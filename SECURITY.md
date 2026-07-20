@@ -13,8 +13,7 @@ Please do **not** open a public issue for suspected security problems. We'll res
 
 ## What is intentionally exposed
 
-- **Self-signed certificates and keys** under `fsc-infra/**/pki/` and `certs/` — used only by the demo containers on localhost.
-- **Default database passwords** in `.env.example` (`postgres:postgres`, `changeme-demo-only`) — for local containers only. The actual `.env` is git-ignored.
+- **Self-signed certificates** under `fsc-infra/**/pki/` and `certs/` — used only by the demo containers on localhost. Private-key files (`*-key.pem`) are git-ignored and regenerated per-user via the `make fsc-*-certs` targets.
 - **Synthetic OIN's** (mostly `9999...` and `0000...` prefixes) — reserved for demo, do not correspond to real Dutch organizations.
 - **Mock BSN's** in `services/graphql-server/mockdata/citizens.json` — checksum-valid demo numbers, not linked to real citizens.
 - **JWT signing secrets** for mock DigiD — hardcoded in the portal, single-purpose demo.

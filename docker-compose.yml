@@ -469,9 +469,7 @@ services:
     image: postgres:16-alpine
     profiles: [eudi, full]
     environment:
-      # Override in .env for local runs; the default is fine for a demo
-      # on a local docker network.
-      POSTGRES_PASSWORD: ${EUDI_POSTGRES_PASSWORD:-changeme-demo-only}
+      POSTGRES_PASSWORD: ${EUDI_POSTGRES_PASSWORD}
       POSTGRES_USER: wallet
       POSTGRES_DB: issuance_server
     volumes:
@@ -489,7 +487,7 @@ services:
     entrypoint: ["/issuance_server_migrations"]
     command: ["up"]
     environment:
-      DATABASE_URL: postgres://wallet:${EUDI_POSTGRES_PASSWORD:-changeme-demo-only}@postgres-eudi:5432/issuance_server
+      DATABASE_URL: postgres://wallet:${EUDI_POSTGRES_PASSWORD}@postgres-eudi:5432/issuance_server
     depends_on:
       postgres-eudi:
         condition: service_healthy
@@ -506,7 +504,7 @@ services:
     ports:
       - "18001:18001"
     environment:
-      - ISSUANCE_SERVER__STORAGE__URL=postgres://wallet:${EUDI_POSTGRES_PASSWORD:-changeme-demo-only}@postgres-eudi:5432/issuance_server
+      - ISSUANCE_SERVER__STORAGE__URL=postgres://wallet:${EUDI_POSTGRES_PASSWORD}@postgres-eudi:5432/issuance_server
       # Three usecases (inkomensverklaring per tax year). Each
       # disclosure_settings config points at its own adapter path; the
       # adapter knows the scope + year query per path via
