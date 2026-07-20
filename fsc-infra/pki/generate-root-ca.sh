@@ -22,6 +22,8 @@ if [[ -f ca/root.pem && -f ca/intermediate.pem ]]; then
     exit 0
 fi
 
+mkdir -p ca
+
 echo ">>> Building pki-tools image (${IMAGE_TAG})"
 docker build -f Dockerfile.pki -t "${IMAGE_TAG}" .
 

@@ -36,7 +36,7 @@ GRANT_LINK_PATH="${GRANT_LINK_PATH:-/bri}"
 OUTWAY_NAME="${OUTWAY_NAME:-HvOutway-01}"
 PG_HOST="${PG_HOST:-postgres}"
 PG_USER="${PG_USER:-postgres}"
-export PGPASSWORD="${PGPASSWORD:-postgres}"
+export PGPASSWORD="${PGPASSWORD:-${FSC_POSTGRES_PASSWORD:-postgres}}"
 
 for f in "$HV_CERT" "$HV_KEY" "$HV_CA" "$HV_ORG_CERT"; do
   if [ ! -f "$f" ]; then

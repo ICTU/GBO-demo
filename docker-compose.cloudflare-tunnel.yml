@@ -1,0 +1,28 @@
+# Optional: Cloudflare named tunnel wrapping the two EUDI-facing services
+# (issuance-server + eudi-adapter). Opt in by adding this file explicitly:
+#   docker compose -f docker-compose.yml -f docker-compose.cloudflare-tunnel.yml --profile eudi up
+# Kept out of the main file on purpose: compose interpolates ${VAR:?...} at
+# parse time for the whole file, so the token guard would break plain
+# `docker compose up` / `make demo-minimal` runs that never use the tunnel.
+# The two public hostnames must be configured in the Cloudflare dashboard
+# and passed as EUDI_PUBLIC_URL / EUDI_BRI_URL. If you already have a
+# reverse proxy, another tunnel, or your own domain, skip this file and
+# just set the two URLs directly.
+services:
+  eudi-tunnel:
+    image: cloudflare/cloudflared:latest
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+      - --token
+      - ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in .env (Cloudflare Zero Trust -> Tunnels -> connector token)}
+    depends_on:
+      eudi-issuance-server:
+        condition: service_started
+      eudi-adapter:
+        condition: service_started
+    networks: [eudi]
+
+networks:
+  eudi:

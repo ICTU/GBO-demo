@@ -9,7 +9,7 @@
 # without this service there is no QR code to scan. Assets (SVGs/icons) are
 # picked up in stage 2.
 
-FROM --platform=linux/amd64 rust:1.92-slim AS builder
+FROM --platform=linux/amd64 rust:1.94-slim AS builder
 RUN apt-get update && apt-get install -y --no-install-recommends \
       musl-tools perl make pkg-config \
     && rm -rf /var/lib/apt/lists/*

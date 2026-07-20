@@ -54,7 +54,7 @@ GRANT_LINK_PATH="${GRANT_LINK_PATH:-/bri}"
 OUTWAY_NAME="${OUTWAY_NAME:-EdiOutway-01}"
 PG_HOST="${PG_HOST:-postgres}"
 PG_USER="${PG_USER:-postgres}"
-export PGPASSWORD="${PGPASSWORD:-postgres}"
+export PGPASSWORD="${PGPASSWORD:-${FSC_POSTGRES_PASSWORD:-postgres}}"
 
 # mTLS credentials (internal-cert per org, mounted under fsc-infra/orgs/*).
 BD_INTERNAL_DIR="$FSC_INFRA_DIR/orgs/belastingdienst-mock/pki/internal"

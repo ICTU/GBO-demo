@@ -21,7 +21,7 @@ Every mode also needs two Postgres passwords set via env-files (compose fails lo
 
 That covers the default (`make demo`, DvTP-only). For the wallet flow (`make demo-eudi` / `make demo-full`) you also need:
 
-- **`NLWALLET_PATH`** in `.env` — path to a local checkout of the [nl-wallet](https://github.com/MinBZK/nl-wallet) repo. Used to build the issuance-server + demo-issuer binaries from source.
+- **`NLWALLET_PATH`** in `.env` — path to a local checkout of the [nl-wallet](https://github.com/MinBZK/nl-wallet) repo. Used to build the issuance-server binary from source.
 - **Three public HTTPS URLs** — `EUDI_PUBLIC_URL` (wallet reaches issuance-server), `EUDI_READER_ORIGIN_URL` (published as `requestOriginBaseUrl` in `reader_auth.json`; usually the same host as `EUDI_PUBLIC_URL`), and `EUDI_BRI_URL` (issuance-server reaches eudi-adapter). See [EUDI public reachability](#eudi-public-reachability) for the three supported options (own domain / bundled Cloudflare tunnel / ad-hoc tunnel).
 - **Six EUDI crypto slots** in `.env` — `EUDI_READER_KEY/CERT`, `EUDI_ISSUER_KEY/CERT`, `EUDI_STATUS_KEY/CERT`. `make eudi-config` (auto-run by `make demo-eudi`) renders `services/eudi-issuance-server/config/{issuance_server.toml,reader_auth.json,...}` from their `.example` templates via `envsubst`. The `.example` files contain public trust-anchors and URL placeholders; **the 6 private keys/certs are not in the public repo** — request them out-of-band from the maintainer for a working wallet-QR flow. Requires `envsubst` (`brew install gettext` on macOS).
 
@@ -227,10 +227,10 @@ EUDI_PUBLIC_URL=https://eudi-is.your-cf-hostname.tld/
 EUDI_BRI_URL=https://eudi-bri.your-cf-hostname.tld/
 
 # Start the tunnel alongside the EUDI stack
-docker compose --profile eudi --profile cloudflare-tunnel up -d
+docker compose -f docker-compose.yml -f docker-compose.cloudflare-tunnel.yml --profile eudi up -d
 ```
 
-**(c) Ad-hoc tunnel** (ngrok, `cloudflared --url`, `tailscale funnel`, …) — start it yourself, paste the two URLs into `.env`, then bring up the stack without the `cloudflare-tunnel` profile.
+**(c) Ad-hoc tunnel** (ngrok, `cloudflared --url`, `tailscale funnel`, …) — start it yourself, paste the two URLs into `.env`, then bring up the stack without the tunnel file.
 
 ## Testing
 
