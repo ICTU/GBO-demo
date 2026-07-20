@@ -14,16 +14,23 @@ Both flows share one authorization pipeline: FSC-Inway (transport) → PDP (cont
 - **Docker** with Compose plugin (Docker Desktop 4.x or Docker Engine + `docker compose`).
 - **~8 GB RAM** allocated to Docker (Preferences → Resources), **~10 GB disk** for images.
 
+Every mode also needs two Postgres passwords set via env-files (compose fails loud if unset — any string works for the local demo network):
+
+- **`EUDI_POSTGRES_PASSWORD`** in `.env` — password for `postgres-eudi` (issuance-server + migrations).
+- **`FSC_POSTGRES_PASSWORD`** in `fsc-infra/.env` — shared password for all FSC-infra database users (three orgs × controller/manager/txlog + directory).
+
 That covers the default (`make demo`, DvTP-only). For the wallet flow (`make demo-eudi` / `make demo-full`) you also need:
 
-- **`NLWALLET_PATH`** in `.env` — path to a local checkout of the [nl-wallet](https://github.com/MinBZK/nl-wallet) repo. Used to build the issuance-server + demo-issuer binaries from source, and to bootstrap `services/eudi-issuance-server/config/issuance_server.toml` (holds inline demo signing keys — git-ignored). `make demo-eudi` runs `make eudi-config` automatically as a dependency.
-- **Two public HTTPS URLs** — `EUDI_PUBLIC_URL` + `EUDI_BRI_URL`. The wallet on a phone needs to reach the issuance-server, and the issuance-server needs to reach the eudi-adapter. See [EUDI public reachability](#eudi-public-reachability) for the three supported options (own domain / bundled Cloudflare tunnel / ad-hoc tunnel).
+- **`NLWALLET_PATH`** in `.env` — path to a local checkout of the [nl-wallet](https://github.com/MinBZK/nl-wallet) repo. Used to build the issuance-server + demo-issuer binaries from source.
+- **Three public HTTPS URLs** — `EUDI_PUBLIC_URL` (wallet reaches issuance-server), `EUDI_READER_ORIGIN_URL` (published as `requestOriginBaseUrl` in `reader_auth.json`; usually the same host as `EUDI_PUBLIC_URL`), and `EUDI_BRI_URL` (issuance-server reaches eudi-adapter). See [EUDI public reachability](#eudi-public-reachability) for the three supported options (own domain / bundled Cloudflare tunnel / ad-hoc tunnel).
+- **Six EUDI crypto slots** in `.env` — `EUDI_READER_KEY/CERT`, `EUDI_ISSUER_KEY/CERT`, `EUDI_STATUS_KEY/CERT`. `make eudi-config` (auto-run by `make demo-eudi`) renders `services/eudi-issuance-server/config/{issuance_server.toml,reader_auth.json,...}` from their `.example` templates via `envsubst`. The `.example` files contain public trust-anchors and URL placeholders; **the 6 private keys/certs are not in the public repo** — request them out-of-band from the maintainer for a working wallet-QR flow. Requires `envsubst` (`brew install gettext` on macOS).
 
-Copy the template and fill it in:
+Copy the templates and fill them in:
 
 ```bash
 cp .env.example .env
-# then edit .env
+cp fsc-infra/.env.example fsc-infra/.env
+# then edit both
 ```
 
 ## Quick Start

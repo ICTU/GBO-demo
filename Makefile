@@ -40,28 +40,29 @@ demo-dvtp: certs fsc-all-up fsc-seed-bri fsc-seed-bri-hv
 
 EUDI_CONFIG_DIR := services/eudi-issuance-server/config
 EUDI_CONFIG_FILES := issuance_server.toml inkomensverklaring_metadata.json issuer_auth.json reader_auth.json
-EUDI_CONFIG_TARGETS := $(addprefix $(EUDI_CONFIG_DIR)/,$(EUDI_CONFIG_FILES))
+EUDI_REQUIRED_VARS := EUDI_PUBLIC_URL EUDI_READER_ORIGIN_URL EUDI_BRI_URL \
+    EUDI_READER_KEY EUDI_READER_CERT \
+    EUDI_ISSUER_KEY EUDI_ISSUER_CERT \
+    EUDI_STATUS_KEY EUDI_STATUS_CERT
 
-eudi-config: $(EUDI_CONFIG_TARGETS)
-
-$(EUDI_CONFIG_DIR)/%.toml $(EUDI_CONFIG_DIR)/%.json:
-	@if [ -z "$$NLWALLET_PATH" ]; then \
-	  echo "ERROR: NLWALLET_PATH not set. Point it at your nl-wallet checkout."; \
+eudi-config:
+	@command -v envsubst >/dev/null 2>&1 || { \
+	  echo "ERROR: envsubst not found. Install with: brew install gettext"; \
 	  exit 1; \
-	fi
-	@src="$$NLWALLET_PATH/target/is-config/$(@F)"; \
-	if [ ! -f "$$src" ]; then \
-	  echo "ERROR: $$src not found."; \
-	  echo "       Generate it in your nl-wallet checkout first (see nl-wallet docs)."; \
+	}
+	@set -a; [ -f .env ] && . ./.env; set +a; \
+	missing=""; for v in $(EUDI_REQUIRED_VARS); do \
+	  eval "val=\$$$$v"; \
+	  [ -n "$$val" ] || missing="$$missing $$v"; \
+	done; \
+	if [ -n "$$missing" ]; then \
+	  echo "ERROR: missing env-vars (see .env.example):$$missing"; \
 	  exit 1; \
 	fi; \
-	echo "-> Bootstrapping $(@F) from \$$NLWALLET_PATH (git-ignored locally — carries keys/hostnames tied to your certs)"; \
-	cp "$$src" "$@"
-	@# TOML-only post-processing: nl-wallet emits a single disclosure_settings
-	@# block with a host-absolute publish_dir. Rewrite for the compose layout.
-	@if [ "$(suffix $@)" = ".toml" ]; then \
-	  bash scripts/transform-issuance-toml.sh "$@"; \
-	fi
+	for f in $(EUDI_CONFIG_FILES); do \
+	  echo "-> Rendering $(EUDI_CONFIG_DIR)/$$f from $$f.example"; \
+	  envsubst < $(EUDI_CONFIG_DIR)/$$f.example > $(EUDI_CONFIG_DIR)/$$f; \
+	done
 
 demo-eudi: certs fsc-all-up fsc-seed-bri eudi-config
 	@echo "-> EUDI stack: base + eudi branch + fsc-infra"
