@@ -1,4 +1,5 @@
-.PHONY: up down logs clean certs fsc-ca fsc-up fsc-down fsc-test fsc-clean fsc-seed-bri \
+.PHONY: up down logs clean certs fsc-ca fsc-up fsc-down fsc-test fsc-clean \
+        fsc-seed-bri fsc-seed-bri-hv \
         demo demo-minimal demo-dvtp demo-eudi demo-full demo-down eudi-config
 
 up: certs
@@ -28,7 +29,7 @@ demo-minimal: certs
 	@echo "  Jaeger:        http://localhost:9686"
 	@echo "  pdp-service:   http://localhost:9408/evaluation (POST)"
 
-demo-dvtp: certs
+demo-dvtp: certs fsc-all-up fsc-seed-bri fsc-seed-bri-hv
 	@echo "-> DvTP stack: base + dienstverlener + toestemmingsportaal (via real FSC)"
 	docker compose --profile dvtp up --build -d
 	@echo ""
@@ -56,6 +57,11 @@ $(EUDI_CONFIG_DIR)/%.toml $(EUDI_CONFIG_DIR)/%.json:
 	fi; \
 	echo "-> Bootstrapping $(@F) from \$$NLWALLET_PATH (git-ignored locally — carries keys/hostnames tied to your certs)"; \
 	cp "$$src" "$@"
+	@# TOML-only post-processing: nl-wallet emits a single disclosure_settings
+	@# block with a host-absolute publish_dir. Rewrite for the compose layout.
+	@if [ "$(suffix $@)" = ".toml" ]; then \
+	  bash scripts/transform-issuance-toml.sh "$@"; \
+	fi
 
 demo-eudi: certs fsc-all-up fsc-seed-bri eudi-config
 	@echo "-> EUDI stack: base + eudi branch + fsc-infra"
@@ -68,7 +74,7 @@ demo-eudi: certs fsc-all-up fsc-seed-bri eudi-config
 	@echo "  Manual step: grant-link '/bri' in EDI-Controller-UI"
 	@echo "  (see README.md section 'EUDI flow over real FSC' step 3)"
 
-demo-full: certs fsc-all-up fsc-seed-bri eudi-config
+demo-full: certs fsc-all-up fsc-seed-bri fsc-seed-bri-hv eudi-config
 	@echo "-> Full stack: everything on"
 	docker compose --profile full up --build -d
 
@@ -123,7 +129,7 @@ fsc-hv-certs: fsc-up
 fsc-bd-up: fsc-directory-up fsc-bd-certs
 	docker compose -f fsc-infra/docker-compose.yml up --build -d cfssl certportal postgres directory-migrations-controller directory-migrations-manager directory-migrations-txlog-api directory-controller directory-manager directory-inway directory-txlog-api directory-ui bd-migrations-controller bd-migrations-manager bd-migrations-txlog-api bd-controller bd-manager bd-inway bd-txlog-api
 
-fsc-all-up: fsc-edi-certs fsc-bd-certs fsc-hv-certs
+fsc-all-up: fsc-directory-certs fsc-edi-certs fsc-bd-certs fsc-hv-certs
 	docker compose -f fsc-infra/docker-compose.yml up --build -d
 
 fsc-down:

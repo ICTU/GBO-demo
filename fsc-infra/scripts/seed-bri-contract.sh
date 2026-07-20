@@ -232,9 +232,9 @@ else
   echo "  ✓ connection contract created; waiting for auto-sign..."
   for _ in $(seq 30); do
     sleep 1
-    st=$(mtls_curl "$EDI_CERT" "$EDI_KEY" "$EDI_CA" \
-      "$EDI_MANAGER_URL/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=$SERVICE_NAME" \
-      | jq -r '.contracts[]? | .state' 2>/dev/null | head -n1)
+    contracts_json=$(mtls_curl "$EDI_CERT" "$EDI_KEY" "$EDI_CA" \
+      "$EDI_MANAGER_URL/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=$SERVICE_NAME")
+    st=$(printf '%s' "$contracts_json" | jq -r 'first(.contracts[]?.state // empty) // ""' 2>/dev/null)
     if [ "$st" = "CONTRACT_STATE_VALID" ]; then
       echo "  ✓ connection contract Valid"
       break
