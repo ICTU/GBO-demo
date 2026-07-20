@@ -42,7 +42,7 @@
     "kvk": "00000002003214394002",
     "privacyPolicyUrl": "https://www.belastingdienst.nl/privacy"
   },
-  "requestOriginBaseUrl": "https://issuer.example.com",
+  "requestOriginBaseUrl": "${EUDI_READER_ORIGIN_URL}",
   "authorizedAttributes": {
     "urn:eudi:pid:nl:1": [
       [
