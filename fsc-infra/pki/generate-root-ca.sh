@@ -33,6 +33,7 @@ docker run --rm \
     "${IMAGE_TAG}" \
     bash -c '
         set -euo pipefail
+        mkdir -p ca
         cd ca
         echo "-- root-CA (self-signed) --"
         cfssl gencert -initca ../root-ca.json | cfssljson -bare root
