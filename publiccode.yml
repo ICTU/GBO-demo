@@ -1,0 +1,59 @@
+publiccodeYmlVersion: "0.2"
+
+name: GBO-demo
+url: "https://github.com/ICTU/GBO-demo.git"
+softwareVersion: "0.1.0"
+releaseDate: "2026-07-20"
+
+platforms:
+  - web
+  - docker
+
+categories:
+  - identity-management
+  - it-development
+
+developmentStatus: development
+
+softwareType: standalone/other
+
+description:
+  en:
+    localisedName: GBO — Gemeenschappelijke Bronontsluiting
+    shortDescription: >
+      Reference-architecture demo for GBO (Gemeenschappelijke
+      Bronontsluiting) with fine-grained authorization (consent + wallet
+      flows over OpenFSC).
+    longDescription: >
+      A live, runnable reference architecture that shows how a consumer
+      can obtain data from a source-holder over a trusted transport
+      channel, where every request is authorized against machine-readable
+      policy (Rego/OPA) and where the source retains control over
+      identifier resolution. Two access flows run side-by-side on the
+      same authorization pipeline: a citizen-consent flow (DvTP) and an
+      EUDI-wallet flow, both routed through real OpenFSC v2.4.0
+      transport.
+    features:
+      - Consent-based data access (DvTP)
+      - EUDI-wallet-based data access
+      - OpenFSC v2.4.0 transport
+      - OPA policy evaluation
+      - Distributed tracing (OpenTelemetry / Jaeger)
+
+legal:
+  license: EUPL-1.2
+  mainCopyrightOwner: ICTU
+  repoOwner: ICTU
+
+maintenance:
+  type: internal
+  contacts:
+    - name: Jeroen de Kok
+      email: jeroen.dekok@ictu.nl
+      affiliation: ICTU
+
+localisation:
+  localisationReady: false
+  availableLanguages:
+    - en
+    - nl

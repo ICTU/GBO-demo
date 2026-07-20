@@ -1,15 +1,23 @@
-# Security
+# Security policy
 
-This repository is a **demo**. All cryptographic material, credentials, and identifiers in this codebase are self-signed, well-known, or synthetic. There is no user data to protect and no production system behind it.
+## Current status
 
-## Reporting a security issue
+This repository is a **reference-architecture demo**. It has not been hardened for production use. We advise against running the demo internet-facing or in an otherwise untrusted environment.
+
+All cryptographic material, credentials, and identifiers in this codebase are self-signed, well-known, or synthetic. There is no user data to protect and no production system behind it.
+
+## Supported versions
+
+Only the latest version on `main` is supported with security updates.
+
+## Reporting a vulnerability
 
 If you find something that looks like a real security problem — for example a leaked credential that turns out not to be a well-known default, or a vulnerability in the demo services that could be exploited if someone deployed this code as-is — please report it privately.
 
-- Open a private security advisory via GitHub (**Security → Advisories → New draft security advisory**).
-- Or email the repository maintainer directly.
+- Open a private security advisory via GitHub (**Security → Advisories → New draft security advisory**), or
+- email the repository maintainer at <jeroen.dekok@ictu.nl>.
 
-Please do **not** open a public issue for suspected security problems. We'll respond as quickly as we can.
+Please do **not** open a public issue for suspected security problems. We aim to respond within 24 hours with a confirmation and a brief action plan or a request for more information.
 
 ## What is intentionally exposed
 
