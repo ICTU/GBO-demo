@@ -1,0 +1,29 @@
+[
+  {
+    "oin": "00000001234567890000",
+    "name": "Demo Hypotheekverlener BV",
+    "sector": "hypotheekverlener",
+    "kvk_sbi": "6492",
+    "register": "KvK"
+  },
+  {
+    "oin": "00000009876543210000",
+    "name": "Demo Notariskantoor",
+    "sector": "notaris",
+    "kvk_sbi": "6910",
+    "register": "KNB"
+  },
+  {
+    "oin": "00000005555555550000",
+    "name": "Demo Verzekeraar NV",
+    "sector": "verzekeraar",
+    "kvk_sbi": "6512",
+    "register": "KvK"
+  },
+  {
+    "oin": "00000004000000004000",
+    "name": "Demo EUDI-issuance (GBO)",
+    "sector": "",
+    "register": "eIDAS art. 5a (mock)"
+  }
+]

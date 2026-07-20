@@ -1,0 +1,16 @@
+{
+  "CN": "GBO-DEMO Internal CA (belastingdienst-mock)",
+  "key": {
+    "algo": "rsa",
+    "size": 4096
+  },
+  "names": [
+    {
+      "C": "NL",
+      "O": "GBO-DEMO Belastingdienst-mock Internal"
+    }
+  ],
+  "ca": {
+    "expiry": "43800h"
+  }
+}

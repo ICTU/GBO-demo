@@ -1,0 +1,153 @@
+{
+  "vct": "nl.gbo.belastingdienst.inkomensverklaring",
+  "name": "Inkomensverklaring",
+  "description": "Geregistreerd inkomen volgens de Basisregistratie Inkomen (BRI)",
+  "display": [
+    {
+      "lang": "nl-NL",
+      "name": "Inkomensverklaring",
+      "description": "Verklaring van geregistreerd inkomen (BRI)",
+      "summary": "€{{verzamelinkomen}} ({{belastingjaar}})",
+      "rendering": {
+        "simple": {
+          "background_color": "#0b5394",
+          "text_color": "#ffffff"
+        }
+      }
+    },
+    {
+      "lang": "en-US",
+      "name": "Income statement",
+      "description": "Statement of registered income (BRI)",
+      "summary": "€{{verzamelinkomen}} ({{belastingjaar}})",
+      "rendering": {
+        "simple": {
+          "background_color": "#0b5394",
+          "text_color": "#ffffff"
+        }
+      }
+    }
+  ],
+  "claims": [
+    {
+      "path": ["belastingjaar"],
+      "display": [
+        { "lang": "nl-NL", "label": "Belastingjaar",     "description": "Jaar waarover het inkomen is vastgesteld" },
+        { "lang": "en-US", "label": "Tax year",          "description": "Year for which the income was assessed" }
+      ],
+      "sd": "always",
+      "svg_id": "belastingjaar"
+    },
+    {
+      "path": ["peil_datum"],
+      "display": [
+        { "lang": "nl-NL", "label": "Peildatum",         "description": "Datum waarop de gegevens zijn vastgesteld" },
+        { "lang": "en-US", "label": "Reference date",    "description": "Date on which the data were determined" }
+      ],
+      "sd": "always"
+    },
+    {
+      "path": ["verzamelinkomen"],
+      "display": [
+        { "lang": "nl-NL", "label": "Verzamelinkomen",   "description": "Verzamelinkomen in eurocenten" },
+        { "lang": "en-US", "label": "Aggregated income", "description": "Aggregated income in euro cents" }
+      ],
+      "sd": "always",
+      "svg_id": "verzamelinkomen"
+    },
+    {
+      "path": ["inkomen_box1"],
+      "display": [
+        { "lang": "nl-NL", "label": "Inkomen box 1",     "description": "Belastbaar inkomen uit werk en woning" },
+        { "lang": "en-US", "label": "Box 1 income",      "description": "Taxable income from work and home" }
+      ],
+      "sd": "always"
+    },
+    {
+      "path": ["inkomen_box2"],
+      "display": [
+        { "lang": "nl-NL", "label": "Inkomen box 2",     "description": "Belastbaar inkomen uit aanmerkelijk belang" },
+        { "lang": "en-US", "label": "Box 2 income",      "description": "Taxable income from substantial interest" }
+      ],
+      "sd": "always"
+    },
+    {
+      "path": ["inkomen_box3"],
+      "display": [
+        { "lang": "nl-NL", "label": "Inkomen box 3",     "description": "Belastbaar inkomen uit sparen en beleggen" },
+        { "lang": "en-US", "label": "Box 3 income",      "description": "Taxable income from savings and investments" }
+      ],
+      "sd": "always"
+    },
+    {
+      "path": ["grondslag_code"],
+      "display": [
+        { "lang": "nl-NL", "label": "Grondslagcode",     "description": "Code voor de grondslag van de vaststelling" },
+        { "lang": "en-US", "label": "Grounds code",      "description": "Code for the legal basis of the assessment" }
+      ],
+      "sd": "always"
+    },
+    {
+      "path": ["grondslag_omschrijving"],
+      "display": [
+        { "lang": "nl-NL", "label": "Grondslag",         "description": "Omschrijving van de grondslag" },
+        { "lang": "en-US", "label": "Grounds",           "description": "Description of the legal basis" }
+      ],
+      "sd": "always"
+    },
+    {
+      "path": ["status_code"],
+      "display": [
+        { "lang": "nl-NL", "label": "Statuscode",        "description": "Code voor de status van de vaststelling" },
+        { "lang": "en-US", "label": "Status code",       "description": "Code for the status of the assessment" }
+      ],
+      "sd": "always"
+    },
+    {
+      "path": ["status_omschrijving"],
+      "display": [
+        { "lang": "nl-NL", "label": "Status",            "description": "Omschrijving van de status" },
+        { "lang": "en-US", "label": "Status",            "description": "Description of the status" }
+      ],
+      "sd": "always"
+    },
+    {
+      "path": ["verklaring_tekst"],
+      "display": [
+        { "lang": "nl-NL", "label": "Verklaring",        "description": "Tekst van de inkomensverklaring" },
+        { "lang": "en-US", "label": "Statement",         "description": "Text of the income statement" }
+      ],
+      "sd": "always"
+    }
+  ],
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "Inkomensverklaring VCT Schema",
+    "description": "JSON schema voor nl.gbo.belastingdienst.inkomensverklaring",
+    "type": "object",
+    "properties": {
+      "vct":                       { "type": "string" },
+      "vct#integrity":             { "type": "string" },
+      "iss":                       { "type": "string" },
+      "nbf":                       { "type": "number" },
+      "exp":                       { "type": "number" },
+      "cnf":                       { "type": "object" },
+      "status":                    { "type": "object" },
+      "sub":                       { "type": "string" },
+      "iat":                       { "type": "number" },
+      "attestation_qualification": { "type": "string" },
+      "belastingjaar":             { "type": "integer" },
+      "peil_datum":                { "type": "string", "format": "date" },
+      "verzamelinkomen":           { "type": "integer" },
+      "inkomen_box1":              { "type": "integer" },
+      "inkomen_box2":              { "type": "integer" },
+      "inkomen_box3":              { "type": "integer" },
+      "grondslag_code":            { "type": "string" },
+      "grondslag_omschrijving":    { "type": "string" },
+      "status_code":               { "type": "string" },
+      "status_omschrijving":       { "type": "string" },
+      "verklaring_tekst":          { "type": "string" }
+    },
+    "required": ["vct", "iss", "attestation_qualification", "belastingjaar", "peil_datum", "verzamelinkomen"]
+  }
+}

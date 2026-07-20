@@ -1,0 +1,765 @@
+# Self-hosted cert-authority + directory-peer for the GBO-DEMO group.
+#
+# Cert-authority:
+#   cfssl     — CA, signs CSRs with the intermediate-CA (from pki/generate-root-ca.sh).
+#   certportal — web/REST frontend for CSR submission.
+#
+# Directory-peer + directory-UI:
+#   postgres              — shared, separate databases per role.
+#   directory-controller  — config UI for the directory-peer.
+#   directory-manager     — the "directory" — the peer all others point at.
+#   directory-inway       — reverse-proxy for inbound peer connections.
+#   directory-ui          — public web frontend showing the group registry.
+#
+# Assumptions:
+#   - pki/generate-root-ca.sh has run: ca/*.pem exist.
+#   - pki/bootstrap-directory-peer.sh has run after make fsc-up:
+#     directory-peer/pki/{org,internal}/* and directory-ui/pki/org/* exist.
+#   - GROUP_ID = fsc-demo (arbitrary; our own group name).
+
+x-directory-peer-env: &directory-peer-env
+  TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+  TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+  TLS_CERT: /certs/internal/internal-cert.pem
+  TLS_KEY: /certs/internal/internal-cert-key.pem
+  GROUP_ID: fsc-demo
+
+services:
+  # === Cert-authority ====================================================
+  cfssl:
+    image: gbo-demo/pki-tools:local
+    build:
+      context: ./pki
+      dockerfile: Dockerfile.pki
+    command:
+      - cfssl
+      - serve
+      - -address=0.0.0.0
+      - -port=8888
+      - -ca=/pki/ca/intermediate.pem
+      - -ca-key=/pki/ca/intermediate-key.pem
+      - -config=/pki/cfssl-signing-config.json
+    volumes:
+      - ./pki:/pki:ro
+    healthcheck:
+      test:
+        - CMD
+        - sh
+        - -c
+        - "curl -fsS -X POST -H 'Content-Type: application/json' -d '{}' http://localhost:8888/api/v1/cfssl/info || exit 1"
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 3s
+
+  certportal:
+    image: federatedserviceconnectivity/ca-certportal:v2.4.0
+    command:
+      - /usr/local/bin/ca-certportal
+      - serve
+      - --listen-address=0.0.0.0:8080
+      - --ca-host=http://cfssl:8888
+      - --include-issuer-cert=true
+    ports:
+      - "8091:8080"
+    depends_on:
+      cfssl:
+        condition: service_healthy
+
+  # === Directory-peer stack ==============================================
+  postgres:
+    image: postgres:17.10-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${FSC_POSTGRES_PASSWORD:-postgres}
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d postgres" ]
+      interval: 10s
+      retries: 5
+      start_period: 10s
+      timeout: 10s
+    volumes:
+      - ./postgres/init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh
+      - postgres-data:/var/lib/postgresql/data
+
+  directory-migrations-controller:
+    image: federatedserviceconnectivity/controller:v2.4.0
+    restart: on-failure
+    command:
+      - /usr/local/bin/controller
+      - migrate
+      - up
+    environment:
+      <<: *directory-peer-env
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_dir_controller?sslmode=disable&connect_timeout=2"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  directory-migrations-manager:
+    image: federatedserviceconnectivity/manager:v2.4.0
+    restart: on-failure
+    command:
+      - /usr/local/bin/manager
+      - migrate
+      - up
+    environment:
+      <<: *directory-peer-env
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_dir_manager?sslmode=disable&connect_timeout=2"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  directory-controller:
+    image: federatedserviceconnectivity/controller:v2.4.0
+    restart: unless-stopped
+    ports:
+      - "8092:3001"
+    volumes:
+      - ./directory-peer/pki:/certs:ro
+    environment:
+      <<: *directory-peer-env
+      LISTEN_ADDRESS_UI: 0.0.0.0:3001
+      LISTEN_ADDRESS_REGISTRATION_API: 0.0.0.0:9443
+      LISTEN_ADDRESS_ADMINISTRATION_API: 0.0.0.0:9444
+      MANAGER_ADDRESS_INTERNAL: https://directory-manager:9443
+      DIRECTORY_ADDRESS: https://directory-manager:8443
+      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_dir_controller?sslmode=disable&connect_timeout=2"
+      AUDITLOG_TYPE: "stdout"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      directory-manager:
+        condition: service_started
+      directory-migrations-controller:
+        condition: service_started
+
+  directory-manager:
+    image: federatedserviceconnectivity/manager:v2.4.0
+    restart: unless-stopped
+    # Seed automation: the Directory-peer auto-signs servicePublication
+    # so new services appear in the directory without manual review.
+    # (Directory is a registry, not a policy party — auto-sign fits.)
+    command: ["/usr/local/bin/manager", "serve", "--auto-sign-grants=servicePublication"]
+    volumes:
+      - ./directory-peer/pki:/certs:ro
+    environment:
+      <<: *directory-peer-env
+      TLS_GROUP_CERT: /certs/org/directory-peer.pem
+      TLS_GROUP_KEY: /certs/org/directory-peer-key.pem
+      TLS_GROUP_TOKEN_CERT: /certs/org/directory-peer.pem
+      TLS_GROUP_TOKEN_KEY: /certs/org/directory-peer-key.pem
+      TLS_GROUP_CONTRACT_CERT: /certs/org/directory-peer.pem
+      TLS_GROUP_CONTRACT_KEY: /certs/org/directory-peer-key.pem
+      TLS_INTERNAL_UNAUTHENTICATED_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_INTERNAL_UNAUTHENTICATED_CERT: /certs/internal/internal-cert.pem
+      TLS_INTERNAL_UNAUTHENTICATED_KEY: /certs/internal/internal-cert-key.pem
+      LISTEN_ADDRESS_INTERNAL: 0.0.0.0:9443
+      LISTEN_ADDRESS_INTERNAL_UNAUTHENTICATED: 0.0.0.0:9444
+      LISTEN_ADDRESS_EXTERNAL: 0.0.0.0:8443
+      CONTROLLER_REGISTRATION_API_ADDRESS: https://directory-controller:9443
+      TX_LOG_API_ADDRESS: https://directory-txlog-api:9443
+      # Self-referential: the directory-Manager points at itself.
+      SELF_ADDRESS: "https://directory-manager:8443"
+      DIRECTORY_MANAGER_ADDRESS: "https://directory-manager:8443"
+      DIRECTORY_PEER_ID: "99999999900000000000"
+      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_dir_manager?sslmode=disable&connect_timeout=2"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      directory-migrations-manager:
+        condition: service_started
+      directory-txlog-api:
+        condition: service_started
+
+  directory-inway:
+    image: federatedserviceconnectivity/inway:v2.4.0
+    restart: unless-stopped
+    volumes:
+      - ./directory-peer/pki:/certs:ro
+    environment:
+      <<: *directory-peer-env
+      TLS_GROUP_CERT: /certs/org/directory-peer.pem
+      TLS_GROUP_KEY: /certs/org/directory-peer-key.pem
+      LISTEN_ADDRESS: 0.0.0.0:443
+      NAME: DirectoryInway-01
+      SELF_ADDRESS: "https://directory-inway:443"
+      CONTROLLER_REGISTRATION_API_ADDRESS: https://directory-controller:9443
+      MANAGER_INTERNAL_UNAUTHENTICATED_ADDRESS: https://directory-manager:9444
+      TX_LOG_API_ADDRESS: https://directory-txlog-api:9443
+    depends_on:
+      - directory-controller
+      - directory-manager
+      - directory-txlog-api
+
+  directory-migrations-txlog-api:
+    image: federatedserviceconnectivity/txlog-api:v2.4.0
+    restart: on-failure
+    command:
+      - /usr/local/bin/txlog-api
+      - migrate
+      - up
+    environment:
+      <<: *directory-peer-env
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_dir_txlog?sslmode=disable&connect_timeout=2"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  directory-txlog-api:
+    image: federatedserviceconnectivity/txlog-api:v2.4.0
+    restart: unless-stopped
+    volumes:
+      - ./directory-peer/pki:/certs:ro
+    environment:
+      <<: *directory-peer-env
+      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_dir_txlog?sslmode=disable&connect_timeout=2"
+      LISTEN_ADDRESS: 0.0.0.0:9443
+      LISTEN_ADDRESS_PLAIN: 0.0.0.0:8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+      directory-migrations-txlog-api:
+        condition: service_started
+
+  directory-ui:
+    image: federatedserviceconnectivity/directory-ui:v2.4.0
+    restart: unless-stopped
+    ports:
+      - "8093:3001"
+    volumes:
+      - ./directory-ui/pki:/certs:ro
+    environment:
+      LISTEN_ADDRESS: 0.0.0.0:3001
+      DIRECTORY_MANAGER_ADDRESS: "https://directory-manager:8443"
+      GROUP_ID: fsc-demo
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_GROUP_CERT: /certs/org/directory-ui.pem
+      TLS_GROUP_KEY: /certs/org/directory-ui-key.pem
+    depends_on:
+      - directory-manager
+
+  # === EDI-issuer-org (consumer) ========================================
+  # Environment anchor: internal certs are per-org, so no shared x-env.
+
+  edi-migrations-controller:
+    image: federatedserviceconnectivity/controller:v2.4.0
+    restart: on-failure
+    command:
+      - /usr/local/bin/controller
+      - migrate
+      - up
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_edi_controller?sslmode=disable&connect_timeout=2"
+    volumes:
+      - ./orgs/edi-issuer/pki:/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  edi-migrations-manager:
+    image: federatedserviceconnectivity/manager:v2.4.0
+    restart: on-failure
+    command:
+      - /usr/local/bin/manager
+      - migrate
+      - up
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_edi_manager?sslmode=disable&connect_timeout=2"
+    volumes:
+      - ./orgs/edi-issuer/pki:/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  edi-migrations-txlog-api:
+    image: federatedserviceconnectivity/txlog-api:v2.4.0
+    restart: on-failure
+    command:
+      - /usr/local/bin/txlog-api
+      - migrate
+      - up
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_edi_txlog?sslmode=disable&connect_timeout=2"
+    volumes:
+      - ./orgs/edi-issuer/pki:/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  edi-controller:
+    image: federatedserviceconnectivity/controller:v2.4.0
+    restart: unless-stopped
+    ports:
+      - "8094:3001"
+    volumes:
+      - ./orgs/edi-issuer/pki:/certs:ro
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      LISTEN_ADDRESS_UI: 0.0.0.0:3001
+      LISTEN_ADDRESS_REGISTRATION_API: 0.0.0.0:9443
+      LISTEN_ADDRESS_ADMINISTRATION_API: 0.0.0.0:9444
+      MANAGER_ADDRESS_INTERNAL: https://edi-manager:9443
+      DIRECTORY_ADDRESS: https://directory-manager:8443
+      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_edi_controller?sslmode=disable&connect_timeout=2"
+      AUDITLOG_TYPE: "stdout"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      edi-manager:
+        condition: service_started
+      edi-migrations-controller:
+        condition: service_started
+
+  edi-manager:
+    image: federatedserviceconnectivity/manager:v2.4.0
+    restart: unless-stopped
+    volumes:
+      - ./orgs/edi-issuer/pki:/certs:ro
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      TLS_GROUP_CERT: /certs/org/edi-issuer.pem
+      TLS_GROUP_KEY: /certs/org/edi-issuer-key.pem
+      TLS_GROUP_TOKEN_CERT: /certs/org/edi-issuer.pem
+      TLS_GROUP_TOKEN_KEY: /certs/org/edi-issuer-key.pem
+      TLS_GROUP_CONTRACT_CERT: /certs/org/edi-issuer.pem
+      TLS_GROUP_CONTRACT_KEY: /certs/org/edi-issuer-key.pem
+      TLS_INTERNAL_UNAUTHENTICATED_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_INTERNAL_UNAUTHENTICATED_CERT: /certs/internal/internal-cert.pem
+      TLS_INTERNAL_UNAUTHENTICATED_KEY: /certs/internal/internal-cert-key.pem
+      LISTEN_ADDRESS_INTERNAL: 0.0.0.0:9443
+      LISTEN_ADDRESS_INTERNAL_UNAUTHENTICATED: 0.0.0.0:9444
+      LISTEN_ADDRESS_EXTERNAL: 0.0.0.0:8443
+      CONTROLLER_REGISTRATION_API_ADDRESS: https://edi-controller:9443
+      TX_LOG_API_ADDRESS: https://edi-txlog-api:9443
+      SELF_ADDRESS: "https://edi-manager:8443"
+      DIRECTORY_MANAGER_ADDRESS: "https://directory-manager:8443"
+      DIRECTORY_PEER_ID: "99999999900000000000"
+      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_edi_manager?sslmode=disable&connect_timeout=2"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      edi-migrations-manager:
+        condition: service_started
+      edi-txlog-api:
+        condition: service_started
+
+  edi-outway:
+    image: federatedserviceconnectivity/outway:v2.4.0
+    restart: unless-stopped
+    volumes:
+      - ./orgs/edi-issuer/pki:/certs:ro
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      TLS_GROUP_CERT: /certs/org/edi-issuer.pem
+      TLS_GROUP_KEY: /certs/org/edi-issuer-key.pem
+      LISTEN_ADDRESS: 0.0.0.0:8080
+      NAME: EdiOutway-01
+      CONTROLLER_REGISTRATION_API_ADDRESS: https://edi-controller:9443
+      TX_LOG_API_ADDRESS: https://edi-txlog-api:9443
+      MANAGER_INTERNAL_ADDRESS: https://edi-manager:9443
+      ENABLE_GRANT_HASH_SUGGESTION: "true"
+    depends_on:
+      - edi-controller
+      - edi-manager
+      - edi-txlog-api
+
+  edi-txlog-api:
+    image: federatedserviceconnectivity/txlog-api:v2.4.0
+    restart: unless-stopped
+    volumes:
+      - ./orgs/edi-issuer/pki:/certs:ro
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_edi_txlog?sslmode=disable&connect_timeout=2"
+      LISTEN_ADDRESS: 0.0.0.0:9443
+      LISTEN_ADDRESS_PLAIN: 0.0.0.0:8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+      edi-migrations-txlog-api:
+        condition: service_started
+
+  # === Hypotheekverlener-mock (DvTP consumer) ============================
+
+  hv-migrations-controller:
+    image: federatedserviceconnectivity/controller:v2.4.0
+    restart: on-failure
+    command: [/usr/local/bin/controller, migrate, up]
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_hv_controller?sslmode=disable&connect_timeout=2"
+    volumes:
+      - ./orgs/hypotheekverlener-mock/pki:/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  hv-migrations-manager:
+    image: federatedserviceconnectivity/manager:v2.4.0
+    restart: on-failure
+    command: [/usr/local/bin/manager, migrate, up]
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_hv_manager?sslmode=disable&connect_timeout=2"
+    volumes:
+      - ./orgs/hypotheekverlener-mock/pki:/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  hv-migrations-txlog-api:
+    image: federatedserviceconnectivity/txlog-api:v2.4.0
+    restart: on-failure
+    command: [/usr/local/bin/txlog-api, migrate, up]
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_hv_txlog?sslmode=disable&connect_timeout=2"
+    volumes:
+      - ./orgs/hypotheekverlener-mock/pki:/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  hv-controller:
+    image: federatedserviceconnectivity/controller:v2.4.0
+    restart: unless-stopped
+    ports:
+      - "8096:3001"
+    volumes:
+      - ./orgs/hypotheekverlener-mock/pki:/certs:ro
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      LISTEN_ADDRESS_UI: 0.0.0.0:3001
+      LISTEN_ADDRESS_REGISTRATION_API: 0.0.0.0:9443
+      LISTEN_ADDRESS_ADMINISTRATION_API: 0.0.0.0:9444
+      MANAGER_ADDRESS_INTERNAL: https://hv-manager:9443
+      DIRECTORY_ADDRESS: https://directory-manager:8443
+      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_hv_controller?sslmode=disable&connect_timeout=2"
+      AUDITLOG_TYPE: "stdout"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      hv-manager:
+        condition: service_started
+      hv-migrations-controller:
+        condition: service_started
+
+  hv-manager:
+    image: federatedserviceconnectivity/manager:v2.4.0
+    restart: unless-stopped
+    volumes:
+      - ./orgs/hypotheekverlener-mock/pki:/certs:ro
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      TLS_GROUP_CERT: /certs/org/hypotheekverlener.pem
+      TLS_GROUP_KEY: /certs/org/hypotheekverlener-key.pem
+      TLS_GROUP_TOKEN_CERT: /certs/org/hypotheekverlener.pem
+      TLS_GROUP_TOKEN_KEY: /certs/org/hypotheekverlener-key.pem
+      TLS_GROUP_CONTRACT_CERT: /certs/org/hypotheekverlener.pem
+      TLS_GROUP_CONTRACT_KEY: /certs/org/hypotheekverlener-key.pem
+      TLS_INTERNAL_UNAUTHENTICATED_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_INTERNAL_UNAUTHENTICATED_CERT: /certs/internal/internal-cert.pem
+      TLS_INTERNAL_UNAUTHENTICATED_KEY: /certs/internal/internal-cert-key.pem
+      LISTEN_ADDRESS_INTERNAL: 0.0.0.0:9443
+      LISTEN_ADDRESS_INTERNAL_UNAUTHENTICATED: 0.0.0.0:9444
+      LISTEN_ADDRESS_EXTERNAL: 0.0.0.0:8443
+      CONTROLLER_REGISTRATION_API_ADDRESS: https://hv-controller:9443
+      TX_LOG_API_ADDRESS: https://hv-txlog-api:9443
+      SELF_ADDRESS: "https://hv-manager:8443"
+      DIRECTORY_MANAGER_ADDRESS: "https://directory-manager:8443"
+      DIRECTORY_PEER_ID: "99999999900000000000"
+      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_hv_manager?sslmode=disable&connect_timeout=2"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      hv-migrations-manager:
+        condition: service_started
+      hv-txlog-api:
+        condition: service_started
+
+  hv-outway:
+    image: federatedserviceconnectivity/outway:v2.4.0
+    restart: unless-stopped
+    volumes:
+      - ./orgs/hypotheekverlener-mock/pki:/certs:ro
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      TLS_GROUP_CERT: /certs/org/hypotheekverlener.pem
+      TLS_GROUP_KEY: /certs/org/hypotheekverlener-key.pem
+      LISTEN_ADDRESS: 0.0.0.0:8080
+      NAME: HvOutway-01
+      CONTROLLER_REGISTRATION_API_ADDRESS: https://hv-controller:9443
+      TX_LOG_API_ADDRESS: https://hv-txlog-api:9443
+      MANAGER_INTERNAL_ADDRESS: https://hv-manager:9443
+      ENABLE_GRANT_HASH_SUGGESTION: "true"
+    depends_on:
+      - hv-controller
+      - hv-manager
+      - hv-txlog-api
+
+  hv-txlog-api:
+    image: federatedserviceconnectivity/txlog-api:v2.4.0
+    restart: unless-stopped
+    volumes:
+      - ./orgs/hypotheekverlener-mock/pki:/certs:ro
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_hv_txlog?sslmode=disable&connect_timeout=2"
+      LISTEN_ADDRESS: 0.0.0.0:9443
+      LISTEN_ADDRESS_PLAIN: 0.0.0.0:8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+      hv-migrations-txlog-api:
+        condition: service_started
+
+  # === Belastingdienst-mock (provider) ===================================
+
+  bd-migrations-controller:
+    image: federatedserviceconnectivity/controller:v2.4.0
+    restart: on-failure
+    command:
+      - /usr/local/bin/controller
+      - migrate
+      - up
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_bd_controller?sslmode=disable&connect_timeout=2"
+    volumes:
+      - ./orgs/belastingdienst-mock/pki:/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  bd-migrations-manager:
+    image: federatedserviceconnectivity/manager:v2.4.0
+    restart: on-failure
+    command:
+      - /usr/local/bin/manager
+      - migrate
+      - up
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_bd_manager?sslmode=disable&connect_timeout=2"
+    volumes:
+      - ./orgs/belastingdienst-mock/pki:/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  bd-migrations-txlog-api:
+    image: federatedserviceconnectivity/txlog-api:v2.4.0
+    restart: on-failure
+    command:
+      - /usr/local/bin/txlog-api
+      - migrate
+      - up
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_bd_txlog?sslmode=disable&connect_timeout=2"
+    volumes:
+      - ./orgs/belastingdienst-mock/pki:/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  bd-controller:
+    image: federatedserviceconnectivity/controller:v2.4.0
+    restart: unless-stopped
+    ports:
+      - "8095:3001"
+    volumes:
+      - ./orgs/belastingdienst-mock/pki:/certs:ro
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      LISTEN_ADDRESS_UI: 0.0.0.0:3001
+      LISTEN_ADDRESS_REGISTRATION_API: 0.0.0.0:9443
+      LISTEN_ADDRESS_ADMINISTRATION_API: 0.0.0.0:9444
+      MANAGER_ADDRESS_INTERNAL: https://bd-manager:9443
+      DIRECTORY_ADDRESS: https://directory-manager:8443
+      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_bd_controller?sslmode=disable&connect_timeout=2"
+      AUDITLOG_TYPE: "stdout"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      bd-manager:
+        condition: service_started
+      bd-migrations-controller:
+        condition: service_started
+
+  bd-manager:
+    image: federatedserviceconnectivity/manager:v2.4.0
+    restart: unless-stopped
+    # Seed automation: Belastingdienst-mock as service-provider
+    # auto-signs incoming serviceConnection requests. In production a
+    # real PDP would sit here (see --auto-sign-pdp-address); for the
+    # demo auto-accept is fine.
+    command: ["/usr/local/bin/manager", "serve", "--auto-sign-grants=serviceConnection"]
+    volumes:
+      - ./orgs/belastingdienst-mock/pki:/certs:ro
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      TLS_GROUP_CERT: /certs/org/bd-mock.pem
+      TLS_GROUP_KEY: /certs/org/bd-mock-key.pem
+      TLS_GROUP_TOKEN_CERT: /certs/org/bd-mock.pem
+      TLS_GROUP_TOKEN_KEY: /certs/org/bd-mock-key.pem
+      TLS_GROUP_CONTRACT_CERT: /certs/org/bd-mock.pem
+      TLS_GROUP_CONTRACT_KEY: /certs/org/bd-mock-key.pem
+      TLS_INTERNAL_UNAUTHENTICATED_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_INTERNAL_UNAUTHENTICATED_CERT: /certs/internal/internal-cert.pem
+      TLS_INTERNAL_UNAUTHENTICATED_KEY: /certs/internal/internal-cert-key.pem
+      LISTEN_ADDRESS_INTERNAL: 0.0.0.0:9443
+      LISTEN_ADDRESS_INTERNAL_UNAUTHENTICATED: 0.0.0.0:9444
+      LISTEN_ADDRESS_EXTERNAL: 0.0.0.0:8443
+      CONTROLLER_REGISTRATION_API_ADDRESS: https://bd-controller:9443
+      TX_LOG_API_ADDRESS: https://bd-txlog-api:9443
+      SELF_ADDRESS: "https://bd-manager:8443"
+      DIRECTORY_MANAGER_ADDRESS: "https://directory-manager:8443"
+      DIRECTORY_PEER_ID: "99999999900000000000"
+      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_bd_manager?sslmode=disable&connect_timeout=2"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      bd-migrations-manager:
+        condition: service_started
+      bd-txlog-api:
+        condition: service_started
+
+  bd-inway:
+    image: federatedserviceconnectivity/inway:v2.4.0
+    restart: unless-stopped
+    volumes:
+      - ./orgs/belastingdienst-mock/pki:/certs:ro
+      # The pdp-service self-signed cert serves as CA for the AuthZen
+      # plugin (see AUTHZEN_ROOT_CA). Separate mount root to avoid a
+      # conflict with /certs (ro).
+      - ../services/pdp-service/certs:/authzen-ca:ro
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      TLS_GROUP_CERT: /certs/org/bd-mock.pem
+      TLS_GROUP_KEY: /certs/org/bd-mock-key.pem
+      LISTEN_ADDRESS: 0.0.0.0:443
+      NAME: BdInway-01
+      SELF_ADDRESS: "https://bd-inway:443"
+      CONTROLLER_REGISTRATION_API_ADDRESS: https://bd-controller:9443
+      TX_LOG_API_ADDRESS: https://bd-txlog-api:9443
+      MANAGER_INTERNAL_UNAUTHENTICATED_ADDRESS: https://bd-manager:9444
+      # Every inbound request is AuthZen-checked by the PDP before it
+      # reaches the backend service. FSC-Inway requires HTTPS + CA;
+      # pdp-service gets a self-signed cert (via generate-pdp-cert.sh),
+      # mounted as /authzen-ca/pdp-service.pem in bd-inway.
+      AUTHZEN_SERVICE_ADDRESS: https://pdp-service:4008
+      AUTHZEN_ROOT_CA: /authzen-ca/pdp-service.pem
+      AUTHZEN_WITH_BODY: "true"
+    depends_on:
+      - bd-controller
+      - bd-manager
+      - bd-txlog-api
+
+  bd-txlog-api:
+    image: federatedserviceconnectivity/txlog-api:v2.4.0
+    restart: unless-stopped
+    volumes:
+      - ./orgs/belastingdienst-mock/pki:/certs:ro
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_bd_txlog?sslmode=disable&connect_timeout=2"
+      LISTEN_ADDRESS: 0.0.0.0:9443
+      LISTEN_ADDRESS_PLAIN: 0.0.0.0:8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+      bd-migrations-txlog-api:
+        condition: service_started
+
+volumes:
+  postgres-data:

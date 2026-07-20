@@ -1,0 +1,16 @@
+{
+  "CN": "GBO-DEMO Internal CA (directory-peer)",
+  "key": {
+    "algo": "rsa",
+    "size": 4096
+  },
+  "names": [
+    {
+      "C": "NL",
+      "O": "GBO-DEMO Directory Peer Internal"
+    }
+  ],
+  "ca": {
+    "expiry": "43800h"
+  }
+}

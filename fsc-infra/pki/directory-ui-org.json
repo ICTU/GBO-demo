@@ -1,0 +1,18 @@
+{
+  "CN": "directory-ui",
+  "hosts": [
+    "directory-ui"
+  ],
+  "key": {
+    "algo": "rsa",
+    "size": 4096
+  },
+  "names": [
+    {
+      "C": "NL",
+      "O": "GBO-DEMO Directory UI",
+      "OU": "TEST",
+      "serialNumber": "99999999900000000010"
+    }
+  ]
+}

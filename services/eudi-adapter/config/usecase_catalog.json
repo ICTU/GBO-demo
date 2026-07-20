@@ -1,0 +1,25 @@
+{
+  "usecases": {
+    "inkomensverklaring_2023": {
+      "attestation_type": "nl.gbo.belastingdienst.inkomensverklaring",
+      "scope": "bd:ib:2023",
+      "belastingjaren": [2023],
+      "outway_path": "/bri/graphql",
+      "note": "In V1 door EUD0001 geblokkeerd (scope niet in allowed_scopes) — demonstreert scope-authorization gate."
+    },
+    "inkomensverklaring_2024": {
+      "attestation_type": "nl.gbo.belastingdienst.inkomensverklaring",
+      "scope": "bd:ib:2024",
+      "belastingjaren": [2024],
+      "outway_path": "/bri/graphql",
+      "note": "ALLOW-pad via EUD0001."
+    },
+    "inkomensverklaring_2025": {
+      "attestation_type": "nl.gbo.belastingdienst.inkomensverklaring",
+      "scope": "bd:ib:2025",
+      "belastingjaren": [2025],
+      "outway_path": "/bri/graphql",
+      "note": "ALLOW-pad via EUD0001."
+    }
+  }
+}

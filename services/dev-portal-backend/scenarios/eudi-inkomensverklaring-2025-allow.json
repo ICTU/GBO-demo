@@ -1,0 +1,10 @@
+{
+  "id": "eudi-inkomensverklaring-2025-allow",
+  "name": "EUDI · Inkomensverklaring 2025 ALLOW",
+  "desc": "Wallet vraagt inkomensverklaring voor belastingjaar 2025 aan. Adapter's usecase-catalog levert scope bd:ib:2025; EUD0001's allowed_scopes accepteert 'em → credential met belastingjaar 2025 wordt uitgegeven.",
+  "tab": "eudi-issuance",
+  "expected_outcome": "allow",
+  "payload": {
+    "usecase": "inkomensverklaring_2025"
+  }
+}

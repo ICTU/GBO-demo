@@ -1,0 +1,16 @@
+{
+  "CN": "GBO-DEMO Internal CA (edi-issuer-org)",
+  "key": {
+    "algo": "rsa",
+    "size": 4096
+  },
+  "names": [
+    {
+      "C": "NL",
+      "O": "GBO-DEMO EDI-issuer-org Internal"
+    }
+  ],
+  "ca": {
+    "expiry": "43800h"
+  }
+}

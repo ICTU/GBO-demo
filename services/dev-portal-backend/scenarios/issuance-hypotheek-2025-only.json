@@ -1,0 +1,14 @@
+{
+  "id": "issuance-hypotheek-2025-only",
+  "name": "Issuance · alleen IB 2025",
+  "desc": "Consent voor alleen IB 2025 (basis voor het 2023-DENY-scenario).",
+  "tab": "issuance",
+  "expected_outcome": "allow",
+  "payload": {
+    "citizen_bsn": "123456789",
+    "dienstverlener_oin": "00000001234567890000",
+    "scopes": ["bd:ib:2025"],
+    "validity_seconds": 7776000,
+    "use_case": "hypotheek"
+  }
+}

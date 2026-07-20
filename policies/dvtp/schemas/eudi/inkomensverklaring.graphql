@@ -1,0 +1,37 @@
+# EUDI consumer-schema for the inkomensverklaring flow.
+#
+# Difference from dvtp/inkomensgegevens.graphql: input is BSN-based
+# directly, so no consentId translation is needed. The wallet provides
+# the BSN via a disclosed PID; the EUDI adapter takes it and builds a
+# GraphQL query using burgerservicenummer.
+#
+# Attribute naming matches what inkomensverklaring_metadata.json expects
+# in the credential-attributes: belastingjaar, verzamelinkomen,
+# peil_datum. These fields are shown in the wallet UI.
+
+type Query {
+  inkomensgegevens(input: InkomensgegevensInput!): [InkomensgegevensPerJaar!]!
+}
+
+input InkomensgegevensInput {
+  # BSN direct — EUDI-adapter haalt uit disclosed PID.
+  burgerservicenummer: String!
+  # Optioneel: specifieke belastingjaren. Leeg = alle beschikbare.
+  belastingjaren: [Int!]
+}
+
+type InkomensgegevensPerJaar {
+  belastingjaar: Int!
+  verzamelinkomen: Int
+  inkomenUitBox1: Int
+  inkomenUitBox2: Int
+  inkomenUitBox3: Int
+  grondslag: CodeOmschrijving
+  status: CodeOmschrijving
+  peilDatum: String
+}
+
+type CodeOmschrijving {
+  code: String!
+  omschrijving: String!
+}

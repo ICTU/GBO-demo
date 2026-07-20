@@ -1,0 +1,19 @@
+{
+  "CN": "bd-mock-internal",
+  "hosts": [
+    "bd-controller",
+    "bd-manager",
+    "bd-inway",
+    "bd-txlog-api"
+  ],
+  "key": {
+    "algo": "rsa",
+    "size": 4096
+  },
+  "names": [
+    {
+      "C": "NL",
+      "O": "GBO-DEMO Belastingdienst-mock Internal"
+    }
+  ]
+}

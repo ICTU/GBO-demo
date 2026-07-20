@@ -1,0 +1,21 @@
+FROM golang:1.21-alpine AS builder
+
+RUN apk add --no-cache git
+
+RUN go install github.com/cloudflare/cfssl/cmd/cfssl@v1.6.5 \
+ && go install github.com/cloudflare/cfssl/cmd/cfssljson@v1.6.5
+
+FROM alpine:3.19
+
+COPY --from=builder /go/bin/cfssl /usr/bin/cfssl
+COPY --from=builder /go/bin/cfssljson /usr/bin/cfssljson
+
+RUN apk add --no-cache \
+    bash \
+    openssl \
+    curl \
+    jq \
+    python3 \
+    postgresql16-client
+
+WORKDIR /pki

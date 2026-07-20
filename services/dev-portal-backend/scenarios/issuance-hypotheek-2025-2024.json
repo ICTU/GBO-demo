@@ -1,0 +1,14 @@
+{
+  "id": "issuance-hypotheek-2025-2024",
+  "name": "Issuance · hypotheek 2025+2024",
+  "desc": "Consent geven voor inkomstenbelasting 2025 en 2024, 90 dagen geldig.",
+  "tab": "issuance",
+  "expected_outcome": "allow",
+  "payload": {
+    "citizen_bsn": "123456789",
+    "dienstverlener_oin": "00000001234567890000",
+    "scopes": ["bd:ib:2025", "bd:ib:2024"],
+    "validity_seconds": 7776000,
+    "use_case": "hypotheek"
+  }
+}

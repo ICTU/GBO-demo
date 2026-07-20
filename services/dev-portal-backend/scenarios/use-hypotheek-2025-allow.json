@@ -1,0 +1,12 @@
+{
+  "id": "use-hypotheek-2025-allow",
+  "name": "Use · hypotheek 2025 ALLOW",
+  "desc": "Query inkomensgegevens 2025 binnen verleende scope.",
+  "tab": "use",
+  "expected_outcome": "allow",
+  "payload": {
+    "consent_id": "",
+    "scope_id": "bd:ib:2025",
+    "belastingjaren": [2025]
+  }
+}

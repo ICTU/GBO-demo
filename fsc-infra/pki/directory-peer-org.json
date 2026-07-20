@@ -1,0 +1,19 @@
+{
+  "CN": "directory-manager",
+  "hosts": [
+    "directory-manager",
+    "directory-inway"
+  ],
+  "key": {
+    "algo": "rsa",
+    "size": 4096
+  },
+  "names": [
+    {
+      "C": "NL",
+      "O": "GBO-DEMO Directory Peer",
+      "OU": "TEST",
+      "serialNumber": "99999999900000000000"
+    }
+  ]
+}

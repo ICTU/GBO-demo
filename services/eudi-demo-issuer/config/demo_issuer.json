@@ -1,0 +1,38 @@
+{
+  "_comment": "demo_issuer config voor GBO/inkomensverklaring flow. issuance_server_url wordt via env-var-override op de tunnel-URL gezet in compose. usecases.inkomensverklaring.data map is BSN → attestation-attribuut-lijst; wallet moet dezelfde BSN disclosen via PID.",
+  "issuance_server_url": "http://eudi-issuance-server:18001/",
+  "help_base_url": "https://help.example.com/",
+  "webserver": {
+    "ip": "0.0.0.0",
+    "port": 3005
+  },
+  "issuance_server": {
+    "ip": "0.0.0.0",
+    "port": 3006
+  },
+  "issuance_server_tls_config": null,
+  "universal_link_base_url": "https://app.preproductie.wallet.edi.bzk.nl/deeplink/",
+  "structured_logging": false,
+  "log_requests": true,
+  "usecases": {
+    "inkomensverklaring": {
+      "client_id": "reader.example.com",
+      "data": {
+        "999991772": [
+          {
+            "attestation_type": "nl.gbo.belastingdienst.inkomensverklaring",
+            "attributes": {
+              "belastingjaar": 2025,
+              "peil_datum": "2026-01-01",
+              "verzamelinkomen": 45000
+            }
+          }
+        ]
+      },
+      "disclosed": {
+        "credential_type": "urn:eudi:pid:nl:1",
+        "path": ["urn:eudi:pid:nl:1", "bsn"]
+      }
+    }
+  }
+}

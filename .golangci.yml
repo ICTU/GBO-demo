@@ -1,0 +1,36 @@
+# golangci-lint config for the demo Go services.
+#
+# Each service under services/ is its own Go module, so lint runs are
+# scoped per service (see .github/workflows/ci.yml).
+
+run:
+  timeout: 3m
+
+linters:
+  disable-all: true
+  enable:
+    - gofmt
+    - govet
+    - staticcheck
+    - errcheck
+    - ineffassign
+    - unused
+    - gocyclo
+
+linters-settings:
+  gocyclo:
+    # main() often wires up many routes/handlers; 30 is a pragmatic ceiling.
+    min-complexity: 30
+  errcheck:
+    exclude-functions:
+      # These stdlib helpers rarely fail in the ways that matter for a
+      # demo and checking every return would clutter the code.
+      - (io.Closer).Close
+      - (*os.File).Close
+      - (*compress/gzip.Writer).Close
+      - fmt.Fprintf
+      - fmt.Fprintln
+      - fmt.Fprint
+
+issues:
+  exclude-use-default: false

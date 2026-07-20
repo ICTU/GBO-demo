@@ -1,0 +1,19 @@
+{
+  "CN": "edi-issuer-internal",
+  "hosts": [
+    "edi-controller",
+    "edi-manager",
+    "edi-outway",
+    "edi-txlog-api"
+  ],
+  "key": {
+    "algo": "rsa",
+    "size": 4096
+  },
+  "names": [
+    {
+      "C": "NL",
+      "O": "GBO-DEMO EDI-issuer-org Internal"
+    }
+  ]
+}

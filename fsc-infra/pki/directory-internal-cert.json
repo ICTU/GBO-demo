@@ -1,0 +1,19 @@
+{
+  "CN": "directory-peer-internal",
+  "hosts": [
+    "directory-controller",
+    "directory-manager",
+    "directory-inway",
+    "directory-txlog-api"
+  ],
+  "key": {
+    "algo": "rsa",
+    "size": 4096
+  },
+  "names": [
+    {
+      "C": "NL",
+      "O": "GBO-DEMO Directory Peer Internal"
+    }
+  ]
+}

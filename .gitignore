@@ -1,0 +1,37 @@
+# Go binaries
+services/*/server
+services/*/*[!.go]
+!services/*/go.*
+!services/*/Dockerfile
+!services/*/main.go
+!services/*/mockdata/
+!services/*/scenarios/
+!services/*/config/
+
+# Local compose overrides + secrets
+.env
+.env.local
+fsc-infra/.env
+fsc-infra/.env.local
+
+# Issuance-server runtime config carries inline demo signing keys +
+# hostnames tied to the issuer/reader certs — never commit. Use the
+# .example files as templates and run `make eudi-config` to bootstrap
+# runtime copies from your local nl-wallet checkout.
+services/eudi-issuance-server/config/issuance_server.toml
+services/eudi-issuance-server/config/inkomensverklaring_metadata.json
+services/eudi-issuance-server/config/issuer_auth.json
+services/eudi-issuance-server/config/reader_auth.json
+
+# IDE / tooling state
+.omc/
+.DS_Store
+
+# Node
+dashboard/node_modules/
+dashboard/dist/
+
+# Certs (generated)
+certs/*.pem
+certs/*.csr
+certs/*.srl

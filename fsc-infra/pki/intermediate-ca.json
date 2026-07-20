@@ -1,0 +1,13 @@
+{
+  "CN": "GBO-DEMO Intermediate CA",
+  "key": {
+    "algo": "rsa",
+    "size": 4096
+  },
+  "names": [
+    {
+      "C": "NL",
+      "O": "GBO-DEMO"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "CN": "GBO-DEMO Root CA",
+  "key": {
+    "algo": "rsa",
+    "size": 4096
+  },
+  "names": [
+    {
+      "C": "NL",
+      "O": "GBO-DEMO"
+    }
+  ],
+  "ca": {
+    "expiry": "87600h"
+  }
+}

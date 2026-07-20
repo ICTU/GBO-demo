@@ -1,0 +1,10 @@
+{
+  "id": "eudi-inkomensverklaring-2023-deny",
+  "name": "EUDI · Inkomensverklaring 2023 DENY (SCOPE_NOT_ALLOWED)",
+  "desc": "Wallet vraagt inkomensverklaring voor belastingjaar 2023 aan. Usecase zit in de catalog en Adapter accepteert /inkomensverklaring_2023/ → scope bd:ib:2023 gaat naar de policy. EUD0001's allowed_scopes bevat 2023 niet → DENY SCOPE_NOT_ALLOWED. Toont dat catalog-membership en policy-authorization onafhankelijke lagen zijn.",
+  "tab": "eudi-issuance",
+  "expected_outcome": "deny",
+  "payload": {
+    "usecase": "inkomensverklaring_2023"
+  }
+}

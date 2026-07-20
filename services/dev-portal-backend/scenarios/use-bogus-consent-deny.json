@@ -1,0 +1,13 @@
+{
+  "id": "use-bogus-consent-deny",
+  "name": "Use · onbekend consent_id DENY",
+  "desc": "Verzonnen consent_id → dienstverlener-backend faalt op consent-lookup vóór FSC-hop → consent_lookup_failed.",
+  "tab": "use",
+  "expected_outcome": "deny",
+  "payload": {
+    "consent_id": "c-does-not-exist-0000-0000-000000000000",
+    "scope_id": "bd:ib:2025",
+    "belastingjaren": [2025],
+    "fields": ["belastingjaar", "verzamelinkomen"]
+  }
+}

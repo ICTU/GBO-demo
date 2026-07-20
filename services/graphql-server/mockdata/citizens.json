@@ -1,0 +1,102 @@
+[
+  {
+    "bsn": "123456789",
+    "inkomensgegevens": [
+      {
+        "belastingjaar": 2024,
+        "verzamelinkomen": 45000,
+        "inkomenUitBox1": 42000,
+        "inkomenUitBox2": 0,
+        "inkomenUitBox3": 3000,
+        "grondslag": { "code": "1000002", "omschrijving": "Voorlopige aanslag inkomstenbelasting" },
+        "status": { "code": "1000017", "omschrijving": "Voorlopig vastgesteld" },
+        "peilDatum": "2024-12-31"
+      },
+      {
+        "belastingjaar": 2025,
+        "verzamelinkomen": 45000,
+        "inkomenUitBox1": 42000,
+        "inkomenUitBox2": 0,
+        "inkomenUitBox3": 3000,
+        "grondslag": { "code": "1000002", "omschrijving": "Voorlopige aanslag inkomstenbelasting" },
+        "status": { "code": "1000018", "omschrijving": "In behandeling" },
+        "peilDatum": "2025-06-01"
+      }
+    ]
+  },
+  {
+    "bsn": "987654321",
+    "inkomensgegevens": [
+      {
+        "belastingjaar": 2024,
+        "verzamelinkomen": 62000,
+        "inkomenUitBox1": 58000,
+        "inkomenUitBox2": 4000,
+        "inkomenUitBox3": 0,
+        "grondslag": { "code": "1000001", "omschrijving": "Definitieve aanslag inkomstenbelasting" },
+        "status": { "code": "1000019", "omschrijving": "Definitief vastgesteld" },
+        "peilDatum": "2024-12-31"
+      },
+      {
+        "belastingjaar": 2025,
+        "verzamelinkomen": 62000,
+        "inkomenUitBox1": 58000,
+        "inkomenUitBox2": 4000,
+        "inkomenUitBox3": 0,
+        "grondslag": { "code": "1000002", "omschrijving": "Voorlopige aanslag inkomstenbelasting" },
+        "status": { "code": "1000017", "omschrijving": "Voorlopig vastgesteld" },
+        "peilDatum": "2025-06-01"
+      }
+    ]
+  },
+  {
+    "bsn": "555555555",
+    "inkomensgegevens": [
+      {
+        "belastingjaar": 2024,
+        "verzamelinkomen": 31000,
+        "inkomenUitBox1": 29000,
+        "inkomenUitBox2": 0,
+        "inkomenUitBox3": 2000,
+        "grondslag": { "code": "1000003", "omschrijving": "Belastbaar jaarloon (geen aangifte gedaan)" },
+        "status": { "code": "1000019", "omschrijving": "Definitief vastgesteld" },
+        "peilDatum": "2024-12-31"
+      },
+      {
+        "belastingjaar": 2025,
+        "verzamelinkomen": 31000,
+        "inkomenUitBox1": 29000,
+        "inkomenUitBox2": 0,
+        "inkomenUitBox3": 2000,
+        "grondslag": { "code": "1000003", "omschrijving": "Belastbaar jaarloon (geen aangifte gedaan)" },
+        "status": { "code": "1000018", "omschrijving": "In behandeling" },
+        "peilDatum": "2025-06-01"
+      }
+    ]
+  },
+  {
+    "bsn": "999991772",
+    "inkomensgegevens": [
+      {
+        "belastingjaar": 2024,
+        "verzamelinkomen": 52000,
+        "inkomenUitBox1": 50000,
+        "inkomenUitBox2": 0,
+        "inkomenUitBox3": 2000,
+        "grondslag": { "code": "1000001", "omschrijving": "Definitieve aanslag inkomstenbelasting" },
+        "status": { "code": "1000019", "omschrijving": "Definitief vastgesteld" },
+        "peilDatum": "2024-12-31"
+      },
+      {
+        "belastingjaar": 2025,
+        "verzamelinkomen": 52000,
+        "inkomenUitBox1": 50000,
+        "inkomenUitBox2": 0,
+        "inkomenUitBox3": 2000,
+        "grondslag": { "code": "1000002", "omschrijving": "Voorlopige aanslag inkomstenbelasting" },
+        "status": { "code": "1000018", "omschrijving": "In behandeling" },
+        "peilDatum": "2025-06-01"
+      }
+    ]
+  }
+]

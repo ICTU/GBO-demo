@@ -1,0 +1,16 @@
+{
+  "CN": "GBO-DEMO Internal CA (hypotheekverlener-mock)",
+  "key": {
+    "algo": "rsa",
+    "size": 4096
+  },
+  "names": [
+    {
+      "C": "NL",
+      "O": "GBO-DEMO Hypotheekverlener-mock Internal"
+    }
+  ],
+  "ca": {
+    "expiry": "43800h"
+  }
+}

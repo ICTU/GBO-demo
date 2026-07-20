@@ -1,0 +1,19 @@
+{
+  "CN": "hypotheekverlener-internal",
+  "hosts": [
+    "hv-controller",
+    "hv-manager",
+    "hv-outway",
+    "hv-txlog-api"
+  ],
+  "key": {
+    "algo": "rsa",
+    "size": 4096
+  },
+  "names": [
+    {
+      "C": "NL",
+      "O": "GBO-DEMO Hypotheekverlener-mock Internal"
+    }
+  ]
+}

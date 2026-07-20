@@ -1,0 +1,633 @@
+services:
+  # --- Infrastructure ---
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.96.0
+    ports:
+      - "9317:4317"   # gRPC
+      - "9318:4318"   # HTTP
+    volumes:
+      - ./otel/collector-config.yaml:/etc/otelcol-contrib/config.yaml
+    networks:
+      - backend
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.54
+    ports:
+      - "9686:16686"  # Jaeger UI + Query API
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:16686/"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  loki:
+    image: grafana/loki:2.9.6
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "9310:3100"
+    volumes:
+      - ./observability/loki-config.yaml:/etc/loki/local-config.yaml:ro
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:3100/ready || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  promtail:
+    image: grafana/promtail:2.9.6
+    command: -config.file=/etc/promtail/config.yaml
+    volumes:
+      - ./observability/promtail-config.yaml:/etc/promtail/config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - backend
+    depends_on:
+      loki:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    ports:
+      - "9300:3000"
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Editor
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+      - GF_USERS_DEFAULT_THEME=light
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - backend
+    depends_on:
+      loki:
+        condition: service_healthy
+      jaeger:
+        condition: service_healthy
+
+  opa:
+    image: openpolicyagent/opa:1.16.2
+    command:
+      - "run"
+      - "--server"
+      - "--addr=0.0.0.0:8181"
+      - "--watch"
+      - "--log-level=info"
+      - "--set=decision_logs.console=true"
+      - "/policies"
+    ports:
+      - "9181:8181"
+    volumes:
+      - ./policies:/policies
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "/opa", "eval", "true"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # --- Go Backend Services ---
+  sector-pip:
+    build: ./services/sector-pip
+    ports:
+      - "9404:4004"
+    environment:
+      - OTEL_SERVICE_NAME=sector-pip
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+    volumes:
+      - ./services/sector-pip/config:/config:ro
+    networks:
+      - backend
+    depends_on:
+      otel-collector:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4004/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  graphql-server:
+    build: ./services/graphql-server
+    ports:
+      - "9400:4000"
+    environment:
+      - OTEL_SERVICE_NAME=graphql-server
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+    networks:
+      - backend
+      # bd-Inway forwards bri requests to graphql-server; must therefore
+      # be reachable inside fsc-infra_default.
+      - fsc-infra
+    depends_on:
+      otel-collector:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  consent-register:
+    build: ./services/consent-register
+    ports:
+      - "9402:4002"
+    environment:
+      - OTEL_SERVICE_NAME=consent-register
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+    networks:
+      - backend
+    depends_on:
+      otel-collector:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4002/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  bsnk-mock:
+    build: ./services/bsnk-mock
+    ports:
+      - "9403:4003"
+    environment:
+      - OTEL_SERVICE_NAME=bsnk-mock
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+    networks:
+      - backend
+    depends_on:
+      otel-collector:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4003/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # XACML context-handler. Sits between the FSC-Inway AuthZen call and
+  # the OPA decision engine: parses the GraphQL query, enriches the input
+  # with PIP data (consent), and forwards to OPA.
+  pdp-service:
+    build: ./services/pdp-service
+    ports:
+      - "9408:4008"
+    environment:
+      - OTEL_SERVICE_NAME=pdp-service
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - OPA_URL=http://opa:8181
+      - SCHEMA_DIR=/schemas
+      - CONSENT_URL=http://consent-register:4002
+      # TLS for the FSC-Inway AuthZen plugin (requires HTTPS + CA).
+      - TLS_CERT_PATH=/certs/pdp-service.pem
+      - TLS_KEY_PATH=/certs/pdp-service-key.pem
+    volumes:
+      # Clean SDL of the source schema — structural reference for the
+      # GraphQL parser. Not policy; the binding lives in the rules.
+      - ./policies/dvtp/schemas:/schemas:ro
+      - ./services/pdp-service/certs:/certs:ro
+    networks:
+      - backend
+      # The bd-Inway AuthZen plugin calls pdp-service /authz; must
+      # therefore be reachable inside fsc-infra_default.
+      - fsc-infra
+    depends_on:
+      opa:
+        condition: service_healthy
+      consent-register:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "--no-check-certificate", "https://localhost:4008/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Gateway next to the source. Reads grant-property subject_id_type
+  # from the FSC token; substitutes PI variables to BSN via bsnk-mock
+  # for 'pseudonym' contracts; pass-through for 'direct' contracts
+  # (current EUDI flow). Runs in fsc-infra_default so bd-inway can
+  # reach it; reaches graphql-server over the main stack backend
+  # network.
+  bron-sidecar:
+    build: ./services/bron-sidecar
+    ports:
+      - "9411:4011"
+    environment:
+      - OTEL_SERVICE_NAME=bron-sidecar
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - UPSTREAM_URL=http://graphql-server:4000
+      - BSNK_URL=http://bsnk-mock:4003
+      - OWN_PEER_OIN=99999999900000000200
+      - PSEUDONYM_VARS=bsn
+    networks:
+      - backend
+      - fsc-infra
+    depends_on:
+      graphql-server:
+        condition: service_healthy
+      bsnk-mock:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4011/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  consent-portal-backend:
+    build: ./services/consent-portal-backend
+    profiles: [dvtp, full]
+    ports:
+      - "9405:4005"
+    environment:
+      - OTEL_SERVICE_NAME=consent-portal-backend
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - BSNK_URL=http://bsnk-mock:4003
+      - CONSENT_URL=http://consent-register:4002
+      - DEV_PORTAL_BACKEND_URL=http://dev-portal-backend:4007
+    networks:
+      - backend
+    depends_on:
+      bsnk-mock:
+        condition: service_healthy
+      consent-register:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4005/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  dienstverlener-backend:
+    build: ./services/dienstverlener-backend
+    profiles: [dvtp, full]
+    ports:
+      - "9406:4006"
+    environment:
+      - OTEL_SERVICE_NAME=dienstverlener-backend
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      # Talks to the real FSC-Outway (Hypotheekverlener-mock) instead
+      # of fsc-mock. OutwayPath = grant-link /bri + backend-path /graphql.
+      # Consent lookup up front to obtain the PI; PI travels in
+      # variables.bsn.
+      - OUTWAY_URL=http://hv-outway:8080
+      - OUTWAY_PATH=/bri/graphql
+      - CONSENT_URL=http://consent-register:4002
+      - ORG_OIN=99999999900000000300
+      - ORG_SECTOR=hypotheekverlener
+      - DEV_PORTAL_BACKEND_URL=http://dev-portal-backend:4007
+    networks:
+      - backend
+      - fsc-infra
+    depends_on:
+      consent-register:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4006/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Frontends run as a Vite dev-server (live reload / HMR via source-mount).
+  # The Dockerfile has an nginx final stage available — for a production
+  # build (`target: final`), build it manually with `docker build`.
+  dienstverlener-mock:
+    build:
+      context: ./dienstverlener-mock
+      target: build
+    profiles: [dvtp, full]
+    command: npm run dev -- --host 0.0.0.0 --port 9001
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+      - DV_API_TARGET=http://dienstverlener-backend:4006
+    volumes:
+      - ./dienstverlener-mock/src:/app/src
+      - ./dienstverlener-mock/public:/app/public
+      - ./dienstverlener-mock/index.html:/app/index.html
+      - ./dienstverlener-mock/vite.config.ts:/app/vite.config.ts
+      - ./dienstverlener-mock/tsconfig.json:/app/tsconfig.json
+    ports:
+      - "9001:9001"
+    networks:
+      - frontend
+      - backend
+    depends_on:
+      dienstverlener-backend:
+        condition: service_healthy
+
+  toestemmingsportaal-frontend:
+    build:
+      context: ./toestemmingsportaal-frontend
+      target: build
+    profiles: [dvtp, full]
+    command: npm run dev -- --host 0.0.0.0 --port 9002
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+      - PORTAL_API_TARGET=http://consent-portal-backend:4005
+    volumes:
+      - ./toestemmingsportaal-frontend/src:/app/src
+      - ./toestemmingsportaal-frontend/public:/app/public
+      - ./toestemmingsportaal-frontend/index.html:/app/index.html
+      - ./toestemmingsportaal-frontend/vite.config.ts:/app/vite.config.ts
+      - ./toestemmingsportaal-frontend/tsconfig.json:/app/tsconfig.json
+    ports:
+      - "9002:9002"
+    networks:
+      - frontend
+      - backend
+    depends_on:
+      consent-portal-backend:
+        condition: service_healthy
+
+  dev-portal-backend:
+    build: ./services/dev-portal-backend
+    ports:
+      - "9407:4007"
+    environment:
+      - OTEL_SERVICE_NAME=dev-portal-backend
+      - CITIZENS_FILE=/citizens/citizens.json
+      - ORGANIZATIONS_FILE=/orgs/organizations.json
+      # FSC-txlog access (demo shortcut). Production would use the
+      # peer-facing manager /v1/logs with a peer-cert (Logius
+      # fsc-logging draft). For the demo we mount each org's existing
+      # internal-cert and talk to the txlog-api directly.
+      - FSC_TXLOG_EDI_URL=https://edi-txlog-api:9443
+      - FSC_TXLOG_EDI_CERT=/certs/edi/internal-cert.pem
+      - FSC_TXLOG_EDI_KEY=/certs/edi/internal-cert-key.pem
+      - FSC_TXLOG_EDI_CA=/certs/edi/intermediate_ca.pem
+      - FSC_TXLOG_HV_URL=https://hv-txlog-api:9443
+      - FSC_TXLOG_HV_CERT=/certs/hv/internal-cert.pem
+      - FSC_TXLOG_HV_KEY=/certs/hv/internal-cert-key.pem
+      - FSC_TXLOG_HV_CA=/certs/hv/intermediate_ca.pem
+      - FSC_TXLOG_BD_URL=https://bd-txlog-api:9443
+      - FSC_TXLOG_BD_CERT=/certs/bd/internal-cert.pem
+      - FSC_TXLOG_BD_KEY=/certs/bd/internal-cert-key.pem
+      - FSC_TXLOG_BD_CA=/certs/bd/intermediate_ca.pem
+      - FSC_GROUP_ID=fsc-demo
+    volumes:
+      - dev-portal-var:/var
+      - ./services/graphql-server/mockdata:/citizens:ro
+      - ./services/sector-pip/config:/orgs:ro
+      - ./fsc-infra/orgs/edi-issuer/pki/internal:/certs/edi:ro
+      - ./fsc-infra/orgs/hypotheekverlener-mock/pki/internal:/certs/hv:ro
+      - ./fsc-infra/orgs/belastingdienst-mock/pki/internal:/certs/bd:ro
+    networks:
+      - backend
+      # Join fsc-infra_default so {edi,bd,hv}-txlog-api:9443 can be
+      # reached directly over their internal DNS names.
+      - fsc-infra
+    depends_on:
+      # /rules, /policy-source, /policy-snippet, /policy-chain, /explain all
+      # hit OPA — cold-start without this dependency causes brief 502s on
+      # those endpoints until OPA's healthcheck flips.
+      opa:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4007/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  developer-portal:
+    build:
+      context: ./developer-portal
+      target: build
+    command: npm run dev -- --host 0.0.0.0 --port 9003
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+      - DEV_API_TARGET=http://dev-portal-backend:4007
+      - PORTAL_API_TARGET=http://consent-portal-backend:4005
+      - DVTP_API_TARGET=http://dienstverlener-backend:4006
+      - JAEGER_API_TARGET=http://jaeger:16686
+      - EUDI_API_TARGET=http://eudi-adapter:4009
+      # The EUDI QR is built client-side; these env vars drive the universal-link.
+      # VITE_* is public — ends up in the built bundle (no secrets here).
+      - VITE_EUDI_PUBLIC_URL=${EUDI_PUBLIC_URL:-}
+      - VITE_EUDI_UL_BASE=${EUDI_UL_BASE:-https://app.preproductie.wallet.edi.bzk.nl/deeplink/disclosure_based_issuance}
+      - VITE_EUDI_CLIENT_ID=${EUDI_CLIENT_ID:-reader.example.com}
+    volumes:
+      - ./developer-portal/src:/app/src
+      - ./developer-portal/index.html:/app/index.html
+      - ./developer-portal/vite.config.ts:/app/vite.config.ts
+      - ./developer-portal/tsconfig.json:/app/tsconfig.json
+    ports:
+      - "9003:9003"
+    networks:
+      - frontend
+      - backend
+    depends_on:
+      dev-portal-backend:
+        condition: service_healthy
+      # consent-portal-backend and dienstverlener-backend live in the
+      # dvtp profile and are not always on. The frontend polls at
+      # runtime and shows an empty state on the relevant tab — no
+      # build-time block needed.
+      consent-portal-backend:
+        condition: service_healthy
+        required: false
+      dienstverlener-backend:
+        condition: service_healthy
+        required: false
+
+  # ══════════════════════════════════════════════════════════════════════
+  # EUDI wallet stack — profile: eudi, default OFF
+  # ══════════════════════════════════════════════════════════════════════
+  # `docker compose --profile eudi up -d` brings up the EUDI stack:
+  # postgres-eudi -> eudi-migrations (one-shot) -> eudi-issuance-server +
+  # eudi-adapter + eudi-demo-issuer.
+  # The adapter has taken over the "bri-source" role — the nl-wallet
+  # bri-mock has been removed from the stack.
+  #
+  # Public reachability: the wallet on a phone needs to reach
+  # issuance-server (EUDI_PUBLIC_URL) and issuance-server needs to reach
+  # eudi-adapter (EUDI_BRI_URL). Bring your own reachability — pick one:
+  #
+  #   (a) Own domain / reverse proxy: point two HTTPS hosts at the
+  #       compose ports and set the two URLs in .env.
+  #   (b) Cloudflare named tunnel (bundled): add `--profile
+  #       cloudflare-tunnel` and set CLOUDFLARE_TUNNEL_TOKEN. The two
+  #       URLs must still match the hostnames configured in your CF
+  #       dashboard.
+  #   (c) Ad-hoc / quick tunnel (ngrok, cloudflared --url, tailscale
+  #       funnel, etc.): run it yourself, paste the two URLs into .env.
+  #
+  # Required env vars before `up`:
+  #   NLWALLET_PATH     — path to the nl-wallet repo (for is-config mount)
+  #   EUDI_PUBLIC_URL   — public HTTPS URL to issuance-server
+  #   EUDI_BRI_URL      — public HTTPS URL to eudi-adapter
+  # Missing var -> fail-loud on `up`.
+  # ══════════════════════════════════════════════════════════════════════
+
+  postgres-eudi:
+    image: postgres:16-alpine
+    profiles: [eudi, full]
+    environment:
+      # Override in .env for local runs; the default is fine for a demo
+      # on a local docker network.
+      POSTGRES_PASSWORD: ${EUDI_POSTGRES_PASSWORD:-changeme-demo-only}
+      POSTGRES_USER: wallet
+      POSTGRES_DB: issuance_server
+    volumes:
+      - postgres-eudi-data:/var/lib/postgresql/data
+    networks: [eudi]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wallet -d issuance_server"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  eudi-migrations:
+    image: gbo/eudi-issuance-server:dev
+    profiles: [eudi, full]
+    entrypoint: ["/issuance_server_migrations"]
+    command: ["up"]
+    environment:
+      DATABASE_URL: postgres://wallet:${EUDI_POSTGRES_PASSWORD:-changeme-demo-only}@postgres-eudi:5432/issuance_server
+    depends_on:
+      postgres-eudi:
+        condition: service_healthy
+    restart: "no"
+    networks: [eudi]
+
+  eudi-issuance-server:
+    image: gbo/eudi-issuance-server:dev
+    profiles: [eudi, full]
+    # USER 0 in the scratch container so /tsl-publish is writable
+    # (volume is root-owned by default). Fine for the demo; production
+    # would use an init container `chown -R 1000` so USER 1000 stays.
+    user: "0"
+    ports:
+      - "18001:18001"
+    environment:
+      - ISSUANCE_SERVER__STORAGE__URL=postgres://wallet:${EUDI_POSTGRES_PASSWORD:-changeme-demo-only}@postgres-eudi:5432/issuance_server
+      # Three usecases (inkomensverklaring per tax year). Each
+      # disclosure_settings config points at its own adapter path; the
+      # adapter knows the scope + year query per path via
+      # usecase_catalog. 2023 is rejected by EUD0001 (SCOPE_NOT_ALLOWED)
+      # — that is the multi-policy demonstration. Adapter tunnel URL
+      # requires HTTPS (LetsEncrypt chain, TOML trust_anchors).
+      # Fail-loud if the env var is missing.
+      - ISSUANCE_SERVER__DISCLOSURE_SETTINGS__INKOMENSVERKLARING_2023__ATTESTATION_URL_CONFIG__BASE_URL=${EUDI_BRI_URL:?set EUDI_BRI_URL to the eudi-tunnel-bri URL before compose up}inkomensverklaring_2023/
+      - ISSUANCE_SERVER__DISCLOSURE_SETTINGS__INKOMENSVERKLARING_2024__ATTESTATION_URL_CONFIG__BASE_URL=${EUDI_BRI_URL:?set EUDI_BRI_URL to the eudi-tunnel-bri URL before compose up}inkomensverklaring_2024/
+      - ISSUANCE_SERVER__DISCLOSURE_SETTINGS__INKOMENSVERKLARING_2025__ATTESTATION_URL_CONFIG__BASE_URL=${EUDI_BRI_URL:?set EUDI_BRI_URL to the eudi-tunnel-bri URL before compose up}inkomensverklaring_2025/
+      - ISSUANCE_SERVER__UNIVERSAL_LINK_BASE_URL=walletdebuginteraction://wallet.edi.rijksoverheid.nl/
+      # Bind addresses explicitly — otherwise default localhost =
+      # unreachable from other containers.
+      - ISSUANCE_SERVER__WALLET_SERVER__IP=0.0.0.0
+      - ISSUANCE_SERVER__WALLET_SERVER__PORT=18001
+      - ISSUANCE_SERVER__INTERNAL_SERVER__IP=0.0.0.0
+      - ISSUANCE_SERVER__INTERNAL_SERVER__PORT=18002
+      # public_url: the issuance tunnel URL. The wallet QR embeds this
+      # URL, so container-internal or localhost values do not work.
+      # Fail-loud.
+      - ISSUANCE_SERVER__PUBLIC_URL=${EUDI_PUBLIC_URL:?set EUDI_PUBLIC_URL to the eudi-tunnel URL before compose up}
+    volumes:
+      # Runtime config bundled with the demo. WORKDIR is / (scratch) so
+      # everything is mounted at / to match the config's CWD-relative
+      # lookups.
+      #
+      # issuance_server.toml is git-ignored — the .example version has
+      # placeholder issuer/reader signing keys. Run `make eudi-config`
+      # (or copy issuance_server.toml.example manually and fill in real
+      # keys) before starting the EUDI profile.
+      - ./services/eudi-issuance-server/config/issuance_server.toml:/issuance_server.toml:ro
+      - ./services/eudi-issuance-server/config/inkomensverklaring_metadata.json:/inkomensverklaring_metadata.json:ro
+      - ./services/eudi-issuance-server/config/issuer_auth.json:/issuer_auth.json:ro
+      - ./services/eudi-issuance-server/config/reader_auth.json:/reader_auth.json:ro
+      - eudi-tsl-publish:/tsl-publish
+    depends_on:
+      eudi-migrations:
+        condition: service_completed_successfully
+    networks: [eudi]
+
+  # Web server serving HTML pages with QR codes pointing at our tunnel
+  # URL. Wallet app scans the QR -> reaches issuance-server via
+  # cloudflared -> OpenID4VCI flow -> credential in wallet.
+  eudi-demo-issuer:
+    image: gbo/eudi-demo-issuer:dev
+    profiles: [eudi, full]
+    user: "0"
+    ports:
+      - "3005:3005"
+    environment:
+      # The config sets a default issuance_server_url; this env var
+      # overrides it to the public tunnel URL the wallet can reach.
+      # config-crate: DEMO_ISSUER__ISSUANCE_SERVER_URL with double underscore.
+      # Fail-loud if the env var is missing (otherwise the QR points at
+      # container DNS).
+      - DEMO_ISSUER__ISSUANCE_SERVER_URL=${EUDI_PUBLIC_URL:?set EUDI_PUBLIC_URL to the eudi-tunnel URL before compose up}
+    volumes:
+      - ./services/eudi-demo-issuer/config/demo_issuer.json:/demo_issuer.json:ro
+    depends_on:
+      eudi-issuance-server:
+        condition: service_started
+    networks: [eudi]
+
+  # Optional: Cloudflare named tunnel wrapping the two EUDI-facing services
+  # (issuance-server + eudi-adapter). Opt in with an extra profile:
+  #   docker compose --profile eudi --profile cloudflare-tunnel up
+  # The two public hostnames must be configured in the Cloudflare dashboard
+  # and passed as EUDI_PUBLIC_URL / EUDI_BRI_URL. If you already have a
+  # reverse proxy, another tunnel, or your own domain, leave this profile
+  # off and just set the two URLs directly.
+  eudi-tunnel:
+    image: cloudflare/cloudflared:latest
+    profiles: [cloudflare-tunnel]
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+      - --token
+      - ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in .env (Cloudflare Zero Trust -> Tunnels -> connector token)}
+    depends_on:
+      eudi-issuance-server:
+        condition: service_started
+      eudi-adapter:
+        condition: service_started
+    networks: [eudi]
+
+  # EUDI adapter — translates the bri issuance contract to the generic
+  # chain. The adapter talks to the real FSC-Outway (edi-outway).
+  # Transport: eudi-adapter -> edi-outway (Fsc-Grant-Hash) -> mTLS ->
+  # bd-inway -> backend.
+  #
+  # To reach edi-outway in the fsc-infra stack we join the external
+  # fsc-infra_default network. FSC_GRANT_HASH via .env or shell-env;
+  # contract created via UI (contract-seed automates this).
+  eudi-adapter:
+    build: ./services/eudi-adapter
+    profiles: [eudi, full]
+    ports:
+      - "9409:4009"
+    environment:
+      - OTEL_SERVICE_NAME=eudi-adapter
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - FSC_OUTWAY_URL=http://edi-outway:8080
+      - ISSUER_OIN=99999999900000000100
+      - USECASE_CATALOG_PATH=/config/usecase_catalog.json
+    volumes:
+      - ./services/eudi-adapter/config:/config:ro
+    networks:
+      - eudi
+      - backend
+      - fsc-infra
+
+networks:
+  frontend:
+  backend:
+  eudi:
+  fsc-infra:
+    name: fsc-infra_default
+    external: true
+
+volumes:
+  dev-portal-var:
+  postgres-eudi-data:
+  eudi-tsl-publish:

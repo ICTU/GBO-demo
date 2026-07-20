@@ -1,0 +1,50 @@
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Short batch window so the developer-portal can colour the strip in near-
+  # real-time; raise this for production to reduce network overhead.
+  batch:
+    timeout: 100ms
+    send_batch_size: 1
+
+exporters:
+  otlp:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+  # Second pipeline target: dev-portal-backend has an OTLP-JSON receiver at
+  # /v1/traces that fans spans out to SSE-subscribed UIs. Powers the chain
+  # coloring without Jaeger polling.
+  #
+  # Retry + queue disabled: this is demo-tooling, not audit-grade. Late
+  # spans batched behind exponential backoff would arrive seconds after the
+  # request and break the live colouring story. Drop on the floor instead.
+  otlphttp/devportal:
+    endpoint: http://dev-portal-backend:4007
+    traces_endpoint: http://dev-portal-backend:4007/v1/traces
+    encoding: json
+    tls:
+      insecure: true
+    retry_on_failure:
+      enabled: false
+    sending_queue:
+      enabled: false
+    timeout: 2s
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp, otlphttp/devportal]
