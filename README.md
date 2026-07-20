@@ -1,6 +1,6 @@
-# GBO Demo Environment
+# GBO — Gemeenschappelijke Bronontsluiting (referentie-demo)
 
-A live, runnable reference architecture for **federated data access with fine-grained authorization**. It shows how a consumer (data requester) can obtain data from a source-holder over a trusted transport channel, where every request is authorized against machine-readable policy, and where the source retains control over identifier resolution.
+A live, runnable reference architecture for **GBO** (Gemeenschappelijke Bronontsluiting). It shows how a consumer (data requester) can obtain data from a source-holder over a trusted transport channel, where every request is authorized against machine-readable policy, and where the source retains control over identifier resolution.
 
 Two access flows sit side-by-side on the same authorization pipeline:
 
@@ -268,3 +268,9 @@ The architecture is designed for incremental extension. Every new flow shares th
 - **Legal-basis (gov-to-gov)**: add `policies/legal-basis/*.rego`, add a new FSC consumer org with contract `flow=g2g:legal-basis`, the PDP dispatches on the token property.
 - **Wallet flow (already implemented)**: see `eudi-adapter`.
 - **AS4 / SDG-OOTS**: add an AS4 bridge mock + Domibus mock.
+
+## Repository owner
+
+Owner: **Jeroen de Kok** — <jeroen.dekok@ictu.nl>
+
+Please open an issue for questions or feature requests. For security issues see [SECURITY.md](SECURITY.md).
