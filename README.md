@@ -1,4 +1,4 @@
-# Federated Data-Access Reference Demo
+# GBO Demo Environment
 
 A live, runnable reference architecture for **federated data access with fine-grained authorization**. It shows how a consumer (data requester) can obtain data from a source-holder over a trusted transport channel, where every request is authorized against machine-readable policy, and where the source retains control over identifier resolution.
 
