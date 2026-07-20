@@ -5,6 +5,11 @@
 -include .env
 export
 
+# nl-wallet source for the eudi-issuance-server build. Pinned via git
+# submodule (vendor/nl-wallet, v0.4.1 — the preprod wallet app rejects
+# v0.5.0's scheme-prefixed client_id). Override in .env if needed.
+NLWALLET_PATH ?= $(PWD)/vendor/nl-wallet
+
 up: certs
 	docker compose up --build -d
 
@@ -70,8 +75,9 @@ eudi-config:
 # eudi-issuance-server has no published image — built from the local
 # nl-wallet checkout ($NLWALLET_PATH).
 eudi-images:
-	@if [ -z "$$NLWALLET_PATH" ]; then \
-	  echo "ERROR: NLWALLET_PATH not set. Point it at your nl-wallet checkout."; \
+	@if [ ! -f "$$NLWALLET_PATH/wallet_core/Cargo.toml" ]; then \
+	  echo "ERROR: nl-wallet sources not found at $$NLWALLET_PATH"; \
+	  echo "       Run: git submodule update --init vendor/nl-wallet"; \
 	  exit 1; \
 	fi
 	@if ! docker image inspect gbo/eudi-issuance-server:dev >/dev/null 2>&1; then \

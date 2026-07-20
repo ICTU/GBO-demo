@@ -21,7 +21,7 @@ Every mode also needs two Postgres passwords set via env-files (compose fails lo
 
 That covers the default (`make demo`, DvTP-only). For the wallet flow (`make demo-eudi` / `make demo-full`) you also need:
 
-- **`NLWALLET_PATH`** in `.env` — path to a local checkout of the [nl-wallet](https://github.com/MinBZK/nl-wallet) repo. Used to build the issuance-server binary from source.
+- **nl-wallet sources** — pinned as a git submodule at `vendor/nl-wallet` (**v0.4.1, required**: the preprod wallet app rejects v0.5.0's scheme-prefixed `client_id`). Init once with `git submodule update --init vendor/nl-wallet`. Used to build the issuance-server binary from source. Override with `NLWALLET_PATH` in `.env` if you need another checkout.
 - **Three public HTTPS URLs** — `EUDI_PUBLIC_URL` (wallet reaches issuance-server), `EUDI_READER_ORIGIN_URL` (published as `requestOriginBaseUrl` in `reader_auth.json`; usually the same host as `EUDI_PUBLIC_URL`), and `EUDI_BRI_URL` (issuance-server reaches eudi-adapter). See [EUDI public reachability](#eudi-public-reachability) for the three supported options (own domain / bundled Cloudflare tunnel / ad-hoc tunnel).
 - **Six EUDI crypto slots** in `.env` — `EUDI_READER_KEY/CERT`, `EUDI_ISSUER_KEY/CERT`, `EUDI_STATUS_KEY/CERT`. `make eudi-config` (auto-run by `make demo-eudi`) renders `services/eudi-issuance-server/config/{issuance_server.toml,reader_auth.json,...}` from their `.example` templates via `envsubst`. The `.example` files contain public trust-anchors and URL placeholders; **the 6 private keys/certs are not in the public repo** — request them out-of-band from the maintainer for a working wallet-QR flow. Requires `envsubst` (`brew install gettext` on macOS).
 
@@ -47,7 +47,7 @@ make demo-minimal     # Base only (~30s, ~13 services)
                       # Curl directly at pdp-service /evaluation for policy tests.
 
 make demo-eudi        # Wallet flow only (~5-10 min first boot; PKI + FSC-infra + contract seed)
-                      # Requires NLWALLET_PATH + two public HTTPS URLs
+                      # Requires the vendor/nl-wallet submodule + two public HTTPS URLs
                       # — see "EUDI public reachability" below.
 
 make demo-full        # Both flows on
