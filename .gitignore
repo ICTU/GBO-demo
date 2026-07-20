@@ -35,3 +35,15 @@ dashboard/dist/
 certs/*.pem
 certs/*.csr
 certs/*.srl
+
+# PKI material — regenerated per-user via bootstrap scripts.
+# Certs (.pem/.der/.crt) and keys are useless without their matching
+# private keys; keeping either in git only causes drift on every regen.
+fsc-infra/orgs/*/pki/
+fsc-infra/directory-peer/pki/
+fsc-infra/directory-ui/pki/
+fsc-infra/pki/ca/
+services/pdp-service/certs/
+# Preserve the input JSON templates + scripts that generate the above.
+!fsc-infra/pki/*.json
+!fsc-infra/pki/*.sh
