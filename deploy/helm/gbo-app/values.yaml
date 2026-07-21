@@ -1,0 +1,58 @@
+replicaCount: 1
+
+image:
+  # Example: ghcr.io/ictu/gbo-demo/bsnk-mock
+  repository: ghcr.io/ictu/gbo-demo/bsnk-mock
+  # Defaults to Chart.appVersion when empty.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+containerPort: 8080
+
+# Example:
+# env:
+#   - name: FOO
+#     value: bar
+env: []
+
+# Example:
+# envFrom:
+#   - secretRef:
+#       name: eudi-secrets
+envFrom: []
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi
+
+health:
+  enabled: true
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 2
+  failureThreshold: 3
+healthPath: /healthz
+
+route:
+  enabled: false
+  hostname: ""
+  parentRefs:
+    - name: default-gateway
+      namespace: fds-public
+      sectionName: https
+
+podAnnotations: {}
+podLabels: {}
+podSecurityContext: {}
+securityContext: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
