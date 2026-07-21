@@ -72,7 +72,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${FSC_POSTGRES_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: ${FSC_POSTGRES_PASSWORD}
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U postgres -d postgres" ]
       interval: 10s
@@ -92,7 +92,7 @@ services:
       - up
     environment:
       <<: *directory-peer-env
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_dir_controller?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_dir_controller?sslmode=disable&connect_timeout=2"
     depends_on:
       postgres:
         condition: service_healthy
@@ -106,7 +106,7 @@ services:
       - up
     environment:
       <<: *directory-peer-env
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_dir_manager?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_dir_manager?sslmode=disable&connect_timeout=2"
     depends_on:
       postgres:
         condition: service_healthy
@@ -125,7 +125,7 @@ services:
       LISTEN_ADDRESS_ADMINISTRATION_API: 0.0.0.0:9444
       MANAGER_ADDRESS_INTERNAL: https://directory-manager:9443
       DIRECTORY_ADDRESS: https://directory-manager:8443
-      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_dir_controller?sslmode=disable&connect_timeout=2"
+      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_dir_controller?sslmode=disable&connect_timeout=2"
       AUDITLOG_TYPE: "stdout"
     depends_on:
       postgres:
@@ -164,7 +164,7 @@ services:
       SELF_ADDRESS: "https://directory-manager:8443"
       DIRECTORY_MANAGER_ADDRESS: "https://directory-manager:8443"
       DIRECTORY_PEER_ID: "99999999900000000000"
-      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_dir_manager?sslmode=disable&connect_timeout=2"
+      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_dir_manager?sslmode=disable&connect_timeout=2"
     depends_on:
       postgres:
         condition: service_healthy
@@ -202,7 +202,7 @@ services:
       - up
     environment:
       <<: *directory-peer-env
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_dir_txlog?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_dir_txlog?sslmode=disable&connect_timeout=2"
     depends_on:
       postgres:
         condition: service_healthy
@@ -214,7 +214,7 @@ services:
       - ./directory-peer/pki:/certs:ro
     environment:
       <<: *directory-peer-env
-      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_dir_txlog?sslmode=disable&connect_timeout=2"
+      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_dir_txlog?sslmode=disable&connect_timeout=2"
       LISTEN_ADDRESS: 0.0.0.0:9443
       LISTEN_ADDRESS_PLAIN: 0.0.0.0:8080
     depends_on:
@@ -256,7 +256,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_edi_controller?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_edi_controller?sslmode=disable&connect_timeout=2"
     volumes:
       - ./orgs/edi-issuer/pki:/certs:ro
     depends_on:
@@ -276,7 +276,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_edi_manager?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_edi_manager?sslmode=disable&connect_timeout=2"
     volumes:
       - ./orgs/edi-issuer/pki:/certs:ro
     depends_on:
@@ -296,7 +296,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_edi_txlog?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_edi_txlog?sslmode=disable&connect_timeout=2"
     volumes:
       - ./orgs/edi-issuer/pki:/certs:ro
     depends_on:
@@ -321,7 +321,7 @@ services:
       LISTEN_ADDRESS_ADMINISTRATION_API: 0.0.0.0:9444
       MANAGER_ADDRESS_INTERNAL: https://edi-manager:9443
       DIRECTORY_ADDRESS: https://directory-manager:8443
-      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_edi_controller?sslmode=disable&connect_timeout=2"
+      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_edi_controller?sslmode=disable&connect_timeout=2"
       AUDITLOG_TYPE: "stdout"
     depends_on:
       postgres:
@@ -359,7 +359,7 @@ services:
       SELF_ADDRESS: "https://edi-manager:8443"
       DIRECTORY_MANAGER_ADDRESS: "https://directory-manager:8443"
       DIRECTORY_PEER_ID: "99999999900000000000"
-      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_edi_manager?sslmode=disable&connect_timeout=2"
+      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_edi_manager?sslmode=disable&connect_timeout=2"
     depends_on:
       postgres:
         condition: service_healthy
@@ -403,7 +403,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_edi_txlog?sslmode=disable&connect_timeout=2"
+      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_edi_txlog?sslmode=disable&connect_timeout=2"
       LISTEN_ADDRESS: 0.0.0.0:9443
       LISTEN_ADDRESS_PLAIN: 0.0.0.0:8080
     depends_on:
@@ -424,7 +424,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_hv_controller?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_hv_controller?sslmode=disable&connect_timeout=2"
     volumes:
       - ./orgs/hypotheekverlener-mock/pki:/certs:ro
     depends_on:
@@ -441,7 +441,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_hv_manager?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_hv_manager?sslmode=disable&connect_timeout=2"
     volumes:
       - ./orgs/hypotheekverlener-mock/pki:/certs:ro
     depends_on:
@@ -458,7 +458,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_hv_txlog?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_hv_txlog?sslmode=disable&connect_timeout=2"
     volumes:
       - ./orgs/hypotheekverlener-mock/pki:/certs:ro
     depends_on:
@@ -483,7 +483,7 @@ services:
       LISTEN_ADDRESS_ADMINISTRATION_API: 0.0.0.0:9444
       MANAGER_ADDRESS_INTERNAL: https://hv-manager:9443
       DIRECTORY_ADDRESS: https://directory-manager:8443
-      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_hv_controller?sslmode=disable&connect_timeout=2"
+      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_hv_controller?sslmode=disable&connect_timeout=2"
       AUDITLOG_TYPE: "stdout"
     depends_on:
       postgres:
@@ -521,7 +521,7 @@ services:
       SELF_ADDRESS: "https://hv-manager:8443"
       DIRECTORY_MANAGER_ADDRESS: "https://directory-manager:8443"
       DIRECTORY_PEER_ID: "99999999900000000000"
-      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_hv_manager?sslmode=disable&connect_timeout=2"
+      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_hv_manager?sslmode=disable&connect_timeout=2"
     depends_on:
       postgres:
         condition: service_healthy
@@ -565,7 +565,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_hv_txlog?sslmode=disable&connect_timeout=2"
+      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_hv_txlog?sslmode=disable&connect_timeout=2"
       LISTEN_ADDRESS: 0.0.0.0:9443
       LISTEN_ADDRESS_PLAIN: 0.0.0.0:8080
     depends_on:
@@ -589,7 +589,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_bd_controller?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_bd_controller?sslmode=disable&connect_timeout=2"
     volumes:
       - ./orgs/belastingdienst-mock/pki:/certs:ro
     depends_on:
@@ -609,7 +609,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_bd_manager?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_bd_manager?sslmode=disable&connect_timeout=2"
     volumes:
       - ./orgs/belastingdienst-mock/pki:/certs:ro
     depends_on:
@@ -629,7 +629,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_bd_txlog?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_bd_txlog?sslmode=disable&connect_timeout=2"
     volumes:
       - ./orgs/belastingdienst-mock/pki:/certs:ro
     depends_on:
@@ -654,7 +654,7 @@ services:
       LISTEN_ADDRESS_ADMINISTRATION_API: 0.0.0.0:9444
       MANAGER_ADDRESS_INTERNAL: https://bd-manager:9443
       DIRECTORY_ADDRESS: https://directory-manager:8443
-      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_bd_controller?sslmode=disable&connect_timeout=2"
+      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_bd_controller?sslmode=disable&connect_timeout=2"
       AUDITLOG_TYPE: "stdout"
     depends_on:
       postgres:
@@ -697,7 +697,7 @@ services:
       SELF_ADDRESS: "https://bd-manager:8443"
       DIRECTORY_MANAGER_ADDRESS: "https://directory-manager:8443"
       DIRECTORY_PEER_ID: "99999999900000000000"
-      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_bd_manager?sslmode=disable&connect_timeout=2"
+      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_bd_manager?sslmode=disable&connect_timeout=2"
     depends_on:
       postgres:
         condition: service_healthy
@@ -752,7 +752,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD:-postgres}@postgres:5432/fsc_bd_txlog?sslmode=disable&connect_timeout=2"
+      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_bd_txlog?sslmode=disable&connect_timeout=2"
       LISTEN_ADDRESS: 0.0.0.0:9443
       LISTEN_ADDRESS_PLAIN: 0.0.0.0:8080
     depends_on:

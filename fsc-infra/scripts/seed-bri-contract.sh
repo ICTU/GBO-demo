@@ -54,7 +54,7 @@ GRANT_LINK_PATH="${GRANT_LINK_PATH:-/bri}"
 OUTWAY_NAME="${OUTWAY_NAME:-EdiOutway-01}"
 PG_HOST="${PG_HOST:-postgres}"
 PG_USER="${PG_USER:-postgres}"
-export PGPASSWORD="${PGPASSWORD:-postgres}"
+export PGPASSWORD="${PGPASSWORD:-${FSC_POSTGRES_PASSWORD}}"
 
 # mTLS credentials (internal-cert per org, mounted under fsc-infra/orgs/*).
 BD_INTERNAL_DIR="$FSC_INFRA_DIR/orgs/belastingdienst-mock/pki/internal"
@@ -232,9 +232,9 @@ else
   echo "  ✓ connection contract created; waiting for auto-sign..."
   for _ in $(seq 30); do
     sleep 1
-    st=$(mtls_curl "$EDI_CERT" "$EDI_KEY" "$EDI_CA" \
-      "$EDI_MANAGER_URL/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=$SERVICE_NAME" \
-      | jq -r '.contracts[]? | .state' 2>/dev/null | head -n1)
+    contracts_json=$(mtls_curl "$EDI_CERT" "$EDI_KEY" "$EDI_CA" \
+      "$EDI_MANAGER_URL/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=$SERVICE_NAME")
+    st=$(printf '%s' "$contracts_json" | jq -r 'first(.contracts[]?.state // empty) // ""' 2>/dev/null)
     if [ "$st" = "CONTRACT_STATE_VALID" ]; then
       echo "  ✓ connection contract Valid"
       break

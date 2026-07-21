@@ -97,6 +97,11 @@ docker run --rm \
         chmod 600 /work/orgs/belastingdienst-mock/pki/internal/*-key.pem
     '
 
+# OpenFSC containers run as appuser (uid/gid 1001) and must be able to
+# read the key material.
+docker run --rm -v "$(pwd)/..:/work" "${IMAGE_TAG}" \
+    chown -R 1001:1001 /work/orgs/belastingdienst-mock/pki
+
 echo
 echo ">>> Done."
 ls -la ../orgs/belastingdienst-mock/pki/org/ ../orgs/belastingdienst-mock/pki/internal/

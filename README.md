@@ -1,6 +1,6 @@
-# Federated Data-Access Reference Demo
+# GBO — Gemeenschappelijke Bronontsluiting (referentie-demo)
 
-A live, runnable reference architecture for **federated data access with fine-grained authorization**. It shows how a consumer (data requester) can obtain data from a source-holder over a trusted transport channel, where every request is authorized against machine-readable policy, and where the source retains control over identifier resolution.
+A live, runnable reference architecture for **GBO** (Gemeenschappelijke Bronontsluiting). It shows how a consumer (data requester) can obtain data from a source-holder over a trusted transport channel, where every request is authorized against machine-readable policy, and where the source retains control over identifier resolution.
 
 Two access flows sit side-by-side on the same authorization pipeline:
 
@@ -14,16 +14,23 @@ Both flows share one authorization pipeline: FSC-Inway (transport) → PDP (cont
 - **Docker** with Compose plugin (Docker Desktop 4.x or Docker Engine + `docker compose`).
 - **~8 GB RAM** allocated to Docker (Preferences → Resources), **~10 GB disk** for images.
 
+Every mode also needs two Postgres passwords set via env-files (compose fails loud if unset — any string works for the local demo network):
+
+- **`EUDI_POSTGRES_PASSWORD`** in `.env` — password for `postgres-eudi` (issuance-server + migrations).
+- **`FSC_POSTGRES_PASSWORD`** in `fsc-infra/.env` — shared password for all FSC-infra database users (three orgs × controller/manager/txlog + directory).
+
 That covers the default (`make demo`, DvTP-only). For the wallet flow (`make demo-eudi` / `make demo-full`) you also need:
 
-- **`NLWALLET_PATH`** in `.env` — path to a local checkout of the [nl-wallet](https://github.com/MinBZK/nl-wallet) repo. Used to build the issuance-server + demo-issuer binaries from source, and to bootstrap `services/eudi-issuance-server/config/issuance_server.toml` (holds inline demo signing keys — git-ignored). `make demo-eudi` runs `make eudi-config` automatically as a dependency.
-- **Two public HTTPS URLs** — `EUDI_PUBLIC_URL` + `EUDI_BRI_URL`. The wallet on a phone needs to reach the issuance-server, and the issuance-server needs to reach the eudi-adapter. See [EUDI public reachability](#eudi-public-reachability) for the three supported options (own domain / bundled Cloudflare tunnel / ad-hoc tunnel).
+- **nl-wallet sources** — pinned as a git submodule at `vendor/nl-wallet` (**v0.4.1, required**: the preprod wallet app rejects v0.5.0's scheme-prefixed `client_id`). Init once with `git submodule update --init vendor/nl-wallet`. Used to build the issuance-server binary from source. Override with `NLWALLET_PATH` in `.env` if you need another checkout.
+- **Three public HTTPS URLs** — `EUDI_PUBLIC_URL` (wallet reaches issuance-server), `EUDI_READER_ORIGIN_URL` (published as `requestOriginBaseUrl` in `reader_auth.json`; usually the same host as `EUDI_PUBLIC_URL`), and `EUDI_BRI_URL` (issuance-server reaches eudi-adapter). See [EUDI public reachability](#eudi-public-reachability) for the three supported options (own domain / bundled Cloudflare tunnel / ad-hoc tunnel).
+- **Six EUDI crypto slots** in `.env` — `EUDI_READER_KEY/CERT`, `EUDI_ISSUER_KEY/CERT`, `EUDI_STATUS_KEY/CERT`. `make eudi-config` (auto-run by `make demo-eudi`) renders `services/eudi-issuance-server/config/{issuance_server.toml,reader_auth.json,...}` from their `.example` templates via `envsubst`. The `.example` files contain public trust-anchors and URL placeholders; **the 6 private keys/certs are not in the public repo** — request them out-of-band from the maintainer for a working wallet-QR flow. Requires `envsubst` (`brew install gettext` on macOS).
 
-Copy the template and fill it in:
+Copy the templates and fill them in:
 
 ```bash
 cp .env.example .env
-# then edit .env
+cp fsc-infra/.env.example fsc-infra/.env
+# then edit both
 ```
 
 ## Quick Start
@@ -40,7 +47,7 @@ make demo-minimal     # Base only (~30s, ~13 services)
                       # Curl directly at pdp-service /evaluation for policy tests.
 
 make demo-eudi        # Wallet flow only (~5-10 min first boot; PKI + FSC-infra + contract seed)
-                      # Requires NLWALLET_PATH + two public HTTPS URLs
+                      # Requires the vendor/nl-wallet submodule + two public HTTPS URLs
                       # — see "EUDI public reachability" below.
 
 make demo-full        # Both flows on
@@ -220,10 +227,10 @@ EUDI_PUBLIC_URL=https://eudi-is.your-cf-hostname.tld/
 EUDI_BRI_URL=https://eudi-bri.your-cf-hostname.tld/
 
 # Start the tunnel alongside the EUDI stack
-docker compose --profile eudi --profile cloudflare-tunnel up -d
+docker compose -f docker-compose.yml -f docker-compose.cloudflare-tunnel.yml --profile eudi up -d
 ```
 
-**(c) Ad-hoc tunnel** (ngrok, `cloudflared --url`, `tailscale funnel`, …) — start it yourself, paste the two URLs into `.env`, then bring up the stack without the `cloudflare-tunnel` profile.
+**(c) Ad-hoc tunnel** (ngrok, `cloudflared --url`, `tailscale funnel`, …) — start it yourself, paste the two URLs into `.env`, then bring up the stack without the tunnel file.
 
 ## Testing
 
@@ -313,3 +320,9 @@ The architecture is designed for incremental extension. Every new flow shares th
 - **Legal-basis (gov-to-gov)**: add `policies/legal-basis/*.rego`, add a new FSC consumer org with contract `flow=g2g:legal-basis`, the PDP dispatches on the token property.
 - **Wallet flow (already implemented)**: see `eudi-adapter`.
 - **AS4 / SDG-OOTS**: add an AS4 bridge mock + Domibus mock.
+
+## Repository owner
+
+Owner: **Jeroen de Kok** — <jeroen.dekok@ictu.nl>
+
+Please open an issue for questions or feature requests. For security issues see [SECURITY.md](SECURITY.md).

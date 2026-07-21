@@ -441,7 +441,7 @@ services:
   # ══════════════════════════════════════════════════════════════════════
   # `docker compose --profile eudi up -d` brings up the EUDI stack:
   # postgres-eudi -> eudi-migrations (one-shot) -> eudi-issuance-server +
-  # eudi-adapter + eudi-demo-issuer.
+  # eudi-adapter.
   # The adapter has taken over the "bri-source" role — the nl-wallet
   # bri-mock has been removed from the stack.
   #
@@ -451,10 +451,10 @@ services:
   #
   #   (a) Own domain / reverse proxy: point two HTTPS hosts at the
   #       compose ports and set the two URLs in .env.
-  #   (b) Cloudflare named tunnel (bundled): add `--profile
-  #       cloudflare-tunnel` and set CLOUDFLARE_TUNNEL_TOKEN. The two
-  #       URLs must still match the hostnames configured in your CF
-  #       dashboard.
+  #   (b) Cloudflare named tunnel (bundled): add
+  #       `-f docker-compose.cloudflare-tunnel.yml` and set
+  #       CLOUDFLARE_TUNNEL_TOKEN. The two URLs must still match the
+  #       hostnames configured in your CF dashboard.
   #   (c) Ad-hoc / quick tunnel (ngrok, cloudflared --url, tailscale
   #       funnel, etc.): run it yourself, paste the two URLs into .env.
   #
@@ -469,9 +469,7 @@ services:
     image: postgres:16-alpine
     profiles: [eudi, full]
     environment:
-      # Override in .env for local runs; the default is fine for a demo
-      # on a local docker network.
-      POSTGRES_PASSWORD: ${EUDI_POSTGRES_PASSWORD:-changeme-demo-only}
+      POSTGRES_PASSWORD: ${EUDI_POSTGRES_PASSWORD}
       POSTGRES_USER: wallet
       POSTGRES_DB: issuance_server
     volumes:
@@ -489,7 +487,7 @@ services:
     entrypoint: ["/issuance_server_migrations"]
     command: ["up"]
     environment:
-      DATABASE_URL: postgres://wallet:${EUDI_POSTGRES_PASSWORD:-changeme-demo-only}@postgres-eudi:5432/issuance_server
+      DATABASE_URL: postgres://wallet:${EUDI_POSTGRES_PASSWORD}@postgres-eudi:5432/issuance_server
     depends_on:
       postgres-eudi:
         condition: service_healthy
@@ -506,7 +504,7 @@ services:
     ports:
       - "18001:18001"
     environment:
-      - ISSUANCE_SERVER__STORAGE__URL=postgres://wallet:${EUDI_POSTGRES_PASSWORD:-changeme-demo-only}@postgres-eudi:5432/issuance_server
+      - ISSUANCE_SERVER__STORAGE__URL=postgres://wallet:${EUDI_POSTGRES_PASSWORD}@postgres-eudi:5432/issuance_server
       # Three usecases (inkomensverklaring per tax year). Each
       # disclosure_settings config points at its own adapter path; the
       # adapter knows the scope + year query per path via
@@ -547,51 +545,15 @@ services:
         condition: service_completed_successfully
     networks: [eudi]
 
-  # Web server serving HTML pages with QR codes pointing at our tunnel
-  # URL. Wallet app scans the QR -> reaches issuance-server via
-  # cloudflared -> OpenID4VCI flow -> credential in wallet.
-  eudi-demo-issuer:
-    image: gbo/eudi-demo-issuer:dev
-    profiles: [eudi, full]
-    user: "0"
-    ports:
-      - "3005:3005"
-    environment:
-      # The config sets a default issuance_server_url; this env var
-      # overrides it to the public tunnel URL the wallet can reach.
-      # config-crate: DEMO_ISSUER__ISSUANCE_SERVER_URL with double underscore.
-      # Fail-loud if the env var is missing (otherwise the QR points at
-      # container DNS).
-      - DEMO_ISSUER__ISSUANCE_SERVER_URL=${EUDI_PUBLIC_URL:?set EUDI_PUBLIC_URL to the eudi-tunnel URL before compose up}
-    volumes:
-      - ./services/eudi-demo-issuer/config/demo_issuer.json:/demo_issuer.json:ro
-    depends_on:
-      eudi-issuance-server:
-        condition: service_started
-    networks: [eudi]
-
   # Optional: Cloudflare named tunnel wrapping the two EUDI-facing services
-  # (issuance-server + eudi-adapter). Opt in with an extra profile:
-  #   docker compose --profile eudi --profile cloudflare-tunnel up
+  # (issuance-server + eudi-adapter). Lives in docker-compose.cloudflare-tunnel.yml
+  # (separate file, so the CLOUDFLARE_TUNNEL_TOKEN guard only evaluates when
+  # you actually include it):
+  #   docker compose -f docker-compose.yml -f docker-compose.cloudflare-tunnel.yml --profile eudi up
   # The two public hostnames must be configured in the Cloudflare dashboard
   # and passed as EUDI_PUBLIC_URL / EUDI_BRI_URL. If you already have a
-  # reverse proxy, another tunnel, or your own domain, leave this profile
-  # off and just set the two URLs directly.
-  eudi-tunnel:
-    image: cloudflare/cloudflared:latest
-    profiles: [cloudflare-tunnel]
-    command:
-      - tunnel
-      - --no-autoupdate
-      - run
-      - --token
-      - ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in .env (Cloudflare Zero Trust -> Tunnels -> connector token)}
-    depends_on:
-      eudi-issuance-server:
-        condition: service_started
-      eudi-adapter:
-        condition: service_started
-    networks: [eudi]
+  # reverse proxy, another tunnel, or your own domain, leave it out and just
+  # set the two URLs directly.
 
   # EUDI adapter — translates the bri issuance contract to the generic
   # chain. The adapter talks to the real FSC-Outway (edi-outway).
