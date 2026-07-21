@@ -18,22 +18,28 @@
 # openssl-dev / libpq nodig, alleen musl-toolchain.
 
 # ─── Stage 1: bouw beide binaries statisch ─────────────────────────────
-# --platform=linux/amd64 forceert build via QEMU op ARM-hosts (Mac Silicon).
-# QEMU-emulated build is een eenmalige cold-cost; runtime-container blijft
-# native amd64.
+# Buildx bouwt deze stage voor ieder doelplatform. Op een amd64-runner wordt
+# de arm64-variant via QEMU uitgevoerd. TARGETARCH bepaalt de Rust musl-target,
+# zodat het manifest nooit een image met een binary voor de verkeerde CPU bevat.
 #
 # Debian-slim (i.p.v. Alpine) sluit aan bij upstream CI (deploy/docker-images/
 # ci/rust-root.sh gebruikt Debian) én levert `perl` + `make` mee — die zijn
 # nodig voor de vendored openssl-sys-build die één van de transitieve deps
 # meebrengt (sea-orm's connection-manager ondanks --no-default-features).
-FROM --platform=linux/amd64 rust:1.92-slim AS builder
+FROM rust:1.92-slim AS builder
+ARG TARGETARCH
 RUN apt-get update && apt-get install -y --no-install-recommends \
       musl-tools \
       perl \
       make \
       pkg-config \
     && rm -rf /var/lib/apt/lists/*
-RUN rustup target add x86_64-unknown-linux-musl
+RUN case "${TARGETARCH}" in \
+      amd64) rust_target=x86_64-unknown-linux-musl ;; \
+      arm64) rust_target=aarch64-unknown-linux-musl ;; \
+      *) echo "Unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+    && rustup target add "${rust_target}"
 
 WORKDIR /src
 # Workspace-manifests + source. `.cargo/`-config uit upstream wordt
@@ -44,18 +50,26 @@ COPY .cargo /src/.cargo
 WORKDIR /src/wallet_core
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/wallet_core/target \
-    cargo build --locked \
-      --target x86_64-unknown-linux-musl --release \
+    case "${TARGETARCH}" in \
+      amd64) rust_target=x86_64-unknown-linux-musl ;; \
+      arm64) rust_target=aarch64-unknown-linux-musl ;; \
+    esac \
+    && cargo build --locked \
+      --target "${rust_target}" --release \
       --no-default-features --features postgres \
       --package issuance_server --bin issuance_server \
-    && cp target/x86_64-unknown-linux-musl/release/issuance_server /out-issuance_server
+    && cp "target/${rust_target}/release/issuance_server" /out-issuance_server
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/wallet_core/target \
-    cargo build --locked \
-      --target x86_64-unknown-linux-musl --release \
+    case "${TARGETARCH}" in \
+      amd64) rust_target=x86_64-unknown-linux-musl ;; \
+      arm64) rust_target=aarch64-unknown-linux-musl ;; \
+    esac \
+    && cargo build --locked \
+      --target "${rust_target}" --release \
       --package issuance_server_migrations --bin issuance_server_migrations \
-    && cp target/x86_64-unknown-linux-musl/release/issuance_server_migrations /out-issuance_server_migrations
+    && cp "target/${rust_target}/release/issuance_server_migrations" /out-issuance_server_migrations
 
 # ─── Stage 2: runtime — scratch met alleen wat we nodig hebben ─────────
 FROM scratch

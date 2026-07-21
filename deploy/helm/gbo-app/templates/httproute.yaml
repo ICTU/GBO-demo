@@ -1,0 +1,17 @@
+{{- if .Values.route.enabled }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "gbo-app.fullname" . }}
+  labels:
+    {{- include "gbo-app.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    {{- toYaml .Values.route.parentRefs | nindent 4 }}
+  hostnames:
+    - {{ required "route.hostname is required when route.enabled is true" .Values.route.hostname | quote }}
+  rules:
+    - backendRefs:
+        - name: {{ include "gbo-app.fullname" . }}
+          port: {{ .Values.containerPort }}
+{{- end }}

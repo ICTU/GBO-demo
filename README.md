@@ -241,6 +241,51 @@ docker compose exec opa opa test /policies -v
 
 CI (`.github/workflows/ci.yml`) runs both on every PR.
 
+## Release
+
+Pushing a SemVer tag with a `v` prefix starts `.github/workflows/release.yml`.
+The workflow builds 14 application images for `linux/amd64` and `linux/arm64`,
+publishes them to GHCR with a tag without the `v` prefix plus `latest`, and then
+publishes the generic `gbo-app` Helm chart with the same normalized version.
+The Compose development flow is unchanged.
+
+The `eudi-issuance-server` build uses the pinned `vendor/nl-wallet` submodule.
+Clone or update this repository with submodules enabled before building it
+locally:
+
+```bash
+git submodule update --init --recursive
+```
+
+Create a release after the release changes are on `main`:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The resulting image and chart versions are `0.1.0`:
+
+```bash
+docker pull ghcr.io/ictu/gbo-demo/bsnk-mock:0.1.0
+helm pull oci://ghcr.io/ictu/gbo-demo-charts/gbo-app --version 0.1.0
+```
+
+GHCR packages are private by default. After the first publication, set the 14
+image packages and `gbo-demo-charts/gbo-app` to **Public** in the organization
+package settings before testing anonymous pulls from tenant clusters.
+
+For a local chart smoke test:
+
+```bash
+helm lint deploy/helm/gbo-app
+helm template bsnk-mock deploy/helm/gbo-app \
+  --set image.repository=ghcr.io/ictu/gbo-demo/bsnk-mock \
+  --set image.tag=0.1.0 \
+  --set containerPort=4003 \
+  --set healthPath=/health
+```
+
 ## Troubleshooting
 
 **Services not starting?**
