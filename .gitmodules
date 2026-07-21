@@ -1,0 +1,3 @@
+[submodule "vendor/nl-wallet"]
+	path = vendor/nl-wallet
+	url = https://github.com/MinBZK/nl-wallet.git

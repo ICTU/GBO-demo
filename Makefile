@@ -1,6 +1,14 @@
 .PHONY: up down logs clean certs fsc-ca fsc-up fsc-down fsc-test fsc-clean \
-        fsc-seed-bri fsc-seed-bri-hv \
+        fsc-seed-bri fsc-seed-bri-hv fsc-pdp-cert eudi-images \
         demo demo-minimal demo-dvtp demo-eudi demo-full demo-down eudi-config
+
+-include .env
+export
+
+# nl-wallet source for the eudi-issuance-server build. Pinned via git
+# submodule (vendor/nl-wallet, v0.4.1 — the preprod wallet app rejects
+# v0.5.0's scheme-prefixed client_id). Override in .env if needed.
+NLWALLET_PATH ?= $(PWD)/vendor/nl-wallet
 
 up: certs
 	docker compose up --build -d
@@ -25,18 +33,18 @@ demo-minimal: certs
 	@echo "-> Base stack (no profile): 13 services"
 	docker compose up --build -d
 	@echo ""
-	@echo "  Dev-portal:    http://localhost:9003"
-	@echo "  Jaeger:        http://localhost:9686"
+	@echo "  Dev-portal:    http://localhost:9003  |  http://$$(hostname -I | awk '{print $$1}'):9003"
+	@echo "  Jaeger:        http://localhost:9686  |  http://$$(hostname -I | awk '{print $$1}'):9686"
 	@echo "  pdp-service:   http://localhost:9408/evaluation (POST)"
 
 demo-dvtp: certs fsc-all-up fsc-seed-bri fsc-seed-bri-hv
 	@echo "-> DvTP stack: base + dienstverlener + toestemmingsportaal (via real FSC)"
 	docker compose --profile dvtp up --build -d
 	@echo ""
-	@echo "  Dev-portal:          http://localhost:9003"
-	@echo "  Toestemmingsportaal: http://localhost:9002"
-	@echo "  Dienstverlener:      http://localhost:9001"
-	@echo "  Jaeger:              http://localhost:9686"
+	@echo "  Dev-portal:          http://localhost:9003  |  http://$$(hostname -I | awk '{print $$1}'):9003"
+	@echo "  Toestemmingsportaal: http://localhost:9002  |  http://$$(hostname -I | awk '{print $$1}'):9002"
+	@echo "  Dienstverlener:      http://localhost:9001  |  http://$$(hostname -I | awk '{print $$1}'):9001"
+	@echo "  Jaeger:              http://localhost:9686  |  http://$$(hostname -I | awk '{print $$1}'):9686"
 
 EUDI_CONFIG_DIR := services/eudi-issuance-server/config
 EUDI_CONFIG_FILES := issuance_server.toml inkomensverklaring_metadata.json issuer_auth.json reader_auth.json
@@ -64,18 +72,32 @@ eudi-config:
 	  envsubst < $(EUDI_CONFIG_DIR)/$$f.example > $(EUDI_CONFIG_DIR)/$$f; \
 	done
 
-demo-eudi: certs fsc-all-up fsc-seed-bri eudi-config
+# eudi-issuance-server has no published image — built from the local
+# nl-wallet checkout ($NLWALLET_PATH).
+eudi-images:
+	@if [ ! -f "$$NLWALLET_PATH/wallet_core/Cargo.toml" ]; then \
+	  echo "ERROR: nl-wallet sources not found at $$NLWALLET_PATH"; \
+	  echo "       Run: git submodule update --init vendor/nl-wallet"; \
+	  exit 1; \
+	fi
+	@if ! docker image inspect gbo/eudi-issuance-server:dev >/dev/null 2>&1; then \
+	  echo "-> Building gbo/eudi-issuance-server:dev from $$NLWALLET_PATH"; \
+	  docker build -t gbo/eudi-issuance-server:dev \
+	    -f services/eudi-issuance-server/Dockerfile "$$NLWALLET_PATH"; \
+	fi
+
+demo-eudi: certs fsc-all-up fsc-seed-bri eudi-config eudi-images
 	@echo "-> EUDI stack: base + eudi branch + fsc-infra"
 	docker compose --profile eudi up --build -d
 	@echo ""
-	@echo "  Dev-portal:      http://localhost:9003"
-	@echo "  EUDI-adapter:    http://localhost:9409"
-	@echo "  Jaeger:          http://localhost:9686"
+	@echo "  Dev-portal:      http://localhost:9003  |  http://$$(hostname -I | awk '{print $$1}'):9003"
+	@echo "  EUDI-adapter:    http://localhost:9409  |  http://$$(hostname -I | awk '{print $$1}'):9409"
+	@echo "  Jaeger:          http://localhost:9686  |  http://$$(hostname -I | awk '{print $$1}'):9686"
 	@echo ""
 	@echo "  Manual step: grant-link '/bri' in EDI-Controller-UI"
 	@echo "  (see README.md section 'EUDI flow over real FSC' step 3)"
 
-demo-full: certs fsc-all-up fsc-seed-bri fsc-seed-bri-hv eudi-config
+demo-full: certs fsc-all-up fsc-seed-bri fsc-seed-bri-hv eudi-config eudi-images
 	@echo "-> Full stack: everything on"
 	docker compose --profile full up --build -d
 
@@ -130,7 +152,12 @@ fsc-hv-certs: fsc-up
 fsc-bd-up: fsc-directory-up fsc-bd-certs
 	docker compose -f fsc-infra/docker-compose.yml up --build -d cfssl certportal postgres directory-migrations-controller directory-migrations-manager directory-migrations-txlog-api directory-controller directory-manager directory-inway directory-txlog-api directory-ui bd-migrations-controller bd-migrations-manager bd-migrations-txlog-api bd-controller bd-manager bd-inway bd-txlog-api
 
-fsc-all-up: fsc-directory-certs fsc-edi-certs fsc-bd-certs fsc-hv-certs
+fsc-pdp-cert:
+	@if [ ! -f services/pdp-service/certs/pdp-service.pem ]; then \
+		bash fsc-infra/pki/generate-pdp-cert.sh; \
+	fi
+
+fsc-all-up: fsc-directory-certs fsc-edi-certs fsc-bd-certs fsc-hv-certs fsc-pdp-cert
 	docker compose -f fsc-infra/docker-compose.yml up --build -d
 
 fsc-down:
@@ -151,6 +178,7 @@ fsc-clean:
 	rm -f fsc-infra/orgs/belastingdienst-mock/pki/internal/*.pem
 	rm -f fsc-infra/orgs/hypotheekverlener-mock/pki/org/*.pem
 	rm -f fsc-infra/orgs/hypotheekverlener-mock/pki/internal/*.pem
+	rm -f services/pdp-service/certs/*.pem
 
 # Contract-seed: register bri-service + publication + connection contract
 # via mTLS to the FSC Manager/Controller APIs. Requires that fsc-all-up
@@ -161,6 +189,7 @@ fsc-clean:
 fsc-seed-bri:
 	docker run --rm \
 		--network fsc-infra_default \
+		--env-file fsc-infra/.env \
 		-v $(PWD)/fsc-infra:/work:ro \
 		-w /work \
 		gbo-demo/pki-tools:local \
@@ -172,6 +201,7 @@ fsc-seed-bri:
 fsc-seed-bri-hv:
 	docker run --rm \
 		--network fsc-infra_default \
+		--env-file fsc-infra/.env \
 		-v $(PWD)/fsc-infra:/work:ro \
 		-w /work \
 		gbo-demo/pki-tools:local \

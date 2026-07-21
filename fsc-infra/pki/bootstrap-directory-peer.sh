@@ -40,7 +40,7 @@ echo ">>> Generating directory-peer + directory-UI cert-tuples"
 
 # ── Group certs via openssl + certportal ────────────────────────────────
 _request_group_cert () {
-    local NAME="$1" ORG="$2" OIN="$3" HOSTS="$4"
+    local NAME="$1" ORG="$2" OIN="$3" HOSTS="$4" DEST="$5"
 
     echo "-- group-cert: ${NAME} (OIN=${OIN}, hosts=${HOSTS}) --"
 
@@ -51,6 +51,7 @@ _request_group_cert () {
         -e ORG="${ORG}" \
         -e OIN="${OIN}" \
         -e HOSTS="${HOSTS}" \
+        -e DEST="${DEST}" \
         "${IMAGE_TAG}" \
         bash -c '
             set -euo pipefail
@@ -89,8 +90,10 @@ _request_group_cert () {
             openssl x509 -in "${OUT}/${NAME}.pem" -noout -subject
             openssl verify -CAfile pki/ca/root.pem -untrusted pki/ca/intermediate.pem "${OUT}/${NAME}.pem" >/dev/null
 
-            mv "${OUT}/${NAME}-key.pem" "/work/${NAME}-org-key.pem"
-            mv "${OUT}/${NAME}.pem"     "/work/${NAME}-org.pem"
+            mkdir -p "/work/${DEST}"
+            mv "${OUT}/${NAME}-key.pem" "/work/${DEST}/${NAME}-key.pem"
+            mv "${OUT}/${NAME}.pem"     "/work/${DEST}/${NAME}.pem"
+            cp pki/ca/root.pem          "/work/${DEST}/root.pem"
         '
 }
 
@@ -99,26 +102,16 @@ _request_group_cert \
     "directory-peer" \
     "GBO-DEMO Directory Peer" \
     "99999999900000000000" \
-    "directory-manager,directory-inway"
-
-mkdir -p "${DIRPEER_ORG}"
-mv ../directory-peer-org-key.pem "${DIRPEER_ORG}/directory-peer-key.pem"
-mv ../directory-peer-org.pem     "${DIRPEER_ORG}/directory-peer.pem"
-cp ca/root.pem                   "${DIRPEER_ORG}/root.pem"
-chmod 600 "${DIRPEER_ORG}/directory-peer-key.pem"
+    "directory-manager,directory-inway" \
+    "directory-peer/pki/org"
 
 # Directory-UI group-cert
 _request_group_cert \
     "directory-ui" \
     "GBO-DEMO Directory UI" \
     "99999999900000000010" \
-    "directory-ui"
-
-mkdir -p "${DIRUI_ORG}"
-mv ../directory-ui-org-key.pem "${DIRUI_ORG}/directory-ui-key.pem"
-mv ../directory-ui-org.pem     "${DIRUI_ORG}/directory-ui.pem"
-cp ca/root.pem                 "${DIRUI_ORG}/root.pem"
-chmod 600 "${DIRUI_ORG}/directory-ui-key.pem"
+    "directory-ui" \
+    "directory-ui/pki/org"
 
 # ── Internal certs (self-signed intermediate, for intra-org) ──────────
 echo "-- internal-CA + internal-cert for directory-peer --"
@@ -145,6 +138,15 @@ docker run --rm \
         mv internal-cert.pem        /work/directory-peer/pki/internal/
         mv internal-cert-key.pem    /work/directory-peer/pki/internal/
         chmod 600 /work/directory-peer/pki/internal/*-key.pem
+    '
+
+# Key files land root-owned via the docker runs; restrict + hand over to
+# appuser (uid/gid 1001) which the OpenFSC containers run as.
+docker run --rm -v "$(pwd)/..:/work" "${IMAGE_TAG}" \
+    bash -c '
+        chmod 600 /work/directory-peer/pki/org/*-key.pem \
+                  /work/directory-ui/pki/org/*-key.pem
+        chown -R 1001:1001 /work/directory-peer/pki /work/directory-ui/pki
     '
 
 echo
