@@ -1,0 +1,29 @@
+image:
+  repository: ghcr.io/ictu/gbo-demo/pdp-service
+  tag: 0.3.0
+
+containerPort: 4008
+env:
+  - name: TLS_CERT_PATH
+    value: /certs/tls.crt
+  - name: TLS_KEY_PATH
+    value: /certs/tls.key
+
+health:
+  scheme: HTTPS
+healthPath: /health
+
+volumeMounts:
+  - name: schemas
+    mountPath: /schemas
+    readOnly: true
+  - name: tls
+    mountPath: /certs
+    readOnly: true
+volumes:
+  - name: schemas
+    configMap:
+      name: pdp-schemas
+  - name: tls
+    secret:
+      secretName: pdp-service-tls

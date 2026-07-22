@@ -37,6 +37,14 @@ spec:
           {{- end }}
           image: "{{ required "image.repository is required" .Values.image.repository }}:{{ default .Chart.AppVersion .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.command }}
+          command:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.args }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.containerPort }}
@@ -49,11 +57,16 @@ spec:
           envFrom:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          {{- with .Values.volumeMounts }}
+          volumeMounts:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           {{- if .Values.health.enabled }}
           livenessProbe:
             httpGet:
               path: {{ .Values.healthPath | quote }}
               port: http
+              scheme: {{ .Values.health.scheme | upper | quote }}
             initialDelaySeconds: {{ .Values.health.initialDelaySeconds }}
             periodSeconds: {{ .Values.health.periodSeconds }}
             timeoutSeconds: {{ .Values.health.timeoutSeconds }}
@@ -62,6 +75,7 @@ spec:
             httpGet:
               path: {{ .Values.healthPath | quote }}
               port: http
+              scheme: {{ .Values.health.scheme | upper | quote }}
             initialDelaySeconds: {{ .Values.health.initialDelaySeconds }}
             periodSeconds: {{ .Values.health.periodSeconds }}
             timeoutSeconds: {{ .Values.health.timeoutSeconds }}
@@ -69,6 +83,10 @@ spec:
           {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.volumes }}
+      volumes:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
