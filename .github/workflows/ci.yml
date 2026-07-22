@@ -88,3 +88,23 @@ jobs:
       - name: tsc --noEmit
         working-directory: ${{ matrix.app }}
         run: npx tsc --noEmit
+
+  docker:
+    name: Docker — build (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - eudi-adapter
+          - graphql-server
+          - pdp-service
+          - sector-pip
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Build image
+        run: |
+          docker build \
+            --file "services/${{ matrix.service }}/Dockerfile" \
+            --tag "gbo-demo/${{ matrix.service }}:ci" \
+            "services/${{ matrix.service }}"
