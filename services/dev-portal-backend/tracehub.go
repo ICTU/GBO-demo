@@ -253,7 +253,7 @@ func handleOTLPTraces(hub *traceHub) http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		var reader io.Reader = io.LimitReader(r.Body, 8<<20)
+		reader := io.LimitReader(r.Body, 8<<20)
 		// The OTel collector's otlphttp exporter gzip-compresses by default.
 		if r.Header.Get("Content-Encoding") == "gzip" {
 			gz, err := gzip.NewReader(reader)

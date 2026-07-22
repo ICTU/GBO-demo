@@ -544,8 +544,8 @@ func handleListConsents(cfg config) http.HandlerFunc {
 		for _, rec := range records {
 			status, _ := rec["status"].(string)
 			effective := "active"
-			switch {
-			case status == "REVOKED":
+			switch status {
+			case "REVOKED":
 				effective = "revoked"
 			default:
 				if vu, ok := rec["valid_until"].(string); ok {
