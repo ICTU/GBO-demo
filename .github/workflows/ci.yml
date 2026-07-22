@@ -65,6 +65,27 @@ jobs:
           docker run --rm -v $(pwd)/policies:/w -w /w \
             $OPA_IMAGE test /w -v
 
+  chart:
+    name: Helm chart — lint + template
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+        with:
+          version: v3.17.3
+      - name: helm lint
+        run: helm lint deploy/helm/gbo-app
+      - name: helm template — default values
+        run: helm template gbo-app deploy/helm/gbo-app
+      - name: helm template — OPA
+        run: >-
+          helm template opa deploy/helm/gbo-app
+          --values deploy/helm/gbo-app/examples/opa-values.yaml
+      - name: helm template — PDP service
+        run: >-
+          helm template pdp-service deploy/helm/gbo-app
+          --values deploy/helm/gbo-app/examples/pdp-service-values.yaml
+
   frontend:
     name: Frontend — tsc --strict
     runs-on: ubuntu-latest

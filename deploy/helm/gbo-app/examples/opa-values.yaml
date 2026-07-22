@@ -1,0 +1,26 @@
+image:
+  repository: openpolicyagent/opa
+  tag: 1.16.2
+
+containerPort: 8181
+command:
+  - /opa
+args:
+  - run
+  - --server
+  - --addr=0.0.0.0:8181
+  - --watch
+  - --log-level=info
+  - --set=decision_logs.console=true
+  - /policies
+
+healthPath: /health
+
+volumeMounts:
+  - name: policies
+    mountPath: /policies
+    readOnly: true
+volumes:
+  - name: policies
+    configMap:
+      name: pdp-policies

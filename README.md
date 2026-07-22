@@ -294,6 +294,17 @@ helm template bsnk-mock deploy/helm/gbo-app \
   --set healthPath=/health
 ```
 
+The chart also supports overriding the container entrypoint, passing arguments,
+mounting native Kubernetes volumes, and selecting the health probe scheme. The
+example values files cover an OPA policy ConfigMap and a TLS-enabled PDP service:
+
+```bash
+helm template opa deploy/helm/gbo-app \
+  --values deploy/helm/gbo-app/examples/opa-values.yaml
+helm template pdp-service deploy/helm/gbo-app \
+  --values deploy/helm/gbo-app/examples/pdp-service-values.yaml
+```
+
 ## Troubleshooting
 
 **Services not starting?**
