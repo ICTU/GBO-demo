@@ -251,9 +251,10 @@ CI (`.github/workflows/ci.yml`) runs both on every PR.
 ## Release
 
 Pushing a SemVer tag with a `v` prefix starts `.github/workflows/release.yml`.
-The workflow builds 14 application images for `linux/amd64` and `linux/arm64`,
-publishes them to GHCR with a tag without the `v` prefix plus `latest`, and then
-publishes the generic `gbo-app` Helm chart with the same normalized version.
+The workflow builds 13 application images for `linux/amd64` and `linux/arm64`
+and builds `eudi-issuance-server` for `linux/amd64`. It publishes them to GHCR
+with a tag without the `v` prefix plus `latest`, and then publishes the generic
+`gbo-app` Helm chart with the same normalized version.
 The Compose development flow is unchanged.
 
 The `eudi-issuance-server` build uses the pinned `vendor/nl-wallet` submodule.
