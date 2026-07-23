@@ -141,29 +141,29 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
-// loadSchemas reads both consumer-schemas: DvTP (consent-based, with
-// consentId as input) and EUDI (BSN-based, direct). The PDP handler
-// dispatches on action.name to pick the schema to use.
+// loadSchemas reads both consumer-schemas: DvTP (consent-based) and EUDI
+// (wallet-based). Both mirror the same BD bron-schema (bd.graphql); the
+// PDP handler dispatches on action.name to pick the schema to use.
 func loadSchemas(dir string) (map[string]*ast.Schema, error) {
 	schemas := map[string]*ast.Schema{}
-	dvtpSrc, err := os.ReadFile(filepath.Join(dir, "inkomensgegevens.graphql"))
+	dvtpSrc, err := os.ReadFile(filepath.Join(dir, "bd.graphql"))
 	if err != nil {
 		return nil, fmt.Errorf("dvtp schema: %w", err)
 	}
-	dvtp, err := gqlparser.LoadSchema(&ast.Source{Name: "inkomensgegevens.graphql", Input: string(dvtpSrc)})
+	dvtp, err := gqlparser.LoadSchema(&ast.Source{Name: "bd.graphql", Input: string(dvtpSrc)})
 	if err != nil {
 		return nil, fmt.Errorf("parse dvtp schema: %w", err)
 	}
 	schemas["dvtp:query"] = dvtp
 
-	eudiSrc, err := os.ReadFile(filepath.Join(dir, "eudi", "inkomensverklaring.graphql"))
+	eudiSrc, err := os.ReadFile(filepath.Join(dir, "eudi", "bd.graphql"))
 	if err != nil {
 		// The EUDI schema may be absent; fall back to the DvTP schema so
 		// the service still starts.
 		slog.Warn("eudi schema not found, EUDI-flow will fall back to dvtp schema", "err", err.Error())
 		schemas["eudi:attestation"] = dvtp
 	} else {
-		eudi, err := gqlparser.LoadSchema(&ast.Source{Name: "eudi/inkomensverklaring.graphql", Input: string(eudiSrc)})
+		eudi, err := gqlparser.LoadSchema(&ast.Source{Name: "eudi/bd.graphql", Input: string(eudiSrc)})
 		if err != nil {
 			return nil, fmt.Errorf("parse eudi schema: %w", err)
 		}
@@ -401,6 +401,13 @@ func handleFSCAuthZen(cfg config, client *http.Client, schemas map[string]*ast.S
 		if scope == "" {
 			scope = env.Context.Headers["X-GBO-Scope"]
 		}
+		// The consent this request is backed by (DvTP-flow). Travels as an
+		// untrusted header like X-GBO-Scope; the PIP lookup in enrichInput
+		// evaluates exactly this record.
+		consentID := env.Context.Headers["X-Gbo-Consent-Id"]
+		if consentID == "" {
+			consentID = env.Context.Headers["X-GBO-Consent-Id"]
+		}
 		// Flow dispatch: prefer the trusted additional claim from the FSC
 		// token, then fall back to the untrusted X-GBO-Flow header for
 		// deployments that do not yet configure the Additional Claims
@@ -437,7 +444,7 @@ func handleFSCAuthZen(cfg config, client *http.Client, schemas map[string]*ast.S
 		opaInput := map[string]any{
 			"input": map[string]any{
 				"subject":  map[string]any{"type": "org", "id": peerID},
-				"resource": map[string]any{"scope": scope, "query": query, "variables": variables},
+				"resource": map[string]any{"scope": scope, "query": query, "variables": variables, "consent_id": consentID},
 				"action":   map[string]any{"name": flow},
 				"trace_id": traceIDStr,
 				// The FSC-transaction-id also lives on the OPA input so
@@ -551,24 +558,30 @@ func enrichInput(ctx context.Context, body []byte, schemas map[string]*ast.Schem
 		}
 		pipData["pid"] = pipPID{BSN: bsn}
 	default:
-		// DvTP-flow: fetch consent from the consent-register. Two paths
-		// for backwards compatibility:
-		//   1. New: PI in resource.variables.bsn — lookup by (PI, scope).
-		//   2. Old (pep-service path): resource.consent_id — lookup by ID.
+		// DvTP-flow: fetch consent from the consent-register. Three paths:
+		//   1. Referenced consent (resource.consent_id, from the
+		//      X-GBO-Consent-Id header) — AUTHORITATIVE: the PIP lookup is
+		//      exactly this record. Other consents for the same PI do not
+		//      count; revoking this record deterministically denies this
+		//      query (CONSENT_WITHDRAWN / CONSENT_NOT_FOUND).
+		//   2. Legacy: PI in resource.variables.bsn without a consent-id —
+		//      union of all ACTIVE consents for the PI.
+		//   3. Oldest (pep-service path): resource.consent_id with no PI
+		//      in the query — same by-ID lookup as path 1.
 		// Fail-soft → exists=false so OPA denies fail-closed with
 		// CONSENT_NOT_FOUND.
 		pip := pipConsent{Exists: false}
 		var c *consentRecord
 		var err error
-		if pi := extractStringVar(ai.Input.Resource.Variables, "bsn"); pi != "" && looksLikePI(pi) {
-			c, err = fetchConsentByPI(ctx, client, consentURL, pi, ai.Input.Resource.Scope)
-			if err != nil {
-				slog.Info("consent by-PI fetch failed", "pi", pi, "scope", ai.Input.Resource.Scope, "err", err.Error())
-			}
-		} else if ai.Input.Resource.ConsentID != "" {
+		if ai.Input.Resource.ConsentID != "" {
 			c, err = fetchConsent(ctx, client, consentURL, ai.Input.Resource.ConsentID)
 			if err != nil {
 				slog.Info("consent by-ID fetch failed", "consent_id", ai.Input.Resource.ConsentID, "err", err.Error())
+			}
+		} else if pi := extractStringVar(ai.Input.Resource.Variables, "bsn"); pi != "" && looksLikePI(pi) {
+			c, err = fetchConsentByPI(ctx, client, consentURL, pi)
+			if err != nil {
+				slog.Info("consent by-PI fetch failed", "pi", pi, "err", err.Error())
 			}
 		}
 		if c != nil {
@@ -581,7 +594,7 @@ func enrichInput(ctx context.Context, body []byte, schemas map[string]*ast.Schem
 			}
 			// Binding-support: lib.constraint_binding reads
 			// resource[<field>], so mirror pip.consent.pi to resource.pi
-			// so the rule's constraint (input.burgerservicenummer ==
+			// so the rule's constraint (bsn-arg ==
 			// resource.pi) is evaluable without a lib-refactor.
 			if c.PI != "" {
 				var res map[string]json.RawMessage
@@ -660,12 +673,16 @@ func looksLikePI(s string) bool {
 	return false
 }
 
-// fetchConsentByPI fetches the first ACTIVE consent for (PI, scope).
-// Returns nil without error when no match is found — enrichInput
-// handles the fail-closed path.
-func fetchConsentByPI(ctx context.Context, client *http.Client, baseURL, pi, scope string) (*consentRecord, error) {
-	u := fmt.Sprintf("%s/consents?pi=%s&scope=%s&status=ACTIVE",
-		baseURL, url.QueryEscape(pi), url.QueryEscape(scope))
+// fetchConsentByPI fetches all ACTIVE consents for a PI and merges them
+// into one policy view: the union of granted_scopes and the latest
+// valid_until. LEGACY fallback for callers that do not send a
+// consent-id — when X-GBO-Consent-Id is present the referenced consent
+// record is authoritative (fetchConsent) and this function is not used.
+// Returns nil without error when no ACTIVE consent is found —
+// enrichInput handles the fail-closed path.
+func fetchConsentByPI(ctx context.Context, client *http.Client, baseURL, pi string) (*consentRecord, error) {
+	u := fmt.Sprintf("%s/consents?pi=%s&status=ACTIVE",
+		baseURL, url.QueryEscape(pi))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
@@ -685,7 +702,23 @@ func fetchConsentByPI(ctx context.Context, client *http.Client, baseURL, pi, sco
 	if len(list) == 0 {
 		return nil, nil
 	}
-	return &list[0], nil
+	merged := consentRecord{Status: "ACTIVE", PI: list[0].PI}
+	seen := map[string]bool{}
+	for _, c := range list {
+		for _, s := range c.Scopes {
+			if !seen[s] {
+				seen[s] = true
+				merged.Scopes = append(merged.Scopes, s)
+			}
+		}
+		if c.ValidUntil > merged.ValidUntil {
+			merged.ValidUntil = c.ValidUntil
+		}
+		if merged.PI == "" {
+			merged.PI = c.PI
+		}
+	}
+	return &merged, nil
 }
 
 func fetchConsent(ctx context.Context, client *http.Client, baseURL, consentID string) (*consentRecord, error) {

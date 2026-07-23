@@ -14,6 +14,7 @@ import { useChainEvents } from './hooks/useChainEvents'
 import { useWatchNext } from './hooks/useWatchNext'
 import { issuanceFlow } from './api/portalClient'
 import { useQuery } from './api/dvtpClient'
+import { fetchExplain } from './api/devClient'
 import { newTraceContext } from './util/trace'
 import type {
   ApiCall, EudiPayload, IssuancePayload, IssuanceResponse, Scenario, Tab, UsePayload, UseResponse,
@@ -31,6 +32,36 @@ const EMPTY_USE: UsePayload = {
   consent_id: '',
   scope_id: 'bd:ib:2025',
   belastingjaren: [2025],
+}
+
+// scopeYears extracts belastingjaren from scopes of the form bd:ib:<year>.
+function scopeYears(scopes: string[]): number[] {
+  return scopes
+    .map((s) => /^bd:ib:(\d{4})$/.exec(s)?.[1])
+    .filter((y): y is string => !!y)
+    .map(Number)
+    .sort((a, b) => a - b)
+}
+
+// opaReasonCode looks up the OPA decision for a trace and returns the
+// top-level reason code (YEAR_NOT_COVERED, CONSENT_SCOPE_MISMATCH, ...).
+// The decision log travels console → promtail → Loki asynchronously, so
+// retry briefly before giving up.
+async function opaReasonCode(traceId: string): Promise<string | null> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const decisions = await fetchExplain(traceId)
+      for (const d of decisions) {
+        const ctx = (d.result as { context?: { reason_admin?: { code?: string } } } | undefined)?.context
+        if (ctx?.reason_admin?.code) return ctx.reason_admin.code
+      }
+      if (decisions.length > 0) return null
+    } catch {
+      // not in Loki yet — retry
+    }
+    await new Promise((r) => setTimeout(r, 800))
+  }
+  return null
 }
 
 const EMPTY_EUDI: EudiPayload = {
@@ -249,7 +280,16 @@ export default function App() {
           outcome: 'allow',
           consent_id: res.consent_id,
         })
-        setUsePayload((u) => ({ ...u, consent_id: res.consent_id }))
+        // Prefill the use-form from the issued consent: scope_id = first
+        // scope, belastingjaren = every bd:ib:<year> scope — so a
+        // both-years consent yields a both-years query by default.
+        const issuedYears = scopeYears(issuancePayload.scopes)
+        setUsePayload((u) => ({
+          ...u,
+          consent_id: res.consent_id,
+          scope_id: issuancePayload.scopes[0] ?? u.scope_id,
+          belastingjaren: issuedYears.length > 0 ? issuedYears : u.belastingjaren,
+        }))
       } else {
         const res: UseResponse = await useQuery(usePayload, ctx.header)
         const outcome = res.allowed ? 'allow' : 'deny'
@@ -270,6 +310,18 @@ export default function App() {
           trace_id: res.trace_id ?? ctx.traceId,
           outcome,
         })
+        // On deny: enrich with the OPA reason-code (YEAR_NOT_COVERED,
+        // CONSENT_SCOPE_MISMATCH, …). The FSC-inway only returns a bare
+        // 401; the real reason lives in the OPA decision log, shipped
+        // via Loki — hence a short retry loop while promtail catches up.
+        if (!res.allowed && res.trace_id) {
+          const code = await opaReasonCode(res.trace_id)
+          if (code) {
+            setResult((r) =>
+              r ? { ...r, reason: `${code}${res.reason ? ` — ${res.reason}` : ''}` } : r,
+            )
+          }
+        }
       }
     } catch (err) {
       setResult({

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/graphql-go/graphql"
+	"github.com/graphql-go/graphql/language/ast"
 	"github.com/graphql-go/handler"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
@@ -22,31 +23,37 @@ import (
 )
 
 // ── Data model ────────────────────────────────────────────────────────────────
+// Bronprofiel BD (subset): the mock bron serves the IH-aangiften of an
+// IngeschrevenPersoon. Amounts are Bedrag objects (waarde + valuta), as in
+// the upstream schema (gbo-semantiek v0.3/graphql/bd.graphql).
 
-type CodeOmschrijving struct {
-	Code         string `json:"code"`
-	Omschrijving string `json:"omschrijving"`
+type Bedrag struct {
+	Waarde float64 `json:"waarde"`
+	Valuta *string `json:"valuta"`
 }
 
-type InkomensgegevensPerJaar struct {
-	Belastingjaar   int               `json:"belastingjaar"`
-	Verzamelinkomen *int              `json:"verzamelinkomen"`
-	InkomenUitBox1  *int              `json:"inkomenUitBox1"`
-	InkomenUitBox2  *int              `json:"inkomenUitBox2"`
-	InkomenUitBox3  *int              `json:"inkomenUitBox3"`
-	Grondslag       *CodeOmschrijving `json:"grondslag"`
-	Status          *CodeOmschrijving `json:"status"`
-	PeilDatum       *string           `json:"peilDatum"`
+type AangifteIH struct {
+	AangifteIdentificatie string  `json:"aangifteIdentificatie"`
+	Belastingsoort        string  `json:"belastingsoort"`
+	Belastingjaar         int     `json:"belastingjaar"`
+	Status                string  `json:"status"`
+	Indieningsdatum       *string `json:"indieningsdatum"`
+	IngangsdatumAangifte  *string `json:"ingangsdatumAangifte"`
+	EinddatumAangifte     *string `json:"einddatumAangifte"`
+	Verzamelinkomen       *Bedrag `json:"verzamelinkomen"`
+	Box1Inkomen           *Bedrag `json:"box1Inkomen"`
+	Box2Inkomen           *Bedrag `json:"box2Inkomen"`
+	Box3Inkomen           *Bedrag `json:"box3Inkomen"`
 }
 
 type Citizen struct {
-	BSN              string                    `json:"bsn"`
-	Inkomensgegevens []InkomensgegevensPerJaar `json:"inkomensgegevens"`
+	BSN                        string       `json:"bsn"`
+	HeeftBelastingjaarAangifte []AangifteIH `json:"heeftBelastingjaarAangifte"`
 }
 
 // ── Mock data store ───────────────────────────────────────────────────────────
 
-var citizenStore map[string][]InkomensgegevensPerJaar
+var citizenStore map[string]Citizen
 
 func loadMockData(path string) error {
 	data, err := os.ReadFile(path)
@@ -57,9 +64,9 @@ func loadMockData(path string) error {
 	if err := json.Unmarshal(data, &citizens); err != nil {
 		return err
 	}
-	citizenStore = make(map[string][]InkomensgegevensPerJaar, len(citizens))
+	citizenStore = make(map[string]Citizen, len(citizens))
 	for _, c := range citizens {
-		citizenStore[c.BSN] = c.Inkomensgegevens
+		citizenStore[c.BSN] = c
 	}
 	slog.Info("mock data loaded", "citizens", len(citizenStore))
 	return nil
@@ -67,25 +74,128 @@ func loadMockData(path string) error {
 
 // ── GraphQL schema ────────────────────────────────────────────────────────────
 
-var codeOmschrijvingType = graphql.NewObject(graphql.ObjectConfig{
-	Name: "CodeOmschrijving",
+// stringScalar builds a custom scalar that behaves like a String (the mock
+// does not enforce the upstream formaat-restricties). Serialize accepts
+// both string and *string — the mock data model uses pointers for optional
+// fields.
+func stringScalar(name, description string) *graphql.Scalar {
+	asString := func(value interface{}) interface{} {
+		switch v := value.(type) {
+		case string:
+			return v
+		case *string:
+			if v != nil {
+				return *v
+			}
+		}
+		return nil
+	}
+	return graphql.NewScalar(graphql.ScalarConfig{
+		Name:        name,
+		Description: description,
+		Serialize:   asString,
+		ParseValue:  asString,
+		ParseLiteral: func(valueAST ast.Value) interface{} {
+			if sv, ok := valueAST.(*ast.StringValue); ok {
+				return sv.Value
+			}
+			return nil
+		},
+	})
+}
+
+var bsnScalar = stringScalar("BSN", "Burgerservicenummer: 9 cijfers met geldige elfproef.")
+var datumScalar = stringScalar("Datum", "Kalenderdatum in ISO 8601, precisie tot op de dag (jjjj-mm-dd).")
+var valutaScalar = stringScalar("CodelijstISO4217", "Valuta-aanduiding conform ISO 4217 (drieletterige code, EUR).")
+
+var bedragType = graphql.NewObject(graphql.ObjectConfig{
+	Name: "Bedrag",
 	Fields: graphql.Fields{
-		"code":         {Type: graphql.NewNonNull(graphql.String)},
-		"omschrijving": {Type: graphql.NewNonNull(graphql.String)},
+		"waarde": {Type: graphql.NewNonNull(graphql.Float)},
+		"valuta": {Type: valutaScalar},
 	},
 })
 
-var inkomensgegevensPerJaarType = graphql.NewObject(graphql.ObjectConfig{
-	Name: "InkomensgegevensPerJaar",
+// aangifteIHType is assigned in init() to break the var-init cycle:
+// the interface's ResolveType points at the object, the object's
+// Interfaces list points back at the interface.
+var aangifteIHType *graphql.Object
+
+var belastingjaarAangifteInterface = graphql.NewInterface(graphql.InterfaceConfig{
+	Name: "BelastingjaarAangifte",
 	Fields: graphql.Fields{
-		"belastingjaar":   {Type: graphql.NewNonNull(graphql.Int)},
-		"verzamelinkomen": {Type: graphql.Int},
-		"inkomenUitBox1":  {Type: graphql.Int},
-		"inkomenUitBox2":  {Type: graphql.Int},
-		"inkomenUitBox3":  {Type: graphql.Int},
-		"grondslag":       {Type: codeOmschrijvingType},
-		"status":          {Type: codeOmschrijvingType},
-		"peilDatum":       {Type: graphql.String},
+		"aangifteIdentificatie": {Type: graphql.NewNonNull(graphql.String)},
+		"indieningsdatum":       {Type: datumScalar},
+		"status":                {Type: graphql.NewNonNull(graphql.String)},
+		"belastingjaar":         {Type: graphql.NewNonNull(graphql.Int)},
+		"belastingsoort":        {Type: graphql.NewNonNull(graphql.String)},
+		"ingangsdatumAangifte":  {Type: datumScalar},
+		"einddatumAangifte":     {Type: datumScalar},
+	},
+	ResolveType: func(p graphql.ResolveTypeParams) *graphql.Object {
+		// The mock bron only serves IH-aangiften.
+		return aangifteIHType
+	},
+})
+
+func init() {
+	aangifteIHType = graphql.NewObject(graphql.ObjectConfig{
+		Name: "AangifteIH",
+		Interfaces: []*graphql.Interface{
+			belastingjaarAangifteInterface,
+		},
+		Fields: graphql.Fields{
+			"aangifteIdentificatie": {Type: graphql.NewNonNull(graphql.String)},
+			"indieningsdatum":       {Type: datumScalar},
+			"status":                {Type: graphql.NewNonNull(graphql.String)},
+			"belastingjaar":         {Type: graphql.NewNonNull(graphql.Int)},
+			"belastingsoort":        {Type: graphql.NewNonNull(graphql.String)},
+			"ingangsdatumAangifte":  {Type: datumScalar},
+			"einddatumAangifte":     {Type: datumScalar},
+			"verzamelinkomen":       {Type: bedragType},
+			"box1Inkomen":           {Type: bedragType},
+			"box2Inkomen":           {Type: bedragType},
+			"box3Inkomen":           {Type: bedragType},
+		},
+	})
+}
+
+var ingeschrevenPersoonType = graphql.NewObject(graphql.ObjectConfig{
+	Name: "IngeschrevenPersoon",
+	Fields: graphql.Fields{
+		"bsn": {Type: graphql.NewNonNull(bsnScalar)},
+		"heeftBelastingjaarAangifte": {
+			Type: graphql.NewList(graphql.NewNonNull(belastingjaarAangifteInterface)),
+			Args: graphql.FieldConfigArgument{
+				// Demo-bron extension of the upstream BD schema: a year
+				// filter. The PDP can only enforce per-year consent when
+				// the selector travels inside the query.
+				"belastingjaren": {Type: graphql.NewList(graphql.NewNonNull(graphql.Int))},
+			},
+			Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+				persoon, ok := p.Source.(Citizen)
+				if !ok {
+					return nil, nil
+				}
+				jarenRaw, _ := p.Args["belastingjaren"].([]interface{})
+				if len(jarenRaw) == 0 {
+					return persoon.HeeftBelastingjaarAangifte, nil
+				}
+				yearSet := make(map[int]bool, len(jarenRaw))
+				for _, y := range jarenRaw {
+					if yr, ok := y.(int); ok {
+						yearSet[yr] = true
+					}
+				}
+				var filtered []AangifteIH
+				for _, a := range persoon.HeeftBelastingjaarAangifte {
+					if yearSet[a.Belastingjaar] {
+						filtered = append(filtered, a)
+					}
+				}
+				return filtered, nil
+			},
+		},
 	},
 })
 
@@ -93,57 +203,34 @@ func buildSchema(tracer trace.Tracer) (graphql.Schema, error) {
 	queryType := graphql.NewObject(graphql.ObjectConfig{
 		Name: "Query",
 		Fields: graphql.Fields{
-			"inkomensgegevens": {
-				Type: graphql.NewNonNull(graphql.NewList(graphql.NewNonNull(inkomensgegevensPerJaarType))),
+			"ingeschrevenPersoon": {
+				Type: ingeschrevenPersoonType,
 				Args: graphql.FieldConfigArgument{
-					"input": {Type: graphql.NewNonNull(graphql.NewInputObject(graphql.InputObjectConfig{
-						Name: "InkomensgegevensInput",
-						Fields: graphql.InputObjectConfigFieldMap{
-							"burgerservicenummer": {Type: graphql.NewNonNull(graphql.String)},
-							"belastingjaren":      {Type: graphql.NewList(graphql.NewNonNull(graphql.Int))},
-						},
-					}))},
+					"bsn": {Type: graphql.NewNonNull(bsnScalar)},
 				},
 				Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 					ctx := p.Context
-					_, span := tracer.Start(ctx, "resolve.inkomensgegevens")
+					_, span := tracer.Start(ctx, "resolve.ingeschrevenPersoon")
 					defer span.End()
 
-					input, ok := p.Args["input"].(map[string]interface{})
-					if !ok {
+					bsn, _ := p.Args["bsn"].(string)
+					citizen, exists := citizenStore[bsn]
+					if !exists {
 						return nil, nil
 					}
-					bsn, _ := input["burgerservicenummer"].(string)
-					jarenRaw, _ := input["belastingjaren"].([]interface{})
-
-					records, exists := citizenStore[bsn]
-					if !exists {
-						return []interface{}{}, nil
-					}
-
-					// Filter by requested years if specified
-					if len(jarenRaw) > 0 {
-						yearSet := make(map[int]bool, len(jarenRaw))
-						for _, y := range jarenRaw {
-							if yr, ok := y.(int); ok {
-								yearSet[yr] = true
-							}
-						}
-						var filtered []InkomensgegevensPerJaar
-						for _, r := range records {
-							if yearSet[r.Belastingjaar] {
-								filtered = append(filtered, r)
-							}
-						}
-						return filtered, nil
-					}
-					return records, nil
+					return citizen, nil
 				},
 			},
 		},
 	})
 
-	return graphql.NewSchema(graphql.SchemaConfig{Query: queryType})
+	// AangifteIH is only reachable through the interface's ResolveType, so
+	// register it explicitly — otherwise `... on AangifteIH` fragments fail
+	// with 'Unknown type'.
+	return graphql.NewSchema(graphql.SchemaConfig{
+		Query: queryType,
+		Types: []graphql.Type{aangifteIHType},
+	})
 }
 
 // ── OTel setup ────────────────────────────────────────────────────────────────

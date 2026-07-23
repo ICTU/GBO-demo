@@ -15,27 +15,36 @@ package dvtp.gbo.rules.dvt0001
 rule_id := "DVT0001"
 
 # Object-types whose SCALAR fields we cover (inheritance):
-# CodeOmschrijving (the sub-object under grondslag/status) — all its
-# scalars (code, omschrijving) inherit coverage from this rule.
-# InkomensgegevensPerJaar is NOT listed here: we declare its covered
-# scalars explicitly in covers_fields, so that a field we deliberately
-# do NOT cover (e.g. inkomenUitBox2/3) comes back as NO_APPLICABLE_RULE
-# — model C: the rule IS the catalog, no separate scope_fields table.
-covers_types := {"CodeOmschrijving"}
+# Bedrag (the amount object under verzamelinkomen/box*Inkomen) — all its
+# scalars (waarde, valuta) inherit coverage from this rule.
+# BelastingjaarAangifte/AangifteIH are NOT listed here: we declare their
+# covered fields explicitly in covers_fields, so that a field we
+# deliberately do NOT cover (e.g. box2Inkomen/box3Inkomen) comes back as
+# NO_APPLICABLE_RULE — model C: the rule IS the catalog, no separate
+# scope_fields table.
+covers_types := {"Bedrag"}
 
 # Explicitly covered fields: ALL object-edges + the scalars this rule
 # grants. Anything not listed here falls outside coverage → the engine's
 # closed-world default gives NO_APPLICABLE_RULE → DENY.
+#
+# Fields that live on the BelastingjaarAangifte interface are declared for
+# both the interface and the concrete AangifteIH: the resolved parent-type
+# depends on whether the query selects the field at interface level or
+# inside an `... on AangifteIH` fragment.
 covers_fields := {
 	# object-edges (parent-traversal requires these)
-	"Query.inkomensgegevens",
-	"InkomensgegevensPerJaar.grondslag",
-	"InkomensgegevensPerJaar.status",
+	"Query.ingeschrevenPersoon",
+	"IngeschrevenPersoon.heeftBelastingjaarAangifte",
+	"AangifteIH.verzamelinkomen",
+	"AangifteIH.box1Inkomen",
 	# scalar fields for the mortgage/IB use-case
-	"InkomensgegevensPerJaar.belastingjaar",
-	"InkomensgegevensPerJaar.verzamelinkomen",
-	"InkomensgegevensPerJaar.inkomenUitBox1",
-	"InkomensgegevensPerJaar.peilDatum",
+	"BelastingjaarAangifte.belastingjaar",
+	"BelastingjaarAangifte.status",
+	"BelastingjaarAangifte.indieningsdatum",
+	"AangifteIH.belastingjaar",
+	"AangifteIH.status",
+	"AangifteIH.indieningsdatum",
 }
 
 # Evaluation spec: which checks must hold for access. lib.evaluate runs
@@ -54,8 +63,13 @@ spec := {
 	# the fetched consent — proving that this query is executed for this
 	# consent, not a different consent from the same consumer.
 	"constraint_binding": [{
-		"arg": "input.burgerservicenummer",
+		"arg": "bsn",
 		"resource_field": "pi",
 	}],
+	# Per-year consent: every belastingjaar in the query's belastingjaren
+	# filter must be covered by a bd:ib:<year> scope in the consent. A
+	# citizen who consents to 2025 but not 2024 makes a query for both
+	# years fail with YEAR_NOT_COVERED.
+	"years_in_scopes": true,
 	"pip": null,
 }

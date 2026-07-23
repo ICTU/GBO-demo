@@ -51,19 +51,40 @@ func TestTokenPropertiesSupportLegacyClaim(t *testing.T) {
 }
 
 // Minimal in-memory schema used by the /evaluation handler when enriching
-// the OPA input. Structurally similar to policies/dvtp/schemas/*.graphql
+// the OPA input. Structurally similar to policies/dvtp/schemas/bd.graphql
 // but stripped down to keep the test hermetic.
 const testDvtpSDL = `
-type Query {
-  inkomensgegevens(input: InkomensgegevensInput!): [InkomensgegevensPerJaar!]!
-}
-input InkomensgegevensInput {
-  consentId: ID!
-  belastingjaren: [Int!]
-}
-type InkomensgegevensPerJaar {
+scalar BSN
+scalar Datum
+
+interface BelastingjaarAangifte {
+  aangifteIdentificatie: String!
+  indieningsdatum: Datum
+  status: String!
   belastingjaar: Int!
-  verzamelinkomen: Int
+  belastingsoort: String!
+}
+
+type AangifteIH implements BelastingjaarAangifte {
+  aangifteIdentificatie: String!
+  indieningsdatum: Datum
+  status: String!
+  belastingjaar: Int!
+  belastingsoort: String!
+  verzamelinkomen: Bedrag
+}
+
+type IngeschrevenPersoon {
+  bsn: BSN!
+  heeftBelastingjaarAangifte: [BelastingjaarAangifte!]
+}
+
+type Bedrag {
+  waarde: Float!
+}
+
+type Query {
+  ingeschrevenPersoon(bsn: BSN!): IngeschrevenPersoon
 }
 `
 
@@ -157,7 +178,7 @@ func TestFSCAuthZenHappyPath(t *testing.T) {
 		"action": map[string]any{
 			"name": "dvtp:query",
 			"properties": map[string]any{
-				"body": `{"query":"query($bsn: ID!){ inkomensgegevens(input:{consentId:$bsn}){ belastingjaar verzamelinkomen } }","variables":{"bsn":"PI-abc123"}}`,
+				"body": `{"query":"query($bsn: BSN!){ ingeschrevenPersoon(bsn:$bsn){ heeftBelastingjaarAangifte{ belastingjaar ... on AangifteIH { verzamelinkomen { waarde } } } } }","variables":{"bsn":"PI-abc123"}}`,
 			},
 		},
 		"context": map[string]any{
@@ -189,5 +210,78 @@ func TestFSCAuthZenHappyPath(t *testing.T) {
 	}
 	if !opaSawEnriched {
 		t.Fatalf("OPA did not receive enriched input (resolved + pip missing)")
+	}
+}
+
+// The X-GBO-Consent-Id header makes the referenced consent record
+// authoritative: the PIP lookup goes by ID, not by PI-union.
+func TestFSCAuthZenConsentIDAuthoritative(t *testing.T) {
+	var sawByID bool
+	consentSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/consents/c-referenced" {
+			sawByID = true
+			_, _ = w.Write([]byte(`{"status":"ACTIVE","scopes":["bd:ib:2025"],"valid_until":"2099-01-01T00:00:00Z","pi":"PI-abc123"}`))
+			return
+		}
+		// by-PI union path should NOT be taken when a consent-id is present
+		_, _ = w.Write([]byte(`[{"status":"ACTIVE","scopes":["bd:ib:2025","bd:ib:2024"],"valid_until":"2099-01-01T00:00:00Z","pi":"PI-abc123"}]`))
+	}))
+	defer consentSrv.Close()
+
+	var opaInput []byte
+	opaSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		opaInput, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"result":{"decision":true,"context":{}}}`))
+	}))
+	defer opaSrv.Close()
+
+	cfg := config{OPAURL: opaSrv.URL, ConsentURL: consentSrv.URL}
+	srv := httptest.NewServer(newMux(cfg, &http.Client{Timeout: 5 * time.Second}, loadTestSchemas(t)))
+	defer srv.Close()
+
+	envelope := map[string]any{
+		"subject": map[string]any{"id": "peer", "properties": map[string]any{}},
+		"action": map[string]any{
+			"name": "dvtp:query",
+			"properties": map[string]any{
+				"body": `{"query":"query($bsn: BSN!){ ingeschrevenPersoon(bsn:$bsn){ heeftBelastingjaarAangifte{ belastingjaar } } }","variables":{"bsn":"PI-abc123"}}`,
+			},
+		},
+		"context": map[string]any{
+			"headers": map[string]string{
+				"X-Gbo-Scope":       "bd:ib:2025",
+				"X-GBO-Consent-Id": "c-referenced",
+			},
+		},
+	}
+	body, _ := json.Marshal(envelope)
+	resp, err := http.Post(srv.URL+"/evaluation", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if !sawByID {
+		t.Fatal("expected by-ID consent fetch for the referenced consent")
+	}
+	// The union record carries [2025 2024]; the referenced record only
+	// [2025]. The OPA input must carry the REFERENCED record's scopes.
+	var env struct {
+		Input struct {
+			PIP struct {
+				Consent struct {
+					GrantedScopes []string `json:"granted_scopes"`
+				} `json:"consent"`
+			} `json:"pip"`
+		} `json:"input"`
+	}
+	if err := json.Unmarshal(opaInput, &env); err != nil {
+		t.Fatalf("decode opa input: %v", err)
+	}
+	got := env.Input.PIP.Consent.GrantedScopes
+	if len(got) != 1 || got[0] != "bd:ib:2025" {
+		t.Fatalf("granted_scopes = %v, want [bd:ib:2025] (referenced consent, not the union)", got)
 	}
 }

@@ -3,7 +3,7 @@ import { buildPortalUrl } from '../lib/buildPortalUrl'
 const VALID_UNTIL_90D = new Date(Date.now() + 90 * 24 * 3600 * 1000).toISOString()
 
 const REDIRECT_CONTEXT = {
-  service: 'inkomensgegevens',
+  service: 'aangiftegegevens',
   purpose: 'Hypotheek-aanvraag',
   scope: ['bd:ib:2025', 'bd:ib:2024'],
   client_oin: '00000001234567890000',

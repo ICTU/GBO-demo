@@ -12,6 +12,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Changed
 - `SECURITY.md` restructured with explicit *Current status*, *Supported versions*, and *Reporting a vulnerability* sections.
+- Bron GraphQL-schema switched from the custom `inkomensgegevens` shape to the BD bronprofiel schema ([gbo-semantiek v0.3 `bd.graphql`](https://github.com/ICTU/gbo-semantiek/blob/main/v0.3/graphql/bd.graphql)): queries now go via `ingeschrevenPersoon(bsn)` → `heeftBelastingjaarAangifte` → `AangifteIH` with `Bedrag` amounts. EUDI inkomensverklaring metadata updated accordingly (`peil_datum`/`grondslag_*`/`status_code` out, `indieningsdatum`/`status` in).
+
+### Added
+- Per-year policy enforcement: `heeftBelastingjaarAangifte` accepts a `belastingjaren` filter (demo-bron extension of the upstream schema) so the PDP can see the requested years. New `years_in_scopes` rule axis requires every requested belastingjaar to be covered by a `bd:ib:<year>` scope in the consent (DVT0001) or the rule's `allowed_scopes` (EUD0001) — a query for a year the citizen did not consent to fails with `YEAR_NOT_COVERED`; a missing year filter fails closed.
+- Flow dispatch in the GBO rule-engine: consent-based rules (DVT0001) only fire when `pip.consent` is present, PID-based rules (EUD0001) only when `pip.pid` is present, so deny reasons come from the flow's own rule (implements the dispatch the rule files already documented).
+- PDP by-PI consent lookup now unions all ACTIVE consents for the PI (per-year scopes may live in separate records; broadening consent over time works).
+- Compose host ports are configurable via `GBO_PORT_*` env vars (defaults unchanged), so two worktree stacks can run side by side.
+- DvTP requests now carry the referenced consent (`X-GBO-Consent-Id` header through the FSC path); the PDP's PIP lookup evaluates exactly that record (the by-PI union is only a legacy fallback), so revoking a consent deterministically denies queries backed by it and sibling consents for the same PI no longer rescue a query.
+- fsc-infra is deployable per worktree: `FSC_PROJECT_NAME` + `FSC_PORT_*` in `fsc-infra/.env` (project name, network, host ports) and `FSC_INFRA_NETWORK` in the root `.env` let multiple checkouts run isolated FSC instances side by side.
+- Dev-portal scenario `use-jaar-niet-geconsenteerd-deny` demonstrating per-year consent.
+- Demo policies (Rego) and GraphQL mirror-schemas are now baked into the `opa` and `pdp-service` images (`services/opa/Dockerfile`, `services/pdp-service/Dockerfile`, build context = repo root). The compose stack and the Helm example values no longer mount them; a volume mount at `/policies` or `/schemas` still shadows the baked-in files if present.
+- DvTP browser flow: the dienstverlener-backend intersects requested belastingjaren with the consent's scopes and only queries consented years; unconsented years are returned as `denied_years` and rendered greyed out in the dienstverlener-mock result page instead of failing the whole query.
 
 ## [0.1.0] - 2026-07-20
 

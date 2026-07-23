@@ -3,8 +3,8 @@ services:
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.96.0
     ports:
-      - "9317:4317"   # gRPC
-      - "9318:4318"   # HTTP
+      - "${GBO_PORT_OTEL_GRPC:-9317}:4317"   # gRPC
+      - "${GBO_PORT_OTEL_HTTP:-9318}:4318"   # HTTP
     volumes:
       - ./otel/collector-config.yaml:/etc/otelcol-contrib/config.yaml
     networks:
@@ -13,7 +13,7 @@ services:
   jaeger:
     image: jaegertracing/all-in-one:1.54
     ports:
-      - "9686:16686"  # Jaeger UI + Query API
+      - "${GBO_PORT_JAEGER:-9686}:16686"  # Jaeger UI + Query API
     environment:
       - COLLECTOR_OTLP_ENABLED=true
     networks:
@@ -28,7 +28,7 @@ services:
     image: grafana/loki:2.9.6
     command: -config.file=/etc/loki/local-config.yaml
     ports:
-      - "9310:3100"
+      - "${GBO_PORT_LOKI:-9310}:3100"
     volumes:
       - ./observability/loki-config.yaml:/etc/loki/local-config.yaml:ro
     networks:
@@ -41,7 +41,12 @@ services:
 
   promtail:
     image: grafana/promtail:2.9.6
-    command: -config.file=/etc/promtail/config.yaml
+    command: -config.file=/etc/promtail/config.yaml -config.expand-env=true
+    environment:
+      # The promtail config filters docker_sd on this label; compose sets
+      # COMPOSE_PROJECT_NAME from the directory (or -p), so worktrees get
+      # the right value automatically.
+      - COMPOSE_PROJECT_NAME
     volumes:
       - ./observability/promtail-config.yaml:/etc/promtail/config.yaml:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -54,7 +59,7 @@ services:
   grafana:
     image: grafana/grafana:11.1.0
     ports:
-      - "9300:3000"
+      - "${GBO_PORT_GRAFANA:-9300}:3000"
     environment:
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Editor
@@ -74,7 +79,11 @@ services:
         condition: service_healthy
 
   opa:
-    image: openpolicyagent/opa:1.16.2
+    # Baked-in demo policies (services/opa/Dockerfile copies ./policies).
+    # Build context is the repo root so the Dockerfile can reach ./policies.
+    build:
+      context: .
+      dockerfile: services/opa/Dockerfile
     command:
       - "run"
       - "--server"
@@ -84,9 +93,7 @@ services:
       - "--set=decision_logs.console=true"
       - "/policies"
     ports:
-      - "9181:8181"
-    volumes:
-      - ./policies:/policies
+      - "${GBO_PORT_OPA:-9181}:8181"
     networks:
       - backend
     healthcheck:
@@ -99,7 +106,7 @@ services:
   sector-pip:
     build: ./services/sector-pip
     ports:
-      - "9404:4004"
+      - "${GBO_PORT_SECTOR_PIP:-9404}:4004"
     environment:
       - OTEL_SERVICE_NAME=sector-pip
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -119,7 +126,7 @@ services:
   graphql-server:
     build: ./services/graphql-server
     ports:
-      - "9400:4000"
+      - "${GBO_PORT_GRAPHQL:-9400}:4000"
     environment:
       - OTEL_SERVICE_NAME=graphql-server
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -140,7 +147,7 @@ services:
   consent-register:
     build: ./services/consent-register
     ports:
-      - "9402:4002"
+      - "${GBO_PORT_CONSENT_REGISTER:-9402}:4002"
     environment:
       - OTEL_SERVICE_NAME=consent-register
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -158,7 +165,7 @@ services:
   bsnk-mock:
     build: ./services/bsnk-mock
     ports:
-      - "9403:4003"
+      - "${GBO_PORT_BSNK:-9403}:4003"
     environment:
       - OTEL_SERVICE_NAME=bsnk-mock
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -177,9 +184,13 @@ services:
   # the OPA decision engine: parses the GraphQL query, enriches the input
   # with PIP data (consent), and forwards to OPA.
   pdp-service:
-    build: ./services/pdp-service
+    # Baked-in mirror-schemas (Dockerfile copies ./policies/dvtp/schemas).
+    # Build context is the repo root so the Dockerfile can reach ./policies.
+    build:
+      context: .
+      dockerfile: services/pdp-service/Dockerfile
     ports:
-      - "9408:4008"
+      - "${GBO_PORT_PDP:-9408}:4008"
     environment:
       - OTEL_SERVICE_NAME=pdp-service
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -190,9 +201,6 @@ services:
       - TLS_CERT_PATH=/certs/pdp-service.pem
       - TLS_KEY_PATH=/certs/pdp-service-key.pem
     volumes:
-      # Clean SDL of the source schema — structural reference for the
-      # GraphQL parser. Not policy; the binding lives in the rules.
-      - ./policies/dvtp/schemas:/schemas:ro
       - ./services/pdp-service/certs:/certs:ro
     networks:
       - backend
@@ -216,7 +224,7 @@ services:
   additional-claims-service:
     build: ./services/additional-claims-service
     ports:
-      - "9412:4012"
+      - "${GBO_PORT_ADDITIONAL_CLAIMS:-9412}:4012"
     environment:
       - CLAIMS_CONFIG_PATH=/config/claims.json
     volumes:
@@ -234,7 +242,7 @@ services:
   bron-sidecar:
     build: ./services/bron-sidecar
     ports:
-      - "9411:4011"
+      - "${GBO_PORT_BRON_SIDECAR:-9411}:4011"
     environment:
       - OTEL_SERVICE_NAME=bron-sidecar
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -260,7 +268,7 @@ services:
     build: ./services/consent-portal-backend
     profiles: [dvtp, full]
     ports:
-      - "9405:4005"
+      - "${GBO_PORT_CONSENT_PORTAL_BACKEND:-9405}:4005"
     environment:
       - OTEL_SERVICE_NAME=consent-portal-backend
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -284,7 +292,7 @@ services:
     build: ./services/dienstverlener-backend
     profiles: [dvtp, full]
     ports:
-      - "9406:4006"
+      - "${GBO_PORT_DV_BACKEND:-9406}:4006"
     environment:
       - OTEL_SERVICE_NAME=dienstverlener-backend
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -329,7 +337,7 @@ services:
       - ./dienstverlener-mock/vite.config.ts:/app/vite.config.ts
       - ./dienstverlener-mock/tsconfig.json:/app/tsconfig.json
     ports:
-      - "9001:9001"
+      - "${GBO_PORT_DV_MOCK:-9001}:9001"
     networks:
       - frontend
       - backend
@@ -353,7 +361,7 @@ services:
       - ./toestemmingsportaal-frontend/vite.config.ts:/app/vite.config.ts
       - ./toestemmingsportaal-frontend/tsconfig.json:/app/tsconfig.json
     ports:
-      - "9002:9002"
+      - "${GBO_PORT_TOESTEMMINGSPORTAAL:-9002}:9002"
     networks:
       - frontend
       - backend
@@ -364,7 +372,7 @@ services:
   dev-portal-backend:
     build: ./services/dev-portal-backend
     ports:
-      - "9407:4007"
+      - "${GBO_PORT_DEV_PORTAL_BACKEND:-9407}:4007"
     environment:
       - OTEL_SERVICE_NAME=dev-portal-backend
       - CITIZENS_FILE=/citizens/citizens.json
@@ -433,7 +441,7 @@ services:
       - ./developer-portal/vite.config.ts:/app/vite.config.ts
       - ./developer-portal/tsconfig.json:/app/tsconfig.json
     ports:
-      - "9003:9003"
+      - "${GBO_PORT_DEVELOPER_PORTAL:-9003}:9003"
     networks:
       - frontend
       - backend
@@ -517,7 +525,7 @@ services:
     # would use an init container `chown -R 1000` so USER 1000 stays.
     user: "0"
     ports:
-      - "18001:18001"
+      - "${GBO_PORT_EUDI_ISSUANCE:-18001}:18001"
     environment:
       - ISSUANCE_SERVER__STORAGE__URL=postgres://wallet:${EUDI_POSTGRES_PASSWORD}@postgres-eudi:5432/issuance_server
       # Three usecases (inkomensverklaring per tax year). Each
@@ -582,7 +590,7 @@ services:
     build: ./services/eudi-adapter
     profiles: [eudi, full]
     ports:
-      - "9409:4009"
+      - "${GBO_PORT_EUDI_ADAPTER:-9409}:4009"
     environment:
       - OTEL_SERVICE_NAME=eudi-adapter
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -601,7 +609,10 @@ networks:
   backend:
   eudi:
   fsc-infra:
-    name: fsc-infra_default
+    # Which fsc-infra compose project to join. Defaults to the shared
+    # single-tenant instance; a worktree running its own fsc-infra sets
+    # FSC_INFRA_NETWORK=<that project>_default in .env.
+    name: ${FSC_INFRA_NETWORK:-fsc-infra_default}
     external: true
 
 volumes:

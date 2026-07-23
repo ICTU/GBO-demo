@@ -11,11 +11,14 @@ import data.dvtp.gbo.rules.dvt0001
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Minimal ctx-shape that carries a valid consent, a matching PI-binding,
-# and the query-argument that the constraint-binding checks. Overridden
-# per test via object.union.
+# a year filter covered by the consent's scopes, and the query-argument
+# that the constraint-binding checks. Overridden per test via object.union.
 _base_ctx := {
 	"subject": {"type": "org", "id": "99999999900000000300"},
-	"args": {"input.burgerservicenummer": "PI-abc123"},
+	"args": {
+		"bsn": "PI-abc123",
+		"belastingjaren.0": "2025",
+	},
 	"time": "2026-07-06T12:00:00Z",
 	"resource": {
 		"scope": "bd:ib:2025",
@@ -28,7 +31,7 @@ _base_ctx := {
 		"granted_scopes": ["bd:ib:2025"],
 		"pi": "PI-abc123",
 	}},
-	"field": "Query.inkomensgegevens",
+	"field": "Query.ingeschrevenPersoon.heeftBelastingjaarAangifte",
 }
 
 # ── Happy path ──────────────────────────────────────────────────────────
@@ -79,9 +82,43 @@ test_deny_scope_not_in_granted_scopes if {
 
 test_deny_constraint_mismatch if {
 	ctx := object.union(_base_ctx, {
-		"args": {"input.burgerservicenummer": "PI-different"},
+		"args": {"bsn": "PI-different", "belastingjaren.0": "2025"},
 	})
 	result := lib.evaluate(dvt0001.spec, ctx)
 	result.decision == false
 	result.context.reason_admin.code == "CONSTRAINT_MISMATCH"
+}
+
+# ── Year-coverage (each requested year needs bd:ib:<year> in consent) ───
+
+test_allow_multiple_years_all_consented if {
+	ctx := object.union(_base_ctx, {
+		"args": {"bsn": "PI-abc123", "belastingjaren.0": "2025", "belastingjaren.1": "2024"},
+		"pip": {"consent": object.union(_base_ctx.pip.consent, {"granted_scopes": ["bd:ib:2025", "bd:ib:2024"]})},
+	})
+	result := lib.evaluate(dvt0001.spec, ctx)
+	result.decision == true
+}
+
+test_deny_year_not_consented if {
+	# Consent covers 2025 only; the query asks for 2024 and 2025.
+	ctx := object.union(_base_ctx, {
+		"args": {"bsn": "PI-abc123", "belastingjaren.0": "2025", "belastingjaren.1": "2024"},
+	})
+	result := lib.evaluate(dvt0001.spec, ctx)
+	result.decision == false
+	result.context.reason_admin.code == "YEAR_NOT_COVERED"
+}
+
+test_deny_year_filter_missing if {
+	# No belastingjaren in the query — the bron would return all years,
+	# so per-year policy cannot hold: fail closed. (object.union merges
+	# recursively, so the key must be removed from the base ctx itself.)
+	ctx := object.union(
+		object.remove(_base_ctx, ["args"]),
+		{"args": object.remove(_base_ctx.args, ["belastingjaren.0"])},
+	)
+	result := lib.evaluate(dvt0001.spec, ctx)
+	result.decision == false
+	result.context.reason_admin.code == "YEAR_NOT_COVERED"
 }

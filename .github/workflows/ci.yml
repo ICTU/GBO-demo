@@ -117,12 +117,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service:
-          - additional-claims-service
-          - eudi-adapter
-          - graphql-server
-          - pdp-service
-          - sector-pip
+        include:
+          - service: additional-claims-service
+            context: services/additional-claims-service
+          - service: eudi-adapter
+            context: services/eudi-adapter
+          - service: graphql-server
+            context: services/graphql-server
+          # pdp-service + opa bake in ./policies — build context is the
+          # repo root so their Dockerfiles can reach it.
+          - service: pdp-service
+            context: .
+          - service: opa
+            context: .
+          - service: sector-pip
+            context: services/sector-pip
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Build image
@@ -130,4 +139,4 @@ jobs:
           docker build \
             --file "services/${{ matrix.service }}/Dockerfile" \
             --tag "gbo-demo/${{ matrix.service }}:ci" \
-            "services/${{ matrix.service }}"
+            "${{ matrix.context }}"

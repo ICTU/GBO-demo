@@ -20,20 +20,24 @@ package dvtp.gbo.rules.eud0001
 
 rule_id := "EUD0001"
 
-# Same covers as DVT0001 — both flows may see the same fields.
-# Divergence (e.g. EUDI sees fewer fields) comes later.
-covers_types := {"CodeOmschrijving"}
+# Same covers as DVT0001, plus box 2 and box 3 — both flows may see the
+# income declaration in full. Divergence (e.g. EUDI sees fewer fields)
+# comes later.
+covers_types := {"Bedrag"}
 
 covers_fields := {
-	"Query.inkomensgegevens",
-	"InkomensgegevensPerJaar.grondslag",
-	"InkomensgegevensPerJaar.status",
-	"InkomensgegevensPerJaar.belastingjaar",
-	"InkomensgegevensPerJaar.verzamelinkomen",
-	"InkomensgegevensPerJaar.inkomenUitBox1",
-	"InkomensgegevensPerJaar.inkomenUitBox2",
-	"InkomensgegevensPerJaar.inkomenUitBox3",
-	"InkomensgegevensPerJaar.peilDatum",
+	"Query.ingeschrevenPersoon",
+	"IngeschrevenPersoon.heeftBelastingjaarAangifte",
+	"BelastingjaarAangifte.belastingjaar",
+	"BelastingjaarAangifte.status",
+	"BelastingjaarAangifte.indieningsdatum",
+	"AangifteIH.belastingjaar",
+	"AangifteIH.status",
+	"AangifteIH.indieningsdatum",
+	"AangifteIH.verzamelinkomen",
+	"AangifteIH.box1Inkomen",
+	"AangifteIH.box2Inkomen",
+	"AangifteIH.box3Inkomen",
 }
 
 # Per-rule scope-whitelist: which resource.scope strings may this rule
@@ -72,5 +76,9 @@ spec := {
 	"pid_required": true,
 	"allowed_scopes": allowed_scopes,
 	"allowed_actors": allowed_actors,
+	# Per-year authorization: the requested belastingjaar must map to a
+	# bd:ib:<year> scope in allowed_scopes. Fires after scope_allowed,
+	# so a usecase for 2023 still reports SCOPE_NOT_ALLOWED first.
+	"years_in_scopes": true,
 	"pip": null,
 }

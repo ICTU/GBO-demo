@@ -1,21 +1,22 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
-type Grondslag = { code: string; omschrijving: string }
+type Bedrag = { waarde: number; valuta?: string }
 
-type IncomeRow = {
+type AangifteRow = {
   belastingjaar: number
-  verzamelinkomen: number | null
-  inkomenUitBox1: number | null
-  grondslag: Grondslag | null
-  peilDatum: string | null
+  verzamelinkomen: Bedrag | null
+  box1Inkomen: Bedrag | null
+  status: string | null
+  indieningsdatum: string | null
 }
 
 type QueryResponse = {
   allowed: boolean
-  data?: { data?: { inkomensgegevens: IncomeRow[] } }
+  data?: { data?: { ingeschrevenPersoon?: { heeftBelastingjaarAangifte?: AangifteRow[] } } }
   reason?: string
   trace_id?: string
+  denied_years?: number[]
 }
 
 const STEPS = [
@@ -73,16 +74,19 @@ function Loading({ phase }: { phase: number }) {
 
 function Result({
   rows,
+  deniedYears,
   traceId,
   onRefresh,
   refreshing,
 }: {
-  rows: IncomeRow[]
+  rows: AangifteRow[]
+  deniedYears: number[]
   traceId?: string
   onRefresh: () => void
   refreshing: boolean
 }) {
   const sorted = [...rows].sort((a, b) => b.belastingjaar - a.belastingjaar)
+  const deniedSorted = [...deniedYears].sort((a, b) => b - a)
 
   return (
     <>
@@ -95,17 +99,27 @@ function Result({
         {sorted.map((y) => (
           <div key={y.belastingjaar} className="hb-data-table">
             <div className="hb-data-thead">
-              <span className="title">Inkomstenbelasting {y.belastingjaar}</span>
+              <span className="title">Aangifte inkomstenbelasting {y.belastingjaar}</span>
             </div>
             <table>
               <tbody>
                 <tr><td>Belastingjaar</td><td>{y.belastingjaar}</td></tr>
-                <tr><td>Verzamelinkomen</td><td>{fmtEuro(y.verzamelinkomen)}</td></tr>
-                <tr><td>Inkomen uit werk en woning</td><td>{fmtEuro(y.inkomenUitBox1)}</td></tr>
-                <tr><td>Soort inkomen</td><td>{y.grondslag?.omschrijving ?? '—'}</td></tr>
-                <tr><td>Peildatum</td><td>{y.peilDatum ?? '—'}</td></tr>
+                <tr><td>Verzamelinkomen</td><td>{fmtEuro(y.verzamelinkomen?.waarde)}</td></tr>
+                <tr><td>Inkomen uit werk en woning</td><td>{fmtEuro(y.box1Inkomen?.waarde)}</td></tr>
+                <tr><td>Status</td><td>{y.status ?? '—'}</td></tr>
+                <tr><td>Indieningsdatum</td><td>{y.indieningsdatum ?? '—'}</td></tr>
               </tbody>
             </table>
+          </div>
+        ))}
+        {deniedSorted.map((jaar) => (
+          <div key={jaar} className="hb-data-table denied">
+            <div className="hb-data-thead">
+              <span className="title">Aangifte inkomstenbelasting {jaar}</span>
+            </div>
+            <div className="denied-note">
+              U heeft voor {jaar} geen toestemming verleend — deze gegevens zijn niet opgehaald.
+            </div>
           </div>
         ))}
       </div>
@@ -270,9 +284,10 @@ export default function Return() {
           />
         ) : !response ? (
           <Loading phase={phase} />
-        ) : response.allowed && response.data?.data?.inkomensgegevens ? (
+        ) : response.allowed && response.data?.data?.ingeschrevenPersoon?.heeftBelastingjaarAangifte ? (
           <Result
-            rows={response.data.data.inkomensgegevens}
+            rows={response.data.data.ingeschrevenPersoon.heeftBelastingjaarAangifte}
+            deniedYears={response.denied_years ?? []}
             traceId={response.trace_id}
             onRefresh={() => runQuery(true)}
             refreshing={refreshing}

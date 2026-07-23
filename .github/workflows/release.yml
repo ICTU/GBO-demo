@@ -58,9 +58,14 @@ jobs:
           - service: graphql-server
             context: ./services/graphql-server
             dockerfile: ./services/graphql-server/Dockerfile
+          # pdp-service + opa bake in ./policies — build context is the
+          # repo root so their Dockerfiles can reach it.
           - service: pdp-service
-            context: ./services/pdp-service
+            context: .
             dockerfile: ./services/pdp-service/Dockerfile
+          - service: opa
+            context: .
+            dockerfile: ./services/opa/Dockerfile
           - service: sector-pip
             context: ./services/sector-pip
             dockerfile: ./services/sector-pip/Dockerfile
