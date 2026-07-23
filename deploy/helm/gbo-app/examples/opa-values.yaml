@@ -10,6 +10,8 @@ args:
   - --server
   - --addr=0.0.0.0:8181
   - --watch
+  # Ignore ConfigMap volume internals such as ..data and ..2026_*.
+  - "--ignore=.*"
   - --log-level=info
   - --set=decision_logs.console=true
   - /policies
