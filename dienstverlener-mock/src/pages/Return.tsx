@@ -24,6 +24,8 @@ const STEPS = [
   'Gegevens ontvangen en controleren…',
 ]
 
+const QUERY_TIMEOUT_MS = 35_000
+
 const fmtEuro = (n: number | null | undefined) =>
   n == null ? '—' : '€ ' + n.toLocaleString('nl-NL', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
 
@@ -206,10 +208,14 @@ export default function Return() {
 
     const minDelay = quick ? 400 : 2300
     const start = Date.now()
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), QUERY_TIMEOUT_MS)
+
     fetch('/api/dvtp/query', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ consent_id: consentId }),
+      signal: controller.signal,
     })
       .then((r) => r.json())
       .then((data: QueryResponse) => {
@@ -220,10 +226,17 @@ export default function Return() {
           setRefreshing(false)
         }, wait)
       })
-      .catch((err) => {
-        setFetchError(err.message)
+      .catch((err: unknown) => {
+        const message =
+          err instanceof DOMException && err.name === 'AbortError'
+            ? 'het ophalen duurde te lang'
+            : err instanceof Error
+              ? err.message
+              : 'onbekende netwerkfout'
+        setFetchError(message)
         setRefreshing(false)
       })
+      .finally(() => window.clearTimeout(timeout))
   }
 
   useEffect(() => {
