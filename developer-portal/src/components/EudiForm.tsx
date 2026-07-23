@@ -44,7 +44,11 @@ const ATTESTATION_TYPES: AttestationConfig[] = [
 const UL_BASE =
   import.meta.env.VITE_EUDI_UL_BASE ??
   'https://app.preproductie.wallet.edi.bzk.nl/deeplink/disclosure_based_issuance'
-const ISSUANCE_SERVER_PUBLIC_URL = (import.meta.env.VITE_EUDI_PUBLIC_URL ?? '').replace(/\/$/, '')
+const ISSUANCE_SERVER_PUBLIC_URL = (
+  window.__GBO_RUNTIME_CONFIG__?.eudiPublicUrl ??
+  import.meta.env.VITE_EUDI_PUBLIC_URL ??
+  ''
+).replace(/\/$/, '')
 
 // Build the same universal-link that demo-issuer's <nl-wallet-button>
 // generates. On scan the wallet POSTs to `request_uri`, where the
