@@ -8,6 +8,14 @@ export type RedirectContext = {
   return_url: string
 }
 
+declare global {
+  interface Window {
+    __GBO_CONFIG__?: {
+      consentPortalUrl?: string
+    }
+  }
+}
+
 export function resolvePortalBase(location: Pick<Location, 'hostname' | 'port' | 'protocol'>): string {
   const { hostname, port, protocol } = location
 
@@ -28,10 +36,16 @@ export function resolvePortalBase(location: Pick<Location, 'hostname' | 'port' |
   return `${protocol}//${hostname}:9002`
 }
 
-const DEFAULT_PORTAL_BASE =
+const configuredPortalBase =
   typeof window === 'undefined'
+    ? ''
+    : window.__GBO_CONFIG__?.consentPortalUrl?.trim() ?? ''
+
+const DEFAULT_PORTAL_BASE =
+  configuredPortalBase ||
+  (typeof window === 'undefined'
     ? 'http://localhost:9002'
-    : resolvePortalBase(window.location)
+    : resolvePortalBase(window.location))
 
 export function buildPortalUrl(ctx: RedirectContext, portalBase: string = DEFAULT_PORTAL_BASE): string {
   const params = new URLSearchParams({
