@@ -20,9 +20,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - PDP by-PI consent lookup now unions all ACTIVE consents for the PI (per-year scopes may live in separate records; broadening consent over time works).
 - Compose host ports are configurable via `GBO_PORT_*` env vars (defaults unchanged), so two worktree stacks can run side by side.
 - Dev-portal scenario `use-jaar-niet-geconsenteerd-deny` demonstrating per-year consent.
+- DvTP browser flow: the dienstverlener-backend intersects requested belastingjaren with the consent's scopes and only queries consented years; unconsented years are returned as `denied_years` and rendered greyed out in the dienstverlener-mock result page instead of failing the whole query.
 
 ## [0.1.0] - 2026-07-20
 
 ### Added
 - Initial import of the GBO reference-architecture demo (consent + wallet flows over OpenFSC v2.4.0).
-- DvTP browser flow: the dienstverlener-backend intersects requested belastingjaren with the consent's scopes and only queries consented years; unconsented years are returned as `denied_years` and rendered greyed out in the dienstverlener-mock result page instead of failing the whole query.
