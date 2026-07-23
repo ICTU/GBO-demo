@@ -18,55 +18,16 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  images:
-    name: Image — ${{ matrix.service }}
+  plan:
+    name: Plan image release
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - service: additional-claims-service
-            context: ./services/additional-claims-service
-            dockerfile: ./services/additional-claims-service/Dockerfile
-          - service: bron-sidecar
-            context: ./services/bron-sidecar
-            dockerfile: ./services/bron-sidecar/Dockerfile
-          - service: bsnk-mock
-            context: ./services/bsnk-mock
-            dockerfile: ./services/bsnk-mock/Dockerfile
-          - service: consent-portal-backend
-            context: ./services/consent-portal-backend
-            dockerfile: ./services/consent-portal-backend/Dockerfile
-          - service: consent-register
-            context: ./services/consent-register
-            dockerfile: ./services/consent-register/Dockerfile
-          - service: dev-portal-backend
-            context: ./services/dev-portal-backend
-            dockerfile: ./services/dev-portal-backend/Dockerfile
-          - service: developer-portal
-            context: ./developer-portal
-            dockerfile: ./developer-portal/Dockerfile
-          - service: dienstverlener-backend
-            context: ./services/dienstverlener-backend
-            dockerfile: ./services/dienstverlener-backend/Dockerfile
-          - service: dienstverlener-mock
-            context: ./dienstverlener-mock
-            dockerfile: ./dienstverlener-mock/Dockerfile
-          - service: eudi-adapter
-            context: ./services/eudi-adapter
-            dockerfile: ./services/eudi-adapter/Dockerfile
-          - service: graphql-server
-            context: ./services/graphql-server
-            dockerfile: ./services/graphql-server/Dockerfile
-          - service: pdp-service
-            context: ./services/pdp-service
-            dockerfile: ./services/pdp-service/Dockerfile
-          - service: sector-pip
-            context: ./services/sector-pip
-            dockerfile: ./services/sector-pip/Dockerfile
-          - service: toestemmingsportaal-frontend
-            context: ./toestemmingsportaal-frontend
-            dockerfile: ./toestemmingsportaal-frontend/Dockerfile
+    outputs:
+      changed: ${{ steps.plan.outputs.changed }}
+      unchanged: ${{ steps.plan.outputs.unchanged }}
+      changed_count: ${{ steps.plan.outputs.changed_count }}
+      unchanged_count: ${{ steps.plan.outputs.unchanged_count }}
+      eudi_changed: ${{ steps.plan.outputs.eudi_changed }}
+      previous_version: ${{ steps.plan.outputs.previous_version }}
     steps:
       - name: Validate release tag
         shell: bash
@@ -76,6 +37,40 @@ jobs:
             exit 1
           fi
 
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Determine changed images
+        id: plan
+        shell: bash
+        run: |
+          previous_tag="$(
+            git describe \
+              --tags \
+              --match 'v*' \
+              --abbrev=0 \
+              "${GITHUB_SHA}^" 2>/dev/null || true
+          )"
+
+          .github/scripts/release-image-plan.sh \
+            "${previous_tag}" \
+            "${GITHUB_SHA}"
+
+          printf 'previous_version=%s\n' "${previous_tag#v}" \
+            >>"${GITHUB_OUTPUT}"
+
+  images:
+    name: Image — ${{ matrix.service }}
+    needs: plan
+    if: needs.plan.outputs.changed_count != '0'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.changed) }}
+    steps:
       - name: Check out repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
@@ -113,19 +108,57 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
 
+  reused-images:
+    name: Reuse unchanged images
+    needs: plan
+    if: >-
+      ${{
+        needs.plan.outputs.unchanged_count != '0' ||
+        needs.plan.outputs.eudi_changed != 'true'
+      }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Reuse previous images
+        shell: bash
+        env:
+          EUDI_CHANGED: ${{ needs.plan.outputs.eudi_changed }}
+          PREVIOUS_VERSION: ${{ needs.plan.outputs.previous_version }}
+          UNCHANGED_IMAGES: ${{ needs.plan.outputs.unchanged }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+
+          jq -r '.[].service' <<<"${UNCHANGED_IMAGES}" |
+            while read -r service; do
+              image="ghcr.io/ictu/gbo-demo/${service}"
+              docker buildx imagetools create \
+                --tag "${image}:${version}" \
+                "${image}:${PREVIOUS_VERSION}"
+            done
+
+          if [[ "${EUDI_CHANGED}" != "true" ]]; then
+            image="ghcr.io/ictu/gbo-demo/eudi-issuance-server"
+            docker buildx imagetools create \
+              --tag "${image}:${version}" \
+              "${image}:${PREVIOUS_VERSION}"
+          fi
+
   eudi-image:
     name: Image — eudi-issuance-server (amd64)
+    needs: plan
+    if: needs.plan.outputs.eudi_changed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Validate release tag
-        shell: bash
-        run: |
-          if [[ ! "${GITHUB_REF_NAME}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
-            echo "Release tag must be SemVer with a v prefix (for example v0.1.0)." >&2
-            exit 1
-          fi
-
       - name: Check out repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -164,7 +197,19 @@ jobs:
 
   chart:
     name: Helm chart
-    needs: [images, eudi-image]
+    needs:
+      - plan
+      - images
+      - reused-images
+      - eudi-image
+    if: >-
+      ${{
+        always() &&
+        needs.plan.result == 'success' &&
+        (needs.images.result == 'success' || needs.images.result == 'skipped') &&
+        (needs.reused-images.result == 'success' || needs.reused-images.result == 'skipped') &&
+        (needs.eudi-image.result == 'success' || needs.eudi-image.result == 'skipped')
+      }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
