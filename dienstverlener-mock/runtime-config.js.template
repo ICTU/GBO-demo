@@ -1,0 +1,3 @@
+window.__GBO_CONFIG__ = {
+  consentPortalUrl: "${CONSENT_PORTAL_URL}"
+}
