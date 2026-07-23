@@ -2,7 +2,7 @@
 // FSC-Inway and the source service. Its role:
 //
 //  1. Take the FSC-Authorization access-token from the incoming request and
-//     read the grant-property 'subject_id_type':
+//     read the additional claim 'subject_id_type':
 //     - "direct"    → pass-through (BSN is already in the query, no action)
 //     - "pseudonym" → resolve PI values in query-variables to BSN via
 //     BSNk-mock, substitute, forward
@@ -64,12 +64,14 @@ func getEnv(k, fallback string) string {
 	return fallback
 }
 
-// grantPropsFromAuth decodes the Fsc-Authorization token and returns the
-// 'prp' claim (grant-properties). Unsafe decode: chain-of-trust is on the
-// FSC-Inway that already validated this token before the request reached us.
+// additionalClaimsFromAuth decodes the Fsc-Authorization token and returns the
+// official 'add' claim populated by the provider Manager's Additional Claims
+// API. Unsafe decode: chain-of-trust is on the FSC-Inway that already
+// validated this token before the request reached us.
 // Returns nil for a missing/invalid token — the caller treats that as the
-// 'direct' flow (safe default, no data transformation).
-func grantPropsFromAuth(auth string) map[string]any {
+// 'direct' flow (no data transformation). The legacy 'prp' claim remains a
+// temporary fallback for older local tokens.
+func additionalClaimsFromAuth(auth string) map[string]any {
 	token := strings.TrimSpace(strings.TrimPrefix(auth, "Bearer"))
 	parts := strings.Split(token, ".")
 	if len(parts) < 2 {
@@ -83,10 +85,14 @@ func grantPropsFromAuth(auth string) map[string]any {
 		}
 	}
 	var claims struct {
+		Add map[string]any `json:"add"`
 		Prp map[string]any `json:"prp"`
 	}
 	if err := json.Unmarshal(payload, &claims); err != nil {
 		return nil
+	}
+	if len(claims.Add) > 0 {
+		return claims.Add
 	}
 	return claims.Prp
 }
@@ -147,9 +153,9 @@ func forwardHandler(cfg config, client *http.Client) http.HandlerFunc {
 			return
 		}
 
-		// Determine binding from the trusted grant-property.
+		// Determine binding from the trusted additional claim.
 		auth := r.Header.Get("Fsc-Authorization")
-		props := grantPropsFromAuth(auth)
+		props := additionalClaimsFromAuth(auth)
 		subjectIDType, _ := props["subject_id_type"].(string)
 		if subjectIDType == "" {
 			subjectIDType = "direct" // fail-safe default

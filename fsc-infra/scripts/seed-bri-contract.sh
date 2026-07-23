@@ -40,7 +40,7 @@ BD_CONTROLLER_URL="${BD_CONTROLLER_URL:-https://bd-controller:9444}"    # contro
 BD_MANAGER_URL="${BD_MANAGER_URL:-https://bd-manager:9443}"             # manager int (LISTEN_ADDRESS_INTERNAL)
 EDI_MANAGER_URL="${EDI_MANAGER_URL:-https://edi-manager:9443}"          # manager int
 
-# bri-service endpoint — bron-sidecar reads grant-property
+# bri-service endpoint — bron-sidecar reads the signed additional claim
 # subject_id_type and substitutes PI -> BSN if needed; direct mode is
 # pass-through to graphql-server. For the demo always via the sidecar.
 SERVICE_ENDPOINT_URL="${SERVICE_ENDPOINT_URL:-http://bron-sidecar:4011}"
@@ -137,11 +137,7 @@ else
         grants: [{
           type: "GRANT_TYPE_SERVICE_PUBLICATION",
           directory: {peer_id: $dir_peer},
-          service: {peer_id: $bd_peer, name: $svc_name, protocol: "PROTOCOL_TCP_HTTP_1.1"},
-          properties: {
-            "flow": "eudi:attestation",
-            "subject_id_type": "direct"
-          }
+          service: {peer_id: $bd_peer, name: $svc_name, protocol: "PROTOCOL_TCP_HTTP_1.1"}
         }]
       }
     }')
@@ -212,11 +208,7 @@ else
               public_key_thumbprint: $thumb
             }
           },
-          service: {type: "SERVICE_TYPE_SERVICE", peer_id: $bd_peer, name: $svc_name},
-          properties: {
-            "flow": "eudi:attestation",
-            "subject_id_type": "direct"
-          }
+          service: {type: "SERVICE_TYPE_SERVICE", peer_id: $bd_peer, name: $svc_name}
         }]
       }
     }')

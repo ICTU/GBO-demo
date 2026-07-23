@@ -210,7 +210,22 @@ services:
       timeout: 3s
       retries: 5
 
-  # Gateway next to the source. Reads grant-property subject_id_type
+  # Provider-owned OpenFSC Additional Claims API. Maps validated connection
+  # grants to flow and identifier semantics; the provider Manager signs the
+  # returned values into the access-token's official `add` claim.
+  additional-claims-service:
+    build: ./services/additional-claims-service
+    ports:
+      - "9412:4012"
+    environment:
+      - CLAIMS_CONFIG_PATH=/config/claims.json
+    volumes:
+      - ./services/additional-claims-service/config/local-claims.json:/config/claims.json:ro
+    networks:
+      - backend
+      - fsc-infra
+
+  # Gateway next to the source. Reads additional claim subject_id_type
   # from the FSC token; substitutes PI variables to BSN via bsnk-mock
   # for 'pseudonym' contracts; pass-through for 'direct' contracts
   # (current EUDI flow). Runs in fsc-infra_default so bd-inway can

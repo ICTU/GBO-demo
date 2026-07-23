@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -13,6 +14,41 @@ import (
 	gqlparser "github.com/vektah/gqlparser/v2"
 	"github.com/vektah/gqlparser/v2/ast"
 )
+
+func TestTokenPropertiesPreferAdditionalClaims(t *testing.T) {
+	payload, err := json.Marshal(map[string]any{
+		"add": map[string]any{"flow": "dvtp:query"},
+		"prp": map[string]any{"flow": "legacy"},
+	})
+	if err != nil {
+		t.Fatalf("marshal token payload: %v", err)
+	}
+	token := "header." + base64.RawURLEncoding.EncodeToString(payload) + ".signature"
+
+	properties := tokenAdditionalClaimsFromHeaders(map[string]string{
+		"Fsc-Authorization": "Bearer " + token,
+	})
+	if properties["flow"] != "dvtp:query" {
+		t.Fatalf("flow = %v, want dvtp:query", properties["flow"])
+	}
+}
+
+func TestTokenPropertiesSupportLegacyClaim(t *testing.T) {
+	payload, err := json.Marshal(map[string]any{
+		"prp": map[string]any{"flow": "dvtp:query"},
+	})
+	if err != nil {
+		t.Fatalf("marshal token payload: %v", err)
+	}
+	token := "header." + base64.RawURLEncoding.EncodeToString(payload) + ".signature"
+
+	properties := tokenAdditionalClaimsFromHeaders(map[string]string{
+		"Fsc-Authorization": "Bearer " + token,
+	})
+	if properties["flow"] != "dvtp:query" {
+		t.Fatalf("flow = %v, want dvtp:query", properties["flow"])
+	}
+}
 
 // Minimal in-memory schema used by the /evaluation handler when enriching
 // the OPA input. Structurally similar to policies/dvtp/schemas/*.graphql

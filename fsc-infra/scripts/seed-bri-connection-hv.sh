@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Connection contract HV -> BD for the bri-service with DvTP flow
-# properties. The publication contract (BD -> Directory) is unchanged —
-# one publication per service, multiple connections (per consumer).
+# Connection contract HV -> BD for the bri-service. The publication contract
+# (BD -> Directory) is unchanged — one publication per service, multiple
+# connections (per consumer).
 #
-# Grant properties:
+# The provider-owned Additional Claims API supplies:
 #   flow: dvtp:query          (policy dispatch)
 #   subject_id_type: pseudonym (sidecar substitutes PI -> BSN)
 #
@@ -88,11 +88,7 @@ else
               public_key_thumbprint: $thumb
             }
           },
-          service: {type: "SERVICE_TYPE_SERVICE", peer_id: $bd_peer, name: $svc_name},
-          properties: {
-            "flow": "dvtp:query",
-            "subject_id_type": "pseudonym"
-          }
+          service: {type: "SERVICE_TYPE_SERVICE", peer_id: $bd_peer, name: $svc_name}
         }]
       }
     }')

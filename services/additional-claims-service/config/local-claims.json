@@ -1,0 +1,22 @@
+{
+  "rules": [
+    {
+      "outway_peer_id": "99999999900000000300",
+      "service_peer_id": "99999999900000000200",
+      "service_name": "bri",
+      "add": {
+        "flow": "dvtp:query",
+        "subject_id_type": "pseudonym"
+      }
+    },
+    {
+      "outway_peer_id": "99999999900000000100",
+      "service_peer_id": "99999999900000000200",
+      "service_name": "bri",
+      "add": {
+        "flow": "eudi:attestation",
+        "subject_id_type": "direct"
+      }
+    }
+  ]
+}
