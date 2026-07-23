@@ -253,7 +253,7 @@ field_in_consent(ctx) if {
 }
 
 field_is_scalar_leaf(ctx) if {
-	some f in input.resolved.fields
+	some f in input.context.resolved.fields
 	f.id == ctx.field
 	f.scalar
 }

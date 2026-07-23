@@ -44,6 +44,10 @@ resources:
 health:
   enabled: true
   scheme: HTTP
+  # Optional numeric container port for the probes when the app serves
+  # health on a different port than containerPort (e.g. OpenFTV PDP:
+  # svc on 8443, health on 8080). Empty = the named http port.
+  port: null
   initialDelaySeconds: 5
   periodSeconds: 10
   timeoutSeconds: 2

@@ -39,7 +39,7 @@ export const USE_CHAIN: NodeDef[] = [
 export const USE_BRANCHES: NodeDef[] = [
   { id: 'hv-manager', role: 'FSC · Manager', name: 'Contract + token', svc: 'hv-manager', branchOf: 'hv-outway' },
   { id: 'consent-pip', role: 'S01 · PIP', name: 'Consent-PIP', svc: 'consent-register', branchOf: 'pdp' },
-  { id: 'opa', role: 'PDP · engine', name: 'OPA', svc: 'opa', branchOf: 'pdp' },
+  { id: 'opa', role: 'PDP · engine', name: 'OpenFTV', svc: 'opa', branchOf: 'pdp' },
   { id: 'bsnk', role: 'BSNk', name: 'PI → BSN', svc: 'bsnk-mock', branchOf: 'sidecar' },
 ]
 
@@ -65,7 +65,7 @@ export const EUDI_ISSUANCE_CHAIN: NodeDef[] = [
 //   - opa: policy-engine behind pdp-service
 export const EUDI_ISSUANCE_BRANCHES: NodeDef[] = [
   { id: 'edi-manager', role: 'FSC · Manager', name: 'Contract + token', svc: 'edi-manager', branchOf: 'edi-outway' },
-  { id: 'opa', role: 'PDP · engine', name: 'OPA', svc: 'opa', branchOf: 'pdp' },
+  { id: 'opa', role: 'PDP · engine', name: 'OpenFTV', svc: 'opa', branchOf: 'pdp' },
 ]
 
 // Nodes for which we structurally get no OTel spans: Rust services

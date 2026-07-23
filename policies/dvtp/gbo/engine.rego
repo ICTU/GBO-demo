@@ -12,9 +12,10 @@ import data.dvtp.gbo.lib
 # ONE AuthZEN Decision (§6.2) = the AND across all covered fields, with
 # the per-field detail in decision.context.
 #
-# Adapted for consent-based policies: ctx carries input.pip + input.resource
-# so consent-checks (lib.evaluate) can access them, and _eval passes the
-# current `field` so field-in-consent works per field.
+# Adapted for consent-based policies: ctx carries input.context.pip +
+# input.context.resource so consent-checks (lib.evaluate) can access
+# them, and _eval passes the current `field` so field-in-consent works
+# per field. (OpenFTV: pdp-service enrichment lives under input.context.)
 # ═══════════════════════════════════════════════════════════════════════════
 
 # ── Entrypoint: one Decision = closed-world AND across all requested data fields ─
@@ -67,7 +68,7 @@ view := {
 
 default _coverage_unverifiable := false
 
-_coverage_unverifiable if input.resolved.coverage_unverifiable
+_coverage_unverifiable if input.context.resolved.coverage_unverifiable
 
 # ── Binding: self-contained rules declare their scope in policy-as-code ──────
 
@@ -116,7 +117,7 @@ _effective_policy_ids(rf, key) := _type_rules(rf.parent) if {
 _root_types := {"Query", "Mutation", "Subscription"}
 
 _data_fields := [df |
-	some rf in input.resolved.fields
+	some rf in input.context.resolved.fields
 	not rf.parent in _root_types
 	not startswith(rf.name, "__")
 	key := sprintf("%s.%s", [rf.parent, rf.name])
@@ -132,7 +133,7 @@ _field_eval(f) := {"resource": {
 	"properties": {"policy_ids": f.policy_ids},
 }}
 
-_args := object.get(input.resolved, "args", {})
+_args := object.get(input.context.resolved, "args", {})
 
 # ── Context for the rules ────────────────────────────────────────────────────
 # Contains consent-PIP + resource so lib.evaluate can perform consent-checks
@@ -141,9 +142,9 @@ _args := object.get(input.resolved, "args", {})
 _ctx := {
 	"subject": input.subject,
 	"args": _args,
-	"time": object.get(object.get(input, "context", {}), "time", ""),
-	"resource": input.resource,
-	"pip": object.get(input, "pip", {}),
+	"time": object.get(input.context, "time", ""),
+	"resource": object.get(input.context, "resource", {}),
+	"pip": object.get(input.context, "pip", {}),
 }
 
 # ── Per-rule evaluation (given field) ────────────────────────────────────────

@@ -1,15 +1,15 @@
 // Package main implements the PDP context-handler — the XACML "P3"
-// role that sits between the PEP and the OPA decision engine. The PEP
-// sends a standard AuthZEN evaluation request; the PDP parses the
-// GraphQL query (action.properties.query), resolves the requested
-// fields against the source-schema SDL, and forwards an enriched
-// `input.resolved = {fields, args, coverage_unverifiable}` to OPA.
-// OPA returns a single Decision which the PDP passes back verbatim.
+// role that sits between the PEP and the OpenFTV PDP (OPA/Rego engine).
+// The PEP sends a standard AuthZEN evaluation request; the PDP parses
+// the GraphQL query, resolves the requested fields against the source-
+// schema SDL, and forwards an AuthZEN evaluation to OpenFTV with the
+// enrichment in context (context.resolved / context.pip /
+// context.resource). OpenFTV returns a single Decision which the PDP
+// translates back to the caller's wire-shape.
 //
 // The AuthZEN wire shape is unchanged: the PEP still sends the raw
-// query, the PDP still returns OPA's response as-is. The split is
-// internal — the PEP does not need to know parsing exists, and OPA
-// does not need to know about GraphQL.
+// query. The split is internal — the PEP does not need to know parsing
+// exists, and the engine does not need to know about GraphQL.
 package main
 
 import (
@@ -116,7 +116,7 @@ func withFscTraceContextFromRequestID(next http.Handler) http.Handler {
 
 type config struct {
 	Port        string
-	OPAURL      string
+	EngineURL   string
 	SchemaDir   string
 	ConsentURL  string
 	TLSCertPath string
@@ -126,7 +126,7 @@ type config struct {
 func loadConfig() config {
 	return config{
 		Port:        getEnv("PORT", "4008"),
-		OPAURL:      getEnv("OPA_URL", "http://opa:8181"),
+		EngineURL:   getEnv("PDP_ENGINE_URL", getEnv("OPA_URL", "http://openftv-pdp:8443")),
 		SchemaDir:   getEnv("SCHEMA_DIR", "/schemas"),
 		ConsentURL:  getEnv("CONSENT_URL", "http://consent-register:4002"),
 		TLSCertPath: getEnv("TLS_CERT_PATH", ""),
@@ -194,7 +194,7 @@ type authzInput struct {
 }
 
 // pipConsent is the policy-relevant subset of a consent-record. Mirrors
-// the shape OPA's lib.evaluate expects under input.pip.consent.
+// the shape lib.evaluate expects under context.pip.consent.
 type pipConsent struct {
 	Exists        bool     `json:"exists"`
 	Withdrawn     bool     `json:"withdrawn"`
@@ -224,15 +224,140 @@ type consentRecord struct {
 	PI string `json:"pi,omitempty"`
 }
 
+// engineDecision is the normalized outcome of an OpenFTV AuthZEN
+// evaluation. Reason carries the Rego `reason` string (surfaced by
+// OpenFTV as context.reasonUser.en) — for our policies that IS the
+// reason_admin code (CONSENT_WITHDRAWN, PID_NOT_PRESENT, ...).
+type engineDecision struct {
+	Decision bool
+	Reason   string
+}
+
+// inputMapFrom parses the OPA-native {input: {...}} envelope into the
+// canonical input map. Also used as the fail-soft fallback when
+// enrichment fails — the engine then denies on missing pip/resolved.
+func inputMapFrom(body []byte) (map[string]json.RawMessage, error) {
+	var env struct {
+		Input map[string]json.RawMessage `json:"input"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		return nil, err
+	}
+	if env.Input == nil {
+		env.Input = map[string]json.RawMessage{}
+	}
+	return env.Input, nil
+}
+
+// toAuthZENRequest maps the enriched canonical input onto the OpenFTV
+// AuthZEN evaluation envelope. OpenFTV builds the OPA input as
+// {subject, action, resource, context} and drops S/A/R properties, so
+// the full resource object and the enrichment (resolved, pip,
+// trace_id, fsc) travel in context. Policies read them back as
+// input.context.resource / input.context.resolved / input.context.pip.
+func toAuthZENRequest(input map[string]json.RawMessage) ([]byte, error) {
+	var subject struct {
+		Type       string         `json:"type"`
+		ID         string         `json:"id"`
+		Properties map[string]any `json:"properties,omitempty"`
+	}
+	if raw, ok := input["subject"]; ok {
+		if err := json.Unmarshal(raw, &subject); err != nil {
+			return nil, fmt.Errorf("parse subject: %w", err)
+		}
+	}
+	if subject.Type == "" {
+		subject.Type = "org"
+	}
+
+	actionName := ""
+	if raw, ok := input["action"]; ok {
+		var action struct {
+			Name string `json:"name"`
+			ID   string `json:"id"`
+		}
+		_ = json.Unmarshal(raw, &action)
+		actionName = action.Name
+		if actionName == "" {
+			actionName = action.ID
+		}
+	}
+	if actionName == "" {
+		actionName = "dvtp:query"
+	}
+
+	ctx := map[string]json.RawMessage{}
+	for _, k := range []string{"resource", "resolved", "pip", "trace_id", "fsc"} {
+		if raw, ok := input[k]; ok {
+			ctx[k] = raw
+		}
+	}
+
+	return json.Marshal(map[string]any{
+		"subject":  subject,
+		"action":   map[string]any{"name": actionName},
+		"resource": map[string]any{"type": "graphql", "id": "query"},
+		"context":  ctx,
+	})
+}
+
+// callEngine POSTs an AuthZEN evaluation to the OpenFTV PDP and
+// normalizes the outcome. Fails closed: transport errors and non-200s
+// are returned as errors.
+func callEngine(ctx context.Context, client *http.Client, target string, payload []byte) (engineDecision, []byte, error) {
+	var zero engineDecision
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(payload))
+	if err != nil {
+		return zero, nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
+	resp, err := client.Do(req)
+	if err != nil {
+		return zero, nil, err
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return zero, respBody, fmt.Errorf("engine status %d: %s", resp.StatusCode, string(respBody))
+	}
+	var er struct {
+		Decision bool `json:"decision"`
+		Context  struct {
+			ReasonUser map[string]string `json:"reasonUser"`
+		} `json:"context"`
+	}
+	if err := json.Unmarshal(respBody, &er); err != nil {
+		return zero, respBody, fmt.Errorf("decode engine response: %w", err)
+	}
+	return engineDecision{Decision: er.Decision, Reason: er.Context.ReasonUser["en"]}, respBody, nil
+}
+
+// legacyContext maps the normalized decision onto the context-object
+// the pre-OpenFTV wire-shape carried: reason_admin.code on DENY. The
+// rich per-field detail (granted[]/denied_fields[]/steps) is no longer
+// in-band — the dev-portal reads it from the engine's decision log.
+func legacyContext(dec engineDecision) map[string]any {
+	ctx := map[string]any{}
+	if !dec.Decision {
+		code := dec.Reason
+		if code == "" {
+			code = "UNKNOWN"
+		}
+		ctx["reason_admin"] = map[string]any{"code": code}
+	}
+	return ctx
+}
+
 // handleAuthz parses the AuthZEN request, dispatches on action.name to
 // the appropriate enrichment (DvTP: consent-fetch from the consent
-// register; EUDI: BSN from resource → input.pip.pid), builds resolved-
+// register; EUDI: BSN from resource → context.pip.pid), builds resolved-
 // fields against the schema for that flow, and forwards the enriched
-// copy to OPA. The PEP is dumb with respect to policy-attributes; PIP
-// lookups are the PDP's responsibility (the XACML "context handler"
-// P3 role).
+// copy to the OpenFTV PDP. The PEP is dumb with respect to policy-
+// attributes; PIP lookups are the PDP's responsibility (the XACML
+// "context handler" P3 role).
 func handleAuthz(cfg config, client *http.Client, schemas map[string]*ast.Schema) http.HandlerFunc {
-	target := cfg.OPAURL + "/v1/data/dvtp/authz"
+	target := cfg.EngineURL + "/authzen/v1/evaluation"
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -257,36 +382,40 @@ func handleAuthz(cfg config, client *http.Client, schemas map[string]*ast.Schema
 			// don't break the demo on a parse glitch. The runtime will deny
 			// later via COVERAGE_UNVERIFIABLE / missing-pip if applicable.
 			slog.Warn("enrichment failed, falling back to passthrough", "err", err.Error())
-			enriched = body
+			enriched, _ = inputMapFrom(body)
+		}
+
+		payload, err := toAuthZENRequest(enriched)
+		if err != nil {
+			http.Error(w, "build engine request: "+err.Error(), http.StatusInternalServerError)
+			return
 		}
 
 		if s := trace.SpanFromContext(r.Context()); s.IsRecording() {
-			s.SetAttributes(attribute.String("gbo.opa.input", string(enriched)))
+			s.SetAttributes(attribute.String("gbo.opa.input", string(payload)))
 		}
 
-		req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, target, bytes.NewReader(enriched))
+		dec, rawResp, err := callEngine(r.Context(), client, target, payload)
 		if err != nil {
-			http.Error(w, "build opa request: "+err.Error(), http.StatusInternalServerError)
+			slog.Error("policy engine call failed", "err", err.Error())
+			http.Error(w, "policy engine: "+err.Error(), http.StatusBadGateway)
 			return
 		}
-		req.Header.Set("Content-Type", "application/json")
-		otel.GetTextMapPropagator().Inject(r.Context(), propagation.HeaderCarrier(req.Header))
-		resp, err := client.Do(req)
-		if err != nil {
-			slog.Error("opa unreachable", "err", err.Error())
-			http.Error(w, "opa unreachable: "+err.Error(), http.StatusBadGateway)
-			return
+		if s := trace.SpanFromContext(r.Context()); s.IsRecording() {
+			s.SetAttributes(attribute.String("gbo.opa.output", string(rawResp)))
 		}
-		defer resp.Body.Close()
-		respBody, _ := io.ReadAll(resp.Body)
+
+		out, _ := json.Marshal(map[string]any{
+			"result": map[string]any{"decision": dec.Decision, "context": legacyContext(dec)},
+		})
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(resp.StatusCode)
-		_, _ = w.Write(respBody)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(out)
 	}
 }
 
 // handleFSCAuthZen receives AuthZen-envelopes from FSC-Inway.
-// Translates Subject/Resource/Action/Context into the OPA-input shape
+// Translates Subject/Resource/Action/Context into the engine-input shape
 // the EUDI rule expects:
 //   - subject.id = FSC peer-OIN (from subject.properties.outway_peer_id)
 //   - resource.scope = X-GBO-Scope header
@@ -298,7 +427,7 @@ func handleAuthz(cfg config, client *http.Client, schemas map[string]*ast.Schema
 // The response is the AuthZen 1.0 decision-shape:
 // {decision: bool, context: {...}}. FSC-Inway reads .Allowed from it.
 func handleFSCAuthZen(cfg config, client *http.Client, schemas map[string]*ast.Schema) http.HandlerFunc {
-	target := cfg.OPAURL + "/v1/data/dvtp/authz"
+	target := cfg.EngineURL + "/authzen/v1/evaluation"
 	return func(w http.ResponseWriter, r *http.Request) {
 		slog.Info("fsc-authzen request", "method", r.Method, "path", r.URL.Path, "remote", r.RemoteAddr)
 		if r.Method != http.MethodPost {
@@ -420,13 +549,13 @@ func handleFSCAuthZen(cfg config, client *http.Client, schemas map[string]*ast.S
 			flow = env.Context.Headers["X-GBO-Flow"]
 		}
 
-		// Envelope → OPA-input mapping. Flow-agnostic here: no PIP
+		// Envelope → engine-input mapping. Flow-agnostic here: no PIP
 		// population, no BSN extraction, no default action.name.
 		// enrichInput (the P3 context-handler) dispatches on action.name
 		// and populates flow-specific PIP fields (pip.pid.bsn for EUDI,
 		// pip.consent for DvTP) from resource.variables or an external
 		// fetch.
-		// input.trace_id links the OPA decision-log to our OTel trace so
+		// input.trace_id links the engine decision-log to our OTel trace so
 		// the dev-portal can look decisions up by trace-id. This trace-id
 		// equals the Fsc-Transaction-Id — one identifier through the
 		// whole chain.
@@ -440,7 +569,7 @@ func handleFSCAuthZen(cfg config, client *http.Client, schemas map[string]*ast.S
 				"resource": map[string]any{"scope": scope, "query": query, "variables": variables},
 				"action":   map[string]any{"name": flow},
 				"trace_id": traceIDStr,
-				// The FSC-transaction-id also lives on the OPA input so
+				// The FSC-transaction-id also lives on the engine input so
 				// it appears in the decision-log — enabling correlation
 				// with both our traces and the FSC transaction log.
 				"fsc": map[string]any{"transaction_id": fscTxID},
@@ -448,61 +577,49 @@ func handleFSCAuthZen(cfg config, client *http.Client, schemas map[string]*ast.S
 		}
 		envelopeBytes, _ := json.Marshal(opaInput)
 		// Reuse the existing enrichInput — it parses the query-AST
-		// against the schema and populates input.resolved.fields, which
-		// OPA needs for per-field rule selection.
+		// against the schema and populates resolved.fields, which the
+		// engine needs for per-field rule selection.
 		enriched, err := enrichInput(r.Context(), envelopeBytes, schemas, cfg.ConsentURL, client)
 		if err != nil {
 			slog.Warn("fsc-authzen enrichment fallback (passthrough)", "err", err.Error())
-			enriched = envelopeBytes
+			enriched, _ = inputMapFrom(envelopeBytes)
 		}
 
-		slog.Info("fsc-authzen opa input", "input", string(enriched))
+		payload, err := toAuthZENRequest(enriched)
+		if err != nil {
+			slog.Error("fsc-authzen build engine request", "err", err.Error())
+			denyResp("PDP_BUILD_REQUEST_ERROR")
+			return
+		}
+
+		slog.Info("fsc-authzen engine input", "input", string(payload))
 		if s := trace.SpanFromContext(r.Context()); s.IsRecording() {
-			s.SetAttributes(attribute.String("gbo.opa.input", string(enriched)))
+			s.SetAttributes(attribute.String("gbo.opa.input", string(payload)))
 		}
 
-		req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, target, bytes.NewReader(enriched))
+		dec, rawResp, err := callEngine(r.Context(), client, target, payload)
 		if err != nil {
-			http.Error(w, "build opa request: "+err.Error(), http.StatusInternalServerError)
+			slog.Error("policy engine call failed", "err", err.Error())
+			denyResp("PDP_ENGINE_ERROR")
 			return
 		}
-		req.Header.Set("Content-Type", "application/json")
-		otel.GetTextMapPropagator().Inject(r.Context(), propagation.HeaderCarrier(req.Header))
-		resp, err := client.Do(req)
-		if err != nil {
-			slog.Error("opa unreachable", "err", err.Error())
-			http.Error(w, "opa unreachable: "+err.Error(), http.StatusBadGateway)
-			return
-		}
-		defer resp.Body.Close()
-		respBody, _ := io.ReadAll(resp.Body)
 
-		slog.Info("fsc-authzen opa response", "status", resp.StatusCode, "body", string(respBody))
-
-		// OPA-response shape: {"result": {"decision": bool, "context": {...}}}
-		// Translate to AuthZen: {"decision": bool, "context": {...}}
-		var opaResp struct {
-			Result struct {
-				Decision bool           `json:"decision"`
-				Context  map[string]any `json:"context"`
-			} `json:"result"`
-		}
-		_ = json.Unmarshal(respBody, &opaResp)
+		slog.Info("fsc-authzen engine response", "body", string(rawResp))
 
 		authzenResp := map[string]any{
-			"decision": opaResp.Result.Decision,
-			"context":  opaResp.Result.Context,
+			"decision": dec.Decision,
+			"context":  legacyContext(dec),
 		}
 		out, _ := json.Marshal(authzenResp)
 
 		if s := trace.SpanFromContext(r.Context()); s.IsRecording() {
 			s.SetAttributes(
-				attribute.Bool("gbo.fsc.authzen.decision", opaResp.Result.Decision),
-				// Expose the OPA response (context contains denied_fields
-				// + reason_admin) as a span-attribute so the dev-portal
-				// can render the OPA popover via cross-trace-lookup on
-				// gbo.fsc.transaction_id, even when traceparent is broken.
-				attribute.String("gbo.opa.output", string(respBody)),
+				attribute.Bool("gbo.fsc.authzen.decision", dec.Decision),
+				// Expose the engine response as a span-attribute so the
+				// dev-portal can render the popover via cross-trace-
+				// lookup on gbo.fsc.transaction_id, even when
+				// traceparent is broken.
+				attribute.String("gbo.opa.output", string(rawResp)),
 			)
 		}
 
@@ -512,11 +629,9 @@ func handleFSCAuthZen(cfg config, client *http.Client, schemas map[string]*ast.S
 	}
 }
 
-func enrichInput(ctx context.Context, body []byte, schemas map[string]*ast.Schema, consentURL string, client *http.Client) ([]byte, error) {
-	var envelope struct {
-		Input map[string]json.RawMessage `json:"input"`
-	}
-	if err := json.Unmarshal(body, &envelope); err != nil {
+func enrichInput(ctx context.Context, body []byte, schemas map[string]*ast.Schema, consentURL string, client *http.Client) (map[string]json.RawMessage, error) {
+	envelope, err := inputMapFrom(body)
+	if err != nil {
 		return nil, err
 	}
 	var ai authzInput
@@ -585,14 +700,14 @@ func enrichInput(ctx context.Context, body []byte, schemas map[string]*ast.Schem
 			// resource.pi) is evaluable without a lib-refactor.
 			if c.PI != "" {
 				var res map[string]json.RawMessage
-				if resJSON, ok := envelope.Input["resource"]; ok {
+				if resJSON, ok := envelope["resource"]; ok {
 					_ = json.Unmarshal(resJSON, &res)
 				}
 				if res == nil {
 					res = map[string]json.RawMessage{}
 				}
 				res["pi"], _ = json.Marshal(c.PI)
-				envelope.Input["resource"], _ = json.Marshal(res)
+				envelope["resource"], _ = json.Marshal(res)
 			}
 		}
 		pipData["consent"] = pip
@@ -611,12 +726,9 @@ func enrichInput(ctx context.Context, body []byte, schemas map[string]*ast.Schem
 		return nil, err
 	}
 
-	if envelope.Input == nil {
-		envelope.Input = map[string]json.RawMessage{}
-	}
-	envelope.Input["resolved"] = resJSON
-	envelope.Input["pip"] = pipJSON
-	return json.Marshal(envelope)
+	envelope["resolved"] = resJSON
+	envelope["pip"] = pipJSON
+	return envelope, nil
 }
 
 // extractStringVar pulls a string value out of a variables-map. The
@@ -750,8 +862,8 @@ func newMux(cfg config, client *http.Client, schemas map[string]*ast.Schema) *ht
 	})
 	mux.HandleFunc("/v1/data/dvtp/authz", handleAuthz(cfg, client, schemas))
 	// FSC-Inway's AuthZen-plugin calls /evaluation with an AuthZen 1.0
-	// access-evaluation envelope. Translates to the existing OPA-input
-	// shape and returns an AuthZen-decision.
+	// access-evaluation envelope. Translates to the OpenFTV AuthZEN
+	// evaluation shape and returns an AuthZen-decision.
 	mux.HandleFunc("/evaluation", handleFSCAuthZen(cfg, client, schemas))
 	return mux
 }
@@ -790,13 +902,13 @@ func main() {
 	// only when TLS_CERT_PATH is set. Without TLS: plain HTTP for
 	// stand-alone dev scenarios that do not involve FSC-Inway.
 	if cfg.TLSCertPath != "" && cfg.TLSKeyPath != "" {
-		slog.Info("pdp-service starting (TLS)", "addr", addr, "opa", cfg.OPAURL, "cert", cfg.TLSCertPath)
+		slog.Info("pdp-service starting (TLS)", "addr", addr, "engine", cfg.EngineURL, "cert", cfg.TLSCertPath)
 		if err := http.ListenAndServeTLS(addr, cfg.TLSCertPath, cfg.TLSKeyPath, handler); err != nil {
 			slog.Error("server stopped", "err", err.Error())
 		}
 		return
 	}
-	slog.Info("pdp-service starting", "addr", addr, "opa", cfg.OPAURL)
+	slog.Info("pdp-service starting", "addr", addr, "engine", cfg.EngineURL)
 	if err := http.ListenAndServe(addr, handler); err != nil {
 		slog.Error("server stopped", "err", err.Error())
 	}

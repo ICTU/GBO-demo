@@ -74,7 +74,7 @@ export async function fetchPolicySnippet(path: string, code: string): Promise<Po
 }
 
 // Rule-metadata as emitted by RFC0052-versie-GBO self-contained rules. The
-// dev-portal-backend /rules endpoint flattens OPA's package map to a list,
+// dev-portal-backend /rules endpoint flattens the rules map to a list,
 // dropping the package-leaf key (each rule carries its own rule_id).
 export type RuleMeta = {
   rule_id: string

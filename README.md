@@ -7,7 +7,7 @@ Two access flows sit side-by-side on the same authorization pipeline:
 - **Consent flow** — a citizen grants a consumer permission to query a specific scope of source data. The consumer uses a consent-id to trigger the query; the source resolves it against the citizen's real identifier (BSN) inside its own trust boundary.
 - **Wallet flow** — a citizen holds an EUDI-wallet credential and discloses it to a consumer, who then requests source data using the disclosed identifier. Same policy engine, same transport, different front door.
 
-Both flows share one authorization pipeline: FSC-Inway (transport) → PDP (context handler) → OPA (policy engine) → source-side sidecar (identifier substitution) → source.
+Both flows share one authorization pipeline: FSC-Inway (transport) → PDP (context handler) → OpenFTV PDP (OPA/Rego policy engine) → source-side sidecar (identifier substitution) → source.
 
 ## Prerequisites
 
@@ -67,37 +67,36 @@ The developer portal also runs in `demo-minimal` and `demo-eudi` — flow tabs s
 
 1. Open the **consent portal** (`:9002`) and log in as a citizen (mock DigiD, BSN from `graphql-server/mockdata/citizens.json`).
 2. Grant consent for a scope (e.g. `bd:ib:2025`) to a consumer.
-3. Open the **consumer mock** (`:9001`), enter the consent-id, click **"Run query"** — the consumer queries income data via HV-Outway → BD-Inway → AuthZen call to PDP → OPA → source sidecar (PI→BSN) → GraphQL.
+3. Open the **consumer mock** (`:9001`), enter the consent-id, click **"Run query"** — the consumer queries income data via HV-Outway → BD-Inway → AuthZen call to PDP → OpenFTV → source sidecar (PI→BSN) → GraphQL.
 4. Open the **developer portal** (`:9003`) → Use tab → click "Watch" → the live arch strip lights up hop by hop.
-5. Revoke consent from the portal and repeat the query — OPA denies with `CONSENT_WITHDRAWN`.
+5. Revoke consent from the portal and repeat the query — the OpenFTV PDP denies with `CONSENT_WITHDRAWN`.
 
 ## "Break things" Guide
 
-### Edit OPA policies (Rego hot-reload)
+### Edit policies (Rego hot-reload)
 
-OPA watches the `policies/` directory. Edit any Rego file and save — OPA reloads automatically.
+The OpenFTV PDP watches the `policies/` directory. Edit any Rego file and save — the PDP reloads automatically within a few seconds.
 
 ```bash
-# Example: force OPA to deny everything
-echo 'package dvtp.authz
-import rego.v1
+# Example: force the PDP to deny everything
+echo 'package authz
 default allow := false
-default reason := "policy_override"' > policies/dvtp/authz.rego
+reason := "POLICY_OVERRIDE"' > policies/authz.rego
 
 # Run a query — the deny surfaces in the consumer UI and the developer portal.
 
 # Restore the original policy
-git checkout policies/dvtp/authz.rego
+git checkout policies/authz.rego
 ```
 
 ### Revoke consent
 
-Click "Revoke consent" in the consent portal (`:9002`), repeat the query. OPA reads the consent register, sees status=REVOKED → DENY.
+Click "Revoke consent" in the consent portal (`:9002`), repeat the query. The PDP reads the consent register, sees status=REVOKED → DENY.
 
-### View OPA decision logs
+### View decision logs
 
 ```bash
-docker compose logs -f opa
+docker compose logs -f openftv-pdp
 ```
 
 ## Service ports
@@ -117,7 +116,7 @@ docker compose logs -f opa
 | HV-Manager UI | 8096 | Consumer-org FSC-Controller (mortgage-lender demo org) | Real (OpenFSC v2.4.0) |
 | EDI-Manager UI | 8094 | Consumer-org FSC-Controller (EUDI issuer) | Real (OpenFSC v2.4.0) |
 | BD-Manager UI | 8092 | Provider-org FSC-Controller (source-holder demo org) | Real (OpenFSC v2.4.0) |
-| OPA | 9181 | Policy Decision Point (Rego) | Real |
+| OpenFTV PDP | 9181 (API) / 9180 (health) | Policy Decision Point (OPA/Rego engine) | Real |
 | Jaeger | 9686 | Distributed tracing UI | Real |
 | OTel Collector | 9317 | Trace collection | Real |
 
@@ -125,7 +124,7 @@ docker compose logs -f opa
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| OPA / Rego policies | **Real** | Production OPA container with real Rego evaluation |
+| OpenFTV PDP / Rego policies | **Real** | OpenFTV PDP (embedded OPA) with real Rego evaluation |
 | OpenTelemetry + Jaeger | **Real** | Production-grade distributed tracing |
 | GraphQL Server | **Real** | Real Go GraphQL implementation |
 | FSC (Manager/Inway/Outway/Controller/txlog) | **Real** | OpenFSC v2.4.0 upstream containers, three orgs (consumer, EUDI-issuer, provider) each with their own PostgreSQL + certs |
@@ -144,8 +143,8 @@ The five-factor authorization model demonstrated:
 | ① | Org identity (mTLS) | FSC-Manager validates peer-certs; FSC-Inway includes peer_cert_chain in the AuthZen context |
 | ② | Org permission (JWT) | Provider FSC-Manager validates the grant and signs `add.{flow, subject_id_type}` returned by its Additional Claims API |
 | ③ | Access basis (consent) | pdp-service fetches consent via `GET /consents?pi=<pi>&scope=...` on consent-register |
-| ④ | Data scope (GraphQL) | OPA checks requested fields against the dienstencatalogus (rules DVT0001/EUD0001) |
-| ⑤ | Request validity | OPA validates `pip.consent` + `resource.pi` binding + expiry |
+| ④ | Data scope (GraphQL) | The OpenFTV PDP checks requested fields against the dienstencatalogus (rules DVT0001/EUD0001) |
+| ⑤ | Request validity | The OpenFTV PDP validates `context.pip.consent` + `context.resource.pi` binding + expiry |
 
 ## Makefile targets
 
@@ -250,8 +249,8 @@ for svc in additional-claims-service bron-sidecar bsnk-mock consent-portal-backe
   (cd services/$svc && go test -timeout 60s ./...)
 done
 
-# OPA policy unit tests
-docker compose exec opa opa test /policies -v
+# Rego policy unit tests (via the OPA CLI image)
+docker run --rm -v $(pwd)/policies:/w -w /w openpolicyagent/opa:1.9.0-static test /w -v
 ```
 
 CI (`.github/workflows/ci.yml`) runs both on every PR.
@@ -304,11 +303,11 @@ helm template bsnk-mock deploy/helm/gbo-app \
 
 The chart also supports overriding the container entrypoint, passing arguments,
 mounting native Kubernetes volumes, and selecting the health probe scheme. The
-example values files cover an OPA policy ConfigMap and a TLS-enabled PDP service:
+example values files cover an OpenFTV PDP with policy ConfigMap and a TLS-enabled PDP service:
 
 ```bash
-helm template opa deploy/helm/gbo-app \
-  --values deploy/helm/gbo-app/examples/opa-values.yaml
+helm template openftv-pdp deploy/helm/gbo-app \
+  --values deploy/helm/gbo-app/examples/openftv-pdp-values.yaml
 helm template pdp-service deploy/helm/gbo-app \
   --values deploy/helm/gbo-app/examples/pdp-service-values.yaml
 ```
@@ -320,13 +319,15 @@ helm template pdp-service deploy/helm/gbo-app \
 docker compose logs <service-name>
 ```
 
-**OPA returning unexpected results?**
+**PDP returning unexpected results?**
 ```bash
-# Check OPA decision logs
-docker compose logs opa | grep "decision"
+# Check decision logs
+docker compose logs openftv-pdp | grep "Decision Log"
 
-# Test OPA directly
-curl -X POST http://localhost:9181/v1/data/dvtp/authz -d '{"input": {...}}'
+# Test the OpenFTV PDP directly (AuthZEN evaluation)
+curl -X POST http://localhost:9181/authzen/v1/evaluation \
+  -H 'Content-Type: application/json' \
+  -d '{"subject":{"type":"org","id":"test"},"action":{"name":"dvtp:query"},"resource":{"type":"graphql","id":"query"},"context":{...}}'
 ```
 
 **Frontend not loading?**
@@ -335,7 +336,7 @@ curl -X POST http://localhost:9181/v1/data/dvtp/authz -d '{"input": {...}}'
 
 ## Adding new access flows
 
-The architecture is designed for incremental extension. Every new flow shares the same FSC-Inway → pdp-service (AuthZen) → OPA → bron-sidecar → GraphQL chain. Flow-specific context is provider-owned: OpenFSC asks `additional-claims-service` during token issuance and signs the returned values into the access token's `add` claim.
+The architecture is designed for incremental extension. Every new flow shares the same FSC-Inway → pdp-service (AuthZen) → OpenFTV PDP → bron-sidecar → GraphQL chain — only the policy rules, contract properties, and entry points differ. Flow-specific context is provider-owned: OpenFSC asks `additional-claims-service` during token issuance and signs the returned values into the access token's `add` claim.
 
 The checked-in mapping is deliberately small demo policy, not a second production contract register. A production deployment should resolve these claims from the same authoritative onboarding or authorization source that governs the relationship.
 
