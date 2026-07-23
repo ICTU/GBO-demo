@@ -75,5 +75,9 @@ spec := {
 	"pid_required": true,
 	"allowed_scopes": allowed_scopes,
 	"allowed_actors": allowed_actors,
+	# Per-year authorization: the requested belastingjaar must map to a
+	# bd:ib:<year> scope in allowed_scopes. Fires after scope_allowed,
+	# so a usecase for 2023 still reports SCOPE_NOT_ALLOWED first.
+	"years_in_scopes": true,
 	"pip": null,
 }

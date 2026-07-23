@@ -122,13 +122,14 @@ func loadCatalog(path string) (*Catalog, error) {
 }
 
 // buildQuery builds a GraphQL query for the usecase against the BD
-// bron-schema. The schema has no belastingjaren argument — the bron
-// returns all aangiften for the person and the adapter selects the
-// usecase's tax year from the response.
+// bron-schema. The usecase's belastingjaren are embedded as the year
+// filter so the PDP can enforce per-year authorization (rule EUD0001's
+// years_in_scopes check); the bron returns exactly those years.
 func buildQuery(u Usecase) string {
-	return `query($bsn: BSN!) {
+	jaren, _ := json.Marshal(u.Belastingjaren) // -> "[2024]" etc.
+	return fmt.Sprintf(`query($bsn: BSN!) {
   ingeschrevenPersoon(bsn: $bsn) {
-    heeftBelastingjaarAangifte {
+    heeftBelastingjaarAangifte(belastingjaren: %s) {
       belastingjaar status indieningsdatum
       ... on AangifteIH {
         verzamelinkomen { waarde valuta }
@@ -138,7 +139,7 @@ func buildQuery(u Usecase) string {
       }
     }
   }
-}`
+}`, string(jaren))
 }
 
 // issuanceServerRequest — a real disclosure can carry the BSN in two
@@ -420,10 +421,9 @@ func callViaFSC(ctx context.Context, client *http.Client, cfg config, bsn string
 	return out.Data.IngeschrevenPersoon.HeeftBelastingjaarAangifte, nil
 }
 
-// selectAangifte picks the aangifte for the usecase's tax year. The BD
-// bron-schema has no year argument, so the bron returned all aangiften;
-// the usecase's belastingjaren selects which one becomes the credential.
-// Empty belastingjaren = first aangifte.
+// selectAangifte picks the aangifte for the usecase's tax year. The query
+// already filters by year at the bron; this is defense-in-depth in case a
+// bron ignores the filter. Empty belastingjaren = first aangifte.
 func selectAangifte(aangiften []map[string]any, jaren []int) map[string]any {
 	if len(aangiften) == 0 {
 		return nil

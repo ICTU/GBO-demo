@@ -150,11 +150,35 @@ _ctx := {
 
 _eval(rid, field) := lib.evaluate(_rule_meta[rid].spec, object.union(_ctx, {"field": field}))
 
+# ── Flow dispatch ────────────────────────────────────────────────────────────
+# Rules declare their authorization basis in the spec: consent_required
+# (DvTP) or pid_required (EUDI). A rule only FIRES when its basis is
+# present in the enriched input (the PDP populates pip.consent for
+# dvtp:query, pip.pid for eudi:attestation). Without this dispatch a
+# DvTP-flow deny would aggregate EUD0001's PID_NOT_PRESENT (priority 55)
+# over the genuine DvTP reason (CONSENT_SCOPE_MISMATCH, YEAR_NOT_COVERED,
+# CONSTRAINT_MISMATCH), and vice versa — the documented "this rule fires
+# only when ..." semantics in the rule files.
+
+_flow_applicable(rid) if {
+	s := _rule_meta[rid].spec
+	object.get(s, "consent_required", false)
+	input.pip.consent
+} else if {
+	s := _rule_meta[rid].spec
+	object.get(s, "pid_required", false)
+	input.pip.pid
+} else if {
+	s := _rule_meta[rid].spec
+	not object.get(s, "consent_required", false)
+	not object.get(s, "pid_required", false)
+}
+
 # ── Per-field evaluation: cheap-first, short-circuit, lazy PIP ───────────────
 
-_cheap(policy_ids) := [r | some r in policy_ids; not _rule_meta[r].has_pip]
+_cheap(policy_ids) := [r | some r in policy_ids; not _rule_meta[r].has_pip; _flow_applicable(r)]
 
-_pip(policy_ids) := [r | some r in policy_ids; _rule_meta[r].has_pip]
+_pip(policy_ids) := [r | some r in policy_ids; _rule_meta[r].has_pip; _flow_applicable(r)]
 
 _decide(f) := {"decision": false, "context": {"reason_admin": {"code": "NO_APPLICABLE_RULE", "evaluated": []}}} if {
 	count(f.policy_ids) == 0
@@ -225,6 +249,12 @@ _code_priority("CONSENT_WITHDRAWN") := 50
 _code_priority("CONSENT_EXPIRED") := 45
 
 _code_priority("CONSENT_SCOPE_MISMATCH") := 40
+
+# Per-year coverage: a requested belastingjaar without a matching
+# bd:ib:<year> scope. Sits next to CONSENT_SCOPE_MISMATCH (same severity
+# class: a scope/authorization gap, not a system error) but must be a
+# distinct priority so _worst_code stays deterministic when both fire.
+_code_priority("YEAR_NOT_COVERED") := 41
 
 _code_priority("CONSTRAINT_MISMATCH") := 30
 

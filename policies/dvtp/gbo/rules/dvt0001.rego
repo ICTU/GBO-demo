@@ -66,5 +66,10 @@ spec := {
 		"arg": "bsn",
 		"resource_field": "pi",
 	}],
+	# Per-year consent: every belastingjaar in the query's belastingjaren
+	# filter must be covered by a bd:ib:<year> scope in the consent. A
+	# citizen who consents to 2025 but not 2024 makes a query for both
+	# years fail with YEAR_NOT_COVERED.
+	"years_in_scopes": true,
 	"pip": null,
 }

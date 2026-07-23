@@ -553,7 +553,9 @@ func enrichInput(ctx context.Context, body []byte, schemas map[string]*ast.Schem
 	default:
 		// DvTP-flow: fetch consent from the consent-register. Two paths
 		// for backwards compatibility:
-		//   1. New: PI in resource.variables.bsn — lookup by (PI, scope).
+		//   1. New: PI in resource.variables.bsn — lookup by PI, unioning
+		//      all ACTIVE consents (per-year scopes may live in separate
+		//      records; the citizen may also broaden consent over time).
 		//   2. Old (pep-service path): resource.consent_id — lookup by ID.
 		// Fail-soft → exists=false so OPA denies fail-closed with
 		// CONSENT_NOT_FOUND.
@@ -561,9 +563,9 @@ func enrichInput(ctx context.Context, body []byte, schemas map[string]*ast.Schem
 		var c *consentRecord
 		var err error
 		if pi := extractStringVar(ai.Input.Resource.Variables, "bsn"); pi != "" && looksLikePI(pi) {
-			c, err = fetchConsentByPI(ctx, client, consentURL, pi, ai.Input.Resource.Scope)
+			c, err = fetchConsentByPI(ctx, client, consentURL, pi)
 			if err != nil {
-				slog.Info("consent by-PI fetch failed", "pi", pi, "scope", ai.Input.Resource.Scope, "err", err.Error())
+				slog.Info("consent by-PI fetch failed", "pi", pi, "err", err.Error())
 			}
 		} else if ai.Input.Resource.ConsentID != "" {
 			c, err = fetchConsent(ctx, client, consentURL, ai.Input.Resource.ConsentID)
@@ -660,12 +662,17 @@ func looksLikePI(s string) bool {
 	return false
 }
 
-// fetchConsentByPI fetches the first ACTIVE consent for (PI, scope).
-// Returns nil without error when no match is found — enrichInput
-// handles the fail-closed path.
-func fetchConsentByPI(ctx context.Context, client *http.Client, baseURL, pi, scope string) (*consentRecord, error) {
-	u := fmt.Sprintf("%s/consents?pi=%s&scope=%s&status=ACTIVE",
-		baseURL, url.QueryEscape(pi), url.QueryEscape(scope))
+// fetchConsentByPI fetches all ACTIVE consents for a PI and merges them
+// into one policy view: the union of granted_scopes and the latest
+// valid_until. Per-year scopes (bd:ib:2024, bd:ib:2025) may live in
+// separate consent records, and a citizen can broaden consent over time
+// by issuing a new one — the first-match lookup would otherwise
+// evaluate against a stale, narrower record.
+// Returns nil without error when no ACTIVE consent is found —
+// enrichInput handles the fail-closed path.
+func fetchConsentByPI(ctx context.Context, client *http.Client, baseURL, pi string) (*consentRecord, error) {
+	u := fmt.Sprintf("%s/consents?pi=%s&status=ACTIVE",
+		baseURL, url.QueryEscape(pi))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
@@ -685,7 +692,23 @@ func fetchConsentByPI(ctx context.Context, client *http.Client, baseURL, pi, sco
 	if len(list) == 0 {
 		return nil, nil
 	}
-	return &list[0], nil
+	merged := consentRecord{Status: "ACTIVE", PI: list[0].PI}
+	seen := map[string]bool{}
+	for _, c := range list {
+		for _, s := range c.Scopes {
+			if !seen[s] {
+				seen[s] = true
+				merged.Scopes = append(merged.Scopes, s)
+			}
+		}
+		if c.ValidUntil > merged.ValidUntil {
+			merged.ValidUntil = c.ValidUntil
+		}
+		if merged.PI == "" {
+			merged.PI = c.PI
+		}
+	}
+	return &merged, nil
 }
 
 func fetchConsent(ctx context.Context, client *http.Client, baseURL, consentID string) (*consentRecord, error) {

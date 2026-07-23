@@ -166,6 +166,35 @@ var ingeschrevenPersoonType = graphql.NewObject(graphql.ObjectConfig{
 		"bsn": {Type: graphql.NewNonNull(bsnScalar)},
 		"heeftBelastingjaarAangifte": {
 			Type: graphql.NewList(graphql.NewNonNull(belastingjaarAangifteInterface)),
+			Args: graphql.FieldConfigArgument{
+				// Demo-bron extension of the upstream BD schema: a year
+				// filter. The PDP can only enforce per-year consent when
+				// the selector travels inside the query.
+				"belastingjaren": {Type: graphql.NewList(graphql.NewNonNull(graphql.Int))},
+			},
+			Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+				persoon, ok := p.Source.(Citizen)
+				if !ok {
+					return nil, nil
+				}
+				jarenRaw, _ := p.Args["belastingjaren"].([]interface{})
+				if len(jarenRaw) == 0 {
+					return persoon.HeeftBelastingjaarAangifte, nil
+				}
+				yearSet := make(map[int]bool, len(jarenRaw))
+				for _, y := range jarenRaw {
+					if yr, ok := y.(int); ok {
+						yearSet[yr] = true
+					}
+				}
+				var filtered []AangifteIH
+				for _, a := range persoon.HeeftBelastingjaarAangifte {
+					if yearSet[a.Belastingjaar] {
+						filtered = append(filtered, a)
+					}
+				}
+				return filtered, nil
+			},
 		},
 	},
 })
