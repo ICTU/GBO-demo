@@ -74,7 +74,11 @@ services:
         condition: service_healthy
 
   opa:
-    image: openpolicyagent/opa:1.16.2
+    # Baked-in demo policies (services/opa/Dockerfile copies ./policies).
+    # Build context is the repo root so the Dockerfile can reach ./policies.
+    build:
+      context: .
+      dockerfile: services/opa/Dockerfile
     command:
       - "run"
       - "--server"
@@ -85,8 +89,6 @@ services:
       - "/policies"
     ports:
       - "${GBO_PORT_OPA:-9181}:8181"
-    volumes:
-      - ./policies:/policies
     networks:
       - backend
     healthcheck:
@@ -177,7 +179,11 @@ services:
   # the OPA decision engine: parses the GraphQL query, enriches the input
   # with PIP data (consent), and forwards to OPA.
   pdp-service:
-    build: ./services/pdp-service
+    # Baked-in mirror-schemas (Dockerfile copies ./policies/dvtp/schemas).
+    # Build context is the repo root so the Dockerfile can reach ./policies.
+    build:
+      context: .
+      dockerfile: services/pdp-service/Dockerfile
     ports:
       - "${GBO_PORT_PDP:-9408}:4008"
     environment:
@@ -190,9 +196,6 @@ services:
       - TLS_CERT_PATH=/certs/pdp-service.pem
       - TLS_KEY_PATH=/certs/pdp-service-key.pem
     volumes:
-      # Clean SDL of the source schema — structural reference for the
-      # GraphQL parser. Not policy; the binding lives in the rules.
-      - ./policies/dvtp/schemas:/schemas:ro
       - ./services/pdp-service/certs:/certs:ro
     networks:
       - backend
