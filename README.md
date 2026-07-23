@@ -110,7 +110,8 @@ docker compose logs -f opa
 | dev-portal-backend | 9407 | Trace hub + explain endpoint | Real (Go) |
 | GraphQL Server | 9400 | Sample source with income data | Real (Go) |
 | pdp-service | 9408 | AuthZen endpoint behind FSC-Inway (P3 context handler) | Real (Go) |
-| bron-sidecar | 9409 | Source-side gateway; PI→BSN via BSNk (subject_id_type-driven) | Real (Go) |
+| bron-sidecar | 9411 | Source-side gateway; PI→BSN via BSNk (subject_id_type-driven) | Real (Go) |
+| additional-claims-service | 9412 | Provider policy that enriches OpenFSC access tokens | Demo configuration (Go) |
 | Consent Register | 9402 | Consent store (PIP) | Mock (Go, in-memory) |
 | BSNk Mock | 9403 | Pseudonymization service | Mock (Go, deterministic) |
 | HV-Manager UI | 8096 | Consumer-org FSC-Controller (mortgage-lender demo org) | Real (OpenFSC v2.4.0) |
@@ -129,7 +130,8 @@ docker compose logs -f opa
 | GraphQL Server | **Real** | Real Go GraphQL implementation |
 | FSC (Manager/Inway/Outway/Controller/txlog) | **Real** | OpenFSC v2.4.0 upstream containers, three orgs (consumer, EUDI-issuer, provider) each with their own PostgreSQL + certs |
 | pdp-service | **Real** | AuthZen endpoint behind FSC-Inway; the only policy endpoint for both flows |
-| bron-sidecar | **Real** | Source-side gateway; PI→BSN driven by the `subject_id_type` grant-property |
+| bron-sidecar | **Real** | Source-side gateway; PI→BSN driven by the signed `subject_id_type` additional claim |
+| additional-claims-service | **Demo** | GitOps-style provider policy; production should resolve claims from the authoritative onboarding or authorization source |
 | Consent Register | **Mock** | In-memory; production would be a persistent store |
 | BSNk Mock | **Mock** | Deterministic SHA-256; real BSNk uses ElGamal on elliptic curves |
 
@@ -140,7 +142,7 @@ The five-factor authorization model demonstrated:
 | # | Factor | Implementation in demo |
 |---|--------|------------------------|
 | ① | Org identity (mTLS) | FSC-Manager validates peer-certs; FSC-Inway includes peer_cert_chain in the AuthZen context |
-| ② | Org permission (JWT) | FSC-Manager issues `Fsc-Authorization` with grant + `Properties.{flow, subject_id_type}` |
+| ② | Org permission (JWT) | Provider FSC-Manager validates the grant and signs `add.{flow, subject_id_type}` returned by its Additional Claims API |
 | ③ | Access basis (consent) | pdp-service fetches consent via `GET /consents?pi=<pi>&scope=...` on consent-register |
 | ④ | Data scope (GraphQL) | OPA checks requested fields against the dienstencatalogus (rules DVT0001/EUD0001) |
 | ⑤ | Request validity | OPA validates `pip.consent` + `resource.pi` binding + expiry |
@@ -171,8 +173,8 @@ make fsc-clean # Wipe everything: containers, images, CA material
 
 Three FSC orgs run alongside the main stack:
 
-- **Consumer-org (mortgage lender)** — consent-flow consumer with contract `flow=dvtp:query`, `subject_id_type=pseudonym`
-- **EDI-Issuer** — wallet-flow consumer with contract `flow=eudi:attestation`, `subject_id_type=direct`
+- **Consumer-org (mortgage lender)** — consent-flow consumer; provider claims resolve to `flow=dvtp:query`, `subject_id_type=pseudonym`
+- **EDI-Issuer** — wallet-flow consumer; provider claims resolve to `flow=eudi:attestation`, `subject_id_type=direct`
 - **Provider (source-holder)** — provides the `bri` service; endpoint routes through the bron-sidecar
 
 `make demo` orchestrates the full sequence automatically:
@@ -185,7 +187,7 @@ Step-by-step targets are available for debugging:
 
 1. **`make fsc-all-up`** — FSC-infra + orgs. The directory-manager runs with `--auto-sign-grants=servicePublication`; the provider-manager runs with `--auto-sign-grants=serviceConnection`. Contracts reach `CONTRACT_STATE_VALID` without manual review.
 
-2. **`make fsc-seed-bri`** + **`bash fsc-infra/scripts/seed-bri-connection-hv.sh`** — services + contracts + grant-links. Registers the `bri` service in the provider-Controller (endpoint = bron-sidecar), posts publication + two connection contracts (with grant-properties `flow` + `subject_id_type`), upserts the grant-links per consumer. Idempotent.
+2. **`make fsc-seed-bri`** + **`bash fsc-infra/scripts/seed-bri-connection-hv.sh`** — services + contracts + grant-links. Registers the `bri` service in the provider-Controller (endpoint = bron-sidecar), posts publication + two connection contracts, and upserts the grant-links per consumer. The provider Manager obtains flow and identifier semantics from `additional-claims-service` when issuing an access token. Idempotent.
 
    Grant-link upsert goes via direct SQL — v2.4.0 has no REST endpoint for grant-link CRUD.
 
@@ -236,7 +238,7 @@ docker compose -f docker-compose.yml -f docker-compose.cloudflare-tunnel.yml --p
 
 ```bash
 # Go happy-path integration tests (per service)
-for svc in bron-sidecar bsnk-mock consent-portal-backend consent-register \
+for svc in additional-claims-service bron-sidecar bsnk-mock consent-portal-backend consent-register \
            dev-portal-backend dienstverlener-backend eudi-adapter \
            graphql-server pdp-service sector-pip; do
   (cd services/$svc && go test -timeout 60s ./...)
@@ -327,9 +329,11 @@ curl -X POST http://localhost:9181/v1/data/dvtp/authz -d '{"input": {...}}'
 
 ## Adding new access flows
 
-The architecture is designed for incremental extension. Every new flow shares the same FSC-Inway → pdp-service (AuthZen) → OPA → bron-sidecar → GraphQL chain — only the policy rules, contract properties, and entry points differ.
+The architecture is designed for incremental extension. Every new flow shares the same FSC-Inway → pdp-service (AuthZen) → OPA → bron-sidecar → GraphQL chain. Flow-specific context is provider-owned: OpenFSC asks `additional-claims-service` during token issuance and signs the returned values into the access token's `add` claim.
 
-- **Legal-basis (gov-to-gov)**: add `policies/legal-basis/*.rego`, add a new FSC consumer org with contract `flow=g2g:legal-basis`, the PDP dispatches on the token property.
+The checked-in mapping is deliberately small demo policy, not a second production contract register. A production deployment should resolve these claims from the same authoritative onboarding or authorization source that governs the relationship.
+
+- **Legal-basis (gov-to-gov)**: add `policies/legal-basis/*.rego`, add a new FSC consumer org and configure provider claims with `flow=g2g:legal-basis`; the PDP dispatches on the signed token claim.
 - **Wallet flow (already implemented)**: see `eudi-adapter`.
 - **AS4 / SDG-OOTS**: add an AS4 bridge mock + Domibus mock.
 

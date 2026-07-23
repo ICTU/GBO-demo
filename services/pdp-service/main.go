@@ -42,20 +42,20 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// tokenPropertiesFromHeaders extracts grant-properties from the FSC
+// tokenAdditionalClaimsFromHeaders extracts additional claims from the FSC
 // access-token. FSC-Inway forwards all incoming request-headers in
 // AuthZen Context.headers; the Fsc-Authorization: Bearer <token>
-// header carries the FSC-Manager-issued token, with grant-properties
-// in the 'prp' claim. We read the token unsafely: FSC-Inway validated
-// the signature before this handler was invoked (chain-of-trust).
+// header carries the FSC-Manager-issued token, with claims returned by
+// the Additional Claims API in the official 'add' claim. We read the
+// token unsafely: FSC-Inway validated the signature before this handler
+// was invoked (chain-of-trust).
 // Returns nil for missing or malformed tokens so callers can fall
 // back to header-based context (e.g. X-GBO-Flow).
 //
 // Token format: three base64url-encoded parts separated by "." (JWT-
-// like); the payload sits in the middle segment. Only the 'prp' claim
-// is of interest here — the other claims are consumed by the FSC flow
-// itself.
-func tokenPropertiesFromHeaders(headers map[string]string) map[string]any {
+// like); the payload sits in the middle segment. The legacy 'prp'
+// claim remains a temporary fallback for older local tokens.
+func tokenAdditionalClaimsFromHeaders(headers map[string]string) map[string]any {
 	auth := headers["Fsc-Authorization"]
 	if auth == "" {
 		auth = headers["fsc-authorization"]
@@ -77,10 +77,14 @@ func tokenPropertiesFromHeaders(headers map[string]string) map[string]any {
 		}
 	}
 	var claims struct {
+		Add map[string]any `json:"add"`
 		Prp map[string]any `json:"prp"`
 	}
 	if err := json.Unmarshal(payload, &claims); err != nil {
 		return nil
+	}
+	if len(claims.Add) > 0 {
+		return claims.Add
 	}
 	return claims.Prp
 }
@@ -397,13 +401,13 @@ func handleFSCAuthZen(cfg config, client *http.Client, schemas map[string]*ast.S
 		if scope == "" {
 			scope = env.Context.Headers["X-GBO-Scope"]
 		}
-		// Flow dispatch: prefer the trusted grant-property from the FSC
+		// Flow dispatch: prefer the trusted additional claim from the FSC
 		// token, then fall back to the untrusted X-GBO-Flow header for
-		// contracts that do not yet carry the property. The grant-
-		// property is cryptographically signed in the FSC-contract; the
-		// header is not.
+		// deployments that do not yet configure the Additional Claims
+		// API. The additional claim is signed into the access token by
+		// the service provider's FSC Manager; the header is not.
 		flow := ""
-		tokenProps := tokenPropertiesFromHeaders(env.Context.Headers)
+		tokenProps := tokenAdditionalClaimsFromHeaders(env.Context.Headers)
 		if tokenProps != nil {
 			if f, ok := tokenProps["flow"].(string); ok {
 				flow = f
@@ -638,7 +642,7 @@ func extractStringVar(vars map[string]any, key string) string {
 // looksLikePI is a quick heuristic: a BSN is 9 numeric chars, a PI
 // carries the "PI-" prefix or has some other shape. Sufficient for
 // the demo. In production this would use type-inference from the
-// query-shape, or a grant-property like subject_id_type would be
+// query-shape, or an additional claim like subject_id_type would be
 // authoritative and remove the need for the heuristic altogether.
 func looksLikePI(s string) bool {
 	if strings.HasPrefix(s, "PI-") {

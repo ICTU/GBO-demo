@@ -697,6 +697,7 @@ services:
       SELF_ADDRESS: "https://bd-manager:8443"
       DIRECTORY_MANAGER_ADDRESS: "https://directory-manager:8443"
       DIRECTORY_PEER_ID: "99999999900000000000"
+      ADDITIONAL_CLAIMS_API_ADDRESS: "http://additional-claims-service:4012"
       STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_bd_manager?sslmode=disable&connect_timeout=2"
     depends_on:
       postgres:

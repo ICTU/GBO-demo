@@ -25,6 +25,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - service: additional-claims-service
+            context: ./services/additional-claims-service
+            dockerfile: ./services/additional-claims-service/Dockerfile
           - service: bron-sidecar
             context: ./services/bron-sidecar
             dockerfile: ./services/bron-sidecar/Dockerfile

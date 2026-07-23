@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,8 +11,39 @@ import (
 	"time"
 )
 
+func TestGrantPropsPreferAdditionalClaims(t *testing.T) {
+	payload, err := json.Marshal(map[string]any{
+		"add": map[string]any{"subject_id_type": "pseudonym"},
+		"prp": map[string]any{"subject_id_type": "direct"},
+	})
+	if err != nil {
+		t.Fatalf("marshal token payload: %v", err)
+	}
+	token := "header." + base64.RawURLEncoding.EncodeToString(payload) + ".signature"
+
+	properties := additionalClaimsFromAuth("Bearer " + token)
+	if properties["subject_id_type"] != "pseudonym" {
+		t.Fatalf("subject_id_type = %v, want pseudonym", properties["subject_id_type"])
+	}
+}
+
+func TestGrantPropsSupportLegacyClaim(t *testing.T) {
+	payload, err := json.Marshal(map[string]any{
+		"prp": map[string]any{"subject_id_type": "pseudonym"},
+	})
+	if err != nil {
+		t.Fatalf("marshal token payload: %v", err)
+	}
+	token := "header." + base64.RawURLEncoding.EncodeToString(payload) + ".signature"
+
+	properties := additionalClaimsFromAuth("Bearer " + token)
+	if properties["subject_id_type"] != "pseudonym" {
+		t.Fatalf("subject_id_type = %v, want pseudonym", properties["subject_id_type"])
+	}
+}
+
 // Happy-path integration test for the sidecar's `direct` flow: no
-// grant-property → default to `direct` → forward the GraphQL body verbatim
+// additional claim → default to `direct` → forward the GraphQL body verbatim
 // to the upstream source (BSNk not touched). The stub upstream captures
 // what it received so we can assert pass-through fidelity.
 func TestForwardDirectPassThrough(t *testing.T) {
