@@ -218,6 +218,12 @@ The EUDI flow needs two publicly-reachable HTTPS URLs:
 
 Both values are read from `.env`. Pick whichever way to expose the two services fits your setup:
 
+The developer-portal container writes `EUDI_PUBLIC_URL` to
+`/runtime-config.js` when it starts. This allows Kubernetes and other runtime
+environments to configure wallet QR links without rebuilding the frontend.
+For backwards compatibility, the container also accepts
+`VITE_EUDI_PUBLIC_URL`.
+
 **(a) Own domain / reverse proxy** — point two HTTPS hostnames at the compose ports and set the URLs. Nothing else to install.
 
 **(b) Cloudflare named tunnel (bundled)** — one Cloudflare tunnel with two Public Hostnames configured in the dashboard, plus the connector token in `.env`:
