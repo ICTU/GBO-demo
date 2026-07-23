@@ -25,3 +25,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Added
 - Initial import of the GBO reference-architecture demo (consent + wallet flows over OpenFSC v2.4.0).
+- DvTP browser flow: the dienstverlener-backend intersects requested belastingjaren with the consent's scopes and only queries consented years; unconsented years are returned as `denied_years` and rendered greyed out in the dienstverlener-mock result page instead of failing the whole query.

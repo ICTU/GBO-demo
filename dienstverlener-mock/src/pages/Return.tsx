@@ -16,6 +16,7 @@ type QueryResponse = {
   data?: { data?: { ingeschrevenPersoon?: { heeftBelastingjaarAangifte?: AangifteRow[] } } }
   reason?: string
   trace_id?: string
+  denied_years?: number[]
 }
 
 const STEPS = [
@@ -73,16 +74,19 @@ function Loading({ phase }: { phase: number }) {
 
 function Result({
   rows,
+  deniedYears,
   traceId,
   onRefresh,
   refreshing,
 }: {
   rows: AangifteRow[]
+  deniedYears: number[]
   traceId?: string
   onRefresh: () => void
   refreshing: boolean
 }) {
   const sorted = [...rows].sort((a, b) => b.belastingjaar - a.belastingjaar)
+  const deniedSorted = [...deniedYears].sort((a, b) => b - a)
 
   return (
     <>
@@ -106,6 +110,16 @@ function Result({
                 <tr><td>Indieningsdatum</td><td>{y.indieningsdatum ?? '—'}</td></tr>
               </tbody>
             </table>
+          </div>
+        ))}
+        {deniedSorted.map((jaar) => (
+          <div key={jaar} className="hb-data-table denied">
+            <div className="hb-data-thead">
+              <span className="title">Aangifte inkomstenbelasting {jaar}</span>
+            </div>
+            <div className="denied-note">
+              U heeft voor {jaar} geen toestemming verleend — deze gegevens zijn niet opgehaald.
+            </div>
           </div>
         ))}
       </div>
@@ -273,6 +287,7 @@ export default function Return() {
         ) : response.allowed && response.data?.data?.ingeschrevenPersoon?.heeftBelastingjaarAangifte ? (
           <Result
             rows={response.data.data.ingeschrevenPersoon.heeftBelastingjaarAangifte}
+            deniedYears={response.denied_years ?? []}
             traceId={response.trace_id}
             onRefresh={() => runQuery(true)}
             refreshing={refreshing}
