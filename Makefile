@@ -3,12 +3,18 @@
         demo demo-minimal demo-dvtp demo-eudi demo-full demo-down eudi-config
 
 -include .env
+-include fsc-infra/.env
 export
 
 # nl-wallet source for the eudi-issuance-server build. Pinned via git
 # submodule (vendor/nl-wallet, v0.4.1 — the preprod wallet app rejects
 # v0.5.0's scheme-prefixed client_id). Override in .env if needed.
 NLWALLET_PATH ?= $(PWD)/vendor/nl-wallet
+
+# Docker network of the fsc-infra instance this checkout uses. Equals
+# <FSC_PROJECT_NAME>_default; override in fsc-infra/.env to run a
+# per-worktree fsc-infra side by side with another checkout's.
+FSC_INFRA_NETWORK ?= fsc-infra_default
 
 up: certs
 	docker compose up --build -d
@@ -188,7 +194,7 @@ fsc-clean:
 # managers via in-network hostnames.
 fsc-seed-bri:
 	docker run --rm \
-		--network fsc-infra_default \
+		--network $(FSC_INFRA_NETWORK) \
 		--env-file fsc-infra/.env \
 		-v $(PWD)/fsc-infra:/work:ro \
 		-w /work \
@@ -200,7 +206,7 @@ fsc-seed-bri:
 # exists via fsc-seed-bri; only the extra consumer connection is needed.
 fsc-seed-bri-hv:
 	docker run --rm \
-		--network fsc-infra_default \
+		--network $(FSC_INFRA_NETWORK) \
 		--env-file fsc-infra/.env \
 		-v $(PWD)/fsc-infra:/work:ro \
 		-w /work \

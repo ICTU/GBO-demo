@@ -609,7 +609,10 @@ networks:
   backend:
   eudi:
   fsc-infra:
-    name: fsc-infra_default
+    # Which fsc-infra compose project to join. Defaults to the shared
+    # single-tenant instance; a worktree running its own fsc-infra sets
+    # FSC_INFRA_NETWORK=<that project>_default in .env.
+    name: ${FSC_INFRA_NETWORK:-fsc-infra_default}
     external: true
 
 volumes:
