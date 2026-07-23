@@ -41,7 +41,12 @@ services:
 
   promtail:
     image: grafana/promtail:2.9.6
-    command: -config.file=/etc/promtail/config.yaml
+    command: -config.file=/etc/promtail/config.yaml -config.expand-env=true
+    environment:
+      # The promtail config filters docker_sd on this label; compose sets
+      # COMPOSE_PROJECT_NAME from the directory (or -p), so worktrees get
+      # the right value automatically.
+      - COMPOSE_PROJECT_NAME
     volumes:
       - ./observability/promtail-config.yaml:/etc/promtail/config.yaml:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
