@@ -101,9 +101,9 @@ func TestAdapterEndToEnd(t *testing.T) {
 	if got, want := docs[0].Attributes["belastingjaar"], float64(2024); got != want {
 		t.Errorf("belastingjaar = %v, want %v", got, want)
 	}
-	// verzamelinkomen 42000.0 -> 4200000 eurocents. JSON round-trips numbers
+	// verzamelinkomen 42000.0 -> 42000 whole euros. JSON round-trips numbers
 	// as float64 into map[string]any, so compare via float.
-	if got, want := docs[0].Attributes["verzamelinkomen"], float64(4200000); got != want {
+	if got, want := docs[0].Attributes["verzamelinkomen"], float64(42000); got != want {
 		t.Errorf("verzamelinkomen = %v (%T), want %v", got, got, want)
 	}
 	if got, want := docs[0].Attributes["aangifte_status"], "Voorlopig vastgesteld"; got != want {

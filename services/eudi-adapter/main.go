@@ -449,7 +449,7 @@ func selectAangifte(aangiften []map[string]any, jaren []int) map[string]any {
 // bri-mock-compatible shape that the nl-wallet-issuance-server expects:
 //   - Flat array (no envelope)
 //   - snake_case attributes; Bedrag objects ({waarde, valuta}) flattened
-//     to eurocents (× 100) — bri convention
+//     to whole euros — readable in the wallet UI
 //   - Metadata (CA, issuer_uri, validity) is pulled by the issuance-server
 //     itself from its config, so those fields are NOT included here.
 //
@@ -458,7 +458,7 @@ func selectAangifte(aangiften []map[string]any, jaren []int) map[string]any {
 func formatAsIssuableDocuments(aangifte map[string]any, uc Usecase) []attestation {
 	attrs := map[string]any{
 		"belastingjaar":   aangifte["belastingjaar"],
-		"verzamelinkomen": toCents(bedragWaarde(aangifte["verzamelinkomen"])),
+		"verzamelinkomen": toEuros(bedragWaarde(aangifte["verzamelinkomen"])),
 	}
 	if v, ok := aangifte["indieningsdatum"]; ok {
 		attrs["indieningsdatum"] = v
@@ -467,13 +467,13 @@ func formatAsIssuableDocuments(aangifte map[string]any, uc Usecase) []attestatio
 		attrs["aangifte_status"] = v
 	}
 	if v := bedragWaarde(aangifte["box1Inkomen"]); v != nil {
-		attrs["inkomen_box1"] = toCents(v)
+		attrs["inkomen_box1"] = toEuros(v)
 	}
 	if v := bedragWaarde(aangifte["box2Inkomen"]); v != nil {
-		attrs["inkomen_box2"] = toCents(v)
+		attrs["inkomen_box2"] = toEuros(v)
 	}
 	if v := bedragWaarde(aangifte["box3Inkomen"]); v != nil {
-		attrs["inkomen_box3"] = toCents(v)
+		attrs["inkomen_box3"] = toEuros(v)
 	}
 	attrs["verklaring_tekst"] = fmt.Sprintf("Inkomensverklaring %v als GBO PubEAA", attrs["belastingjaar"])
 
@@ -505,16 +505,16 @@ func newUUIDv4() string {
 	return uuid.NewString()
 }
 
-// toCents converts a JSON number into eurocents (× 100). GraphQL delivers
-// float64; we multiply and round down.
-func toCents(v any) int64 {
+// toEuros converts a JSON number into whole euros. GraphQL delivers
+// float64; we truncate to an integer.
+func toEuros(v any) int64 {
 	switch n := v.(type) {
 	case float64:
-		return int64(n * 100)
+		return int64(n)
 	case int:
-		return int64(n) * 100
+		return int64(n)
 	case int64:
-		return n * 100
+		return n
 	}
 	return 0
 }

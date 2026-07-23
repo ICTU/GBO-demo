@@ -6,27 +6,51 @@
         "aangifteIdentificatie": "AANGIFTE-IH-123456789-2024",
         "belastingsoort": "IH",
         "belastingjaar": 2024,
-        "status": "Voorlopig vastgesteld",
-        "indieningsdatum": "2025-03-31",
+        "status": "Definitief vastgesteld",
+        "indieningsdatum": "2025-04-28",
         "ingangsdatumAangifte": "2024-01-01",
         "einddatumAangifte": "2024-12-31",
-        "verzamelinkomen": { "waarde": 45000, "valuta": "EUR" },
-        "box1Inkomen": { "waarde": 42000, "valuta": "EUR" },
-        "box2Inkomen": { "waarde": 0, "valuta": "EUR" },
-        "box3Inkomen": { "waarde": 3000, "valuta": "EUR" }
+        "verzamelinkomen": {
+          "waarde": 46500,
+          "valuta": "EUR"
+        },
+        "box1Inkomen": {
+          "waarde": 46500,
+          "valuta": "EUR"
+        },
+        "box2Inkomen": {
+          "waarde": 0,
+          "valuta": "EUR"
+        },
+        "box3Inkomen": {
+          "waarde": 0,
+          "valuta": "EUR"
+        }
       },
       {
         "aangifteIdentificatie": "AANGIFTE-IH-123456789-2025",
         "belastingsoort": "IH",
         "belastingjaar": 2025,
-        "status": "In behandeling",
-        "indieningsdatum": "2026-03-31",
+        "status": "Voorlopig vastgesteld",
+        "indieningsdatum": "2026-04-27",
         "ingangsdatumAangifte": "2025-01-01",
         "einddatumAangifte": "2025-12-31",
-        "verzamelinkomen": { "waarde": 45000, "valuta": "EUR" },
-        "box1Inkomen": { "waarde": 42000, "valuta": "EUR" },
-        "box2Inkomen": { "waarde": 0, "valuta": "EUR" },
-        "box3Inkomen": { "waarde": 3000, "valuta": "EUR" }
+        "verzamelinkomen": {
+          "waarde": 48200,
+          "valuta": "EUR"
+        },
+        "box1Inkomen": {
+          "waarde": 48200,
+          "valuta": "EUR"
+        },
+        "box2Inkomen": {
+          "waarde": 0,
+          "valuta": "EUR"
+        },
+        "box3Inkomen": {
+          "waarde": 0,
+          "valuta": "EUR"
+        }
       }
     ]
   },
@@ -38,26 +62,50 @@
         "belastingsoort": "IH",
         "belastingjaar": 2024,
         "status": "Definitief vastgesteld",
-        "indieningsdatum": "2025-03-31",
+        "indieningsdatum": "2025-03-14",
         "ingangsdatumAangifte": "2024-01-01",
         "einddatumAangifte": "2024-12-31",
-        "verzamelinkomen": { "waarde": 62000, "valuta": "EUR" },
-        "box1Inkomen": { "waarde": 58000, "valuta": "EUR" },
-        "box2Inkomen": { "waarde": 4000, "valuta": "EUR" },
-        "box3Inkomen": { "waarde": 0, "valuta": "EUR" }
+        "verzamelinkomen": {
+          "waarde": 72300,
+          "valuta": "EUR"
+        },
+        "box1Inkomen": {
+          "waarde": 68800,
+          "valuta": "EUR"
+        },
+        "box2Inkomen": {
+          "waarde": 0,
+          "valuta": "EUR"
+        },
+        "box3Inkomen": {
+          "waarde": 3500,
+          "valuta": "EUR"
+        }
       },
       {
         "aangifteIdentificatie": "AANGIFTE-IH-987654321-2025",
         "belastingsoort": "IH",
         "belastingjaar": 2025,
         "status": "Voorlopig vastgesteld",
-        "indieningsdatum": "2026-03-31",
+        "indieningsdatum": "2026-03-13",
         "ingangsdatumAangifte": "2025-01-01",
         "einddatumAangifte": "2025-12-31",
-        "verzamelinkomen": { "waarde": 62000, "valuta": "EUR" },
-        "box1Inkomen": { "waarde": 58000, "valuta": "EUR" },
-        "box2Inkomen": { "waarde": 4000, "valuta": "EUR" },
-        "box3Inkomen": { "waarde": 0, "valuta": "EUR" }
+        "verzamelinkomen": {
+          "waarde": 74900,
+          "valuta": "EUR"
+        },
+        "box1Inkomen": {
+          "waarde": 71400,
+          "valuta": "EUR"
+        },
+        "box2Inkomen": {
+          "waarde": 0,
+          "valuta": "EUR"
+        },
+        "box3Inkomen": {
+          "waarde": 3500,
+          "valuta": "EUR"
+        }
       }
     ]
   },
@@ -69,26 +117,50 @@
         "belastingsoort": "IH",
         "belastingjaar": 2024,
         "status": "Definitief vastgesteld",
-        "indieningsdatum": "2025-03-31",
+        "indieningsdatum": "2025-04-02",
         "ingangsdatumAangifte": "2024-01-01",
         "einddatumAangifte": "2024-12-31",
-        "verzamelinkomen": { "waarde": 31000, "valuta": "EUR" },
-        "box1Inkomen": { "waarde": 29000, "valuta": "EUR" },
-        "box2Inkomen": { "waarde": 0, "valuta": "EUR" },
-        "box3Inkomen": { "waarde": 2000, "valuta": "EUR" }
+        "verzamelinkomen": {
+          "waarde": 29800,
+          "valuta": "EUR"
+        },
+        "box1Inkomen": {
+          "waarde": 29200,
+          "valuta": "EUR"
+        },
+        "box2Inkomen": {
+          "waarde": 0,
+          "valuta": "EUR"
+        },
+        "box3Inkomen": {
+          "waarde": 600,
+          "valuta": "EUR"
+        }
       },
       {
         "aangifteIdentificatie": "AANGIFTE-IH-555555555-2025",
         "belastingsoort": "IH",
         "belastingjaar": 2025,
         "status": "In behandeling",
-        "indieningsdatum": "2026-03-31",
+        "indieningsdatum": "2026-04-01",
         "ingangsdatumAangifte": "2025-01-01",
         "einddatumAangifte": "2025-12-31",
-        "verzamelinkomen": { "waarde": 31000, "valuta": "EUR" },
-        "box1Inkomen": { "waarde": 29000, "valuta": "EUR" },
-        "box2Inkomen": { "waarde": 0, "valuta": "EUR" },
-        "box3Inkomen": { "waarde": 2000, "valuta": "EUR" }
+        "verzamelinkomen": {
+          "waarde": 30900,
+          "valuta": "EUR"
+        },
+        "box1Inkomen": {
+          "waarde": 30300,
+          "valuta": "EUR"
+        },
+        "box2Inkomen": {
+          "waarde": 0,
+          "valuta": "EUR"
+        },
+        "box3Inkomen": {
+          "waarde": 600,
+          "valuta": "EUR"
+        }
       }
     ]
   },
@@ -100,26 +172,50 @@
         "belastingsoort": "IH",
         "belastingjaar": 2024,
         "status": "Definitief vastgesteld",
-        "indieningsdatum": "2025-03-31",
+        "indieningsdatum": "2025-04-28",
         "ingangsdatumAangifte": "2024-01-01",
         "einddatumAangifte": "2024-12-31",
-        "verzamelinkomen": { "waarde": 52000, "valuta": "EUR" },
-        "box1Inkomen": { "waarde": 50000, "valuta": "EUR" },
-        "box2Inkomen": { "waarde": 0, "valuta": "EUR" },
-        "box3Inkomen": { "waarde": 2000, "valuta": "EUR" }
+        "verzamelinkomen": {
+          "waarde": 46500,
+          "valuta": "EUR"
+        },
+        "box1Inkomen": {
+          "waarde": 46500,
+          "valuta": "EUR"
+        },
+        "box2Inkomen": {
+          "waarde": 0,
+          "valuta": "EUR"
+        },
+        "box3Inkomen": {
+          "waarde": 0,
+          "valuta": "EUR"
+        }
       },
       {
         "aangifteIdentificatie": "AANGIFTE-IH-999991772-2025",
         "belastingsoort": "IH",
         "belastingjaar": 2025,
-        "status": "In behandeling",
-        "indieningsdatum": "2026-03-31",
+        "status": "Voorlopig vastgesteld",
+        "indieningsdatum": "2026-04-27",
         "ingangsdatumAangifte": "2025-01-01",
         "einddatumAangifte": "2025-12-31",
-        "verzamelinkomen": { "waarde": 52000, "valuta": "EUR" },
-        "box1Inkomen": { "waarde": 50000, "valuta": "EUR" },
-        "box2Inkomen": { "waarde": 0, "valuta": "EUR" },
-        "box3Inkomen": { "waarde": 2000, "valuta": "EUR" }
+        "verzamelinkomen": {
+          "waarde": 48200,
+          "valuta": "EUR"
+        },
+        "box1Inkomen": {
+          "waarde": 48200,
+          "valuta": "EUR"
+        },
+        "box2Inkomen": {
+          "waarde": 0,
+          "valuta": "EUR"
+        },
+        "box3Inkomen": {
+          "waarde": 0,
+          "valuta": "EUR"
+        }
       }
     ]
   }
