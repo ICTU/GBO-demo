@@ -106,8 +106,8 @@ func TestAdapterEndToEnd(t *testing.T) {
 	if got, want := docs[0].Attributes["verzamelinkomen"], float64(4200000); got != want {
 		t.Errorf("verzamelinkomen = %v (%T), want %v", got, got, want)
 	}
-	if got, want := docs[0].Attributes["status"], "Voorlopig vastgesteld"; got != want {
-		t.Errorf("status = %v, want %v", got, want)
+	if got, want := docs[0].Attributes["aangifte_status"], "Voorlopig vastgesteld"; got != want {
+		t.Errorf("aangifte_status = %v, want %v", got, want)
 	}
 	if got, want := docs[0].Attributes["indieningsdatum"], "2025-05-01"; got != want {
 		t.Errorf("indieningsdatum = %v, want %v", got, want)

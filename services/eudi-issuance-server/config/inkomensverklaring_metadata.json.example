@@ -80,7 +80,7 @@
       "sd": "always"
     },
     {
-      "path": ["status"],
+      "path": ["aangifte_status"],
       "display": [
         { "lang": "nl-NL", "label": "Status",            "description": "Status van de aangifte (bijv. Ingediend, Aangeslagen)" },
         { "lang": "en-US", "label": "Status",            "description": "Status of the tax return (e.g. Filed, Assessed)" }
@@ -119,6 +119,7 @@
       "inkomen_box2":              { "type": "integer" },
       "inkomen_box3":              { "type": "integer" },
       "status":                    { "type": "string" },
+      "aangifte_status":           { "type": "string" },
       "verklaring_tekst":          { "type": "string" }
     },
     "required": ["vct", "iss", "attestation_qualification", "belastingjaar", "verzamelinkomen"]
