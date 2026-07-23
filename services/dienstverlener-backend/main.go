@@ -380,6 +380,12 @@ func handleQuery(cfg config) http.HandlerFunc {
 		// Untrusted context-header: X-GBO-Scope carries the requested scope.
 		// (There is no X-GBO-Flow header; flow is a grant-property.)
 		proxyReq.Header.Set("X-GBO-Scope", req.ScopeID)
+		// X-GBO-Consent-Id references the consent this request is backed
+		// by. The PDP does its PIP lookup on exactly this record, so
+		// revoking it deterministically denies this query — a different
+		// consent for the same PI does not rescue it. The constraint-
+		// binding rule proves the query's PI matches this consent's PI.
+		proxyReq.Header.Set("X-GBO-Consent-Id", req.ConsentID)
 		// Fsc-Transaction-Id doubles as the OTel-trace-id — one identifier
 		// end-to-end across the FSC chain. The middleware already minted it
 		// and tied the span trace-id to it; fall back to a fresh UUID only
