@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Happy-path integration test: two stub upstreams (consent-register +
@@ -89,5 +90,48 @@ func TestDvtpHealth(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("health status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestDvtpQueryTimesOutWhenOutwayDoesNotRespond(t *testing.T) {
+	consent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"pi":"PI-abc123","status":"ACTIVE"}`))
+	}))
+	defer consent.Close()
+
+	outway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer outway.Close()
+
+	cfg := config{
+		OutwayURL:  outway.URL,
+		OutwayPath: "/bri/graphql",
+		ConsentURL: consent.URL,
+		HTTPClient: &http.Client{Timeout: 25 * time.Millisecond},
+	}
+	srv := httptest.NewServer(newMux(cfg))
+	defer srv.Close()
+
+	body := `{"consent_id":"c-1"}`
+	resp, err := http.Post(srv.URL+"/api/dvtp/query", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadGateway {
+		responseBody, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 502; body=%s", resp.StatusCode, responseBody)
+	}
+
+	var response queryResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !strings.HasPrefix(response.Reason, "fsc_outway_call_failed:") {
+		t.Fatalf("reason = %q, want fsc_outway_call_failed prefix", response.Reason)
 	}
 }

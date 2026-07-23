@@ -44,7 +44,10 @@ type config struct {
 	OutwayURL        string
 	OutwayPath       string
 	ConsentURL       string
+	HTTPClient       *http.Client
 }
+
+const upstreamRequestTimeout = 30 * time.Second
 
 func loadConfig() config {
 	return config{
@@ -55,6 +58,7 @@ func loadConfig() config {
 		OutwayURL:        getEnv("OUTWAY_URL", "http://hv-outway:8080"),
 		OutwayPath:       getEnv("OUTWAY_PATH", "/bri/graphql"),
 		ConsentURL:       getEnv("CONSENT_URL", "http://consent-register:4002"),
+		HTTPClient:       &http.Client{Timeout: upstreamRequestTimeout},
 	}
 }
 
@@ -110,13 +114,13 @@ func newFscTransactionID() string {
 // consent-register. The PI, not the consent-id, travels in transit inside the
 // GraphQL query variable; the sidecar at the source resolves PI→BSN. The
 // consent-register URL comes from config.
-func fetchConsentPI(ctx context.Context, consentURL, consentID string) (string, error) {
+func fetchConsentPI(ctx context.Context, client *http.Client, consentURL, consentID string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, consentURL+"/consents/"+consentID, nil)
 	if err != nil {
 		return "", err
 	}
 	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -163,6 +167,11 @@ func buildQuery(jaren []int, fields []string) string {
 }
 
 func handleQuery(cfg config) http.HandlerFunc {
+	client := cfg.HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: upstreamRequestTimeout}
+	}
+
 	return func(w http.ResponseWriter, r *http.Request) {
 		corsHeaders(w)
 		if r.Method == http.MethodOptions {
@@ -197,7 +206,7 @@ func handleQuery(cfg config) http.HandlerFunc {
 		// Step 1 — Consent-lookup: fetch the PI for this consent-id from the
 		// consent-register. The PI travels in the query; the consent-id does
 		// not.
-		pi, err := fetchConsentPI(ctx, cfg.ConsentURL, req.ConsentID)
+		pi, err := fetchConsentPI(ctx, client, cfg.ConsentURL, req.ConsentID)
 		if err != nil {
 			log.Warn("consent-lookup failed", "consent_id", req.ConsentID, "err", err.Error())
 			writeJSON(w, http.StatusForbidden, map[string]any{
@@ -234,15 +243,19 @@ func handleQuery(cfg config) http.HandlerFunc {
 		span.SetAttributes(attribute.String("gbo.fsc.transaction_id", fscTxID))
 		otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(proxyReq.Header))
 
-		proxyResp, err := http.DefaultClient.Do(proxyReq)
+		traceID := traceIDFromSpan(span)
+		proxyResp, err := client.Do(proxyReq)
 		if err != nil {
 			log.Error("fsc outway call failed", "err", err.Error())
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "fsc outway call failed: " + err.Error()})
+			writeJSON(w, http.StatusBadGateway, queryResponse{
+				Allowed: false,
+				Reason:  "fsc_outway_call_failed: " + err.Error(),
+				TraceID: traceID,
+			})
 			return
 		}
 		defer proxyResp.Body.Close()
 		proxyRespBody, _ := io.ReadAll(proxyResp.Body)
-		traceID := traceIDFromSpan(span)
 
 		// Skip backend-side history-post when the dev-portal is the trigger;
 		// its frontend already logs the run (X-Demo-Source header signals).
