@@ -401,6 +401,13 @@ func handleFSCAuthZen(cfg config, client *http.Client, schemas map[string]*ast.S
 		if scope == "" {
 			scope = env.Context.Headers["X-GBO-Scope"]
 		}
+		// The consent this request is backed by (DvTP-flow). Travels as an
+		// untrusted header like X-GBO-Scope; the PIP lookup in enrichInput
+		// evaluates exactly this record.
+		consentID := env.Context.Headers["X-Gbo-Consent-Id"]
+		if consentID == "" {
+			consentID = env.Context.Headers["X-GBO-Consent-Id"]
+		}
 		// Flow dispatch: prefer the trusted additional claim from the FSC
 		// token, then fall back to the untrusted X-GBO-Flow header for
 		// deployments that do not yet configure the Additional Claims
@@ -437,7 +444,7 @@ func handleFSCAuthZen(cfg config, client *http.Client, schemas map[string]*ast.S
 		opaInput := map[string]any{
 			"input": map[string]any{
 				"subject":  map[string]any{"type": "org", "id": peerID},
-				"resource": map[string]any{"scope": scope, "query": query, "variables": variables},
+				"resource": map[string]any{"scope": scope, "query": query, "variables": variables, "consent_id": consentID},
 				"action":   map[string]any{"name": flow},
 				"trace_id": traceIDStr,
 				// The FSC-transaction-id also lives on the OPA input so
@@ -551,26 +558,30 @@ func enrichInput(ctx context.Context, body []byte, schemas map[string]*ast.Schem
 		}
 		pipData["pid"] = pipPID{BSN: bsn}
 	default:
-		// DvTP-flow: fetch consent from the consent-register. Two paths
-		// for backwards compatibility:
-		//   1. New: PI in resource.variables.bsn — lookup by PI, unioning
-		//      all ACTIVE consents (per-year scopes may live in separate
-		//      records; the citizen may also broaden consent over time).
-		//   2. Old (pep-service path): resource.consent_id — lookup by ID.
+		// DvTP-flow: fetch consent from the consent-register. Three paths:
+		//   1. Referenced consent (resource.consent_id, from the
+		//      X-GBO-Consent-Id header) — AUTHORITATIVE: the PIP lookup is
+		//      exactly this record. Other consents for the same PI do not
+		//      count; revoking this record deterministically denies this
+		//      query (CONSENT_WITHDRAWN / CONSENT_NOT_FOUND).
+		//   2. Legacy: PI in resource.variables.bsn without a consent-id —
+		//      union of all ACTIVE consents for the PI.
+		//   3. Oldest (pep-service path): resource.consent_id with no PI
+		//      in the query — same by-ID lookup as path 1.
 		// Fail-soft → exists=false so OPA denies fail-closed with
 		// CONSENT_NOT_FOUND.
 		pip := pipConsent{Exists: false}
 		var c *consentRecord
 		var err error
-		if pi := extractStringVar(ai.Input.Resource.Variables, "bsn"); pi != "" && looksLikePI(pi) {
-			c, err = fetchConsentByPI(ctx, client, consentURL, pi)
-			if err != nil {
-				slog.Info("consent by-PI fetch failed", "pi", pi, "err", err.Error())
-			}
-		} else if ai.Input.Resource.ConsentID != "" {
+		if ai.Input.Resource.ConsentID != "" {
 			c, err = fetchConsent(ctx, client, consentURL, ai.Input.Resource.ConsentID)
 			if err != nil {
 				slog.Info("consent by-ID fetch failed", "consent_id", ai.Input.Resource.ConsentID, "err", err.Error())
+			}
+		} else if pi := extractStringVar(ai.Input.Resource.Variables, "bsn"); pi != "" && looksLikePI(pi) {
+			c, err = fetchConsentByPI(ctx, client, consentURL, pi)
+			if err != nil {
+				slog.Info("consent by-PI fetch failed", "pi", pi, "err", err.Error())
 			}
 		}
 		if c != nil {
@@ -664,10 +675,9 @@ func looksLikePI(s string) bool {
 
 // fetchConsentByPI fetches all ACTIVE consents for a PI and merges them
 // into one policy view: the union of granted_scopes and the latest
-// valid_until. Per-year scopes (bd:ib:2024, bd:ib:2025) may live in
-// separate consent records, and a citizen can broaden consent over time
-// by issuing a new one — the first-match lookup would otherwise
-// evaluate against a stale, narrower record.
+// valid_until. LEGACY fallback for callers that do not send a
+// consent-id — when X-GBO-Consent-Id is present the referenced consent
+// record is authoritative (fetchConsent) and this function is not used.
 // Returns nil without error when no ACTIVE consent is found —
 // enrichInput handles the fail-closed path.
 func fetchConsentByPI(ctx context.Context, client *http.Client, baseURL, pi string) (*consentRecord, error) {
