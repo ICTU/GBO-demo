@@ -23,7 +23,7 @@
             "attestation_type": "nl.gbo.belastingdienst.inkomensverklaring",
             "attributes": {
               "belastingjaar": 2025,
-              "peil_datum": "2026-01-01",
+              "indieningsdatum": "2026-03-31",
               "verzamelinkomen": 45000
             }
           }

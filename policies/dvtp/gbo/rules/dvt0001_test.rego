@@ -15,7 +15,7 @@ import data.dvtp.gbo.rules.dvt0001
 # per test via object.union.
 _base_ctx := {
 	"subject": {"type": "org", "id": "99999999900000000300"},
-	"args": {"input.burgerservicenummer": "PI-abc123"},
+	"args": {"bsn": "PI-abc123"},
 	"time": "2026-07-06T12:00:00Z",
 	"resource": {
 		"scope": "bd:ib:2025",
@@ -28,7 +28,7 @@ _base_ctx := {
 		"granted_scopes": ["bd:ib:2025"],
 		"pi": "PI-abc123",
 	}},
-	"field": "Query.inkomensgegevens",
+	"field": "Query.ingeschrevenPersoon.heeftBelastingjaarAangifte",
 }
 
 # ── Happy path ──────────────────────────────────────────────────────────
@@ -79,7 +79,7 @@ test_deny_scope_not_in_granted_scopes if {
 
 test_deny_constraint_mismatch if {
 	ctx := object.union(_base_ctx, {
-		"args": {"input.burgerservicenummer": "PI-different"},
+		"args": {"bsn": "PI-different"},
 	})
 	result := lib.evaluate(dvt0001.spec, ctx)
 	result.decision == false

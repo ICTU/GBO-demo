@@ -19,7 +19,7 @@ _base_ctx := {
 	"time": "2026-07-06T12:00:00Z",
 	"resource": {"scope": "bd:ib:2025"},
 	"pip": {"pid": {"bsn": "123456789"}},
-	"field": "Query.inkomensgegevens",
+	"field": "Query.ingeschrevenPersoon.heeftBelastingjaarAangifte",
 }
 
 # ── Happy path ──────────────────────────────────────────────────────────

@@ -1,13 +1,13 @@
 {
   "id": "use-veld-buiten-scope-deny",
   "name": "Use · veld buiten rule-coverage DENY",
-  "desc": "Query vraagt inkomenUitBox2 — niet gedekt door DVT0001 → NO_APPLICABLE_RULE per-veld.",
+  "desc": "Query vraagt box2Inkomen — niet gedekt door DVT0001; alleen EUD0001 dekt dat veld → DENY (PID_NOT_PRESENT in de DvTP-flow).",
   "tab": "use",
   "expected_outcome": "deny",
   "payload": {
     "consent_id": "",
     "scope_id": "bd:ib:2025",
     "belastingjaren": [2025],
-    "fields": ["belastingjaar", "verzamelinkomen", "inkomenUitBox2"]
+    "fields": ["belastingjaar", "verzamelinkomen", "box2Inkomen"]
   }
 }

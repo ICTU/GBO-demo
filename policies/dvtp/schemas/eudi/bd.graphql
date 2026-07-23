@@ -1,0 +1,56 @@
+# Clean (directive-free) SDL of the BD-bron for the EUDI inkomensverklaring
+# flow. Same bron schema as ../bd.graphql — both flows query
+# ingeschrevenPersoon(bsn) directly; the EUDI adapter takes the BSN from the
+# disclosed PID, so no consentId translation is needed.
+#
+# Subset of the upstream schema — the types the demo bron exposes:
+#   https://github.com/ICTU/gbo-semantiek/blob/main/v0.3/graphql/bd.graphql
+# The upstream file is not mirrored verbatim: gqlparser (PDP) rejects its
+# interface covariance (Aftrekpost/VermogensBestanddeel narrow the
+# FiscaalFeit.categorie type), and the mock bron only serves AangifteIH.
+#
+# Attribute naming matches what inkomensverklaring_metadata.json expects
+# in the credential-attributes: belastingjaar, verzamelinkomen,
+# indieningsdatum. These fields are shown in the wallet UI.
+
+scalar BSN
+scalar CodelijstISO4217
+scalar Datum
+
+interface BelastingjaarAangifte {
+  aangifteIdentificatie: String!
+  indieningsdatum: Datum
+  status: String!
+  belastingjaar: Int!
+  belastingsoort: String!
+  ingangsdatumAangifte: Datum
+  einddatumAangifte: Datum
+}
+
+type AangifteIH implements BelastingjaarAangifte {
+  aangifteIdentificatie: String!
+  indieningsdatum: Datum
+  status: String!
+  belastingjaar: Int!
+  belastingsoort: String!
+  ingangsdatumAangifte: Datum
+  einddatumAangifte: Datum
+  verzamelinkomen: Bedrag
+  box1Inkomen: Bedrag
+  box2Inkomen: Bedrag
+  box3Inkomen: Bedrag
+}
+
+type IngeschrevenPersoon {
+  bsn: BSN!
+  heeftBelastingjaarAangifte: [BelastingjaarAangifte!]
+}
+
+type Bedrag {
+  waarde: Float!
+  valuta: CodelijstISO4217
+}
+
+type Query {
+  ingeschrevenPersoon(bsn: BSN!): IngeschrevenPersoon
+}

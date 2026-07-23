@@ -144,26 +144,94 @@ func fetchConsentPI(ctx context.Context, client *http.Client, consentURL, consen
 	return c.PI, nil
 }
 
-// buildQuery renders the GraphQL query. The query uses `burgerservicenummer`
-// as its argument, but the actual value passed in the variable is a PI. This
-// matches the EUDI shape exactly. The sidecar at the source resolves PI→BSN
-// (subject_id_type=pseudonym), so the source always sees a BSN. The `$bsn`
-// variable name is kept explicit so the PDP AST-parser picks it up as
-// input.burgerservicenummer.
+// buildQuery renders the GraphQL query against the BD bron-schema. The
+// query uses `bsn` as its argument, but the actual value passed in the
+// variable is a PI. This matches the EUDI shape exactly. The sidecar at
+// the source resolves PI→BSN (subject_id_type=pseudonym), so the source
+// always sees a BSN. The `$bsn` variable name is kept explicit so the PDP
+// AST-parser picks it up as the bsn argument.
 //
-// `fields` is an optional field-selection; empty = default set of 5 fields.
-// Scenarios that want to test out-of-scope fields (e.g. inkomenUitBox2) set
-// fields explicitly.
-func buildQuery(jaren []int, fields []string) string {
-	if len(jaren) == 0 {
-		jaren = []int{2024, 2025}
-	}
+// `fields` is an optional field-selection; empty = default set of 5
+// fields. Bedrag-fields (verzamelinkomen, box*Inkomen) only exist on the
+// concrete AangifteIH type, so they are wrapped in an inline fragment
+// with their scalar leaves selected. Scenarios that want to test
+// out-of-scope fields (e.g. box2Inkomen) set fields explicitly.
+//
+// The BD schema has no belastingjaren argument — year filtering happens
+// client-side in filterAangiftenByYear after the response comes back.
+func buildQuery(fields []string) string {
 	if len(fields) == 0 {
-		fields = []string{"belastingjaar", "verzamelinkomen", "inkomenUitBox1", "grondslag { code omschrijving }", "peilDatum"}
+		fields = []string{"belastingjaar", "verzamelinkomen", "box1Inkomen", "status", "indieningsdatum"}
 	}
-	jarenJSON, _ := json.Marshal(jaren)
-	return fmt.Sprintf(`query($bsn: String!) { inkomensgegevens(input: { burgerservicenummer: $bsn, belastingjaren: %s }) { %s } }`,
-		string(jarenJSON), strings.Join(fields, " "))
+	var plain, bedragen []string
+	for _, f := range fields {
+		if bedragFields[f] {
+			bedragen = append(bedragen, f+" { waarde valuta }")
+		} else {
+			plain = append(plain, f)
+		}
+	}
+	selection := strings.Join(plain, " ")
+	if len(bedragen) > 0 {
+		selection += " ... on AangifteIH { " + strings.Join(bedragen, " ") + " }"
+	}
+	return fmt.Sprintf(`query($bsn: BSN!) { ingeschrevenPersoon(bsn: $bsn) { heeftBelastingjaarAangifte { %s } } }`, selection)
+}
+
+// bedragFields are the AangifteIH fields of type Bedrag in the BD schema.
+var bedragFields = map[string]bool{
+	"verzamelinkomen": true,
+	"box1Inkomen":     true,
+	"box2Inkomen":     true,
+	"box3Inkomen":     true,
+}
+
+// filterAangiftenByYear filters data.ingeschrevenPersoon.heeftBelastingjaarAangifte
+// down to the requested belastingjaren. The BD bron-schema has no year
+// argument, so the bron returns all aangiften and the consumer selects the
+// years it asked for. Empty jaren = no filtering. On any shape mismatch the
+// body is returned unchanged.
+func filterAangiftenByYear(body []byte, jaren []int) []byte {
+	if len(jaren) == 0 {
+		return body
+	}
+	yearSet := make(map[float64]bool, len(jaren))
+	for _, y := range jaren {
+		yearSet[float64(y)] = true
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return body
+	}
+	data, ok := resp["data"].(map[string]any)
+	if !ok {
+		return body
+	}
+	persoon, ok := data["ingeschrevenPersoon"].(map[string]any)
+	if !ok {
+		return body
+	}
+	aangiften, ok := persoon["heeftBelastingjaarAangifte"].([]any)
+	if !ok {
+		return body
+	}
+	filtered := make([]any, 0, len(aangiften))
+	for _, a := range aangiften {
+		m, ok := a.(map[string]any)
+		if !ok {
+			continue
+		}
+		jaar, ok := m["belastingjaar"].(float64)
+		if ok && yearSet[jaar] {
+			filtered = append(filtered, a)
+		}
+	}
+	persoon["heeftBelastingjaarAangifte"] = filtered
+	out, err := json.Marshal(resp)
+	if err != nil {
+		return body
+	}
+	return out
 }
 
 func handleQuery(cfg config) http.HandlerFunc {
@@ -222,7 +290,15 @@ func handleQuery(cfg config) http.HandlerFunc {
 		// substitutes it back to BSN). No separate token-fetch is needed:
 		// the Outway picks a contract by grant-link, signs the token
 		// internally, and opens mTLS to the Inway.
-		query := buildQuery(req.Belastingjaren, req.Fields)
+		//
+		// The BD bron-schema has no belastingjaren argument; the bron
+		// returns all aangiften and we filter the requested years from
+		// the response (default: the two most recent years).
+		jaren := req.Belastingjaren
+		if len(jaren) == 0 {
+			jaren = []int{2024, 2025}
+		}
+		query := buildQuery(req.Fields)
 		vars := map[string]string{"bsn": pi}
 		proxyBody, _ := json.Marshal(map[string]any{
 			"query":     query,
@@ -266,7 +342,7 @@ func handleQuery(cfg config) http.HandlerFunc {
 			log.Info("query allowed", "consent_id", req.ConsentID, "trace_id", traceID)
 			resp := queryResponse{
 				Allowed: true,
-				Data:    json.RawMessage(proxyRespBody),
+				Data:    json.RawMessage(filterAangiftenByYear(proxyRespBody, jaren)),
 				TraceID: traceID,
 			}
 			writeJSON(w, http.StatusOK, resp)
