@@ -18,7 +18,10 @@ type AttestationConfig = {
   clientId: string // reader-cert client_id
 }
 
-const CLIENT_ID = import.meta.env.VITE_EUDI_CLIENT_ID ?? 'reader.example.com'
+const CLIENT_ID =
+  window.__GBO_RUNTIME_CONFIG__?.eudiClientId ??
+  import.meta.env.VITE_EUDI_CLIENT_ID ??
+  'reader.example.com'
 
 const ATTESTATION_TYPES: AttestationConfig[] = [
   {
