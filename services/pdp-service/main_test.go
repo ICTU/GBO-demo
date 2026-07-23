@@ -82,7 +82,7 @@ func loadTestSchemas(t *testing.T) map[string]*ast.Schema {
 // TestHealth verifies the health-endpoint responds without any external
 // dependencies.
 func TestHealth(t *testing.T) {
-	cfg := config{OPAURL: "http://unused"}
+	cfg := config{EngineURL: "http://unused"}
 	srv := httptest.NewServer(newMux(cfg, http.DefaultClient, loadTestSchemas(t)))
 	defer srv.Close()
 
@@ -96,13 +96,13 @@ func TestHealth(t *testing.T) {
 	}
 }
 
-// TestFSCAuthZenHappyPath stubs OPA + consent-register and POSTs a valid
-// AuthZen envelope to /evaluation. Verifies the PDP:
+// TestFSCAuthZenHappyPath stubs the OpenFTV PDP + consent-register and
+// POSTs a valid AuthZen envelope to /evaluation. Verifies the PDP:
 //   - parses the envelope
 //   - dispatches to enrichInput
-//   - forwards the enriched input to OPA
-//   - translates OPA's {result:{decision,context}} back to the AuthZen
-//     wire-shape {decision, context}
+//   - forwards an AuthZEN evaluation with the enrichment in context
+//   - translates OpenFTV's {decision, context.reasonUser} back to the
+//     AuthZen wire-shape {decision, context}
 func TestFSCAuthZenHappyPath(t *testing.T) {
 	// Stub consent-register: return one ACTIVE consent for the by-PI lookup
 	// so the DvTP-flow enrichment succeeds.
@@ -116,33 +116,34 @@ func TestFSCAuthZenHappyPath(t *testing.T) {
 	}))
 	defer consentSrv.Close()
 
-	// Stub OPA: assert we received a POST to /v1/data/dvtp/authz with
-	// enriched input, then respond with an allow-decision.
-	var opaSawEnriched bool
-	opaSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/v1/data/dvtp/authz" {
+	// Stub OpenFTV: assert we received a POST to /authzen/v1/evaluation
+	// with the enrichment in context, then respond with an allow-decision.
+	var engineSawEnriched bool
+	engineSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/authzen/v1/evaluation" {
 			http.Error(w, "unexpected: "+r.Method+" "+r.URL.Path, http.StatusBadRequest)
 			return
 		}
 		body, _ := io.ReadAll(r.Body)
 		var env struct {
-			Input map[string]json.RawMessage `json:"input"`
+			Context map[string]json.RawMessage `json:"context"`
 		}
 		_ = json.Unmarshal(body, &env)
-		// enrichInput MUST populate resolved and pip on the OPA input;
-		// this is the load-bearing contract between PDP and OPA.
-		if _, hasResolved := env.Input["resolved"]; hasResolved {
-			if _, hasPip := env.Input["pip"]; hasPip {
-				opaSawEnriched = true
+		// enrichInput MUST populate resolved and pip; they travel in the
+		// AuthZEN context because OpenFTV drops S/A/R properties from the
+		// OPA input. This is the load-bearing contract with the engine.
+		if _, hasResolved := env.Context["resolved"]; hasResolved {
+			if _, hasPip := env.Context["pip"]; hasPip {
+				engineSawEnriched = true
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"result":{"decision":true,"context":{"reason_admin":{"code":"OK"}}}}`))
+		_, _ = w.Write([]byte(`{"decision":true,"context":{"id":"0","reasonUser":{"en":"ok"}}}`))
 	}))
-	defer opaSrv.Close()
+	defer engineSrv.Close()
 
 	cfg := config{
-		OPAURL:     opaSrv.URL,
+		EngineURL:  engineSrv.URL,
 		ConsentURL: consentSrv.URL,
 	}
 	client := &http.Client{Timeout: 5 * time.Second}
@@ -187,7 +188,7 @@ func TestFSCAuthZenHappyPath(t *testing.T) {
 	if !authzen.Decision {
 		t.Fatalf("decision = false, want true; ctx=%+v", authzen.Context)
 	}
-	if !opaSawEnriched {
-		t.Fatalf("OPA did not receive enriched input (resolved + pip missing)")
+	if !engineSawEnriched {
+		t.Fatalf("engine did not receive enriched input (resolved + pip missing)")
 	}
 }

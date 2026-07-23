@@ -65,6 +65,10 @@ jobs:
         run: |
           docker run --rm -v $(pwd)/policies:/w -w /w \
             $OPA_IMAGE test /w -v
+      - name: rules.json is up to date
+        run: |
+          ./scripts/gen-rules-json.sh
+          git diff --exit-code -- services/dev-portal-backend/rules.json
 
   chart:
     name: Helm chart — lint + template
@@ -78,10 +82,10 @@ jobs:
         run: helm lint deploy/helm/gbo-app
       - name: helm template — default values
         run: helm template gbo-app deploy/helm/gbo-app
-      - name: helm template — OPA
+      - name: helm template — OpenFTV PDP
         run: >-
-          helm template opa deploy/helm/gbo-app
-          --values deploy/helm/gbo-app/examples/opa-values.yaml
+          helm template openftv-pdp deploy/helm/gbo-app
+          --values deploy/helm/gbo-app/examples/openftv-pdp-values.yaml
       - name: helm template — PDP service
         run: >-
           helm template pdp-service deploy/helm/gbo-app

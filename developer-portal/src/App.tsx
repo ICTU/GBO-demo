@@ -109,7 +109,7 @@ export default function App() {
         status: 0,
         body: { trace_id: traceId, usecase: eudiPayload.usecase },
         trace_id: traceId,
-        narrative: 'EUDI-flow gedetecteerd. Zie 3.5 FSC-transactielog voor per-hop-bewijs; OPA-decision (allow/deny) kan via Jaeger op tag gbo.fsc.transaction_id worden opgezocht.',
+        narrative: 'EUDI-flow gedetecteerd. Zie 3.5 FSC-transactielog voor per-hop-bewijs; PDP-decision (allow/deny) kan via Jaeger op tag gbo.fsc.transaction_id worden opgezocht.',
       })
       setArchTraceId(traceId)
       setArchMode('eudi-issuance')

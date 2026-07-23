@@ -73,24 +73,28 @@ services:
       jaeger:
         condition: service_healthy
 
-  opa:
-    image: openpolicyagent/opa:1.16.2
-    command:
-      - "run"
-      - "--server"
-      - "--addr=0.0.0.0:8181"
-      - "--watch"
-      - "--log-level=info"
-      - "--set=decision_logs.console=true"
-      - "/policies"
+  # OpenFTV PDP with the embedded OPA/Rego engine (replaces the bare
+  # OPA container). AuthZEN evaluation API on :8443; health on :8080.
+  # Note: PDP_POLICIES_LANGUAGE must be "rego" — the documented value
+  # "OPA" makes OpenFTV silently skip all policy files (upstream quirk).
+  openftv-pdp:
+    build: ./services/openftv-pdp
+    environment:
+      - PDP_POLICIES_LANGUAGE=rego
+      - PDP_POLICIES_STORE=/policies
+      - PDP_POLICIES_STORE_RECURSE=true
+      - PDP_ADL_TYPE=stdout
+      - PDP_ADL_SERVICE_NAME=gbo
+      - PDP_LOG_LEVEL=info
     ports:
-      - "9181:8181"
+      - "9181:8443"
+      - "9180:8080"
     volumes:
-      - ./policies:/policies
+      - ./policies:/policies:ro
     networks:
       - backend
     healthcheck:
-      test: ["CMD", "/opa", "eval", "true"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -174,8 +178,8 @@ services:
       retries: 5
 
   # XACML context-handler. Sits between the FSC-Inway AuthZen call and
-  # the OPA decision engine: parses the GraphQL query, enriches the input
-  # with PIP data (consent), and forwards to OPA.
+  # the OpenFTV PDP (OPA/Rego engine): parses the GraphQL query,
+  # enriches the input with PIP data (consent), and forwards to OpenFTV.
   pdp-service:
     build: ./services/pdp-service
     ports:
@@ -183,7 +187,7 @@ services:
     environment:
       - OTEL_SERVICE_NAME=pdp-service
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
-      - OPA_URL=http://opa:8181
+      - PDP_ENGINE_URL=http://openftv-pdp:8443
       - SCHEMA_DIR=/schemas
       - CONSENT_URL=http://consent-register:4002
       # TLS for the FSC-Inway AuthZen plugin (requires HTTPS + CA).
@@ -200,7 +204,7 @@ services:
       # therefore be reachable inside fsc-infra_default.
       - fsc-infra
     depends_on:
-      opa:
+      openftv-pdp:
         condition: service_healthy
       consent-register:
         condition: service_healthy
@@ -386,8 +390,15 @@ services:
       - FSC_TXLOG_BD_KEY=/certs/bd/internal-cert-key.pem
       - FSC_TXLOG_BD_CA=/certs/bd/intermediate_ca.pem
       - FSC_GROUP_ID=fsc-demo
+      # Policy introspection for /policy-* endpoints reads the Rego
+      # sources from disk (OpenFTV PDP has no /v1/policies); /rules
+      # serves the pre-generated rules.json (scripts/gen-rules-json.sh).
+      - POLICIES_DIR=/policies
+      - RULES_FILE=/rules.json
     volumes:
       - dev-portal-var:/var
+      - ./policies:/policies:ro
+      - ./services/dev-portal-backend/rules.json:/rules.json:ro
       - ./services/graphql-server/mockdata:/citizens:ro
       - ./services/sector-pip/config:/orgs:ro
       - ./fsc-infra/orgs/edi-issuer/pki/internal:/certs/edi:ro
@@ -399,10 +410,10 @@ services:
       # reached directly over their internal DNS names.
       - fsc-infra
     depends_on:
-      # /rules, /policy-source, /policy-snippet, /policy-chain, /explain all
-      # hit OPA — cold-start without this dependency causes brief 502s on
-      # those endpoints until OPA's healthcheck flips.
-      opa:
+      # /decision + /explain read the engine's decision log via Loki —
+      # cold-start without this dependency causes brief 502s until the
+      # engine's healthcheck flips.
+      openftv-pdp:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4007/health"]

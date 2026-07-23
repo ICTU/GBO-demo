@@ -8,7 +8,7 @@
 //
 //	→ FSC Outway: pick contract by grant-link, sign token, open mTLS to Inway
 //	→ FSC Inway proxy: forward GraphQL query (with PI as bsn variable)
-//	   ↳ PEP → OPA → BSNk Transform → graphql-server
+//	   ↳ PEP → OpenFTV → BSNk Transform → graphql-server
 //	→ return  {allowed, data | reason, trace_id}
 package main
 

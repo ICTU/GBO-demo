@@ -6,6 +6,7 @@ services/*/*[!.go]
 !services/*/main.go
 !services/*/mockdata/
 !services/*/scenarios/
+!services/dev-portal-backend/rules.json
 !services/*/config/
 
 # Local compose overrides + secrets
