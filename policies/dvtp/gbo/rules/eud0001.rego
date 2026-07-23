@@ -58,6 +58,7 @@ allowed_scopes := {
 # allowed at rule-level for income-declaration issuance.
 allowed_actors := {
 	"00000004000000004000",
+	"0000009961EUDIISS000",
 	"99999999900000000100",
 }
 
