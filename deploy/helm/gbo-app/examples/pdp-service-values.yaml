@@ -13,17 +13,13 @@ health:
   scheme: HTTPS
 healthPath: /health
 
+# GraphQL mirror-schemas are baked into the image at /schemas — no
+# ConfigMap mount needed (a mount would shadow the baked-in files).
 volumeMounts:
-  - name: schemas
-    mountPath: /schemas
-    readOnly: true
   - name: tls
     mountPath: /certs
     readOnly: true
 volumes:
-  - name: schemas
-    configMap:
-      name: pdp-schemas
   - name: tls
     secret:
       secretName: pdp-service-tls
