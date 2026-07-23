@@ -118,7 +118,6 @@
       "inkomen_box1":              { "type": "integer" },
       "inkomen_box2":              { "type": "integer" },
       "inkomen_box3":              { "type": "integer" },
-      "status":                    { "type": "string" },
       "aangifte_status":           { "type": "string" },
       "verklaring_tekst":          { "type": "string" }
     },

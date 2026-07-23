@@ -475,7 +475,7 @@ func formatAsIssuableDocuments(aangifte map[string]any, uc Usecase) []attestatio
 	if v := bedragWaarde(aangifte["box3Inkomen"]); v != nil {
 		attrs["inkomen_box3"] = toCents(v)
 	}
-	attrs["verklaring_tekst"] = fmt.Sprintf("Inkomensverklaring %v via GBO/DvTP", attrs["belastingjaar"])
+	attrs["verklaring_tekst"] = fmt.Sprintf("Inkomensverklaring %v als GBO PubEAA", attrs["belastingjaar"])
 
 	return []attestation{{
 		AttestationType: uc.AttestationType,
