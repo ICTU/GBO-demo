@@ -50,6 +50,25 @@ export default function UseForm({ payload, setPayload, history }: Props) {
     return out
   }, [history])
 
+  // Selecting an issued consent prefills scope_id + belastingjaren from
+  // that consent's scopes (bd:ib:<year>), so the query matches what the
+  // citizen actually consented to.
+  const onConsentSelect = (consentId: string) => {
+    const run = history.find((h) => h.tab === 'issuance' && h.consent_id === consentId)
+    const scopes = run ? ((run.payload as IssuancePayload).scopes ?? []) : []
+    const years = scopes
+      .map((s) => /^bd:ib:(\d{4})$/.exec(s)?.[1])
+      .filter((y): y is string => !!y)
+      .map(Number)
+      .sort((a, b) => a - b)
+    setPayload({
+      ...payload,
+      consent_id: consentId,
+      scope_id: scopes[0] ?? payload.scope_id,
+      belastingjaren: years.length > 0 ? years : payload.belastingjaren,
+    })
+  }
+
   const jaren = payload.belastingjaren ?? [2025]
   const fields = payload.fields ?? DEFAULT_FIELDS
   const preview = previewQuery(fields, jaren)
@@ -63,7 +82,7 @@ export default function UseForm({ payload, setPayload, history }: Props) {
             id="cid"
             className="sel"
             value={payload.consent_id}
-            onChange={(e) => setPayload({ ...payload, consent_id: e.target.value })}
+            onChange={(e) => onConsentSelect(e.target.value)}
           >
             <option value="">— kies uit eerdere issuance —</option>
             {issuedConsents.map(({ consent_id, label }) => (
