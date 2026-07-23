@@ -12,8 +12,7 @@
 #   /input/pip/pid/bsn            — PDP-handler enriches via pipData
 #   /input/resource/variables/bsn — adapter builds query with $bsn variable
 #   /input/resolved/args          — PDP-resolved args-map with key names
-#                                    like "vars.bsn" and
-#                                    "input.burgerservicenummer" (dots in
+#                                    like "vars.bsn" and "bsn" (dots in
 #                                    keys); OPA's mask-processor does not
 #                                    parse JSON-pointers per key cleanly
 #                                    for dots — masking the whole map is

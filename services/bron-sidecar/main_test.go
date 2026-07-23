@@ -53,7 +53,7 @@ func TestForwardDirectPassThrough(t *testing.T) {
 		receivedBody = string(b)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"data":{"inkomensgegevens":[{"belastingjaar":2024}]}}`))
+		_, _ = w.Write([]byte(`{"data":{"ingeschrevenPersoon":{"heeftBelastingjaarAangifte":[{"belastingjaar":2024}]}}}`))
 	}))
 	defer upstream.Close()
 
@@ -68,7 +68,7 @@ func TestForwardDirectPassThrough(t *testing.T) {
 	srv := httptest.NewServer(newMux(cfg, client))
 	defer srv.Close()
 
-	reqBody := `{"query":"query($bsn: String!) { inkomensgegevens(input:{burgerservicenummer:$bsn}) { belastingjaar } }","variables":{"bsn":"123456789"}}`
+	reqBody := `{"query":"query($bsn: BSN!) { ingeschrevenPersoon(bsn: $bsn) { heeftBelastingjaarAangifte { belastingjaar } } }","variables":{"bsn":"123456789"}}`
 	resp, err := http.Post(srv.URL+"/graphql", "application/json", strings.NewReader(reqBody))
 	if err != nil {
 		t.Fatalf("post: %v", err)
@@ -86,15 +86,17 @@ func TestForwardDirectPassThrough(t *testing.T) {
 
 	var out struct {
 		Data struct {
-			Inkomensgegevens []struct {
-				Belastingjaar int `json:"belastingjaar"`
-			} `json:"inkomensgegevens"`
+			IngeschrevenPersoon struct {
+				HeeftBelastingjaarAangifte []struct {
+					Belastingjaar int `json:"belastingjaar"`
+				} `json:"heeftBelastingjaarAangifte"`
+			} `json:"ingeschrevenPersoon"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(out.Data.Inkomensgegevens) != 1 || out.Data.Inkomensgegevens[0].Belastingjaar != 2024 {
+	if len(out.Data.IngeschrevenPersoon.HeeftBelastingjaarAangifte) != 1 || out.Data.IngeschrevenPersoon.HeeftBelastingjaarAangifte[0].Belastingjaar != 2024 {
 		t.Fatalf("unexpected response shape: %+v", out)
 	}
 }

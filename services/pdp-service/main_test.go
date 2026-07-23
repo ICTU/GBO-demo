@@ -51,19 +51,40 @@ func TestTokenPropertiesSupportLegacyClaim(t *testing.T) {
 }
 
 // Minimal in-memory schema used by the /evaluation handler when enriching
-// the OPA input. Structurally similar to policies/dvtp/schemas/*.graphql
+// the OPA input. Structurally similar to policies/dvtp/schemas/bd.graphql
 // but stripped down to keep the test hermetic.
 const testDvtpSDL = `
-type Query {
-  inkomensgegevens(input: InkomensgegevensInput!): [InkomensgegevensPerJaar!]!
-}
-input InkomensgegevensInput {
-  consentId: ID!
-  belastingjaren: [Int!]
-}
-type InkomensgegevensPerJaar {
+scalar BSN
+scalar Datum
+
+interface BelastingjaarAangifte {
+  aangifteIdentificatie: String!
+  indieningsdatum: Datum
+  status: String!
   belastingjaar: Int!
-  verzamelinkomen: Int
+  belastingsoort: String!
+}
+
+type AangifteIH implements BelastingjaarAangifte {
+  aangifteIdentificatie: String!
+  indieningsdatum: Datum
+  status: String!
+  belastingjaar: Int!
+  belastingsoort: String!
+  verzamelinkomen: Bedrag
+}
+
+type IngeschrevenPersoon {
+  bsn: BSN!
+  heeftBelastingjaarAangifte: [BelastingjaarAangifte!]
+}
+
+type Bedrag {
+  waarde: Float!
+}
+
+type Query {
+  ingeschrevenPersoon(bsn: BSN!): IngeschrevenPersoon
 }
 `
 
@@ -157,7 +178,7 @@ func TestFSCAuthZenHappyPath(t *testing.T) {
 		"action": map[string]any{
 			"name": "dvtp:query",
 			"properties": map[string]any{
-				"body": `{"query":"query($bsn: ID!){ inkomensgegevens(input:{consentId:$bsn}){ belastingjaar verzamelinkomen } }","variables":{"bsn":"PI-abc123"}}`,
+				"body": `{"query":"query($bsn: BSN!){ ingeschrevenPersoon(bsn:$bsn){ heeftBelastingjaarAangifte{ belastingjaar ... on AangifteIH { verzamelinkomen { waarde } } } } }","variables":{"bsn":"PI-abc123"}}`,
 			},
 		},
 		"context": map[string]any{

@@ -1,19 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
-type Grondslag = { code: string; omschrijving: string }
+type Bedrag = { waarde: number; valuta?: string }
 
-type IncomeRow = {
+type AangifteRow = {
   belastingjaar: number
-  verzamelinkomen: number | null
-  inkomenUitBox1: number | null
-  grondslag: Grondslag | null
-  peilDatum: string | null
+  verzamelinkomen: Bedrag | null
+  box1Inkomen: Bedrag | null
+  status: string | null
+  indieningsdatum: string | null
 }
 
 type QueryResponse = {
   allowed: boolean
-  data?: { data?: { inkomensgegevens: IncomeRow[] } }
+  data?: { data?: { ingeschrevenPersoon?: { heeftBelastingjaarAangifte?: AangifteRow[] } } }
   reason?: string
   trace_id?: string
 }
@@ -77,7 +77,7 @@ function Result({
   onRefresh,
   refreshing,
 }: {
-  rows: IncomeRow[]
+  rows: AangifteRow[]
   traceId?: string
   onRefresh: () => void
   refreshing: boolean
@@ -95,15 +95,15 @@ function Result({
         {sorted.map((y) => (
           <div key={y.belastingjaar} className="hb-data-table">
             <div className="hb-data-thead">
-              <span className="title">Inkomstenbelasting {y.belastingjaar}</span>
+              <span className="title">Aangifte inkomstenbelasting {y.belastingjaar}</span>
             </div>
             <table>
               <tbody>
                 <tr><td>Belastingjaar</td><td>{y.belastingjaar}</td></tr>
-                <tr><td>Verzamelinkomen</td><td>{fmtEuro(y.verzamelinkomen)}</td></tr>
-                <tr><td>Inkomen uit werk en woning</td><td>{fmtEuro(y.inkomenUitBox1)}</td></tr>
-                <tr><td>Soort inkomen</td><td>{y.grondslag?.omschrijving ?? '—'}</td></tr>
-                <tr><td>Peildatum</td><td>{y.peilDatum ?? '—'}</td></tr>
+                <tr><td>Verzamelinkomen</td><td>{fmtEuro(y.verzamelinkomen?.waarde)}</td></tr>
+                <tr><td>Inkomen uit werk en woning</td><td>{fmtEuro(y.box1Inkomen?.waarde)}</td></tr>
+                <tr><td>Status</td><td>{y.status ?? '—'}</td></tr>
+                <tr><td>Indieningsdatum</td><td>{y.indieningsdatum ?? '—'}</td></tr>
               </tbody>
             </table>
           </div>
@@ -270,9 +270,9 @@ export default function Return() {
           />
         ) : !response ? (
           <Loading phase={phase} />
-        ) : response.allowed && response.data?.data?.inkomensgegevens ? (
+        ) : response.allowed && response.data?.data?.ingeschrevenPersoon?.heeftBelastingjaarAangifte ? (
           <Result
-            rows={response.data.data.inkomensgegevens}
+            rows={response.data.data.ingeschrevenPersoon.heeftBelastingjaarAangifte}
             traceId={response.trace_id}
             onRefresh={() => runQuery(true)}
             refreshing={refreshing}

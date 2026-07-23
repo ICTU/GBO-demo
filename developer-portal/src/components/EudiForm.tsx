@@ -93,7 +93,7 @@ export default function EudiForm({ payload, setPayload, citizens }: Props) {
         <div>
           BSN komt uit de <b>wallet-PID-disclosure</b> — niet uit dit portaal.
           Gebruik in je wallet een BSN die de bron kent, anders krijg je aan
-          het eind <code className="mono">no inkomensgegevens found</code>.
+          het eind <code className="mono">no aangifte found</code>.
         </div>
         {knownBsns.length > 0 && (
           <div className="mono" style={{ fontSize: 11, marginTop: 4 }}>

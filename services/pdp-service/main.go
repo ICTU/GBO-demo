@@ -141,29 +141,29 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
-// loadSchemas reads both consumer-schemas: DvTP (consent-based, with
-// consentId as input) and EUDI (BSN-based, direct). The PDP handler
-// dispatches on action.name to pick the schema to use.
+// loadSchemas reads both consumer-schemas: DvTP (consent-based) and EUDI
+// (wallet-based). Both mirror the same BD bron-schema (bd.graphql); the
+// PDP handler dispatches on action.name to pick the schema to use.
 func loadSchemas(dir string) (map[string]*ast.Schema, error) {
 	schemas := map[string]*ast.Schema{}
-	dvtpSrc, err := os.ReadFile(filepath.Join(dir, "inkomensgegevens.graphql"))
+	dvtpSrc, err := os.ReadFile(filepath.Join(dir, "bd.graphql"))
 	if err != nil {
 		return nil, fmt.Errorf("dvtp schema: %w", err)
 	}
-	dvtp, err := gqlparser.LoadSchema(&ast.Source{Name: "inkomensgegevens.graphql", Input: string(dvtpSrc)})
+	dvtp, err := gqlparser.LoadSchema(&ast.Source{Name: "bd.graphql", Input: string(dvtpSrc)})
 	if err != nil {
 		return nil, fmt.Errorf("parse dvtp schema: %w", err)
 	}
 	schemas["dvtp:query"] = dvtp
 
-	eudiSrc, err := os.ReadFile(filepath.Join(dir, "eudi", "inkomensverklaring.graphql"))
+	eudiSrc, err := os.ReadFile(filepath.Join(dir, "eudi", "bd.graphql"))
 	if err != nil {
 		// The EUDI schema may be absent; fall back to the DvTP schema so
 		// the service still starts.
 		slog.Warn("eudi schema not found, EUDI-flow will fall back to dvtp schema", "err", err.Error())
 		schemas["eudi:attestation"] = dvtp
 	} else {
-		eudi, err := gqlparser.LoadSchema(&ast.Source{Name: "eudi/inkomensverklaring.graphql", Input: string(eudiSrc)})
+		eudi, err := gqlparser.LoadSchema(&ast.Source{Name: "eudi/bd.graphql", Input: string(eudiSrc)})
 		if err != nil {
 			return nil, fmt.Errorf("parse eudi schema: %w", err)
 		}
@@ -581,7 +581,7 @@ func enrichInput(ctx context.Context, body []byte, schemas map[string]*ast.Schem
 			}
 			// Binding-support: lib.constraint_binding reads
 			// resource[<field>], so mirror pip.consent.pi to resource.pi
-			// so the rule's constraint (input.burgerservicenummer ==
+			// so the rule's constraint (bsn-arg ==
 			// resource.pi) is evaluable without a lib-refactor.
 			if c.PI != "" {
 				var res map[string]json.RawMessage

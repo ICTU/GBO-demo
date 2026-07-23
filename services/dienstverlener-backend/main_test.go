@@ -35,7 +35,7 @@ func TestDvtpQueryHappyPath(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":{"inkomensgegevens":[{"belastingjaar":2024,"verzamelinkomen":45000}]}}`))
+		_, _ = w.Write([]byte(`{"data":{"ingeschrevenPersoon":{"bsn":"123456789","heeftBelastingjaarAangifte":[{"belastingjaar":2024,"verzamelinkomen":{"waarde":45000,"valuta":"EUR"}},{"belastingjaar":2025,"verzamelinkomen":{"waarde":46000,"valuta":"EUR"}}]}}}`))
 	}))
 	defer outway.Close()
 
@@ -75,8 +75,13 @@ func TestDvtpQueryHappyPath(t *testing.T) {
 	if outwayHits != 1 {
 		t.Fatalf("expected 1 outway hit, got %d", outwayHits)
 	}
-	if !strings.Contains(string(out.Data), "inkomensgegevens") {
+	if !strings.Contains(string(out.Data), "ingeschrevenPersoon") {
 		t.Fatalf("data payload missing expected field: %s", out.Data)
+	}
+	// The request asked for belastingjaren [2024] — the bron returned
+	// 2024+2025, the backend must filter down to 2024.
+	if strings.Contains(string(out.Data), "46000") || strings.Contains(string(out.Data), "2025") {
+		t.Fatalf("expected aangiften filtered to 2024, got: %s", out.Data)
 	}
 }
 

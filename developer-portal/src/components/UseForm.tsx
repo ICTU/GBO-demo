@@ -10,18 +10,27 @@ type Props = {
 type IssuedConsent = { consent_id: string; label: string }
 
 const DEFAULT_FIELDS = [
-  'belastingjaar', 'verzamelinkomen', 'inkomenUitBox1',
-  'grondslag { code omschrijving }', 'peilDatum',
+  'belastingjaar', 'verzamelinkomen', 'box1Inkomen',
+  'status', 'indieningsdatum',
 ]
 
-// The backend generates the GraphQL-query itself based on `belastingjaren`
-// + `fields` (buildQuery in dienstverlener-backend/main.go). The query
-// always contains `$bsn: String!` — the PI gets filled in by the backend
-// after consent-lookup and travels to HV-Outway as `variables.bsn`. The
-// sidecar at the source resolves PI→BSN (subject_id_type=pseudonym in the
-// grant-property).
-function previewQuery(fields: string[], jaren: number[]): string {
-  return `query($bsn: String!) {\n  inkomensgegevens(input: { burgerservicenummer: $bsn, belastingjaren: ${JSON.stringify(jaren)} }) {\n    ${fields.join('\n    ')}\n  }\n}`
+// The backend generates the GraphQL-query itself based on `fields`
+// (buildQuery in dienstverlener-backend/main.go): Bedrag-fields are wrapped
+// in an `... on AangifteIH` fragment. The query always contains
+// `$bsn: BSN!` — the PI gets filled in by the backend after consent-lookup
+// and travels to HV-Outway as `variables.bsn`. The sidecar at the source
+// resolves PI→BSN (subject_id_type=pseudonym in the grant-property).
+// The BD bron-schema has no belastingjaren argument; the backend filters
+// the requested years from the response.
+function previewQuery(fields: string[]): string {
+  const bedrag = fields.filter((f) => ['verzamelinkomen', 'box1Inkomen', 'box2Inkomen', 'box3Inkomen'].includes(f))
+  const plain = fields.filter((f) => !bedrag.includes(f))
+  const selection =
+    plain.join('\n      ') +
+    (bedrag.length
+      ? `\n      ... on AangifteIH {\n        ${bedrag.map((f) => `${f} { waarde valuta }`).join('\n        ')}\n      }`
+      : '')
+  return `query($bsn: BSN!) {\n  ingeschrevenPersoon(bsn: $bsn) {\n    heeftBelastingjaarAangifte {\n      ${selection}\n    }\n  }\n}`
 }
 
 export default function UseForm({ payload, setPayload, history }: Props) {
@@ -43,7 +52,7 @@ export default function UseForm({ payload, setPayload, history }: Props) {
 
   const jaren = payload.belastingjaren ?? [2025]
   const fields = payload.fields ?? DEFAULT_FIELDS
-  const preview = previewQuery(fields, jaren)
+  const preview = previewQuery(fields)
 
   return (
     <>
@@ -82,7 +91,7 @@ export default function UseForm({ payload, setPayload, history }: Props) {
       </div>
 
       <div className="field">
-        <label htmlFor="jaren">Belastingjaren <span className="opt">(comma-separated)</span></label>
+        <label htmlFor="jaren">Belastingjaren <span className="opt">(comma-separated; bron levert alle jaren, backend filtert)</span></label>
         <input
           id="jaren"
           className="inp mono"
