@@ -285,21 +285,31 @@ func handleQuery(cfg config) http.HandlerFunc {
 			return
 		}
 
-		// Per-year consent: only query the years the consent covers. A
-		// query for an unconsented year would fail policy (YEAR_NOT_COVERED)
-		// and deny the whole request; intersecting here lets the citizen
-		// see exactly the years they consented to, with the rest reported
-		// as denied_years.
+		// Per-year consent. Two consumer profiles:
+		//   - Browser flow (dienstverlener-mock): intersect requested years
+		//     with the consent's scopes and only query the covered ones,
+		//     so the citizen sees exactly the years they consented to and
+		//     the rest comes back as denied_years (greyed out in the UI).
+		//   - Dev-portal (X-Demo-Source): send the query exactly as
+		//     requested — the portal exists to demonstrate raw policy
+		//     outcomes, so a year outside the consent must produce the
+		//     policy deny (YEAR_NOT_COVERED) with a full trace, not a
+		//     client-side pre-filter.
 		jaren := req.Belastingjaren
 		if len(jaren) == 0 {
 			jaren = []int{2024, 2025}
 		}
-		queryable, deniedYears := intersectYears(jaren, consentedYears(scopes))
+		fromDevPortal := r.Header.Get("X-Demo-Source") == "dev-portal"
+		queryable := jaren
+		var deniedYears []int
+		if !fromDevPortal {
+			queryable, deniedYears = intersectYears(jaren, consentedYears(scopes))
+		}
 		traceID := traceIDFromSpan(span)
 
-		// Nothing consented: skip the FSC call (an empty year filter would
-		// fail policy fail-closed anyway) and report every requested year
-		// as denied.
+		// Nothing consented (browser flow only): skip the FSC call (an
+		// empty year filter would fail policy fail-closed anyway) and
+		// report every requested year as denied.
 		if len(queryable) == 0 {
 			log.Info("no requested years covered by consent", "consent_id", req.ConsentID, "trace_id", traceID)
 			emptyData, _ := json.Marshal(map[string]any{
@@ -352,8 +362,8 @@ func handleQuery(cfg config) http.HandlerFunc {
 		proxyRespBody, _ := io.ReadAll(proxyResp.Body)
 
 		// Skip backend-side history-post when the dev-portal is the trigger;
-		// its frontend already logs the run (X-Demo-Source header signals).
-		fromDevPortal := r.Header.Get("X-Demo-Source") == "dev-portal"
+		// its frontend already logs the run (X-Demo-Source header signals,
+		// already read above).
 
 		// 200 = ALLOW with data, 403 = DENY with reason, other = error
 		if proxyResp.StatusCode == http.StatusOK {

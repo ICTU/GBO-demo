@@ -245,3 +245,50 @@ func TestDvtpQueryNoConsentedYears(t *testing.T) {
 		t.Fatalf("denied_years = %v, want [2024 2025]", out.DeniedYears)
 	}
 }
+
+// Dev-portal requests (X-Demo-Source: dev-portal) bypass the year
+// intersection: the portal demonstrates raw policy outcomes, so the
+// query must carry the requested years verbatim — letting the PDP deny
+// unconsented years (YEAR_NOT_COVERED) with a full trace.
+func TestDvtpQueryDevPortalBypassesIntersection(t *testing.T) {
+	consent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"pi":"PI-abc123","status":"ACTIVE","scopes":["bd:ib:2025"]}`))
+	}))
+	defer consent.Close()
+
+	var outwayBody string
+	outway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		outwayBody = string(b)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"allowed":false,"reason":"denied by policy: YEAR_NOT_COVERED"}`))
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer outway.Close()
+
+	cfg := config{
+		OutwayURL:  outway.URL,
+		OutwayPath: "/bri/graphql",
+		ConsentURL: consent.URL,
+	}
+	srv := httptest.NewServer(newMux(cfg))
+	defer srv.Close()
+
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/api/dvtp/query",
+		strings.NewReader(`{"consent_id":"c-1","scope_id":"bd:ib:2025","belastingjaren":[2024,2025]}`))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Demo-Source", "dev-portal")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if !strings.Contains(outwayBody, "belastingjaren: [2024,2025]") {
+		t.Fatalf("expected query with years verbatim, got: %s", outwayBody)
+	}
+}
