@@ -71,6 +71,7 @@ _raw_steps(spec, ctx) := [
 	_check_constraint(spec, ctx),
 	_check_pid_present(spec, ctx),
 	_check_scope_allowed(spec, ctx),
+	_check_years_in_scopes(spec, ctx),
 	_check_actor_allowed(spec, ctx),
 ]
 
@@ -200,6 +201,36 @@ _check_scope_allowed(spec, ctx) := step if {
 	step := _step("SCOPE_NOT_ALLOWED", "Scope allowed for rule", sprintf("%q in spec.allowed_scopes", [scope]), "fail")
 } else := _step_skipped("SCOPE_NOT_ALLOWED", "Scope allowed for rule", "no scope-whitelist configured")
 
+# Year-coverage: only active when the rule sets years_in_scopes. Every
+# belastingjaar requested in the query (flattened args "belastingjaren.N")
+# must be covered by a scope of the form bd:ib:<year> in the available
+# scopes — the consent's granted_scopes (DvTP) or the rule's
+# allowed_scopes (EUDI). The BD bron-schema returns ALL aangiften for a
+# person, so per-year authorization is only enforceable when the year
+# selector travels inside the query; a missing filter therefore fails
+# closed.
+_check_years_in_scopes(spec, ctx) := step if {
+	spec.years_in_scopes
+	years := _requested_years(ctx)
+	count(years) > 0
+	scopes := _available_scopes(spec, ctx)
+	uncovered := [y | some y in years; not sprintf("bd:ib:%v", [y]) in scopes]
+	count(uncovered) == 0
+	step := _step("YEAR_NOT_COVERED", "Requested years covered by scopes", sprintf("%d year(s) covered", [count(years)]), "pass")
+} else := step if {
+	spec.years_in_scopes
+	years := _requested_years(ctx)
+	count(years) > 0
+	scopes := _available_scopes(spec, ctx)
+	uncovered := [y | some y in years; not sprintf("bd:ib:%v", [y]) in scopes]
+	count(uncovered) > 0
+	step := _step("YEAR_NOT_COVERED", "Requested years covered by scopes", sprintf("bd:ib:%v in scopes", [uncovered[0]]), "fail")
+} else := step if {
+	spec.years_in_scopes
+	count(_requested_years(ctx)) == 0
+	step := _step("YEAR_NOT_COVERED", "Requested years covered by scopes", "belastingjaren filter present in query", "fail")
+} else := _step_skipped("YEAR_NOT_COVERED", "Requested years covered by scopes", "n/a")
+
 # Actor-authorization: only explicitly designated actors may trigger this
 # rule. Supports e.g. eIDAS art. 5a-style designation: one designated
 # EDI-issuer per attestation-type. Without this axis, any OIN that passes
@@ -242,6 +273,26 @@ constraint_binding_satisfied(fm, ctx) if {
 	arg_value := ctx.args[fm.arg]
 	res_value := object.get(ctx.resource, fm.resource_field, "")
 	arg_value == res_value
+}
+
+# ── Year-coverage helpers ────────────────────────────────────────────────────
+# The PDP flattens the query's belastingjaren argument into args keys
+# "belastingjaren.0", "belastingjaren.1", ... Values are strings when the
+# query embeds literal ints; sprintf %v normalizes both shapes.
+
+_requested_years(ctx) := {y |
+	some k, v in ctx.args
+	startswith(k, "belastingjaren.")
+	y := v
+}
+
+# Scopes available to the flow: the consent's granted_scopes (DvTP) union
+# the rule's own allowed_scopes (EUDI). Exactly one of the two is non-empty
+# per flow.
+_available_scopes(spec, ctx) := scopes if {
+	consent_scopes := object.get(object.get(ctx.pip, "consent", {}), "granted_scopes", [])
+	rule_scopes := object.get(spec, "allowed_scopes", [])
+	scopes := {s | some s in consent_scopes} | {s | some s in rule_scopes}
 }
 
 # ── Field-in-consent-check ───────────────────────────────────────────────────

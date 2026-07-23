@@ -81,6 +81,50 @@ func TestGraphQLHappyPath(t *testing.T) {
 	}
 }
 
+// The belastingjaren argument (demo-bron extension) filters the returned
+// aangiften server-side so per-year policy enforcement has a query-side
+// selector to bind to.
+func TestGraphQLBelastingjarenFilter(t *testing.T) {
+	if err := loadMockData("mockdata/citizens.json"); err != nil {
+		t.Fatalf("loadMockData: %v", err)
+	}
+	tracer := otel.Tracer("graphql-server-test")
+	schema, err := buildSchema(tracer)
+	if err != nil {
+		t.Fatalf("buildSchema: %v", err)
+	}
+	srv := httptest.NewServer(newMux(&schema, tracer))
+	defer srv.Close()
+
+	body := `{"query":"query($bsn: BSN!) { ingeschrevenPersoon(bsn: $bsn) { heeftBelastingjaarAangifte(belastingjaren: [2025]) { belastingjaar } } }","variables":{"bsn":"123456789"}}`
+	resp, err := http.Post(srv.URL+"/graphql", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var out struct {
+		Data struct {
+			IngeschrevenPersoon *struct {
+				HeeftBelastingjaarAangifte []struct {
+					Belastingjaar int `json:"belastingjaar"`
+				} `json:"heeftBelastingjaarAangifte"`
+			} `json:"ingeschrevenPersoon"`
+		} `json:"data"`
+		Errors []any `json:"errors"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out.Errors) > 0 {
+		t.Fatalf("graphql errors: %+v", out.Errors)
+	}
+	aangiften := out.Data.IngeschrevenPersoon.HeeftBelastingjaarAangifte
+	if len(aangiften) != 1 || aangiften[0].Belastingjaar != 2025 {
+		t.Fatalf("expected only 2025 aangifte, got %+v", aangiften)
+	}
+}
+
 func TestGraphQLHealth(t *testing.T) {
 	if err := loadMockData("mockdata/citizens.json"); err != nil {
 		t.Fatalf("loadMockData: %v", err)

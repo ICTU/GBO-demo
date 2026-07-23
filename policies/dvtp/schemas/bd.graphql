@@ -42,7 +42,10 @@ type AangifteIH implements BelastingjaarAangifte {
 
 type IngeschrevenPersoon {
   bsn: BSN!
-  heeftBelastingjaarAangifte: [BelastingjaarAangifte!]
+  # belastingjaren is a demo-bron extension of the upstream schema: the
+  # PDP can only enforce per-year consent when the year selector travels
+  # inside the query.
+  heeftBelastingjaarAangifte(belastingjaren: [Int!]): [BelastingjaarAangifte!]
 }
 
 type Bedrag {

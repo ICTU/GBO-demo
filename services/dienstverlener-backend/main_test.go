@@ -28,14 +28,17 @@ func TestDvtpQueryHappyPath(t *testing.T) {
 
 	// Stub FSC-Outway: mirror back a GraphQL-style success payload.
 	var outwayHits int
+	var outwayBody string
 	outway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		outwayHits++
 		if r.URL.Path != "/bri/graphql" {
 			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
 			return
 		}
+		b, _ := io.ReadAll(r.Body)
+		outwayBody = string(b)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":{"ingeschrevenPersoon":{"bsn":"123456789","heeftBelastingjaarAangifte":[{"belastingjaar":2024,"verzamelinkomen":{"waarde":45000,"valuta":"EUR"}},{"belastingjaar":2025,"verzamelinkomen":{"waarde":46000,"valuta":"EUR"}}]}}}`))
+		_, _ = w.Write([]byte(`{"data":{"ingeschrevenPersoon":{"bsn":"123456789","heeftBelastingjaarAangifte":[{"belastingjaar":2024,"verzamelinkomen":{"waarde":45000,"valuta":"EUR"}}]}}}`))
 	}))
 	defer outway.Close()
 
@@ -78,10 +81,10 @@ func TestDvtpQueryHappyPath(t *testing.T) {
 	if !strings.Contains(string(out.Data), "ingeschrevenPersoon") {
 		t.Fatalf("data payload missing expected field: %s", out.Data)
 	}
-	// The request asked for belastingjaren [2024] — the bron returned
-	// 2024+2025, the backend must filter down to 2024.
-	if strings.Contains(string(out.Data), "46000") || strings.Contains(string(out.Data), "2025") {
-		t.Fatalf("expected aangiften filtered to 2024, got: %s", out.Data)
+	// The request asked for belastingjaren [2024] — the year filter must
+	// travel inside the query so the PDP can enforce per-year consent.
+	if !strings.Contains(outwayBody, "heeftBelastingjaarAangifte(belastingjaren: [2024])") {
+		t.Fatalf("query missing belastingjaren filter: %s", outwayBody)
 	}
 }
 
