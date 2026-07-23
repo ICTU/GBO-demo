@@ -49,8 +49,8 @@
     {
       "path": ["verzamelinkomen"],
       "display": [
-        { "lang": "nl-NL", "label": "Verzamelinkomen",   "description": "Verzamelinkomen in eurocenten" },
-        { "lang": "en-US", "label": "Aggregated income", "description": "Aggregated income in euro cents" }
+        { "lang": "nl-NL", "label": "Verzamelinkomen",   "description": "Verzamelinkomen in hele euro's" },
+        { "lang": "en-US", "label": "Aggregated income", "description": "Aggregated income in whole euros" }
       ],
       "sd": "always",
       "svg_id": "verzamelinkomen"
