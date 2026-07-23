@@ -73,7 +73,7 @@ spec:
           livenessProbe:
             httpGet:
               path: {{ .Values.healthPath | quote }}
-              port: http
+              port: {{ .Values.health.port | default "http" }}
               scheme: {{ .Values.health.scheme | upper | quote }}
             initialDelaySeconds: {{ .Values.health.initialDelaySeconds }}
             periodSeconds: {{ .Values.health.periodSeconds }}
@@ -82,7 +82,7 @@ spec:
           readinessProbe:
             httpGet:
               path: {{ .Values.healthPath | quote }}
-              port: http
+              port: {{ .Values.health.port | default "http" }}
               scheme: {{ .Values.health.scheme | upper | quote }}
             initialDelaySeconds: {{ .Values.health.initialDelaySeconds }}
             periodSeconds: {{ .Values.health.periodSeconds }}

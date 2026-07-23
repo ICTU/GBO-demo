@@ -1,0 +1,69 @@
+{
+  "dvt0001": {
+    "covers_fields": [
+      "InkomensgegevensPerJaar.belastingjaar",
+      "InkomensgegevensPerJaar.grondslag",
+      "InkomensgegevensPerJaar.inkomenUitBox1",
+      "InkomensgegevensPerJaar.peilDatum",
+      "InkomensgegevensPerJaar.status",
+      "InkomensgegevensPerJaar.verzamelinkomen",
+      "Query.inkomensgegevens"
+    ],
+    "covers_types": [
+      "CodeOmschrijving"
+    ],
+    "rule_id": "DVT0001",
+    "spec": {
+      "consent_must_cover_scope": true,
+      "consent_required": true,
+      "constraint_binding": [
+        {
+          "arg": "input.burgerservicenummer",
+          "resource_field": "pi"
+        }
+      ],
+      "pip": null,
+      "rule_id": "DVT0001"
+    }
+  },
+  "eud0001": {
+    "allowed_actors": [
+      "00000004000000004000",
+      "99999999900000000100"
+    ],
+    "allowed_scopes": [
+      "bd:ib:2024",
+      "bd:ib:2025"
+    ],
+    "covers_fields": [
+      "InkomensgegevensPerJaar.belastingjaar",
+      "InkomensgegevensPerJaar.grondslag",
+      "InkomensgegevensPerJaar.inkomenUitBox1",
+      "InkomensgegevensPerJaar.inkomenUitBox2",
+      "InkomensgegevensPerJaar.inkomenUitBox3",
+      "InkomensgegevensPerJaar.peilDatum",
+      "InkomensgegevensPerJaar.status",
+      "InkomensgegevensPerJaar.verzamelinkomen",
+      "Query.inkomensgegevens"
+    ],
+    "covers_types": [
+      "CodeOmschrijving"
+    ],
+    "rule_id": "EUD0001",
+    "spec": {
+      "allowed_actors": [
+        "00000004000000004000",
+        "99999999900000000100"
+      ],
+      "allowed_scopes": [
+        "bd:ib:2024",
+        "bd:ib:2025"
+      ],
+      "consent_must_cover_scope": false,
+      "consent_required": false,
+      "pid_required": true,
+      "pip": null,
+      "rule_id": "EUD0001"
+    }
+  }
+}

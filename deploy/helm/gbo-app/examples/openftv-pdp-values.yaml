@@ -1,0 +1,39 @@
+# OpenFTV PDP with the embedded OPA/Rego engine (replaces the bare OPA
+# deployment). Image is built from services/openftv-pdp/Dockerfile
+# (pinned OpenFTV main commit — published images lag and lack Rego
+# deny-reason passthrough).
+image:
+  repository: ghcr.io/ictu/gbo-demo/openftv-pdp
+  tag: latest
+
+containerPort: 8443
+
+env:
+  # Must be "rego" — the documented value "OPA" makes OpenFTV silently
+  # skip all policy files (upstream quirk, see ICTU-2 plan).
+  - name: PDP_POLICIES_LANGUAGE
+    value: rego
+  - name: PDP_POLICIES_STORE
+    value: /policies
+  - name: PDP_POLICIES_STORE_RECURSE
+    value: "true"
+  - name: PDP_ADL_TYPE
+    value: stdout
+  - name: PDP_ADL_SERVICE_NAME
+    value: gbo
+  - name: PDP_LOG_LEVEL
+    value: info
+
+# OpenFTV serves /healthz on its own port (8080), not on the svc port.
+healthPath: /healthz
+health:
+  port: 8080
+
+volumeMounts:
+  - name: policies
+    mountPath: /policies
+    readOnly: true
+volumes:
+  - name: policies
+    configMap:
+      name: pdp-policies
