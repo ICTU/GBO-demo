@@ -464,7 +464,7 @@ func formatAsIssuableDocuments(aangifte map[string]any, uc Usecase) []attestatio
 		attrs["indieningsdatum"] = v
 	}
 	if v, ok := aangifte["status"]; ok {
-		attrs["status"] = v
+		attrs["aangifte_status"] = v
 	}
 	if v := bedragWaarde(aangifte["box1Inkomen"]); v != nil {
 		attrs["inkomen_box1"] = toCents(v)
