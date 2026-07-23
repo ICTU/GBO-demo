@@ -34,6 +34,15 @@ const EMPTY_USE: UsePayload = {
   belastingjaren: [2025],
 }
 
+// scopeYears extracts belastingjaren from scopes of the form bd:ib:<year>.
+function scopeYears(scopes: string[]): number[] {
+  return scopes
+    .map((s) => /^bd:ib:(\d{4})$/.exec(s)?.[1])
+    .filter((y): y is string => !!y)
+    .map(Number)
+    .sort((a, b) => a - b)
+}
+
 // opaReasonCode looks up the OPA decision for a trace and returns the
 // top-level reason code (YEAR_NOT_COVERED, CONSENT_SCOPE_MISMATCH, ...).
 // The decision log travels console → promtail → Loki asynchronously, so
@@ -271,7 +280,16 @@ export default function App() {
           outcome: 'allow',
           consent_id: res.consent_id,
         })
-        setUsePayload((u) => ({ ...u, consent_id: res.consent_id }))
+        // Prefill the use-form from the issued consent: scope_id = first
+        // scope, belastingjaren = every bd:ib:<year> scope — so a
+        // both-years consent yields a both-years query by default.
+        const issuedYears = scopeYears(issuancePayload.scopes)
+        setUsePayload((u) => ({
+          ...u,
+          consent_id: res.consent_id,
+          scope_id: issuancePayload.scopes[0] ?? u.scope_id,
+          belastingjaren: issuedYears.length > 0 ? issuedYears : u.belastingjaren,
+        }))
       } else {
         const res: UseResponse = await useQuery(usePayload, ctx.header)
         const outcome = res.allowed ? 'allow' : 'deny'
