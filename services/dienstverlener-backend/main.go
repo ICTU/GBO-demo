@@ -21,6 +21,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -97,6 +98,12 @@ type queryResponse struct {
 	Data    json.RawMessage `json:"data,omitempty"`
 	Reason  string          `json:"reason,omitempty"`
 	TraceID string          `json:"trace_id"`
+	// DeniedYears lists the requested belastingjaren the consent does not
+	// cover. The backend intersects requested years with the consent's
+	// scopes and only queries the covered ones (a query for an
+	// unconsented year would deny the whole request); the frontend
+	// renders the denied years greyed out.
+	DeniedYears []int `json:"denied_years,omitempty"`
 }
 
 // newFscTransactionID returns a UUID v7 used as both the FSC-transaction-id
@@ -110,38 +117,72 @@ func newFscTransactionID() string {
 	return u.String()
 }
 
-// fetchConsentPI resolves the pseudonym (PI) for a given consent-id from the
-// consent-register. The PI, not the consent-id, travels in transit inside the
-// GraphQL query variable; the sidecar at the source resolves PI→BSN. The
-// consent-register URL comes from config.
-func fetchConsentPI(ctx context.Context, client *http.Client, consentURL, consentID string) (string, error) {
+// fetchConsentPI resolves the pseudonym (PI) and granted scopes for a
+// given consent-id from the consent-register. The PI, not the consent-id,
+// travels in transit inside the GraphQL query variable; the sidecar at the
+// source resolves PI→BSN. The consent-register URL comes from config.
+func fetchConsentPI(ctx context.Context, client *http.Client, consentURL, consentID string) (string, []string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, consentURL+"/consents/"+consentID, nil)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("consent-register HTTP %d", resp.StatusCode)
+		return "", nil, fmt.Errorf("consent-register HTTP %d", resp.StatusCode)
 	}
 	var c struct {
-		PI     string `json:"pi"`
-		Status string `json:"status"`
+		PI     string   `json:"pi"`
+		Status string   `json:"status"`
+		Scopes []string `json:"scopes"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&c); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if c.Status != "ACTIVE" {
-		return "", fmt.Errorf("consent %s status=%s (not ACTIVE)", consentID, c.Status)
+		return "", nil, fmt.Errorf("consent %s status=%s (not ACTIVE)", consentID, c.Status)
 	}
 	if c.PI == "" {
-		return "", fmt.Errorf("consent %s has no PI", consentID)
+		return "", nil, fmt.Errorf("consent %s has no PI", consentID)
 	}
-	return c.PI, nil
+	return c.PI, c.Scopes, nil
+}
+
+// consentedYears extracts the belastingjaren covered by granted scopes of
+// the form bd:ib:<year>.
+func consentedYears(scopes []string) []int {
+	var years []int
+	for _, s := range scopes {
+		rest, ok := strings.CutPrefix(s, "bd:ib:")
+		if !ok {
+			continue
+		}
+		if y, err := strconv.Atoi(rest); err == nil {
+			years = append(years, y)
+		}
+	}
+	return years
+}
+
+// intersectYears splits the requested years into the ones covered by the
+// consent (queryable) and the rest (denied).
+func intersectYears(requested, consented []int) (allowed, denied []int) {
+	set := make(map[int]bool, len(consented))
+	for _, y := range consented {
+		set[y] = true
+	}
+	for _, y := range requested {
+		if set[y] {
+			allowed = append(allowed, y)
+		} else {
+			denied = append(denied, y)
+		}
+	}
+	return allowed, denied
 }
 
 // buildQuery renders the GraphQL query against the BD bron-schema. The
@@ -230,10 +271,10 @@ func handleQuery(cfg config) http.HandlerFunc {
 
 		// The backend talks to a real FSC-Outway.
 		//
-		// Step 1 — Consent-lookup: fetch the PI for this consent-id from the
-		// consent-register. The PI travels in the query; the consent-id does
-		// not.
-		pi, err := fetchConsentPI(ctx, client, cfg.ConsentURL, req.ConsentID)
+		// Step 1 — Consent-lookup: fetch the PI + granted scopes for this
+		// consent-id from the consent-register. The PI travels in the query;
+		// the consent-id does not.
+		pi, scopes, err := fetchConsentPI(ctx, client, cfg.ConsentURL, req.ConsentID)
 		if err != nil {
 			log.Warn("consent-lookup failed", "consent_id", req.ConsentID, "err", err.Error())
 			writeJSON(w, http.StatusForbidden, map[string]any{
@@ -244,12 +285,39 @@ func handleQuery(cfg config) http.HandlerFunc {
 			return
 		}
 
+		// Per-year consent: only query the years the consent covers. A
+		// query for an unconsented year would fail policy (YEAR_NOT_COVERED)
+		// and deny the whole request; intersecting here lets the citizen
+		// see exactly the years they consented to, with the rest reported
+		// as denied_years.
+		jaren := req.Belastingjaren
+		if len(jaren) == 0 {
+			jaren = []int{2024, 2025}
+		}
+		queryable, deniedYears := intersectYears(jaren, consentedYears(scopes))
+		traceID := traceIDFromSpan(span)
+
+		// Nothing consented: skip the FSC call (an empty year filter would
+		// fail policy fail-closed anyway) and report every requested year
+		// as denied.
+		if len(queryable) == 0 {
+			log.Info("no requested years covered by consent", "consent_id", req.ConsentID, "trace_id", traceID)
+			emptyData, _ := json.Marshal(map[string]any{
+				"data": map[string]any{
+					"ingeschrevenPersoon": map[string]any{"heeftBelastingjaarAangifte": []any{}},
+				},
+			})
+			resp := queryResponse{Allowed: true, Data: emptyData, TraceID: traceID, DeniedYears: deniedYears}
+			writeJSON(w, http.StatusOK, resp)
+			return
+		}
+
 		// Step 2 — POST to the Outway at /bri/graphql. The body is pure
 		// GraphQL, with variables.bsn = PI (the sidecar at the source
 		// substitutes it back to BSN). No separate token-fetch is needed:
 		// the Outway picks a contract by grant-link, signs the token
 		// internally, and opens mTLS to the Inway.
-		query := buildQuery(req.Belastingjaren, req.Fields)
+		query := buildQuery(queryable, req.Fields)
 		vars := map[string]string{"bsn": pi}
 		proxyBody, _ := json.Marshal(map[string]any{
 			"query":     query,
@@ -270,7 +338,6 @@ func handleQuery(cfg config) http.HandlerFunc {
 		span.SetAttributes(attribute.String("gbo.fsc.transaction_id", fscTxID))
 		otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(proxyReq.Header))
 
-		traceID := traceIDFromSpan(span)
 		proxyResp, err := client.Do(proxyReq)
 		if err != nil {
 			log.Error("fsc outway call failed", "err", err.Error())
@@ -292,9 +359,10 @@ func handleQuery(cfg config) http.HandlerFunc {
 		if proxyResp.StatusCode == http.StatusOK {
 			log.Info("query allowed", "consent_id", req.ConsentID, "trace_id", traceID)
 			resp := queryResponse{
-				Allowed: true,
-				Data:    json.RawMessage(proxyRespBody),
-				TraceID: traceID,
+				Allowed:     true,
+				Data:        json.RawMessage(proxyRespBody),
+				TraceID:     traceID,
+				DeniedYears: deniedYears,
 			}
 			writeJSON(w, http.StatusOK, resp)
 			if cfg.DevPortalBackend != "" && !fromDevPortal {
