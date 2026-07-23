@@ -52,8 +52,90 @@ type Store struct {
 	consents map[string]*Consent
 }
 
+type ConsentFilter struct {
+	PI     string
+	Scope  string
+	Status string
+}
+
+type ConsentStore interface {
+	Create(ctx context.Context, consent *Consent) error
+	List(ctx context.Context, filter ConsentFilter) ([]*Consent, error)
+	Get(ctx context.Context, consentID string) (*Consent, bool, error)
+	Revoke(ctx context.Context, consentID string) (*Consent, bool, error)
+}
+
 func NewStore() *Store {
 	return &Store{consents: make(map[string]*Consent)}
+}
+
+func (s *Store) Create(_ context.Context, consent *Consent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.consents[consent.ConsentID] = consent
+
+	return nil
+}
+
+func (s *Store) List(_ context.Context, filter ConsentFilter) ([]*Consent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	result := make([]*Consent, 0)
+
+	for _, consent := range s.consents {
+		if filter.PI != "" && consent.PI != filter.PI {
+			continue
+		}
+
+		if filter.Status != "" && consent.Status != filter.Status {
+			continue
+		}
+
+		if filter.Scope != "" {
+			hasScope := false
+
+			for _, scope := range consent.Scopes {
+				if scope == filter.Scope {
+					hasScope = true
+
+					break
+				}
+			}
+
+			if !hasScope {
+				continue
+			}
+		}
+
+		result = append(result, consent)
+	}
+
+	return result, nil
+}
+
+func (s *Store) Get(_ context.Context, consentID string) (*Consent, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	consent, ok := s.consents[consentID]
+
+	return consent, ok, nil
+}
+
+func (s *Store) Revoke(_ context.Context, consentID string) (*Consent, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	consent, ok := s.consents[consentID]
+	if !ok {
+		return nil, false, nil
+	}
+
+	consent.Status = "REVOKED"
+
+	return consent, true, nil
 }
 
 func corsHeaders(w http.ResponseWriter) {
@@ -102,7 +184,7 @@ func initTracer() func(context.Context) error {
 // newMux builds the routing tree with the given store. Extracted from main
 // so integration tests can wire the handlers to an httptest.Server without
 // starting the real listener.
-func newMux(store *Store) *http.ServeMux {
+func newMux(store ConsentStore) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -167,9 +249,13 @@ func newMux(store *Store) *http.ServeMux {
 				CreatedAt:        now,
 				ValidUntil:       now.Add(time.Duration(validity) * time.Second),
 			}
-			store.mu.Lock()
-			store.consents[c.ConsentID] = c
-			store.mu.Unlock()
+			if err := store.Create(r.Context(), c); err != nil {
+				slog.Error("create consent", "err", err.Error())
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not store consent"})
+
+				return
+			}
+
 			writeJSON(w, http.StatusCreated, c)
 
 		case http.MethodGet:
@@ -179,33 +265,18 @@ func newMux(store *Store) *http.ServeMux {
 			pi := r.URL.Query().Get("pi")
 			scope := r.URL.Query().Get("scope")
 			statusFilter := r.URL.Query().Get("status")
-			store.mu.RLock()
-			var result []*Consent
-			for _, c := range store.consents {
-				if pi != "" && c.PI != pi {
-					continue
-				}
-				if statusFilter != "" && c.Status != statusFilter {
-					continue
-				}
-				if scope != "" {
-					has := false
-					for _, s := range c.Scopes {
-						if s == scope {
-							has = true
-							break
-						}
-					}
-					if !has {
-						continue
-					}
-				}
-				result = append(result, c)
+			result, err := store.List(r.Context(), ConsentFilter{
+				PI:     pi,
+				Scope:  scope,
+				Status: statusFilter,
+			})
+			if err != nil {
+				slog.Error("list consents", "err", err.Error())
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not list consents"})
+
+				return
 			}
-			store.mu.RUnlock()
-			if result == nil {
-				result = []*Consent{}
-			}
+
 			writeJSON(w, http.StatusOK, result)
 
 		default:
@@ -228,26 +299,37 @@ func newMux(store *Store) *http.ServeMux {
 
 		switch r.Method {
 		case http.MethodGet:
-			store.mu.RLock()
-			c, ok := store.consents[id]
-			store.mu.RUnlock()
-			if !ok {
-				writeJSON(w, http.StatusNotFound, map[string]string{"error": "consent not found"})
+			c, ok, err := store.Get(r.Context(), id)
+			if err != nil {
+				slog.Error("get consent", "err", err.Error())
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not get consent"})
+
 				return
 			}
+
+			if !ok {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "consent not found"})
+
+				return
+			}
+
 			writeJSON(w, http.StatusOK, c)
 
 		case http.MethodDelete:
-			store.mu.Lock()
-			c, ok := store.consents[id]
-			if ok {
-				c.Status = "REVOKED"
-			}
-			store.mu.Unlock()
-			if !ok {
-				writeJSON(w, http.StatusNotFound, map[string]string{"error": "consent not found"})
+			c, ok, err := store.Revoke(r.Context(), id)
+			if err != nil {
+				slog.Error("revoke consent", "err", err.Error())
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not revoke consent"})
+
 				return
 			}
+
+			if !ok {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "consent not found"})
+
+				return
+			}
+
 			writeJSON(w, http.StatusOK, c)
 
 		default:
@@ -264,7 +346,13 @@ func main() {
 	shutdown := initTracer()
 	defer func() { _ = shutdown(context.Background()) }()
 
-	store := NewStore()
+	store, closeStore, err := openConsentStore(context.Background())
+	if err != nil {
+		slog.Error("initialize consent store", "err", err.Error())
+		os.Exit(1)
+	}
+	defer closeStore()
+
 	mux := newMux(store)
 
 	addr := ":4002"
