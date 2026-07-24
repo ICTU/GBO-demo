@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
+shopt -s nullglob
+
+cd "$(git rev-parse --show-toplevel)"
 
 base_ref="${1:-}"
 head_ref="${2:-HEAD}"
+force_all="${3:-false}"
 output_file="${GITHUB_OUTPUT:-}"
 
 changed='[]'
 unchanged='[]'
+planned_paths=()
 
 append_service() {
   local bucket="$1"
@@ -34,11 +39,19 @@ append_service() {
 path_changed() {
   local path="$1"
 
-  [[ -z "${base_ref}" ]] ||
+  [[ "${force_all}" == "true" ]] ||
+    [[ -z "${base_ref}" ]] ||
     ! git diff --quiet "${base_ref}" "${head_ref}" -- "${path}"
 }
 
 while IFS='|' read -r service context dockerfile change_path; do
+  if [[ ! -f "${dockerfile}" ]]; then
+    echo "Release matrix lists '${service}', but ${dockerfile} is missing." >&2
+    exit 1
+  fi
+
+  planned_paths+=("${change_path}")
+
   if path_changed "${change_path}"; then
     append_service changed "${service}" "${context}" "${dockerfile}"
   else
@@ -61,8 +74,34 @@ sector-pip|./services/sector-pip|./services/sector-pip/Dockerfile|services/secto
 toestemmingsportaal-frontend|./toestemmingsportaal-frontend|./toestemmingsportaal-frontend/Dockerfile|toestemmingsportaal-frontend
 SERVICES
 
+# Every image the tree can build is either in the matrix above, built by
+# the dedicated eudi-issuance-server job, or listed here as deliberately
+# unreleased. Without this a new service would be skipped by every
+# release, silently and forever.
+while read -r unreleased; do
+  planned_paths+=("${unreleased}")
+done <<'UNRELEASED'
+services/eudi-demo-issuer
+services/eudi-issuance-server
+UNRELEASED
+
+for dockerfile in */Dockerfile services/*/Dockerfile; do
+  image_path="${dockerfile%/Dockerfile}"
+
+  for planned in "${planned_paths[@]}"; do
+    if [[ "${planned}" == "${image_path}" ]]; then
+      continue 2
+    fi
+  done
+
+  echo "${image_path} builds an image that no release job covers." >&2
+  echo "Add it to the release matrix or to the UNRELEASED list." >&2
+  exit 1
+done
+
 eudi_changed=false
-if [[ -z "${base_ref}" ]] ||
+if [[ "${force_all}" == "true" ]] ||
+  [[ -z "${base_ref}" ]] ||
   ! git diff --quiet \
     "${base_ref}" \
     "${head_ref}" \

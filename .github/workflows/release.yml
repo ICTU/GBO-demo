@@ -7,6 +7,15 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      force_rebuild_all:
+        description: >-
+          Rebuild every image instead of reusing unchanged ones. Use after
+          a base image advisory, or to repair a release whose images were
+          only partly published.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -45,6 +54,8 @@ jobs:
       - name: Determine changed images
         id: plan
         shell: bash
+        env:
+          FORCE_REBUILD_ALL: ${{ inputs.force_rebuild_all || false }}
         run: |
           previous_tag="$(
             git describe \
@@ -56,7 +67,8 @@ jobs:
 
           .github/scripts/release-image-plan.sh \
             "${previous_tag}" \
-            "${GITHUB_SHA}"
+            "${GITHUB_SHA}" \
+            "${FORCE_REBUILD_ALL}"
 
           printf 'previous_version=%s\n' "${previous_tag#v}" \
             >>"${GITHUB_OUTPUT}"
@@ -136,21 +148,43 @@ jobs:
           UNCHANGED_IMAGES: ${{ needs.plan.outputs.unchanged }}
         run: |
           version="${GITHUB_REF_NAME#v}"
+          registry="ghcr.io/ictu/gbo-demo"
 
-          jq -r '.[].service' <<<"${UNCHANGED_IMAGES}" |
-            while read -r service; do
-              image="ghcr.io/ictu/gbo-demo/${service}"
-              docker buildx imagetools create \
-                --tag "${image}:${version}" \
-                "${image}:${PREVIOUS_VERSION}"
-            done
+          if [[ -z "${PREVIOUS_VERSION}" ]]; then
+            echo "No previous release tag, so there is nothing to reuse." >&2
+            exit 1
+          fi
+
+          mapfile -t services < <(jq -r '.[].service' <<<"${UNCHANGED_IMAGES}")
 
           if [[ "${EUDI_CHANGED}" != "true" ]]; then
-            image="ghcr.io/ictu/gbo-demo/eudi-issuance-server"
-            docker buildx imagetools create \
-              --tag "${image}:${version}" \
-              "${image}:${PREVIOUS_VERSION}"
+            services+=(eudi-issuance-server)
           fi
+
+          # Check every source manifest before creating any tag. A release
+          # that failed part way through leaves its tag in place but only
+          # some images published, and the next release would otherwise
+          # half-apply the new version before hitting the gap.
+          missing=()
+          for service in "${services[@]}"; do
+            if ! docker buildx imagetools inspect \
+              "${registry}/${service}:${PREVIOUS_VERSION}" >/dev/null 2>&1; then
+              missing+=("${service}")
+            fi
+          done
+
+          if ((${#missing[@]} > 0)); then
+            echo "No ${PREVIOUS_VERSION} manifest to reuse for:" >&2
+            printf '  %s\n' "${missing[@]}" >&2
+            echo "Re-run this workflow with force_rebuild_all." >&2
+            exit 1
+          fi
+
+          for service in "${services[@]}"; do
+            docker buildx imagetools create \
+              --tag "${registry}/${service}:${version}" \
+              "${registry}/${service}:${PREVIOUS_VERSION}"
+          done
 
   eudi-image:
     name: Image — eudi-issuance-server (amd64)
@@ -204,7 +238,7 @@ jobs:
       - eudi-image
     if: >-
       ${{
-        always() &&
+        !cancelled() &&
         needs.plan.result == 'success' &&
         (needs.images.result == 'success' || needs.images.result == 'skipped') &&
         (needs.reused-images.result == 'success' || needs.reused-images.result == 'skipped') &&
