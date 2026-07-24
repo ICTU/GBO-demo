@@ -100,6 +100,12 @@ type queryResponse struct {
 	Data    json.RawMessage `json:"data,omitempty"`
 	Reason  string          `json:"reason,omitempty"`
 	TraceID string          `json:"trace_id"`
+	// FscTransactionID is the identifier that travels through the FSC
+	// chain (Fsc-Transaction-Id → X-Request-Id → the PDP's reconstructed
+	// OTel trace, and therefore the OPA decision-log's input.trace_id).
+	// It equals TraceID only when no caller supplied a traceparent; the
+	// dev-portal always does, so decision-log lookups must use this one.
+	FscTransactionID string `json:"fsc_transaction_id,omitempty"`
 	// DeniedYears lists the requested belastingjaren the consent does not
 	// cover. The backend intersects requested years with the consent's
 	// scopes and only queries the covered ones (a query for an
@@ -158,23 +164,31 @@ func randomSpanIDHex() string {
 	return hex.EncodeToString(b[:])
 }
 
-// fetchConsentPI resolves the pseudonym (PI) and granted scopes for a
-// given consent-id from the consent-register. The PI, not the consent-id,
-// travels in transit inside the GraphQL query variable; the sidecar at the
-// source resolves PI→BSN. The consent-register URL comes from config.
-func fetchConsentPI(ctx context.Context, client *http.Client, consentURL, consentID string) (string, []string, error) {
+// fetchConsentPI resolves the pseudonym (PI), granted scopes and status
+// for a given consent-id from the consent-register. The PI, not the
+// consent-id, travels in transit inside the GraphQL query variable; the
+// sidecar at the source resolves PI→BSN. The consent-register URL comes
+// from config.
+//
+// A non-ACTIVE (revoked/expired) consent is NOT rejected here: the PDP is
+// the authority on consent state, and short-circuiting locally would turn
+// a policy DENY (CONSENT_WITHDRAWN, attributable and visible in the
+// decision log) into an opaque client-side error. Only a consent that
+// cannot be resolved at all is a local failure — without a PI there is no
+// query to send.
+func fetchConsentPI(ctx context.Context, client *http.Client, consentURL, consentID string) (string, []string, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, consentURL+"/consents/"+consentID, nil)
 	if err != nil {
-		return "", nil, err
+		return "", nil, "", err
 	}
 	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", nil, err
+		return "", nil, "", err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", nil, fmt.Errorf("consent-register HTTP %d", resp.StatusCode)
+		return "", nil, "", fmt.Errorf("consent-register HTTP %d", resp.StatusCode)
 	}
 	var c struct {
 		PI     string   `json:"pi"`
@@ -182,15 +196,12 @@ func fetchConsentPI(ctx context.Context, client *http.Client, consentURL, consen
 		Scopes []string `json:"scopes"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&c); err != nil {
-		return "", nil, err
-	}
-	if c.Status != "ACTIVE" {
-		return "", nil, fmt.Errorf("consent %s status=%s (not ACTIVE)", consentID, c.Status)
+		return "", nil, "", err
 	}
 	if c.PI == "" {
-		return "", nil, fmt.Errorf("consent %s has no PI", consentID)
+		return "", nil, "", fmt.Errorf("consent %s has no PI", consentID)
 	}
-	return c.PI, c.Scopes, nil
+	return c.PI, c.Scopes, c.Status, nil
 }
 
 // consentedYears extracts the belastingjaren covered by granted scopes of
@@ -314,8 +325,10 @@ func handleQuery(cfg config) http.HandlerFunc {
 		//
 		// Step 1 — Consent-lookup: fetch the PI + granted scopes for this
 		// consent-id from the consent-register. The PI travels in the query;
-		// the consent-id does not.
-		pi, scopes, err := fetchConsentPI(ctx, client, cfg.ConsentURL, req.ConsentID)
+		// the consent-id does not. A revoked consent is deliberately still
+		// sent to the PDP so the DENY is a policy decision
+		// (CONSENT_WITHDRAWN) with a decision-log entry, not a local error.
+		pi, scopes, consentStatus, err := fetchConsentPI(ctx, client, cfg.ConsentURL, req.ConsentID)
 		if err != nil {
 			log.Warn("consent-lookup failed", "consent_id", req.ConsentID, "err", err.Error())
 			writeJSON(w, http.StatusForbidden, map[string]any{
@@ -324,6 +337,10 @@ func handleQuery(cfg config) http.HandlerFunc {
 				"trace_id": traceIDFromSpan(span),
 			})
 			return
+		}
+		if consentStatus != "ACTIVE" {
+			log.Info("consent not active — letting the PDP decide",
+				"consent_id", req.ConsentID, "status", consentStatus)
 		}
 
 		// Per-year consent. Two consumer profiles:
@@ -347,20 +364,40 @@ func handleQuery(cfg config) http.HandlerFunc {
 			queryable, deniedYears = intersectYears(jaren, consentedYears(scopes))
 		}
 		traceID := traceIDFromSpan(span)
+		// The identifier that travels through FSC (and therefore ends up
+		// as the OPA decision-log's trace). The middleware already minted
+		// it; fall back only when the middleware is not in the chain
+		// (unit tests).
+		fscTxID, _ := ctx.Value(fscTxIDCtxKey).(string)
+		if fscTxID == "" {
+			fscTxID = newFscTransactionID()
+		}
 
-		// Nothing consented (browser flow only): skip the FSC call (an
-		// empty year filter would fail policy fail-closed anyway) and
-		// report every requested year as denied.
-		if len(queryable) == 0 {
+		// Nothing consented (browser flow, ACTIVE consent only): skip the
+		// FSC call (an empty year filter would fail policy fail-closed
+		// anyway) and report every requested year as denied. A non-ACTIVE
+		// consent always goes to the PDP so the DENY is a policy decision.
+		if len(queryable) == 0 && consentStatus == "ACTIVE" {
 			log.Info("no requested years covered by consent", "consent_id", req.ConsentID, "trace_id", traceID)
 			emptyData, _ := json.Marshal(map[string]any{
 				"data": map[string]any{
 					"ingeschrevenPersoon": map[string]any{"heeftBelastingjaarAangifte": []any{}},
 				},
 			})
-			resp := queryResponse{Allowed: true, Data: emptyData, TraceID: traceID, DeniedYears: deniedYears}
+			resp := queryResponse{
+				Allowed:          true,
+				Data:             emptyData,
+				TraceID:          traceID,
+				FscTransactionID: fscTxID,
+				DeniedYears:      deniedYears,
+			}
 			writeJSON(w, http.StatusOK, resp)
 			return
+		}
+		// A revoked consent with no overlapping years still needs a
+		// non-empty filter to reach the PDP at all.
+		if len(queryable) == 0 {
+			queryable = jaren
 		}
 
 		// Step 2 — POST to the Outway at /bri/graphql. The body is pure
@@ -386,14 +423,6 @@ func handleQuery(cfg config) http.HandlerFunc {
 		// consent for the same PI does not rescue it. The constraint-
 		// binding rule proves the query's PI matches this consent's PI.
 		proxyReq.Header.Set("X-GBO-Consent-Id", req.ConsentID)
-		// Fsc-Transaction-Id doubles as the OTel-trace-id — one identifier
-		// end-to-end across the FSC chain. The middleware already minted it
-		// and tied the span trace-id to it; fall back to a fresh UUID only
-		// when the middleware is not in the chain (unit tests).
-		fscTxID, _ := ctx.Value(fscTxIDCtxKey).(string)
-		if fscTxID == "" {
-			fscTxID = newFscTransactionID()
-		}
 		proxyReq.Header.Set("Fsc-Transaction-Id", fscTxID)
 		span.SetAttributes(attribute.String("gbo.fsc.transaction_id", fscTxID))
 		otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(proxyReq.Header))
@@ -402,9 +431,10 @@ func handleQuery(cfg config) http.HandlerFunc {
 		if err != nil {
 			log.Error("fsc outway call failed", "err", err.Error())
 			writeJSON(w, http.StatusBadGateway, queryResponse{
-				Allowed: false,
-				Reason:  "fsc_outway_call_failed: " + err.Error(),
-				TraceID: traceID,
+				Allowed:          false,
+				Reason:           "fsc_outway_call_failed: " + err.Error(),
+				TraceID:          traceID,
+				FscTransactionID: fscTxID,
 			})
 			return
 		}
@@ -419,10 +449,11 @@ func handleQuery(cfg config) http.HandlerFunc {
 		if proxyResp.StatusCode == http.StatusOK {
 			log.Info("query allowed", "consent_id", req.ConsentID, "trace_id", traceID)
 			resp := queryResponse{
-				Allowed:     true,
-				Data:        json.RawMessage(proxyRespBody),
-				TraceID:     traceID,
-				DeniedYears: deniedYears,
+				Allowed:          true,
+				Data:             json.RawMessage(proxyRespBody),
+				TraceID:          traceID,
+				FscTransactionID: fscTxID,
+				DeniedYears:      deniedYears,
 			}
 			writeJSON(w, http.StatusOK, resp)
 			if cfg.DevPortalBackend != "" && !fromDevPortal {
@@ -441,9 +472,10 @@ func handleQuery(cfg config) http.HandlerFunc {
 		}
 		log.Info("query denied", "consent_id", req.ConsentID, "reason", denyResp.Reason, "trace_id", traceID)
 		resp := queryResponse{
-			Allowed: false,
-			Reason:  denyResp.Reason,
-			TraceID: traceID,
+			Allowed:          false,
+			Reason:           denyResp.Reason,
+			TraceID:          traceID,
+			FscTransactionID: fscTxID,
 		}
 		writeJSON(w, http.StatusOK, resp)
 		if cfg.DevPortalBackend != "" && !fromDevPortal {

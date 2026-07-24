@@ -67,6 +67,12 @@ export type UseResponse = {
   data?: { data?: { ingeschrevenPersoon?: { heeftBelastingjaarAangifte?: unknown[] } } }
   reason?: string
   trace_id: string
+  // The identifier that travelled through FSC and ended up in the OPA
+  // decision log. Differs from trace_id whenever the caller supplied its
+  // own traceparent (the dev-portal always does), so decision lookups
+  // must prefer this one.
+  fsc_transaction_id?: string
+  denied_years?: number[]
 }
 
 // Run-log entry for the history table

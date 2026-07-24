@@ -324,8 +324,11 @@ export default function App() {
         // CONSENT_SCOPE_MISMATCH, …). The FSC-inway only returns a bare
         // 401; the real reason lives in the OPA decision log, shipped
         // via Loki — hence a short retry loop while promtail catches up.
-        if (!res.allowed && res.trace_id) {
-          const code = await opaReasonCode(res.trace_id)
+        // Look the decision up by the identifier that actually reached
+        // OPA: the FSC transaction-id when the backend reports one.
+        const decisionId = res.fsc_transaction_id ?? res.trace_id
+        if (!res.allowed && decisionId) {
+          const code = await opaReasonCode(decisionId)
           if (code) {
             setResult((r) =>
               r ? { ...r, reason: `${code}${res.reason ? ` — ${res.reason}` : ''}` } : r,

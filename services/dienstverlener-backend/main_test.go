@@ -292,3 +292,54 @@ func TestDvtpQueryDevPortalBypassesIntersection(t *testing.T) {
 		t.Fatalf("expected query with years verbatim, got: %s", outwayBody)
 	}
 }
+
+// A revoked consent must still reach the PDP: the DENY has to be a policy
+// decision (CONSENT_WITHDRAWN, with a decision-log entry), not a local
+// short-circuit that the portal can only show as a technical error.
+func TestDvtpQueryRevokedConsentReachesPDP(t *testing.T) {
+	consent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"pi":"PI-abc123","status":"REVOKED","scopes":["bd:ib:2025"]}`))
+	}))
+	defer consent.Close()
+
+	var outwayHits int
+	outway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		outwayHits++
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"allowed":false,"reason":"denied by policy: CONSENT_WITHDRAWN"}`))
+	}))
+	defer outway.Close()
+
+	cfg := config{
+		OutwayURL:  outway.URL,
+		OutwayPath: "/bri/graphql",
+		ConsentURL: consent.URL,
+	}
+	srv := httptest.NewServer(newMux(cfg))
+	defer srv.Close()
+
+	body := `{"consent_id":"c-revoked","scope_id":"bd:ib:2025","belastingjaren":[2025]}`
+	resp, err := http.Post(srv.URL+"/api/dvtp/query", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var out queryResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if outwayHits != 1 {
+		t.Fatalf("expected the query to reach FSC/PDP, outway hits = %d", outwayHits)
+	}
+	if out.Allowed {
+		t.Fatalf("expected deny, got %+v", out)
+	}
+	if !strings.Contains(out.Reason, "CONSENT_WITHDRAWN") {
+		t.Fatalf("reason = %q, want the policy reason", out.Reason)
+	}
+	if out.FscTransactionID == "" {
+		t.Fatal("expected fsc_transaction_id on the response for decision-log lookup")
+	}
+}
