@@ -276,15 +276,34 @@ constraint_binding_satisfied(fm, ctx) if {
 }
 
 # ── Year-coverage helpers ────────────────────────────────────────────────────
-# The PDP flattens the query's belastingjaren argument into args keys
-# "belastingjaren.0", "belastingjaren.1", ... Values are strings when the
-# query embeds literal ints; sprintf %v normalizes both shapes.
+# The requested belastingjaren reach the rules in two shapes, depending on
+# how the consumer wrote the query:
+#
+#   1. Literal list — `belastingjaren: [2024, 2025]`. The PDP's
+#      flattenValue walks the list and stores one arg per element:
+#      "belastingjaren.0", "belastingjaren.1" (values as strings).
+#   2. Variable — `belastingjaren: $jaren`. The resolved variable is
+#      stored whole under the un-suffixed key "belastingjaren", as an
+#      array (or a bare scalar for a single year).
+#
+# Both must be recognised: missing one would deny a perfectly valid query
+# with YEAR_NOT_COVERED. sprintf %v normalises string/number elements.
 
-_requested_years(ctx) := {y |
+_requested_years(ctx) := _flattened_years(ctx) | _variable_years(ctx)
+
+_flattened_years(ctx) := {y |
 	some k, v in ctx.args
 	startswith(k, "belastingjaren.")
 	y := v
 }
+
+_variable_years(ctx) := {y | some y in ctx.args.belastingjaren} if {
+	is_array(ctx.args.belastingjaren)
+} else := {ctx.args.belastingjaren} if {
+	is_number(ctx.args.belastingjaren)
+} else := {ctx.args.belastingjaren} if {
+	is_string(ctx.args.belastingjaren)
+} else := set()
 
 # Scopes available to the flow: the consent's granted_scopes (DvTP) union
 # the rule's own allowed_scopes (EUDI). Exactly one of the two is non-empty

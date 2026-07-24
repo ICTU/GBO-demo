@@ -122,3 +122,39 @@ test_deny_year_filter_missing if {
 	result.decision == false
 	result.context.reason_admin.code == "YEAR_NOT_COVERED"
 }
+
+# ── Year-coverage via a GraphQL list variable ──────────────────────────
+# `heeftBelastingjaarAangifte(belastingjaren: $jaren)` — the PDP stores
+# the resolved variable whole under the un-suffixed key, not as
+# belastingjaren.0/.1. Both shapes must be recognised.
+
+test_allow_years_from_list_variable if {
+	ctx := object.union(
+		object.remove(_base_ctx, ["args"]),
+		{
+			"args": {"bsn": "PI-abc123", "belastingjaren": [2025]},
+			"pip": {"consent": object.union(_base_ctx.pip.consent, {"granted_scopes": ["bd:ib:2025"]})},
+		},
+	)
+	result := lib.evaluate(dvt0001.spec, ctx)
+	result.decision == true
+}
+
+test_deny_year_from_list_variable_not_consented if {
+	ctx := object.union(
+		object.remove(_base_ctx, ["args"]),
+		{"args": {"bsn": "PI-abc123", "belastingjaren": [2024, 2025]}},
+	)
+	result := lib.evaluate(dvt0001.spec, ctx)
+	result.decision == false
+	result.context.reason_admin.code == "YEAR_NOT_COVERED"
+}
+
+test_allow_year_from_scalar_variable if {
+	ctx := object.union(
+		object.remove(_base_ctx, ["args"]),
+		{"args": {"bsn": "PI-abc123", "belastingjaren": 2025}},
+	)
+	result := lib.evaluate(dvt0001.spec, ctx)
+	result.decision == true
+}
