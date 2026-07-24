@@ -1,0 +1,55 @@
+version: 2
+
+# Docker base images are the reason this file exists. The release
+# workflow reuses the previous manifest for services whose directory did
+# not change, so an image that is never rebuilt keeps the base layers it
+# was built with. Dependabot turns a base image update into an ordinary
+# change under services/<name>, which the release planner then sees.
+#
+# GitHub's default security updates only cover gomod here, so the Go
+# ecosystem is deliberately left to that and not repeated below.
+#
+# The two Rust images are omitted on purpose. Both build from the
+# nl-wallet submodule rather than their own directory, so a bump to
+# either cannot be verified the way the others can.
+
+updates:
+  - package-ecosystem: docker
+    directories:
+      - /developer-portal
+      - /dienstverlener-mock
+      - /toestemmingsportaal-frontend
+      - /services/additional-claims-service
+      - /services/bron-sidecar
+      - /services/bsnk-mock
+      - /services/consent-portal-backend
+      - /services/consent-register
+      - /services/dev-portal-backend
+      - /services/dienstverlener-backend
+      - /services/eudi-adapter
+      - /services/graphql-server
+      - /services/pdp-service
+      - /services/sector-pip
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build(deps)
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build(deps)
+
+  - package-ecosystem: npm
+    directories:
+      - /developer-portal
+      - /dienstverlener-mock
+      - /toestemmingsportaal-frontend
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build(deps)
+    open-pull-requests-limit: 10
