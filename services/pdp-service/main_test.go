@@ -50,6 +50,26 @@ func TestTokenPropertiesSupportLegacyClaim(t *testing.T) {
 	}
 }
 
+func TestTelemetrySafeJSONRedactsIdentifiersAndNestedAuthZenBody(t *testing.T) {
+	raw := []byte(`{
+		"context":{"headers":{"Fsc-Authorization":"Bearer secret-token"}},
+		"action":{"properties":{"body":"{\"query\":\"query($bsn:String!){income(bsn:$bsn)}\",\"variables\":{\"bsn\":\"123456782\"}}"}},
+		"input":{"pip":{"consent":{"pi":"pseudonym-value"}}}
+	}`)
+
+	safe := telemetrySafeJSON(raw)
+	for _, forbidden := range []string{"secret-token", "123456782", "pseudonym-value"} {
+		if strings.Contains(safe, forbidden) {
+			t.Fatalf("telemetry output still contains %q: %s", forbidden, safe)
+		}
+	}
+	for _, required := range []string{"Fsc-Authorization", "query", "[REDACTED]"} {
+		if !strings.Contains(safe, required) {
+			t.Fatalf("telemetry output does not contain %q: %s", required, safe)
+		}
+	}
+}
+
 // Minimal in-memory schema used by the /evaluation handler when enriching
 // the OPA input. Structurally similar to policies/dvtp/schemas/*.graphql
 // but stripped down to keep the test hermetic.

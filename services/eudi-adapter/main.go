@@ -229,7 +229,7 @@ func handleAttestation(cfg config, client *http.Client, usecaseKey string, uc Us
 			return
 		}
 		if len(req) == 0 || len(req[0].Attestations) == 0 {
-			slog.Error("no attestation in disclosure", "raw_body", string(body))
+			slog.Error("no attestation in disclosure", "body_len", len(body))
 			http.Error(w, "no PID attestation in disclosure", http.StatusBadRequest)
 			return
 		}
@@ -247,7 +247,7 @@ func handleAttestation(cfg config, client *http.Client, usecaseKey string, uc Us
 		}
 		slog.Info("adapter received disclosure",
 			"usecase", usecaseKey,
-			"bsn_prefix", safePrefix(bsn),
+			"bsn_present", true,
 			"attestation_type", uc.AttestationType,
 			"scope", uc.Scope,
 			"belastingjaren", uc.Belastingjaren,
@@ -473,15 +473,6 @@ func toCents(v any) int64 {
 		return n * 100
 	}
 	return 0
-}
-
-// safePrefix: only log the first 3 digits of a BSN — data minimization
-// in transit.
-func safePrefix(bsn string) string {
-	if len(bsn) < 3 {
-		return "***"
-	}
-	return bsn[:3] + "******"
 }
 
 func initTracer(ctx context.Context) (func(context.Context) error, error) {

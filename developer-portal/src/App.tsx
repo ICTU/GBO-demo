@@ -37,6 +37,16 @@ const EMPTY_EUDI: EudiPayload = {
   usecase: 'inkomensverklaring_2024',
 }
 
+const JAEGER_PUBLIC_URL =
+  window.__GBO_RUNTIME_CONFIG__?.jaegerPublicUrl ||
+  import.meta.env.VITE_JAEGER_PUBLIC_URL ||
+  'http://localhost:9686'
+
+const GRAFANA_PUBLIC_URL =
+  window.__GBO_RUNTIME_CONFIG__?.grafanaPublicUrl ||
+  import.meta.env.VITE_GRAFANA_PUBLIC_URL ||
+  'http://localhost:9300'
+
 export default function App() {
   const { scenarios, loading: scLoading, error: scError, remove, save } = useScenarios()
   const { history, append: appendHistory, refresh: refreshHistory } = useHistory()
@@ -315,6 +325,8 @@ export default function App() {
           watching={watching}
           onToggleWatch={() => setWatching((w) => !w)}
           watchError={watchError}
+          jaegerUrl={JAEGER_PUBLIC_URL}
+          grafanaUrl={GRAFANA_PUBLIC_URL}
         />
 
         {(archMode === 'eudi-issuance' || archMode === 'use') && (
@@ -363,6 +375,8 @@ export default function App() {
               <ResultPanel
                 result={archReady ? result : null}
                 pending={!archReady && (submitting || result !== null)}
+                jaegerUrl={JAEGER_PUBLIC_URL}
+                grafanaUrl={GRAFANA_PUBLIC_URL}
               />
             )}
           </div>
