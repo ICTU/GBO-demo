@@ -78,21 +78,45 @@ done
 # Unlike the lists above, the Docker matrix is a deliberate subset of the
 # services that carry a Dockerfile, so it stays explicit. Entries are
 # checked against the tree to catch renames and deletions.
-while read -r service; do
+#
+# Columns: service|build context|extra paths that change the image.
+# pdp-service and opa bake ./policies into the image, so they build from
+# the repository root and a policy change has to rebuild them — the same
+# inputs the release manifest hashes.
+while IFS='|' read -r service context extra_paths; do
+  [[ -n "${service}" ]] || continue
+
   if [[ ! -f "services/${service}/Dockerfile" ]]; then
     echo "Docker matrix lists '${service}', which has no Dockerfile." >&2
     exit 1
   fi
 
-  if [[ "${run_all}" == "true" ]] || path_changed "services/${service}"; then
-    docker_services="$(append_name "${docker_services}" "${service}")"
+  build_service="${run_all}"
+  if [[ "${build_service}" != "true" ]] && path_changed "services/${service}"; then
+    build_service=true
+  fi
+
+  for extra_path in ${extra_paths}; do
+    if [[ "${build_service}" != "true" ]] && path_changed "${extra_path}"; then
+      build_service=true
+    fi
+  done
+
+  if [[ "${build_service}" == "true" ]]; then
+    docker_services="$(
+      jq -c \
+        --arg service "${service}" \
+        --arg context "${context}" \
+        '. + [{service: $service, context: $context}]' <<<"${docker_services}"
+    )"
   fi
 done <<'DOCKER_SERVICES'
-additional-claims-service
-eudi-adapter
-graphql-server
-pdp-service
-sector-pip
+additional-claims-service|services/additional-claims-service|
+eudi-adapter|services/eudi-adapter|
+graphql-server|services/graphql-server|
+pdp-service|.|policies/dvtp/schemas
+opa|.|policies
+sector-pip|services/sector-pip|
 DOCKER_SERVICES
 
 rego=false

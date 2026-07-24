@@ -93,7 +93,8 @@ dienstverlener-backend|./services/dienstverlener-backend|./services/dienstverlen
 dienstverlener-mock|./dienstverlener-mock|./dienstverlener-mock/Dockerfile|dienstverlener-mock|linux/amd64,linux/arm64|false|dienstverlener-mock
 eudi-adapter|./services/eudi-adapter|./services/eudi-adapter/Dockerfile|services/eudi-adapter|linux/amd64,linux/arm64|false|eudi-adapter
 graphql-server|./services/graphql-server|./services/graphql-server/Dockerfile|services/graphql-server|linux/amd64,linux/arm64|false|graphql-server
-pdp-service|./services/pdp-service|./services/pdp-service/Dockerfile|services/pdp-service|linux/amd64,linux/arm64|false|pdp-service
+pdp-service|.|./services/pdp-service/Dockerfile|services/pdp-service policies/dvtp/schemas|linux/amd64,linux/arm64|false|pdp-service
+opa|.|./services/opa/Dockerfile|services/opa policies|linux/amd64,linux/arm64|false|opa
 sector-pip|./services/sector-pip|./services/sector-pip/Dockerfile|services/sector-pip|linux/amd64,linux/arm64|false|sector-pip
 toestemmingsportaal-frontend|./toestemmingsportaal-frontend|./toestemmingsportaal-frontend/Dockerfile|toestemmingsportaal-frontend|linux/amd64,linux/arm64|false|toestemmingsportaal-frontend
 eudi-issuance-server|./vendor/nl-wallet|./services/eudi-issuance-server/Dockerfile|vendor/nl-wallet services/eudi-issuance-server/Dockerfile|linux/amd64|recursive|eudi-issuance-server-amd64
