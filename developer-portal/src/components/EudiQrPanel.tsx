@@ -82,7 +82,7 @@ export default function EudiQrPanel({ usecaseKey, onCancel, onPlaygroundToggle }
           </div>
         ) : (
           <>
-            <QRCodeSVG value={crossDeviceUl} size={220} bgColor="#ffffff" fgColor="#000000" includeMargin />
+            <QRCodeSVG value={crossDeviceUl} size={220} bgColor="#ffffff" fgColor="#000000" marginSize={4} />
             <div style={{ fontSize: 12, color: 'var(--mute)', textAlign: 'center' }}>
               Scan met TestFlight-wallet (cross-device). PID-disclosure met een BSN
               die de bron kent — anders 404 aan het eind.
