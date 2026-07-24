@@ -9,6 +9,15 @@ name: build
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: >-
+          Rebuild every image even if its content tag exists. Use to
+          refresh images after a build input outside the repository
+          changed, without cutting a release.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -25,3 +34,5 @@ jobs:
     permissions:
       contents: read
       packages: write
+    with:
+      force_rebuild: ${{ inputs.force_rebuild || false }}
