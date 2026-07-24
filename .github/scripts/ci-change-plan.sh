@@ -33,7 +33,7 @@ dir_names() {
 }
 
 mapfile -t all_go_services < <(dir_names services/*/go.mod)
-mapfile -t all_frontends < <(dir_names */package.json)
+mapfile -t all_frontends < <(dir_names ./*/package.json)
 
 # An empty discovery would plan an empty CI run that still reports green,
 # so treat it as a planner bug rather than "nothing to do".
