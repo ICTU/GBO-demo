@@ -251,7 +251,7 @@ func TestFSCAuthZenConsentIDAuthoritative(t *testing.T) {
 		},
 		"context": map[string]any{
 			"headers": map[string]string{
-				"X-Gbo-Scope":       "bd:ib:2025",
+				"X-Gbo-Scope":      "bd:ib:2025",
 				"X-GBO-Consent-Id": "c-referenced",
 			},
 		},
