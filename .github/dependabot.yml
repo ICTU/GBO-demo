@@ -8,6 +8,10 @@ version: 2
 #
 # GitHub's default security updates only cover gomod here, so the Go
 # ecosystem is deliberately left to that and not repeated below.
+#
+# The two Rust images are omitted on purpose. Both build from the
+# nl-wallet submodule rather than their own directory, so a bump to
+# either cannot be verified the way the others can.
 
 updates:
   - package-ecosystem: docker
@@ -23,8 +27,6 @@ updates:
       - /services/dev-portal-backend
       - /services/dienstverlener-backend
       - /services/eudi-adapter
-      - /services/eudi-demo-issuer
-      - /services/eudi-issuance-server
       - /services/graphql-server
       - /services/pdp-service
       - /services/sector-pip

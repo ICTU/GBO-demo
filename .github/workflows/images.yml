@@ -1,0 +1,173 @@
+name: images
+
+# Third-party actions are pinned to immutable commit SHAs. Update the SHA and
+# version comment together; never rely on a mutable tag.
+
+# Builds each image once, under a tag derived from its build inputs, and
+# reuses it everywhere else. Called by build.yml for every push to main
+# and by release.yml for every release tag.
+#
+# A release therefore publishes bits that were already built and tested
+# on main, rather than rebuilding from the release commit and hoping the
+# result matches. Images whose inputs did not change are not rebuilt,
+# because their content tag is already in the registry.
+
+on:
+  workflow_call:
+    inputs:
+      release_version:
+        description: >-
+          Version to publish, without the leading v. Empty for a main
+          build, which only refreshes content tags.
+        type: string
+        default: ''
+      force_rebuild:
+        description: Rebuild every image even if its content tag exists.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io/ictu/gbo-demo
+
+jobs:
+  plan:
+    name: Plan images
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.partition.outputs.build }}
+      build_count: ${{ steps.partition.outputs.build_count }}
+      promote: ${{ steps.partition.outputs.promote }}
+      promote_count: ${{ steps.partition.outputs.promote_count }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Build image manifest
+        id: manifest
+        run: .github/scripts/image-manifest.sh
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Split into images to build and images to reuse
+        id: partition
+        shell: bash
+        env:
+          FORCE_REBUILD: ${{ inputs.force_rebuild }}
+          IMAGES: ${{ steps.manifest.outputs.images }}
+        run: |
+          build='[]'
+          promote='[]'
+
+          while read -r image; do
+            service="$(jq -r '.service' <<<"${image}")"
+            ctx_tag="$(jq -r '.ctx_tag' <<<"${image}")"
+
+            if [[ "${FORCE_REBUILD}" != "true" ]] &&
+              docker buildx imagetools inspect \
+                "${REGISTRY}/${service}:${ctx_tag}" >/dev/null 2>&1; then
+              promote="$(jq -c --argjson i "${image}" '. + [$i]' <<<"${promote}")"
+              echo "reuse  ${service} ${ctx_tag}"
+            else
+              build="$(jq -c --argjson i "${image}" '. + [$i]' <<<"${build}")"
+              echo "build  ${service} ${ctx_tag}"
+            fi
+          done < <(jq -c '.[]' <<<"${IMAGES}")
+
+          {
+            printf 'build=%s\n' "${build}"
+            printf 'build_count=%s\n' "$(jq 'length' <<<"${build}")"
+            printf 'promote=%s\n' "${promote}"
+            printf 'promote_count=%s\n' "$(jq 'length' <<<"${promote}")"
+          } >>"${GITHUB_OUTPUT}"
+
+  build:
+    name: Build — ${{ matrix.service }}
+    needs: plan
+    if: needs.plan.outputs.build_count != '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.build) }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          submodules: ${{ matrix.submodules }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        with:
+          images: ghcr.io/ictu/gbo-demo/${{ matrix.service }}
+          tags: |
+            type=raw,value=${{ matrix.ctx_tag }}
+            type=raw,value=${{ inputs.release_version }},enable=${{ inputs.release_version != '' }}
+            type=raw,value=latest,enable=${{ inputs.release_version != '' }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: ${{ matrix.platforms }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.cache_scope }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.cache_scope }}
+
+  promote:
+    name: Promote reused images
+    needs: plan
+    if: inputs.release_version != '' && needs.plan.outputs.promote_count != '0'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag content digests with the release version
+        shell: bash
+        env:
+          PROMOTE: ${{ needs.plan.outputs.promote }}
+          RELEASE_VERSION: ${{ inputs.release_version }}
+        run: |
+          while read -r image; do
+            service="$(jq -r '.service' <<<"${image}")"
+            ctx_tag="$(jq -r '.ctx_tag' <<<"${image}")"
+
+            docker buildx imagetools create \
+              --tag "${REGISTRY}/${service}:${RELEASE_VERSION}" \
+              --tag "${REGISTRY}/${service}:latest" \
+              "${REGISTRY}/${service}:${ctx_tag}"
+          done < <(jq -c '.[]' <<<"${PROMOTE}")

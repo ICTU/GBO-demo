@@ -3,17 +3,22 @@ name: release
 # Third-party actions are pinned to immutable commit SHAs. Update the SHA and
 # version comment together; never rely on a mutable tag.
 
+# A release tags images that were already built on main, identified by
+# their build inputs rather than by a commit or a previous release. Any
+# image whose content tag is missing — a tag on a commit main never
+# built, say — is built here instead, so a release never depends on an
+# earlier one having completed.
+
 on:
   push:
     tags:
       - 'v*'
   workflow_dispatch:
     inputs:
-      force_rebuild_all:
+      force_rebuild:
         description: >-
-          Rebuild every image instead of reusing unchanged ones. Use after
-          a base image advisory, or to repair a release whose images were
-          only partly published.
+          Rebuild every image instead of reusing content tags. Only needed
+          when a build input outside the repository changed.
         type: boolean
         default: false
 
@@ -27,18 +32,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  plan:
-    name: Plan image release
+  validate:
+    name: Validate release tag
     runs-on: ubuntu-latest
     outputs:
-      changed: ${{ steps.plan.outputs.changed }}
-      unchanged: ${{ steps.plan.outputs.unchanged }}
-      changed_count: ${{ steps.plan.outputs.changed_count }}
-      unchanged_count: ${{ steps.plan.outputs.unchanged_count }}
-      eudi_changed: ${{ steps.plan.outputs.eudi_changed }}
-      previous_version: ${{ steps.plan.outputs.previous_version }}
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - name: Validate release tag
+      - name: Check the tag is SemVer
+        id: version
         shell: bash
         run: |
           if [[ ! "${GITHUB_REF_NAME}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
@@ -46,204 +47,24 @@ jobs:
             exit 1
           fi
 
-      - name: Check out repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          fetch-depth: 0
-
-      - name: Determine changed images
-        id: plan
-        shell: bash
-        env:
-          FORCE_REBUILD_ALL: ${{ inputs.force_rebuild_all || false }}
-        run: |
-          previous_tag="$(
-            git describe \
-              --tags \
-              --match 'v*' \
-              --abbrev=0 \
-              "${GITHUB_SHA}^" 2>/dev/null || true
-          )"
-
-          .github/scripts/release-image-plan.sh \
-            "${previous_tag}" \
-            "${GITHUB_SHA}" \
-            "${FORCE_REBUILD_ALL}"
-
-          printf 'previous_version=%s\n' "${previous_tag#v}" \
-            >>"${GITHUB_OUTPUT}"
+          printf 'version=%s\n' "${GITHUB_REF_NAME#v}" >>"${GITHUB_OUTPUT}"
 
   images:
-    name: Image — ${{ matrix.service }}
-    needs: plan
-    if: needs.plan.outputs.changed_count != '0'
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJSON(needs.plan.outputs.changed) }}
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
-
-      - name: Log in to GHCR
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract image metadata
-        id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
-        with:
-          images: ghcr.io/ictu/gbo-demo/${{ matrix.service }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=raw,value=latest
-
-      - name: Build and push image
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
-        with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.dockerfile }}
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.service }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
-
-  reused-images:
-    name: Reuse unchanged images
-    needs: plan
-    if: >-
-      ${{
-        needs.plan.outputs.unchanged_count != '0' ||
-        needs.plan.outputs.eudi_changed != 'true'
-      }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
-
-      - name: Log in to GHCR
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Reuse previous images
-        shell: bash
-        env:
-          EUDI_CHANGED: ${{ needs.plan.outputs.eudi_changed }}
-          PREVIOUS_VERSION: ${{ needs.plan.outputs.previous_version }}
-          UNCHANGED_IMAGES: ${{ needs.plan.outputs.unchanged }}
-        run: |
-          version="${GITHUB_REF_NAME#v}"
-          registry="ghcr.io/ictu/gbo-demo"
-
-          if [[ -z "${PREVIOUS_VERSION}" ]]; then
-            echo "No previous release tag, so there is nothing to reuse." >&2
-            exit 1
-          fi
-
-          mapfile -t services < <(jq -r '.[].service' <<<"${UNCHANGED_IMAGES}")
-
-          if [[ "${EUDI_CHANGED}" != "true" ]]; then
-            services+=(eudi-issuance-server)
-          fi
-
-          # Check every source manifest before creating any tag. A release
-          # that failed part way through leaves its tag in place but only
-          # some images published, and the next release would otherwise
-          # half-apply the new version before hitting the gap.
-          missing=()
-          for service in "${services[@]}"; do
-            if ! docker buildx imagetools inspect \
-              "${registry}/${service}:${PREVIOUS_VERSION}" >/dev/null 2>&1; then
-              missing+=("${service}")
-            fi
-          done
-
-          if ((${#missing[@]} > 0)); then
-            echo "No ${PREVIOUS_VERSION} manifest to reuse for:" >&2
-            printf '  %s\n' "${missing[@]}" >&2
-            echo "Re-run this workflow with force_rebuild_all." >&2
-            exit 1
-          fi
-
-          for service in "${services[@]}"; do
-            docker buildx imagetools create \
-              --tag "${registry}/${service}:${version}" \
-              "${registry}/${service}:${PREVIOUS_VERSION}"
-          done
-
-  eudi-image:
-    name: Image — eudi-issuance-server (amd64)
-    needs: plan
-    if: needs.plan.outputs.eudi_changed == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          submodules: recursive
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
-
-      - name: Log in to GHCR
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract image metadata
-        id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
-        with:
-          images: ghcr.io/ictu/gbo-demo/eudi-issuance-server
-          tags: |
-            type=semver,pattern={{version}}
-            type=raw,value=latest
-
-      - name: Build and push image
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
-        with:
-          context: ./vendor/nl-wallet
-          file: ./services/eudi-issuance-server/Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=eudi-issuance-server-amd64
-          cache-to: type=gha,mode=max,scope=eudi-issuance-server-amd64
+    name: Images
+    needs: validate
+    uses: ./.github/workflows/images.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      release_version: ${{ needs.validate.outputs.version }}
+      force_rebuild: ${{ inputs.force_rebuild || false }}
 
   chart:
     name: Helm chart
     needs:
-      - plan
+      - validate
       - images
-      - reused-images
-      - eudi-image
-    if: >-
-      ${{
-        !cancelled() &&
-        needs.plan.result == 'success' &&
-        (needs.images.result == 'success' || needs.images.result == 'skipped') &&
-        (needs.reused-images.result == 'success' || needs.reused-images.result == 'skipped') &&
-        (needs.eudi-image.result == 'success' || needs.eudi-image.result == 'skipped')
-      }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -256,19 +77,22 @@ jobs:
 
       - name: Log in to GHCR
         shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          printf '%s' "${{ secrets.GITHUB_TOKEN }}" | \
+          printf '%s' "${GHCR_TOKEN}" | \
             helm registry login ghcr.io \
               --username "${{ github.actor }}" \
               --password-stdin
 
       - name: Package and push chart
         shell: bash
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
         run: |
-          version="${GITHUB_REF_NAME#v}"
           helm dependency build deploy/helm/gbo-app
           helm package deploy/helm/gbo-app \
-            --version "${version}" \
-            --app-version "${version}"
-          helm push "gbo-app-${version}.tgz" \
+            --version "${VERSION}" \
+            --app-version "${VERSION}"
+          helm push "gbo-app-${VERSION}.tgz" \
             oci://ghcr.io/ictu/gbo-demo-charts
