@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
+shopt -s nullglob
+
+cd "$(git rev-parse --show-toplevel)"
 
 base_ref="${1:-}"
 head_ref="${2:-HEAD}"
@@ -16,6 +19,29 @@ append_name() {
 
   jq -c --arg name "${name}" '. + [$name]' <<<"${current}"
 }
+
+# Print the directory name of each existing path, sorted. Used to derive
+# component lists from the tree instead of hard-coding them, so a newly
+# added module or frontend cannot silently skip CI.
+dir_names() {
+  local path
+
+  for path in "$@"; do
+    path="${path%/*}"
+    printf '%s\n' "${path##*/}"
+  done | sort
+}
+
+mapfile -t all_go_services < <(dir_names services/*/go.mod)
+mapfile -t all_frontends < <(dir_names */package.json)
+
+# An empty discovery would plan an empty CI run that still reports green,
+# so treat it as a planner bug rather than "nothing to do".
+if ((${#all_go_services[@]} == 0)) || ((${#all_frontends[@]} == 0)); then
+  echo "Component discovery found no Go modules or no frontends." >&2
+  echo "Refusing to plan a CI run that would skip everything." >&2
+  exit 1
+fi
 
 path_changed() {
   local path="$1"
@@ -35,37 +61,29 @@ if [[ -z "${base_ref}" ]] ||
   run_all=true
 fi
 
-while read -r service; do
+for service in "${all_go_services[@]}"; do
   if [[ "${run_all}" == "true" ]] ||
     path_changed "services/${service}" ||
     path_changed ".golangci.yml"; then
     go_services="$(append_name "${go_services}" "${service}")"
   fi
-done <<'GO_SERVICES'
-additional-claims-service
-bron-sidecar
-bsnk-mock
-consent-portal-backend
-consent-register
-dev-portal-backend
-dienstverlener-backend
-eudi-adapter
-graphql-server
-pdp-service
-sector-pip
-GO_SERVICES
+done
 
-while read -r app; do
+for app in "${all_frontends[@]}"; do
   if [[ "${run_all}" == "true" ]] || path_changed "${app}"; then
     frontends="$(append_name "${frontends}" "${app}")"
   fi
-done <<'FRONTENDS'
-developer-portal
-dienstverlener-mock
-toestemmingsportaal-frontend
-FRONTENDS
+done
 
+# Unlike the lists above, the Docker matrix is a deliberate subset of the
+# services that carry a Dockerfile, so it stays explicit. Entries are
+# checked against the tree to catch renames and deletions.
 while read -r service; do
+  if [[ ! -f "services/${service}/Dockerfile" ]]; then
+    echo "Docker matrix lists '${service}', which has no Dockerfile." >&2
+    exit 1
+  fi
+
   if [[ "${run_all}" == "true" ]] || path_changed "services/${service}"; then
     docker_services="$(append_name "${docker_services}" "${service}")"
   fi
