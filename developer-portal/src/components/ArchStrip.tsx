@@ -25,6 +25,8 @@ type Props = {
   watching?: boolean
   onToggleWatch?: () => void
   watchError?: string | null
+  jaegerUrl?: string
+  grafanaUrl?: string
 }
 
 // Match api_calls on node-id for inline-popover-data.
@@ -39,7 +41,7 @@ function apiCallForNode(nodeId: string, calls: ApiCall[] | undefined): ApiCall |
 
 export default function ArchStrip({
   mode, setMode, states, apiCalls, traceId, pdpTraceIdOverride,
-  watching, onToggleWatch, watchError,
+  watching, onToggleWatch, watchError, jaegerUrl, grafanaUrl,
 }: Props) {
   // In EUDI mode we use the PDP trace (cross-lookup) for OPA/PDP details,
   // because the adapter trace doesn't contain them. Other nodes still
@@ -231,6 +233,8 @@ export default function ArchStrip({
                                 state={branchState}
                                 apiCall={undefined}
                                 traceId={branchDef.id === 'opa' ? pdpSpanTraceId : traceId}
+                                jaegerUrl={jaegerUrl}
+                                grafanaUrl={grafanaUrl}
                                 explainDecisions={branchDef.id === 'opa' && (mode === 'use' || mode === 'eudi-issuance') ? explain.decisions : undefined}
                                 explainLoading={branchDef.id === 'opa' ? explain.loading : undefined}
                                 explainError={branchDef.id === 'opa' ? explain.error : undefined}
@@ -247,6 +251,8 @@ export default function ArchStrip({
                       state={state}
                       apiCall={apiCallForNode(node.id, apiCalls)}
                       traceId={node.id === 'pdp' ? pdpSpanTraceId : traceId}
+                      jaegerUrl={jaegerUrl}
+                      grafanaUrl={grafanaUrl}
                       explainDecisions={node.id === 'pdp' ? explain.decisions : undefined}
                       explainLoading={node.id === 'pdp' ? explain.loading : undefined}
                       explainError={node.id === 'pdp' ? explain.error : undefined}

@@ -421,6 +421,8 @@ services:
       - PORTAL_API_TARGET=http://consent-portal-backend:4005
       - DVTP_API_TARGET=http://dienstverlener-backend:4006
       - JAEGER_API_TARGET=http://jaeger:16686
+      - VITE_JAEGER_PUBLIC_URL=${JAEGER_PUBLIC_URL:-http://localhost:9686}
+      - VITE_GRAFANA_PUBLIC_URL=${GRAFANA_PUBLIC_URL:-http://localhost:9300}
       - EUDI_API_TARGET=http://eudi-adapter:4009
       # The EUDI QR is built client-side; these env vars drive the universal-link.
       # VITE_* is public — ends up in the built bundle (no secrets here).

@@ -29,6 +29,8 @@ mask contains "/input/resource/bsn"
 
 mask contains "/input/pip/pid/bsn"
 
+mask contains "/input/pip/consent/pi"
+
 mask contains "/input/resource/variables/bsn"
 
 mask contains "/input/resolved/args"

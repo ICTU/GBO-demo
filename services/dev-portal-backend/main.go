@@ -41,35 +41,48 @@ type config struct {
 	CitizensFile      string
 	OrganizationsFile string
 	LokiURL           string
+	LokiDecisionQuery string
 	OPAURL            string
 	FscGroupID        string
 	FscTxlogPeers     []fscTxlogPeer
 }
 
-// fscTxlogPeer describes one FSC-org whose txlog-api we may query.
-// Demo shortcut: intra-org internal-cert used as client-cert. See
-// handleFscTxlog in fsctxlog.go.
+// fscTxlogPeer describes one FSC log source. Local peers use their txlog-api
+// with an internal certificate; remote peers use the peer-facing Manager
+// logging API with the calling peer's group certificate.
 type fscTxlogPeer struct {
-	Name string // display label (edi, bd)
-	URL  string
-	Cert string
-	Key  string
-	CA   string
+	Name        string // display label (edi, bd)
+	URL         string
+	Cert        string
+	Key         string
+	CA          string
+	SendGroupID bool // txlog-api requires it; the peer-facing Manager derives the group from mTLS
 }
 
 func loadConfig() config {
 	peers := []fscTxlogPeer{}
-	for _, prefix := range []string{"EDI", "HV", "BD"} {
-		url := os.Getenv("FSC_TXLOG_" + prefix + "_URL")
+	for _, source := range []struct {
+		Prefix      string
+		Name        string
+		SendGroupID bool
+	}{
+		{Prefix: "EDI", Name: "edi", SendGroupID: true},
+		{Prefix: "HV", Name: "hv", SendGroupID: true},
+		{Prefix: "BD", Name: "bd", SendGroupID: true},
+		{Prefix: "BD_HV", Name: "bd-via-hv"},
+		{Prefix: "BD_EDI", Name: "bd-via-edi"},
+	} {
+		url := os.Getenv("FSC_TXLOG_" + source.Prefix + "_URL")
 		if url == "" {
 			continue
 		}
 		peers = append(peers, fscTxlogPeer{
-			Name: strings.ToLower(prefix),
-			URL:  url,
-			Cert: os.Getenv("FSC_TXLOG_" + prefix + "_CERT"),
-			Key:  os.Getenv("FSC_TXLOG_" + prefix + "_KEY"),
-			CA:   os.Getenv("FSC_TXLOG_" + prefix + "_CA"),
+			Name:        source.Name,
+			URL:         url,
+			Cert:        os.Getenv("FSC_TXLOG_" + source.Prefix + "_CERT"),
+			Key:         os.Getenv("FSC_TXLOG_" + source.Prefix + "_KEY"),
+			CA:          os.Getenv("FSC_TXLOG_" + source.Prefix + "_CA"),
+			SendGroupID: source.SendGroupID,
 		})
 	}
 	return config{
@@ -79,6 +92,7 @@ func loadConfig() config {
 		CitizensFile:      getEnv("CITIZENS_FILE", "/citizens/citizens.json"),
 		OrganizationsFile: getEnv("ORGANIZATIONS_FILE", "/orgs/organizations.json"),
 		LokiURL:           getEnv("LOKI_URL", "http://loki:3100"),
+		LokiDecisionQuery: getEnv("LOKI_DECISION_QUERY", `{compose_service="opa"} |= "Decision Log"`),
 		OPAURL:            getEnv("OPA_URL", "http://opa:8181"),
 		FscGroupID:        getEnv("FSC_GROUP_ID", "fsc-demo"),
 		FscTxlogPeers:     peers,
@@ -384,8 +398,10 @@ func passthroughFile(path string) http.HandlerFunc {
 
 // OPA writes one "Decision Log" line per evaluation to stdout (enabled via
 // --set=decision_logs.console=true). Promtail ships them to Loki under the
-// {compose_service="opa"} label. We query by trace_id (which PEP injects
-// into the OPA input) and return the parsed JSON entry as-is.
+// {compose_service="opa"} label by default. LOKI_DECISION_QUERY can replace
+// the selector for Kubernetes or another runtime. We query by trace_id
+// (which PEP injects into the OPA input) and return the parsed JSON entry
+// as-is.
 
 type lokiQueryResponse struct {
 	Status string `json:"status"`
@@ -415,7 +431,7 @@ func handleDecision(cfg config) http.HandlerFunc {
 
 		// Search the last 30 minutes — plenty for the demo, bounded to avoid scans.
 		now := time.Now()
-		expr := `{compose_service="opa"} |= "Decision Log"`
+		expr := cfg.LokiDecisionQuery
 		u := fmt.Sprintf("%s/loki/api/v1/query_range?query=%s&start=%d&end=%d&limit=200&direction=backward",
 			cfg.LokiURL, url.QueryEscape(expr), now.Add(-30*time.Minute).UnixNano(), now.UnixNano())
 
@@ -521,7 +537,7 @@ func handleExplain(cfg config) http.HandlerFunc {
 // order (oldest first).
 func lokiDecisionsForTrace(ctx context.Context, cfg config, traceID string) ([]map[string]any, error) {
 	now := time.Now()
-	expr := `{compose_service="opa"} |= "Decision Log"`
+	expr := cfg.LokiDecisionQuery
 	u := fmt.Sprintf("%s/loki/api/v1/query_range?query=%s&start=%d&end=%d&limit=500&direction=forward",
 		cfg.LokiURL, url.QueryEscape(expr), now.Add(-30*time.Minute).UnixNano(), now.UnixNano())
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)

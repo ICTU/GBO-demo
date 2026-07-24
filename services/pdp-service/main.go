@@ -26,6 +26,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -41,6 +42,70 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
 	"go.opentelemetry.io/otel/trace"
 )
+
+var nineDigitIdentifier = regexp.MustCompile(`\b[0-9]{9}\b`)
+
+// telemetrySafeJSON preserves the AuthZEN/OPA document shape used by the
+// developer portal while removing identifiers and credentials before the
+// document is written to logs or trace attributes. The wire request itself is
+// not changed.
+func telemetrySafeJSON(raw []byte) string {
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nineDigitIdentifier.ReplaceAllString(string(raw), "[REDACTED]")
+	}
+	value = redactTelemetryValue(value)
+	out, err := json.Marshal(value)
+	if err != nil {
+		return "[REDACTED]"
+	}
+	return string(out)
+}
+
+func redactTelemetryValue(value any) any {
+	switch value := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(value))
+		for key, child := range value {
+			if telemetryKeyIsSensitive(key) {
+				out[key] = "[REDACTED]"
+				continue
+			}
+			out[key] = redactTelemetryValue(child)
+		}
+		return out
+	case []any:
+		out := make([]any, len(value))
+		for i, child := range value {
+			out[i] = redactTelemetryValue(child)
+		}
+		return out
+	case string:
+		// FSC AuthZen serializes the GraphQL request body as a JSON string.
+		// Redact nested JSON as well instead of treating it as opaque text.
+		var nested any
+		if json.Unmarshal([]byte(value), &nested) == nil {
+			redacted, err := json.Marshal(redactTelemetryValue(nested))
+			if err == nil {
+				return string(redacted)
+			}
+		}
+		return nineDigitIdentifier.ReplaceAllString(value, "[REDACTED]")
+	default:
+		return value
+	}
+}
+
+func telemetryKeyIsSensitive(key string) bool {
+	normalized := strings.NewReplacer("_", "", "-", "", ".", "").Replace(strings.ToLower(key))
+	switch normalized {
+	case "bsn", "burgerservicenummer", "pi", "authorization", "fscauthorization",
+		"token", "accesstoken", "password", "secret", "clientsecret", "privatekey":
+		return true
+	default:
+		return false
+	}
+}
 
 // tokenAdditionalClaimsFromHeaders extracts additional claims from the FSC
 // access-token. FSC-Inway forwards all incoming request-headers in
@@ -248,7 +313,7 @@ func handleAuthz(cfg config, client *http.Client, schemas map[string]*ast.Schema
 		// span so the dev-portal can render it inline in the PDP-node
 		// popover — no Jaeger deep-dive needed for the demo scenario.
 		if s := trace.SpanFromContext(r.Context()); s.IsRecording() {
-			s.SetAttributes(attribute.String("gbo.authzen.request", string(body)))
+			s.SetAttributes(attribute.String("gbo.authzen.request", telemetrySafeJSON(body)))
 		}
 
 		enriched, err := enrichInput(r.Context(), body, schemas, cfg.ConsentURL, client)
@@ -261,7 +326,7 @@ func handleAuthz(cfg config, client *http.Client, schemas map[string]*ast.Schema
 		}
 
 		if s := trace.SpanFromContext(r.Context()); s.IsRecording() {
-			s.SetAttributes(attribute.String("gbo.opa.input", string(enriched)))
+			s.SetAttributes(attribute.String("gbo.opa.input", telemetrySafeJSON(enriched)))
 		}
 
 		req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, target, bytes.NewReader(enriched))
@@ -325,7 +390,8 @@ func handleFSCAuthZen(cfg config, client *http.Client, schemas map[string]*ast.S
 			denyResp("PDP_READ_BODY_ERROR")
 			return
 		}
-		slog.Info("fsc-authzen envelope", "body_len", len(raw), "body_preview", string(raw[:min(200, len(raw))]))
+		safeEnvelope := telemetrySafeJSON(raw)
+		slog.Info("fsc-authzen envelope", "body_len", len(raw), "body_preview", safeEnvelope[:min(200, len(safeEnvelope))])
 		// FSC-Inway's AuthZen-plugin propagates Fsc-Transaction-Id as
 		// X-Request-Id. The traceparent-context breaks at FSC-Inway (no
 		// OTel support in the FSC version we run), so we expose the FSC
@@ -336,7 +402,7 @@ func handleFSCAuthZen(cfg config, client *http.Client, schemas map[string]*ast.S
 		fscTxID := r.Header.Get("X-Request-Id")
 		if s := trace.SpanFromContext(r.Context()); s.IsRecording() {
 			s.SetAttributes(
-				attribute.String("gbo.fsc.authzen.request", string(raw)),
+				attribute.String("gbo.fsc.authzen.request", safeEnvelope),
 				attribute.String("gbo.fsc.transaction_id", fscTxID),
 			)
 		}
@@ -456,9 +522,10 @@ func handleFSCAuthZen(cfg config, client *http.Client, schemas map[string]*ast.S
 			enriched = envelopeBytes
 		}
 
-		slog.Info("fsc-authzen opa input", "input", string(enriched))
+		safeOPAInput := telemetrySafeJSON(enriched)
+		slog.Info("fsc-authzen opa input", "input", safeOPAInput)
 		if s := trace.SpanFromContext(r.Context()); s.IsRecording() {
-			s.SetAttributes(attribute.String("gbo.opa.input", string(enriched)))
+			s.SetAttributes(attribute.String("gbo.opa.input", safeOPAInput))
 		}
 
 		req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, target, bytes.NewReader(enriched))

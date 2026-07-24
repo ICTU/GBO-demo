@@ -56,3 +56,39 @@ func TestHealthAndEmptyHistory(t *testing.T) {
 		t.Fatalf("history = %+v, want empty slice", hist)
 	}
 }
+
+func TestLoadConfigAllowsKubernetesLokiSelector(t *testing.T) {
+	const selector = `{namespace="fds-tenant-minbzk",container="opa"} |= "Decision Log"`
+	t.Setenv("LOKI_DECISION_QUERY", selector)
+
+	cfg := loadConfig()
+	if cfg.LokiDecisionQuery != selector {
+		t.Fatalf("LokiDecisionQuery = %q, want %q", cfg.LokiDecisionQuery, selector)
+	}
+}
+
+func TestLoadConfigSupportsProviderLogsForBothConsumerPeers(t *testing.T) {
+	t.Setenv("FSC_TXLOG_BD_HV_URL", "https://manager.example.test")
+	t.Setenv("FSC_TXLOG_BD_HV_CERT", "/certs/hv/tls.crt")
+	t.Setenv("FSC_TXLOG_BD_HV_KEY", "/certs/hv/tls.key")
+	t.Setenv("FSC_TXLOG_BD_HV_CA", "/certs/hv/ca.crt")
+	t.Setenv("FSC_TXLOG_BD_EDI_URL", "https://manager.example.test")
+	t.Setenv("FSC_TXLOG_BD_EDI_CERT", "/certs/edi/tls.crt")
+	t.Setenv("FSC_TXLOG_BD_EDI_KEY", "/certs/edi/tls.key")
+	t.Setenv("FSC_TXLOG_BD_EDI_CA", "/certs/edi/ca.crt")
+
+	cfg := loadConfig()
+	found := map[string]fscTxlogPeer{}
+	for _, peer := range cfg.FscTxlogPeers {
+		found[peer.Name] = peer
+	}
+	for _, name := range []string{"bd-via-hv", "bd-via-edi"} {
+		peer, ok := found[name]
+		if !ok {
+			t.Fatalf("missing FSC txlog source %q in %+v", name, cfg.FscTxlogPeers)
+		}
+		if peer.SendGroupID {
+			t.Fatalf("provider Manager source %q must not send group_id", name)
+		}
+	}
+}
