@@ -3,10 +3,24 @@ name: release
 # Third-party actions are pinned to immutable commit SHAs. Update the SHA and
 # version comment together; never rely on a mutable tag.
 
+# A release tags images that were already built on main, identified by
+# their build inputs rather than by a commit or a previous release. Any
+# image whose content tag is missing — a tag on a commit main never
+# built, say — is built here instead, so a release never depends on an
+# earlier one having completed.
+
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: >-
+          Rebuild every image instead of reusing content tags. Only needed
+          when a build input outside the repository changed.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -18,178 +32,67 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  validate:
+    name: Validate release tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Check the tag is SemVer
+        id: version
+        shell: bash
+        run: |
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Release tag must be SemVer with a v prefix (for example v0.1.0)." >&2
+            exit 1
+          fi
+
+          printf 'version=%s\n' "${GITHUB_REF_NAME#v}" >>"${GITHUB_OUTPUT}"
+
   images:
-    name: Image — ${{ matrix.service }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - service: additional-claims-service
-            context: ./services/additional-claims-service
-            dockerfile: ./services/additional-claims-service/Dockerfile
-          - service: bron-sidecar
-            context: ./services/bron-sidecar
-            dockerfile: ./services/bron-sidecar/Dockerfile
-          - service: bsnk-mock
-            context: ./services/bsnk-mock
-            dockerfile: ./services/bsnk-mock/Dockerfile
-          - service: consent-portal-backend
-            context: ./services/consent-portal-backend
-            dockerfile: ./services/consent-portal-backend/Dockerfile
-          - service: consent-register
-            context: ./services/consent-register
-            dockerfile: ./services/consent-register/Dockerfile
-          - service: dev-portal-backend
-            context: ./services/dev-portal-backend
-            dockerfile: ./services/dev-portal-backend/Dockerfile
-          - service: developer-portal
-            context: ./developer-portal
-            dockerfile: ./developer-portal/Dockerfile
-          - service: dienstverlener-backend
-            context: ./services/dienstverlener-backend
-            dockerfile: ./services/dienstverlener-backend/Dockerfile
-          - service: dienstverlener-mock
-            context: ./dienstverlener-mock
-            dockerfile: ./dienstverlener-mock/Dockerfile
-          - service: eudi-adapter
-            context: ./services/eudi-adapter
-            dockerfile: ./services/eudi-adapter/Dockerfile
-          - service: graphql-server
-            context: ./services/graphql-server
-            dockerfile: ./services/graphql-server/Dockerfile
-          - service: pdp-service
-            context: ./services/pdp-service
-            dockerfile: ./services/pdp-service/Dockerfile
-          - service: sector-pip
-            context: ./services/sector-pip
-            dockerfile: ./services/sector-pip/Dockerfile
-          - service: toestemmingsportaal-frontend
-            context: ./toestemmingsportaal-frontend
-            dockerfile: ./toestemmingsportaal-frontend/Dockerfile
-    steps:
-      - name: Validate release tag
-        shell: bash
-        run: |
-          if [[ ! "${GITHUB_REF_NAME}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
-            echo "Release tag must be SemVer with a v prefix (for example v0.1.0)." >&2
-            exit 1
-          fi
-
-      - name: Check out repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
-
-      - name: Log in to GHCR
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract image metadata
-        id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
-        with:
-          images: ghcr.io/ictu/gbo-demo/${{ matrix.service }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=raw,value=latest
-
-      - name: Build and push image
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
-        with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.dockerfile }}
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.service }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
-
-  eudi-image:
-    name: Image — eudi-issuance-server (amd64)
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - name: Validate release tag
-        shell: bash
-        run: |
-          if [[ ! "${GITHUB_REF_NAME}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
-            echo "Release tag must be SemVer with a v prefix (for example v0.1.0)." >&2
-            exit 1
-          fi
-
-      - name: Check out repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          submodules: recursive
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
-
-      - name: Log in to GHCR
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract image metadata
-        id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
-        with:
-          images: ghcr.io/ictu/gbo-demo/eudi-issuance-server
-          tags: |
-            type=semver,pattern={{version}}
-            type=raw,value=latest
-
-      - name: Build and push image
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
-        with:
-          context: ./vendor/nl-wallet
-          file: ./services/eudi-issuance-server/Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=eudi-issuance-server-amd64
-          cache-to: type=gha,mode=max,scope=eudi-issuance-server-amd64
+    name: Images
+    needs: validate
+    uses: ./.github/workflows/images.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      release_version: ${{ needs.validate.outputs.version }}
+      force_rebuild: ${{ inputs.force_rebuild || false }}
 
   chart:
     name: Helm chart
-    needs: [images, eudi-image]
+    needs:
+      - validate
+      - images
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Set up Helm
-        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v3.17.3
 
       - name: Log in to GHCR
         shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          printf '%s' "${{ secrets.GITHUB_TOKEN }}" | \
+          printf '%s' "${GHCR_TOKEN}" | \
             helm registry login ghcr.io \
               --username "${{ github.actor }}" \
               --password-stdin
 
       - name: Package and push chart
         shell: bash
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
         run: |
-          version="${GITHUB_REF_NAME#v}"
           helm dependency build deploy/helm/gbo-app
           helm package deploy/helm/gbo-app \
-            --version "${version}" \
-            --app-version "${version}"
-          helm push "gbo-app-${version}.tgz" \
+            --version "${VERSION}" \
+            --app-version "${VERSION}"
+          helm push "gbo-app-${VERSION}.tgz" \
             oci://ghcr.io/ictu/gbo-demo-charts

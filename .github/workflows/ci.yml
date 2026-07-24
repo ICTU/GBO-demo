@@ -14,24 +14,54 @@ env:
   OPA_IMAGE: openpolicyagent/opa:1.9.0-static@sha256:60b6af32b58377718546ac7d4634eecbfe50ec36f7d3ca3f8ebf515f9826c2ac
 
 jobs:
+  changes:
+    name: Plan CI
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.plan.outputs.go }}
+      go_count: ${{ steps.plan.outputs.go_count }}
+      frontends: ${{ steps.plan.outputs.frontends }}
+      frontend_count: ${{ steps.plan.outputs.frontend_count }}
+      docker: ${{ steps.plan.outputs.docker }}
+      docker_count: ${{ steps.plan.outputs.docker_count }}
+      rego: ${{ steps.plan.outputs.rego }}
+      chart: ${{ steps.plan.outputs.chart }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Determine affected components
+        id: plan
+        shell: bash
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            base_ref="$(git merge-base "${PR_BASE_SHA}" "${GITHUB_SHA}")"
+          else
+            base_ref="${BEFORE_SHA}"
+          fi
+
+          if [[ -z "${base_ref}" || "${base_ref}" =~ ^0+$ ]]; then
+            base_ref=""
+          fi
+
+          .github/scripts/ci-change-plan.sh \
+            "${base_ref}" \
+            "${GITHUB_SHA}"
+
   go:
     name: Go — lint + test
+    needs: changes
+    if: needs.changes.outputs.go_count != '0'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        service:
-          - additional-claims-service
-          - bron-sidecar
-          - bsnk-mock
-          - consent-portal-backend
-          - consent-register
-          - dev-portal-backend
-          - dienstverlener-backend
-          - eudi-adapter
-          - graphql-server
-          - pdp-service
-          - sector-pip
+        service: ${{ fromJSON(needs.changes.outputs.go) }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5.1.0
@@ -50,28 +80,32 @@ jobs:
 
   rego:
     name: Rego — fmt + check + test
+    needs: changes
+    if: needs.changes.outputs.rego == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: opa fmt --diff
         run: |
-          docker run --rm -v $(pwd)/policies:/w -w /w \
-            $OPA_IMAGE fmt --diff /w
+          docker run --rm -v "${PWD}/policies:/w" -w /w \
+            "${OPA_IMAGE}" fmt --diff /w
       - name: opa check
         run: |
-          docker run --rm -v $(pwd)/policies:/w -w /w \
-            $OPA_IMAGE check /w
+          docker run --rm -v "${PWD}/policies:/w" -w /w \
+            "${OPA_IMAGE}" check /w
       - name: opa test
         run: |
-          docker run --rm -v $(pwd)/policies:/w -w /w \
-            $OPA_IMAGE test /w -v
+          docker run --rm -v "${PWD}/policies:/w" -w /w \
+            "${OPA_IMAGE}" test /w -v
 
   chart:
     name: Helm chart — lint + template
+    needs: changes
+    if: needs.changes.outputs.chart == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v3.17.3
       - name: helm lint
@@ -89,19 +123,18 @@ jobs:
 
   frontend:
     name: Frontend — tsc --strict
+    needs: changes
+    if: needs.changes.outputs.frontend_count != '0'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        app:
-          - developer-portal
-          - dienstverlener-mock
-          - toestemmingsportaal-frontend
+        app: ${{ fromJSON(needs.changes.outputs.frontends) }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: ${{ matrix.app }}/package-lock.json
       - name: npm ci
@@ -113,16 +146,13 @@ jobs:
 
   docker:
     name: Docker — build (${{ matrix.service }})
+    needs: changes
+    if: needs.changes.outputs.docker_count != '0'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        service:
-          - additional-claims-service
-          - eudi-adapter
-          - graphql-server
-          - pdp-service
-          - sector-pip
+        service: ${{ fromJSON(needs.changes.outputs.docker) }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Build image
@@ -131,3 +161,37 @@ jobs:
             --file "services/${{ matrix.service }}/Dockerfile" \
             --tag "gbo-demo/${{ matrix.service }}:ci" \
             "services/${{ matrix.service }}"
+
+  result:
+    name: CI result
+    needs:
+      - changes
+      - go
+      - rego
+      - chart
+      - frontend
+      - docker
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify required jobs
+        shell: bash
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          GO_RESULT: ${{ needs.go.result }}
+          REGO_RESULT: ${{ needs.rego.result }}
+          CHART_RESULT: ${{ needs.chart.result }}
+          FRONTEND_RESULT: ${{ needs.frontend.result }}
+          DOCKER_RESULT: ${{ needs.docker.result }}
+        run: |
+          for result in \
+            "${CHANGES_RESULT}" \
+            "${GO_RESULT}" \
+            "${REGO_RESULT}" \
+            "${CHART_RESULT}" \
+            "${FRONTEND_RESULT}" \
+            "${DOCKER_RESULT}"; do
+            if [[ "${result}" == "failure" || "${result}" == "cancelled" ]]; then
+              exit 1
+            fi
+          done
