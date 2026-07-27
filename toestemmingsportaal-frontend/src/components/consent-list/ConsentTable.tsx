@@ -1,4 +1,4 @@
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { ConsentRecord } from '../../api/portalClient'
 import { deriveAfnemerName, deriveOnderwerp, formatGeldigTot } from '../../data/onderwerpMap'
 

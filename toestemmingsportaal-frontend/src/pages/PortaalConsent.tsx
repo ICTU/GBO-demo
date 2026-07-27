@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import MijnOverheidLayout from '../components/MijnOverheidLayout'
 import ScopeToggle from '../components/consent/ScopeToggle'
 import PartialConsentWarning from '../components/consent/PartialConsentWarning'

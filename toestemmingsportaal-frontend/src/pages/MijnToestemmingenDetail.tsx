@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router'
 import MijnOverheidLayout from '../components/MijnOverheidLayout'
 import StatusChip from '../components/consent-detail/StatusChip'
 import DetailGrid from '../components/consent-detail/DetailGrid'

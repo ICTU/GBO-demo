@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router'
 import MijnOverheidLayout from '../components/MijnOverheidLayout'
 import ConsentTabs from '../components/consent-list/ConsentTabs'
 import ConsentTable from '../components/consent-list/ConsentTable'

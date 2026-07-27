@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate } from 'react-router'
 import DigiDAuth from './pages/DigiDAuth'
 import PortaalConsent from './pages/PortaalConsent'
 import PortaalBevestiging from './pages/PortaalBevestiging'
