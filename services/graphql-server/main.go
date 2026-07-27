@@ -280,22 +280,27 @@ func initTracer(ctx context.Context) (func(context.Context) error, error) {
 func newMux(schema *graphql.Schema, tracer trace.Tracer) *http.ServeMux {
 	mux := http.NewServeMux()
 
-	// Playground instead of GraphiQL: the bundled GraphQL Playground is dark
-	// (matching the dev-portal), ships a Docs + Schema explorer and prefills
-	// its editor from the `query` URL param, which is how the dev-portal's
-	// BRON block deep-links into it. The handler serves it on a browser GET
-	// of /graphql; POST clients and `?raw` keep getting JSON, so the FSC path
-	// through the sidecar is untouched. Introspection needs no flag —
-	// graphql-go answers __schema/__type queries unconditionally.
+	// Both UIs off: the ones graphql-go/handler bundles are GraphiQL 0.11 and
+	// the retired Prisma GraphQL Playground, neither of which can build a
+	// query by clicking or draw the schema. /playground serves our own page
+	// instead (GraphiQL 5 + explorer + Voyager, see playground.go), and a
+	// browser landing on /graphql is redirected there. Introspection needs no
+	// flag — graphql-go answers __schema/__type queries unconditionally.
 	gqlHandler := handler.New(&handler.Config{
 		Schema:     schema,
 		Pretty:     true,
 		GraphiQL:   false,
-		Playground: true,
+		Playground: false,
 	})
+
+	mux.HandleFunc("/playground", playgroundHandler)
 
 	// Wrap with OTel span
 	mux.HandleFunc("/graphql", func(w http.ResponseWriter, r *http.Request) {
+		if wantsPlayground(r) {
+			playgroundRedirect(w, r)
+			return
+		}
 		_, span := tracer.Start(r.Context(), "graphql.query")
 		defer span.End()
 		// The FSC-Inway proxies the Fsc-Transaction-Id through to the

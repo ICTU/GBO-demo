@@ -4,6 +4,9 @@ services/*/*[!.go]
 !services/*/go.*
 !services/*/Dockerfile
 !services/*/main.go
+# Web assets baked into a binary with go:embed — the binary-catching pattern
+# above matches any filename not ending in `.go`, including these.
+!services/*/*.html
 !services/*/mockdata/
 !services/*/scenarios/
 !services/*/config/

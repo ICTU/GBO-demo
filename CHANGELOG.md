@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - Repository-owner section in `README.md`.
 
 ### Changed
+- Bron playground replaced: `graphql-server` now serves its own page on `/playground` (GraphiQL 5 with the explorer plugin for click-together queries, plus a Schema tab rendering the type graph with GraphQL Voyager) instead of the retired GraphQL Playground bundled with `graphql-go/handler`. Assets are pinned per version and SRI-checked; `/graphql` in a browser redirects to `/playground`, while `POST /graphql` and `GET /graphql?raw` are untouched.
 - `SECURITY.md` restructured with explicit *Current status*, *Supported versions*, and *Reporting a vulnerability* sections.
 - Bron GraphQL-schema switched from the custom `inkomensgegevens` shape to the BD bronprofiel schema ([gbo-semantiek v0.3 `bd.graphql`](https://github.com/ICTU/gbo-semantiek/blob/main/v0.3/graphql/bd.graphql)): queries now go via `ingeschrevenPersoon(bsn)` → `heeftBelastingjaarAangifte` → `AangifteIH` with `Bedrag` amounts. EUDI inkomensverklaring metadata updated accordingly (`peil_datum`/`grondslag_*`/`status_code` out, `indieningsdatum`/`status` in).
 

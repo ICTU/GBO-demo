@@ -20,38 +20,12 @@ const GRAPHQL_PUBLIC_URL =
   import.meta.env.VITE_GRAPHQL_PUBLIC_URL ||
   'http://localhost:9400'
 
-// Query the playground opens with. graphql-server serves the playground
-// bundled with graphql-go/handler on a browser GET of /graphql, which prefills
-// its editor from the `query` URL param — so the link lands on something
-// runnable against the baked mock data instead of an empty editor. The leading
-// comment is the warning itself: this route reaches the bron directly.
-//
-// Keep it ASCII-only. graphql-go's lexer (v0.8.1, and still on master) counts
-// bytes and runes inconsistently while skipping a `#` comment, so a single
-// multi-byte character desynchronises every token after it — mid-query it does
-// not even fail, it silently changes the selection set.
-const BRON_PLAYGROUND_QUERY = `# Demo-bron, directe toegang: geen FSC-Inway, sidecar, PEP of PDP,
-# dus geen toestemmingscheck en geen BSN-pseudonimisering. Mock-data.
-{
-  ingeschrevenPersoon(bsn: "123456789") {
-    bsn
-    heeftBelastingjaarAangifte(belastingjaren: [2024]) {
-      aangifteIdentificatie
-      belastingjaar
-      belastingsoort
-      status
-      indieningsdatum
-      ... on AangifteIH {
-        verzamelinkomen { waarde valuta }
-        box1Inkomen { waarde valuta }
-      }
-    }
-  }
-}
-`
-
-const BRON_PLAYGROUND_URL =
-  `${GRAPHQL_PUBLIC_URL}/graphql?query=${encodeURIComponent(BRON_PLAYGROUND_QUERY)}`
+// graphql-server serves the playground page itself (GraphiQL 5 + explorer +
+// Voyager), including the demo query its editor opens with and the warning
+// that this route reaches the bron directly — so the link carries no `query`
+// param of its own. `/graphql` in a browser redirects here, so older links
+// keep working.
+const BRON_PLAYGROUND_URL = `${GRAPHQL_PUBLIC_URL}/playground`
 
 type Props = {
   node: NodeDef
