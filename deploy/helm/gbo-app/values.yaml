@@ -58,6 +58,10 @@ route:
       namespace: fds-public
       sectionName: https
 
+deploymentAnnotations: {}
+# Override the default RollingUpdate strategy, for example with
+# type: Recreate when a single-replica workload mounts a ReadWriteOnce volume.
+deploymentStrategy: {}
 podAnnotations: {}
 podLabels: {}
 podSecurityContext: {}
