@@ -280,10 +280,18 @@ func initTracer(ctx context.Context) (func(context.Context) error, error) {
 func newMux(schema *graphql.Schema, tracer trace.Tracer) *http.ServeMux {
 	mux := http.NewServeMux()
 
+	// Playground instead of GraphiQL: the bundled GraphQL Playground is dark
+	// (matching the dev-portal), ships a Docs + Schema explorer and prefills
+	// its editor from the `query` URL param, which is how the dev-portal's
+	// BRON block deep-links into it. The handler serves it on a browser GET
+	// of /graphql; POST clients and `?raw` keep getting JSON, so the FSC path
+	// through the sidecar is untouched. Introspection needs no flag —
+	// graphql-go answers __schema/__type queries unconditionally.
 	gqlHandler := handler.New(&handler.Config{
-		Schema:   schema,
-		Pretty:   true,
-		GraphiQL: true,
+		Schema:     schema,
+		Pretty:     true,
+		GraphiQL:   false,
+		Playground: true,
 	})
 
 	// Wrap with OTel span

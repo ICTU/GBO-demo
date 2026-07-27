@@ -24,6 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - Dev-portal scenario `use-jaar-niet-geconsenteerd-deny` demonstrating per-year consent.
 - Demo policies (Rego) and GraphQL mirror-schemas are now baked into the `opa` and `pdp-service` images (`services/opa/Dockerfile`, `services/pdp-service/Dockerfile`, build context = repo root). The compose stack and the Helm example values no longer mount them; a volume mount at `/policies` or `/schemas` still shadows the baked-in files if present.
 - DvTP browser flow: the dienstverlener-backend intersects requested belastingjaren with the consent's scopes and only queries consented years; unconsented years are returned as `denied_years` and rendered greyed out in the dienstverlener-mock result page instead of failing the whole query.
+- Bron GraphQL playground: `graphql-server` now serves the GraphQL Playground bundled with `graphql-go/handler` (dark, with a Docs + Schema explorer) on a browser `GET /graphql` instead of GraphiQL 0.11, and the developer portal's BRON block deep-links to it via `GRAPHQL_PUBLIC_URL` with a query prefilled through the `query` URL param. `POST /graphql` and `?raw` still return GraphQL results. Introspection was already enabled — graphql-go answers `__schema`/`__type` unconditionally — and is now covered by a test. The playground reaches the bron directly, so it bypasses FSC-Inway, the sidecar, the PEP and the PDP: no consent check, no BSN pseudonymisation, as the prefilled query's leading comment states.
 
 ## [0.1.0] - 2026-07-20
 
