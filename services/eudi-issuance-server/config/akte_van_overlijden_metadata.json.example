@@ -1,0 +1,243 @@
+{
+  "vct": "nl.gbo.brp.akte-van-overlijden",
+  "name": "Akte van overlijden",
+  "description": "Uittreksel overlijdensgegevens van de huwelijkspartner uit de Basisregistratie Personen (BRP)",
+  "display": [
+    {
+      "lang": "nl-NL",
+      "name": "Akte van overlijden",
+      "description": "Overlijdensgegevens van de huwelijkspartner (BRP)",
+      "summary": "{{overledene_voornamen}} {{overledene_geslachtsnaam}} ({{datum_overlijden}})",
+      "rendering": {
+        "simple": {
+          "background_color": "#3b3b46",
+          "text_color": "#ffffff"
+        }
+      }
+    },
+    {
+      "lang": "en-US",
+      "name": "Death certificate",
+      "description": "Death record of the spouse (Dutch Personal Records Database)",
+      "summary": "{{overledene_voornamen}} {{overledene_geslachtsnaam}} ({{datum_overlijden}})",
+      "rendering": {
+        "simple": {
+          "background_color": "#3b3b46",
+          "text_color": "#ffffff"
+        }
+      }
+    }
+  ],
+  "claims": [
+    {
+      "path": ["overledene_geslachtsnaam"],
+      "display": [
+        { "lang": "nl-NL", "label": "Geslachtsnaam overledene", "description": "Officiële familienaam van de overledene" },
+        { "lang": "en-US", "label": "Surname of the deceased", "description": "Official family name of the deceased" }
+      ],
+      "sd": "always",
+      "svg_id": "overledene_geslachtsnaam"
+    },
+    {
+      "path": ["overledene_voorvoegsel"],
+      "display": [
+        { "lang": "nl-NL", "label": "Voorvoegsel overledene", "description": "Voorvoegsel bij de geslachtsnaam van de overledene" },
+        { "lang": "en-US", "label": "Name prefix of the deceased", "description": "Prefix belonging to the surname of the deceased" }
+      ],
+      "sd": "always"
+    },
+    {
+      "path": ["overledene_voornamen"],
+      "display": [
+        { "lang": "nl-NL", "label": "Voornamen overledene", "description": "Alle officiële voornamen van de overledene" },
+        { "lang": "en-US", "label": "Given names of the deceased", "description": "All official given names of the deceased" }
+      ],
+      "sd": "always"
+    },
+    {
+      "path": ["overledene_geboortedatum"],
+      "display": [
+        { "lang": "nl-NL", "label": "Geboortedatum overledene", "description": "Datum waarop de overledene is geboren" },
+        { "lang": "en-US", "label": "Date of birth of the deceased", "description": "Date on which the deceased was born" }
+      ],
+      "sd": "always"
+    },
+    {
+      "path": ["overledene_geboorteplaats"],
+      "display": [
+        { "lang": "nl-NL", "label": "Geboorteplaats overledene", "description": "Gemeente of plaats waar de overledene is geboren" },
+        { "lang": "en-US", "label": "Place of birth of the deceased", "description": "Municipality or place where the deceased was born" }
+      ],
+      "sd": "always"
+    },
+    {
+      "path": ["overledene_geboorteland"],
+      "display": [
+        { "lang": "nl-NL", "label": "Geboorteland overledene", "description": "Land waar de overledene is geboren (ISO 3166-1 alpha-2)" },
+        { "lang": "en-US", "label": "Country of birth of the deceased", "description": "Country where the deceased was born (ISO 3166-1 alpha-2)" }
+      ],
+      "sd": "always"
+    },
+    {
+      "path": ["overledene_geslacht"],
+      "display": [
+        { "lang": "nl-NL", "label": "Geslacht overledene", "description": "Geregistreerde geslachtsaanduiding van de overledene" },
+        { "lang": "en-US", "label": "Gender of the deceased", "description": "Registered gender of the deceased" }
+      ],
+      "sd": "always"
+    },
+    {
+      "path": ["overledene_ouders"],
+      "display": [
+        { "lang": "nl-NL", "label": "Ouders overledene", "description": "Namen van de ouders van de overledene, gescheiden door een puntkomma" },
+        { "lang": "en-US", "label": "Parents of the deceased", "description": "Names of the parents of the deceased, separated by a semicolon" }
+      ],
+      "sd": "always"
+    },
+    {
+      "path": ["datum_overlijden"],
+      "display": [
+        { "lang": "nl-NL", "label": "Datum overlijden", "description": "Datum waarop de partner is overleden" },
+        { "lang": "en-US", "label": "Date of death", "description": "Date on which the spouse died" }
+      ],
+      "sd": "always",
+      "svg_id": "datum_overlijden"
+    },
+    {
+      "path": ["plaats_overlijden"],
+      "display": [
+        { "lang": "nl-NL", "label": "Plaats overlijden", "description": "Plaats waar de partner is overleden" },
+        { "lang": "en-US", "label": "Place of death", "description": "Place where the spouse died" }
+      ],
+      "sd": "always"
+    },
+    {
+      "path": ["land_overlijden"],
+      "display": [
+        { "lang": "nl-NL", "label": "Land overlijden", "description": "Land waar de partner is overleden (ISO 3166-1 alpha-2)" },
+        { "lang": "en-US", "label": "Country of death", "description": "Country where the spouse died (ISO 3166-1 alpha-2)" }
+      ],
+      "sd": "always"
+    },
+    {
+      "path": ["soort_verbintenis"],
+      "display": [
+        { "lang": "nl-NL", "label": "Soort verbintenis", "description": "Huwelijk of geregistreerd partnerschap" },
+        { "lang": "en-US", "label": "Type of union", "description": "Marriage or registered partnership" }
+      ],
+      "sd": "always"
+    },
+    {
+      "path": ["datum_voltrekking"],
+      "display": [
+        { "lang": "nl-NL", "label": "Datum voltrekking", "description": "Datum waarop de verbintenis is aangegaan" },
+        { "lang": "en-US", "label": "Date of union", "description": "Date on which the union was entered into" }
+      ],
+      "sd": "always"
+    },
+    {
+      "path": ["plaats_voltrekking"],
+      "display": [
+        { "lang": "nl-NL", "label": "Plaats voltrekking", "description": "Plaats waar de verbintenis is aangegaan" },
+        { "lang": "en-US", "label": "Place of union", "description": "Place where the union was entered into" }
+      ],
+      "sd": "always"
+    },
+    {
+      "path": ["land_voltrekking"],
+      "display": [
+        { "lang": "nl-NL", "label": "Land voltrekking", "description": "Land waar de verbintenis is aangegaan (ISO 3166-1 alpha-2)" },
+        { "lang": "en-US", "label": "Country of union", "description": "Country where the union was entered into (ISO 3166-1 alpha-2)" }
+      ],
+      "sd": "always"
+    },
+    {
+      "path": ["datum_ontbinding"],
+      "display": [
+        { "lang": "nl-NL", "label": "Datum ontbinding", "description": "Datum waarop de verbintenis is ontbonden" },
+        { "lang": "en-US", "label": "Date of dissolution", "description": "Date on which the union was dissolved" }
+      ],
+      "sd": "always"
+    },
+    {
+      "path": ["reden_ontbinding"],
+      "display": [
+        { "lang": "nl-NL", "label": "Reden ontbinding", "description": "Reden van ontbinding (bij deze akte: overlijden)" },
+        { "lang": "en-US", "label": "Reason for dissolution", "description": "Reason the union was dissolved (for this credential: death)" }
+      ],
+      "sd": "always"
+    },
+    {
+      "path": ["nabestaande_geslachtsnaam"],
+      "display": [
+        { "lang": "nl-NL", "label": "Geslachtsnaam nabestaande", "description": "Officiële familienaam van de achtergebleven partner" },
+        { "lang": "en-US", "label": "Surname of the surviving spouse", "description": "Official family name of the surviving spouse" }
+      ],
+      "sd": "always"
+    },
+    {
+      "path": ["nabestaande_voorvoegsel"],
+      "display": [
+        { "lang": "nl-NL", "label": "Voorvoegsel nabestaande", "description": "Voorvoegsel bij de geslachtsnaam van de achtergebleven partner" },
+        { "lang": "en-US", "label": "Name prefix of the surviving spouse", "description": "Prefix belonging to the surname of the surviving spouse" }
+      ],
+      "sd": "always"
+    },
+    {
+      "path": ["nabestaande_voornamen"],
+      "display": [
+        { "lang": "nl-NL", "label": "Voornamen nabestaande", "description": "Alle officiële voornamen van de achtergebleven partner" },
+        { "lang": "en-US", "label": "Given names of the surviving spouse", "description": "All official given names of the surviving spouse" }
+      ],
+      "sd": "always"
+    },
+    {
+      "path": ["verklaring_tekst"],
+      "display": [
+        { "lang": "nl-NL", "label": "Verklaring", "description": "Tekst van de akte van overlijden" },
+        { "lang": "en-US", "label": "Statement", "description": "Text of the death certificate" }
+      ],
+      "sd": "always"
+    }
+  ],
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "Akte van overlijden VCT Schema",
+    "description": "JSON schema voor nl.gbo.brp.akte-van-overlijden",
+    "type": "object",
+    "properties": {
+      "vct":                       { "type": "string" },
+      "vct#integrity":             { "type": "string" },
+      "iss":                       { "type": "string" },
+      "nbf":                       { "type": "number" },
+      "exp":                       { "type": "number" },
+      "cnf":                       { "type": "object" },
+      "status":                    { "type": "object" },
+      "sub":                       { "type": "string" },
+      "iat":                       { "type": "number" },
+      "attestation_qualification": { "type": "string" },
+      "overledene_geslachtsnaam":  { "type": "string" },
+      "overledene_voorvoegsel":    { "type": "string" },
+      "overledene_voornamen":      { "type": "string" },
+      "overledene_geboortedatum":  { "type": "string" },
+      "overledene_geboorteplaats": { "type": "string" },
+      "overledene_geboorteland":   { "type": "string" },
+      "overledene_geslacht":       { "type": "string" },
+      "overledene_ouders":         { "type": "string" },
+      "datum_overlijden":          { "type": "string" },
+      "plaats_overlijden":         { "type": "string" },
+      "land_overlijden":           { "type": "string" },
+      "soort_verbintenis":         { "type": "string" },
+      "datum_voltrekking":         { "type": "string" },
+      "plaats_voltrekking":        { "type": "string" },
+      "land_voltrekking":          { "type": "string" },
+      "datum_ontbinding":          { "type": "string" },
+      "reden_ontbinding":          { "type": "string" },
+      "nabestaande_geslachtsnaam": { "type": "string" },
+      "nabestaande_voorvoegsel":   { "type": "string" },
+      "nabestaande_voornamen":     { "type": "string" },
+      "verklaring_tekst":          { "type": "string" }
+    },
+    "required": ["vct", "iss", "attestation_qualification", "overledene_geslachtsnaam", "datum_overlijden"]
+  }
+}

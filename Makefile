@@ -1,5 +1,5 @@
 .PHONY: up down logs clean certs fsc-ca fsc-up fsc-down fsc-test fsc-clean \
-        fsc-seed-bri fsc-seed-bri-hv fsc-pdp-cert eudi-images \
+        fsc-seed-bri fsc-seed-bri-hv fsc-seed-brp fsc-pdp-cert eudi-images \
         demo demo-minimal demo-dvtp demo-eudi demo-full demo-down eudi-config
 
 -include .env
@@ -53,7 +53,8 @@ demo-dvtp: certs fsc-all-up fsc-seed-bri fsc-seed-bri-hv
 	@echo "  Jaeger:              http://localhost:9686  |  http://$$(hostname -I | awk '{print $$1}'):9686"
 
 EUDI_CONFIG_DIR := services/eudi-issuance-server/config
-EUDI_CONFIG_FILES := issuance_server.toml inkomensverklaring_metadata.json issuer_auth.json reader_auth.json
+EUDI_CONFIG_FILES := issuance_server.toml inkomensverklaring_metadata.json \
+    akte_van_overlijden_metadata.json issuer_auth.json reader_auth.json
 EUDI_REQUIRED_VARS := EUDI_PUBLIC_URL EUDI_READER_ORIGIN_URL EUDI_BRI_URL \
     EUDI_READER_KEY EUDI_READER_CERT \
     EUDI_ISSUER_KEY EUDI_ISSUER_CERT \
@@ -92,7 +93,7 @@ eudi-images:
 	    -f services/eudi-issuance-server/Dockerfile "$$NLWALLET_PATH"; \
 	fi
 
-demo-eudi: certs fsc-all-up fsc-seed-bri eudi-config eudi-images
+demo-eudi: certs fsc-all-up fsc-seed-bri fsc-seed-brp eudi-config eudi-images
 	@echo "-> EUDI stack: base + eudi branch + fsc-infra"
 	docker compose --profile eudi up --build -d
 	@echo ""
@@ -100,10 +101,10 @@ demo-eudi: certs fsc-all-up fsc-seed-bri eudi-config eudi-images
 	@echo "  EUDI-adapter:    http://localhost:9409  |  http://$$(hostname -I | awk '{print $$1}'):9409"
 	@echo "  Jaeger:          http://localhost:9686  |  http://$$(hostname -I | awk '{print $$1}'):9686"
 	@echo ""
-	@echo "  Manual step: grant-link '/bri' in EDI-Controller-UI"
+	@echo "  Manual step: grant-links '/bri' and '/brp' in EDI-Controller-UI"
 	@echo "  (see README.md section 'EUDI flow over real FSC' step 3)"
 
-demo-full: certs fsc-all-up fsc-seed-bri fsc-seed-bri-hv eudi-config eudi-images
+demo-full: certs fsc-all-up fsc-seed-bri fsc-seed-brp fsc-seed-bri-hv eudi-config eudi-images
 	@echo "-> Full stack: everything on"
 	docker compose --profile full up --build -d
 
@@ -212,3 +213,19 @@ fsc-seed-bri-hv:
 		-w /work \
 		gbo-demo/pki-tools:local \
 		bash scripts/seed-bri-connection-hv.sh
+
+# Second bron behind the same provider peer: the BRP service. Same script,
+# different service-name/endpoint/grant-link — see the header of
+# seed-bri-contract.sh. EUDI-only for now (no HV connection), because the
+# akte van overlijden is a wallet usecase.
+fsc-seed-brp:
+	docker run --rm \
+		--network $(FSC_INFRA_NETWORK) \
+		--env-file fsc-infra/.env \
+		-e SERVICE_NAME=brp \
+		-e SERVICE_ENDPOINT_URL=http://brp-sidecar:4011 \
+		-e GRANT_LINK_PATH=/brp \
+		-v $(PWD)/fsc-infra:/work:ro \
+		-w /work \
+		gbo-demo/pki-tools:local \
+		bash scripts/seed-bri-contract.sh

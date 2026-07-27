@@ -108,9 +108,11 @@ docker compose logs -f opa
 | Consent portal | 9002 | Citizen UI (React/Vite) | Demo frontend |
 | Developer portal | 9003 | Architect inspection (React/Vite) | Demo frontend |
 | dev-portal-backend | 9407 | Trace hub + explain endpoint | Real (Go) |
-| GraphQL Server | 9400 | Sample source with income data | Real (Go) |
+| GraphQL Server | 9400 | BD source (bronprofiel `bd`) with income data | Real (Go) |
+| BRP GraphQL Server | 9401 | BRP source (bronprofiel `brp`) with persoonsgegevens | Real (Go) |
 | pdp-service | 9408 | AuthZen endpoint behind FSC-Inway (P3 context handler) | Real (Go) |
-| bron-sidecar | 9411 | Source-side gateway; PI→BSN via BSNk (subject_id_type-driven) | Real (Go) |
+| bron-sidecar | 9411 | Source-side gateway for the BD source; PI→BSN via BSNk (subject_id_type-driven) | Real (Go) |
+| brp-sidecar | 9413 | Same gateway image in front of the BRP source | Real (Go) |
 | additional-claims-service | 9412 | Provider policy that enriches OpenFSC access tokens | Demo configuration (Go) |
 | Consent Register | 9402 | Consent store (PIP) | Mock (Go, in-memory) |
 | BSNk Mock | 9403 | Pseudonymization service | Mock (Go, deterministic) |
@@ -127,7 +129,7 @@ docker compose logs -f opa
 |-----------|--------|-------|
 | OPA / Rego policies | **Real** | Production OPA container with real Rego evaluation |
 | OpenTelemetry + Jaeger | **Real** | Production-grade distributed tracing |
-| GraphQL Server | **Real** | Real Go GraphQL implementation |
+| GraphQL Server (BD + BRP) | **Real** | Two Go GraphQL sources, one per bronprofiel; mock data, real schemas from gbo-semantiek v0.3 |
 | FSC (Manager/Inway/Outway/Controller/txlog) | **Real** | OpenFSC v2.4.0 upstream containers, three orgs (consumer, EUDI-issuer, provider) each with their own PostgreSQL + certs |
 | pdp-service | **Real** | AuthZen endpoint behind FSC-Inway; the only policy endpoint for both flows |
 | bron-sidecar | **Real** | Source-side gateway; PI→BSN driven by the signed `subject_id_type` additional claim |
@@ -144,7 +146,7 @@ The five-factor authorization model demonstrated:
 | ① | Org identity (mTLS) | FSC-Manager validates peer-certs; FSC-Inway includes peer_cert_chain in the AuthZen context |
 | ② | Org permission (JWT) | Provider FSC-Manager validates the grant and signs `add.{flow, subject_id_type}` returned by its Additional Claims API |
 | ③ | Access basis (consent) | pdp-service fetches consent via `GET /consents?pi=<pi>&scope=...` on consent-register |
-| ④ | Data scope (GraphQL) | OPA checks requested fields against the dienstencatalogus (rules DVT0001/EUD0001) |
+| ④ | Data scope (GraphQL) | OPA checks requested fields against the dienstencatalogus (rules DVT0001/EUD0001/EUD0002) |
 | ⑤ | Request validity | OPA validates `pip.consent` + `resource.pi` binding + expiry |
 
 ## Makefile targets
@@ -174,27 +176,27 @@ make fsc-clean # Wipe everything: containers, images, CA material
 Three FSC orgs run alongside the main stack:
 
 - **Consumer-org (mortgage lender)** — consent-flow consumer; provider claims resolve to `flow=dvtp:query`, `subject_id_type=pseudonym`
-- **EDI-Issuer** — wallet-flow consumer; provider claims resolve to `flow=eudi:attestation`, `subject_id_type=direct`
-- **Provider (source-holder)** — provides the `bri` service; endpoint routes through the bron-sidecar
+- **EDI-Issuer** — wallet-flow consumer; provider claims resolve to `flow=eudi:attestation` (BD) or `flow=eudi:attestation:brp` (BRP), `subject_id_type=direct`
+- **Provider (source-holder)** — provides two services: `bri` (BD source, via bron-sidecar) and `brp` (BRP source, via brp-sidecar). One provider peer, two bronnen — a demo simplification; in reality the BRP is held by another organisation.
 
 `make demo` orchestrates the full sequence automatically:
 - PKI generation (root-CA + per-org certs)
 - FSC-infra start (three orgs + directory-peer)
-- Contract seed (bri-service + publication + two connection contracts + grant-links)
-- Main stack with dienstverlener-backend, eudi-adapter, pdp-service, bron-sidecar
+- Contract seed (bri- and brp-service + publications + connection contracts + grant-links)
+- Main stack with dienstverlener-backend, eudi-adapter, pdp-service, both sources and their sidecars
 
 Step-by-step targets are available for debugging:
 
 1. **`make fsc-all-up`** — FSC-infra + orgs. The directory-manager runs with `--auto-sign-grants=servicePublication`; the provider-manager runs with `--auto-sign-grants=serviceConnection`. Contracts reach `CONTRACT_STATE_VALID` without manual review.
 
-2. **`make fsc-seed-bri`** + **`bash fsc-infra/scripts/seed-bri-connection-hv.sh`** — services + contracts + grant-links. Registers the `bri` service in the provider-Controller (endpoint = bron-sidecar), posts publication + two connection contracts, and upserts the grant-links per consumer. The provider Manager obtains flow and identifier semantics from `additional-claims-service` when issuing an access token. Idempotent.
+2. **`make fsc-seed-bri`** + **`make fsc-seed-brp`** + **`bash fsc-infra/scripts/seed-bri-connection-hv.sh`** — services + contracts + grant-links. `seed-bri-contract.sh` is parameterised by `SERVICE_NAME` / `SERVICE_ENDPOINT_URL` / `GRANT_LINK_PATH`, so the same script registers `bri` (endpoint = bron-sidecar, path `/bri`) and `brp` (endpoint = brp-sidecar, path `/brp`) in the provider-Controller, posts the publication + connection contracts, and upserts the grant-links per consumer. The provider Manager obtains flow and identifier semantics from `additional-claims-service` when issuing an access token. Idempotent.
 
    Grant-link upsert goes via direct SQL — v2.4.0 has no REST endpoint for grant-link CRUD.
 
 3. **Generate pdp-service TLS cert + restart**:
    ```bash
    bash fsc-infra/pki/generate-pdp-cert.sh
-   docker compose up -d --force-recreate dienstverlener-backend eudi-adapter pdp-service graphql-server bron-sidecar
+   docker compose up -d --force-recreate dienstverlener-backend eudi-adapter pdp-service graphql-server bron-sidecar brp-graphql-server brp-sidecar
    docker compose -f fsc-infra/docker-compose.yml up -d --force-recreate bd-inway
    ```
 
@@ -244,9 +246,9 @@ docker compose -f docker-compose.yml -f docker-compose.cloudflare-tunnel.yml --p
 
 ```bash
 # Go happy-path integration tests (per service)
-for svc in additional-claims-service bron-sidecar bsnk-mock consent-portal-backend consent-register \
-           dev-portal-backend dienstverlener-backend eudi-adapter \
-           graphql-server pdp-service sector-pip; do
+for svc in additional-claims-service bron-sidecar brp-graphql-server bsnk-mock \
+           consent-portal-backend consent-register dev-portal-backend \
+           dienstverlener-backend eudi-adapter graphql-server pdp-service sector-pip; do
   (cd services/$svc && go test -timeout 60s ./...)
 done
 
@@ -341,6 +343,7 @@ The checked-in mapping is deliberately small demo policy, not a second productio
 
 - **Legal-basis (gov-to-gov)**: add `policies/legal-basis/*.rego`, add a new FSC consumer org and configure provider claims with `flow=g2g:legal-basis`; the PDP dispatches on the signed token claim.
 - **Wallet flow (already implemented)**: see `eudi-adapter`.
+- **Second source (already implemented)**: the akte van overlijden reads the BRP source. A new bronprofiel needs its own FSC service + grant-link path, a mirror schema under `policies/dvtp/schemas/`, an entry in pdp-service's `flowSchemaFiles` (the flow name carries the bronprofiel, because two bronnen can expose the same query root), a rule with its own `covers_fields`, and a catalog entry with `bron` + `flow`.
 - **AS4 / SDG-OOTS**: add an AS4 bridge mock + Domibus mock.
 
 ## Repository owner

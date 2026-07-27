@@ -134,5 +134,5 @@ echo "  ✓ grant-link $OUTWAY_NAME $GRANT_LINK_PATH → ${new_hash:0:22}..."
 
 echo ""
 echo "HV -> BD contract-seed done. Dienstverlener-backend can POST"
-echo "to http://hv-outway:8080/bri (subject_id_type=pseudonym -> sidecar"
-echo "substitutes PI -> BSN)."
+echo "to http://hv-outway:8080$GRANT_LINK_PATH (subject_id_type=pseudonym ->"
+echo "sidecar substitutes PI -> BSN)."

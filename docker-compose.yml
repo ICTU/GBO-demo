@@ -144,6 +144,29 @@ services:
       timeout: 3s
       retries: 5
 
+  # Second bron: bronprofiel BRP (persoonsgegevens). Registered as its own
+  # FSC service ('brp', outway-path /brp) under the same provider org as the
+  # BD bron — a demo simplification: one provider peer, two bronnen. The
+  # akte-van-overlijden usecase reads from here.
+  brp-graphql-server:
+    build: ./services/brp-graphql-server
+    ports:
+      - "${GBO_PORT_BRP_GRAPHQL:-9401}:4001"
+    environment:
+      - OTEL_SERVICE_NAME=brp-graphql-server
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+    networks:
+      - backend
+      - fsc-infra
+    depends_on:
+      otel-collector:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4001/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   consent-register:
     build: ./services/consent-register
     ports:
@@ -255,6 +278,37 @@ services:
       - fsc-infra
     depends_on:
       graphql-server:
+        condition: service_healthy
+      bsnk-mock:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4011/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Same sidecar image in front of the BRP bron. The sidecar is bron-agnostic
+  # (UPSTREAM_URL + PSEUDONYM_VARS), so a second bron needs a second instance,
+  # not a second implementation. The BRP service is EUDI-only for now
+  # (subject_id_type=direct), so in practice this is pass-through; it stays in
+  # place so a DvTP consumer with a pseudonym contract can be added later
+  # without moving the FSC service endpoint.
+  brp-sidecar:
+    build: ./services/bron-sidecar
+    ports:
+      - "${GBO_PORT_BRP_SIDECAR:-9413}:4011"
+    environment:
+      - OTEL_SERVICE_NAME=brp-sidecar
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - UPSTREAM_URL=http://brp-graphql-server:4001
+      - BSNK_URL=http://bsnk-mock:4003
+      - OWN_PEER_OIN=99999999900000000200
+      - PSEUDONYM_VARS=bsn
+    networks:
+      - backend
+      - fsc-infra
+    depends_on:
+      brp-graphql-server:
         condition: service_healthy
       bsnk-mock:
         condition: service_healthy
@@ -540,6 +594,10 @@ services:
       - ISSUANCE_SERVER__DISCLOSURE_SETTINGS__INKOMENSVERKLARING_2023__ATTESTATION_URL_CONFIG__BASE_URL=${EUDI_BRI_URL:?set EUDI_BRI_URL to the eudi-tunnel-bri URL before compose up}inkomensverklaring_2023/
       - ISSUANCE_SERVER__DISCLOSURE_SETTINGS__INKOMENSVERKLARING_2024__ATTESTATION_URL_CONFIG__BASE_URL=${EUDI_BRI_URL:?set EUDI_BRI_URL to the eudi-tunnel-bri URL before compose up}inkomensverklaring_2024/
       - ISSUANCE_SERVER__DISCLOSURE_SETTINGS__INKOMENSVERKLARING_2025__ATTESTATION_URL_CONFIG__BASE_URL=${EUDI_BRI_URL:?set EUDI_BRI_URL to the eudi-tunnel-bri URL before compose up}inkomensverklaring_2025/
+      # Fourth usecase, second bron (BRP): akte van overlijden. Same adapter,
+      # same tunnel — the adapter's catalog entry routes it to the /brp FSC
+      # service and to policy EUD0002.
+      - ISSUANCE_SERVER__DISCLOSURE_SETTINGS__AKTE_VAN_OVERLIJDEN__ATTESTATION_URL_CONFIG__BASE_URL=${EUDI_BRI_URL:?set EUDI_BRI_URL to the eudi-tunnel-bri URL before compose up}akte_van_overlijden/
       - ISSUANCE_SERVER__UNIVERSAL_LINK_BASE_URL=walletdebuginteraction://wallet.edi.rijksoverheid.nl/
       # Bind addresses explicitly — otherwise default localhost =
       # unreachable from other containers.
@@ -562,6 +620,7 @@ services:
       # keys) before starting the EUDI profile.
       - ./services/eudi-issuance-server/config/issuance_server.toml:/issuance_server.toml:ro
       - ./services/eudi-issuance-server/config/inkomensverklaring_metadata.json:/inkomensverklaring_metadata.json:ro
+      - ./services/eudi-issuance-server/config/akte_van_overlijden_metadata.json:/akte_van_overlijden_metadata.json:ro
       - ./services/eudi-issuance-server/config/issuer_auth.json:/issuer_auth.json:ro
       - ./services/eudi-issuance-server/config/reader_auth.json:/reader_auth.json:ro
       - eudi-tsl-publish:/tsl-publish

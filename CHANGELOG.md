@@ -7,6 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Added
+- **Akte van overlijden — a second bron and a second EUDI attestation.** New source service `brp-graphql-server` serving the BRP bronprofiel ([gbo-semantiek v0.3 `brp.graphql`](https://github.com/ICTU/gbo-semantiek/blob/main/v0.3/graphql/brp.graphql)): `IngeschrevenPersoon`/`Ingezetene`/`NietIngezetene`, nationaliteit, huwelijk, verblijfstitel, gezagsverhouding, immigratie and the binnen-/buitenlandse verblijfadres. A nabestaande discloses her PID and receives an `nl.gbo.brp.akte-van-overlijden` credential with her deceased partner's overlijdensgegevens; the query is rooted at her own persoonslijst and reaches the overledene only through `heeftHuwelijk.partners`, which is the authorization argument the policy mirrors. Mock data holds exactly one person who satisfies that shape (Frouke Jansen, BSN `999991772`, the PID-preprod persona); the other personen are married to a living partner, unmarried, or divorced.
+  - Registered as its own FSC service `brp` (outway path `/brp`) behind the same provider peer as the BD bron, with its own `brp-sidecar` instance. `seed-bri-contract.sh` is now parameterised by `SERVICE_NAME`/`SERVICE_ENDPOINT_URL`/`GRANT_LINK_PATH`; `make fsc-seed-brp` seeds the new service.
+  - New policy rule `EUD0002` with scope `brp:akte:overlijden`. Its `covers_fields` are disjoint from `EUD0001`'s, so a BD scope cannot open the BRP path and vice versa; the BD path's per-year axis is declared off.
+  - The PDP selects the mirror schema per flow (`flowSchemaFiles`): `eudi:attestation` → BD, `eudi:attestation:brp` → BRP. Both bronprofielen expose `Query.ingeschrevenPersoon(bsn)` with a different `IngeschrevenPersoon`, so the flow name has to carry the bronprofiel.
+  - The eudi-adapter dispatches on a per-usecase `bron` (`bd`/`brp`), which drives both the GraphQL query it builds and the wallet-attribute mapping.
 - Repository governance files (`CODE_OF_CONDUCT.md`, `publiccode.yml`, `CHANGELOG.md`) and a `.github/workflows/codeql-analysis.yml` workflow to comply with the [ICTU GitHub policy](https://github.com/ictu/github-policy).
 - Repository-owner section in `README.md`.
 

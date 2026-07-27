@@ -1,0 +1,10 @@
+{
+  "id": "eudi-akte-van-overlijden-allow",
+  "name": "EUDI · Akte van overlijden ALLOW",
+  "desc": "Nabestaande (Frouke Jansen, BSN 999991772) discloset haar PID en vraagt een akte van overlijden aan voor haar partner. Tweede bron: BRP (brp-graphql-server) via FSC-service 'brp'. Adapter's usecase-catalog levert scope brp:akte:overlijden en flow eudi:attestation:brp; EUD0002's allowed_scopes accepteert 'em → credential met de overlijdensgegevens van de partner wordt uitgegeven. De query loopt via haar eigen persoonslijst naar heeftHuwelijk.partners — dat pad is meteen de autorisatiegrond.",
+  "tab": "eudi-issuance",
+  "expected_outcome": "allow",
+  "payload": {
+    "usecase": "akte_van_overlijden"
+  }
+}

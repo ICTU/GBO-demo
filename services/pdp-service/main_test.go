@@ -305,3 +305,89 @@ func TestFSCAuthZenConsentIDAuthoritative(t *testing.T) {
 		t.Fatalf("granted_scopes = %v, want [bd:ib:2025] (referenced consent, not the union)", got)
 	}
 }
+
+// The mirror-schemas that ship with the service must all parse, and each
+// flow must get its own bronprofiel: BD and BRP both expose
+// Query.ingeschrevenPersoon(bsn) with a different IngeschrevenPersoon.
+func TestLoadSchemasPerFlow(t *testing.T) {
+	schemas, err := loadSchemas("../../policies/dvtp/schemas")
+	if err != nil {
+		t.Fatalf("loadSchemas: %v", err)
+	}
+	for flow := range flowSchemaFiles {
+		if schemas[flow] == nil {
+			t.Fatalf("no schema for flow %q", flow)
+		}
+	}
+	bd := schemas["eudi:attestation"].Types["IngeschrevenPersoon"]
+	brp := schemas["eudi:attestation:brp"].Types["IngeschrevenPersoon"]
+	if bd.Fields.ForName("heeftBelastingjaarAangifte") == nil {
+		t.Error("BD schema: IngeschrevenPersoon.heeftBelastingjaarAangifte missing")
+	}
+	if brp.Fields.ForName("heeftHuwelijk") == nil {
+		t.Error("BRP schema: IngeschrevenPersoon.heeftHuwelijk missing")
+	}
+	if brp.Fields.ForName("heeftBelastingjaarAangifte") != nil {
+		t.Error("BRP schema leaked BD fields — the two bronprofielen must stay separate")
+	}
+}
+
+// The akte-van-overlijden query must resolve into exactly the field-keys
+// (<ParentType>.<field>) that rule EUD0002 declares in covers_fields. This
+// is the contract between the mirror-schema and the policy; a rename on
+// either side breaks it here rather than at demo time.
+func TestBRPOverlijdenPartnerResolvesToPolicyFieldKeys(t *testing.T) {
+	schemas, err := loadSchemas("../../policies/dvtp/schemas")
+	if err != nil {
+		t.Fatalf("loadSchemas: %v", err)
+	}
+	query := `query OverlijdenPartner($bsn: BSN!) {
+	  ingeschrevenPersoon(bsn: $bsn) {
+	    id bsn geslachtsnaam voorvoegsel voornamen
+	    heeftHuwelijk {
+	      soortVerbintenis datumVoltrekking plaatsVoltrekking landVoltrekking
+	      datumOntbinding redenOntbinding
+	      partners {
+	        id geslachtsnaam voorvoegsel voornamen
+	        geboortedatum geboorteplaats geboorteland geslacht
+	        datumOverlijden plaatsOverlijden landOverlijden
+	        heeftOuder { geslachtsnaam voorvoegsel voornamen }
+	      }
+	    }
+	  }
+	}`
+	res := buildResolved(query, map[string]any{"bsn": "999991772"}, schemas["eudi:attestation:brp"])
+	if res.CoverageUnverifiable {
+		t.Fatal("coverage_unverifiable — the BRP query did not parse against the mirror schema")
+	}
+	got := map[string]bool{}
+	for _, f := range res.Fields {
+		if !f.Known {
+			t.Errorf("field %s.%s unknown in the BRP mirror schema", f.Parent, f.Name)
+		}
+		got[f.Parent+"."+f.Name] = true
+	}
+	want := []string{
+		"Query.ingeschrevenPersoon",
+		"IngeschrevenPersoon.id", "IngeschrevenPersoon.bsn",
+		"IngeschrevenPersoon.geslachtsnaam", "IngeschrevenPersoon.voorvoegsel",
+		"IngeschrevenPersoon.voornamen", "IngeschrevenPersoon.heeftHuwelijk",
+		"Huwelijk.soortVerbintenis", "Huwelijk.datumVoltrekking",
+		"Huwelijk.plaatsVoltrekking", "Huwelijk.landVoltrekking",
+		"Huwelijk.datumOntbinding", "Huwelijk.redenOntbinding", "Huwelijk.partners",
+		"NatuurlijkPersoon.id", "NatuurlijkPersoon.geslachtsnaam",
+		"NatuurlijkPersoon.voorvoegsel", "NatuurlijkPersoon.voornamen",
+		"NatuurlijkPersoon.geboortedatum", "NatuurlijkPersoon.geboorteplaats",
+		"NatuurlijkPersoon.geboorteland", "NatuurlijkPersoon.geslacht",
+		"NatuurlijkPersoon.datumOverlijden", "NatuurlijkPersoon.plaatsOverlijden",
+		"NatuurlijkPersoon.landOverlijden", "NatuurlijkPersoon.heeftOuder",
+	}
+	for _, key := range want {
+		if !got[key] {
+			t.Errorf("missing resolved field-key %q", key)
+		}
+	}
+	if res.Args["vars.bsn"] != "999991772" {
+		t.Errorf("vars.bsn = %v, want the disclosed BSN", res.Args["vars.bsn"])
+	}
+}

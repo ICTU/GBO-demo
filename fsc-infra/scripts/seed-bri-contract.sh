@@ -2,6 +2,13 @@
 # seed-bri-contract — reproduce the bri-service + contract negotiation
 # between edi-issuer-org (consumer) and belastingdienst-mock (provider).
 #
+# Parameterised by SERVICE_NAME / SERVICE_ENDPOINT_URL / GRANT_LINK_PATH so
+# the same script seeds every service the provider org offers. The demo has
+# two bronnen behind one provider peer:
+#   bri -> bron-sidecar     -> graphql-server     (BD bronprofiel)
+#   brp -> brp-sidecar      -> brp-graphql-server (BRP bronprofiel)
+# See the Makefile targets fsc-seed-bri / fsc-seed-brp.
+#
 # Background:
 #   The flow was originally set up manually via the Controller UIs.
 #   Contract state survives container restarts but not `make fsc-clean`.
@@ -40,9 +47,9 @@ BD_CONTROLLER_URL="${BD_CONTROLLER_URL:-https://bd-controller:9444}"    # contro
 BD_MANAGER_URL="${BD_MANAGER_URL:-https://bd-manager:9443}"             # manager int (LISTEN_ADDRESS_INTERNAL)
 EDI_MANAGER_URL="${EDI_MANAGER_URL:-https://edi-manager:9443}"          # manager int
 
-# bri-service endpoint — bron-sidecar reads the signed additional claim
+# Service endpoint — the bron-sidecar reads the signed additional claim
 # subject_id_type and substitutes PI -> BSN if needed; direct mode is
-# pass-through to graphql-server. For the demo always via the sidecar.
+# pass-through to the bron. For the demo always via a sidecar.
 SERVICE_ENDPOINT_URL="${SERVICE_ENDPOINT_URL:-http://bron-sidecar:4011}"
 SERVICE_INWAY_ADDRESS="${SERVICE_INWAY_ADDRESS:-https://bd-inway:443}"
 
@@ -256,5 +263,5 @@ psql -h "$PG_HOST" -U "$PG_USER" -d fsc_edi_controller -c "
 echo "  ✓ grant-link $OUTWAY_NAME $GRANT_LINK_PATH → ${new_hash:0:22}..."
 
 echo ""
-echo "Contract-seed done. Adapter can POST to /bri (via outway) —"
+echo "Contract-seed done. Adapter can POST to $GRANT_LINK_PATH (via outway) —"
 echo "outway resolves it to the grant-hash + mTLS to bd-inway."
