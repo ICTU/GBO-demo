@@ -84,9 +84,13 @@ trust_anchors = ["MIIFazCCA1OgAwIBAgIRAIIQz7DSQONZRGPgu2OCiwAwDQYJKoZIhvcNAQELBQ
 # Tweede bron (BRP): dezelfde PID-disclosure (alleen bsn), andere adapter-
 # usecase. base_url wordt per usecase door compose overschreven.
 [disclosure_settings.akte_van_overlijden]
+# Own reader cert: the purpose statement the wallet shows when it asks for
+# the BSN is baked into this certificate. The BD reader cert says "Uitgifte
+# inkomensverklaring", which is wrong for an akte van overlijden. Falls back
+# to the BD reader pair until a BRP one is minted (see Makefile).
 private_key_type = "software"
-private_key = "${EUDI_READER_KEY}"
-certificate = "${EUDI_READER_CERT}"
+private_key = "${EUDI_BRP_READER_KEY}"
+certificate = "${EUDI_BRP_READER_CERT}"
 
 [[disclosure_settings.akte_van_overlijden.dcql_query.credentials]]
 id = "pid_credential"
@@ -114,11 +118,16 @@ private_key = "${EUDI_STATUS_KEY}"
 certificate = "${EUDI_STATUS_CERT}"
 
 [attestation_settings."nl.gbo.brp.akte-van-overlijden"]
+# Own issuer cert: the organisation the wallet shows as the issuer of this
+# credential is baked into this certificate. The BD issuer cert says
+# "Belastingdienst / Tax and Customs Administration", which is wrong for a
+# BRP akte. Falls back to the BD issuer pair until a BRP one is minted
+# (see Makefile); source metadata in akte_van_overlijden_issuer_auth.json.
 valid_days = 365
 copies_per_format = { "dc+sd-jwt" = 4 }
 private_key_type = "software"
-private_key = "${EUDI_ISSUER_KEY}"
-certificate = "${EUDI_ISSUER_CERT}"
+private_key = "${EUDI_BRP_ISSUER_KEY}"
+certificate = "${EUDI_BRP_ISSUER_CERT}"
 
 [attestation_settings."nl.gbo.brp.akte-van-overlijden".status_list]
 context_path = "/tsl"

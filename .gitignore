@@ -23,6 +23,8 @@ services/eudi-issuance-server/config/inkomensverklaring_metadata.json
 services/eudi-issuance-server/config/akte_van_overlijden_metadata.json
 services/eudi-issuance-server/config/issuer_auth.json
 services/eudi-issuance-server/config/reader_auth.json
+services/eudi-issuance-server/config/akte_van_overlijden_issuer_auth.json
+services/eudi-issuance-server/config/akte_van_overlijden_reader_auth.json
 
 # IDE / tooling state
 .omc/

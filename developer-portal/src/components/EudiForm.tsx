@@ -74,13 +74,6 @@ export function walletUniversalLinkFor(cfg: AttestationConfig, sessionType: 'sam
   return `${UL_BASE}?${params.toString()}`
 }
 
-// Fallback: link to demo-issuer's own QR-page (for when the client-side
-// assembled link doesn't work or the user prefers the external UX).
-export const DEMO_ISSUER_BASE = 'http://localhost:3005'
-export function demoIssuerPageFor(cfg: AttestationConfig): string {
-  return `${DEMO_ISSUER_BASE}/${cfg.usecase}/`
-}
-
 export function attestationConfigFor(usecase: string): AttestationConfig | undefined {
   return ATTESTATION_TYPES.find((a) => a.usecase === usecase)
 }

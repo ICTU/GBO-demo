@@ -54,7 +54,8 @@ demo-dvtp: certs fsc-all-up fsc-seed-bri fsc-seed-bri-hv
 
 EUDI_CONFIG_DIR := services/eudi-issuance-server/config
 EUDI_CONFIG_FILES := issuance_server.toml inkomensverklaring_metadata.json \
-    akte_van_overlijden_metadata.json issuer_auth.json reader_auth.json
+    akte_van_overlijden_metadata.json issuer_auth.json reader_auth.json \
+    akte_van_overlijden_issuer_auth.json akte_van_overlijden_reader_auth.json
 EUDI_REQUIRED_VARS := EUDI_PUBLIC_URL EUDI_READER_ORIGIN_URL EUDI_BRI_URL \
     EUDI_READER_KEY EUDI_READER_CERT \
     EUDI_ISSUER_KEY EUDI_ISSUER_CERT \
@@ -74,6 +75,18 @@ eudi-config:
 	  echo "ERROR: missing env-vars (see .env.example):$$missing"; \
 	  exit 1; \
 	fi; \
+	if [ -z "$$EUDI_BRP_ISSUER_CERT" ] || [ -z "$$EUDI_BRP_READER_CERT" ]; then \
+	  echo "WARNING: EUDI_BRP_{ISSUER,READER}_{KEY,CERT} not set — the akte van"; \
+	  echo "         overlijden falls back to the Belastingdienst issuer/reader"; \
+	  echo "         certificates. The wallet will then show 'Belastingdienst' as"; \
+	  echo "         the issuer and 'Uitgifte inkomensverklaring' as the reason for"; \
+	  echo "         sharing the BSN, which is wrong for a BRP akte. Mint a BRP pair"; \
+	  echo "         from akte_van_overlijden_{issuer,reader}_auth.json to fix it."; \
+	fi; \
+	export EUDI_BRP_ISSUER_KEY="$${EUDI_BRP_ISSUER_KEY:-$$EUDI_ISSUER_KEY}"; \
+	export EUDI_BRP_ISSUER_CERT="$${EUDI_BRP_ISSUER_CERT:-$$EUDI_ISSUER_CERT}"; \
+	export EUDI_BRP_READER_KEY="$${EUDI_BRP_READER_KEY:-$$EUDI_READER_KEY}"; \
+	export EUDI_BRP_READER_CERT="$${EUDI_BRP_READER_CERT:-$$EUDI_READER_CERT}"; \
 	for f in $(EUDI_CONFIG_FILES); do \
 	  echo "-> Rendering $(EUDI_CONFIG_DIR)/$$f from $$f.example"; \
 	  envsubst < $(EUDI_CONFIG_DIR)/$$f.example > $(EUDI_CONFIG_DIR)/$$f; \

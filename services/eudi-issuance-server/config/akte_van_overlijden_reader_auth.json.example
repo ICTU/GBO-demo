@@ -1,0 +1,54 @@
+{
+  "purposeStatement": {
+    "nl": "Uitgifte akte van overlijden",
+    "en": "Issuance of a death certificate"
+  },
+  "retentionPolicy": {
+    "intentToRetain": false
+  },
+  "sharingPolicy": {
+    "intentToShare": false
+  },
+  "deletionPolicy": {
+    "deleteable": true
+  },
+  "organization": {
+    "displayName": {
+      "nl": "Rijksdienst voor Identiteitsgegevens",
+      "en": "Netherlands Agency for Identity Data"
+    },
+    "legalName": {
+      "nl": "Rijksdienst voor Identiteitsgegevens",
+      "en": "Netherlands Agency for Identity Data"
+    },
+    "description": {
+      "nl": "Leest het BSN uit de PID voor uitgifte van de akte van overlijden van uw partner.",
+      "en": "Reads the BSN from the PID to issue the death certificate of your partner."
+    },
+    "webUrl": "https://www.rvig.nl",
+    "city": {
+      "nl": "Den Haag",
+      "en": "The Hague"
+    },
+    "category": {
+      "nl": "Overheid",
+      "en": "Government"
+    },
+    "_TODO_logo": "REQUIRED before minting the certificate: the Belastingdienst wordmark SVG from issuer_auth.json.example must NOT be reused here. Supply the RvIG logo as {mimeType, imageData}.",
+    "countryCode": "nl",
+    "_TODO_kvk": "CONFIRM before minting: issuer_auth.json.example puts a 20-digit OIN in the `kvk` field (Belastingdienst 00000002003214394002), not an 8-digit KVK number. RvIG's KVK is 27373207 (it is a unit of BZK); its OIN must be looked up in the Logius OIN register.",
+    "privacyPolicyUrl": "https://www.rvig.nl/privacy"
+  },
+  "requestOriginBaseUrl": "${EUDI_READER_ORIGIN_URL}",
+  "authorizedAttributes": {
+    "urn:eudi:pid:nl:1": [
+      [
+        "urn:eudi:pid:nl:1",
+        "bsn"
+      ],
+      [
+        "bsn"
+      ]
+    ]
+  }
+}

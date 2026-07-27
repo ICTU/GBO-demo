@@ -1,0 +1,29 @@
+{
+  "organization": {
+    "displayName": {
+      "nl": "Rijksdienst voor Identiteitsgegevens",
+      "en": "Netherlands Agency for Identity Data"
+    },
+    "legalName": {
+      "nl": "Rijksdienst voor Identiteitsgegevens",
+      "en": "Netherlands Agency for Identity Data"
+    },
+    "description": {
+      "nl": "RvIG beheert de Basisregistratie Personen (BRP) namens het ministerie van Binnenlandse Zaken en Koninkrijksrelaties.",
+      "en": "RvIG maintains the Personal Records Database (BRP) on behalf of the Ministry of the Interior and Kingdom Relations."
+    },
+    "webUrl": "https://www.rvig.nl",
+    "city": {
+      "nl": "Den Haag",
+      "en": "The Hague"
+    },
+    "category": {
+      "nl": "Overheid",
+      "en": "Government"
+    },
+    "_TODO_logo": "REQUIRED before minting the certificate: the Belastingdienst wordmark SVG from issuer_auth.json.example must NOT be reused here. Supply the RvIG logo as {mimeType, imageData}.",
+    "countryCode": "nl",
+    "_TODO_kvk": "CONFIRM before minting: issuer_auth.json.example puts a 20-digit OIN in the `kvk` field (Belastingdienst 00000002003214394002), not an 8-digit KVK number. RvIG's KVK is 27373207 (it is a unit of BZK); its OIN must be looked up in the Logius OIN register.",
+    "privacyPolicyUrl": "https://www.rvig.nl/privacy"
+  }
+}
