@@ -25,7 +25,7 @@ export default function TryItOut() {
         <h2 className="h2-serif h2-serif--tight">Zelf uitproberen</h2>
         <p className="prose prose--measure cta-lede">
           Twee stromen draaien live in deze demo. Je start ze allebei hieronder; voor de
-          wallet-stroom heb je daarnaast de EUDI-wallet-app op je telefoon nodig.
+          wallet-stroom heb je daarnaast de NL Wallet app op je telefoon nodig.
         </p>
 
         <div className="tryout-grid">
@@ -65,7 +65,7 @@ export default function TryItOut() {
               <span className="tryout-num">02</span>
               <div>
                 <h3 className="tryout-title">Haal een verklaring op in je wallet</h3>
-                <p className="tryout-meta">EUDI · scan met de EUDI-wallet-app</p>
+                <p className="tryout-meta">EUDI · scan met de NL Wallet</p>
               </div>
             </div>
             <p className="tryout-desc">
@@ -81,14 +81,14 @@ export default function TryItOut() {
                     bgColor="#ffffff"
                     fgColor="#05131f"
                     marginSize={2}
-                    aria-label="QR-code om de inkomensverklaring in je EUDI-wallet te laden"
+                    aria-label="QR-code om de inkomensverklaring in je NL Wallet te laden"
                   />
                 </div>
                 <p className="tryout-note">
                   Scan met een andere telefoon dan waar je deze pagina op leest. Zit je al op je
                   telefoon?{' '}
                   <a href={sameDeviceLink} className="link-underline">
-                    Open de wallet direct
+                    Open de NL Wallet
                   </a>
                   .
                 </p>
@@ -106,21 +106,40 @@ export default function TryItOut() {
           </article>
         </div>
 
-        <aside className="tryout-aside">
-          <h3 className="tryout-aside-title">Daarna: kijken wat er onder water gebeurde</h3>
-          <p className="tryout-aside-desc">
-            De developer-portal is geen vierde stroom maar een inspectieconsole. Draai eerst een van
-            de twee flows hierboven; daarna zie je in de portal per hop terug wat er langskwam — het
-            verzoek, de beleidsbeslissing met de regel die hem nam, het FSC-contract en de trace.
-          </p>
-          <ExternalLink
-            href={links.developerPortal}
-            describes="de developer-portal"
-            className="link-underline tryout-aside-link"
-          >
-            Open de developer-portal ↗
-          </ExternalLink>
-        </aside>
+        <div className="tryout-asides">
+          <aside className="tryout-aside">
+            <h3 className="tryout-aside-title">Daarna: kijken wat er onder water gebeurde</h3>
+            <p className="tryout-aside-desc">
+              De developer-portal is geen vierde stroom maar een inspectieconsole. Draai eerst een
+              van de twee flows hierboven; daarna zie je in de portal per hop terug wat er langskwam
+              — het verzoek, de beleidsbeslissing met de regel die hem nam, het FSC-contract en de
+              trace.
+            </p>
+            <ExternalLink
+              href={links.developerPortal}
+              describes="de developer-portal"
+              className="link-underline tryout-aside-link"
+            >
+              Open de developer-portal ↗
+            </ExternalLink>
+          </aside>
+
+          <aside className="tryout-aside">
+            <h3 className="tryout-aside-title">Of: zelf de bron bevragen</h3>
+            <p className="tryout-aside-desc">
+              De demo-bron serveert een eigen GraphQL-playground. Klik in GraphiQL een query bij
+              elkaar, of bekijk in Voyager hoe het schema van de bron eruitziet. Deze ingang gaat
+              rechtstreeks naar de bron, dus zonder toestemming, FSC-contract en beleidstoetsing.
+            </p>
+            <ExternalLink
+              href={links.bronPlayground}
+              describes="de GraphQL-playground van de demo-bron"
+              className="link-underline tryout-aside-link"
+            >
+              Open de GraphQL-playground ↗
+            </ExternalLink>
+          </aside>
+        </div>
       </div>
     </section>
   )

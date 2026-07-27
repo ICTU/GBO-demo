@@ -7,8 +7,8 @@ export type PipelineStep = {
 
 export const PIPELINE_STEPS: PipelineStep[] = [
   {
-    name: 'Consumer',
-    desc: 'De afnemende partij (minezk) start een verzoek. Afhankelijk van de stroom draagt dat verzoek een toestemming-ID of een identifier uit de wallet.',
+    name: 'Afnemer',
+    desc: 'De afnemende partij start een verzoek. Afhankelijk van de stroom draagt dat verzoek een toestemming-ID of een identifier uit de wallet.',
   },
   {
     name: 'FSC-Outway',
@@ -24,7 +24,7 @@ export const PIPELINE_STEPS: PipelineStep[] = [
   },
   {
     name: 'Bron',
-    desc: 'Het registratiesysteem van de bronhouder (minbzk) levert uitsluitend de velden die het beleid heeft toegestaan.',
+    desc: 'Het registratiesysteem van de bronhouder levert uitsluitend de velden die het beleid heeft toegestaan.',
   },
 ]
 

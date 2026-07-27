@@ -345,6 +345,10 @@ services:
       - VITE_EUDI_PUBLIC_URL=${EUDI_PUBLIC_URL:-}
       - VITE_EUDI_UL_BASE=${EUDI_UL_BASE:-https://app.preproductie.wallet.edi.bzk.nl/deeplink/disclosure_based_issuance}
       - VITE_EUDI_CLIENT_ID=${EUDI_CLIENT_ID:-reader.example.com}
+      # Link naar de GraphQL-playground van de bron op /playground. Zelfde
+      # var als de dev-portal; browser-side, dus hij moet de gepubliceerde
+      # GBO_PORT_GRAPHQL volgen.
+      - VITE_GRAPHQL_PUBLIC_URL=${GRAPHQL_PUBLIC_URL:-http://localhost:9400}
       - VITE_JAEGER_PUBLIC_URL=${JAEGER_PUBLIC_URL:-http://localhost:9686}
       - VITE_GRAFANA_PUBLIC_URL=${GRAFANA_PUBLIC_URL:-http://localhost:9300}
       # De FSC-controllers draaien in de fsc-infra-stack, met eigen
