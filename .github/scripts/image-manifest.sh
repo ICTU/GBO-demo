@@ -93,6 +93,7 @@ dienstverlener-backend|./services/dienstverlener-backend|./services/dienstverlen
 dienstverlener-mock|./dienstverlener-mock|./dienstverlener-mock/Dockerfile|dienstverlener-mock|linux/amd64,linux/arm64|false|dienstverlener-mock
 eudi-adapter|./services/eudi-adapter|./services/eudi-adapter/Dockerfile|services/eudi-adapter|linux/amd64,linux/arm64|false|eudi-adapter
 graphql-server|./services/graphql-server|./services/graphql-server/Dockerfile|services/graphql-server|linux/amd64,linux/arm64|false|graphql-server
+landing-page|./landing-page|./landing-page/Dockerfile|landing-page|linux/amd64,linux/arm64|false|landing-page
 pdp-service|.|./services/pdp-service/Dockerfile|services/pdp-service policies/dvtp/schemas|linux/amd64,linux/arm64|false|pdp-service
 opa|.|./services/opa/Dockerfile|services/opa policies|linux/amd64,linux/arm64|false|opa
 sector-pip|./services/sector-pip|./services/sector-pip/Dockerfile|services/sector-pip|linux/amd64,linux/arm64|false|sector-pip
