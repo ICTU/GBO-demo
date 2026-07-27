@@ -726,19 +726,71 @@ func volledigeNaam(voornamen, voorvoegsel, geslachtsnaam string) string {
 	return strings.Join(parts, " ")
 }
 
+// verbintenisOmschrijving renders the relationship the way an akte words it.
+// Deliberately not gendered ("gehuwd met" instead of echtgenoot/echtgenote),
+// because the BRP geslacht of the surviving partner is not queried.
+func verbintenisOmschrijving(soort string) string {
+	if soort == "GeregistreerdPartnerschap" {
+		return "geregistreerd partner van"
+	}
+	return "gehuwd met"
+}
+
+// akteVerklaring renders the declaratory sentence of the akte, in the order
+// the ambtenaar van de burgerlijke stand writes it: date and place of death,
+// the deceased, birth date and place, and the surviving spouse.
+func akteVerklaring(persoon brpPersoon, huwelijk brpHuwelijk, overledene brpPartner) string {
+	overledeneNaam := volledigeNaam(overledene.Voornamen, overledene.Voorvoegsel, overledene.Geslachtsnaam)
+	echtgenootNaam := volledigeNaam(persoon.Voornamen, persoon.Voorvoegsel, persoon.Geslachtsnaam)
+
+	zin := fmt.Sprintf("Op %s is", overledene.DatumOverlijden)
+	if overledene.PlaatsOverlijden != "" {
+		zin += fmt.Sprintf(" te %s", overledene.PlaatsOverlijden)
+	}
+	zin += fmt.Sprintf(" overleden %s", overledeneNaam)
+	if overledene.Geboortedatum != "" {
+		zin += fmt.Sprintf(", geboren op %s", overledene.Geboortedatum)
+		if overledene.Geboorteplaats != "" {
+			zin += fmt.Sprintf(" te %s", overledene.Geboorteplaats)
+		}
+	}
+	if echtgenootNaam != "" {
+		zin += fmt.Sprintf(", %s %s", verbintenisOmschrijving(huwelijk.SoortVerbintenis), echtgenootNaam)
+	}
+	return zin + "."
+}
+
 // formatAkteVanOverlijden maps the BRP answer onto the akte's wallet
 // attributes. Same conventions as the BD path: a flat array, snake_case
 // attribute names matching akte_van_overlijden_metadata.json, and no
 // metadata fields (the issuance-server adds those from its own config).
 //
+// The attributes are the ones a Dutch akte van overlijden carries: who died,
+// when and where, born when and where, the parents, and — if applicable — the
+// echtgenoot or geregistreerd partner. The query asks for more than that on
+// purpose:
+//   - datumOntbinding / redenOntbinding / datumVoltrekking / plaatsVoltrekking
+//     / landVoltrekking establish WHICH marriage and that it ended in death.
+//     They belong on the huwelijksakte, not on this one, so they are used to
+//     select and then dropped.
+//   - bsn and the ids identify the persoonslijst; an akte carries neither.
+//
+// Conversely, three things a paper akte does carry are absent because the BRP
+// bronprofiel does not offer them: the gemeente van opmaak + aktenummer, the
+// aangever, and the tijdstip (uur) van overlijden. The laatste woonplaats
+// would be reachable via `woontOp`, but that is deliberately outside
+// EUD0002's covers_fields — it is address data, not overlijdensdata.
+//
 // Empty source values are omitted rather than issued as empty claims — an
 // akte should not assert "plaats van overlijden: <leeg>".
 func formatAkteVanOverlijden(persoon brpPersoon, huwelijk brpHuwelijk, overledene brpPartner, uc Usecase) []attestation {
 	attrs := map[string]any{
-		"overledene_geslachtsnaam":  overledene.Geslachtsnaam,
-		"datum_overlijden":          overledene.DatumOverlijden,
-		"soort_verbintenis":         huwelijk.SoortVerbintenis,
-		"nabestaande_geslachtsnaam": persoon.Geslachtsnaam,
+		"overledene_geslachtsnaam": overledene.Geslachtsnaam,
+		"datum_overlijden":         overledene.DatumOverlijden,
+		// The akte words the relationship as "echtgenoot of geregistreerd
+		// partner"; soort_verbintenis disambiguates the two.
+		"soort_verbintenis":        huwelijk.SoortVerbintenis,
+		"echtgenoot_geslachtsnaam": persoon.Geslachtsnaam,
 	}
 	optional := map[string]string{
 		"overledene_voorvoegsel":    overledene.Voorvoegsel,
@@ -749,13 +801,8 @@ func formatAkteVanOverlijden(persoon brpPersoon, huwelijk brpHuwelijk, overleden
 		"overledene_geslacht":       overledene.Geslacht,
 		"plaats_overlijden":         overledene.PlaatsOverlijden,
 		"land_overlijden":           overledene.LandOverlijden,
-		"datum_voltrekking":         huwelijk.DatumVoltrekking,
-		"plaats_voltrekking":        huwelijk.PlaatsVoltrekking,
-		"land_voltrekking":          huwelijk.LandVoltrekking,
-		"datum_ontbinding":          huwelijk.DatumOntbinding,
-		"reden_ontbinding":          huwelijk.RedenOntbinding,
-		"nabestaande_voorvoegsel":   persoon.Voorvoegsel,
-		"nabestaande_voornamen":     persoon.Voornamen,
+		"echtgenoot_voorvoegsel":    persoon.Voorvoegsel,
+		"echtgenoot_voornamen":      persoon.Voornamen,
 	}
 	for k, v := range optional {
 		if v != "" {
@@ -776,12 +823,7 @@ func formatAkteVanOverlijden(persoon brpPersoon, huwelijk brpHuwelijk, overleden
 		attrs["overledene_ouders"] = strings.Join(ouders, "; ")
 	}
 
-	attrs["verklaring_tekst"] = fmt.Sprintf(
-		"Akte van overlijden: %s is overleden op %s. Uitgegeven als GBO PubEAA aan %s.",
-		volledigeNaam(overledene.Voornamen, overledene.Voorvoegsel, overledene.Geslachtsnaam),
-		overledene.DatumOverlijden,
-		volledigeNaam(persoon.Voornamen, persoon.Voorvoegsel, persoon.Geslachtsnaam),
-	)
+	attrs["verklaring_tekst"] = akteVerklaring(persoon, huwelijk, overledene)
 
 	return []attestation{{
 		AttestationType: uc.AttestationType,

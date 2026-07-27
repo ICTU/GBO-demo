@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -247,30 +248,105 @@ func TestAdapterAkteVanOverlijden(t *testing.T) {
 		"overledene_voornamen":      "Sander Willem",
 		"overledene_geboortedatum":  "1997-11-12",
 		"overledene_geboorteplaats": "Rotterdam",
+		"overledene_geboorteland":   "NL",
 		"overledene_geslacht":       "Man",
+		"overledene_ouders":         "Hendrik Jan de Vries; Annelies Maria Bakker",
 		"datum_overlijden":          "2026-02-14",
 		"plaats_overlijden":         "Rotterdam",
 		"land_overlijden":           "NL",
 		"soort_verbintenis":         "Huwelijk",
-		"datum_voltrekking":         "2023-06-16",
-		"datum_ontbinding":          "2026-02-14",
-		"reden_ontbinding":          "Overlijden",
-		"overledene_ouders":         "Hendrik Jan de Vries; Annelies Maria Bakker",
-		"nabestaande_geslachtsnaam": "Jansen",
-		"nabestaande_voornamen":     "Frouke",
+		"echtgenoot_geslachtsnaam":  "Jansen",
+		"echtgenoot_voornamen":      "Frouke",
 	}
 	for k, v := range want {
 		if got := attrs[k]; got != v {
 			t.Errorf("attribute %s = %v, want %v", k, got, v)
 		}
 	}
-	// The nabestaande has no voorvoegsel — an akte must not assert an empty
+	// The echtgenoot has no voorvoegsel — an akte must not assert an empty
 	// claim for it.
-	if _, ok := attrs["nabestaande_voorvoegsel"]; ok {
-		t.Errorf("empty nabestaande_voorvoegsel should be omitted, got %v", attrs["nabestaande_voorvoegsel"])
+	if _, ok := attrs["echtgenoot_voorvoegsel"]; ok {
+		t.Errorf("empty echtgenoot_voorvoegsel should be omitted, got %v", attrs["echtgenoot_voorvoegsel"])
 	}
-	if s, _ := attrs["verklaring_tekst"].(string); !strings.Contains(s, "Sander Willem de Vries") {
-		t.Errorf("verklaring_tekst = %q, want the overledene's full name", s)
+	if got, want := attrs["verklaring_tekst"], "Op 2026-02-14 is te Rotterdam overleden Sander Willem de Vries, geboren op 1997-11-12 te Rotterdam, gehuwd met Frouke Jansen."; got != want {
+		t.Errorf("verklaring_tekst = %q, want %q", got, want)
+	}
+}
+
+// The query fetches more than an akte carries: the huwelijk's voltrekking and
+// ontbinding are needed to select the right marriage and to establish that it
+// ended in death, but they belong on the huwelijksakte. The BSN and the
+// persoonslijst-ids are not on an akte either. None of them may leak into the
+// credential.
+func TestAkteVanOverlijdenOmitsNonAkteFields(t *testing.T) {
+	outway, srv := brpAdapter(t, brpResponse)
+	defer outway.Close()
+	defer srv.Close()
+
+	resp := postDisclosure(t, srv, "/akte_van_overlijden/", "999991772")
+	defer resp.Body.Close()
+	var docs []attestation
+	if err := json.NewDecoder(resp.Body).Decode(&docs); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, forbidden := range []string{
+		"datum_voltrekking", "plaats_voltrekking", "land_voltrekking",
+		"datum_ontbinding", "reden_ontbinding",
+		"bsn", "id", "nabestaande_geslachtsnaam",
+	} {
+		if v, ok := docs[0].Attributes[forbidden]; ok {
+			t.Errorf("attribute %q must not be on an akte van overlijden, got %v", forbidden, v)
+		}
+	}
+
+	// Every attribute the adapter emits must be declared in the credential
+	// metadata, otherwise the issuance-server rejects the document.
+	raw, err := os.ReadFile("../eudi-issuance-server/config/akte_van_overlijden_metadata.json.example")
+	if err != nil {
+		t.Fatalf("read metadata: %v", err)
+	}
+	var meta struct {
+		VCT    string `json:"vct"`
+		Claims []struct {
+			Path []string `json:"path"`
+		} `json:"claims"`
+		Schema struct {
+			Properties map[string]any `json:"properties"`
+		} `json:"schema"`
+	}
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		t.Fatalf("parse metadata: %v", err)
+	}
+	if meta.VCT != docs[0].AttestationType {
+		t.Errorf("metadata vct = %q, adapter emits %q", meta.VCT, docs[0].AttestationType)
+	}
+	declared := map[string]bool{}
+	for _, c := range meta.Claims {
+		declared[c.Path[0]] = true
+	}
+	for name := range docs[0].Attributes {
+		if !declared[name] {
+			t.Errorf("attribute %q is not declared in the credential metadata", name)
+		}
+		if _, ok := meta.Schema.Properties[name]; !ok {
+			t.Errorf("attribute %q is not in the credential JSON-schema", name)
+		}
+	}
+}
+
+// A geregistreerd partnerschap is worded differently on the akte than a
+// huwelijk.
+func TestAkteVerklaringGeregistreerdPartnerschap(t *testing.T) {
+	persoon := brpPersoon{Geslachtsnaam: "Jansen", Voornamen: "Frouke"}
+	huwelijk := brpHuwelijk{SoortVerbintenis: "GeregistreerdPartnerschap"}
+	overledene := brpPartner{
+		Geslachtsnaam: "Vries", Voorvoegsel: "de", Voornamen: "Sander Willem",
+		DatumOverlijden: "2026-02-14", PlaatsOverlijden: "Rotterdam",
+	}
+	got := akteVerklaring(persoon, huwelijk, overledene)
+	want := "Op 2026-02-14 is te Rotterdam overleden Sander Willem de Vries, geregistreerd partner van Frouke Jansen."
+	if got != want {
+		t.Errorf("verklaring = %q, want %q", got, want)
 	}
 }
 
