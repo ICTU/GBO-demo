@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router'
 import DigiDLayout from '../components/DigiDLayout'
 import { useRedirectContext, clearRedirectContext } from '../hooks/useRedirectContext'
 import { usePortalToken } from '../hooks/usePortalToken'

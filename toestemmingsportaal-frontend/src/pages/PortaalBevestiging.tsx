@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import MijnOverheidLayout from '../components/MijnOverheidLayout'
 import { useRedirectContext, clearRedirectContext } from '../hooks/useRedirectContext'
 import { usePortalToken } from '../hooks/usePortalToken'

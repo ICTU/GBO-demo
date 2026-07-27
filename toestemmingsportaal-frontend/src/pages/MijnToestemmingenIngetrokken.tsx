@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router'
 import MijnOverheidLayout from '../components/MijnOverheidLayout'
 import { useConsents } from '../hooks/useConsents'
 import { deriveAfnemerName } from '../data/onderwerpMap'
