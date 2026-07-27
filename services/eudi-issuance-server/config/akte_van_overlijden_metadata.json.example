@@ -82,7 +82,8 @@
           "description": "All official given names of the deceased"
         }
       ],
-      "sd": "always"
+      "sd": "always",
+      "svg_id": "overledene_voornamen"
     },
     {
       "path": [

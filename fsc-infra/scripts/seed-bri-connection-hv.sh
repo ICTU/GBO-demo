@@ -54,7 +54,10 @@ existing=$(mtls_curl "$HV_CERT" "$HV_KEY" "$HV_CA" \
   "${HV_MANAGER_URL}/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=${SERVICE_NAME}" \
   || echo '{}')
 
-if echo "$existing" | jq -e '.contracts[]? | select(.state == "CONTRACT_STATE_VALID")' >/dev/null 2>&1; then
+# The Manager's ?service_name= filter is not honoured (see
+# seed-bri-contract.sh) — match the service name client-side.
+if echo "$existing" | jq -e --arg svc "$SERVICE_NAME" \
+   '.contracts[]? | select(.state == "CONTRACT_STATE_VALID") | select(.content.grants[0].service.name == $svc)' >/dev/null 2>&1; then
   echo "  → connection contract already Valid, skipping create"
 else
   outway_thumbprint=$(pubkey_thumbprint_hex "$HV_ORG_CERT")
@@ -106,7 +109,8 @@ else
     sleep 1
     st=$(mtls_curl "$HV_CERT" "$HV_KEY" "$HV_CA" \
       "$HV_MANAGER_URL/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=$SERVICE_NAME" \
-      | jq -r 'first(.contracts[]?.state)' 2>/dev/null || echo "")
+      | jq -r --arg svc "$SERVICE_NAME" \
+        'first(.contracts[]? | select(.content.grants[0].service.name == $svc) | .state)' 2>/dev/null || echo "")
     if [ "$st" = "CONTRACT_STATE_VALID" ]; then
       echo "  ✓ connection contract Valid"
       break
@@ -119,7 +123,8 @@ fi
 echo "[2/2] Upsert grant-link '$GRANT_LINK_PATH' → HV connection grant-hash..."
 new_hash=$(mtls_curl "$HV_CERT" "$HV_KEY" "$HV_CA" \
   "${HV_MANAGER_URL}/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=${SERVICE_NAME}&limit=1" \
-  | jq -r '.contracts[0].content.grants[0].hash // empty')
+  | jq -r --arg svc "$SERVICE_NAME" \
+    'first(.contracts[]? | select(.content.grants[0].service.name == $svc) | .content.grants[0].hash) // empty')
 if [ -z "$new_hash" ]; then
   echo "  x no HV connection grant-hash found — abort"
   exit 1
