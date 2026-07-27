@@ -1,6 +1,6 @@
 image:
   repository: ghcr.io/ictu/gbo-demo/opa
-  tag: 0.3.0
+  tag: 0.4.0
 
 containerPort: 8181
 command:
