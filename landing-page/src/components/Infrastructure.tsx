@@ -60,17 +60,17 @@ export default function Infrastructure() {
             </ExternalLink>
             <ExternalLink
               href={docs.fsc}
-              describes="de FSC-documentatie op commonground.nl"
+              describes="de FSC-standaard op fsc-standaard.nl"
               className="infra-link"
             >
-              FSC: Federated Service Connectivity ↗
+              FSC (Federatieve Service Connectiviteit) ↗
             </ExternalLink>
             <ExternalLink
-              href={docs.simulatieIndex}
-              describes="de FSC-simulatie-index"
+              href={docs.simulatie}
+              describes="de Simulatieomgeving Federatief Datastelsel"
               className="infra-link"
             >
-              FSC-simulatie-index ↗
+              Simulatieomgeving Federatief Datastelsel ↗
             </ExternalLink>
             <a href={docs.contactMail} className="infra-link">
               Contact: jeroen.dekok@ictu.nl

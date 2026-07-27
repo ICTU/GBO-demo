@@ -1,3 +1,6 @@
+import ExternalLink from './ExternalLink'
+import { docs } from '../config'
+
 export default function Streams() {
   return (
     <section id="stromen" data-reveal className="section section--grey reveal">
@@ -29,11 +32,6 @@ export default function Streams() {
               binnen de eigen vertrouwensgrens, om welke persoon het gaat.
             </p>
             <p className="stream-body stream-body--muted stream-body--last">
-              In de demo vraagt HypotheekBV inkomensgegevens op voor een hypotheekaanvraag. De burger
-              geeft daarvoor toestemming in het toestemmingsportaal (in deze demo een
-              MijnOverheid-achtige mock); pas daarna komt het verzoek langs de toetsing bij de bron.
-              <br />
-              <br />
               Afnemer vraagt → Burger stemt toe → Afnemer bevraagt Bron
             </p>
             <div className="stream-links">
@@ -72,20 +70,32 @@ export default function Streams() {
           </article>
 
           <article>
-            <div className="stream-art stream-art--todo">
-              <svg viewBox="0 0 200 120" aria-label="Grensoverschrijdende uitwisseling, nog te bouwen">
-                <rect x="34" y="43" width="34" height="34" fill="none" stroke="#9a9a9a" strokeWidth="1.5" />
-                <rect x="132" y="43" width="34" height="34" fill="none" stroke="#9a9a9a" strokeWidth="1.5" />
-                <line x1="68" y1="60" x2="132" y2="60" stroke="#9a9a9a" strokeWidth="1.5" strokeDasharray="5 6" />
+            <div className="stream-art stream-art--oots">
+              <svg viewBox="0 0 200 120" aria-label="Grensoverschrijdende uitwisseling tussen twee lidstaten">
+                <rect x="34" y="43" width="34" height="34" fill="none" stroke="#01689b" strokeWidth="1.5" />
+                <rect x="132" y="43" width="34" height="34" fill="none" stroke="#01689b" strokeWidth="1.5" />
+                <line x1="68" y1="60" x2="132" y2="60" stroke="#01689b" strokeWidth="1.5" strokeDasharray="5 6" />
               </svg>
             </div>
-            <p className="stream-status">Todo</p>
-            <h3 className="stream-title stream-title--todo">OOTS · Once-Only Technical System</h3>
-            <p className="stream-body stream-body--muted stream-body--flush">
+            <p className="stream-status">Coming soon</p>
+            <h3 className="stream-title">OOTS · Once-Only Technical System</h3>
+            <p className="stream-body">
               OOTS voegt grensoverschrijdende uitwisseling voor EU-diensten toe, volgens het
-              once-only principe. Nog niet gebouwd in deze demo; de architectuur is er wel op
-              voorbereid.
+              once-only principe: gegevens die een overheid al heeft, hoeft een burger of bedrijf
+              niet nog een keer aan te leveren.
             </p>
+            <p className="stream-body stream-body--muted stream-body--last">
+              Nog niet gebouwd in deze demo, lees de GBO-documentatie voor meer informatie.
+            </p>
+            <div className="stream-links">
+              <ExternalLink
+                href={docs.gbo}
+                describes="de GBO-documentatie"
+                className="link-underline"
+              >
+                Lees de GBO-documentatie ↗
+              </ExternalLink>
+            </div>
           </article>
         </div>
       </div>

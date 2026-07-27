@@ -15,11 +15,10 @@
   --pale-bg: #f3f7fa;
   --pale-border: #d3e0e9;
   --line: #a8c4d4;
-  --line-todo: #b9c9d4;
   --accent-light: #8fcbe8;
   --tint-dvtp: #e7eff5;
   --tint-eudi: #dfeaf2;
-  --tint-todo: #ededed;
+  --tint-oots: #eaf1f6;
   --sans: "Fira Sans", Helvetica, Arial, sans-serif;
   --serif: "Source Serif 4", Georgia, serif;
   --gutter: clamp(20px, 6vw, 88px);
@@ -194,8 +193,17 @@ a:hover {
 /* ── Hero ────────────────────────────────────────────────────────────── */
 
 .hero {
+  position: relative;
+  overflow: hidden;
   background: var(--blue);
   color: #ffffff;
+}
+
+/* De tekening ligt achter menu én tekst, vandaar het stapelen. */
+.hero-topbar,
+.hero-body {
+  position: relative;
+  z-index: 1;
 }
 
 .hero-topbar {
@@ -251,17 +259,96 @@ a:hover {
   text-wrap: balance;
 }
 
-.hero-aside {
+/* Titel, tekst en knop onder elkaar in de linkerhelft; de rechterhelft is
+   voor de tekening. Boven de 54% zou de tekst eroverheen gaan lopen. */
+.hero-stack {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  align-items: flex-start;
+  gap: 22px;
+  max-width: 54%;
+}
+
+.hero-stack h1 {
+  max-width: 18ch;
 }
 
 .hero-lede {
   margin: 0;
+  max-width: 52ch;
   font-size: 17px;
   line-height: 1.65;
   color: rgba(255, 255, 255, 0.9);
+}
+
+/* ── Hero-tekening ───────────────────────────────────────────────────── */
+
+.hero-art {
+  position: absolute;
+  top: -14%;
+  right: -14%;
+  width: 60%;
+  aspect-ratio: 1;
+  z-index: 0;
+  pointer-events: none;
+  /* Volledig weg op menuhoogte zodat de nav-links vrij staan, en onderaan
+     weer uit beeld — zo is er nergens een rechte snijrand. */
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 20%,
+    rgba(0, 0, 0, 0.4) 34%,
+    #000 58%,
+    #000 82%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 20%,
+    rgba(0, 0, 0, 0.4) 34%,
+    #000 58%,
+    #000 82%,
+    transparent 100%
+  );
+}
+
+.hero-art svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.hero-art-ring {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.2);
+  stroke-width: 1.2;
+}
+
+.hero-art-spoke {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.28);
+  stroke-width: 1.1;
+}
+
+.hero-art-pulse {
+  fill: none;
+  stroke: #ffffff;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+}
+
+.hero-art-pulse--soft {
+  stroke: rgba(255, 255, 255, 0.65);
+  stroke-width: 2;
+}
+
+.hero-art-node {
+  fill: rgba(255, 255, 255, 0.9);
+}
+
+.hero-art-core {
+  fill: #ffffff;
 }
 
 .btn-invert {
@@ -397,15 +484,6 @@ a:hover {
   color: var(--text-2);
 }
 
-.flow-output--todo {
-  border-left-color: var(--line-todo);
-}
-
-.flow-output--todo .flow-output-name,
-.flow-output--todo .flow-output-desc {
-  color: var(--text-3);
-}
-
 /* ── Wat doet GBO ────────────────────────────────────────────────────── */
 
 .benefits {
@@ -457,8 +535,8 @@ a:hover {
 .stream-art--eudi {
   background: var(--tint-eudi);
 }
-.stream-art--todo {
-  background: var(--tint-todo);
+.stream-art--oots {
+  background: var(--tint-oots);
 }
 
 .stream-status {
@@ -473,10 +551,6 @@ a:hover {
   font-weight: 600;
 }
 
-.stream-title--todo {
-  color: var(--text-2);
-}
-
 .stream-body {
   margin: 0 0 12px;
   font-size: 15px;
@@ -489,10 +563,6 @@ a:hover {
 
 .stream-body--last {
   margin-bottom: 16px;
-}
-
-.stream-body--flush {
-  margin-bottom: 0;
 }
 
 .stream-links {
@@ -745,10 +815,28 @@ a:hover {
   text-align: center;
 }
 
+/* Twee naslag-ingangen naast elkaar: de dev-portal (wat ging er langs) en
+   de playground van de bron (wat valt er te vragen). Geen kaarten — het
+   zijn geen stromen, dus ze blijven vlak op het blauw staan. */
+.tryout-asides {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr));
+  gap: clamp(20px, 2.5vw, 32px);
+}
+
 .tryout-aside {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
   margin-top: clamp(36px, 5vh, 56px);
   padding-top: clamp(24px, 3vh, 34px);
   border-top: 1px solid rgba(255, 255, 255, 0.28);
+}
+
+/* De link zakt naar de onderkant zodat beide asides hem op dezelfde
+   hoogte tonen, ook als de ene tekst een regel langer is. */
+.tryout-aside .tryout-aside-link {
+  margin-top: auto;
 }
 
 .tryout-aside-title {
@@ -866,6 +954,19 @@ a:hover {
   .span-7,
   .span-8 {
     grid-column: span 12;
+  }
+
+  .hero-stack,
+  .hero-stack h1,
+  .hero-lede {
+    max-width: none;
+  }
+
+  /* De tekst pakt hier de volle breedte, dus elke plaatsing van de tekening
+     komt achter een tekstregel terecht — op 768px landde de kern precies
+     achter de titel. Weglaten dus, net als .flow-fan hieronder. */
+  .hero-art {
+    display: none;
   }
 
   /* Vijf kolommen met twee connector-kolommen vallen op smal scherm uit

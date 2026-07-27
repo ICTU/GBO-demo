@@ -35,6 +35,15 @@ export const links = {
     import.meta.env.VITE_DIENSTVERLENER_URL,
     'http://localhost:9001',
   ),
+  /* De GraphQL-playground van de demo-bron: graphql-server serveert de
+     pagina zelf op /playground (GraphiQL 5 + explorer + Voyager). Zelfde
+     env-var als de dev-portal gebruikt, die het pad er ook zelf achter
+     plakt — vandaar de basis-URL hier. */
+  bronPlayground: `${resolve(
+    rc?.graphqlPublicUrl,
+    import.meta.env.VITE_GRAPHQL_PUBLIC_URL,
+    'http://localhost:9400',
+  ).replace(/\/+$/, '')}/playground`,
   jaeger: resolve(rc?.jaegerUrl, import.meta.env.VITE_JAEGER_PUBLIC_URL, 'http://localhost:9686'),
   grafana: resolve(rc?.grafanaUrl, import.meta.env.VITE_GRAFANA_PUBLIC_URL, 'http://localhost:9300'),
   fscControllerBron: resolve(
@@ -71,8 +80,8 @@ export const eudi = {
 export const docs = {
   gbo: 'https://ictu.github.io/GBO/latest/',
   github: 'https://github.com/ICTU/GBO-demo',
-  fsc: 'https://commonground.nl',
-  simulatieIndex: 'https://index.simulatie.datastelsel.nl',
+  fsc: 'https://fsc-standaard.nl/',
+  simulatie: 'https://simulatie.datastelsel.nl/',
   contactMail: 'mailto:jeroen.dekok@ictu.nl',
 } as const
 

@@ -5,7 +5,7 @@ export default function FlowBand() {
     <div className="flowband">
       <div className="flowcard">
         <div className="flowcard-head">
-          <p>Eén ontsluiting van de overheidsbron, drie manieren waarop gegevens hun weg vinden.</p>
+          <p>Eén ontsluiting van de bron, in plaats van een aparte koppeling per use case.</p>
         </div>
         <div className="flowcard-body">
           <div className="flowgrid">
@@ -60,7 +60,8 @@ export default function FlowBand() {
                 <path d="M0 50 H100" pathLength={100} />
                 <path d="M0 50 C 50 50, 50 83, 100 83" pathLength={100} />
               </g>
-              {/* Alleen de twee gebouwde stromen stromen; OOTS ligt stil. */}
+              {/* Alle drie de stromen horen bij de use cases; OOTS wordt later
+                  toegevoegd maar ligt hier niet stil. */}
               <g
                 data-flow=""
                 fill="none"
@@ -70,6 +71,7 @@ export default function FlowBand() {
                 vectorEffect="non-scaling-stroke"
               >
                 <path d="M0 50 C 50 50, 50 17, 100 17" pathLength={100} />
+                <path d="M0 50 H100" pathLength={100} />
                 <path d="M0 50 C 50 50, 50 83, 100 83" pathLength={100} />
               </g>
             </svg>
@@ -79,8 +81,8 @@ export default function FlowBand() {
                 <div className="flow-output-name">EUDI</div>
                 <div className="flow-output-desc">Europese Digitale Identiteit wallet</div>
               </div>
-              <div className="flow-output flow-output--todo">
-                <div className="flow-output-name">SDG / OOTS</div>
+              <div className="flow-output">
+                <div className="flow-output-name">OOTS</div>
                 <div className="flow-output-desc">Once-Only Technical System</div>
               </div>
               <div className="flow-output">

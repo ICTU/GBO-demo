@@ -9,7 +9,7 @@ export default function Pipeline() {
     <section id="pipeline" data-reveal className="section section--dark reveal">
       <div className="shell">
         <div className="grid-12 pipeline-intro">
-          <h2 className="h2-serif span-5">De reis van één verzoek</h2>
+          <h2 className="h2-serif span-5">De reis van een verzoek</h2>
           <p className="prose prose--on-dark span-7">
             Of een verzoek nu via toestemming of via de wallet binnenkomt, achter FSC volgt het
             dezelfde route. Beleid wordt op één plek getoetst en gegevens worden op één plek
