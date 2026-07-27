@@ -35,14 +35,6 @@ export const links = {
     import.meta.env.VITE_DIENSTVERLENER_URL,
     'http://localhost:9001',
   ),
-  // Geen lokale tegenhanger in de compose-stack: de EUDI-issuance-flow
-  // start in de dev-portal (tab EUDI). Zet EUDI_ISSUER_URL in een
-  // omgeving waar wél een losse issuer-pagina draait.
-  eudiIssuer: resolve(
-    rc?.eudiIssuerUrl,
-    import.meta.env.VITE_EUDI_ISSUER_URL,
-    'http://localhost:9003',
-  ),
   jaeger: resolve(rc?.jaegerUrl, import.meta.env.VITE_JAEGER_PUBLIC_URL, 'http://localhost:9686'),
   grafana: resolve(rc?.grafanaUrl, import.meta.env.VITE_GRAFANA_PUBLIC_URL, 'http://localhost:9300'),
   fscControllerBron: resolve(
@@ -59,6 +51,19 @@ export const links = {
     rc?.fscControllerEudiUrl,
     import.meta.env.VITE_FSC_CONTROLLER_EUDI_URL,
     'http://localhost:8094',
+  ),
+} as const
+
+/* De QR wordt hier zelf samengesteld (zie src/eudi.ts). Daarvoor moet de
+   wallet op de telefoon de issuance-server publiek kunnen bereiken —
+   zonder publicUrl valt de QR weg en toont de pagina waarom. */
+export const eudi = {
+  publicUrl: resolve(rc?.eudiPublicUrl, import.meta.env.VITE_EUDI_PUBLIC_URL, ''),
+  clientId: resolve(rc?.eudiClientId, import.meta.env.VITE_EUDI_CLIENT_ID, 'reader.example.com'),
+  ulBase: resolve(
+    rc?.eudiUlBase,
+    import.meta.env.VITE_EUDI_UL_BASE,
+    'https://app.preproductie.wallet.edi.bzk.nl/deeplink/disclosure_based_issuance',
   ),
 } as const
 

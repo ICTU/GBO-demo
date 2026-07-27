@@ -1,6 +1,3 @@
-import ExternalLink from './ExternalLink'
-import { links } from '../config'
-
 export default function Streams() {
   return (
     <section id="stromen" data-reveal className="section section--grey reveal">
@@ -40,20 +37,11 @@ export default function Streams() {
               Afnemer vraagt → Burger stemt toe → Afnemer bevraagt Bron
             </p>
             <div className="stream-links">
-              <ExternalLink
-                href={links.dienstverlener}
-                describes="de dienstverlener-mock HypotheekBV"
-                className="link-underline"
-              >
-                Probeer de flow ↗
-              </ExternalLink>
-              <ExternalLink
-                href={links.developerPortal}
-                describes="de developer-portal"
-                className="link-underline link-muted"
-              >
-                Bekijk in dev-portal ↗
-              </ExternalLink>
+              {/* Eén startpunt voor alle acties: de sectie "Zelf
+                  uitproberen" verderop, niet hier een tweede ingang. */}
+              <a href="#uitproberen" className="link-underline">
+                Probeer deze stroom ↓
+              </a>
             </div>
           </article>
 
@@ -77,20 +65,9 @@ export default function Streams() {
               Bron → Issuer → Wallet → Dienstverlener
             </p>
             <div className="stream-links">
-              <ExternalLink
-                href={links.eudiIssuer}
-                describes="de EUDI-issuer"
-                className="link-underline"
-              >
-                Scan de QR (issuance) ↗
-              </ExternalLink>
-              <ExternalLink
-                href={links.developerPortal}
-                describes="de developer-portal"
-                className="link-underline link-muted"
-              >
-                Bekijk in dev-portal ↗
-              </ExternalLink>
+              <a href="#uitproberen" className="link-underline">
+                Scan de QR ↓
+              </a>
             </div>
           </article>
 

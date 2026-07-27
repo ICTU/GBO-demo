@@ -27,7 +27,7 @@ export default function Hero() {
               een uniforme, getoetste manier gegevens uit bronsystemen bevragen. Deze demo draait
               live op de FSC-simulatieomgeving van datastelsel.nl.
             </p>
-            <a href="#uitproberen" className="link-underline">
+            <a href="#uitproberen" className="btn-invert">
               Zelf uitproberen
             </a>
           </div>

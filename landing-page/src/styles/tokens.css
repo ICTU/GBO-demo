@@ -264,9 +264,20 @@ a:hover {
   color: rgba(255, 255, 255, 0.9);
 }
 
-.hero-aside a {
+.btn-invert {
+  align-self: flex-start;
+  background: #ffffff;
+  color: var(--blue);
+  padding: 13px 22px;
+  border-radius: 4px;
+  text-decoration: none;
   font-size: 16px;
-  color: #ffffff;
+  font-weight: 500;
+}
+
+.btn-invert:hover {
+  background: var(--grey-bg);
+  color: var(--red);
 }
 
 /* ── Stroomdiagram ───────────────────────────────────────────────────── */
@@ -602,36 +613,166 @@ a:hover {
   color: rgba(255, 255, 255, 0.85);
 }
 
-.cta-grid {
+/* De twee live stromen zijn de enige acties op de pagina en staan als
+   witte kaarten op het blauw. De dev-portal eronder is een naslagwerk,
+   geen stroom, en blijft daarom vlak op de achtergrond staan. */
+.tryout-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: clamp(24px, 3vw, 48px);
+  grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr));
+  gap: clamp(20px, 2.5vw, 32px);
 }
 
-.cta {
+.tryout {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  text-decoration: none;
-  color: #ffffff;
-  border-top: 2px solid rgba(255, 255, 255, 0.5);
-  padding-top: 18px;
+  background: #ffffff;
+  color: var(--text);
+  border-radius: 4px;
+  padding: clamp(24px, 3vw, 36px);
 }
 
-.cta:hover {
-  color: #ffffff;
-  border-top-color: #ffffff;
+.tryout-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
 }
 
-.cta-title {
+.tryout-num {
+  flex: none;
+  font-size: clamp(26px, 3vw, 34px);
+  line-height: 1;
+  font-weight: 600;
+  color: var(--line);
+}
+
+.tryout-title {
+  margin: 0;
   font-size: 21px;
   font-weight: 600;
 }
 
-.cta-desc {
+.tryout-meta {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: var(--text-2);
+}
+
+.tryout-desc {
+  margin: 0 0 18px;
   font-size: 15px;
   line-height: 1.65;
+}
+
+.tryout-steps {
+  list-style: none;
+  margin: 0 0 24px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.tryout-steps li {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.tryout-step-num {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+  border-radius: 50%;
+  background: var(--blue);
+  color: #ffffff;
+  font-size: 13px;
+  display: grid;
+  place-items: center;
+}
+
+.btn-primary {
+  align-self: flex-start;
+  /* Houdt de knop onderaan de kaart, ook als de buurkaart langer is. */
+  margin-top: auto;
+  background: var(--blue);
+  color: #ffffff;
+  padding: 13px 22px;
+  border-radius: 4px;
+  text-decoration: none;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.btn-primary:hover {
+  background: var(--red);
+  color: #ffffff;
+}
+
+.tryout-qr {
+  margin: 4px 0 14px;
+  display: flex;
+  justify-content: center;
+}
+
+.tryout-qr--empty {
+  display: block;
+  border: 1px dashed var(--grey-border);
+  border-radius: 4px;
+  padding: 20px;
+}
+
+.tryout-qr--empty p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-2);
+}
+
+.tryout-qr--empty code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+}
+
+.tryout-note {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-2);
+  text-align: center;
+}
+
+.tryout-aside {
+  margin-top: clamp(36px, 5vh, 56px);
+  padding-top: clamp(24px, 3vh, 34px);
+  border-top: 1px solid rgba(255, 255, 255, 0.28);
+}
+
+.tryout-aside-title {
+  margin: 0 0 10px;
+  font-size: 17px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.tryout-aside-desc {
+  margin: 0 0 12px;
+  font-size: 15px;
+  line-height: 1.7;
   color: rgba(255, 255, 255, 0.85);
+  max-width: 74ch;
+}
+
+.tryout-aside-link {
+  font-size: 16px;
+  color: #ffffff;
+}
+
+.tryout-aside-link:hover {
+  color: #ffffff;
 }
 
 /* ── Infrastructuur ──────────────────────────────────────────────────── */

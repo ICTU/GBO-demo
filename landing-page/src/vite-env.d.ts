@@ -5,7 +5,9 @@ interface Window {
     developerPortalUrl?: string
     toestemmingsportaalUrl?: string
     dienstverlenerUrl?: string
-    eudiIssuerUrl?: string
+    eudiPublicUrl?: string
+    eudiClientId?: string
+    eudiUlBase?: string
     jaegerUrl?: string
     grafanaUrl?: string
     fscControllerBronUrl?: string

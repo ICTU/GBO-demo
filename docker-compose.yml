@@ -338,9 +338,13 @@ services:
       - VITE_DIENSTVERLENER_URL=http://localhost:${GBO_PORT_DV_MOCK:-9001}
       - VITE_TOESTEMMINGSPORTAAL_URL=http://localhost:${GBO_PORT_TOESTEMMINGSPORTAAL:-9002}
       - VITE_DEVELOPER_PORTAL_URL=http://localhost:${GBO_PORT_DEVELOPER_PORTAL:-9003}
-      # Lokaal start de EUDI-issuance-flow in de dev-portal (tab EUDI);
-      # in een omgeving met een losse issuer-pagina zet je EUDI_ISSUER_URL.
-      - VITE_EUDI_ISSUER_URL=${EUDI_ISSUER_URL:-http://localhost:${GBO_PORT_DEVELOPER_PORTAL:-9003}}
+      # De wallet-QR wordt client-side samengesteld, net als in de
+      # dev-portal. Zonder EUDI_PUBLIC_URL (de wallet op een telefoon moet
+      # de issuance-server publiek kunnen bereiken) valt de QR weg en legt
+      # de pagina uit waarom.
+      - VITE_EUDI_PUBLIC_URL=${EUDI_PUBLIC_URL:-}
+      - VITE_EUDI_UL_BASE=${EUDI_UL_BASE:-https://app.preproductie.wallet.edi.bzk.nl/deeplink/disclosure_based_issuance}
+      - VITE_EUDI_CLIENT_ID=${EUDI_CLIENT_ID:-reader.example.com}
       - VITE_JAEGER_PUBLIC_URL=${JAEGER_PUBLIC_URL:-http://localhost:9686}
       - VITE_GRAFANA_PUBLIC_URL=${GRAFANA_PUBLIC_URL:-http://localhost:9300}
       # De FSC-controllers draaien in de fsc-infra-stack, met eigen
