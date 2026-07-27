@@ -11,6 +11,48 @@ import { useSpanInspect, type SpanInspect } from '../hooks/useSpanInspect'
 const JAEGER_DEFAULT = 'http://localhost:9686'
 const GRAFANA_DEFAULT = 'http://localhost:9300'
 
+// The bron's GraphQL playground. Not threaded through ArchStrip as a prop
+// like the Jaeger/Grafana URLs: it is trace-independent and only this popover
+// uses it, so it resolves from the runtime config here (same pattern as
+// EudiForm).
+const GRAPHQL_PUBLIC_URL =
+  window.__GBO_RUNTIME_CONFIG__?.graphqlPublicUrl ||
+  import.meta.env.VITE_GRAPHQL_PUBLIC_URL ||
+  'http://localhost:9400'
+
+// Query the playground opens with. graphql-server serves the playground
+// bundled with graphql-go/handler on a browser GET of /graphql, which prefills
+// its editor from the `query` URL param — so the link lands on something
+// runnable against the baked mock data instead of an empty editor. The leading
+// comment is the warning itself: this route reaches the bron directly.
+//
+// Keep it ASCII-only. graphql-go's lexer (v0.8.1, and still on master) counts
+// bytes and runes inconsistently while skipping a `#` comment, so a single
+// multi-byte character desynchronises every token after it — mid-query it does
+// not even fail, it silently changes the selection set.
+const BRON_PLAYGROUND_QUERY = `# Demo-bron, directe toegang: geen FSC-Inway, sidecar, PEP of PDP,
+# dus geen toestemmingscheck en geen BSN-pseudonimisering. Mock-data.
+{
+  ingeschrevenPersoon(bsn: "123456789") {
+    bsn
+    heeftBelastingjaarAangifte(belastingjaren: [2024]) {
+      aangifteIdentificatie
+      belastingjaar
+      belastingsoort
+      status
+      indieningsdatum
+      ... on AangifteIH {
+        verzamelinkomen { waarde valuta }
+        box1Inkomen { waarde valuta }
+      }
+    }
+  }
+}
+`
+
+const BRON_PLAYGROUND_URL =
+  `${GRAPHQL_PUBLIC_URL}/graphql?query=${encodeURIComponent(BRON_PLAYGROUND_QUERY)}`
+
 type Props = {
   node: NodeDef
   state: NodeState
@@ -47,6 +89,7 @@ export default function NodePopover({
   const stateColor = STATE_COLOR[state]
   const hasIO = !!apiCall
   const isOpaNode = node.id === 'opa'
+  const isGraphqlBron = node.svc === 'graphql-server'
   const spanInspect = useSpanInspect(traceId, node.id)
   const hasSpanInspect = spanInspect.inspects.length > 0
   const wide = isOpaNode || hasSpanInspect
@@ -66,6 +109,14 @@ export default function NodePopover({
       <div className="mono" style={{ fontSize: 11, color: 'var(--mute)', marginTop: 4 }}>
         {node.svc}
       </div>
+
+      {/* Schema exploration on the bron itself. Independent of the trace
+          links: always available, also without a request having run. */}
+      {isGraphqlBron && (
+        <a className="linkbtn" href={BRON_PLAYGROUND_URL} target="_blank" rel="noreferrer">
+          GraphQL-playground <span className="ext">↗</span>
+        </a>
+      )}
 
       {traceId && (
         <a className="linkbtn" href={`${jaegerUrl}/trace/${traceId}`} target="_blank" rel="noreferrer">

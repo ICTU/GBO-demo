@@ -6,5 +6,6 @@ interface Window {
     eudiPublicUrl?: string
     jaegerPublicUrl?: string
     grafanaPublicUrl?: string
+    graphqlPublicUrl?: string
   }
 }

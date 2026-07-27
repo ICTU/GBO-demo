@@ -63,6 +63,24 @@ Three front-ends run in parallel (in default/full mode):
 
 The developer portal also runs in `demo-minimal` and `demo-eudi` — flow tabs stay empty until the matching backend services are up.
 
+### Bron schema exploration
+
+The source exposes GraphQL introspection, and opening `http://localhost:9400/graphql`
+in a browser serves an interactive GraphQL Playground with a Docs + Schema
+explorer. The **BRON** block in the developer portal links there with a query
+prefilled through the `query` URL param, so it lands on something runnable
+against the baked mock data.
+
+The playground talks straight to the source, so the request bypasses FSC-Inway,
+the source sidecar, the PEP and the PDP: no consent is checked and no BSN is
+pseudonymised. It explores the source profile schema; it does not demonstrate
+the authorization chain — use the flow tabs for that. The prefilled query says
+so in a leading comment.
+
+Machine paths are unaffected: `POST /graphql` and `GET /graphql?raw` keep
+returning GraphQL results rather than the playground page. Loading the
+playground needs internet access — its assets come from a CDN.
+
 ## Demo Walkthrough (Consent Flow)
 
 1. Open the **consent portal** (`:9002`) and log in as a citizen (mock DigiD, BSN from `graphql-server/mockdata/citizens.json`).
@@ -108,7 +126,7 @@ docker compose logs -f opa
 | Consent portal | 9002 | Citizen UI (React/Vite) | Demo frontend |
 | Developer portal | 9003 | Architect inspection (React/Vite) | Demo frontend |
 | dev-portal-backend | 9407 | Trace hub + explain endpoint | Real (Go) |
-| GraphQL Server | 9400 | Sample source with income data | Real (Go) |
+| GraphQL Server | 9400 | Sample source with income data; playground on `/graphql` in a browser | Real (Go) |
 | pdp-service | 9408 | AuthZen endpoint behind FSC-Inway (P3 context handler) | Real (Go) |
 | bron-sidecar | 9411 | Source-side gateway; PI→BSN via BSNk (subject_id_type-driven) | Real (Go) |
 | additional-claims-service | 9412 | Provider policy that enriches OpenFSC access tokens | Demo configuration (Go) |
