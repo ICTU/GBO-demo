@@ -2,10 +2,18 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "gbo-app.fullname" . }}
+  {{- with .Values.deploymentAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   labels:
     {{- include "gbo-app.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
+  {{- with .Values.deploymentStrategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "gbo-app.selectorLabels" . | nindent 6 }}
