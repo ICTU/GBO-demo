@@ -11,11 +11,12 @@ import (
 
 // Happy-path integration test: POST an issuance-server disclosure to the
 // adapter's per-usecase endpoint. The FSC-Outway is stubbed with an
-// httptest.Server returning a canned graphql-server response; the adapter
-// should extract the BSN from the disclosure, call the (stubbed) outway,
-// and return an IssuableDocument list in the bri-mock shape.
+// httptest.Server returning a canned graphql-server response (BD-schema);
+// the adapter should extract the BSN from the disclosure, call the
+// (stubbed) outway, select the usecase's belastingjaar, and return an
+// IssuableDocument list in the bri-mock shape.
 func TestAdapterEndToEnd(t *testing.T) {
-	// Stub outway — returns a canned graphql response for the inkomens query.
+	// Stub outway — returns a canned BD-graphql response with two aangiften.
 	outway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/bri/graphql" {
 			t.Errorf("outway path = %q, want /bri/graphql", r.URL.Path)
@@ -25,16 +26,25 @@ func TestAdapterEndToEnd(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
 			"data": {
-				"inkomensgegevens": [{
-					"belastingjaar": 2024,
-					"verzamelinkomen": 42000.0,
-					"peilDatum": "2025-05-01",
-					"inkomenUitBox1": 40000.0,
-					"inkomenUitBox2": 1000.0,
-					"inkomenUitBox3": 1000.0,
-					"grondslag": {"code": "A", "omschrijving": "aangifte"},
-					"status": {"code": "V", "omschrijving": "vastgesteld"}
-				}]
+				"ingeschrevenPersoon": {
+					"heeftBelastingjaarAangifte": [
+						{
+							"belastingjaar": 2023,
+							"status": "Definitief vastgesteld",
+							"indieningsdatum": "2024-04-01",
+							"verzamelinkomen": {"waarde": 40000.0, "valuta": "EUR"}
+						},
+						{
+							"belastingjaar": 2024,
+							"status": "Voorlopig vastgesteld",
+							"indieningsdatum": "2025-05-01",
+							"verzamelinkomen": {"waarde": 42000.0, "valuta": "EUR"},
+							"box1Inkomen": {"waarde": 40000.0, "valuta": "EUR"},
+							"box2Inkomen": {"waarde": 1000.0, "valuta": "EUR"},
+							"box3Inkomen": {"waarde": 1000.0, "valuta": "EUR"}
+						}
+					]
+				}
 			}
 		}`))
 	}))
@@ -86,9 +96,20 @@ func TestAdapterEndToEnd(t *testing.T) {
 	if docs[0].AttestationType != "nl.gbo.belastingdienst.inkomensverklaring" {
 		t.Errorf("attestation_type = %q", docs[0].AttestationType)
 	}
-	// verzamelinkomen 42000.0 -> 4200000 eurocents. JSON round-trips numbers
+	// Usecase belastingjaren [2024] must select the 2024 aangifte, not the
+	// first (2023) one in the bron response.
+	if got, want := docs[0].Attributes["belastingjaar"], float64(2024); got != want {
+		t.Errorf("belastingjaar = %v, want %v", got, want)
+	}
+	// verzamelinkomen 42000.0 -> 42000 whole euros. JSON round-trips numbers
 	// as float64 into map[string]any, so compare via float.
-	if got, want := docs[0].Attributes["verzamelinkomen"], float64(4200000); got != want {
+	if got, want := docs[0].Attributes["verzamelinkomen"], float64(42000); got != want {
 		t.Errorf("verzamelinkomen = %v (%T), want %v", got, got, want)
+	}
+	if got, want := docs[0].Attributes["aangifte_status"], "Voorlopig vastgesteld"; got != want {
+		t.Errorf("aangifte_status = %v, want %v", got, want)
+	}
+	if got, want := docs[0].Attributes["indieningsdatum"], "2025-05-01"; got != want {
+		t.Errorf("indieningsdatum = %v, want %v", got, want)
 	}
 }

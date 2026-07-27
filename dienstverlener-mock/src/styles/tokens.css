@@ -377,6 +377,16 @@ a:focus-visible, button:focus-visible {
 .hb-data-table td:first-child { color: var(--hb-mute); width: 55%; }
 .hb-data-table td:last-child { font-weight: 600; color: var(--hb-ink-900); }
 
+/* Niet-geconsenteerd jaar (greyed out) */
+.hb-data-table.denied { opacity: 0.55; background: #F6F7F7; border-style: dashed; }
+.hb-data-table.denied .hb-data-thead .title { color: var(--hb-mute); }
+.hb-data-table.denied td { color: var(--hb-mute); font-weight: 400; }
+.hb-data-table.denied .denied-note {
+  padding: 12px 20px;
+  font-size: 13.5px;
+  color: var(--hb-mute);
+}
+
 /* Footnote */
 .hb-result-footnote {
   margin-top: 24px;

@@ -121,18 +121,23 @@ func loadCatalog(path string) (*Catalog, error) {
 	return &c, nil
 }
 
-// buildQuery builds a GraphQL query for the usecase. The tax years are
-// embedded as an integer list in the query so the source returns exactly
-// those years.
+// buildQuery builds a GraphQL query for the usecase against the BD
+// bron-schema. The usecase's belastingjaren are embedded as the year
+// filter so the PDP can enforce per-year authorization (rule EUD0001's
+// years_in_scopes check); the bron returns exactly those years.
 func buildQuery(u Usecase) string {
 	jaren, _ := json.Marshal(u.Belastingjaren) // -> "[2024]" etc.
-	return fmt.Sprintf(`query($bsn: String!) {
-  inkomensgegevens(input: { burgerservicenummer: $bsn, belastingjaren: %s }) {
-    belastingjaar verzamelinkomen
-    inkomenUitBox1 inkomenUitBox2 inkomenUitBox3
-    peilDatum
-    grondslag { code omschrijving }
-    status { code omschrijving }
+	return fmt.Sprintf(`query($bsn: BSN!) {
+  ingeschrevenPersoon(bsn: $bsn) {
+    heeftBelastingjaarAangifte(belastingjaren: %s) {
+      belastingjaar status indieningsdatum
+      ... on AangifteIH {
+        verzamelinkomen { waarde valuta }
+        box1Inkomen { waarde valuta }
+        box2Inkomen { waarde valuta }
+        box3Inkomen { waarde valuta }
+      }
+    }
   }
 }`, string(jaren))
 }
@@ -198,9 +203,14 @@ type proxyRequest struct {
 }
 
 // graphqlResponse: on ALLOW the PEP forwards the graphql-server body 1:1.
+// The BD bron-schema nests aangiften under the person; the interface list
+// holds AangifteIH objects (decoded loosely — attributes are picked by
+// name downstream).
 type graphqlResponse struct {
 	Data struct {
-		Inkomensgegevens []map[string]any `json:"inkomensgegevens"`
+		IngeschrevenPersoon *struct {
+			HeeftBelastingjaarAangifte []map[string]any `json:"heeftBelastingjaarAangifte"`
+		} `json:"ingeschrevenPersoon"`
 	} `json:"data"`
 	Errors []map[string]any `json:"errors,omitempty"`
 }
@@ -255,18 +265,19 @@ func handleAttestation(cfg config, client *http.Client, usecaseKey string, uc Us
 
 		// Policy check + data fetch via FSC -> PEP -> PDP -> OPA -> graphql.
 		// Scope + query come from the catalog entry.
-		data, err := callViaFSC(r.Context(), client, cfg, bsn, uc)
+		aangiften, err := callViaFSC(r.Context(), client, cfg, bsn, uc)
 		if err != nil {
 			slog.Error("fsc call failed", "usecase", usecaseKey, "err", err.Error())
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
-		if len(data) == 0 {
-			http.Error(w, "no inkomensgegevens found for BSN", http.StatusNotFound)
+		aangifte := selectAangifte(aangiften, uc.Belastingjaren)
+		if aangifte == nil {
+			http.Error(w, "no aangifte found for BSN and belastingjaar", http.StatusNotFound)
 			return
 		}
 
-		docs := formatAsIssuableDocuments(data, uc)
+		docs := formatAsIssuableDocuments(aangifte, uc)
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(docs); err != nil {
 			slog.Error("encode response", "err", err.Error())
@@ -404,45 +415,67 @@ func callViaFSC(ctx context.Context, client *http.Client, cfg config, bsn string
 	if len(out.Errors) > 0 {
 		return nil, fmt.Errorf("graphql errors: %v", out.Errors)
 	}
-	return out.Data.Inkomensgegevens, nil
+	if out.Data.IngeschrevenPersoon == nil {
+		return nil, nil
+	}
+	return out.Data.IngeschrevenPersoon.HeeftBelastingjaarAangifte, nil
 }
 
-// formatAsIssuableDocuments converts the GraphQL response into the
+// selectAangifte picks the aangifte for the usecase's tax year. The query
+// already filters by year at the bron; this is defense-in-depth in case a
+// bron ignores the filter. Empty belastingjaren = first aangifte.
+func selectAangifte(aangiften []map[string]any, jaren []int) map[string]any {
+	if len(aangiften) == 0 {
+		return nil
+	}
+	if len(jaren) == 0 {
+		return aangiften[0]
+	}
+	for _, a := range aangiften {
+		jaar, ok := a["belastingjaar"].(float64)
+		if !ok {
+			continue
+		}
+		for _, y := range jaren {
+			if int(jaar) == y {
+				return a
+			}
+		}
+	}
+	return nil
+}
+
+// formatAsIssuableDocuments converts the aangifte into the
 // bri-mock-compatible shape that the nl-wallet-issuance-server expects:
 //   - Flat array (no envelope)
-//   - snake_case attributes; nested GraphQL objects (grondslag, status)
-//     flattened into <name>_code / <name>_omschrijving
-//   - Amounts in eurocents (× 100) — bri convention
+//   - snake_case attributes; Bedrag objects ({waarde, valuta}) flattened
+//     to whole euros — readable in the wallet UI
 //   - Metadata (CA, issuer_uri, validity) is pulled by the issuance-server
 //     itself from its config, so those fields are NOT included here.
-func formatAsIssuableDocuments(data []map[string]any, uc Usecase) []attestation {
-	first := data[0]
-
+//
+// Attribute names match inkomensverklaring_metadata.json: belastingjaar,
+// verzamelinkomen, inkomen_box1/2/3, status, indieningsdatum.
+func formatAsIssuableDocuments(aangifte map[string]any, uc Usecase) []attestation {
 	attrs := map[string]any{
-		"belastingjaar":   first["belastingjaar"],
-		"verzamelinkomen": toCents(first["verzamelinkomen"]),
+		"belastingjaar":   aangifte["belastingjaar"],
+		"verzamelinkomen": toEuros(bedragWaarde(aangifte["verzamelinkomen"])),
 	}
-	if v, ok := first["peilDatum"]; ok {
-		attrs["peil_datum"] = v
+	if v, ok := aangifte["indieningsdatum"]; ok {
+		attrs["indieningsdatum"] = v
 	}
-	if v, ok := first["inkomenUitBox1"]; ok {
-		attrs["inkomen_box1"] = toCents(v)
+	if v, ok := aangifte["status"]; ok {
+		attrs["aangifte_status"] = v
 	}
-	if v, ok := first["inkomenUitBox2"]; ok {
-		attrs["inkomen_box2"] = toCents(v)
+	if v := bedragWaarde(aangifte["box1Inkomen"]); v != nil {
+		attrs["inkomen_box1"] = toEuros(v)
 	}
-	if v, ok := first["inkomenUitBox3"]; ok {
-		attrs["inkomen_box3"] = toCents(v)
+	if v := bedragWaarde(aangifte["box2Inkomen"]); v != nil {
+		attrs["inkomen_box2"] = toEuros(v)
 	}
-	if g, ok := first["grondslag"].(map[string]any); ok {
-		attrs["grondslag_code"] = g["code"]
-		attrs["grondslag_omschrijving"] = g["omschrijving"]
+	if v := bedragWaarde(aangifte["box3Inkomen"]); v != nil {
+		attrs["inkomen_box3"] = toEuros(v)
 	}
-	if s, ok := first["status"].(map[string]any); ok {
-		attrs["status_code"] = s["code"]
-		attrs["status_omschrijving"] = s["omschrijving"]
-	}
-	attrs["verklaring_tekst"] = fmt.Sprintf("Inkomensverklaring %v via GBO/DvTP", attrs["belastingjaar"])
+	attrs["verklaring_tekst"] = fmt.Sprintf("Inkomensverklaring %v als GBO PubEAA", attrs["belastingjaar"])
 
 	return []attestation{{
 		AttestationType: uc.AttestationType,
@@ -450,6 +483,17 @@ func formatAsIssuableDocuments(data []map[string]any, uc Usecase) []attestation 
 		Format:          "dc+sd-jwt",
 		ID:              newUUIDv4(),
 	}}
+}
+
+// bedragWaarde extracts the waarde from a Bedrag object ({waarde, valuta})
+// as decoded from the GraphQL response. Returns nil when absent or not an
+// object.
+func bedragWaarde(v any) any {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return nil
+	}
+	return m["waarde"]
 }
 
 // newUUIDv4 generates an RFC4122 v4 UUID for the issuance-server's
@@ -461,16 +505,16 @@ func newUUIDv4() string {
 	return uuid.NewString()
 }
 
-// toCents converts a JSON number into eurocents (× 100). GraphQL delivers
-// float64; we multiply and round down.
-func toCents(v any) int64 {
+// toEuros converts a JSON number into whole euros. GraphQL delivers
+// float64; we truncate to an integer.
+func toEuros(v any) int64 {
 	switch n := v.(type) {
 	case float64:
-		return int64(n * 100)
+		return int64(n)
 	case int:
-		return int64(n) * 100
+		return int64(n)
 	case int64:
-		return n * 100
+		return n
 	}
 	return 0
 }

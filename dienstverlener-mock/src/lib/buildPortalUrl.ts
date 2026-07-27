@@ -20,9 +20,13 @@ export function resolvePortalBase(location: Pick<Location, 'hostname' | 'port' |
   const { hostname, port, protocol } = location
 
   // The local Docker Compose demo exposes both frontends on the same host,
-  // using ports 9001 and 9002.
-  if (hostname === 'localhost' || hostname === '127.0.0.1' || port === '9001') {
-    return `${protocol}//${hostname}:9002`
+  // on consecutive ports (default 9001/9002, overridable via GBO_PORT_*).
+  // The portal lives one port up from the dienstverlener frontend.
+  if (port !== '') {
+    const current = parseInt(port, 10)
+    if (!Number.isNaN(current)) {
+      return `${protocol}//${hostname}:${current + 1}`
+    }
   }
 
   // Deployed environments expose each frontend on its own sibling hostname,

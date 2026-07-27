@@ -1,0 +1,58 @@
+# Clean (directive-free) SDL for the BD-bron (Belastingdienst bronprofiel).
+# The PDP uses this as a structural reference to bind queried fields to
+# rules; it is NOT policy — the binding lives in the rules themselves
+# (covers_types / covers_fields).
+#
+# Subset of the upstream schema — the types the demo bron exposes:
+#   https://github.com/ICTU/gbo-semantiek/blob/main/v0.3/graphql/bd.graphql
+# The upstream file is not mirrored verbatim: gqlparser (PDP) rejects its
+# interface covariance (Aftrekpost/VermogensBestanddeel narrow the
+# FiscaalFeit.categorie type), and the mock bron only serves AangifteIH.
+#
+# Mirrored from graphql-server/main.go buildSchema() — keep in sync when
+# the bron-schema changes.
+
+scalar BSN
+scalar CodelijstISO4217
+scalar Datum
+
+interface BelastingjaarAangifte {
+  aangifteIdentificatie: String!
+  indieningsdatum: Datum
+  status: String!
+  belastingjaar: Int!
+  belastingsoort: String!
+  ingangsdatumAangifte: Datum
+  einddatumAangifte: Datum
+}
+
+type AangifteIH implements BelastingjaarAangifte {
+  aangifteIdentificatie: String!
+  indieningsdatum: Datum
+  status: String!
+  belastingjaar: Int!
+  belastingsoort: String!
+  ingangsdatumAangifte: Datum
+  einddatumAangifte: Datum
+  verzamelinkomen: Bedrag
+  box1Inkomen: Bedrag
+  box2Inkomen: Bedrag
+  box3Inkomen: Bedrag
+}
+
+type IngeschrevenPersoon {
+  bsn: BSN!
+  # belastingjaren is a demo-bron extension of the upstream schema: the
+  # PDP can only enforce per-year consent when the year selector travels
+  # inside the query.
+  heeftBelastingjaarAangifte(belastingjaren: [Int!]): [BelastingjaarAangifte!]
+}
+
+type Bedrag {
+  waarde: Float!
+  valuta: CodelijstISO4217
+}
+
+type Query {
+  ingeschrevenPersoon(bsn: BSN!): IngeschrevenPersoon
+}

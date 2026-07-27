@@ -15,11 +15,11 @@ import data.dvtp.gbo.rules.eud0001
 # test via object.union.
 _base_ctx := {
 	"subject": {"type": "org", "id": "00000004000000004000"},
-	"args": {},
+	"args": {"belastingjaren.0": "2025"},
 	"time": "2026-07-06T12:00:00Z",
 	"resource": {"scope": "bd:ib:2025"},
 	"pip": {"pid": {"bsn": "123456789"}},
-	"field": "Query.inkomensgegevens",
+	"field": "Query.ingeschrevenPersoon.heeftBelastingjaarAangifte",
 }
 
 # ── Happy path ──────────────────────────────────────────────────────────
@@ -65,6 +65,17 @@ test_allow_scope_bd_ib_2024 if {
 	ctx := object.union(_base_ctx, {"resource": {"scope": "bd:ib:2024"}})
 	result := lib.evaluate(eud0001.spec, ctx)
 	result.decision == true
+}
+
+# ── Year-coverage (requested year must map to an allowed scope) ────────
+
+test_deny_year_not_in_allowed_scopes if {
+	# Scope bd:ib:2025 passes the scope-axis, but the query asks for
+	# belastingjaar 2023 — bd:ib:2023 is not in allowed_scopes.
+	ctx := object.union(_base_ctx, {"args": {"belastingjaren.0": "2023"}})
+	result := lib.evaluate(eud0001.spec, ctx)
+	result.decision == false
+	result.context.reason_admin.code == "YEAR_NOT_COVERED"
 }
 
 # ── Actor-authorization ─────────────────────────────────────────────────

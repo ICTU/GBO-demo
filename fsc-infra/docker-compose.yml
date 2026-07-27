@@ -1,3 +1,8 @@
+# Project name is parameterizable so multiple worktrees can each run
+# their own fsc-infra instance side by side (set FSC_PROJECT_NAME in
+# fsc-infra/.env). Defaults to the historical single-tenant name.
+name: ${FSC_PROJECT_NAME:-fsc-infra}
+
 # Self-hosted cert-authority + directory-peer for the GBO-DEMO group.
 #
 # Cert-authority:
@@ -61,7 +66,7 @@ services:
       - --ca-host=http://cfssl:8888
       - --include-issuer-cert=true
     ports:
-      - "8091:8080"
+      - "${FSC_PORT_CERTPORTAL:-8091}:8080"
     depends_on:
       cfssl:
         condition: service_healthy
@@ -115,7 +120,7 @@ services:
     image: federatedserviceconnectivity/controller:v2.4.0
     restart: unless-stopped
     ports:
-      - "8092:3001"
+      - "${FSC_PORT_DIRECTORY_CONTROLLER:-8092}:3001"
     volumes:
       - ./directory-peer/pki:/certs:ro
     environment:
@@ -227,7 +232,7 @@ services:
     image: federatedserviceconnectivity/directory-ui:v2.4.0
     restart: unless-stopped
     ports:
-      - "8093:3001"
+      - "${FSC_PORT_DIRECTORY_UI:-8093}:3001"
     volumes:
       - ./directory-ui/pki:/certs:ro
     environment:
@@ -307,7 +312,7 @@ services:
     image: federatedserviceconnectivity/controller:v2.4.0
     restart: unless-stopped
     ports:
-      - "8094:3001"
+      - "${FSC_PORT_EDI_CONTROLLER:-8094}:3001"
     volumes:
       - ./orgs/edi-issuer/pki:/certs:ro
     environment:
@@ -469,7 +474,7 @@ services:
     image: federatedserviceconnectivity/controller:v2.4.0
     restart: unless-stopped
     ports:
-      - "8096:3001"
+      - "${FSC_PORT_HV_CONTROLLER:-8096}:3001"
     volumes:
       - ./orgs/hypotheekverlener-mock/pki:/certs:ro
     environment:
@@ -640,7 +645,7 @@ services:
     image: federatedserviceconnectivity/controller:v2.4.0
     restart: unless-stopped
     ports:
-      - "8095:3001"
+      - "${FSC_PORT_BD_CONTROLLER:-8095}:3001"
     volumes:
       - ./orgs/belastingdienst-mock/pki:/certs:ro
     environment:

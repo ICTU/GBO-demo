@@ -152,7 +152,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: ${{ fromJSON(needs.changes.outputs.docker) }}
+        include: ${{ fromJSON(needs.changes.outputs.docker) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build image
@@ -160,7 +160,7 @@ jobs:
           docker build \
             --file "services/${{ matrix.service }}/Dockerfile" \
             --tag "gbo-demo/${{ matrix.service }}:ci" \
-            "services/${{ matrix.service }}"
+            "${{ matrix.context }}"
 
   result:
     name: CI result

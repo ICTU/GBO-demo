@@ -26,7 +26,7 @@ export type UsePayload = {
   scope_id?: string
   belastingjaren?: number[]
   // Optional field-selection for the auto-generated query. Default = full set.
-  // Used by scenarios that test out-of-scope fields (e.g. inkomenUitBox2).
+  // Used by scenarios that test out-of-scope fields (e.g. box2Inkomen).
   fields?: string[]
 }
 
@@ -64,9 +64,15 @@ export type IssuanceResponse = {
 // Use-response from dienstverlener-backend
 export type UseResponse = {
   allowed: boolean
-  data?: { data?: { inkomensgegevens: unknown[] } }
+  data?: { data?: { ingeschrevenPersoon?: { heeftBelastingjaarAangifte?: unknown[] } } }
   reason?: string
   trace_id: string
+  // The identifier that travelled through FSC and ended up in the OPA
+  // decision log. Differs from trace_id whenever the caller supplied its
+  // own traceparent (the dev-portal always does), so decision lookups
+  // must prefer this one.
+  fsc_transaction_id?: string
+  denied_years?: number[]
 }
 
 // Run-log entry for the history table
@@ -87,7 +93,7 @@ export type HistoryRun = {
 
 export type Citizen = {
   bsn: string
-  inkomensgegevens?: unknown[]
+  heeftBelastingjaarAangifte?: unknown[]
 }
 
 export type Organization = {

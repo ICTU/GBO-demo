@@ -532,6 +532,28 @@ func handleExplain(cfg config) http.HandlerFunc {
 	}
 }
 
+// traceIDMatches reports whether a decision-log input belongs to the
+// requested identifier. Callers pass either the OTel trace-id or the
+// FSC transaction-id (a UUID v7); both denote the same request, so
+// compare with dashes stripped.
+func traceIDMatches(input map[string]any, wanted string) bool {
+	want := strings.ReplaceAll(wanted, "-", "")
+	if want == "" {
+		return false
+	}
+
+	if tid, _ := input["trace_id"].(string); strings.ReplaceAll(tid, "-", "") == want {
+		return true
+	}
+
+	fsc, _ := input["fsc"].(map[string]any)
+	if fsc == nil {
+		return false
+	}
+	txID, _ := fsc["transaction_id"].(string)
+	return strings.ReplaceAll(txID, "-", "") == want
+}
+
 // lokiDecisionsForTrace pulls every "Decision Log" line that matches the
 // given trace_id (last 30m) and returns the parsed entries in chronological
 // order (oldest first).
@@ -569,7 +591,13 @@ func lokiDecisionsForTrace(ctx context.Context, cfg config, traceID string) ([]m
 			if input == nil {
 				continue
 			}
-			if tid, _ := input["trace_id"].(string); tid == traceID {
+			// Match either identifier: input.trace_id is the OTel trace
+			// the PDP reconstructed, input.fsc.transaction_id the UUID
+			// that travelled through FSC. They are the same value in
+			// different notations (dashes) when nothing upstream supplied
+			// a traceparent, and different fields otherwise — callers may
+			// hold either one.
+			if traceIDMatches(input, traceID) {
 				rows = append(rows, stamped{ts: v[0], raw: entry})
 			}
 		}
