@@ -55,8 +55,9 @@ make demo-full        # Both flows on
 make demo-down        # Bring everything down
 ```
 
-Three front-ends run in parallel (in default/full mode):
+Four front-ends run in parallel (in default/full mode):
 
+- **Landing page** (`http://localhost:9000`) — the demo's public front door: what GBO is, the three flows, and links into the other front-ends. Static; no backend of its own.
 - **Consumer mock** (`http://localhost:9001`) — a stand-in for a data-consuming party (e.g. a mortgage lender). Talks to `dienstverlener-backend`.
 - **Consent portal** (`http://localhost:9002`) — a citizen-facing UI to grant and revoke consent. Talks to `consent-portal-backend`.
 - **Developer portal** (`http://localhost:9003`) — architect inspection UI: live trace view + policy inspection + FSC txlog per hop.
@@ -122,6 +123,7 @@ docker compose logs -f opa
 
 | Service | Port | Description | Real/Mock |
 |---------|------|-------------|-----------|
+| Landing page | 9000 | Public entry point (React/Vite) | Demo frontend |
 | Consumer mock | 9001 | Consumer UI (React/Vite) | Demo frontend |
 | Consent portal | 9002 | Citizen UI (React/Vite) | Demo frontend |
 | Developer portal | 9003 | Architect inspection (React/Vite) | Demo frontend |
@@ -348,7 +350,7 @@ curl -X POST http://localhost:9181/v1/data/dvtp/authz -d '{"input": {...}}'
 ```
 
 **Frontend not loading?**
-- Check the three frontends (`dienstverlener-mock` :9001, `toestemmingsportaal-frontend` :9002, `developer-portal` :9003) and their backends.
+- Check the four frontends (`landing-page` :9000, `dienstverlener-mock` :9001, `toestemmingsportaal-frontend` :9002, `developer-portal` :9003) and their backends.
 - `docker compose logs <service>` for the container in question.
 
 ## Adding new access flows

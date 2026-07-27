@@ -1,0 +1,12 @@
+window.__GBO_RUNTIME_CONFIG__ = {
+  developerPortalUrl: "${DEVELOPER_PORTAL_URL}",
+  toestemmingsportaalUrl: "${TOESTEMMINGSPORTAAL_URL}",
+  dienstverlenerUrl: "${DIENSTVERLENER_URL}",
+  eudiIssuerUrl: "${EUDI_ISSUER_URL}",
+  jaegerUrl: "${JAEGER_PUBLIC_URL}",
+  grafanaUrl: "${GRAFANA_PUBLIC_URL}",
+  fscControllerBronUrl: "${FSC_CONTROLLER_BRON_URL}",
+  fscControllerDvtpUrl: "${FSC_CONTROLLER_DVTP_URL}",
+  fscControllerEudiUrl: "${FSC_CONTROLLER_EUDI_URL}",
+  versionString: "${VERSION_STRING}"
+}
