@@ -639,8 +639,22 @@ func enrichInput(ctx context.Context, body []byte, schemas map[string]*ast.Schem
 	case strings.HasPrefix(flowType, "eudi:"):
 		// EUDI-flow: BSN comes from resource.bsn or resource.variables["bsn"].
 		// The PDP-handler stays flow-agnostic and only forwards the raw
-		// variables; the EUDI-specific BSN extraction happens here. PID
-		// signature-verification lives upstream.
+		// variables; the EUDI-specific BSN extraction happens here.
+		//
+		// DEMO TRUST ASSUMPTION — `pip.pid.bsn` does not independently prove
+		// the wallet-disclosed subject. It is read from the same request that
+		// carries the query variable selecting the record, so a caller who can
+		// reach this endpoint can name any BSN and the policy will evaluate as
+		// if the wallet had disclosed it. Every rule keyed on `pip.pid.bsn`
+		// (EUD0001 on the BD path, EUD0002 on the BRP path) inherits this.
+		//
+		// What closes it is not more validation here: the disclosure has to be
+		// bound to the query before the PDP sees it — the issuance-server's
+		// verified PID assertion (or a provider-verifiable equivalent) carried
+		// into the AuthZen envelope, so `variables.bsn` can be checked against
+		// a signature rather than against itself. PID signature-verification
+		// is deliberately out of scope for the demo; see the EUDI PID
+		// disclosure row in README.md ("What is real vs. demo scaffolding").
 		bsn := ai.Input.Resource.BSN
 		if bsn == "" {
 			if v, ok := ai.Input.Resource.Variables["bsn"]; ok {

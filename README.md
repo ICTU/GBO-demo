@@ -134,6 +134,7 @@ docker compose logs -f opa
 | pdp-service | **Real** | AuthZen endpoint behind FSC-Inway; the only policy endpoint for both flows |
 | bron-sidecar | **Real** | Source-side gateway; PI→BSN driven by the signed `subject_id_type` additional claim |
 | additional-claims-service | **Demo** | GitOps-style provider policy; production should resolve claims from the authoritative onboarding or authorization source |
+| EUDI PID disclosure | **Demo** | The BSN the EUDI rules key on (`pip.pid.bsn`) is taken from the same request that carries the query variable selecting the record — it is not independently verified, so the disclosure does not prove the subject. Production needs the wallet's verified PID assertion bound to `variables.bsn` before the PDP evaluates. Applies to both EUDI flows (BD and BRP) |
 | Consent Register | **Mock** | In-memory; production would be a persistent store |
 | BSNk Mock | **Mock** | Deterministic SHA-256; real BSNk uses ElGamal on elliptic curves |
 
