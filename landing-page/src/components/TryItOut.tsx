@@ -9,8 +9,8 @@ const DVTP_STEPS = [
     Je beoordeelt dat verzoek als burger in het{' '}
     <ExternalLink href={links.toestemmingsportaal} describes="het toestemmingsportaal">
       toestemmingsportaal
-    </ExternalLink>{' '}
-    — daar opent de flow zelf een tabblad.
+    </ExternalLink>
+    , dat de flow zelf in een nieuw tabblad opent.
   </>,
   <>HypotheekBV bevraagt de bron en toont wat er terugkomt.</>,
 ]
@@ -24,8 +24,8 @@ export default function TryItOut() {
       <div className="shell">
         <h2 className="h2-serif h2-serif--tight">Zelf uitproberen</h2>
         <p className="prose prose--measure cta-lede">
-          Twee stromen draaien live in deze demo. Je start ze allebei hieronder; voor de
-          wallet-stroom heb je daarnaast de NL Wallet app op je telefoon nodig.
+          Twee stromen kun je hier zelf doorlopen. Je start ze allebei hieronder; voor de
+          wallet-stroom heb je de NL Wallet op je telefoon nodig.
         </p>
 
         <div className="tryout-grid">
@@ -38,8 +38,8 @@ export default function TryItOut() {
               </div>
             </div>
             <p className="tryout-desc">
-              Je loopt alle drie de rollen langs: eerst als afnemer die gegevens nodig heeft, dan
-              als burger die daar toestemming voor geeft, en tot slot zie je wat de bron vrijgeeft.
+              Je speelt om de beurt de afnemer die gegevens nodig heeft en de burger die daar
+              toestemming voor geeft. Aan het eind zie je wat de bron vrijgeeft.
             </p>
             <ol className="tryout-steps">
               {DVTP_STEPS.map((step, i) => (
@@ -98,8 +98,9 @@ export default function TryItOut() {
                  sessie niet openen; een QR tonen zou een dood spoor zijn. */
               <div className="tryout-qr tryout-qr--empty">
                 <p>
-                  Deze omgeving heeft geen publiek bereikbare issuance-server, dus er valt niets te
-                  scannen. Zet <code>EUDI_PUBLIC_URL</code> zodra de wallet erbij kan.
+                  In deze omgeving is de issuance-server niet publiek bereikbaar, dus er valt niets
+                  te scannen. Zet <code>EUDI_PUBLIC_URL</code> zodra de wallet de server kan
+                  bereiken.
                 </p>
               </div>
             )}
@@ -108,12 +109,11 @@ export default function TryItOut() {
 
         <div className="tryout-asides">
           <aside className="tryout-aside">
-            <h3 className="tryout-aside-title">Daarna: kijken wat er onder water gebeurde</h3>
+            <h3 className="tryout-aside-title">Ook: meekijken in de developer-portal</h3>
             <p className="tryout-aside-desc">
-              De developer-portal is geen vierde stroom maar een inspectieconsole. Draai eerst een
-              van de twee flows hierboven; daarna zie je in de portal per hop terug wat er langskwam
-              — het verzoek, de beleidsbeslissing met de regel die hem nam, het FSC-contract en de
-              trace.
+              De developer-portal laat per hop zien wat er langskwam: het verzoek, welke
+              beleidsregel het toestond of tegenhield, het FSC-contract en de trace. Je kunt er ook
+              zelf verzoeken afvuren, met een kant-en-klaar scenario of een eigen request.
             </p>
             <ExternalLink
               href={links.developerPortal}
