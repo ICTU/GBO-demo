@@ -55,13 +55,42 @@ make demo-full        # Both flows on
 make demo-down        # Bring everything down
 ```
 
-Three front-ends run in parallel (in default/full mode):
+Four front-ends run in parallel (in default/full mode):
 
+- **Landing page** (`http://localhost:9000`) — the demo's public front door: what GBO is, the three flows, and links into the other front-ends. Static; no backend of its own.
 - **Consumer mock** (`http://localhost:9001`) — a stand-in for a data-consuming party (e.g. a mortgage lender). Talks to `dienstverlener-backend`.
 - **Consent portal** (`http://localhost:9002`) — a citizen-facing UI to grant and revoke consent. Talks to `consent-portal-backend`.
 - **Developer portal** (`http://localhost:9003`) — architect inspection UI: live trace view + policy inspection + FSC txlog per hop.
 
 The developer portal also runs in `demo-minimal` and `demo-eudi` — flow tabs stay empty until the matching backend services are up.
+
+### Bron schema exploration
+
+The source exposes GraphQL introspection and serves a playground on
+`http://localhost:9400/playground`, with two tabs:
+
+- **Query** — GraphiQL 5 with the explorer plugin: tick fields in the left-hand
+  pane to assemble a query, run it against the baked mock data, browse the
+  types in Docs. Opens on a runnable demo query; `?query=<urlencoded>` prefills
+  a different one.
+- **Schema** — [GraphQL Voyager](https://github.com/graphql-kit/graphql-voyager),
+  which draws the schema as a type graph (`Query` → `IngeschrevenPersoon` →
+  `BelastingjaarAangifte` → `AangifteIH` → `Bedrag`).
+
+The **BRON** block in the developer portal links to the Query tab. Opening
+`/graphql` in a browser redirects to `/playground`.
+
+The playground talks straight to the source, so the request bypasses FSC-Inway,
+the source sidecar, the PEP and the PDP: no consent is checked and no BSN is
+pseudonymised. It explores the source profile schema; it does not demonstrate
+the authorization chain — use the flow tabs for that. The page says so in its
+header bar.
+
+Machine paths are unaffected: `POST /graphql` and `GET /graphql?raw` keep
+returning GraphQL results rather than being redirected. Loading the playground
+needs internet access — its assets come from esm.sh and jsdelivr, pinned by
+exact version and checked with SRI hashes (see the comment at the top of
+`services/graphql-server/playground.html` before bumping them).
 
 ## Demo Walkthrough (Consent Flow)
 
@@ -104,11 +133,12 @@ docker compose logs -f opa
 
 | Service | Port | Description | Real/Mock |
 |---------|------|-------------|-----------|
+| Landing page | 9000 | Public entry point (React/Vite) | Demo frontend |
 | Consumer mock | 9001 | Consumer UI (React/Vite) | Demo frontend |
 | Consent portal | 9002 | Citizen UI (React/Vite) | Demo frontend |
 | Developer portal | 9003 | Architect inspection (React/Vite) | Demo frontend |
 | dev-portal-backend | 9407 | Trace hub + explain endpoint | Real (Go) |
-| GraphQL Server | 9400 | BD source (bronprofiel `bd`) with income data | Real (Go) |
+| GraphQL Server | 9400 | BD source (bronprofiel `bd`) with income data; playground on `/playground` | Real (Go) |
 | BRP GraphQL Server | 9401 | BRP source (bronprofiel `brp`) with persoonsgegevens | Real (Go) |
 | pdp-service | 9408 | AuthZen endpoint behind FSC-Inway (P3 context handler) | Real (Go) |
 | bron-sidecar | 9411 | Source-side gateway for the BD source; PI→BSN via BSNk (subject_id_type-driven) | Real (Go) |
@@ -333,7 +363,7 @@ curl -X POST http://localhost:9181/v1/data/dvtp/authz -d '{"input": {...}}'
 ```
 
 **Frontend not loading?**
-- Check the three frontends (`dienstverlener-mock` :9001, `toestemmingsportaal-frontend` :9002, `developer-portal` :9003) and their backends.
+- Check the four frontends (`landing-page` :9000, `dienstverlener-mock` :9001, `toestemmingsportaal-frontend` :9002, `developer-portal` :9003) and their backends.
 - `docker compose logs <service>` for the container in question.
 
 ## Adding new access flows

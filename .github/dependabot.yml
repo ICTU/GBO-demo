@@ -18,6 +18,7 @@ updates:
     directories:
       - /developer-portal
       - /dienstverlener-mock
+      - /landing-page
       - /toestemmingsportaal-frontend
       - /services/additional-claims-service
       - /services/bron-sidecar
@@ -47,6 +48,7 @@ updates:
     directories:
       - /developer-portal
       - /dienstverlener-mock
+      - /landing-page
       - /toestemmingsportaal-frontend
     schedule:
       interval: weekly

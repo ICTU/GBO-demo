@@ -1,0 +1,1022 @@
+/* Waarden 1:1 overgenomen uit het design "GBO Landing.dc.html"
+   (claude.ai/design, project 0c7d9e4c). Niet zelf verzinnen — het design
+   is leidend. Alleen de media-queries onderaan zijn toegevoegd: het
+   design kent geen breakpoints omdat het altijd breed gerenderd wordt. */
+
+:root {
+  --blue: #01689b;
+  --blue-deep: #05131f;
+  --red: #d52b1e;
+  --text: #1a1a1a;
+  --text-2: #535353;
+  --text-3: #767676;
+  --grey-bg: #f3f3f3;
+  --grey-border: #d3d3d3;
+  --pale-bg: #f3f7fa;
+  --pale-border: #d3e0e9;
+  --line: #a8c4d4;
+  --accent-light: #8fcbe8;
+  --tint-dvtp: #e7eff5;
+  --tint-eudi: #dfeaf2;
+  --tint-oots: #eaf1f6;
+  --sans: "Fira Sans", Helvetica, Arial, sans-serif;
+  --serif: "Source Serif 4", Georgia, serif;
+  --gutter: clamp(20px, 6vw, 88px);
+  --shell: 1280px;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: #ffffff;
+  color: var(--text);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+  text-wrap: pretty;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+a {
+  color: var(--blue);
+}
+
+a:hover {
+  color: var(--red);
+}
+
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+/* ── Gedeelde bouwstenen ─────────────────────────────────────────────── */
+
+.shell {
+  max-width: var(--shell);
+  margin: 0 auto;
+}
+
+.grid-12 {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: clamp(24px, 4vw, 64px);
+}
+
+.grid-12--tight {
+  gap: clamp(24px, 4vw, 56px);
+}
+
+.span-4,
+.span-5,
+.span-7,
+.span-8 {
+  min-width: 0;
+}
+
+.span-4 {
+  grid-column: span 4;
+}
+.span-5 {
+  grid-column: span 5;
+}
+.span-7 {
+  grid-column: span 7;
+}
+.span-8 {
+  grid-column: span 8;
+}
+
+.section {
+  padding: clamp(64px, 9vh, 104px) var(--gutter);
+}
+
+.section--grey {
+  background: var(--grey-bg);
+}
+
+.section--dark {
+  background: var(--blue-deep);
+  color: #ffffff;
+}
+
+.section--blue {
+  background: var(--blue);
+  color: #ffffff;
+}
+
+.h2-serif {
+  margin: 0;
+  font-family: var(--serif);
+  font-weight: 400;
+  font-size: clamp(26px, 3vw, 36px);
+  line-height: 1.18;
+}
+
+.h2-serif--spaced {
+  margin-bottom: 22px;
+}
+
+.h2-serif--tight {
+  margin-bottom: 12px;
+}
+
+.prose {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.7;
+}
+
+/* Leesbreedte voor lopende tekst; de kolom-intro's in Stromen en
+   Pipeline lopen bewust door tot de kolombreedte. */
+.prose--measure {
+  max-width: 62ch;
+}
+
+.prose--muted {
+  color: var(--text-2);
+}
+
+.prose--on-dark {
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.prose--flow {
+  margin-bottom: 18px;
+}
+
+.prose--flow-last {
+  margin-bottom: 20px;
+}
+
+.link-underline {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.link-muted {
+  color: var(--text-2);
+}
+
+.link-muted:hover {
+  color: var(--red);
+}
+
+/* ── Voortgangsbalk ──────────────────────────────────────────────────── */
+
+.progress-track {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  z-index: 60;
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.progress-bar {
+  height: 100%;
+  width: 0%;
+  background: var(--blue);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.5);
+}
+
+/* ── Hero ────────────────────────────────────────────────────────────── */
+
+.hero {
+  position: relative;
+  overflow: hidden;
+  background: var(--blue);
+  color: #ffffff;
+}
+
+/* De tekening ligt achter menu én tekst, vandaar het stapelen. */
+.hero-topbar,
+.hero-body {
+  position: relative;
+  z-index: 1;
+}
+
+.hero-topbar {
+  padding: 26px var(--gutter) 0;
+}
+
+.hero-topbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.wordmark {
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.hero-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 26px;
+  font-size: 15px;
+}
+
+.hero-nav a {
+  color: rgba(255, 255, 255, 0.85);
+  text-decoration: none;
+}
+
+.hero-nav a:hover {
+  color: #ffffff;
+  text-decoration: underline;
+}
+
+.hero-nav a.is-primary {
+  color: #ffffff;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.hero-body {
+  padding: clamp(44px, 7vh, 76px) var(--gutter) clamp(56px, 9vh, 96px);
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: clamp(30px, 4.2vw, 46px);
+  line-height: 1.16;
+  font-weight: 600;
+  text-wrap: balance;
+}
+
+/* Titel, tekst en knop onder elkaar in de linkerhelft; de rechterhelft is
+   voor de tekening. Boven de 54% zou de tekst eroverheen gaan lopen. */
+.hero-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 22px;
+  max-width: 54%;
+}
+
+.hero-stack h1 {
+  max-width: 18ch;
+}
+
+.hero-lede {
+  margin: 0;
+  max-width: 52ch;
+  font-size: 17px;
+  line-height: 1.65;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* ── Hero-tekening ───────────────────────────────────────────────────── */
+
+.hero-art {
+  position: absolute;
+  top: -14%;
+  right: -14%;
+  width: 60%;
+  aspect-ratio: 1;
+  z-index: 0;
+  pointer-events: none;
+  /* Volledig weg op menuhoogte zodat de nav-links vrij staan, en onderaan
+     weer uit beeld — zo is er nergens een rechte snijrand. */
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 20%,
+    rgba(0, 0, 0, 0.4) 34%,
+    #000 58%,
+    #000 82%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 20%,
+    rgba(0, 0, 0, 0.4) 34%,
+    #000 58%,
+    #000 82%,
+    transparent 100%
+  );
+}
+
+.hero-art svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.hero-art-ring {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.2);
+  stroke-width: 1.2;
+}
+
+.hero-art-spoke {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.28);
+  stroke-width: 1.1;
+}
+
+.hero-art-pulse {
+  fill: none;
+  stroke: #ffffff;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+}
+
+.hero-art-pulse--soft {
+  stroke: rgba(255, 255, 255, 0.65);
+  stroke-width: 2;
+}
+
+.hero-art-node {
+  fill: rgba(255, 255, 255, 0.9);
+}
+
+.hero-art-core {
+  fill: #ffffff;
+}
+
+.btn-invert {
+  align-self: flex-start;
+  background: #ffffff;
+  color: var(--blue);
+  padding: 13px 22px;
+  border-radius: 4px;
+  text-decoration: none;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.btn-invert:hover {
+  background: var(--grey-bg);
+  color: var(--red);
+}
+
+/* ── Stroomdiagram ───────────────────────────────────────────────────── */
+
+.flowband {
+  padding: 0 var(--gutter);
+  /* Bovenste helft loopt door in de hero-blauw, onderste helft is wit. */
+  background: linear-gradient(#01689b 50%, #ffffff 50%);
+}
+
+.flowcard {
+  max-width: var(--shell);
+  margin: 0 auto;
+  border-radius: 4px;
+  background: var(--pale-bg);
+  overflow: hidden;
+}
+
+.flowcard-head {
+  padding: clamp(22px, 3vw, 34px) clamp(20px, 4vw, 48px);
+  border-bottom: 1px solid var(--pale-border);
+}
+
+.flowcard-head p {
+  margin: 0;
+  font-size: clamp(15px, 1.5vw, 18px);
+  color: var(--text);
+}
+
+.flowcard-body {
+  position: relative;
+  padding: clamp(28px, 4.5vw, 64px) clamp(20px, 4vw, 48px);
+}
+
+.flowgrid {
+  position: relative;
+  display: grid;
+  grid-template-columns:
+    minmax(0, 0.9fr) clamp(24px, 4vw, 56px) minmax(0, 1.45fr)
+    clamp(28px, 5vw, 72px) minmax(0, 1fr);
+  align-items: center;
+}
+
+.flow-source {
+  background: #ffffff;
+  border: 1px solid var(--blue);
+  padding: clamp(14px, 2vw, 22px);
+}
+
+.flow-source-title {
+  font-size: clamp(15px, 1.4vw, 18px);
+  font-weight: 500;
+  color: var(--text);
+}
+
+.flow-source-sub {
+  margin-top: 5px;
+  font-size: 14px;
+  color: var(--text-2);
+}
+
+.flow-link {
+  width: 100%;
+  height: 100%;
+  min-height: 2px;
+  overflow: visible;
+}
+
+.flow-hub {
+  background: var(--blue);
+  padding: clamp(20px, 2.6vw, 34px);
+}
+
+.flow-hub-title {
+  font-size: clamp(20px, 2.2vw, 30px);
+  font-weight: 600;
+  color: #ffffff;
+  letter-spacing: 0.01em;
+}
+
+.flow-hub-sub {
+  margin-top: 8px;
+  font-size: clamp(14px, 1.2vw, 16px);
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.flow-fan {
+  width: 100%;
+  height: clamp(120px, 14vw, 190px);
+  overflow: visible;
+}
+
+.flow-outputs {
+  display: flex;
+  flex-direction: column;
+  height: clamp(120px, 14vw, 190px);
+}
+
+.flow-output {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border-left: 3px solid var(--blue);
+  padding-left: 14px;
+}
+
+.flow-output-name {
+  font-size: clamp(14px, 1.3vw, 17px);
+  color: var(--text);
+}
+
+.flow-output-desc {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-2);
+}
+
+/* ── Wat doet GBO ────────────────────────────────────────────────────── */
+
+.benefits {
+  background: var(--grey-bg);
+  padding: clamp(24px, 3vw, 34px);
+}
+
+.benefits h3 {
+  margin: 0 0 16px;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.benefit {
+  padding: 12px 0;
+  border-top: 1px solid var(--grey-border);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+/* ── Stromen ─────────────────────────────────────────────────────────── */
+
+.streams-intro {
+  margin-bottom: clamp(36px, 5vh, 56px);
+}
+
+.streams {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: clamp(20px, 2.5vw, 32px);
+}
+
+.stream-art {
+  height: clamp(190px, 20vw, 260px);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.stream-art svg {
+  width: 68%;
+  height: auto;
+}
+
+.stream-art--dvtp {
+  background: var(--tint-dvtp);
+}
+.stream-art--eudi {
+  background: var(--tint-eudi);
+}
+.stream-art--oots {
+  background: var(--tint-oots);
+}
+
+.stream-status {
+  margin: 18px 0 4px;
+  font-size: 14px;
+  color: var(--text-2);
+}
+
+.stream-title {
+  margin: 0 0 12px;
+  font-size: 21px;
+  font-weight: 600;
+}
+
+.stream-body {
+  margin: 0 0 12px;
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+.stream-body--muted {
+  color: var(--text-2);
+}
+
+.stream-body--last {
+  margin-bottom: 16px;
+}
+
+.stream-links {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 16px;
+}
+
+/* ── Pipeline ────────────────────────────────────────────────────────── */
+
+.pipeline-intro {
+  margin-bottom: clamp(40px, 6vh, 68px);
+}
+
+.pipeline-rail {
+  position: relative;
+}
+
+.pipeline-rail-line {
+  position: absolute;
+  left: 10%;
+  right: 10%;
+  top: 21px;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.pipeline-rail-flow {
+  position: absolute;
+  left: 10%;
+  top: 20px;
+  width: 80%;
+  height: 3px;
+  overflow: visible;
+}
+
+.pipeline-steps {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(var(--step-count), minmax(0, 1fr));
+}
+
+.pipeline-step {
+  appearance: none;
+  background: none;
+  cursor: pointer;
+  font-family: inherit;
+  border: 0;
+  padding: 0 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  text-align: center;
+}
+
+.pipeline-step-dot {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  margin-top: 14px;
+  background: var(--blue-deep);
+  border: 2px solid rgba(255, 255, 255, 0.45);
+}
+
+.pipeline-step[aria-pressed='true'] .pipeline-step-dot {
+  background: var(--accent-light);
+  border-color: var(--accent-light);
+}
+
+.pipeline-step-num {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.pipeline-step-name {
+  font-size: 16px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.pipeline-step[aria-pressed='true'] .pipeline-step-name {
+  color: #ffffff;
+}
+
+.pipeline-detail {
+  margin-top: clamp(32px, 5vh, 52px);
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
+  padding-top: clamp(22px, 3vh, 32px);
+  gap: clamp(20px, 4vw, 64px);
+}
+
+.pipeline-detail-num {
+  font-size: clamp(30px, 4vw, 46px);
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.28);
+}
+
+.pipeline-detail-name {
+  margin-top: 10px;
+  font-size: 21px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.pipeline-detail-desc {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.75;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+/* ── Zelf uitproberen ────────────────────────────────────────────────── */
+
+.cta-lede {
+  margin: 0 0 clamp(32px, 5vh, 52px);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+/* De twee live stromen zijn de enige acties op de pagina en staan als
+   witte kaarten op het blauw. De dev-portal eronder is een naslagwerk,
+   geen stroom, en blijft daarom vlak op de achtergrond staan. */
+.tryout-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr));
+  gap: clamp(20px, 2.5vw, 32px);
+}
+
+.tryout {
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+  color: var(--text);
+  border-radius: 4px;
+  padding: clamp(24px, 3vw, 36px);
+}
+
+.tryout-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.tryout-num {
+  flex: none;
+  font-size: clamp(26px, 3vw, 34px);
+  line-height: 1;
+  font-weight: 600;
+  color: var(--line);
+}
+
+.tryout-title {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 600;
+}
+
+.tryout-meta {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: var(--text-2);
+}
+
+.tryout-desc {
+  margin: 0 0 18px;
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+.tryout-steps {
+  list-style: none;
+  margin: 0 0 24px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.tryout-steps li {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.tryout-step-num {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+  border-radius: 50%;
+  background: var(--blue);
+  color: #ffffff;
+  font-size: 13px;
+  display: grid;
+  place-items: center;
+}
+
+.btn-primary {
+  align-self: flex-start;
+  /* Houdt de knop onderaan de kaart, ook als de buurkaart langer is. */
+  margin-top: auto;
+  background: var(--blue);
+  color: #ffffff;
+  padding: 13px 22px;
+  border-radius: 4px;
+  text-decoration: none;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.btn-primary:hover {
+  background: var(--red);
+  color: #ffffff;
+}
+
+.tryout-qr {
+  margin: 4px 0 14px;
+  display: flex;
+  justify-content: center;
+}
+
+.tryout-qr--empty {
+  display: block;
+  border: 1px dashed var(--grey-border);
+  border-radius: 4px;
+  padding: 20px;
+}
+
+.tryout-qr--empty p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-2);
+}
+
+.tryout-qr--empty code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+}
+
+.tryout-note {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-2);
+  text-align: center;
+}
+
+/* Twee naslag-ingangen naast elkaar: de dev-portal (wat ging er langs) en
+   de playground van de bron (wat valt er te vragen). Geen kaarten — het
+   zijn geen stromen, dus ze blijven vlak op het blauw staan. */
+.tryout-asides {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr));
+  gap: clamp(20px, 2.5vw, 32px);
+}
+
+.tryout-aside {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  margin-top: clamp(36px, 5vh, 56px);
+  padding-top: clamp(24px, 3vh, 34px);
+  border-top: 1px solid rgba(255, 255, 255, 0.28);
+}
+
+/* De link zakt naar de onderkant zodat beide asides hem op dezelfde
+   hoogte tonen, ook als de ene tekst een regel langer is. */
+.tryout-aside .tryout-aside-link {
+  margin-top: auto;
+}
+
+.tryout-aside-title {
+  margin: 0 0 10px;
+  font-size: 17px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.tryout-aside-desc {
+  margin: 0 0 12px;
+  font-size: 15px;
+  line-height: 1.7;
+  color: rgba(255, 255, 255, 0.85);
+  max-width: 74ch;
+}
+
+.tryout-aside-link {
+  font-size: 16px;
+  color: #ffffff;
+}
+
+.tryout-aside-link:hover {
+  color: #ffffff;
+}
+
+/* ── Infrastructuur ──────────────────────────────────────────────────── */
+
+.infra-lead h2 {
+  margin: 0 0 14px;
+  font-size: clamp(24px, 2.6vw, 32px);
+}
+
+.infra-lead p {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.7;
+  color: var(--text-2);
+}
+
+.infra-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: clamp(24px, 3vw, 48px);
+}
+
+.infra-cols h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.infra-link {
+  display: block;
+  padding: 11px 0;
+  border-top: 1px solid var(--grey-border);
+  text-decoration: none;
+  font-size: 15px;
+}
+
+.infra-link:hover {
+  color: var(--red);
+}
+
+/* ── Footer ──────────────────────────────────────────────────────────── */
+
+.site-footer {
+  background: var(--blue-deep);
+  color: rgba(255, 255, 255, 0.7);
+  padding: 30px var(--gutter);
+}
+
+.site-footer-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 14px;
+}
+
+.site-footer-meta {
+  display: flex;
+  gap: 20px;
+}
+
+/* ── Animatie ────────────────────────────────────────────────────────── */
+
+@keyframes gbo-flow {
+  to {
+    stroke-dashoffset: -100;
+  }
+}
+
+[data-flow] {
+  animation: gbo-flow 5s linear infinite;
+}
+
+/* De reveal-klasse wordt door JS gezet, zodat de pagina zonder JS
+   gewoon zichtbaar blijft. */
+.reveal {
+  transition: opacity 300ms ease-out, transform 300ms ease-out;
+}
+
+.reveal.is-hidden {
+  opacity: 0;
+  transform: translateY(12px);
+}
+
+/* ── Breakpoints (aanvulling op het design) ──────────────────────────── */
+
+@media (max-width: 860px) {
+  .span-4,
+  .span-5,
+  .span-7,
+  .span-8 {
+    grid-column: span 12;
+  }
+
+  .hero-stack,
+  .hero-stack h1,
+  .hero-lede {
+    max-width: none;
+  }
+
+  /* De tekst pakt hier de volle breedte, dus elke plaatsing van de tekening
+     komt achter een tekstregel terecht — op 768px landde de kern precies
+     achter de titel. Weglaten dus, net als .flow-fan hieronder. */
+  .hero-art {
+    display: none;
+  }
+
+  /* Vijf kolommen met twee connector-kolommen vallen op smal scherm uit
+     elkaar; de verbindingslijnen dragen dan geen betekenis meer. */
+  .flowgrid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+
+  .flow-link,
+  .flow-fan {
+    display: none;
+  }
+
+  .flow-outputs {
+    height: auto;
+    gap: 12px;
+  }
+
+  .pipeline-rail-line,
+  .pipeline-rail-flow {
+    display: none;
+  }
+
+  .pipeline-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px 12px;
+  }
+
+  .pipeline-step {
+    align-items: flex-start;
+    text-align: left;
+    gap: 8px;
+  }
+
+  .pipeline-step-dot {
+    margin-top: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  [data-flow] {
+    animation: none !important;
+  }
+
+  .reveal {
+    transition: none;
+  }
+}

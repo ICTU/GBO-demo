@@ -1,0 +1,420 @@
+<!doctype html>
+<!--
+  Playground page for the demo-bron. Served by playground.go on GET /playground.
+
+  Two tools behind one tab bar, because neither covers both halves of what a
+  reader wants from a schema:
+
+    Query   GraphiQL 5 + the explorer plugin. The explorer's field checkboxes
+            are the "click a query together" half; the doc explorer and the
+            editor's schema-aware completion cover the reading half.
+    Schema  GraphQL Voyager. Renders the schema as a type graph, which is the
+            one view GraphiQL does not have.
+
+  Assets come from CDNs, pinned by exact version and guarded with SRI. The
+  GraphiQL half (stylesheet URLs, import map and its integrity map) is the
+  upstream `examples/graphiql-cdn/index.html` verbatim; keep it that way when
+  bumping, since the integrity map is generated per release. The Voyager
+  hashes are ours, computed over the jsdelivr files:
+
+    openssl dgst -sha384 -binary voyager.standalone.js | openssl base64 -A
+
+  Loading the page therefore needs internet access. That was already true of
+  the playground bundled with graphql-go/handler that this page replaces, but
+  that one pulled an unpinned `@latest` from a retired project.
+-->
+<html lang="nl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Demo-bron - GraphQL-playground</title>
+
+    <link
+      rel="stylesheet"
+      href="https://esm.sh/graphiql@5.2.4/dist/style.css"
+      integrity="sha384-TFpQQKp325U5sd3PddH4cS0KOB3Gz/aqdEe12Mqkkq3wm2MGcDhRX5WhWf+o8akh"
+      crossorigin="anonymous"
+    />
+    <link
+      rel="stylesheet"
+      href="https://esm.sh/@graphiql/plugin-explorer@5.1.3/dist/style.css"
+      integrity="sha384-vTFGj0krVqwFXLB7kq/VHR0/j2+cCT/B63rge2mULaqnib2OX7DVLUVksTlqvMab"
+      crossorigin="anonymous"
+    />
+
+    <script type="importmap">
+      {
+        "imports": {
+          "react": "https://esm.sh/react@19.2.7",
+          "react/": "https://esm.sh/react@19.2.7/",
+          "react-dom": "https://esm.sh/react-dom@19.2.7",
+          "react-dom/": "https://esm.sh/react-dom@19.2.7/",
+          "graphiql": "https://esm.sh/graphiql@5.2.4?standalone&external=react,react-dom,@graphiql/react,graphql",
+          "graphiql/": "https://esm.sh/graphiql@5.2.4/",
+          "@graphiql/plugin-explorer": "https://esm.sh/@graphiql/plugin-explorer@5.1.3?standalone&external=react,@graphiql/react,graphql",
+          "@graphiql/react": "https://esm.sh/@graphiql/react@0.37.7?standalone&external=react,react-dom,graphql,@graphiql/toolkit,@emotion/is-prop-valid",
+          "@graphiql/toolkit": "https://esm.sh/@graphiql/toolkit@0.12.1?standalone&external=graphql",
+          "graphql": "https://esm.sh/graphql@17.0.2",
+          "@emotion/is-prop-valid": "data:text/javascript,"
+        },
+        "integrity": {
+          "https://esm.sh/react@19.2.7": "sha384-LO2cBox9zBA6AOWqno07582eanOcJxJyu4hwf3rg5CrZQ/XoPtgSAFlL6ezpFK0O",
+          "https://esm.sh/react-dom@19.2.7": "sha384-upKKG1ShVOSXNAoNmdKSl8xWJl9L8fZ05Ki1rHXpPijT4hIS/FFh+88dxk72+jre",
+          "https://esm.sh/graphiql@5.2.4": "sha384-3feoWeu5QZYyfhHQyP8i+VBW+tYf58tTwgBb8Fsrw2QlP/YRBR2tscNGcYyRDtHC",
+          "https://esm.sh/graphiql@5.2.4?standalone&external=react,react-dom,@graphiql/react,graphql": "sha384-n1sWmquV8wXH/vbn5Q8BaQAw8iAFku5zAs2fPBrht0L/OP4/qgZWL/v/WhMLFPBH",
+          "https://esm.sh/@graphiql/plugin-explorer@5.1.3": "sha384-aDt72jaNBi2he5K4f47qh+xnS6Za54L6vuoNt6KtToLAJfebp23zCaAl3zXGl7dV",
+          "https://esm.sh/@graphiql/react@0.37.7?standalone&external=react,react-dom,graphql,@graphiql/toolkit,@emotion/is-prop-valid": "sha384-U8awo9eG6M8scx4fjis/pNfYja4d5EtxOFYcmvDGG8K4Rt/bGB6Km1hxbQXZr9qH",
+          "https://esm.sh/@graphiql/toolkit@0.12.1?standalone&external=graphql": "sha384-+cNTwZgIW33q7A4E+ZoCMqzcXdfVIc2VthQvJ0uDpRXERBWYuDKPVMzvdQU8x48o",
+          "https://esm.sh/graphql@17.0.2": "sha384-IPvlcmnvWT91sKqwbg9MxPXJUuPmSdwXCp22x6hcbBkAEhlfSKkMLR3v19K9iRUp"
+        }
+      }
+    </script>
+
+    <style>
+      /* Palette copied from the dev-portal's tokens.css so the page the BRON
+         block links to does not look like a different product. Copied rather
+         than imported: this file is baked into the Go binary and must render
+         without the portal being up. */
+      :root {
+        --bg: #0e1116;
+        --panel: #161a21;
+        --panel-2: #1b2027;
+        --border: #2a313c;
+        --text: #e6e9ee;
+        --mute: #8a93a1;
+        --accent: #4c8dff;
+        --warn-br: #f4c737;
+        --warn-bg: #2a2008;
+        --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        --sans: "Public Sans", system-ui, sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        height: 100dvh;
+        display: flex;
+        flex-direction: column;
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--sans);
+      }
+
+      .bar {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 0 14px;
+        height: 44px;
+        flex: none;
+        background: var(--panel);
+        border-bottom: 1px solid var(--border);
+      }
+
+      .brand {
+        font-size: 13px;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        white-space: nowrap;
+      }
+
+      .tabs {
+        display: flex;
+        gap: 4px;
+      }
+
+      .tab {
+        border: 1px solid transparent;
+        background: transparent;
+        color: var(--mute);
+        font: inherit;
+        font-size: 12.5px;
+        padding: 5px 12px;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+
+      .tab:hover {
+        color: var(--text);
+      }
+
+      .tab[aria-selected="true"] {
+        color: var(--text);
+        background: var(--panel-2);
+        border-color: var(--border);
+      }
+
+      /* The warning the old playground carried in a query comment. It belongs
+         in the chrome: it is true of every query run here, not only the one
+         the page happens to open with. */
+      .warn {
+        margin: 0 0 0 auto;
+        min-width: 0;
+        padding: 4px 10px;
+        font-size: 11.5px;
+        line-height: 1.35;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: var(--warn-br);
+        background: var(--warn-bg);
+        border: 1px solid var(--warn-br);
+        border-radius: 6px;
+      }
+
+      .warn b {
+        font-weight: 800;
+      }
+
+      /* Below this the detail no longer fits on one line, and wrapping it
+         would push the bar over the editors. The headline plus the tooltip
+         carry the warning from there on. */
+      @media (max-width: 1080px) {
+        .warn-detail {
+          display: none;
+        }
+      }
+
+      main {
+        flex: 1;
+        min-height: 0;
+        position: relative;
+      }
+
+      .pane {
+        position: absolute;
+        inset: 0;
+      }
+
+      .pane[hidden] {
+        display: none;
+      }
+
+      /* Voyager is a light-themed MUI app with no dark variant, so it keeps
+         its own background instead of inheriting the shell's. */
+      #voyager {
+        height: 100%;
+        background: #fff;
+      }
+
+      .loading {
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--mute);
+        font-size: 14px;
+      }
+
+      .failed {
+        padding: 24px;
+        font-family: var(--mono);
+        font-size: 12.5px;
+        color: var(--warn-br);
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+
+  <body>
+    <header class="bar">
+      <span class="brand">Demo-bron &middot; GraphQL</span>
+      <nav class="tabs" role="tablist">
+        <button
+          class="tab"
+          role="tab"
+          id="tab-query"
+          aria-controls="pane-query"
+          aria-selected="true"
+        >
+          Query
+        </button>
+        <button
+          class="tab"
+          role="tab"
+          id="tab-schema"
+          aria-controls="pane-schema"
+          aria-selected="false"
+        >
+          Schema
+        </button>
+      </nav>
+      <p
+        class="warn"
+        title="Deze pagina praat rechtstreeks met de bron: geen FSC-Inway, sidecar, PEP of PDP, dus geen toestemmingscheck en geen BSN-pseudonimisering. De data is mock-data."
+      >
+        <b>Directe toegang tot de bron.</b>
+        <span class="warn-detail"
+          >Geen FSC-Inway, sidecar, PEP of PDP: geen toestemmingscheck, geen
+          BSN-pseudonimisering. Mock-data.</span
+        >
+      </p>
+    </header>
+
+    <main>
+      <section class="pane" id="pane-query" role="tabpanel" aria-labelledby="tab-query">
+        <div id="graphiql" style="height: 100%">
+          <div class="loading">GraphiQL laden&hellip;</div>
+        </div>
+      </section>
+      <section class="pane" id="pane-schema" role="tabpanel" aria-labelledby="tab-schema" hidden>
+        <div id="voyager">
+          <div class="loading">Schema laden&hellip;</div>
+        </div>
+      </section>
+    </main>
+
+    <script type="module">
+      import React from 'react';
+      import ReactDOM from 'react-dom/client';
+      import { GraphiQL, HISTORY_PLUGIN } from 'graphiql';
+      import { createGraphiQLFetcher } from '@graphiql/toolkit';
+      import { explorerPlugin } from '@graphiql/plugin-explorer';
+      import 'graphiql/setup-workers/esm.sh';
+
+      // Query the editor opens with when storage is empty. Keep it ASCII-only:
+      // graphql-go's lexer (v0.8.1, and still on master) counts bytes and runes
+      // inconsistently while skipping a `#` comment, so one multi-byte character
+      // desynchronises every token after it -- mid-query it does not even fail,
+      // it silently changes the selection set. GraphiQL parses this fine; the
+      // bron is what chokes on it once you hit run.
+      const DEFAULT_QUERY = `# Klik links in de Explorer velden aan om deze query aan te passen,
+# of open het Schema-tabblad voor de typegraaf.
+{
+  ingeschrevenPersoon(bsn: "123456789") {
+    bsn
+    heeftBelastingjaarAangifte(belastingjaren: [2024]) {
+      aangifteIdentificatie
+      belastingjaar
+      belastingsoort
+      status
+      indieningsdatum
+      ... on AangifteIH {
+        verzamelinkomen { waarde valuta }
+        box1Inkomen { waarde valuta }
+      }
+    }
+  }
+}
+`;
+
+      const params = new URLSearchParams(location.search);
+
+      // `initialQuery` overrides whatever is in localStorage, `defaultQuery`
+      // only fills an empty editor. So a deep link with ?query= always wins,
+      // and a bare /playground leaves the reader's own last query alone.
+      const deepLinked = params.get('query');
+      const initial = deepLinked
+        ? { initialQuery: deepLinked, initialVariables: params.get('variables') ?? '' }
+        : { defaultQuery: DEFAULT_QUERY };
+
+      const fetcher = createGraphiQLFetcher({ url: new URL('/graphql', location.href).toString() });
+      const plugins = [HISTORY_PLUGIN, explorerPlugin()];
+
+      const root = ReactDOM.createRoot(document.getElementById('graphiql'));
+      root.render(
+        React.createElement(GraphiQL, {
+          fetcher,
+          plugins,
+          defaultTheme: 'dark',
+          defaultEditorToolsVisibility: true,
+          ...initial,
+        }),
+      );
+    </script>
+
+    <script>
+      // Tab switching. Voyager is 1.6 MB and is only fetched when the Schema
+      // tab is first opened; once rendered both panes stay mounted, so
+      // switching back does not re-run introspection or re-layout the graph.
+      (function () {
+        var VOYAGER_JS = 'https://cdn.jsdelivr.net/npm/graphql-voyager@2.1.0/dist/voyager.standalone.js';
+        var VOYAGER_JS_SRI = 'sha384-AFNPWJb6p/jNI0RfFJDZUs1McpGv9J81HF7A8fhwf1GuXhwYVXJlTq5RPBKgZBKG';
+        var VOYAGER_CSS = 'https://cdn.jsdelivr.net/npm/graphql-voyager@2.1.0/dist/voyager.css';
+        var VOYAGER_CSS_SRI = 'sha384-49jZSfLwb0TRp7FzQz1V36BlJ08B5dUugyxacqmaSGEFYN1TgGjaSdjkwds4fNNr';
+
+        var tabs = [document.getElementById('tab-query'), document.getElementById('tab-schema')];
+        var voyagerStarted = false;
+
+        function select(tab) {
+          tabs.forEach(function (t) {
+            var on = t === tab;
+            t.setAttribute('aria-selected', String(on));
+            document.getElementById(t.getAttribute('aria-controls')).hidden = !on;
+          });
+          if (tab.id === 'tab-schema') {
+            startVoyager();
+          }
+        }
+
+        tabs.forEach(function (t) {
+          t.addEventListener('click', function () {
+            select(t);
+          });
+        });
+
+        function fail(err) {
+          document.getElementById('voyager').innerHTML =
+            '<pre class="failed">Schema-visualisatie kon niet geladen worden:\n' +
+            String(err && err.message ? err.message : err) +
+            '\n\nDe assets komen van cdn.jsdelivr.net -- zonder internet blijft dit tabblad leeg.</pre>';
+        }
+
+        function load(el, attrs) {
+          return new Promise(function (resolve, reject) {
+            Object.keys(attrs).forEach(function (k) {
+              el.setAttribute(k, attrs[k]);
+            });
+            el.onload = resolve;
+            el.onerror = function () {
+              reject(new Error('kon ' + (attrs.src || attrs.href) + ' niet laden'));
+            };
+            document.head.appendChild(el);
+          });
+        }
+
+        function startVoyager() {
+          if (voyagerStarted) {
+            return;
+          }
+          voyagerStarted = true;
+
+          Promise.all([
+            load(document.createElement('link'), {
+              rel: 'stylesheet',
+              href: VOYAGER_CSS,
+              integrity: VOYAGER_CSS_SRI,
+              crossorigin: 'anonymous',
+            }),
+            load(document.createElement('script'), {
+              src: VOYAGER_JS,
+              integrity: VOYAGER_JS_SRI,
+              crossorigin: 'anonymous',
+            }),
+          ])
+            .then(function () {
+              // Voyager's own introspection query is the conservative one --
+              // no specifiedByURL, no isRepeatable, no inputValueDeprecation --
+              // which is exactly the subset graphql-go v0.8.1 answers.
+              return fetch(new URL('/graphql', location.href).toString(), {
+                method: 'POST',
+                headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query: GraphQLVoyager.voyagerIntrospectionQuery }),
+              });
+            })
+            .then(function (response) {
+              GraphQLVoyager.renderVoyager(document.getElementById('voyager'), {
+                introspection: response.json(),
+                displayOptions: { sortByAlphabet: true },
+              });
+            })
+            .catch(fail);
+        }
+      })();
+    </script>
+  </body>
+</html>
