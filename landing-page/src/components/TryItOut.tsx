@@ -109,11 +109,11 @@ export default function TryItOut() {
 
         <div className="tryout-asides">
           <aside className="tryout-aside">
-            <h3 className="tryout-aside-title">Daarna: terugkijken in de developer-portal</h3>
+            <h3 className="tryout-aside-title">Ook: meekijken in de developer-portal</h3>
             <p className="tryout-aside-desc">
               De developer-portal laat per hop zien wat er langskwam: het verzoek, welke
-              beleidsregel het toestond of tegenhield, het FSC-contract en de trace. Draai eerst een
-              van de twee stromen hierboven, anders blijven de tabbladen leeg.
+              beleidsregel het toestond of tegenhield, het FSC-contract en de trace. Je kunt er ook
+              zelf verzoeken afvuren, met een kant-en-klaar scenario of een eigen request.
             </p>
             <ExternalLink
               href={links.developerPortal}
