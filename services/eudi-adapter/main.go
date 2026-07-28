@@ -683,20 +683,41 @@ type brpPersoon struct {
 	HeeftHuwelijk []brpHuwelijk `json:"heeftHuwelijk"`
 }
 
-// selectOverledenPartner finds the marriage whose partner died, across all
-// of the requester's marriages.
+// datumVolledig reports whether a BRP DatumIncompleet carries a full calendar
+// date. The scalar also permits partials ("2026", "2026-02"), which cannot be
+// compared day-for-day.
+func datumVolledig(d string) bool {
+	_, err := time.Parse("2006-01-02", d)
+	return err == nil
+}
+
+// selectOverledenPartner finds the marriage that was ended by the death of the
+// requester's partner, across all of the requester's marriages.
 //
 // `partners` is symmetric per the BRP bronprofiel — both spouses are in the
 // list — so the requester herself is filtered out by id, and what remains is
-// a partner with a datumOverlijden. A person can be widowed more than once;
-// the most recent overlijden wins (ISO dates sort lexically, and a partial
-// DatumIncompleet like "2026" still sorts before "2026-02-14", which is the
-// conservative order here).
+// a partner with a datumOverlijden.
+//
+// A datumOverlijden alone is not enough to certify: an ex-partner from a
+// marriage dissolved by echtscheiding also dies eventually, and the BRP keeps
+// that marriage on the persoonslijst. The nabestaande of that death is whoever
+// the deceased was married to at the time, not the earlier ex-spouse. So the
+// verbintenis itself must say it ended in this death:
+//   - redenOntbinding is "Overlijden", and
+//   - where both DatumIncompleet values are full dates, the ontbinding falls
+//     on the day of the overlijden.
+//
+// A person can be widowed more than once; the most recent overlijden wins
+// (ISO dates sort lexically, and a partial DatumIncompleet like "2026" still
+// sorts before "2026-02-14", which is the conservative order here).
 func selectOverledenPartner(p brpPersoon) (brpHuwelijk, brpPartner, bool) {
 	var bestH brpHuwelijk
 	var bestP brpPartner
 	found := false
 	for _, h := range p.HeeftHuwelijk {
+		if h.RedenOntbinding != "Overlijden" {
+			continue
+		}
 		for _, partner := range h.Partners {
 			if partner.DatumOverlijden == "" {
 				continue
@@ -704,6 +725,13 @@ func selectOverledenPartner(p brpPersoon) (brpHuwelijk, brpPartner, bool) {
 			// Guard against a bron that lists the requester herself as
 			// overleden (she is disclosing a PID, so she is not).
 			if partner.ID != "" && partner.ID == p.ID {
+				continue
+			}
+			// Both dates complete → they must be the same day: the ontbinding
+			// IS this overlijden. Partials are let through; refusing them
+			// would deny an akte over a bron's date precision.
+			if datumVolledig(h.DatumOntbinding) && datumVolledig(partner.DatumOverlijden) &&
+				h.DatumOntbinding != partner.DatumOverlijden {
 				continue
 			}
 			if !found || partner.DatumOverlijden > bestP.DatumOverlijden {

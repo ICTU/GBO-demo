@@ -389,12 +389,14 @@ func TestSelectOverledenPartnerPicksMostRecent(t *testing.T) {
 	persoon := brpPersoon{
 		ID: "self",
 		HeeftHuwelijk: []brpHuwelijk{
-			{DatumVoltrekking: "1998-01-01", Partners: []brpPartner{
-				{ID: "self"}, {ID: "a", Geslachtsnaam: "Eerste", DatumOverlijden: "2005-03-02"},
-			}},
-			{DatumVoltrekking: "2010-01-01", Partners: []brpPartner{
-				{ID: "self"}, {ID: "b", Geslachtsnaam: "Tweede", DatumOverlijden: "2022-09-30"},
-			}},
+			{DatumVoltrekking: "1998-01-01", DatumOntbinding: "2005-03-02", RedenOntbinding: "Overlijden",
+				Partners: []brpPartner{
+					{ID: "self"}, {ID: "a", Geslachtsnaam: "Eerste", DatumOverlijden: "2005-03-02"},
+				}},
+			{DatumVoltrekking: "2010-01-01", DatumOntbinding: "2022-09-30", RedenOntbinding: "Overlijden",
+				Partners: []brpPartner{
+					{ID: "self"}, {ID: "b", Geslachtsnaam: "Tweede", DatumOverlijden: "2022-09-30"},
+				}},
 		},
 	}
 	huwelijk, overledene, ok := selectOverledenPartner(persoon)
@@ -406,6 +408,103 @@ func TestSelectOverledenPartnerPicksMostRecent(t *testing.T) {
 	}
 	if huwelijk.DatumVoltrekking != "2010-01-01" {
 		t.Errorf("huwelijk = %q, want the marriage of the most recent overledene", huwelijk.DatumVoltrekking)
+	}
+}
+
+// Divorced first, ex-partner died years later: the BRP still carries that
+// marriage and that datumOverlijden, but the echtscheiding — not this death —
+// ended the verbintenis, so there is no akte to hand the ex-spouse.
+func TestSelectOverledenPartnerIgnoresEchtscheiding(t *testing.T) {
+	persoon := brpPersoon{
+		ID: "self",
+		HeeftHuwelijk: []brpHuwelijk{
+			{DatumVoltrekking: "1998-01-01", DatumOntbinding: "2004-06-11", RedenOntbinding: "Echtscheiding",
+				Partners: []brpPartner{
+					{ID: "self"}, {ID: "a", Geslachtsnaam: "Ex", DatumOverlijden: "2021-07-19"},
+				}},
+		},
+	}
+	if _, overledene, ok := selectOverledenPartner(persoon); ok {
+		t.Errorf("selected %q from a marriage ended by echtscheiding, want no match", overledene.Geslachtsnaam)
+	}
+}
+
+// Ontbonden door overlijden, but on a different day than the partner died:
+// the two do not describe the same event, so the akte is not issued.
+func TestSelectOverledenPartnerRejectsMismatchedDates(t *testing.T) {
+	persoon := brpPersoon{
+		ID: "self",
+		HeeftHuwelijk: []brpHuwelijk{
+			{DatumVoltrekking: "1998-01-01", DatumOntbinding: "2005-03-02", RedenOntbinding: "Overlijden",
+				Partners: []brpPartner{
+					{ID: "self"}, {ID: "a", Geslachtsnaam: "Eerste", DatumOverlijden: "2011-08-23"},
+				}},
+		},
+	}
+	if _, overledene, ok := selectOverledenPartner(persoon); ok {
+		t.Errorf("selected %q on mismatched ontbinding/overlijden dates, want no match", overledene.Geslachtsnaam)
+	}
+}
+
+// A DatumIncompleet the bron only knows to the year cannot be compared
+// day-for-day. Refusing the akte over the bron's date precision would be
+// worse than accepting it, so the partial is let through.
+func TestSelectOverledenPartnerAcceptsPartialDates(t *testing.T) {
+	persoon := brpPersoon{
+		ID: "self",
+		HeeftHuwelijk: []brpHuwelijk{
+			{DatumVoltrekking: "1998-01-01", DatumOntbinding: "2005", RedenOntbinding: "Overlijden",
+				Partners: []brpPartner{
+					{ID: "self"}, {ID: "a", Geslachtsnaam: "Eerste", DatumOverlijden: "2005-03-02"},
+				}},
+		},
+	}
+	_, overledene, ok := selectOverledenPartner(persoon)
+	if !ok {
+		t.Fatal("expected an overleden partner on a partial datumOntbinding")
+	}
+	if overledene.Geslachtsnaam != "Eerste" {
+		t.Errorf("overledene = %q, want Eerste", overledene.Geslachtsnaam)
+	}
+}
+
+// Widowed once and divorced once, the ex dying later: the akte must be about
+// the partner whose death actually ended a marriage — end to end, through the
+// adapter, not just through the selection helper.
+func TestAdapterAkteVanOverlijdenSkipsLaterDeathOfExPartner(t *testing.T) {
+	response := `{"data":{"ingeschrevenPersoon":{
+		"id":"p-1","bsn":"999991772","geslachtsnaam":"Jansen","voornamen":"Frouke",
+		"heeftHuwelijk":[
+			{"soortVerbintenis":"Huwelijk","datumVoltrekking":"1998-01-01",
+			 "datumOntbinding":"2004-06-11","redenOntbinding":"Echtscheiding","partners":[
+				{"id":"p-1","geslachtsnaam":"Jansen","voornamen":"Frouke"},
+				{"id":"p-9","geslachtsnaam":"Ex","voornamen":"Oude","datumOverlijden":"2026-05-01"}
+			]},
+			{"soortVerbintenis":"Huwelijk","datumVoltrekking":"2010-01-01",
+			 "datumOntbinding":"2022-09-30","redenOntbinding":"Overlijden","partners":[
+				{"id":"p-1","geslachtsnaam":"Jansen","voornamen":"Frouke"},
+				{"id":"p-2","geslachtsnaam":"Vries","voorvoegsel":"de","voornamen":"Sander Willem","datumOverlijden":"2022-09-30"}
+			]}
+		]}}}`
+	outway, srv := brpAdapter(t, response)
+	defer outway.Close()
+	defer srv.Close()
+
+	resp := postDisclosure(t, srv, "/akte_van_overlijden/", "999991772")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200; body = %s", resp.StatusCode, string(raw))
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	body := string(raw)
+	// The ex-partner died most recently, so a naive "latest datumOverlijden"
+	// selection would certify him instead.
+	if strings.Contains(body, "2026-05-01") || strings.Contains(body, `"Oude"`) {
+		t.Errorf("akte certifies the ex-partner's later death; body = %s", body)
+	}
+	if !strings.Contains(body, "2022-09-30") {
+		t.Errorf("akte does not certify the death that ended the marriage; body = %s", body)
 	}
 }
 
