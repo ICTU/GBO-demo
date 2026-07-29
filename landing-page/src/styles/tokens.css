@@ -728,6 +728,55 @@ a:hover {
   color: var(--text-2);
 }
 
+/* Welke credential je ophaalt. Zelfde knop-idioom als de pipeline-haltes
+   (aria-pressed stuurt de opmaak), maar dan op een witte kaart. */
+.tryout-choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.tryout-choice button {
+  appearance: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 15px;
+  padding: 8px 16px;
+  border-radius: 4px;
+  border: 1px solid var(--grey-border);
+  background: #ffffff;
+  color: var(--text-2);
+}
+
+.tryout-choice button:hover {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+
+.tryout-choice button[aria-pressed='true'] {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: #ffffff;
+  font-weight: 500;
+}
+
+/* Alle varianten liggen op elkaar in één grid-cel. De cel houdt de hoogte
+   van de langste aan, dus wisselen verspringt niets — op elke
+   schermbreedte, zonder vaste hoogte. visibility houdt de inactieve
+   varianten in de layout maar uit de tab-volgorde en de a11y-boom. */
+.tryout-stack {
+  display: grid;
+}
+
+.tryout-stack > * {
+  grid-area: 1 / 1;
+}
+
+.tryout-stack > [aria-hidden='true'] {
+  visibility: hidden;
+}
+
 .tryout-desc {
   margin: 0 0 18px;
   font-size: 15px;
