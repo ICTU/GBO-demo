@@ -399,10 +399,6 @@ services:
       - VITE_EUDI_PUBLIC_URL=${EUDI_PUBLIC_URL:-}
       - VITE_EUDI_UL_BASE=${EUDI_UL_BASE:-https://app.preproductie.wallet.edi.bzk.nl/deeplink/disclosure_based_issuance}
       - VITE_EUDI_CLIENT_ID=${EUDI_CLIENT_ID:-reader.example.com}
-      # Link naar de GraphQL-playground van de bron op /playground. Zelfde
-      # var als de dev-portal; browser-side, dus hij moet de gepubliceerde
-      # GBO_PORT_GRAPHQL volgen.
-      - VITE_GRAPHQL_PUBLIC_URL=${GRAPHQL_PUBLIC_URL:-http://localhost:9400}
       - VITE_JAEGER_PUBLIC_URL=${JAEGER_PUBLIC_URL:-http://localhost:9686}
       - VITE_GRAFANA_PUBLIC_URL=${GRAFANA_PUBLIC_URL:-http://localhost:9300}
       # De FSC-controllers draaien in de fsc-infra-stack, met eigen
@@ -530,12 +526,14 @@ services:
       - PORTAL_API_TARGET=http://consent-portal-backend:4005
       - DVTP_API_TARGET=http://dienstverlener-backend:4006
       - JAEGER_API_TARGET=http://jaeger:16686
+      # Bron-GraphQL behind the portal's own origin: the playground on
+      # /playground queries /bron-api/<bron>/graphql, which the dev-server
+      # (and nginx in the image) proxies here. Server-side targets, so these
+      # are compose-internal names and ports, not published ones.
+      - BD_GRAPHQL_TARGET=http://graphql-server:4000
+      - BRP_GRAPHQL_TARGET=http://brp-graphql-server:4001
       - VITE_JAEGER_PUBLIC_URL=${JAEGER_PUBLIC_URL:-http://localhost:9686}
       - VITE_GRAFANA_PUBLIC_URL=${GRAFANA_PUBLIC_URL:-http://localhost:9300}
-      # Link from the BRON block to the bron's GraphQL playground on
-      # /playground. Browser-side URL, so it must match the published
-      # GBO_PORT_GRAPHQL.
-      - VITE_GRAPHQL_PUBLIC_URL=${GRAPHQL_PUBLIC_URL:-http://localhost:9400}
       - EUDI_API_TARGET=http://eudi-adapter:4009
       # The EUDI QR is built client-side; these env vars drive the universal-link.
       # VITE_* is public — ends up in the built bundle (no secrets here).

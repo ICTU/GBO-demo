@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -128,9 +127,7 @@ func TestGraphQLBelastingjarenFilter(t *testing.T) {
 	}
 }
 
-// testMux spins up the routing tree over the demo mock data. Extracted once
-// the playground tests pushed the number of copies of this preamble past
-// three.
+// testMux spins up the routing tree over the demo mock data.
 func testMux(t *testing.T) *http.ServeMux {
 	t.Helper()
 	if err := loadMockData("mockdata/citizens.json"); err != nil {
@@ -144,16 +141,19 @@ func testMux(t *testing.T) *http.ServeMux {
 	return newMux(&schema, tracer)
 }
 
-// A browser opening /graphql lands on the playground rather than on a
-// GraphQL error, and the ?query= deep link survives the hop.
-func TestPlaygroundRedirectFromGraphQL(t *testing.T) {
+// This server serves GraphQL and nothing else: the playground moved to the
+// developer-portal, which queries /graphql over its own proxy. A browser
+// opening /graphql therefore gets GraphQL, not a page and not a redirect to
+// one that no longer exists.
+func TestGraphQLServesNoUI(t *testing.T) {
 	srv := httptest.NewServer(testMux(t))
 	defer srv.Close()
 
 	client := &http.Client{
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
-	req, err := http.NewRequest(http.MethodGet, srv.URL+"/graphql?query=%7Bfoo%7D", nil)
+	query := `{ingeschrevenPersoon(bsn:"123456789"){bsn}}`
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/graphql?query="+url.QueryEscape(query), nil)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
@@ -164,17 +164,34 @@ func TestPlaygroundRedirectFromGraphQL(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusFound {
-		t.Fatalf("status = %d, want 302", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	if loc := resp.Header.Get("Location"); loc != "/playground?query=%7Bfoo%7D" {
-		t.Fatalf("Location = %q, want the query string carried to /playground", loc)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if strings.Contains(string(body), "<html") {
+		t.Fatalf("browser GET /graphql served HTML; this server has no UI:\n%s", string(body))
+	}
+	if !strings.Contains(string(body), `"123456789"`) {
+		t.Fatalf("expected GraphQL data, got %s", string(body))
+	}
+
+	// The page it used to redirect to is gone with it.
+	pg, err := http.Get(srv.URL + "/playground")
+	if err != nil {
+		t.Fatalf("get playground: %v", err)
+	}
+	defer pg.Body.Close()
+	if pg.StatusCode != http.StatusNotFound {
+		t.Fatalf("/playground status = %d, want 404", pg.StatusCode)
 	}
 }
 
-// The redirect must not swallow the machine paths: the FSC-Inway POSTs, and
+// The machine paths keep working exactly as before: the FSC-Inway POSTs, and
 // `GET ?raw` is the escape hatch for a browser that wants JSON.
-func TestGraphQLMachinePathsSkipPlayground(t *testing.T) {
+func TestGraphQLMachinePaths(t *testing.T) {
 	srv := httptest.NewServer(testMux(t))
 	defer srv.Close()
 
@@ -219,7 +236,7 @@ func TestGraphQLMachinePathsSkipPlayground(t *testing.T) {
 			}
 			defer resp.Body.Close()
 			if resp.StatusCode != http.StatusOK {
-				t.Fatalf("status = %d, want 200 (redirected to the playground?)", resp.StatusCode)
+				t.Fatalf("status = %d, want 200", resp.StatusCode)
 			}
 
 			var out struct {
@@ -236,65 +253,6 @@ func TestGraphQLMachinePathsSkipPlayground(t *testing.T) {
 				t.Fatalf("expected GraphQL data, got %+v", out)
 			}
 		})
-	}
-}
-
-func TestPlaygroundServesPage(t *testing.T) {
-	srv := httptest.NewServer(testMux(t))
-	defer srv.Close()
-
-	resp, err := http.Get(srv.URL + "/playground")
-	if err != nil {
-		t.Fatalf("get: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
-		t.Fatalf("Content-Type = %q, want text/html", ct)
-	}
-	page, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	// Both tools must be wired up — a page that renders only GraphiQL still
-	// returns 200 and would pass a status-only assertion.
-	for _, want := range []string{"@graphiql/plugin-explorer", "graphql-voyager"} {
-		if !strings.Contains(string(page), want) {
-			t.Fatalf("playground page does not reference %s", want)
-		}
-	}
-}
-
-// Every CDN asset must be pinned to an exact version and carry an SRI hash.
-// A bare @latest or a missing integrity attribute is how a third party gets
-// to change what runs against the bron.
-func TestPlaygroundAssetsArePinned(t *testing.T) {
-	page := string(playgroundHTML)
-
-	cdnRef := regexp.MustCompile(`https://(?:esm\.sh|cdn\.jsdelivr\.net)/[^"'\s]+`)
-	for _, ref := range cdnRef.FindAllString(page, -1) {
-		if !regexp.MustCompile(`@\d+\.\d+\.\d+`).MatchString(ref) {
-			t.Errorf("CDN reference is not pinned to an exact version: %s", ref)
-		}
-	}
-
-	// Every <link>/<script> pointing at a CDN needs an integrity attribute;
-	// import-map entries are covered by the map's own `integrity` block.
-	tag := regexp.MustCompile(`(?s)<(?:link|script)\b[^>]*https://(?:esm\.sh|cdn\.jsdelivr\.net)[^>]*>`)
-	for _, el := range tag.FindAllString(page, -1) {
-		if !strings.Contains(el, "integrity=") {
-			t.Errorf("CDN tag without SRI: %s", el)
-		}
-	}
-	for _, name := range []string{"VOYAGER_JS_SRI", "VOYAGER_CSS_SRI"} {
-		if !regexp.MustCompile(name + ` = 'sha384-`).MatchString(page) {
-			t.Errorf("%s is not an sha384 SRI hash", name)
-		}
-	}
-	if n := strings.Count(page, "sha384-"); n < 12 {
-		t.Errorf("only %d SRI hashes in the page; the import map's integrity block looks incomplete", n)
 	}
 }
 

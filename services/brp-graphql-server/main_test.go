@@ -238,6 +238,55 @@ func TestUnknownBSNResolvesToNull(t *testing.T) {
 	}
 }
 
+// This server serves GraphQL and nothing else: the playground lives in the
+// developer-portal and reaches this endpoint over its own proxy. What that
+// page does need is introspection, which graphql-go answers unconditionally
+// — the Schema tab is built from it.
+func TestGraphQLServesNoUIButIntrospects(t *testing.T) {
+	srv := newTestServer(t)
+	defer srv.Close()
+
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/graphql", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Accept", "text/html")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if strings.Contains(string(body), "<html") {
+		t.Fatalf("browser GET /graphql served HTML; this server has no UI:\n%s", string(body))
+	}
+
+	introspection := `{"query":"{ __schema { queryType { name } } }"}`
+	ir, err := http.Post(srv.URL+"/graphql", "application/json", strings.NewReader(introspection))
+	if err != nil {
+		t.Fatalf("introspect: %v", err)
+	}
+	defer ir.Body.Close()
+	var out struct {
+		Data struct {
+			Schema struct {
+				QueryType struct {
+					Name string `json:"name"`
+				} `json:"queryType"`
+			} `json:"__schema"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(ir.Body).Decode(&out); err != nil {
+		t.Fatalf("decode introspection: %v", err)
+	}
+	if out.Data.Schema.QueryType.Name == "" {
+		t.Fatal("introspection returned no queryType; the portal's Schema tab needs it")
+	}
+}
+
 func TestHealth(t *testing.T) {
 	srv := newTestServer(t)
 	defer srv.Close()

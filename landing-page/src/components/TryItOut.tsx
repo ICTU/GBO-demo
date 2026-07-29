@@ -158,13 +158,14 @@ export default function TryItOut() {
           <aside className="tryout-aside">
             <h3 className="tryout-aside-title">Of: zelf de bron bevragen</h3>
             <p className="tryout-aside-desc">
-              De demo-bron serveert een eigen GraphQL-playground. Klik in GraphiQL een query bij
-              elkaar, of bekijk in Voyager hoe het schema van de bron eruitziet. Deze ingang gaat
-              rechtstreeks naar de bron, dus zonder toestemming, FSC-contract en beleidstoetsing.
+              De developer-portal serveert een GraphQL-playground voor elke bron: kies de
+              Belastingdienst- of de BRP-bron, klik in GraphiQL een query bij elkaar, of bekijk in
+              Voyager hoe dat bronschema eruitziet. Deze ingang gaat rechtstreeks naar de bron, dus
+              zonder toestemming, FSC-contract en beleidstoetsing.
             </p>
             <ExternalLink
               href={links.bronPlayground}
-              describes="de GraphQL-playground van de demo-bron"
+              describes="de GraphQL-playground van de bronnen"
               className="link-underline tryout-aside-link"
             >
               Open de GraphQL-playground ↗

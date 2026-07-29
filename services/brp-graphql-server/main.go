@@ -666,10 +666,15 @@ func initTracer(ctx context.Context) (func(context.Context) error, error) {
 func newMux(schema *graphql.Schema, tracer trace.Tracer) *http.ServeMux {
 	mux := http.NewServeMux()
 
+	// UI off. The one graphql-go/handler bundles is GraphiQL 0.11 from an
+	// unpinned CDN; the playground lives in the developer-portal (/playground
+	// there, one page for every bron) and queries this endpoint over its own
+	// proxy. Introspection needs no flag — graphql-go answers __schema/__type
+	// unconditionally, which is what the portal's Schema tab reads.
 	gqlHandler := handler.New(&handler.Config{
 		Schema:   schema,
 		Pretty:   true,
-		GraphiQL: true,
+		GraphiQL: false,
 	})
 
 	mux.HandleFunc("/graphql", func(w http.ResponseWriter, r *http.Request) {

@@ -66,19 +66,23 @@ The developer portal also runs in `demo-minimal` and `demo-eudi` — flow tabs s
 
 ### Bron schema exploration
 
-The source exposes GraphQL introspection and serves a playground on
-`http://localhost:9400/playground`, with two tabs:
+The developer portal serves a playground for every source on
+`http://localhost:9003/playground`, with a source picker (`?bron=bd`,
+`?bron=brp`) and two tabs:
 
 - **Query** — GraphiQL 5 with the explorer plugin: tick fields in the left-hand
   pane to assemble a query, run it against the baked mock data, browse the
-  types in Docs. Opens on a runnable demo query; `?query=<urlencoded>` prefills
-  a different one.
+  types in Docs. Opens on a runnable demo query for the selected source.
 - **Schema** — [GraphQL Voyager](https://github.com/graphql-kit/graphql-voyager),
-  which draws the schema as a type graph (`Query` → `IngeschrevenPersoon` →
-  `BelastingjaarAangifte` → `AangifteIH` → `Bedrag`).
+  which draws the schema as a type graph (BD: `Query` → `IngeschrevenPersoon` →
+  `BelastingjaarAangifte` → `AangifteIH` → `Bedrag`; BRP: `Query` →
+  `IngeschrevenPersoon` → `Huwelijk` → partners).
 
-The **BRON** block in the developer portal links to the Query tab. Opening
-`/graphql` in a browser redirects to `/playground`.
+Both tabs read the source over the portal's own origin
+(`/bron-api/<bron>/graphql`, proxied by nginx and by the dev-server), so no
+source port has to be published and the source servers need no CORS. The
+**BRON** block in the developer portal links to the playground for whichever
+source that run used. The source servers themselves serve GraphQL only — no UI.
 
 The playground talks straight to the source, so the request bypasses FSC-Inway,
 the source sidecar, the PEP and the PDP: no consent is checked and no BSN is
@@ -86,11 +90,9 @@ pseudonymised. It explores the source profile schema; it does not demonstrate
 the authorization chain — use the flow tabs for that. The page says so in its
 header bar.
 
-Machine paths are unaffected: `POST /graphql` and `GET /graphql?raw` keep
-returning GraphQL results rather than being redirected. Loading the playground
-needs internet access — its assets come from esm.sh and jsdelivr, pinned by
-exact version and checked with SRI hashes (see the comment at the top of
-`services/graphql-server/playground.html` before bumping them).
+A second source profile needs its service names in
+`developer-portal/src/data/bronnen.ts` plus one proxy route — not a second
+playground.
 
 ## Demo Walkthrough (Consent Flow)
 
@@ -138,7 +140,7 @@ docker compose logs -f opa
 | Consent portal | 9002 | Citizen UI (React/Vite) | Demo frontend |
 | Developer portal | 9003 | Architect inspection (React/Vite) | Demo frontend |
 | dev-portal-backend | 9407 | Trace hub + explain endpoint | Real (Go) |
-| GraphQL Server | 9400 | BD source (bronprofiel `bd`) with income data; playground on `/playground` | Real (Go) |
+| GraphQL Server | 9400 | BD source (bronprofiel `bd`) with income data | Real (Go) |
 | BRP GraphQL Server | 9401 | BRP source (bronprofiel `brp`) with persoonsgegevens | Real (Go) |
 | pdp-service | 9408 | AuthZen endpoint behind FSC-Inway (P3 context handler) | Real (Go) |
 | bron-sidecar | 9411 | Source-side gateway for the BD source; PI→BSN via BSNk (subject_id_type-driven) | Real (Go) |
