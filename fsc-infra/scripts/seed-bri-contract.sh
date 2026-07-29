@@ -255,8 +255,12 @@ fi
 # table is read frequently by edi-outway.
 
 echo "[4/4] Upsert grant-link '$GRANT_LINK_PATH' → connection grant-hash..."
+# No limit= here. As noted at step 2 the Manager ignores ?service_name=,
+# so the service has to be matched client-side — and limit=1 truncates
+# the response to whichever contract happens to come first, which is
+# another service's as soon as the provider offers more than one.
 new_hash=$(mtls_curl "$EDI_CERT" "$EDI_KEY" "$EDI_CA" \
-  "${EDI_MANAGER_URL}/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=${SERVICE_NAME}&limit=1" \
+  "${EDI_MANAGER_URL}/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=${SERVICE_NAME}" \
   | jq -r --arg svc "$SERVICE_NAME" \
     'first(.contracts[]? | select(.content.grants[0].service.name == $svc) | .content.grants[0].hash) // empty')
 if [ -z "$new_hash" ]; then
