@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import NodeIO from './NodeIO'
 import OpaDecisionContext from './OpaDecisionContext'
-import { BD_BRON } from '../data/bronnen'
+import { BRON_PROFILES, playgroundUrlFor } from '../data/bronnen'
 import type { NodeDef } from '../data/chains'
 import type { NodeState } from '../hooks/useArchState'
 import type { ApiCall } from '../types'
@@ -11,22 +11,6 @@ import { useSpanInspect, type SpanInspect } from '../hooks/useSpanInspect'
 
 const JAEGER_DEFAULT = 'http://localhost:9686'
 const GRAFANA_DEFAULT = 'http://localhost:9300'
-
-// The bron's GraphQL playground. Not threaded through ArchStrip as a prop
-// like the Jaeger/Grafana URLs: it is trace-independent and only this popover
-// uses it, so it resolves from the runtime config here (same pattern as
-// EudiForm).
-const GRAPHQL_PUBLIC_URL =
-  window.__GBO_RUNTIME_CONFIG__?.graphqlPublicUrl ||
-  import.meta.env.VITE_GRAPHQL_PUBLIC_URL ||
-  'http://localhost:9400'
-
-// graphql-server serves the playground page itself (GraphiQL 5 + explorer +
-// Voyager), including the demo query its editor opens with and the warning
-// that this route reaches the bron directly — so the link carries no `query`
-// param of its own. `/graphql` in a browser redirects here, so older links
-// keep working.
-const BRON_PLAYGROUND_URL = `${GRAPHQL_PUBLIC_URL}/playground`
 
 type Props = {
   node: NodeDef
@@ -64,9 +48,10 @@ export default function NodePopover({
   const stateColor = STATE_COLOR[state]
   const hasIO = !!apiCall
   const isOpaNode = node.id === 'opa'
-  // Only the BD bron serves a playground; brp-graphql-server exposes /graphql
-  // alone, so a BRP-run's bron-node gets no playground-link.
-  const isGraphqlBron = node.svc === BD_BRON.bronSvc
+  // The bron-node of whichever bronprofiel this run used. The playground is
+  // portal-side and covers every bron, so the link is per-profile rather than
+  // one fixed URL.
+  const bronProfile = BRON_PROFILES.find((b) => b.bronSvc === node.svc)
   const spanInspect = useSpanInspect(traceId, node.id)
   const hasSpanInspect = spanInspect.inspects.length > 0
   const wide = isOpaNode || hasSpanInspect
@@ -89,8 +74,8 @@ export default function NodePopover({
 
       {/* Schema exploration on the bron itself. Independent of the trace
           links: always available, also without a request having run. */}
-      {isGraphqlBron && (
-        <a className="linkbtn" href={BRON_PLAYGROUND_URL} target="_blank" rel="noreferrer">
+      {bronProfile && (
+        <a className="linkbtn" href={playgroundUrlFor(bronProfile)} target="_blank" rel="noreferrer">
           GraphQL-playground <span className="ext">↗</span>
         </a>
       )}

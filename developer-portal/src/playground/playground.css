@@ -1,0 +1,125 @@
+/* Chrome around GraphiQL + Voyager. The tools bring their own styling; this
+   is only the bar, the tabs and the panes, on the portal's own tokens. */
+
+.pg {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.pg-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+
+.pg-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  color: var(--text);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.pg-logo {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.pg-pick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--mute);
+}
+
+.pg-pick select {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border-2);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.pg-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.pg-tab {
+  background: transparent;
+  color: var(--text-2);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.pg-tab:hover { color: var(--text); }
+
+.pg-tab.on {
+  background: var(--panel-2);
+  border-color: var(--border-2);
+  color: var(--text);
+}
+
+.pg-warn {
+  margin: 0 0 0 auto;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--warn-br);
+  max-width: 46ch;
+}
+
+.pg-warn-detail { color: var(--mute); }
+
+.pg-panes {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.pg-pane {
+  position: absolute;
+  inset: 0;
+}
+
+.pg-pane[hidden] { display: none; }
+
+/* Both tools expect to fill their container rather than size themselves. */
+.pg-pane .graphiql-container,
+.pg-pane > div {
+  height: 100%;
+}
+
+.pg-failed {
+  margin: 0;
+  padding: 16px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--deny-br);
+  white-space: pre-wrap;
+}
+
+@media (max-width: 900px) {
+  .pg-warn-detail { display: none; }
+}

@@ -8,7 +8,6 @@ interface Window {
     eudiPublicUrl?: string
     eudiClientId?: string
     eudiUlBase?: string
-    graphqlPublicUrl?: string
     jaegerUrl?: string
     grafanaUrl?: string
     fscControllerBronUrl?: string

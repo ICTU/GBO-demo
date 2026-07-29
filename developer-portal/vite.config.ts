@@ -44,6 +44,19 @@ export default defineConfig({
         rewrite: (p) => p.replace(/^\/jaeger-api/, ''),
         changeOrigin: true,
       },
+      // The bron-playground queries these same-origin, so the browser needs
+      // no published bron-port and the servers need no CORS. One route per
+      // bronprofiel — the paths match `graphqlPath` in src/data/bronnen.ts.
+      '/bron-api/bd': {
+        target: process.env.BD_GRAPHQL_TARGET ?? 'http://localhost:9400',
+        rewrite: (p) => p.replace(/^\/bron-api\/bd/, ''),
+        changeOrigin: true,
+      },
+      '/bron-api/brp': {
+        target: process.env.BRP_GRAPHQL_TARGET ?? 'http://localhost:9401',
+        rewrite: (p) => p.replace(/^\/bron-api\/brp/, ''),
+        changeOrigin: true,
+      },
     },
   },
 })

@@ -35,14 +35,13 @@ export const links = {
     import.meta.env.VITE_DIENSTVERLENER_URL,
     'http://localhost:9001',
   ),
-  /* De GraphQL-playground van de demo-bron: graphql-server serveert de
-     pagina zelf op /playground (GraphiQL 5 + explorer + Voyager). Zelfde
-     env-var als de dev-portal gebruikt, die het pad er ook zelf achter
-     plakt — vandaar de basis-URL hier. */
+  /* De GraphQL-playground (GraphiQL 5 + explorer + Voyager) hangt onder de
+     developer-portal en bedient elke bron via een bron-keuze — vandaar geen
+     eigen env-var meer, maar het pad achter de portal-URL. */
   bronPlayground: `${resolve(
-    rc?.graphqlPublicUrl,
-    import.meta.env.VITE_GRAPHQL_PUBLIC_URL,
-    'http://localhost:9400',
+    rc?.developerPortalUrl,
+    import.meta.env.VITE_DEVELOPER_PORTAL_URL,
+    'http://localhost:9003',
   ).replace(/\/+$/, '')}/playground`,
   jaeger: resolve(rc?.jaegerUrl, import.meta.env.VITE_JAEGER_PUBLIC_URL, 'http://localhost:9686'),
   grafana: resolve(rc?.grafanaUrl, import.meta.env.VITE_GRAFANA_PUBLIC_URL, 'http://localhost:9300'),
