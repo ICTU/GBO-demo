@@ -61,7 +61,11 @@ export const USE_BRANCHES: NodeDef[] = [
 export function eudiIssuanceChain(bron: BronProfile = BD_BRON): NodeDef[] {
   return [
     { id: 'wallet', role: 'Actor', name: 'NL-Wallet', svc: 'wallet (TestFlight)' },
-    { id: 'demo-issuer', role: 'QR', name: 'Demo-issuer', svc: 'eudi-demo-issuer' },
+    // De QR-stap zit architectuurgewijs bij de issuer, maar wordt in deze
+    // demo door het portal zelf gerenderd (EudiQrPanel bouwt de
+    // universal-link client-side). De nl-wallet demo_issuer draaide hier
+    // ooit voor; die is verwijderd omdat hij niet in compose stond.
+    { id: 'demo-issuer', role: 'QR', name: 'QR / universal-link', svc: 'developer-portal' },
     { id: 'issuance-server', role: 'IS', name: 'Issuance-server', svc: 'eudi-issuance-server' },
     { id: 'eudi-adapter', role: 'Adapter', name: 'EUDI-adapter', svc: 'eudi-adapter' },
     { id: 'edi-outway', role: 'FSC', name: 'EDI-Outway', svc: 'edi-outway' },
@@ -80,8 +84,8 @@ export const EUDI_ISSUANCE_BRANCHES: NodeDef[] = [
   { id: 'opa', role: 'PDP · engine', name: 'OPA', svc: 'opa', branchOf: 'pdp' },
 ]
 
-// Nodes for which we structurally get no OTel spans: Rust services
-// without OTel instrumentation and OpenFSC containers (bd-inway/
+// Nodes for which we structurally get no OTel spans: browser-/Rust-side
+// steps without OTel instrumentation and OpenFSC containers (bd-inway/
 // edi-outway/edi-manager/hv-outway/hv-manager don't export traces without
 // specific OTel-config). The UI shows these as 'no-otel' instead of
 // 'grey' — absence of data means "not measurable" here, not "not yet".

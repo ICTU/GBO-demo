@@ -104,11 +104,11 @@ IMAGES
 
 # Every image the tree can build is either published above or listed here
 # as deliberately unpublished. Without this a new service would be left
-# out of every release, silently and permanently.
+# out of every release, silently and permanently. The list is empty: every
+# Dockerfile in the tree is currently published.
 while read -r unpublished; do
   covered_paths+=("${unpublished}")
 done <<'UNPUBLISHED'
-services/eudi-demo-issuer
 UNPUBLISHED
 
 for dockerfile in */Dockerfile services/*/Dockerfile; do
