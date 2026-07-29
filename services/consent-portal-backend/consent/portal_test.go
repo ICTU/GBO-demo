@@ -1,8 +1,11 @@
-package main
+package consent
 
 // Core tests. These drive Portal directly against in-memory ports, so they
 // need no httptest.Server and no network. main_test.go still exercises the
 // real HTTP adapters end-to-end; the two are complementary.
+//
+// The fakes live here rather than in a mock package: they are ten lines each
+// and only this package needs them.
 
 import (
 	"context"
@@ -22,6 +25,10 @@ func fakePI(bsn BSN) PI {
 	sum := sha256.Sum256([]byte("test-salt|" + string(bsn)))
 	return PI("PI-" + hex.EncodeToString(sum[:8]))
 }
+
+// testPortalOIN stands in for the portal's own OIN, which main supplies in
+// production.
+const testPortalOIN = "00000000000000000002"
 
 // ── Fakes ─────────────────────────────────────────────────────────────────
 
@@ -51,39 +58,39 @@ func (f *fakePseudo) Pseudonymize(_ context.Context, bsn BSN, recipientOIN strin
 
 type memStore struct {
 	mu      sync.Mutex
-	recs    map[string]ConsentRecord
-	created []NewConsent
+	recs    map[string]Record
+	created []Draft
 	seq     int
 	revoked []string
 }
 
 func newMemStore() *memStore {
-	return &memStore{recs: make(map[string]ConsentRecord)}
+	return &memStore{recs: make(map[string]Record)}
 }
 
-func (m *memStore) Create(_ context.Context, c NewConsent) (ConsentRecord, error) {
+func (m *memStore) Create(_ context.Context, d Draft) (Record, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.seq++
 	id := "c-" + string(rune('0'+m.seq))
-	m.created = append(m.created, c)
-	rec := ConsentRecord{
+	m.created = append(m.created, d)
+	rec := Record{
 		ID:      id,
-		Subject: c.Subject,
+		Subject: d.Subject,
 		Status:  "ACTIVE",
-		Raw:     map[string]any{"consent_id": id, "pi": string(c.Subject), "status": "ACTIVE"},
+		Raw:     map[string]any{"consent_id": id, "pi": string(d.Subject), "status": "ACTIVE"},
 	}
-	if c.ValiditySeconds > 0 {
-		rec.ValidUntil = time.Now().Add(time.Duration(c.ValiditySeconds) * time.Second)
+	if d.ValiditySeconds > 0 {
+		rec.ValidUntil = time.Now().Add(time.Duration(d.ValiditySeconds) * time.Second)
 	}
 	m.recs[id] = rec
 	return rec, nil
 }
 
-func (m *memStore) ListBySubject(_ context.Context, subject PI) ([]ConsentRecord, error) {
+func (m *memStore) ListBySubject(_ context.Context, subject PI) ([]Record, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	var out []ConsentRecord
+	var out []Record
 	for _, r := range m.recs {
 		if r.Subject == subject {
 			out = append(out, r)
@@ -92,12 +99,12 @@ func (m *memStore) ListBySubject(_ context.Context, subject PI) ([]ConsentRecord
 	return out, nil
 }
 
-func (m *memStore) Get(_ context.Context, consentID string) (ConsentRecord, error) {
+func (m *memStore) Get(_ context.Context, consentID string) (Record, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r, ok := m.recs[consentID]
 	if !ok {
-		return ConsentRecord{}, ErrConsentNotFound
+		return Record{}, ErrNotFound
 	}
 	return r, nil
 }
@@ -107,7 +114,7 @@ func (m *memStore) Revoke(_ context.Context, consentID string) error {
 	defer m.mu.Unlock()
 	r, ok := m.recs[consentID]
 	if !ok {
-		return ErrConsentNotFound
+		return ErrNotFound
 	}
 	r.Status = "REVOKED"
 	m.recs[consentID] = r
@@ -138,7 +145,7 @@ func testPortal(t *testing.T, watch Observer) (*Portal, *fakePseudo, *memStore) 
 		Pseudonyms: bsnk,
 		Consents:   store,
 		Watch:      watch,
-		OwnOIN:     portalOIN,
+		OwnOIN:     testPortalOIN,
 	}, bsnk, store
 }
 
@@ -150,7 +157,7 @@ func TestRevokeDeniedForOtherCitizen(t *testing.T) {
 	p, _, store := testPortal(t, nil)
 	ctx := context.Background()
 
-	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveConsentInput{DienstverlenerOIN: "DV"})
+	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"})
 	if err != nil {
 		t.Fatalf("give consent: %v", err)
 	}
@@ -168,7 +175,7 @@ func TestRevokeSucceedsForOwner(t *testing.T) {
 	p, _, store := testPortal(t, nil)
 	ctx := context.Background()
 
-	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveConsentInput{DienstverlenerOIN: "DV"})
+	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"})
 	if err != nil {
 		t.Fatalf("give consent: %v", err)
 	}
@@ -183,8 +190,8 @@ func TestRevokeSucceedsForOwner(t *testing.T) {
 func TestRevokeUnknownConsentIsNotFound(t *testing.T) {
 	p, _, _ := testPortal(t, nil)
 	err := p.RevokeConsent(context.Background(), BSN("111111111"), "c-nope")
-	if !errors.Is(err, ErrConsentNotFound) {
-		t.Fatalf("revoke unknown = %v, want ErrConsentNotFound", err)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("revoke unknown = %v, want ErrNotFound", err)
 	}
 }
 
@@ -194,14 +201,14 @@ func TestEffectiveStatus(t *testing.T) {
 	now := time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)
 	tests := []struct {
 		name string
-		rec  ConsentRecord
+		rec  Record
 		want Status
 	}{
-		{"active without expiry", ConsentRecord{Status: "ACTIVE"}, StatusActive},
-		{"active before expiry", ConsentRecord{Status: "ACTIVE", ValidUntil: now.Add(time.Hour)}, StatusActive},
-		{"expired", ConsentRecord{Status: "ACTIVE", ValidUntil: now.Add(-time.Hour)}, StatusExpired},
-		{"revoked wins over expiry", ConsentRecord{Status: "REVOKED", ValidUntil: now.Add(time.Hour)}, StatusRevoked},
-		{"revoked lowercase", ConsentRecord{Status: "revoked"}, StatusRevoked},
+		{"active without expiry", Record{Status: "ACTIVE"}, StatusActive},
+		{"active before expiry", Record{Status: "ACTIVE", ValidUntil: now.Add(time.Hour)}, StatusActive},
+		{"expired", Record{Status: "ACTIVE", ValidUntil: now.Add(-time.Hour)}, StatusExpired},
+		{"revoked wins over expiry", Record{Status: "REVOKED", ValidUntil: now.Add(time.Hour)}, StatusRevoked},
+		{"revoked lowercase", Record{Status: "revoked"}, StatusRevoked},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -217,7 +224,7 @@ func TestListAnnotatesExpiredAgainstInjectedClock(t *testing.T) {
 	p, _, _ := testPortal(t, nil)
 	ctx := context.Background()
 
-	if _, err := p.GiveConsent(ctx, BSN("111111111"), GiveConsentInput{
+	if _, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{
 		DienstverlenerOIN: "DV",
 		ValiditySeconds:   60,
 	}); err != nil {
@@ -244,7 +251,7 @@ func TestListIsolatesByCitizen(t *testing.T) {
 	p, _, _ := testPortal(t, nil)
 	ctx := context.Background()
 
-	if _, err := p.GiveConsent(ctx, BSN("111111111"), GiveConsentInput{DienstverlenerOIN: "DV"}); err != nil {
+	if _, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"}); err != nil {
 		t.Fatalf("give consent: %v", err)
 	}
 	recs, err := p.ListConsents(ctx, BSN("222222222"))
@@ -264,7 +271,7 @@ func TestBSNNeverReachesTheRegister(t *testing.T) {
 	p, bsnk, store := testPortal(t, nil)
 	const bsn = "987654321"
 
-	if _, err := p.GiveConsent(context.Background(), BSN(bsn), GiveConsentInput{
+	if _, err := p.GiveConsent(context.Background(), BSN(bsn), GiveInput{
 		DienstverlenerOIN: "DV",
 		Scopes:            []string{"bd:ib:2025"},
 	}); err != nil {
@@ -297,14 +304,14 @@ func TestRecipientOINPerFlow(t *testing.T) {
 	p, bsnk, _ := testPortal(t, nil)
 	ctx := context.Background()
 
-	if _, err := p.GiveConsent(ctx, BSN("111111111"), GiveConsentInput{DienstverlenerOIN: "DV-OIN"}); err != nil {
+	if _, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV-OIN"}); err != nil {
 		t.Fatalf("give consent: %v", err)
 	}
 	if _, err := p.ListConsents(ctx, BSN("111111111")); err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if got := bsnk.gotOIN; len(got) != 2 || got[0] != "DV-OIN" || got[1] != portalOIN {
-		t.Errorf("recipient OINs = %v, want [DV-OIN %s]", got, portalOIN)
+	if got := bsnk.gotOIN; len(got) != 2 || got[0] != "DV-OIN" || got[1] != testPortalOIN {
+		t.Errorf("recipient OINs = %v, want [DV-OIN %s]", got, testPortalOIN)
 	}
 }
 
@@ -316,7 +323,7 @@ func TestPanickingObserverDoesNotFailGiveConsent(t *testing.T) {
 	boom := ObserverFunc(func(context.Context, Event) { panic("observer exploded") })
 	p, _, _ := testPortal(t, FanOut{boom})
 
-	granted, err := p.GiveConsent(context.Background(), BSN("111111111"), GiveConsentInput{DienstverlenerOIN: "DV"})
+	granted, err := p.GiveConsent(context.Background(), BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"})
 	if err != nil {
 		t.Fatalf("give consent failed because of an observer: %v", err)
 	}
@@ -330,7 +337,7 @@ func TestGiveConsentEmitsPanelSteps(t *testing.T) {
 	rec := &recorder{}
 	p, _, _ := testPortal(t, rec)
 
-	if _, err := p.GiveConsent(context.Background(), BSN("111111111"), GiveConsentInput{DienstverlenerOIN: "DV"}); err != nil {
+	if _, err := p.GiveConsent(context.Background(), BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"}); err != nil {
 		t.Fatalf("give consent: %v", err)
 	}
 	want := []string{"portal_received", "pseudonymizing", "pseudonym_generated", "consent_granting", "consent_granted"}
@@ -344,7 +351,7 @@ func TestRevokeEmitsPanelSteps(t *testing.T) {
 	p, _, _ := testPortal(t, rec)
 	ctx := context.Background()
 
-	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveConsentInput{DienstverlenerOIN: "DV"})
+	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"})
 	if err != nil {
 		t.Fatalf("give consent: %v", err)
 	}
@@ -365,7 +372,7 @@ func TestDeniedRevokeDoesNotEmitRevoked(t *testing.T) {
 	p, _, _ := testPortal(t, rec)
 	ctx := context.Background()
 
-	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveConsentInput{DienstverlenerOIN: "DV"})
+	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"})
 	if err != nil {
 		t.Fatalf("give consent: %v", err)
 	}
@@ -387,7 +394,7 @@ func TestGiveConsentFailsWhenPseudonymizerFails(t *testing.T) {
 	p, bsnk, store := testPortal(t, nil)
 	bsnk.err = errors.New("bsnk down")
 
-	if _, err := p.GiveConsent(context.Background(), BSN("111111111"), GiveConsentInput{DienstverlenerOIN: "DV"}); err == nil {
+	if _, err := p.GiveConsent(context.Background(), BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"}); err == nil {
 		t.Fatal("want an error when BSNk fails")
 	}
 	// Nothing may be registered when we could not derive a PI.

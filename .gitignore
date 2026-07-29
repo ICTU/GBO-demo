@@ -1,4 +1,5 @@
-# Go binaries
+# Go binaries. `go build` in a service directory drops an extension-less
+# binary there; the pattern below ignores those.
 services/*/server
 services/*/*[!.go]
 !services/*/go.*
@@ -7,12 +8,13 @@ services/*/*[!.go]
 # Web assets baked into a binary with go:embed — the binary-catching pattern
 # above matches any filename not ending in `.go`, including these.
 !services/*/*.html
-!services/*/mockdata/
-!services/*/scenarios/
 !services/dev-portal-backend/rules.json
-!services/openftv-pdp/mapper/
 !services/openftv-pdp/field-map.json
-!services/*/config/
+# It matches directory names too, which silently swallowed the Go sub-packages
+# under services/consent-portal-backend/. Keeping every service subdirectory
+# covers that, and supersedes the per-directory exceptions this list used to
+# need for mockdata/, scenarios/, config/ and openftv-pdp/mapper/.
+!services/*/*/
 
 # Local compose overrides + secrets
 .env

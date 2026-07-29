@@ -1,8 +1,8 @@
-package main
-
-// Driving (inbound) adapters: everything that is true about HTTP and nothing
-// that is true about consent. Handlers translate a request into a core call
-// and a core result into a response; the domain rules live in portal.go.
+// Package portalhttp is the driving side of the portal: everything that is
+// true about HTTP and nothing that is true about consent. Handlers translate
+// a request into a core call and a core result into a response; the domain
+// rules live in the consent package.
+package portalhttp
 
 import (
 	"context"
@@ -12,77 +12,13 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
+
+	"gbo-demo/consent-portal-backend/consent"
+	"gbo-demo/consent-portal-backend/logctx"
 )
-
-// jwtSecret signs mock-DigiD tokens. In this demo the portal is both the
-// issuer and the verifier (inline JWT); a future slice can split that out
-// into a dedicated mock-DigiD service with a JWKS endpoint.
-const jwtSecret = "gbo-demo-portal-secret-do-not-use-in-production"
-
-// portalOIN is the portal's OIN, used as recipient_oin when it needs the
-// caller's PI for its own sake (listing, ownership checks).
-const portalOIN = "00000000000000000002" // mock-portal OIN
-
-// ── DigiD token ───────────────────────────────────────────────────────────
-
-// PortalClaims is the mock-DigiD JWT payload. sub carries the BSN; in a real
-// system the BSN would never appear in a bearer claim - DigiD returns an
-// identifier from which BSN is later resolved at the service. For the demo
-// the simplification is acceptable because the portal IS the resolver.
-type PortalClaims struct {
-	BSN string `json:"sub"`
-	jwt.RegisteredClaims
-}
-
-func signPortalToken(bsn string) (string, error) {
-	now := time.Now()
-	claims := PortalClaims{
-		BSN: bsn,
-		RegisteredClaims: jwt.RegisteredClaims{
-			Issuer:    "mock-digid",
-			IssuedAt:  jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(now.Add(time.Hour)),
-		},
-	}
-	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(jwtSecret))
-}
-
-func parseBearerToken(r *http.Request) (string, error) {
-	auth := r.Header.Get("Authorization")
-	if auth == "" {
-		return "", fmt.Errorf("missing Authorization header")
-	}
-	parts := strings.SplitN(auth, " ", 2)
-	if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
-		return "", fmt.Errorf("invalid Authorization header")
-	}
-	return parts[1], nil
-}
-
-func validatePortalToken(tokenStr string) (string, error) {
-	token, err := jwt.ParseWithClaims(tokenStr, &PortalClaims{}, func(t *jwt.Token) (any, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method")
-		}
-		return []byte(jwtSecret), nil
-	})
-	if err != nil {
-		return "", err
-	}
-	claims, ok := token.Claims.(*PortalClaims)
-	if !ok || !token.Valid {
-		return "", fmt.Errorf("invalid token")
-	}
-	if claims.BSN == "" {
-		return "", fmt.Errorf("token missing sub")
-	}
-	return claims.BSN, nil
-}
 
 // ── HTTP helpers ──────────────────────────────────────────────────────────
 
@@ -111,25 +47,25 @@ type LoginResponse struct {
 }
 
 type GiveConsentRequest struct {
-	DienstverlenrOIN string       `json:"dienstverlener_oin"`
-	Scopes           []string     `json:"scopes"`
-	ScopeEntries     []ScopeEntry `json:"scope_entries"`
-	ValiditySeconds  int          `json:"validity_seconds,omitempty"`
+	DienstverlenrOIN string               `json:"dienstverlener_oin"`
+	Scopes           []string             `json:"scopes"`
+	ScopeEntries     []consent.ScopeEntry `json:"scope_entries"`
+	ValiditySeconds  int                  `json:"validity_seconds,omitempty"`
 }
 
 type GiveConsentResponse struct {
-	ConsentID string    `json:"consent_id"`
-	Pseudonym string    `json:"pseudonym"`
-	PI        string    `json:"pi"`
-	TraceID   string    `json:"trace_id"`
-	APICalls  []APICall `json:"api_calls"`
+	ConsentID string            `json:"consent_id"`
+	Pseudonym string            `json:"pseudonym"`
+	PI        string            `json:"pi"`
+	TraceID   string            `json:"trace_id"`
+	APICalls  []consent.APICall `json:"api_calls"`
 }
 
 // ── The citizen handler seam ──────────────────────────────────────────────
 
 // citizenFunc is what a portal endpoint actually is: an authenticated citizen
 // plus the request in, a JSON body out.
-type citizenFunc func(ctx context.Context, citizen BSN, r *http.Request) (any, error)
+type citizenFunc func(ctx context.Context, citizen consent.BSN, r *http.Request) (any, error)
 
 // httpError lets a handler override the status and body when the default
 // mapping is not enough (give-consent attaches api_calls to its errors).
@@ -144,13 +80,27 @@ func (e *httpError) Error() string { return fmt.Sprint(e.Body["error"]) }
 // translation between a domain outcome and a transport concern.
 func statusFor(err error) int {
 	switch {
-	case errors.Is(err, ErrConsentNotFound):
+	case errors.Is(err, consent.ErrNotFound):
 		return http.StatusNotFound
-	case errors.Is(err, ErrNotOwned):
+	case errors.Is(err, consent.ErrNotOwned):
 		return http.StatusForbidden
 	default:
 		return http.StatusBadGateway
 	}
+}
+
+type callLogKey struct{}
+
+// callsFrom returns the upstream calls recorded so far in this request.
+func callsFrom(ctx context.Context) []consent.APICall {
+	if l, ok := ctx.Value(callLogKey{}).(*consent.CallLog); ok {
+		return l.Snapshot()
+	}
+	return nil
+}
+
+func traceIDFrom(ctx context.Context) string {
+	return trace.SpanContextFromContext(ctx).TraceID().String()
 }
 
 // citizen wraps one endpoint, adding — for every endpoint, automatically —
@@ -158,7 +108,7 @@ func statusFor(err error) int {
 // OTel span, the request-scoped observer, and error-to-status mapping.
 //
 // Adding a fourth portal endpoint costs a core method plus three lines here.
-func (p *Portal) citizen(method, op string, fn citizenFunc) http.HandlerFunc {
+func citizen(method, op string, fn citizenFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		corsHeaders(w)
 		if r.Method == http.MethodOptions {
@@ -187,11 +137,11 @@ func (p *Portal) citizen(method, op string, fn citizenFunc) http.HandlerFunc {
 		// The request-scoped observer is just the call log: the portal's own
 		// watchers are fanned out by the core, so adding them here too would
 		// deliver every event twice.
-		log := &callLog{}
-		ctx = withObserver(ctx, log)
+		log := &consent.CallLog{}
+		ctx = consent.WithObserver(ctx, log)
 		ctx = context.WithValue(ctx, callLogKey{}, log)
 
-		res, err := fn(ctx, BSN(bsn), r)
+		res, err := fn(ctx, consent.BSN(bsn), r)
 		if err != nil {
 			var he *httpError
 			if errors.As(err, &he) {
@@ -199,29 +149,15 @@ func (p *Portal) citizen(method, op string, fn citizenFunc) http.HandlerFunc {
 				return
 			}
 			body := map[string]any{"error": err.Error()}
-			if errors.Is(err, ErrNotOwned) {
+			if errors.Is(err, consent.ErrNotOwned) {
 				body["reason"] = "consent_not_owned_by_caller"
 			}
-			loggerFromCtx(ctx).Error("portal."+op+" failed", "err", err.Error())
+			logctx.From(ctx).Error("portal."+op+" failed", "err", err.Error())
 			writeJSON(w, statusFor(err), body)
 			return
 		}
 		writeJSON(w, http.StatusOK, res)
 	}
-}
-
-type callLogKey struct{}
-
-// callsFrom returns the upstream calls recorded so far in this request.
-func callsFrom(ctx context.Context) []APICall {
-	if l, ok := ctx.Value(callLogKey{}).(*callLog); ok {
-		return l.snapshot()
-	}
-	return nil
-}
-
-func traceIDFrom(ctx context.Context) string {
-	return trace.SpanContextFromContext(ctx).TraceID().String()
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────
@@ -234,7 +170,7 @@ func traceIDFrom(ctx context.Context) string {
 // is what crosses the frontend <-> portal interface afterwards.
 //
 // It does not touch the core: signing a token from a posted BSN involves no
-// domain rule, so routing it through Portal would be a pure proxy.
+// domain rule, so routing it through consent.Portal would be a pure proxy.
 func handleLogin() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		corsHeaders(w)
@@ -260,9 +196,9 @@ func handleLogin() http.HandlerFunc {
 	}
 }
 
-func (p *Portal) handleGiveConsent() http.HandlerFunc {
-	return p.citizen(http.MethodPost, "give_consent",
-		func(ctx context.Context, citizen BSN, r *http.Request) (any, error) {
+func handleGiveConsent(p *consent.Portal) http.HandlerFunc {
+	return citizen(http.MethodPost, "give_consent",
+		func(ctx context.Context, citizen consent.BSN, r *http.Request) (any, error) {
 			var req GiveConsentRequest
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				return nil, &httpError{
@@ -270,7 +206,7 @@ func (p *Portal) handleGiveConsent() http.HandlerFunc {
 					Body:   map[string]any{"error": "invalid request body"},
 				}
 			}
-			in := GiveConsentInput{
+			in := consent.GiveInput{
 				DienstverlenerOIN: req.DienstverlenrOIN,
 				Scopes:            req.Scopes,
 				ScopeEntries:      req.ScopeEntries,
@@ -280,7 +216,7 @@ func (p *Portal) handleGiveConsent() http.HandlerFunc {
 
 			granted, err := p.GiveConsent(ctx, citizen, in)
 			if err != nil {
-				loggerFromCtx(ctx).Error("give consent failed", "err", err.Error())
+				logctx.From(ctx).Error("give consent failed", "err", err.Error())
 				return nil, &httpError{
 					Status: statusFor(err),
 					Body:   map[string]any{"error": err.Error(), "api_calls": callsFrom(ctx)},
@@ -298,11 +234,11 @@ func (p *Portal) handleGiveConsent() http.HandlerFunc {
 
 			// Terminal event: closes the panel narrative and hands the
 			// dev-portal timeline everything it needs in one payload.
-			p.observe(ctx, Event{
+			p.Emit(ctx, consent.Event{
 				Flow: "give_consent",
 				Step: "flow_complete",
 				Data: map[string]any{"trace_id": traceID},
-				Summary: &FlowSummary{
+				Summary: &consent.FlowSummary{
 					Citizen:           citizen,
 					DienstverlenerOIN: in.DienstverlenerOIN,
 					Scopes:            in.Scopes,
@@ -318,9 +254,9 @@ func (p *Portal) handleGiveConsent() http.HandlerFunc {
 		})
 }
 
-func (p *Portal) handleListConsents() http.HandlerFunc {
-	return p.citizen(http.MethodGet, "list_consents",
-		func(ctx context.Context, citizen BSN, _ *http.Request) (any, error) {
+func handleListConsents(p *consent.Portal) http.HandlerFunc {
+	return citizen(http.MethodGet, "list_consents",
+		func(ctx context.Context, citizen consent.BSN, _ *http.Request) (any, error) {
 			recs, err := p.ListConsents(ctx, citizen)
 			if err != nil {
 				return nil, err
@@ -340,9 +276,9 @@ func (p *Portal) handleListConsents() http.HandlerFunc {
 		})
 }
 
-func (p *Portal) handleRevoke() http.HandlerFunc {
-	return p.citizen(http.MethodDelete, "revoke_consent",
-		func(ctx context.Context, citizen BSN, r *http.Request) (any, error) {
+func handleRevoke(p *consent.Portal) http.HandlerFunc {
+	return citizen(http.MethodDelete, "revoke_consent",
+		func(ctx context.Context, citizen consent.BSN, r *http.Request) (any, error) {
 			consentID := strings.TrimPrefix(r.URL.Path, "/portal/consents/")
 			if consentID == "" || strings.Contains(consentID, "/") {
 				return nil, &httpError{
@@ -353,7 +289,7 @@ func (p *Portal) handleRevoke() http.HandlerFunc {
 			if err := p.RevokeConsent(ctx, citizen, consentID); err != nil {
 				return nil, err
 			}
-			p.observe(ctx, Event{
+			p.Emit(ctx, consent.Event{
 				Flow: "revoke_consent",
 				Step: "flow_complete",
 				Data: map[string]any{"trace_id": traceIDFrom(ctx)},
@@ -362,61 +298,12 @@ func (p *Portal) handleRevoke() http.HandlerFunc {
 		})
 }
 
-func handleSSE(hub *SSEHub) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		corsHeaders(w)
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("X-Accel-Buffering", "no")
-
-		flusher, ok := w.(http.Flusher)
-		if !ok {
-			http.Error(w, "streaming not supported", http.StatusInternalServerError)
-			return
-		}
-
-		id, ch := hub.Subscribe()
-		defer hub.Unsubscribe(id)
-
-		fmt.Fprintf(w, "data: %s\n\n", `{"step":"connected"}`)
-		flusher.Flush()
-
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case evt, open := <-ch:
-				if !open {
-					return
-				}
-				b, _ := json.Marshal(evt)
-				fmt.Fprintf(w, "data: %s\n\n", string(b))
-				flusher.Flush()
-			case <-ticker.C:
-				fmt.Fprintf(w, ": ping\n\n")
-				flusher.Flush()
-			case <-r.Context().Done():
-				return
-			}
-		}
-	}
-}
-
 // ── Routing ───────────────────────────────────────────────────────────────
 
-// newMux builds the routing tree with the given config and SSE hub, wiring
-// the core to its production adapters. Extracted from main so integration
-// tests can wire the handlers to an httptest.Server without starting the
-// real listener.
-func newMux(cfg config, hub *SSEHub) *http.ServeMux {
-	return newMuxWithPortal(newPortal(cfg, hub), hub)
-}
-
-// newMuxWithPortal is the seam for tests that want to drive the HTTP surface
-// with in-memory ports instead of real upstreams.
-func newMuxWithPortal(p *Portal, hub *SSEHub) *http.ServeMux {
+// NewMux builds the routing tree over an already-wired core. Keeping this
+// separate from main's wiring lets tests drive the HTTP surface with
+// in-memory ports and no listener.
+func NewMux(p *consent.Portal, hub *Hub) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -431,8 +318,8 @@ func newMuxWithPortal(p *Portal, hub *SSEHub) *http.ServeMux {
 
 	// /portal/consents dispatches on method: POST = new consent,
 	// GET = list of the caller's own consents. DELETE /portal/consents/{id} below.
-	giveH := p.handleGiveConsent()
-	listH := p.handleListConsents()
+	giveH := handleGiveConsent(p)
+	listH := handleListConsents(p)
 	mux.HandleFunc("/portal/consents", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPost:
@@ -447,7 +334,7 @@ func newMuxWithPortal(p *Portal, hub *SSEHub) *http.ServeMux {
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		}
 	})
-	mux.HandleFunc("/portal/consents/", p.handleRevoke())
+	mux.HandleFunc("/portal/consents/", handleRevoke(p))
 	mux.HandleFunc("/portal/events", handleSSE(hub))
 
 	return mux
