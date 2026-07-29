@@ -1,0 +1,273 @@
+[
+  {
+    "_comment": "Frouke Jansen — de enige persoon in de mock die voldoet aan de akte-van-overlijden-vraag: een huwelijk dat is ontbonden door het overlijden van haar partner. BSN + naam + geboortedatum + nationaliteiten komen 1:1 uit de PID-preprod-persoon die de wallet-demo discloset (999991772).",
+    "soort": "Ingezetene",
+    "id": "018f2c4a-0001-7000-8000-000000000001",
+    "bsn": "999991772",
+    "geslachtsnaam": "Jansen",
+    "voornamen": "Frouke",
+    "geboortedatum": "2000-03-24",
+    "geboorteplaats": "Leeuwarden",
+    "geboorteland": "NL",
+    "geslacht": "Vrouw",
+    "datumEersteInschrijving": "2000-03-27",
+    "gemeenteVanInschrijving": "0599",
+    "verificatie": "Geverifieerd",
+    "inOnderzoek": "Nee",
+    "uitsluitingKiesrecht": "Nee",
+    "europeesKiesrecht": "Ja",
+    "indicatieGeheim": "Nee",
+    "datumInschrijvingGemeente": "2023-08-01",
+    "heeftNationaliteit": [
+      {
+        "nationaliteit": "NL",
+        "redenVerkrijging": "Nederlanderschap van rechtswege",
+        "datumVerkrijging": "2000-03-24"
+      },
+      {
+        "nationaliteit": "BE",
+        "redenVerkrijging": "Afstamming",
+        "datumVerkrijging": "2000-03-24"
+      }
+    ],
+    "heeftOuder": [
+      {
+        "id": "018f2c4a-0001-7000-8000-00000000000a",
+        "geslachtsnaam": "Jansen",
+        "voornamen": "Wietse",
+        "geslacht": "Man"
+      },
+      {
+        "id": "018f2c4a-0001-7000-8000-00000000000b",
+        "geslachtsnaam": "Hoekstra",
+        "voornamen": "Baukje Trijntje",
+        "geslacht": "Vrouw"
+      }
+    ],
+    "woontOpBinnenland": {
+      "volledigAdres": "Coolsingel 12 B, 3011 AD Rotterdam",
+      "adresId": "0599200000012345",
+      "straatnaam": "Coolsingel",
+      "huisnummer": 12,
+      "huisletter": "B",
+      "postcode": "3011 AD",
+      "woonplaatsnaam": "Rotterdam"
+    },
+    "heeftHuwelijk": [
+      {
+        "soortVerbintenis": "Huwelijk",
+        "datumVoltrekking": "2023-06-16",
+        "plaatsVoltrekking": "Rotterdam",
+        "landVoltrekking": "NL",
+        "datumOntbinding": "2026-02-14",
+        "redenOntbinding": "Overlijden",
+        "partners": [
+          {
+            "id": "018f2c4a-0001-7000-8000-000000000001",
+            "geslachtsnaam": "Jansen",
+            "voornamen": "Frouke",
+            "geboortedatum": "2000-03-24",
+            "geboorteplaats": "Leeuwarden",
+            "geboorteland": "NL",
+            "geslacht": "Vrouw"
+          },
+          {
+            "id": "018f2c4a-0002-7000-8000-000000000002",
+            "geslachtsnaam": "Vries",
+            "voorvoegsel": "de",
+            "voornamen": "Sander Willem",
+            "geboortedatum": "1997-11-12",
+            "geboorteplaats": "Rotterdam",
+            "geboorteland": "NL",
+            "geslacht": "Man",
+            "datumOverlijden": "2026-02-14",
+            "plaatsOverlijden": "Rotterdam",
+            "landOverlijden": "NL",
+            "heeftOuder": [
+              {
+                "id": "018f2c4a-0002-7000-8000-00000000000a",
+                "geslachtsnaam": "Vries",
+                "voorvoegsel": "de",
+                "voornamen": "Hendrik Jan",
+                "geslacht": "Man"
+              },
+              {
+                "id": "018f2c4a-0002-7000-8000-00000000000b",
+                "geslachtsnaam": "Bakker",
+                "voornamen": "Annelies Maria",
+                "geslacht": "Vrouw"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "_comment": "Getrouwd, partner leeft — de akte-van-overlijden-vraag levert voor deze persoon niets op (adapter: 404 no deceased partner).",
+    "soort": "Ingezetene",
+    "id": "018f2c4a-0003-7000-8000-000000000003",
+    "bsn": "123456789",
+    "geslachtsnaam": "Bakker",
+    "voornamen": "Joost Pieter",
+    "geboortedatum": "1989-02-11",
+    "geboorteplaats": "Utrecht",
+    "geboorteland": "NL",
+    "geslacht": "Man",
+    "datumEersteInschrijving": "1989-02-14",
+    "gemeenteVanInschrijving": "0344",
+    "verificatie": "Geverifieerd",
+    "inOnderzoek": "Nee",
+    "uitsluitingKiesrecht": "Nee",
+    "europeesKiesrecht": "Ja",
+    "indicatieGeheim": "Nee",
+    "datumInschrijvingGemeente": "2016-09-01",
+    "heeftNationaliteit": [
+      {
+        "nationaliteit": "NL",
+        "redenVerkrijging": "Nederlanderschap van rechtswege",
+        "datumVerkrijging": "1989-02-11"
+      }
+    ],
+    "woontOpBinnenland": {
+      "volledigAdres": "Oudegracht 233, 3511 NK Utrecht",
+      "adresId": "0344200000098765",
+      "straatnaam": "Oudegracht",
+      "huisnummer": 233,
+      "postcode": "3511 NK",
+      "woonplaatsnaam": "Utrecht"
+    },
+    "heeftHuwelijk": [
+      {
+        "soortVerbintenis": "Huwelijk",
+        "datumVoltrekking": "2016-08-20",
+        "plaatsVoltrekking": "Utrecht",
+        "landVoltrekking": "NL",
+        "partners": [
+          {
+            "id": "018f2c4a-0003-7000-8000-000000000003",
+            "geslachtsnaam": "Bakker",
+            "voornamen": "Joost Pieter",
+            "geboortedatum": "1989-02-11",
+            "geslacht": "Man"
+          },
+          {
+            "id": "018f2c4a-0004-7000-8000-000000000004",
+            "geslachtsnaam": "Smit",
+            "voornamen": "Lisa",
+            "geboortedatum": "1990-07-03",
+            "geboorteplaats": "Utrecht",
+            "geboorteland": "NL",
+            "geslacht": "Vrouw"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "_comment": "Ongehuwd — geen heeftHuwelijk, dus geen akte.",
+    "soort": "Ingezetene",
+    "id": "018f2c4a-0005-7000-8000-000000000005",
+    "bsn": "987654321",
+    "geslachtsnaam": "Meijer",
+    "voornamen": "Sanne",
+    "geboortedatum": "1994-12-30",
+    "geboorteplaats": "Groningen",
+    "geboorteland": "NL",
+    "geslacht": "Vrouw",
+    "datumEersteInschrijving": "1995-01-04",
+    "gemeenteVanInschrijving": "0014",
+    "verificatie": "Geverifieerd",
+    "inOnderzoek": "Nee",
+    "uitsluitingKiesrecht": "Nee",
+    "europeesKiesrecht": "Ja",
+    "indicatieGeheim": "Nee",
+    "datumInschrijvingGemeente": "2019-03-15",
+    "heeftNationaliteit": [
+      {
+        "nationaliteit": "NL",
+        "redenVerkrijging": "Nederlanderschap van rechtswege",
+        "datumVerkrijging": "1994-12-30"
+      }
+    ],
+    "woontOpBinnenland": {
+      "volledigAdres": "Vismarkt 5, 9711 KS Groningen",
+      "adresId": "0014200000054321",
+      "straatnaam": "Vismarkt",
+      "huisnummer": 5,
+      "postcode": "9711 KS",
+      "woonplaatsnaam": "Groningen"
+    }
+  },
+  {
+    "_comment": "NietIngezetene (RNI) met een door echtscheiding ontbonden partnerschap — verbintenis wel ontbonden, maar niet door overlijden, dus geen akte.",
+    "soort": "NietIngezetene",
+    "id": "018f2c4a-0006-7000-8000-000000000006",
+    "bsn": "555555555",
+    "geslachtsnaam": "Willems",
+    "voornamen": "Tom",
+    "geboortedatum": "1982-05-08",
+    "geboorteplaats": "Antwerpen",
+    "geboorteland": "BE",
+    "geslacht": "Man",
+    "datumEersteInschrijving": "2014-01-20",
+    "datumInschrijvingRNI": "2014-01-20",
+    "landVanVerblijf": "BE",
+    "deelnemerCodeRNI": "Belastingdienst",
+    "verificatie": "NietGeverifieerd",
+    "inOnderzoek": "Nee",
+    "uitsluitingKiesrecht": "Nee",
+    "europeesKiesrecht": "Nee",
+    "tin": "82050812345",
+    "heeftNationaliteit": [
+      {
+        "nationaliteit": "BE",
+        "datumVerkrijging": "1982-05-08"
+      }
+    ],
+    "heeftVerblijfstitel": {
+      "aanduiding": "EU/EER-onderdaan",
+      "datumIngang": "2014-01-20"
+    },
+    "heeftImmigratie": {
+      "datumVestigingInNederland": "2014-01-20",
+      "landVanwaar": "BE",
+      "landBinnenkomst": "BE"
+    },
+    "woontOpBuitenland": {
+      "volledigAdres": "Meir 44, 2000 Antwerpen, België",
+      "adresId": "018f2c4a-0006-7000-8000-0000000000ad",
+      "adresregel1": "Meir 44",
+      "adresregel2": "2000 Antwerpen",
+      "land": "BE"
+    },
+    "heeftHuwelijk": [
+      {
+        "soortVerbintenis": "GeregistreerdPartnerschap",
+        "datumVoltrekking": "2010-04-17",
+        "plaatsVoltrekking": "Antwerpen",
+        "landVoltrekking": "BE",
+        "datumOntbinding": "2019-11-05",
+        "redenOntbinding": "Echtscheiding",
+        "partners": [
+          {
+            "id": "018f2c4a-0006-7000-8000-000000000006",
+            "geslachtsnaam": "Willems",
+            "voornamen": "Tom",
+            "geboortedatum": "1982-05-08",
+            "geslacht": "Man"
+          },
+          {
+            "id": "018f2c4a-0007-7000-8000-000000000007",
+            "geslachtsnaam": "Peeters",
+            "voornamen": "Elke",
+            "geboortedatum": "1984-09-22",
+            "geboorteplaats": "Gent",
+            "geboorteland": "BE",
+            "geslacht": "Vrouw"
+          }
+        ]
+      }
+    ]
+  }
+]

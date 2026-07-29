@@ -1,0 +1,268 @@
+# Clean (directive-free) SDL for the BRP-bron (bronprofiel Basisregistratie
+# Personen). The PDP uses this as a structural reference to bind queried
+# fields to rules; it is NOT policy — the binding lives in the rules
+# themselves (covers_types / covers_fields).
+#
+# Mirror of the upstream schema:
+#   https://github.com/ICTU/gbo-semantiek/blob/main/v0.3/graphql/brp.graphql
+# The upstream file is not mirrored verbatim: the @restrictie directive and
+# its per-scalar annotations are dropped (the mock bron does not enforce the
+# formaat-restricties, and the PDP only needs the type graph).
+#
+# Mirrored from brp-graphql-server/main.go buildSchema() — keep in sync when
+# the bron-schema changes. One deliberate divergence: graphql-go cannot
+# express interface-implements-interface, so the mock declares Partij and
+# IngeschrevenPersoon side by side; gqlparser does support it, so the
+# relationship is preserved here.
+#
+# Selected for the flow key `eudi:attestation:brp` (see pdp-service
+# loadSchemas). The BD bron keeps its own mirror in eudi/bd.graphql — both
+# bronprofielen expose Query.ingeschrevenPersoon(bsn), which is why they
+# cannot live in one schema document.
+
+scalar BAGID
+scalar BSN
+scalar CodelijstBRP
+scalar CodelijstIND
+scalar CodelijstISO3166
+scalar CodelijstLT33
+scalar CodelijstLT37
+scalar CodelijstLT38
+scalar CodelijstLT88
+scalar Datum
+scalar DatumIncompleet
+scalar KVKnummer
+scalar Postcode
+scalar UUID
+
+enum Geslacht {
+  Man
+  Vrouw
+  VastgesteldOnbekend
+}
+
+enum OpschortingBijhouding {
+  Overlijden
+  Emigratie
+  Vermissing
+  FoutAangelegdOfFraude
+}
+
+enum IndicatieJaNee {
+  Ja
+  Nee
+}
+
+enum Verificatie {
+  Geverifieerd
+  NietGeverifieerd
+  InOnderzoek
+}
+
+enum Indicatie {
+  Ja
+  Nee
+  Onbekend
+}
+
+enum SoortVerbintenis {
+  Huwelijk
+  GeregistreerdPartnerschap
+}
+
+enum IndicatieGezag {
+  EenhoofdigOuder
+  GezamenlijkOuders
+  GezamenlijkOuderEnDerde
+  Voogdij
+  TijdelijkGeenGezag
+}
+
+interface Partij {
+  ingeschrevenAls: [KVKnummer!]
+  id: UUID!
+}
+
+interface Adres {
+  volledigAdres: String
+}
+
+interface IngeschrevenPersoon implements Partij {
+  ingeschrevenAls: [KVKnummer!]
+  id: UUID!
+  geslachtsnaam: String!
+  voornamen: String
+  voorvoegsel: String
+  adellijkeTitelPredicaat: CodelijstLT38
+  geboortedatum: DatumIncompleet
+  geboorteplaats: String
+  geboorteland: CodelijstISO3166
+  geslacht: Geslacht
+  datumOverlijden: DatumIncompleet
+  plaatsOverlijden: String
+  landOverlijden: CodelijstISO3166
+  heeftOuder: [NatuurlijkPersoon!]
+  heeftHuwelijk: [Huwelijk!]
+  bsn: BSN!
+  tin: String
+  datumEersteInschrijving: DatumIncompleet
+  gemeenteVanInschrijving: CodelijstLT33
+  opschortingBijhouding: OpschortingBijhouding
+  uitsluitingKiesrecht: IndicatieJaNee
+  europeesKiesrecht: IndicatieJaNee
+  verificatie: Verificatie
+  inOnderzoek: Indicatie!
+  heeftNationaliteit: [Nationaliteit!]
+  heeftVerblijfstitel: Verblijfstitel
+  gezag: Gezagsverhouding
+  heeftImmigratie: Immigratie
+}
+
+type NatuurlijkPersoon implements Partij {
+  ingeschrevenAls: [KVKnummer!]
+  id: UUID!
+  geslachtsnaam: String!
+  voornamen: String
+  voorvoegsel: String
+  adellijkeTitelPredicaat: CodelijstLT38
+  geboortedatum: DatumIncompleet
+  geboorteplaats: String
+  geboorteland: CodelijstISO3166
+  geslacht: Geslacht
+  datumOverlijden: DatumIncompleet
+  plaatsOverlijden: String
+  landOverlijden: CodelijstISO3166
+  heeftOuder: [NatuurlijkPersoon!]
+  heeftHuwelijk: [Huwelijk!]
+}
+
+type Ingezetene implements IngeschrevenPersoon & Partij {
+  ingeschrevenAls: [KVKnummer!]
+  id: UUID!
+  geslachtsnaam: String!
+  voornamen: String
+  voorvoegsel: String
+  adellijkeTitelPredicaat: CodelijstLT38
+  geboortedatum: DatumIncompleet
+  geboorteplaats: String
+  geboorteland: CodelijstISO3166
+  geslacht: Geslacht
+  datumOverlijden: DatumIncompleet
+  plaatsOverlijden: String
+  landOverlijden: CodelijstISO3166
+  heeftOuder: [NatuurlijkPersoon!]
+  heeftHuwelijk: [Huwelijk!]
+  bsn: BSN!
+  tin: String
+  datumEersteInschrijving: DatumIncompleet
+  gemeenteVanInschrijving: CodelijstLT33
+  opschortingBijhouding: OpschortingBijhouding
+  uitsluitingKiesrecht: IndicatieJaNee
+  europeesKiesrecht: IndicatieJaNee
+  verificatie: Verificatie
+  inOnderzoek: Indicatie!
+  heeftNationaliteit: [Nationaliteit!]
+  heeftVerblijfstitel: Verblijfstitel
+  gezag: Gezagsverhouding
+  heeftImmigratie: Immigratie
+  datumInschrijvingGemeente: Datum
+  indicatieGeheim: Indicatie!
+  woontOp: Binnenlandsadres
+}
+
+type NietIngezetene implements IngeschrevenPersoon & Partij {
+  ingeschrevenAls: [KVKnummer!]
+  id: UUID!
+  geslachtsnaam: String!
+  voornamen: String
+  voorvoegsel: String
+  adellijkeTitelPredicaat: CodelijstLT38
+  geboortedatum: DatumIncompleet
+  geboorteplaats: String
+  geboorteland: CodelijstISO3166
+  geslacht: Geslacht
+  datumOverlijden: DatumIncompleet
+  plaatsOverlijden: String
+  landOverlijden: CodelijstISO3166
+  heeftOuder: [NatuurlijkPersoon!]
+  heeftHuwelijk: [Huwelijk!]
+  bsn: BSN!
+  tin: String
+  datumEersteInschrijving: DatumIncompleet
+  gemeenteVanInschrijving: CodelijstLT33
+  opschortingBijhouding: OpschortingBijhouding
+  uitsluitingKiesrecht: IndicatieJaNee
+  europeesKiesrecht: IndicatieJaNee
+  verificatie: Verificatie
+  inOnderzoek: Indicatie!
+  heeftNationaliteit: [Nationaliteit!]
+  heeftVerblijfstitel: Verblijfstitel
+  gezag: Gezagsverhouding
+  heeftImmigratie: Immigratie
+  datumInschrijvingRNI: Datum
+  landVanVerblijf: CodelijstISO3166
+  deelnemerCodeRNI: CodelijstLT88
+  woontOp: Buitenlandsadres
+}
+
+type Nationaliteit {
+  nationaliteit: CodelijstISO3166!
+  redenVerkrijging: CodelijstLT37
+  redenVerlies: CodelijstLT37
+  datumVerkrijging: DatumIncompleet
+  datumVerlies: DatumIncompleet
+}
+
+# Symmetrisch: beide echtgenoten staan in `partners`, er is geen
+# aangaande/partner-onderscheid. De akte-van-overlijden-usecase filtert
+# daarom zelf op de partner met een datumOverlijden.
+type Huwelijk {
+  soortVerbintenis: SoortVerbintenis!
+  datumVoltrekking: DatumIncompleet
+  plaatsVoltrekking: String
+  landVoltrekking: CodelijstISO3166
+  datumOntbinding: DatumIncompleet
+  redenOntbinding: CodelijstBRP
+  partners: [NatuurlijkPersoon!]!
+}
+
+type Verblijfstitel {
+  aanduiding: CodelijstIND!
+  datumIngang: Datum!
+  datumEinde: Datum
+}
+
+type Gezagsverhouding {
+  indicatieGezagMinderjarige: IndicatieGezag
+  indicatieCuratele: Indicatie!
+}
+
+type Immigratie {
+  datumVestigingInNederland: Datum
+  landVanwaar: CodelijstISO3166
+  landBinnenkomst: CodelijstISO3166
+}
+
+type Binnenlandsadres implements Adres {
+  volledigAdres: String
+  adresId: BAGID!
+  straatnaam: String!
+  huisnummer: Int!
+  huisletter: String
+  huisnummertoevoeging: String
+  postcode: Postcode
+  woonplaatsnaam: String!
+}
+
+type Buitenlandsadres implements Adres {
+  volledigAdres: String
+  adresId: UUID!
+  adresregel1: String!
+  adresregel2: String
+  adresregel3: String
+  land: CodelijstISO3166!
+}
+
+type Query {
+  ingeschrevenPersoon(bsn: BSN!): IngeschrevenPersoon
+}

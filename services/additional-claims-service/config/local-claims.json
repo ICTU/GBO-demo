@@ -17,6 +17,15 @@
         "flow": "eudi:attestation",
         "subject_id_type": "direct"
       }
+    },
+    {
+      "outway_peer_id": "99999999900000000100",
+      "service_peer_id": "99999999900000000200",
+      "service_name": "brp",
+      "add": {
+        "flow": "eudi:attestation:brp",
+        "subject_id_type": "direct"
+      }
     }
   ]
 }

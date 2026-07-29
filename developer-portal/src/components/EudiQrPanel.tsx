@@ -1,8 +1,6 @@
 import { useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
-import {
-  attestationConfigFor, demoIssuerPageFor, walletUniversalLinkFor,
-} from './EudiForm'
+import { attestationConfigFor, walletUniversalLinkFor } from './EudiForm'
 
 type Props = {
   usecaseKey: string
@@ -13,10 +11,14 @@ type Props = {
   onPlaygroundToggle?: (active: boolean) => void
 }
 
-// Show a client-side assembled universal-link as QR + fallback-links.
+// Show a client-side assembled universal-link as QR + a same-device link.
 // Supports both same-device (open on this phone) and cross-device (scan
 // with another device) — mirrors what demo-issuer's <nl-wallet-button>
 // would render, but without a tab-switch.
+//
+// There is deliberately no link to the demo-issuer's own QR page: that
+// service is not in docker-compose, and its usecase keys never gained the
+// year suffix (let alone akte_van_overlijden), so the link 404'd.
 export default function EudiQrPanel({ usecaseKey, onCancel, onPlaygroundToggle }: Props) {
   const cfg = attestationConfigFor(usecaseKey)
   const [bsn, setBsn] = useState('123456789')
@@ -28,7 +30,6 @@ export default function EudiQrPanel({ usecaseKey, onCancel, onPlaygroundToggle }
 
   const crossDeviceUl = walletUniversalLinkFor(cfg, 'cross_device')
   const sameDeviceUl = walletUniversalLinkFor(cfg, 'same_device')
-  const demoPage = demoIssuerPageFor(cfg)
   const missingConfig = !crossDeviceUl
 
   const runCurl = async () => {
@@ -90,9 +91,6 @@ export default function EudiQrPanel({ usecaseKey, onCancel, onPlaygroundToggle }
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
               <a className="btn mini" href={sameDeviceUl} target="_blank" rel="noopener noreferrer">
                 same-device link
-              </a>
-              <a className="btn mini" href={demoPage} target="_blank" rel="noopener noreferrer">
-                demo-issuer page ↗
               </a>
             </div>
 

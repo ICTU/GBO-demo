@@ -206,33 +206,60 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
-// loadSchemas reads both consumer-schemas: DvTP (consent-based) and EUDI
-// (wallet-based). Both mirror the same BD bron-schema (bd.graphql); the
-// PDP handler dispatches on action.name to pick the schema to use.
+// flowSchemaFiles maps a flow (the value of input.action.name, which the PDP
+// takes from the FSC token's `flow` additional claim) to its mirror-schema
+// file, relative to SCHEMA_DIR.
+//
+// The flow is the only discriminator the PDP has, and it has to carry the
+// bronprofiel too: BD and BRP both expose Query.ingeschrevenPersoon(bsn) with
+// a different IngeschrevenPersoon, so they cannot share one schema document.
+// Hence eudi:attestation (BD, the original) and eudi:attestation:brp.
+var flowSchemaFiles = map[string]string{
+	"dvtp:query":           "bd.graphql",
+	"eudi:attestation":     "eudi/bd.graphql",
+	"eudi:attestation:brp": "eudi/brp.graphql",
+}
+
+// dvtpFlow is the flow whose schema doubles as the fallback for any flow
+// whose own mirror-schema is missing, so the service still starts.
+const dvtpFlow = "dvtp:query"
+
+// loadSchemas reads the consumer-schemas per flow (see flowSchemaFiles):
+// DvTP (consent-based) over the BD bron, and the two EUDI (wallet-based)
+// flows over the BD and BRP bronnen. The PDP handler dispatches on
+// action.name to pick the schema to use.
 func loadSchemas(dir string) (map[string]*ast.Schema, error) {
 	schemas := map[string]*ast.Schema{}
-	dvtpSrc, err := os.ReadFile(filepath.Join(dir, "bd.graphql"))
+
+	// The DvTP schema is mandatory: it is also the fallback for the others.
+	dvtpFile := flowSchemaFiles[dvtpFlow]
+	dvtpSrc, err := os.ReadFile(filepath.Join(dir, dvtpFile))
 	if err != nil {
 		return nil, fmt.Errorf("dvtp schema: %w", err)
 	}
-	dvtp, err := gqlparser.LoadSchema(&ast.Source{Name: "bd.graphql", Input: string(dvtpSrc)})
+	dvtp, err := gqlparser.LoadSchema(&ast.Source{Name: dvtpFile, Input: string(dvtpSrc)})
 	if err != nil {
 		return nil, fmt.Errorf("parse dvtp schema: %w", err)
 	}
-	schemas["dvtp:query"] = dvtp
+	schemas[dvtpFlow] = dvtp
 
-	eudiSrc, err := os.ReadFile(filepath.Join(dir, "eudi", "bd.graphql"))
-	if err != nil {
-		// The EUDI schema may be absent; fall back to the DvTP schema so
-		// the service still starts.
-		slog.Warn("eudi schema not found, EUDI-flow will fall back to dvtp schema", "err", err.Error())
-		schemas["eudi:attestation"] = dvtp
-	} else {
-		eudi, err := gqlparser.LoadSchema(&ast.Source{Name: "eudi/bd.graphql", Input: string(eudiSrc)})
-		if err != nil {
-			return nil, fmt.Errorf("parse eudi schema: %w", err)
+	for flow, file := range flowSchemaFiles {
+		if flow == dvtpFlow {
+			continue
 		}
-		schemas["eudi:attestation"] = eudi
+		src, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(file)))
+		if err != nil {
+			// A mirror-schema may be absent; fall back to the DvTP schema
+			// so the service still starts.
+			slog.Warn("schema not found, flow will fall back to dvtp schema", "flow", flow, "file", file, "err", err.Error())
+			schemas[flow] = dvtp
+			continue
+		}
+		parsed, err := gqlparser.LoadSchema(&ast.Source{Name: file, Input: string(src)})
+		if err != nil {
+			return nil, fmt.Errorf("parse %s schema: %w", flow, err)
+		}
+		schemas[flow] = parsed
 	}
 	return schemas, nil
 }
@@ -602,16 +629,32 @@ func enrichInput(ctx context.Context, body []byte, schemas map[string]*ast.Schem
 	// compatibility with PEP-callers that do not yet set action.name.
 	flowType := ai.Input.Action.Name
 	if flowType == "" {
-		flowType = "dvtp:query"
+		flowType = dvtpFlow
 	}
 
 	pipData := map[string]any{}
-	switch flowType {
-	case "eudi:attestation":
+	switch {
+	// Every eudi:* flow is PID-based, whichever bronprofiel it queries
+	// (eudi:attestation = BD, eudi:attestation:brp = BRP).
+	case strings.HasPrefix(flowType, "eudi:"):
 		// EUDI-flow: BSN comes from resource.bsn or resource.variables["bsn"].
 		// The PDP-handler stays flow-agnostic and only forwards the raw
-		// variables; the EUDI-specific BSN extraction happens here. PID
-		// signature-verification lives upstream.
+		// variables; the EUDI-specific BSN extraction happens here.
+		//
+		// DEMO TRUST ASSUMPTION — `pip.pid.bsn` does not independently prove
+		// the wallet-disclosed subject. It is read from the same request that
+		// carries the query variable selecting the record, so a caller who can
+		// reach this endpoint can name any BSN and the policy will evaluate as
+		// if the wallet had disclosed it. Every rule keyed on `pip.pid.bsn`
+		// (EUD0001 on the BD path, EUD0002 on the BRP path) inherits this.
+		//
+		// What closes it is not more validation here: the disclosure has to be
+		// bound to the query before the PDP sees it — the issuance-server's
+		// verified PID assertion (or a provider-verifiable equivalent) carried
+		// into the AuthZen envelope, so `variables.bsn` can be checked against
+		// a signature rather than against itself. PID signature-verification
+		// is deliberately out of scope for the demo; see the EUDI PID
+		// disclosure row in README.md ("What is real vs. demo scaffolding").
 		bsn := ai.Input.Resource.BSN
 		if bsn == "" {
 			if v, ok := ai.Input.Resource.Variables["bsn"]; ok {
@@ -679,11 +722,12 @@ func enrichInput(ctx context.Context, body []byte, schemas map[string]*ast.Schem
 	}
 	pipJSON, _ := json.Marshal(pipData)
 
-	// Pick schema-key by flow-type. loadSchemas always guarantees a
-	// fallback map-entry, so this lookup cannot fail.
+	// Pick schema-key by flow-type. loadSchemas guarantees an entry for
+	// every known flow; an unknown flow falls back to the DvTP schema and
+	// will fail closed on the fields it cannot resolve.
 	schema, ok := schemas[flowType]
 	if !ok {
-		schema = schemas["dvtp:query"]
+		schema = schemas[dvtpFlow]
 	}
 	res := buildResolved(ai.Input.Resource.Query, ai.Input.Resource.Variables, schema)
 	resJSON, err := json.Marshal(res)

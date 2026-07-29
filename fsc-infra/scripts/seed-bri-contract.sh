@@ -2,6 +2,13 @@
 # seed-bri-contract — reproduce the bri-service + contract negotiation
 # between edi-issuer-org (consumer) and belastingdienst-mock (provider).
 #
+# Parameterised by SERVICE_NAME / SERVICE_ENDPOINT_URL / GRANT_LINK_PATH so
+# the same script seeds every service the provider org offers. The demo has
+# two bronnen behind one provider peer:
+#   bri -> bron-sidecar     -> graphql-server     (BD bronprofiel)
+#   brp -> brp-sidecar      -> brp-graphql-server (BRP bronprofiel)
+# See the Makefile targets fsc-seed-bri / fsc-seed-brp.
+#
 # Background:
 #   The flow was originally set up manually via the Controller UIs.
 #   Contract state survives container restarts but not `make fsc-clean`.
@@ -40,9 +47,9 @@ BD_CONTROLLER_URL="${BD_CONTROLLER_URL:-https://bd-controller:9444}"    # contro
 BD_MANAGER_URL="${BD_MANAGER_URL:-https://bd-manager:9443}"             # manager int (LISTEN_ADDRESS_INTERNAL)
 EDI_MANAGER_URL="${EDI_MANAGER_URL:-https://edi-manager:9443}"          # manager int
 
-# bri-service endpoint — bron-sidecar reads the signed additional claim
+# Service endpoint — the bron-sidecar reads the signed additional claim
 # subject_id_type and substitutes PI -> BSN if needed; direct mode is
-# pass-through to graphql-server. For the demo always via the sidecar.
+# pass-through to the bron. For the demo always via a sidecar.
 SERVICE_ENDPOINT_URL="${SERVICE_ENDPOINT_URL:-http://bron-sidecar:4011}"
 SERVICE_INWAY_ADDRESS="${SERVICE_INWAY_ADDRESS:-https://bd-inway:443}"
 
@@ -115,7 +122,12 @@ existing_pub=$(mtls_curl "$BD_CERT" "$BD_KEY" "$BD_CA" \
   "$BD_MANAGER_URL/v1/contracts?grant_type=GRANT_TYPE_SERVICE_PUBLICATION&service_name=$SERVICE_NAME" \
   || echo '{}')
 
-if echo "$existing_pub" | jq -e '.contracts[]? | select(.state == "CONTRACT_STATE_VALID")' >/dev/null 2>&1; then
+# NOTE: the Manager's ?service_name= filter is NOT honoured (v2.4.0
+# returns every contract regardless), so the service name has to be
+# matched client-side. Without this a second service silently reuses the
+# first service's contracts and grant-hash.
+if echo "$existing_pub" | jq -e --arg svc "$SERVICE_NAME" \
+   '.contracts[]? | select(.state == "CONTRACT_STATE_VALID") | select(.content.grants[0].service.name == $svc)' >/dev/null 2>&1; then
   echo "  → publication contract already Valid, skipping"
 else
   pub_body=$(jq -n \
@@ -156,7 +168,8 @@ else
     sleep 1
     st=$(mtls_curl "$BD_CERT" "$BD_KEY" "$BD_CA" \
       "$BD_MANAGER_URL/v1/contracts?grant_type=GRANT_TYPE_SERVICE_PUBLICATION&service_name=$SERVICE_NAME" \
-      | jq -r 'first(.contracts[]?.state)' 2>/dev/null || echo "")
+      | jq -r --arg svc "$SERVICE_NAME" \
+        'first(.contracts[]? | select(.content.grants[0].service.name == $svc) | .state)' 2>/dev/null || echo "")
     if [ "$st" = "CONTRACT_STATE_VALID" ]; then
       echo "  ✓ publication contract Valid"
       break
@@ -172,7 +185,8 @@ existing_conn=$(mtls_curl "$EDI_CERT" "$EDI_KEY" "$EDI_CA" \
   "$EDI_MANAGER_URL/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=$SERVICE_NAME" \
   || echo '{}')
 
-if echo "$existing_conn" | jq -e '.contracts[]? | select(.state == "CONTRACT_STATE_VALID")' >/dev/null 2>&1; then
+if echo "$existing_conn" | jq -e --arg svc "$SERVICE_NAME" \
+   '.contracts[]? | select(.state == "CONTRACT_STATE_VALID") | select(.content.grants[0].service.name == $svc)' >/dev/null 2>&1; then
   echo "  → connection contract already Valid, skipping"
 else
   # Outway identification: SHA-256 hex of the peer public key (see openapi.yaml
@@ -226,7 +240,8 @@ else
     sleep 1
     contracts_json=$(mtls_curl "$EDI_CERT" "$EDI_KEY" "$EDI_CA" \
       "$EDI_MANAGER_URL/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=$SERVICE_NAME")
-    st=$(printf '%s' "$contracts_json" | jq -r 'first(.contracts[]?.state // empty) // ""' 2>/dev/null)
+    st=$(printf '%s' "$contracts_json" | jq -r --arg svc "$SERVICE_NAME" \
+      'first(.contracts[]? | select(.content.grants[0].service.name == $svc) | .state) // ""' 2>/dev/null)
     if [ "$st" = "CONTRACT_STATE_VALID" ]; then
       echo "  ✓ connection contract Valid"
       break
@@ -242,7 +257,8 @@ fi
 echo "[4/4] Upsert grant-link '$GRANT_LINK_PATH' → connection grant-hash..."
 new_hash=$(mtls_curl "$EDI_CERT" "$EDI_KEY" "$EDI_CA" \
   "${EDI_MANAGER_URL}/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=${SERVICE_NAME}&limit=1" \
-  | jq -r '.contracts[0].content.grants[0].hash // empty')
+  | jq -r --arg svc "$SERVICE_NAME" \
+    'first(.contracts[]? | select(.content.grants[0].service.name == $svc) | .content.grants[0].hash) // empty')
 if [ -z "$new_hash" ]; then
   echo "  x no connection grant-hash found — abort"
   exit 1
@@ -256,5 +272,5 @@ psql -h "$PG_HOST" -U "$PG_USER" -d fsc_edi_controller -c "
 echo "  ✓ grant-link $OUTWAY_NAME $GRANT_LINK_PATH → ${new_hash:0:22}..."
 
 echo ""
-echo "Contract-seed done. Adapter can POST to /bri (via outway) —"
+echo "Contract-seed done. Adapter can POST to $GRANT_LINK_PATH (via outway) —"
 echo "outway resolves it to the grant-hash + mTLS to bd-inway."

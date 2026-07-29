@@ -84,6 +84,7 @@ while IFS='|' read -r service context dockerfile paths platforms \
 done <<'IMAGES'
 additional-claims-service|./services/additional-claims-service|./services/additional-claims-service/Dockerfile|services/additional-claims-service|linux/amd64,linux/arm64|false|additional-claims-service
 bron-sidecar|./services/bron-sidecar|./services/bron-sidecar/Dockerfile|services/bron-sidecar|linux/amd64,linux/arm64|false|bron-sidecar
+brp-graphql-server|./services/brp-graphql-server|./services/brp-graphql-server/Dockerfile|services/brp-graphql-server|linux/amd64,linux/arm64|false|brp-graphql-server
 bsnk-mock|./services/bsnk-mock|./services/bsnk-mock/Dockerfile|services/bsnk-mock|linux/amd64,linux/arm64|false|bsnk-mock
 consent-portal-backend|./services/consent-portal-backend|./services/consent-portal-backend/Dockerfile|services/consent-portal-backend|linux/amd64,linux/arm64|false|consent-portal-backend
 consent-register|./services/consent-register|./services/consent-register/Dockerfile|services/consent-register|linux/amd64,linux/arm64|false|consent-register
