@@ -11,6 +11,10 @@ import (
 	"time"
 )
 
+// readHeaderTimeout bounds how long a client may take to send its request
+// headers, so a stalled connection cannot hold a handler open.
+const readHeaderTimeout = 10 * time.Second
+
 const (
 	defaultPort       = "4012"
 	defaultConfigPath = "/config/claims.json"
@@ -171,26 +175,31 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
+// fatal logs and ends the process. main is the only place in this service
+// that exits; everything else returns an error.
+func fatal(msg string, err error) {
+	slog.Error(msg, "err", err.Error())
+	os.Exit(1)
+}
+
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", "additional-claims-service"))
 
 	configPath := getEnv("CLAIMS_CONFIG_PATH", defaultConfigPath)
 	cfg, err := loadClaimsConfig(configPath)
 	if err != nil {
-		slog.Error("load configuration", "path", configPath, "err", err)
-		os.Exit(1)
+		fatal("loading claims configuration", err)
 	}
 
 	port := getEnv("PORT", defaultPort)
-	server := &http.Server{
+	srv := &http.Server{
 		Addr:              ":" + port,
 		Handler:           newMux(claimsService{rules: cfg.Rules}),
-		ReadHeaderTimeout: 5 * time.Second,
+		ReadHeaderTimeout: readHeaderTimeout,
 	}
 
 	slog.Info("additional claims service starting", "port", port, "rules", len(cfg.Rules))
-	if err := server.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
-		slog.Error("server stopped", "err", err)
-		os.Exit(1)
+	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+		fatal("listen and serve", err)
 	}
 }

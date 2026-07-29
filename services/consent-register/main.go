@@ -47,6 +47,27 @@ type Consent struct {
 // into valid_until (an absolute timestamp); the chain only uses valid_until.
 const defaultValiditySeconds = 365 * 24 * 60 * 60 // 1 year
 
+// readHeaderTimeout bounds how long a client may take to send its request
+// headers, so a stalled connection cannot hold a handler open.
+const readHeaderTimeout = 10 * time.Second
+
+type config struct {
+	Port string
+}
+
+func loadConfig() (config, error) {
+	return config{
+		Port: getEnv("PORT", "4002"),
+	}, nil
+}
+
+func getEnv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
 type Store struct {
 	mu       sync.RWMutex
 	consents map[string]*Consent
@@ -340,25 +361,35 @@ func newMux(store ConsentStore) *http.ServeMux {
 	return mux
 }
 
+// fatal logs and ends the process. main is the only place in this service
+// that exits; everything else returns an error.
+func fatal(msg string, err error) {
+	slog.Error(msg, "err", err.Error())
+	os.Exit(1)
+}
+
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", "consent-register"))
+
+	cfg, err := loadConfig()
+	if err != nil {
+		fatal("loading configuration from environment", err)
+	}
 
 	shutdown := initTracer()
 	defer func() { _ = shutdown(context.Background()) }()
 
 	store, closeStore, err := openConsentStore(context.Background())
 	if err != nil {
-		slog.Error("initialize consent store", "err", err.Error())
-		os.Exit(1)
+		fatal("initialising consent store", err)
 	}
 	defer closeStore()
 
-	mux := newMux(store)
-
-	addr := ":4002"
-	slog.Info("listening", "addr", addr)
-	if err := http.ListenAndServe(addr, otelhttp.NewHandler(withAccessLog(mux), "consent-register")); err != nil {
-		slog.Error("server error", "err", err.Error())
-		os.Exit(1)
+	srv := &http.Server{
+		Addr:              ":" + cfg.Port,
+		Handler:           otelhttp.NewHandler(withAccessLog(newMux(store)), "consent-register"),
+		ReadHeaderTimeout: readHeaderTimeout,
 	}
+	slog.Info("listening", "addr", srv.Addr)
+	fatal("listen and serve", srv.ListenAndServe())
 }

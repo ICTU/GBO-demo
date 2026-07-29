@@ -18,11 +18,12 @@ import (
 // the pre-baked BSN 123456789. Verifies wiring: /graphql handler → schema
 // resolver → mock store.
 func TestGraphQLHappyPath(t *testing.T) {
-	if err := loadMockData("mockdata/citizens.json"); err != nil {
+	store, err := loadMockData("mockdata/citizens.json")
+	if err != nil {
 		t.Fatalf("loadMockData: %v", err)
 	}
 	tracer := otel.Tracer("graphql-server-test")
-	schema, err := buildSchema(tracer)
+	schema, err := buildSchema(tracer, store)
 	if err != nil {
 		t.Fatalf("buildSchema: %v", err)
 	}
@@ -87,11 +88,12 @@ func TestGraphQLHappyPath(t *testing.T) {
 // aangiften server-side so per-year policy enforcement has a query-side
 // selector to bind to.
 func TestGraphQLBelastingjarenFilter(t *testing.T) {
-	if err := loadMockData("mockdata/citizens.json"); err != nil {
+	store, err := loadMockData("mockdata/citizens.json")
+	if err != nil {
 		t.Fatalf("loadMockData: %v", err)
 	}
 	tracer := otel.Tracer("graphql-server-test")
-	schema, err := buildSchema(tracer)
+	schema, err := buildSchema(tracer, store)
 	if err != nil {
 		t.Fatalf("buildSchema: %v", err)
 	}
@@ -130,11 +132,12 @@ func TestGraphQLBelastingjarenFilter(t *testing.T) {
 // testMux spins up the routing tree over the demo mock data.
 func testMux(t *testing.T) *http.ServeMux {
 	t.Helper()
-	if err := loadMockData("mockdata/citizens.json"); err != nil {
+	store, err := loadMockData("mockdata/citizens.json")
+	if err != nil {
 		t.Fatalf("loadMockData: %v", err)
 	}
 	tracer := otel.Tracer("graphql-server-test")
-	schema, err := buildSchema(tracer)
+	schema, err := buildSchema(tracer, store)
 	if err != nil {
 		t.Fatalf("buildSchema: %v", err)
 	}
@@ -257,11 +260,12 @@ func TestGraphQLMachinePaths(t *testing.T) {
 }
 
 func TestGraphQLHealth(t *testing.T) {
-	if err := loadMockData("mockdata/citizens.json"); err != nil {
+	store, err := loadMockData("mockdata/citizens.json")
+	if err != nil {
 		t.Fatalf("loadMockData: %v", err)
 	}
 	tracer := otel.Tracer("graphql-server-test")
-	schema, err := buildSchema(tracer)
+	schema, err := buildSchema(tracer, store)
 	if err != nil {
 		t.Fatalf("buildSchema: %v", err)
 	}

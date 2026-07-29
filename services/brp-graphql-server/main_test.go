@@ -65,11 +65,12 @@ type overlijdenResult struct {
 
 func newTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	if err := loadMockData("mockdata/personen.json"); err != nil {
+	store, err := loadMockData("mockdata/personen.json")
+	if err != nil {
 		t.Fatalf("loadMockData: %v", err)
 	}
 	tracer := otel.Tracer("brp-graphql-server-test")
-	schema, err := buildSchema(tracer)
+	schema, err := buildSchema(tracer, store)
 	if err != nil {
 		t.Fatalf("buildSchema: %v", err)
 	}

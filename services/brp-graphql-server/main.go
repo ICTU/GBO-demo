@@ -21,6 +21,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -133,6 +134,29 @@ type Buitenlandsadres struct {
 // type-specific verblijfadres fields are kept apart in the mock data
 // (woontOpBinnenland / woontOpBuitenland) because the GraphQL field `woontOp`
 // is typed differently on each concrete type.
+// readHeaderTimeout bounds how long a client may take to send its request
+// headers, so a stalled connection cannot hold a handler open.
+const readHeaderTimeout = 10 * time.Second
+
+type config struct {
+	Port         string
+	MockDataPath string
+}
+
+func loadConfig() (config, error) {
+	return config{
+		Port:         getEnv("PORT", "4001"),
+		MockDataPath: getEnv("MOCKDATA_PATH", "mockdata/personen.json"),
+	}, nil
+}
+
+func getEnv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
 type Persoon struct {
 	Soort string `json:"soort"` // "Ingezetene" | "NietIngezetene"
 
@@ -182,23 +206,25 @@ type Persoon struct {
 
 // ── Mock data store ───────────────────────────────────────────────────────────
 
-var persoonStore map[string]Persoon
-
-func loadMockData(path string) error {
+// loadMockData returns the person records indexed by BSN. The store is
+// returned rather than assigned to a package variable so main can hand it to
+// the schema explicitly and tests can build one without touching
+// process-wide state.
+func loadMockData(path string) (map[string]Persoon, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	var personen []Persoon
 	if err := json.Unmarshal(data, &personen); err != nil {
-		return err
+		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
-	persoonStore = make(map[string]Persoon, len(personen))
+	store := make(map[string]Persoon, len(personen))
 	for _, p := range personen {
-		persoonStore[p.BSN] = p
+		store[p.BSN] = p
 	}
-	slog.Info("mock data loaded", "personen", len(persoonStore))
-	return nil
+	slog.Info("mock data loaded", "personen", len(store))
+	return store, nil
 }
 
 // ── Scalars ───────────────────────────────────────────────────────────────────
@@ -576,7 +602,7 @@ func resolvePartijType(p graphql.ResolveTypeParams) *graphql.Object {
 	return resolvePersoonType(p)
 }
 
-func buildSchema(tracer trace.Tracer) (graphql.Schema, error) {
+func buildSchema(tracer trace.Tracer, store map[string]Persoon) (graphql.Schema, error) {
 	queryType := graphql.NewObject(graphql.ObjectConfig{
 		Name:        "Query",
 		Description: "Query-ingangen van dit bronprofiel.",
@@ -593,7 +619,7 @@ func buildSchema(tracer trace.Tracer) (graphql.Schema, error) {
 					defer span.End()
 
 					bsn, _ := p.Args["bsn"].(string)
-					persoon, exists := persoonStore[bsn]
+					persoon, exists := store[bsn]
 					if !exists {
 						return nil, nil
 					}
@@ -699,11 +725,22 @@ func newMux(schema *graphql.Schema, tracer trace.Tracer) *http.ServeMux {
 	return mux
 }
 
+// fatal logs and ends the process. main is the only place in this service
+// that exits; everything else returns an error.
+func fatal(msg string, err error) {
+	slog.Error(msg, "err", err.Error())
+	os.Exit(1)
+}
+
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", "brp-graphql-server"))
 
-	ctx := context.Background()
+	cfg, err := loadConfig()
+	if err != nil {
+		fatal("loading configuration from environment", err)
+	}
 
+	ctx := context.Background()
 	shutdown, err := initTracer(ctx)
 	if err != nil {
 		slog.Warn("tracer init failed", "err", err.Error())
@@ -719,27 +756,21 @@ func main() {
 
 	tracer := otel.Tracer("brp-graphql-server")
 
-	dataPath := "mockdata/personen.json"
-	if p := os.Getenv("MOCKDATA_PATH"); p != "" {
-		dataPath = p
-	}
-	if err := loadMockData(dataPath); err != nil {
-		slog.Error("failed to load mock data", "err", err.Error())
-		os.Exit(1)
-	}
-
-	schema, err := buildSchema(tracer)
+	store, err := loadMockData(cfg.MockDataPath)
 	if err != nil {
-		slog.Error("failed to build schema", "err", err.Error())
-		os.Exit(1)
+		fatal("loading mock data", err)
 	}
 
-	mux := newMux(&schema, tracer)
-
-	port := "4001"
-	slog.Info("listening", "addr", ":"+port)
-	if err := http.ListenAndServe(":"+port, otelhttp.NewHandler(withAccessLog(mux), "brp-graphql-server")); err != nil {
-		slog.Error("server error", "err", err.Error())
-		os.Exit(1)
+	schema, err := buildSchema(tracer, store)
+	if err != nil {
+		fatal("building schema", err)
 	}
+
+	srv := &http.Server{
+		Addr:              ":" + cfg.Port,
+		Handler:           otelhttp.NewHandler(withAccessLog(newMux(&schema, tracer)), "brp-graphql-server"),
+		ReadHeaderTimeout: readHeaderTimeout,
+	}
+	slog.Info("listening", "addr", srv.Addr)
+	fatal("listen and serve", srv.ListenAndServe())
 }
