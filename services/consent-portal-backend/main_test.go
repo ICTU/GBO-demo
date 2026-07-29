@@ -125,6 +125,26 @@ func TestPortalGiveThenList(t *testing.T) {
 	if give.PI != "PI-xyz" {
 		t.Errorf("pi = %q, want PI-xyz", give.PI)
 	}
+	// The dev-portal renders one card per upstream call: pseudonymise, then
+	// create. Guards against the call log quietly gaining or losing entries.
+	if len(give.APICalls) != 2 {
+		t.Fatalf("api_calls = %d, want 2: %+v", len(give.APICalls), give.APICalls)
+	}
+	for i, want := range []string{"Pseudonymize BSN", "Create Consent"} {
+		if give.APICalls[i].Label != want {
+			t.Errorf("api_calls[%d].Label = %q, want %q", i, give.APICalls[i].Label, want)
+		}
+		if give.APICalls[i].Status != http.StatusOK {
+			t.Errorf("api_calls[%d].Status = %d, want 200", i, give.APICalls[i].Status)
+		}
+	}
+	// The register must never have seen the plain BSN.
+	regMu.Lock()
+	sent, _ := json.Marshal(created)
+	regMu.Unlock()
+	if strings.Contains(string(sent), "123456789") {
+		t.Errorf("BSN reached the consent register: %s", sent)
+	}
 
 	// Step 3: list consents — should surface the one we just created.
 	listReq, _ := http.NewRequest(http.MethodGet, srv.URL+"/portal/consents", nil)
