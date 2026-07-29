@@ -278,6 +278,15 @@ type HistoryRun struct {
 	Response json.RawMessage `json:"response,omitempty"`
 }
 
+// upstreamTimeout bounds the calls this service makes to Loki and OPA. These
+// handlers previously used http.DefaultClient, which has no timeout: one
+// unresponsive upstream hung the request indefinitely.
+const upstreamTimeout = 10 * time.Second
+
+// upstreamClient is the shared client for those calls. The FSC txlog peers
+// need their own mTLS clients and build them in fsctxlog.go.
+var upstreamClient = &http.Client{Timeout: upstreamTimeout}
+
 var historyMu sync.Mutex
 
 func historyFile(cfg config) string { return filepath.Join(cfg.VarDir, "history.jsonl") }
@@ -471,7 +480,7 @@ func handleDecision(cfg config) http.HandlerFunc {
 			cfg.LokiURL, url.QueryEscape(expr), now.Add(-30*time.Minute).UnixNano(), now.UnixNano())
 
 		req, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, u, nil)
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := upstreamClient.Do(req)
 		if err != nil {
 			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "loki unreachable: " + err.Error()})
 			return
@@ -560,7 +569,7 @@ func lokiDecisionsForTrace(ctx context.Context, cfg config, traceID string) ([]m
 	u := fmt.Sprintf("%s/loki/api/v1/query_range?query=%s&start=%d&end=%d&limit=500&direction=forward",
 		cfg.LokiURL, url.QueryEscape(expr), now.Add(-30*time.Minute).UnixNano(), now.UnixNano())
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := upstreamClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("loki unreachable: %w", err)
 	}

@@ -457,7 +457,7 @@ func handleQuery(cfg config) http.HandlerFunc {
 			}
 			writeJSON(w, http.StatusOK, resp)
 			if cfg.DevPortalBackend != "" && !fromDevPortal {
-				go postUseHistory(cfg.DevPortalBackend, req, resp, traceID)
+				go postUseHistory(context.WithoutCancel(ctx), cfg.DevPortalBackend, req, resp, traceID)
 			}
 			return
 		}
@@ -479,14 +479,20 @@ func handleQuery(cfg config) http.HandlerFunc {
 		}
 		writeJSON(w, http.StatusOK, resp)
 		if cfg.DevPortalBackend != "" && !fromDevPortal {
-			go postUseHistory(cfg.DevPortalBackend, req, resp, traceID)
+			go postUseHistory(context.WithoutCancel(ctx), cfg.DevPortalBackend, req, resp, traceID)
 		}
 	}
 }
 
 // Best-effort: log the use-query to dev-portal-backend history. Failures
 // are silent — the afnemer-flow is the primary concern.
-func postUseHistory(devURL string, req queryRequest, qResp queryResponse, traceID string) {
+// postUseHistory records the run in the dev-portal timeline. Best-effort: it
+// runs in its own goroutine and every failure is logged and dropped.
+//
+// ctx must outlive the handler — pass context.WithoutCancel(ctx) — so the
+// post keeps the trace context without being cancelled when the handler
+// returns.
+func postUseHistory(ctx context.Context, devURL string, req queryRequest, qResp queryResponse, traceID string) {
 	outcome := "deny"
 	if qResp.Allowed {
 		outcome = "allow"
@@ -506,12 +512,18 @@ func postUseHistory(devURL string, req queryRequest, qResp queryResponse, traceI
 		"response":   qResp,
 	}
 	body, _ := json.Marshal(entry)
-	httpReq, err := http.NewRequest(http.MethodPost, devURL+"/history", bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, devURL+"/history", bytes.NewReader(body))
 	if err != nil {
 		slog.Warn("dev-portal-backend history post: build failed", "err", err.Error())
 		return
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	// Carry the trace across. Attaching the context alone is not enough: the
+	// client below has a plain transport, so without an explicit inject the
+	// post arrives at the dev-portal with no traceparent and shows up as an
+	// orphan rather than a child of the run that produced it. The service's
+	// other outbound calls already do this.
+	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(httpReq.Header))
 	client := &http.Client{Timeout: 3 * time.Second}
 	resp, err := client.Do(httpReq)
 	if err != nil {

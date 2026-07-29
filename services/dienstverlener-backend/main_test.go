@@ -1,7 +1,11 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -341,5 +345,82 @@ func TestDvtpQueryRevokedConsentReachesPDP(t *testing.T) {
 	}
 	if out.FscTransactionID == "" {
 		t.Fatal("expected fsc_transaction_id on the response for decision-log lookup")
+	}
+}
+
+// The best-effort history post must stay attached to the run that produced
+// it. It used to be built with a context-less http.NewRequest and never had
+// the propagator injected, so it reached the dev-portal with no traceparent
+// and appeared as an orphan trace.
+func TestUseHistoryPostCarriesTheTrace(t *testing.T) {
+	type captured struct {
+		traceparent string
+		body        map[string]any
+	}
+	got := make(chan captured, 1)
+	devPortal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/history" {
+			t.Errorf("path = %q, want /history", r.URL.Path)
+		}
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		got <- captured{traceparent: r.Header.Get("Traceparent"), body: body}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer devPortal.Close()
+
+	// A real provider so the span context is valid and sampled; TraceContext
+	// is the propagator the collector setup uses.
+	tp := sdktrace.NewTracerProvider()
+	defer func() { _ = tp.Shutdown(context.Background()) }()
+	otel.SetTracerProvider(tp)
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+
+	ctx, span := tp.Tracer("test").Start(context.Background(), "dvtp.query")
+	traceID := span.SpanContext().TraceID().String()
+
+	// Exactly how the handler calls it: detached from cancellation, still
+	// carrying the trace.
+	postUseHistory(context.WithoutCancel(ctx), devPortal.URL,
+		queryRequest{ConsentID: "c-1", ScopeID: "bd:ib:2025"},
+		queryResponse{Allowed: true, TraceID: traceID}, traceID)
+	span.End()
+
+	select {
+	case c := <-got:
+		if c.traceparent == "" {
+			t.Fatal("history post carried no traceparent: it is detached from the run's trace")
+		}
+		if !strings.Contains(c.traceparent, traceID) {
+			t.Errorf("traceparent = %q, want it to carry trace id %s", c.traceparent, traceID)
+		}
+		if c.body["trace_id"] != traceID {
+			t.Errorf("body trace_id = %v, want %s", c.body["trace_id"], traceID)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("dev-portal never received the history post")
+	}
+}
+
+// The post must survive the handler returning: WithoutCancel keeps the trace
+// while dropping the request's cancellation.
+func TestUseHistoryPostSurvivesHandlerReturn(t *testing.T) {
+	done := make(chan struct{}, 1)
+	devPortal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		done <- struct{}{}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer devPortal.Close()
+
+	handlerCtx, cancel := context.WithCancel(context.Background())
+	postCtx := context.WithoutCancel(handlerCtx)
+	cancel() // the handler returns before the goroutine runs
+
+	postUseHistory(postCtx, devPortal.URL, queryRequest{ConsentID: "c-1"}, queryResponse{Allowed: true}, "")
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("post was cancelled with the handler; it must outlive it")
 	}
 }
