@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import NodeIO from './NodeIO'
 import OpaDecisionContext from './OpaDecisionContext'
+import { BD_BRON } from '../data/bronnen'
 import type { NodeDef } from '../data/chains'
 import type { NodeState } from '../hooks/useArchState'
 import type { ApiCall } from '../types'
@@ -63,7 +64,9 @@ export default function NodePopover({
   const stateColor = STATE_COLOR[state]
   const hasIO = !!apiCall
   const isOpaNode = node.id === 'opa'
-  const isGraphqlBron = node.svc === 'graphql-server'
+  // Only the BD bron serves a playground; brp-graphql-server exposes /graphql
+  // alone, so a BRP-run's bron-node gets no playground-link.
+  const isGraphqlBron = node.svc === BD_BRON.bronSvc
   const spanInspect = useSpanInspect(traceId, node.id)
   const hasSpanInspect = spanInspect.inspects.length > 0
   const wide = isOpaNode || hasSpanInspect

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  EUDI_ISSUANCE_NODE_IDS, ISSUANCE_NODE_IDS, USE_NODE_IDS, nodeStatesFromSpans,
+  EUDI_ISSUANCE_NODE_IDS, ISSUANCE_NODE_IDS, USE_NODE_IDS, bronForSpans, nodeStatesFromSpans,
   type NodeStatus, type SpanInfo,
 } from '../util/spanMapping'
+import type { BronProfile } from '../data/bronnen'
 import type { Tab } from '../types'
 
 type SpanEvent = {
@@ -25,6 +26,7 @@ function asSpanInfo(e: SpanEvent): SpanInfo {
     error: e.status_code === 2 || (e.attributes?.['http.status_code']
       ? parseInt(e.attributes['http.status_code'], 10) >= 400
       : false),
+    bron: e.attributes?.['gbo.bron'] || undefined,
   }
 }
 
@@ -35,7 +37,7 @@ function asSpanInfo(e: SpanEvent): SpanInfo {
 export function useChainEvents(
   traceId: string | null,
   mode: Tab,
-): { states: Record<string, NodeStatus>; ready: boolean } {
+): { states: Record<string, NodeStatus>; ready: boolean; bron: BronProfile } {
   const expected = useMemo(
     () => (
       mode === 'issuance' ? ISSUANCE_NODE_IDS
@@ -92,5 +94,10 @@ export function useChainEvents(
     return merged
   }, [collected, expected, mode, ready])
 
-  return { states, ready }
+  // The register this run read from — labels the two bron-nodes of the EUDI
+  // strip. Sharpens as the run progresses (bron-span first, adapter-attr as
+  // backstop for runs that never reach the bron).
+  const bron = useMemo(() => bronForSpans(collected), [collected])
+
+  return { states, ready, bron }
 }

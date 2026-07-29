@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { fetchTrace, serviceNameForSpan, spanTag, type JaegerSpan, type JaegerTrace } from '../api/jaegerClient'
+import { BRON_PROFILES } from '../data/bronnen'
 
 // Dev-portal inspection from span-attributes. Services put `gbo.*` attrs
 // on their existing otelhttp/tracer-span with the request-body and any
@@ -28,7 +29,8 @@ const NODE_SPAN_MATCH: Record<string, Match | undefined> = {
   // popovers for those nodes stay empty (matches the 'no-otel' visual
   // status).
   'pdp': { service: 'pdp-service', operation: 'pdp-service' },
-  'sidecar': { service: 'bron-sidecar', operation: 'bron-sidecar' },
+  // 'sidecar' is bron-dependent (bron-sidecar vs brp-sidecar) — see
+  // collectMatches.
 }
 
 function pickSpan(trace: JaegerTrace, m: Match): JaegerSpan | undefined {
@@ -90,6 +92,12 @@ export function useSpanInspect(traceId: string | undefined, nodeId: string): {
 }
 
 function collectMatches(nodeId: string): Match[] {
+  // The gateway-node in front of the bron is one sidecar-instance per
+  // bronprofiel. The popover doesn't know which bron this run used, so it
+  // tries them all — only the one present in the trace yields a span.
+  if (nodeId === 'sidecar') {
+    return BRON_PROFILES.map((b) => ({ service: b.gatewaySvc, operation: b.gatewaySvc }))
+  }
   const primary = NODE_SPAN_MATCH[nodeId]
   if (!primary) return []
   return [primary]

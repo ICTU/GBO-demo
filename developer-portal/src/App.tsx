@@ -93,7 +93,7 @@ export default function App() {
   const [archTraceId, setArchTraceId] = useState<string | null>(null)
   const [archMode, setArchMode] = useState<Tab>('issuance')
 
-  const { states: archStates, ready: archReady } = useChainEvents(archTraceId, archMode)
+  const { states: archStates, ready: archReady, bron: archBron } = useChainEvents(archTraceId, archMode)
   const { data: fscTxlog, loading: fscTxlogLoading, transactionId: fscTxID, overrides: fscOverrides } = useFscTxlog(
     archTraceId ?? undefined, archMode,
   )
@@ -377,6 +377,7 @@ export default function App() {
           apiCalls={archApiCalls}
           traceId={archTraceId ?? undefined}
           pdpTraceIdOverride={fscOverrides.pdpTrace?.traceID}
+          bron={archBron}
           watching={watching}
           onToggleWatch={() => setWatching((w) => !w)}
           watchError={watchError}

@@ -2,9 +2,10 @@ import { Fragment, useState } from 'react'
 import ArchNode from './ArchNode'
 import NodePopover from './NodePopover'
 import {
-  EUDI_ISSUANCE_BRANCHES, EUDI_ISSUANCE_CHAIN,
-  ISSUANCE_CHAIN, USE_BRANCHES, USE_CHAIN, type NodeDef,
+  EUDI_ISSUANCE_BRANCHES, ISSUANCE_CHAIN, USE_BRANCHES, USE_CHAIN,
+  eudiIssuanceChain, type NodeDef,
 } from '../data/chains'
+import type { BronProfile } from '../data/bronnen'
 import type { ArchStates } from '../hooks/useArchState'
 import { useExplain } from '../hooks/useExplain'
 import type { ApiCall, Tab } from '../types'
@@ -22,6 +23,9 @@ type Props = {
   // the right trace-id and the pdp-popover can read its gbo.* attrs from
   // the PDP span.
   pdpTraceIdOverride?: string
+  // Bronprofiel of the run being shown (EUDI only) — decides which register
+  // the last two nodes name. Derived from the trace, see bronForSpans.
+  bron?: BronProfile
   watching?: boolean
   onToggleWatch?: () => void
   watchError?: string | null
@@ -40,7 +44,7 @@ function apiCallForNode(nodeId: string, calls: ApiCall[] | undefined): ApiCall |
 }
 
 export default function ArchStrip({
-  mode, setMode, states, apiCalls, traceId, pdpTraceIdOverride,
+  mode, setMode, states, apiCalls, traceId, pdpTraceIdOverride, bron,
   watching, onToggleWatch, watchError, jaegerUrl, grafanaUrl,
 }: Props) {
   // In EUDI mode we use the PDP trace (cross-lookup) for OPA/PDP details,
@@ -56,7 +60,7 @@ export default function ArchStrip({
   const [openNode, setOpenNode] = useState<string | null>(null)
   const chain: NodeDef[] =
     mode === 'issuance' ? ISSUANCE_CHAIN
-    : mode === 'eudi-issuance' ? EUDI_ISSUANCE_CHAIN
+    : mode === 'eudi-issuance' ? eudiIssuanceChain(bron)
     : USE_CHAIN
   const branches: NodeDef[] =
     mode === 'use' ? USE_BRANCHES
