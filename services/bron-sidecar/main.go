@@ -274,7 +274,12 @@ func newMux(cfg config, client *http.Client) *http.ServeMux {
 }
 
 func main() {
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", "bron-sidecar"))
+	// One image, one instance per bron (bron-sidecar for the BD bron,
+	// brp-sidecar for the BRP bron). Take the identity from the environment so
+	// logs and spans name the instance that ran, not the image — the
+	// dev-portal matches the sidecar-span on it.
+	serviceName := getEnv("OTEL_SERVICE_NAME", "bron-sidecar")
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", serviceName))
 	cfg := loadConfig()
 
 	ctx := context.Background()
@@ -295,13 +300,13 @@ func main() {
 	mux := newMux(cfg, client)
 
 	addr := ":" + cfg.Port
-	slog.Info("bron-sidecar starting",
+	slog.Info("sidecar starting",
 		"addr", addr,
 		"upstream", cfg.UpstreamURL,
 		"bsnk", cfg.BSNkURL,
 		"pseudonym_vars", cfg.PseudonymVars,
 	)
-	if err := http.ListenAndServe(addr, otelhttp.NewHandler(mux, "bron-sidecar")); err != nil {
+	if err := http.ListenAndServe(addr, otelhttp.NewHandler(mux, serviceName)); err != nil {
 		slog.Error("server stopped", "err", err.Error())
 		os.Exit(1)
 	}

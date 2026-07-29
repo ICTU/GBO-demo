@@ -326,6 +326,15 @@ func handleAttestation(cfg config, client *http.Client, usecaseKey string, uc Us
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		// The catalog decides which bron this usecase reads from; put that on
+		// the span so a trace-reader (dev-portal architecture-strip) can name
+		// the register without a second usecase → bron table of its own. Set
+		// before any work: a run that never reaches the bron (policy DENY,
+		// unknown BSN) still says which register it would have queried.
+		trace.SpanFromContext(r.Context()).SetAttributes(
+			attribute.String("gbo.bron", uc.bron()),
+			attribute.String("gbo.usecase", usecaseKey),
+		)
 		body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
 		if err != nil {
 			http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)

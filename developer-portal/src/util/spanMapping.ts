@@ -1,4 +1,10 @@
-import { httpPathForSpan, isSpanError, serviceNameForSpan, type JaegerTrace } from '../api/jaegerClient'
+import {
+  httpPathForSpan, isSpanError, serviceNameForSpan, spanTag,
+  type JaegerSpan, type JaegerTrace,
+} from '../api/jaegerClient'
+import {
+  BD_BRON, BRON_PROFILES, bronNodeForService, bronProfileById, type BronProfile,
+} from '../data/bronnen'
 import type { Tab } from '../types'
 
 export type NodeStatus = 'green' | 'red' | 'yellow' | 'grey' | 'no-otel'
@@ -8,6 +14,14 @@ export type SpanInfo = {
   operationName: string
   httpPath: string
   error: boolean
+  // `gbo.bron` — the bronprofiel the eudi-adapter selected from its
+  // usecase-catalog. Only the adapter-span carries it.
+  bron?: string
+}
+
+function bronTag(span: JaegerSpan): string | undefined {
+  const v = spanTag(span, 'gbo.bron')
+  return typeof v === 'string' && v !== '' ? v : undefined
 }
 
 export function collectSpans(trace: JaegerTrace): SpanInfo[] {
@@ -16,7 +30,32 @@ export function collectSpans(trace: JaegerTrace): SpanInfo[] {
     operationName: s.operationName,
     httpPath: httpPathForSpan(s),
     error: isSpanError(s),
+    bron: bronTag(s),
   }))
+}
+
+// Which register this run reads from. Two signals, both from the run itself —
+// no usecase → bron table portal-side:
+//   1. `gbo.bron` on the eudi-adapter span. Authoritative (it IS the catalog
+//      choice) and also present when the run never reached the bron, e.g. a
+//      policy-DENY.
+//   2. the bron-services in the trace. Arrives earlier than (1) — the adapter
+//      root-span only ends when the whole chain is done — so it is what
+//      normally labels the nodes as they light up.
+// Neither present (no run yet, or a run that died before the adapter): the BD
+// pair, the strip's resting state.
+export function bronForSpans(spans: SpanInfo[]): BronProfile {
+  for (const sp of spans) {
+    const byAttr = bronProfileById(sp.bron)
+    if (byAttr) return byAttr
+  }
+  for (const sp of spans) {
+    const byService = BRON_PROFILES.find(
+      (b) => sp.serviceName === b.gatewaySvc || sp.serviceName === b.bronSvc,
+    )
+    if (byService) return byService
+  }
+  return BD_BRON
 }
 
 function nodesForSpan(span: SpanInfo, mode: Tab): string[] {
@@ -44,9 +83,14 @@ function nodesForSpan(span: SpanInfo, mode: Tab): string[] {
       case 'bd-inway': return ['bd-inway']
       case 'pdp-service': return ['pdp']
       case 'opa': return ['opa']
-      case 'bron-sidecar': return ['sidecar']
-      case 'graphql-server': return ['bron']
-      default: return []
+      default: {
+        // The last two hops are bron-dependent: an akte-van-overlijden run
+        // ends at brp-sidecar/brp-graphql-server instead of the BD pair.
+        // Both map to the same two node-ids — which register they name is a
+        // labelling matter (see eudiIssuanceChain).
+        const bronNode = bronNodeForService(svc)
+        return bronNode ? [bronNode] : []
+      }
     }
   }
 
@@ -58,8 +102,10 @@ function nodesForSpan(span: SpanInfo, mode: Tab): string[] {
     case 'opa': return ['opa']
     case 'consent-register': return ['consent-pip']
     case 'bsnk-mock': return ['bsnk']
-    case 'bron-sidecar': return ['sidecar']
-    case 'graphql-server': return ['bron']
+    // DvTP reaches the BD bron only — a BRP span in a use-trace would be a
+    // different flow, not this chain.
+    case BD_BRON.gatewaySvc: return ['sidecar']
+    case BD_BRON.bronSvc: return ['bron']
     default: return []
   }
 }

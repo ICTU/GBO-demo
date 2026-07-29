@@ -2,6 +2,8 @@
 // What's here must correspond 1:1 to the real services in docker-compose.yml
 // — not to an imagined ideal.
 
+import { BD_BRON, type BronProfile } from './bronnen'
+
 export type NodeDef = {
   id: string
   role: string // top uppercase label
@@ -31,8 +33,9 @@ export const USE_CHAIN: NodeDef[] = [
   // PDP-node status reflects the DECISION outcome (override in ArchStrip);
   // the OPA branch shows engine-status.
   { id: 'pdp', role: 'PDP', name: 'Policy Decision', svc: 'pdp-service' },
-  { id: 'sidecar', role: 'Bron · Gateway', name: 'Bron-sidecar', svc: 'bron-sidecar' },
-  { id: 'bron', role: 'Bron', name: 'GraphQL-server', svc: 'graphql-server' },
+  // DvTP reaches the BD bron only (see BD_BRON).
+  { id: 'sidecar', role: 'Bron · Gateway', name: BD_BRON.gatewayName, svc: BD_BRON.gatewaySvc },
+  { id: 'bron', role: 'Bron', name: BD_BRON.bronName, svc: BD_BRON.bronSvc },
 ]
 
 // Branches: hang under a parent-node in the Use chain.
@@ -48,17 +51,26 @@ export const USE_BRANCHES: NodeDef[] = [
 // calls pdp-service directly). Same AuthZen path as DvTP; the difference
 // is only in the flow + subject_id_type grant-properties (EUDI:
 // eudi:attestation / direct — sidecar pass-through).
-export const EUDI_ISSUANCE_CHAIN: NodeDef[] = [
-  { id: 'wallet', role: 'Actor', name: 'NL-Wallet', svc: 'wallet (TestFlight)' },
-  { id: 'demo-issuer', role: 'QR', name: 'Demo-issuer', svc: 'eudi-demo-issuer' },
-  { id: 'issuance-server', role: 'IS', name: 'Issuance-server', svc: 'eudi-issuance-server' },
-  { id: 'eudi-adapter', role: 'Adapter', name: 'EUDI-adapter', svc: 'eudi-adapter' },
-  { id: 'edi-outway', role: 'FSC', name: 'EDI-Outway', svc: 'edi-outway' },
-  { id: 'bd-inway', role: 'FSC', name: 'BD-Inway', svc: 'bd-inway' },
-  { id: 'pdp', role: 'PDP', name: 'Policy Decision', svc: 'pdp-service' },
-  { id: 'sidecar', role: 'Bron · Gateway', name: 'Bron-sidecar', svc: 'bron-sidecar' },
-  { id: 'bron', role: 'Bron', name: 'GraphQL-server', svc: 'graphql-server' },
-]
+//
+// The last two nodes are bron-dependent: which register a run reads from
+// follows from the usecase (BD for the inkomensverklaringen, BRP for the akte
+// van overlijden), so the chain is a function of the bronprofiel the run
+// turned out to use — see bronForSpans in util/spanMapping. Until a run names
+// its bron the BD pair is shown (BD_BRON), which is what three of the four
+// usecases and the whole DvTP-flow use.
+export function eudiIssuanceChain(bron: BronProfile = BD_BRON): NodeDef[] {
+  return [
+    { id: 'wallet', role: 'Actor', name: 'NL-Wallet', svc: 'wallet (TestFlight)' },
+    { id: 'demo-issuer', role: 'QR', name: 'Demo-issuer', svc: 'eudi-demo-issuer' },
+    { id: 'issuance-server', role: 'IS', name: 'Issuance-server', svc: 'eudi-issuance-server' },
+    { id: 'eudi-adapter', role: 'Adapter', name: 'EUDI-adapter', svc: 'eudi-adapter' },
+    { id: 'edi-outway', role: 'FSC', name: 'EDI-Outway', svc: 'edi-outway' },
+    { id: 'bd-inway', role: 'FSC', name: 'BD-Inway', svc: 'bd-inway' },
+    { id: 'pdp', role: 'PDP', name: 'Policy Decision', svc: 'pdp-service' },
+    { id: 'sidecar', role: 'Bron · Gateway', name: bron.gatewayName, svc: bron.gatewaySvc },
+    { id: 'bron', role: 'Bron', name: bron.bronName, svc: bron.bronSvc },
+  ]
+}
 
 // Branches for the EUDI chain:
 //   - edi-manager: contract- + token-fetch that edi-outway relies on
