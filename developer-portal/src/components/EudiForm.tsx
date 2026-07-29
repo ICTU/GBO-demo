@@ -19,10 +19,33 @@ type AttestationConfig = {
   clientId: string // reader-cert client_id
 }
 
+const ISSUANCE_SERVER_PUBLIC_URL = (
+  window.__GBO_RUNTIME_CONFIG__?.eudiPublicUrl ??
+  import.meta.env.VITE_EUDI_PUBLIC_URL ??
+  ''
+).replace(/\/$/, '')
+
+// Since nl-wallet v0.5.0 the issuance-server derives the client_id from its
+// own public_url — `x509_san_dns:<host of public_url>` (verifier.rs,
+// client_id_from_public_url) — and the wallet rejects the session unless the
+// client_id in the universal link is byte-for-byte the same. So derive it the
+// same way here instead of carrying a separately-configured value that can
+// silently drift. EUDI_CLIENT_ID stays available as an explicit override.
+function clientIdFrom(publicUrl: string): string {
+  if (!publicUrl) return ''
+  try {
+    return `x509_san_dns:${new URL(publicUrl).hostname}`
+  } catch {
+    return ''
+  }
+}
+
+// `||`, not `??`: the nginx entrypoint always writes eudiClientId, as "" when
+// the env var is unset, so a nullish check would never reach the fallback.
 const CLIENT_ID =
-  window.__GBO_RUNTIME_CONFIG__?.eudiClientId ??
-  import.meta.env.VITE_EUDI_CLIENT_ID ??
-  'reader.example.com'
+  window.__GBO_RUNTIME_CONFIG__?.eudiClientId ||
+  import.meta.env.VITE_EUDI_CLIENT_ID ||
+  clientIdFrom(ISSUANCE_SERVER_PUBLIC_URL)
 
 const ATTESTATION_TYPES: AttestationConfig[] = [
   {
@@ -54,11 +77,6 @@ const ATTESTATION_TYPES: AttestationConfig[] = [
 const UL_BASE =
   import.meta.env.VITE_EUDI_UL_BASE ??
   'https://app.preproductie.wallet.edi.bzk.nl/deeplink/disclosure_based_issuance'
-const ISSUANCE_SERVER_PUBLIC_URL = (
-  window.__GBO_RUNTIME_CONFIG__?.eudiPublicUrl ??
-  import.meta.env.VITE_EUDI_PUBLIC_URL ??
-  ''
-).replace(/\/$/, '')
 
 // Build the same universal-link that demo-issuer's <nl-wallet-button>
 // generates. On scan the wallet POSTs to `request_uri`, where the

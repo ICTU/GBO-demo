@@ -398,7 +398,11 @@ services:
       # de pagina uit waarom.
       - VITE_EUDI_PUBLIC_URL=${EUDI_PUBLIC_URL:-}
       - VITE_EUDI_UL_BASE=${EUDI_UL_BASE:-https://app.preproductie.wallet.edi.bzk.nl/deeplink/disclosure_based_issuance}
-      - VITE_EUDI_CLIENT_ID=${EUDI_CLIENT_ID:-reader.example.com}
+      # Leeg laten is de normale stand: de frontend leidt de client_id dan af
+      # uit EUDI_PUBLIC_URL, precies zoals de issuance-server dat doet
+      # (x509_san_dns:<host>). Alleen invullen als het reader-cert een andere
+      # SAN uit dezelfde set moet dragen.
+      - VITE_EUDI_CLIENT_ID=${EUDI_CLIENT_ID:-}
       - VITE_JAEGER_PUBLIC_URL=${JAEGER_PUBLIC_URL:-http://localhost:9686}
       - VITE_GRAFANA_PUBLIC_URL=${GRAFANA_PUBLIC_URL:-http://localhost:9300}
       # De FSC-controllers draaien in de fsc-infra-stack, met eigen
@@ -539,7 +543,11 @@ services:
       # VITE_* is public — ends up in the built bundle (no secrets here).
       - VITE_EUDI_PUBLIC_URL=${EUDI_PUBLIC_URL:-}
       - VITE_EUDI_UL_BASE=${EUDI_UL_BASE:-https://app.preproductie.wallet.edi.bzk.nl/deeplink/disclosure_based_issuance}
-      - VITE_EUDI_CLIENT_ID=${EUDI_CLIENT_ID:-reader.example.com}
+      # Leeg laten is de normale stand: de frontend leidt de client_id dan af
+      # uit EUDI_PUBLIC_URL, precies zoals de issuance-server dat doet
+      # (x509_san_dns:<host>). Alleen invullen als het reader-cert een andere
+      # SAN uit dezelfde set moet dragen.
+      - VITE_EUDI_CLIENT_ID=${EUDI_CLIENT_ID:-}
     volumes:
       - ./developer-portal/src:/app/src
       - ./developer-portal/index.html:/app/index.html

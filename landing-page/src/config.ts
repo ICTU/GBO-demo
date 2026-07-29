@@ -62,12 +62,30 @@ export const links = {
   ),
 } as const
 
+/* Sinds nl-wallet v0.5.0 leidt de issuance-server de client_id zélf af uit
+   public_url: `x509_san_dns:<host van public_url>` (verifier.rs,
+   client_id_from_public_url). De wallet eist dat de client_id in de
+   universal link daar letterlijk aan gelijk is. Vandaar dezelfde afleiding
+   hier, in plaats van een los in te vullen waarde die stil uit de pas kan
+   lopen. EUDI_CLIENT_ID blijft als override bestaan voor het geval het
+   reader-cert een andere SAN uit dezelfde set draagt. */
+function clientIdFrom(publicUrl: string): string {
+  if (!publicUrl) return ''
+  try {
+    return `x509_san_dns:${new URL(publicUrl).hostname}`
+  } catch {
+    return ''
+  }
+}
+
 /* De QR wordt hier zelf samengesteld (zie src/eudi.ts). Daarvoor moet de
    wallet op de telefoon de issuance-server publiek kunnen bereiken —
    zonder publicUrl valt de QR weg en toont de pagina waarom. */
+const eudiPublicUrl = resolve(rc?.eudiPublicUrl, import.meta.env.VITE_EUDI_PUBLIC_URL, '')
+
 export const eudi = {
-  publicUrl: resolve(rc?.eudiPublicUrl, import.meta.env.VITE_EUDI_PUBLIC_URL, ''),
-  clientId: resolve(rc?.eudiClientId, import.meta.env.VITE_EUDI_CLIENT_ID, 'reader.example.com'),
+  publicUrl: eudiPublicUrl,
+  clientId: resolve(rc?.eudiClientId, import.meta.env.VITE_EUDI_CLIENT_ID, clientIdFrom(eudiPublicUrl)),
   ulBase: resolve(
     rc?.eudiUlBase,
     import.meta.env.VITE_EUDI_UL_BASE,
