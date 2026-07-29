@@ -22,7 +22,7 @@ Read assignments from one or more files (the output of mint-eudi-certs.py):
 
 Or pass them literally, or mix both:
 
-  python3 scripts/update-env.py readers.env --set EUDI_CLIENT_ID=eudi-is.example.nl
+  python3 scripts/update-env.py readers.env --set EUDI_PUBLIC_URL=https://eudi-is.example.nl/
 
 Preview without writing:
 

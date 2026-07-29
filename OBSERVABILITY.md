@@ -36,7 +36,6 @@ The production developer-portal image accepts these runtime variables:
 | `JAEGER_PUBLIC_URL` | Public Jaeger UI used by trace links |
 | `GRAFANA_PUBLIC_URL` | Public Grafana UI used by log links |
 | `EUDI_PUBLIC_URL` | Public issuance-server URL |
-| `EUDI_CLIENT_ID` | Optional override for the wallet reader client ID. Left empty (the normal case) it is derived from `EUDI_PUBLIC_URL` as `x509_san_dns:<host>`, matching what the issuance-server derives. |
 
 `dev-portal-backend` accepts:
 

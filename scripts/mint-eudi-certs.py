@@ -160,10 +160,9 @@ def main():
     p.add_argument("--reader-origin",
                    help="requestOriginBaseUrl embedded in the reader certs. The wallet checks it against the "
                         "origin it actually reached, so this must be the URL the wallet talks to — i.e. "
-                        "--public-url, which is the default. Only override it when the reader request is "
-                        "genuinely served from another origin. NOT EUDI_READER_ORIGIN_URL unless that happens "
-                        "to equal EUDI_PUBLIC_URL; a mismatch makes the wallet abort the session with "
-                        "access_denied after the certificate itself has already validated.")
+                        "--public-url, which is the default and is almost always right. A mismatch makes "
+                        "the wallet abort the session with access_denied after the certificate itself has "
+                        "already validated, which looks nothing like an origin problem.")
     p.add_argument("--issuer-ca-key")
     p.add_argument("--issuer-ca-cert")
     p.add_argument("--issuer-host",

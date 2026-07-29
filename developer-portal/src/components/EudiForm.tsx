@@ -28,9 +28,10 @@ const ISSUANCE_SERVER_PUBLIC_URL = (
 // Since nl-wallet v0.5.0 the issuance-server derives the client_id from its
 // own public_url — `x509_san_dns:<host of public_url>` (verifier.rs,
 // client_id_from_public_url) — and the wallet rejects the session unless the
-// client_id in the universal link is byte-for-byte the same. So derive it the
-// same way here instead of carrying a separately-configured value that can
-// silently drift. EUDI_CLIENT_ID stays available as an explicit override.
+// client_id in the universal link is byte-for-byte the same. The server can
+// produce no other value (additional SANs on the reader certificate are never
+// used as the client_id), so there is nothing to configure: deriving it from
+// the same source is the only thing that can work.
 function clientIdFrom(publicUrl: string): string {
   if (!publicUrl) return ''
   try {
@@ -40,12 +41,7 @@ function clientIdFrom(publicUrl: string): string {
   }
 }
 
-// `||`, not `??`: the nginx entrypoint always writes eudiClientId, as "" when
-// the env var is unset, so a nullish check would never reach the fallback.
-const CLIENT_ID =
-  window.__GBO_RUNTIME_CONFIG__?.eudiClientId ||
-  import.meta.env.VITE_EUDI_CLIENT_ID ||
-  clientIdFrom(ISSUANCE_SERVER_PUBLIC_URL)
+const CLIENT_ID = clientIdFrom(ISSUANCE_SERVER_PUBLIC_URL)
 
 const ATTESTATION_TYPES: AttestationConfig[] = [
   {

@@ -58,7 +58,7 @@ EUDI_CONFIG_DIR := services/eudi-issuance-server/config
 EUDI_CONFIG_FILES := issuance_server.toml inkomensverklaring_metadata.json \
     akte_van_overlijden_metadata.json issuer_auth.json reader_auth.json \
     akte_van_overlijden_issuer_auth.json akte_van_overlijden_reader_auth.json
-EUDI_REQUIRED_VARS := EUDI_PUBLIC_URL EUDI_READER_ORIGIN_URL EUDI_BRI_URL \
+EUDI_REQUIRED_VARS := EUDI_PUBLIC_URL EUDI_BRI_URL \
     EUDI_READER_KEY EUDI_READER_CERT \
     EUDI_ISSUER_KEY EUDI_ISSUER_CERT \
     EUDI_STATUS_KEY EUDI_STATUS_CERT

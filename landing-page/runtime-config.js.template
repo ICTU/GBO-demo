@@ -3,7 +3,6 @@ window.__GBO_RUNTIME_CONFIG__ = {
   toestemmingsportaalUrl: "${TOESTEMMINGSPORTAAL_URL}",
   dienstverlenerUrl: "${DIENSTVERLENER_URL}",
   eudiPublicUrl: "${EUDI_PUBLIC_URL}",
-  eudiClientId: "${EUDI_CLIENT_ID}",
   eudiUlBase: "${EUDI_UL_BASE}",
   jaegerUrl: "${JAEGER_PUBLIC_URL}",
   grafanaUrl: "${GRAFANA_PUBLIC_URL}",
