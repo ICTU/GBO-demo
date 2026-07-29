@@ -7,8 +7,10 @@
 export
 
 # nl-wallet source for the eudi-issuance-server build. Pinned via git
-# submodule (vendor/nl-wallet, v0.4.1 — the preprod wallet app rejects
-# v0.5.0's scheme-prefixed client_id). Override in .env if needed.
+# submodule (vendor/nl-wallet, v0.5.0). Server and wallet app move in
+# lockstep: a v0.5.0 server rejects a v0.4.1 app and vice versa, because
+# v0.5.0 made the `x509_san_dns:` client_id prefix mandatory. Override in
+# .env if needed.
 NLWALLET_PATH ?= $(PWD)/vendor/nl-wallet
 
 # Docker network of the fsc-infra instance this checkout uses. Equals
@@ -93,16 +95,32 @@ eudi-config:
 	done
 
 # eudi-issuance-server has no published image — built from the local
-# nl-wallet checkout ($NLWALLET_PATH).
+# nl-wallet checkout ($NLWALLET_PATH). The build is expensive, so an
+# existing image is reused — but only while it was built from the sources
+# now on disk. The nl-wallet revision is stamped on the image as a label
+# and compared here, so bumping the submodule (or editing an overridden
+# checkout) rebuilds instead of silently running the previous pin's binary
+# against this pin's config. Server and wallet app move in lockstep; a
+# stale binary here is a broken flow, not a slightly older one.
 eudi-images:
 	@if [ ! -f "$$NLWALLET_PATH/wallet_core/Cargo.toml" ]; then \
 	  echo "ERROR: nl-wallet sources not found at $$NLWALLET_PATH"; \
 	  echo "       Run: git submodule update --init vendor/nl-wallet"; \
 	  exit 1; \
 	fi
-	@if ! docker image inspect gbo/eudi-issuance-server:dev >/dev/null 2>&1; then \
-	  echo "-> Building gbo/eudi-issuance-server:dev from $$NLWALLET_PATH"; \
+	@rev="$$(git -C "$$NLWALLET_PATH" describe --tags --always --dirty 2>/dev/null || echo unknown)"; \
+	built="$$(docker image inspect gbo/eudi-issuance-server:dev \
+	    --format '{{index .Config.Labels "gbo.nlwallet-rev"}}' 2>/dev/null || true)"; \
+	if [ -n "$$built" ] && [ "$$built" = "$$rev" ]; then \
+	  echo "-> gbo/eudi-issuance-server:dev is current (nl-wallet $$rev)"; \
+	else \
+	  if [ -n "$$built" ]; then \
+	    echo "-> Rebuilding gbo/eudi-issuance-server:dev — image holds nl-wallet $$built, checkout is $$rev"; \
+	  else \
+	    echo "-> Building gbo/eudi-issuance-server:dev from $$NLWALLET_PATH (nl-wallet $$rev)"; \
+	  fi; \
 	  docker build -t gbo/eudi-issuance-server:dev \
+	    --label gbo.nlwallet-rev="$$rev" \
 	    -f services/eudi-issuance-server/Dockerfile "$$NLWALLET_PATH"; \
 	fi
 
