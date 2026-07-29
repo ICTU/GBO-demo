@@ -1,7 +1,8 @@
+import { useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import ExternalLink from './ExternalLink'
 import { links } from '../config'
-import { walletUniversalLink } from '../eudi'
+import { WALLET_USECASES, walletUniversalLink } from '../eudi'
 
 const DVTP_STEPS = [
   <>HypotheekBV vraagt je inkomensgegevens op voor een hypotheekaanvraag.</>,
@@ -16,8 +17,8 @@ const DVTP_STEPS = [
 ]
 
 export default function TryItOut() {
-  const crossDeviceLink = walletUniversalLink('cross_device')
-  const sameDeviceLink = walletUniversalLink('same_device')
+  const [usecase, setUsecase] = useState(WALLET_USECASES[0])
+  const crossDeviceLink = walletUniversalLink(usecase.key, 'cross_device')
 
   return (
     <section id="uitproberen" data-reveal className="section section--blue reveal">
@@ -68,10 +69,32 @@ export default function TryItOut() {
                 <p className="tryout-meta">EUDI · scan met de NL Wallet</p>
               </div>
             </div>
-            <p className="tryout-desc">
-              De issuer haalt je inkomensgegevens bij de bron op en zet er een inkomensverklaring
-              van in je wallet. Die deel je daarna zelf, zonder dat de bron opnieuw bevraagd wordt.
-            </p>
+            <div className="tryout-choice" role="group" aria-label="Kies welke verklaring je ophaalt">
+              {WALLET_USECASES.map((u) => (
+                <button
+                  key={u.key}
+                  type="button"
+                  aria-pressed={u.key === usecase.key}
+                  onClick={() => setUsecase(u)}
+                >
+                  {u.label}
+                </button>
+              ))}
+            </div>
+            {/* Alle varianten in dezelfde grid-cel: de cel wordt zo hoog als
+                de langste tekst, dus het wisselen verschuift niets — ook de
+                kaart ernaast niet, die in dezelfde grid-rij meerekt. */}
+            <div className="tryout-stack">
+              {WALLET_USECASES.map((u) => (
+                <p
+                  key={u.key}
+                  className="tryout-desc"
+                  aria-hidden={u.key === usecase.key ? undefined : true}
+                >
+                  {u.desc}
+                </p>
+              ))}
+            </div>
             {crossDeviceLink ? (
               <>
                 <div className="tryout-qr">
@@ -81,17 +104,25 @@ export default function TryItOut() {
                     bgColor="#ffffff"
                     fgColor="#05131f"
                     marginSize={2}
-                    aria-label="QR-code om de inkomensverklaring in je NL Wallet te laden"
+                    aria-label={`QR-code om de ${usecase.label.toLowerCase()} in je NL Wallet te laden`}
                   />
                 </div>
-                <p className="tryout-note">
-                  Scan met een andere telefoon dan waar je deze pagina op leest. Zit je al op je
-                  telefoon?{' '}
-                  <a href={sameDeviceLink} className="link-underline">
-                    Open de NL Wallet
-                  </a>
-                  .
-                </p>
+                <div className="tryout-stack">
+                  {WALLET_USECASES.map((u) => (
+                    <p
+                      key={u.key}
+                      className="tryout-note"
+                      aria-hidden={u.key === usecase.key ? undefined : true}
+                    >
+                      {u.scanNote} Scan met een andere telefoon dan waar je deze pagina op leest.
+                      Zit je al op je telefoon?{' '}
+                      <a href={walletUniversalLink(u.key, 'same_device')} className="link-underline">
+                        Open de NL Wallet
+                      </a>
+                      .
+                    </p>
+                  ))}
+                </div>
               </>
             ) : (
               /* Zonder publiek bereikbare issuance-server kan de wallet de
