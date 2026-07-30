@@ -320,8 +320,8 @@ docker compose logs <service-name>
 # Check decision logs
 docker compose logs openftv-pdp | grep "Decision Log"
 
-# Test the OpenFTV PDP directly (AuthZEN evaluation)
-curl -X POST http://localhost:9181/authzen/v1/evaluation \
+# Test the OpenFTV PDP directly (AuthZEN evaluation; HTTPS, self-signed)
+curl -k -X POST https://localhost:9181/authzen/v1/evaluation \
   -H 'Content-Type: application/json' \
   -d '{"subject":{"type":"org","id":"test"},"action":{"name":"dvtp:query"},"resource":{"type":"graphql","id":"query"},"context":{...}}'
 ```

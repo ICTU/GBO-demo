@@ -9,7 +9,10 @@ import data.dvtp.gbo
 
 _consents := [{"pi": "PI-abc123", "scopes": ["bd:ib:2025"], "valid_until": "2030-01-01T00:00:00Z"}]
 
-_input := {"context": {"resource": {"variables": {"bsn": "PI-abc123"}}}}
+_input := {
+	"subject": {"type": "org", "id": "peer-oin-123"},
+	"context": {"resource": {"variables": {"bsn": "PI-abc123"}}},
+}
 
 test_consent_match_by_pi if {
 	c := gbo._consent_match with data.attributes as {"consents": _consents}

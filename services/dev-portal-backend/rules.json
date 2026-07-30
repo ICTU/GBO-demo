@@ -1,16 +1,19 @@
 {
   "dvt0001": {
     "covers_fields": [
-      "InkomensgegevensPerJaar.belastingjaar",
-      "InkomensgegevensPerJaar.grondslag",
-      "InkomensgegevensPerJaar.inkomenUitBox1",
-      "InkomensgegevensPerJaar.peilDatum",
-      "InkomensgegevensPerJaar.status",
-      "InkomensgegevensPerJaar.verzamelinkomen",
-      "Query.inkomensgegevens"
+      "AangifteIH.belastingjaar",
+      "AangifteIH.box1Inkomen",
+      "AangifteIH.indieningsdatum",
+      "AangifteIH.status",
+      "AangifteIH.verzamelinkomen",
+      "BelastingjaarAangifte.belastingjaar",
+      "BelastingjaarAangifte.indieningsdatum",
+      "BelastingjaarAangifte.status",
+      "IngeschrevenPersoon.heeftBelastingjaarAangifte",
+      "Query.ingeschrevenPersoon"
     ],
     "covers_types": [
-      "CodeOmschrijving"
+      "Bedrag"
     ],
     "rule_id": "DVT0001",
     "spec": {
@@ -18,17 +21,19 @@
       "consent_required": true,
       "constraint_binding": [
         {
-          "arg": "input.burgerservicenummer",
+          "arg": "bsn",
           "resource_field": "pi"
         }
       ],
       "pip": null,
-      "rule_id": "DVT0001"
+      "rule_id": "DVT0001",
+      "years_in_scopes": true
     }
   },
   "eud0001": {
     "allowed_actors": [
       "00000004000000004000",
+      "0000009961EUDIISS000",
       "99999999900000000100"
     ],
     "allowed_scopes": [
@@ -36,23 +41,27 @@
       "bd:ib:2025"
     ],
     "covers_fields": [
-      "InkomensgegevensPerJaar.belastingjaar",
-      "InkomensgegevensPerJaar.grondslag",
-      "InkomensgegevensPerJaar.inkomenUitBox1",
-      "InkomensgegevensPerJaar.inkomenUitBox2",
-      "InkomensgegevensPerJaar.inkomenUitBox3",
-      "InkomensgegevensPerJaar.peilDatum",
-      "InkomensgegevensPerJaar.status",
-      "InkomensgegevensPerJaar.verzamelinkomen",
-      "Query.inkomensgegevens"
+      "AangifteIH.belastingjaar",
+      "AangifteIH.box1Inkomen",
+      "AangifteIH.box2Inkomen",
+      "AangifteIH.box3Inkomen",
+      "AangifteIH.indieningsdatum",
+      "AangifteIH.status",
+      "AangifteIH.verzamelinkomen",
+      "BelastingjaarAangifte.belastingjaar",
+      "BelastingjaarAangifte.indieningsdatum",
+      "BelastingjaarAangifte.status",
+      "IngeschrevenPersoon.heeftBelastingjaarAangifte",
+      "Query.ingeschrevenPersoon"
     ],
     "covers_types": [
-      "CodeOmschrijving"
+      "Bedrag"
     ],
     "rule_id": "EUD0001",
     "spec": {
       "allowed_actors": [
         "00000004000000004000",
+        "0000009961EUDIISS000",
         "99999999900000000100"
       ],
       "allowed_scopes": [
@@ -63,7 +72,64 @@
       "consent_required": false,
       "pid_required": true,
       "pip": null,
-      "rule_id": "EUD0001"
+      "rule_id": "EUD0001",
+      "years_in_scopes": true
+    }
+  },
+  "eud0002": {
+    "allowed_actors": [
+      "00000004000000004000",
+      "0000009961EUDIISS000",
+      "99999999900000000100"
+    ],
+    "allowed_scopes": [
+      "brp:akte:overlijden"
+    ],
+    "covers_fields": [
+      "Huwelijk.datumOntbinding",
+      "Huwelijk.datumVoltrekking",
+      "Huwelijk.landVoltrekking",
+      "Huwelijk.partners",
+      "Huwelijk.plaatsVoltrekking",
+      "Huwelijk.redenOntbinding",
+      "Huwelijk.soortVerbintenis",
+      "IngeschrevenPersoon.bsn",
+      "IngeschrevenPersoon.geslachtsnaam",
+      "IngeschrevenPersoon.heeftHuwelijk",
+      "IngeschrevenPersoon.id",
+      "IngeschrevenPersoon.voornamen",
+      "IngeschrevenPersoon.voorvoegsel",
+      "NatuurlijkPersoon.datumOverlijden",
+      "NatuurlijkPersoon.geboortedatum",
+      "NatuurlijkPersoon.geboorteland",
+      "NatuurlijkPersoon.geboorteplaats",
+      "NatuurlijkPersoon.geslacht",
+      "NatuurlijkPersoon.geslachtsnaam",
+      "NatuurlijkPersoon.heeftOuder",
+      "NatuurlijkPersoon.id",
+      "NatuurlijkPersoon.landOverlijden",
+      "NatuurlijkPersoon.plaatsOverlijden",
+      "NatuurlijkPersoon.voornamen",
+      "NatuurlijkPersoon.voorvoegsel",
+      "Query.ingeschrevenPersoon"
+    ],
+    "covers_types": [],
+    "rule_id": "EUD0002",
+    "spec": {
+      "allowed_actors": [
+        "00000004000000004000",
+        "0000009961EUDIISS000",
+        "99999999900000000100"
+      ],
+      "allowed_scopes": [
+        "brp:akte:overlijden"
+      ],
+      "consent_must_cover_scope": false,
+      "consent_required": false,
+      "pid_required": true,
+      "pip": null,
+      "rule_id": "EUD0002",
+      "years_in_scopes": false
     }
   }
 }

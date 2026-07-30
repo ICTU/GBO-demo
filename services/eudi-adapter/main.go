@@ -1,5 +1,5 @@
 // Package main implements the EUDI adapter — a bridge between nl-wallet's
-// issuance-server and the PEP/PDP/OpenFTV/graphql-server chain.
+// issuance-server and the PEP/OpenFTV-PDP/graphql-server chain.
 //
 // Role:
 //  1. Receives a POST from the issuance-server (contains disclosed PID with BSN)
@@ -8,19 +8,24 @@
 //     and presents the token from the contract.
 //  3. The Inway receives the request, validates the token, and forwards
 //     to the backend service (PDP as AuthZen endpoint).
-//  4. PEP dispatches on flow="eudi:attestation" (BSN comes from the
-//     disclosed PID; no consent fetch, no BSNk transform).
-//  5. On PDP ALLOW: PEP forwards the query to graphql-server; the adapter
-//     formats the response as an IssuableDocument list.
+//  4. PEP dispatches on the flow (BSN comes from the disclosed PID; no
+//     consent fetch, no BSNk transform).
+//  5. On PDP ALLOW: the bron answers; the adapter formats
+//     the response as an IssuableDocument list.
 //
 // Transport is uniform with the DvTP flow (both via FSC); the access basis
 // still differs (PID vs consent). OIN authenticates the actor and the path,
 // not the per-request authorization.
 //
+// Two bronprofielen are supported, selected per usecase via `bron` in the
+// catalog:
+//   - "bd"  — Belastingdienst; yields the inkomensverklaring attestation
+//   - "brp" — Basisregistratie Personen; yields the akte van overlijden,
+//     walking from the disclosing nabestaande to her huwelijkspartner
+//
 // DELIBERATELY OUT OF SCOPE for V1:
 //   - PID signature verification (BSN is trusted)
 //   - Wallet-cert check
-//   - Multi-attestation support (only the income declaration)
 //   - State between requests (each request is stateless)
 //
 // LOG HYGIENE: log the bare minimum. BSN prefix + attestation-type + trace-id.
@@ -34,6 +39,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -99,7 +105,50 @@ type Usecase struct {
 	Scope           string `json:"scope"`
 	Belastingjaren  []int  `json:"belastingjaren"`
 	OutwayPath      string `json:"outway_path"`
-	Note            string `json:"note,omitempty"`
+	// Bron selects the bronprofiel: "bd" (Belastingdienst, default) or
+	// "brp" (Basisregistratie Personen). It drives both the GraphQL query
+	// that is built and how the response maps onto wallet attributes.
+	Bron string `json:"bron,omitempty"`
+	// Flow is sent as X-GBO-Flow and mirrors the `flow` additional claim
+	// the provider's FSC Manager signs into the token. The PDP uses it to
+	// pick the mirror schema, so it has to name the bronprofiel too.
+	// Defaults to the BD flow.
+	Flow string `json:"flow,omitempty"`
+	Note string `json:"note,omitempty"`
+}
+
+// Bronprofielen the adapter can read.
+const (
+	bronBD  = "bd"
+	bronBRP = "brp"
+)
+
+// Flows, matching pdp-service's flowSchemaFiles keys.
+const (
+	flowEudiBD  = "eudi:attestation"
+	flowEudiBRP = "eudi:attestation:brp"
+)
+
+// bron returns the usecase's bronprofiel, defaulting to BD so existing
+// catalog entries keep working unchanged.
+func (u Usecase) bron() string {
+	if u.Bron == "" {
+		return bronBD
+	}
+	return u.Bron
+}
+
+// flow returns the usecase's flow, defaulting to the flow that matches its
+// bronprofiel. An explicit `flow` in the catalog wins, so a deployment can
+// point a usecase at a different policy path without a code change.
+func (u Usecase) flow() string {
+	if u.Flow != "" {
+		return u.Flow
+	}
+	if u.bron() == bronBRP {
+		return flowEudiBRP
+	}
+	return flowEudiBD
 }
 
 type Catalog struct {
@@ -121,18 +170,72 @@ func loadCatalog(path string) (*Catalog, error) {
 	return &c, nil
 }
 
-// buildQuery builds a GraphQL query for the usecase. The tax years are
-// embedded as an integer list in the query so the source returns exactly
-// those years.
+// overlijdenPartnerQuery is the akte-van-overlijden query against the BRP
+// bron-schema. It is rooted at the disclosing nabestaande's own BSN and
+// reaches the overledene only through the marriage she is a party to —
+// that path IS the authorization argument, and rule EUD0002 mirrors it in
+// covers_fields.
+//
+// `partners` is symmetric (both spouses are listed), so the adapter picks
+// the one with a datumOverlijden; see selectOverledenPartner.
+const overlijdenPartnerQuery = `query OverlijdenPartner($bsn: BSN!) {
+  ingeschrevenPersoon(bsn: $bsn) {
+    id
+    bsn
+    geslachtsnaam
+    voorvoegsel
+    voornamen
+    heeftHuwelijk {
+      soortVerbintenis
+      datumVoltrekking
+      plaatsVoltrekking
+      landVoltrekking
+      datumOntbinding
+      redenOntbinding
+      partners {
+        id
+        geslachtsnaam
+        voorvoegsel
+        voornamen
+        geboortedatum
+        geboorteplaats
+        geboorteland
+        geslacht
+        datumOverlijden
+        plaatsOverlijden
+        landOverlijden
+        heeftOuder {
+          geslachtsnaam
+          voorvoegsel
+          voornamen
+        }
+      }
+    }
+  }
+}`
+
+// buildQuery builds the GraphQL query for the usecase's bronprofiel.
+//
+// BD: the usecase's belastingjaren are embedded as the year filter so the
+// PDP can enforce per-year authorization (rule EUD0001's years_in_scopes
+// check); the bron returns exactly those years.
+// BRP: a fixed query — the akte has no parameter beyond the BSN.
 func buildQuery(u Usecase) string {
+	if u.bron() == bronBRP {
+		return overlijdenPartnerQuery
+	}
 	jaren, _ := json.Marshal(u.Belastingjaren) // -> "[2024]" etc.
-	return fmt.Sprintf(`query($bsn: String!) {
-  inkomensgegevens(input: { burgerservicenummer: $bsn, belastingjaren: %s }) {
-    belastingjaar verzamelinkomen
-    inkomenUitBox1 inkomenUitBox2 inkomenUitBox3
-    peilDatum
-    grondslag { code omschrijving }
-    status { code omschrijving }
+	return fmt.Sprintf(`query($bsn: BSN!) {
+  ingeschrevenPersoon(bsn: $bsn) {
+    heeftBelastingjaarAangifte(belastingjaren: %s) {
+      belastingjaar status indieningsdatum
+      ... on AangifteIH {
+        verzamelinkomen { waarde valuta }
+        box1Inkomen { waarde valuta }
+        box2Inkomen { waarde valuta }
+        box3Inkomen { waarde valuta }
+      }
+    }
   }
 }`, string(jaren))
 }
@@ -197,13 +300,20 @@ type proxyRequest struct {
 	Variables map[string]any `json:"variables,omitempty"`
 }
 
-// graphqlResponse: on ALLOW the PEP forwards the graphql-server body 1:1.
+// graphqlResponse: on ALLOW the PEP forwards the bron's body 1:1. Both
+// bronprofielen root their answer at `ingeschrevenPersoon`, but the shape
+// underneath differs per bronprofiel, so it stays raw here and is decoded
+// by the per-bron path in buildIssuableDocuments.
 type graphqlResponse struct {
 	Data struct {
-		Inkomensgegevens []map[string]any `json:"inkomensgegevens"`
+		IngeschrevenPersoon json.RawMessage `json:"ingeschrevenPersoon"`
 	} `json:"data"`
 	Errors []map[string]any `json:"errors,omitempty"`
 }
+
+// errNoData signals "the bron knows this person but not the facts this
+// usecase needs" — a 404 for the issuance-server, not a failure.
+var errNoData = fmt.Errorf("no data")
 
 // handleAttestation is the per-usecase handler that the issuance-server
 // calls via attestation_url_config.base_url. The usecase key comes from
@@ -216,6 +326,15 @@ func handleAttestation(cfg config, client *http.Client, usecaseKey string, uc Us
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		// The catalog decides which bron this usecase reads from; put that on
+		// the span so a trace-reader (dev-portal architecture-strip) can name
+		// the register without a second usecase → bron table of its own. Set
+		// before any work: a run that never reaches the bron (policy DENY,
+		// unknown BSN) still says which register it would have queried.
+		trace.SpanFromContext(r.Context()).SetAttributes(
+			attribute.String("gbo.bron", uc.bron()),
+			attribute.String("gbo.usecase", usecaseKey),
+		)
 		body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
 		if err != nil {
 			http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
@@ -229,7 +348,7 @@ func handleAttestation(cfg config, client *http.Client, usecaseKey string, uc Us
 			return
 		}
 		if len(req) == 0 || len(req[0].Attestations) == 0 {
-			slog.Error("no attestation in disclosure", "raw_body", string(body))
+			slog.Error("no attestation in disclosure", "body_len", len(body))
 			http.Error(w, "no PID attestation in disclosure", http.StatusBadRequest)
 			return
 		}
@@ -247,26 +366,35 @@ func handleAttestation(cfg config, client *http.Client, usecaseKey string, uc Us
 		}
 		slog.Info("adapter received disclosure",
 			"usecase", usecaseKey,
-			"bsn_prefix", safePrefix(bsn),
+			"bsn_present", true,
 			"attestation_type", uc.AttestationType,
+			"bron", uc.bron(),
+			"flow", uc.flow(),
 			"scope", uc.Scope,
 			"belastingjaren", uc.Belastingjaren,
 		)
 
-		// Policy check + data fetch via FSC -> PEP -> PDP -> OpenFTV -> graphql.
+		// Policy check + data fetch via FSC -> PEP -> PDP -> OPA -> bron.
 		// Scope + query come from the catalog entry.
-		data, err := callViaFSC(r.Context(), client, cfg, bsn, uc)
+		persoon, err := callViaFSC(r.Context(), client, cfg, bsn, uc)
 		if err != nil {
 			slog.Error("fsc call failed", "usecase", usecaseKey, "err", err.Error())
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
-		if len(data) == 0 {
-			http.Error(w, "no inkomensgegevens found for BSN", http.StatusNotFound)
+
+		docs, err := buildIssuableDocuments(uc, persoon)
+		if err != nil {
+			if errors.Is(err, errNoData) {
+				slog.Info("bron has no data for this usecase", "usecase", usecaseKey, "bron", uc.bron())
+				http.Error(w, noDataMessage(uc), http.StatusNotFound)
+				return
+			}
+			slog.Error("format attestation failed", "usecase", usecaseKey, "err", err.Error())
+			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
 
-		docs := formatAsIssuableDocuments(data, uc)
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(docs); err != nil {
 			slog.Error("encode response", "err", err.Error())
@@ -340,7 +468,10 @@ func randomSpanIDHex() string {
 //
 // X-GBO-* headers pass through Outway/Inway transparently to the backend
 // — untrusted but available.
-func callViaFSC(ctx context.Context, client *http.Client, cfg config, bsn string, uc Usecase) ([]map[string]any, error) {
+//
+// Returns the raw `ingeschrevenPersoon` object; the per-bron decoding
+// happens in buildIssuableDocuments.
+func callViaFSC(ctx context.Context, client *http.Client, cfg config, bsn string, uc Usecase) (json.RawMessage, error) {
 	if uc.OutwayPath == "" {
 		return nil, fmt.Errorf("usecase %q has no outway_path in the catalog", uc.AttestationType)
 	}
@@ -360,7 +491,7 @@ func callViaFSC(ctx context.Context, client *http.Client, cfg config, bsn string
 	httpReq.Header.Set("Content-Type", "application/json")
 	// Context headers — untrusted, pass through the Outway/Inway.
 	httpReq.Header.Set("X-GBO-Scope", uc.Scope)
-	httpReq.Header.Set("X-GBO-Flow", "eudi:attestation")
+	httpReq.Header.Set("X-GBO-Flow", uc.flow())
 	// Reuse the Fsc-Transaction-Id that the middleware already generated
 	// and that also forms the trace-id. That way trace-id ==
 	// Fsc-Transaction-Id — a single identifier across the whole chain
@@ -404,45 +535,107 @@ func callViaFSC(ctx context.Context, client *http.Client, cfg config, bsn string
 	if len(out.Errors) > 0 {
 		return nil, fmt.Errorf("graphql errors: %v", out.Errors)
 	}
-	return out.Data.Inkomensgegevens, nil
+	return out.Data.IngeschrevenPersoon, nil
 }
 
-// formatAsIssuableDocuments converts the GraphQL response into the
+// buildIssuableDocuments turns the bron's `ingeschrevenPersoon` object into
+// the issuance-server's IssuableDocument list, dispatching on the usecase's
+// bronprofiel. Returns errNoData when the person exists but not the facts
+// this usecase needs (the caller answers 404).
+func buildIssuableDocuments(uc Usecase, persoon json.RawMessage) ([]attestation, error) {
+	if len(persoon) == 0 || string(persoon) == "null" {
+		return nil, errNoData
+	}
+	if uc.bron() == bronBRP {
+		var p brpPersoon
+		if err := json.Unmarshal(persoon, &p); err != nil {
+			return nil, fmt.Errorf("decode brp persoon: %w", err)
+		}
+		huwelijk, overledene, ok := selectOverledenPartner(p)
+		if !ok {
+			return nil, errNoData
+		}
+		return formatAkteVanOverlijden(p, huwelijk, overledene, uc), nil
+	}
+
+	var p struct {
+		HeeftBelastingjaarAangifte []map[string]any `json:"heeftBelastingjaarAangifte"`
+	}
+	if err := json.Unmarshal(persoon, &p); err != nil {
+		return nil, fmt.Errorf("decode bd persoon: %w", err)
+	}
+	aangifte := selectAangifte(p.HeeftBelastingjaarAangifte, uc.Belastingjaren)
+	if aangifte == nil {
+		return nil, errNoData
+	}
+	return formatAsIssuableDocuments(aangifte, uc), nil
+}
+
+// noDataMessage keeps the 404 body specific per bronprofiel — during a live
+// demo the difference between "wrong BSN" and "this person has no deceased
+// partner" is the whole point.
+func noDataMessage(uc Usecase) string {
+	if uc.bron() == bronBRP {
+		return "no huwelijk with an overleden partner found for this BSN"
+	}
+	return "no aangifte found for BSN and belastingjaar"
+}
+
+// selectAangifte picks the aangifte for the usecase's tax year. The query
+// already filters by year at the bron; this is defense-in-depth in case a
+// bron ignores the filter. Empty belastingjaren = first aangifte.
+func selectAangifte(aangiften []map[string]any, jaren []int) map[string]any {
+	if len(aangiften) == 0 {
+		return nil
+	}
+	if len(jaren) == 0 {
+		return aangiften[0]
+	}
+	for _, a := range aangiften {
+		jaar, ok := a["belastingjaar"].(float64)
+		if !ok {
+			continue
+		}
+		for _, y := range jaren {
+			if int(jaar) == y {
+				return a
+			}
+		}
+	}
+	return nil
+}
+
+// formatAsIssuableDocuments converts the aangifte into the
 // bri-mock-compatible shape that the nl-wallet-issuance-server expects:
 //   - Flat array (no envelope)
-//   - snake_case attributes; nested GraphQL objects (grondslag, status)
-//     flattened into <name>_code / <name>_omschrijving
-//   - Amounts in eurocents (× 100) — bri convention
+//   - snake_case attributes; Bedrag objects ({waarde, valuta}) flattened
+//     to whole euros — readable in the wallet UI
 //   - Metadata (CA, issuer_uri, validity) is pulled by the issuance-server
 //     itself from its config, so those fields are NOT included here.
-func formatAsIssuableDocuments(data []map[string]any, uc Usecase) []attestation {
-	first := data[0]
-
+//
+// Attribute names match inkomensverklaring_metadata.json: belastingjaar,
+// verzamelinkomen, inkomen_box1/2/3, status, indieningsdatum.
+func formatAsIssuableDocuments(aangifte map[string]any, uc Usecase) []attestation {
 	attrs := map[string]any{
-		"belastingjaar":   first["belastingjaar"],
-		"verzamelinkomen": toCents(first["verzamelinkomen"]),
+		"belastingjaar":   aangifte["belastingjaar"],
+		"verzamelinkomen": toEuros(bedragWaarde(aangifte["verzamelinkomen"])),
 	}
-	if v, ok := first["peilDatum"]; ok {
-		attrs["peil_datum"] = v
+	if v, ok := aangifte["indieningsdatum"]; ok {
+		attrs["indieningsdatum"] = v
 	}
-	if v, ok := first["inkomenUitBox1"]; ok {
-		attrs["inkomen_box1"] = toCents(v)
+	if v, ok := aangifte["status"]; ok {
+		attrs["aangifte_status"] = v
 	}
-	if v, ok := first["inkomenUitBox2"]; ok {
-		attrs["inkomen_box2"] = toCents(v)
+	if v := bedragWaarde(aangifte["box1Inkomen"]); v != nil {
+		attrs["inkomen_box1"] = toEuros(v)
 	}
-	if v, ok := first["inkomenUitBox3"]; ok {
-		attrs["inkomen_box3"] = toCents(v)
+	if v := bedragWaarde(aangifte["box2Inkomen"]); v != nil {
+		attrs["inkomen_box2"] = toEuros(v)
 	}
-	if g, ok := first["grondslag"].(map[string]any); ok {
-		attrs["grondslag_code"] = g["code"]
-		attrs["grondslag_omschrijving"] = g["omschrijving"]
+	if v := bedragWaarde(aangifte["box3Inkomen"]); v != nil {
+		attrs["inkomen_box3"] = toEuros(v)
 	}
-	if s, ok := first["status"].(map[string]any); ok {
-		attrs["status_code"] = s["code"]
-		attrs["status_omschrijving"] = s["omschrijving"]
-	}
-	attrs["verklaring_tekst"] = fmt.Sprintf("Inkomensverklaring %v via GBO/DvTP", attrs["belastingjaar"])
+	attrs["verklaring_tekst"] = fmt.Sprintf("Inkomensverklaring %v als GBO PubEAA", attrs["belastingjaar"])
 
 	return []attestation{{
 		AttestationType: uc.AttestationType,
@@ -450,6 +643,242 @@ func formatAsIssuableDocuments(data []map[string]any, uc Usecase) []attestation 
 		Format:          "dc+sd-jwt",
 		ID:              newUUIDv4(),
 	}}
+}
+
+// ── BRP: akte van overlijden ─────────────────────────────────────────────────
+
+// The BRP response shapes, limited to what overlijdenPartnerQuery asks for.
+// Optional fields are plain strings: the bron returns null for "unknown",
+// which decodes to "" here, and empty values are simply omitted from the
+// attestation rather than issued as an empty claim.
+
+type brpOuder struct {
+	Geslachtsnaam string `json:"geslachtsnaam"`
+	Voorvoegsel   string `json:"voorvoegsel"`
+	Voornamen     string `json:"voornamen"`
+}
+
+type brpPartner struct {
+	ID               string     `json:"id"`
+	Geslachtsnaam    string     `json:"geslachtsnaam"`
+	Voorvoegsel      string     `json:"voorvoegsel"`
+	Voornamen        string     `json:"voornamen"`
+	Geboortedatum    string     `json:"geboortedatum"`
+	Geboorteplaats   string     `json:"geboorteplaats"`
+	Geboorteland     string     `json:"geboorteland"`
+	Geslacht         string     `json:"geslacht"`
+	DatumOverlijden  string     `json:"datumOverlijden"`
+	PlaatsOverlijden string     `json:"plaatsOverlijden"`
+	LandOverlijden   string     `json:"landOverlijden"`
+	HeeftOuder       []brpOuder `json:"heeftOuder"`
+}
+
+type brpHuwelijk struct {
+	SoortVerbintenis  string       `json:"soortVerbintenis"`
+	DatumVoltrekking  string       `json:"datumVoltrekking"`
+	PlaatsVoltrekking string       `json:"plaatsVoltrekking"`
+	LandVoltrekking   string       `json:"landVoltrekking"`
+	DatumOntbinding   string       `json:"datumOntbinding"`
+	RedenOntbinding   string       `json:"redenOntbinding"`
+	Partners          []brpPartner `json:"partners"`
+}
+
+type brpPersoon struct {
+	ID            string        `json:"id"`
+	BSN           string        `json:"bsn"`
+	Geslachtsnaam string        `json:"geslachtsnaam"`
+	Voorvoegsel   string        `json:"voorvoegsel"`
+	Voornamen     string        `json:"voornamen"`
+	HeeftHuwelijk []brpHuwelijk `json:"heeftHuwelijk"`
+}
+
+// datumVolledig reports whether a BRP DatumIncompleet carries a full calendar
+// date. The scalar also permits partials ("2026", "2026-02"), which cannot be
+// compared day-for-day.
+func datumVolledig(d string) bool {
+	_, err := time.Parse("2006-01-02", d)
+	return err == nil
+}
+
+// selectOverledenPartner finds the marriage that was ended by the death of the
+// requester's partner, across all of the requester's marriages.
+//
+// `partners` is symmetric per the BRP bronprofiel — both spouses are in the
+// list — so the requester herself is filtered out by id, and what remains is
+// a partner with a datumOverlijden.
+//
+// A datumOverlijden alone is not enough to certify: an ex-partner from a
+// marriage dissolved by echtscheiding also dies eventually, and the BRP keeps
+// that marriage on the persoonslijst. The nabestaande of that death is whoever
+// the deceased was married to at the time, not the earlier ex-spouse. So the
+// verbintenis itself must say it ended in this death:
+//   - redenOntbinding is "Overlijden", and
+//   - where both DatumIncompleet values are full dates, the ontbinding falls
+//     on the day of the overlijden.
+//
+// A person can be widowed more than once; the most recent overlijden wins
+// (ISO dates sort lexically, and a partial DatumIncompleet like "2026" still
+// sorts before "2026-02-14", which is the conservative order here).
+func selectOverledenPartner(p brpPersoon) (brpHuwelijk, brpPartner, bool) {
+	var bestH brpHuwelijk
+	var bestP brpPartner
+	found := false
+	for _, h := range p.HeeftHuwelijk {
+		if h.RedenOntbinding != "Overlijden" {
+			continue
+		}
+		for _, partner := range h.Partners {
+			if partner.DatumOverlijden == "" {
+				continue
+			}
+			// Guard against a bron that lists the requester herself as
+			// overleden (she is disclosing a PID, so she is not).
+			if partner.ID != "" && partner.ID == p.ID {
+				continue
+			}
+			// Both dates complete → they must be the same day: the ontbinding
+			// IS this overlijden. Partials are let through; refusing them
+			// would deny an akte over a bron's date precision.
+			if datumVolledig(h.DatumOntbinding) && datumVolledig(partner.DatumOverlijden) &&
+				h.DatumOntbinding != partner.DatumOverlijden {
+				continue
+			}
+			if !found || partner.DatumOverlijden > bestP.DatumOverlijden {
+				bestH, bestP, found = h, partner, true
+			}
+		}
+	}
+	return bestH, bestP, found
+}
+
+// volledigeNaam renders voornamen + voorvoegsel + geslachtsnaam as one
+// readable string, skipping the parts the BRP does not have.
+func volledigeNaam(voornamen, voorvoegsel, geslachtsnaam string) string {
+	parts := make([]string, 0, 3)
+	for _, s := range []string{voornamen, voorvoegsel, geslachtsnaam} {
+		if s != "" {
+			parts = append(parts, s)
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// verbintenisOmschrijving renders the relationship the way an akte words it.
+// Deliberately not gendered ("gehuwd met" instead of echtgenoot/echtgenote),
+// because the BRP geslacht of the surviving partner is not queried.
+func verbintenisOmschrijving(soort string) string {
+	if soort == "GeregistreerdPartnerschap" {
+		return "geregistreerd partner van"
+	}
+	return "gehuwd met"
+}
+
+// akteVerklaring renders the declaratory sentence of the akte, in the order
+// the ambtenaar van de burgerlijke stand writes it: date and place of death,
+// the deceased, birth date and place, and the surviving spouse.
+func akteVerklaring(persoon brpPersoon, huwelijk brpHuwelijk, overledene brpPartner) string {
+	overledeneNaam := volledigeNaam(overledene.Voornamen, overledene.Voorvoegsel, overledene.Geslachtsnaam)
+	echtgenootNaam := volledigeNaam(persoon.Voornamen, persoon.Voorvoegsel, persoon.Geslachtsnaam)
+
+	zin := fmt.Sprintf("Op %s is", overledene.DatumOverlijden)
+	if overledene.PlaatsOverlijden != "" {
+		zin += fmt.Sprintf(" te %s", overledene.PlaatsOverlijden)
+	}
+	zin += fmt.Sprintf(" overleden %s", overledeneNaam)
+	if overledene.Geboortedatum != "" {
+		zin += fmt.Sprintf(", geboren op %s", overledene.Geboortedatum)
+		if overledene.Geboorteplaats != "" {
+			zin += fmt.Sprintf(" te %s", overledene.Geboorteplaats)
+		}
+	}
+	if echtgenootNaam != "" {
+		zin += fmt.Sprintf(", %s %s", verbintenisOmschrijving(huwelijk.SoortVerbintenis), echtgenootNaam)
+	}
+	return zin + "."
+}
+
+// formatAkteVanOverlijden maps the BRP answer onto the akte's wallet
+// attributes. Same conventions as the BD path: a flat array, snake_case
+// attribute names matching akte_van_overlijden_metadata.json, and no
+// metadata fields (the issuance-server adds those from its own config).
+//
+// The attributes are the ones a Dutch akte van overlijden carries: who died,
+// when and where, born when and where, the parents, and — if applicable — the
+// echtgenoot or geregistreerd partner. The query asks for more than that on
+// purpose:
+//   - datumOntbinding / redenOntbinding / datumVoltrekking / plaatsVoltrekking
+//     / landVoltrekking establish WHICH marriage and that it ended in death.
+//     They belong on the huwelijksakte, not on this one, so they are used to
+//     select and then dropped.
+//   - bsn and the ids identify the persoonslijst; an akte carries neither.
+//
+// Conversely, three things a paper akte does carry are absent because the BRP
+// bronprofiel does not offer them: the gemeente van opmaak + aktenummer, the
+// aangever, and the tijdstip (uur) van overlijden. The laatste woonplaats
+// would be reachable via `woontOp`, but that is deliberately outside
+// EUD0002's covers_fields — it is address data, not overlijdensdata.
+//
+// Empty source values are omitted rather than issued as empty claims — an
+// akte should not assert "plaats van overlijden: <leeg>".
+func formatAkteVanOverlijden(persoon brpPersoon, huwelijk brpHuwelijk, overledene brpPartner, uc Usecase) []attestation {
+	attrs := map[string]any{
+		"overledene_geslachtsnaam": overledene.Geslachtsnaam,
+		"datum_overlijden":         overledene.DatumOverlijden,
+		// The akte words the relationship as "echtgenoot of geregistreerd
+		// partner"; soort_verbintenis disambiguates the two.
+		"soort_verbintenis":        huwelijk.SoortVerbintenis,
+		"echtgenoot_geslachtsnaam": persoon.Geslachtsnaam,
+	}
+	optional := map[string]string{
+		"overledene_voorvoegsel":    overledene.Voorvoegsel,
+		"overledene_voornamen":      overledene.Voornamen,
+		"overledene_geboortedatum":  overledene.Geboortedatum,
+		"overledene_geboorteplaats": overledene.Geboorteplaats,
+		"overledene_geboorteland":   overledene.Geboorteland,
+		"overledene_geslacht":       overledene.Geslacht,
+		"plaats_overlijden":         overledene.PlaatsOverlijden,
+		"land_overlijden":           overledene.LandOverlijden,
+		"echtgenoot_voorvoegsel":    persoon.Voorvoegsel,
+		"echtgenoot_voornamen":      persoon.Voornamen,
+	}
+	for k, v := range optional {
+		if v != "" {
+			attrs[k] = v
+		}
+	}
+
+	// The ouders of the overledene are on a paper akte too. SD-JWT claims
+	// are flat here, so they are rendered as one display string instead of
+	// a nested array.
+	ouders := make([]string, 0, len(overledene.HeeftOuder))
+	for _, o := range overledene.HeeftOuder {
+		if naam := volledigeNaam(o.Voornamen, o.Voorvoegsel, o.Geslachtsnaam); naam != "" {
+			ouders = append(ouders, naam)
+		}
+	}
+	if len(ouders) > 0 {
+		attrs["overledene_ouders"] = strings.Join(ouders, "; ")
+	}
+
+	attrs["verklaring_tekst"] = akteVerklaring(persoon, huwelijk, overledene)
+
+	return []attestation{{
+		AttestationType: uc.AttestationType,
+		Attributes:      attrs,
+		Format:          "dc+sd-jwt",
+		ID:              newUUIDv4(),
+	}}
+}
+
+// bedragWaarde extracts the waarde from a Bedrag object ({waarde, valuta})
+// as decoded from the GraphQL response. Returns nil when absent or not an
+// object.
+func bedragWaarde(v any) any {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return nil
+	}
+	return m["waarde"]
 }
 
 // newUUIDv4 generates an RFC4122 v4 UUID for the issuance-server's
@@ -461,27 +890,18 @@ func newUUIDv4() string {
 	return uuid.NewString()
 }
 
-// toCents converts a JSON number into eurocents (× 100). GraphQL delivers
-// float64; we multiply and round down.
-func toCents(v any) int64 {
+// toEuros converts a JSON number into whole euros. GraphQL delivers
+// float64; we truncate to an integer.
+func toEuros(v any) int64 {
 	switch n := v.(type) {
 	case float64:
-		return int64(n * 100)
+		return int64(n)
 	case int:
-		return int64(n) * 100
+		return int64(n)
 	case int64:
-		return n * 100
+		return n
 	}
 	return 0
-}
-
-// safePrefix: only log the first 3 digits of a BSN — data minimization
-// in transit.
-func safePrefix(bsn string) string {
-	if len(bsn) < 3 {
-		return "***"
-	}
-	return bsn[:3] + "******"
 }
 
 func initTracer(ctx context.Context) (func(context.Context) error, error) {

@@ -3,8 +3,8 @@ services:
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.96.0
     ports:
-      - "9317:4317"   # gRPC
-      - "9318:4318"   # HTTP
+      - "${GBO_PORT_OTEL_GRPC:-9317}:4317"   # gRPC
+      - "${GBO_PORT_OTEL_HTTP:-9318}:4318"   # HTTP
     volumes:
       - ./otel/collector-config.yaml:/etc/otelcol-contrib/config.yaml
     networks:
@@ -13,7 +13,7 @@ services:
   jaeger:
     image: jaegertracing/all-in-one:1.54
     ports:
-      - "9686:16686"  # Jaeger UI + Query API
+      - "${GBO_PORT_JAEGER:-9686}:16686"  # Jaeger UI + Query API
     environment:
       - COLLECTOR_OTLP_ENABLED=true
     networks:
@@ -28,7 +28,7 @@ services:
     image: grafana/loki:2.9.6
     command: -config.file=/etc/loki/local-config.yaml
     ports:
-      - "9310:3100"
+      - "${GBO_PORT_LOKI:-9310}:3100"
     volumes:
       - ./observability/loki-config.yaml:/etc/loki/local-config.yaml:ro
     networks:
@@ -41,7 +41,12 @@ services:
 
   promtail:
     image: grafana/promtail:2.9.6
-    command: -config.file=/etc/promtail/config.yaml
+    command: -config.file=/etc/promtail/config.yaml -config.expand-env=true
+    environment:
+      # The promtail config filters docker_sd on this label; compose sets
+      # COMPOSE_PROJECT_NAME from the directory (or -p), so worktrees get
+      # the right value automatically.
+      - COMPOSE_PROJECT_NAME
     volumes:
       - ./observability/promtail-config.yaml:/etc/promtail/config.yaml:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -54,7 +59,7 @@ services:
   grafana:
     image: grafana/grafana:11.1.0
     ports:
-      - "9300:3000"
+      - "${GBO_PORT_GRAFANA:-9300}:3000"
     environment:
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Editor
@@ -95,8 +100,8 @@ services:
       - PDP_TLS_CERT=/certs/pdp-service.pem
       - PDP_TLS_KEY=/certs/pdp-service-key.pem
     ports:
-      - "9181:8443"
-      - "9180:8080"
+      - "${GBO_PORT_OPA:-9181}:8443"
+      - "${GBO_PORT_OPA_HEALTH:-9180}:8080"
     volumes:
       - ./policies:/policies:ro
       - ./services/openftv-pdp/pull-config.yaml:/etc/gbo/pull-config.yaml:ro
@@ -119,7 +124,7 @@ services:
   sector-pip:
     build: ./services/sector-pip
     ports:
-      - "9404:4004"
+      - "${GBO_PORT_SECTOR_PIP:-9404}:4004"
     environment:
       - OTEL_SERVICE_NAME=sector-pip
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -139,7 +144,7 @@ services:
   graphql-server:
     build: ./services/graphql-server
     ports:
-      - "9400:4000"
+      - "${GBO_PORT_GRAPHQL:-9400}:4000"
     environment:
       - OTEL_SERVICE_NAME=graphql-server
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -157,10 +162,33 @@ services:
       timeout: 3s
       retries: 5
 
+  # Second bron: bronprofiel BRP (persoonsgegevens). Registered as its own
+  # FSC service ('brp', outway-path /brp) under the same provider org as the
+  # BD bron — a demo simplification: one provider peer, two bronnen. The
+  # akte-van-overlijden usecase reads from here.
+  brp-graphql-server:
+    build: ./services/brp-graphql-server
+    ports:
+      - "${GBO_PORT_BRP_GRAPHQL:-9401}:4001"
+    environment:
+      - OTEL_SERVICE_NAME=brp-graphql-server
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+    networks:
+      - backend
+      - fsc-infra
+    depends_on:
+      otel-collector:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4001/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   consent-register:
     build: ./services/consent-register
     ports:
-      - "9402:4002"
+      - "${GBO_PORT_CONSENT_REGISTER:-9402}:4002"
     environment:
       - OTEL_SERVICE_NAME=consent-register
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -178,7 +206,7 @@ services:
   bsnk-mock:
     build: ./services/bsnk-mock
     ports:
-      - "9403:4003"
+      - "${GBO_PORT_BSNK:-9403}:4003"
     environment:
       - OTEL_SERVICE_NAME=bsnk-mock
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -199,7 +227,7 @@ services:
   additional-claims-service:
     build: ./services/additional-claims-service
     ports:
-      - "9412:4012"
+      - "${GBO_PORT_ADDITIONAL_CLAIMS:-9412}:4012"
     environment:
       - CLAIMS_CONFIG_PATH=/config/claims.json
     volumes:
@@ -217,7 +245,7 @@ services:
   bron-sidecar:
     build: ./services/bron-sidecar
     ports:
-      - "9411:4011"
+      - "${GBO_PORT_BRON_SIDECAR:-9411}:4011"
     environment:
       - OTEL_SERVICE_NAME=bron-sidecar
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -239,11 +267,42 @@ services:
       timeout: 3s
       retries: 5
 
+  # Same sidecar image in front of the BRP bron. The sidecar is bron-agnostic
+  # (UPSTREAM_URL + PSEUDONYM_VARS), so a second bron needs a second instance,
+  # not a second implementation. The BRP service is EUDI-only for now
+  # (subject_id_type=direct), so in practice this is pass-through; it stays in
+  # place so a DvTP consumer with a pseudonym contract can be added later
+  # without moving the FSC service endpoint.
+  brp-sidecar:
+    build: ./services/bron-sidecar
+    ports:
+      - "${GBO_PORT_BRP_SIDECAR:-9413}:4011"
+    environment:
+      - OTEL_SERVICE_NAME=brp-sidecar
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - UPSTREAM_URL=http://brp-graphql-server:4001
+      - BSNK_URL=http://bsnk-mock:4003
+      - OWN_PEER_OIN=99999999900000000200
+      - PSEUDONYM_VARS=bsn
+    networks:
+      - backend
+      - fsc-infra
+    depends_on:
+      brp-graphql-server:
+        condition: service_healthy
+      bsnk-mock:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4011/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   consent-portal-backend:
     build: ./services/consent-portal-backend
     profiles: [dvtp, full]
     ports:
-      - "9405:4005"
+      - "${GBO_PORT_CONSENT_PORTAL_BACKEND:-9405}:4005"
     environment:
       - OTEL_SERVICE_NAME=consent-portal-backend
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -267,7 +326,7 @@ services:
     build: ./services/dienstverlener-backend
     profiles: [dvtp, full]
     ports:
-      - "9406:4006"
+      - "${GBO_PORT_DV_BACKEND:-9406}:4006"
     environment:
       - OTEL_SERVICE_NAME=dienstverlener-backend
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -296,6 +355,49 @@ services:
   # Frontends run as a Vite dev-server (live reload / HMR via source-mount).
   # The Dockerfile has an nginx final stage available — for a production
   # build (`target: final`), build it manually with `docker build`.
+
+  # Publieke voorpagina van de demo: legt uit wat GBO is en linkt door
+  # naar de drie frontends. Heeft geen eigen backend — alle links wijzen
+  # naar andere services en komen als VITE_* binnen (in het nginx-image
+  # via runtime-config.js.template).
+  landing-page:
+    build:
+      context: ./landing-page
+      target: build
+    command: npm run dev -- --host 0.0.0.0 --port 9000
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+      # Browser-side URL's, dus ze moeten de gepubliceerde host-poorten
+      # volgen — niet de compose-interne poorten.
+      - VITE_DIENSTVERLENER_URL=http://localhost:${GBO_PORT_DV_MOCK:-9001}
+      - VITE_TOESTEMMINGSPORTAAL_URL=http://localhost:${GBO_PORT_TOESTEMMINGSPORTAAL:-9002}
+      - VITE_DEVELOPER_PORTAL_URL=http://localhost:${GBO_PORT_DEVELOPER_PORTAL:-9003}
+      # De wallet-QR wordt client-side samengesteld, net als in de
+      # dev-portal. Zonder EUDI_PUBLIC_URL (de wallet op een telefoon moet
+      # de issuance-server publiek kunnen bereiken) valt de QR weg en legt
+      # de pagina uit waarom.
+      - VITE_EUDI_PUBLIC_URL=${EUDI_PUBLIC_URL:-}
+      - VITE_EUDI_UL_BASE=${EUDI_UL_BASE:-https://app.preproductie.wallet.edi.bzk.nl/deeplink/disclosure_based_issuance}
+      - VITE_EUDI_CLIENT_ID=${EUDI_CLIENT_ID:-reader.example.com}
+      - VITE_JAEGER_PUBLIC_URL=${JAEGER_PUBLIC_URL:-http://localhost:9686}
+      - VITE_GRAFANA_PUBLIC_URL=${GRAFANA_PUBLIC_URL:-http://localhost:9300}
+      # De FSC-controllers draaien in de fsc-infra-stack, met eigen
+      # FSC_PORT_*-poorten; vandaar losse overrides in plaats van GBO_PORT_*.
+      - VITE_FSC_CONTROLLER_BRON_URL=${FSC_CONTROLLER_BRON_URL:-http://localhost:8092}
+      - VITE_FSC_CONTROLLER_DVTP_URL=${FSC_CONTROLLER_DVTP_URL:-http://localhost:8096}
+      - VITE_FSC_CONTROLLER_EUDI_URL=${FSC_CONTROLLER_EUDI_URL:-http://localhost:8094}
+      - VITE_VERSION_STRING=${VERSION_STRING:-}
+    volumes:
+      - ./landing-page/src:/app/src
+      - ./landing-page/public:/app/public
+      - ./landing-page/index.html:/app/index.html
+      - ./landing-page/vite.config.ts:/app/vite.config.ts
+      - ./landing-page/tsconfig.json:/app/tsconfig.json
+    ports:
+      - "${GBO_PORT_LANDING:-9000}:9000"
+    networks:
+      - frontend
+
   dienstverlener-mock:
     build:
       context: ./dienstverlener-mock
@@ -312,7 +414,7 @@ services:
       - ./dienstverlener-mock/vite.config.ts:/app/vite.config.ts
       - ./dienstverlener-mock/tsconfig.json:/app/tsconfig.json
     ports:
-      - "9001:9001"
+      - "${GBO_PORT_DV_MOCK:-9001}:9001"
     networks:
       - frontend
       - backend
@@ -336,7 +438,7 @@ services:
       - ./toestemmingsportaal-frontend/vite.config.ts:/app/vite.config.ts
       - ./toestemmingsportaal-frontend/tsconfig.json:/app/tsconfig.json
     ports:
-      - "9002:9002"
+      - "${GBO_PORT_TOESTEMMINGSPORTAAL:-9002}:9002"
     networks:
       - frontend
       - backend
@@ -347,7 +449,7 @@ services:
   dev-portal-backend:
     build: ./services/dev-portal-backend
     ports:
-      - "9407:4007"
+      - "${GBO_PORT_DEV_PORTAL_BACKEND:-9407}:4007"
     environment:
       - OTEL_SERVICE_NAME=dev-portal-backend
       - CITIZENS_FILE=/citizens/citizens.json
@@ -376,10 +478,10 @@ services:
       - RULES_FILE=/rules.json
     volumes:
       - dev-portal-var:/var
-      - ./policies:/policies:ro
-      - ./services/dev-portal-backend/rules.json:/rules.json:ro
       - ./services/graphql-server/mockdata:/citizens:ro
       - ./services/sector-pip/config:/orgs:ro
+      - ./policies:/policies:ro
+      - ./services/dev-portal-backend/rules.json:/rules.json:ro
       - ./fsc-infra/orgs/edi-issuer/pki/internal:/certs/edi:ro
       - ./fsc-infra/orgs/hypotheekverlener-mock/pki/internal:/certs/hv:ro
       - ./fsc-infra/orgs/belastingdienst-mock/pki/internal:/certs/bd:ro
@@ -411,6 +513,14 @@ services:
       - PORTAL_API_TARGET=http://consent-portal-backend:4005
       - DVTP_API_TARGET=http://dienstverlener-backend:4006
       - JAEGER_API_TARGET=http://jaeger:16686
+      # Bron-GraphQL behind the portal's own origin: the playground on
+      # /playground queries /bron-api/<bron>/graphql, which the dev-server
+      # (and nginx in the image) proxies here. Server-side targets, so these
+      # are compose-internal names and ports, not published ones.
+      - BD_GRAPHQL_TARGET=http://graphql-server:4000
+      - BRP_GRAPHQL_TARGET=http://brp-graphql-server:4001
+      - VITE_JAEGER_PUBLIC_URL=${JAEGER_PUBLIC_URL:-http://localhost:9686}
+      - VITE_GRAFANA_PUBLIC_URL=${GRAFANA_PUBLIC_URL:-http://localhost:9300}
       - EUDI_API_TARGET=http://eudi-adapter:4009
       # The EUDI QR is built client-side; these env vars drive the universal-link.
       # VITE_* is public — ends up in the built bundle (no secrets here).
@@ -423,7 +533,7 @@ services:
       - ./developer-portal/vite.config.ts:/app/vite.config.ts
       - ./developer-portal/tsconfig.json:/app/tsconfig.json
     ports:
-      - "9003:9003"
+      - "${GBO_PORT_DEVELOPER_PORTAL:-9003}:9003"
     networks:
       - frontend
       - backend
@@ -507,7 +617,7 @@ services:
     # would use an init container `chown -R 1000` so USER 1000 stays.
     user: "0"
     ports:
-      - "18001:18001"
+      - "${GBO_PORT_EUDI_ISSUANCE:-18001}:18001"
     environment:
       - ISSUANCE_SERVER__STORAGE__URL=postgres://wallet:${EUDI_POSTGRES_PASSWORD}@postgres-eudi:5432/issuance_server
       # Three usecases (inkomensverklaring per tax year). Each
@@ -520,6 +630,10 @@ services:
       - ISSUANCE_SERVER__DISCLOSURE_SETTINGS__INKOMENSVERKLARING_2023__ATTESTATION_URL_CONFIG__BASE_URL=${EUDI_BRI_URL:?set EUDI_BRI_URL to the eudi-tunnel-bri URL before compose up}inkomensverklaring_2023/
       - ISSUANCE_SERVER__DISCLOSURE_SETTINGS__INKOMENSVERKLARING_2024__ATTESTATION_URL_CONFIG__BASE_URL=${EUDI_BRI_URL:?set EUDI_BRI_URL to the eudi-tunnel-bri URL before compose up}inkomensverklaring_2024/
       - ISSUANCE_SERVER__DISCLOSURE_SETTINGS__INKOMENSVERKLARING_2025__ATTESTATION_URL_CONFIG__BASE_URL=${EUDI_BRI_URL:?set EUDI_BRI_URL to the eudi-tunnel-bri URL before compose up}inkomensverklaring_2025/
+      # Fourth usecase, second bron (BRP): akte van overlijden. Same adapter,
+      # same tunnel — the adapter's catalog entry routes it to the /brp FSC
+      # service and to policy EUD0002.
+      - ISSUANCE_SERVER__DISCLOSURE_SETTINGS__AKTE_VAN_OVERLIJDEN__ATTESTATION_URL_CONFIG__BASE_URL=${EUDI_BRI_URL:?set EUDI_BRI_URL to the eudi-tunnel-bri URL before compose up}akte_van_overlijden/
       - ISSUANCE_SERVER__UNIVERSAL_LINK_BASE_URL=walletdebuginteraction://wallet.edi.rijksoverheid.nl/
       # Bind addresses explicitly — otherwise default localhost =
       # unreachable from other containers.
@@ -542,6 +656,7 @@ services:
       # keys) before starting the EUDI profile.
       - ./services/eudi-issuance-server/config/issuance_server.toml:/issuance_server.toml:ro
       - ./services/eudi-issuance-server/config/inkomensverklaring_metadata.json:/inkomensverklaring_metadata.json:ro
+      - ./services/eudi-issuance-server/config/akte_van_overlijden_metadata.json:/akte_van_overlijden_metadata.json:ro
       - ./services/eudi-issuance-server/config/issuer_auth.json:/issuer_auth.json:ro
       - ./services/eudi-issuance-server/config/reader_auth.json:/reader_auth.json:ro
       - eudi-tsl-publish:/tsl-publish
@@ -572,7 +687,7 @@ services:
     build: ./services/eudi-adapter
     profiles: [eudi, full]
     ports:
-      - "9409:4009"
+      - "${GBO_PORT_EUDI_ADAPTER:-9409}:4009"
     environment:
       - OTEL_SERVICE_NAME=eudi-adapter
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -591,7 +706,10 @@ networks:
   backend:
   eudi:
   fsc-infra:
-    name: fsc-infra_default
+    # Which fsc-infra compose project to join. Defaults to the shared
+    # single-tenant instance; a worktree running its own fsc-infra sets
+    # FSC_INFRA_NETWORK=<that project>_default in .env.
+    name: ${FSC_INFRA_NETWORK:-fsc-infra_default}
     external: true
 
 volumes:

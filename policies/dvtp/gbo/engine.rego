@@ -133,7 +133,7 @@ _field_eval(f) := {"resource": {
 	"properties": {"policy_ids": f.policy_ids},
 }}
 
-_args := object.get(input.context.resolved, "args", {})
+_args := object.get(object.get(input.context, "resolved", {}), "args", {})
 
 # ── Context for the rules ──────────────────────────────────────────────────
 # Contains consent-PIP + resource so lib.evaluate can perform consent-checks
@@ -180,22 +180,23 @@ _eval(rid, field) := lib.evaluate(_rule_meta[rid].spec, object.union(_ctx, {"fie
 
 # ── Flow dispatch ────────────────────────────────────────────────────────────
 # Rules declare their authorization basis in the spec: consent_required
-# (DvTP) or pid_required (EUDI). A rule only FIRES when its basis is
-# present in the enriched input (the PDP populates pip.consent for
-# dvtp:query, pip.pid for eudi:attestation). Without this dispatch a
-# DvTP-flow deny would aggregate EUD0001's PID_NOT_PRESENT (priority 55)
-# over the genuine DvTP reason (CONSENT_SCOPE_MISMATCH, YEAR_NOT_COVERED,
-# CONSTRAINT_MISMATCH), and vice versa — the documented "this rule fires
-# only when ..." semantics in the rule files.
+# (DvTP) or pid_required (EUDI). A rule only FIRES when its flow matches
+# the request's flow — the request-mapper places it in input.context.flow
+# (from the FSC token's additional-claims / X-GBO-Flow header). Without
+# this dispatch a DvTP-flow deny would aggregate EUD0001's
+# PID_NOT_PRESENT (priority 55) over the genuine DvTP reason
+# (CONSENT_SCOPE_MISMATCH, YEAR_NOT_COVERED, CONSTRAINT_MISMATCH), and
+# vice versa — the documented "this rule fires only when ..." semantics
+# in the rule files.
 
 _flow_applicable(rid) if {
 	s := _rule_meta[rid].spec
 	object.get(s, "consent_required", false)
-	input.pip.consent
+	input.context.flow == "dvtp:query"
 } else if {
 	s := _rule_meta[rid].spec
 	object.get(s, "pid_required", false)
-	input.pip.pid
+	input.context.flow == "eudi:attestation"
 } else if {
 	s := _rule_meta[rid].spec
 	not object.get(s, "consent_required", false)

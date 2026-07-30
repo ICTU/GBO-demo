@@ -68,6 +68,10 @@ jobs:
         run: |
           ./scripts/gen-rules-json.sh
           git diff --exit-code -- services/dev-portal-backend/rules.json
+      - name: field-map.json is up to date
+        run: |
+          ./scripts/gen-field-map.sh
+          git diff --exit-code -- services/openftv-pdp/field-map.json
 
   chart:
     name: Helm chart — lint + template
