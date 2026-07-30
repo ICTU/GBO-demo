@@ -164,21 +164,28 @@ _check_constraint(spec, ctx) := step if {
 	step := _step("CONSTRAINT_MISMATCH", "Constraint-binding satisfied", sprintf("%s == resource.%s", [first.arg, first.resource_field]), "fail")
 } else := _step_skipped("CONSTRAINT_MISMATCH", "Constraint-binding satisfied", "no constraint configured")
 
-# EUDI-flow: validate that the adapter provided a BSN from the wallet's
-# PID-disclosure. In V1 the adapter itself performs no crypto-check on
-# the PID-signature. This axis only checks presence + minimal shape
-# (9 digits).
+# EUDI-flow: validate that the adapter provided a subject from the
+# wallet's PID-disclosure. In V1 the adapter itself performs no crypto-
+# check on the PID-signature. This axis only checks presence + minimal
+# shape.
+#
+# The subject arrives as a PI, not as a BSN: the request-mapper resolves
+# the disclosed BSN through BSNk and gives the engine only the
+# pseudonymous identity. No rule reads the value — this axis asserts
+# that a PID was disclosed, and DVT0001's constraint-binding compares PI
+# against PI — so the engine, and everything that reads its decision
+# log, has no reason to hold a BSN.
 _check_pid_present(spec, ctx) := step if {
 	spec.pid_required
-	bsn := object.get(object.get(ctx.pip, "pid", {}), "bsn", "")
-	bsn != ""
-	regex.match("^[0-9]{9}$", bsn)
-	step := _step("PID_NOT_PRESENT", "PID disclosed by wallet", "input.pip.pid.bsn ~ /^[0-9]{9}$/", "pass")
+	pi := object.get(object.get(ctx.pip, "pid", {}), "pi", "")
+	pi != ""
+	regex.match("^PI-[0-9a-f]{16}$", pi)
+	step := _step("PID_NOT_PRESENT", "PID disclosed by wallet", "input.context.pip.pid.pi ~ /^PI-[0-9a-f]{16}$/", "pass")
 } else := step if {
 	spec.pid_required
-	bsn := object.get(object.get(ctx.pip, "pid", {}), "bsn", "")
-	not regex.match("^[0-9]{9}$", bsn)
-	step := _step("PID_NOT_PRESENT", "PID disclosed by wallet", "input.pip.pid.bsn ~ /^[0-9]{9}$/", "fail")
+	pi := object.get(object.get(ctx.pip, "pid", {}), "pi", "")
+	not regex.match("^PI-[0-9a-f]{16}$", pi)
+	step := _step("PID_NOT_PRESENT", "PID disclosed by wallet", "input.context.pip.pid.pi ~ /^PI-[0-9a-f]{16}$/", "fail")
 } else := _step_skipped("PID_NOT_PRESENT", "PID disclosed by wallet", "n/a (no PID-flow)")
 
 # Scope-authorization: only active when the rule explicitly declares an
@@ -323,7 +330,7 @@ field_in_consent(ctx) if {
 }
 
 field_is_scalar_leaf(ctx) if {
-	some f in input.resolved.fields
+	some f in input.context.resolved.fields
 	f.id == ctx.field
 	f.scalar
 }

@@ -1,5 +1,5 @@
 // Package main implements the EUDI adapter — a bridge between nl-wallet's
-// issuance-server and the PEP/PDP/OPA/graphql-server chain.
+// issuance-server and the PEP/OpenFTV-PDP/graphql-server chain.
 //
 // Role:
 //  1. Receives a POST from the issuance-server (contains disclosed PID with BSN)
@@ -10,7 +10,7 @@
 //     to the backend service (PDP as AuthZen endpoint).
 //  4. PEP dispatches on the flow (BSN comes from the disclosed PID; no
 //     consent fetch, no BSNk transform).
-//  5. On OPA ALLOW: PEP forwards the query to the bron; the adapter formats
+//  5. On PDP ALLOW: the bron answers; the adapter formats
 //     the response as an IssuableDocument list.
 //
 // Transport is uniform with the DvTP flow (both via FSC); the access basis

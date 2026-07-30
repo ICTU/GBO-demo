@@ -12,9 +12,10 @@ import data.dvtp.gbo.lib
 # ONE AuthZEN Decision (§6.2) = the AND across all covered fields, with
 # the per-field detail in decision.context.
 #
-# Adapted for consent-based policies: ctx carries input.pip + input.resource
-# so consent-checks (lib.evaluate) can access them, and _eval passes the
-# current `field` so field-in-consent works per field.
+# Adapted for consent-based policies: ctx carries input.context.pip +
+# input.context.resource so consent-checks (lib.evaluate) can access
+# them, and _eval passes the current `field` so field-in-consent works
+# per field. (OpenFTV: pdp-service enrichment lives under input.context.)
 # ═══════════════════════════════════════════════════════════════════════════
 
 # ── Entrypoint: one Decision = closed-world AND across all requested data fields ─
@@ -67,7 +68,7 @@ view := {
 
 default _coverage_unverifiable := false
 
-_coverage_unverifiable if input.resolved.coverage_unverifiable
+_coverage_unverifiable if input.context.resolved.coverage_unverifiable
 
 # ── Binding: self-contained rules declare their scope in policy-as-code ──────
 
@@ -116,7 +117,7 @@ _effective_policy_ids(rf, key) := _type_rules(rf.parent) if {
 _root_types := {"Query", "Mutation", "Subscription"}
 
 _data_fields := [df |
-	some rf in input.resolved.fields
+	some rf in input.context.resolved.fields
 	not rf.parent in _root_types
 	not startswith(rf.name, "__")
 	key := sprintf("%s.%s", [rf.parent, rf.name])
@@ -132,19 +133,25 @@ _field_eval(f) := {"resource": {
 	"properties": {"policy_ids": f.policy_ids},
 }}
 
-_args := object.get(input.resolved, "args", {})
+_args := object.get(object.get(input.context, "resolved", {}), "args", {})
 
-# ── Context for the rules ────────────────────────────────────────────────────
+# ── Context for the rules ──────────────────────────────────────────────────
 # Contains consent-PIP + resource so lib.evaluate can perform consent-checks
-# without reading input.* itself (dependency-injection style).
+# without reading input.* itself (dependency-injection style). Consent is
+# fetched per-request by the request-mapper (context.pip.consent); the EUDI
+# pid is per-request too (context.pip.pid).
 
 _ctx := {
 	"subject": input.subject,
 	"args": _args,
-	"time": object.get(object.get(input, "context", {}), "time", ""),
-	"resource": input.resource,
-	"pip": object.get(input, "pip", {}),
+	"time": object.get(input.context, "time", ""),
+	"resource": object.union(object.get(input.context, "resource", {}), {"pi": _pip_pi}),
+	"pip": object.get(input.context, "pip", {}),
 }
+
+# Mirror pip.consent.pi onto ctx.resource.pi so the rule's constraint-
+# binding (input.burgerservicenummer == resource.pi) is evaluable.
+_pip_pi := object.get(object.get(object.get(input.context, "pip", {}), "consent", {}), "pi", "")
 
 # ── Per-rule evaluation (given field) ────────────────────────────────────────
 
@@ -152,22 +159,23 @@ _eval(rid, field) := lib.evaluate(_rule_meta[rid].spec, object.union(_ctx, {"fie
 
 # ── Flow dispatch ────────────────────────────────────────────────────────────
 # Rules declare their authorization basis in the spec: consent_required
-# (DvTP) or pid_required (EUDI). A rule only FIRES when its basis is
-# present in the enriched input (the PDP populates pip.consent for
-# dvtp:query, pip.pid for eudi:attestation). Without this dispatch a
-# DvTP-flow deny would aggregate EUD0001's PID_NOT_PRESENT (priority 55)
-# over the genuine DvTP reason (CONSENT_SCOPE_MISMATCH, YEAR_NOT_COVERED,
-# CONSTRAINT_MISMATCH), and vice versa — the documented "this rule fires
-# only when ..." semantics in the rule files.
+# (DvTP) or pid_required (EUDI). A rule only FIRES when its flow matches
+# the request's flow — the request-mapper places it in input.context.flow
+# (from the FSC token's additional-claims / X-GBO-Flow header). Without
+# this dispatch a DvTP-flow deny would aggregate EUD0001's
+# PID_NOT_PRESENT (priority 55) over the genuine DvTP reason
+# (CONSENT_SCOPE_MISMATCH, YEAR_NOT_COVERED, CONSTRAINT_MISMATCH), and
+# vice versa — the documented "this rule fires only when ..." semantics
+# in the rule files.
 
 _flow_applicable(rid) if {
 	s := _rule_meta[rid].spec
 	object.get(s, "consent_required", false)
-	input.pip.consent
+	input.context.flow == "dvtp:query"
 } else if {
 	s := _rule_meta[rid].spec
 	object.get(s, "pid_required", false)
-	input.pip.pid
+	input.context.flow == "eudi:attestation"
 } else if {
 	s := _rule_meta[rid].spec
 	not object.get(s, "consent_required", false)

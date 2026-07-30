@@ -27,7 +27,7 @@ down:
 # are auto-generated on first run (idempotent); subsequent runs skip.
 #
 #   make demo          → default DvTP flow (over real FSC via Hypotheekverlener-mock)
-#   make demo-minimal  → base only: adapter/pdp/opa/graphql + observability
+#   make demo-minimal  → base only: adapter/pdp/openftv-pdp/graphql + observability
 #   make demo-dvtp     → alias for 'make demo'
 #   make demo-eudi     → EUDI flow over real FSC (auto init + seed-bri)
 #   make demo-full     → everything on (DvTP + EUDI + fsc-infra)
@@ -41,7 +41,7 @@ demo-minimal: certs
 	@echo ""
 	@echo "  Dev-portal:    http://localhost:9003  |  http://$$(hostname -I | awk '{print $$1}'):9003"
 	@echo "  Jaeger:        http://localhost:9686  |  http://$$(hostname -I | awk '{print $$1}'):9686"
-	@echo "  pdp-service:   http://localhost:9408/evaluation (POST)"
+	@echo "  OpenFTV PDP:   https://localhost:9181/authzen/v1/evaluation (POST)"
 
 demo-dvtp: certs fsc-all-up fsc-seed-bri fsc-seed-bri-hv
 	@echo "-> DvTP stack: base + dienstverlener + toestemmingsportaal (via real FSC)"
@@ -173,7 +173,7 @@ fsc-bd-up: fsc-directory-up fsc-bd-certs
 	docker compose -f fsc-infra/docker-compose.yml up --build -d cfssl certportal postgres directory-migrations-controller directory-migrations-manager directory-migrations-txlog-api directory-controller directory-manager directory-inway directory-txlog-api directory-ui bd-migrations-controller bd-migrations-manager bd-migrations-txlog-api bd-controller bd-manager bd-inway bd-txlog-api
 
 fsc-pdp-cert:
-	@if [ ! -f services/pdp-service/certs/pdp-service.pem ]; then \
+	@if [ ! -f services/openftv-pdp/certs/pdp-service.pem ]; then \
 		bash fsc-infra/pki/generate-pdp-cert.sh; \
 	fi
 
@@ -198,7 +198,7 @@ fsc-clean:
 	rm -f fsc-infra/orgs/belastingdienst-mock/pki/internal/*.pem
 	rm -f fsc-infra/orgs/hypotheekverlener-mock/pki/org/*.pem
 	rm -f fsc-infra/orgs/hypotheekverlener-mock/pki/internal/*.pem
-	rm -f services/pdp-service/certs/*.pem
+	rm -f services/openftv-pdp/certs/*.pem
 
 # Contract-seed: register bri-service + publication + connection contract
 # via mTLS to the FSC Manager/Controller APIs. Requires that fsc-all-up

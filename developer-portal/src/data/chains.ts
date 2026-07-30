@@ -28,7 +28,7 @@ export const USE_CHAIN: NodeDef[] = [
   { id: 'hv-outway', role: 'FSC', name: 'HV-Outway', svc: 'hv-outway' },
   { id: 'bd-inway', role: 'FSC', name: 'BD-Inway', svc: 'bd-inway' },
   // PDP is the logical decision-unit (XACML): context-handler (P3,
-  // pdp-service) + decision-engine (OPA) together. The engine hangs as a
+  // context-handler now runs inside the OpenFTV PDP as a request-mapper). The engine hangs as a
   // branch under the PDP the same way PIP-services do at the PEP. The
   // PDP-node status reflects the DECISION outcome (override in ArchStrip);
   // the OPA branch shows engine-status.
@@ -42,7 +42,7 @@ export const USE_CHAIN: NodeDef[] = [
 export const USE_BRANCHES: NodeDef[] = [
   { id: 'hv-manager', role: 'FSC · Manager', name: 'Contract + token', svc: 'hv-manager', branchOf: 'hv-outway' },
   { id: 'consent-pip', role: 'S01 · PIP', name: 'Consent-PIP', svc: 'consent-register', branchOf: 'pdp' },
-  { id: 'opa', role: 'PDP · engine', name: 'OPA', svc: 'opa', branchOf: 'pdp' },
+  { id: 'opa', role: 'PDP · engine', name: 'OpenFTV', svc: 'opa', branchOf: 'pdp' },
   { id: 'bsnk', role: 'BSNk', name: 'PI → BSN', svc: 'bsnk-mock', branchOf: 'sidecar' },
 ]
 
@@ -81,7 +81,7 @@ export function eudiIssuanceChain(bron: BronProfile = BD_BRON): NodeDef[] {
 //   - opa: policy-engine behind pdp-service
 export const EUDI_ISSUANCE_BRANCHES: NodeDef[] = [
   { id: 'edi-manager', role: 'FSC · Manager', name: 'Contract + token', svc: 'edi-manager', branchOf: 'edi-outway' },
-  { id: 'opa', role: 'PDP · engine', name: 'OPA', svc: 'opa', branchOf: 'pdp' },
+  { id: 'opa', role: 'PDP · engine', name: 'OpenFTV', svc: 'opa', branchOf: 'pdp' },
 ]
 
 // Nodes for which we structurally get no OTel spans: browser-/Rust-side

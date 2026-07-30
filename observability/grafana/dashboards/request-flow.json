@@ -8,7 +8,10 @@
   "id": null,
   "uid": "request-flow",
   "title": "Request-flow: logs naast traces",
-  "tags": ["dvtp", "observability"],
+  "tags": [
+    "dvtp",
+    "observability"
+  ],
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
@@ -35,8 +38,12 @@
         "allValue": ".+",
         "current": {
           "selected": true,
-          "text": ["All"],
-          "value": ["$__all"]
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
         }
       },
       {
@@ -54,8 +61,12 @@
         "allValue": ".+",
         "current": {
           "selected": true,
-          "text": ["All"],
-          "value": ["$__all"]
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
         }
       },
       {
@@ -108,8 +119,8 @@
     {
       "id": 3,
       "type": "logs",
-      "title": "Autorisatie-beslissingen (OPA decision-log)",
-      "description": "Canonieke PDP-beslissingen direct uit OPA. Elke regel: decision_id, allow/deny + reason, en de input (subject.id, resource.consent_id, resource.scope, trace_id). Klik op een regel om uit te klappen en trace_id naar Jaeger te volgen.",
+      "title": "Autorisatie-beslissingen (OpenFTV decision-log)",
+      "description": "Canonieke PDP-beslissingen direct uit de OpenFTV PDP (embedded OPA). Elke regel: decision_id, allow/deny + reason, en de input (subject.id, context.resource.scope, context.trace_id). Klik op een regel om uit te klappen en trace_id naar Jaeger te volgen.",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -123,7 +134,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "{compose_service=\"opa\"} | json | msg=\"Decision Log\"",
+          "expr": "{compose_service=\"openftv-pdp\"} | json | msg=\"Decision Log\"",
           "datasource": {
             "type": "loki",
             "uid": "loki"

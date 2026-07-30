@@ -78,26 +78,53 @@ services:
       jaeger:
         condition: service_healthy
 
-  opa:
-    # Baked-in demo policies (services/opa/Dockerfile copies ./policies).
-    # Build context is the repo root so the Dockerfile can reach ./policies.
+  # OpenFTV PDP with the embedded OPA/Rego engine — the authorization
+  # endpoint for FSC-Inway (AuthZEN, HTTPS on :8443). The GraphQL
+  # context-handler runs INSIDE this image as a request-mapper
+  # (services/openftv-pdp/mapper, PDP_REQUEST_MAPPINGS); consent is
+  # pulled from the consent-register into data.attributes (pull-config).
+  # Note: PDP_POLICIES_LANGUAGE must be "rego" — the documented value
+  # "OPA" makes OpenFTV silently skip all policy files (upstream quirk).
+  openftv-pdp:
+    # Build context is the repo root: the Dockerfile bakes ./policies in.
     build:
       context: .
-      dockerfile: services/opa/Dockerfile
-    command:
-      - "run"
-      - "--server"
-      - "--addr=0.0.0.0:8181"
-      - "--watch"
-      - "--log-level=info"
-      - "--set=decision_logs.console=true"
-      - "/policies"
+      dockerfile: services/openftv-pdp/Dockerfile
+    environment:
+      - PDP_POLICIES_LANGUAGE=rego
+      - PDP_POLICIES_STORE=/policies
+      - PDP_POLICIES_STORE_RECURSE=true
+      - PDP_ADL_TYPE=stdout
+      - PDP_ADL_SERVICE_NAME=gbo
+      - PDP_LOG_LEVEL=info
+      - PDP_REQUEST_MAPPINGS=graphqltocontext
+      # The mapper fetches consent per-request from the consent-register
+      # (PIP pull turned out to be both stale and broken upstream).
+      - GBO_CONSENT_URL=http://consent-register:4002
+      # The EUDI flow resolves the wallet-disclosed BSN to a PI here; the
+      # policy engine (and its decision log) is never given the BSN.
+      - GBO_BSNK_URL=http://bsnk-mock:4003
+      # TLS for the FSC-Inway AuthZen plugin (requires HTTPS + CA).
+      - PDP_TLS_CERT=/certs/pdp-service.pem
+      - PDP_TLS_KEY=/certs/pdp-service-key.pem
     ports:
-      - "${GBO_PORT_OPA:-9181}:8181"
+      - "${GBO_PORT_OPA:-9181}:8443"
+      - "${GBO_PORT_OPA_HEALTH:-9180}:8080"
+    volumes:
+      - ./policies:/policies:ro
+      - ./services/openftv-pdp/certs:/certs:ro
     networks:
       - backend
+      # The bd-Inway AuthZen plugin calls openftv-pdp directly; must be
+      # reachable inside fsc-infra_default.
+      - fsc-infra
+    depends_on:
+      consent-register:
+        condition: service_healthy
+      bsnk-mock:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "/opa", "eval", "true"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -199,44 +226,6 @@ services:
         condition: service_started
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4003/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-
-  # XACML context-handler. Sits between the FSC-Inway AuthZen call and
-  # the OPA decision engine: parses the GraphQL query, enriches the input
-  # with PIP data (consent), and forwards to OPA.
-  pdp-service:
-    # Baked-in mirror-schemas (Dockerfile copies ./policies/dvtp/schemas).
-    # Build context is the repo root so the Dockerfile can reach ./policies.
-    build:
-      context: .
-      dockerfile: services/pdp-service/Dockerfile
-    ports:
-      - "${GBO_PORT_PDP:-9408}:4008"
-    environment:
-      - OTEL_SERVICE_NAME=pdp-service
-      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
-      - OPA_URL=http://opa:8181
-      - SCHEMA_DIR=/schemas
-      - CONSENT_URL=http://consent-register:4002
-      # TLS for the FSC-Inway AuthZen plugin (requires HTTPS + CA).
-      - TLS_CERT_PATH=/certs/pdp-service.pem
-      - TLS_KEY_PATH=/certs/pdp-service-key.pem
-    volumes:
-      - ./services/pdp-service/certs:/certs:ro
-    networks:
-      - backend
-      # The bd-Inway AuthZen plugin calls pdp-service /authz; must
-      # therefore be reachable inside fsc-infra_default.
-      - fsc-infra
-    depends_on:
-      opa:
-        condition: service_healthy
-      consent-register:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "--no-check-certificate", "https://localhost:4008/health"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -491,10 +480,17 @@ services:
       - FSC_TXLOG_BD_KEY=/certs/bd/internal-cert-key.pem
       - FSC_TXLOG_BD_CA=/certs/bd/intermediate_ca.pem
       - FSC_GROUP_ID=fsc-demo
+      # Policy introspection for /policy-* endpoints reads the Rego
+      # sources from disk (OpenFTV PDP has no /v1/policies); /rules
+      # serves the pre-generated rules.json (scripts/gen-rules-json.sh).
+      - POLICIES_DIR=/policies
+      - RULES_FILE=/rules.json
     volumes:
       - dev-portal-var:/var
       - ./services/graphql-server/mockdata:/citizens:ro
       - ./services/sector-pip/config:/orgs:ro
+      - ./policies:/policies:ro
+      - ./services/dev-portal-backend/rules.json:/rules.json:ro
       - ./fsc-infra/orgs/edi-issuer/pki/internal:/certs/edi:ro
       - ./fsc-infra/orgs/hypotheekverlener-mock/pki/internal:/certs/hv:ro
       - ./fsc-infra/orgs/belastingdienst-mock/pki/internal:/certs/bd:ro
@@ -504,10 +500,10 @@ services:
       # reached directly over their internal DNS names.
       - fsc-infra
     depends_on:
-      # /rules, /policy-source, /policy-snippet, /policy-chain, /explain all
-      # hit OPA — cold-start without this dependency causes brief 502s on
-      # those endpoints until OPA's healthcheck flips.
-      opa:
+      # /decision + /explain read the engine's decision log via Loki —
+      # cold-start without this dependency causes brief 502s until the
+      # engine's healthcheck flips.
+      openftv-pdp:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4007/health"]

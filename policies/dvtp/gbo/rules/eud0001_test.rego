@@ -18,7 +18,7 @@ _base_ctx := {
 	"args": {"belastingjaren.0": "2025"},
 	"time": "2026-07-06T12:00:00Z",
 	"resource": {"scope": "bd:ib:2025"},
-	"pip": {"pid": {"bsn": "123456789"}},
+	"pip": {"pid": {"pi": "PI-2f1a7c9b40e6d853"}},
 	"field": "Query.ingeschrevenPersoon.heeftBelastingjaarAangifte",
 }
 
@@ -109,14 +109,14 @@ test_deny_actor_wins_over_scope if {
 
 test_deny_pid_missing if {
 	# object.union is deep-merged; explicit empty bsn instead of pip=={}.
-	ctx := object.union(_base_ctx, {"pip": {"pid": {"bsn": ""}}})
+	ctx := object.union(_base_ctx, {"pip": {"pid": {"pi": ""}}})
 	result := lib.evaluate(eud0001.spec, ctx)
 	result.decision == false
 	result.context.reason_admin.code == "PID_NOT_PRESENT"
 }
 
 test_deny_pid_invalid_shape if {
-	ctx := object.union(_base_ctx, {"pip": {"pid": {"bsn": "abc"}}})
+	ctx := object.union(_base_ctx, {"pip": {"pid": {"pi": "abc"}}})
 	result := lib.evaluate(eud0001.spec, ctx)
 	result.decision == false
 	result.context.reason_admin.code == "PID_NOT_PRESENT"
