@@ -73,8 +73,11 @@ services:
       jaeger:
         condition: service_healthy
 
-  # OpenFTV PDP with the embedded OPA/Rego engine (replaces the bare
-  # OPA container). AuthZEN evaluation API on :8443; health on :8080.
+  # OpenFTV PDP with the embedded OPA/Rego engine — the authorization
+  # endpoint for FSC-Inway (AuthZEN, HTTPS on :8443). The GraphQL
+  # context-handler runs INSIDE this image as a request-mapper
+  # (services/openftv-pdp/mapper, PDP_REQUEST_MAPPINGS); consent is
+  # pulled from the consent-register into data.attributes (pull-config).
   # Note: PDP_POLICIES_LANGUAGE must be "rego" — the documented value
   # "OPA" makes OpenFTV silently skip all policy files (upstream quirk).
   openftv-pdp:
@@ -86,13 +89,26 @@ services:
       - PDP_ADL_TYPE=stdout
       - PDP_ADL_SERVICE_NAME=gbo
       - PDP_LOG_LEVEL=info
+      - PDP_REQUEST_MAPPINGS=graphqltocontext
+      - PDP_PIP_PULL_CONFIGS=/etc/gbo/pull-config.yaml
+      # TLS for the FSC-Inway AuthZen plugin (requires HTTPS + CA).
+      - PDP_TLS_CERT=/certs/pdp-service.pem
+      - PDP_TLS_KEY=/certs/pdp-service-key.pem
     ports:
       - "9181:8443"
       - "9180:8080"
     volumes:
       - ./policies:/policies:ro
+      - ./services/openftv-pdp/pull-config.yaml:/etc/gbo/pull-config.yaml:ro
+      - ./services/openftv-pdp/certs:/certs:ro
     networks:
       - backend
+      # The bd-Inway AuthZen plugin calls openftv-pdp directly; must be
+      # reachable inside fsc-infra_default.
+      - fsc-infra
+    depends_on:
+      consent-register:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
       interval: 5s
@@ -173,43 +189,6 @@ services:
         condition: service_started
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4003/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-
-  # XACML context-handler. Sits between the FSC-Inway AuthZen call and
-  # the OpenFTV PDP (OPA/Rego engine): parses the GraphQL query,
-  # enriches the input with PIP data (consent), and forwards to OpenFTV.
-  pdp-service:
-    build: ./services/pdp-service
-    ports:
-      - "9408:4008"
-    environment:
-      - OTEL_SERVICE_NAME=pdp-service
-      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
-      - PDP_ENGINE_URL=http://openftv-pdp:8443
-      - SCHEMA_DIR=/schemas
-      - CONSENT_URL=http://consent-register:4002
-      # TLS for the FSC-Inway AuthZen plugin (requires HTTPS + CA).
-      - TLS_CERT_PATH=/certs/pdp-service.pem
-      - TLS_KEY_PATH=/certs/pdp-service-key.pem
-    volumes:
-      # Clean SDL of the source schema — structural reference for the
-      # GraphQL parser. Not policy; the binding lives in the rules.
-      - ./policies/dvtp/schemas:/schemas:ro
-      - ./services/pdp-service/certs:/certs:ro
-    networks:
-      - backend
-      # The bd-Inway AuthZen plugin calls pdp-service /authz; must
-      # therefore be reachable inside fsc-infra_default.
-      - fsc-infra
-    depends_on:
-      openftv-pdp:
-        condition: service_healthy
-      consent-register:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "--no-check-certificate", "https://localhost:4008/health"]
       interval: 5s
       timeout: 3s
       retries: 5

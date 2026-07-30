@@ -28,7 +28,7 @@ export const USE_CHAIN: NodeDef[] = [
   { id: 'hv-outway', role: 'FSC', name: 'HV-Outway', svc: 'hv-outway' },
   { id: 'bd-inway', role: 'FSC', name: 'BD-Inway', svc: 'bd-inway' },
   // PDP is the logical decision-unit (XACML): context-handler (P3,
-  // pdp-service) + decision-engine (OPA) together. The engine hangs as a
+  // context-handler now runs inside the OpenFTV PDP as a request-mapper). The engine hangs as a
   // branch under the PDP the same way PIP-services do at the PEP. The
   // PDP-node status reflects the DECISION outcome (override in ArchStrip);
   // the OPA branch shows engine-status.

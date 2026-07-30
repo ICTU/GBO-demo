@@ -7,7 +7,7 @@ Two access flows sit side-by-side on the same authorization pipeline:
 - **Consent flow** — a citizen grants a consumer permission to query a specific scope of source data. The consumer uses a consent-id to trigger the query; the source resolves it against the citizen's real identifier (BSN) inside its own trust boundary.
 - **Wallet flow** — a citizen holds an EUDI-wallet credential and discloses it to a consumer, who then requests source data using the disclosed identifier. Same policy engine, same transport, different front door.
 
-Both flows share one authorization pipeline: FSC-Inway (transport) → PDP (context handler) → OpenFTV PDP (OPA/Rego policy engine) → source-side sidecar (identifier substitution) → source.
+Both flows share one authorization pipeline: FSC-Inway (transport) → OpenFTV PDP (OPA/Rego policy engine + GraphQL request-mapper) → source-side sidecar (identifier substitution) → source.
 
 ## Prerequisites
 
@@ -44,7 +44,7 @@ make demo             # DvTP (consent) flow only — no wallet, no public URLs n
 
 ```bash
 make demo-minimal     # Base only (~30s, ~13 services)
-                      # Curl directly at pdp-service /evaluation for policy tests.
+                      # Curl directly at the OpenFTV PDP /authzen/v1/evaluation for policy tests.
 
 make demo-eudi        # Wallet flow only (~5-10 min first boot; PKI + FSC-infra + contract seed)
                       # Requires the vendor/nl-wallet submodule + two public HTTPS URLs
@@ -108,7 +108,6 @@ docker compose logs -f openftv-pdp
 | Developer portal | 9003 | Architect inspection (React/Vite) | Demo frontend |
 | dev-portal-backend | 9407 | Trace hub + explain endpoint | Real (Go) |
 | GraphQL Server | 9400 | Sample source with income data | Real (Go) |
-| pdp-service | 9408 | AuthZen endpoint behind FSC-Inway (P3 context handler) | Real (Go) |
 | bron-sidecar | 9411 | Source-side gateway; PI→BSN via BSNk (subject_id_type-driven) | Real (Go) |
 | additional-claims-service | 9412 | Provider policy that enriches OpenFSC access tokens | Demo configuration (Go) |
 | Consent Register | 9402 | Consent store (PIP) | Mock (Go, in-memory) |
@@ -116,7 +115,7 @@ docker compose logs -f openftv-pdp
 | HV-Manager UI | 8096 | Consumer-org FSC-Controller (mortgage-lender demo org) | Real (OpenFSC v2.4.0) |
 | EDI-Manager UI | 8094 | Consumer-org FSC-Controller (EUDI issuer) | Real (OpenFSC v2.4.0) |
 | BD-Manager UI | 8092 | Provider-org FSC-Controller (source-holder demo org) | Real (OpenFSC v2.4.0) |
-| OpenFTV PDP | 9181 (API) / 9180 (health) | Policy Decision Point (OPA/Rego engine) | Real |
+| OpenFTV PDP | 9181 (API, HTTPS) / 9180 (health) | Policy Decision Point (OPA/Rego engine + GraphQL context-mapper) | Real |
 | Jaeger | 9686 | Distributed tracing UI | Real |
 | OTel Collector | 9317 | Trace collection | Real |
 
@@ -128,7 +127,6 @@ docker compose logs -f openftv-pdp
 | OpenTelemetry + Jaeger | **Real** | Production-grade distributed tracing |
 | GraphQL Server | **Real** | Real Go GraphQL implementation |
 | FSC (Manager/Inway/Outway/Controller/txlog) | **Real** | OpenFSC v2.4.0 upstream containers, three orgs (consumer, EUDI-issuer, provider) each with their own PostgreSQL + certs |
-| pdp-service | **Real** | AuthZen endpoint behind FSC-Inway; the only policy endpoint for both flows |
 | bron-sidecar | **Real** | Source-side gateway; PI→BSN driven by the signed `subject_id_type` additional claim |
 | additional-claims-service | **Demo** | GitOps-style provider policy; production should resolve claims from the authoritative onboarding or authorization source |
 | Consent Register | **Mock** | In-memory; production would be a persistent store |
@@ -142,9 +140,9 @@ The five-factor authorization model demonstrated:
 |---|--------|------------------------|
 | ① | Org identity (mTLS) | FSC-Manager validates peer-certs; FSC-Inway includes peer_cert_chain in the AuthZen context |
 | ② | Org permission (JWT) | Provider FSC-Manager validates the grant and signs `add.{flow, subject_id_type}` returned by its Additional Claims API |
-| ③ | Access basis (consent) | pdp-service fetches consent via `GET /consents?pi=<pi>&scope=...` on consent-register |
+| ③ | Access basis (consent) | OpenFTV PDP pulls ACTIVE consents from consent-register into `data.attributes.consents` (PIP pull, 5s interval) |
 | ④ | Data scope (GraphQL) | The OpenFTV PDP checks requested fields against the dienstencatalogus (rules DVT0001/EUD0001) |
-| ⑤ | Request validity | The OpenFTV PDP validates `context.pip.consent` + `context.resource.pi` binding + expiry |
+| ⑤ | Request validity | The OpenFTV PDP validates consent + `context.resource.pi` binding + expiry |
 
 ## Makefile targets
 
@@ -180,7 +178,7 @@ Three FSC orgs run alongside the main stack:
 - PKI generation (root-CA + per-org certs)
 - FSC-infra start (three orgs + directory-peer)
 - Contract seed (bri-service + publication + two connection contracts + grant-links)
-- Main stack with dienstverlener-backend, eudi-adapter, pdp-service, bron-sidecar
+- Main stack with dienstverlener-backend, eudi-adapter, openftv-pdp, bron-sidecar
 
 Step-by-step targets are available for debugging:
 
@@ -190,14 +188,14 @@ Step-by-step targets are available for debugging:
 
    Grant-link upsert goes via direct SQL — v2.4.0 has no REST endpoint for grant-link CRUD.
 
-3. **Generate pdp-service TLS cert + restart**:
+3. **Generate OpenFTV PDP TLS cert + restart**:
    ```bash
    bash fsc-infra/pki/generate-pdp-cert.sh
-   docker compose up -d --force-recreate dienstverlener-backend eudi-adapter pdp-service graphql-server bron-sidecar
+   docker compose up -d --force-recreate dienstverlener-backend eudi-adapter openftv-pdp graphql-server bron-sidecar
    docker compose -f fsc-infra/docker-compose.yml up -d --force-recreate bd-inway
    ```
 
-   `generate-pdp-cert.sh` produces a self-signed cert (SAN=`pdp-service`) — FSC-Inway's AuthZen plugin requires HTTPS+CA. The same `.pem` is mounted by the provider-inway as `AUTHZEN_ROOT_CA`.
+   `generate-pdp-cert.sh` produces a self-signed cert (SAN=`openftv-pdp`) — FSC-Inway's AuthZen plugin requires HTTPS+CA. The same `.pem` is mounted by the provider-inway as `AUTHZEN_ROOT_CA`.
 
 **Reset**:
 
@@ -245,7 +243,7 @@ docker compose -f docker-compose.yml -f docker-compose.cloudflare-tunnel.yml --p
 # Go happy-path integration tests (per service)
 for svc in additional-claims-service bron-sidecar bsnk-mock consent-portal-backend consent-register \
            dev-portal-backend dienstverlener-backend eudi-adapter \
-           graphql-server pdp-service sector-pip; do
+           graphql-server sector-pip; do
   (cd services/$svc && go test -timeout 60s ./...)
 done
 
@@ -308,8 +306,6 @@ example values files cover an OpenFTV PDP with policy ConfigMap and a TLS-enable
 ```bash
 helm template openftv-pdp deploy/helm/gbo-app \
   --values deploy/helm/gbo-app/examples/openftv-pdp-values.yaml
-helm template pdp-service deploy/helm/gbo-app \
-  --values deploy/helm/gbo-app/examples/pdp-service-values.yaml
 ```
 
 ## Troubleshooting
@@ -336,7 +332,7 @@ curl -X POST http://localhost:9181/authzen/v1/evaluation \
 
 ## Adding new access flows
 
-The architecture is designed for incremental extension. Every new flow shares the same FSC-Inway → pdp-service (AuthZen) → OpenFTV PDP → bron-sidecar → GraphQL chain — only the policy rules, contract properties, and entry points differ. Flow-specific context is provider-owned: OpenFSC asks `additional-claims-service` during token issuance and signs the returned values into the access token's `add` claim.
+The architecture is designed for incremental extension. Every new flow shares the same FSC-Inway → OpenFTV PDP (AuthZen + GraphQL request-mapper) → bron-sidecar → GraphQL chain — only the policy rules, contract properties, and entry points differ. Flow-specific context is provider-owned: OpenFSC asks `additional-claims-service` during token issuance and signs the returned values into the access token's `add` claim.
 
 The checked-in mapping is deliberately small demo policy, not a second production contract register. A production deployment should resolve these claims from the same authoritative onboarding or authorization source that governs the relationship.
 

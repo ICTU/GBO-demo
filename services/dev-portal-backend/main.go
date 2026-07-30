@@ -387,7 +387,7 @@ func passthroughFile(path string) http.HandlerFunc {
 // The OpenFTV PDP writes one "Decision Log" line per evaluation to stdout
 // (embedded OPA console decision-logs). Promtail ships them to Loki under
 // the {compose_service="openftv-pdp"} label. We query by trace_id (which
-// pdp-service injects into the AuthZEN context) and return a normalized
+// the OpenFTV request-mapper injects into the AuthZEN context) and
 // entry.
 
 type lokiQueryResponse struct {
@@ -402,7 +402,7 @@ type lokiQueryResponse struct {
 const decisionLogExpr = `{compose_service="openftv-pdp"} |= "Decision Log"`
 
 // traceIDOf extracts the trace_id from an OpenFTV decision-log entry.
-// pdp-service places it in the AuthZEN context → input.context.trace_id.
+// the request-mapper places Fsc-Transaction-Id in input.context.trace_id.
 func traceIDOf(entry map[string]any) string {
 	input, _ := entry["input"].(map[string]any)
 	ctx, _ := input["context"].(map[string]any)

@@ -6,11 +6,22 @@ ARG OPENFTV_REF=5da6cf1e9c8a55385fbac61aa9eeb9fc889f2b8f
 
 WORKDIR /build
 ADD https://gitlab.com/digilab.overheid.nl/ecosystem/ftv/open-ftv/-/archive/${OPENFTV_REF}/open-ftv-${OPENFTV_REF}.tar.gz /tmp/open-ftv.tar.gz
-RUN tar -xzf /tmp/open-ftv.tar.gz -C /build --strip-components=1 \
+RUN tar -xzf /tmp/open-ftv.tar.gz -C /build --strip-components=1
+
+# GBO patch: GraphQL request-mapper (replaces the pdp-service context-
+# handler). Registered as the "graphqltocontext" mapping and wired into
+# the PDP controller via pdp.WithMappings (unwired upstream at this ref).
+COPY mapper/graphql.go eam/mapping/graphql.go
+RUN sed -i '/mappers = append(mappers, BodyToContext)/a\ \t\tcase "graphqltocontext":\n\t\t\tmappers = append(mappers, GraphQLToContext)' eam/mapping/mapper.go \
+  && sed -i '/pdp.WithADL(decisionLog),/a\ \t\tpdp.WithMappings(mapping.MappingsFromConfig(s.cfg.RequestMappings)...),' apps/pdp/server/auth.go \
+  && sed -i 's|handlers "gitlab.com/digilab.overheid.nl/ecosystem/ftv/open-ftv/eam/handlers/fiber"|handlers "gitlab.com/digilab.overheid.nl/ecosystem/ftv/open-ftv/eam/handlers/fiber"\n\t"gitlab.com/digilab.overheid.nl/ecosystem/ftv/open-ftv/eam/mapping"|' apps/pdp/server/auth.go \
+  && go get github.com/vektah/gqlparser/v2@v2.5.30 \
+  && go mod tidy \
   && CGO_ENABLED=0 go build -ldflags="-s -w" -o /pdp ./apps/pdp/cmd/
 
 FROM alpine:3.22
 RUN apk add --no-cache curl
 COPY --from=builder /pdp /
+COPY field-map.json /etc/gbo/field-map.json
 EXPOSE 8443
 ENTRYPOINT ["/pdp"]

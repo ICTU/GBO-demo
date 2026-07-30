@@ -376,7 +376,7 @@ export default function App() {
           states={mergedStates}
           apiCalls={archApiCalls}
           traceId={archTraceId ?? undefined}
-          pdpTraceIdOverride={fscOverrides.pdpTrace?.traceID}
+          pdpTraceIdOverride={fscOverrides.decisionTraceKey ?? undefined}
           bron={archBron}
           watching={watching}
           onToggleWatch={() => setWatching((w) => !w)}
