@@ -86,7 +86,10 @@ services:
   # Note: PDP_POLICIES_LANGUAGE must be "rego" — the documented value
   # "OPA" makes OpenFTV silently skip all policy files (upstream quirk).
   openftv-pdp:
-    build: ./services/openftv-pdp
+    # Build context is the repo root: the Dockerfile bakes ./policies in.
+    build:
+      context: .
+      dockerfile: services/openftv-pdp/Dockerfile
     environment:
       - PDP_POLICIES_LANGUAGE=rego
       - PDP_POLICIES_STORE=/policies
@@ -98,6 +101,9 @@ services:
       # The mapper fetches consent per-request from the consent-register
       # (PIP pull turned out to be both stale and broken upstream).
       - GBO_CONSENT_URL=http://consent-register:4002
+      # The EUDI flow resolves the wallet-disclosed BSN to a PI here; the
+      # policy engine (and its decision log) is never given the BSN.
+      - GBO_BSNK_URL=http://bsnk-mock:4003
       # TLS for the FSC-Inway AuthZen plugin (requires HTTPS + CA).
       - PDP_TLS_CERT=/certs/pdp-service.pem
       - PDP_TLS_KEY=/certs/pdp-service-key.pem
@@ -114,6 +120,8 @@ services:
       - fsc-infra
     depends_on:
       consent-register:
+        condition: service_healthy
+      bsnk-mock:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]

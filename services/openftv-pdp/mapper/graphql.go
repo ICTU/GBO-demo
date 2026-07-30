@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"os"
@@ -69,8 +70,28 @@ func GraphQLToContext(parc *models.PARC, opts ...Option) *models.PARC {
 	ctx.AddAttributeKV("fsc", map[string]any{"transaction_id": txID})
 
 	if flow == "eudi:attestation" {
+		// The BSN stops here. It is needed to reach the bron — the PEP
+		// forwards the original query untouched — but the policy engine
+		// evaluates on a pseudonymous identity, so that is all it is
+		// given. On pseudonymize failure the BSN is scrubbed to "" (fail
+		// closed: PID_NOT_PRESENT), never passed through.
 		bsn, _ := variables["bsn"].(string)
-		ctx.AddAttributeKV("pip", map[string]any{"pid": map[string]any{"bsn": bsn}})
+		pi, err := pseudonymizeBSN(bsn)
+		if err != nil {
+			pi = ""
+		}
+		ctx.AddAttributeKV("pip", map[string]any{"pid": map[string]any{"pi": pi}})
+		action := parc.Action
+		if bsn != "" {
+			substituteContext(ctx, bsn, pi)
+			// The raw body attribute is part of the decision-log input —
+			// rewrite the identifier in it too.
+			variables["bsn"] = pi
+			newBody, _ := json.Marshal(map[string]any{"query": query, "variables": variables})
+			action = models.NewEntity(parc.Action.Type(), parc.Action.ID(), models.NewAttributeSet(parc.Action.Attributes()))
+			action.Attributes().AddAttributeKV(models.AttrBody, string(newBody))
+		}
+		return &models.PARC{Principal: parc.Principal, Action: action, Resource: parc.Resource, Context: ctx}
 	} else {
 		ctx.AddAttributeKV("pip", map[string]any{"consent": fetchConsent(headers, variables, scope)})
 	}
@@ -80,6 +101,84 @@ func GraphQLToContext(parc *models.PARC, opts ...Option) *models.PARC {
 		Action:    parc.Action,
 		Resource:  parc.Resource,
 		Context:   ctx,
+	}
+}
+
+// pseudonymizeBSN resolves the wallet-disclosed BSN to a PI via BSNk,
+// so the policy engine (and its decision log, shipped to Loki) never
+// holds the BSN itself. No rule reads the identifier's value: the EUDI
+// rules only assert that a PID was disclosed, and the DvTP rule's
+// constraint-binding compares PI against PI.
+func pseudonymizeBSN(bsn string) (string, error) {
+	if bsn == "" {
+		return "", nil
+	}
+	u := bsnkURL() + "/pseudonymize"
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, strings.NewReader(`{"bsn":"`+bsn+`"}`))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := consentClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("bsnk status %d", resp.StatusCode)
+	}
+	var out struct {
+		PI string `json:"pi"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil || out.PI == "" {
+		return "", fmt.Errorf("bsnk returned no PI")
+	}
+	return out.PI, nil
+}
+
+func bsnkURL() string {
+	if u := os.Getenv("GBO_BSNK_URL"); u != "" {
+		return u
+	}
+	return "http://bsnk-mock:4003"
+}
+
+// substituteContext rewrites every occurrence of `from` to `to` in the
+// context attributes the mapper just set, at JSON value level rather
+// than by string search, so a BSN that happens to be a substring of
+// some other value is left alone. Covers resource.variables and the
+// resolved args (both derived from the query variables).
+func substituteContext(ctx *models.AttributeSet, from, to string) {
+	for _, key := range []string{"resource", "resolved"} {
+		attr := ctx.GetAttribute(key)
+		if attr == nil {
+			continue
+		}
+		ctx.AddAttributeKV(key, substituteValue(attr.Value(), from, to))
+	}
+}
+
+func substituteValue(v any, from, to string) any {
+	switch t := v.(type) {
+	case string:
+		if t == from {
+			return to
+		}
+		return t
+	case map[string]any:
+		for k, val := range t {
+			t[k] = substituteValue(val, from, to)
+		}
+		return t
+	case []any:
+		for i, val := range t {
+			t[i] = substituteValue(val, from, to)
+		}
+		return t
+	default:
+		return v
 	}
 }
 

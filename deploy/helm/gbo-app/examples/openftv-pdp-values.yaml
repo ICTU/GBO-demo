@@ -29,11 +29,7 @@ healthPath: /healthz
 health:
   port: 8080
 
-volumeMounts:
-  - name: policies
-    mountPath: /policies
-    readOnly: true
-volumes:
-  - name: policies
-    configMap:
-      name: pdp-policies
+# Policies are baked into the image at /policies (services/openftv-pdp/
+# Dockerfile, build context = repo root), so no ConfigMap is needed —
+# the chart creates none. A volume mount at /policies would shadow the
+# baked-in files.

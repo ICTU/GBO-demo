@@ -89,6 +89,14 @@ reason := "POLICY_OVERRIDE"' > policies/authz.rego
 git checkout policies/authz.rego
 ```
 
+Not always, though: the watcher has been seen to miss `lib.rego` while picking
+up every other file in the same tree (issue #151). If a policy change has no
+effect, restart the engine before concluding the rule is wrong:
+
+```bash
+docker compose restart openftv-pdp
+```
+
 ### Revoke consent
 
 Click "Revoke consent" in the consent portal (`:9002`), repeat the query. The PDP reads the consent register, sees status=REVOKED → DENY.
@@ -129,6 +137,7 @@ docker compose logs -f openftv-pdp
 | FSC (Manager/Inway/Outway/Controller/txlog) | **Real** | OpenFSC v2.4.0 upstream containers, three orgs (consumer, EUDI-issuer, provider) each with their own PostgreSQL + certs |
 | bron-sidecar | **Real** | Source-side gateway; PI→BSN driven by the signed `subject_id_type` additional claim |
 | additional-claims-service | **Demo** | GitOps-style provider policy; production should resolve claims from the authoritative onboarding or authorization source |
+| EUDI PID disclosure | **Demo** | The subject the EUDI rules key on (`pip.pid.pi`, derived by the request-mapper from the disclosed BSN via BSNk) originates in the same request that carries the query variable selecting the record — it is not independently verified, so the disclosure does not prove the subject. Production needs the wallet's verified PID assertion bound to `variables.bsn` before the PDP evaluates. Applies to both EUDI flows (BD and BRP) |
 | Consent Register | **Mock** | In-memory; production would be a persistent store |
 | BSNk Mock | **Mock** | Deterministic SHA-256; real BSNk uses ElGamal on elliptic curves |
 
@@ -301,7 +310,7 @@ helm template bsnk-mock deploy/helm/gbo-app \
 
 The chart also supports overriding the container entrypoint, passing arguments,
 mounting native Kubernetes volumes, and selecting the health probe scheme. The
-example values files cover an OpenFTV PDP with policy ConfigMap and a TLS-enabled PDP service:
+example values files cover the OpenFTV PDP (policies baked into the image) and a TLS-enabled PDP service:
 
 ```bash
 helm template openftv-pdp deploy/helm/gbo-app \
