@@ -137,42 +137,21 @@ _args := object.get(object.get(input.context, "resolved", {}), "args", {})
 
 # ── Context for the rules ──────────────────────────────────────────────────
 # Contains consent-PIP + resource so lib.evaluate can perform consent-checks
-# without reading input.* itself (dependency-injection style). Consent comes
-# from data.attributes.consents — the OpenFTV PIP pull of the consent-
-# register (see pull-config.yaml); the EUDI pid is per-request context.
+# without reading input.* itself (dependency-injection style). Consent is
+# fetched per-request by the request-mapper (context.pip.consent); the EUDI
+# pid is per-request too (context.pip.pid).
 
 _ctx := {
 	"subject": input.subject,
 	"args": _args,
 	"time": object.get(input.context, "time", ""),
-	"resource": object.union(object.get(input.context, "resource", {}), {"pi": _pip_consent.pi}),
-	"pip": {
-		"consent": _pip_consent,
-		"pid": object.get(input.context, "pid", {}),
-	},
+	"resource": object.union(object.get(input.context, "resource", {}), {"pi": _pip_pi}),
+	"pip": object.get(input.context, "pip", {}),
 }
 
-# Consent lookup by PI (the pseudonym in resource.variables.bsn). Only
-# ACTIVE consents are pulled, so a withdrawn consent manifests as
-# CONSENT_NOT_FOUND — same semantics as the old by-PI lookup.
-_requested_pi := object.get(object.get(object.get(input.context, "resource", {}), "variables", {}), "bsn", "")
-
-_consent_match := c if {
-	some c in object.get(data.attributes, "consents", [])
-	c.pi == _requested_pi
-}
-
-_pip_consent := {
-	"exists": _consent_found,
-	"withdrawn": false,
-	"valid_until": object.get(_consent_match, "valid_until", ""),
-	"granted_scopes": object.get(_consent_match, "scopes", []),
-	"pi": object.get(_consent_match, "pi", ""),
-}
-
-default _consent_found := false
-
-_consent_found if _consent_match
+# Mirror pip.consent.pi onto ctx.resource.pi so the rule's constraint-
+# binding (input.burgerservicenummer == resource.pi) is evaluable.
+_pip_pi := object.get(object.get(object.get(input.context, "pip", {}), "consent", {}), "pi", "")
 
 # ── Per-rule evaluation (given field) ────────────────────────────────────────
 

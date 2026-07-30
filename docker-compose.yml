@@ -95,7 +95,9 @@ services:
       - PDP_ADL_SERVICE_NAME=gbo
       - PDP_LOG_LEVEL=info
       - PDP_REQUEST_MAPPINGS=graphqltocontext
-      - PDP_PIP_PULL_CONFIGS=/etc/gbo/pull-config.yaml
+      # The mapper fetches consent per-request from the consent-register
+      # (PIP pull turned out to be both stale and broken upstream).
+      - GBO_CONSENT_URL=http://consent-register:4002
       # TLS for the FSC-Inway AuthZen plugin (requires HTTPS + CA).
       - PDP_TLS_CERT=/certs/pdp-service.pem
       - PDP_TLS_KEY=/certs/pdp-service-key.pem
@@ -104,7 +106,6 @@ services:
       - "${GBO_PORT_OPA_HEALTH:-9180}:8080"
     volumes:
       - ./policies:/policies:ro
-      - ./services/openftv-pdp/pull-config.yaml:/etc/gbo/pull-config.yaml:ro
       - ./services/openftv-pdp/certs:/certs:ro
     networks:
       - backend

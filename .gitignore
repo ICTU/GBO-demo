@@ -10,6 +10,8 @@ services/*/*[!.go]
 !services/*/mockdata/
 !services/*/scenarios/
 !services/dev-portal-backend/rules.json
+!services/openftv-pdp/mapper/
+!services/openftv-pdp/field-map.json
 !services/*/config/
 
 # Local compose overrides + secrets
