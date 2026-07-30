@@ -693,18 +693,38 @@ func handlePolicySource(cfg config) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id query param required"})
 			return
 		}
-		clean := filepath.Clean(id)
-		if strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {
+		full, ok := policyFilePath(cfg.PoliciesDir, id)
+		if !ok {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid policy id"})
 			return
 		}
-		raw, err := os.ReadFile(filepath.Join(cfg.PoliciesDir, clean))
+		raw, err := os.ReadFile(full)
 		if err != nil {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "policy not found: " + id})
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"id": id, "raw": string(raw)})
 	}
+}
+
+// policyFilePath resolves a client-supplied policy id to a file inside
+// dir, rejecting anything that would escape it. Only .rego files are
+// served. (CodeQL: uncontrolled data used in path expression — the
+// returned path is provably inside dir.)
+func policyFilePath(dir, id string) (string, bool) {
+	if id == "" {
+		return "", false
+	}
+	clean := filepath.Clean(id)
+	if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, "../") || !strings.HasSuffix(clean, ".rego") {
+		return "", false
+	}
+	full := filepath.Join(dir, clean)
+	rel, err := filepath.Rel(dir, full)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, "../") {
+		return "", false
+	}
+	return full, true
 }
 
 // handlePolicySnippet locates the Rego file + line where a given reason-code
