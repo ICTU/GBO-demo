@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -9,6 +11,11 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"gbo-demo/consent-portal-backend/consent"
+	"gbo-demo/consent-portal-backend/logctx"
+	"gbo-demo/consent-portal-backend/portalhttp"
 )
 
 // Happy-path integration test: login -> give consent -> list consents.
@@ -66,7 +73,7 @@ func TestPortalGiveThenList(t *testing.T) {
 		BSNkURL:    bsnk.URL,
 		ConsentURL: register.URL,
 	}
-	srv := httptest.NewServer(newMux(cfg, NewSSEHub()))
+	srv := httptest.NewServer(newMux(cfg, portalhttp.NewHub()))
 	defer srv.Close()
 
 	// /health sanity check.
@@ -89,7 +96,7 @@ func TestPortalGiveThenList(t *testing.T) {
 	if loginResp.StatusCode != http.StatusOK {
 		t.Fatalf("login status = %d, want 200", loginResp.StatusCode)
 	}
-	var login LoginResponse
+	var login portalhttp.LoginResponse
 	if err := json.NewDecoder(loginResp.Body).Decode(&login); err != nil {
 		t.Fatalf("decode login: %v", err)
 	}
@@ -115,7 +122,7 @@ func TestPortalGiveThenList(t *testing.T) {
 		raw, _ := io.ReadAll(giveResp.Body)
 		t.Fatalf("give consent status = %d, want 200; body = %s", giveResp.StatusCode, string(raw))
 	}
-	var give GiveConsentResponse
+	var give portalhttp.GiveConsentResponse
 	if err := json.NewDecoder(giveResp.Body).Decode(&give); err != nil {
 		t.Fatalf("decode give: %v", err)
 	}
@@ -124,6 +131,26 @@ func TestPortalGiveThenList(t *testing.T) {
 	}
 	if give.PI != "PI-xyz" {
 		t.Errorf("pi = %q, want PI-xyz", give.PI)
+	}
+	// The dev-portal renders one card per upstream call: pseudonymise, then
+	// create. Guards against the call log quietly gaining or losing entries.
+	if len(give.APICalls) != 2 {
+		t.Fatalf("api_calls = %d, want 2: %+v", len(give.APICalls), give.APICalls)
+	}
+	for i, want := range []string{"Pseudonymize BSN", "Create Consent"} {
+		if give.APICalls[i].Label != want {
+			t.Errorf("api_calls[%d].Label = %q, want %q", i, give.APICalls[i].Label, want)
+		}
+		if give.APICalls[i].Status != http.StatusOK {
+			t.Errorf("api_calls[%d].Status = %d, want 200", i, give.APICalls[i].Status)
+		}
+	}
+	// The register must never have seen the plain BSN.
+	regMu.Lock()
+	sent, _ := json.Marshal(created)
+	regMu.Unlock()
+	if strings.Contains(string(sent), "123456789") {
+		t.Errorf("BSN reached the consent register: %s", sent)
 	}
 
 	// Step 3: list consents — should surface the one we just created.
@@ -150,5 +177,57 @@ func TestPortalGiveThenList(t *testing.T) {
 	}
 	if list[0]["effective_status"] != "active" {
 		t.Errorf("effective_status = %v, want active", list[0]["effective_status"])
+	}
+}
+
+// The SSE endpoint must stream through the access-log middleware. It did not:
+// that middleware wraps the ResponseWriter, and the handler's old
+// w.(http.Flusher) assertion failed against the wrapper, so /portal/events
+// answered 500 "streaming not supported". Wire it exactly as main does.
+func TestSSEStreamsThroughAccessLog(t *testing.T) {
+	hub := portalhttp.NewHub()
+	srv := httptest.NewServer(logctx.WithAccessLog(newMux(config{Port: "0"}, hub)))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/portal/events", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("open stream: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("stream status = %d, want 200; body = %s", resp.StatusCode, string(raw))
+	}
+
+	// The greeting only arrives if the handler could actually flush.
+	br := bufio.NewReader(resp.Body)
+	line, err := br.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read greeting: %v", err)
+	}
+	if !strings.Contains(line, `"step":"connected"`) {
+		t.Fatalf("greeting = %q, want the connected event", line)
+	}
+
+	// A step emitted by the core reaches the connected panel.
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		hub.Observe(context.Background(), consent.Event{
+			Step:      "pseudonymizing",
+			Component: "bsnk-mock",
+			Data:      map[string]any{"oin": "DV"},
+		})
+	}()
+	for {
+		l, err := br.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read stream: %v", err)
+		}
+		if strings.Contains(l, "pseudonymizing") {
+			return // delivered
+		}
 	}
 }
