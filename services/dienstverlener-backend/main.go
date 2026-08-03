@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"errors"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
@@ -37,7 +38,17 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
 	"go.opentelemetry.io/otel/trace"
+	"os/signal"
+	"syscall"
 )
+
+// readHeaderTimeout bounds how long a client may take to send its request
+// headers, so a stalled connection cannot hold a handler open.
+const readHeaderTimeout = 10 * time.Second
+
+// shutdownTimeout bounds the drain after SIGTERM: stop accepting, let
+// in-flight requests finish, then close whatever is left.
+const shutdownTimeout = 15 * time.Second
 
 type config struct {
 	Port             string
@@ -598,15 +609,47 @@ func main() {
 		_ = shutdown(shutCtx)
 	}()
 
-	mux := newMux(cfg)
 	// Middleware order: withFscTraceContext wraps otelhttp — the header
 	// mutation must happen before otelhttp extracts the parent context.
-	handler := withFscTraceContext(otelhttp.NewHandler(withAccessLog(mux), "dienstverlener-backend"))
-	addr := ":" + cfg.Port
+	srv := &http.Server{
+		Addr:              ":" + cfg.Port,
+		Handler:           withFscTraceContext(otelhttp.NewHandler(withAccessLog(newMux(cfg)), "dienstverlener-backend")),
+		ReadHeaderTimeout: readHeaderTimeout,
+	}
 	slog.Info("dienstverlener-backend starting",
-		"addr", addr, "outway", cfg.OutwayURL+cfg.OutwayPath, "org_oin", cfg.OrgOIN, "sector", cfg.OrgSector,
+		"addr", srv.Addr, "outway", cfg.OutwayURL+cfg.OutwayPath, "org_oin", cfg.OrgOIN, "sector", cfg.OrgSector,
 		"req_id", uuid.New().String())
-	if err := http.ListenAndServe(addr, handler); err != nil {
-		slog.Error("server stopped", "err", err)
+	serve(srv)
+}
+
+// fatal logs and ends the process. main is the only place in this service
+// that exits; everything else returns an error.
+func fatal(msg string, err error) {
+	slog.Error(msg, "err", err.Error())
+	os.Exit(1)
+}
+
+// serve runs the server until the process is asked to stop, then drains it.
+// Without this a SIGTERM (docker compose down, a Kubernetes rollout) killed
+// in-flight requests outright. Previously a failed ListenAndServe was only
+// logged, so a service that could not bind its port exited 0.
+func serve(srv *http.Server) {
+	go func() {
+		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+			fatal("listen and serve", err)
+		}
+	}()
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	<-ctx.Done()
+	stop()
+
+	slog.Info("shutting down")
+	drainCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	if err := srv.Shutdown(drainCtx); err != nil {
+		slog.Warn("drain did not finish; closing remaining connections", "err", err.Error())
+		_ = srv.Close()
 	}
 }

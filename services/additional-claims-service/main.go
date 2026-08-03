@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,12 +9,18 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 )
 
 // readHeaderTimeout bounds how long a client may take to send its request
 // headers, so a stalled connection cannot hold a handler open.
 const readHeaderTimeout = 10 * time.Second
+
+// shutdownTimeout bounds the drain after SIGTERM: stop accepting, let
+// in-flight requests finish, then close whatever is left.
+const shutdownTimeout = 15 * time.Second
 
 const (
 	defaultPort       = "4012"
@@ -198,8 +205,31 @@ func main() {
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 
-	slog.Info("additional claims service starting", "port", port, "rules", len(cfg.Rules))
-	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
-		fatal("listen and serve", err)
+	slog.Info("additional claims service starting", "rules", len(cfg.Rules))
+	serve(srv)
+}
+
+// serve runs the server until the process is asked to stop, then drains it.
+// Without this a SIGTERM (docker compose down, a Kubernetes rollout) killed
+// in-flight requests outright.
+func serve(srv *http.Server) {
+	go func() {
+		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+			fatal("listen and serve", err)
+		}
+	}()
+	slog.Info("listening", "addr", srv.Addr)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	<-ctx.Done()
+	stop()
+
+	slog.Info("shutting down")
+	drainCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	if err := srv.Shutdown(drainCtx); err != nil {
+		slog.Warn("drain did not finish; closing remaining connections", "err", err.Error())
+		_ = srv.Close()
 	}
 }
