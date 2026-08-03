@@ -30,8 +30,12 @@ import (
 	"sync"
 	"time"
 
+	"errors"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"net"
+	"os/signal"
+	"syscall"
 )
 
 type config struct {
@@ -282,6 +286,20 @@ type HistoryRun struct {
 // handlers previously used http.DefaultClient, which has no timeout: one
 // unresponsive upstream hung the request indefinitely.
 const upstreamTimeout = 10 * time.Second
+
+// readHeaderTimeout bounds how long a client may take to send its request
+// headers, so a stalled connection cannot hold a handler open.
+const readHeaderTimeout = 10 * time.Second
+
+// shutdownTimeout bounds the drain after SIGTERM: stop accepting, let
+// in-flight requests finish, then close whatever is left.
+const shutdownTimeout = 15 * time.Second
+
+// streamGrace is how long ordinary in-flight requests get to finish before
+// the SSE streams are ended. Shutdown waits for active requests but does not
+// cancel their contexts, so /events and /watch-next would otherwise hold the
+// drain open for the full shutdownTimeout on every restart.
+const streamGrace = 2 * time.Second
 
 // upstreamClient is the shared client for those calls. The FSC txlog peers
 // need their own mTLS clients and build them in fsctxlog.go.
@@ -947,10 +965,49 @@ func main() {
 	hub := newTraceHub(10 * time.Minute)
 	mux := newMux(cfg, hub)
 
-	handler := otelhttp.NewHandler(withAccessLog(mux), "dev-portal-backend")
-	addr := ":" + cfg.Port
-	slog.Info("dev-portal-backend starting", "addr", addr, "var_dir", cfg.VarDir, "predefined_dir", cfg.PredefinedDir)
-	if err := http.ListenAndServe(addr, handler); err != nil {
-		slog.Error("server stopped", "err", err)
+	// BaseContext gives every request a context this process can cancel, which
+	// is how the long-lived SSE streams are told to wind up at shutdown.
+	baseCtx, endStreams := context.WithCancel(context.Background())
+	srv := &http.Server{
+		Addr:              ":" + cfg.Port,
+		Handler:           otelhttp.NewHandler(withAccessLog(mux), "dev-portal-backend"),
+		ReadHeaderTimeout: readHeaderTimeout,
+		BaseContext:       func(net.Listener) context.Context { return baseCtx },
+	}
+	slog.Info("dev-portal-backend starting", "addr", srv.Addr, "var_dir", cfg.VarDir, "predefined_dir", cfg.PredefinedDir)
+	serve(srv, endStreams)
+}
+
+// fatal logs and ends the process. main is the only place in this service
+// that exits; everything else returns an error.
+func fatal(msg string, err error) {
+	slog.Error(msg, "err", err.Error())
+	os.Exit(1)
+}
+
+// serve runs the server until the process is asked to stop, then drains it.
+// Without this a SIGTERM (docker compose down, a Kubernetes rollout) killed
+// in-flight requests outright. Previously a failed ListenAndServe was only
+// logged, so a service that could not bind its port exited 0.
+func serve(srv *http.Server, endStreams context.CancelFunc) {
+	go func() {
+		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+			fatal("listen and serve", err)
+		}
+	}()
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	<-ctx.Done()
+	stop()
+
+	slog.Info("shutting down")
+	// Let ordinary requests finish first, then release the SSE streams.
+	time.AfterFunc(streamGrace, endStreams)
+	drainCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	if err := srv.Shutdown(drainCtx); err != nil {
+		slog.Warn("drain did not finish; closing remaining connections", "err", err.Error())
+		_ = srv.Close()
 	}
 }
