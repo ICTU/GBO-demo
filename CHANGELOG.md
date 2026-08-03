@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Fixed
+- Release workflow builds the `openftv-pdp` image with the repo root as build context, the way compose already did. Its Dockerfile bakes in `./policies` and reads `services/openftv-pdp/{mapper,field-map.json}`, all of which sit outside the service directory, so the service-scoped context failed on `"/policies": not found` and the image was not published for `v0.5.2`.
+
 ### Added
 - **Akte van overlijden — a second bron and a second EUDI attestation.** New source service `brp-graphql-server` serving the BRP bronprofiel ([gbo-semantiek v0.3 `brp.graphql`](https://github.com/ICTU/gbo-semantiek/blob/main/v0.3/graphql/brp.graphql)): `IngeschrevenPersoon`/`Ingezetene`/`NietIngezetene`, nationaliteit, huwelijk, verblijfstitel, gezagsverhouding, immigratie and the binnen-/buitenlandse verblijfadres. A nabestaande discloses her PID and receives an `nl.gbo.brp.akte-van-overlijden` credential with her deceased partner's overlijdensgegevens; the query is rooted at her own persoonslijst and reaches the overledene only through `heeftHuwelijk.partners`, which is the authorization argument the policy mirrors. Mock data holds exactly one person who satisfies that shape (Frouke Jansen, BSN `999991772`, the PID-preprod persona); the other personen are married to a living partner, unmarried, or divorced.
   - Registered as its own FSC service `brp` (outway path `/brp`) behind the same provider peer as the BD bron, with its own `brp-sidecar` instance. `seed-bri-contract.sh` is now parameterised by `SERVICE_NAME`/`SERVICE_ENDPOINT_URL`/`GRANT_LINK_PATH`; `make fsc-seed-brp` seeds the new service.

@@ -58,8 +58,10 @@ jobs:
           - service: graphql-server
             context: ./services/graphql-server
             dockerfile: ./services/graphql-server/Dockerfile
+          # Repo root as context: the Dockerfile bakes ./policies in (same
+          # as the compose build).
           - service: openftv-pdp
-            context: ./services/openftv-pdp
+            context: .
             dockerfile: ./services/openftv-pdp/Dockerfile
           - service: sector-pip
             context: ./services/sector-pip
