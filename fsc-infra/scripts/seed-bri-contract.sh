@@ -255,10 +255,20 @@ fi
 # table is read frequently by edi-outway.
 
 echo "[4/4] Upsert grant-link '$GRANT_LINK_PATH' → connection grant-hash..."
+# The manager ignores service_name: this query returns every connection
+# contract in the group, so the filtering has to happen here. `limit=1`
+# used to be on this URL, which truncated the list to whichever contract
+# sorted first and only worked while `bri` was the sole service — adding
+# `brp` made it return that one instead and the lookup came up empty.
+# Selecting on state as well, so a revoked contract cannot supply the hash
+# and write a dead grant-link that fails at routing time instead of here.
 new_hash=$(mtls_curl "$EDI_CERT" "$EDI_KEY" "$EDI_CA" \
-  "${EDI_MANAGER_URL}/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=${SERVICE_NAME}&limit=1" \
+  "${EDI_MANAGER_URL}/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=${SERVICE_NAME}" \
   | jq -r --arg svc "$SERVICE_NAME" \
-    'first(.contracts[]? | select(.content.grants[0].service.name == $svc) | .content.grants[0].hash) // empty')
+    'first(.contracts[]?
+           | select(.state == "CONTRACT_STATE_VALID")
+           | select(.content.grants[0].service.name == $svc)
+           | .content.grants[0].hash) // empty')
 if [ -z "$new_hash" ]; then
   echo "  x no connection grant-hash found — abort"
   exit 1
