@@ -9,10 +9,11 @@ package authz
 # reads granted[]/denied_fields[]/steps from there.
 #
 # Input shape (OpenFTV AuthZEN mapping): {subject, action, resource,
-# context}. The pdp-service context-handler places its enrichment under
-# input.context: context.resolved (GraphQL fields), context.pip
-# (consent/PID), context.resource (scope/query/variables/pi),
-# context.trace_id. OpenFTV injects context.time.
+# context}. The GraphQL request-mapper inside the PDP image places its
+# enrichment under input.context: context.resolved (GraphQL fields),
+# context.resource (scope/query/variables), context.flow, context.pip.pid
+# (EUDI pseudonym), context.trace_id. OpenFTV injects context.time.
+# Consent is not handed in — consent.rego retrieves it during evaluation.
 
 import data.dvtp.gbo
 

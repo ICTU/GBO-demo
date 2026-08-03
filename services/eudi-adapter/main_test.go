@@ -181,10 +181,11 @@ func brpAdapter(t *testing.T, bronResponse string) (*httptest.Server, *httptest.
 		if r.URL.Path != "/brp/graphql" {
 			t.Errorf("outway path = %q, want /brp/graphql", r.URL.Path)
 		}
-		// The BRP flow must reach the PDP as its own flow, otherwise the
-		// PDP resolves the query against the BD mirror schema.
-		if got, want := r.Header.Get("X-GBO-Flow"), "eudi:attestation:brp"; got != want {
-			t.Errorf("X-GBO-Flow = %q, want %q", got, want)
+		// The flow reaches the PDP as a signed additional-claim in the FSC
+		// token, never as a header — a header would let the caller choose
+		// the authorization regime it is judged under.
+		if got := r.Header.Get("X-GBO-Flow"); got != "" {
+			t.Errorf("X-GBO-Flow = %q, want no header", got)
 		}
 		if got, want := r.Header.Get("X-GBO-Scope"), "brp:akte:overlijden"; got != want {
 			t.Errorf("X-GBO-Scope = %q, want %q", got, want)

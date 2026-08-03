@@ -47,6 +47,41 @@ jobs:
         working-directory: services/${{ matrix.service }}
         run: go test -timeout 60s ./...
 
+  # The OpenFTV request-mapper is patched into an upstream tree at image
+  # build time, so it is not a service and cannot join the matrix above:
+  # open-ftv requires Go 1.26.5 where the services are on 1.25. Without
+  # this job the only thing checking 500 lines of security-critical
+  # request parsing would be `docker build`.
+  mapper:
+    name: Go — lint + test (openftv-pdp mapper)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5.1.0
+        with:
+          go-version: '1.26.5'
+          cache-dependency-path: services/openftv-pdp/go.*
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.12.2
+          args: --config ../../.golangci.yml --timeout 3m
+          working-directory: services/openftv-pdp
+      - name: go test
+        working-directory: services/openftv-pdp
+        run: go test -timeout 60s ./...
+      # The module and the image must compile against the same OpenFTV
+      # commit, or the tests verify a different mapper than the one that
+      # ships.
+      - name: go.mod open-ftv pin matches the Dockerfile OPENFTV_REF
+        run: |
+          ref="$(grep -oP 'OPENFTV_REF=\K[0-9a-f]+' services/openftv-pdp/Dockerfile)"
+          if ! grep -q "open-ftv v.*${ref:0:12}" services/openftv-pdp/go.mod; then
+            echo "go.mod does not pin open-ftv to OPENFTV_REF ($ref)" >&2
+            grep open-ftv services/openftv-pdp/go.mod >&2
+            exit 1
+          fi
+
   rego:
     name: Rego — fmt + check + test
     runs-on: ubuntu-latest
@@ -68,10 +103,6 @@ jobs:
         run: |
           ./scripts/gen-rules-json.sh
           git diff --exit-code -- services/dev-portal-backend/rules.json
-      - name: field-map.json is up to date
-        run: |
-          ./scripts/gen-field-map.sh
-          git diff --exit-code -- services/openftv-pdp/field-map.json
 
   chart:
     name: Helm chart — lint + template
@@ -122,6 +153,7 @@ jobs:
       matrix:
         service:
           - additional-claims-service
+          - dev-portal-backend
           - eudi-adapter
           - graphql-server
           - sector-pip
@@ -134,11 +166,31 @@ jobs:
             --tag "gbo-demo/${{ matrix.service }}:ci" \
             "services/${{ matrix.service }}"
 
+  # openftv-pdp builds from the repo root: its Dockerfile bakes in
+  # ./policies (which now also carries the GraphQL SDLs the mapper reads),
+  # so it cannot join the matrix above. Built at PR time because a policy
+  # change can break the image, and because it is the only thing that
+  # proves the Dockerfile's patch of the upstream tree still applies —
+  # release builds are not gated on a PR, so a broken patch would
+  # otherwise reach a published image.
+  docker-openftv-pdp:
+    name: Docker — build (openftv-pdp)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build image
+        run: |
+          docker build \
+            --file services/openftv-pdp/Dockerfile \
+            --tag gbo-demo/openftv-pdp:ci \
+            .
+
+
   # Aggregate gate: the repo ruleset requires a single "CI result" status.
   result:
     name: CI result
     runs-on: ubuntu-latest
-    needs: [go, rego, chart, frontend, docker]
+    needs: [go, mapper, rego, chart, frontend, docker, docker-openftv-pdp]
     if: always()
     steps:
       - name: Evaluate job results

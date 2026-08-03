@@ -146,12 +146,16 @@ _ctx := {
 	"args": _args,
 	"time": object.get(input.context, "time", ""),
 	"resource": object.union(object.get(input.context, "resource", {}), {"pi": _pip_pi}),
-	"pip": object.get(input.context, "pip", {}),
+	"pip": _pip_attrs,
 }
 
-# Mirror pip.consent.pi onto ctx.resource.pi so the rule's constraint-
-# binding (input.burgerservicenummer == resource.pi) is evaluable.
-_pip_pi := object.get(object.get(object.get(input.context, "pip", {}), "consent", {}), "pi", "")
+# The mapper supplies the per-request PIP (EUDI pid); consent is retrieved
+# here during evaluation (see consent.rego) rather than handed in.
+_pip_attrs := object.union(object.get(input.context, "pip", {}), {"consent": consent_pip})
+
+# Mirror consent.pi onto ctx.resource.pi so the rule's constraint-binding
+# (input.burgerservicenummer == resource.pi) is evaluable.
+_pip_pi := object.get(_pip_attrs.consent, "pi", "")
 
 # ── Per-rule evaluation (given field) ────────────────────────────────────────
 
@@ -161,7 +165,7 @@ _eval(rid, field) := lib.evaluate(_rule_meta[rid].spec, object.union(_ctx, {"fie
 # Rules declare their authorization basis in the spec: consent_required
 # (DvTP) or pid_required (EUDI). A rule only FIRES when its flow matches
 # the request's flow — the request-mapper places it in input.context.flow
-# (from the FSC token's additional-claims / X-GBO-Flow header). Without
+# (from the FSC token's signed additional-claim, and nowhere else). Without
 # this dispatch a DvTP-flow deny would aggregate EUD0001's
 # PID_NOT_PRESENT (priority 55) over the genuine DvTP reason
 # (CONSENT_SCOPE_MISMATCH, YEAR_NOT_COVERED, CONSTRAINT_MISMATCH), and
@@ -175,7 +179,13 @@ _flow_applicable(rid) if {
 } else if {
 	s := _rule_meta[rid].spec
 	object.get(s, "pid_required", false)
-	input.context.flow == "eudi:attestation"
+
+	# Prefix, not equality: the flow also carries the bronprofiel
+	# ("eudi:attestation:brp"), so an exact match silenced EUD0002 for
+	# every akte-van-overlijden request — NO_APPLICABLE_RULE on a query
+	# the rule was written to cover. Which bronprofiel applies is decided
+	# by covers_fields, not by the flow string.
+	startswith(input.context.flow, "eudi:")
 } else if {
 	s := _rule_meta[rid].spec
 	not object.get(s, "consent_required", false)

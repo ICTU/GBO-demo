@@ -81,8 +81,10 @@ services:
   # OpenFTV PDP with the embedded OPA/Rego engine — the authorization
   # endpoint for FSC-Inway (AuthZEN, HTTPS on :8443). The GraphQL
   # context-handler runs INSIDE this image as a request-mapper
-  # (services/openftv-pdp/mapper, PDP_REQUEST_MAPPINGS); consent is
-  # pulled from the consent-register into data.attributes (pull-config).
+  # (services/openftv-pdp/mapper, PDP_REQUEST_MAPPINGS): it walks the
+  # query and resolves field→type against the SDLs that ship in
+  # ./policies. Consent is NOT fetched there — the policy retrieves it
+  # during evaluation (policies/dvtp/gbo/consent.rego).
   # Note: PDP_POLICIES_LANGUAGE must be "rego" — the documented value
   # "OPA" makes OpenFTV silently skip all policy files (upstream quirk).
   openftv-pdp:
@@ -98,8 +100,11 @@ services:
       - PDP_ADL_SERVICE_NAME=gbo
       - PDP_LOG_LEVEL=info
       - PDP_REQUEST_MAPPINGS=graphqltocontext
-      # The mapper fetches consent per-request from the consent-register
-      # (PIP pull turned out to be both stale and broken upstream).
+      # Read by consent.rego through opa.runtime().env: the policy calls
+      # the consent-register during evaluation, so a revoke takes effect
+      # on the next request. OpenFTV's configured PIP cannot hold this —
+      # its network PIP is a scheduled loader and its attribute store
+      # rejects every update after the first create (ICTU-37 items 5, 6).
       - GBO_CONSENT_URL=http://consent-register:4002
       # The EUDI flow resolves the wallet-disclosed BSN to a PI here; the
       # policy engine (and its decision log) is never given the BSN.

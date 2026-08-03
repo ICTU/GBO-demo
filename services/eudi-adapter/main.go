@@ -119,10 +119,10 @@ type Usecase struct {
 	// "brp" (Basisregistratie Personen). It drives both the GraphQL query
 	// that is built and how the response maps onto wallet attributes.
 	Bron string `json:"bron,omitempty"`
-	// Flow is sent as X-GBO-Flow and mirrors the `flow` additional claim
-	// the provider's FSC Manager signs into the token. The PDP uses it to
-	// pick the mirror schema, so it has to name the bronprofiel too.
-	// Defaults to the BD flow.
+	// Flow mirrors the `flow` additional claim the provider's FSC Manager
+	// signs into the token — the claim is authoritative for the PDP; this
+	// copy only labels logs and traces on the adapter side. It names the
+	// bronprofiel too. Defaults to the BD flow.
 	Flow string `json:"flow,omitempty"`
 	Note string `json:"note,omitempty"`
 }
@@ -302,7 +302,9 @@ type attestation struct {
 // to the PEP's /evaluate endpoint. All context lives in HTTP headers:
 //   - Authorization: Bearer <FSC-token>   -> Inway validates + propagates
 //   - X-GBO-Scope: bd:ib:2025              -> PDP hint (untrusted)
-//   - X-GBO-Flow: eudi:attestation         -> PEP dispatch (untrusted)
+//
+// The flow is not sent: it travels as a signed additional-claim in the
+// FSC token, which is where the PDP reads it.
 //
 // BSN is already in the query variables (`$bsn`); no separate body field.
 type proxyRequest struct {
@@ -500,8 +502,14 @@ func callViaFSC(ctx context.Context, client *http.Client, cfg config, bsn string
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	// Context headers — untrusted, pass through the Outway/Inway.
+	//
+	// No X-GBO-Flow: the flow is a property of the FSC grant, not of the
+	// request. additional-claims-service derives it from (outway_peer_id,
+	// service_peer_id, service_name) and the provider's FSC-Manager signs
+	// it into the token, which is the only source the PDP reads. Sending
+	// it as a header let the caller name the authorization regime it
+	// wanted to be judged under.
 	httpReq.Header.Set("X-GBO-Scope", uc.Scope)
-	httpReq.Header.Set("X-GBO-Flow", uc.flow())
 	// Reuse the Fsc-Transaction-Id that the middleware already generated
 	// and that also forms the trace-id. That way trace-id ==
 	// Fsc-Transaction-Id — a single identifier across the whole chain

@@ -9,7 +9,6 @@ services/*/*[!.go]
 # above matches any filename not ending in `.go`, including these.
 !services/*/*.html
 !services/dev-portal-backend/rules.json
-!services/openftv-pdp/field-map.json
 # It matches directory names too, which silently swallowed the Go sub-packages
 # under services/consent-portal-backend/. Keeping every service subdirectory
 # covers that, and supersedes the per-directory exceptions this list used to

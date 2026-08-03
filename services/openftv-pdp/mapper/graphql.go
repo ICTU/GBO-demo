@@ -6,29 +6,32 @@ package mapping
 // authz policy needs:
 //
 //   - context.resolved  — {fields, args, coverage_unverifiable} from the
-//     query walk. Schema-less: scalar = no selection set, parent types
-//     come from the generated field-map (GBO_FIELD_MAP).
+//     query walk. `scalar` comes from the selection set; parent types come
+//     from the SDLs shipped with the policies (GBO_SCHEMA_DIR).
 //   - context.resource  — {scope, query, variables}.
 //   - context.trace_id  — Fsc-Transaction-Id (falls back to X-Request-Id).
 //   - context.fsc       — {transaction_id}.
-//   - context.pid       — {bsn} for the EUDI flow (from variables.bsn).
+//   - context.flow      — from the signed FSC additional-claim only.
+//   - context.pip.pid   — {pi} for the EUDI flow, pseudonymised via BSNk.
 //
-// Flow dispatch (dvtp:query vs eudi:attestation) follows the trusted
-// additional-claim in the FSC token, then the X-GBO-Flow header.
+// Consent is NOT fetched here — it is PIP work and the policy retrieves it
+// during evaluation. See policies/dvtp/gbo/consent.rego.
 
 import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net/http"
-	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/vektah/gqlparser/v2"
 	"github.com/vektah/gqlparser/v2/ast"
 	"github.com/vektah/gqlparser/v2/parser"
 
@@ -50,7 +53,7 @@ func GraphQLToContext(parc *models.PARC, opts ...Option) *models.PARC {
 		return parc
 	}
 
-	query, variables := decodeGraphQLBody(body)
+	query, operationName, variables := decodeGraphQLBody(body)
 	headers := headerMap(parc.Context.GetAttributeValue(models.AttrHeaders))
 	flow := flowFromHeaders(headers)
 	scope := firstHeader(headers, "X-Gbo-Scope", "X-GBO-Scope")
@@ -64,12 +67,12 @@ func GraphQLToContext(parc *models.PARC, opts ...Option) *models.PARC {
 
 	ctx := models.NewAttributeSet(parc.Context)
 	ctx.AddAttributeKV("resource", resource)
-	ctx.AddAttributeKV("resolved", walkQuery(query, variables))
+	ctx.AddAttributeKV("resolved", walkQuery(query, operationName, variables))
 	ctx.AddAttributeKV("trace_id", txID)
 	ctx.AddAttributeKV("flow", flow)
 	ctx.AddAttributeKV("fsc", map[string]any{"transaction_id": txID})
 
-	if flow == "eudi:attestation" {
+	if isEUDIFlow(flow) {
 		// The BSN stops here. It is needed to reach the bron — the PEP
 		// forwards the original query untouched — but the policy engine
 		// evaluates on a pseudonymous identity, so that is all it is
@@ -92,16 +95,32 @@ func GraphQLToContext(parc *models.PARC, opts ...Option) *models.PARC {
 			action.Attributes().AddAttributeKV(models.AttrBody, string(newBody))
 		}
 		return &models.PARC{Principal: parc.Principal, Action: action, Resource: parc.Resource, Context: ctx}
-	} else {
-		ctx.AddAttributeKV("pip", map[string]any{"consent": fetchConsent(headers, variables, scope)})
 	}
 
+	// DvTP carries no PID. Consent is not fetched here: it is PIP work,
+	// and the standard puts attribute retrieval in the PDP during
+	// evaluation, so the policy asks the consent-register itself. Doing it
+	// here also meant a mapper reshaping a request it had already been
+	// given, using our register's URL shape and response model — the
+	// largest GBO-specific block in an otherwise generic mapper.
 	return &models.PARC{
 		Principal: parc.Principal,
 		Action:    parc.Action,
 		Resource:  parc.Resource,
 		Context:   ctx,
 	}
+}
+
+// isEUDIFlow reports whether the flow disclosed a PID through the wallet
+// and therefore carries a BSN that must not reach the policy engine.
+//
+// Prefix, not equality: the flow string also carries the bronprofiel
+// ("eudi:attestation:brp"), so an exact match on "eudi:attestation" sent
+// the BRP flow down the consent branch — no pseudonymisation, the BSN
+// into the consent-register query and into the decision log. Matching
+// the whole "eudi:" family keeps a future flow fail-safe by default.
+func isEUDIFlow(flow string) bool {
+	return strings.HasPrefix(flow, "eudi:")
 }
 
 // pseudonymizeBSN resolves the wallet-disclosed BSN to a PI via BSNk,
@@ -121,7 +140,7 @@ func pseudonymizeBSN(bsn string) (string, error) {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := consentClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -137,6 +156,8 @@ func pseudonymizeBSN(bsn string) (string, error) {
 	}
 	return out.PI, nil
 }
+
+var httpClient = &http.Client{Timeout: 2 * time.Second}
 
 func bsnkURL() string {
 	if u := os.Getenv("GBO_BSNK_URL"); u != "" {
@@ -182,78 +203,14 @@ func substituteValue(v any, from, to string) any {
 	}
 }
 
-// ── Consent PIP (per-request, fail-closed) ─────────────────────────────────
-
-// fetchConsent retrieves the ACTIVE consent for (PI, scope) from the
-// consent-register. Per-request so a revoke is effective immediately
-// (the PIP pull-config alternative was both stale and broken upstream —
-// the in-memory attribute store's CAS rejects complex valueAsIs values).
-// Fail-soft: any error yields exists=false → CONSENT_NOT_FOUND.
-func fetchConsent(headers map[string]string, variables map[string]any, scope string) map[string]any {
-	notFound := map[string]any{"exists": false}
-
-	pi, _ := variables["bsn"].(string)
-	if pi == "" {
-		return notFound
-	}
-	u := consentURL() + "/consents?pi=" + url.QueryEscape(pi) + "&scope=" + url.QueryEscape(scope)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return notFound
-	}
-	resp, err := consentClient.Do(req)
-	if err != nil {
-		return notFound
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return notFound
-	}
-	var list []struct {
-		Status     string   `json:"status"`
-		Scopes     []string `json:"scopes"`
-		ValidUntil string   `json:"valid_until"`
-		PI         string   `json:"pi"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil || len(list) == 0 {
-		return notFound
-	}
-	// Prefer an ACTIVE consent; otherwise report the (revoked) record so
-	// the policy can deny with CONSENT_WITHDRAWN instead of NOT_FOUND.
-	c := list[0]
-	for _, item := range list {
-		if item.Status == "ACTIVE" {
-			c = item
-			break
-		}
-	}
-	return map[string]any{
-		"exists":         true,
-		"withdrawn":      c.Status == "REVOKED",
-		"granted_scopes": c.Scopes,
-		"valid_until":    c.ValidUntil,
-		"pi":             c.PI,
-	}
-}
-
-var consentClient = &http.Client{Timeout: 2 * time.Second}
-
-func consentURL() string {
-	if u := os.Getenv("GBO_CONSENT_URL"); u != "" {
-		return u
-	}
-	return "http://consent-register:4002"
-}
-
 // decodeGraphQLBody accepts the body as a plain JSON string (FSC-Inway
-// stringifies JSON bodies) or base64-encoded.
-func decodeGraphQLBody(body string) (string, map[string]any) {
+// stringifies JSON bodies) or base64-encoded. operationName is read
+// because the source executes the operation it names, not the first one.
+func decodeGraphQLBody(body string) (query, operationName string, variables map[string]any) {
 	var inner struct {
-		Query     string         `json:"query"`
-		Variables map[string]any `json:"variables"`
+		Query         string         `json:"query"`
+		OperationName string         `json:"operationName"`
+		Variables     map[string]any `json:"variables"`
 	}
 	if err := json.Unmarshal([]byte(body), &inner); err != nil {
 		if d, err2 := base64.StdEncoding.DecodeString(body); err2 == nil {
@@ -263,7 +220,7 @@ func decodeGraphQLBody(body string) (string, map[string]any) {
 	if inner.Variables == nil {
 		inner.Variables = map[string]any{}
 	}
-	return inner.Query, inner.Variables
+	return inner.Query, inner.OperationName, inner.Variables
 }
 
 // headerMap normalizes the context headers attribute into a
@@ -294,26 +251,41 @@ func firstHeader(headers map[string]string, keys ...string) string {
 	return ""
 }
 
-// flowFromHeaders dispatches on the trusted additional-claim ('add',
-// legacy 'prp') in the FSC access-token, then the untrusted X-GBO-Flow
-// header. The token is read unsafely: FSC-Inway validated the signature
-// before invoking the PDP (chain-of-trust).
+// flowFromHeaders reads the flow from the additional-claim ('add', legacy
+// 'prp') in the FSC access-token, and nowhere else.
+//
+// The flow is a property of the FSC grant: additional-claims-service
+// matches on (outway_peer_id, service_peer_id, service_name) and the
+// provider's FSC-Manager signs the result into the token. The same
+// service yields dvtp:query for one consumer and eudi:attestation for
+// another — decided at contract time, by the source-holder, signed.
+//
+// There is deliberately no header fallback and no default. A header let
+// the caller name the regime it wanted to be judged under, and defaulting
+// to dvtp:query silently selected consent-based rules for a request that
+// had said nothing — fail-open in a security dispatch. An empty flow now
+// matches no rule's dispatch, so the closed-world engine denies with
+// NO_APPLICABLE_RULE.
+//
+// The token is read without verifying its signature: FSC-Inway validated
+// it before invoking the PDP (chain-of-trust).
 func flowFromHeaders(headers map[string]string) string {
-	if auth := headers["fsc-authorization"]; auth != "" {
-		if claims := tokenClaims(strings.TrimSpace(strings.TrimPrefix(auth, "Bearer"))); claims != nil {
-			for _, key := range []string{"add", "prp"} {
-				if props, ok := claims[key].(map[string]any); ok {
-					if f, ok := props["flow"].(string); ok && f != "" {
-						return f
-					}
-				}
+	auth := headers["fsc-authorization"]
+	if auth == "" {
+		return ""
+	}
+	claims := tokenClaims(strings.TrimSpace(strings.TrimPrefix(auth, "Bearer")))
+	if claims == nil {
+		return ""
+	}
+	for _, key := range []string{"add", "prp"} {
+		if props, ok := claims[key].(map[string]any); ok {
+			if f, ok := props["flow"].(string); ok && f != "" {
+				return f
 			}
 		}
 	}
-	if f := firstHeader(headers, "X-Gbo-Flow", "X-GBO-Flow"); f != "" {
-		return f
-	}
-	return "dvtp:query"
+	return ""
 }
 
 func tokenClaims(token string) map[string]any {
@@ -341,21 +313,71 @@ var (
 	fieldMapData map[string]string
 )
 
-// fieldMap lazily loads the generated field→parent-type map. A missing
-// or unreadable file yields an empty map: every nested field then gets
-// parent "?", which the closed-world policy denies (fail-closed).
+// fieldMap lazily builds the field→return-type map from the GraphQL SDLs
+// that ship alongside the policies.
+//
+// The walk itself is schema-less, but coverage keys are type-qualified
+// ("Huwelijk.partners"), and a type name is not present in a query
+// document — only the schema knows that `partners` returns a
+// NatuurlijkPersoon. Type-qualification is unavoidable here because the
+// type graph is cyclic (NatuurlijkPersoon.heeftOuder → NatuurlijkPersoon),
+// so a path-based key would need an infinite family of paths to say what
+// one type-qualified key says.
+//
+// The SDL is read from the policy directory rather than baked in as a
+// generated artifact: the schema is part of the catalogue, so it belongs
+// with the policies the PAP manages, and it hot-reloads with them. It is
+// deliberately not fetched by introspection — that would make the source
+// the authority on its own type graph, and relabelling a field's parent
+// type would silently widen the coverage a rule grants.
+//
+// Fail-closed: an unreadable directory or an invalid SDL yields an empty
+// map, every nested field then gets parent "?", and the closed-world
+// policy denies it.
 func fieldMap() map[string]string {
-	fieldMapOnce.Do(func() {
-		fieldMapData = map[string]string{}
-		path := os.Getenv("GBO_FIELD_MAP")
-		if path == "" {
-			path = "/etc/gbo/field-map.json"
-		}
-		if b, err := os.ReadFile(path); err == nil {
-			_ = json.Unmarshal(b, &fieldMapData)
-		}
-	})
+	fieldMapOnce.Do(func() { fieldMapData = loadFieldMap(schemaDir()) })
 	return fieldMapData
+}
+
+func schemaDir() string {
+	if d := os.Getenv("GBO_SCHEMA_DIR"); d != "" {
+		return d
+	}
+	return "/policies"
+}
+
+// loadFieldMap merges every *.graphql under dir into one field→type map.
+// The bronprofielen are disjoint by design, and where they do share a type
+// name the rules' covers_fields decide which fields are reachable, so a
+// union is the right merge.
+func loadFieldMap(dir string) map[string]string {
+	m := map[string]string{}
+	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || filepath.Ext(path) != ".graphql" {
+			return nil //nolint:nilerr // an unreadable entry must not abort the rest
+		}
+		src, err := os.ReadFile(path) //nolint:gosec // operator-supplied policy dir
+		if err != nil {
+			return nil
+		}
+		schema, err := gqlparser.LoadSchema(&ast.Source{Name: path, Input: string(src)})
+		if err != nil {
+			return nil
+		}
+		for _, t := range schema.Types {
+			if t.Kind != ast.Object && t.Kind != ast.Interface {
+				continue
+			}
+			for _, f := range t.Fields {
+				named := schema.Types[f.Type.Name()]
+				if named != nil && (named.Kind == ast.Object || named.Kind == ast.Interface) {
+					m[t.Name+"."+f.Name] = named.Name
+				}
+			}
+		}
+		return nil
+	})
+	return m
 }
 
 type gqlWalkCtx struct {
@@ -369,9 +391,9 @@ type gqlWalkCtx struct {
 
 // walkQuery parses the query and produces the pre-digested resolved-
 // shape the authz policy consumes. Never touches coverage config —
-// `scalar` is derived from the selection set (no SDL at runtime); the
-// parent type comes from the generated field-map.
-func walkQuery(query string, variables map[string]any) map[string]any {
+// `scalar` is derived from the selection set; the parent type comes from
+// the SDL-derived field map.
+func walkQuery(query, operationName string, variables map[string]any) map[string]any {
 	res := map[string]any{"fields": []map[string]any{}, "args": map[string]any{}, "coverage_unverifiable": false}
 
 	doc, err := parser.ParseQuery(&ast.Source{Input: query})
@@ -379,11 +401,7 @@ func walkQuery(query string, variables map[string]any) map[string]any {
 		res["coverage_unverifiable"] = true
 		return res
 	}
-	var op *ast.OperationDefinition
-	for _, o := range doc.Operations {
-		op = o
-		break
-	}
+	op := selectOperation(doc, operationName)
 	if op == nil {
 		res["coverage_unverifiable"] = true
 		return res
@@ -414,6 +432,27 @@ func walkQuery(query string, variables map[string]any) map[string]any {
 	return res
 }
 
+// selectOperation picks the operation the source will actually execute.
+//
+// A document may hold several operations, and the executing server picks
+// by operationName — so authorizing the first one would judge a different
+// selection set than the one that runs. Anything ambiguous returns nil,
+// which the caller turns into coverage_unverifiable (deny).
+func selectOperation(doc *ast.QueryDocument, operationName string) *ast.OperationDefinition {
+	if operationName != "" {
+		for _, o := range doc.Operations {
+			if o.Name == operationName {
+				return o
+			}
+		}
+		return nil // named but absent — do not fall back to another operation
+	}
+	if len(doc.Operations) != 1 {
+		return nil // 0, or >1 without a name to disambiguate
+	}
+	return doc.Operations[0]
+}
+
 func walkSelections(sels ast.SelectionSet, parentType string, pathSegs []string, ctx *gqlWalkCtx) {
 	if len(pathSegs) > gqlMaxDepth {
 		ctx.coverageUnverifiable = true
@@ -429,7 +468,6 @@ func walkSelections(sels ast.SelectionSet, parentType string, pathSegs []string,
 				"parent": parentType,
 				"name":   name,
 				"scalar": s.SelectionSet == nil,
-				"known":  true,
 				"id":     "Query." + strings.Join(segs, "."),
 			})
 			for _, arg := range s.Arguments {
