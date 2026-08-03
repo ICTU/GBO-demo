@@ -43,7 +43,7 @@
     "countryCode": "nl",
     "privacyPolicyUrl": "https://www.rvig.nl/privacy"
   },
-  "requestOriginBaseUrl": "${EUDI_READER_ORIGIN_URL}",
+  "requestOriginBaseUrl": "${EUDI_PUBLIC_URL}",
   "authorizedAttributes": {
     "urn:eudi:pid:nl:1": [
       [
