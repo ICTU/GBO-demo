@@ -39,6 +39,10 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// readHeaderTimeout bounds how long a client may take to send its request
+// headers, so a stalled connection cannot hold a handler open.
+const readHeaderTimeout = 10 * time.Second
+
 type config struct {
 	Port          string
 	UpstreamURL   string // source service (e.g. http://graphql-server:4000)
@@ -273,6 +277,13 @@ func newMux(cfg config, client *http.Client) *http.ServeMux {
 	return mux
 }
 
+// fatal logs and ends the process. main is the only place in this service
+// that exits; everything else returns an error.
+func fatal(msg string, err error) {
+	slog.Error(msg, "err", err.Error())
+	os.Exit(1)
+}
+
 func main() {
 	// One image, one instance per bron (bron-sidecar for the BD bron,
 	// brp-sidecar for the BRP bron). Take the identity from the environment so
@@ -297,17 +308,17 @@ func main() {
 	}
 
 	client := &http.Client{Timeout: 15 * time.Second}
-	mux := newMux(cfg, client)
 
-	addr := ":" + cfg.Port
+	srv := &http.Server{
+		Addr:              ":" + cfg.Port,
+		Handler:           otelhttp.NewHandler(newMux(cfg, client), serviceName),
+		ReadHeaderTimeout: readHeaderTimeout,
+	}
 	slog.Info("sidecar starting",
-		"addr", addr,
+		"addr", srv.Addr,
 		"upstream", cfg.UpstreamURL,
 		"bsnk", cfg.BSNkURL,
 		"pseudonym_vars", cfg.PseudonymVars,
 	)
-	if err := http.ListenAndServe(addr, otelhttp.NewHandler(mux, serviceName)); err != nil {
-		slog.Error("server stopped", "err", err.Error())
-		os.Exit(1)
-	}
+	fatal("listen and serve", srv.ListenAndServe())
 }

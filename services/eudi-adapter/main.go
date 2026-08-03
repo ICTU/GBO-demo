@@ -66,6 +66,10 @@ type fscTxIDCtxKeyType struct{}
 
 var fscTxIDCtxKey = fscTxIDCtxKeyType{}
 
+// readHeaderTimeout bounds how long a client may take to send its request
+// headers, so a stalled connection cannot hold a handler open.
+const readHeaderTimeout = 10 * time.Second
+
 type config struct {
 	Port        string
 	OutwayURL   string
@@ -953,6 +957,13 @@ func newMux(cfg config, catalog *Catalog, client *http.Client) *http.ServeMux {
 	return mux
 }
 
+// fatal logs and ends the process. main is the only place in this service
+// that exits; everything else returns an error.
+func fatal(msg string, err error) {
+	slog.Error(msg, "err", err.Error())
+	os.Exit(1)
+}
+
 func main() {
 	cfg := loadConfig()
 	ctx := context.Background()
@@ -965,8 +976,7 @@ func main() {
 
 	catalog, err := loadCatalog(cfg.CatalogPath)
 	if err != nil {
-		slog.Error("catalog load failed", "path", cfg.CatalogPath, "err", err.Error())
-		os.Exit(1)
+		fatal("loading usecase catalog", err)
 	}
 
 	client := &http.Client{
@@ -974,13 +984,15 @@ func main() {
 		Transport: otelhttp.NewTransport(http.DefaultTransport),
 	}
 
-	mux := newMux(cfg, catalog, client)
-
-	addr := ":" + cfg.Port
-	slog.Info("eudi-adapter starting", "addr", addr, "outway", cfg.OutwayURL, "issuer_oin", cfg.IssuerOIN)
 	// Middleware order: withFscTraceContext wraps otelhttp — the header
 	// mutation must happen before otelhttp extracts the parent context.
-	if err := http.ListenAndServe(addr, withFscTraceContext(otelhttp.NewHandler(mux, "eudi-adapter"))); err != nil {
-		slog.Error("server stopped", "err", err.Error())
+	srv := &http.Server{
+		Addr:              ":" + cfg.Port,
+		Handler:           withFscTraceContext(otelhttp.NewHandler(newMux(cfg, catalog, client), "eudi-adapter")),
+		ReadHeaderTimeout: readHeaderTimeout,
 	}
+	slog.Info("eudi-adapter starting", "addr", srv.Addr, "outway", cfg.OutwayURL, "issuer_oin", cfg.IssuerOIN)
+	// Previously this logged and returned, so a failure to bind exited 0 and
+	// looked like a clean shutdown to the orchestrator.
+	fatal("listen and serve", srv.ListenAndServe())
 }

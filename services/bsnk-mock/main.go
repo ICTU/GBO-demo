@@ -23,6 +23,27 @@ import (
 
 const piSalt = "pi-salt"
 
+// readHeaderTimeout bounds how long a client may take to send its request
+// headers, so a stalled connection cannot hold a handler open.
+const readHeaderTimeout = 10 * time.Second
+
+type config struct {
+	Port string
+}
+
+func loadConfig() (config, error) {
+	return config{
+		Port: getEnv("PORT", "4003"),
+	}, nil
+}
+
+func getEnv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
 type Store struct {
 	mu      sync.RWMutex
 	piToBSN map[string]string
@@ -185,19 +206,29 @@ func newMux(store *Store) *http.ServeMux {
 	return mux
 }
 
+// fatal logs and ends the process. main is the only place in this service
+// that exits; everything else returns an error.
+func fatal(msg string, err error) {
+	slog.Error(msg, "err", err.Error())
+	os.Exit(1)
+}
+
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", "bsnk-mock"))
+
+	cfg, err := loadConfig()
+	if err != nil {
+		fatal("loading configuration from environment", err)
+	}
 
 	shutdown := initTracer()
 	defer func() { _ = shutdown(context.Background()) }()
 
-	store := NewStore()
-	mux := newMux(store)
-
-	addr := ":4003"
-	slog.Info("listening", "addr", addr)
-	if err := http.ListenAndServe(addr, otelhttp.NewHandler(withAccessLog(mux), "bsnk-mock")); err != nil {
-		slog.Error("server error", "err", err.Error())
-		os.Exit(1)
+	srv := &http.Server{
+		Addr:              ":" + cfg.Port,
+		Handler:           otelhttp.NewHandler(withAccessLog(newMux(NewStore())), "bsnk-mock"),
+		ReadHeaderTimeout: readHeaderTimeout,
 	}
+	slog.Info("listening", "addr", srv.Addr)
+	fatal("listen and serve", srv.ListenAndServe())
 }
