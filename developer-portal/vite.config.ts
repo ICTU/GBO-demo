@@ -3,6 +3,11 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
+  worker: {
+    // Vite 8 defaults worker bundles to iife, which breaks code-splitting
+    // for monaco-graphql's graphql.worker in the production build.
+    format: 'es',
+  },
   server: {
     port: 9003,
     host: true,

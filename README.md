@@ -7,7 +7,7 @@ Two access flows sit side-by-side on the same authorization pipeline:
 - **Consent flow** — a citizen grants a consumer permission to query a specific scope of source data. The consumer uses a consent-id to trigger the query; the source resolves it against the citizen's real identifier (BSN) inside its own trust boundary.
 - **Wallet flow** — a citizen holds an EUDI-wallet credential and discloses it to a consumer, who then requests source data using the disclosed identifier. Same policy engine, same transport, different front door.
 
-Both flows share one authorization pipeline: FSC-Inway (transport) → PDP (context handler) → OPA (policy engine) → source-side sidecar (identifier substitution) → source.
+Both flows share one authorization pipeline: FSC-Inway (transport) → OpenFTV PDP (OPA/Rego policy engine + GraphQL request-mapper) → source-side sidecar (identifier substitution) → source.
 
 ## Prerequisites
 
@@ -61,7 +61,7 @@ make demo             # DvTP (consent) flow only — no wallet, no public URLs n
 
 ```bash
 make demo-minimal     # Base only (~30s, ~13 services)
-                      # Curl directly at pdp-service /evaluation for policy tests.
+                      # Curl directly at the OpenFTV PDP /authzen/v1/evaluation for policy tests.
 
 make demo-eudi        # Wallet flow only (~5-10 min first boot; PKI + FSC-infra + contract seed)
                       # Requires the vendor/nl-wallet submodule + two public HTTPS URLs
@@ -72,103 +72,75 @@ make demo-full        # Both flows on
 make demo-down        # Bring everything down
 ```
 
-Four front-ends run in parallel (in default/full mode):
+Three front-ends run in parallel (in default/full mode):
 
-- **Landing page** (`http://localhost:9000`) — the demo's public front door: what GBO is, the three flows, and links into the other front-ends. Static; no backend of its own.
 - **Consumer mock** (`http://localhost:9001`) — a stand-in for a data-consuming party (e.g. a mortgage lender). Talks to `dienstverlener-backend`.
 - **Consent portal** (`http://localhost:9002`) — a citizen-facing UI to grant and revoke consent. Talks to `consent-portal-backend`.
 - **Developer portal** (`http://localhost:9003`) — architect inspection UI: live trace view + policy inspection + FSC txlog per hop.
 
 The developer portal also runs in `demo-minimal` and `demo-eudi` — flow tabs stay empty until the matching backend services are up.
 
-### Bron schema exploration
-
-The developer portal serves a playground for every source on
-`http://localhost:9003/playground`, with a source picker (`?bron=bd`,
-`?bron=brp`) and two tabs:
-
-- **Query** — GraphiQL 5 with the explorer plugin: tick fields in the left-hand
-  pane to assemble a query, run it against the baked mock data, browse the
-  types in Docs. Opens on a runnable demo query for the selected source.
-- **Schema** — [GraphQL Voyager](https://github.com/graphql-kit/graphql-voyager),
-  which draws the schema as a type graph (BD: `Query` → `IngeschrevenPersoon` →
-  `BelastingjaarAangifte` → `AangifteIH` → `Bedrag`; BRP: `Query` →
-  `IngeschrevenPersoon` → `Huwelijk` → partners).
-
-Both tabs read the source over the portal's own origin
-(`/bron-api/<bron>/graphql`, proxied by nginx and by the dev-server), so no
-source port has to be published and the source servers need no CORS. The
-**BRON** block in the developer portal links to the playground for whichever
-source that run used. The source servers themselves serve GraphQL only — no UI.
-
-The playground talks straight to the source, so the request bypasses FSC-Inway,
-the source sidecar, the PEP and the PDP: no consent is checked and no BSN is
-pseudonymised. It explores the source profile schema; it does not demonstrate
-the authorization chain — use the flow tabs for that. The page says so in its
-header bar.
-
-A second source profile needs its service names in
-`developer-portal/src/data/bronnen.ts` plus one proxy route — not a second
-playground.
-
 ## Demo Walkthrough (Consent Flow)
 
 1. Open the **consent portal** (`:9002`) and log in as a citizen (mock DigiD, BSN from `graphql-server/mockdata/citizens.json`).
 2. Grant consent for a scope (e.g. `bd:ib:2025`) to a consumer.
-3. Open the **consumer mock** (`:9001`), enter the consent-id, click **"Run query"** — the consumer queries income data via HV-Outway → BD-Inway → AuthZen call to PDP → OPA → source sidecar (PI→BSN) → GraphQL.
+3. Open the **consumer mock** (`:9001`), enter the consent-id, click **"Run query"** — the consumer queries income data via HV-Outway → BD-Inway → AuthZen call to PDP → OpenFTV → source sidecar (PI→BSN) → GraphQL.
 4. Open the **developer portal** (`:9003`) → Use tab → click "Watch" → the live arch strip lights up hop by hop.
-5. Revoke consent from the portal and repeat the query — OPA denies with `CONSENT_WITHDRAWN`.
+5. Revoke consent from the portal and repeat the query — the OpenFTV PDP denies with `CONSENT_WITHDRAWN`.
 
 ## "Break things" Guide
 
-### Edit OPA policies (Rego hot-reload)
+### Edit policies (Rego hot-reload)
 
-OPA watches the `policies/` directory. Edit any Rego file and save — OPA reloads automatically.
+The OpenFTV PDP watches the `policies/` directory. Edit any Rego file and save — the PDP reloads automatically within a few seconds.
 
 ```bash
-# Example: force OPA to deny everything
-echo 'package dvtp.authz
-import rego.v1
+# Example: force the PDP to deny everything
+echo 'package authz
 default allow := false
-default reason := "policy_override"' > policies/dvtp/authz.rego
+reason := "POLICY_OVERRIDE"' > policies/authz.rego
 
 # Run a query — the deny surfaces in the consumer UI and the developer portal.
 
 # Restore the original policy
-git checkout policies/dvtp/authz.rego
+git checkout policies/authz.rego
+```
+
+Not always, though: the watcher has been seen to miss `lib.rego` while picking
+up every other file in the same tree (issue #151). If a policy change has no
+effect, restart the engine before concluding the rule is wrong:
+
+```bash
+docker compose restart openftv-pdp
 ```
 
 ### Revoke consent
 
-Click "Revoke consent" in the consent portal (`:9002`), repeat the query. OPA reads the consent register, sees status=REVOKED → DENY.
+Click "Revoke consent" in the consent portal (`:9002`), repeat the query. The PDP reads the consent register, sees status=REVOKED → DENY.
 
-### View OPA decision logs
+### View decision logs
 
 ```bash
-docker compose logs -f opa
+docker compose logs -f openftv-pdp
 ```
 
 ## Service ports
 
 | Service | Port | Description | Real/Mock |
 |---------|------|-------------|-----------|
-| Landing page | 9000 | Public entry point (React/Vite) | Demo frontend |
 | Consumer mock | 9001 | Consumer UI (React/Vite) | Demo frontend |
 | Consent portal | 9002 | Citizen UI (React/Vite) | Demo frontend |
 | Developer portal | 9003 | Architect inspection (React/Vite) | Demo frontend |
 | dev-portal-backend | 9407 | Trace hub + explain endpoint | Real (Go) |
-| GraphQL Server | 9400 | BD source (bronprofiel `bd`) with income data | Real (Go) |
-| BRP GraphQL Server | 9401 | BRP source (bronprofiel `brp`) with persoonsgegevens | Real (Go) |
-| pdp-service | 9408 | AuthZen endpoint behind FSC-Inway (P3 context handler) | Real (Go) |
-| bron-sidecar | 9411 | Source-side gateway for the BD source; PI→BSN via BSNk (subject_id_type-driven) | Real (Go) |
-| brp-sidecar | 9413 | Same gateway image in front of the BRP source | Real (Go) |
+| GraphQL Server | 9400 | Sample source with income data | Real (Go) |
+| bron-sidecar | 9411 | Source-side gateway; PI→BSN via BSNk (subject_id_type-driven) | Real (Go) |
 | additional-claims-service | 9412 | Provider policy that enriches OpenFSC access tokens | Demo configuration (Go) |
 | Consent Register | 9402 | Consent store (PIP) | Mock (Go, in-memory) |
 | BSNk Mock | 9403 | Pseudonymization service | Mock (Go, deterministic) |
 | HV-Manager UI | 8096 | Consumer-org FSC-Controller (mortgage-lender demo org) | Real (OpenFSC v2.4.0) |
 | EDI-Manager UI | 8094 | Consumer-org FSC-Controller (EUDI issuer) | Real (OpenFSC v2.4.0) |
 | BD-Manager UI | 8092 | Provider-org FSC-Controller (source-holder demo org) | Real (OpenFSC v2.4.0) |
-| OPA | 9181 | Policy Decision Point (Rego) | Real |
+| OpenFTV PDP | 9181 (API, HTTPS) / 9180 (health) | Policy Decision Point (OPA/Rego engine + GraphQL context-mapper) | Real |
 | Jaeger | 9686 | Distributed tracing UI | Real |
 | OTel Collector | 9317 | Trace collection | Real |
 
@@ -176,14 +148,13 @@ docker compose logs -f opa
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| OPA / Rego policies | **Real** | Production OPA container with real Rego evaluation |
+| OpenFTV PDP / Rego policies | **Real** | OpenFTV PDP (embedded OPA) with real Rego evaluation |
 | OpenTelemetry + Jaeger | **Real** | Production-grade distributed tracing |
-| GraphQL Server (BD + BRP) | **Real** | Two Go GraphQL sources, one per bronprofiel; mock data, real schemas from gbo-semantiek v0.3 |
+| GraphQL Server | **Real** | Real Go GraphQL implementation |
 | FSC (Manager/Inway/Outway/Controller/txlog) | **Real** | OpenFSC v2.4.0 upstream containers, three orgs (consumer, EUDI-issuer, provider) each with their own PostgreSQL + certs |
-| pdp-service | **Real** | AuthZen endpoint behind FSC-Inway; the only policy endpoint for both flows |
 | bron-sidecar | **Real** | Source-side gateway; PI→BSN driven by the signed `subject_id_type` additional claim |
 | additional-claims-service | **Demo** | GitOps-style provider policy; production should resolve claims from the authoritative onboarding or authorization source |
-| EUDI PID disclosure | **Demo** | The BSN the EUDI rules key on (`pip.pid.bsn`) is taken from the same request that carries the query variable selecting the record — it is not independently verified, so the disclosure does not prove the subject. Production needs the wallet's verified PID assertion bound to `variables.bsn` before the PDP evaluates. Applies to both EUDI flows (BD and BRP) |
+| EUDI PID disclosure | **Demo** | The subject the EUDI rules key on (`pip.pid.pi`, derived by the request-mapper from the disclosed BSN via BSNk) originates in the same request that carries the query variable selecting the record — it is not independently verified, so the disclosure does not prove the subject. Production needs the wallet's verified PID assertion bound to `variables.bsn` before the PDP evaluates. Applies to both EUDI flows (BD and BRP) |
 | Consent Register | **Mock** | In-memory; production would be a persistent store |
 | BSNk Mock | **Mock** | Deterministic SHA-256; real BSNk uses ElGamal on elliptic curves |
 
@@ -195,9 +166,9 @@ The five-factor authorization model demonstrated:
 |---|--------|------------------------|
 | ① | Org identity (mTLS) | FSC-Manager validates peer-certs; FSC-Inway includes peer_cert_chain in the AuthZen context |
 | ② | Org permission (JWT) | Provider FSC-Manager validates the grant and signs `add.{flow, subject_id_type}` returned by its Additional Claims API |
-| ③ | Access basis (consent) | pdp-service fetches consent via `GET /consents?pi=<pi>&scope=...` on consent-register |
-| ④ | Data scope (GraphQL) | OPA checks requested fields against the dienstencatalogus (rules DVT0001/EUD0001/EUD0002) |
-| ⑤ | Request validity | OPA validates `pip.consent` + `resource.pi` binding + expiry |
+| ③ | Access basis (consent) | OpenFTV PDP pulls ACTIVE consents from consent-register into `data.attributes.consents` (PIP pull, 5s interval) |
+| ④ | Data scope (GraphQL) | The OpenFTV PDP checks requested fields against the dienstencatalogus (rules DVT0001/EUD0001) |
+| ⑤ | Request validity | The OpenFTV PDP validates consent + `context.resource.pi` binding + expiry |
 
 ## Makefile targets
 
@@ -226,31 +197,31 @@ make fsc-clean # Wipe everything: containers, images, CA material
 Three FSC orgs run alongside the main stack:
 
 - **Consumer-org (mortgage lender)** — consent-flow consumer; provider claims resolve to `flow=dvtp:query`, `subject_id_type=pseudonym`
-- **EDI-Issuer** — wallet-flow consumer; provider claims resolve to `flow=eudi:attestation` (BD) or `flow=eudi:attestation:brp` (BRP), `subject_id_type=direct`
-- **Provider (source-holder)** — provides two services: `bri` (BD source, via bron-sidecar) and `brp` (BRP source, via brp-sidecar). One provider peer, two bronnen — a demo simplification; in reality the BRP is held by another organisation.
+- **EDI-Issuer** — wallet-flow consumer; provider claims resolve to `flow=eudi:attestation`, `subject_id_type=direct`
+- **Provider (source-holder)** — provides the `bri` service; endpoint routes through the bron-sidecar
 
 `make demo` orchestrates the full sequence automatically:
 - PKI generation (root-CA + per-org certs)
 - FSC-infra start (three orgs + directory-peer)
-- Contract seed (bri- and brp-service + publications + connection contracts + grant-links)
-- Main stack with dienstverlener-backend, eudi-adapter, pdp-service, both sources and their sidecars
+- Contract seed (bri-service + publication + two connection contracts + grant-links)
+- Main stack with dienstverlener-backend, eudi-adapter, openftv-pdp, bron-sidecar
 
 Step-by-step targets are available for debugging:
 
 1. **`make fsc-all-up`** — FSC-infra + orgs. The directory-manager runs with `--auto-sign-grants=servicePublication`; the provider-manager runs with `--auto-sign-grants=serviceConnection`. Contracts reach `CONTRACT_STATE_VALID` without manual review.
 
-2. **`make fsc-seed-bri`** + **`make fsc-seed-brp`** + **`bash fsc-infra/scripts/seed-bri-connection-hv.sh`** — services + contracts + grant-links. `seed-bri-contract.sh` is parameterised by `SERVICE_NAME` / `SERVICE_ENDPOINT_URL` / `GRANT_LINK_PATH`, so the same script registers `bri` (endpoint = bron-sidecar, path `/bri`) and `brp` (endpoint = brp-sidecar, path `/brp`) in the provider-Controller, posts the publication + connection contracts, and upserts the grant-links per consumer. The provider Manager obtains flow and identifier semantics from `additional-claims-service` when issuing an access token. Idempotent.
+2. **`make fsc-seed-bri`** + **`bash fsc-infra/scripts/seed-bri-connection-hv.sh`** — services + contracts + grant-links. Registers the `bri` service in the provider-Controller (endpoint = bron-sidecar), posts publication + two connection contracts, and upserts the grant-links per consumer. The provider Manager obtains flow and identifier semantics from `additional-claims-service` when issuing an access token. Idempotent.
 
    Grant-link upsert goes via direct SQL — v2.4.0 has no REST endpoint for grant-link CRUD.
 
-3. **Generate pdp-service TLS cert + restart**:
+3. **Generate OpenFTV PDP TLS cert + restart**:
    ```bash
    bash fsc-infra/pki/generate-pdp-cert.sh
-   docker compose up -d --force-recreate dienstverlener-backend eudi-adapter pdp-service graphql-server bron-sidecar brp-graphql-server brp-sidecar
+   docker compose up -d --force-recreate dienstverlener-backend eudi-adapter openftv-pdp graphql-server bron-sidecar
    docker compose -f fsc-infra/docker-compose.yml up -d --force-recreate bd-inway
    ```
 
-   `generate-pdp-cert.sh` produces a self-signed cert (SAN=`pdp-service`) — FSC-Inway's AuthZen plugin requires HTTPS+CA. The same `.pem` is mounted by the provider-inway as `AUTHZEN_ROOT_CA`.
+   `generate-pdp-cert.sh` produces a self-signed cert (SAN=`openftv-pdp`) — FSC-Inway's AuthZen plugin requires HTTPS+CA. The same `.pem` is mounted by the provider-inway as `AUTHZEN_ROOT_CA`.
 
 **Reset**:
 
@@ -346,14 +317,14 @@ Env-var lines go to stdout (append straight to `.env`); the summary of what was 
 
 ```bash
 # Go happy-path integration tests (per service)
-for svc in additional-claims-service bron-sidecar brp-graphql-server bsnk-mock \
-           consent-portal-backend consent-register dev-portal-backend \
-           dienstverlener-backend eudi-adapter graphql-server pdp-service sector-pip; do
+for svc in additional-claims-service bron-sidecar bsnk-mock consent-portal-backend consent-register \
+           dev-portal-backend dienstverlener-backend eudi-adapter \
+           graphql-server sector-pip; do
   (cd services/$svc && go test -timeout 60s ./...)
 done
 
-# OPA policy unit tests
-docker compose exec opa opa test /policies -v
+# Rego policy unit tests (via the OPA CLI image)
+docker run --rm -v $(pwd)/policies:/w -w /w openpolicyagent/opa:1.9.0-static test /w -v
 ```
 
 CI (`.github/workflows/ci.yml`) runs both on every PR.
@@ -406,13 +377,11 @@ helm template bsnk-mock deploy/helm/gbo-app \
 
 The chart also supports overriding the container entrypoint, passing arguments,
 mounting native Kubernetes volumes, and selecting the health probe scheme. The
-example values files cover an OPA policy ConfigMap and a TLS-enabled PDP service:
+example values files cover the OpenFTV PDP (policies baked into the image) and a TLS-enabled PDP service:
 
 ```bash
-helm template opa deploy/helm/gbo-app \
-  --values deploy/helm/gbo-app/examples/opa-values.yaml
-helm template pdp-service deploy/helm/gbo-app \
-  --values deploy/helm/gbo-app/examples/pdp-service-values.yaml
+helm template openftv-pdp deploy/helm/gbo-app \
+  --values deploy/helm/gbo-app/examples/openftv-pdp-values.yaml
 ```
 
 ## Troubleshooting
@@ -422,28 +391,29 @@ helm template pdp-service deploy/helm/gbo-app \
 docker compose logs <service-name>
 ```
 
-**OPA returning unexpected results?**
+**PDP returning unexpected results?**
 ```bash
-# Check OPA decision logs
-docker compose logs opa | grep "decision"
+# Check decision logs
+docker compose logs openftv-pdp | grep "Decision Log"
 
-# Test OPA directly
-curl -X POST http://localhost:9181/v1/data/dvtp/authz -d '{"input": {...}}'
+# Test the OpenFTV PDP directly (AuthZEN evaluation; HTTPS, self-signed)
+curl -k -X POST https://localhost:9181/authzen/v1/evaluation \
+  -H 'Content-Type: application/json' \
+  -d '{"subject":{"type":"org","id":"test"},"action":{"name":"dvtp:query"},"resource":{"type":"graphql","id":"query"},"context":{...}}'
 ```
 
 **Frontend not loading?**
-- Check the four frontends (`landing-page` :9000, `dienstverlener-mock` :9001, `toestemmingsportaal-frontend` :9002, `developer-portal` :9003) and their backends.
+- Check the three frontends (`dienstverlener-mock` :9001, `toestemmingsportaal-frontend` :9002, `developer-portal` :9003) and their backends.
 - `docker compose logs <service>` for the container in question.
 
 ## Adding new access flows
 
-The architecture is designed for incremental extension. Every new flow shares the same FSC-Inway → pdp-service (AuthZen) → OPA → bron-sidecar → GraphQL chain. Flow-specific context is provider-owned: OpenFSC asks `additional-claims-service` during token issuance and signs the returned values into the access token's `add` claim.
+The architecture is designed for incremental extension. Every new flow shares the same FSC-Inway → OpenFTV PDP (AuthZen + GraphQL request-mapper) → bron-sidecar → GraphQL chain — only the policy rules, contract properties, and entry points differ. Flow-specific context is provider-owned: OpenFSC asks `additional-claims-service` during token issuance and signs the returned values into the access token's `add` claim.
 
 The checked-in mapping is deliberately small demo policy, not a second production contract register. A production deployment should resolve these claims from the same authoritative onboarding or authorization source that governs the relationship.
 
 - **Legal-basis (gov-to-gov)**: add `policies/legal-basis/*.rego`, add a new FSC consumer org and configure provider claims with `flow=g2g:legal-basis`; the PDP dispatches on the signed token claim.
 - **Wallet flow (already implemented)**: see `eudi-adapter`.
-- **Second source (already implemented)**: the akte van overlijden reads the BRP source. A new bronprofiel needs its own FSC service + grant-link path, a mirror schema under `policies/dvtp/schemas/`, an entry in pdp-service's `flowSchemaFiles` (the flow name carries the bronprofiel, because two bronnen can expose the same query root), a rule with its own `covers_fields`, and a catalog entry with `bron` + `flow`.
 - **AS4 / SDG-OOTS**: add an AS4 bridge mock + Domibus mock.
 
 ## Repository owner

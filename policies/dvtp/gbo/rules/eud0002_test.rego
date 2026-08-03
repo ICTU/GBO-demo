@@ -17,7 +17,7 @@ _base_ctx := {
 	"args": {"vars.bsn": "999991772"},
 	"time": "2026-07-27T12:00:00Z",
 	"resource": {"scope": "brp:akte:overlijden"},
-	"pip": {"pid": {"bsn": "999991772"}},
+	"pip": {"pid": {"pi": "PI-9c4e10b7a6d2f385"}},
 	"field": "Query.ingeschrevenPersoon.heeftHuwelijk.partners.datumOverlijden",
 }
 
@@ -71,7 +71,7 @@ test_deny_actor_not_in_allowed_actors if {
 # ── PID ─────────────────────────────────────────────────────────────────
 
 test_deny_pid_missing if {
-	ctx := object.union(_base_ctx, {"pip": {"pid": {"bsn": ""}}})
+	ctx := object.union(_base_ctx, {"pip": {"pid": {"pi": ""}}})
 	result := lib.evaluate(eud0002.spec, ctx)
 	result.decision == false
 	result.context.reason_admin.code == "PID_NOT_PRESENT"

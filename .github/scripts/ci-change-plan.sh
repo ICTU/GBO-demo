@@ -80,9 +80,9 @@ done
 # checked against the tree to catch renames and deletions.
 #
 # Columns: service|build context|extra paths that change the image.
-# pdp-service and opa bake ./policies into the image, so they build from
-# the repository root and a policy change has to rebuild them — the same
-# inputs the release manifest hashes.
+# dev-portal-backend and openftv-pdp bake ./policies into the image, so
+# they build from the repository root and a policy change has to rebuild
+# them — the same inputs the release manifest hashes.
 while IFS='|' read -r service context extra_paths; do
   [[ -n "${service}" ]] || continue
 
@@ -115,8 +115,7 @@ additional-claims-service|services/additional-claims-service|
 brp-graphql-server|services/brp-graphql-server|
 eudi-adapter|services/eudi-adapter|
 graphql-server|services/graphql-server|
-pdp-service|.|policies/dvtp/schemas
-opa|.|policies
+openftv-pdp|.|policies
 sector-pip|services/sector-pip|
 DOCKER_SERVICES
 

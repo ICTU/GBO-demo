@@ -7,7 +7,7 @@ package dvtp.gbo.rules.eud0001
 # of per-request citizen consent (DvTP-flow), the wallet-app receives
 # the credential after PID-disclosure (EUDI-flow).
 #
-# Dispatch: this rule fires only when `input.pip.pid.bsn` is present.
+# Dispatch: this rule fires only for eudi:attestation (context.flow).
 # DVT0001 fires only when `input.pip.consent` is present. Both rules
 # can cover the same fields; the engine's "first rule that grants →
 # allow" logic picks the right one per request.

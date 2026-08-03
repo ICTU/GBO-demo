@@ -16,12 +16,10 @@ type Props = {
   states: ArchStates
   apiCalls?: ApiCall[]
   traceId?: string
-  // For EUDI the traceparent context breaks at FSC-Inway (the AuthZen
-  // plugin uses context.Background()), so pdp-service creates a fresh
-  // trace-id. useFscTxlog looks it up via the Fsc-Transaction-Id tag; we
-  // pass it in here so useExplain can find the OPA decision-log against
-  // the right trace-id and the pdp-popover can read its gbo.* attrs from
-  // the PDP span.
+  // useFscTxlog resolves the Fsc-Transaction-Id; the OpenFTV request-
+  // mapper copies it into context.trace_id, so useExplain finds the
+  // OpenFTV decision-log directly against it. (No PDP spans exist
+  // anymore — the OpenFTV PDP has no OTel instrumentation.)
   pdpTraceIdOverride?: string
   // Bronprofiel of the run being shown (EUDI only) — decides which register
   // the last two nodes name. Derived from the trace, see bronForSpans.
@@ -47,13 +45,9 @@ export default function ArchStrip({
   mode, setMode, states, apiCalls, traceId, pdpTraceIdOverride, bron,
   watching, onToggleWatch, watchError, jaegerUrl, grafanaUrl,
 }: Props) {
-  // In EUDI mode we use the PDP trace (cross-lookup) for OPA/PDP details,
-  // because the adapter trace doesn't contain them. Other nodes still
-  // resolve against the adapter trace.
-  // The cross-trace-lookup applies to both flows that hit pdp-service via
-  // FSC-Inway (EUDI + DvTP). The AuthZen plugin's context.Background()
-  // breaks the OTel trace; pdp-service creates a fresh trace-id which we
-  // locate via the Fsc-Transaction-Id.
+  // For flows through FSC-Inway (EUDI + DvTP) the PDP decision lives in
+  // the OpenFTV decision log, keyed by Fsc-Transaction-Id (see
+  // useFscTxlog). Other nodes still resolve against the adapter trace.
   const useCrossTrace = (mode === 'eudi-issuance' || mode === 'use') && !!pdpTraceIdOverride
   const explainTraceId = useCrossTrace ? pdpTraceIdOverride : traceId
   const pdpSpanTraceId = useCrossTrace ? pdpTraceIdOverride : traceId

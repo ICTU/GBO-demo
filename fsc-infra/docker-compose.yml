@@ -717,10 +717,10 @@ services:
     restart: unless-stopped
     volumes:
       - ./orgs/belastingdienst-mock/pki:/certs:ro
-      # The pdp-service self-signed cert serves as CA for the AuthZen
+      # The OpenFTV PDP self-signed cert serves as CA for the AuthZen
       # plugin (see AUTHZEN_ROOT_CA). Separate mount root to avoid a
       # conflict with /certs (ro).
-      - ../services/pdp-service/certs:/authzen-ca:ro
+      - ../services/openftv-pdp/certs:/authzen-ca:ro
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
       TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
@@ -735,11 +735,11 @@ services:
       CONTROLLER_REGISTRATION_API_ADDRESS: https://bd-controller:9443
       TX_LOG_API_ADDRESS: https://bd-txlog-api:9443
       MANAGER_INTERNAL_UNAUTHENTICATED_ADDRESS: https://bd-manager:9444
-      # Every inbound request is AuthZen-checked by the PDP before it
-      # reaches the backend service. FSC-Inway requires HTTPS + CA;
-      # pdp-service gets a self-signed cert (via generate-pdp-cert.sh),
-      # mounted as /authzen-ca/pdp-service.pem in bd-inway.
-      AUTHZEN_SERVICE_ADDRESS: https://pdp-service:4008
+      # Every inbound request is AuthZen-checked by the OpenFTV PDP
+      # before it reaches the backend service. FSC-Inway requires
+      # HTTPS + CA; openftv-pdp gets a self-signed cert (via
+      # generate-pdp-cert.sh), mounted as /authzen-ca/pdp-service.pem.
+      AUTHZEN_SERVICE_ADDRESS: https://openftv-pdp:8443/authzen/v1
       AUTHZEN_ROOT_CA: /authzen-ca/pdp-service.pem
       AUTHZEN_WITH_BODY: "true"
     depends_on:

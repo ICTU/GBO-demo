@@ -14,11 +14,11 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -30,8 +30,12 @@ import (
 	"sync"
 	"time"
 
+	"errors"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"net"
+	"os/signal"
+	"syscall"
 )
 
 type config struct {
@@ -42,14 +46,15 @@ type config struct {
 	OrganizationsFile string
 	LokiURL           string
 	LokiDecisionQuery string
-	OPAURL            string
+	PoliciesDir       string
+	RulesFile         string
 	FscGroupID        string
 	FscTxlogPeers     []fscTxlogPeer
 }
 
-// fscTxlogPeer describes one FSC log source. Local peers use their txlog-api
-// with an internal certificate; remote peers use the peer-facing Manager
-// logging API with the calling peer's group certificate.
+// fscTxlogPeer describes one FSC-org whose txlog-api we may query.
+// Demo shortcut: intra-org internal-cert used as client-cert. See
+// handleFscTxlog in fsctxlog.go.
 type fscTxlogPeer struct {
 	Name        string // display label (edi, bd)
 	URL         string
@@ -92,8 +97,9 @@ func loadConfig() config {
 		CitizensFile:      getEnv("CITIZENS_FILE", "/citizens/citizens.json"),
 		OrganizationsFile: getEnv("ORGANIZATIONS_FILE", "/orgs/organizations.json"),
 		LokiURL:           getEnv("LOKI_URL", "http://loki:3100"),
-		LokiDecisionQuery: getEnv("LOKI_DECISION_QUERY", `{compose_service="opa"} |= "Decision Log"`),
-		OPAURL:            getEnv("OPA_URL", "http://opa:8181"),
+		LokiDecisionQuery: getEnv("LOKI_DECISION_QUERY", `{compose_service="openftv-pdp"} |= "Decision Log"`),
+		PoliciesDir:       getEnv("POLICIES_DIR", "/policies"),
+		RulesFile:         getEnv("RULES_FILE", "/rules.json"),
 		FscGroupID:        getEnv("FSC_GROUP_ID", "fsc-demo"),
 		FscTxlogPeers:     peers,
 	}
@@ -276,6 +282,29 @@ type HistoryRun struct {
 	Response json.RawMessage `json:"response,omitempty"`
 }
 
+// upstreamTimeout bounds the calls this service makes to Loki and OPA. These
+// handlers previously used http.DefaultClient, which has no timeout: one
+// unresponsive upstream hung the request indefinitely.
+const upstreamTimeout = 10 * time.Second
+
+// readHeaderTimeout bounds how long a client may take to send its request
+// headers, so a stalled connection cannot hold a handler open.
+const readHeaderTimeout = 10 * time.Second
+
+// shutdownTimeout bounds the drain after SIGTERM: stop accepting, let
+// in-flight requests finish, then close whatever is left.
+const shutdownTimeout = 15 * time.Second
+
+// streamGrace is how long ordinary in-flight requests get to finish before
+// the SSE streams are ended. Shutdown waits for active requests but does not
+// cancel their contexts, so /events and /watch-next would otherwise hold the
+// drain open for the full shutdownTimeout on every restart.
+const streamGrace = 2 * time.Second
+
+// upstreamClient is the shared client for those calls. The FSC txlog peers
+// need their own mTLS clients and build them in fsctxlog.go.
+var upstreamClient = &http.Client{Timeout: upstreamTimeout}
+
 var historyMu sync.Mutex
 
 func historyFile(cfg config) string { return filepath.Join(cfg.VarDir, "history.jsonl") }
@@ -394,14 +423,13 @@ func passthroughFile(path string) http.HandlerFunc {
 	}
 }
 
-// ── OPA decision lookup via Loki ─────────────────────────────────────────
+// ── Decision lookup via Loki ────────────────────────────────────────────
 
-// OPA writes one "Decision Log" line per evaluation to stdout (enabled via
-// --set=decision_logs.console=true). Promtail ships them to Loki under the
-// {compose_service="opa"} label by default. LOKI_DECISION_QUERY can replace
-// the selector for Kubernetes or another runtime. We query by trace_id
-// (which PEP injects into the OPA input) and return the parsed JSON entry
-// as-is.
+// The OpenFTV PDP writes one "Decision Log" line per evaluation to stdout
+// (embedded OPA console decision-logs). Promtail ships them to Loki under
+// the {compose_service="openftv-pdp"} label. We query by trace_id (which
+// the OpenFTV request-mapper injects into the AuthZEN context) and
+// entry.
 
 type lokiQueryResponse struct {
 	Status string `json:"status"`
@@ -410,6 +438,40 @@ type lokiQueryResponse struct {
 			Values [][2]string `json:"values"` // [ts_ns, line]
 		} `json:"result"`
 	} `json:"data"`
+}
+
+// traceIDOf extracts the trace_id from an OpenFTV decision-log entry.
+// the request-mapper places Fsc-Transaction-Id in input.context.trace_id.
+func traceIDOf(entry map[string]any) string {
+	input, _ := entry["input"].(map[string]any)
+	ctx, _ := input["context"].(map[string]any)
+	tid, _ := ctx["trace_id"].(string)
+	return tid
+}
+
+// normalizeDecisionEntry reshapes an OpenFTV decision-log line into the
+// entry-shape the dev-portal renders: {path, input, result:{decision,
+// context}, decision_id}. OpenFTV logs result = {allow, reason,
+// response}; our authz policy puts the legacy {decision, context}
+// document (granted[]/denied_fields[]/reason_admin) in `response`, so
+// we unwrap it here — the frontend contract stays unchanged.
+func normalizeDecisionEntry(entry map[string]any) map[string]any {
+	result, _ := entry["result"].(map[string]any)
+	if result == nil {
+		return entry
+	}
+	out := map[string]any{
+		"decision_id": entry["decision_id"],
+		"path":        entry["path"],
+		"input":       entry["input"],
+		"ts":          entry["timestamp"],
+	}
+	if resp, ok := result["response"].(map[string]any); ok {
+		out["result"] = resp
+	} else {
+		out["result"] = map[string]any{"decision": result["allow"], "context": map[string]any{}}
+	}
+	return out
 }
 
 func handleDecision(cfg config) http.HandlerFunc {
@@ -436,7 +498,7 @@ func handleDecision(cfg config) http.HandlerFunc {
 			cfg.LokiURL, url.QueryEscape(expr), now.Add(-30*time.Minute).UnixNano(), now.UnixNano())
 
 		req, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, u, nil)
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := upstreamClient.Do(req)
 		if err != nil {
 			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "loki unreachable: " + err.Error()})
 			return
@@ -453,7 +515,7 @@ func handleDecision(cfg config) http.HandlerFunc {
 			return
 		}
 
-		// Scan each line — accept the first whose input.trace_id matches.
+		// Scan each line — accept the first whose trace_id matches.
 		for _, stream := range lr.Data.Result {
 			for _, v := range stream.Values {
 				line := v[1]
@@ -461,12 +523,8 @@ func handleDecision(cfg config) http.HandlerFunc {
 				if err := json.Unmarshal([]byte(line), &entry); err != nil {
 					continue
 				}
-				input, _ := entry["input"].(map[string]any)
-				if input == nil {
-					continue
-				}
-				if tid, _ := input["trace_id"].(string); tid == traceID {
-					writeJSON(w, http.StatusOK, entry)
+				if traceIDOf(entry) == traceID {
+					writeJSON(w, http.StatusOK, normalizeDecisionEntry(entry))
 					return
 				}
 			}
@@ -477,13 +535,14 @@ func handleDecision(cfg config) http.HandlerFunc {
 
 // ── Explain & policy-source (generic, no package-pinning) ───────────────
 
-// handleExplain returns the explain-trace for every OPA decision that was
-// recorded under a given trace_id. For each decision, we re-POST its
-// captured input to OPA at the same path with ?explain=<mode>&pretty=true,
-// then return the resulting pretty-text trace alongside input + result.
+// handleExplain returns every decision that was recorded under a given
+// trace_id, with the captured input + normalized result for each.
 //
-// No assumption about policy package — works for dvtp.authz, eudi.authz,
-// or any future policy as long as the decision-log records `path` + `input`.
+// TODO(OpenFTV): ?mode=full|fails used to replay the captured input
+// against OPA's ?explain API for a rule-by-rule evaluation trace.
+// OpenFTV PDP has no explain endpoint, so the replay is dropped and the
+// UI shows the decision-log detail only. Possible future workaround:
+// dev-only `opa eval --explain` sidecar (see ICTU-2 plan).
 func handleExplain(cfg config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		corsHeaders(w)
@@ -509,22 +568,9 @@ func handleExplain(cfg config) http.HandlerFunc {
 		}
 		out := make([]map[string]any, 0, len(decisions))
 		for _, d := range decisions {
-			path, _ := d["path"].(string)
-			input := d["input"]
-			entry := map[string]any{
-				"path":        path,
-				"input":       input,
-				"result":      d["result"],
-				"decision_id": d["decision_id"],
-			}
-			// Only re-run OPA when explain mode is explicitly requested. Each
-			// replay writes a fresh decision-log line; default-skipping keeps
-			// Loki clean and the primary view fast.
+			entry := normalizeDecisionEntry(d)
 			if mode == "full" || mode == "fails" {
-				if ex, replayResult, ok := opaExplain(r.Context(), cfg.OPAURL, path, input, mode); ok {
-					entry["explanation"] = ex
-					entry["result_replay"] = replayResult
-				}
+				entry["explanation_unavailable"] = "rule-evaluation trace is not available with the OpenFTV engine"
 			}
 			out = append(out, entry)
 		}
@@ -532,38 +578,16 @@ func handleExplain(cfg config) http.HandlerFunc {
 	}
 }
 
-// traceIDMatches reports whether a decision-log input belongs to the
-// requested identifier. Callers pass either the OTel trace-id or the
-// FSC transaction-id (a UUID v7); both denote the same request, so
-// compare with dashes stripped.
-func traceIDMatches(input map[string]any, wanted string) bool {
-	want := strings.ReplaceAll(wanted, "-", "")
-	if want == "" {
-		return false
-	}
-
-	if tid, _ := input["trace_id"].(string); strings.ReplaceAll(tid, "-", "") == want {
-		return true
-	}
-
-	fsc, _ := input["fsc"].(map[string]any)
-	if fsc == nil {
-		return false
-	}
-	txID, _ := fsc["transaction_id"].(string)
-	return strings.ReplaceAll(txID, "-", "") == want
-}
-
 // lokiDecisionsForTrace pulls every "Decision Log" line that matches the
 // given trace_id (last 30m) and returns the parsed entries in chronological
-// order (oldest first).
+// order (oldest first), deduplicated by decision_id.
 func lokiDecisionsForTrace(ctx context.Context, cfg config, traceID string) ([]map[string]any, error) {
 	now := time.Now()
 	expr := cfg.LokiDecisionQuery
 	u := fmt.Sprintf("%s/loki/api/v1/query_range?query=%s&start=%d&end=%d&limit=500&direction=forward",
 		cfg.LokiURL, url.QueryEscape(expr), now.Add(-30*time.Minute).UnixNano(), now.UnixNano())
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := upstreamClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("loki unreachable: %w", err)
 	}
@@ -587,68 +611,31 @@ func lokiDecisionsForTrace(ctx context.Context, cfg config, traceID string) ([]m
 			if json.Unmarshal([]byte(v[1]), &entry) != nil {
 				continue
 			}
-			input, _ := entry["input"].(map[string]any)
-			if input == nil {
-				continue
-			}
-			// Match either identifier: input.trace_id is the OTel trace
-			// the PDP reconstructed, input.fsc.transaction_id the UUID
-			// that travelled through FSC. They are the same value in
-			// different notations (dashes) when nothing upstream supplied
-			// a traceparent, and different fields otherwise — callers may
-			// hold either one.
-			if traceIDMatches(input, traceID) {
+			if traceIDOf(entry) == traceID {
 				rows = append(rows, stamped{ts: v[0], raw: entry})
 			}
 		}
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].ts < rows[j].ts })
-	// Dedup by path: the first entry chronologically is the original PEP call;
-	// later entries for the same path are our own /explain re-runs (OPA writes
-	// a decision-log line for every evaluation, including our explain replays).
-	seenPath := make(map[string]bool)
+	seen := make(map[string]bool)
 	out := make([]map[string]any, 0, len(rows))
 	for _, r := range rows {
-		path, _ := r.raw["path"].(string)
-		if seenPath[path] {
+		id, _ := r.raw["decision_id"].(string)
+		if id != "" && seen[id] {
 			continue
 		}
-		seenPath[path] = true
+		seen[id] = true
 		out = append(out, r.raw)
 	}
 	return out, nil
 }
 
-// opaExplain re-runs an OPA evaluation at `data.<path>` with the captured
-// input plus ?explain=<mode>&pretty=true. Returns the pretty-text lines.
-func opaExplain(ctx context.Context, opaURL, path string, input any, mode string) ([]string, any, bool) {
-	body, _ := json.Marshal(map[string]any{"input": input})
-	u := fmt.Sprintf("%s/v1/data/%s?explain=%s&pretty=true", opaURL, strings.TrimPrefix(path, "/"), mode)
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, nil, false
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, nil, false
-	}
-	var parsed struct {
-		Explanation []string `json:"explanation"`
-		Result      any      `json:"result"`
-	}
-	if json.NewDecoder(resp.Body).Decode(&parsed) != nil {
-		return nil, nil, false
-	}
-	return parsed.Explanation, parsed.Result, true
-}
-
-// handleRules proxies OPA's /v1/data/dvtp/gbo/rules so the dev-portal can
-// list the loaded rules and their metadata (covers_types, covers_fields,
-// spec) without knowing OPA's URL. Used by RuleSpecPanel to render a rule's
-// declared scope + evaluation criteria in human-readable form alongside
-// the per-field decisions.
+// handleRules serves the pre-generated rules.json (rule metadata:
+// covers_types, covers_fields, spec) so the dev-portal's RuleSpecPanel
+// can render a rule's declared scope + evaluation criteria. OpenFTV PDP
+// has no data-API to evaluate data.dvtp.gbo.rules live, so the file is
+// generated from the Rego sources by scripts/gen-rules-json.sh (CI
+// checks freshness). Content is identical to the old live evaluation.
 func handleRules(cfg config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		corsHeaders(w)
@@ -660,38 +647,63 @@ func handleRules(cfg config) http.HandlerFunc {
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 			return
 		}
-		req, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, cfg.OPAURL+"/v1/data/dvtp/gbo/rules", nil)
-		resp, err := http.DefaultClient.Do(req)
+		raw, err := os.ReadFile(cfg.RulesFile)
 		if err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "opa unreachable: " + err.Error()})
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "rules.json unreadable (run scripts/gen-rules-json.sh): " + err.Error()})
 			return
 		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("opa /v1/data/dvtp/gbo/rules: %d", resp.StatusCode)})
-			return
-		}
-		// OPA shape: { "result": { "<rule_pkg_leaf>": {rule_id, covers_types, covers_fields, spec} } }
-		var body struct {
-			Result map[string]json.RawMessage `json:"result"`
-		}
-		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "opa decode: " + err.Error()})
+		// File shape: { "<rule_pkg_leaf>": {rule_id, covers_types, covers_fields, spec} }
+		var rules map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &rules); err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "rules.json decode: " + err.Error()})
 			return
 		}
 		// Flatten to a list — the package-leaf key (e.g. "dvt0001") is
 		// redundant since each rule carries its own rule_id.
-		out := make([]json.RawMessage, 0, len(body.Result))
-		for _, m := range body.Result {
+		out := make([]json.RawMessage, 0, len(rules))
+		for _, m := range rules {
 			out = append(out, m)
 		}
 		writeJSON(w, http.StatusOK, out)
 	}
 }
 
-// handlePolicySource returns the raw Rego for a single policy file from
-// OPA's /v1/policies. Used for the "click rule → show snippet" feature.
-// `id` query-param is the OPA policy ID (e.g. "policies/dvtp/authz.rego").
+// policyFile is one Rego source file read from the policies directory.
+type policyFile struct {
+	ID  string // path relative to the policies dir, e.g. "dvtp/gbo/engine.rego"
+	Raw string
+}
+
+// readPolicyFiles walks cfg.PoliciesDir and reads every .rego file.
+// Replaces OPA's /v1/policies listing: the OpenFTV PDP has no policy
+// introspection API, so the dev-portal reads the same files the engine
+// has mounted.
+func readPolicyFiles(dir string) ([]policyFile, error) {
+	var out []policyFile
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(d.Name(), ".rego") {
+			return nil
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		out = append(out, policyFile{ID: filepath.ToSlash(rel), Raw: string(raw)})
+		return nil
+	})
+	return out, err
+}
+
+// handlePolicySource returns the raw Rego for a single policy file.
+// Used for the "click rule → show snippet" feature. `id` query-param is
+// the policy path relative to the policies dir (e.g. "dvtp/gbo/engine.rego").
 func handlePolicySource(cfg config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		corsHeaders(w)
@@ -708,33 +720,38 @@ func handlePolicySource(cfg config) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id query param required"})
 			return
 		}
-		req, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, cfg.OPAURL+"/v1/policies/"+url.PathEscape(id), nil)
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "opa unreachable: " + err.Error()})
+		full, ok := policyFilePath(cfg.PoliciesDir, id)
+		if !ok {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid policy id"})
 			return
 		}
-		defer resp.Body.Close()
-		if resp.StatusCode == http.StatusNotFound {
+		raw, err := os.ReadFile(full)
+		if err != nil {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "policy not found: " + id})
 			return
 		}
-		if resp.StatusCode != http.StatusOK {
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("opa /v1/policies/%s: %d", id, resp.StatusCode)})
-			return
-		}
-		var body struct {
-			Result struct {
-				ID  string `json:"id"`
-				Raw string `json:"raw"`
-			} `json:"result"`
-		}
-		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "opa decode: " + err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]string{"id": body.Result.ID, "raw": body.Result.Raw})
+		writeJSON(w, http.StatusOK, map[string]string{"id": id, "raw": string(raw)})
 	}
+}
+
+// policyFilePath resolves a client-supplied policy id to a file inside
+// dir, rejecting anything that would escape it. Only .rego files are
+// served. (CodeQL: uncontrolled data used in path expression — the
+// returned path is provably inside dir.)
+func policyFilePath(dir, id string) (string, bool) {
+	if id == "" {
+		return "", false
+	}
+	clean := filepath.Clean(id)
+	if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, "../") || !strings.HasSuffix(clean, ".rego") {
+		return "", false
+	}
+	full := filepath.Join(dir, clean)
+	rel, err := filepath.Rel(dir, full)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, "../") {
+		return "", false
+	}
+	return full, true
 }
 
 // handlePolicySnippet locates the Rego file + line where a given reason-code
@@ -743,7 +760,7 @@ func handlePolicySource(cfg config) http.HandlerFunc {
 // render a snippet view centred on that line.
 //
 // Generic across policies that follow the convention `:= "<code>"` in a
-// rule body. Path is the OPA package-path (e.g. "dvtp/authz" maps to
+// rule body. Path is the policy package-path (e.g. "dvtp/gbo/lib" maps to
 // `package dvtp.authz`).
 func handlePolicySnippet(cfg config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -762,18 +779,11 @@ func handlePolicySnippet(cfg config) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path and code query params required"})
 			return
 		}
-		pkgName := strings.ReplaceAll(path, "/", ".")
+		pkgName := strings.ReplaceAll(strings.TrimPrefix(path, "/"), "/", ".")
 
-		req, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, cfg.OPAURL+"/v1/policies", nil)
-		resp, err := http.DefaultClient.Do(req)
+		policies, err := readPolicyFiles(cfg.PoliciesDir)
 		if err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "opa unreachable: " + err.Error()})
-			return
-		}
-		defer resp.Body.Close()
-		var body opaPoliciesResp
-		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "opa decode: " + err.Error()})
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "read policies: " + err.Error()})
 			return
 		}
 		// Four-tier search, most-specific-first. The goal is to land on the
@@ -790,7 +800,7 @@ func handlePolicySnippet(cfg config) http.HandlerFunc {
 			id, raw string
 			line    int
 		}
-		for _, p := range body.Result {
+		for _, p := range policies {
 			if !strings.Contains(p.Raw, "package "+pkgName) {
 				continue
 			}
@@ -800,7 +810,7 @@ func handlePolicySnippet(cfg config) http.HandlerFunc {
 			}
 		}
 		if picked.id == "" {
-			for _, p := range body.Result {
+			for _, p := range policies {
 				if line := findLineWithAll(p.Raw, needle, `"fail")`); line > 0 {
 					picked.id, picked.raw, picked.line = p.ID, p.Raw, line
 					break
@@ -808,7 +818,7 @@ func handlePolicySnippet(cfg config) http.HandlerFunc {
 			}
 		}
 		if picked.id == "" {
-			for _, p := range body.Result {
+			for _, p := range policies {
 				if line := findLineWithAll(p.Raw, needle, "deny_reason("); line > 0 {
 					picked.id, picked.raw, picked.line = p.ID, p.Raw, line
 					break
@@ -816,7 +826,7 @@ func handlePolicySnippet(cfg config) http.HandlerFunc {
 			}
 		}
 		if picked.id == "" {
-			for _, p := range body.Result {
+			for _, p := range policies {
 				if line := findLineWith(p.Raw, needle); line > 0 {
 					picked.id, picked.raw, picked.line = p.ID, p.Raw, line
 					break
@@ -866,27 +876,15 @@ func findLineWith(raw, needle string) int {
 	return 0
 }
 
-// ── Policy chain (derived from OPA-loaded Rego source) ──────────────────
+// ── Policy chain (derived from the Rego sources on disk) ────────────────
 
-// Parses the ordered list of deny-reasons out of the authz.rego `reason`-rule:
-//
-//	reason := "consent_not_found" if { ... }
-//	  else := "consent_withdrawn" if { ... }
-//	  else := "consent_expired" if { ... }
-//	...
-//
-// Each call hits OPA's /v1/policies (cheap; bundle is in-memory) and regex-
-// extracts the string literals after `reason :=` / `else :=`. Keeps the
-// developer-portal in sync with the policy without hardcoding.
+// Parses the ordered deny-cascade out of the evaluation library: the
+// `_step("<CODE>", ...)` literals in lib.rego appear in cascade order
+// (consent-exists → not-withdrawn → not-expired → scope → constraint →
+// pid → scope-whitelist → actor-whitelist). Keeps the developer-portal
+// in sync with the policy without hardcoding.
 
-type opaPoliciesResp struct {
-	Result []struct {
-		ID  string `json:"id"`
-		Raw string `json:"raw"`
-	} `json:"result"`
-}
-
-var reasonRE = regexp.MustCompile(`(?m)^[[:space:]]*(?:reason|}\s*else)\s*:=\s*"([^"]+)"`)
+var chainRE = regexp.MustCompile(`_step\("([^"]+)"`)
 
 func handlePolicyChain(cfg config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -899,38 +897,31 @@ func handlePolicyChain(cfg config) http.HandlerFunc {
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 			return
 		}
-		req, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, cfg.OPAURL+"/v1/policies", nil)
-		resp, err := http.DefaultClient.Do(req)
+		policies, err := readPolicyFiles(cfg.PoliciesDir)
 		if err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "opa unreachable: " + err.Error()})
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "read policies: " + err.Error()})
 			return
 		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("opa /v1/policies: %d", resp.StatusCode)})
-			return
-		}
-		var body opaPoliciesResp
-		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "opa decode: " + err.Error()})
-			return
-		}
-		// Find the file that declares package dvtp.authz; that's where the chain lives.
+		// Find the evaluation library; that's where the cascade lives.
 		var raw string
-		for _, p := range body.Result {
-			if strings.Contains(p.Raw, "package dvtp.authz") {
+		for _, p := range policies {
+			if strings.Contains(p.Raw, "package dvtp.gbo.lib") {
 				raw = p.Raw
 				break
 			}
 		}
 		if raw == "" {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "dvtp.authz policy not loaded in OPA"})
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "dvtp.gbo.lib policy not found on disk"})
 			return
 		}
-		matches := reasonRE.FindAllStringSubmatch(raw, -1)
+		matches := chainRE.FindAllStringSubmatch(raw, -1)
+		seen := make(map[string]bool)
 		codes := make([]string, 0, len(matches))
 		for _, m := range matches {
-			codes = append(codes, m[1])
+			if !seen[m[1]] {
+				seen[m[1]] = true
+				codes = append(codes, m[1])
+			}
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"codes": codes})
 	}
@@ -974,10 +965,49 @@ func main() {
 	hub := newTraceHub(10 * time.Minute)
 	mux := newMux(cfg, hub)
 
-	handler := otelhttp.NewHandler(withAccessLog(mux), "dev-portal-backend")
-	addr := ":" + cfg.Port
-	slog.Info("dev-portal-backend starting", "addr", addr, "var_dir", cfg.VarDir, "predefined_dir", cfg.PredefinedDir)
-	if err := http.ListenAndServe(addr, handler); err != nil {
-		slog.Error("server stopped", "err", err)
+	// BaseContext gives every request a context this process can cancel, which
+	// is how the long-lived SSE streams are told to wind up at shutdown.
+	baseCtx, endStreams := context.WithCancel(context.Background())
+	srv := &http.Server{
+		Addr:              ":" + cfg.Port,
+		Handler:           otelhttp.NewHandler(withAccessLog(mux), "dev-portal-backend"),
+		ReadHeaderTimeout: readHeaderTimeout,
+		BaseContext:       func(net.Listener) context.Context { return baseCtx },
+	}
+	slog.Info("dev-portal-backend starting", "addr", srv.Addr, "var_dir", cfg.VarDir, "predefined_dir", cfg.PredefinedDir)
+	serve(srv, endStreams)
+}
+
+// fatal logs and ends the process. main is the only place in this service
+// that exits; everything else returns an error.
+func fatal(msg string, err error) {
+	slog.Error(msg, "err", err.Error())
+	os.Exit(1)
+}
+
+// serve runs the server until the process is asked to stop, then drains it.
+// Without this a SIGTERM (docker compose down, a Kubernetes rollout) killed
+// in-flight requests outright. Previously a failed ListenAndServe was only
+// logged, so a service that could not bind its port exited 0.
+func serve(srv *http.Server, endStreams context.CancelFunc) {
+	go func() {
+		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+			fatal("listen and serve", err)
+		}
+	}()
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	<-ctx.Done()
+	stop()
+
+	slog.Info("shutting down")
+	// Let ordinary requests finish first, then release the SSE streams.
+	time.AfterFunc(streamGrace, endStreams)
+	drainCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	if err := srv.Shutdown(drainCtx); err != nil {
+		slog.Warn("drain did not finish; closing remaining connections", "err", err.Error())
+		_ = srv.Close()
 	}
 }

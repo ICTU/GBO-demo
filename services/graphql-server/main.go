@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"time"
 
+	"errors"
 	"github.com/graphql-go/graphql"
 	"github.com/graphql-go/graphql/language/ast"
 	"github.com/graphql-go/handler"
@@ -20,6 +22,8 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
 	"go.opentelemetry.io/otel/trace"
+	"os/signal"
+	"syscall"
 )
 
 // ── Data model ────────────────────────────────────────────────────────────────
@@ -46,6 +50,33 @@ type AangifteIH struct {
 	Box3Inkomen           *Bedrag `json:"box3Inkomen"`
 }
 
+// readHeaderTimeout bounds how long a client may take to send its request
+// headers, so a stalled connection cannot hold a handler open.
+const readHeaderTimeout = 10 * time.Second
+
+// shutdownTimeout bounds the drain after SIGTERM: stop accepting, let
+// in-flight requests finish, then close whatever is left.
+const shutdownTimeout = 15 * time.Second
+
+type config struct {
+	Port         string
+	MockDataPath string
+}
+
+func loadConfig() (config, error) {
+	return config{
+		Port:         getEnv("PORT", "4000"),
+		MockDataPath: getEnv("MOCKDATA_PATH", "mockdata/citizens.json"),
+	}, nil
+}
+
+func getEnv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
 type Citizen struct {
 	BSN                        string       `json:"bsn"`
 	HeeftBelastingjaarAangifte []AangifteIH `json:"heeftBelastingjaarAangifte"`
@@ -53,23 +84,25 @@ type Citizen struct {
 
 // ── Mock data store ───────────────────────────────────────────────────────────
 
-var citizenStore map[string]Citizen
-
-func loadMockData(path string) error {
+// loadMockData returns the citizen records indexed by BSN. The store is
+// returned rather than assigned to a package variable so that main can hand
+// it to the schema explicitly and tests can build one without touching
+// process-wide state.
+func loadMockData(path string) (map[string]Citizen, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	var citizens []Citizen
 	if err := json.Unmarshal(data, &citizens); err != nil {
-		return err
+		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
-	citizenStore = make(map[string]Citizen, len(citizens))
+	store := make(map[string]Citizen, len(citizens))
 	for _, c := range citizens {
-		citizenStore[c.BSN] = c
+		store[c.BSN] = c
 	}
-	slog.Info("mock data loaded", "citizens", len(citizenStore))
-	return nil
+	slog.Info("mock data loaded", "citizens", len(store))
+	return store, nil
 }
 
 // ── GraphQL schema ────────────────────────────────────────────────────────────
@@ -199,7 +232,7 @@ var ingeschrevenPersoonType = graphql.NewObject(graphql.ObjectConfig{
 	},
 })
 
-func buildSchema(tracer trace.Tracer) (graphql.Schema, error) {
+func buildSchema(tracer trace.Tracer, store map[string]Citizen) (graphql.Schema, error) {
 	queryType := graphql.NewObject(graphql.ObjectConfig{
 		Name: "Query",
 		Fields: graphql.Fields{
@@ -214,7 +247,7 @@ func buildSchema(tracer trace.Tracer) (graphql.Schema, error) {
 					defer span.End()
 
 					bsn, _ := p.Args["bsn"].(string)
-					citizen, exists := citizenStore[bsn]
+					citizen, exists := store[bsn]
 					if !exists {
 						return nil, nil
 					}
@@ -317,12 +350,22 @@ func newMux(schema *graphql.Schema, tracer trace.Tracer) *http.ServeMux {
 	return mux
 }
 
+// fatal logs and ends the process. main is the only place in this service
+// that exits; everything else returns an error.
+func fatal(msg string, err error) {
+	slog.Error(msg, "err", err.Error())
+	os.Exit(1)
+}
+
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", "graphql-server"))
 
-	ctx := context.Background()
+	cfg, err := loadConfig()
+	if err != nil {
+		fatal("loading configuration from environment", err)
+	}
 
-	// OTel
+	ctx := context.Background()
 	shutdown, err := initTracer(ctx)
 	if err != nil {
 		slog.Warn("tracer init failed", "err", err.Error())
@@ -338,29 +381,45 @@ func main() {
 
 	tracer := otel.Tracer("graphql-server")
 
-	// Load mock data
-	dataPath := "mockdata/citizens.json"
-	if p := os.Getenv("MOCKDATA_PATH"); p != "" {
-		dataPath = p
-	}
-	if err := loadMockData(dataPath); err != nil {
-		slog.Error("failed to load mock data", "err", err.Error())
-		os.Exit(1)
-	}
-
-	// Build schema
-	schema, err := buildSchema(tracer)
+	store, err := loadMockData(cfg.MockDataPath)
 	if err != nil {
-		slog.Error("failed to build schema", "err", err.Error())
-		os.Exit(1)
+		fatal("loading mock data", err)
 	}
 
-	mux := newMux(&schema, tracer)
+	schema, err := buildSchema(tracer, store)
+	if err != nil {
+		fatal("building schema", err)
+	}
 
-	port := "4000"
-	slog.Info("listening", "addr", ":"+port)
-	if err := http.ListenAndServe(":"+port, otelhttp.NewHandler(withAccessLog(mux), "graphql-server")); err != nil {
-		slog.Error("server error", "err", err.Error())
-		os.Exit(1)
+	srv := &http.Server{
+		Addr:              ":" + cfg.Port,
+		Handler:           otelhttp.NewHandler(withAccessLog(newMux(&schema, tracer)), "graphql-server"),
+		ReadHeaderTimeout: readHeaderTimeout,
+	}
+	serve(srv)
+}
+
+// serve runs the server until the process is asked to stop, then drains it.
+// Without this a SIGTERM (docker compose down, a Kubernetes rollout) killed
+// in-flight requests outright.
+func serve(srv *http.Server) {
+	go func() {
+		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+			fatal("listen and serve", err)
+		}
+	}()
+	slog.Info("listening", "addr", srv.Addr)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	<-ctx.Done()
+	stop()
+
+	slog.Info("shutting down")
+	drainCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	if err := srv.Shutdown(drainCtx); err != nil {
+		slog.Warn("drain did not finish; closing remaining connections", "err", err.Error())
+		_ = srv.Close()
 	}
 }

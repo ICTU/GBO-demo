@@ -7,7 +7,7 @@ package dvtp.gbo.rules.eud0002
 # discloses her PID; the query walks from her own persoonslijst to
 # heeftHuwelijk -> partners, where the overleden partner sits.
 #
-# Dispatch: like EUD0001 this rule fires only when `input.pip.pid.bsn` is
+# Dispatch: like EUD0001 this rule fires only for eudi:attestation
 # present. The two EUDI rules never compete for a field — their
 # covers_fields are disjoint because they cover different bronprofielen.
 #

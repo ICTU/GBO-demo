@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { fetchTrace, fetchTracesByTag, spanTag, type JaegerTrace } from '../api/jaegerClient'
-import { fetchFscTxlog, type FscTxlogResponse } from '../api/devClient'
+import { fetchTrace, spanTag } from '../api/jaegerClient'
+import { fetchExplain, fetchFscTxlog, type FscTxlogResponse } from '../api/devClient'
 import type { Tab } from '../types'
 import type { NodeStatus } from '../util/spanMapping'
 
@@ -12,24 +12,25 @@ import type { NodeStatus } from '../util/spanMapping'
 //   1. Fetch the adapter-trace → read the gbo.fsc.transaction_id tag.
 //   2. Fetch /api/dev/fsc/txlog/<uuid> → per FSC-peer a record with
 //      peer-IDs, service, contract-hash and direction.
-//   3. Fetch the pdp-service trace via cross-trace-tag-lookup on the
-//      Fsc-Transaction-Id (Jaeger `tags` parameter). Yields
-//      gbo.fsc.authzen.decision + gbo.opa.input + gbo.opa.output —
-//      enough for node-status and the NodePopover.
+//   3. Fetch the PDP decision from the OpenFTV decision log via
+//      /explain?trace_id=<Fsc-Transaction-Id> — the OpenFTV request-
+//      mapper copies Fsc-Transaction-Id into context.trace_id, so the
+//      decision log correlates directly (no more Jaeger cross-trace-
+//      lookup; the OpenFTV PDP has no OTel instrumentation).
 //   4. Compute node-status overrides for ArchStrip:
 //        - edi-outway / edi-manager: 'green' if edi-peer has records
 //        - bd-inway:                 'green' if bd-peer has records
-//        - pdp / opa:                'green' when authzen.decision=true,
-//                                    'red' when false, 'grey' if the
-//                                    pdp span was not found
-//   5. Also return the pdp-trace so useSpanInspect can reuse it for the
-//      PDP-popover.
+//        - pdp / opa:                'green' when decision=true,
+//                                    'red' when false, 'grey' if no
+//                                    decision-log entry was found
+//   5. Also return decisionTraceKey so ArchStrip can point useExplain at
+//      the Fsc-Transaction-Id for the PDP-popover.
 //
 // Works for both flows that pass through FSC-Inway (EUDI and DvTP).
 
 export type FscOverrides = {
   states: Record<string, NodeStatus>
-  pdpTrace: JaegerTrace | null
+  decisionTraceKey: string | null
 }
 
 export function useFscTxlog(traceId: string | undefined, mode: Tab): {
@@ -41,11 +42,11 @@ export function useFscTxlog(traceId: string | undefined, mode: Tab): {
   const [data, setData] = useState<FscTxlogResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [transactionId, setTransactionId] = useState<string | null>(null)
-  const [overrides, setOverrides] = useState<FscOverrides>({ states: {}, pdpTrace: null })
+  const [overrides, setOverrides] = useState<FscOverrides>({ states: {}, decisionTraceKey: null })
 
   useEffect(() => {
     if (!traceId || (mode !== 'eudi-issuance' && mode !== 'use')) {
-      setData(null); setTransactionId(null); setOverrides({ states: {}, pdpTrace: null }); return
+      setData(null); setTransactionId(null); setOverrides({ states: {}, decisionTraceKey: null }); return
     }
     let cancelled = false
     setLoading(true)
@@ -68,29 +69,37 @@ export function useFscTxlog(traceId: string | undefined, mode: Tab): {
         }
         if (!txID) {
           setData(null); setTransactionId(null)
-          setOverrides({ states: {}, pdpTrace: null })
+          setOverrides({ states: {}, decisionTraceKey: null })
           return
         }
         setTransactionId(txID)
 
-        // Parallel: txlog per peer + pdp-trace via cross-tag-lookup.
-        // Same backoff-retry rationale as above — pdp-service spans may
-        // still be batching when the ingress trace is already indexed.
-        let pdpTrace = null
+        // Parallel: txlog per peer + decision via the decision log.
+        // Backoff-retry: promtail→Loki ingestion lags a few seconds
+        // behind the request, like OTel batching did before.
+        let decision: boolean | undefined
+        let decisionFound = false
         const txlogRes = await fetchFscTxlog(txID)
         if (cancelled) return
         setData(txlogRes)
         for (const delay of [0, 500, 1000, 1500, 2000]) {
           if (delay > 0) await new Promise((r) => setTimeout(r, delay))
           if (cancelled) return
-          const pdpTraces = await fetchTracesByTag('pdp-service', 'gbo.fsc.transaction_id', txID)
-          pdpTrace = pickTraceWithTag(pdpTraces, 'gbo.fsc.transaction_id', txID)
-          if (pdpTrace) break
+          try {
+            const decisions = await fetchExplain(txID)
+            if (decisions.length > 0) {
+              decision = decisions[0].result?.decision === true
+              decisionFound = true
+              break
+            }
+          } catch {
+            // no decision-log entry (yet) — retry
+          }
         }
 
         setOverrides({
-          states: computeOverrides(txlogRes, pdpTrace),
-          pdpTrace,
+          states: computeOverrides(txlogRes, decision, decisionFound),
+          decisionTraceKey: decisionFound ? txID : null,
         })
       } finally {
         if (!cancelled) setLoading(false)
@@ -102,18 +111,10 @@ export function useFscTxlog(traceId: string | undefined, mode: Tab): {
   return { data, loading, transactionId, overrides }
 }
 
-function pickTraceWithTag(traces: JaegerTrace[], key: string, value: string): JaegerTrace | null {
-  for (const tr of traces) {
-    for (const s of tr.spans) {
-      if (spanTag(s, key) === value) return tr
-    }
-  }
-  return null
-}
-
 function computeOverrides(
   txlog: FscTxlogResponse | null,
-  pdpTrace: JaegerTrace | null,
+  decision: boolean | undefined,
+  decisionFound: boolean,
 ): Record<string, NodeStatus> {
   const out: Record<string, NodeStatus> = {}
   if (txlog) {
@@ -131,21 +132,13 @@ function computeOverrides(
       }
     }
   }
-  if (pdpTrace) {
-    let decision: boolean | undefined
-    for (const s of pdpTrace.spans) {
-      const v = spanTag(s, 'gbo.fsc.authzen.decision')
-      if (typeof v === 'boolean') { decision = v; break }
-    }
+  if (decisionFound) {
     if (decision === true) {
       out['pdp'] = 'green'
       out['opa'] = 'green'
-    } else if (decision === false) {
+    } else {
       out['pdp'] = 'red'
       out['opa'] = 'red'
-    } else {
-      out['pdp'] = 'green' // trace found but no decision-tag — treat as reached
-      out['opa'] = 'green'
     }
   }
   return out
