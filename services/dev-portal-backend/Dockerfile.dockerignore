@@ -1,0 +1,6 @@
+**
+!services/
+!services/dev-portal-backend/
+!services/dev-portal-backend/**
+!policies/
+!policies/**

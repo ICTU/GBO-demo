@@ -113,6 +113,7 @@ while IFS='|' read -r service context extra_paths; do
 done <<'DOCKER_SERVICES'
 additional-claims-service|services/additional-claims-service|
 brp-graphql-server|services/brp-graphql-server|
+dev-portal-backend|.|policies
 eudi-adapter|services/eudi-adapter|
 graphql-server|services/graphql-server|
 openftv-pdp|.|policies

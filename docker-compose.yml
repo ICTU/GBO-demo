@@ -455,7 +455,9 @@ services:
         condition: service_healthy
 
   dev-portal-backend:
-    build: ./services/dev-portal-backend
+    build:
+      context: .
+      dockerfile: services/dev-portal-backend/Dockerfile
     ports:
       - "${GBO_PORT_DEV_PORTAL_BACKEND:-9407}:4007"
     environment:
@@ -482,6 +484,8 @@ services:
       # Policy introspection for /policy-* endpoints reads the Rego
       # sources from disk (OpenFTV PDP has no /v1/policies); /rules
       # serves the pre-generated rules.json (scripts/gen-rules-json.sh).
+      # Both are baked into the image; these compose bind mounts keep local
+      # policy edits visible without rebuilding it.
       - POLICIES_DIR=/policies
       - RULES_FILE=/rules.json
     volumes:
