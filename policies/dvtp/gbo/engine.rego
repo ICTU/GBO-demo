@@ -159,8 +159,9 @@ _eval(rid, field) := lib.evaluate(_rule_meta[rid].spec, object.union(_ctx, {"fie
 
 # ── Flow dispatch ────────────────────────────────────────────────────────────
 # Rules declare their authorization basis in the spec: consent_required
-# (DvTP) or pid_required (EUDI). A rule only FIRES when its flow matches
-# the request's flow — the request-mapper places it in input.context.flow
+# (DvTP) or pid_required (EUDI). EUDI rules also declare their exact flow,
+# so bron-specific variants cannot activate the wrong rule. The mapper
+# places the request flow in input.context.flow
 # (from the FSC token's additional-claims / X-GBO-Flow header). Without
 # this dispatch a DvTP-flow deny would aggregate EUD0001's
 # PID_NOT_PRESENT (priority 55) over the genuine DvTP reason
@@ -175,7 +176,7 @@ _flow_applicable(rid) if {
 } else if {
 	s := _rule_meta[rid].spec
 	object.get(s, "pid_required", false)
-	input.context.flow == "eudi:attestation"
+	input.context.flow == object.get(s, "flow", "")
 } else if {
 	s := _rule_meta[rid].spec
 	not object.get(s, "consent_required", false)

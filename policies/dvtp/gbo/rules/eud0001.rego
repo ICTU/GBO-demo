@@ -8,9 +8,9 @@ package dvtp.gbo.rules.eud0001
 # the credential after PID-disclosure (EUDI-flow).
 #
 # Dispatch: this rule fires only for eudi:attestation (context.flow).
-# DVT0001 fires only when `input.pip.consent` is present. Both rules
-# can cover the same fields; the engine's "first rule that grants →
-# allow" logic picks the right one per request.
+# DVT0001 fires only for dvtp:query. Both rules can cover the same fields;
+# the engine's "first rule that grants → allow" logic picks the right one
+# per request.
 #
 # Deliberately NOT in this V1 spec:
 #   - PID-signature verification (adapter trusts BSN from disclosed PID)
@@ -71,6 +71,7 @@ allowed_actors := {
 # DENY-reason.
 spec := {
 	"rule_id": "EUD0001",
+	"flow": "eudi:attestation",
 	"consent_required": false,
 	"consent_must_cover_scope": false,
 	"pid_required": true,

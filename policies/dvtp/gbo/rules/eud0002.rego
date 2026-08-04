@@ -7,9 +7,9 @@ package dvtp.gbo.rules.eud0002
 # discloses her PID; the query walks from her own persoonslijst to
 # heeftHuwelijk -> partners, where the overleden partner sits.
 #
-# Dispatch: like EUD0001 this rule fires only for eudi:attestation
-# present. The two EUDI rules never compete for a field — their
-# covers_fields are disjoint because they cover different bronprofielen.
+# Dispatch: this rule fires only for the BRP-specific
+# eudi:attestation:brp flow. The two EUDI rules never compete for a field —
+# their covers_fields are disjoint because they cover different bronprofielen.
 #
 # Note on the data subject: the query is rooted at the requester's own BSN
 # (the disclosed PID), and everything else is reached through her own
@@ -87,6 +87,7 @@ allowed_actors := {
 # YEAR_NOT_COVERED.
 spec := {
 	"rule_id": "EUD0002",
+	"flow": "eudi:attestation:brp",
 	"consent_required": false,
 	"consent_must_cover_scope": false,
 	"pid_required": true,
