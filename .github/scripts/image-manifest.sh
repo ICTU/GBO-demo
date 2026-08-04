@@ -88,7 +88,7 @@ brp-graphql-server|./services/brp-graphql-server|./services/brp-graphql-server/D
 bsnk-mock|./services/bsnk-mock|./services/bsnk-mock/Dockerfile|services/bsnk-mock|linux/amd64,linux/arm64|false|bsnk-mock
 consent-portal-backend|./services/consent-portal-backend|./services/consent-portal-backend/Dockerfile|services/consent-portal-backend|linux/amd64,linux/arm64|false|consent-portal-backend
 consent-register|./services/consent-register|./services/consent-register/Dockerfile|services/consent-register|linux/amd64,linux/arm64|false|consent-register
-dev-portal-backend|./services/dev-portal-backend|./services/dev-portal-backend/Dockerfile|services/dev-portal-backend|linux/amd64,linux/arm64|false|dev-portal-backend
+dev-portal-backend|.|./services/dev-portal-backend/Dockerfile|services/dev-portal-backend policies|linux/amd64,linux/arm64|false|dev-portal-backend
 developer-portal|./developer-portal|./developer-portal/Dockerfile|developer-portal|linux/amd64,linux/arm64|false|developer-portal
 dienstverlener-backend|./services/dienstverlener-backend|./services/dienstverlener-backend/Dockerfile|services/dienstverlener-backend|linux/amd64,linux/arm64|false|dienstverlener-backend
 dienstverlener-mock|./dienstverlener-mock|./dienstverlener-mock/Dockerfile|dienstverlener-mock|linux/amd64,linux/arm64|false|dienstverlener-mock

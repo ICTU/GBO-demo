@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Fixed
+- The `dev-portal-backend` image now includes the release-matched Rego policy sources and generated `rules.json` used by its policy-inspection endpoints. Deployments no longer need to copy those files into a separate ConfigMap, and policy changes now invalidate the image's content tag and CI build plan.
 - Release workflow builds the `openftv-pdp` image with the repo root as build context, the way compose already did. Its Dockerfile bakes in `./policies` and reads `services/openftv-pdp/{mapper,field-map.json}`, all of which sit outside the service directory, so the service-scoped context failed on `"/policies": not found` and the image was not published for `v0.5.2`.
 
 ### Added

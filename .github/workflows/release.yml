@@ -44,7 +44,7 @@ jobs:
             context: ./services/consent-register
             dockerfile: ./services/consent-register/Dockerfile
           - service: dev-portal-backend
-            context: ./services/dev-portal-backend
+            context: .
             dockerfile: ./services/dev-portal-backend/Dockerfile
           - service: developer-portal
             context: ./developer-portal
