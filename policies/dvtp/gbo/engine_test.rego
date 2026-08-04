@@ -28,3 +28,36 @@ test_ctx_resource_pi_empty_without_consent if {
 	ctx := gbo._ctx with input as {"subject": {"type": "org", "id": "x"}, "context": {}}
 	ctx.resource.pi == ""
 }
+
+# Regression: the BRP attestation uses its own flow key so the request
+# mapper can resolve the BRP GraphQL schema. It must still dispatch to
+# EUD0002 instead of falling through to NO_APPLICABLE_RULE.
+_eudi_brp_input := {
+	"subject": {"type": "org", "id": "0000009961EUDIISS000"},
+	"context": {
+		"flow": "eudi:attestation:brp",
+		"time": "2026-08-04T07:13:33Z",
+		"resource": {
+			"scope": "brp:akte:overlijden",
+			"variables": {"bsn": "999991772"},
+		},
+		"pip": {"pid": {"pi": "PI-70e1c7effa589c71"}},
+		"resolved": {
+			"coverage_unverifiable": false,
+			"args": {"vars.bsn": "999991772"},
+			"fields": [{
+				"id": "Query.ingeschrevenPersoon.heeftHuwelijk",
+				"parent": "IngeschrevenPersoon",
+				"name": "heeftHuwelijk",
+				"scalar": false,
+				"known": true,
+			}],
+		},
+	},
+}
+
+test_eudi_brp_flow_dispatches_to_eud0002 if {
+	result := gbo.response with input as _eudi_brp_input
+	result.decision == true
+	result.context.granted[0].rule == "EUD0002"
+}
