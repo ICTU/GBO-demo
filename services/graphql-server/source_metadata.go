@@ -24,6 +24,8 @@ type sourceMetadataPublisher struct {
 
 // newSourceMetadataPublisher validates the source-owned payload and private
 // JWK once at startup, then signs an immutable compact JWS for publication.
+// In production this handler is an internal backend of the source's dedicated
+// FSC metadata service; it is not an internet-public endpoint.
 func newSourceMetadataPublisher(payload, rawPrivateJWK []byte) (*sourceMetadataPublisher, error) {
 	if !json.Valid(payload) {
 		return nil, fmt.Errorf("source metadata payload is not valid JSON")

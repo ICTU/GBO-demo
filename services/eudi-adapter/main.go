@@ -71,12 +71,22 @@ var fscTxIDCtxKey = fscTxIDCtxKeyType{}
 const readHeaderTimeout = 10 * time.Second
 
 type config struct {
-	Port                        string
-	OutwayURL                   string
-	IssuerOIN                   string
-	CatalogPath                 string
+	Port        string
+	OutwayURL   string
+	IssuerOIN   string
+	CatalogPath string
+
+	// Phase-1 pilot configuration for exactly one metadata source and one
+	// attestation type. SourceMetadataShadowEnabled is the rollback flag:
+	// false keeps the complete legacy path; true fetches and executes the
+	// verified source query, still returns the legacy-formatted document, and
+	// compares the source mapping against that document. In other words, only
+	// the projection comparison is shadow traffic; the source query is active.
+	//
+	// These singular environment-backed fields are temporary. The onboarding
+	// phase replaces them with the validated multi-source registry and cache.
 	SourceMetadataShadowEnabled bool
-	SourceMetadataURL           string
+	SourceMetadataOutwayPath    string
 	SourceMetadataOIN           string
 	SourceMetadataPublicJWKPath string
 	SourceMetadataTypeID        string
@@ -91,7 +101,7 @@ func loadConfig() config {
 		SourceMetadataShadowEnabled: strings.EqualFold(
 			os.Getenv("SOURCE_METADATA_SHADOW_ENABLED"), "true",
 		),
-		SourceMetadataURL:           os.Getenv("SOURCE_METADATA_URL"),
+		SourceMetadataOutwayPath:    os.Getenv("SOURCE_METADATA_OUTWAY_PATH"),
 		SourceMetadataOIN:           os.Getenv("SOURCE_METADATA_OIN"),
 		SourceMetadataPublicJWKPath: os.Getenv("SOURCE_METADATA_PUBLIC_JWK_PATH"),
 		SourceMetadataTypeID:        getEnv("SOURCE_METADATA_TYPE_ID", "inkomensverklaring"),
@@ -1045,7 +1055,7 @@ func main() {
 		fatal("loading source metadata shadow", err)
 	}
 	if shadow != nil {
-		slog.Info("source metadata shadow enabled", "url", cfg.SourceMetadataURL, "source_oin", cfg.SourceMetadataOIN, "metadata_version", shadow.Version)
+		slog.Info("source metadata shadow enabled", "outway_path", cfg.SourceMetadataOutwayPath, "source_oin", cfg.SourceMetadataOIN, "metadata_version", shadow.Version)
 	}
 
 	// Middleware order: withFscTraceContext wraps otelhttp — the header

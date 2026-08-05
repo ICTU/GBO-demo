@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -177,7 +178,13 @@ func TestAdapterUsesSignedSourceMetadataFor2025Shadow(t *testing.T) {
 	}
 	metadataQuery := shipped.Attestations[0].GraphQL.Document
 	metadataJWS := signSourceMetadataForTest(t, metadataPayload, privateKey)
-	metadataServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	metadataServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got, want := r.URL.Path, "/metadata/.well-known/gbo-attestations"; got != want {
+			t.Errorf("metadata Outway path = %q, want %q", got, want)
+		}
+		if r.Header.Get("Fsc-Transaction-Id") == "" {
+			t.Error("metadata request has no Fsc-Transaction-Id")
+		}
 		w.Header().Set("Content-Type", "application/jose")
 		_, _ = w.Write([]byte(metadataJWS))
 	}))
@@ -191,11 +198,17 @@ func TestAdapterUsesSignedSourceMetadataFor2025Shadow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal public JWK: %v", err)
 	}
-	shadow, err := loadSourceMetadataShadow(context.Background(), http.DefaultClient, sourceMetadataConfig{
-		URL:         metadataServer.URL,
-		ExpectedOIN: "99999999900000000200",
-		PublicJWK:   publicJWK,
-		TypeID:      "inkomensverklaring",
+	publicJWKPath := filepath.Join(t.TempDir(), "source-metadata-public.jwk")
+	if err := os.WriteFile(publicJWKPath, publicJWK, 0o600); err != nil {
+		t.Fatalf("write public JWK: %v", err)
+	}
+	shadow, err := loadConfiguredSourceMetadataShadow(context.Background(), http.DefaultClient, config{
+		OutwayURL:                   metadataServer.URL,
+		SourceMetadataShadowEnabled: true,
+		SourceMetadataOutwayPath:    "/metadata/.well-known/gbo-attestations",
+		SourceMetadataOIN:           "99999999900000000200",
+		SourceMetadataPublicJWKPath: publicJWKPath,
+		SourceMetadataTypeID:        "inkomensverklaring",
 	})
 	if err != nil {
 		t.Fatalf("load signed source metadata: %v", err)

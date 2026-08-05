@@ -92,12 +92,15 @@ func loadConfiguredSourceMetadataShadow(ctx context.Context, client *http.Client
 	if cfg.SourceMetadataPublicJWKPath == "" {
 		return nil, fmt.Errorf("SOURCE_METADATA_PUBLIC_JWK_PATH is required when shadow mode is enabled")
 	}
+	if !strings.HasPrefix(cfg.SourceMetadataOutwayPath, "/") || strings.HasPrefix(cfg.SourceMetadataOutwayPath, "//") {
+		return nil, fmt.Errorf("SOURCE_METADATA_OUTWAY_PATH must be an absolute path on the configured FSC Outway")
+	}
 	publicJWK, err := os.ReadFile(cfg.SourceMetadataPublicJWKPath)
 	if err != nil {
 		return nil, fmt.Errorf("read source metadata public JWK: %w", err)
 	}
 	return loadSourceMetadataShadow(ctx, client, sourceMetadataConfig{
-		URL:         cfg.SourceMetadataURL,
+		URL:         strings.TrimRight(cfg.OutwayURL, "/") + cfg.SourceMetadataOutwayPath,
 		ExpectedOIN: cfg.SourceMetadataOIN,
 		PublicJWK:   publicJWK,
 		TypeID:      cfg.SourceMetadataTypeID,
@@ -115,6 +118,12 @@ func loadSourceMetadataShadow(ctx context.Context, client *http.Client, cfg sour
 	if err != nil {
 		return nil, fmt.Errorf("create source metadata request: %w", err)
 	}
+	fscTxID, err := newFscTransactionID()
+	if err != nil {
+		return nil, fmt.Errorf("generate source metadata Fsc-Transaction-Id: %w", err)
+	}
+	req.Header.Set("Accept", sourceMetadataMediaType)
+	req.Header.Set("Fsc-Transaction-Id", fscTxID)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch source metadata: %w", err)
