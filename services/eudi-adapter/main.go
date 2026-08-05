@@ -91,6 +91,13 @@ type config struct {
 	SourceMetadataPublicJWKPath string
 	SourceMetadataTypeID        string
 	SourceMetadataUsecaseKey    string
+
+	// Phase 3 keeps the phase-1 switch available for immediate rollback.
+	// Enabling the cache activates refresh, immutable Type Metadata and
+	// fail-closed expiry for the configured pilot type.
+	SourceMetadataCacheEnabled bool
+	TypeMetadataPublicBaseURL  string
+	TypeMetadataStorePath      string
 }
 
 func loadConfig() config {
@@ -107,6 +114,11 @@ func loadConfig() config {
 		SourceMetadataPublicJWKPath: os.Getenv("SOURCE_METADATA_PUBLIC_JWK_PATH"),
 		SourceMetadataTypeID:        getEnv("SOURCE_METADATA_TYPE_ID", "inkomensverklaring"),
 		SourceMetadataUsecaseKey:    getEnv("SOURCE_METADATA_USECASE_KEY", "inkomensverklaring_2025"),
+		SourceMetadataCacheEnabled: strings.EqualFold(
+			os.Getenv("SOURCE_METADATA_CACHE_ENABLED"), "true",
+		),
+		TypeMetadataPublicBaseURL: os.Getenv("TYPE_METADATA_PUBLIC_BASE_URL"),
+		TypeMetadataStorePath:     getEnv("TYPE_METADATA_STORE_PATH", "/var/lib/gbo/type-metadata"),
 	}
 }
 
@@ -358,7 +370,7 @@ var errNoData = fmt.Errorf("no data")
 // the mux registration (per path); all parameters (scope, tax year,
 // attestation-type) come from the catalog entry — nothing is hard-coded
 // in the adapter code.
-func handleAttestation(cfg config, client *http.Client, usecaseKey string, uc Usecase, shadow *sourceMetadataShadow) http.HandlerFunc {
+func handleAttestation(cfg config, client *http.Client, usecaseKey string, uc Usecase, metadataRuntime sourceMetadataRuntime) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -415,8 +427,20 @@ func handleAttestation(cfg config, client *http.Client, usecaseKey string, uc Us
 		// Policy check + data fetch via FSC -> PEP -> PDP -> OPA -> bron.
 		// In shadow mode the verified source definition supplies the query;
 		// otherwise the existing catalog-driven query remains the fallback.
+		var shadow *sourceMetadataShadow
+		if metadataRuntime != nil && metadataRuntime.appliesTo(usecaseKey, uc) {
+			shadow, err = metadataRuntime.current(time.Now())
+			if err != nil {
+				slog.Error("source metadata unavailable", "usecase", usecaseKey, "err", err.Error())
+				http.Error(w, "source metadata unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			if shadow.CacheState != "" {
+				w.Header().Set("X-GBO-Metadata-Cache", shadow.CacheState)
+			}
+		}
 		var queryPlans []sourceQueryPlan
-		if shadow.appliesTo(usecaseKey, uc) {
+		if shadow != nil {
 			plan, err := shadow.queryPlan(usecaseKey, bsn, uc)
 			if err != nil {
 				slog.Error("build source metadata query", "usecase", usecaseKey, "err", err.Error())
@@ -443,7 +467,7 @@ func handleAttestation(cfg config, client *http.Client, usecaseKey string, uc Us
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
-		if shadow.appliesTo(usecaseKey, uc) {
+		if shadow != nil {
 			matches, compareErr := shadow.compareLegacy(result.Raw, docs)
 			switch {
 			case compareErr != nil:
@@ -454,6 +478,12 @@ func handleAttestation(cfg config, client *http.Client, usecaseKey string, uc Us
 				slog.Warn("source metadata shadow mismatch", "usecase", usecaseKey, "metadata_version", shadow.Version)
 			default:
 				w.Header().Set("X-GBO-Metadata-Shadow", "match")
+			}
+			if shadow.VCT != "" && shadow.VCTIntegrity != "" {
+				for i := range docs {
+					docs[i].AttestationType = shadow.VCT
+					docs[i].Attributes["vct#integrity"] = shadow.VCTIntegrity
+				}
 			}
 		}
 
@@ -1002,10 +1032,10 @@ func initTracer(ctx context.Context) (func(context.Context) error, error) {
 // newMux builds the routing tree with the given config, catalog and HTTP
 // client. Extracted from main so integration tests can wire the handlers
 // to an httptest.Server without starting the real listener.
-func newMux(cfg config, catalog *Catalog, client *http.Client, shadows ...*sourceMetadataShadow) *http.ServeMux {
-	var shadow *sourceMetadataShadow
-	if len(shadows) > 0 {
-		shadow = shadows[0]
+func newMux(cfg config, catalog *Catalog, client *http.Client, runtimes ...sourceMetadataRuntime) *http.ServeMux {
+	var metadataRuntime sourceMetadataRuntime
+	if len(runtimes) > 0 {
+		metadataRuntime = runtimes[0]
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -1020,7 +1050,10 @@ func newMux(cfg config, catalog *Catalog, client *http.Client, shadows ...*sourc
 		usecaseKeys = append(usecaseKeys, key)
 		// The issuance-server's base_url ends with '/' -> mux path idem.
 		path := "/" + key + "/"
-		mux.HandleFunc(path, handleAttestation(cfg, client, key, uc, shadow))
+		mux.HandleFunc(path, handleAttestation(cfg, client, key, uc, metadataRuntime))
+	}
+	if publisher, ok := metadataRuntime.(http.Handler); ok {
+		mux.Handle("/types/", publisher)
 	}
 	slog.Info("eudi-adapter usecases loaded", "keys", usecaseKeys)
 	return mux
@@ -1032,6 +1065,24 @@ func newMux(cfg config, catalog *Catalog, client *http.Client, shadows ...*sourc
 // The target architecture replaces this temporary fallback with the
 // phase-3 validated cache and its explicit stale/fail-closed rules.
 func newRuntimeMux(ctx context.Context, cfg config, catalog *Catalog, client *http.Client) *http.ServeMux {
+	if cfg.SourceMetadataCacheEnabled {
+		cache, err := loadConfiguredSourceMetadataCache(client, cfg)
+		if err != nil {
+			slog.Error("source metadata cache configuration invalid", "err", err.Error())
+			return newMux(cfg, catalog, client, newUnavailableSourceMetadataRuntime(
+				cfg.SourceMetadataUsecaseKey,
+				cfg.TypeMetadataStorePath,
+				err,
+			))
+		}
+		if err := cache.Refresh(ctx, time.Now()); err != nil {
+			slog.Error("initial source metadata cache refresh failed; metadata usecase remains fail-closed", "err", err.Error())
+		} else {
+			slog.Info("source metadata cache activated", "source_oin", cfg.SourceMetadataOIN, "type_id", cfg.SourceMetadataTypeID)
+		}
+		startSourceMetadataRefresh(ctx, cache, 5*time.Minute)
+		return newMux(cfg, catalog, client, cache)
+	}
 	shadow, err := loadConfiguredSourceMetadataShadow(ctx, client, cfg)
 	if err != nil {
 		slog.Error("source metadata pilot unavailable; using legacy path", "err", err.Error())

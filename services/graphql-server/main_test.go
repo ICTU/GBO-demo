@@ -61,6 +61,10 @@ func TestPublishesSignedSourceMetadata(t *testing.T) {
 	if got, want := resp.Header.Get("Content-Type"), "application/jose"; got != want {
 		t.Errorf("Content-Type = %q, want %q", got, want)
 	}
+	etag := resp.Header.Get("ETag")
+	if etag == "" {
+		t.Fatal("ETag is empty")
+	}
 	compact, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("read source metadata: %v", err)
@@ -83,6 +87,23 @@ func TestPublishesSignedSourceMetadata(t *testing.T) {
 	}
 	if !bytes.Equal(gotPayload, payload) {
 		t.Errorf("signed payload = %s, want %s", gotPayload, payload)
+	}
+
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/.well-known/gbo-attestations", nil)
+	if err != nil {
+		t.Fatalf("create conditional request: %v", err)
+	}
+	req.Header.Set("If-None-Match", etag)
+	conditional, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("conditional get source metadata: %v", err)
+	}
+	defer conditional.Body.Close()
+	if got, want := conditional.StatusCode, http.StatusNotModified; got != want {
+		t.Fatalf("conditional status = %d, want %d", got, want)
+	}
+	if body, err := io.ReadAll(conditional.Body); err != nil || len(body) != 0 {
+		t.Fatalf("conditional response body = %q, err = %v; want empty", body, err)
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"gbo-demo/eudi-adapter/internal/gbosimplev1"
 
@@ -51,6 +52,7 @@ type sourceAttestationDefinition struct {
 	MappingProfile  string                           `json:"mapping_profile"`
 	Mapping         gbosimplev1.Mapping              `json:"mapping"`
 	AttributeSchema map[string]sourceAttributeSchema `json:"attribute_schema"`
+	TypeMetadata    json.RawMessage                  `json:"type_metadata"`
 }
 
 type sourceGraphQL struct {
@@ -87,9 +89,17 @@ func (a *sourceAttributeSchema) UnmarshalJSON(data []byte) error {
 type mappingRule = gbosimplev1.Rule
 
 type sourceMetadataShadow struct {
-	Version    string
-	UsecaseKey string
-	Definition sourceAttestationDefinition
+	Version      string
+	UsecaseKey   string
+	Definition   sourceAttestationDefinition
+	VCT          string
+	VCTIntegrity string
+	CacheState   string
+}
+
+type sourceMetadataRuntime interface {
+	appliesTo(usecaseKey string, uc Usecase) bool
+	current(now time.Time) (*sourceMetadataShadow, error)
 }
 
 type sourceMetadataJWK struct {
@@ -187,26 +197,36 @@ func loadSourceMetadataShadow(ctx context.Context, client *http.Client, cfg sour
 		return nil, err
 	}
 
+	shadow, _, err := parseSourceMetadataPayload(payload, cfg)
+	return shadow, err
+}
+
+func parseSourceMetadataPayload(payload []byte, cfg sourceMetadataConfig) (*sourceMetadataShadow, sourceMetadataDocument, error) {
 	var document sourceMetadataDocument
-	if err := json.Unmarshal(payload, &document); err != nil {
-		return nil, fmt.Errorf("parse source metadata payload: %w", err)
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&document); err != nil {
+		return nil, sourceMetadataDocument{}, fmt.Errorf("parse source metadata payload: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return nil, sourceMetadataDocument{}, fmt.Errorf("parse source metadata payload: trailing JSON data")
 	}
 	if document.SourceOIN != cfg.ExpectedOIN {
-		return nil, fmt.Errorf("source metadata OIN %q does not match registered OIN %q", document.SourceOIN, cfg.ExpectedOIN)
+		return nil, sourceMetadataDocument{}, fmt.Errorf("source metadata OIN %q does not match registered OIN %q", document.SourceOIN, cfg.ExpectedOIN)
 	}
 	if document.SchemaVersion != "1.0" {
-		return nil, fmt.Errorf("unsupported source metadata schema_version %q", document.SchemaVersion)
+		return nil, sourceMetadataDocument{}, fmt.Errorf("unsupported source metadata schema_version %q", document.SchemaVersion)
 	}
 	for _, definition := range document.Attestations {
 		if definition.TypeID != cfg.TypeID {
 			continue
 		}
 		if err := validateSourceAttestation(definition); err != nil {
-			return nil, fmt.Errorf("attestation %q: %w", cfg.TypeID, err)
+			return nil, sourceMetadataDocument{}, fmt.Errorf("attestation %q: %w", cfg.TypeID, err)
 		}
-		return &sourceMetadataShadow{Version: document.Version, Definition: definition}, nil
+		return &sourceMetadataShadow{Version: document.Version, Definition: definition}, document, nil
 	}
-	return nil, fmt.Errorf("source metadata has no attestation %q", cfg.TypeID)
+	return nil, sourceMetadataDocument{}, fmt.Errorf("source metadata has no attestation %q", cfg.TypeID)
 }
 
 func verifySourceMetadataJWS(compact string, rawJWK json.RawMessage) ([]byte, error) {
@@ -351,7 +371,15 @@ func isISO4217Alpha3(unit string) bool {
 }
 
 func (s *sourceMetadataShadow) appliesTo(usecaseKey string, uc Usecase) bool {
-	return s != nil && s.UsecaseKey == usecaseKey && uc.bron() == bronBD && len(uc.Belastingjaren) == 1
+	return s != nil && uc.acceptsSourceMetadata(usecaseKey, s.UsecaseKey)
+}
+
+func (uc Usecase) acceptsSourceMetadata(usecaseKey, configuredUsecaseKey string) bool {
+	return configuredUsecaseKey == usecaseKey && uc.bron() == bronBD && len(uc.Belastingjaren) == 1
+}
+
+func (s *sourceMetadataShadow) current(_ time.Time) (*sourceMetadataShadow, error) {
+	return s, nil
 }
 
 func (s *sourceMetadataShadow) queryPlan(usecaseKey, bsn string, uc Usecase) (sourceQueryPlan, error) {
