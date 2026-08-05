@@ -21,6 +21,7 @@ services/*/*[!.go]
 .env.local
 fsc-infra/.env
 fsc-infra/.env.local
+.local/
 
 # Issuance-server runtime config carries inline demo signing keys +
 # hostnames tied to the issuer/reader certs — never commit. Use the

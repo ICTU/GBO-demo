@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -73,6 +74,19 @@ func TestPublishesSignedSourceMetadata(t *testing.T) {
 	if len(parts) != 3 {
 		t.Fatalf("response is not a compact JWS: %q", compact)
 	}
+	protected, err := encoding.DecodeString(parts[0])
+	if err != nil {
+		t.Fatalf("decode protected header: %v", err)
+	}
+	var header struct {
+		JWK sourceMetadataPrivateJWK `json:"jwk"`
+	}
+	if err := json.Unmarshal(protected, &header); err != nil {
+		t.Fatalf("parse protected header: %v", err)
+	}
+	if header.JWK.KTY != "OKP" || header.JWK.CRV != "Ed25519" || header.JWK.X != encoding.EncodeToString(publicKey) || header.JWK.D != "" {
+		t.Fatalf("protected public JWK = %+v", header.JWK)
+	}
 	signingInput := parts[0] + "." + parts[1]
 	signature, err := encoding.DecodeString(parts[2])
 	if err != nil {
@@ -104,6 +118,51 @@ func TestPublishesSignedSourceMetadata(t *testing.T) {
 	}
 	if body, err := io.ReadAll(conditional.Body); err != nil || len(body) != 0 {
 		t.Fatalf("conditional response body = %q, err = %v; want empty", body, err)
+	}
+}
+
+func TestInitLocalMetadataKeyIsIdempotentAndPrivate(t *testing.T) {
+	outputPath := filepath.Join(t.TempDir(), ".local", "source", "private.jwk")
+	arguments := []string{"init-local-metadata-key", "--source-oin", "99999999900000000200", "--output", outputPath}
+	var first, second bytes.Buffer
+	for _, output := range []*bytes.Buffer{&first, &second} {
+		handled, err := runLocalMetadataKeyCommand(arguments, output, io.Discard)
+		if err != nil {
+			t.Fatalf("init local metadata key: %v", err)
+		}
+		if !handled {
+			t.Fatal("local metadata key command was not handled")
+		}
+	}
+	if first.String() != second.String() || !strings.HasPrefix(first.String(), "sha256-") {
+		t.Fatalf("thumbprints differ or are invalid: %q and %q", first.String(), second.String())
+	}
+	info, err := os.Stat(outputPath)
+	if err != nil {
+		t.Fatalf("stat local metadata key: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("local metadata key mode = %o, want 600", got)
+	}
+	raw, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read local metadata key: %v", err)
+	}
+	if bytes.Contains(first.Bytes(), raw) {
+		t.Fatal("command output contains the private key")
+	}
+}
+
+func TestInitLocalMetadataKeyRejectsUnsafeInputs(t *testing.T) {
+	for name, arguments := range map[string][]string{
+		"non-digit OIN": {"init-local-metadata-key", "--source-oin", "9999999990000000020x", "--output", filepath.Join(t.TempDir(), ".local", "key.jwk")},
+		"outside local": {"init-local-metadata-key", "--source-oin", "99999999900000000200", "--output", filepath.Join(t.TempDir(), "key.jwk")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if handled, err := runLocalMetadataKeyCommand(arguments, io.Discard, io.Discard); !handled || err == nil {
+				t.Fatalf("handled = %v, error = %v; want handled error", handled, err)
+			}
+		})
 	}
 }
 

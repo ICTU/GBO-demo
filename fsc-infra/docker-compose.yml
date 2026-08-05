@@ -376,6 +376,8 @@ services:
   edi-outway:
     image: federatedserviceconnectivity/outway:v2.4.0
     restart: unless-stopped
+    ports:
+      - "${FSC_PORT_EDI_OUTWAY:-8087}:8080"
     volumes:
       - ./orgs/edi-issuer/pki:/certs:ro
     environment:

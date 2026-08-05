@@ -1102,6 +1102,12 @@ func fatal(msg string, err error) {
 }
 
 func main() {
+	if handled, err := runOnboardingCommand(context.Background(), os.Args[1:], defaultOnboardingDependencies()); handled {
+		if err != nil {
+			fatal("source onboarding failed", err)
+		}
+		return
+	}
 	cfg := loadConfig()
 	ctx := context.Background()
 	shutdown, err := initTracer(ctx)

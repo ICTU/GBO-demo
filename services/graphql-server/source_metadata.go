@@ -50,10 +50,15 @@ func newSourceMetadataPublisher(payload, rawPrivateJWK []byte) (*sourceMetadataP
 	}
 	thumbprintInput := fmt.Sprintf(`{"crv":"Ed25519","kty":"OKP","x":"%s"}`, x)
 	thumbprint := sha256.Sum256([]byte(thumbprintInput))
-	protected, err := json.Marshal(map[string]string{
+	protected, err := json.Marshal(map[string]any{
 		"alg": "EdDSA",
 		"kid": sourceMetadataBase64URL.EncodeToString(thumbprint[:]),
 		"typ": "gbo-attestations+jws",
+		"jwk": map[string]string{
+			"kty": "OKP",
+			"crv": "Ed25519",
+			"x":   x,
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("marshal source metadata JWS header: %w", err)
