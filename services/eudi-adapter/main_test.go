@@ -2,14 +2,42 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+var testBase64URL = base64.RawURLEncoding
+
+func signSourceMetadataForTest(t *testing.T, payload []byte, privateKey ed25519.PrivateKey) string {
+	t.Helper()
+	publicKey := privateKey.Public().(ed25519.PublicKey)
+	x := testBase64URL.EncodeToString(publicKey)
+	thumbprintInput := fmt.Sprintf(`{"crv":"Ed25519","kty":"OKP","x":"%s"}`, x)
+	thumbprint := sha256.Sum256([]byte(thumbprintInput))
+	header, err := json.Marshal(map[string]string{
+		"alg": "EdDSA",
+		"kid": testBase64URL.EncodeToString(thumbprint[:]),
+		"typ": "gbo-attestations+jws",
+	})
+	if err != nil {
+		t.Fatalf("marshal protected header: %v", err)
+	}
+	signingInput := testBase64URL.EncodeToString(header) + "." + testBase64URL.EncodeToString(payload)
+	signature := ed25519.Sign(privateKey, []byte(signingInput))
+	return signingInput + "." + testBase64URL.EncodeToString(signature)
+}
 
 // Happy-path integration test: POST an issuance-server disclosure to the
 // adapter's per-usecase endpoint. The FSC-Outway is stubbed with an
@@ -19,12 +47,14 @@ import (
 // IssuableDocument list in the bri-mock shape.
 func TestAdapterEndToEnd(t *testing.T) {
 	// Stub outway — returns a canned BD-graphql response with two aangiften.
+	var received proxyRequest
 	outway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/bri/graphql" {
 			t.Errorf("outway path = %q, want /bri/graphql", r.URL.Path)
 		}
-		// Drain body so the adapter's json.Marshal side is exercised too.
-		_, _ = io.ReadAll(r.Body)
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Errorf("decode outway request: %v", err)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
 			"data": {
@@ -113,6 +143,249 @@ func TestAdapterEndToEnd(t *testing.T) {
 	}
 	if got, want := docs[0].Attributes["indieningsdatum"], "2025-05-01"; got != want {
 		t.Errorf("indieningsdatum = %v, want %v", got, want)
+	}
+	// With the feature flag off, rollback is immediate: the original query
+	// with its literal catalog year is used and no metadata parameter exists.
+	if !strings.Contains(received.Query, "belastingjaren: [2024]") {
+		t.Errorf("feature-flag-off query does not contain the legacy year: %s", received.Query)
+	}
+	if _, ok := received.Variables["jaar"]; ok {
+		t.Errorf("feature-flag-off variables unexpectedly contain jaar: %v", received.Variables)
+	}
+}
+
+// Phase 1 walking skeleton: the source publishes one signed declaration for
+// income year 2025. With shadow mode enabled, that declaration supplies the
+// query sent through the existing FSC/PDP route, while the adapter still
+// returns the legacy IssuableDocument. The response header makes the shadow
+// comparison observable without changing the issuance-server contract.
+func TestAdapterUsesSignedSourceMetadataFor2025Shadow(t *testing.T) {
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate signing key: %v", err)
+	}
+
+	metadataPayload, err := os.ReadFile("../graphql-server/config/gbo-attestations.json")
+	if err != nil {
+		t.Fatalf("read shipped source metadata: %v", err)
+	}
+	var shipped sourceMetadataDocument
+	if err := json.Unmarshal(metadataPayload, &shipped); err != nil {
+		t.Fatalf("parse shipped source metadata: %v", err)
+	}
+	if len(shipped.Attestations) != 1 {
+		t.Fatalf("shipped source metadata has %d attestations, want 1", len(shipped.Attestations))
+	}
+	metadataQuery := shipped.Attestations[0].GraphQL.Document
+	metadataJWS := signSourceMetadataForTest(t, metadataPayload, privateKey)
+	metadataServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got, want := r.URL.Path, "/metadata/.well-known/gbo-attestations"; got != want {
+			t.Errorf("metadata Outway path = %q, want %q", got, want)
+		}
+		if r.Header.Get("Fsc-Transaction-Id") == "" {
+			t.Error("metadata request has no Fsc-Transaction-Id")
+		}
+		w.Header().Set("Content-Type", "application/jose")
+		_, _ = w.Write([]byte(metadataJWS))
+	}))
+	defer metadataServer.Close()
+
+	publicJWK, err := json.Marshal(map[string]string{
+		"kty": "OKP",
+		"crv": "Ed25519",
+		"x":   testBase64URL.EncodeToString(publicKey),
+	})
+	if err != nil {
+		t.Fatalf("marshal public JWK: %v", err)
+	}
+	publicJWKPath := filepath.Join(t.TempDir(), "source-metadata-public.jwk")
+	if err := os.WriteFile(publicJWKPath, publicJWK, 0o600); err != nil {
+		t.Fatalf("write public JWK: %v", err)
+	}
+	shadow, err := loadConfiguredSourceMetadataShadow(context.Background(), http.DefaultClient, config{
+		OutwayURL:                   metadataServer.URL,
+		SourceMetadataShadowEnabled: true,
+		SourceMetadataOutwayPath:    "/metadata/.well-known/gbo-attestations",
+		SourceMetadataOIN:           "99999999900000000200",
+		SourceMetadataPublicJWKPath: publicJWKPath,
+		SourceMetadataTypeID:        "inkomensverklaring",
+	})
+	if err != nil {
+		t.Fatalf("load signed source metadata: %v", err)
+	}
+
+	var received proxyRequest
+	outway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Errorf("decode outway request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"data": {"ingeschrevenPersoon": {"heeftBelastingjaarAangifte": [{
+				"belastingjaar": 2025,
+				"status": "Definitief vastgesteld",
+				"indieningsdatum": "2026-04-01",
+				"verzamelinkomen": {"waarde": 43000.0, "valuta": "EUR"},
+				"box1Inkomen": {"waarde": 41000.0, "valuta": "EUR"},
+				"box2Inkomen": {"waarde": 1000.0, "valuta": "EUR"},
+				"box3Inkomen": {"waarde": 1000.0, "valuta": "EUR"}
+			}]}}
+		}`))
+	}))
+	defer outway.Close()
+
+	cfg := config{Port: "0", OutwayURL: outway.URL, IssuerOIN: "00000004000000004000"}
+	catalog := &Catalog{Usecases: map[string]Usecase{
+		"inkomensverklaring_2025": {
+			AttestationType: "nl.gbo.belastingdienst.inkomensverklaring",
+			Scope:           "bd:ib:2025",
+			Belastingjaren:  []int{2025},
+			OutwayPath:      "/bri/graphql",
+		},
+	}}
+	srv := httptest.NewServer(newMux(cfg, catalog, http.DefaultClient, shadow))
+	defer srv.Close()
+
+	body := []byte(`[{
+		"id": "req-1",
+		"attestations": [{
+			"attestation_type": "urn:eudi:pid:nl:1",
+			"attributes": {"urn:eudi:pid:nl:1": {"bsn": "123456789"}}
+		}]
+	}]`)
+	resp, err := http.Post(srv.URL+"/inkomensverklaring_2025/", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200; body = %s", resp.StatusCode, string(raw))
+	}
+	if got, want := resp.Header.Get("X-GBO-Metadata-Shadow"), "match"; got != want {
+		t.Errorf("X-GBO-Metadata-Shadow = %q, want %q", got, want)
+	}
+	if received.Query != metadataQuery {
+		t.Errorf("query sent through FSC was not the source query\ngot:\n%s\nwant:\n%s", received.Query, metadataQuery)
+	}
+	if got, want := received.Variables["bsn"], "123456789"; got != want {
+		t.Errorf("bsn variable = %v, want %v", got, want)
+	}
+	if got, want := received.Variables["jaar"], float64(2025); got != want {
+		t.Errorf("jaar variable = %v, want %v", got, want)
+	}
+}
+
+func TestSourceMetadataRejectedDuringOnboarding(t *testing.T) {
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate signing key: %v", err)
+	}
+	validQuery := `query Inkomensverklaring($bsn: BSN!, $jaar: Int!) {
+  ingeschrevenPersoon(bsn: $bsn) {
+    heeftBelastingjaarAangifte(belastingjaren: [$jaar]) { belastingjaar }
+  }
+}`
+	metadataPayload := func(t *testing.T, sourceOIN, query string) []byte {
+		t.Helper()
+		payload, err := json.Marshal(map[string]any{
+			"source_oin": sourceOIN,
+			"version":    "1.0.0",
+			"attestations": []any{map[string]any{
+				"type_id":      "inkomensverklaring",
+				"type_version": "1.0",
+				"graphql": map[string]any{
+					"document":         query,
+					"subject_variable": "bsn",
+					"parameters": map[string]any{
+						"jaar": map[string]any{"type": "integer", "required": true},
+					},
+					"result_pointer": "/data/ingeschrevenPersoon/heeftBelastingjaarAangifte",
+					"cardinality":    "exactly_one",
+				},
+				"mapping_profile": "gbo-simple-v1",
+				"mapping": map[string]any{
+					"belastingjaar": map[string]any{"pointer": "/belastingjaar", "datatype": "gYear"},
+				},
+			}},
+		})
+		if err != nil {
+			t.Fatalf("marshal source metadata: %v", err)
+		}
+		return payload
+	}
+	publicJWK := func(t *testing.T, key ed25519.PublicKey) json.RawMessage {
+		t.Helper()
+		raw, err := json.Marshal(map[string]string{
+			"kty": "OKP",
+			"crv": "Ed25519",
+			"x":   testBase64URL.EncodeToString(key),
+		})
+		if err != nil {
+			t.Fatalf("marshal public JWK: %v", err)
+		}
+		return raw
+	}
+
+	tests := []struct {
+		name        string
+		payload     []byte
+		pinnedKey   json.RawMessage
+		expectedOIN string
+		wantError   string
+		corruptJWS  bool
+	}{
+		{
+			name:        "invalid signature",
+			payload:     metadataPayload(t, "00000001003214345000", validQuery),
+			pinnedKey:   publicJWK(t, publicKey),
+			expectedOIN: "00000001003214345000",
+			wantError:   "invalid signature",
+			corruptJWS:  true,
+		},
+		{
+			name:        "wrong source OIN",
+			payload:     metadataPayload(t, "00000001003214345001", validQuery),
+			pinnedKey:   publicJWK(t, publicKey),
+			expectedOIN: "00000001003214345000",
+			wantError:   "does not match registered OIN",
+		},
+		{
+			name:        "invalid GraphQL syntax",
+			payload:     metadataPayload(t, "00000001003214345000", "query {"),
+			pinnedKey:   publicJWK(t, publicKey),
+			expectedOIN: "00000001003214345000",
+			wantError:   "invalid GraphQL document",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			compact := signSourceMetadataForTest(t, test.payload, privateKey)
+			if test.corruptJWS {
+				signatureStart := strings.LastIndex(compact, ".") + 1
+				replacement := byte('A')
+				if compact[signatureStart] == replacement {
+					replacement = 'B'
+				}
+				compact = compact[:signatureStart] + string(replacement) + compact[signatureStart+1:]
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/jose")
+				_, _ = w.Write([]byte(compact))
+			}))
+			defer server.Close()
+
+			_, err := loadSourceMetadataShadow(context.Background(), http.DefaultClient, sourceMetadataConfig{
+				URL:         server.URL,
+				ExpectedOIN: test.expectedOIN,
+				PublicJWK:   test.pinnedKey,
+				TypeID:      "inkomensverklaring",
+			})
+			if err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("error = %v, want error containing %q", err, test.wantError)
+			}
+		})
 	}
 }
 
