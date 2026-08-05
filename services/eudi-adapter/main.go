@@ -71,10 +71,15 @@ var fscTxIDCtxKey = fscTxIDCtxKeyType{}
 const readHeaderTimeout = 10 * time.Second
 
 type config struct {
-	Port        string
-	OutwayURL   string
-	IssuerOIN   string
-	CatalogPath string
+	Port                        string
+	OutwayURL                   string
+	IssuerOIN                   string
+	CatalogPath                 string
+	SourceMetadataShadowEnabled bool
+	SourceMetadataURL           string
+	SourceMetadataOIN           string
+	SourceMetadataPublicJWKPath string
+	SourceMetadataTypeID        string
 }
 
 func loadConfig() config {
@@ -83,6 +88,13 @@ func loadConfig() config {
 		OutwayURL:   getEnv("FSC_OUTWAY_URL", "http://edi-outway:8080"),
 		IssuerOIN:   getEnv("ISSUER_OIN", "00000004000000004000"),
 		CatalogPath: getEnv("USECASE_CATALOG_PATH", "/config/usecase_catalog.json"),
+		SourceMetadataShadowEnabled: strings.EqualFold(
+			os.Getenv("SOURCE_METADATA_SHADOW_ENABLED"), "true",
+		),
+		SourceMetadataURL:           os.Getenv("SOURCE_METADATA_URL"),
+		SourceMetadataOIN:           os.Getenv("SOURCE_METADATA_OIN"),
+		SourceMetadataPublicJWKPath: os.Getenv("SOURCE_METADATA_PUBLIC_JWK_PATH"),
+		SourceMetadataTypeID:        getEnv("SOURCE_METADATA_TYPE_ID", "inkomensverklaring"),
 	}
 }
 
@@ -315,6 +327,16 @@ type graphqlResponse struct {
 	Errors []map[string]any `json:"errors,omitempty"`
 }
 
+type sourceQueryPlan struct {
+	Query     string
+	Variables map[string]any
+}
+
+type fscResult struct {
+	Persoon json.RawMessage
+	Raw     []byte
+}
+
 // errNoData signals "the bron knows this person but not the facts this
 // usecase needs" — a 404 for the issuance-server, not a failure.
 var errNoData = fmt.Errorf("no data")
@@ -324,7 +346,7 @@ var errNoData = fmt.Errorf("no data")
 // the mux registration (per path); all parameters (scope, tax year,
 // attestation-type) come from the catalog entry — nothing is hard-coded
 // in the adapter code.
-func handleAttestation(cfg config, client *http.Client, usecaseKey string, uc Usecase) http.HandlerFunc {
+func handleAttestation(cfg config, client *http.Client, usecaseKey string, uc Usecase, shadow *sourceMetadataShadow) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -379,15 +401,26 @@ func handleAttestation(cfg config, client *http.Client, usecaseKey string, uc Us
 		)
 
 		// Policy check + data fetch via FSC -> PEP -> PDP -> OPA -> bron.
-		// Scope + query come from the catalog entry.
-		persoon, err := callViaFSC(r.Context(), client, cfg, bsn, uc)
+		// In shadow mode the verified source definition supplies the query;
+		// otherwise the existing catalog-driven query remains the fallback.
+		var queryPlans []sourceQueryPlan
+		if shadow.appliesTo(uc) {
+			plan, err := shadow.queryPlan(bsn, uc)
+			if err != nil {
+				slog.Error("build source metadata query", "usecase", usecaseKey, "err", err.Error())
+				http.Error(w, err.Error(), http.StatusBadGateway)
+				return
+			}
+			queryPlans = append(queryPlans, plan)
+		}
+		result, err := callViaFSC(r.Context(), client, cfg, bsn, uc, queryPlans...)
 		if err != nil {
 			slog.Error("fsc call failed", "usecase", usecaseKey, "err", err.Error())
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
 
-		docs, err := buildIssuableDocuments(uc, persoon)
+		docs, err := buildIssuableDocuments(uc, result.Persoon)
 		if err != nil {
 			if errors.Is(err, errNoData) {
 				slog.Info("bron has no data for this usecase", "usecase", usecaseKey, "bron", uc.bron())
@@ -397,6 +430,19 @@ func handleAttestation(cfg config, client *http.Client, usecaseKey string, uc Us
 			slog.Error("format attestation failed", "usecase", usecaseKey, "err", err.Error())
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
+		}
+		if shadow.appliesTo(uc) {
+			matches, compareErr := shadow.compareLegacy(result.Raw, docs)
+			switch {
+			case compareErr != nil:
+				w.Header().Set("X-GBO-Metadata-Shadow", "error")
+				slog.Error("source metadata shadow comparison failed", "usecase", usecaseKey, "err", compareErr.Error())
+			case !matches:
+				w.Header().Set("X-GBO-Metadata-Shadow", "mismatch")
+				slog.Warn("source metadata shadow mismatch", "usecase", usecaseKey, "metadata_version", shadow.Version)
+			default:
+				w.Header().Set("X-GBO-Metadata-Shadow", "match")
+			}
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -473,24 +519,31 @@ func randomSpanIDHex() string {
 // X-GBO-* headers pass through Outway/Inway transparently to the backend
 // — untrusted but available.
 //
-// Returns the raw `ingeschrevenPersoon` object; the per-bron decoding
-// happens in buildIssuableDocuments.
-func callViaFSC(ctx context.Context, client *http.Client, cfg config, bsn string, uc Usecase) (json.RawMessage, error) {
+// Returns both the raw GraphQL body for generic projection and the extracted
+// `ingeschrevenPersoon` object for the legacy formatter.
+func callViaFSC(ctx context.Context, client *http.Client, cfg config, bsn string, uc Usecase, plans ...sourceQueryPlan) (fscResult, error) {
 	if uc.OutwayPath == "" {
-		return nil, fmt.Errorf("usecase %q has no outway_path in the catalog", uc.AttestationType)
+		return fscResult{}, fmt.Errorf("usecase %q has no outway_path in the catalog", uc.AttestationType)
 	}
 
-	bsnJSON, _ := json.Marshal(bsn)
-	vars := map[string]any{"bsn": json.RawMessage(bsnJSON)}
+	query := buildQuery(uc)
+	vars := map[string]any{"bsn": bsn}
+	if len(plans) > 1 {
+		return fscResult{}, fmt.Errorf("only one source query plan can be active")
+	}
+	if len(plans) == 1 {
+		query = plans[0].Query
+		vars = plans[0].Variables
+	}
 
 	body, _ := json.Marshal(proxyRequest{
-		Query:     buildQuery(uc),
+		Query:     query,
 		Variables: vars,
 	})
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.OutwayURL+uc.OutwayPath, bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return fscResult{}, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	// Context headers — untrusted, pass through the Outway/Inway.
@@ -506,7 +559,7 @@ func callViaFSC(ctx context.Context, client *http.Client, cfg config, bsn string
 	if fscTxID == "" {
 		gen, err := newFscTransactionID()
 		if err != nil {
-			return nil, fmt.Errorf("generate Fsc-Transaction-Id: %w", err)
+			return fscResult{}, fmt.Errorf("generate Fsc-Transaction-Id: %w", err)
 		}
 		fscTxID = gen
 	}
@@ -516,7 +569,7 @@ func callViaFSC(ctx context.Context, client *http.Client, cfg config, bsn string
 
 	resp, err := client.Do(httpReq)
 	if err != nil {
-		return nil, err
+		return fscResult{}, err
 	}
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(resp.Body)
@@ -526,20 +579,20 @@ func callViaFSC(ctx context.Context, client *http.Client, cfg config, bsn string
 			Reason string `json:"reason"`
 		}
 		_ = json.Unmarshal(respBody, &denied)
-		return nil, fmt.Errorf("denied by policy: %s", denied.Reason)
+		return fscResult{}, fmt.Errorf("denied by policy: %s", denied.Reason)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("fsc proxy status %d: %s", resp.StatusCode, string(respBody))
+		return fscResult{}, fmt.Errorf("fsc proxy status %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var out graphqlResponse
 	if err := json.Unmarshal(respBody, &out); err != nil {
-		return nil, fmt.Errorf("decode graphql response: %w", err)
+		return fscResult{}, fmt.Errorf("decode graphql response: %w", err)
 	}
 	if len(out.Errors) > 0 {
-		return nil, fmt.Errorf("graphql errors: %v", out.Errors)
+		return fscResult{}, fmt.Errorf("graphql errors: %v", out.Errors)
 	}
-	return out.Data.IngeschrevenPersoon, nil
+	return fscResult{Persoon: out.Data.IngeschrevenPersoon, Raw: respBody}, nil
 }
 
 // buildIssuableDocuments turns the bron's `ingeschrevenPersoon` object into
@@ -937,7 +990,11 @@ func initTracer(ctx context.Context) (func(context.Context) error, error) {
 // newMux builds the routing tree with the given config, catalog and HTTP
 // client. Extracted from main so integration tests can wire the handlers
 // to an httptest.Server without starting the real listener.
-func newMux(cfg config, catalog *Catalog, client *http.Client) *http.ServeMux {
+func newMux(cfg config, catalog *Catalog, client *http.Client, shadows ...*sourceMetadataShadow) *http.ServeMux {
+	var shadow *sourceMetadataShadow
+	if len(shadows) > 0 {
+		shadow = shadows[0]
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -951,7 +1008,7 @@ func newMux(cfg config, catalog *Catalog, client *http.Client) *http.ServeMux {
 		usecaseKeys = append(usecaseKeys, key)
 		// The issuance-server's base_url ends with '/' -> mux path idem.
 		path := "/" + key + "/"
-		mux.HandleFunc(path, handleAttestation(cfg, client, key, uc))
+		mux.HandleFunc(path, handleAttestation(cfg, client, key, uc, shadow))
 	}
 	slog.Info("eudi-adapter usecases loaded", "keys", usecaseKeys)
 	return mux
@@ -983,12 +1040,19 @@ func main() {
 		Timeout:   10 * time.Second,
 		Transport: otelhttp.NewTransport(http.DefaultTransport),
 	}
+	shadow, err := loadConfiguredSourceMetadataShadow(ctx, client, cfg)
+	if err != nil {
+		fatal("loading source metadata shadow", err)
+	}
+	if shadow != nil {
+		slog.Info("source metadata shadow enabled", "url", cfg.SourceMetadataURL, "source_oin", cfg.SourceMetadataOIN, "metadata_version", shadow.Version)
+	}
 
 	// Middleware order: withFscTraceContext wraps otelhttp — the header
 	// mutation must happen before otelhttp extracts the parent context.
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           withFscTraceContext(otelhttp.NewHandler(newMux(cfg, catalog, client), "eudi-adapter")),
+		Handler:           withFscTraceContext(otelhttp.NewHandler(newMux(cfg, catalog, client, shadow), "eudi-adapter")),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 	slog.Info("eudi-adapter starting", "addr", srv.Addr, "outway", cfg.OutwayURL, "issuer_oin", cfg.IssuerOIN)
