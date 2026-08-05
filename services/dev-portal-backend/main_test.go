@@ -57,6 +57,49 @@ func TestHealthAndEmptyHistory(t *testing.T) {
 	}
 }
 
+// The timeline is per-developer: your own runs plus the ones nobody could
+// attribute. A colleague's run must not show up, because the Use-form
+// prefills its consent_id from the most recent issuance in this list.
+func TestHistoryFiltersBySession(t *testing.T) {
+	cfg := config{VarDir: t.TempDir(), PredefinedDir: t.TempDir()}
+	for _, run := range []HistoryRun{
+		{RunID: "mine", TraceID: "a", DemoSession: "dev-a"},
+		{RunID: "theirs", TraceID: "b", DemoSession: "dev-b"},
+		{RunID: "untagged", TraceID: "c"},
+	} {
+		if err := appendHistory(cfg, run); err != nil {
+			t.Fatalf("append %s: %v", run.RunID, err)
+		}
+	}
+
+	runs, err := readHistory(cfg, 100, "dev-a")
+	if err != nil {
+		t.Fatalf("readHistory: %v", err)
+	}
+	got := map[string]bool{}
+	for _, r := range runs {
+		got[r.RunID] = true
+	}
+	if !got["mine"] {
+		t.Error("own run missing from the timeline")
+	}
+	if !got["untagged"] {
+		t.Error("unattributable run missing: untagged means unknown, not someone else's")
+	}
+	if got["theirs"] {
+		t.Error("another session's run leaked into the timeline")
+	}
+
+	// No session asked for: the whole timeline, as before sessions existed.
+	all, err := readHistory(cfg, 100, "")
+	if err != nil {
+		t.Fatalf("readHistory unfiltered: %v", err)
+	}
+	if len(all) != 3 {
+		t.Errorf("unfiltered history = %d runs, want 3", len(all))
+	}
+}
+
 func TestLoadConfigAllowsKubernetesLokiSelector(t *testing.T) {
 	const selector = `{namespace="fds-tenant-minbzk",container="opa"} |= "Decision Log"`
 	t.Setenv("LOKI_DECISION_QUERY", selector)

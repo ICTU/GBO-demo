@@ -280,6 +280,9 @@ type HistoryRun struct {
 	// Self-triggered runs from dev-portal already have the body locally
 	// and omit this field.
 	Response json.RawMessage `json:"response,omitempty"`
+	// Which developer's browser drove this run — the id watch-mode routes on.
+	// Empty for a run nobody could attribute, and for pre-sessions entries.
+	DemoSession string `json:"demo_session,omitempty"`
 }
 
 // upstreamTimeout bounds the calls this service makes to Loki and OPA. These
@@ -325,7 +328,10 @@ func appendHistory(cfg config, run HistoryRun) error {
 	return err
 }
 
-func readHistory(cfg config, limit int) ([]HistoryRun, error) {
+// readHistory returns the most recent runs, newest first. A non-empty session
+// keeps that developer's runs plus every untagged one — same rule watch-mode
+// uses: untagged means "nobody could say whose", not "somebody else's".
+func readHistory(cfg config, limit int, session string) ([]HistoryRun, error) {
 	historyMu.Lock()
 	defer historyMu.Unlock()
 	data, err := os.ReadFile(historyFile(cfg))
@@ -342,9 +348,13 @@ func readHistory(cfg config, limit int) ([]HistoryRun, error) {
 			continue
 		}
 		var h HistoryRun
-		if err := json.Unmarshal([]byte(ln), &h); err == nil {
-			out = append(out, h)
+		if err := json.Unmarshal([]byte(ln), &h); err != nil {
+			continue
 		}
+		if session != "" && h.DemoSession != "" && h.DemoSession != session {
+			continue
+		}
+		out = append(out, h)
 	}
 	// Recent first
 	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
@@ -366,7 +376,9 @@ func handleHistory(cfg config) http.HandlerFunc {
 		case http.MethodOptions:
 			w.WriteHeader(http.StatusNoContent)
 		case http.MethodGet:
-			runs, err := readHistory(cfg, 100)
+			// ?session=<id> narrows the timeline to one developer's runs;
+			// omitted, it returns everything, as any curl here still does.
+			runs, err := readHistory(cfg, 100, r.URL.Query().Get("session"))
 			if err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 				return

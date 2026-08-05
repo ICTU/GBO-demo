@@ -166,6 +166,18 @@ func withFscTraceContext(next http.Handler) http.Handler {
 	})
 }
 
+// withDemoSession copies X-Demo-Session onto the server span, which is how
+// the dev-portal's watch-mode tells one developer's run from another's. It
+// gates nothing. Wrap INSIDE otelhttp, or there is no span to annotate yet.
+func withDemoSession(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s := r.Header.Get("X-Demo-Session"); s != "" {
+			trace.SpanFromContext(r.Context()).SetAttributes(attribute.String("gbo.demo.session", s))
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // randomSpanIDHex returns 8 bytes of hex — a valid OTel span-id.
 func randomSpanIDHex() string {
 	var b [8]byte
@@ -613,7 +625,7 @@ func main() {
 	// mutation must happen before otelhttp extracts the parent context.
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           withFscTraceContext(otelhttp.NewHandler(withAccessLog(newMux(cfg)), "dienstverlener-backend")),
+		Handler:           withFscTraceContext(otelhttp.NewHandler(withDemoSession(withAccessLog(newMux(cfg))), "dienstverlener-backend")),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 	slog.Info("dienstverlener-backend starting",

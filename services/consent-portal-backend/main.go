@@ -185,7 +185,7 @@ func main() {
 	baseCtx, endStreams := context.WithCancel(context.Background())
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           otelhttp.NewHandler(logctx.WithAccessLog(newMux(cfg, hub)), "consent-portal-backend"),
+		Handler:           otelhttp.NewHandler(portalhttp.WithDemoSession(logctx.WithAccessLog(newMux(cfg, hub))), "consent-portal-backend"),
 		ReadHeaderTimeout: readHeaderTimeout,
 		BaseContext:       func(net.Listener) context.Context { return baseCtx },
 	}

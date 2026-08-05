@@ -1,3 +1,4 @@
+import { demoSessionId } from '../util/demoSession'
 import type { Scenario, HistoryRun, Citizen, Organization } from '../types'
 
 const BASE = '/api/dev'
@@ -11,7 +12,11 @@ async function jsonGet<T>(path: string): Promise<T> {
 export async function listScenarios(): Promise<Scenario[]> { return jsonGet('/scenarios') }
 export async function listCitizens(): Promise<Citizen[]> { return jsonGet('/citizens') }
 export async function listOrganizations(): Promise<Organization[]> { return jsonGet('/organizations') }
-export async function listHistory(): Promise<HistoryRun[]> { return jsonGet('/history') }
+// listHistory returns this session's runs plus every unattributable one. Pass
+// no session to get the whole timeline, everybody's runs included.
+export async function listHistory(session?: string): Promise<HistoryRun[]> {
+  return jsonGet(session ? `/history?session=${encodeURIComponent(session)}` : '/history')
+}
 
 export async function saveScenario(s: Omit<Scenario, 'user_saved'>): Promise<Scenario> {
   const res = await fetch(`${BASE}/scenarios`, {
@@ -32,7 +37,9 @@ export async function logHistory(run: Omit<HistoryRun, 'run_id' | 'ts'>): Promis
   const res = await fetch(`${BASE}/history`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(run),
+    // Stamp our own runs so they come back to this session's timeline and
+    // stay out of everyone else's.
+    body: JSON.stringify({ demo_session: demoSessionId(), ...run }),
   })
   if (!res.ok) throw new Error(`logHistory failed: ${res.status}`)
   return res.json()
