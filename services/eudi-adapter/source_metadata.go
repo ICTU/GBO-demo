@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
@@ -69,6 +70,18 @@ type sourceAttributeSchema struct {
 	Type   string `json:"type"`
 	Format string `json:"format,omitempty"`
 	Unit   string `json:"unit,omitempty"`
+}
+
+func (a *sourceAttributeSchema) UnmarshalJSON(data []byte) error {
+	type plainAttributeSchema sourceAttributeSchema
+	var decoded plainAttributeSchema
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&decoded); err != nil {
+		return fmt.Errorf("invalid attribute_schema rule: %w", err)
+	}
+	*a = sourceAttributeSchema(decoded)
+	return nil
 }
 
 type mappingRule = gbosimplev1.Rule
@@ -313,11 +326,28 @@ func validateAttributeSchema(definition sourceAttestationDefinition) error {
 		if attribute.Type != wantType || attribute.Format != wantFormat {
 			return fmt.Errorf("attribute_schema claim %q must have type %q and format %q", claim, wantType, wantFormat)
 		}
-		if attribute.Unit != "" && attribute.Type != "number" {
-			return fmt.Errorf("attribute_schema claim %q can only declare a unit for type number", claim)
+		if attribute.Unit != "" {
+			if attribute.Type != "number" {
+				return fmt.Errorf("attribute_schema claim %q can only declare a unit for type number", claim)
+			}
+			if !isISO4217Alpha3(attribute.Unit) {
+				return fmt.Errorf("attribute_schema claim %q unit must be an ISO 4217 alpha-3 code", claim)
+			}
 		}
 	}
 	return nil
+}
+
+func isISO4217Alpha3(unit string) bool {
+	if len(unit) != 3 {
+		return false
+	}
+	for i := 0; i < len(unit); i++ {
+		if unit[i] < 'A' || unit[i] > 'Z' {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *sourceMetadataShadow) appliesTo(usecaseKey string, uc Usecase) bool {

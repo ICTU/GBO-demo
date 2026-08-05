@@ -23,6 +23,23 @@ import (
 var testBase64URL = base64.RawURLEncoding
 
 func TestShippedSourceMetadataMatchesEnvelopeSchema(t *testing.T) {
+	schema := compileSourceMetadataSchema(t)
+	metadataFile, err := os.Open("../graphql-server/config/gbo-attestations.json")
+	if err != nil {
+		t.Fatalf("open shipped source metadata: %v", err)
+	}
+	defer metadataFile.Close()
+	metadata, err := jsonschema.UnmarshalJSON(metadataFile)
+	if err != nil {
+		t.Fatalf("parse shipped source metadata: %v", err)
+	}
+	if err := schema.Validate(metadata); err != nil {
+		t.Fatalf("shipped source metadata does not match envelope schema: %v", err)
+	}
+}
+
+func compileSourceMetadataSchema(t *testing.T) *jsonschema.Schema {
+	t.Helper()
 	compiler := jsonschema.NewCompiler()
 	compiler.AssertFormat()
 	mappingSchemaFile, err := os.Open("../../schemas/gbo-simple-v1.schema.json")
@@ -41,17 +58,78 @@ func TestShippedSourceMetadataMatchesEnvelopeSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compile source metadata schema: %v", err)
 	}
-	metadataFile, err := os.Open("../graphql-server/config/gbo-attestations.json")
+	return schema
+}
+
+func TestAttributeSchemaUnknownPropertiesRejectedByRuntimeAndEnvelopeSchema(t *testing.T) {
+	raw, err := os.ReadFile("../graphql-server/config/gbo-attestations.json")
 	if err != nil {
-		t.Fatalf("open shipped source metadata: %v", err)
+		t.Fatalf("read shipped source metadata: %v", err)
 	}
-	defer metadataFile.Close()
-	metadata, err := jsonschema.UnmarshalJSON(metadataFile)
+	schema := compileSourceMetadataSchema(t)
+	for property, value := range map[string]any{"scale": 0, "anything": "goes"} {
+		t.Run(property, func(t *testing.T) {
+			var envelope map[string]any
+			if err := json.Unmarshal(raw, &envelope); err != nil {
+				t.Fatalf("decode source metadata: %v", err)
+			}
+			attestations := envelope["attestations"].([]any)
+			attestation := attestations[0].(map[string]any)
+			attributes := attestation["attribute_schema"].(map[string]any)
+			amount := attributes["verzamelinkomen"].(map[string]any)
+			amount[property] = value
+			mutated, err := json.Marshal(envelope)
+			if err != nil {
+				t.Fatalf("encode mutated source metadata: %v", err)
+			}
+
+			var document sourceMetadataDocument
+			if err := json.Unmarshal(mutated, &document); err == nil || !strings.Contains(err.Error(), "unknown field") {
+				t.Fatalf("runtime decode error = %v, want unknown field rejection", err)
+			}
+			metadata, err := jsonschema.UnmarshalJSON(bytes.NewReader(mutated))
+			if err != nil {
+				t.Fatalf("parse mutated metadata for schema: %v", err)
+			}
+			if err := schema.Validate(metadata); err == nil {
+				t.Fatal("envelope schema accepted unknown attribute_schema property")
+			}
+		})
+	}
+}
+
+func TestAttributeSchemaUnitRejectedByRuntimeAndEnvelopeSchema(t *testing.T) {
+	raw, err := os.ReadFile("../graphql-server/config/gbo-attestations.json")
 	if err != nil {
-		t.Fatalf("parse shipped source metadata: %v", err)
+		t.Fatalf("read shipped source metadata: %v", err)
 	}
-	if err := schema.Validate(metadata); err != nil {
-		t.Fatalf("shipped source metadata does not match envelope schema: %v", err)
+	var envelope map[string]any
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		t.Fatalf("decode source metadata: %v", err)
+	}
+	attestations := envelope["attestations"].([]any)
+	attestation := attestations[0].(map[string]any)
+	attributes := attestation["attribute_schema"].(map[string]any)
+	amount := attributes["verzamelinkomen"].(map[string]any)
+	amount["unit"] = "eur"
+	mutated, err := json.Marshal(envelope)
+	if err != nil {
+		t.Fatalf("encode mutated source metadata: %v", err)
+	}
+
+	var document sourceMetadataDocument
+	if err := json.Unmarshal(mutated, &document); err != nil {
+		t.Fatalf("runtime decode error = %v", err)
+	}
+	if err := validateSourceAttestation(document.Attestations[0]); err == nil || !strings.Contains(err.Error(), "ISO 4217") {
+		t.Fatalf("runtime validation error = %v, want ISO 4217 rejection", err)
+	}
+	metadata, err := jsonschema.UnmarshalJSON(bytes.NewReader(mutated))
+	if err != nil {
+		t.Fatalf("parse mutated metadata for schema: %v", err)
+	}
+	if err := compileSourceMetadataSchema(t).Validate(metadata); err == nil {
+		t.Fatal("envelope schema accepted lowercase attribute_schema unit")
 	}
 }
 

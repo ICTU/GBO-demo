@@ -10,6 +10,7 @@ import (
 	"io"
 	"math"
 	"math/big"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -227,7 +228,7 @@ func EqualJSON(left, right any) bool {
 		}
 		return true
 	default:
-		return left == right
+		return reflect.DeepEqual(left, right)
 	}
 }
 
@@ -246,11 +247,11 @@ func copyValue(value any, datatype string) (any, error) {
 		}
 		return boolean, nil
 	case "integer", "gYear":
-		number, ok := numberText(value)
+		number, ok := value.(json.Number)
 		if !ok {
-			return nil, profileError(CodeTypeMismatch, "", "value must be an integer")
+			return nil, profileError(CodeTypeMismatch, "", "value must be a json.Number integer produced by DecodeJSON")
 		}
-		rat, ok := parseNumber(number)
+		rat, ok := parseNumber(number.String())
 		if !ok || !rat.IsInt() || !rat.Num().IsInt64() {
 			return nil, profileError(CodeTypeMismatch, "", "value must be an int64")
 		}
@@ -260,11 +261,11 @@ func copyValue(value any, datatype string) (any, error) {
 		}
 		return value, nil
 	case "number":
-		number, ok := numberText(value)
+		number, ok := value.(json.Number)
 		if !ok {
-			return nil, profileError(CodeTypeMismatch, "", "value must be a JSON number")
+			return nil, profileError(CodeTypeMismatch, "", "value must be a json.Number produced by DecodeJSON")
 		}
-		if _, ok := parseNumber(number); !ok {
+		if _, ok := parseNumber(number.String()); !ok {
 			return nil, profileError(CodeTypeMismatch, "", "value must be a finite JSON number")
 		}
 		return value, nil
@@ -320,7 +321,7 @@ func jsonPointer(root any, pointer string) (any, bool) {
 				return nil, false
 			}
 		case []any:
-			if token == "" || (len(token) > 1 && token[0] == '0') {
+			if !isCanonicalArrayIndex(token) {
 				return nil, false
 			}
 			index, err := strconv.Atoi(token)
@@ -333,6 +334,21 @@ func jsonPointer(root any, pointer string) (any, bool) {
 		}
 	}
 	return current, true
+}
+
+func isCanonicalArrayIndex(token string) bool {
+	if token == "0" {
+		return true
+	}
+	if token == "" || token[0] < '1' || token[0] > '9' {
+		return false
+	}
+	for i := 1; i < len(token); i++ {
+		if token[i] < '0' || token[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func sortedClaims(mapping Mapping) []string {

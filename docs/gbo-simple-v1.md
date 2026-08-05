@@ -47,9 +47,15 @@ Een bronwaarde `43000.50` blijft dus `43000.50`; GBO rondt niet af en kiest geen
 | `integer` | exact geheel JSON-getal binnen int64 | dezelfde bronwaarde |
 | `number` | eindig JSON-getal van maximaal 128 tekens | dezelfde bronwaarde |
 | `date` | canonieke RFC 3339 full-date `YYYY-MM-DD` | string |
-| `gYear` | geheel getal van 0 tot en met 9999 | integer |
+| `gYear` | geheel getal van 0 tot en met 9999 | dezelfde bronwaarde |
 
 `attribute_schema` moet voor iedere mappingclaim exact één overeenkomstige outputdefinitie bevatten. Het schema mag bij `type: number` een eenheid zoals `EUR` declareren; de projector interpreteert die eenheid niet.
+
+## Null en optionele claims
+
+Alle claims in een `gbo-simple-v1`-mapping zijn verplicht en non-null. Een ontbrekend pointerpad geeft `GBO_SIMPLE_PATH_MISSING`; een aanwezige JSON-waarde `null` geeft `GBO_SIMPLE_TYPE_MISMATCH`. In beide gevallen ontstaat geen credentialkandidaat.
+
+Dit profiel kan een claim dus niet conditioneel weglaten. De bronresolver moet alleen een resultaat teruggeven wanneer alle gemapte claims gevuld zijn, anders nul resultaten (`no_data`). Een nullable bronveld dat geen verplicht credentialgegeven is, blijft buiten de mapping of wordt door de bronresolver verwerkt tot een non-null domain-ready veld. Als een toekomstig attestatietype werkelijk conditioneel ontbrekende claims moet ondersteunen, vereist dat een nieuw versiegebonden mappingprofiel; `gbo-simple-v1` krijgt daarvoor niet stilzwijgend conditionals of defaults.
 
 ## Grenzen
 
@@ -78,6 +84,7 @@ Er zijn geen conversies of operators voor filters, sortering, `first`, joins, co
 ## Machineleesbaar contract en conformance
 
 - Mapping-JSON Schema: `schemas/gbo-simple-v1.schema.json` (Draft 2020-12).
-- Envelope-schema: `schemas/gbo-attestations-v1.schema.json` verwijst naar dat profiel.
+- Envelope-schema: `schemas/gbo-attestations-v1.schema.json` verwijst via de vaste URN `urn:gov:nl:gbo:schema:gbo-simple-v1:1` naar dat profiel.
+- Een externe validator moet `schemas/gbo-simple-v1.schema.json` vooraf onder die URN registreren; de testhelper laat deze bundelstap zien.
 - Onafhankelijke fixtures: `services/eudi-adapter/internal/gbosimplev1/testdata/cases.json`.
 - Uitvoeren: `cd services/eudi-adapter && go test ./internal/gbosimplev1`.

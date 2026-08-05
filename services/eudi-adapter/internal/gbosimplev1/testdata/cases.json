@@ -105,6 +105,20 @@
       "result_pointer": "/data/rows",
       "mapping": {"claim": {"pointer": "/value", "datatype": "integer"}},
       "error_code": "GBO_SIMPLE_TYPE_MISMATCH"
+    },
+    {
+      "name": "null mapped claim is a type mismatch",
+      "input": {"data": {"rows": [{"value": null}]}},
+      "result_pointer": "/data/rows",
+      "mapping": {"claim": {"pointer": "/value", "datatype": "string"}},
+      "error_code": "GBO_SIMPLE_TYPE_MISMATCH"
+    },
+    {
+      "name": "signed array index is not canonical",
+      "input": {"data": {"rows": [{"values": ["zero"]}]}},
+      "result_pointer": "/data/rows",
+      "mapping": {"claim": {"pointer": "/values/+0", "datatype": "string"}},
+      "error_code": "GBO_SIMPLE_PATH_MISSING"
     }
   ]
 }

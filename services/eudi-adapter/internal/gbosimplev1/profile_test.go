@@ -129,6 +129,48 @@ func TestProjectPreservesDecimalNumber(t *testing.T) {
 	}
 }
 
+func TestProjectRejectsNumbersNotProducedByDecodeJSON(t *testing.T) {
+	var root any
+	if err := json.Unmarshal([]byte(`{"rows":[{"value":43000.50}]}`), &root); err != nil {
+		t.Fatalf("plain json.Unmarshal() error = %v", err)
+	}
+	for _, datatype := range []string{"number", "integer", "gYear"} {
+		t.Run(datatype, func(t *testing.T) {
+			_, err := Project(root, "/rows", "exactly_one", Mapping{
+				"value": {Pointer: "/value", Datatype: datatype},
+			})
+			if got := ErrorCodeOf(err); got != CodeTypeMismatch {
+				t.Fatalf("error code = %q (%v), want %q", got, err, CodeTypeMismatch)
+			}
+		})
+	}
+}
+
+func TestProjectRejectsNonCanonicalArrayIndices(t *testing.T) {
+	root, err := DecodeJSON([]byte(`{"rows":[{"list":["zero"]}]}`))
+	if err != nil {
+		t.Fatalf("DecodeJSON() error = %v", err)
+	}
+	for _, pointer := range []string{"/list/+0", "/list/-0", "/list/00"} {
+		t.Run(pointer, func(t *testing.T) {
+			_, err := Project(root, "/rows", "exactly_one", Mapping{
+				"value": {Pointer: pointer, Datatype: "string"},
+			})
+			if got := ErrorCodeOf(err); got != CodePathMissing {
+				t.Fatalf("error code = %q (%v), want %q", got, err, CodePathMissing)
+			}
+		})
+	}
+}
+
+func TestEqualJSONDoesNotPanicForNonJSONDynamicValues(t *testing.T) {
+	left := map[string]string{"answer": "same"}
+	right := map[string]string{"answer": "same"}
+	if !EqualJSON(left, right) {
+		t.Fatal("equal comparable maps did not compare equal")
+	}
+}
+
 func loadConformance(t *testing.T) conformanceFile {
 	t.Helper()
 	decoder := json.NewDecoder(bytes.NewReader(conformanceCases))
