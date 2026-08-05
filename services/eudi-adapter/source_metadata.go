@@ -35,11 +35,12 @@ type sourceMetadataConfig struct {
 }
 
 type sourceMetadataDocument struct {
-	SourceOIN    string                        `json:"source_oin"`
-	Version      string                        `json:"version"`
-	IssuedAt     string                        `json:"issued_at"`
-	ExpiresAt    string                        `json:"expires_at"`
-	Attestations []sourceAttestationDefinition `json:"attestations"`
+	SchemaVersion string                        `json:"schema_version"`
+	SourceOIN     string                        `json:"source_oin"`
+	Version       string                        `json:"version"`
+	IssuedAt      string                        `json:"issued_at"`
+	ExpiresAt     string                        `json:"expires_at"`
+	Attestations  []sourceAttestationDefinition `json:"attestations"`
 }
 
 type sourceAttestationDefinition struct {
@@ -70,6 +71,7 @@ type mappingRule struct {
 
 type sourceMetadataShadow struct {
 	Version    string
+	UsecaseKey string
 	Definition sourceAttestationDefinition
 }
 
@@ -80,9 +82,24 @@ type sourceMetadataJWK struct {
 }
 
 type sourceMetadataJWSHeader struct {
-	Algorithm string `json:"alg"`
-	KeyID     string `json:"kid"`
-	Type      string `json:"typ"`
+	Algorithm string   `json:"alg"`
+	KeyID     string   `json:"kid"`
+	Type      string   `json:"typ"`
+	Critical  []string `json:"crit,omitempty"`
+}
+
+// phase1ExpectedIncomeClaims is the migration baseline, deliberately kept
+// outside source-controlled metadata. It disappears with the legacy formatter
+// after parity has been proven; until then it prevents the source from making
+// a claim vanish from both its query and mapping while still reporting match.
+var phase1ExpectedIncomeClaims = map[string]struct{}{
+	"belastingjaar":   {},
+	"verzamelinkomen": {},
+	"aangifte_status": {},
+	"indieningsdatum": {},
+	"inkomen_box1":    {},
+	"inkomen_box2":    {},
+	"inkomen_box3":    {},
 }
 
 func loadConfiguredSourceMetadataShadow(ctx context.Context, client *http.Client, cfg config) (*sourceMetadataShadow, error) {
@@ -95,16 +112,24 @@ func loadConfiguredSourceMetadataShadow(ctx context.Context, client *http.Client
 	if !strings.HasPrefix(cfg.SourceMetadataOutwayPath, "/") || strings.HasPrefix(cfg.SourceMetadataOutwayPath, "//") {
 		return nil, fmt.Errorf("SOURCE_METADATA_OUTWAY_PATH must be an absolute path on the configured FSC Outway")
 	}
+	if cfg.SourceMetadataUsecaseKey == "" {
+		return nil, fmt.Errorf("SOURCE_METADATA_USECASE_KEY is required when shadow mode is enabled")
+	}
 	publicJWK, err := os.ReadFile(cfg.SourceMetadataPublicJWKPath)
 	if err != nil {
 		return nil, fmt.Errorf("read source metadata public JWK: %w", err)
 	}
-	return loadSourceMetadataShadow(ctx, client, sourceMetadataConfig{
+	shadow, err := loadSourceMetadataShadow(ctx, client, sourceMetadataConfig{
 		URL:         strings.TrimRight(cfg.OutwayURL, "/") + cfg.SourceMetadataOutwayPath,
 		ExpectedOIN: cfg.SourceMetadataOIN,
 		PublicJWK:   publicJWK,
 		TypeID:      cfg.SourceMetadataTypeID,
 	})
+	if err != nil {
+		return nil, err
+	}
+	shadow.UsecaseKey = cfg.SourceMetadataUsecaseKey
+	return shadow, nil
 }
 
 // loadSourceMetadataShadow performs the phase-1 onboarding step: fetch the
@@ -152,6 +177,9 @@ func loadSourceMetadataShadow(ctx context.Context, client *http.Client, cfg sour
 	if document.SourceOIN != cfg.ExpectedOIN {
 		return nil, fmt.Errorf("source metadata OIN %q does not match registered OIN %q", document.SourceOIN, cfg.ExpectedOIN)
 	}
+	if document.SchemaVersion != "1.0" {
+		return nil, fmt.Errorf("unsupported source metadata schema_version %q", document.SchemaVersion)
+	}
 	for _, definition := range document.Attestations {
 		if definition.TypeID != cfg.TypeID {
 			continue
@@ -191,6 +219,9 @@ func verifySourceMetadataJWS(compact string, rawJWK json.RawMessage) ([]byte, er
 	}
 	if header.Algorithm != "EdDSA" || header.Type != "gbo-attestations+jws" {
 		return nil, fmt.Errorf("source metadata JWS has unsupported protected headers")
+	}
+	if len(header.Critical) > 0 {
+		return nil, fmt.Errorf("source metadata JWS contains an unsupported critical JWS header")
 	}
 	if header.KeyID != sourceMetadataJWKThumbprint(jwk) {
 		return nil, fmt.Errorf("source metadata JWS key id does not match the pinned key")
@@ -258,12 +289,12 @@ func validateSourceAttestation(definition sourceAttestationDefinition) error {
 	return nil
 }
 
-func (s *sourceMetadataShadow) appliesTo(uc Usecase) bool {
-	return s != nil && uc.bron() == bronBD && len(uc.Belastingjaren) == 1
+func (s *sourceMetadataShadow) appliesTo(usecaseKey string, uc Usecase) bool {
+	return s != nil && s.UsecaseKey == usecaseKey && uc.bron() == bronBD && len(uc.Belastingjaren) == 1
 }
 
-func (s *sourceMetadataShadow) queryPlan(bsn string, uc Usecase) (sourceQueryPlan, error) {
-	if !s.appliesTo(uc) {
+func (s *sourceMetadataShadow) queryPlan(usecaseKey, bsn string, uc Usecase) (sourceQueryPlan, error) {
+	if !s.appliesTo(usecaseKey, uc) {
 		return sourceQueryPlan{}, fmt.Errorf("source metadata does not apply to this usecase")
 	}
 	variables := map[string]any{s.Definition.GraphQL.SubjectVariable: bsn}
@@ -286,6 +317,26 @@ func (s *sourceMetadataShadow) queryPlan(bsn string, uc Usecase) (sourceQueryPla
 func (s *sourceMetadataShadow) compareLegacy(rawGraphQL []byte, docs []attestation) (bool, error) {
 	if len(docs) != 1 {
 		return false, fmt.Errorf("shadow comparison expected one legacy document")
+	}
+	for claim := range phase1ExpectedIncomeClaims {
+		if _, declared := s.Definition.Mapping[claim]; !declared {
+			return false, nil
+		}
+		if _, issued := docs[0].Attributes[claim]; !issued {
+			return false, nil
+		}
+	}
+	// verklaring_tekst is presentation text produced only by the legacy
+	// formatter and is deliberately absent from the source mapping. Every
+	// other issued claim must be declared: otherwise removing a field from
+	// both the source query and mapping would incorrectly report a match.
+	for claim := range docs[0].Attributes {
+		if claim == "verklaring_tekst" {
+			continue
+		}
+		if _, declared := s.Definition.Mapping[claim]; !declared {
+			return false, nil
+		}
 	}
 	var root any
 	if err := json.Unmarshal(rawGraphQL, &root); err != nil {
