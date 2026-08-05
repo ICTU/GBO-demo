@@ -277,7 +277,7 @@ func TestSourceActivationAllowsOnlyNewerVersions(t *testing.T) {
 	if err := writeSourceActivation(path, conflictBody, conflict); err == nil {
 		t.Fatal("same version with different bytes was accepted")
 	}
-	rotation, rotationBody := activation("1.0.0", "first")
+	rotation, _ := activation("1.0.0", "first")
 	rotation.Certificates.CertificateExpires = "2028-08-05T12:00:00Z"
 	rotationBody, err := json.Marshal(rotation)
 	if err != nil {
