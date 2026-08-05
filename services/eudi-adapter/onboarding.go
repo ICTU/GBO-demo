@@ -46,6 +46,7 @@ type onboardingOptions struct {
 	outwayURL               string
 	schemaPath              string
 	publicBaseURL           string
+	readerPublicURL         string
 	readerOrigin            string
 	stateDir                string
 	secretsDir              string
@@ -78,7 +79,7 @@ func defaultOnboardingDependencies() onboardingDependencies {
 func configuredCertificateProvider(options onboardingOptions) (certificateProvider, error) {
 	switch options.certificateProviderName {
 	case "development-ca":
-		return newDevelopmentCAProvider(options.secretsDir, options.readerOrigin), nil
+		return newDevelopmentCAProvider(options.secretsDir, options.readerPublicURL, options.readerOrigin), nil
 	default:
 		return nil, fmt.Errorf("unsupported certificate provider %q", options.certificateProviderName)
 	}
@@ -142,6 +143,7 @@ func parseOnboardingOptions(command string, arguments []string, errorOutput io.W
 	set.StringVar(&options.outwayURL, "outway-url", getEnv("FSC_OUTWAY_URL", "http://localhost:8087"), "FSC Outway base URL")
 	set.StringVar(&options.schemaPath, "schema", "schemas/gbo-attestations-v1.schema.json", "source metadata JSON Schema")
 	set.StringVar(&options.publicBaseURL, "type-metadata-base-url", getEnv("TYPE_METADATA_PUBLIC_BASE_URL", "http://localhost:9409"), "public Type Metadata base URL")
+	set.StringVar(&options.readerPublicURL, "reader-public-url", os.Getenv("EUDI_PUBLIC_URL"), "public issuance-server URL whose host becomes the reader certificate DNS SAN")
 	set.StringVar(&options.readerOrigin, "reader-origin-url", os.Getenv("EUDI_READER_ORIGIN_URL"), "public reader origin embedded in the reader certificate")
 	set.StringVar(&options.stateDir, "state-dir", ".local/onboarding", "filesystem onboarding state directory")
 	set.StringVar(&options.secretsDir, "secrets-dir", ".local/secrets", "filesystem secret directory")
@@ -212,11 +214,10 @@ func (b *filesystemActivationBackend) Activate(validated *validatedSourceRegistr
 		return nil, fmt.Errorf("persist pinned source metadata JWK: %w", err)
 	}
 	types := make([]activatedType, 0, len(validated.Publications))
-	for index, publication := range validated.Publications {
-		definition := validated.Document.Attestations[index]
+	for _, publication := range validated.Publications {
 		types = append(types, activatedType{
-			TypeID:       definition.TypeID,
-			TypeVersion:  definition.TypeVersion,
+			TypeID:       publication.TypeID,
+			TypeVersion:  publication.TypeVersion,
 			VCT:          publication.VCT,
 			VCTIntegrity: publication.Integrity,
 		})
@@ -329,8 +330,8 @@ func writeSourceActivation(path string, body []byte, next *sourceActivation) err
 	if comparison < 0 {
 		return fmt.Errorf("metadata version rollback from %q to %q is not allowed", existing.MetadataVersion, next.MetadataVersion)
 	}
-	if comparison == 0 {
-		return fmt.Errorf("metadata version %q has different activation bytes", next.MetadataVersion)
+	if comparison == 0 && existing.MetadataPayloadDigest != next.MetadataPayloadDigest {
+		return fmt.Errorf("metadata version %q has a different metadata payload", next.MetadataVersion)
 	}
 	return writeFileAtomically(filepath.Dir(path), filepath.Base(path), body, 0o644)
 }

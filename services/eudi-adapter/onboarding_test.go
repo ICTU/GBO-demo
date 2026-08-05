@@ -277,6 +277,15 @@ func TestSourceActivationAllowsOnlyNewerVersions(t *testing.T) {
 	if err := writeSourceActivation(path, conflictBody, conflict); err == nil {
 		t.Fatal("same version with different bytes was accepted")
 	}
+	rotation, rotationBody := activation("1.0.0", "first")
+	rotation.Certificates.CertificateExpires = "2028-08-05T12:00:00Z"
+	rotationBody, err := json.Marshal(rotation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeSourceActivation(path, rotationBody, rotation); err != nil {
+		t.Fatalf("write certificate rotation for unchanged metadata: %v", err)
+	}
 	rollback, rollbackBody := activation("0.9.0", "rollback")
 	if err := writeSourceActivation(path, rollbackBody, rollback); err == nil {
 		t.Fatal("activation rollback was accepted")

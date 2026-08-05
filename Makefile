@@ -1,7 +1,7 @@
 .PHONY: up down logs clean certs fsc-local-env fsc-ca fsc-up fsc-down fsc-test fsc-clean \
         fsc-seed-bri fsc-seed-bri-hv fsc-seed-brp fsc-seed-metadata fsc-pdp-cert \
         eudi-images development-source-metadata-key source-metadata-up \
-        validate-source onboard-source demo demo-minimal demo-dvtp demo-eudi \
+        validate-source onboard-source onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
         demo-full demo-down eudi-config
 
 -include .env
@@ -22,6 +22,7 @@ ONBOARDING_STATE_DIR ?= $(PWD)/.local/onboarding
 ONBOARDING_SECRETS_DIR ?= $(PWD)/.local/secrets
 ONBOARDING_TYPE_METADATA_URL ?= $(or $(EUDI_BRI_URL),http://localhost:9409)
 ONBOARDING_EUDI_ENV ?= $(ONBOARDING_SECRETS_DIR)/$(DEVELOPMENT_SOURCE_OIN)/issuance.env
+USE_ONBOARDING_EUDI_ENV ?= false
 ONBOARDING_STORAGE_BACKEND ?= filesystem
 ONBOARDING_CERTIFICATE_PROVIDER ?= development-ca
 
@@ -81,7 +82,13 @@ eudi-config:
 	  exit 1; \
 	}
 	@set -a; [ -f .env ] && . ./.env; \
-	[ -f "$(ONBOARDING_EUDI_ENV)" ] && . "$(ONBOARDING_EUDI_ENV)"; set +a; \
+	if [ "$(USE_ONBOARDING_EUDI_ENV)" = "true" ]; then \
+	  [ -f "$(ONBOARDING_EUDI_ENV)" ] || { echo "ERROR: onboarding issuance environment not found: $(ONBOARDING_EUDI_ENV)"; exit 1; }; \
+	  echo "-> Using onboarding certificates from $(ONBOARDING_EUDI_ENV) (overrides .env certificate values)"; \
+	  . "$(ONBOARDING_EUDI_ENV)"; \
+	elif [ -f "$(ONBOARDING_EUDI_ENV)" ]; then \
+	  echo "-> Ignoring $(ONBOARDING_EUDI_ENV); set USE_ONBOARDING_EUDI_ENV=true to opt in"; \
+	fi; set +a; \
 	missing=""; for v in $(EUDI_REQUIRED_VARS); do \
 	  eval "val=\$$$$v"; \
 	  [ -n "$$val" ] || missing="$$missing $$v"; \
@@ -142,9 +149,13 @@ validate-source:
 		--outway-url "$(ONBOARDING_OUTWAY_URL)" \
 		--schema "$(PWD)/schemas/gbo-attestations-v1.schema.json" \
 		--type-metadata-base-url "$(ONBOARDING_TYPE_METADATA_URL)" \
+		--reader-public-url "$${EUDI_PUBLIC_URL:-}" \
 		--reader-origin-url "$${EUDI_READER_ORIGIN_URL:-}" \
 		--state-dir "$(ONBOARDING_STATE_DIR)" \
 		--secrets-dir "$(ONBOARDING_SECRETS_DIR)"
+
+onboarding-directories:
+	@mkdir -p "$(ONBOARDING_STATE_DIR)/type-metadata" "$(ONBOARDING_STATE_DIR)/trust" "$(ONBOARDING_STATE_DIR)/active"
 
 onboard-source:
 	@test -n "$(SOURCE)" || { echo "ERROR: SOURCE=sources/<oin>.yaml is required"; exit 1; }
@@ -156,12 +167,13 @@ onboard-source:
 		--outway-url "$(ONBOARDING_OUTWAY_URL)" \
 		--schema "$(PWD)/schemas/gbo-attestations-v1.schema.json" \
 		--type-metadata-base-url "$(ONBOARDING_TYPE_METADATA_URL)" \
+		--reader-public-url "$${EUDI_PUBLIC_URL:-}" \
 		--reader-origin-url "$${EUDI_READER_ORIGIN_URL:-}" \
 		--state-dir "$(ONBOARDING_STATE_DIR)" \
 		--secrets-dir "$(ONBOARDING_SECRETS_DIR)" \
 		$$dry_run
 
-demo-eudi: certs fsc-all-up fsc-seed-bri fsc-seed-brp eudi-config eudi-images
+demo-eudi: certs fsc-all-up fsc-seed-bri fsc-seed-brp onboarding-directories eudi-config eudi-images
 	@echo "-> EUDI stack: base + eudi branch + fsc-infra"
 	docker compose --profile eudi up --build -d
 	@echo ""
@@ -172,7 +184,7 @@ demo-eudi: certs fsc-all-up fsc-seed-bri fsc-seed-brp eudi-config eudi-images
 	@echo "  Manual step: grant-links '/bri' and '/brp' in EDI-Controller-UI"
 	@echo "  (see README.md section 'EUDI flow over real FSC' step 3)"
 
-demo-full: certs fsc-all-up fsc-seed-bri fsc-seed-brp fsc-seed-bri-hv eudi-config eudi-images
+demo-full: certs fsc-all-up fsc-seed-bri fsc-seed-brp fsc-seed-bri-hv onboarding-directories eudi-config eudi-images
 	@echo "-> Full stack: everything on"
 	docker compose --profile full up --build -d
 

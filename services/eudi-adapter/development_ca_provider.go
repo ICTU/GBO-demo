@@ -26,6 +26,7 @@ var (
 	issuerEKUOID           = asn1.ObjectIdentifier{1, 0, 18013, 5, 1, 2}
 	readerEKUOID           = asn1.ObjectIdentifier{1, 0, 18013, 5, 1, 6}
 	statusEKUOID           = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 127}
+	extendedKeyUsageOID    = asn1.ObjectIdentifier{2, 5, 29, 37}
 )
 
 type certificateArtifacts struct {
@@ -47,10 +48,11 @@ type certificateProvider interface {
 }
 
 type developmentCAProvider struct {
-	root         string
-	random       io.Reader
-	now          func() time.Time
-	readerOrigin string
+	root            string
+	random          io.Reader
+	now             func() time.Time
+	readerPublicURL string
+	readerOrigin    string
 }
 
 type developmentCA struct {
@@ -59,8 +61,8 @@ type developmentCA struct {
 	certPath string
 }
 
-func newDevelopmentCAProvider(root, readerOrigin string) *developmentCAProvider {
-	return &developmentCAProvider{root: root, random: rand.Reader, now: time.Now, readerOrigin: readerOrigin}
+func newDevelopmentCAProvider(root, readerPublicURL, readerOrigin string) *developmentCAProvider {
+	return &developmentCAProvider{root: root, random: rand.Reader, now: time.Now, readerPublicURL: readerPublicURL, readerOrigin: readerOrigin}
 }
 
 func (p *developmentCAProvider) Provision(registration sourceRegistration) (certificateArtifacts, error) {
@@ -85,15 +87,21 @@ func (p *developmentCAProvider) Provision(registration sourceRegistration) (cert
 	}
 	issuerHost := "issuer-" + registration.SourceOIN + ".gbo.local"
 	readerHost := "reader-" + registration.SourceOIN + ".gbo.local"
+	if p.readerPublicURL != "" {
+		parsed, err := parseDevelopmentRootURL(p.readerPublicURL, false)
+		if err != nil {
+			return certificateArtifacts{}, fmt.Errorf("development reader public URL: %w", err)
+		}
+		readerHost = parsed.Hostname()
+	}
 	readerOrigin := "https://" + readerHost + "/"
 	if p.readerOrigin != "" {
-		parsed, err := url.Parse(p.readerOrigin)
-		if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil || (parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" {
-			return certificateArtifacts{}, fmt.Errorf("development reader origin must be an HTTPS origin without credentials, path, query or fragment")
+		parsed, err := parseDevelopmentRootURL(p.readerOrigin, true)
+		if err != nil {
+			return certificateArtifacts{}, fmt.Errorf("development reader origin: %w", err)
 		}
 		parsed.Path = "/"
 		readerOrigin = parsed.String()
-		readerHost = parsed.Hostname()
 	}
 	issuerSubject := pkix.Name{CommonName: issuerHost, Organization: []string{registration.Name}, SerialNumber: registration.SourceOIN}
 	readerSubject := pkix.Name{CommonName: readerHost, Organization: []string{registration.Name}, SerialNumber: registration.SourceOIN}
@@ -113,13 +121,14 @@ func (p *developmentCAProvider) Provision(registration sourceRegistration) (cert
 	if err != nil {
 		return certificateArtifacts{}, err
 	}
-	if err := validateProvisionedCertificate(issuer.cert, issuerCA.cert, registration, issuerEKUOID); err != nil {
+	now := p.now()
+	if err := validateProvisionedCertificate(issuer.cert, issuerCA.cert, registration, issuerEKUOID, now); err != nil {
 		return certificateArtifacts{}, fmt.Errorf("validate issuer certificate: %w", err)
 	}
-	if err := validateProvisionedCertificate(reader.cert, readerCA.cert, registration, readerEKUOID); err != nil {
+	if err := validateProvisionedCertificate(reader.cert, readerCA.cert, registration, readerEKUOID, now); err != nil {
 		return certificateArtifacts{}, fmt.Errorf("validate reader certificate: %w", err)
 	}
-	if err := validateProvisionedCertificate(status.cert, issuerCA.cert, registration, statusEKUOID); err != nil {
+	if err := validateProvisionedCertificate(status.cert, issuerCA.cert, registration, statusEKUOID, now); err != nil {
 		return certificateArtifacts{}, fmt.Errorf("validate status certificate: %w", err)
 	}
 	if issuer.cert.Subject.String() != status.cert.Subject.String() {
@@ -210,40 +219,53 @@ func (p *developmentCAProvider) ensureLeaf(directory, role string, subject pkix.
 	if keyExists != certExists {
 		return nil, fmt.Errorf("development %s certificate is partially provisioned", role)
 	}
+	var key *ecdsa.PrivateKey
 	if keyExists {
-		key, cert, err := loadDevelopmentLeaf(keyPath, certPath)
+		loadedKey, cert, err := loadDevelopmentLeaf(keyPath, certPath)
 		if err != nil {
 			return nil, fmt.Errorf("load development %s certificate: %w", role, err)
 		}
-		if !publicKeysEqual(&key.PublicKey, cert.PublicKey) {
+		if !publicKeysEqual(&loadedKey.PublicKey, cert.PublicKey) {
 			return nil, fmt.Errorf("development %s key does not match its certificate", role)
 		}
-		return &developmentLeaf{keyPath: keyPath, certPath: certPath, cert: cert}, nil
-	}
-	key, err := ecdsa.GenerateKey(elliptic.P256(), p.random)
-	if err != nil {
-		return nil, fmt.Errorf("generate development %s key: %w", role, err)
+		if err := validateExpectedDevelopmentLeaf(cert, ca.cert, subject, host, eku, authOID, authPayload, p.now()); err == nil {
+			return &developmentLeaf{keyPath: keyPath, certPath: certPath, cert: cert}, nil
+		}
+		// Reuse the bound private key while replacing stale certificate content.
+		// This keeps key references stable and makes configuration changes explicit
+		// in the newly issued certificate.
+		key = loadedKey
+	} else {
+		var err error
+		key, err = ecdsa.GenerateKey(elliptic.P256(), p.random)
+		if err != nil {
+			return nil, fmt.Errorf("generate development %s key: %w", role, err)
+		}
 	}
 	serial, err := randomSerial(p.random)
 	if err != nil {
 		return nil, err
 	}
 	now := p.now().UTC()
+	ekuValue, err := asn1.Marshal([]asn1.ObjectIdentifier{eku})
+	if err != nil {
+		return nil, fmt.Errorf("encode development %s EKU: %w", role, err)
+	}
 	template := &x509.Certificate{
-		SerialNumber:       serial,
-		Subject:            subject,
-		DNSNames:           []string{host},
-		NotBefore:          now.Add(-5 * time.Minute),
-		NotAfter:           now.AddDate(1, 0, 0),
-		KeyUsage:           x509.KeyUsageDigitalSignature,
-		UnknownExtKeyUsage: []asn1.ObjectIdentifier{eku},
+		SerialNumber:    serial,
+		Subject:         subject,
+		DNSNames:        []string{host},
+		NotBefore:       now.Add(-5 * time.Minute),
+		NotAfter:        now.AddDate(1, 0, 0),
+		KeyUsage:        x509.KeyUsageDigitalSignature,
+		ExtraExtensions: []pkix.Extension{{Id: extendedKeyUsageOID, Critical: true, Value: ekuValue}},
 	}
 	if len(authOID) > 0 {
 		encoded, err := asn1.Marshal(string(authPayload))
 		if err != nil {
 			return nil, fmt.Errorf("encode development %s authorization metadata: %w", role, err)
 		}
-		template.ExtraExtensions = []pkix.Extension{{Id: authOID, Value: encoded}}
+		template.ExtraExtensions = append(template.ExtraExtensions, pkix.Extension{Id: authOID, Value: encoded})
 	}
 	certDER, err := x509.CreateCertificate(p.random, template, ca.cert, &key.PublicKey, ca.key)
 	if err != nil {
@@ -253,8 +275,10 @@ func (p *developmentCAProvider) ensureLeaf(directory, role string, subject pkix.
 	if err != nil {
 		return nil, fmt.Errorf("marshal development %s key: %w", role, err)
 	}
-	if err := writeFileAtomically(directory, filepath.Base(keyPath), []byte(base64.StdEncoding.EncodeToString(keyDER)), 0o600); err != nil {
-		return nil, err
+	if !keyExists {
+		if err := writeFileAtomically(directory, filepath.Base(keyPath), []byte(base64.StdEncoding.EncodeToString(keyDER)), 0o600); err != nil {
+			return nil, err
+		}
 	}
 	if err := writeFileAtomically(directory, filepath.Base(certPath), []byte(base64.StdEncoding.EncodeToString(certDER)), 0o644); err != nil {
 		return nil, err
@@ -289,7 +313,7 @@ func developmentCertificateAuthPayloads(registration sourceRegistration, readerO
 	return issuer, reader, nil
 }
 
-func validateProvisionedCertificate(cert, ca *x509.Certificate, registration sourceRegistration, eku asn1.ObjectIdentifier) error {
+func validateProvisionedCertificate(cert, ca *x509.Certificate, registration sourceRegistration, eku asn1.ObjectIdentifier, now time.Time) error {
 	if cert.Subject.SerialNumber != registration.SourceOIN {
 		return fmt.Errorf("certificate is not bound to source OIN %q", registration.SourceOIN)
 	}
@@ -301,10 +325,62 @@ func validateProvisionedCertificate(cert, ca *x509.Certificate, registration sou
 	}
 	pool := x509.NewCertPool()
 	pool.AddCert(ca)
-	if _, err := cert.Verify(x509.VerifyOptions{Roots: pool, CurrentTime: time.Now(), KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny}}); err != nil {
+	if _, err := cert.Verify(x509.VerifyOptions{Roots: pool, CurrentTime: now, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny}}); err != nil {
 		return fmt.Errorf("certificate chain is not trusted: %w", err)
 	}
 	return nil
+}
+
+func parseDevelopmentRootURL(value string, requireHTTPS bool) (*url.URL, error) {
+	parsed, err := url.Parse(value)
+	validScheme := parsed != nil && (parsed.Scheme == "https" || (!requireHTTPS && parsed.Scheme == "http"))
+	if err != nil || !validScheme || parsed.Hostname() == "" || parsed.User != nil || (parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" {
+		scheme := "HTTP(S)"
+		if requireHTTPS {
+			scheme = "HTTPS"
+		}
+		return nil, fmt.Errorf("must be a root %s URL without credentials, query or fragment", scheme)
+	}
+	return parsed, nil
+}
+
+func validateExpectedDevelopmentLeaf(cert, ca *x509.Certificate, subject pkix.Name, host string, eku, authOID asn1.ObjectIdentifier, authPayload []byte, now time.Time) error {
+	if cert.Subject.String() != subject.String() {
+		return fmt.Errorf("certificate subject does not match current source registration")
+	}
+	if len(cert.DNSNames) != 1 || cert.DNSNames[0] != host {
+		return fmt.Errorf("certificate DNS SAN does not match %q", host)
+	}
+	ekuExtension, ok := findCertificateExtension(cert, extendedKeyUsageOID)
+	if !ok || !ekuExtension.Critical || !containsOID(cert.UnknownExtKeyUsage, eku) {
+		return fmt.Errorf("certificate does not contain the required critical EKU %s", eku.String())
+	}
+	if len(authOID) > 0 {
+		authExtension, ok := findCertificateExtension(cert, authOID)
+		if !ok || authExtension.Critical {
+			return fmt.Errorf("certificate authorization extension %s is missing or critical", authOID.String())
+		}
+		var encodedPayload string
+		remaining, err := asn1.Unmarshal(authExtension.Value, &encodedPayload)
+		if err != nil || len(remaining) != 0 || !bytes.Equal([]byte(encodedPayload), authPayload) {
+			return fmt.Errorf("certificate authorization extension %s does not match current configuration", authOID.String())
+		}
+	}
+	pool := x509.NewCertPool()
+	pool.AddCert(ca)
+	if _, err := cert.Verify(x509.VerifyOptions{Roots: pool, CurrentTime: now, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny}}); err != nil {
+		return fmt.Errorf("certificate chain is not trusted: %w", err)
+	}
+	return nil
+}
+
+func findCertificateExtension(cert *x509.Certificate, oid asn1.ObjectIdentifier) (pkix.Extension, bool) {
+	for _, extension := range cert.Extensions {
+		if extension.Id.Equal(oid) {
+			return extension, true
+		}
+	}
+	return pkix.Extension{}, false
 }
 
 func loadDevelopmentCA(keyPath, certPath string) (*ecdsa.PrivateKey, *x509.Certificate, error) {

@@ -55,14 +55,26 @@ Het tweede command is idempotent. Een gewijzigde payload onder dezelfde versie,
 een versieterugval, een verkeerde sleutel, een ongeldig certificaat of een
 onbereikbaar FSC-endpoint faalt gesloten.
 
+De bestanden onder `sources/` gebruiken bewust een beperkt, Git-beheerd
+YAML-profiel: precies de vijf gedocumenteerde velden als scalars op het hoogste
+niveau. Geneste waarden, arrays, multilinewaarden, anchors en tags worden niet
+ondersteund. Eén ongeldige registratie blokkeert de validatie van de volledige
+registratieset; dat is bewust fail-closed en het foutbericht noemt het bestand.
+
 ## Issuance-configuratie
 
 Onboarding schrijft een genegeerd
 `.local/secrets/<oin>/issuance.env`. De configuratie kiest hiervoor expliciet
 `storage-backend=filesystem` en `certificate-provider=development-ca`.
-`make eudi-config` leest dit bestand na de
-gewone `.env`, zodat de lokaal geminte issuer-, reader- en statuscertificaten en
-hun lokale trust-anchors in de bestaande issuance-serverconfig terechtkomen.
+`make eudi-config` gebruikt dit bestand alleen na expliciete opt-in:
+
+```sh
+make eudi-config USE_ONBOARDING_EUDI_ENV=true
+```
+
+Het command meldt dan dat de geminte issuer-, reader- en statuscertificaten en
+hun lokale trust-anchors de certificaatwaarden uit `.env` overschrijven. Zonder
+opt-in blijft `.env` leidend.
 URL-configuratie zoals `EUDI_PUBLIC_URL`, `EUDI_READER_ORIGIN_URL` en
 `EUDI_BRI_URL` blijft deploymentconfiguratie in `.env`.
 
@@ -70,6 +82,14 @@ De door onboarding gepubliceerde Type Metadata en gepinde publieke bronkey
 worden vanuit `.local/onboarding/` in de adapter gemount. De tijdelijke
 `SOURCE_METADATA_*` featureflag blijft standaard uit voor rollback; zet
 `SOURCE_METADATA_CACHE_ENABLED=true` om het bronmetadatapad te activeren.
+`SOURCE_METADATA_OIN` en `SOURCE_METADATA_PUBLIC_JWK_PATH` hebben in Compose
+bewust geen demo-defaults: na inschakelen moeten de onboardingswaarden expliciet
+worden ingesteld.
+
+`make demo-eudi` en `make demo-full` maken de bind-mountdirectories vóór
+Compose met de huidige gebruiker aan. Start je Compose rechtstreeks, voer dan
+eerst `make onboarding-directories` uit om root-owned directories op Linux te
+voorkomen.
 
 De generieke CLI is ook het productie-entrypoint. Een PR-job voert alleen
 `validate-source` uit; een goedgekeurde post-mergejob voert `onboard-source` uit

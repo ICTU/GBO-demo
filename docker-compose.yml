@@ -712,8 +712,10 @@ services:
       # the pinned source key and the matching issuance-server VCT.
       - SOURCE_METADATA_CACHE_ENABLED=${SOURCE_METADATA_CACHE_ENABLED:-false}
       - SOURCE_METADATA_OUTWAY_PATH=${SOURCE_METADATA_OUTWAY_PATH:-/gbo-attestation-metadata/.well-known/gbo-attestations}
-      - SOURCE_METADATA_OIN=${SOURCE_METADATA_OIN:-99999999900000000200}
-      - SOURCE_METADATA_PUBLIC_JWK_PATH=${SOURCE_METADATA_PUBLIC_JWK_PATH:-/var/lib/gbo/source-trust/99999999900000000200-FoVXFFQKKgHHB4GhV5yeKVKAmczLInonClnUyBtINdw.jwk}
+      # No demo trust defaults: enabling the cache without an explicitly
+      # onboarded source/key must fail closed.
+      - SOURCE_METADATA_OIN=${SOURCE_METADATA_OIN:-}
+      - SOURCE_METADATA_PUBLIC_JWK_PATH=${SOURCE_METADATA_PUBLIC_JWK_PATH:-}
       - SOURCE_METADATA_TYPE_ID=${SOURCE_METADATA_TYPE_ID:-inkomensverklaring}
       - SOURCE_METADATA_USECASE_KEY=${SOURCE_METADATA_USECASE_KEY:-inkomensverklaring_2025}
       - TYPE_METADATA_PUBLIC_BASE_URL=${EUDI_BRI_URL:-}
