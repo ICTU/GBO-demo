@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
 	"gbo-demo/consent-portal-backend/consent"
@@ -25,7 +26,19 @@ import (
 func corsHeaders(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Demo-Session")
+}
+
+// WithDemoSession copies X-Demo-Session onto the server span, which is how
+// the dev-portal's watch-mode tells one developer's run from another's. No
+// consent rule reads it. Wrap INSIDE otelhttp, or there is no span yet.
+func WithDemoSession(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s := r.Header.Get("X-Demo-Session"); s != "" {
+			trace.SpanFromContext(r.Context()).SetAttributes(attribute.String("gbo.demo.session", s))
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -248,6 +261,7 @@ func handleGiveConsent(p *consent.Portal) http.HandlerFunc {
 					Outcome:           "allow",
 					Response:          resp,
 					Trigger:           in.Trigger,
+					DemoSession:       r.Header.Get("X-Demo-Session"),
 				},
 			})
 			return resp, nil

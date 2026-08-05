@@ -53,6 +53,9 @@ func (h *History) post(ctx context.Context, s consent.FlowSummary) {
 		"outcome":    s.Outcome,
 		"consent_id": s.ConsentID,
 		"response":   s.Response,
+		// Shows this run to the developer who started it. Empty for a citizen
+		// with no dev-portal open, which keeps it visible to everyone.
+		"demo_session": s.DemoSession,
 	}
 	body, err := json.Marshal(entry)
 	if err != nil {

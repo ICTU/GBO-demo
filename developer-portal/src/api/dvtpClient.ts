@@ -1,3 +1,4 @@
+import { demoSessionHeader } from '../util/demoSession'
 import type { UsePayload, UseResponse } from '../types'
 
 const BASE = '/dvtp-api'
@@ -9,6 +10,8 @@ export async function useQuery(payload: UsePayload, traceparent?: string): Promi
     headers: {
       'Content-Type': 'application/json',
       'X-Demo-Source': 'dev-portal',
+      // Tag our own runs too, so a colleague's watch-mode leaves them alone.
+      ...demoSessionHeader(),
       ...tpHeader,
     },
     body: JSON.stringify({

@@ -120,7 +120,14 @@ export default function App() {
   // Trace_id of a watched run whose history-bubble we're still waiting for
   // (that's how the citizen/consumer FE ships the response to us).
   const [pendingWatchedTrace, setPendingWatchedTrace] = useState<string | null>(null)
-  const { error: watchError } = useWatchNext(watching, (traceId, mode) => {
+  // The hub handed this run to several sessions at once, so what the user is
+  // looking at may be someone else's — say so rather than pretend.
+  const [watchShared, setWatchShared] = useState(false)
+  // Only while the wallet-QR is up: that flow starts out-of-band, so the
+  // usecase is all that ties an incoming trace back to this session.
+  const watchUsecase = tab === 'eudi-issuance' ? eudiPayload.usecase : null
+  const { error: watchError } = useWatchNext(watching, watchUsecase, (traceId, mode, shared) => {
+    setWatchShared(shared)
     // EUDI: this IS the trace we've been waiting for since the user opened
     // the QR-page. Release the "wachten op wallet…" button and log locally
     // (no bubble-POST from the adapter — history-entry is portal-side only).
@@ -379,8 +386,9 @@ export default function App() {
           pdpTraceIdOverride={fscOverrides.decisionTraceKey ?? undefined}
           bron={archBron}
           watching={watching}
-          onToggleWatch={() => setWatching((w) => !w)}
+          onToggleWatch={() => { setWatchShared(false); setWatching((w) => !w) }}
           watchError={watchError}
+          watchShared={watchShared}
           jaegerUrl={JAEGER_PUBLIC_URL}
           grafanaUrl={GRAFANA_PUBLIC_URL}
         />

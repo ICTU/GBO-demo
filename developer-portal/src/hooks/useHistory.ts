@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import { listHistory, logHistory } from '../api/devClient'
+import { demoSessionId } from '../util/demoSession'
 import type { HistoryRun } from '../types'
 
+// This session's runs plus every unattributable one. Not only a display: the
+// Use-form prefills its consent_id from the most recent issuance here, so an
+// unfiltered timeline would hand one developer a colleague's consent.
 export function useHistory() {
   const [history, setHistory] = useState<HistoryRun[]>([])
   const [loading, setLoading] = useState(true)
@@ -9,7 +13,7 @@ export function useHistory() {
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
-      setHistory(await listHistory())
+      setHistory(await listHistory(demoSessionId()))
     } catch {
       // silent fail in demo
     } finally {

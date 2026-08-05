@@ -1,3 +1,4 @@
+import { demoSessionHeader } from '../util/demoSession'
 import type { IssuancePayload, IssuanceResponse } from '../types'
 
 const BASE = '/portal-api'
@@ -9,7 +10,9 @@ export async function issuanceFlow(
   const tpHeader: Record<string, string> = traceparent ? { traceparent } : {}
   // X-Demo-Source tells the backend that the dev-portal is the trigger,
   // so it skips its own history-post (the frontend already logs).
-  const sourceHeader = { 'X-Demo-Source': 'dev-portal' }
+  // X-Demo-Session says *which* dev-portal, so a colleague's watch-mode
+  // leaves this run alone.
+  const sourceHeader = { 'X-Demo-Source': 'dev-portal', ...demoSessionHeader() }
 
   const loginRes = await fetch(`${BASE}/portal/login`, {
     method: 'POST',

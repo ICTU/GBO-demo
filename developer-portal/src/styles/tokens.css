@@ -245,6 +245,12 @@ a:hover { text-decoration: underline; }
   font-weight: 700;
   margin: 0 6px;
 }
+.watch-shared {
+  color: var(--warn, #fbbf24);
+  font-size: 11px;
+  margin: 0 6px;
+  cursor: help;
+}
 .arch .panel-b, .arch.panel { overflow: visible; }
 .chain { display: flex; align-items: flex-start; gap: 0; padding: 28px 22px; }
 .node { position: relative; flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; }

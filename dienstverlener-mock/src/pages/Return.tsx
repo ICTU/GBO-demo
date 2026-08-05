@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
+import { demoSessionHeader } from '../lib/demoSession'
 
 type Bedrag = { waarde: number; valuta?: string }
 
@@ -227,7 +228,7 @@ export default function Return() {
 
     fetch('/api/dvtp/query', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...demoSessionHeader() },
       body: JSON.stringify({ consent_id: consentId }),
       signal: controller.signal,
     })

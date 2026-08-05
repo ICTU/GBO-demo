@@ -1,3 +1,5 @@
+import { demoSessionHeader } from './demoSession'
+
 const BASE = '/portal-api'
 
 export type LoginResponse = { token: string }
@@ -36,6 +38,7 @@ export async function createConsent(
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
+      ...demoSessionHeader(),
     },
     body: JSON.stringify(body),
   })
@@ -73,7 +76,7 @@ export async function listConsents(token: string): Promise<ConsentRecord[]> {
 export async function revokeConsent(token: string, consentId: string): Promise<void> {
   const res = await fetch(`${BASE}/portal/consents/${encodeURIComponent(consentId)}`, {
     method: 'DELETE',
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, ...demoSessionHeader() },
   })
   if (!res.ok) {
     const text = await res.text()

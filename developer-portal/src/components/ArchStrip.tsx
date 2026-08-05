@@ -27,6 +27,7 @@ type Props = {
   watching?: boolean
   onToggleWatch?: () => void
   watchError?: string | null
+  watchShared?: boolean
   jaegerUrl?: string
   grafanaUrl?: string
 }
@@ -43,7 +44,7 @@ function apiCallForNode(nodeId: string, calls: ApiCall[] | undefined): ApiCall |
 
 export default function ArchStrip({
   mode, setMode, states, apiCalls, traceId, pdpTraceIdOverride, bron,
-  watching, onToggleWatch, watchError, jaegerUrl, grafanaUrl,
+  watching, onToggleWatch, watchError, watchShared, jaegerUrl, grafanaUrl,
 }: Props) {
   // For flows through FSC-Inway (EUDI + DvTP) the PDP decision lives in
   // the OpenFTV decision log, keyed by Fsc-Transaction-Id (see
@@ -168,6 +169,14 @@ export default function ArchStrip({
             </button>
           )}
           {watchError && <span className="watch-err" title={watchError}>!</span>}
+          {watchShared && !watchError && (
+            <span
+              className="watch-shared"
+              title="Deze run is tegelijk naar een andere watch-sessie gegaan — hij kan door iemand anders gestart zijn."
+            >
+              gedeeld
+            </span>
+          )}
           <button
             className={mode === 'issuance' ? 'on' : ''}
             onClick={(e) => { e.stopPropagation(); setMode('issuance') }}

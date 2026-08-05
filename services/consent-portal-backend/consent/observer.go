@@ -77,6 +77,9 @@ type FlowSummary struct {
 	Outcome           string
 	Response          any
 	Trigger           string // "dev-portal" when the dev-portal drove this flow
+	// Which developer's browser drove this flow, so the dev-portal timeline
+	// can show one person their own runs. Narrative only, like Trigger.
+	DemoSession string
 }
 
 // APICall is the shape the dev-portal renders as upstream-call cards. It

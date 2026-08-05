@@ -76,7 +76,60 @@ type traceHub struct {
 	mu           sync.Mutex
 	traces       map[string]*traceEntry
 	ttl          time.Duration
-	nextWatchers []chan watchEvent // notified once when a NEW trace_id first appears
+	nextWatchers []*watcher // notified once when a NEW trace_id first appears
+}
+
+// watcher is one armed watch-next connection, narrowed to its own developer's
+// flows. session rides a cookie the browser-started flows return as
+// X-Demo-Session; EUDI starts on a phone, so it is narrowed by usecase.
+type watcher struct {
+	session string
+	usecase string
+	ch      chan watchEvent
+}
+
+// traceOrigin is what an entry-point span says about where its flow came
+// from. Both fields are empty for a flow nobody tagged — a raw curl, or a
+// browser that never had the dev-portal open.
+type traceOrigin struct {
+	session string
+	usecase string
+}
+
+func originOf(s traceSpan) traceOrigin {
+	return traceOrigin{
+		session: s.Attributes["gbo.demo.session"],
+		usecase: s.Attributes["gbo.usecase"],
+	}
+}
+
+// matches reports whether this watcher wants a trace from o. A filter only
+// rejects what positively contradicts it, so an untagged flow still wakes
+// everyone: the failure we want is one run too many, never waiting forever.
+func (w *watcher) matches(o traceOrigin) bool {
+	if w.session != "" && o.session != "" && w.session != o.session {
+		return false
+	}
+	if w.usecase != "" && o.usecase != "" && w.usecase != o.usecase {
+		return false
+	}
+	return true
+}
+
+// takeWatchers splits the armed watchers into those that want this trace and
+// those that stay armed. Callers must hold h.mu.
+func (h *traceHub) takeWatchers(o traceOrigin) []*watcher {
+	var notify []*watcher
+	remaining := h.nextWatchers[:0]
+	for _, w := range h.nextWatchers {
+		if w.matches(o) {
+			notify = append(notify, w)
+			continue
+		}
+		remaining = append(remaining, w)
+	}
+	h.nextWatchers = remaining
+	return notify
 }
 
 func newTraceHub(ttl time.Duration) *traceHub {
@@ -117,15 +170,16 @@ func (h *traceHub) ingest(s traceSpan) {
 	e.spans = append(e.spans, s)
 	e.lastSeen = time.Now()
 	subs := append([]chan traceSpan(nil), e.subscribers...)
-	var watchers []chan watchEvent
+	var watchers []*watcher
 	// Only fire watch-next on the FIRST entry-point-service span we see for
 	// a given trace_id. Spans within a trace arrive in arbitrary order via
 	// the collector, so the literal "first span seen" can be a downstream
 	// service (fsc-mock, pep, …) which doesn't tell us issuance vs use.
 	if !e.notified && isEntryPointSpan(s) {
 		e.notified = true
-		watchers = h.nextWatchers
-		h.nextWatchers = nil // one-shot
+		// Only the watchers that wanted this trace are consumed: disarming
+		// all of them, as this used to, ended everyone else's wait too.
+		watchers = h.takeWatchers(originOf(s))
 	}
 	h.mu.Unlock()
 	for _, ch := range subs {
@@ -135,10 +189,11 @@ func (h *traceHub) ingest(s traceSpan) {
 		}
 	}
 	if len(watchers) > 0 {
-		evt := watchEvent{TraceID: s.TraceID, Service: s.Service}
-		for _, ch := range watchers {
+		// Shared: went to several sessions, so nobody can say whose run it is.
+		evt := watchEvent{TraceID: s.TraceID, Service: s.Service, Shared: len(watchers) > 1}
+		for _, w := range watchers {
 			select {
-			case ch <- evt:
+			case w.ch <- evt:
 			default:
 			}
 		}
@@ -148,29 +203,31 @@ func (h *traceHub) ingest(s traceSpan) {
 type watchEvent struct {
 	TraceID string `json:"trace_id"`
 	Service string `json:"service"`
+	Shared  bool   `json:"shared,omitempty"`
 }
 
 // watchNext registers a one-shot watcher that receives the trace_id (+ first
 // span's service, so the frontend can auto-switch to issuance/use tab) of
-// the next NEW trace to appear in the hub. The cleanup fn deregisters the
-// channel if the caller goes away before any trace arrives.
-func (h *traceHub) watchNext() (chan watchEvent, func()) {
-	ch := make(chan watchEvent, 1)
+// the next NEW trace to appear in the hub. session limits it to this
+// dev-portal session's flows, usecase to one EUDI usecase; either may be
+// empty. The cleanup fn deregisters the watcher if the caller goes away.
+func (h *traceHub) watchNext(session, usecase string) (chan watchEvent, func()) {
+	w := &watcher{session: session, usecase: usecase, ch: make(chan watchEvent, 1)}
 	h.mu.Lock()
-	h.nextWatchers = append(h.nextWatchers, ch)
+	h.nextWatchers = append(h.nextWatchers, w)
 	h.mu.Unlock()
 	cleanup := func() {
 		h.mu.Lock()
 		defer h.mu.Unlock()
 		out := h.nextWatchers[:0]
 		for _, c := range h.nextWatchers {
-			if c != ch {
+			if c != w {
 				out = append(out, c)
 			}
 		}
 		h.nextWatchers = out
 	}
-	return ch, cleanup
+	return w.ch, cleanup
 }
 
 // subscribe registers a subscriber and returns the channel + a snapshot of
@@ -425,6 +482,9 @@ func writeSSE(w io.Writer, event string, payload any) {
 // afnemer-mock) without manual trace_id juggling. Self-traffic (dev-portal-
 // backend's own /history /events /watch-next spans) is filtered in ingest()
 // so it never reaches the watcher.
+//
+// ?session=<id> narrows the wait to this dev-portal session's own flows;
+// ?usecase=<key> does the same for EUDI, which carries no session id.
 func handleWatchNext(hub *traceHub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rc := http.NewResponseController(w)
@@ -433,7 +493,8 @@ func handleWatchNext(hub *traceHub) http.HandlerFunc {
 		w.Header().Set("Connection", "keep-alive")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 
-		ch, cleanup := hub.watchNext()
+		q := r.URL.Query()
+		ch, cleanup := hub.watchNext(q.Get("session"), q.Get("usecase"))
 		defer cleanup()
 
 		_, _ = w.Write([]byte(": watching\n\n"))
