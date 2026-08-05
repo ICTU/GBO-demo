@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +12,7 @@ import (
 	"mime"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,15 +32,21 @@ type sourceMetadataCachePolicy struct {
 }
 
 type cachedSourceMetadata struct {
-	shadow           sourceMetadataShadow
-	sourceVersion    string
-	payloadDigest    [sha256.Size]byte
-	etag             string
-	sourceExpires    time.Time
-	freshUntil       time.Time
-	staleUntil       time.Time
-	publication      *typeMetadataPublication
-	definitionDigest [sha256.Size]byte
+	shadow        sourceMetadataShadow
+	etag          string
+	sourceExpires time.Time
+	freshUntil    time.Time
+	staleUntil    time.Time
+}
+
+type sourceMetadataActivationState struct {
+	SourceOIN        string `json:"source_oin"`
+	TypeID           string `json:"type_id"`
+	SourceVersion    string `json:"source_version"`
+	TypeVersion      string `json:"type_version"`
+	PayloadDigest    string `json:"payload_digest"`
+	DefinitionDigest string `json:"definition_digest"`
+	Checksum         string `json:"checksum"`
 }
 
 // sourceMetadataCache owns activation of verified source declarations. A
@@ -54,20 +63,40 @@ type sourceMetadataCache struct {
 	refreshMu    sync.Mutex
 	mu           sync.RWMutex
 	active       *cachedSourceMetadata
+	baseline     *sourceMetadataActivationState
 	publications map[string]*typeMetadataPublication
 }
 
 type unavailableSourceMetadataRuntime struct {
-	usecaseKey string
-	err        error
+	usecaseKey   string
+	err          error
+	publications map[string]*typeMetadataPublication
 }
 
 func (r *unavailableSourceMetadataRuntime) appliesTo(usecaseKey string, uc Usecase) bool {
-	return r != nil && r.usecaseKey == usecaseKey && uc.bron() == bronBD && len(uc.Belastingjaren) == 1
+	return r != nil && uc.acceptsSourceMetadata(usecaseKey, r.usecaseKey)
 }
 
 func (r *unavailableSourceMetadataRuntime) current(_ time.Time) (*sourceMetadataShadow, error) {
 	return nil, r.err
+}
+
+func newUnavailableSourceMetadataRuntime(usecaseKey, storePath string, cause error) *unavailableSourceMetadataRuntime {
+	publications, err := loadTypeMetadataPublications(storePath)
+	if err != nil {
+		cause = fmt.Errorf("%w; restore existing Type Metadata: %v", cause, err)
+		publications = make(map[string]*typeMetadataPublication)
+	}
+	return &unavailableSourceMetadataRuntime{usecaseKey: usecaseKey, err: cause, publications: publications}
+}
+
+func (r *unavailableSourceMetadataRuntime) ServeHTTP(w http.ResponseWriter, request *http.Request) {
+	publication := r.publications[request.URL.Path]
+	if publication == nil {
+		http.NotFound(w, request)
+		return
+	}
+	publication.ServeHTTP(w, request)
 }
 
 func loadConfiguredSourceMetadataCache(client *http.Client, cfg config) (*sourceMetadataCache, error) {
@@ -123,6 +152,10 @@ func newSourceMetadataCache(client *http.Client, registration sourceMetadataConf
 	if err != nil {
 		return nil, err
 	}
+	baseline, err := loadSourceMetadataActivationState(storePath, registration)
+	if err != nil {
+		return nil, err
+	}
 	return &sourceMetadataCache{
 		client:        client,
 		registration:  registration,
@@ -130,6 +163,7 @@ func newSourceMetadataCache(client *http.Client, registration sourceMetadataConf
 		publicBaseURL: publicBaseURL,
 		storePath:     storePath,
 		policy:        policy,
+		baseline:      baseline,
 		publications:  publications,
 	}, nil
 }
@@ -165,6 +199,9 @@ func (c *sourceMetadataCache) Refresh(ctx context.Context, now time.Time) error 
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotModified {
+		if etag == "" {
+			return fmt.Errorf("source returned not modified for an unconditional metadata request")
+		}
 		return c.extendActiveLifetime(now)
 	}
 	if resp.StatusCode != http.StatusOK {
@@ -175,9 +212,6 @@ func (c *sourceMetadataCache) Refresh(ctx context.Context, now time.Time) error 
 		return fmt.Errorf("source metadata content type must be %s", sourceMetadataMediaType)
 	}
 	responseETag := resp.Header.Get("ETag")
-	if responseETag == "" {
-		return fmt.Errorf("source metadata response has no ETag")
-	}
 	compactJWS, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return fmt.Errorf("read source metadata: %w", err)
@@ -190,32 +224,13 @@ func (c *sourceMetadataCache) Refresh(ctx context.Context, now time.Time) error 
 	if err != nil {
 		return err
 	}
-	issuedAt, err := time.Parse(time.RFC3339, document.IssuedAt)
+	expiresAt, err := validateSourceMetadataEnvelope(document, shadow.Definition, now, c.policy)
 	if err != nil {
-		return fmt.Errorf("source metadata issued_at is invalid: %w", err)
-	}
-	expiresAt, err := time.Parse(time.RFC3339, document.ExpiresAt)
-	if err != nil {
-		return fmt.Errorf("source metadata expires_at is invalid: %w", err)
-	}
-	if issuedAt.After(now.Add(5 * time.Minute)) {
-		return fmt.Errorf("source metadata issued_at is in the future")
-	}
-	if !expiresAt.After(issuedAt) {
-		return fmt.Errorf("source metadata expires_at must be after issued_at")
-	}
-	if expiresAt.Sub(now) < c.policy.MinimumValidity {
-		return fmt.Errorf("source metadata validity is shorter than the GBO minimum")
-	}
-	if _, err := compareNumericVersion(document.Version, "0"); err != nil {
-		return fmt.Errorf("source metadata version: %w", err)
-	}
-	if _, err := compareNumericVersion(shadow.Definition.TypeVersion, "0"); err != nil {
-		return fmt.Errorf("Type Metadata version: %w", err)
+		return err
 	}
 	publication, err := newTypeMetadataPublication(c.publicBaseURL, document.SourceOIN, shadow.Definition)
 	if err != nil {
-		return fmt.Errorf("materialise Type Metadata: %w", err)
+		return fmt.Errorf("materialise type metadata: %w", err)
 	}
 	payloadDigest := sha256.Sum256(payload)
 	definitionBytes, err := json.Marshal(shadow.Definition)
@@ -228,43 +243,82 @@ func (c *sourceMetadataCache) Refresh(ctx context.Context, now time.Time) error 
 	shadow.VCT = publication.VCT
 	shadow.VCTIntegrity = publication.Integrity
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.active != nil {
-		if comparison, err := compareNumericVersion(document.Version, c.active.sourceVersion); err != nil {
+	if c.baseline != nil {
+		if comparison, err := compareNumericVersion(document.Version, c.baseline.SourceVersion); err != nil {
 			return fmt.Errorf("compare source metadata version: %w", err)
 		} else if comparison < 0 {
-			return fmt.Errorf("source metadata version rollback from %q to %q", c.active.sourceVersion, document.Version)
-		} else if comparison == 0 && payloadDigest != c.active.payloadDigest {
+			return fmt.Errorf("source metadata version rollback from %q to %q", c.baseline.SourceVersion, document.Version)
+		} else if comparison == 0 && hex.EncodeToString(payloadDigest[:]) != c.baseline.PayloadDigest {
 			return fmt.Errorf("source metadata version %q has changed bytes", document.Version)
 		}
-		if comparison, err := compareNumericVersion(shadow.Definition.TypeVersion, c.active.shadow.Definition.TypeVersion); err != nil {
-			return fmt.Errorf("compare Type Metadata version: %w", err)
+		if comparison, err := compareNumericVersion(shadow.Definition.TypeVersion, c.baseline.TypeVersion); err != nil {
+			return fmt.Errorf("compare type metadata version: %w", err)
 		} else if comparison < 0 {
-			return fmt.Errorf("Type Metadata version rollback from %q to %q", c.active.shadow.Definition.TypeVersion, shadow.Definition.TypeVersion)
-		} else if comparison == 0 && definitionDigest != c.active.definitionDigest {
+			return fmt.Errorf("type metadata version rollback from %q to %q", c.baseline.TypeVersion, shadow.Definition.TypeVersion)
+		} else if comparison == 0 && hex.EncodeToString(definitionDigest[:]) != c.baseline.DefinitionDigest {
 			return fmt.Errorf("attestation type version %q has changed definition", shadow.Definition.TypeVersion)
 		}
-		if existing := c.publications[publication.path]; existing != nil && string(existing.body) != string(publication.body) {
-			return fmt.Errorf("Type Metadata URL %q already has different bytes", publication.path)
-		}
+	}
+	c.mu.RLock()
+	existing := c.publications[publication.path]
+	c.mu.RUnlock()
+	if existing != nil && !bytes.Equal(existing.body, publication.body) {
+		return fmt.Errorf("type metadata URL %q already has different bytes", publication.path)
 	}
 	if err := persistTypeMetadataPublication(c.storePath, publication); err != nil {
 		return err
 	}
+	activation := &sourceMetadataActivationState{
+		SourceOIN:        document.SourceOIN,
+		TypeID:           shadow.Definition.TypeID,
+		SourceVersion:    document.Version,
+		TypeVersion:      shadow.Definition.TypeVersion,
+		PayloadDigest:    hex.EncodeToString(payloadDigest[:]),
+		DefinitionDigest: hex.EncodeToString(definitionDigest[:]),
+	}
+	activation.Checksum = sourceMetadataActivationChecksum(*activation)
+	if err := persistSourceMetadataActivationState(c.storePath, c.registration, *activation); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.publications[publication.path] = publication
+	c.baseline = activation
 	c.active = &cachedSourceMetadata{
-		shadow:           *shadow,
-		sourceVersion:    document.Version,
-		payloadDigest:    payloadDigest,
-		etag:             responseETag,
-		sourceExpires:    expiresAt,
-		freshUntil:       freshUntil,
-		staleUntil:       staleUntil,
-		publication:      publication,
-		definitionDigest: definitionDigest,
+		shadow:        *shadow,
+		etag:          responseETag,
+		sourceExpires: expiresAt,
+		freshUntil:    freshUntil,
+		staleUntil:    staleUntil,
 	}
 	return nil
+}
+
+func validateSourceMetadataEnvelope(document sourceMetadataDocument, definition sourceAttestationDefinition, now time.Time, policy sourceMetadataCachePolicy) (time.Time, error) {
+	issuedAt, err := time.Parse(time.RFC3339, document.IssuedAt)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("source metadata issued_at is invalid: %w", err)
+	}
+	expiresAt, err := time.Parse(time.RFC3339, document.ExpiresAt)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("source metadata expires_at is invalid: %w", err)
+	}
+	if issuedAt.After(now.Add(5 * time.Minute)) {
+		return time.Time{}, fmt.Errorf("source metadata issued_at is in the future")
+	}
+	if !expiresAt.After(issuedAt) {
+		return time.Time{}, fmt.Errorf("source metadata expires_at must be after issued_at")
+	}
+	if expiresAt.Sub(now) < policy.MinimumValidity {
+		return time.Time{}, fmt.Errorf("source metadata validity is shorter than the GBO minimum")
+	}
+	if _, err := compareNumericVersion(document.Version, "0"); err != nil {
+		return time.Time{}, fmt.Errorf("source metadata version: %w", err)
+	}
+	if _, err := compareNumericVersion(definition.TypeVersion, "0"); err != nil {
+		return time.Time{}, fmt.Errorf("type metadata version: %w", err)
+	}
+	return expiresAt, nil
 }
 
 func (c *sourceMetadataCache) extendActiveLifetime(now time.Time) error {
@@ -295,11 +349,15 @@ func (c *sourceMetadataCache) Current(now time.Time) (*sourceMetadataShadow, err
 		return nil, fmt.Errorf("source metadata cache expired outside stale grace")
 	}
 	shadow := c.active.shadow
+	shadow.CacheState = "fresh"
+	if now.After(c.active.freshUntil) {
+		shadow.CacheState = "stale"
+	}
 	return &shadow, nil
 }
 
 func (c *sourceMetadataCache) appliesTo(usecaseKey string, uc Usecase) bool {
-	return c != nil && c.usecaseKey == usecaseKey && uc.bron() == bronBD && len(uc.Belastingjaren) == 1
+	return c != nil && uc.acceptsSourceMetadata(usecaseKey, c.usecaseKey)
 }
 
 func (c *sourceMetadataCache) current(now time.Time) (*sourceMetadataShadow, error) {
@@ -366,4 +424,81 @@ func minTime(left, right time.Time) time.Time {
 		return left
 	}
 	return right
+}
+
+func sourceMetadataActivationFilename(registration sourceMetadataConfig) string {
+	digest := sha256.Sum256([]byte(registration.ExpectedOIN + "\x00" + registration.TypeID))
+	return "activation-" + hex.EncodeToString(digest[:]) + ".state"
+}
+
+func sourceMetadataActivationChecksum(state sourceMetadataActivationState) string {
+	canonical := strings.Join([]string{
+		state.SourceOIN,
+		state.TypeID,
+		state.SourceVersion,
+		state.TypeVersion,
+		state.PayloadDigest,
+		state.DefinitionDigest,
+	}, "\x00")
+	digest := sha256.Sum256([]byte(canonical))
+	return hex.EncodeToString(digest[:])
+}
+
+func loadSourceMetadataActivationState(directory string, registration sourceMetadataConfig) (*sourceMetadataActivationState, error) {
+	path := filepath.Join(directory, sourceMetadataActivationFilename(registration))
+	body, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read source metadata activation state: %w", err)
+	}
+	var state sourceMetadataActivationState
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&state); err != nil {
+		return nil, fmt.Errorf("parse source metadata activation state: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return nil, fmt.Errorf("parse source metadata activation state: trailing JSON data")
+	}
+	if state.SourceOIN != registration.ExpectedOIN || state.TypeID != registration.TypeID {
+		return nil, fmt.Errorf("source metadata activation state does not match the configured source and type")
+	}
+	if state.Checksum != sourceMetadataActivationChecksum(state) {
+		return nil, fmt.Errorf("source metadata activation state failed its integrity check")
+	}
+	for name, encoded := range map[string]string{
+		"payload_digest":    state.PayloadDigest,
+		"definition_digest": state.DefinitionDigest,
+	} {
+		decoded, err := hex.DecodeString(encoded)
+		if err != nil || len(decoded) != sha256.Size {
+			return nil, fmt.Errorf("source metadata activation state has invalid %s", name)
+		}
+	}
+	if _, err := compareNumericVersion(state.SourceVersion, "0"); err != nil {
+		return nil, fmt.Errorf("source metadata activation state source version: %w", err)
+	}
+	if _, err := compareNumericVersion(state.TypeVersion, "0"); err != nil {
+		return nil, fmt.Errorf("source metadata activation state type version: %w", err)
+	}
+	return &state, nil
+}
+
+func persistSourceMetadataActivationState(directory string, registration sourceMetadataConfig, state sourceMetadataActivationState) error {
+	body, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("marshal source metadata activation state: %w", err)
+	}
+	filename := sourceMetadataActivationFilename(registration)
+	if existing, err := os.ReadFile(filepath.Join(directory, filename)); err == nil && bytes.Equal(existing, body) {
+		return nil
+	} else if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("read source metadata activation state: %w", err)
+	}
+	if err := writeFileAtomically(directory, filename, body, 0o600); err != nil {
+		return fmt.Errorf("persist source metadata activation state: %w", err)
+	}
+	return nil
 }

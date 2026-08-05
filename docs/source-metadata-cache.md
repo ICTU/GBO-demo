@@ -23,25 +23,42 @@ bronnen.
 
 ## Gedrag
 
-- GBO haalt alleen via het geregistreerde FSC-pad op en stuurt na de eerste
-  succesvolle fetch `If-None-Match` met de ETag van de bron.
+- GBO haalt alleen via het geregistreerde FSC-pad op. Als de bron een ETag
+  aanbiedt, stuurt GBO die bij de volgende refresh als `If-None-Match`; zonder
+  ETag blijft de fetch onvoorwaardelijk en bewaakt GBO versies en payloaddigests.
 - Iedere `200` wordt opnieuw op JWS, gepinde sleutel, bron-OIN, tijden, query,
   mapping en monotone bron- en typeversie gevalideerd; een `304` verlengt alleen
   de bestaande cachetermijn.
 - GBO vereist bij acceptatie minimaal één uur resterende brongeldigheid,
   refresht iedere vijf minuten, vertrouwt een succesvolle refresh maximaal
   vijftien minuten als fresh en staat daarna maximaal één uur stale-grace toe.
+  De issuance-response maakt dit zichtbaar als
+  `X-GBO-Metadata-Cache: fresh|stale`.
 - Voor iedere typeversie maakt GBO de VCT
   `/types/{bron-oin}/{type-id}/v{type-version}`, voegt deze aan Type Metadata
   toe en berekent `vct#integrity` over precies de bytes die via die URL worden
   geserveerd.
 - De immutable bytes worden vóór activatie duurzaam opgeslagen. Een bestaande
-  versie-URL kan nooit andere bytes krijgen; corrupte opslag blokkeert het laden.
+  versie-URL kan nooit andere bytes krijgen. De laatst geactiveerde bron- en
+  typeversie plus digests worden eveneens duurzaam opgeslagen, zodat een
+  restart geen rollback mogelijk maakt; corrupte opslag blokkeert het laden.
 - Buiten stale-grace antwoordt de geconfigureerde issuance-usecase met `503`.
   Reeds gepubliceerde Type Metadata-versies blijven wel beschikbaar voor
-  bestaande credentials.
+  bestaande credentials, ook wanneer de bronregistratie na een restart
+  tijdelijk ongeldig is.
+- `type_metadata.schema` is verplichte broninput en moet een JSON-object zijn;
+  GBO voegt daarin zelf de regels voor `vct` en `vct#integrity` toe.
+- Gepubliceerde typeversies worden bewust niet automatisch verwijderd. De
+  beheerder moet de duurzame volumeomvang bewaken en pas een retentiebeleid
+  toepassen wanneer geen geldig credential meer naar een versie kan verwijzen.
 
 Cachemode laat het IssuableDocument `attestation_type` overeenkomen met de VCT
 en voegt `vct#integrity` als te ondertekenen claim toe. De issuance-server moet
 voor exact die VCT en typeversie zijn geprovisioned voordat de featureflag wordt
 ingeschakeld; die lokale provisioning hoort bij fase 4.
+
+Cachemode gebruikt in deze fase nog het legacy formatterresultaat en labelt dat
+met de nieuwe VCT. Daarom blijft de flag uit totdat fase 4 expliciet kiest voor
+de bronprojectie als credentialinhoud, of de legacy-only claims en datatypes met
+de Type Metadata in overeenstemming brengt. Zonder die keuze mag de VCT niet in
+de issuance-server worden geprovisioned.

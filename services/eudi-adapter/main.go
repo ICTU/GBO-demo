@@ -435,6 +435,9 @@ func handleAttestation(cfg config, client *http.Client, usecaseKey string, uc Us
 				http.Error(w, "source metadata unavailable", http.StatusServiceUnavailable)
 				return
 			}
+			if shadow.CacheState != "" {
+				w.Header().Set("X-GBO-Metadata-Cache", shadow.CacheState)
+			}
 		}
 		var queryPlans []sourceQueryPlan
 		if shadow != nil {
@@ -1066,10 +1069,11 @@ func newRuntimeMux(ctx context.Context, cfg config, catalog *Catalog, client *ht
 		cache, err := loadConfiguredSourceMetadataCache(client, cfg)
 		if err != nil {
 			slog.Error("source metadata cache configuration invalid", "err", err.Error())
-			return newMux(cfg, catalog, client, &unavailableSourceMetadataRuntime{
-				usecaseKey: cfg.SourceMetadataUsecaseKey,
-				err:        err,
-			})
+			return newMux(cfg, catalog, client, newUnavailableSourceMetadataRuntime(
+				cfg.SourceMetadataUsecaseKey,
+				cfg.TypeMetadataStorePath,
+				err,
+			))
 		}
 		if err := cache.Refresh(ctx, time.Now()); err != nil {
 			slog.Error("initial source metadata cache refresh failed; metadata usecase remains fail-closed", "err", err.Error())

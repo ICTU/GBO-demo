@@ -94,6 +94,7 @@ type sourceMetadataShadow struct {
 	Definition   sourceAttestationDefinition
 	VCT          string
 	VCTIntegrity string
+	CacheState   string
 }
 
 type sourceMetadataRuntime interface {
@@ -370,7 +371,11 @@ func isISO4217Alpha3(unit string) bool {
 }
 
 func (s *sourceMetadataShadow) appliesTo(usecaseKey string, uc Usecase) bool {
-	return s != nil && s.UsecaseKey == usecaseKey && uc.bron() == bronBD && len(uc.Belastingjaren) == 1
+	return s != nil && uc.acceptsSourceMetadata(usecaseKey, s.UsecaseKey)
+}
+
+func (uc Usecase) acceptsSourceMetadata(usecaseKey, configuredUsecaseKey string) bool {
+	return configuredUsecaseKey == usecaseKey && uc.bron() == bronBD && len(uc.Belastingjaren) == 1
 }
 
 func (s *sourceMetadataShadow) current(_ time.Time) (*sourceMetadataShadow, error) {

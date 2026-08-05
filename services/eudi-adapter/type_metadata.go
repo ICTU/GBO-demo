@@ -68,7 +68,7 @@ func newTypeMetadataPublication(publicBaseURL, sourceOIN string, definition sour
 func validateTypeMetadataBaseURL(publicBaseURL string) error {
 	base, err := url.Parse(strings.TrimRight(publicBaseURL, "/"))
 	if err != nil || (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" || (base.Path != "" && base.Path != "/") || base.RawQuery != "" || base.Fragment != "" {
-		return fmt.Errorf("Type Metadata public base URL must be a root HTTP(S) URL without query or fragment")
+		return fmt.Errorf("type metadata public base URL must be a root HTTP(S) URL without query or fragment")
 	}
 	return nil
 }
@@ -159,7 +159,7 @@ func loadTypeMetadataPublications(directory string) (map[string]*typeMetadataPub
 			return nil, fmt.Errorf("stored Type Metadata %q failed its filename integrity check", entry.Name())
 		}
 		if existing := publications[publication.path]; existing != nil && !bytes.Equal(existing.body, publication.body) {
-			return nil, fmt.Errorf("Type Metadata store contains conflicting bytes for %q", publication.path)
+			return nil, fmt.Errorf("type metadata store contains conflicting bytes for %q", publication.path)
 		}
 		publications[publication.path] = publication
 	}
@@ -176,40 +176,47 @@ func persistTypeMetadataPublication(directory string, publication *typeMetadataP
 	}
 	for _, entry := range entries {
 		if strings.HasPrefix(entry.Name(), prefix) && entry.Name() != filepath.Base(path) {
-			return fmt.Errorf("Type Metadata URL %q already has different stored bytes", publication.path)
+			return fmt.Errorf("type metadata URL %q already has different stored bytes", publication.path)
 		}
 	}
 	if existing, err := os.ReadFile(path); err == nil {
 		if !bytes.Equal(existing, publication.body) {
-			return fmt.Errorf("Type Metadata URL %q already has different stored bytes", publication.path)
+			return fmt.Errorf("type metadata URL %q already has different stored bytes", publication.path)
 		}
 		return nil
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("read immutable Type Metadata: %w", err)
 	}
-	temporary, err := os.CreateTemp(directory, ".type-metadata-*.tmp")
+	if err := writeFileAtomically(directory, filepath.Base(path), publication.body, 0o644); err != nil {
+		return fmt.Errorf("persist immutable Type Metadata: %w", err)
+	}
+	return nil
+}
+
+func writeFileAtomically(directory, filename string, body []byte, mode os.FileMode) error {
+	temporary, err := os.CreateTemp(directory, ".atomic-*.tmp")
 	if err != nil {
-		return fmt.Errorf("create temporary Type Metadata: %w", err)
+		return fmt.Errorf("create temporary file: %w", err)
 	}
 	temporaryPath := temporary.Name()
 	defer func() { _ = os.Remove(temporaryPath) }()
-	if err := temporary.Chmod(0o644); err != nil {
+	if err := temporary.Chmod(mode); err != nil {
 		_ = temporary.Close()
-		return fmt.Errorf("set Type Metadata permissions: %w", err)
+		return fmt.Errorf("set file permissions: %w", err)
 	}
-	if _, err := temporary.Write(publication.body); err != nil {
+	if _, err := temporary.Write(body); err != nil {
 		_ = temporary.Close()
-		return fmt.Errorf("write Type Metadata: %w", err)
+		return fmt.Errorf("write file: %w", err)
 	}
 	if err := temporary.Sync(); err != nil {
 		_ = temporary.Close()
-		return fmt.Errorf("sync Type Metadata: %w", err)
+		return fmt.Errorf("sync file: %w", err)
 	}
 	if err := temporary.Close(); err != nil {
-		return fmt.Errorf("close Type Metadata: %w", err)
+		return fmt.Errorf("close file: %w", err)
 	}
-	if err := os.Rename(temporaryPath, path); err != nil {
-		return fmt.Errorf("activate immutable Type Metadata: %w", err)
+	if err := os.Rename(temporaryPath, filepath.Join(directory, filename)); err != nil {
+		return fmt.Errorf("activate file: %w", err)
 	}
 	return nil
 }
