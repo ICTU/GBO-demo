@@ -17,6 +17,8 @@ import (
 	"strings"
 	"testing"
 
+	"gbo-demo/eudi-adapter/internal/gbosimplev1"
+
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -25,6 +27,18 @@ var testBase64URL = base64.RawURLEncoding
 func TestShippedSourceMetadataMatchesEnvelopeSchema(t *testing.T) {
 	compiler := jsonschema.NewCompiler()
 	compiler.AssertFormat()
+	mappingSchemaFile, err := os.Open("../../schemas/gbo-simple-v1.schema.json")
+	if err != nil {
+		t.Fatalf("open mapping profile schema: %v", err)
+	}
+	defer mappingSchemaFile.Close()
+	mappingSchema, err := jsonschema.UnmarshalJSON(mappingSchemaFile)
+	if err != nil {
+		t.Fatalf("parse mapping profile schema: %v", err)
+	}
+	if err := compiler.AddResource("urn:gov:nl:gbo:schema:gbo-simple-v1:1", mappingSchema); err != nil {
+		t.Fatalf("register mapping profile schema: %v", err)
+	}
 	schema, err := compiler.Compile("../../schemas/gbo-attestations-v1.schema.json")
 	if err != nil {
 		t.Fatalf("compile source metadata schema: %v", err)
@@ -363,12 +377,26 @@ func TestMetadataPilotDoesNotApplyToAnotherBDUsecase(t *testing.T) {
 func phase1IncomeMapping() map[string]mappingRule {
 	return map[string]mappingRule{
 		"belastingjaar":   {Pointer: "/belastingjaar", Datatype: "gYear"},
-		"verzamelinkomen": {Pointer: "/verzamelinkomen/waarde", Datatype: "integer"},
+		"verzamelinkomen": incomeMoneyRule("verzamelinkomen"),
 		"aangifte_status": {Pointer: "/status", Datatype: "string"},
 		"indieningsdatum": {Pointer: "/indieningsdatum", Datatype: "date"},
-		"inkomen_box1":    {Pointer: "/box1Inkomen/waarde", Datatype: "integer"},
-		"inkomen_box2":    {Pointer: "/box2Inkomen/waarde", Datatype: "integer"},
-		"inkomen_box3":    {Pointer: "/box3Inkomen/waarde", Datatype: "integer"},
+		"inkomen_box1":    incomeMoneyRule("box1Inkomen"),
+		"inkomen_box2":    incomeMoneyRule("box2Inkomen"),
+		"inkomen_box3":    incomeMoneyRule("box3Inkomen"),
+	}
+}
+
+func incomeMoneyRule(field string) mappingRule {
+	return mappingRule{
+		Pointer:  "/" + field + "/waarde",
+		Datatype: "integer",
+		Transform: &gbosimplev1.Transform{
+			Operator:        "money_scale",
+			CurrencyPointer: "/" + field + "/valuta",
+			Currency:        "EUR",
+			SourceScale:     2,
+			TargetScale:     0,
+		},
 	}
 }
 
@@ -542,6 +570,9 @@ func TestSourceMetadataRejectedDuringOnboarding(t *testing.T) {
 				"mapping": map[string]any{
 					"belastingjaar": map[string]any{"pointer": "/belastingjaar", "datatype": "gYear"},
 				},
+				"attribute_schema": map[string]any{
+					"belastingjaar": map[string]any{"type": "integer", "format": "gYear"},
+				},
 			}},
 		})
 		if err != nil {
@@ -592,6 +623,30 @@ func TestSourceMetadataRejectedDuringOnboarding(t *testing.T) {
 			pinnedKey:   publicJWK(t, publicKey),
 			expectedOIN: "00000001003214345000",
 			wantError:   "invalid GraphQL document",
+		},
+		{
+			name: "mapping property outside closed profile",
+			payload: bytes.Replace(
+				metadataPayload(t, "00000001003214345000", validQuery),
+				[]byte(`"datatype":"gYear"`),
+				[]byte(`"datatype":"gYear","filter":"first"`),
+				1,
+			),
+			pinnedKey:   publicJWK(t, publicKey),
+			expectedOIN: "00000001003214345000",
+			wantError:   "GBO_SIMPLE_MAPPING_INVALID",
+		},
+		{
+			name: "unknown mapping conversion",
+			payload: bytes.Replace(
+				metadataPayload(t, "00000001003214345000", validQuery),
+				[]byte(`"datatype":"gYear"`),
+				[]byte(`"datatype":"integer","transform":{"operator":"round","currency_pointer":"/currency","currency":"EUR","source_scale":2,"target_scale":0}`),
+				1,
+			),
+			pinnedKey:   publicJWK(t, publicKey),
+			expectedOIN: "00000001003214345000",
+			wantError:   "GBO_SIMPLE_CONVERSION_UNSUPPORTED",
 		},
 		{
 			name:        "unsupported envelope schema version",

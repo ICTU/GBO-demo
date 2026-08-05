@@ -28,7 +28,14 @@
         },
         "verzamelinkomen": {
           "pointer": "/verzamelinkomen/waarde",
-          "datatype": "integer"
+          "datatype": "integer",
+          "transform": {
+            "operator": "money_scale",
+            "currency_pointer": "/verzamelinkomen/valuta",
+            "currency": "EUR",
+            "source_scale": 2,
+            "target_scale": 0
+          }
         },
         "aangifte_status": {
           "pointer": "/status",
@@ -40,15 +47,36 @@
         },
         "inkomen_box1": {
           "pointer": "/box1Inkomen/waarde",
-          "datatype": "integer"
+          "datatype": "integer",
+          "transform": {
+            "operator": "money_scale",
+            "currency_pointer": "/box1Inkomen/valuta",
+            "currency": "EUR",
+            "source_scale": 2,
+            "target_scale": 0
+          }
         },
         "inkomen_box2": {
           "pointer": "/box2Inkomen/waarde",
-          "datatype": "integer"
+          "datatype": "integer",
+          "transform": {
+            "operator": "money_scale",
+            "currency_pointer": "/box2Inkomen/valuta",
+            "currency": "EUR",
+            "source_scale": 2,
+            "target_scale": 0
+          }
         },
         "inkomen_box3": {
           "pointer": "/box3Inkomen/waarde",
-          "datatype": "integer"
+          "datatype": "integer",
+          "transform": {
+            "operator": "money_scale",
+            "currency_pointer": "/box3Inkomen/valuta",
+            "currency": "EUR",
+            "source_scale": 2,
+            "target_scale": 0
+          }
         }
       },
       "attribute_schema": {

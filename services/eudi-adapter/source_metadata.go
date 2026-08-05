@@ -11,9 +11,9 @@ import (
 	"mime"
 	"net/http"
 	"os"
-	"reflect"
-	"strconv"
 	"strings"
+
+	"gbo-demo/eudi-adapter/internal/gbosimplev1"
 
 	"github.com/graphql-go/graphql/language/ast"
 	"github.com/graphql-go/graphql/language/parser"
@@ -44,11 +44,12 @@ type sourceMetadataDocument struct {
 }
 
 type sourceAttestationDefinition struct {
-	TypeID         string                 `json:"type_id"`
-	TypeVersion    string                 `json:"type_version"`
-	GraphQL        sourceGraphQL          `json:"graphql"`
-	MappingProfile string                 `json:"mapping_profile"`
-	Mapping        map[string]mappingRule `json:"mapping"`
+	TypeID          string                           `json:"type_id"`
+	TypeVersion     string                           `json:"type_version"`
+	GraphQL         sourceGraphQL                    `json:"graphql"`
+	MappingProfile  string                           `json:"mapping_profile"`
+	Mapping         gbosimplev1.Mapping              `json:"mapping"`
+	AttributeSchema map[string]sourceAttributeSchema `json:"attribute_schema"`
 }
 
 type sourceGraphQL struct {
@@ -64,10 +65,14 @@ type sourceParameter struct {
 	Required bool   `json:"required"`
 }
 
-type mappingRule struct {
-	Pointer  string `json:"pointer"`
-	Datatype string `json:"datatype"`
+type sourceAttributeSchema struct {
+	Type   string `json:"type"`
+	Format string `json:"format,omitempty"`
+	Unit   string `json:"unit,omitempty"`
+	Scale  *int   `json:"scale,omitempty"`
 }
+
+type mappingRule = gbosimplev1.Rule
 
 type sourceMetadataShadow struct {
 	Version    string
@@ -265,6 +270,12 @@ func validateSourceAttestation(definition sourceAttestationDefinition) error {
 	if len(definition.Mapping) == 0 {
 		return fmt.Errorf("mapping must contain at least one claim")
 	}
+	if err := gbosimplev1.Validate(definition.Mapping); err != nil {
+		return err
+	}
+	if err := validateAttributeSchema(definition); err != nil {
+		return err
+	}
 	document, err := parser.Parse(parser.ParseParams{Source: source.NewSource(&source.Source{Body: []byte(definition.GraphQL.Document), Name: "source-metadata.graphql"})})
 	if err != nil {
 		return fmt.Errorf("invalid GraphQL document: %w", err)
@@ -281,9 +292,36 @@ func validateSourceAttestation(definition sourceAttestationDefinition) error {
 	if operationCount != 1 {
 		return fmt.Errorf("GraphQL document must contain exactly one query operation")
 	}
+	return nil
+}
+
+func validateAttributeSchema(definition sourceAttestationDefinition) error {
+	if len(definition.AttributeSchema) != len(definition.Mapping) {
+		return fmt.Errorf("attribute_schema must define exactly the mapped claims")
+	}
 	for claim, rule := range definition.Mapping {
-		if claim == "" || rule.Pointer == "" || !strings.HasPrefix(rule.Pointer, "/") {
-			return fmt.Errorf("mapping %q must contain an absolute JSON pointer", claim)
+		attribute, ok := definition.AttributeSchema[claim]
+		if !ok {
+			return fmt.Errorf("attribute_schema is missing mapped claim %q", claim)
+		}
+		wantType, wantFormat := rule.Datatype, ""
+		switch rule.Datatype {
+		case "date":
+			wantType, wantFormat = "string", "date"
+		case "gYear":
+			wantType, wantFormat = "integer", "gYear"
+		}
+		if attribute.Type != wantType || attribute.Format != wantFormat {
+			return fmt.Errorf("attribute_schema claim %q must have type %q and format %q", claim, wantType, wantFormat)
+		}
+		if rule.Transform == nil {
+			if attribute.Unit != "" || attribute.Scale != nil {
+				return fmt.Errorf("attribute_schema claim %q has money semantics without a money_scale transform", claim)
+			}
+			continue
+		}
+		if attribute.Unit != rule.Transform.Currency || attribute.Scale == nil || *attribute.Scale != rule.Transform.TargetScale {
+			return fmt.Errorf("attribute_schema claim %q must match money_scale currency and target scale", claim)
 		}
 	}
 	return nil
@@ -338,85 +376,21 @@ func (s *sourceMetadataShadow) compareLegacy(rawGraphQL []byte, docs []attestati
 			return false, nil
 		}
 	}
-	var root any
-	if err := json.Unmarshal(rawGraphQL, &root); err != nil {
+	root, err := gbosimplev1.DecodeJSON(rawGraphQL)
+	if err != nil {
 		return false, fmt.Errorf("decode GraphQL response for shadow projection: %w", err)
 	}
-	selected, ok := jsonPointer(root, s.Definition.GraphQL.ResultPointer)
-	if !ok {
-		return false, fmt.Errorf("result_pointer %q does not exist", s.Definition.GraphQL.ResultPointer)
+	projection, err := gbosimplev1.Project(root, s.Definition.GraphQL.ResultPointer, s.Definition.GraphQL.Cardinality, s.Definition.Mapping)
+	if err != nil {
+		return false, fmt.Errorf("project source response: %w", err)
 	}
-	rows, ok := selected.([]any)
-	if !ok || len(rows) != 1 {
-		return false, fmt.Errorf("cardinality exactly_one expected one result")
+	if projection.Outcome != gbosimplev1.OutcomeCredential {
+		return false, fmt.Errorf("project source response: %s", projection.Outcome)
 	}
-	for claim, rule := range s.Definition.Mapping {
-		value, ok := jsonPointer(rows[0], rule.Pointer)
-		if !ok {
-			return false, fmt.Errorf("mapping pointer %q for claim %q does not exist", rule.Pointer, claim)
-		}
-		converted, err := convertMappedValue(value, rule.Datatype)
-		if err != nil {
-			return false, fmt.Errorf("map claim %q: %w", claim, err)
-		}
-		if !reflect.DeepEqual(converted, docs[0].Attributes[claim]) {
+	for claim, converted := range projection.Claims {
+		if !gbosimplev1.EqualJSON(converted, docs[0].Attributes[claim]) {
 			return false, nil
 		}
 	}
 	return true, nil
-}
-
-func jsonPointer(root any, pointer string) (any, bool) {
-	if pointer == "" {
-		return root, true
-	}
-	if !strings.HasPrefix(pointer, "/") {
-		return nil, false
-	}
-	current := root
-	for _, rawToken := range strings.Split(pointer[1:], "/") {
-		token := strings.ReplaceAll(strings.ReplaceAll(rawToken, "~1", "/"), "~0", "~")
-		switch value := current.(type) {
-		case map[string]any:
-			var ok bool
-			current, ok = value[token]
-			if !ok {
-				return nil, false
-			}
-		case []any:
-			index, err := strconv.Atoi(token)
-			if err != nil || index < 0 || index >= len(value) {
-				return nil, false
-			}
-			current = value[index]
-		default:
-			return nil, false
-		}
-	}
-	return current, true
-}
-
-func convertMappedValue(value any, datatype string) (any, error) {
-	switch datatype {
-	case "integer":
-		number, ok := value.(float64)
-		if !ok || number != float64(int64(number)) {
-			return nil, fmt.Errorf("value is not an integer")
-		}
-		return int64(number), nil
-	case "gYear":
-		number, ok := value.(float64)
-		if !ok || number != float64(int64(number)) {
-			return nil, fmt.Errorf("value is not a year")
-		}
-		return number, nil
-	case "string", "date":
-		text, ok := value.(string)
-		if !ok {
-			return nil, fmt.Errorf("value is not a string")
-		}
-		return text, nil
-	default:
-		return nil, fmt.Errorf("unsupported datatype %q", datatype)
-	}
 }
