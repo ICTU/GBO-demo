@@ -34,9 +34,13 @@ func TestValidateSourceCommandMakesNoPermanentChanges(t *testing.T) {
 	}, onboardingDependencies{
 		client: client,
 		now:    time.Now,
-		certificateProvider: func(string, string) certificateProvider {
+		resolveCertificateProvider: func(onboardingOptions) (certificateProvider, error) {
 			t.Fatal("validate-source must not instantiate a certificate provider")
-			return nil
+			return nil, nil
+		},
+		resolveActivationBackend: func(onboardingOptions) (activationBackend, error) {
+			t.Fatal("validate-source must not instantiate an activation backend")
+			return nil, nil
 		},
 		stdout: &output,
 		stderr: io.Discard,
@@ -62,7 +66,7 @@ func TestOnboardSourceDryRunCreatesNothing(t *testing.T) {
 	providerCalled := false
 
 	_, err := runOnboardingCommand(context.Background(), []string{
-		"onboard-source", "--source", registrationPath, "--env", "local", "--dry-run",
+		"onboard-source", "--source", registrationPath, "--dry-run",
 		"--outway-url", "https://outway.example",
 		"--schema", "../../schemas/gbo-attestations-v1.schema.json",
 		"--type-metadata-base-url", "https://issuer.example",
@@ -70,9 +74,13 @@ func TestOnboardSourceDryRunCreatesNothing(t *testing.T) {
 	}, onboardingDependencies{
 		client: metadataValidationClient(t, payload, privateKey),
 		now:    time.Now,
-		certificateProvider: func(string, string) certificateProvider {
+		resolveCertificateProvider: func(onboardingOptions) (certificateProvider, error) {
 			providerCalled = true
-			return nil
+			return nil, nil
+		},
+		resolveActivationBackend: func(onboardingOptions) (activationBackend, error) {
+			providerCalled = true
+			return nil, nil
 		},
 		stdout: io.Discard,
 		stderr: io.Discard,
@@ -87,22 +95,62 @@ func TestOnboardSourceDryRunCreatesNothing(t *testing.T) {
 	assertPathAbsent(t, secretsDir)
 }
 
+func TestOnboardSourceInjectsOnlyConfiguredInfrastructure(t *testing.T) {
+	payload, publicJWK, privateKey := sourceMetadataCacheFixture(t)
+	registrationPath := writeSourceRegistrationFixture(t, publicJWK)
+	for name, config := range map[string]struct {
+		arguments []string
+		wantError string
+	}{
+		"unknown storage backend": {
+			arguments: []string{"--storage-backend", "database", "--certificate-provider", "development-ca"},
+			wantError: "unsupported onboarding storage backend",
+		},
+		"unknown certificate provider": {
+			arguments: []string{"--storage-backend", "filesystem", "--certificate-provider", "wallet-ca"},
+			wantError: "unsupported certificate provider",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			stateDir := filepath.Join(t.TempDir(), "state")
+			secretsDir := filepath.Join(t.TempDir(), "secrets")
+			arguments := []string{
+				"onboard-source", "--source", registrationPath,
+				"--outway-url", "https://outway.example",
+				"--schema", "../../schemas/gbo-attestations-v1.schema.json",
+				"--type-metadata-base-url", "https://issuer.example",
+				"--state-dir", stateDir, "--secrets-dir", secretsDir,
+			}
+			arguments = append(arguments, config.arguments...)
+			dependencies := defaultOnboardingDependencies()
+			dependencies.client = metadataValidationClient(t, payload, privateKey)
+			dependencies.stdout = io.Discard
+			dependencies.stderr = io.Discard
+			if _, err := runOnboardingCommand(context.Background(), arguments, dependencies); err == nil || !strings.Contains(err.Error(), config.wantError) {
+				t.Fatalf("error = %v, want %q", err, config.wantError)
+			}
+			assertPathAbsent(t, stateDir)
+			assertPathAbsent(t, secretsDir)
+		})
+	}
+}
+
 func TestOnboardSourceIsIdempotentAndActivatesLast(t *testing.T) {
 	payload, publicJWK, privateKey := sourceMetadataCacheFixture(t)
 	registrationPath := writeSourceRegistrationFixture(t, publicJWK)
 	stateDir := filepath.Join(t.TempDir(), "state")
 	secretsDir := filepath.Join(t.TempDir(), "secrets")
 	dependencies := onboardingDependencies{
-		client: metadataValidationClient(t, payload, privateKey),
-		now:    time.Now,
-		certificateProvider: func(root, readerOrigin string) certificateProvider {
-			return newLocalCertificateProvider(root, readerOrigin)
-		},
-		stdout: io.Discard,
-		stderr: io.Discard,
+		client:                     metadataValidationClient(t, payload, privateKey),
+		now:                        time.Now,
+		resolveCertificateProvider: configuredCertificateProvider,
+		resolveActivationBackend:   configuredActivationBackend,
+		stdout:                     io.Discard,
+		stderr:                     io.Discard,
 	}
 	arguments := []string{
-		"onboard-source", "--source", registrationPath, "--env", "local",
+		"onboard-source", "--source", registrationPath,
+		"--storage-backend", "filesystem", "--certificate-provider", "development-ca",
 		"--outway-url", "https://outway.example",
 		"--schema", "../../schemas/gbo-attestations-v1.schema.json",
 		"--type-metadata-base-url", "https://issuer.example",
@@ -125,7 +173,7 @@ func TestOnboardSourceIsIdempotentAndActivatesLast(t *testing.T) {
 	if len(activation.Types) != 1 || activation.Types[0].VCTIntegrity == "" {
 		t.Fatalf("activation types = %+v", activation.Types)
 	}
-	issuanceEnv, err := os.ReadFile(activation.IssuanceEnvPath)
+	issuanceEnv, err := os.ReadFile(activation.IssuanceConfigReference)
 	if err != nil {
 		t.Fatalf("read generated issuance environment: %v", err)
 	}
@@ -138,15 +186,15 @@ func TestOnboardSourceIsIdempotentAndActivatesLast(t *testing.T) {
 			t.Errorf("generated issuance environment has no %s", variable)
 		}
 	}
-	if info, err := os.Stat(activation.IssuanceEnvPath); err != nil {
+	if info, err := os.Stat(activation.IssuanceConfigReference); err != nil {
 		t.Fatalf("stat generated issuance environment: %v", err)
 	} else if got := info.Mode().Perm(); got != 0o600 {
 		t.Errorf("generated issuance environment mode = %o, want 600", got)
 	}
 	for _, path := range []string{
-		activation.Certificates.IssuerKeyPath,
-		activation.Certificates.ReaderKeyPath,
-		activation.Certificates.StatusKeyPath,
+		activation.Certificates.IssuerKeyReference,
+		activation.Certificates.ReaderKeyReference,
+		activation.Certificates.StatusKeyReference,
 	} {
 		info, err := os.Stat(path)
 		if err != nil {
@@ -164,7 +212,8 @@ func TestOnboardSourceCertificateFailureLeavesSourceInactive(t *testing.T) {
 	stateDir := filepath.Join(t.TempDir(), "state")
 
 	_, err := runOnboardingCommand(context.Background(), []string{
-		"onboard-source", "--source", registrationPath, "--env", "local",
+		"onboard-source", "--source", registrationPath,
+		"--storage-backend", "filesystem", "--certificate-provider", "development-ca",
 		"--outway-url", "https://outway.example",
 		"--schema", "../../schemas/gbo-attestations-v1.schema.json",
 		"--type-metadata-base-url", "https://issuer.example",
@@ -172,11 +221,12 @@ func TestOnboardSourceCertificateFailureLeavesSourceInactive(t *testing.T) {
 	}, onboardingDependencies{
 		client: metadataValidationClient(t, payload, privateKey),
 		now:    time.Now,
-		certificateProvider: func(string, string) certificateProvider {
-			return failingCertificateProvider{}
+		resolveCertificateProvider: func(onboardingOptions) (certificateProvider, error) {
+			return failingCertificateProvider{}, nil
 		},
-		stdout: io.Discard,
-		stderr: io.Discard,
+		resolveActivationBackend: configuredActivationBackend,
+		stdout:                   io.Discard,
+		stderr:                   io.Discard,
 	})
 	if err == nil || !strings.Contains(err.Error(), "certificate provider failed") {
 		t.Fatalf("error = %v, want certificate provider failure", err)

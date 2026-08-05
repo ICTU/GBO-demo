@@ -29,43 +29,43 @@ var (
 )
 
 type certificateArtifacts struct {
-	IssuerKeyPath      string `json:"issuer_key_path"`
-	IssuerCertPath     string `json:"issuer_cert_path"`
-	ReaderKeyPath      string `json:"reader_key_path"`
-	ReaderCertPath     string `json:"reader_cert_path"`
-	StatusKeyPath      string `json:"status_key_path"`
-	StatusCertPath     string `json:"status_cert_path"`
-	IssuerCACertPath   string `json:"issuer_ca_cert_path"`
-	ReaderCACertPath   string `json:"reader_ca_cert_path"`
-	IssuerSubject      string `json:"issuer_subject"`
-	ReaderSubject      string `json:"reader_subject"`
-	CertificateExpires string `json:"certificate_expires_at"`
+	IssuerKeyReference    string `json:"issuer_key_reference"`
+	IssuerCertReference   string `json:"issuer_cert_reference"`
+	ReaderKeyReference    string `json:"reader_key_reference"`
+	ReaderCertReference   string `json:"reader_cert_reference"`
+	StatusKeyReference    string `json:"status_key_reference"`
+	StatusCertReference   string `json:"status_cert_reference"`
+	IssuerCACertReference string `json:"issuer_ca_cert_reference"`
+	ReaderCACertReference string `json:"reader_ca_cert_reference"`
+	IssuerSubject         string `json:"issuer_subject"`
+	ReaderSubject         string `json:"reader_subject"`
+	CertificateExpires    string `json:"certificate_expires_at"`
 }
 
 type certificateProvider interface {
 	Provision(sourceRegistration) (certificateArtifacts, error)
 }
 
-type localCertificateProvider struct {
+type developmentCAProvider struct {
 	root         string
 	random       io.Reader
 	now          func() time.Time
 	readerOrigin string
 }
 
-type localCA struct {
+type developmentCA struct {
 	key      *ecdsa.PrivateKey
 	cert     *x509.Certificate
 	certPath string
 }
 
-func newLocalCertificateProvider(root, readerOrigin string) *localCertificateProvider {
-	return &localCertificateProvider{root: root, random: rand.Reader, now: time.Now, readerOrigin: readerOrigin}
+func newDevelopmentCAProvider(root, readerOrigin string) *developmentCAProvider {
+	return &developmentCAProvider{root: root, random: rand.Reader, now: time.Now, readerOrigin: readerOrigin}
 }
 
-func (p *localCertificateProvider) Provision(registration sourceRegistration) (certificateArtifacts, error) {
+func (p *developmentCAProvider) Provision(registration sourceRegistration) (certificateArtifacts, error) {
 	if p == nil || p.root == "" {
-		return certificateArtifacts{}, fmt.Errorf("local certificate secret directory is required")
+		return certificateArtifacts{}, fmt.Errorf("development CA secret directory is required")
 	}
 	if err := ensurePrivateDirectory(p.root); err != nil {
 		return certificateArtifacts{}, err
@@ -89,7 +89,7 @@ func (p *localCertificateProvider) Provision(registration sourceRegistration) (c
 	if p.readerOrigin != "" {
 		parsed, err := url.Parse(p.readerOrigin)
 		if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil || (parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" {
-			return certificateArtifacts{}, fmt.Errorf("local reader origin must be an HTTPS origin without credentials, path, query or fragment")
+			return certificateArtifacts{}, fmt.Errorf("development reader origin must be an HTTPS origin without credentials, path, query or fragment")
 		}
 		parsed.Path = "/"
 		readerOrigin = parsed.String()
@@ -97,7 +97,7 @@ func (p *localCertificateProvider) Provision(registration sourceRegistration) (c
 	}
 	issuerSubject := pkix.Name{CommonName: issuerHost, Organization: []string{registration.Name}, SerialNumber: registration.SourceOIN}
 	readerSubject := pkix.Name{CommonName: readerHost, Organization: []string{registration.Name}, SerialNumber: registration.SourceOIN}
-	issuerPayload, readerPayload, err := localCertificateAuthPayloads(registration, readerOrigin)
+	issuerPayload, readerPayload, err := developmentCertificateAuthPayloads(registration, readerOrigin)
 	if err != nil {
 		return certificateArtifacts{}, err
 	}
@@ -126,27 +126,27 @@ func (p *localCertificateProvider) Provision(registration sourceRegistration) (c
 		return certificateArtifacts{}, fmt.Errorf("issuer and status certificate subjects differ")
 	}
 	return certificateArtifacts{
-		IssuerKeyPath:      issuer.keyPath,
-		IssuerCertPath:     issuer.certPath,
-		ReaderKeyPath:      reader.keyPath,
-		ReaderCertPath:     reader.certPath,
-		StatusKeyPath:      status.keyPath,
-		StatusCertPath:     status.certPath,
-		IssuerCACertPath:   issuerCA.certPath,
-		ReaderCACertPath:   readerCA.certPath,
-		IssuerSubject:      issuer.cert.Subject.String(),
-		ReaderSubject:      reader.cert.Subject.String(),
-		CertificateExpires: issuer.cert.NotAfter.UTC().Format(time.RFC3339),
+		IssuerKeyReference:    issuer.keyPath,
+		IssuerCertReference:   issuer.certPath,
+		ReaderKeyReference:    reader.keyPath,
+		ReaderCertReference:   reader.certPath,
+		StatusKeyReference:    status.keyPath,
+		StatusCertReference:   status.certPath,
+		IssuerCACertReference: issuerCA.certPath,
+		ReaderCACertReference: readerCA.certPath,
+		IssuerSubject:         issuer.cert.Subject.String(),
+		ReaderSubject:         reader.cert.Subject.String(),
+		CertificateExpires:    issuer.cert.NotAfter.UTC().Format(time.RFC3339),
 	}, nil
 }
 
-type localLeaf struct {
+type developmentLeaf struct {
 	keyPath  string
 	certPath string
 	cert     *x509.Certificate
 }
 
-func (p *localCertificateProvider) ensureCA(directory, role string) (*localCA, error) {
+func (p *developmentCAProvider) ensureCA(directory, role string) (*developmentCA, error) {
 	if err := ensurePrivateDirectory(directory); err != nil {
 		return nil, err
 	}
@@ -154,18 +154,18 @@ func (p *localCertificateProvider) ensureCA(directory, role string) (*localCA, e
 	certPath := filepath.Join(directory, role+"-ca-cert.pem")
 	keyExists, certExists := fileExists(keyPath), fileExists(certPath)
 	if keyExists != certExists {
-		return nil, fmt.Errorf("local %s CA is partially provisioned", role)
+		return nil, fmt.Errorf("development %s CA is partially provisioned", role)
 	}
 	if keyExists {
-		key, cert, err := loadLocalCA(keyPath, certPath)
+		key, cert, err := loadDevelopmentCA(keyPath, certPath)
 		if err != nil {
-			return nil, fmt.Errorf("load local %s CA: %w", role, err)
+			return nil, fmt.Errorf("load development %s CA: %w", role, err)
 		}
-		return &localCA{key: key, cert: cert, certPath: certPath}, nil
+		return &developmentCA{key: key, cert: cert, certPath: certPath}, nil
 	}
 	key, err := ecdsa.GenerateKey(elliptic.P256(), p.random)
 	if err != nil {
-		return nil, fmt.Errorf("generate local %s CA key: %w", role, err)
+		return nil, fmt.Errorf("generate development %s CA key: %w", role, err)
 	}
 	now := p.now().UTC()
 	serial, err := randomSerial(p.random)
@@ -174,7 +174,7 @@ func (p *localCertificateProvider) ensureCA(directory, role string) (*localCA, e
 	}
 	template := &x509.Certificate{
 		SerialNumber:          serial,
-		Subject:               pkix.Name{CommonName: "GBO local " + role + " development CA"},
+		Subject:               pkix.Name{CommonName: "GBO " + role + " development CA"},
 		NotBefore:             now.Add(-5 * time.Minute),
 		NotAfter:              now.AddDate(5, 0, 0),
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign | x509.KeyUsageDigitalSignature,
@@ -184,11 +184,11 @@ func (p *localCertificateProvider) ensureCA(directory, role string) (*localCA, e
 	}
 	der, err := x509.CreateCertificate(p.random, template, template, &key.PublicKey, key)
 	if err != nil {
-		return nil, fmt.Errorf("create local %s CA certificate: %w", role, err)
+		return nil, fmt.Errorf("create development %s CA certificate: %w", role, err)
 	}
 	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
 	if err != nil {
-		return nil, fmt.Errorf("marshal local %s CA key: %w", role, err)
+		return nil, fmt.Errorf("marshal development %s CA key: %w", role, err)
 	}
 	if err := writeFileAtomically(directory, filepath.Base(keyPath), pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}), 0o600); err != nil {
 		return nil, err
@@ -198,31 +198,31 @@ func (p *localCertificateProvider) ensureCA(directory, role string) (*localCA, e
 	}
 	cert, err := x509.ParseCertificate(der)
 	if err != nil {
-		return nil, fmt.Errorf("parse generated local %s CA certificate: %w", role, err)
+		return nil, fmt.Errorf("parse generated development %s CA certificate: %w", role, err)
 	}
-	return &localCA{key: key, cert: cert, certPath: certPath}, nil
+	return &developmentCA{key: key, cert: cert, certPath: certPath}, nil
 }
 
-func (p *localCertificateProvider) ensureLeaf(directory, role string, subject pkix.Name, host string, ca *localCA, eku, authOID asn1.ObjectIdentifier, authPayload []byte) (*localLeaf, error) {
+func (p *developmentCAProvider) ensureLeaf(directory, role string, subject pkix.Name, host string, ca *developmentCA, eku, authOID asn1.ObjectIdentifier, authPayload []byte) (*developmentLeaf, error) {
 	keyPath := filepath.Join(directory, role+"-key.der.b64")
 	certPath := filepath.Join(directory, role+"-cert.der.b64")
 	keyExists, certExists := fileExists(keyPath), fileExists(certPath)
 	if keyExists != certExists {
-		return nil, fmt.Errorf("local %s certificate is partially provisioned", role)
+		return nil, fmt.Errorf("development %s certificate is partially provisioned", role)
 	}
 	if keyExists {
-		key, cert, err := loadLocalLeaf(keyPath, certPath)
+		key, cert, err := loadDevelopmentLeaf(keyPath, certPath)
 		if err != nil {
-			return nil, fmt.Errorf("load local %s certificate: %w", role, err)
+			return nil, fmt.Errorf("load development %s certificate: %w", role, err)
 		}
 		if !publicKeysEqual(&key.PublicKey, cert.PublicKey) {
-			return nil, fmt.Errorf("local %s key does not match its certificate", role)
+			return nil, fmt.Errorf("development %s key does not match its certificate", role)
 		}
-		return &localLeaf{keyPath: keyPath, certPath: certPath, cert: cert}, nil
+		return &developmentLeaf{keyPath: keyPath, certPath: certPath, cert: cert}, nil
 	}
 	key, err := ecdsa.GenerateKey(elliptic.P256(), p.random)
 	if err != nil {
-		return nil, fmt.Errorf("generate local %s key: %w", role, err)
+		return nil, fmt.Errorf("generate development %s key: %w", role, err)
 	}
 	serial, err := randomSerial(p.random)
 	if err != nil {
@@ -241,17 +241,17 @@ func (p *localCertificateProvider) ensureLeaf(directory, role string, subject pk
 	if len(authOID) > 0 {
 		encoded, err := asn1.Marshal(string(authPayload))
 		if err != nil {
-			return nil, fmt.Errorf("encode local %s authorization metadata: %w", role, err)
+			return nil, fmt.Errorf("encode development %s authorization metadata: %w", role, err)
 		}
 		template.ExtraExtensions = []pkix.Extension{{Id: authOID, Value: encoded}}
 	}
 	certDER, err := x509.CreateCertificate(p.random, template, ca.cert, &key.PublicKey, ca.key)
 	if err != nil {
-		return nil, fmt.Errorf("create local %s certificate: %w", role, err)
+		return nil, fmt.Errorf("create development %s certificate: %w", role, err)
 	}
 	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
 	if err != nil {
-		return nil, fmt.Errorf("marshal local %s key: %w", role, err)
+		return nil, fmt.Errorf("marshal development %s key: %w", role, err)
 	}
 	if err := writeFileAtomically(directory, filepath.Base(keyPath), []byte(base64.StdEncoding.EncodeToString(keyDER)), 0o600); err != nil {
 		return nil, err
@@ -261,12 +261,12 @@ func (p *localCertificateProvider) ensureLeaf(directory, role string, subject pk
 	}
 	cert, err := x509.ParseCertificate(certDER)
 	if err != nil {
-		return nil, fmt.Errorf("parse generated local %s certificate: %w", role, err)
+		return nil, fmt.Errorf("parse generated development %s certificate: %w", role, err)
 	}
-	return &localLeaf{keyPath: keyPath, certPath: certPath, cert: cert}, nil
+	return &developmentLeaf{keyPath: keyPath, certPath: certPath, cert: cert}, nil
 }
 
-func localCertificateAuthPayloads(registration sourceRegistration, readerOrigin string) ([]byte, []byte, error) {
+func developmentCertificateAuthPayloads(registration sourceRegistration, readerOrigin string) ([]byte, []byte, error) {
 	organization := map[string]any{
 		"displayName": map[string]string{"nl": registration.Name, "en": registration.Name},
 		"legalName":   map[string]string{"nl": registration.Name, "en": registration.Name},
@@ -276,7 +276,7 @@ func localCertificateAuthPayloads(registration sourceRegistration, readerOrigin 
 	}
 	issuer, err := json.Marshal(map[string]any{"organization": organization})
 	if err != nil {
-		return nil, nil, fmt.Errorf("marshal local issuer authorization metadata: %w", err)
+		return nil, nil, fmt.Errorf("marshal development issuer authorization metadata: %w", err)
 	}
 	reader, err := json.Marshal(map[string]any{
 		"organization":         organization,
@@ -284,7 +284,7 @@ func localCertificateAuthPayloads(registration sourceRegistration, readerOrigin 
 		"authorizedAttributes": map[string]any{"urn:eudi:pid:nl:1": [][]string{{"urn:eudi:pid:nl:1", "bsn"}, {"bsn"}}},
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("marshal local reader authorization metadata: %w", err)
+		return nil, nil, fmt.Errorf("marshal development reader authorization metadata: %w", err)
 	}
 	return issuer, reader, nil
 }
@@ -307,7 +307,7 @@ func validateProvisionedCertificate(cert, ca *x509.Certificate, registration sou
 	return nil
 }
 
-func loadLocalCA(keyPath, certPath string) (*ecdsa.PrivateKey, *x509.Certificate, error) {
+func loadDevelopmentCA(keyPath, certPath string) (*ecdsa.PrivateKey, *x509.Certificate, error) {
 	keyPEM, err := os.ReadFile(keyPath)
 	if err != nil {
 		return nil, nil, err
@@ -342,7 +342,7 @@ func loadLocalCA(keyPath, certPath string) (*ecdsa.PrivateKey, *x509.Certificate
 	return key, cert, nil
 }
 
-func loadLocalLeaf(keyPath, certPath string) (*ecdsa.PrivateKey, *x509.Certificate, error) {
+func loadDevelopmentLeaf(keyPath, certPath string) (*ecdsa.PrivateKey, *x509.Certificate, error) {
 	encodedKey, err := os.ReadFile(keyPath)
 	if err != nil {
 		return nil, nil, err

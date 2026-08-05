@@ -1,6 +1,6 @@
 .PHONY: up down logs clean certs fsc-local-env fsc-ca fsc-up fsc-down fsc-test fsc-clean \
         fsc-seed-bri fsc-seed-bri-hv fsc-seed-brp fsc-seed-metadata fsc-pdp-cert \
-        eudi-images local-source-metadata-key local-source-metadata-up \
+        eudi-images development-source-metadata-key source-metadata-up \
         validate-source onboard-source demo demo-minimal demo-dvtp demo-eudi \
         demo-full demo-down eudi-config
 
@@ -13,15 +13,17 @@ export
 # v0.5.0's scheme-prefixed client_id). Override in .env if needed.
 NLWALLET_PATH ?= $(PWD)/vendor/nl-wallet
 
-# Phase-4 local onboarding. The fixed OIN and deterministic source metadata
+# Phase-4 filesystem onboarding. The fixed OIN and deterministic source metadata
 # key are strictly demo-only; issuer/reader/status keys remain randomly
 # generated below the ignored .local/ secret backend.
-LOCAL_SOURCE_OIN ?= 99999999900000000200
+DEVELOPMENT_SOURCE_OIN ?= 99999999900000000200
 ONBOARDING_OUTWAY_URL ?= http://localhost:8087
 ONBOARDING_STATE_DIR ?= $(PWD)/.local/onboarding
 ONBOARDING_SECRETS_DIR ?= $(PWD)/.local/secrets
 ONBOARDING_TYPE_METADATA_URL ?= $(or $(EUDI_BRI_URL),http://localhost:9409)
-ONBOARDING_EUDI_ENV ?= $(ONBOARDING_SECRETS_DIR)/$(LOCAL_SOURCE_OIN)/issuance.env
+ONBOARDING_EUDI_ENV ?= $(ONBOARDING_SECRETS_DIR)/$(DEVELOPMENT_SOURCE_OIN)/issuance.env
+ONBOARDING_STORAGE_BACKEND ?= filesystem
+ONBOARDING_CERTIFICATE_PROVIDER ?= development-ca
 
 # Docker network of the fsc-infra instance this checkout uses. Equals
 # <FSC_PROJECT_NAME>_default; override in fsc-infra/.env to run a
@@ -119,13 +121,13 @@ eudi-images:
 	    -f services/eudi-issuance-server/Dockerfile "$$NLWALLET_PATH"; \
 	fi
 
-local-source-metadata-key:
-	@mkdir -p .local/secrets/source-metadata/$(LOCAL_SOURCE_OIN)
-	@cd services/graphql-server && go run . init-local-metadata-key \
-		--source-oin $(LOCAL_SOURCE_OIN) \
-		--output $(PWD)/.local/secrets/source-metadata/$(LOCAL_SOURCE_OIN)/private.jwk
+development-source-metadata-key:
+	@mkdir -p .local/secrets/source-metadata/$(DEVELOPMENT_SOURCE_OIN)
+	@cd services/graphql-server && go run . init-development-metadata-key \
+		--source-oin $(DEVELOPMENT_SOURCE_OIN) \
+		--output $(PWD)/.local/secrets/source-metadata/$(DEVELOPMENT_SOURCE_OIN)/private.jwk
 
-local-source-metadata-up: local-source-metadata-key
+source-metadata-up: development-source-metadata-key
 	GBO_ATTESTATIONS_PATH=/config/gbo-attestations.json \
 	GBO_METADATA_SIGNING_JWK_PATH=/source-metadata/private.jwk \
 	EUDI_PUBLIC_URL="$${EUDI_PUBLIC_URL:-http://localhost:8001}" \
@@ -149,7 +151,8 @@ onboard-source:
 	@dry_run=""; if [ "$(DRY_RUN)" = "true" ]; then dry_run="--dry-run"; fi; \
 	cd services/eudi-adapter && go run . onboard-source \
 		--source "$(abspath $(SOURCE))" \
-		--env "$(or $(ENV),local)" \
+		--storage-backend "$(ONBOARDING_STORAGE_BACKEND)" \
+		--certificate-provider "$(ONBOARDING_CERTIFICATE_PROVIDER)" \
 		--outway-url "$(ONBOARDING_OUTWAY_URL)" \
 		--schema "$(PWD)/schemas/gbo-attestations-v1.schema.json" \
 		--type-metadata-base-url "$(ONBOARDING_TYPE_METADATA_URL)" \

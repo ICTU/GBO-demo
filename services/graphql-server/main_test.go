@@ -121,17 +121,17 @@ func TestPublishesSignedSourceMetadata(t *testing.T) {
 	}
 }
 
-func TestInitLocalMetadataKeyIsIdempotentAndPrivate(t *testing.T) {
+func TestInitDevelopmentMetadataKeyIsIdempotentAndPrivate(t *testing.T) {
 	outputPath := filepath.Join(t.TempDir(), ".local", "source", "private.jwk")
-	arguments := []string{"init-local-metadata-key", "--source-oin", "99999999900000000200", "--output", outputPath}
+	arguments := []string{"init-development-metadata-key", "--source-oin", "99999999900000000200", "--output", outputPath}
 	var first, second bytes.Buffer
 	for _, output := range []*bytes.Buffer{&first, &second} {
-		handled, err := runLocalMetadataKeyCommand(arguments, output, io.Discard)
+		handled, err := runDevelopmentMetadataKeyCommand(arguments, output, io.Discard)
 		if err != nil {
-			t.Fatalf("init local metadata key: %v", err)
+			t.Fatalf("init development metadata key: %v", err)
 		}
 		if !handled {
-			t.Fatal("local metadata key command was not handled")
+			t.Fatal("development metadata key command was not handled")
 		}
 	}
 	if first.String() != second.String() || !strings.HasPrefix(first.String(), "sha256-") {
@@ -139,27 +139,27 @@ func TestInitLocalMetadataKeyIsIdempotentAndPrivate(t *testing.T) {
 	}
 	info, err := os.Stat(outputPath)
 	if err != nil {
-		t.Fatalf("stat local metadata key: %v", err)
+		t.Fatalf("stat development metadata key: %v", err)
 	}
 	if got := info.Mode().Perm(); got != 0o600 {
-		t.Fatalf("local metadata key mode = %o, want 600", got)
+		t.Fatalf("development metadata key mode = %o, want 600", got)
 	}
 	raw, err := os.ReadFile(outputPath)
 	if err != nil {
-		t.Fatalf("read local metadata key: %v", err)
+		t.Fatalf("read development metadata key: %v", err)
 	}
 	if bytes.Contains(first.Bytes(), raw) {
 		t.Fatal("command output contains the private key")
 	}
 }
 
-func TestInitLocalMetadataKeyRejectsUnsafeInputs(t *testing.T) {
+func TestInitDevelopmentMetadataKeyRejectsUnsafeInputs(t *testing.T) {
 	for name, arguments := range map[string][]string{
-		"non-digit OIN": {"init-local-metadata-key", "--source-oin", "9999999990000000020x", "--output", filepath.Join(t.TempDir(), ".local", "key.jwk")},
-		"outside local": {"init-local-metadata-key", "--source-oin", "99999999900000000200", "--output", filepath.Join(t.TempDir(), "key.jwk")},
+		"non-digit OIN": {"init-development-metadata-key", "--source-oin", "9999999990000000020x", "--output", filepath.Join(t.TempDir(), ".local", "key.jwk")},
+		"outside local": {"init-development-metadata-key", "--source-oin", "99999999900000000200", "--output", filepath.Join(t.TempDir(), "key.jwk")},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if handled, err := runLocalMetadataKeyCommand(arguments, io.Discard, io.Discard); !handled || err == nil {
+			if handled, err := runDevelopmentMetadataKeyCommand(arguments, io.Discard, io.Discard); !handled || err == nil {
 				t.Fatalf("handled = %v, error = %v; want handled error", handled, err)
 			}
 		})

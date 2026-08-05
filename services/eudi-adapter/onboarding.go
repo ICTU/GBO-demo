@@ -19,16 +19,16 @@ import (
 )
 
 type sourceActivation struct {
-	SchemaVersion         string               `json:"schema_version"`
-	Source                sourceRegistration   `json:"source"`
-	MetadataURL           string               `json:"metadata_url"`
-	MetadataVersion       string               `json:"metadata_version"`
-	MetadataPayloadDigest string               `json:"metadata_payload_digest"`
-	PublicJWKPath         string               `json:"public_jwk_path"`
-	TypeMetadataStorePath string               `json:"type_metadata_store_path"`
-	IssuanceEnvPath       string               `json:"issuance_env_path"`
-	Types                 []activatedType      `json:"types"`
-	Certificates          certificateArtifacts `json:"certificates"`
+	SchemaVersion              string               `json:"schema_version"`
+	Source                     sourceRegistration   `json:"source"`
+	MetadataURL                string               `json:"metadata_url"`
+	MetadataVersion            string               `json:"metadata_version"`
+	MetadataPayloadDigest      string               `json:"metadata_payload_digest"`
+	PublicJWKReference         string               `json:"public_jwk_reference"`
+	TypeMetadataStoreReference string               `json:"type_metadata_store_reference"`
+	IssuanceConfigReference    string               `json:"issuance_config_reference"`
+	Types                      []activatedType      `json:"types"`
+	Certificates               certificateArtifacts `json:"certificates"`
 }
 
 type activatedType struct {
@@ -39,34 +39,57 @@ type activatedType struct {
 }
 
 type onboardingOptions struct {
-	sourcePath    string
-	environment   string
-	dryRun        bool
-	outwayURL     string
-	schemaPath    string
-	publicBaseURL string
-	readerOrigin  string
-	stateDir      string
-	secretsDir    string
+	sourcePath              string
+	storageBackend          string
+	certificateProviderName string
+	dryRun                  bool
+	outwayURL               string
+	schemaPath              string
+	publicBaseURL           string
+	readerOrigin            string
+	stateDir                string
+	secretsDir              string
 }
 
 type onboardingDependencies struct {
-	client              *http.Client
-	now                 func() time.Time
-	certificateProvider func(string, string) certificateProvider
-	stdout              io.Writer
-	stderr              io.Writer
+	client                     *http.Client
+	now                        func() time.Time
+	resolveCertificateProvider func(onboardingOptions) (certificateProvider, error)
+	resolveActivationBackend   func(onboardingOptions) (activationBackend, error)
+	stdout                     io.Writer
+	stderr                     io.Writer
+}
+
+type activationBackend interface {
+	Activate(*validatedSourceRegistration, certificateArtifacts) (*sourceActivation, error)
 }
 
 func defaultOnboardingDependencies() onboardingDependencies {
 	return onboardingDependencies{
-		client: &http.Client{Timeout: 15 * time.Second},
-		now:    time.Now,
-		certificateProvider: func(root, readerOrigin string) certificateProvider {
-			return newLocalCertificateProvider(root, readerOrigin)
-		},
-		stdout: os.Stdout,
-		stderr: os.Stderr,
+		client:                     &http.Client{Timeout: 15 * time.Second},
+		now:                        time.Now,
+		resolveCertificateProvider: configuredCertificateProvider,
+		resolveActivationBackend:   configuredActivationBackend,
+		stdout:                     os.Stdout,
+		stderr:                     os.Stderr,
+	}
+}
+
+func configuredCertificateProvider(options onboardingOptions) (certificateProvider, error) {
+	switch options.certificateProviderName {
+	case "development-ca":
+		return newDevelopmentCAProvider(options.secretsDir, options.readerOrigin), nil
+	default:
+		return nil, fmt.Errorf("unsupported certificate provider %q", options.certificateProviderName)
+	}
+}
+
+func configuredActivationBackend(options onboardingOptions) (activationBackend, error) {
+	switch options.storageBackend {
+	case "filesystem":
+		return newFilesystemActivationBackend(options.stateDir, options.secretsDir), nil
+	default:
+		return nil, fmt.Errorf("unsupported onboarding storage backend %q", options.storageBackend)
 	}
 }
 
@@ -91,19 +114,23 @@ func runOnboardingCommand(ctx context.Context, arguments []string, dependencies 
 		_, _ = fmt.Fprintf(dependencies.stdout, "source %s is valid: metadata version %s, %d attestation type(s)\n", registration.SourceOIN, validated.Document.Version, len(validated.Publications))
 		return true, nil
 	}
-	if options.environment != "local" {
-		return true, fmt.Errorf("certificate provider for environment %q is not implemented; phase 4 supports only local", options.environment)
-	}
 	if options.dryRun {
 		_, _ = fmt.Fprintf(dependencies.stdout, "dry-run valid for source %s: no keys, certificates, types or activation were written\n", registration.SourceOIN)
 		return true, nil
 	}
-	provider := dependencies.certificateProvider(options.secretsDir, options.readerOrigin)
-	activation, err := activateLocalSource(validated, options, provider)
+	provider, err := dependencies.resolveCertificateProvider(options)
 	if err != nil {
 		return true, err
 	}
-	_, _ = fmt.Fprintf(dependencies.stdout, "source %s activated locally: metadata version %s, %d type(s); private keys were written only below %s\n", registration.SourceOIN, activation.MetadataVersion, len(activation.Types), options.secretsDir)
+	backend, err := dependencies.resolveActivationBackend(options)
+	if err != nil {
+		return true, err
+	}
+	activation, err := activateSource(validated, provider, backend)
+	if err != nil {
+		return true, err
+	}
+	_, _ = fmt.Fprintf(dependencies.stdout, "source %s activated: metadata version %s, %d type(s); storage=%s, certificate-provider=%s\n", registration.SourceOIN, activation.MetadataVersion, len(activation.Types), options.storageBackend, options.certificateProviderName)
 	return true, nil
 }
 
@@ -115,11 +142,12 @@ func parseOnboardingOptions(command string, arguments []string, errorOutput io.W
 	set.StringVar(&options.outwayURL, "outway-url", getEnv("FSC_OUTWAY_URL", "http://localhost:8087"), "FSC Outway base URL")
 	set.StringVar(&options.schemaPath, "schema", "schemas/gbo-attestations-v1.schema.json", "source metadata JSON Schema")
 	set.StringVar(&options.publicBaseURL, "type-metadata-base-url", getEnv("TYPE_METADATA_PUBLIC_BASE_URL", "http://localhost:9409"), "public Type Metadata base URL")
-	set.StringVar(&options.readerOrigin, "reader-origin-url", os.Getenv("EUDI_READER_ORIGIN_URL"), "public reader origin embedded in the local reader certificate")
-	set.StringVar(&options.stateDir, "state-dir", ".local/onboarding", "local onboarding state directory")
-	set.StringVar(&options.secretsDir, "secrets-dir", ".local/secrets", "local secret backend directory")
+	set.StringVar(&options.readerOrigin, "reader-origin-url", os.Getenv("EUDI_READER_ORIGIN_URL"), "public reader origin embedded in the reader certificate")
+	set.StringVar(&options.stateDir, "state-dir", ".local/onboarding", "filesystem onboarding state directory")
+	set.StringVar(&options.secretsDir, "secrets-dir", ".local/secrets", "filesystem secret directory")
 	if command == "onboard-source" {
-		set.StringVar(&options.environment, "env", "local", "certificate provider environment")
+		set.StringVar(&options.storageBackend, "storage-backend", getEnv("ONBOARDING_STORAGE_BACKEND", "filesystem"), "onboarding state backend")
+		set.StringVar(&options.certificateProviderName, "certificate-provider", getEnv("ONBOARDING_CERTIFICATE_PROVIDER", "development-ca"), "certificate provider")
 		set.BoolVar(&options.dryRun, "dry-run", false, "validate without writing state")
 	}
 	if err := set.Parse(arguments); err != nil {
@@ -137,21 +165,37 @@ func parseOnboardingOptions(command string, arguments []string, errorOutput io.W
 	return options, nil
 }
 
-func activateLocalSource(validated *validatedSourceRegistration, options onboardingOptions, provider certificateProvider) (*sourceActivation, error) {
+func activateSource(validated *validatedSourceRegistration, provider certificateProvider, backend activationBackend) (*sourceActivation, error) {
 	if provider == nil {
-		return nil, fmt.Errorf("local certificate provider is required")
+		return nil, fmt.Errorf("certificate provider is required")
+	}
+	if backend == nil {
+		return nil, fmt.Errorf("activation backend is required")
 	}
 	certificates, err := provider.Provision(validated.Registration)
 	if err != nil {
 		return nil, fmt.Errorf("provision source-bound certificates: %w", err)
 	}
-	issuanceEnvPath, err := writeLocalIssuanceEnvironment(options.secretsDir, validated.Registration.SourceOIN, certificates)
+	return backend.Activate(validated, certificates)
+}
+
+type filesystemActivationBackend struct {
+	stateDir   string
+	secretsDir string
+}
+
+func newFilesystemActivationBackend(stateDir, secretsDir string) *filesystemActivationBackend {
+	return &filesystemActivationBackend{stateDir: stateDir, secretsDir: secretsDir}
+}
+
+func (b *filesystemActivationBackend) Activate(validated *validatedSourceRegistration, certificates certificateArtifacts) (*sourceActivation, error) {
+	issuanceEnvPath, err := writeFilesystemIssuanceEnvironment(b.secretsDir, validated.Registration.SourceOIN, certificates)
 	if err != nil {
-		return nil, fmt.Errorf("prepare local issuance environment: %w", err)
+		return nil, fmt.Errorf("prepare filesystem issuance environment: %w", err)
 	}
-	typeStore := filepath.Join(options.stateDir, "type-metadata")
-	trustStore := filepath.Join(options.stateDir, "trust")
-	activeStore := filepath.Join(options.stateDir, "active")
+	typeStore := filepath.Join(b.stateDir, "type-metadata")
+	trustStore := filepath.Join(b.stateDir, "trust")
+	activeStore := filepath.Join(b.stateDir, "active")
 	for _, directory := range []string{typeStore, trustStore, activeStore} {
 		if err := os.MkdirAll(directory, 0o755); err != nil {
 			return nil, fmt.Errorf("create onboarding state directory %q: %w", directory, err)
@@ -179,16 +223,16 @@ func activateLocalSource(validated *validatedSourceRegistration, options onboard
 	}
 	payloadDigest := sha256.Sum256(validated.Payload)
 	activation := &sourceActivation{
-		SchemaVersion:         "1.0",
-		Source:                validated.Registration,
-		MetadataURL:           validated.MetadataURL,
-		MetadataVersion:       validated.Document.Version,
-		MetadataPayloadDigest: hex.EncodeToString(payloadDigest[:]),
-		PublicJWKPath:         publicJWKPath,
-		TypeMetadataStorePath: typeStore,
-		IssuanceEnvPath:       issuanceEnvPath,
-		Types:                 types,
-		Certificates:          certificates,
+		SchemaVersion:              "1.0",
+		Source:                     validated.Registration,
+		MetadataURL:                validated.MetadataURL,
+		MetadataVersion:            validated.Document.Version,
+		MetadataPayloadDigest:      hex.EncodeToString(payloadDigest[:]),
+		PublicJWKReference:         publicJWKPath,
+		TypeMetadataStoreReference: typeStore,
+		IssuanceConfigReference:    issuanceEnvPath,
+		Types:                      types,
+		Certificates:               certificates,
 	}
 	activationBytes, err := json.MarshalIndent(activation, "", "  ")
 	if err != nil {
@@ -202,7 +246,7 @@ func activateLocalSource(validated *validatedSourceRegistration, options onboard
 	return activation, nil
 }
 
-func writeLocalIssuanceEnvironment(secretRoot, sourceOIN string, certificates certificateArtifacts) (string, error) {
+func writeFilesystemIssuanceEnvironment(secretRoot, sourceOIN string, certificates certificateArtifacts) (string, error) {
 	readBase64 := func(path string) (string, error) {
 		raw, err := os.ReadFile(path)
 		if err != nil {
@@ -216,12 +260,12 @@ func writeLocalIssuanceEnvironment(secretRoot, sourceOIN string, certificates ce
 	}
 	values := make(map[string]string)
 	for name, path := range map[string]string{
-		"EUDI_ISSUER_KEY":  certificates.IssuerKeyPath,
-		"EUDI_ISSUER_CERT": certificates.IssuerCertPath,
-		"EUDI_READER_KEY":  certificates.ReaderKeyPath,
-		"EUDI_READER_CERT": certificates.ReaderCertPath,
-		"EUDI_STATUS_KEY":  certificates.StatusKeyPath,
-		"EUDI_STATUS_CERT": certificates.StatusCertPath,
+		"EUDI_ISSUER_KEY":  certificates.IssuerKeyReference,
+		"EUDI_ISSUER_CERT": certificates.IssuerCertReference,
+		"EUDI_READER_KEY":  certificates.ReaderKeyReference,
+		"EUDI_READER_CERT": certificates.ReaderCertReference,
+		"EUDI_STATUS_KEY":  certificates.StatusKeyReference,
+		"EUDI_STATUS_CERT": certificates.StatusCertReference,
 	} {
 		value, err := readBase64(path)
 		if err != nil {
@@ -230,8 +274,8 @@ func writeLocalIssuanceEnvironment(secretRoot, sourceOIN string, certificates ce
 		values[name] = value
 	}
 	for name, path := range map[string]string{
-		"EUDI_ONBOARDING_ISSUER_TRUST_ANCHOR": certificates.IssuerCACertPath,
-		"EUDI_ONBOARDING_READER_TRUST_ANCHOR": certificates.ReaderCACertPath,
+		"EUDI_ONBOARDING_ISSUER_TRUST_ANCHOR": certificates.IssuerCACertReference,
+		"EUDI_ONBOARDING_READER_TRUST_ANCHOR": certificates.ReaderCACertReference,
 	} {
 		raw, err := os.ReadFile(path)
 		if err != nil {
@@ -249,7 +293,7 @@ func writeLocalIssuanceEnvironment(secretRoot, sourceOIN string, certificates ce
 		"EUDI_ONBOARDING_READER_TRUST_ANCHOR",
 	}
 	var body strings.Builder
-	body.WriteString("# Generated by onboard-source --env local; contains private keys.\n")
+	body.WriteString("# Generated by onboard-source with storage-backend=filesystem; contains private keys.\n")
 	for _, name := range order {
 		_, _ = fmt.Fprintf(&body, "%s='%s'\n", name, values[name])
 	}
