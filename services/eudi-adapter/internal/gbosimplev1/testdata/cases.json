@@ -1,0 +1,124 @@
+{
+  "valid_mappings": [
+    {
+      "name": "copy rename flatten and preserve number",
+      "mapping": {
+        "full_name": {"pointer": "/person/name", "datatype": "string"},
+        "active": {"pointer": "/person/active", "datatype": "boolean"},
+        "birth_date": {"pointer": "/person/birth/date", "datatype": "date"},
+        "year": {"pointer": "/year", "datatype": "gYear"},
+        "amount": {
+          "pointer": "/amount/value",
+          "datatype": "number"
+        }
+      }
+    }
+  ],
+  "invalid_mappings": [
+    {
+      "name": "filter operator is not part of the profile",
+      "mapping": {"claim": {"pointer": "/value", "datatype": "string", "filter": "first"}},
+      "error_code": "GBO_SIMPLE_MAPPING_INVALID"
+    },
+    {
+      "name": "sorting is not part of the profile",
+      "mapping": {"claim": {"pointer": "/value", "datatype": "string", "sort": "ascending"}},
+      "error_code": "GBO_SIMPLE_MAPPING_INVALID"
+    },
+    {
+      "name": "first selection is not part of the profile",
+      "mapping": {"claim": {"pointer": "/value", "datatype": "string", "first": true}},
+      "error_code": "GBO_SIMPLE_MAPPING_INVALID"
+    },
+    {
+      "name": "joins are not part of the profile",
+      "mapping": {"claim": {"pointer": "/value", "datatype": "string", "join": "/other"}},
+      "error_code": "GBO_SIMPLE_MAPPING_INVALID"
+    },
+    {
+      "name": "conditionals are not part of the profile",
+      "mapping": {"claim": {"pointer": "/value", "datatype": "string", "if": "present"}},
+      "error_code": "GBO_SIMPLE_MAPPING_INVALID"
+    },
+    {
+      "name": "scripts are not part of the profile",
+      "mapping": {"claim": {"pointer": "/value", "datatype": "string", "script": "return value"}},
+      "error_code": "GBO_SIMPLE_MAPPING_INVALID"
+    },
+    {
+      "name": "external IO is not part of the profile",
+      "mapping": {"claim": {"pointer": "/value", "datatype": "string", "url": "https://example.invalid"}},
+      "error_code": "GBO_SIMPLE_MAPPING_INVALID"
+    },
+    {
+      "name": "transforms are not part of the profile",
+      "mapping": {
+        "claim": {
+          "pointer": "/value",
+          "datatype": "integer",
+          "transform": {
+            "operator": "round"
+          }
+        }
+      },
+      "error_code": "GBO_SIMPLE_MAPPING_INVALID"
+    },
+    {
+      "name": "invalid pointer escape",
+      "mapping": {"claim": {"pointer": "/bad~2pointer", "datatype": "string"}},
+      "error_code": "GBO_SIMPLE_MAPPING_INVALID"
+    }
+  ],
+  "projections": [
+    {
+      "name": "valid scalars preserve decimal number",
+      "input": {"data": {"rows": [{"person": {"name": "Ada", "active": true, "birth": {"date": "1815-12-10"}}, "year": 2025, "amount": {"value": 43.50, "currency": "EUR"}}]}},
+      "result_pointer": "/data/rows",
+      "mapping_ref": "copy rename flatten and preserve number",
+      "outcome": "credential",
+      "claims": {"full_name": "Ada", "active": true, "birth_date": "1815-12-10", "year": 2025, "amount": 43.50}
+    },
+    {
+      "name": "no rows is no data",
+      "input": {"data": {"rows": []}},
+      "result_pointer": "/data/rows",
+      "mapping_ref": "copy rename flatten and preserve number",
+      "outcome": "no_data"
+    },
+    {
+      "name": "multiple rows are ambiguous",
+      "input": {"data": {"rows": [{}, {}]}},
+      "result_pointer": "/data/rows",
+      "mapping_ref": "copy rename flatten and preserve number",
+      "error_code": "GBO_SIMPLE_CARDINALITY_AMBIGUOUS"
+    },
+    {
+      "name": "missing claim path",
+      "input": {"data": {"rows": [{"person": {"active": true}}]}},
+      "result_pointer": "/data/rows",
+      "mapping": {"claim": {"pointer": "/missing", "datatype": "string"}},
+      "error_code": "GBO_SIMPLE_PATH_MISSING"
+    },
+    {
+      "name": "wrong scalar type",
+      "input": {"data": {"rows": [{"value": "42"}]}},
+      "result_pointer": "/data/rows",
+      "mapping": {"claim": {"pointer": "/value", "datatype": "integer"}},
+      "error_code": "GBO_SIMPLE_TYPE_MISMATCH"
+    },
+    {
+      "name": "null mapped claim is a type mismatch",
+      "input": {"data": {"rows": [{"value": null}]}},
+      "result_pointer": "/data/rows",
+      "mapping": {"claim": {"pointer": "/value", "datatype": "string"}},
+      "error_code": "GBO_SIMPLE_TYPE_MISMATCH"
+    },
+    {
+      "name": "signed array index is not canonical",
+      "input": {"data": {"rows": [{"values": ["zero"]}]}},
+      "result_pointer": "/data/rows",
+      "mapping": {"claim": {"pointer": "/values/+0", "datatype": "string"}},
+      "error_code": "GBO_SIMPLE_PATH_MISSING"
+    }
+  ]
+}

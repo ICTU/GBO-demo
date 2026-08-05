@@ -23,12 +23,7 @@ import (
 var testBase64URL = base64.RawURLEncoding
 
 func TestShippedSourceMetadataMatchesEnvelopeSchema(t *testing.T) {
-	compiler := jsonschema.NewCompiler()
-	compiler.AssertFormat()
-	schema, err := compiler.Compile("../../schemas/gbo-attestations-v1.schema.json")
-	if err != nil {
-		t.Fatalf("compile source metadata schema: %v", err)
-	}
+	schema := compileSourceMetadataSchema(t)
 	metadataFile, err := os.Open("../graphql-server/config/gbo-attestations.json")
 	if err != nil {
 		t.Fatalf("open shipped source metadata: %v", err)
@@ -40,6 +35,101 @@ func TestShippedSourceMetadataMatchesEnvelopeSchema(t *testing.T) {
 	}
 	if err := schema.Validate(metadata); err != nil {
 		t.Fatalf("shipped source metadata does not match envelope schema: %v", err)
+	}
+}
+
+func compileSourceMetadataSchema(t *testing.T) *jsonschema.Schema {
+	t.Helper()
+	compiler := jsonschema.NewCompiler()
+	compiler.AssertFormat()
+	mappingSchemaFile, err := os.Open("../../schemas/gbo-simple-v1.schema.json")
+	if err != nil {
+		t.Fatalf("open mapping profile schema: %v", err)
+	}
+	defer mappingSchemaFile.Close()
+	mappingSchema, err := jsonschema.UnmarshalJSON(mappingSchemaFile)
+	if err != nil {
+		t.Fatalf("parse mapping profile schema: %v", err)
+	}
+	if err := compiler.AddResource("urn:gov:nl:gbo:schema:gbo-simple-v1:1", mappingSchema); err != nil {
+		t.Fatalf("register mapping profile schema: %v", err)
+	}
+	schema, err := compiler.Compile("../../schemas/gbo-attestations-v1.schema.json")
+	if err != nil {
+		t.Fatalf("compile source metadata schema: %v", err)
+	}
+	return schema
+}
+
+func TestAttributeSchemaUnknownPropertiesRejectedByRuntimeAndEnvelopeSchema(t *testing.T) {
+	raw, err := os.ReadFile("../graphql-server/config/gbo-attestations.json")
+	if err != nil {
+		t.Fatalf("read shipped source metadata: %v", err)
+	}
+	schema := compileSourceMetadataSchema(t)
+	for property, value := range map[string]any{"scale": 0, "anything": "goes"} {
+		t.Run(property, func(t *testing.T) {
+			var envelope map[string]any
+			if err := json.Unmarshal(raw, &envelope); err != nil {
+				t.Fatalf("decode source metadata: %v", err)
+			}
+			attestations := envelope["attestations"].([]any)
+			attestation := attestations[0].(map[string]any)
+			attributes := attestation["attribute_schema"].(map[string]any)
+			amount := attributes["verzamelinkomen"].(map[string]any)
+			amount[property] = value
+			mutated, err := json.Marshal(envelope)
+			if err != nil {
+				t.Fatalf("encode mutated source metadata: %v", err)
+			}
+
+			var document sourceMetadataDocument
+			if err := json.Unmarshal(mutated, &document); err == nil || !strings.Contains(err.Error(), "unknown field") {
+				t.Fatalf("runtime decode error = %v, want unknown field rejection", err)
+			}
+			metadata, err := jsonschema.UnmarshalJSON(bytes.NewReader(mutated))
+			if err != nil {
+				t.Fatalf("parse mutated metadata for schema: %v", err)
+			}
+			if err := schema.Validate(metadata); err == nil {
+				t.Fatal("envelope schema accepted unknown attribute_schema property")
+			}
+		})
+	}
+}
+
+func TestAttributeSchemaUnitRejectedByRuntimeAndEnvelopeSchema(t *testing.T) {
+	raw, err := os.ReadFile("../graphql-server/config/gbo-attestations.json")
+	if err != nil {
+		t.Fatalf("read shipped source metadata: %v", err)
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		t.Fatalf("decode source metadata: %v", err)
+	}
+	attestations := envelope["attestations"].([]any)
+	attestation := attestations[0].(map[string]any)
+	attributes := attestation["attribute_schema"].(map[string]any)
+	amount := attributes["verzamelinkomen"].(map[string]any)
+	amount["unit"] = "eur"
+	mutated, err := json.Marshal(envelope)
+	if err != nil {
+		t.Fatalf("encode mutated source metadata: %v", err)
+	}
+
+	var document sourceMetadataDocument
+	if err := json.Unmarshal(mutated, &document); err != nil {
+		t.Fatalf("runtime decode error = %v", err)
+	}
+	if err := validateSourceAttestation(document.Attestations[0]); err == nil || !strings.Contains(err.Error(), "ISO 4217") {
+		t.Fatalf("runtime validation error = %v, want ISO 4217 rejection", err)
+	}
+	metadata, err := jsonschema.UnmarshalJSON(bytes.NewReader(mutated))
+	if err != nil {
+		t.Fatalf("parse mutated metadata for schema: %v", err)
+	}
+	if err := compileSourceMetadataSchema(t).Validate(metadata); err == nil {
+		t.Fatal("envelope schema accepted lowercase attribute_schema unit")
 	}
 }
 
@@ -363,12 +453,12 @@ func TestMetadataPilotDoesNotApplyToAnotherBDUsecase(t *testing.T) {
 func phase1IncomeMapping() map[string]mappingRule {
 	return map[string]mappingRule{
 		"belastingjaar":   {Pointer: "/belastingjaar", Datatype: "gYear"},
-		"verzamelinkomen": {Pointer: "/verzamelinkomen/waarde", Datatype: "integer"},
+		"verzamelinkomen": {Pointer: "/verzamelinkomen/waarde", Datatype: "number"},
 		"aangifte_status": {Pointer: "/status", Datatype: "string"},
 		"indieningsdatum": {Pointer: "/indieningsdatum", Datatype: "date"},
-		"inkomen_box1":    {Pointer: "/box1Inkomen/waarde", Datatype: "integer"},
-		"inkomen_box2":    {Pointer: "/box2Inkomen/waarde", Datatype: "integer"},
-		"inkomen_box3":    {Pointer: "/box3Inkomen/waarde", Datatype: "integer"},
+		"inkomen_box1":    {Pointer: "/box1Inkomen/waarde", Datatype: "number"},
+		"inkomen_box2":    {Pointer: "/box2Inkomen/waarde", Datatype: "number"},
+		"inkomen_box3":    {Pointer: "/box3Inkomen/waarde", Datatype: "number"},
 	}
 }
 
@@ -441,7 +531,7 @@ func TestMetadataPilotReportsMismatchWhenSourceOmitsLegacyClaim(t *testing.T) {
 	}
 }
 
-func TestMetadataPilotReportsProjectionErrorForNonIntegralAmount(t *testing.T) {
+func TestMetadataPilotReportsMismatchWhenLegacyTruncatesCents(t *testing.T) {
 	responseWithCents := strings.Replace(completeIncomeResponse, "43000.0", "43000.50", 1)
 	srv := newIncomeShadowAdapter(t, phase1IncomeMapping(), responseWithCents)
 
@@ -451,7 +541,7 @@ func TestMetadataPilotReportsProjectionErrorForNonIntegralAmount(t *testing.T) {
 		raw, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status = %d, want 200; body = %s", resp.StatusCode, string(raw))
 	}
-	if got, want := resp.Header.Get("X-GBO-Metadata-Shadow"), "error"; got != want {
+	if got, want := resp.Header.Get("X-GBO-Metadata-Shadow"), "mismatch"; got != want {
 		t.Errorf("X-GBO-Metadata-Shadow = %q, want %q", got, want)
 	}
 }
@@ -542,6 +632,9 @@ func TestSourceMetadataRejectedDuringOnboarding(t *testing.T) {
 				"mapping": map[string]any{
 					"belastingjaar": map[string]any{"pointer": "/belastingjaar", "datatype": "gYear"},
 				},
+				"attribute_schema": map[string]any{
+					"belastingjaar": map[string]any{"type": "integer", "format": "gYear"},
+				},
 			}},
 		})
 		if err != nil {
@@ -592,6 +685,30 @@ func TestSourceMetadataRejectedDuringOnboarding(t *testing.T) {
 			pinnedKey:   publicJWK(t, publicKey),
 			expectedOIN: "00000001003214345000",
 			wantError:   "invalid GraphQL document",
+		},
+		{
+			name: "mapping property outside closed profile",
+			payload: bytes.Replace(
+				metadataPayload(t, "00000001003214345000", validQuery),
+				[]byte(`"datatype":"gYear"`),
+				[]byte(`"datatype":"gYear","filter":"first"`),
+				1,
+			),
+			pinnedKey:   publicJWK(t, publicKey),
+			expectedOIN: "00000001003214345000",
+			wantError:   "GBO_SIMPLE_MAPPING_INVALID",
+		},
+		{
+			name: "mapping transform outside closed profile",
+			payload: bytes.Replace(
+				metadataPayload(t, "00000001003214345000", validQuery),
+				[]byte(`"datatype":"gYear"`),
+				[]byte(`"datatype":"integer","transform":{"operator":"round"}`),
+				1,
+			),
+			pinnedKey:   publicJWK(t, publicKey),
+			expectedOIN: "00000001003214345000",
+			wantError:   "GBO_SIMPLE_MAPPING_INVALID",
 		},
 		{
 			name:        "unsupported envelope schema version",
