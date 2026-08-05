@@ -20,6 +20,7 @@ type sourceMetadataPrivateJWK struct {
 
 type sourceMetadataPublisher struct {
 	compactJWS []byte
+	etag       string
 }
 
 // newSourceMetadataPublisher validates the source-owned payload and private
@@ -60,7 +61,11 @@ func newSourceMetadataPublisher(payload, rawPrivateJWK []byte) (*sourceMetadataP
 	signingInput := sourceMetadataBase64URL.EncodeToString(protected) + "." + sourceMetadataBase64URL.EncodeToString(payload)
 	signature := ed25519.Sign(privateKey, []byte(signingInput))
 	compact := signingInput + "." + sourceMetadataBase64URL.EncodeToString(signature)
-	return &sourceMetadataPublisher{compactJWS: []byte(compact)}, nil
+	digest := sha256.Sum256([]byte(compact))
+	return &sourceMetadataPublisher{
+		compactJWS: []byte(compact),
+		etag:       `"` + fmt.Sprintf("%x", digest) + `"`,
+	}, nil
 }
 
 func (p *sourceMetadataPublisher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -70,6 +75,11 @@ func (p *sourceMetadataPublisher) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	}
 	w.Header().Set("Content-Type", "application/jose")
 	w.Header().Set("Cache-Control", "public, max-age=300")
+	w.Header().Set("ETag", p.etag)
+	if r.Header.Get("If-None-Match") == p.etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(p.compactJWS)
 }
