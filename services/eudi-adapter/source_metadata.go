@@ -109,10 +109,11 @@ type sourceMetadataJWK struct {
 }
 
 type sourceMetadataJWSHeader struct {
-	Algorithm string   `json:"alg"`
-	KeyID     string   `json:"kid"`
-	Type      string   `json:"typ"`
-	Critical  []string `json:"crit,omitempty"`
+	Algorithm string             `json:"alg"`
+	KeyID     string             `json:"kid"`
+	Type      string             `json:"typ"`
+	Critical  []string           `json:"crit,omitempty"`
+	JWK       *sourceMetadataJWK `json:"jwk,omitempty"`
 }
 
 // phase1ExpectedIncomeClaims is the migration baseline, deliberately kept
@@ -281,6 +282,38 @@ func sourceMetadataJWKThumbprint(jwk sourceMetadataJWK) string {
 	canonical := fmt.Sprintf(`{"crv":"%s","kty":"%s","x":"%s"}`, jwk.CRV, jwk.KTY, jwk.X)
 	digest := sha256.Sum256([]byte(canonical))
 	return sourceMetadataBase64URL.EncodeToString(digest[:])
+}
+
+func verifySourceMetadataJWSWithThumbprint(compact, expectedThumbprint string) ([]byte, json.RawMessage, error) {
+	parts := strings.Split(compact, ".")
+	if len(parts) != 3 {
+		return nil, nil, fmt.Errorf("source metadata is not a compact JWS")
+	}
+	protected, err := sourceMetadataBase64URL.DecodeString(parts[0])
+	if err != nil {
+		return nil, nil, fmt.Errorf("decode source metadata JWS header: %w", err)
+	}
+	var header sourceMetadataJWSHeader
+	if err := json.Unmarshal(protected, &header); err != nil {
+		return nil, nil, fmt.Errorf("parse source metadata JWS header: %w", err)
+	}
+	if header.JWK == nil {
+		return nil, nil, fmt.Errorf("source metadata JWS header has no public jwk")
+	}
+	actual := sourceMetadataJWKThumbprint(*header.JWK)
+	want := strings.TrimPrefix(expectedThumbprint, "sha256-")
+	if want == "" || actual != want {
+		return nil, nil, fmt.Errorf("source metadata JWK thumbprint does not match the registered thumbprint")
+	}
+	rawJWK, err := json.Marshal(header.JWK)
+	if err != nil {
+		return nil, nil, fmt.Errorf("marshal source metadata public JWK: %w", err)
+	}
+	payload, err := verifySourceMetadataJWS(compact, rawJWK)
+	if err != nil {
+		return nil, nil, err
+	}
+	return payload, rawJWK, nil
 }
 
 func validateSourceAttestation(definition sourceAttestationDefinition) error {

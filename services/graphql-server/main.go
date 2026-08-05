@@ -377,6 +377,12 @@ func fatal(msg string, err error) {
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", "graphql-server"))
+	if handled, err := runDevelopmentMetadataKeyCommand(os.Args[1:], os.Stdout, os.Stderr); handled {
+		if err != nil {
+			fatal("initializing development metadata key", err)
+		}
+		return
+	}
 
 	cfg, err := loadConfig()
 	if err != nil {

@@ -18,11 +18,13 @@ import (
 // source-owned type version. Integrity is calculated over Body exactly as it
 // is served; the source can supply neither the VCT nor its integrity value.
 type typeMetadataPublication struct {
-	VCT       string
-	Integrity string
-	body      []byte
-	etag      string
-	path      string
+	TypeID      string
+	TypeVersion string
+	VCT         string
+	Integrity   string
+	body        []byte
+	etag        string
+	path        string
 }
 
 func newTypeMetadataPublication(publicBaseURL, sourceOIN string, definition sourceAttestationDefinition) (*typeMetadataPublication, error) {
@@ -57,11 +59,13 @@ func newTypeMetadataPublication(publicBaseURL, sourceOIN string, definition sour
 	}
 	digest := sha256.Sum256(body)
 	return &typeMetadataPublication{
-		VCT:       vct,
-		Integrity: "sha256-" + base64.StdEncoding.EncodeToString(digest[:]),
-		body:      body,
-		etag:      `"` + fmt.Sprintf("%x", digest) + `"`,
-		path:      path,
+		TypeID:      definition.TypeID,
+		TypeVersion: definition.TypeVersion,
+		VCT:         vct,
+		Integrity:   "sha256-" + base64.StdEncoding.EncodeToString(digest[:]),
+		body:        body,
+		etag:        `"` + fmt.Sprintf("%x", digest) + `"`,
+		path:        path,
 	}, nil
 }
 

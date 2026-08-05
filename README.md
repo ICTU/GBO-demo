@@ -217,6 +217,10 @@ Without a volume wipe, contracts and grant-links survive a restart.
 
 ## EUDI public reachability
 
+Voor het lokaal registreren, valideren en provisionen van door de bron
+geleverde attestatiedefinities, zie
+[Lokale onboarding van bronmetadata](docs/source-onboarding.md).
+
 The EUDI flow needs two publicly-reachable HTTPS URLs:
 
 - `EUDI_PUBLIC_URL` — the wallet on a phone opens this to talk to the `issuance-server`.

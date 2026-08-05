@@ -147,6 +147,7 @@ func signSourceMetadataWithHeaderForTest(t *testing.T, payload []byte, privateKe
 		"alg": "EdDSA",
 		"kid": testBase64URL.EncodeToString(thumbprint[:]),
 		"typ": "gbo-attestations+jws",
+		"jwk": map[string]string{"kty": "OKP", "crv": "Ed25519", "x": x},
 	}
 	for name, value := range extra {
 		protected[name] = value

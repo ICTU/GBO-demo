@@ -157,6 +157,11 @@ services:
     environment:
       - OTEL_SERVICE_NAME=graphql-server
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - GBO_ATTESTATIONS_PATH=${GBO_ATTESTATIONS_PATH:-}
+      - GBO_METADATA_SIGNING_JWK_PATH=${GBO_METADATA_SIGNING_JWK_PATH:-}
+    volumes:
+      - ./services/graphql-server/config:/config:ro
+      - ./.local/secrets/source-metadata/99999999900000000200:/source-metadata:ro
     networks:
       - backend
       # bd-Inway forwards bri requests to graphql-server; must therefore
@@ -706,7 +711,9 @@ services:
       # Phase-3 pilot; remains off until phase-4 onboarding has provisioned
       # the pinned source key and the matching issuance-server VCT.
       - SOURCE_METADATA_CACHE_ENABLED=${SOURCE_METADATA_CACHE_ENABLED:-false}
-      - SOURCE_METADATA_OUTWAY_PATH=${SOURCE_METADATA_OUTWAY_PATH:-}
+      - SOURCE_METADATA_OUTWAY_PATH=${SOURCE_METADATA_OUTWAY_PATH:-/gbo-attestation-metadata/.well-known/gbo-attestations}
+      # No demo trust defaults: enabling the cache without an explicitly
+      # onboarded source/key must fail closed.
       - SOURCE_METADATA_OIN=${SOURCE_METADATA_OIN:-}
       - SOURCE_METADATA_PUBLIC_JWK_PATH=${SOURCE_METADATA_PUBLIC_JWK_PATH:-}
       - SOURCE_METADATA_TYPE_ID=${SOURCE_METADATA_TYPE_ID:-inkomensverklaring}
@@ -715,7 +722,8 @@ services:
       - TYPE_METADATA_STORE_PATH=/var/lib/gbo/type-metadata
     volumes:
       - ./services/eudi-adapter/config:/config:ro
-      - eudi-type-metadata:/var/lib/gbo/type-metadata
+      - ./.local/onboarding/type-metadata:/var/lib/gbo/type-metadata
+      - ./.local/onboarding/trust:/var/lib/gbo/source-trust:ro
     networks:
       - eudi
       - backend
@@ -736,4 +744,3 @@ volumes:
   dev-portal-var:
   postgres-eudi-data:
   eudi-tsl-publish:
-  eudi-type-metadata:
