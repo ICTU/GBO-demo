@@ -1,22 +1,15 @@
 {
   "valid_mappings": [
     {
-      "name": "copy rename flatten and exact money",
+      "name": "copy rename flatten and preserve number",
       "mapping": {
         "full_name": {"pointer": "/person/name", "datatype": "string"},
         "active": {"pointer": "/person/active", "datatype": "boolean"},
         "birth_date": {"pointer": "/person/birth/date", "datatype": "date"},
         "year": {"pointer": "/year", "datatype": "gYear"},
-        "amount_minor": {
+        "amount": {
           "pointer": "/amount/value",
-          "datatype": "integer",
-          "transform": {
-            "operator": "money_scale",
-            "currency_pointer": "/amount/currency",
-            "currency": "EUR",
-            "source_scale": 2,
-            "target_scale": 2
-          }
+          "datatype": "number"
         }
       }
     }
@@ -58,66 +51,45 @@
       "error_code": "GBO_SIMPLE_MAPPING_INVALID"
     },
     {
-      "name": "unknown transform operator",
+      "name": "transforms are not part of the profile",
       "mapping": {
         "claim": {
           "pointer": "/value",
           "datatype": "integer",
           "transform": {
-            "operator": "round",
-            "currency_pointer": "/currency",
-            "currency": "EUR",
-            "source_scale": 2,
-            "target_scale": 0
+            "operator": "round"
           }
         }
       },
-      "error_code": "GBO_SIMPLE_CONVERSION_UNSUPPORTED"
+      "error_code": "GBO_SIMPLE_MAPPING_INVALID"
     },
     {
       "name": "invalid pointer escape",
       "mapping": {"claim": {"pointer": "/bad~2pointer", "datatype": "string"}},
       "error_code": "GBO_SIMPLE_MAPPING_INVALID"
-    },
-    {
-      "name": "money transform requires integer output",
-      "mapping": {
-        "claim": {
-          "pointer": "/value",
-          "datatype": "number",
-          "transform": {
-            "operator": "money_scale",
-            "currency_pointer": "/currency",
-            "currency": "EUR",
-            "source_scale": 2,
-            "target_scale": 0
-          }
-        }
-      },
-      "error_code": "GBO_SIMPLE_MAPPING_INVALID"
     }
   ],
   "projections": [
     {
-      "name": "valid scalar and exact money projection",
+      "name": "valid scalars preserve decimal number",
       "input": {"data": {"rows": [{"person": {"name": "Ada", "active": true, "birth": {"date": "1815-12-10"}}, "year": 2025, "amount": {"value": 43.50, "currency": "EUR"}}]}},
       "result_pointer": "/data/rows",
-      "mapping_ref": "copy rename flatten and exact money",
+      "mapping_ref": "copy rename flatten and preserve number",
       "outcome": "credential",
-      "claims": {"full_name": "Ada", "active": true, "birth_date": "1815-12-10", "year": 2025, "amount_minor": 4350}
+      "claims": {"full_name": "Ada", "active": true, "birth_date": "1815-12-10", "year": 2025, "amount": 43.50}
     },
     {
       "name": "no rows is no data",
       "input": {"data": {"rows": []}},
       "result_pointer": "/data/rows",
-      "mapping_ref": "copy rename flatten and exact money",
+      "mapping_ref": "copy rename flatten and preserve number",
       "outcome": "no_data"
     },
     {
       "name": "multiple rows are ambiguous",
       "input": {"data": {"rows": [{}, {}]}},
       "result_pointer": "/data/rows",
-      "mapping_ref": "copy rename flatten and exact money",
+      "mapping_ref": "copy rename flatten and preserve number",
       "error_code": "GBO_SIMPLE_CARDINALITY_AMBIGUOUS"
     },
     {
@@ -133,32 +105,6 @@
       "result_pointer": "/data/rows",
       "mapping": {"claim": {"pointer": "/value", "datatype": "integer"}},
       "error_code": "GBO_SIMPLE_TYPE_MISMATCH"
-    },
-    {
-      "name": "currency mismatch",
-      "input": {"data": {"rows": [{"amount": {"value": 42.00, "currency": "USD"}}]}},
-      "result_pointer": "/data/rows",
-      "mapping": {
-        "claim": {
-          "pointer": "/amount/value",
-          "datatype": "integer",
-          "transform": {"operator": "money_scale", "currency_pointer": "/amount/currency", "currency": "EUR", "source_scale": 2, "target_scale": 0}
-        }
-      },
-      "error_code": "GBO_SIMPLE_CURRENCY_MISMATCH"
-    },
-    {
-      "name": "inexact whole-euro conversion",
-      "input": {"data": {"rows": [{"amount": {"value": 43000.50, "currency": "EUR"}}]}},
-      "result_pointer": "/data/rows",
-      "mapping": {
-        "claim": {
-          "pointer": "/amount/value",
-          "datatype": "integer",
-          "transform": {"operator": "money_scale", "currency_pointer": "/amount/currency", "currency": "EUR", "source_scale": 2, "target_scale": 0}
-        }
-      },
-      "error_code": "GBO_SIMPLE_MONEY_INEXACT"
     }
   ]
 }

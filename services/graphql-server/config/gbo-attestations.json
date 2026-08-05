@@ -28,14 +28,7 @@
         },
         "verzamelinkomen": {
           "pointer": "/verzamelinkomen/waarde",
-          "datatype": "integer",
-          "transform": {
-            "operator": "money_scale",
-            "currency_pointer": "/verzamelinkomen/valuta",
-            "currency": "EUR",
-            "source_scale": 2,
-            "target_scale": 0
-          }
+          "datatype": "number"
         },
         "aangifte_status": {
           "pointer": "/status",
@@ -47,36 +40,15 @@
         },
         "inkomen_box1": {
           "pointer": "/box1Inkomen/waarde",
-          "datatype": "integer",
-          "transform": {
-            "operator": "money_scale",
-            "currency_pointer": "/box1Inkomen/valuta",
-            "currency": "EUR",
-            "source_scale": 2,
-            "target_scale": 0
-          }
+          "datatype": "number"
         },
         "inkomen_box2": {
           "pointer": "/box2Inkomen/waarde",
-          "datatype": "integer",
-          "transform": {
-            "operator": "money_scale",
-            "currency_pointer": "/box2Inkomen/valuta",
-            "currency": "EUR",
-            "source_scale": 2,
-            "target_scale": 0
-          }
+          "datatype": "number"
         },
         "inkomen_box3": {
           "pointer": "/box3Inkomen/waarde",
-          "datatype": "integer",
-          "transform": {
-            "operator": "money_scale",
-            "currency_pointer": "/box3Inkomen/valuta",
-            "currency": "EUR",
-            "source_scale": 2,
-            "target_scale": 0
-          }
+          "datatype": "number"
         }
       },
       "attribute_schema": {
@@ -85,9 +57,8 @@
           "format": "gYear"
         },
         "verzamelinkomen": {
-          "type": "integer",
-          "unit": "EUR",
-          "scale": 0
+          "type": "number",
+          "unit": "EUR"
         },
         "aangifte_status": {
           "type": "string"
@@ -97,19 +68,16 @@
           "format": "date"
         },
         "inkomen_box1": {
-          "type": "integer",
-          "unit": "EUR",
-          "scale": 0
+          "type": "number",
+          "unit": "EUR"
         },
         "inkomen_box2": {
-          "type": "integer",
-          "unit": "EUR",
-          "scale": 0
+          "type": "number",
+          "unit": "EUR"
         },
         "inkomen_box3": {
-          "type": "integer",
-          "unit": "EUR",
-          "scale": 0
+          "type": "number",
+          "unit": "EUR"
         }
       },
       "type_metadata": {
@@ -142,22 +110,22 @@
           },
           {
             "path": ["verzamelinkomen"],
-            "display": [{"lang": "nl-NL", "label": "Verzamelinkomen", "description": "Bedrag in hele euro's"}],
+            "display": [{"lang": "nl-NL", "label": "Verzamelinkomen", "description": "Bedrag in euro's"}],
             "sd": "always"
           },
           {
             "path": ["inkomen_box1"],
-            "display": [{"lang": "nl-NL", "label": "Inkomen box 1", "description": "Bedrag in hele euro's"}],
+            "display": [{"lang": "nl-NL", "label": "Inkomen box 1", "description": "Bedrag in euro's"}],
             "sd": "always"
           },
           {
             "path": ["inkomen_box2"],
-            "display": [{"lang": "nl-NL", "label": "Inkomen box 2", "description": "Bedrag in hele euro's"}],
+            "display": [{"lang": "nl-NL", "label": "Inkomen box 2", "description": "Bedrag in euro's"}],
             "sd": "always"
           },
           {
             "path": ["inkomen_box3"],
-            "display": [{"lang": "nl-NL", "label": "Inkomen box 3", "description": "Bedrag in hele euro's"}],
+            "display": [{"lang": "nl-NL", "label": "Inkomen box 3", "description": "Bedrag in euro's"}],
             "sd": "always"
           },
           {
@@ -173,10 +141,10 @@
           "properties": {
             "belastingjaar": {"type": "integer"},
             "indieningsdatum": {"type": "string", "format": "date"},
-            "verzamelinkomen": {"type": "integer"},
-            "inkomen_box1": {"type": "integer"},
-            "inkomen_box2": {"type": "integer"},
-            "inkomen_box3": {"type": "integer"},
+            "verzamelinkomen": {"type": "number"},
+            "inkomen_box1": {"type": "number"},
+            "inkomen_box2": {"type": "number"},
+            "inkomen_box3": {"type": "number"},
             "aangifte_status": {"type": "string"}
           },
           "required": ["belastingjaar", "verzamelinkomen"]

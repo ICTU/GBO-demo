@@ -17,8 +17,6 @@ import (
 	"strings"
 	"testing"
 
-	"gbo-demo/eudi-adapter/internal/gbosimplev1"
-
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -377,26 +375,12 @@ func TestMetadataPilotDoesNotApplyToAnotherBDUsecase(t *testing.T) {
 func phase1IncomeMapping() map[string]mappingRule {
 	return map[string]mappingRule{
 		"belastingjaar":   {Pointer: "/belastingjaar", Datatype: "gYear"},
-		"verzamelinkomen": incomeMoneyRule("verzamelinkomen"),
+		"verzamelinkomen": {Pointer: "/verzamelinkomen/waarde", Datatype: "number"},
 		"aangifte_status": {Pointer: "/status", Datatype: "string"},
 		"indieningsdatum": {Pointer: "/indieningsdatum", Datatype: "date"},
-		"inkomen_box1":    incomeMoneyRule("box1Inkomen"),
-		"inkomen_box2":    incomeMoneyRule("box2Inkomen"),
-		"inkomen_box3":    incomeMoneyRule("box3Inkomen"),
-	}
-}
-
-func incomeMoneyRule(field string) mappingRule {
-	return mappingRule{
-		Pointer:  "/" + field + "/waarde",
-		Datatype: "integer",
-		Transform: &gbosimplev1.Transform{
-			Operator:        "money_scale",
-			CurrencyPointer: "/" + field + "/valuta",
-			Currency:        "EUR",
-			SourceScale:     2,
-			TargetScale:     0,
-		},
+		"inkomen_box1":    {Pointer: "/box1Inkomen/waarde", Datatype: "number"},
+		"inkomen_box2":    {Pointer: "/box2Inkomen/waarde", Datatype: "number"},
+		"inkomen_box3":    {Pointer: "/box3Inkomen/waarde", Datatype: "number"},
 	}
 }
 
@@ -469,7 +453,7 @@ func TestMetadataPilotReportsMismatchWhenSourceOmitsLegacyClaim(t *testing.T) {
 	}
 }
 
-func TestMetadataPilotReportsProjectionErrorForNonIntegralAmount(t *testing.T) {
+func TestMetadataPilotReportsMismatchWhenLegacyTruncatesCents(t *testing.T) {
 	responseWithCents := strings.Replace(completeIncomeResponse, "43000.0", "43000.50", 1)
 	srv := newIncomeShadowAdapter(t, phase1IncomeMapping(), responseWithCents)
 
@@ -479,7 +463,7 @@ func TestMetadataPilotReportsProjectionErrorForNonIntegralAmount(t *testing.T) {
 		raw, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status = %d, want 200; body = %s", resp.StatusCode, string(raw))
 	}
-	if got, want := resp.Header.Get("X-GBO-Metadata-Shadow"), "error"; got != want {
+	if got, want := resp.Header.Get("X-GBO-Metadata-Shadow"), "mismatch"; got != want {
 		t.Errorf("X-GBO-Metadata-Shadow = %q, want %q", got, want)
 	}
 }
@@ -637,16 +621,16 @@ func TestSourceMetadataRejectedDuringOnboarding(t *testing.T) {
 			wantError:   "GBO_SIMPLE_MAPPING_INVALID",
 		},
 		{
-			name: "unknown mapping conversion",
+			name: "mapping transform outside closed profile",
 			payload: bytes.Replace(
 				metadataPayload(t, "00000001003214345000", validQuery),
 				[]byte(`"datatype":"gYear"`),
-				[]byte(`"datatype":"integer","transform":{"operator":"round","currency_pointer":"/currency","currency":"EUR","source_scale":2,"target_scale":0}`),
+				[]byte(`"datatype":"integer","transform":{"operator":"round"}`),
 				1,
 			),
 			pinnedKey:   publicJWK(t, publicKey),
 			expectedOIN: "00000001003214345000",
-			wantError:   "GBO_SIMPLE_CONVERSION_UNSUPPORTED",
+			wantError:   "GBO_SIMPLE_MAPPING_INVALID",
 		},
 		{
 			name:        "unsupported envelope schema version",

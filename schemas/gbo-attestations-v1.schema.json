@@ -222,19 +222,14 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["type", "unit", "scale"],
+          "required": ["type", "unit"],
           "properties": {
             "type": {
-              "const": "integer"
+              "const": "number"
             },
             "unit": {
               "type": "string",
               "pattern": "^[A-Z]{3}$"
-            },
-            "scale": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 6
             }
           }
         }

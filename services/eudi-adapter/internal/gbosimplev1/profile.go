@@ -18,26 +18,23 @@ import (
 )
 
 const (
-	MaxClaims        = 128
-	MaxClaimLength   = 64
-	MaxPointerLength = 512
-	MaxPointerDepth  = 32
-	MaxStringLength  = 16 * 1024
-	MaxNumberLength  = 128
-	MaxMoneyScale    = 6
+	MaxClaims         = 128
+	MaxClaimLength    = 64
+	MaxPointerLength  = 512
+	MaxPointerDepth   = 32
+	MaxStringLength   = 16 * 1024
+	MaxNumberLength   = 128
+	MaxNumberExponent = 308
 )
 
 type ErrorCode string
 
 const (
-	CodeMappingInvalid        ErrorCode = "GBO_SIMPLE_MAPPING_INVALID"
-	CodePathMissing           ErrorCode = "GBO_SIMPLE_PATH_MISSING"
-	CodeTypeMismatch          ErrorCode = "GBO_SIMPLE_TYPE_MISMATCH"
-	CodeConversionUnsupported ErrorCode = "GBO_SIMPLE_CONVERSION_UNSUPPORTED"
-	CodeCurrencyMismatch      ErrorCode = "GBO_SIMPLE_CURRENCY_MISMATCH"
-	CodeMoneyInexact          ErrorCode = "GBO_SIMPLE_MONEY_INEXACT"
-	CodeResultType            ErrorCode = "GBO_SIMPLE_RESULT_TYPE"
-	CodeCardinalityAmbiguous  ErrorCode = "GBO_SIMPLE_CARDINALITY_AMBIGUOUS"
+	CodeMappingInvalid       ErrorCode = "GBO_SIMPLE_MAPPING_INVALID"
+	CodePathMissing          ErrorCode = "GBO_SIMPLE_PATH_MISSING"
+	CodeTypeMismatch         ErrorCode = "GBO_SIMPLE_TYPE_MISMATCH"
+	CodeResultType           ErrorCode = "GBO_SIMPLE_RESULT_TYPE"
+	CodeCardinalityAmbiguous ErrorCode = "GBO_SIMPLE_CARDINALITY_AMBIGUOUS"
 )
 
 type ProfileError struct {
@@ -76,17 +73,8 @@ type Projection struct {
 type Mapping map[string]Rule
 
 type Rule struct {
-	Pointer   string     `json:"pointer"`
-	Datatype  string     `json:"datatype"`
-	Transform *Transform `json:"transform,omitempty"`
-}
-
-type Transform struct {
-	Operator        string `json:"operator"`
-	CurrencyPointer string `json:"currency_pointer"`
-	Currency        string `json:"currency"`
-	SourceScale     int    `json:"source_scale"`
-	TargetScale     int    `json:"target_scale"`
+	Pointer  string `json:"pointer"`
+	Datatype string `json:"datatype"`
 }
 
 func (r *Rule) UnmarshalJSON(data []byte) error {
@@ -104,36 +92,6 @@ func (r *Rule) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (t *Transform) UnmarshalJSON(data []byte) error {
-	type transformFields struct {
-		Operator        *string `json:"operator"`
-		CurrencyPointer *string `json:"currency_pointer"`
-		Currency        *string `json:"currency"`
-		SourceScale     *int    `json:"source_scale"`
-		TargetScale     *int    `json:"target_scale"`
-	}
-	var decoded transformFields
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&decoded); err != nil {
-		return profileError(CodeMappingInvalid, "", "invalid transform: %v", err)
-	}
-	if err := ensureJSONEOF(decoder); err != nil {
-		return profileError(CodeMappingInvalid, "", "invalid transform: %v", err)
-	}
-	if decoded.Operator == nil || decoded.CurrencyPointer == nil || decoded.Currency == nil || decoded.SourceScale == nil || decoded.TargetScale == nil {
-		return profileError(CodeMappingInvalid, "", "all money_scale fields are required")
-	}
-	*t = Transform{
-		Operator:        *decoded.Operator,
-		CurrencyPointer: *decoded.CurrencyPointer,
-		Currency:        *decoded.Currency,
-		SourceScale:     *decoded.SourceScale,
-		TargetScale:     *decoded.TargetScale,
-	}
-	return nil
-}
-
 func ensureJSONEOF(decoder *json.Decoder) error {
 	var extra any
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
@@ -146,9 +104,8 @@ func ensureJSONEOF(decoder *json.Decoder) error {
 }
 
 var (
-	claimPattern    = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
-	currencyPattern = regexp.MustCompile(`^[A-Z]{3}$`)
-	numberPattern   = regexp.MustCompile(`^(-?)(0|[1-9][0-9]*)(?:\.([0-9]+))?(?:[eE]([+-]?[0-9]+))?$`)
+	claimPattern  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	numberPattern = regexp.MustCompile(`^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$`)
 )
 
 func Validate(mapping Mapping) error {
@@ -168,25 +125,6 @@ func Validate(mapping Mapping) error {
 		case "string", "boolean", "integer", "number", "date", "gYear":
 		default:
 			return profileError(CodeMappingInvalid, claim, "unsupported datatype %q", rule.Datatype)
-		}
-		if rule.Transform == nil {
-			continue
-		}
-		transform := rule.Transform
-		if transform.Operator != "money_scale" {
-			return profileError(CodeConversionUnsupported, claim, "unsupported operator %q", transform.Operator)
-		}
-		if rule.Datatype != "integer" {
-			return profileError(CodeMappingInvalid, claim, "money_scale requires datatype integer")
-		}
-		if err := validatePointer(transform.CurrencyPointer); err != nil {
-			return profileError(CodeMappingInvalid, claim, "invalid currency_pointer: %v", err)
-		}
-		if !currencyPattern.MatchString(transform.Currency) {
-			return profileError(CodeMappingInvalid, claim, "currency must be an ISO 4217 alpha-3 code")
-		}
-		if transform.SourceScale < 0 || transform.SourceScale > MaxMoneyScale || transform.TargetScale < 0 || transform.TargetScale > MaxMoneyScale {
-			return profileError(CodeMappingInvalid, claim, "money scales must be between 0 and %d", MaxMoneyScale)
 		}
 	}
 	return nil
@@ -225,7 +163,7 @@ func Project(root any, resultPointer, cardinality string, mapping Mapping) (Proj
 		if !ok {
 			return Projection{}, profileError(CodePathMissing, claim, "pointer %q does not exist", rule.Pointer)
 		}
-		converted, err := convertValue(rows[0], value, rule)
+		copied, err := copyValue(value, rule.Datatype)
 		if err != nil {
 			var profileErr *ProfileError
 			if errors.As(err, &profileErr) && profileErr.Claim == "" {
@@ -233,7 +171,7 @@ func Project(root any, resultPointer, cardinality string, mapping Mapping) (Proj
 			}
 			return Projection{}, err
 		}
-		claims[claim] = converted
+		claims[claim] = copied
 	}
 	return Projection{Outcome: OutcomeCredential, Claims: claims}, nil
 }
@@ -251,8 +189,8 @@ func DecodeJSON(data []byte) (any, error) {
 	return value, nil
 }
 
-// EqualJSON compares JSON values semantically. In particular, 2025 decoded
-// as float64 by the legacy path equals the int64 produced by this profile.
+// EqualJSON compares JSON values semantically, independently of the Go type
+// used to hold a JSON number.
 func EqualJSON(left, right any) bool {
 	leftNumber, leftIsNumber := numberText(left)
 	rightNumber, rightIsNumber := numberText(right)
@@ -260,8 +198,8 @@ func EqualJSON(left, right any) bool {
 		if !leftIsNumber || !rightIsNumber {
 			return false
 		}
-		leftRat, _, leftOK := parseDecimal(leftNumber)
-		rightRat, _, rightOK := parseDecimal(rightNumber)
+		leftRat, leftOK := parseNumber(leftNumber)
+		rightRat, rightOK := parseNumber(rightNumber)
 		return leftOK && rightOK && leftRat.Cmp(rightRat) == 0
 	}
 	switch l := left.(type) {
@@ -293,11 +231,8 @@ func EqualJSON(left, right any) bool {
 	}
 }
 
-func convertValue(row, value any, rule Rule) (any, error) {
-	if rule.Transform != nil {
-		return convertMoney(row, value, *rule.Transform)
-	}
-	switch rule.Datatype {
+func copyValue(value any, datatype string) (any, error) {
+	switch datatype {
 	case "string":
 		text, ok := value.(string)
 		if !ok || len(text) > MaxStringLength {
@@ -315,24 +250,24 @@ func convertValue(row, value any, rule Rule) (any, error) {
 		if !ok {
 			return nil, profileError(CodeTypeMismatch, "", "value must be an integer")
 		}
-		rat, _, ok := parseDecimal(number)
+		rat, ok := parseNumber(number)
 		if !ok || !rat.IsInt() || !rat.Num().IsInt64() {
 			return nil, profileError(CodeTypeMismatch, "", "value must be an int64")
 		}
 		integer := rat.Num().Int64()
-		if rule.Datatype == "gYear" && (integer < 0 || integer > 9999) {
+		if datatype == "gYear" && (integer < 0 || integer > 9999) {
 			return nil, profileError(CodeTypeMismatch, "", "gYear must be between 0 and 9999")
 		}
-		return integer, nil
+		return value, nil
 	case "number":
 		number, ok := numberText(value)
 		if !ok {
 			return nil, profileError(CodeTypeMismatch, "", "value must be a JSON number")
 		}
-		if _, _, ok := parseDecimal(number); !ok {
+		if _, ok := parseNumber(number); !ok {
 			return nil, profileError(CodeTypeMismatch, "", "value must be a finite JSON number")
 		}
-		return json.Number(number), nil
+		return value, nil
 	case "date":
 		date, ok := value.(string)
 		if !ok {
@@ -344,35 +279,8 @@ func convertValue(row, value any, rule Rule) (any, error) {
 		}
 		return date, nil
 	default:
-		return nil, profileError(CodeConversionUnsupported, "", "unsupported datatype %q", rule.Datatype)
+		return nil, profileError(CodeMappingInvalid, "", "unsupported datatype %q", datatype)
 	}
-}
-
-func convertMoney(row, value any, transform Transform) (any, error) {
-	currencyValue, ok := jsonPointer(row, transform.CurrencyPointer)
-	if !ok {
-		return nil, profileError(CodePathMissing, "", "currency_pointer %q does not exist", transform.CurrencyPointer)
-	}
-	currency, ok := currencyValue.(string)
-	if !ok || currency != transform.Currency {
-		return nil, profileError(CodeCurrencyMismatch, "", "currency is %v, expected %s", currencyValue, transform.Currency)
-	}
-	number, ok := numberText(value)
-	if !ok {
-		return nil, profileError(CodeTypeMismatch, "", "money value must be a JSON number")
-	}
-	rat, scale, ok := parseDecimal(number)
-	if !ok {
-		return nil, profileError(CodeTypeMismatch, "", "money value must be a finite decimal JSON number")
-	}
-	if scale > transform.SourceScale {
-		return nil, profileError(CodeMoneyInexact, "", "money value has scale %d, maximum source_scale is %d", scale, transform.SourceScale)
-	}
-	scaled := new(big.Rat).Mul(rat, new(big.Rat).SetInt(powerOfTen(transform.TargetScale)))
-	if !scaled.IsInt() || !scaled.Num().IsInt64() {
-		return nil, profileError(CodeMoneyInexact, "", "money value cannot be represented exactly at target_scale %d", transform.TargetScale)
-	}
-	return scaled.Num().Int64(), nil
 }
 
 func validatePointer(pointer string) error {
@@ -475,44 +383,21 @@ func numberText(value any) (string, bool) {
 	}
 }
 
-func parseDecimal(text string) (*big.Rat, int, bool) {
+func parseNumber(text string) (*big.Rat, bool) {
 	if len(text) == 0 || len(text) > MaxNumberLength {
-		return nil, 0, false
+		return nil, false
 	}
-	parts := numberPattern.FindStringSubmatch(text)
-	if parts == nil {
-		return nil, 0, false
+	if !numberPattern.MatchString(text) {
+		return nil, false
 	}
-	digits := parts[2] + parts[3]
-	coefficient := new(big.Int)
-	if _, ok := coefficient.SetString(digits, 10); !ok {
-		return nil, 0, false
-	}
-	if parts[1] == "-" {
-		coefficient.Neg(coefficient)
-	}
-	exponent := 0
-	if parts[4] != "" {
-		parsed, err := strconv.Atoi(parts[4])
-		if err != nil || parsed < -MaxNumberLength || parsed > MaxNumberLength {
-			return nil, 0, false
+	if exponentAt := strings.IndexAny(text, "eE"); exponentAt >= 0 {
+		exponent, err := strconv.Atoi(text[exponentAt+1:])
+		if err != nil || exponent < -MaxNumberExponent || exponent > MaxNumberExponent {
+			return nil, false
 		}
-		exponent = parsed
 	}
-	scale := len(parts[3]) - exponent
-	for scale > 0 && new(big.Int).Mod(new(big.Int).Abs(new(big.Int).Set(coefficient)), big.NewInt(10)).Sign() == 0 {
-		coefficient.Quo(coefficient, big.NewInt(10))
-		scale--
-	}
-	if scale <= 0 {
-		coefficient.Mul(coefficient, powerOfTen(-scale))
-		return new(big.Rat).SetInt(coefficient), 0, true
-	}
-	return new(big.Rat).SetFrac(coefficient, powerOfTen(scale)), scale, true
-}
-
-func powerOfTen(exponent int) *big.Int {
-	return new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(exponent)), nil)
+	number, ok := new(big.Rat).SetString(text)
+	return number, ok
 }
 
 func profileError(code ErrorCode, claim, format string, args ...any) error {

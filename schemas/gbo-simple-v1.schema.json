@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:gov:nl:gbo:schema:gbo-simple-v1:1",
   "title": "GBO simple mapping profile v1",
-  "description": "Closed mapping contract for pointer-based scalar projection with optional exact money scaling.",
+  "description": "Closed mapping contract for unchanged pointer-based scalar projection.",
   "type": "object",
   "minProperties": 1,
   "maxProperties": 128,
@@ -30,52 +30,6 @@
         },
         "datatype": {
           "enum": ["string", "boolean", "integer", "number", "date", "gYear"]
-        },
-        "transform": {
-          "$ref": "#/$defs/moneyScale"
-        }
-      },
-      "if": {
-        "required": ["transform"]
-      },
-      "then": {
-        "properties": {
-          "datatype": {
-            "const": "integer"
-          }
-        }
-      }
-    },
-    "moneyScale": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "operator",
-        "currency_pointer",
-        "currency",
-        "source_scale",
-        "target_scale"
-      ],
-      "properties": {
-        "operator": {
-          "const": "money_scale"
-        },
-        "currency_pointer": {
-          "$ref": "#/$defs/pointer"
-        },
-        "currency": {
-          "type": "string",
-          "pattern": "^[A-Z]{3}$"
-        },
-        "source_scale": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 6
-        },
-        "target_scale": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 6
         }
       }
     }

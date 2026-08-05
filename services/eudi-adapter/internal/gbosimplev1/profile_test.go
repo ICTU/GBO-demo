@@ -112,6 +112,23 @@ func TestEqualJSONNormalisesNumericGoTypes(t *testing.T) {
 	}
 }
 
+func TestProjectPreservesDecimalNumber(t *testing.T) {
+	root, err := DecodeJSON([]byte(`{"rows":[{"amount":43000.50}]}`))
+	if err != nil {
+		t.Fatalf("DecodeJSON() error = %v", err)
+	}
+	projection, err := Project(root, "/rows", "exactly_one", Mapping{
+		"amount": {Pointer: "/amount", Datatype: "number"},
+	})
+	if err != nil {
+		t.Fatalf("Project() error = %v", err)
+	}
+	amount, ok := projection.Claims["amount"].(json.Number)
+	if !ok || amount.String() != "43000.50" {
+		t.Fatalf("amount = %#v, want unchanged json.Number(43000.50)", projection.Claims["amount"])
+	}
+}
+
 func loadConformance(t *testing.T) conformanceFile {
 	t.Helper()
 	decoder := json.NewDecoder(bytes.NewReader(conformanceCases))

@@ -69,7 +69,6 @@ type sourceAttributeSchema struct {
 	Type   string `json:"type"`
 	Format string `json:"format,omitempty"`
 	Unit   string `json:"unit,omitempty"`
-	Scale  *int   `json:"scale,omitempty"`
 }
 
 type mappingRule = gbosimplev1.Rule
@@ -314,14 +313,8 @@ func validateAttributeSchema(definition sourceAttestationDefinition) error {
 		if attribute.Type != wantType || attribute.Format != wantFormat {
 			return fmt.Errorf("attribute_schema claim %q must have type %q and format %q", claim, wantType, wantFormat)
 		}
-		if rule.Transform == nil {
-			if attribute.Unit != "" || attribute.Scale != nil {
-				return fmt.Errorf("attribute_schema claim %q has money semantics without a money_scale transform", claim)
-			}
-			continue
-		}
-		if attribute.Unit != rule.Transform.Currency || attribute.Scale == nil || *attribute.Scale != rule.Transform.TargetScale {
-			return fmt.Errorf("attribute_schema claim %q must match money_scale currency and target scale", claim)
+		if attribute.Unit != "" && attribute.Type != "number" {
+			return fmt.Errorf("attribute_schema claim %q can only declare a unit for type number", claim)
 		}
 	}
 	return nil
