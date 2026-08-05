@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gov:nl:gbo:schema:gbo-attestations:1",
+  "title": "GBO source attestation metadata v1",
+  "description": "Envelope of the signed JWS payload published by a source through the FSC metadata service.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "source_oin",
+    "version",
+    "issued_at",
+    "expires_at",
+    "attestations"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "source_oin": {
+      "type": "string",
+      "pattern": "^[0-9]{20}$"
+    },
+    "version": {
+      "$ref": "#/$defs/version"
+    },
+    "issued_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "attestations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/attestation"
+      }
+    }
+  },
+  "$defs": {
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+(?:\\.[0-9]+){0,2}$"
+    },
+    "attestation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type_id",
+        "type_version",
+        "type_metadata",
+        "graphql",
+        "mapping_profile",
+        "mapping",
+        "attribute_schema"
+      ],
+      "properties": {
+        "type_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+        },
+        "type_version": {
+          "$ref": "#/$defs/version"
+        },
+        "type_metadata": {
+          "$ref": "#/$defs/typeMetadata"
+        },
+        "graphql": {
+          "$ref": "#/$defs/graphql"
+        },
+        "mapping_profile": {
+          "const": "gbo-simple-v1"
+        },
+        "mapping": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+          },
+          "additionalProperties": {
+            "type": "object"
+          }
+        },
+        "attribute_schema": {
+          "type": "object"
+        }
+      }
+    },
+    "typeMetadata": {
+      "type": "object",
+      "required": ["name", "claims", "schema"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "display": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "claims": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "schema": {
+          "type": "object"
+        }
+      },
+      "allOf": [
+        {
+          "not": {
+            "required": ["vct"]
+          }
+        },
+        {
+          "not": {
+            "required": ["vct#integrity"]
+          }
+        }
+      ]
+    },
+    "graphql": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "document",
+        "subject_variable",
+        "parameters",
+        "result_pointer",
+        "cardinality"
+      ],
+      "properties": {
+        "document": {
+          "type": "string",
+          "minLength": 1
+        },
+        "subject_variable": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+        },
+        "parameters": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/parameter"
+          }
+        },
+        "result_pointer": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "cardinality": {
+          "const": "exactly_one"
+        }
+      }
+    },
+    "parameter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "required"],
+      "properties": {
+        "type": {
+          "enum": ["integer", "string", "boolean", "date"]
+        },
+        "required": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

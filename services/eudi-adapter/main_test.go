@@ -16,21 +16,52 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 var testBase64URL = base64.RawURLEncoding
 
+func TestShippedSourceMetadataMatchesEnvelopeSchema(t *testing.T) {
+	compiler := jsonschema.NewCompiler()
+	compiler.AssertFormat()
+	schema, err := compiler.Compile("../../schemas/gbo-attestations-v1.schema.json")
+	if err != nil {
+		t.Fatalf("compile source metadata schema: %v", err)
+	}
+	metadataFile, err := os.Open("../graphql-server/config/gbo-attestations.json")
+	if err != nil {
+		t.Fatalf("open shipped source metadata: %v", err)
+	}
+	defer metadataFile.Close()
+	metadata, err := jsonschema.UnmarshalJSON(metadataFile)
+	if err != nil {
+		t.Fatalf("parse shipped source metadata: %v", err)
+	}
+	if err := schema.Validate(metadata); err != nil {
+		t.Fatalf("shipped source metadata does not match envelope schema: %v", err)
+	}
+}
+
 func signSourceMetadataForTest(t *testing.T, payload []byte, privateKey ed25519.PrivateKey) string {
+	return signSourceMetadataWithHeaderForTest(t, payload, privateKey, nil)
+}
+
+func signSourceMetadataWithHeaderForTest(t *testing.T, payload []byte, privateKey ed25519.PrivateKey, extra map[string]any) string {
 	t.Helper()
 	publicKey := privateKey.Public().(ed25519.PublicKey)
 	x := testBase64URL.EncodeToString(publicKey)
 	thumbprintInput := fmt.Sprintf(`{"crv":"Ed25519","kty":"OKP","x":"%s"}`, x)
 	thumbprint := sha256.Sum256([]byte(thumbprintInput))
-	header, err := json.Marshal(map[string]string{
+	protected := map[string]any{
 		"alg": "EdDSA",
 		"kid": testBase64URL.EncodeToString(thumbprint[:]),
 		"typ": "gbo-attestations+jws",
-	})
+	}
+	for name, value := range extra {
+		protected[name] = value
+	}
+	header, err := json.Marshal(protected)
 	if err != nil {
 		t.Fatalf("marshal protected header: %v", err)
 	}
@@ -209,6 +240,7 @@ func TestAdapterUsesSignedSourceMetadataFor2025Shadow(t *testing.T) {
 		SourceMetadataOIN:           "99999999900000000200",
 		SourceMetadataPublicJWKPath: publicJWKPath,
 		SourceMetadataTypeID:        "inkomensverklaring",
+		SourceMetadataUsecaseKey:    "inkomensverklaring_2025",
 	})
 	if err != nil {
 		t.Fatalf("load signed source metadata: %v", err)
@@ -276,6 +308,208 @@ func TestAdapterUsesSignedSourceMetadataFor2025Shadow(t *testing.T) {
 	}
 }
 
+func TestMetadataPilotDoesNotApplyToAnotherBDUsecase(t *testing.T) {
+	const metadataQuery = "query metadataShouldNotRun"
+	shadow := &sourceMetadataShadow{
+		UsecaseKey: "inkomensverklaring_2025",
+		Definition: sourceAttestationDefinition{
+			GraphQL: sourceGraphQL{Document: metadataQuery},
+		},
+	}
+
+	var received proxyRequest
+	outway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Errorf("decode outway request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"data": {"ingeschrevenPersoon": {"heeftBelastingjaarAangifte": [{
+				"belastingjaar": 2025,
+				"status": "Definitief vastgesteld",
+				"indieningsdatum": "2026-04-01",
+				"verzamelinkomen": {"waarde": 43000.0, "valuta": "EUR"}
+			}]}}
+		}`))
+	}))
+	defer outway.Close()
+
+	cfg := config{Port: "0", OutwayURL: outway.URL, IssuerOIN: "00000004000000004000"}
+	catalog := &Catalog{Usecases: map[string]Usecase{
+		"andere_bd_attestatie_2025": {
+			AttestationType: "nl.gbo.belastingdienst.andere-attestatie",
+			Scope:           "bd:ib:2025",
+			Belastingjaren:  []int{2025},
+			OutwayPath:      "/bri/graphql",
+		},
+	}}
+	srv := httptest.NewServer(newMux(cfg, catalog, http.DefaultClient, shadow))
+	defer srv.Close()
+
+	resp := postDisclosure(t, srv, "/andere_bd_attestatie_2025/", "123456789")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200; body = %s", resp.StatusCode, string(raw))
+	}
+	if received.Query == metadataQuery {
+		t.Fatal("metadata query was applied to an unrelated BD usecase")
+	}
+	if got := resp.Header.Get("X-GBO-Metadata-Shadow"); got != "" {
+		t.Errorf("unrelated usecase got shadow header %q", got)
+	}
+}
+
+func phase1IncomeMapping() map[string]mappingRule {
+	return map[string]mappingRule{
+		"belastingjaar":   {Pointer: "/belastingjaar", Datatype: "gYear"},
+		"verzamelinkomen": {Pointer: "/verzamelinkomen/waarde", Datatype: "integer"},
+		"aangifte_status": {Pointer: "/status", Datatype: "string"},
+		"indieningsdatum": {Pointer: "/indieningsdatum", Datatype: "date"},
+		"inkomen_box1":    {Pointer: "/box1Inkomen/waarde", Datatype: "integer"},
+		"inkomen_box2":    {Pointer: "/box2Inkomen/waarde", Datatype: "integer"},
+		"inkomen_box3":    {Pointer: "/box3Inkomen/waarde", Datatype: "integer"},
+	}
+}
+
+func newIncomeShadowAdapter(t *testing.T, mapping map[string]mappingRule, bronResponse string) *httptest.Server {
+	t.Helper()
+	uc := Usecase{
+		AttestationType: "nl.gbo.belastingdienst.inkomensverklaring",
+		Scope:           "bd:ib:2025",
+		Belastingjaren:  []int{2025},
+		OutwayPath:      "/bri/graphql",
+	}
+	shadow := &sourceMetadataShadow{
+		UsecaseKey: "inkomensverklaring_2025",
+		Definition: sourceAttestationDefinition{
+			GraphQL: sourceGraphQL{
+				Document:        buildQuery(uc),
+				SubjectVariable: "bsn",
+				ResultPointer:   "/data/ingeschrevenPersoon/heeftBelastingjaarAangifte",
+				Cardinality:     "exactly_one",
+			},
+			MappingProfile: "gbo-simple-v1",
+			Mapping:        mapping,
+		},
+	}
+	outway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(bronResponse))
+	}))
+	t.Cleanup(outway.Close)
+
+	cfg := config{Port: "0", OutwayURL: outway.URL, IssuerOIN: "00000004000000004000"}
+	catalog := &Catalog{Usecases: map[string]Usecase{"inkomensverklaring_2025": uc}}
+	srv := httptest.NewServer(newMux(cfg, catalog, http.DefaultClient, shadow))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+const completeIncomeResponse = `{
+	"data": {"ingeschrevenPersoon": {"heeftBelastingjaarAangifte": [{
+		"belastingjaar": 2025,
+		"status": "Definitief vastgesteld",
+		"indieningsdatum": "2026-04-01",
+		"verzamelinkomen": {"waarde": 43000.0, "valuta": "EUR"},
+		"box1Inkomen": {"waarde": 41000.0, "valuta": "EUR"},
+		"box2Inkomen": {"waarde": 1000.0, "valuta": "EUR"},
+		"box3Inkomen": {"waarde": 1000.0, "valuta": "EUR"}
+	}]}}
+}`
+
+func TestMetadataPilotReportsMismatchWhenSourceOmitsLegacyClaim(t *testing.T) {
+	mapping := phase1IncomeMapping()
+	delete(mapping, "inkomen_box3")
+	responseWithoutBox3 := strings.Replace(
+		completeIncomeResponse,
+		`,
+		"box3Inkomen": {"waarde": 1000.0, "valuta": "EUR"}`,
+		"",
+		1,
+	)
+	srv := newIncomeShadowAdapter(t, mapping, responseWithoutBox3)
+
+	resp := postDisclosure(t, srv, "/inkomensverklaring_2025/", "123456789")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200; body = %s", resp.StatusCode, string(raw))
+	}
+	if got, want := resp.Header.Get("X-GBO-Metadata-Shadow"), "mismatch"; got != want {
+		t.Errorf("X-GBO-Metadata-Shadow = %q, want %q", got, want)
+	}
+}
+
+func TestMetadataPilotReportsProjectionErrorForNonIntegralAmount(t *testing.T) {
+	responseWithCents := strings.Replace(completeIncomeResponse, "43000.0", "43000.50", 1)
+	srv := newIncomeShadowAdapter(t, phase1IncomeMapping(), responseWithCents)
+
+	resp := postDisclosure(t, srv, "/inkomensverklaring_2025/", "123456789")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200; body = %s", resp.StatusCode, string(raw))
+	}
+	if got, want := resp.Header.Get("X-GBO-Metadata-Shadow"), "error"; got != want {
+		t.Errorf("X-GBO-Metadata-Shadow = %q, want %q", got, want)
+	}
+}
+
+func TestMetadataPilotFetchFailureFallsBackToLegacy(t *testing.T) {
+	var received proxyRequest
+	outway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/metadata/.well-known/gbo-attestations" {
+			http.Error(w, "metadata temporarily unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Errorf("decode outway request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(completeIncomeResponse))
+	}))
+	defer outway.Close()
+
+	publicJWKPath := filepath.Join(t.TempDir(), "source-metadata-public.jwk")
+	if err := os.WriteFile(publicJWKPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write public JWK: %v", err)
+	}
+	cfg := config{
+		Port:                        "0",
+		OutwayURL:                   outway.URL,
+		IssuerOIN:                   "00000004000000004000",
+		SourceMetadataShadowEnabled: true,
+		SourceMetadataOutwayPath:    "/metadata/.well-known/gbo-attestations",
+		SourceMetadataOIN:           "99999999900000000200",
+		SourceMetadataPublicJWKPath: publicJWKPath,
+		SourceMetadataTypeID:        "inkomensverklaring",
+		SourceMetadataUsecaseKey:    "inkomensverklaring_2025",
+	}
+	uc := Usecase{
+		AttestationType: "nl.gbo.belastingdienst.inkomensverklaring",
+		Scope:           "bd:ib:2025",
+		Belastingjaren:  []int{2025},
+		OutwayPath:      "/bri/graphql",
+	}
+	catalog := &Catalog{Usecases: map[string]Usecase{"inkomensverklaring_2025": uc}}
+	srv := httptest.NewServer(newRuntimeMux(context.Background(), cfg, catalog, http.DefaultClient))
+	defer srv.Close()
+
+	resp := postDisclosure(t, srv, "/inkomensverklaring_2025/", "123456789")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200; body = %s", resp.StatusCode, string(raw))
+	}
+	if got := resp.Header.Get("X-GBO-Metadata-Shadow"); got != "" {
+		t.Errorf("fallback response got shadow header %q", got)
+	}
+	if !strings.Contains(received.Query, "belastingjaren: [2025]") {
+		t.Errorf("fallback did not use the legacy query: %s", received.Query)
+	}
+}
+
 func TestSourceMetadataRejectedDuringOnboarding(t *testing.T) {
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -289,8 +523,9 @@ func TestSourceMetadataRejectedDuringOnboarding(t *testing.T) {
 	metadataPayload := func(t *testing.T, sourceOIN, query string) []byte {
 		t.Helper()
 		payload, err := json.Marshal(map[string]any{
-			"source_oin": sourceOIN,
-			"version":    "1.0.0",
+			"schema_version": "1.0",
+			"source_oin":     sourceOIN,
+			"version":        "1.0.0",
 			"attestations": []any{map[string]any{
 				"type_id":      "inkomensverklaring",
 				"type_version": "1.0",
@@ -334,6 +569,7 @@ func TestSourceMetadataRejectedDuringOnboarding(t *testing.T) {
 		expectedOIN string
 		wantError   string
 		corruptJWS  bool
+		criticalJWS bool
 	}{
 		{
 			name:        "invalid signature",
@@ -357,11 +593,32 @@ func TestSourceMetadataRejectedDuringOnboarding(t *testing.T) {
 			expectedOIN: "00000001003214345000",
 			wantError:   "invalid GraphQL document",
 		},
+		{
+			name:        "unsupported envelope schema version",
+			payload:     bytes.Replace(metadataPayload(t, "00000001003214345000", validQuery), []byte(`"schema_version":"1.0"`), []byte(`"schema_version":"2.0"`), 1),
+			pinnedKey:   publicJWK(t, publicKey),
+			expectedOIN: "00000001003214345000",
+			wantError:   "unsupported source metadata schema_version",
+		},
+		{
+			name:        "unknown critical JWS header",
+			payload:     metadataPayload(t, "00000001003214345000", validQuery),
+			pinnedKey:   publicJWK(t, publicKey),
+			expectedOIN: "00000001003214345000",
+			wantError:   "critical JWS header",
+			criticalJWS: true,
+		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			compact := signSourceMetadataForTest(t, test.payload, privateKey)
+			if test.criticalJWS {
+				compact = signSourceMetadataWithHeaderForTest(t, test.payload, privateKey, map[string]any{
+					"crit": []string{"exp"},
+					"exp":  true,
+				})
+			}
 			if test.corruptJWS {
 				signatureStart := strings.LastIndex(compact, ".") + 1
 				replacement := byte('A')

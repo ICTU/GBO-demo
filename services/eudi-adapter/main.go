@@ -90,6 +90,7 @@ type config struct {
 	SourceMetadataOIN           string
 	SourceMetadataPublicJWKPath string
 	SourceMetadataTypeID        string
+	SourceMetadataUsecaseKey    string
 }
 
 func loadConfig() config {
@@ -105,6 +106,7 @@ func loadConfig() config {
 		SourceMetadataOIN:           os.Getenv("SOURCE_METADATA_OIN"),
 		SourceMetadataPublicJWKPath: os.Getenv("SOURCE_METADATA_PUBLIC_JWK_PATH"),
 		SourceMetadataTypeID:        getEnv("SOURCE_METADATA_TYPE_ID", "inkomensverklaring"),
+		SourceMetadataUsecaseKey:    getEnv("SOURCE_METADATA_USECASE_KEY", "inkomensverklaring_2025"),
 	}
 }
 
@@ -414,8 +416,8 @@ func handleAttestation(cfg config, client *http.Client, usecaseKey string, uc Us
 		// In shadow mode the verified source definition supplies the query;
 		// otherwise the existing catalog-driven query remains the fallback.
 		var queryPlans []sourceQueryPlan
-		if shadow.appliesTo(uc) {
-			plan, err := shadow.queryPlan(bsn, uc)
+		if shadow.appliesTo(usecaseKey, uc) {
+			plan, err := shadow.queryPlan(usecaseKey, bsn, uc)
 			if err != nil {
 				slog.Error("build source metadata query", "usecase", usecaseKey, "err", err.Error())
 				http.Error(w, err.Error(), http.StatusBadGateway)
@@ -441,7 +443,7 @@ func handleAttestation(cfg config, client *http.Client, usecaseKey string, uc Us
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
-		if shadow.appliesTo(uc) {
+		if shadow.appliesTo(usecaseKey, uc) {
 			matches, compareErr := shadow.compareLegacy(result.Raw, docs)
 			switch {
 			case compareErr != nil:
@@ -1024,6 +1026,23 @@ func newMux(cfg config, catalog *Catalog, client *http.Client, shadows ...*sourc
 	return mux
 }
 
+// newRuntimeMux activates the optional phase-1 metadata pilot. Failure to
+// load or verify pilot metadata never takes down the still-supported legacy
+// adapter: it logs the degradation and constructs the mux without a shadow.
+// The target architecture replaces this temporary fallback with the
+// phase-3 validated cache and its explicit stale/fail-closed rules.
+func newRuntimeMux(ctx context.Context, cfg config, catalog *Catalog, client *http.Client) *http.ServeMux {
+	shadow, err := loadConfiguredSourceMetadataShadow(ctx, client, cfg)
+	if err != nil {
+		slog.Error("source metadata pilot unavailable; using legacy path", "err", err.Error())
+		return newMux(cfg, catalog, client)
+	}
+	if shadow != nil {
+		slog.Info("source metadata shadow enabled", "outway_path", cfg.SourceMetadataOutwayPath, "source_oin", cfg.SourceMetadataOIN, "metadata_version", shadow.Version)
+	}
+	return newMux(cfg, catalog, client, shadow)
+}
+
 // fatal logs and ends the process. main is the only place in this service
 // that exits; everything else returns an error.
 func fatal(msg string, err error) {
@@ -1050,19 +1069,11 @@ func main() {
 		Timeout:   10 * time.Second,
 		Transport: otelhttp.NewTransport(http.DefaultTransport),
 	}
-	shadow, err := loadConfiguredSourceMetadataShadow(ctx, client, cfg)
-	if err != nil {
-		fatal("loading source metadata shadow", err)
-	}
-	if shadow != nil {
-		slog.Info("source metadata shadow enabled", "outway_path", cfg.SourceMetadataOutwayPath, "source_oin", cfg.SourceMetadataOIN, "metadata_version", shadow.Version)
-	}
-
 	// Middleware order: withFscTraceContext wraps otelhttp — the header
 	// mutation must happen before otelhttp extracts the parent context.
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           withFscTraceContext(otelhttp.NewHandler(newMux(cfg, catalog, client, shadow), "eudi-adapter")),
+		Handler:           withFscTraceContext(otelhttp.NewHandler(newRuntimeMux(ctx, cfg, catalog, client), "eudi-adapter")),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 	slog.Info("eudi-adapter starting", "addr", srv.Addr, "outway", cfg.OutwayURL, "issuer_oin", cfg.IssuerOIN)
