@@ -54,6 +54,9 @@ demo-minimal: certs
 demo-manager: certs
 	@echo "-> Base stack + OpenFTV Manager (PAP/PIP, bundle distribution)"
 	GBO_BUNDLE_MANAGER=http://openftv-manager:9443/v1/bundle/gbo-pdp \
+	  GBO_ADL_TYPE=postgres \
+	  GBO_ADL_PG_URL=postgres://ftv:$${FTV_POSTGRES_PASSWORD:-ftv}@postgres-ftv:5432/ftv_adl?sslmode=disable \
+	  GBO_ADL_MIGRATE_SOURCE='*EMBED*' GBO_ADL_MIGRATE_AUTO=true \
 	  docker compose --profile manager up --build -d
 	@echo "-> Waiting for the Manager to accept policies..."
 	@for i in $$(seq 1 30); do \

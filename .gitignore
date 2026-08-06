@@ -19,7 +19,10 @@ services/*/*[!.go]
 !services/*/*/
 
 # Playwright MCP scratch output (page snapshots, console logs, screenshots).
+# The screenshot tool writes to the working directory when given a bare
+# filename, so catch those at the root too.
 .playwright-mcp/
+/*.png
 
 # Local compose overrides + secrets
 .env

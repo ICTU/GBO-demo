@@ -178,6 +178,19 @@ Keycloak needs `KC_PROXY_HEADERS=xforwarded` (set in compose) and the proxy
 must send `X-Forwarded-Proto: https`, or its login form posts over HTTP from
 an HTTPS page and the browser blocks it as *"Form is not secure"*.
 
+The **Logboek** (decision log) needs the ADL on Postgres at both ends: the
+Manager only registers those routes for a Postgres-backed decision log —
+any other value and the endpoints simply do not exist, so the page 404s —
+and the PDP has to write there. `make demo-manager` sets both. The ADL gets
+its own database (`ftv_adl`): it carries its own migration set while the
+Manager's schema is at version 10, and both record progress in a
+`schema_migrations` table, so sharing one database makes the PDP's
+migration fail with *"no migration found for version 10"* and the PDP then
+refuses to start.
+
+This is OpenFTV's own ADL, and is independent of the embedded OPA console
+decision log that the developer portal reads from Loki.
+
 Three things worth knowing before relying on it:
 
 - **The Manager has no file store.** Its PAP is constructed without one

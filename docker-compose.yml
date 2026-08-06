@@ -94,7 +94,16 @@ services:
       - PDP_POLICIES_LANGUAGE=rego
       - PDP_POLICIES_STORE=/policies
       - PDP_POLICIES_STORE_RECURSE=true
-      - PDP_ADL_TYPE=stdout
+      # The Authorization Decision Log. stdout by default; the manager
+      # profile points it at Postgres so the management interface's Logboek
+      # has something to read — its routes are only registered when the ADL
+      # is Postgres-backed, so without this the page 404s.
+      # NB: this is OpenFTV's ADL, not the embedded OPA console decision log
+      # the dev-portal reads from Loki. Those are independent.
+      - PDP_ADL_TYPE=${GBO_ADL_TYPE:-stdout}
+      - PDP_ADL_PG_URL=${GBO_ADL_PG_URL:-}
+      - PDP_MIGRATE_SOURCE=${GBO_ADL_MIGRATE_SOURCE:-}
+      - PDP_MIGRATE_AUTO=${GBO_ADL_MIGRATE_AUTO:-false}
       - PDP_ADL_SERVICE_NAME=gbo
       - PDP_LOG_LEVEL=info
       - PDP_REQUEST_MAPPINGS=graphqltocontext
@@ -152,6 +161,8 @@ services:
       POSTGRES_DB: ftv_manager
     volumes:
       - postgres-ftv-data:/var/lib/postgresql/data
+      # Runs only on an empty data directory (compose down -v to re-run).
+      - ./services/openftv-manager/initdb:/docker-entrypoint-initdb.d:ro
     networks: [backend]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ftv -d ftv_manager"]
@@ -195,6 +206,11 @@ services:
       - MANAGER_OIDC_JWKS_URL=http://keycloak:8080/realms/gbo/protocol/openid-connect/certs
       - MANAGER_OIDC_AUDIENCE=openftv-manager-ui
       - MANAGER_OIDC_ROLES_CLAIM=roles
+      # Serves the Logboek in the management interface. initADL only
+      # registers its routes for a Postgres-backed decision log — any other
+      # value and the endpoints simply do not exist.
+      - MANAGER_ADL_TYPE=postgres
+      - MANAGER_ADL_PG_URL=postgres://ftv:${FTV_POSTGRES_PASSWORD:-ftv}@postgres-ftv:5432/ftv_adl?sslmode=disable
     ports:
       # Management API (what the seed script and a UI talk to).
       - "${GBO_PORT_FTV_MANAGER:-9280}:8443"
