@@ -122,10 +122,10 @@ source-holder would need to rebuild or remount its PDP to change a rule.
 
 `make demo-manager` starts the other half of OpenFTV — the **Manager**, which
 is the PAP and PIP in one service. It owns the policies (in its own Postgres),
-bundles them, and ships each bundle to the PDPs named in
-`services/openftv-manager/bundles/`. The PDP then holds no policy files at
-all: it pulls the bundle at boot (`PDP_BUNDLE_MANAGER`) and receives pushes
-afterwards.
+bundles them, and serves each bundle to the PDPs that ask for it. The PDP
+pulls its bundle at boot (`PDP_BUNDLE_MANAGER`), and the bundle replaces
+whatever the PDP loaded from disk — so the Manager, not the file tree, is
+what decides.
 
 ```bash
 make demo-manager                 # base stack + Manager, policies seeded
@@ -138,6 +138,17 @@ truth, so a change is a deliberate deployment:
 
 ```bash
 make manager-seed                 # push policies/ into the Manager, redeploy
+```
+
+To see that the Manager really is authoritative, edit a policy *in the
+Manager only* and redeploy — the decision changes while the file on disk
+does not:
+
+```bash
+curl -s localhost:9280/v1/policy/<id> | jq -r .data            # read it
+curl -X PUT localhost:9280/v1/policy/<id> -d @edited.json      # change it
+curl -X POST localhost:9280/v1/deployment -d '{"title":"..."}' # bundle it
+docker compose --profile manager restart openftv-pdp           # PDP re-pulls
 ```
 
 Three things worth knowing before relying on it:
@@ -153,6 +164,15 @@ Three things worth knowing before relying on it:
   tag, which drops it from the bundle. This matters: the store is
   cumulative, and two policies declaring the same `package` make the PDP
   fail to compile the whole set, so every request 500s.
+- **The Manager serves bundles; it does not push them here.** It can POST a
+  bundle to a PDP, but the PDP authorizes its own management endpoints with
+  the same policy set it evaluates requests against — our `package authz`
+  entrypoint — so a push is denied with 403. Allowing it would mean opening
+  the PDP's management API from the GBO decision policy, which is not a
+  trade worth making for convenience. OpenFTV only bypasses this when the
+  policy store is empty, i.e. never in practice. So `targets` is empty and
+  the PDP pulls at boot, which is why `make demo-manager` restarts it after
+  seeding.
 - **Masking still does not work.** Adopting the Manager does not change it:
   bundle-delivered policies reach the engine through the same `UpsertPolicy`
   path as file-delivered ones, never through OPA's bundle plugin, so
