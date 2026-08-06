@@ -166,7 +166,7 @@ The five-factor authorization model demonstrated:
 |---|--------|------------------------|
 | ① | Org identity (mTLS) | FSC-Manager validates peer-certs; FSC-Inway includes peer_cert_chain in the AuthZen context |
 | ② | Org permission (JWT) | Provider FSC-Manager validates the grant and signs `add.{flow, subject_id_type}` returned by its Additional Claims API |
-| ③ | Access basis (consent) | OpenFTV PDP pulls ACTIVE consents from consent-register into `data.attributes.consents` (PIP pull, 5s interval) |
+| ③ | Access basis (consent) | The request-mapper fetches the ACTIVE consent for (PI, scope) from the consent-register per request, so a revoke takes effect immediately |
 | ④ | Data scope (GraphQL) | The OpenFTV PDP checks requested fields against the dienstencatalogus (rules DVT0001/EUD0001) |
 | ⑤ | Request validity | The OpenFTV PDP validates consent + `context.resource.pi` binding + expiry |
 
