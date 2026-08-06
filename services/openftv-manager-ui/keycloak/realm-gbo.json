@@ -1,0 +1,131 @@
+{
+  "realm": "gbo",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginTheme": "keycloak",
+  "accessTokenLifespan": 1800,
+  "roles": {
+    "realm": [
+      {
+        "name": "admin",
+        "description": "Mag beleid schrijven en publiceren (deployen)."
+      },
+      {
+        "name": "author",
+        "description": "Mag beleid schrijven, niet publiceren."
+      },
+      {
+        "name": "auditor",
+        "description": "Alleen lezen."
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "openftv-manager-ui",
+      "name": "OpenFTV management interface",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": [
+        "*"
+      ],
+      "webOrigins": [
+        "*"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "*"
+      },
+      "protocolMappers": [
+        {
+          "name": "realm roles as top-level roles claim",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "openftv-manager-ui",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "admin",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Demo",
+      "lastName": "Beheerder",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "admin",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "admin"
+      ],
+      "email": "admin@gbo.local",
+      "requiredActions": []
+    },
+    {
+      "username": "auteur",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Demo",
+      "lastName": "Auteur",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "auteur",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "author"
+      ],
+      "email": "auteur@gbo.local",
+      "requiredActions": []
+    },
+    {
+      "username": "auditor",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Demo",
+      "lastName": "Auditor",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "auditor",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "auditor"
+      ],
+      "email": "auditor@gbo.local",
+      "requiredActions": []
+    }
+  ],
+  "verifyEmail": false,
+  "loginWithEmailAllowed": true
+}

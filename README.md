@@ -114,6 +114,113 @@ effect, restart the engine before concluding the rule is wrong:
 docker compose restart openftv-pdp
 ```
 
+### Policy distribution via the OpenFTV Manager (`make demo-manager`)
+
+The loop above edits files the PDP reads directly. That is convenient while
+writing Rego, but it is not how a federation distributes policy: every
+source-holder would need to rebuild or remount its PDP to change a rule.
+
+`make demo-manager` starts the other half of OpenFTV — the **Manager**, which
+is the PAP and PIP in one service. It owns the policies (in its own Postgres),
+bundles them, and serves each bundle to the PDPs that ask for it. The PDP
+pulls its bundle at boot (`PDP_BUNDLE_MANAGER`), and the bundle replaces
+whatever the PDP loaded from disk — so the Manager, not the file tree, is
+what decides.
+
+```bash
+make demo-manager                 # base stack + Manager, policies seeded
+curl -s localhost:9280/v1/policies | jq '.[].metadata.title'
+curl -s localhost:9281/v1/bundle/gbo-pdp | gunzip | jq '.version, (.policies|length)'
+```
+
+Editing `policies/` no longer reloads by itself — the Manager is the source of
+truth, so a change is a deliberate deployment:
+
+```bash
+make manager-seed                 # push policies/ into the Manager, redeploy
+```
+
+To see that the Manager really is authoritative, edit a policy *in the
+Manager only* and redeploy — the decision changes while the file on disk
+does not:
+
+```bash
+curl -s localhost:9280/v1/policy/<id> | jq -r .data            # read it
+curl -X PUT localhost:9280/v1/policy/<id> -d @edited.json      # change it
+curl -X POST localhost:9280/v1/deployment -d '{"title":"..."}' # bundle it
+docker compose --profile manager restart openftv-pdp           # PDP re-pulls
+```
+
+### The management interface
+
+`make demo-manager` also starts OpenFTV's own UI for the Manager — browse and
+edit policies, attributes and deployments — with a Keycloak realm behind it.
+Three users, one per capability level: `admin`/`admin` (write + publish),
+`auteur`/`auteur` (write), `auditor`/`auditor` (read-only). The UI reads those
+from a top-level `roles` claim in the access token, which is why it is
+Keycloak and not something smaller; see
+`services/openftv-manager-ui/README.md`.
+
+**It must be served over HTTPS unless you open it on `localhost`.** The OIDC
+login uses PKCE, PKCE needs `Crypto.subtle`, and browsers only expose that in
+a secure context — over `http://<lan-ip>:9283` the page fails with
+*"Crypto.subtle is available only in secure contexts"*. Put the UI, the
+Manager API and Keycloak behind a TLS reverse proxy and point the stack at
+them:
+
+```bash
+GBO_FTV_MANAGER_URL=https://ftv-api.example.org \
+GBO_FTV_OIDC_AUTHORITY=https://ftv-auth.example.org/realms/gbo \
+  make demo-manager
+```
+
+Keycloak needs `KC_PROXY_HEADERS=xforwarded` (set in compose) and the proxy
+must send `X-Forwarded-Proto: https`, or its login form posts over HTTP from
+an HTTPS page and the browser blocks it as *"Form is not secure"*.
+
+The **Logboek** (decision log) needs the ADL on Postgres at both ends: the
+Manager only registers those routes for a Postgres-backed decision log —
+any other value and the endpoints simply do not exist, so the page 404s —
+and the PDP has to write there. `make demo-manager` sets both. The ADL gets
+its own database (`ftv_adl`): it carries its own migration set while the
+Manager's schema is at version 10, and both record progress in a
+`schema_migrations` table, so sharing one database makes the PDP's
+migration fail with *"no migration found for version 10"* and the PDP then
+refuses to start.
+
+This is OpenFTV's own ADL, and is independent of the embedded OPA console
+decision log that the developer portal reads from Loki.
+
+Three things worth knowing before relying on it:
+
+- **The Manager has no file store.** Its PAP is constructed without one
+  (`apps/manager/server/pap.go` says so in a comment), so policies can only
+  arrive over the API. `scripts/seed-openftv-manager.py` pushes `policies/`
+  in — the same path the management interface would use. Git stays the
+  source of truth; the Manager is the distribution mechanism.
+- **Policies cannot be deleted.** `DELETE /v1/policy/:id` fails with a
+  foreign-key violation on `policy_audit` (upstream bug). The seed script
+  therefore *retires* a policy that has left git by stripping the bundle's
+  tag, which drops it from the bundle. This matters: the store is
+  cumulative, and two policies declaring the same `package` make the PDP
+  fail to compile the whole set, so every request 500s.
+- **The Manager serves bundles; it does not push them here.** It can POST a
+  bundle to a PDP, but the PDP authorizes its own management endpoints with
+  the same policy set it evaluates requests against — our `package authz`
+  entrypoint — so a push is denied with 403. Allowing it would mean opening
+  the PDP's management API from the GBO decision policy, which is not a
+  trade worth making for convenience. OpenFTV only bypasses this when the
+  policy store is empty, i.e. never in practice. So `targets` is empty and
+  the PDP pulls at boot, which is why `make demo-manager` restarts it after
+  seeding.
+- **Masking still does not work.** Adopting the Manager does not change it:
+  bundle-delivered policies reach the engine through the same `UpsertPolicy`
+  path as file-delivered ones, never through OPA's bundle plugin, so
+  `data.system.log.mask` never resolves either way.
+
+The default stack is unchanged — without `GBO_BUNDLE_MANAGER` the PDP skips
+bundle retrieval entirely and keeps loading `policies/` from disk.
+
 ### Revoke consent
 
 Click "Revoke consent" in the consent portal (`:9002`), repeat the query. The PDP reads the consent register, sees status=REVOKED → DENY.
