@@ -114,6 +114,53 @@ effect, restart the engine before concluding the rule is wrong:
 docker compose restart openftv-pdp
 ```
 
+### Policy distribution via the OpenFTV Manager (`make demo-manager`)
+
+The loop above edits files the PDP reads directly. That is convenient while
+writing Rego, but it is not how a federation distributes policy: every
+source-holder would need to rebuild or remount its PDP to change a rule.
+
+`make demo-manager` starts the other half of OpenFTV — the **Manager**, which
+is the PAP and PIP in one service. It owns the policies (in its own Postgres),
+bundles them, and ships each bundle to the PDPs named in
+`services/openftv-manager/bundles/`. The PDP then holds no policy files at
+all: it pulls the bundle at boot (`PDP_BUNDLE_MANAGER`) and receives pushes
+afterwards.
+
+```bash
+make demo-manager                 # base stack + Manager, policies seeded
+curl -s localhost:9280/v1/policies | jq '.[].metadata.title'
+curl -s localhost:9281/v1/bundle/gbo-pdp | gunzip | jq '.version, (.policies|length)'
+```
+
+Editing `policies/` no longer reloads by itself — the Manager is the source of
+truth, so a change is a deliberate deployment:
+
+```bash
+make manager-seed                 # push policies/ into the Manager, redeploy
+```
+
+Three things worth knowing before relying on it:
+
+- **The Manager has no file store.** Its PAP is constructed without one
+  (`apps/manager/server/pap.go` says so in a comment), so policies can only
+  arrive over the API. `scripts/seed-openftv-manager.py` pushes `policies/`
+  in — the same path the management interface would use. Git stays the
+  source of truth; the Manager is the distribution mechanism.
+- **Policies cannot be deleted.** `DELETE /v1/policy/:id` fails with a
+  foreign-key violation on `policy_audit` (upstream bug). The seed script
+  therefore *retires* a policy that has left git by stripping the bundle's
+  tag, which drops it from the bundle. This matters: the store is
+  cumulative, and two policies declaring the same `package` make the PDP
+  fail to compile the whole set, so every request 500s.
+- **Masking still does not work.** Adopting the Manager does not change it:
+  bundle-delivered policies reach the engine through the same `UpsertPolicy`
+  path as file-delivered ones, never through OPA's bundle plugin, so
+  `data.system.log.mask` never resolves either way.
+
+The default stack is unchanged — without `GBO_BUNDLE_MANAGER` the PDP skips
+bundle retrieval entirely and keeps loading `policies/` from disk.
+
 ### Revoke consent
 
 Click "Revoke consent" in the consent portal (`:9002`), repeat the query. The PDP reads the consent register, sees status=REVOKED → DENY.
