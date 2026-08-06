@@ -1,4 +1,5 @@
-.PHONY: up down logs clean certs fsc-ca fsc-up fsc-down fsc-test fsc-clean \
+.PHONY: up down logs clean certs demo-manager manager-seed \
+	fsc-ca fsc-up fsc-down fsc-test fsc-clean \
         fsc-seed-bri fsc-seed-bri-hv fsc-seed-brp fsc-pdp-cert eudi-images \
         demo demo-minimal demo-dvtp demo-eudi demo-full demo-down eudi-config
 
@@ -33,6 +34,7 @@ down:
 #   make demo-dvtp     → alias for 'make demo'
 #   make demo-eudi     → EUDI flow over real FSC (auto init + seed-bri)
 #   make demo-full     → everything on (DvTP + EUDI + fsc-infra)
+#   make demo-manager  → base + OpenFTV Manager owning policy distribution
 #   make demo-down     → everything down (main + fsc-infra)
 
 demo: demo-dvtp
@@ -44,6 +46,34 @@ demo-minimal: certs
 	@echo "  Dev-portal:    http://localhost:9003  |  http://$$(hostname -I | awk '{print $$1}'):9003"
 	@echo "  Jaeger:        http://localhost:9686  |  http://$$(hostname -I | awk '{print $$1}'):9686"
 	@echo "  OpenFTV PDP:   https://localhost:9181/authzen/v1/evaluation (POST)"
+
+# The management plane: the Manager owns the policies and ships them to the
+# PDP as a bundle, instead of the PDP loading ./policies from disk. Opt-in,
+# because it trades the edit-and-save hot-reload loop for a deliberate
+# deploy step — which is the point, but not what you want while writing Rego.
+demo-manager: certs
+	@echo "-> Base stack + OpenFTV Manager (PAP/PIP, bundle distribution)"
+	GBO_BUNDLE_MANAGER=http://openftv-manager:9443/v1/bundle/gbo-pdp \
+	  docker compose --profile manager up --build -d
+	@echo "-> Waiting for the Manager to accept policies..."
+	@for i in $$(seq 1 30); do \
+	  curl -fsS -m 2 http://localhost:$${GBO_PORT_FTV_MANAGER_HEALTH:-9282}/healthz >/dev/null 2>&1 && break; \
+	  sleep 2; \
+	done
+	./scripts/seed-openftv-manager.py --url http://localhost:$${GBO_PORT_FTV_MANAGER:-9280}
+	@echo "-> Restarting the PDP so it pulls the freshly seeded bundle"
+	docker compose --profile manager restart openftv-pdp
+	@echo ""
+	@echo "  Manager API:   http://localhost:$${GBO_PORT_FTV_MANAGER:-9280}/v1/policies"
+	@echo "  Bundle (PDP):  http://localhost:$${GBO_PORT_FTV_MANAGER_INTERNAL:-9281}/v1/bundle/gbo-pdp"
+	@echo "  Re-seed after editing policies/:  make manager-seed"
+
+# Push the current policies/ into the Manager and redeploy them. Policies
+# that no longer exist in git are retired (untagged) rather than deleted —
+# DELETE is broken upstream, see ICTU-37.
+manager-seed:
+	./scripts/seed-openftv-manager.py --url http://localhost:$${GBO_PORT_FTV_MANAGER:-9280}
+	docker compose --profile manager restart openftv-pdp
 
 demo-dvtp: certs fsc-all-up fsc-seed-bri fsc-seed-bri-hv
 	@echo "-> DvTP stack: base + dienstverlener + toestemmingsportaal (via real FSC)"

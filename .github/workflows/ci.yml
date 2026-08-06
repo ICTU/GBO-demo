@@ -73,9 +73,18 @@ jobs:
       # The module and the image must compile against the same OpenFTV
       # commit, or the tests verify a different mapper than the one that
       # ships.
-      - name: go.mod open-ftv pin matches the Dockerfile OPENFTV_REF
+      # The mapper module, the PDP image and the Manager image must all
+      # come from one OpenFTV tree: the bundle format travels between the
+      # PDP and the Manager, and the tests must compile against the same
+      # eam/models the image builds against.
+      - name: open-ftv pin is identical across go.mod, PDP and Manager
         run: |
           ref="$(grep -oP 'OPENFTV_REF=\K[0-9a-f]+' services/openftv-pdp/Dockerfile)"
+          mgr="$(grep -oP 'OPENFTV_REF=\K[0-9a-f]+' services/openftv-manager/Dockerfile)"
+          if [ "$ref" != "$mgr" ]; then
+            echo "OPENFTV_REF differs: pdp=$ref manager=$mgr" >&2
+            exit 1
+          fi
           if ! grep -q "open-ftv v.*${ref:0:12}" services/openftv-pdp/go.mod; then
             echo "go.mod does not pin open-ftv to OPENFTV_REF ($ref)" >&2
             grep open-ftv services/openftv-pdp/go.mod >&2
@@ -174,15 +183,21 @@ jobs:
   # release builds are not gated on a PR, so a broken patch would
   # otherwise reach a published image.
   docker-openftv-pdp:
-    name: Docker — build (openftv-pdp)
+    name: Docker — build (${{ matrix.service }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - openftv-pdp
+          - openftv-manager
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build image
         run: |
           docker build \
-            --file services/openftv-pdp/Dockerfile \
-            --tag gbo-demo/openftv-pdp:ci \
+            --file "services/${{ matrix.service }}/Dockerfile" \
+            --tag "gbo-demo/${{ matrix.service }}:ci" \
             .
 
 

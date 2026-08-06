@@ -109,6 +109,16 @@ services:
       # The EUDI flow resolves the wallet-disclosed BSN to a PI here; the
       # policy engine (and its decision log) is never given the BSN.
       - GBO_BSNK_URL=http://bsnk-mock:4003
+      # Where the mapper reads the bronprofiel SDLs to resolve field→type.
+      # Separate from PDP_POLICIES_STORE on purpose: under the manager
+      # profile the policies arrive in a bundle, but the schemas still come
+      # from disk.
+      - GBO_SCHEMA_DIR=/policies
+      # Empty by default: the PDP then loads policies from /policies and
+      # skips bundle retrieval entirely (apps/pdp/server/router.go). Set it
+      # — `make demo-manager` does — to put the OpenFTV Manager in charge
+      # of policy distribution instead.
+      - PDP_BUNDLE_MANAGER=${GBO_BUNDLE_MANAGER:-}
       # TLS for the FSC-Inway AuthZen plugin (requires HTTPS + CA).
       - PDP_TLS_CERT=/certs/pdp-service.pem
       - PDP_TLS_KEY=/certs/pdp-service-key.pem
@@ -133,6 +143,67 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+
+  # --- OpenFTV management plane (profile: manager) --------------------------
+  # The PAP+PIP half of OpenFTV. It owns the policies, bundles them, and
+  # ships them to every PDP named in services/openftv-manager/bundles/.
+  # This is what lets a source-holder manage its own policy without
+  # rebuilding a PDP image — the point of running a federated PDP at all.
+  #
+  # Opt-in, because it changes where policy comes from: without it the PDP
+  # loads ./policies from disk and hot-reloads on edit, which is the nicer
+  # loop while writing Rego. Start it with `make demo-manager`.
+  postgres-ftv:
+    image: postgres:16-alpine
+    profiles: [manager, full]
+    environment:
+      POSTGRES_PASSWORD: ${FTV_POSTGRES_PASSWORD:-ftv}
+      POSTGRES_USER: ftv
+      POSTGRES_DB: ftv_manager
+    volumes:
+      - postgres-ftv-data:/var/lib/postgresql/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ftv -d ftv_manager"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  openftv-manager:
+    profiles: [manager, full]
+    build:
+      context: .
+      dockerfile: services/openftv-manager/Dockerfile
+    environment:
+      # Managed policies live in Postgres — the Manager's PAP is built
+      # without a file store (apps/manager/server/pap.go), so there is no
+      # directory to point it at. scripts/seed-openftv-manager.py pushes
+      # ./policies in over the API, which is the same path the management
+      # interface uses.
+      - MANAGER_PERSIST_TYPE=postgres
+      - MANAGER_PERSIST_POSTGRES_URL=postgres://ftv:${FTV_POSTGRES_PASSWORD:-ftv}@postgres-ftv:5432/ftv_manager?sslmode=disable
+      - MANAGER_MIGRATE_SOURCE=*EMBED*
+      - MANAGER_MIGRATE_AUTO=true
+      - MANAGER_POLICIES_LANGUAGE=rego
+      - MANAGER_TAGS_PATH=/tags
+      - MANAGER_BUNDLE_CONFIGS=/bundles
+      - MANAGER_INTERNAL_PORT=9443
+      - MANAGER_LOG_LEVEL=info
+    ports:
+      # Management API (what the seed script and a UI talk to).
+      - "${GBO_PORT_FTV_MANAGER:-9280}:8443"
+      # Internal API: where the PDP pulls its bundle from.
+      - "${GBO_PORT_FTV_MANAGER_INTERNAL:-9281}:9443"
+      - "${GBO_PORT_FTV_MANAGER_HEALTH:-9282}:8080"
+    networks: [backend]
+    depends_on:
+      postgres-ftv:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   # --- Go Backend Services ---
   sector-pip:
@@ -727,4 +798,5 @@ networks:
 volumes:
   dev-portal-var:
   postgres-eudi-data:
+  postgres-ftv-data:
   eudi-tsl-publish:
