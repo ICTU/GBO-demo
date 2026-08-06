@@ -1,0 +1,23 @@
+---
+# Deployment bundle for the GBO PDP.
+#
+# The Manager gathers every policy tagged "gbo-authz" plus the design-time
+# data, bundles it, and pushes it to each target. The PDP also pulls this
+# same bundle by id at boot (PDP_BUNDLE_MANAGER), so a cold start does not
+# have to wait for a push.
+#
+# `id` is what the PDP asks for: GET /v1/bundle/gbo-pdp on the Manager's
+# internal port.
+id: "gbo-pdp"
+title: "GBO authorization policies (DvTP + EUDI)"
+language: "rego"
+tags: ["gbo-authz"]
+policies: true
+data: true
+version: true
+targets:
+  # The PDP's internal API. Plain HTTP on the backend network: the
+  # AuthZEN endpoint that FSC-Inway calls is the TLS one (:8443).
+  - uri: "http://openftv-pdp:9443"
+    apikey: ""
+    encoding: "gzip"

@@ -125,19 +125,33 @@ jobs:
           - dev-portal-backend
           - eudi-adapter
           - graphql-server
+          - openftv-manager
+          - openftv-pdp
           - sector-pip
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build image
         run: |
           context="services/${{ matrix.service }}"
-          if [[ "${{ matrix.service }}" == "dev-portal-backend" ]]; then
-            context=.
-          fi
+          # These reach outside their own service directory: dev-portal-backend
+          # and openftv-pdp bake in ./policies, and openftv-manager ships the
+          # bundle configs. Same context compose uses.
+          case "${{ matrix.service }}" in
+            dev-portal-backend|openftv-pdp|openftv-manager) context=. ;;
+          esac
           docker build \
             --file "services/${{ matrix.service }}/Dockerfile" \
             --tag "gbo-demo/${{ matrix.service }}:ci" \
             "${context}"
+      - name: OPENFTV_REF identical in the PDP and Manager Dockerfiles
+        if: matrix.service == 'openftv-pdp'
+        run: |
+          pdp="$(grep -oP 'OPENFTV_REF=\K[0-9a-f]+' services/openftv-pdp/Dockerfile)"
+          mgr="$(grep -oP 'OPENFTV_REF=\K[0-9a-f]+' services/openftv-manager/Dockerfile)"
+          if [ "$pdp" != "$mgr" ]; then
+            echo "OPENFTV_REF differs: pdp=$pdp manager=$mgr" >&2
+            exit 1
+          fi
       - name: Verify packaged policy sources
         if: matrix.service == 'dev-portal-backend'
         run: |
