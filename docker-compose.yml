@@ -188,6 +188,13 @@ services:
       - MANAGER_BUNDLE_CONFIGS=/bundles
       - MANAGER_INTERNAL_PORT=9443
       - MANAGER_LOG_LEVEL=info
+      # Validate the management interface's tokens. The issuer must be the
+      # URL the BROWSER used, since that is what Keycloak puts in the token;
+      # the JWKS is fetched server-side over the compose network.
+      - MANAGER_OIDC_ISSUER=${GBO_FTV_OIDC_AUTHORITY:-http://localhost:9284/realms/gbo}
+      - MANAGER_OIDC_JWKS_URL=http://keycloak:8080/realms/gbo/protocol/openid-connect/certs
+      - MANAGER_OIDC_AUDIENCE=openftv-manager-ui
+      - MANAGER_OIDC_ROLES_CLAIM=roles
     ports:
       # Management API (what the seed script and a UI talk to).
       - "${GBO_PORT_FTV_MANAGER:-9280}:8443"
@@ -203,6 +210,68 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  # The Manager's own UI: browse and edit policies, attributes and
+  # deployments. It authenticates against Keycloak, because it reads its
+  # capabilities from a top-level `roles` claim in the access token — admin
+  # publishes, author writes, anything else is read-only.
+  #
+  # The URLs below are consumed by the BROWSER, so they must be reachable
+  # from wherever you open the page — not from inside the compose network —
+  # and over HTTPS unless that is localhost (see the PKCE note further down).
+  openftv-manager-ui:
+    profiles: [manager, full]
+    build:
+      context: .
+      dockerfile: services/openftv-manager-ui/Dockerfile
+    environment:
+      # Set as whole URLs rather than host+port, so the stack can sit behind
+      # a TLS reverse proxy on separate hostnames. That is not optional for
+      # a remote demo: the UI's OIDC login uses PKCE, PKCE needs
+      # Crypto.subtle, and browsers only expose that in a secure context —
+      # so http://<lan-ip>:9283 fails with "Crypto.subtle is available only
+      # in secure contexts". localhost counts as secure; a LAN IP does not.
+      - VITE_PAP_BASE_URL=${GBO_FTV_MANAGER_URL:-http://localhost:9280}
+      - VITE_PIP_BASE_URL=${GBO_FTV_MANAGER_URL:-http://localhost:9280}
+      - VITE_OIDC_AUTHORITY=${GBO_FTV_OIDC_AUTHORITY:-http://localhost:9284/realms/gbo}
+      - VITE_OIDC_CLIENT_ID=openftv-manager-ui
+    ports:
+      - "${GBO_PORT_FTV_MANAGER_UI:-9283}:8080"
+    networks: [backend]
+    depends_on:
+      openftv-manager:
+        condition: service_healthy
+
+  # Demo IdP for the management interface. Three users, one per capability
+  # level: admin/admin, auteur/auteur, auditor/auditor. The realm ships a
+  # protocol mapper that copies realm roles into a top-level `roles` claim,
+  # which is the shape the UI reads.
+  keycloak:
+    profiles: [manager, full]
+    image: quay.io/keycloak/keycloak:26.0.7
+    command: ["start-dev", "--import-realm", "--http-port=8080"]
+    environment:
+      - KC_BOOTSTRAP_ADMIN_USERNAME=admin
+      - KC_BOOTSTRAP_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      # The issuer in the token must match what the browser used to reach
+      # Keycloak, or the SPA rejects it. start-dev derives it per request.
+      - KC_HOSTNAME_STRICT=false
+      - KC_HTTP_ENABLED=true
+      # Behind a TLS-terminating proxy the login form would otherwise post
+      # to http:// from an https:// page, which the browser blocks as
+      # "Form is not secure". Honour the forwarded scheme instead.
+      - KC_PROXY_HEADERS=xforwarded
+    volumes:
+      - ./services/openftv-manager-ui/keycloak/realm-gbo.json:/opt/keycloak/data/import/realm-gbo.json:ro
+    ports:
+      - "${GBO_PORT_KEYCLOAK:-9284}:8080"
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080 && echo -e 'GET /realms/gbo HTTP/1.1\\nHost: localhost\\nConnection: close\\n\\n' >&3 && cat <&3 | head -1 | grep -q 200"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
 
   # --- Go Backend Services ---
   sector-pip:

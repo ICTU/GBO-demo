@@ -151,6 +151,33 @@ curl -X POST localhost:9280/v1/deployment -d '{"title":"..."}' # bundle it
 docker compose --profile manager restart openftv-pdp           # PDP re-pulls
 ```
 
+### The management interface
+
+`make demo-manager` also starts OpenFTV's own UI for the Manager — browse and
+edit policies, attributes and deployments — with a Keycloak realm behind it.
+Three users, one per capability level: `admin`/`admin` (write + publish),
+`auteur`/`auteur` (write), `auditor`/`auditor` (read-only). The UI reads those
+from a top-level `roles` claim in the access token, which is why it is
+Keycloak and not something smaller; see
+`services/openftv-manager-ui/README.md`.
+
+**It must be served over HTTPS unless you open it on `localhost`.** The OIDC
+login uses PKCE, PKCE needs `Crypto.subtle`, and browsers only expose that in
+a secure context — over `http://<lan-ip>:9283` the page fails with
+*"Crypto.subtle is available only in secure contexts"*. Put the UI, the
+Manager API and Keycloak behind a TLS reverse proxy and point the stack at
+them:
+
+```bash
+GBO_FTV_MANAGER_URL=https://ftv-api.example.org \
+GBO_FTV_OIDC_AUTHORITY=https://ftv-auth.example.org/realms/gbo \
+  make demo-manager
+```
+
+Keycloak needs `KC_PROXY_HEADERS=xforwarded` (set in compose) and the proxy
+must send `X-Forwarded-Proto: https`, or its login form posts over HTTP from
+an HTTPS page and the browser blocks it as *"Form is not secure"*.
+
 Three things worth knowing before relying on it:
 
 - **The Manager has no file store.** Its PAP is constructed without one
