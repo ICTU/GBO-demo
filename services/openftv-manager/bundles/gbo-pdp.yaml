@@ -15,9 +15,18 @@ tags: ["gbo-authz"]
 policies: true
 data: true
 version: true
-targets:
-  # The PDP's internal API. Plain HTTP on the backend network: the
-  # AuthZEN endpoint that FSC-Inway calls is the TLS one (:8443).
-  - uri: "http://openftv-pdp:9443"
-    apikey: ""
-    encoding: "gzip"
+# No push targets, deliberately.
+#
+# The Manager can POST a bundle to a PDP, but the PDP authorizes its own
+# management endpoints with the same policy set it evaluates requests
+# against — `package authz`. Our entrypoint is the GBO decision policy,
+# which denies anything that is not a GBO data request, so a push gets a
+# 403. Granting it would mean adding a rule to authz.rego that opens the
+# PDP's management API, which is not something to do for convenience.
+# (OpenFTV only installs NoAuth when the policy store is empty, so this
+# bites exactly when the PDP has policies — i.e. always, in practice.)
+#
+# The PDP therefore pulls: PDP_BUNDLE_MANAGER points at this bundle and it
+# fetches at boot, which is why `make demo-manager` restarts it after
+# seeding. Reported upstream (ICTU-37).
+targets: []

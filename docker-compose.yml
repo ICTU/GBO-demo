@@ -174,7 +174,16 @@ services:
       - MANAGER_PERSIST_POSTGRES_URL=postgres://ftv:${FTV_POSTGRES_PASSWORD:-ftv}@postgres-ftv:5432/ftv_manager?sslmode=disable
       - MANAGER_MIGRATE_SOURCE=*EMBED*
       - MANAGER_MIGRATE_AUTO=true
-      - MANAGER_POLICIES_LANGUAGE=rego
+      # Deliberately NOT set to rego. MANAGER_POLICIES_LANGUAGE selects the
+      # language of the policies that authorize the Manager's OWN API (it
+      # seeds Cedar ones for that), and those share a store with the
+      # policies it manages. Setting it to rego makes our `package authz`
+      # — the GBO decision entrypoint — govern the Manager's API instead,
+      # which is undefined for that input shape: every request then 403s.
+      # It survives the first boot, because the store is still empty when
+      # the authorizer initialises, and breaks on the next restart.
+      # The language of a managed policy comes from the policy itself, and
+      # the bundle filters on the language in its own config.
       - MANAGER_TAGS_PATH=/tags
       - MANAGER_BUNDLE_CONFIGS=/bundles
       - MANAGER_INTERNAL_PORT=9443
