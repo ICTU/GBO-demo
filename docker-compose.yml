@@ -81,8 +81,8 @@ services:
   # OpenFTV PDP with the embedded OPA/Rego engine — the authorization
   # endpoint for FSC-Inway (AuthZEN, HTTPS on :8443). The GraphQL
   # context-handler runs INSIDE this image as a request-mapper
-  # (services/openftv-pdp/mapper, PDP_REQUEST_MAPPINGS); consent is
-  # pulled from the consent-register into data.attributes (pull-config).
+  # (services/openftv-pdp/mapper, PDP_REQUEST_MAPPINGS); it fetches the
+  # consent per request from the consent-register (GBO_CONSENT_URL below).
   # Note: PDP_POLICIES_LANGUAGE must be "rego" — the documented value
   # "OPA" makes OpenFTV silently skip all policy files (upstream quirk).
   openftv-pdp:

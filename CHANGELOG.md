@@ -7,6 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Fixed
+- The PDP image's patch of the upstream OpenFTV tree now fails the build when it does not apply. `sed -i` exits 0 when its pattern matches nothing, so a rename upstream would have produced a PDP in which the request-mapper is never registered — every policy evaluating against an empty context, with nothing reporting it. Release images are not gated on a PR, so a silently broken patch could have been published.
+- Three stale references to the abandoned PIP pull-config: the README's access-basis table, the compose comment on `openftv-pdp`, and the header of `policies/authz.rego`, which still described the retired `pdp-service` as the source of the context enrichment. Consent is fetched per request by the mapper.
+- Removed `.github/scripts/ci-change-plan.sh`, dead since `ci.yml` went back to a hardcoded matrix.
 - OpenFTV now treats bron-specific `eudi:attestation:*` requests as PID flows and dispatches them to the exact flow declared by each EUDI policy rule. This restores the `eudi:attestation:brp` death-certificate flow, which was denied with `NO_APPLICABLE_RULE` after replacing `pdp-service` with the embedded OpenFTV mapper.
 - The `dev-portal-backend` image now includes the release-matched Rego policy sources and generated `rules.json` used by its policy-inspection endpoints. Deployments no longer need to copy those files into a separate ConfigMap, and policy changes now invalidate the image's content tag and CI build plan.
 - Release workflow builds the `openftv-pdp` image with the repo root as build context, the way compose already did. Its Dockerfile bakes in `./policies` and reads `services/openftv-pdp/{mapper,field-map.json}`, all of which sit outside the service directory, so the service-scoped context failed on `"/policies": not found` and the image was not published for `v0.5.2`.
