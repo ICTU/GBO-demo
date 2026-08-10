@@ -29,13 +29,32 @@ function write(id: string) {
   document.cookie = `${COOKIE}=${id}; ${attrs}`
 }
 
+// newId mints a session id, without requiring a secure context.
+//
+// crypto.randomUUID is only exposed on https: and localhost, so on a demo
+// served over plain http from a LAN address it is undefined — and calling it
+// threw before any request was made, which broke every button in the portal
+// with "crypto.randomUUID is not a function". That is precisely the setup a
+// demo runs in, so this has to work there.
+//
+// Math.random is fine here: the id only says "same browser" so watch-mode can
+// filter to your own runs. It is a correlation tag, not a credential — the
+// header it ends up in is forgeable by design (see the note at the top), so
+// nothing is gated on it being unguessable.
+function newId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return 'demo-' + Math.random().toString(36).slice(2) + Date.now().toString(36)
+}
+
 // demoSessionId returns this browser's id, minting one on first use. Shared
 // by every dev-portal tab — that is one developer, and a run they start
 // belongs to all their tabs equally.
 export function demoSessionId(): string {
   const existing = read()
   if (existing) return existing
-  const id = crypto.randomUUID()
+  const id = newId()
   write(id)
   // With cookies off this stays empty, and every watcher falls back to the
   // old see-everything behaviour rather than breaking.
