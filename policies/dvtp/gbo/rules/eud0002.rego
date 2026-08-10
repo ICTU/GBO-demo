@@ -77,7 +77,7 @@ allowed_scopes := {"brp:akte:overlijden"}
 # may have an attestation issued at all, not about which bron it reads.
 allowed_actors := {
 	"00000004000000004000",
-	"0000009961EUDIISS000",
+	"0000009961MINEZK0000",
 	"99999999900000000100",
 }
 
