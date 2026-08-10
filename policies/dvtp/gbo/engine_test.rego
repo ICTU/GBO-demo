@@ -33,7 +33,7 @@ test_ctx_resource_pi_empty_without_consent if {
 # mapper can resolve the BRP GraphQL schema. It must still dispatch to
 # EUD0002 instead of falling through to NO_APPLICABLE_RULE.
 _eudi_brp_input := {
-	"subject": {"type": "org", "id": "0000009961EUDIISS000"},
+	"subject": {"type": "org", "id": "0000009961MINEZK0000"},
 	"context": {
 		"flow": "eudi:attestation:brp",
 		"time": "2026-08-04T07:13:33Z",
