@@ -114,6 +114,117 @@ effect, restart the engine before concluding the rule is wrong:
 docker compose restart openftv-pdp
 ```
 
+### Policy distribution via the OpenFTV Manager (`make demo-manager`)
+
+The loop above edits files the PDP reads directly. That is convenient while
+writing Rego, but it is not how a federation distributes policy: every
+source-holder would need to rebuild or remount its PDP to change a rule.
+
+`make demo-manager` starts the other half of OpenFTV — the **Manager**, which
+is the PAP and PIP in one service. Git remains the canonical policy source.
+An internal deployment identity seeds those policies into the Manager's
+Postgres, after which the Manager bundles them and serves each bundle to the
+PDPs that ask for it. The PDP pulls its bundle at boot
+(`PDP_BUNDLE_MANAGER`), and that deployed bundle is its runtime policy set.
+
+```bash
+KEYCLOAK_ADMIN_PASSWORD='<generate-a-secret>' \
+FTV_MANAGER_AUDITOR_PASSWORD='FDSSecret' \
+FTV_MANAGER_DEPLOY_PASSWORD='<generate-another-secret>' \
+make demo-manager                 # base stack + Manager, policies seeded
+curl -s localhost:9281/v1/bundle/gbo-pdp | gunzip | jq '.version, (.policies|length)'
+```
+
+Editing `policies/` no longer reloads by itself. Deploy the changed Git state
+deliberately, using the same secret-backed identity:
+
+```bash
+FTV_MANAGER_DEPLOY_PASSWORD='<same-secret>' make manager-seed
+```
+
+### The management interface
+
+`make demo-manager` also starts OpenFTV's own UI with a Keycloak realm behind
+it. Public demo visitors use the simulation credentials `fds` / `FDSSecret`
+and can inspect policies, deployments and the Logboek, but cannot change or
+publish anything. `FTV_MANAGER_AUDITOR_PASSWORD` supplies that password to
+Keycloak, so a deployment can manage it as a CI/CD secret. The API
+enforces that restriction with Cedar policies; it is not just a disabled UI
+button. Only the internal `deployment` identity, whose password comes from
+`FTV_MANAGER_DEPLOY_PASSWORD`, can write and publish. There is deliberately
+no public admin or author account. The UI reads capabilities from a top-level
+`roles` claim in the access token, which is why it is Keycloak; see
+`services/openftv-manager-ui/README.md`.
+
+**It must be served over HTTPS unless you open it on `localhost`.** The OIDC
+login uses PKCE, PKCE needs `Crypto.subtle`, and browsers only expose that in
+a secure context — over `http://<lan-ip>:9283` the page fails with
+*"Crypto.subtle is available only in secure contexts"*. Put the UI, the
+Manager API and Keycloak behind a TLS reverse proxy and point the stack at
+them:
+
+```bash
+GBO_FTV_MANAGER_URL=https://ftv-api.example.org \
+GBO_FTV_OIDC_AUTHORITY=https://ftv-auth.example.org/realms/gbo \
+  make demo-manager
+```
+
+Keycloak needs `KC_PROXY_HEADERS=xforwarded` (set in compose) and the proxy
+must send `X-Forwarded-Proto: https`, or its login form posts over HTTP from
+an HTTPS page and the browser blocks it as *"Form is not secure"*.
+
+The public auditor can also inspect the **Logboek** (decision log). That is
+appropriate only because this simulation uses synthetic data; do not copy
+that access model to a tenant containing personal data, tokens or secrets.
+The Logboek needs the ADL on Postgres at both ends: the
+Manager only registers those routes for a Postgres-backed decision log —
+any other value and the endpoints simply do not exist, so the page 404s —
+and the PDP has to write there. `make demo-manager` sets both. The ADL gets
+its own database (`ftv_adl`): it carries its own migration set while the
+Manager's schema is at version 10, and both record progress in a
+`schema_migrations` table, so sharing one database makes the PDP's
+migration fail with *"no migration found for version 10"* and the PDP then
+refuses to start.
+
+This is OpenFTV's own ADL, and is independent of the embedded OPA console
+decision log that the developer portal reads from Loki.
+
+Three things worth knowing before relying on it:
+
+- **Managed Rego policies have no file store.** They arrive through the API.
+  `scripts/seed-openftv-manager.py` obtains a short-lived token for the
+  internal deployment identity and pushes `policies/` in. `/authz` in the
+  image is separate: it contains only the Cedar policies that protect the
+  Manager's own API. The Manager fails closed if those cannot be loaded.
+- **Policies cannot be deleted.** `DELETE /v1/policy/:id` fails with a
+  foreign-key violation on `policy_audit` (upstream bug). The seed script
+  therefore *retires* a policy that has left git by stripping the bundle's
+  tag, which drops it from the bundle. This matters: the store is
+  cumulative, and two policies declaring the same `package` make the PDP
+  fail to compile the whole set, so every request 500s.
+- **The Manager serves bundles; it does not push them here.** It can POST a
+  bundle to a PDP, but the PDP authorizes its own management endpoints with
+  the same policy set it evaluates requests against — our `package authz`
+  entrypoint — so a push is denied with 403. Allowing it would mean opening
+  the PDP's management API from the GBO decision policy, which is not a
+  trade worth making for convenience. OpenFTV only bypasses this when the
+  policy store is empty, i.e. never in practice. So `targets` is empty and
+  the PDP pulls at boot, which is why `make demo-manager` restarts it after
+  seeding.
+- **Masking still does not work.** Adopting the Manager does not change it:
+  bundle-delivered policies reach the engine through the same `UpsertPolicy`
+  path as file-delivered ones, never through OPA's bundle plugin, so
+  `data.system.log.mask` never resolves either way.
+
+The default stack is unchanged — without `GBO_BUNDLE_MANAGER` the PDP skips
+bundle retrieval entirely and keeps loading `policies/` from disk.
+
+The Manager is deliberately only in the `manager` profile, not `full`: a
+management plane should never appear accidentally without its required
+secrets and seed step. After upgrading an existing prototype Manager volume,
+recreate that volume once so the Cedar bootstrap policies can be seeded into
+an otherwise empty store.
+
 ### Revoke consent
 
 Click "Revoke consent" in the consent portal (`:9002`), repeat the query. The PDP reads the consent register, sees status=REVOKED → DENY.

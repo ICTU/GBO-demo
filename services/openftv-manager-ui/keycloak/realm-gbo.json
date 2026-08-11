@@ -1,0 +1,112 @@
+{
+  "realm": "gbo",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginTheme": "keycloak",
+  "accessTokenLifespan": 1800,
+  "roles": {
+    "realm": [
+      {
+        "name": "admin",
+        "description": "Mag beleid schrijven en publiceren (deployen)."
+      },
+      {
+        "name": "author",
+        "description": "Mag beleid schrijven, niet publiceren."
+      },
+      {
+        "name": "auditor",
+        "description": "Alleen lezen."
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "openftv-manager-ui",
+      "name": "OpenFTV management interface",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": [
+        "*"
+      ],
+      "webOrigins": [
+        "*"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "*"
+      },
+      "protocolMappers": [
+        {
+          "name": "realm roles as top-level roles claim",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "openftv-manager-api",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "deployment",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Internal",
+      "lastName": "Deployment",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${FTV_MANAGER_DEPLOY_PASSWORD}",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "admin"
+      ],
+      "email": "deployment@gbo.local",
+      "requiredActions": []
+    },
+    {
+      "username": "fds",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Federatief",
+      "lastName": "Datastelsel",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${FTV_MANAGER_AUDITOR_PASSWORD}",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "auditor"
+      ],
+      "email": "fds@gbo.local",
+      "requiredActions": []
+    }
+  ],
+  "verifyEmail": false,
+  "loginWithEmailAllowed": true
+}

@@ -1,0 +1,32 @@
+---
+# Deployment bundle for the GBO PDP.
+#
+# The Manager gathers every policy tagged "gbo-authz" plus the design-time
+# data, bundles it, and pushes it to each target. The PDP also pulls this
+# same bundle by id at boot (PDP_BUNDLE_MANAGER), so a cold start does not
+# have to wait for a push.
+#
+# `id` is what the PDP asks for: GET /v1/bundle/gbo-pdp on the Manager's
+# internal port.
+id: "gbo-pdp"
+title: "GBO authorization policies (DvTP + EUDI)"
+language: "rego"
+tags: ["gbo-authz"]
+policies: true
+data: true
+version: true
+# No push targets, deliberately.
+#
+# The Manager can POST a bundle to a PDP, but the PDP authorizes its own
+# management endpoints with the same policy set it evaluates requests
+# against — `package authz`. Our entrypoint is the GBO decision policy,
+# which denies anything that is not a GBO data request, so a push gets a
+# 403. Granting it would mean adding a rule to authz.rego that opens the
+# PDP's management API, which is not something to do for convenience.
+# (OpenFTV only installs NoAuth when the policy store is empty, so this
+# bites exactly when the PDP has policies — i.e. always, in practice.)
+#
+# The PDP therefore pulls: PDP_BUNDLE_MANAGER points at this bundle and it
+# fetches at boot, which is why `make demo-manager` restarts it after
+# seeding. Reported upstream (ICTU-37).
+targets: []

@@ -66,6 +66,12 @@ jobs:
             dockerfile: ./landing-page/Dockerfile
           # Repo root as context: the Dockerfile bakes ./policies in (same
           # as the compose build).
+          - service: openftv-manager
+            context: .
+            dockerfile: ./services/openftv-manager/Dockerfile
+          - service: openftv-manager-ui
+            context: .
+            dockerfile: ./services/openftv-manager-ui/Dockerfile
           - service: openftv-pdp
             context: .
             dockerfile: ./services/openftv-pdp/Dockerfile
