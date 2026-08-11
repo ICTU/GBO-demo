@@ -13,25 +13,25 @@ import (
 	"time"
 )
 
-func TestValidateSourceCommandMakesNoPermanentChanges(t *testing.T) {
-	payload := sourceMetadataCacheFixture(t)
+func TestStaticOnboardingRejectsFSCRegistration(t *testing.T) {
 	registrationPath := writeSourceRegistrationFixture(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
 	secretsDir := filepath.Join(t.TempDir(), "secrets")
-	client := metadataValidationClient(t, payload)
-	var output bytes.Buffer
 
 	handled, err := runOnboardingCommand(context.Background(), []string{
 		"validate-source",
 		"--source", registrationPath,
 		"--outway-url", "https://outway.example",
-		"--schema", "../../schemas/gbo-attestations-v1.schema.json",
+		"--schema", "../../schemas/gbo-source-metadata-v1.schema.json",
 		"--type-metadata-base-url", "https://issuer.example",
 		"--state-dir", stateDir,
 		"--secrets-dir", secretsDir,
 	}, onboardingDependencies{
-		client: client,
-		now:    time.Now,
+		client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			t.Fatal("a static FSC registration must be rejected before network access")
+			return nil, nil
+		})},
+		now: time.Now,
 		resolveCertificateProvider: func(onboardingOptions) (certificateProvider, error) {
 			t.Fatal("validate-source must not instantiate a certificate provider")
 			return nil, nil
@@ -44,223 +44,16 @@ func TestValidateSourceCommandMakesNoPermanentChanges(t *testing.T) {
 			t.Fatal("validate-source must not instantiate an activation backend")
 			return nil, nil
 		},
-		stdout: &output,
-		stderr: io.Discard,
-	})
-	if err != nil {
-		t.Fatalf("validate-source: %v", err)
-	}
-	if !handled {
-		t.Fatal("validate-source was not handled")
-	}
-	if !strings.Contains(output.String(), "source 99999999900000000200 is valid") {
-		t.Fatalf("output = %q", output.String())
-	}
-	assertPathAbsent(t, stateDir)
-	assertPathAbsent(t, secretsDir)
-}
-
-func TestOnboardSourceDryRunCreatesNothing(t *testing.T) {
-	payload := sourceMetadataCacheFixture(t)
-	registrationPath := writeSourceRegistrationFixture(t)
-	stateDir := filepath.Join(t.TempDir(), "state")
-	secretsDir := filepath.Join(t.TempDir(), "secrets")
-	infrastructureCalled := false
-
-	_, err := runOnboardingCommand(context.Background(), []string{
-		"onboard-source", "--source", registrationPath, "--dry-run",
-		"--outway-url", "https://outway.example",
-		"--schema", "../../schemas/gbo-attestations-v1.schema.json",
-		"--type-metadata-base-url", "https://issuer.example",
-		"--state-dir", stateDir, "--secrets-dir", secretsDir,
-	}, onboardingDependencies{
-		client: metadataValidationClient(t, payload),
-		now:    time.Now,
-		resolveCertificateProvider: func(onboardingOptions) (certificateProvider, error) {
-			infrastructureCalled = true
-			return nil, nil
-		},
-		resolveCertificateStore: func(onboardingOptions) (certificateStore, error) {
-			infrastructureCalled = true
-			return nil, nil
-		},
-		resolveActivationBackend: func(onboardingOptions) (activationBackend, error) {
-			infrastructureCalled = true
-			return nil, nil
-		},
 		stdout: io.Discard,
 		stderr: io.Discard,
 	})
-	if err != nil {
-		t.Fatalf("onboard-source --dry-run: %v", err)
+	if !handled {
+		t.Fatal("validate-source was not handled")
 	}
-	if infrastructureCalled {
-		t.Fatal("dry-run instantiated onboarding infrastructure")
+	if err == nil || !strings.Contains(err.Error(), "discovered from contracts") {
+		t.Fatalf("error = %v, want contract-discovery guidance", err)
 	}
 	assertPathAbsent(t, stateDir)
-	assertPathAbsent(t, secretsDir)
-}
-
-func TestOnboardSourceInjectsOnlyConfiguredInfrastructure(t *testing.T) {
-	payload := sourceMetadataCacheFixture(t)
-	registrationPath := writeSourceRegistrationFixture(t)
-	for name, config := range map[string]struct {
-		arguments []string
-		wantError string
-	}{
-		"unknown storage backend": {
-			arguments: []string{"--storage-backend", "database", "--certificate-store", "development-ca"},
-			wantError: "unsupported onboarding storage backend",
-		},
-		"unknown certificate store": {
-			arguments: []string{"--storage-backend", "filesystem", "--certificate-store", "wallet-ca"},
-			wantError: "unsupported certificate store",
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			stateDir := filepath.Join(t.TempDir(), "state")
-			secretsDir := filepath.Join(t.TempDir(), "secrets")
-			arguments := []string{
-				"onboard-source", "--source", registrationPath,
-				"--outway-url", "https://outway.example",
-				"--schema", "../../schemas/gbo-attestations-v1.schema.json",
-				"--type-metadata-base-url", "https://issuer.example",
-				"--state-dir", stateDir, "--secrets-dir", secretsDir,
-			}
-			arguments = append(arguments, config.arguments...)
-			dependencies := defaultOnboardingDependencies()
-			dependencies.client = metadataValidationClient(t, payload)
-			dependencies.stdout = io.Discard
-			dependencies.stderr = io.Discard
-			if _, err := runOnboardingCommand(context.Background(), arguments, dependencies); err == nil || !strings.Contains(err.Error(), config.wantError) {
-				t.Fatalf("error = %v, want %q", err, config.wantError)
-			}
-			assertPathAbsent(t, stateDir)
-			assertPathAbsent(t, secretsDir)
-		})
-	}
-}
-
-func TestOnboardSourceIsIdempotentAndActivatesLast(t *testing.T) {
-	payload := sourceMetadataCacheFixture(t)
-	registrationPath := writeSourceRegistrationFixture(t)
-	stateDir := filepath.Join(t.TempDir(), "state")
-	secretsDir := filepath.Join(t.TempDir(), "secrets")
-	dependencies := onboardingDependencies{
-		client:                     metadataValidationClient(t, payload),
-		now:                        time.Now,
-		resolveCertificateProvider: configuredCertificateProvider,
-		resolveCertificateStore:    configuredCertificateStore,
-		resolveActivationBackend:   configuredActivationBackend,
-		stdout:                     io.Discard,
-		stderr:                     io.Discard,
-	}
-	arguments := []string{
-		"onboard-source", "--source", registrationPath,
-		"--storage-backend", "filesystem", "--certificate-store", "development-ca",
-		"--outway-url", "https://outway.example",
-		"--schema", "../../schemas/gbo-attestations-v1.schema.json",
-		"--type-metadata-base-url", "https://issuer.example",
-		"--state-dir", stateDir, "--secrets-dir", secretsDir,
-	}
-	if _, err := runOnboardingCommand(context.Background(), []string{
-		"provision-development-certificates", "--source", registrationPath,
-		"--secrets-dir", secretsDir,
-	}, dependencies); err != nil {
-		t.Fatalf("explicitly provision development certificates: %v", err)
-	}
-	for attempt := 0; attempt < 2; attempt++ {
-		if _, err := runOnboardingCommand(context.Background(), arguments, dependencies); err != nil {
-			t.Fatalf("onboard-source attempt %d: %v", attempt+1, err)
-		}
-	}
-	activationPath := filepath.Join(stateDir, "active", "99999999900000000200.json")
-	rawActivation, err := os.ReadFile(activationPath)
-	if err != nil {
-		t.Fatalf("read activation: %v", err)
-	}
-	var activation sourceActivation
-	if err := json.Unmarshal(rawActivation, &activation); err != nil {
-		t.Fatalf("parse activation: %v", err)
-	}
-	if len(activation.Types) != 1 || activation.Types[0].VCTIntegrity == "" {
-		t.Fatalf("activation types = %+v", activation.Types)
-	}
-	typeMetadata, err := os.ReadFile(activation.Types[0].TypeMetadataReference)
-	if err != nil {
-		t.Fatalf("read activated Type Metadata: %v", err)
-	}
-	var activatedMetadata struct {
-		VCT string `json:"vct"`
-	}
-	if err := json.Unmarshal(typeMetadata, &activatedMetadata); err != nil {
-		t.Fatalf("parse activated Type Metadata: %v", err)
-	}
-	if activatedMetadata.VCT != activation.Types[0].VCT {
-		t.Errorf("activated Type Metadata vct = %q, want %q", activatedMetadata.VCT, activation.Types[0].VCT)
-	}
-	issuanceEnv, err := os.ReadFile(activation.IssuanceConfigReference)
-	if err != nil {
-		t.Fatalf("read generated issuance environment: %v", err)
-	}
-	for _, variable := range []string{
-		"EUDI_ISSUER_KEY=", "EUDI_ISSUER_CERT=", "EUDI_READER_KEY=", "EUDI_READER_CERT=",
-		"EUDI_STATUS_KEY=", "EUDI_STATUS_CERT=", "EUDI_ONBOARDING_ISSUER_TRUST_ANCHOR=",
-		"EUDI_ONBOARDING_READER_TRUST_ANCHOR=",
-	} {
-		if !bytes.Contains(issuanceEnv, []byte(variable)) {
-			t.Errorf("generated issuance environment has no %s", variable)
-		}
-	}
-	if info, err := os.Stat(activation.IssuanceConfigReference); err != nil {
-		t.Fatalf("stat generated issuance environment: %v", err)
-	} else if got := info.Mode().Perm(); got != 0o600 {
-		t.Errorf("generated issuance environment mode = %o, want 600", got)
-	}
-	changedArguments := append(append([]string(nil), arguments...), "--reader-origin-url", "https://changed-reader.example")
-	if _, err := runOnboardingCommand(context.Background(), changedArguments, dependencies); err == nil || !strings.Contains(err.Error(), "does not match current configuration") {
-		t.Fatalf("onboard-source with changed reader configuration error = %v, want pre-provisioned certificate mismatch", err)
-	}
-	for _, path := range []string{
-		activation.Certificates.IssuerKeyReference,
-		activation.Certificates.ReaderKeyReference,
-		activation.Certificates.StatusKeyReference,
-	} {
-		info, err := os.Stat(path)
-		if err != nil {
-			t.Fatalf("stat private key %q: %v", path, err)
-		}
-		if got := info.Mode().Perm(); got != 0o600 {
-			t.Errorf("private key %q mode = %o, want 600", path, got)
-		}
-	}
-}
-
-func TestOnboardSourceMissingCertificatesLeavesSourceInactive(t *testing.T) {
-	payload := sourceMetadataCacheFixture(t)
-	registrationPath := writeSourceRegistrationFixture(t)
-	stateDir := filepath.Join(t.TempDir(), "state")
-	secretsDir := filepath.Join(t.TempDir(), "secrets")
-
-	_, err := runOnboardingCommand(context.Background(), []string{
-		"onboard-source", "--source", registrationPath,
-		"--storage-backend", "filesystem", "--certificate-store", "development-ca",
-		"--outway-url", "https://outway.example",
-		"--schema", "../../schemas/gbo-attestations-v1.schema.json",
-		"--type-metadata-base-url", "https://issuer.example",
-		"--state-dir", stateDir, "--secrets-dir", secretsDir,
-	}, onboardingDependencies{
-		client:                   metadataValidationClient(t, payload),
-		now:                      time.Now,
-		resolveCertificateStore:  configuredCertificateStore,
-		resolveActivationBackend: configuredActivationBackend,
-		stdout:                   io.Discard,
-		stderr:                   io.Discard,
-	})
-	if err == nil || !strings.Contains(err.Error(), "load explicitly provisioned") {
-		t.Fatalf("error = %v, want missing manually provisioned certificates", err)
-	}
-	assertPathAbsent(t, filepath.Join(stateDir, "active", "99999999900000000200.json"))
 	assertPathAbsent(t, secretsDir)
 }
 
@@ -287,7 +80,7 @@ func TestHTTPSMTLSRegistrationIsModelledButFailsClosedAtRuntime(t *testing.T) {
 name: "Belastingdienst-mock"
 metadata_endpoint:
   transport: "https-mtls"
-  endpoint: "https://metadata.example/gbo-attestations"
+  endpoint: "https://metadata.example/.well-known/gbo"
 data_access:
   transport: "https-mtls"
 `
@@ -315,7 +108,11 @@ func TestGraphQLEndpointMustMatchOnboardedTransport(t *testing.T) {
 		"mTLS rejects HTTP URL": {endpoint: "http://source.example/graphql", transport: sourceTransportHTTPSMTLS},
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := validateGraphQLEndpoint(test.endpoint, test.transport)
+			graphql := sourceGraphQL{Endpoint: test.endpoint}
+			if test.transport == sourceTransportFSC {
+				graphql.ServiceReference = "bri"
+			}
+			err := validateGraphQLEndpoint(graphql, test.transport)
 			if test.valid && err != nil {
 				t.Fatalf("endpoint rejected: %v", err)
 			}
@@ -392,29 +189,13 @@ func validRegistrationYAML() string {
 		"name: \"Belastingdienst-mock\"\n" +
 		"metadata_endpoint:\n" +
 		"  transport: \"fsc\"\n" +
-		"  service_reference: \"gbo-attestation-metadata\"\n" +
-		"  path: \"/.well-known/gbo-attestations\"\n" +
+		"  service_reference: \"gbo-metadata\"\n" +
+		"  path: \"/.well-known/gbo\"\n" +
+		"  grant_hash: \"metadata-grant\"\n" +
 		"data_access:\n" +
 		"  transport: \"fsc\"\n" +
-		"  service_reference: \"bri\"\n"
-}
-
-func metadataValidationClient(t *testing.T, payload []byte) *http.Client {
-	t.Helper()
-	return &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		if got, want := request.URL.Path, "/gbo-attestation-metadata/.well-known/gbo-attestations"; got != want {
-			t.Fatalf("metadata path = %q, want %q", got, want)
-		}
-		if request.Header.Get("Fsc-Transaction-Id") == "" {
-			t.Fatal("metadata request has no Fsc-Transaction-Id")
-		}
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Header:     http.Header{"Content-Type": []string{sourceMetadataMediaType}},
-			Body:       io.NopCloser(bytes.NewReader(payload)),
-			Request:    request,
-		}, nil
-	})}
+		"  service_reference: \"bri\"\n" +
+		"  grant_hash: \"data-grant\"\n"
 }
 
 func assertPathAbsent(t *testing.T, path string) {

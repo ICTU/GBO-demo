@@ -4,8 +4,8 @@
 // Role:
 //  1. Receives a POST from the issuance-server (contains disclosed PID with BSN)
 //  2. POSTs through the transport selected during source onboarding. The
-//     currently implemented profile is FSC: no explicit token fetch or Bearer. Outway
-//     resolves the path prefix to a grant, opens mTLS to the target Inway,
+//     currently implemented profile is FSC: no explicit token fetch or Bearer. The
+//     adapter sends the grant hash resolved from the contract; Outway opens mTLS to the target Inway,
 //     and presents the token from the contract.
 //  3. The Inway receives the request, validates the token, and forwards
 //     to the backend service (PDP as AuthZen endpoint).
@@ -41,7 +41,9 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -77,8 +79,10 @@ type config struct {
 	// cache starts; they are deliberately not separate deployment settings.
 	SourceMetadataURL             string
 	SourceMetadataTransport       string
+	SourceMetadataGrantHash       string
 	SourceDataTransport           string
 	SourceDataFSCServiceReference string
+	SourceDataFSCGrantHash        string
 	SourceMetadataOIN             string
 	SourceMetadataTypeID          string
 
@@ -168,9 +172,10 @@ type graphqlResponse struct {
 }
 
 type sourceQueryPlan struct {
-	Endpoint  string
-	Query     string
-	Variables map[string]any
+	ServiceReference string
+	Endpoint         string
+	Query            string
+	Variables        map[string]any
 }
 
 type fscResult struct {
@@ -372,18 +377,25 @@ func callViaFSC(ctx context.Context, client *http.Client, cfg config, plan sourc
 	if cfg.SourceDataFSCServiceReference == "" {
 		return fscResult{}, fmt.Errorf("active source has no data FSC service reference")
 	}
+	if cfg.SourceDataFSCGrantHash == "" {
+		return fscResult{}, fmt.Errorf("active source has no data FSC grant hash")
+	}
+	if plan.ServiceReference != cfg.SourceDataFSCServiceReference {
+		return fscResult{}, fmt.Errorf("active source GraphQL service %q does not match contracted service %q", plan.ServiceReference, cfg.SourceDataFSCServiceReference)
+	}
 	if err := validateAbsoluteURLPath(plan.Endpoint); err != nil {
 		return fscResult{}, fmt.Errorf("active source GraphQL endpoint: %w", err)
 	}
 
 	body, _ := json.Marshal(proxyRequest{Query: plan.Query, Variables: plan.Variables})
 
-	endpoint := strings.TrimRight(cfg.OutwayURL, "/") + "/" + cfg.SourceDataFSCServiceReference + plan.Endpoint
+	endpoint := strings.TrimRight(cfg.OutwayURL, "/") + plan.Endpoint
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return fscResult{}, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Fsc-Grant-Hash", cfg.SourceDataFSCGrantHash)
 	// Reuse the Fsc-Transaction-Id that the middleware already generated
 	// and that also forms the trace-id. That way trace-id ==
 	// Fsc-Transaction-Id — a single identifier across the whole chain
@@ -517,14 +529,21 @@ func fatal(msg string, err error) {
 }
 
 func main() {
-	if handled, err := runOnboardingCommand(context.Background(), os.Args[1:], defaultOnboardingDependencies()); handled {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if handled, err := runReconcileCommand(ctx, os.Args[1:], defaultReconcileDependencies()); handled {
+		if err != nil {
+			fatal("FSC source reconciliation failed", err)
+		}
+		return
+	}
+	if handled, err := runOnboardingCommand(ctx, os.Args[1:], defaultOnboardingDependencies()); handled {
 		if err != nil {
 			fatal("source onboarding failed", err)
 		}
 		return
 	}
 	cfg := loadConfig()
-	ctx := context.Background()
 	shutdown, err := initTracer(ctx)
 	if err != nil {
 		slog.Error("tracer init failed", "err", err.Error())

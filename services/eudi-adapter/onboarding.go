@@ -40,6 +40,8 @@ type activatedType struct {
 
 type onboardingOptions struct {
 	sourcePath           string
+	sourceOIN            string
+	sourceName           string
 	storageBackend       string
 	certificateStoreName string
 	dryRun               bool
@@ -84,7 +86,7 @@ func configuredCertificateProvider(options onboardingOptions) (certificateProvid
 
 func configuredCertificateStore(options onboardingOptions) (certificateStore, error) {
 	switch options.certificateStoreName {
-	case "development-ca":
+	case "filesystem":
 		return newDevelopmentCAProvider(options.secretsDir, options.readerPublicURL, options.readerOrigin), nil
 	default:
 		return nil, fmt.Errorf("unsupported certificate store %q", options.certificateStoreName)
@@ -109,11 +111,11 @@ func runOnboardingCommand(ctx context.Context, arguments []string, dependencies 
 	if err != nil {
 		return true, err
 	}
-	registration, err := loadSourceRegistration(options.sourcePath)
-	if err != nil {
-		return true, err
-	}
 	if command == "provision-development-certificates" {
+		registration := sourceRegistration{SourceOIN: options.sourceOIN, Name: options.sourceName}
+		if registration.Name == "" {
+			registration.Name = "FSC source " + registration.SourceOIN
+		}
 		provider, err := dependencies.resolveCertificateProvider(options)
 		if err != nil {
 			return true, err
@@ -123,6 +125,13 @@ func runOnboardingCommand(ctx context.Context, arguments []string, dependencies 
 		}
 		_, _ = fmt.Fprintf(dependencies.stdout, "development certificates provisioned for source %s; this command is for local development only\n", registration.SourceOIN)
 		return true, nil
+	}
+	registration, err := loadSourceRegistration(options.sourcePath)
+	if err != nil {
+		return true, err
+	}
+	if registration.MetadataEndpoint.Transport == sourceTransportFSC || registration.DataAccess.Transport == sourceTransportFSC {
+		return true, fmt.Errorf("FSC sources are discovered from contracts; use reconcile-fsc-sources")
 	}
 	validated, err := validateSourceOnline(ctx, dependencies.client, registration, options.outwayURL, options.schemaPath, options.publicBaseURL, dependencies.now())
 	if err != nil {
@@ -156,9 +165,14 @@ func parseOnboardingOptions(command string, arguments []string, errorOutput io.W
 	set := flag.NewFlagSet(command, flag.ContinueOnError)
 	set.SetOutput(errorOutput)
 	options := onboardingOptions{}
-	set.StringVar(&options.sourcePath, "source", "", "path to sources/<oin>.yaml")
+	if command == "provision-development-certificates" {
+		set.StringVar(&options.sourceOIN, "source-oin", "", "20-digit OIN to bind the local development certificates to")
+		set.StringVar(&options.sourceName, "source-name", "", "source name for the certificate subject (defaults to the FSC-derived name)")
+	} else {
+		set.StringVar(&options.sourcePath, "source", "", "path to a static HTTPS-mTLS source registration")
+	}
 	set.StringVar(&options.outwayURL, "outway-url", getEnv("FSC_OUTWAY_URL", "http://localhost:8087"), "FSC Outway base URL")
-	set.StringVar(&options.schemaPath, "schema", "schemas/gbo-attestations-v1.schema.json", "source metadata JSON Schema")
+	set.StringVar(&options.schemaPath, "schema", "schemas/gbo-source-metadata-v1.schema.json", "source metadata JSON Schema")
 	set.StringVar(&options.publicBaseURL, "type-metadata-base-url", getEnv("TYPE_METADATA_PUBLIC_BASE_URL", "http://localhost:9409"), "public Type Metadata base URL")
 	set.StringVar(&options.readerPublicURL, "reader-public-url", os.Getenv("EUDI_PUBLIC_URL"), "public issuance-server URL whose host becomes the reader certificate DNS SAN")
 	set.StringVar(&options.readerOrigin, "reader-origin-url", os.Getenv("EUDI_READER_ORIGIN_URL"), "public reader origin embedded in the reader certificate")
@@ -166,7 +180,7 @@ func parseOnboardingOptions(command string, arguments []string, errorOutput io.W
 	set.StringVar(&options.secretsDir, "secrets-dir", ".local/secrets", "filesystem secret directory")
 	if command == "onboard-source" {
 		set.StringVar(&options.storageBackend, "storage-backend", getEnv("ONBOARDING_STORAGE_BACKEND", "filesystem"), "onboarding state backend")
-		set.StringVar(&options.certificateStoreName, "certificate-store", getEnv("ONBOARDING_CERTIFICATE_STORE", "development-ca"), "store containing manually provisioned certificates")
+		set.StringVar(&options.certificateStoreName, "certificate-store", getEnv("ONBOARDING_CERTIFICATE_STORE", "filesystem"), "store containing manually provisioned certificates")
 		set.BoolVar(&options.dryRun, "dry-run", false, "validate without writing state")
 	}
 	if err := set.Parse(arguments); err != nil {
@@ -175,7 +189,11 @@ func parseOnboardingOptions(command string, arguments []string, errorOutput io.W
 	if set.NArg() != 0 {
 		return onboardingOptions{}, fmt.Errorf("unexpected positional arguments: %s", strings.Join(set.Args(), " "))
 	}
-	if options.sourcePath == "" {
+	if command == "provision-development-certificates" {
+		if !sourceOINPattern.MatchString(options.sourceOIN) {
+			return onboardingOptions{}, fmt.Errorf("--source-oin must contain exactly 20 digits")
+		}
+	} else if options.sourcePath == "" {
 		return onboardingOptions{}, fmt.Errorf("--source is required")
 	}
 	if strings.TrimSpace(options.outwayURL) == "" {

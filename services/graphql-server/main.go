@@ -61,7 +61,7 @@ func loadConfig() (config, error) {
 	return config{
 		Port:               getEnv("PORT", "4000"),
 		MockDataPath:       getEnv("MOCKDATA_PATH", "mockdata/citizens.json"),
-		SourceMetadataPath: os.Getenv("GBO_ATTESTATIONS_PATH"),
+		SourceMetadataPath: os.Getenv("GBO_SOURCE_METADATA_PATH"),
 	}, nil
 }
 
@@ -319,7 +319,7 @@ func initTracer(ctx context.Context) (func(context.Context) error, error) {
 func newMux(schema *graphql.Schema, tracer trace.Tracer, publishers ...http.Handler) *http.ServeMux {
 	mux := http.NewServeMux()
 	if len(publishers) > 0 && publishers[0] != nil {
-		mux.Handle("/.well-known/gbo-attestations", publishers[0])
+		mux.Handle("/.well-known/gbo", publishers[0])
 	}
 
 	// Both UIs off: the ones graphql-go/handler bundles are GraphiQL 0.11 and

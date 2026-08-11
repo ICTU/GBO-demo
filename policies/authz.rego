@@ -25,7 +25,7 @@ default allow := false
 _source_metadata_request if {
 	input.context.flow == "gbo:source-metadata"
 	input.action.id == "GET"
-	input.resource.id == "/.well-known/gbo-attestations"
+	input.resource.id == "/.well-known/gbo"
 }
 
 response := {

@@ -1,102 +1,97 @@
-# Onboarding van bronmetadata
+# Bronnen ontdekken en activeren
 
-GBO configureert geen query of mapping. Bij onboarding legt GBO alleen de
-identiteit van de bron en de gekozen transportranden vast. De bron publiceert
-per attestation type de GraphQL-query, het GraphQL-endpoint, de mapping en de
-wallet Type Metadata.
+GBO configureert geen bronquery of mapping. Een bron publiceert één generiek
+document op `/.well-known/gbo`. De EUDI-capability daarin bevat per type de
+GraphQL-service, query, parameters, mapping en wallet Type Metadata. Later kan
+hetzelfde document naast `capabilities.eudi` bijvoorbeeld `capabilities.oots`
+bevatten.
+
+## FSC: geen onboardingbestand
+
+Voor een FSC-bron zijn twee geldige service-connection-contracten nodig:
+
+- `gbo-metadata`, om het vaste `/.well-known/gbo`-document op te halen;
+- de dataservice die het brondocument zelf noemt, bijvoorbeeld `bri` of `brp`.
+
+De reconciler leest de contracten uit de FSC Manager van de EUDI-adapterpeer.
+Per contract gebruikt hij de provider-OIN, servicenaam en grant-hash. Daardoor
+staan bron-OIN, FSC-servicebindingen en grant-hashes niet ook nog in Git of in
+losse onboarding-YAML.
+
+De statische `validate-source`- en `onboard-source`-commando's weigeren daarom
+het FSC-transport en verwijzen naar `reconcile-fsc-sources`.
+
+```mermaid
+sequenceDiagram
+    participant R as GBO source reconciler
+    participant M as FSC Manager (EUDI consumer)
+    participant O as FSC Outway
+    participant B as Source
+    participant S as Activation store
+
+    R->>M: List valid service-connection contracts
+    M-->>R: provider OIN + service + grant hash
+    R->>O: GET /.well-known/gbo + metadata grant hash
+    O->>B: FSC mTLS request
+    B-->>R: source metadata
+    R->>R: Validate schema, provider OIN, lifetime and endpoints
+    R->>M: Resolve data contract named by source metadata
+    R->>S: Activate atomically using existing certificates
+```
+
+De provider-OIN uit het metadata-document moet gelijk zijn aan de provider-OIN
+in het FSC-contract. Metadata en data moeten voor diezelfde provider geldige
+contracten hebben. De issuance-runtime leest alleen geactiveerde records en
+stuurt bij ieder FSC-verzoek de gepinde grant-hash mee. Zonder geldig record of
+bruikbaar contract faalt uitgifte gesloten; er is geen legacyfallback.
 
 ## Wat staat waar?
 
-| Gegeven | Eigenaar | Locatie |
-|---|---|---|
-| Bron-OIN, naam en transportkeuze | GBO onboarding | `sources/<oin>.yaml` in deze demo; in productie in de onboardingopslag |
-| Metadata-endpoint | GBO onboarding | `metadata_endpoint` in de bronregistratie |
-| Dataservicereferentie bij FSC | GBO onboarding | `data_access.service_reference` |
-| GraphQL-endpoint, query, parameters, mapping en Type Metadata | bron | document op het geregistreerde metadata-endpoint |
-| Immutable wallet Type Metadata en activatierecord | GBO | onboardingopslag |
-| Issuer-, reader- en statuscertificaten en private keys | bevoegde certificaatbeheerder | secretopslag; nooit in de bronmetadata of onboardingregistratie |
+| Gegeven | Bron |
+|---|---|
+| Provider-OIN, transportbinding en grant-hash | geldig FSC-contract |
+| Vast metadata-pad | GBO-profiel: `/.well-known/gbo` |
+| Dataservicenaam, GraphQL-endpoint, query, parameters en mapping | bronmetadata |
+| Kaartnaam, kleur, logo, claimlabels en claimschema | Type Metadata in de bronmetadata |
+| Immutable Type Metadata en activatierecord | GBO-onboardingopslag |
+| Issuer-, reader- en statuscertificaten en private keys | bevoegde certificaatbeheerder/secretopslag |
 
-De bron hoeft geen GraphQL-schema te publiceren. GBO ondersteunt precies één
-gekozen transportprofiel per endpoint; er is geen automatische fallback.
+Een bron publiceert geen GraphQL-schema. De ondersteunde mappingfunctionaliteit
+staat in [gbo-simple-v1.md](gbo-simple-v1.md); onbekende functies of velden
+worden geweigerd.
 
-Een FSC-registratie ziet er bijvoorbeeld zo uit:
+## Lokaal
 
-```yaml
-source_oin: "99999999900000000200"
-name: "Belastingdienst-mock"
-metadata_endpoint:
-  transport: "fsc"
-  service_reference: "gbo-attestation-metadata"
-  path: "/.well-known/gbo-attestations"
-data_access:
-  transport: "fsc"
-  service_reference: "bri"
-```
-
-Het brondocument bevat per type onder meer:
-
-```json
-{
-  "graphql": {
-    "endpoint": "/graphql",
-    "document": "query ...",
-    "subject_variable": "bsn",
-    "parameters": {},
-    "result_pointer": "/data/result",
-    "cardinality": "exactly_one"
-  }
-}
-```
-
-Voor FSC zijn metadata- en GraphQL-endpoints absolute URL-paden. GBO roept ze
-aan via `outway/{service_reference}{path}`. Het profiel `https-mtls` is al in
-het registratiemodel opgenomen en vereist absolute HTTPS-URL's, maar de
-runtime-implementatie ontbreekt bewust nog en faalt gesloten. Voordat dit
-profiel wordt aangezet moeten onder andere het PKI-profiel, OIN-controle,
-clientcertificaatbeheer en intrekking zijn vastgesteld.
-
-## Lokale demo
-
-De volledige, idempotente demo voor Belastingdienst en BRP is:
+De volledige route voor de afzonderlijke BD- en BRP/RvIG-peers is:
 
 ```sh
 make onboard-demo-sources
 ```
 
-De losse stappen zijn bewust zichtbaar:
+Deze target start de FSC-peers, publiceert en contracteert hun metadata- en
+dataservices, maakt uitsluitend voor lokaal gebruik expliciet
+ontwikkelcertificaten en draait daarna één reconciliatie. De kernstappen zijn:
 
 ```sh
-# Read-only: registratie ophalen en inhoud valideren.
-make validate-source SOURCE=sources/99999999900000000200.yaml
-
-# Alleen lokaal: expliciet ontwikkelcertificaten maken.
-make provision-development-certificates SOURCE=sources/99999999900000000200.yaml
-
-# Bestaande certificaten laden, Type Metadata materialiseren en activeren.
-make onboard-source SOURCE=sources/99999999900000000200.yaml
+make provision-development-certificates SOURCE_OIN=99999999900000000200
+make provision-development-certificates SOURCE_OIN=99999999900000000400
+make reconcile-fsc-sources
 ```
 
-`onboard-source` mint of vernieuwt geen certificaten. Ontbrekende, verlopen of
-niet meer bij de configuratie passende certificaten blokkeren activatie. Een
-bevoegde beheerder moet dan eerst buiten onboarding nieuwe certificaten
-uitgeven. `provision-development-certificates` is uitsluitend een lokale
-demo-vervanger voor die handmatige productiehandeling.
+De reconciler mint of vernieuwt nooit certificaten. Ontbrekende, verlopen of
+niet-passende certificaten blokkeren activatie. In productie worden die door
+een apart bevoegd proces uitgegeven.
 
-Losse onboarding kan eerst zonder writes worden getest met `DRY_RUN=true`.
-Activatie faalt ook gesloten bij een gewijzigde payload onder dezelfde versie,
-versieterugval, onbereikbare metadata of een endpoint dat niet bij het gekozen
-transportprofiel past.
+## Productie
 
-## Runtime en productie
+De reconciler en issuance-runtime gebruiken hetzelfde image maar zijn aparte
+processen. In Kubernetes draait de reconciler als Deployment met één replica
+en `reconcile-fsc-sources --watch`, of als CronJob zonder `--watch`. De
+HTTP-issuance-runtime pollt geen contracten en schrijft geen onboardingstaat.
 
-De runtime leest transport, OIN, type-id, service-referenties en endpoints uit
-de activatierecords; dit zijn geen losse deployment-env-vars. Zonder geldige
-activatie is een type niet uitgiftebaar en er is geen legacyfallback.
-
-De demo gebruikt `storage-backend=filesystem` en
-`certificate-store=development-ca`. Deze zijn instelbaar met
-`ONBOARDING_STORAGE_BACKEND`, `ONBOARDING_CERTIFICATE_STORE` en de gelijknamige
-CLI-flags. De productie-implementatie voor goedgekeurde opslag en secrets is
-nog niet gekozen. Productiecertificaten worden handmatig of via een apart,
-bevoegd proces uitgegeven; nooit automatisch door een GitHub Action of
-`onboard-source`.
+Een bron buiten FSC kan later statisch worden geregistreerd met een absoluut
+HTTPS-endpoint, zoals [example-https-mtls.yaml](../sources/example-https-mtls.yaml).
+Dat transportprofiel is bewust nog fail-closed: activering wacht op een
+vastgelegd PKI-profiel, brongebonden clientcertificaten, OIN-controle en
+intrekkingsgedrag. FSC is dus een discoveryprovider, niet een verplichte kern
+van het metadatamodel.

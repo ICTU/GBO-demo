@@ -149,13 +149,13 @@ func loadConfig() (config, error) {
 	return config{
 		Port:               getEnv("PORT", "4001"),
 		MockDataPath:       getEnv("MOCKDATA_PATH", "mockdata/personen.json"),
-		SourceMetadataPath: os.Getenv("GBO_ATTESTATIONS_PATH"),
+		SourceMetadataPath: os.Getenv("GBO_SOURCE_METADATA_PATH"),
 	}, nil
 }
 
 func loadSourceMetadataPublisher(cfg config) (*sourceMetadataPublisher, error) {
 	if cfg.SourceMetadataPath == "" {
-		return nil, fmt.Errorf("GBO_ATTESTATIONS_PATH is required")
+		return nil, fmt.Errorf("GBO_SOURCE_METADATA_PATH is required")
 	}
 	payload, err := os.ReadFile(cfg.SourceMetadataPath)
 	if err != nil {
@@ -849,7 +849,7 @@ func newMux(schema *graphql.Schema, tracer trace.Tracer, publisher ...http.Handl
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 	if len(publisher) == 1 && publisher[0] != nil {
-		mux.Handle("/.well-known/gbo-attestations", publisher[0])
+		mux.Handle("/.well-known/gbo", publisher[0])
 	}
 
 	return mux

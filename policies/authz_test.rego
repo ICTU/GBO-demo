@@ -13,7 +13,7 @@ test_source_metadata_exact_route_allowed if {
 	authz.allow with input as metadata_input(
 		"gbo:source-metadata",
 		"GET",
-		"/.well-known/gbo-attestations",
+		"/.well-known/gbo",
 	)
 }
 
@@ -21,7 +21,7 @@ test_source_metadata_wrong_flow_denied if {
 	not authz.allow with input as metadata_input(
 		"eudi:attestation",
 		"GET",
-		"/.well-known/gbo-attestations",
+		"/.well-known/gbo",
 	)
 }
 
@@ -29,7 +29,7 @@ test_source_metadata_wrong_method_denied if {
 	not authz.allow with input as metadata_input(
 		"gbo:source-metadata",
 		"POST",
-		"/.well-known/gbo-attestations",
+		"/.well-known/gbo",
 	)
 }
 

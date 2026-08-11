@@ -157,7 +157,7 @@ services:
     environment:
       - OTEL_SERVICE_NAME=graphql-server
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
-      - GBO_ATTESTATIONS_PATH=${GBO_ATTESTATIONS_PATH:-}
+      - GBO_SOURCE_METADATA_PATH=/config/gbo-source-metadata.json
     volumes:
       - ./services/graphql-server/config:/config:ro
     networks:
@@ -174,10 +174,8 @@ services:
       timeout: 3s
       retries: 5
 
-  # Second bron: bronprofiel BRP (persoonsgegevens). Registered as its own
-  # FSC service ('brp', outway-path /brp) under the same provider org as the
-  # BD bron — a demo simplification: one provider peer, two bronnen. The
-  # akte-van-overlijden usecase reads from here.
+  # Second bron: bronprofiel BRP (persoonsgegevens). Locally it is published
+  # by its own BRP/RvIG FSC peer (OIN ...0400), separate from BD (OIN ...0200).
   brp-graphql-server:
     build: ./services/brp-graphql-server
     ports:
@@ -185,7 +183,7 @@ services:
     environment:
       - OTEL_SERVICE_NAME=brp-graphql-server
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
-      - GBO_ATTESTATIONS_PATH=/config/gbo-attestations.json
+      - GBO_SOURCE_METADATA_PATH=/config/gbo-source-metadata.json
     volumes:
       - ./services/brp-graphql-server/config:/config:ro
     networks:
@@ -297,7 +295,7 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
       - UPSTREAM_URL=http://brp-graphql-server:4001
       - BSNK_URL=http://bsnk-mock:4003
-      - OWN_PEER_OIN=99999999900000000200
+      - OWN_PEER_OIN=99999999900000000400
       - PSEUDONYM_VARS=bsn
     networks:
       - backend
@@ -710,6 +708,37 @@ services:
     networks:
       - eudi
       - backend
+      - fsc-infra
+
+  # Same image as the issuance runtime, but a separate one-shot process.
+  # Kubernetes can run this command with --watch as a single-replica
+  # Deployment, or without --watch as a CronJob.
+  source-reconciler:
+    build: ./services/eudi-adapter
+    profiles: [onboarding]
+    command:
+      - ./eudi-adapter
+      - reconcile-fsc-sources
+      - --manager-url=https://edi-manager:9443
+      - --manager-ca=/fsc-certs/intermediate_ca.pem
+      - --manager-cert=/fsc-certs/internal-cert.pem
+      - --manager-key=/fsc-certs/internal-cert-key.pem
+      - --consumer-oin=99999999900000000100
+      - --outway-url=http://edi-outway:8080
+      - --schema=/config/schemas/gbo-source-metadata-v1.schema.json
+      - --type-metadata-base-url=${EUDI_BRI_URL:-http://localhost:9409}
+      - --storage-backend=filesystem
+      - --certificate-store=filesystem
+      - --state-dir=/var/lib/gbo
+      - --secrets-dir=/var/lib/gbo-secrets
+      - --reader-public-url=${EUDI_PUBLIC_URL:-}
+      - --reader-origin-url=${EUDI_READER_ORIGIN_URL:-}
+    volumes:
+      - ./schemas:/config/schemas:ro
+      - ./fsc-infra/orgs/edi-issuer/pki/internal:/fsc-certs:ro
+      - ./.local/onboarding:/var/lib/gbo
+      - ./.local/secrets:/var/lib/gbo-secrets
+    networks:
       - fsc-infra
 
 networks:

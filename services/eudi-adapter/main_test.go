@@ -17,8 +17,8 @@ import (
 func TestShippedSourceMetadataMatchesEnvelopeSchema(t *testing.T) {
 	schema := compileSourceMetadataSchema(t)
 	for _, path := range []string{
-		"../graphql-server/config/gbo-attestations.json",
-		"../brp-graphql-server/config/gbo-attestations.json",
+		"../graphql-server/config/gbo-source-metadata.json",
+		"../brp-graphql-server/config/gbo-source-metadata.json",
 	} {
 		t.Run(path, func(t *testing.T) {
 			metadataFile, err := os.Open(path)
@@ -53,7 +53,7 @@ func compileSourceMetadataSchema(t *testing.T) *jsonschema.Schema {
 	if err := compiler.AddResource("urn:gov:nl:gbo:schema:gbo-simple-v1:1", mappingSchema); err != nil {
 		t.Fatalf("register mapping profile schema: %v", err)
 	}
-	schema, err := compiler.Compile("../../schemas/gbo-attestations-v1.schema.json")
+	schema, err := compiler.Compile("../../schemas/gbo-source-metadata-v1.schema.json")
 	if err != nil {
 		t.Fatalf("compile source metadata schema: %v", err)
 	}
@@ -61,7 +61,7 @@ func compileSourceMetadataSchema(t *testing.T) *jsonschema.Schema {
 }
 
 func TestAttributeSchemaUnknownPropertiesRejectedByRuntimeAndEnvelopeSchema(t *testing.T) {
-	raw, err := os.ReadFile("../graphql-server/config/gbo-attestations.json")
+	raw, err := os.ReadFile("../graphql-server/config/gbo-source-metadata.json")
 	if err != nil {
 		t.Fatalf("read shipped source metadata: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestAttributeSchemaUnknownPropertiesRejectedByRuntimeAndEnvelopeSchema(t *t
 			if err := json.Unmarshal(raw, &envelope); err != nil {
 				t.Fatalf("decode source metadata: %v", err)
 			}
-			attestations := envelope["attestations"].([]any)
+			attestations := envelope["capabilities"].(map[string]any)["eudi"].(map[string]any)["attestations"].([]any)
 			attestation := attestations[0].(map[string]any)
 			attributes := attestation["attribute_schema"].(map[string]any)
 			amount := attributes["verzamelinkomen"].(map[string]any)
@@ -98,7 +98,7 @@ func TestAttributeSchemaUnknownPropertiesRejectedByRuntimeAndEnvelopeSchema(t *t
 }
 
 func TestAttributeSchemaUnitRejectedByRuntimeAndEnvelopeSchema(t *testing.T) {
-	raw, err := os.ReadFile("../graphql-server/config/gbo-attestations.json")
+	raw, err := os.ReadFile("../graphql-server/config/gbo-source-metadata.json")
 	if err != nil {
 		t.Fatalf("read shipped source metadata: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestAttributeSchemaUnitRejectedByRuntimeAndEnvelopeSchema(t *testing.T) {
 	if err := json.Unmarshal(raw, &envelope); err != nil {
 		t.Fatalf("decode source metadata: %v", err)
 	}
-	attestations := envelope["attestations"].([]any)
+	attestations := envelope["capabilities"].(map[string]any)["eudi"].(map[string]any)["attestations"].([]any)
 	attestation := attestations[0].(map[string]any)
 	attributes := attestation["attribute_schema"].(map[string]any)
 	amount := attributes["verzamelinkomen"].(map[string]any)
@@ -120,7 +120,7 @@ func TestAttributeSchemaUnitRejectedByRuntimeAndEnvelopeSchema(t *testing.T) {
 	if err := json.Unmarshal(mutated, &document); err != nil {
 		t.Fatalf("runtime decode error = %v", err)
 	}
-	if err := validateSourceAttestation(document.Attestations[0]); err == nil || !strings.Contains(err.Error(), "ISO 4217") {
+	if err := validateSourceAttestation(document.eudiAttestations()[0]); err == nil || !strings.Contains(err.Error(), "ISO 4217") {
 		t.Fatalf("runtime validation error = %v, want ISO 4217 rejection", err)
 	}
 	metadata, err := jsonschema.UnmarshalJSON(bytes.NewReader(mutated))
@@ -136,7 +136,7 @@ func TestAttributeSchemaUnitRejectedByRuntimeAndEnvelopeSchema(t *testing.T) {
 // through FSC/PDP
 // and the projection returned to the issuance server.
 func TestAdapterUsesSourceMetadataFor2025(t *testing.T) {
-	metadataPayload, err := os.ReadFile("../graphql-server/config/gbo-attestations.json")
+	metadataPayload, err := os.ReadFile("../graphql-server/config/gbo-source-metadata.json")
 	if err != nil {
 		t.Fatalf("read shipped source metadata: %v", err)
 	}
@@ -144,12 +144,12 @@ func TestAdapterUsesSourceMetadataFor2025(t *testing.T) {
 	if err := json.Unmarshal(metadataPayload, &shipped); err != nil {
 		t.Fatalf("parse shipped source metadata: %v", err)
 	}
-	if len(shipped.Attestations) != 1 {
-		t.Fatalf("shipped source metadata has %d attestations, want 1", len(shipped.Attestations))
+	if len(shipped.eudiAttestations()) != 1 {
+		t.Fatalf("shipped source metadata has %d EUDI attestations, want 1", len(shipped.eudiAttestations()))
 	}
-	metadataQuery := shipped.Attestations[0].GraphQL.Document
+	metadataQuery := shipped.eudiAttestations()[0].GraphQL.Document
 	metadataServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got, want := r.URL.Path, "/metadata/.well-known/gbo-attestations"; got != want {
+		if got, want := r.URL.Path, "/metadata/.well-known/gbo"; got != want {
 			t.Errorf("metadata Outway path = %q, want %q", got, want)
 		}
 		if r.Header.Get("Fsc-Transaction-Id") == "" {
@@ -161,7 +161,7 @@ func TestAdapterUsesSourceMetadataFor2025(t *testing.T) {
 	defer metadataServer.Close()
 
 	metadata, err := loadSourceMetadata(context.Background(), http.DefaultClient, sourceMetadataConfig{
-		URL: metadataServer.URL + "/metadata/.well-known/gbo-attestations", MetadataTransport: sourceTransportFSC,
+		URL: metadataServer.URL + "/metadata/.well-known/gbo", MetadataTransport: sourceTransportFSC,
 		DataTransport: sourceTransportFSC, ExpectedOIN: "99999999900000000200", TypeID: "inkomensverklaring",
 	})
 	if err != nil {
@@ -188,7 +188,7 @@ func TestAdapterUsesSourceMetadataFor2025(t *testing.T) {
 	}))
 	defer outway.Close()
 
-	cfg := config{Port: "0", OutwayURL: outway.URL, IssuerOIN: "00000004000000004000", SourceDataTransport: sourceTransportFSC, SourceDataFSCServiceReference: "bri"}
+	cfg := config{Port: "0", OutwayURL: outway.URL, IssuerOIN: "00000004000000004000", SourceDataTransport: sourceTransportFSC, SourceDataFSCServiceReference: "bri", SourceDataFSCGrantHash: "data-grant"}
 	srv := httptest.NewServer(newMux(cfg, http.DefaultClient, metadata))
 	defer srv.Close()
 
@@ -248,7 +248,8 @@ func newIncomeSourceAdapter(t *testing.T, mapping map[string]mappingRule, bronRe
 		TypeID:    "inkomensverklaring",
 		Definition: sourceAttestationDefinition{
 			GraphQL: sourceGraphQL{
-				Endpoint: "/source-query",
+				ServiceReference: "bri",
+				Endpoint:         "/source-query",
 				Document: `query Inkomensverklaring($bsn: BSN!, $jaar: Int!) {
   ingeschrevenPersoon(bsn: $bsn) {
     heeftBelastingjaarAangifte(belastingjaren: [$jaar]) {
@@ -274,7 +275,7 @@ func newIncomeSourceAdapter(t *testing.T, mapping map[string]mappingRule, bronRe
 		},
 	}
 	outway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-		if got, want := request.URL.Path, "/bri/source-query"; got != want {
+		if got, want := request.URL.Path, "/source-query"; got != want {
 			t.Errorf("source data path = %q, want metadata-defined %q", got, want)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -282,7 +283,7 @@ func newIncomeSourceAdapter(t *testing.T, mapping map[string]mappingRule, bronRe
 	}))
 	t.Cleanup(outway.Close)
 
-	cfg := config{Port: "0", OutwayURL: outway.URL, IssuerOIN: "00000004000000004000", SourceDataTransport: sourceTransportFSC, SourceDataFSCServiceReference: "bri"}
+	cfg := config{Port: "0", OutwayURL: outway.URL, IssuerOIN: "00000004000000004000", SourceDataTransport: sourceTransportFSC, SourceDataFSCServiceReference: "bri", SourceDataFSCGrantHash: "data-grant"}
 	srv := httptest.NewServer(newMux(cfg, http.DefaultClient, metadata))
 	t.Cleanup(srv.Close)
 	return srv
@@ -358,25 +359,28 @@ func TestSourceMetadataRejectedDuringOnboarding(t *testing.T) {
 			"schema_version": "1.0",
 			"source_oin":     sourceOIN,
 			"version":        "1.0.0",
-			"attestations": []any{map[string]any{
-				"type_id":      "inkomensverklaring",
-				"type_version": "1.0",
-				"graphql": map[string]any{
-					"document":         query,
-					"subject_variable": "bsn",
-					"parameters": map[string]any{
-						"jaar": map[string]any{"type": "integer", "required": true},
+			"capabilities": map[string]any{"eudi": map[string]any{
+				"version": "1.0",
+				"attestations": []any{map[string]any{
+					"type_id":      "inkomensverklaring",
+					"type_version": "1.0",
+					"graphql": map[string]any{
+						"document":         query,
+						"subject_variable": "bsn",
+						"parameters": map[string]any{
+							"jaar": map[string]any{"type": "integer", "required": true},
+						},
+						"result_pointer": "/data/ingeschrevenPersoon/heeftBelastingjaarAangifte",
+						"cardinality":    "exactly_one",
 					},
-					"result_pointer": "/data/ingeschrevenPersoon/heeftBelastingjaarAangifte",
-					"cardinality":    "exactly_one",
-				},
-				"mapping_profile": "gbo-simple-v1",
-				"mapping": map[string]any{
-					"belastingjaar": map[string]any{"pointer": "/belastingjaar", "datatype": "gYear"},
-				},
-				"attribute_schema": map[string]any{
-					"belastingjaar": map[string]any{"type": "integer", "format": "gYear"},
-				},
+					"mapping_profile": "gbo-simple-v1",
+					"mapping": map[string]any{
+						"belastingjaar": map[string]any{"pointer": "/belastingjaar", "datatype": "gYear"},
+					},
+					"attribute_schema": map[string]any{
+						"belastingjaar": map[string]any{"type": "integer", "format": "gYear"},
+					},
+				}},
 			}},
 		})
 		if err != nil {
@@ -452,7 +456,7 @@ func TestSourceMetadataRejectedDuringOnboarding(t *testing.T) {
 }
 
 func TestAdapterUsesBRPSourceQueryAndMapping(t *testing.T) {
-	raw, err := os.ReadFile("../brp-graphql-server/config/gbo-attestations.json")
+	raw, err := os.ReadFile("../brp-graphql-server/config/gbo-source-metadata.json")
 	if err != nil {
 		t.Fatalf("read BRP source metadata: %v", err)
 	}
@@ -460,7 +464,7 @@ func TestAdapterUsesBRPSourceQueryAndMapping(t *testing.T) {
 	if err := json.Unmarshal(raw, &document); err != nil {
 		t.Fatalf("parse BRP source metadata: %v", err)
 	}
-	definition := document.Attestations[0]
+	definition := document.eudiAttestations()[0]
 	active := &activeSourceMetadata{
 		Version:      document.Version,
 		SourceOIN:    document.SourceOIN,
@@ -472,7 +476,7 @@ func TestAdapterUsesBRPSourceQueryAndMapping(t *testing.T) {
 
 	var received proxyRequest
 	outway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got, want := r.URL.Path, "/brp/graphql"; got != want {
+		if got, want := r.URL.Path, "/graphql"; got != want {
 			t.Errorf("outway path = %q, want %q", got, want)
 		}
 		if got := r.Header.Get("X-GBO-Flow"); got != "" {
@@ -498,7 +502,7 @@ func TestAdapterUsesBRPSourceQueryAndMapping(t *testing.T) {
 	}))
 	defer outway.Close()
 
-	cfg := config{OutwayURL: outway.URL, SourceDataTransport: sourceTransportFSC, SourceDataFSCServiceReference: "brp"}
+	cfg := config{OutwayURL: outway.URL, SourceDataTransport: sourceTransportFSC, SourceDataFSCServiceReference: "brp", SourceDataFSCGrantHash: "data-grant"}
 	srv := httptest.NewServer(newMux(cfg, http.DefaultClient, active))
 	defer srv.Close()
 	resp := postDisclosure(t, srv, "/attestations/99999999900000000400/akte-van-overlijden", "999991772")

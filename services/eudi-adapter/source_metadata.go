@@ -25,18 +25,35 @@ const sourceMetadataMediaType = "application/json"
 type sourceMetadataConfig struct {
 	URL               string
 	MetadataTransport string
+	MetadataGrantHash string
 	DataTransport     string
 	ExpectedOIN       string
 	TypeID            string
 }
 
 type sourceMetadataDocument struct {
-	SchemaVersion string                        `json:"schema_version"`
-	SourceOIN     string                        `json:"source_oin"`
-	Version       string                        `json:"version"`
-	IssuedAt      string                        `json:"issued_at"`
-	ExpiresAt     string                        `json:"expires_at"`
-	Attestations  []sourceAttestationDefinition `json:"attestations"`
+	SchemaVersion string                     `json:"schema_version"`
+	SourceOIN     string                     `json:"source_oin"`
+	Version       string                     `json:"version"`
+	IssuedAt      string                     `json:"issued_at"`
+	ExpiresAt     string                     `json:"expires_at"`
+	Capabilities  sourceMetadataCapabilities `json:"capabilities"`
+}
+
+type sourceMetadataCapabilities struct {
+	EUDI *sourceEUDICapability `json:"eudi,omitempty"`
+}
+
+type sourceEUDICapability struct {
+	Version      string                        `json:"version"`
+	Attestations []sourceAttestationDefinition `json:"attestations"`
+}
+
+func (d sourceMetadataDocument) eudiAttestations() []sourceAttestationDefinition {
+	if d.Capabilities.EUDI == nil {
+		return nil
+	}
+	return d.Capabilities.EUDI.Attestations
 }
 
 type sourceAttestationDefinition struct {
@@ -50,12 +67,13 @@ type sourceAttestationDefinition struct {
 }
 
 type sourceGraphQL struct {
-	Endpoint        string                     `json:"endpoint"`
-	Document        string                     `json:"document"`
-	SubjectVariable string                     `json:"subject_variable"`
-	Parameters      map[string]sourceParameter `json:"parameters"`
-	ResultPointer   string                     `json:"result_pointer"`
-	Cardinality     string                     `json:"cardinality"`
+	ServiceReference string                     `json:"service_reference,omitempty"`
+	Endpoint         string                     `json:"endpoint"`
+	Document         string                     `json:"document"`
+	SubjectVariable  string                     `json:"subject_variable"`
+	Parameters       map[string]sourceParameter `json:"parameters"`
+	ResultPointer    string                     `json:"result_pointer"`
+	Cardinality      string                     `json:"cardinality"`
 }
 
 type sourceParameter struct {
@@ -114,6 +132,7 @@ func loadSourceMetadata(ctx context.Context, client *http.Client, cfg sourceMeta
 			return nil, fmt.Errorf("generate source metadata Fsc-Transaction-Id: %w", err)
 		}
 		req.Header.Set("Fsc-Transaction-Id", fscTxID)
+		req.Header.Set("Fsc-Grant-Hash", cfg.MetadataGrantHash)
 	} else {
 		return nil, fmt.Errorf("source metadata transport %q is configured but not implemented", cfg.MetadataTransport)
 	}
@@ -154,14 +173,17 @@ func parseSourceMetadataPayload(payload []byte, cfg sourceMetadataConfig) (*acti
 	if document.SchemaVersion != "1.0" {
 		return nil, sourceMetadataDocument{}, fmt.Errorf("unsupported source metadata schema_version %q", document.SchemaVersion)
 	}
-	for _, definition := range document.Attestations {
+	if document.Capabilities.EUDI == nil || document.Capabilities.EUDI.Version != "1.0" {
+		return nil, sourceMetadataDocument{}, fmt.Errorf("source metadata has no supported EUDI capability")
+	}
+	for _, definition := range document.eudiAttestations() {
 		if definition.TypeID != cfg.TypeID {
 			continue
 		}
 		if err := validateSourceAttestation(definition); err != nil {
 			return nil, sourceMetadataDocument{}, fmt.Errorf("attestation %q: %w", cfg.TypeID, err)
 		}
-		if err := validateGraphQLEndpoint(definition.GraphQL.Endpoint, cfg.DataTransport); err != nil {
+		if err := validateGraphQLEndpoint(definition.GraphQL, cfg.DataTransport); err != nil {
 			return nil, sourceMetadataDocument{}, fmt.Errorf("attestation %q graphql.endpoint: %w", cfg.TypeID, err)
 		}
 		return &activeSourceMetadata{
@@ -215,12 +237,18 @@ func validateSourceAttestation(definition sourceAttestationDefinition) error {
 	return nil
 }
 
-func validateGraphQLEndpoint(endpoint, transport string) error {
+func validateGraphQLEndpoint(graphql sourceGraphQL, transport string) error {
 	switch transport {
 	case sourceTransportFSC:
-		return validateAbsoluteURLPath(endpoint)
+		if !serviceReferencePattern.MatchString(graphql.ServiceReference) {
+			return fmt.Errorf("service_reference is required and must be valid for FSC transport")
+		}
+		return validateAbsoluteURLPath(graphql.Endpoint)
 	case sourceTransportHTTPSMTLS:
-		return validateAbsoluteHTTPSEndpoint(endpoint)
+		if graphql.ServiceReference != "" {
+			return fmt.Errorf("service_reference is not allowed for https-mtls transport")
+		}
+		return validateAbsoluteHTTPSEndpoint(graphql.Endpoint)
 	default:
 		return fmt.Errorf("unsupported data transport %q", transport)
 	}
@@ -295,7 +323,7 @@ func (s *activeSourceMetadata) queryPlan(bsn string, supplied map[string][]strin
 			return sourceQueryPlan{}, fmt.Errorf("request supplies undeclared source parameter %q", name)
 		}
 	}
-	return sourceQueryPlan{Endpoint: s.Definition.GraphQL.Endpoint, Query: s.Definition.GraphQL.Document, Variables: variables}, nil
+	return sourceQueryPlan{ServiceReference: s.Definition.GraphQL.ServiceReference, Endpoint: s.Definition.GraphQL.Endpoint, Query: s.Definition.GraphQL.Document, Variables: variables}, nil
 }
 
 func parseSourceParameter(name, parameterType, raw string) (any, error) {

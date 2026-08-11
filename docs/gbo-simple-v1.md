@@ -84,7 +84,7 @@ Er zijn geen conversies of operators voor filters, sortering, `first`, joins, co
 ## Machineleesbaar contract en conformance
 
 - Mapping-JSON Schema: `schemas/gbo-simple-v1.schema.json` (Draft 2020-12).
-- Envelope-schema: `schemas/gbo-attestations-v1.schema.json` verwijst via de vaste URN `urn:gov:nl:gbo:schema:gbo-simple-v1:1` naar dat profiel.
+- Envelope-schema: `schemas/gbo-source-metadata-v1.schema.json` verwijst via de vaste URN `urn:gov:nl:gbo:schema:gbo-simple-v1:1` naar dat profiel.
 - Een externe validator moet `schemas/gbo-simple-v1.schema.json` vooraf onder die URN registreren; de testhelper laat deze bundelstap zien.
 - Onafhankelijke fixtures: `services/eudi-adapter/internal/gbosimplev1/testdata/cases.json`.
 - Uitvoeren: `cd services/eudi-adapter && go test ./internal/gbosimplev1`.

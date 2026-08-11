@@ -34,11 +34,13 @@ type sourceMetadataEndpoint struct {
 	ServiceReference string `json:"service_reference,omitempty" yaml:"service_reference,omitempty"`
 	Path             string `json:"path,omitempty" yaml:"path,omitempty"`
 	Endpoint         string `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
+	GrantHash        string `json:"grant_hash,omitempty" yaml:"grant_hash,omitempty"`
 }
 
 type sourceDataAccess struct {
 	Transport        string `json:"transport" yaml:"transport"`
 	ServiceReference string `json:"service_reference,omitempty" yaml:"service_reference,omitempty"`
+	GrantHash        string `json:"grant_hash,omitempty" yaml:"grant_hash,omitempty"`
 }
 
 type sourceRegistration struct {
@@ -119,6 +121,9 @@ func (e sourceMetadataEndpoint) validate() error {
 		if e.Endpoint != "" {
 			return fmt.Errorf("endpoint is not allowed for FSC transport")
 		}
+		if e.GrantHash == "" {
+			return fmt.Errorf("grant_hash is required for FSC transport")
+		}
 	case sourceTransportHTTPSMTLS:
 		if e.ServiceReference != "" || e.Path != "" {
 			return fmt.Errorf("service_reference and path are not allowed for https-mtls transport")
@@ -137,6 +142,9 @@ func (a sourceDataAccess) validate() error {
 	case sourceTransportFSC:
 		if !serviceReferencePattern.MatchString(a.ServiceReference) {
 			return fmt.Errorf("service_reference is invalid")
+		}
+		if a.GrantHash == "" {
+			return fmt.Errorf("grant_hash is required for FSC transport")
 		}
 	case sourceTransportHTTPSMTLS:
 		if a.ServiceReference != "" {
@@ -170,7 +178,7 @@ func (r sourceRegistration) metadataURL(outwayURL string) (string, error) {
 		if strings.TrimSpace(outwayURL) == "" {
 			return "", fmt.Errorf("FSC Outway URL is required")
 		}
-		return strings.TrimRight(outwayURL, "/") + "/" + r.MetadataEndpoint.ServiceReference + r.MetadataEndpoint.Path, nil
+		return strings.TrimRight(outwayURL, "/") + r.MetadataEndpoint.Path, nil
 	case sourceTransportHTTPSMTLS:
 		return "", fmt.Errorf("source metadata transport %q is configured but not implemented", sourceTransportHTTPSMTLS)
 	default:
@@ -218,8 +226,15 @@ func validateSourceOnline(ctx context.Context, client *http.Client, registration
 	if err != nil {
 		return nil, err
 	}
-	payload, err := fetchSourceMetadata(ctx, client, metadataURL, registration.MetadataEndpoint.Transport)
+	payload, err := fetchSourceMetadata(ctx, client, metadataURL, registration.MetadataEndpoint.Transport, registration.MetadataEndpoint.GrantHash)
 	if err != nil {
+		return nil, err
+	}
+	return validateSourcePayload(registration, payload, metadataURL, schemaPath, publicBaseURL, now)
+}
+
+func validateSourcePayload(registration sourceRegistration, payload []byte, metadataURL, schemaPath, publicBaseURL string, now time.Time) (*validatedSourceRegistration, error) {
+	if err := validateTypeMetadataBaseURL(publicBaseURL); err != nil {
 		return nil, err
 	}
 	if err := validateSourceMetadataSchema(payload, schemaPath); err != nil {
@@ -235,15 +250,19 @@ func validateSourceOnline(ctx context.Context, client *http.Client, registration
 	if document.SchemaVersion != "1.0" {
 		return nil, fmt.Errorf("unsupported source metadata schema_version %q", document.SchemaVersion)
 	}
-	if len(document.Attestations) == 0 {
-		return nil, fmt.Errorf("source metadata must contain at least one attestation")
+	if document.Capabilities.EUDI == nil || document.Capabilities.EUDI.Version != "1.0" {
+		return nil, fmt.Errorf("source metadata has no supported EUDI capability")
+	}
+	attestations := document.eudiAttestations()
+	if len(attestations) == 0 {
+		return nil, fmt.Errorf("source metadata EUDI capability must contain at least one attestation")
 	}
 	if _, err := compareNumericVersion(document.Version, "0"); err != nil {
 		return nil, fmt.Errorf("source metadata version: %w", err)
 	}
-	seenTypes := make(map[string]bool, len(document.Attestations))
-	publications := make([]*typeMetadataPublication, 0, len(document.Attestations))
-	for _, definition := range document.Attestations {
+	seenTypes := make(map[string]bool, len(attestations))
+	publications := make([]*typeMetadataPublication, 0, len(attestations))
+	for _, definition := range attestations {
 		if seenTypes[definition.TypeID] {
 			return nil, fmt.Errorf("source metadata contains duplicate type_id %q", definition.TypeID)
 		}
@@ -251,7 +270,7 @@ func validateSourceOnline(ctx context.Context, client *http.Client, registration
 		if err := validateSourceAttestation(definition); err != nil {
 			return nil, fmt.Errorf("attestation %q: %w", definition.TypeID, err)
 		}
-		if err := validateGraphQLEndpoint(definition.GraphQL.Endpoint, registration.DataAccess.Transport); err != nil {
+		if err := validateGraphQLEndpoint(definition.GraphQL, registration.DataAccess.Transport); err != nil {
 			return nil, fmt.Errorf("attestation %q graphql.endpoint: %w", definition.TypeID, err)
 		}
 		if _, err := validateSourceMetadataEnvelope(document, definition, now, defaultSourceMetadataCachePolicy); err != nil {
@@ -272,7 +291,7 @@ func validateSourceOnline(ctx context.Context, client *http.Client, registration
 	}, nil
 }
 
-func fetchSourceMetadata(ctx context.Context, client *http.Client, metadataURL, transport string) ([]byte, error) {
+func fetchSourceMetadata(ctx context.Context, client *http.Client, metadataURL, transport, grantHash string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, metadataURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create source metadata validation request: %w", err)
@@ -284,6 +303,7 @@ func fetchSourceMetadata(ctx context.Context, client *http.Client, metadataURL, 
 			return nil, fmt.Errorf("generate source metadata Fsc-Transaction-Id: %w", err)
 		}
 		req.Header.Set("Fsc-Transaction-Id", txID)
+		req.Header.Set("Fsc-Grant-Hash", grantHash)
 	} else {
 		return nil, fmt.Errorf("source metadata transport %q is configured but not implemented", transport)
 	}
@@ -344,7 +364,7 @@ func validateSourceMetadataSchema(payload []byte, schemaPath string) error {
 		return fmt.Errorf("parse source metadata for schema validation: %w", err)
 	}
 	if err := schema.Validate(metadata); err != nil {
-		return fmt.Errorf("source metadata does not match gbo-attestations-v1: %w", err)
+		return fmt.Errorf("source metadata does not match gbo-source-metadata-v1: %w", err)
 	}
 	return nil
 }

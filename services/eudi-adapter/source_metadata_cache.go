@@ -124,8 +124,10 @@ func configFromSourceActivation(cfg config) (config, error) {
 	cfg.SourceMetadataOIN = activation.Source.SourceOIN
 	cfg.SourceMetadataTypeID = activation.Types[0].TypeID
 	cfg.SourceMetadataTransport = activation.Source.MetadataEndpoint.Transport
+	cfg.SourceMetadataGrantHash = activation.Source.MetadataEndpoint.GrantHash
 	cfg.SourceDataTransport = activation.Source.DataAccess.Transport
 	cfg.SourceDataFSCServiceReference = activation.Source.DataAccess.ServiceReference
+	cfg.SourceDataFSCGrantHash = activation.Source.DataAccess.GrantHash
 	cfg.SourceMetadataURL, err = activation.Source.metadataURL(cfg.OutwayURL)
 	if err != nil {
 		return config{}, fmt.Errorf("resolve source metadata endpoint: %w", err)
@@ -180,6 +182,7 @@ func loadConfiguredSourceMetadataCache(client *http.Client, cfg config) (*source
 	return newSourceMetadataCache(client, sourceMetadataConfig{
 		URL:               cfg.SourceMetadataURL,
 		MetadataTransport: cfg.SourceMetadataTransport,
+		MetadataGrantHash: cfg.SourceMetadataGrantHash,
 		DataTransport:     cfg.SourceDataTransport,
 		ExpectedOIN:       cfg.SourceMetadataOIN,
 		TypeID:            cfg.SourceMetadataTypeID,
@@ -265,6 +268,7 @@ func (c *sourceMetadataCache) Refresh(ctx context.Context, now time.Time) error 
 	}
 	req.Header.Set("Accept", sourceMetadataMediaType)
 	req.Header.Set("Fsc-Transaction-Id", txID)
+	req.Header.Set("Fsc-Grant-Hash", c.registration.MetadataGrantHash)
 	if etag != "" {
 		req.Header.Set("If-None-Match", etag)
 	}

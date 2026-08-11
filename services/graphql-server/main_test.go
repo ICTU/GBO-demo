@@ -33,7 +33,7 @@ func TestPublishesSourceMetadata(t *testing.T) {
 	srv := httptest.NewServer(newMux(&schema, tracer, publisher))
 	defer srv.Close()
 
-	resp, err := http.Get(srv.URL + "/.well-known/gbo-attestations")
+	resp, err := http.Get(srv.URL + "/.well-known/gbo")
 	if err != nil {
 		t.Fatalf("get source metadata: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestPublishesSourceMetadata(t *testing.T) {
 		t.Errorf("payload = %s, want %s", gotPayload, payload)
 	}
 
-	req, err := http.NewRequest(http.MethodGet, srv.URL+"/.well-known/gbo-attestations", nil)
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/.well-known/gbo", nil)
 	if err != nil {
 		t.Fatalf("create conditional request: %v", err)
 	}
@@ -193,28 +193,33 @@ func TestGraphQLBelastingjarenFilter(t *testing.T) {
 // The checked-in source declaration is executable against the source schema;
 // this catches drift that a syntax-only onboarding check cannot detect.
 func TestShippedAttestationQueryMatchesSourceSchema(t *testing.T) {
-	rawMetadata, err := os.ReadFile("config/gbo-attestations.json")
+	rawMetadata, err := os.ReadFile("config/gbo-source-metadata.json")
 	if err != nil {
 		t.Fatalf("read source metadata: %v", err)
 	}
 	var metadata struct {
-		Attestations []struct {
-			GraphQL struct {
-				Document string `json:"document"`
-			} `json:"graphql"`
-		} `json:"attestations"`
+		Capabilities struct {
+			EUDI struct {
+				Attestations []struct {
+					GraphQL struct {
+						Document string `json:"document"`
+					} `json:"graphql"`
+				} `json:"attestations"`
+			} `json:"eudi"`
+		} `json:"capabilities"`
 	}
 	if err := json.Unmarshal(rawMetadata, &metadata); err != nil {
 		t.Fatalf("parse source metadata: %v", err)
 	}
-	if len(metadata.Attestations) != 1 {
-		t.Fatalf("attestations = %d, want 1", len(metadata.Attestations))
+	attestations := metadata.Capabilities.EUDI.Attestations
+	if len(attestations) != 1 {
+		t.Fatalf("attestations = %d, want 1", len(attestations))
 	}
 
 	srv := httptest.NewServer(testMux(t))
 	defer srv.Close()
 	body, err := json.Marshal(map[string]any{
-		"query": metadata.Attestations[0].GraphQL.Document,
+		"query": attestations[0].GraphQL.Document,
 		"variables": map[string]any{
 			"bsn":  "123456789",
 			"jaar": 2025,
