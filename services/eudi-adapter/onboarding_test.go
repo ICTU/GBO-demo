@@ -173,6 +173,19 @@ func TestOnboardSourceIsIdempotentAndActivatesLast(t *testing.T) {
 	if len(activation.Types) != 1 || activation.Types[0].VCTIntegrity == "" {
 		t.Fatalf("activation types = %+v", activation.Types)
 	}
+	typeMetadata, err := os.ReadFile(activation.Types[0].TypeMetadataReference)
+	if err != nil {
+		t.Fatalf("read activated Type Metadata: %v", err)
+	}
+	var activatedMetadata struct {
+		VCT string `json:"vct"`
+	}
+	if err := json.Unmarshal(typeMetadata, &activatedMetadata); err != nil {
+		t.Fatalf("parse activated Type Metadata: %v", err)
+	}
+	if activatedMetadata.VCT != activation.Types[0].VCT {
+		t.Errorf("activated Type Metadata vct = %q, want %q", activatedMetadata.VCT, activation.Types[0].VCT)
+	}
 	issuanceEnv, err := os.ReadFile(activation.IssuanceConfigReference)
 	if err != nil {
 		t.Fatalf("read generated issuance environment: %v", err)
@@ -190,6 +203,17 @@ func TestOnboardSourceIsIdempotentAndActivatesLast(t *testing.T) {
 		t.Fatalf("stat generated issuance environment: %v", err)
 	} else if got := info.Mode().Perm(); got != 0o600 {
 		t.Errorf("generated issuance environment mode = %o, want 600", got)
+	}
+	changedArguments := append(append([]string(nil), arguments...), "--reader-origin-url", "https://changed-reader.example")
+	if _, err := runOnboardingCommand(context.Background(), changedArguments, dependencies); err != nil {
+		t.Fatalf("onboard-source after reader configuration change: %v", err)
+	}
+	refreshedIssuanceEnv, err := os.ReadFile(activation.IssuanceConfigReference)
+	if err != nil {
+		t.Fatalf("read refreshed issuance environment: %v", err)
+	}
+	if bytes.Equal(issuanceEnv, refreshedIssuanceEnv) {
+		t.Fatal("issuance environment was not refreshed after reader certificate reissue")
 	}
 	for _, path := range []string{
 		activation.Certificates.IssuerKeyReference,

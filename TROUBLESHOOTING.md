@@ -60,7 +60,7 @@ Check the `make fsc-seed-bri` output. Common causes:
 
 **Most common**: the `/bri` grant-link is not set in the EDI-Controller UI (`http://localhost:8094`). See `README.md` section *Real FSC end-to-end*, step 3.
 
-**Check**: `curl -X POST http://localhost:9409/inkomensverklaring_2024/ …` (see the same README section). A `UNKNOWN_GRANT_HASH_IN_HEADER` response means the grant-link is missing.
+**Check**: `curl -X POST 'http://localhost:9409/attestations/99999999900000000200/inkomensverklaring?jaar=2024' …`. A `UNKNOWN_GRANT_HASH_IN_HEADER` response means the data-service grant-link is missing.
 
 ## Developer portal shows empty tabs
 

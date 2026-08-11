@@ -1,7 +1,7 @@
 {
   "id": "eudi-inkomensverklaring-2024-allow",
   "name": "EUDI · Inkomensverklaring 2024 ALLOW",
-  "desc": "Wallet vraagt inkomensverklaring voor belastingjaar 2024 aan. Adapter's usecase-catalog levert scope bd:ib:2024; EUD0001's allowed_scopes accepteert 'em → credential met belastingjaar 2024 wordt uitgegeven.",
+  "desc": "Wallet vraagt inkomensverklaring voor belastingjaar 2024 aan. De geonboarde bronmetadata levert query en mapping; EUD0001 autoriseert de gevraagde velden en het jaar → credential met belastingjaar 2024 wordt uitgegeven.",
   "tab": "eudi-issuance",
   "expected_outcome": "allow",
   "payload": {

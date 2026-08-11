@@ -31,6 +31,7 @@ func TestDevelopmentCAProviderBindsReaderCertificateToCurrentConfiguration(t *te
 	if got := readerRequestOrigin(t, firstReader); got != "https://reader.example/" {
 		t.Fatalf("reader request origin = %q", got)
 	}
+	assertReaderAuthorizationPolicies(t, firstReader)
 	for name, artifact := range map[string]struct {
 		keyPath  string
 		certPath string
@@ -114,6 +115,38 @@ func assertCriticalEKU(t *testing.T, cert *x509.Certificate, eku asn1.ObjectIden
 
 func readerRequestOrigin(t *testing.T, cert *x509.Certificate) string {
 	t.Helper()
+	payload := readerAuthorizationPayload(t, cert)
+	requestOrigin, ok := payload["requestOriginBaseUrl"].(string)
+	if !ok {
+		t.Fatalf("reader requestOriginBaseUrl = %#v, want string", payload["requestOriginBaseUrl"])
+	}
+	return requestOrigin
+}
+
+func assertReaderAuthorizationPolicies(t *testing.T, cert *x509.Certificate) {
+	t.Helper()
+	payload := readerAuthorizationPayload(t, cert)
+	purpose, ok := payload["purposeStatement"].(map[string]any)
+	if !ok || purpose["nl"] == "" || purpose["en"] == "" {
+		t.Fatalf("reader purposeStatement = %#v, want nl and en values", payload["purposeStatement"])
+	}
+	for field, child := range map[string]string{
+		"retentionPolicy": "intentToRetain",
+		"sharingPolicy":   "intentToShare",
+	} {
+		policy, ok := payload[field].(map[string]any)
+		if !ok || policy[child] != false {
+			t.Fatalf("reader %s = %#v, want %s=false", field, payload[field], child)
+		}
+	}
+	deletion, ok := payload["deletionPolicy"].(map[string]any)
+	if !ok || deletion["deleteable"] != true {
+		t.Fatalf("reader deletionPolicy = %#v, want deleteable=true", payload["deletionPolicy"])
+	}
+}
+
+func readerAuthorizationPayload(t *testing.T, cert *x509.Certificate) map[string]any {
+	t.Helper()
 	extension, ok := findCertificateExtension(cert, readerAuthExtensionOID)
 	if !ok {
 		t.Fatal("reader certificate has no authorization extension")
@@ -123,11 +156,9 @@ func readerRequestOrigin(t *testing.T, cert *x509.Certificate) string {
 	if err != nil || len(remaining) != 0 {
 		t.Fatalf("decode reader authorization extension: remaining=%x err=%v", remaining, err)
 	}
-	var payload struct {
-		RequestOriginBaseURL string `json:"requestOriginBaseUrl"`
-	}
+	var payload map[string]any
 	if err := json.Unmarshal([]byte(encodedPayload), &payload); err != nil {
 		t.Fatalf("parse reader authorization payload: %v", err)
 	}
-	return payload.RequestOriginBaseURL
+	return payload
 }

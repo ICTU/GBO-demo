@@ -6,23 +6,40 @@ type Props = {
   citizens: Citizen[]
 }
 
-// Four usecases across two bronnen: three income-statements (one per tax
-// year, BD bron) and the akte van overlijden (BRP bron). The usecase-key maps
-// to the disclosure_settings key in issuance-server config AND to the path in
-// the adapter (usecase-catalog driven). IB 2023 is deliberately in the catalog
-// while the EUD0001 policy denies it — demonstrating scope-authorization
-// independent of catalog-membership.
+// Four issuance products across two onboarded sources. `usecase` is only the
+// nl-wallet disclosure_settings key; its adapter endpoint is generated from
+// the corresponding source activation. IB 2023 deliberately demonstrates the
+// policy's allowed-year boundary.
 type AttestationConfig = {
   code: string
   label: string
-  usecase: string  // must match [disclosure_settings.<usecase>] in issuance-server.toml AND the adapter-catalog key
+  usecase: string  // must match [disclosure_settings.<usecase>] in issuance_server.toml
   clientId: string // reader-cert client_id
 }
 
-const CLIENT_ID =
-  window.__GBO_RUNTIME_CONFIG__?.eudiClientId ??
-  import.meta.env.VITE_EUDI_CLIENT_ID ??
-  'reader.example.com'
+const ISSUANCE_SERVER_PUBLIC_URL = (
+  window.__GBO_RUNTIME_CONFIG__?.eudiPublicUrl ||
+  import.meta.env.VITE_EUDI_PUBLIC_URL ||
+  ''
+).replace(/\/$/, '')
+
+function readerClientId(publicUrl: string): string {
+  const configured = (
+    window.__GBO_RUNTIME_CONFIG__?.eudiClientId ||
+    import.meta.env.VITE_EUDI_CLIENT_ID ||
+    ''
+  ).trim()
+  if (configured) return configured
+  try {
+    const hostname = new URL(publicUrl).hostname
+    if (hostname) return `x509_san_dns:${hostname}`
+  } catch {
+    // Keep the development fallback below for an absent or invalid URL.
+  }
+  return ''
+}
+
+const CLIENT_ID = readerClientId(ISSUANCE_SERVER_PUBLIC_URL)
 
 const ATTESTATION_TYPES: AttestationConfig[] = [
   {
@@ -39,7 +56,7 @@ const ATTESTATION_TYPES: AttestationConfig[] = [
   },
   {
     code: 'nl.gbo.belastingdienst.inkomensverklaring',
-    label: 'Inkomensverklaring 2023 (Belastingdienst) — verwacht DENY (SCOPE_NOT_ALLOWED)',
+    label: 'Inkomensverklaring 2023 (Belastingdienst) — verwacht DENY (YEAR_NOT_ALLOWED)',
     usecase: 'inkomensverklaring_2023',
     clientId: CLIENT_ID,
   },
@@ -54,12 +71,6 @@ const ATTESTATION_TYPES: AttestationConfig[] = [
 const UL_BASE =
   import.meta.env.VITE_EUDI_UL_BASE ??
   'https://app.preproductie.wallet.edi.bzk.nl/deeplink/disclosure_based_issuance'
-const ISSUANCE_SERVER_PUBLIC_URL = (
-  window.__GBO_RUNTIME_CONFIG__?.eudiPublicUrl ??
-  import.meta.env.VITE_EUDI_PUBLIC_URL ??
-  ''
-).replace(/\/$/, '')
-
 // Build the same universal-link that demo-issuer's <nl-wallet-button>
 // generates. On scan the wallet POSTs to `request_uri`, where the
 // issuance-server opens its own session — no dev-portal-side state needed.
@@ -111,19 +122,18 @@ export default function EudiForm({ payload, setPayload, citizens }: Props) {
       </div>
 
       <div className="hint" style={{ fontSize: 12, color: 'var(--mute)', marginTop: 8 }}>
-        <b>Bron + scope</b> komen uit de <code className="mono">
-        eudi-adapter/config/usecase_catalog.json</code> — per usecase een
-        eigen bronprofiel, scope en flow. Policy EUD0001 (BD) en EUD0002 (BRP)
-        weigeren scopes buiten hun whitelist, onafhankelijk van wat de catalog
-        kent. Dat is waarom &quot;IB 2023&quot; verwacht wordt te DENY'en:
-        catalog kent 'em, policy niet.
+        De <b>bron</b> publiceert de query, parameters, mapping en Type Metadata;
+        onboarding bindt die aan bron-OIN en FSC-service. De PDP autoriseert de
+        daadwerkelijk gevraagde velden. EUD0001 staat alleen 2024 en 2025 toe,
+        waardoor &quot;IB 2023&quot; fail-closed wordt geweigerd.
       </div>
 
       <div className="hint" style={{ fontSize: 12, color: 'var(--mute)', marginTop: 8 }}>
         <b>Akte van overlijden</b> leest uit de tweede bron (BRP,{' '}
         <code className="mono">brp-graphql-server</code>) en loopt van de
-        nabestaande via <code className="mono">heeftHuwelijk.partners</code>{' '}
-        naar de overledene. In de mock voldoet alleen BSN{' '}
+        bron-eigen attestation-view <code className="mono">akteVanOverlijden</code>.
+        De selectie van de overleden partner gebeurt dus in de bron. In de mock
+        voldoet alleen BSN{' '}
         <code className="mono">999991772</code> (Frouke Jansen) daaraan; andere
         BSN&#39;s geven een 404 zonder dat er policy aan te pas komt.
       </div>

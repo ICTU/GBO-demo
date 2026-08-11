@@ -1,0 +1,6 @@
+# Tweede geonboarde bron in de lokale E2E-proef: BRP-mock.
+source_oin: "99999999900000000400"
+name: "BRP-mock"
+metadata_fsc_service_reference: "brp-attestation-metadata"
+metadata_signing_jwk_thumbprint: "sha256-qRi2CXYGxBMcbJbLbb7rjxk4jiSkpA1tpcWmagK0Hwk"
+data_fsc_service_reference: "brp"

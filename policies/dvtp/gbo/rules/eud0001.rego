@@ -40,20 +40,9 @@ covers_fields := {
 	"AangifteIH.box3Inkomen",
 }
 
-# Per-rule scope-whitelist: which resource.scope strings may this rule
-# cover at all? Prevents a requester with an arbitrary scope-claim from
-# passing through the same covers_fields. Symmetric with DvTP's
-# _check_consent_covers_scope, but the source here is the rule itself
-# (policy-as-code as source of truth), not a consent-fetch.
-#
-# 2023 is deliberately omitted from the whitelist so that the multi-
-# usecase demo (the usecase-catalog knows 2023, but the policy denies
-# it) is tangible — scope-authorization gates independently of what the
-# adapter claims from its catalog.
-allowed_scopes := {
-	"bd:ib:2024",
-	"bd:ib:2025",
-}
+# The policy authorizes the concrete selector in the source-owned query.
+# There is no GBO usecase-catalog or derived bd:ib:<year> scope in this path.
+allowed_years := {2024, 2025}
 
 # Per-rule actor-whitelist: which subject.id (OIN) may trigger this rule?
 # Designated EDI-issuer along the lines of eIDAS art. 5a-style
@@ -66,19 +55,15 @@ allowed_actors := {
 	"99999999900000000100",
 }
 
-# Evaluation spec: PID present + BSN 9 digits + scope in allowed_scopes +
-# actor in allowed_actors. All four must pass; the first failure wins as
-# DENY-reason.
+# Evaluation spec: PID present + requested year in allowed_years + actor in
+# allowed_actors. All checks apply to the actual query sent to the source.
 spec := {
 	"rule_id": "EUD0001",
 	"consent_required": false,
 	"consent_must_cover_scope": false,
 	"pid_required": true,
-	"allowed_scopes": allowed_scopes,
+	"allowed_years": allowed_years,
 	"allowed_actors": allowed_actors,
-	# Per-year authorization: the requested belastingjaar must map to a
-	# bd:ib:<year> scope in allowed_scopes. Fires after scope_allowed,
-	# so a usecase for 2023 still reports SCOPE_NOT_ALLOWED first.
-	"years_in_scopes": true,
+	"years_in_scopes": false,
 	"pip": null,
 }

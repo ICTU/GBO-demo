@@ -303,6 +303,19 @@ func developmentCertificateAuthPayloads(registration sourceRegistration, readerO
 		return nil, nil, fmt.Errorf("marshal development issuer authorization metadata: %w", err)
 	}
 	reader, err := json.Marshal(map[string]any{
+		"purposeStatement": map[string]string{
+			"nl": "Uitgifte van attestaties van " + registration.Name,
+			"en": "Issuance of attestations by " + registration.Name,
+		},
+		"retentionPolicy": map[string]any{
+			"intentToRetain": false,
+		},
+		"sharingPolicy": map[string]any{
+			"intentToShare": false,
+		},
+		"deletionPolicy": map[string]any{
+			"deleteable": true,
+		},
 		"organization":         organization,
 		"requestOriginBaseUrl": readerOrigin,
 		"authorizedAttributes": map[string]any{"urn:eudi:pid:nl:1": [][]string{{"urn:eudi:pid:nl:1", "bsn"}, {"bsn"}}},

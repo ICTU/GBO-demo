@@ -4,11 +4,11 @@ import data.dvtp.gbo.lib
 import data.dvtp.gbo.rules.eud0001
 
 # ═══════════════════════════════════════════════════════════════════════════
-# EUD0001 axes — scope + actor + PID.
+# EUD0001 axes — concrete query year + actor + PID.
 #
 # Tests run against lib.evaluate(spec, ctx) to isolate the check-axes from
 # the engine's field-binding. The spec is taken from the rule itself so
-# that allowed_scopes / allowed_actors come from a single source.
+# that allowed_years / allowed_actors come from a single source.
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Minimal ctx-shape that all EUD0001-checks can handle. Overridden per
@@ -17,14 +17,14 @@ _base_ctx := {
 	"subject": {"type": "org", "id": "00000004000000004000"},
 	"args": {"belastingjaren.0": "2025"},
 	"time": "2026-07-06T12:00:00Z",
-	"resource": {"scope": "bd:ib:2025"},
+	"resource": {"scope": ""},
 	"pip": {"pid": {"pi": "PI-2f1a7c9b40e6d853"}},
 	"field": "Query.ingeschrevenPersoon.heeftBelastingjaarAangifte",
 }
 
 # ── Happy path ──────────────────────────────────────────────────────────
 
-test_allow_valid_actor_scope_pid if {
+test_allow_valid_actor_year_pid if {
 	result := lib.evaluate(eud0001.spec, _base_ctx)
 	result.decision == true
 }
@@ -35,47 +35,20 @@ test_allow_simulation_eudi_issuer if {
 	result.decision == true
 }
 
-# ── Scope-authorization ─────────────────────────────────────────────────
+# ── Direct year authorization ──────────────────────────────────────────
 
-test_deny_scope_not_in_allowed_scopes if {
-	ctx := object.union(_base_ctx, {"resource": {"scope": "dv:studieschuld:2024"}})
-	result := lib.evaluate(eud0001.spec, ctx)
-	result.decision == false
-	result.context.reason_admin.code == "SCOPE_NOT_ALLOWED"
-}
-
-test_deny_scope_empty if {
-	ctx := object.union(_base_ctx, {"resource": {"scope": ""}})
-	result := lib.evaluate(eud0001.spec, ctx)
-	result.decision == false
-	result.context.reason_admin.code == "SCOPE_NOT_ALLOWED"
-}
-
-# 2023 is a catalog-usecase (adapter knows it, wallet can request it) but
-# the policy denies it — demonstrating the separation between catalog-
-# membership and scope-authorization.
-test_deny_scope_bd_ib_2023 if {
-	ctx := object.union(_base_ctx, {"resource": {"scope": "bd:ib:2023"}})
-	result := lib.evaluate(eud0001.spec, ctx)
-	result.decision == false
-	result.context.reason_admin.code == "SCOPE_NOT_ALLOWED"
-}
-
-test_allow_scope_bd_ib_2024 if {
-	ctx := object.union(_base_ctx, {"resource": {"scope": "bd:ib:2024"}})
-	result := lib.evaluate(eud0001.spec, ctx)
-	result.decision == true
-}
-
-# ── Year-coverage (requested year must map to an allowed scope) ────────
-
-test_deny_year_not_in_allowed_scopes if {
-	# Scope bd:ib:2025 passes the scope-axis, but the query asks for
-	# belastingjaar 2023 — bd:ib:2023 is not in allowed_scopes.
+test_deny_year_not_allowed if {
 	ctx := object.union(_base_ctx, {"args": {"belastingjaren.0": "2023"}})
 	result := lib.evaluate(eud0001.spec, ctx)
 	result.decision == false
-	result.context.reason_admin.code == "YEAR_NOT_COVERED"
+	result.context.reason_admin.code == "YEAR_NOT_ALLOWED"
+}
+
+test_deny_year_missing if {
+	ctx := object.union(object.remove(_base_ctx, ["args"]), {"args": {}})
+	result := lib.evaluate(eud0001.spec, ctx)
+	result.decision == false
+	result.context.reason_admin.code == "YEAR_NOT_ALLOWED"
 }
 
 # ── Actor-authorization ─────────────────────────────────────────────────
@@ -85,24 +58,6 @@ test_deny_actor_not_in_allowed_actors if {
 	result := lib.evaluate(eud0001.spec, ctx)
 	result.decision == false
 	result.context.reason_admin.code == "ACTOR_NOT_ALLOWED"
-}
-
-# ── Priority: actor-fail wins over scope-fail (more structural) ─────────
-
-test_deny_actor_wins_over_scope if {
-	ctx := object.union(_base_ctx, {
-		"subject": {"type": "org", "id": "00000001234567890000"},
-		"resource": {"scope": "dv:studieschuld:2024"},
-	})
-	result := lib.evaluate(eud0001.spec, ctx)
-	result.decision == false
-
-	# lib.evaluate reports the FIRST fail in _raw_steps as
-	# reason_admin.code. Cascade order: PID → scope → actor. On
-	# simultaneous scope+actor fail, scope wins in the reason (first
-	# fail); the engine's _worst_code then recalibrates on priority
-	# (actor > scope). In lib-only context: first fail = SCOPE_NOT_ALLOWED.
-	result.context.reason_admin.code == "SCOPE_NOT_ALLOWED"
 }
 
 # ── PID-check remains present ───────────────────────────────────────────

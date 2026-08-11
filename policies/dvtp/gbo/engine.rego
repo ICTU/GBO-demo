@@ -159,10 +159,10 @@ _eval(rid, field) := lib.evaluate(_rule_meta[rid].spec, object.union(_ctx, {"fie
 
 # ── Flow dispatch ────────────────────────────────────────────────────────────
 # Rules declare their authorization basis in the spec: consent_required
-# (DvTP) or pid_required (EUDI). A rule only FIRES when its flow matches
-# the request's flow — the request-mapper places it in input.context.flow
-# (from the FSC token's additional-claims / X-GBO-Flow header). Without
-# this dispatch a DvTP-flow deny would aggregate EUD0001's
+# (DvTP) or pid_required (EUDI). The request flow selects that authorization
+# model; it does not select a source or individual policy. The request-mapper
+# places the trusted FSC additional claim in input.context.flow. Without this
+# dispatch a DvTP-flow deny would aggregate an EUDI rule's
 # PID_NOT_PRESENT (priority 55) over the genuine DvTP reason
 # (CONSENT_SCOPE_MISMATCH, YEAR_NOT_COVERED, CONSTRAINT_MISMATCH), and
 # vice versa — the documented "this rule fires only when ..." semantics
@@ -263,6 +263,8 @@ _code_priority("CONSENT_SCOPE_MISMATCH") := 40
 # class: a scope/authorization gap, not a system error) but must be a
 # distinct priority so _worst_code stays deterministic when both fire.
 _code_priority("YEAR_NOT_COVERED") := 41
+
+_code_priority("YEAR_NOT_ALLOWED") := 63
 
 _code_priority("CONSTRAINT_MISMATCH") := 30
 

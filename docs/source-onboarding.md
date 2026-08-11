@@ -27,31 +27,34 @@ of mapping.
 
 ## Verse lokale checkout
 
-Start FSC en de bronmetadata-publicatie, en leg daarna het aparte
-metadatacontract vast. `make fsc-all-up` maakt bij een verse checkout
-automatisch een genegeerde `fsc-infra/.env` met een lokaal databasewachtwoord:
+De complete idempotente demo-onboarding voor zowel Belastingdienst als BRP is:
 
 ```sh
-make fsc-all-up
-make source-metadata-up
-make fsc-seed-metadata
+make onboard-demo-sources
 ```
 
-Valideer eerst zonder wijzigingen:
+De target start FSC en de twee bronpublishers, legt beide metadata-contracten
+vast en activeert daarna beide bronnen. `make fsc-all-up` maakt bij een verse
+checkout automatisch een genegeerde `fsc-infra/.env` met een lokaal
+databasewachtwoord.
+
+Losse validatie zonder wijzigingen kan voor iedere bron:
 
 ```sh
 make validate-source SOURCE=sources/99999999900000000200.yaml
+make validate-source SOURCE=sources/99999999900000000400.yaml
 ```
 
-Bekijk vervolgens exact dezelfde onboarding zonder writes en voer haar daarna
-uit:
+Bekijk de losse onboarding eerst zonder writes en activeer daarna:
 
 ```sh
 make onboard-source SOURCE=sources/99999999900000000200.yaml DRY_RUN=true
+make onboard-source SOURCE=sources/99999999900000000400.yaml DRY_RUN=true
 make onboard-source SOURCE=sources/99999999900000000200.yaml
+make onboard-source SOURCE=sources/99999999900000000400.yaml
 ```
 
-Het tweede command is idempotent. Een gewijzigde payload onder dezelfde versie,
+De activatiecommands zijn idempotent. Een gewijzigde payload onder dezelfde versie,
 een versieterugval, een verkeerde sleutel, een ongeldig certificaat of een
 onbereikbaar FSC-endpoint faalt gesloten.
 
@@ -63,28 +66,28 @@ registratieset; dat is bewust fail-closed en het foutbericht noemt het bestand.
 
 ## Issuance-configuratie
 
-Onboarding schrijft een genegeerd
-`.local/secrets/<oin>/issuance.env`. De configuratie kiest hiervoor expliciet
-`storage-backend=filesystem` en `certificate-provider=development-ca`.
-`make eudi-config` gebruikt dit bestand alleen na expliciete opt-in:
+Onboarding schrijft per bron een genegeerd
+`.local/secrets/<oin>/issuance.env`. De lokale configuratie kiest hiervoor
+expliciet `storage-backend=filesystem` en
+`certificate-provider=development-ca`. Nadat beide demo-bronnen zijn
+geonboard, genereert dit de issuance-configuratie:
 
 ```sh
-make eudi-config USE_ONBOARDING_EUDI_ENV=true
+make eudi-config
 ```
 
-Het command meldt dan dat de geminte issuer-, reader- en statuscertificaten en
-hun lokale trust-anchors de certificaatwaarden uit `.env` overschrijven. Zonder
-opt-in blijft `.env` leidend.
+Het command gebruikt de per bron geminte issuer- en readercertificaten, leest
+VCT, adapterroute en Type Metadata-referentie uit de activatierecords,
+controleert hun onderlinge binding en installeert de metadata in de
+issuance-serverconfig. Er is geen alternatieve catalogusconfiguratie.
 URL-configuratie zoals `EUDI_PUBLIC_URL`, `EUDI_READER_ORIGIN_URL` en
 `EUDI_BRI_URL` blijft deploymentconfiguratie in `.env`.
 
-De door onboarding gepubliceerde Type Metadata en gepinde publieke bronkey
-worden vanuit `.local/onboarding/` in de adapter gemount. De tijdelijke
-`SOURCE_METADATA_*` featureflag blijft standaard uit voor rollback; zet
-`SOURCE_METADATA_CACHE_ENABLED=true` om het bronmetadatapad te activeren.
-`SOURCE_METADATA_OIN` en `SOURCE_METADATA_PUBLIC_JWK_PATH` hebben in Compose
-bewust geen demo-defaults: na inschakelen moeten de onboardingswaarden expliciet
-worden ingesteld.
+De actieve registraties, gepubliceerde Type Metadata en gepinde publieke
+bronkeys worden vanuit `.local/onboarding/` in de adapter gemount. OIN, type-id,
+FSC-servicereferentie, parameters en JWK-pad worden uit ieder activatierecord en
+de ondertekende bronmetadata afgeleid en zijn geen losse env-vars. Zonder een
+geldige activatie is een type niet uitgiftebaar; er is geen legacyfallback.
 
 `make demo-eudi` en `make demo-full` maken de bind-mountdirectories vóór
 Compose met de huidige gebruiker aan. Start je Compose rechtstreeks, voer dan

@@ -87,3 +87,33 @@ func TestSourceCannotSupplyVCTOrIntegrity(t *testing.T) {
 		})
 	}
 }
+
+func TestSummaryPlaceholdersRequireMatchingClaimSVGIDs(t *testing.T) {
+	definition := sourceAttestationDefinition{
+		TypeID:      "inkomensverklaring",
+		TypeVersion: "1.0",
+		TypeMetadata: json.RawMessage(`{
+			"display":[{"lang":"nl-NL","summary":"€{{verzamelinkomen}} ({{belastingjaar}})"}],
+			"claims":[
+				{"path":["belastingjaar"],"svg_id":"belastingjaar"},
+				{"path":["verzamelinkomen"]}
+			],
+			"schema":{"type":"object"}
+		}`),
+	}
+	if _, err := newTypeMetadataPublication("https://issuer.example", "99999999900000000200", definition); err == nil {
+		t.Fatal("summary placeholder without matching svg_id was accepted")
+	}
+
+	definition.TypeMetadata = json.RawMessage(`{
+		"display":[{"lang":"nl-NL","summary":"€{{verzamelinkomen}} ({{belastingjaar}})"}],
+		"claims":[
+			{"path":["belastingjaar"],"svg_id":"belastingjaar"},
+			{"path":["verzamelinkomen"],"svg_id":"verzamelinkomen"}
+		],
+		"schema":{"type":"object"}
+	}`)
+	if _, err := newTypeMetadataPublication("https://issuer.example", "99999999900000000200", definition); err != nil {
+		t.Fatalf("matching summary svg_id values were rejected: %v", err)
+	}
+}

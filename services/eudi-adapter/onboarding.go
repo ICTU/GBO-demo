@@ -32,10 +32,11 @@ type sourceActivation struct {
 }
 
 type activatedType struct {
-	TypeID       string `json:"type_id"`
-	TypeVersion  string `json:"type_version"`
-	VCT          string `json:"vct"`
-	VCTIntegrity string `json:"vct_integrity"`
+	TypeID                string `json:"type_id"`
+	TypeVersion           string `json:"type_version"`
+	VCT                   string `json:"vct"`
+	VCTIntegrity          string `json:"vct_integrity"`
+	TypeMetadataReference string `json:"type_metadata_reference"`
 }
 
 type onboardingOptions struct {
@@ -216,10 +217,11 @@ func (b *filesystemActivationBackend) Activate(validated *validatedSourceRegistr
 	types := make([]activatedType, 0, len(validated.Publications))
 	for _, publication := range validated.Publications {
 		types = append(types, activatedType{
-			TypeID:       publication.TypeID,
-			TypeVersion:  publication.TypeVersion,
-			VCT:          publication.VCT,
-			VCTIntegrity: publication.Integrity,
+			TypeID:                publication.TypeID,
+			TypeVersion:           publication.TypeVersion,
+			VCT:                   publication.VCT,
+			VCTIntegrity:          publication.Integrity,
+			TypeMetadataReference: filepath.Join(typeStore, typeMetadataFilename(publication)),
 		})
 	}
 	payloadDigest := sha256.Sum256(validated.Payload)
@@ -299,7 +301,10 @@ func writeFilesystemIssuanceEnvironment(secretRoot, sourceOIN string, certificat
 		_, _ = fmt.Fprintf(&body, "%s='%s'\n", name, values[name])
 	}
 	path := filepath.Join(secretRoot, sourceOIN, "issuance.env")
-	if err := writeSameOrCreate(path, []byte(body.String()), 0o600); err != nil {
+	// This file is derived from the current certificate artifacts. Leaf
+	// certificates can be renewed or reissued while retaining their key, so the
+	// generated environment must follow those changes atomically.
+	if err := writeFileAtomically(filepath.Dir(path), filepath.Base(path), []byte(body.String()), 0o600); err != nil {
 		return "", err
 	}
 	return path, nil

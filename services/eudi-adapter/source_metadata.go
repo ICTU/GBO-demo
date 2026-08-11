@@ -11,7 +11,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
-	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -88,9 +88,10 @@ func (a *sourceAttributeSchema) UnmarshalJSON(data []byte) error {
 
 type mappingRule = gbosimplev1.Rule
 
-type sourceMetadataShadow struct {
+type activeSourceMetadata struct {
 	Version      string
-	UsecaseKey   string
+	SourceOIN    string
+	TypeID       string
 	Definition   sourceAttestationDefinition
 	VCT          string
 	VCTIntegrity string
@@ -98,8 +99,7 @@ type sourceMetadataShadow struct {
 }
 
 type sourceMetadataRuntime interface {
-	appliesTo(usecaseKey string, uc Usecase) bool
-	current(now time.Time) (*sourceMetadataShadow, error)
+	current(now time.Time) (*activeSourceMetadata, error)
 }
 
 type sourceMetadataJWK struct {
@@ -116,54 +116,9 @@ type sourceMetadataJWSHeader struct {
 	JWK       *sourceMetadataJWK `json:"jwk,omitempty"`
 }
 
-// phase1ExpectedIncomeClaims is the migration baseline, deliberately kept
-// outside source-controlled metadata. It disappears with the legacy formatter
-// after parity has been proven; until then it prevents the source from making
-// a claim vanish from both its query and mapping while still reporting match.
-var phase1ExpectedIncomeClaims = map[string]struct{}{
-	"belastingjaar":   {},
-	"verzamelinkomen": {},
-	"aangifte_status": {},
-	"indieningsdatum": {},
-	"inkomen_box1":    {},
-	"inkomen_box2":    {},
-	"inkomen_box3":    {},
-}
-
-func loadConfiguredSourceMetadataShadow(ctx context.Context, client *http.Client, cfg config) (*sourceMetadataShadow, error) {
-	if !cfg.SourceMetadataShadowEnabled {
-		return nil, nil
-	}
-	if cfg.SourceMetadataPublicJWKPath == "" {
-		return nil, fmt.Errorf("SOURCE_METADATA_PUBLIC_JWK_PATH is required when shadow mode is enabled")
-	}
-	if !strings.HasPrefix(cfg.SourceMetadataOutwayPath, "/") || strings.HasPrefix(cfg.SourceMetadataOutwayPath, "//") {
-		return nil, fmt.Errorf("SOURCE_METADATA_OUTWAY_PATH must be an absolute path on the configured FSC Outway")
-	}
-	if cfg.SourceMetadataUsecaseKey == "" {
-		return nil, fmt.Errorf("SOURCE_METADATA_USECASE_KEY is required when shadow mode is enabled")
-	}
-	publicJWK, err := os.ReadFile(cfg.SourceMetadataPublicJWKPath)
-	if err != nil {
-		return nil, fmt.Errorf("read source metadata public JWK: %w", err)
-	}
-	shadow, err := loadSourceMetadataShadow(ctx, client, sourceMetadataConfig{
-		URL:         strings.TrimRight(cfg.OutwayURL, "/") + cfg.SourceMetadataOutwayPath,
-		ExpectedOIN: cfg.SourceMetadataOIN,
-		PublicJWK:   publicJWK,
-		TypeID:      cfg.SourceMetadataTypeID,
-	})
-	if err != nil {
-		return nil, err
-	}
-	shadow.UsecaseKey = cfg.SourceMetadataUsecaseKey
-	return shadow, nil
-}
-
-// loadSourceMetadataShadow performs the phase-1 onboarding step: fetch the
-// declaration, verify it against the pinned source key and OIN, validate its
-// GraphQL syntax, and keep only the requested attestation definition.
-func loadSourceMetadataShadow(ctx context.Context, client *http.Client, cfg sourceMetadataConfig) (*sourceMetadataShadow, error) {
+// loadSourceMetadata fetches the declaration through FSC, verifies it against
+// the pinned source key and OIN, validates it and selects the activated type.
+func loadSourceMetadata(ctx context.Context, client *http.Client, cfg sourceMetadataConfig) (*activeSourceMetadata, error) {
 	if cfg.URL == "" || cfg.ExpectedOIN == "" || len(cfg.PublicJWK) == 0 || cfg.TypeID == "" {
 		return nil, fmt.Errorf("source metadata registration is incomplete")
 	}
@@ -198,11 +153,11 @@ func loadSourceMetadataShadow(ctx context.Context, client *http.Client, cfg sour
 		return nil, err
 	}
 
-	shadow, _, err := parseSourceMetadataPayload(payload, cfg)
-	return shadow, err
+	metadata, _, err := parseSourceMetadataPayload(payload, cfg)
+	return metadata, err
 }
 
-func parseSourceMetadataPayload(payload []byte, cfg sourceMetadataConfig) (*sourceMetadataShadow, sourceMetadataDocument, error) {
+func parseSourceMetadataPayload(payload []byte, cfg sourceMetadataConfig) (*activeSourceMetadata, sourceMetadataDocument, error) {
 	var document sourceMetadataDocument
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.DisallowUnknownFields()
@@ -225,7 +180,9 @@ func parseSourceMetadataPayload(payload []byte, cfg sourceMetadataConfig) (*sour
 		if err := validateSourceAttestation(definition); err != nil {
 			return nil, sourceMetadataDocument{}, fmt.Errorf("attestation %q: %w", cfg.TypeID, err)
 		}
-		return &sourceMetadataShadow{Version: document.Version, Definition: definition}, document, nil
+		return &activeSourceMetadata{
+			Version: document.Version, SourceOIN: cfg.ExpectedOIN, TypeID: cfg.TypeID, Definition: definition,
+		}, document, nil
 	}
 	return nil, sourceMetadataDocument{}, fmt.Errorf("source metadata has no attestation %q", cfg.TypeID)
 }
@@ -403,78 +360,70 @@ func isISO4217Alpha3(unit string) bool {
 	return true
 }
 
-func (s *sourceMetadataShadow) appliesTo(usecaseKey string, uc Usecase) bool {
-	return s != nil && uc.acceptsSourceMetadata(usecaseKey, s.UsecaseKey)
-}
-
-func (uc Usecase) acceptsSourceMetadata(usecaseKey, configuredUsecaseKey string) bool {
-	return configuredUsecaseKey == usecaseKey && uc.bron() == bronBD && len(uc.Belastingjaren) == 1
-}
-
-func (s *sourceMetadataShadow) current(_ time.Time) (*sourceMetadataShadow, error) {
+func (s *activeSourceMetadata) current(_ time.Time) (*activeSourceMetadata, error) {
 	return s, nil
 }
 
-func (s *sourceMetadataShadow) queryPlan(usecaseKey, bsn string, uc Usecase) (sourceQueryPlan, error) {
-	if !s.appliesTo(usecaseKey, uc) {
-		return sourceQueryPlan{}, fmt.Errorf("source metadata does not apply to this usecase")
-	}
+func (s *activeSourceMetadata) queryPlan(bsn string, supplied map[string][]string) (sourceQueryPlan, error) {
 	variables := map[string]any{s.Definition.GraphQL.SubjectVariable: bsn}
 	for name, parameter := range s.Definition.GraphQL.Parameters {
-		switch name {
-		case "jaar":
-			variables[name] = uc.Belastingjaren[0]
-		default:
-			if parameter.Required {
-				return sourceQueryPlan{}, fmt.Errorf("no runtime value for required source parameter %q", name)
+		values, configured := supplied[name]
+		if configured && len(values) != 1 {
+			return sourceQueryPlan{}, fmt.Errorf("source parameter %q must occur exactly once", name)
+		}
+		if configured {
+			value, err := parseSourceParameter(name, parameter.Type, values[0])
+			if err != nil {
+				return sourceQueryPlan{}, err
 			}
+			variables[name] = value
+		} else if parameter.Required {
+			return sourceQueryPlan{}, fmt.Errorf("no runtime value for required source parameter %q", name)
+		}
+	}
+	for name := range supplied {
+		if _, declared := s.Definition.GraphQL.Parameters[name]; !declared {
+			return sourceQueryPlan{}, fmt.Errorf("request supplies undeclared source parameter %q", name)
 		}
 	}
 	return sourceQueryPlan{Query: s.Definition.GraphQL.Document, Variables: variables}, nil
 }
 
-// compareLegacy projects only the claims declared by the source and checks
-// those against the legacy formatter. Legacy-only presentation claims (such
-// as verklaring_tekst) intentionally do not become mapping capabilities.
-func (s *sourceMetadataShadow) compareLegacy(rawGraphQL []byte, docs []attestation) (bool, error) {
-	if len(docs) != 1 {
-		return false, fmt.Errorf("shadow comparison expected one legacy document")
+func parseSourceParameter(name, parameterType, raw string) (any, error) {
+	switch parameterType {
+	case "string":
+		return raw, nil
+	case "integer":
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("source parameter %q must be an integer", name)
+		}
+		return value, nil
+	case "number":
+		value, err := strconv.ParseFloat(raw, 64)
+		if err != nil {
+			return nil, fmt.Errorf("source parameter %q must be a number", name)
+		}
+		return value, nil
+	case "boolean":
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			return nil, fmt.Errorf("source parameter %q must be a boolean", name)
+		}
+		return value, nil
+	default:
+		return nil, fmt.Errorf("source parameter %q has unsupported type %q", name, parameterType)
 	}
-	for claim := range phase1ExpectedIncomeClaims {
-		if _, declared := s.Definition.Mapping[claim]; !declared {
-			return false, nil
-		}
-		if _, issued := docs[0].Attributes[claim]; !issued {
-			return false, nil
-		}
-	}
-	// verklaring_tekst is presentation text produced only by the legacy
-	// formatter and is deliberately absent from the source mapping. Every
-	// other issued claim must be declared: otherwise removing a field from
-	// both the source query and mapping would incorrectly report a match.
-	for claim := range docs[0].Attributes {
-		if claim == "verklaring_tekst" {
-			continue
-		}
-		if _, declared := s.Definition.Mapping[claim]; !declared {
-			return false, nil
-		}
-	}
+}
+
+func (s *activeSourceMetadata) project(rawGraphQL []byte) (gbosimplev1.Projection, error) {
 	root, err := gbosimplev1.DecodeJSON(rawGraphQL)
 	if err != nil {
-		return false, fmt.Errorf("decode GraphQL response for shadow projection: %w", err)
+		return gbosimplev1.Projection{}, fmt.Errorf("decode GraphQL response for source projection: %w", err)
 	}
 	projection, err := gbosimplev1.Project(root, s.Definition.GraphQL.ResultPointer, s.Definition.GraphQL.Cardinality, s.Definition.Mapping)
 	if err != nil {
-		return false, fmt.Errorf("project source response: %w", err)
+		return gbosimplev1.Projection{}, fmt.Errorf("project source response: %w", err)
 	}
-	if projection.Outcome != gbosimplev1.OutcomeCredential {
-		return false, fmt.Errorf("project source response: %s", projection.Outcome)
-	}
-	for claim, converted := range projection.Claims {
-		if !gbosimplev1.EqualJSON(converted, docs[0].Attributes[claim]) {
-			return false, nil
-		}
-	}
-	return true, nil
+	return projection, nil
 }

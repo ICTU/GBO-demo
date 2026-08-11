@@ -41,20 +41,26 @@ const gqlMaxDepth = 64
 // enriches the context. Bodies that do not decode as a GraphQL request
 // mark the coverage unverifiable (fail-closed) instead of erroring.
 func GraphQLToContext(parc *models.PARC, opts ...Option) *models.PARC {
+	headers := headerMap(parc.Context.GetAttributeValue(models.AttrHeaders))
+	flow := flowFromHeaders(headers)
+	txID := firstHeader(headers, "Fsc-Transaction-Id", "X-Request-Id", "X-Request-ID")
+
+	ctx := models.NewAttributeSet(parc.Context)
+	ctx.AddAttributeKV("trace_id", txID)
+	ctx.AddAttributeKV("flow", flow)
+	ctx.AddAttributeKV("fsc", map[string]any{"transaction_id": txID})
+
 	attr := parc.Action.Attributes().GetAttribute(models.AttrBody)
 	if attr == nil {
-		return parc
+		return &models.PARC{Principal: parc.Principal, Action: parc.Action, Resource: parc.Resource, Context: ctx}
 	}
 	body, ok := attr.Value().(string)
 	if !ok || body == "" {
-		return parc
+		return &models.PARC{Principal: parc.Principal, Action: parc.Action, Resource: parc.Resource, Context: ctx}
 	}
 
 	query, variables := decodeGraphQLBody(body)
-	headers := headerMap(parc.Context.GetAttributeValue(models.AttrHeaders))
-	flow := flowFromHeaders(headers)
 	scope := firstHeader(headers, "X-Gbo-Scope", "X-GBO-Scope")
-	txID := firstHeader(headers, "Fsc-Transaction-Id", "X-Request-Id", "X-Request-ID")
 
 	resource := map[string]any{
 		"scope":     scope,
@@ -62,12 +68,8 @@ func GraphQLToContext(parc *models.PARC, opts ...Option) *models.PARC {
 		"variables": variables,
 	}
 
-	ctx := models.NewAttributeSet(parc.Context)
 	ctx.AddAttributeKV("resource", resource)
 	ctx.AddAttributeKV("resolved", walkQuery(query, variables))
-	ctx.AddAttributeKV("trace_id", txID)
-	ctx.AddAttributeKV("flow", flow)
-	ctx.AddAttributeKV("fsc", map[string]any{"transaction_id": txID})
 
 	if flow == "eudi:attestation" {
 		// The BSN stops here. It is needed to reach the bron — the PEP

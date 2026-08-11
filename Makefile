@@ -1,7 +1,7 @@
 .PHONY: up down logs clean certs fsc-local-env fsc-ca fsc-up fsc-down fsc-test fsc-clean \
         fsc-seed-bri fsc-seed-bri-hv fsc-seed-brp fsc-seed-metadata fsc-pdp-cert \
         eudi-images development-source-metadata-key source-metadata-up \
-        validate-source onboard-source onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
+        validate-source onboard-source onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
         demo-full demo-down eudi-config
 
 -include .env
@@ -17,12 +17,15 @@ NLWALLET_PATH ?= $(PWD)/vendor/nl-wallet
 # key are strictly demo-only; issuer/reader/status keys remain randomly
 # generated below the ignored .local/ secret backend.
 DEVELOPMENT_SOURCE_OIN ?= 99999999900000000200
+DEVELOPMENT_BRP_SOURCE_OIN ?= 99999999900000000400
 ONBOARDING_OUTWAY_URL ?= http://localhost:8087
 ONBOARDING_STATE_DIR ?= $(PWD)/.local/onboarding
 ONBOARDING_SECRETS_DIR ?= $(PWD)/.local/secrets
 ONBOARDING_TYPE_METADATA_URL ?= $(or $(EUDI_BRI_URL),http://localhost:9409)
 ONBOARDING_EUDI_ENV ?= $(ONBOARDING_SECRETS_DIR)/$(DEVELOPMENT_SOURCE_OIN)/issuance.env
-USE_ONBOARDING_EUDI_ENV ?= false
+ONBOARDING_ACTIVE_SOURCE ?= $(ONBOARDING_STATE_DIR)/active/$(DEVELOPMENT_SOURCE_OIN).json
+ONBOARDING_BRP_EUDI_ENV ?= $(ONBOARDING_SECRETS_DIR)/$(DEVELOPMENT_BRP_SOURCE_OIN)/issuance.env
+ONBOARDING_ACTIVE_BRP_SOURCE ?= $(ONBOARDING_STATE_DIR)/active/$(DEVELOPMENT_BRP_SOURCE_OIN).json
 ONBOARDING_STORAGE_BACKEND ?= filesystem
 ONBOARDING_CERTIFICATE_PROVIDER ?= development-ca
 
@@ -82,13 +85,34 @@ eudi-config:
 	  exit 1; \
 	}
 	@set -a; [ -f .env ] && . ./.env; \
-	if [ "$(USE_ONBOARDING_EUDI_ENV)" = "true" ]; then \
+	  command -v jq >/dev/null 2>&1 || { echo "ERROR: jq not found"; exit 1; }; \
 	  [ -f "$(ONBOARDING_EUDI_ENV)" ] || { echo "ERROR: onboarding issuance environment not found: $(ONBOARDING_EUDI_ENV)"; exit 1; }; \
+	  [ -f "$(ONBOARDING_ACTIVE_SOURCE)" ] || { echo "ERROR: active source registration not found: $(ONBOARDING_ACTIVE_SOURCE)"; exit 1; }; \
+	  [ -f "$(ONBOARDING_ACTIVE_BRP_SOURCE)" ] || { echo "ERROR: active BRP source registration not found: $(ONBOARDING_ACTIVE_BRP_SOURCE)"; exit 1; }; \
+	  [ -f "$(ONBOARDING_BRP_EUDI_ENV)" ] || { echo "ERROR: BRP onboarding issuance environment not found: $(ONBOARDING_BRP_EUDI_ENV)"; exit 1; }; \
+	  type_count=$$(jq '[.types[] | select(.type_id == "inkomensverklaring")] | length' "$(ONBOARDING_ACTIVE_SOURCE)"); \
+	  [ "$$type_count" = "1" ] || { echo "ERROR: active source must contain exactly one inkomensverklaring type"; exit 1; }; \
+	  EUDI_INKOMENSVERKLARING_VCT=$$(jq -er '.types[] | select(.type_id == "inkomensverklaring") | .vct' "$(ONBOARDING_ACTIVE_SOURCE)"); \
+	  source_oin=$$(jq -er '.source.source_oin' "$(ONBOARDING_ACTIVE_SOURCE)"); \
+	  source_type_id=$$(jq -er '.types[] | select(.type_id == "inkomensverklaring") | .type_id' "$(ONBOARDING_ACTIVE_SOURCE)"); \
+	  EUDI_INKOMENSVERKLARING_ENDPOINT="$${EUDI_BRI_URL%/}/attestations/$$source_oin/$$source_type_id"; \
+	  EUDI_AKTE_VCT=$$(jq -er '.types[] | select(.type_id == "akte-van-overlijden") | .vct' "$(ONBOARDING_ACTIVE_BRP_SOURCE)"); \
+	  brp_source_oin=$$(jq -er '.source.source_oin' "$(ONBOARDING_ACTIVE_BRP_SOURCE)"); \
+	  EUDI_AKTE_ENDPOINT="$${EUDI_BRI_URL%/}/attestations/$$brp_source_oin/akte-van-overlijden"; \
+	  onboarding_brp_type_metadata=$$(jq -er '.types[] | select(.type_id == "akte-van-overlijden") | .type_metadata_reference' "$(ONBOARDING_ACTIVE_BRP_SOURCE)"); \
+	  onboarding_type_metadata=$$(jq -er '.types[] | select(.type_id == "inkomensverklaring") | .type_metadata_reference' "$(ONBOARDING_ACTIVE_SOURCE)"); \
+	  [ -f "$$onboarding_type_metadata" ] || { echo "ERROR: activated Type Metadata not found: $$onboarding_type_metadata"; exit 1; }; \
+	  jq -e --arg vct "$$EUDI_INKOMENSVERKLARING_VCT" '.vct == $$vct' "$$onboarding_type_metadata" >/dev/null || { echo "ERROR: activated Type Metadata does not match its VCT"; exit 1; }; \
+	  export EUDI_INKOMENSVERKLARING_VCT EUDI_INKOMENSVERKLARING_ENDPOINT EUDI_AKTE_VCT EUDI_AKTE_ENDPOINT; \
 	  echo "-> Using onboarding certificates from $(ONBOARDING_EUDI_ENV) (overrides .env certificate values)"; \
 	  . "$(ONBOARDING_EUDI_ENV)"; \
-	elif [ -f "$(ONBOARDING_EUDI_ENV)" ]; then \
-	  echo "-> Ignoring $(ONBOARDING_EUDI_ENV); set USE_ONBOARDING_EUDI_ENV=true to opt in"; \
-	fi; set +a; \
+	  EUDI_BRP_ISSUER_KEY=$$(set -a; . "$(ONBOARDING_BRP_EUDI_ENV)"; printf %s "$$EUDI_ISSUER_KEY"); \
+	  EUDI_BRP_ISSUER_CERT=$$(set -a; . "$(ONBOARDING_BRP_EUDI_ENV)"; printf %s "$$EUDI_ISSUER_CERT"); \
+	  EUDI_BRP_READER_KEY=$$(set -a; . "$(ONBOARDING_BRP_EUDI_ENV)"; printf %s "$$EUDI_READER_KEY"); \
+	  EUDI_BRP_READER_CERT=$$(set -a; . "$(ONBOARDING_BRP_EUDI_ENV)"; printf %s "$$EUDI_READER_CERT"); \
+	  EUDI_BRP_STATUS_KEY=$$(set -a; . "$(ONBOARDING_BRP_EUDI_ENV)"; printf %s "$$EUDI_STATUS_KEY"); \
+	  EUDI_BRP_STATUS_CERT=$$(set -a; . "$(ONBOARDING_BRP_EUDI_ENV)"; printf %s "$$EUDI_STATUS_CERT"); \
+	  export EUDI_BRP_ISSUER_KEY EUDI_BRP_ISSUER_CERT EUDI_BRP_READER_KEY EUDI_BRP_READER_CERT EUDI_BRP_STATUS_KEY EUDI_BRP_STATUS_CERT; set +a; \
 	missing=""; for v in $(EUDI_REQUIRED_VARS); do \
 	  eval "val=\$$$$v"; \
 	  [ -n "$$val" ] || missing="$$missing $$v"; \
@@ -97,21 +121,21 @@ eudi-config:
 	  echo "ERROR: missing env-vars (see .env.example):$$missing"; \
 	  exit 1; \
 	fi; \
-	if [ -z "$$EUDI_BRP_ISSUER_CERT" ] || [ -z "$$EUDI_BRP_READER_CERT" ]; then \
-	  echo "WARNING: EUDI_BRP_{ISSUER,READER}_{KEY,CERT} not set — the akte van"; \
-	  echo "         overlijden falls back to the Belastingdienst issuer/reader"; \
-	  echo "         certificates. The wallet will then show 'Belastingdienst' as"; \
-	  echo "         the issuer and 'Uitgifte inkomensverklaring' as the reason for"; \
-	  echo "         sharing the BSN, which is wrong for a BRP akte. Mint a BRP pair"; \
-	  echo "         from akte_van_overlijden_{issuer,reader}_auth.json to fix it."; \
-	fi; \
-	export EUDI_BRP_ISSUER_KEY="$${EUDI_BRP_ISSUER_KEY:-$$EUDI_ISSUER_KEY}"; \
-	export EUDI_BRP_ISSUER_CERT="$${EUDI_BRP_ISSUER_CERT:-$$EUDI_ISSUER_CERT}"; \
-	export EUDI_BRP_READER_KEY="$${EUDI_BRP_READER_KEY:-$$EUDI_READER_KEY}"; \
-	export EUDI_BRP_READER_CERT="$${EUDI_BRP_READER_CERT:-$$EUDI_READER_CERT}"; \
+	for v in EUDI_BRP_ISSUER_KEY EUDI_BRP_ISSUER_CERT EUDI_BRP_READER_KEY EUDI_BRP_READER_CERT EUDI_BRP_STATUS_KEY EUDI_BRP_STATUS_CERT; do \
+	  eval "val=\$$$$v"; \
+	  [ -n "$$val" ] || { echo "ERROR: BRP onboarding environment is missing $$v"; exit 1; }; \
+	done; \
 	for f in $(EUDI_CONFIG_FILES); do \
-	  echo "-> Rendering $(EUDI_CONFIG_DIR)/$$f from $$f.example"; \
-	  envsubst < $(EUDI_CONFIG_DIR)/$$f.example > $(EUDI_CONFIG_DIR)/$$f; \
+	  if [ "$$f" = "inkomensverklaring_metadata.json" ]; then \
+	    echo "-> Installing activated Type Metadata as $(EUDI_CONFIG_DIR)/$$f"; \
+	    cp "$$onboarding_type_metadata" "$(EUDI_CONFIG_DIR)/$$f"; \
+	  elif [ "$$f" = "akte_van_overlijden_metadata.json" ]; then \
+	    echo "-> Installing activated BRP Type Metadata as $(EUDI_CONFIG_DIR)/$$f"; \
+	    cp "$$onboarding_brp_type_metadata" "$(EUDI_CONFIG_DIR)/$$f"; \
+	  else \
+	    echo "-> Rendering $(EUDI_CONFIG_DIR)/$$f from $$f.example"; \
+	    envsubst < $(EUDI_CONFIG_DIR)/$$f.example > $(EUDI_CONFIG_DIR)/$$f; \
+	  fi; \
 	done
 
 # eudi-issuance-server has no published image — built from the local
@@ -133,6 +157,10 @@ development-source-metadata-key:
 	@cd services/graphql-server && go run . init-development-metadata-key \
 		--source-oin $(DEVELOPMENT_SOURCE_OIN) \
 		--output $(PWD)/.local/secrets/source-metadata/$(DEVELOPMENT_SOURCE_OIN)/private.jwk
+	@mkdir -p .local/secrets/source-metadata/$(DEVELOPMENT_BRP_SOURCE_OIN)
+	@cd services/graphql-server && go run . init-development-metadata-key \
+		--source-oin $(DEVELOPMENT_BRP_SOURCE_OIN) \
+		--output $(PWD)/.local/secrets/source-metadata/$(DEVELOPMENT_BRP_SOURCE_OIN)/private.jwk
 
 source-metadata-up: development-source-metadata-key
 	GBO_ATTESTATIONS_PATH=/config/gbo-attestations.json \
@@ -140,7 +168,7 @@ source-metadata-up: development-source-metadata-key
 	EUDI_PUBLIC_URL="$${EUDI_PUBLIC_URL:-http://localhost:8001}" \
 	EUDI_BRI_URL="$${EUDI_BRI_URL:-http://localhost:9409}" \
 	EUDI_POSTGRES_PASSWORD="$${EUDI_POSTGRES_PASSWORD:-local-not-used}" \
-		docker compose up --build -d graphql-server
+		docker compose up --build --force-recreate -d openftv-pdp additional-claims-service graphql-server brp-graphql-server
 
 validate-source:
 	@test -n "$(SOURCE)" || { echo "ERROR: SOURCE=sources/<oin>.yaml is required"; exit 1; }
@@ -173,18 +201,25 @@ onboard-source:
 		--secrets-dir "$(ONBOARDING_SECRETS_DIR)" \
 		$$dry_run
 
-demo-eudi: certs fsc-all-up fsc-seed-bri fsc-seed-brp onboarding-directories eudi-config eudi-images
+# Complete, idempotent local onboarding for both demo sources. The sequence is
+# explicit so a clean checkout cannot reach eudi-config before metadata has
+# been published, transported through FSC, verified and activated.
+onboard-demo-sources: certs
+	$(MAKE) fsc-all-up
+	$(MAKE) source-metadata-up
+	$(MAKE) fsc-seed-metadata
+	$(MAKE) onboard-source SOURCE=sources/$(DEVELOPMENT_SOURCE_OIN).yaml
+	$(MAKE) onboard-source SOURCE=sources/$(DEVELOPMENT_BRP_SOURCE_OIN).yaml
+
+demo-eudi: onboard-demo-sources fsc-seed-bri fsc-seed-brp eudi-config eudi-images
 	@echo "-> EUDI stack: base + eudi branch + fsc-infra"
 	docker compose --profile eudi up --build -d
 	@echo ""
 	@echo "  Dev-portal:      http://localhost:9003  |  http://$$(hostname -I | awk '{print $$1}'):9003"
 	@echo "  EUDI-adapter:    http://localhost:9409  |  http://$$(hostname -I | awk '{print $$1}'):9409"
 	@echo "  Jaeger:          http://localhost:9686  |  http://$$(hostname -I | awk '{print $$1}'):9686"
-	@echo ""
-	@echo "  Manual step: grant-links '/bri' and '/brp' in EDI-Controller-UI"
-	@echo "  (see README.md section 'EUDI flow over real FSC' step 3)"
 
-demo-full: certs fsc-all-up fsc-seed-bri fsc-seed-brp fsc-seed-bri-hv onboarding-directories eudi-config eudi-images
+demo-full: onboard-demo-sources fsc-seed-bri fsc-seed-brp fsc-seed-bri-hv eudi-config eudi-images
 	@echo "-> Full stack: everything on"
 	docker compose --profile full up --build -d
 
@@ -326,6 +361,16 @@ fsc-seed-metadata: fsc-local-env
 		-e SERVICE_NAME=gbo-attestation-metadata \
 		-e SERVICE_ENDPOINT_URL=http://graphql-server:4000 \
 		-e GRANT_LINK_PATH=/gbo-attestation-metadata \
+		-v $(PWD)/fsc-infra:/work:ro \
+		-w /work \
+		gbo-demo/pki-tools:local \
+		bash scripts/seed-bri-contract.sh
+	docker run --rm \
+		--network $(FSC_INFRA_NETWORK) \
+		--env-file fsc-infra/.env \
+		-e SERVICE_NAME=brp-attestation-metadata \
+		-e SERVICE_ENDPOINT_URL=http://brp-graphql-server:4001 \
+		-e GRANT_LINK_PATH=/brp-attestation-metadata \
 		-v $(PWD)/fsc-infra:/work:ro \
 		-w /work \
 		gbo-demo/pki-tools:local \

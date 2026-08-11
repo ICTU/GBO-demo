@@ -32,7 +32,7 @@ type sourceMetadataCachePolicy struct {
 }
 
 type cachedSourceMetadata struct {
-	shadow        sourceMetadataShadow
+	metadata      activeSourceMetadata
 	etag          string
 	sourceExpires time.Time
 	freshUntil    time.Time
@@ -55,7 +55,6 @@ type sourceMetadataActivationState struct {
 type sourceMetadataCache struct {
 	client        *http.Client
 	registration  sourceMetadataConfig
-	usecaseKey    string
 	publicBaseURL string
 	storePath     string
 	policy        sourceMetadataCachePolicy
@@ -68,26 +67,23 @@ type sourceMetadataCache struct {
 }
 
 type unavailableSourceMetadataRuntime struct {
-	usecaseKey   string
+	sourceOIN    string
+	typeID       string
 	err          error
 	publications map[string]*typeMetadataPublication
 }
 
-func (r *unavailableSourceMetadataRuntime) appliesTo(usecaseKey string, uc Usecase) bool {
-	return r != nil && uc.acceptsSourceMetadata(usecaseKey, r.usecaseKey)
-}
-
-func (r *unavailableSourceMetadataRuntime) current(_ time.Time) (*sourceMetadataShadow, error) {
+func (r *unavailableSourceMetadataRuntime) current(_ time.Time) (*activeSourceMetadata, error) {
 	return nil, r.err
 }
 
-func newUnavailableSourceMetadataRuntime(usecaseKey, storePath string, cause error) *unavailableSourceMetadataRuntime {
+func newUnavailableSourceMetadataRuntime(sourceOIN, typeID, storePath string, cause error) *unavailableSourceMetadataRuntime {
 	publications, err := loadTypeMetadataPublications(storePath)
 	if err != nil {
 		cause = fmt.Errorf("%w; restore existing Type Metadata: %v", cause, err)
 		publications = make(map[string]*typeMetadataPublication)
 	}
-	return &unavailableSourceMetadataRuntime{usecaseKey: usecaseKey, err: cause, publications: publications}
+	return &unavailableSourceMetadataRuntime{sourceOIN: sourceOIN, typeID: typeID, err: cause, publications: publications}
 }
 
 func (r *unavailableSourceMetadataRuntime) ServeHTTP(w http.ResponseWriter, request *http.Request) {
@@ -99,12 +95,93 @@ func (r *unavailableSourceMetadataRuntime) ServeHTTP(w http.ResponseWriter, requ
 	publication.ServeHTTP(w, request)
 }
 
+func configFromSourceActivation(cfg config) (config, error) {
+	if cfg.SourceActivationPath == "" {
+		return config{}, fmt.Errorf("SOURCE_ACTIVATION_PATH is required when source metadata is enabled")
+	}
+	raw, err := os.ReadFile(cfg.SourceActivationPath)
+	if err != nil {
+		return config{}, fmt.Errorf("read active source registration: %w", err)
+	}
+	var activation sourceActivation
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&activation); err != nil {
+		return config{}, fmt.Errorf("parse active source registration: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return config{}, fmt.Errorf("parse active source registration: trailing JSON data")
+	}
+	if activation.SchemaVersion != "1.0" {
+		return config{}, fmt.Errorf("unsupported active source schema_version %q", activation.SchemaVersion)
+	}
+	if err := activation.Source.validate(); err != nil {
+		return config{}, fmt.Errorf("validate active source registration: %w", err)
+	}
+	if len(activation.Types) != 1 || activation.Types[0].TypeID == "" {
+		return config{}, fmt.Errorf("active source registration must contain exactly one attestation type")
+	}
+	if cfg.SourceMetadataTrustPath == "" {
+		return config{}, fmt.Errorf("SOURCE_METADATA_TRUST_PATH is required when source metadata is enabled")
+	}
+	expectedJWKName := activation.Source.SourceOIN + "-" + strings.TrimPrefix(activation.Source.MetadataSigningJWKThumbprint, "sha256-") + ".jwk"
+	if filepath.Base(activation.PublicJWKReference) != expectedJWKName {
+		return config{}, fmt.Errorf("active source public JWK reference does not match the registered source and thumbprint")
+	}
+	cfg.SourceMetadataOIN = activation.Source.SourceOIN
+	cfg.SourceMetadataTypeID = activation.Types[0].TypeID
+	cfg.SourceMetadataOutwayPath = "/" + activation.Source.MetadataFSCServiceReference + "/.well-known/gbo-attestations"
+	cfg.SourceDataOutwayPath = "/" + activation.Source.DataFSCServiceReference + "/graphql"
+	cfg.SourceMetadataPublicJWKPath = filepath.Join(cfg.SourceMetadataTrustPath, expectedJWKName)
+	return cfg, nil
+}
+
+func configsFromSourceActivations(cfg config) ([]config, error) {
+	if cfg.SourceActivationPath != "" {
+		resolved, err := configFromSourceActivation(cfg)
+		if err != nil {
+			return nil, err
+		}
+		return []config{resolved}, nil
+	}
+	if cfg.SourceActivationsPath == "" {
+		return nil, fmt.Errorf("SOURCE_ACTIVATIONS_PATH is required")
+	}
+	entries, err := os.ReadDir(cfg.SourceActivationsPath)
+	if err != nil {
+		return nil, fmt.Errorf("read active source registrations: %w", err)
+	}
+	resolved := make([]config, 0, len(entries))
+	seen := make(map[string]struct{})
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		candidate := cfg
+		candidate.SourceActivationPath = filepath.Join(cfg.SourceActivationsPath, entry.Name())
+		activationConfig, err := configFromSourceActivation(candidate)
+		if err != nil {
+			return nil, fmt.Errorf("activation %s: %w", entry.Name(), err)
+		}
+		key := activationConfig.SourceMetadataOIN + "\x00" + activationConfig.SourceMetadataTypeID
+		if _, duplicate := seen[key]; duplicate {
+			return nil, fmt.Errorf("duplicate active source/type %s/%s", activationConfig.SourceMetadataOIN, activationConfig.SourceMetadataTypeID)
+		}
+		seen[key] = struct{}{}
+		resolved = append(resolved, activationConfig)
+	}
+	if len(resolved) == 0 {
+		return nil, fmt.Errorf("SOURCE_ACTIVATIONS_PATH contains no active source registrations")
+	}
+	return resolved, nil
+}
+
 func loadConfiguredSourceMetadataCache(client *http.Client, cfg config) (*sourceMetadataCache, error) {
 	if cfg.SourceMetadataPublicJWKPath == "" {
-		return nil, fmt.Errorf("SOURCE_METADATA_PUBLIC_JWK_PATH is required when cache mode is enabled")
+		return nil, fmt.Errorf("active source registration did not resolve a pinned public JWK")
 	}
 	if !strings.HasPrefix(cfg.SourceMetadataOutwayPath, "/") || strings.HasPrefix(cfg.SourceMetadataOutwayPath, "//") {
-		return nil, fmt.Errorf("SOURCE_METADATA_OUTWAY_PATH must be an absolute path on the configured FSC Outway")
+		return nil, fmt.Errorf("active source registration did not resolve a valid FSC Outway path")
 	}
 	publicJWK, err := os.ReadFile(cfg.SourceMetadataPublicJWKPath)
 	if err != nil {
@@ -115,7 +192,7 @@ func loadConfiguredSourceMetadataCache(client *http.Client, cfg config) (*source
 		ExpectedOIN: cfg.SourceMetadataOIN,
 		PublicJWK:   publicJWK,
 		TypeID:      cfg.SourceMetadataTypeID,
-	}, cfg.SourceMetadataUsecaseKey, cfg.TypeMetadataPublicBaseURL, cfg.TypeMetadataStorePath, defaultSourceMetadataCachePolicy)
+	}, cfg.TypeMetadataPublicBaseURL, cfg.TypeMetadataStorePath, defaultSourceMetadataCachePolicy)
 }
 
 func startSourceMetadataRefresh(ctx context.Context, cache *sourceMetadataCache, interval time.Duration) {
@@ -135,12 +212,12 @@ func startSourceMetadataRefresh(ctx context.Context, cache *sourceMetadataCache,
 	}()
 }
 
-func newSourceMetadataCache(client *http.Client, registration sourceMetadataConfig, usecaseKey, publicBaseURL, storePath string, policy sourceMetadataCachePolicy) (*sourceMetadataCache, error) {
+func newSourceMetadataCache(client *http.Client, registration sourceMetadataConfig, publicBaseURL, storePath string, policy sourceMetadataCachePolicy) (*sourceMetadataCache, error) {
 	if client == nil || registration.URL == "" || registration.ExpectedOIN == "" || len(registration.PublicJWK) == 0 || registration.TypeID == "" {
 		return nil, fmt.Errorf("source metadata cache registration is incomplete")
 	}
-	if usecaseKey == "" || publicBaseURL == "" || storePath == "" {
-		return nil, fmt.Errorf("source metadata usecase, public base URL and store path are required")
+	if publicBaseURL == "" || storePath == "" {
+		return nil, fmt.Errorf("source metadata public base URL and store path are required")
 	}
 	if err := validateTypeMetadataBaseURL(publicBaseURL); err != nil {
 		return nil, err
@@ -159,7 +236,6 @@ func newSourceMetadataCache(client *http.Client, registration sourceMetadataConf
 	return &sourceMetadataCache{
 		client:        client,
 		registration:  registration,
-		usecaseKey:    usecaseKey,
 		publicBaseURL: publicBaseURL,
 		storePath:     storePath,
 		policy:        policy,
@@ -220,28 +296,29 @@ func (c *sourceMetadataCache) Refresh(ctx context.Context, now time.Time) error 
 	if err != nil {
 		return err
 	}
-	shadow, document, err := parseSourceMetadataPayload(payload, c.registration)
+	metadata, document, err := parseSourceMetadataPayload(payload, c.registration)
 	if err != nil {
 		return err
 	}
-	expiresAt, err := validateSourceMetadataEnvelope(document, shadow.Definition, now, c.policy)
+	expiresAt, err := validateSourceMetadataEnvelope(document, metadata.Definition, now, c.policy)
 	if err != nil {
 		return err
 	}
-	publication, err := newTypeMetadataPublication(c.publicBaseURL, document.SourceOIN, shadow.Definition)
+	publication, err := newTypeMetadataPublication(c.publicBaseURL, document.SourceOIN, metadata.Definition)
 	if err != nil {
 		return fmt.Errorf("materialise type metadata: %w", err)
 	}
 	payloadDigest := sha256.Sum256(payload)
-	definitionBytes, err := json.Marshal(shadow.Definition)
+	definitionBytes, err := json.Marshal(metadata.Definition)
 	if err != nil {
 		return fmt.Errorf("marshal attestation definition: %w", err)
 	}
 	definitionDigest := sha256.Sum256(definitionBytes)
 	freshUntil, staleUntil := c.lifetimes(now, expiresAt)
-	shadow.UsecaseKey = c.usecaseKey
-	shadow.VCT = publication.VCT
-	shadow.VCTIntegrity = publication.Integrity
+	metadata.SourceOIN = c.registration.ExpectedOIN
+	metadata.TypeID = c.registration.TypeID
+	metadata.VCT = publication.VCT
+	metadata.VCTIntegrity = publication.Integrity
 
 	if c.baseline != nil {
 		if comparison, err := compareNumericVersion(document.Version, c.baseline.SourceVersion); err != nil {
@@ -251,12 +328,12 @@ func (c *sourceMetadataCache) Refresh(ctx context.Context, now time.Time) error 
 		} else if comparison == 0 && hex.EncodeToString(payloadDigest[:]) != c.baseline.PayloadDigest {
 			return fmt.Errorf("source metadata version %q has changed bytes", document.Version)
 		}
-		if comparison, err := compareNumericVersion(shadow.Definition.TypeVersion, c.baseline.TypeVersion); err != nil {
+		if comparison, err := compareNumericVersion(metadata.Definition.TypeVersion, c.baseline.TypeVersion); err != nil {
 			return fmt.Errorf("compare type metadata version: %w", err)
 		} else if comparison < 0 {
-			return fmt.Errorf("type metadata version rollback from %q to %q", c.baseline.TypeVersion, shadow.Definition.TypeVersion)
+			return fmt.Errorf("type metadata version rollback from %q to %q", c.baseline.TypeVersion, metadata.Definition.TypeVersion)
 		} else if comparison == 0 && hex.EncodeToString(definitionDigest[:]) != c.baseline.DefinitionDigest {
-			return fmt.Errorf("attestation type version %q has changed definition", shadow.Definition.TypeVersion)
+			return fmt.Errorf("attestation type version %q has changed definition", metadata.Definition.TypeVersion)
 		}
 	}
 	c.mu.RLock()
@@ -270,9 +347,9 @@ func (c *sourceMetadataCache) Refresh(ctx context.Context, now time.Time) error 
 	}
 	activation := &sourceMetadataActivationState{
 		SourceOIN:        document.SourceOIN,
-		TypeID:           shadow.Definition.TypeID,
+		TypeID:           metadata.Definition.TypeID,
 		SourceVersion:    document.Version,
-		TypeVersion:      shadow.Definition.TypeVersion,
+		TypeVersion:      metadata.Definition.TypeVersion,
 		PayloadDigest:    hex.EncodeToString(payloadDigest[:]),
 		DefinitionDigest: hex.EncodeToString(definitionDigest[:]),
 	}
@@ -285,7 +362,7 @@ func (c *sourceMetadataCache) Refresh(ctx context.Context, now time.Time) error 
 	c.publications[publication.path] = publication
 	c.baseline = activation
 	c.active = &cachedSourceMetadata{
-		shadow:        *shadow,
+		metadata:      *metadata,
 		etag:          responseETag,
 		sourceExpires: expiresAt,
 		freshUntil:    freshUntil,
@@ -339,7 +416,7 @@ func (c *sourceMetadataCache) lifetimes(now, sourceExpires time.Time) (time.Time
 	return freshUntil, minTime(freshUntil.Add(c.policy.StaleGrace), sourceExpires)
 }
 
-func (c *sourceMetadataCache) Current(now time.Time) (*sourceMetadataShadow, error) {
+func (c *sourceMetadataCache) Current(now time.Time) (*activeSourceMetadata, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	if c.active == nil {
@@ -348,19 +425,15 @@ func (c *sourceMetadataCache) Current(now time.Time) (*sourceMetadataShadow, err
 	if now.After(c.active.staleUntil) {
 		return nil, fmt.Errorf("source metadata cache expired outside stale grace")
 	}
-	shadow := c.active.shadow
-	shadow.CacheState = "fresh"
+	metadata := c.active.metadata
+	metadata.CacheState = "fresh"
 	if now.After(c.active.freshUntil) {
-		shadow.CacheState = "stale"
+		metadata.CacheState = "stale"
 	}
-	return &shadow, nil
+	return &metadata, nil
 }
 
-func (c *sourceMetadataCache) appliesTo(usecaseKey string, uc Usecase) bool {
-	return c != nil && uc.acceptsSourceMetadata(usecaseKey, c.usecaseKey)
-}
-
-func (c *sourceMetadataCache) current(now time.Time) (*sourceMetadataShadow, error) {
+func (c *sourceMetadataCache) current(now time.Time) (*activeSourceMetadata, error) {
 	return c.Current(now)
 }
 

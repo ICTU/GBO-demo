@@ -150,7 +150,7 @@ The five-factor authorization model demonstrated:
 | ① | Org identity (mTLS) | FSC-Manager validates peer-certs; FSC-Inway includes peer_cert_chain in the AuthZen context |
 | ② | Org permission (JWT) | Provider FSC-Manager validates the grant and signs `add.{flow, subject_id_type}` returned by its Additional Claims API |
 | ③ | Access basis (consent) | OpenFTV PDP pulls ACTIVE consents from consent-register into `data.attributes.consents` (PIP pull, 5s interval) |
-| ④ | Data scope (GraphQL) | The OpenFTV PDP checks requested fields against the dienstencatalogus (rules DVT0001/EUD0001) |
+| ④ | Data scope (GraphQL) | The OpenFTV PDP checks every requested field against the applicable rule (DVT0001/EUD0001/EUD0002) |
 | ⑤ | Request validity | The OpenFTV PDP validates consent + `context.resource.pi` binding + expiry |
 
 ## Makefile targets
@@ -227,6 +227,10 @@ The EUDI flow needs two publicly-reachable HTTPS URLs:
 - `EUDI_BRI_URL` — the `issuance-server` fetches attestations from the `eudi-adapter` at this URL.
 
 Both values are read from `.env`. Pick whichever way to expose the two services fits your setup:
+
+De wallet `client_id` wordt standaard als `x509_san_dns:<host>` afgeleid uit
+`EUDI_PUBLIC_URL`, gelijk aan de DNS-SAN van het tijdens onboarding geminte
+readercertificaat. `EUDI_CLIENT_ID` is alleen nog een expliciete override.
 
 The developer-portal container writes `EUDI_PUBLIC_URL` to
 `/runtime-config.js` when it starts. This allows Kubernetes and other runtime

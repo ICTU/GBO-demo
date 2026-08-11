@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -124,7 +125,7 @@ func TestSourceMetadataCacheRejectsChangedBytesAtSameVersion(t *testing.T) {
 
 func TestSourceMetadataCacheKeepsOlderTypeVersionReachable(t *testing.T) {
 	payload, publicJWK, privateKey := sourceMetadataCacheFixture(t)
-	nextPayload := mutateSourceMetadataVersions(t, payload, "1.1.0", "1.1")
+	nextPayload := mutateSourceMetadataVersions(t, payload, "9.0.0", "9.0")
 	responses := [][]byte{
 		[]byte(signSourceMetadataForTest(t, payload, privateKey)),
 		[]byte(signSourceMetadataForTest(t, nextPayload, privateKey)),
@@ -168,7 +169,7 @@ func TestSourceMetadataCacheRejectsRollbackBeforeAndAfterRestart(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			payload, publicJWK, privateKey := sourceMetadataCacheFixture(t)
-			nextPayload := mutateSourceMetadataVersions(t, payload, "1.1.0", "1.1")
+			nextPayload := mutateSourceMetadataVersions(t, payload, "9.0.0", "9.0")
 			responses := [][]byte{
 				[]byte(signSourceMetadataForTest(t, payload, privateKey)),
 				[]byte(signSourceMetadataForTest(t, nextPayload, privateKey)),
@@ -201,8 +202,8 @@ func TestSourceMetadataCacheRejectsRollbackBeforeAndAfterRestart(t *testing.T) {
 
 func TestSourceMetadataCacheRejectsTypeRollbackAfterRestart(t *testing.T) {
 	payload, publicJWK, privateKey := sourceMetadataCacheFixture(t)
-	nextPayload := mutateSourceMetadataVersions(t, payload, "1.1.0", "1.1")
-	typeRollback := mutateSourceMetadataVersions(t, payload, "1.2.0", "1.0")
+	nextPayload := mutateSourceMetadataVersions(t, payload, "9.0.0", "9.0")
+	typeRollback := mutateSourceMetadataVersions(t, payload, "10.0.0", "0.1")
 	responses := [][]byte{
 		[]byte(signSourceMetadataForTest(t, payload, privateKey)),
 		[]byte(signSourceMetadataForTest(t, nextPayload, privateKey)),
@@ -252,15 +253,7 @@ func TestAdapterActivatesOnlyCachedTypeAndBindsIssuableDocument(t *testing.T) {
 		t.Fatalf("current metadata: %v", err)
 	}
 
-	uc := Usecase{
-		AttestationType: "nl.gbo.belastingdienst.inkomensverklaring",
-		Scope:           "bd:ib:2025",
-		Belastingjaren:  []int{2025},
-		OutwayPath:      "/bri/graphql",
-	}
-	mux := newMux(config{OutwayURL: "https://outway.example"}, &Catalog{Usecases: map[string]Usecase{
-		"inkomensverklaring_2025": uc,
-	}}, client, cache)
+	mux := newMux(config{OutwayURL: "https://outway.example", SourceDataOutwayPath: "/bri/graphql"}, client, cache)
 
 	metadataRequest := httptest.NewRequest(http.MethodGet, active.VCT, nil)
 	metadataRecorder := httptest.NewRecorder()
@@ -282,7 +275,7 @@ func TestAdapterActivatesOnlyCachedTypeAndBindsIssuableDocument(t *testing.T) {
 			"attributes":{"urn:eudi:pid:nl:1":{"bsn":"123456789"}}
 		}]
 	}]`
-	issuanceRequest := httptest.NewRequest(http.MethodPost, "http://adapter/inkomensverklaring_2025/", strings.NewReader(disclosure))
+	issuanceRequest := httptest.NewRequest(http.MethodPost, "http://adapter/attestations/99999999900000000200/inkomensverklaring?jaar=2025", strings.NewReader(disclosure))
 	issuanceRecorder := httptest.NewRecorder()
 	mux.ServeHTTP(issuanceRecorder, issuanceRequest)
 	if got, want := issuanceRecorder.Code, http.StatusOK; got != want {
@@ -368,7 +361,7 @@ func TestCacheRestartRejectsCorruptedTypeMetadata(t *testing.T) {
 		ExpectedOIN: "99999999900000000200",
 		PublicJWK:   publicJWK,
 		TypeID:      "inkomensverklaring",
-	}, "inkomensverklaring_2025", "https://issuer.example", storePath, sourceMetadataCachePolicy{
+	}, "https://issuer.example", storePath, sourceMetadataCachePolicy{
 		MinimumValidity:  time.Hour,
 		MaximumFreshness: 10 * time.Minute,
 		StaleGrace:       5 * time.Minute,
@@ -406,7 +399,15 @@ func TestCacheRestartRejectsCorruptedActivationState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read activation state: %v", err)
 	}
-	body = bytes.Replace(body, []byte(`"source_version":"1.0.0"`), []byte(`"source_version":"9.0.0"`), 1)
+	var corrupted map[string]any
+	if err := json.Unmarshal(body, &corrupted); err != nil {
+		t.Fatalf("parse activation state: %v", err)
+	}
+	corrupted["source_version"] = "corrupted"
+	body, err = json.Marshal(corrupted)
+	if err != nil {
+		t.Fatalf("marshal corrupted activation state: %v", err)
+	}
 	if err := os.WriteFile(statePath, body, 0o600); err != nil {
 		t.Fatalf("corrupt activation state: %v", err)
 	}
@@ -415,7 +416,7 @@ func TestCacheRestartRejectsCorruptedActivationState(t *testing.T) {
 		ExpectedOIN: "99999999900000000200",
 		PublicJWK:   publicJWK,
 		TypeID:      "inkomensverklaring",
-	}, "inkomensverklaring_2025", "https://issuer.example", storePath, sourceMetadataCachePolicy{
+	}, "https://issuer.example", storePath, sourceMetadataCachePolicy{
 		MinimumValidity:  time.Hour,
 		MaximumFreshness: 10 * time.Minute,
 		StaleGrace:       5 * time.Minute,
@@ -425,22 +426,64 @@ func TestCacheRestartRejectsCorruptedActivationState(t *testing.T) {
 	}
 }
 
-func TestConfiguredMetadataUsecaseFailsClosedWithoutActiveCache(t *testing.T) {
-	runtime := newUnavailableSourceMetadataRuntime("inkomensverklaring_2025", t.TempDir(), io.ErrUnexpectedEOF)
-	uc := Usecase{
-		AttestationType: "nl.gbo.belastingdienst.inkomensverklaring",
-		Belastingjaren:  []int{2025},
-		OutwayPath:      "/bri/graphql",
-	}
-	mux := newMux(config{}, &Catalog{Usecases: map[string]Usecase{
-		"inkomensverklaring_2025": uc,
-	}}, http.DefaultClient, runtime)
+func TestActivatedSourceFailsClosedWithoutActiveCache(t *testing.T) {
+	runtime := newUnavailableSourceMetadataRuntime("99999999900000000200", "inkomensverklaring", t.TempDir(), io.ErrUnexpectedEOF)
+	mux := newMux(config{}, http.DefaultClient, runtime)
 	disclosure := `[{"attestations":[{"attributes":{"bsn":"123456789"}}]}]`
-	request := httptest.NewRequest(http.MethodPost, "http://adapter/inkomensverklaring_2025/", strings.NewReader(disclosure))
+	request := httptest.NewRequest(http.MethodPost, "http://adapter/attestations/99999999900000000200/inkomensverklaring?jaar=2025", strings.NewReader(disclosure))
 	recorder := httptest.NewRecorder()
 	mux.ServeHTTP(recorder, request)
 	if got, want := recorder.Code, http.StatusServiceUnavailable; got != want {
 		t.Fatalf("status = %d, want fail-closed %d", got, want)
+	}
+}
+
+func TestActiveSourceRegistrationResolvesRuntimeBinding(t *testing.T) {
+	trustPath := filepath.Join(t.TempDir(), "trust")
+	thumbprint := strings.Repeat("A", 43)
+	jwkName := "99999999900000000200-" + thumbprint + ".jwk"
+	activation := sourceActivation{
+		SchemaVersion: "1.0",
+		Source: sourceRegistration{
+			SourceOIN:                    "99999999900000000200",
+			Name:                         "Belastingdienst-mock",
+			MetadataFSCServiceReference:  "gbo-attestation-metadata",
+			MetadataSigningJWKThumbprint: "sha256-" + thumbprint,
+			DataFSCServiceReference:      "bri",
+		},
+		PublicJWKReference: "/host/onboarding/trust/" + jwkName,
+		Types:              []activatedType{{TypeID: "inkomensverklaring"}},
+	}
+	raw, err := json.Marshal(activation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activationPath := filepath.Join(t.TempDir(), "active.json")
+	if err := os.WriteFile(activationPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	resolved, err := configFromSourceActivation(config{
+		SourceActivationPath:    activationPath,
+		SourceMetadataTrustPath: trustPath,
+	})
+	if err != nil {
+		t.Fatalf("resolve active source registration: %v", err)
+	}
+	if got, want := resolved.SourceMetadataOIN, activation.Source.SourceOIN; got != want {
+		t.Errorf("source OIN = %q, want %q", got, want)
+	}
+	if got, want := resolved.SourceMetadataTypeID, "inkomensverklaring"; got != want {
+		t.Errorf("type ID = %q, want %q", got, want)
+	}
+	if got, want := resolved.SourceMetadataOutwayPath, "/gbo-attestation-metadata/.well-known/gbo-attestations"; got != want {
+		t.Errorf("metadata Outway path = %q, want %q", got, want)
+	}
+	if got, want := resolved.SourceDataOutwayPath, "/bri/graphql"; got != want {
+		t.Errorf("data Outway path = %q, want %q", got, want)
+	}
+	if got, want := resolved.SourceMetadataPublicJWKPath, filepath.Join(trustPath, jwkName); got != want {
+		t.Errorf("public JWK path = %q, want %q", got, want)
 	}
 }
 
@@ -460,10 +503,8 @@ func TestUnavailableSourceStillServesPreviouslyPublishedTypeMetadata(t *testing.
 		t.Fatalf("current metadata: %v", err)
 	}
 	mux := newRuntimeMux(context.Background(), config{
-		SourceMetadataCacheEnabled: true,
-		SourceMetadataUsecaseKey:   "inkomensverklaring_2025",
-		TypeMetadataStorePath:      storePath,
-	}, &Catalog{Usecases: map[string]Usecase{}}, http.DefaultClient)
+		TypeMetadataStorePath: storePath,
+	}, http.DefaultClient)
 	recorder := httptest.NewRecorder()
 	mux.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, active.VCT, nil))
 	if got, want := recorder.Code, http.StatusOK; got != want {
@@ -520,7 +561,7 @@ func newTestSourceMetadataCacheAt(t *testing.T, client *http.Client, publicJWK j
 		ExpectedOIN: "99999999900000000200",
 		PublicJWK:   publicJWK,
 		TypeID:      "inkomensverklaring",
-	}, "inkomensverklaring_2025", "https://issuer.example", storePath, sourceMetadataCachePolicy{
+	}, "https://issuer.example", storePath, sourceMetadataCachePolicy{
 		MinimumValidity:  time.Hour,
 		MaximumFreshness: 10 * time.Minute,
 		StaleGrace:       5 * time.Minute,

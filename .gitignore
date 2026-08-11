@@ -56,6 +56,7 @@ fsc-infra/directory-peer/pki/
 fsc-infra/directory-ui/pki/
 fsc-infra/pki/ca/
 services/pdp-service/certs/
+services/openftv-pdp/certs/
 # Preserve the input JSON templates + scripts that generate the above.
 !fsc-infra/pki/*.json
 !fsc-infra/pki/*.sh
