@@ -25,10 +25,10 @@ var (
 )
 
 type sourceRegistration struct {
-	SourceOIN                    string `json:"source_oin"`
-	Name                         string `json:"name"`
-	MetadataFSCServiceReference  string `json:"metadata_fsc_service_reference"`
-	DataFSCServiceReference      string `json:"data_fsc_service_reference"`
+	SourceOIN                   string `json:"source_oin"`
+	Name                        string `json:"name"`
+	MetadataFSCServiceReference string `json:"metadata_fsc_service_reference"`
+	DataFSCServiceReference     string `json:"data_fsc_service_reference"`
 }
 
 type validatedSourceRegistration struct {
@@ -49,10 +49,10 @@ func loadSourceRegistration(path string) (sourceRegistration, error) {
 		return sourceRegistration{}, err
 	}
 	registration := sourceRegistration{
-		SourceOIN:                    values["source_oin"],
-		Name:                         values["name"],
-		MetadataFSCServiceReference:  values["metadata_fsc_service_reference"],
-		DataFSCServiceReference:      values["data_fsc_service_reference"],
+		SourceOIN:                   values["source_oin"],
+		Name:                        values["name"],
+		MetadataFSCServiceReference: values["metadata_fsc_service_reference"],
+		DataFSCServiceReference:     values["data_fsc_service_reference"],
 	}
 	if err := registration.validate(); err != nil {
 		return sourceRegistration{}, err

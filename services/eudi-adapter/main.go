@@ -362,10 +362,7 @@ func callViaFSC(ctx context.Context, client *http.Client, cfg config, plan sourc
 		return fscResult{}, fmt.Errorf("active source has no data FSC service path")
 	}
 
-	body, _ := json.Marshal(proxyRequest{
-		Query:     plan.Query,
-		Variables: plan.Variables,
-	})
+	body, _ := json.Marshal(proxyRequest(plan))
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.OutwayURL+cfg.SourceDataOutwayPath, bytes.NewReader(body))
 	if err != nil {
