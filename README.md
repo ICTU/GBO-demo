@@ -131,6 +131,7 @@ PDPs that ask for it. The PDP pulls its bundle at boot
 KEYCLOAK_ADMIN_PASSWORD='<generate-a-secret>' \
 FTV_MANAGER_AUDITOR_PASSWORD='FDSSecret' \
 FTV_MANAGER_DEPLOY_PASSWORD='<generate-another-secret>' \
+FTV_POSTGRES_PASSWORD='<generate-a-database-secret>' \
 make demo-manager                 # base stack + Manager, policies seeded
 curl -s localhost:9281/v1/bundle/gbo-pdp | gunzip | jq '.version, (.policies|length)'
 ```
