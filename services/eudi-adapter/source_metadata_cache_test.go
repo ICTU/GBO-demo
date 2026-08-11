@@ -248,7 +248,7 @@ func TestAdapterActivatesOnlyCachedTypeAndBindsIssuableDocument(t *testing.T) {
 		t.Fatalf("current metadata: %v", err)
 	}
 
-	mux := newMux(config{OutwayURL: "https://outway.example", SourceDataOutwayPath: "/bri/graphql"}, client, cache)
+	mux := newMux(config{OutwayURL: "https://outway.example", SourceDataTransport: sourceTransportFSC, SourceDataFSCServiceReference: "bri"}, client, cache)
 
 	metadataRequest := httptest.NewRequest(http.MethodGet, active.VCT, nil)
 	metadataRecorder := httptest.NewRecorder()
@@ -350,9 +350,8 @@ func TestCacheRestartRejectsCorruptedTypeMetadata(t *testing.T) {
 		t.Fatalf("corrupt stored Type Metadata: %v", err)
 	}
 	_, err = newSourceMetadataCache(client, sourceMetadataConfig{
-		URL:         "https://source.example/.well-known/gbo-attestations",
-		ExpectedOIN: "99999999900000000200",
-		TypeID:      "inkomensverklaring",
+		URL: "https://source.example/.well-known/gbo-attestations", MetadataTransport: sourceTransportFSC,
+		DataTransport: sourceTransportFSC, ExpectedOIN: "99999999900000000200", TypeID: "inkomensverklaring",
 	}, "https://issuer.example", storePath, sourceMetadataCachePolicy{
 		MinimumValidity:  time.Hour,
 		MaximumFreshness: 10 * time.Minute,
@@ -403,9 +402,8 @@ func TestCacheRestartRejectsCorruptedActivationState(t *testing.T) {
 		t.Fatalf("corrupt activation state: %v", err)
 	}
 	_, err = newSourceMetadataCache(client, sourceMetadataConfig{
-		URL:         "https://source.example/.well-known/gbo-attestations",
-		ExpectedOIN: "99999999900000000200",
-		TypeID:      "inkomensverklaring",
+		URL: "https://source.example/.well-known/gbo-attestations", MetadataTransport: sourceTransportFSC,
+		DataTransport: sourceTransportFSC, ExpectedOIN: "99999999900000000200", TypeID: "inkomensverklaring",
 	}, "https://issuer.example", storePath, sourceMetadataCachePolicy{
 		MinimumValidity:  time.Hour,
 		MaximumFreshness: 10 * time.Minute,
@@ -432,10 +430,9 @@ func TestActiveSourceRegistrationResolvesRuntimeBinding(t *testing.T) {
 	activation := sourceActivation{
 		SchemaVersion: "1.0",
 		Source: sourceRegistration{
-			SourceOIN:                   "99999999900000000200",
-			Name:                        "Belastingdienst-mock",
-			MetadataFSCServiceReference: "gbo-attestation-metadata",
-			DataFSCServiceReference:     "bri",
+			SourceOIN: "99999999900000000200", Name: "Belastingdienst-mock",
+			MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportFSC, ServiceReference: "gbo-attestation-metadata", Path: "/metadata/v1"},
+			DataAccess:       sourceDataAccess{Transport: sourceTransportFSC, ServiceReference: "bri"},
 		},
 		Types: []activatedType{{TypeID: "inkomensverklaring"}},
 	}
@@ -448,7 +445,7 @@ func TestActiveSourceRegistrationResolvesRuntimeBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resolved, err := configFromSourceActivation(config{SourceActivationPath: activationPath})
+	resolved, err := configFromSourceActivation(config{SourceActivationPath: activationPath, OutwayURL: "https://outway.example"})
 	if err != nil {
 		t.Fatalf("resolve active source registration: %v", err)
 	}
@@ -458,11 +455,11 @@ func TestActiveSourceRegistrationResolvesRuntimeBinding(t *testing.T) {
 	if got, want := resolved.SourceMetadataTypeID, "inkomensverklaring"; got != want {
 		t.Errorf("type ID = %q, want %q", got, want)
 	}
-	if got, want := resolved.SourceMetadataOutwayPath, "/gbo-attestation-metadata/.well-known/gbo-attestations"; got != want {
-		t.Errorf("metadata Outway path = %q, want %q", got, want)
+	if got, want := resolved.SourceMetadataURL, "https://outway.example/gbo-attestation-metadata/metadata/v1"; got != want {
+		t.Errorf("metadata URL = %q, want %q", got, want)
 	}
-	if got, want := resolved.SourceDataOutwayPath, "/bri/graphql"; got != want {
-		t.Errorf("data Outway path = %q, want %q", got, want)
+	if got, want := resolved.SourceDataFSCServiceReference, "bri"; got != want {
+		t.Errorf("data FSC service = %q, want %q", got, want)
 	}
 }
 
@@ -523,9 +520,8 @@ func newTestSourceMetadataCache(t *testing.T, client *http.Client) *sourceMetada
 func newTestSourceMetadataCacheAt(t *testing.T, client *http.Client, storePath string) *sourceMetadataCache {
 	t.Helper()
 	cache, err := newSourceMetadataCache(client, sourceMetadataConfig{
-		URL:         "https://source.example/.well-known/gbo-attestations",
-		ExpectedOIN: "99999999900000000200",
-		TypeID:      "inkomensverklaring",
+		URL: "https://source.example/.well-known/gbo-attestations", MetadataTransport: sourceTransportFSC,
+		DataTransport: sourceTransportFSC, ExpectedOIN: "99999999900000000200", TypeID: "inkomensverklaring",
 	}, "https://issuer.example", storePath, sourceMetadataCachePolicy{
 		MinimumValidity:  time.Hour,
 		MaximumFreshness: 10 * time.Minute,

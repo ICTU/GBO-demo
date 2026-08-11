@@ -20,13 +20,14 @@ import (
 
 const sourceMetadataMediaType = "application/json"
 
-// sourceMetadataConfig is the deliberately small phase-1 registration. A
-// later phase replaces these direct settings with the normal source
-// registration, but the trust decisions are already explicit here.
+// sourceMetadataConfig is resolved from an active onboarding record. Endpoint
+// and transport choices are deliberately not separate deployment settings.
 type sourceMetadataConfig struct {
-	URL         string
-	ExpectedOIN string
-	TypeID      string
+	URL               string
+	MetadataTransport string
+	DataTransport     string
+	ExpectedOIN       string
+	TypeID            string
 }
 
 type sourceMetadataDocument struct {
@@ -49,6 +50,7 @@ type sourceAttestationDefinition struct {
 }
 
 type sourceGraphQL struct {
+	Endpoint        string                     `json:"endpoint"`
 	Document        string                     `json:"document"`
 	SubjectVariable string                     `json:"subject_variable"`
 	Parameters      map[string]sourceParameter `json:"parameters"`
@@ -95,8 +97,8 @@ type sourceMetadataRuntime interface {
 	current(now time.Time) (*activeSourceMetadata, error)
 }
 
-// loadSourceMetadata fetches the declaration through the source-bound FSC
-// service, validates its OIN and selects the activated type.
+// loadSourceMetadata fetches the declaration through the onboarded transport,
+// validates its OIN and selects the activated type.
 func loadSourceMetadata(ctx context.Context, client *http.Client, cfg sourceMetadataConfig) (*activeSourceMetadata, error) {
 	if cfg.URL == "" || cfg.ExpectedOIN == "" || cfg.TypeID == "" {
 		return nil, fmt.Errorf("source metadata registration is incomplete")
@@ -105,12 +107,16 @@ func loadSourceMetadata(ctx context.Context, client *http.Client, cfg sourceMeta
 	if err != nil {
 		return nil, fmt.Errorf("create source metadata request: %w", err)
 	}
-	fscTxID, err := newFscTransactionID()
-	if err != nil {
-		return nil, fmt.Errorf("generate source metadata Fsc-Transaction-Id: %w", err)
-	}
 	req.Header.Set("Accept", sourceMetadataMediaType)
-	req.Header.Set("Fsc-Transaction-Id", fscTxID)
+	if cfg.MetadataTransport == sourceTransportFSC {
+		fscTxID, err := newFscTransactionID()
+		if err != nil {
+			return nil, fmt.Errorf("generate source metadata Fsc-Transaction-Id: %w", err)
+		}
+		req.Header.Set("Fsc-Transaction-Id", fscTxID)
+	} else {
+		return nil, fmt.Errorf("source metadata transport %q is configured but not implemented", cfg.MetadataTransport)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch source metadata: %w", err)
@@ -154,6 +160,9 @@ func parseSourceMetadataPayload(payload []byte, cfg sourceMetadataConfig) (*acti
 		}
 		if err := validateSourceAttestation(definition); err != nil {
 			return nil, sourceMetadataDocument{}, fmt.Errorf("attestation %q: %w", cfg.TypeID, err)
+		}
+		if err := validateGraphQLEndpoint(definition.GraphQL.Endpoint, cfg.DataTransport); err != nil {
+			return nil, sourceMetadataDocument{}, fmt.Errorf("attestation %q graphql.endpoint: %w", cfg.TypeID, err)
 		}
 		return &activeSourceMetadata{
 			Version: document.Version, SourceOIN: cfg.ExpectedOIN, TypeID: cfg.TypeID, Definition: definition,
@@ -204,6 +213,17 @@ func validateSourceAttestation(definition sourceAttestationDefinition) error {
 		return fmt.Errorf("GraphQL document must contain exactly one query operation")
 	}
 	return nil
+}
+
+func validateGraphQLEndpoint(endpoint, transport string) error {
+	switch transport {
+	case sourceTransportFSC:
+		return validateAbsoluteURLPath(endpoint)
+	case sourceTransportHTTPSMTLS:
+		return validateAbsoluteHTTPSEndpoint(endpoint)
+	default:
+		return fmt.Errorf("unsupported data transport %q", transport)
+	}
 }
 
 func validateAttributeSchema(definition sourceAttestationDefinition) error {
@@ -275,7 +295,7 @@ func (s *activeSourceMetadata) queryPlan(bsn string, supplied map[string][]strin
 			return sourceQueryPlan{}, fmt.Errorf("request supplies undeclared source parameter %q", name)
 		}
 	}
-	return sourceQueryPlan{Query: s.Definition.GraphQL.Document, Variables: variables}, nil
+	return sourceQueryPlan{Endpoint: s.Definition.GraphQL.Endpoint, Query: s.Definition.GraphQL.Document, Variables: variables}, nil
 }
 
 func parseSourceParameter(name, parameterType, raw string) (any, error) {

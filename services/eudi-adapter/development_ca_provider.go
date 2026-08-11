@@ -47,6 +47,10 @@ type certificateProvider interface {
 	Provision(sourceRegistration) (certificateArtifacts, error)
 }
 
+type certificateStore interface {
+	Load(sourceRegistration) (certificateArtifacts, error)
+}
+
 type developmentCAProvider struct {
 	root            string
 	random          io.Reader
@@ -63,6 +67,47 @@ type developmentCA struct {
 
 func newDevelopmentCAProvider(root, readerPublicURL, readerOrigin string) *developmentCAProvider {
 	return &developmentCAProvider{root: root, random: rand.Reader, now: time.Now, readerPublicURL: readerPublicURL, readerOrigin: readerOrigin}
+}
+
+type developmentCertificateBinding struct {
+	issuerHost    string
+	readerHost    string
+	issuerSubject pkix.Name
+	readerSubject pkix.Name
+	issuerPayload []byte
+	readerPayload []byte
+}
+
+func (p *developmentCAProvider) binding(registration sourceRegistration) (developmentCertificateBinding, error) {
+	issuerHost := "issuer-" + registration.SourceOIN + ".gbo.local"
+	readerHost := "reader-" + registration.SourceOIN + ".gbo.local"
+	if p.readerPublicURL != "" {
+		parsed, err := parseDevelopmentRootURL(p.readerPublicURL, false)
+		if err != nil {
+			return developmentCertificateBinding{}, fmt.Errorf("development reader public URL: %w", err)
+		}
+		readerHost = parsed.Hostname()
+	}
+	readerOrigin := "https://" + readerHost + "/"
+	if p.readerOrigin != "" {
+		parsed, err := parseDevelopmentRootURL(p.readerOrigin, true)
+		if err != nil {
+			return developmentCertificateBinding{}, fmt.Errorf("development reader origin: %w", err)
+		}
+		parsed.Path = "/"
+		readerOrigin = parsed.String()
+	}
+	issuerSubject := pkix.Name{CommonName: issuerHost, Organization: []string{registration.Name}, SerialNumber: registration.SourceOIN}
+	readerSubject := pkix.Name{CommonName: readerHost, Organization: []string{registration.Name}, SerialNumber: registration.SourceOIN}
+	issuerPayload, readerPayload, err := developmentCertificateAuthPayloads(registration, readerOrigin)
+	if err != nil {
+		return developmentCertificateBinding{}, err
+	}
+	return developmentCertificateBinding{
+		issuerHost: issuerHost, readerHost: readerHost,
+		issuerSubject: issuerSubject, readerSubject: readerSubject,
+		issuerPayload: issuerPayload, readerPayload: readerPayload,
+	}, nil
 }
 
 func (p *developmentCAProvider) Provision(registration sourceRegistration) (certificateArtifacts, error) {
@@ -85,39 +130,19 @@ func (p *developmentCAProvider) Provision(registration sourceRegistration) (cert
 	if err := ensurePrivateDirectory(sourceDir); err != nil {
 		return certificateArtifacts{}, err
 	}
-	issuerHost := "issuer-" + registration.SourceOIN + ".gbo.local"
-	readerHost := "reader-" + registration.SourceOIN + ".gbo.local"
-	if p.readerPublicURL != "" {
-		parsed, err := parseDevelopmentRootURL(p.readerPublicURL, false)
-		if err != nil {
-			return certificateArtifacts{}, fmt.Errorf("development reader public URL: %w", err)
-		}
-		readerHost = parsed.Hostname()
-	}
-	readerOrigin := "https://" + readerHost + "/"
-	if p.readerOrigin != "" {
-		parsed, err := parseDevelopmentRootURL(p.readerOrigin, true)
-		if err != nil {
-			return certificateArtifacts{}, fmt.Errorf("development reader origin: %w", err)
-		}
-		parsed.Path = "/"
-		readerOrigin = parsed.String()
-	}
-	issuerSubject := pkix.Name{CommonName: issuerHost, Organization: []string{registration.Name}, SerialNumber: registration.SourceOIN}
-	readerSubject := pkix.Name{CommonName: readerHost, Organization: []string{registration.Name}, SerialNumber: registration.SourceOIN}
-	issuerPayload, readerPayload, err := developmentCertificateAuthPayloads(registration, readerOrigin)
+	binding, err := p.binding(registration)
 	if err != nil {
 		return certificateArtifacts{}, err
 	}
-	issuer, err := p.ensureLeaf(sourceDir, "issuer", issuerSubject, issuerHost, issuerCA, issuerEKUOID, issuerAuthExtensionOID, issuerPayload)
+	issuer, err := p.ensureLeaf(sourceDir, "issuer", binding.issuerSubject, binding.issuerHost, issuerCA, issuerEKUOID, issuerAuthExtensionOID, binding.issuerPayload)
 	if err != nil {
 		return certificateArtifacts{}, err
 	}
-	reader, err := p.ensureLeaf(sourceDir, "reader", readerSubject, readerHost, readerCA, readerEKUOID, readerAuthExtensionOID, readerPayload)
+	reader, err := p.ensureLeaf(sourceDir, "reader", binding.readerSubject, binding.readerHost, readerCA, readerEKUOID, readerAuthExtensionOID, binding.readerPayload)
 	if err != nil {
 		return certificateArtifacts{}, err
 	}
-	status, err := p.ensureLeaf(sourceDir, "status", issuerSubject, issuerHost, issuerCA, statusEKUOID, nil, nil)
+	status, err := p.ensureLeaf(sourceDir, "status", binding.issuerSubject, binding.issuerHost, issuerCA, statusEKUOID, nil, nil)
 	if err != nil {
 		return certificateArtifacts{}, err
 	}
@@ -146,6 +171,75 @@ func (p *developmentCAProvider) Provision(registration sourceRegistration) (cert
 		IssuerSubject:         issuer.cert.Subject.String(),
 		ReaderSubject:         reader.cert.Subject.String(),
 		CertificateExpires:    issuer.cert.NotAfter.UTC().Format(time.RFC3339),
+	}, nil
+}
+
+// Load reads and validates certificates that were provisioned explicitly. It
+// never creates directories, keys or certificates, so onboarding cannot mint
+// certificate material as a side effect.
+func (p *developmentCAProvider) Load(registration sourceRegistration) (certificateArtifacts, error) {
+	if p == nil || p.root == "" {
+		return certificateArtifacts{}, fmt.Errorf("development CA secret directory is required")
+	}
+	binding, err := p.binding(registration)
+	if err != nil {
+		return certificateArtifacts{}, err
+	}
+	caDir := filepath.Join(p.root, "development-ca")
+	issuerCAKey := filepath.Join(caDir, "issuer-ca-key.pem")
+	issuerCACert := filepath.Join(caDir, "issuer-ca-cert.pem")
+	readerCAKey := filepath.Join(caDir, "reader-ca-key.pem")
+	readerCACert := filepath.Join(caDir, "reader-ca-cert.pem")
+	_, issuerCA, err := loadDevelopmentCA(issuerCAKey, issuerCACert)
+	if err != nil {
+		return certificateArtifacts{}, fmt.Errorf("load explicitly provisioned development issuer CA: %w", err)
+	}
+	_, readerCA, err := loadDevelopmentCA(readerCAKey, readerCACert)
+	if err != nil {
+		return certificateArtifacts{}, fmt.Errorf("load explicitly provisioned development reader CA: %w", err)
+	}
+	sourceDir := filepath.Join(p.root, registration.SourceOIN)
+	loadLeaf := func(role string) (*developmentLeaf, error) {
+		keyPath := filepath.Join(sourceDir, role+"-key.der.b64")
+		certPath := filepath.Join(sourceDir, role+"-cert.der.b64")
+		key, cert, err := loadDevelopmentLeaf(keyPath, certPath)
+		if err != nil {
+			return nil, fmt.Errorf("load explicitly provisioned development %s certificate: %w", role, err)
+		}
+		if !publicKeysEqual(&key.PublicKey, cert.PublicKey) {
+			return nil, fmt.Errorf("development %s key does not match its certificate", role)
+		}
+		return &developmentLeaf{keyPath: keyPath, certPath: certPath, cert: cert}, nil
+	}
+	issuer, err := loadLeaf("issuer")
+	if err != nil {
+		return certificateArtifacts{}, err
+	}
+	reader, err := loadLeaf("reader")
+	if err != nil {
+		return certificateArtifacts{}, err
+	}
+	status, err := loadLeaf("status")
+	if err != nil {
+		return certificateArtifacts{}, err
+	}
+	now := p.now()
+	if err := validateExpectedDevelopmentLeaf(issuer.cert, issuerCA, binding.issuerSubject, binding.issuerHost, issuerEKUOID, issuerAuthExtensionOID, binding.issuerPayload, now); err != nil {
+		return certificateArtifacts{}, fmt.Errorf("validate explicitly provisioned issuer certificate: %w", err)
+	}
+	if err := validateExpectedDevelopmentLeaf(reader.cert, readerCA, binding.readerSubject, binding.readerHost, readerEKUOID, readerAuthExtensionOID, binding.readerPayload, now); err != nil {
+		return certificateArtifacts{}, fmt.Errorf("validate explicitly provisioned reader certificate: %w", err)
+	}
+	if err := validateExpectedDevelopmentLeaf(status.cert, issuerCA, binding.issuerSubject, binding.issuerHost, statusEKUOID, nil, nil, now); err != nil {
+		return certificateArtifacts{}, fmt.Errorf("validate explicitly provisioned status certificate: %w", err)
+	}
+	return certificateArtifacts{
+		IssuerKeyReference: issuer.keyPath, IssuerCertReference: issuer.certPath,
+		ReaderKeyReference: reader.keyPath, ReaderCertReference: reader.certPath,
+		StatusKeyReference: status.keyPath, StatusCertReference: status.certPath,
+		IssuerCACertReference: issuerCACert, ReaderCACertReference: readerCACert,
+		IssuerSubject: issuer.cert.Subject.String(), ReaderSubject: reader.cert.Subject.String(),
+		CertificateExpires: issuer.cert.NotAfter.UTC().Format(time.RFC3339),
 	}, nil
 }
 

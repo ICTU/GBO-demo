@@ -229,7 +229,7 @@ The EUDI flow needs two publicly-reachable HTTPS URLs:
 Both values are read from `.env`. Pick whichever way to expose the two services fits your setup:
 
 De wallet `client_id` wordt standaard als `x509_san_dns:<host>` afgeleid uit
-`EUDI_PUBLIC_URL`, gelijk aan de DNS-SAN van het tijdens onboarding geminte
+`EUDI_PUBLIC_URL`, gelijk aan de DNS-SAN van het vooraf geprovisioneerde
 readercertificaat. `EUDI_CLIENT_ID` is alleen nog een expliciete override.
 
 The developer-portal container writes `EUDI_PUBLIC_URL` to

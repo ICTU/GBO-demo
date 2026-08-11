@@ -1,7 +1,7 @@
 .PHONY: up down logs clean certs fsc-local-env fsc-ca fsc-up fsc-down fsc-test fsc-clean \
         fsc-seed-bri fsc-seed-bri-hv fsc-seed-brp fsc-seed-metadata fsc-pdp-cert \
         eudi-images source-metadata-up \
-        validate-source onboard-source onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
+        validate-source provision-development-certificates onboard-source onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
         demo-full demo-down eudi-config
 
 -include .env
@@ -13,8 +13,8 @@ export
 # v0.5.0's scheme-prefixed client_id). Override in .env if needed.
 NLWALLET_PATH ?= $(PWD)/vendor/nl-wallet
 
-# Phase-4 filesystem onboarding. Issuer/reader/status keys are generated below
-# the ignored .local/ secret backend.
+# Local filesystem onboarding. Development certificates are provisioned only
+# by the explicit provision-development-certificates target.
 DEVELOPMENT_SOURCE_OIN ?= 99999999900000000200
 DEVELOPMENT_BRP_SOURCE_OIN ?= 99999999900000000400
 ONBOARDING_OUTWAY_URL ?= http://localhost:8087
@@ -26,7 +26,7 @@ ONBOARDING_ACTIVE_SOURCE ?= $(ONBOARDING_STATE_DIR)/active/$(DEVELOPMENT_SOURCE_
 ONBOARDING_BRP_EUDI_ENV ?= $(ONBOARDING_SECRETS_DIR)/$(DEVELOPMENT_BRP_SOURCE_OIN)/issuance.env
 ONBOARDING_ACTIVE_BRP_SOURCE ?= $(ONBOARDING_STATE_DIR)/active/$(DEVELOPMENT_BRP_SOURCE_OIN).json
 ONBOARDING_STORAGE_BACKEND ?= filesystem
-ONBOARDING_CERTIFICATE_PROVIDER ?= development-ca
+ONBOARDING_CERTIFICATE_STORE ?= development-ca
 
 # Docker network of the fsc-infra instance this checkout uses. Equals
 # <FSC_PROJECT_NAME>_default; override in fsc-infra/.env to run a
@@ -179,7 +179,7 @@ onboard-source:
 	cd services/eudi-adapter && go run . onboard-source \
 		--source "$(abspath $(SOURCE))" \
 		--storage-backend "$(ONBOARDING_STORAGE_BACKEND)" \
-		--certificate-provider "$(ONBOARDING_CERTIFICATE_PROVIDER)" \
+		--certificate-store "$(ONBOARDING_CERTIFICATE_STORE)" \
 		--outway-url "$(ONBOARDING_OUTWAY_URL)" \
 		--schema "$(PWD)/schemas/gbo-attestations-v1.schema.json" \
 		--type-metadata-base-url "$(ONBOARDING_TYPE_METADATA_URL)" \
@@ -189,6 +189,14 @@ onboard-source:
 		--secrets-dir "$(ONBOARDING_SECRETS_DIR)" \
 		$$dry_run
 
+provision-development-certificates:
+	@test -n "$(SOURCE)" || { echo "ERROR: SOURCE=sources/<oin>.yaml is required"; exit 1; }
+	@cd services/eudi-adapter && go run . provision-development-certificates \
+		--source "$(abspath $(SOURCE))" \
+		--reader-public-url "$${EUDI_PUBLIC_URL:-}" \
+		--reader-origin-url "$${EUDI_READER_ORIGIN_URL:-}" \
+		--secrets-dir "$(ONBOARDING_SECRETS_DIR)"
+
 # Complete, idempotent local onboarding for both demo sources. The sequence is
 # explicit so a clean checkout cannot reach eudi-config before metadata has
 # been published, transported through FSC, verified and activated.
@@ -196,6 +204,8 @@ onboard-demo-sources: certs
 	$(MAKE) fsc-all-up
 	$(MAKE) source-metadata-up
 	$(MAKE) fsc-seed-metadata
+	$(MAKE) provision-development-certificates SOURCE=sources/$(DEVELOPMENT_SOURCE_OIN).yaml
+	$(MAKE) provision-development-certificates SOURCE=sources/$(DEVELOPMENT_BRP_SOURCE_OIN).yaml
 	$(MAKE) onboard-source SOURCE=sources/$(DEVELOPMENT_SOURCE_OIN).yaml
 	$(MAKE) onboard-source SOURCE=sources/$(DEVELOPMENT_BRP_SOURCE_OIN).yaml
 

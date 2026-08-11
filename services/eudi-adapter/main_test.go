@@ -161,9 +161,8 @@ func TestAdapterUsesSourceMetadataFor2025(t *testing.T) {
 	defer metadataServer.Close()
 
 	metadata, err := loadSourceMetadata(context.Background(), http.DefaultClient, sourceMetadataConfig{
-		URL:         metadataServer.URL + "/metadata/.well-known/gbo-attestations",
-		ExpectedOIN: "99999999900000000200",
-		TypeID:      "inkomensverklaring",
+		URL: metadataServer.URL + "/metadata/.well-known/gbo-attestations", MetadataTransport: sourceTransportFSC,
+		DataTransport: sourceTransportFSC, ExpectedOIN: "99999999900000000200", TypeID: "inkomensverklaring",
 	})
 	if err != nil {
 		t.Fatalf("load source metadata: %v", err)
@@ -189,7 +188,7 @@ func TestAdapterUsesSourceMetadataFor2025(t *testing.T) {
 	}))
 	defer outway.Close()
 
-	cfg := config{Port: "0", OutwayURL: outway.URL, IssuerOIN: "00000004000000004000", SourceDataOutwayPath: "/bri/graphql"}
+	cfg := config{Port: "0", OutwayURL: outway.URL, IssuerOIN: "00000004000000004000", SourceDataTransport: sourceTransportFSC, SourceDataFSCServiceReference: "bri"}
 	srv := httptest.NewServer(newMux(cfg, http.DefaultClient, metadata))
 	defer srv.Close()
 
@@ -249,6 +248,7 @@ func newIncomeSourceAdapter(t *testing.T, mapping map[string]mappingRule, bronRe
 		TypeID:    "inkomensverklaring",
 		Definition: sourceAttestationDefinition{
 			GraphQL: sourceGraphQL{
+				Endpoint: "/source-query",
 				Document: `query Inkomensverklaring($bsn: BSN!, $jaar: Int!) {
   ingeschrevenPersoon(bsn: $bsn) {
     heeftBelastingjaarAangifte(belastingjaren: [$jaar]) {
@@ -273,13 +273,16 @@ func newIncomeSourceAdapter(t *testing.T, mapping map[string]mappingRule, bronRe
 			Mapping:        mapping,
 		},
 	}
-	outway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	outway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if got, want := request.URL.Path, "/bri/source-query"; got != want {
+			t.Errorf("source data path = %q, want metadata-defined %q", got, want)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(bronResponse))
 	}))
 	t.Cleanup(outway.Close)
 
-	cfg := config{Port: "0", OutwayURL: outway.URL, IssuerOIN: "00000004000000004000", SourceDataOutwayPath: "/bri/graphql"}
+	cfg := config{Port: "0", OutwayURL: outway.URL, IssuerOIN: "00000004000000004000", SourceDataTransport: sourceTransportFSC, SourceDataFSCServiceReference: "bri"}
 	srv := httptest.NewServer(newMux(cfg, http.DefaultClient, metadata))
 	t.Cleanup(srv.Close)
 	return srv
@@ -438,9 +441,8 @@ func TestSourceMetadataRejectedDuringOnboarding(t *testing.T) {
 			defer server.Close()
 
 			_, err := loadSourceMetadata(context.Background(), http.DefaultClient, sourceMetadataConfig{
-				URL:         server.URL,
-				ExpectedOIN: test.expectedOIN,
-				TypeID:      "inkomensverklaring",
+				URL: server.URL, MetadataTransport: sourceTransportFSC, DataTransport: sourceTransportFSC,
+				ExpectedOIN: test.expectedOIN, TypeID: "inkomensverklaring",
 			})
 			if err == nil || !strings.Contains(err.Error(), test.wantError) {
 				t.Fatalf("error = %v, want error containing %q", err, test.wantError)
@@ -496,7 +498,7 @@ func TestAdapterUsesBRPSourceQueryAndMapping(t *testing.T) {
 	}))
 	defer outway.Close()
 
-	cfg := config{OutwayURL: outway.URL, SourceDataOutwayPath: "/brp/graphql"}
+	cfg := config{OutwayURL: outway.URL, SourceDataTransport: sourceTransportFSC, SourceDataFSCServiceReference: "brp"}
 	srv := httptest.NewServer(newMux(cfg, http.DefaultClient, active))
 	defer srv.Close()
 	resp := postDisclosure(t, srv, "/attestations/99999999900000000400/akte-van-overlijden", "999991772")

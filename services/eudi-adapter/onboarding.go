@@ -39,23 +39,24 @@ type activatedType struct {
 }
 
 type onboardingOptions struct {
-	sourcePath              string
-	storageBackend          string
-	certificateProviderName string
-	dryRun                  bool
-	outwayURL               string
-	schemaPath              string
-	publicBaseURL           string
-	readerPublicURL         string
-	readerOrigin            string
-	stateDir                string
-	secretsDir              string
+	sourcePath           string
+	storageBackend       string
+	certificateStoreName string
+	dryRun               bool
+	outwayURL            string
+	schemaPath           string
+	publicBaseURL        string
+	readerPublicURL      string
+	readerOrigin         string
+	stateDir             string
+	secretsDir           string
 }
 
 type onboardingDependencies struct {
 	client                     *http.Client
 	now                        func() time.Time
 	resolveCertificateProvider func(onboardingOptions) (certificateProvider, error)
+	resolveCertificateStore    func(onboardingOptions) (certificateStore, error)
 	resolveActivationBackend   func(onboardingOptions) (activationBackend, error)
 	stdout                     io.Writer
 	stderr                     io.Writer
@@ -70,6 +71,7 @@ func defaultOnboardingDependencies() onboardingDependencies {
 		client:                     &http.Client{Timeout: 15 * time.Second},
 		now:                        time.Now,
 		resolveCertificateProvider: configuredCertificateProvider,
+		resolveCertificateStore:    configuredCertificateStore,
 		resolveActivationBackend:   configuredActivationBackend,
 		stdout:                     os.Stdout,
 		stderr:                     os.Stderr,
@@ -77,11 +79,15 @@ func defaultOnboardingDependencies() onboardingDependencies {
 }
 
 func configuredCertificateProvider(options onboardingOptions) (certificateProvider, error) {
-	switch options.certificateProviderName {
+	return newDevelopmentCAProvider(options.secretsDir, options.readerPublicURL, options.readerOrigin), nil
+}
+
+func configuredCertificateStore(options onboardingOptions) (certificateStore, error) {
+	switch options.certificateStoreName {
 	case "development-ca":
 		return newDevelopmentCAProvider(options.secretsDir, options.readerPublicURL, options.readerOrigin), nil
 	default:
-		return nil, fmt.Errorf("unsupported certificate provider %q", options.certificateProviderName)
+		return nil, fmt.Errorf("unsupported certificate store %q", options.certificateStoreName)
 	}
 }
 
@@ -95,7 +101,7 @@ func configuredActivationBackend(options onboardingOptions) (activationBackend, 
 }
 
 func runOnboardingCommand(ctx context.Context, arguments []string, dependencies onboardingDependencies) (bool, error) {
-	if len(arguments) == 0 || (arguments[0] != "validate-source" && arguments[0] != "onboard-source") {
+	if len(arguments) == 0 || (arguments[0] != "validate-source" && arguments[0] != "onboard-source" && arguments[0] != "provision-development-certificates") {
 		return false, nil
 	}
 	command := arguments[0]
@@ -106,6 +112,17 @@ func runOnboardingCommand(ctx context.Context, arguments []string, dependencies 
 	registration, err := loadSourceRegistration(options.sourcePath)
 	if err != nil {
 		return true, err
+	}
+	if command == "provision-development-certificates" {
+		provider, err := dependencies.resolveCertificateProvider(options)
+		if err != nil {
+			return true, err
+		}
+		if _, err := provider.Provision(registration); err != nil {
+			return true, fmt.Errorf("provision development certificates: %w", err)
+		}
+		_, _ = fmt.Fprintf(dependencies.stdout, "development certificates provisioned for source %s; this command is for local development only\n", registration.SourceOIN)
+		return true, nil
 	}
 	validated, err := validateSourceOnline(ctx, dependencies.client, registration, options.outwayURL, options.schemaPath, options.publicBaseURL, dependencies.now())
 	if err != nil {
@@ -119,7 +136,7 @@ func runOnboardingCommand(ctx context.Context, arguments []string, dependencies 
 		_, _ = fmt.Fprintf(dependencies.stdout, "dry-run valid for source %s: no keys, certificates, types or activation were written\n", registration.SourceOIN)
 		return true, nil
 	}
-	provider, err := dependencies.resolveCertificateProvider(options)
+	store, err := dependencies.resolveCertificateStore(options)
 	if err != nil {
 		return true, err
 	}
@@ -127,11 +144,11 @@ func runOnboardingCommand(ctx context.Context, arguments []string, dependencies 
 	if err != nil {
 		return true, err
 	}
-	activation, err := activateSource(validated, provider, backend)
+	activation, err := activateSource(validated, store, backend)
 	if err != nil {
 		return true, err
 	}
-	_, _ = fmt.Fprintf(dependencies.stdout, "source %s activated: metadata version %s, %d type(s); storage=%s, certificate-provider=%s\n", registration.SourceOIN, activation.MetadataVersion, len(activation.Types), options.storageBackend, options.certificateProviderName)
+	_, _ = fmt.Fprintf(dependencies.stdout, "source %s activated: metadata version %s, %d type(s); storage=%s, certificate-store=%s\n", registration.SourceOIN, activation.MetadataVersion, len(activation.Types), options.storageBackend, options.certificateStoreName)
 	return true, nil
 }
 
@@ -149,7 +166,7 @@ func parseOnboardingOptions(command string, arguments []string, errorOutput io.W
 	set.StringVar(&options.secretsDir, "secrets-dir", ".local/secrets", "filesystem secret directory")
 	if command == "onboard-source" {
 		set.StringVar(&options.storageBackend, "storage-backend", getEnv("ONBOARDING_STORAGE_BACKEND", "filesystem"), "onboarding state backend")
-		set.StringVar(&options.certificateProviderName, "certificate-provider", getEnv("ONBOARDING_CERTIFICATE_PROVIDER", "development-ca"), "certificate provider")
+		set.StringVar(&options.certificateStoreName, "certificate-store", getEnv("ONBOARDING_CERTIFICATE_STORE", "development-ca"), "store containing manually provisioned certificates")
 		set.BoolVar(&options.dryRun, "dry-run", false, "validate without writing state")
 	}
 	if err := set.Parse(arguments); err != nil {
@@ -167,16 +184,16 @@ func parseOnboardingOptions(command string, arguments []string, errorOutput io.W
 	return options, nil
 }
 
-func activateSource(validated *validatedSourceRegistration, provider certificateProvider, backend activationBackend) (*sourceActivation, error) {
-	if provider == nil {
-		return nil, fmt.Errorf("certificate provider is required")
+func activateSource(validated *validatedSourceRegistration, store certificateStore, backend activationBackend) (*sourceActivation, error) {
+	if store == nil {
+		return nil, fmt.Errorf("certificate store is required")
 	}
 	if backend == nil {
 		return nil, fmt.Errorf("activation backend is required")
 	}
-	certificates, err := provider.Provision(validated.Registration)
+	certificates, err := store.Load(validated.Registration)
 	if err != nil {
-		return nil, fmt.Errorf("provision source-bound certificates: %w", err)
+		return nil, fmt.Errorf("load manually provisioned source-bound certificates: %w", err)
 	}
 	return backend.Activate(validated, certificates)
 }

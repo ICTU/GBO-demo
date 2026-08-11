@@ -123,8 +123,13 @@ func configFromSourceActivation(cfg config) (config, error) {
 	}
 	cfg.SourceMetadataOIN = activation.Source.SourceOIN
 	cfg.SourceMetadataTypeID = activation.Types[0].TypeID
-	cfg.SourceMetadataOutwayPath = "/" + activation.Source.MetadataFSCServiceReference + "/.well-known/gbo-attestations"
-	cfg.SourceDataOutwayPath = "/" + activation.Source.DataFSCServiceReference + "/graphql"
+	cfg.SourceMetadataTransport = activation.Source.MetadataEndpoint.Transport
+	cfg.SourceDataTransport = activation.Source.DataAccess.Transport
+	cfg.SourceDataFSCServiceReference = activation.Source.DataAccess.ServiceReference
+	cfg.SourceMetadataURL, err = activation.Source.metadataURL(cfg.OutwayURL)
+	if err != nil {
+		return config{}, fmt.Errorf("resolve source metadata endpoint: %w", err)
+	}
 	return cfg, nil
 }
 
@@ -169,13 +174,15 @@ func configsFromSourceActivations(cfg config) ([]config, error) {
 }
 
 func loadConfiguredSourceMetadataCache(client *http.Client, cfg config) (*sourceMetadataCache, error) {
-	if !strings.HasPrefix(cfg.SourceMetadataOutwayPath, "/") || strings.HasPrefix(cfg.SourceMetadataOutwayPath, "//") {
-		return nil, fmt.Errorf("active source registration did not resolve a valid FSC Outway path")
+	if cfg.SourceMetadataURL == "" {
+		return nil, fmt.Errorf("active source registration did not resolve a metadata endpoint")
 	}
 	return newSourceMetadataCache(client, sourceMetadataConfig{
-		URL:         strings.TrimRight(cfg.OutwayURL, "/") + cfg.SourceMetadataOutwayPath,
-		ExpectedOIN: cfg.SourceMetadataOIN,
-		TypeID:      cfg.SourceMetadataTypeID,
+		URL:               cfg.SourceMetadataURL,
+		MetadataTransport: cfg.SourceMetadataTransport,
+		DataTransport:     cfg.SourceDataTransport,
+		ExpectedOIN:       cfg.SourceMetadataOIN,
+		TypeID:            cfg.SourceMetadataTypeID,
 	}, cfg.TypeMetadataPublicBaseURL, cfg.TypeMetadataStorePath, defaultSourceMetadataCachePolicy)
 }
 
@@ -202,6 +209,12 @@ func newSourceMetadataCache(client *http.Client, registration sourceMetadataConf
 	}
 	if publicBaseURL == "" || storePath == "" {
 		return nil, fmt.Errorf("source metadata public base URL and store path are required")
+	}
+	if registration.MetadataTransport != sourceTransportFSC && registration.MetadataTransport != sourceTransportHTTPSMTLS {
+		return nil, fmt.Errorf("unsupported source metadata transport %q", registration.MetadataTransport)
+	}
+	if registration.DataTransport != sourceTransportFSC && registration.DataTransport != sourceTransportHTTPSMTLS {
+		return nil, fmt.Errorf("unsupported source data transport %q", registration.DataTransport)
 	}
 	if err := validateTypeMetadataBaseURL(publicBaseURL); err != nil {
 		return nil, err
@@ -242,6 +255,9 @@ func (c *sourceMetadataCache) Refresh(ctx context.Context, now time.Time) error 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.registration.URL, nil)
 	if err != nil {
 		return fmt.Errorf("create source metadata refresh request: %w", err)
+	}
+	if c.registration.MetadataTransport != sourceTransportFSC {
+		return fmt.Errorf("source metadata transport %q is configured but not implemented", c.registration.MetadataTransport)
 	}
 	txID, err := newFscTransactionID()
 	if err != nil {

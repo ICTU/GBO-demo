@@ -3,7 +3,8 @@
 //
 // Role:
 //  1. Receives a POST from the issuance-server (contains disclosed PID with BSN)
-//  2. POSTs to the FSC-Outway — no explicit token fetch, no Bearer. Outway
+//  2. POSTs through the transport selected during source onboarding. The
+//     currently implemented profile is FSC: no explicit token fetch or Bearer. Outway
 //     resolves the path prefix to a grant, opens mTLS to the target Inway,
 //     and presents the token from the contract.
 //  3. The Inway receives the request, validates the token, and forwards
@@ -13,12 +14,8 @@
 //  5. On PDP ALLOW: the bron answers; the adapter formats
 //     the response as an IssuableDocument list.
 //
-// Transport is uniform with the DvTP flow (both via FSC); the access basis
-// still differs (PID vs consent). OIN authenticates the actor and the path,
-// not the per-request authorization.
-//
 // Every credential type is supplied by an onboarded source. The source-owned
-// metadata, fetched through its source-bound FSC service, defines the GraphQL
+// metadata, fetched through its onboarded endpoint, defines the GraphQL endpoint,
 // query, its parameters and the claim
 // mapping; the adapter contains no source-specific query or formatter.
 //
@@ -78,10 +75,12 @@ type config struct {
 
 	// These fields are resolved from the active onboarding record before the
 	// cache starts; they are deliberately not separate deployment settings.
-	SourceMetadataOutwayPath string
-	SourceDataOutwayPath     string
-	SourceMetadataOIN        string
-	SourceMetadataTypeID     string
+	SourceMetadataURL             string
+	SourceMetadataTransport       string
+	SourceDataTransport           string
+	SourceDataFSCServiceReference string
+	SourceMetadataOIN             string
+	SourceMetadataTypeID          string
 
 	SourceActivationPath      string
 	SourceActivationsPath     string
@@ -169,6 +168,7 @@ type graphqlResponse struct {
 }
 
 type sourceQueryPlan struct {
+	Endpoint  string
 	Query     string
 	Variables map[string]any
 }
@@ -218,7 +218,7 @@ func handleSourceAttestation(cfg config, client *http.Client, runtime sourceMeta
 			attribute.String("gbo.source_oin", metadata.SourceOIN),
 			attribute.String("gbo.type_id", metadata.TypeID),
 		)
-		result, err := callViaFSC(r.Context(), client, cfg, plan)
+		result, err := callSource(r.Context(), client, cfg, plan)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
@@ -357,14 +357,29 @@ func randomSpanIDHex() string {
 //
 // Flow selection is not sent by the adapter: the provider's FSC Manager puts
 // the trusted, service-specific flow in the validated access token.
+func callSource(ctx context.Context, client *http.Client, cfg config, plan sourceQueryPlan) (fscResult, error) {
+	switch cfg.SourceDataTransport {
+	case sourceTransportFSC:
+		return callViaFSC(ctx, client, cfg, plan)
+	case sourceTransportHTTPSMTLS:
+		return fscResult{}, fmt.Errorf("source data transport %q is configured but not implemented", sourceTransportHTTPSMTLS)
+	default:
+		return fscResult{}, fmt.Errorf("unsupported source data transport %q", cfg.SourceDataTransport)
+	}
+}
+
 func callViaFSC(ctx context.Context, client *http.Client, cfg config, plan sourceQueryPlan) (fscResult, error) {
-	if cfg.SourceDataOutwayPath == "" {
-		return fscResult{}, fmt.Errorf("active source has no data FSC service path")
+	if cfg.SourceDataFSCServiceReference == "" {
+		return fscResult{}, fmt.Errorf("active source has no data FSC service reference")
+	}
+	if err := validateAbsoluteURLPath(plan.Endpoint); err != nil {
+		return fscResult{}, fmt.Errorf("active source GraphQL endpoint: %w", err)
 	}
 
-	body, _ := json.Marshal(proxyRequest(plan))
+	body, _ := json.Marshal(proxyRequest{Query: plan.Query, Variables: plan.Variables})
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.OutwayURL+cfg.SourceDataOutwayPath, bytes.NewReader(body))
+	endpoint := strings.TrimRight(cfg.OutwayURL, "/") + "/" + cfg.SourceDataFSCServiceReference + plan.Endpoint
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return fscResult{}, err
 	}

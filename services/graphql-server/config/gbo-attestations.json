@@ -9,6 +9,7 @@
       "type_id": "inkomensverklaring",
       "type_version": "1.1",
       "graphql": {
+        "endpoint": "/graphql",
         "document": "query Inkomensverklaring($bsn: BSN!, $jaar: Int!) {\n  ingeschrevenPersoon(bsn: $bsn) {\n    heeftBelastingjaarAangifte(belastingjaren: [$jaar]) {\n      belastingjaar\n      status\n      indieningsdatum\n      ... on AangifteIH {\n        verzamelinkomen { waarde valuta }\n        box1Inkomen { waarde valuta }\n        box2Inkomen { waarde valuta }\n        box3Inkomen { waarde valuta }\n      }\n    }\n  }\n}",
         "subject_variable": "bsn",
         "parameters": {

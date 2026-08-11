@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -37,6 +36,10 @@ func TestValidateSourceCommandMakesNoPermanentChanges(t *testing.T) {
 			t.Fatal("validate-source must not instantiate a certificate provider")
 			return nil, nil
 		},
+		resolveCertificateStore: func(onboardingOptions) (certificateStore, error) {
+			t.Fatal("validate-source must not instantiate a certificate store")
+			return nil, nil
+		},
 		resolveActivationBackend: func(onboardingOptions) (activationBackend, error) {
 			t.Fatal("validate-source must not instantiate an activation backend")
 			return nil, nil
@@ -62,7 +65,7 @@ func TestOnboardSourceDryRunCreatesNothing(t *testing.T) {
 	registrationPath := writeSourceRegistrationFixture(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
 	secretsDir := filepath.Join(t.TempDir(), "secrets")
-	providerCalled := false
+	infrastructureCalled := false
 
 	_, err := runOnboardingCommand(context.Background(), []string{
 		"onboard-source", "--source", registrationPath, "--dry-run",
@@ -74,11 +77,15 @@ func TestOnboardSourceDryRunCreatesNothing(t *testing.T) {
 		client: metadataValidationClient(t, payload),
 		now:    time.Now,
 		resolveCertificateProvider: func(onboardingOptions) (certificateProvider, error) {
-			providerCalled = true
+			infrastructureCalled = true
+			return nil, nil
+		},
+		resolveCertificateStore: func(onboardingOptions) (certificateStore, error) {
+			infrastructureCalled = true
 			return nil, nil
 		},
 		resolveActivationBackend: func(onboardingOptions) (activationBackend, error) {
-			providerCalled = true
+			infrastructureCalled = true
 			return nil, nil
 		},
 		stdout: io.Discard,
@@ -87,8 +94,8 @@ func TestOnboardSourceDryRunCreatesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("onboard-source --dry-run: %v", err)
 	}
-	if providerCalled {
-		t.Fatal("dry-run instantiated the certificate provider")
+	if infrastructureCalled {
+		t.Fatal("dry-run instantiated onboarding infrastructure")
 	}
 	assertPathAbsent(t, stateDir)
 	assertPathAbsent(t, secretsDir)
@@ -102,12 +109,12 @@ func TestOnboardSourceInjectsOnlyConfiguredInfrastructure(t *testing.T) {
 		wantError string
 	}{
 		"unknown storage backend": {
-			arguments: []string{"--storage-backend", "database", "--certificate-provider", "development-ca"},
+			arguments: []string{"--storage-backend", "database", "--certificate-store", "development-ca"},
 			wantError: "unsupported onboarding storage backend",
 		},
-		"unknown certificate provider": {
-			arguments: []string{"--storage-backend", "filesystem", "--certificate-provider", "wallet-ca"},
-			wantError: "unsupported certificate provider",
+		"unknown certificate store": {
+			arguments: []string{"--storage-backend", "filesystem", "--certificate-store", "wallet-ca"},
+			wantError: "unsupported certificate store",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -143,17 +150,24 @@ func TestOnboardSourceIsIdempotentAndActivatesLast(t *testing.T) {
 		client:                     metadataValidationClient(t, payload),
 		now:                        time.Now,
 		resolveCertificateProvider: configuredCertificateProvider,
+		resolveCertificateStore:    configuredCertificateStore,
 		resolveActivationBackend:   configuredActivationBackend,
 		stdout:                     io.Discard,
 		stderr:                     io.Discard,
 	}
 	arguments := []string{
 		"onboard-source", "--source", registrationPath,
-		"--storage-backend", "filesystem", "--certificate-provider", "development-ca",
+		"--storage-backend", "filesystem", "--certificate-store", "development-ca",
 		"--outway-url", "https://outway.example",
 		"--schema", "../../schemas/gbo-attestations-v1.schema.json",
 		"--type-metadata-base-url", "https://issuer.example",
 		"--state-dir", stateDir, "--secrets-dir", secretsDir,
+	}
+	if _, err := runOnboardingCommand(context.Background(), []string{
+		"provision-development-certificates", "--source", registrationPath,
+		"--secrets-dir", secretsDir,
+	}, dependencies); err != nil {
+		t.Fatalf("explicitly provision development certificates: %v", err)
 	}
 	for attempt := 0; attempt < 2; attempt++ {
 		if _, err := runOnboardingCommand(context.Background(), arguments, dependencies); err != nil {
@@ -204,15 +218,8 @@ func TestOnboardSourceIsIdempotentAndActivatesLast(t *testing.T) {
 		t.Errorf("generated issuance environment mode = %o, want 600", got)
 	}
 	changedArguments := append(append([]string(nil), arguments...), "--reader-origin-url", "https://changed-reader.example")
-	if _, err := runOnboardingCommand(context.Background(), changedArguments, dependencies); err != nil {
-		t.Fatalf("onboard-source after reader configuration change: %v", err)
-	}
-	refreshedIssuanceEnv, err := os.ReadFile(activation.IssuanceConfigReference)
-	if err != nil {
-		t.Fatalf("read refreshed issuance environment: %v", err)
-	}
-	if bytes.Equal(issuanceEnv, refreshedIssuanceEnv) {
-		t.Fatal("issuance environment was not refreshed after reader certificate reissue")
+	if _, err := runOnboardingCommand(context.Background(), changedArguments, dependencies); err == nil || !strings.Contains(err.Error(), "does not match current configuration") {
+		t.Fatalf("onboard-source with changed reader configuration error = %v, want pre-provisioned certificate mismatch", err)
 	}
 	for _, path := range []string{
 		activation.Certificates.IssuerKeyReference,
@@ -229,32 +236,32 @@ func TestOnboardSourceIsIdempotentAndActivatesLast(t *testing.T) {
 	}
 }
 
-func TestOnboardSourceCertificateFailureLeavesSourceInactive(t *testing.T) {
+func TestOnboardSourceMissingCertificatesLeavesSourceInactive(t *testing.T) {
 	payload := sourceMetadataCacheFixture(t)
 	registrationPath := writeSourceRegistrationFixture(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
+	secretsDir := filepath.Join(t.TempDir(), "secrets")
 
 	_, err := runOnboardingCommand(context.Background(), []string{
 		"onboard-source", "--source", registrationPath,
-		"--storage-backend", "filesystem", "--certificate-provider", "development-ca",
+		"--storage-backend", "filesystem", "--certificate-store", "development-ca",
 		"--outway-url", "https://outway.example",
 		"--schema", "../../schemas/gbo-attestations-v1.schema.json",
 		"--type-metadata-base-url", "https://issuer.example",
-		"--state-dir", stateDir, "--secrets-dir", filepath.Join(t.TempDir(), "secrets"),
+		"--state-dir", stateDir, "--secrets-dir", secretsDir,
 	}, onboardingDependencies{
-		client: metadataValidationClient(t, payload),
-		now:    time.Now,
-		resolveCertificateProvider: func(onboardingOptions) (certificateProvider, error) {
-			return failingCertificateProvider{}, nil
-		},
+		client:                   metadataValidationClient(t, payload),
+		now:                      time.Now,
+		resolveCertificateStore:  configuredCertificateStore,
 		resolveActivationBackend: configuredActivationBackend,
 		stdout:                   io.Discard,
 		stderr:                   io.Discard,
 	})
-	if err == nil || !strings.Contains(err.Error(), "certificate provider failed") {
-		t.Fatalf("error = %v, want certificate provider failure", err)
+	if err == nil || !strings.Contains(err.Error(), "load explicitly provisioned") {
+		t.Fatalf("error = %v, want missing manually provisioned certificates", err)
 	}
 	assertPathAbsent(t, filepath.Join(stateDir, "active", "99999999900000000200.json"))
+	assertPathAbsent(t, secretsDir)
 }
 
 func TestSourceRegistrationRejectsUnknownAndDuplicateFields(t *testing.T) {
@@ -269,6 +276,51 @@ func TestSourceRegistrationRejectsUnknownAndDuplicateFields(t *testing.T) {
 			}
 			if _, err := loadSourceRegistration(path); err == nil {
 				t.Fatal("invalid source registration was accepted")
+			}
+		})
+	}
+}
+
+func TestHTTPSMTLSRegistrationIsModelledButFailsClosedAtRuntime(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "source.yaml")
+	body := `source_oin: "99999999900000000200"
+name: "Belastingdienst-mock"
+metadata_endpoint:
+  transport: "https-mtls"
+  endpoint: "https://metadata.example/gbo-attestations"
+data_access:
+  transport: "https-mtls"
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	registration, err := loadSourceRegistration(path)
+	if err != nil {
+		t.Fatalf("load https-mtls registration: %v", err)
+	}
+	if _, err := registration.metadataURL("https://outway.example"); err == nil || !strings.Contains(err.Error(), "not implemented") {
+		t.Fatalf("https-mtls runtime error = %v, want fail-closed not implemented", err)
+	}
+}
+
+func TestGraphQLEndpointMustMatchOnboardedTransport(t *testing.T) {
+	for name, test := range map[string]struct {
+		endpoint  string
+		transport string
+		valid     bool
+	}{
+		"FSC path":              {endpoint: "/graphql", transport: sourceTransportFSC, valid: true},
+		"FSC rejects URL":       {endpoint: "https://source.example/graphql", transport: sourceTransportFSC},
+		"mTLS HTTPS URL":        {endpoint: "https://source.example/graphql", transport: sourceTransportHTTPSMTLS, valid: true},
+		"mTLS rejects HTTP URL": {endpoint: "http://source.example/graphql", transport: sourceTransportHTTPSMTLS},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := validateGraphQLEndpoint(test.endpoint, test.transport)
+			if test.valid && err != nil {
+				t.Fatalf("endpoint rejected: %v", err)
+			}
+			if !test.valid && err == nil {
+				t.Fatal("invalid endpoint was accepted")
 			}
 		})
 	}
@@ -326,12 +378,6 @@ func TestSourceActivationAllowsOnlyNewerVersions(t *testing.T) {
 	}
 }
 
-type failingCertificateProvider struct{}
-
-func (failingCertificateProvider) Provision(sourceRegistration) (certificateArtifacts, error) {
-	return certificateArtifacts{}, errors.New("certificate provider failed")
-}
-
 func writeSourceRegistrationFixture(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "99999999900000000200.yaml")
@@ -344,8 +390,13 @@ func writeSourceRegistrationFixture(t *testing.T) string {
 func validRegistrationYAML() string {
 	return "source_oin: \"99999999900000000200\"\n" +
 		"name: \"Belastingdienst-mock\"\n" +
-		"metadata_fsc_service_reference: \"gbo-attestation-metadata\"\n" +
-		"data_fsc_service_reference: \"bri\"\n"
+		"metadata_endpoint:\n" +
+		"  transport: \"fsc\"\n" +
+		"  service_reference: \"gbo-attestation-metadata\"\n" +
+		"  path: \"/.well-known/gbo-attestations\"\n" +
+		"data_access:\n" +
+		"  transport: \"fsc\"\n" +
+		"  service_reference: \"bri\"\n"
 }
 
 func metadataValidationClient(t *testing.T, payload []byte) *http.Client {

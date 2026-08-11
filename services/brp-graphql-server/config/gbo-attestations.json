@@ -8,6 +8,7 @@
     "type_id": "akte-van-overlijden",
     "type_version": "1.0",
     "graphql": {
+      "endpoint": "/graphql",
       "document": "query AkteVanOverlijden($bsn: BSN!) {\n  akteVanOverlijden(bsn: $bsn) {\n    overledene_geslachtsnaam overledene_voorvoegsel overledene_voornamen\n    overledene_geboortedatum overledene_geboorteplaats overledene_geboorteland\n    overledene_geslacht overledene_ouders datum_overlijden plaats_overlijden\n    land_overlijden soort_verbintenis echtgenoot_geslachtsnaam\n    echtgenoot_voorvoegsel echtgenoot_voornamen verklaring_tekst\n  }\n}",
       "subject_variable": "bsn",
       "parameters": {},

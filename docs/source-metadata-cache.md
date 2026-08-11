@@ -12,14 +12,15 @@ fail-closed; er bestaat geen catalogus- of formatterfallback.
 | `TYPE_METADATA_PUBLIC_BASE_URL` | Publieke basis-URL van de adapter, bijvoorbeeld de waarde van `EUDI_BRI_URL` zonder verplicht trailing slash. |
 | `TYPE_METADATA_STORE_PATH` | Duurzame opslag voor immutable Type Metadata; standaard `/var/lib/gbo/type-metadata`. |
 
-OIN, type-id en FSC-servicereferentie worden uit het ene
+OIN, type-id, gekozen transport en eventuele FSC-servicereferentie worden uit het ene
 activatierecord afgeleid en niet nogmaals als losse env-vars geconfigureerd.
 De runtime scant alle `*.json`-activatierecords en activeert precies één type
 per record.
 
 ## Gedrag
 
-- GBO haalt alleen via het geregistreerde FSC-pad op. Als de bron een ETag
+- GBO haalt alleen via het tijdens onboarding geregistreerde transport en
+  metadata-endpoint op. Als de bron een ETag
   aanbiedt, stuurt GBO die bij de volgende refresh als `If-None-Match`; zonder
   ETag blijft de fetch onvoorwaardelijk en bewaakt GBO versies en payloaddigests.
 - Iedere `200` wordt opnieuw op bron-OIN, tijden, query, mapping en monotone

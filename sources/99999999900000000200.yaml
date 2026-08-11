@@ -2,5 +2,10 @@
 # Type Metadata blijven in de bronmetadata die via FSC wordt opgehaald.
 source_oin: "99999999900000000200"
 name: "Belastingdienst-mock"
-metadata_fsc_service_reference: "gbo-attestation-metadata"
-data_fsc_service_reference: "bri"
+metadata_endpoint:
+  transport: "fsc"
+  service_reference: "gbo-attestation-metadata"
+  path: "/.well-known/gbo-attestations"
+data_access:
+  transport: "fsc"
+  service_reference: "bri"
