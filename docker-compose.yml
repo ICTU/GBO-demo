@@ -156,7 +156,7 @@ services:
     image: postgres:16-alpine
     profiles: [manager]
     environment:
-      POSTGRES_PASSWORD: ${FTV_POSTGRES_PASSWORD:-ftv}
+      POSTGRES_PASSWORD: ${FTV_POSTGRES_PASSWORD}
       POSTGRES_USER: ftv
       POSTGRES_DB: ftv_manager
     volumes:
@@ -182,7 +182,7 @@ services:
       # ./policies in over the API, which is the same path the management
       # interface uses.
       - MANAGER_PERSIST_TYPE=postgres
-      - MANAGER_PERSIST_POSTGRES_URL=postgres://ftv:${FTV_POSTGRES_PASSWORD:-ftv}@postgres-ftv:5432/ftv_manager?sslmode=disable
+      - MANAGER_PERSIST_POSTGRES_URL=postgres://ftv:${FTV_POSTGRES_PASSWORD}@postgres-ftv:5432/ftv_manager?sslmode=disable
       - MANAGER_MIGRATE_SOURCE=*EMBED*
       - MANAGER_MIGRATE_AUTO=true
       # Deliberately NOT set to rego. MANAGER_POLICIES_LANGUAGE selects the
@@ -216,7 +216,7 @@ services:
       # registers its routes for a Postgres-backed decision log — any other
       # value and the endpoints simply do not exist.
       - MANAGER_ADL_TYPE=postgres
-      - MANAGER_ADL_PG_URL=postgres://ftv:${FTV_POSTGRES_PASSWORD:-ftv}@postgres-ftv:5432/ftv_adl?sslmode=disable
+      - MANAGER_ADL_PG_URL=postgres://ftv:${FTV_POSTGRES_PASSWORD}@postgres-ftv:5432/ftv_adl?sslmode=disable
     ports:
       # Management API (what the seed script and a UI talk to).
       - "${GBO_PORT_FTV_MANAGER:-9280}:8443"
