@@ -4,9 +4,9 @@ Fase 4 gebruikt geen aparte onboardingservice. De bestaande `graphql-server`
 publiceert bronmetadata en de bestaande `eudi-adapter` bevat twee eenmalige
 commands:
 
-- `validate-source` leest de Git-registratie, haalt de JWS via FSC op en
-  valideert registratie, sleutelbinding, handtekening, schema, query, mapping,
-  versies en geldigheid. Dit command schrijft niets.
+- `validate-source` leest de Git-registratie, haalt de JSON via de brongebonden
+  FSC-service op en valideert registratie, FSC-pad, bron-OIN, schema, query,
+  mapping, versies en geldigheid. Dit command schrijft niets.
 - `onboard-source` herhaalt dezelfde validatie, maakt met de geconfigureerde
   `development-ca`-provider issuer-, reader- en statuscertificaten, publiceert
   immutable Type Metadata en
@@ -16,10 +16,10 @@ commands:
 
 | Gegeven | Eigenaar | Locatie |
 |---|---|---|
-| OIN, naam, FSC-servicereferenties en JWK-thumbprint | GBO | `sources/<oin>.yaml` in Git |
-| Query, mapping, types en Type Metadata-inhoud | bron | ondertekend `/.well-known/gbo-attestations` via de aparte FSC-service |
-| Publieke metadata-verificatiesleutel en immutable Type Metadata | GBO onboarding | `.local/onboarding/` |
-| Private metadata-, issuer-, reader- en statuskeys | lokale secret-backend | `.local/secrets/` (Git ignored, mode `0600`) |
+| OIN, naam en FSC-servicereferenties | GBO | `sources/<oin>.yaml` in Git |
+| Query, mapping, types en Type Metadata-inhoud | bron | JSON op `/.well-known/gbo-attestations` via de aparte FSC-service |
+| Immutable Type Metadata en activatierecords | GBO onboarding | `.local/onboarding/` |
+| Private issuer-, reader- en statuskeys | lokale secret-backend | `.local/secrets/` (Git ignored, mode `0600`) |
 
 De bron publiceert geen GraphQL-schema en er is geen publieke URL-fallback. De
 registratie bevat alleen trust- en transportranden; GBO configureert geen query
@@ -55,11 +55,11 @@ make onboard-source SOURCE=sources/99999999900000000400.yaml
 ```
 
 De activatiecommands zijn idempotent. Een gewijzigde payload onder dezelfde versie,
-een versieterugval, een verkeerde sleutel, een ongeldig certificaat of een
+een versieterugval, een ongeldig certificaat of een
 onbereikbaar FSC-endpoint faalt gesloten.
 
 De bestanden onder `sources/` gebruiken bewust een beperkt, Git-beheerd
-YAML-profiel: precies de vijf gedocumenteerde velden als scalars op het hoogste
+YAML-profiel: precies de vier gedocumenteerde velden als scalars op het hoogste
 niveau. Geneste waarden, arrays, multilinewaarden, anchors en tags worden niet
 ondersteund. Eén ongeldige registratie blokkeert de validatie van de volledige
 registratieset; dat is bewust fail-closed en het foutbericht noemt het bestand.
@@ -83,10 +83,10 @@ issuance-serverconfig. Er is geen alternatieve catalogusconfiguratie.
 URL-configuratie zoals `EUDI_PUBLIC_URL`, `EUDI_READER_ORIGIN_URL` en
 `EUDI_BRI_URL` blijft deploymentconfiguratie in `.env`.
 
-De actieve registraties, gepubliceerde Type Metadata en gepinde publieke
-bronkeys worden vanuit `.local/onboarding/` in de adapter gemount. OIN, type-id,
-FSC-servicereferentie, parameters en JWK-pad worden uit ieder activatierecord en
-de ondertekende bronmetadata afgeleid en zijn geen losse env-vars. Zonder een
+De actieve registraties en gepubliceerde Type Metadata worden vanuit
+`.local/onboarding/` in de adapter gemount. OIN, type-id,
+FSC-servicereferentie en parameters worden uit ieder activatierecord en de via
+FSC opgehaalde bronmetadata afgeleid en zijn geen losse env-vars. Zonder een
 geldige activatie is een type niet uitgiftebaar; er is geen legacyfallback.
 
 `make demo-eudi` en `make demo-full` maken de bind-mountdirectories vóór

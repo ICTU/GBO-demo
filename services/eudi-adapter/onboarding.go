@@ -24,7 +24,6 @@ type sourceActivation struct {
 	MetadataURL                string               `json:"metadata_url"`
 	MetadataVersion            string               `json:"metadata_version"`
 	MetadataPayloadDigest      string               `json:"metadata_payload_digest"`
-	PublicJWKReference         string               `json:"public_jwk_reference"`
 	TypeMetadataStoreReference string               `json:"type_metadata_store_reference"`
 	IssuanceConfigReference    string               `json:"issuance_config_reference"`
 	Types                      []activatedType      `json:"types"`
@@ -197,9 +196,8 @@ func (b *filesystemActivationBackend) Activate(validated *validatedSourceRegistr
 		return nil, fmt.Errorf("prepare filesystem issuance environment: %w", err)
 	}
 	typeStore := filepath.Join(b.stateDir, "type-metadata")
-	trustStore := filepath.Join(b.stateDir, "trust")
 	activeStore := filepath.Join(b.stateDir, "active")
-	for _, directory := range []string{typeStore, trustStore, activeStore} {
+	for _, directory := range []string{typeStore, activeStore} {
 		if err := os.MkdirAll(directory, 0o755); err != nil {
 			return nil, fmt.Errorf("create onboarding state directory %q: %w", directory, err)
 		}
@@ -208,11 +206,6 @@ func (b *filesystemActivationBackend) Activate(validated *validatedSourceRegistr
 		if err := persistTypeMetadataPublication(typeStore, publication); err != nil {
 			return nil, err
 		}
-	}
-	thumbprint := strings.TrimPrefix(validated.Registration.MetadataSigningJWKThumbprint, "sha256-")
-	publicJWKPath := filepath.Join(trustStore, validated.Registration.SourceOIN+"-"+thumbprint+".jwk")
-	if err := writeSameOrCreate(publicJWKPath, validated.PublicJWK, 0o644); err != nil {
-		return nil, fmt.Errorf("persist pinned source metadata JWK: %w", err)
 	}
 	types := make([]activatedType, 0, len(validated.Publications))
 	for _, publication := range validated.Publications {
@@ -231,7 +224,6 @@ func (b *filesystemActivationBackend) Activate(validated *validatedSourceRegistr
 		MetadataURL:                validated.MetadataURL,
 		MetadataVersion:            validated.Document.Version,
 		MetadataPayloadDigest:      hex.EncodeToString(payloadDigest[:]),
-		PublicJWKReference:         publicJWKPath,
 		TypeMetadataStoreReference: typeStore,
 		IssuanceConfigReference:    issuanceEnvPath,
 		Types:                      types,
@@ -339,16 +331,4 @@ func writeSourceActivation(path string, body []byte, next *sourceActivation) err
 		return fmt.Errorf("metadata version %q has a different metadata payload", next.MetadataVersion)
 	}
 	return writeFileAtomically(filepath.Dir(path), filepath.Base(path), body, 0o644)
-}
-
-func writeSameOrCreate(path string, body []byte, mode os.FileMode) error {
-	if existing, err := os.ReadFile(path); err == nil {
-		if !bytes.Equal(existing, body) {
-			return fmt.Errorf("existing file %q contains different bytes", path)
-		}
-		return nil
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	return writeFileAtomically(filepath.Dir(path), filepath.Base(path), body, mode)
 }

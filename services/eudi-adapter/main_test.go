@@ -3,12 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -18,8 +13,6 @@ import (
 
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 )
-
-var testBase64URL = base64.RawURLEncoding
 
 func TestShippedSourceMetadataMatchesEnvelopeSchema(t *testing.T) {
 	schema := compileSourceMetadataSchema(t)
@@ -139,42 +132,10 @@ func TestAttributeSchemaUnitRejectedByRuntimeAndEnvelopeSchema(t *testing.T) {
 	}
 }
 
-func signSourceMetadataForTest(t *testing.T, payload []byte, privateKey ed25519.PrivateKey) string {
-	return signSourceMetadataWithHeaderForTest(t, payload, privateKey, nil)
-}
-
-func signSourceMetadataWithHeaderForTest(t *testing.T, payload []byte, privateKey ed25519.PrivateKey, extra map[string]any) string {
-	t.Helper()
-	publicKey := privateKey.Public().(ed25519.PublicKey)
-	x := testBase64URL.EncodeToString(publicKey)
-	thumbprintInput := fmt.Sprintf(`{"crv":"Ed25519","kty":"OKP","x":"%s"}`, x)
-	thumbprint := sha256.Sum256([]byte(thumbprintInput))
-	protected := map[string]any{
-		"alg": "EdDSA",
-		"kid": testBase64URL.EncodeToString(thumbprint[:]),
-		"typ": "gbo-attestations+jws",
-		"jwk": map[string]string{"kty": "OKP", "crv": "Ed25519", "x": x},
-	}
-	for name, value := range extra {
-		protected[name] = value
-	}
-	header, err := json.Marshal(protected)
-	if err != nil {
-		t.Fatalf("marshal protected header: %v", err)
-	}
-	signingInput := testBase64URL.EncodeToString(header) + "." + testBase64URL.EncodeToString(payload)
-	signature := ed25519.Sign(privateKey, []byte(signingInput))
-	return signingInput + "." + testBase64URL.EncodeToString(signature)
-}
-
-// A signed source declaration supplies both the query sent through FSC/PDP
+// A source declaration fetched through FSC supplies both the query sent
+// through FSC/PDP
 // and the projection returned to the issuance server.
-func TestAdapterUsesSignedSourceMetadataFor2025(t *testing.T) {
-	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatalf("generate signing key: %v", err)
-	}
-
+func TestAdapterUsesSourceMetadataFor2025(t *testing.T) {
 	metadataPayload, err := os.ReadFile("../graphql-server/config/gbo-attestations.json")
 	if err != nil {
 		t.Fatalf("read shipped source metadata: %v", err)
@@ -187,7 +148,6 @@ func TestAdapterUsesSignedSourceMetadataFor2025(t *testing.T) {
 		t.Fatalf("shipped source metadata has %d attestations, want 1", len(shipped.Attestations))
 	}
 	metadataQuery := shipped.Attestations[0].GraphQL.Document
-	metadataJWS := signSourceMetadataForTest(t, metadataPayload, privateKey)
 	metadataServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got, want := r.URL.Path, "/metadata/.well-known/gbo-attestations"; got != want {
 			t.Errorf("metadata Outway path = %q, want %q", got, want)
@@ -195,27 +155,18 @@ func TestAdapterUsesSignedSourceMetadataFor2025(t *testing.T) {
 		if r.Header.Get("Fsc-Transaction-Id") == "" {
 			t.Error("metadata request has no Fsc-Transaction-Id")
 		}
-		w.Header().Set("Content-Type", "application/jose")
-		_, _ = w.Write([]byte(metadataJWS))
+		w.Header().Set("Content-Type", sourceMetadataMediaType)
+		_, _ = w.Write(metadataPayload)
 	}))
 	defer metadataServer.Close()
 
-	publicJWK, err := json.Marshal(map[string]string{
-		"kty": "OKP",
-		"crv": "Ed25519",
-		"x":   testBase64URL.EncodeToString(publicKey),
-	})
-	if err != nil {
-		t.Fatalf("marshal public JWK: %v", err)
-	}
 	metadata, err := loadSourceMetadata(context.Background(), http.DefaultClient, sourceMetadataConfig{
 		URL:         metadataServer.URL + "/metadata/.well-known/gbo-attestations",
 		ExpectedOIN: "99999999900000000200",
-		PublicJWK:   publicJWK,
 		TypeID:      "inkomensverklaring",
 	})
 	if err != nil {
-		t.Fatalf("load signed source metadata: %v", err)
+		t.Fatalf("load source metadata: %v", err)
 	}
 
 	var received proxyRequest
@@ -393,10 +344,6 @@ func TestSourceProjectionPreservesDecimalNumbers(t *testing.T) {
 }
 
 func TestSourceMetadataRejectedDuringOnboarding(t *testing.T) {
-	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatalf("generate signing key: %v", err)
-	}
 	validQuery := `query Inkomensverklaring($bsn: BSN!, $jaar: Int!) {
   ingeschrevenPersoon(bsn: $bsn) {
     heeftBelastingjaarAangifte(belastingjaren: [$jaar]) { belastingjaar }
@@ -434,47 +381,21 @@ func TestSourceMetadataRejectedDuringOnboarding(t *testing.T) {
 		}
 		return payload
 	}
-	publicJWK := func(t *testing.T, key ed25519.PublicKey) json.RawMessage {
-		t.Helper()
-		raw, err := json.Marshal(map[string]string{
-			"kty": "OKP",
-			"crv": "Ed25519",
-			"x":   testBase64URL.EncodeToString(key),
-		})
-		if err != nil {
-			t.Fatalf("marshal public JWK: %v", err)
-		}
-		return raw
-	}
-
 	tests := []struct {
 		name        string
 		payload     []byte
-		pinnedKey   json.RawMessage
 		expectedOIN string
 		wantError   string
-		corruptJWS  bool
-		criticalJWS bool
 	}{
-		{
-			name:        "invalid signature",
-			payload:     metadataPayload(t, "00000001003214345000", validQuery),
-			pinnedKey:   publicJWK(t, publicKey),
-			expectedOIN: "00000001003214345000",
-			wantError:   "invalid signature",
-			corruptJWS:  true,
-		},
 		{
 			name:        "wrong source OIN",
 			payload:     metadataPayload(t, "00000001003214345001", validQuery),
-			pinnedKey:   publicJWK(t, publicKey),
 			expectedOIN: "00000001003214345000",
 			wantError:   "does not match registered OIN",
 		},
 		{
 			name:        "invalid GraphQL syntax",
 			payload:     metadataPayload(t, "00000001003214345000", "query {"),
-			pinnedKey:   publicJWK(t, publicKey),
 			expectedOIN: "00000001003214345000",
 			wantError:   "invalid GraphQL document",
 		},
@@ -486,7 +407,6 @@ func TestSourceMetadataRejectedDuringOnboarding(t *testing.T) {
 				[]byte(`"datatype":"gYear","filter":"first"`),
 				1,
 			),
-			pinnedKey:   publicJWK(t, publicKey),
 			expectedOIN: "00000001003214345000",
 			wantError:   "GBO_SIMPLE_MAPPING_INVALID",
 		},
@@ -498,54 +418,28 @@ func TestSourceMetadataRejectedDuringOnboarding(t *testing.T) {
 				[]byte(`"datatype":"integer","transform":{"operator":"round"}`),
 				1,
 			),
-			pinnedKey:   publicJWK(t, publicKey),
 			expectedOIN: "00000001003214345000",
 			wantError:   "GBO_SIMPLE_MAPPING_INVALID",
 		},
 		{
 			name:        "unsupported envelope schema version",
 			payload:     bytes.Replace(metadataPayload(t, "00000001003214345000", validQuery), []byte(`"schema_version":"1.0"`), []byte(`"schema_version":"2.0"`), 1),
-			pinnedKey:   publicJWK(t, publicKey),
 			expectedOIN: "00000001003214345000",
 			wantError:   "unsupported source metadata schema_version",
-		},
-		{
-			name:        "unknown critical JWS header",
-			payload:     metadataPayload(t, "00000001003214345000", validQuery),
-			pinnedKey:   publicJWK(t, publicKey),
-			expectedOIN: "00000001003214345000",
-			wantError:   "critical JWS header",
-			criticalJWS: true,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			compact := signSourceMetadataForTest(t, test.payload, privateKey)
-			if test.criticalJWS {
-				compact = signSourceMetadataWithHeaderForTest(t, test.payload, privateKey, map[string]any{
-					"crit": []string{"exp"},
-					"exp":  true,
-				})
-			}
-			if test.corruptJWS {
-				signatureStart := strings.LastIndex(compact, ".") + 1
-				replacement := byte('A')
-				if compact[signatureStart] == replacement {
-					replacement = 'B'
-				}
-				compact = compact[:signatureStart] + string(replacement) + compact[signatureStart+1:]
-			}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.Header().Set("Content-Type", "application/jose")
-				_, _ = w.Write([]byte(compact))
+				w.Header().Set("Content-Type", sourceMetadataMediaType)
+				_, _ = w.Write(test.payload)
 			}))
 			defer server.Close()
 
 			_, err := loadSourceMetadata(context.Background(), http.DefaultClient, sourceMetadataConfig{
 				URL:         server.URL,
 				ExpectedOIN: test.expectedOIN,
-				PublicJWK:   test.pinnedKey,
 				TypeID:      "inkomensverklaring",
 			})
 			if err == nil || !strings.Contains(err.Error(), test.wantError) {

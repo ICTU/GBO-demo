@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:gov:nl:gbo:schema:gbo-attestations:1",
   "title": "GBO source attestation metadata v1",
-  "description": "Envelope of the signed JWS payload published by a source through the FSC metadata service.",
+  "description": "Source attestation metadata published through a source-bound FSC metadata service.",
   "type": "object",
   "additionalProperties": false,
   "required": [

@@ -52,37 +52,28 @@ type AangifteIH struct {
 const readHeaderTimeout = 10 * time.Second
 
 type config struct {
-	Port                   string
-	MockDataPath           string
-	SourceMetadataPath     string
-	MetadataSigningJWKPath string
+	Port               string
+	MockDataPath       string
+	SourceMetadataPath string
 }
 
 func loadConfig() (config, error) {
 	return config{
-		Port:                   getEnv("PORT", "4000"),
-		MockDataPath:           getEnv("MOCKDATA_PATH", "mockdata/citizens.json"),
-		SourceMetadataPath:     os.Getenv("GBO_ATTESTATIONS_PATH"),
-		MetadataSigningJWKPath: os.Getenv("GBO_METADATA_SIGNING_JWK_PATH"),
+		Port:               getEnv("PORT", "4000"),
+		MockDataPath:       getEnv("MOCKDATA_PATH", "mockdata/citizens.json"),
+		SourceMetadataPath: os.Getenv("GBO_ATTESTATIONS_PATH"),
 	}, nil
 }
 
 func loadSourceMetadataPublisher(cfg config) (*sourceMetadataPublisher, error) {
-	if cfg.SourceMetadataPath == "" && cfg.MetadataSigningJWKPath == "" {
+	if cfg.SourceMetadataPath == "" {
 		return nil, nil
-	}
-	if cfg.SourceMetadataPath == "" || cfg.MetadataSigningJWKPath == "" {
-		return nil, fmt.Errorf("GBO_ATTESTATIONS_PATH and GBO_METADATA_SIGNING_JWK_PATH must be configured together")
 	}
 	payload, err := os.ReadFile(cfg.SourceMetadataPath)
 	if err != nil {
 		return nil, fmt.Errorf("read source metadata: %w", err)
 	}
-	privateJWK, err := os.ReadFile(cfg.MetadataSigningJWKPath)
-	if err != nil {
-		return nil, fmt.Errorf("read source metadata signing JWK: %w", err)
-	}
-	return newSourceMetadataPublisher(payload, privateJWK)
+	return newSourceMetadataPublisher(payload)
 }
 
 func getEnv(key, fallback string) string {
@@ -377,13 +368,6 @@ func fatal(msg string, err error) {
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", "graphql-server"))
-	if handled, err := runDevelopmentMetadataKeyCommand(os.Args[1:], os.Stdout, os.Stderr); handled {
-		if err != nil {
-			fatal("initializing development metadata key", err)
-		}
-		return
-	}
-
 	cfg, err := loadConfig()
 	if err != nil {
 		fatal("loading configuration from environment", err)

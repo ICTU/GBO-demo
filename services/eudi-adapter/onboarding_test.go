@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"io"
@@ -16,11 +15,11 @@ import (
 )
 
 func TestValidateSourceCommandMakesNoPermanentChanges(t *testing.T) {
-	payload, publicJWK, privateKey := sourceMetadataCacheFixture(t)
-	registrationPath := writeSourceRegistrationFixture(t, publicJWK)
+	payload := sourceMetadataCacheFixture(t)
+	registrationPath := writeSourceRegistrationFixture(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
 	secretsDir := filepath.Join(t.TempDir(), "secrets")
-	client := metadataValidationClient(t, payload, privateKey)
+	client := metadataValidationClient(t, payload)
 	var output bytes.Buffer
 
 	handled, err := runOnboardingCommand(context.Background(), []string{
@@ -59,8 +58,8 @@ func TestValidateSourceCommandMakesNoPermanentChanges(t *testing.T) {
 }
 
 func TestOnboardSourceDryRunCreatesNothing(t *testing.T) {
-	payload, publicJWK, privateKey := sourceMetadataCacheFixture(t)
-	registrationPath := writeSourceRegistrationFixture(t, publicJWK)
+	payload := sourceMetadataCacheFixture(t)
+	registrationPath := writeSourceRegistrationFixture(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
 	secretsDir := filepath.Join(t.TempDir(), "secrets")
 	providerCalled := false
@@ -72,7 +71,7 @@ func TestOnboardSourceDryRunCreatesNothing(t *testing.T) {
 		"--type-metadata-base-url", "https://issuer.example",
 		"--state-dir", stateDir, "--secrets-dir", secretsDir,
 	}, onboardingDependencies{
-		client: metadataValidationClient(t, payload, privateKey),
+		client: metadataValidationClient(t, payload),
 		now:    time.Now,
 		resolveCertificateProvider: func(onboardingOptions) (certificateProvider, error) {
 			providerCalled = true
@@ -96,8 +95,8 @@ func TestOnboardSourceDryRunCreatesNothing(t *testing.T) {
 }
 
 func TestOnboardSourceInjectsOnlyConfiguredInfrastructure(t *testing.T) {
-	payload, publicJWK, privateKey := sourceMetadataCacheFixture(t)
-	registrationPath := writeSourceRegistrationFixture(t, publicJWK)
+	payload := sourceMetadataCacheFixture(t)
+	registrationPath := writeSourceRegistrationFixture(t)
 	for name, config := range map[string]struct {
 		arguments []string
 		wantError string
@@ -123,7 +122,7 @@ func TestOnboardSourceInjectsOnlyConfiguredInfrastructure(t *testing.T) {
 			}
 			arguments = append(arguments, config.arguments...)
 			dependencies := defaultOnboardingDependencies()
-			dependencies.client = metadataValidationClient(t, payload, privateKey)
+			dependencies.client = metadataValidationClient(t, payload)
 			dependencies.stdout = io.Discard
 			dependencies.stderr = io.Discard
 			if _, err := runOnboardingCommand(context.Background(), arguments, dependencies); err == nil || !strings.Contains(err.Error(), config.wantError) {
@@ -136,12 +135,12 @@ func TestOnboardSourceInjectsOnlyConfiguredInfrastructure(t *testing.T) {
 }
 
 func TestOnboardSourceIsIdempotentAndActivatesLast(t *testing.T) {
-	payload, publicJWK, privateKey := sourceMetadataCacheFixture(t)
-	registrationPath := writeSourceRegistrationFixture(t, publicJWK)
+	payload := sourceMetadataCacheFixture(t)
+	registrationPath := writeSourceRegistrationFixture(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
 	secretsDir := filepath.Join(t.TempDir(), "secrets")
 	dependencies := onboardingDependencies{
-		client:                     metadataValidationClient(t, payload, privateKey),
+		client:                     metadataValidationClient(t, payload),
 		now:                        time.Now,
 		resolveCertificateProvider: configuredCertificateProvider,
 		resolveActivationBackend:   configuredActivationBackend,
@@ -231,8 +230,8 @@ func TestOnboardSourceIsIdempotentAndActivatesLast(t *testing.T) {
 }
 
 func TestOnboardSourceCertificateFailureLeavesSourceInactive(t *testing.T) {
-	payload, publicJWK, privateKey := sourceMetadataCacheFixture(t)
-	registrationPath := writeSourceRegistrationFixture(t, publicJWK)
+	payload := sourceMetadataCacheFixture(t)
+	registrationPath := writeSourceRegistrationFixture(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
 
 	_, err := runOnboardingCommand(context.Background(), []string{
@@ -243,7 +242,7 @@ func TestOnboardSourceCertificateFailureLeavesSourceInactive(t *testing.T) {
 		"--type-metadata-base-url", "https://issuer.example",
 		"--state-dir", stateDir, "--secrets-dir", filepath.Join(t.TempDir(), "secrets"),
 	}, onboardingDependencies{
-		client: metadataValidationClient(t, payload, privateKey),
+		client: metadataValidationClient(t, payload),
 		now:    time.Now,
 		resolveCertificateProvider: func(onboardingOptions) (certificateProvider, error) {
 			return failingCertificateProvider{}, nil
@@ -260,8 +259,8 @@ func TestOnboardSourceCertificateFailureLeavesSourceInactive(t *testing.T) {
 
 func TestSourceRegistrationRejectsUnknownAndDuplicateFields(t *testing.T) {
 	for name, body := range map[string]string{
-		"unknown":   validRegistrationYAML("sha256-"+strings.Repeat("A", 43)) + "metadata_url: https://public.example\n",
-		"duplicate": validRegistrationYAML("sha256-"+strings.Repeat("A", 43)) + "name: duplicate\n",
+		"unknown":   validRegistrationYAML() + "metadata_url: https://public.example\n",
+		"duplicate": validRegistrationYAML() + "name: duplicate\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "source.yaml")
@@ -333,30 +332,24 @@ func (failingCertificateProvider) Provision(sourceRegistration) (certificateArti
 	return certificateArtifacts{}, errors.New("certificate provider failed")
 }
 
-func writeSourceRegistrationFixture(t *testing.T, publicJWK json.RawMessage) string {
+func writeSourceRegistrationFixture(t *testing.T) string {
 	t.Helper()
-	var jwk sourceMetadataJWK
-	if err := json.Unmarshal(publicJWK, &jwk); err != nil {
-		t.Fatalf("parse public JWK: %v", err)
-	}
 	path := filepath.Join(t.TempDir(), "99999999900000000200.yaml")
-	if err := os.WriteFile(path, []byte(validRegistrationYAML("sha256-"+sourceMetadataJWKThumbprint(jwk))), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(validRegistrationYAML()), 0o600); err != nil {
 		t.Fatalf("write source registration: %v", err)
 	}
 	return path
 }
 
-func validRegistrationYAML(thumbprint string) string {
+func validRegistrationYAML() string {
 	return "source_oin: \"99999999900000000200\"\n" +
 		"name: \"Belastingdienst-mock\"\n" +
 		"metadata_fsc_service_reference: \"gbo-attestation-metadata\"\n" +
-		"metadata_signing_jwk_thumbprint: \"" + thumbprint + "\"\n" +
 		"data_fsc_service_reference: \"bri\"\n"
 }
 
-func metadataValidationClient(t *testing.T, payload []byte, privateKey ed25519.PrivateKey) *http.Client {
+func metadataValidationClient(t *testing.T, payload []byte) *http.Client {
 	t.Helper()
-	compact := signSourceMetadataForTest(t, payload, privateKey)
 	return &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		if got, want := request.URL.Path, "/gbo-attestation-metadata/.well-known/gbo-attestations"; got != want {
 			t.Fatalf("metadata path = %q, want %q", got, want)
@@ -367,7 +360,7 @@ func metadataValidationClient(t *testing.T, payload []byte, privateKey ed25519.P
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Header:     http.Header{"Content-Type": []string{sourceMetadataMediaType}},
-			Body:       io.NopCloser(strings.NewReader(compact)),
+			Body:       io.NopCloser(bytes.NewReader(payload)),
 			Request:    request,
 		}, nil
 	})}

@@ -1,7 +1,6 @@
 # GBO registreert alleen de bron en haar trustgrenzen. Query's, mappings en
-# Type Metadata blijven in de door de bron ondertekende metadata.
+# Type Metadata blijven in de bronmetadata die via FSC wordt opgehaald.
 source_oin: "99999999900000000200"
 name: "Belastingdienst-mock"
 metadata_fsc_service_reference: "gbo-attestation-metadata"
-metadata_signing_jwk_thumbprint: "sha256-FoVXFFQKKgHHB4GhV5yeKVKAmczLInonClnUyBtINdw"
 data_fsc_service_reference: "bri"

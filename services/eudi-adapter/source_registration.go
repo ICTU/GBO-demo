@@ -22,14 +22,12 @@ import (
 var (
 	sourceOINPattern        = regexp.MustCompile(`^[0-9]{20}$`)
 	serviceReferencePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
-	jwkThumbprintPattern    = regexp.MustCompile(`^sha256-[A-Za-z0-9_-]{43}$`)
 )
 
 type sourceRegistration struct {
 	SourceOIN                    string `json:"source_oin"`
 	Name                         string `json:"name"`
 	MetadataFSCServiceReference  string `json:"metadata_fsc_service_reference"`
-	MetadataSigningJWKThumbprint string `json:"metadata_signing_jwk_thumbprint"`
 	DataFSCServiceReference      string `json:"data_fsc_service_reference"`
 }
 
@@ -37,7 +35,6 @@ type validatedSourceRegistration struct {
 	Registration sourceRegistration
 	Document     sourceMetadataDocument
 	Payload      []byte
-	PublicJWK    json.RawMessage
 	MetadataURL  string
 	Publications []*typeMetadataPublication
 }
@@ -55,7 +52,6 @@ func loadSourceRegistration(path string) (sourceRegistration, error) {
 		SourceOIN:                    values["source_oin"],
 		Name:                         values["name"],
 		MetadataFSCServiceReference:  values["metadata_fsc_service_reference"],
-		MetadataSigningJWKThumbprint: values["metadata_signing_jwk_thumbprint"],
 		DataFSCServiceReference:      values["data_fsc_service_reference"],
 	}
 	if err := registration.validate(); err != nil {
@@ -70,7 +66,7 @@ func loadSourceRegistration(path string) (sourceRegistration, error) {
 func parseSourceRegistrationYAML(raw []byte) (map[string]string, error) {
 	allowed := map[string]bool{
 		"source_oin": true, "name": true, "metadata_fsc_service_reference": true,
-		"metadata_signing_jwk_thumbprint": true, "data_fsc_service_reference": true,
+		"data_fsc_service_reference": true,
 	}
 	values := make(map[string]string, len(allowed))
 	scanner := bufio.NewScanner(bytes.NewReader(raw))
@@ -151,9 +147,6 @@ func (r sourceRegistration) validate() error {
 	if r.MetadataFSCServiceReference == r.DataFSCServiceReference {
 		return fmt.Errorf("source registration metadata and data FSC services must be separate")
 	}
-	if !jwkThumbprintPattern.MatchString(r.MetadataSigningJWKThumbprint) {
-		return fmt.Errorf("source registration metadata signing thumbprint must be sha256- followed by a base64url SHA-256 digest")
-	}
 	return nil
 }
 
@@ -194,11 +187,7 @@ func validateSourceOnline(ctx context.Context, client *http.Client, registration
 		return nil, err
 	}
 	metadataURL := strings.TrimRight(outwayURL, "/") + "/" + registration.MetadataFSCServiceReference + "/.well-known/gbo-attestations"
-	compact, err := fetchSourceMetadataJWS(ctx, client, metadataURL)
-	if err != nil {
-		return nil, err
-	}
-	payload, publicJWK, err := verifySourceMetadataJWSWithThumbprint(compact, registration.MetadataSigningJWKThumbprint)
+	payload, err := fetchSourceMetadata(ctx, client, metadataURL)
 	if err != nil {
 		return nil, err
 	}
@@ -244,40 +233,39 @@ func validateSourceOnline(ctx context.Context, client *http.Client, registration
 		Registration: registration,
 		Document:     document,
 		Payload:      append([]byte(nil), payload...),
-		PublicJWK:    publicJWK,
 		MetadataURL:  metadataURL,
 		Publications: publications,
 	}, nil
 }
 
-func fetchSourceMetadataJWS(ctx context.Context, client *http.Client, metadataURL string) (string, error) {
+func fetchSourceMetadata(ctx context.Context, client *http.Client, metadataURL string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, metadataURL, nil)
 	if err != nil {
-		return "", fmt.Errorf("create source metadata validation request: %w", err)
+		return nil, fmt.Errorf("create source metadata validation request: %w", err)
 	}
 	txID, err := newFscTransactionID()
 	if err != nil {
-		return "", fmt.Errorf("generate source metadata Fsc-Transaction-Id: %w", err)
+		return nil, fmt.Errorf("generate source metadata Fsc-Transaction-Id: %w", err)
 	}
 	req.Header.Set("Accept", sourceMetadataMediaType)
 	req.Header.Set("Fsc-Transaction-Id", txID)
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("fetch source metadata through FSC: %w", err)
+		return nil, fmt.Errorf("fetch source metadata through FSC: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("source metadata FSC request returned status %d", resp.StatusCode)
+		return nil, fmt.Errorf("source metadata FSC request returned status %d", resp.StatusCode)
 	}
 	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if err != nil || mediaType != sourceMetadataMediaType {
-		return "", fmt.Errorf("source metadata content type must be %s", sourceMetadataMediaType)
+		return nil, fmt.Errorf("source metadata content type must be %s", sourceMetadataMediaType)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return "", fmt.Errorf("read source metadata: %w", err)
+		return nil, fmt.Errorf("read source metadata: %w", err)
 	}
-	return strings.TrimSpace(string(body)), nil
+	return body, nil
 }
 
 func decodeSourceMetadataDocument(payload []byte) (sourceMetadataDocument, error) {

@@ -1,6 +1,6 @@
 .PHONY: up down logs clean certs fsc-local-env fsc-ca fsc-up fsc-down fsc-test fsc-clean \
         fsc-seed-bri fsc-seed-bri-hv fsc-seed-brp fsc-seed-metadata fsc-pdp-cert \
-        eudi-images development-source-metadata-key source-metadata-up \
+        eudi-images source-metadata-up \
         validate-source onboard-source onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
         demo-full demo-down eudi-config
 
@@ -13,9 +13,8 @@ export
 # v0.5.0's scheme-prefixed client_id). Override in .env if needed.
 NLWALLET_PATH ?= $(PWD)/vendor/nl-wallet
 
-# Phase-4 filesystem onboarding. The fixed OIN and deterministic source metadata
-# key are strictly demo-only; issuer/reader/status keys remain randomly
-# generated below the ignored .local/ secret backend.
+# Phase-4 filesystem onboarding. Issuer/reader/status keys are generated below
+# the ignored .local/ secret backend.
 DEVELOPMENT_SOURCE_OIN ?= 99999999900000000200
 DEVELOPMENT_BRP_SOURCE_OIN ?= 99999999900000000400
 ONBOARDING_OUTWAY_URL ?= http://localhost:8087
@@ -152,19 +151,8 @@ eudi-images:
 	    -f services/eudi-issuance-server/Dockerfile "$$NLWALLET_PATH"; \
 	fi
 
-development-source-metadata-key:
-	@mkdir -p .local/secrets/source-metadata/$(DEVELOPMENT_SOURCE_OIN)
-	@cd services/graphql-server && go run . init-development-metadata-key \
-		--source-oin $(DEVELOPMENT_SOURCE_OIN) \
-		--output $(PWD)/.local/secrets/source-metadata/$(DEVELOPMENT_SOURCE_OIN)/private.jwk
-	@mkdir -p .local/secrets/source-metadata/$(DEVELOPMENT_BRP_SOURCE_OIN)
-	@cd services/graphql-server && go run . init-development-metadata-key \
-		--source-oin $(DEVELOPMENT_BRP_SOURCE_OIN) \
-		--output $(PWD)/.local/secrets/source-metadata/$(DEVELOPMENT_BRP_SOURCE_OIN)/private.jwk
-
-source-metadata-up: development-source-metadata-key
+source-metadata-up:
 	GBO_ATTESTATIONS_PATH=/config/gbo-attestations.json \
-	GBO_METADATA_SIGNING_JWK_PATH=/source-metadata/private.jwk \
 	EUDI_PUBLIC_URL="$${EUDI_PUBLIC_URL:-http://localhost:8001}" \
 	EUDI_BRI_URL="$${EUDI_BRI_URL:-http://localhost:9409}" \
 	EUDI_POSTGRES_PASSWORD="$${EUDI_POSTGRES_PASSWORD:-local-not-used}" \
@@ -183,7 +171,7 @@ validate-source:
 		--secrets-dir "$(ONBOARDING_SECRETS_DIR)"
 
 onboarding-directories:
-	@mkdir -p "$(ONBOARDING_STATE_DIR)/type-metadata" "$(ONBOARDING_STATE_DIR)/trust" "$(ONBOARDING_STATE_DIR)/active"
+	@mkdir -p "$(ONBOARDING_STATE_DIR)/type-metadata" "$(ONBOARDING_STATE_DIR)/active"
 
 onboard-source:
 	@test -n "$(SOURCE)" || { echo "ERROR: SOURCE=sources/<oin>.yaml is required"; exit 1; }

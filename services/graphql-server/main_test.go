@@ -2,39 +2,21 @@ package main
 
 import (
 	"bytes"
-	"crypto/ed25519"
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"go.opentelemetry.io/otel"
 )
 
-func TestPublishesSignedSourceMetadata(t *testing.T) {
-	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatalf("generate metadata signing key: %v", err)
-	}
-	encoding := base64.RawURLEncoding
-	privateJWK, err := json.Marshal(map[string]string{
-		"kty": "OKP",
-		"crv": "Ed25519",
-		"x":   encoding.EncodeToString(publicKey),
-		"d":   encoding.EncodeToString(privateKey.Seed()),
-	})
-	if err != nil {
-		t.Fatalf("marshal private JWK: %v", err)
-	}
+func TestPublishesSourceMetadata(t *testing.T) {
 	payload := []byte(`{"source_oin":"00000001003214345000","version":"v1","attestations":[]}`)
-	publisher, err := newSourceMetadataPublisher(payload, privateJWK)
+	publisher, err := newSourceMetadataPublisher(payload)
 	if err != nil {
 		t.Fatalf("new source metadata publisher: %v", err)
 	}
@@ -59,48 +41,19 @@ func TestPublishesSignedSourceMetadata(t *testing.T) {
 	if got, want := resp.StatusCode, http.StatusOK; got != want {
 		t.Fatalf("status = %d, want %d", got, want)
 	}
-	if got, want := resp.Header.Get("Content-Type"), "application/jose"; got != want {
+	if got, want := resp.Header.Get("Content-Type"), "application/json"; got != want {
 		t.Errorf("Content-Type = %q, want %q", got, want)
 	}
 	etag := resp.Header.Get("ETag")
 	if etag == "" {
 		t.Fatal("ETag is empty")
 	}
-	compact, err := io.ReadAll(resp.Body)
+	gotPayload, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("read source metadata: %v", err)
 	}
-	parts := strings.Split(string(compact), ".")
-	if len(parts) != 3 {
-		t.Fatalf("response is not a compact JWS: %q", compact)
-	}
-	protected, err := encoding.DecodeString(parts[0])
-	if err != nil {
-		t.Fatalf("decode protected header: %v", err)
-	}
-	var header struct {
-		JWK sourceMetadataPrivateJWK `json:"jwk"`
-	}
-	if err := json.Unmarshal(protected, &header); err != nil {
-		t.Fatalf("parse protected header: %v", err)
-	}
-	if header.JWK.KTY != "OKP" || header.JWK.CRV != "Ed25519" || header.JWK.X != encoding.EncodeToString(publicKey) || header.JWK.D != "" {
-		t.Fatalf("protected public JWK = %+v", header.JWK)
-	}
-	signingInput := parts[0] + "." + parts[1]
-	signature, err := encoding.DecodeString(parts[2])
-	if err != nil {
-		t.Fatalf("decode signature: %v", err)
-	}
-	if !ed25519.Verify(publicKey, []byte(signingInput), signature) {
-		t.Fatal("source metadata signature is invalid")
-	}
-	gotPayload, err := encoding.DecodeString(parts[1])
-	if err != nil {
-		t.Fatalf("decode payload: %v", err)
-	}
 	if !bytes.Equal(gotPayload, payload) {
-		t.Errorf("signed payload = %s, want %s", gotPayload, payload)
+		t.Errorf("payload = %s, want %s", gotPayload, payload)
 	}
 
 	req, err := http.NewRequest(http.MethodGet, srv.URL+"/.well-known/gbo-attestations", nil)
@@ -118,51 +71,6 @@ func TestPublishesSignedSourceMetadata(t *testing.T) {
 	}
 	if body, err := io.ReadAll(conditional.Body); err != nil || len(body) != 0 {
 		t.Fatalf("conditional response body = %q, err = %v; want empty", body, err)
-	}
-}
-
-func TestInitDevelopmentMetadataKeyIsIdempotentAndPrivate(t *testing.T) {
-	outputPath := filepath.Join(t.TempDir(), ".local", "source", "private.jwk")
-	arguments := []string{"init-development-metadata-key", "--source-oin", "99999999900000000200", "--output", outputPath}
-	var first, second bytes.Buffer
-	for _, output := range []*bytes.Buffer{&first, &second} {
-		handled, err := runDevelopmentMetadataKeyCommand(arguments, output, io.Discard)
-		if err != nil {
-			t.Fatalf("init development metadata key: %v", err)
-		}
-		if !handled {
-			t.Fatal("development metadata key command was not handled")
-		}
-	}
-	if first.String() != second.String() || !strings.HasPrefix(first.String(), "sha256-") {
-		t.Fatalf("thumbprints differ or are invalid: %q and %q", first.String(), second.String())
-	}
-	info, err := os.Stat(outputPath)
-	if err != nil {
-		t.Fatalf("stat development metadata key: %v", err)
-	}
-	if got := info.Mode().Perm(); got != 0o600 {
-		t.Fatalf("development metadata key mode = %o, want 600", got)
-	}
-	raw, err := os.ReadFile(outputPath)
-	if err != nil {
-		t.Fatalf("read development metadata key: %v", err)
-	}
-	if bytes.Contains(first.Bytes(), raw) {
-		t.Fatal("command output contains the private key")
-	}
-}
-
-func TestInitDevelopmentMetadataKeyRejectsUnsafeInputs(t *testing.T) {
-	for name, arguments := range map[string][]string{
-		"non-digit OIN": {"init-development-metadata-key", "--source-oin", "9999999990000000020x", "--output", filepath.Join(t.TempDir(), ".local", "key.jwk")},
-		"outside local": {"init-development-metadata-key", "--source-oin", "99999999900000000200", "--output", filepath.Join(t.TempDir(), "key.jwk")},
-	} {
-		t.Run(name, func(t *testing.T) {
-			if handled, err := runDevelopmentMetadataKeyCommand(arguments, io.Discard, io.Discard); !handled || err == nil {
-				t.Fatalf("handled = %v, error = %v; want handled error", handled, err)
-			}
-		})
 	}
 }
 

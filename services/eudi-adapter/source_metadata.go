@@ -3,16 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/ed25519"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"mime"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"gbo-demo/eudi-adapter/internal/gbosimplev1"
@@ -22,9 +18,7 @@ import (
 	"github.com/graphql-go/graphql/language/source"
 )
 
-const sourceMetadataMediaType = "application/jose"
-
-var sourceMetadataBase64URL = base64.RawURLEncoding
+const sourceMetadataMediaType = "application/json"
 
 // sourceMetadataConfig is the deliberately small phase-1 registration. A
 // later phase replaces these direct settings with the normal source
@@ -32,7 +26,6 @@ var sourceMetadataBase64URL = base64.RawURLEncoding
 type sourceMetadataConfig struct {
 	URL         string
 	ExpectedOIN string
-	PublicJWK   json.RawMessage
 	TypeID      string
 }
 
@@ -102,24 +95,10 @@ type sourceMetadataRuntime interface {
 	current(now time.Time) (*activeSourceMetadata, error)
 }
 
-type sourceMetadataJWK struct {
-	KTY string `json:"kty"`
-	CRV string `json:"crv"`
-	X   string `json:"x"`
-}
-
-type sourceMetadataJWSHeader struct {
-	Algorithm string             `json:"alg"`
-	KeyID     string             `json:"kid"`
-	Type      string             `json:"typ"`
-	Critical  []string           `json:"crit,omitempty"`
-	JWK       *sourceMetadataJWK `json:"jwk,omitempty"`
-}
-
-// loadSourceMetadata fetches the declaration through FSC, verifies it against
-// the pinned source key and OIN, validates it and selects the activated type.
+// loadSourceMetadata fetches the declaration through the source-bound FSC
+// service, validates its OIN and selects the activated type.
 func loadSourceMetadata(ctx context.Context, client *http.Client, cfg sourceMetadataConfig) (*activeSourceMetadata, error) {
-	if cfg.URL == "" || cfg.ExpectedOIN == "" || len(cfg.PublicJWK) == 0 || cfg.TypeID == "" {
+	if cfg.URL == "" || cfg.ExpectedOIN == "" || cfg.TypeID == "" {
 		return nil, fmt.Errorf("source metadata registration is incomplete")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cfg.URL, nil)
@@ -144,13 +123,9 @@ func loadSourceMetadata(ctx context.Context, client *http.Client, cfg sourceMeta
 	if err != nil || mediaType != sourceMetadataMediaType {
 		return nil, fmt.Errorf("source metadata content type must be %s", sourceMetadataMediaType)
 	}
-	compactJWS, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	payload, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return nil, fmt.Errorf("read source metadata: %w", err)
-	}
-	payload, err := verifySourceMetadataJWS(strings.TrimSpace(string(compactJWS)), cfg.PublicJWK)
-	if err != nil {
-		return nil, err
 	}
 
 	metadata, _, err := parseSourceMetadataPayload(payload, cfg)
@@ -185,92 +160,6 @@ func parseSourceMetadataPayload(payload []byte, cfg sourceMetadataConfig) (*acti
 		}, document, nil
 	}
 	return nil, sourceMetadataDocument{}, fmt.Errorf("source metadata has no attestation %q", cfg.TypeID)
-}
-
-func verifySourceMetadataJWS(compact string, rawJWK json.RawMessage) ([]byte, error) {
-	var jwk sourceMetadataJWK
-	if err := json.Unmarshal(rawJWK, &jwk); err != nil {
-		return nil, fmt.Errorf("parse source metadata JWK: %w", err)
-	}
-	if jwk.KTY != "OKP" || jwk.CRV != "Ed25519" {
-		return nil, fmt.Errorf("source metadata JWK must be an Ed25519 OKP key")
-	}
-	publicKey, err := sourceMetadataBase64URL.DecodeString(jwk.X)
-	if err != nil || len(publicKey) != ed25519.PublicKeySize {
-		return nil, fmt.Errorf("source metadata JWK has an invalid public key")
-	}
-
-	parts := strings.Split(compact, ".")
-	if len(parts) != 3 {
-		return nil, fmt.Errorf("source metadata is not a compact JWS")
-	}
-	protected, err := sourceMetadataBase64URL.DecodeString(parts[0])
-	if err != nil {
-		return nil, fmt.Errorf("decode source metadata JWS header: %w", err)
-	}
-	var header sourceMetadataJWSHeader
-	if err := json.Unmarshal(protected, &header); err != nil {
-		return nil, fmt.Errorf("parse source metadata JWS header: %w", err)
-	}
-	if header.Algorithm != "EdDSA" || header.Type != "gbo-attestations+jws" {
-		return nil, fmt.Errorf("source metadata JWS has unsupported protected headers")
-	}
-	if len(header.Critical) > 0 {
-		return nil, fmt.Errorf("source metadata JWS contains an unsupported critical JWS header")
-	}
-	if header.KeyID != sourceMetadataJWKThumbprint(jwk) {
-		return nil, fmt.Errorf("source metadata JWS key id does not match the pinned key")
-	}
-	signature, err := sourceMetadataBase64URL.DecodeString(parts[2])
-	if err != nil {
-		return nil, fmt.Errorf("decode source metadata JWS signature: %w", err)
-	}
-	if !ed25519.Verify(ed25519.PublicKey(publicKey), []byte(parts[0]+"."+parts[1]), signature) {
-		return nil, fmt.Errorf("verify source metadata JWS signature: invalid signature")
-	}
-	payload, err := sourceMetadataBase64URL.DecodeString(parts[1])
-	if err != nil {
-		return nil, fmt.Errorf("decode source metadata JWS payload: %w", err)
-	}
-	return payload, nil
-}
-
-func sourceMetadataJWKThumbprint(jwk sourceMetadataJWK) string {
-	canonical := fmt.Sprintf(`{"crv":"%s","kty":"%s","x":"%s"}`, jwk.CRV, jwk.KTY, jwk.X)
-	digest := sha256.Sum256([]byte(canonical))
-	return sourceMetadataBase64URL.EncodeToString(digest[:])
-}
-
-func verifySourceMetadataJWSWithThumbprint(compact, expectedThumbprint string) ([]byte, json.RawMessage, error) {
-	parts := strings.Split(compact, ".")
-	if len(parts) != 3 {
-		return nil, nil, fmt.Errorf("source metadata is not a compact JWS")
-	}
-	protected, err := sourceMetadataBase64URL.DecodeString(parts[0])
-	if err != nil {
-		return nil, nil, fmt.Errorf("decode source metadata JWS header: %w", err)
-	}
-	var header sourceMetadataJWSHeader
-	if err := json.Unmarshal(protected, &header); err != nil {
-		return nil, nil, fmt.Errorf("parse source metadata JWS header: %w", err)
-	}
-	if header.JWK == nil {
-		return nil, nil, fmt.Errorf("source metadata JWS header has no public jwk")
-	}
-	actual := sourceMetadataJWKThumbprint(*header.JWK)
-	want := strings.TrimPrefix(expectedThumbprint, "sha256-")
-	if want == "" || actual != want {
-		return nil, nil, fmt.Errorf("source metadata JWK thumbprint does not match the registered thumbprint")
-	}
-	rawJWK, err := json.Marshal(header.JWK)
-	if err != nil {
-		return nil, nil, fmt.Errorf("marshal source metadata public JWK: %w", err)
-	}
-	payload, err := verifySourceMetadataJWS(compact, rawJWK)
-	if err != nil {
-		return nil, nil, err
-	}
-	return payload, rawJWK, nil
 }
 
 func validateSourceAttestation(definition sourceAttestationDefinition) error {

@@ -121,18 +121,10 @@ func configFromSourceActivation(cfg config) (config, error) {
 	if len(activation.Types) != 1 || activation.Types[0].TypeID == "" {
 		return config{}, fmt.Errorf("active source registration must contain exactly one attestation type")
 	}
-	if cfg.SourceMetadataTrustPath == "" {
-		return config{}, fmt.Errorf("SOURCE_METADATA_TRUST_PATH is required when source metadata is enabled")
-	}
-	expectedJWKName := activation.Source.SourceOIN + "-" + strings.TrimPrefix(activation.Source.MetadataSigningJWKThumbprint, "sha256-") + ".jwk"
-	if filepath.Base(activation.PublicJWKReference) != expectedJWKName {
-		return config{}, fmt.Errorf("active source public JWK reference does not match the registered source and thumbprint")
-	}
 	cfg.SourceMetadataOIN = activation.Source.SourceOIN
 	cfg.SourceMetadataTypeID = activation.Types[0].TypeID
 	cfg.SourceMetadataOutwayPath = "/" + activation.Source.MetadataFSCServiceReference + "/.well-known/gbo-attestations"
 	cfg.SourceDataOutwayPath = "/" + activation.Source.DataFSCServiceReference + "/graphql"
-	cfg.SourceMetadataPublicJWKPath = filepath.Join(cfg.SourceMetadataTrustPath, expectedJWKName)
 	return cfg, nil
 }
 
@@ -177,20 +169,12 @@ func configsFromSourceActivations(cfg config) ([]config, error) {
 }
 
 func loadConfiguredSourceMetadataCache(client *http.Client, cfg config) (*sourceMetadataCache, error) {
-	if cfg.SourceMetadataPublicJWKPath == "" {
-		return nil, fmt.Errorf("active source registration did not resolve a pinned public JWK")
-	}
 	if !strings.HasPrefix(cfg.SourceMetadataOutwayPath, "/") || strings.HasPrefix(cfg.SourceMetadataOutwayPath, "//") {
 		return nil, fmt.Errorf("active source registration did not resolve a valid FSC Outway path")
-	}
-	publicJWK, err := os.ReadFile(cfg.SourceMetadataPublicJWKPath)
-	if err != nil {
-		return nil, fmt.Errorf("read source metadata public JWK: %w", err)
 	}
 	return newSourceMetadataCache(client, sourceMetadataConfig{
 		URL:         strings.TrimRight(cfg.OutwayURL, "/") + cfg.SourceMetadataOutwayPath,
 		ExpectedOIN: cfg.SourceMetadataOIN,
-		PublicJWK:   publicJWK,
 		TypeID:      cfg.SourceMetadataTypeID,
 	}, cfg.TypeMetadataPublicBaseURL, cfg.TypeMetadataStorePath, defaultSourceMetadataCachePolicy)
 }
@@ -213,7 +197,7 @@ func startSourceMetadataRefresh(ctx context.Context, cache *sourceMetadataCache,
 }
 
 func newSourceMetadataCache(client *http.Client, registration sourceMetadataConfig, publicBaseURL, storePath string, policy sourceMetadataCachePolicy) (*sourceMetadataCache, error) {
-	if client == nil || registration.URL == "" || registration.ExpectedOIN == "" || len(registration.PublicJWK) == 0 || registration.TypeID == "" {
+	if client == nil || registration.URL == "" || registration.ExpectedOIN == "" || registration.TypeID == "" {
 		return nil, fmt.Errorf("source metadata cache registration is incomplete")
 	}
 	if publicBaseURL == "" || storePath == "" {
@@ -288,13 +272,9 @@ func (c *sourceMetadataCache) Refresh(ctx context.Context, now time.Time) error 
 		return fmt.Errorf("source metadata content type must be %s", sourceMetadataMediaType)
 	}
 	responseETag := resp.Header.Get("ETag")
-	compactJWS, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	payload, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return fmt.Errorf("read source metadata: %w", err)
-	}
-	payload, err := verifySourceMetadataJWS(strings.TrimSpace(string(compactJWS)), c.registration.PublicJWK)
-	if err != nil {
-		return err
 	}
 	metadata, document, err := parseSourceMetadataPayload(payload, c.registration)
 	if err != nil {

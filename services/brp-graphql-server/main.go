@@ -140,34 +140,28 @@ type Buitenlandsadres struct {
 const readHeaderTimeout = 10 * time.Second
 
 type config struct {
-	Port                   string
-	MockDataPath           string
-	SourceMetadataPath     string
-	MetadataSigningJWKPath string
+	Port               string
+	MockDataPath       string
+	SourceMetadataPath string
 }
 
 func loadConfig() (config, error) {
 	return config{
-		Port:                   getEnv("PORT", "4001"),
-		MockDataPath:           getEnv("MOCKDATA_PATH", "mockdata/personen.json"),
-		SourceMetadataPath:     os.Getenv("GBO_ATTESTATIONS_PATH"),
-		MetadataSigningJWKPath: os.Getenv("GBO_METADATA_SIGNING_JWK_PATH"),
+		Port:               getEnv("PORT", "4001"),
+		MockDataPath:       getEnv("MOCKDATA_PATH", "mockdata/personen.json"),
+		SourceMetadataPath: os.Getenv("GBO_ATTESTATIONS_PATH"),
 	}, nil
 }
 
 func loadSourceMetadataPublisher(cfg config) (*sourceMetadataPublisher, error) {
-	if cfg.SourceMetadataPath == "" || cfg.MetadataSigningJWKPath == "" {
-		return nil, fmt.Errorf("GBO_ATTESTATIONS_PATH and GBO_METADATA_SIGNING_JWK_PATH are required")
+	if cfg.SourceMetadataPath == "" {
+		return nil, fmt.Errorf("GBO_ATTESTATIONS_PATH is required")
 	}
 	payload, err := os.ReadFile(cfg.SourceMetadataPath)
 	if err != nil {
 		return nil, fmt.Errorf("read source metadata: %w", err)
 	}
-	privateJWK, err := os.ReadFile(cfg.MetadataSigningJWKPath)
-	if err != nil {
-		return nil, fmt.Errorf("read source metadata signing JWK: %w", err)
-	}
-	return newSourceMetadataPublisher(payload, privateJWK)
+	return newSourceMetadataPublisher(payload)
 }
 
 func getEnv(key, fallback string) string {

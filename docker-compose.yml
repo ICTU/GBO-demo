@@ -158,10 +158,8 @@ services:
       - OTEL_SERVICE_NAME=graphql-server
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
       - GBO_ATTESTATIONS_PATH=${GBO_ATTESTATIONS_PATH:-}
-      - GBO_METADATA_SIGNING_JWK_PATH=${GBO_METADATA_SIGNING_JWK_PATH:-}
     volumes:
       - ./services/graphql-server/config:/config:ro
-      - ./.local/secrets/source-metadata/99999999900000000200:/source-metadata:ro
     networks:
       - backend
       # bd-Inway forwards bri requests to graphql-server; must therefore
@@ -188,10 +186,8 @@ services:
       - OTEL_SERVICE_NAME=brp-graphql-server
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
       - GBO_ATTESTATIONS_PATH=/config/gbo-attestations.json
-      - GBO_METADATA_SIGNING_JWK_PATH=/source-metadata/private.jwk
     volumes:
       - ./services/brp-graphql-server/config:/config:ro
-      - ./.local/secrets/source-metadata/99999999900000000400:/source-metadata:ro
     networks:
       - backend
       - fsc-infra
@@ -704,15 +700,13 @@ services:
       - FSC_OUTWAY_URL=http://edi-outway:8080
       - ISSUER_OIN=99999999900000000100
       # Source metadata is activated from the single atomic onboarding record;
-      # OIN, type, FSC service and pinned JWK are not duplicated in env-vars.
+      # OIN, type and FSC services are not duplicated in env-vars.
       - SOURCE_ACTIVATIONS_PATH=/var/lib/gbo/active
-      - SOURCE_METADATA_TRUST_PATH=/var/lib/gbo/source-trust
       - TYPE_METADATA_PUBLIC_BASE_URL=${EUDI_BRI_URL:-}
       - TYPE_METADATA_STORE_PATH=/var/lib/gbo/type-metadata
     volumes:
       - ./.local/onboarding/active:/var/lib/gbo/active:ro
       - ./.local/onboarding/type-metadata:/var/lib/gbo/type-metadata
-      - ./.local/onboarding/trust:/var/lib/gbo/source-trust:ro
     networks:
       - eudi
       - backend

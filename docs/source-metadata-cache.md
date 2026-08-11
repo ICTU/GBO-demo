@@ -9,11 +9,10 @@ fail-closed; er bestaat geen catalogus- of formatterfallback.
 | Variabele | Betekenis |
 |---|---|
 | `SOURCE_ACTIVATIONS_PATH` | Directory met één atomair activatierecord per geonboarde bron/type-combinatie. |
-| `SOURCE_METADATA_TRUST_PATH` | Mount met de door onboarding gepinde publieke bronkeys. |
 | `TYPE_METADATA_PUBLIC_BASE_URL` | Publieke basis-URL van de adapter, bijvoorbeeld de waarde van `EUDI_BRI_URL` zonder verplicht trailing slash. |
 | `TYPE_METADATA_STORE_PATH` | Duurzame opslag voor immutable Type Metadata; standaard `/var/lib/gbo/type-metadata`. |
 
-OIN, type-id, FSC-servicereferentie en JWK-bestandsnaam worden uit het ene
+OIN, type-id en FSC-servicereferentie worden uit het ene
 activatierecord afgeleid en niet nogmaals als losse env-vars geconfigureerd.
 De runtime scant alle `*.json`-activatierecords en activeert precies één type
 per record.
@@ -23,8 +22,8 @@ per record.
 - GBO haalt alleen via het geregistreerde FSC-pad op. Als de bron een ETag
   aanbiedt, stuurt GBO die bij de volgende refresh als `If-None-Match`; zonder
   ETag blijft de fetch onvoorwaardelijk en bewaakt GBO versies en payloaddigests.
-- Iedere `200` wordt opnieuw op JWS, gepinde sleutel, bron-OIN, tijden, query,
-  mapping en monotone bron- en typeversie gevalideerd; een `304` verlengt alleen
+- Iedere `200` wordt opnieuw op bron-OIN, tijden, query, mapping en monotone
+  bron- en typeversie gevalideerd; een `304` verlengt alleen
   de bestaande cachetermijn.
 - GBO vereist bij acceptatie minimaal één uur resterende brongeldigheid,
   refresht iedere vijf minuten, vertrouwt een succesvolle refresh maximaal

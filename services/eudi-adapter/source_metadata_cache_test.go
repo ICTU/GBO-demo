@@ -3,8 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -25,8 +23,7 @@ func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) 
 }
 
 func TestSourceMetadataCacheRefreshesConditionallyAndExpiresFailClosed(t *testing.T) {
-	payload, publicJWK, privateKey := sourceMetadataCacheFixture(t)
-	compact := signSourceMetadataForTest(t, payload, privateKey)
+	payload := sourceMetadataCacheFixture(t)
 	requests := 0
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		requests++
@@ -36,9 +33,9 @@ func TestSourceMetadataCacheRefreshesConditionallyAndExpiresFailClosed(t *testin
 		if requests == 2 {
 			return metadataHTTPResponse(http.StatusNotModified, `"source-v1"`, nil), nil
 		}
-		return metadataHTTPResponse(http.StatusOK, `"source-v1"`, []byte(compact)), nil
+		return metadataHTTPResponse(http.StatusOK, `"source-v1"`, payload), nil
 	})}
-	cache := newTestSourceMetadataCache(t, client, publicJWK)
+	cache := newTestSourceMetadataCache(t, client)
 	now := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
 
 	if err := cache.Refresh(context.Background(), now); err != nil {
@@ -70,15 +67,14 @@ func TestSourceMetadataCacheRefreshesConditionallyAndExpiresFailClosed(t *testin
 }
 
 func TestSourceMetadataCacheAcceptsResponsesWithoutETag(t *testing.T) {
-	payload, publicJWK, privateKey := sourceMetadataCacheFixture(t)
-	compact := signSourceMetadataForTest(t, payload, privateKey)
+	payload := sourceMetadataCacheFixture(t)
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		if got := request.Header.Get("If-None-Match"); got != "" {
 			t.Errorf("unconditional refresh sent If-None-Match %q", got)
 		}
-		return metadataHTTPResponse(http.StatusOK, "", []byte(compact)), nil
+		return metadataHTTPResponse(http.StatusOK, "", payload), nil
 	})}
-	cache := newTestSourceMetadataCache(t, client, publicJWK)
+	cache := newTestSourceMetadataCache(t, client)
 	now := time.Now()
 	if err := cache.Refresh(context.Background(), now); err != nil {
 		t.Fatalf("refresh without ETag: %v", err)
@@ -95,11 +91,11 @@ func TestSourceMetadataCacheRejectsChangedBytesAtSameVersion(t *testing.T) {
 			name = "after restart"
 		}
 		t.Run(name, func(t *testing.T) {
-			payload, publicJWK, privateKey := sourceMetadataCacheFixture(t)
+			payload := sourceMetadataCacheFixture(t)
 			changed := bytes.Replace(payload, []byte(`"Inkomensverklaring"`), []byte(`"Gewijzigde inkomensverklaring"`), 1)
 			responses := [][]byte{
-				[]byte(signSourceMetadataForTest(t, payload, privateKey)),
-				[]byte(signSourceMetadataForTest(t, changed, privateKey)),
+				payload,
+				changed,
 			}
 			requestIndex := 0
 			client := &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
@@ -108,13 +104,13 @@ func TestSourceMetadataCacheRejectsChangedBytesAtSameVersion(t *testing.T) {
 				return metadataHTTPResponse(http.StatusOK, `"source-refresh"`, body), nil
 			})}
 			storePath := t.TempDir()
-			cache := newTestSourceMetadataCacheAt(t, client, publicJWK, storePath)
+			cache := newTestSourceMetadataCacheAt(t, client, storePath)
 			now := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
 			if err := cache.Refresh(context.Background(), now); err != nil {
 				t.Fatalf("initial refresh: %v", err)
 			}
 			if restart {
-				cache = newTestSourceMetadataCacheAt(t, client, publicJWK, storePath)
+				cache = newTestSourceMetadataCacheAt(t, client, storePath)
 			}
 			if err := cache.Refresh(context.Background(), now.Add(time.Minute)); err == nil || !strings.Contains(err.Error(), "changed bytes") {
 				t.Fatalf("changed same-version refresh error = %v", err)
@@ -124,11 +120,11 @@ func TestSourceMetadataCacheRejectsChangedBytesAtSameVersion(t *testing.T) {
 }
 
 func TestSourceMetadataCacheKeepsOlderTypeVersionReachable(t *testing.T) {
-	payload, publicJWK, privateKey := sourceMetadataCacheFixture(t)
+	payload := sourceMetadataCacheFixture(t)
 	nextPayload := mutateSourceMetadataVersions(t, payload, "9.0.0", "9.0")
 	responses := [][]byte{
-		[]byte(signSourceMetadataForTest(t, payload, privateKey)),
-		[]byte(signSourceMetadataForTest(t, nextPayload, privateKey)),
+		payload,
+		nextPayload,
 	}
 	requestIndex := 0
 	client := &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
@@ -136,7 +132,7 @@ func TestSourceMetadataCacheKeepsOlderTypeVersionReachable(t *testing.T) {
 		requestIndex++
 		return metadataHTTPResponse(http.StatusOK, `"source-refresh"`, body), nil
 	})}
-	cache := newTestSourceMetadataCache(t, client, publicJWK)
+	cache := newTestSourceMetadataCache(t, client)
 	now := time.Now()
 	if err := cache.Refresh(context.Background(), now); err != nil {
 		t.Fatalf("initial refresh: %v", err)
@@ -168,12 +164,12 @@ func TestSourceMetadataCacheRejectsRollbackBeforeAndAfterRestart(t *testing.T) {
 			name = "after restart"
 		}
 		t.Run(name, func(t *testing.T) {
-			payload, publicJWK, privateKey := sourceMetadataCacheFixture(t)
+			payload := sourceMetadataCacheFixture(t)
 			nextPayload := mutateSourceMetadataVersions(t, payload, "9.0.0", "9.0")
 			responses := [][]byte{
-				[]byte(signSourceMetadataForTest(t, payload, privateKey)),
-				[]byte(signSourceMetadataForTest(t, nextPayload, privateKey)),
-				[]byte(signSourceMetadataForTest(t, payload, privateKey)),
+				payload,
+				nextPayload,
+				payload,
 			}
 			requestIndex := 0
 			client := &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
@@ -182,7 +178,7 @@ func TestSourceMetadataCacheRejectsRollbackBeforeAndAfterRestart(t *testing.T) {
 				return metadataHTTPResponse(http.StatusOK, `"source-refresh"`, body), nil
 			})}
 			storePath := t.TempDir()
-			cache := newTestSourceMetadataCacheAt(t, client, publicJWK, storePath)
+			cache := newTestSourceMetadataCacheAt(t, client, storePath)
 			now := time.Now()
 			if err := cache.Refresh(context.Background(), now); err != nil {
 				t.Fatalf("initial refresh: %v", err)
@@ -191,7 +187,7 @@ func TestSourceMetadataCacheRejectsRollbackBeforeAndAfterRestart(t *testing.T) {
 				t.Fatalf("forward refresh: %v", err)
 			}
 			if restart {
-				cache = newTestSourceMetadataCacheAt(t, client, publicJWK, storePath)
+				cache = newTestSourceMetadataCacheAt(t, client, storePath)
 			}
 			if err := cache.Refresh(context.Background(), now.Add(2*time.Minute)); err == nil || !strings.Contains(err.Error(), "rollback") {
 				t.Fatalf("rollback error = %v, want rollback rejection", err)
@@ -201,13 +197,13 @@ func TestSourceMetadataCacheRejectsRollbackBeforeAndAfterRestart(t *testing.T) {
 }
 
 func TestSourceMetadataCacheRejectsTypeRollbackAfterRestart(t *testing.T) {
-	payload, publicJWK, privateKey := sourceMetadataCacheFixture(t)
+	payload := sourceMetadataCacheFixture(t)
 	nextPayload := mutateSourceMetadataVersions(t, payload, "9.0.0", "9.0")
 	typeRollback := mutateSourceMetadataVersions(t, payload, "10.0.0", "0.1")
 	responses := [][]byte{
-		[]byte(signSourceMetadataForTest(t, payload, privateKey)),
-		[]byte(signSourceMetadataForTest(t, nextPayload, privateKey)),
-		[]byte(signSourceMetadataForTest(t, typeRollback, privateKey)),
+		payload,
+		nextPayload,
+		typeRollback,
 	}
 	requestIndex := 0
 	client := &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
@@ -216,7 +212,7 @@ func TestSourceMetadataCacheRejectsTypeRollbackAfterRestart(t *testing.T) {
 		return metadataHTTPResponse(http.StatusOK, `"source-refresh"`, body), nil
 	})}
 	storePath := t.TempDir()
-	cache := newTestSourceMetadataCacheAt(t, client, publicJWK, storePath)
+	cache := newTestSourceMetadataCacheAt(t, client, storePath)
 	now := time.Now()
 	if err := cache.Refresh(context.Background(), now); err != nil {
 		t.Fatalf("initial refresh: %v", err)
@@ -224,19 +220,18 @@ func TestSourceMetadataCacheRejectsTypeRollbackAfterRestart(t *testing.T) {
 	if err := cache.Refresh(context.Background(), now.Add(time.Minute)); err != nil {
 		t.Fatalf("forward refresh: %v", err)
 	}
-	restarted := newTestSourceMetadataCacheAt(t, client, publicJWK, storePath)
+	restarted := newTestSourceMetadataCacheAt(t, client, storePath)
 	if err := restarted.Refresh(context.Background(), now.Add(2*time.Minute)); err == nil || !strings.Contains(err.Error(), "type metadata version rollback") {
 		t.Fatalf("type rollback error = %v, want type metadata rollback rejection", err)
 	}
 }
 
 func TestAdapterActivatesOnlyCachedTypeAndBindsIssuableDocument(t *testing.T) {
-	payload, publicJWK, privateKey := sourceMetadataCacheFixture(t)
-	compact := signSourceMetadataForTest(t, payload, privateKey)
+	payload := sourceMetadataCacheFixture(t)
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		switch request.URL.Host {
 		case "source.example":
-			return metadataHTTPResponse(http.StatusOK, `"source-v1"`, []byte(compact)), nil
+			return metadataHTTPResponse(http.StatusOK, `"source-v1"`, payload), nil
 		case "outway.example":
 			return jsonHTTPResponse(http.StatusOK, []byte(completeIncomeResponse)), nil
 		default:
@@ -244,7 +239,7 @@ func TestAdapterActivatesOnlyCachedTypeAndBindsIssuableDocument(t *testing.T) {
 			return nil, nil
 		}
 	})}
-	cache := newTestSourceMetadataCache(t, client, publicJWK)
+	cache := newTestSourceMetadataCache(t, client)
 	if err := cache.Refresh(context.Background(), time.Now()); err != nil {
 		t.Fatalf("initial refresh: %v", err)
 	}
@@ -297,13 +292,12 @@ func TestAdapterActivatesOnlyCachedTypeAndBindsIssuableDocument(t *testing.T) {
 }
 
 func TestPublishedTypeMetadataSurvivesCacheRestart(t *testing.T) {
-	payload, publicJWK, privateKey := sourceMetadataCacheFixture(t)
-	compact := signSourceMetadataForTest(t, payload, privateKey)
+	payload := sourceMetadataCacheFixture(t)
 	client := &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
-		return metadataHTTPResponse(http.StatusOK, `"source-v1"`, []byte(compact)), nil
+		return metadataHTTPResponse(http.StatusOK, `"source-v1"`, payload), nil
 	})}
 	storePath := t.TempDir()
-	first := newTestSourceMetadataCacheAt(t, client, publicJWK, storePath)
+	first := newTestSourceMetadataCacheAt(t, client, storePath)
 	if err := first.Refresh(context.Background(), time.Now()); err != nil {
 		t.Fatalf("initial refresh: %v", err)
 	}
@@ -312,7 +306,7 @@ func TestPublishedTypeMetadataSurvivesCacheRestart(t *testing.T) {
 		t.Fatalf("current metadata: %v", err)
 	}
 
-	restarted := newTestSourceMetadataCacheAt(t, client, publicJWK, storePath)
+	restarted := newTestSourceMetadataCacheAt(t, client, storePath)
 	request := httptest.NewRequest(http.MethodGet, active.VCT, nil)
 	recorder := httptest.NewRecorder()
 	restarted.ServeHTTP(recorder, request)
@@ -325,13 +319,12 @@ func TestPublishedTypeMetadataSurvivesCacheRestart(t *testing.T) {
 }
 
 func TestCacheRestartRejectsCorruptedTypeMetadata(t *testing.T) {
-	payload, publicJWK, privateKey := sourceMetadataCacheFixture(t)
-	compact := signSourceMetadataForTest(t, payload, privateKey)
+	payload := sourceMetadataCacheFixture(t)
 	client := &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
-		return metadataHTTPResponse(http.StatusOK, `"source-v1"`, []byte(compact)), nil
+		return metadataHTTPResponse(http.StatusOK, `"source-v1"`, payload), nil
 	})}
 	storePath := t.TempDir()
-	cache := newTestSourceMetadataCacheAt(t, client, publicJWK, storePath)
+	cache := newTestSourceMetadataCacheAt(t, client, storePath)
 	if err := cache.Refresh(context.Background(), time.Now()); err != nil {
 		t.Fatalf("initial refresh: %v", err)
 	}
@@ -359,7 +352,6 @@ func TestCacheRestartRejectsCorruptedTypeMetadata(t *testing.T) {
 	_, err = newSourceMetadataCache(client, sourceMetadataConfig{
 		URL:         "https://source.example/.well-known/gbo-attestations",
 		ExpectedOIN: "99999999900000000200",
-		PublicJWK:   publicJWK,
 		TypeID:      "inkomensverklaring",
 	}, "https://issuer.example", storePath, sourceMetadataCachePolicy{
 		MinimumValidity:  time.Hour,
@@ -372,13 +364,12 @@ func TestCacheRestartRejectsCorruptedTypeMetadata(t *testing.T) {
 }
 
 func TestCacheRestartRejectsCorruptedActivationState(t *testing.T) {
-	payload, publicJWK, privateKey := sourceMetadataCacheFixture(t)
-	compact := signSourceMetadataForTest(t, payload, privateKey)
+	payload := sourceMetadataCacheFixture(t)
 	client := &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
-		return metadataHTTPResponse(http.StatusOK, `"source-v1"`, []byte(compact)), nil
+		return metadataHTTPResponse(http.StatusOK, `"source-v1"`, payload), nil
 	})}
 	storePath := t.TempDir()
-	cache := newTestSourceMetadataCacheAt(t, client, publicJWK, storePath)
+	cache := newTestSourceMetadataCacheAt(t, client, storePath)
 	if err := cache.Refresh(context.Background(), time.Now()); err != nil {
 		t.Fatalf("initial refresh: %v", err)
 	}
@@ -414,7 +405,6 @@ func TestCacheRestartRejectsCorruptedActivationState(t *testing.T) {
 	_, err = newSourceMetadataCache(client, sourceMetadataConfig{
 		URL:         "https://source.example/.well-known/gbo-attestations",
 		ExpectedOIN: "99999999900000000200",
-		PublicJWK:   publicJWK,
 		TypeID:      "inkomensverklaring",
 	}, "https://issuer.example", storePath, sourceMetadataCachePolicy{
 		MinimumValidity:  time.Hour,
@@ -439,20 +429,15 @@ func TestActivatedSourceFailsClosedWithoutActiveCache(t *testing.T) {
 }
 
 func TestActiveSourceRegistrationResolvesRuntimeBinding(t *testing.T) {
-	trustPath := filepath.Join(t.TempDir(), "trust")
-	thumbprint := strings.Repeat("A", 43)
-	jwkName := "99999999900000000200-" + thumbprint + ".jwk"
 	activation := sourceActivation{
 		SchemaVersion: "1.0",
 		Source: sourceRegistration{
-			SourceOIN:                    "99999999900000000200",
-			Name:                         "Belastingdienst-mock",
-			MetadataFSCServiceReference:  "gbo-attestation-metadata",
-			MetadataSigningJWKThumbprint: "sha256-" + thumbprint,
-			DataFSCServiceReference:      "bri",
+			SourceOIN:                   "99999999900000000200",
+			Name:                        "Belastingdienst-mock",
+			MetadataFSCServiceReference: "gbo-attestation-metadata",
+			DataFSCServiceReference:     "bri",
 		},
-		PublicJWKReference: "/host/onboarding/trust/" + jwkName,
-		Types:              []activatedType{{TypeID: "inkomensverklaring"}},
+		Types: []activatedType{{TypeID: "inkomensverklaring"}},
 	}
 	raw, err := json.Marshal(activation)
 	if err != nil {
@@ -463,10 +448,7 @@ func TestActiveSourceRegistrationResolvesRuntimeBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resolved, err := configFromSourceActivation(config{
-		SourceActivationPath:    activationPath,
-		SourceMetadataTrustPath: trustPath,
-	})
+	resolved, err := configFromSourceActivation(config{SourceActivationPath: activationPath})
 	if err != nil {
 		t.Fatalf("resolve active source registration: %v", err)
 	}
@@ -482,19 +464,15 @@ func TestActiveSourceRegistrationResolvesRuntimeBinding(t *testing.T) {
 	if got, want := resolved.SourceDataOutwayPath, "/bri/graphql"; got != want {
 		t.Errorf("data Outway path = %q, want %q", got, want)
 	}
-	if got, want := resolved.SourceMetadataPublicJWKPath, filepath.Join(trustPath, jwkName); got != want {
-		t.Errorf("public JWK path = %q, want %q", got, want)
-	}
 }
 
 func TestUnavailableSourceStillServesPreviouslyPublishedTypeMetadata(t *testing.T) {
-	payload, publicJWK, privateKey := sourceMetadataCacheFixture(t)
-	compact := signSourceMetadataForTest(t, payload, privateKey)
+	payload := sourceMetadataCacheFixture(t)
 	client := &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
-		return metadataHTTPResponse(http.StatusOK, `"source-v1"`, []byte(compact)), nil
+		return metadataHTTPResponse(http.StatusOK, `"source-v1"`, payload), nil
 	})}
 	storePath := t.TempDir()
-	cache := newTestSourceMetadataCacheAt(t, client, publicJWK, storePath)
+	cache := newTestSourceMetadataCacheAt(t, client, storePath)
 	if err := cache.Refresh(context.Background(), time.Now()); err != nil {
 		t.Fatalf("initial refresh: %v", err)
 	}
@@ -512,25 +490,13 @@ func TestUnavailableSourceStillServesPreviouslyPublishedTypeMetadata(t *testing.
 	}
 }
 
-func sourceMetadataCacheFixture(t *testing.T) ([]byte, json.RawMessage, ed25519.PrivateKey) {
+func sourceMetadataCacheFixture(t *testing.T) []byte {
 	t.Helper()
 	payload, err := os.ReadFile("../graphql-server/config/gbo-attestations.json")
 	if err != nil {
 		t.Fatalf("read source metadata fixture: %v", err)
 	}
-	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatalf("generate signing key: %v", err)
-	}
-	publicJWK, err := json.Marshal(map[string]string{
-		"kty": "OKP",
-		"crv": "Ed25519",
-		"x":   testBase64URL.EncodeToString(publicKey),
-	})
-	if err != nil {
-		t.Fatalf("marshal public JWK: %v", err)
-	}
-	return payload, publicJWK, privateKey
+	return payload
 }
 
 func mutateSourceMetadataVersions(t *testing.T, payload []byte, sourceVersion, typeVersion string) []byte {
@@ -549,17 +515,16 @@ func mutateSourceMetadataVersions(t *testing.T, payload []byte, sourceVersion, t
 	return mutated
 }
 
-func newTestSourceMetadataCache(t *testing.T, client *http.Client, publicJWK json.RawMessage) *sourceMetadataCache {
+func newTestSourceMetadataCache(t *testing.T, client *http.Client) *sourceMetadataCache {
 	t.Helper()
-	return newTestSourceMetadataCacheAt(t, client, publicJWK, t.TempDir())
+	return newTestSourceMetadataCacheAt(t, client, t.TempDir())
 }
 
-func newTestSourceMetadataCacheAt(t *testing.T, client *http.Client, publicJWK json.RawMessage, storePath string) *sourceMetadataCache {
+func newTestSourceMetadataCacheAt(t *testing.T, client *http.Client, storePath string) *sourceMetadataCache {
 	t.Helper()
 	cache, err := newSourceMetadataCache(client, sourceMetadataConfig{
 		URL:         "https://source.example/.well-known/gbo-attestations",
 		ExpectedOIN: "99999999900000000200",
-		PublicJWK:   publicJWK,
 		TypeID:      "inkomensverklaring",
 	}, "https://issuer.example", storePath, sourceMetadataCachePolicy{
 		MinimumValidity:  time.Hour,

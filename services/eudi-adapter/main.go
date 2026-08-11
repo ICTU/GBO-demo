@@ -17,8 +17,9 @@
 // still differs (PID vs consent). OIN authenticates the actor and the path,
 // not the per-request authorization.
 //
-// Every credential type is supplied by an onboarded source. The source-owned,
-// signed metadata defines the GraphQL query, its parameters and the claim
+// Every credential type is supplied by an onboarded source. The source-owned
+// metadata, fetched through its source-bound FSC service, defines the GraphQL
+// query, its parameters and the claim
 // mapping; the adapter contains no source-specific query or formatter.
 //
 // DELIBERATELY OUT OF SCOPE for V1:
@@ -77,15 +78,13 @@ type config struct {
 
 	// These fields are resolved from the active onboarding record before the
 	// cache starts; they are deliberately not separate deployment settings.
-	SourceMetadataOutwayPath    string
-	SourceDataOutwayPath        string
-	SourceMetadataOIN           string
-	SourceMetadataPublicJWKPath string
-	SourceMetadataTypeID        string
+	SourceMetadataOutwayPath string
+	SourceDataOutwayPath     string
+	SourceMetadataOIN        string
+	SourceMetadataTypeID     string
 
 	SourceActivationPath      string
 	SourceActivationsPath     string
-	SourceMetadataTrustPath   string
 	TypeMetadataPublicBaseURL string
 	TypeMetadataStorePath     string
 }
@@ -96,7 +95,6 @@ func loadConfig() config {
 		OutwayURL:                 getEnv("FSC_OUTWAY_URL", "http://edi-outway:8080"),
 		IssuerOIN:                 getEnv("ISSUER_OIN", "00000004000000004000"),
 		SourceActivationsPath:     os.Getenv("SOURCE_ACTIVATIONS_PATH"),
-		SourceMetadataTrustPath:   getEnv("SOURCE_METADATA_TRUST_PATH", "/var/lib/gbo/source-trust"),
 		TypeMetadataPublicBaseURL: os.Getenv("TYPE_METADATA_PUBLIC_BASE_URL"),
 		TypeMetadataStorePath:     getEnv("TYPE_METADATA_STORE_PATH", "/var/lib/gbo/type-metadata"),
 	}
