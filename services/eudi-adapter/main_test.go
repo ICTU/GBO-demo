@@ -363,6 +363,10 @@ func TestSourceMetadataRejectedDuringOnboarding(t *testing.T) {
 				"attestations": []any{map[string]any{
 					"type_id":      "inkomensverklaring",
 					"type_version": "1.0",
+					"offers": []any{map[string]any{
+						"id": "inkomensverklaring_2024", "label": "Inkomensverklaring 2024",
+						"parameters": map[string]any{"jaar": 2024},
+					}},
 					"graphql": map[string]any{
 						"document":         query,
 						"subject_variable": "bsn",

@@ -59,11 +59,19 @@ func (d sourceMetadataDocument) eudiAttestations() []sourceAttestationDefinition
 type sourceAttestationDefinition struct {
 	TypeID          string                           `json:"type_id"`
 	TypeVersion     string                           `json:"type_version"`
+	Offers          []sourceOffer                    `json:"offers"`
 	GraphQL         sourceGraphQL                    `json:"graphql"`
 	MappingProfile  string                           `json:"mapping_profile"`
 	Mapping         gbosimplev1.Mapping              `json:"mapping"`
 	AttributeSchema map[string]sourceAttributeSchema `json:"attribute_schema"`
 	TypeMetadata    json.RawMessage                  `json:"type_metadata"`
+}
+
+type sourceOffer struct {
+	ID          string         `json:"id"`
+	Label       string         `json:"label"`
+	Description string         `json:"description,omitempty"`
+	Parameters  map[string]any `json:"parameters"`
 }
 
 type sourceGraphQL struct {
@@ -202,6 +210,9 @@ func validateSourceAttestation(definition sourceAttestationDefinition) error {
 	if definition.GraphQL.ResultPointer == "" {
 		return fmt.Errorf("graphql.result_pointer is required")
 	}
+	if err := validateSourceOffers(definition); err != nil {
+		return err
+	}
 	if definition.MappingProfile != "gbo-simple-v1" {
 		return fmt.Errorf("unsupported mapping_profile %q", definition.MappingProfile)
 	}
@@ -231,6 +242,88 @@ func validateSourceAttestation(definition sourceAttestationDefinition) error {
 		return fmt.Errorf("GraphQL document must contain exactly one query operation")
 	}
 	return nil
+}
+
+func validateSourceOffers(definition sourceAttestationDefinition) error {
+	if len(definition.Offers) == 0 {
+		return fmt.Errorf("offers must contain at least one concrete issuance option")
+	}
+	seen := make(map[string]struct{}, len(definition.Offers))
+	for _, offer := range definition.Offers {
+		if offer.ID == "" || offer.Label == "" {
+			return fmt.Errorf("offer id and label are required")
+		}
+		if _, duplicate := seen[offer.ID]; duplicate {
+			return fmt.Errorf("duplicate offer id %q", offer.ID)
+		}
+		seen[offer.ID] = struct{}{}
+		for name, parameter := range definition.GraphQL.Parameters {
+			value, supplied := offer.Parameters[name]
+			if !supplied {
+				if parameter.Required {
+					return fmt.Errorf("offer %q has no value for required parameter %q", offer.ID, name)
+				}
+				continue
+			}
+			if _, err := formatOfferParameter(name, parameter.Type, value); err != nil {
+				return fmt.Errorf("offer %q: %w", offer.ID, err)
+			}
+		}
+		for name := range offer.Parameters {
+			if _, declared := definition.GraphQL.Parameters[name]; !declared {
+				return fmt.Errorf("offer %q supplies undeclared parameter %q", offer.ID, name)
+			}
+		}
+	}
+	return nil
+}
+
+func formatOfferParameter(name, parameterType string, value any) (string, error) {
+	switch parameterType {
+	case "string":
+		text, ok := value.(string)
+		if !ok {
+			return "", fmt.Errorf("source parameter %q must be a string", name)
+		}
+		return text, nil
+	case "date":
+		text, ok := value.(string)
+		if !ok {
+			return "", fmt.Errorf("source parameter %q must be an ISO date", name)
+		}
+		if _, err := time.Parse(time.DateOnly, text); err != nil {
+			return "", fmt.Errorf("source parameter %q must be an ISO date", name)
+		}
+		return text, nil
+	case "integer":
+		switch number := value.(type) {
+		case float64:
+			if number != float64(int64(number)) {
+				return "", fmt.Errorf("source parameter %q must be an integer", name)
+			}
+			return strconv.FormatInt(int64(number), 10), nil
+		case int:
+			return strconv.Itoa(number), nil
+		case int64:
+			return strconv.FormatInt(number, 10), nil
+		case json.Number:
+			integer, err := number.Int64()
+			if err != nil {
+				return "", fmt.Errorf("source parameter %q must be an integer", name)
+			}
+			return strconv.FormatInt(integer, 10), nil
+		default:
+			return "", fmt.Errorf("source parameter %q must be an integer", name)
+		}
+	case "boolean":
+		boolean, ok := value.(bool)
+		if !ok {
+			return "", fmt.Errorf("source parameter %q must be a boolean", name)
+		}
+		return strconv.FormatBool(boolean), nil
+	default:
+		return "", fmt.Errorf("source parameter %q has unsupported type %q", name, parameterType)
+	}
 }
 
 func validateGraphQLEndpoint(graphql sourceGraphQL, transport string) error {
@@ -344,6 +437,11 @@ func parseSourceParameter(name, parameterType, raw string) (any, error) {
 			return nil, fmt.Errorf("source parameter %q must be a boolean", name)
 		}
 		return value, nil
+	case "date":
+		if _, err := time.Parse(time.DateOnly, raw); err != nil {
+			return nil, fmt.Errorf("source parameter %q must be an ISO date", name)
+		}
+		return raw, nil
 	default:
 		return nil, fmt.Errorf("source parameter %q has unsupported type %q", name, parameterType)
 	}

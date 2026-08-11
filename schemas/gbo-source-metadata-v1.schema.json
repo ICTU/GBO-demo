@@ -77,6 +77,7 @@
       "required": [
         "type_id",
         "type_version",
+        "offers",
         "type_metadata",
         "graphql",
         "mapping_profile",
@@ -90,6 +91,14 @@
         },
         "type_version": {
           "$ref": "#/$defs/version"
+        },
+        "offers": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/offer"
+          }
         },
         "type_metadata": {
           "$ref": "#/$defs/typeMetadata"
@@ -225,6 +234,43 @@
         },
         "required": {
           "type": "boolean"
+        }
+      }
+    },
+    "offer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "parameters"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "parameters": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          },
+          "additionalProperties": {
+            "type": [
+              "string",
+              "integer",
+              "boolean"
+            ]
+          }
         }
       }
     },

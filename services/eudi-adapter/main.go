@@ -531,6 +531,12 @@ func fatal(msg string, err error) {
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if handled, err := runIssuanceConfigCommand(os.Args[1:], os.Stdout, os.Stderr); handled {
+		if err != nil {
+			fatal("issuance configuration generation failed", err)
+		}
+		return
+	}
 	if handled, err := runReconcileCommand(ctx, os.Args[1:], defaultReconcileDependencies()); handled {
 		if err != nil {
 			fatal("FSC source reconciliation failed", err)

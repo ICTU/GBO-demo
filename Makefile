@@ -21,10 +21,6 @@ ONBOARDING_OUTWAY_URL ?= http://localhost:8087
 ONBOARDING_STATE_DIR ?= $(PWD)/.local/onboarding
 ONBOARDING_SECRETS_DIR ?= $(PWD)/.local/secrets
 ONBOARDING_TYPE_METADATA_URL ?= $(or $(EUDI_BRI_URL),http://localhost:9409)
-ONBOARDING_EUDI_ENV ?= $(ONBOARDING_SECRETS_DIR)/$(DEVELOPMENT_SOURCE_OIN)/issuance.env
-ONBOARDING_ACTIVE_SOURCE ?= $(ONBOARDING_STATE_DIR)/active/$(DEVELOPMENT_SOURCE_OIN).json
-ONBOARDING_BRP_EUDI_ENV ?= $(ONBOARDING_SECRETS_DIR)/$(DEVELOPMENT_BRP_SOURCE_OIN)/issuance.env
-ONBOARDING_ACTIVE_BRP_SOURCE ?= $(ONBOARDING_STATE_DIR)/active/$(DEVELOPMENT_BRP_SOURCE_OIN).json
 ONBOARDING_STORAGE_BACKEND ?= filesystem
 ONBOARDING_CERTIFICATE_STORE ?= filesystem
 
@@ -70,48 +66,10 @@ demo-dvtp: certs fsc-all-up fsc-seed-bri fsc-seed-bri-hv
 	@echo "  Jaeger:              http://localhost:9686  |  http://$$(hostname -I | awk '{print $$1}'):9686"
 
 EUDI_CONFIG_DIR := services/eudi-issuance-server/config
-EUDI_CONFIG_FILES := issuance_server.toml inkomensverklaring_metadata.json \
-    akte_van_overlijden_metadata.json issuer_auth.json reader_auth.json \
-    akte_van_overlijden_issuer_auth.json akte_van_overlijden_reader_auth.json
-EUDI_REQUIRED_VARS := EUDI_PUBLIC_URL EUDI_READER_ORIGIN_URL EUDI_BRI_URL \
-    EUDI_READER_KEY EUDI_READER_CERT \
-    EUDI_ISSUER_KEY EUDI_ISSUER_CERT \
-    EUDI_STATUS_KEY EUDI_STATUS_CERT
+EUDI_REQUIRED_VARS := EUDI_PUBLIC_URL EUDI_BRI_URL
 
 eudi-config:
-	@command -v envsubst >/dev/null 2>&1 || { \
-	  echo "ERROR: envsubst not found. Install with: brew install gettext"; \
-	  exit 1; \
-	}
-	@set -a; [ -f .env ] && . ./.env; \
-	  command -v jq >/dev/null 2>&1 || { echo "ERROR: jq not found"; exit 1; }; \
-	  [ -f "$(ONBOARDING_EUDI_ENV)" ] || { echo "ERROR: onboarding issuance environment not found: $(ONBOARDING_EUDI_ENV)"; exit 1; }; \
-	  [ -f "$(ONBOARDING_ACTIVE_SOURCE)" ] || { echo "ERROR: active source registration not found: $(ONBOARDING_ACTIVE_SOURCE)"; exit 1; }; \
-	  [ -f "$(ONBOARDING_ACTIVE_BRP_SOURCE)" ] || { echo "ERROR: active BRP source registration not found: $(ONBOARDING_ACTIVE_BRP_SOURCE)"; exit 1; }; \
-	  [ -f "$(ONBOARDING_BRP_EUDI_ENV)" ] || { echo "ERROR: BRP onboarding issuance environment not found: $(ONBOARDING_BRP_EUDI_ENV)"; exit 1; }; \
-	  type_count=$$(jq '[.types[] | select(.type_id == "inkomensverklaring")] | length' "$(ONBOARDING_ACTIVE_SOURCE)"); \
-	  [ "$$type_count" = "1" ] || { echo "ERROR: active source must contain exactly one inkomensverklaring type"; exit 1; }; \
-	  EUDI_INKOMENSVERKLARING_VCT=$$(jq -er '.types[] | select(.type_id == "inkomensverklaring") | .vct' "$(ONBOARDING_ACTIVE_SOURCE)"); \
-	  source_oin=$$(jq -er '.source.source_oin' "$(ONBOARDING_ACTIVE_SOURCE)"); \
-	  source_type_id=$$(jq -er '.types[] | select(.type_id == "inkomensverklaring") | .type_id' "$(ONBOARDING_ACTIVE_SOURCE)"); \
-	  EUDI_INKOMENSVERKLARING_ENDPOINT="$${EUDI_BRI_URL%/}/attestations/$$source_oin/$$source_type_id"; \
-	  EUDI_AKTE_VCT=$$(jq -er '.types[] | select(.type_id == "akte-van-overlijden") | .vct' "$(ONBOARDING_ACTIVE_BRP_SOURCE)"); \
-	  brp_source_oin=$$(jq -er '.source.source_oin' "$(ONBOARDING_ACTIVE_BRP_SOURCE)"); \
-	  EUDI_AKTE_ENDPOINT="$${EUDI_BRI_URL%/}/attestations/$$brp_source_oin/akte-van-overlijden"; \
-	  onboarding_brp_type_metadata=$$(jq -er '.types[] | select(.type_id == "akte-van-overlijden") | .type_metadata_reference' "$(ONBOARDING_ACTIVE_BRP_SOURCE)"); \
-	  onboarding_type_metadata=$$(jq -er '.types[] | select(.type_id == "inkomensverklaring") | .type_metadata_reference' "$(ONBOARDING_ACTIVE_SOURCE)"); \
-	  [ -f "$$onboarding_type_metadata" ] || { echo "ERROR: activated Type Metadata not found: $$onboarding_type_metadata"; exit 1; }; \
-	  jq -e --arg vct "$$EUDI_INKOMENSVERKLARING_VCT" '.vct == $$vct' "$$onboarding_type_metadata" >/dev/null || { echo "ERROR: activated Type Metadata does not match its VCT"; exit 1; }; \
-	  export EUDI_INKOMENSVERKLARING_VCT EUDI_INKOMENSVERKLARING_ENDPOINT EUDI_AKTE_VCT EUDI_AKTE_ENDPOINT; \
-	  echo "-> Using onboarding certificates from $(ONBOARDING_EUDI_ENV) (overrides .env certificate values)"; \
-	  . "$(ONBOARDING_EUDI_ENV)"; \
-	  EUDI_BRP_ISSUER_KEY=$$(set -a; . "$(ONBOARDING_BRP_EUDI_ENV)"; printf %s "$$EUDI_ISSUER_KEY"); \
-	  EUDI_BRP_ISSUER_CERT=$$(set -a; . "$(ONBOARDING_BRP_EUDI_ENV)"; printf %s "$$EUDI_ISSUER_CERT"); \
-	  EUDI_BRP_READER_KEY=$$(set -a; . "$(ONBOARDING_BRP_EUDI_ENV)"; printf %s "$$EUDI_READER_KEY"); \
-	  EUDI_BRP_READER_CERT=$$(set -a; . "$(ONBOARDING_BRP_EUDI_ENV)"; printf %s "$$EUDI_READER_CERT"); \
-	  EUDI_BRP_STATUS_KEY=$$(set -a; . "$(ONBOARDING_BRP_EUDI_ENV)"; printf %s "$$EUDI_STATUS_KEY"); \
-	  EUDI_BRP_STATUS_CERT=$$(set -a; . "$(ONBOARDING_BRP_EUDI_ENV)"; printf %s "$$EUDI_STATUS_CERT"); \
-	  export EUDI_BRP_ISSUER_KEY EUDI_BRP_ISSUER_CERT EUDI_BRP_READER_KEY EUDI_BRP_READER_CERT EUDI_BRP_STATUS_KEY EUDI_BRP_STATUS_CERT; set +a; \
+	@set -eu; set -a; [ -f .env ] && . ./.env; set +a; \
 	missing=""; for v in $(EUDI_REQUIRED_VARS); do \
 	  eval "val=\$$$$v"; \
 	  [ -n "$$val" ] || missing="$$missing $$v"; \
@@ -120,22 +78,16 @@ eudi-config:
 	  echo "ERROR: missing env-vars (see .env.example):$$missing"; \
 	  exit 1; \
 	fi; \
-	for v in EUDI_BRP_ISSUER_KEY EUDI_BRP_ISSUER_CERT EUDI_BRP_READER_KEY EUDI_BRP_READER_CERT EUDI_BRP_STATUS_KEY EUDI_BRP_STATUS_CERT; do \
-	  eval "val=\$$$$v"; \
-	  [ -n "$$val" ] || { echo "ERROR: BRP onboarding environment is missing $$v"; exit 1; }; \
-	done; \
-	for f in $(EUDI_CONFIG_FILES); do \
-	  if [ "$$f" = "inkomensverklaring_metadata.json" ]; then \
-	    echo "-> Installing activated Type Metadata as $(EUDI_CONFIG_DIR)/$$f"; \
-	    cp "$$onboarding_type_metadata" "$(EUDI_CONFIG_DIR)/$$f"; \
-	  elif [ "$$f" = "akte_van_overlijden_metadata.json" ]; then \
-	    echo "-> Installing activated BRP Type Metadata as $(EUDI_CONFIG_DIR)/$$f"; \
-	    cp "$$onboarding_brp_type_metadata" "$(EUDI_CONFIG_DIR)/$$f"; \
-	  else \
-	    echo "-> Rendering $(EUDI_CONFIG_DIR)/$$f from $$f.example"; \
-	    envsubst < $(EUDI_CONFIG_DIR)/$$f.example > $(EUDI_CONFIG_DIR)/$$f; \
-	  fi; \
-	done
+	docker compose --profile onboarding run --build --rm source-reconciler \
+	  ./eudi-adapter generate-issuance-config \
+	  --activations-dir /var/lib/gbo/active \
+	  --template /generated/issuance_server.toml.example \
+	  --adapter-base-url "$$EUDI_BRI_URL" \
+	  --output /generated/issuance_server.toml \
+	  --offers-output /generated/eudi-offers.json; \
+	cp "$(PWD)/$(EUDI_CONFIG_DIR)/eudi-offers.json" "$(PWD)/landing-page/public/eudi-offers.json"; \
+	cp "$(PWD)/$(EUDI_CONFIG_DIR)/eudi-offers.json" "$(PWD)/developer-portal/public/eudi-offers.json"; \
+	echo "-> Generated issuance products and frontend offer catalog from every active source"
 
 # eudi-issuance-server has no published image — built from the local
 # nl-wallet checkout ($NLWALLET_PATH).

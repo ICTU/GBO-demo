@@ -633,11 +633,8 @@ services:
       - "${GBO_PORT_EUDI_ISSUANCE:-18001}:18001"
     environment:
       - ISSUANCE_SERVER__STORAGE__URL=postgres://wallet:${EUDI_POSTGRES_PASSWORD}@postgres-eudi:5432/issuance_server
-      # Inkomensverklaring endpoints are rendered from the active source
-      # registration into issuance_server.toml. The year remains a concrete
-      # issuance-product parameter; GBO owns no query or parameter catalog.
-      # The BRP endpoint and FSC data route are likewise derived from its
-      # active source registration; the adapter has no per-source catalog.
+      # Concrete issuance products, endpoints and Type Metadata are generated
+      # from every active source registration by `make eudi-config`.
       - ISSUANCE_SERVER__UNIVERSAL_LINK_BASE_URL=walletdebuginteraction://wallet.edi.rijksoverheid.nl/
       # Bind addresses explicitly — otherwise default localhost =
       # unreachable from other containers.
@@ -650,19 +647,15 @@ services:
       # Fail-loud.
       - ISSUANCE_SERVER__PUBLIC_URL=${EUDI_PUBLIC_URL:?set EUDI_PUBLIC_URL to the eudi-tunnel URL before compose up}
     volumes:
-      # Runtime config bundled with the demo. WORKDIR is / (scratch) so
-      # everything is mounted at / to match the config's CWD-relative
-      # lookups.
+      # Runtime config generated from the active onboarding records. The
+      # source-specific certificate references remain in each activation;
+      # this does not decide the still-open shared-vs-per-source cert model.
       #
-      # issuance_server.toml is git-ignored — the .example version has
-      # placeholder issuer/reader signing keys. Run `make eudi-config`
-      # (or copy issuance_server.toml.example manually and fill in real
-      # keys) before starting the EUDI profile.
+      # issuance_server.toml is git-ignored because the generator inserts the
+      # referenced signing keys. Run `make eudi-config` before starting the
+      # EUDI profile.
       - ./services/eudi-issuance-server/config/issuance_server.toml:/issuance_server.toml:ro
-      - ./services/eudi-issuance-server/config/inkomensverklaring_metadata.json:/inkomensverklaring_metadata.json:ro
-      - ./services/eudi-issuance-server/config/akte_van_overlijden_metadata.json:/akte_van_overlijden_metadata.json:ro
-      - ./services/eudi-issuance-server/config/issuer_auth.json:/issuer_auth.json:ro
-      - ./services/eudi-issuance-server/config/reader_auth.json:/reader_auth.json:ro
+      - ./services/eudi-issuance-server/config:/config:ro
       - eudi-tsl-publish:/tsl-publish
     depends_on:
       eudi-migrations:
@@ -716,6 +709,8 @@ services:
   source-reconciler:
     build: ./services/eudi-adapter
     profiles: [onboarding]
+    environment:
+      - EUDI_PUBLIC_URL=${EUDI_PUBLIC_URL:-}
     command:
       - ./eudi-adapter
       - reconcile-fsc-sources
@@ -738,6 +733,7 @@ services:
       - ./fsc-infra/orgs/edi-issuer/pki/internal:/fsc-certs:ro
       - ./.local/onboarding:/var/lib/gbo
       - ./.local/secrets:/var/lib/gbo-secrets
+      - ./services/eudi-issuance-server/config:/generated
     networks:
       - fsc-infra
 

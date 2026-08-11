@@ -11,35 +11,26 @@ import { eudi } from './config'
    pakket. Wijzigt het linkformaat, dan moeten beide mee. */
 
 export type WalletUsecase = {
-  /* Moet overeenkomen met [disclosure_settings.<key>] in
-     issuance-server.toml én met de sleutel in de adapter-catalogus. */
+  /* Wordt door onboarding gegenereerd uit offers[] van de bron en komt
+     overeen met [disclosure_settings.<key>] in issuance_server.toml. */
   key: string
   label: string
-  desc: string
-  /* Welke PID werkt. Verschilt per credential, en dat is precies waar een
-     bezoeker anders op stukloopt: de fout valt pas aan het eind. */
-  scanNote: string
+  description?: string
+  attestation_type: string
+  source_oin: string
+  type_id: string
+  parameters: Record<string, string | number | boolean>
 }
 
-/* De dev-portal heeft meer varianten (inkomensverklaring 2023 verwacht een
-   DENY); hier staan alleen de usecases die een bezoeker een werkende
-   credential opleveren. */
-export const WALLET_USECASES: WalletUsecase[] = [
-  {
-    key: 'inkomensverklaring_2024',
-    label: 'Inkomensverklaring',
-    desc: 'De issuer haalt je inkomensgegevens bij de bron op en zet er een inkomensverklaring van in je wallet. Die deel je daarna zelf, zonder dat de bron opnieuw bevraagd wordt.',
-    scanNote:
-      'De demo-bron kent een paar test-BSN’s; zit er een andere BSN in je wallet-PID, dan loopt de uitgifte aan het eind vast.',
-  },
-  {
-    key: 'akte_van_overlijden',
-    label: 'Akte van overlijden',
-    desc: 'Als nabestaande deel je je PID en krijg je de akte van overlijden van je partner terug, uit de BRP. Je krijgt alleen wat op een akte hoort: de overledene, het overlijden, de ouders en de partner.',
-    scanNote:
-      'Werkt alleen met de PID van Frouke Jansen (BSN 999991772). De andere personen in de demo-BRP zijn ongehuwd, gescheiden, of hebben een nog levende partner.',
-  },
-]
+export async function loadWalletUsecases(): Promise<WalletUsecase[]> {
+  const response = await fetch('/eudi-offers.json', { cache: 'no-store' })
+  if (!response.ok) throw new Error(`issuance-aanbod is niet beschikbaar (HTTP ${response.status})`)
+  const offers = (await response.json()) as WalletUsecase[]
+  if (!Array.isArray(offers) || offers.length === 0) {
+    throw new Error('issuance-aanbod bevat geen producten')
+  }
+  return offers
+}
 
 export type SessionType = 'same_device' | 'cross_device'
 

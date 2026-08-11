@@ -4,10 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"encoding/pem"
 	"flag"
 	"fmt"
 	"io"
@@ -25,17 +23,17 @@ type sourceActivation struct {
 	MetadataVersion            string               `json:"metadata_version"`
 	MetadataPayloadDigest      string               `json:"metadata_payload_digest"`
 	TypeMetadataStoreReference string               `json:"type_metadata_store_reference"`
-	IssuanceConfigReference    string               `json:"issuance_config_reference"`
 	Types                      []activatedType      `json:"types"`
 	Certificates               certificateArtifacts `json:"certificates"`
 }
 
 type activatedType struct {
-	TypeID                string `json:"type_id"`
-	TypeVersion           string `json:"type_version"`
-	VCT                   string `json:"vct"`
-	VCTIntegrity          string `json:"vct_integrity"`
-	TypeMetadataReference string `json:"type_metadata_reference"`
+	TypeID                string        `json:"type_id"`
+	TypeVersion           string        `json:"type_version"`
+	VCT                   string        `json:"vct"`
+	VCTIntegrity          string        `json:"vct_integrity"`
+	TypeMetadataReference string        `json:"type_metadata_reference"`
+	Offers                []sourceOffer `json:"offers"`
 }
 
 type onboardingOptions struct {
@@ -96,7 +94,7 @@ func configuredCertificateStore(options onboardingOptions) (certificateStore, er
 func configuredActivationBackend(options onboardingOptions) (activationBackend, error) {
 	switch options.storageBackend {
 	case "filesystem":
-		return newFilesystemActivationBackend(options.stateDir, options.secretsDir), nil
+		return newFilesystemActivationBackend(options.stateDir), nil
 	default:
 		return nil, fmt.Errorf("unsupported onboarding storage backend %q", options.storageBackend)
 	}
@@ -217,19 +215,14 @@ func activateSource(validated *validatedSourceRegistration, store certificateSto
 }
 
 type filesystemActivationBackend struct {
-	stateDir   string
-	secretsDir string
+	stateDir string
 }
 
-func newFilesystemActivationBackend(stateDir, secretsDir string) *filesystemActivationBackend {
-	return &filesystemActivationBackend{stateDir: stateDir, secretsDir: secretsDir}
+func newFilesystemActivationBackend(stateDir string) *filesystemActivationBackend {
+	return &filesystemActivationBackend{stateDir: stateDir}
 }
 
 func (b *filesystemActivationBackend) Activate(validated *validatedSourceRegistration, certificates certificateArtifacts) (*sourceActivation, error) {
-	issuanceEnvPath, err := writeFilesystemIssuanceEnvironment(b.secretsDir, validated.Registration.SourceOIN, certificates)
-	if err != nil {
-		return nil, fmt.Errorf("prepare filesystem issuance environment: %w", err)
-	}
 	typeStore := filepath.Join(b.stateDir, "type-metadata")
 	activeStore := filepath.Join(b.stateDir, "active")
 	for _, directory := range []string{typeStore, activeStore} {
@@ -244,12 +237,20 @@ func (b *filesystemActivationBackend) Activate(validated *validatedSourceRegistr
 	}
 	types := make([]activatedType, 0, len(validated.Publications))
 	for _, publication := range validated.Publications {
+		var offers []sourceOffer
+		for _, definition := range validated.Document.eudiAttestations() {
+			if definition.TypeID == publication.TypeID {
+				offers = append([]sourceOffer(nil), definition.Offers...)
+				break
+			}
+		}
 		types = append(types, activatedType{
 			TypeID:                publication.TypeID,
 			TypeVersion:           publication.TypeVersion,
 			VCT:                   publication.VCT,
 			VCTIntegrity:          publication.Integrity,
 			TypeMetadataReference: filepath.Join(typeStore, typeMetadataFilename(publication)),
+			Offers:                offers,
 		})
 	}
 	payloadDigest := sha256.Sum256(validated.Payload)
@@ -260,7 +261,6 @@ func (b *filesystemActivationBackend) Activate(validated *validatedSourceRegistr
 		MetadataVersion:            validated.Document.Version,
 		MetadataPayloadDigest:      hex.EncodeToString(payloadDigest[:]),
 		TypeMetadataStoreReference: typeStore,
-		IssuanceConfigReference:    issuanceEnvPath,
 		Types:                      types,
 		Certificates:               certificates,
 	}
@@ -274,67 +274,6 @@ func (b *filesystemActivationBackend) Activate(validated *validatedSourceRegistr
 		return nil, fmt.Errorf("activate source registration: %w", err)
 	}
 	return activation, nil
-}
-
-func writeFilesystemIssuanceEnvironment(secretRoot, sourceOIN string, certificates certificateArtifacts) (string, error) {
-	readBase64 := func(path string) (string, error) {
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return "", err
-		}
-		value := strings.TrimSpace(string(raw))
-		if value == "" {
-			return "", fmt.Errorf("file %q is empty", path)
-		}
-		return value, nil
-	}
-	values := make(map[string]string)
-	for name, path := range map[string]string{
-		"EUDI_ISSUER_KEY":  certificates.IssuerKeyReference,
-		"EUDI_ISSUER_CERT": certificates.IssuerCertReference,
-		"EUDI_READER_KEY":  certificates.ReaderKeyReference,
-		"EUDI_READER_CERT": certificates.ReaderCertReference,
-		"EUDI_STATUS_KEY":  certificates.StatusKeyReference,
-		"EUDI_STATUS_CERT": certificates.StatusCertReference,
-	} {
-		value, err := readBase64(path)
-		if err != nil {
-			return "", fmt.Errorf("read %s: %w", name, err)
-		}
-		values[name] = value
-	}
-	for name, path := range map[string]string{
-		"EUDI_ONBOARDING_ISSUER_TRUST_ANCHOR": certificates.IssuerCACertReference,
-		"EUDI_ONBOARDING_READER_TRUST_ANCHOR": certificates.ReaderCACertReference,
-	} {
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return "", fmt.Errorf("read %s: %w", name, err)
-		}
-		block, _ := pem.Decode(raw)
-		if block == nil || block.Type != "CERTIFICATE" {
-			return "", fmt.Errorf("%s file %q is not a PEM certificate", name, path)
-		}
-		values[name] = `"` + base64.StdEncoding.EncodeToString(block.Bytes) + `",`
-	}
-	order := []string{
-		"EUDI_ISSUER_KEY", "EUDI_ISSUER_CERT", "EUDI_READER_KEY", "EUDI_READER_CERT",
-		"EUDI_STATUS_KEY", "EUDI_STATUS_CERT", "EUDI_ONBOARDING_ISSUER_TRUST_ANCHOR",
-		"EUDI_ONBOARDING_READER_TRUST_ANCHOR",
-	}
-	var body strings.Builder
-	body.WriteString("# Generated by onboard-source with storage-backend=filesystem; contains private keys.\n")
-	for _, name := range order {
-		_, _ = fmt.Fprintf(&body, "%s='%s'\n", name, values[name])
-	}
-	path := filepath.Join(secretRoot, sourceOIN, "issuance.env")
-	// This file is derived from the current certificate artifacts. Leaf
-	// certificates can be renewed or reissued while retaining their key, so the
-	// generated environment must follow those changes atomically.
-	if err := writeFileAtomically(filepath.Dir(path), filepath.Base(path), []byte(body.String()), 0o600); err != nil {
-		return "", err
-	}
-	return path, nil
 }
 
 func writeSourceActivation(path string, body []byte, next *sourceActivation) error {

@@ -1,95 +1,15 @@
 import type { Citizen, EudiPayload } from '../types'
+import type { IssuanceOffer } from '../eudi'
 
 type Props = {
   payload: EudiPayload
   setPayload: (p: EudiPayload) => void
   citizens: Citizen[]
+  offers: IssuanceOffer[]
+  offersError: string
 }
 
-// Four issuance products across two onboarded sources. `usecase` is only the
-// nl-wallet disclosure_settings key; its adapter endpoint is generated from
-// the corresponding source activation. IB 2023 deliberately demonstrates the
-// policy's allowed-year boundary.
-type AttestationConfig = {
-  code: string
-  label: string
-  usecase: string  // must match [disclosure_settings.<usecase>] in issuance_server.toml
-  clientId: string // reader-cert client_id
-}
-
-const ISSUANCE_SERVER_PUBLIC_URL = (
-  window.__GBO_RUNTIME_CONFIG__?.eudiPublicUrl ||
-  import.meta.env.VITE_EUDI_PUBLIC_URL ||
-  ''
-).replace(/\/$/, '')
-
-function readerClientId(publicUrl: string): string {
-  const configured = (
-    window.__GBO_RUNTIME_CONFIG__?.eudiClientId ||
-    import.meta.env.VITE_EUDI_CLIENT_ID ||
-    ''
-  ).trim()
-  if (configured) return configured
-  try {
-    const hostname = new URL(publicUrl).hostname
-    if (hostname) return `x509_san_dns:${hostname}`
-  } catch {
-    // Keep the development fallback below for an absent or invalid URL.
-  }
-  return ''
-}
-
-const CLIENT_ID = readerClientId(ISSUANCE_SERVER_PUBLIC_URL)
-
-const ATTESTATION_TYPES: AttestationConfig[] = [
-  {
-    code: 'nl.gbo.belastingdienst.inkomensverklaring',
-    label: 'Inkomensverklaring 2024 (Belastingdienst) — ALLOW',
-    usecase: 'inkomensverklaring_2024',
-    clientId: CLIENT_ID,
-  },
-  {
-    code: 'nl.gbo.belastingdienst.inkomensverklaring',
-    label: 'Inkomensverklaring 2025 (Belastingdienst) — ALLOW',
-    usecase: 'inkomensverklaring_2025',
-    clientId: CLIENT_ID,
-  },
-  {
-    code: 'nl.gbo.belastingdienst.inkomensverklaring',
-    label: 'Inkomensverklaring 2023 (Belastingdienst) — verwacht DENY (YEAR_NOT_ALLOWED)',
-    usecase: 'inkomensverklaring_2023',
-    clientId: CLIENT_ID,
-  },
-  {
-    code: 'nl.gbo.brp.akte-van-overlijden',
-    label: 'Akte van overlijden (BRP) — ALLOW',
-    usecase: 'akte_van_overlijden',
-    clientId: CLIENT_ID,
-  },
-]
-
-const UL_BASE =
-  import.meta.env.VITE_EUDI_UL_BASE ??
-  'https://app.preproductie.wallet.edi.bzk.nl/deeplink/disclosure_based_issuance'
-// Build the same universal-link that demo-issuer's <nl-wallet-button>
-// generates. On scan the wallet POSTs to `request_uri`, where the
-// issuance-server opens its own session — no dev-portal-side state needed.
-export function walletUniversalLinkFor(cfg: AttestationConfig, sessionType: 'same_device' | 'cross_device'): string {
-  if (!ISSUANCE_SERVER_PUBLIC_URL) return ''
-  const requestUri = `${ISSUANCE_SERVER_PUBLIC_URL}/disclosure/${cfg.usecase}/request_uri?session_type=${sessionType}`
-  const params = new URLSearchParams({
-    request_uri: requestUri,
-    request_uri_method: 'post',
-    client_id: cfg.clientId,
-  })
-  return `${UL_BASE}?${params.toString()}`
-}
-
-export function attestationConfigFor(usecase: string): AttestationConfig | undefined {
-  return ATTESTATION_TYPES.find((a) => a.usecase === usecase)
-}
-
-export default function EudiForm({ payload, setPayload, citizens }: Props) {
+export default function EudiForm({ payload, setPayload, citizens, offers, offersError }: Props) {
   const knownBsns = citizens.map((c) => c.bsn)
   return (
     <>
@@ -101,10 +21,11 @@ export default function EudiForm({ payload, setPayload, citizens }: Props) {
           value={payload.usecase}
           onChange={(e) => setPayload({ ...payload, usecase: e.target.value })}
         >
-          {ATTESTATION_TYPES.map((a) => (
-            <option key={a.usecase} value={a.usecase}>{a.label}</option>
+          {offers.map((offer) => (
+            <option key={offer.key} value={offer.key}>{offer.label}</option>
           ))}
         </select>
+        {offersError && <div className="hint">{offersError}</div>}
       </div>
 
       <div className="hint" style={{ fontSize: 12, color: 'var(--mute)', marginTop: 8 }}>
@@ -122,10 +43,10 @@ export default function EudiForm({ payload, setPayload, citizens }: Props) {
       </div>
 
       <div className="hint" style={{ fontSize: 12, color: 'var(--mute)', marginTop: 8 }}>
-        De <b>bron</b> publiceert de query, parameters, mapping en Type Metadata;
-        onboarding bindt die aan bron-OIN en FSC-service. De PDP autoriseert de
-        daadwerkelijk gevraagde velden. EUD0001 staat alleen 2024 en 2025 toe,
-        waardoor &quot;IB 2023&quot; fail-closed wordt geweigerd.
+        De <b>bron</b> publiceert query, parameters, concrete aanbiedingen,
+        mapping en Type Metadata. Onboarding genereert hieruit zowel de
+        issuance-serverconfiguratie als deze keuzelijst; de PDP blijft de
+        daadwerkelijk gevraagde velden en parameterwaarden autoriseren.
       </div>
 
       <div className="hint" style={{ fontSize: 12, color: 'var(--mute)', marginTop: 8 }}>
