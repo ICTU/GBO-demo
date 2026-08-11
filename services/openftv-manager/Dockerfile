@@ -15,6 +15,7 @@ RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /manager ./apps/manager/cmd/
 FROM alpine:3.22
 RUN apk add --no-cache curl
 COPY --from=builder /manager /
+COPY services/openftv-manager/authz /authz
 COPY services/openftv-manager/bundles /bundles
 COPY services/openftv-manager/tags /tags
 EXPOSE 8443 9443 8080

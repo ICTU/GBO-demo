@@ -154,7 +154,7 @@ services:
   # loop while writing Rego. Start it with `make demo-manager`.
   postgres-ftv:
     image: postgres:16-alpine
-    profiles: [manager, full]
+    profiles: [manager]
     environment:
       POSTGRES_PASSWORD: ${FTV_POSTGRES_PASSWORD:-ftv}
       POSTGRES_USER: ftv
@@ -171,7 +171,7 @@ services:
       retries: 10
 
   openftv-manager:
-    profiles: [manager, full]
+    profiles: [manager]
     build:
       context: .
       dockerfile: services/openftv-manager/Dockerfile
@@ -195,6 +195,12 @@ services:
       # the authorizer initialises, and breaks on the next restart.
       # The language of a managed policy comes from the policy itself, and
       # the bundle filters on the language in its own config.
+      # These Cedar policies authorize the Manager's own API. Fail closed
+      # if they cannot be loaded: an empty store must never mean open access.
+      - MANAGER_POLICIES_STORE=/authz
+      - MANAGER_POLICIES_STORE_RECURSE=true
+      - MANAGER_AUTHORIZATION_AUTHENTICATE=true
+      - MANAGER_AUTHORIZATION_FAIL_CLOSED_ON_EMPTY=true
       - MANAGER_TAGS_PATH=/tags
       - MANAGER_BUNDLE_CONFIGS=/bundles
       - MANAGER_INTERNAL_PORT=9443
@@ -204,7 +210,7 @@ services:
       # the JWKS is fetched server-side over the compose network.
       - MANAGER_OIDC_ISSUER=${GBO_FTV_OIDC_AUTHORITY:-http://localhost:9284/realms/gbo}
       - MANAGER_OIDC_JWKS_URL=http://keycloak:8080/realms/gbo/protocol/openid-connect/certs
-      - MANAGER_OIDC_AUDIENCE=openftv-manager-ui
+      - MANAGER_OIDC_AUDIENCE=openftv-manager-api
       - MANAGER_OIDC_ROLES_CLAIM=roles
       # Serves the Logboek in the management interface. initADL only
       # registers its routes for a Postgres-backed decision log — any other
@@ -221,6 +227,8 @@ services:
     depends_on:
       postgres-ftv:
         condition: service_healthy
+      keycloak:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
       interval: 5s
@@ -236,7 +244,7 @@ services:
   # from wherever you open the page — not from inside the compose network —
   # and over HTTPS unless that is localhost (see the PKCE note further down).
   openftv-manager-ui:
-    profiles: [manager, full]
+    profiles: [manager]
     build:
       context: .
       dockerfile: services/openftv-manager-ui/Dockerfile
@@ -258,17 +266,17 @@ services:
       openftv-manager:
         condition: service_healthy
 
-  # Demo IdP for the management interface. Three users, one per capability
-  # level: admin/admin, auteur/auteur, auditor/auditor. The realm ships a
-  # protocol mapper that copies realm roles into a top-level `roles` claim,
-  # which is the shape the UI reads.
+  # Demo IdP for the management interface. Public visitors use the read-only
+  # auditor account. A secret-backed deployment identity is the only account
+  # that can write and publish policies.
   keycloak:
-    profiles: [manager, full]
+    profiles: [manager]
     image: quay.io/keycloak/keycloak:26.0.7
     command: ["start-dev", "--import-realm", "--http-port=8080"]
     environment:
       - KC_BOOTSTRAP_ADMIN_USERNAME=admin
-      - KC_BOOTSTRAP_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      - KC_BOOTSTRAP_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:-}
+      - FTV_MANAGER_DEPLOY_PASSWORD=${FTV_MANAGER_DEPLOY_PASSWORD:-}
       # The issuer in the token must match what the browser used to reach
       # Keycloak, or the SPA rejects it. start-dev derives it per request.
       - KC_HOSTNAME_STRICT=false
