@@ -73,7 +73,6 @@ type sourceGraphQL struct {
 	SubjectVariable  string                     `json:"subject_variable"`
 	Parameters       map[string]sourceParameter `json:"parameters"`
 	ResultPointer    string                     `json:"result_pointer"`
-	Cardinality      string                     `json:"cardinality"`
 }
 
 type sourceParameter struct {
@@ -202,9 +201,6 @@ func validateSourceAttestation(definition sourceAttestationDefinition) error {
 	}
 	if definition.GraphQL.ResultPointer == "" {
 		return fmt.Errorf("graphql.result_pointer is required")
-	}
-	if definition.GraphQL.Cardinality != "exactly_one" {
-		return fmt.Errorf("phase 1 only supports cardinality exactly_one")
 	}
 	if definition.MappingProfile != "gbo-simple-v1" {
 		return fmt.Errorf("unsupported mapping_profile %q", definition.MappingProfile)
@@ -358,7 +354,7 @@ func (s *activeSourceMetadata) project(rawGraphQL []byte) (gbosimplev1.Projectio
 	if err != nil {
 		return gbosimplev1.Projection{}, fmt.Errorf("decode GraphQL response for source projection: %w", err)
 	}
-	projection, err := gbosimplev1.Project(root, s.Definition.GraphQL.ResultPointer, s.Definition.GraphQL.Cardinality, s.Definition.Mapping)
+	projection, err := gbosimplev1.Project(root, s.Definition.GraphQL.ResultPointer, s.Definition.Mapping)
 	if err != nil {
 		return gbosimplev1.Projection{}, fmt.Errorf("project source response: %w", err)
 	}

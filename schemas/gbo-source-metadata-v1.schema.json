@@ -173,8 +173,7 @@
         "document",
         "subject_variable",
         "parameters",
-        "result_pointer",
-        "cardinality"
+        "result_pointer"
       ],
       "properties": {
         "service_reference": {
@@ -205,9 +204,6 @@
         "result_pointer": {
           "type": "string",
           "pattern": "^/"
-        },
-        "cardinality": {
-          "const": "exactly_one"
         }
       }
     },

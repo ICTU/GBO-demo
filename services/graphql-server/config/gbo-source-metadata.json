@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "source_oin": "99999999900000000200",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "issued_at": "2026-08-05T00:00:00Z",
   "expires_at": "2099-01-01T00:00:00Z",
   "capabilities": {
@@ -10,7 +10,7 @@
       "attestations": [
         {
           "type_id": "inkomensverklaring",
-        "type_version": "2.0",
+          "type_version": "2.1",
           "graphql": {
             "service_reference": "bri",
             "endpoint": "/graphql",
@@ -22,8 +22,7 @@
                 "required": true
               }
             },
-            "result_pointer": "/data/ingeschrevenPersoon/heeftBelastingjaarAangifte",
-            "cardinality": "exactly_one"
+            "result_pointer": "/data/ingeschrevenPersoon/heeftBelastingjaarAangifte"
           },
           "mapping_profile": "gbo-simple-v1",
           "mapping": {

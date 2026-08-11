@@ -10,7 +10,7 @@ De uitvoering is fail-closed:
 
 1. valideer de mapping volledig;
 2. volg `result_pointer` vanaf de GraphQL-response;
-3. pas cardinaliteit `exactly_one` toe;
+3. accepteer nul of één resultaat en weiger meerdere resultaten;
 4. lees en typecontroleer iedere claim zonder de waarde te veranderen;
 5. geef alleen bij volledig succes het gehele claimobject terug.
 
@@ -77,7 +77,7 @@ Er zijn geen conversies of operators voor filters, sortering, `first`, joins, co
 | `GBO_SIMPLE_PATH_MISSING` | `result_pointer` of claimpointer bestaat niet |
 | `GBO_SIMPLE_TYPE_MISMATCH` | bronwaarde voldoet niet aan het datatype |
 | `GBO_SIMPLE_RESULT_TYPE` | `result_pointer` wijst niet naar een array |
-| `GBO_SIMPLE_CARDINALITY_AMBIGUOUS` | `exactly_one` ontving meer dan één resultaat |
+| `GBO_SIMPLE_RESULT_AMBIGUOUS` | `result_pointer` selecteerde meer dan één resultaat |
 
 `no_data` is een uitkomst en geen technische foutcode.
 

@@ -31,11 +31,11 @@ const (
 type ErrorCode string
 
 const (
-	CodeMappingInvalid       ErrorCode = "GBO_SIMPLE_MAPPING_INVALID"
-	CodePathMissing          ErrorCode = "GBO_SIMPLE_PATH_MISSING"
-	CodeTypeMismatch         ErrorCode = "GBO_SIMPLE_TYPE_MISMATCH"
-	CodeResultType           ErrorCode = "GBO_SIMPLE_RESULT_TYPE"
-	CodeCardinalityAmbiguous ErrorCode = "GBO_SIMPLE_CARDINALITY_AMBIGUOUS"
+	CodeMappingInvalid  ErrorCode = "GBO_SIMPLE_MAPPING_INVALID"
+	CodePathMissing     ErrorCode = "GBO_SIMPLE_PATH_MISSING"
+	CodeTypeMismatch    ErrorCode = "GBO_SIMPLE_TYPE_MISMATCH"
+	CodeResultType      ErrorCode = "GBO_SIMPLE_RESULT_TYPE"
+	CodeResultAmbiguous ErrorCode = "GBO_SIMPLE_RESULT_AMBIGUOUS"
 )
 
 type ProfileError struct {
@@ -131,12 +131,9 @@ func Validate(mapping Mapping) error {
 	return nil
 }
 
-func Project(root any, resultPointer, cardinality string, mapping Mapping) (Projection, error) {
+func Project(root any, resultPointer string, mapping Mapping) (Projection, error) {
 	if err := Validate(mapping); err != nil {
 		return Projection{}, err
-	}
-	if cardinality != "exactly_one" {
-		return Projection{}, profileError(CodeMappingInvalid, "", "unsupported cardinality %q", cardinality)
 	}
 	if err := validatePointer(resultPointer); err != nil {
 		return Projection{}, profileError(CodeMappingInvalid, "", "invalid result_pointer: %v", err)
@@ -154,7 +151,7 @@ func Project(root any, resultPointer, cardinality string, mapping Mapping) (Proj
 		return Projection{Outcome: OutcomeNoData}, nil
 	case 1:
 	default:
-		return Projection{}, profileError(CodeCardinalityAmbiguous, "", "exactly_one received %d results", len(rows))
+		return Projection{}, profileError(CodeResultAmbiguous, "", "result_pointer selected %d results; at most one is allowed", len(rows))
 	}
 
 	claims := make(map[string]any, len(mapping))

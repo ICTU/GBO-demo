@@ -90,7 +90,7 @@
       "input": {"data": {"rows": [{}, {}]}},
       "result_pointer": "/data/rows",
       "mapping_ref": "copy rename flatten and preserve number",
-      "error_code": "GBO_SIMPLE_CARDINALITY_AMBIGUOUS"
+      "error_code": "GBO_SIMPLE_RESULT_AMBIGUOUS"
     },
     {
       "name": "missing claim path",

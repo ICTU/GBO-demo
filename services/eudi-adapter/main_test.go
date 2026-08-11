@@ -268,7 +268,6 @@ func newIncomeSourceAdapter(t *testing.T, mapping map[string]mappingRule, bronRe
 					"jaar": {Type: "integer", Required: true},
 				},
 				ResultPointer: "/data/ingeschrevenPersoon/heeftBelastingjaarAangifte",
-				Cardinality:   "exactly_one",
 			},
 			MappingProfile: "gbo-simple-v1",
 			Mapping:        mapping,
@@ -371,7 +370,6 @@ func TestSourceMetadataRejectedDuringOnboarding(t *testing.T) {
 							"jaar": map[string]any{"type": "integer", "required": true},
 						},
 						"result_pointer": "/data/ingeschrevenPersoon/heeftBelastingjaarAangifte",
-						"cardinality":    "exactly_one",
 					},
 					"mapping_profile": "gbo-simple-v1",
 					"mapping": map[string]any{
