@@ -16,16 +16,19 @@ policy in place instead of creating a duplicate — the script is safe to
 run on every `make` invocation.
 
 Usage:
-    scripts/seed-openftv-manager.py [--url http://localhost:9280] [--dry-run]
+    FTV_MANAGER_DEPLOY_PASSWORD=... scripts/seed-openftv-manager.py \
+        [--url http://localhost:9280] [--dry-run]
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 
@@ -57,10 +60,18 @@ def title_for(rel: pathlib.Path) -> str:
     return stem.replace("/", " · ")
 
 
-def request(method: str, url: str, body: dict | None = None) -> tuple[int, bytes]:
+def request(
+    method: str, url: str, token: str, body: dict | None = None
+) -> tuple[int, bytes]:
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(
-        url, data=data, method=method, headers={"Content-Type": "application/json"}
+        url,
+        data=data,
+        method=method,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
     )
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
@@ -69,7 +80,40 @@ def request(method: str, url: str, body: dict | None = None) -> tuple[int, bytes
         return exc.code, exc.read()
 
 
-def retire_stale(base: str, keep: set[str], dry_run: bool) -> int:
+def deployment_token(
+    authority: str, client_id: str, username: str, password: str
+) -> str:
+    """Get a short-lived token for the internal deployment identity."""
+    form = urllib.parse.urlencode(
+        {
+            "grant_type": "password",
+            "client_id": client_id,
+            "username": username,
+            "password": password,
+        }
+    ).encode()
+    req = urllib.request.Request(
+        f"{authority.rstrip('/')}/protocol/openid-connect/token",
+        data=form,
+        method="POST",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            payload = json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        detail = exc.read()[:200].decode(errors="replace")
+        raise RuntimeError(f"OIDC token request failed: HTTP {exc.code} {detail}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"OIDC token request failed: {exc.reason}") from exc
+
+    token = payload.get("access_token")
+    if not token:
+        raise RuntimeError("OIDC token response did not contain access_token")
+    return token
+
+
+def retire_stale(base: str, keep: set[str], dry_run: bool, token: str) -> int:
     """Drop policies the Manager still holds but git no longer has.
 
     Retire rather than delete: `DELETE /v1/policy/:id` fails with a foreign
@@ -84,10 +128,10 @@ def retire_stale(base: str, keep: set[str], dry_run: bool) -> int:
     to compile the whole set — every request then 500s. Exactly that
     happened while building this.
     """
-    status, out = request("GET", f"{base}/v1/policies")
+    status, out = request("GET", f"{base}/v1/policies", token)
     if status != 200:
-        print(f"  could not list policies (HTTP {status}) — skipping prune", file=sys.stderr)
-        return 0
+        print(f"  could not list policies (HTTP {status})", file=sys.stderr)
+        return 1
 
     failures = 0
     for pol in json.loads(out):
@@ -102,7 +146,7 @@ def retire_stale(base: str, keep: set[str], dry_run: bool) -> int:
             continue
 
         # Read the full record: the list view omits `data`, and PUT needs it.
-        st, body = request("GET", f"{base}/v1/policy/{pid}")
+        st, body = request("GET", f"{base}/v1/policy/{pid}", token)
         data = json.loads(body).get("data", "") if st == 200 else ""
         payload = {
             "id": pid,
@@ -114,7 +158,7 @@ def retire_stale(base: str, keep: set[str], dry_run: bool) -> int:
                 "tags": [RETIRED_TAG],
             },
         }
-        st, out = request("PUT", f"{base}/v1/policy/{pid}", payload)
+        st, out = request("PUT", f"{base}/v1/policy/{pid}", token, payload)
         if st not in (200, 201, 204):
             print(f"  FAIL retiring {title}: HTTP {st} {out[:200]!r}", file=sys.stderr)
             failures += 1
@@ -124,7 +168,7 @@ def retire_stale(base: str, keep: set[str], dry_run: bool) -> int:
     return failures
 
 
-def seed(base: str, dry_run: bool) -> int:
+def seed(base: str, dry_run: bool, token: str) -> int:
     files = policy_files()
     if not files:
         print("no policies found — is policies/ present?", file=sys.stderr)
@@ -153,9 +197,9 @@ def seed(base: str, dry_run: bool) -> int:
 
         # POST creates; on a re-run the id already exists, so fall back to
         # PUT, which is the update verb.
-        status, out = request("POST", f"{base}/v1/policy/{pid}", payload)
+        status, out = request("POST", f"{base}/v1/policy/{pid}", token, payload)
         if status in (409, 400, 422):
-            status, out = request("PUT", f"{base}/v1/policy/{pid}", payload)
+            status, out = request("PUT", f"{base}/v1/policy/{pid}", token, payload)
 
         if status not in (200, 201, 204):
             print(f"  FAIL {rel}: HTTP {status} {out[:200]!r}", file=sys.stderr)
@@ -163,7 +207,7 @@ def seed(base: str, dry_run: bool) -> int:
         else:
             print(f"  seeded {rel}  (HTTP {status})")
 
-    failures += retire_stale(base, seeded, dry_run)
+    failures += retire_stale(base, seeded, dry_run, token)
     return 1 if failures else 0
 
 
@@ -174,12 +218,36 @@ def main() -> int:
         default="http://localhost:9280",
         help="Manager management API (default: the compose-published port)",
     )
+    ap.add_argument(
+        "--oidc-authority",
+        default=os.environ.get(
+            "GBO_FTV_OIDC_AUTHORITY", "http://localhost:9284/realms/gbo"
+        ),
+        help="OIDC realm used for the deployment identity",
+    )
+    ap.add_argument("--oidc-client-id", default="openftv-manager-ui")
+    ap.add_argument("--username", default="deployment")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
     base = args.url.rstrip("/")
     print(f"seeding OpenFTV Manager at {base}")
-    return seed(base, args.dry_run)
+    if args.dry_run:
+        return seed(base, True, "dry-run")
+
+    password = os.environ.get("FTV_MANAGER_DEPLOY_PASSWORD", "")
+    if not password:
+        print("FTV_MANAGER_DEPLOY_PASSWORD is required", file=sys.stderr)
+        return 1
+
+    try:
+        token = deployment_token(
+            args.oidc_authority, args.oidc_client_id, args.username, password
+        )
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    return seed(base, False, token)
 
 
 if __name__ == "__main__":

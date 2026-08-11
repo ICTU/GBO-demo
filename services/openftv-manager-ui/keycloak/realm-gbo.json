@@ -60,7 +60,7 @@
           "protocolMapper": "oidc-audience-mapper",
           "consentRequired": false,
           "config": {
-            "included.client.audience": "openftv-manager-ui",
+            "included.client.audience": "openftv-manager-api",
             "access.token.claim": "true"
           }
         }
@@ -69,41 +69,22 @@
   ],
   "users": [
     {
-      "username": "admin",
+      "username": "deployment",
       "enabled": true,
       "emailVerified": true,
-      "firstName": "Demo",
-      "lastName": "Beheerder",
+      "firstName": "Internal",
+      "lastName": "Deployment",
       "credentials": [
         {
           "type": "password",
-          "value": "admin",
+          "value": "${FTV_MANAGER_DEPLOY_PASSWORD}",
           "temporary": false
         }
       ],
       "realmRoles": [
         "admin"
       ],
-      "email": "admin@gbo.local",
-      "requiredActions": []
-    },
-    {
-      "username": "auteur",
-      "enabled": true,
-      "emailVerified": true,
-      "firstName": "Demo",
-      "lastName": "Auteur",
-      "credentials": [
-        {
-          "type": "password",
-          "value": "auteur",
-          "temporary": false
-        }
-      ],
-      "realmRoles": [
-        "author"
-      ],
-      "email": "auteur@gbo.local",
+      "email": "deployment@gbo.local",
       "requiredActions": []
     },
     {

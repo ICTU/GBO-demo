@@ -52,6 +52,8 @@ demo-minimal: certs
 # because it trades the edit-and-save hot-reload loop for a deliberate
 # deploy step — which is the point, but not what you want while writing Rego.
 demo-manager: certs
+	@test -n "$(KEYCLOAK_ADMIN_PASSWORD)" || (echo "KEYCLOAK_ADMIN_PASSWORD is required" >&2; exit 1)
+	@test -n "$(FTV_MANAGER_DEPLOY_PASSWORD)" || (echo "FTV_MANAGER_DEPLOY_PASSWORD is required" >&2; exit 1)
 	@echo "-> Base stack + OpenFTV Manager (PAP/PIP, bundle distribution)"
 	GBO_BUNDLE_MANAGER=http://openftv-manager:9443/v1/bundle/gbo-pdp \
 	  GBO_ADL_TYPE=postgres \
@@ -75,6 +77,7 @@ demo-manager: certs
 # that no longer exist in git are retired (untagged) rather than deleted —
 # DELETE is broken upstream, see ICTU-37.
 manager-seed:
+	@test -n "$(FTV_MANAGER_DEPLOY_PASSWORD)" || (echo "FTV_MANAGER_DEPLOY_PASSWORD is required" >&2; exit 1)
 	./scripts/seed-openftv-manager.py --url http://localhost:$${GBO_PORT_FTV_MANAGER:-9280}
 	docker compose --profile manager restart openftv-pdp
 
@@ -173,7 +176,7 @@ demo-full: certs fsc-all-up fsc-seed-bri fsc-seed-brp fsc-seed-bri-hv eudi-confi
 	docker compose --profile full up --build -d
 
 demo-down:
-	docker compose --profile full down
+	docker compose --profile full --profile manager down
 	docker compose -f fsc-infra/docker-compose.yml down
 
 logs:

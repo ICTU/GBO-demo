@@ -126,6 +126,7 @@ jobs:
           - eudi-adapter
           - graphql-server
           - openftv-manager
+          - openftv-manager-ui
           - openftv-pdp
           - sector-pip
     steps:
@@ -134,24 +135,28 @@ jobs:
         run: |
           context="services/${{ matrix.service }}"
           # These reach outside their own service directory: dev-portal-backend
-          # and openftv-pdp bake in ./policies, and openftv-manager ships the
-          # bundle configs. Same context compose uses.
+          # and openftv-pdp bake in ./policies, while both Manager images
+          # are built from the upstream OpenFTV tree. Same context compose uses.
           case "${{ matrix.service }}" in
-            dev-portal-backend|openftv-pdp|openftv-manager) context=. ;;
+            dev-portal-backend|openftv-pdp|openftv-manager|openftv-manager-ui) context=. ;;
           esac
           docker build \
             --file "services/${{ matrix.service }}/Dockerfile" \
             --tag "gbo-demo/${{ matrix.service }}:ci" \
             "${context}"
-      - name: OPENFTV_REF identical in the PDP and Manager Dockerfiles
+      - name: OPENFTV_REF identical in all OpenFTV Dockerfiles
         if: matrix.service == 'openftv-pdp'
         run: |
           pdp="$(grep -oP 'OPENFTV_REF=\K[0-9a-f]+' services/openftv-pdp/Dockerfile)"
           mgr="$(grep -oP 'OPENFTV_REF=\K[0-9a-f]+' services/openftv-manager/Dockerfile)"
-          if [ "$pdp" != "$mgr" ]; then
-            echo "OPENFTV_REF differs: pdp=$pdp manager=$mgr" >&2
+          ui="$(grep -oP 'OPENFTV_REF=\K[0-9a-f]+' services/openftv-manager-ui/Dockerfile)"
+          if [ "$pdp" != "$mgr" ] || [ "$pdp" != "$ui" ]; then
+            echo "OPENFTV_REF differs: pdp=$pdp manager=$mgr ui=$ui" >&2
             exit 1
           fi
+      - name: Test Manager seed authentication
+        if: matrix.service == 'openftv-manager'
+        run: python3 -m unittest scripts/test_seed_openftv_manager.py
       - name: Verify packaged policy sources
         if: matrix.service == 'dev-portal-backend'
         run: |
