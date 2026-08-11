@@ -276,6 +276,7 @@ services:
     environment:
       - KC_BOOTSTRAP_ADMIN_USERNAME=admin
       - KC_BOOTSTRAP_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:-}
+      - FTV_MANAGER_AUDITOR_PASSWORD=${FTV_MANAGER_AUDITOR_PASSWORD:-}
       - FTV_MANAGER_DEPLOY_PASSWORD=${FTV_MANAGER_DEPLOY_PASSWORD:-}
       # The issuer in the token must match what the browser used to reach
       # Keycloak, or the SPA rejects it. start-dev derives it per request.

@@ -16,7 +16,7 @@ claim; an IdP that only emits `groups` would leave the UI read-only.
 
 | user | password | capability |
 | --- | --- | --- |
-| `auditor` | `auditor` | read-only |
+| `fds` | `FTV_MANAGER_AUDITOR_PASSWORD` (`FDSSecret` in the simulation) | read-only |
 | `deployment` | `FTV_MANAGER_DEPLOY_PASSWORD` | internal seed process; write + publish |
 
 There is no public admin or author account. Public demo visitors may inspect
@@ -25,10 +25,11 @@ must not contain personal data, tokens or secrets. The Manager API enforces
 the same permissions with Cedar, so bypassing the UI does not bypass the
 read-only restriction.
 
-Set both `KEYCLOAK_ADMIN_PASSWORD` and `FTV_MANAGER_DEPLOY_PASSWORD` before
-running `make demo-manager`. Neither value belongs in a public deployment's
-frontend configuration. The deployment identity uses a short-lived OIDC
-access token and is only intended for `scripts/seed-openftv-manager.py`.
+Set `KEYCLOAK_ADMIN_PASSWORD`, `FTV_MANAGER_AUDITOR_PASSWORD` and
+`FTV_MANAGER_DEPLOY_PASSWORD` before running `make demo-manager`. Store them
+as CI/CD secrets; none belongs in frontend configuration. The deployment
+identity uses a short-lived OIDC access token and is only intended for
+`scripts/seed-openftv-manager.py`.
 
 ## Demo-only shortcuts
 

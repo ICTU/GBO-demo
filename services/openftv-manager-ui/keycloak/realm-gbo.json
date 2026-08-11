@@ -88,22 +88,22 @@
       "requiredActions": []
     },
     {
-      "username": "auditor",
+      "username": "fds",
       "enabled": true,
       "emailVerified": true,
-      "firstName": "Demo",
-      "lastName": "Auditor",
+      "firstName": "Federatief",
+      "lastName": "Datastelsel",
       "credentials": [
         {
           "type": "password",
-          "value": "auditor",
+          "value": "${FTV_MANAGER_AUDITOR_PASSWORD}",
           "temporary": false
         }
       ],
       "realmRoles": [
         "auditor"
       ],
-      "email": "auditor@gbo.local",
+      "email": "fds@gbo.local",
       "requiredActions": []
     }
   ],

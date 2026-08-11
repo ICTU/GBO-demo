@@ -129,6 +129,7 @@ PDPs that ask for it. The PDP pulls its bundle at boot
 
 ```bash
 KEYCLOAK_ADMIN_PASSWORD='<generate-a-secret>' \
+FTV_MANAGER_AUDITOR_PASSWORD='FDSSecret' \
 FTV_MANAGER_DEPLOY_PASSWORD='<generate-another-secret>' \
 make demo-manager                 # base stack + Manager, policies seeded
 curl -s localhost:9281/v1/bundle/gbo-pdp | gunzip | jq '.version, (.policies|length)'
@@ -144,8 +145,10 @@ FTV_MANAGER_DEPLOY_PASSWORD='<same-secret>' make manager-seed
 ### The management interface
 
 `make demo-manager` also starts OpenFTV's own UI with a Keycloak realm behind
-it. Public demo visitors use `auditor`/`auditor` and can inspect policies,
-deployments and the Logboek, but cannot change or publish anything. The API
+it. Public demo visitors use the simulation credentials `fds` / `FDSSecret`
+and can inspect policies, deployments and the Logboek, but cannot change or
+publish anything. `FTV_MANAGER_AUDITOR_PASSWORD` supplies that password to
+Keycloak, so a deployment can manage it as a CI/CD secret. The API
 enforces that restriction with Cedar policies; it is not just a disabled UI
 button. Only the internal `deployment` identity, whose password comes from
 `FTV_MANAGER_DEPLOY_PASSWORD`, can write and publish. There is deliberately
