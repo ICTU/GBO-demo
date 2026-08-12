@@ -45,7 +45,7 @@ docker run --rm \
         echo -e "[req_distinguished_name]\nserialNumber=OIN" >> /etc/ssl/openssl.cnf
 
         openssl req -new -nodes -sha256 -newkey rsa:4096 \
-            -subj "/C=NL/O=GBO-DEMO BRP-mock/OU=TEST/CN=brp-manager/serialNumber=99999999900000000400" \
+            -subj "/C=NL/O=RvIG/OU=TEST/CN=brp-manager/serialNumber=99999999900000000400" \
             -addext "subjectAltName=DNS:brp-manager,DNS:brp-inway" \
             -keyout "${OUT}/brp-mock-key.pem" \
             -out "${OUT}/brp-mock.csr" 2>/dev/null

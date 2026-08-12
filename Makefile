@@ -19,6 +19,8 @@ NLWALLET_PATH ?= $(PWD)/vendor/nl-wallet
 # by the explicit provision-development-certificates target.
 DEVELOPMENT_SOURCE_OIN ?= 99999999900000000200
 DEVELOPMENT_BRP_SOURCE_OIN ?= 99999999900000000400
+DEVELOPMENT_SOURCE_NAME ?= Belastingdienst
+DEVELOPMENT_BRP_SOURCE_NAME ?= RvIG
 ONBOARDING_OUTWAY_URL ?= http://localhost:8087
 ONBOARDING_STATE_DIR ?= $(PWD)/.local/onboarding
 ONBOARDING_SECRETS_DIR ?= $(PWD)/.local/secrets
@@ -199,6 +201,7 @@ provision-development-certificates:
 	@test -n "$(SOURCE_OIN)" || { echo "ERROR: SOURCE_OIN=<20-digit OIN> is required"; exit 1; }
 	@cd services/eudi-adapter && go run . provision-development-certificates \
 		--source-oin "$(SOURCE_OIN)" \
+		--source-name "$(SOURCE_NAME)" \
 		--reader-public-url "$${EUDI_PUBLIC_URL:-}" \
 		--secrets-dir "$(ONBOARDING_SECRETS_DIR)"
 
@@ -214,8 +217,8 @@ onboard-demo-sources: certs
 	$(MAKE) fsc-seed-bri
 	$(MAKE) fsc-seed-brp
 	$(MAKE) fsc-seed-metadata
-	$(MAKE) provision-development-certificates SOURCE_OIN=$(DEVELOPMENT_SOURCE_OIN)
-	$(MAKE) provision-development-certificates SOURCE_OIN=$(DEVELOPMENT_BRP_SOURCE_OIN)
+	$(MAKE) provision-development-certificates SOURCE_OIN=$(DEVELOPMENT_SOURCE_OIN) SOURCE_NAME="$(DEVELOPMENT_SOURCE_NAME)"
+	$(MAKE) provision-development-certificates SOURCE_OIN=$(DEVELOPMENT_BRP_SOURCE_OIN) SOURCE_NAME="$(DEVELOPMENT_BRP_SOURCE_NAME)"
 	$(MAKE) reconcile-fsc-sources
 
 demo-eudi: onboard-demo-sources eudi-config eudi-images

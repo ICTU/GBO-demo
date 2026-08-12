@@ -385,8 +385,8 @@ public url host <host> not in certificate DNS SANs: <sans>
 Every activated source therefore needs a reader certificate for the host you are actually serving on. For the local proof, rerun the explicit development provisioning step for both sources and reconcile them:
 
 ```bash
-make provision-development-certificates SOURCE_OIN=99999999900000000200
-make provision-development-certificates SOURCE_OIN=99999999900000000400
+make provision-development-certificates SOURCE_OIN=99999999900000000200 SOURCE_NAME="Belastingdienst"
+make provision-development-certificates SOURCE_OIN=99999999900000000400 SOURCE_NAME="RvIG"
 make reconcile-fsc-sources
 make eudi-config
 ```

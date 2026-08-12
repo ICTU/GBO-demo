@@ -24,6 +24,11 @@ func TestFSCContractDiscoverySelectsNewestValidConsumerGrant(t *testing.T) {
 		fscConnectionContract(testConsumerOIN, testProviderOIN, "bri", "data-grant", now.Unix(), now),
 	})
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/v1/peers" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(fscPeerPayload(t))
+			return
+		}
 		if got := request.URL.Query().Get("grant_type"); got != "GRANT_TYPE_SERVICE_CONNECTION" {
 			t.Errorf("grant_type = %q", got)
 		}
@@ -49,6 +54,10 @@ func TestFSCContractDiscoveryFollowsManagerPagination(t *testing.T) {
 	now := time.Now().UTC()
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if request.URL.Path == "/v1/peers" {
+			_, _ = w.Write(fscPeerPayload(t))
+			return
+		}
 		if request.URL.Query().Get("cursor") == "next-page" {
 			_, _ = w.Write(fscContractPagePayload(t, []map[string]any{
 				fscConnectionContract(testConsumerOIN, testProviderOIN, "bri", "data-grant", now.Unix(), now),
@@ -76,8 +85,12 @@ func TestFSCSourceReconcilerDerivesRegistrationFromContractsAndMetadata(t *testi
 		fscConnectionContract(testConsumerOIN, testProviderOIN, gboMetadataServiceName, "metadata-grant", now.Unix(), now),
 		fscConnectionContract(testConsumerOIN, testProviderOIN, "bri", "data-grant", now.Unix(), now),
 	})
-	manager := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	manager := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if request.URL.Path == "/v1/peers" {
+			_, _ = w.Write(fscPeerPayload(t))
+			return
+		}
 		_, _ = w.Write(managerPayload)
 	}))
 	defer manager.Close()
@@ -110,7 +123,7 @@ func TestFSCSourceReconcilerDerivesRegistrationFromContractsAndMetadata(t *testi
 		t.Fatal("source was not activated")
 	}
 	registration := backend.validated.Registration
-	if registration.SourceOIN != testProviderOIN || registration.MetadataEndpoint.GrantHash != "metadata-grant" || registration.DataAccess.ServiceReference != "bri" || registration.DataAccess.GrantHash != "data-grant" {
+	if registration.SourceOIN != testProviderOIN || registration.Name != "Belastingdienst" || registration.MetadataEndpoint.GrantHash != "metadata-grant" || registration.DataAccess.ServiceReference != "bri" || registration.DataAccess.GrantHash != "data-grant" {
 		t.Fatalf("derived registration = %+v", registration)
 	}
 }
@@ -132,6 +145,17 @@ func (b *capturingActivationBackend) Activate(validated *validatedSourceRegistra
 
 func fscContractPayload(t *testing.T, contracts []map[string]any) []byte {
 	return fscContractPagePayload(t, contracts, "")
+}
+
+func fscPeerPayload(t *testing.T) []byte {
+	t.Helper()
+	payload, err := json.Marshal(map[string]any{
+		"peers": []map[string]any{{"id": testProviderOIN, "name": "Belastingdienst"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return payload
 }
 
 func fscContractPagePayload(t *testing.T, contracts []map[string]any, nextCursor string) []byte {

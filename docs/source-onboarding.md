@@ -21,9 +21,10 @@ Voor een FSC-bron zijn twee geldige service-connection-contracten nodig:
 - de dataservice die het brondocument zelf noemt, bijvoorbeeld `bri` of `brp`.
 
 De reconciler leest de contracten uit de FSC Manager van de EUDI-adapterpeer.
-Per contract gebruikt hij de provider-OIN, servicenaam en grant-hash. Daardoor
-staan bron-OIN, FSC-servicebindingen en grant-hashes niet ook nog in Git of in
-losse onboarding-YAML.
+Per contract gebruikt hij de provider-OIN, servicenaam en grant-hash. De
+organisatienaam komt uit de peerregistratie van dezelfde FSC Manager. Daardoor
+staan bronidentiteit, FSC-servicebindingen en grant-hashes niet ook nog in Git
+of in losse onboarding-YAML.
 
 De statische `validate-source`- en `onboard-source`-commando's weigeren daarom
 het FSC-transport en verwijzen naar `reconcile-fsc-sources`.
@@ -38,8 +39,8 @@ sequenceDiagram
     participant G as Issuance config generator
     participant I as Issuance server and frontends
 
-    R->>M: List valid service-connection contracts
-    M-->>R: provider OIN + service + grant hash
+    R->>M: List peers and valid service-connection contracts
+    M-->>R: provider OIN + organization name + service + grant hash
     R->>O: GET /.well-known/gbo + metadata grant hash
     O->>B: FSC mTLS request
     B-->>R: source metadata
@@ -61,6 +62,7 @@ bruikbaar contract faalt uitgifte gesloten; er is geen legacyfallback.
 | Gegeven | Bron |
 |---|---|
 | Provider-OIN, transportbinding en grant-hash | geldig FSC-contract |
+| Organisatienaam van de bron | FSC-peerregistratie voor hetzelfde provider-OIN |
 | Vast metadata-pad | GBO-profiel: `/.well-known/gbo` |
 | Dataservicenaam, GraphQL-endpoint, query, parameters, offers en mapping | bronmetadata |
 | Kaartnaam, kleur, logo, claimlabels en claimschema | Type Metadata in de bronmetadata |
@@ -94,8 +96,8 @@ dataservices, maakt uitsluitend voor lokaal gebruik expliciet
 ontwikkelcertificaten en draait daarna één reconciliatie. De kernstappen zijn:
 
 ```sh
-make provision-development-certificates SOURCE_OIN=99999999900000000200
-make provision-development-certificates SOURCE_OIN=99999999900000000400
+make provision-development-certificates SOURCE_OIN=99999999900000000200 SOURCE_NAME="Belastingdienst"
+make provision-development-certificates SOURCE_OIN=99999999900000000400 SOURCE_NAME="RvIG"
 make reconcile-fsc-sources
 make eudi-config
 ```
@@ -113,7 +115,9 @@ worden gegenereerd en de issuance-server en frontends opnieuw worden uitgerold.
 
 De reconciler mint of vernieuwt nooit certificaten. Ontbrekende, verlopen of
 niet-passende certificaten blokkeren activatie. In productie worden die door
-een apart bevoegd proces uitgegeven.
+een apart bevoegd proces uitgegeven. De certificaten binden zowel het OIN als
+de FSC-organisatienaam; een naamswijziging vereist dus expliciete heruitgifte
+en kan niet eenzijdig via bronmetadata worden doorgevoerd.
 
 Deze metadataflow beslist niet of alle bronnen één vooraf beheerde GBO
 issuer/reader/status-set delen of ieder een eigen set krijgen. De huidige proof
