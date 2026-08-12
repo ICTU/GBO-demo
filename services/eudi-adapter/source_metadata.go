@@ -345,9 +345,12 @@ func validateAttributeSchema(definition sourceAttestationDefinition) error {
 		if attribute.Type != wantType || attribute.Format != wantFormat {
 			return fmt.Errorf("attribute_schema claim %q must have type %q and format %q", claim, wantType, wantFormat)
 		}
+		if attribute.Type == "number" {
+			return fmt.Errorf("attribute_schema claim %q uses number, which nl-wallet v0.5 cannot represent; use integer or string", claim)
+		}
 		if attribute.Unit != "" {
-			if attribute.Type != "number" {
-				return fmt.Errorf("attribute_schema claim %q can only declare a unit for type number", claim)
+			if attribute.Type != "integer" {
+				return fmt.Errorf("attribute_schema claim %q can only declare a unit for type integer", claim)
 			}
 			if !isUppercaseAlpha3(attribute.Unit) {
 				return fmt.Errorf("attribute_schema claim %q unit must be a three-letter uppercase code", claim)

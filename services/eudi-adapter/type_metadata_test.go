@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
@@ -158,6 +159,25 @@ func TestOptionalMappingClaimCannotBeRequiredByTypeMetadata(t *testing.T) {
 	}
 	if _, err := newTypeMetadataPublication("https://issuer.example", "99999999900000000200", definition); err == nil {
 		t.Fatal("optional mapping claim required by Type Metadata was accepted")
+	}
+}
+
+func TestTypeMetadataSchemaMustMatchAttributeSchema(t *testing.T) {
+	definition := sourceAttestationDefinition{
+		TypeID:      "inkomensverklaring",
+		TypeVersion: "1.0",
+		AttributeSchema: map[string]sourceAttributeSchema{
+			"verzamelinkomen": {Type: "integer", Unit: "EUR"},
+		},
+		TypeMetadata: json.RawMessage(`{
+			"schema":{
+				"type":"object",
+				"properties":{"verzamelinkomen":{"type":"number"}}
+			}
+		}`),
+	}
+	if _, err := newTypeMetadataPublication("https://issuer.example", "99999999900000000200", definition); err == nil || !strings.Contains(err.Error(), `must have type "integer"`) {
+		t.Fatalf("mismatched Type Metadata schema error = %v", err)
 	}
 }
 

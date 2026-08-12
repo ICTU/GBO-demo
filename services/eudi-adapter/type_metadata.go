@@ -56,6 +56,9 @@ func newTypeMetadataPublication(publicBaseURL, sourceOIN string, definition sour
 	if err := validateOptionalClaimsAgainstSchema(metadata, definition.Mapping); err != nil {
 		return nil, err
 	}
+	if err := validateTypeMetadataAttributeSchema(metadata, definition.AttributeSchema); err != nil {
+		return nil, err
+	}
 	if err := validateSummaryPlaceholders(metadata); err != nil {
 		return nil, err
 	}
@@ -80,6 +83,33 @@ func newTypeMetadataPublication(publicBaseURL, sourceOIN string, definition sour
 		etag:        `"` + fmt.Sprintf("%x", digest) + `"`,
 		path:        path,
 	}, nil
+}
+
+func validateTypeMetadataAttributeSchema(metadata map[string]any, attributes map[string]sourceAttributeSchema) error {
+	if len(attributes) == 0 {
+		return nil
+	}
+	schema, ok := metadata["schema"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("type_metadata.schema must be a JSON object")
+	}
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("type_metadata.schema.properties must define every mapped claim")
+	}
+	for claim, attribute := range attributes {
+		property, ok := properties[claim].(map[string]any)
+		if !ok {
+			return fmt.Errorf("type_metadata.schema.properties is missing mapped claim %q", claim)
+		}
+		if property["type"] != attribute.Type {
+			return fmt.Errorf("type_metadata schema claim %q must have type %q", claim, attribute.Type)
+		}
+		if attribute.Format == "date" && property["format"] != "date" {
+			return fmt.Errorf("type_metadata schema claim %q must have format %q", claim, attribute.Format)
+		}
+	}
+	return nil
 }
 
 func validateOptionalClaimsAgainstSchema(metadata map[string]any, mapping gbosimplev1.Mapping) error {

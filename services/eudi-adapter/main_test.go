@@ -173,6 +173,41 @@ func TestAttributeSchemaUnitRejectedByRuntimeAndEnvelopeSchema(t *testing.T) {
 	}
 }
 
+func TestEUDIAttributeSchemaRejectsNumberUnsupportedByWallet(t *testing.T) {
+	raw, err := os.ReadFile("../graphql-server/config/gbo-source-metadata.json")
+	if err != nil {
+		t.Fatalf("read shipped source metadata: %v", err)
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		t.Fatalf("decode source metadata: %v", err)
+	}
+	attestations := envelope["capabilities"].(map[string]any)["eudi"].(map[string]any)["attestations"].([]any)
+	attestation := attestations[0].(map[string]any)
+	attestation["mapping"].(map[string]any)["verzamelinkomen"].(map[string]any)["datatype"] = "number"
+	attestation["attribute_schema"].(map[string]any)["verzamelinkomen"].(map[string]any)["type"] = "number"
+	attestation["type_metadata"].(map[string]any)["schema"].(map[string]any)["properties"].(map[string]any)["verzamelinkomen"].(map[string]any)["type"] = "number"
+	mutated, err := json.Marshal(envelope)
+	if err != nil {
+		t.Fatalf("encode mutated source metadata: %v", err)
+	}
+
+	var document sourceMetadataDocument
+	if err := json.Unmarshal(mutated, &document); err != nil {
+		t.Fatalf("runtime decode error = %v", err)
+	}
+	if err := validateSourceAttestation(document.eudiAttestations()[0]); err == nil || !strings.Contains(err.Error(), "nl-wallet v0.5 cannot represent") {
+		t.Fatalf("runtime validation error = %v, want unsupported wallet number", err)
+	}
+	metadata, err := jsonschema.UnmarshalJSON(bytes.NewReader(mutated))
+	if err != nil {
+		t.Fatalf("parse mutated metadata for schema: %v", err)
+	}
+	if err := compileSourceMetadataSchema(t).Validate(metadata); err == nil {
+		t.Fatal("envelope schema accepted a number attribute unsupported by nl-wallet v0.5")
+	}
+}
+
 // A source declaration fetched through FSC supplies both the query sent
 // through FSC/PDP
 // and the projection returned to the issuance server.

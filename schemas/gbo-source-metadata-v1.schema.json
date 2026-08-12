@@ -288,8 +288,7 @@
               "enum": [
                 "string",
                 "boolean",
-                "integer",
-                "number"
+                "integer"
               ]
             }
           }
@@ -335,7 +334,7 @@
           ],
           "properties": {
             "type": {
-              "const": "number"
+              "const": "integer"
             },
             "unit": {
               "type": "string",

@@ -38,7 +38,7 @@ Ook bedragen worden ongewijzigd gekopieerd:
 }
 ```
 
-Een bronwaarde `43000.50` blijft dus `43000.50`; GBO rondt niet af en kiest geen schaal. Een eventuele eenheid zoals `EUR` is declaratieve semantiek in `attribute_schema` en Type Metadata. Als een productiebron een andere representatie nodig heeft, levert zijn domain-ready resolver die representatie aan. Conversies worden pas aan een nieuw profiel toegevoegd wanneer een productiecasus ze aantoonbaar nodig heeft.
+Een bronwaarde `43000.50` blijft binnen het generieke mappingprofiel dus `43000.50`; GBO rondt niet af en kiest geen schaal. De huidige EUDI-capability gebruikt echter nl-wallet v0.5, dat geen niet-integrale attribuutwaarden kan representeren. EUDI-onboarding accepteert daarom voorlopig alleen `integer` voor bedragen; de inkomensdemo gebruikt gehele euro's. Een eventuele eenheid zoals `EUR` is declaratieve semantiek in `attribute_schema` en Type Metadata. Als een productiebron decimalen nodig heeft, moet eerst expliciet worden gekozen voor bijvoorbeeld een tekstrepresentatie of minor units; GBO voert die conversie niet stilzwijgend uit.
 
 ## Datatypes
 
@@ -51,7 +51,7 @@ Een bronwaarde `43000.50` blijft dus `43000.50`; GBO rondt niet af en kiest geen
 | `date` | canonieke RFC 3339 full-date `YYYY-MM-DD` | string |
 | `gYear` | geheel getal van 0 tot en met 9999 | dezelfde bronwaarde |
 
-`attribute_schema` moet voor iedere mappingclaim exact één overeenkomstige outputdefinitie bevatten. Het schema mag bij `type: number` een eenheid zoals `EUR` declareren; de projector interpreteert die eenheid niet.
+`attribute_schema` moet voor iedere mappingclaim exact één overeenkomstige outputdefinitie bevatten. De huidige EUDI-subset mag bij `type: integer` een eenheid zoals `EUR` declareren; de projector interpreteert die eenheid niet. Het JSON Schema in Type Metadata moet hetzelfde type gebruiken, zodat een incompatibele walletpreview al tijdens onboarding wordt geweigerd.
 
 ## Null en optionele claims
 
