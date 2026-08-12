@@ -33,6 +33,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
 
+	"errors"
 	"gbo-demo/consent-portal-backend/bsnk"
 	"gbo-demo/consent-portal-backend/consent"
 	"gbo-demo/consent-portal-backend/devportal"
@@ -40,6 +41,9 @@ import (
 	"gbo-demo/consent-portal-backend/portalhttp"
 	"gbo-demo/consent-portal-backend/register"
 	"gbo-demo/consent-portal-backend/upstream"
+	"net"
+	"os/signal"
+	"syscall"
 )
 
 // portalOIN is the portal's own OIN, used as recipient_oin when it needs the
@@ -55,6 +59,20 @@ const upstreamTimeout = 10 * time.Second
 
 // historyTimeout bounds the best-effort dev-portal history post.
 const historyTimeout = 3 * time.Second
+
+// readHeaderTimeout bounds how long a client may take to send its request
+// headers, so a stalled connection cannot hold a handler open.
+const readHeaderTimeout = 10 * time.Second
+
+// shutdownTimeout bounds the drain after SIGTERM: stop accepting, let
+// in-flight requests finish, then close whatever is left.
+const shutdownTimeout = 15 * time.Second
+
+// streamGrace is how long ordinary in-flight requests get to finish before
+// the SSE streams are ended. Shutdown waits for active requests but does not
+// cancel their contexts, so /portal/events would otherwise hold the drain
+// open for the full shutdownTimeout on every restart.
+const streamGrace = 2 * time.Second
 
 // ── Config ────────────────────────────────────────────────────────────────
 
@@ -161,12 +179,50 @@ func main() {
 
 	cfg := loadConfig()
 	hub := portalhttp.NewHub()
-	mux := newMux(cfg, hub)
 
-	addr := ":" + cfg.Port
-	slog.Info("listening", "addr", addr)
-	if err := http.ListenAndServe(addr, otelhttp.NewHandler(logctx.WithAccessLog(mux), "consent-portal-backend")); err != nil {
-		slog.Error("server error", "err", err.Error())
-		os.Exit(1)
+	// BaseContext gives every request a context this process can cancel, which
+	// is how the long-lived SSE streams are told to wind up at shutdown.
+	baseCtx, endStreams := context.WithCancel(context.Background())
+	srv := &http.Server{
+		Addr:              ":" + cfg.Port,
+		Handler:           otelhttp.NewHandler(portalhttp.WithDemoSession(logctx.WithAccessLog(newMux(cfg, hub))), "consent-portal-backend"),
+		ReadHeaderTimeout: readHeaderTimeout,
+		BaseContext:       func(net.Listener) context.Context { return baseCtx },
+	}
+	slog.Info("listening", "addr", srv.Addr)
+	serve(srv, endStreams)
+}
+
+// fatal logs and ends the process. main is the only place in this service
+// that exits; everything else returns an error.
+func fatal(msg string, err error) {
+	slog.Error(msg, "err", err.Error())
+	os.Exit(1)
+}
+
+// serve runs the server until the process is asked to stop, then drains it.
+// Without this a SIGTERM (docker compose down, a Kubernetes rollout) killed
+// in-flight consent writes outright. Previously a failed ListenAndServe was
+// only logged, so a service that could not bind its port exited 0.
+func serve(srv *http.Server, endStreams context.CancelFunc) {
+	go func() {
+		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+			fatal("listen and serve", err)
+		}
+	}()
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	<-ctx.Done()
+	stop()
+
+	slog.Info("shutting down")
+	// Let ordinary requests finish first, then release the SSE streams.
+	time.AfterFunc(streamGrace, endStreams)
+	drainCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	if err := srv.Shutdown(drainCtx); err != nil {
+		slog.Warn("drain did not finish; closing remaining connections", "err", err.Error())
+		_ = srv.Close()
 	}
 }

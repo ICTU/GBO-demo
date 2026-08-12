@@ -34,7 +34,7 @@ jobs:
           - sector-pip
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5.1.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.25'
           cache-dependency-path: services/${{ matrix.service }}/go.*
@@ -79,7 +79,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v3.17.3
       - name: helm lint
@@ -103,9 +103,9 @@ jobs:
           - toestemmingsportaal-frontend
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: ${{ matrix.app }}/package-lock.json
       - name: npm ci
@@ -123,17 +123,47 @@ jobs:
       matrix:
         service:
           - additional-claims-service
+          - dev-portal-backend
           - eudi-adapter
           - graphql-server
+          - openftv-manager
+          - openftv-manager-ui
+          - openftv-pdp
           - sector-pip
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build image
         run: |
+          context="services/${{ matrix.service }}"
+          # These reach outside their own service directory: dev-portal-backend
+          # and openftv-pdp bake in ./policies, while both Manager images
+          # are built from the upstream OpenFTV tree. Same context compose uses.
+          case "${{ matrix.service }}" in
+            dev-portal-backend|openftv-pdp|openftv-manager|openftv-manager-ui) context=. ;;
+          esac
           docker build \
             --file "services/${{ matrix.service }}/Dockerfile" \
             --tag "gbo-demo/${{ matrix.service }}:ci" \
-            "services/${{ matrix.service }}"
+            "${context}"
+      - name: OPENFTV_REF identical in all OpenFTV Dockerfiles
+        if: matrix.service == 'openftv-pdp'
+        run: |
+          pdp="$(grep -oP 'OPENFTV_REF=\K[0-9a-f]+' services/openftv-pdp/Dockerfile)"
+          mgr="$(grep -oP 'OPENFTV_REF=\K[0-9a-f]+' services/openftv-manager/Dockerfile)"
+          ui="$(grep -oP 'OPENFTV_REF=\K[0-9a-f]+' services/openftv-manager-ui/Dockerfile)"
+          if [ "$pdp" != "$mgr" ] || [ "$pdp" != "$ui" ]; then
+            echo "OPENFTV_REF differs: pdp=$pdp manager=$mgr ui=$ui" >&2
+            exit 1
+          fi
+      - name: Test Manager seed authentication
+        if: matrix.service == 'openftv-manager'
+        run: python3 -m unittest scripts/test_seed_openftv_manager.py
+      - name: Verify packaged policy sources
+        if: matrix.service == 'dev-portal-backend'
+        run: |
+          docker run --rm --entrypoint sh \
+            "gbo-demo/${{ matrix.service }}:ci" \
+            -c 'test -f /rules.json && test -f /policies/authz.rego'
 
   # Aggregate gate: the repo ruleset requires a single "CI result" status.
   result:

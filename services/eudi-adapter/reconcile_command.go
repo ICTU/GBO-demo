@@ -26,7 +26,6 @@ type reconcileOptions struct {
 	stateDir         string
 	secretsDir       string
 	readerPublicURL  string
-	readerOrigin     string
 	watch            bool
 	interval         time.Duration
 }
@@ -64,7 +63,7 @@ func runReconcileCommand(ctx context.Context, arguments []string, dependencies r
 	onboarding := onboardingOptions{
 		storageBackend: options.storageBackend, certificateStoreName: options.certificateStore,
 		stateDir: options.stateDir, secretsDir: options.secretsDir,
-		readerPublicURL: options.readerPublicURL, readerOrigin: options.readerOrigin,
+		readerPublicURL: options.readerPublicURL,
 	}
 	store, err := configuredCertificateStore(onboarding)
 	if err != nil {
@@ -124,7 +123,6 @@ func parseReconcileOptions(arguments []string, errorOutput io.Writer) (reconcile
 	set.StringVar(&options.stateDir, "state-dir", ".local/onboarding", "filesystem onboarding state directory")
 	set.StringVar(&options.secretsDir, "secrets-dir", ".local/secrets", "filesystem secret directory")
 	set.StringVar(&options.readerPublicURL, "reader-public-url", os.Getenv("EUDI_PUBLIC_URL"), "public issuance-server URL")
-	set.StringVar(&options.readerOrigin, "reader-origin-url", os.Getenv("EUDI_READER_ORIGIN_URL"), "public reader origin")
 	set.BoolVar(&options.watch, "watch", false, "continuously reconcile FSC contracts")
 	set.DurationVar(&options.interval, "interval", 30*time.Second, "poll interval in watch mode")
 	if err := set.Parse(arguments); err != nil {

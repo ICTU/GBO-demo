@@ -15,12 +15,6 @@ const ISSUANCE_SERVER_PUBLIC_URL = (
 ).replace(/\/$/, '')
 
 function readerClientId(publicUrl: string): string {
-  const configured = (
-    window.__GBO_RUNTIME_CONFIG__?.eudiClientId ||
-    import.meta.env.VITE_EUDI_CLIENT_ID ||
-    ''
-  ).trim()
-  if (configured) return configured
   try {
     const hostname = new URL(publicUrl).hostname
     if (hostname) return `x509_san_dns:${hostname}`

@@ -21,9 +21,11 @@ Every mode also needs two Postgres passwords set via env-files (compose fails lo
 
 That covers the default (`make demo`, DvTP-only). For the wallet flow (`make demo-eudi` / `make demo-full`) you also need:
 
-- **nl-wallet sources** — pinned as a git submodule at `vendor/nl-wallet` (**v0.4.1, required**: the preprod wallet app rejects v0.5.0's scheme-prefixed `client_id`). Init once with `git submodule update --init vendor/nl-wallet`. Used to build the issuance-server binary from source. Override with `NLWALLET_PATH` in `.env` if you need another checkout.
-- **Three public HTTPS URLs** — `EUDI_PUBLIC_URL` (wallet reaches issuance-server), `EUDI_READER_ORIGIN_URL` (embedded in locally provisioned reader certificates; usually the same host as `EUDI_PUBLIC_URL`), and `EUDI_BRI_URL` (issuance-server reaches eudi-adapter). See [EUDI public reachability](#eudi-public-reachability) for the three supported options (own domain / bundled Cloudflare tunnel / ad-hoc tunnel).
-- **Activated sources with certificate references** — `make onboard-demo-sources` provisions development certificates only through its explicit local-development step and activates BD and BRP. Each source publishes its concrete wallet products as `offers`; `make eudi-config` generates the issuance-server TOML, Type Metadata files and frontend QR catalog from all active records. There is no source/usecase catalog in the adapter or issuance-server. Production uses pre-managed certificates; shared versus per-source certificate sets remains an open design choice.
+- **nl-wallet sources** — pinned as a git submodule at `vendor/nl-wallet` (**v0.5.0**). Server and app move in lockstep: v0.5.0 made the `x509_san_dns:` `client_id` prefix mandatory, so a v0.4.1 wallet app cannot complete a session against a v0.5.0 server, or the other way round. Init once with `git submodule update --init vendor/nl-wallet`. Used to build the issuance-server binary from source. Override with `NLWALLET_PATH` in `.env` if you need another checkout.
+- **Two public HTTPS URLs** — `EUDI_PUBLIC_URL` (wallet reaches issuance-server) and `EUDI_BRI_URL` (issuance-server reaches eudi-adapter). See [EUDI public reachability](#eudi-public-reachability) for the three supported options (own domain / bundled Cloudflare tunnel / ad-hoc tunnel).
+
+  Since v0.5.0 the `EUDI_PUBLIC_URL` **host** is part of the crypto, not just routing: the issuance-server derives its OpenID4VP `client_id` from it (`x509_san_dns:<host>`) and validates on startup that every reader certificate carries that host as a DNS SAN. Point `EUDI_PUBLIC_URL` at a different hostname and provision new development reader certificates before reconciling the sources again — see [Reader certificates and `EUDI_PUBLIC_URL`](#reader-certificates-and-eudi_public_url).
+- **Activated sources with certificate references** — `make onboard-demo-sources` explicitly provisions local-development certificates and activates BD and BRP. Each source publishes its concrete wallet products as `offers`; `make eudi-config` generates the issuance-server TOML, Type Metadata files, and frontend QR catalog from all active records. There is no source/use-case catalog in the adapter or issuance server. Production uses pre-managed certificates; [issue #225](https://github.com/ICTU/GBO-demo/issues/225) tracks the choice between shared and per-source certificate sets.
 
 Copy the templates and fill them in:
 
@@ -97,6 +99,118 @@ effect, restart the engine before concluding the rule is wrong:
 docker compose restart openftv-pdp
 ```
 
+### Policy distribution via the OpenFTV Manager (`make demo-manager`)
+
+The loop above edits files the PDP reads directly. That is convenient while
+writing Rego, but it is not how a federation distributes policy: every
+source-holder would need to rebuild or remount its PDP to change a rule.
+
+`make demo-manager` starts the other half of OpenFTV — the **Manager**, which
+is the PAP and PIP in one service. Git remains the canonical policy source.
+An internal deployment identity seeds those policies into the Manager's
+Postgres, after which the Manager bundles them and serves each bundle to the
+PDPs that ask for it. The PDP pulls its bundle at boot
+(`PDP_BUNDLE_MANAGER`), and that deployed bundle is its runtime policy set.
+
+```bash
+KEYCLOAK_ADMIN_PASSWORD='<generate-a-secret>' \
+FTV_MANAGER_AUDITOR_PASSWORD='FDSSecret' \
+FTV_MANAGER_DEPLOY_PASSWORD='<generate-another-secret>' \
+FTV_POSTGRES_PASSWORD='<generate-a-database-secret>' \
+make demo-manager                 # base stack + Manager, policies seeded
+curl -s localhost:9281/v1/bundle/gbo-pdp | gunzip | jq '.version, (.policies|length)'
+```
+
+Editing `policies/` no longer reloads by itself. Deploy the changed Git state
+deliberately, using the same secret-backed identity:
+
+```bash
+FTV_MANAGER_DEPLOY_PASSWORD='<same-secret>' make manager-seed
+```
+
+### The management interface
+
+`make demo-manager` also starts OpenFTV's own UI with a Keycloak realm behind
+it. Public demo visitors use the simulation credentials `fds` / `FDSSecret`
+and can inspect policies, deployments and the Logboek, but cannot change or
+publish anything. `FTV_MANAGER_AUDITOR_PASSWORD` supplies that password to
+Keycloak, so a deployment can manage it as a CI/CD secret. The API
+enforces that restriction with Cedar policies; it is not just a disabled UI
+button. Only the internal `deployment` identity, whose password comes from
+`FTV_MANAGER_DEPLOY_PASSWORD`, can write and publish. There is deliberately
+no public admin or author account. The UI reads capabilities from a top-level
+`roles` claim in the access token, which is why it is Keycloak; see
+`services/openftv-manager-ui/README.md`.
+
+**It must be served over HTTPS unless you open it on `localhost`.** The OIDC
+login uses PKCE, PKCE needs `Crypto.subtle`, and browsers only expose that in
+a secure context — over `http://<lan-ip>:9283` the page fails with
+*"Crypto.subtle is available only in secure contexts"*. Put the UI, the
+Manager API and Keycloak behind a TLS reverse proxy and point the stack at
+them:
+
+```bash
+GBO_FTV_MANAGER_URL=https://ftv-api.example.org \
+GBO_FTV_OIDC_AUTHORITY=https://ftv-auth.example.org/realms/gbo \
+  make demo-manager
+```
+
+Keycloak needs `KC_PROXY_HEADERS=xforwarded` (set in compose) and the proxy
+must send `X-Forwarded-Proto: https`, or its login form posts over HTTP from
+an HTTPS page and the browser blocks it as *"Form is not secure"*.
+
+The public auditor can also inspect the **Logboek** (decision log). That is
+appropriate only because this simulation uses synthetic data; do not copy
+that access model to a tenant containing personal data, tokens or secrets.
+The Logboek needs the ADL on Postgres at both ends: the
+Manager only registers those routes for a Postgres-backed decision log —
+any other value and the endpoints simply do not exist, so the page 404s —
+and the PDP has to write there. `make demo-manager` sets both. The ADL gets
+its own database (`ftv_adl`): it carries its own migration set while the
+Manager's schema is at version 10, and both record progress in a
+`schema_migrations` table, so sharing one database makes the PDP's
+migration fail with *"no migration found for version 10"* and the PDP then
+refuses to start.
+
+This is OpenFTV's own ADL, and is independent of the embedded OPA console
+decision log that the developer portal reads from Loki.
+
+Three things worth knowing before relying on it:
+
+- **Managed Rego policies have no file store.** They arrive through the API.
+  `scripts/seed-openftv-manager.py` obtains a short-lived token for the
+  internal deployment identity and pushes `policies/` in. `/authz` in the
+  image is separate: it contains only the Cedar policies that protect the
+  Manager's own API. The Manager fails closed if those cannot be loaded.
+- **Policies cannot be deleted.** `DELETE /v1/policy/:id` fails with a
+  foreign-key violation on `policy_audit` (upstream bug). The seed script
+  therefore *retires* a policy that has left git by stripping the bundle's
+  tag, which drops it from the bundle. This matters: the store is
+  cumulative, and two policies declaring the same `package` make the PDP
+  fail to compile the whole set, so every request 500s.
+- **The Manager serves bundles; it does not push them here.** It can POST a
+  bundle to a PDP, but the PDP authorizes its own management endpoints with
+  the same policy set it evaluates requests against — our `package authz`
+  entrypoint — so a push is denied with 403. Allowing it would mean opening
+  the PDP's management API from the GBO decision policy, which is not a
+  trade worth making for convenience. OpenFTV only bypasses this when the
+  policy store is empty, i.e. never in practice. So `targets` is empty and
+  the PDP pulls at boot, which is why `make demo-manager` restarts it after
+  seeding.
+- **Masking still does not work.** Adopting the Manager does not change it:
+  bundle-delivered policies reach the engine through the same `UpsertPolicy`
+  path as file-delivered ones, never through OPA's bundle plugin, so
+  `data.system.log.mask` never resolves either way.
+
+The default stack is unchanged — without `GBO_BUNDLE_MANAGER` the PDP skips
+bundle retrieval entirely and keeps loading `policies/` from disk.
+
+The Manager is deliberately only in the `manager` profile, not `full`: a
+management plane should never appear accidentally without its required
+secrets and seed step. After upgrading an existing prototype Manager volume,
+recreate that volume once so the Cedar bootstrap policies can be seeded into
+an otherwise empty store.
+
 ### Revoke consent
 
 Click "Revoke consent" in the consent portal (`:9002`), repeat the query. The PDP reads the consent register, sees status=REVOKED → DENY.
@@ -149,7 +263,7 @@ The five-factor authorization model demonstrated:
 |---|--------|------------------------|
 | ① | Org identity (mTLS) | FSC-Manager validates peer-certs; FSC-Inway includes peer_cert_chain in the AuthZen context |
 | ② | Org permission (JWT) | Provider FSC-Manager validates the grant and signs `add.{flow, subject_id_type}` returned by its Additional Claims API |
-| ③ | Access basis (consent) | OpenFTV PDP pulls ACTIVE consents from consent-register into `data.attributes.consents` (PIP pull, 5s interval) |
+| ③ | Access basis (consent) | The request-mapper fetches the ACTIVE consent for (PI, scope) from the consent-register per request, so a revoke takes effect immediately |
 | ④ | Data scope (GraphQL) | The OpenFTV PDP checks every requested field against the applicable rule (DVT0001/EUD0001/EUD0002) |
 | ⑤ | Request validity | The OpenFTV PDP validates consent + `context.resource.pi` binding + expiry |
 
@@ -234,9 +348,9 @@ metadata. Because the pinned nl-wallet issuance-server reads product settings
 only at startup, a later activation change requires config regeneration and a
 controlled restart/rollout of the issuance-server and frontends.
 
-De wallet `client_id` wordt standaard als `x509_san_dns:<host>` afgeleid uit
-`EUDI_PUBLIC_URL`, gelijk aan de DNS-SAN van het vooraf geprovisioneerde
-readercertificaat. `EUDI_CLIENT_ID` is alleen nog een expliciete override.
+The wallet `client_id` is derived as `x509_san_dns:<host>` from
+`EUDI_PUBLIC_URL`, matching the DNS SAN of the provisioned reader certificate.
+There is no separate client-ID setting.
 
 The developer-portal container writes `EUDI_PUBLIC_URL` to
 `/runtime-config.js` when it starts. This allows Kubernetes and other runtime
@@ -259,6 +373,33 @@ docker compose -f docker-compose.yml -f docker-compose.cloudflare-tunnel.yml --p
 ```
 
 **(c) Ad-hoc tunnel** (ngrok, `cloudflared --url`, `tailscale funnel`, …) — start it yourself, paste the two URLs into `.env`, then bring up the stack without the tunnel file.
+
+### Reader certificates and `EUDI_PUBLIC_URL`
+
+Whichever option you pick, the hostname in `EUDI_PUBLIC_URL` is not free. nl-wallet v0.5.0 derives the OpenID4VP `client_id` from it — `x509_san_dns:<host>` — and `WalletInitiatedUseCase::try_new` refuses to build a disclosure use case unless the reader certificate for that use case has the same host among its DNS SANs. A mismatch is a startup failure, not a runtime one:
+
+```
+public url host <host> not in certificate DNS SANs: <sans>
+```
+
+Every activated source therefore needs a reader certificate for the host you are actually serving on. For the local proof, rerun the explicit development provisioning step for both sources and reconcile them:
+
+```bash
+make provision-development-certificates SOURCE_OIN=99999999900000000200
+make provision-development-certificates SOURCE_OIN=99999999900000000400
+make reconcile-fsc-sources
+make eudi-config
+```
+
+The command reuses the existing development private keys and CA while replacing stale leaf-certificate content. `requestOriginBaseUrl` follows `EUDI_PUBLIC_URL`; the frontends derive the same client ID and need no separate setting.
+
+The local command stores its issuer and reader CAs under `.local/secrets/development-ca`. A real wallet only accepts leaves under a configured trust anchor, so use pre-approved development CA material in that directory when testing with the preproduction wallet. **Never create a new CA merely to solve a hostname mismatch**: an unknown root is rejected regardless of the leaf certificate.
+
+### The other certificates
+
+Issuer and status certificates are not tied to `EUDI_PUBLIC_URL`. Within each activation, the issuance server requires the attestation and status-list certificates to represent the same subject. The activation record references the corresponding issuer, reader, and status material; the config generator copies those references into the generated nl-wallet settings.
+
+The current proof retains separate references for BD and BRP. It deliberately does not decide whether production should share one GBO certificate set, keep source-specific sets, or use a hybrid model. That decision, including issuer identity, key custody, trust registration, rotation, and revocation, is tracked in [issue #225](https://github.com/ICTU/GBO-demo/issues/225).
 
 ## Testing
 

@@ -49,7 +49,7 @@ sprintf("AkteVanOverlijden.%s", [field]) |
 # may have an attestation issued at all, not about which bron it reads.
 allowed_actors := {
 	"00000004000000004000",
-	"0000009961EUDIISS000",
+	"0000009961MINEZK0000",
 	"99999999900000000100",
 }
 
@@ -57,6 +57,7 @@ allowed_actors := {
 # is the authorization surface; no catalog scope is manufactured by GBO.
 spec := {
 	"rule_id": "EUD0002",
+	"flow": "eudi:attestation",
 	"consent_required": false,
 	"consent_must_cover_scope": false,
 	"pid_required": true,

@@ -16,7 +16,7 @@ func TestDevelopmentCAProviderBindsReaderCertificateToCurrentConfiguration(t *te
 		Name:      "Belastingdienst-mock",
 	}
 	fixedNow := time.Date(2026, time.August, 5, 12, 0, 0, 0, time.UTC)
-	provider := newDevelopmentCAProvider(t.TempDir(), "https://issuance.example", "https://reader.example")
+	provider := newDevelopmentCAProvider(t.TempDir(), "https://issuance.example")
 	provider.now = func() time.Time { return fixedNow }
 
 	first, err := provider.Provision(registration)
@@ -28,7 +28,7 @@ func TestDevelopmentCAProviderBindsReaderCertificateToCurrentConfiguration(t *te
 	if len(firstReader.DNSNames) != 1 || firstReader.DNSNames[0] != "issuance.example" {
 		t.Fatalf("reader DNS SANs = %v, want [issuance.example]", firstReader.DNSNames)
 	}
-	if got := readerRequestOrigin(t, firstReader); got != "https://reader.example/" {
+	if got := readerRequestOrigin(t, firstReader); got != "https://issuance.example/" {
 		t.Fatalf("reader request origin = %q", got)
 	}
 	assertReaderAuthorizationPolicies(t, firstReader)
@@ -53,20 +53,23 @@ func TestDevelopmentCAProviderBindsReaderCertificateToCurrentConfiguration(t *te
 		t.Fatal(err)
 	}
 
-	provider.readerOrigin = "https://changed-reader.example"
+	provider.readerPublicURL = "https://new-issuance.example"
 	second, err := provider.Provision(registration)
 	if err != nil {
-		t.Fatalf("reprovision changed reader origin: %v", err)
+		t.Fatalf("reprovision changed reader public URL: %v", err)
 	}
 	secondReaderBytes, err := os.ReadFile(second.ReaderCertReference)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if bytes.Equal(firstReaderBytes, secondReaderBytes) {
-		t.Fatal("reader certificate was reused after the configured reader origin changed")
+		t.Fatal("reader certificate was reused after the reader public URL changed")
 	}
 	secondReader := loadCertificateArtifact(t, second.ReaderKeyReference, second.ReaderCertReference)
-	if got := readerRequestOrigin(t, secondReader); got != "https://changed-reader.example/" {
+	if len(secondReader.DNSNames) != 1 || secondReader.DNSNames[0] != "new-issuance.example" {
+		t.Fatalf("reissued reader DNS SANs = %v, want [new-issuance.example]", secondReader.DNSNames)
+	}
+	if got := readerRequestOrigin(t, secondReader); got != "https://new-issuance.example/" {
 		t.Fatalf("reissued reader request origin = %q", got)
 	}
 	secondReaderKey, err := os.ReadFile(second.ReaderKeyReference)
@@ -75,16 +78,6 @@ func TestDevelopmentCAProviderBindsReaderCertificateToCurrentConfiguration(t *te
 	}
 	if !bytes.Equal(firstReaderKey, secondReaderKey) {
 		t.Fatal("reader private key changed while refreshing only the certificate")
-	}
-
-	provider.readerPublicURL = "https://new-issuance.example"
-	third, err := provider.Provision(registration)
-	if err != nil {
-		t.Fatalf("reprovision changed reader public URL: %v", err)
-	}
-	thirdReader := loadCertificateArtifact(t, third.ReaderKeyReference, third.ReaderCertReference)
-	if len(thirdReader.DNSNames) != 1 || thirdReader.DNSNames[0] != "new-issuance.example" {
-		t.Fatalf("reissued reader DNS SANs = %v, want [new-issuance.example]", thirdReader.DNSNames)
 	}
 
 	provider.now = func() time.Time { return fixedNow.AddDate(2, 0, 0) }

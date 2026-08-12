@@ -1,0 +1,8 @@
+---
+# Tags the management interface offers, and that bundle configurations
+# select on. A policy carries its tags in its metadata; the bundle for the
+# PDP takes everything tagged "gbo-authz".
+- id: gbo-authz
+  name: GBO autorisatiebeleid (DvTP + EUDI)
+- id: gbo-schema
+  name: GBO bronprofiel-schema's

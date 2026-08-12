@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
+import { demoSessionId } from '../util/demoSession'
 import type { Tab } from '../types'
 
-type WatchEvent = { trace_id: string; service: string }
+type WatchEvent = { trace_id: string; service: string; shared?: boolean }
 
 // Map the originating service (= first span seen for a new trace) to the
 // tab/mode the dev-portal should switch into. Burger-FE flows always enter
@@ -20,9 +21,14 @@ function modeForService(service: string): Tab | null {
 // auto-reconnects after each event — so one click on "watch" keeps catching
 // subsequent flows until the user toggles it off. Backend is one-shot per
 // connection; this hook re-arms by reopening the EventSource.
+//
+// The demo-session id claims this browser's own flows; `usecase` covers EUDI,
+// which starts on a phone and carries none — null elsewhere, since the
+// issuance → use chain crosses modes. `shared`: went to several sessions.
 export function useWatchNext(
   active: boolean,
-  onTrace: (traceId: string, mode: Tab | null) => void,
+  usecase: string | null,
+  onTrace: (traceId: string, mode: Tab | null, shared: boolean) => void,
 ) {
   const [error, setError] = useState<string | null>(null)
   const cbRef = useRef(onTrace)
@@ -33,13 +39,19 @@ export function useWatchNext(
     setError(null)
     let cancelled = false
     let es: EventSource | null = null
+    const params = new URLSearchParams()
+    const session = demoSessionId()
+    if (session) params.set('session', session)
+    if (usecase) params.set('usecase', usecase)
+    const query = params.toString()
+    const url = query ? `/api/dev/watch-next?${query}` : '/api/dev/watch-next'
 
     const connect = () => {
       if (cancelled) return
-      es = new EventSource('/api/dev/watch-next')
+      es = new EventSource(url)
       es.addEventListener('trace', (e) => {
         const data = JSON.parse((e as MessageEvent).data) as WatchEvent
-        cbRef.current(data.trace_id, modeForService(data.service))
+        cbRef.current(data.trace_id, modeForService(data.service), data.shared === true)
         es?.close()
         // brief gap before reopening so we don't race the same trace event
         setTimeout(connect, 50)
@@ -57,7 +69,7 @@ export function useWatchNext(
       cancelled = true
       es?.close()
     }
-  }, [active])
+  }, [active, usecase])
 
   return { error }
 }

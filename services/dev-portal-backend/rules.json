@@ -33,7 +33,7 @@
   "eud0001": {
     "allowed_actors": [
       "00000004000000004000",
-      "0000009961EUDIISS000",
+      "0000009961MINEZK0000",
       "99999999900000000100"
     ],
     "allowed_years": [
@@ -61,7 +61,7 @@
     "spec": {
       "allowed_actors": [
         "00000004000000004000",
-        "0000009961EUDIISS000",
+        "0000009961MINEZK0000",
         "99999999900000000100"
       ],
       "allowed_years": [
@@ -70,6 +70,7 @@
       ],
       "consent_must_cover_scope": false,
       "consent_required": false,
+      "flow": "eudi:attestation",
       "pid_required": true,
       "pip": null,
       "rule_id": "EUD0001",
@@ -79,7 +80,7 @@
   "eud0002": {
     "allowed_actors": [
       "00000004000000004000",
-      "0000009961EUDIISS000",
+      "0000009961MINEZK0000",
       "99999999900000000100"
     ],
     "covers_fields": [
@@ -106,11 +107,12 @@
     "spec": {
       "allowed_actors": [
         "00000004000000004000",
-        "0000009961EUDIISS000",
+        "0000009961MINEZK0000",
         "99999999900000000100"
       ],
       "consent_must_cover_scope": false,
       "consent_required": false,
+      "flow": "eudi:attestation",
       "pid_required": true,
       "pip": null,
       "rule_id": "EUD0002",

@@ -265,10 +265,16 @@ fi
 # so the service has to be matched client-side — and limit=1 truncates
 # the response to whichever contract happens to come first, which is
 # another service's as soon as the provider offers more than one.
+# Selecting on state as well, so a revoked contract cannot supply the hash
+# and write a dead grant-link that fails at routing time instead of here.
 new_hash=$(mtls_curl "$EDI_CERT" "$EDI_KEY" "$EDI_CA" \
   "${EDI_MANAGER_URL}/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=${SERVICE_NAME}" \
   | jq -r --arg svc "$SERVICE_NAME" --arg provider "$PROVIDER_PEER_ID" \
-    'first(.contracts[]? | select(.content.grants[0].service.name == $svc and .content.grants[0].service.peer_id == $provider) | .content.grants[0].hash) // empty')
+    'first(.contracts[]?
+           | select(.state == "CONTRACT_STATE_VALID")
+           | select(.content.grants[0].service.name == $svc)
+           | select(.content.grants[0].service.peer_id == $provider)
+           | .content.grants[0].hash) // empty')
 if [ -z "$new_hash" ]; then
   echo "  x no connection grant-hash found — abort"
   exit 1

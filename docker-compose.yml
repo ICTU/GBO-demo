@@ -81,8 +81,8 @@ services:
   # OpenFTV PDP with the embedded OPA/Rego engine — the authorization
   # endpoint for FSC-Inway (AuthZEN, HTTPS on :8443). The GraphQL
   # context-handler runs INSIDE this image as a request-mapper
-  # (services/openftv-pdp/mapper, PDP_REQUEST_MAPPINGS); consent is
-  # pulled from the consent-register into data.attributes (pull-config).
+  # (services/openftv-pdp/mapper, PDP_REQUEST_MAPPINGS); it fetches the
+  # consent per request from the consent-register (GBO_CONSENT_URL below).
   # Note: PDP_POLICIES_LANGUAGE must be "rego" — the documented value
   # "OPA" makes OpenFTV silently skip all policy files (upstream quirk).
   openftv-pdp:
@@ -94,7 +94,16 @@ services:
       - PDP_POLICIES_LANGUAGE=rego
       - PDP_POLICIES_STORE=/policies
       - PDP_POLICIES_STORE_RECURSE=true
-      - PDP_ADL_TYPE=stdout
+      # The Authorization Decision Log. stdout by default; the manager
+      # profile points it at Postgres so the management interface's Logboek
+      # has something to read — its routes are only registered when the ADL
+      # is Postgres-backed, so without this the page 404s.
+      # NB: this is OpenFTV's ADL, not the embedded OPA console decision log
+      # the dev-portal reads from Loki. Those are independent.
+      - PDP_ADL_TYPE=${GBO_ADL_TYPE:-stdout}
+      - PDP_ADL_PG_URL=${GBO_ADL_PG_URL:-}
+      - PDP_MIGRATE_SOURCE=${GBO_ADL_MIGRATE_SOURCE:-}
+      - PDP_MIGRATE_AUTO=${GBO_ADL_MIGRATE_AUTO:-false}
       - PDP_ADL_SERVICE_NAME=gbo
       - PDP_LOG_LEVEL=info
       - PDP_REQUEST_MAPPINGS=graphqltocontext
@@ -104,6 +113,11 @@ services:
       # The EUDI flow resolves the wallet-disclosed BSN to a PI here; the
       # policy engine (and its decision log) is never given the BSN.
       - GBO_BSNK_URL=http://bsnk-mock:4003
+      # Empty by default: the PDP then loads policies from /policies and
+      # skips bundle retrieval entirely (apps/pdp/server/router.go). Set it
+      # — `make demo-manager` does — to put the OpenFTV Manager in charge
+      # of policy distribution instead.
+      - PDP_BUNDLE_MANAGER=${GBO_BUNDLE_MANAGER:-}
       # TLS for the FSC-Inway AuthZen plugin (requires HTTPS + CA).
       - PDP_TLS_CERT=/certs/pdp-service.pem
       - PDP_TLS_KEY=/certs/pdp-service-key.pem
@@ -128,6 +142,161 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+
+  # --- OpenFTV management plane (profile: manager) --------------------------
+  # The PAP+PIP half of OpenFTV. It owns the policies, bundles them, and
+  # ships them to every PDP named in services/openftv-manager/bundles/.
+  # This is what lets a source-holder manage its own policy without
+  # rebuilding a PDP image — the point of running a federated PDP at all.
+  #
+  # Opt-in, because it changes where policy comes from: without it the PDP
+  # loads ./policies from disk and hot-reloads on edit, which is the nicer
+  # loop while writing Rego. Start it with `make demo-manager`.
+  postgres-ftv:
+    image: postgres:16-alpine
+    profiles: [manager]
+    environment:
+      POSTGRES_PASSWORD: ${FTV_POSTGRES_PASSWORD}
+      POSTGRES_USER: ftv
+      POSTGRES_DB: ftv_manager
+    volumes:
+      - postgres-ftv-data:/var/lib/postgresql/data
+      # Runs only on an empty data directory (compose down -v to re-run).
+      - ./services/openftv-manager/initdb:/docker-entrypoint-initdb.d:ro
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ftv -d ftv_manager"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  openftv-manager:
+    profiles: [manager]
+    build:
+      context: .
+      dockerfile: services/openftv-manager/Dockerfile
+    environment:
+      # Managed policies live in Postgres — the Manager's PAP is built
+      # without a file store (apps/manager/server/pap.go), so there is no
+      # directory to point it at. scripts/seed-openftv-manager.py pushes
+      # ./policies in over the API, which is the same path the management
+      # interface uses.
+      - MANAGER_PERSIST_TYPE=postgres
+      - MANAGER_PERSIST_POSTGRES_URL=postgres://ftv:${FTV_POSTGRES_PASSWORD}@postgres-ftv:5432/ftv_manager?sslmode=disable
+      - MANAGER_MIGRATE_SOURCE=*EMBED*
+      - MANAGER_MIGRATE_AUTO=true
+      # Deliberately NOT set to rego. MANAGER_POLICIES_LANGUAGE selects the
+      # language of the policies that authorize the Manager's OWN API (it
+      # seeds Cedar ones for that), and those share a store with the
+      # policies it manages. Setting it to rego makes our `package authz`
+      # — the GBO decision entrypoint — govern the Manager's API instead,
+      # which is undefined for that input shape: every request then 403s.
+      # It survives the first boot, because the store is still empty when
+      # the authorizer initialises, and breaks on the next restart.
+      # The language of a managed policy comes from the policy itself, and
+      # the bundle filters on the language in its own config.
+      # These Cedar policies authorize the Manager's own API. Fail closed
+      # if they cannot be loaded: an empty store must never mean open access.
+      - MANAGER_POLICIES_STORE=/authz
+      - MANAGER_POLICIES_STORE_RECURSE=true
+      - MANAGER_AUTHORIZATION_AUTHENTICATE=true
+      - MANAGER_AUTHORIZATION_FAIL_CLOSED_ON_EMPTY=true
+      - MANAGER_TAGS_PATH=/tags
+      - MANAGER_BUNDLE_CONFIGS=/bundles
+      - MANAGER_INTERNAL_PORT=9443
+      - MANAGER_LOG_LEVEL=info
+      # Validate the management interface's tokens. The issuer must be the
+      # URL the BROWSER used, since that is what Keycloak puts in the token;
+      # the JWKS is fetched server-side over the compose network.
+      - MANAGER_OIDC_ISSUER=${GBO_FTV_OIDC_AUTHORITY:-http://localhost:9284/realms/gbo}
+      - MANAGER_OIDC_JWKS_URL=http://keycloak:8080/realms/gbo/protocol/openid-connect/certs
+      - MANAGER_OIDC_AUDIENCE=openftv-manager-api
+      - MANAGER_OIDC_ROLES_CLAIM=roles
+      # Serves the Logboek in the management interface. initADL only
+      # registers its routes for a Postgres-backed decision log — any other
+      # value and the endpoints simply do not exist.
+      - MANAGER_ADL_TYPE=postgres
+      - MANAGER_ADL_PG_URL=postgres://ftv:${FTV_POSTGRES_PASSWORD}@postgres-ftv:5432/ftv_adl?sslmode=disable
+    ports:
+      # Management API (what the seed script and a UI talk to).
+      - "${GBO_PORT_FTV_MANAGER:-9280}:8443"
+      # Internal API: where the PDP pulls its bundle from.
+      - "${GBO_PORT_FTV_MANAGER_INTERNAL:-9281}:9443"
+      - "${GBO_PORT_FTV_MANAGER_HEALTH:-9282}:8080"
+    networks: [backend]
+    depends_on:
+      postgres-ftv:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # The Manager's own UI: browse and edit policies, attributes and
+  # deployments. It authenticates against Keycloak, because it reads its
+  # capabilities from a top-level `roles` claim in the access token — admin
+  # publishes, author writes, anything else is read-only.
+  #
+  # The URLs below are consumed by the BROWSER, so they must be reachable
+  # from wherever you open the page — not from inside the compose network —
+  # and over HTTPS unless that is localhost (see the PKCE note further down).
+  openftv-manager-ui:
+    profiles: [manager]
+    build:
+      context: .
+      dockerfile: services/openftv-manager-ui/Dockerfile
+    environment:
+      # Set as whole URLs rather than host+port, so the stack can sit behind
+      # a TLS reverse proxy on separate hostnames. That is not optional for
+      # a remote demo: the UI's OIDC login uses PKCE, PKCE needs
+      # Crypto.subtle, and browsers only expose that in a secure context —
+      # so http://<lan-ip>:9283 fails with "Crypto.subtle is available only
+      # in secure contexts". localhost counts as secure; a LAN IP does not.
+      - VITE_PAP_BASE_URL=${GBO_FTV_MANAGER_URL:-http://localhost:9280}
+      - VITE_PIP_BASE_URL=${GBO_FTV_MANAGER_URL:-http://localhost:9280}
+      - VITE_OIDC_AUTHORITY=${GBO_FTV_OIDC_AUTHORITY:-http://localhost:9284/realms/gbo}
+      - VITE_OIDC_CLIENT_ID=openftv-manager-ui
+    ports:
+      - "${GBO_PORT_FTV_MANAGER_UI:-9283}:8080"
+    networks: [backend]
+    depends_on:
+      openftv-manager:
+        condition: service_healthy
+
+  # Demo IdP for the management interface. Public visitors use the read-only
+  # auditor account. A secret-backed deployment identity is the only account
+  # that can write and publish policies.
+  keycloak:
+    profiles: [manager]
+    image: quay.io/keycloak/keycloak:26.0.7
+    command: ["start-dev", "--import-realm", "--http-port=8080"]
+    environment:
+      - KC_BOOTSTRAP_ADMIN_USERNAME=admin
+      - KC_BOOTSTRAP_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:-}
+      - FTV_MANAGER_AUDITOR_PASSWORD=${FTV_MANAGER_AUDITOR_PASSWORD:-}
+      - FTV_MANAGER_DEPLOY_PASSWORD=${FTV_MANAGER_DEPLOY_PASSWORD:-}
+      # The issuer in the token must match what the browser used to reach
+      # Keycloak, or the SPA rejects it. start-dev derives it per request.
+      - KC_HOSTNAME_STRICT=false
+      - KC_HTTP_ENABLED=true
+      # Behind a TLS-terminating proxy the login form would otherwise post
+      # to http:// from an https:// page, which the browser blocks as
+      # "Form is not secure". Honour the forwarded scheme instead.
+      - KC_PROXY_HEADERS=xforwarded
+    volumes:
+      - ./services/openftv-manager-ui/keycloak/realm-gbo.json:/opt/keycloak/data/import/realm-gbo.json:ro
+    ports:
+      - "${GBO_PORT_KEYCLOAK:-9284}:8080"
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080 && echo -e 'GET /realms/gbo HTTP/1.1\\nHost: localhost\\nConnection: close\\n\\n' >&3 && cat <&3 | head -1 | grep -q 200"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
 
   # --- Go Backend Services ---
   sector-pip:
@@ -381,24 +550,27 @@ services:
     environment:
       - CHOKIDAR_USEPOLLING=true
       # Browser-side URL's, dus ze moeten de gepubliceerde host-poorten
-      # volgen — niet de compose-interne poorten.
-      - VITE_DIENSTVERLENER_URL=http://localhost:${GBO_PORT_DV_MOCK:-9001}
-      - VITE_TOESTEMMINGSPORTAAL_URL=http://localhost:${GBO_PORT_TOESTEMMINGSPORTAAL:-9002}
-      - VITE_DEVELOPER_PORTAL_URL=http://localhost:${GBO_PORT_DEVELOPER_PORTAL:-9003}
+      # volgen — niet de compose-interne poorten. En de host waar de
+      # bezoeker vandaan kijkt, niet die van de server: zet
+      # GBO_PUBLIC_HOST op het LAN-adres zodra je vanaf een andere machine
+      # demonstreert, anders wijst de landingspagina naar de localhost van
+      # de bezoeker.
+      - VITE_DIENSTVERLENER_URL=${DIENSTVERLENER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_DV_MOCK:-9001}}
+      - VITE_TOESTEMMINGSPORTAAL_URL=${TOESTEMMINGSPORTAAL_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_TOESTEMMINGSPORTAAL:-9002}}
+      - VITE_DEVELOPER_PORTAL_URL=${DEVELOPER_PORTAL_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_DEVELOPER_PORTAL:-9003}}
       # De wallet-QR wordt client-side samengesteld, net als in de
       # dev-portal. Zonder EUDI_PUBLIC_URL (de wallet op een telefoon moet
       # de issuance-server publiek kunnen bereiken) valt de QR weg en legt
       # de pagina uit waarom.
       - VITE_EUDI_PUBLIC_URL=${EUDI_PUBLIC_URL:-}
       - VITE_EUDI_UL_BASE=${EUDI_UL_BASE:-https://app.preproductie.wallet.edi.bzk.nl/deeplink/disclosure_based_issuance}
-      - VITE_EUDI_CLIENT_ID=${EUDI_CLIENT_ID:-}
-      - VITE_JAEGER_PUBLIC_URL=${JAEGER_PUBLIC_URL:-http://localhost:9686}
-      - VITE_GRAFANA_PUBLIC_URL=${GRAFANA_PUBLIC_URL:-http://localhost:9300}
+      - VITE_JAEGER_PUBLIC_URL=${JAEGER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_JAEGER:-9686}}
+      - VITE_GRAFANA_PUBLIC_URL=${GRAFANA_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_GRAFANA:-9300}}
       # De FSC-controllers draaien in de fsc-infra-stack, met eigen
       # FSC_PORT_*-poorten; vandaar losse overrides in plaats van GBO_PORT_*.
-      - VITE_FSC_CONTROLLER_BRON_URL=${FSC_CONTROLLER_BRON_URL:-http://localhost:8092}
-      - VITE_FSC_CONTROLLER_DVTP_URL=${FSC_CONTROLLER_DVTP_URL:-http://localhost:8096}
-      - VITE_FSC_CONTROLLER_EUDI_URL=${FSC_CONTROLLER_EUDI_URL:-http://localhost:8094}
+      - VITE_FSC_CONTROLLER_BRON_URL=${FSC_CONTROLLER_BRON_URL:-http://${GBO_PUBLIC_HOST:-localhost}:8092}
+      - VITE_FSC_CONTROLLER_DVTP_URL=${FSC_CONTROLLER_DVTP_URL:-http://${GBO_PUBLIC_HOST:-localhost}:8096}
+      - VITE_FSC_CONTROLLER_EUDI_URL=${FSC_CONTROLLER_EUDI_URL:-http://${GBO_PUBLIC_HOST:-localhost}:8094}
       - VITE_VERSION_STRING=${VERSION_STRING:-}
     volumes:
       - ./landing-page/src:/app/src
@@ -460,7 +632,9 @@ services:
         condition: service_healthy
 
   dev-portal-backend:
-    build: ./services/dev-portal-backend
+    build:
+      context: .
+      dockerfile: services/dev-portal-backend/Dockerfile
     ports:
       - "${GBO_PORT_DEV_PORTAL_BACKEND:-9407}:4007"
     environment:
@@ -487,6 +661,8 @@ services:
       # Policy introspection for /policy-* endpoints reads the Rego
       # sources from disk (OpenFTV PDP has no /v1/policies); /rules
       # serves the pre-generated rules.json (scripts/gen-rules-json.sh).
+      # Both are baked into the image; these compose bind mounts keep local
+      # policy edits visible without rebuilding it.
       - POLICIES_DIR=/policies
       - RULES_FILE=/rules.json
     volumes:
@@ -532,14 +708,13 @@ services:
       # are compose-internal names and ports, not published ones.
       - BD_GRAPHQL_TARGET=http://graphql-server:4000
       - BRP_GRAPHQL_TARGET=http://brp-graphql-server:4001
-      - VITE_JAEGER_PUBLIC_URL=${JAEGER_PUBLIC_URL:-http://localhost:9686}
-      - VITE_GRAFANA_PUBLIC_URL=${GRAFANA_PUBLIC_URL:-http://localhost:9300}
+      - VITE_JAEGER_PUBLIC_URL=${JAEGER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_JAEGER:-9686}}
+      - VITE_GRAFANA_PUBLIC_URL=${GRAFANA_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_GRAFANA:-9300}}
       - EUDI_API_TARGET=http://eudi-adapter:4009
       # The EUDI QR is built client-side; these env vars drive the universal-link.
       # VITE_* is public — ends up in the built bundle (no secrets here).
       - VITE_EUDI_PUBLIC_URL=${EUDI_PUBLIC_URL:-}
       - VITE_EUDI_UL_BASE=${EUDI_UL_BASE:-https://app.preproductie.wallet.edi.bzk.nl/deeplink/disclosure_based_issuance}
-      - VITE_EUDI_CLIENT_ID=${EUDI_CLIENT_ID:-}
     volumes:
       - ./developer-portal/src:/app/src
       - ./developer-portal/index.html:/app/index.html
@@ -727,7 +902,6 @@ services:
       - --state-dir=/var/lib/gbo
       - --secrets-dir=/var/lib/gbo-secrets
       - --reader-public-url=${EUDI_PUBLIC_URL:-}
-      - --reader-origin-url=${EUDI_READER_ORIGIN_URL:-}
     volumes:
       - ./schemas:/config/schemas:ro
       - ./fsc-infra/orgs/edi-issuer/pki/internal:/fsc-certs:ro
@@ -751,4 +925,5 @@ networks:
 volumes:
   dev-portal-var:
   postgres-eudi-data:
+  postgres-ftv-data:
   eudi-tsl-publish:

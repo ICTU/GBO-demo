@@ -88,6 +88,10 @@ export type HistoryRun = {
   // in its result-panel when watching a flow. Self-triggered runs leave it
   // empty (the FE already has the body locally).
   response?: IssuanceResponse | UseResponse
+  // Which developer's browser drove this run. Set by the client on its own
+  // runs and by the burger-FE bubble; empty for anything nobody could
+  // attribute, which stays visible to every session.
+  demo_session?: string
 }
 
 export type Citizen = {

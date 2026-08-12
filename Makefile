@@ -1,4 +1,4 @@
-.PHONY: up down logs clean certs fsc-local-env fsc-ca fsc-up fsc-all-up fsc-brp-certs fsc-databases fsc-down fsc-test fsc-clean \
+.PHONY: up down logs clean certs demo-manager manager-seed fsc-local-env fsc-ca fsc-up fsc-all-up fsc-brp-certs fsc-databases fsc-down fsc-test fsc-clean \
         fsc-seed-bri fsc-seed-bri-hv fsc-seed-brp fsc-seed-metadata fsc-pdp-cert \
         eudi-images source-metadata-up \
         validate-source provision-development-certificates onboard-source reconcile-fsc-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
@@ -9,8 +9,10 @@
 export
 
 # nl-wallet source for the eudi-issuance-server build. Pinned via git
-# submodule (vendor/nl-wallet, v0.4.1 — the preprod wallet app rejects
-# v0.5.0's scheme-prefixed client_id). Override in .env if needed.
+# submodule (vendor/nl-wallet, v0.5.0). Server and wallet app move in
+# lockstep: a v0.5.0 server rejects a v0.4.1 app and vice versa, because
+# v0.5.0 made the `x509_san_dns:` client_id prefix mandatory. Override in
+# .env if needed.
 NLWALLET_PATH ?= $(PWD)/vendor/nl-wallet
 
 # Local filesystem onboarding. Development certificates are provisioned only
@@ -44,6 +46,7 @@ down:
 #   make demo-dvtp     → alias for 'make demo'
 #   make demo-eudi     → EUDI flow over real FSC (auto init + seed-bri)
 #   make demo-full     → everything on (DvTP + EUDI + fsc-infra)
+#   make demo-manager  → base + OpenFTV Manager owning policy distribution
 #   make demo-down     → everything down (main + fsc-infra)
 
 demo: demo-dvtp
@@ -55,6 +58,42 @@ demo-minimal: certs
 	@echo "  Dev-portal:    http://localhost:9003  |  http://$$(hostname -I | awk '{print $$1}'):9003"
 	@echo "  Jaeger:        http://localhost:9686  |  http://$$(hostname -I | awk '{print $$1}'):9686"
 	@echo "  OpenFTV PDP:   https://localhost:9181/authzen/v1/evaluation (POST)"
+
+# The management plane: the Manager owns the policies and ships them to the
+# PDP as a bundle, instead of the PDP loading ./policies from disk. Opt-in,
+# because it trades the edit-and-save hot-reload loop for a deliberate
+# deploy step — which is the point, but not what you want while writing Rego.
+demo-manager: certs
+	@test -n "$(KEYCLOAK_ADMIN_PASSWORD)" || (echo "KEYCLOAK_ADMIN_PASSWORD is required" >&2; exit 1)
+	@test -n "$(FTV_MANAGER_AUDITOR_PASSWORD)" || (echo "FTV_MANAGER_AUDITOR_PASSWORD is required" >&2; exit 1)
+	@test -n "$(FTV_MANAGER_DEPLOY_PASSWORD)" || (echo "FTV_MANAGER_DEPLOY_PASSWORD is required" >&2; exit 1)
+	@test -n "$(FTV_POSTGRES_PASSWORD)" || (echo "FTV_POSTGRES_PASSWORD is required" >&2; exit 1)
+	@echo "-> Base stack + OpenFTV Manager (PAP/PIP, bundle distribution)"
+	GBO_BUNDLE_MANAGER=http://openftv-manager:9443/v1/bundle/gbo-pdp \
+	  GBO_ADL_TYPE=postgres \
+	  GBO_ADL_PG_URL=postgres://ftv:$${FTV_POSTGRES_PASSWORD}@postgres-ftv:5432/ftv_adl?sslmode=disable \
+	  GBO_ADL_MIGRATE_SOURCE='*EMBED*' GBO_ADL_MIGRATE_AUTO=true \
+	  docker compose --profile manager up --build -d
+	@echo "-> Waiting for the Manager to accept policies..."
+	@for i in $$(seq 1 30); do \
+	  curl -fsS -m 2 http://localhost:$${GBO_PORT_FTV_MANAGER_HEALTH:-9282}/healthz >/dev/null 2>&1 && break; \
+	  sleep 2; \
+	done
+	./scripts/seed-openftv-manager.py --url http://localhost:$${GBO_PORT_FTV_MANAGER:-9280}
+	@echo "-> Restarting the PDP so it pulls the freshly seeded bundle"
+	docker compose --profile manager restart openftv-pdp
+	@echo ""
+	@echo "  Manager API:   http://localhost:$${GBO_PORT_FTV_MANAGER:-9280}/v1/policies"
+	@echo "  Bundle (PDP):  http://localhost:$${GBO_PORT_FTV_MANAGER_INTERNAL:-9281}/v1/bundle/gbo-pdp"
+	@echo "  Re-seed after editing policies/:  make manager-seed"
+
+# Push the current policies/ into the Manager and redeploy them. Policies
+# that no longer exist in git are retired (untagged) rather than deleted —
+# DELETE is broken upstream, see ICTU-37.
+manager-seed:
+	@test -n "$(FTV_MANAGER_DEPLOY_PASSWORD)" || (echo "FTV_MANAGER_DEPLOY_PASSWORD is required" >&2; exit 1)
+	./scripts/seed-openftv-manager.py --url http://localhost:$${GBO_PORT_FTV_MANAGER:-9280}
+	docker compose --profile manager restart openftv-pdp
 
 demo-dvtp: certs fsc-all-up fsc-seed-bri fsc-seed-bri-hv
 	@echo "-> DvTP stack: base + dienstverlener + toestemmingsportaal (via real FSC)"
@@ -90,16 +129,32 @@ eudi-config:
 	echo "-> Generated issuance products and frontend offer catalog from every active source"
 
 # eudi-issuance-server has no published image — built from the local
-# nl-wallet checkout ($NLWALLET_PATH).
+# nl-wallet checkout ($NLWALLET_PATH). The build is expensive, so an
+# existing image is reused — but only while it was built from the sources
+# now on disk. The nl-wallet revision is stamped on the image as a label
+# and compared here, so bumping the submodule (or editing an overridden
+# checkout) rebuilds instead of silently running the previous pin's binary
+# against this pin's config. Server and wallet app move in lockstep; a
+# stale binary here is a broken flow, not a slightly older one.
 eudi-images:
 	@if [ ! -f "$$NLWALLET_PATH/wallet_core/Cargo.toml" ]; then \
 	  echo "ERROR: nl-wallet sources not found at $$NLWALLET_PATH"; \
 	  echo "       Run: git submodule update --init vendor/nl-wallet"; \
 	  exit 1; \
 	fi
-	@if ! docker image inspect gbo/eudi-issuance-server:dev >/dev/null 2>&1; then \
-	  echo "-> Building gbo/eudi-issuance-server:dev from $$NLWALLET_PATH"; \
+	@rev="$$(git -C "$$NLWALLET_PATH" describe --tags --always --dirty 2>/dev/null || echo unknown)"; \
+	built="$$(docker image inspect gbo/eudi-issuance-server:dev \
+	    --format '{{index .Config.Labels "gbo.nlwallet-rev"}}' 2>/dev/null || true)"; \
+	if [ -n "$$built" ] && [ "$$built" = "$$rev" ]; then \
+	  echo "-> gbo/eudi-issuance-server:dev is current (nl-wallet $$rev)"; \
+	else \
+	  if [ -n "$$built" ]; then \
+	    echo "-> Rebuilding gbo/eudi-issuance-server:dev — image holds nl-wallet $$built, checkout is $$rev"; \
+	  else \
+	    echo "-> Building gbo/eudi-issuance-server:dev from $$NLWALLET_PATH (nl-wallet $$rev)"; \
+	  fi; \
 	  docker build -t gbo/eudi-issuance-server:dev \
+	    --label gbo.nlwallet-rev="$$rev" \
 	    -f services/eudi-issuance-server/Dockerfile "$$NLWALLET_PATH"; \
 	fi
 
@@ -117,7 +172,6 @@ validate-source:
 		--schema "$(PWD)/schemas/gbo-source-metadata-v1.schema.json" \
 		--type-metadata-base-url "$(ONBOARDING_TYPE_METADATA_URL)" \
 		--reader-public-url "$${EUDI_PUBLIC_URL:-}" \
-		--reader-origin-url "$${EUDI_READER_ORIGIN_URL:-}" \
 		--state-dir "$(ONBOARDING_STATE_DIR)" \
 		--secrets-dir "$(ONBOARDING_SECRETS_DIR)"
 
@@ -135,7 +189,6 @@ onboard-source:
 		--schema "$(PWD)/schemas/gbo-source-metadata-v1.schema.json" \
 		--type-metadata-base-url "$(ONBOARDING_TYPE_METADATA_URL)" \
 		--reader-public-url "$${EUDI_PUBLIC_URL:-}" \
-		--reader-origin-url "$${EUDI_READER_ORIGIN_URL:-}" \
 		--state-dir "$(ONBOARDING_STATE_DIR)" \
 		--secrets-dir "$(ONBOARDING_SECRETS_DIR)" \
 		$$dry_run
@@ -145,7 +198,6 @@ provision-development-certificates:
 	@cd services/eudi-adapter && go run . provision-development-certificates \
 		--source-oin "$(SOURCE_OIN)" \
 		--reader-public-url "$${EUDI_PUBLIC_URL:-}" \
-		--reader-origin-url "$${EUDI_READER_ORIGIN_URL:-}" \
 		--secrets-dir "$(ONBOARDING_SECRETS_DIR)"
 
 reconcile-fsc-sources: onboarding-directories
@@ -177,7 +229,7 @@ demo-full: onboard-demo-sources fsc-seed-bri-hv eudi-config eudi-images
 	docker compose --profile full up --build -d
 
 demo-down:
-	docker compose --profile full down
+	docker compose --profile full --profile manager down
 	docker compose -f fsc-infra/docker-compose.yml down
 
 logs:

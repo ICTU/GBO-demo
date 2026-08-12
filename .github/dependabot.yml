@@ -43,6 +43,14 @@ updates:
       interval: weekly
     commit-message:
       prefix: build(deps)
+    # init, autobuild and analyze are three sub-actions of one repository
+    # and must run at the same version. Ungrouped, Dependabot opens a PR
+    # per sub-action and each one fails on its own with "Loaded a
+    # configuration file for version X, but running version Y".
+    groups:
+      codeql-action:
+        patterns:
+          - github/codeql-action*
 
   - package-ecosystem: npm
     directories:
@@ -52,6 +60,16 @@ updates:
       - /toestemmingsportaal-frontend
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: build(deps)
     open-pull-requests-limit: 10
+    ignore:
+      # monaco-graphql is the consumer of monaco-editor in
+      # developer-portal and its peer range is ">= 0.20.0 < 0.53". The
+      # latest release, 1.8.0, still carries that cap, so anything from
+      # 0.53 up cannot install. Drop this once monaco-graphql 2.0 is out.
+      - dependency-name: monaco-editor
+        versions:
+          - ">= 0.53.0"

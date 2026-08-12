@@ -30,7 +30,7 @@ test_allow_valid_actor_year_pid if {
 }
 
 test_allow_simulation_eudi_issuer if {
-	ctx := object.union(_base_ctx, {"subject": {"type": "org", "id": "0000009961EUDIISS000"}})
+	ctx := object.union(_base_ctx, {"subject": {"type": "org", "id": "0000009961MINEZK0000"}})
 	result := lib.evaluate(eud0001.spec, ctx)
 	result.decision == true
 }

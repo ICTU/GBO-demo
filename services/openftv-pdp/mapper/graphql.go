@@ -13,8 +13,8 @@ package mapping
 //   - context.fsc       — {transaction_id}.
 //   - context.pid       — {bsn} for the EUDI flow (from variables.bsn).
 //
-// Flow dispatch (dvtp:query vs eudi:attestation) follows the trusted
-// additional-claim in the FSC token, then the X-GBO-Flow header.
+// Flow dispatch (dvtp:query vs the eudi:attestation family) follows the
+// trusted additional-claim in the FSC token, then the X-GBO-Flow header.
 
 import (
 	"context"
@@ -71,7 +71,7 @@ func GraphQLToContext(parc *models.PARC, opts ...Option) *models.PARC {
 	ctx.AddAttributeKV("resource", resource)
 	ctx.AddAttributeKV("resolved", walkQuery(query, variables))
 
-	if flow == "eudi:attestation" {
+	if isEUDIFlow(flow) {
 		// The BSN stops here. It is needed to reach the bron — the PEP
 		// forwards the original query untouched — but the policy engine
 		// evaluates on a pseudonymous identity, so that is all it is
@@ -160,6 +160,13 @@ func substituteContext(ctx *models.AttributeSet, from, to string) {
 		}
 		ctx.AddAttributeKV(key, substituteValue(attr.Value(), from, to))
 	}
+}
+
+// isEUDIFlow recognises the base attestation flow and its bron-specific
+// variants. Requiring either an exact match or a colon-delimited suffix
+// avoids accidentally treating lookalikes as wallet flows.
+func isEUDIFlow(flow string) bool {
+	return flow == "eudi:attestation" || strings.HasPrefix(flow, "eudi:attestation:")
 }
 
 func substituteValue(v any, from, to string) any {

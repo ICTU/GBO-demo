@@ -56,7 +56,6 @@ type developmentCAProvider struct {
 	random          io.Reader
 	now             func() time.Time
 	readerPublicURL string
-	readerOrigin    string
 }
 
 type developmentCA struct {
@@ -65,8 +64,8 @@ type developmentCA struct {
 	certPath string
 }
 
-func newDevelopmentCAProvider(root, readerPublicURL, readerOrigin string) *developmentCAProvider {
-	return &developmentCAProvider{root: root, random: rand.Reader, now: time.Now, readerPublicURL: readerPublicURL, readerOrigin: readerOrigin}
+func newDevelopmentCAProvider(root, readerPublicURL string) *developmentCAProvider {
+	return &developmentCAProvider{root: root, random: rand.Reader, now: time.Now, readerPublicURL: readerPublicURL}
 }
 
 type developmentCertificateBinding struct {
@@ -89,14 +88,6 @@ func (p *developmentCAProvider) binding(registration sourceRegistration) (develo
 		readerHost = parsed.Hostname()
 	}
 	readerOrigin := "https://" + readerHost + "/"
-	if p.readerOrigin != "" {
-		parsed, err := parseDevelopmentRootURL(p.readerOrigin, true)
-		if err != nil {
-			return developmentCertificateBinding{}, fmt.Errorf("development reader origin: %w", err)
-		}
-		parsed.Path = "/"
-		readerOrigin = parsed.String()
-	}
 	issuerSubject := pkix.Name{CommonName: issuerHost, Organization: []string{registration.Name}, SerialNumber: registration.SourceOIN}
 	readerSubject := pkix.Name{CommonName: readerHost, Organization: []string{registration.Name}, SerialNumber: registration.SourceOIN}
 	issuerPayload, readerPayload, err := developmentCertificateAuthPayloads(registration, readerOrigin)

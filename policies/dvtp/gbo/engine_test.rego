@@ -70,3 +70,8 @@ test_generic_eudi_flow_selects_brp_rule_by_fields if {
 	result.decision == true
 	result.context.granted[0].rule == "EUD0002"
 }
+
+test_source_specific_eudi_flow_activates_no_rule if {
+	not gbo._flow_applicable("EUD0001") with input as {"context": {"flow": "eudi:attestation:bd"}}
+	not gbo._flow_applicable("EUD0002") with input as {"context": {"flow": "eudi:attestation:brp"}}
+}

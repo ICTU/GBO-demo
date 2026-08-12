@@ -175,7 +175,7 @@ _flow_applicable(rid) if {
 } else if {
 	s := _rule_meta[rid].spec
 	object.get(s, "pid_required", false)
-	input.context.flow == "eudi:attestation"
+	input.context.flow == object.get(s, "flow", "")
 } else if {
 	s := _rule_meta[rid].spec
 	not object.get(s, "consent_required", false)

@@ -6,7 +6,6 @@ interface Window {
     toestemmingsportaalUrl?: string
     dienstverlenerUrl?: string
     eudiPublicUrl?: string
-    eudiClientId?: string
     eudiUlBase?: string
     jaegerUrl?: string
     grafanaUrl?: string

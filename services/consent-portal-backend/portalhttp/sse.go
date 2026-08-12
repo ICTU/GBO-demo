@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -84,9 +85,17 @@ func handleSSE(hub *Hub) http.HandlerFunc {
 		// fails against that wrapper (which is why this endpoint used to
 		// answer "streaming not supported"). ResponseController follows the
 		// wrapper's Unwrap chain down to the real writer.
+		// Commit the status before the first flush. Flushing an uncommitted
+		// response makes net/http write the header itself, which the otelhttp
+		// wrapper does not see — it then writes its own and the server logs a
+		// "superfluous WriteHeader" line on every connect.
+		w.WriteHeader(http.StatusOK)
+
 		rc := http.NewResponseController(w)
 		if err := rc.Flush(); err != nil {
-			http.Error(w, "streaming not supported", http.StatusInternalServerError)
+			// The status is already committed, so http.Error would be another
+			// superfluous write; the client sees an empty stream and retries.
+			slog.Error("streaming not supported by this ResponseWriter", "err", err.Error())
 			return
 		}
 

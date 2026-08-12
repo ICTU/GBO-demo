@@ -70,6 +70,10 @@ var fscTxIDCtxKey = fscTxIDCtxKeyType{}
 // headers, so a stalled connection cannot hold a handler open.
 const readHeaderTimeout = 10 * time.Second
 
+// shutdownTimeout bounds the drain after SIGTERM: stop accepting, let
+// in-flight requests finish, then close whatever is left.
+const shutdownTimeout = 15 * time.Second
+
 type config struct {
 	Port      string
 	OutwayURL string
@@ -569,5 +573,30 @@ func main() {
 	slog.Info("eudi-adapter starting", "addr", srv.Addr, "outway", cfg.OutwayURL, "issuer_oin", cfg.IssuerOIN)
 	// Previously this logged and returned, so a failure to bind exited 0 and
 	// looked like a clean shutdown to the orchestrator.
-	fatal("listen and serve", srv.ListenAndServe())
+	serve(srv)
+}
+
+// serve runs the server until the process is asked to stop, then drains it.
+// Without this a SIGTERM (docker compose down, a Kubernetes rollout) killed
+// in-flight requests outright.
+func serve(srv *http.Server) {
+	go func() {
+		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+			fatal("listen and serve", err)
+		}
+	}()
+	slog.Info("listening", "addr", srv.Addr)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	<-ctx.Done()
+	stop()
+
+	slog.Info("shutting down")
+	drainCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	if err := srv.Shutdown(drainCtx); err != nil {
+		slog.Warn("drain did not finish; closing remaining connections", "err", err.Error())
+		_ = srv.Close()
+	}
 }

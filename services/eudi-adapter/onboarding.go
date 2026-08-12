@@ -47,7 +47,6 @@ type onboardingOptions struct {
 	schemaPath           string
 	publicBaseURL        string
 	readerPublicURL      string
-	readerOrigin         string
 	stateDir             string
 	secretsDir           string
 }
@@ -79,13 +78,13 @@ func defaultOnboardingDependencies() onboardingDependencies {
 }
 
 func configuredCertificateProvider(options onboardingOptions) (certificateProvider, error) {
-	return newDevelopmentCAProvider(options.secretsDir, options.readerPublicURL, options.readerOrigin), nil
+	return newDevelopmentCAProvider(options.secretsDir, options.readerPublicURL), nil
 }
 
 func configuredCertificateStore(options onboardingOptions) (certificateStore, error) {
 	switch options.certificateStoreName {
 	case "filesystem":
-		return newDevelopmentCAProvider(options.secretsDir, options.readerPublicURL, options.readerOrigin), nil
+		return newDevelopmentCAProvider(options.secretsDir, options.readerPublicURL), nil
 	default:
 		return nil, fmt.Errorf("unsupported certificate store %q", options.certificateStoreName)
 	}
@@ -173,7 +172,6 @@ func parseOnboardingOptions(command string, arguments []string, errorOutput io.W
 	set.StringVar(&options.schemaPath, "schema", "schemas/gbo-source-metadata-v1.schema.json", "source metadata JSON Schema")
 	set.StringVar(&options.publicBaseURL, "type-metadata-base-url", getEnv("TYPE_METADATA_PUBLIC_BASE_URL", "http://localhost:9409"), "public Type Metadata base URL")
 	set.StringVar(&options.readerPublicURL, "reader-public-url", os.Getenv("EUDI_PUBLIC_URL"), "public issuance-server URL whose host becomes the reader certificate DNS SAN")
-	set.StringVar(&options.readerOrigin, "reader-origin-url", os.Getenv("EUDI_READER_ORIGIN_URL"), "public reader origin embedded in the reader certificate")
 	set.StringVar(&options.stateDir, "state-dir", ".local/onboarding", "filesystem onboarding state directory")
 	set.StringVar(&options.secretsDir, "secrets-dir", ".local/secrets", "filesystem secret directory")
 	if command == "onboard-source" {
