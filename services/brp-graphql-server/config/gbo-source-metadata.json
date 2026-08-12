@@ -1,0 +1,441 @@
+{
+  "schema_version": "1.0",
+  "source_oin": "99999999900000000400",
+  "version": "2.4.0",
+  "issued_at": "2026-08-12T00:00:00Z",
+  "expires_at": "2099-01-01T00:00:00Z",
+  "capabilities": {
+    "eudi": {
+      "version": "1.0",
+      "attestations": [
+        {
+          "type_id": "akte-van-overlijden",
+          "type_version": "2.3",
+          "offers": [
+            {
+              "id": "akte_van_overlijden",
+              "label": "Akte van overlijden",
+              "description": "Overlijdensgegevens van de huwelijkspartner uit de BRP",
+              "parameters": {}
+            }
+          ],
+          "graphql": {
+            "service_reference": "brp",
+            "endpoint": "/graphql",
+            "document": "query AkteVanOverlijden($bsn: BSN!) {\n  akteVanOverlijden(bsn: $bsn) {\n    overledene_geslachtsnaam overledene_voorvoegsel overledene_voornamen\n    overledene_geboortedatum overledene_geboorteplaats overledene_geboorteland\n    overledene_geslacht overledene_ouders datum_overlijden plaats_overlijden\n    land_overlijden soort_verbintenis echtgenoot_geslachtsnaam\n    echtgenoot_voorvoegsel echtgenoot_voornamen verklaring_tekst\n  }\n}",
+            "subject_variable": "bsn",
+            "parameters": {},
+            "result_pointer": "/data/akteVanOverlijden"
+          },
+          "mapping_profile": "gbo-simple-v1",
+          "mapping": {
+            "overledene_geslachtsnaam": {
+              "pointer": "/overledene_geslachtsnaam",
+              "datatype": "string"
+            },
+            "overledene_voorvoegsel": {
+              "pointer": "/overledene_voorvoegsel",
+              "datatype": "string",
+              "optional": true
+            },
+            "overledene_voornamen": {
+              "pointer": "/overledene_voornamen",
+              "datatype": "string"
+            },
+            "overledene_geboortedatum": {
+              "pointer": "/overledene_geboortedatum",
+              "datatype": "date",
+              "optional": true
+            },
+            "overledene_geboorteplaats": {
+              "pointer": "/overledene_geboorteplaats",
+              "datatype": "string",
+              "optional": true
+            },
+            "overledene_geboorteland": {
+              "pointer": "/overledene_geboorteland",
+              "datatype": "string",
+              "optional": true
+            },
+            "overledene_geslacht": {
+              "pointer": "/overledene_geslacht",
+              "datatype": "string",
+              "optional": true
+            },
+            "overledene_ouders": {
+              "pointer": "/overledene_ouders",
+              "datatype": "string",
+              "optional": true
+            },
+            "datum_overlijden": {
+              "pointer": "/datum_overlijden",
+              "datatype": "date"
+            },
+            "plaats_overlijden": {
+              "pointer": "/plaats_overlijden",
+              "datatype": "string",
+              "optional": true
+            },
+            "land_overlijden": {
+              "pointer": "/land_overlijden",
+              "datatype": "string",
+              "optional": true
+            },
+            "soort_verbintenis": {
+              "pointer": "/soort_verbintenis",
+              "datatype": "string"
+            },
+            "echtgenoot_geslachtsnaam": {
+              "pointer": "/echtgenoot_geslachtsnaam",
+              "datatype": "string",
+              "optional": true
+            },
+            "echtgenoot_voorvoegsel": {
+              "pointer": "/echtgenoot_voorvoegsel",
+              "datatype": "string",
+              "optional": true
+            },
+            "echtgenoot_voornamen": {
+              "pointer": "/echtgenoot_voornamen",
+              "datatype": "string",
+              "optional": true
+            },
+            "verklaring_tekst": {
+              "pointer": "/verklaring_tekst",
+              "datatype": "string"
+            }
+          },
+          "attribute_schema": {
+            "overledene_geslachtsnaam": {
+              "type": "string"
+            },
+            "overledene_voorvoegsel": {
+              "type": "string"
+            },
+            "overledene_voornamen": {
+              "type": "string"
+            },
+            "overledene_geboortedatum": {
+              "type": "string",
+              "format": "date"
+            },
+            "overledene_geboorteplaats": {
+              "type": "string"
+            },
+            "overledene_geboorteland": {
+              "type": "string"
+            },
+            "overledene_geslacht": {
+              "type": "string"
+            },
+            "overledene_ouders": {
+              "type": "string"
+            },
+            "datum_overlijden": {
+              "type": "string",
+              "format": "date"
+            },
+            "plaats_overlijden": {
+              "type": "string"
+            },
+            "land_overlijden": {
+              "type": "string"
+            },
+            "soort_verbintenis": {
+              "type": "string"
+            },
+            "echtgenoot_geslachtsnaam": {
+              "type": "string"
+            },
+            "echtgenoot_voorvoegsel": {
+              "type": "string"
+            },
+            "echtgenoot_voornamen": {
+              "type": "string"
+            },
+            "verklaring_tekst": {
+              "type": "string"
+            }
+          },
+          "type_metadata": {
+            "name": "Akte van overlijden",
+            "description": "Overlijdensgegevens van de huwelijkspartner uit de BRP",
+            "display": [
+              {
+                "lang": "nl-NL",
+                "name": "Akte van overlijden",
+                "description": "Overlijdensgegevens van de huwelijkspartner",
+                "summary": "{{overledene_voornamen}} {{overledene_geslachtsnaam}} ({{datum_overlijden}})",
+                "rendering": {
+                  "simple": {
+                    "background_color": "#3b3b46",
+                    "text_color": "#ffffff"
+                  }
+                }
+              }
+            ],
+            "schema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "title": "Akte van overlijden",
+              "type": "object",
+              "properties": {
+                "overledene_geslachtsnaam": {
+                  "type": "string"
+                },
+                "overledene_voorvoegsel": {
+                  "type": "string"
+                },
+                "overledene_voornamen": {
+                  "type": "string"
+                },
+                "overledene_geboortedatum": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "overledene_geboorteplaats": {
+                  "type": "string"
+                },
+                "overledene_geboorteland": {
+                  "type": "string"
+                },
+                "overledene_geslacht": {
+                  "type": "string"
+                },
+                "overledene_ouders": {
+                  "type": "string"
+                },
+                "datum_overlijden": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "plaats_overlijden": {
+                  "type": "string"
+                },
+                "land_overlijden": {
+                  "type": "string"
+                },
+                "soort_verbintenis": {
+                  "type": "string"
+                },
+                "echtgenoot_geslachtsnaam": {
+                  "type": "string"
+                },
+                "echtgenoot_voorvoegsel": {
+                  "type": "string"
+                },
+                "echtgenoot_voornamen": {
+                  "type": "string"
+                },
+                "verklaring_tekst": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "overledene_geslachtsnaam",
+                "overledene_voornamen",
+                "datum_overlijden"
+              ]
+            },
+            "claims": [
+              {
+                "path": [
+                  "overledene_geslachtsnaam"
+                ],
+                "display": [
+                  {
+                    "lang": "nl-NL",
+                    "label": "Geslachtsnaam overledene"
+                  }
+                ],
+                "sd": "always",
+                "svg_id": "overledene_geslachtsnaam"
+              },
+              {
+                "path": [
+                  "overledene_voorvoegsel"
+                ],
+                "display": [
+                  {
+                    "lang": "nl-NL",
+                    "label": "Voorvoegsel overledene"
+                  }
+                ],
+                "sd": "always"
+              },
+              {
+                "path": [
+                  "overledene_voornamen"
+                ],
+                "display": [
+                  {
+                    "lang": "nl-NL",
+                    "label": "Voornamen overledene"
+                  }
+                ],
+                "sd": "always",
+                "svg_id": "overledene_voornamen"
+              },
+              {
+                "path": [
+                  "overledene_geboortedatum"
+                ],
+                "display": [
+                  {
+                    "lang": "nl-NL",
+                    "label": "Geboortedatum overledene"
+                  }
+                ],
+                "sd": "always"
+              },
+              {
+                "path": [
+                  "overledene_geboorteplaats"
+                ],
+                "display": [
+                  {
+                    "lang": "nl-NL",
+                    "label": "Geboorteplaats overledene"
+                  }
+                ],
+                "sd": "always"
+              },
+              {
+                "path": [
+                  "overledene_geboorteland"
+                ],
+                "display": [
+                  {
+                    "lang": "nl-NL",
+                    "label": "Geboorteland overledene"
+                  }
+                ],
+                "sd": "always"
+              },
+              {
+                "path": [
+                  "overledene_geslacht"
+                ],
+                "display": [
+                  {
+                    "lang": "nl-NL",
+                    "label": "Geslacht overledene"
+                  }
+                ],
+                "sd": "always"
+              },
+              {
+                "path": [
+                  "overledene_ouders"
+                ],
+                "display": [
+                  {
+                    "lang": "nl-NL",
+                    "label": "Ouders overledene"
+                  }
+                ],
+                "sd": "always"
+              },
+              {
+                "path": [
+                  "datum_overlijden"
+                ],
+                "display": [
+                  {
+                    "lang": "nl-NL",
+                    "label": "Datum overlijden"
+                  }
+                ],
+                "sd": "always",
+                "svg_id": "datum_overlijden"
+              },
+              {
+                "path": [
+                  "plaats_overlijden"
+                ],
+                "display": [
+                  {
+                    "lang": "nl-NL",
+                    "label": "Plaats overlijden"
+                  }
+                ],
+                "sd": "always"
+              },
+              {
+                "path": [
+                  "land_overlijden"
+                ],
+                "display": [
+                  {
+                    "lang": "nl-NL",
+                    "label": "Land overlijden"
+                  }
+                ],
+                "sd": "always"
+              },
+              {
+                "path": [
+                  "soort_verbintenis"
+                ],
+                "display": [
+                  {
+                    "lang": "nl-NL",
+                    "label": "Soort verbintenis"
+                  }
+                ],
+                "sd": "always"
+              },
+              {
+                "path": [
+                  "echtgenoot_geslachtsnaam"
+                ],
+                "display": [
+                  {
+                    "lang": "nl-NL",
+                    "label": "Geslachtsnaam echtgenoot"
+                  }
+                ],
+                "sd": "always"
+              },
+              {
+                "path": [
+                  "echtgenoot_voorvoegsel"
+                ],
+                "display": [
+                  {
+                    "lang": "nl-NL",
+                    "label": "Voorvoegsel echtgenoot"
+                  }
+                ],
+                "sd": "always"
+              },
+              {
+                "path": [
+                  "echtgenoot_voornamen"
+                ],
+                "display": [
+                  {
+                    "lang": "nl-NL",
+                    "label": "Voornamen echtgenoot"
+                  }
+                ],
+                "sd": "always"
+              },
+              {
+                "path": [
+                  "verklaring_tekst"
+                ],
+                "display": [
+                  {
+                    "lang": "nl-NL",
+                    "label": "Verklaring"
+                  }
+                ],
+                "sd": "always"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

@@ -29,18 +29,23 @@ services/*/*[!.go]
 .env.local
 fsc-infra/.env
 fsc-infra/.env.local
+.local/
 
 # Issuance-server runtime config carries inline demo signing keys +
 # hostnames tied to the issuer/reader certs — never commit. Use the
 # .example files as templates and run `make eudi-config` to bootstrap
 # runtime copies from your local nl-wallet checkout.
 services/eudi-issuance-server/config/issuance_server.toml
-services/eudi-issuance-server/config/inkomensverklaring_metadata.json
-services/eudi-issuance-server/config/akte_van_overlijden_metadata.json
+services/eudi-issuance-server/config/type-*.json
+services/eudi-issuance-server/config/eudi-offers.json
 services/eudi-issuance-server/config/issuer_auth.json
 services/eudi-issuance-server/config/reader_auth.json
+services/eudi-issuance-server/config/inkomensverklaring_metadata.json
 services/eudi-issuance-server/config/akte_van_overlijden_issuer_auth.json
 services/eudi-issuance-server/config/akte_van_overlijden_reader_auth.json
+services/eudi-issuance-server/config/akte_van_overlijden_metadata.json
+landing-page/public/eudi-offers.json
+developer-portal/public/eudi-offers.json
 
 # IDE / tooling state
 .omc/

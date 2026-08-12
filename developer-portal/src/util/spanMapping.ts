@@ -3,7 +3,7 @@ import {
   type JaegerSpan, type JaegerTrace,
 } from '../api/jaegerClient'
 import {
-  BD_BRON, BRON_PROFILES, bronNodeForService, bronProfileById, type BronProfile,
+  BD_BRON, BRON_PROFILES, bronNodeForService, bronProfileBySourceOIN, type BronProfile,
 } from '../data/bronnen'
 import type { Tab } from '../types'
 
@@ -14,13 +14,12 @@ export type SpanInfo = {
   operationName: string
   httpPath: string
   error: boolean
-  // `gbo.bron` — the bronprofiel the eudi-adapter selected from its
-  // usecase-catalog. Only the adapter-span carries it.
-  bron?: string
+  // `gbo.source_oin` comes from the activated source record.
+  sourceOIN?: string
 }
 
-function bronTag(span: JaegerSpan): string | undefined {
-  const v = spanTag(span, 'gbo.bron')
+function sourceOINTag(span: JaegerSpan): string | undefined {
+  const v = spanTag(span, 'gbo.source_oin')
   return typeof v === 'string' && v !== '' ? v : undefined
 }
 
@@ -30,15 +29,13 @@ export function collectSpans(trace: JaegerTrace): SpanInfo[] {
     operationName: s.operationName,
     httpPath: httpPathForSpan(s),
     error: isSpanError(s),
-    bron: bronTag(s),
+    sourceOIN: sourceOINTag(s),
   }))
 }
 
 // Which register this run reads from. Two signals, both from the run itself —
-// no usecase → bron table portal-side:
-//   1. `gbo.bron` on the eudi-adapter span. Authoritative (it IS the catalog
-//      choice) and also present when the run never reached the bron, e.g. a
-//      policy-DENY.
+// no issuance-product → bron table portal-side:
+//   1. `gbo.source_oin` on the eudi-adapter span, derived from onboarding.
 //   2. the bron-services in the trace. Arrives earlier than (1) — the adapter
 //      root-span only ends when the whole chain is done — so it is what
 //      normally labels the nodes as they light up.
@@ -46,7 +43,7 @@ export function collectSpans(trace: JaegerTrace): SpanInfo[] {
 // pair, the strip's resting state.
 export function bronForSpans(spans: SpanInfo[]): BronProfile {
   for (const sp of spans) {
-    const byAttr = bronProfileById(sp.bron)
+    const byAttr = bronProfileBySourceOIN(sp.sourceOIN)
     if (byAttr) return byAttr
   }
   for (const sp of spans) {

@@ -10,5 +10,6 @@ RUN apk add --no-cache ca-certificates wget
 WORKDIR /app
 COPY --from=builder /app/graphql-server .
 COPY mockdata/ mockdata/
+COPY config/ config/
 EXPOSE 4000
 CMD ["./graphql-server"]

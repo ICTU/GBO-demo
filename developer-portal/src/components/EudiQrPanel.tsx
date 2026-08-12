@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
-import { attestationConfigFor, walletUniversalLinkFor } from './EudiForm'
+import { adapterPathFor, walletUniversalLinkFor, type IssuanceOffer } from '../eudi'
 
 type Props = {
   usecaseKey: string
+  offers: IssuanceOffer[]
   onCancel: () => void
   // Playground toggle: tells App that a curl is running so the watch-mode
   // callback doesn't jump to the result-panel (which would hide the user's
@@ -19,29 +20,29 @@ type Props = {
 // There is deliberately no link to the demo-issuer's own QR page: that
 // service is not in docker-compose, and its usecase keys never gained the
 // year suffix (let alone akte_van_overlijden), so the link 404'd.
-export default function EudiQrPanel({ usecaseKey, onCancel, onPlaygroundToggle }: Props) {
-  const cfg = attestationConfigFor(usecaseKey)
+export default function EudiQrPanel({ usecaseKey, offers, onCancel, onPlaygroundToggle }: Props) {
+  const offer = offers.find((candidate) => candidate.key === usecaseKey)
   const [bsn, setBsn] = useState('123456789')
   const [busy, setBusy] = useState(false)
   const [response, setResponse] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  if (!cfg) return null
+  if (!offer) return null
 
-  const crossDeviceUl = walletUniversalLinkFor(cfg, 'cross_device')
-  const sameDeviceUl = walletUniversalLinkFor(cfg, 'same_device')
+  const crossDeviceUl = walletUniversalLinkFor(offer, 'cross_device')
+  const sameDeviceUl = walletUniversalLinkFor(offer, 'same_device')
   const missingConfig = !crossDeviceUl
 
   const runCurl = async () => {
     setBusy(true); setError(null); setResponse(null)
     onPlaygroundToggle?.(true)
     try {
-      const res = await fetch(`/eudi-api/${usecaseKey}/`, {
+      const res = await fetch(adapterPathFor(offer), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify([{
           attestations: [{
-            attestation_type: cfg.code,
+            attestation_type: offer.attestation_type,
             attributes: { bsn },
           }],
           id: 'dev-portal-playground',

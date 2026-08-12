@@ -1,0 +1,19 @@
+{
+  "CN": "brp-mock-internal",
+  "hosts": [
+    "brp-controller",
+    "brp-manager",
+    "brp-inway",
+    "brp-txlog-api"
+  ],
+  "key": {
+    "algo": "rsa",
+    "size": 4096
+  },
+  "names": [
+    {
+      "C": "NL",
+      "O": "GBO-DEMO BRP-mock Internal"
+    }
+  ]
+}

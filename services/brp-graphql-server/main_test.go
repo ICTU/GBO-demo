@@ -74,7 +74,7 @@ func newTestServer(t *testing.T) *httptest.Server {
 	if err != nil {
 		t.Fatalf("buildSchema: %v", err)
 	}
-	return httptest.NewServer(newMux(&schema, tracer))
+	return httptest.NewServer(newMux(&schema, tracer, nil))
 }
 
 func post(t *testing.T, srv *httptest.Server, query, bsn string) overlijdenResult {
@@ -179,6 +179,57 @@ func TestOnlyOnePersoonHasOverledenPartner(t *testing.T) {
 		}
 	}
 }
+
+func TestAkteRejectsDeathThatDidNotEndMarriage(t *testing.T) {
+	persoon := testWidow("2024-01-02", "2024-01-03")
+	if _, ok := akteVanOverlijden(persoon); ok {
+		t.Fatal("akteVanOverlijden accepted a partner death on a different date than the marriage dissolution")
+	}
+}
+
+func TestAkteAllowsIncompleteDates(t *testing.T) {
+	persoon := testWidow("2024-01", "2024-01-03")
+	if _, ok := akteVanOverlijden(persoon); !ok {
+		t.Fatal("akteVanOverlijden rejected a BRP DatumIncompleet that cannot be compared day-for-day")
+	}
+}
+
+func TestAkteRepresentsMissingOptionalFieldsAsNull(t *testing.T) {
+	persoon := testWidow("2024-01-03", "2024-01-03")
+	persoon.Geslachtsnaam = ""
+	akte, ok := akteVanOverlijden(persoon)
+	if !ok {
+		t.Fatal("akteVanOverlijden returned no result")
+	}
+	for _, claim := range []string{
+		"overledene_voorvoegsel", "overledene_geboortedatum", "overledene_geboorteplaats",
+		"overledene_geboorteland", "overledene_geslacht", "overledene_ouders",
+		"plaats_overlijden", "land_overlijden", "echtgenoot_geslachtsnaam", "echtgenoot_voorvoegsel", "echtgenoot_voornamen",
+	} {
+		if value := akte[claim]; value != nil {
+			t.Errorf("%s = %#v, want nil", claim, value)
+		}
+	}
+}
+
+func testWidow(datumOntbinding, datumOverlijden string) Persoon {
+	partnerID := "partner"
+	requesterID := "requester"
+	partnerName := "Partner"
+	return Persoon{
+		ID: requesterID, Geslachtsnaam: "Requester",
+		HeeftHuwelijk: []Huwelijk{{
+			SoortVerbintenis: "Huwelijk", DatumOntbinding: &datumOntbinding,
+			RedenOntbinding: stringPointer("Overlijden"),
+			Partners: []NatuurlijkPersoon{
+				{ID: requesterID, Geslachtsnaam: "Requester"},
+				{ID: partnerID, Geslachtsnaam: "Partner", Voornamen: &partnerName, DatumOverlijden: &datumOverlijden},
+			},
+		}},
+	}
+}
+
+func stringPointer(value string) *string { return &value }
 
 // The concrete types behind the IngeschrevenPersoon interface must be
 // reachable through inline fragments — Ingezetene carries a binnenlands

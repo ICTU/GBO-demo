@@ -15,7 +15,7 @@ set -o nounset
 cd "$(dirname "$0")"
 
 IMAGE_TAG="gbo-demo/pki-tools:local"
-NETWORK="fsc-infra_default"
+NETWORK="${FSC_INFRA_NETWORK:-fsc-infra_default}"
 
 EDI_ORG="../orgs/edi-issuer/pki/org"
 EDI_INT="../orgs/edi-issuer/pki/internal"

@@ -1,0 +1,479 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math"
+	"strconv"
+	"time"
+
+	"gbo-demo/eudi-adapter/internal/gbosimplev1"
+
+	"github.com/graphql-go/graphql/language/ast"
+	"github.com/graphql-go/graphql/language/parser"
+	"github.com/graphql-go/graphql/language/source"
+)
+
+const sourceMetadataMediaType = "application/json"
+
+// sourceMetadataConfig is resolved from an active onboarding record. Endpoint
+// and transport choices are deliberately not separate deployment settings.
+type sourceMetadataConfig struct {
+	URL               string
+	MetadataTransport string
+	MetadataGrantHash string
+	DataTransport     string
+	ExpectedOIN       string
+	TypeID            string
+}
+
+type sourceMetadataDocument struct {
+	SchemaVersion string                     `json:"schema_version"`
+	SourceOIN     string                     `json:"source_oin"`
+	Version       string                     `json:"version"`
+	IssuedAt      string                     `json:"issued_at"`
+	ExpiresAt     string                     `json:"expires_at"`
+	Capabilities  sourceMetadataCapabilities `json:"capabilities"`
+}
+
+type sourceMetadataCapabilities struct {
+	EUDI *sourceEUDICapability `json:"eudi,omitempty"`
+}
+
+type sourceEUDICapability struct {
+	Version      string                        `json:"version"`
+	Attestations []sourceAttestationDefinition `json:"attestations"`
+}
+
+func (d sourceMetadataDocument) eudiAttestations() []sourceAttestationDefinition {
+	if d.Capabilities.EUDI == nil {
+		return nil
+	}
+	return d.Capabilities.EUDI.Attestations
+}
+
+type sourceAttestationDefinition struct {
+	TypeID          string                           `json:"type_id"`
+	TypeVersion     string                           `json:"type_version"`
+	Offers          []sourceOffer                    `json:"offers"`
+	GraphQL         sourceGraphQL                    `json:"graphql"`
+	MappingProfile  string                           `json:"mapping_profile"`
+	Mapping         gbosimplev1.Mapping              `json:"mapping"`
+	AttributeSchema map[string]sourceAttributeSchema `json:"attribute_schema"`
+	TypeMetadata    json.RawMessage                  `json:"type_metadata"`
+}
+
+type sourceOffer struct {
+	ID          string         `json:"id"`
+	Label       string         `json:"label"`
+	Description string         `json:"description,omitempty"`
+	Parameters  map[string]any `json:"parameters"`
+}
+
+type sourceGraphQL struct {
+	ServiceReference string                     `json:"service_reference,omitempty"`
+	Endpoint         string                     `json:"endpoint"`
+	Document         string                     `json:"document"`
+	SubjectVariable  string                     `json:"subject_variable"`
+	Parameters       map[string]sourceParameter `json:"parameters"`
+	ResultPointer    string                     `json:"result_pointer"`
+}
+
+type sourceParameter struct {
+	Type     string `json:"type"`
+	Required bool   `json:"required"`
+}
+
+type sourceAttributeSchema struct {
+	Type   string `json:"type"`
+	Format string `json:"format,omitempty"`
+	Unit   string `json:"unit,omitempty"`
+}
+
+func (a *sourceAttributeSchema) UnmarshalJSON(data []byte) error {
+	type plainAttributeSchema sourceAttributeSchema
+	var decoded plainAttributeSchema
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&decoded); err != nil {
+		return fmt.Errorf("invalid attribute_schema rule: %w", err)
+	}
+	*a = sourceAttributeSchema(decoded)
+	return nil
+}
+
+type mappingRule = gbosimplev1.Rule
+
+type activeSourceMetadata struct {
+	Version      string
+	SourceOIN    string
+	TypeID       string
+	Definition   sourceAttestationDefinition
+	VCT          string
+	VCTIntegrity string
+	CacheState   string
+}
+
+type sourceMetadataRuntime interface {
+	current(now time.Time) (*activeSourceMetadata, error)
+}
+
+func parseSourceMetadataPayload(payload []byte, cfg sourceMetadataConfig) (*activeSourceMetadata, sourceMetadataDocument, error) {
+	var document sourceMetadataDocument
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&document); err != nil {
+		return nil, sourceMetadataDocument{}, fmt.Errorf("parse source metadata payload: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return nil, sourceMetadataDocument{}, fmt.Errorf("parse source metadata payload: trailing JSON data")
+	}
+	if document.SourceOIN != cfg.ExpectedOIN {
+		return nil, sourceMetadataDocument{}, fmt.Errorf("source metadata OIN %q does not match registered OIN %q", document.SourceOIN, cfg.ExpectedOIN)
+	}
+	if document.SchemaVersion != "1.0" {
+		return nil, sourceMetadataDocument{}, fmt.Errorf("unsupported source metadata schema_version %q", document.SchemaVersion)
+	}
+	if document.Capabilities.EUDI == nil || document.Capabilities.EUDI.Version != "1.0" {
+		return nil, sourceMetadataDocument{}, fmt.Errorf("source metadata has no supported EUDI capability")
+	}
+	for _, definition := range document.eudiAttestations() {
+		if definition.TypeID != cfg.TypeID {
+			continue
+		}
+		if err := validateSourceAttestation(definition); err != nil {
+			return nil, sourceMetadataDocument{}, fmt.Errorf("attestation %q: %w", cfg.TypeID, err)
+		}
+		if err := validateGraphQLEndpoint(definition.GraphQL, cfg.DataTransport); err != nil {
+			return nil, sourceMetadataDocument{}, fmt.Errorf("attestation %q graphql.endpoint: %w", cfg.TypeID, err)
+		}
+		return &activeSourceMetadata{
+			Version: document.Version, SourceOIN: cfg.ExpectedOIN, TypeID: cfg.TypeID, Definition: definition,
+		}, document, nil
+	}
+	return nil, sourceMetadataDocument{}, fmt.Errorf("source metadata has no attestation %q", cfg.TypeID)
+}
+
+func validateSourceAttestation(definition sourceAttestationDefinition) error {
+	if !typeIDPattern.MatchString(definition.TypeID) {
+		return fmt.Errorf("type_id has an invalid format")
+	}
+	if !numericVersionPattern.MatchString(definition.TypeVersion) {
+		return fmt.Errorf("type_version has an invalid format")
+	}
+	if definition.GraphQL.SubjectVariable == "" {
+		return fmt.Errorf("graphql.subject_variable is required")
+	}
+	if definition.GraphQL.ResultPointer == "" {
+		return fmt.Errorf("graphql.result_pointer is required")
+	}
+	if err := validateSourceOffers(definition); err != nil {
+		return err
+	}
+	if definition.MappingProfile != "gbo-simple-v1" {
+		return fmt.Errorf("unsupported mapping_profile %q", definition.MappingProfile)
+	}
+	if len(definition.Mapping) == 0 {
+		return fmt.Errorf("mapping must contain at least one claim")
+	}
+	if err := gbosimplev1.Validate(definition.Mapping); err != nil {
+		return err
+	}
+	if err := validateAttributeSchema(definition); err != nil {
+		return err
+	}
+	document, err := parser.Parse(parser.ParseParams{Source: source.NewSource(&source.Source{Body: []byte(definition.GraphQL.Document), Name: "source-metadata.graphql"})})
+	if err != nil {
+		return fmt.Errorf("invalid GraphQL document: %w", err)
+	}
+	operationCount := 0
+	for _, node := range document.Definitions {
+		if operation, ok := node.(*ast.OperationDefinition); ok {
+			operationCount++
+			if operation.Operation != ast.OperationTypeQuery {
+				return fmt.Errorf("GraphQL document must contain a query operation")
+			}
+		}
+	}
+	if operationCount != 1 {
+		return fmt.Errorf("GraphQL document must contain exactly one query operation")
+	}
+	return nil
+}
+
+func validateSourceOffers(definition sourceAttestationDefinition) error {
+	if len(definition.Offers) == 0 {
+		return fmt.Errorf("offers must contain at least one concrete issuance option")
+	}
+	seen := make(map[string]struct{}, len(definition.Offers))
+	for _, offer := range definition.Offers {
+		if offer.ID == "" || offer.Label == "" {
+			return fmt.Errorf("offer id and label are required")
+		}
+		if _, duplicate := seen[offer.ID]; duplicate {
+			return fmt.Errorf("duplicate offer id %q", offer.ID)
+		}
+		seen[offer.ID] = struct{}{}
+		for name, parameter := range definition.GraphQL.Parameters {
+			value, supplied := offer.Parameters[name]
+			if !supplied {
+				if parameter.Required {
+					return fmt.Errorf("offer %q has no value for required parameter %q", offer.ID, name)
+				}
+				continue
+			}
+			if _, err := formatOfferParameter(name, parameter.Type, value); err != nil {
+				return fmt.Errorf("offer %q: %w", offer.ID, err)
+			}
+		}
+		for name := range offer.Parameters {
+			if _, declared := definition.GraphQL.Parameters[name]; !declared {
+				return fmt.Errorf("offer %q supplies undeclared parameter %q", offer.ID, name)
+			}
+		}
+	}
+	return nil
+}
+
+func formatOfferParameter(name, parameterType string, value any) (string, error) {
+	switch parameterType {
+	case "string":
+		text, ok := value.(string)
+		if !ok {
+			return "", fmt.Errorf("source parameter %q must be a string", name)
+		}
+		return text, nil
+	case "date":
+		text, ok := value.(string)
+		if !ok {
+			return "", fmt.Errorf("source parameter %q must be an ISO date", name)
+		}
+		if _, err := time.Parse(time.DateOnly, text); err != nil {
+			return "", fmt.Errorf("source parameter %q must be an ISO date", name)
+		}
+		return text, nil
+	case "integer":
+		switch number := value.(type) {
+		case float64:
+			if number != float64(int64(number)) {
+				return "", fmt.Errorf("source parameter %q must be an integer", name)
+			}
+			return strconv.FormatInt(int64(number), 10), nil
+		case int:
+			return strconv.Itoa(number), nil
+		case int64:
+			return strconv.FormatInt(number, 10), nil
+		case json.Number:
+			integer, err := number.Int64()
+			if err != nil {
+				return "", fmt.Errorf("source parameter %q must be an integer", name)
+			}
+			return strconv.FormatInt(integer, 10), nil
+		default:
+			return "", fmt.Errorf("source parameter %q must be an integer", name)
+		}
+	case "number":
+		var number float64
+		switch value := value.(type) {
+		case float64:
+			number = value
+		case float32:
+			number = float64(value)
+		case int:
+			number = float64(value)
+		case int64:
+			number = float64(value)
+		case json.Number:
+			parsed, err := value.Float64()
+			if err != nil {
+				return "", fmt.Errorf("source parameter %q must be a number", name)
+			}
+			number = parsed
+		default:
+			return "", fmt.Errorf("source parameter %q must be a number", name)
+		}
+		if math.IsNaN(number) || math.IsInf(number, 0) {
+			return "", fmt.Errorf("source parameter %q must be a finite number", name)
+		}
+		return strconv.FormatFloat(number, 'g', -1, 64), nil
+	case "boolean":
+		boolean, ok := value.(bool)
+		if !ok {
+			return "", fmt.Errorf("source parameter %q must be a boolean", name)
+		}
+		return strconv.FormatBool(boolean), nil
+	default:
+		return "", fmt.Errorf("source parameter %q has unsupported type %q", name, parameterType)
+	}
+}
+
+func validateGraphQLEndpoint(graphql sourceGraphQL, transport string) error {
+	switch transport {
+	case sourceTransportFSC:
+		if !serviceReferencePattern.MatchString(graphql.ServiceReference) {
+			return fmt.Errorf("service_reference is required and must be valid for FSC transport")
+		}
+		return validateAbsoluteURLPath(graphql.Endpoint)
+	case sourceTransportHTTPSMTLS:
+		if graphql.ServiceReference != "" {
+			return fmt.Errorf("service_reference is not allowed for https-mtls transport")
+		}
+		return validateAbsoluteHTTPSEndpoint(graphql.Endpoint)
+	default:
+		return fmt.Errorf("unsupported data transport %q", transport)
+	}
+}
+
+func validateAttributeSchema(definition sourceAttestationDefinition) error {
+	if len(definition.AttributeSchema) != len(definition.Mapping) {
+		return fmt.Errorf("attribute_schema must define exactly the mapped claims")
+	}
+	for claim, rule := range definition.Mapping {
+		attribute, ok := definition.AttributeSchema[claim]
+		if !ok {
+			return fmt.Errorf("attribute_schema is missing mapped claim %q", claim)
+		}
+		wantType, wantFormat := rule.Datatype, ""
+		switch rule.Datatype {
+		case "date":
+			wantType, wantFormat = "string", "date"
+		case "gYear":
+			wantType, wantFormat = "integer", "gYear"
+		}
+		if attribute.Type != wantType || attribute.Format != wantFormat {
+			return fmt.Errorf("attribute_schema claim %q must have type %q and format %q", claim, wantType, wantFormat)
+		}
+		if attribute.Type == "number" {
+			return fmt.Errorf("attribute_schema claim %q uses number, which nl-wallet v0.5 cannot represent; use integer or string", claim)
+		}
+		if attribute.Unit != "" {
+			if attribute.Type != "integer" {
+				return fmt.Errorf("attribute_schema claim %q can only declare a unit for type integer", claim)
+			}
+			if !isUppercaseAlpha3(attribute.Unit) {
+				return fmt.Errorf("attribute_schema claim %q unit must be a three-letter uppercase code", claim)
+			}
+		}
+	}
+	return nil
+}
+
+func isUppercaseAlpha3(unit string) bool {
+	if len(unit) != 3 {
+		return false
+	}
+	for i := 0; i < len(unit); i++ {
+		if unit[i] < 'A' || unit[i] > 'Z' {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *activeSourceMetadata) current(_ time.Time) (*activeSourceMetadata, error) {
+	return s, nil
+}
+
+func (s *activeSourceMetadata) queryPlan(bsn string, supplied map[string][]string) (sourceQueryPlan, error) {
+	variables := map[string]any{s.Definition.GraphQL.SubjectVariable: bsn}
+	for name, parameter := range s.Definition.GraphQL.Parameters {
+		values, configured := supplied[name]
+		if configured && len(values) != 1 {
+			return sourceQueryPlan{}, fmt.Errorf("source parameter %q must occur exactly once", name)
+		}
+		if configured {
+			value, err := parseSourceParameter(name, parameter.Type, values[0])
+			if err != nil {
+				return sourceQueryPlan{}, err
+			}
+			variables[name] = value
+		} else if parameter.Required {
+			return sourceQueryPlan{}, fmt.Errorf("no runtime value for required source parameter %q", name)
+		}
+	}
+	for name := range supplied {
+		if _, declared := s.Definition.GraphQL.Parameters[name]; !declared {
+			return sourceQueryPlan{}, fmt.Errorf("request supplies undeclared source parameter %q", name)
+		}
+	}
+	if !s.matchesPublishedOffer(supplied, variables) {
+		return sourceQueryPlan{}, fmt.Errorf("source parameters do not match a published offer")
+	}
+	return sourceQueryPlan{ServiceReference: s.Definition.GraphQL.ServiceReference, Endpoint: s.Definition.GraphQL.Endpoint, Query: s.Definition.GraphQL.Document, Variables: variables}, nil
+}
+
+func (s *activeSourceMetadata) matchesPublishedOffer(supplied map[string][]string, variables map[string]any) bool {
+	for _, offer := range s.Definition.Offers {
+		if len(offer.Parameters) != len(supplied) {
+			continue
+		}
+		matches := true
+		for name, offeredValue := range offer.Parameters {
+			parameter, declared := s.Definition.GraphQL.Parameters[name]
+			if !declared {
+				matches = false
+				break
+			}
+			offered, err := formatOfferParameter(name, parameter.Type, offeredValue)
+			if err != nil {
+				matches = false
+				break
+			}
+			requested, err := formatOfferParameter(name, parameter.Type, variables[name])
+			if err != nil || requested != offered {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return true
+		}
+	}
+	return false
+}
+
+func parseSourceParameter(name, parameterType, raw string) (any, error) {
+	switch parameterType {
+	case "string":
+		return raw, nil
+	case "integer":
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("source parameter %q must be an integer", name)
+		}
+		return value, nil
+	case "number":
+		value, err := strconv.ParseFloat(raw, 64)
+		if err != nil || math.IsNaN(value) || math.IsInf(value, 0) {
+			return nil, fmt.Errorf("source parameter %q must be a finite number", name)
+		}
+		return value, nil
+	case "boolean":
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			return nil, fmt.Errorf("source parameter %q must be a boolean", name)
+		}
+		return value, nil
+	case "date":
+		if _, err := time.Parse(time.DateOnly, raw); err != nil {
+			return nil, fmt.Errorf("source parameter %q must be an ISO date", name)
+		}
+		return raw, nil
+	default:
+		return nil, fmt.Errorf("source parameter %q has unsupported type %q", name, parameterType)
+	}
+}
+
+func (s *activeSourceMetadata) project(rawGraphQL []byte) (gbosimplev1.Projection, error) {
+	root, err := gbosimplev1.DecodeJSON(rawGraphQL)
+	if err != nil {
+		return gbosimplev1.Projection{}, fmt.Errorf("decode GraphQL response for source projection: %w", err)
+	}
+	projection, err := gbosimplev1.Project(root, s.Definition.GraphQL.ResultPointer, s.Definition.Mapping)
+	if err != nil {
+		return gbosimplev1.Projection{}, fmt.Errorf("project source response: %w", err)
+	}
+	return projection, nil
+}

@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import ExternalLink from './ExternalLink'
 import { links } from '../config'
-import { WALLET_USECASES, walletUniversalLink } from '../eudi'
+import { loadWalletUsecases, walletUniversalLink, type WalletUsecase } from '../eudi'
 
 const DVTP_STEPS = [
   <>HypotheekBV vraagt je inkomensgegevens op voor een hypotheekaanvraag.</>,
@@ -17,8 +17,20 @@ const DVTP_STEPS = [
 ]
 
 export default function TryItOut() {
-  const [usecase, setUsecase] = useState(WALLET_USECASES[0])
-  const crossDeviceLink = walletUniversalLink(usecase.key, 'cross_device')
+  const [usecases, setUsecases] = useState<WalletUsecase[]>([])
+  const [usecase, setUsecase] = useState<WalletUsecase | null>(null)
+  const [offersError, setOffersError] = useState('')
+
+  useEffect(() => {
+    void loadWalletUsecases()
+      .then((loaded) => {
+        setUsecases(loaded)
+        setUsecase(loaded[0])
+      })
+      .catch((error: Error) => setOffersError(error.message))
+  }, [])
+
+  const crossDeviceLink = usecase ? walletUniversalLink(usecase.key, 'cross_device') : ''
 
   return (
     <section id="uitproberen" data-reveal className="section section--blue reveal">
@@ -70,11 +82,11 @@ export default function TryItOut() {
               </div>
             </div>
             <div className="tryout-choice" role="group" aria-label="Kies welke verklaring je ophaalt">
-              {WALLET_USECASES.map((u) => (
+              {usecases.map((u) => (
                 <button
                   key={u.key}
                   type="button"
-                  aria-pressed={u.key === usecase.key}
+                  aria-pressed={u.key === usecase?.key}
                   onClick={() => setUsecase(u)}
                 >
                   {u.label}
@@ -85,17 +97,17 @@ export default function TryItOut() {
                 de langste tekst, dus het wisselen verschuift niets — ook de
                 kaart ernaast niet, die in dezelfde grid-rij meerekt. */}
             <div className="tryout-stack">
-              {WALLET_USECASES.map((u) => (
+              {usecases.map((u) => (
                 <p
                   key={u.key}
                   className="tryout-desc"
-                  aria-hidden={u.key === usecase.key ? undefined : true}
+                  aria-hidden={u.key === usecase?.key ? undefined : true}
                 >
-                  {u.desc}
+                  {u.description}
                 </p>
               ))}
             </div>
-            {crossDeviceLink ? (
+            {usecase && crossDeviceLink ? (
               <>
                 <div className="tryout-qr">
                   <QRCodeSVG
@@ -108,13 +120,13 @@ export default function TryItOut() {
                   />
                 </div>
                 <div className="tryout-stack">
-                  {WALLET_USECASES.map((u) => (
+                  {usecases.map((u) => (
                     <p
                       key={u.key}
                       className="tryout-note"
                       aria-hidden={u.key === usecase.key ? undefined : true}
                     >
-                      {u.scanNote} Scan met een andere telefoon dan waar je deze pagina op leest.
+                      Scan met een andere telefoon dan waar je deze pagina op leest.
                       Zit je al op je telefoon?{' '}
                       <a href={walletUniversalLink(u.key, 'same_device')} className="link-underline">
                         Open de NL Wallet
@@ -129,9 +141,9 @@ export default function TryItOut() {
                  sessie niet openen; een QR tonen zou een dood spoor zijn. */
               <div className="tryout-qr tryout-qr--empty">
                 <p>
-                  In deze omgeving is de issuance-server niet publiek bereikbaar, dus er valt niets
-                  te scannen. Zet <code>EUDI_PUBLIC_URL</code> zodra de wallet de server kan
-                  bereiken.
+                  {offersError
+                    ? `Het gegenereerde wallet-aanbod kon niet worden geladen: ${offersError}.`
+                    : 'Het wallet-aanbod wordt geladen, of de issuance-server is niet publiek bereikbaar.'}
                 </p>
               </div>
             )}

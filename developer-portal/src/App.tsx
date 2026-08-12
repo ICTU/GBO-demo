@@ -16,6 +16,7 @@ import { issuanceFlow } from './api/portalClient'
 import { useQuery } from './api/dvtpClient'
 import { fetchExplain } from './api/devClient'
 import { newTraceContext } from './util/trace'
+import { loadIssuanceOffers, type IssuanceOffer } from './eudi'
 import type {
   ApiCall, EudiPayload, IssuancePayload, IssuanceResponse, Scenario, Tab, UsePayload, UseResponse,
 } from './types'
@@ -65,7 +66,7 @@ async function opaReasonCode(traceId: string): Promise<string | null> {
 }
 
 const EMPTY_EUDI: EudiPayload = {
-  usecase: 'inkomensverklaring_2024',
+  usecase: '',
 }
 
 const JAEGER_PUBLIC_URL =
@@ -87,11 +88,27 @@ export default function App() {
   const [issuancePayload, setIssuancePayload] = useState<IssuancePayload>(EMPTY_ISSUANCE)
   const [usePayload, setUsePayload] = useState<UsePayload>(EMPTY_USE)
   const [eudiPayload, setEudiPayload] = useState<EudiPayload>(EMPTY_EUDI)
+  const [eudiOffers, setEudiOffers] = useState<IssuanceOffer[]>([])
+  const [eudiOffersError, setEudiOffersError] = useState('')
   const [result, setResult] = useState<ResultData | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [archApiCalls, setArchApiCalls] = useState<ApiCall[] | undefined>(undefined)
   const [archTraceId, setArchTraceId] = useState<string | null>(null)
   const [archMode, setArchMode] = useState<Tab>('issuance')
+
+  useEffect(() => {
+    void loadIssuanceOffers()
+      .then((offers) => {
+        setEudiOffers(offers)
+        setEudiPayload((current) => ({
+          ...current,
+          usecase: offers.some((offer) => offer.key === current.usecase)
+            ? current.usecase
+            : offers[0].key,
+        }))
+      })
+      .catch((error: Error) => setEudiOffersError(error.message))
+  }, [])
 
   const { states: archStates, ready: archReady, bron: archBron } = useChainEvents(archTraceId, archMode)
   const { data: fscTxlog, loading: fscTxlogLoading, transactionId: fscTxID, overrides: fscOverrides } = useFscTxlog(
@@ -423,12 +440,15 @@ export default function App() {
               onSubmit={onSubmit}
               onSaveAsScenario={onSaveAsScenario}
               submitting={submitting}
+              eudiOffers={eudiOffers}
+              eudiOffersError={eudiOffersError}
             />
           </div>
           <div className="col">
             {tab === 'eudi-issuance' && submitting && (!archTraceId || playgroundActive) ? (
               <EudiQrPanel
                 usecaseKey={eudiPayload.usecase}
+                offers={eudiOffers}
                 onCancel={() => { setSubmitting(false); setPlaygroundActive(false) }}
                 onPlaygroundToggle={(active) => {
                   playgroundActiveRef.current = active

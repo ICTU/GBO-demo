@@ -1,13 +1,9 @@
 #!/usr/bin/env python3
 """Apply KEY=VALUE assignments to a .env file, in place and idempotently.
 
-Written for the EUDI certificate slots, whose values are single-line base64
-tens of kilobytes long. Editing those by hand is error-prone in exactly the
-ways that cost the most time: appending a fresh block leaves the previous
-assignment above it (last-wins hides the mistake until something reads the
-file differently), and hand-deleting the old lines is one mis-selected line
-away from dropping a slot entirely — which then falls back silently, or
-pairs a new certificate with an old private key.
+Editing environment files by hand is error-prone: appending a fresh value
+leaves the previous assignment above it, and last-wins semantics can hide the
+mistake until another tool reads the file differently.
 
 So: every key is replaced where it already sits, any later duplicates of it
 are removed, and unknown keys are appended. Comments, blank lines, ordering
@@ -16,7 +12,7 @@ before anything changes.
 
 Values are never printed — only key names, byte lengths and what happened.
 
-Read assignments from one or more files (the output of mint-eudi-certs.py):
+Read assignments from one or more files:
 
   python3 scripts/update-env.py readers.env
 

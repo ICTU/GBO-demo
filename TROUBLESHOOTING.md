@@ -24,7 +24,10 @@ Symptoms of insufficient RAM: containers crash at random, `docker compose logs` 
 
 ## Missing certificates
 
-If you run `make demo-eudi` without `make fsc-ca` first, cert mounts fail. Fix by letting the `demo-*` targets handle it (they depend on `certs`), or run it manually:
+The `demo-*` targets generate the local FSC certificates in the correct order.
+Certificate mount failures normally mean the stack was started directly with
+`docker compose` before bootstrap completed. Prefer `make demo-eudi`, or run
+the certificate targets manually:
 
 ```bash
 make fsc-ca && make fsc-directory-certs && make fsc-edi-certs && make fsc-bd-certs
@@ -58,9 +61,59 @@ Check the `make fsc-seed-bri` output. Common causes:
 
 ## EUDI flow doesn't work after `make demo-eudi`
 
-**Most common**: the `/bri` grant-link is not set in the EDI-Controller UI (`http://localhost:8094`). See `README.md` section *Real FSC end-to-end*, step 3.
+Start with the generated and activated state:
 
-**Check**: `curl -X POST http://localhost:9409/inkomensverklaring_2024/ …` (see the same README section). A `UNKNOWN_GRANT_HASH_IN_HEADER` response means the grant-link is missing.
+```bash
+find .local/onboarding/active -type f -name '*.json' -print
+jq -r '.[].key' services/eudi-issuance-server/config/eudi-offers.json
+docker compose ps
+```
+
+`make demo-eudi` should create two active source records and the three offers
+`inkomensverklaring_2024`, `inkomensverklaring_2025`, and
+`akte_van_overlijden`.
+
+**The QR opens but no applicable PID can be shared**: `make demo-eudi` does not
+onboard the wallet or issue a PID. Use a v0.5.0-compatible test wallet with a
+trusted `urn:eudi:pid:nl:1` credential. Mock BSN `999991772` is the persona that
+has data for all three offers. Also verify that the wallet trusts the issuer
+and reader CA certificates installed under `.local/secrets/development-ca`.
+
+**`source metadata unavailable`**: reconciliation did not produce a usable
+activation. Rerun the complete idempotent sequence and inspect the reconciler
+output:
+
+```bash
+make onboard-demo-sources
+make eudi-config
+docker compose --profile eudi up --build --force-recreate -d \
+  eudi-adapter eudi-issuance-server developer-portal landing-page
+```
+
+**The wallet fails after PID sharing and the issuance-server logs `requested
+credential previews not found in session`**: compare the public and local
+issuer metadata. With Cloudflare, `CF-Cache-Status: HIT` or an `Age` header on
+the issuance hostname means a broad cache rule is overriding the origin's
+`Cache-Control: no-store`. Add a final hostname-wide **Bypass cache** rule,
+purge the hostname, reload the QR page, and scan a newly generated QR.
+
+```bash
+set -a; . ./.env; set +a
+curl -sSI "${EUDI_PUBLIC_URL%/}/.well-known/openid-credential-issuer" \
+  | grep -Ei 'cf-cache-status|age|cache-control'
+curl -s "${EUDI_PUBLIC_URL%/}/.well-known/openid-credential-issuer" \
+  | jq -r '.credential_configurations_supported | keys[]'
+```
+
+Expect `DYNAMIC` or `BYPASS`, no increasing `Age`, and the same VCT version as
+the active source record.
+
+**FSC seed reports PostgreSQL password authentication failed**: an existing
+FSC volume was initialized with a different password than `fsc-infra/.env`.
+For disposable local state, run `make fsc-clean` and restart. Do not wipe a
+non-disposable environment.
+
+**Check**: `curl -X POST 'http://localhost:9409/attestations/99999999900000000200/inkomensverklaring?jaar=2024' …`. A `UNKNOWN_GRANT_HASH_IN_HEADER` response means the data-service grant-link is missing.
 
 ## Developer portal shows empty tabs
 
@@ -70,10 +123,11 @@ Expected with `make demo-minimal` (base only) and `make demo-eudi`: DvTP tabs ar
 
 ```bash
 make demo-down
-docker volume rm 05-demo_dev-portal-var fsc-infra_postgres-data 2>/dev/null
+make clean
 ```
 
-For a full wipe (including certs):
+For a full FSC wipe (including contracts and locally generated FSC
+certificates):
 
 ```bash
 make fsc-clean

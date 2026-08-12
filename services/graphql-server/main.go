@@ -59,15 +59,28 @@ const readHeaderTimeout = 10 * time.Second
 const shutdownTimeout = 15 * time.Second
 
 type config struct {
-	Port         string
-	MockDataPath string
+	Port               string
+	MockDataPath       string
+	SourceMetadataPath string
 }
 
 func loadConfig() (config, error) {
 	return config{
-		Port:         getEnv("PORT", "4000"),
-		MockDataPath: getEnv("MOCKDATA_PATH", "mockdata/citizens.json"),
+		Port:               getEnv("PORT", "4000"),
+		MockDataPath:       getEnv("MOCKDATA_PATH", "mockdata/citizens.json"),
+		SourceMetadataPath: os.Getenv("GBO_SOURCE_METADATA_PATH"),
 	}, nil
+}
+
+func loadSourceMetadataPublisher(cfg config) (*sourceMetadataPublisher, error) {
+	if cfg.SourceMetadataPath == "" {
+		return nil, nil
+	}
+	payload, err := os.ReadFile(cfg.SourceMetadataPath)
+	if err != nil {
+		return nil, fmt.Errorf("read source metadata: %w", err)
+	}
+	return newSourceMetadataPublisher(payload)
 }
 
 func getEnv(key, fallback string) string {
@@ -310,8 +323,11 @@ func initTracer(ctx context.Context) (func(context.Context) error, error) {
 // main so integration tests can wire the handlers to an httptest.Server
 // without starting the real listener. Schema + tracer are constructed by
 // main and injected here; loading mock data + env-reads stay in main.
-func newMux(schema *graphql.Schema, tracer trace.Tracer) *http.ServeMux {
+func newMux(schema *graphql.Schema, tracer trace.Tracer, publishers ...http.Handler) *http.ServeMux {
 	mux := http.NewServeMux()
+	if len(publishers) > 0 && publishers[0] != nil {
+		mux.Handle("/.well-known/gbo", publishers[0])
+	}
 
 	// Both UIs off: the ones graphql-go/handler bundles are GraphiQL 0.11 and
 	// the retired Prisma GraphQL Playground, neither of which can build a
@@ -359,7 +375,6 @@ func fatal(msg string, err error) {
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", "graphql-server"))
-
 	cfg, err := loadConfig()
 	if err != nil {
 		fatal("loading configuration from environment", err)
@@ -390,10 +405,20 @@ func main() {
 	if err != nil {
 		fatal("building schema", err)
 	}
+	publisher, err := loadSourceMetadataPublisher(cfg)
+	if err != nil {
+		fatal("loading source metadata publisher", err)
+	}
+	var mux *http.ServeMux
+	if publisher == nil {
+		mux = newMux(&schema, tracer)
+	} else {
+		mux = newMux(&schema, tracer, publisher)
+	}
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           otelhttp.NewHandler(withAccessLog(newMux(&schema, tracer)), "graphql-server"),
+		Handler:           otelhttp.NewHandler(withAccessLog(mux), "graphql-server"),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 	serve(srv)

@@ -33,10 +33,9 @@ export type UsePayload = {
 // EUDI-issuance is externally triggered (wallet scans a QR), so the payload
 // captures what the user selected in the dev-portal to launch the run — not
 // what the wallet later sends. The BSN comes exclusively from the wallet-PID;
-// here we only capture the usecase-selection. The usecase-key maps to both
-// the disclosure_settings-key in issuance-server-config and the path in the
-// adapter-catalog. The same attestation_type can back multiple usecases
-// (e.g. one per tax-year).
+// here we only capture the issuance-product selection. The key maps to
+// disclosure_settings in the issuance-server; onboarding generates that
+// product's adapter route from source OIN, type and concrete parameters.
 export type EudiPayload = {
   usecase: string
 }

@@ -1,0 +1,16 @@
+{
+  "CN": "GBO-DEMO Internal CA (brp-mock)",
+  "key": {
+    "algo": "rsa",
+    "size": 4096
+  },
+  "names": [
+    {
+      "C": "NL",
+      "O": "GBO-DEMO BRP-mock Internal"
+    }
+  ],
+  "ca": {
+    "expiry": "43800h"
+  }
+}

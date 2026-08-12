@@ -15,7 +15,7 @@ set -o nounset
 cd "$(dirname "$0")"
 
 IMAGE_TAG="gbo-demo/pki-tools:local"
-NETWORK="fsc-infra_default"
+NETWORK="${FSC_INFRA_NETWORK:-fsc-infra_default}"
 
 BD_ORG="../orgs/belastingdienst-mock/pki/org"
 BD_INT="../orgs/belastingdienst-mock/pki/internal"
@@ -45,7 +45,7 @@ docker run --rm \
         echo -e "[req_distinguished_name]\nserialNumber=OIN" >> /etc/ssl/openssl.cnf
 
         openssl req -new -nodes -sha256 -newkey rsa:4096 \
-            -subj "/C=NL/O=GBO-DEMO Belastingdienst-mock/OU=TEST/CN=bd-manager/serialNumber=99999999900000000200" \
+            -subj "/C=NL/O=Belastingdienst/OU=TEST/CN=bd-manager/serialNumber=99999999900000000200" \
             -addext "subjectAltName=DNS:bd-manager,DNS:bd-inway" \
             -keyout "${OUT}/bd-mock-key.pem" \
             -out "${OUT}/bd-mock.csr" 2>/dev/null

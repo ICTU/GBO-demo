@@ -26,7 +26,7 @@ function asSpanInfo(e: SpanEvent): SpanInfo {
     error: e.status_code === 2 || (e.attributes?.['http.status_code']
       ? parseInt(e.attributes['http.status_code'], 10) >= 400
       : false),
-    bron: e.attributes?.['gbo.bron'] || undefined,
+    sourceOIN: e.attributes?.['gbo.source_oin'] || undefined,
   }
 }
 

@@ -36,9 +36,9 @@
       "0000009961MINEZK0000",
       "99999999900000000100"
     ],
-    "allowed_scopes": [
-      "bd:ib:2024",
-      "bd:ib:2025"
+    "allowed_years": [
+      2024,
+      2025
     ],
     "covers_fields": [
       "AangifteIH.belastingjaar",
@@ -64,9 +64,9 @@
         "0000009961MINEZK0000",
         "99999999900000000100"
       ],
-      "allowed_scopes": [
-        "bd:ib:2024",
-        "bd:ib:2025"
+      "allowed_years": [
+        2024,
+        2025
       ],
       "consent_must_cover_scope": false,
       "consent_required": false,
@@ -74,7 +74,7 @@
       "pid_required": true,
       "pip": null,
       "rule_id": "EUD0001",
-      "years_in_scopes": true
+      "years_in_scopes": false
     }
   },
   "eud0002": {
@@ -83,36 +83,24 @@
       "0000009961MINEZK0000",
       "99999999900000000100"
     ],
-    "allowed_scopes": [
-      "brp:akte:overlijden"
-    ],
     "covers_fields": [
-      "Huwelijk.datumOntbinding",
-      "Huwelijk.datumVoltrekking",
-      "Huwelijk.landVoltrekking",
-      "Huwelijk.partners",
-      "Huwelijk.plaatsVoltrekking",
-      "Huwelijk.redenOntbinding",
-      "Huwelijk.soortVerbintenis",
-      "IngeschrevenPersoon.bsn",
-      "IngeschrevenPersoon.geslachtsnaam",
-      "IngeschrevenPersoon.heeftHuwelijk",
-      "IngeschrevenPersoon.id",
-      "IngeschrevenPersoon.voornamen",
-      "IngeschrevenPersoon.voorvoegsel",
-      "NatuurlijkPersoon.datumOverlijden",
-      "NatuurlijkPersoon.geboortedatum",
-      "NatuurlijkPersoon.geboorteland",
-      "NatuurlijkPersoon.geboorteplaats",
-      "NatuurlijkPersoon.geslacht",
-      "NatuurlijkPersoon.geslachtsnaam",
-      "NatuurlijkPersoon.heeftOuder",
-      "NatuurlijkPersoon.id",
-      "NatuurlijkPersoon.landOverlijden",
-      "NatuurlijkPersoon.plaatsOverlijden",
-      "NatuurlijkPersoon.voornamen",
-      "NatuurlijkPersoon.voorvoegsel",
-      "Query.ingeschrevenPersoon"
+      "AkteVanOverlijden.datum_overlijden",
+      "AkteVanOverlijden.echtgenoot_geslachtsnaam",
+      "AkteVanOverlijden.echtgenoot_voornamen",
+      "AkteVanOverlijden.echtgenoot_voorvoegsel",
+      "AkteVanOverlijden.land_overlijden",
+      "AkteVanOverlijden.overledene_geboortedatum",
+      "AkteVanOverlijden.overledene_geboorteland",
+      "AkteVanOverlijden.overledene_geboorteplaats",
+      "AkteVanOverlijden.overledene_geslacht",
+      "AkteVanOverlijden.overledene_geslachtsnaam",
+      "AkteVanOverlijden.overledene_ouders",
+      "AkteVanOverlijden.overledene_voornamen",
+      "AkteVanOverlijden.overledene_voorvoegsel",
+      "AkteVanOverlijden.plaats_overlijden",
+      "AkteVanOverlijden.soort_verbintenis",
+      "AkteVanOverlijden.verklaring_tekst",
+      "Query.akteVanOverlijden"
     ],
     "covers_types": [],
     "rule_id": "EUD0002",
@@ -122,12 +110,9 @@
         "0000009961MINEZK0000",
         "99999999900000000100"
       ],
-      "allowed_scopes": [
-        "brp:akte:overlijden"
-      ],
       "consent_must_cover_scope": false,
       "consent_required": false,
-      "flow": "eudi:attestation:brp",
+      "flow": "eudi:attestation",
       "pid_required": true,
       "pip": null,
       "rule_id": "EUD0002",

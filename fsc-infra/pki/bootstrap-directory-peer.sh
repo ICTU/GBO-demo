@@ -3,7 +3,7 @@
 #
 # Requires:
 #   - Root-CA + intermediate-CA (pki/ca/*.pem) — via generate-root-ca.sh
-#   - Certportal running on the fsc-infra_default network (make fsc-up)
+#   - Certportal running on the FSC infra network (make fsc-up)
 #
 # Cert generation uses **openssl** (not cfssl genkey) because CFSSL's
 # JSON config ignores `serialNumber` in the `names` section. OpenSSL
@@ -20,7 +20,7 @@ set -o nounset
 cd "$(dirname "$0")"
 
 IMAGE_TAG="gbo-demo/pki-tools:local"
-NETWORK="fsc-infra_default"
+NETWORK="${FSC_INFRA_NETWORK:-fsc-infra_default}"
 
 DIRPEER_ORG="../directory-peer/pki/org"
 DIRPEER_INT="../directory-peer/pki/internal"

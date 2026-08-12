@@ -2,18 +2,15 @@
 //
 // The EUDI chain does not end in a fixed bron: an inkomensverklaring reads
 // from the BD bron, the akte van overlijden from the BRP bron. Which bron a
-// run used is derived per run from its trace (see util/spanMapping) — the
-// usecase → bron mapping itself lives in
-// `services/eudi-adapter/config/usecase_catalog.json` and is deliberately NOT
-// duplicated here.
+// run used is derived per run from its trace (see util/spanMapping). The
+// adapter records the OIN from the activated onboarding record.
 //
-// `id` must match the `bron` key in that catalog and `gatewaySvc`/`bronSvc`
-// must match OTEL_SERVICE_NAME in docker-compose.yml. Together they are the
-// only thing tying a run's spans to its register, so a third bronprofiel is
-// added here and nowhere else in the portal.
+// This is visualization metadata only: OIN and OTEL service names connect a
+// trace to the human-readable register label.
 
 export type BronProfile = {
-  id: string // catalog `bron` value ('bd', 'brp', …)
+  id: string
+  sourceOIN: string
   label: string // register name, for the playground's bron-picker
   gatewaySvc: string // OTEL_SERVICE_NAME of the sidecar in front of the bron
   gatewayName: string // node label for the gateway
@@ -51,10 +48,9 @@ const BD_EXAMPLE = `# Klik links in de Explorer velden aan om deze query aan te 
 }
 `
 
-// The akte-van-overlijden shape: rooted at the nabestaande's own
-// persoonslijst, reaching the overledene through the marriage she is a party
-// to. Mirrors the query the eudi-adapter builds; BSN 999991772 (Frouke
-// Jansen) is the one persona in the mock whose marriage ended in death.
+// Explore the BRP facts underlying the source-owned `akteVanOverlijden` view.
+// BSN 999991772 (Frouke Jansen) is the one persona in the mock whose marriage
+// ended in death; the adapter itself only executes the query from bronmetadata.
 const BRP_EXAMPLE = `# Klik links in de Explorer velden aan om deze query aan te passen,
 # of open het Schema-tabblad voor de typegraaf.
 {
@@ -82,6 +78,7 @@ const BRP_EXAMPLE = `# Klik links in de Explorer velden aan om deze query aan te
 export const BRON_PROFILES: BronProfile[] = [
   {
     id: 'bd',
+    sourceOIN: '99999999900000000200',
     label: 'Belastingdienst',
     gatewaySvc: 'bron-sidecar',
     gatewayName: 'BD-sidecar',
@@ -92,6 +89,7 @@ export const BRON_PROFILES: BronProfile[] = [
   },
   {
     id: 'brp',
+    sourceOIN: '99999999900000000400',
     label: 'BRP',
     gatewaySvc: 'brp-sidecar',
     gatewayName: 'BRP-sidecar',
@@ -116,6 +114,11 @@ export const BD_BRON: BronProfile = BRON_PROFILES[0]
 export function bronProfileById(id: string | undefined): BronProfile | undefined {
   if (!id) return undefined
   return BRON_PROFILES.find((b) => b.id === id)
+}
+
+export function bronProfileBySourceOIN(sourceOIN: string | undefined): BronProfile | undefined {
+  if (!sourceOIN) return undefined
+  return BRON_PROFILES.find((b) => b.sourceOIN === sourceOIN)
 }
 
 // Which bron-node (if any) a service name belongs to. 'sidecar' and 'bron' are

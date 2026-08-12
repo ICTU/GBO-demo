@@ -23,6 +23,7 @@ jobs:
         service:
           - additional-claims-service
           - bron-sidecar
+          - brp-graphql-server
           - bsnk-mock
           - consent-portal-backend
           - consent-register

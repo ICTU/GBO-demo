@@ -7,11 +7,72 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 
 	"go.opentelemetry.io/otel"
 )
+
+func TestPublishesSourceMetadata(t *testing.T) {
+	payload := []byte(`{"source_oin":"00000001003214345000","version":"v1","attestations":[]}`)
+	publisher, err := newSourceMetadataPublisher(payload)
+	if err != nil {
+		t.Fatalf("new source metadata publisher: %v", err)
+	}
+
+	store, err := loadMockData("mockdata/citizens.json")
+	if err != nil {
+		t.Fatalf("loadMockData: %v", err)
+	}
+	tracer := otel.Tracer("graphql-server-test")
+	schema, err := buildSchema(tracer, store)
+	if err != nil {
+		t.Fatalf("buildSchema: %v", err)
+	}
+	srv := httptest.NewServer(newMux(&schema, tracer, publisher))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/.well-known/gbo")
+	if err != nil {
+		t.Fatalf("get source metadata: %v", err)
+	}
+	defer resp.Body.Close()
+	if got, want := resp.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("status = %d, want %d", got, want)
+	}
+	if got, want := resp.Header.Get("Content-Type"), "application/json"; got != want {
+		t.Errorf("Content-Type = %q, want %q", got, want)
+	}
+	etag := resp.Header.Get("ETag")
+	if etag == "" {
+		t.Fatal("ETag is empty")
+	}
+	gotPayload, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read source metadata: %v", err)
+	}
+	if !bytes.Equal(gotPayload, payload) {
+		t.Errorf("payload = %s, want %s", gotPayload, payload)
+	}
+
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/.well-known/gbo", nil)
+	if err != nil {
+		t.Fatalf("create conditional request: %v", err)
+	}
+	req.Header.Set("If-None-Match", etag)
+	conditional, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("conditional get source metadata: %v", err)
+	}
+	defer conditional.Body.Close()
+	if got, want := conditional.StatusCode, http.StatusNotModified; got != want {
+		t.Fatalf("conditional status = %d, want %d", got, want)
+	}
+	if body, err := io.ReadAll(conditional.Body); err != nil || len(body) != 0 {
+		t.Fatalf("conditional response body = %q, err = %v; want empty", body, err)
+	}
+}
 
 // Happy-path integration test: load the demo mock data, build the schema,
 // spin up the mux behind an httptest.Server, and issue a GraphQL query for
@@ -126,6 +187,70 @@ func TestGraphQLBelastingjarenFilter(t *testing.T) {
 	aangiften := out.Data.IngeschrevenPersoon.HeeftBelastingjaarAangifte
 	if len(aangiften) != 1 || aangiften[0].Belastingjaar != 2025 {
 		t.Fatalf("expected only 2025 aangifte, got %+v", aangiften)
+	}
+}
+
+// The checked-in source declaration is executable against the source schema;
+// this catches drift that a syntax-only onboarding check cannot detect.
+func TestShippedAttestationQueryMatchesSourceSchema(t *testing.T) {
+	rawMetadata, err := os.ReadFile("config/gbo-source-metadata.json")
+	if err != nil {
+		t.Fatalf("read source metadata: %v", err)
+	}
+	var metadata struct {
+		Capabilities struct {
+			EUDI struct {
+				Attestations []struct {
+					GraphQL struct {
+						Document string `json:"document"`
+					} `json:"graphql"`
+				} `json:"attestations"`
+			} `json:"eudi"`
+		} `json:"capabilities"`
+	}
+	if err := json.Unmarshal(rawMetadata, &metadata); err != nil {
+		t.Fatalf("parse source metadata: %v", err)
+	}
+	attestations := metadata.Capabilities.EUDI.Attestations
+	if len(attestations) != 1 {
+		t.Fatalf("attestations = %d, want 1", len(attestations))
+	}
+
+	srv := httptest.NewServer(testMux(t))
+	defer srv.Close()
+	body, err := json.Marshal(map[string]any{
+		"query": attestations[0].GraphQL.Document,
+		"variables": map[string]any{
+			"bsn":  "123456789",
+			"jaar": 2025,
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal GraphQL request: %v", err)
+	}
+	resp, err := http.Post(srv.URL+"/graphql", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("post source query: %v", err)
+	}
+	defer resp.Body.Close()
+	var result struct {
+		Data struct {
+			IngeschrevenPersoon struct {
+				Aangiften []struct {
+					Belastingjaar int `json:"belastingjaar"`
+				} `json:"heeftBelastingjaarAangifte"`
+			} `json:"ingeschrevenPersoon"`
+		} `json:"data"`
+		Errors []any `json:"errors"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode source response: %v", err)
+	}
+	if len(result.Errors) > 0 {
+		t.Fatalf("source query returned GraphQL errors: %v", result.Errors)
+	}
+	if len(result.Data.IngeschrevenPersoon.Aangiften) != 1 || result.Data.IngeschrevenPersoon.Aangiften[0].Belastingjaar != 2025 {
+		t.Fatalf("source query result = %+v, want exactly tax year 2025", result.Data.IngeschrevenPersoon.Aangiften)
 	}
 }
 

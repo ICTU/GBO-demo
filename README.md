@@ -13,53 +13,56 @@ Both flows share one authorization pipeline: FSC-Inway (transport) → OpenFTV P
 
 - **Docker** with Compose plugin (Docker Desktop 4.x or Docker Engine + `docker compose`).
 - **~8 GB RAM** allocated to Docker (Preferences → Resources), **~10 GB disk** for images.
+- **Host tools**: Git, Make, Bash, `curl`, `jq`, OpenSSL, and Python 3.9 or newer.
 
-Every mode also needs two Postgres passwords set via env-files (compose fails loud if unset — any string works for the local demo network):
+Compose requires an EUDI Postgres password even when the EUDI profile is not
+selected (any non-empty local-development value is sufficient):
 
 - **`EUDI_POSTGRES_PASSWORD`** in `.env` — password for `postgres-eudi` (issuance-server + migrations).
-- **`FSC_POSTGRES_PASSWORD`** in `fsc-infra/.env` — shared password for all FSC-infra database users (three orgs × controller/manager/txlog + directory).
+
+`make` creates `fsc-infra/.env` with a random `FSC_POSTGRES_PASSWORD` when the
+file is absent. Copy `fsc-infra/.env.example` yourself only when you need a
+stable, externally managed value. Do not change that password while old FSC
+Postgres volumes still exist.
 
 That covers the default (`make demo`, DvTP-only). For the wallet flow (`make demo-eudi` / `make demo-full`) you also need:
 
 - **nl-wallet sources** — pinned as a git submodule at `vendor/nl-wallet` (**v0.5.0**). Server and app move in lockstep: v0.5.0 made the `x509_san_dns:` `client_id` prefix mandatory, so a v0.4.1 wallet app cannot complete a session against a v0.5.0 server, or the other way round. Init once with `git submodule update --init vendor/nl-wallet`. Used to build the issuance-server binary from source. Override with `NLWALLET_PATH` in `.env` if you need another checkout.
 - **Two public HTTPS URLs** — `EUDI_PUBLIC_URL` (wallet reaches issuance-server) and `EUDI_BRI_URL` (issuance-server reaches eudi-adapter). See [EUDI public reachability](#eudi-public-reachability) for the three supported options (own domain / bundled Cloudflare tunnel / ad-hoc tunnel).
 
-  Since v0.5.0 the `EUDI_PUBLIC_URL` **host** is part of the crypto, not just routing: the issuance-server derives its OpenID4VP `client_id` from it (`x509_san_dns:<host>`) and validates on startup that every reader certificate in `[disclosure_settings.*]` carries that host as a DNS SAN. Point `EUDI_PUBLIC_URL` at a different hostname and you must re-mint the reader certificates — see [Reader certificates and `EUDI_PUBLIC_URL`](#reader-certificates-and-eudi_public_url).
-- **Six EUDI crypto slots** in `.env` — `EUDI_READER_KEY/CERT`, `EUDI_ISSUER_KEY/CERT`, `EUDI_STATUS_KEY/CERT`. `make eudi-config` (auto-run by `make demo-eudi`) renders `services/eudi-issuance-server/config/{issuance_server.toml,reader_auth.json,...}` from their `.example` templates via `envsubst`. The `.example` files contain public trust-anchors and URL placeholders; **the private keys/certs are not in the public repo**. Requires `envsubst` (`brew install gettext` on macOS).
-
-  Where each one comes from:
-
-  | slot | signed by | bound to |
-  | --- | --- | --- |
-  | `EUDI_READER_*`, `EUDI_BRP_READER_*` | `ca.gbo-reader` | the `EUDI_PUBLIC_URL` host — re-mint whenever it changes |
-  | `EUDI_ISSUER_*`, `EUDI_BRP_ISSUER_*`, `EUDI_STATUS_*` | `ca.gbo-issuer` | each other (one shared subject); free of the deployment host |
-
-  All five pairs are minted by `scripts/mint-eudi-certs.py` — see [Reader certificates and `EUDI_PUBLIC_URL`](#reader-certificates-and-eudi_public_url) for when to re-mint which.
-
-  They hang off two demo CAs, `ca.gbo-issuer` and `ca.gbo-reader`, which are what the preprod wallet is configured to trust. Their **public** halves are in this repo, as the `issuer_trust_anchors` / `reader_trust_anchors` base64 in `services/eudi-issuance-server/config/issuance_server.toml.example`; the CA private keys are not, and are held by the maintainer. They were generated with nl-wallet's own CA tool (`cargo run -p wallet_ca -- ca -n ca.gbo-reader -f ca.gbo-reader`). Note that a CA common name is just `ca.gbo-reader` — it is not tied to `.gbo.b15.io` or to any other domain.
-
-  **Only the CAs have to stay fixed** — leaf hostnames are free, because neither CA carries a name-constraints extension.
-
-  This is a demo arrangement, not a small version of production. A production EUDI wallet trusts CAs on the EU Trusted List: a relying party does not mint its reader certificate, it is issued one by a registered Access CA after RP registration, and that registration — not a local JSON file — is what authorises the attributes it may request.
+  Since v0.5.0 the `EUDI_PUBLIC_URL` **host** is part of the crypto, not just routing: the issuance-server derives its OpenID4VP `client_id` from it (`x509_san_dns:<host>`) and validates on startup that every reader certificate carries that host as a DNS SAN. Point `EUDI_PUBLIC_URL` at a different hostname and provision new development reader certificates before reconciling the sources again — see [Reader certificates and `EUDI_PUBLIC_URL`](#reader-certificates-and-eudi_public_url).
+- **Activated sources with certificate references** — `make onboard-demo-sources` explicitly provisions local-development certificates and activates BD and BRP. Each source publishes its concrete wallet products as `offers`; `make eudi-config` generates the issuance-server TOML, Type Metadata files, and frontend QR catalog from all active records. There is no source/use-case catalog in the adapter or issuance server. Production uses pre-managed certificates; [issue #225](https://github.com/ICTU/GBO-demo/issues/225) tracks the choice between shared and per-source certificate sets.
 
 Copy the templates and fill them in:
 
 ```bash
 cp .env.example .env
-cp fsc-infra/.env.example fsc-infra/.env
-# then edit both
+# then edit .env; make generates fsc-infra/.env when it is absent
 ```
 
 ## Quick Start
 
+After completing the one-time `.env`, public URL, and trusted-CA setup below,
+start the complete DvTP + EUDI demo with one command:
+
 ```bash
-cd 05-demo
-make demo             # DvTP (consent) flow only — no wallet, no public URLs needed
+# Existing reverse proxy or externally managed tunnel
+make demo-full
+
+# Bundled Cloudflare connector
+COMPOSE_FILE=docker-compose.yml:docker-compose.cloudflare-tunnel.yml make demo-full
 ```
+
+Both commands bootstrap FSC contracts, source onboarding, certificate leaves,
+source reconciliation, generated EUDI products, and all application services.
+Do not run the individual `fsc-seed-*`, `onboard-demo-sources`,
+`reconcile-fsc-sources`, or `eudi-config` targets first.
 
 ### Other modes
 
 ```bash
+make demo             # DvTP (consent) flow only — no wallet or public URLs
+
 make demo-minimal     # Base only (~30s, ~13 services)
                       # Curl directly at the OpenFTV PDP /authzen/v1/evaluation for policy tests.
 
@@ -71,6 +74,68 @@ make demo-full        # Both flows on
 
 make demo-down        # Bring everything down
 ```
+
+### Fresh checkout: complete DvTP + EUDI flow
+
+The following is the complete route from a new checkout to both DvTP and the
+three wallet offers (income 2024, income 2025, and BRP/RvIG death certificate):
+
+```bash
+git clone --recurse-submodules https://github.com/ICTU/GBO-demo.git
+cd GBO-demo
+cp .env.example .env
+```
+
+Set these values in `.env`:
+
+```dotenv
+EUDI_PUBLIC_URL=https://eudi-is.example.org/
+EUDI_BRI_URL=https://eudi-bri.example.org/
+EUDI_POSTGRES_PASSWORD=<local-random-password>
+```
+
+When using the bundled Cloudflare tunnel, also set
+`CLOUDFLARE_TUNNEL_TOKEN` and complete the hostname and cache setup in
+[Cloudflare named tunnel](#cloudflare-named-tunnel). When using a preproduction
+wallet, install the already trusted development CA material before starting;
+see [Trusted development CAs](#trusted-development-cas).
+
+#### Test-wallet prerequisite
+
+This repository onboards sources and configures the issuance side; it does not
+install, register, unlock, or provision the wallet app and it does not issue a
+PID. Before scanning, the test device must already have:
+
+- an nl-wallet app compatible with the pinned server version (**v0.5.0**);
+- a valid `urn:eudi:pid:nl:1` PID credential;
+- the issuer and reader trust anchors matching the CA material used below.
+
+The one PID persona that exercises all three checked-in offers has mock BSN
+`999991772` (Frouke Jansen). It has income records for 2024 and 2025 and is the
+BRP/RvIG death-certificate happy path. Another PID only works when its BSN and
+scenario exist in both source mock datasets. Obtaining the preproduction app
+and PID is an external test-environment onboarding step, not something this
+repository can automate.
+
+Start the complete flow:
+
+```bash
+# Own reverse proxy or externally managed tunnel
+make demo-full
+
+# Or include the bundled Cloudflare connector in the same compose run
+COMPOSE_FILE=docker-compose.yml:docker-compose.cloudflare-tunnel.yml make demo-full
+```
+
+`make demo-full` is intentionally a full, idempotent bootstrap. It initializes
+FSC, publishes and contracts the DvTP, metadata, and EUDI data services,
+provisions the development leaves, reconciles both sources, generates the
+nl-wallet startup configuration and QR catalog, builds the pinned
+issuance-server, and starts the stack. The first build can take 5–10 minutes.
+
+Open <http://localhost:9000>, select each offer, and scan a newly generated QR.
+After sharing the PID, the wallet should show the preview and allow issuance.
+Do not reuse QR codes from before a restart or metadata change.
 
 Three front-ends run in parallel (in default/full mode):
 
@@ -279,7 +344,7 @@ The five-factor authorization model demonstrated:
 | ① | Org identity (mTLS) | FSC-Manager validates peer-certs; FSC-Inway includes peer_cert_chain in the AuthZen context |
 | ② | Org permission (JWT) | Provider FSC-Manager validates the grant and signs `add.{flow, subject_id_type}` returned by its Additional Claims API |
 | ③ | Access basis (consent) | The request-mapper fetches the ACTIVE consent for (PI, scope) from the consent-register per request, so a revoke takes effect immediately |
-| ④ | Data scope (GraphQL) | The OpenFTV PDP checks requested fields against the dienstencatalogus (rules DVT0001/EUD0001) |
+| ④ | Data scope (GraphQL) | The OpenFTV PDP checks every requested field against the applicable rule (DVT0001/EUD0001/EUD0002) |
 | ⑤ | Request validity | The OpenFTV PDP validates consent + `context.resource.pi` binding + expiry |
 
 ## Makefile targets
@@ -346,12 +411,26 @@ Without a volume wipe, contracts and grant-links survive a restart.
 
 ## EUDI public reachability
 
+Voor het lokaal registreren, valideren en provisionen van door de bron
+geleverde attestatiedefinities, zie
+[Lokale onboarding van bronmetadata](docs/source-onboarding.md).
+
 The EUDI flow needs two publicly-reachable HTTPS URLs:
 
 - `EUDI_PUBLIC_URL` — the wallet on a phone opens this to talk to the `issuance-server`.
 - `EUDI_BRI_URL` — the `issuance-server` fetches attestations from the `eudi-adapter` at this URL.
 
 Both values are read from `.env`. Pick whichever way to expose the two services fits your setup:
+
+`make demo-eudi` runs source reconciliation and `make eudi-config` before the
+stack starts. The generated products come from `offers` in the active source
+metadata. Because the pinned nl-wallet issuance-server reads product settings
+only at startup, a later activation change requires config regeneration and a
+controlled restart/rollout of the issuance-server and frontends.
+
+The wallet `client_id` is derived as `x509_san_dns:<host>` from
+`EUDI_PUBLIC_URL`, matching the DNS SAN of the provisioned reader certificate.
+There is no separate client-ID setting.
 
 The developer-portal container writes `EUDI_PUBLIC_URL` to
 `/runtime-config.js` when it starts. This allows Kubernetes and other runtime
@@ -361,7 +440,25 @@ For backwards compatibility, the container also accepts
 
 **(a) Own domain / reverse proxy** — point two HTTPS hostnames at the compose ports and set the URLs. Nothing else to install.
 
-**(b) Cloudflare named tunnel (bundled)** — one Cloudflare tunnel with two Public Hostnames configured in the dashboard, plus the connector token in `.env`:
+### Cloudflare named tunnel
+
+**(b) Cloudflare named tunnel (bundled)** — one Cloudflare tunnel with two
+Public Hostnames configured in the dashboard:
+
+| Public hostname | Tunnel service |
+|---|---|
+| `eudi-is.example.org` | `http://eudi-issuance-server:18001` |
+| `eudi-bri.example.org` | `http://eudi-adapter:4009` |
+
+The issuance hostname is entirely dynamic. Cloudflare must not cache any path
+on it: this includes both `.well-known` issuer metadata and the stateful
+`/disclosure/.../request_uri` responses. Create a final **Cache Rule** matching
+`Hostname equals eudi-is.example.org` with **Cache eligibility: Bypass cache**.
+Because the last matching Cache Rule wins, keep this rule below any broad
+“cache everything” rule. If the hostname was served before the bypass existed,
+purge that hostname once after deploying the rule.
+
+Set the connector token and public URLs in `.env`:
 
 ```bash
 # In .env
@@ -369,9 +466,23 @@ CLOUDFLARE_TUNNEL_TOKEN=eyJ...
 EUDI_PUBLIC_URL=https://eudi-is.your-cf-hostname.tld/
 EUDI_BRI_URL=https://eudi-bri.your-cf-hostname.tld/
 
-# Start the tunnel alongside the EUDI stack
-docker compose -f docker-compose.yml -f docker-compose.cloudflare-tunnel.yml --profile eudi up -d
+# Bootstrap and start the complete DvTP + EUDI stack plus connector
+COMPOSE_FILE=docker-compose.yml:docker-compose.cloudflare-tunnel.yml make demo-full
 ```
+
+Verify the public route before scanning:
+
+```bash
+set -a; . ./.env; set +a
+curl -sSI "${EUDI_PUBLIC_URL%/}/.well-known/openid-credential-issuer" \
+  | grep -Ei 'cf-cache-status|age|cache-control'
+curl -s "${EUDI_PUBLIC_URL%/}/.well-known/openid-credential-issuer" \
+  | jq -r '.credential_configurations_supported | keys[]'
+```
+
+Expect `CF-Cache-Status: DYNAMIC` or `BYPASS`, no increasing `Age`, and the
+currently generated income VCT. A `HIT` means the wallet can receive stale
+metadata or a reused QR session and the flow is not safe to test.
 
 **(c) Ad-hoc tunnel** (ngrok, `cloudflared --url`, `tailscale funnel`, …) — start it yourself, paste the two URLs into `.env`, then bring up the stack without the tunnel file.
 
@@ -383,47 +494,43 @@ Whichever option you pick, the hostname in `EUDI_PUBLIC_URL` is not free. nl-wal
 public url host <host> not in certificate DNS SANs: <sans>
 ```
 
-So every reader certificate — `EUDI_READER_CERT` and `EUDI_BRP_READER_CERT` — must be minted for the host you are actually serving on:
+Every activated source therefore needs a reader certificate for the host you are actually serving on. For the local proof, rerun the explicit development provisioning step for both sources and reconcile them:
 
 ```bash
-python3 scripts/mint-eudi-certs.py --only readers \
-    --reader-ca-key  /path/to/ca.gbo-reader.key.pem \
-    --reader-ca-cert /path/to/ca.gbo-reader.crt.pem \
-    --public-url     "$EUDI_PUBLIC_URL" > readers.env
-
-python3 scripts/update-env.py readers.env      # rewrites .env in place, with a backup
+make provision-development-certificates SOURCE_OIN=99999999900000000200 SOURCE_NAME="Belastingdienst" SOURCE_LOGO=assets/issuer-logos/belastingdienst.svg
+make provision-development-certificates SOURCE_OIN=99999999900000000400 SOURCE_NAME="RvIG" SOURCE_LOGO=assets/issuer-logos/rvig.svg
+make reconcile-fsc-sources
 make eudi-config
 ```
 
-Use `update-env.py` rather than `>> .env`: it replaces each key where it already sits and drops any later duplicate, so you cannot end up with two assignments of the same slot (last-wins hides that until something reads the file differently) or with a new certificate paired against an old private key. It writes a timestamped backup and prints key names and byte lengths only, never values.
+The command reuses the existing development private keys and CA while replacing stale leaf-certificate content. `SOURCE_LOGO` embeds an SVG, PNG, or JPEG as nl-wallet organization metadata in the issuer and reader authorization extensions. It is explicit certificate-provisioning input, not source-published metadata. The included SVGs are recognizable demo assets rather than official brand files. `requestOriginBaseUrl` follows `EUDI_PUBLIC_URL`; the frontends derive the same client ID and need no separate setting.
 
-The `requestOriginBaseUrl` baked into a reader certificate follows `--public-url` and needs no separate setting: the wallet checks it against the origin it actually reached, so it can only ever be the URL the wallet talks to. Should it nevertheless diverge, the failure reads like a certificate problem but is not — the chain, EKU and `client_id` all validate, the wallet then aborts with `access_denied`, and the server records a **CANCELLED** session with no error text. A rejected certificate gives `invalid_request` and a **FAILED** session carrying the reason instead, so `CANCELLED` with a clean server log points at the origin rather than the chain. The frontends need no separate change: they derive the same `client_id` from `EUDI_PUBLIC_URL`.
+### Trusted development CAs
 
-Nothing about the CA changes. `ca.gbo-reader` is what the preprod wallet trusts, it carries no name-constraints extension, and so it signs a leaf for any hostname — `eudi-is.simulatie.datastelsel.nl` as readily as one under `.gbo.b15.io`. **Never mint a new CA to solve a hostname problem**: a leaf under an unknown root is rejected by every wallet, which is the one failure this setup cannot recover from locally.
+The local command stores its issuer and reader CAs under
+`.local/secrets/development-ca`. If no CA exists, it creates one for isolated
+local testing. A preproduction wallet only accepts leaves under a trust anchor
+already configured in that wallet. Install the matching CA key pairs before
+running `make demo-eudi`:
 
-These certificates are not v0.5.0-specific. v0.4.1 derives the `client_id` from the certificate's first DNS SAN and never looks at `public_url`, so it accepts them too — it just uses the bare hostname as the `client_id`. What is version-specific is the `client_id` *string*: v0.4.1 compares it to the SAN without a scheme prefix. Rolling the submodule back to v0.4.1 therefore needs no re-mint, but it does need the frontends reverted along with it, since they now emit the prefixed form unconditionally.
+```bash
+mkdir -p .local/secrets/development-ca
+install -m 600 <ca-dir>/ca.gbo-issuer.key.pem .local/secrets/development-ca/issuer-ca-key.pem
+install -m 644 <ca-dir>/ca.gbo-issuer.crt.pem .local/secrets/development-ca/issuer-ca-cert.pem
+install -m 600 <ca-dir>/ca.gbo-reader.key.pem .local/secrets/development-ca/reader-ca-key.pem
+install -m 644 <ca-dir>/ca.gbo-reader.crt.pem .local/secrets/development-ca/reader-ca-cert.pem
+```
+
+The private CA keys are needed only by the explicit local provisioning command
+to issue source-bound demo leaves. Never commit `.local/` or copy these keys
+into container images. **Never create a new CA merely to solve a hostname
+mismatch**: an unknown root is rejected regardless of the leaf certificate.
 
 ### The other certificates
 
-The issuer and status certificates are *not* tied to `EUDI_PUBLIC_URL`. They are tied to each other: per attestation type the issuance-server requires the attestation certificate and its status-list certificate to share a subject, and since both attestation types share one status certificate, `EUDI_ISSUER_*`, `EUDI_BRP_ISSUER_*` and `EUDI_STATUS_*` must all carry the same subject. That subject also becomes the credential's `iss` (a DNS SAN is read as `https://<san>`), so it is an identity rather than an address — it does not have to resolve, but it is what the wallet shows as the issuer.
+Issuer and status certificates are not tied to `EUDI_PUBLIC_URL`. Within each activation, the issuance server requires the attestation and status-list certificates to represent the same subject. The activation record references the corresponding issuer, reader, and status material; the config generator copies those references into the generated nl-wallet settings.
 
-That means an existing `.gbo.b15.io` issuer identity keeps working on a new environment. Re-mint it only when you want the identity to match, and mint all three together so the shared-subject rule holds by construction:
-
-```bash
-python3 scripts/mint-eudi-certs.py \
-    --reader-ca-key  /path/to/ca.gbo-reader.key.pem \
-    --reader-ca-cert /path/to/ca.gbo-reader.crt.pem \
-    --issuer-ca-key  /path/to/ca.gbo-issuer.key.pem \
-    --issuer-ca-cert /path/to/ca.gbo-issuer.crt.pem \
-    --public-url     "$EUDI_PUBLIC_URL" \
-    --issuer-host    issuer.your-environment.tld > certs.env
-
-python3 scripts/update-env.py certs.env
-```
-
-This mints all five pairs — both readers, both issuers and the status certificate — and verifies both invariants before printing. `--issuer-host` defaults to the `--public-url` host. One caveat: a fresh `EUDI_STATUS_*` invalidates the status lists of already-issued credentials, so re-issue them.
-
-Env-var lines go to stdout (append straight to `.env`); the summary of what was minted goes to stderr.
+The current proof retains separate references for BD and BRP. It deliberately does not decide whether production should share one GBO certificate set, keep source-specific sets, or use a hybrid model. That decision, including issuer identity, key custody, trust registration, rotation, and revocation, is tracked in [issue #225](https://github.com/ICTU/GBO-demo/issues/225).
 
 ## Testing
 

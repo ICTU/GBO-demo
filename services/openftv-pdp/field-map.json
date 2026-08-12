@@ -29,6 +29,7 @@
   "NietIngezetene.woontOp": "Buitenlandsadres",
   "Query.__schema": "__Schema",
   "Query.__type": "__Type",
+  "Query.akteVanOverlijden": "AkteVanOverlijden",
   "Query.ingeschrevenPersoon": "IngeschrevenPersoon",
   "__Directive.args": "__InputValue",
   "__Field.args": "__InputValue",

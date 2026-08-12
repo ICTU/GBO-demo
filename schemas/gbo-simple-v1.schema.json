@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gov:nl:gbo:schema:gbo-simple-v1:1",
+  "title": "GBO simple mapping profile v1",
+  "description": "Closed mapping contract for unchanged pointer-based scalar projection.",
+  "type": "object",
+  "minProperties": 1,
+  "maxProperties": 128,
+  "propertyNames": {
+    "maxLength": 64,
+    "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+  },
+  "additionalProperties": {
+    "$ref": "#/$defs/rule"
+  },
+  "$defs": {
+    "pointer": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^(?:/(?:[^~/]|~[01])*)+$"
+    },
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pointer", "datatype"],
+      "properties": {
+        "pointer": {
+          "$ref": "#/$defs/pointer"
+        },
+        "datatype": {
+          "enum": ["string", "boolean", "integer", "number", "date", "gYear"]
+        },
+        "optional": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    }
+  }
+}

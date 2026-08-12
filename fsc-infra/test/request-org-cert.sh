@@ -20,7 +20,7 @@ OIN="${3:-99999999900000000001}"
 CERTPORTAL_URL="${CERTPORTAL_URL:-http://certportal:8080}"
 
 IMAGE_TAG="gbo-demo/pki-tools:local"
-NETWORK="fsc-infra_default"
+NETWORK="${FSC_INFRA_NETWORK:-fsc-infra_default}"
 
 if [[ ! -f pki/ca/root.pem ]]; then
     echo "ERROR: pki/ca/root.pem is missing. Run first: bash pki/generate-root-ca.sh"

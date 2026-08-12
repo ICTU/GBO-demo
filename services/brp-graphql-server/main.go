@@ -25,6 +25,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"errors"
@@ -146,15 +147,28 @@ const readHeaderTimeout = 10 * time.Second
 const shutdownTimeout = 15 * time.Second
 
 type config struct {
-	Port         string
-	MockDataPath string
+	Port               string
+	MockDataPath       string
+	SourceMetadataPath string
 }
 
 func loadConfig() (config, error) {
 	return config{
-		Port:         getEnv("PORT", "4001"),
-		MockDataPath: getEnv("MOCKDATA_PATH", "mockdata/personen.json"),
+		Port:               getEnv("PORT", "4001"),
+		MockDataPath:       getEnv("MOCKDATA_PATH", "mockdata/personen.json"),
+		SourceMetadataPath: os.Getenv("GBO_SOURCE_METADATA_PATH"),
 	}, nil
+}
+
+func loadSourceMetadataPublisher(cfg config) (*sourceMetadataPublisher, error) {
+	if cfg.SourceMetadataPath == "" {
+		return nil, fmt.Errorf("GBO_SOURCE_METADATA_PATH is required")
+	}
+	payload, err := os.ReadFile(cfg.SourceMetadataPath)
+	if err != nil {
+		return nil, fmt.Errorf("read source metadata: %w", err)
+	}
+	return newSourceMetadataPublisher(payload)
 }
 
 func getEnv(key, fallback string) string {
@@ -609,11 +623,162 @@ func resolvePartijType(p graphql.ResolveTypeParams) *graphql.Object {
 	return resolvePersoonType(p)
 }
 
+func stringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func nullableString(value *string) any {
+	if value == nil || *value == "" {
+		return nil
+	}
+	return *value
+}
+
+func nullableNonEmpty(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
+// datumVolledig reports whether a BRP DatumIncompleet contains a full date.
+// Partial dates cannot safely be compared day-for-day and are therefore not
+// rejected by the equality guard below.
+func datumVolledig(value string) bool {
+	_, err := time.Parse(time.DateOnly, value)
+	return err == nil
+}
+
+func volledigeNaam(voornamen, voorvoegsel, geslachtsnaam string) string {
+	parts := make([]string, 0, 3)
+	for _, part := range []string{voornamen, voorvoegsel, geslachtsnaam} {
+		if part != "" {
+			parts = append(parts, part)
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// akteVanOverlijden is a source-owned attestation view. It keeps selection
+// semantics at the source so the published mapping can remain plain JSON
+// pointers and GBO does not need BRP-specific conversion code.
+func akteVanOverlijden(persoon Persoon) (map[string]any, bool) {
+	var selectedHuwelijk Huwelijk
+	var selectedPartner NatuurlijkPersoon
+	found := false
+	for _, huwelijk := range persoon.HeeftHuwelijk {
+		if stringValue(huwelijk.RedenOntbinding) != "Overlijden" {
+			continue
+		}
+		for _, partner := range huwelijk.Partners {
+			if partner.ID == persoon.ID || stringValue(partner.DatumOverlijden) == "" {
+				continue
+			}
+			// An ex-partner may die after a different dissolution. When both
+			// DatumIncompleet values are full dates, the marriage must have
+			// ended on this partner's date of death.
+			if datumVolledig(stringValue(huwelijk.DatumOntbinding)) && datumVolledig(stringValue(partner.DatumOverlijden)) &&
+				stringValue(huwelijk.DatumOntbinding) != stringValue(partner.DatumOverlijden) {
+				continue
+			}
+			if !found || stringValue(partner.DatumOverlijden) > stringValue(selectedPartner.DatumOverlijden) {
+				selectedHuwelijk, selectedPartner, found = huwelijk, partner, true
+			}
+		}
+	}
+	if !found {
+		return nil, false
+	}
+	ouders := make([]string, 0, len(selectedPartner.HeeftOuder))
+	for _, ouder := range selectedPartner.HeeftOuder {
+		if naam := volledigeNaam(stringValue(ouder.Voornamen), stringValue(ouder.Voorvoegsel), ouder.Geslachtsnaam); naam != "" {
+			ouders = append(ouders, naam)
+		}
+	}
+	overledeneNaam := volledigeNaam(stringValue(selectedPartner.Voornamen), stringValue(selectedPartner.Voorvoegsel), selectedPartner.Geslachtsnaam)
+	echtgenootNaam := volledigeNaam(stringValue(persoon.Voornamen), stringValue(persoon.Voorvoegsel), persoon.Geslachtsnaam)
+	verklaring := fmt.Sprintf("Op %s is", stringValue(selectedPartner.DatumOverlijden))
+	if plaats := stringValue(selectedPartner.PlaatsOverlijden); plaats != "" {
+		verklaring += " te " + plaats
+	}
+	verklaring += " overleden " + overledeneNaam
+	if geboorte := stringValue(selectedPartner.Geboortedatum); geboorte != "" {
+		verklaring += ", geboren op " + geboorte
+		if plaats := stringValue(selectedPartner.Geboorteplaats); plaats != "" {
+			verklaring += " te " + plaats
+		}
+	}
+	if echtgenootNaam != "" {
+		verbintenis := "gehuwd met"
+		if selectedHuwelijk.SoortVerbintenis == "GeregistreerdPartnerschap" {
+			verbintenis = "geregistreerd partner van"
+		}
+		verklaring += ", " + verbintenis + " " + echtgenootNaam
+	}
+	return map[string]any{
+		"overledene_geslachtsnaam":  selectedPartner.Geslachtsnaam,
+		"overledene_voorvoegsel":    nullableString(selectedPartner.Voorvoegsel),
+		"overledene_voornamen":      nullableString(selectedPartner.Voornamen),
+		"overledene_geboortedatum":  nullableString(selectedPartner.Geboortedatum),
+		"overledene_geboorteplaats": nullableString(selectedPartner.Geboorteplaats),
+		"overledene_geboorteland":   nullableString(selectedPartner.Geboorteland),
+		"overledene_geslacht":       nullableNonEmpty(selectedPartner.Geslacht),
+		"overledene_ouders":         nullableNonEmpty(strings.Join(ouders, "; ")),
+		"datum_overlijden":          stringValue(selectedPartner.DatumOverlijden),
+		"plaats_overlijden":         nullableString(selectedPartner.PlaatsOverlijden),
+		"land_overlijden":           nullableString(selectedPartner.LandOverlijden),
+		"soort_verbintenis":         selectedHuwelijk.SoortVerbintenis,
+		"echtgenoot_geslachtsnaam":  nullableNonEmpty(persoon.Geslachtsnaam),
+		"echtgenoot_voorvoegsel":    nullableString(persoon.Voorvoegsel),
+		"echtgenoot_voornamen":      nullableString(persoon.Voornamen),
+		"verklaring_tekst":          verklaring + ".",
+	}, true
+}
+
 func buildSchema(tracer trace.Tracer, store map[string]Persoon) (graphql.Schema, error) {
+	akteFields := graphql.Fields{}
+	requiredAkteFields := map[string]bool{
+		"overledene_geslachtsnaam": true,
+		"overledene_voornamen":     true,
+		"datum_overlijden":         true,
+	}
+	for _, name := range []string{
+		"overledene_geslachtsnaam", "overledene_voorvoegsel", "overledene_voornamen",
+		"overledene_geboortedatum", "overledene_geboorteplaats", "overledene_geboorteland",
+		"overledene_geslacht", "overledene_ouders", "datum_overlijden", "plaats_overlijden",
+		"land_overlijden", "soort_verbintenis", "echtgenoot_geslachtsnaam",
+		"echtgenoot_voorvoegsel", "echtgenoot_voornamen", "verklaring_tekst",
+	} {
+		fieldType := graphql.Type(graphql.String)
+		if requiredAkteFields[name] {
+			fieldType = graphql.NewNonNull(graphql.String)
+		}
+		akteFields[name] = &graphql.Field{Type: fieldType}
+	}
+	akteType := graphql.NewObject(graphql.ObjectConfig{Name: "AkteVanOverlijden", Fields: akteFields})
 	queryType := graphql.NewObject(graphql.ObjectConfig{
 		Name:        "Query",
 		Description: "Query-ingangen van dit bronprofiel.",
 		Fields: graphql.Fields{
+			"akteVanOverlijden": {
+				Type: graphql.NewNonNull(graphql.NewList(graphql.NewNonNull(akteType))),
+				Args: graphql.FieldConfigArgument{"bsn": {Type: graphql.NewNonNull(bsnScalar)}},
+				Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+					bsn, _ := p.Args["bsn"].(string)
+					persoon, exists := store[bsn]
+					if !exists {
+						return []map[string]any{}, nil
+					}
+					akte, ok := akteVanOverlijden(persoon)
+					if !ok {
+						return []map[string]any{}, nil
+					}
+					return []map[string]any{akte}, nil
+				},
+			},
 			"ingeschrevenPersoon": {
 				Type:        ingeschrevenPersoonInterface,
 				Description: "Eén IngeschrevenPersoon op bsn.",
@@ -696,7 +861,7 @@ func initTracer(ctx context.Context) (func(context.Context) error, error) {
 // newMux builds the routing tree for the BRP GraphQL server. Extracted from
 // main so integration tests can wire the handlers to an httptest.Server
 // without starting the real listener.
-func newMux(schema *graphql.Schema, tracer trace.Tracer) *http.ServeMux {
+func newMux(schema *graphql.Schema, tracer trace.Tracer, publisher http.Handler) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	// UI off. The one graphql-go/handler bundles is GraphiQL 0.11 from an
@@ -728,6 +893,9 @@ func newMux(schema *graphql.Schema, tracer trace.Tracer) *http.ServeMux {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
+	if publisher != nil {
+		mux.Handle("/.well-known/gbo", publisher)
+	}
 
 	return mux
 }
@@ -772,10 +940,14 @@ func main() {
 	if err != nil {
 		fatal("building schema", err)
 	}
+	publisher, err := loadSourceMetadataPublisher(cfg)
+	if err != nil {
+		fatal("loading source metadata publisher", err)
+	}
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           otelhttp.NewHandler(withAccessLog(newMux(&schema, tracer)), "brp-graphql-server"),
+		Handler:           otelhttp.NewHandler(withAccessLog(newMux(&schema, tracer, publisher)), "brp-graphql-server"),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 	serve(srv)

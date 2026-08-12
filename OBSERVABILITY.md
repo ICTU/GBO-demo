@@ -19,11 +19,9 @@ the Inway boundary. The applications therefore also record
 `gbo.fsc.transaction_id`. The developer portal uses this value to correlate
 the consumer trace, the PDP trace and the FSC transaction logs.
 
-The eudi-adapter records `gbo.bron` (`bd`/`brp`) and `gbo.usecase` on its
-request span, taken from its usecase catalog. The architecture strip reads
-`gbo.bron` to name the register a run queried — including runs that never
-reach the bron, such as a policy DENY — so the portal needs no usecase → bron
-table of its own. The bron services themselves are recognised by their
+The eudi-adapter records the activated `gbo.source_oin` and `gbo.type_id` on
+its request span. These values come from the onboarded source record, not from
+an adapter catalog. The bron services themselves are recognised by their
 `OTEL_SERVICE_NAME` (`bron-sidecar`/`graphql-server` versus
 `brp-sidecar`/`brp-graphql-server`).
 
