@@ -8,6 +8,14 @@
 # and passed as EUDI_PUBLIC_URL / EUDI_BRI_URL. If you already have a
 # reverse proxy, another tunnel, or your own domain, skip this file and
 # just set the two URLs directly.
+#
+# Public Hostname routes:
+#   EUDI_PUBLIC_URL host -> http://eudi-issuance-server:18001
+#   EUDI_BRI_URL host    -> http://eudi-adapter:4009
+#
+# The complete EUDI_PUBLIC_URL host must have a final Cloudflare Cache Rule
+# with Cache eligibility = Bypass cache. Purge the hostname after adding the
+# rule. Both issuer metadata and request_uri responses are dynamic.
 services:
   eudi-tunnel:
     image: cloudflare/cloudflared:latest

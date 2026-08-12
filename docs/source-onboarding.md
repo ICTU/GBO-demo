@@ -86,6 +86,10 @@ hebben voor conflicterende of incomplete brondata.
 
 ## Lokaal
 
+Voor een volledige nieuwe checkout, inclusief `.env`, vertrouwde wallet-CA's,
+publieke URL's, Cloudflare-cachebypass en de uiteindelijke QR-test, volg
+[Fresh checkout: complete DvTP + EUDI flow](../README.md#fresh-checkout-complete-dvtp--eudi-flow).
+
 De volledige route voor de afzonderlijke BD- en BRP/RvIG-peers is:
 
 ```sh

@@ -13,11 +13,17 @@ Both flows share one authorization pipeline: FSC-Inway (transport) → OpenFTV P
 
 - **Docker** with Compose plugin (Docker Desktop 4.x or Docker Engine + `docker compose`).
 - **~8 GB RAM** allocated to Docker (Preferences → Resources), **~10 GB disk** for images.
+- **Host tools**: Git, Make, Bash, `curl`, `jq`, OpenSSL, and Python 3.9 or newer.
 
-Every mode also needs two Postgres passwords set via env-files (compose fails loud if unset — any string works for the local demo network):
+Compose requires an EUDI Postgres password even when the EUDI profile is not
+selected (any non-empty local-development value is sufficient):
 
 - **`EUDI_POSTGRES_PASSWORD`** in `.env` — password for `postgres-eudi` (issuance-server + migrations).
-- **`FSC_POSTGRES_PASSWORD`** in `fsc-infra/.env` — shared password for all FSC-infra database users (three orgs × controller/manager/txlog + directory).
+
+`make` creates `fsc-infra/.env` with a random `FSC_POSTGRES_PASSWORD` when the
+file is absent. Copy `fsc-infra/.env.example` yourself only when you need a
+stable, externally managed value. Do not change that password while old FSC
+Postgres volumes still exist.
 
 That covers the default (`make demo`, DvTP-only). For the wallet flow (`make demo-eudi` / `make demo-full`) you also need:
 
@@ -31,20 +37,32 @@ Copy the templates and fill them in:
 
 ```bash
 cp .env.example .env
-cp fsc-infra/.env.example fsc-infra/.env
-# then edit both
+# then edit .env; make generates fsc-infra/.env when it is absent
 ```
 
 ## Quick Start
 
+After completing the one-time `.env`, public URL, and trusted-CA setup below,
+start the complete DvTP + EUDI demo with one command:
+
 ```bash
-cd 05-demo
-make demo             # DvTP (consent) flow only — no wallet, no public URLs needed
+# Existing reverse proxy or externally managed tunnel
+make demo-full
+
+# Bundled Cloudflare connector
+COMPOSE_FILE=docker-compose.yml:docker-compose.cloudflare-tunnel.yml make demo-full
 ```
+
+Both commands bootstrap FSC contracts, source onboarding, certificate leaves,
+source reconciliation, generated EUDI products, and all application services.
+Do not run the individual `fsc-seed-*`, `onboard-demo-sources`,
+`reconcile-fsc-sources`, or `eudi-config` targets first.
 
 ### Other modes
 
 ```bash
+make demo             # DvTP (consent) flow only — no wallet or public URLs
+
 make demo-minimal     # Base only (~30s, ~13 services)
                       # Curl directly at the OpenFTV PDP /authzen/v1/evaluation for policy tests.
 
@@ -56,6 +74,68 @@ make demo-full        # Both flows on
 
 make demo-down        # Bring everything down
 ```
+
+### Fresh checkout: complete DvTP + EUDI flow
+
+The following is the complete route from a new checkout to both DvTP and the
+three wallet offers (income 2024, income 2025, and BRP/RvIG death certificate):
+
+```bash
+git clone --recurse-submodules https://github.com/ICTU/GBO-demo.git
+cd GBO-demo
+cp .env.example .env
+```
+
+Set these values in `.env`:
+
+```dotenv
+EUDI_PUBLIC_URL=https://eudi-is.example.org/
+EUDI_BRI_URL=https://eudi-bri.example.org/
+EUDI_POSTGRES_PASSWORD=<local-random-password>
+```
+
+When using the bundled Cloudflare tunnel, also set
+`CLOUDFLARE_TUNNEL_TOKEN` and complete the hostname and cache setup in
+[Cloudflare named tunnel](#cloudflare-named-tunnel). When using a preproduction
+wallet, install the already trusted development CA material before starting;
+see [Trusted development CAs](#trusted-development-cas).
+
+#### Test-wallet prerequisite
+
+This repository onboards sources and configures the issuance side; it does not
+install, register, unlock, or provision the wallet app and it does not issue a
+PID. Before scanning, the test device must already have:
+
+- an nl-wallet app compatible with the pinned server version (**v0.5.0**);
+- a valid `urn:eudi:pid:nl:1` PID credential;
+- the issuer and reader trust anchors matching the CA material used below.
+
+The one PID persona that exercises all three checked-in offers has mock BSN
+`999991772` (Frouke Jansen). It has income records for 2024 and 2025 and is the
+BRP/RvIG death-certificate happy path. Another PID only works when its BSN and
+scenario exist in both source mock datasets. Obtaining the preproduction app
+and PID is an external test-environment onboarding step, not something this
+repository can automate.
+
+Start the complete flow:
+
+```bash
+# Own reverse proxy or externally managed tunnel
+make demo-full
+
+# Or include the bundled Cloudflare connector in the same compose run
+COMPOSE_FILE=docker-compose.yml:docker-compose.cloudflare-tunnel.yml make demo-full
+```
+
+`make demo-full` is intentionally a full, idempotent bootstrap. It initializes
+FSC, publishes and contracts the DvTP, metadata, and EUDI data services,
+provisions the development leaves, reconciles both sources, generates the
+nl-wallet startup configuration and QR catalog, builds the pinned
+issuance-server, and starts the stack. The first build can take 5–10 minutes.
+
+Open <http://localhost:9000>, select each offer, and scan a newly generated QR.
+After sharing the PID, the wallet should show the preview and allow issuance.
+Do not reuse QR codes from before a restart or metadata change.
 
 Three front-ends run in parallel (in default/full mode):
 
@@ -360,7 +440,25 @@ For backwards compatibility, the container also accepts
 
 **(a) Own domain / reverse proxy** — point two HTTPS hostnames at the compose ports and set the URLs. Nothing else to install.
 
-**(b) Cloudflare named tunnel (bundled)** — one Cloudflare tunnel with two Public Hostnames configured in the dashboard, plus the connector token in `.env`:
+### Cloudflare named tunnel
+
+**(b) Cloudflare named tunnel (bundled)** — one Cloudflare tunnel with two
+Public Hostnames configured in the dashboard:
+
+| Public hostname | Tunnel service |
+|---|---|
+| `eudi-is.example.org` | `http://eudi-issuance-server:18001` |
+| `eudi-bri.example.org` | `http://eudi-adapter:4009` |
+
+The issuance hostname is entirely dynamic. Cloudflare must not cache any path
+on it: this includes both `.well-known` issuer metadata and the stateful
+`/disclosure/.../request_uri` responses. Create a final **Cache Rule** matching
+`Hostname equals eudi-is.example.org` with **Cache eligibility: Bypass cache**.
+Because the last matching Cache Rule wins, keep this rule below any broad
+“cache everything” rule. If the hostname was served before the bypass existed,
+purge that hostname once after deploying the rule.
+
+Set the connector token and public URLs in `.env`:
 
 ```bash
 # In .env
@@ -368,9 +466,23 @@ CLOUDFLARE_TUNNEL_TOKEN=eyJ...
 EUDI_PUBLIC_URL=https://eudi-is.your-cf-hostname.tld/
 EUDI_BRI_URL=https://eudi-bri.your-cf-hostname.tld/
 
-# Start the tunnel alongside the EUDI stack
-docker compose -f docker-compose.yml -f docker-compose.cloudflare-tunnel.yml --profile eudi up -d
+# Bootstrap and start the complete DvTP + EUDI stack plus connector
+COMPOSE_FILE=docker-compose.yml:docker-compose.cloudflare-tunnel.yml make demo-full
 ```
+
+Verify the public route before scanning:
+
+```bash
+set -a; . ./.env; set +a
+curl -sSI "${EUDI_PUBLIC_URL%/}/.well-known/openid-credential-issuer" \
+  | grep -Ei 'cf-cache-status|age|cache-control'
+curl -s "${EUDI_PUBLIC_URL%/}/.well-known/openid-credential-issuer" \
+  | jq -r '.credential_configurations_supported | keys[]'
+```
+
+Expect `CF-Cache-Status: DYNAMIC` or `BYPASS`, no increasing `Age`, and the
+currently generated income VCT. A `HIT` means the wallet can receive stale
+metadata or a reused QR session and the flow is not safe to test.
 
 **(c) Ad-hoc tunnel** (ngrok, `cloudflared --url`, `tailscale funnel`, …) — start it yourself, paste the two URLs into `.env`, then bring up the stack without the tunnel file.
 
@@ -393,7 +505,26 @@ make eudi-config
 
 The command reuses the existing development private keys and CA while replacing stale leaf-certificate content. `SOURCE_LOGO` embeds an SVG, PNG, or JPEG as nl-wallet organization metadata in the issuer and reader authorization extensions. It is explicit certificate-provisioning input, not source-published metadata. The included SVGs are recognizable demo assets rather than official brand files. `requestOriginBaseUrl` follows `EUDI_PUBLIC_URL`; the frontends derive the same client ID and need no separate setting.
 
-The local command stores its issuer and reader CAs under `.local/secrets/development-ca`. A real wallet only accepts leaves under a configured trust anchor, so use pre-approved development CA material in that directory when testing with the preproduction wallet. **Never create a new CA merely to solve a hostname mismatch**: an unknown root is rejected regardless of the leaf certificate.
+### Trusted development CAs
+
+The local command stores its issuer and reader CAs under
+`.local/secrets/development-ca`. If no CA exists, it creates one for isolated
+local testing. A preproduction wallet only accepts leaves under a trust anchor
+already configured in that wallet. Install the matching CA key pairs before
+running `make demo-eudi`:
+
+```bash
+mkdir -p .local/secrets/development-ca
+install -m 600 <ca-dir>/ca.gbo-issuer.key.pem .local/secrets/development-ca/issuer-ca-key.pem
+install -m 644 <ca-dir>/ca.gbo-issuer.crt.pem .local/secrets/development-ca/issuer-ca-cert.pem
+install -m 600 <ca-dir>/ca.gbo-reader.key.pem .local/secrets/development-ca/reader-ca-key.pem
+install -m 644 <ca-dir>/ca.gbo-reader.crt.pem .local/secrets/development-ca/reader-ca-cert.pem
+```
+
+The private CA keys are needed only by the explicit local provisioning command
+to issue source-bound demo leaves. Never commit `.local/` or copy these keys
+into container images. **Never create a new CA merely to solve a hostname
+mismatch**: an unknown root is rejected regardless of the leaf certificate.
 
 ### The other certificates
 
