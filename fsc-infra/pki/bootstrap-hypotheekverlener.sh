@@ -15,7 +15,7 @@ set -o nounset
 cd "$(dirname "$0")"
 
 IMAGE_TAG="gbo-demo/pki-tools:local"
-NETWORK="fsc-infra_default"
+NETWORK="${FSC_INFRA_NETWORK:-fsc-infra_default}"
 
 HV_ORG="../orgs/hypotheekverlener-mock/pki/org"
 HV_INT="../orgs/hypotheekverlener-mock/pki/internal"
