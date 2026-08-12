@@ -306,6 +306,23 @@ fsc-all-up: fsc-directory-certs fsc-edi-certs fsc-bd-certs fsc-brp-certs fsc-hv-
 # initialised; the docker-entrypoint init script only runs for a new volume.
 fsc-databases: fsc-local-env
 	$(FSC_COMPOSE) up -d --wait postgres
+	@container_id="$$($(FSC_COMPOSE) ps -q postgres)"; \
+	ready=false; \
+	for attempt in $$(seq 1 60); do \
+		if docker logs "$$container_id" 2>&1 | grep -Eq \
+			'PostgreSQL init process complete; ready for start up.|Skipping initialization'; then \
+			if $(FSC_COMPOSE) exec -T postgres \
+				psql -U postgres -d postgres -tAc 'SELECT 1' >/dev/null 2>&1; then \
+				ready=true; \
+				break; \
+			fi; \
+		fi; \
+		sleep 1; \
+	done; \
+	if [ "$$ready" != "true" ]; then \
+		echo "ERROR: FSC Postgres did not finish initialization" >&2; \
+		exit 1; \
+	fi
 	@for database in fsc_brp_controller fsc_brp_manager fsc_brp_txlog; do \
 		exists=$$($(FSC_COMPOSE) exec -T postgres \
 			psql -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$$database'"); \
