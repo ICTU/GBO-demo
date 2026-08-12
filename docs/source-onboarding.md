@@ -65,7 +65,8 @@ bruikbaar contract faalt uitgifte gesloten; er is geen legacyfallback.
 | Organisatienaam van de bron | FSC-peerregistratie voor hetzelfde provider-OIN |
 | Vast metadata-pad | GBO-profiel: `/.well-known/gbo` |
 | Dataservicenaam, GraphQL-endpoint, query, parameters, offers en mapping | bronmetadata |
-| Kaartnaam, kleur, logo, claimlabels en claimschema | Type Metadata in de bronmetadata |
+| Kaartnaam, kaartkleur, kaartlogo, claimlabels en claimschema | Type Metadata in de bronmetadata |
+| Getoonde issuernaam en issuerlogo | organisatiegegevens in het vooraf beheerde issuer-/readercertificaat |
 | Immutable Type Metadata en activatierecord | GBO-onboardingopslag |
 | Issuance-producten en QR-keuzelijst | mechanisch door GBO gegenereerd uit geactiveerde offers |
 | Issuer-, reader- en statuscertificaten en private keys | bevoegde certificaatbeheerder/secretopslag |
@@ -96,8 +97,8 @@ dataservices, maakt uitsluitend voor lokaal gebruik expliciet
 ontwikkelcertificaten en draait daarna één reconciliatie. De kernstappen zijn:
 
 ```sh
-make provision-development-certificates SOURCE_OIN=99999999900000000200 SOURCE_NAME="Belastingdienst"
-make provision-development-certificates SOURCE_OIN=99999999900000000400 SOURCE_NAME="RvIG"
+make provision-development-certificates SOURCE_OIN=99999999900000000200 SOURCE_NAME="Belastingdienst" SOURCE_LOGO=assets/issuer-logos/belastingdienst.svg
+make provision-development-certificates SOURCE_OIN=99999999900000000400 SOURCE_NAME="RvIG" SOURCE_LOGO=assets/issuer-logos/rvig.svg
 make reconcile-fsc-sources
 make eudi-config
 ```
@@ -115,9 +116,11 @@ worden gegenereerd en de issuance-server en frontends opnieuw worden uitgerold.
 
 De reconciler mint of vernieuwt nooit certificaten. Ontbrekende, verlopen of
 niet-passende certificaten blokkeren activatie. In productie worden die door
-een apart bevoegd proces uitgegeven. De certificaten binden zowel het OIN als
-de FSC-organisatienaam; een naamswijziging vereist dus expliciete heruitgifte
-en kan niet eenzijdig via bronmetadata worden doorgevoerd.
+een apart bevoegd proces uitgegeven. De certificaten binden het OIN, de
+FSC-organisatienaam en optioneel het getoonde issuerlogo; een wijziging hiervan
+vereist dus expliciete heruitgifte en kan niet eenzijdig via bronmetadata worden
+doorgevoerd. De meegeleverde SVG's zijn herkenbare demo-assets, geen officiële
+huisstijlbestanden.
 
 Deze metadataflow beslist niet of alle bronnen één vooraf beheerde GBO
 issuer/reader/status-set delen of ieder een eigen set krijgen. De huidige proof

@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"time"
 )
 
@@ -383,6 +384,9 @@ func developmentCertificateAuthPayloads(registration sourceRegistration, readerO
 		"category":    map[string]string{"nl": "Overheid", "en": "Government"},
 		"countryCode": "nl",
 	}
+	if registration.Logo != nil {
+		organization["logo"] = registration.Logo
+	}
 	issuer, err := json.Marshal(map[string]any{"organization": organization})
 	if err != nil {
 		return nil, nil, fmt.Errorf("marshal development issuer authorization metadata: %w", err)
@@ -460,7 +464,7 @@ func validateExpectedDevelopmentLeaf(cert, ca *x509.Certificate, subject pkix.Na
 		}
 		var encodedPayload string
 		remaining, err := asn1.Unmarshal(authExtension.Value, &encodedPayload)
-		if err != nil || len(remaining) != 0 || !bytes.Equal([]byte(encodedPayload), authPayload) {
+		if err != nil || len(remaining) != 0 || !authorizationPayloadMatches([]byte(encodedPayload), authPayload) {
 			return fmt.Errorf("certificate authorization extension %s does not match current configuration", authOID.String())
 		}
 	}
@@ -470,6 +474,24 @@ func validateExpectedDevelopmentLeaf(cert, ca *x509.Certificate, subject pkix.Na
 		return fmt.Errorf("certificate chain is not trusted: %w", err)
 	}
 	return nil
+}
+
+// authorizationPayloadMatches permits an explicitly provisioned organization
+// logo to remain certificate-owned when the reconciler later loads the source
+// without provisioning input. Every other authorization field must match.
+func authorizationPayloadMatches(actual, expected []byte) bool {
+	var actualValue, expectedValue map[string]any
+	if json.Unmarshal(actual, &actualValue) != nil || json.Unmarshal(expected, &expectedValue) != nil {
+		return false
+	}
+	expectedOrganization, expectedHasOrganization := expectedValue["organization"].(map[string]any)
+	actualOrganization, actualHasOrganization := actualValue["organization"].(map[string]any)
+	if expectedHasOrganization && actualHasOrganization {
+		if _, expectsLogo := expectedOrganization["logo"]; !expectsLogo {
+			delete(actualOrganization, "logo")
+		}
+	}
+	return reflect.DeepEqual(actualValue, expectedValue)
 }
 
 func findCertificateExtension(cert *x509.Certificate, oid asn1.ObjectIdentifier) (pkix.Extension, bool) {

@@ -21,6 +21,8 @@ DEVELOPMENT_SOURCE_OIN ?= 99999999900000000200
 DEVELOPMENT_BRP_SOURCE_OIN ?= 99999999900000000400
 DEVELOPMENT_SOURCE_NAME ?= Belastingdienst
 DEVELOPMENT_BRP_SOURCE_NAME ?= RvIG
+DEVELOPMENT_SOURCE_LOGO ?= assets/issuer-logos/belastingdienst.svg
+DEVELOPMENT_BRP_SOURCE_LOGO ?= assets/issuer-logos/rvig.svg
 ONBOARDING_OUTWAY_URL ?= http://localhost:8087
 ONBOARDING_STATE_DIR ?= $(PWD)/.local/onboarding
 ONBOARDING_SECRETS_DIR ?= $(PWD)/.local/secrets
@@ -202,6 +204,7 @@ provision-development-certificates:
 	@cd services/eudi-adapter && go run . provision-development-certificates \
 		--source-oin "$(SOURCE_OIN)" \
 		--source-name "$(SOURCE_NAME)" \
+		--source-logo "$(if $(SOURCE_LOGO),$(abspath $(SOURCE_LOGO)),)" \
 		--reader-public-url "$${EUDI_PUBLIC_URL:-}" \
 		--secrets-dir "$(ONBOARDING_SECRETS_DIR)"
 
@@ -217,8 +220,8 @@ onboard-demo-sources: certs
 	$(MAKE) fsc-seed-bri
 	$(MAKE) fsc-seed-brp
 	$(MAKE) fsc-seed-metadata
-	$(MAKE) provision-development-certificates SOURCE_OIN=$(DEVELOPMENT_SOURCE_OIN) SOURCE_NAME="$(DEVELOPMENT_SOURCE_NAME)"
-	$(MAKE) provision-development-certificates SOURCE_OIN=$(DEVELOPMENT_BRP_SOURCE_OIN) SOURCE_NAME="$(DEVELOPMENT_BRP_SOURCE_NAME)"
+	$(MAKE) provision-development-certificates SOURCE_OIN=$(DEVELOPMENT_SOURCE_OIN) SOURCE_NAME="$(DEVELOPMENT_SOURCE_NAME)" SOURCE_LOGO="$(DEVELOPMENT_SOURCE_LOGO)"
+	$(MAKE) provision-development-certificates SOURCE_OIN=$(DEVELOPMENT_BRP_SOURCE_OIN) SOURCE_NAME="$(DEVELOPMENT_BRP_SOURCE_NAME)" SOURCE_LOGO="$(DEVELOPMENT_BRP_SOURCE_LOGO)"
 	$(MAKE) reconcile-fsc-sources
 
 demo-eudi: onboard-demo-sources eudi-config eudi-images

@@ -66,6 +66,7 @@ type onboardingOptions struct {
 	sourcePath           string
 	sourceOIN            string
 	sourceName           string
+	sourceLogoPath       string
 	storageBackend       string
 	certificateStoreName string
 	dryRun               bool
@@ -139,6 +140,13 @@ func runOnboardingCommand(ctx context.Context, arguments []string, dependencies 
 		if registration.Name == "" {
 			registration.Name = "FSC source " + registration.SourceOIN
 		}
+		if options.sourceLogoPath != "" {
+			logo, err := loadOrganizationLogo(options.sourceLogoPath)
+			if err != nil {
+				return true, err
+			}
+			registration.Logo = logo
+		}
 		provider, err := dependencies.resolveCertificateProvider(options)
 		if err != nil {
 			return true, err
@@ -191,6 +199,7 @@ func parseOnboardingOptions(command string, arguments []string, errorOutput io.W
 	if command == "provision-development-certificates" {
 		set.StringVar(&options.sourceOIN, "source-oin", "", "20-digit OIN to bind the local development certificates to")
 		set.StringVar(&options.sourceName, "source-name", "", "source name for the certificate subject (defaults to the FSC-derived name)")
+		set.StringVar(&options.sourceLogoPath, "source-logo", "", "SVG, PNG or JPEG logo to embed in the certificate authorization metadata")
 	} else {
 		set.StringVar(&options.sourcePath, "source", "", "path to a static HTTPS-mTLS source registration")
 	}

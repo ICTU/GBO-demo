@@ -14,6 +14,7 @@ func TestDevelopmentCAProviderBindsReaderCertificateToCurrentConfiguration(t *te
 	registration := sourceRegistration{
 		SourceOIN: "99999999900000000200",
 		Name:      "Belastingdienst-mock",
+		Logo:      &organizationLogo{MimeType: "image/svg+xml", ImageData: "<svg/>"},
 	}
 	fixedNow := time.Date(2026, time.August, 5, 12, 0, 0, 0, time.UTC)
 	provider := newDevelopmentCAProvider(t.TempDir(), "https://issuance.example")
@@ -32,6 +33,14 @@ func TestDevelopmentCAProviderBindsReaderCertificateToCurrentConfiguration(t *te
 		t.Fatalf("reader request origin = %q", got)
 	}
 	assertReaderAuthorizationPolicies(t, firstReader)
+	assertOrganizationLogo(t, firstReader, readerAuthExtensionOID, registration.Logo)
+	firstIssuer := loadCertificateArtifact(t, first.IssuerKeyReference, first.IssuerCertReference)
+	assertOrganizationLogo(t, firstIssuer, issuerAuthExtensionOID, registration.Logo)
+	registrationWithoutProvisioningInput := registration
+	registrationWithoutProvisioningInput.Logo = nil
+	if _, err := provider.Load(registrationWithoutProvisioningInput); err != nil {
+		t.Fatalf("load certificates while keeping their certificate-owned logo: %v", err)
+	}
 	for name, artifact := range map[string]struct {
 		keyPath  string
 		certPath string
@@ -140,9 +149,14 @@ func assertReaderAuthorizationPolicies(t *testing.T, cert *x509.Certificate) {
 
 func readerAuthorizationPayload(t *testing.T, cert *x509.Certificate) map[string]any {
 	t.Helper()
-	extension, ok := findCertificateExtension(cert, readerAuthExtensionOID)
+	return authorizationPayload(t, cert, readerAuthExtensionOID)
+}
+
+func authorizationPayload(t *testing.T, cert *x509.Certificate, oid asn1.ObjectIdentifier) map[string]any {
+	t.Helper()
+	extension, ok := findCertificateExtension(cert, oid)
 	if !ok {
-		t.Fatal("reader certificate has no authorization extension")
+		t.Fatalf("certificate has no %s authorization extension", oid.String())
 	}
 	var encodedPayload string
 	remaining, err := asn1.Unmarshal(extension.Value, &encodedPayload)
@@ -154,4 +168,47 @@ func readerAuthorizationPayload(t *testing.T, cert *x509.Certificate) map[string
 		t.Fatalf("parse reader authorization payload: %v", err)
 	}
 	return payload
+}
+
+func assertOrganizationLogo(t *testing.T, cert *x509.Certificate, oid asn1.ObjectIdentifier, expected *organizationLogo) {
+	t.Helper()
+	payload := authorizationPayload(t, cert, oid)
+	organization, ok := payload["organization"].(map[string]any)
+	if !ok {
+		t.Fatalf("organization = %#v, want object", payload["organization"])
+	}
+	logo, ok := organization["logo"].(map[string]any)
+	if !ok || logo["mimeType"] != expected.MimeType || logo["imageData"] != expected.ImageData {
+		t.Fatalf("organization logo = %#v, want %#v", organization["logo"], expected)
+	}
+}
+
+func TestAuthorizationPayloadMatchesOnlyPermitsCertificateOwnedLogo(t *testing.T) {
+	expected := []byte(`{"organization":{"displayName":{"nl":"Belastingdienst"}},"requestOriginBaseUrl":"https://issuer.example/"}`)
+	tests := map[string]struct {
+		actual  string
+		matches bool
+	}{
+		"same": {
+			actual:  string(expected),
+			matches: true,
+		},
+		"additional logo": {
+			actual:  `{"organization":{"displayName":{"nl":"Belastingdienst"},"logo":{"mimeType":"image/svg+xml","imageData":"<svg/>"}},"requestOriginBaseUrl":"https://issuer.example/"}`,
+			matches: true,
+		},
+		"additional authorization field": {
+			actual: `{"organization":{"displayName":{"nl":"Belastingdienst"}},"requestOriginBaseUrl":"https://issuer.example/","authorizedAttributes":{"extra":[]}}`,
+		},
+		"different organization": {
+			actual: `{"organization":{"displayName":{"nl":"GBO"}},"requestOriginBaseUrl":"https://issuer.example/"}`,
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := authorizationPayloadMatches([]byte(test.actual), expected); got != test.matches {
+				t.Fatalf("authorizationPayloadMatches() = %t, want %t", got, test.matches)
+			}
+		})
+	}
 }

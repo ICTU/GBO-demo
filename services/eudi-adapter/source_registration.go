@@ -50,6 +50,8 @@ type sourceRegistration struct {
 	Name             string                 `json:"name" yaml:"name"`
 	MetadataEndpoint sourceMetadataEndpoint `json:"metadata_endpoint" yaml:"metadata_endpoint"`
 	DataAccess       sourceDataAccess       `json:"data_access" yaml:"data_access"`
+	// Logo is certificate-provisioning input, not source-published metadata.
+	Logo *organizationLogo `json:"-" yaml:"-"`
 }
 
 type validatedSourceRegistration struct {

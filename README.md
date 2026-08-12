@@ -385,13 +385,13 @@ public url host <host> not in certificate DNS SANs: <sans>
 Every activated source therefore needs a reader certificate for the host you are actually serving on. For the local proof, rerun the explicit development provisioning step for both sources and reconcile them:
 
 ```bash
-make provision-development-certificates SOURCE_OIN=99999999900000000200 SOURCE_NAME="Belastingdienst"
-make provision-development-certificates SOURCE_OIN=99999999900000000400 SOURCE_NAME="RvIG"
+make provision-development-certificates SOURCE_OIN=99999999900000000200 SOURCE_NAME="Belastingdienst" SOURCE_LOGO=assets/issuer-logos/belastingdienst.svg
+make provision-development-certificates SOURCE_OIN=99999999900000000400 SOURCE_NAME="RvIG" SOURCE_LOGO=assets/issuer-logos/rvig.svg
 make reconcile-fsc-sources
 make eudi-config
 ```
 
-The command reuses the existing development private keys and CA while replacing stale leaf-certificate content. `requestOriginBaseUrl` follows `EUDI_PUBLIC_URL`; the frontends derive the same client ID and need no separate setting.
+The command reuses the existing development private keys and CA while replacing stale leaf-certificate content. `SOURCE_LOGO` embeds an SVG, PNG, or JPEG as nl-wallet organization metadata in the issuer and reader authorization extensions. It is explicit certificate-provisioning input, not source-published metadata. The included SVGs are recognizable demo assets rather than official brand files. `requestOriginBaseUrl` follows `EUDI_PUBLIC_URL`; the frontends derive the same client ID and need no separate setting.
 
 The local command stores its issuer and reader CAs under `.local/secrets/development-ca`. A real wallet only accepts leaves under a configured trust anchor, so use pre-approved development CA material in that directory when testing with the preproduction wallet. **Never create a new CA merely to solve a hostname mismatch**: an unknown root is rejected regardless of the leaf certificate.
 
