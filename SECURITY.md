@@ -30,13 +30,12 @@ These are safe to expose publicly for their intended use. If you're deploying an
 
 ## What is deliberately NOT in the repo
 
-The EUDI issuance-server runtime config carries inline mdoc/SD-JWT signing keys plus hostnames tied to the issuer/reader certificates. All four runtime files are git-ignored; committed `.example` twins carry placeholder keys and generic `example.com` hostnames:
+The EUDI issuance-server runtime config carries inline mdoc/SD-JWT signing keys plus hostnames tied to the issuer/reader certificates. Runtime artifacts are generated from active source registrations and are git-ignored:
 
 - `services/eudi-issuance-server/config/issuance_server.toml`
-- `services/eudi-issuance-server/config/inkomensverklaring_metadata.json`
-- `services/eudi-issuance-server/config/issuer_auth.json`
-- `services/eudi-issuance-server/config/reader_auth.json`
+- `services/eudi-issuance-server/config/type-*.json`
+- `services/eudi-issuance-server/config/eudi-offers.json`
 
-Bootstrap all four with `make eudi-config` (copies from `$NLWALLET_PATH/target/is-config/`) or by hand from the committed `.example` files.
+Run `make onboard-demo-sources` and then `make eudi-config`; the latter reads certificate references and activated Type Metadata from every active onboarding record. Local development certificates are created only by the explicit `provision-development-certificates` step. Production must supply pre-managed certificate references.
 
 The safety-audit script (`scripts/check-safety.sh`) refuses inline `private_key = "…"` / `certificate = "…"` patterns in any committed file, so this stays enforced.

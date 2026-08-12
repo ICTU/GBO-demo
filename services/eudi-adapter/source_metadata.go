@@ -3,16 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/ed25519"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"mime"
 	"net/http"
-	"os"
-	"strings"
+	"strconv"
 	"time"
 
 	"gbo-demo/eudi-adapter/internal/gbosimplev1"
@@ -22,32 +18,48 @@ import (
 	"github.com/graphql-go/graphql/language/source"
 )
 
-const sourceMetadataMediaType = "application/jose"
+const sourceMetadataMediaType = "application/json"
 
-var sourceMetadataBase64URL = base64.RawURLEncoding
-
-// sourceMetadataConfig is the deliberately small phase-1 registration. A
-// later phase replaces these direct settings with the normal source
-// registration, but the trust decisions are already explicit here.
+// sourceMetadataConfig is resolved from an active onboarding record. Endpoint
+// and transport choices are deliberately not separate deployment settings.
 type sourceMetadataConfig struct {
-	URL         string
-	ExpectedOIN string
-	PublicJWK   json.RawMessage
-	TypeID      string
+	URL               string
+	MetadataTransport string
+	MetadataGrantHash string
+	DataTransport     string
+	ExpectedOIN       string
+	TypeID            string
 }
 
 type sourceMetadataDocument struct {
-	SchemaVersion string                        `json:"schema_version"`
-	SourceOIN     string                        `json:"source_oin"`
-	Version       string                        `json:"version"`
-	IssuedAt      string                        `json:"issued_at"`
-	ExpiresAt     string                        `json:"expires_at"`
-	Attestations  []sourceAttestationDefinition `json:"attestations"`
+	SchemaVersion string                     `json:"schema_version"`
+	SourceOIN     string                     `json:"source_oin"`
+	Version       string                     `json:"version"`
+	IssuedAt      string                     `json:"issued_at"`
+	ExpiresAt     string                     `json:"expires_at"`
+	Capabilities  sourceMetadataCapabilities `json:"capabilities"`
+}
+
+type sourceMetadataCapabilities struct {
+	EUDI *sourceEUDICapability `json:"eudi,omitempty"`
+}
+
+type sourceEUDICapability struct {
+	Version      string                        `json:"version"`
+	Attestations []sourceAttestationDefinition `json:"attestations"`
+}
+
+func (d sourceMetadataDocument) eudiAttestations() []sourceAttestationDefinition {
+	if d.Capabilities.EUDI == nil {
+		return nil
+	}
+	return d.Capabilities.EUDI.Attestations
 }
 
 type sourceAttestationDefinition struct {
 	TypeID          string                           `json:"type_id"`
 	TypeVersion     string                           `json:"type_version"`
+	Offers          []sourceOffer                    `json:"offers"`
 	GraphQL         sourceGraphQL                    `json:"graphql"`
 	MappingProfile  string                           `json:"mapping_profile"`
 	Mapping         gbosimplev1.Mapping              `json:"mapping"`
@@ -55,12 +67,20 @@ type sourceAttestationDefinition struct {
 	TypeMetadata    json.RawMessage                  `json:"type_metadata"`
 }
 
+type sourceOffer struct {
+	ID          string         `json:"id"`
+	Label       string         `json:"label"`
+	Description string         `json:"description,omitempty"`
+	Parameters  map[string]any `json:"parameters"`
+}
+
 type sourceGraphQL struct {
-	Document        string                     `json:"document"`
-	SubjectVariable string                     `json:"subject_variable"`
-	Parameters      map[string]sourceParameter `json:"parameters"`
-	ResultPointer   string                     `json:"result_pointer"`
-	Cardinality     string                     `json:"cardinality"`
+	ServiceReference string                     `json:"service_reference,omitempty"`
+	Endpoint         string                     `json:"endpoint"`
+	Document         string                     `json:"document"`
+	SubjectVariable  string                     `json:"subject_variable"`
+	Parameters       map[string]sourceParameter `json:"parameters"`
+	ResultPointer    string                     `json:"result_pointer"`
 }
 
 type sourceParameter struct {
@@ -88,9 +108,10 @@ func (a *sourceAttributeSchema) UnmarshalJSON(data []byte) error {
 
 type mappingRule = gbosimplev1.Rule
 
-type sourceMetadataShadow struct {
+type activeSourceMetadata struct {
 	Version      string
-	UsecaseKey   string
+	SourceOIN    string
+	TypeID       string
 	Definition   sourceAttestationDefinition
 	VCT          string
 	VCTIntegrity string
@@ -98,85 +119,30 @@ type sourceMetadataShadow struct {
 }
 
 type sourceMetadataRuntime interface {
-	appliesTo(usecaseKey string, uc Usecase) bool
-	current(now time.Time) (*sourceMetadataShadow, error)
+	current(now time.Time) (*activeSourceMetadata, error)
 }
 
-type sourceMetadataJWK struct {
-	KTY string `json:"kty"`
-	CRV string `json:"crv"`
-	X   string `json:"x"`
-}
-
-type sourceMetadataJWSHeader struct {
-	Algorithm string             `json:"alg"`
-	KeyID     string             `json:"kid"`
-	Type      string             `json:"typ"`
-	Critical  []string           `json:"crit,omitempty"`
-	JWK       *sourceMetadataJWK `json:"jwk,omitempty"`
-}
-
-// phase1ExpectedIncomeClaims is the migration baseline, deliberately kept
-// outside source-controlled metadata. It disappears with the legacy formatter
-// after parity has been proven; until then it prevents the source from making
-// a claim vanish from both its query and mapping while still reporting match.
-var phase1ExpectedIncomeClaims = map[string]struct{}{
-	"belastingjaar":   {},
-	"verzamelinkomen": {},
-	"aangifte_status": {},
-	"indieningsdatum": {},
-	"inkomen_box1":    {},
-	"inkomen_box2":    {},
-	"inkomen_box3":    {},
-}
-
-func loadConfiguredSourceMetadataShadow(ctx context.Context, client *http.Client, cfg config) (*sourceMetadataShadow, error) {
-	if !cfg.SourceMetadataShadowEnabled {
-		return nil, nil
-	}
-	if cfg.SourceMetadataPublicJWKPath == "" {
-		return nil, fmt.Errorf("SOURCE_METADATA_PUBLIC_JWK_PATH is required when shadow mode is enabled")
-	}
-	if !strings.HasPrefix(cfg.SourceMetadataOutwayPath, "/") || strings.HasPrefix(cfg.SourceMetadataOutwayPath, "//") {
-		return nil, fmt.Errorf("SOURCE_METADATA_OUTWAY_PATH must be an absolute path on the configured FSC Outway")
-	}
-	if cfg.SourceMetadataUsecaseKey == "" {
-		return nil, fmt.Errorf("SOURCE_METADATA_USECASE_KEY is required when shadow mode is enabled")
-	}
-	publicJWK, err := os.ReadFile(cfg.SourceMetadataPublicJWKPath)
-	if err != nil {
-		return nil, fmt.Errorf("read source metadata public JWK: %w", err)
-	}
-	shadow, err := loadSourceMetadataShadow(ctx, client, sourceMetadataConfig{
-		URL:         strings.TrimRight(cfg.OutwayURL, "/") + cfg.SourceMetadataOutwayPath,
-		ExpectedOIN: cfg.SourceMetadataOIN,
-		PublicJWK:   publicJWK,
-		TypeID:      cfg.SourceMetadataTypeID,
-	})
-	if err != nil {
-		return nil, err
-	}
-	shadow.UsecaseKey = cfg.SourceMetadataUsecaseKey
-	return shadow, nil
-}
-
-// loadSourceMetadataShadow performs the phase-1 onboarding step: fetch the
-// declaration, verify it against the pinned source key and OIN, validate its
-// GraphQL syntax, and keep only the requested attestation definition.
-func loadSourceMetadataShadow(ctx context.Context, client *http.Client, cfg sourceMetadataConfig) (*sourceMetadataShadow, error) {
-	if cfg.URL == "" || cfg.ExpectedOIN == "" || len(cfg.PublicJWK) == 0 || cfg.TypeID == "" {
+// loadSourceMetadata fetches the declaration through the onboarded transport,
+// validates its OIN and selects the activated type.
+func loadSourceMetadata(ctx context.Context, client *http.Client, cfg sourceMetadataConfig) (*activeSourceMetadata, error) {
+	if cfg.URL == "" || cfg.ExpectedOIN == "" || cfg.TypeID == "" {
 		return nil, fmt.Errorf("source metadata registration is incomplete")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cfg.URL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create source metadata request: %w", err)
 	}
-	fscTxID, err := newFscTransactionID()
-	if err != nil {
-		return nil, fmt.Errorf("generate source metadata Fsc-Transaction-Id: %w", err)
-	}
 	req.Header.Set("Accept", sourceMetadataMediaType)
-	req.Header.Set("Fsc-Transaction-Id", fscTxID)
+	if cfg.MetadataTransport == sourceTransportFSC {
+		fscTxID, err := newFscTransactionID()
+		if err != nil {
+			return nil, fmt.Errorf("generate source metadata Fsc-Transaction-Id: %w", err)
+		}
+		req.Header.Set("Fsc-Transaction-Id", fscTxID)
+		req.Header.Set("Fsc-Grant-Hash", cfg.MetadataGrantHash)
+	} else {
+		return nil, fmt.Errorf("source metadata transport %q is configured but not implemented", cfg.MetadataTransport)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch source metadata: %w", err)
@@ -189,20 +155,16 @@ func loadSourceMetadataShadow(ctx context.Context, client *http.Client, cfg sour
 	if err != nil || mediaType != sourceMetadataMediaType {
 		return nil, fmt.Errorf("source metadata content type must be %s", sourceMetadataMediaType)
 	}
-	compactJWS, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	payload, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return nil, fmt.Errorf("read source metadata: %w", err)
 	}
-	payload, err := verifySourceMetadataJWS(strings.TrimSpace(string(compactJWS)), cfg.PublicJWK)
-	if err != nil {
-		return nil, err
-	}
 
-	shadow, _, err := parseSourceMetadataPayload(payload, cfg)
-	return shadow, err
+	metadata, _, err := parseSourceMetadataPayload(payload, cfg)
+	return metadata, err
 }
 
-func parseSourceMetadataPayload(payload []byte, cfg sourceMetadataConfig) (*sourceMetadataShadow, sourceMetadataDocument, error) {
+func parseSourceMetadataPayload(payload []byte, cfg sourceMetadataConfig) (*activeSourceMetadata, sourceMetadataDocument, error) {
 	var document sourceMetadataDocument
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.DisallowUnknownFields()
@@ -218,102 +180,24 @@ func parseSourceMetadataPayload(payload []byte, cfg sourceMetadataConfig) (*sour
 	if document.SchemaVersion != "1.0" {
 		return nil, sourceMetadataDocument{}, fmt.Errorf("unsupported source metadata schema_version %q", document.SchemaVersion)
 	}
-	for _, definition := range document.Attestations {
+	if document.Capabilities.EUDI == nil || document.Capabilities.EUDI.Version != "1.0" {
+		return nil, sourceMetadataDocument{}, fmt.Errorf("source metadata has no supported EUDI capability")
+	}
+	for _, definition := range document.eudiAttestations() {
 		if definition.TypeID != cfg.TypeID {
 			continue
 		}
 		if err := validateSourceAttestation(definition); err != nil {
 			return nil, sourceMetadataDocument{}, fmt.Errorf("attestation %q: %w", cfg.TypeID, err)
 		}
-		return &sourceMetadataShadow{Version: document.Version, Definition: definition}, document, nil
+		if err := validateGraphQLEndpoint(definition.GraphQL, cfg.DataTransport); err != nil {
+			return nil, sourceMetadataDocument{}, fmt.Errorf("attestation %q graphql.endpoint: %w", cfg.TypeID, err)
+		}
+		return &activeSourceMetadata{
+			Version: document.Version, SourceOIN: cfg.ExpectedOIN, TypeID: cfg.TypeID, Definition: definition,
+		}, document, nil
 	}
 	return nil, sourceMetadataDocument{}, fmt.Errorf("source metadata has no attestation %q", cfg.TypeID)
-}
-
-func verifySourceMetadataJWS(compact string, rawJWK json.RawMessage) ([]byte, error) {
-	var jwk sourceMetadataJWK
-	if err := json.Unmarshal(rawJWK, &jwk); err != nil {
-		return nil, fmt.Errorf("parse source metadata JWK: %w", err)
-	}
-	if jwk.KTY != "OKP" || jwk.CRV != "Ed25519" {
-		return nil, fmt.Errorf("source metadata JWK must be an Ed25519 OKP key")
-	}
-	publicKey, err := sourceMetadataBase64URL.DecodeString(jwk.X)
-	if err != nil || len(publicKey) != ed25519.PublicKeySize {
-		return nil, fmt.Errorf("source metadata JWK has an invalid public key")
-	}
-
-	parts := strings.Split(compact, ".")
-	if len(parts) != 3 {
-		return nil, fmt.Errorf("source metadata is not a compact JWS")
-	}
-	protected, err := sourceMetadataBase64URL.DecodeString(parts[0])
-	if err != nil {
-		return nil, fmt.Errorf("decode source metadata JWS header: %w", err)
-	}
-	var header sourceMetadataJWSHeader
-	if err := json.Unmarshal(protected, &header); err != nil {
-		return nil, fmt.Errorf("parse source metadata JWS header: %w", err)
-	}
-	if header.Algorithm != "EdDSA" || header.Type != "gbo-attestations+jws" {
-		return nil, fmt.Errorf("source metadata JWS has unsupported protected headers")
-	}
-	if len(header.Critical) > 0 {
-		return nil, fmt.Errorf("source metadata JWS contains an unsupported critical JWS header")
-	}
-	if header.KeyID != sourceMetadataJWKThumbprint(jwk) {
-		return nil, fmt.Errorf("source metadata JWS key id does not match the pinned key")
-	}
-	signature, err := sourceMetadataBase64URL.DecodeString(parts[2])
-	if err != nil {
-		return nil, fmt.Errorf("decode source metadata JWS signature: %w", err)
-	}
-	if !ed25519.Verify(ed25519.PublicKey(publicKey), []byte(parts[0]+"."+parts[1]), signature) {
-		return nil, fmt.Errorf("verify source metadata JWS signature: invalid signature")
-	}
-	payload, err := sourceMetadataBase64URL.DecodeString(parts[1])
-	if err != nil {
-		return nil, fmt.Errorf("decode source metadata JWS payload: %w", err)
-	}
-	return payload, nil
-}
-
-func sourceMetadataJWKThumbprint(jwk sourceMetadataJWK) string {
-	canonical := fmt.Sprintf(`{"crv":"%s","kty":"%s","x":"%s"}`, jwk.CRV, jwk.KTY, jwk.X)
-	digest := sha256.Sum256([]byte(canonical))
-	return sourceMetadataBase64URL.EncodeToString(digest[:])
-}
-
-func verifySourceMetadataJWSWithThumbprint(compact, expectedThumbprint string) ([]byte, json.RawMessage, error) {
-	parts := strings.Split(compact, ".")
-	if len(parts) != 3 {
-		return nil, nil, fmt.Errorf("source metadata is not a compact JWS")
-	}
-	protected, err := sourceMetadataBase64URL.DecodeString(parts[0])
-	if err != nil {
-		return nil, nil, fmt.Errorf("decode source metadata JWS header: %w", err)
-	}
-	var header sourceMetadataJWSHeader
-	if err := json.Unmarshal(protected, &header); err != nil {
-		return nil, nil, fmt.Errorf("parse source metadata JWS header: %w", err)
-	}
-	if header.JWK == nil {
-		return nil, nil, fmt.Errorf("source metadata JWS header has no public jwk")
-	}
-	actual := sourceMetadataJWKThumbprint(*header.JWK)
-	want := strings.TrimPrefix(expectedThumbprint, "sha256-")
-	if want == "" || actual != want {
-		return nil, nil, fmt.Errorf("source metadata JWK thumbprint does not match the registered thumbprint")
-	}
-	rawJWK, err := json.Marshal(header.JWK)
-	if err != nil {
-		return nil, nil, fmt.Errorf("marshal source metadata public JWK: %w", err)
-	}
-	payload, err := verifySourceMetadataJWS(compact, rawJWK)
-	if err != nil {
-		return nil, nil, err
-	}
-	return payload, rawJWK, nil
 }
 
 func validateSourceAttestation(definition sourceAttestationDefinition) error {
@@ -326,8 +210,8 @@ func validateSourceAttestation(definition sourceAttestationDefinition) error {
 	if definition.GraphQL.ResultPointer == "" {
 		return fmt.Errorf("graphql.result_pointer is required")
 	}
-	if definition.GraphQL.Cardinality != "exactly_one" {
-		return fmt.Errorf("phase 1 only supports cardinality exactly_one")
+	if err := validateSourceOffers(definition); err != nil {
+		return err
 	}
 	if definition.MappingProfile != "gbo-simple-v1" {
 		return fmt.Errorf("unsupported mapping_profile %q", definition.MappingProfile)
@@ -358,6 +242,105 @@ func validateSourceAttestation(definition sourceAttestationDefinition) error {
 		return fmt.Errorf("GraphQL document must contain exactly one query operation")
 	}
 	return nil
+}
+
+func validateSourceOffers(definition sourceAttestationDefinition) error {
+	if len(definition.Offers) == 0 {
+		return fmt.Errorf("offers must contain at least one concrete issuance option")
+	}
+	seen := make(map[string]struct{}, len(definition.Offers))
+	for _, offer := range definition.Offers {
+		if offer.ID == "" || offer.Label == "" {
+			return fmt.Errorf("offer id and label are required")
+		}
+		if _, duplicate := seen[offer.ID]; duplicate {
+			return fmt.Errorf("duplicate offer id %q", offer.ID)
+		}
+		seen[offer.ID] = struct{}{}
+		for name, parameter := range definition.GraphQL.Parameters {
+			value, supplied := offer.Parameters[name]
+			if !supplied {
+				if parameter.Required {
+					return fmt.Errorf("offer %q has no value for required parameter %q", offer.ID, name)
+				}
+				continue
+			}
+			if _, err := formatOfferParameter(name, parameter.Type, value); err != nil {
+				return fmt.Errorf("offer %q: %w", offer.ID, err)
+			}
+		}
+		for name := range offer.Parameters {
+			if _, declared := definition.GraphQL.Parameters[name]; !declared {
+				return fmt.Errorf("offer %q supplies undeclared parameter %q", offer.ID, name)
+			}
+		}
+	}
+	return nil
+}
+
+func formatOfferParameter(name, parameterType string, value any) (string, error) {
+	switch parameterType {
+	case "string":
+		text, ok := value.(string)
+		if !ok {
+			return "", fmt.Errorf("source parameter %q must be a string", name)
+		}
+		return text, nil
+	case "date":
+		text, ok := value.(string)
+		if !ok {
+			return "", fmt.Errorf("source parameter %q must be an ISO date", name)
+		}
+		if _, err := time.Parse(time.DateOnly, text); err != nil {
+			return "", fmt.Errorf("source parameter %q must be an ISO date", name)
+		}
+		return text, nil
+	case "integer":
+		switch number := value.(type) {
+		case float64:
+			if number != float64(int64(number)) {
+				return "", fmt.Errorf("source parameter %q must be an integer", name)
+			}
+			return strconv.FormatInt(int64(number), 10), nil
+		case int:
+			return strconv.Itoa(number), nil
+		case int64:
+			return strconv.FormatInt(number, 10), nil
+		case json.Number:
+			integer, err := number.Int64()
+			if err != nil {
+				return "", fmt.Errorf("source parameter %q must be an integer", name)
+			}
+			return strconv.FormatInt(integer, 10), nil
+		default:
+			return "", fmt.Errorf("source parameter %q must be an integer", name)
+		}
+	case "boolean":
+		boolean, ok := value.(bool)
+		if !ok {
+			return "", fmt.Errorf("source parameter %q must be a boolean", name)
+		}
+		return strconv.FormatBool(boolean), nil
+	default:
+		return "", fmt.Errorf("source parameter %q has unsupported type %q", name, parameterType)
+	}
+}
+
+func validateGraphQLEndpoint(graphql sourceGraphQL, transport string) error {
+	switch transport {
+	case sourceTransportFSC:
+		if !serviceReferencePattern.MatchString(graphql.ServiceReference) {
+			return fmt.Errorf("service_reference is required and must be valid for FSC transport")
+		}
+		return validateAbsoluteURLPath(graphql.Endpoint)
+	case sourceTransportHTTPSMTLS:
+		if graphql.ServiceReference != "" {
+			return fmt.Errorf("service_reference is not allowed for https-mtls transport")
+		}
+		return validateAbsoluteHTTPSEndpoint(graphql.Endpoint)
+	default:
+		return fmt.Errorf("unsupported data transport %q", transport)
+	}
 }
 
 func validateAttributeSchema(definition sourceAttestationDefinition) error {
@@ -403,78 +386,75 @@ func isISO4217Alpha3(unit string) bool {
 	return true
 }
 
-func (s *sourceMetadataShadow) appliesTo(usecaseKey string, uc Usecase) bool {
-	return s != nil && uc.acceptsSourceMetadata(usecaseKey, s.UsecaseKey)
-}
-
-func (uc Usecase) acceptsSourceMetadata(usecaseKey, configuredUsecaseKey string) bool {
-	return configuredUsecaseKey == usecaseKey && uc.bron() == bronBD && len(uc.Belastingjaren) == 1
-}
-
-func (s *sourceMetadataShadow) current(_ time.Time) (*sourceMetadataShadow, error) {
+func (s *activeSourceMetadata) current(_ time.Time) (*activeSourceMetadata, error) {
 	return s, nil
 }
 
-func (s *sourceMetadataShadow) queryPlan(usecaseKey, bsn string, uc Usecase) (sourceQueryPlan, error) {
-	if !s.appliesTo(usecaseKey, uc) {
-		return sourceQueryPlan{}, fmt.Errorf("source metadata does not apply to this usecase")
-	}
+func (s *activeSourceMetadata) queryPlan(bsn string, supplied map[string][]string) (sourceQueryPlan, error) {
 	variables := map[string]any{s.Definition.GraphQL.SubjectVariable: bsn}
 	for name, parameter := range s.Definition.GraphQL.Parameters {
-		switch name {
-		case "jaar":
-			variables[name] = uc.Belastingjaren[0]
-		default:
-			if parameter.Required {
-				return sourceQueryPlan{}, fmt.Errorf("no runtime value for required source parameter %q", name)
+		values, configured := supplied[name]
+		if configured && len(values) != 1 {
+			return sourceQueryPlan{}, fmt.Errorf("source parameter %q must occur exactly once", name)
+		}
+		if configured {
+			value, err := parseSourceParameter(name, parameter.Type, values[0])
+			if err != nil {
+				return sourceQueryPlan{}, err
 			}
+			variables[name] = value
+		} else if parameter.Required {
+			return sourceQueryPlan{}, fmt.Errorf("no runtime value for required source parameter %q", name)
 		}
 	}
-	return sourceQueryPlan{Query: s.Definition.GraphQL.Document, Variables: variables}, nil
+	for name := range supplied {
+		if _, declared := s.Definition.GraphQL.Parameters[name]; !declared {
+			return sourceQueryPlan{}, fmt.Errorf("request supplies undeclared source parameter %q", name)
+		}
+	}
+	return sourceQueryPlan{ServiceReference: s.Definition.GraphQL.ServiceReference, Endpoint: s.Definition.GraphQL.Endpoint, Query: s.Definition.GraphQL.Document, Variables: variables}, nil
 }
 
-// compareLegacy projects only the claims declared by the source and checks
-// those against the legacy formatter. Legacy-only presentation claims (such
-// as verklaring_tekst) intentionally do not become mapping capabilities.
-func (s *sourceMetadataShadow) compareLegacy(rawGraphQL []byte, docs []attestation) (bool, error) {
-	if len(docs) != 1 {
-		return false, fmt.Errorf("shadow comparison expected one legacy document")
+func parseSourceParameter(name, parameterType, raw string) (any, error) {
+	switch parameterType {
+	case "string":
+		return raw, nil
+	case "integer":
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("source parameter %q must be an integer", name)
+		}
+		return value, nil
+	case "number":
+		value, err := strconv.ParseFloat(raw, 64)
+		if err != nil {
+			return nil, fmt.Errorf("source parameter %q must be a number", name)
+		}
+		return value, nil
+	case "boolean":
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			return nil, fmt.Errorf("source parameter %q must be a boolean", name)
+		}
+		return value, nil
+	case "date":
+		if _, err := time.Parse(time.DateOnly, raw); err != nil {
+			return nil, fmt.Errorf("source parameter %q must be an ISO date", name)
+		}
+		return raw, nil
+	default:
+		return nil, fmt.Errorf("source parameter %q has unsupported type %q", name, parameterType)
 	}
-	for claim := range phase1ExpectedIncomeClaims {
-		if _, declared := s.Definition.Mapping[claim]; !declared {
-			return false, nil
-		}
-		if _, issued := docs[0].Attributes[claim]; !issued {
-			return false, nil
-		}
-	}
-	// verklaring_tekst is presentation text produced only by the legacy
-	// formatter and is deliberately absent from the source mapping. Every
-	// other issued claim must be declared: otherwise removing a field from
-	// both the source query and mapping would incorrectly report a match.
-	for claim := range docs[0].Attributes {
-		if claim == "verklaring_tekst" {
-			continue
-		}
-		if _, declared := s.Definition.Mapping[claim]; !declared {
-			return false, nil
-		}
-	}
+}
+
+func (s *activeSourceMetadata) project(rawGraphQL []byte) (gbosimplev1.Projection, error) {
 	root, err := gbosimplev1.DecodeJSON(rawGraphQL)
 	if err != nil {
-		return false, fmt.Errorf("decode GraphQL response for shadow projection: %w", err)
+		return gbosimplev1.Projection{}, fmt.Errorf("decode GraphQL response for source projection: %w", err)
 	}
-	projection, err := gbosimplev1.Project(root, s.Definition.GraphQL.ResultPointer, s.Definition.GraphQL.Cardinality, s.Definition.Mapping)
+	projection, err := gbosimplev1.Project(root, s.Definition.GraphQL.ResultPointer, s.Definition.Mapping)
 	if err != nil {
-		return false, fmt.Errorf("project source response: %w", err)
+		return gbosimplev1.Projection{}, fmt.Errorf("project source response: %w", err)
 	}
-	if projection.Outcome != gbosimplev1.OutcomeCredential {
-		return false, fmt.Errorf("project source response: %s", projection.Outcome)
-	}
-	for claim, converted := range projection.Claims {
-		if !gbosimplev1.EqualJSON(converted, docs[0].Attributes[claim]) {
-			return false, nil
-		}
-	}
-	return true, nil
+	return projection, nil
 }

@@ -17,6 +17,16 @@ function resolve(runtime: string | undefined, env: string | undefined, fallback:
   return clean(runtime) || clean(env) || fallback
 }
 
+function readerClientId(publicUrl: string): string {
+  try {
+    const hostname = new URL(publicUrl).hostname
+    if (hostname) return `x509_san_dns:${hostname}`
+  } catch {
+    // Keep the development fallback below for an absent or invalid URL.
+  }
+  return ''
+}
+
 const rc = typeof window === 'undefined' ? undefined : window.__GBO_RUNTIME_CONFIG__
 
 export const links = {
@@ -65,9 +75,10 @@ export const links = {
 /* De QR wordt hier zelf samengesteld (zie src/eudi.ts). Daarvoor moet de
    wallet op de telefoon de issuance-server publiek kunnen bereiken —
    zonder publicUrl valt de QR weg en toont de pagina waarom. */
+const eudiPublicUrl = resolve(rc?.eudiPublicUrl, import.meta.env.VITE_EUDI_PUBLIC_URL, '')
 export const eudi = {
-  publicUrl: resolve(rc?.eudiPublicUrl, import.meta.env.VITE_EUDI_PUBLIC_URL, ''),
-  clientId: resolve(rc?.eudiClientId, import.meta.env.VITE_EUDI_CLIENT_ID, 'reader.example.com'),
+  publicUrl: eudiPublicUrl,
+  clientId: resolve(rc?.eudiClientId, import.meta.env.VITE_EUDI_CLIENT_ID, readerClientId(eudiPublicUrl)),
   ulBase: resolve(
     rc?.eudiUlBase,
     import.meta.env.VITE_EUDI_UL_BASE,

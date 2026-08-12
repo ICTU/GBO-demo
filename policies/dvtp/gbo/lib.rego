@@ -71,6 +71,7 @@ _raw_steps(spec, ctx) := [
 	_check_constraint(spec, ctx),
 	_check_pid_present(spec, ctx),
 	_check_scope_allowed(spec, ctx),
+	_check_years_allowed(spec, ctx),
 	_check_years_in_scopes(spec, ctx),
 	_check_actor_allowed(spec, ctx),
 ]
@@ -207,6 +208,32 @@ _check_scope_allowed(spec, ctx) := step if {
 	not scope in allowed
 	step := _step("SCOPE_NOT_ALLOWED", "Scope allowed for rule", sprintf("%q in spec.allowed_scopes", [scope]), "fail")
 } else := _step_skipped("SCOPE_NOT_ALLOWED", "Scope allowed for rule", "no scope-whitelist configured")
+
+# Direct year authorization for source-owned EUDI queries. Unlike the DvTP
+# consent path this checks the actual GraphQL selector against a rule-owned
+# set; it does not manufacture or trust a GBO catalog scope.
+_check_years_allowed(spec, ctx) := step if {
+	allowed := object.get(spec, "allowed_years", set())
+	count(allowed) > 0
+	years := _requested_years(ctx)
+	count(years) > 0
+	disallowed := [y | some y in years; not to_number(y) in allowed]
+	count(disallowed) == 0
+	step := _step("YEAR_NOT_ALLOWED", "Requested years allowed for rule", sprintf("%d year(s) allowed", [count(years)]), "pass")
+} else := step if {
+	allowed := object.get(spec, "allowed_years", set())
+	count(allowed) > 0
+	years := _requested_years(ctx)
+	count(years) > 0
+	disallowed := [y | some y in years; not to_number(y) in allowed]
+	count(disallowed) > 0
+	step := _step("YEAR_NOT_ALLOWED", "Requested years allowed for rule", sprintf("%v in spec.allowed_years", [disallowed[0]]), "fail")
+} else := step if {
+	allowed := object.get(spec, "allowed_years", set())
+	count(allowed) > 0
+	count(_requested_years(ctx)) == 0
+	step := _step("YEAR_NOT_ALLOWED", "Requested years allowed for rule", "belastingjaren filter present in query", "fail")
+} else := _step_skipped("YEAR_NOT_ALLOWED", "Requested years allowed for rule", "no year-whitelist configured")
 
 # Year-coverage: only active when the rule sets years_in_scopes. Every
 # belastingjaar requested in the query (flattened args "belastingjaren.N")

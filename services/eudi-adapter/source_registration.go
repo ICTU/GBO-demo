@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -9,35 +8,52 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
+	"gopkg.in/yaml.v3"
 )
 
 var (
 	sourceOINPattern        = regexp.MustCompile(`^[0-9]{20}$`)
 	serviceReferencePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
-	jwkThumbprintPattern    = regexp.MustCompile(`^sha256-[A-Za-z0-9_-]{43}$`)
 )
 
+const (
+	sourceTransportFSC       = "fsc"
+	sourceTransportHTTPSMTLS = "https-mtls"
+)
+
+type sourceMetadataEndpoint struct {
+	Transport        string `json:"transport" yaml:"transport"`
+	ServiceReference string `json:"service_reference,omitempty" yaml:"service_reference,omitempty"`
+	Path             string `json:"path,omitempty" yaml:"path,omitempty"`
+	Endpoint         string `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
+	GrantHash        string `json:"grant_hash,omitempty" yaml:"grant_hash,omitempty"`
+}
+
+type sourceDataAccess struct {
+	Transport        string `json:"transport" yaml:"transport"`
+	ServiceReference string `json:"service_reference,omitempty" yaml:"service_reference,omitempty"`
+	GrantHash        string `json:"grant_hash,omitempty" yaml:"grant_hash,omitempty"`
+}
+
 type sourceRegistration struct {
-	SourceOIN                    string `json:"source_oin"`
-	Name                         string `json:"name"`
-	MetadataFSCServiceReference  string `json:"metadata_fsc_service_reference"`
-	MetadataSigningJWKThumbprint string `json:"metadata_signing_jwk_thumbprint"`
-	DataFSCServiceReference      string `json:"data_fsc_service_reference"`
+	SourceOIN        string                 `json:"source_oin" yaml:"source_oin"`
+	Name             string                 `json:"name" yaml:"name"`
+	MetadataEndpoint sourceMetadataEndpoint `json:"metadata_endpoint" yaml:"metadata_endpoint"`
+	DataAccess       sourceDataAccess       `json:"data_access" yaml:"data_access"`
 }
 
 type validatedSourceRegistration struct {
 	Registration sourceRegistration
 	Document     sourceMetadataDocument
 	Payload      []byte
-	PublicJWK    json.RawMessage
 	MetadataURL  string
 	Publications []*typeMetadataPublication
 }
@@ -47,16 +63,9 @@ func loadSourceRegistration(path string) (sourceRegistration, error) {
 	if err != nil {
 		return sourceRegistration{}, fmt.Errorf("read source registration: %w", err)
 	}
-	values, err := parseSourceRegistrationYAML(raw)
+	registration, err := parseSourceRegistrationYAML(raw)
 	if err != nil {
 		return sourceRegistration{}, err
-	}
-	registration := sourceRegistration{
-		SourceOIN:                    values["source_oin"],
-		Name:                         values["name"],
-		MetadataFSCServiceReference:  values["metadata_fsc_service_reference"],
-		MetadataSigningJWKThumbprint: values["metadata_signing_jwk_thumbprint"],
-		DataFSCServiceReference:      values["data_fsc_service_reference"],
 	}
 	if err := registration.validate(); err != nil {
 		return sourceRegistration{}, err
@@ -67,72 +76,18 @@ func loadSourceRegistration(path string) (sourceRegistration, error) {
 	return registration, nil
 }
 
-func parseSourceRegistrationYAML(raw []byte) (map[string]string, error) {
-	allowed := map[string]bool{
-		"source_oin": true, "name": true, "metadata_fsc_service_reference": true,
-		"metadata_signing_jwk_thumbprint": true, "data_fsc_service_reference": true,
+func parseSourceRegistrationYAML(raw []byte) (sourceRegistration, error) {
+	var registration sourceRegistration
+	decoder := yaml.NewDecoder(bytes.NewReader(raw))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&registration); err != nil {
+		return sourceRegistration{}, fmt.Errorf("parse source registration: %w", err)
 	}
-	values := make(map[string]string, len(allowed))
-	scanner := bufio.NewScanner(bytes.NewReader(raw))
-	lineNumber := 0
-	for scanner.Scan() {
-		lineNumber++
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		if strings.HasPrefix(scanner.Text(), " ") || strings.HasPrefix(scanner.Text(), "\t") {
-			return nil, fmt.Errorf("source registration line %d: nested YAML is not supported", lineNumber)
-		}
-		parts := strings.SplitN(line, ":", 2)
-		if len(parts) != 2 {
-			return nil, fmt.Errorf("source registration line %d: expected key: value", lineNumber)
-		}
-		key := strings.TrimSpace(parts[0])
-		if !allowed[key] {
-			return nil, fmt.Errorf("source registration line %d: unknown field %q", lineNumber, key)
-		}
-		if _, duplicate := values[key]; duplicate {
-			return nil, fmt.Errorf("source registration line %d: duplicate field %q", lineNumber, key)
-		}
-		value, err := parseSourceRegistrationScalar(strings.TrimSpace(parts[1]))
-		if err != nil {
-			return nil, fmt.Errorf("source registration line %d field %q: %w", lineNumber, key, err)
-		}
-		values[key] = value
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return sourceRegistration{}, fmt.Errorf("parse source registration: multiple YAML documents are not supported")
 	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scan source registration: %w", err)
-	}
-	for key := range allowed {
-		if values[key] == "" {
-			return nil, fmt.Errorf("source registration field %q is required", key)
-		}
-	}
-	return values, nil
-}
-
-func parseSourceRegistrationScalar(value string) (string, error) {
-	if value == "" {
-		return "", fmt.Errorf("value is empty")
-	}
-	if strings.HasPrefix(value, `"`) {
-		decoded, err := strconv.Unquote(value)
-		if err != nil {
-			return "", fmt.Errorf("invalid quoted value: %w", err)
-		}
-		return decoded, nil
-	}
-	if strings.HasPrefix(value, "'") {
-		if len(value) < 2 || !strings.HasSuffix(value, "'") {
-			return "", fmt.Errorf("invalid quoted value")
-		}
-		return strings.ReplaceAll(value[1:len(value)-1], "''", "'"), nil
-	}
-	if strings.Contains(value, " #") {
-		value = strings.TrimSpace(strings.SplitN(value, " #", 2)[0])
-	}
-	return value, nil
+	return registration, nil
 }
 
 func (r sourceRegistration) validate() error {
@@ -142,19 +97,93 @@ func (r sourceRegistration) validate() error {
 	if strings.TrimSpace(r.Name) == "" {
 		return fmt.Errorf("source registration name is required")
 	}
-	if !serviceReferencePattern.MatchString(r.MetadataFSCServiceReference) {
-		return fmt.Errorf("source registration metadata FSC service reference is invalid")
+	if err := r.MetadataEndpoint.validate(); err != nil {
+		return fmt.Errorf("source registration metadata_endpoint: %w", err)
 	}
-	if !serviceReferencePattern.MatchString(r.DataFSCServiceReference) {
-		return fmt.Errorf("source registration data FSC service reference is invalid")
+	if err := r.DataAccess.validate(); err != nil {
+		return fmt.Errorf("source registration data_access: %w", err)
 	}
-	if r.MetadataFSCServiceReference == r.DataFSCServiceReference {
+	if r.MetadataEndpoint.Transport == sourceTransportFSC && r.DataAccess.Transport == sourceTransportFSC && r.MetadataEndpoint.ServiceReference == r.DataAccess.ServiceReference {
 		return fmt.Errorf("source registration metadata and data FSC services must be separate")
 	}
-	if !jwkThumbprintPattern.MatchString(r.MetadataSigningJWKThumbprint) {
-		return fmt.Errorf("source registration metadata signing thumbprint must be sha256- followed by a base64url SHA-256 digest")
+	return nil
+}
+
+func (e sourceMetadataEndpoint) validate() error {
+	switch e.Transport {
+	case sourceTransportFSC:
+		if !serviceReferencePattern.MatchString(e.ServiceReference) {
+			return fmt.Errorf("service_reference is invalid")
+		}
+		if err := validateAbsoluteURLPath(e.Path); err != nil {
+			return fmt.Errorf("path: %w", err)
+		}
+		if e.Endpoint != "" {
+			return fmt.Errorf("endpoint is not allowed for FSC transport")
+		}
+		if e.GrantHash == "" {
+			return fmt.Errorf("grant_hash is required for FSC transport")
+		}
+	case sourceTransportHTTPSMTLS:
+		if e.ServiceReference != "" || e.Path != "" {
+			return fmt.Errorf("service_reference and path are not allowed for https-mtls transport")
+		}
+		if err := validateAbsoluteHTTPSEndpoint(e.Endpoint); err != nil {
+			return fmt.Errorf("endpoint: %w", err)
+		}
+	default:
+		return fmt.Errorf("unsupported transport %q", e.Transport)
 	}
 	return nil
+}
+
+func (a sourceDataAccess) validate() error {
+	switch a.Transport {
+	case sourceTransportFSC:
+		if !serviceReferencePattern.MatchString(a.ServiceReference) {
+			return fmt.Errorf("service_reference is invalid")
+		}
+		if a.GrantHash == "" {
+			return fmt.Errorf("grant_hash is required for FSC transport")
+		}
+	case sourceTransportHTTPSMTLS:
+		if a.ServiceReference != "" {
+			return fmt.Errorf("service_reference is not allowed for https-mtls transport")
+		}
+	default:
+		return fmt.Errorf("unsupported transport %q", a.Transport)
+	}
+	return nil
+}
+
+func validateAbsoluteURLPath(value string) error {
+	parsed, err := url.ParseRequestURI(value)
+	if err != nil || !strings.HasPrefix(value, "/") || strings.HasPrefix(value, "//") || parsed.IsAbs() || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("must be an absolute URL path without query or fragment")
+	}
+	return nil
+}
+
+func validateAbsoluteHTTPSEndpoint(value string) error {
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("must be an absolute HTTPS URL without credentials, query or fragment")
+	}
+	return nil
+}
+
+func (r sourceRegistration) metadataURL(outwayURL string) (string, error) {
+	switch r.MetadataEndpoint.Transport {
+	case sourceTransportFSC:
+		if strings.TrimSpace(outwayURL) == "" {
+			return "", fmt.Errorf("FSC Outway URL is required")
+		}
+		return strings.TrimRight(outwayURL, "/") + r.MetadataEndpoint.Path, nil
+	case sourceTransportHTTPSMTLS:
+		return "", fmt.Errorf("source metadata transport %q is configured but not implemented", sourceTransportHTTPSMTLS)
+	default:
+		return "", fmt.Errorf("unsupported source metadata transport %q", r.MetadataEndpoint.Transport)
+	}
 }
 
 func validateSourceRegistrationUniqueness(path string, registration sourceRegistration) error {
@@ -175,11 +204,11 @@ func validateSourceRegistrationUniqueness(path string, registration sourceRegist
 		if err != nil {
 			return fmt.Errorf("read source registration %q: %w", candidate, err)
 		}
-		values, err := parseSourceRegistrationYAML(raw)
+		other, err := parseSourceRegistrationYAML(raw)
 		if err != nil {
 			return fmt.Errorf("parse source registration %q: %w", candidate, err)
 		}
-		if values["source_oin"] == registration.SourceOIN {
+		if other.SourceOIN == registration.SourceOIN {
 			return fmt.Errorf("source OIN %q is registered more than once", registration.SourceOIN)
 		}
 	}
@@ -193,13 +222,19 @@ func validateSourceOnline(ctx context.Context, client *http.Client, registration
 	if err := validateTypeMetadataBaseURL(publicBaseURL); err != nil {
 		return nil, err
 	}
-	metadataURL := strings.TrimRight(outwayURL, "/") + "/" + registration.MetadataFSCServiceReference + "/.well-known/gbo-attestations"
-	compact, err := fetchSourceMetadataJWS(ctx, client, metadataURL)
+	metadataURL, err := registration.metadataURL(outwayURL)
 	if err != nil {
 		return nil, err
 	}
-	payload, publicJWK, err := verifySourceMetadataJWSWithThumbprint(compact, registration.MetadataSigningJWKThumbprint)
+	payload, err := fetchSourceMetadata(ctx, client, metadataURL, registration.MetadataEndpoint.Transport, registration.MetadataEndpoint.GrantHash)
 	if err != nil {
+		return nil, err
+	}
+	return validateSourcePayload(registration, payload, metadataURL, schemaPath, publicBaseURL, now)
+}
+
+func validateSourcePayload(registration sourceRegistration, payload []byte, metadataURL, schemaPath, publicBaseURL string, now time.Time) (*validatedSourceRegistration, error) {
+	if err := validateTypeMetadataBaseURL(publicBaseURL); err != nil {
 		return nil, err
 	}
 	if err := validateSourceMetadataSchema(payload, schemaPath); err != nil {
@@ -215,21 +250,28 @@ func validateSourceOnline(ctx context.Context, client *http.Client, registration
 	if document.SchemaVersion != "1.0" {
 		return nil, fmt.Errorf("unsupported source metadata schema_version %q", document.SchemaVersion)
 	}
-	if len(document.Attestations) == 0 {
-		return nil, fmt.Errorf("source metadata must contain at least one attestation")
+	if document.Capabilities.EUDI == nil || document.Capabilities.EUDI.Version != "1.0" {
+		return nil, fmt.Errorf("source metadata has no supported EUDI capability")
+	}
+	attestations := document.eudiAttestations()
+	if len(attestations) == 0 {
+		return nil, fmt.Errorf("source metadata EUDI capability must contain at least one attestation")
 	}
 	if _, err := compareNumericVersion(document.Version, "0"); err != nil {
 		return nil, fmt.Errorf("source metadata version: %w", err)
 	}
-	seenTypes := make(map[string]bool, len(document.Attestations))
-	publications := make([]*typeMetadataPublication, 0, len(document.Attestations))
-	for _, definition := range document.Attestations {
+	seenTypes := make(map[string]bool, len(attestations))
+	publications := make([]*typeMetadataPublication, 0, len(attestations))
+	for _, definition := range attestations {
 		if seenTypes[definition.TypeID] {
 			return nil, fmt.Errorf("source metadata contains duplicate type_id %q", definition.TypeID)
 		}
 		seenTypes[definition.TypeID] = true
 		if err := validateSourceAttestation(definition); err != nil {
 			return nil, fmt.Errorf("attestation %q: %w", definition.TypeID, err)
+		}
+		if err := validateGraphQLEndpoint(definition.GraphQL, registration.DataAccess.Transport); err != nil {
+			return nil, fmt.Errorf("attestation %q graphql.endpoint: %w", definition.TypeID, err)
 		}
 		if _, err := validateSourceMetadataEnvelope(document, definition, now, defaultSourceMetadataCachePolicy); err != nil {
 			return nil, err
@@ -244,40 +286,44 @@ func validateSourceOnline(ctx context.Context, client *http.Client, registration
 		Registration: registration,
 		Document:     document,
 		Payload:      append([]byte(nil), payload...),
-		PublicJWK:    publicJWK,
 		MetadataURL:  metadataURL,
 		Publications: publications,
 	}, nil
 }
 
-func fetchSourceMetadataJWS(ctx context.Context, client *http.Client, metadataURL string) (string, error) {
+func fetchSourceMetadata(ctx context.Context, client *http.Client, metadataURL, transport, grantHash string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, metadataURL, nil)
 	if err != nil {
-		return "", fmt.Errorf("create source metadata validation request: %w", err)
-	}
-	txID, err := newFscTransactionID()
-	if err != nil {
-		return "", fmt.Errorf("generate source metadata Fsc-Transaction-Id: %w", err)
+		return nil, fmt.Errorf("create source metadata validation request: %w", err)
 	}
 	req.Header.Set("Accept", sourceMetadataMediaType)
-	req.Header.Set("Fsc-Transaction-Id", txID)
+	if transport == sourceTransportFSC {
+		txID, err := newFscTransactionID()
+		if err != nil {
+			return nil, fmt.Errorf("generate source metadata Fsc-Transaction-Id: %w", err)
+		}
+		req.Header.Set("Fsc-Transaction-Id", txID)
+		req.Header.Set("Fsc-Grant-Hash", grantHash)
+	} else {
+		return nil, fmt.Errorf("source metadata transport %q is configured but not implemented", transport)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("fetch source metadata through FSC: %w", err)
+		return nil, fmt.Errorf("fetch source metadata: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("source metadata FSC request returned status %d", resp.StatusCode)
+		return nil, fmt.Errorf("source metadata request returned status %d", resp.StatusCode)
 	}
 	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if err != nil || mediaType != sourceMetadataMediaType {
-		return "", fmt.Errorf("source metadata content type must be %s", sourceMetadataMediaType)
+		return nil, fmt.Errorf("source metadata content type must be %s", sourceMetadataMediaType)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return "", fmt.Errorf("read source metadata: %w", err)
+		return nil, fmt.Errorf("read source metadata: %w", err)
 	}
-	return strings.TrimSpace(string(body)), nil
+	return body, nil
 }
 
 func decodeSourceMetadataDocument(payload []byte) (sourceMetadataDocument, error) {
@@ -318,7 +364,7 @@ func validateSourceMetadataSchema(payload []byte, schemaPath string) error {
 		return fmt.Errorf("parse source metadata for schema validation: %w", err)
 	}
 	if err := schema.Validate(metadata); err != nil {
-		return fmt.Errorf("source metadata does not match gbo-attestations-v1: %w", err)
+		return fmt.Errorf("source metadata does not match gbo-source-metadata-v1: %w", err)
 	}
 	return nil
 }

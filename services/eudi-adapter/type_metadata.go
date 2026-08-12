@@ -11,8 +11,12 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 )
+
+var summaryPlaceholderPattern = regexp.MustCompile(`\{\{([^{}]+)\}\}`)
 
 // typeMetadataPublication is the immutable representation associated with one
 // source-owned type version. Integrity is calculated over Body exactly as it
@@ -46,6 +50,9 @@ func newTypeMetadataPublication(publicBaseURL, sourceOIN string, definition sour
 			return nil, fmt.Errorf("type_metadata must not define %q", forbidden)
 		}
 	}
+	if err := validateSummaryPlaceholders(metadata); err != nil {
+		return nil, err
+	}
 
 	path := "/types/" + url.PathEscape(sourceOIN) + "/" + url.PathEscape(definition.TypeID) + "/v" + url.PathEscape(definition.TypeVersion)
 	vct := strings.TrimRight(publicBaseURL, "/") + path
@@ -67,6 +74,50 @@ func newTypeMetadataPublication(publicBaseURL, sourceOIN string, definition sour
 		etag:        `"` + fmt.Sprintf("%x", digest) + `"`,
 		path:        path,
 	}, nil
+}
+
+func validateSummaryPlaceholders(metadata map[string]any) error {
+	requiredIDs := make(map[string]struct{})
+	if displays, ok := metadata["display"].([]any); ok {
+		for _, rawDisplay := range displays {
+			display, ok := rawDisplay.(map[string]any)
+			if !ok {
+				continue
+			}
+			summary, _ := display["summary"].(string)
+			for _, match := range summaryPlaceholderPattern.FindAllStringSubmatch(summary, -1) {
+				if id := strings.TrimSpace(match[1]); id != "" {
+					requiredIDs[id] = struct{}{}
+				}
+			}
+		}
+	}
+	if len(requiredIDs) == 0 {
+		return nil
+	}
+	availableIDs := make(map[string]struct{})
+	if claims, ok := metadata["claims"].([]any); ok {
+		for _, rawClaim := range claims {
+			claim, ok := rawClaim.(map[string]any)
+			if !ok {
+				continue
+			}
+			if id, ok := claim["svg_id"].(string); ok && id != "" {
+				availableIDs[id] = struct{}{}
+			}
+		}
+	}
+	missing := make([]string, 0)
+	for id := range requiredIDs {
+		if _, available := availableIDs[id]; !available {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) > 0 {
+		slices.Sort(missing)
+		return fmt.Errorf("type_metadata summary placeholders require matching claim svg_id values: %s", strings.Join(missing, ", "))
+	}
+	return nil
 }
 
 func validateTypeMetadataBaseURL(publicBaseURL string) error {

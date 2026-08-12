@@ -10,7 +10,7 @@ De uitvoering is fail-closed:
 
 1. valideer de mapping volledig;
 2. volg `result_pointer` vanaf de GraphQL-response;
-3. pas cardinaliteit `exactly_one` toe;
+3. accepteer nul of één resultaat en weiger meerdere resultaten;
 4. lees en typecontroleer iedere claim zonder de waarde te veranderen;
 5. geef alleen bij volledig succes het gehele claimobject terug.
 
@@ -77,14 +77,14 @@ Er zijn geen conversies of operators voor filters, sortering, `first`, joins, co
 | `GBO_SIMPLE_PATH_MISSING` | `result_pointer` of claimpointer bestaat niet |
 | `GBO_SIMPLE_TYPE_MISMATCH` | bronwaarde voldoet niet aan het datatype |
 | `GBO_SIMPLE_RESULT_TYPE` | `result_pointer` wijst niet naar een array |
-| `GBO_SIMPLE_CARDINALITY_AMBIGUOUS` | `exactly_one` ontving meer dan één resultaat |
+| `GBO_SIMPLE_RESULT_AMBIGUOUS` | `result_pointer` selecteerde meer dan één resultaat |
 
 `no_data` is een uitkomst en geen technische foutcode.
 
 ## Machineleesbaar contract en conformance
 
 - Mapping-JSON Schema: `schemas/gbo-simple-v1.schema.json` (Draft 2020-12).
-- Envelope-schema: `schemas/gbo-attestations-v1.schema.json` verwijst via de vaste URN `urn:gov:nl:gbo:schema:gbo-simple-v1:1` naar dat profiel.
+- Envelope-schema: `schemas/gbo-source-metadata-v1.schema.json` verwijst via de vaste URN `urn:gov:nl:gbo:schema:gbo-simple-v1:1` naar dat profiel.
 - Een externe validator moet `schemas/gbo-simple-v1.schema.json` vooraf onder die URN registreren; de testhelper laat deze bundelstap zien.
 - Onafhankelijke fixtures: `services/eudi-adapter/internal/gbosimplev1/testdata/cases.json`.
 - Uitvoeren: `cd services/eudi-adapter && go test ./internal/gbosimplev1`.

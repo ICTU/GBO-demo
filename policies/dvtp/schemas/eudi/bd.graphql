@@ -9,7 +9,7 @@
 # interface covariance (Aftrekpost/VermogensBestanddeel narrow the
 # FiscaalFeit.categorie type), and the mock bron only serves AangifteIH.
 #
-# Attribute naming matches what inkomensverklaring_metadata.json expects
+# Attribute naming matches the Type Metadata generated during onboarding.
 # in the credential-attributes: belastingjaar, verzamelinkomen,
 # indieningsdatum. These fields are shown in the wallet UI.
 

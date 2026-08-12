@@ -45,6 +45,7 @@ _regen () {
 _regen directory-peer  internal-ca.json               directory-internal-cert.json  directory-peer
 _regen edi-issuer      edi-issuer-internal-ca.json    edi-issuer-internal-cert.json orgs/edi-issuer
 _regen bd-mock         bd-mock-internal-ca.json       bd-mock-internal-cert.json    orgs/belastingdienst-mock
+_regen brp-mock        brp-mock-internal-ca.json      brp-mock-internal-cert.json   orgs/brp-mock
 
 echo
 echo ">>> Done. Restart all FSC containers to load the new internal certs."

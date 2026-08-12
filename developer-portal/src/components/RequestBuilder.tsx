@@ -6,6 +6,7 @@ import { curlFor } from '../util/curl'
 import type {
   Citizen, EudiPayload, HistoryRun, IssuancePayload, Organization, Tab, UsePayload,
 } from '../types'
+import type { IssuanceOffer } from '../eudi'
 
 type Props = {
   tab: Tab
@@ -22,12 +23,15 @@ type Props = {
   onSubmit: () => void
   onSaveAsScenario: () => void
   submitting: boolean
+  eudiOffers: IssuanceOffer[]
+  eudiOffersError: string
 }
 
 export default function RequestBuilder({
   tab, setTab, issuancePayload, setIssuancePayload, usePayload, setUsePayload,
   eudiPayload, setEudiPayload,
   citizens, organizations, history, onSubmit, onSaveAsScenario, submitting,
+  eudiOffers, eudiOffersError,
 }: Props) {
   const endpoint =
     tab === 'issuance'
@@ -86,7 +90,13 @@ export default function RequestBuilder({
           <UseForm payload={usePayload} setPayload={setUsePayload} history={history} />
         )}
         {tab === 'eudi-issuance' && (
-          <EudiForm payload={eudiPayload} setPayload={setEudiPayload} citizens={citizens} />
+          <EudiForm
+            payload={eudiPayload}
+            setPayload={setEudiPayload}
+            citizens={citizens}
+            offers={eudiOffers}
+            offersError={eudiOffersError}
+          />
         )}
 
         <HttpPreview text={curlText} />

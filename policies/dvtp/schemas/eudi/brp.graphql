@@ -15,10 +15,9 @@
 # IngeschrevenPersoon side by side; gqlparser does support it, so the
 # relationship is preserved here.
 #
-# Selected for the flow key `eudi:attestation:brp` (see pdp-service
-# loadSchemas). The BD bron keeps its own mirror in eudi/bd.graphql — both
-# bronprofielen expose Query.ingeschrevenPersoon(bsn), which is why they
-# cannot live in one schema document.
+# Used to generate the field map for the BRP attestation policy. The generic
+# FSC flow `eudi:attestation` selects PID-based authorization.
+# The requested fields select this BRP policy path rather than the BD rule.
 
 scalar BAGID
 scalar BSN
@@ -263,6 +262,26 @@ type Buitenlandsadres implements Adres {
   land: CodelijstISO3166!
 }
 
+type AkteVanOverlijden {
+  overledene_geslachtsnaam: String!
+  overledene_voorvoegsel: String!
+  overledene_voornamen: String!
+  overledene_geboortedatum: String!
+  overledene_geboorteplaats: String!
+  overledene_geboorteland: String!
+  overledene_geslacht: String!
+  overledene_ouders: String!
+  datum_overlijden: String!
+  plaats_overlijden: String!
+  land_overlijden: String!
+  soort_verbintenis: String!
+  echtgenoot_geslachtsnaam: String!
+  echtgenoot_voorvoegsel: String!
+  echtgenoot_voornamen: String!
+  verklaring_tekst: String!
+}
+
 type Query {
   ingeschrevenPersoon(bsn: BSN!): IngeschrevenPersoon
+  akteVanOverlijden(bsn: BSN!): [AkteVanOverlijden!]!
 }

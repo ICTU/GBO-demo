@@ -83,7 +83,7 @@ func TestConformanceProjections(t *testing.T) {
 			if len(test.Mapping) > 0 {
 				mapping = decodeMapping(t, test.Mapping)
 			}
-			projection, err := Project(test.Input, test.ResultPointer, "exactly_one", mapping)
+			projection, err := Project(test.Input, test.ResultPointer, mapping)
 			if gotCode := ErrorCodeOf(err); gotCode != test.ErrorCode {
 				t.Fatalf("error code = %q (%v), want %q", gotCode, err, test.ErrorCode)
 			}
@@ -117,7 +117,7 @@ func TestProjectPreservesDecimalNumber(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodeJSON() error = %v", err)
 	}
-	projection, err := Project(root, "/rows", "exactly_one", Mapping{
+	projection, err := Project(root, "/rows", Mapping{
 		"amount": {Pointer: "/amount", Datatype: "number"},
 	})
 	if err != nil {
@@ -136,7 +136,7 @@ func TestProjectRejectsNumbersNotProducedByDecodeJSON(t *testing.T) {
 	}
 	for _, datatype := range []string{"number", "integer", "gYear"} {
 		t.Run(datatype, func(t *testing.T) {
-			_, err := Project(root, "/rows", "exactly_one", Mapping{
+			_, err := Project(root, "/rows", Mapping{
 				"value": {Pointer: "/value", Datatype: datatype},
 			})
 			if got := ErrorCodeOf(err); got != CodeTypeMismatch {
@@ -153,7 +153,7 @@ func TestProjectRejectsNonCanonicalArrayIndices(t *testing.T) {
 	}
 	for _, pointer := range []string{"/list/+0", "/list/-0", "/list/00"} {
 		t.Run(pointer, func(t *testing.T) {
-			_, err := Project(root, "/rows", "exactly_one", Mapping{
+			_, err := Project(root, "/rows", Mapping{
 				"value": {Pointer: pointer, Datatype: "string"},
 			})
 			if got := ErrorCodeOf(err); got != CodePathMissing {

@@ -81,9 +81,7 @@ test_deny_scope_not_in_granted_scopes if {
 # ── Constraint-binding (PI in query-arg must equal resource.pi) ─────────
 
 test_deny_constraint_mismatch if {
-	ctx := object.union(_base_ctx, {
-		"args": {"bsn": "PI-different", "belastingjaren.0": "2025"},
-	})
+	ctx := object.union(_base_ctx, {"args": {"bsn": "PI-different", "belastingjaren.0": "2025"}})
 	result := lib.evaluate(dvt0001.spec, ctx)
 	result.decision == false
 	result.context.reason_admin.code == "CONSTRAINT_MISMATCH"
@@ -102,9 +100,7 @@ test_allow_multiple_years_all_consented if {
 
 test_deny_year_not_consented if {
 	# Consent covers 2025 only; the query asks for 2024 and 2025.
-	ctx := object.union(_base_ctx, {
-		"args": {"bsn": "PI-abc123", "belastingjaren.0": "2025", "belastingjaren.1": "2024"},
-	})
+	ctx := object.union(_base_ctx, {"args": {"bsn": "PI-abc123", "belastingjaren.0": "2025", "belastingjaren.1": "2024"}})
 	result := lib.evaluate(dvt0001.spec, ctx)
 	result.decision == false
 	result.context.reason_admin.code == "YEAR_NOT_COVERED"

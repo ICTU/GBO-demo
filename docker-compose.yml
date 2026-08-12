@@ -157,11 +157,9 @@ services:
     environment:
       - OTEL_SERVICE_NAME=graphql-server
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
-      - GBO_ATTESTATIONS_PATH=${GBO_ATTESTATIONS_PATH:-}
-      - GBO_METADATA_SIGNING_JWK_PATH=${GBO_METADATA_SIGNING_JWK_PATH:-}
+      - GBO_SOURCE_METADATA_PATH=/config/gbo-source-metadata.json
     volumes:
       - ./services/graphql-server/config:/config:ro
-      - ./.local/secrets/source-metadata/99999999900000000200:/source-metadata:ro
     networks:
       - backend
       # bd-Inway forwards bri requests to graphql-server; must therefore
@@ -176,10 +174,8 @@ services:
       timeout: 3s
       retries: 5
 
-  # Second bron: bronprofiel BRP (persoonsgegevens). Registered as its own
-  # FSC service ('brp', outway-path /brp) under the same provider org as the
-  # BD bron — a demo simplification: one provider peer, two bronnen. The
-  # akte-van-overlijden usecase reads from here.
+  # Second bron: bronprofiel BRP (persoonsgegevens). Locally it is published
+  # by its own BRP/RvIG FSC peer (OIN ...0400), separate from BD (OIN ...0200).
   brp-graphql-server:
     build: ./services/brp-graphql-server
     ports:
@@ -187,6 +183,9 @@ services:
     environment:
       - OTEL_SERVICE_NAME=brp-graphql-server
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - GBO_SOURCE_METADATA_PATH=/config/gbo-source-metadata.json
+    volumes:
+      - ./services/brp-graphql-server/config:/config:ro
     networks:
       - backend
       - fsc-infra
@@ -296,7 +295,7 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
       - UPSTREAM_URL=http://brp-graphql-server:4001
       - BSNK_URL=http://bsnk-mock:4003
-      - OWN_PEER_OIN=99999999900000000200
+      - OWN_PEER_OIN=99999999900000000400
       - PSEUDONYM_VARS=bsn
     networks:
       - backend
@@ -392,7 +391,7 @@ services:
       # de pagina uit waarom.
       - VITE_EUDI_PUBLIC_URL=${EUDI_PUBLIC_URL:-}
       - VITE_EUDI_UL_BASE=${EUDI_UL_BASE:-https://app.preproductie.wallet.edi.bzk.nl/deeplink/disclosure_based_issuance}
-      - VITE_EUDI_CLIENT_ID=${EUDI_CLIENT_ID:-reader.example.com}
+      - VITE_EUDI_CLIENT_ID=${EUDI_CLIENT_ID:-}
       - VITE_JAEGER_PUBLIC_URL=${JAEGER_PUBLIC_URL:-http://localhost:9686}
       - VITE_GRAFANA_PUBLIC_URL=${GRAFANA_PUBLIC_URL:-http://localhost:9300}
       # De FSC-controllers draaien in de fsc-infra-stack, met eigen
@@ -540,7 +539,7 @@ services:
       # VITE_* is public — ends up in the built bundle (no secrets here).
       - VITE_EUDI_PUBLIC_URL=${EUDI_PUBLIC_URL:-}
       - VITE_EUDI_UL_BASE=${EUDI_UL_BASE:-https://app.preproductie.wallet.edi.bzk.nl/deeplink/disclosure_based_issuance}
-      - VITE_EUDI_CLIENT_ID=${EUDI_CLIENT_ID:-reader.example.com}
+      - VITE_EUDI_CLIENT_ID=${EUDI_CLIENT_ID:-}
     volumes:
       - ./developer-portal/src:/app/src
       - ./developer-portal/index.html:/app/index.html
@@ -634,20 +633,8 @@ services:
       - "${GBO_PORT_EUDI_ISSUANCE:-18001}:18001"
     environment:
       - ISSUANCE_SERVER__STORAGE__URL=postgres://wallet:${EUDI_POSTGRES_PASSWORD}@postgres-eudi:5432/issuance_server
-      # Three usecases (inkomensverklaring per tax year). Each
-      # disclosure_settings config points at its own adapter path; the
-      # adapter knows the scope + year query per path via
-      # usecase_catalog. 2023 is rejected by EUD0001 (SCOPE_NOT_ALLOWED)
-      # — that is the multi-policy demonstration. Adapter tunnel URL
-      # requires HTTPS (LetsEncrypt chain, TOML trust_anchors).
-      # Fail-loud if the env var is missing.
-      - ISSUANCE_SERVER__DISCLOSURE_SETTINGS__INKOMENSVERKLARING_2023__ATTESTATION_URL_CONFIG__BASE_URL=${EUDI_BRI_URL:?set EUDI_BRI_URL to the eudi-tunnel-bri URL before compose up}inkomensverklaring_2023/
-      - ISSUANCE_SERVER__DISCLOSURE_SETTINGS__INKOMENSVERKLARING_2024__ATTESTATION_URL_CONFIG__BASE_URL=${EUDI_BRI_URL:?set EUDI_BRI_URL to the eudi-tunnel-bri URL before compose up}inkomensverklaring_2024/
-      - ISSUANCE_SERVER__DISCLOSURE_SETTINGS__INKOMENSVERKLARING_2025__ATTESTATION_URL_CONFIG__BASE_URL=${EUDI_BRI_URL:?set EUDI_BRI_URL to the eudi-tunnel-bri URL before compose up}inkomensverklaring_2025/
-      # Fourth usecase, second bron (BRP): akte van overlijden. Same adapter,
-      # same tunnel — the adapter's catalog entry routes it to the /brp FSC
-      # service and to policy EUD0002.
-      - ISSUANCE_SERVER__DISCLOSURE_SETTINGS__AKTE_VAN_OVERLIJDEN__ATTESTATION_URL_CONFIG__BASE_URL=${EUDI_BRI_URL:?set EUDI_BRI_URL to the eudi-tunnel-bri URL before compose up}akte_van_overlijden/
+      # Concrete issuance products, endpoints and Type Metadata are generated
+      # from every active source registration by `make eudi-config`.
       - ISSUANCE_SERVER__UNIVERSAL_LINK_BASE_URL=walletdebuginteraction://wallet.edi.rijksoverheid.nl/
       # Bind addresses explicitly — otherwise default localhost =
       # unreachable from other containers.
@@ -660,19 +647,15 @@ services:
       # Fail-loud.
       - ISSUANCE_SERVER__PUBLIC_URL=${EUDI_PUBLIC_URL:?set EUDI_PUBLIC_URL to the eudi-tunnel URL before compose up}
     volumes:
-      # Runtime config bundled with the demo. WORKDIR is / (scratch) so
-      # everything is mounted at / to match the config's CWD-relative
-      # lookups.
+      # Runtime config generated from the active onboarding records. The
+      # source-specific certificate references remain in each activation;
+      # this does not decide the still-open shared-vs-per-source cert model.
       #
-      # issuance_server.toml is git-ignored — the .example version has
-      # placeholder issuer/reader signing keys. Run `make eudi-config`
-      # (or copy issuance_server.toml.example manually and fill in real
-      # keys) before starting the EUDI profile.
+      # issuance_server.toml is git-ignored because the generator inserts the
+      # referenced signing keys. Run `make eudi-config` before starting the
+      # EUDI profile.
       - ./services/eudi-issuance-server/config/issuance_server.toml:/issuance_server.toml:ro
-      - ./services/eudi-issuance-server/config/inkomensverklaring_metadata.json:/inkomensverklaring_metadata.json:ro
-      - ./services/eudi-issuance-server/config/akte_van_overlijden_metadata.json:/akte_van_overlijden_metadata.json:ro
-      - ./services/eudi-issuance-server/config/issuer_auth.json:/issuer_auth.json:ro
-      - ./services/eudi-issuance-server/config/reader_auth.json:/reader_auth.json:ro
+      - ./services/eudi-issuance-server/config:/config:ro
       - eudi-tsl-publish:/tsl-publish
     depends_on:
       eudi-migrations:
@@ -707,26 +690,51 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
       - FSC_OUTWAY_URL=http://edi-outway:8080
       - ISSUER_OIN=99999999900000000100
-      - USECASE_CATALOG_PATH=/config/usecase_catalog.json
-      # Phase-3 pilot; remains off until phase-4 onboarding has provisioned
-      # the pinned source key and the matching issuance-server VCT.
-      - SOURCE_METADATA_CACHE_ENABLED=${SOURCE_METADATA_CACHE_ENABLED:-false}
-      - SOURCE_METADATA_OUTWAY_PATH=${SOURCE_METADATA_OUTWAY_PATH:-/gbo-attestation-metadata/.well-known/gbo-attestations}
-      # No demo trust defaults: enabling the cache without an explicitly
-      # onboarded source/key must fail closed.
-      - SOURCE_METADATA_OIN=${SOURCE_METADATA_OIN:-}
-      - SOURCE_METADATA_PUBLIC_JWK_PATH=${SOURCE_METADATA_PUBLIC_JWK_PATH:-}
-      - SOURCE_METADATA_TYPE_ID=${SOURCE_METADATA_TYPE_ID:-inkomensverklaring}
-      - SOURCE_METADATA_USECASE_KEY=${SOURCE_METADATA_USECASE_KEY:-inkomensverklaring_2025}
+      # Source metadata is activated from the single atomic onboarding record;
+      # OIN, type and FSC services are not duplicated in env-vars.
+      - SOURCE_ACTIVATIONS_PATH=/var/lib/gbo/active
       - TYPE_METADATA_PUBLIC_BASE_URL=${EUDI_BRI_URL:-}
       - TYPE_METADATA_STORE_PATH=/var/lib/gbo/type-metadata
     volumes:
-      - ./services/eudi-adapter/config:/config:ro
+      - ./.local/onboarding/active:/var/lib/gbo/active:ro
       - ./.local/onboarding/type-metadata:/var/lib/gbo/type-metadata
-      - ./.local/onboarding/trust:/var/lib/gbo/source-trust:ro
     networks:
       - eudi
       - backend
+      - fsc-infra
+
+  # Same image as the issuance runtime, but a separate one-shot process.
+  # Kubernetes can run this command with --watch as a single-replica
+  # Deployment, or without --watch as a CronJob.
+  source-reconciler:
+    build: ./services/eudi-adapter
+    profiles: [onboarding]
+    environment:
+      - EUDI_PUBLIC_URL=${EUDI_PUBLIC_URL:-}
+    command:
+      - ./eudi-adapter
+      - reconcile-fsc-sources
+      - --manager-url=https://edi-manager:9443
+      - --manager-ca=/fsc-certs/intermediate_ca.pem
+      - --manager-cert=/fsc-certs/internal-cert.pem
+      - --manager-key=/fsc-certs/internal-cert-key.pem
+      - --consumer-oin=99999999900000000100
+      - --outway-url=http://edi-outway:8080
+      - --schema=/config/schemas/gbo-source-metadata-v1.schema.json
+      - --type-metadata-base-url=${EUDI_BRI_URL:-http://localhost:9409}
+      - --storage-backend=filesystem
+      - --certificate-store=filesystem
+      - --state-dir=/var/lib/gbo
+      - --secrets-dir=/var/lib/gbo-secrets
+      - --reader-public-url=${EUDI_PUBLIC_URL:-}
+      - --reader-origin-url=${EUDI_READER_ORIGIN_URL:-}
+    volumes:
+      - ./schemas:/config/schemas:ro
+      - ./fsc-infra/orgs/edi-issuer/pki/internal:/fsc-certs:ro
+      - ./.local/onboarding:/var/lib/gbo
+      - ./.local/secrets:/var/lib/gbo-secrets
+      - ./services/eudi-issuance-server/config:/generated
+    networks:
       - fsc-infra
 
 networks:

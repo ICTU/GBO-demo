@@ -1,104 +1,126 @@
-# Lokale onboarding van bronmetadata
+# Bronnen ontdekken en activeren
 
-Fase 4 gebruikt geen aparte onboardingservice. De bestaande `graphql-server`
-publiceert bronmetadata en de bestaande `eudi-adapter` bevat twee eenmalige
-commands:
+GBO configureert geen bronquery of mapping. Een bron publiceert één generiek
+document op `/.well-known/gbo`. De EUDI-capability daarin bevat per type de
+GraphQL-service, query, parameters, concrete aanbiedingen (`offers`), mapping
+en wallet Type Metadata. Later kan hetzelfde document naast
+`capabilities.eudi` bijvoorbeeld `capabilities.oots` bevatten.
 
-- `validate-source` leest de Git-registratie, haalt de JWS via FSC op en
-  valideert registratie, sleutelbinding, handtekening, schema, query, mapping,
-  versies en geldigheid. Dit command schrijft niets.
-- `onboard-source` herhaalt dezelfde validatie, maakt met de geconfigureerde
-  `development-ca`-provider issuer-, reader- en statuscertificaten, publiceert
-  immutable Type Metadata en
-  schrijft pas als laatste de actieve registratie.
+Een offer is een concreet product dat de wallet kan aanbieden. Het heeft een
+stabiele id en vult uitsluitend parameters in die bij de query zijn
+gedeclareerd, bijvoorbeeld `jaar: 2024`. Een offer verleent geen toegang: de
+PDP beoordeelt de gekozen velden en parameterwaarden opnieuw bij ieder gebruik.
+
+## FSC: geen onboardingbestand
+
+Voor een FSC-bron zijn twee geldige service-connection-contracten nodig:
+
+- `gbo-metadata`, om het vaste `/.well-known/gbo`-document op te halen;
+- de dataservice die het brondocument zelf noemt, bijvoorbeeld `bri` of `brp`.
+
+De reconciler leest de contracten uit de FSC Manager van de EUDI-adapterpeer.
+Per contract gebruikt hij de provider-OIN, servicenaam en grant-hash. Daardoor
+staan bron-OIN, FSC-servicebindingen en grant-hashes niet ook nog in Git of in
+losse onboarding-YAML.
+
+De statische `validate-source`- en `onboard-source`-commando's weigeren daarom
+het FSC-transport en verwijzen naar `reconcile-fsc-sources`.
+
+```mermaid
+sequenceDiagram
+    participant R as GBO source reconciler
+    participant M as FSC Manager (EUDI consumer)
+    participant O as FSC Outway
+    participant B as Source
+    participant S as Activation store
+    participant G as Issuance config generator
+    participant I as Issuance server and frontends
+
+    R->>M: List valid service-connection contracts
+    M-->>R: provider OIN + service + grant hash
+    R->>O: GET /.well-known/gbo + metadata grant hash
+    O->>B: FSC mTLS request
+    B-->>R: source metadata
+    R->>R: Validate schema, provider OIN, lifetime and endpoints
+    R->>M: Resolve data contract named by source metadata
+    R->>S: Activate atomically using existing certificates
+    G->>S: Read every active source and offer
+    G-->>I: TOML, Type Metadata and QR offer catalog
+```
+
+De provider-OIN uit het metadata-document moet gelijk zijn aan de provider-OIN
+in het FSC-contract. Metadata en data moeten voor diezelfde provider geldige
+contracten hebben. De issuance-runtime leest alleen geactiveerde records en
+stuurt bij ieder FSC-verzoek de gepinde grant-hash mee. Zonder geldig record of
+bruikbaar contract faalt uitgifte gesloten; er is geen legacyfallback.
 
 ## Wat staat waar?
 
-| Gegeven | Eigenaar | Locatie |
-|---|---|---|
-| OIN, naam, FSC-servicereferenties en JWK-thumbprint | GBO | `sources/<oin>.yaml` in Git |
-| Query, mapping, types en Type Metadata-inhoud | bron | ondertekend `/.well-known/gbo-attestations` via de aparte FSC-service |
-| Publieke metadata-verificatiesleutel en immutable Type Metadata | GBO onboarding | `.local/onboarding/` |
-| Private metadata-, issuer-, reader- en statuskeys | lokale secret-backend | `.local/secrets/` (Git ignored, mode `0600`) |
+| Gegeven | Bron |
+|---|---|
+| Provider-OIN, transportbinding en grant-hash | geldig FSC-contract |
+| Vast metadata-pad | GBO-profiel: `/.well-known/gbo` |
+| Dataservicenaam, GraphQL-endpoint, query, parameters, offers en mapping | bronmetadata |
+| Kaartnaam, kleur, logo, claimlabels en claimschema | Type Metadata in de bronmetadata |
+| Immutable Type Metadata en activatierecord | GBO-onboardingopslag |
+| Issuance-producten en QR-keuzelijst | mechanisch door GBO gegenereerd uit geactiveerde offers |
+| Issuer-, reader- en statuscertificaten en private keys | bevoegde certificaatbeheerder/secretopslag |
 
-De bron publiceert geen GraphQL-schema en er is geen publieke URL-fallback. De
-registratie bevat alleen trust- en transportranden; GBO configureert geen query
-of mapping.
+Een bron publiceert geen GraphQL-schema. De ondersteunde mappingfunctionaliteit
+staat in [gbo-simple-v1.md](gbo-simple-v1.md); onbekende functies of velden
+worden geweigerd.
 
-## Verse lokale checkout
+## Lokaal
 
-Start FSC en de bronmetadata-publicatie, en leg daarna het aparte
-metadatacontract vast. `make fsc-all-up` maakt bij een verse checkout
-automatisch een genegeerde `fsc-infra/.env` met een lokaal databasewachtwoord:
-
-```sh
-make fsc-all-up
-make source-metadata-up
-make fsc-seed-metadata
-```
-
-Valideer eerst zonder wijzigingen:
+De volledige route voor de afzonderlijke BD- en BRP/RvIG-peers is:
 
 ```sh
-make validate-source SOURCE=sources/99999999900000000200.yaml
+make onboard-demo-sources
 ```
 
-Bekijk vervolgens exact dezelfde onboarding zonder writes en voer haar daarna
-uit:
+Deze target start de FSC-peers, publiceert en contracteert hun metadata- en
+dataservices, maakt uitsluitend voor lokaal gebruik expliciet
+ontwikkelcertificaten en draait daarna één reconciliatie. De kernstappen zijn:
 
 ```sh
-make onboard-source SOURCE=sources/99999999900000000200.yaml DRY_RUN=true
-make onboard-source SOURCE=sources/99999999900000000200.yaml
+make provision-development-certificates SOURCE_OIN=99999999900000000200
+make provision-development-certificates SOURCE_OIN=99999999900000000400
+make reconcile-fsc-sources
+make eudi-config
 ```
 
-Het tweede command is idempotent. Een gewijzigde payload onder dezelfde versie,
-een versieterugval, een verkeerde sleutel, een ongeldig certificaat of een
-onbereikbaar FSC-endpoint faalt gesloten.
+`make eudi-config` leest alle activatierecords en genereert zonder
+bron-specifieke catalogus in de adapter:
 
-De bestanden onder `sources/` gebruiken bewust een beperkt, Git-beheerd
-YAML-profiel: precies de vijf gedocumenteerde velden als scalars op het hoogste
-niveau. Geneste waarden, arrays, multilinewaarden, anchors en tags worden niet
-ondersteund. Eén ongeldige registratie blokkeert de validatie van de volledige
-registratieset; dat is bewust fail-closed en het foutbericht noemt het bestand.
+- één nl-wallet `disclosure_settings`-product per offer;
+- `attestation_settings` en Type Metadata per geactiveerd type;
+- `eudi-offers.json` voor de landing-page en developer-portal.
 
-## Issuance-configuratie
+De huidige nl-wallet issuance-server leest deze productconfiguratie alleen bij
+het opstarten. Na een gewijzigde activatie moeten daarom de artifacts opnieuw
+worden gegenereerd en de issuance-server en frontends opnieuw worden uitgerold.
 
-Onboarding schrijft een genegeerd
-`.local/secrets/<oin>/issuance.env`. De configuratie kiest hiervoor expliciet
-`storage-backend=filesystem` en `certificate-provider=development-ca`.
-`make eudi-config` gebruikt dit bestand alleen na expliciete opt-in:
+De reconciler mint of vernieuwt nooit certificaten. Ontbrekende, verlopen of
+niet-passende certificaten blokkeren activatie. In productie worden die door
+een apart bevoegd proces uitgegeven.
 
-```sh
-make eudi-config USE_ONBOARDING_EUDI_ENV=true
-```
+Deze metadataflow beslist niet of alle bronnen één vooraf beheerde GBO
+issuer/reader/status-set delen of ieder een eigen set krijgen. De huidige proof
+behoudt de bestaande certificaatreferenties per activatie; de uiteindelijke
+productiekeuze blijft open.
 
-Het command meldt dan dat de geminte issuer-, reader- en statuscertificaten en
-hun lokale trust-anchors de certificaatwaarden uit `.env` overschrijven. Zonder
-opt-in blijft `.env` leidend.
-URL-configuratie zoals `EUDI_PUBLIC_URL`, `EUDI_READER_ORIGIN_URL` en
-`EUDI_BRI_URL` blijft deploymentconfiguratie in `.env`.
+## Productie
 
-De door onboarding gepubliceerde Type Metadata en gepinde publieke bronkey
-worden vanuit `.local/onboarding/` in de adapter gemount. De tijdelijke
-`SOURCE_METADATA_*` featureflag blijft standaard uit voor rollback; zet
-`SOURCE_METADATA_CACHE_ENABLED=true` om het bronmetadatapad te activeren.
-`SOURCE_METADATA_OIN` en `SOURCE_METADATA_PUBLIC_JWK_PATH` hebben in Compose
-bewust geen demo-defaults: na inschakelen moeten de onboardingswaarden expliciet
-worden ingesteld.
+De reconciler en issuance-runtime gebruiken hetzelfde image maar zijn aparte
+processen. In Kubernetes draait de reconciler als Deployment met één replica
+en `reconcile-fsc-sources --watch`, of als CronJob zonder `--watch`. De
+HTTP-issuance-runtime pollt geen contracten en schrijft geen onboardingstaat.
+Een aparte deploystap draait de configgenerator na een nieuwe activatie en rolt
+de gegenereerde startupconfiguratie en QR-catalogus gecontroleerd uit.
 
-`make demo-eudi` en `make demo-full` maken de bind-mountdirectories vóór
-Compose met de huidige gebruiker aan. Start je Compose rechtstreeks, voer dan
-eerst `make onboarding-directories` uit om root-owned directories op Linux te
-voorkomen.
-
-De generieke CLI is ook het productie-entrypoint. Een PR-job voert alleen
-`validate-source` uit; een goedgekeurde post-mergejob voert `onboard-source` uit
-met productie-implementaties voor opslag, secrets en certificaten. De
-`development-ca`-provider is uitsluitend voor ontwikkeling. Productieproviders
-volgen pas nadat dezelfde flow lokaal end-to-end is bewezen en het
-CA-/trustmodel met het Wallet-team is vastgesteld.
-
-Dezelfde waarden zijn rechtstreeks te configureren met
-`ONBOARDING_STORAGE_BACKEND` en `ONBOARDING_CERTIFICATE_PROVIDER`, of met de
-CLI-flags `--storage-backend` en `--certificate-provider`. Onbekende waarden
-worden vóór provisioning geweigerd.
+Een bron buiten FSC kan later statisch worden geregistreerd met een absoluut
+HTTPS-endpoint, zoals [example-https-mtls.yaml](../sources/example-https-mtls.yaml).
+Dat transportprofiel is bewust nog fail-closed: activering wacht op een
+vastgelegd PKI-profiel, brongebonden clientcertificaten, OIN-controle en
+intrekkingsgedrag. FSC is dus een discoveryprovider, niet een verplichte kern
+van het metadatamodel.

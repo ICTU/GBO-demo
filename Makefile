@@ -1,7 +1,7 @@
-.PHONY: up down logs clean certs fsc-local-env fsc-ca fsc-up fsc-down fsc-test fsc-clean \
+.PHONY: up down logs clean certs fsc-local-env fsc-ca fsc-up fsc-all-up fsc-brp-certs fsc-databases fsc-down fsc-test fsc-clean \
         fsc-seed-bri fsc-seed-bri-hv fsc-seed-brp fsc-seed-metadata fsc-pdp-cert \
-        eudi-images development-source-metadata-key source-metadata-up \
-        validate-source onboard-source onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
+        eudi-images source-metadata-up \
+        validate-source provision-development-certificates onboard-source reconcile-fsc-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
         demo-full demo-down eudi-config
 
 -include .env
@@ -13,18 +13,16 @@ export
 # v0.5.0's scheme-prefixed client_id). Override in .env if needed.
 NLWALLET_PATH ?= $(PWD)/vendor/nl-wallet
 
-# Phase-4 filesystem onboarding. The fixed OIN and deterministic source metadata
-# key are strictly demo-only; issuer/reader/status keys remain randomly
-# generated below the ignored .local/ secret backend.
+# Local filesystem onboarding. Development certificates are provisioned only
+# by the explicit provision-development-certificates target.
 DEVELOPMENT_SOURCE_OIN ?= 99999999900000000200
+DEVELOPMENT_BRP_SOURCE_OIN ?= 99999999900000000400
 ONBOARDING_OUTWAY_URL ?= http://localhost:8087
 ONBOARDING_STATE_DIR ?= $(PWD)/.local/onboarding
 ONBOARDING_SECRETS_DIR ?= $(PWD)/.local/secrets
 ONBOARDING_TYPE_METADATA_URL ?= $(or $(EUDI_BRI_URL),http://localhost:9409)
-ONBOARDING_EUDI_ENV ?= $(ONBOARDING_SECRETS_DIR)/$(DEVELOPMENT_SOURCE_OIN)/issuance.env
-USE_ONBOARDING_EUDI_ENV ?= false
 ONBOARDING_STORAGE_BACKEND ?= filesystem
-ONBOARDING_CERTIFICATE_PROVIDER ?= development-ca
+ONBOARDING_CERTIFICATE_STORE ?= filesystem
 
 # Docker network of the fsc-infra instance this checkout uses. Equals
 # <FSC_PROJECT_NAME>_default; override in fsc-infra/.env to run a
@@ -68,27 +66,10 @@ demo-dvtp: certs fsc-all-up fsc-seed-bri fsc-seed-bri-hv
 	@echo "  Jaeger:              http://localhost:9686  |  http://$$(hostname -I | awk '{print $$1}'):9686"
 
 EUDI_CONFIG_DIR := services/eudi-issuance-server/config
-EUDI_CONFIG_FILES := issuance_server.toml inkomensverklaring_metadata.json \
-    akte_van_overlijden_metadata.json issuer_auth.json reader_auth.json \
-    akte_van_overlijden_issuer_auth.json akte_van_overlijden_reader_auth.json
-EUDI_REQUIRED_VARS := EUDI_PUBLIC_URL EUDI_READER_ORIGIN_URL EUDI_BRI_URL \
-    EUDI_READER_KEY EUDI_READER_CERT \
-    EUDI_ISSUER_KEY EUDI_ISSUER_CERT \
-    EUDI_STATUS_KEY EUDI_STATUS_CERT
+EUDI_REQUIRED_VARS := EUDI_PUBLIC_URL EUDI_BRI_URL
 
 eudi-config:
-	@command -v envsubst >/dev/null 2>&1 || { \
-	  echo "ERROR: envsubst not found. Install with: brew install gettext"; \
-	  exit 1; \
-	}
-	@set -a; [ -f .env ] && . ./.env; \
-	if [ "$(USE_ONBOARDING_EUDI_ENV)" = "true" ]; then \
-	  [ -f "$(ONBOARDING_EUDI_ENV)" ] || { echo "ERROR: onboarding issuance environment not found: $(ONBOARDING_EUDI_ENV)"; exit 1; }; \
-	  echo "-> Using onboarding certificates from $(ONBOARDING_EUDI_ENV) (overrides .env certificate values)"; \
-	  . "$(ONBOARDING_EUDI_ENV)"; \
-	elif [ -f "$(ONBOARDING_EUDI_ENV)" ]; then \
-	  echo "-> Ignoring $(ONBOARDING_EUDI_ENV); set USE_ONBOARDING_EUDI_ENV=true to opt in"; \
-	fi; set +a; \
+	@set -eu; set -a; [ -f .env ] && . ./.env; set +a; \
 	missing=""; for v in $(EUDI_REQUIRED_VARS); do \
 	  eval "val=\$$$$v"; \
 	  [ -n "$$val" ] || missing="$$missing $$v"; \
@@ -97,22 +78,16 @@ eudi-config:
 	  echo "ERROR: missing env-vars (see .env.example):$$missing"; \
 	  exit 1; \
 	fi; \
-	if [ -z "$$EUDI_BRP_ISSUER_CERT" ] || [ -z "$$EUDI_BRP_READER_CERT" ]; then \
-	  echo "WARNING: EUDI_BRP_{ISSUER,READER}_{KEY,CERT} not set — the akte van"; \
-	  echo "         overlijden falls back to the Belastingdienst issuer/reader"; \
-	  echo "         certificates. The wallet will then show 'Belastingdienst' as"; \
-	  echo "         the issuer and 'Uitgifte inkomensverklaring' as the reason for"; \
-	  echo "         sharing the BSN, which is wrong for a BRP akte. Mint a BRP pair"; \
-	  echo "         from akte_van_overlijden_{issuer,reader}_auth.json to fix it."; \
-	fi; \
-	export EUDI_BRP_ISSUER_KEY="$${EUDI_BRP_ISSUER_KEY:-$$EUDI_ISSUER_KEY}"; \
-	export EUDI_BRP_ISSUER_CERT="$${EUDI_BRP_ISSUER_CERT:-$$EUDI_ISSUER_CERT}"; \
-	export EUDI_BRP_READER_KEY="$${EUDI_BRP_READER_KEY:-$$EUDI_READER_KEY}"; \
-	export EUDI_BRP_READER_CERT="$${EUDI_BRP_READER_CERT:-$$EUDI_READER_CERT}"; \
-	for f in $(EUDI_CONFIG_FILES); do \
-	  echo "-> Rendering $(EUDI_CONFIG_DIR)/$$f from $$f.example"; \
-	  envsubst < $(EUDI_CONFIG_DIR)/$$f.example > $(EUDI_CONFIG_DIR)/$$f; \
-	done
+	docker compose --profile onboarding run --build --rm source-reconciler \
+	  ./eudi-adapter generate-issuance-config \
+	  --activations-dir /var/lib/gbo/active \
+	  --template /generated/issuance_server.toml.example \
+	  --adapter-base-url "$$EUDI_BRI_URL" \
+	  --output /generated/issuance_server.toml \
+	  --offers-output /generated/eudi-offers.json; \
+	cp "$(PWD)/$(EUDI_CONFIG_DIR)/eudi-offers.json" "$(PWD)/landing-page/public/eudi-offers.json"; \
+	cp "$(PWD)/$(EUDI_CONFIG_DIR)/eudi-offers.json" "$(PWD)/developer-portal/public/eudi-offers.json"; \
+	echo "-> Generated issuance products and frontend offer catalog from every active source"
 
 # eudi-issuance-server has no published image — built from the local
 # nl-wallet checkout ($NLWALLET_PATH).
@@ -128,26 +103,18 @@ eudi-images:
 	    -f services/eudi-issuance-server/Dockerfile "$$NLWALLET_PATH"; \
 	fi
 
-development-source-metadata-key:
-	@mkdir -p .local/secrets/source-metadata/$(DEVELOPMENT_SOURCE_OIN)
-	@cd services/graphql-server && go run . init-development-metadata-key \
-		--source-oin $(DEVELOPMENT_SOURCE_OIN) \
-		--output $(PWD)/.local/secrets/source-metadata/$(DEVELOPMENT_SOURCE_OIN)/private.jwk
-
-source-metadata-up: development-source-metadata-key
-	GBO_ATTESTATIONS_PATH=/config/gbo-attestations.json \
-	GBO_METADATA_SIGNING_JWK_PATH=/source-metadata/private.jwk \
+source-metadata-up:
 	EUDI_PUBLIC_URL="$${EUDI_PUBLIC_URL:-http://localhost:8001}" \
 	EUDI_BRI_URL="$${EUDI_BRI_URL:-http://localhost:9409}" \
 	EUDI_POSTGRES_PASSWORD="$${EUDI_POSTGRES_PASSWORD:-local-not-used}" \
-		docker compose up --build -d graphql-server
+		docker compose up --build --force-recreate -d openftv-pdp additional-claims-service graphql-server brp-graphql-server bron-sidecar brp-sidecar
 
 validate-source:
 	@test -n "$(SOURCE)" || { echo "ERROR: SOURCE=sources/<oin>.yaml is required"; exit 1; }
 	@cd services/eudi-adapter && go run . validate-source \
 		--source "$(abspath $(SOURCE))" \
 		--outway-url "$(ONBOARDING_OUTWAY_URL)" \
-		--schema "$(PWD)/schemas/gbo-attestations-v1.schema.json" \
+		--schema "$(PWD)/schemas/gbo-source-metadata-v1.schema.json" \
 		--type-metadata-base-url "$(ONBOARDING_TYPE_METADATA_URL)" \
 		--reader-public-url "$${EUDI_PUBLIC_URL:-}" \
 		--reader-origin-url "$${EUDI_READER_ORIGIN_URL:-}" \
@@ -155,7 +122,7 @@ validate-source:
 		--secrets-dir "$(ONBOARDING_SECRETS_DIR)"
 
 onboarding-directories:
-	@mkdir -p "$(ONBOARDING_STATE_DIR)/type-metadata" "$(ONBOARDING_STATE_DIR)/trust" "$(ONBOARDING_STATE_DIR)/active"
+	@mkdir -p "$(ONBOARDING_STATE_DIR)/type-metadata" "$(ONBOARDING_STATE_DIR)/active"
 
 onboard-source:
 	@test -n "$(SOURCE)" || { echo "ERROR: SOURCE=sources/<oin>.yaml is required"; exit 1; }
@@ -163,9 +130,9 @@ onboard-source:
 	cd services/eudi-adapter && go run . onboard-source \
 		--source "$(abspath $(SOURCE))" \
 		--storage-backend "$(ONBOARDING_STORAGE_BACKEND)" \
-		--certificate-provider "$(ONBOARDING_CERTIFICATE_PROVIDER)" \
+		--certificate-store "$(ONBOARDING_CERTIFICATE_STORE)" \
 		--outway-url "$(ONBOARDING_OUTWAY_URL)" \
-		--schema "$(PWD)/schemas/gbo-attestations-v1.schema.json" \
+		--schema "$(PWD)/schemas/gbo-source-metadata-v1.schema.json" \
 		--type-metadata-base-url "$(ONBOARDING_TYPE_METADATA_URL)" \
 		--reader-public-url "$${EUDI_PUBLIC_URL:-}" \
 		--reader-origin-url "$${EUDI_READER_ORIGIN_URL:-}" \
@@ -173,18 +140,39 @@ onboard-source:
 		--secrets-dir "$(ONBOARDING_SECRETS_DIR)" \
 		$$dry_run
 
-demo-eudi: certs fsc-all-up fsc-seed-bri fsc-seed-brp onboarding-directories eudi-config eudi-images
+provision-development-certificates:
+	@test -n "$(SOURCE_OIN)" || { echo "ERROR: SOURCE_OIN=<20-digit OIN> is required"; exit 1; }
+	@cd services/eudi-adapter && go run . provision-development-certificates \
+		--source-oin "$(SOURCE_OIN)" \
+		--reader-public-url "$${EUDI_PUBLIC_URL:-}" \
+		--reader-origin-url "$${EUDI_READER_ORIGIN_URL:-}" \
+		--secrets-dir "$(ONBOARDING_SECRETS_DIR)"
+
+reconcile-fsc-sources: onboarding-directories
+	docker compose --profile onboarding run --build --rm source-reconciler
+
+# Complete, idempotent local onboarding for both demo sources. The sequence is
+# explicit so a clean checkout cannot reach eudi-config before metadata has
+# been published, transported through FSC, verified and activated.
+onboard-demo-sources: certs
+	$(MAKE) fsc-all-up
+	$(MAKE) source-metadata-up
+	$(MAKE) fsc-seed-bri
+	$(MAKE) fsc-seed-brp
+	$(MAKE) fsc-seed-metadata
+	$(MAKE) provision-development-certificates SOURCE_OIN=$(DEVELOPMENT_SOURCE_OIN)
+	$(MAKE) provision-development-certificates SOURCE_OIN=$(DEVELOPMENT_BRP_SOURCE_OIN)
+	$(MAKE) reconcile-fsc-sources
+
+demo-eudi: onboard-demo-sources eudi-config eudi-images
 	@echo "-> EUDI stack: base + eudi branch + fsc-infra"
 	docker compose --profile eudi up --build -d
 	@echo ""
 	@echo "  Dev-portal:      http://localhost:9003  |  http://$$(hostname -I | awk '{print $$1}'):9003"
 	@echo "  EUDI-adapter:    http://localhost:9409  |  http://$$(hostname -I | awk '{print $$1}'):9409"
 	@echo "  Jaeger:          http://localhost:9686  |  http://$$(hostname -I | awk '{print $$1}'):9686"
-	@echo ""
-	@echo "  Manual step: grant-links '/bri' and '/brp' in EDI-Controller-UI"
-	@echo "  (see README.md section 'EUDI flow over real FSC' step 3)"
 
-demo-full: certs fsc-all-up fsc-seed-bri fsc-seed-brp fsc-seed-bri-hv onboarding-directories eudi-config eudi-images
+demo-full: onboard-demo-sources fsc-seed-bri-hv eudi-config eudi-images
 	@echo "-> Full stack: everything on"
 	docker compose --profile full up --build -d
 
@@ -238,6 +226,11 @@ fsc-bd-certs: fsc-up
 		bash fsc-infra/pki/bootstrap-bd-mock.sh; \
 	fi
 
+fsc-brp-certs: fsc-up
+	@if [ ! -f fsc-infra/orgs/brp-mock/pki/org/brp-mock.pem ]; then \
+		bash fsc-infra/pki/bootstrap-brp-mock.sh; \
+	fi
+
 fsc-hv-certs: fsc-up
 	@if [ ! -f fsc-infra/orgs/hypotheekverlener-mock/pki/org/hypotheekverlener.pem ]; then \
 		bash fsc-infra/pki/bootstrap-hypotheekverlener.sh; \
@@ -251,8 +244,22 @@ fsc-pdp-cert:
 		bash fsc-infra/pki/generate-pdp-cert.sh; \
 	fi
 
-fsc-all-up: fsc-directory-certs fsc-edi-certs fsc-bd-certs fsc-hv-certs fsc-pdp-cert
+fsc-all-up: fsc-directory-certs fsc-edi-certs fsc-bd-certs fsc-brp-certs fsc-hv-certs fsc-pdp-cert
+	$(MAKE) fsc-databases
 	docker compose -f fsc-infra/docker-compose.yml up --build -d
+
+# Also creates databases added after an existing local Postgres volume was
+# initialised; the docker-entrypoint init script only runs for a new volume.
+fsc-databases: fsc-local-env
+	docker compose -f fsc-infra/docker-compose.yml up -d --wait postgres
+	@for database in fsc_brp_controller fsc_brp_manager fsc_brp_txlog; do \
+		exists=$$(docker compose -f fsc-infra/docker-compose.yml exec -T postgres \
+			psql -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$$database'"); \
+		if [ "$$exists" != "1" ]; then \
+			echo "-> Creating missing FSC database $$database"; \
+			docker compose -f fsc-infra/docker-compose.yml exec -T postgres createdb -U postgres "$$database"; \
+		fi; \
+	done
 
 fsc-down:
 	docker compose -f fsc-infra/docker-compose.yml down
@@ -270,6 +277,8 @@ fsc-clean:
 	rm -f fsc-infra/orgs/edi-issuer/pki/internal/*.pem
 	rm -f fsc-infra/orgs/belastingdienst-mock/pki/org/*.pem
 	rm -f fsc-infra/orgs/belastingdienst-mock/pki/internal/*.pem
+	rm -f fsc-infra/orgs/brp-mock/pki/org/*.pem
+	rm -f fsc-infra/orgs/brp-mock/pki/internal/*.pem
 	rm -f fsc-infra/orgs/hypotheekverlener-mock/pki/org/*.pem
 	rm -f fsc-infra/orgs/hypotheekverlener-mock/pki/internal/*.pem
 	rm -f services/openftv-pdp/certs/*.pem
@@ -301,31 +310,49 @@ fsc-seed-bri-hv: fsc-local-env
 		gbo-demo/pki-tools:local \
 		bash scripts/seed-bri-connection-hv.sh
 
-# Second bron behind the same provider peer: the BRP service. Same script,
-# different service-name/endpoint/grant-link — see the header of
-# seed-bri-contract.sh. EUDI-only for now (no HV connection), because the
-# akte van overlijden is a wallet usecase.
+# BRP/RvIG is a separate local FSC provider peer (OIN ...0400), with its own
+# Manager, Controller, Inway and contracts.
 fsc-seed-brp: fsc-local-env
 	docker run --rm \
 		--network $(FSC_INFRA_NETWORK) \
 		--env-file fsc-infra/.env \
 		-e SERVICE_NAME=brp \
 		-e SERVICE_ENDPOINT_URL=http://brp-sidecar:4011 \
-		-e GRANT_LINK_PATH=/brp \
+		-e SERVICE_INWAY_ADDRESS=https://brp-inway:443 \
+		-e PROVIDER_PEER_ID=99999999900000000400 \
+		-e PROVIDER_CONTROLLER_URL=https://brp-controller:9444 \
+		-e PROVIDER_MANAGER_URL=https://brp-manager:9443 \
+		-e PROVIDER_INTERNAL_DIR=/work/orgs/brp-mock/pki/internal \
+		-e CREATE_GRANT_LINK=false \
 		-v $(PWD)/fsc-infra:/work:ro \
 		-w /work \
 		gbo-demo/pki-tools:local \
 		bash scripts/seed-bri-contract.sh
 
-# Dedicated, non-public metadata service. The Outway path mirrors the FSC
-# service reference, so onboarding needs no source-owned URL configuration.
+# Each provider publishes the generic metadata service under the same fixed
+# service name. Provider OIN + service name identify the two contracts.
 fsc-seed-metadata: fsc-local-env
 	docker run --rm \
 		--network $(FSC_INFRA_NETWORK) \
 		--env-file fsc-infra/.env \
-		-e SERVICE_NAME=gbo-attestation-metadata \
+		-e SERVICE_NAME=gbo-metadata \
 		-e SERVICE_ENDPOINT_URL=http://graphql-server:4000 \
-		-e GRANT_LINK_PATH=/gbo-attestation-metadata \
+		-e CREATE_GRANT_LINK=false \
+		-v $(PWD)/fsc-infra:/work:ro \
+		-w /work \
+		gbo-demo/pki-tools:local \
+		bash scripts/seed-bri-contract.sh
+	docker run --rm \
+		--network $(FSC_INFRA_NETWORK) \
+		--env-file fsc-infra/.env \
+		-e SERVICE_NAME=gbo-metadata \
+		-e SERVICE_ENDPOINT_URL=http://brp-graphql-server:4001 \
+		-e SERVICE_INWAY_ADDRESS=https://brp-inway:443 \
+		-e PROVIDER_PEER_ID=99999999900000000400 \
+		-e PROVIDER_CONTROLLER_URL=https://brp-controller:9444 \
+		-e PROVIDER_MANAGER_URL=https://brp-manager:9443 \
+		-e PROVIDER_INTERNAL_DIR=/work/orgs/brp-mock/pki/internal \
+		-e CREATE_GRANT_LINK=false \
 		-v $(PWD)/fsc-infra:/work:ro \
 		-w /work \
 		gbo-demo/pki-tools:local \

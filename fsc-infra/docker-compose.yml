@@ -769,5 +769,173 @@ services:
       bd-migrations-txlog-api:
         condition: service_started
 
+  # === BRP/RvIG-mock (provider) =========================================
+
+  brp-migrations-controller:
+    image: federatedserviceconnectivity/controller:v2.4.0
+    restart: on-failure
+    command: [/usr/local/bin/controller, migrate, up]
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_brp_controller?sslmode=disable&connect_timeout=2"
+    volumes:
+      - ./orgs/brp-mock/pki:/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  brp-migrations-manager:
+    image: federatedserviceconnectivity/manager:v2.4.0
+    restart: on-failure
+    command: [/usr/local/bin/manager, migrate, up]
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_brp_manager?sslmode=disable&connect_timeout=2"
+    volumes:
+      - ./orgs/brp-mock/pki:/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  brp-migrations-txlog-api:
+    image: federatedserviceconnectivity/txlog-api:v2.4.0
+    restart: on-failure
+    command: [/usr/local/bin/txlog-api, migrate, up]
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_brp_txlog?sslmode=disable&connect_timeout=2"
+    volumes:
+      - ./orgs/brp-mock/pki:/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  brp-controller:
+    image: federatedserviceconnectivity/controller:v2.4.0
+    restart: unless-stopped
+    ports:
+      - "${FSC_PORT_BRP_CONTROLLER:-8097}:3001"
+    volumes:
+      - ./orgs/brp-mock/pki:/certs:ro
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      LISTEN_ADDRESS_UI: 0.0.0.0:3001
+      LISTEN_ADDRESS_REGISTRATION_API: 0.0.0.0:9443
+      LISTEN_ADDRESS_ADMINISTRATION_API: 0.0.0.0:9444
+      MANAGER_ADDRESS_INTERNAL: https://brp-manager:9443
+      DIRECTORY_ADDRESS: https://directory-manager:8443
+      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_brp_controller?sslmode=disable&connect_timeout=2"
+      AUDITLOG_TYPE: "stdout"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      brp-manager:
+        condition: service_started
+      brp-migrations-controller:
+        condition: service_started
+
+  brp-manager:
+    image: federatedserviceconnectivity/manager:v2.4.0
+    restart: unless-stopped
+    command: ["/usr/local/bin/manager", "serve", "--auto-sign-grants=serviceConnection"]
+    volumes:
+      - ./orgs/brp-mock/pki:/certs:ro
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      TLS_GROUP_CERT: /certs/org/brp-mock.pem
+      TLS_GROUP_KEY: /certs/org/brp-mock-key.pem
+      TLS_GROUP_TOKEN_CERT: /certs/org/brp-mock.pem
+      TLS_GROUP_TOKEN_KEY: /certs/org/brp-mock-key.pem
+      TLS_GROUP_CONTRACT_CERT: /certs/org/brp-mock.pem
+      TLS_GROUP_CONTRACT_KEY: /certs/org/brp-mock-key.pem
+      TLS_INTERNAL_UNAUTHENTICATED_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_INTERNAL_UNAUTHENTICATED_CERT: /certs/internal/internal-cert.pem
+      TLS_INTERNAL_UNAUTHENTICATED_KEY: /certs/internal/internal-cert-key.pem
+      LISTEN_ADDRESS_INTERNAL: 0.0.0.0:9443
+      LISTEN_ADDRESS_INTERNAL_UNAUTHENTICATED: 0.0.0.0:9444
+      LISTEN_ADDRESS_EXTERNAL: 0.0.0.0:8443
+      CONTROLLER_REGISTRATION_API_ADDRESS: https://brp-controller:9443
+      TX_LOG_API_ADDRESS: https://brp-txlog-api:9443
+      SELF_ADDRESS: "https://brp-manager:8443"
+      DIRECTORY_MANAGER_ADDRESS: "https://directory-manager:8443"
+      DIRECTORY_PEER_ID: "99999999900000000000"
+      ADDITIONAL_CLAIMS_API_ADDRESS: "http://additional-claims-service:4012"
+      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_brp_manager?sslmode=disable&connect_timeout=2"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      brp-migrations-manager:
+        condition: service_started
+      brp-txlog-api:
+        condition: service_started
+
+  brp-inway:
+    image: federatedserviceconnectivity/inway:v2.4.0
+    restart: unless-stopped
+    volumes:
+      - ./orgs/brp-mock/pki:/certs:ro
+      - ../services/openftv-pdp/certs:/authzen-ca:ro
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      TLS_GROUP_CERT: /certs/org/brp-mock.pem
+      TLS_GROUP_KEY: /certs/org/brp-mock-key.pem
+      LISTEN_ADDRESS: 0.0.0.0:443
+      NAME: BrpInway-01
+      SELF_ADDRESS: "https://brp-inway:443"
+      CONTROLLER_REGISTRATION_API_ADDRESS: https://brp-controller:9443
+      TX_LOG_API_ADDRESS: https://brp-txlog-api:9443
+      MANAGER_INTERNAL_UNAUTHENTICATED_ADDRESS: https://brp-manager:9444
+      AUTHZEN_SERVICE_ADDRESS: https://openftv-pdp:8443/authzen/v1
+      AUTHZEN_ROOT_CA: /authzen-ca/pdp-service.pem
+      AUTHZEN_WITH_BODY: "true"
+    depends_on:
+      - brp-controller
+      - brp-manager
+      - brp-txlog-api
+
+  brp-txlog-api:
+    image: federatedserviceconnectivity/txlog-api:v2.4.0
+    restart: unless-stopped
+    volumes:
+      - ./orgs/brp-mock/pki:/certs:ro
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_brp_txlog?sslmode=disable&connect_timeout=2"
+      LISTEN_ADDRESS: 0.0.0.0:9443
+      LISTEN_ADDRESS_PLAIN: 0.0.0.0:8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+      brp-migrations-txlog-api:
+        condition: service_started
+
 volumes:
   postgres-data:
