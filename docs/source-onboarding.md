@@ -87,8 +87,29 @@ hebben voor conflicterende of incomplete brondata.
 ## Lokaal
 
 Voor een volledige nieuwe checkout, inclusief `.env`, vertrouwde wallet-CA's,
-publieke URL's, Cloudflare-cachebypass en de uiteindelijke QR-test, volg
-[Fresh checkout: complete DvTP + EUDI flow](../README.md#fresh-checkout-complete-dvtp--eudi-flow).
+publieke URL's, Cloudflare-cachebypass en de uiteindelijke QR-test, volg de
+[Quick start](../README.md#quick-start) en
+[EUDI-walkthrough](../README.md#eudi-wallet-issuance).
+
+### Vertrouwde ontwikkel-CA's
+
+Zonder bestaande CA maakt de lokale provisioning een eigen, geïsoleerde
+ontwikkel-CA. Een preproductiewallet vertrouwt die niet. Plaats daarom vóór de
+onboarding de reeds door de testwallet vertrouwde CA's op deze genegeerde
+locaties:
+
+```bash
+mkdir -p .local/secrets/development-ca
+install -m 600 <ca-dir>/ca.gbo-issuer.key.pem .local/secrets/development-ca/issuer-ca-key.pem
+install -m 644 <ca-dir>/ca.gbo-issuer.crt.pem .local/secrets/development-ca/issuer-ca-cert.pem
+install -m 600 <ca-dir>/ca.gbo-reader.key.pem .local/secrets/development-ca/reader-ca-key.pem
+install -m 644 <ca-dir>/ca.gbo-reader.crt.pem .local/secrets/development-ca/reader-ca-cert.pem
+```
+
+De privésleutels zijn alleen nodig om met de expliciete lokale
+provisioningstap demo-leafcertificaten te maken. Commit `.local/` nooit en maak
+geen nieuwe CA om alleen een hostnamefout op te lossen: een onbekende root
+blijft door de wallet geweigerd.
 
 De volledige route voor de afzonderlijke BD- en BRP/RvIG-peers is:
 
