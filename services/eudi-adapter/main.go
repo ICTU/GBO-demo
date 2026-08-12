@@ -110,8 +110,8 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
-// issuanceServerRequest — a real disclosure can carry the BSN in two
-// places (reverse-engineered from bri-mock.rs::extract_bsn):
+// issuanceServerRequest supports the two disclosure shapes used by the
+// issuance integration:
 //   - `attributes.urn:eudi:pid:nl:1.bsn` (nested, real PID sd-jwt)
 //   - `attributes.bsn` (flat, test shape)
 //
@@ -124,8 +124,7 @@ type issuanceServerRequest []struct {
 	ID string `json:"id"`
 }
 
-// extractBSN scans the attributes map for a BSN. It follows the same
-// pattern as bri-mock.rs::extract_bsn: first nested under the PID
+// extractBSN scans the attributes map for a BSN: first nested under the PID
 // namespace, then flat.
 func extractBSN(attrs map[string]any) string {
 	if nested, ok := attrs["urn:eudi:pid:nl:1"].(map[string]any); ok {
@@ -147,10 +146,9 @@ func extractBSN(attrs map[string]any) string {
 	return ""
 }
 
-// attestation matches 1:1 the shape returned by bri-mock (reverse-
-// engineered via curl). The issuance-server expects a flat array — no
-// envelope; metadata (CA, issuer_uri, validity) is pulled by the
-// issuance-server itself from its own config.
+// attestation is the generic shape consumed by the issuance-server. It
+// expects a flat array without an envelope; credential metadata is resolved
+// from the generated issuance configuration.
 type attestation struct {
 	AttestationType string         `json:"attestation_type"`
 	Attributes      map[string]any `json:"attributes"`
