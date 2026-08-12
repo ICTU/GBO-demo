@@ -29,7 +29,9 @@ ONBOARDING_CERTIFICATE_STORE ?= filesystem
 # Docker network of the fsc-infra instance this checkout uses. Equals
 # <FSC_PROJECT_NAME>_default; override in fsc-infra/.env to run a
 # per-worktree fsc-infra side by side with another checkout's.
-FSC_INFRA_NETWORK ?= fsc-infra_default
+FSC_PROJECT_NAME ?= fsc-infra
+FSC_INFRA_NETWORK ?= $(FSC_PROJECT_NAME)_default
+FSC_COMPOSE = docker compose -p $(FSC_PROJECT_NAME) -f fsc-infra/docker-compose.yml
 
 up: certs
 	docker compose up --build -d
@@ -230,7 +232,7 @@ demo-full: onboard-demo-sources fsc-seed-bri-hv eudi-config eudi-images
 
 demo-down:
 	docker compose --profile full --profile manager down
-	docker compose -f fsc-infra/docker-compose.yml down
+	$(FSC_COMPOSE) down
 
 logs:
 	docker compose logs -f
@@ -255,7 +257,7 @@ fsc-ca:
 	@if [ ! -f fsc-infra/pki/ca/root.pem ]; then bash fsc-infra/pki/generate-root-ca.sh; fi
 
 fsc-up: fsc-local-env fsc-ca
-	docker compose -f fsc-infra/docker-compose.yml up --build -d cfssl certportal
+	$(FSC_COMPOSE) up --build -d cfssl certportal
 
 fsc-directory-certs: fsc-up
 	@if [ ! -f fsc-infra/directory-peer/pki/org/directory-peer.pem ]; then \
@@ -263,7 +265,7 @@ fsc-directory-certs: fsc-up
 	fi
 
 fsc-directory-up: fsc-directory-certs
-	docker compose -f fsc-infra/docker-compose.yml up --build -d cfssl certportal postgres directory-migrations-controller directory-migrations-manager directory-migrations-txlog-api directory-controller directory-manager directory-inway directory-txlog-api directory-ui
+	$(FSC_COMPOSE) up --build -d cfssl certportal postgres directory-migrations-controller directory-migrations-manager directory-migrations-txlog-api directory-controller directory-manager directory-inway directory-txlog-api directory-ui
 
 fsc-edi-certs: fsc-up
 	@if [ ! -f fsc-infra/orgs/edi-issuer/pki/org/edi-issuer.pem ]; then \
@@ -271,7 +273,7 @@ fsc-edi-certs: fsc-up
 	fi
 
 fsc-edi-up: fsc-directory-up fsc-edi-certs
-	docker compose -f fsc-infra/docker-compose.yml up --build -d cfssl certportal postgres directory-migrations-controller directory-migrations-manager directory-migrations-txlog-api directory-controller directory-manager directory-inway directory-txlog-api directory-ui edi-migrations-controller edi-migrations-manager edi-migrations-txlog-api edi-controller edi-manager edi-outway edi-txlog-api
+	$(FSC_COMPOSE) up --build -d cfssl certportal postgres directory-migrations-controller directory-migrations-manager directory-migrations-txlog-api directory-controller directory-manager directory-inway directory-txlog-api directory-ui edi-migrations-controller edi-migrations-manager edi-migrations-txlog-api edi-controller edi-manager edi-outway edi-txlog-api
 
 fsc-bd-certs: fsc-up
 	@if [ ! -f fsc-infra/orgs/belastingdienst-mock/pki/org/bd-mock.pem ]; then \
@@ -289,7 +291,7 @@ fsc-hv-certs: fsc-up
 	fi
 
 fsc-bd-up: fsc-directory-up fsc-bd-certs
-	docker compose -f fsc-infra/docker-compose.yml up --build -d cfssl certportal postgres directory-migrations-controller directory-migrations-manager directory-migrations-txlog-api directory-controller directory-manager directory-inway directory-txlog-api directory-ui bd-migrations-controller bd-migrations-manager bd-migrations-txlog-api bd-controller bd-manager bd-inway bd-txlog-api
+	$(FSC_COMPOSE) up --build -d cfssl certportal postgres directory-migrations-controller directory-migrations-manager directory-migrations-txlog-api directory-controller directory-manager directory-inway directory-txlog-api directory-ui bd-migrations-controller bd-migrations-manager bd-migrations-txlog-api bd-controller bd-manager bd-inway bd-txlog-api
 
 fsc-pdp-cert:
 	@if [ ! -f services/openftv-pdp/certs/pdp-service.pem ]; then \
@@ -298,29 +300,29 @@ fsc-pdp-cert:
 
 fsc-all-up: fsc-directory-certs fsc-edi-certs fsc-bd-certs fsc-brp-certs fsc-hv-certs fsc-pdp-cert
 	$(MAKE) fsc-databases
-	docker compose -f fsc-infra/docker-compose.yml up --build -d
+	$(FSC_COMPOSE) up --build -d
 
 # Also creates databases added after an existing local Postgres volume was
 # initialised; the docker-entrypoint init script only runs for a new volume.
 fsc-databases: fsc-local-env
-	docker compose -f fsc-infra/docker-compose.yml up -d --wait postgres
+	$(FSC_COMPOSE) up -d --wait postgres
 	@for database in fsc_brp_controller fsc_brp_manager fsc_brp_txlog; do \
-		exists=$$(docker compose -f fsc-infra/docker-compose.yml exec -T postgres \
+		exists=$$($(FSC_COMPOSE) exec -T postgres \
 			psql -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$$database'"); \
 		if [ "$$exists" != "1" ]; then \
 			echo "-> Creating missing FSC database $$database"; \
-			docker compose -f fsc-infra/docker-compose.yml exec -T postgres createdb -U postgres "$$database"; \
+			$(FSC_COMPOSE) exec -T postgres createdb -U postgres "$$database"; \
 		fi; \
 	done
 
 fsc-down:
-	docker compose -f fsc-infra/docker-compose.yml down
+	$(FSC_COMPOSE) down
 
 fsc-test: fsc-up
 	bash fsc-infra/test/request-org-cert.sh
 
 fsc-clean:
-	docker compose -f fsc-infra/docker-compose.yml down -v --rmi local
+	$(FSC_COMPOSE) down -v --rmi local
 	rm -f fsc-infra/pki/ca/*.pem fsc-infra/pki/ca/*.csr
 	rm -f fsc-infra/directory-peer/pki/org/*.pem
 	rm -f fsc-infra/directory-peer/pki/internal/*.pem
