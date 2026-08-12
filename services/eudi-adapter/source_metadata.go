@@ -2,12 +2,10 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"mime"
-	"net/http"
+	"math"
 	"strconv"
 	"time"
 
@@ -122,48 +120,6 @@ type sourceMetadataRuntime interface {
 	current(now time.Time) (*activeSourceMetadata, error)
 }
 
-// loadSourceMetadata fetches the declaration through the onboarded transport,
-// validates its OIN and selects the activated type.
-func loadSourceMetadata(ctx context.Context, client *http.Client, cfg sourceMetadataConfig) (*activeSourceMetadata, error) {
-	if cfg.URL == "" || cfg.ExpectedOIN == "" || cfg.TypeID == "" {
-		return nil, fmt.Errorf("source metadata registration is incomplete")
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cfg.URL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create source metadata request: %w", err)
-	}
-	req.Header.Set("Accept", sourceMetadataMediaType)
-	if cfg.MetadataTransport == sourceTransportFSC {
-		fscTxID, err := newFscTransactionID()
-		if err != nil {
-			return nil, fmt.Errorf("generate source metadata Fsc-Transaction-Id: %w", err)
-		}
-		req.Header.Set("Fsc-Transaction-Id", fscTxID)
-		req.Header.Set("Fsc-Grant-Hash", cfg.MetadataGrantHash)
-	} else {
-		return nil, fmt.Errorf("source metadata transport %q is configured but not implemented", cfg.MetadataTransport)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("fetch source metadata: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("source metadata status %d", resp.StatusCode)
-	}
-	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
-	if err != nil || mediaType != sourceMetadataMediaType {
-		return nil, fmt.Errorf("source metadata content type must be %s", sourceMetadataMediaType)
-	}
-	payload, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return nil, fmt.Errorf("read source metadata: %w", err)
-	}
-
-	metadata, _, err := parseSourceMetadataPayload(payload, cfg)
-	return metadata, err
-}
-
 func parseSourceMetadataPayload(payload []byte, cfg sourceMetadataConfig) (*activeSourceMetadata, sourceMetadataDocument, error) {
 	var document sourceMetadataDocument
 	decoder := json.NewDecoder(bytes.NewReader(payload))
@@ -201,8 +157,11 @@ func parseSourceMetadataPayload(payload []byte, cfg sourceMetadataConfig) (*acti
 }
 
 func validateSourceAttestation(definition sourceAttestationDefinition) error {
-	if definition.TypeVersion == "" {
-		return fmt.Errorf("type_version is required")
+	if !typeIDPattern.MatchString(definition.TypeID) {
+		return fmt.Errorf("type_id has an invalid format")
+	}
+	if !numericVersionPattern.MatchString(definition.TypeVersion) {
+		return fmt.Errorf("type_version has an invalid format")
 	}
 	if definition.GraphQL.SubjectVariable == "" {
 		return fmt.Errorf("graphql.subject_variable is required")
@@ -315,6 +274,30 @@ func formatOfferParameter(name, parameterType string, value any) (string, error)
 		default:
 			return "", fmt.Errorf("source parameter %q must be an integer", name)
 		}
+	case "number":
+		var number float64
+		switch value := value.(type) {
+		case float64:
+			number = value
+		case float32:
+			number = float64(value)
+		case int:
+			number = float64(value)
+		case int64:
+			number = float64(value)
+		case json.Number:
+			parsed, err := value.Float64()
+			if err != nil {
+				return "", fmt.Errorf("source parameter %q must be a number", name)
+			}
+			number = parsed
+		default:
+			return "", fmt.Errorf("source parameter %q must be a number", name)
+		}
+		if math.IsNaN(number) || math.IsInf(number, 0) {
+			return "", fmt.Errorf("source parameter %q must be a finite number", name)
+		}
+		return strconv.FormatFloat(number, 'g', -1, 64), nil
 	case "boolean":
 		boolean, ok := value.(bool)
 		if !ok {
@@ -366,15 +349,15 @@ func validateAttributeSchema(definition sourceAttestationDefinition) error {
 			if attribute.Type != "number" {
 				return fmt.Errorf("attribute_schema claim %q can only declare a unit for type number", claim)
 			}
-			if !isISO4217Alpha3(attribute.Unit) {
-				return fmt.Errorf("attribute_schema claim %q unit must be an ISO 4217 alpha-3 code", claim)
+			if !isUppercaseAlpha3(attribute.Unit) {
+				return fmt.Errorf("attribute_schema claim %q unit must be a three-letter uppercase code", claim)
 			}
 		}
 	}
 	return nil
 }
 
-func isISO4217Alpha3(unit string) bool {
+func isUppercaseAlpha3(unit string) bool {
 	if len(unit) != 3 {
 		return false
 	}
@@ -412,7 +395,40 @@ func (s *activeSourceMetadata) queryPlan(bsn string, supplied map[string][]strin
 			return sourceQueryPlan{}, fmt.Errorf("request supplies undeclared source parameter %q", name)
 		}
 	}
+	if !s.matchesPublishedOffer(supplied, variables) {
+		return sourceQueryPlan{}, fmt.Errorf("source parameters do not match a published offer")
+	}
 	return sourceQueryPlan{ServiceReference: s.Definition.GraphQL.ServiceReference, Endpoint: s.Definition.GraphQL.Endpoint, Query: s.Definition.GraphQL.Document, Variables: variables}, nil
+}
+
+func (s *activeSourceMetadata) matchesPublishedOffer(supplied map[string][]string, variables map[string]any) bool {
+	for _, offer := range s.Definition.Offers {
+		if len(offer.Parameters) != len(supplied) {
+			continue
+		}
+		matches := true
+		for name, offeredValue := range offer.Parameters {
+			parameter, declared := s.Definition.GraphQL.Parameters[name]
+			if !declared {
+				matches = false
+				break
+			}
+			offered, err := formatOfferParameter(name, parameter.Type, offeredValue)
+			if err != nil {
+				matches = false
+				break
+			}
+			requested, err := formatOfferParameter(name, parameter.Type, variables[name])
+			if err != nil || requested != offered {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return true
+		}
+	}
+	return false
 }
 
 func parseSourceParameter(name, parameterType, raw string) (any, error) {
@@ -427,8 +443,8 @@ func parseSourceParameter(name, parameterType, raw string) (any, error) {
 		return value, nil
 	case "number":
 		value, err := strconv.ParseFloat(raw, 64)
-		if err != nil {
-			return nil, fmt.Errorf("source parameter %q must be a number", name)
+		if err != nil || math.IsNaN(value) || math.IsInf(value, 0) {
+			return nil, fmt.Errorf("source parameter %q must be a finite number", name)
 		}
 		return value, nil
 	case "boolean":

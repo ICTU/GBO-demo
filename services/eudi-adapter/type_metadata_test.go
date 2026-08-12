@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 func TestPublishedTypeMetadataIsBoundToItsExactBytes(t *testing.T) {
@@ -73,6 +75,61 @@ func TestPublishedTypeMetadataIsBoundToItsExactBytes(t *testing.T) {
 	}
 }
 
+func TestPublishedSchemaAcceptsIssuerManagedVCTClaims(t *testing.T) {
+	definition := sourceAttestationDefinition{
+		TypeID:      "example",
+		TypeVersion: "1.0",
+		Mapping: map[string]mappingRule{
+			"name": {Pointer: "/name", Datatype: "string"},
+		},
+		TypeMetadata: json.RawMessage(`{
+			"schema":{
+				"$schema":"https://json-schema.org/draft/2020-12/schema",
+				"type":"object",
+				"properties":{"name":{"type":"string"}},
+				"required":["name"]
+			}
+		}`),
+	}
+	publication, err := newTypeMetadataPublication("https://issuer.example", "99999999900000000200", definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal(publication.body, &metadata); err != nil {
+		t.Fatal(err)
+	}
+	compiler := jsonschema.NewCompiler()
+	if err := compiler.AddResource("credential.schema.json", metadata["schema"]); err != nil {
+		t.Fatal(err)
+	}
+	schema, err := compiler.Compile("credential.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	credential := map[string]any{
+		"vct":           publication.VCT,
+		"vct#integrity": publication.Integrity,
+		"name":          "Example",
+	}
+	if err := schema.Validate(credential); err != nil {
+		t.Fatalf("credential with issuer-managed vct claims did not validate: %v", err)
+	}
+}
+
+func TestTypeMetadataBaseURLRequiresHTTPSOutsideLoopback(t *testing.T) {
+	for _, raw := range []string{"http://issuer.example", "http://192.0.2.1"} {
+		if err := validateTypeMetadataBaseURL(raw); err == nil {
+			t.Errorf("validateTypeMetadataBaseURL(%q) accepted public HTTP", raw)
+		}
+	}
+	for _, raw := range []string{"https://issuer.example", "http://localhost:9409", "http://127.0.0.1:9409"} {
+		if err := validateTypeMetadataBaseURL(raw); err != nil {
+			t.Errorf("validateTypeMetadataBaseURL(%q) = %v", raw, err)
+		}
+	}
+}
+
 func TestSourceCannotSupplyVCTOrIntegrity(t *testing.T) {
 	for _, forbidden := range []string{"vct", "vct#integrity"} {
 		t.Run(forbidden, func(t *testing.T) {
@@ -85,6 +142,22 @@ func TestSourceCannotSupplyVCTOrIntegrity(t *testing.T) {
 				t.Fatalf("source-controlled %q was accepted", forbidden)
 			}
 		})
+	}
+}
+
+func TestOptionalMappingClaimCannotBeRequiredByTypeMetadata(t *testing.T) {
+	definition := sourceAttestationDefinition{
+		TypeID:      "example",
+		TypeVersion: "1.0",
+		Mapping: map[string]mappingRule{
+			"optional_claim": {Pointer: "/optional_claim", Datatype: "string", Optional: true},
+		},
+		TypeMetadata: json.RawMessage(`{
+			"schema":{"type":"object","required":["optional_claim"]}
+		}`),
+	}
+	if _, err := newTypeMetadataPublication("https://issuer.example", "99999999900000000200", definition); err == nil {
+		t.Fatal("optional mapping claim required by Type Metadata was accepted")
 	}
 }
 

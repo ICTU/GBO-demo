@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
@@ -34,6 +35,31 @@ type activatedType struct {
 	VCTIntegrity          string        `json:"vct_integrity"`
 	TypeMetadataReference string        `json:"type_metadata_reference"`
 	Offers                []sourceOffer `json:"offers"`
+}
+
+func (t activatedType) validate() error {
+	if !typeIDPattern.MatchString(t.TypeID) {
+		return fmt.Errorf("type_id has an invalid format")
+	}
+	if !numericVersionPattern.MatchString(t.TypeVersion) {
+		return fmt.Errorf("type_version has an invalid format")
+	}
+	if t.VCT == "" || t.TypeMetadataReference == "" || len(t.Offers) == 0 {
+		return fmt.Errorf("attestation type is incomplete")
+	}
+	if !validSHA256Integrity(t.VCTIntegrity) {
+		return fmt.Errorf("vct_integrity must be a SHA-256 integrity value")
+	}
+	return nil
+}
+
+func validSHA256Integrity(value string) bool {
+	const prefix = "sha256-"
+	if !strings.HasPrefix(value, prefix) {
+		return false
+	}
+	digest, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(value, prefix))
+	return err == nil && len(digest) == sha256.Size
 }
 
 type onboardingOptions struct {

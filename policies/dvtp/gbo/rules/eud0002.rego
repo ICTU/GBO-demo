@@ -11,18 +11,16 @@ package dvtp.gbo.rules.eud0002
 # The two EUDI rules never compete for a field because their
 # covers_fields are disjoint.
 #
-# Note on the data subject: the query is rooted at the requester's own BSN
-# (the disclosed PID), and everything else is reached through her own
-# persoonslijst. That is the authorization argument for releasing another
-# person's overlijdensgegevens here: only the huwelijkspartner can walk
-# this path, and only for the marriage she is herself a party to.
+# Note on the data subject: the source-owned resolver is rooted at the
+# requester's own BSN (the disclosed PID) and selects a marriage from her own
+# persoonslijst. The PDP can constrain this resolver and its flat output
+# fields, but cannot inspect the underlying marriage walk. Correctly selecting
+# the partner whose death ended that marriage is therefore a security-sensitive
+# source invariant and is tested in the BRP service.
 #
 # Deliberately NOT in this V1 spec (same carve-outs as EUD0001):
 #   - PID-signature verification (adapter trusts BSN from disclosed PID)
 #   - Wallet-cert check
-#   - A check that the verbintenis is actually ontbonden by overlijden —
-#     that is a data-shape concern, enforced by the adapter (no overleden
-#     partner -> no attestation), not a policy axis.
 
 rule_id := "EUD0002"
 

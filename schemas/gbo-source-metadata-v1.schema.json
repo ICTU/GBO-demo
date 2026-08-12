@@ -268,6 +268,7 @@
             "type": [
               "string",
               "integer",
+              "number",
               "boolean"
             ]
           }

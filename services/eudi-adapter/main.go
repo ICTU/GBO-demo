@@ -191,6 +191,7 @@ func handleSourceAttestation(cfg config, client *http.Client, runtime sourceMeta
 	return func(w http.ResponseWriter, r *http.Request) {
 		metadata, err := runtime.current(time.Now())
 		if err != nil {
+			logSourceAttestationError(r, "metadata", err)
 			http.Error(w, "source metadata unavailable", http.StatusServiceUnavailable)
 			return
 		}
@@ -203,22 +204,29 @@ func handleSourceAttestation(cfg config, client *http.Client, runtime sourceMeta
 		}
 		body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
 		if err != nil {
-			http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
+			logSourceAttestationError(r, "read_request", err)
+			http.Error(w, "invalid issuance request", http.StatusBadRequest)
 			return
 		}
 		var request issuanceServerRequest
 		if err := json.Unmarshal(body, &request); err != nil || len(request) == 0 || len(request[0].Attestations) == 0 {
+			if err == nil {
+				err = fmt.Errorf("issuance request contains no disclosed attestation")
+			}
+			logSourceAttestationError(r, "decode_request", err)
 			http.Error(w, "invalid PID disclosure", http.StatusBadRequest)
 			return
 		}
 		bsn := extractBSN(request[0].Attestations[0].Attributes)
 		if bsn == "" {
+			logSourceAttestationError(r, "extract_subject", fmt.Errorf("disclosed PID contains no BSN"))
 			http.Error(w, "no BSN in disclosed PID", http.StatusBadRequest)
 			return
 		}
 		plan, err := metadata.queryPlan(bsn, r.URL.Query())
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			logSourceAttestationError(r, "parameters", err)
+			http.Error(w, "invalid attestation parameters", http.StatusBadRequest)
 			return
 		}
 		trace.SpanFromContext(r.Context()).SetAttributes(
@@ -227,21 +235,23 @@ func handleSourceAttestation(cfg config, client *http.Client, runtime sourceMeta
 		)
 		result, err := callSource(r.Context(), client, cfg, plan)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
+			logSourceAttestationError(r, "source_request", err)
+			http.Error(w, "source request failed", http.StatusBadGateway)
 			return
 		}
 		projection, err := metadata.project(result.Raw)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
+			logSourceAttestationError(r, "projection", err)
+			http.Error(w, "source response could not be projected", http.StatusBadGateway)
 			return
 		}
 		if projection.Outcome == gbosimplev1.OutcomeNoData {
 			http.Error(w, "source has no data for this subject and parameters", http.StatusNotFound)
 			return
 		}
-		if metadata.VCTIntegrity != "" {
-			projection.Claims["vct#integrity"] = metadata.VCTIntegrity
-		}
+		// nl-wallet turns attestation_type into the credential's vct and
+		// computes vct#integrity from the installed Type Metadata bytes. Both
+		// are internal claims and must not be supplied as ordinary attributes.
 		documents := []attestation{{
 			AttestationType: metadata.VCT,
 			Attributes:      projection.Claims,
@@ -253,6 +263,15 @@ func handleSourceAttestation(cfg config, client *http.Client, runtime sourceMeta
 			slog.Error("encode source attestation response", "err", err.Error())
 		}
 	}
+}
+
+func logSourceAttestationError(r *http.Request, stage string, err error) {
+	slog.Error("source attestation request failed",
+		"stage", stage,
+		"source_oin", r.PathValue("sourceOIN"),
+		"type_id", r.PathValue("typeID"),
+		"err", err.Error(),
+	)
 }
 
 type sourceRuntimeBinding struct {
@@ -282,12 +301,12 @@ type sourceTypeMetadataHandler struct {
 
 func (h sourceTypeMetadataHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/types/"), "/")
-	if len(parts) < 1 || parts[0] == "" {
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
 		http.NotFound(w, r)
 		return
 	}
 	for _, binding := range h.bindings {
-		if binding.config.SourceMetadataOIN == parts[0] {
+		if binding.config.SourceMetadataOIN == parts[0] && binding.config.SourceMetadataTypeID == parts[1] {
 			if publisher, ok := binding.runtime.(http.Handler); ok {
 				publisher.ServeHTTP(w, r)
 				return
@@ -354,9 +373,9 @@ func randomSpanIDHex() string {
 
 // callViaFSC posts the source-owned query to the data service selected by the
 // activated onboarding record.
-// The Outway matches the path prefix against configured grant-links and
-// resolves it to the grant-hash — no Fsc-Grant-Hash header needed; the
-// adapter knows nothing about hashes or contract details.
+// The activation pins the data contract's grant-hash. The adapter sends that
+// hash explicitly so the Outway uses exactly the contract that was reviewed
+// and activated for this source and type.
 //
 // The Outway opens mTLS to the Inway (from the contract) and sets
 // Fsc-Authorization: Bearer <token> itself. The Inway validates and
@@ -503,7 +522,7 @@ func newRuntimeMux(ctx context.Context, cfg config, client *http.Client) *http.S
 	for _, activatedConfig := range activatedConfigs {
 		cache, err := loadConfiguredSourceMetadataCache(client, activatedConfig)
 		if err != nil {
-			activationErr = errors.Join(activationErr, fmt.Errorf("%s/%s: %w", activatedConfig.SourceMetadataOIN, activatedConfig.SourceMetadataTypeID, err))
+			slog.Error("source metadata cache activation failed; source route remains fail-closed", "source_oin", activatedConfig.SourceMetadataOIN, "type_id", activatedConfig.SourceMetadataTypeID, "err", err.Error())
 			bindings = append(bindings, sourceRuntimeBinding{activatedConfig, newUnavailableSourceMetadataRuntime(
 				activatedConfig.SourceMetadataOIN, activatedConfig.SourceMetadataTypeID, activatedConfig.TypeMetadataStorePath, err,
 			)})

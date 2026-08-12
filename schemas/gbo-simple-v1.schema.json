@@ -30,6 +30,10 @@
         },
         "datatype": {
           "enum": ["string", "boolean", "integer", "number", "date", "gYear"]
+        },
+        "optional": {
+          "type": "boolean",
+          "default": false
         }
       }
     }

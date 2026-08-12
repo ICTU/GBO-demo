@@ -630,6 +630,28 @@ func stringValue(value *string) string {
 	return *value
 }
 
+func nullableString(value *string) any {
+	if value == nil || *value == "" {
+		return nil
+	}
+	return *value
+}
+
+func nullableNonEmpty(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
+// datumVolledig reports whether a BRP DatumIncompleet contains a full date.
+// Partial dates cannot safely be compared day-for-day and are therefore not
+// rejected by the equality guard below.
+func datumVolledig(value string) bool {
+	_, err := time.Parse(time.DateOnly, value)
+	return err == nil
+}
+
 func volledigeNaam(voornamen, voorvoegsel, geslachtsnaam string) string {
 	parts := make([]string, 0, 3)
 	for _, part := range []string{voornamen, voorvoegsel, geslachtsnaam} {
@@ -653,6 +675,13 @@ func akteVanOverlijden(persoon Persoon) (map[string]any, bool) {
 		}
 		for _, partner := range huwelijk.Partners {
 			if partner.ID == persoon.ID || stringValue(partner.DatumOverlijden) == "" {
+				continue
+			}
+			// An ex-partner may die after a different dissolution. When both
+			// DatumIncompleet values are full dates, the marriage must have
+			// ended on this partner's date of death.
+			if datumVolledig(stringValue(huwelijk.DatumOntbinding)) && datumVolledig(stringValue(partner.DatumOverlijden)) &&
+				stringValue(huwelijk.DatumOntbinding) != stringValue(partner.DatumOverlijden) {
 				continue
 			}
 			if !found || stringValue(partner.DatumOverlijden) > stringValue(selectedPartner.DatumOverlijden) {
@@ -691,26 +720,31 @@ func akteVanOverlijden(persoon Persoon) (map[string]any, bool) {
 	}
 	return map[string]any{
 		"overledene_geslachtsnaam":  selectedPartner.Geslachtsnaam,
-		"overledene_voorvoegsel":    stringValue(selectedPartner.Voorvoegsel),
-		"overledene_voornamen":      stringValue(selectedPartner.Voornamen),
-		"overledene_geboortedatum":  stringValue(selectedPartner.Geboortedatum),
-		"overledene_geboorteplaats": stringValue(selectedPartner.Geboorteplaats),
-		"overledene_geboorteland":   stringValue(selectedPartner.Geboorteland),
-		"overledene_geslacht":       selectedPartner.Geslacht,
-		"overledene_ouders":         strings.Join(ouders, "; "),
+		"overledene_voorvoegsel":    nullableString(selectedPartner.Voorvoegsel),
+		"overledene_voornamen":      nullableString(selectedPartner.Voornamen),
+		"overledene_geboortedatum":  nullableString(selectedPartner.Geboortedatum),
+		"overledene_geboorteplaats": nullableString(selectedPartner.Geboorteplaats),
+		"overledene_geboorteland":   nullableString(selectedPartner.Geboorteland),
+		"overledene_geslacht":       nullableNonEmpty(selectedPartner.Geslacht),
+		"overledene_ouders":         nullableNonEmpty(strings.Join(ouders, "; ")),
 		"datum_overlijden":          stringValue(selectedPartner.DatumOverlijden),
-		"plaats_overlijden":         stringValue(selectedPartner.PlaatsOverlijden),
-		"land_overlijden":           stringValue(selectedPartner.LandOverlijden),
+		"plaats_overlijden":         nullableString(selectedPartner.PlaatsOverlijden),
+		"land_overlijden":           nullableString(selectedPartner.LandOverlijden),
 		"soort_verbintenis":         selectedHuwelijk.SoortVerbintenis,
-		"echtgenoot_geslachtsnaam":  persoon.Geslachtsnaam,
-		"echtgenoot_voorvoegsel":    stringValue(persoon.Voorvoegsel),
-		"echtgenoot_voornamen":      stringValue(persoon.Voornamen),
+		"echtgenoot_geslachtsnaam":  nullableNonEmpty(persoon.Geslachtsnaam),
+		"echtgenoot_voorvoegsel":    nullableString(persoon.Voorvoegsel),
+		"echtgenoot_voornamen":      nullableString(persoon.Voornamen),
 		"verklaring_tekst":          verklaring + ".",
 	}, true
 }
 
 func buildSchema(tracer trace.Tracer, store map[string]Persoon) (graphql.Schema, error) {
 	akteFields := graphql.Fields{}
+	requiredAkteFields := map[string]bool{
+		"overledene_geslachtsnaam": true,
+		"overledene_voornamen":     true,
+		"datum_overlijden":         true,
+	}
 	for _, name := range []string{
 		"overledene_geslachtsnaam", "overledene_voorvoegsel", "overledene_voornamen",
 		"overledene_geboortedatum", "overledene_geboorteplaats", "overledene_geboorteland",
@@ -718,7 +752,11 @@ func buildSchema(tracer trace.Tracer, store map[string]Persoon) (graphql.Schema,
 		"land_overlijden", "soort_verbintenis", "echtgenoot_geslachtsnaam",
 		"echtgenoot_voorvoegsel", "echtgenoot_voornamen", "verklaring_tekst",
 	} {
-		akteFields[name] = &graphql.Field{Type: graphql.NewNonNull(graphql.String)}
+		fieldType := graphql.Type(graphql.String)
+		if requiredAkteFields[name] {
+			fieldType = graphql.NewNonNull(graphql.String)
+		}
+		akteFields[name] = &graphql.Field{Type: fieldType}
 	}
 	akteType := graphql.NewObject(graphql.ObjectConfig{Name: "AkteVanOverlijden", Fields: akteFields})
 	queryType := graphql.NewObject(graphql.ObjectConfig{
@@ -823,7 +861,7 @@ func initTracer(ctx context.Context) (func(context.Context) error, error) {
 // newMux builds the routing tree for the BRP GraphQL server. Extracted from
 // main so integration tests can wire the handlers to an httptest.Server
 // without starting the real listener.
-func newMux(schema *graphql.Schema, tracer trace.Tracer, publisher ...http.Handler) *http.ServeMux {
+func newMux(schema *graphql.Schema, tracer trace.Tracer, publisher http.Handler) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	// UI off. The one graphql-go/handler bundles is GraphiQL 0.11 from an
@@ -855,8 +893,8 @@ func newMux(schema *graphql.Schema, tracer trace.Tracer, publisher ...http.Handl
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
-	if len(publisher) == 1 && publisher[0] != nil {
-		mux.Handle("/.well-known/gbo", publisher[0])
+	if publisher != nil {
+		mux.Handle("/.well-known/gbo", publisher)
 	}
 
 	return mux

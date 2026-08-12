@@ -44,6 +44,13 @@ test_deny_year_not_allowed if {
 	result.context.reason_admin.code == "YEAR_NOT_ALLOWED"
 }
 
+test_deny_non_numeric_year if {
+	ctx := object.union(_base_ctx, {"args": {"belastingjaren.0": "2023x"}})
+	result := lib.evaluate(eud0001.spec, ctx)
+	result.decision == false
+	result.context.reason_admin.code == "YEAR_NOT_ALLOWED"
+}
+
 test_deny_year_missing if {
 	ctx := object.union(object.remove(_base_ctx, ["args"]), {"args": {}})
 	result := lib.evaluate(eud0001.spec, ctx)

@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 )
@@ -58,6 +61,44 @@ func compileSourceMetadataSchema(t *testing.T) *jsonschema.Schema {
 		t.Fatalf("compile source metadata schema: %v", err)
 	}
 	return schema
+}
+
+func fetchSourceMetadataForTest(ctx context.Context, client *http.Client, cfg sourceMetadataConfig) (*activeSourceMetadata, error) {
+	if cfg.URL == "" || cfg.ExpectedOIN == "" || cfg.TypeID == "" {
+		return nil, fmt.Errorf("source metadata registration is incomplete")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cfg.URL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create source metadata request: %w", err)
+	}
+	req.Header.Set("Accept", sourceMetadataMediaType)
+	if cfg.MetadataTransport != sourceTransportFSC {
+		return nil, fmt.Errorf("source metadata transport %q is configured but not implemented", cfg.MetadataTransport)
+	}
+	fscTxID, err := newFscTransactionID()
+	if err != nil {
+		return nil, fmt.Errorf("generate source metadata Fsc-Transaction-Id: %w", err)
+	}
+	req.Header.Set("Fsc-Transaction-Id", fscTxID)
+	req.Header.Set("Fsc-Grant-Hash", cfg.MetadataGrantHash)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch source metadata: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("source metadata status %d", resp.StatusCode)
+	}
+	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	if err != nil || mediaType != sourceMetadataMediaType {
+		return nil, fmt.Errorf("source metadata content type must be %s", sourceMetadataMediaType)
+	}
+	payload, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, fmt.Errorf("read source metadata: %w", err)
+	}
+	metadata, _, err := parseSourceMetadataPayload(payload, cfg)
+	return metadata, err
 }
 
 func TestAttributeSchemaUnknownPropertiesRejectedByRuntimeAndEnvelopeSchema(t *testing.T) {
@@ -120,8 +161,8 @@ func TestAttributeSchemaUnitRejectedByRuntimeAndEnvelopeSchema(t *testing.T) {
 	if err := json.Unmarshal(mutated, &document); err != nil {
 		t.Fatalf("runtime decode error = %v", err)
 	}
-	if err := validateSourceAttestation(document.eudiAttestations()[0]); err == nil || !strings.Contains(err.Error(), "ISO 4217") {
-		t.Fatalf("runtime validation error = %v, want ISO 4217 rejection", err)
+	if err := validateSourceAttestation(document.eudiAttestations()[0]); err == nil || !strings.Contains(err.Error(), "three-letter uppercase") {
+		t.Fatalf("runtime validation error = %v, want uppercase alpha-3 rejection", err)
 	}
 	metadata, err := jsonschema.UnmarshalJSON(bytes.NewReader(mutated))
 	if err != nil {
@@ -160,7 +201,7 @@ func TestAdapterUsesSourceMetadataFor2025(t *testing.T) {
 	}))
 	defer metadataServer.Close()
 
-	metadata, err := loadSourceMetadata(context.Background(), http.DefaultClient, sourceMetadataConfig{
+	metadata, err := fetchSourceMetadataForTest(context.Background(), http.DefaultClient, sourceMetadataConfig{
 		URL: metadataServer.URL + "/metadata/.well-known/gbo", MetadataTransport: sourceTransportFSC,
 		DataTransport: sourceTransportFSC, ExpectedOIN: "99999999900000000200", TypeID: "inkomensverklaring",
 	})
@@ -247,6 +288,10 @@ func newIncomeSourceAdapter(t *testing.T, mapping map[string]mappingRule, bronRe
 		SourceOIN: "99999999900000000200",
 		TypeID:    "inkomensverklaring",
 		Definition: sourceAttestationDefinition{
+			Offers: []sourceOffer{{
+				ID: "inkomensverklaring_2025", Label: "Inkomensverklaring 2025",
+				Parameters: map[string]any{"jaar": 2025},
+			}},
 			GraphQL: sourceGraphQL{
 				ServiceReference: "bri",
 				Endpoint:         "/source-query",
@@ -286,6 +331,76 @@ func newIncomeSourceAdapter(t *testing.T, mapping map[string]mappingRule, bronRe
 	srv := httptest.NewServer(newMux(cfg, http.DefaultClient, metadata))
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+func TestSourceAttestationRejectsParametersOutsidePublishedOffers(t *testing.T) {
+	srv := newIncomeSourceAdapter(t, phase1IncomeMapping(), completeIncomeResponse)
+	resp := postDisclosure(t, srv, "/attestations/99999999900000000200/inkomensverklaring?jaar=2023", "123456789")
+	defer resp.Body.Close()
+	if got, want := resp.StatusCode, http.StatusBadRequest; got != want {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want %d; body=%s", got, want, body)
+	}
+}
+
+func TestSourceAttestationDoesNotExposeUpstreamErrorBody(t *testing.T) {
+	metadata := &activeSourceMetadata{
+		SourceOIN: "99999999900000000200", TypeID: "example", VCT: "https://issuer.example/types/99999999900000000200/example/v1",
+		Definition: sourceAttestationDefinition{
+			Offers:  []sourceOffer{{ID: "example", Label: "Example", Parameters: map[string]any{}}},
+			GraphQL: sourceGraphQL{ServiceReference: "example", Endpoint: "/graphql", Document: "query Example($bsn: BSN!) { example(bsn: $bsn) { value } }", SubjectVariable: "bsn", ResultPointer: "/data/example"},
+			Mapping: map[string]mappingRule{"value": {Pointer: "/value", Datatype: "string"}},
+		},
+	}
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusInternalServerError,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader("sensitive upstream diagnostics")),
+		}, nil
+	})}
+	mux := newMux(config{OutwayURL: "https://outway.example", SourceDataTransport: sourceTransportFSC, SourceDataFSCServiceReference: "example", SourceDataFSCGrantHash: "grant"}, client, metadata)
+	disclosure := `[{
+		"attestations":[{"attributes":{"urn:eudi:pid:nl:1":{"bsn":"123456789"}}}]
+	}]`
+	recorder := httptest.NewRecorder()
+	mux.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "http://adapter/attestations/99999999900000000200/example", strings.NewReader(disclosure)))
+	if got, want := recorder.Code, http.StatusBadGateway; got != want {
+		t.Fatalf("status = %d, want %d; body=%s", got, want, recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), "sensitive") {
+		t.Fatalf("response exposed upstream body: %s", recorder.Body.String())
+	}
+}
+
+type typeRoutingRuntime struct {
+	metadata activeSourceMetadata
+	body     string
+}
+
+func (r *typeRoutingRuntime) current(time.Time) (*activeSourceMetadata, error) {
+	return &r.metadata, nil
+}
+
+func (r *typeRoutingRuntime) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
+	_, _ = io.WriteString(w, r.body)
+}
+
+func TestTypeMetadataRoutingUsesSourceAndType(t *testing.T) {
+	const sourceOIN = "99999999900000000200"
+	bindings := []sourceRuntimeBinding{
+		{config: config{SourceMetadataOIN: sourceOIN, SourceMetadataTypeID: "type-one"}, runtime: &typeRoutingRuntime{body: "type-one"}},
+		{config: config{SourceMetadataOIN: sourceOIN, SourceMetadataTypeID: "type-two"}, runtime: &typeRoutingRuntime{body: "type-two"}},
+	}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/types/"+sourceOIN+"/type-two/v1", nil)
+	sourceTypeMetadataHandler{bindings: bindings}.ServeHTTP(recorder, request)
+	if got, want := recorder.Code, http.StatusOK; got != want {
+		t.Fatalf("status = %d, want %d", got, want)
+	}
+	if got, want := recorder.Body.String(), "type-two"; got != want {
+		t.Fatalf("body = %q, want %q", got, want)
+	}
 }
 
 const completeIncomeResponse = `{
@@ -446,7 +561,7 @@ func TestSourceMetadataRejectedDuringOnboarding(t *testing.T) {
 			}))
 			defer server.Close()
 
-			_, err := loadSourceMetadata(context.Background(), http.DefaultClient, sourceMetadataConfig{
+			_, err := fetchSourceMetadataForTest(context.Background(), http.DefaultClient, sourceMetadataConfig{
 				URL: server.URL, MetadataTransport: sourceTransportFSC, DataTransport: sourceTransportFSC,
 				ExpectedOIN: test.expectedOIN, TypeID: "inkomensverklaring",
 			})
@@ -529,8 +644,10 @@ func TestAdapterUsesBRPSourceQueryAndMapping(t *testing.T) {
 	if got, want := documents[0].Attributes["overledene_geslachtsnaam"], "Vries"; got != want {
 		t.Errorf("mapped BRP claim = %v, want %v", got, want)
 	}
-	if got, want := documents[0].Attributes["vct#integrity"], active.VCTIntegrity; got != want {
-		t.Errorf("vct#integrity = %v, want %v", got, want)
+	for _, internalClaim := range []string{"vct", "vct#integrity"} {
+		if value, exists := documents[0].Attributes[internalClaim]; exists {
+			t.Errorf("internal claim %q was sent as an IssuableDocument attribute: %v", internalClaim, value)
+		}
 	}
 }
 

@@ -100,6 +100,17 @@
       "error_code": "GBO_SIMPLE_PATH_MISSING"
     },
     {
+      "name": "missing optional claim is omitted",
+      "input": {"data": {"rows": [{"person": {"active": true}}]}},
+      "result_pointer": "/data/rows",
+      "mapping": {
+        "active": {"pointer": "/person/active", "datatype": "boolean"},
+        "claim": {"pointer": "/missing", "datatype": "string", "optional": true}
+      },
+      "outcome": "credential",
+      "claims": {"active": true}
+    },
+    {
       "name": "wrong scalar type",
       "input": {"data": {"rows": [{"value": "42"}]}},
       "result_pointer": "/data/rows",
@@ -112,6 +123,17 @@
       "result_pointer": "/data/rows",
       "mapping": {"claim": {"pointer": "/value", "datatype": "string"}},
       "error_code": "GBO_SIMPLE_TYPE_MISMATCH"
+    },
+    {
+      "name": "null optional claim is omitted",
+      "input": {"data": {"rows": [{"active": true, "value": null}]}},
+      "result_pointer": "/data/rows",
+      "mapping": {
+        "active": {"pointer": "/active", "datatype": "boolean"},
+        "value": {"pointer": "/value", "datatype": "string", "optional": true}
+      },
+      "outcome": "credential",
+      "claims": {"active": true}
     },
     {
       "name": "signed array index is not canonical",

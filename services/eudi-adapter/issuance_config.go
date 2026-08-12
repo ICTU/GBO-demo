@@ -118,6 +118,11 @@ func generateIssuanceConfig(options issuanceConfigOptions) error {
 			if err != nil {
 				return fmt.Errorf("read activated Type Metadata for %s/%s: %w", activation.Source.SourceOIN, activatedType.TypeID, err)
 			}
+			metadataDigest := sha256.Sum256(metadataBody)
+			metadataIntegrity := "sha256-" + base64.StdEncoding.EncodeToString(metadataDigest[:])
+			if metadataIntegrity != activatedType.VCTIntegrity {
+				return fmt.Errorf("activated Type Metadata integrity mismatch for %s/%s", activation.Source.SourceOIN, activatedType.TypeID)
+			}
 			if err := os.MkdirAll(filepath.Dir(options.outputPath), 0o755); err != nil {
 				return fmt.Errorf("create issuance config directory: %w", err)
 			}
@@ -161,9 +166,12 @@ func generateIssuanceConfig(options issuanceConfigOptions) error {
 	rendered := string(templateBody)
 	rendered = strings.Replace(rendered, "${EUDI_ONBOARDING_ISSUER_TRUST_ANCHOR}", renderTrustAnchors(issuerAnchors), 1)
 	rendered = strings.Replace(rendered, "${EUDI_ONBOARDING_READER_TRUST_ANCHOR}", renderTrustAnchors(readerAnchors), 1)
+	rendered, err = expandRequiredEnvironment(rendered)
+	if err != nil {
+		return err
+	}
 	rendered = strings.Replace(rendered, "{{TYPE_METADATA_FILES}}", renderStringList(metadataFiles, "  "), 1)
 	rendered = strings.Replace(rendered, "{{GENERATED_ISSUANCE_SETTINGS}}", settings.String(), 1)
-	rendered = os.ExpandEnv(rendered)
 	if strings.Contains(rendered, "${") || strings.Contains(rendered, "{{") {
 		return fmt.Errorf("issuance config template contains an unresolved placeholder")
 	}
@@ -182,6 +190,26 @@ func generateIssuanceConfig(options issuanceConfigOptions) error {
 		return fmt.Errorf("write public issuance offers: %w", err)
 	}
 	return nil
+}
+
+func expandRequiredEnvironment(template string) (string, error) {
+	missing := make(map[string]struct{})
+	expanded := os.Expand(template, func(name string) string {
+		value, exists := os.LookupEnv(name)
+		if !exists || value == "" {
+			missing[name] = struct{}{}
+		}
+		return value
+	})
+	if len(missing) > 0 {
+		names := make([]string, 0, len(missing))
+		for name := range missing {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		return "", fmt.Errorf("issuance config template requires unset environment variable(s): %s", strings.Join(names, ", "))
+	}
+	return expanded, nil
 }
 
 func parseAdapterBaseURL(raw string) (*url.URL, error) {
@@ -220,8 +248,8 @@ func loadIssuanceActivations(directory string) ([]sourceActivation, error) {
 			return nil, fmt.Errorf("activation %s is incomplete", entry.Name())
 		}
 		for _, activatedType := range activation.Types {
-			if activatedType.TypeID == "" || activatedType.VCT == "" || activatedType.TypeMetadataReference == "" || len(activatedType.Offers) == 0 {
-				return nil, fmt.Errorf("activation %s contains an incomplete attestation type", entry.Name())
+			if err := activatedType.validate(); err != nil {
+				return nil, fmt.Errorf("activation %s contains an invalid attestation type: %w", entry.Name(), err)
 			}
 		}
 		activations = append(activations, activation)
@@ -330,7 +358,7 @@ func appendDisclosureSettings(builder *strings.Builder, key, endpoint, adapterTr
 
 func appendAttestationSettings(builder *strings.Builder, vct string, material issuanceCertificateMaterial) {
 	statusDigest := sha256.Sum256([]byte(vct))
-	statusPath := "/tsl/" + hex.EncodeToString(statusDigest[:6])
+	statusPath := "/tsl/" + hex.EncodeToString(statusDigest[:])
 	quotedVCT := strconv.Quote(vct)
 	_, _ = fmt.Fprintf(builder, "\n[attestation_settings.%s]\nvalid_days = 365\ncopies_per_format = { \"dc+sd-jwt\" = 4 }\nprivate_key_type = \"software\"\nprivate_key = %s\ncertificate = %s\n\n", quotedVCT, strconv.Quote(material.issuerKey), strconv.Quote(material.issuerCert))
 	_, _ = fmt.Fprintf(builder, "[attestation_settings.%s.status_list]\ncontext_path = %s\npublish_dir = \"/tsl-publish\"\nprivate_key_type = \"software\"\nprivate_key = %s\ncertificate = %s\n", quotedVCT, strconv.Quote(statusPath), strconv.Quote(material.statusKey), strconv.Quote(material.statusCert))

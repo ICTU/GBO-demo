@@ -11,10 +11,10 @@ De uitvoering is fail-closed:
 1. valideer de mapping volledig;
 2. volg `result_pointer` vanaf de GraphQL-response;
 3. accepteer nul of één resultaat en weiger meerdere resultaten;
-4. lees en typecontroleer iedere claim zonder de waarde te veranderen;
+4. lees en typecontroleer iedere claim zonder de waarde te veranderen; sla alleen expliciet optionele `null`/afwezige claims over;
 5. geef alleen bij volledig succes het gehele claimobject terug.
 
-Er wordt nooit een gedeeltelijk claimobject uitgegeven. Een lege resultatenlijst is de afzonderlijke uitkomst `no_data`; meer dan één resultaat is een fout.
+Een fout in een verplichte of aanwezige claim breekt de volledige projectie af; alleen vooraf als optioneel gemarkeerde afwezige claims mogen ontbreken. Een lege resultatenlijst is de afzonderlijke uitkomst `no_data`; meer dan één resultaat is een fout.
 
 ## Toegestane regels
 
@@ -26,6 +26,8 @@ Iedere claimregel heeft exact deze vorm:
   "datatype": "date"
 }
 ```
+
+Een optionele claim voegt uitsluitend `"optional": true` toe.
 
 Ook bedragen worden ongewijzigd gekopieerd:
 
@@ -53,9 +55,9 @@ Een bronwaarde `43000.50` blijft dus `43000.50`; GBO rondt niet af en kiest geen
 
 ## Null en optionele claims
 
-Alle claims in een `gbo-simple-v1`-mapping zijn verplicht en non-null. Een ontbrekend pointerpad geeft `GBO_SIMPLE_PATH_MISSING`; een aanwezige JSON-waarde `null` geeft `GBO_SIMPLE_TYPE_MISMATCH`. In beide gevallen ontstaat geen credentialkandidaat.
+Een mappingregel is standaard verplicht en non-null. Een ontbrekend pointerpad geeft dan `GBO_SIMPLE_PATH_MISSING`; een aanwezige JSON-waarde `null` geeft `GBO_SIMPLE_TYPE_MISMATCH`.
 
-Dit profiel kan een claim dus niet conditioneel weglaten. De bronresolver moet alleen een resultaat teruggeven wanneer alle gemapte claims gevuld zijn, anders nul resultaten (`no_data`). Een nullable bronveld dat geen verplicht credentialgegeven is, blijft buiten de mapping of wordt door de bronresolver verwerkt tot een non-null domain-ready veld. Als een toekomstig attestatietype werkelijk conditioneel ontbrekende claims moet ondersteunen, vereist dat een nieuw versiegebonden mappingprofiel; `gbo-simple-v1` krijgt daarvoor niet stilzwijgend conditionals of defaults.
+Een bron kan een werkelijk optioneel credentialgegeven expliciet markeren met `optional: true`. Alleen voor zo'n regel worden een ontbrekend pointerpad en JSON `null` overgeslagen. Een lege string blijft een echte waarde en wordt dus niet stilzwijgend verwijderd. De bronresolver moet afwezigheid daarom als `null` publiceren en niet als `""`. Selectie, defaults en andere conditionele logica blijven buiten het profiel.
 
 ## Grenzen
 
@@ -67,7 +69,7 @@ Dit profiel kan een claim dus niet conditioneel weglaten. De bronresolver moet a
 
 ## Niet toegestaan
 
-Er zijn geen conversies of operators voor filters, sortering, `first`, joins, conditionals, defaults, scripts, templates, expressies, netwerk- of andere externe I/O. Onbekende properties en datatypes worden geweigerd; ze worden nooit genegeerd. Domeinselectie, representatiekeuzes en afgeleide waarden horen in de resolver van de bron en moeten vóór projectie exact één domain-ready resultaat opleveren.
+Er zijn geen conversies of operators voor filters, sortering, `first`, joins, conditionals, defaults, scripts, templates, expressies, netwerk- of andere externe I/O. `optional` bepaalt uitsluitend of `null`/afwezig wordt overgeslagen. Onbekende properties en datatypes worden geweigerd; ze worden nooit genegeerd. Domeinselectie, representatiekeuzes en afgeleide waarden horen in de resolver van de bron en moeten vóór projectie exact één domain-ready resultaat opleveren.
 
 ## Foutcodes
 

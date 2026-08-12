@@ -286,8 +286,10 @@ func TestAdapterActivatesOnlyCachedTypeAndBindsIssuableDocument(t *testing.T) {
 	if got := documents[0].AttestationType; got != active.VCT {
 		t.Errorf("attestation_type = %q, want active VCT %q", got, active.VCT)
 	}
-	if got := documents[0].Attributes["vct#integrity"]; got != active.VCTIntegrity {
-		t.Errorf("vct#integrity = %v, want %q", got, active.VCTIntegrity)
+	for _, internalClaim := range []string{"vct", "vct#integrity"} {
+		if value, exists := documents[0].Attributes[internalClaim]; exists {
+			t.Errorf("internal claim %q was sent as an IssuableDocument attribute: %v", internalClaim, value)
+		}
 	}
 }
 
@@ -434,7 +436,19 @@ func TestActiveSourceRegistrationResolvesRuntimeBinding(t *testing.T) {
 			MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportFSC, ServiceReference: "gbo-metadata", Path: "/metadata/v1", GrantHash: "metadata-grant"},
 			DataAccess:       sourceDataAccess{Transport: sourceTransportFSC, ServiceReference: "bri", GrantHash: "data-grant"},
 		},
-		Types: []activatedType{{TypeID: "inkomensverklaring"}},
+		Types: []activatedType{{
+			TypeID: "inkomensverklaring", TypeVersion: "1.0",
+			VCT:                   "https://issuer.example/types/99999999900000000200/inkomensverklaring/v1.0",
+			VCTIntegrity:          "sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=",
+			TypeMetadataReference: "/metadata/type.json",
+			Offers:                []sourceOffer{{ID: "inkomensverklaring_2025", Label: "Inkomensverklaring 2025", Parameters: map[string]any{"jaar": 2025}}},
+		}, {
+			TypeID: "jaaropgave", TypeVersion: "1.0",
+			VCT:                   "https://issuer.example/types/99999999900000000200/jaaropgave/v1.0",
+			VCTIntegrity:          "sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=",
+			TypeMetadataReference: "/metadata/jaaropgave.json",
+			Offers:                []sourceOffer{{ID: "jaaropgave_2025", Label: "Jaaropgave 2025", Parameters: map[string]any{"jaar": 2025}}},
+		}},
 	}
 	raw, err := json.Marshal(activation)
 	if err != nil {
@@ -445,20 +459,26 @@ func TestActiveSourceRegistrationResolvesRuntimeBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resolved, err := configFromSourceActivation(config{SourceActivationPath: activationPath, OutwayURL: "https://outway.example"})
+	resolved, err := configsFromSourceActivation(config{SourceActivationPath: activationPath, OutwayURL: "https://outway.example"})
 	if err != nil {
 		t.Fatalf("resolve active source registration: %v", err)
 	}
-	if got, want := resolved.SourceMetadataOIN, activation.Source.SourceOIN; got != want {
+	if got, want := len(resolved), 2; got != want {
+		t.Fatalf("runtime bindings = %d, want %d", got, want)
+	}
+	if got, want := resolved[0].SourceMetadataOIN, activation.Source.SourceOIN; got != want {
 		t.Errorf("source OIN = %q, want %q", got, want)
 	}
-	if got, want := resolved.SourceMetadataTypeID, "inkomensverklaring"; got != want {
+	if got, want := resolved[0].SourceMetadataTypeID, "inkomensverklaring"; got != want {
 		t.Errorf("type ID = %q, want %q", got, want)
 	}
-	if got, want := resolved.SourceMetadataURL, "https://outway.example/metadata/v1"; got != want {
+	if got, want := resolved[1].SourceMetadataTypeID, "jaaropgave"; got != want {
+		t.Errorf("second type ID = %q, want %q", got, want)
+	}
+	if got, want := resolved[0].SourceMetadataURL, "https://outway.example/metadata/v1"; got != want {
 		t.Errorf("metadata URL = %q, want %q", got, want)
 	}
-	if got, want := resolved.SourceDataFSCServiceReference, "bri"; got != want {
+	if got, want := resolved[0].SourceDataFSCServiceReference, "bri"; got != want {
 		t.Errorf("data FSC service = %q, want %q", got, want)
 	}
 }

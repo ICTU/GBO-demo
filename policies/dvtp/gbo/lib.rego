@@ -217,7 +217,8 @@ _check_years_allowed(spec, ctx) := step if {
 	count(allowed) > 0
 	years := _requested_years(ctx)
 	count(years) > 0
-	disallowed := [y | some y in years; not to_number(y) in allowed]
+	allowed_text := {sprintf("%v", [year]) | some year in allowed}
+	disallowed := [y | some y in years; not sprintf("%v", [y]) in allowed_text]
 	count(disallowed) == 0
 	step := _step("YEAR_NOT_ALLOWED", "Requested years allowed for rule", sprintf("%d year(s) allowed", [count(years)]), "pass")
 } else := step if {
@@ -225,7 +226,8 @@ _check_years_allowed(spec, ctx) := step if {
 	count(allowed) > 0
 	years := _requested_years(ctx)
 	count(years) > 0
-	disallowed := [y | some y in years; not to_number(y) in allowed]
+	allowed_text := {sprintf("%v", [year]) | some year in allowed}
+	disallowed := [y | some y in years; not sprintf("%v", [y]) in allowed_text]
 	count(disallowed) > 0
 	step := _step("YEAR_NOT_ALLOWED", "Requested years allowed for rule", sprintf("%v in spec.allowed_years", [disallowed[0]]), "fail")
 } else := step if {

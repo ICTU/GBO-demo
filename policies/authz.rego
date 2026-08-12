@@ -20,10 +20,12 @@ default allow := false
 
 # Source-metadata is transported over its own FSC service and carries no
 # GraphQL body or citizen identifier. The provider-owned additional claim in
-# the FSC token selects this narrow policy path; method and endpoint remain
-# exact so all other non-GraphQL traffic stays fail-closed.
+# the FSC token selects this narrow policy path. Only the GBO consumer peer may
+# use it; method and endpoint remain exact so all other non-GraphQL traffic
+# stays fail-closed.
 _source_metadata_request if {
 	input.context.flow == "gbo:source-metadata"
+	input.subject.id == "99999999900000000100"
 	input.action.id == "GET"
 	input.resource.id == "/.well-known/gbo"
 }

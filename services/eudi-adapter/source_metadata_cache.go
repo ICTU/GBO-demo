@@ -95,53 +95,63 @@ func (r *unavailableSourceMetadataRuntime) ServeHTTP(w http.ResponseWriter, requ
 	publication.ServeHTTP(w, request)
 }
 
-func configFromSourceActivation(cfg config) (config, error) {
+func configsFromSourceActivation(cfg config) ([]config, error) {
 	if cfg.SourceActivationPath == "" {
-		return config{}, fmt.Errorf("SOURCE_ACTIVATION_PATH is required when source metadata is enabled")
+		return nil, fmt.Errorf("SOURCE_ACTIVATION_PATH is required when source metadata is enabled")
 	}
 	raw, err := os.ReadFile(cfg.SourceActivationPath)
 	if err != nil {
-		return config{}, fmt.Errorf("read active source registration: %w", err)
+		return nil, fmt.Errorf("read active source registration: %w", err)
 	}
 	var activation sourceActivation
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&activation); err != nil {
-		return config{}, fmt.Errorf("parse active source registration: %w", err)
+		return nil, fmt.Errorf("parse active source registration: %w", err)
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		return config{}, fmt.Errorf("parse active source registration: trailing JSON data")
+		return nil, fmt.Errorf("parse active source registration: trailing JSON data")
 	}
 	if activation.SchemaVersion != "1.0" {
-		return config{}, fmt.Errorf("unsupported active source schema_version %q", activation.SchemaVersion)
+		return nil, fmt.Errorf("unsupported active source schema_version %q", activation.SchemaVersion)
 	}
 	if err := activation.Source.validate(); err != nil {
-		return config{}, fmt.Errorf("validate active source registration: %w", err)
+		return nil, fmt.Errorf("validate active source registration: %w", err)
 	}
-	if len(activation.Types) != 1 || activation.Types[0].TypeID == "" {
-		return config{}, fmt.Errorf("active source registration must contain exactly one attestation type")
+	if len(activation.Types) == 0 {
+		return nil, fmt.Errorf("active source registration contains no attestation types")
 	}
-	cfg.SourceMetadataOIN = activation.Source.SourceOIN
-	cfg.SourceMetadataTypeID = activation.Types[0].TypeID
-	cfg.SourceMetadataTransport = activation.Source.MetadataEndpoint.Transport
-	cfg.SourceMetadataGrantHash = activation.Source.MetadataEndpoint.GrantHash
-	cfg.SourceDataTransport = activation.Source.DataAccess.Transport
-	cfg.SourceDataFSCServiceReference = activation.Source.DataAccess.ServiceReference
-	cfg.SourceDataFSCGrantHash = activation.Source.DataAccess.GrantHash
-	cfg.SourceMetadataURL, err = activation.Source.metadataURL(cfg.OutwayURL)
+	metadataURL, err := activation.Source.metadataURL(cfg.OutwayURL)
 	if err != nil {
-		return config{}, fmt.Errorf("resolve source metadata endpoint: %w", err)
+		return nil, fmt.Errorf("resolve source metadata endpoint: %w", err)
 	}
-	return cfg, nil
+	resolved := make([]config, 0, len(activation.Types))
+	seenTypes := make(map[string]struct{}, len(activation.Types))
+	for _, activatedType := range activation.Types {
+		if err := activatedType.validate(); err != nil {
+			return nil, fmt.Errorf("validate active attestation type: %w", err)
+		}
+		if _, duplicate := seenTypes[activatedType.TypeID]; duplicate {
+			return nil, fmt.Errorf("duplicate active attestation type %q", activatedType.TypeID)
+		}
+		seenTypes[activatedType.TypeID] = struct{}{}
+		candidate := cfg
+		candidate.SourceMetadataOIN = activation.Source.SourceOIN
+		candidate.SourceMetadataTypeID = activatedType.TypeID
+		candidate.SourceMetadataTransport = activation.Source.MetadataEndpoint.Transport
+		candidate.SourceMetadataGrantHash = activation.Source.MetadataEndpoint.GrantHash
+		candidate.SourceDataTransport = activation.Source.DataAccess.Transport
+		candidate.SourceDataFSCServiceReference = activation.Source.DataAccess.ServiceReference
+		candidate.SourceDataFSCGrantHash = activation.Source.DataAccess.GrantHash
+		candidate.SourceMetadataURL = metadataURL
+		resolved = append(resolved, candidate)
+	}
+	return resolved, nil
 }
 
 func configsFromSourceActivations(cfg config) ([]config, error) {
 	if cfg.SourceActivationPath != "" {
-		resolved, err := configFromSourceActivation(cfg)
-		if err != nil {
-			return nil, err
-		}
-		return []config{resolved}, nil
+		return configsFromSourceActivation(cfg)
 	}
 	if cfg.SourceActivationsPath == "" {
 		return nil, fmt.Errorf("SOURCE_ACTIVATIONS_PATH is required")
@@ -158,16 +168,18 @@ func configsFromSourceActivations(cfg config) ([]config, error) {
 		}
 		candidate := cfg
 		candidate.SourceActivationPath = filepath.Join(cfg.SourceActivationsPath, entry.Name())
-		activationConfig, err := configFromSourceActivation(candidate)
+		activationConfigs, err := configsFromSourceActivation(candidate)
 		if err != nil {
 			return nil, fmt.Errorf("activation %s: %w", entry.Name(), err)
 		}
-		key := activationConfig.SourceMetadataOIN + "\x00" + activationConfig.SourceMetadataTypeID
-		if _, duplicate := seen[key]; duplicate {
-			return nil, fmt.Errorf("duplicate active source/type %s/%s", activationConfig.SourceMetadataOIN, activationConfig.SourceMetadataTypeID)
+		for _, activationConfig := range activationConfigs {
+			key := activationConfig.SourceMetadataOIN + "\x00" + activationConfig.SourceMetadataTypeID
+			if _, duplicate := seen[key]; duplicate {
+				return nil, fmt.Errorf("duplicate active source/type %s/%s", activationConfig.SourceMetadataOIN, activationConfig.SourceMetadataTypeID)
+			}
+			seen[key] = struct{}{}
+			resolved = append(resolved, activationConfig)
 		}
-		seen[key] = struct{}{}
-		resolved = append(resolved, activationConfig)
 	}
 	if len(resolved) == 0 {
 		return nil, fmt.Errorf("SOURCE_ACTIVATIONS_PATH contains no active source registrations")

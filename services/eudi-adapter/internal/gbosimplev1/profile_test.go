@@ -4,6 +4,8 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
+	"errors"
+	"reflect"
 	"testing"
 
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
@@ -58,7 +60,7 @@ func TestConformanceMappings(t *testing.T) {
 			if err == nil {
 				err = Validate(mapping)
 			}
-			gotCode := ErrorCodeOf(err)
+			gotCode := errorCodeOf(err)
 			if gotCode == "" && err != nil {
 				gotCode = CodeMappingInvalid
 			}
@@ -84,7 +86,7 @@ func TestConformanceProjections(t *testing.T) {
 				mapping = decodeMapping(t, test.Mapping)
 			}
 			projection, err := Project(test.Input, test.ResultPointer, mapping)
-			if gotCode := ErrorCodeOf(err); gotCode != test.ErrorCode {
+			if gotCode := errorCodeOf(err); gotCode != test.ErrorCode {
 				t.Fatalf("error code = %q (%v), want %q", gotCode, err, test.ErrorCode)
 			}
 			if test.ErrorCode != "" {
@@ -96,7 +98,7 @@ func TestConformanceProjections(t *testing.T) {
 			if projection.Outcome != test.Outcome {
 				t.Fatalf("outcome = %q, want %q", projection.Outcome, test.Outcome)
 			}
-			if !EqualJSON(projection.Claims, test.Claims) {
+			if !equalJSON(projection.Claims, test.Claims) {
 				t.Fatalf("claims = %#v, want %#v", projection.Claims, test.Claims)
 			}
 		})
@@ -104,10 +106,10 @@ func TestConformanceProjections(t *testing.T) {
 }
 
 func TestEqualJSONNormalisesNumericGoTypes(t *testing.T) {
-	if !EqualJSON(int64(2025), float64(2025)) {
+	if !equalJSON(int64(2025), float64(2025)) {
 		t.Fatal("equal JSON integers with different Go types did not compare equal")
 	}
-	if EqualJSON(json.Number("1.01"), float64(1)) {
+	if equalJSON(json.Number("1.01"), float64(1)) {
 		t.Fatal("different JSON numbers compared equal")
 	}
 }
@@ -139,7 +141,7 @@ func TestProjectRejectsNumbersNotProducedByDecodeJSON(t *testing.T) {
 			_, err := Project(root, "/rows", Mapping{
 				"value": {Pointer: "/value", Datatype: datatype},
 			})
-			if got := ErrorCodeOf(err); got != CodeTypeMismatch {
+			if got := errorCodeOf(err); got != CodeTypeMismatch {
 				t.Fatalf("error code = %q (%v), want %q", got, err, CodeTypeMismatch)
 			}
 		})
@@ -156,7 +158,7 @@ func TestProjectRejectsNonCanonicalArrayIndices(t *testing.T) {
 			_, err := Project(root, "/rows", Mapping{
 				"value": {Pointer: pointer, Datatype: "string"},
 			})
-			if got := ErrorCodeOf(err); got != CodePathMissing {
+			if got := errorCodeOf(err); got != CodePathMissing {
 				t.Fatalf("error code = %q (%v), want %q", got, err, CodePathMissing)
 			}
 		})
@@ -166,9 +168,57 @@ func TestProjectRejectsNonCanonicalArrayIndices(t *testing.T) {
 func TestEqualJSONDoesNotPanicForNonJSONDynamicValues(t *testing.T) {
 	left := map[string]string{"answer": "same"}
 	right := map[string]string{"answer": "same"}
-	if !EqualJSON(left, right) {
+	if !equalJSON(left, right) {
 		t.Fatal("equal comparable maps did not compare equal")
 	}
+}
+
+func equalJSON(left, right any) bool {
+	leftNumber, leftIsNumber := numberText(left)
+	rightNumber, rightIsNumber := numberText(right)
+	if leftIsNumber || rightIsNumber {
+		if !leftIsNumber || !rightIsNumber {
+			return false
+		}
+		leftRat, leftOK := parseNumber(leftNumber)
+		rightRat, rightOK := parseNumber(rightNumber)
+		return leftOK && rightOK && leftRat.Cmp(rightRat) == 0
+	}
+	switch l := left.(type) {
+	case map[string]any:
+		r, ok := right.(map[string]any)
+		if !ok || len(l) != len(r) {
+			return false
+		}
+		for key, value := range l {
+			other, ok := r[key]
+			if !ok || !equalJSON(value, other) {
+				return false
+			}
+		}
+		return true
+	case []any:
+		r, ok := right.([]any)
+		if !ok || len(l) != len(r) {
+			return false
+		}
+		for i := range l {
+			if !equalJSON(l[i], r[i]) {
+				return false
+			}
+		}
+		return true
+	default:
+		return reflect.DeepEqual(left, right)
+	}
+}
+
+func errorCodeOf(err error) ErrorCode {
+	var profileErr *ProfileError
+	if errors.As(err, &profileErr) {
+		return profileErr.Code
+	}
+	return ""
 }
 
 func loadConformance(t *testing.T) conformanceFile {

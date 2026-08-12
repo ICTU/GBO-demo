@@ -54,7 +54,10 @@ naar de vooraf beheerde issuer-, reader- en statuscertificaten.
 
 De geverifieerde bronmapping produceert rechtstreeks het IssuableDocument,
 zonder bron-specifieke conversies in de adapter. Het `attestation_type` is de
-geactiveerde VCT en `vct#integrity` wordt als claim meegegeven.
+geactiveerde VCT. `vct` en `vct#integrity` zijn interne credentialclaims en
+worden niet als gewone attributes meegestuurd: nl-wallet zet `vct` vanuit
+`attestation_type` en berekent `vct#integrity` zelf over de geïnstalleerde,
+immutable Type Metadata-bytes.
 
 ## Issuance-artifacts
 

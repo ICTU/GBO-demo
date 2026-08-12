@@ -9,12 +9,21 @@ metadata_input(flow, method, path) := {
 	"context": {"flow": flow},
 }
 
+metadata_input_for_actor(actor) := object.union(
+	metadata_input("gbo:source-metadata", "GET", "/.well-known/gbo"),
+	{"subject": {"id": actor, "type": "identity"}},
+)
+
 test_source_metadata_exact_route_allowed if {
 	authz.allow with input as metadata_input(
 		"gbo:source-metadata",
 		"GET",
 		"/.well-known/gbo",
 	)
+}
+
+test_source_metadata_other_actor_denied if {
+	not authz.allow with input as metadata_input_for_actor("00000001234567890000")
 }
 
 test_source_metadata_wrong_flow_denied if {

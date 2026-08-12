@@ -22,6 +22,8 @@ import (
 var (
 	sourceOINPattern        = regexp.MustCompile(`^[0-9]{20}$`)
 	serviceReferencePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
+	typeIDPattern           = regexp.MustCompile(`^[a-z0-9]+(?:[._-][a-z0-9]+)*$`)
+	numericVersionPattern   = regexp.MustCompile(`^[0-9]+(?:\.[0-9]+){0,2}$`)
 )
 
 const (

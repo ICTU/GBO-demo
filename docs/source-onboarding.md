@@ -8,8 +8,10 @@ en wallet Type Metadata. Later kan hetzelfde document naast
 
 Een offer is een concreet product dat de wallet kan aanbieden. Het heeft een
 stabiele id en vult uitsluitend parameters in die bij de query zijn
-gedeclareerd, bijvoorbeeld `jaar: 2024`. Een offer verleent geen toegang: de
-PDP beoordeelt de gekozen velden en parameterwaarden opnieuw bij ieder gebruik.
+gedeclareerd, bijvoorbeeld `jaar: 2024`. De adapter accepteert alleen exact
+zo'n gepubliceerde parametercombinatie. Dat is inputbegrenzing, geen
+autorisatieverlening: de PDP beoordeelt de gekozen velden en parameterwaarden
+opnieuw bij ieder gebruik.
 
 ## FSC: geen onboardingbestand
 
@@ -69,6 +71,15 @@ bruikbaar contract faalt uitgifte gesloten; er is geen legacyfallback.
 Een bron publiceert geen GraphQL-schema. De ondersteunde mappingfunctionaliteit
 staat in [gbo-simple-v1.md](gbo-simple-v1.md); onbekende functies of velden
 worden geweigerd.
+
+Een source-owned resolver mag domeinselectie uitvoeren die de vlakke mapping
+niet kan uitdrukken. Daarmee wordt die resolver security-sensitive code. Bij
+de BRP-akte selecteert de bron bijvoorbeeld welke verbintenis daadwerkelijk
+door het overlijden van de partner is ontbonden. De PDP begrenst de resolver
+tot `Query.akteVanOverlijden` en de toegestane outputvelden, maar kan de
+onderliggende huwelijksselectie niet meer zelfstandig reconstrueren. Zulke
+selectieregels moeten daarom bron-side fail-closed zijn en regressietests
+hebben voor conflicterende of incomplete brondata.
 
 ## Lokaal
 

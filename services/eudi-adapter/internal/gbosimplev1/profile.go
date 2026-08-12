@@ -10,7 +10,6 @@ import (
 	"io"
 	"math"
 	"math/big"
-	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -51,14 +50,6 @@ func (e *ProfileError) Error() string {
 	return fmt.Sprintf("%s: %s", e.Code, e.Detail)
 }
 
-func ErrorCodeOf(err error) ErrorCode {
-	var profileErr *ProfileError
-	if errors.As(err, &profileErr) {
-		return profileErr.Code
-	}
-	return ""
-}
-
 type Outcome string
 
 const (
@@ -76,6 +67,7 @@ type Mapping map[string]Rule
 type Rule struct {
 	Pointer  string `json:"pointer"`
 	Datatype string `json:"datatype"`
+	Optional bool   `json:"optional,omitempty"`
 }
 
 func (r *Rule) UnmarshalJSON(data []byte) error {
@@ -158,6 +150,9 @@ func Project(root any, resultPointer string, mapping Mapping) (Projection, error
 	for _, claim := range sortedClaims(mapping) {
 		rule := mapping[claim]
 		value, ok := jsonPointer(rows[0], rule.Pointer)
+		if (!ok || value == nil) && rule.Optional {
+			continue
+		}
 		if !ok {
 			return Projection{}, profileError(CodePathMissing, claim, "pointer %q does not exist", rule.Pointer)
 		}
@@ -185,48 +180,6 @@ func DecodeJSON(data []byte) (any, error) {
 		return nil, err
 	}
 	return value, nil
-}
-
-// EqualJSON compares JSON values semantically, independently of the Go type
-// used to hold a JSON number.
-func EqualJSON(left, right any) bool {
-	leftNumber, leftIsNumber := numberText(left)
-	rightNumber, rightIsNumber := numberText(right)
-	if leftIsNumber || rightIsNumber {
-		if !leftIsNumber || !rightIsNumber {
-			return false
-		}
-		leftRat, leftOK := parseNumber(leftNumber)
-		rightRat, rightOK := parseNumber(rightNumber)
-		return leftOK && rightOK && leftRat.Cmp(rightRat) == 0
-	}
-	switch l := left.(type) {
-	case map[string]any:
-		r, ok := right.(map[string]any)
-		if !ok || len(l) != len(r) {
-			return false
-		}
-		for key, value := range l {
-			other, ok := r[key]
-			if !ok || !EqualJSON(value, other) {
-				return false
-			}
-		}
-		return true
-	case []any:
-		r, ok := right.([]any)
-		if !ok || len(l) != len(r) {
-			return false
-		}
-		for i := range l {
-			if !EqualJSON(l[i], r[i]) {
-				return false
-			}
-		}
-		return true
-	default:
-		return reflect.DeepEqual(left, right)
-	}
 }
 
 func copyValue(value any, datatype string) (any, error) {

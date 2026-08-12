@@ -1,6 +1,9 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"os"
@@ -8,6 +11,42 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestExpandRequiredEnvironmentRejectsUnsetVariable(t *testing.T) {
+	t.Setenv("GBO_TEST_REQUIRED_ENV", "")
+	_, err := expandRequiredEnvironment(`value = "${GBO_TEST_REQUIRED_ENV}"`)
+	if err == nil || !strings.Contains(err.Error(), "GBO_TEST_REQUIRED_ENV") {
+		t.Fatalf("error = %v, want missing environment variable", err)
+	}
+}
+
+func TestAttestationStatusPathUsesFullVCTDigest(t *testing.T) {
+	const vct = "https://issuer.example/types/99999999900000000200/example/v1"
+	var settings strings.Builder
+	appendAttestationSettings(&settings, vct, issuanceCertificateMaterial{})
+	digest := sha256.Sum256([]byte(vct))
+	want := `/tsl/` + hex.EncodeToString(digest[:])
+	if !strings.Contains(settings.String(), want) {
+		t.Fatalf("generated settings do not contain full status digest %q", want)
+	}
+}
+
+func TestLoadIssuanceActivationsRejectsUnsafeTypeID(t *testing.T) {
+	root := t.TempDir()
+	activeDir := filepath.Join(root, "active")
+	writeTestActivation(t, activeDir, root, "99999999900000000200", "../escape", "https://issuer.example/type", "test", []sourceOffer{{ID: "example", Label: "Example", Parameters: map[string]any{}}})
+	if _, err := loadIssuanceActivations(activeDir); err == nil {
+		t.Fatal("unsafe activation type_id was accepted")
+	}
+}
+
+func TestFormatOfferParameterSupportsFiniteNumbers(t *testing.T) {
+	for _, value := range []any{float64(1.25), int64(2), json.Number("3.5")} {
+		if _, err := formatOfferParameter("amount", "number", value); err != nil {
+			t.Errorf("formatOfferParameter(%v) = %v", value, err)
+		}
+	}
+}
 
 func TestGenerateIssuanceConfigFromAllActivatedOffers(t *testing.T) {
 	root := t.TempDir()
@@ -97,7 +136,10 @@ func writeTestActivation(t *testing.T, activeDir, root, oin, typeID, vct, certif
 	t.Helper()
 	certificateDir := filepath.Join(root, "certificates", oin)
 	metadataPath := filepath.Join(root, "metadata", oin+".json")
-	writeTestFile(t, metadataPath, []byte(`{"name":"test"}`))
+	metadataBody := []byte(`{"name":"test"}`)
+	writeTestFile(t, metadataPath, metadataBody)
+	metadataDigest := sha256.Sum256(metadataBody)
+	metadataIntegrity := "sha256-" + base64.StdEncoding.EncodeToString(metadataDigest[:])
 	writeTestFile(t, filepath.Join(certificateDir, "issuer.key"), []byte(certificatePrefix+"-issuer-key"))
 	writeTestFile(t, filepath.Join(certificateDir, "issuer.cert"), []byte(certificatePrefix+"-issuer-cert"))
 	writeTestFile(t, filepath.Join(certificateDir, "reader.key"), []byte(certificatePrefix+"-reader-key"))
@@ -114,7 +156,7 @@ func writeTestActivation(t *testing.T, activeDir, root, oin, typeID, vct, certif
 		Source:        sourceRegistration{SourceOIN: oin, Name: certificatePrefix},
 		Types: []activatedType{{
 			TypeID: typeID, TypeVersion: "1.0", VCT: vct,
-			TypeMetadataReference: metadataPath, Offers: offers,
+			VCTIntegrity: metadataIntegrity, TypeMetadataReference: metadataPath, Offers: offers,
 		}},
 		Certificates: certificateArtifacts{
 			IssuerKeyReference: issuerCAPath(certificateDir, "issuer.key"), IssuerCertReference: issuerCAPath(certificateDir, "issuer.cert"),

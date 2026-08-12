@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -14,6 +15,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"gbo-demo/eudi-adapter/internal/gbosimplev1"
 )
 
 var summaryPlaceholderPattern = regexp.MustCompile(`\{\{([^{}]+)\}\}`)
@@ -50,6 +53,9 @@ func newTypeMetadataPublication(publicBaseURL, sourceOIN string, definition sour
 			return nil, fmt.Errorf("type_metadata must not define %q", forbidden)
 		}
 	}
+	if err := validateOptionalClaimsAgainstSchema(metadata, definition.Mapping); err != nil {
+		return nil, err
+	}
 	if err := validateSummaryPlaceholders(metadata); err != nil {
 		return nil, err
 	}
@@ -74,6 +80,24 @@ func newTypeMetadataPublication(publicBaseURL, sourceOIN string, definition sour
 		etag:        `"` + fmt.Sprintf("%x", digest) + `"`,
 		path:        path,
 	}, nil
+}
+
+func validateOptionalClaimsAgainstSchema(metadata map[string]any, mapping gbosimplev1.Mapping) error {
+	schema, ok := metadata["schema"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("type_metadata.schema must be a JSON object")
+	}
+	required, _ := schema["required"].([]any)
+	for _, rawClaim := range required {
+		claim, ok := rawClaim.(string)
+		if !ok {
+			return fmt.Errorf("type_metadata.schema.required must contain only strings")
+		}
+		if rule, mapped := mapping[claim]; mapped && rule.Optional {
+			return fmt.Errorf("mapping claim %q cannot be optional because Type Metadata requires it", claim)
+		}
+	}
+	return nil
 }
 
 func validateSummaryPlaceholders(metadata map[string]any) error {
@@ -124,6 +148,13 @@ func validateTypeMetadataBaseURL(publicBaseURL string) error {
 	base, err := url.Parse(strings.TrimRight(publicBaseURL, "/"))
 	if err != nil || (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" || (base.Path != "" && base.Path != "/") || base.RawQuery != "" || base.Fragment != "" {
 		return fmt.Errorf("type metadata public base URL must be a root HTTP(S) URL without query or fragment")
+	}
+	if base.Scheme == "http" {
+		hostname := base.Hostname()
+		ip := net.ParseIP(hostname)
+		if hostname != "localhost" && (ip == nil || !ip.IsLoopback()) {
+			return fmt.Errorf("type metadata public base URL must use HTTPS outside loopback development")
+		}
 	}
 	return nil
 }
@@ -272,6 +303,17 @@ func writeFileAtomically(directory, filename string, body []byte, mode os.FileMo
 	}
 	if err := os.Rename(temporaryPath, filepath.Join(directory, filename)); err != nil {
 		return fmt.Errorf("activate file: %w", err)
+	}
+	directoryHandle, err := os.Open(directory)
+	if err != nil {
+		return fmt.Errorf("open activation directory: %w", err)
+	}
+	if err := directoryHandle.Sync(); err != nil {
+		_ = directoryHandle.Close()
+		return fmt.Errorf("sync activation directory: %w", err)
+	}
+	if err := directoryHandle.Close(); err != nil {
+		return fmt.Errorf("close activation directory: %w", err)
 	}
 	return nil
 }
