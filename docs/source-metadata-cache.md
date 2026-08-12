@@ -15,7 +15,8 @@ fail-closed; er bestaat geen catalogus- of formatterfallback.
 OIN, type-id, gekozen transport en eventuele FSC-servicereferentie worden uit het ene
 activatierecord afgeleid en niet nogmaals als losse env-vars geconfigureerd.
 De runtime scant alle `*.json`-activatierecords en activeert precies één type
-per record.
+per record. Het record bevat daarnaast de gevalideerde offers en verwijzingen
+naar de vooraf beheerde issuer-, reader- en statuscertificaten.
 
 ## Gedrag
 
@@ -53,6 +54,20 @@ per record.
 
 De geverifieerde bronmapping produceert rechtstreeks het IssuableDocument,
 zonder bron-specifieke conversies in de adapter. Het `attestation_type` is de
-geactiveerde VCT en `vct#integrity` wordt als claim meegegeven. `make
-eudi-config` installeert exact dezelfde geactiveerde Type Metadata en VCT in de
-issuance-server.
+geactiveerde VCT en `vct#integrity` wordt als claim meegegeven.
+
+## Issuance-artifacts
+
+`make eudi-config` leest alle activatierecords en genereert de volledige
+bronafhankelijke startupconfiguratie van de issuance-server. Voor ieder offer
+ontstaat een disclosure-product met de geactiveerde VCT, adapterroute en
+parameterwaarden. Dezelfde stap installeert de geactiveerde Type Metadata en
+maakt `eudi-offers.json` voor de QR-keuzelijsten. Er is geen tweede, statische
+usecase- of jaarcatalogus in de adapter of issuance-server.
+
+De gebruikte nl-wallet issuance-server herlaadt deze configuratie niet
+dynamisch. Een activatiewijziging vereist daarom regeneratie en een rollout van
+issuance-server en frontends. Voor productie moet de rollout bovendien borgen
+dat de runtimequery en de gegenereerde issuance-config uit hetzelfde
+activatiesnapshot komen; die snapshotkoppeling is nog een expliciet
+vervolgpunt.

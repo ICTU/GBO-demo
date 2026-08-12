@@ -2,9 +2,14 @@
 
 GBO configureert geen bronquery of mapping. Een bron publiceert één generiek
 document op `/.well-known/gbo`. De EUDI-capability daarin bevat per type de
-GraphQL-service, query, parameters, mapping en wallet Type Metadata. Later kan
-hetzelfde document naast `capabilities.eudi` bijvoorbeeld `capabilities.oots`
-bevatten.
+GraphQL-service, query, parameters, concrete aanbiedingen (`offers`), mapping
+en wallet Type Metadata. Later kan hetzelfde document naast
+`capabilities.eudi` bijvoorbeeld `capabilities.oots` bevatten.
+
+Een offer is een concreet product dat de wallet kan aanbieden. Het heeft een
+stabiele id en vult uitsluitend parameters in die bij de query zijn
+gedeclareerd, bijvoorbeeld `jaar: 2024`. Een offer verleent geen toegang: de
+PDP beoordeelt de gekozen velden en parameterwaarden opnieuw bij ieder gebruik.
 
 ## FSC: geen onboardingbestand
 
@@ -28,6 +33,8 @@ sequenceDiagram
     participant O as FSC Outway
     participant B as Source
     participant S as Activation store
+    participant G as Issuance config generator
+    participant I as Issuance server and frontends
 
     R->>M: List valid service-connection contracts
     M-->>R: provider OIN + service + grant hash
@@ -37,6 +44,8 @@ sequenceDiagram
     R->>R: Validate schema, provider OIN, lifetime and endpoints
     R->>M: Resolve data contract named by source metadata
     R->>S: Activate atomically using existing certificates
+    G->>S: Read every active source and offer
+    G-->>I: TOML, Type Metadata and QR offer catalog
 ```
 
 De provider-OIN uit het metadata-document moet gelijk zijn aan de provider-OIN
@@ -51,9 +60,10 @@ bruikbaar contract faalt uitgifte gesloten; er is geen legacyfallback.
 |---|---|
 | Provider-OIN, transportbinding en grant-hash | geldig FSC-contract |
 | Vast metadata-pad | GBO-profiel: `/.well-known/gbo` |
-| Dataservicenaam, GraphQL-endpoint, query, parameters en mapping | bronmetadata |
+| Dataservicenaam, GraphQL-endpoint, query, parameters, offers en mapping | bronmetadata |
 | Kaartnaam, kleur, logo, claimlabels en claimschema | Type Metadata in de bronmetadata |
 | Immutable Type Metadata en activatierecord | GBO-onboardingopslag |
+| Issuance-producten en QR-keuzelijst | mechanisch door GBO gegenereerd uit geactiveerde offers |
 | Issuer-, reader- en statuscertificaten en private keys | bevoegde certificaatbeheerder/secretopslag |
 
 Een bron publiceert geen GraphQL-schema. De ondersteunde mappingfunctionaliteit
@@ -76,11 +86,28 @@ ontwikkelcertificaten en draait daarna één reconciliatie. De kernstappen zijn:
 make provision-development-certificates SOURCE_OIN=99999999900000000200
 make provision-development-certificates SOURCE_OIN=99999999900000000400
 make reconcile-fsc-sources
+make eudi-config
 ```
+
+`make eudi-config` leest alle activatierecords en genereert zonder
+bron-specifieke catalogus in de adapter:
+
+- één nl-wallet `disclosure_settings`-product per offer;
+- `attestation_settings` en Type Metadata per geactiveerd type;
+- `eudi-offers.json` voor de landing-page en developer-portal.
+
+De huidige nl-wallet issuance-server leest deze productconfiguratie alleen bij
+het opstarten. Na een gewijzigde activatie moeten daarom de artifacts opnieuw
+worden gegenereerd en de issuance-server en frontends opnieuw worden uitgerold.
 
 De reconciler mint of vernieuwt nooit certificaten. Ontbrekende, verlopen of
 niet-passende certificaten blokkeren activatie. In productie worden die door
 een apart bevoegd proces uitgegeven.
+
+Deze metadataflow beslist niet of alle bronnen één vooraf beheerde GBO
+issuer/reader/status-set delen of ieder een eigen set krijgen. De huidige proof
+behoudt de bestaande certificaatreferenties per activatie; de uiteindelijke
+productiekeuze blijft open.
 
 ## Productie
 
@@ -88,6 +115,8 @@ De reconciler en issuance-runtime gebruiken hetzelfde image maar zijn aparte
 processen. In Kubernetes draait de reconciler als Deployment met één replica
 en `reconcile-fsc-sources --watch`, of als CronJob zonder `--watch`. De
 HTTP-issuance-runtime pollt geen contracten en schrijft geen onboardingstaat.
+Een aparte deploystap draait de configgenerator na een nieuwe activatie en rolt
+de gegenereerde startupconfiguratie en QR-catalogus gecontroleerd uit.
 
 Een bron buiten FSC kan later statisch worden geregistreerd met een absoluut
 HTTPS-endpoint, zoals [example-https-mtls.yaml](../sources/example-https-mtls.yaml).

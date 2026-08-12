@@ -23,7 +23,7 @@ That covers the default (`make demo`, DvTP-only). For the wallet flow (`make dem
 
 - **nl-wallet sources** — pinned as a git submodule at `vendor/nl-wallet` (**v0.4.1, required**: the preprod wallet app rejects v0.5.0's scheme-prefixed `client_id`). Init once with `git submodule update --init vendor/nl-wallet`. Used to build the issuance-server binary from source. Override with `NLWALLET_PATH` in `.env` if you need another checkout.
 - **Three public HTTPS URLs** — `EUDI_PUBLIC_URL` (wallet reaches issuance-server), `EUDI_READER_ORIGIN_URL` (embedded in locally provisioned reader certificates; usually the same host as `EUDI_PUBLIC_URL`), and `EUDI_BRI_URL` (issuance-server reaches eudi-adapter). See [EUDI public reachability](#eudi-public-reachability) for the three supported options (own domain / bundled Cloudflare tunnel / ad-hoc tunnel).
-- **Activated sources with certificate references** — `make onboard-demo-sources` provisions development certificates only through its explicit local-development step and activates BD and BRP. `make eudi-config` then generates the issuance-server TOML, Type Metadata files and frontend QR offer catalog from all active records. Production uses pre-managed certificates; shared versus per-source certificate sets remains an open design choice.
+- **Activated sources with certificate references** — `make onboard-demo-sources` provisions development certificates only through its explicit local-development step and activates BD and BRP. Each source publishes its concrete wallet products as `offers`; `make eudi-config` generates the issuance-server TOML, Type Metadata files and frontend QR catalog from all active records. There is no source/usecase catalog in the adapter or issuance-server. Production uses pre-managed certificates; shared versus per-source certificate sets remains an open design choice.
 
 Copy the templates and fill them in:
 
@@ -227,6 +227,12 @@ The EUDI flow needs two publicly-reachable HTTPS URLs:
 - `EUDI_BRI_URL` — the `issuance-server` fetches attestations from the `eudi-adapter` at this URL.
 
 Both values are read from `.env`. Pick whichever way to expose the two services fits your setup:
+
+`make demo-eudi` runs source reconciliation and `make eudi-config` before the
+stack starts. The generated products come from `offers` in the active source
+metadata. Because the pinned nl-wallet issuance-server reads product settings
+only at startup, a later activation change requires config regeneration and a
+controlled restart/rollout of the issuance-server and frontends.
 
 De wallet `client_id` wordt standaard als `x509_san_dns:<host>` afgeleid uit
 `EUDI_PUBLIC_URL`, gelijk aan de DNS-SAN van het vooraf geprovisioneerde
