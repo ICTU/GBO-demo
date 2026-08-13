@@ -116,6 +116,8 @@ else
       break
     fi
   done
+  [ "${st:-}" = "CONTRACT_STATE_VALID" ] ||
+    fail_unsigned "HV connection contract for '$SERVICE_NAME'" "${st:-}"
 fi
 
 # ── 2. Grant-link upsert in hv_controller ─────────────────────────────

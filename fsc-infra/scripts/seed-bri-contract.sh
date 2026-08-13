@@ -13,9 +13,11 @@
 #   Contract state survives container restarts but not `make fsc-clean`.
 #   This script restores it.
 #
-# Requires auto-sign flags in fsc-infra/docker-compose.yml
-# (directory-manager + provider Manager). Without those, contracts stay
-# `pending` and someone has to accept them manually.
+# Requires the counterparties to accept the contracts. The directory-peer
+# auto-signs publications by grant type; the source Managers put every
+# incoming contract to the OpenFTV PDP (policies/fsc/autosign.rego), so a
+# consumer that is not in policies/fsc/registry.rego is refused and the
+# contract stays `proposed`. Both cases abort the seed — see fail_unsigned.
 #
 # Idempotent: each step detects existing state and skips.
 #
@@ -175,6 +177,8 @@ else
       break
     fi
   done
+  [ "${st:-}" = "CONTRACT_STATE_VALID" ] ||
+    fail_unsigned "publication contract for '$SERVICE_NAME'" "${st:-}"
 fi
 
 # ── 3. Create connection contract in edi-Manager ───────────────────────────
@@ -247,6 +251,8 @@ else
       break
     fi
   done
+  [ "${st:-}" = "CONTRACT_STATE_VALID" ] ||
+    fail_unsigned "connection contract for '$SERVICE_NAME'" "${st:-}"
 fi
 
 # ── 4. Grant-link upsert in edi_controller ────────────────────────────

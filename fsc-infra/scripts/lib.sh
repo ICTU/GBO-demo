@@ -70,3 +70,30 @@ mtls_curl() {
   shift 4
   curl -s --cert "$cert" --key "$key" --cacert "$ca" "$url" "$@"
 }
+
+# fail_unsigned <what> <observed-state> — abort when a contract did not
+# reach CONTRACT_STATE_VALID inside the poll window.
+#
+# Worth failing hard on: the counterparty's Manager decides contract
+# acceptance by policy (--authzen-auto-sign-pdp-address), so a DENY is a
+# normal outcome, and it leaves the contract `proposed` rather than
+# rejected. Without this the seed would continue and write a grant-link
+# pointing at a contract that carries only the consumer's signature —
+# the stack then looks seeded and fails at the first request.
+fail_unsigned() {
+  local what="$1" state="${2:-<none>}"
+  {
+    echo "  ✗ $what did not reach CONTRACT_STATE_VALID (state: ${state:-<none>})"
+    echo ""
+    echo "  The counterparty did not counter-sign. Contract acceptance is a"
+    echo "  policy decision; read the reason from the PDP:"
+    echo ""
+    echo "    docker compose logs openftv-pdp \\"
+    echo "      | grep auto_sign_contract | tail -1 | jq .result.response"
+    echo ""
+    echo "  reason_admin.code names the cause. PARTY_NOT_IN_REGISTRY means the"
+    echo "  peer OIN is missing from policies/fsc/registry.rego — add it, then"
+    echo "  docker compose up -d --force-recreate openftv-pdp and re-run."
+  } >&2
+  exit 1
+}

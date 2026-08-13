@@ -1,5 +1,5 @@
 .PHONY: up down logs clean certs demo-manager manager-seed fsc-local-env fsc-ca fsc-up fsc-all-up fsc-brp-certs fsc-databases fsc-down fsc-test fsc-clean \
-        fsc-seed-bri fsc-seed-bri-hv fsc-seed-brp fsc-seed-metadata fsc-pdp-cert \
+        fsc-seed-bri fsc-seed-bri-hv fsc-seed-brp fsc-seed-metadata fsc-pdp-cert pdp-up \
         eudi-images source-metadata-up \
         validate-source provision-development-certificates onboard-source reconcile-fsc-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
         demo-full demo-down eudi-config
@@ -298,15 +298,27 @@ fsc-hv-certs: fsc-up
 
 fsc-bd-up: fsc-directory-up fsc-bd-certs
 	$(FSC_COMPOSE) up --build -d cfssl certportal postgres directory-migrations-controller directory-migrations-manager directory-migrations-txlog-api directory-controller directory-manager directory-inway directory-txlog-api directory-ui bd-migrations-controller bd-migrations-manager bd-migrations-txlog-api bd-controller bd-manager bd-inway bd-txlog-api
+	$(MAKE) pdp-up
 
 fsc-pdp-cert:
 	@if [ ! -f services/openftv-pdp/certs/pdp-service.pem ]; then \
 		bash fsc-infra/pki/generate-pdp-cert.sh; \
 	fi
 
+# bd-manager decides on incoming contracts through the OpenFTV PDP
+# (--authzen-auto-sign-pdp-address), so the PDP has to answer before the
+# first contract is submitted — otherwise every fsc-seed-* leaves its
+# connection contract pending and the seed times out after 30s with no
+# useful error. The PDP lives in the main compose project, which normally
+# starts *after* fsc-infra; this pulls it forward. --wait blocks on the
+# healthcheck, so the seeds cannot race a still-booting PDP.
+pdp-up: certs fsc-pdp-cert
+	docker compose up --build -d --wait openftv-pdp
+
 fsc-all-up: fsc-directory-certs fsc-edi-certs fsc-bd-certs fsc-brp-certs fsc-hv-certs fsc-pdp-cert
 	$(MAKE) fsc-databases
 	$(FSC_COMPOSE) up --build -d
+	$(MAKE) pdp-up
 
 # Also creates databases added after an existing local Postgres volume was
 # initialised; the docker-entrypoint init script only runs for a new volume.

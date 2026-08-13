@@ -674,13 +674,34 @@ services:
   bd-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
     restart: unless-stopped
-    # Seed automation: Belastingdienst-mock as service-provider
-    # auto-signs incoming serviceConnection requests. In production a
-    # real PDP would sit here (see --auto-sign-pdp-address); for the
-    # demo auto-accept is fine.
-    command: ["/usr/local/bin/manager", "serve", "--auto-sign-grants=serviceConnection"]
+    # Belastingdienst-mock as service-provider decides on incoming
+    # contracts by POLICY, not by a flag: every contract a peer submits
+    # is put to the OpenFTV PDP as an AuthZEN evaluation, and only signed
+    # on decision=true. The policy is policies/fsc/autosign.rego —
+    # package doelbinding.auto_sign_contract, because the Manager sends
+    # context.doelbinding="auto_sign_contract" and OpenFTV derives the
+    # OPA entrypoint from that.
+    #
+    # This replaces --auto-sign-grants=serviceConnection. The Manager
+    # refuses to run with both (manager/cmd/serve.go: "cannot combine the
+    # auto sign grants option with an auto-sign policy decision point" is
+    # fatal), so the serviceConnection-only gate now lives in the policy.
+    #
+    # The other managers still auto-sign by grant type: the directory is
+    # a registry rather than a policy party, and brp-mock is deliberately
+    # left on the old behaviour so one source demonstrates each model.
+    command:
+      [
+        "/usr/local/bin/manager",
+        "serve",
+        "--authzen-auto-sign-pdp-address=https://openftv-pdp:8443/authzen/v1",
+        "--authzen-auto-sign-pdp-root-ca=/authzen-ca/pdp-service.pem",
+      ]
     volumes:
       - ./orgs/belastingdienst-mock/pki:/certs:ro
+      # Same self-signed PDP cert the Inways trust as CA (see bd-inway).
+      # Separate mount root to avoid a conflict with /certs (ro).
+      - ../services/openftv-pdp/certs:/authzen-ca:ro
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
       TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
@@ -853,9 +874,21 @@ services:
   brp-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
     restart: unless-stopped
-    command: ["/usr/local/bin/manager", "serve", "--auto-sign-grants=serviceConnection"]
+    # Same policy-driven contract acceptance as bd-manager: the PDP
+    # decides, the flag does not. See the comment there for why
+    # --auto-sign-grants cannot be combined with a PDP address.
+    command:
+      [
+        "/usr/local/bin/manager",
+        "serve",
+        "--authzen-auto-sign-pdp-address=https://openftv-pdp:8443/authzen/v1",
+        "--authzen-auto-sign-pdp-root-ca=/authzen-ca/pdp-service.pem",
+      ]
     volumes:
       - ./orgs/brp-mock/pki:/certs:ro
+      # Same self-signed PDP cert the Inways trust as CA (see brp-inway).
+      # Separate mount root to avoid a conflict with /certs (ro).
+      - ../services/openftv-pdp/certs:/authzen-ca:ro
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
       TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem

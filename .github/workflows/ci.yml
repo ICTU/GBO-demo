@@ -53,6 +53,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The OpenFTV PAP loads EVERY file under PDP_POLICIES_STORE as a Rego
+      # module (eam/pap/loader.go). A file that does not parse makes OPA keep
+      # its previous compiler, so every policy later in walk order silently
+      # disappears — the PDP then answers "decision was undefined" (HTTP 500)
+      # for those paths while the earlier ones keep working. Keep policies/
+      # free of anything that is not Rego.
+      - name: policies/ contains only Rego
+        run: |
+          stray=$(find policies -type f ! -name '*.rego' -print)
+          if [ -n "$stray" ]; then
+            echo "non-Rego files under policies/ (move them elsewhere):" >&2
+            echo "$stray" >&2
+            exit 1
+          fi
       - name: opa fmt --diff
         run: |
           docker run --rm -v $(pwd)/policies:/w -w /w \
