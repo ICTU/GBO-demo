@@ -30,7 +30,8 @@ services:
       - BADGER_EPHEMERAL=false
       - BADGER_DIRECTORY_KEY=/badger/keys
       - BADGER_DIRECTORY_VALUE=/badger/values
-      - BADGER_SPAN_STORE_TTL=72h
+      # 168h = the seven-day retention stated in OBSERVABILITY.md.
+      - BADGER_SPAN_STORE_TTL=168h
     volumes:
       - jaeger-badger:/badger
     networks:
