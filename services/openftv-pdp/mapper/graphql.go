@@ -11,10 +11,13 @@ package mapping
 //   - context.resource  — {scope, query, variables}.
 //   - context.trace_id  — Fsc-Transaction-Id (falls back to X-Request-Id).
 //   - context.fsc       — {transaction_id}.
-//   - context.pid       — {bsn} for the EUDI flow (from variables.bsn).
+//   - context.pip       — {consent} for the DvTP flow, {pid: {pi}} for
+//     the EUDI flow. Never the BSN; see pseudonymizeBSN.
 //
-// Flow dispatch (dvtp:query vs the eudi:attestation family) follows the
-// trusted additional-claim in the FSC token, then the X-GBO-Flow header.
+// Flow dispatch reads the trusted additional-claim in the FSC token and
+// nothing else. A request that carries no flow gets an empty one, which
+// matches no rule (engine.rego `_flow_applicable`) and therefore denies
+// with NO_APPLICABLE_RULE.
 
 import (
 	"context"
@@ -162,11 +165,14 @@ func substituteContext(ctx *models.AttributeSet, from, to string) {
 	}
 }
 
-// isEUDIFlow recognises the base attestation flow and its bron-specific
-// variants. Requiring either an exact match or a colon-delimited suffix
-// avoids accidentally treating lookalikes as wallet flows.
+// isEUDIFlow recognises the wallet attestation flow. Bron-specific
+// variants (`eudi:attestation:brp`) are gone: the bronprofiel is not an
+// axis of the flow, and both EUDI rules dispatch on the base name. A
+// suffixed value is therefore not a wallet flow — engine_test.rego
+// asserts it matches no rule, so accepting it here would pseudonymise a
+// request the policy is about to deny anyway.
 func isEUDIFlow(flow string) bool {
-	return flow == "eudi:attestation" || strings.HasPrefix(flow, "eudi:attestation:")
+	return flow == "eudi:attestation"
 }
 
 func substituteValue(v any, from, to string) any {
@@ -304,25 +310,35 @@ func firstHeader(headers map[string]string, keys ...string) string {
 }
 
 // flowFromHeaders dispatches on the trusted additional-claim ('add',
-// legacy 'prp') in the FSC access-token, then the untrusted X-GBO-Flow
-// header. The token is read unsafely: FSC-Inway validated the signature
-// before invoking the PDP (chain-of-trust).
+// legacy 'prp') in the FSC access-token, and on nothing else. The token
+// is read unsafely: FSC-Inway validated the signature before invoking
+// the PDP (chain-of-trust).
+//
+// The flow is a property of the FSC grant — additional-claims-service
+// resolves it per (outway_peer, service_peer, service_name) and the
+// provider's FSC-Manager signs it in — so a caller has no say in which
+// authorization regime it is judged under. There is deliberately no
+// header fallback and no default: absent a claim the flow is empty,
+// which matches no rule and denies. Defaulting to `dvtp:query` would
+// silently select the consent-based regime for a request that never
+// asked for it.
 func flowFromHeaders(headers map[string]string) string {
-	if auth := headers["fsc-authorization"]; auth != "" {
-		if claims := tokenClaims(strings.TrimSpace(strings.TrimPrefix(auth, "Bearer"))); claims != nil {
-			for _, key := range []string{"add", "prp"} {
-				if props, ok := claims[key].(map[string]any); ok {
-					if f, ok := props["flow"].(string); ok && f != "" {
-						return f
-					}
-				}
+	auth := headers["fsc-authorization"]
+	if auth == "" {
+		return ""
+	}
+	claims := tokenClaims(strings.TrimSpace(strings.TrimPrefix(auth, "Bearer")))
+	if claims == nil {
+		return ""
+	}
+	for _, key := range []string{"add", "prp"} {
+		if props, ok := claims[key].(map[string]any); ok {
+			if f, ok := props["flow"].(string); ok && f != "" {
+				return f
 			}
 		}
 	}
-	if f := firstHeader(headers, "X-Gbo-Flow", "X-GBO-Flow"); f != "" {
-		return f
-	}
-	return "dvtp:query"
+	return ""
 }
 
 func tokenClaims(token string) map[string]any {
