@@ -69,9 +69,10 @@ jq -r '.[].key' services/eudi-issuance-server/config/eudi-offers.json
 docker compose ps
 ```
 
-`make demo-eudi` should create two active source records and the three offers
-`inkomensverklaring_2024`, `inkomensverklaring_2025`, and
-`akte_van_overlijden`.
+`make demo-eudi` should create three active source records and four offers:
+`inkomensverklaring_2024`, `inkomensverklaring_2025`,
+`akte_van_overlijden`, and `demo_inkomen_2025`. The last offer is the
+explicitly unsecured HTTP demonstration.
 
 **The QR opens but no applicable PID can be shared**: `make demo-eudi` does not
 onboard the wallet or issue a PID. Use a v0.5.0-compatible test wallet with a

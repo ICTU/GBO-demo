@@ -20,7 +20,7 @@
     },
     {
       "outway_peer_id": "99999999900000000100",
-      "service_peer_id": "99999999900000000400",
+      "service_peer_id": "99999999900000000200",
       "service_name": "brp",
       "add": {
         "flow": "eudi:attestation",
@@ -29,8 +29,8 @@
     },
     {
       "outway_peer_id": "99999999900000000100",
-      "service_peer_id": "99999999900000000400",
-      "service_name": "gbo-metadata",
+      "service_peer_id": "99999999900000000200",
+      "service_name": "gbo-metadata-rvig",
       "add": {
         "flow": "gbo:source-metadata"
       }
@@ -38,7 +38,7 @@
     {
       "outway_peer_id": "99999999900000000100",
       "service_peer_id": "99999999900000000200",
-      "service_name": "gbo-metadata",
+      "service_name": "gbo-metadata-bd",
       "add": {
         "flow": "gbo:source-metadata"
       }

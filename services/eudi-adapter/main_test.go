@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -21,6 +23,7 @@ func TestShippedSourceMetadataMatchesEnvelopeSchema(t *testing.T) {
 	schema := compileSourceMetadataSchema(t)
 	for _, path := range []string{
 		"../graphql-server/config/gbo-source-metadata.json",
+		"../graphql-server/config/gbo-source-metadata-unsecured.json",
 		"../brp-graphql-server/config/gbo-source-metadata.json",
 	} {
 		t.Run(path, func(t *testing.T) {
@@ -63,7 +66,17 @@ func compileSourceMetadataSchema(t *testing.T) *jsonschema.Schema {
 	return schema
 }
 
-func fetchSourceMetadataForTest(ctx context.Context, client *http.Client, cfg sourceMetadataConfig) (*activeSourceMetadata, error) {
+type testSourceMetadataConfig struct {
+	URL               string
+	MetadataTransport string
+	MetadataGrantHash string
+	DataTransport     string
+	SourceID          string
+	ExpectedOIN       string
+	TypeID            string
+}
+
+func fetchSourceMetadataForTest(ctx context.Context, client *http.Client, cfg testSourceMetadataConfig) (*activeSourceMetadata, error) {
 	if cfg.URL == "" || cfg.ExpectedOIN == "" || cfg.TypeID == "" {
 		return nil, fmt.Errorf("source metadata registration is incomplete")
 	}
@@ -97,8 +110,35 @@ func fetchSourceMetadataForTest(ctx context.Context, client *http.Client, cfg so
 	if err != nil {
 		return nil, fmt.Errorf("read source metadata: %w", err)
 	}
-	metadata, _, err := parseSourceMetadataPayload(payload, cfg)
-	return metadata, err
+	document, err := decodeSourceMetadataDocument(payload)
+	if err != nil {
+		return nil, err
+	}
+	if document.SourceOIN != cfg.ExpectedOIN {
+		return nil, fmt.Errorf("source metadata OIN %q does not match registered OIN %q", document.SourceOIN, cfg.ExpectedOIN)
+	}
+	if document.SchemaVersion != "1.0" {
+		return nil, fmt.Errorf("unsupported source metadata schema_version %q", document.SchemaVersion)
+	}
+	if document.Capabilities.EUDI == nil || document.Capabilities.EUDI.Version != "1.0" {
+		return nil, fmt.Errorf("source metadata has no supported EUDI capability")
+	}
+	for _, definition := range document.eudiAttestations() {
+		if definition.TypeID != cfg.TypeID {
+			continue
+		}
+		if err := validateSourceAttestation(definition); err != nil {
+			return nil, fmt.Errorf("attestation %q: %w", cfg.TypeID, err)
+		}
+		if err := validateGraphQLEndpoint(definition.GraphQL, cfg.DataTransport); err != nil {
+			return nil, fmt.Errorf("attestation %q graphql.endpoint: %w", cfg.TypeID, err)
+		}
+		return &activeSourceMetadata{
+			Version: document.Version, SourceID: cfg.SourceID, SourceOIN: cfg.ExpectedOIN,
+			TypeID: cfg.TypeID, Definition: definition,
+		}, nil
+	}
+	return nil, fmt.Errorf("source metadata has no attestation %q", cfg.TypeID)
 }
 
 func TestAttributeSchemaUnknownPropertiesRejectedByRuntimeAndEnvelopeSchema(t *testing.T) {
@@ -236,9 +276,9 @@ func TestAdapterUsesSourceMetadataFor2025(t *testing.T) {
 	}))
 	defer metadataServer.Close()
 
-	metadata, err := fetchSourceMetadataForTest(context.Background(), http.DefaultClient, sourceMetadataConfig{
+	metadata, err := fetchSourceMetadataForTest(context.Background(), http.DefaultClient, testSourceMetadataConfig{
 		URL: metadataServer.URL + "/metadata/.well-known/gbo", MetadataTransport: sourceTransportFSC,
-		DataTransport: sourceTransportFSC, ExpectedOIN: "99999999900000000200", TypeID: "inkomensverklaring",
+		DataTransport: sourceTransportFSC, SourceID: "belastingdienst", ExpectedOIN: "99999999900000000200", TypeID: "inkomensverklaring",
 	})
 	if err != nil {
 		t.Fatalf("load source metadata: %v", err)
@@ -275,7 +315,7 @@ func TestAdapterUsesSourceMetadataFor2025(t *testing.T) {
 			"attributes": {"urn:eudi:pid:nl:1": {"bsn": "123456789"}}
 		}]
 	}]`)
-	resp, err := http.Post(srv.URL+"/attestations/99999999900000000200/inkomensverklaring?jaar=2025", "application/json", bytes.NewReader(body))
+	resp, err := http.Post(srv.URL+"/attestations/belastingdienst/inkomensverklaring?jaar=2025", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("post: %v", err)
 	}
@@ -320,6 +360,7 @@ func phase1IncomeMapping() map[string]mappingRule {
 func newIncomeSourceAdapter(t *testing.T, mapping map[string]mappingRule, bronResponse string) *httptest.Server {
 	t.Helper()
 	metadata := &activeSourceMetadata{
+		SourceID:  "belastingdienst",
 		SourceOIN: "99999999900000000200",
 		TypeID:    "inkomensverklaring",
 		Definition: sourceAttestationDefinition{
@@ -370,7 +411,7 @@ func newIncomeSourceAdapter(t *testing.T, mapping map[string]mappingRule, bronRe
 
 func TestSourceAttestationRejectsParametersOutsidePublishedOffers(t *testing.T) {
 	srv := newIncomeSourceAdapter(t, phase1IncomeMapping(), completeIncomeResponse)
-	resp := postDisclosure(t, srv, "/attestations/99999999900000000200/inkomensverklaring?jaar=2023", "123456789")
+	resp := postDisclosure(t, srv, "/attestations/belastingdienst/inkomensverklaring?jaar=2023", "123456789")
 	defer resp.Body.Close()
 	if got, want := resp.StatusCode, http.StatusBadRequest; got != want {
 		body, _ := io.ReadAll(resp.Body)
@@ -380,7 +421,7 @@ func TestSourceAttestationRejectsParametersOutsidePublishedOffers(t *testing.T) 
 
 func TestSourceAttestationDoesNotExposeUpstreamErrorBody(t *testing.T) {
 	metadata := &activeSourceMetadata{
-		SourceOIN: "99999999900000000200", TypeID: "example", VCT: "https://issuer.example/types/99999999900000000200/example/v1",
+		SourceID: "belastingdienst", SourceOIN: "99999999900000000200", TypeID: "example", VCT: "https://issuer.example/types/belastingdienst/example/v1",
 		Definition: sourceAttestationDefinition{
 			Offers:  []sourceOffer{{ID: "example", Label: "Example", Parameters: map[string]any{}}},
 			GraphQL: sourceGraphQL{ServiceReference: "example", Endpoint: "/graphql", Document: "query Example($bsn: BSN!) { example(bsn: $bsn) { value } }", SubjectVariable: "bsn", ResultPointer: "/data/example"},
@@ -399,7 +440,7 @@ func TestSourceAttestationDoesNotExposeUpstreamErrorBody(t *testing.T) {
 		"attestations":[{"attributes":{"urn:eudi:pid:nl:1":{"bsn":"123456789"}}}]
 	}]`
 	recorder := httptest.NewRecorder()
-	mux.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "http://adapter/attestations/99999999900000000200/example", strings.NewReader(disclosure)))
+	mux.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "http://adapter/attestations/belastingdienst/example", strings.NewReader(disclosure)))
 	if got, want := recorder.Code, http.StatusBadGateway; got != want {
 		t.Fatalf("status = %d, want %d; body=%s", got, want, recorder.Body.String())
 	}
@@ -424,17 +465,127 @@ func (r *typeRoutingRuntime) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 func TestTypeMetadataRoutingUsesSourceAndType(t *testing.T) {
 	const sourceOIN = "99999999900000000200"
 	bindings := []sourceRuntimeBinding{
-		{config: config{SourceMetadataOIN: sourceOIN, SourceMetadataTypeID: "type-one"}, runtime: &typeRoutingRuntime{body: "type-one"}},
-		{config: config{SourceMetadataOIN: sourceOIN, SourceMetadataTypeID: "type-two"}, runtime: &typeRoutingRuntime{body: "type-two"}},
+		{config: config{SourceMetadataSourceID: "belastingdienst", SourceMetadataOIN: sourceOIN, SourceMetadataTypeID: "shared-type"}, runtime: &typeRoutingRuntime{body: "belastingdienst"}},
+		{config: config{SourceMetadataSourceID: "rvig", SourceMetadataOIN: sourceOIN, SourceMetadataTypeID: "shared-type"}, runtime: &typeRoutingRuntime{body: "rvig"}},
 	}
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/types/"+sourceOIN+"/type-two/v1", nil)
+	request := httptest.NewRequest(http.MethodGet, "/types/rvig/shared-type/v1", nil)
 	sourceTypeMetadataHandler{bindings: bindings}.ServeHTTP(recorder, request)
 	if got, want := recorder.Code, http.StatusOK; got != want {
 		t.Fatalf("status = %d, want %d", got, want)
 	}
-	if got, want := recorder.Body.String(), "type-two"; got != want {
+	if got, want := recorder.Body.String(), "rvig"; got != want {
 		t.Fatalf("body = %q, want %q", got, want)
+	}
+}
+
+func TestUnsecuredSourceDataUsesPublishedAbsoluteEndpointWithoutFSCHeaders(t *testing.T) {
+	var received proxyRequest
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("Fsc-Grant-Hash") != "" || request.Header.Get("Fsc-Transaction-Id") != "" {
+			t.Fatalf("unsecured data request contains FSC headers: %v", request.Header)
+		}
+		if err := json.NewDecoder(request.Body).Decode(&received); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"example":{"value":"ok"}}}`))
+	}))
+	defer source.Close()
+
+	result, err := callSource(context.Background(), source.Client(), config{SourceDataTransport: sourceTransportUnsecured}, sourceQueryPlan{
+		Endpoint: source.URL + "/graphql", Query: "query Example { example { value } }",
+	})
+	if err != nil {
+		t.Fatalf("call unsecured source: %v", err)
+	}
+	if len(result.Raw) == 0 || received.Query == "" {
+		t.Fatalf("result=%s request=%+v", result.Raw, received)
+	}
+}
+
+func TestUnsecuredSourceDataRejectsRedirect(t *testing.T) {
+	targetCalled := false
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { targetCalled = true }))
+	defer target.Close()
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		http.Redirect(w, request, target.URL, http.StatusTemporaryRedirect)
+	}))
+	defer redirect.Close()
+
+	_, err := callSource(context.Background(), redirect.Client(), config{SourceDataTransport: sourceTransportUnsecured}, sourceQueryPlan{
+		Endpoint: redirect.URL, Query: "query Example { example { value } }",
+	})
+	if err == nil || !strings.Contains(err.Error(), "redirect") {
+		t.Fatalf("redirect error = %v", err)
+	}
+	if targetCalled {
+		t.Fatal("unsecured data redirect crossed the configured endpoint boundary")
+	}
+}
+
+func TestRuntimeDoesNotFetchSourceMetadata(t *testing.T) {
+	activeDirectory := t.TempDir()
+	activation := sourceActivation{
+		SchemaVersion: "1.0",
+		Source: sourceRegistration{
+			SourceID: "belastingdienst", SourceOIN: "99999999900000000200", Name: "Belastingdienst", CertificateSet: "belastingdienst",
+			MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportFSC, ServiceReference: "gbo-metadata", Path: "/.well-known/gbo", GrantHash: "metadata-grant"},
+			DataAccess:       sourceDataAccess{Transport: sourceTransportFSC, ServiceReference: "bri", GrantHash: "data-grant"},
+		},
+		Types: []activatedType{{
+			TypeID: "inkomensverklaring", TypeVersion: "1.0",
+			VCT: "https://issuer.example/types/belastingdienst/inkomensverklaring/v1.0", VCTIntegrity: "sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=",
+			TypeMetadataReference: filepath.Join(t.TempDir(), "type.json"), Offers: []sourceOffer{{ID: "income", Label: "Income", Parameters: map[string]any{}}},
+		}},
+	}
+	body, err := json.Marshal(activation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(activeDirectory, "belastingdienst.json"), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	requests := 0
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		requests++
+		return nil, errors.New("runtime must not fetch source metadata")
+	})}
+
+	_ = newRuntimeMux(context.Background(), config{
+		OutwayURL: "https://outway.example", SourceActivationsPath: activeDirectory,
+		TypeMetadataStorePath: t.TempDir(),
+	}, client)
+	if requests != 0 {
+		t.Fatalf("runtime performed %d source metadata request(s)", requests)
+	}
+}
+
+func TestRuntimeFailsClosedWhenDeployedTypeDisappears(t *testing.T) {
+	activationPath := filepath.Join(t.TempDir(), "belastingdienst.json")
+	body, err := json.Marshal(sourceActivation{
+		SchemaVersion: "1.0",
+		Source: sourceRegistration{
+			SourceID: "belastingdienst", SourceOIN: "99999999900000000200", Name: "Belastingdienst", CertificateSet: "belastingdienst",
+		},
+		Types: []activatedType{{TypeID: "different-type"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(activationPath, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := newActivatedSourceRuntime(config{
+		SourceMetadataSourceID: "belastingdienst", SourceMetadataOIN: "99999999900000000200",
+		SourceMetadataTypeID: "inkomensverklaring", SourceMetadataVCT: "https://issuer.example/types/belastingdienst/inkomensverklaring/v1.0",
+		SourceActivationPath: activationPath, TypeMetadataStorePath: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.current(time.Now()); err == nil || !strings.Contains(err.Error(), "no longer contains") {
+		t.Fatalf("current error = %v, want removed type to fail closed", err)
 	}
 }
 
@@ -462,7 +613,7 @@ func TestSourceProjectionContainsOnlyMappedClaims(t *testing.T) {
 	)
 	srv := newIncomeSourceAdapter(t, mapping, responseWithoutBox3)
 
-	resp := postDisclosure(t, srv, "/attestations/99999999900000000200/inkomensverklaring?jaar=2025", "123456789")
+	resp := postDisclosure(t, srv, "/attestations/belastingdienst/inkomensverklaring?jaar=2025", "123456789")
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(resp.Body)
@@ -481,7 +632,7 @@ func TestSourceProjectionPreservesDecimalNumbers(t *testing.T) {
 	responseWithCents := strings.Replace(completeIncomeResponse, "43000.0", "43000.50", 1)
 	srv := newIncomeSourceAdapter(t, phase1IncomeMapping(), responseWithCents)
 
-	resp := postDisclosure(t, srv, "/attestations/99999999900000000200/inkomensverklaring?jaar=2025", "123456789")
+	resp := postDisclosure(t, srv, "/attestations/belastingdienst/inkomensverklaring?jaar=2025", "123456789")
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(resp.Body)
@@ -596,7 +747,7 @@ func TestSourceMetadataRejectedDuringOnboarding(t *testing.T) {
 			}))
 			defer server.Close()
 
-			_, err := fetchSourceMetadataForTest(context.Background(), http.DefaultClient, sourceMetadataConfig{
+			_, err := fetchSourceMetadataForTest(context.Background(), http.DefaultClient, testSourceMetadataConfig{
 				URL: server.URL, MetadataTransport: sourceTransportFSC, DataTransport: sourceTransportFSC,
 				ExpectedOIN: test.expectedOIN, TypeID: "inkomensverklaring",
 			})
@@ -619,10 +770,11 @@ func TestAdapterUsesBRPSourceQueryAndMapping(t *testing.T) {
 	definition := document.eudiAttestations()[0]
 	active := &activeSourceMetadata{
 		Version:      document.Version,
+		SourceID:     "rvig",
 		SourceOIN:    document.SourceOIN,
 		TypeID:       definition.TypeID,
 		Definition:   definition,
-		VCT:          "https://issuer.example/types/99999999900000000400/akte-van-overlijden/v1.0",
+		VCT:          "https://issuer.example/types/rvig/akte-van-overlijden/v1.0",
 		VCTIntegrity: "sha256-test-integrity",
 	}
 
@@ -657,7 +809,7 @@ func TestAdapterUsesBRPSourceQueryAndMapping(t *testing.T) {
 	cfg := config{OutwayURL: outway.URL, SourceDataTransport: sourceTransportFSC, SourceDataFSCServiceReference: "brp", SourceDataFSCGrantHash: "data-grant"}
 	srv := httptest.NewServer(newMux(cfg, http.DefaultClient, active))
 	defer srv.Close()
-	resp := postDisclosure(t, srv, "/attestations/99999999900000000400/akte-van-overlijden", "999991772")
+	resp := postDisclosure(t, srv, "/attestations/rvig/akte-van-overlijden", "999991772")
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)

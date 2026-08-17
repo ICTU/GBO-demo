@@ -16,12 +16,16 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const adapterTrustAnchorMarker = "# GBO_GENERATOR_ADAPTER_"
 
 type issuanceConfigOptions struct {
 	activationsDir string
+	activeDir      string
+	sourcesDir     string
+	statusDir      string
 	templatePath   string
 	adapterBaseURL string
 	outputPath     string
@@ -33,6 +37,7 @@ type publicIssuanceOffer struct {
 	Label           string         `json:"label"`
 	Description     string         `json:"description,omitempty"`
 	AttestationType string         `json:"attestation_type"`
+	SourceID        string         `json:"source_id"`
 	SourceOIN       string         `json:"source_oin"`
 	TypeID          string         `json:"type_id"`
 	Parameters      map[string]any `json:"parameters"`
@@ -56,7 +61,10 @@ func runIssuanceConfigCommand(arguments []string, stdout, stderr io.Writer) (boo
 	set := flag.NewFlagSet(arguments[0], flag.ContinueOnError)
 	set.SetOutput(stderr)
 	options := issuanceConfigOptions{}
-	set.StringVar(&options.activationsDir, "activations-dir", ".local/onboarding/active", "directory containing active source registrations")
+	set.StringVar(&options.activationsDir, "activations-dir", ".local/onboarding/candidates", "directory containing reconciled candidate source registrations")
+	set.StringVar(&options.activeDir, "active-dir", ".local/onboarding/active", "directory receiving the successfully deployed source snapshot")
+	set.StringVar(&options.sourcesDir, "sources-dir", getEnv("SOURCE_CONFIGURATIONS_PATH", "sources/configured"), "directory containing desired source configurations")
+	set.StringVar(&options.statusDir, "status-dir", ".local/onboarding/status", "directory containing per-source reconciliation status")
 	set.StringVar(&options.templatePath, "template", "services/eudi-issuance-server/config/issuance_server.toml.example", "issuance-server TOML template")
 	set.StringVar(&options.adapterBaseURL, "adapter-base-url", os.Getenv("EUDI_BRI_URL"), "public GBO adapter base URL")
 	set.StringVar(&options.outputPath, "output", "services/eudi-issuance-server/config/issuance_server.toml", "generated issuance-server TOML")
@@ -83,6 +91,11 @@ func generateIssuanceConfig(options issuanceConfigOptions) error {
 	if err != nil {
 		return err
 	}
+	if options.sourcesDir != "" || options.statusDir != "" {
+		if err := validateIssuanceRolloutSources(options.sourcesDir, options.statusDir, activations); err != nil {
+			return err
+		}
+	}
 	templateBody, err := os.ReadFile(options.templatePath)
 	if err != nil {
 		return fmt.Errorf("read issuance config template: %w", err)
@@ -103,7 +116,7 @@ func generateIssuanceConfig(options issuanceConfigOptions) error {
 	for _, activation := range activations {
 		material, err := loadIssuanceCertificateMaterial(activation.Certificates)
 		if err != nil {
-			return fmt.Errorf("source %s certificates: %w", activation.Source.SourceOIN, err)
+			return fmt.Errorf("source %s certificates: %w", activation.Source.SourceID, err)
 		}
 		issuerAnchors[material.issuerCA] = struct{}{}
 		readerAnchors[material.readerCA] = struct{}{}
@@ -113,15 +126,15 @@ func generateIssuanceConfig(options issuanceConfigOptions) error {
 			}
 			seenVCTs[activatedType.VCT] = struct{}{}
 
-			metadataName := fmt.Sprintf("type-%s-%s-v%s.json", activation.Source.SourceOIN, activatedType.TypeID, activatedType.TypeVersion)
+			metadataName := fmt.Sprintf("type-%s-%s-v%s.json", activation.Source.SourceID, activatedType.TypeID, activatedType.TypeVersion)
 			metadataBody, err := os.ReadFile(activatedType.TypeMetadataReference)
 			if err != nil {
-				return fmt.Errorf("read activated Type Metadata for %s/%s: %w", activation.Source.SourceOIN, activatedType.TypeID, err)
+				return fmt.Errorf("read activated Type Metadata for %s/%s: %w", activation.Source.SourceID, activatedType.TypeID, err)
 			}
 			metadataDigest := sha256.Sum256(metadataBody)
 			metadataIntegrity := "sha256-" + base64.StdEncoding.EncodeToString(metadataDigest[:])
 			if metadataIntegrity != activatedType.VCTIntegrity {
-				return fmt.Errorf("activated Type Metadata integrity mismatch for %s/%s", activation.Source.SourceOIN, activatedType.TypeID)
+				return fmt.Errorf("activated Type Metadata integrity mismatch for %s/%s", activation.Source.SourceID, activatedType.TypeID)
 			}
 			if err := os.MkdirAll(filepath.Dir(options.outputPath), 0o755); err != nil {
 				return fmt.Errorf("create issuance config directory: %w", err)
@@ -137,7 +150,7 @@ func generateIssuanceConfig(options issuanceConfigOptions) error {
 				}
 				seenOfferKeys[offer.ID] = struct{}{}
 				endpoint := *adapterBaseURL
-				endpoint.Path = strings.TrimRight(endpoint.Path, "/") + "/attestations/" + activation.Source.SourceOIN + "/" + activatedType.TypeID
+				endpoint.Path = strings.TrimRight(endpoint.Path, "/") + "/attestations/" + activation.Source.SourceID + "/" + activatedType.TypeID
 				query := make(url.Values, len(offer.Parameters))
 				for name, value := range offer.Parameters {
 					formatted, err := canonicalOfferParameter(value)
@@ -150,7 +163,7 @@ func generateIssuanceConfig(options issuanceConfigOptions) error {
 				appendDisclosureSettings(&settings, offer.ID, endpoint.String(), adapterTrustAnchors, material)
 				offers = append(offers, publicIssuanceOffer{
 					Key: offer.ID, Label: offer.Label, Description: offer.Description,
-					AttestationType: activatedType.VCT, SourceOIN: activation.Source.SourceOIN,
+					AttestationType: activatedType.VCT, SourceID: activation.Source.SourceID, SourceOIN: activation.Source.SourceOIN,
 					TypeID: activatedType.TypeID, Parameters: offer.Parameters,
 				})
 			}
@@ -188,6 +201,113 @@ func generateIssuanceConfig(options issuanceConfigOptions) error {
 	}
 	if err := writeFileAtomically(filepath.Dir(options.offersPath), filepath.Base(options.offersPath), offersBody, 0o644); err != nil {
 		return fmt.Errorf("write public issuance offers: %w", err)
+	}
+	if options.activeDir != "" {
+		if err := promoteActivationCandidates(options.activationsDir, options.activeDir, options.statusDir, activations); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateIssuanceRolloutSources(sourcesDir, statusDir string, activations []sourceActivation) error {
+	if sourcesDir == "" || statusDir == "" {
+		return fmt.Errorf("sources and status directories are required for a controlled rollout")
+	}
+	configurations, err := loadSourceConfigurations(sourcesDir)
+	if err != nil {
+		return err
+	}
+	bySource := make(map[string]sourceActivation, len(activations))
+	for _, activation := range activations {
+		bySource[activation.Source.SourceID] = activation
+	}
+	for _, configuration := range configurations {
+		if _, ok := bySource[configuration.SourceID]; !ok {
+			return fmt.Errorf("configured source %q has no complete candidate activation", configuration.SourceID)
+		}
+		body, err := os.ReadFile(filepath.Join(statusDir, configuration.SourceID+".json"))
+		if err != nil {
+			return fmt.Errorf("configured source %q has no reconciliation status: %w", configuration.SourceID, err)
+		}
+		var status sourceReconcileStatus
+		if err := json.Unmarshal(body, &status); err != nil {
+			return fmt.Errorf("configured source %q has invalid reconciliation status: %w", configuration.SourceID, err)
+		}
+		if status.SourceID != configuration.SourceID {
+			return fmt.Errorf("configured source %q status belongs to %q", configuration.SourceID, status.SourceID)
+		}
+		if status.State != sourceStateActive && status.State != sourceStateRolloutRequired {
+			return fmt.Errorf("configured source %q is %s and cannot be rolled out", configuration.SourceID, status.State)
+		}
+		delete(bySource, configuration.SourceID)
+	}
+	if len(bySource) != 0 {
+		return fmt.Errorf("candidate activations contain sources that are absent from desired configuration")
+	}
+	return nil
+}
+
+func promoteActivationCandidates(candidatesDir, activeDir, statusDir string, activations []sourceActivation) error {
+	if filepath.Clean(candidatesDir) == filepath.Clean(activeDir) {
+		return fmt.Errorf("candidate and active source directories must be separate")
+	}
+	parent := filepath.Dir(activeDir)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return fmt.Errorf("create active source parent directory: %w", err)
+	}
+	staging, err := os.MkdirTemp(parent, ".active-next-")
+	if err != nil {
+		return fmt.Errorf("create active source staging directory: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(staging) }()
+	for _, activation := range activations {
+		name := activation.Source.SourceID + ".json"
+		body, err := os.ReadFile(filepath.Join(candidatesDir, name))
+		if err != nil {
+			return fmt.Errorf("read candidate activation %s: %w", name, err)
+		}
+		if err := os.WriteFile(filepath.Join(staging, name), body, 0o644); err != nil {
+			return fmt.Errorf("stage candidate activation %s: %w", name, err)
+		}
+	}
+	backup, err := os.MkdirTemp(parent, ".active-previous-")
+	if err != nil {
+		return fmt.Errorf("reserve active source backup path: %w", err)
+	}
+	if err := os.Remove(backup); err != nil {
+		return fmt.Errorf("prepare active source backup path: %w", err)
+	}
+	hadActive := true
+	if err := os.Rename(activeDir, backup); os.IsNotExist(err) {
+		hadActive = false
+	} else if err != nil {
+		return fmt.Errorf("preserve deployed source snapshot: %w", err)
+	}
+	if err := os.Rename(staging, activeDir); err != nil {
+		if hadActive {
+			_ = os.Rename(backup, activeDir)
+		}
+		return fmt.Errorf("activate deployed source snapshot: %w", err)
+	}
+	if hadActive {
+		if err := os.RemoveAll(backup); err != nil {
+			return fmt.Errorf("remove previous deployed source snapshot: %w", err)
+		}
+	}
+	writer := &filesystemSourceStatusWriter{directory: statusDir}
+	for _, activation := range activations {
+		digest, err := activationDeploymentDigest(&activation)
+		if err != nil {
+			return err
+		}
+		if err := writer.Write(sourceReconcileStatus{
+			SourceID: activation.Source.SourceID, State: sourceStateActive,
+			MetadataVersion: activation.MetadataVersion, DeploymentDigest: digest,
+			TransportAuthenticated: activation.TransportAuthenticated, CheckedAt: time.Now().UTC(),
+		}); err != nil {
+			return fmt.Errorf("mark source %s deployed: %w", activation.Source.SourceID, err)
+		}
 	}
 	return nil
 }
@@ -227,6 +347,7 @@ func loadIssuanceActivations(directory string) ([]sourceActivation, error) {
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
 	activations := make([]sourceActivation, 0, len(entries))
+	seenSourceIDs := make(map[string]string, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue
@@ -244,9 +365,16 @@ func loadIssuanceActivations(directory string) ([]sourceActivation, error) {
 		if err := decoder.Decode(&struct{}{}); err != io.EOF {
 			return nil, fmt.Errorf("parse activation %s: trailing JSON data", entry.Name())
 		}
-		if activation.SchemaVersion != "1.0" || !sourceOINPattern.MatchString(activation.Source.SourceOIN) || len(activation.Types) == 0 {
+		if activation.SchemaVersion != "1.0" || !sourceIDPattern.MatchString(activation.Source.SourceID) || !sourceOINPattern.MatchString(activation.Source.SourceOIN) || len(activation.Types) == 0 {
 			return nil, fmt.Errorf("activation %s is incomplete", entry.Name())
 		}
+		if entry.Name() != activation.Source.SourceID+".json" {
+			return nil, fmt.Errorf("activation %s does not match source_id %q", entry.Name(), activation.Source.SourceID)
+		}
+		if previous, duplicate := seenSourceIDs[activation.Source.SourceID]; duplicate {
+			return nil, fmt.Errorf("source_id %q is activated in both %s and %s", activation.Source.SourceID, previous, entry.Name())
+		}
+		seenSourceIDs[activation.Source.SourceID] = entry.Name()
 		for _, activatedType := range activation.Types {
 			if err := activatedType.validate(); err != nil {
 				return nil, fmt.Errorf("activation %s contains an invalid attestation type: %w", entry.Name(), err)

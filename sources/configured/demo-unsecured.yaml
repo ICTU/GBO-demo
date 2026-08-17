@@ -1,0 +1,9 @@
+source_id: demo-unsecured
+source_oin: "99999999900000000900"
+name: Demo unsecured source
+certificate_set: demo-unsecured
+metadata_endpoint:
+  transport: unsecured
+  endpoint: http://unsecured-graphql-server:4000/.well-known/gbo
+data_access:
+  transport: unsecured

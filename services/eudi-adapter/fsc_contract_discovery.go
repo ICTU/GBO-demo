@@ -11,14 +11,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 	"time"
-)
-
-const (
-	gboMetadataServiceName = "gbo-metadata"
-	gboWellKnownPath       = "/.well-known/gbo"
 )
 
 type fscContractsResponse struct {
@@ -26,15 +21,6 @@ type fscContractsResponse struct {
 	Pagination struct {
 		NextCursor string `json:"next_cursor"`
 	} `json:"pagination"`
-}
-
-type fscPeersResponse struct {
-	Peers []fscPeer `json:"peers"`
-}
-
-type fscPeer struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
 }
 
 type fscContract struct {
@@ -78,7 +64,6 @@ type fscConnectionGrant struct {
 
 type fscContractSnapshot struct {
 	byService map[string]fscConnectionGrant
-	peerNames map[string]string
 }
 
 func newFSCManagerHTTPClient(caPath, certPath, keyPath string) (*http.Client, error) {
@@ -112,10 +97,6 @@ func loadFSCContractSnapshot(ctx context.Context, client *http.Client, managerUR
 		return nil, fmt.Errorf("FSC Manager URL must be an absolute HTTPS URL without credentials, query or fragment")
 	}
 	basePath := strings.TrimRight(parsed.Path, "/")
-	peerNames, err := loadFSCPeerNames(ctx, client, *parsed, basePath)
-	if err != nil {
-		return nil, err
-	}
 	parsed.Path = basePath + "/v1/contracts"
 	parsed.RawQuery = ""
 	var contracts []fscContract
@@ -139,7 +120,7 @@ func loadFSCContractSnapshot(ctx context.Context, client *http.Client, managerUR
 			return nil, fmt.Errorf("list FSC contracts exceeded 100 pages")
 		}
 	}
-	snapshot := &fscContractSnapshot{byService: make(map[string]fscConnectionGrant), peerNames: peerNames}
+	snapshot := &fscContractSnapshot{byService: make(map[string]fscConnectionGrant)}
 	unixNow := now.Unix()
 	for _, contract := range contracts {
 		if contract.State != "CONTRACT_STATE_VALID" || unixNow < contract.Content.Validity.NotBefore || unixNow >= contract.Content.Validity.NotAfter {
@@ -158,42 +139,6 @@ func loadFSCContractSnapshot(ctx context.Context, client *http.Client, managerUR
 		}
 	}
 	return snapshot, nil
-}
-
-func loadFSCPeerNames(ctx context.Context, client *http.Client, endpoint url.URL, basePath string) (map[string]string, error) {
-	endpoint.Path = basePath + "/v1/peers"
-	endpoint.RawQuery = ""
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
-	if err != nil {
-		return nil, fmt.Errorf("create FSC peers request: %w", err)
-	}
-	request.Header.Set("Accept", "application/json")
-	response, err := client.Do(request)
-	if err != nil {
-		return nil, fmt.Errorf("list FSC peers: %w", err)
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(response.Body, 4<<10))
-		return nil, fmt.Errorf("list FSC peers returned status %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
-	}
-	var payload fscPeersResponse
-	decoder := json.NewDecoder(io.LimitReader(response.Body, 4<<20))
-	if err := decoder.Decode(&payload); err != nil {
-		return nil, fmt.Errorf("decode FSC peers: %w", err)
-	}
-	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		return nil, fmt.Errorf("decode FSC peers: trailing JSON data")
-	}
-	peerNames := make(map[string]string, len(payload.Peers))
-	for _, peer := range payload.Peers {
-		name := strings.TrimSpace(peer.Name)
-		if !sourceOINPattern.MatchString(peer.ID) || name == "" {
-			continue
-		}
-		peerNames[peer.ID] = name
-	}
-	return peerNames, nil
 }
 
 func loadFSCContractsPage(ctx context.Context, client *http.Client, endpoint url.URL, cursor string) (fscContractsResponse, error) {
@@ -232,22 +177,6 @@ func fscServiceKey(providerOIN, serviceName string) string {
 	return providerOIN + "\x00" + serviceName
 }
 
-func (s *fscContractSnapshot) metadataGrants() []fscConnectionGrant {
-	if s == nil {
-		return nil
-	}
-	grants := make([]fscConnectionGrant, 0)
-	for _, grant := range s.byService {
-		if grant.ServiceName == gboMetadataServiceName {
-			grants = append(grants, grant)
-		}
-	}
-	sort.Slice(grants, func(i, j int) bool {
-		return grants[i].ProviderOIN < grants[j].ProviderOIN
-	})
-	return grants
-}
-
 func (s *fscContractSnapshot) service(providerOIN, serviceName string) (fscConnectionGrant, bool) {
 	if s == nil {
 		return fscConnectionGrant{}, false
@@ -256,15 +185,7 @@ func (s *fscContractSnapshot) service(providerOIN, serviceName string) (fscConne
 	return grant, ok
 }
 
-func (s *fscContractSnapshot) peerName(providerOIN string) (string, bool) {
-	if s == nil {
-		return "", false
-	}
-	name, ok := s.peerNames[providerOIN]
-	return name, ok
-}
-
-type fscSourceReconciler struct {
+type sourceReconciler struct {
 	managerClient *http.Client
 	sourceClient  *http.Client
 	managerURL    string
@@ -272,81 +193,276 @@ type fscSourceReconciler struct {
 	outwayURL     string
 	schemaPath    string
 	publicBaseURL string
+	sources       []sourceConfiguration
 	store         certificateStore
 	backend       activationBackend
+	statuses      sourceStatusWriter
 }
 
-func (r *fscSourceReconciler) Reconcile(ctx context.Context, now time.Time) error {
+func (r *sourceReconciler) Reconcile(ctx context.Context, now time.Time) error {
 	if r == nil || r.sourceClient == nil || r.store == nil || r.backend == nil {
 		return fmt.Errorf("FSC source reconciler is incomplete")
 	}
-	snapshot, err := loadFSCContractSnapshot(ctx, r.managerClient, r.managerURL, r.consumerOIN, now)
-	if err != nil {
-		return err
-	}
 	var reconcileErrors []error
-	for _, metadataGrant := range snapshot.metadataGrants() {
-		if err := r.reconcileSource(ctx, snapshot, metadataGrant, now); err != nil {
-			reconcileErrors = append(reconcileErrors, fmt.Errorf("source %s: %w", metadataGrant.ProviderOIN, err))
+	type readySource struct {
+		configuration sourceConfiguration
+		certificates  certificateArtifacts
+	}
+	ready := make([]readySource, 0, len(r.sources))
+	hasFSCSource := false
+	for _, configuration := range r.sources {
+		certificates, err := r.store.Load(configuration.registration())
+		if err != nil {
+			reason := sourceReasonCertificateSetInvalid
+			if errors.Is(err, os.ErrNotExist) {
+				reason = sourceReasonCertificateSetNotFound
+			}
+			message := fmt.Sprintf("certificate set %q is unavailable: %v", configuration.CertificateSet, err)
+			reconcileErrors = append(reconcileErrors, r.blocked(configuration, reason, message, now))
+			continue
+		}
+		ready = append(ready, readySource{configuration: configuration, certificates: certificates})
+		hasFSCSource = hasFSCSource || configuration.MetadataEndpoint.Transport == sourceTransportFSC
+		if err := r.writeStatus(sourceReconcileStatus{
+			SourceID: configuration.SourceID, State: sourceStatePending,
+			TransportAuthenticated: configuration.MetadataEndpoint.Transport == sourceTransportFSC, CheckedAt: now.UTC(),
+		}); err != nil {
+			reconcileErrors = append(reconcileErrors, fmt.Errorf("source %s: record pending status: %w", configuration.SourceID, err))
+		}
+	}
+	if len(ready) == 0 {
+		return errors.Join(reconcileErrors...)
+	}
+	var snapshot *fscContractSnapshot
+	if hasFSCSource {
+		var err error
+		snapshot, err = loadFSCContractSnapshot(ctx, r.managerClient, r.managerURL, r.consumerOIN, now)
+		if err != nil {
+			for _, source := range ready {
+				if source.configuration.MetadataEndpoint.Transport == sourceTransportFSC {
+					existing, candidateErr := r.currentCandidate(source.configuration.SourceID)
+					if candidateErr != nil {
+						reconcileErrors = append(reconcileErrors, r.blocked(source.configuration, sourceReasonActivationFailed, candidateErr.Error(), now))
+						continue
+					}
+					reconcileErrors = append(reconcileErrors, r.metadataUnavailable(source.configuration, existing, sourceReasonFSCManagerUnavailable, err.Error(), now))
+				}
+			}
+			ready = slices.DeleteFunc(ready, func(source readySource) bool {
+				return source.configuration.MetadataEndpoint.Transport == sourceTransportFSC
+			})
+		}
+	}
+	for _, source := range ready {
+		if err := r.reconcileSource(ctx, snapshot, source.configuration, source.certificates, now); err != nil {
+			reconcileErrors = append(reconcileErrors, err)
 		}
 	}
 	return errors.Join(reconcileErrors...)
 }
 
-func (r *fscSourceReconciler) reconcileSource(ctx context.Context, snapshot *fscContractSnapshot, metadataGrant fscConnectionGrant, now time.Time) error {
-	metadataURL := strings.TrimRight(r.outwayURL, "/") + gboWellKnownPath
-	payload, err := fetchSourceMetadata(ctx, r.sourceClient, metadataURL, sourceTransportFSC, metadataGrant.GrantHash)
-	if err != nil {
-		return err
+func (r *sourceReconciler) reconcileSource(ctx context.Context, snapshot *fscContractSnapshot, configuration sourceConfiguration, certificates certificateArtifacts, now time.Time) error {
+	if configuration.MetadataEndpoint.Transport == sourceTransportUnsecured {
+		return r.reconcileUnsecuredSource(ctx, configuration, certificates, now)
 	}
+	metadataGrant, ok := snapshot.service(configuration.SourceOIN, configuration.MetadataEndpoint.ServiceReference)
+	if !ok {
+		return r.blocked(configuration, sourceReasonMetadataContractMissing, fmt.Sprintf("no valid FSC metadata contract for service %q", configuration.MetadataEndpoint.ServiceReference), now)
+	}
+	metadataURL := strings.TrimRight(r.outwayURL, "/") + configuration.MetadataEndpoint.Path
+	existing, err := r.currentCandidate(configuration.SourceID)
+	if err != nil {
+		return r.blocked(configuration, sourceReasonActivationFailed, err.Error(), now)
+	}
+	etag := ""
+	if existing != nil {
+		etag = existing.MetadataETag
+	}
+	fetched, err := fetchSourceMetadataCandidate(ctx, r.sourceClient, metadataURL, sourceTransportFSC, metadataGrant.GrantHash, etag)
+	if err != nil {
+		return r.metadataUnavailable(configuration, existing, sourceReasonMetadataFetchFailed, err.Error(), now)
+	}
+	if fetched.NotModified {
+		return r.refreshCandidate(configuration, now)
+	}
+	payload := fetched.Payload
 	if err := validateSourceMetadataSchema(payload, r.schemaPath); err != nil {
-		return err
+		return r.metadataUnavailable(configuration, existing, sourceReasonMetadataInvalid, err.Error(), now)
 	}
 	document, err := decodeSourceMetadataDocument(payload)
 	if err != nil {
-		return err
+		return r.metadataUnavailable(configuration, existing, sourceReasonMetadataInvalid, err.Error(), now)
 	}
-	if document.SourceOIN != metadataGrant.ProviderOIN {
-		return fmt.Errorf("source metadata OIN %q does not match FSC provider OIN %q", document.SourceOIN, metadataGrant.ProviderOIN)
+	if document.SourceOIN != configuration.SourceOIN {
+		return r.metadataUnavailable(configuration, existing, sourceReasonMetadataInvalid, fmt.Sprintf("source metadata OIN %q does not match configured FSC provider OIN %q", document.SourceOIN, configuration.SourceOIN), now)
 	}
 	attestations := document.eudiAttestations()
 	if len(attestations) == 0 {
-		return fmt.Errorf("source metadata has no EUDI attestations")
+		return r.metadataUnavailable(configuration, existing, sourceReasonMetadataInvalid, "source metadata has no EUDI attestations", now)
 	}
 	dataService := attestations[0].GraphQL.ServiceReference
 	for _, definition := range attestations[1:] {
 		if definition.GraphQL.ServiceReference != dataService {
-			return fmt.Errorf("one metadata document currently must use one FSC data service")
+			return r.metadataUnavailable(configuration, existing, sourceReasonMetadataInvalid, "one metadata document currently must use one FSC data service", now)
 		}
 	}
-	dataGrant, ok := snapshot.service(metadataGrant.ProviderOIN, dataService)
+	dataGrant, ok := snapshot.service(configuration.SourceOIN, dataService)
 	if !ok {
-		return fmt.Errorf("no valid FSC data contract for service %q", dataService)
-	}
-	peerName, ok := snapshot.peerName(metadataGrant.ProviderOIN)
-	if !ok {
-		return fmt.Errorf("FSC provider %q has no registered peer name", metadataGrant.ProviderOIN)
+		return r.metadataUnavailable(configuration, existing, sourceReasonDataContractMissing, fmt.Sprintf("no valid FSC data contract for service %q", dataService), now)
 	}
 	registration := sourceRegistration{
-		SourceOIN: metadataGrant.ProviderOIN,
-		Name:      peerName,
+		SourceID: configuration.SourceID, SourceOIN: configuration.SourceOIN,
+		Name: configuration.Name, CertificateSet: configuration.CertificateSet,
 		MetadataEndpoint: sourceMetadataEndpoint{
-			Transport: sourceTransportFSC, ServiceReference: gboMetadataServiceName,
-			Path: gboWellKnownPath, GrantHash: metadataGrant.GrantHash,
+			Transport: sourceTransportFSC, ServiceReference: configuration.MetadataEndpoint.ServiceReference,
+			Path: configuration.MetadataEndpoint.Path, GrantHash: metadataGrant.GrantHash,
 		},
 		DataAccess: sourceDataAccess{
 			Transport: sourceTransportFSC, ServiceReference: dataService, GrantHash: dataGrant.GrantHash,
 		},
 	}
 	if err := registration.validate(); err != nil {
-		return err
+		return r.metadataUnavailable(configuration, existing, sourceReasonMetadataInvalid, err.Error(), now)
 	}
 	validated, err := validateSourcePayload(registration, payload, metadataURL, r.schemaPath, r.publicBaseURL, now)
 	if err != nil {
-		return err
+		return r.metadataUnavailable(configuration, existing, sourceReasonMetadataInvalid, err.Error(), now)
 	}
-	if _, err := activateSource(validated, r.store, r.backend); err != nil {
-		return err
+	validated.MetadataETag = fetched.ETag
+	return r.activate(configuration, validated, certificates, true, now)
+}
+
+func (r *sourceReconciler) reconcileUnsecuredSource(ctx context.Context, configuration sourceConfiguration, certificates certificateArtifacts, now time.Time) error {
+	existing, err := r.currentCandidate(configuration.SourceID)
+	if err != nil {
+		return r.blocked(configuration, sourceReasonActivationFailed, err.Error(), now)
+	}
+	etag := ""
+	if existing != nil {
+		etag = existing.MetadataETag
+	}
+	fetched, err := fetchSourceMetadataCandidate(ctx, r.sourceClient, configuration.MetadataEndpoint.Endpoint, sourceTransportUnsecured, "", etag)
+	if err != nil {
+		return r.metadataUnavailable(configuration, existing, sourceReasonMetadataFetchFailed, err.Error(), now)
+	}
+	if fetched.NotModified {
+		return r.refreshCandidate(configuration, now)
+	}
+	payload := fetched.Payload
+	registration := configuration.registration()
+	registration.MetadataEndpoint = configuration.MetadataEndpoint
+	registration.DataAccess = configuration.DataAccess
+	if err := registration.validate(); err != nil {
+		return r.metadataUnavailable(configuration, existing, sourceReasonMetadataInvalid, err.Error(), now)
+	}
+	validated, err := validateSourcePayload(registration, payload, configuration.MetadataEndpoint.Endpoint, r.schemaPath, r.publicBaseURL, now)
+	if err != nil {
+		return r.metadataUnavailable(configuration, existing, sourceReasonMetadataInvalid, err.Error(), now)
+	}
+	validated.MetadataETag = fetched.ETag
+	return r.activate(configuration, validated, certificates, false, now)
+}
+
+func (r *sourceReconciler) activate(configuration sourceConfiguration, validated *validatedSourceRegistration, certificates certificateArtifacts, transportAuthenticated bool, now time.Time) error {
+	activation, err := r.backend.Activate(validated, certificates)
+	if err != nil {
+		return r.blocked(configuration, sourceReasonActivationFailed, fmt.Sprintf("activate source: %v", err), now)
+	}
+	state := sourceStateActive
+	digest, digestErr := activationDeploymentDigest(activation)
+	if digestErr != nil {
+		return r.blocked(configuration, sourceReasonActivationFailed, digestErr.Error(), now)
+	}
+	if lifecycle, ok := r.backend.(activationLifecycleBackend); ok {
+		rolloutRequired, err := lifecycle.RolloutRequired(activation)
+		if err != nil {
+			return r.blocked(configuration, sourceReasonActivationFailed, err.Error(), now)
+		}
+		if rolloutRequired {
+			state = sourceStateRolloutRequired
+		}
+	}
+	if err := r.writeStatus(sourceReconcileStatus{
+		SourceID: configuration.SourceID, State: state, DeploymentDigest: digest,
+		MetadataVersion: activation.MetadataVersion, TransportAuthenticated: transportAuthenticated, CheckedAt: now.UTC(),
+	}); err != nil {
+		return fmt.Errorf("source %s: record %s status: %w", configuration.SourceID, state, err)
 	}
 	return nil
+}
+
+func (r *sourceReconciler) currentCandidate(sourceID string) (*sourceActivation, error) {
+	lifecycle, ok := r.backend.(activationLifecycleBackend)
+	if !ok {
+		return nil, nil
+	}
+	activation, err := lifecycle.CurrentCandidate(sourceID)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	return activation, err
+}
+
+func (r *sourceReconciler) refreshCandidate(configuration sourceConfiguration, now time.Time) error {
+	lifecycle, ok := r.backend.(activationLifecycleBackend)
+	if !ok {
+		return r.blocked(configuration, sourceReasonActivationFailed, "activation backend cannot refresh a not-modified source", now)
+	}
+	activation, err := lifecycle.RefreshCandidate(configuration.SourceID, now)
+	if err != nil {
+		return r.metadataUnavailable(configuration, nil, sourceReasonMetadataInvalid, err.Error(), now)
+	}
+	state := sourceStateActive
+	rolloutRequired, err := lifecycle.RolloutRequired(activation)
+	if err != nil {
+		return r.blocked(configuration, sourceReasonActivationFailed, err.Error(), now)
+	}
+	if rolloutRequired {
+		state = sourceStateRolloutRequired
+	}
+	digest, err := activationDeploymentDigest(activation)
+	if err != nil {
+		return r.blocked(configuration, sourceReasonActivationFailed, err.Error(), now)
+	}
+	return r.writeStatus(sourceReconcileStatus{
+		SourceID: configuration.SourceID, State: state, DeploymentDigest: digest,
+		MetadataVersion:        activation.MetadataVersion,
+		TransportAuthenticated: configuration.MetadataEndpoint.Transport == sourceTransportFSC, CheckedAt: now.UTC(),
+	})
+}
+
+func (r *sourceReconciler) metadataUnavailable(configuration sourceConfiguration, existing *sourceActivation, reason, message string, now time.Time) error {
+	if existing != nil && !existing.StaleUntil.IsZero() && !now.After(existing.StaleUntil) {
+		digest, _ := activationDeploymentDigest(existing)
+		statusErr := r.writeStatus(sourceReconcileStatus{
+			SourceID: configuration.SourceID, State: sourceStateStale, Reason: reason, Message: message,
+			MetadataVersion: existing.MetadataVersion, DeploymentDigest: digest,
+			TransportAuthenticated: configuration.MetadataEndpoint.Transport == sourceTransportFSC, CheckedAt: now.UTC(),
+		})
+		staleErr := fmt.Errorf("source %s stale (%s): %s", configuration.SourceID, reason, message)
+		if statusErr != nil {
+			return errors.Join(staleErr, statusErr)
+		}
+		return staleErr
+	}
+	return r.blocked(configuration, reason, message, now)
+}
+
+func (r *sourceReconciler) blocked(configuration sourceConfiguration, reason, message string, now time.Time) error {
+	statusErr := r.writeStatus(sourceReconcileStatus{
+		SourceID: configuration.SourceID, State: sourceStateBlocked, Reason: reason,
+		Message: message, TransportAuthenticated: configuration.MetadataEndpoint.Transport == sourceTransportFSC, CheckedAt: now.UTC(),
+	})
+	blockedErr := fmt.Errorf("source %s blocked (%s): %s", configuration.SourceID, reason, message)
+	if statusErr != nil {
+		return errors.Join(blockedErr, fmt.Errorf("record blocked status: %w", statusErr))
+	}
+	return blockedErr
+}
+
+func (r *sourceReconciler) writeStatus(status sourceReconcileStatus) error {
+	if r.statuses == nil {
+		return nil
+	}
+	return r.statuses.Write(status)
 }

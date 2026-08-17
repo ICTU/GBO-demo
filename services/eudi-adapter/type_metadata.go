@@ -34,12 +34,12 @@ type typeMetadataPublication struct {
 	path        string
 }
 
-func newTypeMetadataPublication(publicBaseURL, sourceOIN string, definition sourceAttestationDefinition) (*typeMetadataPublication, error) {
+func newTypeMetadataPublication(publicBaseURL, sourceID string, definition sourceAttestationDefinition) (*typeMetadataPublication, error) {
 	if err := validateTypeMetadataBaseURL(publicBaseURL); err != nil {
 		return nil, err
 	}
-	if sourceOIN == "" || definition.TypeID == "" || definition.TypeVersion == "" {
-		return nil, fmt.Errorf("source OIN, type ID and type version are required")
+	if !sourceIDPattern.MatchString(sourceID) || definition.TypeID == "" || definition.TypeVersion == "" {
+		return nil, fmt.Errorf("valid source ID, type ID and type version are required")
 	}
 
 	decoder := json.NewDecoder(bytes.NewReader(definition.TypeMetadata))
@@ -63,7 +63,7 @@ func newTypeMetadataPublication(publicBaseURL, sourceOIN string, definition sour
 		return nil, err
 	}
 
-	path := "/types/" + url.PathEscape(sourceOIN) + "/" + url.PathEscape(definition.TypeID) + "/v" + url.PathEscape(definition.TypeVersion)
+	path := "/types/" + url.PathEscape(sourceID) + "/" + url.PathEscape(definition.TypeID) + "/v" + url.PathEscape(definition.TypeVersion)
 	vct := strings.TrimRight(publicBaseURL, "/") + path
 	metadata["vct"] = vct
 	if err := addManagedCredentialSchema(metadata, vct); err != nil {

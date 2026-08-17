@@ -343,8 +343,8 @@ services:
       timeout: 3s
       retries: 5
 
-  # Second bron: bronprofiel BRP (persoonsgegevens). Locally it is published
-  # by its own BRP/RvIG FSC peer (OIN ...0400), separate from BD (OIN ...0200).
+  # Second logical source: BRP/RvIG. The onboarding proof publishes it as a
+  # distinct service under the same FSC participant as BD.
   brp-graphql-server:
     build: ./services/brp-graphql-server
     ports:
@@ -363,6 +363,30 @@ services:
         condition: service_started
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4001/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Deliberately unauthenticated HTTP source used to prove the unsecured
+  # onboarding profile. It is isolated from FSC and is never a production
+  # security example.
+  unsecured-graphql-server:
+    build: ./services/graphql-server
+    ports:
+      - "${GBO_PORT_UNSECURED_GRAPHQL:-9414}:4000"
+    environment:
+      - OTEL_SERVICE_NAME=unsecured-graphql-server
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - GBO_SOURCE_METADATA_PATH=/config/gbo-source-metadata-unsecured.json
+    volumes:
+      - ./services/graphql-server/config:/config:ro
+    networks:
+      - backend
+    depends_on:
+      otel-collector:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4000/health"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -464,7 +488,7 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
       - UPSTREAM_URL=http://brp-graphql-server:4001
       - BSNK_URL=http://bsnk-mock:4003
-      - OWN_PEER_OIN=99999999900000000400
+      - OWN_PEER_OIN=99999999900000000200
       - PSEUDONYM_VARS=bsn
     networks:
       - backend
@@ -868,7 +892,6 @@ services:
       # Source metadata is activated from the single atomic onboarding record;
       # OIN, type and FSC services are not duplicated in env-vars.
       - SOURCE_ACTIVATIONS_PATH=/var/lib/gbo/active
-      - TYPE_METADATA_PUBLIC_BASE_URL=${EUDI_BRI_URL:-}
       - TYPE_METADATA_STORE_PATH=/var/lib/gbo/type-metadata
     volumes:
       - ./.local/onboarding/active:/var/lib/gbo/active:ro
@@ -878,9 +901,9 @@ services:
       - backend
       - fsc-infra
 
-  # Same image as the issuance runtime, but a separate one-shot process.
+  # Same image as the issuance runtime, but a separate reconciliation process.
   # Kubernetes can run this command with --watch as a single-replica
-  # Deployment, or without --watch as a CronJob.
+  # Deployment, or with --once as a CronJob.
   source-reconciler:
     build: ./services/eudi-adapter
     profiles: [onboarding]
@@ -888,7 +911,8 @@ services:
       - EUDI_PUBLIC_URL=${EUDI_PUBLIC_URL:-}
     command:
       - ./eudi-adapter
-      - reconcile-fsc-sources
+      - reconcile-sources
+      - --once
       - --manager-url=https://edi-manager:9443
       - --manager-ca=/fsc-certs/intermediate_ca.pem
       - --manager-cert=/fsc-certs/internal-cert.pem
@@ -902,14 +926,17 @@ services:
       - --state-dir=/var/lib/gbo
       - --secrets-dir=/var/lib/gbo-secrets
       - --reader-public-url=${EUDI_PUBLIC_URL:-}
+      - --sources-dir=/config/sources
     volumes:
       - ./schemas:/config/schemas:ro
+      - ./sources/configured:/config/sources:ro
       - ./fsc-infra/orgs/edi-issuer/pki/internal:/fsc-certs:ro
       - ./.local/onboarding:/var/lib/gbo
       - ./.local/secrets:/var/lib/gbo-secrets
       - ./services/eudi-issuance-server/config:/generated
     networks:
       - fsc-infra
+      - backend
 
 networks:
   frontend:

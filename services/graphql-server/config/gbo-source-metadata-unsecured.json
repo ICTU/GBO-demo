@@ -1,0 +1,99 @@
+{
+  "schema_version": "1.0",
+  "source_oin": "99999999900000000900",
+  "version": "1.0.0",
+  "issued_at": "2026-08-05T00:00:00Z",
+  "expires_at": "2099-01-01T00:00:00Z",
+  "capabilities": {
+    "eudi": {
+      "version": "1.0",
+      "attestations": [
+        {
+          "type_id": "demo-inkomen",
+          "type_version": "1.0",
+          "offers": [
+            {
+              "id": "demo_inkomen_2025",
+              "label": "Demo-inkomen 2025",
+              "description": "Onbeveiligde HTTP-demonstratie van brononboarding",
+              "parameters": { "jaar": 2025 }
+            }
+          ],
+          "graphql": {
+            "endpoint": "http://unsecured-graphql-server:4000/graphql",
+            "document": "query DemoInkomen($bsn: BSN!, $jaar: Int!) {\n  ingeschrevenPersoon(bsn: $bsn) {\n    heeftBelastingjaarAangifte(belastingjaren: [$jaar]) {\n      belastingjaar\n      status\n    }\n  }\n}",
+            "subject_variable": "bsn",
+            "parameters": {
+              "jaar": {
+                "type": "integer",
+                "required": true
+              }
+            },
+            "result_pointer": "/data/ingeschrevenPersoon/heeftBelastingjaarAangifte"
+          },
+          "mapping_profile": "gbo-simple-v1",
+          "mapping": {
+            "belastingjaar": {
+              "pointer": "/belastingjaar",
+              "datatype": "gYear"
+            },
+            "aangifte_status": {
+              "pointer": "/status",
+              "datatype": "string"
+            }
+          },
+          "attribute_schema": {
+            "belastingjaar": {
+              "type": "integer",
+              "format": "gYear"
+            },
+            "aangifte_status": {
+              "type": "string"
+            }
+          },
+          "type_metadata": {
+            "name": "Demo-inkomen",
+            "description": "Attestatie via een bewust onbeveiligde HTTP-bron",
+            "display": [
+              {
+                "lang": "nl-NL",
+                "name": "Demo-inkomen",
+                "description": "Alleen bedoeld om unsecured onboarding te testen",
+                "summary": "Belastingjaar {{belastingjaar}}",
+                "rendering": {
+                  "simple": {
+                    "background_color": "#6b4f9b",
+                    "text_color": "#ffffff"
+                  }
+                }
+              }
+            ],
+            "claims": [
+              {
+                "path": ["belastingjaar"],
+                "display": [{ "lang": "nl-NL", "label": "Belastingjaar" }],
+                "sd": "always",
+                "svg_id": "belastingjaar"
+              },
+              {
+                "path": ["aangifte_status"],
+                "display": [{ "lang": "nl-NL", "label": "Status" }],
+                "sd": "always"
+              }
+            ],
+            "schema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "title": "Demo-inkomen",
+              "type": "object",
+              "properties": {
+                "belastingjaar": { "type": "integer" },
+                "aangifte_status": { "type": "string" }
+              },
+              "required": ["belastingjaar", "aangifte_status"]
+            }
+          }
+        }
+      ]
+    }
+  }
+}
