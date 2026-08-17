@@ -20,6 +20,11 @@ var defaultSourceMetadataCachePolicy = sourceMetadataCachePolicy{
 	StaleGrace:       time.Hour,
 }
 
+const (
+	activationReloadInterval      = 5 * time.Minute
+	activationReloadRetryInterval = 5 * time.Second
+)
+
 type sourceMetadataCachePolicy struct {
 	MinimumValidity  time.Duration
 	MaximumFreshness time.Duration
@@ -35,9 +40,11 @@ type unavailableSourceMetadataRuntime struct {
 
 type activatedSourceRuntime struct {
 	mu             sync.Mutex
+	config         config
 	metadata       activeSourceMetadata
 	freshUntil     time.Time
 	staleUntil     time.Time
+	reloadAfter    time.Time
 	activationPath string
 	typeID         string
 	storePath      string
@@ -52,7 +59,8 @@ func newActivatedSourceRuntime(cfg config) (*activatedSourceRuntime, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &activatedSourceRuntime{
+	runtime := &activatedSourceRuntime{
+		config: cfg,
 		metadata: activeSourceMetadata{
 			Version: cfg.SourceMetadataVersion, SourceID: cfg.SourceMetadataSourceID, SourceOIN: cfg.SourceMetadataOIN,
 			TypeID: cfg.SourceMetadataTypeID, Definition: cfg.SourceMetadataDefinition,
@@ -61,50 +69,63 @@ func newActivatedSourceRuntime(cfg config) (*activatedSourceRuntime, error) {
 		freshUntil: cfg.SourceMetadataFreshUntil, staleUntil: cfg.SourceMetadataStaleUntil,
 		activationPath: cfg.SourceActivationPath, typeID: cfg.SourceMetadataTypeID, storePath: cfg.TypeMetadataStorePath,
 		publications: publications,
-	}, nil
+	}
+	if runtime.activationPath != "" {
+		if err := runtime.reload(time.Now()); err != nil {
+			return nil, err
+		}
+	}
+	return runtime, nil
 }
 
 func (r *activatedSourceRuntime) current(now time.Time) (*activeSourceMetadata, error) {
+	metadata, _, err := r.currentSource(now)
+	return metadata, err
+}
+
+func (r *activatedSourceRuntime) currentSource(now time.Time) (*activeSourceMetadata, config, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.activationPath != "" {
-		activation, err := loadSourceActivation(r.activationPath)
-		if err != nil {
-			return nil, fmt.Errorf("reload deployed source snapshot: %w", err)
-		}
-		if activation.SchemaVersion != "1.0" || activation.Source.SourceID != r.metadata.SourceID || activation.Source.SourceOIN != r.metadata.SourceOIN {
-			return nil, fmt.Errorf("reloaded deployed source snapshot does not match the active source")
-		}
-		found := false
-		for _, activatedType := range activation.Types {
-			if activatedType.TypeID != r.typeID {
-				continue
-			}
-			if err := activatedType.validate(); err != nil {
-				return nil, fmt.Errorf("reload deployed source type: %w", err)
-			}
-			r.metadata = activeSourceMetadata{
-				Version: activation.MetadataVersion, SourceID: activation.Source.SourceID, SourceOIN: activation.Source.SourceOIN,
-				TypeID: activatedType.TypeID, Definition: activatedType.Definition,
-				VCT: activatedType.VCT, VCTIntegrity: activatedType.VCTIntegrity,
-			}
-			r.freshUntil, r.staleUntil = activation.FreshUntil, activation.StaleUntil
-			found = true
-			break
-		}
-		if !found {
-			return nil, fmt.Errorf("reloaded deployed source snapshot no longer contains type %q", r.typeID)
+	if r.activationPath != "" && !now.Before(r.reloadAfter) {
+		if err := r.reload(now); err != nil {
+			r.reloadAfter = now.Add(activationReloadRetryInterval)
+			return nil, config{}, err
 		}
 	}
 	if !r.staleUntil.IsZero() && now.After(r.staleUntil) {
-		return nil, fmt.Errorf("activated source snapshot expired outside stale grace")
+		return nil, config{}, fmt.Errorf("activated source snapshot expired outside stale grace")
 	}
 	metadata := r.metadata
 	metadata.CacheState = "fresh"
 	if !r.freshUntil.IsZero() && now.After(r.freshUntil) {
 		metadata.CacheState = "stale"
 	}
-	return &metadata, nil
+	return &metadata, r.config, nil
+}
+
+func (r *activatedSourceRuntime) reload(now time.Time) error {
+	configs, err := configsFromSourceActivation(r.config)
+	if err != nil {
+		return fmt.Errorf("reload deployed source snapshot: %w", err)
+	}
+	for _, candidate := range configs {
+		if candidate.SourceMetadataTypeID != r.typeID {
+			continue
+		}
+		if candidate.SourceMetadataSourceID != r.metadata.SourceID || candidate.SourceMetadataOIN != r.metadata.SourceOIN {
+			return fmt.Errorf("reloaded deployed source snapshot does not match the active source")
+		}
+		r.config = candidate
+		r.metadata = activeSourceMetadata{
+			Version: candidate.SourceMetadataVersion, SourceID: candidate.SourceMetadataSourceID, SourceOIN: candidate.SourceMetadataOIN,
+			TypeID: candidate.SourceMetadataTypeID, Definition: candidate.SourceMetadataDefinition,
+			VCT: candidate.SourceMetadataVCT, VCTIntegrity: candidate.SourceMetadataVCTIntegrity,
+		}
+		r.freshUntil, r.staleUntil = candidate.SourceMetadataFreshUntil, candidate.SourceMetadataStaleUntil
+		r.reloadAfter = now.Add(activationReloadInterval)
+		return nil
+	}
+	return fmt.Errorf("reloaded deployed source snapshot no longer contains type %q", r.typeID)
 }
 
 func (r *activatedSourceRuntime) ServeHTTP(w http.ResponseWriter, request *http.Request) {

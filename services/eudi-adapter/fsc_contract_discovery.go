@@ -283,7 +283,29 @@ func (r *sourceReconciler) reconcileSource(ctx context.Context, snapshot *fscCon
 		return r.metadataUnavailable(configuration, existing, sourceReasonMetadataFetchFailed, err.Error(), now)
 	}
 	if fetched.NotModified {
-		return r.refreshCandidate(configuration, now)
+		if existing == nil {
+			return r.metadataUnavailable(configuration, nil, sourceReasonMetadataInvalid, "source returned not-modified without an existing candidate", now)
+		}
+		dataService := existing.Source.DataAccess.ServiceReference
+		dataGrant, ok := snapshot.service(configuration.SourceOIN, dataService)
+		if !ok {
+			return r.metadataUnavailable(configuration, existing, sourceReasonDataContractMissing, fmt.Sprintf("no valid FSC data contract for service %q", dataService), now)
+		}
+		registration := sourceRegistration{
+			SourceID: configuration.SourceID, SourceOIN: configuration.SourceOIN,
+			Name: configuration.Name, CertificateSet: configuration.CertificateSet,
+			MetadataEndpoint: sourceMetadataEndpoint{
+				Transport: sourceTransportFSC, ServiceReference: configuration.MetadataEndpoint.ServiceReference,
+				Path: configuration.MetadataEndpoint.Path, GrantHash: metadataGrant.GrantHash,
+			},
+			DataAccess: sourceDataAccess{
+				Transport: sourceTransportFSC, ServiceReference: dataService, GrantHash: dataGrant.GrantHash,
+			},
+		}
+		if err := registration.validate(); err != nil {
+			return r.metadataUnavailable(configuration, existing, sourceReasonMetadataInvalid, err.Error(), now)
+		}
+		return r.refreshCandidate(configuration, existing, registration, metadataURL, certificates, true, now)
 	}
 	payload := fetched.Payload
 	if err := validateSourceMetadataSchema(payload, r.schemaPath); err != nil {
@@ -346,7 +368,13 @@ func (r *sourceReconciler) reconcileUnsecuredSource(ctx context.Context, configu
 		return r.metadataUnavailable(configuration, existing, sourceReasonMetadataFetchFailed, err.Error(), now)
 	}
 	if fetched.NotModified {
-		return r.refreshCandidate(configuration, now)
+		if existing == nil {
+			return r.metadataUnavailable(configuration, nil, sourceReasonMetadataInvalid, "source returned not-modified without an existing candidate", now)
+		}
+		registration := configuration.registration()
+		registration.MetadataEndpoint = configuration.MetadataEndpoint
+		registration.DataAccess = configuration.DataAccess
+		return r.refreshCandidate(configuration, existing, registration, configuration.MetadataEndpoint.Endpoint, certificates, false, now)
 	}
 	payload := fetched.Payload
 	registration := configuration.registration()
@@ -403,14 +431,14 @@ func (r *sourceReconciler) currentCandidate(sourceID string) (*sourceActivation,
 	return activation, err
 }
 
-func (r *sourceReconciler) refreshCandidate(configuration sourceConfiguration, now time.Time) error {
+func (r *sourceReconciler) refreshCandidate(configuration sourceConfiguration, existing *sourceActivation, source sourceRegistration, metadataURL string, certificates certificateArtifacts, transportAuthenticated bool, now time.Time) error {
 	lifecycle, ok := r.backend.(activationLifecycleBackend)
 	if !ok {
 		return r.blocked(configuration, sourceReasonActivationFailed, "activation backend cannot refresh a not-modified source", now)
 	}
-	activation, err := lifecycle.RefreshCandidate(configuration.SourceID, now)
+	activation, err := lifecycle.RefreshCandidate(configuration.SourceID, source, metadataURL, certificates, transportAuthenticated, now)
 	if err != nil {
-		return r.metadataUnavailable(configuration, nil, sourceReasonMetadataInvalid, err.Error(), now)
+		return r.metadataUnavailable(configuration, existing, sourceReasonMetadataInvalid, err.Error(), now)
 	}
 	state := sourceStateActive
 	rolloutRequired, err := lifecycle.RolloutRequired(activation)

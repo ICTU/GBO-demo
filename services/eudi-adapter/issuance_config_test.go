@@ -179,7 +179,7 @@ metadata = [
 	}
 }
 
-func TestGenerateIssuanceConfigRejectsBlockedConfiguredSource(t *testing.T) {
+func TestGenerateIssuanceConfigRejectsOnlyBlockedSourceWithoutDeployedFallback(t *testing.T) {
 	root := t.TempDir()
 	candidatesDir := filepath.Join(root, "candidates")
 	sourcesDir := filepath.Join(root, "sources")
@@ -206,8 +206,64 @@ data_access:
 		templatePath: filepath.Join(root, "unused-template"), adapterBaseURL: "https://adapter.example",
 		outputPath: filepath.Join(root, "output.toml"), offersPath: filepath.Join(root, "offers.json"),
 	})
-	if err == nil || !strings.Contains(err.Error(), "blocked") {
+	if err == nil || !strings.Contains(err.Error(), "no configured source has a deployable activation") {
 		t.Fatalf("generation error = %v", err)
+	}
+}
+
+func TestRolloutUsesDeployedFallbackForStaleSourceAndPrunesDeletedState(t *testing.T) {
+	root := t.TempDir()
+	candidatesDir := filepath.Join(root, "candidates")
+	activeDir := filepath.Join(root, "active")
+	sourcesDir := filepath.Join(root, "sources")
+	statusDir := filepath.Join(root, "status")
+	writeTestActivation(t, candidatesDir, root, "healthy", "99999999900000000200", "healthy-type", "https://issuer.example/types/healthy/v2.0", "healthy", []sourceOffer{{ID: "healthy", Label: "Healthy", Parameters: map[string]any{}}})
+	writeTestActivation(t, candidatesDir, root, "degraded", "99999999900000000300", "degraded-type", "https://issuer.example/types/degraded/v2.0", "degraded-new", []sourceOffer{{ID: "degraded-new", Label: "Degraded new", Parameters: map[string]any{}}})
+	writeTestActivation(t, activeDir, root, "degraded", "99999999900000000300", "degraded-type", "https://issuer.example/types/degraded/v1.0", "degraded-old", []sourceOffer{{ID: "degraded-old", Label: "Degraded old", Parameters: map[string]any{}}})
+	writeTestActivation(t, candidatesDir, root, "blocked", "99999999900000000500", "blocked-type", "https://issuer.example/types/blocked/v2.0", "blocked-new", []sourceOffer{{ID: "blocked-new", Label: "Blocked new", Parameters: map[string]any{}}})
+	writeTestActivation(t, activeDir, root, "blocked", "99999999900000000500", "blocked-type", "https://issuer.example/types/blocked/v1.0", "blocked-old", []sourceOffer{{ID: "blocked-old", Label: "Blocked old", Parameters: map[string]any{}}})
+	writeTestActivation(t, candidatesDir, root, "deleted", "99999999900000000400", "deleted-type", "https://issuer.example/types/deleted/v1.0", "deleted", []sourceOffer{{ID: "deleted", Label: "Deleted", Parameters: map[string]any{}}})
+	for _, source := range []struct {
+		id  string
+		oin string
+	}{
+		{id: "healthy", oin: "99999999900000000200"},
+		{id: "degraded", oin: "99999999900000000300"},
+		{id: "blocked", oin: "99999999900000000500"},
+	} {
+		writeTestFile(t, filepath.Join(sourcesDir, source.id+".yaml"), []byte("source_id: "+source.id+"\nsource_oin: \""+source.oin+"\"\nname: "+source.id+"\ncertificate_set: "+source.id+"\nmetadata_endpoint:\n  transport: unsecured\n  endpoint: http://"+source.id+":4000/.well-known/gbo\ndata_access:\n  transport: unsecured\n"))
+	}
+	for sourceID, state := range map[string]string{"healthy": sourceStateRolloutRequired, "degraded": sourceStateStale, "blocked": sourceStateBlocked, "deleted": sourceStateActive} {
+		body, err := json.Marshal(sourceReconcileStatus{SourceID: sourceID, State: state})
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeTestFile(t, filepath.Join(statusDir, sourceID+".json"), body)
+	}
+
+	selected, err := resolveIssuanceRolloutActivations(issuanceConfigOptions{
+		activationsDir: candidatesDir, activeDir: activeDir, sourcesDir: sourcesDir, statusDir: statusDir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := len(selected), 2; got != want {
+		t.Fatalf("selected activations = %d, want %d", got, want)
+	}
+	bySource := make(map[string]sourceActivation, len(selected))
+	for _, activation := range selected {
+		bySource[activation.Source.SourceID] = activation
+	}
+	if got, want := bySource["degraded"].Types[0].VCT, "https://issuer.example/types/degraded/v1.0"; got != want {
+		t.Fatalf("degraded VCT = %q, want deployed fallback %q", got, want)
+	}
+	if _, exists := bySource["blocked"]; exists {
+		t.Fatal("blocked source was included in rollout")
+	}
+	for _, path := range []string{filepath.Join(candidatesDir, "deleted.json"), filepath.Join(statusDir, "deleted.json")} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("deleted source state %s still exists: %v", path, err)
+		}
 	}
 }
 
@@ -217,6 +273,10 @@ func TestSuccessfulIssuanceGenerationPromotesCandidate(t *testing.T) {
 	activeDir := filepath.Join(root, "active")
 	sourcesDir := filepath.Join(root, "sources")
 	statusDir := filepath.Join(root, "status")
+	writeTestFile(t, filepath.Join(activeDir, "bind-mount-marker"), []byte("keep"))
+	if err := os.Chmod(activeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	writeTestActivation(t, candidatesDir, root, "demo", "99999999900000000900", "example", "https://issuer.example/types/demo/example/v1.0", "demo", []sourceOffer{{ID: "example", Label: "Example", Parameters: map[string]any{}}})
 	writeTestFile(t, filepath.Join(sourcesDir, "demo.yaml"), []byte(`source_id: demo
 source_oin: "99999999900000000900"
@@ -251,6 +311,16 @@ metadata = [{{TYPE_METADATA_FILES}}]
 	}
 	if _, err := os.Stat(filepath.Join(activeDir, "demo.json")); err != nil {
 		t.Fatalf("deployed activation: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(activeDir, "bind-mount-marker")); err != nil {
+		t.Fatalf("active directory was replaced instead of updated in place: %v", err)
+	}
+	info, err := os.Stat(activeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := info.Mode().Perm(), os.FileMode(0o755); got != want {
+		t.Fatalf("active directory mode = %o, want %o", got, want)
 	}
 	body, err := os.ReadFile(filepath.Join(statusDir, "demo.json"))
 	if err != nil {

@@ -581,11 +581,109 @@ func TestRuntimeFailsClosedWhenDeployedTypeDisappears(t *testing.T) {
 		SourceMetadataTypeID: "inkomensverklaring", SourceMetadataVCT: "https://issuer.example/types/belastingdienst/inkomensverklaring/v1.0",
 		SourceActivationPath: activationPath, TypeMetadataStorePath: t.TempDir(),
 	})
+	if err == nil {
+		_, err = runtime.current(time.Now())
+	}
+	if err == nil {
+		t.Fatal("removed or invalid deployed type did not fail closed")
+	}
+}
+
+func TestActivatedRuntimeDoesNotReloadActivationOnEveryRequest(t *testing.T) {
+	now := time.Now().UTC()
+	activationPath := filepath.Join(t.TempDir(), "belastingdienst.json")
+	if err := os.WriteFile(activationPath, []byte("not valid JSON"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runtime := &activatedSourceRuntime{
+		config: config{
+			SourceActivationPath: activationPath,
+		},
+		metadata: activeSourceMetadata{
+			SourceID: "belastingdienst", SourceOIN: "99999999900000000200", TypeID: "inkomensverklaring",
+		},
+		activationPath: activationPath,
+		typeID:         "inkomensverklaring",
+		reloadAfter:    now.Add(activationReloadInterval),
+	}
+	if _, err := runtime.current(now); err != nil {
+		t.Fatalf("cached request unexpectedly reloaded activation: %v", err)
+	}
+	if _, err := runtime.current(now.Add(activationReloadInterval)); err == nil {
+		t.Fatal("activation was not reloaded after the bounded cache interval")
+	}
+}
+
+func TestActivatedRuntimeReloadsUpdatedDataGrantAfterCacheInterval(t *testing.T) {
+	now := time.Now().UTC()
+	activationPath := filepath.Join(t.TempDir(), "belastingdienst.json")
+	offer := sourceOffer{ID: "example", Label: "Example", Parameters: map[string]any{}}
+	definition := sourceAttestationDefinition{
+		TypeID: "example", TypeVersion: "1.0", Offers: []sourceOffer{offer},
+		GraphQL: sourceGraphQL{
+			ServiceReference: "bri", Document: "query Example($bsn: String!) { example(bsn: $bsn) { value } }",
+			SubjectVariable: "bsn", ResultPointer: "/data/example",
+		},
+		MappingProfile: "gbo-simple-v1",
+		Mapping:        map[string]mappingRule{"value": {Pointer: "/value", Datatype: "string"}},
+		AttributeSchema: map[string]sourceAttributeSchema{
+			"value": {Type: "string"},
+		},
+	}
+	activation := sourceActivation{
+		SchemaVersion: "1.0", MetadataVersion: "1.0", FreshUntil: now.Add(time.Hour), StaleUntil: now.Add(2 * time.Hour),
+		Source: sourceRegistration{
+			SourceID: "belastingdienst", SourceOIN: "99999999900000000200", Name: "Belastingdienst", CertificateSet: "belastingdienst",
+			MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportFSC, ServiceReference: "gbo-metadata", Path: "/.well-known/gbo", GrantHash: "metadata-grant"},
+			DataAccess:       sourceDataAccess{Transport: sourceTransportFSC, ServiceReference: "bri", GrantHash: "data-grant-v1"},
+		},
+		Types: []activatedType{{
+			TypeID: "example", TypeVersion: "1.0", VCT: "https://issuer.example/types/belastingdienst/example/v1.0",
+			VCTIntegrity: "sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=", TypeMetadataReference: filepath.Join(t.TempDir(), "type.json"),
+			Offers: []sourceOffer{offer}, Definition: definition,
+		}},
+	}
+	writeActivation := func() {
+		body, err := json.Marshal(activation)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(activationPath, body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeActivation()
+	runtime, err := newActivatedSourceRuntime(config{
+		SourceMetadataSourceID: "belastingdienst", SourceMetadataOIN: "99999999900000000200", SourceMetadataTypeID: "example",
+		SourceMetadataVCT: "https://issuer.example/types/belastingdienst/example/v1.0", SourceActivationPath: activationPath,
+		TypeMetadataStorePath: t.TempDir(),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runtime.current(time.Now()); err == nil || !strings.Contains(err.Error(), "no longer contains") {
-		t.Fatalf("current error = %v, want removed type to fail closed", err)
+	_, resolved, err := runtime.currentSource(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := resolved.SourceDataFSCGrantHash, "data-grant-v1"; got != want {
+		t.Fatalf("initial data grant = %q, want %q", got, want)
+	}
+	activation.Source.DataAccess.GrantHash = "data-grant-v2"
+	writeActivation()
+	reloadAt := runtime.reloadAfter
+	_, cached, err := runtime.currentSource(reloadAt.Add(-time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := cached.SourceDataFSCGrantHash, "data-grant-v1"; got != want {
+		t.Fatalf("cached data grant = %q, want %q", got, want)
+	}
+	_, refreshed, err := runtime.currentSource(reloadAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := refreshed.SourceDataFSCGrantHash, "data-grant-v2"; got != want {
+		t.Fatalf("refreshed data grant = %q, want %q", got, want)
 	}
 }
 

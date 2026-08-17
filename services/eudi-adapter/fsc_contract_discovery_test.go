@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -466,6 +468,123 @@ func TestReconcilerUsesETagAndRefreshesCandidateLifetime(t *testing.T) {
 	}
 }
 
+func TestFSCNotModifiedRefreshesResolvedGrantHashes(t *testing.T) {
+	now := time.Now().UTC()
+	metadataPayload, err := os.ReadFile("../graphql-server/config/gbo-source-metadata.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	contractVersion := 1
+	manager := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(fscContractPayload(t, []map[string]any{
+			fscConnectionContract(testConsumerOIN, testProviderOIN, gboMetadataServiceName, fmt.Sprintf("metadata-grant-v%d", contractVersion), now.Unix()+int64(contractVersion), now),
+			fscConnectionContract(testConsumerOIN, testProviderOIN, "bri", fmt.Sprintf("data-grant-v%d", contractVersion), now.Unix()+int64(contractVersion), now),
+		}))
+	}))
+	defer manager.Close()
+	requestCount := 0
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		requestCount++
+		if got, want := request.Header.Get("Fsc-Grant-Hash"), fmt.Sprintf("metadata-grant-v%d", contractVersion); got != want {
+			t.Errorf("metadata grant = %q, want %q", got, want)
+		}
+		if requestCount == 2 {
+			if got, want := request.Header.Get("If-None-Match"), `"metadata-v1"`; got != want {
+				t.Errorf("If-None-Match = %q, want %q", got, want)
+			}
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("Content-Type", sourceMetadataMediaType)
+		w.Header().Set("ETag", `"metadata-v1"`)
+		_, _ = w.Write(metadataPayload)
+	}))
+	defer source.Close()
+
+	stateDir := t.TempDir()
+	backend := newFilesystemActivationBackend(stateDir)
+	reconciler := &sourceReconciler{
+		managerClient: manager.Client(), sourceClient: source.Client(), managerURL: manager.URL,
+		consumerOIN: testConsumerOIN, outwayURL: source.URL,
+		schemaPath: "../../schemas/gbo-source-metadata-v1.schema.json", publicBaseURL: "https://issuer.example",
+		sources: []sourceConfiguration{{
+			SourceID: "belastingdienst", SourceOIN: testProviderOIN, Name: "Belastingdienst", CertificateSet: "belastingdienst",
+			MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportFSC, ServiceReference: gboMetadataServiceName, Path: gboWellKnownPath},
+			DataAccess:       sourceDataAccess{Transport: sourceTransportFSC},
+		}},
+		store: staticCertificateStore{}, backend: backend, statuses: &capturingSourceStatusWriter{},
+	}
+	if err := reconciler.Reconcile(context.Background(), now); err != nil {
+		t.Fatalf("initial reconcile: %v", err)
+	}
+	initial, err := backend.CurrentCandidate("belastingdienst")
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialBody, err := json.Marshal(initial)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFileAtomically(filepath.Join(stateDir, "active"), "belastingdienst.json", initialBody, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	contractVersion = 2
+	if err := reconciler.Reconcile(context.Background(), now.Add(10*time.Minute)); err != nil {
+		t.Fatalf("conditional reconcile: %v", err)
+	}
+	for label, activationPath := range map[string]string{
+		"candidate": filepath.Join(stateDir, "candidates", "belastingdienst.json"),
+		"active":    filepath.Join(stateDir, "active", "belastingdienst.json"),
+	} {
+		activation, err := loadSourceActivation(activationPath)
+		if err != nil {
+			t.Fatalf("load %s activation: %v", label, err)
+		}
+		if got, want := activation.Source.MetadataEndpoint.GrantHash, "metadata-grant-v2"; got != want {
+			t.Errorf("%s metadata grant = %q, want %q", label, got, want)
+		}
+		if got, want := activation.Source.DataAccess.GrantHash, "data-grant-v2"; got != want {
+			t.Errorf("%s data grant = %q, want %q", label, got, want)
+		}
+	}
+}
+
+func TestNotModifiedRefreshFailureUsesExistingStaleGrace(t *testing.T) {
+	now := time.Now().UTC()
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if got, want := request.Header.Get("If-None-Match"), `"metadata-v1"`; got != want {
+			t.Errorf("If-None-Match = %q, want %q", got, want)
+		}
+		w.WriteHeader(http.StatusNotModified)
+	}))
+	defer source.Close()
+	backend := &candidateActivationBackend{
+		candidate: &sourceActivation{
+			SchemaVersion: "1.0", MetadataVersion: "1.0", MetadataETag: `"metadata-v1"`,
+			StaleUntil: now.Add(time.Hour), Source: sourceRegistration{SourceID: "demo", SourceOIN: testProviderOIN},
+		},
+		refreshErr: errors.New("refresh failed"),
+	}
+	statuses := &capturingSourceStatusWriter{}
+	reconciler := &sourceReconciler{
+		sourceClient: source.Client(), schemaPath: "../../schemas/gbo-source-metadata-v1.schema.json", publicBaseURL: "https://issuer.example",
+		sources: []sourceConfiguration{{
+			SourceID: "demo", SourceOIN: testProviderOIN, Name: "Demo", CertificateSet: "demo",
+			MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportUnsecured, Endpoint: source.URL},
+			DataAccess:       sourceDataAccess{Transport: sourceTransportUnsecured},
+		}},
+		store: staticCertificateStore{}, backend: backend, statuses: statuses,
+	}
+	if err := reconciler.Reconcile(context.Background(), now); err == nil {
+		t.Fatal("refresh failure reconciled successfully")
+	}
+	if statuses.last.State != sourceStateStale || statuses.last.Reason != sourceReasonMetadataInvalid {
+		t.Fatalf("status = %+v, want stale metadata-invalid status", statuses.last)
+	}
+}
+
 func TestReconcilerKeepsLastCandidateDuringStaleGrace(t *testing.T) {
 	now := time.Now().UTC()
 	raw, err := os.ReadFile("../graphql-server/config/gbo-source-metadata.json")
@@ -569,7 +688,10 @@ type capturingActivationBackend struct {
 	activations []*validatedSourceRegistration
 }
 
-type candidateActivationBackend struct{ candidate *sourceActivation }
+type candidateActivationBackend struct {
+	candidate  *sourceActivation
+	refreshErr error
+}
 
 func (b *candidateActivationBackend) Activate(*validatedSourceRegistration, certificateArtifacts) (*sourceActivation, error) {
 	return b.candidate, nil
@@ -579,7 +701,14 @@ func (b *candidateActivationBackend) CurrentCandidate(string) (*sourceActivation
 	return b.candidate, nil
 }
 
-func (b *candidateActivationBackend) RefreshCandidate(string, time.Time) (*sourceActivation, error) {
+func (b *candidateActivationBackend) RefreshCandidate(_ string, source sourceRegistration, metadataURL string, certificates certificateArtifacts, transportAuthenticated bool, _ time.Time) (*sourceActivation, error) {
+	if b.refreshErr != nil {
+		return nil, b.refreshErr
+	}
+	b.candidate.Source = source
+	b.candidate.MetadataURL = metadataURL
+	b.candidate.Certificates = certificates
+	b.candidate.TransportAuthenticated = transportAuthenticated
 	return b.candidate, nil
 }
 

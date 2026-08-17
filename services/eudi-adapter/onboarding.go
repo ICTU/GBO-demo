@@ -102,7 +102,7 @@ type activationBackend interface {
 
 type activationLifecycleBackend interface {
 	CurrentCandidate(sourceID string) (*sourceActivation, error)
-	RefreshCandidate(sourceID string, now time.Time) (*sourceActivation, error)
+	RefreshCandidate(sourceID string, source sourceRegistration, metadataURL string, certificates certificateArtifacts, transportAuthenticated bool, now time.Time) (*sourceActivation, error)
 	RolloutRequired(*sourceActivation) (bool, error)
 }
 
@@ -211,14 +211,24 @@ func (b *filesystemActivationBackend) CurrentCandidate(sourceID string) (*source
 	return loadSourceActivation(filepath.Join(b.stateDir, "candidates", sourceID+".json"))
 }
 
-func (b *filesystemActivationBackend) RefreshCandidate(sourceID string, now time.Time) (*sourceActivation, error) {
+func (b *filesystemActivationBackend) RefreshCandidate(sourceID string, source sourceRegistration, metadataURL string, certificates certificateArtifacts, transportAuthenticated bool, now time.Time) (*sourceActivation, error) {
 	activation, err := b.CurrentCandidate(sourceID)
 	if err != nil {
 		return nil, err
 	}
+	if source.SourceID != sourceID {
+		return nil, fmt.Errorf("refreshed source registration belongs to %q", source.SourceID)
+	}
+	if err := source.validate(); err != nil {
+		return nil, fmt.Errorf("validate refreshed source registration: %w", err)
+	}
 	if activation.ExpiresAt.Sub(now) < defaultSourceMetadataCachePolicy.MinimumValidity {
 		return nil, fmt.Errorf("source metadata validity is shorter than the GBO minimum")
 	}
+	activation.Source = source
+	activation.MetadataURL = metadataURL
+	activation.Certificates = certificates
+	activation.TransportAuthenticated = transportAuthenticated
 	activation.FreshUntil = minTime(now.Add(defaultSourceMetadataCachePolicy.MaximumFreshness), activation.ExpiresAt)
 	activation.StaleUntil = minTime(activation.FreshUntil.Add(defaultSourceMetadataCachePolicy.StaleGrace), activation.ExpiresAt)
 	if err := b.writeCandidateAndMatchingActive(activation); err != nil {

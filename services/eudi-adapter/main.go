@@ -191,7 +191,17 @@ type fscResult struct {
 // the issuance request URL and are validated against the source declaration.
 func handleSourceAttestation(cfg config, client *http.Client, runtime sourceMetadataRuntime) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		metadata, err := runtime.current(time.Now())
+		now := time.Now()
+		resolved := cfg
+		var metadata *activeSourceMetadata
+		var err error
+		if activated, ok := runtime.(interface {
+			currentSource(time.Time) (*activeSourceMetadata, config, error)
+		}); ok {
+			metadata, resolved, err = activated.currentSource(now)
+		} else {
+			metadata, err = runtime.current(now)
+		}
 		if err != nil {
 			logSourceAttestationError(r, "metadata", err)
 			http.Error(w, "source metadata unavailable", http.StatusServiceUnavailable)
@@ -236,7 +246,7 @@ func handleSourceAttestation(cfg config, client *http.Client, runtime sourceMeta
 			attribute.String("gbo.source_oin", metadata.SourceOIN),
 			attribute.String("gbo.type_id", metadata.TypeID),
 		)
-		result, err := callSource(r.Context(), client, cfg, plan)
+		result, err := callSource(r.Context(), client, resolved, plan)
 		if err != nil {
 			logSourceAttestationError(r, "source_request", err)
 			http.Error(w, "source request failed", http.StatusBadGateway)
@@ -286,21 +296,7 @@ func handleSourceAttestations(client *http.Client, bindings []sourceRuntimeBindi
 	return func(w http.ResponseWriter, r *http.Request) {
 		for _, binding := range bindings {
 			if binding.config.SourceMetadataSourceID == r.PathValue("sourceID") && binding.config.SourceMetadataTypeID == r.PathValue("typeID") {
-				resolved := binding.config
-				if binding.config.SourceActivationPath != "" {
-					configs, err := configsFromSourceActivation(binding.config)
-					if err != nil {
-						http.Error(w, "deployed source snapshot unavailable", http.StatusServiceUnavailable)
-						return
-					}
-					for _, candidate := range configs {
-						if candidate.SourceMetadataTypeID == binding.config.SourceMetadataTypeID {
-							resolved = candidate
-							break
-						}
-					}
-				}
-				handleSourceAttestation(resolved, client, binding.runtime).ServeHTTP(w, r)
+				handleSourceAttestation(binding.config, client, binding.runtime).ServeHTTP(w, r)
 				return
 			}
 		}

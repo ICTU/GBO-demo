@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -87,12 +88,15 @@ func generateIssuanceConfig(options issuanceConfigOptions) error {
 	if err != nil {
 		return err
 	}
-	activations, err := loadIssuanceActivations(options.activationsDir)
-	if err != nil {
-		return err
-	}
+	var activations []sourceActivation
 	if options.sourcesDir != "" || options.statusDir != "" {
-		if err := validateIssuanceRolloutSources(options.sourcesDir, options.statusDir, activations); err != nil {
+		activations, err = resolveIssuanceRolloutActivations(options)
+		if err != nil {
+			return err
+		}
+	} else {
+		activations, err = loadIssuanceActivations(options.activationsDir)
+		if err != nil {
 			return err
 		}
 	}
@@ -203,100 +207,150 @@ func generateIssuanceConfig(options issuanceConfigOptions) error {
 		return fmt.Errorf("write public issuance offers: %w", err)
 	}
 	if options.activeDir != "" {
-		if err := promoteActivationCandidates(options.activationsDir, options.activeDir, options.statusDir, activations); err != nil {
+		if err := promoteActivationCandidates(options.activeDir, options.statusDir, activations); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func validateIssuanceRolloutSources(sourcesDir, statusDir string, activations []sourceActivation) error {
-	if sourcesDir == "" || statusDir == "" {
-		return fmt.Errorf("sources and status directories are required for a controlled rollout")
+func resolveIssuanceRolloutActivations(options issuanceConfigOptions) ([]sourceActivation, error) {
+	if options.sourcesDir == "" || options.statusDir == "" {
+		return nil, fmt.Errorf("sources and status directories are required for a controlled rollout")
 	}
-	configurations, err := loadSourceConfigurations(sourcesDir)
+	configurations, err := loadSourceConfigurations(options.sourcesDir)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	bySource := make(map[string]sourceActivation, len(activations))
-	for _, activation := range activations {
-		bySource[activation.Source.SourceID] = activation
-	}
+	desired := make(map[string]struct{}, len(configurations))
 	for _, configuration := range configurations {
-		if _, ok := bySource[configuration.SourceID]; !ok {
-			return fmt.Errorf("configured source %q has no complete candidate activation", configuration.SourceID)
+		desired[configuration.SourceID] = struct{}{}
+	}
+	for _, directory := range []string{options.activationsDir, options.statusDir} {
+		if err := pruneUndesiredSourceFiles(directory, desired); err != nil {
+			return nil, err
 		}
-		body, err := os.ReadFile(filepath.Join(statusDir, configuration.SourceID+".json"))
+	}
+	candidates, err := loadIssuanceActivationsOptional(options.activationsDir)
+	if err != nil {
+		return nil, err
+	}
+	active, err := loadIssuanceActivationsOptional(options.activeDir)
+	if err != nil {
+		return nil, err
+	}
+	candidatesBySource := make(map[string]sourceActivation, len(candidates))
+	for _, activation := range candidates {
+		candidatesBySource[activation.Source.SourceID] = activation
+	}
+	activeBySource := make(map[string]sourceActivation, len(active))
+	for _, activation := range active {
+		activeBySource[activation.Source.SourceID] = activation
+	}
+	selected := make([]sourceActivation, 0, len(configurations))
+	for _, configuration := range configurations {
+		body, err := os.ReadFile(filepath.Join(options.statusDir, configuration.SourceID+".json"))
 		if err != nil {
-			return fmt.Errorf("configured source %q has no reconciliation status: %w", configuration.SourceID, err)
+			slog.Warn("source omitted from issuance rollout", "source_id", configuration.SourceID, "reason", "reconciliation status unavailable", "err", err.Error())
+			continue
 		}
 		var status sourceReconcileStatus
 		if err := json.Unmarshal(body, &status); err != nil {
-			return fmt.Errorf("configured source %q has invalid reconciliation status: %w", configuration.SourceID, err)
+			slog.Warn("source omitted from issuance rollout", "source_id", configuration.SourceID, "reason", "invalid reconciliation status", "err", err.Error())
+			continue
 		}
 		if status.SourceID != configuration.SourceID {
-			return fmt.Errorf("configured source %q status belongs to %q", configuration.SourceID, status.SourceID)
+			slog.Warn("source omitted from issuance rollout", "source_id", configuration.SourceID, "reason", "status source_id mismatch", "status_source_id", status.SourceID)
+			continue
 		}
-		if status.State != sourceStateActive && status.State != sourceStateRolloutRequired {
-			return fmt.Errorf("configured source %q is %s and cannot be rolled out", configuration.SourceID, status.State)
+		switch status.State {
+		case sourceStateActive, sourceStateRolloutRequired:
+			if candidate, ok := candidatesBySource[configuration.SourceID]; ok {
+				selected = append(selected, candidate)
+			} else if deployed, ok := activeBySource[configuration.SourceID]; ok {
+				selected = append(selected, deployed)
+			}
+		case sourceStatePending, sourceStateStale:
+			if deployed, ok := activeBySource[configuration.SourceID]; ok {
+				selected = append(selected, deployed)
+			}
+		case sourceStateBlocked:
+			// A blocked source is intentionally absent from the next generated
+			// product set; it must not prevent healthy sources from rolling out.
+		default:
+			slog.Warn("source omitted from issuance rollout", "source_id", configuration.SourceID, "reason", "unknown reconciliation state", "state", status.State)
 		}
-		delete(bySource, configuration.SourceID)
 	}
-	if len(bySource) != 0 {
-		return fmt.Errorf("candidate activations contain sources that are absent from desired configuration")
+	if len(selected) == 0 {
+		return nil, fmt.Errorf("no configured source has a deployable activation; reconcile a source successfully or restore a previous active snapshot")
+	}
+	return selected, nil
+}
+
+func pruneUndesiredSourceFiles(directory string, desired map[string]struct{}) error {
+	if directory == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(directory)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read source state directory %q: %w", directory, err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		sourceID := strings.TrimSuffix(entry.Name(), ".json")
+		if !sourceIDPattern.MatchString(sourceID) {
+			continue
+		}
+		if _, keep := desired[sourceID]; keep {
+			continue
+		}
+		if err := os.Remove(filepath.Join(directory, entry.Name())); err != nil {
+			return fmt.Errorf("remove state for deleted source %q from %s: %w", sourceID, directory, err)
+		}
 	}
 	return nil
 }
 
-func promoteActivationCandidates(candidatesDir, activeDir, statusDir string, activations []sourceActivation) error {
-	if filepath.Clean(candidatesDir) == filepath.Clean(activeDir) {
-		return fmt.Errorf("candidate and active source directories must be separate")
+func promoteActivationCandidates(activeDir, statusDir string, activations []sourceActivation) error {
+	if activeDir == "" {
+		return fmt.Errorf("active source directory is required")
 	}
-	parent := filepath.Dir(activeDir)
-	if err := os.MkdirAll(parent, 0o755); err != nil {
-		return fmt.Errorf("create active source parent directory: %w", err)
+	if err := os.MkdirAll(activeDir, 0o755); err != nil {
+		return fmt.Errorf("create active source directory: %w", err)
 	}
-	staging, err := os.MkdirTemp(parent, ".active-next-")
-	if err != nil {
-		return fmt.Errorf("create active source staging directory: %w", err)
+	if err := os.Chmod(activeDir, 0o755); err != nil {
+		return fmt.Errorf("set active source directory permissions: %w", err)
 	}
-	defer func() { _ = os.RemoveAll(staging) }()
+	desired := make(map[string]struct{}, len(activations))
 	for _, activation := range activations {
-		name := activation.Source.SourceID + ".json"
-		body, err := os.ReadFile(filepath.Join(candidatesDir, name))
+		body, err := json.MarshalIndent(activation, "", "  ")
 		if err != nil {
-			return fmt.Errorf("read candidate activation %s: %w", name, err)
+			return fmt.Errorf("marshal deployed source %s: %w", activation.Source.SourceID, err)
 		}
-		if err := os.WriteFile(filepath.Join(staging, name), body, 0o644); err != nil {
-			return fmt.Errorf("stage candidate activation %s: %w", name, err)
+		body = append(body, '\n')
+		if err := writeFileAtomically(activeDir, activation.Source.SourceID+".json", body, 0o644); err != nil {
+			return fmt.Errorf("deploy source activation %s: %w", activation.Source.SourceID, err)
 		}
+		desired[activation.Source.SourceID] = struct{}{}
 	}
-	backup, err := os.MkdirTemp(parent, ".active-previous-")
-	if err != nil {
-		return fmt.Errorf("reserve active source backup path: %w", err)
-	}
-	if err := os.Remove(backup); err != nil {
-		return fmt.Errorf("prepare active source backup path: %w", err)
-	}
-	hadActive := true
-	if err := os.Rename(activeDir, backup); os.IsNotExist(err) {
-		hadActive = false
-	} else if err != nil {
-		return fmt.Errorf("preserve deployed source snapshot: %w", err)
-	}
-	if err := os.Rename(staging, activeDir); err != nil {
-		if hadActive {
-			_ = os.Rename(backup, activeDir)
-		}
-		return fmt.Errorf("activate deployed source snapshot: %w", err)
-	}
-	if hadActive {
-		if err := os.RemoveAll(backup); err != nil {
-			return fmt.Errorf("remove previous deployed source snapshot: %w", err)
-		}
+	if err := pruneUndesiredSourceFiles(activeDir, desired); err != nil {
+		return err
 	}
 	writer := &filesystemSourceStatusWriter{directory: statusDir}
 	for _, activation := range activations {
+		statusBody, err := os.ReadFile(filepath.Join(statusDir, activation.Source.SourceID+".json"))
+		if err != nil {
+			continue
+		}
+		var current sourceReconcileStatus
+		if json.Unmarshal(statusBody, &current) != nil || (current.State != sourceStateActive && current.State != sourceStateRolloutRequired) {
+			continue
+		}
 		digest, err := activationDeploymentDigest(&activation)
 		if err != nil {
 			return err
@@ -341,7 +395,24 @@ func parseAdapterBaseURL(raw string) (*url.URL, error) {
 }
 
 func loadIssuanceActivations(directory string) ([]sourceActivation, error) {
+	activations, err := loadIssuanceActivationsOptional(directory)
+	if err != nil {
+		return nil, err
+	}
+	if len(activations) == 0 {
+		return nil, fmt.Errorf("active source directory contains no registrations")
+	}
+	return activations, nil
+}
+
+func loadIssuanceActivationsOptional(directory string) ([]sourceActivation, error) {
+	if directory == "" {
+		return nil, nil
+	}
 	entries, err := os.ReadDir(directory)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("read active source registrations: %w", err)
 	}
@@ -381,9 +452,6 @@ func loadIssuanceActivations(directory string) ([]sourceActivation, error) {
 			}
 		}
 		activations = append(activations, activation)
-	}
-	if len(activations) == 0 {
-		return nil, fmt.Errorf("active source directory contains no registrations")
 	}
 	return activations, nil
 }
