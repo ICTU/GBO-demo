@@ -930,6 +930,9 @@ services:
     volumes:
       - ./schemas:/config/schemas:ro
       - ./sources/configured:/config/sources:ro
+      # Deliberately local-only. Deployment ConfigMaps use sources/configured
+      # and therefore never expose the unsecured demonstration source.
+      - ./sources/local-demo/demo-unsecured.yaml:/config/sources/demo-unsecured.yaml:ro
       - ./fsc-infra/orgs/edi-issuer/pki/internal:/fsc-certs:ro
       - ./.local/onboarding:/var/lib/gbo
       - ./.local/secrets:/var/lib/gbo-secrets

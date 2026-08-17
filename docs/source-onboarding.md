@@ -39,6 +39,11 @@ Belastingdienst- en RvIG-bronnen gebruiken dit model.
 
 ### Unsecured
 
+De meegeleverde unsecured voorbeeldbron staat bewust in
+`sources/local-demo/`. Alleen de lokale Docker Compose-configuratie monteert
+dit bestand. Simulatie- en productieconfiguraties gebruiken uitsluitend
+`sources/configured/` en bieden deze bron dus niet aan.
+
 ```yaml
 source_id: demo-unsecured
 source_oin: "99999999900000000900"

@@ -6,6 +6,9 @@ evaluated by an OpenFTV policy before the source returns data. The EUDI demo
 also contains one deliberately unsecured HTTP source to prove that onboarding
 is not technically coupled to FSC; that source is not a security example.
 
+The unsecured source is mounted only by the local Compose setup and is not
+part of the deployable source configuration used by simulation environments.
+
 The demo contains two ways to start that request:
 
 - **DvTP consent** — a citizen grants a consumer permission to request a
