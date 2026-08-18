@@ -211,6 +211,99 @@ data_access:
 	}
 }
 
+func TestRolloutRefusesToPruneStateWithoutConfiguredSources(t *testing.T) {
+	for _, test := range []struct {
+		name             string
+		createSourcesDir bool
+	}{
+		{name: "missing directory"},
+		{name: "empty directory", createSourcesDir: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			candidatesDir := filepath.Join(root, "candidates")
+			activeDir := filepath.Join(root, "active")
+			statusDir := filepath.Join(root, "status")
+			sourcesDir := filepath.Join(root, "sources")
+			if test.createSourcesDir {
+				if err := os.MkdirAll(sourcesDir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			paths := []string{
+				filepath.Join(candidatesDir, "keep.json"),
+				filepath.Join(activeDir, "keep.json"),
+				filepath.Join(statusDir, "keep.json"),
+			}
+			for _, path := range paths {
+				writeTestFile(t, path, []byte(`{"keep":true}`))
+			}
+
+			_, err := resolveIssuanceRolloutActivations(issuanceConfigOptions{
+				activationsDir: candidatesDir, activeDir: activeDir, sourcesDir: sourcesDir, statusDir: statusDir,
+			})
+			if err == nil || !strings.Contains(err.Error(), "contains no configured sources; refusing to prune") {
+				t.Fatalf("rollout error = %v", err)
+			}
+			for _, path := range paths {
+				if _, err := os.Stat(path); err != nil {
+					t.Fatalf("state file %s was removed: %v", path, err)
+				}
+			}
+		})
+	}
+}
+
+func TestRolloutReplacesCorruptDesiredActiveAndPrunesLegacyActive(t *testing.T) {
+	root := t.TempDir()
+	candidatesDir := filepath.Join(root, "candidates")
+	activeDir := filepath.Join(root, "active")
+	sourcesDir := filepath.Join(root, "sources")
+	statusDir := filepath.Join(root, "status")
+	writeTestActivation(t, candidatesDir, root, "healthy", "99999999900000000200", "healthy-type", "https://issuer.example/types/healthy/v2.0", "healthy", []sourceOffer{{ID: "healthy", Label: "Healthy", Parameters: map[string]any{}}})
+	writeTestFile(t, filepath.Join(activeDir, "healthy.json"), []byte(`{"legacy":"missing definition"}`))
+	legacyPath := filepath.Join(activeDir, "99999999900000000200.json")
+	writeTestFile(t, legacyPath, []byte(`{"legacy":"OIN-named activation"}`))
+	writeTestFile(t, filepath.Join(sourcesDir, "healthy.yaml"), []byte(`source_id: healthy
+source_oin: "99999999900000000200"
+name: Healthy
+certificate_set: healthy
+metadata_endpoint:
+  transport: unsecured
+  endpoint: http://healthy:4000/.well-known/gbo
+data_access:
+  transport: unsecured
+`))
+	statusBody, err := json.Marshal(sourceReconcileStatus{SourceID: "healthy", State: sourceStateRolloutRequired})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(statusDir, "healthy.json"), statusBody)
+
+	selected, err := resolveIssuanceRolloutActivations(issuanceConfigOptions{
+		activationsDir: candidatesDir, activeDir: activeDir, sourcesDir: sourcesDir, statusDir: statusDir,
+	})
+	if err != nil {
+		t.Fatalf("resolve rollout with legacy active state: %v", err)
+	}
+	if got, want := len(selected), 1; got != want {
+		t.Fatalf("selected activations = %d, want %d", got, want)
+	}
+	if _, err := os.Stat(legacyPath); !os.IsNotExist(err) {
+		t.Fatalf("legacy OIN-named activation still exists: %v", err)
+	}
+	if err := promoteActivationCandidates(activeDir, statusDir, selected); err != nil {
+		t.Fatalf("promote replacement activation: %v", err)
+	}
+	active, err := loadIssuanceActivations(activeDir)
+	if err != nil {
+		t.Fatalf("strictly load repaired active state: %v", err)
+	}
+	if got, want := active[0].Source.SourceID, "healthy"; got != want {
+		t.Fatalf("active source = %q, want %q", got, want)
+	}
+}
+
 func TestRolloutUsesDeployedFallbackForStaleSourceAndPrunesDeletedState(t *testing.T) {
 	root := t.TempDir()
 	candidatesDir := filepath.Join(root, "candidates")

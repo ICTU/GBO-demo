@@ -39,16 +39,18 @@ type unavailableSourceMetadataRuntime struct {
 }
 
 type activatedSourceRuntime struct {
-	mu             sync.Mutex
-	config         config
-	metadata       activeSourceMetadata
-	freshUntil     time.Time
-	staleUntil     time.Time
-	reloadAfter    time.Time
-	activationPath string
-	typeID         string
-	storePath      string
-	publications   map[string]*typeMetadataPublication
+	mu                      sync.Mutex
+	publicationsMu          sync.Mutex
+	config                  config
+	metadata                activeSourceMetadata
+	freshUntil              time.Time
+	staleUntil              time.Time
+	reloadAfter             time.Time
+	publicationsReloadAfter time.Time
+	activationPath          string
+	typeID                  string
+	storePath               string
+	publications            map[string]*typeMetadataPublication
 }
 
 func newActivatedSourceRuntime(cfg config) (*activatedSourceRuntime, error) {
@@ -59,6 +61,7 @@ func newActivatedSourceRuntime(cfg config) (*activatedSourceRuntime, error) {
 	if err != nil {
 		return nil, err
 	}
+	loadedAt := time.Now()
 	runtime := &activatedSourceRuntime{
 		config: cfg,
 		metadata: activeSourceMetadata{
@@ -68,10 +71,10 @@ func newActivatedSourceRuntime(cfg config) (*activatedSourceRuntime, error) {
 		},
 		freshUntil: cfg.SourceMetadataFreshUntil, staleUntil: cfg.SourceMetadataStaleUntil,
 		activationPath: cfg.SourceActivationPath, typeID: cfg.SourceMetadataTypeID, storePath: cfg.TypeMetadataStorePath,
-		publications: publications,
+		publications: publications, publicationsReloadAfter: loadedAt.Add(activationReloadInterval),
 	}
 	if runtime.activationPath != "" {
-		if err := runtime.reload(time.Now()); err != nil {
+		if err := runtime.reload(loadedAt); err != nil {
 			return nil, err
 		}
 	}
@@ -129,14 +132,18 @@ func (r *activatedSourceRuntime) reload(now time.Time) error {
 }
 
 func (r *activatedSourceRuntime) ServeHTTP(w http.ResponseWriter, request *http.Request) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.storePath != "" {
+	r.publicationsMu.Lock()
+	now := time.Now()
+	if r.storePath != "" && !now.Before(r.publicationsReloadAfter) {
 		if publications, err := loadTypeMetadataPublications(r.storePath); err == nil {
 			r.publications = publications
+			r.publicationsReloadAfter = now.Add(activationReloadInterval)
+		} else {
+			r.publicationsReloadAfter = now.Add(activationReloadRetryInterval)
 		}
 	}
 	publication := r.publications[request.URL.Path]
+	r.publicationsMu.Unlock()
 	if publication == nil {
 		http.NotFound(w, request)
 		return

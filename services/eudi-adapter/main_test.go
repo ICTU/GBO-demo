@@ -614,6 +614,55 @@ func TestActivatedRuntimeDoesNotReloadActivationOnEveryRequest(t *testing.T) {
 	}
 }
 
+func TestActivatedRuntimeCachesTypeMetadataStore(t *testing.T) {
+	storePath := t.TempDir()
+	newPublication := func(typeID string) *typeMetadataPublication {
+		t.Helper()
+		publication, err := newTypeMetadataPublication("https://issuer.example", "belastingdienst", sourceAttestationDefinition{
+			TypeID: typeID, TypeVersion: "1.0",
+			TypeMetadata: json.RawMessage(`{"name":"Test","schema":{"type":"object"}}`),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := persistTypeMetadataPublication(storePath, publication); err != nil {
+			t.Fatal(err)
+		}
+		return publication
+	}
+	first := newPublication("first")
+	runtime := &activatedSourceRuntime{
+		storePath: storePath, publications: make(map[string]*typeMetadataPublication),
+		publicationsReloadAfter: time.Now().Add(activationReloadInterval),
+	}
+	request := func(publication *typeMetadataPublication) int {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		runtime.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, publication.VCT, nil))
+		return recorder.Code
+	}
+	if got, want := request(first), http.StatusNotFound; got != want {
+		t.Fatalf("first request before cache refresh = %d, want %d", got, want)
+	}
+	runtime.publicationsMu.Lock()
+	runtime.publicationsReloadAfter = time.Now().Add(-time.Second)
+	runtime.publicationsMu.Unlock()
+	if got, want := request(first), http.StatusOK; got != want {
+		t.Fatalf("first request after cache refresh = %d, want %d", got, want)
+	}
+
+	second := newPublication("second")
+	if got, want := request(second), http.StatusNotFound; got != want {
+		t.Fatalf("new publication bypassed cache interval: status = %d, want %d", got, want)
+	}
+	runtime.publicationsMu.Lock()
+	runtime.publicationsReloadAfter = time.Now().Add(-time.Second)
+	runtime.publicationsMu.Unlock()
+	if got, want := request(second), http.StatusOK; got != want {
+		t.Fatalf("second request after cache refresh = %d, want %d", got, want)
+	}
+}
+
 func TestActivatedRuntimeReloadsUpdatedDataGrantAfterCacheInterval(t *testing.T) {
 	now := time.Now().UTC()
 	activationPath := filepath.Join(t.TempDir(), "belastingdienst.json")

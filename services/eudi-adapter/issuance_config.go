@@ -222,11 +222,14 @@ func resolveIssuanceRolloutActivations(options issuanceConfigOptions) ([]sourceA
 	if err != nil {
 		return nil, err
 	}
+	if len(configurations) == 0 {
+		return nil, fmt.Errorf("source configuration directory %q contains no configured sources; refusing to prune onboarding state", options.sourcesDir)
+	}
 	desired := make(map[string]struct{}, len(configurations))
 	for _, configuration := range configurations {
 		desired[configuration.SourceID] = struct{}{}
 	}
-	for _, directory := range []string{options.activationsDir, options.statusDir} {
+	for _, directory := range []string{options.activationsDir, options.statusDir, options.activeDir} {
 		if err := pruneUndesiredSourceFiles(directory, desired); err != nil {
 			return nil, err
 		}
@@ -235,7 +238,7 @@ func resolveIssuanceRolloutActivations(options issuanceConfigOptions) ([]sourceA
 	if err != nil {
 		return nil, err
 	}
-	active, err := loadIssuanceActivationsOptional(options.activeDir)
+	active, err := loadUsableActiveIssuanceActivations(options.activeDir, desired)
 	if err != nil {
 		return nil, err
 	}
@@ -303,9 +306,6 @@ func pruneUndesiredSourceFiles(directory string, desired map[string]struct{}) er
 			continue
 		}
 		sourceID := strings.TrimSuffix(entry.Name(), ".json")
-		if !sourceIDPattern.MatchString(sourceID) {
-			continue
-		}
 		if _, keep := desired[sourceID]; keep {
 			continue
 		}
@@ -423,37 +423,76 @@ func loadIssuanceActivationsOptional(directory string) ([]sourceActivation, erro
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue
 		}
-		body, err := os.ReadFile(filepath.Join(directory, entry.Name()))
+		activation, err := loadIssuanceActivation(filepath.Join(directory, entry.Name()), entry.Name())
 		if err != nil {
-			return nil, fmt.Errorf("read activation %s: %w", entry.Name(), err)
-		}
-		var activation sourceActivation
-		decoder := json.NewDecoder(bytes.NewReader(body))
-		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&activation); err != nil {
-			return nil, fmt.Errorf("parse activation %s: %w", entry.Name(), err)
-		}
-		if err := decoder.Decode(&struct{}{}); err != io.EOF {
-			return nil, fmt.Errorf("parse activation %s: trailing JSON data", entry.Name())
-		}
-		if activation.SchemaVersion != "1.0" || !sourceIDPattern.MatchString(activation.Source.SourceID) || !sourceOINPattern.MatchString(activation.Source.SourceOIN) || len(activation.Types) == 0 {
-			return nil, fmt.Errorf("activation %s is incomplete", entry.Name())
-		}
-		if entry.Name() != activation.Source.SourceID+".json" {
-			return nil, fmt.Errorf("activation %s does not match source_id %q", entry.Name(), activation.Source.SourceID)
+			return nil, err
 		}
 		if previous, duplicate := seenSourceIDs[activation.Source.SourceID]; duplicate {
 			return nil, fmt.Errorf("source_id %q is activated in both %s and %s", activation.Source.SourceID, previous, entry.Name())
 		}
 		seenSourceIDs[activation.Source.SourceID] = entry.Name()
-		for _, activatedType := range activation.Types {
-			if err := activatedType.validate(); err != nil {
-				return nil, fmt.Errorf("activation %s contains an invalid attestation type: %w", entry.Name(), err)
-			}
+		activations = append(activations, activation)
+	}
+	return activations, nil
+}
+
+func loadUsableActiveIssuanceActivations(directory string, desired map[string]struct{}) ([]sourceActivation, error) {
+	if directory == "" {
+		return nil, nil
+	}
+	entries, err := os.ReadDir(directory)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read deployed source registrations: %w", err)
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+	activations := make([]sourceActivation, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		sourceID := strings.TrimSuffix(entry.Name(), ".json")
+		if _, configured := desired[sourceID]; !configured {
+			continue
+		}
+		activation, err := loadIssuanceActivation(filepath.Join(directory, entry.Name()), entry.Name())
+		if err != nil {
+			slog.Warn("deployed source activation omitted from rollout", "source_id", sourceID, "err", err.Error())
+			continue
 		}
 		activations = append(activations, activation)
 	}
 	return activations, nil
+}
+
+func loadIssuanceActivation(path, name string) (sourceActivation, error) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return sourceActivation{}, fmt.Errorf("read activation %s: %w", name, err)
+	}
+	var activation sourceActivation
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&activation); err != nil {
+		return sourceActivation{}, fmt.Errorf("parse activation %s: %w", name, err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return sourceActivation{}, fmt.Errorf("parse activation %s: trailing JSON data", name)
+	}
+	if activation.SchemaVersion != "1.0" || !sourceIDPattern.MatchString(activation.Source.SourceID) || !sourceOINPattern.MatchString(activation.Source.SourceOIN) || len(activation.Types) == 0 {
+		return sourceActivation{}, fmt.Errorf("activation %s is incomplete", name)
+	}
+	if name != activation.Source.SourceID+".json" {
+		return sourceActivation{}, fmt.Errorf("activation %s does not match source_id %q", name, activation.Source.SourceID)
+	}
+	for _, activatedType := range activation.Types {
+		if err := activatedType.validate(); err != nil {
+			return sourceActivation{}, fmt.Errorf("activation %s contains an invalid attestation type: %w", name, err)
+		}
+	}
+	return activation, nil
 }
 
 func extractAdapterTrustAnchors(templateBody []byte) (string, []byte, error) {
