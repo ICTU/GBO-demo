@@ -1,0 +1,28 @@
+description: DvTP onboarding register
+sources:
+  - name: dvtp-onboarding-register
+    requests:
+      - name: participants
+        method: GET
+        uri: http://dvtp-onboarding-register:4015/internal/openftv/participants
+        timeout: 2s
+        interval: 5s
+        initialInterval: 1s
+        contentType: application/json
+        mapping:
+          entities:
+            - base: ""
+              typeValue: dvtp_participant
+              idField: oin
+              attributes:
+                - base: ""
+                  map:
+                    - keyValue: name
+                      valueField: name
+                      required: true
+                    - keyValue: active
+                      valueField: active
+                      required: true
+                    - keyValue: allowed_sources
+                      valueField: allowed_sources
+                      required: true

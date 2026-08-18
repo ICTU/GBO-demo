@@ -6,7 +6,7 @@ const REDIRECT_CONTEXT = {
   service: 'aangiftegegevens',
   purpose: 'Hypotheek-aanvraag',
   scope: ['bd:ib:2025', 'bd:ib:2024'],
-  client_oin: '00000001234567890000',
+  client_oin: '99999999900000000300',
   client_name: 'Hypotheek-BV',
   valid_until: VALID_UNTIL_90D,
   return_url: `${window.location.origin}/return`,

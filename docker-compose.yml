@@ -125,6 +125,10 @@ services:
       - PDP_ADL_SERVICE_NAME=gbo
       - PDP_LOG_LEVEL=info
       - PDP_REQUEST_MAPPINGS=graphqltocontext
+      # Native OpenFTV PIP pull: refresh the DvTP admission entities over the
+      # internal Docker address. Host access to the register is separately
+      # restricted to loopback below.
+      - PDP_PIP_PULL_CONFIGS=/pip-pull/dvtp-onboarding.yaml
       # The mapper fetches verification keys and the referenced consent's
       # current status per request. Any verification/status failure denies.
       - GBO_CONSENT_URL=http://consent-register:4002
@@ -147,6 +151,7 @@ services:
     volumes:
       - ./policies:/policies:ro
       - ./services/openftv-pdp/certs:/certs:ro
+      - ./services/openftv-pdp/pip-pull:/pip-pull:ro
     networks:
       - backend
       # The bd-Inway AuthZen plugin calls openftv-pdp directly; must be
@@ -156,6 +161,8 @@ services:
       consent-register:
         condition: service_healthy
       bsnk-mock:
+        condition: service_healthy
+      dvtp-onboarding-register:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
@@ -319,6 +326,24 @@ services:
       start_period: 40s
 
   # --- Go Backend Services ---
+  dvtp-onboarding-register:
+    build: ./services/dvtp-onboarding-register
+    ports:
+      # The admin UI is intentionally not exposed on every host interface.
+      - "127.0.0.1:${GBO_PORT_DVTP_ONBOARDING_REGISTER:-9415}:4015"
+    environment:
+      - DATABASE_PATH=/data/onboarding.db
+      - SEED_DEMO_DATA=true
+    volumes:
+      - dvtp-onboarding-data:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4015/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   sector-pip:
     build: ./services/sector-pip
     ports:
@@ -976,6 +1001,7 @@ networks:
 volumes:
   jaeger-badger:
   dev-portal-var:
+  dvtp-onboarding-data:
   postgres-eudi-data:
   postgres-ftv-data:
   eudi-tsl-publish:

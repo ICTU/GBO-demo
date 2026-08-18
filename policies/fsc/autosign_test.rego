@@ -15,6 +15,21 @@ suspended := "99999999900000000500"
 
 unknown_party := "00000009876543210000"
 
+unknown_source := "00000000000000000001"
+
+participants := {
+	hv: {
+		"name": "Demo Hypotheekverlener BV",
+		"active": true,
+		"allowed_sources": ["belastingdienst"],
+	},
+	suspended: {
+		"name": "Demo Incassobureau BV",
+		"active": false,
+		"allowed_sources": ["belastingdienst"],
+	},
+}
+
 # Mirrors the body a Manager posts, after OpenFTV's entity mapping.
 contract_input_for(source, peer_ids, grant_types) := {
 	"subject": {
@@ -37,91 +52,118 @@ connection_for(source, consumer) := contract_input_for(source, sort([source, con
 
 connection(consumer) := contract_input(sort([bd, consumer]), [2])
 
+is_allowed(request) if {
+	autosign.allow with input as request with data.entities as {"dvtp_participant": participants}
+}
+
+deny_reason(request) := value if {
+	value := autosign.reason with input as request with data.entities as {"dvtp_participant": participants}
+}
+
+decision_response(request) := value if {
+	value := autosign.response with input as request with data.entities as {"dvtp_participant": participants}
+}
+
 # --- allow ------------------------------------------------------------
 
 test_registered_consumer_allowed if {
-	autosign.allow with input as connection(hv)
+	is_allowed(connection(hv))
 }
 
 test_registered_issuer_allowed if {
+	is_allowed(connection(edi))
+}
+
+test_system_issuer_allowed_without_pip_data if {
 	autosign.allow with input as connection(edi)
 }
 
-# The demo registry is deliberately shared by both source Managers. This
-# provider-independent scope must be revisited for production (issue #230).
-test_registered_consumer_allowed_for_other_source if {
-	autosign.allow with input as connection_for(brp, hv)
+test_system_issuer_allowed_for_brp if {
+	is_allowed(connection_for(brp, edi))
+}
+
+test_consumer_denied_for_source_without_admission if {
+	not is_allowed(connection_for(brp, hv))
+}
+
+test_wrong_source_reason if {
+	deny_reason(connection_for(brp, hv)) == "SOURCE_NOT_ALLOWED"
+}
+
+test_unknown_source_reason if {
+	deny_reason(connection_for(unknown_source, hv)) == "SOURCE_NOT_CONFIGURED"
 }
 
 test_allow_reports_counterparty if {
-	resp := autosign.response with input as connection(hv)
-	resp.context.granted[0].rule == "FSC_AUTOSIGN_REGISTERED_PARTY"
+	resp := decision_response(connection(hv))
+	resp.context.granted[0].rule == "FSC_AUTOSIGN_ADMITTED_PARTY"
 	resp.context.granted[0].counterparties == [hv]
+	resp.context.granted[0].source == "belastingdienst"
 }
 
 # --- registry -------------------------------------------------------
 
 test_unknown_party_denied if {
-	not autosign.allow with input as connection(unknown_party)
+	not is_allowed(connection(unknown_party))
 }
 
 test_unknown_party_reason if {
-	autosign.reason == "PARTY_NOT_IN_REGISTRY" with input as connection(unknown_party)
+	deny_reason(connection(unknown_party)) == "PARTY_NOT_IN_REGISTRY"
 }
 
 test_suspended_party_denied if {
-	not autosign.allow with input as connection(suspended)
+	not is_allowed(connection(suspended))
 }
 
 test_suspended_party_reason if {
-	autosign.reason == "PARTY_NOT_ACTIVE" with input as connection(suspended)
+	deny_reason(connection(suspended)) == "PARTY_NOT_ACTIVE"
 }
 
 # One bad party among several is enough to refuse the whole contract.
 test_mixed_parties_denied if {
-	not autosign.allow with input as contract_input(sort([bd, hv, unknown_party]), [2])
+	not is_allowed(contract_input(sort([bd, hv, unknown_party]), [2]))
 }
 
 # --- grant types ------------------------------------------------------
 
 test_service_publication_denied if {
-	not autosign.allow with input as contract_input(sort([bd, hv]), [1])
+	not is_allowed(contract_input(sort([bd, hv]), [1]))
 }
 
 test_delegated_service_connection_denied if {
-	not autosign.allow with input as contract_input(sort([bd, hv]), [3])
+	not is_allowed(contract_input(sort([bd, hv]), [3]))
 }
 
 test_mixed_grant_types_denied if {
-	not autosign.allow with input as contract_input(sort([bd, hv]), [2, 3])
+	not is_allowed(contract_input(sort([bd, hv]), [2, 3]))
 }
 
 test_empty_grant_types_denied if {
-	autosign.reason == "GRANT_TYPE_NOT_ALLOWED" with input as contract_input(sort([bd, hv]), [])
+	deny_reason(contract_input(sort([bd, hv]), [])) == "GRANT_TYPE_NOT_ALLOWED"
 }
 
 # --- malformed input --------------------------------------------------
 
 test_contract_without_counterparty_denied if {
-	autosign.reason == "NO_COUNTERPARTY" with input as contract_input([bd], [2])
+	deny_reason(contract_input([bd], [2])) == "NO_COUNTERPARTY"
 }
 
 test_other_action_denied if {
-	autosign.reason == "NOT_AN_AUTOSIGN_REQUEST" with input as object.union(
+	deny_reason(object.union(
 		connection(hv),
 		{"action": {"type": "name", "id": "something_else"}},
-	)
+	)) == "NOT_AN_AUTOSIGN_REQUEST"
 }
 
 test_missing_attributes_denied if {
-	not autosign.allow with input as {
+	not is_allowed({
 		"subject": {"type": "peer_id", "id": bd},
 		"action": {"type": "name", "id": "autosign_contract"},
 		"resource": {"type": "contract", "id": "$1$1$abcdef"},
 		"context": {"doelbinding": "auto_sign_contract"},
-	}
+	})
 }
 
 test_empty_input_denied if {
-	not autosign.allow with input as {}
+	not is_allowed({})
 }
