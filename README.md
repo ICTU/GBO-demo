@@ -130,6 +130,9 @@ contracts and generated configuration in the required order.
 5. Revoke the consent and repeat the query. The PDP now denies it with
    `CONSENT_WITHDRAWN`.
 
+See [the DvTP consent architecture and sequence diagrams](docs/consent-flow.md)
+for the component boundaries and the grant, use and revocation flows.
+
 `S01` is the architecture role identifier used in the demo diagrams for the
 consent-register; it is not a separate service. The demo consent token is a
 bearer JWT. The consent-register generates an ephemeral P-256 key
@@ -229,6 +232,7 @@ source activation, wallet trust and cached QR sessions is in
 
 ## Further reading
 
+- [DvTP consent architecture and flow](docs/consent-flow.md)
 - [Source discovery and onboarding](docs/source-onboarding.md)
 - [Source metadata cache and Type Metadata](docs/source-metadata-cache.md)
 - [`gbo-simple-v1` mapping profile](docs/gbo-simple-v1.md)
