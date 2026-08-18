@@ -12,10 +12,28 @@ services:
 
   jaeger:
     image: jaegertracing/all-in-one:1.54
+    # The image runs as USER 10001, and a fresh named volume is root-owned
+    # 0755, so badger cannot mkdir /badger/keys ("permission denied", the
+    # container exits at startup). Same trade-off as eudi-issuance-server:
+    # root in the demo, an init container `chown -R 10001` in production.
+    user: "0"
     ports:
       - "${GBO_PORT_JAEGER:-9686}:16686"  # Jaeger UI + Query API
     environment:
       - COLLECTOR_OTLP_ENABLED=true
+      # On-disk span storage. The default memory store is unbounded and grew
+      # to 2.0 GiB on a 7-day-old demo stack. Badger keeps RAM bounded and
+      # traces survive a restart.
+      # BADGER_EPHEMERAL defaults to true, which means tmpfs (= RAM); both it
+      # and SPAN_STORAGE_TYPE are required.
+      - SPAN_STORAGE_TYPE=badger
+      - BADGER_EPHEMERAL=false
+      - BADGER_DIRECTORY_KEY=/badger/keys
+      - BADGER_DIRECTORY_VALUE=/badger/values
+      # 168h = the seven-day retention stated in OBSERVABILITY.md.
+      - BADGER_SPAN_STORE_TTL=168h
+    volumes:
+      - jaeger-badger:/badger
     networks:
       - backend
     healthcheck:
@@ -956,6 +974,7 @@ networks:
     external: true
 
 volumes:
+  jaeger-badger:
   dev-portal-var:
   postgres-eudi-data:
   postgres-ftv-data:
