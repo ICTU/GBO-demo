@@ -1,5 +1,5 @@
 .PHONY: up down logs clean certs demo-manager manager-seed fsc-local-env fsc-ca fsc-up fsc-all-up fsc-brp-certs fsc-databases fsc-down fsc-test fsc-clean \
-        fsc-seed-bri fsc-seed-bri-hv fsc-seed-brp fsc-seed-rvig-source fsc-seed-metadata fsc-pdp-cert \
+        fsc-seed-bri fsc-seed-bri-hv fsc-seed-brp fsc-seed-rvig-source fsc-seed-metadata fsc-pdp-cert pdp-up \
         eudi-images source-metadata-up \
         provision-development-certificates reconcile-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
         demo-full demo-down eudi-config
@@ -26,10 +26,10 @@ DEVELOPMENT_BRP_SOURCE_LOGO ?= assets/issuer-logos/rvig.svg
 DEVELOPMENT_UNSECURED_SOURCE_OIN ?= 99999999900000000900
 DEVELOPMENT_UNSECURED_SOURCE_NAME ?= Demo unsecured source
 DEVELOPMENT_UNSECURED_SOURCE_LOGO ?= assets/issuer-logos/belastingdienst.svg
-ONBOARDING_OUTWAY_URL ?= http://localhost:8087
+ONBOARDING_OUTWAY_URL ?= http://localhost:$(or $(FSC_PORT_EDI_OUTWAY),8087)
 ONBOARDING_STATE_DIR ?= $(PWD)/.local/onboarding
 ONBOARDING_SECRETS_DIR ?= $(PWD)/.local/secrets
-ONBOARDING_TYPE_METADATA_URL ?= $(or $(EUDI_BRI_URL),http://localhost:9409)
+ONBOARDING_TYPE_METADATA_URL ?= $(or $(EUDI_BRI_URL),http://localhost:$(or $(GBO_PORT_EUDI_ADAPTER),9409))
 ONBOARDING_STORAGE_BACKEND ?= filesystem
 ONBOARDING_CERTIFICATE_STORE ?= filesystem
 
@@ -39,6 +39,20 @@ ONBOARDING_CERTIFICATE_STORE ?= filesystem
 FSC_PROJECT_NAME ?= fsc-infra
 FSC_INFRA_NETWORK ?= $(FSC_PROJECT_NAME)_default
 FSC_COMPOSE = docker compose -p $(FSC_PROJECT_NAME) -f fsc-infra/docker-compose.yml
+
+# Published host ports, with the same defaults compose applies. The demo
+# banners must read these too: a checkout that shifts its ports in .env
+# to run beside another worktree was handed URLs that do not resolve.
+PORT_DEV_PORTAL := $(or $(GBO_PORT_DEVELOPER_PORTAL),9003)
+PORT_TOESTEMMINGSPORTAAL := $(or $(GBO_PORT_TOESTEMMINGSPORTAAL),9002)
+PORT_DV_MOCK := $(or $(GBO_PORT_DV_MOCK),9001)
+PORT_JAEGER := $(or $(GBO_PORT_JAEGER),9686)
+PORT_PDP := $(or $(GBO_PORT_OPA),9181)
+PORT_EUDI_ADAPTER := $(or $(GBO_PORT_EUDI_ADAPTER),9409)
+
+# banner <label> <port> [scheme] — one "  Label:  <local>  |  <lan>" line.
+# hostname -I lists every address; the first is the LAN one.
+banner = @printf "  %-21s %s://localhost:%s  |  %s://%s:%s\n" "$(1)" "$(or $(3),http)" "$(2)" "$(or $(3),http)" "$$(hostname -I | awk '{print $$1}')" "$(2)"
 
 up: certs
 	docker compose up --build -d
@@ -64,9 +78,9 @@ demo-minimal: certs
 	@echo "-> Base stack (no profile): 13 services"
 	docker compose up --build -d
 	@echo ""
-	@echo "  Dev-portal:    http://localhost:9003  |  http://$$(hostname -I | awk '{print $$1}'):9003"
-	@echo "  Jaeger:        http://localhost:9686  |  http://$$(hostname -I | awk '{print $$1}'):9686"
-	@echo "  OpenFTV PDP:   https://localhost:9181/authzen/v1/evaluation (POST)"
+	$(call banner,Dev-portal:,$(PORT_DEV_PORTAL))
+	$(call banner,Jaeger:,$(PORT_JAEGER))
+	@echo "  OpenFTV PDP:          https://localhost:$(PORT_PDP)/authzen/v1/evaluation (POST)"
 
 # The management plane: the Manager owns the policies and ships them to the
 # PDP as a bundle, instead of the PDP loading ./policies from disk. Opt-in,
@@ -108,10 +122,10 @@ demo-dvtp: certs fsc-all-up fsc-seed-bri fsc-seed-bri-hv
 	@echo "-> DvTP stack: base + dienstverlener + toestemmingsportaal (via real FSC)"
 	docker compose --profile dvtp up --build -d
 	@echo ""
-	@echo "  Dev-portal:          http://localhost:9003  |  http://$$(hostname -I | awk '{print $$1}'):9003"
-	@echo "  Toestemmingsportaal: http://localhost:9002  |  http://$$(hostname -I | awk '{print $$1}'):9002"
-	@echo "  Dienstverlener:      http://localhost:9001  |  http://$$(hostname -I | awk '{print $$1}'):9001"
-	@echo "  Jaeger:              http://localhost:9686  |  http://$$(hostname -I | awk '{print $$1}'):9686"
+	$(call banner,Dev-portal:,$(PORT_DEV_PORTAL))
+	$(call banner,Toestemmingsportaal:,$(PORT_TOESTEMMINGSPORTAAL))
+	$(call banner,Dienstverlener:,$(PORT_DV_MOCK))
+	$(call banner,Jaeger:,$(PORT_JAEGER))
 
 EUDI_CONFIG_DIR := services/eudi-issuance-server/config
 EUDI_REQUIRED_VARS := EUDI_PUBLIC_URL EUDI_BRI_URL
@@ -210,9 +224,9 @@ demo-eudi: onboard-demo-sources eudi-config eudi-images
 	@echo "-> EUDI stack: base + eudi branch + fsc-infra"
 	docker compose --profile eudi up --build -d
 	@echo ""
-	@echo "  Dev-portal:      http://localhost:9003  |  http://$$(hostname -I | awk '{print $$1}'):9003"
-	@echo "  EUDI-adapter:    http://localhost:9409  |  http://$$(hostname -I | awk '{print $$1}'):9409"
-	@echo "  Jaeger:          http://localhost:9686  |  http://$$(hostname -I | awk '{print $$1}'):9686"
+	$(call banner,Dev-portal:,$(PORT_DEV_PORTAL))
+	$(call banner,EUDI-adapter:,$(PORT_EUDI_ADAPTER))
+	$(call banner,Jaeger:,$(PORT_JAEGER))
 
 demo-full: onboard-demo-sources fsc-seed-bri-hv eudi-config eudi-images
 	@echo "-> Full stack: everything on"
@@ -278,7 +292,8 @@ fsc-hv-certs: fsc-up
 		bash fsc-infra/pki/bootstrap-hypotheekverlener.sh; \
 	fi
 
-fsc-bd-up: fsc-directory-up fsc-bd-certs
+fsc-bd-up: fsc-directory-up fsc-bd-certs fsc-pdp-cert
+	$(MAKE) pdp-up
 	$(FSC_COMPOSE) up --build -d cfssl certportal postgres directory-migrations-controller directory-migrations-manager directory-migrations-txlog-api directory-controller directory-manager directory-inway directory-txlog-api directory-ui bd-migrations-controller bd-migrations-manager bd-migrations-txlog-api bd-controller bd-manager bd-inway bd-txlog-api
 
 fsc-pdp-cert:
@@ -286,8 +301,19 @@ fsc-pdp-cert:
 		bash fsc-infra/pki/generate-pdp-cert.sh; \
 	fi
 
+# The source Managers decide on incoming contracts through the OpenFTV PDP
+# (--authzen-auto-sign-pdp-address), so the PDP has to answer before the
+# first contract is submitted — otherwise every fsc-seed-* leaves its
+# connection contract pending and the seed times out after 30s with no
+# useful error. The PDP lives in the main compose project, which normally
+# starts *after* fsc-infra; this pulls it forward. --wait blocks on the
+# healthcheck, so the seeds cannot race a still-booting PDP.
+pdp-up: certs fsc-pdp-cert
+	docker compose up --build -d --wait --force-recreate openftv-pdp
+
 fsc-all-up: fsc-directory-certs fsc-edi-certs fsc-bd-certs fsc-brp-certs fsc-hv-certs fsc-pdp-cert
 	$(MAKE) fsc-databases
+	$(MAKE) pdp-up
 	$(FSC_COMPOSE) up --build -d
 
 # Also creates databases added after an existing local Postgres volume was

@@ -458,7 +458,7 @@ func init() {
 	// IngeschrevenPersoon are declared side by side and both implemented by
 	// the concrete types; the upstream SDL's
 	// `interface IngeschrevenPersoon implements Partij` is reproduced in
-	// the PDP mirror schema (policies/dvtp/schemas/eudi/brp.graphql), which
+	// the PDP mirror schema (schemas/pdp-mirror/eudi/brp.graphql), which
 	// gqlparser does support.
 	partijInterface = graphql.NewInterface(graphql.InterfaceConfig{
 		Name:        "Partij",
