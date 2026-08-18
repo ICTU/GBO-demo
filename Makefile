@@ -1,7 +1,7 @@
 .PHONY: up down logs clean certs demo-manager manager-seed fsc-local-env fsc-ca fsc-up fsc-all-up fsc-brp-certs fsc-databases fsc-down fsc-test fsc-clean \
-        fsc-seed-bri fsc-seed-bri-hv fsc-seed-brp fsc-seed-metadata fsc-pdp-cert pdp-up \
+        fsc-seed-bri fsc-seed-bri-hv fsc-seed-brp fsc-seed-rvig-source fsc-seed-metadata fsc-pdp-cert pdp-up \
         eudi-images source-metadata-up \
-        validate-source provision-development-certificates onboard-source reconcile-fsc-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
+        provision-development-certificates reconcile-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
         demo-full demo-down eudi-config
 
 -include .env
@@ -18,11 +18,14 @@ NLWALLET_PATH ?= $(PWD)/vendor/nl-wallet
 # Local filesystem onboarding. Development certificates are provisioned only
 # by the explicit provision-development-certificates target.
 DEVELOPMENT_SOURCE_OIN ?= 99999999900000000200
-DEVELOPMENT_BRP_SOURCE_OIN ?= 99999999900000000400
+DEVELOPMENT_BRP_SOURCE_OIN ?= $(DEVELOPMENT_SOURCE_OIN)
 DEVELOPMENT_SOURCE_NAME ?= Belastingdienst
 DEVELOPMENT_BRP_SOURCE_NAME ?= RvIG
 DEVELOPMENT_SOURCE_LOGO ?= assets/issuer-logos/belastingdienst.svg
 DEVELOPMENT_BRP_SOURCE_LOGO ?= assets/issuer-logos/rvig.svg
+DEVELOPMENT_UNSECURED_SOURCE_OIN ?= 99999999900000000900
+DEVELOPMENT_UNSECURED_SOURCE_NAME ?= Demo unsecured source
+DEVELOPMENT_UNSECURED_SOURCE_LOGO ?= assets/issuer-logos/belastingdienst.svg
 ONBOARDING_OUTWAY_URL ?= http://localhost:$(or $(FSC_PORT_EDI_OUTWAY),8087)
 ONBOARDING_STATE_DIR ?= $(PWD)/.local/onboarding
 ONBOARDING_SECRETS_DIR ?= $(PWD)/.local/secrets
@@ -139,7 +142,10 @@ eudi-config:
 	fi; \
 	docker compose --profile onboarding run --build --rm source-reconciler \
 	  ./eudi-adapter generate-issuance-config \
-	  --activations-dir /var/lib/gbo/active \
+	  --activations-dir /var/lib/gbo/candidates \
+	  --active-dir /var/lib/gbo/active \
+	  --sources-dir /config/sources \
+	  --status-dir /var/lib/gbo/status \
 	  --template /generated/issuance_server.toml.example \
 	  --adapter-base-url "$$EUDI_BRI_URL" \
 	  --output /generated/issuance_server.toml \
@@ -182,47 +188,22 @@ source-metadata-up:
 	EUDI_PUBLIC_URL="$${EUDI_PUBLIC_URL:-http://localhost:8001}" \
 	EUDI_BRI_URL="$${EUDI_BRI_URL:-http://localhost:9409}" \
 	EUDI_POSTGRES_PASSWORD="$${EUDI_POSTGRES_PASSWORD:-local-not-used}" \
-		docker compose up --build --force-recreate -d openftv-pdp additional-claims-service graphql-server brp-graphql-server bron-sidecar brp-sidecar
-
-validate-source:
-	@test -n "$(SOURCE)" || { echo "ERROR: SOURCE=sources/<oin>.yaml is required"; exit 1; }
-	@cd services/eudi-adapter && go run . validate-source \
-		--source "$(abspath $(SOURCE))" \
-		--outway-url "$(ONBOARDING_OUTWAY_URL)" \
-		--schema "$(PWD)/schemas/gbo-source-metadata-v1.schema.json" \
-		--type-metadata-base-url "$(ONBOARDING_TYPE_METADATA_URL)" \
-		--reader-public-url "$${EUDI_PUBLIC_URL:-}" \
-		--state-dir "$(ONBOARDING_STATE_DIR)" \
-		--secrets-dir "$(ONBOARDING_SECRETS_DIR)"
+		docker compose up --build --force-recreate -d openftv-pdp additional-claims-service graphql-server brp-graphql-server unsecured-graphql-server bron-sidecar brp-sidecar
 
 onboarding-directories:
-	@mkdir -p "$(ONBOARDING_STATE_DIR)/type-metadata" "$(ONBOARDING_STATE_DIR)/active"
-
-onboard-source:
-	@test -n "$(SOURCE)" || { echo "ERROR: SOURCE=sources/<oin>.yaml is required"; exit 1; }
-	@dry_run=""; if [ "$(DRY_RUN)" = "true" ]; then dry_run="--dry-run"; fi; \
-	cd services/eudi-adapter && go run . onboard-source \
-		--source "$(abspath $(SOURCE))" \
-		--storage-backend "$(ONBOARDING_STORAGE_BACKEND)" \
-		--certificate-store "$(ONBOARDING_CERTIFICATE_STORE)" \
-		--outway-url "$(ONBOARDING_OUTWAY_URL)" \
-		--schema "$(PWD)/schemas/gbo-source-metadata-v1.schema.json" \
-		--type-metadata-base-url "$(ONBOARDING_TYPE_METADATA_URL)" \
-		--reader-public-url "$${EUDI_PUBLIC_URL:-}" \
-		--state-dir "$(ONBOARDING_STATE_DIR)" \
-		--secrets-dir "$(ONBOARDING_SECRETS_DIR)" \
-		$$dry_run
+	@mkdir -p "$(ONBOARDING_STATE_DIR)/type-metadata" "$(ONBOARDING_STATE_DIR)/candidates" "$(ONBOARDING_STATE_DIR)/active" "$(ONBOARDING_STATE_DIR)/status"
 
 provision-development-certificates:
 	@test -n "$(SOURCE_OIN)" || { echo "ERROR: SOURCE_OIN=<20-digit OIN> is required"; exit 1; }
 	@cd services/eudi-adapter && go run . provision-development-certificates \
 		--source-oin "$(SOURCE_OIN)" \
 		--source-name "$(SOURCE_NAME)" \
+		--certificate-set "$(SOURCE_CERTIFICATE_SET)" \
 		--source-logo "$(if $(SOURCE_LOGO),$(abspath $(SOURCE_LOGO)),)" \
 		--reader-public-url "$${EUDI_PUBLIC_URL:-}" \
 		--secrets-dir "$(ONBOARDING_SECRETS_DIR)"
 
-reconcile-fsc-sources: onboarding-directories
+reconcile-sources: onboarding-directories
 	docker compose --profile onboarding run --build --rm source-reconciler
 
 # Complete, idempotent local onboarding for both demo sources. The sequence is
@@ -232,11 +213,12 @@ onboard-demo-sources: certs
 	$(MAKE) fsc-all-up
 	$(MAKE) source-metadata-up
 	$(MAKE) fsc-seed-bri
-	$(MAKE) fsc-seed-brp
+	$(MAKE) fsc-seed-rvig-source
 	$(MAKE) fsc-seed-metadata
-	$(MAKE) provision-development-certificates SOURCE_OIN=$(DEVELOPMENT_SOURCE_OIN) SOURCE_NAME="$(DEVELOPMENT_SOURCE_NAME)" SOURCE_LOGO="$(DEVELOPMENT_SOURCE_LOGO)"
-	$(MAKE) provision-development-certificates SOURCE_OIN=$(DEVELOPMENT_BRP_SOURCE_OIN) SOURCE_NAME="$(DEVELOPMENT_BRP_SOURCE_NAME)" SOURCE_LOGO="$(DEVELOPMENT_BRP_SOURCE_LOGO)"
-	$(MAKE) reconcile-fsc-sources
+	$(MAKE) provision-development-certificates SOURCE_OIN=$(DEVELOPMENT_SOURCE_OIN) SOURCE_CERTIFICATE_SET=belastingdienst SOURCE_NAME="$(DEVELOPMENT_SOURCE_NAME)" SOURCE_LOGO="$(DEVELOPMENT_SOURCE_LOGO)"
+	$(MAKE) provision-development-certificates SOURCE_OIN=$(DEVELOPMENT_BRP_SOURCE_OIN) SOURCE_CERTIFICATE_SET=rvig SOURCE_NAME="$(DEVELOPMENT_BRP_SOURCE_NAME)" SOURCE_LOGO="$(DEVELOPMENT_BRP_SOURCE_LOGO)"
+	$(MAKE) provision-development-certificates SOURCE_OIN=$(DEVELOPMENT_UNSECURED_SOURCE_OIN) SOURCE_CERTIFICATE_SET=demo-unsecured SOURCE_NAME="$(DEVELOPMENT_UNSECURED_SOURCE_NAME)" SOURCE_LOGO="$(DEVELOPMENT_UNSECURED_SOURCE_LOGO)"
+	$(MAKE) reconcile-sources
 
 demo-eudi: onboard-demo-sources eudi-config eudi-images
 	@echo "-> EUDI stack: base + eudi branch + fsc-infra"
@@ -310,16 +292,16 @@ fsc-hv-certs: fsc-up
 		bash fsc-infra/pki/bootstrap-hypotheekverlener.sh; \
 	fi
 
-fsc-bd-up: fsc-directory-up fsc-bd-certs
-	$(FSC_COMPOSE) up --build -d cfssl certportal postgres directory-migrations-controller directory-migrations-manager directory-migrations-txlog-api directory-controller directory-manager directory-inway directory-txlog-api directory-ui bd-migrations-controller bd-migrations-manager bd-migrations-txlog-api bd-controller bd-manager bd-inway bd-txlog-api
+fsc-bd-up: fsc-directory-up fsc-bd-certs fsc-pdp-cert
 	$(MAKE) pdp-up
+	$(FSC_COMPOSE) up --build -d cfssl certportal postgres directory-migrations-controller directory-migrations-manager directory-migrations-txlog-api directory-controller directory-manager directory-inway directory-txlog-api directory-ui bd-migrations-controller bd-migrations-manager bd-migrations-txlog-api bd-controller bd-manager bd-inway bd-txlog-api
 
 fsc-pdp-cert:
 	@if [ ! -f services/openftv-pdp/certs/pdp-service.pem ]; then \
 		bash fsc-infra/pki/generate-pdp-cert.sh; \
 	fi
 
-# bd-manager decides on incoming contracts through the OpenFTV PDP
+# The source Managers decide on incoming contracts through the OpenFTV PDP
 # (--authzen-auto-sign-pdp-address), so the PDP has to answer before the
 # first contract is submitted — otherwise every fsc-seed-* leaves its
 # connection contract pending and the seed times out after 30s with no
@@ -327,12 +309,12 @@ fsc-pdp-cert:
 # starts *after* fsc-infra; this pulls it forward. --wait blocks on the
 # healthcheck, so the seeds cannot race a still-booting PDP.
 pdp-up: certs fsc-pdp-cert
-	docker compose up --build -d --wait openftv-pdp
+	docker compose up --build -d --wait --force-recreate openftv-pdp
 
 fsc-all-up: fsc-directory-certs fsc-edi-certs fsc-bd-certs fsc-brp-certs fsc-hv-certs fsc-pdp-cert
 	$(MAKE) fsc-databases
-	$(FSC_COMPOSE) up --build -d
 	$(MAKE) pdp-up
+	$(FSC_COMPOSE) up --build -d
 
 # Also creates databases added after an existing local Postgres volume was
 # initialised; the docker-entrypoint init script only runs for a new volume.
@@ -432,13 +414,28 @@ fsc-seed-brp: fsc-local-env
 		gbo-demo/pki-tools:local \
 		bash scripts/seed-bri-contract.sh
 
-# Each provider publishes the generic metadata service under the same fixed
-# service name. Provider OIN + service name identify the two contracts.
+# The onboarding proof publishes the logical RvIG source through the same FSC
+# participant as BD. It remains a distinct service, metadata document and
+# certificate set; FSC only shares the provider organization and Inway.
+fsc-seed-rvig-source: fsc-local-env
+	docker run --rm \
+		--network $(FSC_INFRA_NETWORK) \
+		--env-file fsc-infra/.env \
+		-e SERVICE_NAME=brp \
+		-e SERVICE_ENDPOINT_URL=http://brp-sidecar:4011 \
+		-e CREATE_GRANT_LINK=false \
+		-v $(PWD)/fsc-infra:/work:ro \
+		-w /work \
+		gbo-demo/pki-tools:local \
+		bash scripts/seed-bri-contract.sh
+
+# One FSC participant publishes two logical metadata services. The manually
+# configured service reference selects which source document is fetched.
 fsc-seed-metadata: fsc-local-env
 	docker run --rm \
 		--network $(FSC_INFRA_NETWORK) \
 		--env-file fsc-infra/.env \
-		-e SERVICE_NAME=gbo-metadata \
+		-e SERVICE_NAME=gbo-metadata-bd \
 		-e SERVICE_ENDPOINT_URL=http://graphql-server:4000 \
 		-e CREATE_GRANT_LINK=false \
 		-v $(PWD)/fsc-infra:/work:ro \
@@ -448,13 +445,8 @@ fsc-seed-metadata: fsc-local-env
 	docker run --rm \
 		--network $(FSC_INFRA_NETWORK) \
 		--env-file fsc-infra/.env \
-		-e SERVICE_NAME=gbo-metadata \
+		-e SERVICE_NAME=gbo-metadata-rvig \
 		-e SERVICE_ENDPOINT_URL=http://brp-graphql-server:4001 \
-		-e SERVICE_INWAY_ADDRESS=https://brp-inway:443 \
-		-e PROVIDER_PEER_ID=99999999900000000400 \
-		-e PROVIDER_CONTROLLER_URL=https://brp-controller:9444 \
-		-e PROVIDER_MANAGER_URL=https://brp-manager:9443 \
-		-e PROVIDER_INTERNAL_DIR=/work/orgs/brp-mock/pki/internal \
 		-e CREATE_GRANT_LINK=false \
 		-v $(PWD)/fsc-infra:/work:ro \
 		-w /work \

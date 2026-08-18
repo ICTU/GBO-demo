@@ -36,6 +36,6 @@ The EUDI issuance-server runtime config carries inline mdoc/SD-JWT signing keys 
 - `services/eudi-issuance-server/config/type-*.json`
 - `services/eudi-issuance-server/config/eudi-offers.json`
 
-Run `make onboard-demo-sources` and then `make eudi-config`; the latter reads certificate references and activated Type Metadata from every active onboarding record. Local development certificates are created only by the explicit `provision-development-certificates` step. Production must supply pre-managed certificate references.
+Run `make onboard-demo-sources` and then `make eudi-config`; the latter validates every configured source, generates artifacts from the complete candidate set and promotes that set to active. Local development certificates are created only by the explicit `provision-development-certificates` step. Production must supply pre-managed certificate references.
 
 The safety-audit script (`scripts/check-safety.sh`) refuses inline `private_key = "…"` / `certificate = "…"` patterns in any committed file, so this stays enforced.

@@ -44,7 +44,7 @@ export default function RequestBuilder({
     tab === 'issuance'
       ? !!issuancePayload.citizen_bsn && !!issuancePayload.dienstverlener_oin && issuancePayload.scopes.length > 0
     : tab === 'use'
-      ? !!usePayload.consent_id
+      ? !!usePayload.consent_id && !!usePayload.consent_token
       : !!eudiPayload.usecase
 
   const curlText =

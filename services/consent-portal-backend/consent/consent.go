@@ -20,8 +20,14 @@ import (
 type BSN string
 
 // PI is the recipient-independent pseudonymous identity BSNk derives from a
-// BSN. It is the only subject the consent register ever sees.
+// BSN. The consent register only sees it transiently while signing the authorization context;
+// it is never part of the persisted consent record.
 type PI string
+
+// SubjectRef is a pseudonym scoped to the consent portal. The consent register may persist it
+// for citizen listing and ownership checks; unlike PI it cannot be reused by
+// a service provider or source holder.
+type SubjectRef string
 
 // Status is the consent status as the citizen experiences it, derived from
 // the register's own status plus the clock.
@@ -39,9 +45,9 @@ const UseCase = "hypotheek"
 var (
 	// ErrNotFound is returned when the register has no such record.
 	ErrNotFound = errors.New("consent not found")
-	// ErrNotOwned is returned when the caller's PI does not match the
-	// record's subject. Without this check any token holder could revoke
-	// any consent_id they guess.
+	// ErrNotOwned is returned when the caller's portal-scoped subject reference
+	// does not match the record. Without this check any authenticated citizen
+	// could revoke any consent_id they guess.
 	ErrNotOwned = errors.New("consent does not belong to authenticated citizen")
 )
 
@@ -52,10 +58,12 @@ type ScopeEntry struct {
 	ConsentedFields []string `json:"consented_fields"`
 }
 
-// Draft is a consent about to be registered. Its subject is a PI: there is
-// deliberately no field that would accept a BSN.
+// Draft is a consent about to be registered. PI is transient token material;
+// SubjectRef is the only persisted subject. There is deliberately no field
+// that would accept a BSN.
 type Draft struct {
-	Subject           PI
+	PI                PI
+	SubjectRef        SubjectRef
 	DienstverlenerOIN string
 	Scopes            []string
 	ScopeEntries      []ScopeEntry
@@ -67,11 +75,12 @@ type Draft struct {
 // core reasons about, plus the register's own payload passed through
 // untouched so the UI keeps working when the register grows a field.
 //
-// Adapters fill ID/Subject/Status/ValidUntil/Raw. Only the core sets
+// Adapters fill ID/SubjectRef/Token/Status/ValidUntil/Raw. Only the core sets
 // Effective — computing it is a judgement, and judgements are core work.
 type Record struct {
 	ID         string
-	Subject    PI
+	SubjectRef SubjectRef
+	Token      string
 	Status     string    // as reported by the register, e.g. "ACTIVE"/"REVOKED"
 	ValidUntil time.Time // zero value means no expiry
 	Raw        map[string]any

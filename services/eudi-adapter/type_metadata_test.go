@@ -23,7 +23,7 @@ func TestPublishedTypeMetadataIsBoundToItsExactBytes(t *testing.T) {
 	}
 	publication, err := newTypeMetadataPublication(
 		"https://issuer.example",
-		"99999999900000000200",
+		"belastingdienst",
 		definition,
 	)
 	if err != nil {
@@ -52,7 +52,7 @@ func TestPublishedTypeMetadataIsBoundToItsExactBytes(t *testing.T) {
 			t.Errorf("conditional status = %d, want %d", got, want)
 		}
 	}
-	if got, want := publication.VCT, "https://issuer.example/types/99999999900000000200/inkomensverklaring/v1.0"; got != want {
+	if got, want := publication.VCT, "https://issuer.example/types/belastingdienst/inkomensverklaring/v1.0"; got != want {
 		t.Errorf("VCT = %q, want %q", got, want)
 	}
 
@@ -73,6 +73,24 @@ func TestPublishedTypeMetadataIsBoundToItsExactBytes(t *testing.T) {
 	wantIntegrity := "sha256-" + base64.StdEncoding.EncodeToString(digest[:])
 	if got := publication.Integrity; got != wantIntegrity {
 		t.Errorf("integrity = %q, want %q", got, wantIntegrity)
+	}
+}
+
+func TestTypeMetadataIdentityUsesSourceIDInsteadOfSharedOIN(t *testing.T) {
+	definition := sourceAttestationDefinition{
+		TypeID: "shared-type", TypeVersion: "1.0",
+		TypeMetadata: json.RawMessage(`{"name":"Shared","schema":{"type":"object"}}`),
+	}
+	belastingdienst, err := newTypeMetadataPublication("https://issuer.example", "belastingdienst", definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rvig, err := newTypeMetadataPublication("https://issuer.example", "rvig", definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if belastingdienst.VCT == rvig.VCT || belastingdienst.path == rvig.path {
+		t.Fatalf("shared type collided: belastingdienst=%q rvig=%q", belastingdienst.VCT, rvig.VCT)
 	}
 }
 

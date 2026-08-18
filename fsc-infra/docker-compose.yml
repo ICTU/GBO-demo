@@ -687,9 +687,9 @@ services:
     # auto sign grants option with an auto-sign policy decision point" is
     # fatal), so the serviceConnection-only gate now lives in the policy.
     #
-    # The other managers still auto-sign by grant type: the directory is
-    # a registry rather than a policy party, and brp-mock is deliberately
-    # left on the old behaviour so one source demonstrates each model.
+    # Both source Managers use this policy. Only directory-manager keeps
+    # auto-signing by grant type because the directory is a registry rather
+    # than a policy party.
     command:
       [
         "/usr/local/bin/manager",

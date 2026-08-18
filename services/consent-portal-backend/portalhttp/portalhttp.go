@@ -67,11 +67,10 @@ type GiveConsentRequest struct {
 }
 
 type GiveConsentResponse struct {
-	ConsentID string            `json:"consent_id"`
-	Pseudonym string            `json:"pseudonym"`
-	PI        string            `json:"pi"`
-	TraceID   string            `json:"trace_id"`
-	APICalls  []consent.APICall `json:"api_calls"`
+	ConsentID    string            `json:"consent_id"`
+	ConsentToken string            `json:"consent_token"`
+	TraceID      string            `json:"trace_id"`
+	APICalls     []consent.APICall `json:"api_calls"`
 }
 
 // ── The citizen handler seam ──────────────────────────────────────────────
@@ -238,11 +237,10 @@ func handleGiveConsent(p *consent.Portal) http.HandlerFunc {
 
 			traceID := traceIDFrom(ctx)
 			resp := GiveConsentResponse{
-				ConsentID: granted.ConsentID,
-				Pseudonym: granted.Pseudonym,
-				PI:        string(granted.PI),
-				TraceID:   traceID,
-				APICalls:  callsFrom(ctx),
+				ConsentID:    granted.ConsentID,
+				ConsentToken: granted.ConsentToken,
+				TraceID:      traceID,
+				APICalls:     callsFrom(ctx),
 			}
 
 			// Terminal event: closes the panel narrative and hands the
@@ -259,7 +257,7 @@ func handleGiveConsent(p *consent.Portal) http.HandlerFunc {
 					TraceID:           traceID,
 					ConsentID:         granted.ConsentID,
 					Outcome:           "allow",
-					Response:          resp,
+					APICalls:          resp.APICalls,
 					Trigger:           in.Trigger,
 					DemoSession:       r.Header.Get("X-Demo-Session"),
 				},

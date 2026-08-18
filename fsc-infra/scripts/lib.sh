@@ -88,7 +88,7 @@ fail_unsigned() {
     echo "  The counterparty did not counter-sign. Contract acceptance is a"
     echo "  policy decision; read the reason from the PDP:"
     echo ""
-    echo "    docker compose logs openftv-pdp \\"
+    echo "    docker compose logs --no-log-prefix openftv-pdp \\"
     echo "      | grep auto_sign_contract | tail -1 | jq .result.response"
     echo ""
     echo "  reason_admin.code names the cause. PARTY_NOT_IN_REGISTRY means the"

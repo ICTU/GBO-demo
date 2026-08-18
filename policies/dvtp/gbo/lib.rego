@@ -16,14 +16,15 @@ package dvtp.gbo.lib
 #
 # ctx-shape (provided by the dvtp.gbo engine):
 #   ctx := {
-#     "subject":  { ...AuthZEN subject (unused in DVT0001 but available
-#                   for future role-checks) },
+#     "subject":  { ...AuthZEN subject; DVT0001 binds its FSC caller OIN },
 #     "args":     { "vars.<name>": value, "input.<name>": value, ... },
 #     "time":     "<RFC3339>",
-#     "resource": { "scope": "...", "consent_id": "...", "consented_fields": [...] },
-#     "pip":      { "consent": { "exists": bool, "withdrawn": bool,
+#     "resource": { "scope": "...", "pi": "..." },
+#     "pip":      { "consent": { "context_valid": bool, "exists": bool,
+#                                "status_available": bool, "withdrawn": bool,
 #                                "valid_until": "<RFC3339>",
-#                                "granted_scopes": [...] } },
+#                                "granted_scopes": [...],
+#                                "dienstverlener_oin": "..." } },
 #     "field":    "Query.<path>.<name>"
 #   }
 #
@@ -64,6 +65,8 @@ evaluate(spec, ctx) := result if {
 # a separate status.
 
 _raw_steps(spec, ctx) := [
+	_check_consent_context_valid(spec, ctx),
+	_check_consent_status_available(spec, ctx),
 	_check_consent_exists(spec, ctx),
 	_check_consent_not_withdrawn(spec, ctx),
 	_check_consent_not_expired(spec, ctx),
@@ -73,6 +76,7 @@ _raw_steps(spec, ctx) := [
 	_check_scope_allowed(spec, ctx),
 	_check_years_allowed(spec, ctx),
 	_check_years_in_scopes(spec, ctx),
+	_check_consent_actor_binding(spec, ctx),
 	_check_actor_allowed(spec, ctx),
 ]
 
@@ -287,6 +291,23 @@ _check_actor_allowed(spec, ctx) := step if {
 	step := _step("ACTOR_NOT_ALLOWED", "Actor allowed for rule", sprintf("%q in spec.allowed_actors", [actor]), "fail")
 } else := _step_skipped("ACTOR_NOT_ALLOWED", "Actor allowed for rule", "no actor-whitelist configured")
 
+_check_consent_actor_binding(spec, ctx) := step if {
+	spec.consent_actor_binding
+	consent_actor_matches(ctx)
+	step := _step("CONSENT_ACTOR_MISMATCH", "FSC caller matches signed consent recipient", "subject.id == consent.dienstverlener_oin", "pass")
+} else := step if {
+	spec.consent_actor_binding
+	not consent_actor_matches(ctx)
+	step := _step("CONSENT_ACTOR_MISMATCH", "FSC caller matches signed consent recipient", "subject.id == consent.dienstverlener_oin", "fail")
+} else := _step_skipped("CONSENT_ACTOR_MISMATCH", "FSC caller matches signed consent recipient", "n/a")
+
+consent_actor_matches(ctx) if {
+	actor := object.get(ctx.subject, "id", "")
+	consent_actor := object.get(ctx.pip.consent, "dienstverlener_oin", "")
+	actor != ""
+	actor == consent_actor
+}
+
 _step(code, label, expected, status) := {
 	"code": code,
 	"label": label,
@@ -381,3 +402,23 @@ _now_ns(ctx) := time.parse_rfc3339_ns(ctx.time) if ctx.time != ""
 _now_ns(ctx) := time.now_ns() if {
 	not ctx.time
 } else := time.now_ns() if ctx.time == ""
+
+_check_consent_context_valid(spec, ctx) := step if {
+	spec.consent_context_required
+	ctx.pip.consent.context_valid == true
+	step := _step("CONSENT_CONTEXT_INVALID", "Signed consent context valid", "signature, issuer, audience and time claims valid", "pass")
+} else := step if {
+	spec.consent_context_required
+	not ctx.pip.consent.context_valid == true
+	step := _step("CONSENT_CONTEXT_INVALID", "Signed consent context valid", "signature, issuer, audience and time claims valid", "fail")
+} else := _step_skipped("CONSENT_CONTEXT_INVALID", "Signed consent context valid", "n/a")
+
+_check_consent_status_available(spec, ctx) := step if {
+	spec.consent_status_required
+	ctx.pip.consent.status_available == true
+	step := _step("CONSENT_STATUS_UNAVAILABLE", "Consent status available", "online consent-register status check succeeded", "pass")
+} else := step if {
+	spec.consent_status_required
+	not ctx.pip.consent.status_available == true
+	step := _step("CONSENT_STATUS_UNAVAILABLE", "Consent status available", "online consent-register status check succeeded", "fail")
+} else := _step_skipped("CONSENT_STATUS_UNAVAILABLE", "Consent status available", "n/a")

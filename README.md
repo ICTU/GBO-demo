@@ -1,8 +1,13 @@
 # GBO — Gemeenschappelijke Bronontsluiting
 
 This repository is a runnable reference demo for GBO. It shows how a consumer
-can request data from a source over OpenFSC, with every request evaluated by an
-OpenFTV policy before the source returns data.
+can request data from a source, normally over OpenFSC with every request
+evaluated by an OpenFTV policy before the source returns data. The EUDI demo
+also contains one deliberately unsecured HTTP source to prove that onboarding
+is not technically coupled to FSC; that source is not a security example.
+
+The unsecured source is mounted only by the local Compose setup and is not
+part of the deployable source configuration used by simulation environments.
 
 The demo contains two ways to start that request:
 
@@ -11,7 +16,7 @@ The demo contains two ways to start that request:
 - **EUDI wallet issuance** — a citizen shares a PID from a wallet and receives
   a source-backed credential.
 
-Both flows use the same core path:
+The production-oriented flows use the same core path:
 
 ```text
 consumer → FSC Outway → FSC Inway → OpenFTV PDP → source sidecar → GraphQL source
@@ -123,18 +128,41 @@ contracts and generated configuration in the required order.
 1. Open the [consent portal](http://localhost:9002) and sign in with a mock
    citizen from `services/graphql-server/mockdata/citizens.json`.
 2. Grant a consumer consent for a scope such as `bd:ib:2025`.
-3. Open the [consumer mock](http://localhost:9001), enter the consent ID and
-   run the query.
+3. The portal returns a signed consent token to the
+   [consumer mock](http://localhost:9001), which immediately runs the query.
 4. Open the [developer portal](http://localhost:9003) to inspect the policy
    decision, trace and FSC transaction.
 5. Revoke the consent and repeat the query. The PDP now denies it with
    `CONSENT_WITHDRAWN`.
 
+See [the DvTP consent architecture and sequence diagrams](docs/consent-flow.md)
+for the component boundaries and the grant, use and revocation flows.
+
+`S01` is the architecture role identifier used in the demo diagrams for the
+consent-register; it is not a separate service. The demo consent token is a
+bearer JWT. The consent-register generates an ephemeral P-256 key
+when `CONSENT_SIGNING_KEY_PATH` is empty, matching its default in-memory
+consent store. A persistent deployment must provide a stable PKCS#8 or SEC1
+P-256 private key and set an explicit `CONSENT_SIGNING_KEY_ID`. The demo JWKS
+exposes only the current key; production rotation must retain old public keys
+until their tokens expire. Production hardening should also shorten the token
+lifetime and bind proof of possession
+to the FSC/mTLS identity (for example with a confirmation claim); the current
+explicit `dienstverlener_oin` check prevents cross-consumer use but does not
+make a stolen bearer token non-replayable by that same consumer.
+
+Because the token returns through the browser, the consent portal only accepts
+`http` or `https` return URLs whose exact origin occurs in
+`VITE_ALLOWED_RETURN_ORIGINS` (comma-separated). Compose derives the demo value
+from `DIENSTVERLENER_PUBLIC_URL`; production images must supply the same value
+as a build argument.
+
 ### EUDI wallet issuance
 
 1. Start `make demo-full` or `make demo-eudi` and open the
    [landing page](http://localhost:9000).
-2. Select income 2024, income 2025 or the BRP/RvIG death certificate.
+2. Select income 2024, income 2025, the BRP/RvIG death certificate or the
+   explicitly labelled unsecured demo credential.
 3. Scan the newly generated QR code with the compatible test wallet.
 4. Share the PID for mock BSN `999991772`, review the credential preview and
    accept issuance.
@@ -146,11 +174,12 @@ issuance server or changing activated source metadata.
 
 ## How the demo works
 
-The DvTP and EUDI entrypoints share transport, policy evaluation, identifier
-resolution and source access. Belastingdienst and BRP/RvIG are separate FSC
-provider peers with their own metadata, data services and policies. The EUDI
-adapter contains no hard-coded source or offer catalog: active source metadata
-generates the issuance-server products and the frontend offer list.
+The DvTP and FSC-backed EUDI entrypoints share transport, policy evaluation,
+identifier resolution and source access. Belastingdienst and BRP/RvIG are
+separate logical sources with their own metadata, data services, policies and
+certificate sets; this demo publishes both through one FSC participant. The
+EUDI adapter contains no hard-coded source or offer catalog: active source
+metadata generates the issuance-server products and the frontend offer list.
 
 The demo combines production-grade components with deliberate test doubles:
 
@@ -210,7 +239,8 @@ source activation, wallet trust and cached QR sessions is in
 
 ## Further reading
 
-- [Source discovery and onboarding](docs/source-onboarding.md)
+- [DvTP consent architecture and flow](docs/consent-flow.md)
+- [Source configuration and onboarding](docs/source-onboarding.md)
 - [Source metadata cache and Type Metadata](docs/source-metadata-cache.md)
 - [`gbo-simple-v1` mapping profile](docs/gbo-simple-v1.md)
 - [Observability](OBSERVABILITY.md)

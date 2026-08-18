@@ -34,6 +34,11 @@ package doelbinding.auto_sign_contract
 # The payload is all the Manager knows at this point: no service name, no
 # outway thumbprint. Rules can therefore only judge WHO, not WHAT.
 #
+# DEMO SCOPE — the flat registry is intentionally provider-independent. Both
+# bd-manager and brp-manager use this package, so an active demo party may
+# connect to either source. Production admission should model the governed
+# party-to-source relationship; see https://github.com/ICTU/GBO-demo/issues/230.
+#
 # OUTPUT — OpenFTV reads `allow` (bool) and, on deny, `reason` (string).
 # The whole package document reaches the decision log, so `response`
 # carries the detail needed to explain a refusal.

@@ -1,6 +1,6 @@
-// Package register talks to the consent register, which stores consent
-// keyed by PI. There is no method here that accepts a BSN, and there must
-// never be one.
+// Package register talks to the consent register, which stores a portal-scoped
+// subject reference and sees PI only transiently while issuing a signed token.
+// There is no method here that accepts a BSN, and there must never be one.
 //
 // The adapter translates representations; it does not decide outcomes. No
 // time.Now(), no comparison against "REVOKED", no notion of who is calling.
@@ -26,11 +26,14 @@ type Client struct {
 
 func (c Client) Create(ctx context.Context, d consent.Draft) (consent.Record, error) {
 	var out struct {
-		ConsentID string `json:"consent_id"`
+		ConsentID    string `json:"consent_id"`
+		ConsentToken string `json:"consent_token"`
 	}
-	// The wire field is "pi": the register's subject is a PI and nothing else.
-	_, err := c.Caller.Do(ctx, "Create Consent", http.MethodPost, c.Base+"/consents", map[string]any{
-		"pi":                 string(d.Subject),
+	// PI is transient token material. subject_ref is the only subject value the consent register
+	// persists and returns.
+	_, err := c.Caller.DoPrivate(ctx, "Create Consent", http.MethodPost, c.Base+"/consents", map[string]any{
+		"pi":                 string(d.PI),
+		"subject_ref":        string(d.SubjectRef),
 		"dienstverlener_oin": d.DienstverlenerOIN,
 		"scopes":             d.Scopes,
 		"scope_entries":      d.ScopeEntries,
@@ -40,13 +43,13 @@ func (c Client) Create(ctx context.Context, d consent.Draft) (consent.Record, er
 	if err != nil {
 		return consent.Record{}, err
 	}
-	return consent.Record{ID: out.ConsentID, Subject: d.Subject}, nil
+	return consent.Record{ID: out.ConsentID, SubjectRef: d.SubjectRef, Token: out.ConsentToken}, nil
 }
 
-func (c Client) ListBySubject(ctx context.Context, subject consent.PI) ([]consent.Record, error) {
+func (c Client) ListBySubject(ctx context.Context, subject consent.SubjectRef) ([]consent.Record, error) {
 	var raw []map[string]any
 	_, err := c.Caller.Do(ctx, "List Consents", http.MethodGet,
-		c.Base+"/consents?pi="+url.QueryEscape(string(subject)), nil, &raw)
+		c.Base+"/consents?subject_ref="+url.QueryEscape(string(subject)), nil, &raw)
 	if err != nil {
 		return nil, err
 	}
@@ -92,8 +95,8 @@ func recordFromRaw(raw map[string]any) consent.Record {
 	if v, ok := raw["status"].(string); ok {
 		rec.Status = v
 	}
-	if v, ok := raw["pi"].(string); ok {
-		rec.Subject = consent.PI(v)
+	if v, ok := raw["subject_ref"].(string); ok {
+		rec.SubjectRef = consent.SubjectRef(v)
 	}
 	if v, ok := raw["valid_until"].(string); ok {
 		// The register has emitted both layouts; try the stricter one first.

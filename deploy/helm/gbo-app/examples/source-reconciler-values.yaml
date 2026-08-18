@@ -1,0 +1,57 @@
+image:
+  repository: ghcr.io/ictu/gbo-demo/eudi-adapter
+  tag: latest
+
+command: ["./eudi-adapter"]
+args:
+  - reconcile-sources
+  - --watch
+  - --interval=30s
+  - --manager-url=https://fsc-manager:9443
+  - --manager-ca=/fsc-manager/intermediate_ca.pem
+  - --manager-cert=/fsc-manager/internal-cert.pem
+  - --manager-key=/fsc-manager/internal-cert-key.pem
+  - --consumer-oin=99999999900000000100
+  - --outway-url=http://fsc-outway:8080
+  - --schema=/schemas/gbo-source-metadata-v1.schema.json
+  - --type-metadata-base-url=https://adapter.example
+  - --sources-dir=/sources
+  - --state-dir=/state
+  - --secrets-dir=/source-certificates
+  - --reader-public-url=https://issuer.example
+
+health:
+  enabled: false
+
+volumeMounts:
+  - name: source-configurations
+    mountPath: /sources
+    readOnly: true
+  - name: metadata-schemas
+    mountPath: /schemas
+    readOnly: true
+  - name: fsc-manager-client
+    mountPath: /fsc-manager
+    readOnly: true
+  - name: source-certificates
+    mountPath: /source-certificates
+    readOnly: true
+  - name: onboarding-state
+    mountPath: /state
+
+volumes:
+  - name: source-configurations
+    configMap:
+      name: gbo-source-configurations
+  - name: metadata-schemas
+    configMap:
+      name: gbo-source-metadata-schemas
+  - name: fsc-manager-client
+    secret:
+      secretName: gbo-fsc-manager-client
+  - name: source-certificates
+    secret:
+      secretName: gbo-source-certificates
+  - name: onboarding-state
+    persistentVolumeClaim:
+      claimName: gbo-onboarding-state

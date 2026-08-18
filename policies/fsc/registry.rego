@@ -1,17 +1,21 @@
 package fsc.registry
 
-# Party registry for FSC contract acceptance (DvTP onboarding).
+# DEMO-ONLY party registry for FSC contract acceptance (DvTP onboarding).
 #
-# This is the PIP behind doelbinding.auto_sign_contract: a party may only
-# obtain a service-connection contract with one of our sources once it is
-# registered here and active. Onboarding a new private party is therefore
-# a registry edit, not a config change on the manager.
+# An entry represents explicit onboarding for this local demo. Merely having
+# an OIN or appearing in an external register does not grant authorization.
+# The `sectors` and `register` fields below are illustrative, unverified demo
+# metadata and are not used by the decision logic.
+#
+# Production identity and GBO-admission facts should come from governed
+# registries/PIPs while Rego retains the decision logic. That follow-up is
+# tracked in https://github.com/ICTU/GBO-demo/issues/230.
 #
 # Why Rego and not registry.json: the OpenFTV PAP loads EVERY file under
 # PDP_POLICIES_STORE as a policy in the configured language
 # (eam/pap/loader.go, loadPolicy) — a stray .json aborts the whole walk.
 # The data is kept flat and JSON-shaped so it can move to an HTTP PIP
-# later without touching the rules: that becomes a request-mapper that
+# later without touching the rules: that can become a request-mapper that
 # puts the same object under input.context.pip.registry.
 #
 # Keys are the 20-digit OIN carried in the peer's FSC certificate

@@ -37,7 +37,7 @@ RUN set -eux; \
     grep -q 'case "graphqltocontext":' eam/mapping/mapper.go; \
     grep -q 'pdp.WithMappings(' apps/pdp/server/auth.go
 
-RUN go get github.com/vektah/gqlparser/v2@v2.5.30 \
+RUN go get github.com/vektah/gqlparser/v2@v2.5.30 github.com/golang-jwt/jwt/v5@v5.2.2 \
   && go mod tidy \
   && go test ./eam/mapping \
   && CGO_ENABLED=0 go build -ldflags="-s -w" -o /pdp ./apps/pdp/cmd/

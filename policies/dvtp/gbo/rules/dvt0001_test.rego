@@ -25,11 +25,14 @@ _base_ctx := {
 		"pi": "PI-abc123",
 	},
 	"pip": {"consent": {
+		"context_valid": true,
+		"status_available": true,
 		"exists": true,
 		"withdrawn": false,
 		"valid_until": "2030-01-01T00:00:00Z",
 		"granted_scopes": ["bd:ib:2025"],
 		"pi": "PI-abc123",
+		"dienstverlener_oin": "99999999900000000300",
 	}},
 	"field": "Query.ingeschrevenPersoon.heeftBelastingjaarAangifte",
 }
@@ -39,6 +42,27 @@ _base_ctx := {
 test_allow_valid_consent_and_binding if {
 	result := lib.evaluate(dvt0001.spec, _base_ctx)
 	result.decision == true
+}
+
+test_deny_invalid_signed_context if {
+	ctx := object.union(_base_ctx, {"pip": {"consent": object.union(_base_ctx.pip.consent, {"context_valid": false})}})
+	result := lib.evaluate(dvt0001.spec, ctx)
+	result.decision == false
+	result.context.reason_admin.code == "CONSENT_CONTEXT_INVALID"
+}
+
+test_deny_status_unavailable if {
+	ctx := object.union(_base_ctx, {"pip": {"consent": object.union(_base_ctx.pip.consent, {"status_available": false})}})
+	result := lib.evaluate(dvt0001.spec, ctx)
+	result.decision == false
+	result.context.reason_admin.code == "CONSENT_STATUS_UNAVAILABLE"
+}
+
+test_deny_fsc_actor_does_not_match_signed_recipient if {
+	ctx := object.union(_base_ctx, {"subject": {"type": "org", "id": "99999999900000000999"}})
+	result := lib.evaluate(dvt0001.spec, ctx)
+	result.decision == false
+	result.context.reason_admin.code == "CONSENT_ACTOR_MISMATCH"
 }
 
 # ── Consent-existence ───────────────────────────────────────────────────

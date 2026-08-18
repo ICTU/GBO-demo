@@ -118,7 +118,7 @@ func (p *developmentCAProvider) Provision(registration sourceRegistration) (cert
 	if err != nil {
 		return certificateArtifacts{}, err
 	}
-	sourceDir := filepath.Join(p.root, registration.SourceOIN)
+	sourceDir := filepath.Join(p.root, registration.certificateSetID())
 	if err := ensurePrivateDirectory(sourceDir); err != nil {
 		return certificateArtifacts{}, err
 	}
@@ -190,7 +190,7 @@ func (p *developmentCAProvider) Load(registration sourceRegistration) (certifica
 	if err != nil {
 		return certificateArtifacts{}, fmt.Errorf("load explicitly provisioned development reader CA: %w", err)
 	}
-	sourceDir := filepath.Join(p.root, registration.SourceOIN)
+	sourceDir := filepath.Join(p.root, registration.certificateSetID())
 	loadLeaf := func(role string) (*developmentLeaf, error) {
 		keyPath := filepath.Join(sourceDir, role+"-key.der.b64")
 		certPath := filepath.Join(sourceDir, role+"-cert.der.b64")

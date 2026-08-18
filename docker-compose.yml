@@ -81,8 +81,8 @@ services:
   # OpenFTV PDP with the embedded OPA/Rego engine — the authorization
   # endpoint for FSC-Inway (AuthZEN, HTTPS on :8443). The GraphQL
   # context-handler runs INSIDE this image as a request-mapper
-  # (services/openftv-pdp/mapper, PDP_REQUEST_MAPPINGS); it fetches the
-  # consent per request from the consent-register (GBO_CONSENT_URL below).
+  # (services/openftv-pdp/mapper, PDP_REQUEST_MAPPINGS); it verifies the
+  # signed consent context and checks its live status at the consent-register.
   # Note: PDP_POLICIES_LANGUAGE must be "rego" — the documented value
   # "OPA" makes OpenFTV silently skip all policy files (upstream quirk).
   openftv-pdp:
@@ -107,9 +107,11 @@ services:
       - PDP_ADL_SERVICE_NAME=gbo
       - PDP_LOG_LEVEL=info
       - PDP_REQUEST_MAPPINGS=graphqltocontext
-      # The mapper fetches consent per-request from the consent-register
-      # (PIP pull turned out to be both stale and broken upstream).
+      # The mapper fetches verification keys and the referenced consent's
+      # current status per request. Any verification/status failure denies.
       - GBO_CONSENT_URL=http://consent-register:4002
+      - GBO_CONSENT_ISSUER=https://consent-register.gbo.test
+      - GBO_CONSENT_AUDIENCE=gbo:dvtp:pdp
       # The EUDI flow resolves the wallet-disclosed BSN to a PI here; the
       # policy engine (and its decision log) is never given the BSN.
       - GBO_BSNK_URL=http://bsnk-mock:4003
@@ -343,8 +345,8 @@ services:
       timeout: 3s
       retries: 5
 
-  # Second bron: bronprofiel BRP (persoonsgegevens). Locally it is published
-  # by its own BRP/RvIG FSC peer (OIN ...0400), separate from BD (OIN ...0200).
+  # Second logical source: BRP/RvIG. The onboarding proof publishes it as a
+  # distinct service under the same FSC participant as BD.
   brp-graphql-server:
     build: ./services/brp-graphql-server
     ports:
@@ -367,6 +369,30 @@ services:
       timeout: 3s
       retries: 5
 
+  # Deliberately unauthenticated HTTP source used to prove the unsecured
+  # onboarding profile. It is isolated from FSC and is never a production
+  # security example.
+  unsecured-graphql-server:
+    build: ./services/graphql-server
+    ports:
+      - "${GBO_PORT_UNSECURED_GRAPHQL:-9414}:4000"
+    environment:
+      - OTEL_SERVICE_NAME=unsecured-graphql-server
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - GBO_SOURCE_METADATA_PATH=/config/gbo-source-metadata-unsecured.json
+    volumes:
+      - ./services/graphql-server/config:/config:ro
+    networks:
+      - backend
+    depends_on:
+      otel-collector:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   consent-register:
     build: ./services/consent-register
     ports:
@@ -374,6 +400,8 @@ services:
     environment:
       - OTEL_SERVICE_NAME=consent-register
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - CONSENT_TOKEN_ISSUER=https://consent-register.gbo.test
+      - CONSENT_TOKEN_AUDIENCE=gbo:dvtp:pdp
     networks:
       - backend
     depends_on:
@@ -464,7 +492,7 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
       - UPSTREAM_URL=http://brp-graphql-server:4001
       - BSNK_URL=http://bsnk-mock:4003
-      - OWN_PEER_OIN=99999999900000000400
+      - OWN_PEER_OIN=99999999900000000200
       - PSEUDONYM_VARS=bsn
     networks:
       - backend
@@ -514,20 +542,16 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
       # Talks to the real FSC-Outway (Hypotheekverlener-mock) instead
       # of fsc-mock. OutwayPath = grant-link /bri + backend-path /graphql.
-      # Consent lookup up front to obtain the PI; PI travels in
-      # variables.bsn.
+      # The signed consent token supplies the PI and scopes; the PDP verifies
+      # it and checks revocation at the consent-register.
       - OUTWAY_URL=http://hv-outway:8080
       - OUTWAY_PATH=/bri/graphql
-      - CONSENT_URL=http://consent-register:4002
       - ORG_OIN=99999999900000000300
       - ORG_SECTOR=hypotheekverlener
       - DEV_PORTAL_BACKEND_URL=http://dev-portal-backend:4007
     networks:
       - backend
       - fsc-infra
-    depends_on:
-      consent-register:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4006/health"]
       interval: 5s
@@ -616,6 +640,9 @@ services:
     environment:
       - CHOKIDAR_USEPOLLING=true
       - PORTAL_API_TARGET=http://consent-portal-backend:4005
+      # The bearer consent token may only return to explicitly trusted
+      # consumer origins. Multiple origins can be supplied comma-separated.
+      - VITE_ALLOWED_RETURN_ORIGINS=${DIENSTVERLENER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_DV_MOCK:-9001}}
     volumes:
       - ./toestemmingsportaal-frontend/src:/app/src
       - ./toestemmingsportaal-frontend/public:/app/public
@@ -868,7 +895,6 @@ services:
       # Source metadata is activated from the single atomic onboarding record;
       # OIN, type and FSC services are not duplicated in env-vars.
       - SOURCE_ACTIVATIONS_PATH=/var/lib/gbo/active
-      - TYPE_METADATA_PUBLIC_BASE_URL=${EUDI_BRI_URL:-}
       - TYPE_METADATA_STORE_PATH=/var/lib/gbo/type-metadata
     volumes:
       - ./.local/onboarding/active:/var/lib/gbo/active:ro
@@ -878,9 +904,9 @@ services:
       - backend
       - fsc-infra
 
-  # Same image as the issuance runtime, but a separate one-shot process.
+  # Same image as the issuance runtime, but a separate reconciliation process.
   # Kubernetes can run this command with --watch as a single-replica
-  # Deployment, or without --watch as a CronJob.
+  # Deployment, or with --once as a CronJob.
   source-reconciler:
     build: ./services/eudi-adapter
     profiles: [onboarding]
@@ -888,7 +914,8 @@ services:
       - EUDI_PUBLIC_URL=${EUDI_PUBLIC_URL:-}
     command:
       - ./eudi-adapter
-      - reconcile-fsc-sources
+      - reconcile-sources
+      - --once
       - --manager-url=https://edi-manager:9443
       - --manager-ca=/fsc-certs/intermediate_ca.pem
       - --manager-cert=/fsc-certs/internal-cert.pem
@@ -902,14 +929,20 @@ services:
       - --state-dir=/var/lib/gbo
       - --secrets-dir=/var/lib/gbo-secrets
       - --reader-public-url=${EUDI_PUBLIC_URL:-}
+      - --sources-dir=/config/sources
     volumes:
       - ./schemas:/config/schemas:ro
+      - ./sources/configured:/config/sources:ro
+      # Deliberately local-only. Deployment ConfigMaps use sources/configured
+      # and therefore never expose the unsecured demonstration source.
+      - ./sources/local-demo/demo-unsecured.yaml:/config/sources/demo-unsecured.yaml:ro
       - ./fsc-infra/orgs/edi-issuer/pki/internal:/fsc-certs:ro
       - ./.local/onboarding:/var/lib/gbo
       - ./.local/secrets:/var/lib/gbo-secrets
       - ./services/eudi-issuance-server/config:/generated
     networks:
       - fsc-infra
+      - backend
 
 networks:
   frontend:

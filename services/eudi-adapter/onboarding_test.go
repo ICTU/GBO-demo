@@ -4,95 +4,42 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
-func TestStaticOnboardingRejectsFSCRegistration(t *testing.T) {
-	registrationPath := writeSourceRegistrationFixture(t)
-	stateDir := filepath.Join(t.TempDir(), "state")
-	secretsDir := filepath.Join(t.TempDir(), "secrets")
-
-	handled, err := runOnboardingCommand(context.Background(), []string{
-		"validate-source",
-		"--source", registrationPath,
-		"--outway-url", "https://outway.example",
-		"--schema", "../../schemas/gbo-source-metadata-v1.schema.json",
-		"--type-metadata-base-url", "https://issuer.example",
-		"--state-dir", stateDir,
-		"--secrets-dir", secretsDir,
-	}, onboardingDependencies{
-		client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
-			t.Fatal("a static FSC registration must be rejected before network access")
-			return nil, nil
-		})},
-		now: time.Now,
-		resolveCertificateProvider: func(onboardingOptions) (certificateProvider, error) {
-			t.Fatal("validate-source must not instantiate a certificate provider")
-			return nil, nil
-		},
-		resolveCertificateStore: func(onboardingOptions) (certificateStore, error) {
-			t.Fatal("validate-source must not instantiate a certificate store")
-			return nil, nil
-		},
-		resolveActivationBackend: func(onboardingOptions) (activationBackend, error) {
-			t.Fatal("validate-source must not instantiate an activation backend")
-			return nil, nil
-		},
-		stdout: io.Discard,
-		stderr: io.Discard,
-	})
-	if !handled {
-		t.Fatal("validate-source was not handled")
-	}
-	if err == nil || !strings.Contains(err.Error(), "discovered from contracts") {
-		t.Fatalf("error = %v, want contract-discovery guidance", err)
-	}
-	assertPathAbsent(t, stateDir)
-	assertPathAbsent(t, secretsDir)
-}
-
-func TestSourceRegistrationRejectsUnknownAndDuplicateFields(t *testing.T) {
-	for name, body := range map[string]string{
-		"unknown":   validRegistrationYAML() + "metadata_url: https://public.example\n",
-		"duplicate": validRegistrationYAML() + "name: duplicate\n",
-	} {
-		t.Run(name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "source.yaml")
-			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := loadSourceRegistration(path); err == nil {
-				t.Fatal("invalid source registration was accepted")
-			}
-		})
+func TestUnsecuredMetadataFetchSendsNoFSCHeaders(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("Fsc-Grant-Hash") != "" || request.Header.Get("Fsc-Transaction-Id") != "" {
+			t.Fatalf("unsecured request contains FSC headers: %v", request.Header)
+		}
+		w.Header().Set("Content-Type", sourceMetadataMediaType)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+	if _, err := fetchSourceMetadata(context.Background(), server.Client(), server.URL, sourceTransportUnsecured, ""); err != nil {
+		t.Fatalf("fetch unsecured metadata: %v", err)
 	}
 }
 
-func TestHTTPSMTLSRegistrationIsModelledButFailsClosedAtRuntime(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "source.yaml")
-	body := `source_oin: "99999999900000000200"
-name: "Belastingdienst-mock"
-metadata_endpoint:
-  transport: "https-mtls"
-  endpoint: "https://metadata.example/.well-known/gbo"
-data_access:
-  transport: "https-mtls"
-`
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
+func TestUnsecuredMetadataFetchRejectsRedirect(t *testing.T) {
+	targetCalled := false
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { targetCalled = true }))
+	defer target.Close()
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		http.Redirect(w, request, target.URL, http.StatusTemporaryRedirect)
+	}))
+	defer redirect.Close()
+	_, err := fetchSourceMetadata(context.Background(), redirect.Client(), redirect.URL, sourceTransportUnsecured, "")
+	if err == nil || !strings.Contains(err.Error(), "redirect") {
+		t.Fatalf("redirect error = %v", err)
 	}
-	registration, err := loadSourceRegistration(path)
-	if err != nil {
-		t.Fatalf("load https-mtls registration: %v", err)
-	}
-	if _, err := registration.metadataURL("https://outway.example"); err == nil || !strings.Contains(err.Error(), "not implemented") {
-		t.Fatalf("https-mtls runtime error = %v, want fail-closed not implemented", err)
+	if targetCalled {
+		t.Fatal("unsecured metadata redirect crossed the configured endpoint boundary")
 	}
 }
 
@@ -102,10 +49,10 @@ func TestGraphQLEndpointMustMatchOnboardedTransport(t *testing.T) {
 		transport string
 		valid     bool
 	}{
-		"FSC path":              {endpoint: "/graphql", transport: sourceTransportFSC, valid: true},
-		"FSC rejects URL":       {endpoint: "https://source.example/graphql", transport: sourceTransportFSC},
-		"mTLS HTTPS URL":        {endpoint: "https://source.example/graphql", transport: sourceTransportHTTPSMTLS, valid: true},
-		"mTLS rejects HTTP URL": {endpoint: "http://source.example/graphql", transport: sourceTransportHTTPSMTLS},
+		"FSC path":            {endpoint: "/graphql", transport: sourceTransportFSC, valid: true},
+		"FSC rejects URL":     {endpoint: "https://source.example/graphql", transport: sourceTransportFSC},
+		"unsecured HTTPS URL": {endpoint: "https://source.example/graphql", transport: sourceTransportUnsecured, valid: true},
+		"unsecured HTTP URL":  {endpoint: "http://source.example/graphql", transport: sourceTransportUnsecured, valid: true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			graphql := sourceGraphQL{Endpoint: test.endpoint}
@@ -124,17 +71,9 @@ func TestGraphQLEndpointMustMatchOnboardedTransport(t *testing.T) {
 }
 
 func TestSourceActivationAllowsOnlyNewerVersions(t *testing.T) {
-	directory := t.TempDir()
-	path := filepath.Join(directory, "source.json")
+	path := filepath.Join(t.TempDir(), "source.json")
 	activation := func(version, digest string) (*sourceActivation, []byte) {
-		value := &sourceActivation{
-			SchemaVersion: "1.0",
-			Source: sourceRegistration{
-				SourceOIN: "99999999900000000200",
-			},
-			MetadataVersion:       version,
-			MetadataPayloadDigest: digest,
-		}
+		value := &sourceActivation{SchemaVersion: "1.0", Source: sourceRegistration{SourceOIN: "99999999900000000200"}, MetadataVersion: version, MetadataPayloadDigest: digest}
 		body, err := json.Marshal(value)
 		if err != nil {
 			t.Fatal(err)
@@ -143,7 +82,7 @@ func TestSourceActivationAllowsOnlyNewerVersions(t *testing.T) {
 	}
 	first, firstBody := activation("1.0.0", "first")
 	if err := writeSourceActivation(path, firstBody, first); err != nil {
-		t.Fatalf("write first activation: %v", err)
+		t.Fatal(err)
 	}
 	conflict, conflictBody := activation("1.0.0", "different")
 	if err := writeSourceActivation(path, conflictBody, conflict); err == nil {
@@ -151,12 +90,9 @@ func TestSourceActivationAllowsOnlyNewerVersions(t *testing.T) {
 	}
 	rotation, _ := activation("1.0.0", "first")
 	rotation.Certificates.CertificateExpires = "2028-08-05T12:00:00Z"
-	rotationBody, err := json.Marshal(rotation)
-	if err != nil {
-		t.Fatal(err)
-	}
+	rotationBody, _ := json.Marshal(rotation)
 	if err := writeSourceActivation(path, rotationBody, rotation); err != nil {
-		t.Fatalf("write certificate rotation for unchanged metadata: %v", err)
+		t.Fatalf("certificate rotation: %v", err)
 	}
 	rollback, rollbackBody := activation("0.9.0", "rollback")
 	if err := writeSourceActivation(path, rollbackBody, rollback); err == nil {
@@ -164,43 +100,32 @@ func TestSourceActivationAllowsOnlyNewerVersions(t *testing.T) {
 	}
 	upgrade, upgradeBody := activation("1.1.0", "upgrade")
 	if err := writeSourceActivation(path, upgradeBody, upgrade); err != nil {
-		t.Fatalf("write activation upgrade: %v", err)
-	}
-	stored, err := os.ReadFile(path)
-	if err != nil {
 		t.Fatal(err)
 	}
+	stored, _ := os.ReadFile(path)
 	if !bytes.Equal(stored, upgradeBody) {
 		t.Fatalf("stored activation = %s, want %s", stored, upgradeBody)
 	}
 }
 
-func writeSourceRegistrationFixture(t *testing.T) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "99999999900000000200.yaml")
-	if err := os.WriteFile(path, []byte(validRegistrationYAML()), 0o600); err != nil {
-		t.Fatalf("write source registration: %v", err)
+func TestFilesystemActivationUsesSourceIDForSharedOIN(t *testing.T) {
+	stateDir := t.TempDir()
+	backend := newFilesystemActivationBackend(stateDir)
+	for _, sourceID := range []string{"belastingdienst", "rvig"} {
+		validated := &validatedSourceRegistration{
+			Registration: sourceRegistration{SourceID: sourceID, SourceOIN: "99999999900000000200", Name: sourceID, CertificateSet: sourceID},
+			Document:     sourceMetadataDocument{Version: "1.0"}, Payload: []byte(sourceID), MetadataURL: "https://metadata.example/" + sourceID,
+		}
+		if _, err := backend.Activate(validated, certificateArtifacts{}); err != nil {
+			t.Fatalf("activate %s: %v", sourceID, err)
+		}
 	}
-	return path
-}
-
-func validRegistrationYAML() string {
-	return "source_oin: \"99999999900000000200\"\n" +
-		"name: \"Belastingdienst-mock\"\n" +
-		"metadata_endpoint:\n" +
-		"  transport: \"fsc\"\n" +
-		"  service_reference: \"gbo-metadata\"\n" +
-		"  path: \"/.well-known/gbo\"\n" +
-		"  grant_hash: \"metadata-grant\"\n" +
-		"data_access:\n" +
-		"  transport: \"fsc\"\n" +
-		"  service_reference: \"bri\"\n" +
-		"  grant_hash: \"data-grant\"\n"
-}
-
-func assertPathAbsent(t *testing.T, path string) {
-	t.Helper()
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("path %q exists after non-mutating command (err=%v)", path, err)
+	for _, sourceID := range []string{"belastingdienst", "rvig"} {
+		if _, err := os.Stat(filepath.Join(stateDir, "candidates", sourceID+".json")); err != nil {
+			t.Errorf("activation %s: %v", sourceID, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(stateDir, "candidates", "99999999900000000200.json")); !os.IsNotExist(err) {
+		t.Fatalf("shared OIN was used as activation key: %v", err)
 	}
 }

@@ -5,20 +5,13 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
-	"sort"
 	"strings"
 	"time"
-)
-
-const (
-	gboMetadataServiceName = "gbo-metadata"
-	gboWellKnownPath       = "/.well-known/gbo"
 )
 
 type fscContractsResponse struct {
@@ -26,15 +19,6 @@ type fscContractsResponse struct {
 	Pagination struct {
 		NextCursor string `json:"next_cursor"`
 	} `json:"pagination"`
-}
-
-type fscPeersResponse struct {
-	Peers []fscPeer `json:"peers"`
-}
-
-type fscPeer struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
 }
 
 type fscContract struct {
@@ -78,7 +62,6 @@ type fscConnectionGrant struct {
 
 type fscContractSnapshot struct {
 	byService map[string]fscConnectionGrant
-	peerNames map[string]string
 }
 
 func newFSCManagerHTTPClient(caPath, certPath, keyPath string) (*http.Client, error) {
@@ -112,10 +95,6 @@ func loadFSCContractSnapshot(ctx context.Context, client *http.Client, managerUR
 		return nil, fmt.Errorf("FSC Manager URL must be an absolute HTTPS URL without credentials, query or fragment")
 	}
 	basePath := strings.TrimRight(parsed.Path, "/")
-	peerNames, err := loadFSCPeerNames(ctx, client, *parsed, basePath)
-	if err != nil {
-		return nil, err
-	}
 	parsed.Path = basePath + "/v1/contracts"
 	parsed.RawQuery = ""
 	var contracts []fscContract
@@ -139,7 +118,7 @@ func loadFSCContractSnapshot(ctx context.Context, client *http.Client, managerUR
 			return nil, fmt.Errorf("list FSC contracts exceeded 100 pages")
 		}
 	}
-	snapshot := &fscContractSnapshot{byService: make(map[string]fscConnectionGrant), peerNames: peerNames}
+	snapshot := &fscContractSnapshot{byService: make(map[string]fscConnectionGrant)}
 	unixNow := now.Unix()
 	for _, contract := range contracts {
 		if contract.State != "CONTRACT_STATE_VALID" || unixNow < contract.Content.Validity.NotBefore || unixNow >= contract.Content.Validity.NotAfter {
@@ -158,42 +137,6 @@ func loadFSCContractSnapshot(ctx context.Context, client *http.Client, managerUR
 		}
 	}
 	return snapshot, nil
-}
-
-func loadFSCPeerNames(ctx context.Context, client *http.Client, endpoint url.URL, basePath string) (map[string]string, error) {
-	endpoint.Path = basePath + "/v1/peers"
-	endpoint.RawQuery = ""
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
-	if err != nil {
-		return nil, fmt.Errorf("create FSC peers request: %w", err)
-	}
-	request.Header.Set("Accept", "application/json")
-	response, err := client.Do(request)
-	if err != nil {
-		return nil, fmt.Errorf("list FSC peers: %w", err)
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(response.Body, 4<<10))
-		return nil, fmt.Errorf("list FSC peers returned status %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
-	}
-	var payload fscPeersResponse
-	decoder := json.NewDecoder(io.LimitReader(response.Body, 4<<20))
-	if err := decoder.Decode(&payload); err != nil {
-		return nil, fmt.Errorf("decode FSC peers: %w", err)
-	}
-	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		return nil, fmt.Errorf("decode FSC peers: trailing JSON data")
-	}
-	peerNames := make(map[string]string, len(payload.Peers))
-	for _, peer := range payload.Peers {
-		name := strings.TrimSpace(peer.Name)
-		if !sourceOINPattern.MatchString(peer.ID) || name == "" {
-			continue
-		}
-		peerNames[peer.ID] = name
-	}
-	return peerNames, nil
 }
 
 func loadFSCContractsPage(ctx context.Context, client *http.Client, endpoint url.URL, cursor string) (fscContractsResponse, error) {
@@ -232,22 +175,6 @@ func fscServiceKey(providerOIN, serviceName string) string {
 	return providerOIN + "\x00" + serviceName
 }
 
-func (s *fscContractSnapshot) metadataGrants() []fscConnectionGrant {
-	if s == nil {
-		return nil
-	}
-	grants := make([]fscConnectionGrant, 0)
-	for _, grant := range s.byService {
-		if grant.ServiceName == gboMetadataServiceName {
-			grants = append(grants, grant)
-		}
-	}
-	sort.Slice(grants, func(i, j int) bool {
-		return grants[i].ProviderOIN < grants[j].ProviderOIN
-	})
-	return grants
-}
-
 func (s *fscContractSnapshot) service(providerOIN, serviceName string) (fscConnectionGrant, bool) {
 	if s == nil {
 		return fscConnectionGrant{}, false
@@ -256,15 +183,7 @@ func (s *fscContractSnapshot) service(providerOIN, serviceName string) (fscConne
 	return grant, ok
 }
 
-func (s *fscContractSnapshot) peerName(providerOIN string) (string, bool) {
-	if s == nil {
-		return "", false
-	}
-	name, ok := s.peerNames[providerOIN]
-	return name, ok
-}
-
-type fscSourceReconciler struct {
+type sourceReconciler struct {
 	managerClient *http.Client
 	sourceClient  *http.Client
 	managerURL    string
@@ -272,81 +191,8 @@ type fscSourceReconciler struct {
 	outwayURL     string
 	schemaPath    string
 	publicBaseURL string
+	sources       []sourceConfiguration
 	store         certificateStore
 	backend       activationBackend
-}
-
-func (r *fscSourceReconciler) Reconcile(ctx context.Context, now time.Time) error {
-	if r == nil || r.sourceClient == nil || r.store == nil || r.backend == nil {
-		return fmt.Errorf("FSC source reconciler is incomplete")
-	}
-	snapshot, err := loadFSCContractSnapshot(ctx, r.managerClient, r.managerURL, r.consumerOIN, now)
-	if err != nil {
-		return err
-	}
-	var reconcileErrors []error
-	for _, metadataGrant := range snapshot.metadataGrants() {
-		if err := r.reconcileSource(ctx, snapshot, metadataGrant, now); err != nil {
-			reconcileErrors = append(reconcileErrors, fmt.Errorf("source %s: %w", metadataGrant.ProviderOIN, err))
-		}
-	}
-	return errors.Join(reconcileErrors...)
-}
-
-func (r *fscSourceReconciler) reconcileSource(ctx context.Context, snapshot *fscContractSnapshot, metadataGrant fscConnectionGrant, now time.Time) error {
-	metadataURL := strings.TrimRight(r.outwayURL, "/") + gboWellKnownPath
-	payload, err := fetchSourceMetadata(ctx, r.sourceClient, metadataURL, sourceTransportFSC, metadataGrant.GrantHash)
-	if err != nil {
-		return err
-	}
-	if err := validateSourceMetadataSchema(payload, r.schemaPath); err != nil {
-		return err
-	}
-	document, err := decodeSourceMetadataDocument(payload)
-	if err != nil {
-		return err
-	}
-	if document.SourceOIN != metadataGrant.ProviderOIN {
-		return fmt.Errorf("source metadata OIN %q does not match FSC provider OIN %q", document.SourceOIN, metadataGrant.ProviderOIN)
-	}
-	attestations := document.eudiAttestations()
-	if len(attestations) == 0 {
-		return fmt.Errorf("source metadata has no EUDI attestations")
-	}
-	dataService := attestations[0].GraphQL.ServiceReference
-	for _, definition := range attestations[1:] {
-		if definition.GraphQL.ServiceReference != dataService {
-			return fmt.Errorf("one metadata document currently must use one FSC data service")
-		}
-	}
-	dataGrant, ok := snapshot.service(metadataGrant.ProviderOIN, dataService)
-	if !ok {
-		return fmt.Errorf("no valid FSC data contract for service %q", dataService)
-	}
-	peerName, ok := snapshot.peerName(metadataGrant.ProviderOIN)
-	if !ok {
-		return fmt.Errorf("FSC provider %q has no registered peer name", metadataGrant.ProviderOIN)
-	}
-	registration := sourceRegistration{
-		SourceOIN: metadataGrant.ProviderOIN,
-		Name:      peerName,
-		MetadataEndpoint: sourceMetadataEndpoint{
-			Transport: sourceTransportFSC, ServiceReference: gboMetadataServiceName,
-			Path: gboWellKnownPath, GrantHash: metadataGrant.GrantHash,
-		},
-		DataAccess: sourceDataAccess{
-			Transport: sourceTransportFSC, ServiceReference: dataService, GrantHash: dataGrant.GrantHash,
-		},
-	}
-	if err := registration.validate(); err != nil {
-		return err
-	}
-	validated, err := validateSourcePayload(registration, payload, metadataURL, r.schemaPath, r.publicBaseURL, now)
-	if err != nil {
-		return err
-	}
-	if _, err := activateSource(validated, r.store, r.backend); err != nil {
-		return err
-	}
-	return nil
+	statuses      sourceStatusWriter
 }
