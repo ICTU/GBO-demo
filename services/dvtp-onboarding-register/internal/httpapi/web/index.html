@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DvTP toelatingsregister</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="page-shell">
+    <header class="masthead">
+      <div class="wordmark" aria-hidden="true">GBO</div>
+      <div class="masthead-copy">
+        <p class="eyebrow">Federatieve dienstverlening · intern register</p>
+        <h1>DvTP toelatingsregister</h1>
+        <p class="lede">Private partijen die hier actief staan, hebben de onboarding en juridische controle voor de geselecteerde bronnen afgerond.</p>
+      </div>
+      <div class="edition">DEMO<br>REGISTER</div>
+    </header>
+
+    {{if .Saved}}<div class="notice success" role="status">Wijziging opgeslagen. OpenFTV neemt deze binnen enkele seconden over.</div>{{end}}
+    {{if .Error}}<div class="notice error" role="alert">{{.Error}}</div>{{end}}
+
+    <main>
+      <section class="register-panel" aria-labelledby="register-title">
+        <div class="section-heading">
+          <div>
+            <p class="section-index">01 / Register</p>
+            <h2 id="register-title">Toegelaten partijen</h2>
+          </div>
+          <p class="count">{{len .Participants}} registraties</p>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Organisatie</th><th>OIN</th><th>Bronnen</th><th>Status</th><th><span class="sr-only">Actie</span></th></tr>
+            </thead>
+            <tbody>
+              {{range .Participants}}
+              <tr class="{{if not .Active}}is-inactive{{end}}">
+                <td class="organization">{{.Name}}</td>
+                <td><code>{{.OIN}}</code></td>
+                <td>
+                  <div class="source-list">
+                    {{range .AllowedSourceOINs}}<span>{{sourceName .}}</span>{{end}}
+                  </div>
+                </td>
+                <td><span class="status {{if .Active}}active{{else}}inactive{{end}}"><i></i>{{if .Active}}Actief{{else}}Gepauzeerd{{end}}</span></td>
+                <td class="action-cell">
+                  <form method="post" action="/participants/{{.OIN}}/toggle">
+                    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                    <button class="text-button" type="submit">{{if .Active}}Pauzeer{{else}}Activeer{{end}}</button>
+                  </form>
+                </td>
+              </tr>
+              {{else}}
+              <tr><td colspan="5" class="empty">Nog geen private partijen onboarded.</td></tr>
+              {{end}}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="form-panel" aria-labelledby="form-title">
+        <div class="section-heading compact">
+          <div>
+            <p class="section-index">02 / Onboarding</p>
+            <h2 id="form-title">Partij toevoegen</h2>
+          </div>
+          <span class="stamp" aria-hidden="true">CONTROLE<br>AFGEROND</span>
+        </div>
+
+        <form class="onboarding-form" method="post" action="/participants">
+          <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+          <label>
+            <span>Naam organisatie</span>
+            <input name="name" autocomplete="organization" required placeholder="Bijvoorbeeld Hypotheekadvies BV">
+          </label>
+          <label>
+            <span>OIN</span>
+            <input name="oin" inputmode="numeric" pattern="[0-9]{20}" minlength="20" maxlength="20" required placeholder="20 cijfers">
+          </label>
+
+          <fieldset>
+            <legend>Toegang tot bronnen</legend>
+            <div class="checkbox-grid">
+              {{range .Sources}}
+              <label class="source-check">
+                <input type="checkbox" name="source_oins" value="{{.OIN}}">
+                <span class="box" aria-hidden="true"></span>
+                <span>{{.Name}}</span>
+              </label>
+              {{end}}
+            </div>
+          </fieldset>
+
+          <label class="active-check">
+            <input type="checkbox" name="active" checked>
+            <span class="box" aria-hidden="true"></span>
+            <span>Direct activeren</span>
+          </label>
+
+          <div class="form-footer">
+            <p>Opslaan betekent in deze demo dat de juridische controle is afgerond.</p>
+            <button class="primary-button" type="submit">Voeg toe aan register <span>→</span></button>
+          </div>
+        </form>
+      </section>
+    </main>
+
+    <footer>
+      <span>Alleen voor de lokale GBO-demo</span>
+      <span>OpenFTV PIP · automatische synchronisatie</span>
+    </footer>
+  </div>
+</body>
+</html>

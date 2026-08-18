@@ -34,16 +34,19 @@ package doelbinding.auto_sign_contract
 # The payload is all the Manager knows at this point: no service name, no
 # outway thumbprint. Rules can therefore only judge WHO, not WHAT.
 #
-# DEMO SCOPE — the flat registry is intentionally provider-independent. Both
-# bd-manager and brp-manager use this package, so an active demo party may
-# connect to either source. Production admission should model the governed
-# party-to-source relationship; see https://github.com/ICTU/GBO-demo/issues/230.
+# ADMISSION DATA — private DvTP parties are pulled from the onboarding
+# register by OpenFTV's native PIP pull and appear under
+# data.entities.dvtp_participant. Each entry explicitly lists the sources to
+# which it was admitted, identified directly by the source holder's OIN.
+# Service-specific admission needs OpenFSC to retain the service details in
+# its AuthZEN autosign input; see https://github.com/ICTU/GBO-demo/issues/240.
+# The EUDI issuer is not a private DvTP participant;
+# it remains a trusted technical party below because this same policy also
+# protects its FSC contracts.
 #
 # OUTPUT — OpenFTV reads `allow` (bool) and, on deny, `reason` (string).
 # The whole package document reaches the decision log, so `response`
 # carries the detail needed to explain a refusal.
-
-import data.fsc.registry
 
 default allow := false
 
@@ -68,6 +71,24 @@ grant_type_service_connection := 2
 
 # --- derived facts ----------------------------------------------------
 
+# Technical participants that are part of this demo deployment rather than
+# private parties admitted through the DvTP onboarding process.
+_system_parties := {"99999999900000000100": {
+	"name": "Demo EUDI-issuance (GBO)",
+	"active": true,
+	"allowed_source_oins": ["99999999900000000200", "99999999900000000400"],
+}}
+
+_subject_attributes := object.get(object.get(input, "subject", {}), "attributes", {})
+_source_oin := object.get(_subject_attributes, "self_peer_id", "")
+_pulled_participants := object.get(data.entities, "dvtp_participant", {}) if {
+	data.entities
+}
+
+else := {}
+
+_parties := object.union(_pulled_participants, _system_parties)
+
 _grant_types := {t | some t in input.resource.attributes.grant_types}
 
 # Every party on the contract except ourselves. A plain service connection
@@ -79,13 +100,20 @@ _counterparties := {p |
 
 _unknown := {p |
 	some p in _counterparties
-	not registry.known(p)
+	not _parties[p]
 }
 
 _suspended := {p |
 	some p in _counterparties
-	registry.known(p)
-	not registry.active(p)
+	_parties[p]
+	object.get(_parties[p], "active", false) != true
+}
+
+_wrong_source := {p |
+	some p in _counterparties
+	_parties[p]
+	object.get(_parties[p], "active", false) == true
+	not _source_oin in object.get(_parties[p], "allowed_source_oins", [])
 }
 
 # --- checks -----------------------------------------------------------
@@ -99,6 +127,7 @@ _well_formed if {
 	input.action.id == "autosign_contract"
 	input.resource.type == "contract"
 	is_string(input.subject.attributes.self_peer_id)
+	input.subject.attributes.self_peer_id != ""
 	is_array(input.subject.attributes.peer_ids)
 	is_array(input.resource.attributes.grant_types)
 }
@@ -127,6 +156,12 @@ _all_active if {
 	count(_suspended) == 0
 }
 
+default _source_allowed := false
+
+_source_allowed if {
+	count(_wrong_source) == 0
+}
+
 # Ordered cascade: the first failing check names the refusal.
 _checks := [
 	{"code": "NOT_AN_AUTOSIGN_REQUEST", "ok": _well_formed},
@@ -134,6 +169,7 @@ _checks := [
 	{"code": "NO_COUNTERPARTY", "ok": _has_counterparty},
 	{"code": "PARTY_NOT_IN_REGISTRY", "ok": _all_known},
 	{"code": "PARTY_NOT_ACTIVE", "ok": _all_active},
+	{"code": "SOURCE_NOT_ALLOWED", "ok": _source_allowed},
 ]
 
 _failed := [c |
@@ -157,7 +193,8 @@ response := {
 else := {
 	"decision": true,
 	"context": {"granted": [{
-		"rule": "FSC_AUTOSIGN_REGISTERED_PARTY",
+		"rule": "FSC_AUTOSIGN_ADMITTED_PARTY",
 		"counterparties": sort(_counterparties),
+		"source_oin": _source_oin,
 	}]},
 }

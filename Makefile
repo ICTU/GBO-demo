@@ -49,6 +49,7 @@ PORT_DV_MOCK := $(or $(GBO_PORT_DV_MOCK),9001)
 PORT_JAEGER := $(or $(GBO_PORT_JAEGER),9686)
 PORT_PDP := $(or $(GBO_PORT_OPA),9181)
 PORT_EUDI_ADAPTER := $(or $(GBO_PORT_EUDI_ADAPTER),9409)
+PORT_DVTP_ONBOARDING_REGISTER := $(or $(GBO_PORT_DVTP_ONBOARDING_REGISTER),9415)
 
 # banner <label> <port> [scheme] — one "  Label:  <local>  |  <lan>" line.
 # hostname -I lists every address; the first is the LAN one.
@@ -75,7 +76,7 @@ down:
 demo: demo-dvtp
 
 demo-minimal: certs
-	@echo "-> Base stack (no profile): 13 services"
+	@echo "-> Base stack (no profile)"
 	docker compose up --build -d
 	@echo ""
 	$(call banner,Dev-portal:,$(PORT_DEV_PORTAL))
@@ -125,6 +126,7 @@ demo-dvtp: certs fsc-all-up fsc-seed-bri fsc-seed-bri-hv
 	$(call banner,Dev-portal:,$(PORT_DEV_PORTAL))
 	$(call banner,Toestemmingsportaal:,$(PORT_TOESTEMMINGSPORTAAL))
 	$(call banner,Dienstverlener:,$(PORT_DV_MOCK))
+	@printf "  %-21s http://localhost:%s\n" "DvTP toelatingsregister:" "$(PORT_DVTP_ONBOARDING_REGISTER)"
 	$(call banner,Jaeger:,$(PORT_JAEGER))
 
 EUDI_CONFIG_DIR := services/eudi-issuance-server/config
@@ -306,10 +308,12 @@ fsc-pdp-cert:
 # first contract is submitted — otherwise every fsc-seed-* leaves its
 # connection contract pending and the seed times out after 30s with no
 # useful error. The PDP lives in the main compose project, which normally
-# starts *after* fsc-infra; this pulls it forward. --wait blocks on the
-# healthcheck, so the seeds cannot race a still-booting PDP.
+# starts *after* fsc-infra; this pulls it forward. --wait only covers the
+# process healthcheck, so the explicit AuthZen probe also waits for the native
+# PIP pull to make the seeded Hypotheek-BV admission effective.
 pdp-up: certs fsc-pdp-cert
 	docker compose up --build -d --wait --force-recreate openftv-pdp
+	./scripts/wait-openftv-admission.sh
 
 fsc-all-up: fsc-directory-certs fsc-edi-certs fsc-bd-certs fsc-brp-certs fsc-hv-certs fsc-pdp-cert
 	$(MAKE) fsc-databases

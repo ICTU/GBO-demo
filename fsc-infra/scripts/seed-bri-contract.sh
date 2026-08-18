@@ -16,8 +16,9 @@
 # Requires the counterparties to accept the contracts. The directory-peer
 # auto-signs publications by grant type; the source Managers put every
 # incoming contract to the OpenFTV PDP (policies/fsc/autosign.rego), so a
-# consumer that is not in policies/fsc/registry.rego is refused and the
-# contract stays `proposed`. Both cases abort the seed — see fail_unsigned.
+# private consumer that is not active for that source in the DvTP onboarding
+# register is refused and the contract stays `proposed`. Both cases abort the
+# seed — see fail_unsigned.
 #
 # Idempotent: each step detects existing state and skips.
 #

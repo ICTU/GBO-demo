@@ -92,8 +92,8 @@ fail_unsigned() {
     echo "      | grep auto_sign_contract | tail -1 | jq .result.response"
     echo ""
     echo "  reason_admin.code names the cause. PARTY_NOT_IN_REGISTRY means the"
-    echo "  peer OIN is missing from policies/fsc/registry.rego — add it, then"
-    echo "  docker compose up -d --force-recreate openftv-pdp and re-run."
+    echo "  peer has not been admitted in the DvTP onboarding register. Add it"
+    echo "  at http://localhost:${GBO_PORT_DVTP_ONBOARDING_REGISTER:-9415}, wait for the PIP pull, and re-run."
   } >&2
   exit 1
 }

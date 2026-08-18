@@ -29,6 +29,7 @@ jobs:
           - consent-register
           - dev-portal-backend
           - dienstverlener-backend
+          - dvtp-onboarding-register
           - eudi-adapter
           - graphql-server
           - sector-pip
@@ -138,6 +139,7 @@ jobs:
         service:
           - additional-claims-service
           - dev-portal-backend
+          - dvtp-onboarding-register
           - eudi-adapter
           - graphql-server
           - openftv-manager

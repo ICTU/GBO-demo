@@ -55,6 +55,9 @@ jobs:
           - service: dienstverlener-mock
             context: ./dienstverlener-mock
             dockerfile: ./dienstverlener-mock/Dockerfile
+          - service: dvtp-onboarding-register
+            context: ./services/dvtp-onboarding-register
+            dockerfile: ./services/dvtp-onboarding-register/Dockerfile
           - service: eudi-adapter
             context: ./services/eudi-adapter
             dockerfile: ./services/eudi-adapter/Dockerfile
