@@ -69,6 +69,7 @@ func TestSaveRejectsInvalidParticipant(t *testing.T) {
 	service := NewService(newMemoryRepository())
 	tests := []Participant{
 		{OIN: "123", Name: "Too short", Active: true, AllowedSourceOINs: []string{"99999999900000000200"}},
+		{OIN: eudiIssuerOIN, Name: "Technical EUDI issuer", Active: true, AllowedSourceOINs: []string{"99999999900000000200"}},
 		{OIN: "00000001234567890000", Active: true, AllowedSourceOINs: []string{"99999999900000000200"}},
 		{OIN: "00000001234567890000", Name: "No source", Active: true},
 		{OIN: "00000001234567890000", Name: "Unknown source", Active: true, AllowedSourceOINs: []string{"00000000000000000001"}},
@@ -77,6 +78,31 @@ func TestSaveRejectsInvalidParticipant(t *testing.T) {
 		if err := service.Save(t.Context(), participant); err == nil {
 			t.Errorf("Save(%+v) succeeded, want validation error", participant)
 		}
+	}
+}
+
+func TestListExcludesReservedTechnicalParties(t *testing.T) {
+	repository := newMemoryRepository()
+	repository.participants[eudiIssuerOIN] = Participant{
+		OIN:               eudiIssuerOIN,
+		Name:              "Technical EUDI issuer",
+		Active:            false,
+		AllowedSourceOINs: []string{"99999999900000000200"},
+	}
+	service := NewService(repository)
+	participants, err := service.List(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(participants) != 0 {
+		t.Fatalf("reserved participant leaked from register: %+v", participants)
+	}
+}
+
+func TestToggleRejectsReservedTechnicalParty(t *testing.T) {
+	service := NewService(newMemoryRepository())
+	if _, err := service.ToggleActive(t.Context(), eudiIssuerOIN); err == nil {
+		t.Fatal("ToggleActive accepted a reserved technical party")
 	}
 }
 

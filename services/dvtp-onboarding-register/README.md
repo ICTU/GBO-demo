@@ -12,13 +12,16 @@ The register stores only:
 - the OINs of the source holders to which it is admitted.
 
 The server-rendered UI is available at `http://localhost:9415`. Compose binds
-that port to host loopback only. OpenFTV reads
-`/internal/openftv/participants` over the internal Docker network using its
+that port to host loopback only. Mutating forms require a per-process CSRF
+token and a same-origin browser request. OpenFTV reads
+`/internal/openftv/participants` over a dedicated Docker network using its
 native PIP pull configuration; the endpoint is not published as a public
-internet endpoint by this deployment.
+internet endpoint by this deployment. The register and PDP share a dedicated
+network that no other backend service joins.
 
 This is intentionally a mock, without user accounts or an onboarding
-workflow. A production deployment should put the administration UI behind its
+workflow: anyone with local access to the UI is an administrator. A production
+deployment should put the administration UI behind its
 normal operator authentication and keep the pull endpoint on a private network
 or protect it with mTLS. OpenFTV pull configurations support `tlsCA`, `tlsCert`
 and `tlsKey`, so that does not require changing the policy or response shape.

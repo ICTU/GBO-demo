@@ -2,6 +2,7 @@
 package httpapi
 
 import (
+	"crypto/subtle"
 	"embed"
 	"encoding/json"
 	"html/template"
@@ -20,11 +21,15 @@ var webFiles embed.FS
 type pageData struct {
 	Participants []onboarding.Participant
 	Sources      []onboarding.Source
+	CSRFToken    string
 	Saved        bool
 	Error        string
 }
 
-func NewHandler(service *onboarding.Service) http.Handler {
+func NewHandler(service *onboarding.Service, csrfToken string) http.Handler {
+	if csrfToken == "" {
+		panic("CSRF token is required")
+	}
 	sources := service.Sources()
 	page := template.Must(template.New("index.html").Funcs(template.FuncMap{
 		"sourceName": func(oin string) string {
@@ -61,10 +66,12 @@ func NewHandler(service *onboarding.Service) http.Handler {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
 		setBrowserSecurityHeaders(w)
 		_ = page.Execute(w, pageData{
 			Participants: participants,
 			Sources:      sources,
+			CSRFToken:    csrfToken,
 			Saved:        r.URL.Query().Get("saved") == "1",
 			Error:        r.URL.Query().Get("error"),
 		})
@@ -72,6 +79,11 @@ func NewHandler(service *onboarding.Service) http.Handler {
 	mux.HandleFunc("POST /participants", func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
 			redirectError(w, r, "Formulier kon niet worden gelezen")
+			return
+		}
+		if !validCSRFRequest(r, csrfToken) {
+			slog.Warn("rejected cross-site participant mutation", "origin", r.Header.Get("Origin"), "fetch_site", r.Header.Get("Sec-Fetch-Site"))
+			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
 		participant := onboarding.Participant{
@@ -87,14 +99,39 @@ func NewHandler(service *onboarding.Service) http.Handler {
 		http.Redirect(w, r, "/?saved=1", http.StatusSeeOther)
 	})
 	mux.HandleFunc("POST /participants/{oin}/toggle", func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			redirectError(w, r, "Formulier kon niet worden gelezen")
+			return
+		}
+		if !validCSRFRequest(r, csrfToken) {
+			slog.Warn("rejected cross-site participant mutation", "origin", r.Header.Get("Origin"), "fetch_site", r.Header.Get("Sec-Fetch-Site"))
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
 		found, err := service.ToggleActive(r.Context(), r.PathValue("oin"))
-		if err != nil || !found {
+		if err != nil {
+			slog.Error("toggling participant", "oin", r.PathValue("oin"), "err", err)
+			http.Error(w, "register unavailable", http.StatusInternalServerError)
+			return
+		}
+		if !found {
 			redirectError(w, r, "Deelnemer niet gevonden")
 			return
 		}
 		http.Redirect(w, r, "/?saved=1", http.StatusSeeOther)
 	})
 	return withAccessLog(mux)
+}
+
+func validCSRFRequest(r *http.Request, expectedToken string) bool {
+	origin, err := url.Parse(r.Header.Get("Origin"))
+	if err != nil || (origin.Scheme != "http" && origin.Scheme != "https") || origin.Host != r.Host {
+		return false
+	}
+	if fetchSite := r.Header.Get("Sec-Fetch-Site"); fetchSite != "" && fetchSite != "same-origin" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(r.FormValue("csrf_token")), []byte(expectedToken)) == 1
 }
 
 func withAccessLog(next http.Handler) http.Handler {

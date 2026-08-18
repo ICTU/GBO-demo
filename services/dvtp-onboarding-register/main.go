@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -43,6 +45,14 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
+func generateCSRFToken() (string, error) {
+	value := make([]byte, 32)
+	if _, err := rand.Read(value); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(value), nil
+}
+
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", "dvtp-onboarding-register"))
 	cfg := loadConfig()
@@ -60,10 +70,15 @@ func main() {
 			os.Exit(1)
 		}
 	}
+	csrfToken, err := generateCSRFToken()
+	if err != nil {
+		slog.Error("generating CSRF token", "err", err)
+		os.Exit(1)
+	}
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           httpapi.NewHandler(service),
+		Handler:           httpapi.NewHandler(service, csrfToken),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 

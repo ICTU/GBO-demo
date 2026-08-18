@@ -308,10 +308,12 @@ fsc-pdp-cert:
 # first contract is submitted — otherwise every fsc-seed-* leaves its
 # connection contract pending and the seed times out after 30s with no
 # useful error. The PDP lives in the main compose project, which normally
-# starts *after* fsc-infra; this pulls it forward. --wait blocks on the
-# healthcheck, so the seeds cannot race a still-booting PDP.
+# starts *after* fsc-infra; this pulls it forward. --wait only covers the
+# process healthcheck, so the explicit AuthZen probe also waits for the native
+# PIP pull to make the seeded Hypotheek-BV admission effective.
 pdp-up: certs fsc-pdp-cert
 	docker compose up --build -d --wait --force-recreate openftv-pdp
+	./scripts/wait-openftv-admission.sh
 
 fsc-all-up: fsc-directory-certs fsc-edi-certs fsc-bd-certs fsc-brp-certs fsc-hv-certs fsc-pdp-cert
 	$(MAKE) fsc-databases

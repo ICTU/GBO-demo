@@ -12,6 +12,12 @@ import (
 
 var validOIN = regexp.MustCompile(`^[0-9]{20}$`)
 
+const eudiIssuerOIN = "99999999900000000100"
+
+var reservedParticipantOINs = map[string]bool{
+	eudiIssuerOIN: true,
+}
+
 var availableSources = []Source{
 	{OIN: "99999999900000000200", Name: "Belastingdienst"},
 	{OIN: "99999999900000000400", Name: "BRP (RvIG)"},
@@ -54,7 +60,17 @@ func (s *Service) Sources() []Source {
 }
 
 func (s *Service) List(ctx context.Context) ([]Participant, error) {
-	return s.repository.List(ctx)
+	participants, err := s.repository.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	privateParticipants := make([]Participant, 0, len(participants))
+	for _, participant := range participants {
+		if !reservedParticipantOINs[participant.OIN] {
+			privateParticipants = append(privateParticipants, participant)
+		}
+	}
+	return privateParticipants, nil
 }
 
 func (s *Service) Save(ctx context.Context, participant Participant) error {
@@ -68,6 +84,9 @@ func (s *Service) Save(ctx context.Context, participant Participant) error {
 func (s *Service) ToggleActive(ctx context.Context, oin string) (bool, error) {
 	if !validOIN.MatchString(oin) {
 		return false, errors.New("invalid OIN")
+	}
+	if reservedParticipantOINs[oin] {
+		return false, errors.New("OIN is reserved for a technical system party")
 	}
 	return s.repository.ToggleActive(ctx, oin)
 }
@@ -104,6 +123,9 @@ func normalizeParticipant(participant Participant) (Participant, error) {
 	participant.Name = strings.TrimSpace(participant.Name)
 	if !validOIN.MatchString(participant.OIN) {
 		return Participant{}, errors.New("OIN must contain exactly 20 digits")
+	}
+	if reservedParticipantOINs[participant.OIN] {
+		return Participant{}, errors.New("OIN is reserved for a technical system party")
 	}
 	if participant.Name == "" {
 		return Participant{}, errors.New("name is required")

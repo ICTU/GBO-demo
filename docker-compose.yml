@@ -125,9 +125,8 @@ services:
       - PDP_ADL_SERVICE_NAME=gbo
       - PDP_LOG_LEVEL=info
       - PDP_REQUEST_MAPPINGS=graphqltocontext
-      # Native OpenFTV PIP pull: refresh the DvTP admission entities over the
-      # internal Docker address. Host access to the register is separately
-      # restricted to loopback below.
+      # Native OpenFTV PIP pull: refresh the DvTP admission entities over a
+      # dedicated network shared only with the register.
       - PDP_PIP_PULL_CONFIGS=/pip-pull/dvtp-onboarding.yaml
       # The mapper fetches verification keys and the referenced consent's
       # current status per request. Any verification/status failure denies.
@@ -154,6 +153,7 @@ services:
       - ./services/openftv-pdp/pip-pull:/pip-pull:ro
     networks:
       - backend
+      - dvtp-onboarding
       # The bd-Inway AuthZen plugin calls openftv-pdp directly; must be
       # reachable inside fsc-infra_default.
       - fsc-infra
@@ -337,7 +337,9 @@ services:
     volumes:
       - dvtp-onboarding-data:/data
     networks:
-      - backend
+      # Only the PDP shares this dedicated network. The published admin port
+      # remains reachable from host loopback, not from other backend services.
+      - dvtp-onboarding
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4015/health"]
       interval: 5s
@@ -990,6 +992,7 @@ services:
 networks:
   frontend:
   backend:
+  dvtp-onboarding:
   eudi:
   fsc-infra:
     # Which fsc-infra compose project to join. Defaults to the shared

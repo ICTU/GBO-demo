@@ -49,6 +49,7 @@
                 <td><span class="status {{if .Active}}active{{else}}inactive{{end}}"><i></i>{{if .Active}}Actief{{else}}Gepauzeerd{{end}}</span></td>
                 <td class="action-cell">
                   <form method="post" action="/participants/{{.OIN}}/toggle">
+                    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
                     <button class="text-button" type="submit">{{if .Active}}Pauzeer{{else}}Activeer{{end}}</button>
                   </form>
                 </td>
@@ -71,6 +72,7 @@
         </div>
 
         <form class="onboarding-form" method="post" action="/participants">
+          <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
           <label>
             <span>Naam organisatie</span>
             <input name="name" autocomplete="organization" required placeholder="Bijvoorbeeld Hypotheekadvies BV">

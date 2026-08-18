@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,8 +14,11 @@ import (
 	"dvtp-onboarding-register/internal/onboarding"
 )
 
+const testCSRFToken = "test-csrf-token"
+
 type memoryRepository struct {
 	participants map[string]onboarding.Participant
+	toggleErr    error
 }
 
 func newTestService(t *testing.T) (*onboarding.Service, *memoryRepository) {
@@ -44,6 +48,9 @@ func (r *memoryRepository) InsertIfAbsent(_ context.Context, participant onboard
 }
 
 func (r *memoryRepository) ToggleActive(_ context.Context, oin string) (bool, error) {
+	if r.toggleErr != nil {
+		return false, r.toggleErr
+	}
 	participant, exists := r.participants[oin]
 	if !exists {
 		return false, nil
@@ -53,6 +60,19 @@ func (r *memoryRepository) ToggleActive(_ context.Context, oin string) (bool, er
 	return true, nil
 }
 
+func testHandler(service *onboarding.Service) http.Handler {
+	return NewHandler(service, testCSRFToken)
+}
+
+func formRequest(method, path string, form url.Values) *http.Request {
+	form.Set("csrf_token", testCSRFToken)
+	request := httptest.NewRequest(method, path, strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Origin", "http://example.com")
+	request.Header.Set("Sec-Fetch-Site", "same-origin")
+	return request
+}
+
 func TestOpenFTVParticipantsEndpoint(t *testing.T) {
 	service, _ := newTestService(t)
 	if err := service.SeedDemo(t.Context()); err != nil {
@@ -60,7 +80,7 @@ func TestOpenFTVParticipantsEndpoint(t *testing.T) {
 	}
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/internal/openftv/participants", nil)
-	NewHandler(service).ServeHTTP(recorder, request)
+	testHandler(service).ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d", recorder.Code)
@@ -86,9 +106,8 @@ func TestParticipantFormCreatesParticipant(t *testing.T) {
 		"source_oins": {"99999999900000000200"},
 	}
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/participants", strings.NewReader(form.Encode()))
-	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	NewHandler(service).ServeHTTP(recorder, request)
+	request := formRequest(http.MethodPost, "/participants", form)
+	testHandler(service).ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusSeeOther || recorder.Header().Get("Location") != "/?saved=1" {
 		t.Fatalf("response = %d %q", recorder.Code, recorder.Header().Get("Location"))
 	}
@@ -105,9 +124,8 @@ func TestParticipantFormRejectsMissingSource(t *testing.T) {
 		"active": {"on"},
 	}
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/participants", strings.NewReader(form.Encode()))
-	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	NewHandler(service).ServeHTTP(recorder, request)
+	request := formRequest(http.MethodPost, "/participants", form)
+	testHandler(service).ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusSeeOther || !strings.Contains(recorder.Header().Get("Location"), "error=") {
 		t.Fatalf("response = %d %q", recorder.Code, recorder.Header().Get("Location"))
 	}
@@ -120,12 +138,63 @@ func TestRegisterPageAndSecurityHeaders(t *testing.T) {
 	}
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
-	NewHandler(service).ServeHTTP(recorder, request)
+	testHandler(service).ServeHTTP(recorder, request)
 	body, _ := io.ReadAll(recorder.Body)
 	if !strings.Contains(string(body), "DvTP toelatingsregister") || !strings.Contains(string(body), "Demo Hypotheekverlener BV") {
 		t.Fatalf("page did not render register: %s", body)
 	}
+	if strings.Count(string(body), `name="csrf_token" value="`+testCSRFToken+`"`) != 3 {
+		t.Fatalf("page did not render CSRF tokens in every form: %s", body)
+	}
 	if header := recorder.Header().Get("Content-Security-Policy"); !strings.Contains(header, "frame-ancestors 'none'") {
 		t.Fatalf("Content-Security-Policy = %q", header)
+	}
+}
+
+func TestParticipantFormRejectsCrossSiteAndMissingToken(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		origin    string
+		fetchSite string
+		token     string
+	}{
+		{name: "cross-site origin", origin: "https://attacker.example", fetchSite: "cross-site", token: testCSRFToken},
+		{name: "missing token", origin: "http://example.com", fetchSite: "same-origin"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			service, repository := newTestService(t)
+			form := url.Values{
+				"oin":         {"00000001234567890000"},
+				"name":        {"Hypotheekadvies BV"},
+				"source_oins": {"99999999900000000200"},
+				"csrf_token":  {test.token},
+			}
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, "/participants", strings.NewReader(form.Encode()))
+			request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			request.Header.Set("Origin", test.origin)
+			request.Header.Set("Sec-Fetch-Site", test.fetchSite)
+			testHandler(service).ServeHTTP(recorder, request)
+			if recorder.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusForbidden)
+			}
+			if len(repository.participants) != 0 {
+				t.Fatal("cross-site request mutated the register")
+			}
+		})
+	}
+}
+
+func TestToggleStorageFailureReturnsUnavailable(t *testing.T) {
+	service, repository := newTestService(t)
+	repository.toggleErr = errors.New("database locked")
+	recorder := httptest.NewRecorder()
+	request := formRequest(http.MethodPost, "/participants/00000001234567890000/toggle", url.Values{})
+	testHandler(service).ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusInternalServerError)
+	}
+	if !strings.Contains(recorder.Body.String(), "register unavailable") {
+		t.Fatalf("body = %q", recorder.Body.String())
 	}
 }
