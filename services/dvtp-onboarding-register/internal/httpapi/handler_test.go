@@ -80,10 +80,10 @@ func TestOpenFTVParticipantsEndpoint(t *testing.T) {
 func TestParticipantFormCreatesParticipant(t *testing.T) {
 	service, repository := newTestService(t)
 	form := url.Values{
-		"oin":     {"00000001234567890000"},
-		"name":    {"Hypotheekadvies BV"},
-		"active":  {"on"},
-		"sources": {"belastingdienst"},
+		"oin":         {"00000001234567890000"},
+		"name":        {"Hypotheekadvies BV"},
+		"active":      {"on"},
+		"source_oins": {"99999999900000000200"},
 	}
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/participants", strings.NewReader(form.Encode()))

@@ -37,7 +37,10 @@ package doelbinding.auto_sign_contract
 # ADMISSION DATA — private DvTP parties are pulled from the onboarding
 # register by OpenFTV's native PIP pull and appear under
 # data.entities.dvtp_participant. Each entry explicitly lists the sources to
-# which it was admitted. The EUDI issuer is not a private DvTP participant;
+# which it was admitted, identified directly by the source holder's OIN.
+# Service-specific admission needs OpenFSC to retain the service details in
+# its AuthZEN autosign input; see https://github.com/ICTU/GBO-demo/issues/240.
+# The EUDI issuer is not a private DvTP participant;
 # it remains a trusted technical party below because this same policy also
 # protects its FSC contracts.
 #
@@ -68,24 +71,16 @@ grant_type_service_connection := 2
 
 # --- derived facts ----------------------------------------------------
 
-# Stable local source identities. This translates the source Manager's OIN
-# from the AuthZEN request to the checkbox values used by the register. It is
-# source configuration, not an admission list.
-_source_by_manager_oin := {
-	"99999999900000000200": "belastingdienst",
-	"99999999900000000400": "brp",
-}
-
 # Technical participants that are part of this demo deployment rather than
 # private parties admitted through the DvTP onboarding process.
 _system_parties := {"99999999900000000100": {
 	"name": "Demo EUDI-issuance (GBO)",
 	"active": true,
-	"allowed_sources": ["belastingdienst", "brp"],
+	"allowed_source_oins": ["99999999900000000200", "99999999900000000400"],
 }}
 
 _subject_attributes := object.get(object.get(input, "subject", {}), "attributes", {})
-_source := object.get(_source_by_manager_oin, object.get(_subject_attributes, "self_peer_id", ""), "")
+_source_oin := object.get(_subject_attributes, "self_peer_id", "")
 _pulled_participants := object.get(data.entities, "dvtp_participant", {}) if {
 	data.entities
 }
@@ -118,7 +113,7 @@ _wrong_source := {p |
 	some p in _counterparties
 	_parties[p]
 	object.get(_parties[p], "active", false) == true
-	not _source in object.get(_parties[p], "allowed_sources", [])
+	not _source_oin in object.get(_parties[p], "allowed_source_oins", [])
 }
 
 # --- checks -----------------------------------------------------------
@@ -132,6 +127,7 @@ _well_formed if {
 	input.action.id == "autosign_contract"
 	input.resource.type == "contract"
 	is_string(input.subject.attributes.self_peer_id)
+	input.subject.attributes.self_peer_id != ""
 	is_array(input.subject.attributes.peer_ids)
 	is_array(input.resource.attributes.grant_types)
 }
@@ -146,12 +142,6 @@ default _has_counterparty := false
 
 _has_counterparty if {
 	count(_counterparties) > 0
-}
-
-default _source_configured := false
-
-_source_configured if {
-	_source != ""
 }
 
 default _all_known := false
@@ -175,7 +165,6 @@ _source_allowed if {
 # Ordered cascade: the first failing check names the refusal.
 _checks := [
 	{"code": "NOT_AN_AUTOSIGN_REQUEST", "ok": _well_formed},
-	{"code": "SOURCE_NOT_CONFIGURED", "ok": _source_configured},
 	{"code": "GRANT_TYPE_NOT_ALLOWED", "ok": _grant_types_allowed},
 	{"code": "NO_COUNTERPARTY", "ok": _has_counterparty},
 	{"code": "PARTY_NOT_IN_REGISTRY", "ok": _all_known},
@@ -206,6 +195,6 @@ else := {
 	"context": {"granted": [{
 		"rule": "FSC_AUTOSIGN_ADMITTED_PARTY",
 		"counterparties": sort(_counterparties),
-		"source": _source,
+		"source_oin": _source_oin,
 	}]},
 }

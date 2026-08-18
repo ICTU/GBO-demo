@@ -9,7 +9,7 @@ The register stores only:
 - the participant's 20-digit OIN;
 - its display name;
 - whether the admission is active;
-- the sources to which it is admitted.
+- the OINs of the source holders to which it is admitted.
 
 The server-rendered UI is available at `http://localhost:9415`. Compose binds
 that port to host loopback only. OpenFTV reads

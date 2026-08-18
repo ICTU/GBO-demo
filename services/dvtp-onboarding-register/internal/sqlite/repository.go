@@ -19,6 +19,8 @@ type Repository struct {
 	db *sql.DB
 }
 
+// The storage column keeps its original name so existing demo volumes can be
+// migrated in place; the domain and JSON API expose allowed_source_oins.
 const schema = `
 CREATE TABLE IF NOT EXISTS participants (
     oin TEXT PRIMARY KEY,
@@ -51,6 +53,18 @@ func Open(path string) (*Repository, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("initialize sqlite schema: %w", err)
 	}
+	if _, err := db.Exec(`
+        UPDATE participants
+        SET allowed_sources = replace(
+            replace(allowed_sources, '"belastingdienst"', '"99999999900000000200"'),
+            '"brp"', '"99999999900000000400"'
+        )
+        WHERE allowed_sources LIKE '%"belastingdienst"%'
+           OR allowed_sources LIKE '%"brp"%'
+    `); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate source keys to OINs: %w", err)
+	}
 	return &Repository{db: db}, nil
 }
 
@@ -59,7 +73,7 @@ func (r *Repository) Close() error {
 }
 
 func (r *Repository) Save(ctx context.Context, participant onboarding.Participant) error {
-	encodedSources, err := json.Marshal(participant.AllowedSources)
+	encodedSources, err := json.Marshal(participant.AllowedSourceOINs)
 	if err != nil {
 		return fmt.Errorf("encode allowed sources: %w", err)
 	}
@@ -79,7 +93,7 @@ func (r *Repository) Save(ctx context.Context, participant onboarding.Participan
 }
 
 func (r *Repository) InsertIfAbsent(ctx context.Context, participant onboarding.Participant) error {
-	encodedSources, err := json.Marshal(participant.AllowedSources)
+	encodedSources, err := json.Marshal(participant.AllowedSourceOINs)
 	if err != nil {
 		return fmt.Errorf("encode allowed sources: %w", err)
 	}
@@ -110,7 +124,7 @@ func (r *Repository) List(ctx context.Context) ([]onboarding.Participant, error)
 		if err := rows.Scan(&participant.OIN, &participant.Name, &participant.Active, &encodedSources, &participant.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan participant: %w", err)
 		}
-		if err := json.Unmarshal([]byte(encodedSources), &participant.AllowedSources); err != nil {
+		if err := json.Unmarshal([]byte(encodedSources), &participant.AllowedSourceOINs); err != nil {
 			return nil, fmt.Errorf("decode sources for %s: %w", participant.OIN, err)
 		}
 		participants = append(participants, participant)

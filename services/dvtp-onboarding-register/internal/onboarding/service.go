@@ -13,23 +13,23 @@ import (
 var validOIN = regexp.MustCompile(`^[0-9]{20}$`)
 
 var availableSources = []Source{
-	{Key: "belastingdienst", Name: "Belastingdienst"},
-	{Key: "brp", Name: "BRP (RvIG)"},
+	{OIN: "99999999900000000200", Name: "Belastingdienst"},
+	{OIN: "99999999900000000400", Name: "BRP (RvIG)"},
 }
 
 // Source is a source holder to which a private party can be admitted.
 type Source struct {
-	Key  string
+	OIN  string
 	Name string
 }
 
 // Participant is a private party's admission state.
 type Participant struct {
-	OIN            string   `json:"oin"`
-	Name           string   `json:"name"`
-	Active         bool     `json:"active"`
-	AllowedSources []string `json:"allowed_sources"`
-	UpdatedAt      string   `json:"-"`
+	OIN               string   `json:"oin"`
+	Name              string   `json:"name"`
+	Active            bool     `json:"active"`
+	AllowedSourceOINs []string `json:"allowed_source_oins"`
+	UpdatedAt         string   `json:"-"`
 }
 
 // Repository is the persistence port needed by the onboarding use cases.
@@ -75,16 +75,16 @@ func (s *Service) ToggleActive(ctx context.Context, oin string) (bool, error) {
 func (s *Service) SeedDemo(ctx context.Context) error {
 	seed := []Participant{
 		{
-			OIN:            "99999999900000000300",
-			Name:           "Demo Hypotheekverlener BV",
-			Active:         true,
-			AllowedSources: []string{"belastingdienst"},
+			OIN:               "99999999900000000300",
+			Name:              "Demo Hypotheekverlener BV",
+			Active:            true,
+			AllowedSourceOINs: []string{"99999999900000000200"},
 		},
 		{
-			OIN:            "99999999900000000500",
-			Name:           "Demo Incassobureau BV",
-			Active:         false,
-			AllowedSources: []string{"belastingdienst"},
+			OIN:               "99999999900000000500",
+			Name:              "Demo Incassobureau BV",
+			Active:            false,
+			AllowedSourceOINs: []string{"99999999900000000200"},
 		},
 	}
 	for _, participant := range seed {
@@ -111,21 +111,21 @@ func normalizeParticipant(participant Participant) (Participant, error) {
 
 	allowed := make(map[string]bool, len(availableSources))
 	for _, source := range availableSources {
-		allowed[source.Key] = true
+		allowed[source.OIN] = true
 	}
-	unique := make(map[string]bool, len(participant.AllowedSources))
-	for _, source := range participant.AllowedSources {
-		if !allowed[source] {
-			return Participant{}, fmt.Errorf("unknown source %q", source)
+	unique := make(map[string]bool, len(participant.AllowedSourceOINs))
+	for _, sourceOIN := range participant.AllowedSourceOINs {
+		if !allowed[sourceOIN] {
+			return Participant{}, fmt.Errorf("unknown source OIN %q", sourceOIN)
 		}
-		unique[source] = true
+		unique[sourceOIN] = true
 	}
-	participant.AllowedSources = participant.AllowedSources[:0]
-	for source := range unique {
-		participant.AllowedSources = append(participant.AllowedSources, source)
+	participant.AllowedSourceOINs = participant.AllowedSourceOINs[:0]
+	for sourceOIN := range unique {
+		participant.AllowedSourceOINs = append(participant.AllowedSourceOINs, sourceOIN)
 	}
-	sort.Strings(participant.AllowedSources)
-	if len(participant.AllowedSources) == 0 {
+	sort.Strings(participant.AllowedSourceOINs)
+	if len(participant.AllowedSourceOINs) == 0 {
 		return Participant{}, errors.New("select at least one source")
 	}
 	return participant, nil

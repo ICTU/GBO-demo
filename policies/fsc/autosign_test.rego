@@ -21,12 +21,12 @@ participants := {
 	hv: {
 		"name": "Demo Hypotheekverlener BV",
 		"active": true,
-		"allowed_sources": ["belastingdienst"],
+		"allowed_source_oins": [bd],
 	},
 	suspended: {
 		"name": "Demo Incassobureau BV",
 		"active": false,
-		"allowed_sources": ["belastingdienst"],
+		"allowed_source_oins": [bd],
 	},
 }
 
@@ -91,14 +91,14 @@ test_wrong_source_reason if {
 }
 
 test_unknown_source_reason if {
-	deny_reason(connection_for(unknown_source, hv)) == "SOURCE_NOT_CONFIGURED"
+	deny_reason(connection_for(unknown_source, hv)) == "SOURCE_NOT_ALLOWED"
 }
 
 test_allow_reports_counterparty if {
 	resp := decision_response(connection(hv))
 	resp.context.granted[0].rule == "FSC_AUTOSIGN_ADMITTED_PARTY"
 	resp.context.granted[0].counterparties == [hv]
-	resp.context.granted[0].source == "belastingdienst"
+	resp.context.granted[0].source_oin == bd
 }
 
 # --- registry -------------------------------------------------------

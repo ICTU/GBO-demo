@@ -27,13 +27,13 @@ type pageData struct {
 func NewHandler(service *onboarding.Service) http.Handler {
 	sources := service.Sources()
 	page := template.Must(template.New("index.html").Funcs(template.FuncMap{
-		"sourceName": func(key string) string {
+		"sourceName": func(oin string) string {
 			for _, source := range sources {
-				if source.Key == key {
+				if source.OIN == oin {
 					return source.Name
 				}
 			}
-			return key
+			return oin
 		},
 	}).ParseFS(webFiles, "web/index.html"))
 	staticFiles, err := fs.Sub(webFiles, "web")
@@ -75,10 +75,10 @@ func NewHandler(service *onboarding.Service) http.Handler {
 			return
 		}
 		participant := onboarding.Participant{
-			OIN:            r.FormValue("oin"),
-			Name:           r.FormValue("name"),
-			Active:         r.FormValue("active") == "on",
-			AllowedSources: r.Form["sources"],
+			OIN:               r.FormValue("oin"),
+			Name:              r.FormValue("name"),
+			Active:            r.FormValue("active") == "on",
+			AllowedSourceOINs: r.Form["source_oins"],
 		}
 		if err := service.Save(r.Context(), participant); err != nil {
 			redirectError(w, r, err.Error())

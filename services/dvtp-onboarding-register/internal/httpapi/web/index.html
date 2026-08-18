@@ -43,7 +43,7 @@
                 <td><code>{{.OIN}}</code></td>
                 <td>
                   <div class="source-list">
-                    {{range .AllowedSources}}<span>{{sourceName .}}</span>{{end}}
+                    {{range .AllowedSourceOINs}}<span>{{sourceName .}}</span>{{end}}
                   </div>
                 </td>
                 <td><span class="status {{if .Active}}active{{else}}inactive{{end}}"><i></i>{{if .Active}}Actief{{else}}Gepauzeerd{{end}}</span></td>
@@ -85,7 +85,7 @@
             <div class="checkbox-grid">
               {{range .Sources}}
               <label class="source-check">
-                <input type="checkbox" name="sources" value="{{.Key}}">
+                <input type="checkbox" name="source_oins" value="{{.OIN}}">
                 <span class="box" aria-hidden="true"></span>
                 <span>{{.Name}}</span>
               </label>

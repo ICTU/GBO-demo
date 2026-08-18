@@ -23,6 +23,6 @@ sources:
                     - keyValue: active
                       valueField: active
                       required: true
-                    - keyValue: allowed_sources
-                      valueField: allowed_sources
+                    - keyValue: allowed_source_oins
+                      valueField: allowed_source_oins
                       required: true

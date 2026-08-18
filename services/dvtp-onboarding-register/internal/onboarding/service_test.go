@@ -48,10 +48,10 @@ func TestSaveNormalizesParticipant(t *testing.T) {
 	repository := newMemoryRepository()
 	service := NewService(repository)
 	participant := Participant{
-		OIN:            "00000001234567890000",
-		Name:           " Hypotheekadvies BV ",
-		Active:         true,
-		AllowedSources: []string{"brp", "belastingdienst", "brp"},
+		OIN:               "00000001234567890000",
+		Name:              " Hypotheekadvies BV ",
+		Active:            true,
+		AllowedSourceOINs: []string{"99999999900000000400", "99999999900000000200", "99999999900000000400"},
 	}
 	if err := service.Save(t.Context(), participant); err != nil {
 		t.Fatal(err)
@@ -60,18 +60,18 @@ func TestSaveNormalizesParticipant(t *testing.T) {
 	if got.Name != "Hypotheekadvies BV" {
 		t.Fatalf("Name = %q", got.Name)
 	}
-	if want := []string{"belastingdienst", "brp"}; !reflect.DeepEqual(got.AllowedSources, want) {
-		t.Fatalf("AllowedSources = %v, want %v", got.AllowedSources, want)
+	if want := []string{"99999999900000000200", "99999999900000000400"}; !reflect.DeepEqual(got.AllowedSourceOINs, want) {
+		t.Fatalf("AllowedSourceOINs = %v, want %v", got.AllowedSourceOINs, want)
 	}
 }
 
 func TestSaveRejectsInvalidParticipant(t *testing.T) {
 	service := NewService(newMemoryRepository())
 	tests := []Participant{
-		{OIN: "123", Name: "Too short", Active: true, AllowedSources: []string{"belastingdienst"}},
-		{OIN: "00000001234567890000", Active: true, AllowedSources: []string{"belastingdienst"}},
+		{OIN: "123", Name: "Too short", Active: true, AllowedSourceOINs: []string{"99999999900000000200"}},
+		{OIN: "00000001234567890000", Active: true, AllowedSourceOINs: []string{"99999999900000000200"}},
 		{OIN: "00000001234567890000", Name: "No source", Active: true},
-		{OIN: "00000001234567890000", Name: "Unknown source", Active: true, AllowedSources: []string{"kadaster"}},
+		{OIN: "00000001234567890000", Name: "Unknown source", Active: true, AllowedSourceOINs: []string{"00000000000000000001"}},
 	}
 	for _, participant := range tests {
 		if err := service.Save(t.Context(), participant); err == nil {
