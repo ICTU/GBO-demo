@@ -1,8 +1,13 @@
 # GBO — Gemeenschappelijke Bronontsluiting
 
 This repository is a runnable reference demo for GBO. It shows how a consumer
-can request data from a source over OpenFSC, with every request evaluated by an
-OpenFTV policy before the source returns data.
+can request data from a source, normally over OpenFSC with every request
+evaluated by an OpenFTV policy before the source returns data. The EUDI demo
+also contains one deliberately unsecured HTTP source to prove that onboarding
+is not technically coupled to FSC; that source is not a security example.
+
+The unsecured source is mounted only by the local Compose setup and is not
+part of the deployable source configuration used by simulation environments.
 
 The demo contains two ways to start that request:
 
@@ -11,7 +16,7 @@ The demo contains two ways to start that request:
 - **EUDI wallet issuance** — a citizen shares a PID from a wallet and receives
   a source-backed credential.
 
-Both flows use the same core path:
+The production-oriented flows use the same core path:
 
 ```text
 consumer → FSC Outway → FSC Inway → OpenFTV PDP → source sidecar → GraphQL source
@@ -156,7 +161,8 @@ as a build argument.
 
 1. Start `make demo-full` or `make demo-eudi` and open the
    [landing page](http://localhost:9000).
-2. Select income 2024, income 2025 or the BRP/RvIG death certificate.
+2. Select income 2024, income 2025, the BRP/RvIG death certificate or the
+   explicitly labelled unsecured demo credential.
 3. Scan the newly generated QR code with the compatible test wallet.
 4. Share the PID for mock BSN `999991772`, review the credential preview and
    accept issuance.
@@ -168,11 +174,12 @@ issuance server or changing activated source metadata.
 
 ## How the demo works
 
-The DvTP and EUDI entrypoints share transport, policy evaluation, identifier
-resolution and source access. Belastingdienst and BRP/RvIG are separate FSC
-provider peers with their own metadata, data services and policies. The EUDI
-adapter contains no hard-coded source or offer catalog: active source metadata
-generates the issuance-server products and the frontend offer list.
+The DvTP and FSC-backed EUDI entrypoints share transport, policy evaluation,
+identifier resolution and source access. Belastingdienst and BRP/RvIG are
+separate logical sources with their own metadata, data services, policies and
+certificate sets; this demo publishes both through one FSC participant. The
+EUDI adapter contains no hard-coded source or offer catalog: active source
+metadata generates the issuance-server products and the frontend offer list.
 
 The demo combines production-grade components with deliberate test doubles:
 
@@ -233,7 +240,7 @@ source activation, wallet trust and cached QR sessions is in
 ## Further reading
 
 - [DvTP consent architecture and flow](docs/consent-flow.md)
-- [Source discovery and onboarding](docs/source-onboarding.md)
+- [Source configuration and onboarding](docs/source-onboarding.md)
 - [Source metadata cache and Type Metadata](docs/source-metadata-cache.md)
 - [`gbo-simple-v1` mapping profile](docs/gbo-simple-v1.md)
 - [Observability](OBSERVABILITY.md)

@@ -6,15 +6,17 @@ import (
 	"encoding/asn1"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
 
 func TestDevelopmentCAProviderBindsReaderCertificateToCurrentConfiguration(t *testing.T) {
 	registration := sourceRegistration{
-		SourceOIN: "99999999900000000200",
-		Name:      "Belastingdienst-mock",
-		Logo:      &organizationLogo{MimeType: "image/svg+xml", ImageData: "<svg/>"},
+		SourceOIN:      "99999999900000000200",
+		Name:           "Belastingdienst-mock",
+		CertificateSet: "belastingdienst",
+		Logo:           &organizationLogo{MimeType: "image/svg+xml", ImageData: "<svg/>"},
 	}
 	fixedNow := time.Date(2026, time.August, 5, 12, 0, 0, 0, time.UTC)
 	provider := newDevelopmentCAProvider(t.TempDir(), "https://issuance.example")
@@ -23,6 +25,9 @@ func TestDevelopmentCAProviderBindsReaderCertificateToCurrentConfiguration(t *te
 	first, err := provider.Provision(registration)
 	if err != nil {
 		t.Fatalf("provision first certificate set: %v", err)
+	}
+	if got := filepath.Base(filepath.Dir(first.IssuerKeyReference)); got != registration.CertificateSet {
+		t.Fatalf("certificate directory = %q, want certificate set %q", got, registration.CertificateSet)
 	}
 	firstReader := loadCertificateArtifact(t, first.ReaderKeyReference, first.ReaderCertReference)
 	assertCriticalEKU(t, firstReader, readerEKUOID)

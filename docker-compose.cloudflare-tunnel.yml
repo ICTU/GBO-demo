@@ -19,6 +19,7 @@
 services:
   eudi-tunnel:
     image: cloudflare/cloudflared:latest
+    profiles: [eudi, full]
     command:
       - tunnel
       - --no-autoupdate

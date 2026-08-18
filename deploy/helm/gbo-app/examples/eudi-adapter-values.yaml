@@ -1,0 +1,28 @@
+image:
+  repository: ghcr.io/ictu/gbo-demo/eudi-adapter
+  tag: latest
+
+containerPort: 4009
+healthPath: /health
+
+env:
+  - name: PORT
+    value: "4009"
+  - name: FSC_OUTWAY_URL
+    value: http://fsc-outway:8080
+  - name: ISSUER_OIN
+    value: "99999999900000000100"
+  - name: SOURCE_ACTIVATIONS_PATH
+    value: /state/active
+  - name: TYPE_METADATA_STORE_PATH
+    value: /state/type-metadata
+
+volumeMounts:
+  - name: onboarding-state
+    mountPath: /state
+    readOnly: true
+
+volumes:
+  - name: onboarding-state
+    persistentVolumeClaim:
+      claimName: gbo-onboarding-state

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"math"
 	"strconv"
 	"time"
@@ -17,17 +16,6 @@ import (
 )
 
 const sourceMetadataMediaType = "application/json"
-
-// sourceMetadataConfig is resolved from an active onboarding record. Endpoint
-// and transport choices are deliberately not separate deployment settings.
-type sourceMetadataConfig struct {
-	URL               string
-	MetadataTransport string
-	MetadataGrantHash string
-	DataTransport     string
-	ExpectedOIN       string
-	TypeID            string
-}
 
 type sourceMetadataDocument struct {
 	SchemaVersion string                     `json:"schema_version"`
@@ -108,6 +96,7 @@ type mappingRule = gbosimplev1.Rule
 
 type activeSourceMetadata struct {
 	Version      string
+	SourceID     string
 	SourceOIN    string
 	TypeID       string
 	Definition   sourceAttestationDefinition
@@ -118,42 +107,6 @@ type activeSourceMetadata struct {
 
 type sourceMetadataRuntime interface {
 	current(now time.Time) (*activeSourceMetadata, error)
-}
-
-func parseSourceMetadataPayload(payload []byte, cfg sourceMetadataConfig) (*activeSourceMetadata, sourceMetadataDocument, error) {
-	var document sourceMetadataDocument
-	decoder := json.NewDecoder(bytes.NewReader(payload))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&document); err != nil {
-		return nil, sourceMetadataDocument{}, fmt.Errorf("parse source metadata payload: %w", err)
-	}
-	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		return nil, sourceMetadataDocument{}, fmt.Errorf("parse source metadata payload: trailing JSON data")
-	}
-	if document.SourceOIN != cfg.ExpectedOIN {
-		return nil, sourceMetadataDocument{}, fmt.Errorf("source metadata OIN %q does not match registered OIN %q", document.SourceOIN, cfg.ExpectedOIN)
-	}
-	if document.SchemaVersion != "1.0" {
-		return nil, sourceMetadataDocument{}, fmt.Errorf("unsupported source metadata schema_version %q", document.SchemaVersion)
-	}
-	if document.Capabilities.EUDI == nil || document.Capabilities.EUDI.Version != "1.0" {
-		return nil, sourceMetadataDocument{}, fmt.Errorf("source metadata has no supported EUDI capability")
-	}
-	for _, definition := range document.eudiAttestations() {
-		if definition.TypeID != cfg.TypeID {
-			continue
-		}
-		if err := validateSourceAttestation(definition); err != nil {
-			return nil, sourceMetadataDocument{}, fmt.Errorf("attestation %q: %w", cfg.TypeID, err)
-		}
-		if err := validateGraphQLEndpoint(definition.GraphQL, cfg.DataTransport); err != nil {
-			return nil, sourceMetadataDocument{}, fmt.Errorf("attestation %q graphql.endpoint: %w", cfg.TypeID, err)
-		}
-		return &activeSourceMetadata{
-			Version: document.Version, SourceOIN: cfg.ExpectedOIN, TypeID: cfg.TypeID, Definition: definition,
-		}, document, nil
-	}
-	return nil, sourceMetadataDocument{}, fmt.Errorf("source metadata has no attestation %q", cfg.TypeID)
 }
 
 func validateSourceAttestation(definition sourceAttestationDefinition) error {
@@ -316,11 +269,11 @@ func validateGraphQLEndpoint(graphql sourceGraphQL, transport string) error {
 			return fmt.Errorf("service_reference is required and must be valid for FSC transport")
 		}
 		return validateAbsoluteURLPath(graphql.Endpoint)
-	case sourceTransportHTTPSMTLS:
+	case sourceTransportUnsecured:
 		if graphql.ServiceReference != "" {
-			return fmt.Errorf("service_reference is not allowed for https-mtls transport")
+			return fmt.Errorf("service_reference is not allowed for unsecured transport")
 		}
-		return validateAbsoluteHTTPSEndpoint(graphql.Endpoint)
+		return validateAbsoluteUnsecuredEndpoint(graphql.Endpoint)
 	default:
 		return fmt.Errorf("unsupported data transport %q", transport)
 	}
