@@ -33,7 +33,7 @@ func TestPortalGiveThenList(t *testing.T) {
 	}))
 	defer bsnk.Close()
 
-	// Stub consent-register: POST /consents creates, GET /consents?pi= lists.
+	// Stub consent-register: POST creates a token; GET lists by subject_ref.
 	var (
 		regMu   sync.Mutex
 		created []map[string]any
@@ -44,18 +44,19 @@ func TestPortalGiveThenList(t *testing.T) {
 		case r.Method == http.MethodPost && r.URL.Path == "/consents":
 			var body map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&body)
+			delete(body, "pi") // transient signing input is not persisted
 			body["consent_id"] = "c-1"
 			body["status"] = "ACTIVE"
 			regMu.Lock()
 			created = append(created, body)
 			regMu.Unlock()
-			_, _ = w.Write([]byte(`{"consent_id":"c-1"}`))
+			_, _ = w.Write([]byte(`{"consent_id":"c-1","consent_token":"signed-consent-token"}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/consents":
-			pi := r.URL.Query().Get("pi")
+			subjectRef := r.URL.Query().Get("subject_ref")
 			regMu.Lock()
 			out := make([]map[string]any, 0, len(created))
 			for _, rec := range created {
-				if rec["pi"] == pi {
+				if rec["subject_ref"] == subjectRef {
 					out = append(out, rec)
 				}
 			}
@@ -129,22 +130,13 @@ func TestPortalGiveThenList(t *testing.T) {
 	if give.ConsentID != "c-1" {
 		t.Errorf("consent_id = %q, want c-1", give.ConsentID)
 	}
-	if give.PI != "PI-xyz" {
-		t.Errorf("pi = %q, want PI-xyz", give.PI)
+	if give.ConsentToken != "signed-consent-token" {
+		t.Errorf("consent_token = %q", give.ConsentToken)
 	}
-	// The dev-portal renders one card per upstream call: pseudonymise, then
-	// create. Guards against the call log quietly gaining or losing entries.
-	if len(give.APICalls) != 2 {
-		t.Fatalf("api_calls = %d, want 2: %+v", len(give.APICalls), give.APICalls)
-	}
-	for i, want := range []string{"Pseudonymize BSN", "Create Consent"} {
-		if give.APICalls[i].Label != want {
-			t.Errorf("api_calls[%d].Label = %q, want %q", i, give.APICalls[i].Label, want)
-		}
-		if give.APICalls[i].Status != http.StatusOK {
-			t.Errorf("api_calls[%d].Status = %d, want 200", i, give.APICalls[i].Status)
-		}
-	}
+	// The dev-portal renders one card per upstream call: recipient pseudonym,
+	// portal subject reference, then create. Guards against the call log quietly
+	// gaining or losing entries.
+	assertPrivateAPICalls(t, give.APICalls)
 	// The register must never have seen the plain BSN.
 	regMu.Lock()
 	sent, _ := json.Marshal(created)
@@ -177,6 +169,24 @@ func TestPortalGiveThenList(t *testing.T) {
 	}
 	if list[0]["effective_status"] != "active" {
 		t.Errorf("effective_status = %v, want active", list[0]["effective_status"])
+	}
+}
+
+func assertPrivateAPICalls(t *testing.T, calls []consent.APICall) {
+	t.Helper()
+	if len(calls) != 3 {
+		t.Fatalf("api_calls = %d, want 3: %+v", len(calls), calls)
+	}
+	for i, want := range []string{"Pseudonymize BSN", "Pseudonymize BSN", "Create Consent"} {
+		if calls[i].Label != want {
+			t.Errorf("api_calls[%d].Label = %q, want %q", i, calls[i].Label, want)
+		}
+		if calls[i].Status != http.StatusOK {
+			t.Errorf("api_calls[%d].Status = %d, want 200", i, calls[i].Status)
+		}
+		if len(calls[i].RequestBody) != 0 || len(calls[i].ResponseBody) != 0 {
+			t.Errorf("api_calls[%d] exposed private request/response bodies", i)
+		}
 	}
 }
 

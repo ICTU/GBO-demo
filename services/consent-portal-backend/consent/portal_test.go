@@ -26,6 +26,11 @@ func fakePI(bsn BSN) PI {
 	return PI("PI-" + hex.EncodeToString(sum[:8]))
 }
 
+func fakeSubjectRef(bsn BSN, recipientOIN string) SubjectRef {
+	sum := sha256.Sum256([]byte("subject-ref|" + string(bsn) + "|" + recipientOIN))
+	return SubjectRef("EP-" + hex.EncodeToString(sum[:8]))
+}
+
 // testPortalOIN stands in for the portal's own OIN, which main supplies in
 // production.
 const testPortalOIN = "00000000000000000002"
@@ -50,7 +55,7 @@ func (f *fakePseudo) Pseudonymize(_ context.Context, bsn BSN, recipientOIN strin
 	}
 	p := f.pseudonym
 	if p == "" {
-		p = "EP-" + string(bsn)
+		p = string(fakeSubjectRef(bsn, recipientOIN))
 	}
 	// PI is deterministic per BSN and independent of the recipient.
 	return Pseudonyms{Pseudonym: p, PI: fakePI(bsn)}, nil
@@ -75,10 +80,11 @@ func (m *memStore) Create(_ context.Context, d Draft) (Record, error) {
 	id := "c-" + string(rune('0'+m.seq))
 	m.created = append(m.created, d)
 	rec := Record{
-		ID:      id,
-		Subject: d.Subject,
-		Status:  "ACTIVE",
-		Raw:     map[string]any{"consent_id": id, "pi": string(d.Subject), "status": "ACTIVE"},
+		ID:         id,
+		SubjectRef: d.SubjectRef,
+		Token:      "signed-consent-token",
+		Status:     "ACTIVE",
+		Raw:        map[string]any{"consent_id": id, "subject_ref": string(d.SubjectRef), "status": "ACTIVE"},
 	}
 	if d.ValiditySeconds > 0 {
 		rec.ValidUntil = time.Now().Add(time.Duration(d.ValiditySeconds) * time.Second)
@@ -87,12 +93,12 @@ func (m *memStore) Create(_ context.Context, d Draft) (Record, error) {
 	return rec, nil
 }
 
-func (m *memStore) ListBySubject(_ context.Context, subject PI) ([]Record, error) {
+func (m *memStore) ListBySubject(_ context.Context, subject SubjectRef) ([]Record, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Record
 	for _, r := range m.recs {
-		if r.Subject == subject {
+		if r.SubjectRef == subject {
 			out = append(out, r)
 		}
 	}
@@ -246,7 +252,8 @@ func TestListAnnotatesExpiredAgainstInjectedClock(t *testing.T) {
 	}
 }
 
-// A citizen must never see another citizen's consents: isolation is by PI.
+// A citizen must never see another citizen's consents: isolation is by the
+// portal-specific subject reference.
 func TestListIsolatesByCitizen(t *testing.T) {
 	p, _, _ := testPortal(t, nil)
 	ctx := context.Background()
@@ -265,8 +272,9 @@ func TestListIsolatesByCitizen(t *testing.T) {
 
 // ── The privacy invariant ─────────────────────────────────────────────────
 
-// The BSN/PI type split makes this a compile error, but assert it at runtime
-// too: nothing derived from the BSN may appear in what reaches the register.
+// The register receives PI only as transient signing material and receives a
+// portal-scoped pseudonym as its persistent subject. Plain BSN must never
+// cross the port.
 func TestBSNNeverReachesTheRegister(t *testing.T) {
 	p, bsnk, store := testPortal(t, nil)
 	const bsn = "987654321"
@@ -288,18 +296,21 @@ func TestBSNNeverReachesTheRegister(t *testing.T) {
 	if strings.Contains(string(payload), bsn) {
 		t.Fatalf("BSN leaked to the consent register: %s", payload)
 	}
-	if store.created[0].Subject != fakePI(BSN(bsn)) {
-		t.Errorf("subject = %q, want the PI", store.created[0].Subject)
+	if store.created[0].PI != fakePI(BSN(bsn)) {
+		t.Errorf("transient PI = %q, want derived PI", store.created[0].PI)
+	}
+	if store.created[0].SubjectRef != fakeSubjectRef(BSN(bsn), testPortalOIN) {
+		t.Errorf("subject_ref = %q, want portal-scoped pseudonym", store.created[0].SubjectRef)
 	}
 	// The BSN is not merely absent downstream — it did reach the one port
 	// that is allowed to see it.
-	if len(bsnk.gotBSN) != 1 || bsnk.gotBSN[0] != BSN(bsn) {
-		t.Errorf("BSNk saw %v, want [%s]", bsnk.gotBSN, bsn)
+	if len(bsnk.gotBSN) != 2 || bsnk.gotBSN[0] != BSN(bsn) || bsnk.gotBSN[1] != BSN(bsn) {
+		t.Errorf("BSNk saw %v, want two derivations for %s", bsnk.gotBSN, bsn)
 	}
 }
 
 // Pseudonymisation must use the dienstverlener as recipient when granting,
-// and the portal's own OIN when the portal needs the PI for itself.
+// and the portal's own OIN for the persistent subject reference.
 func TestRecipientOINPerFlow(t *testing.T) {
 	p, bsnk, _ := testPortal(t, nil)
 	ctx := context.Background()
@@ -310,8 +321,8 @@ func TestRecipientOINPerFlow(t *testing.T) {
 	if _, err := p.ListConsents(ctx, BSN("111111111")); err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if got := bsnk.gotOIN; len(got) != 2 || got[0] != "DV-OIN" || got[1] != testPortalOIN {
-		t.Errorf("recipient OINs = %v, want [DV-OIN %s]", got, testPortalOIN)
+	if got := bsnk.gotOIN; len(got) != 3 || got[0] != "DV-OIN" || got[1] != testPortalOIN || got[2] != testPortalOIN {
+		t.Errorf("recipient OINs = %v, want [DV-OIN %s %s]", got, testPortalOIN, testPortalOIN)
 	}
 }
 

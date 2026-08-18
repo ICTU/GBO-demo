@@ -25,7 +25,7 @@ func (c Client) Pseudonymize(ctx context.Context, bsn consent.BSN, recipientOIN 
 		Pseudonym string `json:"pseudonym"`
 		PI        string `json:"pi"`
 	}
-	_, err := c.Caller.Do(ctx, "Pseudonymize BSN", http.MethodPost, c.Base+"/pseudonymize",
+	_, err := c.Caller.DoPrivate(ctx, "Pseudonymize BSN", http.MethodPost, c.Base+"/pseudonymize",
 		map[string]any{"bsn": string(bsn), "recipient_oin": recipientOIN}, &out)
 	if err != nil {
 		return consent.Pseudonyms{}, err

@@ -128,12 +128,34 @@ contracts and generated configuration in the required order.
 1. Open the [consent portal](http://localhost:9002) and sign in with a mock
    citizen from `services/graphql-server/mockdata/citizens.json`.
 2. Grant a consumer consent for a scope such as `bd:ib:2025`.
-3. Open the [consumer mock](http://localhost:9001), enter the consent ID and
-   run the query.
+3. The portal returns a signed consent token to the
+   [consumer mock](http://localhost:9001), which immediately runs the query.
 4. Open the [developer portal](http://localhost:9003) to inspect the policy
    decision, trace and FSC transaction.
 5. Revoke the consent and repeat the query. The PDP now denies it with
    `CONSENT_WITHDRAWN`.
+
+See [the DvTP consent architecture and sequence diagrams](docs/consent-flow.md)
+for the component boundaries and the grant, use and revocation flows.
+
+`S01` is the architecture role identifier used in the demo diagrams for the
+consent-register; it is not a separate service. The demo consent token is a
+bearer JWT. The consent-register generates an ephemeral P-256 key
+when `CONSENT_SIGNING_KEY_PATH` is empty, matching its default in-memory
+consent store. A persistent deployment must provide a stable PKCS#8 or SEC1
+P-256 private key and set an explicit `CONSENT_SIGNING_KEY_ID`. The demo JWKS
+exposes only the current key; production rotation must retain old public keys
+until their tokens expire. Production hardening should also shorten the token
+lifetime and bind proof of possession
+to the FSC/mTLS identity (for example with a confirmation claim); the current
+explicit `dienstverlener_oin` check prevents cross-consumer use but does not
+make a stolen bearer token non-replayable by that same consumer.
+
+Because the token returns through the browser, the consent portal only accepts
+`http` or `https` return URLs whose exact origin occurs in
+`VITE_ALLOWED_RETURN_ORIGINS` (comma-separated). Compose derives the demo value
+from `DIENSTVERLENER_PUBLIC_URL`; production images must supply the same value
+as a build argument.
 
 ### EUDI wallet issuance
 
@@ -217,6 +239,7 @@ source activation, wallet trust and cached QR sessions is in
 
 ## Further reading
 
+- [DvTP consent architecture and flow](docs/consent-flow.md)
 - [Source configuration and onboarding](docs/source-onboarding.md)
 - [Source metadata cache and Type Metadata](docs/source-metadata-cache.md)
 - [`gbo-simple-v1` mapping profile](docs/gbo-simple-v1.md)

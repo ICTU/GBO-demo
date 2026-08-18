@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { demoSessionHeader } from '../lib/demoSession'
 
@@ -197,6 +197,13 @@ export default function Return() {
   const [params] = useSearchParams()
   const status = params.get('status')
   const consentId = params.get('consent_id')
+  const [consentToken] = useState(() =>
+    new URLSearchParams(window.location.hash.slice(1)).get('consent_token'))
+  useLayoutEffect(() => {
+    if (consentToken) {
+      window.history.replaceState(null, '', window.location.pathname + window.location.search)
+    }
+  }, [consentToken])
   const denied = status === 'denied'
 
   const [phase, setPhase] = useState(0)
@@ -208,7 +215,7 @@ export default function Return() {
   // runQuery performs the fetch; when `quick=true` we skip the UX loading steps
   // (used for the Refresh button after a previous successful response).
   const runQuery = (quick: boolean) => {
-    if (!consentId) return
+    if (!consentToken) return
     setFetchError(null)
     if (!quick) {
       setPhase(0)
@@ -229,7 +236,7 @@ export default function Return() {
     fetch('/api/dvtp/query', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...demoSessionHeader() },
-      body: JSON.stringify({ consent_id: consentId }),
+      body: JSON.stringify({ consent_token: consentToken }),
       signal: controller.signal,
     })
       .then((r) => r.json())
@@ -255,11 +262,11 @@ export default function Return() {
   }
 
   useEffect(() => {
-    if (denied || !consentId || startedRef.current) return
+    if (denied || !consentId || !consentToken || startedRef.current) return
     startedRef.current = true
     runQuery(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [denied, consentId])
+  }, [denied, consentId, consentToken])
 
   return (
     <div className="hb-shell">
@@ -275,8 +282,8 @@ export default function Return() {
       <main className="hb-return-main">
         {denied ? (
           <Denied />
-        ) : !consentId ? (
-          <ErrorPanel reason="geen consent-id ontvangen" />
+        ) : !consentId || !consentToken ? (
+          <ErrorPanel reason="geen geldige consent-context ontvangen" />
         ) : fetchError ? (
           <ErrorPanel
             reason={`netwerkfout: ${fetchError}`}

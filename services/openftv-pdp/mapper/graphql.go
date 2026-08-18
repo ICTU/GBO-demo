@@ -21,9 +21,12 @@ package mapping
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net/http"
 	"net/url"
 	"os"
@@ -32,13 +35,19 @@ import (
 	"sync"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/vektah/gqlparser/v2/ast"
 	"github.com/vektah/gqlparser/v2/parser"
 
 	"gitlab.com/digilab.overheid.nl/ecosystem/ftv/open-ftv/eam/models"
 )
 
-const gqlMaxDepth = 64
+const (
+	gqlMaxDepth         = 64
+	consentClockSkew    = 30 * time.Second
+	consentJWKSCacheTTL = 5 * time.Minute
+	consentJWKSMaxStale = time.Hour
+)
 
 // GraphQLToContext detects a GraphQL body in the action attributes and
 // enriches the context. Bodies that do not decode as a GraphQL request
@@ -97,8 +106,10 @@ func GraphQLToContext(parc *models.PARC, opts ...Option) *models.PARC {
 			action.Attributes().AddAttributeKV(models.AttrBody, string(newBody))
 		}
 		return &models.PARC{Principal: parc.Principal, Action: action, Resource: parc.Resource, Context: ctx}
+	} else if flow == "dvtp:query" {
+		ctx.AddAttributeKV("pip", map[string]any{"consent": fetchConsent(headers)})
 	} else {
-		ctx.AddAttributeKV("pip", map[string]any{"consent": fetchConsent(headers, variables, scope)})
+		ctx.AddAttributeKV("pip", map[string]any{"consent": invalidConsent("flow is not dvtp:query")})
 	}
 
 	return &models.PARC{
@@ -199,59 +210,230 @@ func substituteValue(v any, from, to string) any {
 
 // ── Consent PIP (per-request, fail-closed) ─────────────────────────────────
 
-// fetchConsent retrieves the ACTIVE consent for (PI, scope) from the
-// consent-register. Per-request so a revoke is effective immediately
-// (the PIP pull-config alternative was both stale and broken upstream —
-// the in-memory attribute store's CAS rejects complex valueAsIs values).
-// Fail-soft: any error yields exists=false → CONSENT_NOT_FOUND.
-func fetchConsent(headers map[string]string, variables map[string]any, scope string) map[string]any {
-	notFound := map[string]any{"exists": false}
+type consentClaims struct {
+	ConsentID        string   `json:"consent_id"`
+	PI               string   `json:"pi"`
+	Scopes           []string `json:"scopes"`
+	DienstverlenrOIN string   `json:"dienstverlener_oin"`
+	ValidUntil       string   `json:"valid_until"`
+	jwt.RegisteredClaims
+}
 
-	pi, _ := variables["bsn"].(string)
-	if pi == "" {
-		return notFound
-	}
-	u := consentURL() + "/consents?pi=" + url.QueryEscape(pi) + "&scope=" + url.QueryEscape(scope)
+type jwkSet struct {
+	Keys []struct {
+		KTY string `json:"kty"`
+		CRV string `json:"crv"`
+		Alg string `json:"alg"`
+		Kid string `json:"kid"`
+		X   string `json:"x"`
+		Y   string `json:"y"`
+	} `json:"keys"`
+}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+func invalidConsent(reason string) map[string]any {
+	return map[string]any{
+		"context_valid":    false,
+		"status_available": false,
+		"exists":           false,
+		"invalid_reason":   reason,
+	}
+}
+
+// fetchConsent verifies the complete signed authorization context first and
+// then checks only the referenced consent's online status. No claim is filled
+// from a different request or an alternate consent record.
+func fetchConsent(headers map[string]string) map[string]any {
+	tokenString := headers["x-gbo-consent-token"]
+	if tokenString == "" {
+		return invalidConsent("consent token missing")
+	}
+	claims := &consentClaims{}
+	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (any, error) {
+		if token.Method != jwt.SigningMethodES256 {
+			return nil, fmt.Errorf("unexpected consent signing algorithm")
+		}
+		if typ, _ := token.Header["typ"].(string); typ != "gbo-consent+jwt" {
+			return nil, fmt.Errorf("unexpected consent token type")
+		}
+		kid, _ := token.Header["kid"].(string)
+		if kid == "" {
+			return nil, fmt.Errorf("consent signing key id missing")
+		}
+		return consentSigningKey(kid)
+	},
+		jwt.WithValidMethods([]string{jwt.SigningMethodES256.Alg()}),
+		jwt.WithIssuer(consentIssuer()),
+		jwt.WithAudience(consentAudience()),
+		jwt.WithExpirationRequired(),
+		jwt.WithIssuedAt(),
+		jwt.WithLeeway(consentClockSkew),
+	)
+	if err != nil || token == nil || !token.Valid {
+		return invalidConsent("consent token verification failed")
+	}
+	if claims.ConsentID == "" || claims.PI == "" || claims.Scopes == nil || claims.DienstverlenrOIN == "" ||
+		claims.ValidUntil == "" || claims.ID == "" || claims.IssuedAt == nil || claims.NotBefore == nil || claims.ExpiresAt == nil {
+		return invalidConsent("required consent claims missing")
+	}
+	validUntil := claims.ValidUntil
+	parsedValidUntil, validUntilErr := time.Parse(time.RFC3339, validUntil)
+	if validUntilErr != nil || claims.ExpiresAt == nil || !parsedValidUntil.Equal(claims.ExpiresAt.Time) {
+		return invalidConsent("valid_until does not match exp")
+	}
+	status, found, err := fetchConsentStatus(claims.ConsentID)
 	if err != nil {
-		return notFound
+		return map[string]any{
+			"context_valid":    true,
+			"status_available": false,
+			"exists":           false,
+			"consent_id":       claims.ConsentID,
+		}
 	}
-	resp, err := consentClient.Do(req)
-	if err != nil {
-		return notFound
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return notFound
-	}
-	var list []struct {
-		Status     string   `json:"status"`
-		Scopes     []string `json:"scopes"`
-		ValidUntil string   `json:"valid_until"`
-		PI         string   `json:"pi"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil || len(list) == 0 {
-		return notFound
-	}
-	// Prefer an ACTIVE consent; otherwise report the (revoked) record so
-	// the policy can deny with CONSENT_WITHDRAWN instead of NOT_FOUND.
-	c := list[0]
-	for _, item := range list {
-		if item.Status == "ACTIVE" {
-			c = item
-			break
+	if found && status != "ACTIVE" && status != "REVOKED" {
+		return map[string]any{
+			"context_valid":    true,
+			"status_available": false,
+			"exists":           false,
+			"consent_id":       claims.ConsentID,
 		}
 	}
 	return map[string]any{
-		"exists":         true,
-		"withdrawn":      c.Status == "REVOKED",
-		"granted_scopes": c.Scopes,
-		"valid_until":    c.ValidUntil,
-		"pi":             c.PI,
+		"context_valid":      true,
+		"status_available":   true,
+		"exists":             found,
+		"withdrawn":          found && status == "REVOKED",
+		"granted_scopes":     claims.Scopes,
+		"valid_until":        validUntil,
+		"pi":                 claims.PI,
+		"dienstverlener_oin": claims.DienstverlenrOIN,
+		"consent_id":         claims.ConsentID,
+		"jti":                claims.ID,
 	}
+}
+
+type consentKeyCache struct {
+	mu         sync.Mutex
+	source     string
+	keys       map[string]*ecdsa.PublicKey
+	freshUntil time.Time
+	staleUntil time.Time
+	now        func() time.Time
+}
+
+var cachedConsentKeys = consentKeyCache{now: time.Now}
+
+// consentSigningKey keeps known verification keys local to the PDP. An
+// unknown kid always triggers a refresh so key rotation takes effect without
+// waiting for the TTL. During a brief JWKS outage a previously verified key
+// remains usable for a bounded period; the separate online consent-status
+// check still fails closed if the consent register itself is unavailable.
+func consentSigningKey(kid string) (*ecdsa.PublicKey, error) {
+	cache := &cachedConsentKeys
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+
+	source := consentURL()
+	now := cache.now()
+	if cache.source != source {
+		cache.source = source
+		cache.keys = nil
+		cache.freshUntil = time.Time{}
+		cache.staleUntil = time.Time{}
+	}
+
+	known := cache.keys[kid]
+	if known != nil && now.Before(cache.freshUntil) {
+		return known, nil
+	}
+
+	keys, err := fetchConsentKeys(source)
+	if err != nil {
+		if known != nil && now.Before(cache.staleUntil) {
+			return known, nil
+		}
+		return nil, fmt.Errorf("consent verification keys unavailable: %w", err)
+	}
+
+	cache.keys = keys
+	cache.freshUntil = now.Add(consentJWKSCacheTTL)
+	cache.staleUntil = now.Add(consentJWKSMaxStale)
+	key := keys[kid]
+	if key == nil {
+		return nil, fmt.Errorf("unknown consent signing key")
+	}
+	return key, nil
+}
+
+func fetchConsentKeys(source string) (map[string]*ecdsa.PublicKey, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, source+"/.well-known/jwks.json", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := consentClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("jwks status %d", resp.StatusCode)
+	}
+	var set jwkSet
+	if err := json.NewDecoder(resp.Body).Decode(&set); err != nil {
+		return nil, err
+	}
+	keys := make(map[string]*ecdsa.PublicKey, len(set.Keys))
+	for _, key := range set.Keys {
+		if key.KTY != "EC" || key.CRV != "P-256" || key.Alg != "ES256" || key.Kid == "" {
+			continue
+		}
+		x, errX := base64.RawURLEncoding.DecodeString(key.X)
+		y, errY := base64.RawURLEncoding.DecodeString(key.Y)
+		if errX != nil || errY != nil {
+			continue
+		}
+		pub := &ecdsa.PublicKey{Curve: elliptic.P256(), X: new(big.Int).SetBytes(x), Y: new(big.Int).SetBytes(y)}
+		if pub.Curve.IsOnCurve(pub.X, pub.Y) {
+			keys[key.Kid] = pub
+		}
+	}
+	if len(keys) == 0 {
+		return nil, fmt.Errorf("jwks contains no supported keys")
+	}
+	return keys, nil
+}
+
+func fetchConsentStatus(consentID string) (string, bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	u := consentURL() + "/consents/" + url.PathEscape(consentID) + "/status"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return "", false, err
+	}
+	resp, err := consentClient.Do(req)
+	if err != nil {
+		return "", false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return "", false, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", false, fmt.Errorf("consent status %d", resp.StatusCode)
+	}
+	var status struct {
+		ConsentID string `json:"consent_id"`
+		Status    string `json:"status"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		return "", false, err
+	}
+	if status.ConsentID != consentID || status.Status == "" {
+		return "", false, fmt.Errorf("invalid consent status response")
+	}
+	return status.Status, true, nil
 }
 
 var consentClient = &http.Client{Timeout: 2 * time.Second}
@@ -261,6 +443,20 @@ func consentURL() string {
 		return u
 	}
 	return "http://consent-register:4002"
+}
+
+func consentIssuer() string {
+	if value := os.Getenv("GBO_CONSENT_ISSUER"); value != "" {
+		return value
+	}
+	return "https://consent-register.gbo.test"
+}
+
+func consentAudience() string {
+	if value := os.Getenv("GBO_CONSENT_AUDIENCE"); value != "" {
+		return value
+	}
+	return "gbo:dvtp:pdp"
 }
 
 // decodeGraphQLBody accepts the body as a plain JSON string (FSC-Inway

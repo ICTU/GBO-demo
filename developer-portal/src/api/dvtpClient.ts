@@ -15,7 +15,7 @@ export async function useQuery(payload: UsePayload, traceparent?: string): Promi
       ...tpHeader,
     },
     body: JSON.stringify({
-      consent_id: payload.consent_id,
+      consent_token: payload.consent_token,
       scope_id: payload.scope_id,
       belastingjaren: payload.belastingjaren,
       fields: payload.fields,

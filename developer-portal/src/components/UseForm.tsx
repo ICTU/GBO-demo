@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import type { HistoryRun, IssuancePayload, UsePayload } from '../types'
+import { consentTokenFor } from '../util/consentTokens'
 
 type Props = {
   payload: UsePayload
@@ -19,7 +20,7 @@ const DEFAULT_FIELDS = [
 // are wrapped in an `... on AangifteIH` fragment, and the year filter
 // travels inside the query so the PDP can enforce per-year consent. The
 // query always contains `$bsn: BSN!` — the PI gets filled in by the backend
-// after consent-lookup and travels to HV-Outway as `variables.bsn`. The
+// from the consent-token and travels to HV-Outway as `variables.bsn`. The
 // sidecar at the source resolves PI→BSN (subject_id_type=pseudonym in the
 // grant-property).
 function previewQuery(fields: string[], jaren: number[]): string {
@@ -64,6 +65,7 @@ export default function UseForm({ payload, setPayload, history }: Props) {
     setPayload({
       ...payload,
       consent_id: consentId,
+      consent_token: consentTokenFor(consentId),
       scope_id: scopes[0] ?? payload.scope_id,
       belastingjaren: years.length > 0 ? years : payload.belastingjaren,
     })
@@ -99,6 +101,18 @@ export default function UseForm({ payload, setPayload, history }: Props) {
       </div>
 
       <div className="field">
+        <label htmlFor="ctok">Gesigneerde consent-context</label>
+        <textarea
+          id="ctok"
+          className="inp mono"
+          rows={3}
+          placeholder="eyJ..."
+          value={payload.consent_token ?? ''}
+          onChange={(e) => setPayload({ ...payload, consent_token: e.target.value.trim() })}
+        />
+      </div>
+
+      <div className="field">
         <label htmlFor="scope">Scope-ID <span className="opt">(geldig in token-claim; PDP checkt scope ⊆ consent.granted_scopes)</span></label>
         <input
           id="scope"
@@ -127,7 +141,7 @@ export default function UseForm({ payload, setPayload, history }: Props) {
 
       <div className="field">
         <label>
-          GraphQL-query <span className="opt">(auto-generated; PI wordt in `variables.bsn` gezet door dienstverlener-backend na consent-lookup)</span>
+          GraphQL-query <span className="opt">(auto-generated; PI wordt in `variables.bsn` gezet vanuit het consent-token)</span>
         </label>
         <div className="ed-wrap">
           <div className="ed-bar">
