@@ -138,8 +138,8 @@ _args := object.get(object.get(input.context, "resolved", {}), "args", {})
 # ── Context for the rules ──────────────────────────────────────────────────
 # Contains consent-PIP + resource so lib.evaluate can perform consent-checks
 # without reading input.* itself (dependency-injection style). Consent is
-# fetched per-request by the request-mapper (context.pip.consent); the EUDI
-# pid is per-request too (context.pip.pid).
+# verified and status-checked per request by the request-mapper
+# (context.pip.consent); the EUDI pid is per-request too (context.pip.pid).
 
 _ctx := {
 	"subject": input.subject,
@@ -251,6 +251,12 @@ _outcome_steps(outcome) := outcome.context.reason_admin.steps if {
 # deeper causes (no consent) before derived ones (scope/fields).
 
 _code_priority("CONSENT_NOT_FOUND") := 60
+
+_code_priority("CONSENT_CONTEXT_INVALID") := 70
+
+_code_priority("CONSENT_STATUS_UNAVAILABLE") := 69
+
+_code_priority("CONSENT_ACTOR_MISMATCH") := 68
 
 _code_priority("CONSENT_WITHDRAWN") := 50
 

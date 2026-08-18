@@ -123,12 +123,23 @@ contracts and generated configuration in the required order.
 1. Open the [consent portal](http://localhost:9002) and sign in with a mock
    citizen from `services/graphql-server/mockdata/citizens.json`.
 2. Grant a consumer consent for a scope such as `bd:ib:2025`.
-3. Open the [consumer mock](http://localhost:9001), enter the consent ID and
-   run the query.
+3. The portal returns a signed consent token to the
+   [consumer mock](http://localhost:9001), which immediately runs the query.
 4. Open the [developer portal](http://localhost:9003) to inspect the policy
    decision, trace and FSC transaction.
 5. Revoke the consent and repeat the query. The PDP now denies it with
    `CONSENT_WITHDRAWN`.
+
+The demo consent token is a bearer JWT. S01 generates an ephemeral P-256 key
+when `CONSENT_SIGNING_KEY_PATH` is empty, matching its default in-memory
+consent store. A persistent deployment must provide a stable PKCS#8 or SEC1
+P-256 private key and set an explicit `CONSENT_SIGNING_KEY_ID`. The demo JWKS
+exposes only the current key; production rotation must retain old public keys
+until their tokens expire. Production hardening should also shorten the token
+lifetime and bind proof of possession
+to the FSC/mTLS identity (for example with a confirmation claim); the current
+explicit `dienstverlener_oin` check prevents cross-consumer use but does not
+make a stolen bearer token non-replayable by that same consumer.
 
 ### EUDI wallet issuance
 

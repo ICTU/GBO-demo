@@ -8,8 +8,7 @@ const AUTO_REDIRECT_MS = 5000
 
 type StoredConsent = {
   consent_id: string
-  pseudonym: string
-  pi: string
+  consent_token: string
   scopes: string[]
   partial: boolean
 }
@@ -58,6 +57,7 @@ export default function PortaalBevestiging() {
     const url = new URL(ctx.return_url)
     url.searchParams.set('status', 'ok')
     url.searchParams.set('consent_id', consent.consent_id)
+    url.hash = new URLSearchParams({ consent_token: consent.consent_token }).toString()
     clearRedirectContext()
     clear()
     sessionStorage.removeItem('gbo.last_consent')

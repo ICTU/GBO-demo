@@ -10,7 +10,7 @@ package dvtp.gbo.rules.dvt0001
 # Semantics: this rule grants a service provider (= consumer) access to
 # income-data fields IF a valid citizen consent exists for (consumer,
 # scope, fields), the consent is not withdrawn or expired, and the query
-# carries a correct consent_id-binding.
+# carries the subject PI from that same signed consent context.
 
 rule_id := "DVT0001"
 
@@ -52,13 +52,16 @@ covers_fields := {
 spec := {
 	"rule_id": "DVT0001",
 	"consent_required": true,
+	"consent_context_required": true,
+	"consent_status_required": true,
+	"consent_actor_binding": true,
 	"consent_must_cover_scope": true,
 	# Field-coverage now comes from covers_fields above (model C). A
 	# field we do not explicitly include → the engine's closed-world
 	# default denies with NO_APPLICABLE_RULE. No separate field-axis
 	# in lib anymore.
 	# The query supplies PI in the bsn-arg (the service provider holds
-	# PI via BSNk); consent-PIP-lookup by-PI+scope fills pip.consent.pi.
+	# PI via BSNk); the verified consent token fills pip.consent.pi.
 	# Binding: the pseudonym in the query must match the pseudonym in
 	# the fetched consent — proving that this query is executed for this
 	# consent, not a different consent from the same consumer.

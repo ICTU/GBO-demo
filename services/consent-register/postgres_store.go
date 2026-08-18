@@ -15,7 +15,7 @@ const consentSchema = `
 CREATE TABLE IF NOT EXISTS consents (
     consent_id text PRIMARY KEY,
     status text NOT NULL,
-    pi text NOT NULL,
+    subject_ref text,
     dienstverlener_oin text NOT NULL,
     scopes jsonb NOT NULL,
     scope_entries jsonb NOT NULL,
@@ -24,8 +24,12 @@ CREATE TABLE IF NOT EXISTS consents (
     valid_until timestamptz NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS consents_pi_status_idx
-    ON consents (pi, status);
+ALTER TABLE consents ADD COLUMN IF NOT EXISTS subject_ref text;
+DROP INDEX IF EXISTS consents_pi_status_idx;
+ALTER TABLE consents DROP COLUMN IF EXISTS pi;
+
+CREATE INDEX IF NOT EXISTS consents_subject_ref_status_idx
+    ON consents (subject_ref, status);
 `
 
 type PostgreSQLStore struct {
@@ -90,7 +94,7 @@ func (s *PostgreSQLStore) Create(ctx context.Context, consent *Consent) error {
 		INSERT INTO consents (
 			consent_id,
 			status,
-			pi,
+			subject_ref,
 			dienstverlener_oin,
 			scopes,
 			scope_entries,
@@ -102,7 +106,7 @@ func (s *PostgreSQLStore) Create(ctx context.Context, consent *Consent) error {
 	`,
 		consent.ConsentID,
 		consent.Status,
-		consent.PI,
+		consent.SubjectRef,
 		consent.DienstverlenrOIN,
 		scopes,
 		scopeEntries,
@@ -122,7 +126,7 @@ func (s *PostgreSQLStore) List(ctx context.Context, filter ConsentFilter) ([]*Co
 		SELECT
 			consent_id,
 			status,
-			pi,
+			subject_ref,
 			dienstverlener_oin,
 			scopes,
 			scope_entries,
@@ -130,11 +134,11 @@ func (s *PostgreSQLStore) List(ctx context.Context, filter ConsentFilter) ([]*Co
 			created_at,
 			valid_until
 		FROM consents
-		WHERE ($1::text = '' OR pi = $1)
+		WHERE ($1::text = '' OR subject_ref = $1)
 		  AND ($2::text = '' OR scopes @> jsonb_build_array($2::text))
 		  AND ($3::text = '' OR status = $3)
 		ORDER BY created_at ASC
-	`, filter.PI, filter.Scope, filter.Status)
+	`, filter.SubjectRef, filter.Scope, filter.Status)
 	if err != nil {
 		return nil, fmt.Errorf("query consents: %w", err)
 	}
@@ -163,7 +167,7 @@ func (s *PostgreSQLStore) Get(ctx context.Context, consentID string) (*Consent, 
 		SELECT
 			consent_id,
 			status,
-			pi,
+			subject_ref,
 			dienstverlener_oin,
 			scopes,
 			scope_entries,
@@ -192,7 +196,7 @@ func (s *PostgreSQLStore) Revoke(ctx context.Context, consentID string) (*Consen
 		RETURNING
 			consent_id,
 			status,
-			pi,
+			subject_ref,
 			dienstverlener_oin,
 			scopes,
 			scope_entries,
@@ -219,7 +223,7 @@ func scanConsent(row rowScanner) (*Consent, error) {
 	err := row.Scan(
 		&consent.ConsentID,
 		&consent.Status,
-		&consent.PI,
+		&consent.SubjectRef,
 		&consent.DienstverlenrOIN,
 		&scopes,
 		&scopeEntries,

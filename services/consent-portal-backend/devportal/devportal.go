@@ -52,7 +52,11 @@ func (h *History) post(ctx context.Context, s consent.FlowSummary) {
 		"trace_id":   s.TraceID,
 		"outcome":    s.Outcome,
 		"consent_id": s.ConsentID,
-		"response":   s.Response,
+		"response": map[string]any{
+			"consent_id": s.ConsentID,
+			"trace_id":   s.TraceID,
+			"api_calls":  s.APICalls,
+		},
 		// Shows this run to the developer who started it. Empty for a citizen
 		// with no dev-portal open, which keeps it visible to everyone.
 		"demo_session": s.DemoSession,

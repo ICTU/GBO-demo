@@ -25,8 +25,7 @@ export type CreateConsentRequest = {
 
 export type CreateConsentResponse = {
   consent_id: string
-  pseudonym: string
-  pi: string
+  consent_token: string
 }
 
 export async function createConsent(
@@ -53,7 +52,7 @@ export type ConsentRecord = {
   consent_id: string
   status: string
   effective_status: 'active' | 'expired' | 'revoked'
-  pi: string
+  subject_ref: string
   dienstverlener_oin: string
   scopes: string[]
   scope_entries?: Array<{ bronhouder: string; scope_id: string; consented_fields: string[] }>

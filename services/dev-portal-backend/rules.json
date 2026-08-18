@@ -17,8 +17,11 @@
     ],
     "rule_id": "DVT0001",
     "spec": {
+      "consent_actor_binding": true,
+      "consent_context_required": true,
       "consent_must_cover_scope": true,
       "consent_required": true,
+      "consent_status_required": true,
       "constraint_binding": [
         {
           "arg": "bsn",

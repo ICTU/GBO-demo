@@ -28,7 +28,7 @@ export function curlForUse(p: UsePayload): string {
     `curl -sS -X POST http://localhost:9406/api/dvtp/query \\`,
     `  -H 'Content-Type: application/json' \\`,
     `  -d '${JSON.stringify({
-      consent_id: p.consent_id,
+      consent_token: p.consent_token,
       scope_id: p.scope_id,
       belastingjaren: p.belastingjaren,
       fields: p.fields,

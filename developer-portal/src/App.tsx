@@ -16,6 +16,7 @@ import { issuanceFlow } from './api/portalClient'
 import { useQuery } from './api/dvtpClient'
 import { fetchExplain } from './api/devClient'
 import { newTraceContext } from './util/trace'
+import { consentTokenFor, storeConsentToken } from './util/consentTokens'
 import { loadIssuanceOffers, type IssuanceOffer } from './eudi'
 import type {
   ApiCall, EudiPayload, IssuancePayload, IssuanceResponse, Scenario, Tab, UsePayload, UseResponse,
@@ -256,6 +257,7 @@ export default function App() {
         ...EMPTY_USE,
         ...scenarioUse,
         consent_id: effectiveCid,
+        consent_token: scenarioUse.consent_token || consentTokenFor(effectiveCid),
       })
     }
   }
@@ -267,7 +269,8 @@ export default function App() {
     } else if (run.tab === 'eudi-issuance') {
       setEudiPayload({ ...EMPTY_EUDI, ...(run.payload as EudiPayload) })
     } else {
-      setUsePayload({ ...EMPTY_USE, ...(run.payload as UsePayload) })
+      const p = run.payload as UsePayload
+      setUsePayload({ ...EMPTY_USE, ...p, consent_token: p.consent_token || consentTokenFor(p.consent_id) })
     }
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -306,6 +309,7 @@ export default function App() {
           narrative: 'Consent vastgelegd in S01 — afnemer kan binnen scope opvragen.',
         })
         setArchApiCalls(res.api_calls)
+        storeConsentToken(res.consent_id, res.consent_token)
         await appendHistory({
           scenario_name: 'Custom issuance',
           tab: 'issuance',
@@ -321,6 +325,7 @@ export default function App() {
         setUsePayload((u) => ({
           ...u,
           consent_id: res.consent_id,
+          consent_token: res.consent_token,
           scope_id: issuancePayload.scopes[0] ?? u.scope_id,
           belastingjaren: issuedYears.length > 0 ? issuedYears : u.belastingjaren,
         }))
@@ -337,10 +342,12 @@ export default function App() {
             ? 'Query toegestaan — bron heeft data teruggegeven.'
             : 'Query geweigerd door PDP. Reden hieronder.',
         })
+        const historyPayload = { ...usePayload }
+        delete historyPayload.consent_token
         await appendHistory({
           scenario_name: 'Custom use',
           tab: 'use',
-          payload: usePayload,
+          payload: historyPayload,
           trace_id: res.trace_id ?? ctx.traceId,
           outcome,
         })

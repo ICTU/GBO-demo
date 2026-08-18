@@ -40,7 +40,7 @@ func TestPostgreSQLStorePersistsConsent(t *testing.T) {
 	consent := &Consent{
 		ConsentID:        consentID,
 		Status:           "ACTIVE",
-		PI:               "PI-persistent",
+		SubjectRef:       "EP-portal-persistent",
 		DienstverlenrOIN: "00000001234567890000",
 		Scopes:           []string{"inkomen:read"},
 		ScopeEntries: []ScopeEntry{{
@@ -71,14 +71,14 @@ func TestPostgreSQLStorePersistsConsent(t *testing.T) {
 	if !ok {
 		t.Fatal("persisted consent not found after reopening store")
 	}
-	if fetched.PI != consent.PI || fetched.Status != "ACTIVE" {
+	if fetched.SubjectRef != consent.SubjectRef || fetched.Status != "ACTIVE" {
 		t.Fatalf("unexpected persisted consent: %+v", fetched)
 	}
 
 	filtered, err := reopened.List(ctx, ConsentFilter{
-		PI:     consent.PI,
-		Scope:  "inkomen:read",
-		Status: "ACTIVE",
+		SubjectRef: consent.SubjectRef,
+		Scope:      "inkomen:read",
+		Status:     "ACTIVE",
 	})
 	if err != nil {
 		t.Fatalf("list consent: %v", err)

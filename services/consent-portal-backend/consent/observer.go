@@ -75,7 +75,7 @@ type FlowSummary struct {
 	TraceID           string
 	ConsentID         string
 	Outcome           string
-	Response          any
+	APICalls          []APICall
 	Trigger           string // "dev-portal" when the dev-portal drove this flow
 	// Which developer's browser drove this flow, so the dev-portal timeline
 	// can show one person their own runs. Narrative only, like Trigger.

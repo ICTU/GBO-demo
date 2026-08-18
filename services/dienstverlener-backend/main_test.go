@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
@@ -14,27 +15,34 @@ import (
 	"time"
 )
 
-// Happy-path integration test: two stub upstreams (consent-register +
-// FSC-Outway) return canned responses; the backend chains consent-lookup →
-// outway POST and returns {allowed:true, data:...}. Covers the full
-// wiring — handleQuery → fetchConsentPI → outway roundtrip → JSON assembly.
-func TestDvtpQueryHappyPath(t *testing.T) {
-	// Stub consent-register: return an ACTIVE consent with a PI and the
-	// scopes the test requests years for (the backend intersects requested
-	// years with consented scopes before querying).
-	consent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasPrefix(r.URL.Path, "/consents/") {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"pi":"PI-abc123","status":"ACTIVE","scopes":["bd:ib:2024","bd:ib:2025"]}`))
-	}))
-	defer consent.Close()
+func testConsentToken(consentID string, scopes []string) string {
+	encode := base64.RawURLEncoding.EncodeToString
+	payload, _ := json.Marshal(map[string]any{
+		"consent_id": consentID,
+		"pi":         "PI-abc123",
+		"scopes":     scopes,
+	})
+	return encode([]byte(`{"alg":"none"}`)) + "." + encode(payload) + ".sig"
+}
 
+func testQueryBody(consentID string, scopes []string, extra map[string]any) string {
+	body := map[string]any{"consent_token": testConsentToken(consentID, scopes)}
+	for key, value := range extra {
+		body[key] = value
+	}
+	encoded, _ := json.Marshal(body)
+	return string(encoded)
+}
+
+// Happy-path integration test: the backend reads the token payload to build
+// the query and forwards the untouched token to FSC, where the PDP verifies
+// it, then returns {allowed:true, data:...}.
+func TestDvtpQueryHappyPath(t *testing.T) {
 	// Stub FSC-Outway: mirror back a GraphQL-style success payload.
 	var outwayHits int
 	var outwayBody string
+	var forwardedToken string
+	var legacyConsentID string
 	outway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		outwayHits++
 		if r.URL.Path != "/bri/graphql" {
@@ -43,6 +51,8 @@ func TestDvtpQueryHappyPath(t *testing.T) {
 		}
 		b, _ := io.ReadAll(r.Body)
 		outwayBody = string(b)
+		forwardedToken = r.Header.Get("X-GBO-Consent-Token")
+		legacyConsentID = r.Header.Get("X-GBO-Consent-Id")
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"data":{"ingeschrevenPersoon":{"bsn":"123456789","heeftBelastingjaarAangifte":[{"belastingjaar":2024,"verzamelinkomen":{"waarde":45000,"valuta":"EUR"}}]}}}`))
 	}))
@@ -54,12 +64,17 @@ func TestDvtpQueryHappyPath(t *testing.T) {
 		OrgSector:  "hypotheekverlener",
 		OutwayURL:  outway.URL,
 		OutwayPath: "/bri/graphql",
-		ConsentURL: consent.URL,
 	}
 	srv := httptest.NewServer(newMux(cfg))
 	defer srv.Close()
 
-	body := `{"consent_id":"c-1","scope_id":"bd:ib:2025","belastingjaren":[2024]}`
+	token := testConsentToken("c-1", []string{"bd:ib:2024", "bd:ib:2025"})
+	bodyBytes, _ := json.Marshal(map[string]any{
+		"consent_token":  token,
+		"scope_id":       "bd:ib:2025",
+		"belastingjaren": []int{2024},
+	})
+	body := string(bodyBytes)
 	resp, err := http.Post(srv.URL+"/api/dvtp/query", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("post: %v", err)
@@ -83,6 +98,12 @@ func TestDvtpQueryHappyPath(t *testing.T) {
 	}
 	if outwayHits != 1 {
 		t.Fatalf("expected 1 outway hit, got %d", outwayHits)
+	}
+	if forwardedToken != token {
+		t.Fatalf("forwarded consent token differs from issued token")
+	}
+	if legacyConsentID != "" {
+		t.Fatalf("legacy X-GBO-Consent-Id header was sent: %q", legacyConsentID)
 	}
 	if !strings.Contains(string(out.Data), "ingeschrevenPersoon") {
 		t.Fatalf("data payload missing expected field: %s", out.Data)
@@ -108,12 +129,6 @@ func TestDvtpHealth(t *testing.T) {
 }
 
 func TestDvtpQueryTimesOutWhenOutwayDoesNotRespond(t *testing.T) {
-	consent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"pi":"PI-abc123","status":"ACTIVE","scopes":["bd:ib:2024","bd:ib:2025"]}`))
-	}))
-	defer consent.Close()
-
 	outway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		time.Sleep(200 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
@@ -123,13 +138,12 @@ func TestDvtpQueryTimesOutWhenOutwayDoesNotRespond(t *testing.T) {
 	cfg := config{
 		OutwayURL:  outway.URL,
 		OutwayPath: "/bri/graphql",
-		ConsentURL: consent.URL,
 		HTTPClient: &http.Client{Timeout: 25 * time.Millisecond},
 	}
 	srv := httptest.NewServer(newMux(cfg))
 	defer srv.Close()
 
-	body := `{"consent_id":"c-1"}`
+	body := testQueryBody("c-1", []string{"bd:ib:2024", "bd:ib:2025"}, nil)
 	resp, err := http.Post(srv.URL+"/api/dvtp/query", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("post: %v", err)
@@ -154,12 +168,6 @@ func TestDvtpQueryTimesOutWhenOutwayDoesNotRespond(t *testing.T) {
 // [2024, 2025] must query only 2025 and report 2024 as denied — instead
 // of letting the whole query fail policy (YEAR_NOT_COVERED).
 func TestDvtpQueryIntersectsConsentedYears(t *testing.T) {
-	consent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"pi":"PI-abc123","status":"ACTIVE","scopes":["bd:ib:2025"]}`))
-	}))
-	defer consent.Close()
-
 	var outwayHits int
 	var outwayBody string
 	outway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -174,12 +182,11 @@ func TestDvtpQueryIntersectsConsentedYears(t *testing.T) {
 	cfg := config{
 		OutwayURL:  outway.URL,
 		OutwayPath: "/bri/graphql",
-		ConsentURL: consent.URL,
 	}
 	srv := httptest.NewServer(newMux(cfg))
 	defer srv.Close()
 
-	body := `{"consent_id":"c-1","scope_id":"bd:ib:2025","belastingjaren":[2024,2025]}`
+	body := testQueryBody("c-1", []string{"bd:ib:2025"}, map[string]any{"scope_id": "bd:ib:2025", "belastingjaren": []int{2024, 2025}})
 	resp, err := http.Post(srv.URL+"/api/dvtp/query", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("post: %v", err)
@@ -204,15 +211,9 @@ func TestDvtpQueryIntersectsConsentedYears(t *testing.T) {
 	}
 }
 
-// No overlap between requested years and consented scopes: the FSC call
-// is skipped and every requested year is reported denied.
+// No overlap still reaches FSC/PDP so token verification and revocation cannot
+// be bypassed by a local empty-result shortcut.
 func TestDvtpQueryNoConsentedYears(t *testing.T) {
-	consent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"pi":"PI-abc123","status":"ACTIVE","scopes":["bd:ib:2023"]}`))
-	}))
-	defer consent.Close()
-
 	var outwayHits int
 	outway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		outwayHits++
@@ -223,12 +224,11 @@ func TestDvtpQueryNoConsentedYears(t *testing.T) {
 	cfg := config{
 		OutwayURL:  outway.URL,
 		OutwayPath: "/bri/graphql",
-		ConsentURL: consent.URL,
 	}
 	srv := httptest.NewServer(newMux(cfg))
 	defer srv.Close()
 
-	body := `{"consent_id":"c-1","scope_id":"bd:ib:2025","belastingjaren":[2024,2025]}`
+	body := testQueryBody("c-1", []string{"bd:ib:2023"}, map[string]any{"scope_id": "bd:ib:2025", "belastingjaren": []int{2024, 2025}})
 	resp, err := http.Post(srv.URL+"/api/dvtp/query", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("post: %v", err)
@@ -242,8 +242,8 @@ func TestDvtpQueryNoConsentedYears(t *testing.T) {
 	if !out.Allowed {
 		t.Fatalf("expected allowed=true, got %+v", out)
 	}
-	if outwayHits != 0 {
-		t.Fatalf("expected no outway call, got %d", outwayHits)
+	if outwayHits != 1 {
+		t.Fatalf("expected request to reach PDP, got %d outway calls", outwayHits)
 	}
 	if len(out.DeniedYears) != 2 {
 		t.Fatalf("denied_years = %v, want [2024 2025]", out.DeniedYears)
@@ -255,12 +255,6 @@ func TestDvtpQueryNoConsentedYears(t *testing.T) {
 // query must carry the requested years verbatim — letting the PDP deny
 // unconsented years (YEAR_NOT_COVERED) with a full trace.
 func TestDvtpQueryDevPortalBypassesIntersection(t *testing.T) {
-	consent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"pi":"PI-abc123","status":"ACTIVE","scopes":["bd:ib:2025"]}`))
-	}))
-	defer consent.Close()
-
 	var outwayBody string
 	outway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
@@ -274,13 +268,12 @@ func TestDvtpQueryDevPortalBypassesIntersection(t *testing.T) {
 	cfg := config{
 		OutwayURL:  outway.URL,
 		OutwayPath: "/bri/graphql",
-		ConsentURL: consent.URL,
 	}
 	srv := httptest.NewServer(newMux(cfg))
 	defer srv.Close()
 
 	req, err := http.NewRequest(http.MethodPost, srv.URL+"/api/dvtp/query",
-		strings.NewReader(`{"consent_id":"c-1","scope_id":"bd:ib:2025","belastingjaren":[2024,2025]}`))
+		strings.NewReader(testQueryBody("c-1", []string{"bd:ib:2025"}, map[string]any{"scope_id": "bd:ib:2025", "belastingjaren": []int{2024, 2025}})))
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
@@ -301,12 +294,6 @@ func TestDvtpQueryDevPortalBypassesIntersection(t *testing.T) {
 // decision (CONSENT_WITHDRAWN, with a decision-log entry), not a local
 // short-circuit that the portal can only show as a technical error.
 func TestDvtpQueryRevokedConsentReachesPDP(t *testing.T) {
-	consent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"pi":"PI-abc123","status":"REVOKED","scopes":["bd:ib:2025"]}`))
-	}))
-	defer consent.Close()
-
 	var outwayHits int
 	outway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		outwayHits++
@@ -318,12 +305,11 @@ func TestDvtpQueryRevokedConsentReachesPDP(t *testing.T) {
 	cfg := config{
 		OutwayURL:  outway.URL,
 		OutwayPath: "/bri/graphql",
-		ConsentURL: consent.URL,
 	}
 	srv := httptest.NewServer(newMux(cfg))
 	defer srv.Close()
 
-	body := `{"consent_id":"c-revoked","scope_id":"bd:ib:2025","belastingjaren":[2025]}`
+	body := testQueryBody("c-revoked", []string{"bd:ib:2025"}, map[string]any{"scope_id": "bd:ib:2025", "belastingjaren": []int{2025}})
 	resp, err := http.Post(srv.URL+"/api/dvtp/query", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("post: %v", err)
@@ -381,8 +367,8 @@ func TestUseHistoryPostCarriesTheTrace(t *testing.T) {
 
 	// Exactly how the handler calls it: detached from cancellation, still
 	// carrying the trace.
-	postUseHistory(context.WithoutCancel(ctx), devPortal.URL,
-		queryRequest{ConsentID: "c-1", ScopeID: "bd:ib:2025"},
+	postUseHistory(context.WithoutCancel(ctx), devPortal.URL, "c-1",
+		queryRequest{ConsentToken: "secret-consent-token", ScopeID: "bd:ib:2025"},
 		queryResponse{Allowed: true, TraceID: traceID}, traceID)
 	span.End()
 
@@ -396,6 +382,10 @@ func TestUseHistoryPostCarriesTheTrace(t *testing.T) {
 		}
 		if c.body["trace_id"] != traceID {
 			t.Errorf("body trace_id = %v, want %s", c.body["trace_id"], traceID)
+		}
+		encoded, _ := json.Marshal(c.body)
+		if strings.Contains(string(encoded), "secret-consent-token") {
+			t.Fatalf("history payload leaked consent token: %s", encoded)
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("dev-portal never received the history post")
@@ -416,7 +406,7 @@ func TestUseHistoryPostSurvivesHandlerReturn(t *testing.T) {
 	postCtx := context.WithoutCancel(handlerCtx)
 	cancel() // the handler returns before the goroutine runs
 
-	postUseHistory(postCtx, devPortal.URL, queryRequest{ConsentID: "c-1"}, queryResponse{Allowed: true}, "")
+	postUseHistory(postCtx, devPortal.URL, "c-1", queryRequest{}, queryResponse{Allowed: true}, "")
 
 	select {
 	case <-done:

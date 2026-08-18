@@ -23,6 +23,7 @@ export type IssuancePayload = {
 
 export type UsePayload = {
   consent_id: string
+  consent_token?: string
   scope_id?: string
   belastingjaren?: number[]
   // Optional field-selection for the auto-generated query. Default = full set.
@@ -54,8 +55,7 @@ export type ApiCall = {
 // Issuance-response from consent-portal-backend
 export type IssuanceResponse = {
   consent_id: string
-  pseudonym: string
-  pi: string
+  consent_token: string
   trace_id?: string
   api_calls?: ApiCall[]
 }

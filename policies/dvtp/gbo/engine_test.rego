@@ -6,7 +6,7 @@ import data.dvtp.gbo
 # fetched in input.context.pip.consent; the engine mirrors its pi onto
 # ctx.resource for the constraint-binding rule.
 
-_pip := {"consent": {"exists": true, "withdrawn": false, "granted_scopes": ["bd:ib:2025"], "valid_until": "2030-01-01T00:00:00Z", "pi": "PI-abc123"}}
+_pip := {"consent": {"context_valid": true, "status_available": true, "exists": true, "withdrawn": false, "granted_scopes": ["bd:ib:2025"], "valid_until": "2030-01-01T00:00:00Z", "pi": "PI-abc123", "dienstverlener_oin": "peer-oin-123"}}
 
 _input := {
 	"subject": {"type": "org", "id": "peer-oin-123"},

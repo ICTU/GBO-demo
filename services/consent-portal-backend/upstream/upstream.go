@@ -32,6 +32,16 @@ type Caller struct {
 // card. It returns the HTTP status alongside the error so callers can map 404
 // to a domain error without parsing strings.
 func (c Caller) Do(ctx context.Context, label, method, rawURL string, body, result any) (int, error) {
+	return c.do(ctx, label, method, rawURL, body, result, true)
+}
+
+// DoPrivate performs the same call but suppresses request and response bodies
+// in observer cards. Use it for BSN, PI and bearer-token material.
+func (c Caller) DoPrivate(ctx context.Context, label, method, rawURL string, body, result any) (int, error) {
+	return c.do(ctx, label, method, rawURL, body, result, false)
+}
+
+func (c Caller) do(ctx context.Context, label, method, rawURL string, body, result any, reportBodies bool) (int, error) {
 	var reqBytes []byte
 	var reader io.Reader
 	if body != nil {
@@ -57,13 +67,13 @@ func (c Caller) Do(ctx context.Context, label, method, rawURL string, body, resu
 
 	if err != nil {
 		// A transport failure has no status; the panel shows it as 502.
-		c.report(ctx, label, method, rawURL, http.StatusBadGateway, reqBytes, nil, durationMS)
+		c.report(ctx, label, method, rawURL, http.StatusBadGateway, reportBytes(reqBytes, reportBodies), nil, durationMS)
 		return 0, fmt.Errorf("do request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBytes, _ := io.ReadAll(resp.Body)
-	c.report(ctx, label, method, rawURL, resp.StatusCode, reqBytes, respBytes, durationMS)
+	c.report(ctx, label, method, rawURL, resp.StatusCode, reportBytes(reqBytes, reportBodies), reportBytes(respBytes, reportBodies), durationMS)
 
 	if resp.StatusCode >= 400 {
 		return resp.StatusCode, fmt.Errorf("upstream %d: %s", resp.StatusCode, string(respBytes))
@@ -74,6 +84,13 @@ func (c Caller) Do(ctx context.Context, label, method, rawURL string, body, resu
 		}
 	}
 	return resp.StatusCode, nil
+}
+
+func reportBytes(value []byte, include bool) []byte {
+	if !include {
+		return nil
+	}
+	return value
 }
 
 func (c Caller) report(ctx context.Context, label, method, url string, status int, reqBody, respBody []byte, durationMS int64) {

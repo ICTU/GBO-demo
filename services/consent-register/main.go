@@ -3,14 +3,16 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
-	"errors"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
@@ -19,8 +21,6 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
-	"os/signal"
-	"syscall"
 )
 
 type ScopeEntry struct {
@@ -29,14 +29,13 @@ type ScopeEntry struct {
 	ConsentedFields []string `json:"consented_fields"`
 }
 
-// Consent identifies its subject by PI (polymorphic identifier from BSNk).
-// Plain BSN never enters the consent register: pseudonymisation happens before
-// consent creation, and the PEP resolves PI→BSN only after a positive PDP
-// decision, inside the PEP boundary.
+// Consent stores only the consent-portal-specific subject reference. The PI is
+// accepted transiently while issuing the signed consent token, but is never
+// assigned to this persisted model.
 type Consent struct {
 	ConsentID        string       `json:"consent_id"`
 	Status           string       `json:"status"`
-	PI               string       `json:"pi"`
+	SubjectRef       string       `json:"subject_ref"`
 	DienstverlenrOIN string       `json:"dienstverlener_oin"`
 	Scopes           []string     `json:"scopes"`
 	ScopeEntries     []ScopeEntry `json:"scope_entries,omitempty"`
@@ -59,13 +58,25 @@ const readHeaderTimeout = 10 * time.Second
 const shutdownTimeout = 15 * time.Second
 
 type config struct {
-	Port string
+	Port           string
+	SigningKeyPath string
+	SigningKeyID   string
+	TokenIssuer    string
+	TokenAudience  string
 }
 
 func loadConfig() (config, error) {
-	return config{
-		Port: getEnv("PORT", "4002"),
-	}, nil
+	cfg := config{
+		Port:           getEnv("PORT", "4002"),
+		SigningKeyPath: os.Getenv("CONSENT_SIGNING_KEY_PATH"),
+		SigningKeyID:   getEnv("CONSENT_SIGNING_KEY_ID", "gbo-consent-demo-1"),
+		TokenIssuer:    getEnv("CONSENT_TOKEN_ISSUER", "https://consent-register.gbo.test"),
+		TokenAudience:  getEnv("CONSENT_TOKEN_AUDIENCE", "gbo:dvtp:pdp"),
+	}
+	if os.Getenv("DATABASE_URL") != "" && cfg.SigningKeyPath == "" {
+		return config{}, errors.New("CONSENT_SIGNING_KEY_PATH is required with a persistent consent store")
+	}
+	return cfg, nil
 }
 
 func getEnv(key, fallback string) string {
@@ -81,9 +92,9 @@ type Store struct {
 }
 
 type ConsentFilter struct {
-	PI     string
-	Scope  string
-	Status string
+	SubjectRef string
+	Scope      string
+	Status     string
 }
 
 type ConsentStore interface {
@@ -113,7 +124,7 @@ func (s *Store) List(_ context.Context, filter ConsentFilter) ([]*Consent, error
 	result := make([]*Consent, 0)
 
 	for _, consent := range s.consents {
-		if filter.PI != "" && consent.PI != filter.PI {
+		if filter.SubjectRef != "" && consent.SubjectRef != filter.SubjectRef {
 			continue
 		}
 
@@ -212,7 +223,7 @@ func initTracer() func(context.Context) error {
 // newMux builds the routing tree with the given store. Extracted from main
 // so integration tests can wire the handlers to an httptest.Server without
 // starting the real listener.
-func newMux(store ConsentStore) *http.ServeMux {
+func newMux(store ConsentStore, issuer *ConsentIssuer) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -222,6 +233,19 @@ func newMux(store ConsentStore) *http.ServeMux {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	})
+
+	mux.HandleFunc("/.well-known/jwks.json", func(w http.ResponseWriter, r *http.Request) {
+		corsHeaders(w)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+		writeJSON(w, http.StatusOK, issuer.JWKS())
 	})
 
 	mux.HandleFunc("/consents", func(w http.ResponseWriter, r *http.Request) {
@@ -235,6 +259,7 @@ func newMux(store ConsentStore) *http.ServeMux {
 		case http.MethodPost:
 			var req struct {
 				PI               string       `json:"pi"`
+				SubjectRef       string       `json:"subject_ref"`
 				DienstverlenrOIN string       `json:"dienstverlener_oin"`
 				Scopes           []string     `json:"scopes"`
 				ScopeEntries     []ScopeEntry `json:"scope_entries"`
@@ -247,6 +272,14 @@ func newMux(store ConsentStore) *http.ServeMux {
 			}
 			if req.PI == "" {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "pi is required (no plain BSN accepted)"})
+				return
+			}
+			if req.SubjectRef == "" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "subject_ref is required"})
+				return
+			}
+			if req.DienstverlenrOIN == "" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "dienstverlener_oin is required"})
 				return
 			}
 			validity := req.ValiditySeconds
@@ -269,7 +302,7 @@ func newMux(store ConsentStore) *http.ServeMux {
 			c := &Consent{
 				ConsentID:        "c-" + uuid.New().String(),
 				Status:           "ACTIVE",
-				PI:               req.PI,
+				SubjectRef:       req.SubjectRef,
 				DienstverlenrOIN: req.DienstverlenrOIN,
 				Scopes:           scopes,
 				ScopeEntries:     req.ScopeEntries,
@@ -277,26 +310,34 @@ func newMux(store ConsentStore) *http.ServeMux {
 				CreatedAt:        now,
 				ValidUntil:       now.Add(time.Duration(validity) * time.Second),
 			}
+			consentToken, err := issuer.Sign(*c, req.PI)
+			if err != nil {
+				slog.Error("sign consent token", "consent_id", c.ConsentID, "err", err.Error())
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not issue consent token"})
+				return
+			}
 			if err := store.Create(r.Context(), c); err != nil {
 				slog.Error("create consent", "err", err.Error())
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not store consent"})
-
 				return
 			}
 
-			writeJSON(w, http.StatusCreated, c)
+			writeJSON(w, http.StatusCreated, struct {
+				*Consent
+				ConsentToken string `json:"consent_token"`
+			}{Consent: c, ConsentToken: consentToken})
 
 		case http.MethodGet:
-			// GET /consents?pi=<pi>&scope=<scope>&status=<status>
-			// pi + scope: filter for the policy lookup (which consent
-			// covers this subject+scope combination).
-			pi := r.URL.Query().Get("pi")
+			// GET /consents?subject_ref=<portal-pseudonym>&scope=<scope>&status=<status>
+			// subject_ref exists only for citizen-facing ownership/listing. It
+			// is not an authorization input; the PDP uses the signed token.
+			subjectRef := r.URL.Query().Get("subject_ref")
 			scope := r.URL.Query().Get("scope")
 			statusFilter := r.URL.Query().Get("status")
 			result, err := store.List(r.Context(), ConsentFilter{
-				PI:     pi,
-				Scope:  scope,
-				Status: statusFilter,
+				SubjectRef: subjectRef,
+				Scope:      scope,
+				Status:     statusFilter,
 			})
 			if err != nil {
 				slog.Error("list consents", "err", err.Error())
@@ -322,6 +363,29 @@ func newMux(store ConsentStore) *http.ServeMux {
 		id := strings.TrimPrefix(r.URL.Path, "/consents/")
 		if id == "" {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing consent_id"})
+			return
+		}
+
+		if strings.HasSuffix(id, "/status") {
+			if r.Method != http.MethodGet {
+				writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+				return
+			}
+			consentID := strings.TrimSuffix(id, "/status")
+			c, ok, err := store.Get(r.Context(), consentID)
+			if err != nil {
+				slog.Error("get consent status", "err", err.Error())
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not get consent status"})
+				return
+			}
+			if !ok {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "consent not found"})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"consent_id": c.ConsentID,
+				"status":     c.Status,
+			})
 			return
 		}
 
@@ -391,10 +455,14 @@ func main() {
 		fatal("initialising consent store", err)
 	}
 	defer closeStore()
+	issuer, err := NewConsentIssuer(cfg)
+	if err != nil {
+		fatal("initialising consent token issuer", err)
+	}
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           otelhttp.NewHandler(withAccessLog(newMux(store)), "consent-register"),
+		Handler:           otelhttp.NewHandler(withAccessLog(newMux(store, issuer)), "consent-register"),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 	serve(srv)

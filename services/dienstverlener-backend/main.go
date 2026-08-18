@@ -4,7 +4,7 @@
 // PEP directly. In a production deployment this service would hold mTLS keys
 // and FSC Outway config.
 //
-// Endpoint: POST /api/dvtp/query  {consent_id, scope_id?, belastingjaren?}
+// Endpoint: POST /api/dvtp/query  {consent_token, scope_id?, belastingjaren?}
 //
 //	→ FSC Outway: pick contract by grant-link, sign token, open mTLS to Inway
 //	→ FSC Inway proxy: forward GraphQL query (with PI as bsn variable)
@@ -16,8 +16,10 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -27,7 +29,6 @@ import (
 	"strings"
 	"time"
 
-	"errors"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
@@ -57,7 +58,6 @@ type config struct {
 	DevPortalBackend string
 	OutwayURL        string
 	OutwayPath       string
-	ConsentURL       string
 	HTTPClient       *http.Client
 }
 
@@ -71,7 +71,6 @@ func loadConfig() config {
 		DevPortalBackend: getEnv("DEV_PORTAL_BACKEND_URL", ""),
 		OutwayURL:        getEnv("OUTWAY_URL", "http://hv-outway:8080"),
 		OutwayPath:       getEnv("OUTWAY_PATH", "/bri/graphql"),
-		ConsentURL:       getEnv("CONSENT_URL", "http://consent-register:4002"),
 		HTTPClient:       &http.Client{Timeout: upstreamRequestTimeout},
 	}
 }
@@ -100,7 +99,7 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 // ── Query handler ────────────────────────────────────────────────────────
 
 type queryRequest struct {
-	ConsentID      string   `json:"consent_id"`
+	ConsentToken   string   `json:"consent_token"`
 	ScopeID        string   `json:"scope_id,omitempty"`
 	Belastingjaren []int    `json:"belastingjaren,omitempty"`
 	Fields         []string `json:"fields,omitempty"`
@@ -187,44 +186,33 @@ func randomSpanIDHex() string {
 	return hex.EncodeToString(b[:])
 }
 
-// fetchConsentPI resolves the pseudonym (PI), granted scopes and status
-// for a given consent-id from the consent-register. The PI, not the
-// consent-id, travels in transit inside the GraphQL query variable; the
-// sidecar at the source resolves PI→BSN. The consent-register URL comes
-// from config.
-//
-// A non-ACTIVE (revoked/expired) consent is NOT rejected here: the PDP is
-// the authority on consent state, and short-circuiting locally would turn
-// a policy DENY (CONSENT_WITHDRAWN, attributable and visible in the
-// decision log) into an opaque client-side error. Only a consent that
-// cannot be resolved at all is a local failure — without a PI there is no
-// query to send.
-func fetchConsentPI(ctx context.Context, client *http.Client, consentURL, consentID string) (string, []string, string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, consentURL+"/consents/"+consentID, nil)
+type consentTokenPayload struct {
+	ConsentID string   `json:"consent_id"`
+	PI        string   `json:"pi"`
+	Scopes    []string `json:"scopes"`
+}
+
+// decodeConsentTokenPayload reads only enough context to construct the
+// outgoing query. This is intentionally not an authorization decision: the
+// PDP verifies signature, issuer, audience, time, status and FSC actor before
+// granting access.
+func decodeConsentTokenPayload(token string) (consentTokenPayload, error) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return consentTokenPayload{}, fmt.Errorf("consent token is not a compact JWT")
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return "", nil, "", err
+		return consentTokenPayload{}, fmt.Errorf("decode consent token payload: %w", err)
 	}
-	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", nil, "", err
+	var claims consentTokenPayload
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return consentTokenPayload{}, fmt.Errorf("decode consent token claims: %w", err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", nil, "", fmt.Errorf("consent-register HTTP %d", resp.StatusCode)
+	if claims.ConsentID == "" || claims.PI == "" {
+		return consentTokenPayload{}, fmt.Errorf("consent token misses consent_id or pi")
 	}
-	var c struct {
-		PI     string   `json:"pi"`
-		Status string   `json:"status"`
-		Scopes []string `json:"scopes"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&c); err != nil {
-		return "", nil, "", err
-	}
-	if c.PI == "" {
-		return "", nil, "", fmt.Errorf("consent %s has no PI", consentID)
-	}
-	return c.PI, c.Scopes, c.Status, nil
+	return claims, nil
 }
 
 // consentedYears extracts the belastingjaren covered by granted scopes of
@@ -331,8 +319,8 @@ func handleQuery(cfg config) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 			return
 		}
-		if req.ConsentID == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "consent_id is required"})
+		if req.ConsentToken == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "consent_token is required"})
 			return
 		}
 		if req.ScopeID == "" {
@@ -346,25 +334,19 @@ func handleQuery(cfg config) http.HandlerFunc {
 
 		// The backend talks to a real FSC-Outway.
 		//
-		// Step 1 — Consent-lookup: fetch the PI + granted scopes for this
-		// consent-id from the consent-register. The PI travels in the query;
-		// the consent-id does not. A revoked consent is deliberately still
-		// sent to the PDP so the DENY is a policy decision
-		// (CONSENT_WITHDRAWN) with a decision-log entry, not a local error.
-		pi, scopes, consentStatus, err := fetchConsentPI(ctx, client, cfg.ConsentURL, req.ConsentID)
+		// Step 1 — Read the signed consent artifact to construct the request.
+		// The PDP, not this consumer, is the authority that verifies it.
+		consentContext, err := decodeConsentTokenPayload(req.ConsentToken)
 		if err != nil {
-			log.Warn("consent-lookup failed", "consent_id", req.ConsentID, "err", err.Error())
+			log.Warn("consent token decode failed", "err", err.Error())
 			writeJSON(w, http.StatusForbidden, map[string]any{
 				"allowed":  false,
-				"reason":   "consent_lookup_failed: " + err.Error(),
+				"reason":   "invalid_consent_token: " + err.Error(),
 				"trace_id": traceIDFromSpan(span),
 			})
 			return
 		}
-		if consentStatus != "ACTIVE" {
-			log.Info("consent not active — letting the PDP decide",
-				"consent_id", req.ConsentID, "status", consentStatus)
-		}
+		pi, scopes := consentContext.PI, consentContext.Scopes
 
 		// Per-year consent. Two consumer profiles:
 		//   - Browser flow (dienstverlener-mock): intersect requested years
@@ -396,29 +378,8 @@ func handleQuery(cfg config) http.HandlerFunc {
 			fscTxID = newFscTransactionID()
 		}
 
-		// Nothing consented (browser flow, ACTIVE consent only): skip the
-		// FSC call (an empty year filter would fail policy fail-closed
-		// anyway) and report every requested year as denied. A non-ACTIVE
-		// consent always goes to the PDP so the DENY is a policy decision.
-		if len(queryable) == 0 && consentStatus == "ACTIVE" {
-			log.Info("no requested years covered by consent", "consent_id", req.ConsentID, "trace_id", traceID)
-			emptyData, _ := json.Marshal(map[string]any{
-				"data": map[string]any{
-					"ingeschrevenPersoon": map[string]any{"heeftBelastingjaarAangifte": []any{}},
-				},
-			})
-			resp := queryResponse{
-				Allowed:          true,
-				Data:             emptyData,
-				TraceID:          traceID,
-				FscTransactionID: fscTxID,
-				DeniedYears:      deniedYears,
-			}
-			writeJSON(w, http.StatusOK, resp)
-			return
-		}
-		// A revoked consent with no overlapping years still needs a
-		// non-empty filter to reach the PDP at all.
+		// Even a zero-overlap request reaches the PDP: otherwise token
+		// verification and online revocation could be bypassed locally.
 		if len(queryable) == 0 {
 			queryable = jaren
 		}
@@ -440,12 +401,7 @@ func handleQuery(cfg config) http.HandlerFunc {
 		// Untrusted context-header: X-GBO-Scope carries the requested scope.
 		// (There is no X-GBO-Flow header; flow is a grant-property.)
 		proxyReq.Header.Set("X-GBO-Scope", req.ScopeID)
-		// X-GBO-Consent-Id references the consent this request is backed
-		// by. The PDP does its PIP lookup on exactly this record, so
-		// revoking it deterministically denies this query — a different
-		// consent for the same PI does not rescue it. The constraint-
-		// binding rule proves the query's PI matches this consent's PI.
-		proxyReq.Header.Set("X-GBO-Consent-Id", req.ConsentID)
+		proxyReq.Header.Set("X-GBO-Consent-Token", req.ConsentToken)
 		proxyReq.Header.Set("Fsc-Transaction-Id", fscTxID)
 		span.SetAttributes(attribute.String("gbo.fsc.transaction_id", fscTxID))
 		otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(proxyReq.Header))
@@ -470,7 +426,7 @@ func handleQuery(cfg config) http.HandlerFunc {
 
 		// 200 = ALLOW with data, 403 = DENY with reason, other = error
 		if proxyResp.StatusCode == http.StatusOK {
-			log.Info("query allowed", "consent_id", req.ConsentID, "trace_id", traceID)
+			log.Info("query allowed", "consent_id", consentContext.ConsentID, "trace_id", traceID)
 			resp := queryResponse{
 				Allowed:          true,
 				Data:             json.RawMessage(proxyRespBody),
@@ -480,7 +436,7 @@ func handleQuery(cfg config) http.HandlerFunc {
 			}
 			writeJSON(w, http.StatusOK, resp)
 			if cfg.DevPortalBackend != "" && !fromDevPortal {
-				go postUseHistory(context.WithoutCancel(ctx), cfg.DevPortalBackend, req, resp, traceID)
+				go postUseHistory(context.WithoutCancel(ctx), cfg.DevPortalBackend, consentContext.ConsentID, req, resp, traceID)
 			}
 			return
 		}
@@ -493,7 +449,7 @@ func handleQuery(cfg config) http.HandlerFunc {
 		if denyResp.Reason == "" {
 			denyResp.Reason = fmt.Sprintf("upstream_error: status %d", proxyResp.StatusCode)
 		}
-		log.Info("query denied", "consent_id", req.ConsentID, "reason", denyResp.Reason, "trace_id", traceID)
+		log.Info("query denied", "consent_id", consentContext.ConsentID, "reason", denyResp.Reason, "trace_id", traceID)
 		resp := queryResponse{
 			Allowed:          false,
 			Reason:           denyResp.Reason,
@@ -502,7 +458,7 @@ func handleQuery(cfg config) http.HandlerFunc {
 		}
 		writeJSON(w, http.StatusOK, resp)
 		if cfg.DevPortalBackend != "" && !fromDevPortal {
-			go postUseHistory(context.WithoutCancel(ctx), cfg.DevPortalBackend, req, resp, traceID)
+			go postUseHistory(context.WithoutCancel(ctx), cfg.DevPortalBackend, consentContext.ConsentID, req, resp, traceID)
 		}
 	}
 }
@@ -515,7 +471,7 @@ func handleQuery(cfg config) http.HandlerFunc {
 // ctx must outlive the handler — pass context.WithoutCancel(ctx) — so the
 // post keeps the trace context without being cancelled when the handler
 // returns.
-func postUseHistory(ctx context.Context, devURL string, req queryRequest, qResp queryResponse, traceID string) {
+func postUseHistory(ctx context.Context, devURL, consentID string, req queryRequest, qResp queryResponse, traceID string) {
 	outcome := "deny"
 	if qResp.Allowed {
 		outcome = "allow"
@@ -524,14 +480,14 @@ func postUseHistory(ctx context.Context, devURL string, req queryRequest, qResp 
 		"scenario_name": fmt.Sprintf("Afnemer · use · scope %s", req.ScopeID),
 		"tab":           "use",
 		"payload": map[string]any{
-			"consent_id":     req.ConsentID,
+			"consent_id":     consentID,
 			"scope_id":       req.ScopeID,
 			"belastingjaren": req.Belastingjaren,
 			"fields":         req.Fields,
 		},
 		"trace_id":   traceID,
 		"outcome":    outcome,
-		"consent_id": req.ConsentID,
+		"consent_id": consentID,
 		"response":   qResp,
 	}
 	body, _ := json.Marshal(entry)
@@ -595,7 +551,7 @@ func setupTracing(ctx context.Context, serviceName string) (func(context.Context
 
 // newMux builds the routing tree for the backend. Extracted from main so
 // integration tests can wire the handlers to an httptest.Server (with
-// stub OutwayURL + ConsentURL in cfg) without starting the real listener.
+// stub OutwayURL in cfg) without starting the real listener.
 func newMux(cfg config) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
