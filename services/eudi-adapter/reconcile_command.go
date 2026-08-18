@@ -26,6 +26,8 @@ type reconcileOptions struct {
 	stateDir         string
 	secretsDir       string
 	readerPublicURL  string
+	sourcesDir       string
+	once             bool
 	watch            bool
 	interval         time.Duration
 }
@@ -49,14 +51,10 @@ func defaultReconcileDependencies() reconcileDependencies {
 }
 
 func runReconcileCommand(ctx context.Context, arguments []string, dependencies reconcileDependencies) (bool, error) {
-	if len(arguments) == 0 || arguments[0] != "reconcile-fsc-sources" {
+	if len(arguments) == 0 || arguments[0] != "reconcile-sources" {
 		return false, nil
 	}
 	options, err := parseReconcileOptions(arguments[1:], dependencies.stderr)
-	if err != nil {
-		return true, err
-	}
-	managerClient, err := dependencies.newManagerClient(options.managerCAPath, options.managerCertPath, options.managerKeyPath)
 	if err != nil {
 		return true, err
 	}
@@ -73,24 +71,48 @@ func runReconcileCommand(ctx context.Context, arguments []string, dependencies r
 	if err != nil {
 		return true, err
 	}
-	reconciler := &fscSourceReconciler{
-		managerClient: managerClient, sourceClient: dependencies.sourceClient,
-		managerURL: options.managerURL, consumerOIN: options.consumerOIN, outwayURL: options.outwayURL,
-		schemaPath: options.schemaPath, publicBaseURL: options.publicBaseURL,
-		store: store, backend: backend,
-	}
+	var managerClient *http.Client
 	reconcile := func() error {
+		sources, err := loadSourceConfigurations(options.sourcesDir)
+		if err != nil {
+			return err
+		}
+		hasFSC := false
+		for _, source := range sources {
+			hasFSC = hasFSC || source.MetadataEndpoint.Transport == sourceTransportFSC
+		}
+		if hasFSC && managerClient == nil {
+			for name, value := range map[string]string{
+				"--manager-url": options.managerURL, "--manager-ca": options.managerCAPath,
+				"--manager-cert": options.managerCertPath, "--manager-key": options.managerKeyPath,
+			} {
+				if strings.TrimSpace(value) == "" {
+					return fmt.Errorf("%s is required for configured FSC sources", name)
+				}
+			}
+			managerClient, err = dependencies.newManagerClient(options.managerCAPath, options.managerCertPath, options.managerKeyPath)
+			if err != nil {
+				return err
+			}
+		}
+		reconciler := &sourceReconciler{
+			managerClient: managerClient, sourceClient: dependencies.sourceClient,
+			managerURL: options.managerURL, consumerOIN: options.consumerOIN, outwayURL: options.outwayURL,
+			schemaPath: options.schemaPath, publicBaseURL: options.publicBaseURL,
+			sources: sources, store: store, backend: backend,
+			statuses: newFilesystemSourceStatusWriter(options.stateDir),
+		}
 		if err := reconciler.Reconcile(ctx, dependencies.now()); err != nil {
 			return err
 		}
-		_, _ = fmt.Fprintln(dependencies.stdout, "FSC source reconciliation completed")
+		_, _ = fmt.Fprintln(dependencies.stdout, "source reconciliation completed")
 		return nil
 	}
 	if !options.watch {
 		return true, reconcile()
 	}
 	if err := reconcile(); err != nil {
-		slog.Error("initial FSC source reconciliation failed", "err", err.Error())
+		slog.Error("initial source reconciliation failed", "err", err.Error())
 	}
 	ticker := time.NewTicker(options.interval)
 	defer ticker.Stop()
@@ -100,14 +122,14 @@ func runReconcileCommand(ctx context.Context, arguments []string, dependencies r
 			return true, nil
 		case <-ticker.C:
 			if err := reconcile(); err != nil {
-				slog.Error("FSC source reconciliation failed", "err", err.Error())
+				slog.Error("source reconciliation failed", "err", err.Error())
 			}
 		}
 	}
 }
 
 func parseReconcileOptions(arguments []string, errorOutput io.Writer) (reconcileOptions, error) {
-	set := flag.NewFlagSet("reconcile-fsc-sources", flag.ContinueOnError)
+	set := flag.NewFlagSet("reconcile-sources", flag.ContinueOnError)
 	set.SetOutput(errorOutput)
 	options := reconcileOptions{}
 	set.StringVar(&options.managerURL, "manager-url", os.Getenv("FSC_MANAGER_URL"), "FSC consumer Manager internal base URL")
@@ -117,13 +139,15 @@ func parseReconcileOptions(arguments []string, errorOutput io.Writer) (reconcile
 	set.StringVar(&options.consumerOIN, "consumer-oin", getEnv("ISSUER_OIN", "99999999900000000100"), "OIN of the FSC consumer peer")
 	set.StringVar(&options.outwayURL, "outway-url", getEnv("FSC_OUTWAY_URL", "http://localhost:8087"), "FSC Outway base URL")
 	set.StringVar(&options.schemaPath, "schema", "schemas/gbo-source-metadata-v1.schema.json", "source metadata JSON Schema")
-	set.StringVar(&options.publicBaseURL, "type-metadata-base-url", os.Getenv("TYPE_METADATA_PUBLIC_BASE_URL"), "public Type Metadata base URL")
+	set.StringVar(&options.publicBaseURL, "type-metadata-base-url", "", "public Type Metadata base URL")
 	set.StringVar(&options.storageBackend, "storage-backend", getEnv("ONBOARDING_STORAGE_BACKEND", "filesystem"), "onboarding state backend")
 	set.StringVar(&options.certificateStore, "certificate-store", getEnv("ONBOARDING_CERTIFICATE_STORE", "filesystem"), "store containing manually provisioned certificates")
 	set.StringVar(&options.stateDir, "state-dir", ".local/onboarding", "filesystem onboarding state directory")
 	set.StringVar(&options.secretsDir, "secrets-dir", ".local/secrets", "filesystem secret directory")
 	set.StringVar(&options.readerPublicURL, "reader-public-url", os.Getenv("EUDI_PUBLIC_URL"), "public issuance-server URL")
-	set.BoolVar(&options.watch, "watch", false, "continuously reconcile FSC contracts")
+	set.StringVar(&options.sourcesDir, "sources-dir", getEnv("SOURCE_CONFIGURATIONS_PATH", "sources/configured"), "directory containing manually managed source configurations")
+	set.BoolVar(&options.once, "once", false, "run one reconciliation and exit")
+	set.BoolVar(&options.watch, "watch", false, "reconcile at startup and continuously watch for source and metadata changes")
 	set.DurationVar(&options.interval, "interval", 30*time.Second, "poll interval in watch mode")
 	if err := set.Parse(arguments); err != nil {
 		return reconcileOptions{}, err
@@ -132,10 +156,9 @@ func parseReconcileOptions(arguments []string, errorOutput io.Writer) (reconcile
 		return reconcileOptions{}, fmt.Errorf("unexpected positional arguments: %s", strings.Join(set.Args(), " "))
 	}
 	for name, value := range map[string]string{
-		"--manager-url": options.managerURL, "--manager-ca": options.managerCAPath,
-		"--manager-cert": options.managerCertPath, "--manager-key": options.managerKeyPath,
-		"--consumer-oin": options.consumerOIN, "--outway-url": options.outwayURL,
-		"--schema": options.schemaPath, "--type-metadata-base-url": options.publicBaseURL,
+		"--consumer-oin": options.consumerOIN,
+		"--schema":       options.schemaPath, "--type-metadata-base-url": options.publicBaseURL,
+		"--sources-dir": options.sourcesDir,
 	} {
 		if strings.TrimSpace(value) == "" {
 			return reconcileOptions{}, fmt.Errorf("%s is required", name)
@@ -146,6 +169,9 @@ func parseReconcileOptions(arguments []string, errorOutput io.Writer) (reconcile
 	}
 	if options.interval <= 0 {
 		return reconcileOptions{}, fmt.Errorf("--interval must be positive")
+	}
+	if options.once == options.watch {
+		return reconcileOptions{}, fmt.Errorf("exactly one of --once or --watch is required")
 	}
 	return options, nil
 }

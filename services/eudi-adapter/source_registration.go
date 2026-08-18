@@ -16,11 +16,11 @@ import (
 	"time"
 
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
-	"gopkg.in/yaml.v3"
 )
 
 var (
 	sourceOINPattern        = regexp.MustCompile(`^[0-9]{20}$`)
+	sourceIDPattern         = regexp.MustCompile(`^[a-z0-9]+(?:[-_][a-z0-9]+)*$`)
 	serviceReferencePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 	typeIDPattern           = regexp.MustCompile(`^[a-z0-9]+(?:[._-][a-z0-9]+)*$`)
 	numericVersionPattern   = regexp.MustCompile(`^[0-9]+(?:\.[0-9]+){0,2}$`)
@@ -28,7 +28,7 @@ var (
 
 const (
 	sourceTransportFSC       = "fsc"
-	sourceTransportHTTPSMTLS = "https-mtls"
+	sourceTransportUnsecured = "unsecured"
 )
 
 type sourceMetadataEndpoint struct {
@@ -46,12 +46,21 @@ type sourceDataAccess struct {
 }
 
 type sourceRegistration struct {
+	SourceID         string                 `json:"source_id,omitempty" yaml:"source_id,omitempty"`
 	SourceOIN        string                 `json:"source_oin" yaml:"source_oin"`
 	Name             string                 `json:"name" yaml:"name"`
+	CertificateSet   string                 `json:"certificate_set,omitempty" yaml:"certificate_set,omitempty"`
 	MetadataEndpoint sourceMetadataEndpoint `json:"metadata_endpoint" yaml:"metadata_endpoint"`
 	DataAccess       sourceDataAccess       `json:"data_access" yaml:"data_access"`
 	// Logo is certificate-provisioning input, not source-published metadata.
 	Logo *organizationLogo `json:"-" yaml:"-"`
+}
+
+func (r sourceRegistration) certificateSetID() string {
+	if r.CertificateSet != "" {
+		return r.CertificateSet
+	}
+	return r.SourceOIN
 }
 
 type validatedSourceRegistration struct {
@@ -60,46 +69,23 @@ type validatedSourceRegistration struct {
 	Payload      []byte
 	MetadataURL  string
 	Publications []*typeMetadataPublication
-}
-
-func loadSourceRegistration(path string) (sourceRegistration, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return sourceRegistration{}, fmt.Errorf("read source registration: %w", err)
-	}
-	registration, err := parseSourceRegistrationYAML(raw)
-	if err != nil {
-		return sourceRegistration{}, err
-	}
-	if err := registration.validate(); err != nil {
-		return sourceRegistration{}, err
-	}
-	if err := validateSourceRegistrationUniqueness(path, registration); err != nil {
-		return sourceRegistration{}, err
-	}
-	return registration, nil
-}
-
-func parseSourceRegistrationYAML(raw []byte) (sourceRegistration, error) {
-	var registration sourceRegistration
-	decoder := yaml.NewDecoder(bytes.NewReader(raw))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&registration); err != nil {
-		return sourceRegistration{}, fmt.Errorf("parse source registration: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		return sourceRegistration{}, fmt.Errorf("parse source registration: multiple YAML documents are not supported")
-	}
-	return registration, nil
+	ValidatedAt  time.Time
+	ExpiresAt    time.Time
+	MetadataETag string
 }
 
 func (r sourceRegistration) validate() error {
+	if r.SourceID != "" && !sourceIDPattern.MatchString(r.SourceID) {
+		return fmt.Errorf("source registration source_id is invalid")
+	}
 	if !sourceOINPattern.MatchString(r.SourceOIN) {
 		return fmt.Errorf("source registration source_oin must contain exactly 20 digits")
 	}
 	if strings.TrimSpace(r.Name) == "" {
 		return fmt.Errorf("source registration name is required")
+	}
+	if r.CertificateSet != "" && !sourceIDPattern.MatchString(r.CertificateSet) {
+		return fmt.Errorf("source registration certificate_set is invalid")
 	}
 	if err := r.MetadataEndpoint.validate(); err != nil {
 		return fmt.Errorf("source registration metadata_endpoint: %w", err)
@@ -128,12 +114,15 @@ func (e sourceMetadataEndpoint) validate() error {
 		if e.GrantHash == "" {
 			return fmt.Errorf("grant_hash is required for FSC transport")
 		}
-	case sourceTransportHTTPSMTLS:
+	case sourceTransportUnsecured:
 		if e.ServiceReference != "" || e.Path != "" {
-			return fmt.Errorf("service_reference and path are not allowed for https-mtls transport")
+			return fmt.Errorf("service_reference and path are not allowed for unsecured transport")
 		}
-		if err := validateAbsoluteHTTPSEndpoint(e.Endpoint); err != nil {
+		if err := validateAbsoluteUnsecuredEndpoint(e.Endpoint); err != nil {
 			return fmt.Errorf("endpoint: %w", err)
+		}
+		if e.GrantHash != "" {
+			return fmt.Errorf("grant_hash is not allowed for unsecured transport")
 		}
 	default:
 		return fmt.Errorf("unsupported transport %q", e.Transport)
@@ -150,9 +139,12 @@ func (a sourceDataAccess) validate() error {
 		if a.GrantHash == "" {
 			return fmt.Errorf("grant_hash is required for FSC transport")
 		}
-	case sourceTransportHTTPSMTLS:
+	case sourceTransportUnsecured:
 		if a.ServiceReference != "" {
-			return fmt.Errorf("service_reference is not allowed for https-mtls transport")
+			return fmt.Errorf("service_reference is not allowed for unsecured transport")
+		}
+		if a.GrantHash != "" {
+			return fmt.Errorf("grant_hash is not allowed for unsecured transport")
 		}
 	default:
 		return fmt.Errorf("unsupported transport %q", a.Transport)
@@ -168,73 +160,12 @@ func validateAbsoluteURLPath(value string) error {
 	return nil
 }
 
-func validateAbsoluteHTTPSEndpoint(value string) error {
+func validateAbsoluteUnsecuredEndpoint(value string) error {
 	parsed, err := url.Parse(value)
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return fmt.Errorf("must be an absolute HTTPS URL without credentials, query or fragment")
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("must be an absolute HTTP(S) URL without credentials, query or fragment")
 	}
 	return nil
-}
-
-func (r sourceRegistration) metadataURL(outwayURL string) (string, error) {
-	switch r.MetadataEndpoint.Transport {
-	case sourceTransportFSC:
-		if strings.TrimSpace(outwayURL) == "" {
-			return "", fmt.Errorf("FSC Outway URL is required")
-		}
-		return strings.TrimRight(outwayURL, "/") + r.MetadataEndpoint.Path, nil
-	case sourceTransportHTTPSMTLS:
-		return "", fmt.Errorf("source metadata transport %q is configured but not implemented", sourceTransportHTTPSMTLS)
-	default:
-		return "", fmt.Errorf("unsupported source metadata transport %q", r.MetadataEndpoint.Transport)
-	}
-}
-
-func validateSourceRegistrationUniqueness(path string, registration sourceRegistration) error {
-	entries, err := filepath.Glob(filepath.Join(filepath.Dir(path), "*.yaml"))
-	if err != nil {
-		return fmt.Errorf("list source registrations: %w", err)
-	}
-	current, err := filepath.Abs(path)
-	if err != nil {
-		return fmt.Errorf("resolve source registration path: %w", err)
-	}
-	for _, candidate := range entries {
-		absolute, err := filepath.Abs(candidate)
-		if err != nil || absolute == current {
-			continue
-		}
-		raw, err := os.ReadFile(candidate)
-		if err != nil {
-			return fmt.Errorf("read source registration %q: %w", candidate, err)
-		}
-		other, err := parseSourceRegistrationYAML(raw)
-		if err != nil {
-			return fmt.Errorf("parse source registration %q: %w", candidate, err)
-		}
-		if other.SourceOIN == registration.SourceOIN {
-			return fmt.Errorf("source OIN %q is registered more than once", registration.SourceOIN)
-		}
-	}
-	return nil
-}
-
-func validateSourceOnline(ctx context.Context, client *http.Client, registration sourceRegistration, outwayURL, schemaPath, publicBaseURL string, now time.Time) (*validatedSourceRegistration, error) {
-	if client == nil {
-		return nil, fmt.Errorf("source validation HTTP client is required")
-	}
-	if err := validateTypeMetadataBaseURL(publicBaseURL); err != nil {
-		return nil, err
-	}
-	metadataURL, err := registration.metadataURL(outwayURL)
-	if err != nil {
-		return nil, err
-	}
-	payload, err := fetchSourceMetadata(ctx, client, metadataURL, registration.MetadataEndpoint.Transport, registration.MetadataEndpoint.GrantHash)
-	if err != nil {
-		return nil, err
-	}
-	return validateSourcePayload(registration, payload, metadataURL, schemaPath, publicBaseURL, now)
 }
 
 func validateSourcePayload(registration sourceRegistration, payload []byte, metadataURL, schemaPath, publicBaseURL string, now time.Time) (*validatedSourceRegistration, error) {
@@ -266,6 +197,7 @@ func validateSourcePayload(registration sourceRegistration, payload []byte, meta
 	}
 	seenTypes := make(map[string]bool, len(attestations))
 	publications := make([]*typeMetadataPublication, 0, len(attestations))
+	var expiresAt time.Time
 	for _, definition := range attestations {
 		if seenTypes[definition.TypeID] {
 			return nil, fmt.Errorf("source metadata contains duplicate type_id %q", definition.TypeID)
@@ -277,10 +209,12 @@ func validateSourcePayload(registration sourceRegistration, payload []byte, meta
 		if err := validateGraphQLEndpoint(definition.GraphQL, registration.DataAccess.Transport); err != nil {
 			return nil, fmt.Errorf("attestation %q graphql.endpoint: %w", definition.TypeID, err)
 		}
-		if _, err := validateSourceMetadataEnvelope(document, definition, now, defaultSourceMetadataCachePolicy); err != nil {
+		validatedExpiry, err := validateSourceMetadataEnvelope(document, definition, now, defaultSourceMetadataCachePolicy)
+		if err != nil {
 			return nil, err
 		}
-		publication, err := newTypeMetadataPublication(publicBaseURL, document.SourceOIN, definition)
+		expiresAt = validatedExpiry
+		publication, err := newTypeMetadataPublication(publicBaseURL, registration.SourceID, definition)
 		if err != nil {
 			return nil, fmt.Errorf("materialise type metadata for %q: %w", definition.TypeID, err)
 		}
@@ -292,42 +226,84 @@ func validateSourcePayload(registration sourceRegistration, payload []byte, meta
 		Payload:      append([]byte(nil), payload...),
 		MetadataURL:  metadataURL,
 		Publications: publications,
+		ValidatedAt:  now.UTC(),
+		ExpiresAt:    expiresAt.UTC(),
 	}, nil
 }
 
+type sourceMetadataFetch struct {
+	Payload     []byte
+	ETag        string
+	NotModified bool
+}
+
 func fetchSourceMetadata(ctx context.Context, client *http.Client, metadataURL, transport, grantHash string) ([]byte, error) {
+	fetched, err := fetchSourceMetadataCandidate(ctx, client, metadataURL, transport, grantHash, "")
+	if err != nil {
+		return nil, err
+	}
+	if fetched.NotModified {
+		return nil, fmt.Errorf("source returned not modified for an unconditional metadata request")
+	}
+	return fetched.Payload, nil
+}
+
+func fetchSourceMetadataCandidate(ctx context.Context, client *http.Client, metadataURL, transport, grantHash, etag string) (sourceMetadataFetch, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, metadataURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("create source metadata validation request: %w", err)
+		return sourceMetadataFetch{}, fmt.Errorf("create source metadata validation request: %w", err)
 	}
 	req.Header.Set("Accept", sourceMetadataMediaType)
-	if transport == sourceTransportFSC {
+	switch transport {
+	case sourceTransportFSC:
 		txID, err := newFscTransactionID()
 		if err != nil {
-			return nil, fmt.Errorf("generate source metadata Fsc-Transaction-Id: %w", err)
+			return sourceMetadataFetch{}, fmt.Errorf("generate source metadata Fsc-Transaction-Id: %w", err)
 		}
 		req.Header.Set("Fsc-Transaction-Id", txID)
 		req.Header.Set("Fsc-Grant-Hash", grantHash)
-	} else {
-		return nil, fmt.Errorf("source metadata transport %q is configured but not implemented", transport)
+	case sourceTransportUnsecured:
+		// This profile deliberately adds no transport authentication headers.
+	default:
+		return sourceMetadataFetch{}, fmt.Errorf("source metadata transport %q is configured but not implemented", transport)
 	}
-	resp, err := client.Do(req)
+	if etag != "" {
+		req.Header.Set("If-None-Match", etag)
+	}
+	resp, err := doSourceRequest(client, req, transport == sourceTransportUnsecured)
 	if err != nil {
-		return nil, fmt.Errorf("fetch source metadata: %w", err)
+		return sourceMetadataFetch{}, fmt.Errorf("fetch source metadata: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode >= http.StatusMultipleChoices && resp.StatusCode < http.StatusBadRequest {
+		if resp.StatusCode == http.StatusNotModified && etag != "" {
+			return sourceMetadataFetch{ETag: etag, NotModified: true}, nil
+		}
+		return sourceMetadataFetch{}, fmt.Errorf("source metadata redirect is not allowed for %s transport", transport)
+	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("source metadata request returned status %d", resp.StatusCode)
+		return sourceMetadataFetch{}, fmt.Errorf("source metadata request returned status %d", resp.StatusCode)
 	}
 	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if err != nil || mediaType != sourceMetadataMediaType {
-		return nil, fmt.Errorf("source metadata content type must be %s", sourceMetadataMediaType)
+		return sourceMetadataFetch{}, fmt.Errorf("source metadata content type must be %s", sourceMetadataMediaType)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return nil, fmt.Errorf("read source metadata: %w", err)
+		return sourceMetadataFetch{}, fmt.Errorf("read source metadata: %w", err)
 	}
-	return body, nil
+	return sourceMetadataFetch{Payload: body, ETag: resp.Header.Get("ETag")}, nil
+}
+
+func doSourceRequest(client *http.Client, request *http.Request, rejectRedirects bool) (*http.Response, error) {
+	if !rejectRedirects {
+		return client.Do(request)
+	}
+	withoutRedirects := *client
+	withoutRedirects.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	return withoutRedirects.Do(request)
 }
 
 func decodeSourceMetadataDocument(payload []byte) (sourceMetadataDocument, error) {

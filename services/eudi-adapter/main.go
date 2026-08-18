@@ -79,31 +79,33 @@ type config struct {
 	OutwayURL string
 	IssuerOIN string
 
-	// These fields are resolved from the active onboarding record before the
-	// cache starts; they are deliberately not separate deployment settings.
-	SourceMetadataURL             string
-	SourceMetadataTransport       string
-	SourceMetadataGrantHash       string
+	// These fields are resolved from the active onboarding record before
+	// serving begins; they are deliberately not separate deployment settings.
 	SourceDataTransport           string
 	SourceDataFSCServiceReference string
 	SourceDataFSCGrantHash        string
+	SourceMetadataSourceID        string
 	SourceMetadataOIN             string
 	SourceMetadataTypeID          string
+	SourceMetadataVersion         string
+	SourceMetadataDefinition      sourceAttestationDefinition
+	SourceMetadataVCT             string
+	SourceMetadataVCTIntegrity    string
+	SourceMetadataFreshUntil      time.Time
+	SourceMetadataStaleUntil      time.Time
 
-	SourceActivationPath      string
-	SourceActivationsPath     string
-	TypeMetadataPublicBaseURL string
-	TypeMetadataStorePath     string
+	SourceActivationPath  string
+	SourceActivationsPath string
+	TypeMetadataStorePath string
 }
 
 func loadConfig() config {
 	return config{
-		Port:                      getEnv("PORT", "4009"),
-		OutwayURL:                 getEnv("FSC_OUTWAY_URL", "http://edi-outway:8080"),
-		IssuerOIN:                 getEnv("ISSUER_OIN", "00000004000000004000"),
-		SourceActivationsPath:     os.Getenv("SOURCE_ACTIVATIONS_PATH"),
-		TypeMetadataPublicBaseURL: os.Getenv("TYPE_METADATA_PUBLIC_BASE_URL"),
-		TypeMetadataStorePath:     getEnv("TYPE_METADATA_STORE_PATH", "/var/lib/gbo/type-metadata"),
+		Port:                  getEnv("PORT", "4009"),
+		OutwayURL:             getEnv("FSC_OUTWAY_URL", "http://edi-outway:8080"),
+		IssuerOIN:             getEnv("ISSUER_OIN", "00000004000000004000"),
+		SourceActivationsPath: os.Getenv("SOURCE_ACTIVATIONS_PATH"),
+		TypeMetadataStorePath: getEnv("TYPE_METADATA_STORE_PATH", "/var/lib/gbo/type-metadata"),
 	}
 }
 
@@ -189,13 +191,23 @@ type fscResult struct {
 // the issuance request URL and are validated against the source declaration.
 func handleSourceAttestation(cfg config, client *http.Client, runtime sourceMetadataRuntime) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		metadata, err := runtime.current(time.Now())
+		now := time.Now()
+		resolved := cfg
+		var metadata *activeSourceMetadata
+		var err error
+		if activated, ok := runtime.(interface {
+			currentSource(time.Time) (*activeSourceMetadata, config, error)
+		}); ok {
+			metadata, resolved, err = activated.currentSource(now)
+		} else {
+			metadata, err = runtime.current(now)
+		}
 		if err != nil {
 			logSourceAttestationError(r, "metadata", err)
 			http.Error(w, "source metadata unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		if r.PathValue("sourceOIN") != metadata.SourceOIN || r.PathValue("typeID") != metadata.TypeID {
+		if r.PathValue("sourceID") != metadata.SourceID || r.PathValue("typeID") != metadata.TypeID {
 			http.NotFound(w, r)
 			return
 		}
@@ -230,10 +242,11 @@ func handleSourceAttestation(cfg config, client *http.Client, runtime sourceMeta
 			return
 		}
 		trace.SpanFromContext(r.Context()).SetAttributes(
+			attribute.String("gbo.source_id", metadata.SourceID),
 			attribute.String("gbo.source_oin", metadata.SourceOIN),
 			attribute.String("gbo.type_id", metadata.TypeID),
 		)
-		result, err := callSource(r.Context(), client, cfg, plan)
+		result, err := callSource(r.Context(), client, resolved, plan)
 		if err != nil {
 			logSourceAttestationError(r, "source_request", err)
 			http.Error(w, "source request failed", http.StatusBadGateway)
@@ -268,7 +281,7 @@ func handleSourceAttestation(cfg config, client *http.Client, runtime sourceMeta
 func logSourceAttestationError(r *http.Request, stage string, err error) {
 	slog.Error("source attestation request failed",
 		"stage", stage,
-		"source_oin", r.PathValue("sourceOIN"),
+		"source_id", r.PathValue("sourceID"),
 		"type_id", r.PathValue("typeID"),
 		"err", err.Error(),
 	)
@@ -282,7 +295,7 @@ type sourceRuntimeBinding struct {
 func handleSourceAttestations(client *http.Client, bindings []sourceRuntimeBinding, unavailable error) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		for _, binding := range bindings {
-			if binding.config.SourceMetadataOIN == r.PathValue("sourceOIN") && binding.config.SourceMetadataTypeID == r.PathValue("typeID") {
+			if binding.config.SourceMetadataSourceID == r.PathValue("sourceID") && binding.config.SourceMetadataTypeID == r.PathValue("typeID") {
 				handleSourceAttestation(binding.config, client, binding.runtime).ServeHTTP(w, r)
 				return
 			}
@@ -306,7 +319,7 @@ func (h sourceTypeMetadataHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	for _, binding := range h.bindings {
-		if binding.config.SourceMetadataOIN == parts[0] && binding.config.SourceMetadataTypeID == parts[1] {
+		if binding.config.SourceMetadataSourceID == parts[0] && binding.config.SourceMetadataTypeID == parts[1] {
 			if publisher, ok := binding.runtime.(http.Handler); ok {
 				publisher.ServeHTTP(w, r)
 				return
@@ -387,11 +400,47 @@ func callSource(ctx context.Context, client *http.Client, cfg config, plan sourc
 	switch cfg.SourceDataTransport {
 	case sourceTransportFSC:
 		return callViaFSC(ctx, client, cfg, plan)
-	case sourceTransportHTTPSMTLS:
-		return fscResult{}, fmt.Errorf("source data transport %q is configured but not implemented", sourceTransportHTTPSMTLS)
+	case sourceTransportUnsecured:
+		return callUnsecuredSource(ctx, client, plan)
 	default:
 		return fscResult{}, fmt.Errorf("unsupported source data transport %q", cfg.SourceDataTransport)
 	}
+}
+
+func callUnsecuredSource(ctx context.Context, client *http.Client, plan sourceQueryPlan) (fscResult, error) {
+	if plan.ServiceReference != "" {
+		return fscResult{}, fmt.Errorf("unsecured source GraphQL plan must not contain a service reference")
+	}
+	if err := validateAbsoluteUnsecuredEndpoint(plan.Endpoint); err != nil {
+		return fscResult{}, fmt.Errorf("active unsecured source GraphQL endpoint: %w", err)
+	}
+	body, _ := json.Marshal(proxyRequest{Query: plan.Query, Variables: plan.Variables})
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, plan.Endpoint, bytes.NewReader(body))
+	if err != nil {
+		return fscResult{}, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(request.Header))
+	response, err := doSourceRequest(client, request, true)
+	if err != nil {
+		return fscResult{}, err
+	}
+	defer response.Body.Close()
+	responseBody, _ := io.ReadAll(response.Body)
+	if response.StatusCode >= http.StatusMultipleChoices && response.StatusCode < http.StatusBadRequest {
+		return fscResult{}, fmt.Errorf("unsecured source redirect is not allowed")
+	}
+	if response.StatusCode != http.StatusOK {
+		return fscResult{}, fmt.Errorf("unsecured source status %d", response.StatusCode)
+	}
+	var graphql graphqlResponse
+	if err := json.Unmarshal(responseBody, &graphql); err != nil {
+		return fscResult{}, fmt.Errorf("decode graphql response: %w", err)
+	}
+	if len(graphql.Errors) > 0 {
+		return fscResult{}, fmt.Errorf("graphql errors: %v", graphql.Errors)
+	}
+	return fscResult{Raw: responseBody}, nil
 }
 
 func callViaFSC(ctx context.Context, client *http.Client, cfg config, plan sourceQueryPlan) (fscResult, error) {
@@ -498,7 +547,7 @@ func newMux(cfg config, client *http.Client, metadataRuntime sourceMetadataRunti
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 	if metadataRuntime != nil {
-		mux.HandleFunc("POST /attestations/{sourceOIN}/{typeID}", handleSourceAttestation(cfg, client, metadataRuntime))
+		mux.HandleFunc("POST /attestations/{sourceID}/{typeID}", handleSourceAttestation(cfg, client, metadataRuntime))
 	}
 	if publisher, ok := metadataRuntime.(http.Handler); ok {
 		mux.Handle("/types/", publisher)
@@ -506,38 +555,34 @@ func newMux(cfg config, client *http.Client, metadataRuntime sourceMetadataRunti
 	return mux
 }
 
-// newRuntimeMux always activates onboarded source metadata. If activation or
-// refresh fails, the source route remains present but fail-closed; it never
+// newRuntimeMux always activates onboarded source metadata. If loading or a
+// later snapshot reload fails, the source route remains fail-closed; it never
 // falls back to a catalog query or formatter.
 func newRuntimeMux(ctx context.Context, cfg config, client *http.Client) *http.ServeMux {
+	_ = ctx
 	activatedConfigs, activationErr := configsFromSourceActivations(cfg)
 	if activationErr != nil {
 		slog.Error("active source registrations invalid; all source routes remain fail-closed", "err", activationErr.Error())
 		mux := newMux(cfg, client, nil)
-		mux.HandleFunc("POST /attestations/{sourceOIN}/{typeID}", handleSourceAttestations(client, nil, activationErr))
+		mux.HandleFunc("POST /attestations/{sourceID}/{typeID}", handleSourceAttestations(client, nil, activationErr))
 		mux.Handle("/types/", newUnavailableSourceMetadataRuntime("", "", cfg.TypeMetadataStorePath, activationErr))
 		return mux
 	}
 	bindings := make([]sourceRuntimeBinding, 0, len(activatedConfigs))
 	for _, activatedConfig := range activatedConfigs {
-		cache, err := loadConfiguredSourceMetadataCache(client, activatedConfig)
+		runtime, err := newActivatedSourceRuntime(activatedConfig)
 		if err != nil {
-			slog.Error("source metadata cache activation failed; source route remains fail-closed", "source_oin", activatedConfig.SourceMetadataOIN, "type_id", activatedConfig.SourceMetadataTypeID, "err", err.Error())
+			slog.Error("activated source snapshot is invalid; source route remains fail-closed", "source_id", activatedConfig.SourceMetadataSourceID, "source_oin", activatedConfig.SourceMetadataOIN, "type_id", activatedConfig.SourceMetadataTypeID, "err", err.Error())
 			bindings = append(bindings, sourceRuntimeBinding{activatedConfig, newUnavailableSourceMetadataRuntime(
-				activatedConfig.SourceMetadataOIN, activatedConfig.SourceMetadataTypeID, activatedConfig.TypeMetadataStorePath, err,
+				activatedConfig.SourceMetadataSourceID, activatedConfig.SourceMetadataTypeID, activatedConfig.TypeMetadataStorePath, err,
 			)})
 			continue
 		}
-		if err := cache.Refresh(ctx, time.Now()); err != nil {
-			slog.Error("initial source metadata cache refresh failed; source route remains fail-closed", "source_oin", activatedConfig.SourceMetadataOIN, "type_id", activatedConfig.SourceMetadataTypeID, "err", err.Error())
-		} else {
-			slog.Info("source metadata cache activated", "source_oin", activatedConfig.SourceMetadataOIN, "type_id", activatedConfig.SourceMetadataTypeID)
-		}
-		startSourceMetadataRefresh(ctx, cache, 5*time.Minute)
-		bindings = append(bindings, sourceRuntimeBinding{activatedConfig, cache})
+		slog.Info("source snapshot activated", "source_id", activatedConfig.SourceMetadataSourceID, "source_oin", activatedConfig.SourceMetadataOIN, "type_id", activatedConfig.SourceMetadataTypeID)
+		bindings = append(bindings, sourceRuntimeBinding{activatedConfig, runtime})
 	}
 	mux := newMux(cfg, client, nil)
-	mux.HandleFunc("POST /attestations/{sourceOIN}/{typeID}", handleSourceAttestations(client, bindings, nil))
+	mux.HandleFunc("POST /attestations/{sourceID}/{typeID}", handleSourceAttestations(client, bindings, nil))
 	mux.Handle("/types/", sourceTypeMetadataHandler{bindings: bindings})
 	return mux
 }
@@ -560,7 +605,7 @@ func main() {
 	}
 	if handled, err := runReconcileCommand(ctx, os.Args[1:], defaultReconcileDependencies()); handled {
 		if err != nil {
-			fatal("FSC source reconciliation failed", err)
+			fatal("source reconciliation failed", err)
 		}
 		return
 	}
