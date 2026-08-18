@@ -519,7 +519,7 @@ services:
       # Talks to the real FSC-Outway (Hypotheekverlener-mock) instead
       # of fsc-mock. OutwayPath = grant-link /bri + backend-path /graphql.
       # The signed consent token supplies the PI and scopes; the PDP verifies
-      # it and checks revocation at S01.
+      # it and checks revocation at the consent-register.
       - OUTWAY_URL=http://hv-outway:8080
       - OUTWAY_PATH=/bri/graphql
       - ORG_OIN=99999999900000000300
@@ -616,6 +616,9 @@ services:
     environment:
       - CHOKIDAR_USEPOLLING=true
       - PORTAL_API_TARGET=http://consent-portal-backend:4005
+      # The bearer consent token may only return to explicitly trusted
+      # consumer origins. Multiple origins can be supplied comma-separated.
+      - VITE_ALLOWED_RETURN_ORIGINS=${DIENSTVERLENER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_DV_MOCK:-9001}}
     volumes:
       - ./toestemmingsportaal-frontend/src:/app/src
       - ./toestemmingsportaal-frontend/public:/app/public

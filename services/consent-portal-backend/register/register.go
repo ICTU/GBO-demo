@@ -29,7 +29,7 @@ func (c Client) Create(ctx context.Context, d consent.Draft) (consent.Record, er
 		ConsentID    string `json:"consent_id"`
 		ConsentToken string `json:"consent_token"`
 	}
-	// PI is transient token material. subject_ref is the only subject value S01
+	// PI is transient token material. subject_ref is the only subject value the consent register
 	// persists and returns.
 	_, err := c.Caller.DoPrivate(ctx, "Create Consent", http.MethodPost, c.Base+"/consents", map[string]any{
 		"pi":                 string(d.PI),

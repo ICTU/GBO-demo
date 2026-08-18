@@ -416,9 +416,9 @@ _check_consent_context_valid(spec, ctx) := step if {
 _check_consent_status_available(spec, ctx) := step if {
 	spec.consent_status_required
 	ctx.pip.consent.status_available == true
-	step := _step("CONSENT_STATUS_UNAVAILABLE", "Consent status available", "online S01 status check succeeded", "pass")
+	step := _step("CONSENT_STATUS_UNAVAILABLE", "Consent status available", "online consent-register status check succeeded", "pass")
 } else := step if {
 	spec.consent_status_required
 	not ctx.pip.consent.status_available == true
-	step := _step("CONSENT_STATUS_UNAVAILABLE", "Consent status available", "online S01 status check succeeded", "fail")
+	step := _step("CONSENT_STATUS_UNAVAILABLE", "Consent status available", "online consent-register status check succeeded", "fail")
 } else := _step_skipped("CONSENT_STATUS_UNAVAILABLE", "Consent status available", "n/a")

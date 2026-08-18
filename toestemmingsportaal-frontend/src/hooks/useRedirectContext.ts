@@ -1,22 +1,26 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router'
+import {
+  parseAllowedReturnOrigins,
+  validatedRedirectContext,
+  type RedirectContext,
+} from './redirectValidation'
 
-export type RedirectContext = {
-  service: string
-  purpose: string
-  scope: string[]
-  client_oin: string
-  client_name: string
-  valid_until: string
-  return_url: string
-}
+export type { RedirectContext } from './redirectValidation'
 
 const STORAGE_KEY = 'gbo.redirect_context'
+const DEFAULT_ALLOWED_RETURN_ORIGINS = 'http://localhost:9001'
+
+function configuredReturnOrigins() {
+  const configured = import.meta.env.VITE_ALLOWED_RETURN_ORIGINS
+    ?? DEFAULT_ALLOWED_RETURN_ORIGINS
+  return parseAllowedReturnOrigins(configured)
+}
 
 function parseFromParams(p: URLSearchParams): RedirectContext | null {
   const required = ['service', 'purpose', 'scope', 'client_oin', 'client_name', 'return_url']
   if (required.some((k) => !p.get(k))) return null
-  return {
+  return validatedRedirectContext({
     service: p.get('service')!,
     purpose: p.get('purpose')!,
     scope: p.get('scope')!.split(',').filter(Boolean),
@@ -24,7 +28,7 @@ function parseFromParams(p: URLSearchParams): RedirectContext | null {
     client_name: p.get('client_name')!,
     valid_until: p.get('valid_until') ?? '',
     return_url: p.get('return_url')!,
-  }
+  }, configuredReturnOrigins())
 }
 
 export function useRedirectContext(): RedirectContext | null {
@@ -36,7 +40,12 @@ export function useRedirectContext(): RedirectContext | null {
       return fromParams
     }
     const stored = sessionStorage.getItem(STORAGE_KEY)
-    return stored ? (JSON.parse(stored) as RedirectContext) : null
+    if (!stored) return null
+    try {
+      return validatedRedirectContext(JSON.parse(stored), configuredReturnOrigins())
+    } catch {
+      return null
+    }
   })
 
   useEffect(() => {

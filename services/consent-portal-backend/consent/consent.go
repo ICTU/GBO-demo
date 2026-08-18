@@ -20,11 +20,11 @@ import (
 type BSN string
 
 // PI is the recipient-independent pseudonymous identity BSNk derives from a
-// BSN. S01 only sees it transiently while signing the authorization context;
+// BSN. The consent register only sees it transiently while signing the authorization context;
 // it is never part of the persisted consent record.
 type PI string
 
-// SubjectRef is a pseudonym scoped to the consent portal. S01 may persist it
+// SubjectRef is a pseudonym scoped to the consent portal. The consent register may persist it
 // for citizen listing and ownership checks; unlike PI it cannot be reused by
 // a service provider or source holder.
 type SubjectRef string

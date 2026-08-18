@@ -55,7 +55,7 @@ type Granted struct {
 }
 
 // GiveConsent derives the authorization PI and a separate portal-scoped
-// subject reference, then asks S01 to persist the latter and sign the former.
+// subject reference, then asks the consent register to persist the latter and sign the former.
 //
 // The ordering here is the privacy invariant: pseudonymisation happens first,
 // and nothing below that line holds a BSN it could hand onwards — Draft has
@@ -76,7 +76,7 @@ func (p *Portal) GiveConsent(ctx context.Context, citizen BSN, in GiveInput) (Gr
 	}
 	emit("pseudonym_generated", "bsnk-mock", map[string]any{"pseudonym": ps.Pseudonym})
 
-	// S01 needs a subject key for citizen listing, but must not persist PI.
+	// The consent register needs a subject key for citizen listing, but must not persist PI.
 	// A second BSNk derivation scoped to the portal provides that key.
 	portalSubject, err := p.Pseudonyms.Pseudonymize(ctx, citizen, p.OwnOIN)
 	if err != nil {

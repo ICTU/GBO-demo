@@ -42,7 +42,12 @@ import (
 	"gitlab.com/digilab.overheid.nl/ecosystem/ftv/open-ftv/eam/models"
 )
 
-const gqlMaxDepth = 64
+const (
+	gqlMaxDepth         = 64
+	consentClockSkew    = 30 * time.Second
+	consentJWKSCacheTTL = 5 * time.Minute
+	consentJWKSMaxStale = time.Hour
+)
 
 // GraphQLToContext detects a GraphQL body in the action attributes and
 // enriches the context. Bodies that do not decode as a GraphQL request
@@ -242,10 +247,6 @@ func fetchConsent(headers map[string]string) map[string]any {
 	if tokenString == "" {
 		return invalidConsent("consent token missing")
 	}
-	keys, err := fetchConsentKeys()
-	if err != nil {
-		return invalidConsent("consent verification keys unavailable")
-	}
 	claims := &consentClaims{}
 	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (any, error) {
 		if token.Method != jwt.SigningMethodES256 {
@@ -255,17 +256,17 @@ func fetchConsent(headers map[string]string) map[string]any {
 			return nil, fmt.Errorf("unexpected consent token type")
 		}
 		kid, _ := token.Header["kid"].(string)
-		key, ok := keys[kid]
-		if !ok {
-			return nil, fmt.Errorf("unknown consent signing key")
+		if kid == "" {
+			return nil, fmt.Errorf("consent signing key id missing")
 		}
-		return key, nil
+		return consentSigningKey(kid)
 	},
 		jwt.WithValidMethods([]string{jwt.SigningMethodES256.Alg()}),
 		jwt.WithIssuer(consentIssuer()),
 		jwt.WithAudience(consentAudience()),
 		jwt.WithExpirationRequired(),
 		jwt.WithIssuedAt(),
+		jwt.WithLeeway(consentClockSkew),
 	)
 	if err != nil || token == nil || !token.Valid {
 		return invalidConsent("consent token verification failed")
@@ -310,10 +311,63 @@ func fetchConsent(headers map[string]string) map[string]any {
 	}
 }
 
-func fetchConsentKeys() (map[string]*ecdsa.PublicKey, error) {
+type consentKeyCache struct {
+	mu         sync.Mutex
+	source     string
+	keys       map[string]*ecdsa.PublicKey
+	freshUntil time.Time
+	staleUntil time.Time
+	now        func() time.Time
+}
+
+var cachedConsentKeys = consentKeyCache{now: time.Now}
+
+// consentSigningKey keeps known verification keys local to the PDP. An
+// unknown kid always triggers a refresh so key rotation takes effect without
+// waiting for the TTL. During a brief JWKS outage a previously verified key
+// remains usable for a bounded period; the separate online consent-status
+// check still fails closed if the consent register itself is unavailable.
+func consentSigningKey(kid string) (*ecdsa.PublicKey, error) {
+	cache := &cachedConsentKeys
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+
+	source := consentURL()
+	now := cache.now()
+	if cache.source != source {
+		cache.source = source
+		cache.keys = nil
+		cache.freshUntil = time.Time{}
+		cache.staleUntil = time.Time{}
+	}
+
+	known := cache.keys[kid]
+	if known != nil && now.Before(cache.freshUntil) {
+		return known, nil
+	}
+
+	keys, err := fetchConsentKeys(source)
+	if err != nil {
+		if known != nil && now.Before(cache.staleUntil) {
+			return known, nil
+		}
+		return nil, fmt.Errorf("consent verification keys unavailable: %w", err)
+	}
+
+	cache.keys = keys
+	cache.freshUntil = now.Add(consentJWKSCacheTTL)
+	cache.staleUntil = now.Add(consentJWKSMaxStale)
+	key := keys[kid]
+	if key == nil {
+		return nil, fmt.Errorf("unknown consent signing key")
+	}
+	return key, nil
+}
+
+func fetchConsentKeys(source string) (map[string]*ecdsa.PublicKey, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, consentURL()+"/.well-known/jwks.json", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, source+"/.well-known/jwks.json", nil)
 	if err != nil {
 		return nil, err
 	}

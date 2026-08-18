@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -15,7 +16,7 @@ const consentSchema = `
 CREATE TABLE IF NOT EXISTS consents (
     consent_id text PRIMARY KEY,
     status text NOT NULL,
-    subject_ref text,
+    subject_ref text NOT NULL DEFAULT '',
     dienstverlener_oin text NOT NULL,
     scopes jsonb NOT NULL,
     scope_entries jsonb NOT NULL,
@@ -24,7 +25,10 @@ CREATE TABLE IF NOT EXISTS consents (
     valid_until timestamptz NOT NULL
 );
 
-ALTER TABLE consents ADD COLUMN IF NOT EXISTS subject_ref text;
+ALTER TABLE consents ADD COLUMN IF NOT EXISTS subject_ref text NOT NULL DEFAULT '';
+UPDATE consents SET subject_ref = '' WHERE subject_ref IS NULL;
+ALTER TABLE consents ALTER COLUMN subject_ref SET DEFAULT '';
+ALTER TABLE consents ALTER COLUMN subject_ref SET NOT NULL;
 DROP INDEX IF EXISTS consents_pi_status_idx;
 ALTER TABLE consents DROP COLUMN IF EXISTS pi;
 
@@ -217,13 +221,14 @@ func (s *PostgreSQLStore) Revoke(ctx context.Context, consentID string) (*Consen
 
 func scanConsent(row rowScanner) (*Consent, error) {
 	consent := &Consent{}
+	var subjectRef pgtype.Text
 	var scopes []byte
 	var scopeEntries []byte
 
 	err := row.Scan(
 		&consent.ConsentID,
 		&consent.Status,
-		&consent.SubjectRef,
+		&subjectRef,
 		&consent.DienstverlenrOIN,
 		&scopes,
 		&scopeEntries,
@@ -233,6 +238,9 @@ func scanConsent(row rowScanner) (*Consent, error) {
 	)
 	if err != nil {
 		return nil, fmt.Errorf("scan consent: %w", err)
+	}
+	if subjectRef.Valid {
+		consent.SubjectRef = subjectRef.String
 	}
 
 	if err := json.Unmarshal(scopes, &consent.Scopes); err != nil {

@@ -130,7 +130,9 @@ contracts and generated configuration in the required order.
 5. Revoke the consent and repeat the query. The PDP now denies it with
    `CONSENT_WITHDRAWN`.
 
-The demo consent token is a bearer JWT. S01 generates an ephemeral P-256 key
+`S01` is the architecture role identifier used in the demo diagrams for the
+consent-register; it is not a separate service. The demo consent token is a
+bearer JWT. The consent-register generates an ephemeral P-256 key
 when `CONSENT_SIGNING_KEY_PATH` is empty, matching its default in-memory
 consent store. A persistent deployment must provide a stable PKCS#8 or SEC1
 P-256 private key and set an explicit `CONSENT_SIGNING_KEY_ID`. The demo JWKS
@@ -140,6 +142,12 @@ lifetime and bind proof of possession
 to the FSC/mTLS identity (for example with a confirmation claim); the current
 explicit `dienstverlener_oin` check prevents cross-consumer use but does not
 make a stolen bearer token non-replayable by that same consumer.
+
+Because the token returns through the browser, the consent portal only accepts
+`http` or `https` return URLs whose exact origin occurs in
+`VITE_ALLOWED_RETURN_ORIGINS` (comma-separated). Compose derives the demo value
+from `DIENSTVERLENER_PUBLIC_URL`; production images must supply the same value
+as a build argument.
 
 ### EUDI wallet issuance
 

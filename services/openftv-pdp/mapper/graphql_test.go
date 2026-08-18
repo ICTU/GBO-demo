@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -118,8 +119,16 @@ func consentTestToken(t *testing.T, key *ecdsa.PrivateKey, kid, audience string,
 }
 
 func consentTestTokenAt(t *testing.T, key *ecdsa.PrivateKey, kid, audience string, notBefore, expires time.Time) string {
+	return consentTestTokenWithTimes(t, key, kid, audience, time.Now().Add(-time.Minute), notBefore, expires)
+}
+
+func consentTestTokenWithTimes(
+	t *testing.T,
+	key *ecdsa.PrivateKey,
+	kid, audience string,
+	issuedAt, notBefore, expires time.Time,
+) string {
 	t.Helper()
-	now := time.Now().UTC()
 	claims := consentClaims{
 		ConsentID:        "c-signed",
 		PI:               "PI-abc123",
@@ -129,7 +138,7 @@ func consentTestTokenAt(t *testing.T, key *ecdsa.PrivateKey, kid, audience strin
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    "test-issuer",
 			Audience:  jwt.ClaimStrings{audience},
-			IssuedAt:  jwt.NewNumericDate(now.Add(-time.Minute)),
+			IssuedAt:  jwt.NewNumericDate(issuedAt),
 			NotBefore: jwt.NewNumericDate(notBefore),
 			ExpiresAt: jwt.NewNumericDate(expires),
 			ID:        "jti-1",
@@ -143,6 +152,106 @@ func consentTestTokenAt(t *testing.T, key *ecdsa.PrivateKey, kid, audience strin
 		t.Fatal(err)
 	}
 	return signed
+}
+
+func resetConsentKeyCache(t *testing.T) {
+	t.Helper()
+	cachedConsentKeys.mu.Lock()
+	cachedConsentKeys.source = ""
+	cachedConsentKeys.keys = nil
+	cachedConsentKeys.freshUntil = time.Time{}
+	cachedConsentKeys.staleUntil = time.Time{}
+	cachedConsentKeys.now = time.Now
+	cachedConsentKeys.mu.Unlock()
+	t.Cleanup(func() {
+		cachedConsentKeys.mu.Lock()
+		cachedConsentKeys.source = ""
+		cachedConsentKeys.keys = nil
+		cachedConsentKeys.freshUntil = time.Time{}
+		cachedConsentKeys.staleUntil = time.Time{}
+		cachedConsentKeys.now = time.Now
+		cachedConsentKeys.mu.Unlock()
+	})
+}
+
+func jwksHandler(key *ecdsa.PrivateKey, hits *atomic.Int32, fail *atomic.Bool) http.Handler {
+	encode := base64.RawURLEncoding.EncodeToString
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/.well-known/jwks.json" {
+			http.NotFound(w, r)
+			return
+		}
+		hits.Add(1)
+		if fail != nil && fail.Load() {
+			http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"keys": []map[string]string{{
+			"kty": "EC", "crv": "P-256", "alg": "ES256", "kid": "test-key",
+			"x": encode(key.X.FillBytes(make([]byte, 32))),
+			"y": encode(key.Y.FillBytes(make([]byte, 32))),
+		}}})
+	})
+}
+
+func TestConsentSigningKeyCachesAndRefreshesByKid(t *testing.T) {
+	resetConsentKeyCache(t)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hits atomic.Int32
+	server := httptest.NewServer(jwksHandler(key, &hits, nil))
+	defer server.Close()
+	t.Setenv("GBO_CONSENT_URL", server.URL)
+
+	if _, err := consentSigningKey("test-key"); err != nil {
+		t.Fatalf("initial key fetch: %v", err)
+	}
+	if _, err := consentSigningKey("test-key"); err != nil {
+		t.Fatalf("cached key fetch: %v", err)
+	}
+	if got := hits.Load(); got != 1 {
+		t.Fatalf("JWKS fetches = %d, want 1 for cached key", got)
+	}
+	if _, err := consentSigningKey("unknown-key"); err == nil {
+		t.Fatal("unknown kid accepted")
+	}
+	if got := hits.Load(); got != 2 {
+		t.Fatalf("JWKS fetches = %d, want refresh for unknown kid", got)
+	}
+}
+
+func TestConsentSigningKeyUsesBoundedStaleKeyOnJWKSFailure(t *testing.T) {
+	resetConsentKeyCache(t)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hits atomic.Int32
+	var fail atomic.Bool
+	server := httptest.NewServer(jwksHandler(key, &hits, &fail))
+	defer server.Close()
+	t.Setenv("GBO_CONSENT_URL", server.URL)
+
+	now := time.Now()
+	cachedConsentKeys.mu.Lock()
+	cachedConsentKeys.now = func() time.Time { return now }
+	cachedConsentKeys.mu.Unlock()
+	if _, err := consentSigningKey("test-key"); err != nil {
+		t.Fatalf("initial key fetch: %v", err)
+	}
+
+	fail.Store(true)
+	now = now.Add(consentJWKSCacheTTL + time.Second)
+	if _, err := consentSigningKey("test-key"); err != nil {
+		t.Fatalf("stale key rejected during brief outage: %v", err)
+	}
+
+	now = now.Add(consentJWKSMaxStale)
+	if _, err := consentSigningKey("test-key"); err == nil {
+		t.Fatal("key remained usable beyond maximum stale period")
+	}
 }
 
 func consentTestServer(t *testing.T, key *ecdsa.PrivateKey, status string) *httptest.Server {
@@ -187,6 +296,37 @@ func TestFetchConsentVerifiesTokenAndExactStatus(t *testing.T) {
 	}
 	if got["pi"] != "PI-abc123" || got["dienstverlener_oin"] != "99999999900000000300" {
 		t.Fatalf("signed bindings missing: %#v", got)
+	}
+}
+
+func TestFetchConsentAllowsOnlyBoundedClockSkew(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := consentTestServer(t, key, "ACTIVE")
+	defer server.Close()
+	t.Setenv("GBO_CONSENT_URL", server.URL)
+	t.Setenv("GBO_CONSENT_ISSUER", "test-issuer")
+	t.Setenv("GBO_CONSENT_AUDIENCE", "test-audience")
+
+	now := time.Now().UTC()
+	withinLeeway := consentTestTokenWithTimes(
+		t, key, "test-key", "test-audience",
+		now.Add(20*time.Second), now.Add(20*time.Second), now.Add(time.Hour),
+	)
+	got := fetchConsent(map[string]string{"x-gbo-consent-token": withinLeeway})
+	if got["context_valid"] != true {
+		t.Fatalf("clock skew within leeway rejected: %#v", got)
+	}
+
+	beyondLeeway := consentTestTokenWithTimes(
+		t, key, "test-key", "test-audience",
+		now.Add(time.Minute), now.Add(time.Minute), now.Add(time.Hour),
+	)
+	got = fetchConsent(map[string]string{"x-gbo-consent-token": beyondLeeway})
+	if got["context_valid"] != false {
+		t.Fatalf("clock skew beyond leeway accepted: %#v", got)
 	}
 }
 
