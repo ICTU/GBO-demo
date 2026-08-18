@@ -123,9 +123,3 @@ func (c sourceConfiguration) validate() error {
 	}
 	return nil
 }
-
-func (c sourceConfiguration) registration() sourceRegistration {
-	return sourceRegistration{
-		SourceID: c.SourceID, SourceOIN: c.SourceOIN, Name: c.Name, CertificateSet: c.CertificateSet,
-	}
-}
