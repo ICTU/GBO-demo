@@ -35,8 +35,8 @@ func (c testContracts) Snapshot(context.Context, time.Time) (ContractSnapshot, e
 	return c, c.err
 }
 
-func (c testContracts) Grant(providerOIN, service string) (Grant, bool) {
-	grant, ok := c.grants[providerOIN+"/"+service]
+func (c testContracts) Grant(providerPeerID, service string) (Grant, bool) {
+	grant, ok := c.grants[providerPeerID+"/"+service]
 	return grant, ok
 }
 
@@ -194,8 +194,8 @@ func TestNotModifiedRefreshesCurrentFSCGrantHashes(t *testing.T) {
 	activations := &testActivations{candidates: map[string]*testCandidate{source.ID: existing}}
 	statuses := &testStatuses{bySource: map[string]Status{}}
 	contracts := testContracts{grants: map[string]Grant{
-		source.OIN + "/metadata": {Hash: "metadata-v2"},
-		source.OIN + "/data":     {Hash: "data-v2"},
+		source.ProviderPeerID + "/metadata": {Hash: "metadata-v2"},
+		source.ProviderPeerID + "/data":     {Hash: "data-v2"},
 	}}
 	service := newTestService(t, []Source{source}, contracts, metadata, certificates, activations, statuses)
 
@@ -242,7 +242,7 @@ func unsecuredSource(id, endpoint string) Source {
 
 func fscSource(id string) Source {
 	return Source{
-		ID: id, OIN: "00000000000000000001", Name: id, CertificateSet: id,
+		ID: id, ProviderPeerID: "0000009958MINBZK0000", OIN: "00000000000000000001", Name: id, CertificateSet: id,
 		MetadataEndpoint:    MetadataEndpoint{Transport: TransportFSC, ServiceReference: "metadata", Path: "/.well-known/gbo"},
 		DataAccessTransport: TransportFSC,
 	}

@@ -1,4 +1,5 @@
 source_id: belastingdienst
+provider_peer_id: "99999999900000000200"
 source_oin: "99999999900000000200"
 name: Belastingdienst
 certificate_set: belastingdienst

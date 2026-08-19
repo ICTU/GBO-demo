@@ -54,10 +54,10 @@ type fscContractService struct {
 }
 
 type fscConnectionGrant struct {
-	ProviderOIN string
-	ServiceName string
-	GrantHash   string
-	CreatedAt   int64
+	ProviderPeerID string
+	ServiceName    string
+	GrantHash      string
+	CreatedAt      int64
 }
 
 type fscContractSnapshot struct {
@@ -86,7 +86,7 @@ func newFSCManagerHTTPClient(caPath, certPath, keyPath string) (*http.Client, er
 	return &http.Client{Timeout: 15 * time.Second, Transport: transport}, nil
 }
 
-func loadFSCContractSnapshot(ctx context.Context, client *http.Client, managerURL, consumerOIN string, now time.Time) (*fscContractSnapshot, error) {
+func loadFSCContractSnapshot(ctx context.Context, client *http.Client, managerURL, consumerPeerID string, now time.Time) (*fscContractSnapshot, error) {
 	if client == nil {
 		return nil, fmt.Errorf("FSC Manager HTTP client is required")
 	}
@@ -125,11 +125,11 @@ func loadFSCContractSnapshot(ctx context.Context, client *http.Client, managerUR
 			continue
 		}
 		for _, grant := range contract.Content.Grants {
-			if grant.Type != "GRANT_TYPE_SERVICE_CONNECTION" || grant.Outway.PeerID != consumerOIN || !sourceOINPattern.MatchString(grant.Service.PeerID) || !serviceReferencePattern.MatchString(grant.Service.Name) || grant.Hash == "" {
+			if grant.Type != "GRANT_TYPE_SERVICE_CONNECTION" || grant.Outway.PeerID != consumerPeerID || !peerIDPattern.MatchString(grant.Service.PeerID) || !serviceReferencePattern.MatchString(grant.Service.Name) || grant.Hash == "" {
 				continue
 			}
-			candidate := fscConnectionGrant{ProviderOIN: grant.Service.PeerID, ServiceName: grant.Service.Name, GrantHash: grant.Hash, CreatedAt: contract.Content.CreatedAt}
-			key := fscServiceKey(candidate.ProviderOIN, candidate.ServiceName)
+			candidate := fscConnectionGrant{ProviderPeerID: grant.Service.PeerID, ServiceName: grant.Service.Name, GrantHash: grant.Hash, CreatedAt: contract.Content.CreatedAt}
+			key := fscServiceKey(candidate.ProviderPeerID, candidate.ServiceName)
 			current, exists := snapshot.byService[key]
 			if !exists || candidate.CreatedAt > current.CreatedAt || (candidate.CreatedAt == current.CreatedAt && candidate.GrantHash > current.GrantHash) {
 				snapshot.byService[key] = candidate
@@ -171,28 +171,28 @@ func loadFSCContractsPage(ctx context.Context, client *http.Client, endpoint url
 	return payload, nil
 }
 
-func fscServiceKey(providerOIN, serviceName string) string {
-	return providerOIN + "\x00" + serviceName
+func fscServiceKey(providerPeerID, serviceName string) string {
+	return providerPeerID + "\x00" + serviceName
 }
 
-func (s *fscContractSnapshot) service(providerOIN, serviceName string) (fscConnectionGrant, bool) {
+func (s *fscContractSnapshot) service(providerPeerID, serviceName string) (fscConnectionGrant, bool) {
 	if s == nil {
 		return fscConnectionGrant{}, false
 	}
-	grant, ok := s.byService[fscServiceKey(providerOIN, serviceName)]
+	grant, ok := s.byService[fscServiceKey(providerPeerID, serviceName)]
 	return grant, ok
 }
 
 type sourceReconciler struct {
-	managerClient *http.Client
-	sourceClient  *http.Client
-	managerURL    string
-	consumerOIN   string
-	outwayURL     string
-	schemaPath    string
-	publicBaseURL string
-	sources       []sourceConfiguration
-	store         certificateStore
-	backend       activationBackend
-	statuses      sourceStatusWriter
+	managerClient  *http.Client
+	sourceClient   *http.Client
+	managerURL     string
+	consumerPeerID string
+	outwayURL      string
+	schemaPath     string
+	publicBaseURL  string
+	sources        []sourceConfiguration
+	store          certificateStore
+	backend        activationBackend
+	statuses       sourceStatusWriter
 }

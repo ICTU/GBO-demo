@@ -936,7 +936,6 @@ services:
       - OTEL_SERVICE_NAME=eudi-adapter
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
       - FSC_OUTWAY_URL=http://edi-outway:8080
-      - ISSUER_OIN=99999999900000000100
       # Source metadata is activated from the single atomic onboarding record;
       # OIN, type and FSC services are not duplicated in env-vars.
       - SOURCE_ACTIVATIONS_PATH=/var/lib/gbo/active
@@ -965,7 +964,7 @@ services:
       - --manager-ca=/fsc-certs/intermediate_ca.pem
       - --manager-cert=/fsc-certs/internal-cert.pem
       - --manager-key=/fsc-certs/internal-cert-key.pem
-      - --consumer-oin=99999999900000000100
+      - --consumer-peer-id=99999999900000000100
       - --outway-url=http://edi-outway:8080
       - --schema=/config/schemas/gbo-source-metadata-v1.schema.json
       - --type-metadata-base-url=${EUDI_BRI_URL:-http://localhost:9409}

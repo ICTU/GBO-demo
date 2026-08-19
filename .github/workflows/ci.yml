@@ -105,6 +105,10 @@ jobs:
         run: >-
           helm template openftv-pdp deploy/helm/gbo-app
           --values deploy/helm/gbo-app/examples/openftv-pdp-values.yaml
+      - name: helm template — DvTP onboarding register
+        run: >-
+          helm template dvtp-onboarding-register deploy/helm/gbo-app
+          --values deploy/helm/gbo-app/examples/dvtp-onboarding-register-values.yaml
 
   frontend:
     name: Frontend — tsc --strict

@@ -6,10 +6,25 @@ complete for this demo.
 
 The register stores only:
 
-- the participant's 20-digit OIN;
+- the participant's 20-character alphanumeric FSC Peer ID;
 - its display name;
 - whether the admission is active;
-- the OINs of the source holders to which it is admitted.
+- the FSC Peer IDs of the source holders to which it is admitted.
+
+Source holders, technical system participants and optional demo seeds are
+deployment configuration, loaded from `ONBOARDING_CONFIG_PATH` (default:
+`/config/onboarding.json`). The image contains `config/demo.json` for local
+Compose; a deployment should mount its own file. Technical participants are
+included in the internal OpenFTV feed but are neither persisted nor editable
+through the UI.
+
+Kubernetes examples are provided in
+[`deploy/helm/gbo-app/examples/dvtp-onboarding-configmap.yaml`](../../deploy/helm/gbo-app/examples/dvtp-onboarding-configmap.yaml)
+and
+[`deploy/helm/gbo-app/examples/dvtp-onboarding-register-values.yaml`](../../deploy/helm/gbo-app/examples/dvtp-onboarding-register-values.yaml).
+The ConfigMap is deployment-owned because Peer IDs identify the actual FSC
+organizations in that environment; it must be deployed with the register and
+the matching OpenFTV PIP mapping.
 
 The server-rendered UI is available at `http://localhost:9415`. Compose binds
 that port to host loopback only. Mutating forms require a per-process CSRF

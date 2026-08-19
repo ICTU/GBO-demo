@@ -38,23 +38,23 @@
         <div class="table-wrap">
           <table>
             <thead>
-              <tr><th>Organisatie</th><th>OIN</th><th>Bronnen</th><th>Status</th><th><span class="sr-only">Actie</span></th></tr>
+              <tr><th>Organisatie</th><th>Peer ID</th><th>Bronnen</th><th>Status</th><th><span class="sr-only">Actie</span></th></tr>
             </thead>
             <tbody>
               {{range .Participants}}
               <tr class="{{if not .Active}}is-inactive{{end}}">
                 <td class="organization">{{.Name}}</td>
-                <td><code>{{.OIN}}</code></td>
+                <td><code>{{.PeerID}}</code></td>
                 <td>
                   <div class="source-list">
-                    {{range .AllowedSourceOINs}}<span>{{sourceName .}}</span>{{end}}
+                    {{range .AllowedSourcePeerIDs}}<span>{{sourceName .}}</span>{{end}}
                   </div>
                 </td>
                 <td><span class="status {{if .Active}}active{{else}}inactive{{end}}"><i></i>{{if .Active}}Actief{{else}}Gepauzeerd{{end}}</span></td>
                 <td class="action-cell">
                   <div class="row-actions">
-                    <a class="text-button" href="/?edit={{.OIN}}#edit-participant">Bewerken</a>
-                    <form method="post" action="/participants/{{.OIN}}/toggle">
+                    <a class="text-button" href="/?edit={{.PeerID}}#edit-participant">Bewerken</a>
+                    <form method="post" action="/participants/{{.PeerID}}/toggle">
                       <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
                       <button class="text-button" type="submit">{{if .Active}}Pauzeer{{else}}Activeer{{end}}</button>
                     </form>
@@ -76,18 +76,18 @@
             <p class="section-index">Bestaande toelating</p>
             <h2 id="edit-form-title">Partij bewerken</h2>
           </div>
-          <span class="form-context neutral">OIN blijft ongewijzigd</span>
+          <span class="form-context neutral">Peer ID blijft ongewijzigd</span>
         </div>
 
-        <form class="onboarding-form" method="post" action="/participants/{{.OIN}}">
+        <form class="onboarding-form" method="post" action="/participants/{{.PeerID}}">
           <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
           <label>
             <span>Naam organisatie</span>
             <input name="name" autocomplete="organization" required value="{{.Name}}">
           </label>
           <label>
-            <span>OIN</span>
-            <input name="oin" value="{{.OIN}}" readonly aria-readonly="true">
+            <span>Peer ID</span>
+            <input name="peer_id" value="{{.PeerID}}" readonly aria-readonly="true">
           </label>
 
           <fieldset>
@@ -95,7 +95,7 @@
             <div class="checkbox-grid">
               {{range $.Sources}}
               <label class="source-check">
-                <input type="checkbox" name="source_oins" value="{{.OIN}}" {{if containsSource $.Editing.AllowedSourceOINs .OIN}}checked{{end}}>
+                <input type="checkbox" name="source_peer_ids" value="{{.PeerID}}" {{if containsSource $.Editing.AllowedSourcePeerIDs .PeerID}}checked{{end}}>
                 <span class="box" aria-hidden="true"></span>
                 <span>{{.Name}}</span>
               </label>
@@ -127,8 +127,8 @@
             <input name="name" autocomplete="organization" required placeholder="Bijvoorbeeld Hypotheekadvies BV">
           </label>
           <label>
-            <span>OIN</span>
-            <input name="oin" inputmode="numeric" pattern="[0-9]{20}" minlength="20" maxlength="20" required placeholder="20 cijfers">
+            <span>Peer ID</span>
+            <input name="peer_id" pattern="[A-Za-z0-9]{20}" minlength="20" maxlength="20" required placeholder="20 letters en cijfers">
           </label>
 
           <fieldset>
@@ -136,7 +136,7 @@
             <div class="checkbox-grid">
               {{range .Sources}}
               <label class="source-check">
-                <input type="checkbox" name="source_oins" value="{{.OIN}}">
+                <input type="checkbox" name="source_peer_ids" value="{{.PeerID}}">
                 <span class="box" aria-hidden="true"></span>
                 <span>{{.Name}}</span>
               </label>

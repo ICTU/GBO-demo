@@ -322,7 +322,7 @@ legend {
 }
 
 input[name='name'],
-input[name='oin'] {
+input[name='peer_id'] {
   width: 100%;
   min-height: 46px;
   padding: 10px 12px;
@@ -338,14 +338,14 @@ input[readonly] {
   cursor: not-allowed;
 }
 
-input[name='oin'] {
+input[name='peer_id'] {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 14px;
   letter-spacing: .02em;
 }
 
 input[name='name']:focus,
-input[name='oin']:focus { border-color: var(--blue); }
+input[name='peer_id']:focus { border-color: var(--blue); }
 
 fieldset {
   grid-column: 1 / -1;

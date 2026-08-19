@@ -7,6 +7,7 @@ import (
 
 func TestReconcileCommandRequiresExplicitOnceOrWatchMode(t *testing.T) {
 	base := []string{
+		"--consumer-peer-id", "0000009961MINEZK0000",
 		"--schema", "../../schemas/gbo-source-metadata-v1.schema.json",
 		"--type-metadata-base-url", "https://issuer.example",
 		"--sources-dir", t.TempDir(),
@@ -23,5 +24,34 @@ func TestReconcileCommandRequiresExplicitOnceOrWatchMode(t *testing.T) {
 	}
 	if _, err := parseReconcileOptions(append(base, "--once", "--watch"), io.Discard); err == nil {
 		t.Fatal("mutually exclusive reconcile modes were accepted")
+	}
+}
+
+func TestReconcileCommandRequiresConsumerPeerID(t *testing.T) {
+	t.Setenv("FSC_CONSUMER_PEER_ID", "")
+	_, err := parseReconcileOptions([]string{
+		"--schema", "../../schemas/gbo-source-metadata-v1.schema.json",
+		"--type-metadata-base-url", "https://issuer.example",
+		"--sources-dir", t.TempDir(),
+		"--once",
+	}, io.Discard)
+	if err == nil {
+		t.Fatal("missing consumer Peer ID was accepted")
+	}
+}
+
+func TestReconcileCommandAcceptsAlphanumericConsumerPeerID(t *testing.T) {
+	options, err := parseReconcileOptions([]string{
+		"--consumer-peer-id", "0000009961MINEZK0000",
+		"--schema", "../../schemas/gbo-source-metadata-v1.schema.json",
+		"--type-metadata-base-url", "https://issuer.example",
+		"--sources-dir", t.TempDir(),
+		"--once",
+	}, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.consumerPeerID != "0000009961MINEZK0000" {
+		t.Fatalf("consumer peer ID = %q", options.consumerPeerID)
 	}
 }

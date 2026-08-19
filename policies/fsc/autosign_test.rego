@@ -3,13 +3,13 @@ package doelbinding.auto_sign_contract_test
 import data.doelbinding.auto_sign_contract as autosign
 
 # The Belastingdienst-mock peer is the bronhouder whose Manager asks.
-bd := "99999999900000000200"
+bd := "0000009958MINBZK0000"
 
-brp := "99999999900000000400"
+brp := "0000009958RVIG000000"
 
-hv := "99999999900000000300"
+hv := "0000009950HYPBV00000"
 
-edi := "99999999900000000100"
+edi := "0000009961MINEZK0000"
 
 suspended := "99999999900000000500"
 
@@ -21,12 +21,17 @@ participants := {
 	hv: {
 		"name": "Demo Hypotheekverlener BV",
 		"active": true,
-		"allowed_source_oins": [bd],
+		"allowed_source_peer_ids": [bd],
 	},
 	suspended: {
 		"name": "Demo Incassobureau BV",
 		"active": false,
-		"allowed_source_oins": [bd],
+		"allowed_source_peer_ids": [bd],
+	},
+	edi: {
+		"name": "Demo EUDI-issuance (GBO)",
+		"active": true,
+		"allowed_source_peer_ids": [bd, brp],
 	},
 }
 
@@ -74,8 +79,8 @@ test_registered_issuer_allowed if {
 	is_allowed(connection(edi))
 }
 
-test_system_issuer_allowed_without_pip_data if {
-	autosign.allow with input as connection(edi)
+test_system_issuer_denied_without_pip_data if {
+	not autosign.allow with input as connection(edi)
 }
 
 test_system_issuer_allowed_for_brp if {
@@ -98,7 +103,7 @@ test_allow_reports_counterparty if {
 	resp := decision_response(connection(hv))
 	resp.context.granted[0].rule == "FSC_AUTOSIGN_ADMITTED_PARTY"
 	resp.context.granted[0].counterparties == [hv]
-	resp.context.granted[0].source_oin == bd
+	resp.context.granted[0].source_peer_id == bd
 }
 
 # --- registry -------------------------------------------------------

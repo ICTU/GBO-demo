@@ -77,7 +77,6 @@ const shutdownTimeout = 15 * time.Second
 type config struct {
 	Port      string
 	OutwayURL string
-	IssuerOIN string
 
 	// These fields are resolved from the active onboarding record before
 	// serving begins; they are deliberately not separate deployment settings.
@@ -103,7 +102,6 @@ func loadConfig() config {
 	return config{
 		Port:                  getEnv("PORT", "4009"),
 		OutwayURL:             getEnv("FSC_OUTWAY_URL", "http://edi-outway:8080"),
-		IssuerOIN:             getEnv("ISSUER_OIN", "00000004000000004000"),
 		SourceActivationsPath: os.Getenv("SOURCE_ACTIVATIONS_PATH"),
 		TypeMetadataStorePath: getEnv("TYPE_METADATA_STORE_PATH", "/var/lib/gbo/type-metadata"),
 	}
@@ -634,7 +632,7 @@ func main() {
 		Handler:           withFscTraceContext(otelhttp.NewHandler(newRuntimeMux(ctx, cfg, client), "eudi-adapter")),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
-	slog.Info("eudi-adapter starting", "addr", srv.Addr, "outway", cfg.OutwayURL, "issuer_oin", cfg.IssuerOIN)
+	slog.Info("eudi-adapter starting", "addr", srv.Addr, "outway", cfg.OutwayURL)
 	// Previously this logged and returned, so a failure to bind exited 0 and
 	// looked like a clean shutdown to the orchestrator.
 	serve(srv)

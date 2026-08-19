@@ -178,17 +178,15 @@ func (p *developmentCAProvider) Load(registration sourceRegistration) (certifica
 		return certificateArtifacts{}, err
 	}
 	caDir := filepath.Join(p.root, "development-ca")
-	issuerCAKey := filepath.Join(caDir, "issuer-ca-key.pem")
 	issuerCACert := filepath.Join(caDir, "issuer-ca-cert.pem")
-	readerCAKey := filepath.Join(caDir, "reader-ca-key.pem")
 	readerCACert := filepath.Join(caDir, "reader-ca-cert.pem")
-	_, issuerCA, err := loadDevelopmentCA(issuerCAKey, issuerCACert)
+	issuerCA, err := loadDevelopmentCACertificate(issuerCACert)
 	if err != nil {
-		return certificateArtifacts{}, fmt.Errorf("load explicitly provisioned development issuer CA: %w", err)
+		return certificateArtifacts{}, fmt.Errorf("load explicitly provisioned development issuer CA certificate: %w", err)
 	}
-	_, readerCA, err := loadDevelopmentCA(readerCAKey, readerCACert)
+	readerCA, err := loadDevelopmentCACertificate(readerCACert)
 	if err != nil {
-		return certificateArtifacts{}, fmt.Errorf("load explicitly provisioned development reader CA: %w", err)
+		return certificateArtifacts{}, fmt.Errorf("load explicitly provisioned development reader CA certificate: %w", err)
 	}
 	sourceDir := filepath.Join(p.root, registration.certificateSetID())
 	loadLeaf := func(role string) (*developmentLeaf, error) {
@@ -477,15 +475,7 @@ func loadDevelopmentCA(keyPath, certPath string) (*ecdsa.PrivateKey, *x509.Certi
 	if !ok {
 		return nil, nil, fmt.Errorf("CA key is not ECDSA")
 	}
-	certPEM, err := os.ReadFile(certPath)
-	if err != nil {
-		return nil, nil, err
-	}
-	certBlock, _ := pem.Decode(certPEM)
-	if certBlock == nil {
-		return nil, nil, fmt.Errorf("CA certificate is not PEM")
-	}
-	cert, err := x509.ParseCertificate(certBlock.Bytes)
+	cert, err := loadDevelopmentCACertificate(certPath)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -493,6 +483,18 @@ func loadDevelopmentCA(keyPath, certPath string) (*ecdsa.PrivateKey, *x509.Certi
 		return nil, nil, fmt.Errorf("CA key does not match its certificate")
 	}
 	return key, cert, nil
+}
+
+func loadDevelopmentCACertificate(certPath string) (*x509.Certificate, error) {
+	certPEM, err := os.ReadFile(certPath)
+	if err != nil {
+		return nil, err
+	}
+	certBlock, _ := pem.Decode(certPEM)
+	if certBlock == nil {
+		return nil, fmt.Errorf("CA certificate is not PEM")
+	}
+	return x509.ParseCertificate(certBlock.Bytes)
 }
 
 func loadDevelopmentLeaf(keyPath, certPath string) (*ecdsa.PrivateKey, *x509.Certificate, error) {

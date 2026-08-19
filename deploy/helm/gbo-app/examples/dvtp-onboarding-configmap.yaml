@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dvtp-onboarding-config
+data:
+  onboarding.json: |
+    {
+      "source_holders": [
+        {
+          "peer_id": "0000009958MINBZK0000",
+          "name": "Ministerie van Binnenlandse Zaken en Koninkrijksrelaties"
+        }
+      ],
+      "system_participants": [
+        {
+          "peer_id": "0000009961MINEZK0000",
+          "name": "GBO EUDI issuer",
+          "active": true,
+          "allowed_source_peer_ids": ["0000009958MINBZK0000"]
+        }
+      ],
+      "seed_participants": []
+    }

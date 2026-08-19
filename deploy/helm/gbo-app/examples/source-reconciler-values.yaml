@@ -11,7 +11,7 @@ args:
   - --manager-ca=/fsc-manager/intermediate_ca.pem
   - --manager-cert=/fsc-manager/internal-cert.pem
   - --manager-key=/fsc-manager/internal-cert-key.pem
-  - --consumer-oin=99999999900000000100
+  - --consumer-peer-id=0000009961MINEZK0000
   - --outway-url=http://fsc-outway:8080
   - --schema=/schemas/gbo-source-metadata-v1.schema.json
   - --type-metadata-base-url=https://adapter.example

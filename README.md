@@ -80,6 +80,12 @@ material from another location, set `ONBOARDING_SECRETS_DIR` to the absolute
 path of that secrets root; both the provisioning command and Compose use it.
 Setup fails before onboarding when any required CA file is absent.
 
+Those CA private keys are provisioning input, not application runtime input.
+After the issuer, reader and status leaf certificates have been provisioned,
+the source reconciler needs only those leaf keys/certificates and the two public
+CA certificates. A Kubernetes runtime Secret must not contain
+`issuer-ca-key.pem` or `reader-ca-key.pem`.
+
 `EUDI_PUBLIC_URL` must route to the issuance server and its hostname must be in
 the reader-certificate DNS SAN. `EUDI_BRI_URL` must route to the EUDI adapter.
 See [source onboarding](docs/source-onboarding.md) for the local certificate

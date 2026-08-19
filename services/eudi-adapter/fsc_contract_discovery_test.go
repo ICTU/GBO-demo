@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	testConsumerOIN        = "99999999900000000100"
-	testProviderOIN        = "99999999900000000200"
+	testConsumerPeerID     = "0000009961MINEZK0000"
+	testProviderPeerID     = "0000009958MINBZK0000"
+	testSourceOIN          = "99999999900000000200"
 	gboMetadataServiceName = "gbo-metadata"
 	gboWellKnownPath       = "/.well-known/gbo"
 )
@@ -24,10 +25,10 @@ const (
 func TestFSCContractDiscoverySelectsNewestValidConsumerGrant(t *testing.T) {
 	now := time.Now().UTC()
 	payload := fscContractPayload(t, []map[string]any{
-		fscConnectionContract(testConsumerOIN, testProviderOIN, gboMetadataServiceName, "old-grant", now.Add(-time.Hour).Unix(), now),
-		fscConnectionContract(testConsumerOIN, testProviderOIN, gboMetadataServiceName, "new-grant", now.Unix(), now),
-		fscConnectionContract("99999999900000000999", testProviderOIN, gboMetadataServiceName, "other-consumer", now.Add(time.Minute).Unix(), now),
-		fscConnectionContract(testConsumerOIN, testProviderOIN, "bri", "data-grant", now.Unix(), now),
+		fscConnectionContract(testConsumerPeerID, testProviderPeerID, gboMetadataServiceName, "old-grant", now.Add(-time.Hour).Unix(), now),
+		fscConnectionContract(testConsumerPeerID, testProviderPeerID, gboMetadataServiceName, "new-grant", now.Unix(), now),
+		fscConnectionContract("99999999900000000999", testProviderPeerID, gboMetadataServiceName, "other-consumer", now.Add(time.Minute).Unix(), now),
+		fscConnectionContract(testConsumerPeerID, testProviderPeerID, "bri", "data-grant", now.Unix(), now),
 	})
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		if request.URL.Path == "/v1/peers" {
@@ -43,15 +44,15 @@ func TestFSCContractDiscoverySelectsNewestValidConsumerGrant(t *testing.T) {
 	}))
 	defer server.Close()
 
-	snapshot, err := loadFSCContractSnapshot(context.Background(), server.Client(), server.URL, testConsumerOIN, now)
+	snapshot, err := loadFSCContractSnapshot(context.Background(), server.Client(), server.URL, testConsumerPeerID, now)
 	if err != nil {
 		t.Fatalf("load contracts: %v", err)
 	}
-	metadata, ok := snapshot.service(testProviderOIN, gboMetadataServiceName)
+	metadata, ok := snapshot.service(testProviderPeerID, gboMetadataServiceName)
 	if !ok || metadata.GrantHash != "new-grant" {
 		t.Fatalf("metadata grant = %+v, exists=%v", metadata, ok)
 	}
-	if data, ok := snapshot.service(testProviderOIN, "bri"); !ok || data.GrantHash != "data-grant" {
+	if data, ok := snapshot.service(testProviderPeerID, "bri"); !ok || data.GrantHash != "data-grant" {
 		t.Fatalf("data grant = %+v, exists=%v", data, ok)
 	}
 }
@@ -66,21 +67,21 @@ func TestFSCContractDiscoveryFollowsManagerPagination(t *testing.T) {
 		}
 		if request.URL.Query().Get("cursor") == "next-page" {
 			_, _ = w.Write(fscContractPagePayload(t, []map[string]any{
-				fscConnectionContract(testConsumerOIN, testProviderOIN, "bri", "data-grant", now.Unix(), now),
+				fscConnectionContract(testConsumerPeerID, testProviderPeerID, "bri", "data-grant", now.Unix(), now),
 			}, ""))
 			return
 		}
 		_, _ = w.Write(fscContractPagePayload(t, []map[string]any{
-			fscConnectionContract(testConsumerOIN, testProviderOIN, gboMetadataServiceName, "metadata-grant", now.Unix(), now),
+			fscConnectionContract(testConsumerPeerID, testProviderPeerID, gboMetadataServiceName, "metadata-grant", now.Unix(), now),
 		}, "next-page"))
 	}))
 	defer server.Close()
 
-	snapshot, err := loadFSCContractSnapshot(context.Background(), server.Client(), server.URL, testConsumerOIN, now)
+	snapshot, err := loadFSCContractSnapshot(context.Background(), server.Client(), server.URL, testConsumerPeerID, now)
 	if err != nil {
 		t.Fatalf("load paginated contracts: %v", err)
 	}
-	if _, ok := snapshot.service(testProviderOIN, "bri"); !ok {
+	if _, ok := snapshot.service(testProviderPeerID, "bri"); !ok {
 		t.Fatal("data grant from second Manager page was not discovered")
 	}
 }
@@ -88,8 +89,8 @@ func TestFSCContractDiscoveryFollowsManagerPagination(t *testing.T) {
 func TestFSCSourceReconcilerActivatesOnlyConfiguredSource(t *testing.T) {
 	now := time.Now().UTC()
 	managerPayload := fscContractPayload(t, []map[string]any{
-		fscConnectionContract(testConsumerOIN, testProviderOIN, gboMetadataServiceName, "metadata-grant", now.Unix(), now),
-		fscConnectionContract(testConsumerOIN, testProviderOIN, "bri", "data-grant", now.Unix(), now),
+		fscConnectionContract(testConsumerPeerID, testProviderPeerID, gboMetadataServiceName, "metadata-grant", now.Unix(), now),
+		fscConnectionContract(testConsumerPeerID, testProviderPeerID, "bri", "data-grant", now.Unix(), now),
 	})
 	manager := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -119,10 +120,10 @@ func TestFSCSourceReconcilerActivatesOnlyConfiguredSource(t *testing.T) {
 	statuses := &capturingSourceStatusWriter{}
 	reconciler := &sourceReconciler{
 		managerClient: manager.Client(), sourceClient: source.Client(),
-		managerURL: manager.URL, consumerOIN: testConsumerOIN, outwayURL: source.URL,
+		managerURL: manager.URL, consumerPeerID: testConsumerPeerID, outwayURL: source.URL,
 		schemaPath: "../../schemas/gbo-source-metadata-v1.schema.json", publicBaseURL: "https://issuer.example",
 		sources: []sourceConfiguration{{
-			SourceID: "belastingdienst", SourceOIN: testProviderOIN, Name: "Belastingdienst", CertificateSet: testProviderOIN,
+			SourceID: "belastingdienst", ProviderPeerID: testProviderPeerID, SourceOIN: testSourceOIN, Name: "Belastingdienst", CertificateSet: testSourceOIN,
 			MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportFSC, ServiceReference: gboMetadataServiceName, Path: gboWellKnownPath},
 			DataAccess:       sourceDataAccess{Transport: sourceTransportFSC},
 		}},
@@ -135,7 +136,7 @@ func TestFSCSourceReconcilerActivatesOnlyConfiguredSource(t *testing.T) {
 		t.Fatal("source was not activated")
 	}
 	registration := backend.validated.Registration
-	if registration.SourceID != "belastingdienst" || registration.CertificateSet != testProviderOIN || registration.SourceOIN != testProviderOIN || registration.Name != "Belastingdienst" || registration.MetadataEndpoint.GrantHash != "metadata-grant" || registration.DataAccess.ServiceReference != "bri" || registration.DataAccess.GrantHash != "data-grant" {
+	if registration.SourceID != "belastingdienst" || registration.ProviderPeerID != testProviderPeerID || registration.CertificateSet != testSourceOIN || registration.SourceOIN != testSourceOIN || registration.Name != "Belastingdienst" || registration.MetadataEndpoint.GrantHash != "metadata-grant" || registration.DataAccess.ServiceReference != "bri" || registration.DataAccess.GrantHash != "data-grant" {
 		t.Fatalf("derived registration = %+v", registration)
 	}
 	if statuses.last.State != sourceStateActive || statuses.last.SourceID != "belastingdienst" {
@@ -152,7 +153,7 @@ func TestFSCSourceReconcilerIgnoresUnconfiguredMetadataContract(t *testing.T) {
 			return
 		}
 		_, _ = w.Write(fscContractPayload(t, []map[string]any{
-			fscConnectionContract(testConsumerOIN, testProviderOIN, gboMetadataServiceName, "metadata-grant", now.Unix(), now),
+			fscConnectionContract(testConsumerPeerID, testProviderPeerID, gboMetadataServiceName, "metadata-grant", now.Unix(), now),
 		}))
 	}))
 	defer manager.Close()
@@ -160,7 +161,7 @@ func TestFSCSourceReconcilerIgnoresUnconfiguredMetadataContract(t *testing.T) {
 	backend := &capturingActivationBackend{}
 	reconciler := &sourceReconciler{
 		managerClient: manager.Client(), sourceClient: http.DefaultClient,
-		managerURL: manager.URL, consumerOIN: testConsumerOIN, outwayURL: "http://source.invalid",
+		managerURL: manager.URL, consumerPeerID: testConsumerPeerID, outwayURL: "http://source.invalid",
 		schemaPath: "../../schemas/gbo-source-metadata-v1.schema.json", publicBaseURL: "https://issuer.example",
 		store: staticCertificateStore{}, backend: backend, statuses: &capturingSourceStatusWriter{},
 	}
@@ -184,10 +185,10 @@ func TestFSCSourceReconcilerChecksCertificatesBeforeNetwork(t *testing.T) {
 			t.Fatal("source metadata was fetched before certificate preflight")
 			return nil, nil
 		})},
-		managerURL: "https://manager.example", consumerOIN: testConsumerOIN, outwayURL: "http://outway.example",
+		managerURL: "https://manager.example", consumerPeerID: testConsumerPeerID, outwayURL: "http://outway.example",
 		schemaPath: "../../schemas/gbo-source-metadata-v1.schema.json", publicBaseURL: "https://issuer.example",
 		sources: []sourceConfiguration{{
-			SourceID: "belastingdienst", SourceOIN: testProviderOIN, Name: "Belastingdienst", CertificateSet: "missing-bd",
+			SourceID: "belastingdienst", ProviderPeerID: testProviderPeerID, SourceOIN: testSourceOIN, Name: "Belastingdienst", CertificateSet: "missing-bd",
 			MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportFSC, ServiceReference: gboMetadataServiceName, Path: gboWellKnownPath},
 			DataAccess:       sourceDataAccess{Transport: sourceTransportFSC},
 		}},
@@ -215,10 +216,10 @@ func TestFSCSourceReconcilerReportsMissingConfiguredMetadataContract(t *testing.
 	statuses := &capturingSourceStatusWriter{}
 	reconciler := &sourceReconciler{
 		managerClient: manager.Client(), sourceClient: http.DefaultClient,
-		managerURL: manager.URL, consumerOIN: testConsumerOIN, outwayURL: "http://source.invalid",
+		managerURL: manager.URL, consumerPeerID: testConsumerPeerID, outwayURL: "http://source.invalid",
 		schemaPath: "../../schemas/gbo-source-metadata-v1.schema.json", publicBaseURL: "https://issuer.example",
 		sources: []sourceConfiguration{{
-			SourceID: "belastingdienst", SourceOIN: testProviderOIN, Name: "Belastingdienst", CertificateSet: testProviderOIN,
+			SourceID: "belastingdienst", ProviderPeerID: testProviderPeerID, SourceOIN: testSourceOIN, Name: "Belastingdienst", CertificateSet: testSourceOIN,
 			MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportFSC, ServiceReference: gboMetadataServiceName, Path: gboWellKnownPath},
 			DataAccess:       sourceDataAccess{Transport: sourceTransportFSC},
 		}},
@@ -236,9 +237,9 @@ func TestFSCSourceReconcilerReportsMissingConfiguredMetadataContract(t *testing.
 func TestFSCSourceReconcilerSupportsSharedOINWithDistinctServicesAndCertificates(t *testing.T) {
 	now := time.Now().UTC()
 	managerPayload := fscContractPayload(t, []map[string]any{
-		fscConnectionContract(testConsumerOIN, testProviderOIN, "gbo-metadata-bd", "metadata-bd", now.Unix(), now),
-		fscConnectionContract(testConsumerOIN, testProviderOIN, "gbo-metadata-rvig", "metadata-rvig", now.Unix(), now),
-		fscConnectionContract(testConsumerOIN, testProviderOIN, "bri", "data-grant", now.Unix(), now),
+		fscConnectionContract(testConsumerPeerID, testProviderPeerID, "gbo-metadata-bd", "metadata-bd", now.Unix(), now),
+		fscConnectionContract(testConsumerPeerID, testProviderPeerID, "gbo-metadata-rvig", "metadata-rvig", now.Unix(), now),
+		fscConnectionContract(testConsumerPeerID, testProviderPeerID, "bri", "data-grant", now.Unix(), now),
 	})
 	manager := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -262,7 +263,7 @@ func TestFSCSourceReconcilerSupportsSharedOINWithDistinctServicesAndCertificates
 	store := &recordingCertificateStore{}
 	reconciler := &sourceReconciler{
 		managerClient: manager.Client(), sourceClient: source.Client(), managerURL: manager.URL,
-		consumerOIN: testConsumerOIN, outwayURL: source.URL,
+		consumerPeerID: testConsumerPeerID, outwayURL: source.URL,
 		schemaPath: "../../schemas/gbo-source-metadata-v1.schema.json", publicBaseURL: "https://issuer.example",
 		sources: []sourceConfiguration{
 			sharedOINSourceConfiguration("belastingdienst", "gbo-metadata-bd"),
@@ -291,8 +292,8 @@ func TestFSCSourceReconcilerIsolatesCertificateFailureForSharedOIN(t *testing.T)
 	manager := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(fscContractPayload(t, []map[string]any{
-			fscConnectionContract(testConsumerOIN, testProviderOIN, "gbo-metadata-bd", "metadata-bd", now.Unix(), now),
-			fscConnectionContract(testConsumerOIN, testProviderOIN, "bri", "data-grant", now.Unix(), now),
+			fscConnectionContract(testConsumerPeerID, testProviderPeerID, "gbo-metadata-bd", "metadata-bd", now.Unix(), now),
+			fscConnectionContract(testConsumerPeerID, testProviderPeerID, "bri", "data-grant", now.Unix(), now),
 		}))
 	}))
 	defer manager.Close()
@@ -309,7 +310,7 @@ func TestFSCSourceReconcilerIsolatesCertificateFailureForSharedOIN(t *testing.T)
 	statuses := &capturingSourceStatusWriter{}
 	reconciler := &sourceReconciler{
 		managerClient: manager.Client(), sourceClient: source.Client(), managerURL: manager.URL,
-		consumerOIN: testConsumerOIN, outwayURL: source.URL,
+		consumerPeerID: testConsumerPeerID, outwayURL: source.URL,
 		schemaPath: "../../schemas/gbo-source-metadata-v1.schema.json", publicBaseURL: "https://issuer.example",
 		sources: []sourceConfiguration{
 			sharedOINSourceConfiguration("belastingdienst", "gbo-metadata-bd"),
@@ -360,10 +361,10 @@ func TestSourceReconcilerActivatesUnsecuredHTTPSourceWithoutFSCManager(t *testin
 			t.Fatal("unsecured-only reconciliation called the FSC Manager")
 			return nil, nil
 		})},
-		sourceClient: source.Client(), managerURL: "https://manager.invalid", consumerOIN: testConsumerOIN,
+		sourceClient: source.Client(), managerURL: "https://manager.invalid", consumerPeerID: testConsumerPeerID,
 		schemaPath: "../../schemas/gbo-source-metadata-v1.schema.json", publicBaseURL: "https://issuer.example",
 		sources: []sourceConfiguration{{
-			SourceID: "demo", SourceOIN: testProviderOIN, Name: "Demo", CertificateSet: "demo",
+			SourceID: "demo", SourceOIN: testSourceOIN, Name: "Demo", CertificateSet: "demo",
 			MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportUnsecured, Endpoint: source.URL},
 			DataAccess:       sourceDataAccess{Transport: sourceTransportUnsecured},
 		}},
@@ -389,7 +390,7 @@ func TestUnsecuredSourceFailureIsReportedAsUnauthenticated(t *testing.T) {
 	reconciler := &sourceReconciler{
 		sourceClient: source.Client(), schemaPath: "../../schemas/gbo-source-metadata-v1.schema.json", publicBaseURL: "https://issuer.example",
 		sources: []sourceConfiguration{{
-			SourceID: "demo", SourceOIN: testProviderOIN, Name: "Demo", CertificateSet: "demo",
+			SourceID: "demo", SourceOIN: testSourceOIN, Name: "Demo", CertificateSet: "demo",
 			MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportUnsecured, Endpoint: source.URL},
 			DataAccess:       sourceDataAccess{Transport: sourceTransportUnsecured},
 		}},
@@ -438,7 +439,7 @@ func TestReconcilerUsesETagAndRefreshesCandidateLifetime(t *testing.T) {
 	reconciler := &sourceReconciler{
 		sourceClient: source.Client(), schemaPath: "../../schemas/gbo-source-metadata-v1.schema.json", publicBaseURL: "https://issuer.example",
 		sources: []sourceConfiguration{{
-			SourceID: "demo", SourceOIN: testProviderOIN, Name: "Demo", CertificateSet: "demo",
+			SourceID: "demo", SourceOIN: testSourceOIN, Name: "Demo", CertificateSet: "demo",
 			MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportUnsecured, Endpoint: source.URL},
 			DataAccess:       sourceDataAccess{Transport: sourceTransportUnsecured},
 		}}, store: staticCertificateStore{}, backend: backend, statuses: statuses,
@@ -478,8 +479,8 @@ func TestFSCNotModifiedRefreshesResolvedGrantHashes(t *testing.T) {
 	manager := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(fscContractPayload(t, []map[string]any{
-			fscConnectionContract(testConsumerOIN, testProviderOIN, gboMetadataServiceName, fmt.Sprintf("metadata-grant-v%d", contractVersion), now.Unix()+int64(contractVersion), now),
-			fscConnectionContract(testConsumerOIN, testProviderOIN, "bri", fmt.Sprintf("data-grant-v%d", contractVersion), now.Unix()+int64(contractVersion), now),
+			fscConnectionContract(testConsumerPeerID, testProviderPeerID, gboMetadataServiceName, fmt.Sprintf("metadata-grant-v%d", contractVersion), now.Unix()+int64(contractVersion), now),
+			fscConnectionContract(testConsumerPeerID, testProviderPeerID, "bri", fmt.Sprintf("data-grant-v%d", contractVersion), now.Unix()+int64(contractVersion), now),
 		}))
 	}))
 	defer manager.Close()
@@ -506,10 +507,10 @@ func TestFSCNotModifiedRefreshesResolvedGrantHashes(t *testing.T) {
 	backend := newFilesystemActivationBackend(stateDir)
 	reconciler := &sourceReconciler{
 		managerClient: manager.Client(), sourceClient: source.Client(), managerURL: manager.URL,
-		consumerOIN: testConsumerOIN, outwayURL: source.URL,
+		consumerPeerID: testConsumerPeerID, outwayURL: source.URL,
 		schemaPath: "../../schemas/gbo-source-metadata-v1.schema.json", publicBaseURL: "https://issuer.example",
 		sources: []sourceConfiguration{{
-			SourceID: "belastingdienst", SourceOIN: testProviderOIN, Name: "Belastingdienst", CertificateSet: "belastingdienst",
+			SourceID: "belastingdienst", ProviderPeerID: testProviderPeerID, SourceOIN: testSourceOIN, Name: "Belastingdienst", CertificateSet: "belastingdienst",
 			MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportFSC, ServiceReference: gboMetadataServiceName, Path: gboWellKnownPath},
 			DataAccess:       sourceDataAccess{Transport: sourceTransportFSC},
 		}},
@@ -563,7 +564,7 @@ func TestNotModifiedRefreshFailureUsesExistingStaleGrace(t *testing.T) {
 	backend := &candidateActivationBackend{
 		candidate: &sourceActivation{
 			SchemaVersion: "1.0", MetadataVersion: "1.0", MetadataETag: `"metadata-v1"`,
-			StaleUntil: now.Add(time.Hour), Source: sourceRegistration{SourceID: "demo", SourceOIN: testProviderOIN},
+			StaleUntil: now.Add(time.Hour), Source: sourceRegistration{SourceID: "demo", SourceOIN: testSourceOIN},
 		},
 		refreshErr: errors.New("refresh failed"),
 	}
@@ -571,7 +572,7 @@ func TestNotModifiedRefreshFailureUsesExistingStaleGrace(t *testing.T) {
 	reconciler := &sourceReconciler{
 		sourceClient: source.Client(), schemaPath: "../../schemas/gbo-source-metadata-v1.schema.json", publicBaseURL: "https://issuer.example",
 		sources: []sourceConfiguration{{
-			SourceID: "demo", SourceOIN: testProviderOIN, Name: "Demo", CertificateSet: "demo",
+			SourceID: "demo", SourceOIN: testSourceOIN, Name: "Demo", CertificateSet: "demo",
 			MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportUnsecured, Endpoint: source.URL},
 			DataAccess:       sourceDataAccess{Transport: sourceTransportUnsecured},
 		}},
@@ -614,7 +615,7 @@ func TestReconcilerKeepsLastCandidateDuringStaleGrace(t *testing.T) {
 	reconciler := &sourceReconciler{
 		sourceClient: source.Client(), schemaPath: "../../schemas/gbo-source-metadata-v1.schema.json", publicBaseURL: "https://issuer.example",
 		sources: []sourceConfiguration{{
-			SourceID: "demo", SourceOIN: testProviderOIN, Name: "Demo", CertificateSet: "demo",
+			SourceID: "demo", SourceOIN: testSourceOIN, Name: "Demo", CertificateSet: "demo",
 			MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportUnsecured, Endpoint: source.URL},
 			DataAccess:       sourceDataAccess{Transport: sourceTransportUnsecured},
 		}}, store: staticCertificateStore{}, backend: backend, statuses: statuses,
@@ -643,14 +644,14 @@ func TestFSCManagerFailureKeepsCandidateDuringStaleGrace(t *testing.T) {
 	now := time.Now().UTC()
 	backend := &candidateActivationBackend{candidate: &sourceActivation{
 		SchemaVersion: "1.0", MetadataVersion: "1.0", StaleUntil: now.Add(time.Hour),
-		Source: sourceRegistration{SourceID: "belastingdienst", SourceOIN: testProviderOIN},
+		Source: sourceRegistration{SourceID: "belastingdienst", ProviderPeerID: testProviderPeerID, SourceOIN: testSourceOIN},
 	}}
 	statuses := &capturingSourceStatusWriter{}
 	reconciler := &sourceReconciler{
 		managerClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 			return nil, errors.New("manager unavailable")
 		})},
-		sourceClient: http.DefaultClient, managerURL: "https://manager.example", consumerOIN: testConsumerOIN,
+		sourceClient: http.DefaultClient, managerURL: "https://manager.example", consumerPeerID: testConsumerPeerID,
 		sources: []sourceConfiguration{sharedOINSourceConfiguration("belastingdienst", "gbo-metadata-bd")},
 		store:   staticCertificateStore{}, backend: backend, statuses: statuses,
 	}
@@ -665,7 +666,7 @@ func TestFSCManagerFailureKeepsCandidateDuringStaleGrace(t *testing.T) {
 
 func sharedOINSourceConfiguration(sourceID, metadataService string) sourceConfiguration {
 	return sourceConfiguration{
-		SourceID: sourceID, SourceOIN: testProviderOIN, Name: sourceID, CertificateSet: sourceID,
+		SourceID: sourceID, ProviderPeerID: testProviderPeerID, SourceOIN: testSourceOIN, Name: sourceID, CertificateSet: sourceID,
 		MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportFSC, ServiceReference: metadataService, Path: gboWellKnownPath},
 		DataAccess:       sourceDataAccess{Transport: sourceTransportFSC},
 	}
@@ -756,7 +757,7 @@ func fscContractPayload(t *testing.T, contracts []map[string]any) []byte {
 func fscPeerPayload(t *testing.T) []byte {
 	t.Helper()
 	payload, err := json.Marshal(map[string]any{
-		"peers": []map[string]any{{"id": testProviderOIN, "name": "Belastingdienst"}},
+		"peers": []map[string]any{{"id": testProviderPeerID, "name": "Belastingdienst"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -775,7 +776,7 @@ func fscContractPagePayload(t *testing.T, contracts []map[string]any, nextCursor
 	return payload
 }
 
-func fscConnectionContract(consumerOIN, providerOIN, serviceName, grantHash string, createdAt int64, now time.Time) map[string]any {
+func fscConnectionContract(consumerPeerID, providerPeerID, serviceName, grantHash string, createdAt int64, now time.Time) map[string]any {
 	return map[string]any{
 		"state": "CONTRACT_STATE_VALID",
 		"content": map[string]any{
@@ -783,8 +784,8 @@ func fscConnectionContract(consumerOIN, providerOIN, serviceName, grantHash stri
 			"validity":   map[string]any{"not_before": now.Add(-time.Hour).Unix(), "not_after": now.Add(time.Hour).Unix()},
 			"grants": []any{map[string]any{
 				"type": "GRANT_TYPE_SERVICE_CONNECTION", "hash": grantHash,
-				"outway":  map[string]any{"peer_id": consumerOIN},
-				"service": map[string]any{"peer_id": providerOIN, "name": serviceName},
+				"outway":  map[string]any{"peer_id": consumerPeerID},
+				"service": map[string]any{"peer_id": providerPeerID, "name": serviceName},
 			}},
 		},
 	}

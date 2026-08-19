@@ -304,7 +304,7 @@ func TestAdapterUsesSourceMetadataFor2025(t *testing.T) {
 	}))
 	defer outway.Close()
 
-	cfg := config{Port: "0", OutwayURL: outway.URL, IssuerOIN: "00000004000000004000", SourceDataTransport: sourceTransportFSC, SourceDataFSCServiceReference: "bri", SourceDataFSCGrantHash: "data-grant"}
+	cfg := config{Port: "0", OutwayURL: outway.URL, SourceDataTransport: sourceTransportFSC, SourceDataFSCServiceReference: "bri", SourceDataFSCGrantHash: "data-grant"}
 	srv := httptest.NewServer(newMux(cfg, http.DefaultClient, metadata))
 	defer srv.Close()
 
@@ -403,7 +403,7 @@ func newIncomeSourceAdapter(t *testing.T, mapping map[string]mappingRule, bronRe
 	}))
 	t.Cleanup(outway.Close)
 
-	cfg := config{Port: "0", OutwayURL: outway.URL, IssuerOIN: "00000004000000004000", SourceDataTransport: sourceTransportFSC, SourceDataFSCServiceReference: "bri", SourceDataFSCGrantHash: "data-grant"}
+	cfg := config{Port: "0", OutwayURL: outway.URL, SourceDataTransport: sourceTransportFSC, SourceDataFSCServiceReference: "bri", SourceDataFSCGrantHash: "data-grant"}
 	srv := httptest.NewServer(newMux(cfg, http.DefaultClient, metadata))
 	t.Cleanup(srv.Close)
 	return srv
@@ -529,7 +529,7 @@ func TestRuntimeDoesNotFetchSourceMetadata(t *testing.T) {
 	activation := sourceActivation{
 		SchemaVersion: "1.0",
 		Source: sourceRegistration{
-			SourceID: "belastingdienst", SourceOIN: "99999999900000000200", Name: "Belastingdienst", CertificateSet: "belastingdienst",
+			SourceID: "belastingdienst", ProviderPeerID: "0000009958MINBZK0000", SourceOIN: "99999999900000000200", Name: "Belastingdienst", CertificateSet: "belastingdienst",
 			MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportFSC, ServiceReference: "gbo-metadata", Path: "/.well-known/gbo", GrantHash: "metadata-grant"},
 			DataAccess:       sourceDataAccess{Transport: sourceTransportFSC, ServiceReference: "bri", GrantHash: "data-grant"},
 		},
@@ -566,7 +566,7 @@ func TestRuntimeFailsClosedWhenDeployedTypeDisappears(t *testing.T) {
 	body, err := json.Marshal(sourceActivation{
 		SchemaVersion: "1.0",
 		Source: sourceRegistration{
-			SourceID: "belastingdienst", SourceOIN: "99999999900000000200", Name: "Belastingdienst", CertificateSet: "belastingdienst",
+			SourceID: "belastingdienst", ProviderPeerID: "0000009958MINBZK0000", SourceOIN: "99999999900000000200", Name: "Belastingdienst", CertificateSet: "belastingdienst",
 		},
 		Types: []activatedType{{TypeID: "different-type"}},
 	})
@@ -682,7 +682,7 @@ func TestActivatedRuntimeReloadsUpdatedDataGrantAfterCacheInterval(t *testing.T)
 	activation := sourceActivation{
 		SchemaVersion: "1.0", MetadataVersion: "1.0", FreshUntil: now.Add(time.Hour), StaleUntil: now.Add(2 * time.Hour),
 		Source: sourceRegistration{
-			SourceID: "belastingdienst", SourceOIN: "99999999900000000200", Name: "Belastingdienst", CertificateSet: "belastingdienst",
+			SourceID: "belastingdienst", ProviderPeerID: "0000009958MINBZK0000", SourceOIN: "99999999900000000200", Name: "Belastingdienst", CertificateSet: "belastingdienst",
 			MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportFSC, ServiceReference: "gbo-metadata", Path: "/.well-known/gbo", GrantHash: "metadata-grant"},
 			DataAccess:       sourceDataAccess{Transport: sourceTransportFSC, ServiceReference: "bri", GrantHash: "data-grant-v1"},
 		},

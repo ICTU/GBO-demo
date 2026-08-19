@@ -1,0 +1,28 @@
+{
+  "source_holders": [
+    {"peer_id": "99999999900000000200", "name": "Belastingdienst"},
+    {"peer_id": "99999999900000000400", "name": "BRP (RvIG)"}
+  ],
+  "system_participants": [
+    {
+      "peer_id": "99999999900000000100",
+      "name": "Demo EUDI-issuance (GBO)",
+      "active": true,
+      "allowed_source_peer_ids": ["99999999900000000200", "99999999900000000400"]
+    }
+  ],
+  "seed_participants": [
+    {
+      "peer_id": "99999999900000000300",
+      "name": "Demo Hypotheekverlener BV",
+      "active": true,
+      "allowed_source_peer_ids": ["99999999900000000200"]
+    },
+    {
+      "peer_id": "99999999900000000500",
+      "name": "Demo Incassobureau BV",
+      "active": false,
+      "allowed_source_peer_ids": ["99999999900000000200"]
+    }
+  ]
+}
