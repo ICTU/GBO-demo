@@ -661,6 +661,7 @@ services:
     environment:
       - CHOKIDAR_USEPOLLING=true
       - DV_API_TARGET=http://dienstverlener-backend:4006
+      - VITE_CONSUMER_PEER_ID=${HV_PEER_ID:-99999999900000000300}
     volumes:
       - ./dienstverlener-mock/src:/app/src
       - ./dienstverlener-mock/public:/app/public

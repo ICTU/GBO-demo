@@ -1,0 +1,3 @@
+window.__GBO_CONFIG__ = {
+  allowedReturnOrigins: "${ALLOWED_RETURN_ORIGINS}"
+}
