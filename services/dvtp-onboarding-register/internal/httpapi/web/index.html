@@ -9,13 +9,17 @@
 <body>
   <div class="page-shell">
     <header class="masthead">
-      <div class="wordmark" aria-hidden="true">GBO</div>
-      <div class="masthead-copy">
-        <p class="eyebrow">Federatieve dienstverlening · intern register</p>
-        <h1>DvTP toelatingsregister</h1>
-        <p class="lede">Private partijen die hier actief staan, hebben de onboarding en juridische controle voor de geselecteerde bronnen afgerond.</p>
+      <div class="masthead-inner">
+        <div class="masthead-topline">
+          <div class="wordmark">GBO <span>Federatieve dienstverlening</span></div>
+          <div class="edition">Demo-omgeving</div>
+        </div>
+        <div class="masthead-copy">
+          <p class="eyebrow">Intern register</p>
+          <h1>DvTP toelatingsregister</h1>
+          <p class="lede">Beheer welke private partijen na onboarding en juridische controle toegang hebben tot de geselecteerde bronnen.</p>
+        </div>
       </div>
-      <div class="edition">DEMO<br>REGISTER</div>
     </header>
 
     {{if .Saved}}<div class="notice success" role="status">Wijziging opgeslagen. OpenFTV neemt deze binnen enkele seconden over.</div>{{end}}
@@ -25,7 +29,7 @@
       <section class="register-panel" aria-labelledby="register-title">
         <div class="section-heading">
           <div>
-            <p class="section-index">01 / Register</p>
+            <p class="section-index">Register</p>
             <h2 id="register-title">Toegelaten partijen</h2>
           </div>
           <p class="count">{{len .Participants}} registraties</p>
@@ -48,10 +52,13 @@
                 </td>
                 <td><span class="status {{if .Active}}active{{else}}inactive{{end}}"><i></i>{{if .Active}}Actief{{else}}Gepauzeerd{{end}}</span></td>
                 <td class="action-cell">
-                  <form method="post" action="/participants/{{.OIN}}/toggle">
-                    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                    <button class="text-button" type="submit">{{if .Active}}Pauzeer{{else}}Activeer{{end}}</button>
-                  </form>
+                  <div class="row-actions">
+                    <a class="text-button" href="/?edit={{.OIN}}#edit-participant">Bewerken</a>
+                    <form method="post" action="/participants/{{.OIN}}/toggle">
+                      <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                      <button class="text-button" type="submit">{{if .Active}}Pauzeer{{else}}Activeer{{end}}</button>
+                    </form>
+                  </div>
                 </td>
               </tr>
               {{else}}
@@ -62,13 +69,55 @@
         </div>
       </section>
 
+      {{with .Editing}}
+      <section class="form-panel edit-panel" id="edit-participant" aria-labelledby="edit-form-title">
+        <div class="section-heading compact">
+          <div>
+            <p class="section-index">Bestaande toelating</p>
+            <h2 id="edit-form-title">Partij bewerken</h2>
+          </div>
+          <span class="form-context neutral">OIN blijft ongewijzigd</span>
+        </div>
+
+        <form class="onboarding-form" method="post" action="/participants/{{.OIN}}">
+          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+          <label>
+            <span>Naam organisatie</span>
+            <input name="name" autocomplete="organization" required value="{{.Name}}">
+          </label>
+          <label>
+            <span>OIN</span>
+            <input name="oin" value="{{.OIN}}" readonly aria-readonly="true">
+          </label>
+
+          <fieldset>
+            <legend>Toegang tot bronnen</legend>
+            <div class="checkbox-grid">
+              {{range $.Sources}}
+              <label class="source-check">
+                <input type="checkbox" name="source_oins" value="{{.OIN}}" {{if containsSource $.Editing.AllowedSourceOINs .OIN}}checked{{end}}>
+                <span class="box" aria-hidden="true"></span>
+                <span>{{.Name}}</span>
+              </label>
+              {{end}}
+            </div>
+          </fieldset>
+
+          <div class="form-footer">
+            <a class="secondary-link" href="/">Annuleren</a>
+            <button class="primary-button" type="submit">Wijzigingen opslaan <span>→</span></button>
+          </div>
+        </form>
+      </section>
+      {{end}}
+
       <section class="form-panel" aria-labelledby="form-title">
         <div class="section-heading compact">
           <div>
-            <p class="section-index">02 / Onboarding</p>
+            <p class="section-index">Nieuwe toelating</p>
             <h2 id="form-title">Partij toevoegen</h2>
           </div>
-          <span class="stamp" aria-hidden="true">CONTROLE<br>AFGEROND</span>
+          <span class="form-context">Juridische controle afgerond</span>
         </div>
 
         <form class="onboarding-form" method="post" action="/participants">
@@ -110,8 +159,10 @@
     </main>
 
     <footer>
-      <span>Alleen voor de lokale GBO-demo</span>
-      <span>OpenFTV PIP · automatische synchronisatie</span>
+      <div class="footer-inner">
+        <span>Lokale GBO-demo</span>
+        <span>OpenFTV PIP · automatische synchronisatie</span>
+      </div>
     </footer>
   </div>
 </body>

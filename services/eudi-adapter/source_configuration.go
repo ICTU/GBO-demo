@@ -25,9 +25,17 @@ type sourceConfiguration struct {
 }
 
 func loadSourceConfigurations(directory string) ([]sourceConfiguration, error) {
-	entries, err := filepath.Glob(filepath.Join(directory, "*.yaml"))
-	if err != nil {
-		return nil, fmt.Errorf("list source configurations: %w", err)
+	patterns := []string{
+		filepath.Join(directory, "*.yaml"),
+		filepath.Join(directory, "*", "*.yaml"),
+	}
+	var entries []string
+	for _, pattern := range patterns {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			return nil, fmt.Errorf("list source configurations: %w", err)
+		}
+		entries = append(entries, matches...)
 	}
 	sort.Strings(entries)
 	configurations := make([]sourceConfiguration, 0, len(entries))

@@ -45,6 +45,21 @@ func TestRepositoryPersistsAndTogglesParticipant(t *testing.T) {
 	if participants[0].Active {
 		t.Fatal("participant remained active")
 	}
+
+	updated := participant
+	updated.Name = "Gewijzigde naam"
+	updated.AllowedSourceOINs = []string{"99999999900000000400"}
+	found, err = repository.UpdateDetails(t.Context(), updated)
+	if err != nil || !found {
+		t.Fatalf("UpdateDetails = %v, %v", found, err)
+	}
+	participants, _ = repository.List(t.Context())
+	if participants[0].Name != updated.Name || !reflect.DeepEqual(participants[0].AllowedSourceOINs, updated.AllowedSourceOINs) {
+		t.Fatalf("participant details = %+v, want %+v", participants[0], updated)
+	}
+	if participants[0].Active {
+		t.Fatal("UpdateDetails overwrote the independently managed active state")
+	}
 }
 
 func TestInsertIfAbsentDoesNotOverwriteParticipant(t *testing.T) {

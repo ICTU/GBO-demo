@@ -42,6 +42,7 @@ type Participant struct {
 type Repository interface {
 	List(context.Context) ([]Participant, error)
 	Save(context.Context, Participant) error
+	UpdateDetails(context.Context, Participant) (bool, error)
 	InsertIfAbsent(context.Context, Participant) error
 	ToggleActive(context.Context, string) (bool, error)
 }
@@ -79,6 +80,20 @@ func (s *Service) Save(ctx context.Context, participant Participant) error {
 		return err
 	}
 	return s.repository.Save(ctx, normalized)
+}
+
+// UpdateDetails changes an existing participant's display name and source
+// admissions without changing whether the participant is active.
+func (s *Service) UpdateDetails(ctx context.Context, oin, name string, allowedSourceOINs []string) (bool, error) {
+	normalized, err := normalizeParticipant(Participant{
+		OIN:               oin,
+		Name:              name,
+		AllowedSourceOINs: allowedSourceOINs,
+	})
+	if err != nil {
+		return false, err
+	}
+	return s.repository.UpdateDetails(ctx, normalized)
 }
 
 func (s *Service) ToggleActive(ctx context.Context, oin string) (bool, error) {

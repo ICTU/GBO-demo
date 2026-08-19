@@ -110,11 +110,11 @@ func (p *developmentCAProvider) Provision(registration sourceRegistration) (cert
 		return certificateArtifacts{}, err
 	}
 	caDir := filepath.Join(p.root, "development-ca")
-	issuerCA, err := p.ensureCA(caDir, "issuer")
+	issuerCA, err := p.loadPreProvisionedCA(caDir, "issuer")
 	if err != nil {
 		return certificateArtifacts{}, err
 	}
-	readerCA, err := p.ensureCA(caDir, "reader")
+	readerCA, err := p.loadPreProvisionedCA(caDir, "reader")
 	if err != nil {
 		return certificateArtifacts{}, err
 	}
@@ -241,59 +241,16 @@ type developmentLeaf struct {
 	cert     *x509.Certificate
 }
 
-func (p *developmentCAProvider) ensureCA(directory, role string) (*developmentCA, error) {
-	if err := ensurePrivateDirectory(directory); err != nil {
-		return nil, err
-	}
+func (p *developmentCAProvider) loadPreProvisionedCA(directory, role string) (*developmentCA, error) {
 	keyPath := filepath.Join(directory, role+"-ca-key.pem")
 	certPath := filepath.Join(directory, role+"-ca-cert.pem")
 	keyExists, certExists := fileExists(keyPath), fileExists(certPath)
-	if keyExists != certExists {
-		return nil, fmt.Errorf("development %s CA is partially provisioned", role)
+	if !keyExists || !certExists {
+		return nil, fmt.Errorf("pre-provisioned development %s CA key and certificate are required at %q and %q", role, keyPath, certPath)
 	}
-	if keyExists {
-		key, cert, err := loadDevelopmentCA(keyPath, certPath)
-		if err != nil {
-			return nil, fmt.Errorf("load development %s CA: %w", role, err)
-		}
-		return &developmentCA{key: key, cert: cert, certPath: certPath}, nil
-	}
-	key, err := ecdsa.GenerateKey(elliptic.P256(), p.random)
+	key, cert, err := loadDevelopmentCA(keyPath, certPath)
 	if err != nil {
-		return nil, fmt.Errorf("generate development %s CA key: %w", role, err)
-	}
-	now := p.now().UTC()
-	serial, err := randomSerial(p.random)
-	if err != nil {
-		return nil, err
-	}
-	template := &x509.Certificate{
-		SerialNumber:          serial,
-		Subject:               pkix.Name{CommonName: "GBO " + role + " development CA"},
-		NotBefore:             now.Add(-5 * time.Minute),
-		NotAfter:              now.AddDate(5, 0, 0),
-		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign | x509.KeyUsageDigitalSignature,
-		BasicConstraintsValid: true,
-		IsCA:                  true,
-		MaxPathLenZero:        true,
-	}
-	der, err := x509.CreateCertificate(p.random, template, template, &key.PublicKey, key)
-	if err != nil {
-		return nil, fmt.Errorf("create development %s CA certificate: %w", role, err)
-	}
-	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
-	if err != nil {
-		return nil, fmt.Errorf("marshal development %s CA key: %w", role, err)
-	}
-	if err := writeFileAtomically(directory, filepath.Base(keyPath), pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}), 0o600); err != nil {
-		return nil, err
-	}
-	if err := writeFileAtomically(directory, filepath.Base(certPath), pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o644); err != nil {
-		return nil, err
-	}
-	cert, err := x509.ParseCertificate(der)
-	if err != nil {
-		return nil, fmt.Errorf("parse generated development %s CA certificate: %w", role, err)
+		return nil, fmt.Errorf("load pre-provisioned development %s CA: %w", role, err)
 	}
 	return &developmentCA{key: key, cert: cert, certPath: certPath}, nil
 }

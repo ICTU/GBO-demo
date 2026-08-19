@@ -22,7 +22,7 @@ type Props = {
 // year suffix (let alone akte_van_overlijden), so the link 404'd.
 export default function EudiQrPanel({ usecaseKey, offers, onCancel, onPlaygroundToggle }: Props) {
   const offer = offers.find((candidate) => candidate.key === usecaseKey)
-  const [bsn, setBsn] = useState('123456789')
+  const [bsn, setBsn] = useState('999991772')
   const [busy, setBusy] = useState(false)
   const [response, setResponse] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -118,7 +118,7 @@ export default function EudiQrPanel({ usecaseKey, offers, onCancel, onPlayground
                   }}
                   value={bsn}
                   onChange={(e) => setBsn(e.target.value)}
-                  placeholder="123456789"
+                  placeholder="999991772"
                 />
                 <button className="btn mini" onClick={runCurl} disabled={busy}>
                   {busy ? 'bezig…' : 'verstuur'}
