@@ -3,6 +3,7 @@ export type IssuanceOffer = {
   label: string
   description?: string
   attestation_type: string
+  source_id: string
   source_oin: string
   type_id: string
   parameters: Record<string, string | number | boolean>
@@ -53,5 +54,5 @@ export function adapterPathFor(offer: IssuanceOffer): string {
   const query = new URLSearchParams()
   for (const [name, value] of Object.entries(offer.parameters)) query.set(name, String(value))
   const suffix = query.size > 0 ? `?${query.toString()}` : ''
-  return `/eudi-api/attestations/${encodeURIComponent(offer.source_oin)}/${encodeURIComponent(offer.type_id)}${suffix}`
+  return `/eudi-api/attestations/${encodeURIComponent(offer.source_id)}/${encodeURIComponent(offer.type_id)}${suffix}`
 }

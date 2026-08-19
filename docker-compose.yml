@@ -977,13 +977,13 @@ services:
       - --sources-dir=/config/sources
     volumes:
       - ./schemas:/config/schemas:ro
-      - ./sources/configured:/config/sources:ro
-      # Deliberately local-only. Deployment ConfigMaps use sources/configured
-      # and therefore never expose the unsecured demonstration source.
-      - ./sources/local-demo/demo-unsecured.yaml:/config/sources/demo-unsecured.yaml:ro
+      # Compose loads both the governed configurations and the local-only
+      # unsecured demo. Deployments mount only sources/configured and therefore
+      # never expose the unsecured demonstration source.
+      - ./sources:/config/sources:ro
       - ./fsc-infra/orgs/edi-issuer/pki/internal:/fsc-certs:ro
       - ./.local/onboarding:/var/lib/gbo
-      - ./.local/secrets:/var/lib/gbo-secrets
+      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}:/var/lib/gbo-secrets
       - ./services/eudi-issuance-server/config:/generated
     networks:
       - fsc-infra

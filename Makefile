@@ -1,7 +1,7 @@
 .PHONY: up down logs clean certs demo-manager manager-seed fsc-local-env fsc-ca fsc-up fsc-all-up fsc-brp-certs fsc-databases fsc-down fsc-test fsc-clean \
         fsc-seed-bri fsc-seed-bri-hv fsc-seed-brp fsc-seed-rvig-source fsc-seed-metadata fsc-pdp-cert pdp-up \
         eudi-images source-metadata-up \
-        provision-development-certificates reconcile-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
+        require-development-cas provision-development-certificates reconcile-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
         demo-full demo-down eudi-config
 
 -include .env
@@ -29,6 +29,7 @@ DEVELOPMENT_UNSECURED_SOURCE_LOGO ?= assets/issuer-logos/belastingdienst.svg
 ONBOARDING_OUTWAY_URL ?= http://localhost:$(or $(FSC_PORT_EDI_OUTWAY),8087)
 ONBOARDING_STATE_DIR ?= $(PWD)/.local/onboarding
 ONBOARDING_SECRETS_DIR ?= $(PWD)/.local/secrets
+DEVELOPMENT_CA_DIR ?= $(ONBOARDING_SECRETS_DIR)/development-ca
 ONBOARDING_TYPE_METADATA_URL ?= $(or $(EUDI_BRI_URL),http://localhost:$(or $(GBO_PORT_EUDI_ADAPTER),9409))
 ONBOARDING_STORAGE_BACKEND ?= filesystem
 ONBOARDING_CERTIFICATE_STORE ?= filesystem
@@ -195,7 +196,13 @@ source-metadata-up:
 onboarding-directories:
 	@mkdir -p "$(ONBOARDING_STATE_DIR)/type-metadata" "$(ONBOARDING_STATE_DIR)/candidates" "$(ONBOARDING_STATE_DIR)/active" "$(ONBOARDING_STATE_DIR)/status"
 
-provision-development-certificates:
+require-development-cas:
+	@test -f "$(DEVELOPMENT_CA_DIR)/issuer-ca-key.pem" || { echo "ERROR: pre-provisioned EUDI CA file is required: $(DEVELOPMENT_CA_DIR)/issuer-ca-key.pem"; echo "       Set ONBOARDING_SECRETS_DIR to the managed secrets root; trust anchors are never generated."; exit 1; }
+	@test -f "$(DEVELOPMENT_CA_DIR)/issuer-ca-cert.pem" || { echo "ERROR: pre-provisioned EUDI CA file is required: $(DEVELOPMENT_CA_DIR)/issuer-ca-cert.pem"; exit 1; }
+	@test -f "$(DEVELOPMENT_CA_DIR)/reader-ca-key.pem" || { echo "ERROR: pre-provisioned EUDI CA file is required: $(DEVELOPMENT_CA_DIR)/reader-ca-key.pem"; exit 1; }
+	@test -f "$(DEVELOPMENT_CA_DIR)/reader-ca-cert.pem" || { echo "ERROR: pre-provisioned EUDI CA file is required: $(DEVELOPMENT_CA_DIR)/reader-ca-cert.pem"; exit 1; }
+
+provision-development-certificates: require-development-cas
 	@test -n "$(SOURCE_OIN)" || { echo "ERROR: SOURCE_OIN=<20-digit OIN> is required"; exit 1; }
 	@cd services/eudi-adapter && go run . provision-development-certificates \
 		--source-oin "$(SOURCE_OIN)" \
@@ -211,7 +218,7 @@ reconcile-sources: onboarding-directories
 # Complete, idempotent local onboarding for both demo sources. The sequence is
 # explicit so a clean checkout cannot reach eudi-config before metadata has
 # been published, transported through FSC, verified and activated.
-onboard-demo-sources: certs
+onboard-demo-sources: require-development-cas certs
 	$(MAKE) fsc-all-up
 	$(MAKE) source-metadata-up
 	$(MAKE) fsc-seed-bri

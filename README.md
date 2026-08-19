@@ -63,6 +63,23 @@ EUDI_BRI_URL=https://eudi-bri.example.org/
 EUDI_POSTGRES_PASSWORD=<local-random-password>
 ```
 
+Before starting an EUDI demo, provide the issuer and reader CA material that
+the test wallet already trusts. The setup deliberately never generates trust
+anchors. By default it loads these four files from
+`.local/secrets/development-ca/`:
+
+```text
+issuer-ca-key.pem
+issuer-ca-cert.pem
+reader-ca-key.pem
+reader-ca-cert.pem
+```
+
+Keep the private keys outside version control. To load the same managed CA
+material from another location, set `ONBOARDING_SECRETS_DIR` to the absolute
+path of that secrets root; both the provisioning command and Compose use it.
+Setup fails before onboarding when any required CA file is absent.
+
 `EUDI_PUBLIC_URL` must route to the issuance server and its hostname must be in
 the reader-certificate DNS SAN. `EUDI_BRI_URL` must route to the EUDI adapter.
 See [source onboarding](docs/source-onboarding.md) for the local certificate

@@ -19,6 +19,7 @@ const testCSRFToken = "test-csrf-token"
 type memoryRepository struct {
 	participants map[string]onboarding.Participant
 	toggleErr    error
+	updateErr    error
 }
 
 func newTestService(t *testing.T) (*onboarding.Service, *memoryRepository) {
@@ -57,6 +58,19 @@ func (r *memoryRepository) ToggleActive(_ context.Context, oin string) (bool, er
 	}
 	participant.Active = !participant.Active
 	r.participants[oin] = participant
+	return true, nil
+}
+
+func (r *memoryRepository) UpdateDetails(_ context.Context, participant onboarding.Participant) (bool, error) {
+	if r.updateErr != nil {
+		return false, r.updateErr
+	}
+	current, exists := r.participants[participant.OIN]
+	if !exists {
+		return false, nil
+	}
+	participant.Active = current.Active
+	r.participants[participant.OIN] = participant
 	return true, nil
 }
 
@@ -131,6 +145,53 @@ func TestParticipantFormRejectsMissingSource(t *testing.T) {
 	}
 }
 
+func TestParticipantEditPagePrefillsCurrentDetails(t *testing.T) {
+	service, _ := newTestService(t)
+	if err := service.SeedDemo(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	oin := "99999999900000000300"
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/?edit="+oin, nil)
+	testHandler(service).ServeHTTP(recorder, request)
+	body := recorder.Body.String()
+	for _, want := range []string{
+		`id="edit-participant"`,
+		`action="/participants/` + oin + `"`,
+		`value="Demo Hypotheekverlener BV"`,
+		`value="99999999900000000200" checked`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("edit page does not contain %q: %s", want, body)
+		}
+	}
+}
+
+func TestParticipantEditUpdatesNameAndSourcesWithoutChangingActiveState(t *testing.T) {
+	service, repository := newTestService(t)
+	if err := service.SeedDemo(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	oin := "99999999900000000500"
+	form := url.Values{
+		"name":        {"Gewijzigd Incassobureau BV"},
+		"source_oins": {"99999999900000000200", "99999999900000000400"},
+	}
+	recorder := httptest.NewRecorder()
+	request := formRequest(http.MethodPost, "/participants/"+oin, form)
+	testHandler(service).ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusSeeOther || recorder.Header().Get("Location") != "/?saved=1" {
+		t.Fatalf("response = %d %q", recorder.Code, recorder.Header().Get("Location"))
+	}
+	got := repository.participants[oin]
+	if got.Name != "Gewijzigd Incassobureau BV" || len(got.AllowedSourceOINs) != 2 {
+		t.Fatalf("updated participant = %+v", got)
+	}
+	if got.Active {
+		t.Fatal("edit route activated a paused participant")
+	}
+}
+
 func TestRegisterPageAndSecurityHeaders(t *testing.T) {
 	service, _ := newTestService(t)
 	if err := service.SeedDemo(t.Context()); err != nil {
@@ -148,6 +209,9 @@ func TestRegisterPageAndSecurityHeaders(t *testing.T) {
 	}
 	if header := recorder.Header().Get("Content-Security-Policy"); !strings.Contains(header, "frame-ancestors 'none'") {
 		t.Fatalf("Content-Security-Policy = %q", header)
+	}
+	if header := recorder.Header().Get("Referrer-Policy"); header != "same-origin" {
+		t.Fatalf("Referrer-Policy = %q, want %q", header, "same-origin")
 	}
 }
 

@@ -21,6 +21,7 @@ var webFiles embed.FS
 type pageData struct {
 	Participants []onboarding.Participant
 	Sources      []onboarding.Source
+	Editing      *onboarding.Participant
 	CSRFToken    string
 	Saved        bool
 	Error        string
@@ -39,6 +40,14 @@ func NewHandler(service *onboarding.Service, csrfToken string) http.Handler {
 				}
 			}
 			return oin
+		},
+		"containsSource": func(sourceOINs []string, wanted string) bool {
+			for _, sourceOIN := range sourceOINs {
+				if sourceOIN == wanted {
+					return true
+				}
+			}
+			return false
 		},
 	}).ParseFS(webFiles, "web/index.html"))
 	staticFiles, err := fs.Sub(webFiles, "web")
@@ -65,16 +74,47 @@ func NewHandler(service *onboarding.Service, csrfToken string) http.Handler {
 			http.Error(w, "register unavailable", http.StatusInternalServerError)
 			return
 		}
+		var editing *onboarding.Participant
+		if editOIN := r.URL.Query().Get("edit"); editOIN != "" {
+			for index := range participants {
+				if participants[index].OIN == editOIN {
+					editing = &participants[index]
+					break
+				}
+			}
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
 		setBrowserSecurityHeaders(w)
 		_ = page.Execute(w, pageData{
 			Participants: participants,
 			Sources:      sources,
+			Editing:      editing,
 			CSRFToken:    csrfToken,
 			Saved:        r.URL.Query().Get("saved") == "1",
 			Error:        r.URL.Query().Get("error"),
 		})
+	})
+	mux.HandleFunc("POST /participants/{oin}", func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			redirectError(w, r, "Formulier kon niet worden gelezen")
+			return
+		}
+		if !validCSRFRequest(r, csrfToken) {
+			slog.Warn("rejected cross-site participant mutation", "origin", r.Header.Get("Origin"), "fetch_site", r.Header.Get("Sec-Fetch-Site"))
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		found, err := service.UpdateDetails(r.Context(), r.PathValue("oin"), r.FormValue("name"), r.Form["source_oins"])
+		if err != nil {
+			redirectError(w, r, err.Error())
+			return
+		}
+		if !found {
+			redirectError(w, r, "Deelnemer niet gevonden")
+			return
+		}
+		http.Redirect(w, r, "/?saved=1", http.StatusSeeOther)
 	})
 	mux.HandleFunc("POST /participants", func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
@@ -144,7 +184,7 @@ func withAccessLog(next http.Handler) http.Handler {
 
 func setBrowserSecurityHeaders(w http.ResponseWriter) {
 	w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
-	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("Referrer-Policy", "same-origin")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("X-Frame-Options", "DENY")
 }

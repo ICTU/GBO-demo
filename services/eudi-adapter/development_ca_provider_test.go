@@ -2,14 +2,37 @@ package main
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/asn1"
 	"encoding/json"
+	"encoding/pem"
+	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestDevelopmentCAProviderRequiresPreProvisionedCAs(t *testing.T) {
+	root := t.TempDir()
+	provider := newDevelopmentCAProvider(root, "https://issuance.example")
+	_, err := provider.Provision(sourceRegistration{
+		SourceOIN:      "99999999900000000200",
+		Name:           "Belastingdienst-mock",
+		CertificateSet: "belastingdienst",
+	})
+	if err == nil || !strings.Contains(err.Error(), "pre-provisioned development issuer CA") {
+		t.Fatalf("Provision() error = %v, want missing pre-provisioned issuer CA", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "development-ca")); !os.IsNotExist(statErr) {
+		t.Fatalf("Provision() created a CA directory, stat error = %v", statErr)
+	}
+}
 
 func TestDevelopmentCAProviderBindsReaderCertificateToCurrentConfiguration(t *testing.T) {
 	registration := sourceRegistration{
@@ -19,7 +42,9 @@ func TestDevelopmentCAProviderBindsReaderCertificateToCurrentConfiguration(t *te
 		Logo:           &organizationLogo{MimeType: "image/svg+xml", ImageData: "<svg/>"},
 	}
 	fixedNow := time.Date(2026, time.August, 5, 12, 0, 0, 0, time.UTC)
-	provider := newDevelopmentCAProvider(t.TempDir(), "https://issuance.example")
+	root := t.TempDir()
+	writeTestDevelopmentCAs(t, root, fixedNow)
+	provider := newDevelopmentCAProvider(root, "https://issuance.example")
 	provider.now = func() time.Time { return fixedNow }
 
 	first, err := provider.Provision(registration)
@@ -97,6 +122,44 @@ func TestDevelopmentCAProviderBindsReaderCertificateToCurrentConfiguration(t *te
 	provider.now = func() time.Time { return fixedNow.AddDate(2, 0, 0) }
 	if _, err := provider.Provision(registration); err != nil {
 		t.Fatalf("reprovision expired leaf certificates using injected clock: %v", err)
+	}
+}
+
+func writeTestDevelopmentCAs(t *testing.T, root string, now time.Time) {
+	t.Helper()
+	directory := filepath.Join(root, "development-ca")
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for index, role := range []string{"issuer", "reader"} {
+		key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		template := &x509.Certificate{
+			SerialNumber:          big.NewInt(int64(index + 1)),
+			Subject:               pkix.Name{CommonName: "test " + role + " CA"},
+			NotBefore:             now.Add(-time.Hour),
+			NotAfter:              now.AddDate(10, 0, 0),
+			KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign | x509.KeyUsageDigitalSignature,
+			BasicConstraintsValid: true,
+			IsCA:                  true,
+			MaxPathLenZero:        true,
+		}
+		certificateDER, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		keyDER, err := x509.MarshalPKCS8PrivateKey(key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(directory, role+"-ca-key.pem"), pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(directory, role+"-ca-cert.pem"), pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certificateDER}), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

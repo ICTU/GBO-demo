@@ -106,6 +106,26 @@ func (r *Repository) InsertIfAbsent(ctx context.Context, participant onboarding.
 	return nil
 }
 
+func (r *Repository) UpdateDetails(ctx context.Context, participant onboarding.Participant) (bool, error) {
+	encodedSources, err := json.Marshal(participant.AllowedSourceOINs)
+	if err != nil {
+		return false, fmt.Errorf("encode allowed sources: %w", err)
+	}
+	result, err := r.db.ExecContext(ctx, `
+        UPDATE participants
+        SET name = ?, allowed_sources = ?, updated_at = ?
+        WHERE oin = ?
+    `, participant.Name, string(encodedSources), now(), participant.OIN)
+	if err != nil {
+		return false, fmt.Errorf("update participant details: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("read affected rows: %w", err)
+	}
+	return count == 1, nil
+}
+
 func (r *Repository) List(ctx context.Context) ([]onboarding.Participant, error) {
 	rows, err := r.db.QueryContext(ctx, `
         SELECT oin, name, active, allowed_sources, updated_at

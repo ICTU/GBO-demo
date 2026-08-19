@@ -44,6 +44,16 @@ func (r *memoryRepository) ToggleActive(_ context.Context, oin string) (bool, er
 	return true, nil
 }
 
+func (r *memoryRepository) UpdateDetails(_ context.Context, participant Participant) (bool, error) {
+	current, exists := r.participants[participant.OIN]
+	if !exists {
+		return false, nil
+	}
+	participant.Active = current.Active
+	r.participants[participant.OIN] = participant
+	return true, nil
+}
+
 func TestSaveNormalizesParticipant(t *testing.T) {
 	repository := newMemoryRepository()
 	service := NewService(repository)
@@ -78,6 +88,36 @@ func TestSaveRejectsInvalidParticipant(t *testing.T) {
 		if err := service.Save(t.Context(), participant); err == nil {
 			t.Errorf("Save(%+v) succeeded, want validation error", participant)
 		}
+	}
+}
+
+func TestUpdateDetailsNormalizesParticipantAndPreservesActiveState(t *testing.T) {
+	repository := newMemoryRepository()
+	oin := "00000001234567890000"
+	repository.participants[oin] = Participant{
+		OIN:               oin,
+		Name:              "Original",
+		Active:            false,
+		AllowedSourceOINs: []string{"99999999900000000200"},
+	}
+	service := NewService(repository)
+	found, err := service.UpdateDetails(t.Context(), oin, " Gewijzigde naam ", []string{
+		"99999999900000000400",
+		"99999999900000000200",
+		"99999999900000000400",
+	})
+	if err != nil || !found {
+		t.Fatalf("UpdateDetails() = %t, %v", found, err)
+	}
+	got := repository.participants[oin]
+	if got.Name != "Gewijzigde naam" {
+		t.Fatalf("Name = %q", got.Name)
+	}
+	if got.Active {
+		t.Fatal("UpdateDetails changed the participant's active state")
+	}
+	if want := []string{"99999999900000000200", "99999999900000000400"}; !reflect.DeepEqual(got.AllowedSourceOINs, want) {
+		t.Fatalf("AllowedSourceOINs = %v, want %v", got.AllowedSourceOINs, want)
 	}
 }
 
