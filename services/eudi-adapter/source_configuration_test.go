@@ -80,6 +80,53 @@ data_access:
 	}
 }
 
+func TestLoadSourceConfigurationsIgnoresKubernetesProjectionDirectories(t *testing.T) {
+	directory := t.TempDir()
+	projectionDirectory := filepath.Join(directory, "..2026_08_19_12_32_38.100056535")
+	writeTestSourceConfiguration(t, projectionDirectory, "belastingdienst.yaml", `
+source_id: belastingdienst
+provider_peer_id: "0000009958MINBZK0000"
+source_oin: "99999999900000000200"
+name: Belastingdienst
+certificate_set: belastingdienst
+metadata_endpoint:
+  transport: fsc
+  service_reference: gbo-metadata-bd
+  path: /.well-known/gbo
+data_access:
+  transport: fsc
+`)
+	writeTestSourceConfiguration(t, projectionDirectory, "rvig.yaml", `
+source_id: rvig
+provider_peer_id: "0000009958MINBZK0000"
+source_oin: "99999999900000000200"
+name: RvIG
+certificate_set: rvig
+metadata_endpoint:
+  transport: fsc
+  service_reference: gbo-metadata-rvig
+  path: /.well-known/gbo
+data_access:
+  transport: fsc
+`)
+	if err := os.Symlink(filepath.Base(projectionDirectory), filepath.Join(directory, "..data")); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"belastingdienst.yaml", "rvig.yaml"} {
+		if err := os.Symlink(filepath.Join("..data", name), filepath.Join(directory, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	configurations, err := loadSourceConfigurations(directory)
+	if err != nil {
+		t.Fatalf("load Kubernetes-projected configurations: %v", err)
+	}
+	if len(configurations) != 2 || configurations[0].SourceID != "belastingdienst" || configurations[1].SourceID != "rvig" {
+		t.Fatalf("configurations = %+v", configurations)
+	}
+}
+
 func TestLoadSourceConfigurationsRejectsDuplicateSourceID(t *testing.T) {
 	directory := t.TempDir()
 	for _, name := range []string{"one.yaml", "two.yaml"} {
