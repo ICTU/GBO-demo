@@ -152,7 +152,7 @@ func (s *Service) ToggleActive(ctx context.Context, peerID string) (bool, error)
 		return false, errors.New("invalid Peer ID")
 	}
 	if s.reservedPeerIDs[peerID] {
-		return false, errors.New("Peer ID is reserved for a technical system party")
+		return false, errors.New("peer ID is reserved for a technical system party")
 	}
 	return s.repository.ToggleActive(ctx, peerID)
 }
@@ -170,10 +170,10 @@ func (s *Service) normalizeParticipant(participant Participant, rejectReserved b
 	participant.PeerID = strings.TrimSpace(participant.PeerID)
 	participant.Name = strings.TrimSpace(participant.Name)
 	if !validPeerID.MatchString(participant.PeerID) {
-		return Participant{}, errors.New("Peer ID must contain exactly 20 alphanumeric characters")
+		return Participant{}, errors.New("peer ID must contain exactly 20 alphanumeric characters")
 	}
 	if rejectReserved && s.reservedPeerIDs[participant.PeerID] {
-		return Participant{}, errors.New("Peer ID is reserved for a technical system party")
+		return Participant{}, errors.New("peer ID is reserved for a technical system party")
 	}
 	if participant.Name == "" {
 		return Participant{}, errors.New("name is required")
