@@ -1,4 +1,4 @@
-import { buildPortalUrl } from '../lib/buildPortalUrl'
+import { buildPortalUrl, configuredConsumerPeerID } from '../lib/buildPortalUrl'
 
 const VALID_UNTIL_90D = new Date(Date.now() + 90 * 24 * 3600 * 1000).toISOString()
 
@@ -6,7 +6,7 @@ const REDIRECT_CONTEXT = {
   service: 'aangiftegegevens',
   purpose: 'Hypotheek-aanvraag',
   scope: ['bd:ib:2025', 'bd:ib:2024'],
-  client_oin: '99999999900000000300',
+  client_oin: configuredConsumerPeerID(),
   client_name: 'Hypotheek-BV',
   valid_until: VALID_UNTIL_90D,
   return_url: `${window.location.origin}/return`,

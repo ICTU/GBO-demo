@@ -133,6 +133,9 @@ jobs:
       - name: tsc --noEmit
         working-directory: ${{ matrix.app }}
         run: npx tsc --noEmit
+      - name: Unit tests
+        working-directory: ${{ matrix.app }}
+        run: npm test --if-present
 
   docker:
     name: Docker — build (${{ matrix.service }})

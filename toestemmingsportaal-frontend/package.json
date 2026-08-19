@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test:return-url": "node --test tests/redirectValidation.test.mjs"
+    "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {
     "react": "^19.2.8",

@@ -12,8 +12,23 @@ declare global {
   interface Window {
     __GBO_CONFIG__?: {
       consentPortalUrl?: string
+      consumerPeerId?: string
     }
   }
+}
+
+export const DEFAULT_CONSUMER_PEER_ID = '99999999900000000300'
+
+export function resolveConsumerPeerID(configured?: string): string {
+  return configured?.trim() || DEFAULT_CONSUMER_PEER_ID
+}
+
+export function configuredConsumerPeerID(): string {
+  if (typeof window === 'undefined') return DEFAULT_CONSUMER_PEER_ID
+  return resolveConsumerPeerID(
+    window.__GBO_CONFIG__?.consumerPeerId?.trim()
+      || import.meta.env.VITE_CONSUMER_PEER_ID,
+  )
 }
 
 export function resolvePortalBase(location: Pick<Location, 'hostname' | 'port' | 'protocol'>): string {

@@ -11,9 +11,18 @@ export type { RedirectContext } from './redirectValidation'
 const STORAGE_KEY = 'gbo.redirect_context'
 const DEFAULT_ALLOWED_RETURN_ORIGINS = 'http://localhost:9001'
 
+declare global {
+  interface Window {
+    __GBO_CONFIG__?: {
+      allowedReturnOrigins?: string
+    }
+  }
+}
+
 function configuredReturnOrigins() {
-  const configured = import.meta.env.VITE_ALLOWED_RETURN_ORIGINS
-    ?? DEFAULT_ALLOWED_RETURN_ORIGINS
+  const configured = window.__GBO_CONFIG__?.allowedReturnOrigins?.trim()
+    || import.meta.env.VITE_ALLOWED_RETURN_ORIGINS
+    || DEFAULT_ALLOWED_RETURN_ORIGINS
   return parseAllowedReturnOrigins(configured)
 }
 

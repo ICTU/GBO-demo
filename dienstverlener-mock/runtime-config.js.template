@@ -1,3 +1,4 @@
 window.__GBO_CONFIG__ = {
-  consentPortalUrl: "${CONSENT_PORTAL_URL}"
+  consentPortalUrl: "${CONSENT_PORTAL_URL}",
+  consumerPeerId: "${CONSUMER_PEER_ID}"
 }
