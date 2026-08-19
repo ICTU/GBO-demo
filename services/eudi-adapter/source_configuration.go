@@ -36,7 +36,16 @@ func loadSourceConfigurations(directory string) ([]sourceConfiguration, error) {
 		if err != nil {
 			return nil, fmt.Errorf("list source configurations: %w", err)
 		}
-		entries = append(entries, matches...)
+		for _, match := range matches {
+			relative, err := filepath.Rel(directory, match)
+			if err != nil {
+				return nil, fmt.Errorf("resolve source configuration path %q: %w", match, err)
+			}
+			if pathContainsHiddenComponent(relative) {
+				continue
+			}
+			entries = append(entries, match)
+		}
 	}
 	sort.Strings(entries)
 	configurations := make([]sourceConfiguration, 0, len(entries))
@@ -71,6 +80,15 @@ func loadSourceConfigurations(directory string) ([]sourceConfiguration, error) {
 		configurations = append(configurations, configuration)
 	}
 	return configurations, nil
+}
+
+func pathContainsHiddenComponent(path string) bool {
+	for _, component := range strings.Split(filepath.Clean(path), string(filepath.Separator)) {
+		if strings.HasPrefix(component, ".") {
+			return true
+		}
+	}
+	return false
 }
 
 func parseSourceConfiguration(raw []byte) (sourceConfiguration, error) {
