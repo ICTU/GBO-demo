@@ -25,7 +25,24 @@ type memoryRepository struct {
 func newTestService(t *testing.T) (*onboarding.Service, *memoryRepository) {
 	t.Helper()
 	repository := &memoryRepository{participants: make(map[string]onboarding.Participant)}
-	return onboarding.NewService(repository), repository
+	service, err := onboarding.NewService(repository, onboarding.Configuration{
+		SourceHolders: []onboarding.Source{
+			{PeerID: "99999999900000000200", Name: "Belastingdienst"},
+			{PeerID: "99999999900000000400", Name: "BRP (RvIG)"},
+		},
+		SystemParticipants: []onboarding.Participant{{
+			PeerID: "0000009961MINEZK0000", Name: "EUDI issuer", Active: true,
+			AllowedSourcePeerIDs: []string{"99999999900000000200", "99999999900000000400"},
+		}},
+		SeedParticipants: []onboarding.Participant{
+			{PeerID: "99999999900000000300", Name: "Demo Hypotheekverlener BV", Active: true, AllowedSourcePeerIDs: []string{"99999999900000000200"}},
+			{PeerID: "99999999900000000500", Name: "Demo Incassobureau BV", Active: false, AllowedSourcePeerIDs: []string{"99999999900000000200"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return service, repository
 }
 
 func (r *memoryRepository) List(context.Context) ([]onboarding.Participant, error) {
@@ -37,27 +54,27 @@ func (r *memoryRepository) List(context.Context) ([]onboarding.Participant, erro
 }
 
 func (r *memoryRepository) Save(_ context.Context, participant onboarding.Participant) error {
-	r.participants[participant.OIN] = participant
+	r.participants[participant.PeerID] = participant
 	return nil
 }
 
 func (r *memoryRepository) InsertIfAbsent(_ context.Context, participant onboarding.Participant) error {
-	if _, exists := r.participants[participant.OIN]; !exists {
-		r.participants[participant.OIN] = participant
+	if _, exists := r.participants[participant.PeerID]; !exists {
+		r.participants[participant.PeerID] = participant
 	}
 	return nil
 }
 
-func (r *memoryRepository) ToggleActive(_ context.Context, oin string) (bool, error) {
+func (r *memoryRepository) ToggleActive(_ context.Context, peerID string) (bool, error) {
 	if r.toggleErr != nil {
 		return false, r.toggleErr
 	}
-	participant, exists := r.participants[oin]
+	participant, exists := r.participants[peerID]
 	if !exists {
 		return false, nil
 	}
 	participant.Active = !participant.Active
-	r.participants[oin] = participant
+	r.participants[peerID] = participant
 	return true, nil
 }
 
@@ -65,12 +82,12 @@ func (r *memoryRepository) UpdateDetails(_ context.Context, participant onboardi
 	if r.updateErr != nil {
 		return false, r.updateErr
 	}
-	current, exists := r.participants[participant.OIN]
+	current, exists := r.participants[participant.PeerID]
 	if !exists {
 		return false, nil
 	}
 	participant.Active = current.Active
-	r.participants[participant.OIN] = participant
+	r.participants[participant.PeerID] = participant
 	return true, nil
 }
 
@@ -106,18 +123,18 @@ func TestOpenFTVParticipantsEndpoint(t *testing.T) {
 	if err := json.NewDecoder(recorder.Body).Decode(&participants); err != nil {
 		t.Fatal(err)
 	}
-	if len(participants) != 2 {
-		t.Fatalf("participants = %d, want 2", len(participants))
+	if len(participants) != 3 {
+		t.Fatalf("participants = %d, want 3", len(participants))
 	}
 }
 
 func TestParticipantFormCreatesParticipant(t *testing.T) {
 	service, repository := newTestService(t)
 	form := url.Values{
-		"oin":         {"00000001234567890000"},
-		"name":        {"Hypotheekadvies BV"},
-		"active":      {"on"},
-		"source_oins": {"99999999900000000200"},
+		"peer_id":         {"00000001234567890000"},
+		"name":            {"Hypotheekadvies BV"},
+		"active":          {"on"},
+		"source_peer_ids": {"99999999900000000200"},
 	}
 	recorder := httptest.NewRecorder()
 	request := formRequest(http.MethodPost, "/participants", form)
@@ -133,9 +150,9 @@ func TestParticipantFormCreatesParticipant(t *testing.T) {
 func TestParticipantFormRejectsMissingSource(t *testing.T) {
 	service, _ := newTestService(t)
 	form := url.Values{
-		"oin":    {"00000001234567890000"},
-		"name":   {"Hypotheekadvies BV"},
-		"active": {"on"},
+		"peer_id": {"00000001234567890000"},
+		"name":    {"Hypotheekadvies BV"},
+		"active":  {"on"},
 	}
 	recorder := httptest.NewRecorder()
 	request := formRequest(http.MethodPost, "/participants", form)
@@ -150,14 +167,14 @@ func TestParticipantEditPagePrefillsCurrentDetails(t *testing.T) {
 	if err := service.SeedDemo(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	oin := "99999999900000000300"
+	peerID := "99999999900000000300"
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/?edit="+oin, nil)
+	request := httptest.NewRequest(http.MethodGet, "/?edit="+peerID, nil)
 	testHandler(service).ServeHTTP(recorder, request)
 	body := recorder.Body.String()
 	for _, want := range []string{
 		`id="edit-participant"`,
-		`action="/participants/` + oin + `"`,
+		`action="/participants/` + peerID + `"`,
 		`value="Demo Hypotheekverlener BV"`,
 		`value="99999999900000000200" checked`,
 	} {
@@ -172,19 +189,19 @@ func TestParticipantEditUpdatesNameAndSourcesWithoutChangingActiveState(t *testi
 	if err := service.SeedDemo(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	oin := "99999999900000000500"
+	peerID := "99999999900000000500"
 	form := url.Values{
-		"name":        {"Gewijzigd Incassobureau BV"},
-		"source_oins": {"99999999900000000200", "99999999900000000400"},
+		"name":            {"Gewijzigd Incassobureau BV"},
+		"source_peer_ids": {"99999999900000000200", "99999999900000000400"},
 	}
 	recorder := httptest.NewRecorder()
-	request := formRequest(http.MethodPost, "/participants/"+oin, form)
+	request := formRequest(http.MethodPost, "/participants/"+peerID, form)
 	testHandler(service).ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusSeeOther || recorder.Header().Get("Location") != "/?saved=1" {
 		t.Fatalf("response = %d %q", recorder.Code, recorder.Header().Get("Location"))
 	}
-	got := repository.participants[oin]
-	if got.Name != "Gewijzigd Incassobureau BV" || len(got.AllowedSourceOINs) != 2 {
+	got := repository.participants[peerID]
+	if got.Name != "Gewijzigd Incassobureau BV" || len(got.AllowedSourcePeerIDs) != 2 {
 		t.Fatalf("updated participant = %+v", got)
 	}
 	if got.Active {
@@ -228,10 +245,10 @@ func TestParticipantFormRejectsCrossSiteAndMissingToken(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			service, repository := newTestService(t)
 			form := url.Values{
-				"oin":         {"00000001234567890000"},
-				"name":        {"Hypotheekadvies BV"},
-				"source_oins": {"99999999900000000200"},
-				"csrf_token":  {test.token},
+				"peer_id":         {"00000001234567890000"},
+				"name":            {"Hypotheekadvies BV"},
+				"source_peer_ids": {"99999999900000000200"},
+				"csrf_token":      {test.token},
 			}
 			recorder := httptest.NewRecorder()
 			request := httptest.NewRequest(http.MethodPost, "/participants", strings.NewReader(form.Encode()))

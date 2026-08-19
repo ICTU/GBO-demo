@@ -406,7 +406,7 @@ fsc-seed-bri-hv: fsc-local-env
 		gbo-demo/pki-tools:local \
 		bash scripts/seed-bri-connection-hv.sh
 
-# BRP/RvIG is a separate local FSC provider peer (OIN ...0400), with its own
+# BRP/RvIG is a separate local FSC provider peer (Peer ID ...0400), with its own
 # Manager, Controller, Inway and contracts.
 fsc-seed-brp: fsc-local-env
 	docker run --rm \

@@ -17,6 +17,7 @@ import (
 // current contracts and the validated source metadata on every run.
 type sourceConfiguration struct {
 	SourceID         string                 `yaml:"source_id"`
+	ProviderPeerID   string                 `yaml:"provider_peer_id,omitempty"`
 	SourceOIN        string                 `yaml:"source_oin"`
 	Name             string                 `yaml:"name"`
 	CertificateSet   string                 `yaml:"certificate_set"`
@@ -60,9 +61,9 @@ func loadSourceConfigurations(directory string) ([]sourceConfiguration, error) {
 		if previous, exists := byCertificateSet[configuration.CertificateSet]; exists {
 			return nil, fmt.Errorf("certificate_set %q is configured in both %q and %q", configuration.CertificateSet, previous, path)
 		}
-		binding := configuration.MetadataEndpoint.Transport + "\x00" + configuration.SourceOIN + "\x00" + configuration.MetadataEndpoint.ServiceReference + "\x00" + configuration.MetadataEndpoint.Endpoint
+		binding := configuration.MetadataEndpoint.Transport + "\x00" + configuration.ProviderPeerID + "\x00" + configuration.MetadataEndpoint.ServiceReference + "\x00" + configuration.MetadataEndpoint.Endpoint
 		if previous, exists := byTransportBinding[binding]; exists {
-			return nil, fmt.Errorf("metadata endpoint for source OIN %q is configured in both %q and %q", configuration.SourceOIN, previous, path)
+			return nil, fmt.Errorf("metadata endpoint for provider Peer ID %q is configured in both %q and %q", configuration.ProviderPeerID, previous, path)
 		}
 		byID[configuration.SourceID] = path
 		byCertificateSet[configuration.CertificateSet] = path
@@ -101,6 +102,9 @@ func (c sourceConfiguration) validate() error {
 	}
 	switch c.MetadataEndpoint.Transport {
 	case sourceTransportFSC:
+		if !peerIDPattern.MatchString(c.ProviderPeerID) {
+			return fmt.Errorf("provider_peer_id must contain exactly 20 alphanumeric characters for FSC transport")
+		}
 		if !serviceReferencePattern.MatchString(c.MetadataEndpoint.ServiceReference) {
 			return fmt.Errorf("metadata_endpoint service_reference is invalid")
 		}
@@ -111,6 +115,9 @@ func (c sourceConfiguration) validate() error {
 			return fmt.Errorf("metadata_endpoint endpoint is not allowed for FSC transport")
 		}
 	case sourceTransportUnsecured:
+		if c.ProviderPeerID != "" {
+			return fmt.Errorf("provider_peer_id is not allowed for unsecured transport")
+		}
 		if c.MetadataEndpoint.ServiceReference != "" || c.MetadataEndpoint.Path != "" {
 			return fmt.Errorf("metadata_endpoint service_reference and path are not allowed for unsecured transport")
 		}

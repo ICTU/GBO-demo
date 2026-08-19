@@ -1,0 +1,29 @@
+image:
+  repository: ghcr.io/ictu/gbo-demo/dvtp-onboarding-register
+  tag: latest
+
+containerPort: 4015
+healthPath: /health
+
+env:
+  - name: DATABASE_PATH
+    value: /data/onboarding.db
+  - name: ONBOARDING_CONFIG_PATH
+    value: /config/onboarding.json
+  - name: SEED_DEMO_DATA
+    value: "false"
+
+volumeMounts:
+  - name: onboarding-configuration
+    mountPath: /config
+    readOnly: true
+  - name: onboarding-data
+    mountPath: /data
+
+volumes:
+  - name: onboarding-configuration
+    configMap:
+      name: dvtp-onboarding-config
+  - name: onboarding-data
+    persistentVolumeClaim:
+      claimName: dvtp-onboarding-data

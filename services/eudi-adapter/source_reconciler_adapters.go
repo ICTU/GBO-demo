@@ -41,7 +41,7 @@ func (a sourceCatalogAdapter) List(context.Context) ([]onboarding.Source, error)
 	sources := make([]onboarding.Source, 0, len(a.sources))
 	for _, source := range a.sources {
 		sources = append(sources, onboarding.Source{
-			ID: source.SourceID, OIN: source.SourceOIN, Name: source.Name, CertificateSet: source.CertificateSet,
+			ID: source.SourceID, ProviderPeerID: source.ProviderPeerID, OIN: source.SourceOIN, Name: source.Name, CertificateSet: source.CertificateSet,
 			MetadataEndpoint: onboarding.MetadataEndpoint{
 				Transport: onboarding.Transport(source.MetadataEndpoint.Transport), ServiceReference: source.MetadataEndpoint.ServiceReference,
 				Path: source.MetadataEndpoint.Path, Endpoint: source.MetadataEndpoint.Endpoint,
@@ -57,7 +57,7 @@ type contractCatalogAdapter struct {
 }
 
 func (a contractCatalogAdapter) Snapshot(ctx context.Context, now time.Time) (onboarding.ContractSnapshot, error) {
-	snapshot, err := loadFSCContractSnapshot(ctx, a.reconciler.managerClient, a.reconciler.managerURL, a.reconciler.consumerOIN, now)
+	snapshot, err := loadFSCContractSnapshot(ctx, a.reconciler.managerClient, a.reconciler.managerURL, a.reconciler.consumerPeerID, now)
 	if err != nil {
 		return nil, err
 	}
@@ -68,12 +68,12 @@ type contractSnapshotAdapter struct {
 	snapshot *fscContractSnapshot
 }
 
-func (a contractSnapshotAdapter) Grant(providerOIN, serviceReference string) (onboarding.Grant, bool) {
-	grant, ok := a.snapshot.service(providerOIN, serviceReference)
+func (a contractSnapshotAdapter) Grant(providerPeerID, serviceReference string) (onboarding.Grant, bool) {
+	grant, ok := a.snapshot.service(providerPeerID, serviceReference)
 	if !ok {
 		return onboarding.Grant{}, false
 	}
-	return onboarding.Grant{ProviderOIN: grant.ProviderOIN, ServiceReference: grant.ServiceName, Hash: grant.GrantHash}, true
+	return onboarding.Grant{ProviderPeerID: grant.ProviderPeerID, ServiceReference: grant.ServiceName, Hash: grant.GrantHash}, true
 }
 
 type metadataClientAdapter struct {
@@ -133,7 +133,7 @@ type certificateStoreAdapter struct {
 
 func (a certificateStoreAdapter) Load(_ context.Context, source onboarding.Source) (certificateArtifacts, error) {
 	return a.store.Load(sourceRegistration{
-		SourceID: source.ID, SourceOIN: source.OIN, Name: source.Name, CertificateSet: source.CertificateSet,
+		SourceID: source.ID, ProviderPeerID: source.ProviderPeerID, SourceOIN: source.OIN, Name: source.Name, CertificateSet: source.CertificateSet,
 	})
 }
 
@@ -207,7 +207,7 @@ func (a statusRepositoryAdapter) Put(_ context.Context, status onboarding.Status
 func registrationFromResolvedSource(resolved onboarding.ResolvedSource) sourceRegistration {
 	source := resolved.Source
 	registration := sourceRegistration{
-		SourceID: source.ID, SourceOIN: source.OIN, Name: source.Name, CertificateSet: source.CertificateSet,
+		SourceID: source.ID, ProviderPeerID: source.ProviderPeerID, SourceOIN: source.OIN, Name: source.Name, CertificateSet: source.CertificateSet,
 		MetadataEndpoint: sourceMetadataEndpoint{Transport: string(source.MetadataEndpoint.Transport)},
 		DataAccess:       sourceDataAccess{Transport: string(source.DataAccessTransport)},
 	}

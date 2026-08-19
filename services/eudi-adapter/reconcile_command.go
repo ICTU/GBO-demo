@@ -17,7 +17,7 @@ type reconcileOptions struct {
 	managerCAPath    string
 	managerCertPath  string
 	managerKeyPath   string
-	consumerOIN      string
+	consumerPeerID   string
 	outwayURL        string
 	schemaPath       string
 	publicBaseURL    string
@@ -97,7 +97,7 @@ func runReconcileCommand(ctx context.Context, arguments []string, dependencies r
 		}
 		reconciler := &sourceReconciler{
 			managerClient: managerClient, sourceClient: dependencies.sourceClient,
-			managerURL: options.managerURL, consumerOIN: options.consumerOIN, outwayURL: options.outwayURL,
+			managerURL: options.managerURL, consumerPeerID: options.consumerPeerID, outwayURL: options.outwayURL,
 			schemaPath: options.schemaPath, publicBaseURL: options.publicBaseURL,
 			sources: sources, store: store, backend: backend,
 			statuses: newFilesystemSourceStatusWriter(options.stateDir),
@@ -136,7 +136,7 @@ func parseReconcileOptions(arguments []string, errorOutput io.Writer) (reconcile
 	set.StringVar(&options.managerCAPath, "manager-ca", os.Getenv("FSC_MANAGER_CA_FILE"), "FSC Manager TLS CA file")
 	set.StringVar(&options.managerCertPath, "manager-cert", os.Getenv("FSC_MANAGER_CERT_FILE"), "FSC Manager mTLS client certificate")
 	set.StringVar(&options.managerKeyPath, "manager-key", os.Getenv("FSC_MANAGER_KEY_FILE"), "FSC Manager mTLS client key")
-	set.StringVar(&options.consumerOIN, "consumer-oin", getEnv("ISSUER_OIN", "99999999900000000100"), "OIN of the FSC consumer peer")
+	set.StringVar(&options.consumerPeerID, "consumer-peer-id", os.Getenv("FSC_CONSUMER_PEER_ID"), "20-character ID of the FSC consumer peer")
 	set.StringVar(&options.outwayURL, "outway-url", getEnv("FSC_OUTWAY_URL", "http://localhost:8087"), "FSC Outway base URL")
 	set.StringVar(&options.schemaPath, "schema", "schemas/gbo-source-metadata-v1.schema.json", "source metadata JSON Schema")
 	set.StringVar(&options.publicBaseURL, "type-metadata-base-url", "", "public Type Metadata base URL")
@@ -156,16 +156,16 @@ func parseReconcileOptions(arguments []string, errorOutput io.Writer) (reconcile
 		return reconcileOptions{}, fmt.Errorf("unexpected positional arguments: %s", strings.Join(set.Args(), " "))
 	}
 	for name, value := range map[string]string{
-		"--consumer-oin": options.consumerOIN,
-		"--schema":       options.schemaPath, "--type-metadata-base-url": options.publicBaseURL,
+		"--consumer-peer-id": options.consumerPeerID,
+		"--schema":           options.schemaPath, "--type-metadata-base-url": options.publicBaseURL,
 		"--sources-dir": options.sourcesDir,
 	} {
 		if strings.TrimSpace(value) == "" {
 			return reconcileOptions{}, fmt.Errorf("%s is required", name)
 		}
 	}
-	if !sourceOINPattern.MatchString(options.consumerOIN) {
-		return reconcileOptions{}, fmt.Errorf("--consumer-oin must contain exactly 20 digits")
+	if !peerIDPattern.MatchString(options.consumerPeerID) {
+		return reconcileOptions{}, fmt.Errorf("--consumer-peer-id must contain exactly 20 alphanumeric characters")
 	}
 	if options.interval <= 0 {
 		return reconcileOptions{}, fmt.Errorf("--interval must be positive")

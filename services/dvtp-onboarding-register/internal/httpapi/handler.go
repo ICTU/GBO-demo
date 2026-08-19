@@ -33,17 +33,17 @@ func NewHandler(service *onboarding.Service, csrfToken string) http.Handler {
 	}
 	sources := service.Sources()
 	page := template.Must(template.New("index.html").Funcs(template.FuncMap{
-		"sourceName": func(oin string) string {
+		"sourceName": func(peerID string) string {
 			for _, source := range sources {
-				if source.OIN == oin {
+				if source.PeerID == peerID {
 					return source.Name
 				}
 			}
-			return oin
+			return peerID
 		},
-		"containsSource": func(sourceOINs []string, wanted string) bool {
-			for _, sourceOIN := range sourceOINs {
-				if sourceOIN == wanted {
+		"containsSource": func(sourcePeerIDs []string, wanted string) bool {
+			for _, sourcePeerID := range sourcePeerIDs {
+				if sourcePeerID == wanted {
 					return true
 				}
 			}
@@ -61,7 +61,7 @@ func NewHandler(service *onboarding.Service, csrfToken string) http.Handler {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 	mux.HandleFunc("GET /internal/openftv/participants", func(w http.ResponseWriter, r *http.Request) {
-		participants, err := service.List(r.Context())
+		participants, err := service.ListForPolicy(r.Context())
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "register unavailable"})
 			return
@@ -75,9 +75,9 @@ func NewHandler(service *onboarding.Service, csrfToken string) http.Handler {
 			return
 		}
 		var editing *onboarding.Participant
-		if editOIN := r.URL.Query().Get("edit"); editOIN != "" {
+		if editPeerID := r.URL.Query().Get("edit"); editPeerID != "" {
 			for index := range participants {
-				if participants[index].OIN == editOIN {
+				if participants[index].PeerID == editPeerID {
 					editing = &participants[index]
 					break
 				}
@@ -95,7 +95,7 @@ func NewHandler(service *onboarding.Service, csrfToken string) http.Handler {
 			Error:        r.URL.Query().Get("error"),
 		})
 	})
-	mux.HandleFunc("POST /participants/{oin}", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /participants/{peer_id}", func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
 			redirectError(w, r, "Formulier kon niet worden gelezen")
 			return
@@ -105,7 +105,7 @@ func NewHandler(service *onboarding.Service, csrfToken string) http.Handler {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
-		found, err := service.UpdateDetails(r.Context(), r.PathValue("oin"), r.FormValue("name"), r.Form["source_oins"])
+		found, err := service.UpdateDetails(r.Context(), r.PathValue("peer_id"), r.FormValue("name"), r.Form["source_peer_ids"])
 		if err != nil {
 			redirectError(w, r, err.Error())
 			return
@@ -127,10 +127,10 @@ func NewHandler(service *onboarding.Service, csrfToken string) http.Handler {
 			return
 		}
 		participant := onboarding.Participant{
-			OIN:               r.FormValue("oin"),
-			Name:              r.FormValue("name"),
-			Active:            r.FormValue("active") == "on",
-			AllowedSourceOINs: r.Form["source_oins"],
+			PeerID:               r.FormValue("peer_id"),
+			Name:                 r.FormValue("name"),
+			Active:               r.FormValue("active") == "on",
+			AllowedSourcePeerIDs: r.Form["source_peer_ids"],
 		}
 		if err := service.Save(r.Context(), participant); err != nil {
 			redirectError(w, r, err.Error())
@@ -138,7 +138,7 @@ func NewHandler(service *onboarding.Service, csrfToken string) http.Handler {
 		}
 		http.Redirect(w, r, "/?saved=1", http.StatusSeeOther)
 	})
-	mux.HandleFunc("POST /participants/{oin}/toggle", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /participants/{peer_id}/toggle", func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
 			redirectError(w, r, "Formulier kon niet worden gelezen")
 			return
@@ -148,9 +148,9 @@ func NewHandler(service *onboarding.Service, csrfToken string) http.Handler {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
-		found, err := service.ToggleActive(r.Context(), r.PathValue("oin"))
+		found, err := service.ToggleActive(r.Context(), r.PathValue("peer_id"))
 		if err != nil {
-			slog.Error("toggling participant", "oin", r.PathValue("oin"), "err", err)
+			slog.Error("toggling participant", "peer_id", r.PathValue("peer_id"), "err", err)
 			http.Error(w, "register unavailable", http.StatusInternalServerError)
 			return
 		}

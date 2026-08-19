@@ -24,6 +24,7 @@ const (
 
 type Source struct {
 	ID                  string
+	ProviderPeerID      string
 	OIN                 string
 	Name                string
 	CertificateSet      string
@@ -43,7 +44,7 @@ func (s Source) TransportAuthenticated() bool {
 }
 
 type Grant struct {
-	ProviderOIN      string
+	ProviderPeerID   string
 	ServiceReference string
 	Hash             string
 }
@@ -163,7 +164,7 @@ type ContractCatalog interface {
 }
 
 type ContractSnapshot interface {
-	Grant(providerOIN, serviceReference string) (Grant, bool)
+	Grant(providerPeerID, serviceReference string) (Grant, bool)
 }
 
 // MetadataClient hides both FSC Outway and unsecured HTTP request mechanics.
@@ -287,7 +288,7 @@ func (s *Service[C, P, A]) reconcileSource(ctx context.Context, snapshot Contrac
 	metadataGrant := Grant{}
 	if source.MetadataEndpoint.Transport == TransportFSC {
 		var ok bool
-		metadataGrant, ok = snapshot.Grant(source.OIN, source.MetadataEndpoint.ServiceReference)
+		metadataGrant, ok = snapshot.Grant(source.ProviderPeerID, source.MetadataEndpoint.ServiceReference)
 		if !ok {
 			return s.blocked(ctx, source, ReasonMetadataContractMissing, fmt.Sprintf("no valid FSC metadata contract for service %q", source.MetadataEndpoint.ServiceReference), at)
 		}
@@ -320,7 +321,7 @@ func (s *Service[C, P, A]) reconcileSource(ctx context.Context, snapshot Contrac
 		}
 		resolved.DataServiceReference = info.DataServiceReference
 		if source.MetadataEndpoint.Transport == TransportFSC {
-			dataGrant, ok := snapshot.Grant(source.OIN, info.DataServiceReference)
+			dataGrant, ok := snapshot.Grant(source.ProviderPeerID, info.DataServiceReference)
 			if !ok {
 				return s.unavailableWithCandidate(ctx, source, existing, true, info, ReasonDataContractMissing, fmt.Sprintf("no valid FSC data contract for service %q", info.DataServiceReference), at)
 			}
@@ -338,11 +339,11 @@ func (s *Service[C, P, A]) reconcileSource(ctx context.Context, snapshot Contrac
 		return s.unavailableWithCandidate(ctx, source, existing, exists, info, ReasonMetadataInvalid, err.Error(), at)
 	}
 	if description.SourceOIN != source.OIN {
-		return s.unavailableWithCandidate(ctx, source, existing, exists, info, ReasonMetadataInvalid, fmt.Sprintf("source metadata OIN %q does not match configured provider OIN %q", description.SourceOIN, source.OIN), at)
+		return s.unavailableWithCandidate(ctx, source, existing, exists, info, ReasonMetadataInvalid, fmt.Sprintf("source metadata OIN %q does not match configured source OIN %q", description.SourceOIN, source.OIN), at)
 	}
 	resolved.DataServiceReference = description.DataServiceReference
 	if source.MetadataEndpoint.Transport == TransportFSC {
-		dataGrant, ok := snapshot.Grant(source.OIN, description.DataServiceReference)
+		dataGrant, ok := snapshot.Grant(source.ProviderPeerID, description.DataServiceReference)
 		if !ok {
 			return s.unavailableWithCandidate(ctx, source, existing, exists, info, ReasonDataContractMissing, fmt.Sprintf("no valid FSC data contract for service %q", description.DataServiceReference), at)
 		}

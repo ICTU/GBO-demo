@@ -125,6 +125,30 @@ func TestDevelopmentCAProviderBindsReaderCertificateToCurrentConfiguration(t *te
 	}
 }
 
+func TestDevelopmentCAProviderLoadDoesNotRequireCAPrivateKeys(t *testing.T) {
+	registration := sourceRegistration{
+		SourceOIN:      "99999999900000000200",
+		Name:           "Belastingdienst-mock",
+		CertificateSet: "belastingdienst",
+	}
+	fixedNow := time.Date(2026, time.August, 5, 12, 0, 0, 0, time.UTC)
+	root := t.TempDir()
+	writeTestDevelopmentCAs(t, root, fixedNow)
+	provider := newDevelopmentCAProvider(root, "https://issuance.example")
+	provider.now = func() time.Time { return fixedNow }
+	if _, err := provider.Provision(registration); err != nil {
+		t.Fatalf("provision certificate set: %v", err)
+	}
+	for _, role := range []string{"issuer", "reader"} {
+		if err := os.Remove(filepath.Join(root, "development-ca", role+"-ca-key.pem")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := provider.Load(registration); err != nil {
+		t.Fatalf("load runtime certificate set without CA private keys: %v", err)
+	}
+}
+
 func writeTestDevelopmentCAs(t *testing.T, root string, now time.Time) {
 	t.Helper()
 	directory := filepath.Join(root, "development-ca")

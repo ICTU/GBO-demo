@@ -8,5 +8,6 @@ RUN CGO_ENABLED=0 go build -o /server .
 FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
 RUN apk add --no-cache wget
 COPY --from=build /server /server
+COPY config/demo.json /config/onboarding.json
 EXPOSE 4015
 CMD ["/server"]

@@ -19,6 +19,7 @@ import (
 )
 
 var (
+	peerIDPattern           = regexp.MustCompile(`^[A-Za-z0-9]{20}$`)
 	sourceOINPattern        = regexp.MustCompile(`^[0-9]{20}$`)
 	sourceIDPattern         = regexp.MustCompile(`^[a-z0-9]+(?:[-_][a-z0-9]+)*$`)
 	serviceReferencePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
@@ -47,6 +48,7 @@ type sourceDataAccess struct {
 
 type sourceRegistration struct {
 	SourceID         string                 `json:"source_id,omitempty" yaml:"source_id,omitempty"`
+	ProviderPeerID   string                 `json:"provider_peer_id,omitempty" yaml:"provider_peer_id,omitempty"`
 	SourceOIN        string                 `json:"source_oin" yaml:"source_oin"`
 	Name             string                 `json:"name" yaml:"name"`
 	CertificateSet   string                 `json:"certificate_set,omitempty" yaml:"certificate_set,omitempty"`
@@ -80,6 +82,13 @@ func (r sourceRegistration) validate() error {
 	}
 	if !sourceOINPattern.MatchString(r.SourceOIN) {
 		return fmt.Errorf("source registration source_oin must contain exactly 20 digits")
+	}
+	if r.MetadataEndpoint.Transport == sourceTransportFSC {
+		if !peerIDPattern.MatchString(r.ProviderPeerID) {
+			return fmt.Errorf("source registration provider_peer_id must contain exactly 20 alphanumeric characters")
+		}
+	} else if r.ProviderPeerID != "" {
+		return fmt.Errorf("source registration provider_peer_id is only allowed for FSC transport")
 	}
 	if strings.TrimSpace(r.Name) == "" {
 		return fmt.Errorf("source registration name is required")

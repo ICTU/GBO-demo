@@ -23,9 +23,9 @@ package doelbinding.auto_sign_contract
 #
 # INPUT (AuthZEN PARC, after OpenFTV's entity mapping):
 #
-#   input.subject  = {type: "peer_id", id: <our own OIN>,
-#                     attributes: {self_peer_id: <our OIN>,
-#                                  peer_ids: [<every OIN on the contract>]}}
+#   input.subject  = {type: "peer_id", id: <our own Peer ID>,
+#                     attributes: {self_peer_id: <our Peer ID>,
+#                                  peer_ids: [<every Peer ID on the contract>]}}
 #   input.action   = {type: "name", id: "autosign_contract"}
 #   input.resource = {type: "contract", id: <content hash>,
 #                     attributes: {grant_types: [<int>, ...]}}
@@ -37,12 +37,11 @@ package doelbinding.auto_sign_contract
 # ADMISSION DATA — private DvTP parties are pulled from the onboarding
 # register by OpenFTV's native PIP pull and appear under
 # data.entities.dvtp_participant. Each entry explicitly lists the sources to
-# which it was admitted, identified directly by the source holder's OIN.
+# which it was admitted, identified directly by the source holder's Peer ID.
 # Service-specific admission needs OpenFSC to retain the service details in
 # its AuthZEN autosign input; see https://github.com/ICTU/GBO-demo/issues/240.
-# The EUDI issuer is not a private DvTP participant;
-# it remains a trusted technical party below because this same policy also
-# protects its FSC contracts.
+# Technical participants such as the EUDI issuer are supplied by the same
+# operator-managed register configuration and therefore need no policy constant.
 #
 # OUTPUT — OpenFTV reads `allow` (bool) and, on deny, `reason` (string).
 # The whole package document reaches the decision log, so `response`
@@ -71,23 +70,15 @@ grant_type_service_connection := 2
 
 # --- derived facts ----------------------------------------------------
 
-# Technical participants that are part of this demo deployment rather than
-# private parties admitted through the DvTP onboarding process.
-_system_parties := {"99999999900000000100": {
-	"name": "Demo EUDI-issuance (GBO)",
-	"active": true,
-	"allowed_source_oins": ["99999999900000000200", "99999999900000000400"],
-}}
-
 _subject_attributes := object.get(object.get(input, "subject", {}), "attributes", {})
-_source_oin := object.get(_subject_attributes, "self_peer_id", "")
+_source_peer_id := object.get(_subject_attributes, "self_peer_id", "")
 _pulled_participants := object.get(data.entities, "dvtp_participant", {}) if {
 	data.entities
 }
 
 else := {}
 
-_parties := object.union(_pulled_participants, _system_parties)
+_parties := _pulled_participants
 
 _grant_types := {t | some t in input.resource.attributes.grant_types}
 
@@ -113,7 +104,7 @@ _wrong_source := {p |
 	some p in _counterparties
 	_parties[p]
 	object.get(_parties[p], "active", false) == true
-	not _source_oin in object.get(_parties[p], "allowed_source_oins", [])
+	not _source_peer_id in object.get(_parties[p], "allowed_source_peer_ids", [])
 }
 
 # --- checks -----------------------------------------------------------
@@ -195,6 +186,6 @@ else := {
 	"context": {"granted": [{
 		"rule": "FSC_AUTOSIGN_ADMITTED_PARTY",
 		"counterparties": sort(_counterparties),
-		"source_oin": _source_oin,
+		"source_peer_id": _source_peer_id,
 	}]},
 }

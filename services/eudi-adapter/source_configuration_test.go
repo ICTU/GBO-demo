@@ -11,6 +11,7 @@ func TestLoadSourceConfigurations(t *testing.T) {
 	directory := t.TempDir()
 	writeTestSourceConfiguration(t, directory, "belastingdienst.yaml", `
 source_id: belastingdienst
+provider_peer_id: "0000009958MINBZK0000"
 source_oin: "99999999900000000200"
 name: Belastingdienst
 certificate_set: belastingdienst
@@ -26,8 +27,20 @@ data_access:
 	if err != nil {
 		t.Fatalf("load configurations: %v", err)
 	}
-	if len(configurations) != 1 || configurations[0].SourceID != "belastingdienst" || configurations[0].CertificateSet != "belastingdienst" {
+	if len(configurations) != 1 || configurations[0].SourceID != "belastingdienst" || configurations[0].ProviderPeerID != "0000009958MINBZK0000" || configurations[0].CertificateSet != "belastingdienst" {
 		t.Fatalf("configurations = %+v", configurations)
+	}
+}
+
+func TestSourceConfigurationKeepsSourceOINNumeric(t *testing.T) {
+	configuration := sourceConfiguration{
+		SourceID: "belastingdienst", ProviderPeerID: "0000009958MINBZK0000", SourceOIN: "0000009958MINBZK0000",
+		Name: "Belastingdienst", CertificateSet: "belastingdienst",
+		MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportFSC, ServiceReference: "gbo-metadata", Path: "/.well-known/gbo"},
+		DataAccess:       sourceDataAccess{Transport: sourceTransportFSC},
+	}
+	if err := configuration.validate(); err == nil || !strings.Contains(err.Error(), "source_oin") {
+		t.Fatalf("validate error = %v, want numeric source_oin rejection", err)
 	}
 }
 
@@ -35,6 +48,7 @@ func TestLoadSourceConfigurationsFromGroupedDirectories(t *testing.T) {
 	directory := t.TempDir()
 	writeTestSourceConfiguration(t, filepath.Join(directory, "configured"), "belastingdienst.yaml", `
 source_id: belastingdienst
+provider_peer_id: "0000009958MINBZK0000"
 source_oin: "99999999900000000200"
 name: Belastingdienst
 certificate_set: belastingdienst
@@ -71,6 +85,7 @@ func TestLoadSourceConfigurationsRejectsDuplicateSourceID(t *testing.T) {
 	for _, name := range []string{"one.yaml", "two.yaml"} {
 		writeTestSourceConfiguration(t, directory, name, `
 source_id: belastingdienst
+provider_peer_id: "0000009958MINBZK0000"
 source_oin: "99999999900000000200"
 name: Belastingdienst
 certificate_set: belastingdienst
@@ -93,6 +108,7 @@ func TestLoadSourceConfigurationsAllowsLogicalSourcesUnderOneOIN(t *testing.T) {
 	directory := t.TempDir()
 	writeTestSourceConfiguration(t, directory, "belastingdienst.yaml", `
 source_id: belastingdienst
+provider_peer_id: "0000009958MINBZK0000"
 source_oin: "99999999900000000200"
 name: Belastingdienst
 certificate_set: belastingdienst
@@ -105,6 +121,7 @@ data_access:
 `)
 	writeTestSourceConfiguration(t, directory, "rvig.yaml", `
 source_id: rvig
+provider_peer_id: "0000009958MINBZK0000"
 source_oin: "99999999900000000200"
 name: RvIG
 certificate_set: rvig
@@ -129,6 +146,7 @@ func TestSourceConfigurationRejectsResolvedGrantHashes(t *testing.T) {
 	directory := t.TempDir()
 	writeTestSourceConfiguration(t, directory, "belastingdienst.yaml", `
 source_id: belastingdienst
+provider_peer_id: "0000009958MINBZK0000"
 source_oin: "99999999900000000200"
 name: Belastingdienst
 certificate_set: belastingdienst

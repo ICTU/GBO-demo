@@ -10,8 +10,6 @@ env:
     value: "4009"
   - name: FSC_OUTWAY_URL
     value: http://fsc-outway:8080
-  - name: ISSUER_OIN
-    value: "99999999900000000100"
   - name: SOURCE_ACTIVATIONS_PATH
     value: /state/active
   - name: TYPE_METADATA_STORE_PATH

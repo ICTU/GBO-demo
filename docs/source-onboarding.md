@@ -17,6 +17,7 @@ GraphQL-schema.
 
 ```yaml
 source_id: belastingdienst
+provider_peer_id: "0000009958MINBZK0000"
 source_oin: "99999999900000000200"
 name: Belastingdienst
 certificate_set: belastingdienst
@@ -29,11 +30,13 @@ data_access:
 ```
 
 GBO resolveert zowel het geconfigureerde metadatacontract als de dataservice
-uit actuele FSC-contracten. De geconfigureerde OIN, de provider-OIN van beide
-contracten en `source_oin` uit het brondocument moeten gelijk zijn. Grant-hashes
-worden bij iedere reconciliation opnieuw vastgelegd.
+uit actuele FSC-contracten. `provider_peer_id` selecteert de FSC-provider van
+beide contracten en mag exact twintig alfanumerieke tekens bevatten.
+`source_oin` is daarvan bewust gescheiden: dit blijft de numerieke, twintigcijferige
+juridische identiteit die ook in het brondocument en de certificaten staat.
+Grant-hashes worden bij iedere reconciliation opnieuw vastgelegd.
 
-Meerdere logische bronnen mogen hetzelfde FSC-OIN gebruiken. `source_id`, de
+Meerdere logische bronnen mogen hetzelfde FSC-Peer ID gebruiken. `source_id`, de
 metadata-service en certificaatset blijven per bron uniek. De lokale
 Belastingdienst- en RvIG-bronnen gebruiken dit model.
 
@@ -83,7 +86,7 @@ sequenceDiagram
     O->>R: Configure source_id, transport and certificate_set
     R->>R: Check existing certificate set
     alt FSC
-        R->>F: Resolve metadata contract
+        R->>F: Resolve metadata contract by provider_peer_id
         R->>F: Fetch /.well-known/gbo with pinned grant
         F->>B: Authenticated FSC request
         R->>F: Resolve data contract from validated metadata
@@ -123,8 +126,8 @@ is; een bron kan daardoor niet stil uit de walletproducten verdwijnen.
 
 | Gegeven | Eigenaar/bron |
 |---|---|
-| `source_id`, verwachte OIN, naam, certset en metadata-endpoint | GBO-bronconfiguratie |
-| FSC provider, services en grant-hashes | actuele FSC-contracten |
+| `source_id`, `provider_peer_id`, verwachte `source_oin`, naam, certset en metadata-endpoint | GBO-bronconfiguratie |
+| FSC provider Peer ID, services en grant-hashes | actuele FSC-contracten |
 | GraphQL-endpoint, query, parameters, offers en mapping | `/.well-known/gbo` van de bron |
 | Kaartnaam, kleur, kaartlogo, claimlabels en claimschema | Type Metadata in het brondocument |
 | Getoonde issuernaam en issuerlogo | vooraf beheerde issuer-/readercertificaten |
@@ -168,4 +171,34 @@ Gebruik hetzelfde adapterimage voor twee afzonderlijke workloads:
 Beide gebruiken dezelfde duurzame onboardingopslag. Voorbeeldwaarden staan in
 [`source-reconciler-values.yaml`](../deploy/helm/gbo-app/examples/source-reconciler-values.yaml)
 en [`eudi-adapter-values.yaml`](../deploy/helm/gbo-app/examples/eudi-adapter-values.yaml).
-Certificaatprovisioning blijft een afzonderlijk, bevoegd beheerproces.
+Certificaatprovisioning blijft een afzonderlijk, bevoegd beheerproces. Alleen
+dat proces heeft de CA-private keys nodig. De reconciler-runtime krijgt de
+issuer-, reader- en status-leaf keys/certificaten plus de publieke issuer- en
+reader-CA-certificaten; CA-private keys horen niet in het runtime Secret.
+
+### Upgrade vanaf v0.6.1
+
+De scheiding tussen FSC-identiteit en juridische bronidentiteit wijzigt enkele
+deploymentcontracten bewust fail-closed:
+
+- iedere FSC-bronconfiguratie krijgt `provider_peer_id`; `source_oin` blijft
+  numeriek en wordt niet vervangen door het Peer ID;
+- de reconciler gebruikt `--consumer-peer-id` of
+  `FSC_CONSUMER_PEER_ID`; `--consumer-oin` en `ISSUER_OIN` vervallen;
+- het DvTP-register krijgt een JSON-configuratie via
+  `ONBOARDING_CONFIG_PATH`, met `source_holders`, `system_participants` en
+  optionele `seed_participants`;
+- de OpenFTV PIP-feed gebruikt `peer_id` en `allowed_source_peer_ids`.
+
+Rol eerst de DvTP-configuratie en de nieuwe register-/PDP-images samen uit.
+Laat daarna de source reconciler ten minste één succesvolle ronde uitvoeren
+voordat de HTTP-adapter als functioneel wordt beschouwd; zo worden bestaande
+activaties aangevuld met `provider_peer_id`. De runtime kan zonder CA-private
+keys starten zodra alle brongebonden leafbestanden en beide publieke
+CA-certificaten aanwezig zijn.
+
+Voor Kubernetes staan voorbeelden in
+[`dvtp-onboarding-register-values.yaml`](../deploy/helm/gbo-app/examples/dvtp-onboarding-register-values.yaml),
+[`dvtp-onboarding-configmap.yaml`](../deploy/helm/gbo-app/examples/dvtp-onboarding-configmap.yaml),
+[`source-reconciler-values.yaml`](../deploy/helm/gbo-app/examples/source-reconciler-values.yaml)
+en [`eudi-adapter-values.yaml`](../deploy/helm/gbo-app/examples/eudi-adapter-values.yaml).
