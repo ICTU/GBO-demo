@@ -25,7 +25,10 @@ default allow := false
 # stays fail-closed.
 _source_metadata_request if {
 	input.context.flow == "gbo:source-metadata"
-	input.subject.id == "99999999900000000100"
+	input.subject.id in {
+		"99999999900000000100", # local Docker Compose
+		"0000009961MINEZK0000", # simulation MinEZK
+	}
 	input.action.id == "GET"
 	input.resource.id == "/.well-known/gbo"
 }
