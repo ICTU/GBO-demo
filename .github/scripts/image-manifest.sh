@@ -82,25 +82,25 @@ while IFS='|' read -r service context dockerfile paths platforms \
       }]' <<<"${images}"
   )"
 done <<'IMAGES'
-additional-claims-service|./services/additional-claims-service|./services/additional-claims-service/Dockerfile|services/additional-claims-service|linux/amd64,linux/arm64|false|additional-claims-service
-bron-sidecar|./services/bron-sidecar|./services/bron-sidecar/Dockerfile|services/bron-sidecar|linux/amd64,linux/arm64|false|bron-sidecar
-brp-graphql-server|./services/brp-graphql-server|./services/brp-graphql-server/Dockerfile|services/brp-graphql-server|linux/amd64,linux/arm64|false|brp-graphql-server
-bsnk-mock|./services/bsnk-mock|./services/bsnk-mock/Dockerfile|services/bsnk-mock|linux/amd64,linux/arm64|false|bsnk-mock
-consent-portal-backend|./services/consent-portal-backend|./services/consent-portal-backend/Dockerfile|services/consent-portal-backend|linux/amd64,linux/arm64|false|consent-portal-backend
-consent-register|./services/consent-register|./services/consent-register/Dockerfile|services/consent-register|linux/amd64,linux/arm64|false|consent-register
-dev-portal-backend|.|./services/dev-portal-backend/Dockerfile|services/dev-portal-backend policies|linux/amd64,linux/arm64|false|dev-portal-backend
-developer-portal|./developer-portal|./developer-portal/Dockerfile|developer-portal|linux/amd64,linux/arm64|false|developer-portal
-dienstverlener-backend|./services/dienstverlener-backend|./services/dienstverlener-backend/Dockerfile|services/dienstverlener-backend|linux/amd64,linux/arm64|false|dienstverlener-backend
-dienstverlener-mock|./dienstverlener-mock|./dienstverlener-mock/Dockerfile|dienstverlener-mock|linux/amd64,linux/arm64|false|dienstverlener-mock
-dvtp-onboarding-register|./services/dvtp-onboarding-register|./services/dvtp-onboarding-register/Dockerfile|services/dvtp-onboarding-register|linux/amd64,linux/arm64|false|dvtp-onboarding-register
-eudi-adapter|./services/eudi-adapter|./services/eudi-adapter/Dockerfile|services/eudi-adapter|linux/amd64,linux/arm64|false|eudi-adapter
-graphql-server|./services/graphql-server|./services/graphql-server/Dockerfile|services/graphql-server|linux/amd64,linux/arm64|false|graphql-server
-landing-page|./landing-page|./landing-page/Dockerfile|landing-page|linux/amd64,linux/arm64|false|landing-page
-openftv-manager|.|./services/openftv-manager/Dockerfile|services/openftv-manager|linux/amd64,linux/arm64|false|openftv-manager
-openftv-manager-ui|.|./services/openftv-manager-ui/Dockerfile|services/openftv-manager-ui|linux/amd64,linux/arm64|false|openftv-manager-ui
-openftv-pdp|.|./services/openftv-pdp/Dockerfile|services/openftv-pdp policies|linux/amd64,linux/arm64|false|openftv-pdp
-sector-pip|./services/sector-pip|./services/sector-pip/Dockerfile|services/sector-pip|linux/amd64,linux/arm64|false|sector-pip
-toestemmingsportaal-frontend|./toestemmingsportaal-frontend|./toestemmingsportaal-frontend/Dockerfile|toestemmingsportaal-frontend|linux/amd64,linux/arm64|false|toestemmingsportaal-frontend
+additional-claims-service|./services/additional-claims-service|./services/additional-claims-service/Dockerfile|services/additional-claims-service|linux/amd64|false|additional-claims-service
+bron-sidecar|./services/bron-sidecar|./services/bron-sidecar/Dockerfile|services/bron-sidecar|linux/amd64|false|bron-sidecar
+brp-graphql-server|./services/brp-graphql-server|./services/brp-graphql-server/Dockerfile|services/brp-graphql-server|linux/amd64|false|brp-graphql-server
+bsnk-mock|./services/bsnk-mock|./services/bsnk-mock/Dockerfile|services/bsnk-mock|linux/amd64|false|bsnk-mock
+consent-portal-backend|./services/consent-portal-backend|./services/consent-portal-backend/Dockerfile|services/consent-portal-backend|linux/amd64|false|consent-portal-backend
+consent-register|./services/consent-register|./services/consent-register/Dockerfile|services/consent-register|linux/amd64|false|consent-register
+dev-portal-backend|.|./services/dev-portal-backend/Dockerfile|services/dev-portal-backend policies|linux/amd64|false|dev-portal-backend
+developer-portal|./developer-portal|./developer-portal/Dockerfile|developer-portal|linux/amd64|false|developer-portal
+dienstverlener-backend|./services/dienstverlener-backend|./services/dienstverlener-backend/Dockerfile|services/dienstverlener-backend|linux/amd64|false|dienstverlener-backend
+dienstverlener-mock|./dienstverlener-mock|./dienstverlener-mock/Dockerfile|dienstverlener-mock|linux/amd64|false|dienstverlener-mock
+dvtp-onboarding-register|./services/dvtp-onboarding-register|./services/dvtp-onboarding-register/Dockerfile|services/dvtp-onboarding-register|linux/amd64|false|dvtp-onboarding-register
+eudi-adapter|./services/eudi-adapter|./services/eudi-adapter/Dockerfile|services/eudi-adapter|linux/amd64|false|eudi-adapter
+graphql-server|./services/graphql-server|./services/graphql-server/Dockerfile|services/graphql-server|linux/amd64|false|graphql-server
+landing-page|./landing-page|./landing-page/Dockerfile|landing-page|linux/amd64|false|landing-page
+openftv-manager|.|./services/openftv-manager/Dockerfile|services/openftv-manager|linux/amd64|false|openftv-manager
+openftv-manager-ui|.|./services/openftv-manager-ui/Dockerfile|services/openftv-manager-ui|linux/amd64|false|openftv-manager-ui
+openftv-pdp|.|./services/openftv-pdp/Dockerfile|services/openftv-pdp policies|linux/amd64|false|openftv-pdp
+sector-pip|./services/sector-pip|./services/sector-pip/Dockerfile|services/sector-pip|linux/amd64|false|sector-pip
+toestemmingsportaal-frontend|./toestemmingsportaal-frontend|./toestemmingsportaal-frontend/Dockerfile|toestemmingsportaal-frontend|linux/amd64|false|toestemmingsportaal-frontend
 eudi-issuance-server|./vendor/nl-wallet|./services/eudi-issuance-server/Dockerfile|vendor/nl-wallet services/eudi-issuance-server/Dockerfile|linux/amd64|recursive|eudi-issuance-server-amd64
 IMAGES
 
