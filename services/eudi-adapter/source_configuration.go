@@ -12,17 +12,27 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// sourceConfiguration is operator-managed desired state. FSC grant hashes and
-// the data service are deliberately absent: the reconciler resolves them from
-// current contracts and the validated source metadata on every run.
+const sourceMetadataWellKnownPath = "/.well-known/gbo"
+
+// sourceConfiguration is the minimal operator-managed desired state. Legal
+// identity and display name come from the provisioned certificate set whose
+// directory is the source_id. The data service, data transport and grant
+// hashes are resolved from the selected transport, current contracts and the
+// validated source metadata.
 type sourceConfiguration struct {
-	SourceID         string                 `yaml:"source_id"`
-	ProviderPeerID   string                 `yaml:"provider_peer_id,omitempty"`
-	SourceOIN        string                 `yaml:"source_oin"`
-	Name             string                 `yaml:"name"`
-	CertificateSet   string                 `yaml:"certificate_set"`
-	MetadataEndpoint sourceMetadataEndpoint `yaml:"metadata_endpoint"`
-	DataAccess       sourceDataAccess       `yaml:"data_access"`
+	SourceID         string                           `yaml:"-"`
+	MetadataEndpoint configuredSourceMetadataEndpoint `yaml:"metadata_endpoint"`
+}
+
+// configuredSourceMetadataEndpoint deliberately does not reuse the runtime
+// sourceMetadataEndpoint type. Keeping a separate type makes yaml.KnownFields
+// reject resolved fields such as path and grant_hash instead of accidentally
+// turning them into operator inputs.
+type configuredSourceMetadataEndpoint struct {
+	Transport        string `yaml:"transport"`
+	ProviderPeerID   string `yaml:"provider_peer_id,omitempty"`
+	ServiceReference string `yaml:"service_reference,omitempty"`
+	Endpoint         string `yaml:"endpoint,omitempty"`
 }
 
 func loadSourceConfigurations(directory string) ([]sourceConfiguration, error) {
@@ -50,7 +60,6 @@ func loadSourceConfigurations(directory string) ([]sourceConfiguration, error) {
 	sort.Strings(entries)
 	configurations := make([]sourceConfiguration, 0, len(entries))
 	byID := make(map[string]string, len(entries))
-	byCertificateSet := make(map[string]string, len(entries))
 	byTransportBinding := make(map[string]string, len(entries))
 	for _, path := range entries {
 		raw, err := os.ReadFile(path)
@@ -61,21 +70,18 @@ func loadSourceConfigurations(directory string) ([]sourceConfiguration, error) {
 		if err != nil {
 			return nil, fmt.Errorf("source configuration %q: %w", path, err)
 		}
+		configuration.SourceID = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 		if err := configuration.validate(); err != nil {
 			return nil, fmt.Errorf("source configuration %q: %w", path, err)
 		}
 		if previous, exists := byID[configuration.SourceID]; exists {
 			return nil, fmt.Errorf("source_id %q is configured in both %q and %q", configuration.SourceID, previous, path)
 		}
-		if previous, exists := byCertificateSet[configuration.CertificateSet]; exists {
-			return nil, fmt.Errorf("certificate_set %q is configured in both %q and %q", configuration.CertificateSet, previous, path)
-		}
-		binding := configuration.MetadataEndpoint.Transport + "\x00" + configuration.ProviderPeerID + "\x00" + configuration.MetadataEndpoint.ServiceReference + "\x00" + configuration.MetadataEndpoint.Endpoint
+		binding := configuration.MetadataEndpoint.Transport + "\x00" + configuration.MetadataEndpoint.ProviderPeerID + "\x00" + configuration.MetadataEndpoint.ServiceReference + "\x00" + configuration.MetadataEndpoint.Endpoint
 		if previous, exists := byTransportBinding[binding]; exists {
-			return nil, fmt.Errorf("metadata endpoint for provider Peer ID %q is configured in both %q and %q", configuration.ProviderPeerID, previous, path)
+			return nil, fmt.Errorf("metadata endpoint for provider Peer ID %q is configured in both %q and %q", configuration.MetadataEndpoint.ProviderPeerID, previous, path)
 		}
 		byID[configuration.SourceID] = path
-		byCertificateSet[configuration.CertificateSet] = path
 		byTransportBinding[binding] = path
 		configurations = append(configurations, configuration)
 	}
@@ -109,50 +115,29 @@ func (c sourceConfiguration) validate() error {
 	if !sourceIDPattern.MatchString(c.SourceID) {
 		return fmt.Errorf("source_id is invalid")
 	}
-	if !sourceOINPattern.MatchString(c.SourceOIN) {
-		return fmt.Errorf("source_oin must contain exactly 20 digits")
-	}
-	if strings.TrimSpace(c.Name) == "" {
-		return fmt.Errorf("name is required")
-	}
-	if !sourceIDPattern.MatchString(c.CertificateSet) {
-		return fmt.Errorf("certificate_set is invalid")
-	}
 	switch c.MetadataEndpoint.Transport {
 	case sourceTransportFSC:
-		if !peerIDPattern.MatchString(c.ProviderPeerID) {
-			return fmt.Errorf("provider_peer_id must contain exactly 20 alphanumeric characters for FSC transport")
+		if !peerIDPattern.MatchString(c.MetadataEndpoint.ProviderPeerID) {
+			return fmt.Errorf("metadata_endpoint provider_peer_id must contain exactly 20 alphanumeric characters for FSC transport")
 		}
 		if !serviceReferencePattern.MatchString(c.MetadataEndpoint.ServiceReference) {
 			return fmt.Errorf("metadata_endpoint service_reference is invalid")
-		}
-		if err := validateAbsoluteURLPath(c.MetadataEndpoint.Path); err != nil {
-			return fmt.Errorf("metadata_endpoint path: %w", err)
 		}
 		if c.MetadataEndpoint.Endpoint != "" {
 			return fmt.Errorf("metadata_endpoint endpoint is not allowed for FSC transport")
 		}
 	case sourceTransportUnsecured:
-		if c.ProviderPeerID != "" {
-			return fmt.Errorf("provider_peer_id is not allowed for unsecured transport")
+		if c.MetadataEndpoint.ProviderPeerID != "" {
+			return fmt.Errorf("metadata_endpoint provider_peer_id is not allowed for unsecured transport")
 		}
-		if c.MetadataEndpoint.ServiceReference != "" || c.MetadataEndpoint.Path != "" {
-			return fmt.Errorf("metadata_endpoint service_reference and path are not allowed for unsecured transport")
+		if c.MetadataEndpoint.ServiceReference != "" {
+			return fmt.Errorf("metadata_endpoint service_reference is not allowed for unsecured transport")
 		}
 		if err := validateAbsoluteUnsecuredEndpoint(c.MetadataEndpoint.Endpoint); err != nil {
 			return fmt.Errorf("metadata_endpoint endpoint: %w", err)
 		}
 	default:
 		return fmt.Errorf("metadata_endpoint transport must be %q or %q", sourceTransportFSC, sourceTransportUnsecured)
-	}
-	if c.MetadataEndpoint.GrantHash != "" {
-		return fmt.Errorf("metadata_endpoint grant_hash is resolved during reconciliation and must not be configured")
-	}
-	if c.DataAccess.Transport != c.MetadataEndpoint.Transport {
-		return fmt.Errorf("metadata_endpoint and data_access must use the same transport")
-	}
-	if c.DataAccess.ServiceReference != "" || c.DataAccess.GrantHash != "" {
-		return fmt.Errorf("data_access service_reference and grant_hash are resolved during reconciliation")
 	}
 	return nil
 }

@@ -96,6 +96,7 @@ type config struct {
 	SourceActivationPath  string
 	SourceActivationsPath string
 	TypeMetadataStorePath string
+	IssuanceOffersPath    string
 }
 
 func loadConfig() config {
@@ -104,6 +105,7 @@ func loadConfig() config {
 		OutwayURL:             getEnv("FSC_OUTWAY_URL", "http://edi-outway:8080"),
 		SourceActivationsPath: os.Getenv("SOURCE_ACTIVATIONS_PATH"),
 		TypeMetadataStorePath: getEnv("TYPE_METADATA_STORE_PATH", "/var/lib/gbo/type-metadata"),
+		IssuanceOffersPath:    os.Getenv("EUDI_OFFERS_PATH"),
 	}
 }
 
@@ -544,6 +546,9 @@ func newMux(cfg config, client *http.Client, metadataRuntime sourceMetadataRunti
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
+	if cfg.IssuanceOffersPath != "" {
+		mux.HandleFunc("GET /eudi-offers.json", handleIssuanceOffers(cfg.IssuanceOffersPath))
+	}
 	if metadataRuntime != nil {
 		mux.HandleFunc("POST /attestations/{sourceID}/{typeID}", handleSourceAttestation(cfg, client, metadataRuntime))
 	}
@@ -551,6 +556,23 @@ func newMux(cfg config, client *http.Client, metadataRuntime sourceMetadataRunti
 		mux.Handle("/types/", publisher)
 	}
 	return mux
+}
+
+func handleIssuanceOffers(path string) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			http.Error(w, "issuance offers unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if !json.Valid(body) {
+			http.Error(w, "issuance offers invalid", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write(body)
+	}
 }
 
 // newRuntimeMux always activates onboarded source metadata. If loading or a

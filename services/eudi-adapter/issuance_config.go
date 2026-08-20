@@ -66,7 +66,7 @@ func runIssuanceConfigCommand(arguments []string, stdout, stderr io.Writer) (boo
 	set.StringVar(&options.activeDir, "active-dir", ".local/onboarding/active", "directory receiving the successfully deployed source snapshot")
 	set.StringVar(&options.sourcesDir, "sources-dir", getEnv("SOURCE_CONFIGURATIONS_PATH", "sources/configured"), "directory containing desired source configurations")
 	set.StringVar(&options.statusDir, "status-dir", ".local/onboarding/status", "directory containing per-source reconciliation status")
-	set.StringVar(&options.templatePath, "template", "services/eudi-issuance-server/config/issuance_server.toml.example", "issuance-server TOML template")
+	set.StringVar(&options.templatePath, "template", "services/eudi-adapter/config/issuance_server.toml.example", "issuance-server TOML template")
 	set.StringVar(&options.adapterBaseURL, "adapter-base-url", os.Getenv("EUDI_BRI_URL"), "public GBO adapter base URL")
 	set.StringVar(&options.outputPath, "output", "services/eudi-issuance-server/config/issuance_server.toml", "generated issuance-server TOML")
 	set.StringVar(&options.offersPath, "offers-output", "services/eudi-issuance-server/config/eudi-offers.json", "generated public issuance offers")

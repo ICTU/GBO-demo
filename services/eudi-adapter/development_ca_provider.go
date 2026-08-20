@@ -42,6 +42,8 @@ type certificateArtifacts struct {
 	IssuerSubject         string `json:"issuer_subject"`
 	ReaderSubject         string `json:"reader_subject"`
 	CertificateExpires    string `json:"certificate_expires_at"`
+	sourceOIN             string
+	sourceName            string
 }
 
 type certificateProvider interface {
@@ -163,6 +165,8 @@ func (p *developmentCAProvider) Provision(registration sourceRegistration) (cert
 		IssuerSubject:         issuer.cert.Subject.String(),
 		ReaderSubject:         reader.cert.Subject.String(),
 		CertificateExpires:    issuer.cert.NotAfter.UTC().Format(time.RFC3339),
+		sourceOIN:             registration.SourceOIN,
+		sourceName:            registration.Name,
 	}, nil
 }
 
@@ -172,10 +176,6 @@ func (p *developmentCAProvider) Provision(registration sourceRegistration) (cert
 func (p *developmentCAProvider) Load(registration sourceRegistration) (certificateArtifacts, error) {
 	if p == nil || p.root == "" {
 		return certificateArtifacts{}, fmt.Errorf("development CA secret directory is required")
-	}
-	binding, err := p.binding(registration)
-	if err != nil {
-		return certificateArtifacts{}, err
 	}
 	caDir := filepath.Join(p.root, "development-ca")
 	issuerCACert := filepath.Join(caDir, "issuer-ca-cert.pem")
@@ -213,6 +213,22 @@ func (p *developmentCAProvider) Load(registration sourceRegistration) (certifica
 	if err != nil {
 		return certificateArtifacts{}, err
 	}
+	identityOIN, identityName, err := certificateSourceIdentity(issuer.cert)
+	if err != nil {
+		return certificateArtifacts{}, fmt.Errorf("read explicitly provisioned source identity: %w", err)
+	}
+	if registration.SourceOIN != "" && registration.SourceOIN != identityOIN {
+		return certificateArtifacts{}, fmt.Errorf("certificate source OIN %q does not match configured OIN %q", identityOIN, registration.SourceOIN)
+	}
+	if registration.Name != "" && registration.Name != identityName {
+		return certificateArtifacts{}, fmt.Errorf("certificate source name %q does not match configured name %q", identityName, registration.Name)
+	}
+	registration.SourceOIN = identityOIN
+	registration.Name = identityName
+	binding, err := p.binding(registration)
+	if err != nil {
+		return certificateArtifacts{}, err
+	}
 	now := p.now()
 	if err := validateExpectedDevelopmentLeaf(issuer.cert, issuerCA, binding.issuerSubject, binding.issuerHost, issuerEKUOID, issuerAuthExtensionOID, binding.issuerPayload, now); err != nil {
 		return certificateArtifacts{}, fmt.Errorf("validate explicitly provisioned issuer certificate: %w", err)
@@ -230,7 +246,18 @@ func (p *developmentCAProvider) Load(registration sourceRegistration) (certifica
 		IssuerCACertReference: issuerCACert, ReaderCACertReference: readerCACert,
 		IssuerSubject: issuer.cert.Subject.String(), ReaderSubject: reader.cert.Subject.String(),
 		CertificateExpires: issuer.cert.NotAfter.UTC().Format(time.RFC3339),
+		sourceOIN:          identityOIN, sourceName: identityName,
 	}, nil
+}
+
+func certificateSourceIdentity(cert *x509.Certificate) (string, string, error) {
+	if cert == nil || !sourceOINPattern.MatchString(cert.Subject.SerialNumber) {
+		return "", "", fmt.Errorf("issuer certificate serialNumber must contain the 20-digit source OIN")
+	}
+	if len(cert.Subject.Organization) != 1 || cert.Subject.Organization[0] == "" {
+		return "", "", fmt.Errorf("issuer certificate must contain exactly one organisation name")
+	}
+	return cert.Subject.SerialNumber, cert.Subject.Organization[0], nil
 }
 
 type developmentLeaf struct {

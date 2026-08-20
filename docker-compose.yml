@@ -941,6 +941,7 @@ services:
       # OIN, type and FSC services are not duplicated in env-vars.
       - SOURCE_ACTIVATIONS_PATH=/var/lib/gbo/active
       - TYPE_METADATA_STORE_PATH=/var/lib/gbo/type-metadata
+      - EUDI_OFFERS_PATH=/var/lib/gbo/runtime/eudi-offers.json
     volumes:
       - ./.local/onboarding/active:/var/lib/gbo/active:ro
       - ./.local/onboarding/type-metadata:/var/lib/gbo/type-metadata
@@ -975,6 +976,10 @@ services:
       - --secrets-dir=/var/lib/gbo-secrets
       - --reader-public-url=${EUDI_PUBLIC_URL:-}
       - --sources-dir=/config/sources
+      - --auto-promote=${SOURCE_AUTO_PROMOTE:-false}
+      - --issuance-template=/app/issuance_server.toml.example
+      - --issuance-output=/generated/issuance_server.toml
+      - --offers-output=/generated/eudi-offers.json
     volumes:
       - ./schemas:/config/schemas:ro
       # Compose loads both the governed configurations and the local-only

@@ -1,11 +1,4 @@
-source_id: rvig
-provider_peer_id: "99999999900000000200"
-source_oin: "99999999900000000200"
-name: RvIG
-certificate_set: rvig
 metadata_endpoint:
   transport: fsc
+  provider_peer_id: "99999999900000000200"
   service_reference: gbo-metadata-rvig
-  path: /.well-known/gbo
-data_access:
-  transport: fsc

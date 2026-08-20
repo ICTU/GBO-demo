@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -27,6 +29,10 @@ type reconcileOptions struct {
 	secretsDir       string
 	readerPublicURL  string
 	sourcesDir       string
+	autoPromote      bool
+	issuanceTemplate string
+	issuanceOutput   string
+	offersOutput     string
 	once             bool
 	watch            bool
 	interval         time.Duration
@@ -106,6 +112,15 @@ func runReconcileCommand(ctx context.Context, arguments []string, dependencies r
 			return err
 		}
 		_, _ = fmt.Fprintln(dependencies.stdout, "source reconciliation completed")
+		if options.autoPromote {
+			promoted, err := autoPromoteReconciledSources(options)
+			if err != nil {
+				return fmt.Errorf("auto-promote reconciled sources: %w", err)
+			}
+			if promoted {
+				_, _ = fmt.Fprintln(dependencies.stdout, "source candidates automatically promoted; restart issuance runtimes to load the generated revision")
+			}
+		}
 		return nil
 	}
 	if !options.watch {
@@ -146,6 +161,10 @@ func parseReconcileOptions(arguments []string, errorOutput io.Writer) (reconcile
 	set.StringVar(&options.secretsDir, "secrets-dir", ".local/secrets", "filesystem secret directory")
 	set.StringVar(&options.readerPublicURL, "reader-public-url", os.Getenv("EUDI_PUBLIC_URL"), "public issuance-server URL")
 	set.StringVar(&options.sourcesDir, "sources-dir", getEnv("SOURCE_CONFIGURATIONS_PATH", "sources/configured"), "directory containing manually managed source configurations")
+	set.BoolVar(&options.autoPromote, "auto-promote", false, "automatically generate and promote a fully reconciled source set (demo environments only)")
+	set.StringVar(&options.issuanceTemplate, "issuance-template", os.Getenv("EUDI_ISSUANCE_TEMPLATE"), "issuance-server TOML template used by --auto-promote")
+	set.StringVar(&options.issuanceOutput, "issuance-output", os.Getenv("EUDI_ISSUANCE_CONFIG_OUTPUT"), "generated issuance-server TOML used by --auto-promote")
+	set.StringVar(&options.offersOutput, "offers-output", os.Getenv("EUDI_OFFERS_OUTPUT"), "generated public offer catalog used by --auto-promote")
 	set.BoolVar(&options.once, "once", false, "run one reconciliation and exit")
 	set.BoolVar(&options.watch, "watch", false, "reconcile at startup and continuously watch for source and metadata changes")
 	set.DurationVar(&options.interval, "interval", 30*time.Second, "poll interval in watch mode")
@@ -173,5 +192,59 @@ func parseReconcileOptions(arguments []string, errorOutput io.Writer) (reconcile
 	if options.once == options.watch {
 		return reconcileOptions{}, fmt.Errorf("exactly one of --once or --watch is required")
 	}
+	if options.autoPromote {
+		for name, value := range map[string]string{
+			"--issuance-template": options.issuanceTemplate,
+			"--issuance-output":   options.issuanceOutput,
+			"--offers-output":     options.offersOutput,
+		} {
+			if strings.TrimSpace(value) == "" {
+				return reconcileOptions{}, fmt.Errorf("%s is required with --auto-promote", name)
+			}
+		}
+	}
 	return options, nil
+}
+
+func autoPromoteReconciledSources(options reconcileOptions) (bool, error) {
+	statusDir := filepath.Join(options.stateDir, "status")
+	required, err := hasRolloutRequiredStatus(statusDir)
+	if err != nil || !required {
+		return false, err
+	}
+	err = generateIssuanceConfig(issuanceConfigOptions{
+		activationsDir: filepath.Join(options.stateDir, "candidates"),
+		activeDir:      filepath.Join(options.stateDir, "active"),
+		sourcesDir:     options.sourcesDir,
+		statusDir:      statusDir,
+		templatePath:   options.issuanceTemplate,
+		adapterBaseURL: options.publicBaseURL,
+		outputPath:     options.issuanceOutput,
+		offersPath:     options.offersOutput,
+	})
+	return err == nil, err
+}
+
+func hasRolloutRequiredStatus(directory string) (bool, error) {
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return false, fmt.Errorf("read source statuses: %w", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(directory, entry.Name()))
+		if err != nil {
+			return false, fmt.Errorf("read source status %q: %w", entry.Name(), err)
+		}
+		var status sourceReconcileStatus
+		if err := json.Unmarshal(body, &status); err != nil {
+			return false, fmt.Errorf("parse source status %q: %w", entry.Name(), err)
+		}
+		if status.State == sourceStateRolloutRequired {
+			return true, nil
+		}
+	}
+	return false, nil
 }

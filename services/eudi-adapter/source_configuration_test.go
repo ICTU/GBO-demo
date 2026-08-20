@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,65 +11,78 @@ import (
 func TestLoadSourceConfigurations(t *testing.T) {
 	directory := t.TempDir()
 	writeTestSourceConfiguration(t, directory, "belastingdienst.yaml", `
-source_id: belastingdienst
-provider_peer_id: "0000009958MINBZK0000"
-source_oin: "99999999900000000200"
-name: Belastingdienst
-certificate_set: belastingdienst
 metadata_endpoint:
   transport: fsc
+  provider_peer_id: "0000009958MINBZK0000"
   service_reference: gbo-metadata
-  path: /.well-known/gbo
-data_access:
-  transport: fsc
 `)
 
 	configurations, err := loadSourceConfigurations(directory)
 	if err != nil {
 		t.Fatalf("load configurations: %v", err)
 	}
-	if len(configurations) != 1 || configurations[0].SourceID != "belastingdienst" || configurations[0].ProviderPeerID != "0000009958MINBZK0000" || configurations[0].CertificateSet != "belastingdienst" {
+	if len(configurations) != 1 || configurations[0].SourceID != "belastingdienst" || configurations[0].MetadataEndpoint.ProviderPeerID != "0000009958MINBZK0000" {
 		t.Fatalf("configurations = %+v", configurations)
 	}
 }
 
-func TestSourceConfigurationKeepsSourceOINNumeric(t *testing.T) {
-	configuration := sourceConfiguration{
-		SourceID: "belastingdienst", ProviderPeerID: "0000009958MINBZK0000", SourceOIN: "0000009958MINBZK0000",
-		Name: "Belastingdienst", CertificateSet: "belastingdienst",
-		MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportFSC, ServiceReference: "gbo-metadata", Path: "/.well-known/gbo"},
-		DataAccess:       sourceDataAccess{Transport: sourceTransportFSC},
+func TestSourceCatalogDerivesRuntimeDefaultsFromMinimalConfiguration(t *testing.T) {
+	catalog := sourceCatalogAdapter{sources: []sourceConfiguration{{
+		SourceID: "belastingdienst",
+		MetadataEndpoint: configuredSourceMetadataEndpoint{
+			Transport: sourceTransportFSC, ProviderPeerID: "0000009958MINBZK0000", ServiceReference: "gbo-metadata-bd",
+		},
+	}}}
+	sources, err := catalog.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
 	}
-	if err := configuration.validate(); err == nil || !strings.Contains(err.Error(), "source_oin") {
-		t.Fatalf("validate error = %v, want numeric source_oin rejection", err)
+	if len(sources) != 1 {
+		t.Fatalf("sources = %+v", sources)
+	}
+	source := sources[0]
+	if source.OIN != "" || source.Name != "" {
+		t.Fatalf("certificate-owned fields = %+v", source)
+	}
+	if source.MetadataEndpoint.Path != sourceMetadataWellKnownPath || source.DataAccessTransport != source.MetadataEndpoint.Transport {
+		t.Fatalf("derived transport fields = %+v", source)
+	}
+}
+
+func TestSourceConfigurationRejectsRemovedIdentityAndRuntimeFields(t *testing.T) {
+	for _, field := range []string{
+		`source_id: configured-value-is-not-allowed`,
+		`name: Belastingdienst`,
+		`source_oin: "99999999900000000200"`,
+		`certificate_set: belastingdienst`,
+		`data_access: {transport: fsc}`,
+	} {
+		directory := t.TempDir()
+		writeTestSourceConfiguration(t, directory, "belastingdienst.yaml", `
+`+field+`
+metadata_endpoint:
+  transport: fsc
+  provider_peer_id: "0000009958MINBZK0000"
+  service_reference: gbo-metadata
+`)
+		if _, err := loadSourceConfigurations(directory); err == nil {
+			t.Fatalf("removed field %q was accepted", field)
+		}
 	}
 }
 
 func TestLoadSourceConfigurationsFromGroupedDirectories(t *testing.T) {
 	directory := t.TempDir()
 	writeTestSourceConfiguration(t, filepath.Join(directory, "configured"), "belastingdienst.yaml", `
-source_id: belastingdienst
-provider_peer_id: "0000009958MINBZK0000"
-source_oin: "99999999900000000200"
-name: Belastingdienst
-certificate_set: belastingdienst
 metadata_endpoint:
   transport: fsc
+  provider_peer_id: "0000009958MINBZK0000"
   service_reference: gbo-metadata
-  path: /.well-known/gbo
-data_access:
-  transport: fsc
 `)
 	writeTestSourceConfiguration(t, filepath.Join(directory, "local-demo"), "demo.yaml", `
-source_id: demo
-source_oin: "99999999900000000900"
-name: Demo source
-certificate_set: demo
 metadata_endpoint:
   transport: unsecured
   endpoint: http://demo-source:4000/.well-known/gbo
-data_access:
-  transport: unsecured
 `)
 
 	configurations, err := loadSourceConfigurations(directory)
@@ -84,30 +98,16 @@ func TestLoadSourceConfigurationsIgnoresKubernetesProjectionDirectories(t *testi
 	directory := t.TempDir()
 	projectionDirectory := filepath.Join(directory, "..2026_08_19_12_32_38.100056535")
 	writeTestSourceConfiguration(t, projectionDirectory, "belastingdienst.yaml", `
-source_id: belastingdienst
-provider_peer_id: "0000009958MINBZK0000"
-source_oin: "99999999900000000200"
-name: Belastingdienst
-certificate_set: belastingdienst
 metadata_endpoint:
   transport: fsc
+  provider_peer_id: "0000009958MINBZK0000"
   service_reference: gbo-metadata-bd
-  path: /.well-known/gbo
-data_access:
-  transport: fsc
 `)
 	writeTestSourceConfiguration(t, projectionDirectory, "rvig.yaml", `
-source_id: rvig
-provider_peer_id: "0000009958MINBZK0000"
-source_oin: "99999999900000000200"
-name: RvIG
-certificate_set: rvig
 metadata_endpoint:
   transport: fsc
+  provider_peer_id: "0000009958MINBZK0000"
   service_reference: gbo-metadata-rvig
-  path: /.well-known/gbo
-data_access:
-  transport: fsc
 `)
 	if err := os.Symlink(filepath.Base(projectionDirectory), filepath.Join(directory, "..data")); err != nil {
 		t.Fatal(err)
@@ -129,19 +129,12 @@ data_access:
 
 func TestLoadSourceConfigurationsRejectsDuplicateSourceID(t *testing.T) {
 	directory := t.TempDir()
-	for _, name := range []string{"one.yaml", "two.yaml"} {
-		writeTestSourceConfiguration(t, directory, name, `
-source_id: belastingdienst
-provider_peer_id: "0000009958MINBZK0000"
-source_oin: "99999999900000000200"
-name: Belastingdienst
-certificate_set: belastingdienst
+	for _, group := range []string{"configured", "local-demo"} {
+		writeTestSourceConfiguration(t, filepath.Join(directory, group), "belastingdienst.yaml", `
 metadata_endpoint:
   transport: fsc
+  provider_peer_id: "0000009958MINBZK0000"
   service_reference: gbo-metadata
-  path: /.well-known/gbo
-data_access:
-  transport: fsc
 `)
 	}
 
@@ -151,40 +144,26 @@ data_access:
 	}
 }
 
-func TestLoadSourceConfigurationsAllowsLogicalSourcesUnderOneOIN(t *testing.T) {
+func TestLoadSourceConfigurationsAllowsLogicalSourcesUnderOneProvider(t *testing.T) {
 	directory := t.TempDir()
 	writeTestSourceConfiguration(t, directory, "belastingdienst.yaml", `
-source_id: belastingdienst
-provider_peer_id: "0000009958MINBZK0000"
-source_oin: "99999999900000000200"
-name: Belastingdienst
-certificate_set: belastingdienst
 metadata_endpoint:
   transport: fsc
+  provider_peer_id: "0000009958MINBZK0000"
   service_reference: gbo-metadata-bd
-  path: /.well-known/gbo
-data_access:
-  transport: fsc
 `)
 	writeTestSourceConfiguration(t, directory, "rvig.yaml", `
-source_id: rvig
-provider_peer_id: "0000009958MINBZK0000"
-source_oin: "99999999900000000200"
-name: RvIG
-certificate_set: rvig
 metadata_endpoint:
   transport: fsc
+  provider_peer_id: "0000009958MINBZK0000"
   service_reference: gbo-metadata-rvig
-  path: /.well-known/gbo
-data_access:
-  transport: fsc
 `)
 
 	configurations, err := loadSourceConfigurations(directory)
 	if err != nil {
 		t.Fatalf("load shared-OID configurations: %v", err)
 	}
-	if len(configurations) != 2 || configurations[0].SourceOIN != configurations[1].SourceOIN {
+	if len(configurations) != 2 || configurations[0].MetadataEndpoint.ProviderPeerID != configurations[1].MetadataEndpoint.ProviderPeerID {
 		t.Fatalf("configurations = %+v", configurations)
 	}
 }
@@ -192,18 +171,11 @@ data_access:
 func TestSourceConfigurationRejectsResolvedGrantHashes(t *testing.T) {
 	directory := t.TempDir()
 	writeTestSourceConfiguration(t, directory, "belastingdienst.yaml", `
-source_id: belastingdienst
-provider_peer_id: "0000009958MINBZK0000"
-source_oin: "99999999900000000200"
-name: Belastingdienst
-certificate_set: belastingdienst
 metadata_endpoint:
   transport: fsc
+  provider_peer_id: "0000009958MINBZK0000"
   service_reference: gbo-metadata
-  path: /.well-known/gbo
   grant_hash: operator-must-not-pin-this
-data_access:
-  transport: fsc
 `)
 
 	_, err := loadSourceConfigurations(directory)
@@ -215,15 +187,9 @@ data_access:
 func TestSourceConfigurationsAcceptUnsecuredHTTPSource(t *testing.T) {
 	directory := t.TempDir()
 	writeTestSourceConfiguration(t, directory, "demo.yaml", `
-source_id: demo
-source_oin: "99999999900000000900"
-name: Demo source
-certificate_set: demo
 metadata_endpoint:
   transport: unsecured
   endpoint: http://demo-source:4000/.well-known/gbo
-data_access:
-  transport: unsecured
 `)
 
 	configurations, err := loadSourceConfigurations(directory)

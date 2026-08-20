@@ -66,9 +66,9 @@ type testCertificates struct {
 	loads  []string
 }
 
-func (c *testCertificates) Load(_ context.Context, source Source) (string, error) {
+func (c *testCertificates) Load(_ context.Context, source Source) (CertificateSet[string], error) {
 	c.loads = append(c.loads, source.ID)
-	return source.CertificateSet, c.errors[source.ID]
+	return CertificateSet[string]{Artifacts: source.ID, SourceOIN: source.OIN, Name: source.Name}, c.errors[source.ID]
 }
 
 type testActivations struct {
@@ -234,7 +234,7 @@ func TestUnavailableMetadataUsesCandidateStaleGrace(t *testing.T) {
 
 func unsecuredSource(id, endpoint string) Source {
 	return Source{
-		ID: id, OIN: "00000000000000000001", Name: id, CertificateSet: id,
+		ID: id, OIN: "00000000000000000001", Name: id,
 		MetadataEndpoint:    MetadataEndpoint{Transport: TransportUnsecured, Endpoint: endpoint},
 		DataAccessTransport: TransportUnsecured,
 	}
@@ -242,7 +242,7 @@ func unsecuredSource(id, endpoint string) Source {
 
 func fscSource(id string) Source {
 	return Source{
-		ID: id, ProviderPeerID: "0000009958MINBZK0000", OIN: "00000000000000000001", Name: id, CertificateSet: id,
+		ID: id, ProviderPeerID: "0000009958MINBZK0000", OIN: "00000000000000000001", Name: id,
 		MetadataEndpoint:    MetadataEndpoint{Transport: TransportFSC, ServiceReference: "metadata", Path: "/.well-known/gbo"},
 		DataAccessTransport: TransportFSC,
 	}

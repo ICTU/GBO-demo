@@ -122,12 +122,8 @@ func TestFSCSourceReconcilerActivatesOnlyConfiguredSource(t *testing.T) {
 		managerClient: manager.Client(), sourceClient: source.Client(),
 		managerURL: manager.URL, consumerPeerID: testConsumerPeerID, outwayURL: source.URL,
 		schemaPath: "../../schemas/gbo-source-metadata-v1.schema.json", publicBaseURL: "https://issuer.example",
-		sources: []sourceConfiguration{{
-			SourceID: "belastingdienst", ProviderPeerID: testProviderPeerID, SourceOIN: testSourceOIN, Name: "Belastingdienst", CertificateSet: testSourceOIN,
-			MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportFSC, ServiceReference: gboMetadataServiceName, Path: gboWellKnownPath},
-			DataAccess:       sourceDataAccess{Transport: sourceTransportFSC},
-		}},
-		store: staticCertificateStore{}, backend: backend, statuses: statuses,
+		sources: []sourceConfiguration{fscSourceConfiguration("belastingdienst", gboMetadataServiceName)},
+		store:   staticCertificateStore{}, backend: backend, statuses: statuses,
 	}
 	if err := reconciler.Reconcile(context.Background(), now); err != nil {
 		t.Fatalf("reconcile: %v", err)
@@ -136,7 +132,7 @@ func TestFSCSourceReconcilerActivatesOnlyConfiguredSource(t *testing.T) {
 		t.Fatal("source was not activated")
 	}
 	registration := backend.validated.Registration
-	if registration.SourceID != "belastingdienst" || registration.ProviderPeerID != testProviderPeerID || registration.CertificateSet != testSourceOIN || registration.SourceOIN != testSourceOIN || registration.Name != "Belastingdienst" || registration.MetadataEndpoint.GrantHash != "metadata-grant" || registration.DataAccess.ServiceReference != "bri" || registration.DataAccess.GrantHash != "data-grant" {
+	if registration.SourceID != "belastingdienst" || registration.ProviderPeerID != testProviderPeerID || registration.SourceOIN != testSourceOIN || registration.Name != "Belastingdienst" || registration.MetadataEndpoint.GrantHash != "metadata-grant" || registration.DataAccess.ServiceReference != "bri" || registration.DataAccess.GrantHash != "data-grant" {
 		t.Fatalf("derived registration = %+v", registration)
 	}
 	if statuses.last.State != sourceStateActive || statuses.last.SourceID != "belastingdienst" {
@@ -187,12 +183,8 @@ func TestFSCSourceReconcilerChecksCertificatesBeforeNetwork(t *testing.T) {
 		})},
 		managerURL: "https://manager.example", consumerPeerID: testConsumerPeerID, outwayURL: "http://outway.example",
 		schemaPath: "../../schemas/gbo-source-metadata-v1.schema.json", publicBaseURL: "https://issuer.example",
-		sources: []sourceConfiguration{{
-			SourceID: "belastingdienst", ProviderPeerID: testProviderPeerID, SourceOIN: testSourceOIN, Name: "Belastingdienst", CertificateSet: "missing-bd",
-			MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportFSC, ServiceReference: gboMetadataServiceName, Path: gboWellKnownPath},
-			DataAccess:       sourceDataAccess{Transport: sourceTransportFSC},
-		}},
-		store: failingCertificateStore{err: os.ErrNotExist}, backend: backend, statuses: statuses,
+		sources: []sourceConfiguration{fscSourceConfiguration("belastingdienst", gboMetadataServiceName)},
+		store:   failingCertificateStore{err: os.ErrNotExist}, backend: backend, statuses: statuses,
 	}
 	err := reconciler.Reconcile(context.Background(), time.Now().UTC())
 	if err == nil || !strings.Contains(err.Error(), sourceReasonCertificateSetNotFound) {
@@ -218,12 +210,8 @@ func TestFSCSourceReconcilerReportsMissingConfiguredMetadataContract(t *testing.
 		managerClient: manager.Client(), sourceClient: http.DefaultClient,
 		managerURL: manager.URL, consumerPeerID: testConsumerPeerID, outwayURL: "http://source.invalid",
 		schemaPath: "../../schemas/gbo-source-metadata-v1.schema.json", publicBaseURL: "https://issuer.example",
-		sources: []sourceConfiguration{{
-			SourceID: "belastingdienst", ProviderPeerID: testProviderPeerID, SourceOIN: testSourceOIN, Name: "Belastingdienst", CertificateSet: testSourceOIN,
-			MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportFSC, ServiceReference: gboMetadataServiceName, Path: gboWellKnownPath},
-			DataAccess:       sourceDataAccess{Transport: sourceTransportFSC},
-		}},
-		store: staticCertificateStore{}, backend: &capturingActivationBackend{}, statuses: statuses,
+		sources: []sourceConfiguration{fscSourceConfiguration("belastingdienst", gboMetadataServiceName)},
+		store:   staticCertificateStore{}, backend: &capturingActivationBackend{}, statuses: statuses,
 	}
 	err := reconciler.Reconcile(context.Background(), now)
 	if err == nil || !strings.Contains(err.Error(), sourceReasonMetadataContractMissing) {
@@ -363,12 +351,8 @@ func TestSourceReconcilerActivatesUnsecuredHTTPSourceWithoutFSCManager(t *testin
 		})},
 		sourceClient: source.Client(), managerURL: "https://manager.invalid", consumerPeerID: testConsumerPeerID,
 		schemaPath: "../../schemas/gbo-source-metadata-v1.schema.json", publicBaseURL: "https://issuer.example",
-		sources: []sourceConfiguration{{
-			SourceID: "demo", SourceOIN: testSourceOIN, Name: "Demo", CertificateSet: "demo",
-			MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportUnsecured, Endpoint: source.URL},
-			DataAccess:       sourceDataAccess{Transport: sourceTransportUnsecured},
-		}},
-		store: staticCertificateStore{}, backend: backend, statuses: statuses,
+		sources: []sourceConfiguration{unsecuredSourceConfiguration("demo", source.URL)},
+		store:   staticCertificateStore{}, backend: backend, statuses: statuses,
 	}
 	if err := reconciler.Reconcile(context.Background(), now); err != nil {
 		t.Fatalf("reconcile unsecured source: %v", err)
@@ -389,12 +373,8 @@ func TestUnsecuredSourceFailureIsReportedAsUnauthenticated(t *testing.T) {
 	statuses := &capturingSourceStatusWriter{}
 	reconciler := &sourceReconciler{
 		sourceClient: source.Client(), schemaPath: "../../schemas/gbo-source-metadata-v1.schema.json", publicBaseURL: "https://issuer.example",
-		sources: []sourceConfiguration{{
-			SourceID: "demo", SourceOIN: testSourceOIN, Name: "Demo", CertificateSet: "demo",
-			MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportUnsecured, Endpoint: source.URL},
-			DataAccess:       sourceDataAccess{Transport: sourceTransportUnsecured},
-		}},
-		store: staticCertificateStore{}, backend: &capturingActivationBackend{}, statuses: statuses,
+		sources: []sourceConfiguration{unsecuredSourceConfiguration("demo", source.URL)},
+		store:   staticCertificateStore{}, backend: &capturingActivationBackend{}, statuses: statuses,
 	}
 	if err := reconciler.Reconcile(context.Background(), time.Now().UTC()); err == nil {
 		t.Fatal("unavailable unsecured source reconciled successfully")
@@ -438,11 +418,7 @@ func TestReconcilerUsesETagAndRefreshesCandidateLifetime(t *testing.T) {
 	statuses := &capturingSourceStatusWriter{}
 	reconciler := &sourceReconciler{
 		sourceClient: source.Client(), schemaPath: "../../schemas/gbo-source-metadata-v1.schema.json", publicBaseURL: "https://issuer.example",
-		sources: []sourceConfiguration{{
-			SourceID: "demo", SourceOIN: testSourceOIN, Name: "Demo", CertificateSet: "demo",
-			MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportUnsecured, Endpoint: source.URL},
-			DataAccess:       sourceDataAccess{Transport: sourceTransportUnsecured},
-		}}, store: staticCertificateStore{}, backend: backend, statuses: statuses,
+		sources: []sourceConfiguration{unsecuredSourceConfiguration("demo", source.URL)}, store: staticCertificateStore{}, backend: backend, statuses: statuses,
 	}
 	if err := reconciler.Reconcile(context.Background(), now); err != nil {
 		t.Fatalf("initial reconcile: %v", err)
@@ -509,12 +485,8 @@ func TestFSCNotModifiedRefreshesResolvedGrantHashes(t *testing.T) {
 		managerClient: manager.Client(), sourceClient: source.Client(), managerURL: manager.URL,
 		consumerPeerID: testConsumerPeerID, outwayURL: source.URL,
 		schemaPath: "../../schemas/gbo-source-metadata-v1.schema.json", publicBaseURL: "https://issuer.example",
-		sources: []sourceConfiguration{{
-			SourceID: "belastingdienst", ProviderPeerID: testProviderPeerID, SourceOIN: testSourceOIN, Name: "Belastingdienst", CertificateSet: "belastingdienst",
-			MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportFSC, ServiceReference: gboMetadataServiceName, Path: gboWellKnownPath},
-			DataAccess:       sourceDataAccess{Transport: sourceTransportFSC},
-		}},
-		store: staticCertificateStore{}, backend: backend, statuses: &capturingSourceStatusWriter{},
+		sources: []sourceConfiguration{fscSourceConfiguration("belastingdienst", gboMetadataServiceName)},
+		store:   staticCertificateStore{}, backend: backend, statuses: &capturingSourceStatusWriter{},
 	}
 	if err := reconciler.Reconcile(context.Background(), now); err != nil {
 		t.Fatalf("initial reconcile: %v", err)
@@ -571,12 +543,8 @@ func TestNotModifiedRefreshFailureUsesExistingStaleGrace(t *testing.T) {
 	statuses := &capturingSourceStatusWriter{}
 	reconciler := &sourceReconciler{
 		sourceClient: source.Client(), schemaPath: "../../schemas/gbo-source-metadata-v1.schema.json", publicBaseURL: "https://issuer.example",
-		sources: []sourceConfiguration{{
-			SourceID: "demo", SourceOIN: testSourceOIN, Name: "Demo", CertificateSet: "demo",
-			MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportUnsecured, Endpoint: source.URL},
-			DataAccess:       sourceDataAccess{Transport: sourceTransportUnsecured},
-		}},
-		store: staticCertificateStore{}, backend: backend, statuses: statuses,
+		sources: []sourceConfiguration{unsecuredSourceConfiguration("demo", source.URL)},
+		store:   staticCertificateStore{}, backend: backend, statuses: statuses,
 	}
 	if err := reconciler.Reconcile(context.Background(), now); err == nil {
 		t.Fatal("refresh failure reconciled successfully")
@@ -614,11 +582,7 @@ func TestReconcilerKeepsLastCandidateDuringStaleGrace(t *testing.T) {
 	statuses := &capturingSourceStatusWriter{}
 	reconciler := &sourceReconciler{
 		sourceClient: source.Client(), schemaPath: "../../schemas/gbo-source-metadata-v1.schema.json", publicBaseURL: "https://issuer.example",
-		sources: []sourceConfiguration{{
-			SourceID: "demo", SourceOIN: testSourceOIN, Name: "Demo", CertificateSet: "demo",
-			MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportUnsecured, Endpoint: source.URL},
-			DataAccess:       sourceDataAccess{Transport: sourceTransportUnsecured},
-		}}, store: staticCertificateStore{}, backend: backend, statuses: statuses,
+		sources: []sourceConfiguration{unsecuredSourceConfiguration("demo", source.URL)}, store: staticCertificateStore{}, backend: backend, statuses: statuses,
 	}
 	if err := reconciler.Reconcile(context.Background(), now); err != nil {
 		t.Fatal(err)
@@ -665,17 +629,36 @@ func TestFSCManagerFailureKeepsCandidateDuringStaleGrace(t *testing.T) {
 }
 
 func sharedOINSourceConfiguration(sourceID, metadataService string) sourceConfiguration {
+	return fscSourceConfiguration(sourceID, metadataService)
+}
+
+func fscSourceConfiguration(sourceID, metadataService string) sourceConfiguration {
 	return sourceConfiguration{
-		SourceID: sourceID, ProviderPeerID: testProviderPeerID, SourceOIN: testSourceOIN, Name: sourceID, CertificateSet: sourceID,
-		MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportFSC, ServiceReference: metadataService, Path: gboWellKnownPath},
-		DataAccess:       sourceDataAccess{Transport: sourceTransportFSC},
+		SourceID: sourceID,
+		MetadataEndpoint: configuredSourceMetadataEndpoint{
+			Transport: sourceTransportFSC, ProviderPeerID: testProviderPeerID, ServiceReference: metadataService,
+		},
+	}
+}
+
+func unsecuredSourceConfiguration(sourceID, endpoint string) sourceConfiguration {
+	return sourceConfiguration{
+		SourceID:         sourceID,
+		MetadataEndpoint: configuredSourceMetadataEndpoint{Transport: sourceTransportUnsecured, Endpoint: endpoint},
 	}
 }
 
 type staticCertificateStore struct{}
 
-func (staticCertificateStore) Load(sourceRegistration) (certificateArtifacts, error) {
-	return certificateArtifacts{}, nil
+func (staticCertificateStore) Load(registration sourceRegistration) (certificateArtifacts, error) {
+	name := registration.SourceID
+	switch name {
+	case "belastingdienst":
+		name = "Belastingdienst"
+	case "demo":
+		name = "Demo"
+	}
+	return certificateArtifacts{sourceOIN: testSourceOIN, sourceName: name}, nil
 }
 
 type failingCertificateStore struct{ err error }
@@ -737,11 +720,11 @@ type recordingCertificateStore struct {
 }
 
 func (s *recordingCertificateStore) Load(registration sourceRegistration) (certificateArtifacts, error) {
-	s.loaded = append(s.loaded, registration.CertificateSet)
-	if s.missing[registration.CertificateSet] {
+	s.loaded = append(s.loaded, registration.SourceID)
+	if s.missing[registration.SourceID] {
 		return certificateArtifacts{}, os.ErrNotExist
 	}
-	return certificateArtifacts{}, nil
+	return certificateArtifacts{sourceOIN: testSourceOIN, sourceName: registration.SourceID}, nil
 }
 
 func (b *capturingActivationBackend) Activate(validated *validatedSourceRegistration, _ certificateArtifacts) (*sourceActivation, error) {

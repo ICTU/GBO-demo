@@ -26,6 +26,26 @@ func TestUnsecuredMetadataFetchSendsNoFSCHeaders(t *testing.T) {
 	}
 }
 
+func TestCertificateProvisioningUsesSourceIDAsItsOnlySetKey(t *testing.T) {
+	options, err := parseOnboardingOptions("provision-development-certificates", []string{
+		"--source-id=belastingdienst",
+		"--source-oin=99999999900000000200",
+	}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parse provisioning options: %v", err)
+	}
+	if options.sourceID != "belastingdienst" {
+		t.Fatalf("source ID = %q", options.sourceID)
+	}
+	if _, err := parseOnboardingOptions("provision-development-certificates", []string{
+		"--source-id=belastingdienst",
+		"--source-oin=99999999900000000200",
+		"--certificate-set=duplicate-key",
+	}, &bytes.Buffer{}); err == nil {
+		t.Fatal("removed --certificate-set option was accepted")
+	}
+}
+
 func TestUnsecuredMetadataFetchRejectsRedirect(t *testing.T) {
 	targetCalled := false
 	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { targetCalled = true }))
@@ -113,7 +133,7 @@ func TestFilesystemActivationUsesSourceIDForSharedOIN(t *testing.T) {
 	backend := newFilesystemActivationBackend(stateDir)
 	for _, sourceID := range []string{"belastingdienst", "rvig"} {
 		validated := &validatedSourceRegistration{
-			Registration: sourceRegistration{SourceID: sourceID, SourceOIN: "99999999900000000200", Name: sourceID, CertificateSet: sourceID},
+			Registration: sourceRegistration{SourceID: sourceID, SourceOIN: "99999999900000000200", Name: sourceID},
 			Document:     sourceMetadataDocument{Version: "1.0"}, Payload: []byte(sourceID), MetadataURL: "https://metadata.example/" + sourceID,
 		}
 		if _, err := backend.Activate(validated, certificateArtifacts{}); err != nil {

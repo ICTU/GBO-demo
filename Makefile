@@ -149,7 +149,7 @@ eudi-config:
 	  --active-dir /var/lib/gbo/active \
 	  --sources-dir /config/sources \
 	  --status-dir /var/lib/gbo/status \
-	  --template /generated/issuance_server.toml.example \
+	  --template /app/issuance_server.toml.example \
 	  --adapter-base-url "$$EUDI_BRI_URL" \
 	  --output /generated/issuance_server.toml \
 	  --offers-output /generated/eudi-offers.json; \
@@ -203,11 +203,12 @@ require-development-cas:
 	@test -f "$(DEVELOPMENT_CA_DIR)/reader-ca-cert.pem" || { echo "ERROR: pre-provisioned EUDI CA file is required: $(DEVELOPMENT_CA_DIR)/reader-ca-cert.pem"; exit 1; }
 
 provision-development-certificates: require-development-cas
+	@test -n "$(SOURCE_ID)" || { echo "ERROR: SOURCE_ID=<source_id> is required"; exit 1; }
 	@test -n "$(SOURCE_OIN)" || { echo "ERROR: SOURCE_OIN=<20-digit OIN> is required"; exit 1; }
 	@cd services/eudi-adapter && go run . provision-development-certificates \
+		--source-id "$(SOURCE_ID)" \
 		--source-oin "$(SOURCE_OIN)" \
 		--source-name "$(SOURCE_NAME)" \
-		--certificate-set "$(SOURCE_CERTIFICATE_SET)" \
 		--source-logo "$(if $(SOURCE_LOGO),$(abspath $(SOURCE_LOGO)),)" \
 		--reader-public-url "$${EUDI_PUBLIC_URL:-}" \
 		--secrets-dir "$(ONBOARDING_SECRETS_DIR)"
@@ -224,9 +225,9 @@ onboard-demo-sources: require-development-cas certs
 	$(MAKE) fsc-seed-bri
 	$(MAKE) fsc-seed-rvig-source
 	$(MAKE) fsc-seed-metadata
-	$(MAKE) provision-development-certificates SOURCE_OIN=$(DEVELOPMENT_SOURCE_OIN) SOURCE_CERTIFICATE_SET=belastingdienst SOURCE_NAME="$(DEVELOPMENT_SOURCE_NAME)" SOURCE_LOGO="$(DEVELOPMENT_SOURCE_LOGO)"
-	$(MAKE) provision-development-certificates SOURCE_OIN=$(DEVELOPMENT_BRP_SOURCE_OIN) SOURCE_CERTIFICATE_SET=rvig SOURCE_NAME="$(DEVELOPMENT_BRP_SOURCE_NAME)" SOURCE_LOGO="$(DEVELOPMENT_BRP_SOURCE_LOGO)"
-	$(MAKE) provision-development-certificates SOURCE_OIN=$(DEVELOPMENT_UNSECURED_SOURCE_OIN) SOURCE_CERTIFICATE_SET=demo-unsecured SOURCE_NAME="$(DEVELOPMENT_UNSECURED_SOURCE_NAME)" SOURCE_LOGO="$(DEVELOPMENT_UNSECURED_SOURCE_LOGO)"
+	$(MAKE) provision-development-certificates SOURCE_ID=belastingdienst SOURCE_OIN=$(DEVELOPMENT_SOURCE_OIN) SOURCE_NAME="$(DEVELOPMENT_SOURCE_NAME)" SOURCE_LOGO="$(DEVELOPMENT_SOURCE_LOGO)"
+	$(MAKE) provision-development-certificates SOURCE_ID=rvig SOURCE_OIN=$(DEVELOPMENT_BRP_SOURCE_OIN) SOURCE_NAME="$(DEVELOPMENT_BRP_SOURCE_NAME)" SOURCE_LOGO="$(DEVELOPMENT_BRP_SOURCE_LOGO)"
+	$(MAKE) provision-development-certificates SOURCE_ID=demo-unsecured SOURCE_OIN=$(DEVELOPMENT_UNSECURED_SOURCE_OIN) SOURCE_NAME="$(DEVELOPMENT_UNSECURED_SOURCE_NAME)" SOURCE_LOGO="$(DEVELOPMENT_UNSECURED_SOURCE_LOGO)"
 	$(MAKE) reconcile-sources
 
 demo-eudi: onboard-demo-sources eudi-config eudi-images
