@@ -43,6 +43,24 @@ func TestShippedSourceMetadataMatchesEnvelopeSchema(t *testing.T) {
 	}
 }
 
+func TestRuntimeServesGeneratedIssuanceOffers(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "eudi-offers.json")
+	if err := os.WriteFile(path, []byte(`[{"key":"income-2025"}]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+	newMux(config{IssuanceOffersPath: path}, nil, nil).ServeHTTP(
+		recorder,
+		httptest.NewRequest(http.MethodGet, "/eudi-offers.json", nil),
+	)
+	if recorder.Code != http.StatusOK || recorder.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("offers response = %d %v", recorder.Code, recorder.Header())
+	}
+	if got := strings.TrimSpace(recorder.Body.String()); got != `[{"key":"income-2025"}]` {
+		t.Fatalf("offers body = %s", got)
+	}
+}
+
 func compileSourceMetadataSchema(t *testing.T) *jsonschema.Schema {
 	t.Helper()
 	compiler := jsonschema.NewCompiler()
@@ -529,7 +547,7 @@ func TestRuntimeDoesNotFetchSourceMetadata(t *testing.T) {
 	activation := sourceActivation{
 		SchemaVersion: "1.0",
 		Source: sourceRegistration{
-			SourceID: "belastingdienst", ProviderPeerID: "0000009958MINBZK0000", SourceOIN: "99999999900000000200", Name: "Belastingdienst", CertificateSet: "belastingdienst",
+			SourceID: "belastingdienst", ProviderPeerID: "0000009958MINBZK0000", SourceOIN: "99999999900000000200", Name: "Belastingdienst",
 			MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportFSC, ServiceReference: "gbo-metadata", Path: "/.well-known/gbo", GrantHash: "metadata-grant"},
 			DataAccess:       sourceDataAccess{Transport: sourceTransportFSC, ServiceReference: "bri", GrantHash: "data-grant"},
 		},
@@ -566,7 +584,7 @@ func TestRuntimeFailsClosedWhenDeployedTypeDisappears(t *testing.T) {
 	body, err := json.Marshal(sourceActivation{
 		SchemaVersion: "1.0",
 		Source: sourceRegistration{
-			SourceID: "belastingdienst", ProviderPeerID: "0000009958MINBZK0000", SourceOIN: "99999999900000000200", Name: "Belastingdienst", CertificateSet: "belastingdienst",
+			SourceID: "belastingdienst", ProviderPeerID: "0000009958MINBZK0000", SourceOIN: "99999999900000000200", Name: "Belastingdienst",
 		},
 		Types: []activatedType{{TypeID: "different-type"}},
 	})
@@ -682,7 +700,7 @@ func TestActivatedRuntimeReloadsUpdatedDataGrantAfterCacheInterval(t *testing.T)
 	activation := sourceActivation{
 		SchemaVersion: "1.0", MetadataVersion: "1.0", FreshUntil: now.Add(time.Hour), StaleUntil: now.Add(2 * time.Hour),
 		Source: sourceRegistration{
-			SourceID: "belastingdienst", ProviderPeerID: "0000009958MINBZK0000", SourceOIN: "99999999900000000200", Name: "Belastingdienst", CertificateSet: "belastingdienst",
+			SourceID: "belastingdienst", ProviderPeerID: "0000009958MINBZK0000", SourceOIN: "99999999900000000200", Name: "Belastingdienst",
 			MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportFSC, ServiceReference: "gbo-metadata", Path: "/.well-known/gbo", GrantHash: "metadata-grant"},
 			DataAccess:       sourceDataAccess{Transport: sourceTransportFSC, ServiceReference: "bri", GrantHash: "data-grant-v1"},
 		},

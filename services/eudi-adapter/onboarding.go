@@ -79,9 +79,9 @@ func validSHA256Integrity(value string) bool {
 }
 
 type onboardingOptions struct {
+	sourceID             string
 	sourceOIN            string
 	sourceName           string
-	sourceCertificateSet string
 	sourceLogoPath       string
 	storageBackend       string
 	certificateStoreName string
@@ -145,10 +145,7 @@ func runOnboardingCommand(_ context.Context, arguments []string, dependencies on
 	if err != nil {
 		return true, err
 	}
-	registration := sourceRegistration{SourceOIN: options.sourceOIN, Name: options.sourceName, CertificateSet: options.sourceCertificateSet}
-	if registration.CertificateSet == "" {
-		registration.CertificateSet = registration.SourceOIN
-	}
+	registration := sourceRegistration{SourceID: options.sourceID, SourceOIN: options.sourceOIN, Name: options.sourceName}
 	if registration.Name == "" {
 		registration.Name = "Source " + registration.SourceOIN
 	}
@@ -174,9 +171,9 @@ func parseOnboardingOptions(command string, arguments []string, errorOutput io.W
 	set := flag.NewFlagSet(command, flag.ContinueOnError)
 	set.SetOutput(errorOutput)
 	options := onboardingOptions{}
+	set.StringVar(&options.sourceID, "source-id", "", "stable source identifier and certificate directory name")
 	set.StringVar(&options.sourceOIN, "source-oin", "", "20-digit OIN to bind the local development certificates to")
 	set.StringVar(&options.sourceName, "source-name", "", "source name for the certificate subject (defaults to a generic OIN-based name)")
-	set.StringVar(&options.sourceCertificateSet, "certificate-set", "", "certificate-set identifier (defaults to source OIN)")
 	set.StringVar(&options.sourceLogoPath, "source-logo", "", "SVG, PNG or JPEG logo to embed in the certificate authorization metadata")
 	set.StringVar(&options.readerPublicURL, "reader-public-url", os.Getenv("EUDI_PUBLIC_URL"), "public issuance-server URL whose host becomes the reader certificate DNS SAN")
 	set.StringVar(&options.stateDir, "state-dir", ".local/onboarding", "filesystem onboarding state directory")
@@ -187,11 +184,11 @@ func parseOnboardingOptions(command string, arguments []string, errorOutput io.W
 	if set.NArg() != 0 {
 		return onboardingOptions{}, fmt.Errorf("unexpected positional arguments: %s", strings.Join(set.Args(), " "))
 	}
+	if !sourceIDPattern.MatchString(options.sourceID) {
+		return onboardingOptions{}, fmt.Errorf("--source-id is invalid")
+	}
 	if !sourceOINPattern.MatchString(options.sourceOIN) {
 		return onboardingOptions{}, fmt.Errorf("--source-oin must contain exactly 20 digits")
-	}
-	if options.sourceCertificateSet != "" && !sourceIDPattern.MatchString(options.sourceCertificateSet) {
-		return onboardingOptions{}, fmt.Errorf("--certificate-set is invalid")
 	}
 	return options, nil
 }
@@ -379,16 +376,14 @@ func activationDeploymentDigest(activation *sourceActivation) (string, error) {
 		return "", fmt.Errorf("source activation is required")
 	}
 	stable := struct {
-		SourceID       string               `json:"source_id"`
-		SourceOIN      string               `json:"source_oin"`
-		Name           string               `json:"name"`
-		CertificateSet string               `json:"certificate_set"`
-		Types          []activatedType      `json:"types"`
-		Certificates   certificateArtifacts `json:"certificates"`
+		SourceID     string               `json:"source_id"`
+		SourceOIN    string               `json:"source_oin"`
+		Name         string               `json:"name"`
+		Types        []activatedType      `json:"types"`
+		Certificates certificateArtifacts `json:"certificates"`
 	}{
 		SourceID: activation.Source.SourceID, SourceOIN: activation.Source.SourceOIN,
-		Name: activation.Source.Name, CertificateSet: activation.Source.CertificateSet,
-		Types: activation.Types, Certificates: activation.Certificates,
+		Name: activation.Source.Name, Types: activation.Types, Certificates: activation.Certificates,
 	}
 	body, err := json.Marshal(stable)
 	if err != nil {

@@ -185,15 +185,9 @@ func TestGenerateIssuanceConfigRejectsOnlyBlockedSourceWithoutDeployedFallback(t
 	sourcesDir := filepath.Join(root, "sources")
 	statusDir := filepath.Join(root, "status")
 	writeTestActivation(t, candidatesDir, root, "demo", "99999999900000000900", "example", "https://issuer.example/types/demo/example/v1.0", "demo", []sourceOffer{{ID: "example", Label: "Example", Parameters: map[string]any{}}})
-	writeTestFile(t, filepath.Join(sourcesDir, "demo.yaml"), []byte(`source_id: demo
-source_oin: "99999999900000000900"
-name: Demo
-certificate_set: demo
-metadata_endpoint:
+	writeTestFile(t, filepath.Join(sourcesDir, "demo.yaml"), []byte(`metadata_endpoint:
   transport: unsecured
   endpoint: http://demo-source:4000/.well-known/gbo
-data_access:
-  transport: unsecured
 `))
 	statusBody, err := json.Marshal(sourceReconcileStatus{SourceID: "demo", State: sourceStateBlocked, Reason: sourceReasonMetadataFetchFailed})
 	if err != nil {
@@ -264,15 +258,9 @@ func TestRolloutReplacesCorruptDesiredActiveAndPrunesLegacyActive(t *testing.T) 
 	writeTestFile(t, filepath.Join(activeDir, "healthy.json"), []byte(`{"legacy":"missing definition"}`))
 	legacyPath := filepath.Join(activeDir, "99999999900000000200.json")
 	writeTestFile(t, legacyPath, []byte(`{"legacy":"OIN-named activation"}`))
-	writeTestFile(t, filepath.Join(sourcesDir, "healthy.yaml"), []byte(`source_id: healthy
-source_oin: "99999999900000000200"
-name: Healthy
-certificate_set: healthy
-metadata_endpoint:
+	writeTestFile(t, filepath.Join(sourcesDir, "healthy.yaml"), []byte(`metadata_endpoint:
   transport: unsecured
   endpoint: http://healthy:4000/.well-known/gbo
-data_access:
-  transport: unsecured
 `))
 	statusBody, err := json.Marshal(sourceReconcileStatus{SourceID: "healthy", State: sourceStateRolloutRequired})
 	if err != nil {
@@ -317,14 +305,13 @@ func TestRolloutUsesDeployedFallbackForStaleSourceAndPrunesDeletedState(t *testi
 	writeTestActivation(t, activeDir, root, "blocked", "99999999900000000500", "blocked-type", "https://issuer.example/types/blocked/v1.0", "blocked-old", []sourceOffer{{ID: "blocked-old", Label: "Blocked old", Parameters: map[string]any{}}})
 	writeTestActivation(t, candidatesDir, root, "deleted", "99999999900000000400", "deleted-type", "https://issuer.example/types/deleted/v1.0", "deleted", []sourceOffer{{ID: "deleted", Label: "Deleted", Parameters: map[string]any{}}})
 	for _, source := range []struct {
-		id  string
-		oin string
+		id string
 	}{
-		{id: "healthy", oin: "99999999900000000200"},
-		{id: "degraded", oin: "99999999900000000300"},
-		{id: "blocked", oin: "99999999900000000500"},
+		{id: "healthy"},
+		{id: "degraded"},
+		{id: "blocked"},
 	} {
-		writeTestFile(t, filepath.Join(sourcesDir, source.id+".yaml"), []byte("source_id: "+source.id+"\nsource_oin: \""+source.oin+"\"\nname: "+source.id+"\ncertificate_set: "+source.id+"\nmetadata_endpoint:\n  transport: unsecured\n  endpoint: http://"+source.id+":4000/.well-known/gbo\ndata_access:\n  transport: unsecured\n"))
+		writeTestFile(t, filepath.Join(sourcesDir, source.id+".yaml"), []byte("metadata_endpoint:\n  transport: unsecured\n  endpoint: http://"+source.id+":4000/.well-known/gbo\n"))
 	}
 	for sourceID, state := range map[string]string{"healthy": sourceStateRolloutRequired, "degraded": sourceStateStale, "blocked": sourceStateBlocked, "deleted": sourceStateActive} {
 		body, err := json.Marshal(sourceReconcileStatus{SourceID: sourceID, State: state})
@@ -371,15 +358,9 @@ func TestSuccessfulIssuanceGenerationPromotesCandidate(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeTestActivation(t, candidatesDir, root, "demo", "99999999900000000900", "example", "https://issuer.example/types/demo/example/v1.0", "demo", []sourceOffer{{ID: "example", Label: "Example", Parameters: map[string]any{}}})
-	writeTestFile(t, filepath.Join(sourcesDir, "demo.yaml"), []byte(`source_id: demo
-source_oin: "99999999900000000900"
-name: Demo
-certificate_set: demo
-metadata_endpoint:
+	writeTestFile(t, filepath.Join(sourcesDir, "demo.yaml"), []byte(`metadata_endpoint:
   transport: unsecured
   endpoint: http://demo-source:4000/.well-known/gbo
-data_access:
-  transport: unsecured
 `))
 	statusBody, err := json.Marshal(sourceReconcileStatus{SourceID: "demo", State: sourceStateRolloutRequired})
 	if err != nil {
@@ -455,7 +436,7 @@ func writeTestActivation(t *testing.T, activeDir, root, sourceID, oin, typeID, v
 
 	activation := sourceActivation{
 		SchemaVersion: "1.0",
-		Source:        sourceRegistration{SourceID: sourceID, SourceOIN: oin, Name: certificatePrefix, CertificateSet: sourceID},
+		Source:        sourceRegistration{SourceID: sourceID, SourceOIN: oin, Name: certificatePrefix},
 		Types: []activatedType{{
 			TypeID: typeID, TypeVersion: "1.0", VCT: vct,
 			VCTIntegrity: metadataIntegrity, TypeMetadataReference: metadataPath, Offers: offers,

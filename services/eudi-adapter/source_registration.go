@@ -34,6 +34,7 @@ const (
 
 type sourceMetadataEndpoint struct {
 	Transport        string `json:"transport" yaml:"transport"`
+	ProviderPeerID   string `json:"-" yaml:"provider_peer_id,omitempty"`
 	ServiceReference string `json:"service_reference,omitempty" yaml:"service_reference,omitempty"`
 	Path             string `json:"path,omitempty" yaml:"path,omitempty"`
 	Endpoint         string `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
@@ -51,7 +52,6 @@ type sourceRegistration struct {
 	ProviderPeerID   string                 `json:"provider_peer_id,omitempty" yaml:"provider_peer_id,omitempty"`
 	SourceOIN        string                 `json:"source_oin" yaml:"source_oin"`
 	Name             string                 `json:"name" yaml:"name"`
-	CertificateSet   string                 `json:"certificate_set,omitempty" yaml:"certificate_set,omitempty"`
 	MetadataEndpoint sourceMetadataEndpoint `json:"metadata_endpoint" yaml:"metadata_endpoint"`
 	DataAccess       sourceDataAccess       `json:"data_access" yaml:"data_access"`
 	// Logo is certificate-provisioning input, not source-published metadata.
@@ -59,8 +59,8 @@ type sourceRegistration struct {
 }
 
 func (r sourceRegistration) certificateSetID() string {
-	if r.CertificateSet != "" {
-		return r.CertificateSet
+	if r.SourceID != "" {
+		return r.SourceID
 	}
 	return r.SourceOIN
 }
@@ -77,7 +77,7 @@ type validatedSourceRegistration struct {
 }
 
 func (r sourceRegistration) validate() error {
-	if r.SourceID != "" && !sourceIDPattern.MatchString(r.SourceID) {
+	if !sourceIDPattern.MatchString(r.SourceID) {
 		return fmt.Errorf("source registration source_id is invalid")
 	}
 	if !sourceOINPattern.MatchString(r.SourceOIN) {
@@ -92,9 +92,6 @@ func (r sourceRegistration) validate() error {
 	}
 	if strings.TrimSpace(r.Name) == "" {
 		return fmt.Errorf("source registration name is required")
-	}
-	if r.CertificateSet != "" && !sourceIDPattern.MatchString(r.CertificateSet) {
-		return fmt.Errorf("source registration certificate_set is invalid")
 	}
 	if err := r.MetadataEndpoint.validate(); err != nil {
 		return fmt.Errorf("source registration metadata_endpoint: %w", err)

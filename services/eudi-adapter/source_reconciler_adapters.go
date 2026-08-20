@@ -41,12 +41,12 @@ func (a sourceCatalogAdapter) List(context.Context) ([]onboarding.Source, error)
 	sources := make([]onboarding.Source, 0, len(a.sources))
 	for _, source := range a.sources {
 		sources = append(sources, onboarding.Source{
-			ID: source.SourceID, ProviderPeerID: source.ProviderPeerID, OIN: source.SourceOIN, Name: source.Name, CertificateSet: source.CertificateSet,
+			ID: source.SourceID, ProviderPeerID: source.MetadataEndpoint.ProviderPeerID,
 			MetadataEndpoint: onboarding.MetadataEndpoint{
 				Transport: onboarding.Transport(source.MetadataEndpoint.Transport), ServiceReference: source.MetadataEndpoint.ServiceReference,
-				Path: source.MetadataEndpoint.Path, Endpoint: source.MetadataEndpoint.Endpoint,
+				Path: sourceMetadataWellKnownPath, Endpoint: source.MetadataEndpoint.Endpoint,
 			},
-			DataAccessTransport: onboarding.Transport(source.DataAccess.Transport),
+			DataAccessTransport: onboarding.Transport(source.MetadataEndpoint.Transport),
 		})
 	}
 	return sources, nil
@@ -131,10 +131,18 @@ type certificateStoreAdapter struct {
 	store certificateStore
 }
 
-func (a certificateStoreAdapter) Load(_ context.Context, source onboarding.Source) (certificateArtifacts, error) {
-	return a.store.Load(sourceRegistration{
-		SourceID: source.ID, ProviderPeerID: source.ProviderPeerID, SourceOIN: source.OIN, Name: source.Name, CertificateSet: source.CertificateSet,
+func (a certificateStoreAdapter) Load(_ context.Context, source onboarding.Source) (onboarding.CertificateSet[certificateArtifacts], error) {
+	artifacts, err := a.store.Load(sourceRegistration{
+		SourceID: source.ID, ProviderPeerID: source.ProviderPeerID, SourceOIN: source.OIN, Name: source.Name,
 	})
+	if err != nil {
+		return onboarding.CertificateSet[certificateArtifacts]{}, err
+	}
+	return onboarding.CertificateSet[certificateArtifacts]{
+		Artifacts: artifacts,
+		SourceOIN: artifacts.sourceOIN,
+		Name:      artifacts.sourceName,
+	}, nil
 }
 
 type activationRepositoryAdapter struct {
@@ -207,7 +215,7 @@ func (a statusRepositoryAdapter) Put(_ context.Context, status onboarding.Status
 func registrationFromResolvedSource(resolved onboarding.ResolvedSource) sourceRegistration {
 	source := resolved.Source
 	registration := sourceRegistration{
-		SourceID: source.ID, ProviderPeerID: source.ProviderPeerID, SourceOIN: source.OIN, Name: source.Name, CertificateSet: source.CertificateSet,
+		SourceID: source.ID, ProviderPeerID: source.ProviderPeerID, SourceOIN: source.OIN, Name: source.Name,
 		MetadataEndpoint: sourceMetadataEndpoint{Transport: string(source.MetadataEndpoint.Transport)},
 		DataAccess:       sourceDataAccess{Transport: string(source.DataAccessTransport)},
 	}

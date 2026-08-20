@@ -9,5 +9,6 @@ FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec4
 RUN apk add --no-cache ca-certificates wget
 WORKDIR /app
 COPY --from=builder /app/eudi-adapter .
+COPY config/issuance_server.toml.example .
 EXPOSE 4009
 CMD ["./eudi-adapter"]

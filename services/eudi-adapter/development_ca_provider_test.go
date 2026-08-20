@@ -22,9 +22,9 @@ func TestDevelopmentCAProviderRequiresPreProvisionedCAs(t *testing.T) {
 	root := t.TempDir()
 	provider := newDevelopmentCAProvider(root, "https://issuance.example")
 	_, err := provider.Provision(sourceRegistration{
-		SourceOIN:      "99999999900000000200",
-		Name:           "Belastingdienst-mock",
-		CertificateSet: "belastingdienst",
+		SourceID:  "belastingdienst",
+		SourceOIN: "99999999900000000200",
+		Name:      "Belastingdienst-mock",
 	})
 	if err == nil || !strings.Contains(err.Error(), "pre-provisioned development issuer CA") {
 		t.Fatalf("Provision() error = %v, want missing pre-provisioned issuer CA", err)
@@ -36,10 +36,10 @@ func TestDevelopmentCAProviderRequiresPreProvisionedCAs(t *testing.T) {
 
 func TestDevelopmentCAProviderBindsReaderCertificateToCurrentConfiguration(t *testing.T) {
 	registration := sourceRegistration{
-		SourceOIN:      "99999999900000000200",
-		Name:           "Belastingdienst-mock",
-		CertificateSet: "belastingdienst",
-		Logo:           &organizationLogo{MimeType: "image/svg+xml", ImageData: "<svg/>"},
+		SourceID:  "belastingdienst",
+		SourceOIN: "99999999900000000200",
+		Name:      "Belastingdienst-mock",
+		Logo:      &organizationLogo{MimeType: "image/svg+xml", ImageData: "<svg/>"},
 	}
 	fixedNow := time.Date(2026, time.August, 5, 12, 0, 0, 0, time.UTC)
 	root := t.TempDir()
@@ -51,8 +51,8 @@ func TestDevelopmentCAProviderBindsReaderCertificateToCurrentConfiguration(t *te
 	if err != nil {
 		t.Fatalf("provision first certificate set: %v", err)
 	}
-	if got := filepath.Base(filepath.Dir(first.IssuerKeyReference)); got != registration.CertificateSet {
-		t.Fatalf("certificate directory = %q, want certificate set %q", got, registration.CertificateSet)
+	if got := filepath.Base(filepath.Dir(first.IssuerKeyReference)); got != registration.SourceID {
+		t.Fatalf("certificate directory = %q, want source_id %q", got, registration.SourceID)
 	}
 	firstReader := loadCertificateArtifact(t, first.ReaderKeyReference, first.ReaderCertReference)
 	assertCriticalEKU(t, firstReader, readerEKUOID)
@@ -127,9 +127,9 @@ func TestDevelopmentCAProviderBindsReaderCertificateToCurrentConfiguration(t *te
 
 func TestDevelopmentCAProviderLoadDoesNotRequireCAPrivateKeys(t *testing.T) {
 	registration := sourceRegistration{
-		SourceOIN:      "99999999900000000200",
-		Name:           "Belastingdienst-mock",
-		CertificateSet: "belastingdienst",
+		SourceID:  "belastingdienst",
+		SourceOIN: "99999999900000000200",
+		Name:      "Belastingdienst-mock",
 	}
 	fixedNow := time.Date(2026, time.August, 5, 12, 0, 0, 0, time.UTC)
 	root := t.TempDir()
@@ -146,6 +146,31 @@ func TestDevelopmentCAProviderLoadDoesNotRequireCAPrivateKeys(t *testing.T) {
 	}
 	if _, err := provider.Load(registration); err != nil {
 		t.Fatalf("load runtime certificate set without CA private keys: %v", err)
+	}
+}
+
+func TestDevelopmentCAProviderDerivesSourceIdentityAndSetFromSourceID(t *testing.T) {
+	provisioning := sourceRegistration{
+		SourceID: "belastingdienst", SourceOIN: "99999999900000000200", Name: "Belastingdienst-mock",
+	}
+	fixedNow := time.Date(2026, time.August, 5, 12, 0, 0, 0, time.UTC)
+	root := t.TempDir()
+	writeTestDevelopmentCAs(t, root, fixedNow)
+	provider := newDevelopmentCAProvider(root, "https://issuance.example")
+	provider.now = func() time.Time { return fixedNow }
+	if _, err := provider.Provision(provisioning); err != nil {
+		t.Fatalf("provision certificate set: %v", err)
+	}
+
+	loaded, err := provider.Load(sourceRegistration{SourceID: "belastingdienst"})
+	if err != nil {
+		t.Fatalf("load certificate-owned source identity: %v", err)
+	}
+	if loaded.sourceOIN != provisioning.SourceOIN || loaded.sourceName != provisioning.Name {
+		t.Fatalf("certificate identity = %q/%q, want %q/%q", loaded.sourceOIN, loaded.sourceName, provisioning.SourceOIN, provisioning.Name)
+	}
+	if got := filepath.Base(filepath.Dir(loaded.IssuerCertReference)); got != provisioning.SourceID {
+		t.Fatalf("certificate set directory = %q, want source_id %q", got, provisioning.SourceID)
 	}
 }
 

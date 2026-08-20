@@ -27,7 +27,6 @@ type Source struct {
 	ProviderPeerID      string
 	OIN                 string
 	Name                string
-	CertificateSet      string
 	MetadataEndpoint    MetadataEndpoint
 	DataAccessTransport Transport
 }
@@ -180,7 +179,17 @@ type MetadataCompiler[P any] interface {
 }
 
 type CertificateStore[C any] interface {
-	Load(context.Context, Source) (C, error)
+	Load(context.Context, Source) (CertificateSet[C], error)
+}
+
+// CertificateSet binds opaque certificate material to the legal source
+// identity encoded in the operator-provisioned leaf certificates. Keeping the
+// binding here prevents source configuration and certificates from becoming
+// two competing sources of truth for the OIN and organisation name.
+type CertificateSet[C any] struct {
+	Artifacts C
+	SourceOIN string
+	Name      string
 }
 
 // ActivationRepository owns persistence and artifact materialisation.
@@ -238,17 +247,24 @@ func (s *Service[C, P, A]) Reconcile(ctx context.Context, at time.Time) (Report,
 	ready := make([]readySource, 0, len(sources))
 	hasFSC := false
 	for _, source := range sources {
-		certificates, loadErr := s.ports.Certificates.Load(ctx, source)
+		certificateSet, loadErr := s.ports.Certificates.Load(ctx, source)
 		if loadErr != nil {
 			reason := ReasonCertificateSetInvalid
 			if errors.Is(loadErr, fs.ErrNotExist) {
 				reason = ReasonCertificateSetNotFound
 			}
-			message := fmt.Sprintf("certificate set %q is unavailable: %v", source.CertificateSet, loadErr)
+			message := fmt.Sprintf("certificate set for source %q is unavailable: %v", source.ID, loadErr)
 			report.Results = append(report.Results, s.blocked(ctx, source, reason, message, at))
 			continue
 		}
-		ready = append(ready, readySource{source: source, certificates: certificates})
+		if strings.TrimSpace(certificateSet.SourceOIN) == "" || strings.TrimSpace(certificateSet.Name) == "" {
+			message := fmt.Sprintf("certificate set for source %q does not contain a source identity", source.ID)
+			report.Results = append(report.Results, s.blocked(ctx, source, ReasonCertificateSetInvalid, message, at))
+			continue
+		}
+		source.OIN = certificateSet.SourceOIN
+		source.Name = certificateSet.Name
+		ready = append(ready, readySource{source: source, certificates: certificateSet.Artifacts})
 		hasFSC = hasFSC || source.MetadataEndpoint.Transport == TransportFSC
 		status := Status{SourceID: source.ID, State: StatePending, TransportAuthenticated: source.TransportAuthenticated(), CheckedAt: at.UTC()}
 		if statusErr := s.putStatus(ctx, status); statusErr != nil {
