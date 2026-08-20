@@ -3,16 +3,71 @@
 Een handmatig beheerd bestand in `sources/configured/` is de enige trigger om
 een bron te onboarden. Een FSC-contract alleen maakt dus nooit een bron aan.
 De bestandsnaam zonder extensie is de stabiele `source_id`: zo wordt
-`belastingdienst.yaml` de bron `belastingdienst`. Iedere logische bron verwijst naar een vooraf
-beheerde issuer-, reader- en statuscertificaatset met dezelfde sleutel als de
-`source_id`. De reconciler leest de juridische OIN en organisatienaam uit die
-certificaten; dezelfde waarden staan daarom niet nogmaals in de bronconfig. De
-reconciler mint of vernieuwt geen certificaten.
+`belastingdienst.yaml` de bron `belastingdienst`. Iedere logische bron verwijst
+naar een vooraf beheerde issuer-, reader- en statuscertificaatset met dezelfde
+sleutel als de `source_id`. De reconciler leest de juridische OIN en
+organisatienaam uit die certificaten; dezelfde waarden staan daarom niet
+nogmaals in de bronconfig. De reconciler mint of vernieuwt geen certificaten.
 
 De bron blijft eigenaar van `/.well-known/gbo`. Dat document bevat per type de
 GraphQL-query, parameters, concrete walletaanbiedingen, mapping en Type
 Metadata. GBO bevat geen bron- of jaarcatalogus en de bron publiceert geen
 GraphQL-schema.
+
+## Architectuur
+
+De onboardingconfiguratie beschrijft alleen **waar** de metadata gevonden kan
+worden en **hoe** deze wordt opgehaald. De certificaten leveren de identiteit,
+de FSC-contracten geven toegang en de metadata van de bron beschrijft het
+inhoudelijke product. Na validatie maakt de reconciler daar runtimeconfiguratie
+voor de EUDI-componenten van.
+
+```mermaid
+flowchart LR
+    subgraph Desired["Door de beheerder beheerde gewenste toestand"]
+        S["source_id.yaml<br/>transport en metadata locator"]
+        K["Source certificate Secret<br/>leaf keys en certificaten plus publieke CA's"]
+        C["FSC-contracten<br/>metadata- en dataservicegrants"]
+    end
+
+    subgraph Provider["Bronhouder"]
+        M["GBO-metadata<br/>query, mapping, offers en Type Metadata"]
+        D["GraphQL-dataservice"]
+    end
+
+    subgraph Onboarding["GBO-onboarding"]
+        R["Source reconciler"]
+        F["FSC Manager en Outway"]
+        P["Gedeelde onboardingopslag<br/>status, candidates, active,<br/>type-metadata en runtime"]
+    end
+
+    subgraph Runtime["EUDI-runtime"]
+        A["EUDI-adapter<br/>active snapshots, offers en Type Metadata"]
+        I["nl-wallet issuance-server<br/>gegenereerde TOML bij startup"]
+        U["Developer portal en landingspagina"]
+    end
+
+    S --> R
+    K --> R
+    C --> F
+    R -->|"FSC-metadataverzoek"| F
+    F --> M
+    M --> F
+    F --> R
+    R -->|"gevalideerde candidate"| P
+    R -->|"demo auto-promote"| P
+    P --> A
+    P --> I
+    U -->|"GET /eudi-offers.json"| A
+    I -->|"attestation request"| A
+    A -->|"FSC-dataverzoek"| F
+    F --> D
+```
+
+De reconciler krijgt bewust geen Kubernetes-APIrechten. Certificaten en
+contracten worden vooraf beheerd; de reconciler leest ze en schrijft uitsluitend
+naar de gedeelde onboardingopslag. Een gecontroleerde restart van de
+issuance-server blijft nodig wanneer de gegenereerde TOML wijzigt.
 
 ## Waarom valideren en activeren twee stappen zijn
 
@@ -49,9 +104,9 @@ dynamisch; een promotie vereist daarom altijd een gecontroleerde rollout.
 In een wegwerpbare demo mag de expliciete goedkeuring worden overgeslagen met
 `reconcile-sources --auto-promote`. De reconciler genereert en promoveert dan
 na een volledig succesvolle reconciliation automatisch. Dit verandert niets
-aan de technische noodzaak om de issuance-server en andere consumers van de
-gegenereerde producten te herstarten. De optie staat standaard uit en hoort
-niet in een productieomgeving.
+aan de technische noodzaak om de issuance-server na een gewijzigde TOML te
+herstarten. De optie staat standaard uit en hoort niet in een
+productieomgeving.
 
 ## Transportprofielen
 
@@ -103,33 +158,53 @@ de verantwoordelijkheid van het gepubliceerde bronendpoint.
 
 ```mermaid
 sequenceDiagram
-    participant O as Operator configuration
+    participant O as Beheerder
+    participant K as Certificaatopslag
     participant R as Source reconciler
-    participant F as FSC Manager/Outway
-    participant B as Source
-    participant C as Candidate store
-    participant G as Issuance config generator
-    participant A as Active store
-    participant I as Adapter and issuance server
+    participant F as FSC Manager en Outway
+    participant B as Bron
+    participant P as Onboardingopslag
+    participant A as EUDI-adapter
+    participant I as Issuance-server
+    participant U as Portal
 
-    O->>R: Add source_id.yaml with metadata transport locator
-    R->>R: Load source_id certificate set and derive OIN/name
+    O->>R: Voeg source_id.yaml met transport en metadata locator toe
+    O->>K: Plaats source_id leaf keys en certificaten
+    R->>K: Laad certificaatset
+    R->>R: Lees Peer ID uit config en leid OIN en organisatienaam af
     alt FSC
-        R->>F: Resolve metadata contract by provider_peer_id
-        R->>F: Fetch /.well-known/gbo with pinned grant
-        F->>B: Authenticated FSC request
-        R->>F: Resolve data contract from validated metadata
-    else unsecured
-        R->>B: Fetch absolute HTTP(S) metadata endpoint
+        R->>F: Vind metadata-grant voor geconfigureerde provider Peer ID
+        R->>F: Haal metadata met de vastgezette grant op
+        F->>B: Geauthenticeerd FSC-verzoek
+    else Onbeveiligd voor lokale ontwikkeling
+        R->>B: Haal absolute HTTP(S)-metadata-URL op
     end
-    R->>R: Validate schema, OIN, lifetime, query, offers, mapping and Type Metadata
-    R->>C: Write complete candidate atomically
-    R-->>O: rollout_required
-    G->>C: Verify every configured source is complete
-    G->>G: Generate issuance TOML, Type Metadata and offer catalog
-    G->>A: Promote the complete candidate set atomically
-    G-->>I: Controlled rollout of one consistent snapshot
+    R->>R: Valideer schema, identiteit, geldigheid, query, mapping, offers en Type Metadata
+    opt FSC-transport
+        R->>F: Controleer het dataservicecontract uit de gevalideerde metadata
+    end
+    R->>P: Schrijf candidate en status rollout_required
+    alt Demo met auto-promote
+        R->>P: Controleer alle bronnen en genereer runtimeproducten uit één candidate-set
+        R->>P: Schrijf active snapshots, Type Metadata, offers en issuance-TOML
+        R->>P: Zet status op active
+    else Productie met expliciete promotie
+        O->>P: Keur een complete candidate-set goed en promoveer die
+    end
+    P-->>A: Adapter herlaadt bestaande active snapshots periodiek
+    O->>I: Gecontroleerde restart na gewijzigde TOML
+    I->>P: Lees gegenereerde issuance-TOML bij startup
+    U->>A: Vraag dynamische offercatalogus op
+    A-->>U: Beschikbare issuance-offers
 ```
+
+De gegenereerde bestanden komen uit één gevalideerde candidate-set en worden
+elk atomisch vervangen. De adapter herlaadt wijzigingen voor reeds bekende
+bronnen periodiek. De issuance-server leest zijn TOML alleen bij het opstarten;
+daarom is daarvoor na promotie een gecontroleerde restart nodig. Wanneer een
+volledig nieuwe bron wordt toegevoegd, moet ook de adapter opnieuw starten om
+de nieuwe bronroutes en bindings te registreren. De frontends hoeven niet te
+herstarten: zij halen de offercatalogus dynamisch bij de adapter op.
 
 De reconciler draait bij startup, daarna periodiek met `--watch`, of eenmalig
 met `reconcile-sources --once`. In watch-modus worden de configuratiebestanden
@@ -227,15 +302,17 @@ Voor een demo kan dezelfde reconciler automatisch promoveren:
 
 ```text
 reconcile-sources --watch --auto-promote \
-  --issuance-template=/runtime-template/issuance_server.toml.example \
-  --issuance-output=/runtime/issuance_server.toml \
-  --offers-output=/runtime/eudi-offers.json
+  --issuance-template=/app/issuance_server.toml.example \
+  --issuance-output=/state/runtime/issuance_server.toml \
+  --offers-output=/state/runtime/eudi-offers.json
 ```
 
-`/runtime` moet duurzame, gedeelde opslag zijn. Laat een deployment-specifieke
-rolloutcontroller de issuance-server, adapter en frontend opnieuw starten als
-de gegenereerde revisie verandert. Auto-promotie geeft de reconciler bewust
-geen Kubernetes-APIrechten en verwijdert dus niet zelf pods.
+`/state` moet duurzame, gedeelde opslag zijn. Auto-promotie geeft de reconciler
+bewust geen Kubernetes-APIrechten en verwijdert dus niet zelf pods. De
+beheerder of deploymentautomatisering moet de issuance-server gecontroleerd
+herstarten nadat de gegenereerde TOML verandert. Bij een volledig nieuwe bron
+moet ook de adapter herstarten; de frontends lezen de offercatalogus dynamisch
+en hoeven niet mee te rollen.
 
 Certificaatprovisioning blijft een afzonderlijk, bevoegd beheerproces. Alleen
 dat proces heeft de CA-private keys nodig. De reconciler-runtime krijgt de
