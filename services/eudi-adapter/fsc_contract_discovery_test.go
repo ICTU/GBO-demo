@@ -652,9 +652,10 @@ type staticCertificateStore struct{}
 
 func (staticCertificateStore) Load(registration sourceRegistration) (certificateArtifacts, error) {
 	name := registration.SourceID
-	if name == "belastingdienst" {
+	switch name {
+	case "belastingdienst":
 		name = "Belastingdienst"
-	} else if name == "demo" {
+	case "demo":
 		name = "Demo"
 	}
 	return certificateArtifacts{sourceOIN: testSourceOIN, sourceName: name}, nil
