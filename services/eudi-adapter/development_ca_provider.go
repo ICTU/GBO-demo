@@ -260,6 +260,124 @@ func certificateSourceIdentity(cert *x509.Certificate) (string, string, error) {
 	return cert.Subject.SerialNumber, cert.Subject.Organization[0], nil
 }
 
+func projectPublicCertificateArtifacts(root, sourceID string, artifacts certificateArtifacts) error {
+	if root == "" {
+		return fmt.Errorf("public certificate projection directory is required")
+	}
+	if !sourceIDPattern.MatchString(sourceID) {
+		return fmt.Errorf("public certificate projection source_id is invalid")
+	}
+	files := []struct {
+		directory string
+		name      string
+		source    string
+	}{
+		{filepath.Join(root, "development-ca"), "issuer-ca-cert.pem", artifacts.IssuerCACertReference},
+		{filepath.Join(root, "development-ca"), "reader-ca-cert.pem", artifacts.ReaderCACertReference},
+		{filepath.Join(root, sourceID), "issuer-cert.der.b64", artifacts.IssuerCertReference},
+		{filepath.Join(root, sourceID), "reader-cert.der.b64", artifacts.ReaderCertReference},
+		{filepath.Join(root, sourceID), "status-cert.der.b64", artifacts.StatusCertReference},
+	}
+	for _, file := range files {
+		if file.source == "" {
+			return fmt.Errorf("public certificate %s source path is missing", file.name)
+		}
+		body, err := os.ReadFile(file.source)
+		if err != nil {
+			return fmt.Errorf("read public certificate %s: %w", file.name, err)
+		}
+		if err := os.MkdirAll(file.directory, 0o755); err != nil {
+			return fmt.Errorf("create public certificate directory: %w", err)
+		}
+		if err := writeFileAtomically(file.directory, file.name, body, 0o644); err != nil {
+			return fmt.Errorf("write public certificate %s: %w", file.name, err)
+		}
+	}
+	return nil
+}
+
+// publicDevelopmentCertificateStore validates the same certificate chains as
+// the development provider without opening any private-key file. It is the
+// only certificate-store mode permitted for registry-backed reconciliation.
+type publicDevelopmentCertificateStore struct {
+	provider *developmentCAProvider
+}
+
+func newPublicDevelopmentCertificateStore(root, readerPublicURL string) *publicDevelopmentCertificateStore {
+	return &publicDevelopmentCertificateStore{provider: newDevelopmentCAProvider(root, readerPublicURL)}
+}
+
+func (s *publicDevelopmentCertificateStore) Load(registration sourceRegistration) (certificateArtifacts, error) {
+	if s == nil || s.provider == nil || s.provider.root == "" {
+		return certificateArtifacts{}, fmt.Errorf("development certificate directory is required")
+	}
+	caDir := filepath.Join(s.provider.root, "development-ca")
+	issuerCACertPath := filepath.Join(caDir, "issuer-ca-cert.pem")
+	readerCACertPath := filepath.Join(caDir, "reader-ca-cert.pem")
+	issuerCA, err := loadDevelopmentCACertificate(issuerCACertPath)
+	if err != nil {
+		return certificateArtifacts{}, fmt.Errorf("load explicitly provisioned development issuer CA certificate: %w", err)
+	}
+	readerCA, err := loadDevelopmentCACertificate(readerCACertPath)
+	if err != nil {
+		return certificateArtifacts{}, fmt.Errorf("load explicitly provisioned development reader CA certificate: %w", err)
+	}
+	sourceDir := filepath.Join(s.provider.root, registration.certificateSetID())
+	loadLeaf := func(role string) (*x509.Certificate, string, error) {
+		path := filepath.Join(sourceDir, role+"-cert.der.b64")
+		certificate, err := loadDevelopmentLeafCertificate(path)
+		if err != nil {
+			return nil, "", fmt.Errorf("load explicitly provisioned development %s certificate: %w", role, err)
+		}
+		return certificate, path, nil
+	}
+	issuer, issuerPath, err := loadLeaf("issuer")
+	if err != nil {
+		return certificateArtifacts{}, err
+	}
+	reader, readerPath, err := loadLeaf("reader")
+	if err != nil {
+		return certificateArtifacts{}, err
+	}
+	status, statusPath, err := loadLeaf("status")
+	if err != nil {
+		return certificateArtifacts{}, err
+	}
+	identityOIN, identityName, err := certificateSourceIdentity(issuer)
+	if err != nil {
+		return certificateArtifacts{}, fmt.Errorf("read explicitly provisioned source identity: %w", err)
+	}
+	if registration.SourceOIN != "" && registration.SourceOIN != identityOIN {
+		return certificateArtifacts{}, fmt.Errorf("certificate source OIN %q does not match configured OIN %q", identityOIN, registration.SourceOIN)
+	}
+	if registration.Name != "" && registration.Name != identityName {
+		return certificateArtifacts{}, fmt.Errorf("certificate source name %q does not match configured name %q", identityName, registration.Name)
+	}
+	registration.SourceOIN = identityOIN
+	registration.Name = identityName
+	binding, err := s.provider.binding(registration)
+	if err != nil {
+		return certificateArtifacts{}, err
+	}
+	now := s.provider.now()
+	if err := validateExpectedDevelopmentLeaf(issuer, issuerCA, binding.issuerSubject, binding.issuerHost, issuerEKUOID, issuerAuthExtensionOID, binding.issuerPayload, now); err != nil {
+		return certificateArtifacts{}, fmt.Errorf("validate explicitly provisioned issuer certificate: %w", err)
+	}
+	if err := validateExpectedDevelopmentLeaf(reader, readerCA, binding.readerSubject, binding.readerHost, readerEKUOID, readerAuthExtensionOID, binding.readerPayload, now); err != nil {
+		return certificateArtifacts{}, fmt.Errorf("validate explicitly provisioned reader certificate: %w", err)
+	}
+	if err := validateExpectedDevelopmentLeaf(status, issuerCA, binding.issuerSubject, binding.issuerHost, statusEKUOID, nil, nil, now); err != nil {
+		return certificateArtifacts{}, fmt.Errorf("validate explicitly provisioned status certificate: %w", err)
+	}
+	return certificateArtifacts{
+		IssuerCertReference: issuerPath, ReaderCertReference: readerPath, StatusCertReference: statusPath,
+		IssuerCACertReference: issuerCACertPath, ReaderCACertReference: readerCACertPath,
+		IssuerSubject: issuer.Subject.String(), ReaderSubject: reader.Subject.String(),
+		CertificateExpires: issuer.NotAfter.UTC().Format(time.RFC3339),
+		sourceOIN:          identityOIN, sourceName: identityName,
+	}, nil
+}
+
 type developmentLeaf struct {
 	keyPath  string
 	certPath string
@@ -551,6 +669,18 @@ func loadDevelopmentLeaf(keyPath, certPath string) (*ecdsa.PrivateKey, *x509.Cer
 	}
 	cert, err := x509.ParseCertificate(certDER)
 	return key, cert, err
+}
+
+func loadDevelopmentLeafCertificate(certPath string) (*x509.Certificate, error) {
+	encodedCert, err := os.ReadFile(certPath)
+	if err != nil {
+		return nil, err
+	}
+	certDER, err := base64.StdEncoding.DecodeString(string(bytes.TrimSpace(encodedCert)))
+	if err != nil {
+		return nil, err
+	}
+	return x509.ParseCertificate(certDER)
 }
 
 func ensurePrivateDirectory(path string) error {

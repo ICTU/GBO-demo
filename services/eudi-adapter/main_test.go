@@ -4,14 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"mime"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -43,24 +41,6 @@ func TestShippedSourceMetadataMatchesEnvelopeSchema(t *testing.T) {
 	}
 }
 
-func TestRuntimeServesGeneratedIssuanceOffers(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "eudi-offers.json")
-	if err := os.WriteFile(path, []byte(`[{"key":"income-2025"}]`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	recorder := httptest.NewRecorder()
-	newMux(config{IssuanceOffersPath: path}, nil, nil).ServeHTTP(
-		recorder,
-		httptest.NewRequest(http.MethodGet, "/eudi-offers.json", nil),
-	)
-	if recorder.Code != http.StatusOK || recorder.Header().Get("Cache-Control") != "no-store" {
-		t.Fatalf("offers response = %d %v", recorder.Code, recorder.Header())
-	}
-	if got := strings.TrimSpace(recorder.Body.String()); got != `[{"key":"income-2025"}]` {
-		t.Fatalf("offers body = %s", got)
-	}
-}
-
 func compileSourceMetadataSchema(t *testing.T) *jsonschema.Schema {
 	t.Helper()
 	compiler := jsonschema.NewCompiler()
@@ -82,6 +62,15 @@ func compileSourceMetadataSchema(t *testing.T) *jsonschema.Schema {
 		t.Fatalf("compile source metadata schema: %v", err)
 	}
 	return schema
+}
+
+func testMux(cfg config, client *http.Client, metadataRuntime sourceMetadataRuntime) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /attestations/{sourceID}/{typeID}", handleSourceAttestation(cfg, client, metadataRuntime))
+	if publisher, ok := metadataRuntime.(http.Handler); ok {
+		mux.Handle("/types/", publisher)
+	}
+	return mux
 }
 
 type testSourceMetadataConfig struct {
@@ -323,7 +312,7 @@ func TestAdapterUsesSourceMetadataFor2025(t *testing.T) {
 	defer outway.Close()
 
 	cfg := config{Port: "0", OutwayURL: outway.URL, SourceDataTransport: sourceTransportFSC, SourceDataFSCServiceReference: "bri", SourceDataFSCGrantHash: "data-grant"}
-	srv := httptest.NewServer(newMux(cfg, http.DefaultClient, metadata))
+	srv := httptest.NewServer(testMux(cfg, http.DefaultClient, metadata))
 	defer srv.Close()
 
 	body := []byte(`[{
@@ -422,7 +411,7 @@ func newIncomeSourceAdapter(t *testing.T, mapping map[string]mappingRule, bronRe
 	t.Cleanup(outway.Close)
 
 	cfg := config{Port: "0", OutwayURL: outway.URL, SourceDataTransport: sourceTransportFSC, SourceDataFSCServiceReference: "bri", SourceDataFSCGrantHash: "data-grant"}
-	srv := httptest.NewServer(newMux(cfg, http.DefaultClient, metadata))
+	srv := httptest.NewServer(testMux(cfg, http.DefaultClient, metadata))
 	t.Cleanup(srv.Close)
 	return srv
 }
@@ -453,7 +442,7 @@ func TestSourceAttestationDoesNotExposeUpstreamErrorBody(t *testing.T) {
 			Body:       io.NopCloser(strings.NewReader("sensitive upstream diagnostics")),
 		}, nil
 	})}
-	mux := newMux(config{OutwayURL: "https://outway.example", SourceDataTransport: sourceTransportFSC, SourceDataFSCServiceReference: "example", SourceDataFSCGrantHash: "grant"}, client, metadata)
+	mux := testMux(config{OutwayURL: "https://outway.example", SourceDataTransport: sourceTransportFSC, SourceDataFSCServiceReference: "example", SourceDataFSCGrantHash: "grant"}, client, metadata)
 	disclosure := `[{
 		"attestations":[{"attributes":{"urn:eudi:pid:nl:1":{"bsn":"123456789"}}}]
 	}]`
@@ -470,6 +459,27 @@ func TestSourceAttestationDoesNotExposeUpstreamErrorBody(t *testing.T) {
 type typeRoutingRuntime struct {
 	metadata activeSourceMetadata
 	body     string
+}
+
+type sourceTypeMetadataHandler struct {
+	bindings []sourceRuntimeBinding
+}
+
+func (h sourceTypeMetadataHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/types/"), "/")
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		http.NotFound(w, r)
+		return
+	}
+	for _, binding := range h.bindings {
+		if binding.config.SourceMetadataSourceID == parts[0] && binding.config.SourceMetadataTypeID == parts[1] {
+			if publisher, ok := binding.runtime.(http.Handler); ok {
+				publisher.ServeHTTP(w, r)
+				return
+			}
+		}
+	}
+	http.NotFound(w, r)
 }
 
 func (r *typeRoutingRuntime) current(time.Time) (*activeSourceMetadata, error) {
@@ -539,218 +549,6 @@ func TestUnsecuredSourceDataRejectsRedirect(t *testing.T) {
 	}
 	if targetCalled {
 		t.Fatal("unsecured data redirect crossed the configured endpoint boundary")
-	}
-}
-
-func TestRuntimeDoesNotFetchSourceMetadata(t *testing.T) {
-	activeDirectory := t.TempDir()
-	activation := sourceActivation{
-		SchemaVersion: "1.0",
-		Source: sourceRegistration{
-			SourceID: "belastingdienst", ProviderPeerID: "0000009958MINBZK0000", SourceOIN: "99999999900000000200", Name: "Belastingdienst",
-			MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportFSC, ServiceReference: "gbo-metadata", Path: "/.well-known/gbo", GrantHash: "metadata-grant"},
-			DataAccess:       sourceDataAccess{Transport: sourceTransportFSC, ServiceReference: "bri", GrantHash: "data-grant"},
-		},
-		Types: []activatedType{{
-			TypeID: "inkomensverklaring", TypeVersion: "1.0",
-			VCT: "https://issuer.example/types/belastingdienst/inkomensverklaring/v1.0", VCTIntegrity: "sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=",
-			TypeMetadataReference: filepath.Join(t.TempDir(), "type.json"), Offers: []sourceOffer{{ID: "income", Label: "Income", Parameters: map[string]any{}}},
-		}},
-	}
-	body, err := json.Marshal(activation)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(activeDirectory, "belastingdienst.json"), body, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	requests := 0
-	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
-		requests++
-		return nil, errors.New("runtime must not fetch source metadata")
-	})}
-
-	_ = newRuntimeMux(context.Background(), config{
-		OutwayURL: "https://outway.example", SourceActivationsPath: activeDirectory,
-		TypeMetadataStorePath: t.TempDir(),
-	}, client)
-	if requests != 0 {
-		t.Fatalf("runtime performed %d source metadata request(s)", requests)
-	}
-}
-
-func TestRuntimeFailsClosedWhenDeployedTypeDisappears(t *testing.T) {
-	activationPath := filepath.Join(t.TempDir(), "belastingdienst.json")
-	body, err := json.Marshal(sourceActivation{
-		SchemaVersion: "1.0",
-		Source: sourceRegistration{
-			SourceID: "belastingdienst", ProviderPeerID: "0000009958MINBZK0000", SourceOIN: "99999999900000000200", Name: "Belastingdienst",
-		},
-		Types: []activatedType{{TypeID: "different-type"}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(activationPath, body, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	runtime, err := newActivatedSourceRuntime(config{
-		SourceMetadataSourceID: "belastingdienst", SourceMetadataOIN: "99999999900000000200",
-		SourceMetadataTypeID: "inkomensverklaring", SourceMetadataVCT: "https://issuer.example/types/belastingdienst/inkomensverklaring/v1.0",
-		SourceActivationPath: activationPath, TypeMetadataStorePath: t.TempDir(),
-	})
-	if err == nil {
-		_, err = runtime.current(time.Now())
-	}
-	if err == nil {
-		t.Fatal("removed or invalid deployed type did not fail closed")
-	}
-}
-
-func TestActivatedRuntimeDoesNotReloadActivationOnEveryRequest(t *testing.T) {
-	now := time.Now().UTC()
-	activationPath := filepath.Join(t.TempDir(), "belastingdienst.json")
-	if err := os.WriteFile(activationPath, []byte("not valid JSON"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	runtime := &activatedSourceRuntime{
-		config: config{
-			SourceActivationPath: activationPath,
-		},
-		metadata: activeSourceMetadata{
-			SourceID: "belastingdienst", SourceOIN: "99999999900000000200", TypeID: "inkomensverklaring",
-		},
-		activationPath: activationPath,
-		typeID:         "inkomensverklaring",
-		reloadAfter:    now.Add(activationReloadInterval),
-	}
-	if _, err := runtime.current(now); err != nil {
-		t.Fatalf("cached request unexpectedly reloaded activation: %v", err)
-	}
-	if _, err := runtime.current(now.Add(activationReloadInterval)); err == nil {
-		t.Fatal("activation was not reloaded after the bounded cache interval")
-	}
-}
-
-func TestActivatedRuntimeCachesTypeMetadataStore(t *testing.T) {
-	storePath := t.TempDir()
-	newPublication := func(typeID string) *typeMetadataPublication {
-		t.Helper()
-		publication, err := newTypeMetadataPublication("https://issuer.example", "belastingdienst", sourceAttestationDefinition{
-			TypeID: typeID, TypeVersion: "1.0",
-			TypeMetadata: json.RawMessage(`{"name":"Test","schema":{"type":"object"}}`),
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := persistTypeMetadataPublication(storePath, publication); err != nil {
-			t.Fatal(err)
-		}
-		return publication
-	}
-	first := newPublication("first")
-	runtime := &activatedSourceRuntime{
-		storePath: storePath, publications: make(map[string]*typeMetadataPublication),
-		publicationsReloadAfter: time.Now().Add(activationReloadInterval),
-	}
-	request := func(publication *typeMetadataPublication) int {
-		t.Helper()
-		recorder := httptest.NewRecorder()
-		runtime.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, publication.VCT, nil))
-		return recorder.Code
-	}
-	if got, want := request(first), http.StatusNotFound; got != want {
-		t.Fatalf("first request before cache refresh = %d, want %d", got, want)
-	}
-	runtime.publicationsMu.Lock()
-	runtime.publicationsReloadAfter = time.Now().Add(-time.Second)
-	runtime.publicationsMu.Unlock()
-	if got, want := request(first), http.StatusOK; got != want {
-		t.Fatalf("first request after cache refresh = %d, want %d", got, want)
-	}
-
-	second := newPublication("second")
-	if got, want := request(second), http.StatusNotFound; got != want {
-		t.Fatalf("new publication bypassed cache interval: status = %d, want %d", got, want)
-	}
-	runtime.publicationsMu.Lock()
-	runtime.publicationsReloadAfter = time.Now().Add(-time.Second)
-	runtime.publicationsMu.Unlock()
-	if got, want := request(second), http.StatusOK; got != want {
-		t.Fatalf("second request after cache refresh = %d, want %d", got, want)
-	}
-}
-
-func TestActivatedRuntimeReloadsUpdatedDataGrantAfterCacheInterval(t *testing.T) {
-	now := time.Now().UTC()
-	activationPath := filepath.Join(t.TempDir(), "belastingdienst.json")
-	offer := sourceOffer{ID: "example", Label: "Example", Parameters: map[string]any{}}
-	definition := sourceAttestationDefinition{
-		TypeID: "example", TypeVersion: "1.0", Offers: []sourceOffer{offer},
-		GraphQL: sourceGraphQL{
-			ServiceReference: "bri", Document: "query Example($bsn: String!) { example(bsn: $bsn) { value } }",
-			SubjectVariable: "bsn", ResultPointer: "/data/example",
-		},
-		MappingProfile: "gbo-simple-v1",
-		Mapping:        map[string]mappingRule{"value": {Pointer: "/value", Datatype: "string"}},
-		AttributeSchema: map[string]sourceAttributeSchema{
-			"value": {Type: "string"},
-		},
-	}
-	activation := sourceActivation{
-		SchemaVersion: "1.0", MetadataVersion: "1.0", FreshUntil: now.Add(time.Hour), StaleUntil: now.Add(2 * time.Hour),
-		Source: sourceRegistration{
-			SourceID: "belastingdienst", ProviderPeerID: "0000009958MINBZK0000", SourceOIN: "99999999900000000200", Name: "Belastingdienst",
-			MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportFSC, ServiceReference: "gbo-metadata", Path: "/.well-known/gbo", GrantHash: "metadata-grant"},
-			DataAccess:       sourceDataAccess{Transport: sourceTransportFSC, ServiceReference: "bri", GrantHash: "data-grant-v1"},
-		},
-		Types: []activatedType{{
-			TypeID: "example", TypeVersion: "1.0", VCT: "https://issuer.example/types/belastingdienst/example/v1.0",
-			VCTIntegrity: "sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=", TypeMetadataReference: filepath.Join(t.TempDir(), "type.json"),
-			Offers: []sourceOffer{offer}, Definition: definition,
-		}},
-	}
-	writeActivation := func() {
-		body, err := json.Marshal(activation)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(activationPath, body, 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	writeActivation()
-	runtime, err := newActivatedSourceRuntime(config{
-		SourceMetadataSourceID: "belastingdienst", SourceMetadataOIN: "99999999900000000200", SourceMetadataTypeID: "example",
-		SourceMetadataVCT: "https://issuer.example/types/belastingdienst/example/v1.0", SourceActivationPath: activationPath,
-		TypeMetadataStorePath: t.TempDir(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, resolved, err := runtime.currentSource(now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, want := resolved.SourceDataFSCGrantHash, "data-grant-v1"; got != want {
-		t.Fatalf("initial data grant = %q, want %q", got, want)
-	}
-	activation.Source.DataAccess.GrantHash = "data-grant-v2"
-	writeActivation()
-	reloadAt := runtime.reloadAfter
-	_, cached, err := runtime.currentSource(reloadAt.Add(-time.Second))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, want := cached.SourceDataFSCGrantHash, "data-grant-v1"; got != want {
-		t.Fatalf("cached data grant = %q, want %q", got, want)
-	}
-	_, refreshed, err := runtime.currentSource(reloadAt)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, want := refreshed.SourceDataFSCGrantHash, "data-grant-v2"; got != want {
-		t.Fatalf("refreshed data grant = %q, want %q", got, want)
 	}
 }
 
@@ -972,7 +770,7 @@ func TestAdapterUsesBRPSourceQueryAndMapping(t *testing.T) {
 	defer outway.Close()
 
 	cfg := config{OutwayURL: outway.URL, SourceDataTransport: sourceTransportFSC, SourceDataFSCServiceReference: "brp", SourceDataFSCGrantHash: "data-grant"}
-	srv := httptest.NewServer(newMux(cfg, http.DefaultClient, active))
+	srv := httptest.NewServer(testMux(cfg, http.DefaultClient, active))
 	defer srv.Close()
 	resp := postDisclosure(t, srv, "/attestations/rvig/akte-van-overlijden", "999991772")
 	defer resp.Body.Close()

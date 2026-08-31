@@ -1,0 +1,453 @@
+package onboarding
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"sort"
+	"strings"
+	"time"
+)
+
+var (
+	ErrNoActiveRelease = errors.New("source registry has no active release")
+	ErrReleaseNotFound = errors.New("source release not found")
+)
+
+// PublicCertificate describes certificate material that may safely cross the
+// registry boundary. Secret paths and private key material deliberately have
+// no representation in this model.
+type PublicCertificate struct {
+	Role     string    `json:"role"`
+	Subject  string    `json:"subject"`
+	SHA256   string    `json:"sha256"`
+	NotAfter time.Time `json:"not_after"`
+	DNSNames []string  `json:"dns_names,omitempty"`
+	EKUOIDs  []string  `json:"eku_oids,omitempty"`
+}
+
+type PublicCertificateSet struct {
+	ID           string              `json:"id"`
+	Certificates []PublicCertificate `json:"certificates"`
+}
+
+type TypeMetadata struct {
+	VCT       string `json:"vct"`
+	Version   string `json:"version"`
+	Integrity string `json:"integrity"`
+	MediaType string `json:"media_type"`
+	Bytes     []byte `json:"bytes"`
+}
+
+// SourceCandidate is mutable control-plane state. Snapshot and Offers are
+// versioned domain JSON; lifecycle fields remain typed and queryable.
+type SourceCandidate struct {
+	SourceID               string               `json:"source_id"`
+	MetadataVersion        string               `json:"metadata_version"`
+	MetadataPayloadDigest  string               `json:"metadata_payload_digest"`
+	MetadataETag           string               `json:"metadata_etag,omitempty"`
+	DeploymentDigest       string               `json:"deployment_digest"`
+	CheckedAt              time.Time            `json:"checked_at"`
+	ExpiresAt              time.Time            `json:"expires_at"`
+	FreshUntil             time.Time            `json:"fresh_until"`
+	StaleUntil             time.Time            `json:"stale_until"`
+	TransportAuthenticated bool                 `json:"transport_authenticated"`
+	Snapshot               json.RawMessage      `json:"snapshot"`
+	Offers                 json.RawMessage      `json:"offers"`
+	CertificateSet         PublicCertificateSet `json:"certificate_set"`
+	TypeMetadata           []TypeMetadata       `json:"type_metadata"`
+}
+
+type ReleaseSource struct {
+	SourceID               string               `json:"source_id"`
+	MetadataVersion        string               `json:"metadata_version"`
+	MetadataPayloadDigest  string               `json:"metadata_payload_digest"`
+	MetadataETag           string               `json:"metadata_etag,omitempty"`
+	DeploymentDigest       string               `json:"deployment_digest"`
+	CheckedAt              time.Time            `json:"checked_at"`
+	ExpiresAt              time.Time            `json:"expires_at"`
+	FreshUntil             time.Time            `json:"fresh_until"`
+	StaleUntil             time.Time            `json:"stale_until"`
+	TransportAuthenticated bool                 `json:"transport_authenticated"`
+	Snapshot               json.RawMessage      `json:"snapshot"`
+	CertificateSet         PublicCertificateSet `json:"certificate_set"`
+	TypeMetadata           []TypeMetadata       `json:"type_metadata"`
+}
+
+type SourceRelease struct {
+	ID                    string          `json:"id"`
+	Digest                string          `json:"digest"`
+	MaterializationDigest string          `json:"materialization_digest"`
+	CreatedAt             time.Time       `json:"created_at"`
+	Sources               []ReleaseSource `json:"sources"`
+	Offers                json.RawMessage `json:"offers"`
+}
+
+type ReleaseSourceLifecycle struct {
+	SourceID   string
+	CheckedAt  time.Time
+	ExpiresAt  time.Time
+	FreshUntil time.Time
+	StaleUntil time.Time
+}
+
+type ActiveReleaseState struct {
+	ReleaseID string
+	Sources   []ReleaseSourceLifecycle
+}
+
+// SourceRegistry is shaped around onboarding use cases rather than database
+// tables. Promotion and activation are required to be atomic operations.
+type SourceRegistry interface {
+	Candidate(context.Context, string) (SourceCandidate, bool, error)
+	PutCandidate(context.Context, SourceCandidate) error
+	PutStatus(context.Context, Status) error
+	// Promote stores a complete release and returns whether it activated that
+	// release. An existing inactive release must not replace the operator-selected
+	// active pointer.
+	Promote(context.Context, SourceRelease) (bool, error)
+	ActiveReleaseState(context.Context) (ActiveReleaseState, bool, error)
+	ActiveRelease(context.Context) (SourceRelease, error)
+	Release(context.Context, string) (SourceRelease, error)
+	ActivateRelease(context.Context, string) error
+}
+
+// PromotionResult distinguishes a newly activated release from an existing
+// release whose reactivation was suppressed to preserve an operator rollback.
+type PromotionResult struct {
+	Release   SourceRelease
+	Activated bool
+}
+
+// PromoteCompleteSourceSet is the release-composition use case. It refuses to
+// silently drop a configured source, delegates atomic release activation to
+// the registry port, and only marks sources active after that succeeds.
+func PromoteCompleteSourceSet(ctx context.Context, registry SourceRegistry, sourceIDs []string, at time.Time) (PromotionResult, error) {
+	if registry == nil {
+		return PromotionResult{}, fmt.Errorf("source registry is required")
+	}
+	if len(sourceIDs) == 0 {
+		return PromotionResult{}, fmt.Errorf("configured source set is empty")
+	}
+	candidates := make([]SourceCandidate, 0, len(sourceIDs))
+	seen := make(map[string]struct{}, len(sourceIDs))
+	for _, sourceID := range sourceIDs {
+		if _, duplicate := seen[sourceID]; duplicate {
+			return PromotionResult{}, fmt.Errorf("configured source_id %q is duplicated", sourceID)
+		}
+		seen[sourceID] = struct{}{}
+		candidate, found, err := registry.Candidate(ctx, sourceID)
+		if err != nil {
+			return PromotionResult{}, err
+		}
+		if !found {
+			return PromotionResult{}, fmt.Errorf("configured source %q has no complete candidate", sourceID)
+		}
+		if at.After(candidate.StaleUntil) {
+			return PromotionResult{}, fmt.Errorf("configured source %q is outside stale grace", sourceID)
+		}
+		candidates = append(candidates, candidate)
+	}
+	release, err := NewSourceRelease(at, candidates)
+	if err != nil {
+		return PromotionResult{}, err
+	}
+	activated, err := registry.Promote(ctx, release)
+	if err != nil {
+		return PromotionResult{}, err
+	}
+	if !activated {
+		// The desired candidate material was active before, but an operator
+		// deliberately selected another stored release. Preserve that rollback
+		// until genuinely new candidate material creates a new release ID.
+		return PromotionResult{Release: release, Activated: false}, nil
+	}
+	for _, candidate := range candidates {
+		if err := registry.PutStatus(ctx, Status{
+			SourceID: candidate.SourceID, State: StateActive,
+			MetadataVersion: candidate.MetadataVersion, DeploymentDigest: candidate.DeploymentDigest,
+			TransportAuthenticated: candidate.TransportAuthenticated, CheckedAt: at.UTC(),
+		}); err != nil {
+			return PromotionResult{Release: release, Activated: true}, fmt.Errorf("mark promoted source %q active: %w", candidate.SourceID, err)
+		}
+	}
+	return PromotionResult{Release: release, Activated: true}, nil
+}
+
+func (release SourceRelease) Validate() error {
+	if release.ID == "" || release.ID != release.Digest || !validHexDigest(release.Digest) ||
+		!validHexDigest(release.MaterializationDigest) || release.CreatedAt.IsZero() || len(release.Sources) == 0 {
+		return fmt.Errorf("source release is incomplete")
+	}
+	if !json.Valid(release.Offers) {
+		return fmt.Errorf("source release offers must be valid JSON")
+	}
+	if err := rejectSecretJSON(release.Offers); err != nil {
+		return fmt.Errorf("source release offers: %w", err)
+	}
+	seen := make(map[string]struct{}, len(release.Sources))
+	for _, source := range release.Sources {
+		if _, duplicate := seen[source.SourceID]; duplicate {
+			return fmt.Errorf("duplicate release source_id %q", source.SourceID)
+		}
+		seen[source.SourceID] = struct{}{}
+		candidate := SourceCandidate{
+			SourceID: source.SourceID, MetadataVersion: source.MetadataVersion,
+			MetadataPayloadDigest: source.MetadataPayloadDigest, MetadataETag: source.MetadataETag,
+			DeploymentDigest: source.DeploymentDigest, CheckedAt: source.CheckedAt,
+			ExpiresAt: source.ExpiresAt, FreshUntil: source.FreshUntil, StaleUntil: source.StaleUntil,
+			TransportAuthenticated: source.TransportAuthenticated, Snapshot: source.Snapshot,
+			Offers: json.RawMessage(`[]`), CertificateSet: source.CertificateSet, TypeMetadata: source.TypeMetadata,
+		}
+		if err := candidate.Validate(); err != nil {
+			return fmt.Errorf("release source %q: %w", source.SourceID, err)
+		}
+	}
+	full, err := releaseDigestDocument(release, true)
+	if err != nil {
+		return err
+	}
+	material, err := releaseDigestDocument(release, false)
+	if err != nil {
+		return err
+	}
+	if digestHex(full) != release.Digest || digestHex(material) != release.MaterializationDigest {
+		return fmt.Errorf("source release digest does not match its immutable contents")
+	}
+	return nil
+}
+
+func NewSourceRelease(createdAt time.Time, candidates []SourceCandidate) (SourceRelease, error) {
+	if len(candidates) == 0 {
+		return SourceRelease{}, fmt.Errorf("source release requires at least one candidate")
+	}
+	ordered := append([]SourceCandidate(nil), candidates...)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].SourceID < ordered[j].SourceID })
+
+	seenSources := make(map[string]struct{}, len(ordered))
+	seenOffers := make(map[string]struct{})
+	publicOffers := make([]json.RawMessage, 0)
+	sources := make([]ReleaseSource, 0, len(ordered))
+	for _, candidate := range ordered {
+		if err := candidate.Validate(); err != nil {
+			return SourceRelease{}, fmt.Errorf("candidate %q: %w", candidate.SourceID, err)
+		}
+		if _, duplicate := seenSources[candidate.SourceID]; duplicate {
+			return SourceRelease{}, fmt.Errorf("duplicate candidate source_id %q", candidate.SourceID)
+		}
+		seenSources[candidate.SourceID] = struct{}{}
+		var offers []json.RawMessage
+		if err := json.Unmarshal(candidate.Offers, &offers); err != nil {
+			return SourceRelease{}, fmt.Errorf("candidate %q offers: %w", candidate.SourceID, err)
+		}
+		for _, offer := range offers {
+			var identity struct {
+				Key string `json:"key"`
+			}
+			if err := json.Unmarshal(offer, &identity); err != nil || strings.TrimSpace(identity.Key) == "" {
+				return SourceRelease{}, fmt.Errorf("candidate %q contains an offer without a key", candidate.SourceID)
+			}
+			if _, duplicate := seenOffers[identity.Key]; duplicate {
+				return SourceRelease{}, fmt.Errorf("issuance offer key %q is not globally unique", identity.Key)
+			}
+			seenOffers[identity.Key] = struct{}{}
+			publicOffers = append(publicOffers, append(json.RawMessage(nil), offer...))
+		}
+		typeMetadata := append([]TypeMetadata(nil), candidate.TypeMetadata...)
+		sort.Slice(typeMetadata, func(i, j int) bool {
+			if typeMetadata[i].VCT == typeMetadata[j].VCT {
+				return typeMetadata[i].Version < typeMetadata[j].Version
+			}
+			return typeMetadata[i].VCT < typeMetadata[j].VCT
+		})
+		sources = append(sources, ReleaseSource{
+			SourceID: candidate.SourceID, MetadataVersion: candidate.MetadataVersion,
+			MetadataPayloadDigest: candidate.MetadataPayloadDigest, MetadataETag: candidate.MetadataETag,
+			DeploymentDigest: candidate.DeploymentDigest, CheckedAt: candidate.CheckedAt.UTC(), ExpiresAt: candidate.ExpiresAt.UTC(),
+			FreshUntil: candidate.FreshUntil.UTC(), StaleUntil: candidate.StaleUntil.UTC(),
+			TransportAuthenticated: candidate.TransportAuthenticated,
+			Snapshot:               append(json.RawMessage(nil), candidate.Snapshot...), CertificateSet: candidate.CertificateSet,
+			TypeMetadata: typeMetadata,
+		})
+	}
+	sort.Slice(publicOffers, func(i, j int) bool { return bytes.Compare(publicOffers[i], publicOffers[j]) < 0 })
+	offers, err := json.Marshal(publicOffers)
+	if err != nil {
+		return SourceRelease{}, fmt.Errorf("marshal release offers: %w", err)
+	}
+
+	release := SourceRelease{CreatedAt: createdAt.UTC(), Sources: sources, Offers: offers}
+	full, err := releaseDigestDocument(release, true)
+	if err != nil {
+		return SourceRelease{}, err
+	}
+	material, err := releaseDigestDocument(release, false)
+	if err != nil {
+		return SourceRelease{}, err
+	}
+	release.Digest = digestHex(full)
+	release.ID = release.Digest
+	release.MaterializationDigest = digestHex(material)
+	if err := release.Validate(); err != nil {
+		return SourceRelease{}, err
+	}
+	return release, nil
+}
+
+func (c SourceCandidate) Validate() error {
+	if strings.TrimSpace(c.SourceID) == "" || strings.TrimSpace(c.MetadataVersion) == "" {
+		return fmt.Errorf("source_id and metadata_version are required")
+	}
+	for name, value := range map[string]string{
+		"metadata_payload_digest": c.MetadataPayloadDigest,
+		"deployment_digest":       c.DeploymentDigest,
+	} {
+		if !validHexDigest(value) {
+			return fmt.Errorf("%s must be a SHA-256 hex digest", name)
+		}
+	}
+	if c.CheckedAt.IsZero() || c.ExpiresAt.IsZero() || c.FreshUntil.IsZero() || c.StaleUntil.IsZero() {
+		return fmt.Errorf("candidate lifecycle timestamps are required")
+	}
+	if c.FreshUntil.After(c.StaleUntil) || c.StaleUntil.After(c.ExpiresAt) {
+		return fmt.Errorf("candidate freshness must satisfy fresh_until <= stale_until <= expires_at")
+	}
+	if !json.Valid(c.Snapshot) || !json.Valid(c.Offers) {
+		return fmt.Errorf("candidate snapshot and offers must be valid JSON")
+	}
+	if err := rejectSecretJSON(c.Snapshot); err != nil {
+		return fmt.Errorf("candidate snapshot: %w", err)
+	}
+	if err := c.CertificateSet.validate(); err != nil {
+		return err
+	}
+	return validateTypeMetadata(c.TypeMetadata)
+}
+
+func (certificates PublicCertificateSet) validate() error {
+	if strings.TrimSpace(certificates.ID) == "" || len(certificates.Certificates) == 0 {
+		return fmt.Errorf("public certificate set is required")
+	}
+	seenRoles := make(map[string]struct{}, len(certificates.Certificates))
+	requiredRoles := map[string]struct{}{"issuer": {}, "reader": {}, "status": {}, "issuer_ca": {}, "reader_ca": {}}
+	for _, certificate := range certificates.Certificates {
+		if certificate.Role == "" || certificate.Subject == "" || !validHexDigest(certificate.SHA256) || certificate.NotAfter.IsZero() {
+			return fmt.Errorf("public certificate descriptor is incomplete")
+		}
+		if _, duplicate := seenRoles[certificate.Role]; duplicate {
+			return fmt.Errorf("duplicate public certificate role %q", certificate.Role)
+		}
+		seenRoles[certificate.Role] = struct{}{}
+		delete(requiredRoles, certificate.Role)
+	}
+	if len(requiredRoles) != 0 {
+		missing := make([]string, 0, len(requiredRoles))
+		for role := range requiredRoles {
+			missing = append(missing, role)
+		}
+		sort.Strings(missing)
+		return fmt.Errorf("public certificate set is missing roles: %s", strings.Join(missing, ", "))
+	}
+	return nil
+}
+
+func validateTypeMetadata(allMetadata []TypeMetadata) error {
+	if len(allMetadata) == 0 {
+		return fmt.Errorf("candidate requires Type Metadata")
+	}
+	for _, metadata := range allMetadata {
+		if metadata.VCT == "" || metadata.Version == "" || metadata.Integrity == "" || len(metadata.Bytes) == 0 {
+			return fmt.Errorf("type metadata is incomplete")
+		}
+		digest := sha256.Sum256(metadata.Bytes)
+		integrity := "sha256-" + base64.StdEncoding.EncodeToString(digest[:])
+		if metadata.Integrity != integrity {
+			return fmt.Errorf("type metadata integrity mismatch for %q", metadata.VCT)
+		}
+	}
+	return nil
+}
+
+// releaseDigestDocument deliberately excludes observation timestamps. A 304
+// refresh extends freshness without creating a new immutable release; the
+// registry updates those lifecycle observations on the active materialization.
+// includeETag distinguishes the complete release identity from the issuance
+// materialization digest without making polling time part of either identity.
+func releaseDigestDocument(release SourceRelease, includeETag bool) ([]byte, error) {
+	type digestSource struct {
+		SourceID               string               `json:"source_id"`
+		MetadataVersion        string               `json:"metadata_version"`
+		MetadataPayloadDigest  string               `json:"metadata_payload_digest"`
+		MetadataETag           string               `json:"metadata_etag,omitempty"`
+		DeploymentDigest       string               `json:"deployment_digest"`
+		TransportAuthenticated bool                 `json:"transport_authenticated"`
+		Snapshot               json.RawMessage      `json:"snapshot"`
+		CertificateSet         PublicCertificateSet `json:"certificate_set"`
+		TypeMetadata           []TypeMetadata       `json:"type_metadata"`
+	}
+	sources := make([]digestSource, len(release.Sources))
+	for index, source := range release.Sources {
+		sources[index] = digestSource{
+			SourceID: source.SourceID, MetadataVersion: source.MetadataVersion,
+			MetadataPayloadDigest: source.MetadataPayloadDigest, DeploymentDigest: source.DeploymentDigest,
+			TransportAuthenticated: source.TransportAuthenticated, Snapshot: source.Snapshot,
+			CertificateSet: source.CertificateSet, TypeMetadata: source.TypeMetadata,
+		}
+		if includeETag {
+			sources[index].MetadataETag = source.MetadataETag
+		}
+	}
+	return json.Marshal(struct {
+		Sources []digestSource  `json:"sources"`
+		Offers  json.RawMessage `json:"offers"`
+	}{Sources: sources, Offers: release.Offers})
+}
+
+func rejectSecretJSON(raw json.RawMessage) error {
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return err
+	}
+	var walk func(any) error
+	walk = func(current any) error {
+		switch typed := current.(type) {
+		case map[string]any:
+			for key, nested := range typed {
+				normalized := strings.ToLower(strings.ReplaceAll(key, "-", "_"))
+				if strings.Contains(normalized, "private_key") || strings.HasSuffix(normalized, "key_reference") {
+					return fmt.Errorf("secret-bearing field %q is not allowed", key)
+				}
+				if err := walk(nested); err != nil {
+					return err
+				}
+			}
+		case []any:
+			for _, nested := range typed {
+				if err := walk(nested); err != nil {
+					return err
+				}
+			}
+		case string:
+			if strings.Contains(typed, "-----BEGIN PRIVATE KEY-----") {
+				return fmt.Errorf("private key material is not allowed")
+			}
+		}
+		return nil
+	}
+	return walk(value)
+}
+
+func validHexDigest(value string) bool {
+	decoded, err := hex.DecodeString(value)
+	return err == nil && len(decoded) == sha256.Size
+}
+
+func digestHex(body []byte) string {
+	digest := sha256.Sum256(body)
+	return hex.EncodeToString(digest[:])
+}

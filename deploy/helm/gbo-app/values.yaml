@@ -29,6 +29,10 @@ env: []
 #       name: eudi-secrets
 envFrom: []
 
+# Native Kubernetes init containers. Each entry owns its image, command,
+# environment, security context, resources and volume mounts.
+initContainers: []
+
 # Native Kubernetes volume mounts and pod volumes.
 volumeMounts: []
 volumes: []

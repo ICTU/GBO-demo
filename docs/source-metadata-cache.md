@@ -10,15 +10,19 @@ formatterfallback.
 | Proces | Instelling | Betekenis |
 |---|---|---|
 | Reconciler | `--type-metadata-base-url` | Publieke basis-URL van de adapter; lokaal afgeleid uit `EUDI_BRI_URL`. |
-| Reconciler | `--state-dir` | Duurzame opslag met `candidates/`, `active/`, `status/` en `type-metadata/`. |
-| Issuance-runtime | `SOURCE_ACTIVATIONS_PATH` | Alleen-lezen directory met één uitgerold record per logische bron. |
-| Issuance-runtime | `TYPE_METADATA_STORE_PATH` | Alleen-lezen opslag voor immutable Type Metadata; standaard `/var/lib/gbo/type-metadata`. |
+| Reconciler | `SOURCE_REGISTRY_DATABASE_URL` | Read-write PostgreSQL-verbinding voor kandidaten, statussen en atomische promotie. |
+| Adapter | `SOURCE_REGISTRY_DATABASE_URL` | Alleen-lezen verbinding; de adapter wisselt zijn complete in-memory release atomair. |
+| Alle registry-clients | `SOURCE_REGISTRY_SCHEMA` | Logisch schema, standaard `source_registry`. |
+| Adapter | `SOURCE_REGISTRY_REFRESH_INTERVAL` | Interval waarmee de actieve releasepointer en lichte lifecycle-observaties worden gecontroleerd. |
+| Issuance init-container | `SOURCE_REGISTRY_DATABASE_URL` | Alleen-lezen verbinding om één actieve release te materialiseren. |
 
 OIN, type-id, transport, query, mapping en eventuele FSC-servicebinding worden
 uit het activatierecord gelezen en niet als losse runtimevariabelen
-geconfigureerd. Eén record bevat alle typen en offers van een logische bron en
-de verwijzingen naar de vooraf beheerde issuer-, reader- en
-statuscertificaten.
+geconfigureerd. Eén `SourceRelease` bevat immutable typen, offers en publieke
+certificaatidentiteiten van de volledige bronset. De observatietijden voor
+freshness en stale grace horen niet bij de release-identiteit en mogen bij een
+succesvolle hercontrole worden verlengd. Private keys en secretpaden hebben
+geen representatie in het registry-model.
 
 ## Ophalen en geldigheid
 
@@ -56,21 +60,33 @@ zet `vct` vanuit `attestation_type` en gebruikt de geïnstalleerde Type
 Metadata-bytes voor `vct#integrity`; beide worden daarom niet als gewone
 attributes meegestuurd.
 
-## Kandidaten en rollout
+## Kandidaten, releases en rollout
 
-De reconciler schrijft complete bronversies naar `candidates/` en een duurzame
-status per bron naar `status/`. Een inhoudelijke wijziging aan typen, offers,
-VCT's of certificaatverwijzingen krijgt de status `rollout_required` en raakt
-de actieve uitgifte nog niet.
+De reconciler schrijft complete kandidaten en de actuele status per bron naar
+PostgreSQL. `--auto-promote` bouwt alleen wanneer *iedere* handmatig
+geconfigureerde bron bruikbaar is een `SourceRelease`. De release-inhoud en
+release-ID blijven gelijk wanneer een `304` alleen de observatietijden
+verlengt; de bestaande lifecycle-kolommen worden dan bijgewerkt zonder nieuwe
+release of Type Metadata-kopieën te maken. De release en de singleton
+`active_release_id` worden in één transactie geschreven. Een `pending`,
+`stale` of `blocked` bron verhindert promotie, zodat een bron niet stil uit het
+aanbod verdwijnt. Een mislukte promotie laat de vorige actieve release
+ongemoeid.
 
-`make eudi-config` controleert dat iedere handmatig geconfigureerde bron een
-bruikbare kandidaat heeft. Daarna genereert het de nl-wallet-producten, Type
-Metadata en `eudi-offers.json` en promoveert het de volledige kandidaatset
-atomair naar `active/`. Een `pending`, `stale` of `blocked` bron laat deze stap
-falen, zodat een bron niet stil uit het aanbod verdwijnt.
+De adapter controleert de actieve pointer en bouwt een nieuwe release volledig
+in geheugen voordat hij die atomair wisselt. Bij hetzelfde release-ID worden
+alleen de freshness- en stale-grace-tijden in een nieuwe in-memory snapshot
+overgenomen; Type Metadata en offers worden niet opnieuw geladen.
+Attestatieafhandeling, `eudi-offers.json` en Type Metadata komen daardoor altijd
+uit dezelfde release en vereisen geen restart.
 
-De gebruikte nl-wallet issuance-server herlaadt zijn productconfiguratie niet
-dynamisch. Een inhoudelijke wijziging vereist daarom regeneratie en een
-gecontroleerde rollout van issuance-server en frontends. In productie moeten
-de gegenereerde artifacts en het bijbehorende actieve snapshot onderdeel zijn
-van dezelfde release voordat verkeer naar de nieuwe pods gaat.
+De gebruikte nl-wallet issuance-server leest TOML alleen bij startup. Een
+init-container leest de actieve release en combineert die met het gemounte
+certificaat-Secret in een pod-lokale `emptyDir`. Een gewijzigde release vereist
+daarom nog steeds een gecontroleerde restart van de issuance-server. Lokaal
+voert `make eudi-config` die materialisatie en restart uit. Automatisch een
+rollout triggeren blijft bewust buiten deze implementatie.
+
+Rollback wijzigt uitsluitend `active_release_id` naar een bewaarde vorige
+release. De adapter neemt die wijziging live over; de issuance-server moet
+daarna opnieuw worden gestart.
