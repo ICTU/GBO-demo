@@ -107,48 +107,65 @@ type SourceRegistry interface {
 	Candidate(context.Context, string) (SourceCandidate, bool, error)
 	PutCandidate(context.Context, SourceCandidate) error
 	PutStatus(context.Context, Status) error
-	Promote(context.Context, SourceRelease) error
+	// Promote stores a complete release and returns whether it activated that
+	// release. An existing inactive release must not replace the operator-selected
+	// active pointer.
+	Promote(context.Context, SourceRelease) (bool, error)
 	ActiveReleaseState(context.Context) (ActiveReleaseState, bool, error)
 	ActiveRelease(context.Context) (SourceRelease, error)
 	Release(context.Context, string) (SourceRelease, error)
 	ActivateRelease(context.Context, string) error
 }
 
+// PromotionResult distinguishes a newly activated release from an existing
+// release whose reactivation was suppressed to preserve an operator rollback.
+type PromotionResult struct {
+	Release   SourceRelease
+	Activated bool
+}
+
 // PromoteCompleteSourceSet is the release-composition use case. It refuses to
 // silently drop a configured source, delegates atomic release activation to
 // the registry port, and only marks sources active after that succeeds.
-func PromoteCompleteSourceSet(ctx context.Context, registry SourceRegistry, sourceIDs []string, at time.Time) (SourceRelease, error) {
+func PromoteCompleteSourceSet(ctx context.Context, registry SourceRegistry, sourceIDs []string, at time.Time) (PromotionResult, error) {
 	if registry == nil {
-		return SourceRelease{}, fmt.Errorf("source registry is required")
+		return PromotionResult{}, fmt.Errorf("source registry is required")
 	}
 	if len(sourceIDs) == 0 {
-		return SourceRelease{}, fmt.Errorf("configured source set is empty")
+		return PromotionResult{}, fmt.Errorf("configured source set is empty")
 	}
 	candidates := make([]SourceCandidate, 0, len(sourceIDs))
 	seen := make(map[string]struct{}, len(sourceIDs))
 	for _, sourceID := range sourceIDs {
 		if _, duplicate := seen[sourceID]; duplicate {
-			return SourceRelease{}, fmt.Errorf("configured source_id %q is duplicated", sourceID)
+			return PromotionResult{}, fmt.Errorf("configured source_id %q is duplicated", sourceID)
 		}
 		seen[sourceID] = struct{}{}
 		candidate, found, err := registry.Candidate(ctx, sourceID)
 		if err != nil {
-			return SourceRelease{}, err
+			return PromotionResult{}, err
 		}
 		if !found {
-			return SourceRelease{}, fmt.Errorf("configured source %q has no complete candidate", sourceID)
+			return PromotionResult{}, fmt.Errorf("configured source %q has no complete candidate", sourceID)
 		}
 		if at.After(candidate.StaleUntil) {
-			return SourceRelease{}, fmt.Errorf("configured source %q is outside stale grace", sourceID)
+			return PromotionResult{}, fmt.Errorf("configured source %q is outside stale grace", sourceID)
 		}
 		candidates = append(candidates, candidate)
 	}
 	release, err := NewSourceRelease(at, candidates)
 	if err != nil {
-		return SourceRelease{}, err
+		return PromotionResult{}, err
 	}
-	if err := registry.Promote(ctx, release); err != nil {
-		return SourceRelease{}, err
+	activated, err := registry.Promote(ctx, release)
+	if err != nil {
+		return PromotionResult{}, err
+	}
+	if !activated {
+		// The desired candidate material was active before, but an operator
+		// deliberately selected another stored release. Preserve that rollback
+		// until genuinely new candidate material creates a new release ID.
+		return PromotionResult{Release: release, Activated: false}, nil
 	}
 	for _, candidate := range candidates {
 		if err := registry.PutStatus(ctx, Status{
@@ -156,10 +173,10 @@ func PromoteCompleteSourceSet(ctx context.Context, registry SourceRegistry, sour
 			MetadataVersion: candidate.MetadataVersion, DeploymentDigest: candidate.DeploymentDigest,
 			TransportAuthenticated: candidate.TransportAuthenticated, CheckedAt: at.UTC(),
 		}); err != nil {
-			return release, fmt.Errorf("mark promoted source %q active: %w", candidate.SourceID, err)
+			return PromotionResult{Release: release, Activated: true}, fmt.Errorf("mark promoted source %q active: %w", candidate.SourceID, err)
 		}
 	}
-	return release, nil
+	return PromotionResult{Release: release, Activated: true}, nil
 }
 
 func (release SourceRelease) Validate() error {

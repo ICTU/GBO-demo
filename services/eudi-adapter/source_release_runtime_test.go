@@ -15,15 +15,17 @@ import (
 )
 
 type runtimeRegistryFake struct {
-	mu       sync.Mutex
-	active   string
-	releases map[string]onboarding.SourceRelease
-	err      error
+	mu         sync.Mutex
+	active     string
+	releases   map[string]onboarding.SourceRelease
+	err        error
+	stateCalls int
 }
 
 func (f *runtimeRegistryFake) ActiveReleaseState(context.Context) (onboarding.ActiveReleaseState, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.stateCalls++
 	if f.err != nil {
 		return onboarding.ActiveReleaseState{}, false, f.err
 	}
@@ -31,6 +33,48 @@ func (f *runtimeRegistryFake) ActiveReleaseState(context.Context) (onboarding.Ac
 		return onboarding.ActiveReleaseState{}, false, nil
 	}
 	return runtimeReleaseState(f.releases[f.active]), true, nil
+}
+
+func TestSourceReleaseRuntimeHonorsColdStartRetryBackoff(t *testing.T) {
+	now := time.Now().UTC()
+	registry := &runtimeRegistryFake{err: errors.New("database unavailable")}
+	runtime := &sourceReleaseRuntime{registry: registry, baseConfig: config{}, refreshInterval: time.Second}
+
+	if _, err := runtime.current(context.Background(), now); err == nil {
+		t.Fatal("initial refresh unexpectedly succeeded")
+	}
+	if _, err := runtime.current(context.Background(), now.Add(time.Second)); err == nil {
+		t.Fatal("backed-off refresh unexpectedly succeeded")
+	}
+	registry.mu.Lock()
+	calls := registry.stateCalls
+	registry.mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("active release checks during retry backoff = %d, want 1", calls)
+	}
+}
+
+func TestSourceReleaseRuntimeSchedulesRetryFromRefreshCompletion(t *testing.T) {
+	now := time.Now().UTC()
+	base := &runtimeRegistryFake{err: errors.New("database unavailable")}
+	blocking := &blockingRuntimeRegistry{runtimeRegistryFake: base, started: make(chan struct{}), release: make(chan struct{})}
+	runtime := &sourceReleaseRuntime{registry: blocking, baseConfig: config{}, refreshInterval: time.Second}
+	result := make(chan error, 1)
+	go func() {
+		_, err := runtime.current(context.Background(), now)
+		result <- err
+	}()
+	<-blocking.started
+	close(blocking.release)
+	if err := <-result; err == nil {
+		t.Fatal("initial refresh unexpectedly succeeded")
+	}
+	runtime.mu.Lock()
+	checkAfter := runtime.checkAfter
+	runtime.mu.Unlock()
+	if !checkAfter.After(now.Add(activationReloadRetryInterval)) {
+		t.Fatalf("retry scheduled at %s, want after refresh-start baseline %s", checkAfter, now.Add(activationReloadRetryInterval))
+	}
 }
 
 func (f *runtimeRegistryFake) ActiveRelease(context.Context) (onboarding.SourceRelease, error) {

@@ -100,7 +100,7 @@ func TestFailedPromotionLeavesPreviousReleaseActive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Promote(context.Background(), first); err != nil {
+	if _, err := store.Promote(context.Background(), first); err != nil {
 		t.Fatal(err)
 	}
 
@@ -129,7 +129,7 @@ func TestFailedPromotionLeavesPreviousReleaseActive(t *testing.T) {
 	`); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Promote(context.Background(), failed); err == nil {
+	if _, err := store.Promote(context.Background(), failed); err == nil {
 		t.Fatal("promotion with an injected database failure unexpectedly succeeded")
 	}
 	active, err := store.ActiveRelease(context.Background())
@@ -154,7 +154,7 @@ func TestPromotionRollbackAndConcurrentReads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Promote(context.Background(), first); err != nil {
+	if _, err := store.Promote(context.Background(), first); err != nil {
 		t.Fatal(err)
 	}
 	secondCandidates := []onboarding.SourceCandidate{
@@ -208,7 +208,7 @@ func TestPromotionRollbackAndConcurrentReads(t *testing.T) {
 			}
 		}()
 	}
-	if err := store.Promote(context.Background(), second); err != nil {
+	if _, err := store.Promote(context.Background(), second); err != nil {
 		t.Fatal(err)
 	}
 	cancel()
@@ -228,6 +228,20 @@ func TestPromotionRollbackAndConcurrentReads(t *testing.T) {
 	if active.ID != first.ID {
 		t.Fatalf("rollback activated %q, want %q", active.ID, first.ID)
 	}
+	activated, err := store.Promote(context.Background(), second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if activated {
+		t.Fatal("auto-promotion reactivated a previously stored release after rollback")
+	}
+	active, err = store.ActiveRelease(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active.ID != first.ID {
+		t.Fatalf("auto-promotion undid rollback: active = %q, want %q", active.ID, first.ID)
+	}
 	if err := store.ActivateRelease(context.Background(), strings.Repeat("f", 64)); !errors.Is(err, onboarding.ErrReleaseNotFound) {
 		t.Fatalf("ActivateRelease() error = %v, want ErrReleaseNotFound", err)
 	}
@@ -241,7 +255,7 @@ func TestFreshnessRefreshReusesReleaseAndUpdatesActiveLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Promote(context.Background(), first); err != nil {
+	if _, err := store.Promote(context.Background(), first); err != nil {
 		t.Fatal(err)
 	}
 
@@ -256,7 +270,7 @@ func TestFreshnessRefreshReusesReleaseAndUpdatesActiveLifecycle(t *testing.T) {
 	if refreshed.ID != first.ID {
 		t.Fatalf("freshness refresh created release %q, want %q", refreshed.ID, first.ID)
 	}
-	if err := store.Promote(context.Background(), refreshed); err != nil {
+	if _, err := store.Promote(context.Background(), refreshed); err != nil {
 		t.Fatal(err)
 	}
 

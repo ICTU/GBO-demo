@@ -137,11 +137,15 @@ func runReconcileCommand(ctx context.Context, arguments []string, dependencies r
 			for index, source := range sources {
 				sourceIDs[index] = source.SourceID
 			}
-			release, err := onboardingcore.PromoteCompleteSourceSet(ctx, registry, sourceIDs, dependencies.now())
+			promotion, err := onboardingcore.PromoteCompleteSourceSet(ctx, registry, sourceIDs, dependencies.now())
 			if err != nil {
 				return fmt.Errorf("promote complete source release: %w", err)
 			}
-			_, _ = fmt.Fprintf(dependencies.stdout, "source release %s activated\n", release.ID)
+			if promotion.Activated {
+				_, _ = fmt.Fprintf(dependencies.stdout, "source release %s activated\n", promotion.Release.ID)
+			} else {
+				_, _ = fmt.Fprintf(dependencies.stdout, "source release %s already exists; preserving operator-selected active release\n", promotion.Release.ID)
+			}
 		}
 		_, _ = fmt.Fprintln(dependencies.stdout, "source reconciliation completed")
 		return nil

@@ -294,30 +294,30 @@ func (s *Store) PutStatus(ctx context.Context, status onboarding.Status) error {
 	return nil
 }
 
-func (s *Store) Promote(ctx context.Context, release onboarding.SourceRelease) error {
+func (s *Store) Promote(ctx context.Context, release onboarding.SourceRelease) (bool, error) {
 	if err := validateRelease(release); err != nil {
-		return err
+		return false, err
 	}
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
 	if err != nil {
-		return fmt.Errorf("begin source release promotion: %w", err)
+		return false, fmt.Errorf("begin source release promotion: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	var exists bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM source_releases WHERE release_id = $1)`, release.ID).Scan(&exists); err != nil {
-		return fmt.Errorf("inspect source release %q: %w", release.ID, err)
+		return false, fmt.Errorf("inspect source release %q: %w", release.ID, err)
 	}
 	if !exists {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO source_releases (release_id, digest, materialization_digest, created_at, offers)
 			VALUES ($1,$2,$3,$4,$5)
 		`, release.ID, release.Digest, release.MaterializationDigest, release.CreatedAt, release.Offers); err != nil {
-			return fmt.Errorf("insert source release: %w", err)
+			return false, fmt.Errorf("insert source release: %w", err)
 		}
 		for _, source := range release.Sources {
 			certificates, err := json.Marshal(source.CertificateSet)
 			if err != nil {
-				return fmt.Errorf("marshal release certificate set: %w", err)
+				return false, fmt.Errorf("marshal release certificate set: %w", err)
 			}
 			if _, err := tx.Exec(ctx, `
 				INSERT INTO source_release_sources (
@@ -328,7 +328,7 @@ func (s *Store) Promote(ctx context.Context, release onboarding.SourceRelease) e
 			`, release.ID, source.SourceID, source.MetadataVersion, source.MetadataPayloadDigest,
 				source.MetadataETag, source.DeploymentDigest, source.CheckedAt, source.ExpiresAt,
 				source.FreshUntil, source.StaleUntil, source.TransportAuthenticated, source.Snapshot, certificates); err != nil {
-				return fmt.Errorf("insert release source %q: %w", source.SourceID, err)
+				return false, fmt.Errorf("insert release source %q: %w", source.SourceID, err)
 			}
 			for _, metadata := range source.TypeMetadata {
 				if _, err := tx.Exec(ctx, `
@@ -336,7 +336,7 @@ func (s *Store) Promote(ctx context.Context, release onboarding.SourceRelease) e
 						release_id, source_id, vct, type_version, integrity, media_type, bytes
 					) VALUES ($1,$2,$3,$4,$5,$6,$7)
 				`, release.ID, source.SourceID, metadata.VCT, metadata.Version, metadata.Integrity, metadata.MediaType, metadata.Bytes); err != nil {
-					return fmt.Errorf("insert release Type Metadata %q: %w", metadata.VCT, err)
+					return false, fmt.Errorf("insert release Type Metadata %q: %w", metadata.VCT, err)
 				}
 			}
 		}
@@ -352,23 +352,37 @@ func (s *Store) Promote(ctx context.Context, release onboarding.SourceRelease) e
 			`, release.ID, source.SourceID, source.CheckedAt, source.ExpiresAt,
 				source.FreshUntil, source.StaleUntil, source.DeploymentDigest)
 			if err != nil {
-				return fmt.Errorf("refresh release source %q lifecycle: %w", source.SourceID, err)
+				return false, fmt.Errorf("refresh release source %q lifecycle: %w", source.SourceID, err)
 			}
 			if result.RowsAffected() != 1 {
-				return fmt.Errorf("refresh release source %q lifecycle: immutable release contents differ", source.SourceID)
+				return false, fmt.Errorf("refresh release source %q lifecycle: immutable release contents differ", source.SourceID)
 			}
 		}
 	}
-	if _, err := tx.Exec(ctx, `
+	activated := true
+	if exists {
+		// The conditional upsert takes the active-pointer row lock and decides
+		// atomically whether an operator has selected another stored release.
+		// Reconciliation may refresh lifecycle data, but must not undo rollback.
+		result, err := tx.Exec(ctx, `
+			INSERT INTO active_source_release (singleton, release_id) VALUES (1, $1)
+			ON CONFLICT (singleton) DO UPDATE SET release_id = EXCLUDED.release_id
+			WHERE active_source_release.release_id = EXCLUDED.release_id
+		`, release.ID)
+		if err != nil {
+			return false, fmt.Errorf("preserve or activate source release %q: %w", release.ID, err)
+		}
+		activated = result.RowsAffected() == 1
+	} else if _, err := tx.Exec(ctx, `
 		INSERT INTO active_source_release (singleton, release_id) VALUES (1, $1)
 		ON CONFLICT (singleton) DO UPDATE SET release_id = EXCLUDED.release_id
 	`, release.ID); err != nil {
-		return fmt.Errorf("activate source release %q: %w", release.ID, err)
+		return false, fmt.Errorf("activate source release %q: %w", release.ID, err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit source release promotion: %w", err)
+		return false, fmt.Errorf("commit source release promotion: %w", err)
 	}
-	return nil
+	return activated, nil
 }
 
 func (s *Store) ActiveReleaseState(ctx context.Context) (onboarding.ActiveReleaseState, bool, error) {

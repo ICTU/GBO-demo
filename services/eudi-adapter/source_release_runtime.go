@@ -112,6 +112,11 @@ func (r *sourceReleaseRuntime) current(ctx context.Context, now time.Time) (*rel
 		r.mu.Unlock()
 		return snapshot, nil
 	}
+	if r.snapshot == nil && r.lastErr != nil && now.Before(r.checkAfter) {
+		err := r.lastErr
+		r.mu.Unlock()
+		return nil, err
+	}
 	if r.refreshing {
 		snapshot, done := r.snapshot, r.refreshDone
 		r.mu.Unlock()
@@ -147,6 +152,10 @@ func (r *sourceReleaseRuntime) waitForInitialRefresh(ctx context.Context, done <
 }
 
 func (r *sourceReleaseRuntime) refresh(now time.Time) {
+	startedAt := time.Now()
+	finish := func(next *releaseRuntimeSnapshot, err error) {
+		r.finishRefresh(now.Add(time.Since(startedAt)), next, err)
+	}
 	baseCtx := r.ctx
 	if baseCtx == nil {
 		baseCtx = context.Background()
@@ -156,12 +165,12 @@ func (r *sourceReleaseRuntime) refresh(now time.Time) {
 
 	state, found, err := r.registry.ActiveReleaseState(ctx)
 	if err != nil {
-		r.finishRefresh(now, nil, err)
+		finish(nil, err)
 		slog.Warn("Source Registry active release check failed; retaining complete previous snapshot", "err", err.Error())
 		return
 	}
 	if !found {
-		r.finishRefresh(now, nil, onboarding.ErrNoActiveRelease)
+		finish(nil, onboarding.ErrNoActiveRelease)
 		return
 	}
 	r.mu.Lock()
@@ -170,32 +179,32 @@ func (r *sourceReleaseRuntime) refresh(now time.Time) {
 	if current != nil && current.releaseID == state.ReleaseID {
 		next, err := refreshReleaseRuntimeLifecycle(current, state)
 		if err != nil {
-			r.finishRefresh(now, nil, err)
+			finish(nil, err)
 			slog.Warn("Source Registry release lifecycle refresh failed; retaining complete previous snapshot", "release_id", state.ReleaseID, "err", err.Error())
 			return
 		}
-		r.finishRefresh(now, next, nil)
+		finish(next, nil)
 		return
 	}
 	release, err := r.registry.ActiveRelease(ctx)
 	if err != nil {
-		r.finishRefresh(now, nil, err)
+		finish(nil, err)
 		slog.Warn("Source Registry release refresh failed; retaining complete previous snapshot", "release_id", state.ReleaseID, "err", err.Error())
 		return
 	}
 	if release.ID != state.ReleaseID {
 		err = fmt.Errorf("active release changed while loading: pointer=%s release=%s", state.ReleaseID, release.ID)
-		r.finishRefresh(now, nil, err)
+		finish(nil, err)
 		slog.Warn("Source Registry release changed during refresh; retaining complete previous snapshot", "err", err.Error())
 		return
 	}
 	next, err := buildReleaseRuntimeSnapshot(r.baseConfig, release)
 	if err != nil {
-		r.finishRefresh(now, nil, err)
+		finish(nil, err)
 		slog.Error("active Source Registry release is invalid; retaining complete previous snapshot", "release_id", state.ReleaseID, "err", err.Error())
 		return
 	}
-	r.finishRefresh(now, next, nil)
+	finish(next, nil)
 	slog.Info("Source Registry release activated", "release_id", release.ID, "materialization_digest", release.MaterializationDigest)
 }
 

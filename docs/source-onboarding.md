@@ -306,6 +306,12 @@ rematerialiseren en de issuance-server te herstarten. In Kubernetes gebeurt
 dit door de issuance-pod opnieuw aan te maken, zodat de init-container opnieuw
 draait. Een onbekend release-ID wijzigt de actieve pointer niet.
 
+Een reconciler met `--watch --auto-promote` respecteert deze handmatige
+rollback. Wanneer de huidige kandidaatset al als release bestaat, maar een
+operator een andere bestaande release heeft geactiveerd, laat auto-promotie de
+actieve pointer ongemoeid. Nieuwe kandidaatinhoud maakt een nieuw release-ID en
+wordt wel automatisch geactiveerd; een rollback is dus geen permanente freeze.
+
 ## Productie
 
 Gebruik hetzelfde adapterimage voor drie afzonderlijke rollen:
@@ -339,7 +345,9 @@ Auto-promotie geeft de reconciler bewust geen Kubernetes-APIrechten en
 verwijdert dus niet zelf pods. De beheerder of deploymentautomatisering moet de
 issuance-server gecontroleerd herstarten nadat de actieve release verandert.
 De adapter neemt zowel gewijzigde als volledig nieuwe bronnen dynamisch over;
-de frontends lezen de offercatalogus eveneens dynamisch.
+de frontends lezen de offercatalogus eveneens dynamisch. Een expliciete
+rollback naar een bestaande release blijft actief totdat nieuwe kandidaatinhoud
+een nog niet eerder opgeslagen release oplevert.
 
 Certificaatprovisioning blijft een afzonderlijk, bevoegd beheerproces. Alleen
 dat proces heeft de CA-private keys nodig. De reconciler krijgt via een Secret-

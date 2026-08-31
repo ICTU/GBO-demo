@@ -47,15 +47,18 @@ func (m *memoryRegistry) PutStatus(_ context.Context, status Status) error {
 	return nil
 }
 
-func (m *memoryRegistry) Promote(_ context.Context, release SourceRelease) error {
+func (m *memoryRegistry) Promote(_ context.Context, release SourceRelease) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.failPromote != nil {
-		return m.failPromote
+		return false, m.failPromote
+	}
+	if _, exists := m.releases[release.ID]; exists && m.active != "" && m.active != release.ID {
+		return false, nil
 	}
 	m.releases[release.ID] = release
 	m.active = release.ID
-	return nil
+	return true, nil
 }
 
 func (m *memoryRegistry) ActiveReleaseState(context.Context) (ActiveReleaseState, bool, error) {
@@ -119,7 +122,7 @@ func TestMemoryRegistryCandidateStatusPromotionFailureAndRollback(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := registry.Promote(ctx, first); err != nil {
+	if _, err := registry.Promote(ctx, first); err != nil {
 		t.Fatal(err)
 	}
 
@@ -131,7 +134,7 @@ func TestMemoryRegistryCandidateStatusPromotionFailureAndRollback(t *testing.T) 
 		t.Fatal(err)
 	}
 	registry.failPromote = errors.New("injected transaction failure")
-	if err := registry.Promote(ctx, second); err == nil {
+	if _, err := registry.Promote(ctx, second); err == nil {
 		t.Fatal("promotion unexpectedly succeeded")
 	}
 	active, err := registry.ActiveRelease(ctx)
@@ -143,7 +146,7 @@ func TestMemoryRegistryCandidateStatusPromotionFailureAndRollback(t *testing.T) 
 	}
 
 	registry.failPromote = nil
-	if err := registry.Promote(ctx, second); err != nil {
+	if _, err := registry.Promote(ctx, second); err != nil {
 		t.Fatal(err)
 	}
 	if err := registry.ActivateRelease(ctx, first.ID); err != nil {

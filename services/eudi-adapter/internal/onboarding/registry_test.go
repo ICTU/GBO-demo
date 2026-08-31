@@ -12,6 +12,8 @@ import (
 
 type registryUseCaseFake struct {
 	candidates map[string]SourceCandidate
+	releases   map[string]SourceRelease
+	active     string
 	promoted   *SourceRelease
 	statuses   []Status
 }
@@ -26,20 +28,44 @@ func (f *registryUseCaseFake) PutStatus(_ context.Context, status Status) error 
 	f.statuses = append(f.statuses, status)
 	return nil
 }
-func (f *registryUseCaseFake) Promote(_ context.Context, release SourceRelease) error {
+func (f *registryUseCaseFake) Promote(_ context.Context, release SourceRelease) (bool, error) {
+	if f.releases == nil {
+		f.releases = make(map[string]SourceRelease)
+	}
+	if _, exists := f.releases[release.ID]; exists && f.active != "" && f.active != release.ID {
+		return false, nil
+	}
+	f.releases[release.ID] = release
+	f.active = release.ID
 	f.promoted = &release
+	return true, nil
+}
+func (f *registryUseCaseFake) ActiveReleaseState(context.Context) (ActiveReleaseState, bool, error) {
+	if f.active == "" {
+		return ActiveReleaseState{}, false, nil
+	}
+	return ActiveReleaseState{ReleaseID: f.active}, true, nil
+}
+func (f *registryUseCaseFake) ActiveRelease(context.Context) (SourceRelease, error) {
+	if f.active == "" {
+		return SourceRelease{}, ErrNoActiveRelease
+	}
+	return f.releases[f.active], nil
+}
+func (f *registryUseCaseFake) Release(_ context.Context, releaseID string) (SourceRelease, error) {
+	release, found := f.releases[releaseID]
+	if !found {
+		return SourceRelease{}, ErrReleaseNotFound
+	}
+	return release, nil
+}
+func (f *registryUseCaseFake) ActivateRelease(_ context.Context, releaseID string) error {
+	if _, found := f.releases[releaseID]; !found {
+		return ErrReleaseNotFound
+	}
+	f.active = releaseID
 	return nil
 }
-func (*registryUseCaseFake) ActiveReleaseState(context.Context) (ActiveReleaseState, bool, error) {
-	return ActiveReleaseState{}, false, nil
-}
-func (*registryUseCaseFake) ActiveRelease(context.Context) (SourceRelease, error) {
-	return SourceRelease{}, ErrNoActiveRelease
-}
-func (*registryUseCaseFake) Release(context.Context, string) (SourceRelease, error) {
-	return SourceRelease{}, ErrReleaseNotFound
-}
-func (*registryUseCaseFake) ActivateRelease(context.Context, string) error { return nil }
 
 func TestSourceReleaseDigestIsDeterministic(t *testing.T) {
 	now := time.Date(2026, 8, 31, 10, 0, 0, 0, time.UTC)
@@ -75,15 +101,56 @@ func TestPromoteCompleteSourceSetRequiresAndActivatesEveryConfiguredSource(t *te
 	}
 
 	registry.candidates["rvig"] = registryTestCandidate("rvig", "address", now)
-	release, err := PromoteCompleteSourceSet(context.Background(), registry, []string{"belastingdienst", "rvig"}, now)
+	result, err := PromoteCompleteSourceSet(context.Background(), registry, []string{"belastingdienst", "rvig"}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if registry.promoted == nil || registry.promoted.ID != release.ID {
-		t.Fatalf("promoted release = %+v, want %s", registry.promoted, release.ID)
+	if !result.Activated || registry.promoted == nil || registry.promoted.ID != result.Release.ID {
+		t.Fatalf("promotion result = %+v, promoted release = %+v", result, registry.promoted)
 	}
 	if len(registry.statuses) != 2 || registry.statuses[0].State != StateActive || registry.statuses[1].State != StateActive {
 		t.Fatalf("active statuses = %+v", registry.statuses)
+	}
+}
+
+func TestPromoteCompleteSourceSetPreservesOperatorRollback(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 8, 31, 10, 0, 0, 0, time.UTC)
+	registry := newMemoryRegistry()
+	firstCandidate := registryTestCandidate("belastingdienst", "offer-v1", now)
+	if err := registry.PutCandidate(ctx, firstCandidate); err != nil {
+		t.Fatal(err)
+	}
+	first, err := PromoteCompleteSourceSet(ctx, registry, []string{"belastingdienst"}, now)
+	if err != nil || !first.Activated {
+		t.Fatalf("first promotion = %+v, err = %v", first, err)
+	}
+
+	secondCandidate := registryTestCandidate("belastingdienst", "offer-v2", now.Add(time.Minute))
+	if err := registry.PutCandidate(ctx, secondCandidate); err != nil {
+		t.Fatal(err)
+	}
+	second, err := PromoteCompleteSourceSet(ctx, registry, []string{"belastingdienst"}, now.Add(time.Minute))
+	if err != nil || !second.Activated || second.Release.ID == first.Release.ID {
+		t.Fatalf("second promotion = %+v, err = %v", second, err)
+	}
+	if err := registry.ActivateRelease(ctx, first.Release.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	reconciled, err := PromoteCompleteSourceSet(ctx, registry, []string{"belastingdienst"}, now.Add(2*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reconciled.Activated || reconciled.Release.ID != second.Release.ID {
+		t.Fatalf("reconciliation after rollback = %+v", reconciled)
+	}
+	active, err := registry.ActiveRelease(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active.ID != first.Release.ID {
+		t.Fatalf("auto-promotion undid rollback: active = %s, want %s", active.ID, first.Release.ID)
 	}
 }
 
