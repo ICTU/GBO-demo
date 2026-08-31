@@ -97,15 +97,26 @@ type config struct {
 	SourceActivationsPath string
 	TypeMetadataStorePath string
 	IssuanceOffersPath    string
+
+	SourceRegistryDatabaseURL string
+	SourceRegistrySchema      string
+	SourceRegistryRefresh     time.Duration
 }
 
 func loadConfig() config {
+	refresh, err := time.ParseDuration(getEnv("SOURCE_REGISTRY_REFRESH_INTERVAL", "5s"))
+	if err != nil || refresh <= 0 {
+		refresh = 5 * time.Second
+	}
 	return config{
-		Port:                  getEnv("PORT", "4009"),
-		OutwayURL:             getEnv("FSC_OUTWAY_URL", "http://edi-outway:8080"),
-		SourceActivationsPath: os.Getenv("SOURCE_ACTIVATIONS_PATH"),
-		TypeMetadataStorePath: getEnv("TYPE_METADATA_STORE_PATH", "/var/lib/gbo/type-metadata"),
-		IssuanceOffersPath:    os.Getenv("EUDI_OFFERS_PATH"),
+		Port:                      getEnv("PORT", "4009"),
+		OutwayURL:                 getEnv("FSC_OUTWAY_URL", "http://edi-outway:8080"),
+		SourceActivationsPath:     os.Getenv("SOURCE_ACTIVATIONS_PATH"),
+		TypeMetadataStorePath:     getEnv("TYPE_METADATA_STORE_PATH", "/var/lib/gbo/type-metadata"),
+		IssuanceOffersPath:        os.Getenv("EUDI_OFFERS_PATH"),
+		SourceRegistryDatabaseURL: os.Getenv("SOURCE_REGISTRY_DATABASE_URL"),
+		SourceRegistrySchema:      getEnv("SOURCE_REGISTRY_SCHEMA", "source_registry"),
+		SourceRegistryRefresh:     refresh,
 	}
 }
 
@@ -617,9 +628,21 @@ func fatal(msg string, err error) {
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if handled, err := runIssuanceConfigCommand(os.Args[1:], os.Stdout, os.Stderr); handled {
+	if handled, err := runIssuanceReleaseCommand(ctx, os.Args[1:], os.Stdout, os.Stderr); handled {
 		if err != nil {
-			fatal("issuance configuration generation failed", err)
+			fatal("issuance Source Release materialization failed", err)
+		}
+		return
+	}
+	if handled, err := runSourceRegistryMigrateCommand(ctx, os.Args[1:], os.Stdout, os.Stderr); handled {
+		if err != nil {
+			fatal("source registry migration failed", err)
+		}
+		return
+	}
+	if handled, err := runSourceRegistryOperationsCommand(ctx, os.Args[1:], os.Stdout, os.Stderr); handled {
+		if err != nil {
+			fatal("Source Registry operation failed", err)
 		}
 		return
 	}
@@ -636,6 +659,9 @@ func main() {
 		return
 	}
 	cfg := loadConfig()
+	if cfg.SourceRegistryDatabaseURL == "" {
+		fatal("Source Registry configuration missing", fmt.Errorf("SOURCE_REGISTRY_DATABASE_URL is required"))
+	}
 	shutdown, err := initTracer(ctx)
 	if err != nil {
 		slog.Error("tracer init failed", "err", err.Error())
@@ -647,11 +673,17 @@ func main() {
 		Timeout:   10 * time.Second,
 		Transport: otelhttp.NewTransport(http.DefaultTransport),
 	}
+	registry, err := openRuntimeSourceRegistry(ctx, cfg)
+	if err != nil {
+		fatal("open Source Registry", err)
+	}
+	defer registry.Close()
+	runtimeHandler := http.Handler(newSourceReleaseRuntimeMux(cfg, client, registry))
 	// Middleware order: withFscTraceContext wraps otelhttp — the header
 	// mutation must happen before otelhttp extracts the parent context.
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           withFscTraceContext(otelhttp.NewHandler(newRuntimeMux(ctx, cfg, client), "eudi-adapter")),
+		Handler:           withFscTraceContext(otelhttp.NewHandler(runtimeHandler, "eudi-adapter")),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 	slog.Info("eudi-adapter starting", "addr", srv.Addr, "outway", cfg.OutwayURL)

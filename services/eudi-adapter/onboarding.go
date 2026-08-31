@@ -16,22 +16,27 @@ import (
 	"reflect"
 	"strings"
 	"time"
+
+	onboardingcore "gbo-demo/eudi-adapter/internal/onboarding"
 )
 
 type sourceActivation struct {
-	SchemaVersion              string               `json:"schema_version"`
-	Source                     sourceRegistration   `json:"source"`
-	MetadataURL                string               `json:"metadata_url"`
-	MetadataVersion            string               `json:"metadata_version"`
-	MetadataPayloadDigest      string               `json:"metadata_payload_digest"`
-	MetadataETag               string               `json:"metadata_etag,omitempty"`
-	ExpiresAt                  time.Time            `json:"expires_at"`
-	FreshUntil                 time.Time            `json:"fresh_until"`
-	StaleUntil                 time.Time            `json:"stale_until"`
-	TransportAuthenticated     bool                 `json:"transport_authenticated"`
-	TypeMetadataStoreReference string               `json:"type_metadata_store_reference"`
-	Types                      []activatedType      `json:"types"`
-	Certificates               certificateArtifacts `json:"certificates"`
+	SchemaVersion              string                              `json:"schema_version"`
+	Source                     sourceRegistration                  `json:"source"`
+	MetadataURL                string                              `json:"metadata_url"`
+	MetadataVersion            string                              `json:"metadata_version"`
+	MetadataPayloadDigest      string                              `json:"metadata_payload_digest"`
+	MetadataETag               string                              `json:"metadata_etag,omitempty"`
+	CheckedAt                  time.Time                           `json:"checked_at,omitempty"`
+	ExpiresAt                  time.Time                           `json:"expires_at"`
+	FreshUntil                 time.Time                           `json:"fresh_until"`
+	StaleUntil                 time.Time                           `json:"stale_until"`
+	TransportAuthenticated     bool                                `json:"transport_authenticated"`
+	TypeMetadataStoreReference string                              `json:"type_metadata_store_reference"`
+	Types                      []activatedType                     `json:"types"`
+	Certificates               certificateArtifacts                `json:"certificates"`
+	RegistryDeploymentDigest   string                              `json:"-"`
+	PublicCertificates         onboardingcore.PublicCertificateSet `json:"-"`
 }
 
 type activatedType struct {
@@ -122,6 +127,8 @@ func configuredCertificateStore(options onboardingOptions) (certificateStore, er
 	switch options.certificateStoreName {
 	case "filesystem":
 		return newDevelopmentCAProvider(options.secretsDir, options.readerPublicURL), nil
+	case "public-filesystem":
+		return newPublicDevelopmentCertificateStore(options.secretsDir, options.readerPublicURL), nil
 	default:
 		return nil, fmt.Errorf("unsupported certificate store %q", options.certificateStoreName)
 	}
@@ -374,6 +381,9 @@ func loadSourceActivation(path string) (*sourceActivation, error) {
 func activationDeploymentDigest(activation *sourceActivation) (string, error) {
 	if activation == nil {
 		return "", fmt.Errorf("source activation is required")
+	}
+	if activation.RegistryDeploymentDigest != "" {
+		return activation.RegistryDeploymentDigest, nil
 	}
 	stable := struct {
 		SourceID     string               `json:"source_id"`

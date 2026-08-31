@@ -174,6 +174,38 @@ func TestDevelopmentCAProviderDerivesSourceIdentityAndSetFromSourceID(t *testing
 	}
 }
 
+func TestPublicCertificateStoreNeverRequiresLeafPrivateKeys(t *testing.T) {
+	registration := sourceRegistration{
+		SourceID: "belastingdienst", SourceOIN: "99999999900000000200", Name: "Belastingdienst-mock",
+	}
+	now := time.Now().UTC()
+	root := t.TempDir()
+	writeTestDevelopmentCAs(t, root, now)
+	provider := newDevelopmentCAProvider(root, "https://issuance.example")
+	provider.now = func() time.Time { return now }
+	artifacts, err := provider.Provision(registration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{artifacts.IssuerKeyReference, artifacts.ReaderKeyReference, artifacts.StatusKeyReference} {
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store := newPublicDevelopmentCertificateStore(root, "https://issuance.example")
+	store.provider.now = func() time.Time { return now }
+	loaded, err := store.Load(sourceRegistration{SourceID: registration.SourceID})
+	if err != nil {
+		t.Fatalf("public certificate validation opened a leaf private key: %v", err)
+	}
+	if loaded.IssuerKeyReference != "" || loaded.ReaderKeyReference != "" || loaded.StatusKeyReference != "" {
+		t.Fatalf("public certificate store returned private-key references: %+v", loaded)
+	}
+	if loaded.sourceOIN != registration.SourceOIN || loaded.sourceName != registration.Name {
+		t.Fatalf("public certificate identity = %q/%q, want %q/%q", loaded.sourceOIN, loaded.sourceName, registration.SourceOIN, registration.Name)
+	}
+}
+
 func writeTestDevelopmentCAs(t *testing.T, root string, now time.Time) {
 	t.Helper()
 	directory := filepath.Join(root, "development-ca")

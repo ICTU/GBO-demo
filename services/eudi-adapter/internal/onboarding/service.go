@@ -10,10 +10,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"strings"
 	"time"
 )
+
+var ErrCertificateNotFound = errors.New("certificate set not found")
 
 type Transport string
 
@@ -250,7 +251,7 @@ func (s *Service[C, P, A]) Reconcile(ctx context.Context, at time.Time) (Report,
 		certificateSet, loadErr := s.ports.Certificates.Load(ctx, source)
 		if loadErr != nil {
 			reason := ReasonCertificateSetInvalid
-			if errors.Is(loadErr, fs.ErrNotExist) {
+			if errors.Is(loadErr, ErrCertificateNotFound) {
 				reason = ReasonCertificateSetNotFound
 			}
 			message := fmt.Sprintf("certificate set for source %q is unavailable: %v", source.ID, loadErr)
