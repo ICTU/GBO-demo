@@ -15,8 +15,8 @@ export
 # .env if needed.
 NLWALLET_PATH ?= $(PWD)/vendor/nl-wallet
 
-# Local filesystem onboarding. Development certificates are provisioned only
-# by the explicit provision-development-certificates target.
+# Local Source Registry onboarding. Development certificates are provisioned
+# only by the explicit provision-development-certificates target.
 DEVELOPMENT_SOURCE_OIN ?= 99999999900000000200
 DEVELOPMENT_BRP_SOURCE_OIN ?= $(DEVELOPMENT_SOURCE_OIN)
 DEVELOPMENT_SOURCE_NAME ?= Belastingdienst
@@ -27,12 +27,11 @@ DEVELOPMENT_UNSECURED_SOURCE_OIN ?= 99999999900000000900
 DEVELOPMENT_UNSECURED_SOURCE_NAME ?= Demo unsecured source
 DEVELOPMENT_UNSECURED_SOURCE_LOGO ?= assets/issuer-logos/belastingdienst.svg
 ONBOARDING_OUTWAY_URL ?= http://localhost:$(or $(FSC_PORT_EDI_OUTWAY),8087)
-ONBOARDING_STATE_DIR ?= $(PWD)/.local/onboarding
 ONBOARDING_SECRETS_DIR ?= $(PWD)/.local/secrets
 DEVELOPMENT_CA_DIR ?= $(ONBOARDING_SECRETS_DIR)/development-ca
 ONBOARDING_TYPE_METADATA_URL ?= $(or $(EUDI_BRI_URL),http://localhost:$(or $(GBO_PORT_EUDI_ADAPTER),9409))
-ONBOARDING_STORAGE_BACKEND ?= filesystem
-ONBOARDING_CERTIFICATE_STORE ?= filesystem
+ONBOARDING_STORAGE_BACKEND ?= postgres
+ONBOARDING_CERTIFICATE_STORE ?= public-filesystem
 
 # Docker network of the fsc-infra instance this checkout uses. Equals
 # <FSC_PROJECT_NAME>_default; override in fsc-infra/.env to run a
@@ -130,8 +129,7 @@ demo-dvtp: certs fsc-all-up fsc-seed-bri fsc-seed-bri-hv
 	@printf "  %-21s http://localhost:%s\n" "DvTP toelatingsregister:" "$(PORT_DVTP_ONBOARDING_REGISTER)"
 	$(call banner,Jaeger:,$(PORT_JAEGER))
 
-EUDI_CONFIG_DIR := services/eudi-issuance-server/config
-EUDI_REQUIRED_VARS := EUDI_PUBLIC_URL EUDI_BRI_URL
+EUDI_REQUIRED_VARS := EUDI_PUBLIC_URL EUDI_BRI_URL EUDI_POSTGRES_PASSWORD SOURCE_REGISTRY_PASSWORD SOURCE_REGISTRY_READER_PASSWORD
 
 eudi-config:
 	@set -eu; set -a; [ -f .env ] && . ./.env; set +a; \
@@ -143,19 +141,9 @@ eudi-config:
 	  echo "ERROR: missing env-vars (see .env.example):$$missing"; \
 	  exit 1; \
 	fi; \
-	docker compose --profile onboarding run --build --rm source-reconciler \
-	  ./eudi-adapter generate-issuance-config \
-	  --activations-dir /var/lib/gbo/candidates \
-	  --active-dir /var/lib/gbo/active \
-	  --sources-dir /config/sources \
-	  --status-dir /var/lib/gbo/status \
-	  --template /app/issuance_server.toml.example \
-	  --adapter-base-url "$$EUDI_BRI_URL" \
-	  --output /generated/issuance_server.toml \
-	  --offers-output /generated/eudi-offers.json; \
-	cp "$(PWD)/$(EUDI_CONFIG_DIR)/eudi-offers.json" "$(PWD)/landing-page/public/eudi-offers.json"; \
-	cp "$(PWD)/$(EUDI_CONFIG_DIR)/eudi-offers.json" "$(PWD)/developer-portal/public/eudi-offers.json"; \
-	echo "-> Generated issuance products and frontend offer catalog from every active source"
+	docker compose --profile eudi run --build --rm eudi-issuance-materialize; \
+	docker compose --profile eudi up -d --force-recreate eudi-issuance-server; \
+	echo "-> Materialized the active Source Release and restarted the issuance-server"
 
 # eudi-issuance-server has no published image — built from the local
 # nl-wallet checkout ($NLWALLET_PATH). The build is expensive, so an
@@ -194,7 +182,7 @@ source-metadata-up:
 		docker compose up --build --force-recreate -d openftv-pdp additional-claims-service graphql-server brp-graphql-server unsecured-graphql-server bron-sidecar brp-sidecar
 
 onboarding-directories:
-	@mkdir -p "$(ONBOARDING_STATE_DIR)/type-metadata" "$(ONBOARDING_STATE_DIR)/candidates" "$(ONBOARDING_STATE_DIR)/active" "$(ONBOARDING_STATE_DIR)/status"
+	@echo "-> Source onboarding state is stored in PostgreSQL"
 
 require-development-cas:
 	@test -f "$(DEVELOPMENT_CA_DIR)/issuer-ca-key.pem" || { echo "ERROR: pre-provisioned EUDI CA file is required: $(DEVELOPMENT_CA_DIR)/issuer-ca-key.pem"; echo "       Set ONBOARDING_SECRETS_DIR to the managed secrets root; trust anchors are never generated."; exit 1; }
@@ -213,7 +201,7 @@ provision-development-certificates: require-development-cas
 		--reader-public-url "$${EUDI_PUBLIC_URL:-}" \
 		--secrets-dir "$(ONBOARDING_SECRETS_DIR)"
 
-reconcile-sources: onboarding-directories
+reconcile-sources:
 	docker compose --profile onboarding run --build --rm source-reconciler
 
 # Complete, idempotent local onboarding for both demo sources. The sequence is
@@ -230,7 +218,7 @@ onboard-demo-sources: require-development-cas certs
 	$(MAKE) provision-development-certificates SOURCE_ID=demo-unsecured SOURCE_OIN=$(DEVELOPMENT_UNSECURED_SOURCE_OIN) SOURCE_NAME="$(DEVELOPMENT_UNSECURED_SOURCE_NAME)" SOURCE_LOGO="$(DEVELOPMENT_UNSECURED_SOURCE_LOGO)"
 	$(MAKE) reconcile-sources
 
-demo-eudi: onboard-demo-sources eudi-config eudi-images
+demo-eudi: onboard-demo-sources eudi-images
 	@echo "-> EUDI stack: base + eudi branch + fsc-infra"
 	docker compose --profile eudi up --build -d
 	@echo ""
@@ -238,7 +226,7 @@ demo-eudi: onboard-demo-sources eudi-config eudi-images
 	$(call banner,EUDI-adapter:,$(PORT_EUDI_ADAPTER))
 	$(call banner,Jaeger:,$(PORT_JAEGER))
 
-demo-full: onboard-demo-sources fsc-seed-bri-hv eudi-config eudi-images
+demo-full: onboard-demo-sources fsc-seed-bri-hv eudi-images
 	@echo "-> Full stack: everything on"
 	docker compose --profile full up --build -d
 

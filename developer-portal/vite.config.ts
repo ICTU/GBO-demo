@@ -44,6 +44,10 @@ export default defineConfig({
         rewrite: (p) => p.replace(/^\/eudi-api/, ''),
         changeOrigin: true,
       },
+      '/eudi-offers.json': {
+        target: process.env.EUDI_API_TARGET ?? 'http://localhost:9409',
+        changeOrigin: true,
+      },
       '/jaeger-api': {
         target: process.env.JAEGER_API_TARGET ?? 'http://localhost:9686',
         rewrite: (p) => p.replace(/^\/jaeger-api/, ''),

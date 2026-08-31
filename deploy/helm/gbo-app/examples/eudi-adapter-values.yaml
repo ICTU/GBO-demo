@@ -10,17 +10,12 @@ env:
     value: "4009"
   - name: FSC_OUTWAY_URL
     value: http://fsc-outway:8080
-  - name: SOURCE_ACTIVATIONS_PATH
-    value: /state/active
-  - name: TYPE_METADATA_STORE_PATH
-    value: /state/type-metadata
-
-volumeMounts:
-  - name: onboarding-state
-    mountPath: /state
-    readOnly: true
-
-volumes:
-  - name: onboarding-state
-    persistentVolumeClaim:
-      claimName: gbo-onboarding-state
+  - name: SOURCE_REGISTRY_DATABASE_URL
+    valueFrom:
+      secretKeyRef:
+        name: source-registry-reader
+        key: uri
+  - name: SOURCE_REGISTRY_SCHEMA
+    value: source_registry
+  - name: SOURCE_REGISTRY_REFRESH_INTERVAL
+    value: 5s

@@ -633,6 +633,7 @@ services:
       # de pagina uit waarom.
       - VITE_EUDI_PUBLIC_URL=${EUDI_PUBLIC_URL:-}
       - VITE_EUDI_UL_BASE=${EUDI_UL_BASE:-https://app.preproductie.wallet.edi.bzk.nl/deeplink/disclosure_based_issuance}
+      - EUDI_API_TARGET=http://eudi-adapter:4009
       - VITE_JAEGER_PUBLIC_URL=${JAEGER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_JAEGER:-9686}}
       - VITE_GRAFANA_PUBLIC_URL=${GRAFANA_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_GRAFANA:-9300}}
       # De FSC-controllers draaien in de fsc-infra-stack, met eigen
@@ -651,6 +652,11 @@ services:
       - "${GBO_PORT_LANDING:-9000}:9000"
     networks:
       - frontend
+      - backend
+    depends_on:
+      eudi-adapter:
+        condition: service_started
+        required: false
 
   dienstverlener-mock:
     build:
@@ -838,12 +844,14 @@ services:
   #   NLWALLET_PATH     — path to the nl-wallet repo (for is-config mount)
   #   EUDI_PUBLIC_URL   — public HTTPS URL to issuance-server
   #   EUDI_BRI_URL      — public HTTPS URL to eudi-adapter
+  #   SOURCE_REGISTRY_PASSWORD        — reconciler/migration registry role
+  #   SOURCE_REGISTRY_READER_PASSWORD — adapter/init read-only registry role
   # Missing var -> fail-loud on `up`.
   # ══════════════════════════════════════════════════════════════════════
 
   postgres-eudi:
     image: postgres:16-alpine
-    profiles: [eudi, full]
+    profiles: [onboarding, eudi, full]
     environment:
       POSTGRES_PASSWORD: ${EUDI_POSTGRES_PASSWORD}
       POSTGRES_USER: wallet
@@ -857,6 +865,41 @@ services:
       timeout: 3s
       retries: 10
 
+  source-registry-bootstrap:
+    image: postgres:16-alpine
+    profiles: [onboarding, eudi, full]
+    environment:
+      PGHOST: postgres-eudi
+      PGPORT: "5432"
+      PGUSER: wallet
+      PGPASSWORD: ${EUDI_POSTGRES_PASSWORD}
+      SOURCE_REGISTRY_PASSWORD: ${SOURCE_REGISTRY_PASSWORD}
+      SOURCE_REGISTRY_READER_PASSWORD: ${SOURCE_REGISTRY_READER_PASSWORD}
+    command: ["/scripts/bootstrap-source-registry.sh"]
+    volumes:
+      - ./scripts/bootstrap-source-registry.sh:/scripts/bootstrap-source-registry.sh:ro
+    depends_on:
+      postgres-eudi:
+        condition: service_healthy
+    restart: "no"
+    networks: [eudi]
+
+  source-registry-migrations:
+    build:
+      context: .
+      dockerfile: services/eudi-adapter/Dockerfile
+    profiles: [onboarding, eudi, full]
+    command: ["./eudi-adapter", "migrate-source-registry"]
+    environment:
+      SOURCE_REGISTRY_DATABASE_URL: postgres://source_registry:${SOURCE_REGISTRY_PASSWORD}@postgres-eudi:5432/source_registry
+      SOURCE_REGISTRY_SCHEMA: source_registry
+      SOURCE_REGISTRY_READER_ROLE: source_registry_reader
+    depends_on:
+      source-registry-bootstrap:
+        condition: service_completed_successfully
+    restart: "no"
+    networks: [eudi]
+
   eudi-migrations:
     image: gbo/eudi-issuance-server:dev
     profiles: [eudi, full]
@@ -867,6 +910,32 @@ services:
     depends_on:
       postgres-eudi:
         condition: service_healthy
+    restart: "no"
+    networks: [eudi]
+
+  eudi-issuance-materialize:
+    build:
+      context: .
+      dockerfile: services/eudi-adapter/Dockerfile
+    profiles: [eudi, full]
+    command:
+      - ./eudi-adapter
+      - materialize-issuance-release
+      - --database-schema=source_registry
+      - --secrets-dir=/source-certificates
+      - --template=/app/issuance_server.toml.example
+      - --adapter-base-url=${EUDI_BRI_URL:?set EUDI_BRI_URL before compose up}
+      - --output=/runtime/issuance_server.toml
+    environment:
+      SOURCE_REGISTRY_DATABASE_URL: postgres://source_registry_reader:${SOURCE_REGISTRY_READER_PASSWORD}@postgres-eudi:5432/source_registry
+      SOURCE_REGISTRY_SCHEMA: source_registry
+      EUDI_PUBLIC_URL: ${EUDI_PUBLIC_URL:?set EUDI_PUBLIC_URL before compose up}
+    volumes:
+      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}:/source-certificates:ro
+      - eudi-issuance-runtime:/runtime
+    depends_on:
+      source-registry-migrations:
+        condition: service_completed_successfully
     restart: "no"
     networks: [eudi]
 
@@ -882,7 +951,7 @@ services:
     environment:
       - ISSUANCE_SERVER__STORAGE__URL=postgres://wallet:${EUDI_POSTGRES_PASSWORD}@postgres-eudi:5432/issuance_server
       # Concrete issuance products, endpoints and Type Metadata are generated
-      # from every active source registration by `make eudi-config`.
+      # from the active Source Release by eudi-issuance-materialize.
       - ISSUANCE_SERVER__UNIVERSAL_LINK_BASE_URL=walletdebuginteraction://wallet.edi.rijksoverheid.nl/
       # Bind addresses explicitly — otherwise default localhost =
       # unreachable from other containers.
@@ -895,18 +964,20 @@ services:
       # Fail-loud.
       - ISSUANCE_SERVER__PUBLIC_URL=${EUDI_PUBLIC_URL:?set EUDI_PUBLIC_URL to the eudi-tunnel URL before compose up}
     volumes:
-      # Runtime config generated from the active onboarding records. The
-      # source-specific certificate references remain in each activation;
-      # this does not decide the still-open shared-vs-per-source cert model.
-      #
-      # issuance_server.toml is git-ignored because the generator inserts the
-      # referenced signing keys. Run `make eudi-config` before starting the
-      # EUDI profile.
-      - ./services/eudi-issuance-server/config/issuance_server.toml:/issuance_server.toml:ro
-      - ./services/eudi-issuance-server/config:/config:ro
+      # The one-shot materializer combines the active Source Release with the
+      # certificate Secret. PostgreSQL and public artifacts never contain keys.
+      - type: volume
+        source: eudi-issuance-runtime
+        target: /issuance_server.toml
+        read_only: true
+        volume:
+          subpath: issuance_server.toml
+      - eudi-issuance-runtime:/config:ro
       - eudi-tsl-publish:/tsl-publish
     depends_on:
       eudi-migrations:
+        condition: service_completed_successfully
+      eudi-issuance-materialize:
         condition: service_completed_successfully
     networks: [eudi]
 
@@ -929,7 +1000,9 @@ services:
   # fsc-infra_default network. FSC_GRANT_HASH via .env or shell-env;
   # contract created via UI (contract-seed automates this).
   eudi-adapter:
-    build: ./services/eudi-adapter
+    build:
+      context: .
+      dockerfile: services/eudi-adapter/Dockerfile
     profiles: [eudi, full]
     ports:
       - "${GBO_PORT_EUDI_ADAPTER:-9409}:4009"
@@ -937,14 +1010,12 @@ services:
       - OTEL_SERVICE_NAME=eudi-adapter
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
       - FSC_OUTWAY_URL=http://edi-outway:8080
-      # Source metadata is activated from the single atomic onboarding record;
-      # OIN, type and FSC services are not duplicated in env-vars.
-      - SOURCE_ACTIVATIONS_PATH=/var/lib/gbo/active
-      - TYPE_METADATA_STORE_PATH=/var/lib/gbo/type-metadata
-      - EUDI_OFFERS_PATH=/var/lib/gbo/runtime/eudi-offers.json
-    volumes:
-      - ./.local/onboarding/active:/var/lib/gbo/active:ro
-      - ./.local/onboarding/type-metadata:/var/lib/gbo/type-metadata
+      - SOURCE_REGISTRY_DATABASE_URL=postgres://source_registry_reader:${SOURCE_REGISTRY_READER_PASSWORD}@postgres-eudi:5432/source_registry
+      - SOURCE_REGISTRY_SCHEMA=source_registry
+      - SOURCE_REGISTRY_REFRESH_INTERVAL=2s
+    depends_on:
+      source-registry-migrations:
+        condition: service_completed_successfully
     networks:
       - eudi
       - backend
@@ -954,10 +1025,14 @@ services:
   # Kubernetes can run this command with --watch as a single-replica
   # Deployment, or with --once as a CronJob.
   source-reconciler:
-    build: ./services/eudi-adapter
+    build:
+      context: .
+      dockerfile: services/eudi-adapter/Dockerfile
     profiles: [onboarding]
     environment:
       - EUDI_PUBLIC_URL=${EUDI_PUBLIC_URL:-}
+      - SOURCE_REGISTRY_DATABASE_URL=postgres://source_registry:${SOURCE_REGISTRY_PASSWORD}@postgres-eudi:5432/source_registry
+      - SOURCE_REGISTRY_SCHEMA=source_registry
     command:
       - ./eudi-adapter
       - reconcile-sources
@@ -970,16 +1045,13 @@ services:
       - --outway-url=http://edi-outway:8080
       - --schema=/config/schemas/gbo-source-metadata-v1.schema.json
       - --type-metadata-base-url=${EUDI_BRI_URL:-http://localhost:9409}
-      - --storage-backend=filesystem
-      - --certificate-store=filesystem
-      - --state-dir=/var/lib/gbo
-      - --secrets-dir=/var/lib/gbo-secrets
+      - --storage-backend=postgres
+      - --certificate-store=public-filesystem
+      - --database-schema=source_registry
+      - --secrets-dir=/public-certificates
       - --reader-public-url=${EUDI_PUBLIC_URL:-}
       - --sources-dir=/config/sources
-      - --auto-promote=${SOURCE_AUTO_PROMOTE:-false}
-      - --issuance-template=/app/issuance_server.toml.example
-      - --issuance-output=/generated/issuance_server.toml
-      - --offers-output=/generated/eudi-offers.json
+      - --auto-promote
     volumes:
       - ./schemas:/config/schemas:ro
       # Compose loads both the governed configurations and the local-only
@@ -987,12 +1059,26 @@ services:
       # never expose the unsecured demonstration source.
       - ./sources:/config/sources:ro
       - ./fsc-infra/orgs/edi-issuer/pki/internal:/fsc-certs:ro
-      - ./.local/onboarding:/var/lib/gbo
-      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}:/var/lib/gbo-secrets
-      - ./services/eudi-issuance-server/config:/generated
+      # Public-only projection: the reconciler cannot open any source private
+      # key even though the issuance materializer uses the full Secret.
+      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/development-ca/issuer-ca-cert.pem:/public-certificates/development-ca/issuer-ca-cert.pem:ro
+      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/development-ca/reader-ca-cert.pem:/public-certificates/development-ca/reader-ca-cert.pem:ro
+      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/belastingdienst/issuer-cert.der.b64:/public-certificates/belastingdienst/issuer-cert.der.b64:ro
+      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/belastingdienst/reader-cert.der.b64:/public-certificates/belastingdienst/reader-cert.der.b64:ro
+      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/belastingdienst/status-cert.der.b64:/public-certificates/belastingdienst/status-cert.der.b64:ro
+      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/rvig/issuer-cert.der.b64:/public-certificates/rvig/issuer-cert.der.b64:ro
+      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/rvig/reader-cert.der.b64:/public-certificates/rvig/reader-cert.der.b64:ro
+      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/rvig/status-cert.der.b64:/public-certificates/rvig/status-cert.der.b64:ro
+      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/demo-unsecured/issuer-cert.der.b64:/public-certificates/demo-unsecured/issuer-cert.der.b64:ro
+      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/demo-unsecured/reader-cert.der.b64:/public-certificates/demo-unsecured/reader-cert.der.b64:ro
+      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/demo-unsecured/status-cert.der.b64:/public-certificates/demo-unsecured/status-cert.der.b64:ro
+    depends_on:
+      source-registry-migrations:
+        condition: service_completed_successfully
     networks:
       - fsc-infra
       - backend
+      - eudi
 
 networks:
   frontend:
@@ -1013,3 +1099,4 @@ volumes:
   postgres-eudi-data:
   postgres-ftv-data:
   eudi-tsl-publish:
+  eudi-issuance-runtime:

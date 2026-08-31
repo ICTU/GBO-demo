@@ -16,9 +16,21 @@ args:
   - --schema=/schemas/gbo-source-metadata-v1.schema.json
   - --type-metadata-base-url=https://adapter.example
   - --sources-dir=/sources
-  - --state-dir=/state
-  - --secrets-dir=/source-certificates
+  - --storage-backend=postgres
+  - --certificate-store=public-filesystem
+  - --database-schema=source_registry
+  - --database-reader-role=source_registry_reader
+  - --migrate
+  - --secrets-dir=/public-certificates
   - --reader-public-url=https://issuer.example
+  - --auto-promote
+
+env:
+  - name: SOURCE_REGISTRY_DATABASE_URL
+    valueFrom:
+      secretKeyRef:
+        name: source-registry-writer
+        key: uri
 
 health:
   enabled: false
@@ -34,10 +46,8 @@ volumeMounts:
     mountPath: /fsc-manager
     readOnly: true
   - name: source-certificates
-    mountPath: /source-certificates
+    mountPath: /public-certificates
     readOnly: true
-  - name: onboarding-state
-    mountPath: /state
 
 volumes:
   - name: source-configurations
@@ -52,6 +62,22 @@ volumes:
   - name: source-certificates
     secret:
       secretName: gbo-source-certificates
-  - name: onboarding-state
-    persistentVolumeClaim:
-      claimName: gbo-onboarding-state
+      # Project only public leaf and CA certificates. Private-key Secret keys
+      # are intentionally unavailable to the reconciler container.
+      items:
+        - key: issuer-ca-cert.pem
+          path: development-ca/issuer-ca-cert.pem
+        - key: reader-ca-cert.pem
+          path: development-ca/reader-ca-cert.pem
+        - key: belastingdienst-issuer-cert.der.b64
+          path: belastingdienst/issuer-cert.der.b64
+        - key: belastingdienst-reader-cert.der.b64
+          path: belastingdienst/reader-cert.der.b64
+        - key: belastingdienst-status-cert.der.b64
+          path: belastingdienst/status-cert.der.b64
+        - key: rvig-issuer-cert.der.b64
+          path: rvig/issuer-cert.der.b64
+        - key: rvig-reader-cert.der.b64
+          path: rvig/reader-cert.der.b64
+        - key: rvig-status-cert.der.b64
+          path: rvig/status-cert.der.b64

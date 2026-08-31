@@ -1,0 +1,60 @@
+image:
+  repository: ghcr.io/ictu/gbo-demo/eudi-issuance-server
+  tag: latest
+
+containerPort: 18001
+health:
+  enabled: false
+
+initContainers:
+  - name: materialize-source-release
+    image: ghcr.io/ictu/gbo-demo/eudi-adapter:latest
+    imagePullPolicy: IfNotPresent
+    command: ["./eudi-adapter"]
+    args:
+      - materialize-issuance-release
+      - --database-schema=source_registry
+      - --secrets-dir=/source-certificates
+      - --template=/app/issuance_server.toml.example
+      - --adapter-base-url=https://adapter.example
+      - --output=/runtime/issuance_server.toml
+    env:
+      - name: SOURCE_REGISTRY_DATABASE_URL
+        valueFrom:
+          secretKeyRef:
+            name: source-registry-reader
+            key: uri
+      - name: EUDI_PUBLIC_URL
+        value: https://issuer.example
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+      readOnlyRootFilesystem: true
+    volumeMounts:
+      - name: source-certificates
+        mountPath: /source-certificates
+        readOnly: true
+      - name: issuance-runtime
+        mountPath: /runtime
+
+volumeMounts:
+  - name: issuance-runtime
+    mountPath: /issuance_server.toml
+    subPath: issuance_server.toml
+    readOnly: true
+  - name: issuance-runtime
+    mountPath: /config
+    readOnly: true
+  - name: status-lists
+    mountPath: /tsl-publish
+
+volumes:
+  - name: source-certificates
+    secret:
+      secretName: gbo-source-certificates
+  - name: issuance-runtime
+    emptyDir: {}
+  - name: status-lists
+    persistentVolumeClaim:
+      claimName: eudi-issuance-status-lists

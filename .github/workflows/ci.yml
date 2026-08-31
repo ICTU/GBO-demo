@@ -49,6 +49,36 @@ jobs:
         working-directory: services/${{ matrix.service }}
         run: go test -timeout 60s ./...
 
+  source-registry:
+    name: Source Registry — PostgreSQL migrations + atomicity
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:a5074487380d4e686036ce61ed6f2d363939ae9a0c40123d1a9e3bb3a5f344b4
+        env:
+          POSTGRES_PASSWORD: registrytest
+          POSTGRES_DB: registrytest
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d registrytest"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.25'
+          cache-dependency-path: services/eudi-adapter/go.*
+      - name: migration, persistence, promotion and rollback tests
+        working-directory: services/eudi-adapter
+        env:
+          SOURCE_REGISTRY_TEST_PASSWORD: registrytest
+        run: >-
+          SOURCE_REGISTRY_TEST_DATABASE_URL="postgres://postgres:${SOURCE_REGISTRY_TEST_PASSWORD}@127.0.0.1:5432/registrytest?sslmode=disable"
+          go test -count=1 -timeout 60s ./internal/postgresregistry
+
   rego:
     name: Rego — fmt + check + test
     runs-on: ubuntu-latest
@@ -109,6 +139,18 @@ jobs:
         run: >-
           helm template dvtp-onboarding-register deploy/helm/gbo-app
           --values deploy/helm/gbo-app/examples/dvtp-onboarding-register-values.yaml
+      - name: helm template — EUDI issuance init container
+        run: |
+          helm template eudi-issuance-server deploy/helm/gbo-app \
+            --values deploy/helm/gbo-app/examples/eudi-issuance-server-values.yaml \
+            > /tmp/eudi-issuance-server.yaml
+          grep -q '^      initContainers:' /tmp/eudi-issuance-server.yaml
+          grep -q 'name: materialize-source-release' /tmp/eudi-issuance-server.yaml
+          grep -q 'emptyDir: {}' /tmp/eudi-issuance-server.yaml
+          if grep -q 'gbo-source-onboarding-state' /tmp/eudi-issuance-server.yaml; then
+            echo 'shared onboarding PVC remains in the rendered issuance workload' >&2
+            exit 1
+          fi
 
   frontend:
     name: Frontend — tsc --strict
@@ -118,6 +160,7 @@ jobs:
       matrix:
         app:
           - developer-portal
+          - landing-page
           - dienstverlener-mock
           - toestemmingsportaal-frontend
     steps:
@@ -162,7 +205,7 @@ jobs:
           # and openftv-pdp bake in ./policies, while both Manager images
           # are built from the upstream OpenFTV tree. Same context compose uses.
           case "${{ matrix.service }}" in
-            dev-portal-backend|openftv-pdp|openftv-manager|openftv-manager-ui) context=. ;;
+            dev-portal-backend|eudi-adapter|openftv-pdp|openftv-manager|openftv-manager-ui) context=. ;;
           esac
           docker build \
             --file "services/${{ matrix.service }}/Dockerfile" \
@@ -192,7 +235,7 @@ jobs:
   result:
     name: CI result
     runs-on: ubuntu-latest
-    needs: [go, rego, chart, frontend, docker]
+    needs: [go, source-registry, rego, chart, frontend, docker]
     if: always()
     steps:
       - name: Evaluate job results
