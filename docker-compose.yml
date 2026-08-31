@@ -1059,19 +1059,10 @@ services:
       # never expose the unsecured demonstration source.
       - ./sources:/config/sources:ro
       - ./fsc-infra/orgs/edi-issuer/pki/internal:/fsc-certs:ro
-      # Public-only projection: the reconciler cannot open any source private
-      # key even though the issuance materializer uses the full Secret.
-      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/development-ca/issuer-ca-cert.pem:/public-certificates/development-ca/issuer-ca-cert.pem:ro
-      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/development-ca/reader-ca-cert.pem:/public-certificates/development-ca/reader-ca-cert.pem:ro
-      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/belastingdienst/issuer-cert.der.b64:/public-certificates/belastingdienst/issuer-cert.der.b64:ro
-      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/belastingdienst/reader-cert.der.b64:/public-certificates/belastingdienst/reader-cert.der.b64:ro
-      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/belastingdienst/status-cert.der.b64:/public-certificates/belastingdienst/status-cert.der.b64:ro
-      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/rvig/issuer-cert.der.b64:/public-certificates/rvig/issuer-cert.der.b64:ro
-      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/rvig/reader-cert.der.b64:/public-certificates/rvig/reader-cert.der.b64:ro
-      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/rvig/status-cert.der.b64:/public-certificates/rvig/status-cert.der.b64:ro
-      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/demo-unsecured/issuer-cert.der.b64:/public-certificates/demo-unsecured/issuer-cert.der.b64:ro
-      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/demo-unsecured/reader-cert.der.b64:/public-certificates/demo-unsecured/reader-cert.der.b64:ro
-      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/demo-unsecured/status-cert.der.b64:/public-certificates/demo-unsecured/status-cert.der.b64:ro
+      # Public-only projection: provisioning copies only leaf certificates
+      # and public CAs here. Adding a source needs no Compose edit and never
+      # exposes its private keys to the reconciler.
+      - ${ONBOARDING_PUBLIC_CERTIFICATES_DIR:-./.local/public-certificates}:/public-certificates:ro
     depends_on:
       source-registry-migrations:
         condition: service_completed_successfully

@@ -260,6 +260,42 @@ func certificateSourceIdentity(cert *x509.Certificate) (string, string, error) {
 	return cert.Subject.SerialNumber, cert.Subject.Organization[0], nil
 }
 
+func projectPublicCertificateArtifacts(root, sourceID string, artifacts certificateArtifacts) error {
+	if root == "" {
+		return fmt.Errorf("public certificate projection directory is required")
+	}
+	if !sourceIDPattern.MatchString(sourceID) {
+		return fmt.Errorf("public certificate projection source_id is invalid")
+	}
+	files := []struct {
+		directory string
+		name      string
+		source    string
+	}{
+		{filepath.Join(root, "development-ca"), "issuer-ca-cert.pem", artifacts.IssuerCACertReference},
+		{filepath.Join(root, "development-ca"), "reader-ca-cert.pem", artifacts.ReaderCACertReference},
+		{filepath.Join(root, sourceID), "issuer-cert.der.b64", artifacts.IssuerCertReference},
+		{filepath.Join(root, sourceID), "reader-cert.der.b64", artifacts.ReaderCertReference},
+		{filepath.Join(root, sourceID), "status-cert.der.b64", artifacts.StatusCertReference},
+	}
+	for _, file := range files {
+		if file.source == "" {
+			return fmt.Errorf("public certificate %s source path is missing", file.name)
+		}
+		body, err := os.ReadFile(file.source)
+		if err != nil {
+			return fmt.Errorf("read public certificate %s: %w", file.name, err)
+		}
+		if err := os.MkdirAll(file.directory, 0o755); err != nil {
+			return fmt.Errorf("create public certificate directory: %w", err)
+		}
+		if err := writeFileAtomically(file.directory, file.name, body, 0o644); err != nil {
+			return fmt.Errorf("write public certificate %s: %w", file.name, err)
+		}
+	}
+	return nil
+}
+
 // publicDevelopmentCertificateStore validates the same certificate chains as
 // the development provider without opening any private-key file. It is the
 // only certificate-store mode permitted for registry-backed reconciliation.

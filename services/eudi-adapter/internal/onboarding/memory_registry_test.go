@@ -58,10 +58,21 @@ func (m *memoryRegistry) Promote(_ context.Context, release SourceRelease) error
 	return nil
 }
 
-func (m *memoryRegistry) ActiveReleaseID(context.Context) (string, bool, error) {
+func (m *memoryRegistry) ActiveReleaseState(context.Context) (ActiveReleaseState, bool, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.active, m.active != "", nil
+	if m.active == "" {
+		return ActiveReleaseState{}, false, nil
+	}
+	release := m.releases[m.active]
+	state := ActiveReleaseState{ReleaseID: release.ID, Sources: make([]ReleaseSourceLifecycle, len(release.Sources))}
+	for index, source := range release.Sources {
+		state.Sources[index] = ReleaseSourceLifecycle{
+			SourceID: source.SourceID, CheckedAt: source.CheckedAt, ExpiresAt: source.ExpiresAt,
+			FreshUntil: source.FreshUntil, StaleUntil: source.StaleUntil,
+		}
+	}
+	return state, true, nil
 }
 
 func (m *memoryRegistry) ActiveRelease(context.Context) (SourceRelease, error) {

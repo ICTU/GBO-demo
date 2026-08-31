@@ -26,7 +26,6 @@ type reconcileOptions struct {
 	publicBaseURL      string
 	storageBackend     string
 	certificateStore   string
-	stateDir           string
 	secretsDir         string
 	readerPublicURL    string
 	sourcesDir         string
@@ -67,9 +66,9 @@ func runReconcileCommand(ctx context.Context, arguments []string, dependencies r
 		return true, err
 	}
 	onboarding := onboardingOptions{
-		storageBackend: options.storageBackend, certificateStoreName: options.certificateStore,
-		stateDir: options.stateDir, secretsDir: options.secretsDir,
-		readerPublicURL: options.readerPublicURL,
+		certificateStoreName: options.certificateStore,
+		secretsDir:           options.secretsDir,
+		readerPublicURL:      options.readerPublicURL,
 	}
 	store, err := configuredCertificateStore(onboarding)
 	if err != nil {
@@ -134,7 +133,11 @@ func runReconcileCommand(ctx context.Context, arguments []string, dependencies r
 			return err
 		}
 		if options.autoPromote {
-			release, err := promoteRegistryCandidates(ctx, registry, sources, dependencies.now())
+			sourceIDs := make([]string, len(sources))
+			for index, source := range sources {
+				sourceIDs[index] = source.SourceID
+			}
+			release, err := onboardingcore.PromoteCompleteSourceSet(ctx, registry, sourceIDs, dependencies.now())
 			if err != nil {
 				return fmt.Errorf("promote complete source release: %w", err)
 			}
@@ -177,7 +180,6 @@ func parseReconcileOptions(arguments []string, errorOutput io.Writer) (reconcile
 	set.StringVar(&options.publicBaseURL, "type-metadata-base-url", "", "public Type Metadata base URL")
 	set.StringVar(&options.storageBackend, "storage-backend", getEnv("ONBOARDING_STORAGE_BACKEND", "postgres"), "onboarding state backend (must be postgres)")
 	set.StringVar(&options.certificateStore, "certificate-store", getEnv("ONBOARDING_CERTIFICATE_STORE", "public-filesystem"), "public certificate store")
-	set.StringVar(&options.stateDir, "state-dir", ".local/onboarding", "filesystem onboarding state directory")
 	set.StringVar(&options.secretsDir, "secrets-dir", ".local/secrets", "filesystem secret directory")
 	set.StringVar(&options.readerPublicURL, "reader-public-url", os.Getenv("EUDI_PUBLIC_URL"), "public issuance-server URL")
 	set.StringVar(&options.sourcesDir, "sources-dir", getEnv("SOURCE_CONFIGURATIONS_PATH", "sources/configured"), "directory containing manually managed source configurations")

@@ -1,11 +1,6 @@
 package main
 
-import (
-	"encoding/json"
-	"fmt"
-	"os"
-	"time"
-)
+import "time"
 
 const (
 	sourceStatePending         = "pending"
@@ -37,27 +32,4 @@ type sourceReconcileStatus struct {
 
 type sourceStatusWriter interface {
 	Write(sourceReconcileStatus) error
-}
-
-type filesystemSourceStatusWriter struct{ directory string }
-
-func (w *filesystemSourceStatusWriter) Write(status sourceReconcileStatus) error {
-	if w == nil || w.directory == "" {
-		return fmt.Errorf("source status directory is required")
-	}
-	if !sourceIDPattern.MatchString(status.SourceID) {
-		return fmt.Errorf("source status has invalid source_id %q", status.SourceID)
-	}
-	if err := os.MkdirAll(w.directory, 0o755); err != nil {
-		return fmt.Errorf("create source status directory: %w", err)
-	}
-	body, err := json.MarshalIndent(status, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal source status: %w", err)
-	}
-	body = append(body, '\n')
-	if err := writeFileAtomically(w.directory, status.SourceID+".json", body, 0o644); err != nil {
-		return fmt.Errorf("write source status: %w", err)
-	}
-	return nil
 }

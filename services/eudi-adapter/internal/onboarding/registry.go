@@ -88,6 +88,19 @@ type SourceRelease struct {
 	Offers                json.RawMessage `json:"offers"`
 }
 
+type ReleaseSourceLifecycle struct {
+	SourceID   string
+	CheckedAt  time.Time
+	ExpiresAt  time.Time
+	FreshUntil time.Time
+	StaleUntil time.Time
+}
+
+type ActiveReleaseState struct {
+	ReleaseID string
+	Sources   []ReleaseSourceLifecycle
+}
+
 // SourceRegistry is shaped around onboarding use cases rather than database
 // tables. Promotion and activation are required to be atomic operations.
 type SourceRegistry interface {
@@ -95,10 +108,58 @@ type SourceRegistry interface {
 	PutCandidate(context.Context, SourceCandidate) error
 	PutStatus(context.Context, Status) error
 	Promote(context.Context, SourceRelease) error
-	ActiveReleaseID(context.Context) (string, bool, error)
+	ActiveReleaseState(context.Context) (ActiveReleaseState, bool, error)
 	ActiveRelease(context.Context) (SourceRelease, error)
 	Release(context.Context, string) (SourceRelease, error)
 	ActivateRelease(context.Context, string) error
+}
+
+// PromoteCompleteSourceSet is the release-composition use case. It refuses to
+// silently drop a configured source, delegates atomic release activation to
+// the registry port, and only marks sources active after that succeeds.
+func PromoteCompleteSourceSet(ctx context.Context, registry SourceRegistry, sourceIDs []string, at time.Time) (SourceRelease, error) {
+	if registry == nil {
+		return SourceRelease{}, fmt.Errorf("source registry is required")
+	}
+	if len(sourceIDs) == 0 {
+		return SourceRelease{}, fmt.Errorf("configured source set is empty")
+	}
+	candidates := make([]SourceCandidate, 0, len(sourceIDs))
+	seen := make(map[string]struct{}, len(sourceIDs))
+	for _, sourceID := range sourceIDs {
+		if _, duplicate := seen[sourceID]; duplicate {
+			return SourceRelease{}, fmt.Errorf("configured source_id %q is duplicated", sourceID)
+		}
+		seen[sourceID] = struct{}{}
+		candidate, found, err := registry.Candidate(ctx, sourceID)
+		if err != nil {
+			return SourceRelease{}, err
+		}
+		if !found {
+			return SourceRelease{}, fmt.Errorf("configured source %q has no complete candidate", sourceID)
+		}
+		if at.After(candidate.StaleUntil) {
+			return SourceRelease{}, fmt.Errorf("configured source %q is outside stale grace", sourceID)
+		}
+		candidates = append(candidates, candidate)
+	}
+	release, err := NewSourceRelease(at, candidates)
+	if err != nil {
+		return SourceRelease{}, err
+	}
+	if err := registry.Promote(ctx, release); err != nil {
+		return SourceRelease{}, err
+	}
+	for _, candidate := range candidates {
+		if err := registry.PutStatus(ctx, Status{
+			SourceID: candidate.SourceID, State: StateActive,
+			MetadataVersion: candidate.MetadataVersion, DeploymentDigest: candidate.DeploymentDigest,
+			TransportAuthenticated: candidate.TransportAuthenticated, CheckedAt: at.UTC(),
+		}); err != nil {
+			return release, fmt.Errorf("mark promoted source %q active: %w", candidate.SourceID, err)
+		}
+	}
+	return release, nil
 }
 
 func (release SourceRelease) Validate() error {
@@ -295,17 +356,18 @@ func validateTypeMetadata(allMetadata []TypeMetadata) error {
 	return nil
 }
 
-func releaseDigestDocument(release SourceRelease, includeLifecycle bool) ([]byte, error) {
+// releaseDigestDocument deliberately excludes observation timestamps. A 304
+// refresh extends freshness without creating a new immutable release; the
+// registry updates those lifecycle observations on the active materialization.
+// includeETag distinguishes the complete release identity from the issuance
+// materialization digest without making polling time part of either identity.
+func releaseDigestDocument(release SourceRelease, includeETag bool) ([]byte, error) {
 	type digestSource struct {
 		SourceID               string               `json:"source_id"`
 		MetadataVersion        string               `json:"metadata_version"`
 		MetadataPayloadDigest  string               `json:"metadata_payload_digest"`
 		MetadataETag           string               `json:"metadata_etag,omitempty"`
 		DeploymentDigest       string               `json:"deployment_digest"`
-		CheckedAt              time.Time            `json:"checked_at,omitempty"`
-		ExpiresAt              time.Time            `json:"expires_at,omitempty"`
-		FreshUntil             time.Time            `json:"fresh_until,omitempty"`
-		StaleUntil             time.Time            `json:"stale_until,omitempty"`
 		TransportAuthenticated bool                 `json:"transport_authenticated"`
 		Snapshot               json.RawMessage      `json:"snapshot"`
 		CertificateSet         PublicCertificateSet `json:"certificate_set"`
@@ -319,12 +381,8 @@ func releaseDigestDocument(release SourceRelease, includeLifecycle bool) ([]byte
 			TransportAuthenticated: source.TransportAuthenticated, Snapshot: source.Snapshot,
 			CertificateSet: source.CertificateSet, TypeMetadata: source.TypeMetadata,
 		}
-		if includeLifecycle {
+		if includeETag {
 			sources[index].MetadataETag = source.MetadataETag
-			sources[index].CheckedAt = source.CheckedAt
-			sources[index].ExpiresAt = source.ExpiresAt
-			sources[index].FreshUntil = source.FreshUntil
-			sources[index].StaleUntil = source.StaleUntil
 		}
 	}
 	return json.Marshal(struct {

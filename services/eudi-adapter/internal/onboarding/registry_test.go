@@ -1,6 +1,7 @@
 package onboarding
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -8,6 +9,37 @@ import (
 	"testing"
 	"time"
 )
+
+type registryUseCaseFake struct {
+	candidates map[string]SourceCandidate
+	promoted   *SourceRelease
+	statuses   []Status
+}
+
+func (f *registryUseCaseFake) Candidate(_ context.Context, sourceID string) (SourceCandidate, bool, error) {
+	candidate, found := f.candidates[sourceID]
+	return candidate, found, nil
+}
+
+func (*registryUseCaseFake) PutCandidate(context.Context, SourceCandidate) error { return nil }
+func (f *registryUseCaseFake) PutStatus(_ context.Context, status Status) error {
+	f.statuses = append(f.statuses, status)
+	return nil
+}
+func (f *registryUseCaseFake) Promote(_ context.Context, release SourceRelease) error {
+	f.promoted = &release
+	return nil
+}
+func (*registryUseCaseFake) ActiveReleaseState(context.Context) (ActiveReleaseState, bool, error) {
+	return ActiveReleaseState{}, false, nil
+}
+func (*registryUseCaseFake) ActiveRelease(context.Context) (SourceRelease, error) {
+	return SourceRelease{}, ErrNoActiveRelease
+}
+func (*registryUseCaseFake) Release(context.Context, string) (SourceRelease, error) {
+	return SourceRelease{}, ErrReleaseNotFound
+}
+func (*registryUseCaseFake) ActivateRelease(context.Context, string) error { return nil }
 
 func TestSourceReleaseDigestIsDeterministic(t *testing.T) {
 	now := time.Date(2026, 8, 31, 10, 0, 0, 0, time.UTC)
@@ -30,7 +62,32 @@ func TestSourceReleaseDigestIsDeterministic(t *testing.T) {
 	}
 }
 
-func TestFreshnessChangesReleaseDigestButNotMaterializationDigest(t *testing.T) {
+func TestPromoteCompleteSourceSetRequiresAndActivatesEveryConfiguredSource(t *testing.T) {
+	now := time.Date(2026, 8, 31, 10, 0, 0, 0, time.UTC)
+	registry := &registryUseCaseFake{candidates: map[string]SourceCandidate{
+		"belastingdienst": registryTestCandidate("belastingdienst", "income", now),
+	}}
+	if _, err := PromoteCompleteSourceSet(context.Background(), registry, []string{"belastingdienst", "rvig"}, now); err == nil || !strings.Contains(err.Error(), "rvig") {
+		t.Fatalf("missing configured candidate error = %v", err)
+	}
+	if registry.promoted != nil {
+		t.Fatal("incomplete source set was promoted")
+	}
+
+	registry.candidates["rvig"] = registryTestCandidate("rvig", "address", now)
+	release, err := PromoteCompleteSourceSet(context.Background(), registry, []string{"belastingdienst", "rvig"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if registry.promoted == nil || registry.promoted.ID != release.ID {
+		t.Fatalf("promoted release = %+v, want %s", registry.promoted, release.ID)
+	}
+	if len(registry.statuses) != 2 || registry.statuses[0].State != StateActive || registry.statuses[1].State != StateActive {
+		t.Fatalf("active statuses = %+v", registry.statuses)
+	}
+}
+
+func TestFreshnessDoesNotChangeReleaseIdentity(t *testing.T) {
 	now := time.Date(2026, 8, 31, 10, 0, 0, 0, time.UTC)
 	firstCandidate := registryTestCandidate("belastingdienst", "offer", now)
 	secondCandidate := firstCandidate
@@ -46,11 +103,8 @@ func TestFreshnessChangesReleaseDigestButNotMaterializationDigest(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.Digest == second.Digest {
-		t.Fatal("freshness-only release must receive a distinct full digest")
-	}
-	if first.MaterializationDigest != second.MaterializationDigest {
-		t.Fatal("freshness-only release unexpectedly changed the materialization digest")
+	if first.ID != second.ID || first.Digest != second.Digest || first.MaterializationDigest != second.MaterializationDigest {
+		t.Fatalf("freshness-only refresh changed release identity: first=%+v second=%+v", first, second)
 	}
 }
 

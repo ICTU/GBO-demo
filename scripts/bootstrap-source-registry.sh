@@ -28,5 +28,7 @@ psql --dbname source_registry --set ON_ERROR_STOP=1 <<'SQL'
 CREATE SCHEMA IF NOT EXISTS source_registry AUTHORIZATION source_registry;
 GRANT USAGE ON SCHEMA source_registry TO source_registry_reader;
 ALTER DEFAULT PRIVILEGES FOR ROLE source_registry IN SCHEMA source_registry
-  GRANT SELECT ON TABLES TO source_registry_reader;
+  REVOKE SELECT ON TABLES FROM source_registry_reader;
+REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA source_registry
+  FROM source_registry_reader;
 SQL

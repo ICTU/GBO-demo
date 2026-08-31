@@ -186,48 +186,6 @@ func (b *registryActivationBackend) RolloutRequired(candidate *sourceActivation)
 	return true, nil
 }
 
-func promoteRegistryCandidates(ctx context.Context, registry onboarding.SourceRegistry, sources []sourceConfiguration, at time.Time) (onboarding.SourceRelease, error) {
-	if len(sources) == 0 {
-		return onboarding.SourceRelease{}, fmt.Errorf("configured source set is empty")
-	}
-	candidates := make([]onboarding.SourceCandidate, 0, len(sources))
-	seen := make(map[string]struct{}, len(sources))
-	for _, source := range sources {
-		if _, duplicate := seen[source.SourceID]; duplicate {
-			return onboarding.SourceRelease{}, fmt.Errorf("configured source_id %q is duplicated", source.SourceID)
-		}
-		seen[source.SourceID] = struct{}{}
-		candidate, found, err := registry.Candidate(ctx, source.SourceID)
-		if err != nil {
-			return onboarding.SourceRelease{}, err
-		}
-		if !found {
-			return onboarding.SourceRelease{}, fmt.Errorf("configured source %q has no complete candidate", source.SourceID)
-		}
-		if at.After(candidate.StaleUntil) {
-			return onboarding.SourceRelease{}, fmt.Errorf("configured source %q is outside stale grace", source.SourceID)
-		}
-		candidates = append(candidates, candidate)
-	}
-	release, err := onboarding.NewSourceRelease(at, candidates)
-	if err != nil {
-		return onboarding.SourceRelease{}, err
-	}
-	if err := registry.Promote(ctx, release); err != nil {
-		return onboarding.SourceRelease{}, err
-	}
-	for _, candidate := range candidates {
-		if err := registry.PutStatus(ctx, onboarding.Status{
-			SourceID: candidate.SourceID, State: onboarding.StateActive,
-			MetadataVersion: candidate.MetadataVersion, DeploymentDigest: candidate.DeploymentDigest,
-			TransportAuthenticated: candidate.TransportAuthenticated, CheckedAt: at.UTC(),
-		}); err != nil {
-			return release, fmt.Errorf("mark promoted source %q active: %w", candidate.SourceID, err)
-		}
-	}
-	return release, nil
-}
-
 func activationFromValidatedSource(validated *validatedSourceRegistration) *sourceActivation {
 	types := make([]activatedType, 0, len(validated.Publications))
 	for _, publication := range validated.Publications {
@@ -328,7 +286,6 @@ func registrySnapshotFromActivation(activation *sourceActivation) (registryActiv
 func activationFromRegistryCandidate(candidate onboarding.SourceCandidate) (*sourceActivation, error) {
 	var snapshot registryActivationSnapshot
 	decoder := json.NewDecoder(strings.NewReader(string(candidate.Snapshot)))
-	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&snapshot); err != nil {
 		return nil, fmt.Errorf("decode registry source snapshot: %w", err)
 	}
@@ -341,6 +298,9 @@ func activationFromRegistryCandidate(candidate onboarding.SourceCandidate) (*sou
 			TypeID: stored.TypeID, TypeVersion: stored.TypeVersion, VCT: stored.VCT,
 			VCTIntegrity: stored.VCTIntegrity, TypeMetadataReference: stored.VCT,
 			Offers: append([]sourceOffer(nil), stored.Offers...), Definition: stored.Definition,
+		}
+		if err := types[index].validate(); err != nil {
+			return nil, fmt.Errorf("registry source snapshot type %q is invalid: %w", stored.TypeID, err)
 		}
 	}
 	return &sourceActivation{

@@ -13,14 +13,16 @@ formatterfallback.
 | Reconciler | `SOURCE_REGISTRY_DATABASE_URL` | Read-write PostgreSQL-verbinding voor kandidaten, statussen en atomische promotie. |
 | Adapter | `SOURCE_REGISTRY_DATABASE_URL` | Alleen-lezen verbinding; de adapter wisselt zijn complete in-memory release atomair. |
 | Alle registry-clients | `SOURCE_REGISTRY_SCHEMA` | Logisch schema, standaard `source_registry`. |
-| Adapter | `SOURCE_REGISTRY_REFRESH_INTERVAL` | Interval waarmee alleen de actieve releasepointer wordt gecontroleerd. |
+| Adapter | `SOURCE_REGISTRY_REFRESH_INTERVAL` | Interval waarmee de actieve releasepointer en lichte lifecycle-observaties worden gecontroleerd. |
 | Issuance init-container | `SOURCE_REGISTRY_DATABASE_URL` | Alleen-lezen verbinding om één actieve release te materialiseren. |
 
 OIN, type-id, transport, query, mapping en eventuele FSC-servicebinding worden
 uit het activatierecord gelezen en niet als losse runtimevariabelen
-geconfigureerd. Eén immutable `SourceRelease` bevat alle typen, offers en
-publieke certificaatidentiteiten van de volledige bronset. Private keys en
-secretpaden hebben geen representatie in het registry-model.
+geconfigureerd. Eén `SourceRelease` bevat immutable typen, offers en publieke
+certificaatidentiteiten van de volledige bronset. De observatietijden voor
+freshness en stale grace horen niet bij de release-identiteit en mogen bij een
+succesvolle hercontrole worden verlengd. Private keys en secretpaden hebben
+geen representatie in het registry-model.
 
 ## Ophalen en geldigheid
 
@@ -62,16 +64,21 @@ attributes meegestuurd.
 
 De reconciler schrijft complete kandidaten en de actuele status per bron naar
 PostgreSQL. `--auto-promote` bouwt alleen wanneer *iedere* handmatig
-geconfigureerde bron bruikbaar is een immutable `SourceRelease`. De release en
-de singleton `active_release_id` worden in één transactie geschreven. Een
-`pending`, `stale` of `blocked` bron verhindert promotie, zodat een bron niet
-stil uit het aanbod verdwijnt. Een mislukte promotie laat de vorige actieve
-release ongemoeid.
+geconfigureerde bron bruikbaar is een `SourceRelease`. De release-inhoud en
+release-ID blijven gelijk wanneer een `304` alleen de observatietijden
+verlengt; de bestaande lifecycle-kolommen worden dan bijgewerkt zonder nieuwe
+release of Type Metadata-kopieën te maken. De release en de singleton
+`active_release_id` worden in één transactie geschreven. Een `pending`,
+`stale` of `blocked` bron verhindert promotie, zodat een bron niet stil uit het
+aanbod verdwijnt. Een mislukte promotie laat de vorige actieve release
+ongemoeid.
 
-De adapter controleert de actieve pointer en bouwt de nieuwe release volledig
-in geheugen voordat hij die atomair wisselt. Attestatieafhandeling,
-`eudi-offers.json` en Type Metadata komen daardoor altijd uit dezelfde release
-en vereisen geen restart.
+De adapter controleert de actieve pointer en bouwt een nieuwe release volledig
+in geheugen voordat hij die atomair wisselt. Bij hetzelfde release-ID worden
+alleen de freshness- en stale-grace-tijden in een nieuwe in-memory snapshot
+overgenomen; Type Metadata en offers worden niet opnieuw geladen.
+Attestatieafhandeling, `eudi-offers.json` en Type Metadata komen daardoor altijd
+uit dezelfde release en vereisen geen restart.
 
 De gebruikte nl-wallet issuance-server leest TOML alleen bij startup. Een
 init-container leest de actieve release en combineert die met het gemounte

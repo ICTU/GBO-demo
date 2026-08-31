@@ -6,6 +6,13 @@ containerPort: 18001
 health:
   enabled: false
 
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  fsGroupChangePolicy: OnRootMismatch
+
 initContainers:
   - name: materialize-source-release
     image: ghcr.io/ictu/gbo-demo/eudi-adapter:latest
@@ -27,6 +34,9 @@ initContainers:
       - name: EUDI_PUBLIC_URL
         value: https://issuer.example
     securityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
       allowPrivilegeEscalation: false
       capabilities:
         drop: ["ALL"]
@@ -53,6 +63,35 @@ volumes:
   - name: source-certificates
     secret:
       secretName: gbo-source-certificates
+      items:
+        - key: issuer-ca-cert.pem
+          path: development-ca/issuer-ca-cert.pem
+        - key: reader-ca-cert.pem
+          path: development-ca/reader-ca-cert.pem
+        - key: belastingdienst-issuer-key.der.b64
+          path: belastingdienst/issuer-key.der.b64
+        - key: belastingdienst-issuer-cert.der.b64
+          path: belastingdienst/issuer-cert.der.b64
+        - key: belastingdienst-reader-key.der.b64
+          path: belastingdienst/reader-key.der.b64
+        - key: belastingdienst-reader-cert.der.b64
+          path: belastingdienst/reader-cert.der.b64
+        - key: belastingdienst-status-key.der.b64
+          path: belastingdienst/status-key.der.b64
+        - key: belastingdienst-status-cert.der.b64
+          path: belastingdienst/status-cert.der.b64
+        - key: rvig-issuer-key.der.b64
+          path: rvig/issuer-key.der.b64
+        - key: rvig-issuer-cert.der.b64
+          path: rvig/issuer-cert.der.b64
+        - key: rvig-reader-key.der.b64
+          path: rvig/reader-key.der.b64
+        - key: rvig-reader-cert.der.b64
+          path: rvig/reader-cert.der.b64
+        - key: rvig-status-key.der.b64
+          path: rvig/status-key.der.b64
+        - key: rvig-status-cert.der.b64
+          path: rvig/status-cert.der.b64
   - name: issuance-runtime
     emptyDir: {}
   - name: status-lists

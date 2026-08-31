@@ -149,9 +149,9 @@ func (s *Store) Migrate(ctx context.Context) error {
 	return nil
 }
 
-// GrantReadOnly gives one runtime role access only to immutable releases and
-// the active pointer. Mutable candidates and reconciliation statuses remain
-// control-plane-only.
+// GrantReadOnly gives one runtime role access only to release material,
+// lifecycle observations, and the active pointer. Mutable candidates and
+// reconciliation statuses remain control-plane-only.
 func (s *Store) GrantReadOnly(ctx context.Context, role string) error {
 	if !schemaNamePattern.MatchString(role) {
 		return fmt.Errorf("source registry reader role %q is invalid", role)
@@ -169,6 +169,10 @@ func (s *Store) GrantReadOnly(ctx context.Context, role string) error {
 	statements := []string{
 		`GRANT CONNECT ON DATABASE ` + databaseIdentifier + ` TO ` + roleIdentifier,
 		`GRANT USAGE ON SCHEMA ` + schemaIdentifier + ` TO ` + roleIdentifier,
+		`ALTER DEFAULT PRIVILEGES IN SCHEMA ` + schemaIdentifier + ` REVOKE SELECT ON TABLES FROM ` + roleIdentifier,
+		`REVOKE ALL PRIVILEGES ON TABLE ` + schemaIdentifier + `.source_registry_schema_migrations, ` +
+			schemaIdentifier + `.source_candidates, ` + schemaIdentifier + `.source_candidate_type_metadata, ` +
+			schemaIdentifier + `.source_statuses FROM ` + roleIdentifier,
 		`GRANT SELECT ON TABLE ` + schemaIdentifier + `.source_releases, ` +
 			schemaIdentifier + `.source_release_sources, ` + schemaIdentifier + `.source_release_type_metadata, ` +
 			schemaIdentifier + `.active_source_release TO ` + roleIdentifier,
@@ -182,7 +186,12 @@ func (s *Store) GrantReadOnly(ctx context.Context, role string) error {
 }
 
 func (s *Store) Candidate(ctx context.Context, sourceID string) (onboarding.SourceCandidate, bool, error) {
-	row := s.pool.QueryRow(ctx, `
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return onboarding.SourceCandidate{}, false, fmt.Errorf("begin source candidate read: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	row := tx.QueryRow(ctx, `
 		SELECT source_id, metadata_version, metadata_payload_digest, metadata_etag,
 		       deployment_digest, checked_at, expires_at, fresh_until, stale_until,
 		       transport_authenticated, snapshot, offers, certificate_set
@@ -195,11 +204,14 @@ func (s *Store) Candidate(ctx context.Context, sourceID string) (onboarding.Sour
 	if err != nil {
 		return onboarding.SourceCandidate{}, false, fmt.Errorf("load source candidate %q: %w", sourceID, err)
 	}
-	metadata, err := loadCandidateTypeMetadata(ctx, s.pool, sourceID)
+	metadata, err := loadCandidateTypeMetadata(ctx, tx, sourceID)
 	if err != nil {
 		return onboarding.SourceCandidate{}, false, err
 	}
 	candidate.TypeMetadata = metadata
+	if err := tx.Commit(ctx); err != nil {
+		return onboarding.SourceCandidate{}, false, fmt.Errorf("commit source candidate read: %w", err)
+	}
 	return candidate, true, nil
 }
 
@@ -328,6 +340,24 @@ func (s *Store) Promote(ctx context.Context, release onboarding.SourceRelease) e
 				}
 			}
 		}
+	} else {
+		// Release material is immutable, but successful 304 checks extend the
+		// lifecycle observations used by the runtime. Refresh those rows in
+		// place instead of copying the complete release and Type Metadata.
+		for _, source := range release.Sources {
+			result, err := tx.Exec(ctx, `
+				UPDATE source_release_sources
+				SET checked_at = $3, expires_at = $4, fresh_until = $5, stale_until = $6
+				WHERE release_id = $1 AND source_id = $2 AND deployment_digest = $7
+			`, release.ID, source.SourceID, source.CheckedAt, source.ExpiresAt,
+				source.FreshUntil, source.StaleUntil, source.DeploymentDigest)
+			if err != nil {
+				return fmt.Errorf("refresh release source %q lifecycle: %w", source.SourceID, err)
+			}
+			if result.RowsAffected() != 1 {
+				return fmt.Errorf("refresh release source %q lifecycle: immutable release contents differ", source.SourceID)
+			}
+		}
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO active_source_release (singleton, release_id) VALUES (1, $1)
@@ -341,16 +371,40 @@ func (s *Store) Promote(ctx context.Context, release onboarding.SourceRelease) e
 	return nil
 }
 
-func (s *Store) ActiveReleaseID(ctx context.Context) (string, bool, error) {
-	var releaseID string
-	err := s.pool.QueryRow(ctx, `SELECT release_id FROM active_source_release WHERE singleton = 1`).Scan(&releaseID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", false, nil
-	}
+func (s *Store) ActiveReleaseState(ctx context.Context) (onboarding.ActiveReleaseState, bool, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT active.release_id, source.source_id, source.checked_at, source.expires_at,
+		       source.fresh_until, source.stale_until
+		FROM active_source_release AS active
+		JOIN source_release_sources AS source ON source.release_id = active.release_id
+		WHERE active.singleton = 1
+		ORDER BY source.source_id
+	`)
 	if err != nil {
-		return "", false, fmt.Errorf("load active source release ID: %w", err)
+		return onboarding.ActiveReleaseState{}, false, fmt.Errorf("load active source release state: %w", err)
 	}
-	return releaseID, true, nil
+	defer rows.Close()
+	state := onboarding.ActiveReleaseState{}
+	for rows.Next() {
+		var releaseID string
+		var lifecycle onboarding.ReleaseSourceLifecycle
+		if err := rows.Scan(&releaseID, &lifecycle.SourceID, &lifecycle.CheckedAt, &lifecycle.ExpiresAt, &lifecycle.FreshUntil, &lifecycle.StaleUntil); err != nil {
+			return onboarding.ActiveReleaseState{}, false, fmt.Errorf("scan active source release state: %w", err)
+		}
+		if state.ReleaseID == "" {
+			state.ReleaseID = releaseID
+		} else if state.ReleaseID != releaseID {
+			return onboarding.ActiveReleaseState{}, false, fmt.Errorf("active source release state is inconsistent")
+		}
+		state.Sources = append(state.Sources, lifecycle)
+	}
+	if err := rows.Err(); err != nil {
+		return onboarding.ActiveReleaseState{}, false, fmt.Errorf("load active source release state: %w", err)
+	}
+	if state.ReleaseID == "" {
+		return onboarding.ActiveReleaseState{}, false, nil
+	}
+	return state, true, nil
 }
 
 func (s *Store) ActiveRelease(ctx context.Context) (onboarding.SourceRelease, error) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"time"
 
@@ -135,8 +136,8 @@ func (a certificateStoreAdapter) Load(_ context.Context, source onboarding.Sourc
 	artifacts, err := a.store.Load(sourceRegistration{
 		SourceID: source.ID, ProviderPeerID: source.ProviderPeerID, SourceOIN: source.OIN, Name: source.Name,
 	})
-	if os.IsNotExist(err) {
-		return onboarding.CertificateSet[certificateArtifacts]{}, fmt.Errorf("%w: %v", onboarding.ErrCertificateNotFound, err)
+	if errors.Is(err, fs.ErrNotExist) {
+		return onboarding.CertificateSet[certificateArtifacts]{}, fmt.Errorf("%w: %w", onboarding.ErrCertificateNotFound, err)
 	}
 	if err != nil {
 		return onboarding.CertificateSet[certificateArtifacts]{}, err

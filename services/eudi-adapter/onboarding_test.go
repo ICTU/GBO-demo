@@ -3,11 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -87,65 +84,5 @@ func TestGraphQLEndpointMustMatchOnboardedTransport(t *testing.T) {
 				t.Fatal("invalid endpoint was accepted")
 			}
 		})
-	}
-}
-
-func TestSourceActivationAllowsOnlyNewerVersions(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "source.json")
-	activation := func(version, digest string) (*sourceActivation, []byte) {
-		value := &sourceActivation{SchemaVersion: "1.0", Source: sourceRegistration{SourceOIN: "99999999900000000200"}, MetadataVersion: version, MetadataPayloadDigest: digest}
-		body, err := json.Marshal(value)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return value, body
-	}
-	first, firstBody := activation("1.0.0", "first")
-	if err := writeSourceActivation(path, firstBody, first); err != nil {
-		t.Fatal(err)
-	}
-	conflict, conflictBody := activation("1.0.0", "different")
-	if err := writeSourceActivation(path, conflictBody, conflict); err == nil {
-		t.Fatal("same version with different bytes was accepted")
-	}
-	rotation, _ := activation("1.0.0", "first")
-	rotation.Certificates.CertificateExpires = "2028-08-05T12:00:00Z"
-	rotationBody, _ := json.Marshal(rotation)
-	if err := writeSourceActivation(path, rotationBody, rotation); err != nil {
-		t.Fatalf("certificate rotation: %v", err)
-	}
-	rollback, rollbackBody := activation("0.9.0", "rollback")
-	if err := writeSourceActivation(path, rollbackBody, rollback); err == nil {
-		t.Fatal("activation rollback was accepted")
-	}
-	upgrade, upgradeBody := activation("1.1.0", "upgrade")
-	if err := writeSourceActivation(path, upgradeBody, upgrade); err != nil {
-		t.Fatal(err)
-	}
-	stored, _ := os.ReadFile(path)
-	if !bytes.Equal(stored, upgradeBody) {
-		t.Fatalf("stored activation = %s, want %s", stored, upgradeBody)
-	}
-}
-
-func TestFilesystemActivationUsesSourceIDForSharedOIN(t *testing.T) {
-	stateDir := t.TempDir()
-	backend := newFilesystemActivationBackend(stateDir)
-	for _, sourceID := range []string{"belastingdienst", "rvig"} {
-		validated := &validatedSourceRegistration{
-			Registration: sourceRegistration{SourceID: sourceID, SourceOIN: "99999999900000000200", Name: sourceID},
-			Document:     sourceMetadataDocument{Version: "1.0"}, Payload: []byte(sourceID), MetadataURL: "https://metadata.example/" + sourceID,
-		}
-		if _, err := backend.Activate(validated, certificateArtifacts{}); err != nil {
-			t.Fatalf("activate %s: %v", sourceID, err)
-		}
-	}
-	for _, sourceID := range []string{"belastingdienst", "rvig"} {
-		if _, err := os.Stat(filepath.Join(stateDir, "candidates", sourceID+".json")); err != nil {
-			t.Errorf("activation %s: %v", sourceID, err)
-		}
-	}
-	if _, err := os.Stat(filepath.Join(stateDir, "candidates", "99999999900000000200.json")); !os.IsNotExist(err) {
-		t.Fatalf("shared OIN was used as activation key: %v", err)
 	}
 }

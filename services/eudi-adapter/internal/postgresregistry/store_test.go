@@ -233,6 +233,56 @@ func TestPromotionRollbackAndConcurrentReads(t *testing.T) {
 	}
 }
 
+func TestFreshnessRefreshReusesReleaseAndUpdatesActiveLifecycle(t *testing.T) {
+	store := openTestStore(t)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	candidate := postgresTestCandidate("belastingdienst", "offer", now)
+	first, err := onboarding.NewSourceRelease(now, []onboarding.SourceCandidate{candidate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Promote(context.Background(), first); err != nil {
+		t.Fatal(err)
+	}
+
+	refreshedCandidate := candidate
+	refreshedCandidate.CheckedAt = now.Add(30 * time.Second)
+	refreshedCandidate.FreshUntil = candidate.FreshUntil.Add(30 * time.Second)
+	refreshedCandidate.StaleUntil = candidate.StaleUntil.Add(30 * time.Second)
+	refreshed, err := onboarding.NewSourceRelease(now.Add(30*time.Second), []onboarding.SourceCandidate{refreshedCandidate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refreshed.ID != first.ID {
+		t.Fatalf("freshness refresh created release %q, want %q", refreshed.ID, first.ID)
+	}
+	if err := store.Promote(context.Background(), refreshed); err != nil {
+		t.Fatal(err)
+	}
+
+	var releases int
+	if err := store.pool.QueryRow(context.Background(), `SELECT count(*) FROM source_releases`).Scan(&releases); err != nil {
+		t.Fatal(err)
+	}
+	if releases != 1 {
+		t.Fatalf("freshness refresh stored %d releases, want 1", releases)
+	}
+	state, found, err := store.ActiveReleaseState(context.Background())
+	if err != nil || !found {
+		t.Fatalf("active release state: found=%v err=%v", found, err)
+	}
+	if state.ReleaseID != first.ID || len(state.Sources) != 1 || !state.Sources[0].StaleUntil.Equal(refreshedCandidate.StaleUntil) {
+		t.Fatalf("active release state was not refreshed: %+v", state)
+	}
+	active, err := store.ActiveRelease(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !active.Sources[0].CheckedAt.Equal(refreshedCandidate.CheckedAt) || !active.Sources[0].StaleUntil.Equal(refreshedCandidate.StaleUntil) {
+		t.Fatalf("active lifecycle was not refreshed: %+v", active.Sources[0])
+	}
+}
+
 func TestDatabaseContainsNoPrivateKeyMaterial(t *testing.T) {
 	store := openTestStore(t)
 	candidate := postgresTestCandidate("belastingdienst", "offer", time.Now().UTC())
@@ -255,11 +305,17 @@ func TestDatabaseContainsNoPrivateKeyMaterial(t *testing.T) {
 	}
 }
 
-func TestGrantReadOnlyExposesOnlyImmutableRuntimeTables(t *testing.T) {
+func TestGrantReadOnlyExposesOnlyRuntimeReleaseTables(t *testing.T) {
 	store := openTestStore(t)
 	role := fmt.Sprintf("registry_reader_%d", time.Now().UnixNano()%1_000_000_000)
 	roleIdentifier := pgx.Identifier{role}.Sanitize()
 	if _, err := store.pool.Exec(context.Background(), `CREATE ROLE `+roleIdentifier); err != nil {
+		t.Fatal(err)
+	}
+	// Reproduce the overly broad default grant used by the original Compose
+	// bootstrap. GrantReadOnly must correct an existing deployment as well as
+	// configure a fresh one.
+	if _, err := store.pool.Exec(context.Background(), `GRANT SELECT ON ALL TABLES IN SCHEMA `+pgx.Identifier{testOptions(t).Schema}.Sanitize()+` TO `+roleIdentifier); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {

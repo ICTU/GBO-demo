@@ -206,6 +206,53 @@ func TestPublicCertificateStoreNeverRequiresLeafPrivateKeys(t *testing.T) {
 	}
 }
 
+func TestPublicCertificateProjectionContainsNoPrivateKeys(t *testing.T) {
+	secretRoot := t.TempDir()
+	publicRoot := t.TempDir()
+	caDir := filepath.Join(secretRoot, "development-ca")
+	sourceDir := filepath.Join(secretRoot, "belastingdienst")
+	for _, directory := range []string{caDir, sourceDir} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	artifacts := certificateArtifacts{
+		IssuerCACertReference: filepath.Join(caDir, "issuer-ca-cert.pem"),
+		ReaderCACertReference: filepath.Join(caDir, "reader-ca-cert.pem"),
+		IssuerCertReference:   filepath.Join(sourceDir, "issuer-cert.der.b64"),
+		ReaderCertReference:   filepath.Join(sourceDir, "reader-cert.der.b64"),
+		StatusCertReference:   filepath.Join(sourceDir, "status-cert.der.b64"),
+	}
+	for _, path := range []string{
+		artifacts.IssuerCACertReference, artifacts.ReaderCACertReference,
+		artifacts.IssuerCertReference, artifacts.ReaderCertReference, artifacts.StatusCertReference,
+	} {
+		if err := os.WriteFile(path, []byte(filepath.Base(path)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "issuer-key.der.b64"), []byte("private"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := projectPublicCertificateArtifacts(publicRoot, "belastingdienst", artifacts); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(publicRoot, "belastingdienst", "issuer-key.der.b64")); !os.IsNotExist(err) {
+		t.Fatalf("private key was projected: %v", err)
+	}
+	for _, path := range []string{
+		filepath.Join(publicRoot, "development-ca", "issuer-ca-cert.pem"),
+		filepath.Join(publicRoot, "development-ca", "reader-ca-cert.pem"),
+		filepath.Join(publicRoot, "belastingdienst", "issuer-cert.der.b64"),
+		filepath.Join(publicRoot, "belastingdienst", "reader-cert.der.b64"),
+		filepath.Join(publicRoot, "belastingdienst", "status-cert.der.b64"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("projected certificate %s: %v", path, err)
+		}
+	}
+}
+
 func writeTestDevelopmentCAs(t *testing.T, root string, now time.Time) {
 	t.Helper()
 	directory := filepath.Join(root, "development-ca")

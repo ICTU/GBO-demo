@@ -194,7 +194,7 @@ sequenceDiagram
     else Productie met expliciete promotie
         O->>P: Keur een complete kandidaatset goed en promoveer die
     end
-    A->>P: Poll active_release_id en laad de complete release read-only
+    A->>P: Poll active release en lifecycle; laad gewijzigd materiaal read-only
     A->>A: Vervang de in-memory snapshot atomair
     M->>P: Laad de actieve release read-only
     M->>M: Combineer release en certificate Secret in emptyDir
@@ -203,9 +203,12 @@ sequenceDiagram
     A-->>U: Beschikbare issuance-offers
 ```
 
-Een promotie schrijft eerst een immutable release en wijzigt daarna binnen
-dezelfde databasetransactie de singleton `active_release_id`. De adapter pollt
-de pointer en vervangt zijn complete in-memory snapshot atomair; ook volledig
+Een promotie schrijft eerst een release met immutable materiaal en wijzigt
+daarna binnen dezelfde databasetransactie de singleton `active_release_id`.
+Een hercontrole die alleen freshness- en stale-grace-tijden verlengt, hergebruikt
+dezelfde release-ID en werkt uitsluitend die lifecycle-observaties bij. De adapter pollt
+de actieve toestand en vervangt zijn in-memory snapshot atomair. Alleen bij een
+gewijzigd release-ID laadt hij het complete materiaal opnieuw; ook volledig
 nieuwe bronnen worden zo zichtbaar zonder restart. De issuance-server leest
 zijn TOML alleen bij het opstarten, dus die pod of container moet na promotie
 wel gecontroleerd worden herstart. De frontends halen de offercatalogus

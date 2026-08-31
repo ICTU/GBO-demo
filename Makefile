@@ -28,6 +28,7 @@ DEVELOPMENT_UNSECURED_SOURCE_NAME ?= Demo unsecured source
 DEVELOPMENT_UNSECURED_SOURCE_LOGO ?= assets/issuer-logos/belastingdienst.svg
 ONBOARDING_OUTWAY_URL ?= http://localhost:$(or $(FSC_PORT_EDI_OUTWAY),8087)
 ONBOARDING_SECRETS_DIR ?= $(PWD)/.local/secrets
+ONBOARDING_PUBLIC_CERTIFICATES_DIR ?= $(PWD)/.local/public-certificates
 DEVELOPMENT_CA_DIR ?= $(ONBOARDING_SECRETS_DIR)/development-ca
 ONBOARDING_TYPE_METADATA_URL ?= $(or $(EUDI_BRI_URL),http://localhost:$(or $(GBO_PORT_EUDI_ADAPTER),9409))
 ONBOARDING_STORAGE_BACKEND ?= postgres
@@ -199,7 +200,8 @@ provision-development-certificates: require-development-cas
 		--source-name "$(SOURCE_NAME)" \
 		--source-logo "$(if $(SOURCE_LOGO),$(abspath $(SOURCE_LOGO)),)" \
 		--reader-public-url "$${EUDI_PUBLIC_URL:-}" \
-		--secrets-dir "$(ONBOARDING_SECRETS_DIR)"
+		--secrets-dir "$(ONBOARDING_SECRETS_DIR)" \
+		--public-certificates-dir "$(ONBOARDING_PUBLIC_CERTIFICATES_DIR)"
 
 reconcile-sources:
 	docker compose --profile onboarding run --build --rm source-reconciler

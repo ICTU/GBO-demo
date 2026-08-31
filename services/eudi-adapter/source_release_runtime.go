@@ -16,7 +16,7 @@ import (
 )
 
 type sourceReleaseReader interface {
-	ActiveReleaseID(context.Context) (string, bool, error)
+	ActiveReleaseState(context.Context) (onboarding.ActiveReleaseState, bool, error)
 	ActiveRelease(context.Context) (onboarding.SourceRelease, error)
 }
 
@@ -29,13 +29,17 @@ type releaseRuntimeSnapshot struct {
 }
 
 type sourceReleaseRuntime struct {
+	ctx             context.Context
 	registry        sourceReleaseReader
 	baseConfig      config
 	refreshInterval time.Duration
 
-	mu         sync.Mutex
-	snapshot   *releaseRuntimeSnapshot
-	checkAfter time.Time
+	mu          sync.Mutex
+	snapshot    *releaseRuntimeSnapshot
+	checkAfter  time.Time
+	refreshing  bool
+	refreshDone chan struct{}
+	lastErr     error
 }
 
 type releaseSourceRuntime struct {
@@ -52,8 +56,8 @@ func openRuntimeSourceRegistry(ctx context.Context, cfg config) (*postgresregist
 	})
 }
 
-func newSourceReleaseRuntimeMux(cfg config, client *http.Client, registry sourceReleaseReader) *http.ServeMux {
-	runtime := &sourceReleaseRuntime{registry: registry, baseConfig: cfg, refreshInterval: cfg.SourceRegistryRefresh}
+func newSourceReleaseRuntimeMux(ctx context.Context, cfg config, client *http.Client, registry sourceReleaseReader) *http.ServeMux {
+	runtime := &sourceReleaseRuntime{ctx: ctx, registry: registry, baseConfig: cfg, refreshInterval: cfg.SourceRegistryRefresh}
 	if runtime.refreshInterval <= 0 {
 		runtime.refreshInterval = 5 * time.Second
 	}
@@ -103,55 +107,161 @@ func newSourceReleaseRuntimeMux(cfg config, client *http.Client, registry source
 
 func (r *sourceReleaseRuntime) current(ctx context.Context, now time.Time) (*releaseRuntimeSnapshot, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if r.snapshot != nil && now.Before(r.checkAfter) {
-		return r.snapshot, nil
+		snapshot := r.snapshot
+		r.mu.Unlock()
+		return snapshot, nil
 	}
-	releaseID, found, err := r.registry.ActiveReleaseID(ctx)
-	if err != nil {
-		r.checkAfter = now.Add(activationReloadRetryInterval)
+	if r.refreshing {
+		snapshot, done := r.snapshot, r.refreshDone
+		r.mu.Unlock()
+		if snapshot != nil {
+			return snapshot, nil
+		}
+		return r.waitForInitialRefresh(ctx, done)
+	}
+	r.refreshing = true
+	r.refreshDone = make(chan struct{})
+	done := r.refreshDone
+	snapshot := r.snapshot
+	r.mu.Unlock()
+	go r.refresh(now)
+	if snapshot != nil {
+		return snapshot, nil
+	}
+	return r.waitForInitialRefresh(ctx, done)
+}
+
+func (r *sourceReleaseRuntime) waitForInitialRefresh(ctx context.Context, done <-chan struct{}) (*releaseRuntimeSnapshot, error) {
+	select {
+	case <-done:
+		r.mu.Lock()
+		defer r.mu.Unlock()
 		if r.snapshot != nil {
-			slog.Warn("Source Registry active release check failed; retaining complete previous snapshot", "err", err.Error())
 			return r.snapshot, nil
 		}
-		return nil, err
+		return nil, r.lastErr
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (r *sourceReleaseRuntime) refresh(now time.Time) {
+	baseCtx := r.ctx
+	if baseCtx == nil {
+		baseCtx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(baseCtx, 10*time.Second)
+	defer cancel()
+
+	state, found, err := r.registry.ActiveReleaseState(ctx)
+	if err != nil {
+		r.finishRefresh(now, nil, err)
+		slog.Warn("Source Registry active release check failed; retaining complete previous snapshot", "err", err.Error())
+		return
 	}
 	if !found {
-		r.checkAfter = now.Add(activationReloadRetryInterval)
-		if r.snapshot != nil {
-			return r.snapshot, nil
-		}
-		return nil, onboarding.ErrNoActiveRelease
+		r.finishRefresh(now, nil, onboarding.ErrNoActiveRelease)
+		return
 	}
-	if r.snapshot != nil && r.snapshot.releaseID == releaseID {
-		r.checkAfter = now.Add(r.refreshInterval)
-		return r.snapshot, nil
+	r.mu.Lock()
+	current := r.snapshot
+	r.mu.Unlock()
+	if current != nil && current.releaseID == state.ReleaseID {
+		next, err := refreshReleaseRuntimeLifecycle(current, state)
+		if err != nil {
+			r.finishRefresh(now, nil, err)
+			slog.Warn("Source Registry release lifecycle refresh failed; retaining complete previous snapshot", "release_id", state.ReleaseID, "err", err.Error())
+			return
+		}
+		r.finishRefresh(now, next, nil)
+		return
 	}
 	release, err := r.registry.ActiveRelease(ctx)
 	if err != nil {
-		r.checkAfter = now.Add(activationReloadRetryInterval)
-		if r.snapshot != nil {
-			slog.Warn("Source Registry release refresh failed; retaining complete previous snapshot", "release_id", releaseID, "err", err.Error())
-			return r.snapshot, nil
-		}
-		return nil, err
+		r.finishRefresh(now, nil, err)
+		slog.Warn("Source Registry release refresh failed; retaining complete previous snapshot", "release_id", state.ReleaseID, "err", err.Error())
+		return
 	}
-	if release.ID != releaseID {
-		return nil, fmt.Errorf("active release changed while loading: pointer=%s release=%s", releaseID, release.ID)
+	if release.ID != state.ReleaseID {
+		err = fmt.Errorf("active release changed while loading: pointer=%s release=%s", state.ReleaseID, release.ID)
+		r.finishRefresh(now, nil, err)
+		slog.Warn("Source Registry release changed during refresh; retaining complete previous snapshot", "err", err.Error())
+		return
 	}
 	next, err := buildReleaseRuntimeSnapshot(r.baseConfig, release)
 	if err != nil {
-		r.checkAfter = now.Add(activationReloadRetryInterval)
-		if r.snapshot != nil {
-			slog.Error("active Source Registry release is invalid; retaining complete previous snapshot", "release_id", releaseID, "err", err.Error())
-			return r.snapshot, nil
-		}
-		return nil, err
+		r.finishRefresh(now, nil, err)
+		slog.Error("active Source Registry release is invalid; retaining complete previous snapshot", "release_id", state.ReleaseID, "err", err.Error())
+		return
 	}
-	r.snapshot = next
-	r.checkAfter = now.Add(r.refreshInterval)
+	r.finishRefresh(now, next, nil)
 	slog.Info("Source Registry release activated", "release_id", release.ID, "materialization_digest", release.MaterializationDigest)
+}
+
+func refreshReleaseRuntimeLifecycle(current *releaseRuntimeSnapshot, state onboarding.ActiveReleaseState) (*releaseRuntimeSnapshot, error) {
+	if current == nil || current.releaseID != state.ReleaseID || len(state.Sources) == 0 {
+		return nil, fmt.Errorf("active release lifecycle is incomplete")
+	}
+	lifecycleBySource := make(map[string]onboarding.ReleaseSourceLifecycle, len(state.Sources))
+	for _, lifecycle := range state.Sources {
+		if lifecycle.SourceID == "" || lifecycle.FreshUntil.After(lifecycle.StaleUntil) || lifecycle.StaleUntil.After(lifecycle.ExpiresAt) {
+			return nil, fmt.Errorf("source %q lifecycle is invalid", lifecycle.SourceID)
+		}
+		if _, duplicate := lifecycleBySource[lifecycle.SourceID]; duplicate {
+			return nil, fmt.Errorf("source %q lifecycle is duplicated", lifecycle.SourceID)
+		}
+		lifecycleBySource[lifecycle.SourceID] = lifecycle
+	}
+	next := &releaseRuntimeSnapshot{
+		releaseID: current.releaseID, bindings: make(map[string]sourceRuntimeBinding, len(current.bindings)),
+		typeMetadata: current.typeMetadata, offers: current.offers,
+	}
+	seenSources := make(map[string]struct{}, len(lifecycleBySource))
+	for key, binding := range current.bindings {
+		lifecycle, found := lifecycleBySource[binding.config.SourceMetadataSourceID]
+		if !found {
+			return nil, fmt.Errorf("source %q lifecycle is missing", binding.config.SourceMetadataSourceID)
+		}
+		runtime, ok := binding.runtime.(*releaseSourceRuntime)
+		if !ok {
+			return nil, fmt.Errorf("source %q runtime cannot refresh lifecycle", binding.config.SourceMetadataSourceID)
+		}
+		updatedRuntime := *runtime
+		updatedRuntime.freshUntil = lifecycle.FreshUntil
+		updatedRuntime.staleUntil = lifecycle.StaleUntil
+		updatedRuntime.config.SourceMetadataFreshUntil = lifecycle.FreshUntil
+		updatedRuntime.config.SourceMetadataStaleUntil = lifecycle.StaleUntil
+		binding.config.SourceMetadataFreshUntil = lifecycle.FreshUntil
+		binding.config.SourceMetadataStaleUntil = lifecycle.StaleUntil
+		binding.runtime = &updatedRuntime
+		next.bindings[key] = binding
+		seenSources[lifecycle.SourceID] = struct{}{}
+		if next.staleUntil.IsZero() || lifecycle.StaleUntil.Before(next.staleUntil) {
+			next.staleUntil = lifecycle.StaleUntil
+		}
+	}
+	if len(seenSources) != len(lifecycleBySource) {
+		return nil, fmt.Errorf("active release lifecycle contains an unknown source")
+	}
 	return next, nil
+}
+
+func (r *sourceReleaseRuntime) finishRefresh(now time.Time, next *releaseRuntimeSnapshot, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if next != nil {
+		r.snapshot = next
+	}
+	r.lastErr = err
+	if err != nil {
+		r.checkAfter = now.Add(activationReloadRetryInterval)
+	} else {
+		r.checkAfter = now.Add(r.refreshInterval)
+	}
+	r.refreshing = false
+	close(r.refreshDone)
+	r.refreshDone = nil
 }
 
 func buildReleaseRuntimeSnapshot(base config, release onboarding.SourceRelease) (*releaseRuntimeSnapshot, error) {
