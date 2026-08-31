@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
-	"flag"
 	"fmt"
 	"io"
 	"log/slog"
@@ -53,34 +52,6 @@ type issuanceCertificateMaterial struct {
 	statusCert string
 	issuerCA   string
 	readerCA   string
-}
-
-func runIssuanceConfigCommand(arguments []string, stdout, stderr io.Writer) (bool, error) {
-	if len(arguments) == 0 || arguments[0] != "generate-issuance-config" {
-		return false, nil
-	}
-	set := flag.NewFlagSet(arguments[0], flag.ContinueOnError)
-	set.SetOutput(stderr)
-	options := issuanceConfigOptions{}
-	set.StringVar(&options.activationsDir, "activations-dir", ".local/onboarding/candidates", "directory containing reconciled candidate source registrations")
-	set.StringVar(&options.activeDir, "active-dir", ".local/onboarding/active", "directory receiving the successfully deployed source snapshot")
-	set.StringVar(&options.sourcesDir, "sources-dir", getEnv("SOURCE_CONFIGURATIONS_PATH", "sources/configured"), "directory containing desired source configurations")
-	set.StringVar(&options.statusDir, "status-dir", ".local/onboarding/status", "directory containing per-source reconciliation status")
-	set.StringVar(&options.templatePath, "template", "services/eudi-adapter/config/issuance_server.toml.example", "issuance-server TOML template")
-	set.StringVar(&options.adapterBaseURL, "adapter-base-url", os.Getenv("EUDI_BRI_URL"), "public GBO adapter base URL")
-	set.StringVar(&options.outputPath, "output", "services/eudi-issuance-server/config/issuance_server.toml", "generated issuance-server TOML")
-	set.StringVar(&options.offersPath, "offers-output", "services/eudi-issuance-server/config/eudi-offers.json", "generated public issuance offers")
-	if err := set.Parse(arguments[1:]); err != nil {
-		return true, err
-	}
-	if set.NArg() != 0 {
-		return true, fmt.Errorf("unexpected positional arguments: %s", strings.Join(set.Args(), " "))
-	}
-	if err := generateIssuanceConfig(options); err != nil {
-		return true, err
-	}
-	_, _ = fmt.Fprintf(stdout, "issuance configuration generated from active source offers: %s; offers: %s\n", options.outputPath, options.offersPath)
-	return true, nil
 }
 
 func generateIssuanceConfig(options issuanceConfigOptions) error {

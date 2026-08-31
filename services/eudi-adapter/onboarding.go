@@ -134,15 +134,6 @@ func configuredCertificateStore(options onboardingOptions) (certificateStore, er
 	}
 }
 
-func configuredActivationBackend(options onboardingOptions) (activationBackend, error) {
-	switch options.storageBackend {
-	case "filesystem":
-		return newFilesystemActivationBackend(options.stateDir), nil
-	default:
-		return nil, fmt.Errorf("unsupported onboarding storage backend %q", options.storageBackend)
-	}
-}
-
 func runOnboardingCommand(_ context.Context, arguments []string, dependencies onboardingDependencies) (bool, error) {
 	if len(arguments) == 0 || arguments[0] != "provision-development-certificates" {
 		return false, nil

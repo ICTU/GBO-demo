@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 )
 
@@ -41,10 +40,6 @@ type sourceStatusWriter interface {
 }
 
 type filesystemSourceStatusWriter struct{ directory string }
-
-func newFilesystemSourceStatusWriter(stateDir string) *filesystemSourceStatusWriter {
-	return &filesystemSourceStatusWriter{directory: filepath.Join(stateDir, "status")}
-}
 
 func (w *filesystemSourceStatusWriter) Write(status sourceReconcileStatus) error {
 	if w == nil || w.directory == "" {

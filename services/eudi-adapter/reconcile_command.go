@@ -78,7 +78,6 @@ func runReconcileCommand(ctx context.Context, arguments []string, dependencies r
 	var backend activationBackend
 	var statuses sourceStatusWriter
 	var registry onboardingcore.SourceRegistry
-	var closeRegistry func()
 	if options.certificateStore != "public-filesystem" {
 		return true, fmt.Errorf("registry-backed reconciliation requires --certificate-store=public-filesystem")
 	}
@@ -86,8 +85,8 @@ func runReconcileCommand(ctx context.Context, arguments []string, dependencies r
 	if err != nil {
 		return true, err
 	}
+	defer postgresStore.Close()
 	registry = postgresStore
-	closeRegistry = postgresStore.Close
 	if options.migrate {
 		if err := postgresStore.Migrate(ctx); err != nil {
 			return true, err
@@ -100,9 +99,6 @@ func runReconcileCommand(ctx context.Context, arguments []string, dependencies r
 	}
 	backend = newRegistryActivationBackend(ctx, registry)
 	statuses = registryStatusWriter{ctx: ctx, registry: registry}
-	if closeRegistry != nil {
-		defer closeRegistry()
-	}
 	var managerClient *http.Client
 	reconcile := func() error {
 		sources, err := loadSourceConfigurations(options.sourcesDir)

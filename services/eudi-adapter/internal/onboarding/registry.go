@@ -245,12 +245,19 @@ func (c SourceCandidate) Validate() error {
 	if err := rejectSecretJSON(c.Snapshot); err != nil {
 		return fmt.Errorf("candidate snapshot: %w", err)
 	}
-	if strings.TrimSpace(c.CertificateSet.ID) == "" || len(c.CertificateSet.Certificates) == 0 {
+	if err := c.CertificateSet.validate(); err != nil {
+		return err
+	}
+	return validateTypeMetadata(c.TypeMetadata)
+}
+
+func (certificates PublicCertificateSet) validate() error {
+	if strings.TrimSpace(certificates.ID) == "" || len(certificates.Certificates) == 0 {
 		return fmt.Errorf("public certificate set is required")
 	}
-	seenRoles := make(map[string]struct{}, len(c.CertificateSet.Certificates))
+	seenRoles := make(map[string]struct{}, len(certificates.Certificates))
 	requiredRoles := map[string]struct{}{"issuer": {}, "reader": {}, "status": {}, "issuer_ca": {}, "reader_ca": {}}
-	for _, certificate := range c.CertificateSet.Certificates {
+	for _, certificate := range certificates.Certificates {
 		if certificate.Role == "" || certificate.Subject == "" || !validHexDigest(certificate.SHA256) || certificate.NotAfter.IsZero() {
 			return fmt.Errorf("public certificate descriptor is incomplete")
 		}
@@ -268,17 +275,21 @@ func (c SourceCandidate) Validate() error {
 		sort.Strings(missing)
 		return fmt.Errorf("public certificate set is missing roles: %s", strings.Join(missing, ", "))
 	}
-	if len(c.TypeMetadata) == 0 {
+	return nil
+}
+
+func validateTypeMetadata(allMetadata []TypeMetadata) error {
+	if len(allMetadata) == 0 {
 		return fmt.Errorf("candidate requires Type Metadata")
 	}
-	for _, metadata := range c.TypeMetadata {
+	for _, metadata := range allMetadata {
 		if metadata.VCT == "" || metadata.Version == "" || metadata.Integrity == "" || len(metadata.Bytes) == 0 {
-			return fmt.Errorf("Type Metadata is incomplete")
+			return fmt.Errorf("type metadata is incomplete")
 		}
 		digest := sha256.Sum256(metadata.Bytes)
 		integrity := "sha256-" + base64.StdEncoding.EncodeToString(digest[:])
 		if metadata.Integrity != integrity {
-			return fmt.Errorf("Type Metadata integrity mismatch for %q", metadata.VCT)
+			return fmt.Errorf("type metadata integrity mismatch for %q", metadata.VCT)
 		}
 	}
 	return nil
