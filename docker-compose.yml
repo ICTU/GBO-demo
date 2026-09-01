@@ -591,7 +591,6 @@ services:
       # it and checks revocation at the consent-register.
       - OUTWAY_URL=http://hv-outway:8080
       - OUTWAY_PATH=/bri/graphql
-      - ORG_OIN=99999999900000000300
       - ORG_SECTOR=hypotheekverlener
       - DEV_PORTAL_BACKEND_URL=http://dev-portal-backend:4007
     networks:
@@ -714,6 +713,8 @@ services:
       - OTEL_SERVICE_NAME=dev-portal-backend
       - CITIZENS_FILE=/citizens/citizens.json
       - ORGANIZATIONS_FILE=/orgs/organizations.json
+      # Optional deployment override; the backend owns the local demo default.
+      - DVTP_CONSUMER_PEER_ID
       # FSC-txlog access (demo shortcut). Production would use the
       # peer-facing manager /v1/logs with a peer-cert (Logius
       # fsc-logging draft). For the demo we mount each org's existing

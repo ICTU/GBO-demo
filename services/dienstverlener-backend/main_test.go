@@ -60,7 +60,6 @@ func TestDvtpQueryHappyPath(t *testing.T) {
 
 	cfg := config{
 		Port:       "0",
-		OrgOIN:     "99999999900000000300",
 		OrgSector:  "hypotheekverlener",
 		OutwayURL:  outway.URL,
 		OutwayPath: "/bri/graphql",

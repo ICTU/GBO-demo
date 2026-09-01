@@ -1,12 +1,147 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
 )
+
+type testIssuancePayload struct {
+	CitizenBSN      string   `json:"citizen_bsn"`
+	ConsumerPeerID  string   `json:"dienstverlener_oin"`
+	Scopes          []string `json:"scopes"`
+	ValiditySeconds int      `json:"validity_seconds"`
+	UseCase         string   `json:"use_case"`
+}
+
+func dvtpIssuancePayloads(t *testing.T, cfg config) map[string]testIssuancePayload {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/scenarios", nil)
+	rec := httptest.NewRecorder()
+	handleScenarios(cfg).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list predefined scenarios status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var scenarios []Scenario
+	if err := json.NewDecoder(rec.Body).Decode(&scenarios); err != nil {
+		t.Fatalf("decode predefined scenarios: %v", err)
+	}
+	payloads := make(map[string]testIssuancePayload)
+	for _, scenario := range scenarios {
+		if scenario.Tab != "issuance" {
+			continue
+		}
+		var payload testIssuancePayload
+		if err := json.Unmarshal(scenario.Payload, &payload); err != nil {
+			t.Fatalf("decode %s payload: %v", scenario.ID, err)
+		}
+		payloads[scenario.ID] = payload
+	}
+	return payloads
+}
+
+func TestPredefinedDvtpScenariosUseLocalDefaultWithoutConfiguration(t *testing.T) {
+	t.Setenv("DVTP_CONSUMER_PEER_ID", "")
+	cfg := loadConfig()
+	cfg.PredefinedDir = "scenarios"
+	cfg.VarDir = t.TempDir()
+
+	if cfg.DvtpConsumerPeerID != defaultDvtpConsumerPeerID {
+		t.Fatalf("DvtpConsumerPeerID = %q, want local default %q", cfg.DvtpConsumerPeerID, defaultDvtpConsumerPeerID)
+	}
+	for id, payload := range dvtpIssuancePayloads(t, cfg) {
+		if payload.ConsumerPeerID != defaultDvtpConsumerPeerID {
+			t.Errorf("%s dienstverlener_oin = %q, want %q", id, payload.ConsumerPeerID, defaultDvtpConsumerPeerID)
+		}
+	}
+}
+
+func TestPredefinedDvtpScenariosUseConfiguredPeerIDAndPreservePayload(t *testing.T) {
+	const peerID = "0000009950HYPBV00000"
+	t.Setenv("DVTP_CONSUMER_PEER_ID", peerID)
+	cfg := loadConfig()
+	cfg.PredefinedDir = "scenarios"
+	cfg.VarDir = t.TempDir()
+
+	want := map[string]testIssuancePayload{
+		"issuance-hypotheek-2025-only": {
+			CitizenBSN:      "123456789",
+			ConsumerPeerID:  peerID,
+			Scopes:          []string{"bd:ib:2025"},
+			ValiditySeconds: 7776000,
+			UseCase:         "hypotheek",
+		},
+		"issuance-hypotheek-2025-2024": {
+			CitizenBSN:      "123456789",
+			ConsumerPeerID:  peerID,
+			Scopes:          []string{"bd:ib:2025", "bd:ib:2024"},
+			ValiditySeconds: 7776000,
+			UseCase:         "hypotheek",
+		},
+	}
+	if got := dvtpIssuancePayloads(t, cfg); !reflect.DeepEqual(got, want) {
+		t.Fatalf("DvTP issuance payloads = %#v, want %#v", got, want)
+	}
+}
+
+func TestCustomIssuanceScenarioKeepsEnteredConsumerPeerID(t *testing.T) {
+	const customPeerID = "custom-consumer-peer"
+	cfg := config{
+		VarDir:             t.TempDir(),
+		PredefinedDir:      t.TempDir(),
+		DvtpConsumerPeerID: "0000009950HYPBV00000",
+	}
+	custom := Scenario{
+		ID:   "user-custom-issuance",
+		Name: "Custom issuance",
+		Tab:  "issuance",
+		Payload: json.RawMessage(`{
+			"citizen_bsn":"987654321",
+			"dienstverlener_oin":"custom-consumer-peer",
+			"scopes":["custom:scope"],
+			"validity_seconds":123
+		}`),
+	}
+	body, err := json.Marshal(custom)
+	if err != nil {
+		t.Fatalf("encode custom scenario: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/scenarios", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handleScenarios(cfg).ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("save status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/scenarios", nil)
+	rec = httptest.NewRecorder()
+	handleScenarios(cfg).ServeHTTP(rec, req)
+	var scenarios []Scenario
+	if err := json.NewDecoder(rec.Body).Decode(&scenarios); err != nil {
+		t.Fatalf("decode scenarios: %v", err)
+	}
+	for _, scenario := range scenarios {
+		if scenario.ID != custom.ID {
+			continue
+		}
+		var payload testIssuancePayload
+		if err := json.Unmarshal(scenario.Payload, &payload); err != nil {
+			t.Fatalf("decode custom payload: %v", err)
+		}
+		if payload.ConsumerPeerID != customPeerID {
+			t.Fatalf("custom dienstverlener_oin = %q, want %q", payload.ConsumerPeerID, customPeerID)
+		}
+		if !reflect.DeepEqual(payload.Scopes, []string{"custom:scope"}) || payload.ValiditySeconds != 123 {
+			t.Fatalf("custom payload changed unexpectedly: %#v", payload)
+		}
+		return
+	}
+	t.Fatal("saved custom issuance scenario not returned")
+}
 
 // TestHealthAndEmptyHistory exercises the two happy-path endpoints that
 // have no external dependencies: /health returns {status:"ok"} and

@@ -39,18 +39,21 @@ import (
 )
 
 type config struct {
-	Port              string
-	VarDir            string
-	PredefinedDir     string
-	CitizensFile      string
-	OrganizationsFile string
-	LokiURL           string
-	LokiDecisionQuery string
-	PoliciesDir       string
-	RulesFile         string
-	FscGroupID        string
-	FscTxlogPeers     []fscTxlogPeer
+	Port               string
+	VarDir             string
+	PredefinedDir      string
+	DvtpConsumerPeerID string
+	CitizensFile       string
+	OrganizationsFile  string
+	LokiURL            string
+	LokiDecisionQuery  string
+	PoliciesDir        string
+	RulesFile          string
+	FscGroupID         string
+	FscTxlogPeers      []fscTxlogPeer
 }
+
+const defaultDvtpConsumerPeerID = "99999999900000000300"
 
 // fscTxlogPeer describes one FSC-org whose txlog-api we may query.
 // Demo shortcut: intra-org internal-cert used as client-cert. See
@@ -91,17 +94,18 @@ func loadConfig() config {
 		})
 	}
 	return config{
-		Port:              getEnv("PORT", "4007"),
-		VarDir:            getEnv("VAR_DIR", "/var"),
-		PredefinedDir:     getEnv("PREDEFINED_DIR", "/scenarios"),
-		CitizensFile:      getEnv("CITIZENS_FILE", "/citizens/citizens.json"),
-		OrganizationsFile: getEnv("ORGANIZATIONS_FILE", "/orgs/organizations.json"),
-		LokiURL:           getEnv("LOKI_URL", "http://loki:3100"),
-		LokiDecisionQuery: getEnv("LOKI_DECISION_QUERY", `{compose_service="openftv-pdp"} |= "Decision Log"`),
-		PoliciesDir:       getEnv("POLICIES_DIR", "/policies"),
-		RulesFile:         getEnv("RULES_FILE", "/rules.json"),
-		FscGroupID:        getEnv("FSC_GROUP_ID", "fsc-demo"),
-		FscTxlogPeers:     peers,
+		Port:               getEnv("PORT", "4007"),
+		VarDir:             getEnv("VAR_DIR", "/var"),
+		PredefinedDir:      getEnv("PREDEFINED_DIR", "/scenarios"),
+		DvtpConsumerPeerID: getEnv("DVTP_CONSUMER_PEER_ID", defaultDvtpConsumerPeerID),
+		CitizensFile:       getEnv("CITIZENS_FILE", "/citizens/citizens.json"),
+		OrganizationsFile:  getEnv("ORGANIZATIONS_FILE", "/orgs/organizations.json"),
+		LokiURL:            getEnv("LOKI_URL", "http://loki:3100"),
+		LokiDecisionQuery:  getEnv("LOKI_DECISION_QUERY", `{compose_service="openftv-pdp"} |= "Decision Log"`),
+		PoliciesDir:        getEnv("POLICIES_DIR", "/policies"),
+		RulesFile:          getEnv("RULES_FILE", "/rules.json"),
+		FscGroupID:         getEnv("FSC_GROUP_ID", "fsc-demo"),
+		FscTxlogPeers:      peers,
 	}
 }
 
@@ -180,6 +184,35 @@ func loadScenariosFromDir(dir string, userSaved bool) ([]Scenario, error) {
 	return out, nil
 }
 
+// loadPredefinedScenarios injects deployment-specific values into the generic
+// source-controlled scenarios. User-saved scenarios deliberately bypass this
+// function so custom issuance payloads remain exactly as entered.
+func loadPredefinedScenarios(cfg config) ([]Scenario, error) {
+	scenarios, err := loadScenariosFromDir(cfg.PredefinedDir, false)
+	if err != nil {
+		return nil, err
+	}
+	for i := range scenarios {
+		if scenarios[i].Tab != "issuance" {
+			continue
+		}
+		var payload map[string]json.RawMessage
+		if err := json.Unmarshal(scenarios[i].Payload, &payload); err != nil {
+			return nil, fmt.Errorf("decode predefined scenario %q payload: %w", scenarios[i].ID, err)
+		}
+		peerID, err := json.Marshal(cfg.DvtpConsumerPeerID)
+		if err != nil {
+			return nil, fmt.Errorf("encode DvTP consumer Peer ID: %w", err)
+		}
+		payload["dienstverlener_oin"] = peerID
+		scenarios[i].Payload, err = json.Marshal(payload)
+		if err != nil {
+			return nil, fmt.Errorf("encode predefined scenario %q payload: %w", scenarios[i].ID, err)
+		}
+	}
+	return scenarios, nil
+}
+
 func handleScenarios(cfg config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		corsHeaders(w)
@@ -187,7 +220,11 @@ func handleScenarios(cfg config) http.HandlerFunc {
 		case http.MethodOptions:
 			w.WriteHeader(http.StatusNoContent)
 		case http.MethodGet:
-			pre, _ := loadScenariosFromDir(cfg.PredefinedDir, false)
+			pre, err := loadPredefinedScenarios(cfg)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
 			userScenariosMu.RLock()
 			usr, _ := loadScenariosFromDir(userScenariosDir(cfg), true)
 			userScenariosMu.RUnlock()
@@ -986,7 +1023,8 @@ func main() {
 		ReadHeaderTimeout: readHeaderTimeout,
 		BaseContext:       func(net.Listener) context.Context { return baseCtx },
 	}
-	slog.Info("dev-portal-backend starting", "addr", srv.Addr, "var_dir", cfg.VarDir, "predefined_dir", cfg.PredefinedDir)
+	slog.Info("dev-portal-backend starting", "addr", srv.Addr, "var_dir", cfg.VarDir, "predefined_dir", cfg.PredefinedDir,
+		"dvtp_consumer_peer_id", cfg.DvtpConsumerPeerID)
 	serve(srv, endStreams)
 }
 
