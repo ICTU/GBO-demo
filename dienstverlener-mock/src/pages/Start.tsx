@@ -1,4 +1,5 @@
 import { buildPortalUrl, configuredConsumerPeerID } from '../lib/buildPortalUrl'
+import { ChecklistItem, CompletedDossierItems, DossierUser, HeaderBar } from '../components/dossier'
 
 const VALID_UNTIL_90D = new Date(Date.now() + 90 * 24 * 3600 * 1000).toISOString()
 
@@ -19,15 +20,7 @@ export default function Start() {
 
   return (
     <div className="hb-shell">
-      <header className="hb-header">
-        <div className="hb-header-left">
-          <span className="hb-logo">H</span>
-          <span className="hb-brand">Hypotheek-BV</span>
-        </div>
-        <div className="hb-header-right">
-          <span className="user-icon" aria-hidden /> J. de Vries · Mijn dossier
-        </div>
-      </header>
+      <HeaderBar right={<DossierUser />} />
 
       <main className="hb-main">
         <div className="hb-eyebrow">Mijn dossier · Hypotheekaanvraag</div>
@@ -37,34 +30,13 @@ export default function Start() {
         </p>
 
         <ul className="hb-checklist" role="list">
-          <li className="hb-check-item">
-            <span className="hb-check-icon done" aria-hidden>✓</span>
-            <div className="hb-check-body">
-              <div className="hb-check-title">Persoonlijke gegevens</div>
-              <div className="hb-check-meta">Naam, adres, contactgegevens</div>
-            </div>
-            <span className="hb-check-status done">Compleet</span>
-          </li>
-
-          <li className="hb-check-item">
-            <span className="hb-check-icon done" aria-hidden>✓</span>
-            <div className="hb-check-body">
-              <div className="hb-check-title">Woning &amp; aankoop</div>
-              <div className="hb-check-meta">
-                Aankoopprijs € 425.000 · gewenste hypotheek € 380.000
-              </div>
-            </div>
-            <span className="hb-check-status done">Compleet</span>
-          </li>
-
-          <li className="hb-check-item pending">
-            <span className="hb-check-icon todo" aria-hidden>+</span>
-            <div className="hb-check-body">
-              <div className="hb-check-title">Inkomensgegevens</div>
-              <div className="hb-check-meta">Inkomstenbelasting 2024 en 2025</div>
-            </div>
-            <span className="hb-check-status todo">Nog aanvullen</span>
-          </li>
+          <CompletedDossierItems />
+          <ChecklistItem
+            state="todo"
+            title="Inkomensgegevens"
+            meta="Inkomstenbelasting 2024 en 2025"
+            status="Nog aanvullen"
+          />
         </ul>
 
         <section className="hb-cta">
