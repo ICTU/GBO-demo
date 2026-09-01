@@ -93,19 +93,22 @@ type config struct {
 	SourceMetadataFreshUntil      time.Time
 	SourceMetadataStaleUntil      time.Time
 
-	SourceActivationPath  string
-	SourceActivationsPath string
-	TypeMetadataStorePath string
-	IssuanceOffersPath    string
+	SourceRegistryDatabaseURL string
+	SourceRegistrySchema      string
+	SourceRegistryRefresh     time.Duration
 }
 
 func loadConfig() config {
+	refresh, err := time.ParseDuration(getEnv("SOURCE_REGISTRY_REFRESH_INTERVAL", "5s"))
+	if err != nil || refresh <= 0 {
+		refresh = 5 * time.Second
+	}
 	return config{
-		Port:                  getEnv("PORT", "4009"),
-		OutwayURL:             getEnv("FSC_OUTWAY_URL", "http://edi-outway:8080"),
-		SourceActivationsPath: os.Getenv("SOURCE_ACTIVATIONS_PATH"),
-		TypeMetadataStorePath: getEnv("TYPE_METADATA_STORE_PATH", "/var/lib/gbo/type-metadata"),
-		IssuanceOffersPath:    os.Getenv("EUDI_OFFERS_PATH"),
+		Port:                      getEnv("PORT", "4009"),
+		OutwayURL:                 getEnv("FSC_OUTWAY_URL", "http://edi-outway:8080"),
+		SourceRegistryDatabaseURL: os.Getenv("SOURCE_REGISTRY_DATABASE_URL"),
+		SourceRegistrySchema:      getEnv("SOURCE_REGISTRY_SCHEMA", "source_registry"),
+		SourceRegistryRefresh:     refresh,
 	}
 }
 
@@ -290,43 +293,6 @@ func logSourceAttestationError(r *http.Request, stage string, err error) {
 type sourceRuntimeBinding struct {
 	config  config
 	runtime sourceMetadataRuntime
-}
-
-func handleSourceAttestations(client *http.Client, bindings []sourceRuntimeBinding, unavailable error) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		for _, binding := range bindings {
-			if binding.config.SourceMetadataSourceID == r.PathValue("sourceID") && binding.config.SourceMetadataTypeID == r.PathValue("typeID") {
-				handleSourceAttestation(binding.config, client, binding.runtime).ServeHTTP(w, r)
-				return
-			}
-		}
-		if unavailable != nil {
-			http.Error(w, "source activations unavailable", http.StatusServiceUnavailable)
-			return
-		}
-		http.NotFound(w, r)
-	}
-}
-
-type sourceTypeMetadataHandler struct {
-	bindings []sourceRuntimeBinding
-}
-
-func (h sourceTypeMetadataHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/types/"), "/")
-	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
-		http.NotFound(w, r)
-		return
-	}
-	for _, binding := range h.bindings {
-		if binding.config.SourceMetadataSourceID == parts[0] && binding.config.SourceMetadataTypeID == parts[1] {
-			if publisher, ok := binding.runtime.(http.Handler); ok {
-				publisher.ServeHTTP(w, r)
-				return
-			}
-		}
-	}
-	http.NotFound(w, r)
 }
 
 // newFscTransactionID returns a UUID **v7** (time-ordered) — the
@@ -538,75 +504,6 @@ func initTracer(ctx context.Context) (func(context.Context) error, error) {
 	return tp.Shutdown, nil
 }
 
-// newMux builds the routing tree for one activated source runtime. Production
-// uses newRuntimeMux for all activations; tests use this smaller constructor.
-func newMux(cfg config, client *http.Client, metadataRuntime sourceMetadataRuntime) *http.ServeMux {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":"ok"}`))
-	})
-	if cfg.IssuanceOffersPath != "" {
-		mux.HandleFunc("GET /eudi-offers.json", handleIssuanceOffers(cfg.IssuanceOffersPath))
-	}
-	if metadataRuntime != nil {
-		mux.HandleFunc("POST /attestations/{sourceID}/{typeID}", handleSourceAttestation(cfg, client, metadataRuntime))
-	}
-	if publisher, ok := metadataRuntime.(http.Handler); ok {
-		mux.Handle("/types/", publisher)
-	}
-	return mux
-}
-
-func handleIssuanceOffers(path string) http.HandlerFunc {
-	return func(w http.ResponseWriter, _ *http.Request) {
-		body, err := os.ReadFile(path)
-		if err != nil {
-			http.Error(w, "issuance offers unavailable", http.StatusServiceUnavailable)
-			return
-		}
-		if !json.Valid(body) {
-			http.Error(w, "issuance offers invalid", http.StatusServiceUnavailable)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Cache-Control", "no-store")
-		_, _ = w.Write(body)
-	}
-}
-
-// newRuntimeMux always activates onboarded source metadata. If loading or a
-// later snapshot reload fails, the source route remains fail-closed; it never
-// falls back to a catalog query or formatter.
-func newRuntimeMux(ctx context.Context, cfg config, client *http.Client) *http.ServeMux {
-	_ = ctx
-	activatedConfigs, activationErr := configsFromSourceActivations(cfg)
-	if activationErr != nil {
-		slog.Error("active source registrations invalid; all source routes remain fail-closed", "err", activationErr.Error())
-		mux := newMux(cfg, client, nil)
-		mux.HandleFunc("POST /attestations/{sourceID}/{typeID}", handleSourceAttestations(client, nil, activationErr))
-		mux.Handle("/types/", newUnavailableSourceMetadataRuntime("", "", cfg.TypeMetadataStorePath, activationErr))
-		return mux
-	}
-	bindings := make([]sourceRuntimeBinding, 0, len(activatedConfigs))
-	for _, activatedConfig := range activatedConfigs {
-		runtime, err := newActivatedSourceRuntime(activatedConfig)
-		if err != nil {
-			slog.Error("activated source snapshot is invalid; source route remains fail-closed", "source_id", activatedConfig.SourceMetadataSourceID, "source_oin", activatedConfig.SourceMetadataOIN, "type_id", activatedConfig.SourceMetadataTypeID, "err", err.Error())
-			bindings = append(bindings, sourceRuntimeBinding{activatedConfig, newUnavailableSourceMetadataRuntime(
-				activatedConfig.SourceMetadataSourceID, activatedConfig.SourceMetadataTypeID, activatedConfig.TypeMetadataStorePath, err,
-			)})
-			continue
-		}
-		slog.Info("source snapshot activated", "source_id", activatedConfig.SourceMetadataSourceID, "source_oin", activatedConfig.SourceMetadataOIN, "type_id", activatedConfig.SourceMetadataTypeID)
-		bindings = append(bindings, sourceRuntimeBinding{activatedConfig, runtime})
-	}
-	mux := newMux(cfg, client, nil)
-	mux.HandleFunc("POST /attestations/{sourceID}/{typeID}", handleSourceAttestations(client, bindings, nil))
-	mux.Handle("/types/", sourceTypeMetadataHandler{bindings: bindings})
-	return mux
-}
-
 // fatal logs and ends the process. main is the only place in this service
 // that exits; everything else returns an error.
 func fatal(msg string, err error) {
@@ -617,9 +514,21 @@ func fatal(msg string, err error) {
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if handled, err := runIssuanceConfigCommand(os.Args[1:], os.Stdout, os.Stderr); handled {
+	if handled, err := runIssuanceReleaseCommand(ctx, os.Args[1:], os.Stdout, os.Stderr); handled {
 		if err != nil {
-			fatal("issuance configuration generation failed", err)
+			fatal("issuance Source Release materialization failed", err)
+		}
+		return
+	}
+	if handled, err := runSourceRegistryMigrateCommand(ctx, os.Args[1:], os.Stdout, os.Stderr); handled {
+		if err != nil {
+			fatal("source registry migration failed", err)
+		}
+		return
+	}
+	if handled, err := runSourceRegistryOperationsCommand(ctx, os.Args[1:], os.Stdout, os.Stderr); handled {
+		if err != nil {
+			fatal("Source Registry operation failed", err)
 		}
 		return
 	}
@@ -636,6 +545,9 @@ func main() {
 		return
 	}
 	cfg := loadConfig()
+	if cfg.SourceRegistryDatabaseURL == "" {
+		fatal("Source Registry configuration missing", fmt.Errorf("SOURCE_REGISTRY_DATABASE_URL is required"))
+	}
 	shutdown, err := initTracer(ctx)
 	if err != nil {
 		slog.Error("tracer init failed", "err", err.Error())
@@ -647,11 +559,17 @@ func main() {
 		Timeout:   10 * time.Second,
 		Transport: otelhttp.NewTransport(http.DefaultTransport),
 	}
+	registry, err := openRuntimeSourceRegistry(ctx, cfg)
+	if err != nil {
+		fatal("open Source Registry", err)
+	}
+	defer registry.Close()
+	runtimeHandler := http.Handler(newSourceReleaseRuntimeMux(ctx, cfg, client, registry))
 	// Middleware order: withFscTraceContext wraps otelhttp — the header
 	// mutation must happen before otelhttp extracts the parent context.
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           withFscTraceContext(otelhttp.NewHandler(newRuntimeMux(ctx, cfg, client), "eudi-adapter")),
+		Handler:           withFscTraceContext(otelhttp.NewHandler(runtimeHandler, "eudi-adapter")),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 	slog.Info("eudi-adapter starting", "addr", srv.Addr, "outway", cfg.OutwayURL)

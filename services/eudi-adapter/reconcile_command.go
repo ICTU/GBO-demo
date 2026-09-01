@@ -2,40 +2,41 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
+
+	onboardingcore "gbo-demo/eudi-adapter/internal/onboarding"
+	"gbo-demo/eudi-adapter/internal/postgresregistry"
 )
 
 type reconcileOptions struct {
-	managerURL       string
-	managerCAPath    string
-	managerCertPath  string
-	managerKeyPath   string
-	consumerPeerID   string
-	outwayURL        string
-	schemaPath       string
-	publicBaseURL    string
-	storageBackend   string
-	certificateStore string
-	stateDir         string
-	secretsDir       string
-	readerPublicURL  string
-	sourcesDir       string
-	autoPromote      bool
-	issuanceTemplate string
-	issuanceOutput   string
-	offersOutput     string
-	once             bool
-	watch            bool
-	interval         time.Duration
+	managerURL         string
+	managerCAPath      string
+	managerCertPath    string
+	managerKeyPath     string
+	consumerPeerID     string
+	outwayURL          string
+	schemaPath         string
+	publicBaseURL      string
+	storageBackend     string
+	certificateStore   string
+	secretsDir         string
+	readerPublicURL    string
+	sourcesDir         string
+	databaseURL        string
+	databaseSchema     string
+	databaseReaderRole string
+	migrate            bool
+	autoPromote        bool
+	once               bool
+	watch              bool
+	interval           time.Duration
 }
 
 type reconcileDependencies struct {
@@ -65,18 +66,38 @@ func runReconcileCommand(ctx context.Context, arguments []string, dependencies r
 		return true, err
 	}
 	onboarding := onboardingOptions{
-		storageBackend: options.storageBackend, certificateStoreName: options.certificateStore,
-		stateDir: options.stateDir, secretsDir: options.secretsDir,
-		readerPublicURL: options.readerPublicURL,
+		certificateStoreName: options.certificateStore,
+		secretsDir:           options.secretsDir,
+		readerPublicURL:      options.readerPublicURL,
 	}
 	store, err := configuredCertificateStore(onboarding)
 	if err != nil {
 		return true, err
 	}
-	backend, err := configuredActivationBackend(onboarding)
+	var backend activationBackend
+	var statuses sourceStatusWriter
+	var registry onboardingcore.SourceRegistry
+	if options.certificateStore != "public-filesystem" {
+		return true, fmt.Errorf("registry-backed reconciliation requires --certificate-store=public-filesystem")
+	}
+	postgresStore, err := postgresregistry.Open(ctx, postgresregistry.Options{DatabaseURL: options.databaseURL, Schema: options.databaseSchema})
 	if err != nil {
 		return true, err
 	}
+	defer postgresStore.Close()
+	registry = postgresStore
+	if options.migrate {
+		if err := postgresStore.Migrate(ctx); err != nil {
+			return true, err
+		}
+		if options.databaseReaderRole != "" {
+			if err := postgresStore.GrantReadOnly(ctx, options.databaseReaderRole); err != nil {
+				return true, err
+			}
+		}
+	}
+	backend = newRegistryActivationBackend(ctx, registry)
+	statuses = registryStatusWriter{ctx: ctx, registry: registry}
 	var managerClient *http.Client
 	reconcile := func() error {
 		sources, err := loadSourceConfigurations(options.sourcesDir)
@@ -106,21 +127,27 @@ func runReconcileCommand(ctx context.Context, arguments []string, dependencies r
 			managerURL: options.managerURL, consumerPeerID: options.consumerPeerID, outwayURL: options.outwayURL,
 			schemaPath: options.schemaPath, publicBaseURL: options.publicBaseURL,
 			sources: sources, store: store, backend: backend,
-			statuses: newFilesystemSourceStatusWriter(options.stateDir),
+			statuses: statuses,
 		}
 		if err := reconciler.Reconcile(ctx, dependencies.now()); err != nil {
 			return err
 		}
-		_, _ = fmt.Fprintln(dependencies.stdout, "source reconciliation completed")
 		if options.autoPromote {
-			promoted, err := autoPromoteReconciledSources(options)
-			if err != nil {
-				return fmt.Errorf("auto-promote reconciled sources: %w", err)
+			sourceIDs := make([]string, len(sources))
+			for index, source := range sources {
+				sourceIDs[index] = source.SourceID
 			}
-			if promoted {
-				_, _ = fmt.Fprintln(dependencies.stdout, "source candidates automatically promoted; restart issuance runtimes to load the generated revision")
+			promotion, err := onboardingcore.PromoteCompleteSourceSet(ctx, registry, sourceIDs, dependencies.now())
+			if err != nil {
+				return fmt.Errorf("promote complete source release: %w", err)
+			}
+			if promotion.Activated {
+				_, _ = fmt.Fprintf(dependencies.stdout, "source release %s activated\n", promotion.Release.ID)
+			} else {
+				_, _ = fmt.Fprintf(dependencies.stdout, "source release %s already exists; preserving operator-selected active release\n", promotion.Release.ID)
 			}
 		}
+		_, _ = fmt.Fprintln(dependencies.stdout, "source reconciliation completed")
 		return nil
 	}
 	if !options.watch {
@@ -155,16 +182,16 @@ func parseReconcileOptions(arguments []string, errorOutput io.Writer) (reconcile
 	set.StringVar(&options.outwayURL, "outway-url", getEnv("FSC_OUTWAY_URL", "http://localhost:8087"), "FSC Outway base URL")
 	set.StringVar(&options.schemaPath, "schema", "schemas/gbo-source-metadata-v1.schema.json", "source metadata JSON Schema")
 	set.StringVar(&options.publicBaseURL, "type-metadata-base-url", "", "public Type Metadata base URL")
-	set.StringVar(&options.storageBackend, "storage-backend", getEnv("ONBOARDING_STORAGE_BACKEND", "filesystem"), "onboarding state backend")
-	set.StringVar(&options.certificateStore, "certificate-store", getEnv("ONBOARDING_CERTIFICATE_STORE", "filesystem"), "store containing manually provisioned certificates")
-	set.StringVar(&options.stateDir, "state-dir", ".local/onboarding", "filesystem onboarding state directory")
+	set.StringVar(&options.storageBackend, "storage-backend", getEnv("ONBOARDING_STORAGE_BACKEND", "postgres"), "onboarding state backend (must be postgres)")
+	set.StringVar(&options.certificateStore, "certificate-store", getEnv("ONBOARDING_CERTIFICATE_STORE", "public-filesystem"), "public certificate store")
 	set.StringVar(&options.secretsDir, "secrets-dir", ".local/secrets", "filesystem secret directory")
 	set.StringVar(&options.readerPublicURL, "reader-public-url", os.Getenv("EUDI_PUBLIC_URL"), "public issuance-server URL")
 	set.StringVar(&options.sourcesDir, "sources-dir", getEnv("SOURCE_CONFIGURATIONS_PATH", "sources/configured"), "directory containing manually managed source configurations")
-	set.BoolVar(&options.autoPromote, "auto-promote", false, "automatically generate and promote a fully reconciled source set (demo environments only)")
-	set.StringVar(&options.issuanceTemplate, "issuance-template", os.Getenv("EUDI_ISSUANCE_TEMPLATE"), "issuance-server TOML template used by --auto-promote")
-	set.StringVar(&options.issuanceOutput, "issuance-output", os.Getenv("EUDI_ISSUANCE_CONFIG_OUTPUT"), "generated issuance-server TOML used by --auto-promote")
-	set.StringVar(&options.offersOutput, "offers-output", os.Getenv("EUDI_OFFERS_OUTPUT"), "generated public offer catalog used by --auto-promote")
+	set.StringVar(&options.databaseURL, "database-url", os.Getenv("SOURCE_REGISTRY_DATABASE_URL"), "PostgreSQL Source Registry connection URL")
+	set.StringVar(&options.databaseSchema, "database-schema", getEnv("SOURCE_REGISTRY_SCHEMA", "source_registry"), "PostgreSQL Source Registry schema")
+	set.StringVar(&options.databaseReaderRole, "database-reader-role", os.Getenv("SOURCE_REGISTRY_READER_ROLE"), "runtime PostgreSQL role that receives read-only release access when migrations run")
+	set.BoolVar(&options.migrate, "migrate", false, "apply Source Registry migrations under an advisory lock before reconciliation")
+	set.BoolVar(&options.autoPromote, "auto-promote", false, "atomically promote the complete valid source set after reconciliation")
 	set.BoolVar(&options.once, "once", false, "run one reconciliation and exit")
 	set.BoolVar(&options.watch, "watch", false, "reconcile at startup and continuously watch for source and metadata changes")
 	set.DurationVar(&options.interval, "interval", 30*time.Second, "poll interval in watch mode")
@@ -192,59 +219,14 @@ func parseReconcileOptions(arguments []string, errorOutput io.Writer) (reconcile
 	if options.once == options.watch {
 		return reconcileOptions{}, fmt.Errorf("exactly one of --once or --watch is required")
 	}
-	if options.autoPromote {
-		for name, value := range map[string]string{
-			"--issuance-template": options.issuanceTemplate,
-			"--issuance-output":   options.issuanceOutput,
-			"--offers-output":     options.offersOutput,
-		} {
-			if strings.TrimSpace(value) == "" {
-				return reconcileOptions{}, fmt.Errorf("%s is required with --auto-promote", name)
-			}
-		}
+	if options.storageBackend != "postgres" {
+		return reconcileOptions{}, fmt.Errorf("--storage-backend must be postgres; filesystem onboarding state is no longer supported")
+	}
+	if strings.TrimSpace(options.databaseURL) == "" {
+		return reconcileOptions{}, fmt.Errorf("--database-url is required for PostgreSQL onboarding storage")
+	}
+	if options.databaseReaderRole != "" && !options.migrate {
+		return reconcileOptions{}, fmt.Errorf("--database-reader-role requires --migrate")
 	}
 	return options, nil
-}
-
-func autoPromoteReconciledSources(options reconcileOptions) (bool, error) {
-	statusDir := filepath.Join(options.stateDir, "status")
-	required, err := hasRolloutRequiredStatus(statusDir)
-	if err != nil || !required {
-		return false, err
-	}
-	err = generateIssuanceConfig(issuanceConfigOptions{
-		activationsDir: filepath.Join(options.stateDir, "candidates"),
-		activeDir:      filepath.Join(options.stateDir, "active"),
-		sourcesDir:     options.sourcesDir,
-		statusDir:      statusDir,
-		templatePath:   options.issuanceTemplate,
-		adapterBaseURL: options.publicBaseURL,
-		outputPath:     options.issuanceOutput,
-		offersPath:     options.offersOutput,
-	})
-	return err == nil, err
-}
-
-func hasRolloutRequiredStatus(directory string) (bool, error) {
-	entries, err := os.ReadDir(directory)
-	if err != nil {
-		return false, fmt.Errorf("read source statuses: %w", err)
-	}
-	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
-			continue
-		}
-		body, err := os.ReadFile(filepath.Join(directory, entry.Name()))
-		if err != nil {
-			return false, fmt.Errorf("read source status %q: %w", entry.Name(), err)
-		}
-		var status sourceReconcileStatus
-		if err := json.Unmarshal(body, &status); err != nil {
-			return false, fmt.Errorf("parse source status %q: %w", entry.Name(), err)
-		}
-		if status.State == sourceStateRolloutRequired {
-			return true, nil
-		}
-	}
-	return false, nil
 }

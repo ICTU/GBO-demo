@@ -3,7 +3,6 @@ package onboarding
 import (
 	"context"
 	"errors"
-	"io/fs"
 	"strings"
 	"testing"
 	"time"
@@ -137,7 +136,7 @@ func TestReconcileIsolatesMissingCertificateSet(t *testing.T) {
 	metadata := &testMetadata{responses: map[string]MetadataResponse{
 		"http://healthy.example/metadata": {Payload: []byte(`{}`)},
 	}, errors: map[string]error{}}
-	certificates := &testCertificates{errors: map[string]error{"missing": fs.ErrNotExist}}
+	certificates := &testCertificates{errors: map[string]error{"missing": ErrCertificateNotFound}}
 	activations := &testActivations{candidates: map[string]*testCandidate{}}
 	statuses := &testStatuses{bySource: map[string]Status{}}
 	service := newTestService(t, sources, testContracts{}, metadata, certificates, activations, statuses)

@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -413,8 +412,7 @@ func TestReconcilerUsesETagAndRefreshesCandidateLifetime(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(document)
 	}))
 	defer source.Close()
-	stateDir := t.TempDir()
-	backend := newFilesystemActivationBackend(stateDir)
+	backend := newMemoryActivationBackend()
 	statuses := &capturingSourceStatusWriter{}
 	reconciler := &sourceReconciler{
 		sourceClient: source.Client(), schemaPath: "../../schemas/gbo-source-metadata-v1.schema.json", publicBaseURL: "https://issuer.example",
@@ -479,8 +477,7 @@ func TestFSCNotModifiedRefreshesResolvedGrantHashes(t *testing.T) {
 	}))
 	defer source.Close()
 
-	stateDir := t.TempDir()
-	backend := newFilesystemActivationBackend(stateDir)
+	backend := newMemoryActivationBackend()
 	reconciler := &sourceReconciler{
 		managerClient: manager.Client(), sourceClient: source.Client(), managerURL: manager.URL,
 		consumerPeerID: testConsumerPeerID, outwayURL: source.URL,
@@ -495,23 +492,17 @@ func TestFSCNotModifiedRefreshesResolvedGrantHashes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	initialBody, err := json.Marshal(initial)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := writeFileAtomically(filepath.Join(stateDir, "active"), "belastingdienst.json", initialBody, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	backend.setActive(initial)
 
 	contractVersion = 2
 	if err := reconciler.Reconcile(context.Background(), now.Add(10*time.Minute)); err != nil {
 		t.Fatalf("conditional reconcile: %v", err)
 	}
-	for label, activationPath := range map[string]string{
-		"candidate": filepath.Join(stateDir, "candidates", "belastingdienst.json"),
-		"active":    filepath.Join(stateDir, "active", "belastingdienst.json"),
+	for label, load := range map[string]func(string) (*sourceActivation, error){
+		"candidate": backend.CurrentCandidate,
+		"active":    backend.activeCandidate,
 	} {
-		activation, err := loadSourceActivation(activationPath)
+		activation, err := load("belastingdienst")
 		if err != nil {
 			t.Fatalf("load %s activation: %v", label, err)
 		}
@@ -578,7 +569,7 @@ func TestReconcilerKeepsLastCandidateDuringStaleGrace(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(document)
 	}))
 	defer source.Close()
-	backend := newFilesystemActivationBackend(t.TempDir())
+	backend := newMemoryActivationBackend()
 	statuses := &capturingSourceStatusWriter{}
 	reconciler := &sourceReconciler{
 		sourceClient: source.Client(), schemaPath: "../../schemas/gbo-source-metadata-v1.schema.json", publicBaseURL: "https://issuer.example",

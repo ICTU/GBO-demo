@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -227,88 +226,6 @@ func addManagedCredentialSchema(metadata map[string]any, vct string) error {
 	return nil
 }
 
-func restoreTypeMetadataPublication(body []byte) (*typeMetadataPublication, error) {
-	var metadata map[string]any
-	if err := json.Unmarshal(body, &metadata); err != nil {
-		return nil, fmt.Errorf("parse stored Type Metadata: %w", err)
-	}
-	vct, ok := metadata["vct"].(string)
-	if !ok || vct == "" {
-		return nil, fmt.Errorf("stored Type Metadata has no vct")
-	}
-	parsed, err := url.Parse(vct)
-	if err != nil || !strings.HasPrefix(parsed.Path, "/types/") {
-		return nil, fmt.Errorf("stored Type Metadata has an invalid vct")
-	}
-	digest := sha256.Sum256(body)
-	return &typeMetadataPublication{
-		VCT:       vct,
-		Integrity: "sha256-" + base64.StdEncoding.EncodeToString(digest[:]),
-		body:      body,
-		etag:      `"` + fmt.Sprintf("%x", digest) + `"`,
-		path:      parsed.Path,
-	}, nil
-}
-
-func loadTypeMetadataPublications(directory string) (map[string]*typeMetadataPublication, error) {
-	if err := os.MkdirAll(directory, 0o755); err != nil {
-		return nil, fmt.Errorf("create Type Metadata store: %w", err)
-	}
-	entries, err := os.ReadDir(directory)
-	if err != nil {
-		return nil, fmt.Errorf("read Type Metadata store: %w", err)
-	}
-	publications := make(map[string]*typeMetadataPublication)
-	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
-			continue
-		}
-		body, err := os.ReadFile(filepath.Join(directory, entry.Name()))
-		if err != nil {
-			return nil, fmt.Errorf("read stored Type Metadata %q: %w", entry.Name(), err)
-		}
-		publication, err := restoreTypeMetadataPublication(body)
-		if err != nil {
-			return nil, fmt.Errorf("restore Type Metadata %q: %w", entry.Name(), err)
-		}
-		if entry.Name() != typeMetadataFilename(publication) {
-			return nil, fmt.Errorf("stored Type Metadata %q failed its filename integrity check", entry.Name())
-		}
-		if existing := publications[publication.path]; existing != nil && !bytes.Equal(existing.body, publication.body) {
-			return nil, fmt.Errorf("type metadata store contains conflicting bytes for %q", publication.path)
-		}
-		publications[publication.path] = publication
-	}
-	return publications, nil
-}
-
-func persistTypeMetadataPublication(directory string, publication *typeMetadataPublication) error {
-	path := filepath.Join(directory, typeMetadataFilename(publication))
-	pathDigest := sha256.Sum256([]byte(publication.path))
-	prefix := hex.EncodeToString(pathDigest[:]) + "-"
-	entries, err := os.ReadDir(directory)
-	if err != nil {
-		return fmt.Errorf("read Type Metadata store: %w", err)
-	}
-	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), prefix) && entry.Name() != filepath.Base(path) {
-			return fmt.Errorf("type metadata URL %q already has different stored bytes", publication.path)
-		}
-	}
-	if existing, err := os.ReadFile(path); err == nil {
-		if !bytes.Equal(existing, publication.body) {
-			return fmt.Errorf("type metadata URL %q already has different stored bytes", publication.path)
-		}
-		return nil
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("read immutable Type Metadata: %w", err)
-	}
-	if err := writeFileAtomically(directory, filepath.Base(path), publication.body, 0o644); err != nil {
-		return fmt.Errorf("persist immutable Type Metadata: %w", err)
-	}
-	return nil
-}
-
 func writeFileAtomically(directory, filename string, body []byte, mode os.FileMode) error {
 	temporary, err := os.CreateTemp(directory, ".atomic-*.tmp")
 	if err != nil {
@@ -346,12 +263,6 @@ func writeFileAtomically(directory, filename string, body []byte, mode os.FileMo
 		return fmt.Errorf("close activation directory: %w", err)
 	}
 	return nil
-}
-
-func typeMetadataFilename(publication *typeMetadataPublication) string {
-	pathDigest := sha256.Sum256([]byte(publication.path))
-	bodyDigest := sha256.Sum256(publication.body)
-	return hex.EncodeToString(pathDigest[:]) + "-" + hex.EncodeToString(bodyDigest[:]) + ".json"
 }
 
 func (p *typeMetadataPublication) ServeHTTP(w http.ResponseWriter, r *http.Request) {

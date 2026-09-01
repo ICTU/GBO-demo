@@ -125,7 +125,7 @@ def main():
 
     env_path.write_text("\n".join(kept) + ("\n" if ends_with_newline else ""))
     print(f"wrote:  {env_path}  ({len(wanted)} keys set, {len(removed)} duplicates removed)")
-    print("next:   make eudi-config && docker compose --profile eudi restart eudi-issuance-server")
+    print("next:   make onboard-demo-sources && make eudi-config")
 
 
 if __name__ == "__main__":

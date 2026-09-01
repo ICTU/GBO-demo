@@ -19,8 +19,10 @@ func TestCoreHasNoInfrastructureImports(t *testing.T) {
 		t.Fatal(err)
 	}
 	forbidden := map[string]bool{
+		"database/sql":  true,
 		"crypto/tls":    true,
 		"flag":          true,
+		"io/fs":         true,
 		"net/http":      true,
 		"os":            true,
 		"path/filepath": true,
@@ -42,6 +44,10 @@ func TestCoreHasNoInfrastructureImports(t *testing.T) {
 			if forbidden[path] {
 				position := files.Position(imported.Pos())
 				t.Errorf("%s imports infrastructure package %q at %s", entry.Name(), path, position)
+			}
+			if strings.Contains(path, "pgx") || strings.Contains(path, "postgres") {
+				position := files.Position(imported.Pos())
+				t.Errorf("%s imports persistence package %q at %s", entry.Name(), path, position)
 			}
 		}
 	}

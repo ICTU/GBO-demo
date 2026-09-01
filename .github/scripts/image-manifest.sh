@@ -93,7 +93,7 @@ developer-portal|./developer-portal|./developer-portal/Dockerfile|developer-port
 dienstverlener-backend|./services/dienstverlener-backend|./services/dienstverlener-backend/Dockerfile|services/dienstverlener-backend|linux/amd64|false|dienstverlener-backend
 dienstverlener-mock|./dienstverlener-mock|./dienstverlener-mock/Dockerfile|dienstverlener-mock|linux/amd64|false|dienstverlener-mock
 dvtp-onboarding-register|./services/dvtp-onboarding-register|./services/dvtp-onboarding-register/Dockerfile|services/dvtp-onboarding-register|linux/amd64|false|dvtp-onboarding-register
-eudi-adapter|./services/eudi-adapter|./services/eudi-adapter/Dockerfile|services/eudi-adapter|linux/amd64|false|eudi-adapter
+eudi-adapter|.|./services/eudi-adapter/Dockerfile|services/eudi-adapter|linux/amd64|false|eudi-adapter
 graphql-server|./services/graphql-server|./services/graphql-server/Dockerfile|services/graphql-server|linux/amd64|false|graphql-server
 landing-page|./landing-page|./landing-page/Dockerfile|landing-page|linux/amd64|false|landing-page
 openftv-manager|.|./services/openftv-manager/Dockerfile|services/openftv-manager|linux/amd64|false|openftv-manager

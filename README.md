@@ -29,8 +29,8 @@ For every mode:
 - Docker with the Compose plugin;
 - Git, Make, Bash, `curl`, `jq`, OpenSSL and Python 3.9 or newer;
 - a local `.env` copied from `.env.example`;
-- a non-empty `EUDI_POSTGRES_PASSWORD` in `.env` (Compose requires it even
-  when the EUDI profile is not selected).
+- non-empty `EUDI_POSTGRES_PASSWORD`, `SOURCE_REGISTRY_PASSWORD` and
+  `SOURCE_REGISTRY_READER_PASSWORD` values in `.env`.
 
 The complete EUDI flow additionally requires:
 
@@ -61,6 +61,8 @@ Set the required values in `.env`:
 EUDI_PUBLIC_URL=https://eudi-is.example.org/
 EUDI_BRI_URL=https://eudi-bri.example.org/
 EUDI_POSTGRES_PASSWORD=<local-random-password>
+SOURCE_REGISTRY_PASSWORD=<local-random-writer-password>
+SOURCE_REGISTRY_READER_PASSWORD=<local-random-reader-password>
 ```
 
 Before starting an EUDI demo, provide the issuer and reader CA material that
@@ -82,8 +84,9 @@ Setup fails before onboarding when any required CA file is absent.
 
 Those CA private keys are provisioning input, not application runtime input.
 After the issuer, reader and status leaf certificates have been provisioned,
-the source reconciler needs only those leaf keys/certificates and the two public
-CA certificates. A Kubernetes runtime Secret must not contain
+the source reconciler receives only their public certificates and the two
+public CA certificates. Leaf private keys are mounted exclusively into the
+issuance materializer. A Kubernetes runtime Secret must not contain
 `issuer-ca-key.pem` or `reader-ca-key.pem`.
 
 `EUDI_PUBLIC_URL` must route to the issuance server and its hostname must be in
@@ -254,8 +257,9 @@ Common fixes:
 
 - use `make demo-full` or the matching `demo-*` target instead of starting
   individual containers;
-- after changing source metadata, rerun `make onboard-demo-sources` followed
-  by `make eudi-config` and restart the EUDI services;
+- after changing source metadata, rerun `make onboard-demo-sources`; the
+  adapter observes the promoted release live. Run `make eudi-config` to
+  rematerialize and restart the issuance-server;
 - scan a fresh QR after a restart or metadata change;
 - if Cloudflare reports `HIT` or an increasing `Age` for issuer metadata,
   correct the cache-bypass rule and purge the issuance hostname;

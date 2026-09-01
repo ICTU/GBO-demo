@@ -31,18 +31,19 @@ flowchart LR
     end
 
     subgraph Provider["Bronhouder"]
-        M["GBO-metadata<br/>query, mapping, offers en Type Metadata"]
+        G["GBO-metadata<br/>query, mapping, offers en Type Metadata"]
         D["GraphQL-dataservice"]
     end
 
     subgraph Onboarding["GBO-onboarding"]
         R["Source reconciler"]
         F["FSC Manager en Outway"]
-        P["Gedeelde onboardingopslag<br/>status, candidates, active,<br/>type-metadata en runtime"]
+        P["PostgreSQL Source Registry<br/>status, candidates en<br/>immutable releases"]
     end
 
     subgraph Runtime["EUDI-runtime"]
         A["EUDI-adapter<br/>active snapshots, offers en Type Metadata"]
+        M["Issuance-materializer<br/>release plus private keys"]
         I["nl-wallet issuance-server<br/>gegenereerde TOML bij startup"]
         U["Developer portal en landingspagina"]
     end
@@ -51,13 +52,14 @@ flowchart LR
     K --> R
     C --> F
     R -->|"FSC-metadataverzoek"| F
-    F --> M
-    M --> F
+    F --> G
+    G --> F
     F --> R
     R -->|"gevalideerde candidate"| P
     R -->|"demo auto-promote"| P
     P --> A
-    P --> I
+    P --> M
+    M --> I
     U -->|"GET /eudi-offers.json"| A
     I -->|"attestation request"| A
     A -->|"FSC-dataverzoek"| F
@@ -66,8 +68,10 @@ flowchart LR
 
 De reconciler krijgt bewust geen Kubernetes-APIrechten. Certificaten en
 contracten worden vooraf beheerd; de reconciler leest ze en schrijft uitsluitend
-naar de gedeelde onboardingopslag. Een gecontroleerde restart van de
-issuance-server blijft nodig wanneer de gegenereerde TOML wijzigt.
+naar de Source Registry. De adapter leest de actieve release met een read-only
+database-account. De issuance-materializer combineert diezelfde release met het
+private-key-Secret in een tijdelijk runtimevolume. Een gecontroleerde restart
+van de issuance-server blijft nodig wanneer de actieve release wijzigt.
 
 ## Waarom valideren en activeren twee stappen zijn
 
@@ -163,8 +167,9 @@ sequenceDiagram
     participant R as Source reconciler
     participant F as FSC Manager en Outway
     participant B as Bron
-    participant P as Onboardingopslag
+    participant P as PostgreSQL Source Registry
     participant A as EUDI-adapter
+    participant M as Issuance-materializer
     participant I as Issuance-server
     participant U as Portal
 
@@ -183,28 +188,31 @@ sequenceDiagram
     opt FSC-transport
         R->>F: Controleer het dataservicecontract uit de gevalideerde metadata
     end
-    R->>P: Schrijf candidate en status rollout_required
+    R->>P: Schrijf kandidaat en status rollout_required
     alt Demo met auto-promote
-        R->>P: Controleer alle bronnen en genereer runtimeproducten uit één candidate-set
-        R->>P: Schrijf active snapshots, Type Metadata, offers en issuance-TOML
-        R->>P: Zet status op active
+        R->>P: Maak immutable release en wijzig active_release_id transactioneel
     else Productie met expliciete promotie
-        O->>P: Keur een complete candidate-set goed en promoveer die
+        O->>P: Keur een complete kandidaatset goed en promoveer die
     end
-    P-->>A: Adapter herlaadt bestaande active snapshots periodiek
-    O->>I: Gecontroleerde restart na gewijzigde TOML
-    I->>P: Lees gegenereerde issuance-TOML bij startup
+    A->>P: Poll active release en lifecycle; laad gewijzigd materiaal read-only
+    A->>A: Vervang de in-memory snapshot atomair
+    M->>P: Laad de actieve release read-only
+    M->>M: Combineer release en certificate Secret in emptyDir
+    M-->>I: Schrijf issuance_server.toml en Type Metadata
     U->>A: Vraag dynamische offercatalogus op
     A-->>U: Beschikbare issuance-offers
 ```
 
-De gegenereerde bestanden komen uit één gevalideerde candidate-set en worden
-elk atomisch vervangen. De adapter herlaadt wijzigingen voor reeds bekende
-bronnen periodiek. De issuance-server leest zijn TOML alleen bij het opstarten;
-daarom is daarvoor na promotie een gecontroleerde restart nodig. Wanneer een
-volledig nieuwe bron wordt toegevoegd, moet ook de adapter opnieuw starten om
-de nieuwe bronroutes en bindings te registreren. De frontends hoeven niet te
-herstarten: zij halen de offercatalogus dynamisch bij de adapter op.
+Een promotie schrijft eerst een release met immutable materiaal en wijzigt
+daarna binnen dezelfde databasetransactie de singleton `active_release_id`.
+Een hercontrole die alleen freshness- en stale-grace-tijden verlengt, hergebruikt
+dezelfde release-ID en werkt uitsluitend die lifecycle-observaties bij. De adapter pollt
+de actieve toestand en vervangt zijn in-memory snapshot atomair. Alleen bij een
+gewijzigd release-ID laadt hij het complete materiaal opnieuw; ook volledig
+nieuwe bronnen worden zo zichtbaar zonder restart. De issuance-server leest
+zijn TOML alleen bij het opstarten, dus die pod of container moet na promotie
+wel gecontroleerd worden herstart. De frontends halen de offercatalogus
+dynamisch bij de adapter op en hoeven niet te herstarten.
 
 De reconciler draait bij startup, daarna periodiek met `--watch`, of eenmalig
 met `reconcile-sources --once`. In watch-modus worden de configuratiebestanden
@@ -212,8 +220,7 @@ bij iedere cyclus opnieuw gelezen. `ETag`/`If-None-Match`, monotone versies,
 immutable bytes, freshness en stale grace worden door de reconciler bewaakt;
 de HTTP-issuance-runtime haalt zelf nooit bronmetadata op.
 
-Per bron staat de actuele toestand in
-`.local/onboarding/status/<source_id>.json`:
+Per bron staat de actuele toestand duurzaam in de Source Registry:
 
 - `pending`: de controle is gestart;
 - `rollout_required`: een complete kandidaat wacht op configgeneratie;
@@ -222,18 +229,14 @@ Per bron staat de actuele toestand in
   stale grace;
 - `blocked`: er is geen bruikbare snapshot of stale grace is verstreken.
 
-Deze toestand is applicatiestatus en geen Kubernetes `Condition`. In een
-Kubernetes-deployment staat dezelfde JSON op de duurzame onboardingopslag,
-bijvoorbeeld onder `/state/status/<source_id>.json` in de reconcilerpod. Een
-gezonde reconcilerpod kan dus `Ready` zijn terwijl een bron terecht
-`rollout_required` of `blocked` is. Het deploymentrunbook moet beide niveaus
-controleren.
+Deze toestand is applicatiestatus en geen Kubernetes `Condition`. Een gezonde
+reconcilerpod kan dus `Ready` zijn terwijl een bron terecht `rollout_required`
+of `blocked` is. Het deploymentrunbook moet beide niveaus controleren.
 
-Een fout bij één bron blokkeert reconciliation van andere bronnen niet. De
-handmatige generator behoudt bij `pending` of `stale` een nog bruikbare actieve
-snapshot en laat een `blocked` bron zonder fallback weg; hij faalt als geen
-enkele bron inzetbaar is. Demo-auto-promotie is strenger en draait alleen als
-de volledige reconciliation zonder bronfouten is afgerond.
+Een fout bij één bron beschadigt kandidaten van andere bronnen en de bestaande
+actieve release niet. Promotie van een nieuwe complete release faalt wel wanneer
+een handmatig geconfigureerde bron `pending`, `stale` of `blocked` is; een bron
+kan daardoor niet stil uit de walletproducten verdwijnen.
 
 ## Wat staat waar?
 
@@ -246,9 +249,10 @@ de volledige reconciliation zonder bronfouten is afgerond.
 | GraphQL-endpoint, query, parameters, offers en mapping | `/.well-known/gbo` van de bron |
 | Kaartnaam, kleur, kaartlogo, claimlabels en claimschema | Type Metadata in het brondocument |
 | Getoonde issuernaam en issuerlogo | vooraf beheerde issuer-/readercertificaten |
-| Immutable Type Metadata en kandidaat-/actiefsnapshot | GBO-onboardingopslag |
-| Issuance-producten en QR-keuzelijst | mechanisch gegenereerd uit alle kandidaten |
-| Private keys en certificaten | bevoegde certificaatbeheerder/secretopslag |
+| Kandidaten, statussen, immutable releases, Type Metadata en publieke offercatalogus | PostgreSQL Source Release Registry |
+| Actieve release | transactionele singleton `active_release_id` |
+| Private keys | Kubernetes Secret of lokale secretopslag; uitsluitend gemount in de issuance-materializer |
+| Publieke certificaatidentiteit en SHA-256-digest | Source Release Registry |
 
 De maximale mappingfunctionaliteit staat in
 [`gbo-simple-v1.md`](gbo-simple-v1.md). Onbekende functies en velden worden
@@ -267,57 +271,100 @@ Daarna voert dit target de volledige onboarding uit:
 
 ```sh
 make onboard-demo-sources
-make eudi-config
+make demo-eudi
 ```
 
 Het eerste target start de drie bronnen, maakt de FSC-contracten, maakt
 expliciet lokale leafcertificaten voor `belastingdienst`, `rvig` en
-`demo-unsecured`, en draait één reconciliation. Het tweede target genereert de
-walletproducten en promoveert alle kandidaten naar `active`.
+`demo-unsecured`, draait één reconciliation en promoveert de complete release
+atomair. `demo-eudi` materialiseert de release in een lokale runtimevolume en
+start daarna de issuance-server. Na een latere metadatawijziging voert
+`make eudi-config` de vereiste rematerialisatie en restart uit.
+
+### Inspectie en rollback
+
+Inspecteer uitsluitend de niet-geheime identiteit, versies en freshness van
+de actieve release:
+
+```sh
+docker compose --profile onboarding run --rm source-reconciler \
+  ./eudi-adapter inspect-source-registry
+```
+
+Een eerdere immutable release blijft in PostgreSQL beschikbaar. Activeer die
+atomair met het writer-account door het release-ID uit de inspectie of de
+operationele historie expliciet op te geven:
+
+```sh
+docker compose --profile onboarding run --rm source-reconciler \
+  ./eudi-adapter activate-source-release --release-id=<sha256-release-id>
+```
+
+De adapter neemt de complete release bij zijn volgende refresh over. Draai
+daarna `make eudi-config` om de issuance-configuratie uit dezelfde release te
+rematerialiseren en de issuance-server te herstarten. In Kubernetes gebeurt
+dit door de issuance-pod opnieuw aan te maken, zodat de init-container opnieuw
+draait. Een onbekend release-ID wijzigt de actieve pointer niet.
+
+Een reconciler met `--watch --auto-promote` respecteert deze handmatige
+rollback. Wanneer de huidige kandidaatset al als release bestaat, maar een
+operator een andere bestaande release heeft geactiveerd, laat auto-promotie de
+actieve pointer ongemoeid. Nieuwe kandidaatinhoud maakt een nieuw release-ID en
+wordt wel automatisch geactiveerd; een rollback is dus geen permanente freeze.
 
 ## Productie
 
-Gebruik hetzelfde adapterimage voor twee afzonderlijke workloads:
+Gebruik hetzelfde adapterimage voor drie afzonderlijke rollen:
 
-- één reconciler-Deployment met `reconcile-sources --watch` en één replica, of
+- één reconciler-Deployment met `reconcile-sources --watch --migrate`, één
+  replica en het registry writer-account, of
   een CronJob met `--once`;
-- de stateless HTTP-adapter die alleen de uitgerolde `active/`-snapshot leest.
+- de stateless HTTP-adapter met een read-only registry-account;
+- een issuance init-container met een read-only registry-account, het
+  certificaat-Secret en een schrijfbare runtime-`emptyDir`.
 
-Beide gebruiken dezelfde duurzame onboardingopslag. Voorbeeldwaarden staan in
+De rollen gebruiken dezelfde applicatie-eigen Source Registry, maar met
+least-privilege credentials. Voorbeeldwaarden staan in
 [`source-reconciler-values.yaml`](../deploy/helm/gbo-app/examples/source-reconciler-values.yaml)
 en [`eudi-adapter-values.yaml`](../deploy/helm/gbo-app/examples/eudi-adapter-values.yaml).
-De reconciler blijft daarin ook na promotie het geldigheidsvenster van een
-ongewijzigde actieve snapshot verversen. Kopieer een `active/`-bestand daarom
-niet naar statische image-inhoud: zonder die refresh loopt de runtime na de
-stale grace bewust dicht.
 
 Voer een eerste Kubernetes-activatie bij voorkeur in twee gecontroleerde
-stappen uit. Laat eerst een eenmalige generator-Job de complete kandidaatset op
-de duurzame opslag promoveren en controleer dat alle statussen `active` zijn.
-Rol daarna pas de adapter, issuance-server en frontendproducten uit. Daarmee
-kan de adapter niet vóór de promotie gezond starten met een lege snapshot. Een
-latere metadatawijziging volgt dezelfde expliciete goedkeuringsgrens.
+stappen uit. Laat eerst een eenmalige reconciler-Job de complete kandidaatset
+naar de registry promoveren en controleer dat alle statussen `active` zijn.
+Rol daarna pas de adapter en issuance-server uit. Daarmee kan de adapter niet
+vóór de promotie gezond starten met een lege release. Een latere
+metadatawijziging volgt dezelfde expliciete goedkeuringsgrens.
 
 Voor een demo kan dezelfde reconciler automatisch promoveren:
 
 ```text
-reconcile-sources --watch --auto-promote \
-  --issuance-template=/app/issuance_server.toml.example \
-  --issuance-output=/state/runtime/issuance_server.toml \
-  --offers-output=/state/runtime/eudi-offers.json
+reconcile-sources --watch --auto-promote --storage-backend=postgres
 ```
 
-`/state` moet duurzame, gedeelde opslag zijn. Auto-promotie geeft de reconciler
-bewust geen Kubernetes-APIrechten en verwijdert dus niet zelf pods. De
-beheerder of deploymentautomatisering moet de issuance-server gecontroleerd
-herstarten nadat de gegenereerde TOML verandert. Bij een volledig nieuwe bron
-moet ook de adapter herstarten; de frontends lezen de offercatalogus dynamisch
-en hoeven niet mee te rollen.
+Auto-promotie geeft de reconciler bewust geen Kubernetes-APIrechten en
+verwijdert dus niet zelf pods. De beheerder of deploymentautomatisering moet de
+issuance-server gecontroleerd herstarten nadat de actieve release verandert.
+De adapter neemt zowel gewijzigde als volledig nieuwe bronnen dynamisch over;
+de frontends lezen de offercatalogus eveneens dynamisch. Een expliciete
+rollback naar een bestaande release blijft actief totdat nieuwe kandidaatinhoud
+een nog niet eerder opgeslagen release oplevert.
 
 Certificaatprovisioning blijft een afzonderlijk, bevoegd beheerproces. Alleen
-dat proces heeft de CA-private keys nodig. De reconciler-runtime krijgt de
-issuer-, reader- en status-leaf keys/certificaten plus de publieke issuer- en
-reader-CA-certificaten; CA-private keys horen niet in het runtime Secret.
+dat proces heeft de CA-private keys nodig. De reconciler krijgt via een Secret-
+projectie uitsluitend publieke issuer-, reader- en statusleafs plus publieke
+CA-certificaten. Alleen de issuance init-container krijgt de bijbehorende
+leaf-private keys.
+
+`--migrate` past versioned migrations toe onder een PostgreSQL advisory lock.
+Geef daarbij `--database-reader-role=<rol>` mee om alleen `SELECT` op immutable
+release-tabellen en de actieve pointer te verlenen; candidates en statuses
+blijven voor dat runtime-account onzichtbaar. De database en beide rollen zelf
+worden door het platform geprovisioneerd.
+
+Gebruik `inspect-source-registry` met het reader-account voor diagnose. Maak
+voor `activate-source-release` een korte beheer-Job met het writer-account;
+geef het release-ID expliciet mee en verwijder de Job na afloop. Geef deze
+beheeroperatie niet aan de stateless adapter of de issuance-server.
 
 ### Upgrade vanaf v0.6.1
 
