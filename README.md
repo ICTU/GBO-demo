@@ -161,6 +161,12 @@ contracts and generated configuration in the required order.
 5. Revoke the consent and repeat the query. The PDP now denies it with
    `CONSENT_WITHDRAWN`.
 
+The developer portal injects `DVTP_CONSUMER_PEER_ID` into the
+`dienstverlener_oin` field of its predefined DvTP issuance scenarios. It uses
+`99999999900000000300` for local development when the variable is unset.
+Deployments must configure the FSC Peer ID of their actual consumer. Custom
+issuance payloads and user-saved scenarios keep the value entered by the user.
+
 See [the DvTP consent architecture and sequence diagrams](docs/consent-flow.md)
 for the component boundaries and the grant, use and revocation flows.
 

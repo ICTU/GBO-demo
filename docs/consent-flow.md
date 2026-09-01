@@ -93,6 +93,13 @@ Het token bevat de bindings waarop de PDP later beslist:
 - `dienstverlener_oin`;
 - issuer, audience en geldigheid via `iat`, `nbf`, `exp` en `valid_until`.
 
+De bestaande API-veldnaam `dienstverlener_oin` bevat in deze flow de FSC Peer
+ID waarmee de PDP de token aan `subject.id` bindt. De voorgedefinieerde
+issuance-scenario's van het developer portal vullen dit veld vanuit
+`DVTP_CONSUMER_PEER_ID`; alleen lokaal geldt bij ontbrekende configuratie de
+default `99999999900000000300`. Handmatig ingevoerde en opgeslagen payloads
+worden niet door deze configuratie overschreven.
+
 Het portaal accepteert alleen `http`- en `https`-return-URL's waarvan de
 exacte origin in `VITE_ALLOWED_RETURN_ORIGINS` staat. De token wordt in het
 URL-fragment teruggegeven en direct uit de zichtbare URL verwijderd.

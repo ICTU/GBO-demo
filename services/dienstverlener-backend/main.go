@@ -53,7 +53,6 @@ const shutdownTimeout = 15 * time.Second
 
 type config struct {
 	Port             string
-	OrgOIN           string
 	OrgSector        string
 	DevPortalBackend string
 	OutwayURL        string
@@ -66,7 +65,6 @@ const upstreamRequestTimeout = 30 * time.Second
 func loadConfig() config {
 	return config{
 		Port:             getEnv("PORT", "4006"),
-		OrgOIN:           getEnv("ORG_OIN", "99999999900000000300"),
 		OrgSector:        getEnv("ORG_SECTOR", "hypotheekverlener"),
 		DevPortalBackend: getEnv("DEV_PORTAL_BACKEND_URL", ""),
 		OutwayURL:        getEnv("OUTWAY_URL", "http://hv-outway:8080"),
@@ -585,7 +583,7 @@ func main() {
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 	slog.Info("dienstverlener-backend starting",
-		"addr", srv.Addr, "outway", cfg.OutwayURL+cfg.OutwayPath, "org_oin", cfg.OrgOIN, "sector", cfg.OrgSector,
+		"addr", srv.Addr, "outway", cfg.OutwayURL+cfg.OutwayPath, "sector", cfg.OrgSector,
 		"req_id", uuid.New().String())
 	serve(srv)
 }

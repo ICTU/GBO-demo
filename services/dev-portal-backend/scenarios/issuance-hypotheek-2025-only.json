@@ -6,7 +6,6 @@
   "expected_outcome": "allow",
   "payload": {
     "citizen_bsn": "123456789",
-    "dienstverlener_oin": "99999999900000000300",
     "scopes": ["bd:ib:2025"],
     "validity_seconds": 7776000,
     "use_case": "hypotheek"
