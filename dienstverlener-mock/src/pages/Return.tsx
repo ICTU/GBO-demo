@@ -1,6 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { demoSessionHeader } from '../lib/demoSession'
+import {
+  CompletedDossierItems,
+  DossierUser,
+  ExpandableChecklistItem,
+  HeaderBar,
+  HeaderStage,
+} from '../components/dossier'
 
 type Bedrag = { waarde: number; valuta?: string }
 
@@ -31,25 +38,9 @@ const QUERY_TIMEOUT_MS = 35_000
 const fmtEuro = (n: number | null | undefined) =>
   n == null ? '—' : '€ ' + n.toLocaleString('nl-NL', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
 
-const HeaderBar = ({ stage }: { stage?: string }) => (
-  <header className="hb-header">
-    <div className="hb-header-left">
-      <span className="hb-logo">H</span>
-      <span className="hb-brand">Hypotheek-BV</span>
-    </div>
-    {stage && <div className="hb-header-stage">{stage}</div>}
-  </header>
-)
-
 const CheckIcon = () => (
   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5">
     <path d="M5 12l5 5L20 7" />
-  </svg>
-)
-
-const CheckBig = () => (
-  <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.5">
-    <path d="M3 8.5l3.5 3.5L13 5" />
   </svg>
 )
 
@@ -86,57 +77,87 @@ function Result({
   onRefresh: () => void
   refreshing: boolean
 }) {
+  const [open, setOpen] = useState(false)
   const sorted = [...rows].sort((a, b) => b.belastingjaar - a.belastingjaar)
   const deniedSorted = [...deniedYears].sort((a, b) => b - a)
+  const partial = deniedSorted.length > 0
+  const jaren = (years: number[]) => years.join(' en ')
 
   return (
     <>
-      <div className="hb-result-head">
-        <div className="hb-result-check"><CheckBig /></div>
-        <h1 className="hb-result-title">Uw gegevens zijn opgehaald</h1>
-      </div>
+      <div className="hb-eyebrow">Mijn dossier · Hypotheekaanvraag</div>
+      <h1 className="hb-title">
+        {partial ? 'Uw dossier is bijgewerkt' : 'Uw dossier is compleet'}
+      </h1>
+      <p className="hb-subtitle">
+        {partial
+          ? `We hebben uw inkomensgegevens over ${jaren(sorted.map((y) => y.belastingjaar))} opgehaald bij de Belastingdienst. Voor ${jaren(deniedSorted)} gaf u geen toestemming.`
+          : 'Uw inkomensgegevens zijn opgehaald bij de Belastingdienst. U kunt uw aanvraag nu afronden.'}
+      </p>
 
-      <div className="hb-data-tables">
-        {sorted.map((y) => (
-          <div key={y.belastingjaar} className="hb-data-table">
-            <div className="hb-data-thead">
-              <span className="title">Aangifte inkomstenbelasting {y.belastingjaar}</span>
-            </div>
-            <table>
-              <tbody>
-                <tr><td>Belastingjaar</td><td>{y.belastingjaar}</td></tr>
-                <tr><td>Verzamelinkomen</td><td>{fmtEuro(y.verzamelinkomen?.waarde)}</td></tr>
-                <tr><td>Inkomen uit werk en woning</td><td>{fmtEuro(y.box1Inkomen?.waarde)}</td></tr>
-                <tr><td>Status</td><td>{y.status ?? '—'}</td></tr>
-                <tr><td>Indieningsdatum</td><td>{y.indieningsdatum ?? '—'}</td></tr>
-              </tbody>
-            </table>
+      <ul className="hb-checklist" role="list">
+        <CompletedDossierItems />
+        <ExpandableChecklistItem
+          state={partial ? 'todo' : 'done'}
+          title="Inkomensgegevens"
+          meta={
+            partial
+              ? `Inkomstenbelasting ${jaren(sorted.map((y) => y.belastingjaar))} opgehaald · ${jaren(deniedSorted)} niet gedeeld`
+              : `Inkomstenbelasting ${jaren(sorted.map((y) => y.belastingjaar))} · opgehaald via MijnOverheid`
+          }
+          status={partial ? 'Deels compleet' : 'Compleet'}
+          open={open}
+          onToggle={() => setOpen((v) => !v)}
+        >
+          <div className="hb-data-tables">
+            {sorted.map((y) => (
+              <div key={y.belastingjaar} className="hb-data-table">
+                <div className="hb-data-thead">
+                  <span className="title">Aangifte inkomstenbelasting {y.belastingjaar}</span>
+                </div>
+                <table>
+                  <tbody>
+                    <tr><td>Belastingjaar</td><td>{y.belastingjaar}</td></tr>
+                    <tr><td>Verzamelinkomen</td><td>{fmtEuro(y.verzamelinkomen?.waarde)}</td></tr>
+                    <tr><td>Inkomen uit werk en woning</td><td>{fmtEuro(y.box1Inkomen?.waarde)}</td></tr>
+                    <tr><td>Status</td><td>{y.status ?? '—'}</td></tr>
+                    <tr><td>Indieningsdatum</td><td>{y.indieningsdatum ?? '—'}</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            ))}
+            {deniedSorted.map((jaar) => (
+              <div key={jaar} className="hb-data-table denied">
+                <div className="hb-data-thead">
+                  <span className="title">Aangifte inkomstenbelasting {jaar}</span>
+                </div>
+                <div className="denied-note">
+                  U heeft voor {jaar} geen toestemming verleend — deze gegevens zijn niet opgehaald.
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
-        {deniedSorted.map((jaar) => (
-          <div key={jaar} className="hb-data-table denied">
-            <div className="hb-data-thead">
-              <span className="title">Aangifte inkomstenbelasting {jaar}</span>
-            </div>
-            <div className="denied-note">
-              U heeft voor {jaar} geen toestemming verleend — deze gegevens zijn niet opgehaald.
-            </div>
-          </div>
-        ))}
-      </div>
 
-      {traceId && (
-        <div style={{ marginTop: 12, fontSize: 12, color: 'var(--hb-mute)', fontFamily: 'ui-monospace, Menlo, monospace' }}>
-          trace-id: {traceId}
+          <div className="hb-panel-actions">
+            <button className="hb-link" onClick={onRefresh} disabled={refreshing}>
+              {refreshing ? 'Bezig met opnieuw ophalen…' : '↻ Verversen'}
+            </button>
+            {traceId && <span className="hb-trace">trace-id: {traceId}</span>}
+          </div>
+        </ExpandableChecklistItem>
+      </ul>
+
+      <section className="hb-cta">
+        <h2>{partial ? 'Aanvraag afronden' : 'Alles compleet'}</h2>
+        <p>
+          {partial
+            ? 'U kunt uw aanvraag indienen met de gegevens die u heeft gedeeld. Voor de ontbrekende jaren vragen wij u om zelf inkomensbewijzen aan te leveren.'
+            : 'We hebben alle onderdelen van uw dossier binnen. U kunt uw hypotheekaanvraag nu indienen — er hoeven geen papieren meer opgestuurd te worden.'}
+        </p>
+        <div className="hb-actions-row">
+          <Link to="/" className="hb-link">Demo opnieuw starten</Link>
         </div>
-      )}
-
-      <div style={{ marginTop: 20, display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-        <button className="hb-restart-link" onClick={onRefresh} disabled={refreshing}>
-          {refreshing ? 'Bezig met opnieuw ophalen…' : '↻ Verversen'}
-        </button>
-        <Link to="/" className="hb-restart-link">Demo opnieuw starten</Link>
-      </div>
+      </section>
     </>
   )
 }
@@ -268,18 +289,23 @@ export default function Return() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [denied, consentId, consentToken])
 
+  const rows = response?.allowed
+    ? response.data?.data?.ingeschrevenPersoon?.heeftBelastingjaarAangifte
+    : undefined
+  const success = !denied && !!consentId && !!consentToken && !fetchError && !!rows
+
   return (
     <div className="hb-shell">
       <HeaderBar
-        stage={
-          denied
-            ? undefined
-            : response
-            ? 'Mijn aanvraag · Stap 4 van 4'
-            : 'Mijn aanvraag · Stap 3 van 4'
+        right={
+          success ? (
+            <DossierUser />
+          ) : denied ? undefined : (
+            <HeaderStage label={`Mijn aanvraag · Stap ${response ? 4 : 3} van 4`} />
+          )
         }
       />
-      <main className="hb-return-main">
+      <main className={success ? 'hb-main' : 'hb-return-main'}>
         {denied ? (
           <Denied />
         ) : !consentId || !consentToken ? (
@@ -292,9 +318,9 @@ export default function Return() {
           />
         ) : !response ? (
           <Loading phase={phase} />
-        ) : response.allowed && response.data?.data?.ingeschrevenPersoon?.heeftBelastingjaarAangifte ? (
+        ) : rows ? (
           <Result
-            rows={response.data.data.ingeschrevenPersoon.heeftBelastingjaarAangifte}
+            rows={rows}
             deniedYears={response.denied_years ?? []}
             traceId={response.trace_id}
             onRefresh={() => runQuery(true)}
