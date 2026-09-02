@@ -360,7 +360,27 @@ claim, made checkable rather than asserted.
 ```bash
 curl -s -H "Authorization: Bearer $LDV_READ_TOKEN" \
   "http://localhost:9416/logboek/records?traceID=<32 hex chars>" | jq
+
+# or the whole chain at once, through the portal backend
+curl -s "http://localhost:9407/ldv/<Fsc-Transaction-Id>" | jq
 ```
+
+One DvTP query, as the running demo produces it:
+
+```
+Belastingdienst — 3 records
+  bronquery-doorgifte   [bd-bronquery-doorgifte@v1]  PI-70e1c7ef… (pi)
+    pi-bsn-resolutie    [bd-pi-bsn-resolutie@v1]     PI-70e1c7ef… (pi)
+    bronbevraging       [bd-ib-2025@v1]              PI-70e1c7ef… (pi)
+RvIG — 0 records
+GBO — 1 record
+  toestemming-status    [gbo-toestemming-status@v1]  EP-c44cade3… (portal-subject)
+```
+
+Two Verantwoordelijken, one trace id, and the same Betrokkene named differently
+in each — which is what `data_subject_id_type` is for. RvIG is empty because
+the BRP source was not involved, and an empty logbook means nothing was
+processed rather than that a record was dropped.
 
 ## Scope
 

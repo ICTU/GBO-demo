@@ -85,9 +85,8 @@ type config struct {
 	DevPortalBackend string
 	// LogbookURL empty means this portal is not part of an LDV chain and
 	// writes no Dataverwerkingen records.
-	LogbookURL      string
-	LogbookToken    string
-	LogbookFallback string
+	LogbookURL   string
+	LogbookToken string
 }
 
 func loadConfig() config {
@@ -98,17 +97,8 @@ func loadConfig() config {
 		DevPortalBackend: getEnv("DEV_PORTAL_BACKEND_URL", ""),
 		LogbookURL:       getEnv("LDV_LOGBOOK_URL", ""),
 		LogbookToken:     getEnv("LDV_WRITE_TOKEN", ""),
-		LogbookFallback:  getEnv("LDV_FALLBACK_ACTIVITY", ""),
 	}
 }
-
-// How long to wait for the logbook at startup. A component that must log
-// cannot start without one; compose orders it after the logbook's health
-// check, and the retries only cover the gap on a cold stack.
-const (
-	ldvRegisterAttempts = 15
-	ldvRegisterBackoff  = time.Second
-)
 
 func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
@@ -151,7 +141,7 @@ func newPortal(cfg config, hub *portalhttp.Hub, logbook consent.Logbook) *consen
 // interface while being nil underneath, so the concrete absence is turned
 // into an interface-level one here.
 func newLogbook(cfg config, serviceName string) (consent.Logbook, *ldv.Logbook, error) {
-	writer, err := ldv.New(serviceName, cfg.LogbookURL, cfg.LogbookToken, cfg.LogbookFallback)
+	writer, err := ldv.New(serviceName, cfg.LogbookURL, cfg.LogbookToken)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -221,12 +211,7 @@ func main() {
 	if err != nil {
 		fatal("configuring the logboek adapter", err)
 	}
-	if writer != nil {
-		if err := writer.LoadRegister(context.Background(), ldvRegisterAttempts, ldvRegisterBackoff); err != nil {
-			fatal("reading the logboek verwerkingsactiviteiten register", err)
-		}
-		slog.Info("logboek configured", "fallback_activity", writer.Fallback())
-	} else {
+	if writer == nil {
 		slog.Warn("no LDV_LOGBOOK_URL configured; this portal writes no Logboek Dataverwerkingen records")
 	}
 
