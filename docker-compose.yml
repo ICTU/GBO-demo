@@ -389,6 +389,8 @@ services:
       # whole access model here, and who may write to or read from a
       # Verantwoordelijke's logboek is an open governance question.
       - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
+      # Reading a logbook is a different capability from writing one.
+      - LDV_READ_TOKEN=${LDV_READ_TOKEN:-local-demo-logboek-read-token}
     volumes:
       - logboek-bd-data:/data
     networks:
@@ -411,6 +413,7 @@ services:
       - DATABASE_PATH=/data/logboek.db
       - REGISTER_PATH=/config/verwerkingsactiviteiten-brp.json
       - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
+      - LDV_READ_TOKEN=${LDV_READ_TOKEN:-local-demo-logboek-read-token}
     volumes:
       - logboek-brp-data:/data
     networks:
@@ -434,6 +437,7 @@ services:
       - DATABASE_PATH=/data/logboek.db
       - REGISTER_PATH=/config/verwerkingsactiviteiten-gbo.json
       - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
+      - LDV_READ_TOKEN=${LDV_READ_TOKEN:-local-demo-logboek-read-token}
     volumes:
       - logboek-gbo-data:/data
     networks:
@@ -855,6 +859,11 @@ services:
       # peer-facing manager /v1/logs with a peer-cert (Logius
       # fsc-logging draft). For the demo we mount each org's existing
       # internal-cert and talk to the txlog-api directly.
+      # The Logboek Dataverwerkingen of each Verantwoordelijke. The chain
+      # view queries them in parallel and joins on the trace id, because LDV
+      # keeps the records in separate stores by design.
+      - LDV_LOGBOOKS=logboek-bd=Belastingdienst=http://logboek-bd:4016,logboek-brp=RvIG=http://logboek-brp:4016,logboek-gbo=GBO=http://logboek-gbo:4016
+      - LDV_READ_TOKEN=${LDV_READ_TOKEN:-local-demo-logboek-read-token}
       - FSC_TXLOG_EDI_URL=https://edi-txlog-api:9443
       - FSC_TXLOG_EDI_CERT=/certs/edi/internal-cert.pem
       - FSC_TXLOG_EDI_KEY=/certs/edi/internal-cert-key.pem
@@ -1149,6 +1158,9 @@ services:
       - LDV_LOGBOOK_URL=http://logboek-gbo:4016
       - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
       - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY_GBO:-local-demo-pseudonym-key-gbo}
+      # Where each source's half of the request is logged, so a reader can
+      # follow dpl.read.nextLogbookId across the organisation boundary.
+      - LDV_NEXT_LOGBOOK_IDS=belastingdienst=logboek-bd,rvig=logboek-brp
     depends_on:
       source-registry-migrations:
         condition: service_completed_successfully

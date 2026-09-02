@@ -12,7 +12,10 @@ import (
 	"ldv-logboek/internal/sqlite"
 )
 
-const writeToken = "test-token"
+const (
+	writeToken = "test-token"
+	readToken  = "test-read-token"
+)
 
 func newTestHandler(t *testing.T) (*Handler, *sqlite.Repository) {
 	t.Helper()
@@ -29,7 +32,7 @@ func newTestHandler(t *testing.T) (*Handler, *sqlite.Repository) {
 	if err != nil {
 		t.Fatalf("wire logbook: %v", err)
 	}
-	return NewHandler(logbook, writeToken), repository
+	return NewHandler(logbook, writeToken, readToken), repository
 }
 
 func validBody() map[string]any {
@@ -217,5 +220,125 @@ func TestHealthIsUnauthenticated(t *testing.T) {
 	handler.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", recorder.Code)
+	}
+}
+
+// get issues an authenticated read.
+func get(t *testing.T, handler *Handler, token, path string) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, path, nil)
+	if token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	return recorder
+}
+
+// The read extension answers on the three axes LDV names.
+func TestReadRecordsByEachSelector(t *testing.T) {
+	handler, _ := newTestHandler(t)
+	if response := post(t, handler, writeToken, validBody()); response.Code != http.StatusCreated {
+		t.Fatalf("seed write status = %d", response.Code)
+	}
+
+	for name, path := range map[string]string{
+		"by trace":    "/logboek/records?traceID=0af7651916cd43dd8448eb211c80319c",
+		"by activity": "/logboek/records?processingActivityID=bd-bronquery-doorgifte@v1",
+		"by subject":  "/logboek/records?dataSubjectId=PI-abc123&dataSubjectIdType=pi",
+	} {
+		t.Run(name, func(t *testing.T) {
+			response := get(t, handler, readToken, path)
+			if response.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", response.Code, response.Body)
+			}
+			var payload struct {
+				Verantwoordelijke string       `json:"verantwoordelijke"`
+				Records           []ldv.Stored `json:"records"`
+				Truncated         bool         `json:"truncated"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if len(payload.Records) != 1 {
+				t.Fatalf("read %d records, want 1: %s", len(payload.Records), response.Body)
+			}
+			if payload.Verantwoordelijke != "Belastingdienst" {
+				t.Errorf("verantwoordelijke = %q", payload.Verantwoordelijke)
+			}
+			if payload.Records[0].Attribute(ldv.AttrDataSubjectID) != "PI-abc123" {
+				t.Errorf("record did not round-trip: %#v", payload.Records[0])
+			}
+		})
+	}
+}
+
+// A read that names no axis would be a request to browse the logbook.
+func TestReadWithoutASelectorIs400(t *testing.T) {
+	handler, _ := newTestHandler(t)
+
+	response := get(t, handler, readToken, "/logboek/records")
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", response.Code)
+	}
+	var problem map[string]string
+	if err := json.Unmarshal(response.Body.Bytes(), &problem); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if problem["error"] != "no_selector" {
+		t.Fatalf("problem = %#v", problem)
+	}
+}
+
+// Reading and writing are different capabilities, so the write token does not
+// open the read extension.
+func TestReadRequiresItsOwnToken(t *testing.T) {
+	handler, _ := newTestHandler(t)
+
+	for name, token := range map[string]string{
+		"no token":    "",
+		"write token": writeToken,
+		"wrong token": "guessed",
+	} {
+		t.Run(name, func(t *testing.T) {
+			response := get(t, handler, token, "/logboek/records?traceID=0af7651916cd43dd8448eb211c80319c")
+			if response.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want 401", response.Code)
+			}
+		})
+	}
+}
+
+func TestReadRejectsANonsenseLimit(t *testing.T) {
+	handler, _ := newTestHandler(t)
+
+	response := get(t, handler, readToken, "/logboek/records?traceID=0af7651916cd43dd8448eb211c80319c&limit=nope")
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", response.Code)
+	}
+}
+
+// A reader must never be silently handed a partial logbook.
+func TestReadSaysWhenTheCapTruncated(t *testing.T) {
+	handler, _ := newTestHandler(t)
+
+	for _, spanID := range []string{"b7ad6b7169203331", "00f067aa0ba902b7"} {
+		body := validBody()
+		body["span_id"] = spanID
+		if response := post(t, handler, writeToken, body); response.Code != http.StatusCreated {
+			t.Fatalf("seed write status = %d", response.Code)
+		}
+	}
+
+	response := get(t, handler, readToken, "/logboek/records?traceID=0af7651916cd43dd8448eb211c80319c&limit=1")
+	var payload struct {
+		Records   []ldv.Stored `json:"records"`
+		Truncated bool         `json:"truncated"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(payload.Records) != 1 || !payload.Truncated {
+		t.Fatalf("records = %d, truncated = %v; want 1 and true", len(payload.Records), payload.Truncated)
 	}
 }

@@ -117,22 +117,31 @@ type ldvQueryConfig struct {
 	YearActivityTemplate string
 }
 
-// activityForYear names the verwerkingsactiviteit of one processing. The
-// requested scope is preferred — it is what the consumer was authorized for,
-// and it maps onto the register entry generated from that same scope
-// definition. The belastingjaar covers the flows that carry no scope header,
-// which is the EUDI issuance path.
+// activityForYear names the verwerkingsactiviteit of one processing.
+//
+// The belastingjaar decides, because a record and its activity have to agree:
+// a query covering 2024 and 2025 is two verstrekkingen, and the scope header
+// can only ever describe one of them. Preferring the scope made the 2024
+// record claim bd-ib-2025@v1 while its own gbo.belastingjaar said 2024 —
+// internally contradictory, and wrong in the direction that matters, since
+// the register entry is what someone would be held to afterwards.
+//
+// The scope is the fallback for a request that names no year at all. It maps
+// straight onto a reference because the register entries were generated from
+// those same scope definitions; both routes land on the same entry for the
+// single-year case, which is why the collision went unnoticed until a
+// two-year query ran against the real stack.
 //
 // A reference this bron's register does not hold is refused by the logbook and
-// fails the request. That is the intended behaviour rather than a gap: a
-// verstrekking whose verwerkingsactiviteit is not described is one nobody can
-// account for afterwards.
+// fails the request. That is intended rather than a gap: a verstrekking whose
+// verwerkingsactiviteit is not described is one nobody can account for
+// afterwards.
 func (l *sourceLogbook) activityForYear(scope string, year int) string {
-	if scope != "" {
-		return strings.ReplaceAll(scope, ":", "-") + "@v1"
-	}
 	if l.cfg.YearActivityTemplate != "" && year != 0 {
 		return fmt.Sprintf(l.cfg.YearActivityTemplate, year)
+	}
+	if scope != "" {
+		return strings.ReplaceAll(scope, ":", "-") + "@v1"
 	}
 	return ""
 }

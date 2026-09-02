@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -18,6 +19,8 @@ type Repository interface {
 	// Append stores the record. It returns ErrDuplicateRecord when this
 	// (trace_id, span_id) pair is already present.
 	Append(ctx context.Context, stored Stored) error
+	// Query answers a read. The query has already been validated and capped.
+	Query(ctx context.Context, query Query) ([]Stored, error)
 }
 
 // ErrDuplicateRecord is returned when a record with the same (trace_id,
@@ -91,4 +94,67 @@ func (l *Logbook) Write(ctx context.Context, record Record) (Confirmation, error
 func (l *Logbook) resolves(reference string) bool {
 	_, ok := l.register.Resolve(reference)
 	return ok
+}
+
+// Query selects records. Exactly one of the three axes must be set — LDV's
+// read extension is deliberately not a general query language, because a
+// logbook you can browse freely is a logbook that has become a second copy of
+// the data it describes.
+type Query struct {
+	TraceID              string
+	ProcessingActivityID string
+	DataSubjectID        string
+	// DataSubjectIDType narrows a subject lookup to one pseudonym space. Two
+	// Verantwoordelijken can name different people by the same string, so
+	// without it a subject query is ambiguous.
+	DataSubjectIDType string
+	Limit             int
+}
+
+// ErrNoSelector is returned for a read that names none of the three axes.
+var ErrNoSelector = errors.New("a read needs a traceID, a processingActivityID or a dataSubjectId")
+
+// MaxReadLimit caps a single read. A cap rather than pagination: this is a
+// demo of the read extension existing, not of reading a production logbook.
+const MaxReadLimit = 500
+
+// defaultReadLimit applies when the caller names none.
+const defaultReadLimit = 100
+
+// normalize validates the query and applies the cap.
+func (q Query) normalize() (Query, error) {
+	selectors := 0
+	for _, selector := range []string{q.TraceID, q.ProcessingActivityID, q.DataSubjectID} {
+		if strings.TrimSpace(selector) != "" {
+			selectors++
+		}
+	}
+	if selectors == 0 {
+		return Query{}, ErrNoSelector
+	}
+	if q.Limit <= 0 {
+		q.Limit = defaultReadLimit
+	}
+	if q.Limit > MaxReadLimit {
+		q.Limit = MaxReadLimit
+	}
+	return q, nil
+}
+
+// Read answers a query against this logbook — LDV's extensie lezen.
+//
+// Who may do this is the open governance question (Q-08): a logbook holds a
+// record of every processing about a person, so unrestricted read access
+// recreates the very concentration the pseudonymisation avoids. The demo
+// protects it with a separate bearer token and says no more than that.
+func (l *Logbook) Read(ctx context.Context, query Query) ([]Stored, error) {
+	normalized, err := query.normalize()
+	if err != nil {
+		return nil, err
+	}
+	records, err := l.repository.Query(ctx, normalized)
+	if err != nil {
+		return nil, fmt.Errorf("read records: %w", err)
+	}
+	return records, nil
 }

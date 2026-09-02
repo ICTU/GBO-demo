@@ -3,6 +3,7 @@ package ldv
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -12,6 +13,26 @@ import (
 type fakeRepository struct {
 	stored  []Stored
 	failure error
+}
+
+// Query is the read half of the port. The fake filters on trace id only —
+// enough for the core's read rules, which are about validation and capping
+// rather than about SQL.
+func (f *fakeRepository) Query(_ context.Context, query Query) ([]Stored, error) {
+	if f.failure != nil {
+		return nil, f.failure
+	}
+	var matched []Stored
+	for _, stored := range f.stored {
+		if query.TraceID != "" && stored.TraceID != query.TraceID {
+			continue
+		}
+		if len(matched) == query.Limit {
+			break
+		}
+		matched = append(matched, stored)
+	}
+	return matched, nil
 }
 
 func (f *fakeRepository) Append(_ context.Context, stored Stored) error {
@@ -128,5 +149,71 @@ func TestNewLogbookRequiresItsCollaborators(t *testing.T) {
 	}
 	if _, err := NewLogbook(&fakeRepository{}, nil, nil); err == nil {
 		t.Error("a logbook without a register must not start")
+	}
+}
+
+// A read has to name one of the three axes. Without that a logbook becomes
+// browsable, which is the opposite of what it is for.
+func TestReadRequiresASelector(t *testing.T) {
+	logbook := newTestLogbook(t, &fakeRepository{})
+
+	if _, err := logbook.Read(context.Background(), Query{}); !errors.Is(err, ErrNoSelector) {
+		t.Fatalf("expected ErrNoSelector, got %v", err)
+	}
+}
+
+func TestReadReturnsTheRecordsOfOneTrace(t *testing.T) {
+	repository := &fakeRepository{}
+	logbook := newTestLogbook(t, repository)
+	ctx := context.Background()
+
+	first := validRecord()
+	second := validRecord()
+	second.SpanID = "00f067aa0ba902b7"
+	other := validRecord()
+	other.TraceID = "11111111111111111111111111111111"
+	for _, record := range []Record{first, second, other} {
+		if _, err := logbook.Write(ctx, record); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+
+	records, err := logbook.Read(ctx, Query{TraceID: first.TraceID})
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("read %d records, want the two of that trace", len(records))
+	}
+}
+
+// The cap is what keeps a read from becoming a dump of the whole logbook.
+func TestReadCapsTheResult(t *testing.T) {
+	repository := &fakeRepository{}
+	logbook := newTestLogbook(t, repository)
+	ctx := context.Background()
+
+	for index := 0; index < 5; index++ {
+		record := validRecord()
+		record.SpanID = fmt.Sprintf("%016x", index)
+		if _, err := logbook.Write(ctx, record); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+
+	records, err := logbook.Read(ctx, Query{TraceID: validRecord().TraceID, Limit: 2})
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("read %d records, want the requested 2", len(records))
+	}
+	// An absurd limit is capped rather than honoured.
+	capped, err := Query{TraceID: "x", Limit: 10_000}.normalize()
+	if err != nil {
+		t.Fatalf("normalize: %v", err)
+	}
+	if capped.Limit != MaxReadLimit {
+		t.Fatalf("limit = %d, want the cap %d", capped.Limit, MaxReadLimit)
 	}
 }

@@ -35,6 +35,7 @@ type config struct {
 	DatabasePath string
 	RegisterPath string
 	WriteToken   string
+	ReadToken    string
 }
 
 func loadConfig() config {
@@ -43,6 +44,7 @@ func loadConfig() config {
 		DatabasePath: getEnv("DATABASE_PATH", "/data/logboek.db"),
 		RegisterPath: getEnv("REGISTER_PATH", "/config/verwerkingsactiviteiten.json"),
 		WriteToken:   os.Getenv("LDV_WRITE_TOKEN"),
+		ReadToken:    os.Getenv("LDV_READ_TOKEN"),
 	}
 }
 
@@ -64,6 +66,13 @@ func main() {
 	if cfg.WriteToken == "" {
 		slog.Error("LDV_WRITE_TOKEN is required")
 		os.Exit(1)
+	}
+	// Reading a logbook is a different capability from writing one: every
+	// instrumented component writes, and almost nothing should read. Without
+	// a read token the extensie lezen simply is not served, rather than being
+	// served to whoever holds the write token.
+	if cfg.ReadToken == "" {
+		slog.Warn("no LDV_READ_TOKEN configured; the read extension will refuse every request")
 	}
 
 	register, err := ldv.LoadRegister(cfg.RegisterPath)
@@ -93,7 +102,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           httpapi.NewHandler(logbook, cfg.WriteToken),
+		Handler:           httpapi.NewHandler(logbook, cfg.WriteToken, cfg.ReadToken),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 

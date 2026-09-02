@@ -57,7 +57,7 @@ func issuanceUnderTest(t *testing.T, logbook *ldvtest.Logbook) string {
 		Port: "0", OutwayURL: outway.URL, SourceDataTransport: sourceTransportFSC,
 		SourceDataFSCServiceReference: "bri", SourceDataFSCGrantHash: "data-grant",
 	}
-	client := newIssuanceLogbook(logbook.Client(t, "eudi-adapter"))
+	client := newIssuanceLogbook(logbook.Client(t, "eudi-adapter"), map[string]string{"belastingdienst": "logboek-bd"})
 	server := httptest.NewServer(testMux(cfg, http.DefaultClient, metadata, client))
 	t.Cleanup(server.Close)
 	return server.URL
@@ -204,7 +204,7 @@ func TestAnIssuanceThatCannotBeLoggedNeverReachesTheSource(t *testing.T) {
 		t.Fatalf("load source metadata: %v", err)
 	}
 
-	client := newIssuanceLogbook(logbook.Client(t, "eudi-adapter"))
+	client := newIssuanceLogbook(logbook.Client(t, "eudi-adapter"), map[string]string{"belastingdienst": "logboek-bd"})
 	cfg := config{
 		Port: "0", OutwayURL: outway.URL, SourceDataTransport: sourceTransportFSC,
 		SourceDataFSCServiceReference: "bri", SourceDataFSCGrantHash: "data-grant",
@@ -286,5 +286,40 @@ func TestAttributesDropEmptyValues(t *testing.T) {
 	}
 	if strings.Contains(string(encoded), walletBSN) {
 		t.Fatalf("attributes contain the BSN: %s", encoded)
+	}
+}
+
+// The chain view is assembled by following pointers, not by one place holding
+// everything — which is what LDV's per-Verantwoordelijke model requires. The
+// issuance is the hop where GBO's processing hands off to a bronhouder, so it
+// is the record that has to say where the rest was written down.
+func TestTheAssemblyRecordPointsAtTheSourcesLogbook(t *testing.T) {
+	logbook := ldvtest.New(t, pidExtractionActivity, attestationBuildActivity)
+	url := issuanceUnderTest(t, logbook)
+
+	issue(t, url)
+
+	assembly := ldvtest.ByName(logbook.Written(), "dataverwerking.attestatie-samenstellen")
+	if len(assembly) != 1 {
+		t.Fatalf("expected one assembly record, got %+v", logbook.Written())
+	}
+	if got := assembly[0].Attributes[ldv.AttrNextLogbookID]; got != "logboek-bd" {
+		t.Errorf("%s = %v, want logboek-bd", ldv.AttrNextLogbookID, got)
+	}
+	// The extraction happens before any bronhouder is involved, so it points
+	// nowhere — and an absent pointer must not be written as an empty one.
+	extraction := ldvtest.ByName(logbook.Written(), "dataverwerking.pid-bsn-extractie")
+	if _, present := extraction[0].Attributes[ldv.AttrNextLogbookID]; present {
+		t.Error("the extraction record should carry no next-logbook pointer")
+	}
+}
+
+func TestParseNextLogbooks(t *testing.T) {
+	mapping := parseNextLogbooks(" belastingdienst=logboek-bd , rvig=logboek-brp ,, malformed ,=x, y= ")
+	if len(mapping) != 2 {
+		t.Fatalf("mapping = %#v, want the two well-formed entries", mapping)
+	}
+	if mapping["belastingdienst"] != "logboek-bd" || mapping["rvig"] != "logboek-brp" {
+		t.Errorf("mapping = %#v", mapping)
 	}
 }

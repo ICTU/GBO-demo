@@ -47,6 +47,11 @@ CREATE TABLE IF NOT EXISTS records (
     attributes TEXT NOT NULL,
     PRIMARY KEY (trace_id, span_id)
 );
+-- The three axes the read extension queries on. A logbook is written once and
+-- read rarely, so the cost is in the write; these keep a read from scanning.
+CREATE INDEX IF NOT EXISTS records_by_activity ON records (processing_activity_id, received_at);
+CREATE INDEX IF NOT EXISTS records_by_subject ON records (data_subject_id_type, data_subject_id, received_at);
+CREATE INDEX IF NOT EXISTS records_by_trace ON records (trace_id, start_time);
 `
 
 // Open prepares the store. It creates the containing directory so a fresh
@@ -126,6 +131,86 @@ func (r *Repository) Count(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("count records: %w", err)
 	}
 	return count, nil
+}
+
+// Query answers a read on one of the three axes. The core has already
+// validated that exactly one selector is set and capped the limit, so this
+// builds the WHERE clause from whatever is present.
+func (r *Repository) Query(ctx context.Context, query ldv.Query) ([]ldv.Stored, error) {
+	conditions := make([]string, 0, 3)
+	arguments := make([]any, 0, 4)
+	if query.TraceID != "" {
+		conditions = append(conditions, "trace_id = ?")
+		arguments = append(arguments, query.TraceID)
+	}
+	if query.ProcessingActivityID != "" {
+		conditions = append(conditions, "processing_activity_id = ?")
+		arguments = append(arguments, query.ProcessingActivityID)
+	}
+	if query.DataSubjectID != "" {
+		conditions = append(conditions, "data_subject_id = ?")
+		arguments = append(arguments, query.DataSubjectID)
+		if query.DataSubjectIDType != "" {
+			conditions = append(conditions, "data_subject_id_type = ?")
+			arguments = append(arguments, query.DataSubjectIDType)
+		}
+	}
+	arguments = append(arguments, query.Limit)
+
+	rows, err := r.db.QueryContext(ctx, `
+        SELECT trace_id, span_id, parent_span_id, name, status,
+               start_time, end_time, received_at, resource, attributes
+        FROM records WHERE `+strings.Join(conditions, " AND ")+`
+        ORDER BY start_time, span_id
+        LIMIT ?
+    `, arguments...)
+	if err != nil {
+		return nil, fmt.Errorf("query records: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	records := make([]ldv.Stored, 0)
+	for rows.Next() {
+		var (
+			stored                           ldv.Stored
+			startText, endText, receivedText string
+			resourceJSON, attributesJSON     string
+		)
+		if err := rows.Scan(
+			&stored.TraceID, &stored.SpanID, &stored.ParentSpanID, &stored.Name, &stored.Status,
+			&startText, &endText, &receivedText, &resourceJSON, &attributesJSON,
+		); err != nil {
+			return nil, fmt.Errorf("scan record: %w", err)
+		}
+		if stored.StartTime, err = parseTime(startText); err != nil {
+			return nil, err
+		}
+		if stored.EndTime, err = parseTime(endText); err != nil {
+			return nil, err
+		}
+		if stored.ReceivedAt, err = parseTime(receivedText); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(resourceJSON), &stored.Resource); err != nil {
+			return nil, fmt.Errorf("decode resource: %w", err)
+		}
+		if err := json.Unmarshal([]byte(attributesJSON), &stored.Attributes); err != nil {
+			return nil, fmt.Errorf("decode attributes: %w", err)
+		}
+		records = append(records, stored)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate records: %w", err)
+	}
+	return records, nil
+}
+
+func parseTime(text string) (time.Time, error) {
+	parsed, err := time.Parse(time.RFC3339Nano, text)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parse stored time %q: %w", text, err)
+	}
+	return parsed, nil
 }
 
 func orEmptyMap(resource map[string]string) map[string]string {

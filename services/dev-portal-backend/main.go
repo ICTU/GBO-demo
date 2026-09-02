@@ -51,6 +51,10 @@ type config struct {
 	RulesFile          string
 	FscGroupID         string
 	FscTxlogPeers      []fscTxlogPeer
+	// LdvLogbooks are the Logboek Dataverwerkingen the chain view queries —
+	// one per Verantwoordelijke, because that is where LDV puts them.
+	LdvLogbooks  []ldvLogbook
+	LdvReadToken string
 }
 
 const defaultDvtpConsumerPeerID = "99999999900000000300"
@@ -106,6 +110,8 @@ func loadConfig() config {
 		RulesFile:          getEnv("RULES_FILE", "/rules.json"),
 		FscGroupID:         getEnv("FSC_GROUP_ID", "fsc-demo"),
 		FscTxlogPeers:      peers,
+		LdvLogbooks:        parseLdvLogbooks(os.Getenv("LDV_LOGBOOKS")),
+		LdvReadToken:       os.Getenv("LDV_READ_TOKEN"),
 	}
 }
 
@@ -1000,6 +1006,7 @@ func newMux(cfg config, hub *traceHub) *http.ServeMux {
 	mux.HandleFunc("/policy-snippet", handlePolicySnippet(cfg))
 
 	mux.HandleFunc("/fsc/txlog/", handleFscTxlog(cfg))
+	mux.HandleFunc("/ldv/", handleLdvChain(cfg))
 	mux.HandleFunc("/v1/traces", handleOTLPTraces(hub))
 	mux.HandleFunc("/events", handleChainEvents(hub))
 	mux.HandleFunc("/watch-next", handleWatchNext(hub))

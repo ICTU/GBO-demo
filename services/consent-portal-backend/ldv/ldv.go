@@ -12,6 +12,11 @@
 // of a technical operation; an LDV record is an administrative record that
 // must exist for every processing, is confirmed on write and is never sampled
 // (REQ-32).
+//
+// The portal names the verwerkingsactiviteit it performs and the logbook
+// refuses a reference its own register does not resolve, which fails the
+// citizen's action. Checking the register up front would only move the same
+// failure earlier, at the cost of a second protocol between them.
 package ldv
 
 import (
@@ -49,11 +54,8 @@ const (
 // this portal belongs to. It implements consent.Logbook.
 type Logbook struct {
 	endpoint    string
-	registerURL string
 	token       string
 	serviceName string
-	fallback    string
-	activities  map[string]bool
 	client      *http.Client
 }
 
@@ -62,7 +64,7 @@ type Logbook struct {
 // records. Every other misconfiguration is an error, because a
 // half-configured logbook silently logging nothing is the failure mode this
 // package exists to prevent.
-func New(serviceName, logbookURL, token, fallbackActivity string) (*Logbook, error) {
+func New(serviceName, logbookURL, token string) (*Logbook, error) {
 	base := strings.TrimRight(logbookURL, "/")
 	if base == "" {
 		return nil, nil
@@ -70,77 +72,12 @@ func New(serviceName, logbookURL, token, fallbackActivity string) (*Logbook, err
 	if token == "" {
 		return nil, fmt.Errorf("a logbook URL is set but no write token")
 	}
-	if fallbackActivity == "" {
-		return nil, fmt.Errorf("a logbook URL is set but no fallback verwerkingsactiviteit")
-	}
 	return &Logbook{
 		endpoint:    base + "/logboek/records",
-		registerURL: base + "/verwerkingsactiviteiten",
 		token:       token,
 		serviceName: serviceName,
-		fallback:    fallbackActivity,
 		client:      &http.Client{Timeout: 5 * time.Second},
 	}, nil
-}
-
-// Fallback is the register entry used when a named activity does not resolve.
-func (l *Logbook) Fallback() string { return l.fallback }
-
-// LoadRegister fetches the logbook's verwerkingsactiviteiten index once, so
-// the portal knows which references it may use and can fall back deliberately
-// rather than have a write rejected mid-request. It also proves at startup
-// that the logbook is reachable — a component that must log has no business
-// starting without one.
-func (l *Logbook) LoadRegister(ctx context.Context, attempts int, backoff time.Duration) error {
-	var lastErr error
-	for attempt := 0; attempt < attempts; attempt++ {
-		if attempt > 0 {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(backoff):
-			}
-		}
-		references, err := l.fetchRegister(ctx)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		l.activities = make(map[string]bool, len(references))
-		for _, reference := range references {
-			l.activities[reference] = true
-		}
-		if !l.activities[l.fallback] {
-			return fmt.Errorf("fallback verwerkingsactiviteit %q is not in the logbook's register", l.fallback)
-		}
-		return nil
-	}
-	return fmt.Errorf("logbook register unreachable after %d attempts: %w", attempts, lastErr)
-}
-
-func (l *Logbook) fetchRegister(ctx context.Context) ([]string, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, l.registerURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	response, err := l.client.Do(request)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = response.Body.Close() }()
-	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("register status %d", response.StatusCode)
-	}
-	var payload struct {
-		Verwerkingsactiviteiten []string `json:"verwerkingsactiviteiten"`
-	}
-	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&payload); err != nil {
-		return nil, err
-	}
-	if len(payload.Verwerkingsactiviteiten) == 0 {
-		return nil, fmt.Errorf("register is empty")
-	}
-	return payload.Verwerkingsactiviteiten, nil
 }
 
 // record is the wire shape: the OTel log record LDV reuses.
@@ -160,7 +97,7 @@ type record struct {
 // action must fail rather than complete unlogged.
 func (l *Logbook) Record(ctx context.Context, processing consent.Processing) error {
 	attributes := map[string]any{
-		attrProcessingActivityID: l.activityFor(processing.Activity),
+		attrProcessingActivityID: processing.Activity,
 		attrDataSubjectID:        string(processing.Subject),
 		attrDataSubjectIDType:    subjectTypePortalSubject,
 	}
@@ -205,17 +142,6 @@ func (l *Logbook) Record(ctx context.Context, processing consent.Processing) err
 	}
 	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4<<10))
 	return nil
-}
-
-// activityFor falls back to the register's vangnet entry when the named
-// activity is not there. A processing whose activity is not described is
-// still a processing, and leaving the record out would be the one thing LDV
-// forbids.
-func (l *Logbook) activityFor(activity string) string {
-	if l.activities[activity] {
-		return activity
-	}
-	return l.fallback
 }
 
 var traceIDPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)

@@ -602,7 +602,7 @@ func main() {
 	if err != nil {
 		fatal("configuring the logboek client", err)
 	}
-	logbook := newIssuanceLogbook(ldvClient)
+	logbook := newIssuanceLogbook(ldvClient, parseNextLogbooks(os.Getenv("LDV_NEXT_LOGBOOK_IDS")))
 	if ldvClient == nil {
 		slog.Warn("no LDV_LOGBOOK_URL configured; this adapter writes no Logboek Dataverwerkingen records")
 	}
