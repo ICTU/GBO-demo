@@ -200,6 +200,7 @@ which is the register requirement actually biting rather than being described.
 | | |
 | --- | --- |
 | `POST /logboek/records` | write one record. `201` with a confirmation, `200` when the (trace_id, span_id) was already stored, `400` on malformed JSON, `422` on an unlawful record, `401` without the bearer token. |
+| `GET /logboek/records?traceID=…` | the read extension. Also `?processingActivityID=…` and `?dataSubjectId=…&dataSubjectIdType=…`; `400` without one of the three, `401` without the read token. `limit` caps the answer (default 100, max 500) and the response says whether it truncated. |
 | `GET /verwerkingsactiviteiten` | register index (unauthenticated) |
 | `GET /verwerkingsactiviteiten/{ref}` | one entry (unauthenticated) |
 | `GET /health` | liveness |
@@ -214,10 +215,21 @@ span_id)` is the primary key, so a producer's retry after a timeout is
 idempotent and is reported as a duplicate rather than creating a second
 Dataverwerking.
 
-Access control is minimal on purpose: network-internal plus a shared bearer
-token. Who may write to and read from a Verantwoordelijke's logboek is an open
-governance question (Q-08), and answering it with an invented demo scheme
-would be worse than saying so.
+Reading and writing take **separate tokens**, which is the one distinction
+worth making even in a demo: every instrumented component must write, and
+almost nothing should read. A logbook holds a record of every processing about
+a person, so unrestricted read access recreates the very concentration the
+pseudonymisation avoids.
+
+Beyond that, access control is minimal on purpose: network-internal plus a
+shared bearer token. Who may read a Verantwoordelijke's logboek — the citizen,
+the DPO, a toezichthouder, incident response — is exactly the open governance
+question (Q-08), and answering it with an invented demo scheme would be worse
+than saying so.
+
+The read extension is deliberately not a query language. One axis per read, a
+result cap, and no free browsing: a logbook you can page through has become a
+second copy of the data it describes.
 
 ## Configuration
 
@@ -227,6 +239,7 @@ would be worse than saying so.
 | `DATABASE_PATH` | `/data/logboek.db` | SQLite, like `dvtp-onboarding-register` |
 | `REGISTER_PATH` | `/config/verwerkingsactiviteiten.json` | which Verantwoordelijke this instance is |
 | `LDV_WRITE_TOKEN` | — | required; the service refuses to start without it |
+| `LDV_READ_TOKEN` | — | the read extension refuses every request without it |
 
 ## Producers: fail-closed
 
@@ -329,15 +342,31 @@ docker compose exec -T logboek-bd \
   wget -qO- http://localhost:4016/verwerkingsactiviteiten
 ```
 
+## The chain view
+
+`dpl.read.nextLogbookId` is what makes a chain view assemblable without one
+place that holds everything — which is precisely what LDV's
+per-Verantwoordelijke model rules out. The `eudi-adapter` sets it on the
+attestation-assembly record, naming the logbook of the bronhouder it called,
+so a reader follows the pointer and queries there with the same trace id.
+
+The developer portal does that fan-out for you: its **Logboek
+Dataverwerkingen** panel queries every configured logbook in parallel and
+renders the records as the tree their `parent_span_id` describes. It sits
+directly under the FSC transaction-log panel, and both show the same trace id
+as the PDP decision above them — which is the "one trace id, three standards"
+claim, made checkable rather than asserted.
+
+```bash
+curl -s -H "Authorization: Bearer $LDV_READ_TOKEN" \
+  "http://localhost:9416/logboek/records?traceID=<32 hex chars>" | jq
+```
+
 ## Scope
 
-Phases 1 and 2 of [#302](https://github.com/ICTU/GBO-demo/issues/302) cover the
-write side for every in-scope component. Not here yet:
-
-- **Phase 3** — the read extension (`extensie lezen`) per logbook,
-  `dpl.read.nextLogbookId` on cross-org records, and a developer-portal panel
-  showing the three-standard picture per trace. The store already indexes the
-  three query axes that extension needs.
+[#302](https://github.com/ICTU/GBO-demo/issues/302) is complete: the write side
+for every in-scope component, and the read side with the chain view. Citizen
+inzage via MijnToestemmingen is a separate follow-up.
 
 Out of scope entirely: retention terms, bewaarplicht, append-only and signing
 guarantees — governance questions where the LDV *profielen* mechanism is meant

@@ -47,6 +47,13 @@ const (
 	AttrDataSubjectID             = "dpl.core.data_subject_id"
 	AttrDataSubjectIDType         = "dpl.core.data_subject_id_type"
 	AttrForeignOperationProcessor = "dpl.core.foreign_operation.processor"
+
+	// AttrNextLogbookID points at the logbook where this processing continues,
+	// at another Verantwoordelijke. It is what makes a chain view assemblable
+	// iteratively: a reader follows the trace id into the next logbook rather
+	// than needing one place that holds everything — which is precisely what
+	// LDV's per-Verantwoordelijke model rules out.
+	AttrNextLogbookID = "dpl.read.nextLogbookId"
 )
 
 // Headers carrying LDV metadata between components of the same chain. Only

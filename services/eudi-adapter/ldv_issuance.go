@@ -7,9 +7,11 @@ package main
 
 import (
 	"context"
-	ldv "gbo-demo/ldv-client"
 	"net/http"
+	"strings"
 	"time"
+
+	ldv "gbo-demo/ldv-client"
 )
 
 // The verwerkingsactiviteiten of the adapter, as named in GBO's register.
@@ -28,14 +30,36 @@ const (
 // methods below are nil-safe and the handler needs no branch.
 type issuanceLogbook struct {
 	*ldv.Client
+	// nextLogbooks maps a source id onto the logbook of the Verantwoordelijke
+	// that holds it. An issuance is where GBO's own processing hands off to a
+	// bronhouder, so it is the one place in this chain that can say where the
+	// rest of the story is written down.
+	nextLogbooks map[string]string
 }
 
 // newIssuanceLogbook wraps a client, or returns nil when there is none.
-func newIssuanceLogbook(client *ldv.Client) *issuanceLogbook {
+func newIssuanceLogbook(client *ldv.Client, nextLogbooks map[string]string) *issuanceLogbook {
 	if client == nil {
 		return nil
 	}
-	return &issuanceLogbook{Client: client}
+	return &issuanceLogbook{Client: client, nextLogbooks: nextLogbooks}
+}
+
+// parseNextLogbooks reads a "sourceID=logbookID,sourceID=logbookID" mapping.
+// A malformed entry is skipped rather than fatal: a missing pointer costs a
+// reader one manual hop, while refusing to start costs every issuance.
+func parseNextLogbooks(raw string) map[string]string {
+	mapping := map[string]string{}
+	for _, entry := range strings.Split(raw, ",") {
+		sourceID, logbookID, found := strings.Cut(strings.TrimSpace(entry), "=")
+		if !found {
+			continue
+		}
+		if sourceID, logbookID = strings.TrimSpace(sourceID), strings.TrimSpace(logbookID); sourceID != "" && logbookID != "" {
+			mapping[sourceID] = logbookID
+		}
+	}
+	return mapping
 }
 
 // issuanceRecording carries the identity of an issuance's records while the
@@ -121,9 +145,12 @@ func (l *issuanceLogbook) logAttestationAssembly(ctx context.Context, recording 
 		StartTime:    start,
 		EndTime:      time.Now().UTC(),
 		Attributes: ldv.Attributes(attestationBuildActivity, recording.subjectID, recording.subjectType, recording.processor, map[string]any{
-			"gbo.source_id":  sourceID,
-			"gbo.source_oin": sourceOIN,
-			"gbo.type_id":    typeID,
+			// Where this processing continues: the bronhouder logged its own
+			// half of this request under the same trace id.
+			ldv.AttrNextLogbookID: l.nextLogbooks[sourceID],
+			"gbo.source_id":       sourceID,
+			"gbo.source_oin":      sourceOIN,
+			"gbo.type_id":         typeID,
 			// How many claims ended up in the attestation, not which: the
 			// record says what was processed, it is not a copy of it.
 			"gbo.attestatie.claims": claims,
