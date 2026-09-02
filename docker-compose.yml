@@ -366,14 +366,58 @@ services:
       timeout: 3s
       retries: 5
 
+  # The Logboek Dataverwerkingen of the Belastingdienst (LDV v1.0.0). One
+  # image, one instance per Verantwoordelijke — the same pattern as the
+  # sidecars — because LDV has each Verantwoordelijke log its own processing
+  # and lets only trace metadata cross a boundary. What makes this instance
+  # "the Belastingdienst's" is the register document it serves, nothing in
+  # the code.
+  #
+  # It is deliberately *not* the observability pipeline. Loki and Jaeger keep
+  # sampled, short-lived exhaust of technical operations; these records are
+  # administrative, confirmed on write and never sampled. Separate store,
+  # separate guarantees.
+  logboek-bd:
+    build: ./services/ldv-logboek
+    ports:
+      - "127.0.0.1:${GBO_PORT_LOGBOEK_BD:-9416}:4016"
+    environment:
+      - OTEL_SERVICE_NAME=logboek-bd
+      - DATABASE_PATH=/data/logboek.db
+      - REGISTER_PATH=/config/verwerkingsactiviteiten-bd.json
+      # Local-demo default. A deployment sets a real value; the token is the
+      # whole access model here, and who may write to or read from a
+      # Verantwoordelijke's logboek is an open governance question.
+      - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
+    volumes:
+      - logboek-bd-data:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4016/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   graphql-server:
-    build: ./services/graphql-server
+    build:
+      # Root context: this service depends on the sibling services/ldv-client
+      # module, which a context scoped to its own directory cannot see.
+      context: .
+      dockerfile: services/graphql-server/Dockerfile
     ports:
       - "${GBO_PORT_GRAPHQL:-9400}:4000"
     environment:
       - OTEL_SERVICE_NAME=graphql-server
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
       - GBO_SOURCE_METADATA_PATH=/config/gbo-source-metadata.json
+      # LDV: this bron is part of the Belastingdienst's logboek. Setting
+      # LDV_LOGBOOK_URL is what puts it in the chain — and makes it
+      # fail-closed, so a query that cannot be logged returns no data.
+      - LDV_LOGBOOK_URL=http://logboek-bd:4016
+      - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
+      - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY:-local-demo-pseudonym-key}
+      - LDV_YEAR_ACTIVITY_TEMPLATE=bd-ib-%d@v1
     volumes:
       - ./services/graphql-server/config:/config:ro
     networks:
@@ -384,6 +428,8 @@ services:
     depends_on:
       otel-collector:
         condition: service_started
+      logboek-bd:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4000/health"]
       interval: 5s
@@ -418,7 +464,9 @@ services:
   # onboarding profile. It is isolated from FSC and is never a production
   # security example.
   unsecured-graphql-server:
-    build: ./services/graphql-server
+    build:
+      context: .
+      dockerfile: services/graphql-server/Dockerfile
     ports:
       - "${GBO_PORT_UNSECURED_GRAPHQL:-9414}:4000"
     environment:
@@ -483,7 +531,11 @@ services:
   # fsc-infra_default so bd-inway can reach it; reaches graphql-server
   # over the main stack backend network.
   bron-sidecar:
-    build: ./services/bron-sidecar
+    build:
+      # Root context: this service depends on the sibling services/ldv-client
+      # module, which a context scoped to its own directory cannot see.
+      context: .
+      dockerfile: services/bron-sidecar/Dockerfile
     ports:
       - "${GBO_PORT_BRON_SIDECAR:-9411}:4011"
     environment:
@@ -493,6 +545,13 @@ services:
       - BSNK_URL=http://bsnk-mock:4003
       - OWN_PEER_OIN=99999999900000000200
       - PSEUDONYM_VARS=bsn
+      # LDV: the sidecar's two Dataverwerkingen — the PI→BSN resolution and
+      # the forward — go to the Belastingdienst's logboek.
+      - LDV_LOGBOOK_URL=http://logboek-bd:4016
+      - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
+      - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY:-local-demo-pseudonym-key}
+      - LDV_RESOLUTION_ACTIVITY=bd-pi-bsn-resolutie@v1
+      - LDV_FORWARD_ACTIVITY=bd-bronquery-doorgifte@v1
     networks:
       - backend
       - fsc-infra
@@ -500,6 +559,8 @@ services:
       graphql-server:
         condition: service_healthy
       bsnk-mock:
+        condition: service_healthy
+      logboek-bd:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4011/health"]
@@ -514,7 +575,9 @@ services:
   # place so a DvTP consumer with a pseudonym contract can be added later
   # without moving the FSC service endpoint.
   brp-sidecar:
-    build: ./services/bron-sidecar
+    build:
+      context: .
+      dockerfile: services/bron-sidecar/Dockerfile
     ports:
       - "${GBO_PORT_BRP_SIDECAR:-9413}:4011"
     environment:
@@ -1073,6 +1136,7 @@ volumes:
   jaeger-badger:
   dev-portal-var:
   dvtp-onboarding-data:
+  logboek-bd-data:
   postgres-eudi-data:
   postgres-ftv-data:
   eudi-tsl-publish:

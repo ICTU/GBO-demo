@@ -82,7 +82,7 @@ while IFS='|' read -r service context dockerfile paths platforms \
       }]' <<<"${images}"
   )"
 done <<'IMAGES'
-bron-sidecar|./services/bron-sidecar|./services/bron-sidecar/Dockerfile|services/bron-sidecar|linux/amd64|false|bron-sidecar
+bron-sidecar|.|./services/bron-sidecar/Dockerfile|services/bron-sidecar services/ldv-client|linux/amd64|false|bron-sidecar
 brp-graphql-server|./services/brp-graphql-server|./services/brp-graphql-server/Dockerfile|services/brp-graphql-server|linux/amd64|false|brp-graphql-server
 bsnk-mock|./services/bsnk-mock|./services/bsnk-mock/Dockerfile|services/bsnk-mock|linux/amd64|false|bsnk-mock
 consent-portal-backend|./services/consent-portal-backend|./services/consent-portal-backend/Dockerfile|services/consent-portal-backend|linux/amd64|false|consent-portal-backend
@@ -93,7 +93,8 @@ dienstverlener-backend|./services/dienstverlener-backend|./services/dienstverlen
 dienstverlener-mock|./dienstverlener-mock|./dienstverlener-mock/Dockerfile|dienstverlener-mock|linux/amd64|false|dienstverlener-mock
 dvtp-onboarding-register|./services/dvtp-onboarding-register|./services/dvtp-onboarding-register/Dockerfile|services/dvtp-onboarding-register|linux/amd64|false|dvtp-onboarding-register
 eudi-adapter|.|./services/eudi-adapter/Dockerfile|services/eudi-adapter|linux/amd64|false|eudi-adapter
-graphql-server|./services/graphql-server|./services/graphql-server/Dockerfile|services/graphql-server|linux/amd64|false|graphql-server
+graphql-server|.|./services/graphql-server/Dockerfile|services/graphql-server services/ldv-client|linux/amd64|false|graphql-server
+ldv-logboek|./services/ldv-logboek|./services/ldv-logboek/Dockerfile|services/ldv-logboek|linux/amd64|false|ldv-logboek
 landing-page|./landing-page|./landing-page/Dockerfile|landing-page|linux/amd64|false|landing-page
 openftv-manager|.|./services/openftv-manager/Dockerfile|services/openftv-manager|linux/amd64|false|openftv-manager
 openftv-manager-ui|.|./services/openftv-manager-ui/Dockerfile|services/openftv-manager-ui|linux/amd64|false|openftv-manager-ui

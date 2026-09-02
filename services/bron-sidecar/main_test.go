@@ -66,7 +66,7 @@ func TestForwardDirectPassThrough(t *testing.T) {
 		PseudonymVars: "bsn",
 	}
 	client := &http.Client{Timeout: 5 * time.Second}
-	srv := httptest.NewServer(newMux(cfg, client))
+	srv := httptest.NewServer(newMux(cfg, client, nil))
 	defer srv.Close()
 
 	reqBody := `{"query":"query($bsn: BSN!) { ingeschrevenPersoon(bsn: $bsn) { heeftBelastingjaarAangifte { belastingjaar } } }","variables":{"bsn":"123456789"}}`
@@ -104,7 +104,7 @@ func TestForwardDirectPassThrough(t *testing.T) {
 
 func TestHealth(t *testing.T) {
 	cfg := config{UpstreamURL: "http://unused.invalid", BSNkURL: "http://unused.invalid", PseudonymVars: "bsn"}
-	srv := httptest.NewServer(newMux(cfg, &http.Client{Timeout: time.Second}))
+	srv := httptest.NewServer(newMux(cfg, &http.Client{Timeout: time.Second}, nil))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/health")
