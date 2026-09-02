@@ -77,11 +77,28 @@ An empty or missing `prp` means the connection contract carries no grant
 properties. Contracts predating the move of `flow`/`subject_id_type` from the
 retired `additional-claims-service` back into the grant are such contracts.
 Re-run the seed — it detects the property mismatch, creates a new contract
-(contracts are immutable) and repoints the grant-link:
+(contracts are immutable) and repoints the grant-link.
+
+Each seed target repairs only its own grants, so repair the whole demo at
+once — the order matters, `fsc-seed-bri-hv` needs the `bri` publication the
+first target creates:
 
 ```bash
-make fsc-seed-bri && make fsc-seed-bri-hv
+make fsc-seed-bri fsc-seed-rvig-source fsc-seed-metadata fsc-seed-bri-hv
 ```
+
+The `svc` claim in the decoded token names the failing service. To repair just
+that one:
+
+| `svc` | Consumer → provider | Seed target |
+| --- | --- | --- |
+| `bri` | EDI-issuer → Belastingdienst | `make fsc-seed-bri` |
+| `bri` | Hypotheekverlener → Belastingdienst | `make fsc-seed-bri-hv` |
+| `brp` | EDI-issuer → Belastingdienst (RvIG source) | `make fsc-seed-rvig-source` |
+| `gbo-metadata-bd`, `gbo-metadata-rvig` | EDI-issuer → Belastingdienst | `make fsc-seed-metadata` |
+
+The `sub` claim tells the two `bri` rows apart: `99999999900000000100` is the
+EDI-issuer, `99999999900000000300` the Hypotheekverlener.
 
 If the new contract stays pending, the counterparty refused it; see *Contract
 seed fails* above. Grant properties need OpenFSC >= v2.0.0 on every peer on
