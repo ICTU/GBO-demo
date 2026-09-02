@@ -20,7 +20,6 @@ updates:
       - /dienstverlener-mock
       - /landing-page
       - /toestemmingsportaal-frontend
-      - /services/additional-claims-service
       - /services/bron-sidecar
       - /services/bsnk-mock
       - /services/consent-portal-backend

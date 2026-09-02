@@ -59,6 +59,34 @@ Check the `make fsc-seed-bri` output. Common causes:
                     "https://bd-manager:9443/v1/contracts?grant_type=GRANT_TYPE_SERVICE_PUBLICATION" | jq'
   ```
 
+## Every request denies with `NO_APPLICABLE_RULE`
+
+The authorization regime travels in the access token as the `prp` claim: the
+properties of the service-connection grant, countersigned by both peers. The
+PDP dispatches on `prp.flow` and denies when it is absent, and the
+bron-sidecar reads `prp.subject_id_type` to decide whether to resolve PI to
+BSN. Decode the token to see what the provider Manager actually issued:
+
+```bash
+docker compose logs --no-log-prefix openftv-pdp | grep -o 'Bearer [A-Za-z0-9._-]*' | tail -1 \
+  | cut -d' ' -f2 | cut -d. -f2 \
+  | python3 -c 'import base64,json,sys; d=sys.stdin.read().strip(); print(json.dumps(json.loads(base64.urlsafe_b64decode(d+"="*(-len(d)%4))), indent=2))'
+```
+
+An empty or missing `prp` means the connection contract carries no grant
+properties. Contracts predating the move of `flow`/`subject_id_type` from the
+retired `additional-claims-service` back into the grant are such contracts.
+Re-run the seed — it detects the property mismatch, creates a new contract
+(contracts are immutable) and repoints the grant-link:
+
+```bash
+make fsc-seed-bri && make fsc-seed-bri-hv
+```
+
+If the new contract stays pending, the counterparty refused it; see *Contract
+seed fails* above. Grant properties need OpenFSC >= v2.0.0 on every peer on
+the contract.
+
 ## EUDI flow doesn't work after `make demo-eudi`
 
 Start with the generated and activated state:

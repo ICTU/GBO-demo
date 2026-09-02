@@ -21,7 +21,6 @@ jobs:
       fail-fast: false
       matrix:
         service:
-          - additional-claims-service
           - bron-sidecar
           - brp-graphql-server
           - bsnk-mock
@@ -192,7 +191,6 @@ jobs:
       fail-fast: false
       matrix:
         service:
-          - additional-claims-service
           - dev-portal-backend
           - dvtp-onboarding-register
           - eudi-adapter

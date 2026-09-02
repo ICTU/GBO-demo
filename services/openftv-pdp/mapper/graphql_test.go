@@ -61,14 +61,17 @@ func TestFlowFromHeaders(t *testing.T) {
 		want    string
 	}{
 		{
-			name:    "add claim",
-			headers: map[string]string{"fsc-authorization": "Bearer " + fscToken(`{"add":{"flow":"dvtp:query"}}`)},
+			name:    "grant-property claim",
+			headers: map[string]string{"fsc-authorization": "Bearer " + fscToken(`{"prp":{"flow":"dvtp:query"}}`)},
 			want:    "dvtp:query",
 		},
 		{
-			name:    "legacy prp claim",
-			headers: map[string]string{"fsc-authorization": "Bearer " + fscToken(`{"prp":{"flow":"eudi:attestation"}}`)},
-			want:    "eudi:attestation",
+			// `add` is the retired OpenFSC Additional Claims hook. Honouring
+			// it would accept a regime only the provider signed, next to the
+			// countersigned one in `prp`.
+			name:    "retired add claim is not honoured",
+			headers: map[string]string{"fsc-authorization": "Bearer " + fscToken(`{"add":{"flow":"eudi:attestation"}}`)},
+			want:    "",
 		},
 		{
 			name:    "no token denies rather than defaulting",
@@ -77,7 +80,7 @@ func TestFlowFromHeaders(t *testing.T) {
 		},
 		{
 			name:    "claim without a flow",
-			headers: map[string]string{"fsc-authorization": "Bearer " + fscToken(`{"add":{"subject_id_type":"pseudonym"}}`)},
+			headers: map[string]string{"fsc-authorization": "Bearer " + fscToken(`{"prp":{"subject_id_type":"pseudonym"}}`)},
 			want:    "",
 		},
 		{
@@ -96,7 +99,7 @@ func TestFlowFromHeaders(t *testing.T) {
 		{
 			name: "header does not override the claim",
 			headers: map[string]string{
-				"fsc-authorization": "Bearer " + fscToken(`{"add":{"flow":"eudi:attestation"}}`),
+				"fsc-authorization": "Bearer " + fscToken(`{"prp":{"flow":"eudi:attestation"}}`),
 				"x-gbo-flow":        "dvtp:query",
 			},
 			want: "eudi:attestation",
