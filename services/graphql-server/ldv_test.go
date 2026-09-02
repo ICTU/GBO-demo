@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -218,5 +219,34 @@ func TestAnUnknownSubjectWritesNoRecord(t *testing.T) {
 	}
 	if records := logbook.Written(); len(records) != 0 {
 		t.Fatalf("wrote %d records for an unknown subject: %+v", len(records), records)
+	}
+}
+
+// A query covering two years is two verstrekkingen, and each record has to
+// name the activity its own belastingjaar belongs to. The scope header can
+// only describe one of them, so preferring it made the 2024 record claim the
+// 2025 entry — the kind of mislabelling that only shows up once a real
+// multi-year request runs.
+func TestEachYearGetsItsOwnActivityEvenUnderOneScope(t *testing.T) {
+	logbook := ldvtest.New(t, activity2025, activity2024)
+	url := sourceUnderTest(t, logbook)
+
+	body := `{"query":"query($bsn: BSN!){ingeschrevenPersoon(bsn:$bsn){heeftBelastingjaarAangifte(belastingjaren:[2024,2025]){belastingjaar}}}","variables":{"bsn":"` + demoBSN + `"}}`
+	// The consumer was authorized under one scope, which names 2025 only.
+	if response := queryYear(t, url, map[string]string{"X-GBO-Scope": "bd:ib:2025"}, body); response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", response.StatusCode)
+	}
+
+	records := logbook.Written()
+	if len(records) != 2 {
+		t.Fatalf("wrote %d records, want one per year: %+v", len(records), records)
+	}
+	for _, record := range records {
+		year, _ := record.Attributes["gbo.belastingjaar"].(float64)
+		activity, _ := record.Attributes[ldv.AttrProcessingActivityID].(string)
+		want := "bd-ib-" + strconv.Itoa(int(year)) + "@v1"
+		if activity != want {
+			t.Errorf("a record for %d names %q, want %q — the activity must match its own year", int(year), activity, want)
+		}
 	}
 }
