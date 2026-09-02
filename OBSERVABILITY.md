@@ -61,9 +61,10 @@ authoritative per-hop message metadata.
 ## Not observability: the Logboek Dataverwerkingen
 
 Every Dataverwerking in the chain is also recorded in the logbook of the
-Verantwoordelijke that performed it — a separate store, served by
-[`ldv-logboek`](services/ldv-logboek/README.md), implementing Logius LDV
-v1.0.0. It uses the OpenTelemetry log-record shape, which makes it look like a
+Verantwoordelijke that performed it — `logboek-bd` for the Belastingdienst,
+`logboek-brp` for RvIG, `logboek-gbo` for the voorziening itself. Separate
+stores, served by [`ldv-logboek`](services/ldv-logboek/README.md), implementing
+Logius LDV v1.0.0. It uses the OpenTelemetry log-record shape, which makes it look like a
 second trace exporter. It is not, and the difference is the point: a span here
 is best-effort exhaust of a technical operation, sampled and short-lived,
 while an LDV record is an administrative record that must exist for every

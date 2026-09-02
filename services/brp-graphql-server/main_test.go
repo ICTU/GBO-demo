@@ -74,7 +74,7 @@ func newTestServer(t *testing.T) *httptest.Server {
 	if err != nil {
 		t.Fatalf("buildSchema: %v", err)
 	}
-	return httptest.NewServer(newMux(&schema, tracer, nil))
+	return httptest.NewServer(newMux(&schema, tracer, nil, nil))
 }
 
 func post(t *testing.T, srv *httptest.Server, query, bsn string) overlijdenResult {
@@ -182,14 +182,14 @@ func TestOnlyOnePersoonHasOverledenPartner(t *testing.T) {
 
 func TestAkteRejectsDeathThatDidNotEndMarriage(t *testing.T) {
 	persoon := testWidow("2024-01-02", "2024-01-03")
-	if _, ok := akteVanOverlijden(persoon); ok {
+	if _, _, ok := akteVanOverlijden(persoon); ok {
 		t.Fatal("akteVanOverlijden accepted a partner death on a different date than the marriage dissolution")
 	}
 }
 
 func TestAkteAllowsIncompleteDates(t *testing.T) {
 	persoon := testWidow("2024-01", "2024-01-03")
-	if _, ok := akteVanOverlijden(persoon); !ok {
+	if _, _, ok := akteVanOverlijden(persoon); !ok {
 		t.Fatal("akteVanOverlijden rejected a BRP DatumIncompleet that cannot be compared day-for-day")
 	}
 }
@@ -197,7 +197,7 @@ func TestAkteAllowsIncompleteDates(t *testing.T) {
 func TestAkteRepresentsMissingOptionalFieldsAsNull(t *testing.T) {
 	persoon := testWidow("2024-01-03", "2024-01-03")
 	persoon.Geslachtsnaam = ""
-	akte, ok := akteVanOverlijden(persoon)
+	akte, _, ok := akteVanOverlijden(persoon)
 	if !ok {
 		t.Fatal("akteVanOverlijden returned no result")
 	}

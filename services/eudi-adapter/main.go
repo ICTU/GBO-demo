@@ -37,6 +37,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	ldv "gbo-demo/ldv-client"
 	"io"
 	"log/slog"
 	"net/http"
@@ -192,9 +193,15 @@ type fscResult struct {
 // handleSourceAttestation is the only issuance path for onboarded types. The
 // route selects an activated source/type; concrete parameter values come from
 // the issuance request URL and are validated against the source declaration.
-func handleSourceAttestation(cfg config, client *http.Client, runtime sourceMetadataRuntime) http.HandlerFunc {
+func handleSourceAttestation(cfg config, client *http.Client, runtime sourceMetadataRuntime, logbook *issuanceLogbook) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		now := time.Now()
+		// Two Dataverwerkingen happen below: reading the BSN out of the
+		// disclosed PID, and assembling the attestation from what the source
+		// returned. Both are GBO's own, both are logged, and neither delivers
+		// if its record is not confirmed.
+		extractionStart := time.Now().UTC()
+		var recording issuanceRecording
 		resolved := cfg
 		var metadata *activeSourceMetadata
 		var err error
@@ -238,6 +245,15 @@ func handleSourceAttestation(cfg config, client *http.Client, runtime sourceMeta
 			http.Error(w, "no BSN in disclosed PID", http.StatusBadRequest)
 			return
 		}
+		// Logged before the source is called: a request that cannot be logged
+		// must not reach the bronhouder at all.
+		if logbook != nil {
+			recording, err = logbook.logPIDExtraction(r.Context(), r, bsn, extractionStart, metadata.SourceID, metadata.TypeID)
+			if err != nil {
+				http.Error(w, "the PID disclosure could not be logged; refusing the request", http.StatusInternalServerError)
+				return
+			}
+		}
 		plan, err := metadata.queryPlan(bsn, r.URL.Query())
 		if err != nil {
 			logSourceAttestationError(r, "parameters", err)
@@ -255,6 +271,7 @@ func handleSourceAttestation(cfg config, client *http.Client, runtime sourceMeta
 			http.Error(w, "source request failed", http.StatusBadGateway)
 			return
 		}
+		assemblyStart := time.Now().UTC()
 		projection, err := metadata.project(result.Raw)
 		if err != nil {
 			logSourceAttestationError(r, "projection", err)
@@ -264,6 +281,15 @@ func handleSourceAttestation(cfg config, client *http.Client, runtime sourceMeta
 		if projection.Outcome == gbosimplev1.OutcomeNoData {
 			http.Error(w, "source has no data for this subject and parameters", http.StatusNotFound)
 			return
+		}
+		// The attestation exists now; it does not leave this process until
+		// the logbook has said so.
+		if logbook != nil {
+			if err := logbook.logAttestationAssembly(r.Context(), recording, assemblyStart,
+				metadata.SourceID, metadata.TypeID, metadata.SourceOIN, len(projection.Claims)); err != nil {
+				http.Error(w, "the attestation could not be logged; withholding it", http.StatusInternalServerError)
+				return
+			}
 		}
 		// nl-wallet turns attestation_type into the credential's vct and
 		// computes vct#integrity from the installed Type Metadata bytes. Both
@@ -564,7 +590,24 @@ func main() {
 		fatal("open Source Registry", err)
 	}
 	defer registry.Close()
-	runtimeHandler := http.Handler(newSourceReleaseRuntimeMux(ctx, cfg, client, registry))
+
+	// Either this adapter is part of GBO's LDV chain and cannot start without
+	// its logbook, or it is not and writes no records.
+	ldvClient, err := ldv.New(ldv.Config{
+		ServiceName:  getEnv("OTEL_SERVICE_NAME", "eudi-adapter"),
+		LogbookURL:   os.Getenv("LDV_LOGBOOK_URL"),
+		WriteToken:   os.Getenv("LDV_WRITE_TOKEN"),
+		PseudonymKey: os.Getenv("LDV_SUBJECT_PSEUDONYM_KEY"),
+	})
+	if err != nil {
+		fatal("configuring the logboek client", err)
+	}
+	logbook := newIssuanceLogbook(ldvClient)
+	if ldvClient == nil {
+		slog.Warn("no LDV_LOGBOOK_URL configured; this adapter writes no Logboek Dataverwerkingen records")
+	}
+
+	runtimeHandler := http.Handler(newSourceReleaseRuntimeMux(ctx, cfg, client, registry, logbook))
 	// Middleware order: withFscTraceContext wraps otelhttp — the header
 	// mutation must happen before otelhttp extracts the parent context.
 	srv := &http.Server{

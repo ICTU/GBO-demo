@@ -214,7 +214,7 @@ jobs:
           # records depend on the sibling services/ldv-client module. Same
           # context compose uses.
           case "${{ matrix.service }}" in
-            bron-sidecar|dev-portal-backend|eudi-adapter|graphql-server|openftv-pdp|openftv-manager|openftv-manager-ui) context=. ;;
+            bron-sidecar|brp-graphql-server|consent-register|dev-portal-backend|eudi-adapter|graphql-server|openftv-pdp|openftv-manager|openftv-manager-ui) context=. ;;
           esac
           docker build \
             --file "services/${{ matrix.service }}/Dockerfile" \

@@ -1,10 +1,15 @@
 # ldv-logboek — Logboek Dataverwerkingen
 
-One image, one instance per **Verantwoordelijke**. `logboek-bd` is the
-Belastingdienst's logbook; phase 2 adds `logboek-brp` (RvIG) and `logboek-gbo`.
-Nothing in the code knows about a particular organisation — an instance is
-"the Belastingdienst's" because of the register document it serves and the
-components configured to write to it.
+One image, one instance per **Verantwoordelijke**: `logboek-bd`
+(Belastingdienst), `logboek-brp` (RvIG) and `logboek-gbo` (the voorziening
+itself). Nothing in the code knows about a particular organisation — an
+instance is "the Belastingdienst's" because of the register document it serves
+and the components configured to write to it.
+
+LDV has each Verantwoordelijke log its own processing, with only trace
+metadata crossing a boundary, so a shared logbook would be the wrong shape
+however convenient it looks in a demo. What ties the three together is one
+trace id, not one store.
 
 Implements the write side of [Logius LDV
 v1.0.0](https://logius-standaarden.github.io/LDV/): the third of the three
@@ -108,7 +113,18 @@ and `dpl.core.data_subject_id_type` says which pseudonym space it lives in:
 | --- | --- |
 | `pi` | the polymorphic identity the DvTP chain carries end to end |
 | `logboek-pseudoniem` | a key-derived, logbook-local reference, for components that hold only a BSN (the EUDI flow) |
-| `portal-subject` | the portal-scoped subject reference of the consent-register (phase 2) |
+| `portal-subject` | the portal-scoped reference the consent portal derives, and the only identifier the consent register ever holds |
+| `brp-persoon-id` | RvIG's own record identifier, for someone named in a certificate about another person |
+
+`brp-persoon-id` is deliberately not a pseudonym. It names a Betrokkene the
+source has no pseudonym for — a relative of the deceased, who never asked for
+anything — and it is acceptable precisely because the record never leaves
+RvIG's own logbook. A record crossing an organisation boundary would need a
+pseudonym.
+
+The pseudonym key is per Verantwoordelijke, not shared: one key would make the
+same citizen recognisable across organisations' logbooks, which is exactly
+what a logbook-local pseudonym must not do.
 
 `logboek-pseudoniem` is a demo stand-in: HMAC-SHA-256 over the BSN with a
 per-Verantwoordelijke key, truncated. Stable within one Verantwoordelijke,
@@ -143,7 +159,8 @@ the dienstencatalogus or becomes a separate facility is an open question; the
 stand-in exists to make that gap tangible without blocking, and every served
 entry carries a disclaimer saying so.
 
-The Belastingdienst register ([`config/verwerkingsactiviteiten-bd.json`](config/verwerkingsactiviteiten-bd.json)):
+One register per Verantwoordelijke, in [`config/`](config/). The
+Belastingdienst's ([`verwerkingsactiviteiten-bd.json`](config/verwerkingsactiviteiten-bd.json)):
 
 | reference | Dataverwerking | logged by |
 | --- | --- | --- |
@@ -151,6 +168,27 @@ The Belastingdienst register ([`config/verwerkingsactiviteiten-bd.json`](config/
 | `bd-bronquery-doorgifte@v1` | receiving and forwarding a bronbevraging | `bron-sidecar` |
 | `bd-ib-2025@v1` | verstrekking inkomensgegevens IB 2025 | `graphql-server` |
 | `bd-ib-2024@v1` | verstrekking inkomensgegevens IB 2024 | `graphql-server` |
+
+RvIG's ([`verwerkingsactiviteiten-brp.json`](config/verwerkingsactiviteiten-brp.json)):
+
+| reference | Dataverwerking | logged by |
+| --- | --- | --- |
+| `brp-pi-bsn-resolutie@v1` | PI → BSN resolution | `brp-sidecar` |
+| `brp-bronquery-doorgifte@v1` | receiving and forwarding a bronbevraging | `brp-sidecar` |
+| `brp-akte-overlijden@v1` | verstrekking akte van overlijden | `brp-graphql-server` |
+| `brp-persoonsgegevens-verstrekking@v1` | verstrekking BRP-persoonsgegevens | `brp-graphql-server` |
+
+GBO's own ([`verwerkingsactiviteiten-gbo.json`](config/verwerkingsactiviteiten-gbo.json)):
+
+| reference | Dataverwerking | logged by |
+| --- | --- | --- |
+| `gbo-bsn-pseudonimisering@v1` | BSN → PI + portal-scoped reference at consent intake | `consent-portal-backend` |
+| `gbo-toestemming-verlenen@v1` | recording a consent | `consent-register` |
+| `gbo-toestemming-intrekken@v1` | revoking a consent | `consent-register` |
+| `gbo-toestemming-status@v1` | confirming a consent's status to the PDP | `consent-register` |
+| `gbo-toestemming-inzage@v1` | showing a citizen their own consents | `consent-register` |
+| `gbo-pid-bsn-extractie@v1` | reading the BSN out of a disclosed PID | `eudi-adapter` |
+| `gbo-attestatie-samenstellen@v1` | assembling an attestation from source data | `eudi-adapter` |
 
 A component names the activity it performs; the logbook refuses a reference
 its register does not resolve, and that refusal fails the request. So a
@@ -210,8 +248,12 @@ Producer configuration:
 | `LDV_LOGBOOK_URL` | the logbook of this component's Verantwoordelijke; unset means no LDV |
 | `LDV_WRITE_TOKEN` | must match the logbook's |
 | `LDV_SUBJECT_PSEUDONYM_KEY` | key for `logboek-pseudoniem` derivation |
-| `LDV_RESOLUTION_ACTIVITY`, `LDV_FORWARD_ACTIVITY` | `bron-sidecar` only |
+| `LDV_RESOLUTION_ACTIVITY`, `LDV_FORWARD_ACTIVITY` | `bron-sidecar`/`brp-sidecar` only — the same image runs in front of every bron, and each bron's register names its activities in its own terms |
 | `LDV_YEAR_ACTIVITY_TEMPLATE` | `graphql-server` only, e.g. `bd-ib-%d@v1` |
+
+`consent-register` and `consent-portal-backend` need no
+`LDV_SUBJECT_PSEUDONYM_KEY`: neither ever holds a BSN in a record, so there is
+nothing to derive a pseudonym from.
 
 ## The client
 
@@ -232,7 +274,14 @@ fake logbook the services' tests drive. What stays per service is what only
 that service knows: which of its verwerkingsactiviteiten a given request
 performed and who it was about — a small wrapper type embedding the client.
 
-## What one DvTP query produces
+`consent-portal-backend` carries none of it. It is laid out as ports and
+adapters, so its core owns a `Logbook` port and `ldv/` implements it with a
+purpose-built writer: no FSC boundary, no BSN, and therefore no use for the
+shared client's machinery.
+
+## What the flows produce
+
+A DvTP query, in `logboek-bd`:
 
 ```
 Fsc-Transaction-Id 0af76519-…-c80319c
@@ -244,6 +293,37 @@ Fsc-Transaction-Id 0af76519-…-c80319c
 The same trace id appears on the ADL decision record written by the OpenFTV
 PDP and in the FSC transaction log of both peers.
 
+The death-certificate attestation, in `logboek-brp`. One request, three
+Betrokkenen: the surviving partner who asked, and the two living relatives the
+certificate names. The relatives' records hang under the requester's because
+they exist only as part of that one processing.
+
+```
+└── brp-bronquery-doorgifte@v1  brp-sidecar        LP-4727… (logboek-pseudoniem)
+    └── brp-akte-overlijden@v1  brp-graphql-server LP-4727… (logboek-pseudoniem)   rol=aanvrager
+        ├── brp-akte-overlijden@v1  brp-graphql-server 018f2c4a-…-000a (brp-persoon-id)  rol=ouder-van-overledene
+        └── brp-akte-overlijden@v1  brp-graphql-server 018f2c4a-…-000b (brp-persoon-id)  rol=ouder-van-overledene
+```
+
+The deceased is **not** among them. The AVG protects living persons, so the
+person the certificate is about is not a Betrokkene of this processing even
+though their data is what gets disclosed. The requester's record carries
+`gbo.akte.overledene_verwerkt` so a reader sees that this was decided rather
+than forgotten.
+
+A consent lifecycle, in `logboek-gbo` — each step under the portal-scoped
+reference, which is the only identifier this side ever holds:
+
+```
+gbo-bsn-pseudonimisering@v1  consent-portal-backend  EP-3f9a… (portal-subject)
+gbo-toestemming-verlenen@v1  consent-register        EP-3f9a… (portal-subject)
+gbo-toestemming-status@v1    consent-register        EP-3f9a… (portal-subject)
+gbo-toestemming-intrekken@v1 consent-register        EP-3f9a… (portal-subject)
+```
+
+The status check is logged like any other processing rather than treated as a
+read-only lookup: it is what makes a revocation take effect.
+
 ```bash
 docker compose exec -T logboek-bd \
   wget -qO- http://localhost:4016/verwerkingsactiviteiten
@@ -251,12 +331,9 @@ docker compose exec -T logboek-bd \
 
 ## Scope
 
-Phase 1 of [#302](https://github.com/ICTU/GBO-demo/issues/302) covers the write
-side of the Belastingdienst chain. Not here yet:
+Phases 1 and 2 of [#302](https://github.com/ICTU/GBO-demo/issues/302) cover the
+write side for every in-scope component. Not here yet:
 
-- **Phase 2** — `logboek-brp` (RvIG) and `logboek-gbo`, with the consent
-  register, consent portal and EUDI adapter, and multi-subject child records
-  for the death-certificate flow.
 - **Phase 3** — the read extension (`extensie lezen`) per logbook,
   `dpl.read.nextLogbookId` on cross-org records, and a developer-portal panel
   showing the three-standard picture per trace. The store already indexes the
@@ -265,5 +342,10 @@ side of the Belastingdienst chain. Not here yet:
 Out of scope entirely: retention terms, bewaarplicht, append-only and signing
 guarantees — governance questions where the LDV *profielen* mechanism is meant
 to land; a real RvVA; wallet-side processing; and the consumer's own
-processing, which is Hypotheek-BV's responsibility rather than a
-GBO-delivered component's.
+processing.
+
+That last one is a boundary rather than a gap. `dienstverlener-backend`
+receives and processes response data, which is a Dataverwerking — but of
+Hypotheek-BV, not of anything GBO delivers. Its logbook would be Hypotheek-BV's
+own, and instrumenting the mock consumer here would suggest the voorziening
+logs on a consumer's behalf, which is exactly what LDV says it must not do.

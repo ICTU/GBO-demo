@@ -38,3 +38,10 @@ require (
 	google.golang.org/grpc v1.83.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
+
+require gbo-demo/ldv-client v0.0.0
+
+// The LDV client is a sibling module in this repository rather than a
+// published one: a change to it has to be usable by the services in the same
+// commit, without a tag in between.
+replace gbo-demo/ldv-client => ../ldv-client

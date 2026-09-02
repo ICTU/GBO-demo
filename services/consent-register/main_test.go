@@ -23,7 +23,7 @@ func TestCreateThenGetConsent(t *testing.T) {
 		t.Fatal(err)
 	}
 	issuer.now = func() time.Time { return time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC) }
-	srv := httptest.NewServer(newMux(NewStore(), issuer))
+	srv := httptest.NewServer(newMux(NewStore(), issuer, nil))
 	defer srv.Close()
 
 	createBody := bytes.NewBufferString(`{

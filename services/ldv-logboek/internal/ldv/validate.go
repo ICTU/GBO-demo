@@ -24,12 +24,20 @@ var ErrInvalidRecord = errors.New("invalid log record")
 //     component holds only a BSN (the EUDI flow) and therefore has nothing
 //     else to name the Betrokkene by. A demo stand-in: it is stable within one
 //     Verantwoordelijke and meaningless outside it.
-//   - portal-subject      the portal-scoped subject reference of the
-//     consent-register (phase 2)
+//   - portal-subject      the portal-scoped subject reference the consent
+//     portal derives for the consent-register, so the register can list a
+//     citizen's consents without ever holding a PI or a BSN
+//   - brp-persoon-id      RvIG's own record identifier for a person in the
+//     BRP. Not a pseudonym, and deliberately so: it names a Betrokkene who
+//     appears in a certificate about someone else (a relative of the
+//     deceased) and for whom the source has no pseudonym at all. It is
+//     acceptable here precisely because the record never leaves RvIG's own
+//     logbook — a cross-organisation record would need a pseudonym.
 var SubjectIDTypes = map[string]bool{
 	"pi":                 true,
 	"logboek-pseudoniem": true,
 	"portal-subject":     true,
+	"brp-persoon-id":     true,
 }
 
 var (

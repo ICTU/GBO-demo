@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	ldv "gbo-demo/ldv-client"
 	"log/slog"
 	"net/http"
 	"os"
@@ -223,7 +224,7 @@ func initTracer() func(context.Context) error {
 // newMux builds the routing tree with the given store. Extracted from main
 // so integration tests can wire the handlers to an httptest.Server without
 // starting the real listener.
-func newMux(store ConsentStore, issuer *ConsentIssuer) *http.ServeMux {
+func newMux(store ConsentStore, issuer *ConsentIssuer, logbook *registerLogbook) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -248,7 +249,20 @@ func newMux(store ConsentStore, issuer *ConsentIssuer) *http.ServeMux {
 		writeJSON(w, http.StatusOK, issuer.JWKS())
 	})
 
-	mux.HandleFunc("/consents", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/consents", handleConsents(store, issuer, logbook))
+
+	mux.HandleFunc("/consents/", handleConsentByID(store, logbook))
+
+	return mux
+}
+
+// handleConsents serves the collection: recording a new consent, and the
+// citizen listing. Split out of newMux because a routing tree that also
+// contains the handlers grows past what anyone can read at once — and past
+// what gocyclo tolerates.
+func handleConsents(store ConsentStore, issuer *ConsentIssuer, logbook *registerLogbook) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now().UTC()
 		corsHeaders(w)
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -322,6 +336,23 @@ func newMux(store ConsentStore, issuer *ConsentIssuer) *http.ServeMux {
 				return
 			}
 
+			// Recording a consent is itself a Dataverwerking of the GBO
+			// voorziening. The record names the Betrokkene by the
+			// portal-scoped reference the register stores — never the PI,
+			// which exists here only inside the signed token.
+			if err := logbook.logConsentOperation(r.Context(), r,
+				consentGrantActivity, "dataverwerking.toestemming-verlenen",
+				c.SubjectRef, start, http.StatusCreated,
+				map[string]any{
+					"gbo.consent.id":             c.ConsentID,
+					"gbo.consent.dienstverlener": c.DienstverlenrOIN,
+					"gbo.consent.scopes":         c.Scopes,
+					"gbo.consent.use_case":       c.UseCase,
+				}); err != nil {
+				refuseUnlogged(w)
+				return
+			}
+
 			writeJSON(w, http.StatusCreated, struct {
 				*Consent
 				ConsentToken string `json:"consent_token"`
@@ -346,14 +377,30 @@ func newMux(store ConsentStore, issuer *ConsentIssuer) *http.ServeMux {
 				return
 			}
 
+			// Showing a citizen their own consents is a Dataverwerking too.
+			// A listing without a subject_ref is an operational query rather
+			// than inzage by a Betrokkene, and names nobody to log.
+			if err := logbook.logConsentOperation(r.Context(), r,
+				consentListActivity, "dataverwerking.toestemming-inzage",
+				subjectRef, start, http.StatusOK,
+				map[string]any{"gbo.consent.count": len(result)}); err != nil {
+				refuseUnlogged(w)
+				return
+			}
+
 			writeJSON(w, http.StatusOK, result)
 
 		default:
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		}
-	})
+	}
+}
 
-	mux.HandleFunc("/consents/", func(w http.ResponseWriter, r *http.Request) {
+// handleConsentByID serves a single consent: its status, its detail, and its
+// revocation.
+func handleConsentByID(store ConsentStore, logbook *registerLogbook) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now().UTC()
 		corsHeaders(w)
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -382,6 +429,21 @@ func newMux(store ConsentStore, issuer *ConsentIssuer) *http.ServeMux {
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": "consent not found"})
 				return
 			}
+			// The PDP asks this on every request. Confirming a consent's
+			// status is a processing of that Betrokkene's data, and it is the
+			// step that makes a revocation take effect — so it is logged like
+			// any other, not treated as a read-only lookup.
+			if err := logbook.logConsentOperation(r.Context(), r,
+				consentStatusActivity, "dataverwerking.toestemming-status",
+				c.SubjectRef, start, http.StatusOK,
+				map[string]any{
+					"gbo.consent.id":     c.ConsentID,
+					"gbo.consent.status": c.Status,
+				}); err != nil {
+				refuseUnlogged(w)
+				return
+			}
+
 			writeJSON(w, http.StatusOK, map[string]any{
 				"consent_id": c.ConsentID,
 				"status":     c.Status,
@@ -405,6 +467,14 @@ func newMux(store ConsentStore, issuer *ConsentIssuer) *http.ServeMux {
 				return
 			}
 
+			if err := logbook.logConsentOperation(r.Context(), r,
+				consentListActivity, "dataverwerking.toestemming-inzage",
+				c.SubjectRef, start, http.StatusOK,
+				map[string]any{"gbo.consent.id": c.ConsentID}); err != nil {
+				refuseUnlogged(w)
+				return
+			}
+
 			writeJSON(w, http.StatusOK, c)
 
 		case http.MethodDelete:
@@ -422,14 +492,28 @@ func newMux(store ConsentStore, issuer *ConsentIssuer) *http.ServeMux {
 				return
 			}
 
+			// The revocation has already been stored, so this is the one
+			// place where fail-closed cannot undo the processing. It can
+			// still withhold the confirmation, which is what it does: the
+			// caller learns the operation did not complete cleanly rather
+			// than being told all is well while the logboek has no record.
+			if err := logbook.logConsentOperation(r.Context(), r,
+				consentRevokeActivity, "dataverwerking.toestemming-intrekken",
+				c.SubjectRef, start, http.StatusOK,
+				map[string]any{
+					"gbo.consent.id":     c.ConsentID,
+					"gbo.consent.status": c.Status,
+				}); err != nil {
+				refuseUnlogged(w)
+				return
+			}
+
 			writeJSON(w, http.StatusOK, c)
 
 		default:
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		}
-	})
-
-	return mux
+	}
 }
 
 // fatal logs and ends the process. main is the only place in this service
@@ -440,7 +524,8 @@ func fatal(msg string, err error) {
 }
 
 func main() {
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", "consent-register"))
+	serviceName := getEnv("OTEL_SERVICE_NAME", "consent-register")
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", serviceName))
 
 	cfg, err := loadConfig()
 	if err != nil {
@@ -460,9 +545,24 @@ func main() {
 		fatal("initialising consent token issuer", err)
 	}
 
+	// Either this register is part of GBO's LDV chain and cannot start
+	// without its logbook, or it is not and writes no records.
+	client, err := ldv.New(ldv.Config{
+		ServiceName: serviceName,
+		LogbookURL:  os.Getenv("LDV_LOGBOOK_URL"),
+		WriteToken:  os.Getenv("LDV_WRITE_TOKEN"),
+	})
+	if err != nil {
+		fatal("configuring the logboek client", err)
+	}
+	logbook := newRegisterLogbook(client)
+	if client == nil {
+		slog.Warn("no LDV_LOGBOOK_URL configured; this register writes no Logboek Dataverwerkingen records")
+	}
+
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           otelhttp.NewHandler(withAccessLog(newMux(store, issuer)), "consent-register"),
+		Handler:           otelhttp.NewHandler(withAccessLog(newMux(store, issuer, logbook)), serviceName),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 	serve(srv)
