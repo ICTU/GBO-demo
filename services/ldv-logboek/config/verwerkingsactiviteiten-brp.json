@@ -1,0 +1,76 @@
+{
+  "verantwoordelijke": "RvIG",
+  "disclaimer": "Demo-stand-in voor een Register van Verwerkingsactiviteiten. Dit is GEEN RvVA: de inhoud is afgeleid van de scope-definities in de dienstencatalogus en van de infrastructurele verwerkingen in de keten, en heeft geen enkele juridische status. Het bestaat om de LDV-eis 'elk record verwijst naar een oplosbare, geversioneerde verwerkingsactiviteit' waar te kunnen maken en om het ontbreken van een echt register zichtbaar te houden.",
+  "activities": [
+    {
+      "id": "brp-pi-bsn-resolutie",
+      "version": "v1",
+      "name": "Depseudonimisatie polymorfe identiteit naar BSN",
+      "doel": "Een binnenkomende bronbevraging van een DvTP-afnemer koppelen aan de juiste ingeschreven persoon, zonder dat het BSN buiten de bronhouder komt. De BRP-keten is vooralsnog EUDI-only, dus deze activiteit staat klaar voor het moment dat er een pseudonym-contract bijkomt.",
+      "grondslag": "Noodzakelijk voor de uitvoering van de wettelijke taak van RvIG.",
+      "categorieen_betrokkenen": [
+        "Ingeschreven personen in de BRP"
+      ],
+      "categorieen_persoonsgegevens": [
+        "Polymorfe identiteit (PI)",
+        "Burgerservicenummer"
+      ]
+    },
+    {
+      "id": "brp-bronquery-doorgifte",
+      "version": "v1",
+      "name": "Ontvangen en doorgeven van een bronbevraging",
+      "doel": "Een geautoriseerde bevraging van een afnemer aannemen, geschikt maken voor de bron en doorzetten naar de bronservice.",
+      "grondslag": "De attestatie-uitgifte waarvoor de betrokkene zelf de opdracht geeft (EUDI), dan wel toestemming van de betrokkene (DvTP).",
+      "categorieen_betrokkenen": [
+        "Ingeschreven personen in de BRP"
+      ],
+      "categorieen_persoonsgegevens": [
+        "Polymorfe identiteit (PI)"
+      ],
+      "ontvangers": [
+        "Bronservice RvIG (brp)"
+      ]
+    },
+    {
+      "id": "brp-akte-overlijden",
+      "version": "v1",
+      "name": "Verstrekken akte van overlijden aan de nabestaande partner",
+      "doel": "Het verstrekken van de overlijdensgegevens van de huwelijks- of geregistreerd partner aan de nabestaande, ten behoeve van de afwikkeling van de nalatenschap.",
+      "grondslag": "Verstrekking op verzoek van de betrokkene zelf, in het kader van de wettelijke taak van RvIG.",
+      "scope_id": "brp:akte:overlijden",
+      "categorieen_betrokkenen": [
+        "De nabestaande partner die de akte opvraagt",
+        "De in de akte genoemde nog levende bloedverwanten van de overledene"
+      ],
+      "categorieen_persoonsgegevens": [
+        "Naam, geboortedatum en geboorteplaats",
+        "Datum, plaats en land van overlijden",
+        "Soort verbintenis en gegevens van de partner",
+        "Namen van de ouders van de overledene"
+      ],
+      "ontvangers": [
+        "EUDI-wallet van de nabestaande"
+      ]
+    },
+    {
+      "id": "brp-persoonsgegevens-verstrekking",
+      "version": "v1",
+      "name": "Verstrekken persoonsgegevens van een ingeschreven persoon",
+      "doel": "Het verstrekken van de BRP-gegevens van een ingeschreven persoon aan een geautoriseerde afnemer.",
+      "grondslag": "Verstrekking in het kader van de wettelijke taak van RvIG.",
+      "categorieen_betrokkenen": [
+        "Ingeschreven personen in de BRP"
+      ],
+      "categorieen_persoonsgegevens": [
+        "Naam- en geboortegegevens",
+        "Adresgegevens",
+        "Nationaliteit, verblijfstitel en gezagsverhouding",
+        "Huwelijk of geregistreerd partnerschap"
+      ],
+      "ontvangers": [
+        "De geautoriseerde afnemer"
+      ]
+    }
+  ]
+}

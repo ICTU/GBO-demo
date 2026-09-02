@@ -399,6 +399,51 @@ services:
       timeout: 3s
       retries: 5
 
+  # The Logboek Dataverwerkingen of RvIG. Same image, different register: the
+  # BRP chain's Dataverwerkingen belong to RvIG and must not land in the
+  # Belastingdienst's logbook.
+  logboek-brp:
+    build: ./services/ldv-logboek
+    ports:
+      - "127.0.0.1:${GBO_PORT_LOGBOEK_BRP:-9417}:4016"
+    environment:
+      - OTEL_SERVICE_NAME=logboek-brp
+      - DATABASE_PATH=/data/logboek.db
+      - REGISTER_PATH=/config/verwerkingsactiviteiten-brp.json
+      - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
+    volumes:
+      - logboek-brp-data:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4016/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # The Logboek Dataverwerkingen of GBO itself. The voorziening is a
+  # Verantwoordelijke in its own right: it pseudonymises, records consent,
+  # answers status questions and assembles attestations, and those are its own
+  # processings rather than a bronhouder's.
+  logboek-gbo:
+    build: ./services/ldv-logboek
+    ports:
+      - "127.0.0.1:${GBO_PORT_LOGBOEK_GBO:-9418}:4016"
+    environment:
+      - OTEL_SERVICE_NAME=logboek-gbo
+      - DATABASE_PATH=/data/logboek.db
+      - REGISTER_PATH=/config/verwerkingsactiviteiten-gbo.json
+      - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
+    volumes:
+      - logboek-gbo-data:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4016/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   graphql-server:
     build:
       # Root context: this service depends on the sibling services/ldv-client
@@ -439,13 +484,21 @@ services:
   # Second logical source: BRP/RvIG. The onboarding proof publishes it as a
   # distinct service under the same FSC participant as BD.
   brp-graphql-server:
-    build: ./services/brp-graphql-server
+    build:
+      # Root context: this service depends on the sibling services/ldv-client
+      # module, which a context scoped to its own directory cannot see.
+      context: .
+      dockerfile: services/brp-graphql-server/Dockerfile
     ports:
       - "${GBO_PORT_BRP_GRAPHQL:-9401}:4001"
     environment:
       - OTEL_SERVICE_NAME=brp-graphql-server
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
       - GBO_SOURCE_METADATA_PATH=/config/gbo-source-metadata.json
+      # LDV: this bron is part of RvIG's logboek.
+      - LDV_LOGBOOK_URL=http://logboek-brp:4016
+      - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
+      - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY_BRP:-local-demo-pseudonym-key-brp}
     volumes:
       - ./services/brp-graphql-server/config:/config:ro
     networks:
@@ -454,6 +507,8 @@ services:
     depends_on:
       otel-collector:
         condition: service_started
+      logboek-brp:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4001/health"]
       interval: 5s
@@ -487,7 +542,11 @@ services:
       retries: 5
 
   consent-register:
-    build: ./services/consent-register
+    build:
+      # Root context: this service depends on the sibling services/ldv-client
+      # module, which a context scoped to its own directory cannot see.
+      context: .
+      dockerfile: services/consent-register/Dockerfile
     ports:
       - "${GBO_PORT_CONSENT_REGISTER:-9402}:4002"
     environment:
@@ -495,11 +554,19 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
       - CONSENT_TOKEN_ISSUER=https://consent-register.gbo.test
       - CONSENT_TOKEN_AUDIENCE=gbo:dvtp:pdp
+      # LDV: recording, revoking and status-confirming a consent are GBO's own
+      # Dataverwerkingen. No pseudonym key: this service never sees a BSN, it
+      # names the Betrokkene by the portal-scoped reference it is given.
+      - LDV_LOGBOOK_URL=http://logboek-gbo:4016
+      - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
+      - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY_GBO:-local-demo-pseudonym-key-gbo}
     networks:
       - backend
     depends_on:
       otel-collector:
         condition: service_started
+      logboek-gbo:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4002/health"]
       interval: 5s
@@ -587,6 +654,13 @@ services:
       - BSNK_URL=http://bsnk-mock:4003
       - OWN_PEER_OIN=99999999900000000200
       - PSEUDONYM_VARS=bsn
+      # LDV: the same sidecar image in front of the BRP bron writes to RvIG's
+      # logboek, under RvIG's own verwerkingsactiviteiten.
+      - LDV_LOGBOOK_URL=http://logboek-brp:4016
+      - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
+      - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY_BRP:-local-demo-pseudonym-key-brp}
+      - LDV_RESOLUTION_ACTIVITY=brp-pi-bsn-resolutie@v1
+      - LDV_FORWARD_ACTIVITY=brp-bronquery-doorgifte@v1
     networks:
       - backend
       - fsc-infra
@@ -594,6 +668,8 @@ services:
       brp-graphql-server:
         condition: service_healthy
       bsnk-mock:
+        condition: service_healthy
+      logboek-brp:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4011/health"]
@@ -612,12 +688,18 @@ services:
       - BSNK_URL=http://bsnk-mock:4003
       - CONSENT_URL=http://consent-register:4002
       - DEV_PORTAL_BACKEND_URL=http://dev-portal-backend:4007
+      # LDV: the BSN→PI pseudonymisation at consent intake is GBO's own
+      # Dataverwerking — the one that makes every processing after it BSN-free.
+      - LDV_LOGBOOK_URL=http://logboek-gbo:4016
+      - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
     networks:
       - backend
     depends_on:
       bsnk-mock:
         condition: service_healthy
       consent-register:
+        condition: service_healthy
+      logboek-gbo:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4005/health"]
@@ -1062,9 +1144,16 @@ services:
       - SOURCE_REGISTRY_DATABASE_URL=postgres://source_registry_reader:${SOURCE_REGISTRY_READER_PASSWORD}@postgres-eudi:5432/source_registry
       - SOURCE_REGISTRY_SCHEMA=source_registry
       - SOURCE_REGISTRY_REFRESH_INTERVAL=2s
+      # LDV: reading the BSN out of the disclosed PID and assembling the
+      # attestation are GBO's own Dataverwerkingen, in its issuer role.
+      - LDV_LOGBOOK_URL=http://logboek-gbo:4016
+      - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
+      - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY_GBO:-local-demo-pseudonym-key-gbo}
     depends_on:
       source-registry-migrations:
         condition: service_completed_successfully
+      logboek-gbo:
+        condition: service_healthy
     networks:
       - eudi
       - backend
@@ -1137,6 +1226,8 @@ volumes:
   dev-portal-var:
   dvtp-onboarding-data:
   logboek-bd-data:
+  logboek-brp-data:
+  logboek-gbo-data:
   postgres-eudi-data:
   postgres-ftv-data:
   eudi-tsl-publish:

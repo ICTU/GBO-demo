@@ -1,0 +1,113 @@
+{
+  "verantwoordelijke": "GBO",
+  "disclaimer": "Demo-stand-in voor een Register van Verwerkingsactiviteiten. Dit is GEEN RvVA: de inhoud is afgeleid van de toestemmings- en uitgiftefuncties van de voorziening zelf, en heeft geen enkele juridische status. Het bestaat om de LDV-eis 'elk record verwijst naar een oplosbare, geversioneerde verwerkingsactiviteit' waar te kunnen maken en om het ontbreken van een echt register zichtbaar te houden.",
+  "activities": [
+    {
+      "id": "gbo-toestemming-verlenen",
+      "version": "v1",
+      "name": "Vastleggen van een verleende toestemming",
+      "doel": "Het vastleggen van de toestemming die een burger geeft aan een dienstverlener, inclusief de reikwijdte en geldigheidsduur ervan, zodat de bronhouder de verstrekking kan verantwoorden.",
+      "grondslag": "Toestemming van de betrokkene; het vastleggen zelf is noodzakelijk voor de uitvoering van de voorziening.",
+      "categorieen_betrokkenen": [
+        "Burgers die toestemming verlenen via het toestemmingsportaal"
+      ],
+      "categorieen_persoonsgegevens": [
+        "Portaalgebonden subjectverwijzing",
+        "Polymorfe identiteit (PI) in het ondertekende toestemmingstoken",
+        "Reikwijdte, doel en geldigheidsduur van de toestemming"
+      ],
+      "ontvangers": [
+        "De aangewezen dienstverlener",
+        "De bronhouder, via het ondertekende toestemmingstoken"
+      ]
+    },
+    {
+      "id": "gbo-toestemming-intrekken",
+      "version": "v1",
+      "name": "Intrekken van een verleende toestemming",
+      "doel": "Het verwerken van de intrekking van een toestemming, zodat verstrekkingen op basis daarvan direct stoppen.",
+      "grondslag": "Toestemming van de betrokkene; intrekking is een recht van de betrokkene.",
+      "categorieen_betrokkenen": [
+        "Burgers die een toestemming intrekken"
+      ],
+      "categorieen_persoonsgegevens": [
+        "Portaalgebonden subjectverwijzing",
+        "Toestemmingsidentificatie en status"
+      ]
+    },
+    {
+      "id": "gbo-toestemming-status",
+      "version": "v1",
+      "name": "Bevestigen van de status van een toestemming",
+      "doel": "Het beantwoorden van een statusvraag over een toestemming, zodat het autorisatiebesluit op de actuele stand berust en een ingetrokken toestemming meteen tot een weigering leidt.",
+      "grondslag": "Noodzakelijk voor de uitvoering van de voorziening.",
+      "categorieen_betrokkenen": [
+        "Burgers met een vastgelegde toestemming"
+      ],
+      "categorieen_persoonsgegevens": [
+        "Toestemmingsidentificatie en status"
+      ],
+      "ontvangers": [
+        "Het autorisatiebesluitpunt (PDP)"
+      ]
+    },
+    {
+      "id": "gbo-toestemming-inzage",
+      "version": "v1",
+      "name": "Tonen van de eigen toestemmingen aan de burger",
+      "doel": "Het tonen van de toestemmingen van de burger in het toestemmingsportaal.",
+      "grondslag": "Inzagerecht van de betrokkene.",
+      "categorieen_betrokkenen": [
+        "Burgers die hun toestemmingen inzien"
+      ],
+      "categorieen_persoonsgegevens": [
+        "Portaalgebonden subjectverwijzing",
+        "Toestemmingsgegevens"
+      ]
+    },
+    {
+      "id": "gbo-bsn-pseudonimisering",
+      "version": "v1",
+      "name": "Pseudonimiseren van het BSN bij toestemmingsintake",
+      "doel": "Het omzetten van het BSN van de ingelogde burger naar een polymorfe identiteit voor de dienstverlener en een losse portaalgebonden subjectverwijzing, zodat het BSN de voorziening niet verlaat en het toestemmingsregister geen BSN vastlegt.",
+      "grondslag": "Noodzakelijk voor de uitvoering van de voorziening; privacy by design.",
+      "categorieen_betrokkenen": [
+        "Burgers die inloggen op het toestemmingsportaal"
+      ],
+      "categorieen_persoonsgegevens": [
+        "Burgerservicenummer",
+        "Polymorfe identiteit (PI)",
+        "Portaalgebonden subjectverwijzing"
+      ]
+    },
+    {
+      "id": "gbo-pid-bsn-extractie",
+      "version": "v1",
+      "name": "Uitlezen van het BSN uit een gepresenteerde PID",
+      "doel": "Het vaststellen wie de wallethouder is, door het BSN uit de gepresenteerde PID te halen, zodat de juiste bron bevraagd kan worden voor de attestatie die de burger aanvraagt.",
+      "grondslag": "De burger geeft zelf de opdracht tot uitgifte en presenteert daarvoor de PID.",
+      "categorieen_betrokkenen": [
+        "Wallethouders die een attestatie aanvragen"
+      ],
+      "categorieen_persoonsgegevens": [
+        "Burgerservicenummer uit de PID"
+      ]
+    },
+    {
+      "id": "gbo-attestatie-samenstellen",
+      "version": "v1",
+      "name": "Samenstellen van een attestatie uit brongegevens",
+      "doel": "Het omzetten van het antwoord van de bron naar de attestatie die aan de wallet wordt uitgegeven, volgens het gepubliceerde mappingprofiel van de bron.",
+      "grondslag": "De burger geeft zelf de opdracht tot uitgifte.",
+      "categorieen_betrokkenen": [
+        "Wallethouders die een attestatie aanvragen"
+      ],
+      "categorieen_persoonsgegevens": [
+        "De brongegevens die in de attestatie worden opgenomen"
+      ],
+      "ontvangers": [
+        "De EUDI-wallet van de betrokkene, via de issuance-server"
+      ]
+    }
+  ]
+}

@@ -66,28 +66,71 @@ func TestLoadRegisterRejectsUnusableDocuments(t *testing.T) {
 	}
 }
 
-// The register the demo actually ships must load, and every activity a
-// producer can name has to be in it. A typo here would only surface as a
-// rejected write at runtime.
-func TestShippedBelastingdienstRegisterLoads(t *testing.T) {
-	register, err := LoadRegister("../../config/verwerkingsactiviteiten-bd.json")
-	if err != nil {
-		t.Fatalf("load shipped BD register: %v", err)
+// The registers the demo actually ships must load, and every activity a
+// producer can name has to be in one of them. A typo here would only surface
+// as a rejected write at runtime, in whichever flow happens to hit it.
+func TestShippedRegistersLoad(t *testing.T) {
+	cases := map[string]struct {
+		path              string
+		verantwoordelijke string
+		references        []string
+	}{
+		"Belastingdienst": {
+			path:              "../../config/verwerkingsactiviteiten-bd.json",
+			verantwoordelijke: "Belastingdienst",
+			references: []string{
+				"bd-pi-bsn-resolutie@v1",
+				"bd-bronquery-doorgifte@v1",
+				"bd-ib-2025@v1",
+				"bd-ib-2024@v1",
+			},
+		},
+		"RvIG": {
+			path:              "../../config/verwerkingsactiviteiten-brp.json",
+			verantwoordelijke: "RvIG",
+			references: []string{
+				"brp-pi-bsn-resolutie@v1",
+				"brp-bronquery-doorgifte@v1",
+				"brp-akte-overlijden@v1",
+				"brp-persoonsgegevens-verstrekking@v1",
+			},
+		},
+		"GBO": {
+			path:              "../../config/verwerkingsactiviteiten-gbo.json",
+			verantwoordelijke: "GBO",
+			references: []string{
+				"gbo-toestemming-verlenen@v1",
+				"gbo-toestemming-intrekken@v1",
+				"gbo-toestemming-status@v1",
+				"gbo-toestemming-inzage@v1",
+				"gbo-bsn-pseudonimisering@v1",
+				"gbo-pid-bsn-extractie@v1",
+				"gbo-attestatie-samenstellen@v1",
+			},
+		},
 	}
-	if register.Verantwoordelijke != "Belastingdienst" {
-		t.Fatalf("verantwoordelijke = %q", register.Verantwoordelijke)
-	}
-	if !strings.Contains(strings.ToLower(register.Disclaimer), "geen rvva") {
-		t.Fatal("the register must say in so many words that it is not an RvVA")
-	}
-	for _, reference := range []string{
-		"bd-pi-bsn-resolutie@v1",
-		"bd-bronquery-doorgifte@v1",
-		"bd-ib-2025@v1",
-		"bd-ib-2024@v1",
-	} {
-		if _, found := register.Resolve(reference); !found {
-			t.Errorf("%s is referenced by the instrumented components but missing from the register", reference)
-		}
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			register, err := LoadRegister(testCase.path)
+			if err != nil {
+				t.Fatalf("load shipped register: %v", err)
+			}
+			if register.Verantwoordelijke != testCase.verantwoordelijke {
+				t.Fatalf("verantwoordelijke = %q, want %q", register.Verantwoordelijke, testCase.verantwoordelijke)
+			}
+			if !strings.Contains(strings.ToLower(register.Disclaimer), "geen rvva") {
+				t.Error("the register must say in so many words that it is not an RvVA")
+			}
+			for _, reference := range testCase.references {
+				if _, found := register.Resolve(reference); !found {
+					t.Errorf("%s is referenced by an instrumented component but missing from the register", reference)
+				}
+			}
+			// Nothing beyond what the components name: an entry nobody writes
+			// is a register that has drifted away from the chain.
+			if got, want := len(register.References()), len(testCase.references); got != want {
+				t.Errorf("register holds %d entries, the components name %d: %v", got, want, register.References())
+			}
+		})
 	}
 }

@@ -13,8 +13,26 @@ type Portal struct {
 	Pseudonyms Pseudonymizer
 	Consents   Store
 	Watch      Observer         // process-lifetime watchers; nil is fine
+	Logbook    Logbook          // Logboek Dataverwerkingen; nil means not in an LDV chain
 	OwnOIN     string           // recipient_oin used for the portal-scoped subject reference
 	Now        func() time.Time // nil means time.Now; injected by tests
+}
+
+// The verwerkingsactiviteiten of this portal, as named in GBO's register.
+const pseudonymisationActivity = "gbo-bsn-pseudonimisering@v1"
+
+// record files one Dataverwerking. Nil-safe, so callers need no branch: a
+// deployment without a logbook is simply not in an LDV chain.
+//
+// The error is returned rather than swallowed. Everything this portal logs
+// happens before the processing it belongs to has any outward effect, so a
+// caller that propagates the error genuinely prevents an unlogged processing
+// rather than merely reporting one.
+func (p *Portal) record(ctx context.Context, processing Processing) error {
+	if p.Logbook == nil {
+		return nil
+	}
+	return p.Logbook.Record(ctx, processing)
 }
 
 func (p *Portal) now() time.Time {
@@ -69,6 +87,7 @@ func (p *Portal) GiveConsent(ctx context.Context, citizen BSN, in GiveInput) (Gr
 
 	// recipient_oin is the dienstverlener that will receive the pseudonym;
 	// PI becomes signed authorization material for that dienstverlener.
+	pseudonymisationStart := p.now().UTC()
 	emit("pseudonymizing", "bsnk-mock", map[string]any{"oin": in.DienstverlenerOIN})
 	ps, err := p.Pseudonyms.Pseudonymize(ctx, citizen, in.DienstverlenerOIN)
 	if err != nil {
@@ -81,6 +100,28 @@ func (p *Portal) GiveConsent(ctx context.Context, citizen BSN, in GiveInput) (Gr
 	portalSubject, err := p.Pseudonyms.Pseudonymize(ctx, citizen, p.OwnOIN)
 	if err != nil {
 		return Granted{}, fmt.Errorf("derive portal subject reference: %w", err)
+	}
+
+	// Turning a BSN into pseudonyms is itself a Dataverwerking — the one that
+	// makes every processing after it BSN-free — so it is logged here, before
+	// the consent is created. A record that the logbook does not confirm
+	// therefore leaves no consent behind.
+	//
+	// It is logged under the reference it just produced, which is the only
+	// identifier this portal may write down: not the BSN it started from, and
+	// not the PI it derived for the dienstverlener.
+	if err := p.record(ctx, Processing{
+		Activity: pseudonymisationActivity,
+		Name:     "dataverwerking.bsn-pseudonimisering",
+		Subject:  SubjectRef(portalSubject.Pseudonym),
+		Start:    pseudonymisationStart,
+		End:      p.now().UTC(),
+		Attributes: map[string]any{
+			"gbo.pseudonimisering.aanleiding": "toestemming-verlenen",
+			"gbo.consent.dienstverlener":      in.DienstverlenerOIN,
+		},
+	}); err != nil {
+		return Granted{}, fmt.Errorf("log pseudonymisation: %w", err)
 	}
 
 	emit("consent_granting", "consent-register", map[string]any{"oin": in.DienstverlenerOIN})
@@ -105,7 +146,7 @@ func (p *Portal) GiveConsent(ctx context.Context, citizen BSN, in GiveInput) (Gr
 // effective status the UI renders. Filtering is by a portal-scoped subject
 // reference, which enforces per-citizen isolation without persisting PI.
 func (p *Portal) ListConsents(ctx context.Context, citizen BSN) ([]Record, error) {
-	subjectRef, err := p.subjectRefFor(ctx, citizen)
+	subjectRef, err := p.subjectRefFor(ctx, citizen, "toestemmingen-inzien")
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +166,7 @@ func (p *Portal) RevokeConsent(ctx context.Context, citizen BSN, consentID strin
 	emit := p.stepEmitter(ctx, "revoke_consent")
 	emit("portal_received", "toestemmingsportaal", map[string]any{"consent_id": consentID})
 
-	subjectRef, err := p.subjectRefFor(ctx, citizen)
+	subjectRef, err := p.subjectRefFor(ctx, citizen, "toestemming-intrekken")
 	if err != nil {
 		return err
 	}
@@ -149,10 +190,26 @@ func (p *Portal) RevokeConsent(ctx context.Context, citizen BSN, consentID strin
 
 // subjectRefFor derives a portal-specific pseudonym for citizen-facing lookup.
 // This is deliberately not the recipient-independent PI.
-func (p *Portal) subjectRefFor(ctx context.Context, citizen BSN) (SubjectRef, error) {
+//
+// The derivation is a Dataverwerking wherever it happens — listing and
+// revoking both start with it — so it is logged here rather than at each call
+// site, where one of them would eventually be forgotten. `aanleiding` says
+// which flow asked.
+func (p *Portal) subjectRefFor(ctx context.Context, citizen BSN, aanleiding string) (SubjectRef, error) {
+	start := p.now().UTC()
 	ps, err := p.Pseudonyms.Pseudonymize(ctx, citizen, p.OwnOIN)
 	if err != nil {
 		return "", fmt.Errorf("pseudonymize: %w", err)
+	}
+	if err := p.record(ctx, Processing{
+		Activity:   pseudonymisationActivity,
+		Name:       "dataverwerking.bsn-pseudonimisering",
+		Subject:    SubjectRef(ps.Pseudonym),
+		Start:      start,
+		End:        p.now().UTC(),
+		Attributes: map[string]any{"gbo.pseudonimisering.aanleiding": aanleiding},
+	}); err != nil {
+		return "", fmt.Errorf("log pseudonymisation: %w", err)
 	}
 	return SubjectRef(ps.Pseudonym), nil
 }

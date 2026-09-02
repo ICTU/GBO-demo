@@ -221,7 +221,7 @@ The demo combines production-grade components with deliberate test doubles:
 | Authorization | OpenFTV PDP with OPA/Rego policies |
 | Source access | Go GraphQL services behind source-side sidecars |
 | Observability | OpenTelemetry, Jaeger, Loki and Grafana |
-| Processing logs | `ldv-logboek` per Verantwoordelijke (LDV v1.0.0), alongside the PDP's ADL and FSC-Logging |
+| Processing logs | `ldv-logboek` per Verantwoordelijke — Belastingdienst, RvIG and GBO (LDV v1.0.0), alongside the PDP's ADL and FSC-Logging |
 | Identity and data | Synthetic citizens, deterministic BSNk and mock DigiD |
 | Consent | In-memory demo register |
 

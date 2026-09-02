@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	ldv "gbo-demo/ldv-client"
 	"log/slog"
 	"net/http"
 	"os"
@@ -665,7 +666,12 @@ func volledigeNaam(voornamen, voorvoegsel, geslachtsnaam string) string {
 // akteVanOverlijden is a source-owned attestation view. It keeps selection
 // semantics at the source so the published mapping can remain plain JSON
 // pointers and GBO does not need BRP-specific conversion code.
-func akteVanOverlijden(persoon Persoon) (map[string]any, bool) {
+//
+// It also returns the deceased partner it selected. The certificate is about
+// more people than the one who asked for it, and the LDV record set has to
+// name each of them; deriving that from the akte map afterwards would mean
+// repeating this selection, which is exactly how the two would drift apart.
+func akteVanOverlijden(persoon Persoon) (map[string]any, NatuurlijkPersoon, bool) {
 	var selectedHuwelijk Huwelijk
 	var selectedPartner NatuurlijkPersoon
 	found := false
@@ -690,7 +696,7 @@ func akteVanOverlijden(persoon Persoon) (map[string]any, bool) {
 		}
 	}
 	if !found {
-		return nil, false
+		return nil, NatuurlijkPersoon{}, false
 	}
 	ouders := make([]string, 0, len(selectedPartner.HeeftOuder))
 	for _, ouder := range selectedPartner.HeeftOuder {
@@ -735,7 +741,7 @@ func akteVanOverlijden(persoon Persoon) (map[string]any, bool) {
 		"echtgenoot_voorvoegsel":    nullableString(persoon.Voorvoegsel),
 		"echtgenoot_voornamen":      nullableString(persoon.Voornamen),
 		"verklaring_tekst":          verklaring + ".",
-	}, true
+	}, selectedPartner, true
 }
 
 func buildSchema(tracer trace.Tracer, store map[string]Persoon) (graphql.Schema, error) {
@@ -772,10 +778,18 @@ func buildSchema(tracer trace.Tracer, store map[string]Persoon) (graphql.Schema,
 					if !exists {
 						return []map[string]any{}, nil
 					}
-					akte, ok := akteVanOverlijden(persoon)
+					akte, overledene, ok := akteVanOverlijden(persoon)
 					if !ok {
 						return []map[string]any{}, nil
 					}
+					// The nabestaande who asked is the Betrokkene the request
+					// is about; the living relatives named in the certificate
+					// are Betrokkenen of the same processing and get their own
+					// records beneath it.
+					facts := queryFactsFrom(p.Context)
+					facts.noteSubject(bsn)
+					facts.noteActivity(akteActivity)
+					facts.noteRelatives(levendeBetrokkenenInAkte(overledene))
 					return []map[string]any{akte}, nil
 				},
 			},
@@ -795,6 +809,9 @@ func buildSchema(tracer trace.Tracer, store map[string]Persoon) (graphql.Schema,
 					if !exists {
 						return nil, nil
 					}
+					facts := queryFactsFrom(ctx)
+					facts.noteSubject(bsn)
+					facts.noteActivity(persoonsgegevensActivity)
 					return persoon, nil
 				},
 			},
@@ -861,7 +878,7 @@ func initTracer(ctx context.Context) (func(context.Context) error, error) {
 // newMux builds the routing tree for the BRP GraphQL server. Extracted from
 // main so integration tests can wire the handlers to an httptest.Server
 // without starting the real listener.
-func newMux(schema *graphql.Schema, tracer trace.Tracer, publisher http.Handler) *http.ServeMux {
+func newMux(schema *graphql.Schema, tracer trace.Tracer, logbook *sourceLogbook, publisher http.Handler) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	// UI off. The one graphql-go/handler bundles is GraphiQL 0.11 from an
@@ -876,7 +893,7 @@ func newMux(schema *graphql.Schema, tracer trace.Tracer, publisher http.Handler)
 	})
 
 	mux.HandleFunc("/graphql", func(w http.ResponseWriter, r *http.Request) {
-		_, span := tracer.Start(r.Context(), "graphql.query")
+		ctx, span := tracer.Start(r.Context(), "graphql.query")
 		defer span.End()
 		// The FSC-Inway proxies the Fsc-Transaction-Id through to the
 		// backend. Store it as a span attribute so the dev-portal can use a
@@ -885,7 +902,26 @@ func newMux(schema *graphql.Schema, tracer trace.Tracer, publisher http.Handler)
 		if txID := r.Header.Get("Fsc-Transaction-Id"); txID != "" {
 			span.SetAttributes(attribute.String("gbo.fsc.transaction_id", txID))
 		}
-		gqlHandler.ServeHTTP(w, r.WithContext(r.Context()))
+
+		if logbook == nil {
+			gqlHandler.ServeHTTP(w, r.WithContext(ctx))
+			return
+		}
+
+		// The query is a Dataverwerking of RvIG, so the answer is held back
+		// until the logbook has confirmed the records — one for the Betrokkene
+		// who asked and one for every further Betrokkene the certificate
+		// names.
+		start := time.Now().UTC()
+		factsCtx, facts := withQueryFacts(ctx)
+		buffered := newBufferedResponse()
+		gqlHandler.ServeHTTP(buffered, r.WithContext(factsCtx))
+
+		if err := logbook.logQuery(factsCtx, r, facts, start, buffered.status); err != nil {
+			http.Error(w, "the source query could not be logged; withholding the response", http.StatusInternalServerError)
+			return
+		}
+		buffered.flushTo(w)
 	})
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -908,7 +944,8 @@ func fatal(msg string, err error) {
 }
 
 func main() {
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", "brp-graphql-server"))
+	serviceName := getEnv("OTEL_SERVICE_NAME", "brp-graphql-server")
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", serviceName))
 
 	cfg, err := loadConfig()
 	if err != nil {
@@ -945,9 +982,25 @@ func main() {
 		fatal("loading source metadata publisher", err)
 	}
 
+	// Either this bron is part of RvIG's LDV chain and cannot start without
+	// its logbook, or it is not and writes no records.
+	client, err := ldv.New(ldv.Config{
+		ServiceName:  serviceName,
+		LogbookURL:   os.Getenv("LDV_LOGBOOK_URL"),
+		WriteToken:   os.Getenv("LDV_WRITE_TOKEN"),
+		PseudonymKey: os.Getenv("LDV_SUBJECT_PSEUDONYM_KEY"),
+	})
+	if err != nil {
+		fatal("configuring the logboek client", err)
+	}
+	logbook := newSourceLogbook(client)
+	if client == nil {
+		slog.Warn("no LDV_LOGBOOK_URL configured; this bron writes no Logboek Dataverwerkingen records")
+	}
+
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           otelhttp.NewHandler(withAccessLog(newMux(&schema, tracer, publisher)), "brp-graphql-server"),
+		Handler:           otelhttp.NewHandler(withAccessLog(newMux(&schema, tracer, logbook, publisher)), serviceName),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 	serve(srv)
