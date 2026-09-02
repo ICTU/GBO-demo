@@ -2,8 +2,9 @@
 # seed-bri-contract — reproduce a service contract between the
 # edi-issuer consumer and a configurable source provider.
 #
-# Parameterised by provider, service and endpoint settings so the same script
-# seeds every source peer and every service it offers. The demo has:
+# Parameterised by provider, service, endpoint and grant-property settings so
+# the same script seeds every source peer and every service it offers. The
+# demo has:
 #   bri -> bron-sidecar     -> graphql-server     (BD bronprofiel)
 #   brp -> brp-sidecar      -> brp-graphql-server (BRP bronprofiel)
 # See the Makefile targets fsc-seed-bri / fsc-seed-brp.
@@ -49,11 +50,28 @@ PROVIDER_CONTROLLER_URL="${PROVIDER_CONTROLLER_URL:-https://bd-controller:9444}"
 PROVIDER_MANAGER_URL="${PROVIDER_MANAGER_URL:-https://bd-manager:9443}"
 EDI_MANAGER_URL="${EDI_MANAGER_URL:-https://edi-manager:9443}"          # manager int
 
-# Service endpoint — the bron-sidecar reads the signed additional claim
+# Service endpoint — the bron-sidecar reads the grant property
 # subject_id_type and substitutes PI -> BSN if needed; direct mode is
 # pass-through to the bron. For the demo always via a sidecar.
 SERVICE_ENDPOINT_URL="${SERVICE_ENDPOINT_URL:-http://bron-sidecar:4011}"
 SERVICE_INWAY_ADDRESS="${SERVICE_INWAY_ADDRESS:-https://bd-inway:443}"
+
+# Grant properties (fsc-core §Properties) on the service-connection grant.
+# They are part of the grant hash, so both peers countersign the regime the
+# consumer is judged under, and the provider Manager emits them in the access
+# token as the `prp` claim. Two consumers read them from there:
+#   flow            — authorization regime; the OpenFTV request-mapper
+#                     dispatches on it and denies when it is absent
+#   subject_id_type — 'pseudonym' makes the bron-sidecar substitute PI -> BSN,
+#                     'direct' passes the query through unchanged
+# Requires OpenFSC >= v2.0.0 on every peer on the contract; the demo pins
+# v2.4.0 (fsc-infra/docker-compose.yml).
+default_grant_properties='{"flow": "eudi:attestation", "subject_id_type": "direct"}'
+GRANT_PROPERTIES="${GRANT_PROPERTIES:-$default_grant_properties}"
+if ! jq -e 'type == "object"' >/dev/null 2>&1 <<<"$GRANT_PROPERTIES"; then
+  echo "GRANT_PROPERTIES must be a JSON object, got: $GRANT_PROPERTIES" >&2
+  exit 1
+fi
 
 # Grant-link config (edi-Controller side). v2.4.0 has no REST endpoint
 # for grant-link CRUD, so we upsert directly into the Controller DB
@@ -190,8 +208,15 @@ existing_conn=$(mtls_curl "$EDI_CERT" "$EDI_KEY" "$EDI_CA" \
   "$EDI_MANAGER_URL/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=$SERVICE_NAME" \
   || echo '{}')
 
-if echo "$existing_conn" | jq -e --arg svc "$SERVICE_NAME" --arg provider "$PROVIDER_PEER_ID" \
-   '.contracts[]? | select(.state == "CONTRACT_STATE_VALID") | select(.content.grants[0].service.name == $svc and .content.grants[0].service.peer_id == $provider)' >/dev/null 2>&1; then
+# Contracts are immutable, so a changed regime means a NEW contract (new iv),
+# not an update. Matching on the properties as well as on the service
+# therefore does double duty: it keeps the seed idempotent, and it re-seeds by
+# itself when the desired properties changed — as they did when flow and
+# subject_id_type moved out of the additional-claims mapping and back into the
+# grant. The superseded contract stays Valid but unused: step 4 repoints the
+# grant-link at the new grant hash. `make fsc-clean` removes the old one.
+if echo "$existing_conn" | jq -e --arg svc "$SERVICE_NAME" --arg provider "$PROVIDER_PEER_ID" --argjson properties "$GRANT_PROPERTIES" \
+   '.contracts[]? | select(.state == "CONTRACT_STATE_VALID") | select(.content.grants[0].service.name == $svc and .content.grants[0].service.peer_id == $provider) | select((.content.grants[0].properties // {}) == $properties)' >/dev/null 2>&1; then
   echo "  → connection contract already Valid, skipping"
 else
   # Outway identification: SHA-256 hex of the peer public key (see openapi.yaml
@@ -211,6 +236,7 @@ else
     --arg provider_peer "$PROVIDER_PEER_ID" \
     --arg edi_peer "$EDI_PEER_ID" \
     --arg thumb "$outway_thumbprint" \
+    --argjson properties "$GRANT_PROPERTIES" \
     '{
       contract_content: {
         iv: $iv,
@@ -227,7 +253,8 @@ else
               public_key_thumbprint: $thumb
             }
           },
-          service: {type: "SERVICE_TYPE_SERVICE", peer_id: $provider_peer, name: $svc_name}
+          service: {type: "SERVICE_TYPE_SERVICE", peer_id: $provider_peer, name: $svc_name},
+          properties: $properties
         }]
       }
     }')
@@ -245,8 +272,8 @@ else
     sleep 1
     contracts_json=$(mtls_curl "$EDI_CERT" "$EDI_KEY" "$EDI_CA" \
       "$EDI_MANAGER_URL/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=$SERVICE_NAME")
-    st=$(printf '%s' "$contracts_json" | jq -r --arg svc "$SERVICE_NAME" --arg provider "$PROVIDER_PEER_ID" \
-      'first(.contracts[]? | select(.content.grants[0].service.name == $svc and .content.grants[0].service.peer_id == $provider) | .state) // ""' 2>/dev/null)
+    st=$(printf '%s' "$contracts_json" | jq -r --arg svc "$SERVICE_NAME" --arg provider "$PROVIDER_PEER_ID" --argjson properties "$GRANT_PROPERTIES" \
+      'first(.contracts[]? | select(.content.grants[0].service.name == $svc and .content.grants[0].service.peer_id == $provider) | select((.content.grants[0].properties // {}) == $properties) | .state) // ""' 2>/dev/null)
     if [ "$st" = "CONTRACT_STATE_VALID" ]; then
       echo "  ✓ connection contract Valid"
       break
@@ -274,13 +301,16 @@ fi
 # another service's as soon as the provider offers more than one.
 # Selecting on state as well, so a revoked contract cannot supply the hash
 # and write a dead grant-link that fails at routing time instead of here.
+# Selecting on the properties too, so a contract superseded by a property
+# change cannot keep the grant-link pointing at the previous regime.
 new_hash=$(mtls_curl "$EDI_CERT" "$EDI_KEY" "$EDI_CA" \
   "${EDI_MANAGER_URL}/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=${SERVICE_NAME}" \
-  | jq -r --arg svc "$SERVICE_NAME" --arg provider "$PROVIDER_PEER_ID" \
+  | jq -r --arg svc "$SERVICE_NAME" --arg provider "$PROVIDER_PEER_ID" --argjson properties "$GRANT_PROPERTIES" \
     'first(.contracts[]?
            | select(.state == "CONTRACT_STATE_VALID")
            | select(.content.grants[0].service.name == $svc)
            | select(.content.grants[0].service.peer_id == $provider)
+           | select((.content.grants[0].properties // {}) == $properties)
            | .content.grants[0].hash) // empty')
 if [ -z "$new_hash" ]; then
   echo "  x no connection grant-hash found — abort"

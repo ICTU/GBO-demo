@@ -11,23 +11,7 @@ import (
 	"time"
 )
 
-func TestGrantPropsPreferAdditionalClaims(t *testing.T) {
-	payload, err := json.Marshal(map[string]any{
-		"add": map[string]any{"subject_id_type": "pseudonym"},
-		"prp": map[string]any{"subject_id_type": "direct"},
-	})
-	if err != nil {
-		t.Fatalf("marshal token payload: %v", err)
-	}
-	token := "header." + base64.RawURLEncoding.EncodeToString(payload) + ".signature"
-
-	properties := additionalClaimsFromAuth("Bearer " + token)
-	if properties["subject_id_type"] != "pseudonym" {
-		t.Fatalf("subject_id_type = %v, want pseudonym", properties["subject_id_type"])
-	}
-}
-
-func TestGrantPropsSupportLegacyClaim(t *testing.T) {
+func TestGrantPropsReadTheCountersignedClaim(t *testing.T) {
 	payload, err := json.Marshal(map[string]any{
 		"prp": map[string]any{"subject_id_type": "pseudonym"},
 	})
@@ -36,14 +20,31 @@ func TestGrantPropsSupportLegacyClaim(t *testing.T) {
 	}
 	token := "header." + base64.RawURLEncoding.EncodeToString(payload) + ".signature"
 
-	properties := additionalClaimsFromAuth("Bearer " + token)
+	properties := grantPropertiesFromAuth("Bearer " + token)
 	if properties["subject_id_type"] != "pseudonym" {
 		t.Fatalf("subject_id_type = %v, want pseudonym", properties["subject_id_type"])
 	}
 }
 
+// `add` is the retired OpenFSC Additional Claims hook: only the provider
+// Manager signed it, so honouring it would let an unilateral value decide
+// whether the source sees a BSN. Ignoring it degrades to `direct`.
+func TestGrantPropsIgnoreRetiredAddClaim(t *testing.T) {
+	payload, err := json.Marshal(map[string]any{
+		"add": map[string]any{"subject_id_type": "pseudonym"},
+	})
+	if err != nil {
+		t.Fatalf("marshal token payload: %v", err)
+	}
+	token := "header." + base64.RawURLEncoding.EncodeToString(payload) + ".signature"
+
+	if properties := grantPropertiesFromAuth("Bearer " + token); properties != nil {
+		t.Fatalf("properties = %v, want nil", properties)
+	}
+}
+
 // Happy-path integration test for the sidecar's `direct` flow: no
-// additional claim → default to `direct` → forward the GraphQL body verbatim
+// grant property → default to `direct` → forward the GraphQL body verbatim
 // to the upstream source (BSNk not touched). The stub upstream captures
 // what it received so we can assert pass-through fidelity.
 func TestForwardDirectPassThrough(t *testing.T) {

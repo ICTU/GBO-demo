@@ -19,8 +19,8 @@ import data.dvtp.gbo
 default allow := false
 
 # Source-metadata is transported over its own FSC service and carries no
-# GraphQL body or citizen identifier. The provider-owned additional claim in
-# the FSC token selects this narrow policy path. Only the GBO consumer peer may
+# GraphQL body or citizen identifier. The countersigned grant property in the
+# FSC token selects this narrow policy path. Only the GBO consumer peer may
 # use it; method and endpoint remain exact so all other non-GraphQL traffic
 # stays fail-closed.
 _source_metadata_request if {

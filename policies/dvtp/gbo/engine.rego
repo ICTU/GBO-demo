@@ -161,7 +161,7 @@ _eval(rid, field) := lib.evaluate(_rule_meta[rid].spec, object.union(_ctx, {"fie
 # Rules declare their authorization basis in the spec: consent_required
 # (DvTP) or pid_required (EUDI). The request flow selects that authorization
 # model; it does not select a source or individual policy. The request-mapper
-# places the trusted FSC additional claim in input.context.flow. Without this
+# places the trusted FSC grant property in input.context.flow. Without this
 # dispatch a DvTP-flow deny would aggregate an EUDI rule's
 # PID_NOT_PRESENT (priority 55) over the genuine DvTP reason
 # (CONSENT_SCOPE_MISMATCH, YEAR_NOT_COVERED, CONSTRAINT_MISMATCH), and

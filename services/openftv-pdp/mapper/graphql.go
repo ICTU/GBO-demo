@@ -14,7 +14,7 @@ package mapping
 //   - context.pip       — {consent} for the DvTP flow, {pid: {pi}} for
 //     the EUDI flow. Never the BSN; see pseudonymizeBSN.
 //
-// Flow dispatch reads the trusted additional-claim in the FSC token and
+// Flow dispatch reads the trusted grant property in the FSC token and
 // nothing else. A request that carries no flow gets an empty one, which
 // matches no rule (engine.rego `_flow_applicable`) and therefore denies
 // with NO_APPLICABLE_RULE.
@@ -505,14 +505,15 @@ func firstHeader(headers map[string]string, keys ...string) string {
 	return ""
 }
 
-// flowFromHeaders dispatches on the trusted additional-claim ('add',
-// legacy 'prp') in the FSC access-token, and on nothing else. The token
-// is read unsafely: FSC-Inway validated the signature before invoking
-// the PDP (chain-of-trust).
+// flowFromHeaders dispatches on the trusted 'prp' claim in the FSC
+// access-token, and on nothing else. The token is read unsafely:
+// FSC-Inway validated the signature before invoking the PDP
+// (chain-of-trust).
 //
-// The flow is a property of the FSC grant — additional-claims-service
-// resolves it per (outway_peer, service_peer, service_name) and the
-// provider's FSC-Manager signs it in — so a caller has no say in which
+// The flow is a property of the FSC grant (fsc-core §Properties): it is
+// agreed when the contract is negotiated, covered by both peers'
+// signatures because it is part of the grant hash, and emitted by the
+// provider's Manager as `prp` — so a caller has no say in which
 // authorization regime it is judged under. There is deliberately no
 // header fallback and no default: absent a claim the flow is empty,
 // which matches no rule and denies. Defaulting to `dvtp:query` would
@@ -527,14 +528,12 @@ func flowFromHeaders(headers map[string]string) string {
 	if claims == nil {
 		return ""
 	}
-	for _, key := range []string{"add", "prp"} {
-		if props, ok := claims[key].(map[string]any); ok {
-			if f, ok := props["flow"].(string); ok && f != "" {
-				return f
-			}
-		}
+	props, ok := claims["prp"].(map[string]any)
+	if !ok {
+		return ""
 	}
-	return ""
+	flow, _ := props["flow"].(string)
+	return flow
 }
 
 func tokenClaims(token string) map[string]any {

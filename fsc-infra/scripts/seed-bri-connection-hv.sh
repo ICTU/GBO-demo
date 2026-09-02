@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Connection contract HV -> BD for the bri-service. The publication contract
-# (BD -> Directory) is unchanged — one publication per service, multiple
-# connections (per consumer).
+# Connection contract HV -> BD for the bri-service with DvTP grant
+# properties. The publication contract (BD -> Directory) is unchanged — one
+# publication per service, multiple connections (per consumer).
 #
-# The provider-owned Additional Claims API supplies:
+# Grant properties:
 #   flow: dvtp:query          (policy dispatch)
 #   subject_id_type: pseudonym (sidecar substitutes PI -> BSN)
 #
@@ -32,6 +32,16 @@ HV_CERT="$HV_INTERNAL_DIR/internal-cert.pem"
 HV_KEY="$HV_INTERNAL_DIR/internal-cert-key.pem"
 HV_CA="$HV_INTERNAL_DIR/intermediate_ca.pem"
 
+# Grant properties (fsc-core §Properties). Part of the grant hash, so both
+# peers countersign them, and the provider Manager emits them in the access
+# token as the `prp` claim. See seed-bri-contract.sh for the full rationale.
+default_grant_properties='{"flow": "dvtp:query", "subject_id_type": "pseudonym"}'
+GRANT_PROPERTIES="${GRANT_PROPERTIES:-$default_grant_properties}"
+if ! jq -e 'type == "object"' >/dev/null 2>&1 <<<"$GRANT_PROPERTIES"; then
+  echo "GRANT_PROPERTIES must be a JSON object, got: $GRANT_PROPERTIES" >&2
+  exit 1
+fi
+
 GRANT_LINK_PATH="${GRANT_LINK_PATH:-/bri}"
 OUTWAY_NAME="${OUTWAY_NAME:-HvOutway-01}"
 PG_HOST="${PG_HOST:-postgres}"
@@ -55,9 +65,11 @@ existing=$(mtls_curl "$HV_CERT" "$HV_KEY" "$HV_CA" \
   || echo '{}')
 
 # The Manager's ?service_name= filter is not honoured (see
-# seed-bri-contract.sh) — match the service name client-side.
-if echo "$existing" | jq -e --arg svc "$SERVICE_NAME" \
-   '.contracts[]? | select(.state == "CONTRACT_STATE_VALID") | select(.content.grants[0].service.name == $svc)' >/dev/null 2>&1; then
+# seed-bri-contract.sh) — match the service name client-side. Matching the
+# properties too re-seeds automatically when the regime changed; contracts are
+# immutable, so that is a new contract rather than an update.
+if echo "$existing" | jq -e --arg svc "$SERVICE_NAME" --argjson properties "$GRANT_PROPERTIES" \
+   '.contracts[]? | select(.state == "CONTRACT_STATE_VALID") | select(.content.grants[0].service.name == $svc) | select((.content.grants[0].properties // {}) == $properties)' >/dev/null 2>&1; then
   echo "  → connection contract already Valid, skipping create"
 else
   outway_thumbprint=$(pubkey_thumbprint_hex "$HV_ORG_CERT")
@@ -75,6 +87,7 @@ else
     --arg bd_peer "$BD_PEER_ID" \
     --arg hv_peer "$HV_PEER_ID" \
     --arg thumb "$outway_thumbprint" \
+    --argjson properties "$GRANT_PROPERTIES" \
     '{
       contract_content: {
         iv: $iv,
@@ -91,7 +104,8 @@ else
               public_key_thumbprint: $thumb
             }
           },
-          service: {type: "SERVICE_TYPE_SERVICE", peer_id: $bd_peer, name: $svc_name}
+          service: {type: "SERVICE_TYPE_SERVICE", peer_id: $bd_peer, name: $svc_name},
+          properties: $properties
         }]
       }
     }')
@@ -109,8 +123,8 @@ else
     sleep 1
     st=$(mtls_curl "$HV_CERT" "$HV_KEY" "$HV_CA" \
       "$HV_MANAGER_URL/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=$SERVICE_NAME" \
-      | jq -r --arg svc "$SERVICE_NAME" \
-        'first(.contracts[]? | select(.content.grants[0].service.name == $svc) | .state)' 2>/dev/null || echo "")
+      | jq -r --arg svc "$SERVICE_NAME" --argjson properties "$GRANT_PROPERTIES" \
+        'first(.contracts[]? | select(.content.grants[0].service.name == $svc) | select((.content.grants[0].properties // {}) == $properties) | .state)' 2>/dev/null || echo "")
     if [ "$st" = "CONTRACT_STATE_VALID" ]; then
       echo "  ✓ connection contract Valid"
       break
@@ -123,10 +137,18 @@ fi
 # ── 2. Grant-link upsert in hv_controller ─────────────────────────────
 
 echo "[2/2] Upsert grant-link '$GRANT_LINK_PATH' → HV connection grant-hash..."
+# No limit= here: the Manager ignores ?service_name=, so the match happens
+# client-side and limit=1 would truncate the response to whichever contract
+# happens to come first — another service's, or the one this seed just
+# superseded by changing the grant properties.
 new_hash=$(mtls_curl "$HV_CERT" "$HV_KEY" "$HV_CA" \
-  "${HV_MANAGER_URL}/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=${SERVICE_NAME}&limit=1" \
-  | jq -r --arg svc "$SERVICE_NAME" \
-    'first(.contracts[]? | select(.content.grants[0].service.name == $svc) | .content.grants[0].hash) // empty')
+  "${HV_MANAGER_URL}/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=${SERVICE_NAME}" \
+  | jq -r --arg svc "$SERVICE_NAME" --argjson properties "$GRANT_PROPERTIES" \
+    'first(.contracts[]?
+           | select(.state == "CONTRACT_STATE_VALID")
+           | select(.content.grants[0].service.name == $svc)
+           | select((.content.grants[0].properties // {}) == $properties)
+           | .content.grants[0].hash) // empty')
 if [ -z "$new_hash" ]; then
   echo "  x no HV connection grant-hash found — abort"
   exit 1

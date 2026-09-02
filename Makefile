@@ -180,7 +180,7 @@ source-metadata-up:
 	EUDI_PUBLIC_URL="$${EUDI_PUBLIC_URL:-http://localhost:8001}" \
 	EUDI_BRI_URL="$${EUDI_BRI_URL:-http://localhost:9409}" \
 	EUDI_POSTGRES_PASSWORD="$${EUDI_POSTGRES_PASSWORD:-local-not-used}" \
-		docker compose up --build --force-recreate -d openftv-pdp additional-claims-service graphql-server brp-graphql-server unsecured-graphql-server bron-sidecar brp-sidecar
+		docker compose up --build --force-recreate -d openftv-pdp graphql-server brp-graphql-server unsecured-graphql-server bron-sidecar brp-sidecar
 
 onboarding-directories:
 	@echo "-> Source onboarding state is stored in PostgreSQL"
@@ -433,12 +433,15 @@ fsc-seed-rvig-source: fsc-local-env
 
 # One FSC participant publishes two logical metadata services. The manually
 # configured service reference selects which source document is fetched.
+# Metadata transport is not a subject-bound flow, so its connection grants
+# carry only `flow`; no subject_id_type means the bron-sidecar passes through.
 fsc-seed-metadata: fsc-local-env
 	docker run --rm \
 		--network $(FSC_INFRA_NETWORK) \
 		--env-file fsc-infra/.env \
 		-e SERVICE_NAME=gbo-metadata-bd \
 		-e SERVICE_ENDPOINT_URL=http://graphql-server:4000 \
+		-e GRANT_PROPERTIES='{"flow": "gbo:source-metadata"}' \
 		-e CREATE_GRANT_LINK=false \
 		-v $(PWD)/fsc-infra:/work:ro \
 		-w /work \
@@ -449,6 +452,7 @@ fsc-seed-metadata: fsc-local-env
 		--env-file fsc-infra/.env \
 		-e SERVICE_NAME=gbo-metadata-rvig \
 		-e SERVICE_ENDPOINT_URL=http://brp-graphql-server:4001 \
+		-e GRANT_PROPERTIES='{"flow": "gbo:source-metadata"}' \
 		-e CREATE_GRANT_LINK=false \
 		-v $(PWD)/fsc-infra:/work:ro \
 		-w /work \
