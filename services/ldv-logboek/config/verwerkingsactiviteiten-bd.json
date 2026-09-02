@@ -1,0 +1,77 @@
+{
+  "verantwoordelijke": "Belastingdienst",
+  "disclaimer": "Demo-stand-in voor een Register van Verwerkingsactiviteiten. Dit is GEEN RvVA: de inhoud is afgeleid van de scope-definities in de dienstencatalogus en van de infrastructurele verwerkingen in de keten, en heeft geen enkele juridische status. Het bestaat om de LDV-eis 'elk record verwijst naar een oplosbare, geversioneerde verwerkingsactiviteit' waar te kunnen maken en om het ontbreken van een echt register zichtbaar te houden.",
+  "activities": [
+    {
+      "id": "bd-pi-bsn-resolutie",
+      "version": "v1",
+      "name": "Depseudonimisatie polymorfe identiteit naar BSN",
+      "doel": "Een binnenkomende bronbevraging van een DvTP-afnemer koppelen aan de juiste ingeschreven persoon, zonder dat het BSN buiten de bronhouder komt.",
+      "grondslag": "Noodzakelijk voor de uitvoering van de wettelijke taak van de Belastingdienst; de verstrekking zelf berust op toestemming van de betrokkene.",
+      "categorieen_betrokkenen": [
+        "Belastingplichtigen met een aangifte inkomstenbelasting"
+      ],
+      "categorieen_persoonsgegevens": [
+        "Polymorfe identiteit (PI)",
+        "Burgerservicenummer"
+      ]
+    },
+    {
+      "id": "bd-bronquery-doorgifte",
+      "version": "v1",
+      "name": "Ontvangen en doorgeven van een bronbevraging",
+      "doel": "Een geautoriseerde bevraging van een afnemer aannemen, geschikt maken voor de bron en doorzetten naar de bronservice.",
+      "grondslag": "Toestemming van de betrokkene (DvTP) dan wel de attestatie-uitgifte waarvoor de betrokkene zelf de opdracht geeft (EUDI).",
+      "categorieen_betrokkenen": [
+        "Belastingplichtigen met een aangifte inkomstenbelasting"
+      ],
+      "categorieen_persoonsgegevens": [
+        "Polymorfe identiteit (PI)",
+        "Gevraagde belastingjaren"
+      ],
+      "ontvangers": [
+        "Bronservice Belastingdienst (bri)"
+      ]
+    },
+    {
+      "id": "bd-ib-2025",
+      "version": "v1",
+      "name": "Verstrekken inkomensgegevens inkomstenbelasting 2025",
+      "doel": "Het verstrekken van de aangiftegegevens inkomstenbelasting over belastingjaar 2025 aan een door de betrokkene aangewezen afnemer.",
+      "grondslag": "Toestemming van de betrokkene, vastgelegd in het toestemmingsregister.",
+      "scope_id": "bd:ib:2025",
+      "categorieen_betrokkenen": [
+        "Belastingplichtigen met een aangifte inkomstenbelasting 2025"
+      ],
+      "categorieen_persoonsgegevens": [
+        "Verzamelinkomen",
+        "Box 1-, box 2- en box 3-inkomen",
+        "Aangiftestatus en indieningsdatum"
+      ],
+      "ontvangers": [
+        "De door de betrokkene aangewezen dienstverlener",
+        "EUDI-wallet van de betrokkene"
+      ]
+    },
+    {
+      "id": "bd-ib-2024",
+      "version": "v1",
+      "name": "Verstrekken inkomensgegevens inkomstenbelasting 2024",
+      "doel": "Het verstrekken van de aangiftegegevens inkomstenbelasting over belastingjaar 2024 aan een door de betrokkene aangewezen afnemer.",
+      "grondslag": "Toestemming van de betrokkene, vastgelegd in het toestemmingsregister.",
+      "scope_id": "bd:ib:2024",
+      "categorieen_betrokkenen": [
+        "Belastingplichtigen met een aangifte inkomstenbelasting 2024"
+      ],
+      "categorieen_persoonsgegevens": [
+        "Verzamelinkomen",
+        "Box 1-, box 2- en box 3-inkomen",
+        "Aangiftestatus en indieningsdatum"
+      ],
+      "ontvangers": [
+        "De door de betrokkene aangewezen dienstverlener",
+        "EUDI-wallet van de betrokkene"
+      ]
+    }
+  ]
+}

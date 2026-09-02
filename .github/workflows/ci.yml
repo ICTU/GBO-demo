@@ -31,6 +31,8 @@ jobs:
           - dvtp-onboarding-register
           - eudi-adapter
           - graphql-server
+          - ldv-client
+          - ldv-logboek
           - sector-pip
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -194,7 +196,9 @@ jobs:
           - dev-portal-backend
           - dvtp-onboarding-register
           - eudi-adapter
+          - bron-sidecar
           - graphql-server
+          - ldv-logboek
           - openftv-manager
           - openftv-manager-ui
           - openftv-pdp
@@ -205,10 +209,12 @@ jobs:
         run: |
           context="services/${{ matrix.service }}"
           # These reach outside their own service directory: dev-portal-backend
-          # and openftv-pdp bake in ./policies, while both Manager images
-          # are built from the upstream OpenFTV tree. Same context compose uses.
+          # and openftv-pdp bake in ./policies, both Manager images are built
+          # from the upstream OpenFTV tree, and the services that write LDV
+          # records depend on the sibling services/ldv-client module. Same
+          # context compose uses.
           case "${{ matrix.service }}" in
-            dev-portal-backend|eudi-adapter|openftv-pdp|openftv-manager|openftv-manager-ui) context=. ;;
+            bron-sidecar|dev-portal-backend|eudi-adapter|graphql-server|openftv-pdp|openftv-manager|openftv-manager-ui) context=. ;;
           esac
           docker build \
             --file "services/${{ matrix.service }}/Dockerfile" \

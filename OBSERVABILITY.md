@@ -57,3 +57,25 @@ emits a decision log.
 Jaeger and Loki are debugging stores, not audit stores. The simulation
 deployment uses seven-day retention; OpenFSC transaction logs remain the
 authoritative per-hop message metadata.
+
+## Not observability: the Logboek Dataverwerkingen
+
+Every Dataverwerking in the chain is also recorded in the logbook of the
+Verantwoordelijke that performed it — a separate store, served by
+[`ldv-logboek`](services/ldv-logboek/README.md), implementing Logius LDV
+v1.0.0. It uses the OpenTelemetry log-record shape, which makes it look like a
+second trace exporter. It is not, and the difference is the point: a span here
+is best-effort exhaust of a technical operation, sampled and short-lived,
+while an LDV record is an administrative record that must exist for every
+processing, is confirmed on write, and is never sampled.
+
+Nothing in this document changes because of it. The collector, Jaeger, Loki
+and Grafana are untouched; the logbooks are additional stores with their own
+guarantees. A component that cannot write its record fails its request rather
+than dropping the record — which is exactly what an observability pipeline
+must never do, and exactly what this one must.
+
+The two are joined by one value: the trace id of an LDV record is the
+`Fsc-Transaction-Id`, the same identifier the ADL decision record and the FSC
+transaction logs carry, and the same one the developer portal already
+correlates on.

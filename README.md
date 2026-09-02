@@ -221,6 +221,7 @@ The demo combines production-grade components with deliberate test doubles:
 | Authorization | OpenFTV PDP with OPA/Rego policies |
 | Source access | Go GraphQL services behind source-side sidecars |
 | Observability | OpenTelemetry, Jaeger, Loki and Grafana |
+| Processing logs | `ldv-logboek` per Verantwoordelijke (LDV v1.0.0), alongside the PDP's ADL and FSC-Logging |
 | Identity and data | Synthetic citizens, deterministic BSNk and mock DigiD |
 | Consent | In-memory demo register |
 
@@ -276,6 +277,7 @@ source activation, wallet trust and cached QR sessions is in
 - [Source configuration and onboarding](docs/source-onboarding.md)
 - [Source metadata cache and Type Metadata](docs/source-metadata-cache.md)
 - [`gbo-simple-v1` mapping profile](docs/gbo-simple-v1.md)
+- [Logboek Dataverwerkingen](services/ldv-logboek/README.md)
 - [Observability](OBSERVABILITY.md)
 - [Security](SECURITY.md)
 - [Contributing](CONTRIBUTING.md)
