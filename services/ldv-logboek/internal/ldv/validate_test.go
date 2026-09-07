@@ -18,7 +18,7 @@ func validRecord() Record {
 		Status:    StatusOK,
 		StartTime: start,
 		EndTime:   start.Add(12 * time.Millisecond),
-		Resource:  map[string]string{"service.name": "bron-sidecar"},
+		Resource:  map[string]any{"service.name": "bron-sidecar"},
 		Attributes: map[string]any{
 			AttrProcessingActivityID: "bd-ib-2025@v1",
 			AttrDataSubjectID:        "PI-abc123",

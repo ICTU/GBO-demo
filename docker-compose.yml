@@ -378,7 +378,11 @@ services:
   # administrative, confirmed on write and never sampled. Separate store,
   # separate guarantees.
   logboek-bd:
-    build: ./services/ldv-logboek
+    build:
+      # Root context: the logbook shares the wire DTO with its producers
+      # through the sibling services/ldv-client module.
+      context: .
+      dockerfile: services/ldv-logboek/Dockerfile
     ports:
       - "127.0.0.1:${GBO_PORT_LOGBOEK_BD:-9416}:4016"
     environment:
@@ -405,7 +409,9 @@ services:
   # BRP chain's Dataverwerkingen belong to RvIG and must not land in the
   # Belastingdienst's logbook.
   logboek-brp:
-    build: ./services/ldv-logboek
+    build:
+      context: .
+      dockerfile: services/ldv-logboek/Dockerfile
     ports:
       - "127.0.0.1:${GBO_PORT_LOGBOEK_BRP:-9417}:4016"
     environment:
@@ -429,7 +435,9 @@ services:
   # answers status questions and assembles attestations, and those are its own
   # processings rather than a bronhouder's.
   logboek-gbo:
-    build: ./services/ldv-logboek
+    build:
+      context: .
+      dockerfile: services/ldv-logboek/Dockerfile
     ports:
       - "127.0.0.1:${GBO_PORT_LOGBOEK_GBO:-9418}:4016"
     environment:

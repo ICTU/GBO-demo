@@ -72,17 +72,101 @@ const (
 	StatusError = "ERROR"
 )
 
-// Record is the OTel-shaped log record LDV defines.
+// Record is the log record LDV defines (§3.2.2). Go keeps the fields in the
+// shapes that are pleasant to work with — real times, an attribute map — and
+// MarshalJSON puts them on the wire the way the standard specifies. Having one
+// type own that translation is why this module exists: a second hand-written
+// DTO elsewhere is a second place for the format to drift.
 type Record struct {
-	TraceID      string            `json:"trace_id"`
-	SpanID       string            `json:"span_id"`
-	ParentSpanID string            `json:"parent_span_id,omitempty"`
-	Name         string            `json:"name"`
-	StartTime    time.Time         `json:"start_time"`
-	EndTime      time.Time         `json:"end_time"`
-	Status       string            `json:"status"`
-	Resource     map[string]string `json:"resource,omitempty"`
-	Attributes   map[string]any    `json:"attributes"`
+	TraceID      string
+	SpanID       string
+	ParentSpanID string
+	Name         string
+	StartTime    time.Time
+	EndTime      time.Time
+	Status       string
+	// Resource describes the component that performed the processing. On the
+	// wire it is nested under `resource.attributes`, not written directly.
+	Resource   map[string]any
+	Attributes map[string]any
+}
+
+// wireRecord is the on-the-wire shape: snake_case names, times as uint64
+// milliseconds since the epoch (§3.2.2.5–6), and resource as an object with
+// an attributes field (§3.2.2.8).
+type wireRecord struct {
+	TraceID      string         `json:"trace_id"`
+	SpanID       string         `json:"span_id"`
+	ParentSpanID string         `json:"parent_span_id,omitempty"`
+	Name         string         `json:"name"`
+	StartTime    uint64         `json:"start_time"`
+	EndTime      uint64         `json:"end_time"`
+	Status       string         `json:"status"`
+	Resource     *wireResource  `json:"resource,omitempty"`
+	Attributes   map[string]any `json:"attributes"`
+}
+
+type wireResource struct {
+	Attributes map[string]any `json:"attributes"`
+}
+
+// EpochMillis converts a time to the representation LDV uses. Times before
+// the epoch clamp to zero rather than wrapping, which a uint64 would do
+// silently.
+func EpochMillis(value time.Time) uint64 {
+	millis := value.UTC().UnixMilli()
+	if millis < 0 {
+		return 0
+	}
+	return uint64(millis)
+}
+
+// FromEpochMillis is the inverse, in UTC.
+func FromEpochMillis(millis uint64) time.Time {
+	return time.UnixMilli(int64(millis)).UTC()
+}
+
+func (r Record) MarshalJSON() ([]byte, error) {
+	wire := wireRecord{
+		TraceID:      r.TraceID,
+		SpanID:       r.SpanID,
+		ParentSpanID: r.ParentSpanID,
+		Name:         r.Name,
+		StartTime:    EpochMillis(r.StartTime),
+		EndTime:      EpochMillis(r.EndTime),
+		Status:       r.Status,
+		Attributes:   r.Attributes,
+	}
+	if len(r.Resource) > 0 {
+		wire.Resource = &wireResource{Attributes: r.Resource}
+	}
+	if wire.Attributes == nil {
+		wire.Attributes = map[string]any{}
+	}
+	return json.Marshal(wire)
+}
+
+func (r *Record) UnmarshalJSON(data []byte) error {
+	var wire wireRecord
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&wire); err != nil {
+		return err
+	}
+	*r = Record{
+		TraceID:      wire.TraceID,
+		SpanID:       wire.SpanID,
+		ParentSpanID: wire.ParentSpanID,
+		Name:         wire.Name,
+		StartTime:    FromEpochMillis(wire.StartTime),
+		EndTime:      FromEpochMillis(wire.EndTime),
+		Status:       wire.Status,
+		Attributes:   wire.Attributes,
+	}
+	if wire.Resource != nil {
+		r.Resource = wire.Resource.Attributes
+	}
+	return nil
 }
 
 // Config is what a component needs to join an LDV chain. LogbookURL empty
@@ -104,7 +188,7 @@ type Config struct {
 type Client struct {
 	endpoint     string
 	token        string
-	resource     map[string]string
+	resource     map[string]any
 	pseudonymKey []byte
 	http         *http.Client
 }
@@ -131,7 +215,7 @@ func New(cfg Config) (*Client, error) {
 	return &Client{
 		endpoint:     base + "/logboek/records",
 		token:        cfg.WriteToken,
-		resource:     map[string]string{"service.name": cfg.ServiceName},
+		resource:     map[string]any{"service.name": cfg.ServiceName},
 		pseudonymKey: []byte(cfg.PseudonymKey),
 		http:         &http.Client{Timeout: 5 * time.Second},
 	}, nil

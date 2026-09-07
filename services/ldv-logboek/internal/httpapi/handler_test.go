@@ -39,13 +39,15 @@ func newTestHandler(t *testing.T) (*Handler, *sqlite.Repository) {
 func validBody() map[string]any {
 	start := time.Date(2026, 9, 2, 10, 0, 0, 0, time.UTC)
 	return map[string]any{
-		"trace_id":   "0af7651916cd43dd8448eb211c80319c",
-		"span_id":    "b7ad6b7169203331",
-		"name":       "bronquery.doorgifte",
-		"status":     "OK",
-		"start_time": start.Format(time.RFC3339Nano),
-		"end_time":   start.Add(time.Millisecond).Format(time.RFC3339Nano),
-		"resource":   map[string]string{"service.name": "bron-sidecar"},
+		"trace_id": "0af7651916cd43dd8448eb211c80319c",
+		"span_id":  "b7ad6b7169203331",
+		"name":     "bronquery.doorgifte",
+		"status":   "OK",
+		// Wire format: epoch milliseconds, and resource nested under
+		// attributes (§3.2.2.5-6, §3.2.2.8).
+		"start_time": start.UnixMilli(),
+		"end_time":   start.Add(time.Millisecond).UnixMilli(),
+		"resource":   map[string]any{"attributes": map[string]any{"service.name": "bron-sidecar"}},
 		"attributes": map[string]any{
 			ldv.AttrProcessingActivityID: "bd-bronquery-doorgifte@v1",
 			ldv.AttrDataSubjectID:        "PI-abc123",
@@ -267,7 +269,7 @@ func TestReadRecordsByEachSelector(t *testing.T) {
 			if payload.Verantwoordelijke != "Belastingdienst" {
 				t.Errorf("verantwoordelijke = %q", payload.Verantwoordelijke)
 			}
-			if payload.Records[0].Attribute(ldv.AttrDataSubjectID) != "PI-abc123" {
+			if payload.Records[0].DataSubjectID() != "PI-abc123" {
 				t.Errorf("record did not round-trip: %#v", payload.Records[0])
 			}
 		})

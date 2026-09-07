@@ -228,15 +228,17 @@ func parseTime(text string) (time.Time, error) {
 	return parsed, nil
 }
 
-func orEmptyMap(resource map[string]string) map[string]string {
+func orEmptyMap(resource map[string]any) map[string]any {
 	if resource == nil {
-		return map[string]string{}
+		return map[string]any{}
 	}
 	return resource
 }
 
 // formatTime stores times as RFC 3339 with nanoseconds in UTC, so the text
-// ordering of the column equals the chronological ordering.
+// ordering of the column equals the chronological ordering. The wire format is
+// epoch milliseconds; this is storage, where a sortable, readable column is
+// worth more than matching the transport.
 func formatTime(value time.Time) string {
 	return value.UTC().Format(time.RFC3339Nano)
 }

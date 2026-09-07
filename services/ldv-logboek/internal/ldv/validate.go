@@ -104,10 +104,10 @@ func validateMandatoryAttributes(record Record, resolve func(string) bool) error
 			return fmt.Errorf("%w: %s must be a non-empty string", ErrInvalidRecord, key)
 		}
 	}
-	if !SubjectIDTypes[record.DataSubjectIDType()] {
-		return fmt.Errorf("%w: %s %q is not a known pseudonym space", ErrInvalidRecord, AttrDataSubjectIDType, record.DataSubjectIDType())
+	if !SubjectIDTypes[attributeOf(record, AttrDataSubjectIDType)] {
+		return fmt.Errorf("%w: %s %q is not a known pseudonym space", ErrInvalidRecord, AttrDataSubjectIDType, attributeOf(record, AttrDataSubjectIDType))
 	}
-	reference := record.ProcessingActivityID()
+	reference := attributeOf(record, AttrProcessingActivityID)
 	if !referencePattern.MatchString(reference) {
 		return fmt.Errorf("%w: %s must be a versioned reference like 'bd-ib-2025@v1', got %q", ErrInvalidRecord, AttrProcessingActivityID, reference)
 	}
