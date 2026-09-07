@@ -194,7 +194,7 @@ func (s *Store) Candidate(ctx context.Context, sourceID string) (onboarding.Sour
 	row := tx.QueryRow(ctx, `
 		SELECT source_id, metadata_version, metadata_payload_digest, metadata_etag,
 		       deployment_digest, checked_at, expires_at, fresh_until, stale_until,
-		       transport_authenticated, snapshot, offers, certificate_set
+		       transport_authenticated, data_transport_authenticated, snapshot, offers, certificate_set
 		FROM source_candidates WHERE source_id = $1
 	`, sourceID)
 	candidate, err := scanCandidate(row)
@@ -232,8 +232,8 @@ func (s *Store) PutCandidate(ctx context.Context, candidate onboarding.SourceCan
 		INSERT INTO source_candidates (
 			source_id, metadata_version, metadata_payload_digest, metadata_etag,
 			deployment_digest, checked_at, expires_at, fresh_until, stale_until,
-			transport_authenticated, snapshot, offers, certificate_set, updated_at
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,now())
+			transport_authenticated, data_transport_authenticated, snapshot, offers, certificate_set, updated_at
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now())
 		ON CONFLICT (source_id) DO UPDATE SET
 			metadata_version = EXCLUDED.metadata_version,
 			metadata_payload_digest = EXCLUDED.metadata_payload_digest,
@@ -244,13 +244,15 @@ func (s *Store) PutCandidate(ctx context.Context, candidate onboarding.SourceCan
 			fresh_until = EXCLUDED.fresh_until,
 			stale_until = EXCLUDED.stale_until,
 			transport_authenticated = EXCLUDED.transport_authenticated,
+			data_transport_authenticated = EXCLUDED.data_transport_authenticated,
 			snapshot = EXCLUDED.snapshot,
 			offers = EXCLUDED.offers,
 			certificate_set = EXCLUDED.certificate_set,
 			updated_at = now()
 	`, candidate.SourceID, candidate.MetadataVersion, candidate.MetadataPayloadDigest, candidate.MetadataETag,
 		candidate.DeploymentDigest, candidate.CheckedAt, candidate.ExpiresAt, candidate.FreshUntil,
-		candidate.StaleUntil, candidate.TransportAuthenticated, candidate.Snapshot, candidate.Offers, certificates)
+		candidate.StaleUntil, candidate.TransportAuthenticated, candidate.DataTransportAuthenticated,
+		candidate.Snapshot, candidate.Offers, certificates)
 	if err != nil {
 		return fmt.Errorf("store source candidate %q: %w", candidate.SourceID, err)
 	}
@@ -278,16 +280,17 @@ func (s *Store) PutStatus(ctx context.Context, status onboarding.Status) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO source_statuses (
 			source_id, state, reason, message, metadata_version, deployment_digest,
-			transport_authenticated, checked_at
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+			transport_authenticated, data_transport_authenticated, checked_at
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 		ON CONFLICT (source_id) DO UPDATE SET
 			state = EXCLUDED.state, reason = EXCLUDED.reason, message = EXCLUDED.message,
 			metadata_version = EXCLUDED.metadata_version,
 			deployment_digest = EXCLUDED.deployment_digest,
 			transport_authenticated = EXCLUDED.transport_authenticated,
+			data_transport_authenticated = EXCLUDED.data_transport_authenticated,
 			checked_at = EXCLUDED.checked_at
 	`, status.SourceID, status.State, status.Reason, status.Message, status.MetadataVersion,
-		status.DeploymentDigest, status.TransportAuthenticated, status.CheckedAt)
+		status.DeploymentDigest, status.TransportAuthenticated, status.DataTransportAuthenticated, status.CheckedAt)
 	if err != nil {
 		return fmt.Errorf("store source status %q: %w", status.SourceID, err)
 	}
@@ -323,11 +326,12 @@ func (s *Store) Promote(ctx context.Context, release onboarding.SourceRelease) (
 				INSERT INTO source_release_sources (
 					release_id, source_id, metadata_version, metadata_payload_digest, metadata_etag,
 					deployment_digest, checked_at, expires_at, fresh_until, stale_until,
-					transport_authenticated, snapshot, certificate_set
-				) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+					transport_authenticated, data_transport_authenticated, snapshot, certificate_set
+				) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 			`, release.ID, source.SourceID, source.MetadataVersion, source.MetadataPayloadDigest,
 				source.MetadataETag, source.DeploymentDigest, source.CheckedAt, source.ExpiresAt,
-				source.FreshUntil, source.StaleUntil, source.TransportAuthenticated, source.Snapshot, certificates); err != nil {
+				source.FreshUntil, source.StaleUntil, source.TransportAuthenticated, source.DataTransportAuthenticated,
+				source.Snapshot, certificates); err != nil {
 				return false, fmt.Errorf("insert release source %q: %w", source.SourceID, err)
 			}
 			for _, metadata := range source.TypeMetadata {
@@ -490,7 +494,7 @@ func loadRelease(ctx context.Context, query queryer, releaseID string) (onboardi
 	rows, err := query.Query(ctx, `
 		SELECT source_id, metadata_version, metadata_payload_digest, metadata_etag,
 		       deployment_digest, checked_at, expires_at, fresh_until, stale_until,
-		       transport_authenticated, snapshot, certificate_set
+		       transport_authenticated, data_transport_authenticated, snapshot, certificate_set
 		FROM source_release_sources WHERE release_id = $1 ORDER BY source_id
 	`, releaseID)
 	if err != nil {
@@ -502,7 +506,8 @@ func loadRelease(ctx context.Context, query queryer, releaseID string) (onboardi
 		if err := rows.Scan(
 			&source.SourceID, &source.MetadataVersion, &source.MetadataPayloadDigest, &source.MetadataETag,
 			&source.DeploymentDigest, &source.CheckedAt, &source.ExpiresAt, &source.FreshUntil,
-			&source.StaleUntil, &source.TransportAuthenticated, &source.Snapshot, &certificates,
+			&source.StaleUntil, &source.TransportAuthenticated, &source.DataTransportAuthenticated,
+			&source.Snapshot, &certificates,
 		); err != nil {
 			return onboarding.SourceRelease{}, fmt.Errorf("scan release source: %w", err)
 		}
@@ -532,7 +537,8 @@ func scanCandidate(row rowScanner) (onboarding.SourceCandidate, error) {
 		&candidate.SourceID, &candidate.MetadataVersion, &candidate.MetadataPayloadDigest,
 		&candidate.MetadataETag, &candidate.DeploymentDigest, &candidate.CheckedAt,
 		&candidate.ExpiresAt, &candidate.FreshUntil, &candidate.StaleUntil,
-		&candidate.TransportAuthenticated, &candidate.Snapshot, &candidate.Offers, &certificates,
+		&candidate.TransportAuthenticated, &candidate.DataTransportAuthenticated,
+		&candidate.Snapshot, &candidate.Offers, &certificates,
 	)
 	if err != nil {
 		return onboarding.SourceCandidate{}, err

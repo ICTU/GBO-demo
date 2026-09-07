@@ -16,6 +16,7 @@ args:
   - --schema=/schemas/gbo-source-metadata-v1.schema.json
   - --type-metadata-base-url=https://adapter.example
   - --sources-dir=/sources
+  - --metadata-dir=/source-metadata
   - --storage-backend=postgres
   - --certificate-store=public-filesystem
   - --database-schema=source_registry
@@ -39,6 +40,11 @@ volumeMounts:
   - name: source-configurations
     mountPath: /sources
     readOnly: true
+  # Only needed when a source uses file metadata transport. The ConfigMap holds
+  # the documents an operator maintains for sources that publish none.
+  - name: source-metadata-documents
+    mountPath: /source-metadata
+    readOnly: true
   - name: metadata-schemas
     mountPath: /schemas
     readOnly: true
@@ -53,6 +59,10 @@ volumes:
   - name: source-configurations
     configMap:
       name: gbo-source-configurations
+  - name: source-metadata-documents
+    configMap:
+      name: gbo-source-metadata-documents
+      optional: true
   - name: metadata-schemas
     configMap:
       name: gbo-source-metadata-schemas

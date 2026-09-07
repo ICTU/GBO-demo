@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -676,14 +677,15 @@ func (b *candidateActivationBackend) CurrentCandidate(string) (*sourceActivation
 	return b.candidate, nil
 }
 
-func (b *candidateActivationBackend) RefreshCandidate(_ string, source sourceRegistration, metadataURL string, certificates certificateArtifacts, transportAuthenticated bool, _ time.Time) (*sourceActivation, error) {
+func (b *candidateActivationBackend) RefreshCandidate(_ string, source sourceRegistration, metadataURL string, certificates certificateArtifacts, authentication transportAuthentication, _ time.Time) (*sourceActivation, error) {
 	if b.refreshErr != nil {
 		return nil, b.refreshErr
 	}
 	b.candidate.Source = source
 	b.candidate.MetadataURL = metadataURL
 	b.candidate.Certificates = certificates
-	b.candidate.TransportAuthenticated = transportAuthenticated
+	b.candidate.TransportAuthenticated = authentication.metadata
+	b.candidate.DataTransportAuthenticated = authentication.data
 	return b.candidate, nil
 }
 
@@ -771,3 +773,109 @@ var _ certificateStore = (*recordingCertificateStore)(nil)
 var _ activationBackend = (*capturingActivationBackend)(nil)
 var _ activationLifecycleBackend = (*candidateActivationBackend)(nil)
 var _ sourceStatusWriter = (*capturingSourceStatusWriter)(nil)
+
+func fileSourceConfiguration(sourceID, documentPath string) sourceConfiguration {
+	return sourceConfiguration{
+		SourceID:         sourceID,
+		MetadataEndpoint: configuredSourceMetadataEndpoint{Transport: sourceTransportFile, Path: documentPath},
+		DataAccess:       &configuredSourceDataAccess{Transport: sourceTransportFSC, ProviderPeerID: testProviderPeerID},
+	}
+}
+
+// The combination this whole split exists for: GBO holds the document because
+// the source publishes none, while the data call it describes stays pinned to
+// an FSC contract.
+func TestFileMetadataSourceActivatesWithFSCDataContract(t *testing.T) {
+	now := time.Now().UTC()
+	managerPayload := fscContractPayload(t, []map[string]any{
+		fscConnectionContract(testConsumerPeerID, testProviderPeerID, "bri", "data-grant", now.Unix(), now),
+	})
+	manager := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if request.URL.Path == "/v1/peers" {
+			_, _ = w.Write(fscPeerPayload(t))
+			return
+		}
+		_, _ = w.Write(managerPayload)
+	}))
+	defer manager.Close()
+	metadataPayload, err := os.ReadFile("../graphql-server/config/gbo-source-metadata.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadataDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(metadataDir, "belastingdienst"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(metadataDir, "belastingdienst", "gbo.json"), metadataPayload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	backend := &capturingActivationBackend{}
+	statuses := &capturingSourceStatusWriter{}
+	reconciler := &sourceReconciler{
+		managerClient: manager.Client(), sourceClient: http.DefaultClient,
+		managerURL: manager.URL, consumerPeerID: testConsumerPeerID, outwayURL: "http://outway.example",
+		schemaPath: "../../schemas/gbo-source-metadata-v1.schema.json", publicBaseURL: "https://issuer.example",
+		metadataDir: metadataDir,
+		sources:     []sourceConfiguration{fileSourceConfiguration("belastingdienst", "belastingdienst/gbo.json")},
+		store:       staticCertificateStore{}, backend: backend, statuses: statuses,
+	}
+
+	if err := reconciler.Reconcile(context.Background(), now); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if backend.validated == nil {
+		t.Fatal("source was not activated")
+	}
+	registration := backend.validated.Registration
+	if registration.MetadataEndpoint.Transport != sourceTransportFile || registration.MetadataEndpoint.Path != "belastingdienst/gbo.json" {
+		t.Fatalf("metadata endpoint = %+v", registration.MetadataEndpoint)
+	}
+	if registration.MetadataEndpoint.GrantHash != "" || registration.MetadataEndpoint.Endpoint != "" {
+		t.Fatalf("file metadata endpoint carries transport state: %+v", registration.MetadataEndpoint)
+	}
+	if registration.ProviderPeerID != testProviderPeerID || registration.DataAccess.Transport != sourceTransportFSC ||
+		registration.DataAccess.ServiceReference != "bri" || registration.DataAccess.GrantHash != "data-grant" {
+		t.Fatalf("data access = %+v peer = %q", registration.DataAccess, registration.ProviderPeerID)
+	}
+	if backend.validated.MetadataURL != "file:belastingdienst/gbo.json" {
+		t.Fatalf("recorded metadata provenance = %q", backend.validated.MetadataURL)
+	}
+	if statuses.last.State != sourceStateActive || statuses.last.TransportAuthenticated || !statuses.last.DataTransportAuthenticated {
+		t.Fatalf("status = %+v", statuses.last)
+	}
+}
+
+// A missing document must say why it is missing rather than quietly leaving
+// the source out of the next release.
+func TestMissingMetadataFileBlocksTheSource(t *testing.T) {
+	now := time.Now().UTC()
+	managerPayload := fscContractPayload(t, []map[string]any{
+		fscConnectionContract(testConsumerPeerID, testProviderPeerID, "bri", "data-grant", now.Unix(), now),
+	})
+	manager := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if request.URL.Path == "/v1/peers" {
+			_, _ = w.Write(fscPeerPayload(t))
+			return
+		}
+		_, _ = w.Write(managerPayload)
+	}))
+	defer manager.Close()
+	statuses := &capturingSourceStatusWriter{bySource: map[string]sourceReconcileStatus{}}
+	reconciler := &sourceReconciler{
+		managerClient: manager.Client(), sourceClient: http.DefaultClient,
+		managerURL: manager.URL, consumerPeerID: testConsumerPeerID, outwayURL: "http://outway.example",
+		schemaPath: "../../schemas/gbo-source-metadata-v1.schema.json", publicBaseURL: "https://issuer.example",
+		metadataDir: t.TempDir(),
+		sources:     []sourceConfiguration{fileSourceConfiguration("belastingdienst", "belastingdienst/gbo.json")},
+		store:       staticCertificateStore{}, backend: &capturingActivationBackend{}, statuses: statuses,
+	}
+
+	if err := reconciler.Reconcile(context.Background(), now); err == nil {
+		t.Fatal("missing source document reconciled successfully")
+	}
+	if statuses.last.State != sourceStateBlocked || statuses.last.Reason != sourceReasonMetadataFetchFailed {
+		t.Fatalf("status = %+v", statuses.last)
+	}
+}

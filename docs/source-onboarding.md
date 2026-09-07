@@ -124,7 +124,8 @@ metadata_endpoint:
 ```
 
 GBO resolveert zowel het geconfigureerde metadatacontract als de dataservice
-uit actuele FSC-contracten. `provider_peer_id` selecteert de FSC-provider van
+uit actuele FSC-contracten. Dit blijft de bedoelde vorm: beide benen
+geauthenticeerd, met twee gescheiden services. `provider_peer_id` selecteert de FSC-provider van
 beide contracten en mag exact twintig alfanumerieke tekens bevatten. Het vaste
 pad `/.well-known/gbo`, het datatransport en grant-hashes worden automatisch
 ingevuld. De twintigcijferige juridische OIN en organisatienaam komen uit de
@@ -157,6 +158,66 @@ Dit profiel is bedoeld voor demonstraties of afgeschermde netwerken. HTTPS
 maakt het profiel niet brongebonden: zonder apart vastgelegde client- of
 serveridentiteit blijft het `unsecured`. Autorisatie van het dataverzoek blijft
 de verantwoordelijkheid van het gepubliceerde bronendpoint.
+
+### File
+
+```yaml
+metadata_endpoint:
+  transport: file
+  path: centric/gbo.json
+data_access:
+  transport: fsc
+  provider_peer_id: "99999999900000000300"
+```
+
+`file` leest het brondocument uit de door de beheerder beheerde
+metadatadirectory (`--metadata-dir`, in Compose `source-metadata/`). Het pad is
+relatief aan die directory en mag er niet uit ontsnappen; symlinks worden na
+resolutie opnieuw gecontroleerd. Het profiel bestaat voor bronnen die zelf geen
+`/.well-known/gbo` publiceren.
+
+Wat vervalt is het ophalen, niet de controle. Het document wordt nog steeds
+tegen het schema gevalideerd, de OIN moet nog steeds overeenkomen met de
+vooraf beheerde certificaatset, en promotie blijft een aparte stap. Wat wél
+verandert is wie inhoudelijk tekent: zonder bronendpoint neemt de beheerder de
+productbeschrijving van een ander over. Leg vast wie daarmee akkoord is.
+
+Een bestand heeft geen eigen versheid. De bytes leveren de ETag, dus een
+ongewijzigd document verlengt de freshness zoals een `304` dat doet. `expires_at`
+moet minimaal een uur in de toekomst liggen; anders wordt de bron `stale` en
+daarna `blocked`. Dat een document onderhoud vraagt is de reden om de bron
+alsnog naar een eigen metadata-endpoint te bewegen, niet een vaste taak.
+
+### De twee benen afzonderlijk kiezen
+
+`data_access` is optioneel. Zonder dat blok gebruikt het databeen hetzelfde
+transport als het metadatabeen, precies zoals voorheen. Mét dat blok kiest een
+bron ze los van elkaar:
+
+| metadata | data | Toegestaan |
+| --- | --- | --- |
+| `fsc` | `fsc` | ja; de twee services moeten verschillen |
+| `fsc` | `unsecured` | nee |
+| `unsecured` | `fsc` | ja |
+| `unsecured` | `unsecured` | ja |
+| `file` | `fsc` | ja |
+| `file` | `unsecured` | ja |
+| `file` | — | nee; een bestand zegt niets over het bereiken van de bron |
+
+Een bron is één FSC-peer. `provider_peer_id` staat daarom op het been dat FSC
+spreekt en mag niet op beide staan. De dataservice en de grant-hash blijven
+afgeleid uit respectievelijk het brondocument en de actuele contracten; ze zijn
+geen beheerdersinvoer.
+
+Een gescheiden combinatie is een onboardingfase, geen eindtoestand. Bij
+`unsecured` of `file` metadata arriveert de *beschrijving* van een
+FSC-geauthenticeerde datacall over een niet-geauthenticeerd kanaal: wie dat
+document beheerst, bepaalt query, mapping en de claims die in de wallet
+belanden. Wat de schade begrenst is dat het Peer ID uit de eigen configuratie
+komt, de grant-hash het contract vastpint, de OIN tegen het certificaat wordt
+gecontroleerd en promotie een expliciete stap blijft. De status rapporteert
+daarom beide benen afzonderlijk als `transport_authenticated` en
+`data_transport_authenticated`; één vlag zou deze combinatie onzichtbaar maken.
 
 ## Proces
 
@@ -244,6 +305,8 @@ kan daardoor niet stil uit de walletproducten verdwijnen.
 |---|---|
 | `source_id` | Bestandsnaam van de GBO-bronconfiguratie |
 | Transport en metadata-locator | Inhoud van de GBO-bronconfiguratie |
+| Datatransport en FSC-peer | Inhoud van de GBO-bronconfiguratie |
+| Brondocument zonder bronendpoint | Beheerde metadatadirectory (`--metadata-dir`) |
 | Juridische `source_oin`, organisatienaam en certificatenset | Vooraf beheerde certificaten onder de sleutel `source_id` |
 | FSC provider Peer ID, services en grant-hashes | actuele FSC-contracten |
 | GraphQL-endpoint, query, parameters, offers en mapping | `/.well-known/gbo` van de bron |

@@ -47,36 +47,41 @@ type TypeMetadata struct {
 // SourceCandidate is mutable control-plane state. Snapshot and Offers are
 // versioned domain JSON; lifecycle fields remain typed and queryable.
 type SourceCandidate struct {
-	SourceID               string               `json:"source_id"`
-	MetadataVersion        string               `json:"metadata_version"`
-	MetadataPayloadDigest  string               `json:"metadata_payload_digest"`
-	MetadataETag           string               `json:"metadata_etag,omitempty"`
-	DeploymentDigest       string               `json:"deployment_digest"`
-	CheckedAt              time.Time            `json:"checked_at"`
-	ExpiresAt              time.Time            `json:"expires_at"`
-	FreshUntil             time.Time            `json:"fresh_until"`
-	StaleUntil             time.Time            `json:"stale_until"`
-	TransportAuthenticated bool                 `json:"transport_authenticated"`
-	Snapshot               json.RawMessage      `json:"snapshot"`
-	Offers                 json.RawMessage      `json:"offers"`
-	CertificateSet         PublicCertificateSet `json:"certificate_set"`
-	TypeMetadata           []TypeMetadata       `json:"type_metadata"`
+	SourceID               string    `json:"source_id"`
+	MetadataVersion        string    `json:"metadata_version"`
+	MetadataPayloadDigest  string    `json:"metadata_payload_digest"`
+	MetadataETag           string    `json:"metadata_etag,omitempty"`
+	DeploymentDigest       string    `json:"deployment_digest"`
+	CheckedAt              time.Time `json:"checked_at"`
+	ExpiresAt              time.Time `json:"expires_at"`
+	FreshUntil             time.Time `json:"fresh_until"`
+	StaleUntil             time.Time `json:"stale_until"`
+	TransportAuthenticated bool      `json:"transport_authenticated"`
+	// DataTransportAuthenticated reports the data leg separately, because a
+	// source may take its data over FSC while its description arrives over an
+	// unauthenticated metadata transport.
+	DataTransportAuthenticated bool                 `json:"data_transport_authenticated"`
+	Snapshot                   json.RawMessage      `json:"snapshot"`
+	Offers                     json.RawMessage      `json:"offers"`
+	CertificateSet             PublicCertificateSet `json:"certificate_set"`
+	TypeMetadata               []TypeMetadata       `json:"type_metadata"`
 }
 
 type ReleaseSource struct {
-	SourceID               string               `json:"source_id"`
-	MetadataVersion        string               `json:"metadata_version"`
-	MetadataPayloadDigest  string               `json:"metadata_payload_digest"`
-	MetadataETag           string               `json:"metadata_etag,omitempty"`
-	DeploymentDigest       string               `json:"deployment_digest"`
-	CheckedAt              time.Time            `json:"checked_at"`
-	ExpiresAt              time.Time            `json:"expires_at"`
-	FreshUntil             time.Time            `json:"fresh_until"`
-	StaleUntil             time.Time            `json:"stale_until"`
-	TransportAuthenticated bool                 `json:"transport_authenticated"`
-	Snapshot               json.RawMessage      `json:"snapshot"`
-	CertificateSet         PublicCertificateSet `json:"certificate_set"`
-	TypeMetadata           []TypeMetadata       `json:"type_metadata"`
+	SourceID                   string               `json:"source_id"`
+	MetadataVersion            string               `json:"metadata_version"`
+	MetadataPayloadDigest      string               `json:"metadata_payload_digest"`
+	MetadataETag               string               `json:"metadata_etag,omitempty"`
+	DeploymentDigest           string               `json:"deployment_digest"`
+	CheckedAt                  time.Time            `json:"checked_at"`
+	ExpiresAt                  time.Time            `json:"expires_at"`
+	FreshUntil                 time.Time            `json:"fresh_until"`
+	StaleUntil                 time.Time            `json:"stale_until"`
+	TransportAuthenticated     bool                 `json:"transport_authenticated"`
+	DataTransportAuthenticated bool                 `json:"data_transport_authenticated"`
+	Snapshot                   json.RawMessage      `json:"snapshot"`
+	CertificateSet             PublicCertificateSet `json:"certificate_set"`
+	TypeMetadata               []TypeMetadata       `json:"type_metadata"`
 }
 
 type SourceRelease struct {
@@ -171,7 +176,8 @@ func PromoteCompleteSourceSet(ctx context.Context, registry SourceRegistry, sour
 		if err := registry.PutStatus(ctx, Status{
 			SourceID: candidate.SourceID, State: StateActive,
 			MetadataVersion: candidate.MetadataVersion, DeploymentDigest: candidate.DeploymentDigest,
-			TransportAuthenticated: candidate.TransportAuthenticated, CheckedAt: at.UTC(),
+			TransportAuthenticated: candidate.TransportAuthenticated, DataTransportAuthenticated: candidate.DataTransportAuthenticated,
+			CheckedAt: at.UTC(),
 		}); err != nil {
 			return PromotionResult{Release: release, Activated: true}, fmt.Errorf("mark promoted source %q active: %w", candidate.SourceID, err)
 		}
@@ -201,8 +207,9 @@ func (release SourceRelease) Validate() error {
 			MetadataPayloadDigest: source.MetadataPayloadDigest, MetadataETag: source.MetadataETag,
 			DeploymentDigest: source.DeploymentDigest, CheckedAt: source.CheckedAt,
 			ExpiresAt: source.ExpiresAt, FreshUntil: source.FreshUntil, StaleUntil: source.StaleUntil,
-			TransportAuthenticated: source.TransportAuthenticated, Snapshot: source.Snapshot,
-			Offers: json.RawMessage(`[]`), CertificateSet: source.CertificateSet, TypeMetadata: source.TypeMetadata,
+			TransportAuthenticated: source.TransportAuthenticated, DataTransportAuthenticated: source.DataTransportAuthenticated,
+			Snapshot: source.Snapshot,
+			Offers:   json.RawMessage(`[]`), CertificateSet: source.CertificateSet, TypeMetadata: source.TypeMetadata,
 		}
 		if err := candidate.Validate(); err != nil {
 			return fmt.Errorf("release source %q: %w", source.SourceID, err)
@@ -270,8 +277,8 @@ func NewSourceRelease(createdAt time.Time, candidates []SourceCandidate) (Source
 			MetadataPayloadDigest: candidate.MetadataPayloadDigest, MetadataETag: candidate.MetadataETag,
 			DeploymentDigest: candidate.DeploymentDigest, CheckedAt: candidate.CheckedAt.UTC(), ExpiresAt: candidate.ExpiresAt.UTC(),
 			FreshUntil: candidate.FreshUntil.UTC(), StaleUntil: candidate.StaleUntil.UTC(),
-			TransportAuthenticated: candidate.TransportAuthenticated,
-			Snapshot:               append(json.RawMessage(nil), candidate.Snapshot...), CertificateSet: candidate.CertificateSet,
+			TransportAuthenticated: candidate.TransportAuthenticated, DataTransportAuthenticated: candidate.DataTransportAuthenticated,
+			Snapshot: append(json.RawMessage(nil), candidate.Snapshot...), CertificateSet: candidate.CertificateSet,
 			TypeMetadata: typeMetadata,
 		})
 	}

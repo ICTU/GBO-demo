@@ -22,6 +22,10 @@ const sourceMetadataWellKnownPath = "/.well-known/gbo"
 type sourceConfiguration struct {
 	SourceID         string                           `yaml:"-"`
 	MetadataEndpoint configuredSourceMetadataEndpoint `yaml:"metadata_endpoint"`
+	// DataAccess is optional. Omitting it keeps the historical shape in which
+	// one transport served both legs; stating it lets a source take its data
+	// over FSC while its description arrives another way.
+	DataAccess *configuredSourceDataAccess `yaml:"data_access,omitempty"`
 }
 
 // configuredSourceMetadataEndpoint deliberately does not reuse the runtime
@@ -33,6 +37,36 @@ type configuredSourceMetadataEndpoint struct {
 	ProviderPeerID   string `yaml:"provider_peer_id,omitempty"`
 	ServiceReference string `yaml:"service_reference,omitempty"`
 	Endpoint         string `yaml:"endpoint,omitempty"`
+	// Path locates the document inside the operator-managed metadata
+	// directory. It applies to file transport only; the FSC well-known path is
+	// a fixed convention and never an operator input.
+	Path string `yaml:"path,omitempty"`
+}
+
+// configuredSourceDataAccess carries only what an operator legitimately owns.
+// The data service reference and grant hash stay out: the source names its own
+// service in its document, and the grant is resolved from current contracts.
+type configuredSourceDataAccess struct {
+	Transport      string `yaml:"transport"`
+	ProviderPeerID string `yaml:"provider_peer_id,omitempty"`
+}
+
+// dataTransport defaults to the metadata transport so existing single-leg
+// configurations keep their meaning without being rewritten.
+func (c sourceConfiguration) dataTransport() string {
+	if c.DataAccess != nil {
+		return c.DataAccess.Transport
+	}
+	return c.MetadataEndpoint.Transport
+}
+
+// providerPeerID is the one FSC peer behind this source. It is declared on
+// whichever leg speaks FSC; validation guarantees it is declared exactly once.
+func (c sourceConfiguration) providerPeerID() string {
+	if c.DataAccess != nil && c.DataAccess.ProviderPeerID != "" {
+		return c.DataAccess.ProviderPeerID
+	}
+	return c.MetadataEndpoint.ProviderPeerID
 }
 
 func loadSourceConfigurations(directory string) ([]sourceConfiguration, error) {
@@ -77,7 +111,11 @@ func loadSourceConfigurations(directory string) ([]sourceConfiguration, error) {
 		if previous, exists := byID[configuration.SourceID]; exists {
 			return nil, fmt.Errorf("source_id %q is configured in both %q and %q", configuration.SourceID, previous, path)
 		}
-		binding := configuration.MetadataEndpoint.Transport + "\x00" + configuration.MetadataEndpoint.ProviderPeerID + "\x00" + configuration.MetadataEndpoint.ServiceReference + "\x00" + configuration.MetadataEndpoint.Endpoint
+		binding := strings.Join([]string{
+			configuration.MetadataEndpoint.Transport, configuration.MetadataEndpoint.ProviderPeerID,
+			configuration.MetadataEndpoint.ServiceReference, configuration.MetadataEndpoint.Endpoint,
+			configuration.MetadataEndpoint.Path,
+		}, "\x00")
 		if previous, exists := byTransportBinding[binding]; exists {
 			return nil, fmt.Errorf("metadata endpoint for provider Peer ID %q is configured in both %q and %q", configuration.MetadataEndpoint.ProviderPeerID, previous, path)
 		}
@@ -111,6 +149,17 @@ func parseSourceConfiguration(raw []byte) (sourceConfiguration, error) {
 	return configuration, nil
 }
 
+// sourcesNeedFSCContracts reports whether this configured set requires an FSC
+// Manager client. Either leg counts: a source may take only its data over FSC.
+func sourcesNeedFSCContracts(sources []sourceConfiguration) bool {
+	for _, source := range sources {
+		if source.MetadataEndpoint.Transport == sourceTransportFSC || source.dataTransport() == sourceTransportFSC {
+			return true
+		}
+	}
+	return false
+}
+
 func (c sourceConfiguration) validate() error {
 	if !sourceIDPattern.MatchString(c.SourceID) {
 		return fmt.Errorf("source_id is invalid")
@@ -126,6 +175,9 @@ func (c sourceConfiguration) validate() error {
 		if c.MetadataEndpoint.Endpoint != "" {
 			return fmt.Errorf("metadata_endpoint endpoint is not allowed for FSC transport")
 		}
+		if c.MetadataEndpoint.Path != "" {
+			return fmt.Errorf("metadata_endpoint path is not allowed for FSC transport")
+		}
 	case sourceTransportUnsecured:
 		if c.MetadataEndpoint.ProviderPeerID != "" {
 			return fmt.Errorf("metadata_endpoint provider_peer_id is not allowed for unsecured transport")
@@ -133,11 +185,58 @@ func (c sourceConfiguration) validate() error {
 		if c.MetadataEndpoint.ServiceReference != "" {
 			return fmt.Errorf("metadata_endpoint service_reference is not allowed for unsecured transport")
 		}
+		if c.MetadataEndpoint.Path != "" {
+			return fmt.Errorf("metadata_endpoint path is not allowed for unsecured transport")
+		}
 		if err := validateAbsoluteUnsecuredEndpoint(c.MetadataEndpoint.Endpoint); err != nil {
 			return fmt.Errorf("metadata_endpoint endpoint: %w", err)
 		}
+	case sourceTransportFile:
+		if c.MetadataEndpoint.ProviderPeerID != "" {
+			return fmt.Errorf("metadata_endpoint provider_peer_id is not allowed for file transport; declare it on data_access")
+		}
+		if c.MetadataEndpoint.ServiceReference != "" {
+			return fmt.Errorf("metadata_endpoint service_reference is not allowed for file transport")
+		}
+		if c.MetadataEndpoint.Endpoint != "" {
+			return fmt.Errorf("metadata_endpoint endpoint is not allowed for file transport")
+		}
+		if err := validateStorageRelativePath(c.MetadataEndpoint.Path); err != nil {
+			return fmt.Errorf("metadata_endpoint path: %w", err)
+		}
 	default:
-		return fmt.Errorf("metadata_endpoint transport must be %q or %q", sourceTransportFSC, sourceTransportUnsecured)
+		return fmt.Errorf("metadata_endpoint transport must be %q, %q or %q", sourceTransportFSC, sourceTransportUnsecured, sourceTransportFile)
+	}
+	return c.validateDataAccess()
+}
+
+func (c sourceConfiguration) validateDataAccess() error {
+	if c.DataAccess == nil {
+		// A document read from disk says nothing about how to reach the source
+		// itself, so the data leg cannot be inherited and must be stated.
+		if c.MetadataEndpoint.Transport == sourceTransportFile {
+			return fmt.Errorf("data_access is required for file metadata transport")
+		}
+		return nil
+	}
+	switch c.DataAccess.Transport {
+	case sourceTransportFSC:
+		if c.MetadataEndpoint.Transport == sourceTransportFSC {
+			if c.DataAccess.ProviderPeerID != "" {
+				return fmt.Errorf("data_access provider_peer_id is already declared on metadata_endpoint")
+			}
+		} else if !peerIDPattern.MatchString(c.DataAccess.ProviderPeerID) {
+			return fmt.Errorf("data_access provider_peer_id must contain exactly 20 alphanumeric characters for FSC transport")
+		}
+	case sourceTransportUnsecured:
+		if c.DataAccess.ProviderPeerID != "" {
+			return fmt.Errorf("data_access provider_peer_id is not allowed for unsecured transport")
+		}
+		if c.MetadataEndpoint.Transport == sourceTransportFSC {
+			return fmt.Errorf("FSC metadata must not be combined with unsecured data_access")
+		}
+	default:
+		return fmt.Errorf("data_access transport must be %q or %q", sourceTransportFSC, sourceTransportUnsecured)
 	}
 	return nil
 }

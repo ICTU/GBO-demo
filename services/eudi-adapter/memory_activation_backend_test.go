@@ -26,7 +26,7 @@ func (b *memoryActivationBackend) CurrentCandidate(sourceID string) (*sourceActi
 	return cloneTestActivation(candidate), nil
 }
 
-func (b *memoryActivationBackend) RefreshCandidate(sourceID string, source sourceRegistration, metadataURL string, certificates certificateArtifacts, transportAuthenticated bool, now time.Time) (*sourceActivation, error) {
+func (b *memoryActivationBackend) RefreshCandidate(sourceID string, source sourceRegistration, metadataURL string, certificates certificateArtifacts, authentication transportAuthentication, now time.Time) (*sourceActivation, error) {
 	activation, err := b.CurrentCandidate(sourceID)
 	if err != nil {
 		return nil, err
@@ -43,7 +43,8 @@ func (b *memoryActivationBackend) RefreshCandidate(sourceID string, source sourc
 	activation.Source = source
 	activation.MetadataURL = metadataURL
 	activation.Certificates = certificates
-	activation.TransportAuthenticated = transportAuthenticated
+	activation.TransportAuthenticated = authentication.metadata
+	activation.DataTransportAuthenticated = authentication.data
 	activation.CheckedAt = now.UTC()
 	activation.FreshUntil = minTime(now.Add(defaultSourceMetadataCachePolicy.MaximumFreshness), activation.ExpiresAt)
 	activation.StaleUntil = minTime(activation.FreshUntil.Add(defaultSourceMetadataCachePolicy.StaleGrace), activation.ExpiresAt)
