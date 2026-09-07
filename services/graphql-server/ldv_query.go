@@ -206,7 +206,7 @@ func (l *sourceLogbook) logQuery(ctx context.Context, r *http.Request, facts *qu
 	scope := r.Header.Get("X-GBO-Scope")
 	processor := l.ForeignProcessor(r)
 	traceID := ldv.TraceID(ctx, r.Header)
-	parentSpanID := strings.TrimSpace(r.Header.Get(ldv.HeaderParentSpanID))
+	parentSpanID := ldv.ParentSpanFromHeader(r.Header)
 	end := time.Now().UTC()
 
 	years := facts.sortedYears()

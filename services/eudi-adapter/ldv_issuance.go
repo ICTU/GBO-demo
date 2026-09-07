@@ -75,10 +75,10 @@ type issuanceRecording struct {
 // ldvTraceIDForIssuance returns the trace id the whole chain will share.
 //
 // The adapter mints the Fsc-Transaction-Id itself and stashes it on the
-// context, so it is taken from there rather than from a header: when the
-// issuance-server sends its own traceparent the OTel trace id no longer
-// equals the FSC id, and reading the ambient trace would file the adapter's
-// records under an id the source's logbook never sees.
+// context, so it is taken from there rather than from a header: it is the only
+// identifier that survives the FSC hop, and the bronhouder's logbook will file
+// its half of this request under it. Reading the ambient OTel trace instead
+// would file the adapter's records under an id the source never sees.
 func ldvTraceIDForIssuance(ctx context.Context, header http.Header) string {
 	if fscTxID, ok := ctx.Value(fscTxIDCtxKey).(string); ok && fscTxID != "" {
 		if normalized := ldv.NormalizeTraceID(fscTxID); normalized != "" {

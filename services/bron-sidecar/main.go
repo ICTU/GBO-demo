@@ -290,14 +290,15 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client) http.H
 		}
 		otel.GetTextMapPropagator().Inject(r.Context(), propagation.HeaderCarrier(req.Header))
 
-		// Hand the source the trace metadata it needs to file its own records
-		// under the same trace and below this one. Only metadata crosses:
-		// the records stay in each component's own logboek, and here both
-		// components happen to share one because they share a
-		// Verantwoordelijke.
+		// Hand the source its position in the trace, so it files its records
+		// under the same trace and below this one. On the standard
+		// traceparent (§3.1), which also replaces whatever OTel injected
+		// above: the LDV trace id is the one the whole chain shares, and two
+		// different trace ids on one request is the problem this avoids.
 		if logbook != nil {
-			req.Header.Set(ldv.HeaderTraceID, forward.traceID)
-			req.Header.Set(ldv.HeaderParentSpanID, forward.spanID)
+			ldv.InjectTraceparent(req.Header, ldv.TraceContext{
+				TraceID: forward.traceID, SpanID: forward.spanID, Sampled: true,
+			})
 			// In the pseudonym flow the source receives a BSN and would
 			// otherwise have to invent a subject reference. Passing the PI on
 			// keeps both components naming the same Betrokkene the same way.

@@ -138,8 +138,8 @@ func TestAkteRequesterKeepsTheSidecarsPseudonym(t *testing.T) {
 	url := brpUnderTest(t, logbook)
 
 	brpQuery(t, url, map[string]string{
-		ldv.HeaderTraceID:       "0af7651916cd43dd8448eb211c80319c",
-		ldv.HeaderParentSpanID:  "b7ad6b7169203331",
+		// §3.1: the trace arrives on the standard traceparent.
+		"traceparent":           "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
 		ldv.HeaderSubjectID:     "PI-abc123",
 		ldv.HeaderSubjectIDType: ldv.SubjectTypePI,
 	}, akteQuery)

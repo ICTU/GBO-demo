@@ -476,6 +476,22 @@ func callViaFSC(ctx context.Context, client *http.Client, cfg config, plan sourc
 	trace.SpanFromContext(ctx).SetAttributes(attribute.String("gbo.fsc.transaction_id", fscTxID))
 	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(httpReq.Header))
 
+	// §3.1 requires Trace Context on an HTTP hop that carries a
+	// dataverwerking, so the traceparent is set to the id the chain actually
+	// shares rather than to whatever OTel happened to inject: when the
+	// issuance-server sends its own traceparent, the ambient trace id is not
+	// the Fsc-Transaction-Id, and the bronhouder would file its half of this
+	// request under a different id.
+	//
+	// FSC v2.4.0 strips the header before it reaches the source, which is why
+	// the Fsc-Transaction-Id above is not redundant. Sending it anyway costs
+	// nothing and stops being a workaround the day FSC forwards it.
+	if normalized := ldv.NormalizeTraceID(fscTxID); normalized != "" {
+		ldv.InjectTraceparent(httpReq.Header, ldv.TraceContext{
+			TraceID: normalized, SpanID: ldv.SpanID(), Sampled: true,
+		})
+	}
+
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return fscResult{}, err

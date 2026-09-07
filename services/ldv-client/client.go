@@ -57,12 +57,18 @@ const (
 	AttrNextLogbookID = "dpl.read.nextLogbookId"
 )
 
-// Headers carrying LDV metadata between components of the same chain. Only
-// trace metadata crosses a component boundary; the records themselves stay
-// with their own Verantwoordelijke's logbook.
+// Headers carrying LDV metadata between components of the same
+// Verantwoordelijke. Only trace metadata crosses a component boundary; the
+// records themselves stay with their own logbook.
+//
+// The trace itself rides on the standard `traceparent` (§3.1) — see
+// tracecontext.go. What remains here is the subject, and that is a deliberate
+// local extension rather than something the standard defines: when a sidecar
+// has de-pseudonymised a PI into a BSN, the bron behind it would otherwise
+// have to invent its own name for a Betrokkene the sidecar already named. A
+// Betrokkene that changes name halfway down the chain cannot be followed
+// through the logboek.
 const (
-	HeaderTraceID       = "Gbo-Ldv-Trace-Id"
-	HeaderParentSpanID  = "Gbo-Ldv-Parent-Span-Id"
 	HeaderSubjectID     = "Gbo-Ldv-Subject-Id"
 	HeaderSubjectIDType = "Gbo-Ldv-Subject-Id-Type"
 )
@@ -309,20 +315,15 @@ var traceIDPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 // TraceID derives a record's trace id from the request.
 //
-// The Fsc-Transaction-Id is a UUID, which is exactly 32 hex characters once
-// the hyphens come off — so LDV's traceID, the ADL's trace id and the FSC
-// transaction log all end up carrying the same value for one request. That
-// shared id is a mitigation as much as a design: FSC v2.4.0 drops
-// `traceparent` between peers, so the id has to travel in a field FSC does
-// propagate (REQ-55).
-//
-// Falls back to the ambient OTel trace id, and then to a fresh id, so a record
-// is never dropped for want of a correlation handle.
+// A standard traceparent wins (§3.1). Where FSC has stripped it, the
+// Fsc-Transaction-Id carries the same value across the hop — a UUID is exactly
+// 32 hex characters once the hyphens come off, so LDV's traceID, the ADL's
+// trace id and the FSC transaction log all end up carrying one value for one
+// request. Then the ambient OTel trace, and finally a fresh id, so a record is
+// never dropped for want of a correlation handle.
 func TraceID(ctx context.Context, header http.Header) string {
-	for _, name := range []string{HeaderTraceID, "Fsc-Transaction-Id", "X-Request-Id"} {
-		if candidate := NormalizeTraceID(header.Get(name)); candidate != "" {
-			return candidate
-		}
+	if trace := TraceContextFrom(header, ""); trace.TraceID != "" {
+		return trace.TraceID
 	}
 	if spanContext := trace.SpanContextFromContext(ctx); spanContext.HasTraceID() {
 		return spanContext.TraceID().String()
@@ -342,17 +343,26 @@ func NormalizeTraceID(value string) string {
 	return ""
 }
 
+// IsTraceID reports whether a value is a usable W3C trace id.
+func IsTraceID(value string) bool {
+	return value != zeroTraceID && traceIDPattern.MatchString(value)
+}
+
 // SpanID mints the identity of one Dataverwerking record. It is the record's
 // own, not the OTel span's: an LDV record and a span are different objects
 // with different lifetimes, and borrowing the span id would tie an
 // administrative record to a sampling decision.
 func SpanID() string { return randomHex(8) }
 
-// ParentSpanFromHeader returns the LDV span a component of the same
-// Verantwoordelijke filed upstream, so this record hangs under it. Empty when
-// this component starts the tree.
+// ParentSpanFromHeader returns the span the caller was in, so this record
+// hangs under it. Read from the standard traceparent rather than a header of
+// our own. Empty when this component starts the tree, or when the hop that
+// delivered the request dropped the trace context.
 func ParentSpanFromHeader(header http.Header) string {
-	return strings.TrimSpace(header.Get(HeaderParentSpanID))
+	if parsed, ok := ParseTraceparent(header.Get("traceparent")); ok {
+		return parsed.SpanID
+	}
+	return ""
 }
 
 func randomHex(byteCount int) string {

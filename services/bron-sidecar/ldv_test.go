@@ -222,11 +222,14 @@ func TestTheSidecarPassesTraceMetadataToTheSource(t *testing.T) {
 	postQuery(t, sidecar.URL, map[string]string{"Fsc-Authorization": pseudonymToken(t)},
 		`{"query":"q","variables":{"bsn":"PI-abc123"}}`)
 
-	if received.Get(ldv.HeaderTraceID) == "" {
-		t.Error("the source was not given the LDV trace id")
+	// §3.1: the trace crosses on the standard traceparent, not on a header
+	// of our own.
+	trace, ok := ldv.ParseTraceparent(received.Get("traceparent"))
+	if !ok {
+		t.Fatalf("the source was given no usable traceparent: %q", received.Get("traceparent"))
 	}
-	if received.Get(ldv.HeaderParentSpanID) == "" {
-		t.Error("the source was not given a parent span id")
+	if !ldv.IsTraceID(trace.TraceID) || !ldv.IsSpanID(trace.SpanID) {
+		t.Errorf("traceparent = %#v", trace)
 	}
 	if got := received.Get(ldv.HeaderSubjectID); got != "PI-abc123" {
 		t.Errorf("subject header = %q, want the PI so both components name the Betrokkene alike", got)

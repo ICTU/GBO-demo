@@ -98,11 +98,26 @@ An OTel-shaped log record with the mandatory fields — `trace_id`, `span_id`,
 }
 ```
 
-`trace_id` **is** the `Fsc-Transaction-Id`, hyphens stripped — a UUID is
-exactly 32 hex characters, so LDV's `traceID`, the ADL's trace id and the FSC
-transaction log all carry one value for one request (REQ-55). That is a
-mitigation as much as a design: FSC v2.4.0 drops `traceparent` between peers,
-so the correlation handle has to travel in a field FSC does propagate.
+### Trace Context, and where it breaks
+
+§3.1 is unambiguous: when HTTP carries a dataverwerking between applications,
+W3C Trace Context **MUST** be used. So the chain correlates on `traceparent`.
+Every hop between our own components sets one, and every component reads one.
+
+**The FSC hop is a documented profile deviation.** FSC v2.4.0 does not forward
+`traceparent` between peers — the Inway strips it, and nothing on our side
+changes that. There the chain falls back to the `Fsc-Transaction-Id`, which is
+a UUID and therefore exactly a 16-byte trace-id once the hyphens come off, so
+the same value continues on the far side through a header FSC does propagate.
+The adapter sends both, so the workaround stops being one the day FSC forwards
+the standard header.
+
+That is a deviation, not conformance, and it is named here rather than
+papered over: a reader has to be able to tell where the chain follows the
+standard and where it works around a transport that cannot.
+
+One consequence is a benefit: LDV's `traceID`, the ADL's trace id and the FSC
+transaction log all carry one value for one request (REQ-55).
 
 ### Never the BSN
 
