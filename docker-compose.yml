@@ -1037,6 +1037,7 @@ services:
       - --secrets-dir=/public-certificates
       - --reader-public-url=${EUDI_PUBLIC_URL:-}
       - --sources-dir=/config/sources
+      - --metadata-dir=/config/source-metadata
       - --auto-promote
     volumes:
       - ./schemas:/config/schemas:ro
@@ -1044,6 +1045,9 @@ services:
       # unsecured demo. Deployments mount only sources/configured and therefore
       # never expose the unsecured demonstration source.
       - ./sources:/config/sources:ro
+      # Documents for sources that publish no metadata endpoint of their own.
+      # The directory may be empty; only file-transport sources read from it.
+      - ./source-metadata:/config/source-metadata:ro
       - ./fsc-infra/orgs/edi-issuer/pki/internal:/fsc-certs:ro
       # Public-only projection: provisioning copies only leaf certificates
       # and public CAs here. Adding a source needs no Compose edit and never

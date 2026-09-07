@@ -29,6 +29,7 @@ type reconcileOptions struct {
 	secretsDir         string
 	readerPublicURL    string
 	sourcesDir         string
+	metadataDir        string
 	databaseURL        string
 	databaseSchema     string
 	databaseReaderRole string
@@ -106,7 +107,7 @@ func runReconcileCommand(ctx context.Context, arguments []string, dependencies r
 		}
 		hasFSC := false
 		for _, source := range sources {
-			hasFSC = hasFSC || source.MetadataEndpoint.Transport == sourceTransportFSC
+			hasFSC = hasFSC || source.MetadataEndpoint.Transport == sourceTransportFSC || source.dataTransport() == sourceTransportFSC
 		}
 		if hasFSC && managerClient == nil {
 			for name, value := range map[string]string{
@@ -126,7 +127,8 @@ func runReconcileCommand(ctx context.Context, arguments []string, dependencies r
 			managerClient: managerClient, sourceClient: dependencies.sourceClient,
 			managerURL: options.managerURL, consumerPeerID: options.consumerPeerID, outwayURL: options.outwayURL,
 			schemaPath: options.schemaPath, publicBaseURL: options.publicBaseURL,
-			sources: sources, store: store, backend: backend,
+			metadataDir: options.metadataDir,
+			sources:     sources, store: store, backend: backend,
 			statuses: statuses,
 		}
 		if err := reconciler.Reconcile(ctx, dependencies.now()); err != nil {
@@ -187,6 +189,7 @@ func parseReconcileOptions(arguments []string, errorOutput io.Writer) (reconcile
 	set.StringVar(&options.secretsDir, "secrets-dir", ".local/secrets", "filesystem secret directory")
 	set.StringVar(&options.readerPublicURL, "reader-public-url", os.Getenv("EUDI_PUBLIC_URL"), "public issuance-server URL")
 	set.StringVar(&options.sourcesDir, "sources-dir", getEnv("SOURCE_CONFIGURATIONS_PATH", "sources/configured"), "directory containing manually managed source configurations")
+	set.StringVar(&options.metadataDir, "metadata-dir", os.Getenv("SOURCE_METADATA_PATH"), "directory containing operator-managed source documents for file transport")
 	set.StringVar(&options.databaseURL, "database-url", os.Getenv("SOURCE_REGISTRY_DATABASE_URL"), "PostgreSQL Source Registry connection URL")
 	set.StringVar(&options.databaseSchema, "database-schema", getEnv("SOURCE_REGISTRY_SCHEMA", "source_registry"), "PostgreSQL Source Registry schema")
 	set.StringVar(&options.databaseReaderRole, "database-reader-role", os.Getenv("SOURCE_REGISTRY_READER_ROLE"), "runtime PostgreSQL role that receives read-only release access when migrations run")

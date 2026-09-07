@@ -29,6 +29,7 @@ type sourceActivation struct {
 	FreshUntil                 time.Time                           `json:"fresh_until"`
 	StaleUntil                 time.Time                           `json:"stale_until"`
 	TransportAuthenticated     bool                                `json:"transport_authenticated"`
+	DataTransportAuthenticated bool                                `json:"data_transport_authenticated"`
 	TypeMetadataStoreReference string                              `json:"type_metadata_store_reference"`
 	Types                      []activatedType                     `json:"types"`
 	Certificates               certificateArtifacts                `json:"certificates"`
@@ -103,7 +104,7 @@ type activationBackend interface {
 
 type activationLifecycleBackend interface {
 	CurrentCandidate(sourceID string) (*sourceActivation, error)
-	RefreshCandidate(sourceID string, source sourceRegistration, metadataURL string, certificates certificateArtifacts, transportAuthenticated bool, now time.Time) (*sourceActivation, error)
+	RefreshCandidate(sourceID string, source sourceRegistration, metadataURL string, certificates certificateArtifacts, authentication transportAuthentication, now time.Time) (*sourceActivation, error)
 	RolloutRequired(*sourceActivation) (bool, error)
 }
 

@@ -21,7 +21,19 @@ type Transport string
 const (
 	TransportFSC       Transport = "fsc"
 	TransportUnsecured Transport = "unsecured"
+	// TransportFile reads the source document from operator-managed storage
+	// instead of fetching it from the source. It is a metadata-only profile:
+	// a file cannot answer a GraphQL query, so the data leg still selects its
+	// own transport.
+	TransportFile Transport = "file"
 )
+
+// FileMetadataLocator renders the recorded provenance of a file-transported
+// document. The registry keeps the storage-relative path rather than a host
+// path, so a snapshot stays meaningful across containers and deployments.
+func FileMetadataLocator(path string) string {
+	return "file:" + path
+}
 
 type Source struct {
 	ID                  string
@@ -35,12 +47,27 @@ type Source struct {
 type MetadataEndpoint struct {
 	Transport        Transport
 	ServiceReference string
-	Path             string
-	Endpoint         string
+	// Path is the well-known URL path for FSC transport and the
+	// storage-relative document path for file transport.
+	Path     string
+	Endpoint string
 }
 
-func (s Source) TransportAuthenticated() bool {
+// The two legs of a source authenticate independently: the metadata leg
+// describes the product, the data leg carries citizen data. Reporting one
+// boolean for both would hide that an FSC-authenticated data call can be
+// described by a document that arrived over an unauthenticated transport.
+func (s Source) MetadataTransportAuthenticated() bool {
 	return s.MetadataEndpoint.Transport == TransportFSC
+}
+
+func (s Source) DataTransportAuthenticated() bool {
+	return s.DataAccessTransport == TransportFSC
+}
+
+// UsesFSC reports whether reconciling this source needs FSC contracts at all.
+func (s Source) UsesFSC() bool {
+	return s.MetadataTransportAuthenticated() || s.DataTransportAuthenticated()
 }
 
 type Grant struct {
@@ -50,16 +77,20 @@ type Grant struct {
 }
 
 type ResolvedSource struct {
-	Source                 Source
-	MetadataURL            string
-	MetadataGrantHash      string
-	DataServiceReference   string
-	DataGrantHash          string
-	TransportAuthenticated bool
+	Source                         Source
+	MetadataURL                    string
+	MetadataGrantHash              string
+	DataServiceReference           string
+	DataGrantHash                  string
+	MetadataTransportAuthenticated bool
+	DataTransportAuthenticated     bool
 }
 
 type MetadataRequest struct {
-	URL       string
+	URL string
+	// Path carries the storage-relative document path for file transport, so
+	// the adapter resolves it against its own root instead of parsing URL.
+	Path      string
 	Transport Transport
 	GrantHash string
 	ETag      string
@@ -121,14 +152,15 @@ const (
 )
 
 type Status struct {
-	SourceID               string
-	State                  State
-	Reason                 Reason
-	Message                string
-	MetadataVersion        string
-	DeploymentDigest       string
-	TransportAuthenticated bool
-	CheckedAt              time.Time
+	SourceID                   string
+	State                      State
+	Reason                     Reason
+	Message                    string
+	MetadataVersion            string
+	DeploymentDigest           string
+	TransportAuthenticated     bool
+	DataTransportAuthenticated bool
+	CheckedAt                  time.Time
 }
 
 type Result struct {
@@ -266,8 +298,12 @@ func (s *Service[C, P, A]) Reconcile(ctx context.Context, at time.Time) (Report,
 		source.OIN = certificateSet.SourceOIN
 		source.Name = certificateSet.Name
 		ready = append(ready, readySource{source: source, certificates: certificateSet.Artifacts})
-		hasFSC = hasFSC || source.MetadataEndpoint.Transport == TransportFSC
-		status := Status{SourceID: source.ID, State: StatePending, TransportAuthenticated: source.TransportAuthenticated(), CheckedAt: at.UTC()}
+		hasFSC = hasFSC || source.UsesFSC()
+		status := Status{
+			SourceID: source.ID, State: StatePending,
+			TransportAuthenticated: source.MetadataTransportAuthenticated(), DataTransportAuthenticated: source.DataTransportAuthenticated(),
+			CheckedAt: at.UTC(),
+		}
 		if statusErr := s.putStatus(ctx, status); statusErr != nil {
 			report.Results = append(report.Results, Result{SourceID: source.ID, Status: status, Err: fmt.Errorf("source %s: record pending status: %w", source.ID, statusErr)})
 		}
@@ -283,7 +319,7 @@ func (s *Service[C, P, A]) Reconcile(ctx context.Context, at time.Time) (Report,
 		if err != nil {
 			remaining := ready[:0]
 			for _, item := range ready {
-				if item.source.MetadataEndpoint.Transport != TransportFSC {
+				if !item.source.UsesFSC() {
 					remaining = append(remaining, item)
 					continue
 				}
@@ -302,14 +338,19 @@ func (s *Service[C, P, A]) Reconcile(ctx context.Context, at time.Time) (Report,
 
 func (s *Service[C, P, A]) reconcileSource(ctx context.Context, snapshot ContractSnapshot, source Source, certificates C, at time.Time) Result {
 	metadataURL := source.MetadataEndpoint.Endpoint
+	metadataPath := ""
 	metadataGrant := Grant{}
-	if source.MetadataEndpoint.Transport == TransportFSC {
+	switch source.MetadataEndpoint.Transport {
+	case TransportFSC:
 		var ok bool
 		metadataGrant, ok = snapshot.Grant(source.ProviderPeerID, source.MetadataEndpoint.ServiceReference)
 		if !ok {
 			return s.blocked(ctx, source, ReasonMetadataContractMissing, fmt.Sprintf("no valid FSC metadata contract for service %q", source.MetadataEndpoint.ServiceReference), at)
 		}
 		metadataURL = strings.TrimRight(s.options.OutwayURL, "/") + source.MetadataEndpoint.Path
+	case TransportFile:
+		metadataPath = source.MetadataEndpoint.Path
+		metadataURL = FileMetadataLocator(metadataPath)
 	}
 
 	existing, exists, err := s.ports.Activations.Current(ctx, source.ID)
@@ -324,20 +365,24 @@ func (s *Service[C, P, A]) reconcileSource(ctx context.Context, snapshot Contrac
 		}
 	}
 	fetched, err := s.ports.Metadata.Fetch(ctx, MetadataRequest{
-		URL: metadataURL, Transport: source.MetadataEndpoint.Transport,
+		URL: metadataURL, Path: metadataPath, Transport: source.MetadataEndpoint.Transport,
 		GrantHash: metadataGrant.Hash, ETag: info.MetadataETag,
 	})
 	if err != nil {
 		return s.unavailableWithCandidate(ctx, source, existing, exists, info, ReasonMetadataFetchFailed, err.Error(), at)
 	}
 
-	resolved := ResolvedSource{Source: source, MetadataURL: metadataURL, MetadataGrantHash: metadataGrant.Hash, TransportAuthenticated: source.TransportAuthenticated()}
+	resolved := ResolvedSource{
+		Source: source, MetadataURL: metadataURL, MetadataGrantHash: metadataGrant.Hash,
+		MetadataTransportAuthenticated: source.MetadataTransportAuthenticated(),
+		DataTransportAuthenticated:     source.DataTransportAuthenticated(),
+	}
 	if fetched.NotModified {
 		if !exists {
 			return s.unavailable(ctx, source, ReasonMetadataInvalid, "source returned not-modified without an existing candidate", at)
 		}
 		resolved.DataServiceReference = info.DataServiceReference
-		if source.MetadataEndpoint.Transport == TransportFSC {
+		if source.DataAccessTransport == TransportFSC {
 			dataGrant, ok := snapshot.Grant(source.ProviderPeerID, info.DataServiceReference)
 			if !ok {
 				return s.unavailableWithCandidate(ctx, source, existing, true, info, ReasonDataContractMissing, fmt.Sprintf("no valid FSC data contract for service %q", info.DataServiceReference), at)
@@ -359,7 +404,7 @@ func (s *Service[C, P, A]) reconcileSource(ctx context.Context, snapshot Contrac
 		return s.unavailableWithCandidate(ctx, source, existing, exists, info, ReasonMetadataInvalid, fmt.Sprintf("source metadata OIN %q does not match configured source OIN %q", description.SourceOIN, source.OIN), at)
 	}
 	resolved.DataServiceReference = description.DataServiceReference
-	if source.MetadataEndpoint.Transport == TransportFSC {
+	if source.DataAccessTransport == TransportFSC {
 		dataGrant, ok := snapshot.Grant(source.ProviderPeerID, description.DataServiceReference)
 		if !ok {
 			return s.unavailableWithCandidate(ctx, source, existing, exists, info, ReasonDataContractMissing, fmt.Sprintf("no valid FSC data contract for service %q", description.DataServiceReference), at)
@@ -392,7 +437,9 @@ func (s *Service[C, P, A]) activated(ctx context.Context, source Source, activat
 	}
 	status := Status{
 		SourceID: source.ID, State: state, MetadataVersion: info.MetadataVersion,
-		DeploymentDigest: info.DeploymentDigest, TransportAuthenticated: source.TransportAuthenticated(), CheckedAt: at.UTC(),
+		DeploymentDigest:       info.DeploymentDigest,
+		TransportAuthenticated: source.MetadataTransportAuthenticated(), DataTransportAuthenticated: source.DataTransportAuthenticated(),
+		CheckedAt: at.UTC(),
 	}
 	statusErr := s.putStatus(ctx, status)
 	return Result{SourceID: source.ID, Status: status, Err: statusErr}
@@ -418,7 +465,8 @@ func (s *Service[C, P, A]) unavailableWithCandidate(ctx context.Context, source 
 		status := Status{
 			SourceID: source.ID, State: StateStale, Reason: reason, Message: message,
 			MetadataVersion: info.MetadataVersion, DeploymentDigest: info.DeploymentDigest,
-			TransportAuthenticated: source.TransportAuthenticated(), CheckedAt: at.UTC(),
+			TransportAuthenticated: source.MetadataTransportAuthenticated(), DataTransportAuthenticated: source.DataTransportAuthenticated(),
+			CheckedAt: at.UTC(),
 		}
 		statusErr := s.putStatus(ctx, status)
 		staleErr := fmt.Errorf("source %s stale (%s): %s", source.ID, reason, message)
@@ -430,7 +478,8 @@ func (s *Service[C, P, A]) unavailableWithCandidate(ctx context.Context, source 
 func (s *Service[C, P, A]) blocked(ctx context.Context, source Source, reason Reason, message string, at time.Time) Result {
 	status := Status{
 		SourceID: source.ID, State: StateBlocked, Reason: reason, Message: message,
-		TransportAuthenticated: source.TransportAuthenticated(), CheckedAt: at.UTC(),
+		TransportAuthenticated: source.MetadataTransportAuthenticated(), DataTransportAuthenticated: source.DataTransportAuthenticated(),
+		CheckedAt: at.UTC(),
 	}
 	statusErr := s.putStatus(ctx, status)
 	blockedErr := fmt.Errorf("source %s blocked (%s): %s", source.ID, reason, message)

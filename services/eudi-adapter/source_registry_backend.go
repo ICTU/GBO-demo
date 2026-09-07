@@ -36,19 +36,27 @@ func (w registryStatusWriter) Write(status sourceReconcileStatus) error {
 	})
 }
 
+// transportAuthentication carries both legs together so a caller cannot
+// silently pass one boolean where two distinct facts are meant.
+type transportAuthentication struct {
+	metadata bool
+	data     bool
+}
+
 type registryActivationSnapshot struct {
-	SchemaVersion          string                  `json:"schema_version"`
-	Source                 sourceRegistration      `json:"source"`
-	MetadataURL            string                  `json:"metadata_url"`
-	MetadataVersion        string                  `json:"metadata_version"`
-	MetadataPayloadDigest  string                  `json:"metadata_payload_digest"`
-	MetadataETag           string                  `json:"metadata_etag,omitempty"`
-	CheckedAt              time.Time               `json:"checked_at"`
-	ExpiresAt              time.Time               `json:"expires_at"`
-	FreshUntil             time.Time               `json:"fresh_until"`
-	StaleUntil             time.Time               `json:"stale_until"`
-	TransportAuthenticated bool                    `json:"transport_authenticated"`
-	Types                  []registryActivatedType `json:"types"`
+	SchemaVersion              string                  `json:"schema_version"`
+	Source                     sourceRegistration      `json:"source"`
+	MetadataURL                string                  `json:"metadata_url"`
+	MetadataVersion            string                  `json:"metadata_version"`
+	MetadataPayloadDigest      string                  `json:"metadata_payload_digest"`
+	MetadataETag               string                  `json:"metadata_etag,omitempty"`
+	CheckedAt                  time.Time               `json:"checked_at"`
+	ExpiresAt                  time.Time               `json:"expires_at"`
+	FreshUntil                 time.Time               `json:"fresh_until"`
+	StaleUntil                 time.Time               `json:"stale_until"`
+	TransportAuthenticated     bool                    `json:"transport_authenticated"`
+	DataTransportAuthenticated bool                    `json:"data_transport_authenticated"`
+	Types                      []registryActivatedType `json:"types"`
 }
 
 type registryActivatedType struct {
@@ -120,7 +128,7 @@ func (b *registryActivationBackend) Activate(validated *validatedSourceRegistrat
 	return activation, nil
 }
 
-func (b *registryActivationBackend) RefreshCandidate(sourceID string, source sourceRegistration, metadataURL string, certificates certificateArtifacts, transportAuthenticated bool, now time.Time) (*sourceActivation, error) {
+func (b *registryActivationBackend) RefreshCandidate(sourceID string, source sourceRegistration, metadataURL string, certificates certificateArtifacts, authentication transportAuthentication, now time.Time) (*sourceActivation, error) {
 	candidate, found, err := b.registry.Candidate(b.ctx, sourceID)
 	if err != nil {
 		return nil, err
@@ -147,7 +155,8 @@ func (b *registryActivationBackend) RefreshCandidate(sourceID string, source sou
 	}
 	activation.Source = source
 	activation.MetadataURL = metadataURL
-	activation.TransportAuthenticated = transportAuthenticated
+	activation.TransportAuthenticated = authentication.metadata
+	activation.DataTransportAuthenticated = authentication.data
 	activation.CheckedAt = now.UTC()
 	activation.FreshUntil = minTime(now.Add(defaultSourceMetadataCachePolicy.MaximumFreshness), activation.ExpiresAt)
 	activation.StaleUntil = minTime(activation.FreshUntil.Add(defaultSourceMetadataCachePolicy.StaleGrace), activation.ExpiresAt)
@@ -209,11 +218,12 @@ func activationFromValidatedSource(validated *validatedSourceRegistration) *sour
 		SchemaVersion: "2.0", Source: validated.Registration, MetadataURL: validated.MetadataURL,
 		MetadataVersion: validated.Document.Version, MetadataPayloadDigest: hex.EncodeToString(payloadDigest[:]),
 		MetadataETag: validated.MetadataETag, ExpiresAt: validated.ExpiresAt,
-		CheckedAt:              validated.ValidatedAt.UTC(),
-		FreshUntil:             minTime(validated.ValidatedAt.Add(defaultSourceMetadataCachePolicy.MaximumFreshness), validated.ExpiresAt),
-		StaleUntil:             minTime(validated.ValidatedAt.Add(defaultSourceMetadataCachePolicy.MaximumFreshness+defaultSourceMetadataCachePolicy.StaleGrace), validated.ExpiresAt),
-		TransportAuthenticated: validated.Registration.MetadataEndpoint.Transport == sourceTransportFSC,
-		Types:                  types,
+		CheckedAt:                  validated.ValidatedAt.UTC(),
+		FreshUntil:                 minTime(validated.ValidatedAt.Add(defaultSourceMetadataCachePolicy.MaximumFreshness), validated.ExpiresAt),
+		StaleUntil:                 minTime(validated.ValidatedAt.Add(defaultSourceMetadataCachePolicy.MaximumFreshness+defaultSourceMetadataCachePolicy.StaleGrace), validated.ExpiresAt),
+		TransportAuthenticated:     validated.Registration.MetadataEndpoint.Transport == sourceTransportFSC,
+		DataTransportAuthenticated: validated.Registration.DataAccess.Transport == sourceTransportFSC,
+		Types:                      types,
 	}
 }
 
@@ -256,7 +266,8 @@ func registryCandidateFromActivation(activation *sourceActivation, certificateSe
 		MetadataPayloadDigest: activation.MetadataPayloadDigest, MetadataETag: activation.MetadataETag,
 		DeploymentDigest: hex.EncodeToString(materialDigest[:]), CheckedAt: activation.CheckedAt,
 		ExpiresAt: activation.ExpiresAt, FreshUntil: activation.FreshUntil, StaleUntil: activation.StaleUntil,
-		TransportAuthenticated: activation.TransportAuthenticated, Snapshot: snapshotBody, Offers: offersBody,
+		TransportAuthenticated: activation.TransportAuthenticated, DataTransportAuthenticated: activation.DataTransportAuthenticated,
+		Snapshot: snapshotBody, Offers: offersBody,
 		CertificateSet: certificateSet, TypeMetadata: append([]onboarding.TypeMetadata(nil), typeMetadata...),
 	}, nil
 }
@@ -279,7 +290,8 @@ func registrySnapshotFromActivation(activation *sourceActivation) (registryActiv
 		MetadataETag: activation.MetadataETag, ExpiresAt: activation.ExpiresAt,
 		CheckedAt:  activation.CheckedAt,
 		FreshUntil: activation.FreshUntil, StaleUntil: activation.StaleUntil,
-		TransportAuthenticated: activation.TransportAuthenticated, Types: types,
+		TransportAuthenticated: activation.TransportAuthenticated, DataTransportAuthenticated: activation.DataTransportAuthenticated,
+		Types: types,
 	}, nil
 }
 
@@ -309,7 +321,8 @@ func activationFromRegistryCandidate(candidate onboarding.SourceCandidate) (*sou
 		MetadataETag: snapshot.MetadataETag, ExpiresAt: snapshot.ExpiresAt,
 		CheckedAt:  snapshot.CheckedAt,
 		FreshUntil: snapshot.FreshUntil, StaleUntil: snapshot.StaleUntil,
-		TransportAuthenticated: snapshot.TransportAuthenticated, Types: types,
+		TransportAuthenticated: snapshot.TransportAuthenticated, DataTransportAuthenticated: snapshot.DataTransportAuthenticated,
+		Types:                    types,
 		RegistryDeploymentDigest: candidate.DeploymentDigest, PublicCertificates: candidate.CertificateSet,
 	}, nil
 }

@@ -20,14 +20,15 @@ const (
 )
 
 type sourceReconcileStatus struct {
-	SourceID               string    `json:"source_id"`
-	State                  string    `json:"state"`
-	Reason                 string    `json:"reason,omitempty"`
-	Message                string    `json:"message,omitempty"`
-	MetadataVersion        string    `json:"metadata_version,omitempty"`
-	DeploymentDigest       string    `json:"deployment_digest,omitempty"`
-	TransportAuthenticated bool      `json:"transport_authenticated"`
-	CheckedAt              time.Time `json:"checked_at"`
+	SourceID                   string    `json:"source_id"`
+	State                      string    `json:"state"`
+	Reason                     string    `json:"reason,omitempty"`
+	Message                    string    `json:"message,omitempty"`
+	MetadataVersion            string    `json:"metadata_version,omitempty"`
+	DeploymentDigest           string    `json:"deployment_digest,omitempty"`
+	TransportAuthenticated     bool      `json:"transport_authenticated"`
+	DataTransportAuthenticated bool      `json:"data_transport_authenticated"`
+	CheckedAt                  time.Time `json:"checked_at"`
 }
 
 type sourceStatusWriter interface {

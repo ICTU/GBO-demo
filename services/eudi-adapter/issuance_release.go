@@ -93,7 +93,8 @@ func materializeIssuanceRelease(options issuanceReleaseOptions, release onboardi
 			MetadataPayloadDigest: source.MetadataPayloadDigest, MetadataETag: source.MetadataETag,
 			DeploymentDigest: source.DeploymentDigest, CheckedAt: source.CheckedAt,
 			ExpiresAt: source.ExpiresAt, FreshUntil: source.FreshUntil, StaleUntil: source.StaleUntil,
-			TransportAuthenticated: source.TransportAuthenticated, Snapshot: source.Snapshot,
+			TransportAuthenticated: source.TransportAuthenticated, DataTransportAuthenticated: source.DataTransportAuthenticated,
+			Snapshot:       source.Snapshot,
 			CertificateSet: source.CertificateSet, TypeMetadata: source.TypeMetadata,
 		}
 		activation, err := activationFromRegistryCandidate(candidate)

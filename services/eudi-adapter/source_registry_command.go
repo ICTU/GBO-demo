@@ -29,12 +29,16 @@ type sourceReleaseSummary struct {
 }
 
 type releaseSourceSummary struct {
-	SourceID               string    `json:"source_id"`
-	MetadataVersion        string    `json:"metadata_version"`
-	DeploymentDigest       string    `json:"deployment_digest"`
-	TransportAuthenticated bool      `json:"transport_authenticated"`
-	FreshUntil             time.Time `json:"fresh_until"`
-	StaleUntil             time.Time `json:"stale_until"`
+	SourceID         string `json:"source_id"`
+	MetadataVersion  string `json:"metadata_version"`
+	DeploymentDigest string `json:"deployment_digest"`
+	// Both legs are reported, because an operator diagnosing a source needs to
+	// see that its data call is FSC-authenticated even when the document
+	// describing that call is not, and the other way round.
+	TransportAuthenticated     bool      `json:"transport_authenticated"`
+	DataTransportAuthenticated bool      `json:"data_transport_authenticated"`
+	FreshUntil                 time.Time `json:"fresh_until"`
+	StaleUntil                 time.Time `json:"stale_until"`
 }
 
 func runSourceRegistryMigrateCommand(ctx context.Context, arguments []string, stdout, stderr io.Writer) (bool, error) {
@@ -141,7 +145,8 @@ func writeSourceReleaseSummary(writer io.Writer, release onboarding.SourceReleas
 	for _, source := range release.Sources {
 		summary.Sources = append(summary.Sources, releaseSourceSummary{
 			SourceID: source.SourceID, MetadataVersion: source.MetadataVersion,
-			DeploymentDigest: source.DeploymentDigest, TransportAuthenticated: source.TransportAuthenticated,
+			DeploymentDigest:       source.DeploymentDigest,
+			TransportAuthenticated: source.TransportAuthenticated, DataTransportAuthenticated: source.DataTransportAuthenticated,
 			FreshUntil: source.FreshUntil, StaleUntil: source.StaleUntil,
 		})
 	}
