@@ -232,7 +232,11 @@ func (l *sourceLogbook) logQuery(ctx context.Context, r *http.Request, facts *qu
 	if bsn == "" {
 		return nil
 	}
-	subjectID, subjectType := l.Subject(r.Header, bsn)
+	subjectID, subjectType, err := l.Subject(r.Header, bsn)
+	if err != nil {
+		ldv.LogFailure("dataverwerking.bronbevraging", err)
+		return err
+	}
 	processor := ldv.ForeignProcessor(r)
 	traceID := ldv.TraceID(ctx, r.Header)
 	parentSpanID := ldv.ParentSpanFromHeader(r.Header)

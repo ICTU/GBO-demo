@@ -13,7 +13,10 @@
 // guarantees — hence a separate store with its own service.
 package ldv
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Attribute keys the standard reserves. Everything a component wants to add
 // beyond these lives under its own prefix (we use `gbo.`), so a reader can
@@ -83,4 +86,46 @@ func (r Record) DataSubjectIDType() string { return r.Attribute(AttrDataSubjectI
 type Stored struct {
 	Record
 	ReceivedAt time.Time `json:"received_at"`
+}
+
+// SameProcessingAs reports whether another record describes the same
+// Dataverwerking. Used to tell a producer's retry from a genuine identity
+// collision: the first may be confirmed, the second must not be.
+//
+// ReceivedAt is excluded — that is the logbook's own stamp and differs by
+// definition between the original and the replay.
+func (s Stored) SameProcessingAs(other Record) bool {
+	if s.Name != other.Name || s.Status != other.Status ||
+		s.ParentSpanID != other.ParentSpanID ||
+		!s.StartTime.Equal(other.StartTime) || !s.EndTime.Equal(other.EndTime) {
+		return false
+	}
+	return sameStringMap(s.Resource, other.Resource) && sameJSONMap(s.Attributes, other.Attributes)
+}
+
+func sameStringMap(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for key, value := range a {
+		if b[key] != value {
+			return false
+		}
+	}
+	return true
+}
+
+// sameJSONMap compares attribute maps by their JSON encoding, because the
+// values are open — numbers, lists and nested objects all occur — and Go's
+// == is not defined over them.
+func sameJSONMap(a, b map[string]any) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	encodedA, errA := json.Marshal(a)
+	encodedB, errB := json.Marshal(b)
+	if errA != nil || errB != nil {
+		return false
+	}
+	return string(encodedA) == string(encodedB)
 }

@@ -114,10 +114,12 @@ type Client struct {
 // misconfiguration is an error, because a half-configured logbook silently
 // logging nothing is the failure mode this package exists to prevent.
 //
-// PseudonymKey is optional. A component that never holds a BSN — the consent
-// register works with a portal-scoped reference throughout — has nothing to
-// derive a pseudonym from, and calling Subject without a key panics rather
-// than silently producing a keyless one.
+// PseudonymKey is optional at construction, because a component that never
+// holds a BSN — the consent register works with a portal-scoped reference
+// throughout — has nothing to derive a pseudonym from. A component that does
+// hold one gets ErrNoPseudonymKey from Subject rather than a keyless
+// pseudonym, which would be deterministic, public, and enumerable over the
+// whole BSN range.
 func New(cfg Config) (*Client, error) {
 	base := strings.TrimRight(cfg.LogbookURL, "/")
 	if base == "" {

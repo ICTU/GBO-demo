@@ -70,6 +70,14 @@ func (h *Handler) writeRecord(w http.ResponseWriter, r *http.Request) {
 
 	confirmation, err := h.logbook.Write(r.Context(), record)
 	if err != nil {
+		if errors.Is(err, ldv.ErrConflictingRecord) {
+			// A different Dataverwerking under an identity that is taken.
+			// Confirming it would tell the producer its record is logged
+			// while the logbook holds something else.
+			slog.Warn("rejected conflicting log record", "trace_id", record.TraceID, "span_id", record.SpanID)
+			writeProblem(w, http.StatusConflict, "conflicting_record", err.Error())
+			return
+		}
 		if errors.Is(err, ldv.ErrInvalidRecord) {
 			// 422, not 400: the JSON parsed fine, the record is not lawful.
 			// The producer is expected to treat this as a defect in itself,
@@ -116,7 +124,7 @@ func (h *Handler) readRecords(w http.ResponseWriter, r *http.Request) {
 		Limit:                limit,
 	}
 
-	records, err := h.logbook.Read(r.Context(), query)
+	page, err := h.logbook.Read(r.Context(), query)
 	if err != nil {
 		if errors.Is(err, ldv.ErrNoSelector) {
 			writeProblem(w, http.StatusBadRequest, "no_selector", err.Error())
@@ -128,10 +136,10 @@ func (h *Handler) readRecords(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"verantwoordelijke": h.logbook.Register().Verantwoordelijke,
-		"records":           records,
+		"records":           page.Records,
 		// Says whether the cap truncated the answer, so a reader is never
 		// silently shown a partial logbook.
-		"truncated": len(records) == query.Limit || (query.Limit == 0 && len(records) == ldv.MaxReadLimit),
+		"truncated": page.Truncated,
 	})
 }
 
@@ -177,7 +185,16 @@ func (h *Handler) health(w http.ResponseWriter, r *http.Request) {
 }
 
 // authorized compares the bearer token in constant time.
+//
+// An unconfigured token authorizes nobody. Without this an empty server-side
+// token matched a request that sent no Authorization header at all — both
+// sides being the empty string — so a logbook started without
+// LDV_READ_TOKEN served every record to anyone while logging that it would
+// refuse every request. Absent credentials must never be a credential.
 func authorized(r *http.Request, token string) bool {
+	if token == "" {
+		return false
+	}
 	presented := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer"))
 	return subtle.ConstantTimeCompare([]byte(presented), []byte(token)) == 1
 }

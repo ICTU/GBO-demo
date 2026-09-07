@@ -15,6 +15,19 @@ type fakeRepository struct {
 	failure error
 }
 
+// Get is how the core tells a replay from a collision.
+func (f *fakeRepository) Get(_ context.Context, traceID, spanID string) (Stored, bool, error) {
+	if f.failure != nil {
+		return Stored{}, false, f.failure
+	}
+	for _, stored := range f.stored {
+		if stored.TraceID == traceID && stored.SpanID == spanID {
+			return stored, true, nil
+		}
+	}
+	return Stored{}, false, nil
+}
+
 // Query is the read half of the port. The fake filters on trace id only —
 // enough for the core's read rules, which are about validation and capping
 // rather than about SQL.
@@ -55,6 +68,7 @@ func testRegister(t *testing.T) *Register {
 		Disclaimer:        "demo",
 		Activities: []Activity{
 			{ID: "bd-ib-2025", Version: "v1", Name: "Verstrekken IB 2025", Doel: "demo"},
+			{ID: "bd-ib-2024", Version: "v1", Name: "Verstrekken IB 2024", Doel: "demo"},
 		},
 	}
 	if err := register.index(); err != nil {
@@ -178,12 +192,15 @@ func TestReadReturnsTheRecordsOfOneTrace(t *testing.T) {
 		}
 	}
 
-	records, err := logbook.Read(ctx, Query{TraceID: first.TraceID})
+	page, err := logbook.Read(ctx, Query{TraceID: first.TraceID})
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	if len(records) != 2 {
-		t.Fatalf("read %d records, want the two of that trace", len(records))
+	if len(page.Records) != 2 {
+		t.Fatalf("read %d records, want the two of that trace", len(page.Records))
+	}
+	if page.Truncated {
+		t.Error("a complete answer must not claim to be truncated")
 	}
 }
 
@@ -201,12 +218,21 @@ func TestReadCapsTheResult(t *testing.T) {
 		}
 	}
 
-	records, err := logbook.Read(ctx, Query{TraceID: validRecord().TraceID, Limit: 2})
+	page, err := logbook.Read(ctx, Query{TraceID: validRecord().TraceID, Limit: 2})
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	if len(records) != 2 {
-		t.Fatalf("read %d records, want the requested 2", len(records))
+	if len(page.Records) != 2 || !page.Truncated {
+		t.Fatalf("records = %d, truncated = %v; want 2 and true", len(page.Records), page.Truncated)
+	}
+	// A result that is exactly the limit is not truncated, and a caller told
+	// otherwise would go looking for records that do not exist.
+	exact, err := logbook.Read(ctx, Query{TraceID: validRecord().TraceID, Limit: 5})
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if len(exact.Records) != 5 || exact.Truncated {
+		t.Fatalf("records = %d, truncated = %v; want 5 and false", len(exact.Records), exact.Truncated)
 	}
 	// An absurd limit is capped rather than honoured.
 	capped, err := Query{TraceID: "x", Limit: 10_000}.normalize()
@@ -215,5 +241,49 @@ func TestReadCapsTheResult(t *testing.T) {
 	}
 	if capped.Limit != MaxReadLimit {
 		t.Fatalf("limit = %d, want the cap %d", capped.Limit, MaxReadLimit)
+	}
+}
+
+// A retry after a timeout is the same Dataverwerking and may be confirmed.
+// A different record under the same identity may not: confirming it would
+// tell the producer its record is logged while the logbook holds something
+// else, which is the one lie a logbook must not tell.
+func TestWriteRefusesAConflictingRecordUnderATakenIdentity(t *testing.T) {
+	repository := &fakeRepository{}
+	logbook := newTestLogbook(t, repository)
+	ctx := context.Background()
+
+	if _, err := logbook.Write(ctx, validRecord()); err != nil {
+		t.Fatalf("first write: %v", err)
+	}
+
+	for name, mutate := range map[string]func(*Record){
+		"different name":     func(r *Record) { r.Name = "dataverwerking.iets-anders" },
+		"different status":   func(r *Record) { r.Status = StatusError },
+		"different subject":  func(r *Record) { r.Attributes[AttrDataSubjectID] = "PI-someone-else" },
+		"different activity": func(r *Record) { r.Attributes[AttrProcessingActivityID] = "bd-ib-2024@v1" },
+		"different parent":   func(r *Record) { r.ParentSpanID = "00f067aa0ba902b7" },
+		"different times":    func(r *Record) { r.StartTime = r.StartTime.Add(time.Second); r.EndTime = r.EndTime.Add(time.Second) },
+		"extra attribute":    func(r *Record) { r.Attributes["gbo.extra"] = "x" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			colliding := validRecord()
+			mutate(&colliding)
+			if _, err := logbook.Write(ctx, colliding); !errors.Is(err, ErrConflictingRecord) {
+				t.Fatalf("expected ErrConflictingRecord, got %v", err)
+			}
+		})
+	}
+
+	// And the honest replay still is one.
+	confirmation, err := logbook.Write(ctx, validRecord())
+	if err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	if !confirmation.Duplicate {
+		t.Error("an identical replay must be reported as a duplicate")
+	}
+	if len(repository.stored) != 1 {
+		t.Fatalf("stored %d records, want 1", len(repository.stored))
 	}
 }

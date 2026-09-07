@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"strings"
 )
@@ -22,6 +23,13 @@ const (
 	SubjectTypePseudonym = "logboek-pseudoniem"
 )
 
+// ErrNoPseudonymKey is returned when a component that holds a BSN has no key
+// to derive a pseudonym with. It is a configuration fault, and a fatal one:
+// an HMAC under an empty key is deterministic and public, so every BSN in the
+// range could be enumerated offline and matched against the logbook. A
+// keyless pseudonym is worse than none, because it looks like one.
+var ErrNoPseudonymKey = errors.New("no pseudonym key configured")
+
 // LocalPseudonym derives a stable, logbook-local reference to a Betrokkene
 // from a BSN, for the flows where a component holds nothing else. Keyed HMAC,
 // truncated: stable within one Verantwoordelijke, meaningless outside it, and
@@ -34,10 +42,13 @@ const (
 // The key is per Verantwoordelijke on purpose: one shared key would make the
 // same citizen recognisable across organisations' logbooks, which is exactly
 // what a logbook-local pseudonym must not do.
-func (c *Client) LocalPseudonym(bsn string) string {
+func (c *Client) LocalPseudonym(bsn string) (string, error) {
+	if len(c.pseudonymKey) == 0 {
+		return "", ErrNoPseudonymKey
+	}
 	mac := hmac.New(sha256.New, c.pseudonymKey)
 	_, _ = mac.Write([]byte(bsn))
-	return "LP-" + hex.EncodeToString(mac.Sum(nil))[:24]
+	return "LP-" + hex.EncodeToString(mac.Sum(nil))[:24], nil
 }
 
 // Subject decides how a record names the Betrokkene the request was about.
@@ -50,17 +61,21 @@ func (c *Client) LocalPseudonym(bsn string) string {
 // An unrecognised type on the wire is treated as no type at all. The logbook
 // would refuse it anyway, and refusing here means the component still names
 // the Betrokkene by something it can vouch for.
-func (c *Client) Subject(header http.Header, bsn string) (string, string) {
+func (c *Client) Subject(header http.Header, bsn string) (string, string, error) {
 	passed := strings.TrimSpace(header.Get(HeaderSubjectID))
 	switch strings.TrimSpace(header.Get(HeaderSubjectIDType)) {
 	case SubjectTypePI:
 		if passed != "" {
-			return passed, SubjectTypePI
+			return passed, SubjectTypePI, nil
 		}
 	case SubjectTypePseudonym:
 		if passed != "" {
-			return passed, SubjectTypePseudonym
+			return passed, SubjectTypePseudonym, nil
 		}
 	}
-	return c.LocalPseudonym(bsn), SubjectTypePseudonym
+	pseudonym, err := c.LocalPseudonym(bsn)
+	if err != nil {
+		return "", "", err
+	}
+	return pseudonym, SubjectTypePseudonym, nil
 }

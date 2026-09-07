@@ -133,6 +133,21 @@ func (r *Repository) Count(ctx context.Context) (int, error) {
 	return count, nil
 }
 
+// Get returns the record stored under one identity, so the core can tell a
+// producer's replay from a different record that collides with it.
+func (r *Repository) Get(ctx context.Context, traceID, spanID string) (ldv.Stored, bool, error) {
+	records, err := r.Query(ctx, ldv.Query{TraceID: traceID, Limit: ldv.MaxReadLimit})
+	if err != nil {
+		return ldv.Stored{}, false, err
+	}
+	for _, stored := range records {
+		if stored.SpanID == spanID {
+			return stored, true, nil
+		}
+	}
+	return ldv.Stored{}, false, nil
+}
+
 // Query answers a read on one of the three axes. The core has already
 // validated that exactly one selector is set and capped the limit, so this
 // builds the WHERE clause from whatever is present.

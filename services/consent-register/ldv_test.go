@@ -173,9 +173,10 @@ func TestListingACitizensConsentsIsLogged(t *testing.T) {
 	}
 }
 
-// A listing without a subject_ref is an operational query rather than inzage
-// by a Betrokkene: it names nobody, so there is nothing to log.
-func TestAnUnscopedListingLogsNothing(t *testing.T) {
+// An unscoped listing would read every citizen's consents — a Dataverwerking
+// about all of them at once, which cannot be logged against a single
+// Betrokkene. Rather than log it wrongly or not at all, the route refuses it.
+func TestAnUnscopedListingIsRefused(t *testing.T) {
 	logbook := ldvtest.New(t, allGBOActivities()...)
 	url := registerUnderTest(t, logbook)
 	grant(t, url)
@@ -185,9 +186,12 @@ func TestAnUnscopedListingLogsNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	_ = response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", response.StatusCode)
+	}
 	if got := len(logbook.Written()); got != before {
-		t.Fatalf("an unscoped listing wrote %d extra records", got-before)
+		t.Fatalf("a refused listing wrote %d records", got-before)
 	}
 }
 

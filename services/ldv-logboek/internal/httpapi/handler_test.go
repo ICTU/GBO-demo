@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -340,5 +341,45 @@ func TestReadSaysWhenTheCapTruncated(t *testing.T) {
 	}
 	if len(payload.Records) != 1 || !payload.Truncated {
 		t.Fatalf("records = %d, truncated = %v; want 1 and true", len(payload.Records), payload.Truncated)
+	}
+}
+
+// An unconfigured token must authorize nobody. This is the regression test for
+// a bypass: an empty server-side token matched a request that sent no
+// Authorization header, because ConstantTimeCompare found two empty strings
+// equal — so a logbook started without LDV_READ_TOKEN served every record to
+// anyone, while logging that it would refuse every request.
+func TestAnUnconfiguredTokenAuthorizesNobody(t *testing.T) {
+	register, err := ldv.LoadRegister("../../config/verwerkingsactiviteiten-bd.json")
+	if err != nil {
+		t.Fatalf("load register: %v", err)
+	}
+	repository, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = repository.Close() })
+	logbook, err := ldv.NewLogbook(repository, register, time.Now)
+	if err != nil {
+		t.Fatalf("wire logbook: %v", err)
+	}
+	// No read token, and no write token either: neither endpoint may open up.
+	handler := NewHandler(logbook, "", "")
+
+	for name, request := range map[string]*http.Request{
+		"read, no header":    httptest.NewRequest(http.MethodGet, "/logboek/records?traceID=0af7651916cd43dd8448eb211c80319c", nil),
+		"read, empty bearer": httptest.NewRequest(http.MethodGet, "/logboek/records?traceID=0af7651916cd43dd8448eb211c80319c", nil),
+		"write, no header":   httptest.NewRequest(http.MethodPost, "/logboek/records", strings.NewReader("{}")),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if strings.Contains(name, "empty bearer") {
+				request.Header.Set("Authorization", "Bearer ")
+			}
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			if recorder.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want 401 — an absent credential is not a credential", recorder.Code)
+			}
+		})
 	}
 }

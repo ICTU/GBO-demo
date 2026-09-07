@@ -362,7 +362,19 @@ func handleConsents(store ConsentStore, issuer *ConsentIssuer, logbook *register
 			// GET /consents?subject_ref=<portal-pseudonym>&scope=<scope>&status=<status>
 			// subject_ref exists only for citizen-facing ownership/listing. It
 			// is not an authorization input; the PDP uses the signed token.
+			//
+			// It is also mandatory. Without it this route read and returned
+			// every citizen's consents — a Dataverwerking about all of them at
+			// once, logged as none, because there was no single Betrokkene to
+			// name. Nothing asks for that listing; the portal always scopes to
+			// one citizen.
 			subjectRef := r.URL.Query().Get("subject_ref")
+			if strings.TrimSpace(subjectRef) == "" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{
+					"error": "subject_ref is required; an unscoped listing would read every citizen's consents",
+				})
+				return
+			}
 			scope := r.URL.Query().Get("scope")
 			statusFilter := r.URL.Query().Get("status")
 			result, err := store.List(r.Context(), ConsentFilter{

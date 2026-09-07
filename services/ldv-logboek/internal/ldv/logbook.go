@@ -19,16 +19,24 @@ type Repository interface {
 	// Append stores the record. It returns ErrDuplicateRecord when this
 	// (trace_id, span_id) pair is already present.
 	Append(ctx context.Context, stored Stored) error
+	// Get returns the record already stored under this identity, if any.
+	Get(ctx context.Context, traceID, spanID string) (Stored, bool, error)
 	// Query answers a read. The query has already been validated and capped.
 	Query(ctx context.Context, query Query) ([]Stored, error)
 }
 
 // ErrDuplicateRecord is returned when a record with the same (trace_id,
 // span_id) is already stored. A producer that retries after a timeout will
-// hit this; the logbook treats it as success-on-replay rather than as a
+// hit this; the logbook treats an identical replay as success rather than as a
 // second Dataverwerking, because span ids identify the operation, not the
 // attempt.
 var ErrDuplicateRecord = errors.New("record already stored")
+
+// ErrConflictingRecord is a different record under an identity that is
+// already taken. Confirming it would tell the producer its Dataverwerking is
+// logged while the logbook holds something else — the one lie a logbook must
+// not tell. The producer has a bug, and gets told so.
+var ErrConflictingRecord = errors.New("a different record is already stored under this identity")
 
 // Clock is the logbook's own notion of now, injected so tests get a fixed
 // ReceivedAt.
@@ -85,7 +93,18 @@ func (l *Logbook) Write(ctx context.Context, record Record) (Confirmation, error
 	case err == nil:
 		return Confirmation{TraceID: record.TraceID, SpanID: record.SpanID, ReceivedAt: stored.ReceivedAt}, nil
 	case errors.Is(err, ErrDuplicateRecord):
-		return Confirmation{TraceID: record.TraceID, SpanID: record.SpanID, ReceivedAt: stored.ReceivedAt, Duplicate: true}, nil
+		// Idempotent only if it really is the same Dataverwerking. A replay
+		// after a timeout is; a different record that happens to collide is
+		// not, and confirming it would leave the producer believing something
+		// the logbook does not hold.
+		existing, found, getErr := l.repository.Get(ctx, record.TraceID, record.SpanID)
+		if getErr != nil {
+			return Confirmation{}, fmt.Errorf("compare with stored record: %w", getErr)
+		}
+		if !found || !existing.SameProcessingAs(record) {
+			return Confirmation{}, ErrConflictingRecord
+		}
+		return Confirmation{TraceID: record.TraceID, SpanID: record.SpanID, ReceivedAt: existing.ReceivedAt, Duplicate: true}, nil
 	default:
 		return Confirmation{}, fmt.Errorf("append record: %w", err)
 	}
@@ -141,20 +160,36 @@ func (q Query) normalize() (Query, error) {
 	return q, nil
 }
 
+// Page is a capped answer plus whether the cap cut it short.
+type Page struct {
+	Records []Stored
+	// Truncated says there was more. Derived from asking storage for one
+	// record beyond the limit rather than from comparing the count with it:
+	// a result that happens to be exactly the limit is not truncated, and a
+	// caller told otherwise would go looking for records that do not exist.
+	Truncated bool
+}
+
 // Read answers a query against this logbook — LDV's extensie lezen.
 //
 // Who may do this is the open governance question (Q-08): a logbook holds a
 // record of every processing about a person, so unrestricted read access
 // recreates the very concentration the pseudonymisation avoids. The demo
 // protects it with a separate bearer token and says no more than that.
-func (l *Logbook) Read(ctx context.Context, query Query) ([]Stored, error) {
+func (l *Logbook) Read(ctx context.Context, query Query) (Page, error) {
 	normalized, err := query.normalize()
 	if err != nil {
-		return nil, err
+		return Page{}, err
 	}
-	records, err := l.repository.Query(ctx, normalized)
+	limit := normalized.Limit
+	probe := normalized
+	probe.Limit = limit + 1
+	records, err := l.repository.Query(ctx, probe)
 	if err != nil {
-		return nil, fmt.Errorf("read records: %w", err)
+		return Page{}, fmt.Errorf("read records: %w", err)
 	}
-	return records, nil
+	if len(records) > limit {
+		return Page{Records: records[:limit], Truncated: true}, nil
+	}
+	return Page{Records: records}, nil
 }

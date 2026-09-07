@@ -326,7 +326,13 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client) http.H
 			for variable, subject := range subjects {
 				subjectID, subjectType := subject, ldv.SubjectTypePI
 				if subjectIDType != "pseudonym" {
-					subjectID, subjectType = logbook.LocalPseudonym(subject), ldv.SubjectTypePseudonym
+					pseudonym, err := logbook.LocalPseudonym(subject)
+					if err != nil {
+						ldv.LogFailure("dataverwerking.bronquery-doorgifte", err)
+						http.Error(w, "the forward could not be logged; withholding the response", http.StatusInternalServerError)
+						return
+					}
+					subjectID, subjectType = pseudonym, ldv.SubjectTypePseudonym
 				}
 				record := ldv.Record{
 					TraceID:   forward.traceID,

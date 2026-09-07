@@ -100,7 +100,11 @@ func (l *issuanceLogbook) logPIDExtraction(ctx context.Context, r *http.Request,
 	if l == nil {
 		return issuanceRecording{}, nil
 	}
-	subjectID, subjectType := l.Subject(r.Header, bsn)
+	subjectID, subjectType, err := l.Subject(r.Header, bsn)
+	if err != nil {
+		ldv.LogFailure("dataverwerking.pid-bsn-extractie", err)
+		return issuanceRecording{}, err
+	}
 	recording := issuanceRecording{
 		traceID:     ldvTraceIDForIssuance(ctx, r.Header),
 		extractSpan: ldv.SpanID(),
