@@ -119,11 +119,11 @@ func TestAnIssuanceLogsBothDataverwerkingen(t *testing.T) {
 	}
 	// The record says how much was processed, not what: it is a record about
 	// the attestation, not a copy of it.
-	if got := assembly[0].Attributes["gbo.attestatie.claims"]; got == nil || got == float64(0) {
-		t.Errorf("gbo.attestatie.claims = %v, want the number of claims", got)
+	if got := assembly[0].Attributes["dpl.gbo.attestatieClaims"]; got == nil || got == float64(0) {
+		t.Errorf("dpl.gbo.attestatieClaims = %v, want the number of claims", got)
 	}
-	if got := assembly[0].Attributes["gbo.source_oin"]; got != "99999999900000000200" {
-		t.Errorf("gbo.source_oin = %v", got)
+	if got := assembly[0].Attributes["dpl.gbo.sourceId"]; got != "belastingdienst" {
+		t.Errorf("dpl.gbo.sourceId = %v", got)
 	}
 }
 

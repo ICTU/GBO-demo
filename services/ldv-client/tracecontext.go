@@ -1,9 +1,11 @@
 package ldvclient
 
 import (
+	"context"
 	"net/http"
-	"regexp"
-	"strings"
+
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // W3C Trace Context. §3.1 of the standard is unambiguous: when HTTP/1.1 or
@@ -11,17 +13,26 @@ import (
 // used. So the chain correlates on `traceparent`, not on headers of our own
 // invention.
 //
-// The one place that cannot hold is the FSC hop. FSC v2.4.0 does not forward
-// `traceparent` between peers, and no amount of care on our side changes what
-// the Inway strips. There the chain falls back to the Fsc-Transaction-Id,
-// which is a UUID and therefore exactly a 16-byte trace-id once the hyphens
-// come off — so the same value continues on the far side, reachable through a
-// header FSC does propagate.
+// Propagation is OpenTelemetry's, not ours. A hand-written parser had to get
+// the versioning rule right (a higher version is parsed for the fields it
+// still defines, not rejected), the sampled flag right (bit 0 of trace-flags,
+// not "the byte is non-zero"), and `tracestate` carried alongside — three
+// things it got wrong, and three things that are somebody else's solved
+// problem. The service already depends on OTel; using its propagator deletes
+// the edge cases rather than fixing them one at a time.
+//
+// The one place Trace Context cannot hold is the FSC hop. FSC v2.4.0 does not
+// forward `traceparent` between peers, and no amount of care on our side
+// changes what the Inway strips. There the chain falls back to the
+// Fsc-Transaction-Id, which is a UUID and therefore exactly a 16-byte trace-id
+// once the hyphens come off — so the same value continues on the far side,
+// reachable through a header FSC does propagate.
 //
 // That fallback is a profile deviation, not conformance, and is written up as
-// one in the logbook README. Naming it is the point: a reader must be able to
-// tell where the chain follows the standard and where it works around a
-// transport that cannot.
+// one in the logbook README.
+
+// propagator handles traceparent and tracestate together, as W3C requires.
+var propagator = propagation.TraceContext{}
 
 // TraceContext is one request's position in a trace.
 type TraceContext struct {
@@ -33,52 +44,27 @@ type TraceContext struct {
 	// this only travels so the flag survives the hop for anything that does
 	// use it.
 	Sampled bool
-}
-
-var traceparentPattern = regexp.MustCompile(`^00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$`)
-
-// zeroTraceID and zeroSpanID are invalid per the specification; a traceparent
-// carrying either must be treated as absent rather than followed.
-const (
-	zeroTraceID = "00000000000000000000000000000000"
-	zeroSpanID  = "0000000000000000"
-)
-
-// ParseTraceparent reads a W3C traceparent header. Only version 00 is
-// accepted: a later version may reorder the fields, and guessing at a format
-// we do not know would silently corrupt the correlation.
-func ParseTraceparent(value string) (TraceContext, bool) {
-	match := traceparentPattern.FindStringSubmatch(strings.TrimSpace(value))
-	if match == nil {
-		return TraceContext{}, false
-	}
-	if match[1] == zeroTraceID || match[2] == zeroSpanID {
-		return TraceContext{}, false
-	}
-	return TraceContext{TraceID: match[1], SpanID: match[2], Sampled: match[3] != "00"}, true
-}
-
-// Traceparent renders the header. Empty when the context is not usable, so a
-// caller never sends a malformed one.
-func (t TraceContext) Traceparent() string {
-	if !IsTraceID(t.TraceID) || !IsSpanID(t.SpanID) {
-		return ""
-	}
-	flags := "00"
-	if t.Sampled {
-		flags = "01"
-	}
-	return "00-" + t.TraceID + "-" + t.SpanID + "-" + flags
+	// State is the W3C tracestate, carried through untouched. Dropping it
+	// would silently discard other vendors' correlation on every hop.
+	State string
 }
 
 // TraceContextFrom reads the incoming request's position in the trace.
 //
 // A standard traceparent wins. Failing that the Fsc-Transaction-Id is used —
-// the FSC hop strips traceparent, so on the far side that header is all
-// there is. The span is this component's own record, which the caller sets.
-func TraceContextFrom(header http.Header, spanID string) TraceContext {
-	if parsed, ok := ParseTraceparent(header.Get("traceparent")); ok {
-		return TraceContext{TraceID: parsed.TraceID, SpanID: spanID, Sampled: parsed.Sampled}
+// the FSC hop strips traceparent, so on the far side that header is all there
+// is. The span is this component's own record, which the caller supplies.
+func TraceContextFrom(ctx context.Context, header http.Header, spanID string) TraceContext {
+	extracted := trace.SpanContextFromContext(
+		propagator.Extract(ctx, propagation.HeaderCarrier(header)),
+	)
+	if extracted.HasTraceID() {
+		return TraceContext{
+			TraceID: extracted.TraceID().String(),
+			SpanID:  spanID,
+			Sampled: extracted.IsSampled(),
+			State:   extracted.TraceState().String(),
+		}
 	}
 	for _, name := range []string{"Fsc-Transaction-Id", "X-Request-Id"} {
 		if candidate := NormalizeTraceID(header.Get(name)); candidate != "" {
@@ -88,18 +74,80 @@ func TraceContextFrom(header http.Header, spanID string) TraceContext {
 	return TraceContext{SpanID: spanID, Sampled: true}
 }
 
-// InjectTraceparent puts this component's position on an outgoing request, so
-// the next application continues the same trace. Called for every hop between
-// applications that perform a dataverwerking (§3.1).
-func InjectTraceparent(header http.Header, trace TraceContext) {
-	if value := trace.Traceparent(); value != "" {
-		header.Set("traceparent", value)
+// spanContext turns this into something OTel can inject. Invalid ids yield an
+// unusable context, which Inject then skips — a malformed traceparent is worse
+// than none.
+func (t TraceContext) spanContext() trace.SpanContext {
+	traceID, err := trace.TraceIDFromHex(t.TraceID)
+	if err != nil {
+		return trace.SpanContext{}
 	}
+	spanID, err := trace.SpanIDFromHex(t.SpanID)
+	if err != nil {
+		return trace.SpanContext{}
+	}
+	var flags trace.TraceFlags
+	if t.Sampled {
+		flags = trace.FlagsSampled
+	}
+	state, err := trace.ParseTraceState(t.State)
+	if err != nil {
+		// An unparseable tracestate is dropped rather than propagated
+		// malformed; the traceparent, which is what correlates, survives.
+		state = trace.TraceState{}
+	}
+	return trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID: traceID, SpanID: spanID, TraceFlags: flags, TraceState: state,
+	})
+}
+
+// Traceparent renders the header. Empty when the context is not usable.
+func (t TraceContext) Traceparent() string {
+	spanContext := t.spanContext()
+	if !spanContext.IsValid() {
+		return ""
+	}
+	header := http.Header{}
+	propagator.Inject(
+		trace.ContextWithSpanContext(context.Background(), spanContext),
+		propagation.HeaderCarrier(header),
+	)
+	return header.Get("traceparent")
+}
+
+// InjectTraceparent puts this component's position on an outgoing request, so
+// the next application continues the same trace. Injects `tracestate` too,
+// because W3C requires both to travel.
+func InjectTraceparent(header http.Header, trace TraceContext) {
+	spanContext := trace.spanContext()
+	if !spanContext.IsValid() {
+		return
+	}
+	propagator.Inject(
+		contextWithSpan(spanContext),
+		propagation.HeaderCarrier(header),
+	)
+}
+
+func contextWithSpan(spanContext trace.SpanContext) context.Context {
+	return trace.ContextWithSpanContext(context.Background(), spanContext)
+}
+
+// ParentSpanFromHeader returns the span the caller was in, so this record
+// hangs under it. Empty when this component starts the tree, or when the hop
+// that delivered the request dropped the trace context.
+func ParentSpanFromHeader(header http.Header) string {
+	extracted := trace.SpanContextFromContext(
+		propagator.Extract(context.Background(), propagation.HeaderCarrier(header)),
+	)
+	if !extracted.HasSpanID() {
+		return ""
+	}
+	return extracted.SpanID().String()
 }
 
 // IsSpanID reports whether a value is a usable W3C span id.
 func IsSpanID(value string) bool {
-	return len(value) == 16 && value != zeroSpanID && spanIDPattern.MatchString(value)
+	spanID, err := trace.SpanIDFromHex(value)
+	return err == nil && spanID.IsValid()
 }
-
-var spanIDPattern = regexp.MustCompile(`^[0-9a-f]{16}$`)

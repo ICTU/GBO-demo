@@ -266,9 +266,9 @@ func handleSourceAttestation(cfg config, client *http.Client, runtime sourceMeta
 			return
 		}
 		trace.SpanFromContext(r.Context()).SetAttributes(
-			attribute.String("gbo.source_id", metadata.SourceID),
+			attribute.String("dpl.gbo.sourceId", metadata.SourceID),
 			attribute.String("gbo.source_oin", metadata.SourceOIN),
-			attribute.String("gbo.type_id", metadata.TypeID),
+			attribute.String("dpl.gbo.typeId", metadata.TypeID),
 		)
 		result, err := callSource(r.Context(), client, resolved, plan)
 		if err != nil {

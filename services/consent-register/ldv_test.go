@@ -105,8 +105,8 @@ func TestGrantingAConsentIsLogged(t *testing.T) {
 	if got := record.Attributes[ldv.AttrDataSubjectIDType]; got != ldvSubjectTypePortalSubject {
 		t.Errorf("data_subject_id_type = %v, want %s", got, ldvSubjectTypePortalSubject)
 	}
-	if got := record.Attributes["gbo.consent.id"]; got != consentID {
-		t.Errorf("gbo.consent.id = %v, want %s", got, consentID)
+	if got := record.Attributes["dpl.gbo.consentId"]; got != consentID {
+		t.Errorf("dpl.gbo.consentId = %v, want %s", got, consentID)
 	}
 	// The PI is authorization material for the dienstverlener, not an
 	// identifier this register may write down.
@@ -158,8 +158,10 @@ func TestStatusAndRevocationAreLogged(t *testing.T) {
 	if got := revocations[0].Attributes[ldv.AttrProcessingActivityID]; got != consentRevokeActivity {
 		t.Errorf("processing_activity_id = %v, want %s", got, consentRevokeActivity)
 	}
-	if got := revocations[0].Attributes["gbo.consent.status"]; got != "REVOKED" {
-		t.Errorf("gbo.consent.status = %v, want REVOKED", got)
+	// The consent's new status follows from the verwerkingsactiviteit
+	// (gbo-toestemming-intrekken), so it is not repeated as an attribute.
+	if got := revocations[0].Attributes["dpl.gbo.consentId"]; got == nil {
+		t.Errorf("the revocation record should name the consent: %#v", revocations[0].Attributes)
 	}
 	// Every record of one citizen's consent names the same Betrokkene.
 	for _, record := range records {
@@ -186,8 +188,8 @@ func TestListingACitizensConsentsIsLogged(t *testing.T) {
 	if len(listings) != 1 {
 		t.Fatalf("expected one inzage record, got %+v", logbook.Written())
 	}
-	if got := listings[0].Attributes["gbo.consent.count"]; got != float64(1) {
-		t.Errorf("gbo.consent.count = %v, want 1", got)
+	if got := listings[0].Attributes["dpl.gbo.consentCount"]; got != float64(1) {
+		t.Errorf("dpl.gbo.consentCount = %v, want 1", got)
 	}
 }
 

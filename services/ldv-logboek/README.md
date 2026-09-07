@@ -80,18 +80,24 @@ An OTel-shaped log record with the mandatory fields — `trace_id`, `span_id`,
   "parent_span_id": "00f067aa0ba902b7",
   "name": "dataverwerking.bronbevraging",
   "status": "OK",
-  "start_time": "2026-09-02T10:00:00Z",
-  "end_time": "2026-09-02T10:00:00.012Z",
-  "resource": { "service.name": "graphql-server" },
+  "start_time": 1788343200000,
+  "end_time": 1788343201500,
+  "resource": { "attributes": { "service.name": "graphql-server" } },
   "attributes": {
-    "dpl.core.processing_activity_id": "bd-ib-2025@v1",
+    "dpl.core.processing_activity_id": "https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-ib-2025/v1",
     "dpl.core.data_subject_id": "PI-abc123",
     "dpl.core.data_subject_id_type": "pi",
-    "dpl.core.foreign_operation.processor": "fsc-peer:AAAABBBBCCCCDDDDEEEE",
-    "gbo.belastingjaar": 2025
+    "dpl.core.foreign_operation.processor": "https://fsc.gbo.overheid.nl/peers/AAAABBBBCCCCDDDDEEEE",
+    "dpl.gbo.belastingjaar": 2025
   }
 }
 ```
+
+Times are `uint64` milliseconds since the epoch and `resource` nests under
+`attributes` because §3.2.2 says so; `processing_activity_id` and
+`foreign_operation.processor` are a URI and a URL for the same reason. The
+read extension answers in a different shape — camelCase, RFC 3339, nested
+attributes — and that translation happens at the read boundary.
 
 ### Trace Context, and where it breaks
 
@@ -259,6 +265,7 @@ neither defines.
 | `LDV_WRITE_TOKEN` | — | required; the service refuses to start without it |
 | `LDV_READ_TOKEN` | — | the read extension refuses every request without it |
 | `LDV_LOGBOOK_ID` | derived from the register | the URI of this logbook's read API |
+| `LDV_TLS_CERT_PATH`, `LDV_TLS_KEY_PATH` | — | terminate TLS here. Both or neither: one without the other fails startup rather than quietly serving plaintext |
 
 ## Producers: durable first, delivered after
 
@@ -270,9 +277,16 @@ That is a deliberate change from failing the request when the logbook is
 unreachable. Withholding a response never un-processed anything: by the time a
 record can fail to be delivered, the source has been queried and the BSN
 resolved. The Dataverwerking happened, and refusing to answer left it
-*unlogged* — the one thing LDV forbids. So the guarantee is "this record
-cannot be lost", not "the logbook already has it". A weaker promise about
-timing, a stronger one about completeness.
+*unlogged* — the one thing LDV forbids.
+
+The guarantee is therefore about delivery: **once `Append` returns, the record
+reaches the logbook**. It is not a claim that the record and the processing it
+describes are atomic. For the components that only read, nothing is
+transactional and nothing can be: the source query and the spool write are two
+separate acts, and a crash between them loses the record for a processing that
+happened. The window is small and the failure mode is a broken disk rather
+than an unreachable service, which is the improvement — but it is a narrower
+window, not a closed one.
 
 Replay is safe by construction: the logbook keys on `(trace_id, span_id)` and
 reports an identical replay as a duplicate, so a crash between delivery and
@@ -308,6 +322,37 @@ Producer configuration:
 `consent-register` and `consent-portal-backend` need no
 `LDV_SUBJECT_PSEUDONYM_KEY`: neither ever holds a BSN in a record, so there is
 nothing to derive a pseudonym from.
+
+## The `dpl.gbo` extension, and what it is not
+
+Records carry a handful of attributes the core standard does not define:
+
+| attribute | on | why it is not derivable |
+| --- | --- | --- |
+| `dpl.gbo.belastingjaar` | source query | which year's verstrekking this record is |
+| `dpl.gbo.betrokkeneRol` | BRP | aanvrager, or a relative named in the certificate |
+| `dpl.gbo.overledeneVerwerkt` | BRP | records that the deceased's data was disclosed while they are not a Betrokkene |
+| `dpl.gbo.consentId` / `dpl.gbo.consentCount` | consent register | which consent, and how many were shown |
+| `dpl.gbo.pseudonimiseringAanleiding` | portal | which flow triggered the pseudonymisation |
+| `dpl.gbo.sourceId` / `dpl.gbo.typeId` / `dpl.gbo.attestatieClaims` | adapter | which source and attestation, and how much was disclosed |
+
+The prefix is not decoration. The extension guideline requires every added
+attribute to carry `dpl.<extensienaam>.`, so `gbo.scope` — which is what these
+used to be — was outside the namespace the standard reserves and could not be
+made conformant by documenting it.
+
+Everything that followed from the verwerkingsactiviteit, the record's own
+status, or its `data_subject_id_type` was removed rather than renamed:
+`gbo.scope` (the activity is derived from it), `gbo.sidecar.subject_id_type`
+(the record says it), `gbo.upstream.status` and `gbo.consent.status` (the
+record's status says it), plus `gbo.bsnk.recipient`, `gbo.graphql.variable`,
+`gbo.source_oin` and the consent's scopes and use case.
+
+**This extension is not vastgesteld.** It is a local demo extension, written
+down here and nowhere else. So the honest claim for this implementation is
+**LDV core with a documented local extension**, not full LDV conformance —
+alongside the FSC trace-context deviation above, which is the other place the
+chain departs from the standard on purpose.
 
 ## The client
 

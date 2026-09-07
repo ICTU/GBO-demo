@@ -117,8 +117,7 @@ func (p *Portal) GiveConsent(ctx context.Context, citizen BSN, in GiveInput) (Gr
 		Start:    pseudonymisationStart,
 		End:      p.now().UTC(),
 		Attributes: map[string]any{
-			"gbo.pseudonimisering.aanleiding": "toestemming-verlenen",
-			"gbo.consent.dienstverlener":      in.DienstverlenerOIN,
+			"dpl.gbo.pseudonimiseringAanleiding": "toestemming-verlenen",
 		},
 	}); err != nil {
 		return Granted{}, fmt.Errorf("log pseudonymisation: %w", err)
@@ -207,7 +206,7 @@ func (p *Portal) subjectRefFor(ctx context.Context, citizen BSN, aanleiding stri
 		Subject:    SubjectRef(ps.Pseudonym),
 		Start:      start,
 		End:        p.now().UTC(),
-		Attributes: map[string]any{"gbo.pseudonimisering.aanleiding": aanleiding},
+		Attributes: map[string]any{"dpl.gbo.pseudonimiseringAanleiding": aanleiding},
 	}); err != nil {
 		return "", fmt.Errorf("log pseudonymisation: %w", err)
 	}

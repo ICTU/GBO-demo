@@ -40,9 +40,13 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// Attribute keys reserved by the standard. Anything a component adds beyond
-// them is prefixed `gbo.` by convention, so a reader can tell normative fields
-// from local colour at a glance.
+// Attribute keys reserved by the standard.
+//
+// Anything a component adds beyond them carries `dpl.gbo.`, because the
+// extension guideline requires every added attribute to be namespaced
+// `dpl.<extensienaam>.` — a plain `gbo.` prefix is outside the namespace the
+// standard reserves, and no amount of documenting makes it conformant. The
+// extension itself is local and not vastgesteld; see the logbook README.
 const (
 	AttrProcessingActivityID      = "dpl.core.processing_activity_id"
 	AttrDataSubjectID             = "dpl.core.data_subject_id"
@@ -351,11 +355,8 @@ var traceIDPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 // request. Then the ambient OTel trace, and finally a fresh id, so a record is
 // never dropped for want of a correlation handle.
 func TraceID(ctx context.Context, header http.Header) string {
-	if trace := TraceContextFrom(header, ""); trace.TraceID != "" {
-		return trace.TraceID
-	}
-	if spanContext := trace.SpanContextFromContext(ctx); spanContext.HasTraceID() {
-		return spanContext.TraceID().String()
+	if traceContext := TraceContextFrom(ctx, header, ""); traceContext.TraceID != "" {
+		return traceContext.TraceID
 	}
 	return randomHex(16)
 }
@@ -372,9 +373,11 @@ func NormalizeTraceID(value string) string {
 	return ""
 }
 
-// IsTraceID reports whether a value is a usable W3C trace id.
+// IsTraceID reports whether a value is a usable W3C trace id — well-formed
+// and not the all-zero id the specification declares invalid.
 func IsTraceID(value string) bool {
-	return value != zeroTraceID && traceIDPattern.MatchString(value)
+	traceID, err := trace.TraceIDFromHex(value)
+	return err == nil && traceID.IsValid()
 }
 
 // SpanID mints the identity of one Dataverwerking record. It is the record's
@@ -382,17 +385,6 @@ func IsTraceID(value string) bool {
 // with different lifetimes, and borrowing the span id would tie an
 // administrative record to a sampling decision.
 func SpanID() string { return randomHex(8) }
-
-// ParentSpanFromHeader returns the span the caller was in, so this record
-// hangs under it. Read from the standard traceparent rather than a header of
-// our own. Empty when this component starts the tree, or when the hop that
-// delivered the request dropped the trace context.
-func ParentSpanFromHeader(header http.Header) string {
-	if parsed, ok := ParseTraceparent(header.Get("traceparent")); ok {
-		return parsed.SpanID
-	}
-	return ""
-}
 
 func randomHex(byteCount int) string {
 	buffer := make([]byte, byteCount)

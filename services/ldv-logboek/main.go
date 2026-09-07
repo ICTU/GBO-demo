@@ -13,6 +13,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -37,6 +38,12 @@ type config struct {
 	RegisterPath string
 	WriteToken   string
 	ReadToken    string
+	// TLSCertPath and TLSKeyPath enable TLS. §3.2.1: "Het Logboek MOET TLS
+	// kunnen afdwingen" — the capability is required, using it is not, which
+	// is why these are optional and why a deployment behind a terminating
+	// proxy leaves them empty.
+	TLSCertPath string
+	TLSKeyPath  string
 	// LogbookID is the URI of this logbook's read API — the value a record's
 	// dpl.read.nextLogbookId points at, and what the read response names
 	// itself by. Defaults to the register's base host, which is right for the
@@ -52,7 +59,30 @@ func loadConfig() config {
 		WriteToken:   os.Getenv("LDV_WRITE_TOKEN"),
 		ReadToken:    os.Getenv("LDV_READ_TOKEN"),
 		LogbookID:    os.Getenv("LDV_LOGBOOK_ID"),
+		TLSCertPath:  os.Getenv("LDV_TLS_CERT_PATH"),
+		TLSKeyPath:   os.Getenv("LDV_TLS_KEY_PATH"),
 	}
+}
+
+// tlsEnabled reports whether the logbook should terminate TLS itself, and
+// refuses a half-configured pair.
+//
+// Both or neither: one without the other is a deployment that meant to serve
+// TLS and will silently serve plaintext instead — records of every processing
+// about a person, in the clear, because of one unset variable.
+func (c config) tlsEnabled() (bool, error) {
+	switch {
+	case c.TLSCertPath == "" && c.TLSKeyPath == "":
+		return false, nil
+	case c.TLSCertPath == "" || c.TLSKeyPath == "":
+		return false, fmt.Errorf("LDV_TLS_CERT_PATH and LDV_TLS_KEY_PATH must be set together")
+	}
+	for name, path := range map[string]string{"certificate": c.TLSCertPath, "key": c.TLSKeyPath} {
+		if _, err := os.Stat(path); err != nil {
+			return false, fmt.Errorf("TLS %s: %w", name, err)
+		}
+	}
+	return true, nil
 }
 
 func getEnv(key, fallback string) string {
@@ -121,6 +151,12 @@ func main() {
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 
+	useTLS, err := cfg.tlsEnabled()
+	if err != nil {
+		slog.Error("TLS configuration", "err", err)
+		os.Exit(1)
+	}
+
 	go func() {
 		slog.Info("logboek listening",
 			"addr", srv.Addr,
@@ -128,8 +164,13 @@ func main() {
 			"verwerkingsactiviteiten", len(register.URIs()),
 			"records_on_disk", stored,
 			"database", cfg.DatabasePath,
+			"tls", useTLS,
 		)
-		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+		serveErr := srv.ListenAndServe
+		if useTLS {
+			serveErr = func() error { return srv.ListenAndServeTLS(cfg.TLSCertPath, cfg.TLSKeyPath) }
+		}
+		if err := serveErr(); !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("serving logboek", "err", err)
 			os.Exit(1)
 		}

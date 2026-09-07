@@ -242,7 +242,7 @@ func TestEachYearGetsItsOwnActivityEvenUnderOneScope(t *testing.T) {
 		t.Fatalf("wrote %d records, want one per year: %+v", len(records), records)
 	}
 	for _, record := range records {
-		year, _ := record.Attributes["gbo.belastingjaar"].(float64)
+		year, _ := record.Attributes["dpl.gbo.belastingjaar"].(float64)
 		activity, _ := record.Attributes[ldv.AttrProcessingActivityID].(string)
 		want := "bd-ib-" + strconv.Itoa(int(year)) + "@v1"
 		if activity != want {

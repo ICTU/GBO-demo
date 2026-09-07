@@ -224,12 +224,12 @@ func TestTheSidecarPassesTraceMetadataToTheSource(t *testing.T) {
 
 	// §3.1: the trace crosses on the standard traceparent, not on a header
 	// of our own.
-	trace, ok := ldv.ParseTraceparent(received.Get("traceparent"))
-	if !ok {
+	traceContext := ldv.TraceContextFrom(t.Context(), received, "")
+	if !ldv.IsTraceID(traceContext.TraceID) {
 		t.Fatalf("the source was given no usable traceparent: %q", received.Get("traceparent"))
 	}
-	if !ldv.IsTraceID(trace.TraceID) || !ldv.IsSpanID(trace.SpanID) {
-		t.Errorf("traceparent = %#v", trace)
+	if got := ldv.ParentSpanFromHeader(received); !ldv.IsSpanID(got) {
+		t.Errorf("parent span = %q, want the sidecar's forward span", got)
 	}
 	if got := received.Get(ldv.HeaderSubjectID); got != "PI-abc123" {
 		t.Errorf("subject header = %q, want the PI so both components name the Betrokkene alike", got)

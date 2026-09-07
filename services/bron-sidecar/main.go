@@ -255,10 +255,7 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client) http.H
 						Status:       ldv.Status(resolveErr),
 						StartTime:    resolutionStart,
 						EndTime:      time.Now().UTC(),
-						Attributes: ldv.Attributes(cfg.LDVResolutionActivity, piVal, ldv.SubjectTypePI, forward.processor, map[string]any{
-							"gbo.graphql.variable": varName,
-							"gbo.bsnk.recipient":   cfg.OwnPeerOIN,
-						}),
+						Attributes:   ldv.Attributes(cfg.LDVResolutionActivity, piVal, ldv.SubjectTypePI, forward.processor, map[string]any{}),
 					}
 					if writeErr := logbook.Write(r.Context(), record); writeErr != nil {
 						ldv.LogFailure(record.Name, writeErr)
@@ -329,7 +326,7 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client) http.H
 		// two-phase commit, and the reason this is fail-closed rather than
 		// best-effort.
 		if logbook != nil {
-			for variable, subject := range subjects {
+			for _, subject := range subjects {
 				subjectID, subjectType := subject, ldv.SubjectTypePI
 				if subjectIDType != "pseudonym" {
 					pseudonym, err := logbook.LocalPseudonym(subject)
@@ -341,18 +338,13 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client) http.H
 					subjectID, subjectType = pseudonym, ldv.SubjectTypePseudonym
 				}
 				record := ldv.Record{
-					TraceID:   forward.traceID,
-					SpanID:    forward.spanID,
-					Name:      "dataverwerking.bronquery-doorgifte",
-					Status:    ldv.StatusFromHTTP(resp.StatusCode),
-					StartTime: forward.startTime,
-					EndTime:   time.Now().UTC(),
-					Attributes: ldv.Attributes(cfg.LDVForwardActivity, subjectID, subjectType, forward.processor, map[string]any{
-						"gbo.graphql.variable":        variable,
-						"gbo.sidecar.subject_id_type": subjectIDType,
-						"gbo.upstream.status":         resp.StatusCode,
-						"gbo.scope":                   r.Header.Get("X-GBO-Scope"),
-					}),
+					TraceID:    forward.traceID,
+					SpanID:     forward.spanID,
+					Name:       "dataverwerking.bronquery-doorgifte",
+					Status:     ldv.StatusFromHTTP(resp.StatusCode),
+					StartTime:  forward.startTime,
+					EndTime:    time.Now().UTC(),
+					Attributes: ldv.Attributes(cfg.LDVForwardActivity, subjectID, subjectType, forward.processor, map[string]any{}),
 				}
 				if writeErr := logbook.Write(r.Context(), record); writeErr != nil {
 					ldv.LogFailure(record.Name, writeErr)

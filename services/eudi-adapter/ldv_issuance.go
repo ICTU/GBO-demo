@@ -122,8 +122,8 @@ func (l *issuanceLogbook) logPIDExtraction(ctx context.Context, r *http.Request,
 		StartTime:    start,
 		EndTime:      time.Now().UTC(),
 		Attributes: ldv.Attributes(pidExtractionActivity, subjectID, subjectType, recording.processor, map[string]any{
-			"gbo.source_id": sourceID,
-			"gbo.type_id":   typeID,
+			"dpl.gbo.sourceId": sourceID,
+			"dpl.gbo.typeId":   typeID,
 		}),
 	}
 	if err := l.Write(ctx, record); err != nil {
@@ -153,12 +153,11 @@ func (l *issuanceLogbook) logAttestationAssembly(ctx context.Context, recording 
 			// Where this processing continues: the bronhouder logged its own
 			// half of this request under the same trace id.
 			ldv.AttrNextLogbookID: l.nextLogbooks[sourceID],
-			"gbo.source_id":       sourceID,
-			"gbo.source_oin":      sourceOIN,
-			"gbo.type_id":         typeID,
+			"dpl.gbo.sourceId":    sourceID,
+			"dpl.gbo.typeId":      typeID,
 			// How many claims ended up in the attestation, not which: the
 			// record says what was processed, it is not a copy of it.
-			"gbo.attestatie.claims": claims,
+			"dpl.gbo.attestatieClaims": claims,
 		}),
 	}
 	if err := l.Write(ctx, record); err != nil {

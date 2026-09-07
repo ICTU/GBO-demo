@@ -240,7 +240,6 @@ func (l *sourceLogbook) logQuery(ctx context.Context, r *http.Request, facts *qu
 	processor := l.ForeignProcessor(r)
 	traceID := ldv.TraceID(ctx, r.Header)
 	parentSpanID := ldv.ParentSpanFromHeader(r.Header)
-	scope := r.Header.Get("X-GBO-Scope")
 	end := time.Now().UTC()
 
 	relatives := facts.otherBetrokkenen()
@@ -256,12 +255,11 @@ func (l *sourceLogbook) logQuery(ctx context.Context, r *http.Request, facts *qu
 			StartTime:    start,
 			EndTime:      end,
 			Attributes: ldv.Attributes(activity, subjectID, subjectType, processor, map[string]any{
-				"gbo.scope":          scope,
-				"gbo.betrokkene.rol": "aanvrager",
+				"dpl.gbo.betrokkeneRol": "aanvrager",
 				// Named explicitly because the certificate discloses the
 				// deceased's data while the deceased is not a Betrokkene: a
 				// reader should see that this was decided, not forgotten.
-				"gbo.akte.overledene_verwerkt": activity == akteActivity,
+				"dpl.gbo.overledeneVerwerkt": activity == akteActivity,
 			}),
 		}
 		if err := l.Write(ctx, primary); err != nil {
@@ -278,8 +276,7 @@ func (l *sourceLogbook) logQuery(ctx context.Context, r *http.Request, facts *qu
 				StartTime:    start,
 				EndTime:      end,
 				Attributes: ldv.Attributes(activity, relative.id, relative.idType, processor, map[string]any{
-					"gbo.scope":          scope,
-					"gbo.betrokkene.rol": relative.rol,
+					"dpl.gbo.betrokkeneRol": relative.rol,
 				}),
 			}
 			if err := l.Write(ctx, child); err != nil {

@@ -94,9 +94,9 @@ func (h *Handler) listDataProcessingOperations(w http.ResponseWriter, r *http.Re
 
 	query := ldv.Query{
 		TraceID:              ldv.NormalizeTraceID(request.TraceID),
-		ProcessingActivityID: attributeString(request.Attributes, ldv.AttrProcessingActivityID),
-		DataSubjectID:        attributeString(request.Attributes, ldv.AttrDataSubjectID),
-		DataSubjectIDType:    attributeString(request.Attributes, ldv.AttrDataSubjectIDType),
+		ProcessingActivityID: fromReadAttributes(request.Attributes, ldv.AttrProcessingActivityID),
+		DataSubjectID:        fromReadAttributes(request.Attributes, ldv.AttrDataSubjectID),
+		DataSubjectIDType:    fromReadAttributes(request.Attributes, ldv.AttrDataSubjectIDType),
 		StartTime:            request.StartTime,
 		EndTime:              request.EndTime,
 	}
@@ -115,14 +115,16 @@ func (h *Handler) listDataProcessingOperations(w http.ResponseWriter, r *http.Re
 	operations := make([]dataProcessingOperation, 0, len(page.Records))
 	for _, stored := range page.Records {
 		operation := dataProcessingOperation{
-			TraceID:      stored.TraceID,
+			// The schema types traceId as a uuid where the record stores the
+			// W3C hex form. Same sixteen bytes, two spellings.
+			TraceID:      asUUID(stored.TraceID),
 			SpanID:       stored.SpanID,
 			ParentSpanID: stored.ParentSpanID,
 			Status:       readStatus(stored.Status),
 			Name:         stored.Name,
 			StartTime:    stored.StartTime.UTC().Format(time.RFC3339Nano),
 			EndTime:      stored.EndTime.UTC().Format(time.RFC3339Nano),
-			Attributes:   stored.Attributes,
+			Attributes:   toReadAttributes(stored.Attributes),
 		}
 		if len(stored.Resource) > 0 {
 			operation.Resource = &readResource{Attributes: stored.Resource}
@@ -137,11 +139,4 @@ func (h *Handler) listDataProcessingOperations(w http.ResponseWriter, r *http.Re
 		},
 		DataProcessingOperations: operations,
 	})
-}
-
-// attributeString reads a string-valued selector out of the request's
-// attributes object.
-func attributeString(attributes map[string]any, key string) string {
-	value, _ := attributes[key].(string)
-	return strings.TrimSpace(value)
 }

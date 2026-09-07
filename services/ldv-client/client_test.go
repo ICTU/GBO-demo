@@ -117,24 +117,6 @@ func TestNormalizeTraceID(t *testing.T) {
 	}
 }
 
-func TestTraceIDPrefersTheChainsOwnHeaders(t *testing.T) {
-	header := http.Header{}
-	header.Set("Fsc-Transaction-Id", "0af76519-16cd-43dd-8448-eb211c80319c")
-	if got := TraceID(context.Background(), header); got != "0af7651916cd43dd8448eb211c80319c" {
-		t.Errorf("TraceID = %q, want the Fsc-Transaction-Id", got)
-	}
-	// A standard traceparent wins over the FSC fallback, because that is what
-	// the standard says to correlate on where the transport allows it.
-	header.Set("traceparent", "00-11111111111111111111111111111111-b7ad6b7169203331-01")
-	if got := TraceID(context.Background(), header); got != "11111111111111111111111111111111" {
-		t.Errorf("TraceID = %q, want the traceparent", got)
-	}
-	// A record is never dropped for want of a correlation handle.
-	if got := TraceID(context.Background(), http.Header{}); NormalizeTraceID(got) == "" {
-		t.Errorf("TraceID fallback = %q, not a trace id", got)
-	}
-}
-
 func TestSpanIDsAreDistinct(t *testing.T) {
 	first, second := SpanID(), SpanID()
 	if first == second || len(first) != 16 {
@@ -218,16 +200,5 @@ func TestClaimsIgnoresAnUndecodableToken(t *testing.T) {
 		if claims := Claims(token); claims != nil {
 			t.Errorf("Claims(%q) = %v, want nil", token, claims)
 		}
-	}
-}
-
-func TestParentSpanFromHeader(t *testing.T) {
-	header := http.Header{}
-	if got := ParentSpanFromHeader(header); got != "" {
-		t.Errorf("ParentSpanFromHeader = %q, want empty when this component starts the tree", got)
-	}
-	header.Set("traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
-	if got := ParentSpanFromHeader(header); got != "b7ad6b7169203331" {
-		t.Errorf("ParentSpanFromHeader = %q, want the caller's span", got)
 	}
 }

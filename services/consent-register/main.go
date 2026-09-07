@@ -421,10 +421,7 @@ func handleConsents(store ConsentStore, issuer *ConsentIssuer, logbook *register
 				consentGrantActivity, "dataverwerking.toestemming-verlenen",
 				c.SubjectRef, start, http.StatusCreated,
 				map[string]any{
-					"gbo.consent.id":             c.ConsentID,
-					"gbo.consent.dienstverlener": c.DienstverlenrOIN,
-					"gbo.consent.scopes":         c.Scopes,
-					"gbo.consent.use_case":       c.UseCase,
+					"dpl.gbo.consentId": c.ConsentID,
 				})
 			if err != nil {
 				slog.Error("build consent record", "err", err.Error())
@@ -479,7 +476,7 @@ func handleConsents(store ConsentStore, issuer *ConsentIssuer, logbook *register
 			if err := logbook.logConsentOperation(r.Context(), store, r,
 				consentListActivity, "dataverwerking.toestemming-inzage",
 				subjectRef, start, http.StatusOK,
-				map[string]any{"gbo.consent.count": len(result)}); err != nil {
+				map[string]any{"dpl.gbo.consentCount": len(result)}); err != nil {
 				refuseUnlogged(w)
 				return
 			}
@@ -533,8 +530,7 @@ func handleConsentByID(store ConsentStore, logbook *registerLogbook) http.Handle
 				consentStatusActivity, "dataverwerking.toestemming-status",
 				c.SubjectRef, start, http.StatusOK,
 				map[string]any{
-					"gbo.consent.id":     c.ConsentID,
-					"gbo.consent.status": c.Status,
+					"dpl.gbo.consentId": c.ConsentID,
 				}); err != nil {
 				refuseUnlogged(w)
 				return
@@ -566,7 +562,7 @@ func handleConsentByID(store ConsentStore, logbook *registerLogbook) http.Handle
 			if err := logbook.logConsentOperation(r.Context(), store, r,
 				consentListActivity, "dataverwerking.toestemming-inzage",
 				c.SubjectRef, start, http.StatusOK,
-				map[string]any{"gbo.consent.id": c.ConsentID}); err != nil {
+				map[string]any{"dpl.gbo.consentId": c.ConsentID}); err != nil {
 				refuseUnlogged(w)
 				return
 			}
@@ -582,8 +578,7 @@ func handleConsentByID(store ConsentStore, logbook *registerLogbook) http.Handle
 					consentRevokeActivity, "dataverwerking.toestemming-intrekken",
 					revoked.SubjectRef, start, http.StatusOK,
 					map[string]any{
-						"gbo.consent.id":     revoked.ConsentID,
-						"gbo.consent.status": revoked.Status,
+						"dpl.gbo.consentId": revoked.ConsentID,
 					})
 			})
 			if err != nil {

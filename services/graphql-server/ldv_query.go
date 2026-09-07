@@ -216,7 +216,7 @@ func (l *sourceLogbook) logQuery(ctx context.Context, r *http.Request, facts *qu
 	for _, year := range years {
 		attributes := map[string]any{"gbo.scope": scope}
 		if year != 0 {
-			attributes["gbo.belastingjaar"] = year
+			attributes["dpl.gbo.belastingjaar"] = year
 		}
 		record := ldv.Record{
 			TraceID:      traceID,
