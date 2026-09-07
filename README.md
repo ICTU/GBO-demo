@@ -282,5 +282,10 @@ source activation, wallet trust and cached QR sessions is in
 - [Changelog](CHANGELOG.md)
 
 GBO is maintained by the Dutch Ministry of the Interior and Kingdom Relations
-(BZK), Digital Government Directorate, with ICTU as technical steward. See
-`publiccode.yml` for repository metadata and contacts.
+(BZK), Digital Government Directorate, with ICTU as technical steward.
+
+## Repository owner
+
+The repository owner is **Jeroen de Kok** (ICTU), reachable at
+<jeroen.dekok@ictu.nl>. See `publiccode.yml` for additional repository
+metadata.

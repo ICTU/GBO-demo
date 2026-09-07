@@ -2,8 +2,8 @@ publiccodeYmlVersion: "0.2"
 
 name: GBO-demo
 url: "https://github.com/ICTU/GBO-demo.git"
-softwareVersion: "0.1.0"
-releaseDate: "2026-07-20"
+softwareVersion: "0.6.11"
+releaseDate: "2026-09-07"
 
 platforms:
   - web
