@@ -105,11 +105,7 @@ func runReconcileCommand(ctx context.Context, arguments []string, dependencies r
 		if err != nil {
 			return err
 		}
-		hasFSC := false
-		for _, source := range sources {
-			hasFSC = hasFSC || source.MetadataEndpoint.Transport == sourceTransportFSC || source.dataTransport() == sourceTransportFSC
-		}
-		if hasFSC && managerClient == nil {
+		if sourcesNeedFSCContracts(sources) && managerClient == nil {
 			for name, value := range map[string]string{
 				"--manager-url": options.managerURL, "--manager-ca": options.managerCAPath,
 				"--manager-cert": options.managerCertPath, "--manager-key": options.managerKeyPath,

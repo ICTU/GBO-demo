@@ -149,6 +149,17 @@ func parseSourceConfiguration(raw []byte) (sourceConfiguration, error) {
 	return configuration, nil
 }
 
+// sourcesNeedFSCContracts reports whether this configured set requires an FSC
+// Manager client. Either leg counts: a source may take only its data over FSC.
+func sourcesNeedFSCContracts(sources []sourceConfiguration) bool {
+	for _, source := range sources {
+		if source.MetadataEndpoint.Transport == sourceTransportFSC || source.dataTransport() == sourceTransportFSC {
+			return true
+		}
+	}
+	return false
+}
+
 func (c sourceConfiguration) validate() error {
 	if !sourceIDPattern.MatchString(c.SourceID) {
 		return fmt.Errorf("source_id is invalid")
