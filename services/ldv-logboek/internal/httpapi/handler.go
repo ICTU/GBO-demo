@@ -10,10 +10,8 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"ldv-logboek/internal/ldv"
@@ -29,7 +27,10 @@ type Handler struct {
 	logbook    *ldv.Logbook
 	writeToken string
 	readToken  string
-	mux        *http.ServeMux
+	// logbookID is the URI of this read API — the value a record's
+	// dpl.read.nextLogbookId points at.
+	logbookID string
+	mux       *http.ServeMux
 }
 
 // NewHandler builds the routing tree. writeToken protects the write endpoint;
@@ -43,10 +44,10 @@ type Handler struct {
 // readToken protects the read extension. It is separate from writeToken
 // because writing and reading a logbook are different capabilities: every
 // instrumented component must write, and almost nothing should read.
-func NewHandler(logbook *ldv.Logbook, writeToken, readToken string) *Handler {
-	handler := &Handler{logbook: logbook, writeToken: writeToken, readToken: readToken, mux: http.NewServeMux()}
+func NewHandler(logbook *ldv.Logbook, writeToken, readToken, logbookID string) *Handler {
+	handler := &Handler{logbook: logbook, writeToken: writeToken, readToken: readToken, logbookID: logbookID, mux: http.NewServeMux()}
 	handler.mux.HandleFunc("POST /logboek/records", handler.writeRecord)
-	handler.mux.HandleFunc("GET /logboek/records", handler.readRecords)
+	handler.mux.HandleFunc("POST /data-processing-operations", handler.listDataProcessingOperations)
 	handler.mux.HandleFunc("GET /verwerkingsactiviteiten", handler.listActivities)
 	handler.mux.HandleFunc("GET /verwerkingsactiviteiten/{id}/{version}", handler.getActivity)
 	handler.mux.HandleFunc("GET /health", handler.health)
@@ -98,61 +99,6 @@ func (h *Handler) writeRecord(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusOK
 	}
 	writeJSON(w, status, confirmation)
-}
-
-// readRecords is LDV's extensie lezen: query by traceID,
-// processingActivityID or dataSubjectId, capped, one axis at a time.
-//
-// A logbook holds a record of every processing about a person, so who may do
-// this is exactly the governance question the demo does not answer (Q-08).
-// The separate token says "not everyone", and nothing more.
-func (h *Handler) readRecords(w http.ResponseWriter, r *http.Request) {
-	if !authorized(r, h.readToken) {
-		writeProblem(w, http.StatusUnauthorized, "unauthorized", "a valid bearer token is required to read this logboek")
-		return
-	}
-	limit, err := readLimit(r.URL.Query().Get("limit"))
-	if err != nil {
-		writeProblem(w, http.StatusBadRequest, "invalid_limit", err.Error())
-		return
-	}
-	query := ldv.Query{
-		TraceID:              strings.TrimSpace(r.URL.Query().Get("traceID")),
-		ProcessingActivityID: strings.TrimSpace(r.URL.Query().Get("processingActivityID")),
-		DataSubjectID:        strings.TrimSpace(r.URL.Query().Get("dataSubjectId")),
-		DataSubjectIDType:    strings.TrimSpace(r.URL.Query().Get("dataSubjectIdType")),
-		Limit:                limit,
-	}
-
-	page, err := h.logbook.Read(r.Context(), query)
-	if err != nil {
-		if errors.Is(err, ldv.ErrNoSelector) {
-			writeProblem(w, http.StatusBadRequest, "no_selector", err.Error())
-			return
-		}
-		slog.Error("reading log records", "err", err.Error())
-		writeProblem(w, http.StatusInternalServerError, "storage_failure", "the records could not be read")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"verantwoordelijke": h.logbook.Register().Verantwoordelijke,
-		"records":           page.Records,
-		// Says whether the cap truncated the answer, so a reader is never
-		// silently shown a partial logbook.
-		"truncated": page.Truncated,
-	})
-}
-
-// readLimit parses the optional cap.
-func readLimit(raw string) (int, error) {
-	if strings.TrimSpace(raw) == "" {
-		return 0, nil
-	}
-	limit, err := strconv.Atoi(raw)
-	if err != nil || limit < 1 {
-		return 0, fmt.Errorf("limit must be a positive whole number")
-	}
-	return limit, nil
 }
 
 // listActivities serves the register index. Unauthenticated: the register is
@@ -208,9 +154,21 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	_ = json.NewEncoder(w).Encode(payload)
 }
 
-// writeProblem answers with a small machine-readable error. The detail is
-// echoed to the producer because every rejection here is a defect in the
-// producer that someone has to fix.
+// writeProblem answers with a machine-readable error. The read extension
+// specifies application/problem+json (RFC 9457), so that is what goes out —
+// with the legacy `error`/`detail` pair kept alongside the standard fields,
+// because the write side's producers already read them.
+//
+// The detail is echoed because every rejection here is a defect in the caller
+// that someone has to fix.
 func writeProblem(w http.ResponseWriter, status int, code, detail string) {
-	writeJSON(w, status, map[string]string{"error": code, "detail": detail})
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"type":   "about:blank",
+		"title":  http.StatusText(status),
+		"status": status,
+		"detail": detail,
+		"error":  code,
+	})
 }

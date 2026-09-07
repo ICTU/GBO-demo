@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +16,9 @@ import (
 const (
 	writeToken = "test-token"
 	readToken  = "test-read-token"
+	// The read API identifies itself by its own URI, which is what a
+	// record's dpl.read.nextLogbookId points at.
+	testLogbookID = "https://logboek.belastingdienst.nl/data-processing-operations"
 )
 
 func newTestHandler(t *testing.T) (*Handler, *sqlite.Repository) {
@@ -34,7 +36,7 @@ func newTestHandler(t *testing.T) (*Handler, *sqlite.Repository) {
 	if err != nil {
 		t.Fatalf("wire logbook: %v", err)
 	}
-	return NewHandler(logbook, writeToken, readToken), repository
+	return NewHandler(logbook, writeToken, readToken, testLogbookID), repository
 }
 
 func validBody() map[string]any {
@@ -145,11 +147,12 @@ func TestWriteRecordRejectsAnUnlawfulRecordWith422(t *testing.T) {
 	if response.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("status = %d, want 422", response.Code)
 	}
-	var problem map[string]string
+	// problem+json carries a numeric status alongside the code.
+	var problem map[string]any
 	if err := json.Unmarshal(response.Body.Bytes(), &problem); err != nil {
 		t.Fatalf("decode problem: %v", err)
 	}
-	if problem["error"] != "invalid_record" {
+	if problem["error"] != "invalid_record" || problem["status"] != float64(422) {
 		t.Fatalf("problem = %#v", problem)
 	}
 }
@@ -227,10 +230,14 @@ func TestHealthIsUnauthenticated(t *testing.T) {
 	}
 }
 
-// get issues an authenticated read.
-func get(t *testing.T, handler *Handler, token, path string) *httptest.ResponseRecorder {
+// read issues an authenticated read against the standard endpoint.
+func read(t *testing.T, handler *Handler, token string, body any) *httptest.ResponseRecorder {
 	t.Helper()
-	request := httptest.NewRequest(http.MethodGet, path, nil)
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("encode body: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/data-processing-operations", bytes.NewReader(encoded))
 	if token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -239,64 +246,107 @@ func get(t *testing.T, handler *Handler, token, path string) *httptest.ResponseR
 	return recorder
 }
 
-// The read extension answers on the three axes LDV names.
-func TestReadRecordsByEachSelector(t *testing.T) {
+// The read extension is POST /data-processing-operations with a body, not a
+// query string of our own devising, and it answers in its own vocabulary:
+// camelCase names, RFC 3339 times, Ok/Error/Unset.
+func TestReadExtensionAnswersInItsOwnShape(t *testing.T) {
+	handler, _ := newTestHandler(t)
+	if response := post(t, handler, writeToken, validBody()); response.Code != http.StatusCreated {
+		t.Fatalf("seed write status = %d, body = %s", response.Code, response.Body)
+	}
+
+	response := read(t, handler, readToken, map[string]any{"traceId": "0af76519-16cd-43dd-8448-eb211c80319c"})
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body)
+	}
+	var payload struct {
+		Metadata struct {
+			LogbookID        string `json:"logbookId"`
+			OrganizationName string `json:"organizationName"`
+		} `json:"metadata"`
+		Operations []map[string]any `json:"dataProcessingOperations"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if payload.Metadata.LogbookID != testLogbookID || payload.Metadata.OrganizationName != "Belastingdienst" {
+		t.Fatalf("metadata = %#v", payload.Metadata)
+	}
+	if len(payload.Operations) != 1 {
+		t.Fatalf("read %d operations, want 1: %s", len(payload.Operations), response.Body)
+	}
+	operation := payload.Operations[0]
+	// The read side names fields in camelCase, unlike the write side.
+	for _, field := range []string{"traceId", "spanId", "status", "name", "startTime", "endTime"} {
+		if _, present := operation[field]; !present {
+			t.Errorf("field %q missing: %s", field, response.Body)
+		}
+	}
+	// RFC 3339 here, milliseconds on the write side. The standard's own
+	// difference, followed per side rather than unified.
+	if _, err := time.Parse(time.RFC3339Nano, operation["startTime"].(string)); err != nil {
+		t.Errorf("startTime is not RFC 3339: %v", operation["startTime"])
+	}
+	if operation["status"] != "Ok" {
+		t.Errorf("status = %v, want the read extension's Ok", operation["status"])
+	}
+}
+
+// The three selectors the standard names, one of which must be present.
+func TestReadExtensionSelectors(t *testing.T) {
 	handler, _ := newTestHandler(t)
 	if response := post(t, handler, writeToken, validBody()); response.Code != http.StatusCreated {
 		t.Fatalf("seed write status = %d", response.Code)
 	}
 
-	for name, path := range map[string]string{
-		"by trace":    "/logboek/records?traceID=0af7651916cd43dd8448eb211c80319c",
-		"by activity": "/logboek/records?processingActivityID=" + url.QueryEscape("https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-bronquery-doorgifte/v1"),
-		"by subject":  "/logboek/records?dataSubjectId=PI-abc123&dataSubjectIdType=pi",
+	for name, body := range map[string]any{
+		"by trace":      map[string]any{"traceId": "0af7651916cd43dd8448eb211c80319c"},
+		"by trace uuid": map[string]any{"traceId": "0af76519-16cd-43dd-8448-eb211c80319c"},
+		"by activity": map[string]any{"attributes": map[string]any{
+			ldv.AttrProcessingActivityID: "https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-bronquery-doorgifte/v1",
+		}},
+		"by subject": map[string]any{"attributes": map[string]any{
+			ldv.AttrDataSubjectID: "PI-abc123", ldv.AttrDataSubjectIDType: "pi",
+		}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			response := get(t, handler, readToken, path)
+			response := read(t, handler, readToken, body)
 			if response.Code != http.StatusOK {
 				t.Fatalf("status = %d, body = %s", response.Code, response.Body)
 			}
 			var payload struct {
-				Verantwoordelijke string       `json:"verantwoordelijke"`
-				Records           []ldv.Stored `json:"records"`
-				Truncated         bool         `json:"truncated"`
+				Operations []map[string]any `json:"dataProcessingOperations"`
 			}
-			if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
-				t.Fatalf("decode: %v", err)
-			}
-			if len(payload.Records) != 1 {
-				t.Fatalf("read %d records, want 1: %s", len(payload.Records), response.Body)
-			}
-			if payload.Verantwoordelijke != "Belastingdienst" {
-				t.Errorf("verantwoordelijke = %q", payload.Verantwoordelijke)
-			}
-			if payload.Records[0].DataSubjectID() != "PI-abc123" {
-				t.Errorf("record did not round-trip: %#v", payload.Records[0])
+			_ = json.Unmarshal(response.Body.Bytes(), &payload)
+			if len(payload.Operations) != 1 {
+				t.Fatalf("read %d operations, want 1", len(payload.Operations))
 			}
 		})
 	}
 }
 
-// A read that names no axis would be a request to browse the logbook.
-func TestReadWithoutASelectorIs400(t *testing.T) {
+// "A request where all three these parameters are missing MUST result in an
+// HTTP 400 Bad Request", and the error is problem+json.
+func TestReadExtensionWithoutASelectorIs400ProblemJSON(t *testing.T) {
 	handler, _ := newTestHandler(t)
 
-	response := get(t, handler, readToken, "/logboek/records")
+	response := read(t, handler, readToken, map[string]any{})
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", response.Code)
 	}
-	var problem map[string]string
+	if got := response.Header().Get("Content-Type"); got != "application/problem+json" {
+		t.Errorf("Content-Type = %q, want application/problem+json", got)
+	}
+	var problem map[string]any
 	if err := json.Unmarshal(response.Body.Bytes(), &problem); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if problem["error"] != "no_selector" {
-		t.Fatalf("problem = %#v", problem)
+	if problem["status"] != float64(400) || problem["title"] == nil {
+		t.Errorf("problem = %#v", problem)
 	}
 }
 
-// Reading and writing are different capabilities, so the write token does not
-// open the read extension.
-func TestReadRequiresItsOwnToken(t *testing.T) {
+func TestReadExtensionRequiresItsOwnToken(t *testing.T) {
 	handler, _ := newTestHandler(t)
 
 	for name, token := range map[string]string{
@@ -305,45 +355,11 @@ func TestReadRequiresItsOwnToken(t *testing.T) {
 		"wrong token": "guessed",
 	} {
 		t.Run(name, func(t *testing.T) {
-			response := get(t, handler, token, "/logboek/records?traceID=0af7651916cd43dd8448eb211c80319c")
+			response := read(t, handler, token, map[string]any{"traceId": "0af7651916cd43dd8448eb211c80319c"})
 			if response.Code != http.StatusUnauthorized {
 				t.Fatalf("status = %d, want 401", response.Code)
 			}
 		})
-	}
-}
-
-func TestReadRejectsANonsenseLimit(t *testing.T) {
-	handler, _ := newTestHandler(t)
-
-	response := get(t, handler, readToken, "/logboek/records?traceID=0af7651916cd43dd8448eb211c80319c&limit=nope")
-	if response.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", response.Code)
-	}
-}
-
-// A reader must never be silently handed a partial logbook.
-func TestReadSaysWhenTheCapTruncated(t *testing.T) {
-	handler, _ := newTestHandler(t)
-
-	for _, spanID := range []string{"b7ad6b7169203331", "00f067aa0ba902b7"} {
-		body := validBody()
-		body["span_id"] = spanID
-		if response := post(t, handler, writeToken, body); response.Code != http.StatusCreated {
-			t.Fatalf("seed write status = %d", response.Code)
-		}
-	}
-
-	response := get(t, handler, readToken, "/logboek/records?traceID=0af7651916cd43dd8448eb211c80319c&limit=1")
-	var payload struct {
-		Records   []ldv.Stored `json:"records"`
-		Truncated bool         `json:"truncated"`
-	}
-	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(payload.Records) != 1 || !payload.Truncated {
-		t.Fatalf("records = %d, truncated = %v; want 1 and true", len(payload.Records), payload.Truncated)
 	}
 }
 
@@ -366,18 +382,13 @@ func TestAnUnconfiguredTokenAuthorizesNobody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("wire logbook: %v", err)
 	}
-	// No read token, and no write token either: neither endpoint may open up.
-	handler := NewHandler(logbook, "", "")
+	handler := NewHandler(logbook, "", "", testLogbookID)
 
 	for name, request := range map[string]*http.Request{
-		"read, no header":    httptest.NewRequest(http.MethodGet, "/logboek/records?traceID=0af7651916cd43dd8448eb211c80319c", nil),
-		"read, empty bearer": httptest.NewRequest(http.MethodGet, "/logboek/records?traceID=0af7651916cd43dd8448eb211c80319c", nil),
-		"write, no header":   httptest.NewRequest(http.MethodPost, "/logboek/records", strings.NewReader("{}")),
+		"read, no header":  httptest.NewRequest(http.MethodPost, "/data-processing-operations", strings.NewReader(`{"traceId":"0af7651916cd43dd8448eb211c80319c"}`)),
+		"write, no header": httptest.NewRequest(http.MethodPost, "/logboek/records", strings.NewReader("{}")),
 	} {
 		t.Run(name, func(t *testing.T) {
-			if strings.Contains(name, "empty bearer") {
-				request.Header.Set("Authorization", "Bearer ")
-			}
 			recorder := httptest.NewRecorder()
 			handler.ServeHTTP(recorder, request)
 			if recorder.Code != http.StatusUnauthorized {

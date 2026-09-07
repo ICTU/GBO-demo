@@ -215,7 +215,7 @@ which is the register requirement actually biting rather than being described.
 | | |
 | --- | --- |
 | `POST /logboek/records` | write one record. `201` with a confirmation, `200` when the (trace_id, span_id) was already stored, `400` on malformed JSON, `422` on an unlawful record, `401` without the bearer token. |
-| `GET /logboek/records?traceID=…` | the read extension. Also `?processingActivityID=…` and `?dataSubjectId=…&dataSubjectIdType=…`; `400` without one of the three, `401` without the read token. `limit` caps the answer (default 100, max 500) and the response says whether it truncated. |
+| `POST /data-processing-operations` | the read extension, as its OpenAPI defines it. Body carries `traceId` and/or the `dpl.core.*` selectors, optionally narrowed by `startTime`/`endTime`; `400` without a selector, `401` without the read token. Errors are `application/problem+json`. |
 | `GET /verwerkingsactiviteiten` | register index (unauthenticated) |
 | `GET /verwerkingsactiviteiten/{ref}` | one entry (unauthenticated) |
 | `GET /health` | liveness |
@@ -242,9 +242,17 @@ the DPO, a toezichthouder, incident response — is exactly the open governance
 question (Q-08), and answering it with an invented demo scheme would be worse
 than saying so.
 
-The read extension is deliberately not a query language. One axis per read, a
-result cap, and no free browsing: a logbook you can page through has become a
+The read extension is not a query language, and the standard says so: at least
+one of `traceId`, `dpl.core.processingActivityId` or `dpl.core.dataSubjectId`
+must be present, and a request without them is a 400. A result cap is
+RECOMMENDED and applied. A logbook you can page through freely has become a
 second copy of the data it describes.
+
+Note the two vocabularies. The write side is snake_case with epoch
+milliseconds; the read extension is camelCase with RFC 3339 and a
+`Ok`/`Error`/`Unset` status enum. That split is the standard's own, and each
+side follows its own specification rather than being unified into something
+neither defines.
 
 ## Configuration
 
@@ -361,9 +369,11 @@ docker compose exec -T logboek-bd \
 
 `dpl.read.nextLogbookId` is what makes a chain view assemblable without one
 place that holds everything — which is precisely what LDV's
-per-Verantwoordelijke model rules out. The `eudi-adapter` sets it on the
-attestation-assembly record, naming the logbook of the bronhouder it called,
-so a reader follows the pointer and queries there with the same trace id.
+per-Verantwoordelijke model rules out. It is the **URI of the next logbook's
+read API**, so a reader follows it directly rather than having to know what a
+local name stands for. The `eudi-adapter` sets it on the attestation-assembly
+record, pointing at the bronhouder it called, and a read there with the same
+trace id returns that half of the request.
 
 The developer portal does that fan-out for you: its **Logboek
 Dataverwerkingen** panel queries every configured logbook in parallel and
@@ -373,8 +383,10 @@ as the PDP decision above them — which is the "one trace id, three standards"
 claim, made checkable rather than asserted.
 
 ```bash
-curl -s -H "Authorization: Bearer $LDV_READ_TOKEN" \
-  "http://localhost:9416/logboek/records?traceID=<32 hex chars>" | jq
+curl -s -X POST http://localhost:9416/data-processing-operations \
+  -H "Authorization: Bearer $LDV_READ_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"traceId":"<Fsc-Transaction-Id>"}' | jq
 
 # or the whole chain at once, through the portal backend
 curl -s "http://localhost:9407/ldv/<Fsc-Transaction-Id>" | jq

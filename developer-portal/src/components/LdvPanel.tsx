@@ -22,18 +22,18 @@ function text(record: LdvRecord, key: string): string {
   return typeof value === 'string' ? value : ''
 }
 
-// Records of one request form a tree through parent_span_id: a sidecar's
+// Records of one request form a tree through parentSpanId: a sidecar's
 // forward holds the source query beneath it, and a certificate naming several
 // people holds one child per further Betrokkene. Depth is what makes that
 // readable, so it is computed rather than flattened away.
 function depthOf(record: LdvRecord, bySpan: Map<string, LdvRecord>): number {
   let depth = 0
-  let parent = record.parent_span_id
-  const seen = new Set<string>([record.span_id])
+  let parent = record.parentSpanId
+  const seen = new Set<string>([record.spanId])
   while (parent && bySpan.has(parent) && !seen.has(parent)) {
     seen.add(parent)
     depth += 1
-    parent = bySpan.get(parent)?.parent_span_id
+    parent = bySpan.get(parent)?.parentSpanId
   }
   return depth
 }
@@ -77,14 +77,13 @@ export default function LdvPanel({
           <div className="ldv-logbooks">
             {data.logbooks.map((entry) => {
               const records = entry.records ?? []
-              const bySpan = new Map(records.map((r) => [r.span_id, r]))
+              const bySpan = new Map(records.map((r) => [r.spanId, r]))
               return (
                 <div key={entry.logbook.id} className="ldv-logbook">
                   <div className="ldv-logbook-name">
                     <strong>{entry.logbook.name}</strong>
                     <code className="dim tiny" style={{ marginLeft: 6 }}>{entry.logbook.id}</code>
                     {entry.error && <span className="fsc-txlog-err">— {entry.error}</span>}
-                    {entry.truncated && <span className="dim tiny"> — afgekapt</span>}
                   </div>
                   {!entry.error && records.length === 0 && (
                     <div className="dim tiny">geen records</div>
@@ -104,7 +103,7 @@ export default function LdvPanel({
                         {records.map((record) => {
                           const next = text(record, NEXT_LOGBOOK)
                           return (
-                            <tr key={record.span_id}>
+                            <tr key={record.spanId}>
                               <td style={{ paddingLeft: 6 + depthOf(record, bySpan) * 14 }}>
                                 <code>{record.name.replace('dataverwerking.', '')}</code>
                                 {next && (
@@ -118,9 +117,9 @@ export default function LdvPanel({
                                 <code>{text(record, SUBJECT) || '—'}</code>
                                 <span className="dim tiny"> ({text(record, SUBJECT_TYPE) || '—'})</span>
                               </td>
-                              <td><code>{record.resource?.['service.name'] ?? '—'}</code></td>
+                              <td><code>{String(record.resource?.attributes?.['service.name'] ?? '—')}</code></td>
                               <td>
-                                <span className={record.status === 'OK' ? 'dir-in' : 'dir-out'}>
+                                <span className={record.status === 'Ok' ? 'dir-in' : 'dir-out'}>
                                   {record.status}
                                 </span>
                               </td>

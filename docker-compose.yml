@@ -389,6 +389,10 @@ services:
       - OTEL_SERVICE_NAME=logboek-bd
       - DATABASE_PATH=/data/logboek.db
       - REGISTER_PATH=/config/verwerkingsactiviteiten-bd.json
+      # The URI of this logbook's read API — what a record's
+      # dpl.read.nextLogbookId points at, and what the read response names
+      # itself by.
+      - LDV_LOGBOOK_ID=https://logboek.belastingdienst.nl/data-processing-operations
       # Local-demo default. A deployment sets a real value; the token is the
       # whole access model here, and who may write to or read from a
       # Verantwoordelijke's logboek is an open governance question.
@@ -418,6 +422,10 @@ services:
       - OTEL_SERVICE_NAME=logboek-brp
       - DATABASE_PATH=/data/logboek.db
       - REGISTER_PATH=/config/verwerkingsactiviteiten-brp.json
+      # The URI of this logbook's read API — what a record's
+      # dpl.read.nextLogbookId points at, and what the read response names
+      # itself by.
+      - LDV_LOGBOOK_ID=https://logboek.rvig.nl/data-processing-operations
       - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
       - LDV_READ_TOKEN=${LDV_READ_TOKEN:-local-demo-logboek-read-token}
     volumes:
@@ -444,6 +452,10 @@ services:
       - OTEL_SERVICE_NAME=logboek-gbo
       - DATABASE_PATH=/data/logboek.db
       - REGISTER_PATH=/config/verwerkingsactiviteiten-gbo.json
+      # The URI of this logbook's read API — what a record's
+      # dpl.read.nextLogbookId points at, and what the read response names
+      # itself by.
+      - LDV_LOGBOOK_ID=https://logboek.gbo.overheid.nl/data-processing-operations
       - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
       - LDV_READ_TOKEN=${LDV_READ_TOKEN:-local-demo-logboek-read-token}
     volumes:
@@ -1169,7 +1181,7 @@ services:
       - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY_GBO:-local-demo-pseudonym-key-gbo}
       # Where each source's half of the request is logged, so a reader can
       # follow dpl.read.nextLogbookId across the organisation boundary.
-      - LDV_NEXT_LOGBOOK_IDS=belastingdienst=logboek-bd,rvig=logboek-brp
+      - LDV_NEXT_LOGBOOK_IDS=belastingdienst=https://logboek.belastingdienst.nl/data-processing-operations,rvig=https://logboek.rvig.nl/data-processing-operations
     depends_on:
       source-registry-migrations:
         condition: service_completed_successfully

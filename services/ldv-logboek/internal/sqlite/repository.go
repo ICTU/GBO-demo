@@ -170,6 +170,14 @@ func (r *Repository) Query(ctx context.Context, query ldv.Query) ([]ldv.Stored, 
 			arguments = append(arguments, query.DataSubjectIDType)
 		}
 	}
+	if query.StartTime != nil {
+		conditions = append(conditions, "start_time >= ?")
+		arguments = append(arguments, formatTime(*query.StartTime))
+	}
+	if query.EndTime != nil {
+		conditions = append(conditions, "end_time <= ?")
+		arguments = append(arguments, formatTime(*query.EndTime))
+	}
 	arguments = append(arguments, query.Limit)
 
 	rows, err := r.db.QueryContext(ctx, `

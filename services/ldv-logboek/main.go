@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -36,6 +37,11 @@ type config struct {
 	RegisterPath string
 	WriteToken   string
 	ReadToken    string
+	// LogbookID is the URI of this logbook's read API — the value a record's
+	// dpl.read.nextLogbookId points at, and what the read response names
+	// itself by. Defaults to the register's base host, which is right for the
+	// demo and wrong for anything else.
+	LogbookID string
 }
 
 func loadConfig() config {
@@ -45,6 +51,7 @@ func loadConfig() config {
 		RegisterPath: getEnv("REGISTER_PATH", "/config/verwerkingsactiviteiten.json"),
 		WriteToken:   os.Getenv("LDV_WRITE_TOKEN"),
 		ReadToken:    os.Getenv("LDV_READ_TOKEN"),
+		LogbookID:    os.Getenv("LDV_LOGBOOK_ID"),
 	}
 }
 
@@ -94,6 +101,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	logbookID := cfg.LogbookID
+	if logbookID == "" {
+		// Derived from the register so a demo instance needs no extra
+		// configuration; a deployment sets it explicitly.
+		logbookID = strings.TrimSuffix(register.BaseURI, "/verwerkingsactiviteiten") + "/data-processing-operations"
+		slog.Warn("no LDV_LOGBOOK_ID configured; derived one from the register", "logbook_id", logbookID)
+	}
+
 	stored, err := repository.Count(context.Background())
 	if err != nil {
 		slog.Error("reading logboek store", "err", err)
@@ -102,7 +117,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           httpapi.NewHandler(logbook, cfg.WriteToken, cfg.ReadToken),
+		Handler:           httpapi.NewHandler(logbook, cfg.WriteToken, cfg.ReadToken, logbookID),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 

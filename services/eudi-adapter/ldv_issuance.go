@@ -30,10 +30,11 @@ const (
 // methods below are nil-safe and the handler needs no branch.
 type issuanceLogbook struct {
 	*ldv.Client
-	// nextLogbooks maps a source id onto the logbook of the Verantwoordelijke
-	// that holds it. An issuance is where GBO's own processing hands off to a
-	// bronhouder, so it is the one place in this chain that can say where the
-	// rest of the story is written down.
+	// nextLogbooks maps a source id onto the read-API URI of the logbook that
+	// holds the bronhouder's half of the request. The extension defines
+	// dpl.read.nextLogbookId as "uri naar uniek identificeerbare API volgens
+	// extensie lezen", so a reader can follow it rather than having to know
+	// what a local name like "logboek-bd" stands for.
 	nextLogbooks map[string]string
 }
 
