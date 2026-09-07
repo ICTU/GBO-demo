@@ -203,6 +203,7 @@ type Client struct {
 	resource     map[string]any
 	pseudonymKey []byte
 	peerURIBase  string
+	outbox       *Outbox
 	http         *http.Client
 }
 
@@ -239,11 +240,39 @@ func New(cfg Config) (*Client, error) {
 	}, nil
 }
 
-// Write sends one record and returns only once the logbook has confirmed it.
-// The error is meant to be propagated: the caller must fail its own request
-// rather than continue with an unlogged Dataverwerking.
+// Write records one Dataverwerking.
+//
+// With an outbox configured this makes the record durable locally and returns;
+// delivery to the logbook happens afterwards, with retries. That is the
+// guarantee worth having: withholding a response never un-processed anything,
+// so "the record cannot be lost" is what a caller actually needs, and it takes
+// the logbook off the critical path of every request.
+//
+// Without one it posts synchronously and returns only on confirmation. The
+// error is still meant to be propagated either way — a record that cannot even
+// be made durable locally is a failure the caller must not paper over.
 func (c *Client) Write(ctx context.Context, record Record) error {
 	record.Resource = c.resource
+	if c.outbox != nil {
+		return c.outbox.Append(record)
+	}
+	return c.post(ctx, record)
+}
+
+// Resource is what the client stamps on every record it writes. Exposed for
+// callers that build a record themselves — a store that must write it inside
+// its own transaction, for instance.
+func (c *Client) Resource() map[string]any { return c.resource }
+
+// UseOutbox attaches a spool. Called by the composition root after opening it,
+// because where the spool lives is a deployment decision.
+func (c *Client) UseOutbox(outbox *Outbox) { c.outbox = outbox }
+
+// post delivers one record and returns only once the logbook has confirmed it.
+func (c *Client) post(ctx context.Context, record Record) error {
+	if record.Resource == nil {
+		record.Resource = c.resource
+	}
 	body, err := json.Marshal(record)
 	if err != nil {
 		return fmt.Errorf("encode log record: %w", err)

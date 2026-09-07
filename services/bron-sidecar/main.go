@@ -50,6 +50,11 @@ const readHeaderTimeout = 10 * time.Second
 // in-flight requests finish, then close whatever is left.
 const shutdownTimeout = 15 * time.Second
 
+// ldvDeliveryInterval is how often the LDV spool is drained. Records are
+// durable the moment they are written, so this governs only how quickly they
+// reach the logbook, not whether they do.
+const ldvDeliveryInterval = 2 * time.Second
+
 type config struct {
 	Port          string
 	UpstreamURL   string // source service (e.g. http://graphql-server:4000)
@@ -469,6 +474,17 @@ func main() {
 	}
 	if logbook == nil {
 		slog.Warn("no LDV_LOGBOOK_URL configured; this bron writes no Logboek Dataverwerkingen records")
+	}
+	if logbook != nil {
+		// A local spool: durable here, delivered afterwards. The logbook is
+		// no longer on the critical path of every forwarded request.
+		outbox, err := ldv.OpenOutbox(getEnv("LDV_OUTBOX_PATH", "/data/ldv-outbox.jsonl"), logbook)
+		if err != nil {
+			fatal("opening the LDV outbox", err)
+		}
+		defer func() { _ = outbox.Close() }()
+		logbook.UseOutbox(outbox)
+		go outbox.Run(ctx, ldvDeliveryInterval)
 	}
 
 	srv := &http.Server{

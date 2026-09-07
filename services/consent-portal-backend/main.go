@@ -43,6 +43,7 @@ import (
 	"gbo-demo/consent-portal-backend/portalhttp"
 	"gbo-demo/consent-portal-backend/register"
 	"gbo-demo/consent-portal-backend/upstream"
+	ldvclient "gbo-demo/ldv-client"
 	"net"
 	"os/signal"
 	"syscall"
@@ -69,6 +70,9 @@ const readHeaderTimeout = 10 * time.Second
 // shutdownTimeout bounds the drain after SIGTERM: stop accepting, let
 // in-flight requests finish, then close whatever is left.
 const shutdownTimeout = 15 * time.Second
+
+// ldvDeliveryInterval is how often the LDV spool is drained.
+const ldvDeliveryInterval = 2 * time.Second
 
 // streamGrace is how long ordinary in-flight requests get to finish before
 // the SSE streams are ended. Shutdown waits for active requests but does not
@@ -140,15 +144,12 @@ func newPortal(cfg config, hub *portalhttp.Hub, logbook consent.Logbook) *consen
 // this deployment is not part of an LDV chain. A typed nil would satisfy the
 // interface while being nil underneath, so the concrete absence is turned
 // into an interface-level one here.
-func newLogbook(cfg config, serviceName string) (consent.Logbook, *ldv.Logbook, error) {
-	writer, err := ldv.New(serviceName, cfg.LogbookURL, cfg.LogbookToken)
-	if err != nil {
+func newLogbook(cfg config, serviceName string) (consent.Logbook, *ldvclient.Client, error) {
+	writer, client, err := ldv.New(serviceName, cfg.LogbookURL, cfg.LogbookToken)
+	if err != nil || writer == nil {
 		return nil, nil, err
 	}
-	if writer == nil {
-		return nil, nil, nil
-	}
-	return writer, writer, nil
+	return writer, client, nil
 }
 
 // newMux wires the core to its production adapters and builds the routing
@@ -207,12 +208,22 @@ func main() {
 
 	// Either this portal is part of GBO's LDV chain and cannot start without
 	// its logbook, or it is not and writes no records.
-	logbook, writer, err := newLogbook(cfg, serviceName)
+	logbook, ldvClient, err := newLogbook(cfg, serviceName)
 	if err != nil {
 		fatal("configuring the logboek adapter", err)
 	}
-	if writer == nil {
+	if ldvClient == nil {
 		slog.Warn("no LDV_LOGBOOK_URL configured; this portal writes no Logboek Dataverwerkingen records")
+	} else {
+		// A local spool: the pseudonymisation record is durable before the
+		// consent is created, and reaches the logbook afterwards.
+		outbox, err := ldvclient.OpenOutbox(getEnv("LDV_OUTBOX_PATH", "/data/ldv-outbox.jsonl"), ldvClient)
+		if err != nil {
+			fatal("opening the LDV outbox", err)
+		}
+		defer func() { _ = outbox.Close() }()
+		ldvClient.UseOutbox(outbox)
+		go outbox.Run(context.Background(), ldvDeliveryInterval)
 	}
 
 	// BaseContext gives every request a context this process can cancel, which

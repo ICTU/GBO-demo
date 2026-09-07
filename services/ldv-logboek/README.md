@@ -38,22 +38,17 @@ than assumed, which is why this demo speaks plain HTTP: the confirmation is
 then unmistakable. An organisation that already has a verwerkingenlogging
 facility should adapt to it; the LDV interface is small enough.
 
-**Two ways this design would not survive production.**
+**One way this design would not survive production.**
 
-*The logbook is on the critical path.* Fail-closed means a logbook outage is a
-service outage, so it must be at least as available as everything it logs —
-a heavy demand for a single-instance SQLite service. The better shape is a
-local durable spool: the component writes the record to its own disk, is
-confirmed there, and forwards asynchronously. The hard guarantee survives —
-nothing lost, nothing sampled — without coupling availability to a remote
-service. What the producer needs confirmed is "durably recorded", not "durably
-recorded in the remote logbook". This demo does not make that distinction.
+*Nothing here is tamper-evident.* — see below. The logbook is no longer on the
+critical path: every producer spools locally and delivers afterwards, so an
+outage delays records rather than failing requests.
 
-*Nothing here is tamper-evident.* The store accepts `UPDATE` and `DELETE` like
-any other SQLite database, and a logbook an operator can edit is not evidence.
-Production wants WORM storage, hash chaining or an external notary. That sits
-under the same governance question as retention (Q-08), but it is also a
-storage decision made early rather than late.
+The store accepts `UPDATE` and `DELETE` like any other SQLite database, and a
+logbook an operator can edit is not evidence. Production wants WORM storage,
+hash chaining or an external notary. That sits under the same governance
+question as retention (Q-08), but it is also a storage decision made early
+rather than late.
 
 ## Why this is not the observability pipeline
 
@@ -263,15 +258,37 @@ neither defines.
 | `REGISTER_PATH` | `/config/verwerkingsactiviteiten.json` | which Verantwoordelijke this instance is |
 | `LDV_WRITE_TOKEN` | — | required; the service refuses to start without it |
 | `LDV_READ_TOKEN` | — | the read extension refuses every request without it |
+| `LDV_LOGBOOK_ID` | derived from the register | the URI of this logbook's read API |
 
-## Producers: fail-closed
+## Producers: durable first, delivered after
 
 A component joins an LDV chain by having `LDV_LOGBOOK_URL` set. Once it is,
-a processing that cannot be logged **does not deliver**: the sidecar withholds
-the source response, the bron buffers its GraphQL answer until the records are
-confirmed and returns `500` otherwise. There is no third mode where records
-are dropped quietly — that is precisely the guarantee LDV adds over an
-observability pipeline.
+every record is made **durable locally** before the processing's response
+leaves, and delivered to the logbook afterwards with retries.
+
+That is a deliberate change from failing the request when the logbook is
+unreachable. Withholding a response never un-processed anything: by the time a
+record can fail to be delivered, the source has been queried and the BSN
+resolved. The Dataverwerking happened, and refusing to answer left it
+*unlogged* — the one thing LDV forbids. So the guarantee is "this record
+cannot be lost", not "the logbook already has it". A weaker promise about
+timing, a stronger one about completeness.
+
+Replay is safe by construction: the logbook keys on `(trace_id, span_id)` and
+reports an identical replay as a duplicate, so a crash between delivery and
+cursor advance costs nothing. A *different* record under a taken identity is
+refused with `409` rather than confirmed.
+
+**The consent register is the exception, and the interesting one.** Its outbox
+is a table in the same Postgres as the consents, so a consent and the record
+of the processing that created it commit in one transaction. A file spool
+could not do that: it is durable, but it is a second store, and two stores
+cannot be committed together — there would always be a window in which a
+consent exists that nothing logged, or a record describes a mutation that
+never happened.
+
+There is no third mode where records are dropped quietly. That is precisely
+the guarantee LDV adds over an observability pipeline.
 
 With `LDV_LOGBOOK_URL` unset a component is not in an LDV chain and writes no
 records at all. That is how `unsecured-graphql-server`, which runs the same
@@ -282,6 +299,7 @@ Producer configuration:
 | variable | |
 | --- | --- |
 | `LDV_LOGBOOK_URL` | the logbook of this component's Verantwoordelijke; unset means no LDV |
+| `LDV_OUTBOX_PATH` | where the local spool lives; must be on a volume that survives a restart |
 | `LDV_WRITE_TOKEN` | must match the logbook's |
 | `LDV_SUBJECT_PSEUDONYM_KEY` | key for `logboek-pseudoniem` derivation |
 | `LDV_RESOLUTION_ACTIVITY`, `LDV_FORWARD_ACTIVITY` | `bron-sidecar`/`brp-sidecar` only — the same image runs in front of every bron, and each bron's register names its activities in its own terms |

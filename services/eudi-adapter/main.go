@@ -71,6 +71,11 @@ var fscTxIDCtxKey = fscTxIDCtxKeyType{}
 // headers, so a stalled connection cannot hold a handler open.
 const readHeaderTimeout = 10 * time.Second
 
+// ldvDeliveryInterval is how often the LDV spool is drained. Records are
+// durable the moment they are written, so this governs only how quickly they
+// reach the logbook, not whether they do.
+const ldvDeliveryInterval = 2 * time.Second
+
 // shutdownTimeout bounds the drain after SIGTERM: stop accepting, let
 // in-flight requests finish, then close whatever is left.
 const shutdownTimeout = 15 * time.Second
@@ -617,6 +622,18 @@ func main() {
 	})
 	if err != nil {
 		fatal("configuring the logboek client", err)
+	}
+	if ldvClient != nil {
+		// A local spool: the record is durable before the source is called,
+		// and delivered to the logbook afterwards. Failing the request once
+		// the PID had been read would not have un-read it.
+		outbox, err := ldv.OpenOutbox(getEnv("LDV_OUTBOX_PATH", "/data/ldv-outbox.jsonl"), ldvClient)
+		if err != nil {
+			fatal("opening the LDV outbox", err)
+		}
+		defer func() { _ = outbox.Close() }()
+		ldvClient.UseOutbox(outbox)
+		go outbox.Run(ctx, ldvDeliveryInterval)
 	}
 	logbook := newIssuanceLogbook(ldvClient, parseNextLogbooks(os.Getenv("LDV_NEXT_LOGBOOK_IDS")))
 	if ldvClient == nil {

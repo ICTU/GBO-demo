@@ -489,6 +489,9 @@ services:
       - LDV_YEAR_ACTIVITY_TEMPLATE=https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-ib-%d/v1
       - LDV_SCOPE_ACTIVITY_BASE=https://logboek.belastingdienst.nl/verwerkingsactiviteiten
     volumes:
+      # The LDV spool must survive a restart; that is what makes a
+      # record durable before it reaches the logbook.
+      - ldv-outbox-graphql-server:/data
       - ./services/graphql-server/config:/config:ro
     networks:
       - backend
@@ -525,6 +528,9 @@ services:
       - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
       - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY_BRP:-local-demo-pseudonym-key-brp}
     volumes:
+      # The LDV spool must survive a restart; that is what makes a
+      # record durable before it reaches the logbook.
+      - ldv-outbox-brp-graphql-server:/data
       - ./services/brp-graphql-server/config:/config:ro
     networks:
       - backend
@@ -644,6 +650,10 @@ services:
       - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY:-local-demo-pseudonym-key}
       - LDV_RESOLUTION_ACTIVITY=https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-pi-bsn-resolutie/v1
       - LDV_FORWARD_ACTIVITY=https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-bronquery-doorgifte/v1
+    volumes:
+      # The LDV spool must survive a restart; that is what makes a
+      # record durable before it reaches the logbook.
+      - ldv-outbox-bron-sidecar:/data
     networks:
       - backend
       - fsc-infra
@@ -686,6 +696,10 @@ services:
       - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY_BRP:-local-demo-pseudonym-key-brp}
       - LDV_RESOLUTION_ACTIVITY=https://logboek.rvig.nl/verwerkingsactiviteiten/brp-pi-bsn-resolutie/v1
       - LDV_FORWARD_ACTIVITY=https://logboek.rvig.nl/verwerkingsactiviteiten/brp-bronquery-doorgifte/v1
+    volumes:
+      # The LDV spool must survive a restart; that is what makes a
+      # record durable before it reaches the logbook.
+      - ldv-outbox-brp-sidecar:/data
     networks:
       - backend
       - fsc-infra
@@ -703,7 +717,10 @@ services:
       retries: 5
 
   consent-portal-backend:
-    build: ./services/consent-portal-backend
+    build:
+      # Root context: shares services/ldv-client with the other LDV components.
+      context: .
+      dockerfile: services/consent-portal-backend/Dockerfile
     profiles: [dvtp, full]
     ports:
       - "${GBO_PORT_CONSENT_PORTAL_BACKEND:-9405}:4005"
@@ -717,6 +734,10 @@ services:
       # Dataverwerking — the one that makes every processing after it BSN-free.
       - LDV_LOGBOOK_URL=http://logboek-gbo:4016
       - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
+    volumes:
+      # The LDV spool must survive a restart; that is what makes a record
+      # durable before it reaches the logbook.
+      - ldv-outbox-consent-portal-backend:/data
     networks:
       - backend
     depends_on:
@@ -1182,6 +1203,10 @@ services:
       # Where each source's half of the request is logged, so a reader can
       # follow dpl.read.nextLogbookId across the organisation boundary.
       - LDV_NEXT_LOGBOOK_IDS=belastingdienst=https://logboek.belastingdienst.nl/data-processing-operations,rvig=https://logboek.rvig.nl/data-processing-operations
+    volumes:
+      # The LDV spool must survive a restart; that is what makes a
+      # record durable before it reaches the logbook.
+      - ldv-outbox-eudi-adapter:/data
     depends_on:
       source-registry-migrations:
         condition: service_completed_successfully
@@ -1256,6 +1281,12 @@ networks:
 
 volumes:
   jaeger-badger:
+  ldv-outbox-bron-sidecar:
+  ldv-outbox-brp-sidecar:
+  ldv-outbox-graphql-server:
+  ldv-outbox-brp-graphql-server:
+  ldv-outbox-eudi-adapter:
+  ldv-outbox-consent-portal-backend:
   dev-portal-var:
   dvtp-onboarding-data:
   logboek-bd-data:
