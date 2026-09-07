@@ -7,6 +7,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Changed
+- Updated the remaining gRPC dependencies to the patched 1.83.1 release.
+- Brought the repository owner, contact and publiccode metadata in line with
+  the ICTU GitHub policy.
+
+### Fixed
+- Confined developer-portal scenario writes and policy-source reads to their
+  configured roots, preventing path and symlink traversal.
+
+## [0.6.11] - 2026-09-07
+
+### Changed
 - **A source's metadata leg and data leg now choose their transport independently.** `data_access` returns to the source configuration, carrying only `transport` and `provider_peer_id`; the data service and grant hash stay derived from the source document and from current contracts. Omitting the block keeps the previous meaning, in which one transport served both legs.
   - This unblocks the realistic onboarding order: a source whose GraphQL service is already published on FSC can be onboarded before it publishes `/.well-known/gbo`, instead of having to stand up a second FSC service first. The data call stays contract-bound throughout; only the description arrives another way.
   - A new `file` metadata transport reads the source document from an operator-managed directory (`--metadata-dir`, `SOURCE_METADATA_PATH`; `source-metadata/` in Compose) for sources that publish no metadata endpoint at all. Paths are relative and confined to that directory, re-checked after symlink resolution, and the document digest takes the place of the ETag so the not-modified path behaves as it does over HTTP. Validation, OIN binding to the provisioned certificate set, and explicit promotion are unchanged — what is removed is the fetch, not the review.
