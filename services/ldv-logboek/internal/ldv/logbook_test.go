@@ -65,6 +65,7 @@ func testRegister(t *testing.T) *Register {
 	t.Helper()
 	register := &Register{
 		Verantwoordelijke: "Belastingdienst",
+		BaseURI:           "https://logboek.belastingdienst.nl/verwerkingsactiviteiten",
 		Disclaimer:        "demo",
 		Activities: []Activity{
 			{ID: "bd-ib-2025", Version: "v1", Name: "Verstrekken IB 2025", Doel: "demo"},
@@ -137,7 +138,7 @@ func TestWriteRejectsAnUnknownProcessingActivity(t *testing.T) {
 	logbook := newTestLogbook(t, repository)
 
 	record := validRecord()
-	record.Attributes[AttrProcessingActivityID] = "bd-ib-2019@v1"
+	record.Attributes[AttrProcessingActivityID] = "https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-ib-2019/v1"
 	if _, err := logbook.Write(context.Background(), record); !errors.Is(err, ErrInvalidRecord) {
 		t.Fatalf("expected ErrInvalidRecord, got %v", err)
 	}
@@ -258,13 +259,15 @@ func TestWriteRefusesAConflictingRecordUnderATakenIdentity(t *testing.T) {
 	}
 
 	for name, mutate := range map[string]func(*Record){
-		"different name":     func(r *Record) { r.Name = "dataverwerking.iets-anders" },
-		"different status":   func(r *Record) { r.Status = StatusError },
-		"different subject":  func(r *Record) { r.Attributes[AttrDataSubjectID] = "PI-someone-else" },
-		"different activity": func(r *Record) { r.Attributes[AttrProcessingActivityID] = "bd-ib-2024@v1" },
-		"different parent":   func(r *Record) { r.ParentSpanID = "00f067aa0ba902b7" },
-		"different times":    func(r *Record) { r.StartTime = r.StartTime.Add(time.Second); r.EndTime = r.EndTime.Add(time.Second) },
-		"extra attribute":    func(r *Record) { r.Attributes["gbo.extra"] = "x" },
+		"different name":    func(r *Record) { r.Name = "dataverwerking.iets-anders" },
+		"different status":  func(r *Record) { r.Status = StatusError },
+		"different subject": func(r *Record) { r.Attributes[AttrDataSubjectID] = "PI-someone-else" },
+		"different activity": func(r *Record) {
+			r.Attributes[AttrProcessingActivityID] = "https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-ib-2024/v1"
+		},
+		"different parent": func(r *Record) { r.ParentSpanID = "00f067aa0ba902b7" },
+		"different times":  func(r *Record) { r.StartTime = r.StartTime.Add(time.Second); r.EndTime = r.EndTime.Add(time.Second) },
+		"extra attribute":  func(r *Record) { r.Attributes["gbo.extra"] = "x" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			colliding := validRecord()

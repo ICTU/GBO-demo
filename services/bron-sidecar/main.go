@@ -206,7 +206,7 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client) http.H
 			traceID:   ldv.TraceID(r.Context(), r.Header),
 			spanID:    ldv.SpanID(),
 			startTime: time.Now().UTC(),
-			processor: ldv.ForeignProcessor(r),
+			processor: logbook.ForeignProcessor(r),
 		}
 
 		// Who the request is about, named the way it arrived. In the

@@ -32,6 +32,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -182,6 +183,11 @@ type Config struct {
 	// PseudonymKey derives logbook-local subject pseudonyms. Required only by
 	// components that hold a BSN; see Subject.
 	PseudonymKey string
+	// PeerURIBase turns an FSC peer id into the URL that
+	// dpl.core.foreign_operation.processor requires (§3.2.2.9). A demo
+	// stand-in: FSC identifies a peer by a 20-character id, not by a URL, so
+	// one has to be constructed. Empty means DefaultPeerURIBase.
+	PeerURIBase string
 }
 
 // Client writes records to one logbook.
@@ -190,6 +196,7 @@ type Client struct {
 	token        string
 	resource     map[string]any
 	pseudonymKey []byte
+	peerURIBase  string
 	http         *http.Client
 }
 
@@ -212,11 +219,16 @@ func New(cfg Config) (*Client, error) {
 	if cfg.WriteToken == "" {
 		return nil, fmt.Errorf("a logbook URL is set but no write token")
 	}
+	peerURIBase := strings.TrimRight(cfg.PeerURIBase, "/")
+	if peerURIBase == "" {
+		peerURIBase = DefaultPeerURIBase
+	}
 	return &Client{
 		endpoint:     base + "/logboek/records",
 		token:        cfg.WriteToken,
 		resource:     map[string]any{"service.name": cfg.ServiceName},
 		pseudonymKey: []byte(cfg.PseudonymKey),
+		peerURIBase:  peerURIBase,
 		http:         &http.Client{Timeout: 5 * time.Second},
 	}, nil
 }
@@ -380,24 +392,32 @@ func Claims(authorization string) map[string]any {
 // peerIDPattern is the 20-character alphanumeric FSC Peer ID.
 var peerIDPattern = regexp.MustCompile(`^[A-Za-z0-9]{20}$`)
 
+// DefaultPeerURIBase is the demo namespace under which an FSC peer gets a URL.
+// FSC identifies a peer by a 20-character id and a grant by a hash; neither is
+// a URL, and the standard requires one, so one is constructed. Nothing is
+// served at these addresses — they identify, they do not resolve.
+const DefaultPeerURIBase = "https://fsc.gbo.overheid.nl/peers"
+
 // ForeignProcessor names the application that initiated this processing when
-// it was not this Verantwoordelijke — `dpl.core.foreign_operation.processor`.
+// it was not this Verantwoordelijke — dpl.core.foreign_operation.processor,
+// which the standard defines as a URL (§3.2.2.9).
 //
 // The FSC peer that called us is the honest answer, and the token's `sub`/`iss`
 // carry it when the Manager sets them. When they do not, the grant hash is
 // used instead: it is the identity of the countersigned connection the caller
 // acts under, which is the one thing about the caller this side can actually
 // verify. Empty when the request did not come through FSC at all — a locally
-// initiated processing has no foreign processor.
-func ForeignProcessor(r *http.Request) string {
+// initiated processing has no foreign processor, and the attribute is then
+// omitted rather than sent empty.
+func (c *Client) ForeignProcessor(r *http.Request) string {
 	claims := Claims(r.Header.Get("Fsc-Authorization"))
 	for _, name := range []string{"sub", "iss"} {
 		if value, ok := claims[name].(string); ok && peerIDPattern.MatchString(value) {
-			return "fsc-peer:" + value
+			return c.peerURIBase + "/" + value
 		}
 	}
 	if grantHash := strings.TrimSpace(r.Header.Get("Fsc-Grant-Hash")); grantHash != "" {
-		return "fsc-grant:" + grantHash
+		return c.peerURIBase + "/by-grant/" + url.PathEscape(grantHash)
 	}
 	return ""
 }

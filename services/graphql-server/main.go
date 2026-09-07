@@ -76,6 +76,7 @@ func loadConfig() (config, error) {
 		SourceMetadataPath: os.Getenv("GBO_SOURCE_METADATA_PATH"),
 		LDVQuery: ldvQueryConfig{
 			YearActivityTemplate: os.Getenv("LDV_YEAR_ACTIVITY_TEMPLATE"),
+			ScopeActivityBase:    os.Getenv("LDV_SCOPE_ACTIVITY_BASE"),
 		},
 	}, nil
 }

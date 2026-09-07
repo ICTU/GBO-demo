@@ -48,7 +48,7 @@ func NewHandler(logbook *ldv.Logbook, writeToken, readToken string) *Handler {
 	handler.mux.HandleFunc("POST /logboek/records", handler.writeRecord)
 	handler.mux.HandleFunc("GET /logboek/records", handler.readRecords)
 	handler.mux.HandleFunc("GET /verwerkingsactiviteiten", handler.listActivities)
-	handler.mux.HandleFunc("GET /verwerkingsactiviteiten/{reference}", handler.getActivity)
+	handler.mux.HandleFunc("GET /verwerkingsactiviteiten/{id}/{version}", handler.getActivity)
 	handler.mux.HandleFunc("GET /health", handler.health)
 	return handler
 }
@@ -162,13 +162,15 @@ func (h *Handler) listActivities(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"verantwoordelijke":       register.Verantwoordelijke,
 		"disclaimer":              register.Disclaimer,
-		"verwerkingsactiviteiten": register.References(),
+		"verwerkingsactiviteiten": register.URIs(),
 	})
 }
 
 func (h *Handler) getActivity(w http.ResponseWriter, r *http.Request) {
 	register := h.logbook.Register()
-	activity, found := register.Resolve(r.PathValue("reference"))
+	// Addressed by id and version, so the URI a record carries resolves when
+	// someone actually dereferences it.
+	activity, found := register.ResolveLocal(r.PathValue("id"), r.PathValue("version"))
 	if !found {
 		writeProblem(w, http.StatusNotFound, "unknown_verwerkingsactiviteit", "no such entry in this register")
 		return
@@ -176,6 +178,7 @@ func (h *Handler) getActivity(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"verantwoordelijke":     register.Verantwoordelijke,
 		"disclaimer":            register.Disclaimer,
+		"uri":                   activity.URI(register.BaseURI),
 		"verwerkingsactiviteit": activity,
 	})
 }

@@ -110,7 +110,7 @@ func main() {
 		slog.Info("logboek listening",
 			"addr", srv.Addr,
 			"verantwoordelijke", register.Verantwoordelijke,
-			"verwerkingsactiviteiten", len(register.References()),
+			"verwerkingsactiviteiten", len(register.URIs()),
 			"records_on_disk", stored,
 			"database", cfg.DatabasePath,
 		)

@@ -18,8 +18,8 @@ import (
 // Constants rather than configuration: this service is not a generic image,
 // and its processings are the two steps of an issuance it actually performs.
 const (
-	pidExtractionActivity    = "gbo-pid-bsn-extractie@v1"
-	attestationBuildActivity = "gbo-attestatie-samenstellen@v1"
+	pidExtractionActivity    = "https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-pid-bsn-extractie/v1"
+	attestationBuildActivity = "https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-attestatie-samenstellen/v1"
 )
 
 // issuanceLogbook is the adapter's view of GBO's logbook: the shared client,
@@ -110,7 +110,7 @@ func (l *issuanceLogbook) logPIDExtraction(ctx context.Context, r *http.Request,
 		extractSpan: ldv.SpanID(),
 		subjectID:   subjectID,
 		subjectType: subjectType,
-		processor:   ldv.ForeignProcessor(r),
+		processor:   l.ForeignProcessor(r),
 	}
 	record := ldv.Record{
 		TraceID:      recording.traceID,

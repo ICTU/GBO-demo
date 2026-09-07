@@ -140,8 +140,9 @@ func TestPseudonymFlowLogsBothDataverwerkingen(t *testing.T) {
 	}
 	// The request was initiated by another application, on the far side of an
 	// FSC boundary.
-	if got := forward[0].Attributes[ldv.AttrForeignOperationProcessor]; got != "fsc-peer:AAAABBBBCCCCDDDDEEEE" {
-		t.Errorf("foreign_operation.processor = %v", got)
+	// §3.2.2.9 defines the processor as a URL, so an FSC peer id gets one.
+	if got, want := forward[0].Attributes[ldv.AttrForeignOperationProcessor], ldv.DefaultPeerURIBase+"/AAAABBBBCCCCDDDDEEEE"; got != want {
+		t.Errorf("foreign_operation.processor = %v, want %v", got, want)
 	}
 	ldvtest.AssertNoBSN(t, records, demoBSN)
 }

@@ -20,7 +20,7 @@ func validRecord() Record {
 		EndTime:   start.Add(12 * time.Millisecond),
 		Resource:  map[string]any{"service.name": "bron-sidecar"},
 		Attributes: map[string]any{
-			AttrProcessingActivityID: "bd-ib-2025@v1",
+			AttrProcessingActivityID: "https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-ib-2025/v1",
 			AttrDataSubjectID:        "PI-abc123",
 			AttrDataSubjectIDType:    "pi",
 		},

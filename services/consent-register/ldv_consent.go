@@ -19,10 +19,10 @@ import (
 // service is not a generic image, and its processings are the operations its
 // own API offers.
 const (
-	consentGrantActivity  = "gbo-toestemming-verlenen@v1"
-	consentRevokeActivity = "gbo-toestemming-intrekken@v1"
-	consentStatusActivity = "gbo-toestemming-status@v1"
-	consentListActivity   = "gbo-toestemming-inzage@v1"
+	consentGrantActivity  = "https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-toestemming-verlenen/v1"
+	consentRevokeActivity = "https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-toestemming-intrekken/v1"
+	consentStatusActivity = "https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-toestemming-status/v1"
+	consentListActivity   = "https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-toestemming-inzage/v1"
 
 	// The portal-scoped subject reference. The register holds nothing else:
 	// no BSN, and deliberately no PI either — the PI travels only inside the
@@ -81,7 +81,7 @@ func (l *registerLogbook) logConsentOperation(
 		Attributes: ldv.Attributes(
 			activity,
 			subjectRef, ldvSubjectTypePortalSubject,
-			ldv.ForeignProcessor(r), extra,
+			l.ForeignProcessor(r), extra,
 		),
 	}
 	if err := l.Write(ctx, record); err != nil {

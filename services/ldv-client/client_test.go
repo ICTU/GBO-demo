@@ -175,27 +175,40 @@ func TestForeignProcessorNamesTheCallingPeer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
+	client, err := New(testConfig("http://logboek:4016"))
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
 	request := httptest.NewRequest(http.MethodPost, "/graphql", nil)
 	request.Header.Set("Fsc-Authorization", "Bearer header."+base64.RawURLEncoding.EncodeToString(payload)+".signature")
-	if got := ForeignProcessor(request); got != "fsc-peer:AAAABBBBCCCCDDDDEEEE" {
-		t.Errorf("ForeignProcessor = %q", got)
+	// §3.2.2.9 wants a URL, and an FSC peer id is not one.
+	if got, want := client.ForeignProcessor(request), DefaultPeerURIBase+"/AAAABBBBCCCCDDDDEEEE"; got != want {
+		t.Errorf("ForeignProcessor = %q, want %q", got, want)
 	}
 }
 
 // Without a peer-shaped claim, the grant hash is the one thing about the
 // caller this side can actually verify.
 func TestForeignProcessorFallsBackToTheGrantHash(t *testing.T) {
+	client, err := New(testConfig("http://logboek:4016"))
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
 	request := httptest.NewRequest(http.MethodPost, "/graphql", nil)
 	request.Header.Set("Fsc-Grant-Hash", "abc123")
-	if got := ForeignProcessor(request); got != "fsc-grant:abc123" {
-		t.Errorf("ForeignProcessor = %q", got)
+	if got, want := client.ForeignProcessor(request), DefaultPeerURIBase+"/by-grant/abc123"; got != want {
+		t.Errorf("ForeignProcessor = %q, want %q", got, want)
 	}
 }
 
 // A locally initiated processing has no foreign processor, and an absent
 // attribute is not the same as an empty one.
 func TestForeignProcessorIsEmptyWithoutFSC(t *testing.T) {
-	if got := ForeignProcessor(httptest.NewRequest(http.MethodPost, "/graphql", nil)); got != "" {
+	client, err := New(testConfig("http://logboek:4016"))
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	if got := client.ForeignProcessor(httptest.NewRequest(http.MethodPost, "/graphql", nil)); got != "" {
 		t.Errorf("ForeignProcessor = %q, want empty", got)
 	}
 }

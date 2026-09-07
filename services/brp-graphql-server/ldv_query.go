@@ -23,8 +23,8 @@ import (
 // service is not a generic image running in front of an arbitrary bron — it
 // *is* the BRP bron, and its processings are the ones its own schema offers.
 const (
-	akteActivity             = "brp-akte-overlijden@v1"
-	persoonsgegevensActivity = "brp-persoonsgegevens-verstrekking@v1"
+	akteActivity             = "https://logboek.rvig.nl/verwerkingsactiviteiten/brp-akte-overlijden/v1"
+	persoonsgegevensActivity = "https://logboek.rvig.nl/verwerkingsactiviteiten/brp-persoonsgegevens-verstrekking/v1"
 
 	// RvIG's own record identifier for a person in the BRP. Not a pseudonym,
 	// and it does not need to be: it names someone who appears in a
@@ -237,7 +237,7 @@ func (l *sourceLogbook) logQuery(ctx context.Context, r *http.Request, facts *qu
 		ldv.LogFailure("dataverwerking.bronbevraging", err)
 		return err
 	}
-	processor := ldv.ForeignProcessor(r)
+	processor := l.ForeignProcessor(r)
 	traceID := ldv.TraceID(ctx, r.Header)
 	parentSpanID := ldv.ParentSpanFromHeader(r.Header)
 	scope := r.Header.Get("X-GBO-Scope")

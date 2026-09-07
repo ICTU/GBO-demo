@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -49,7 +50,7 @@ func validBody() map[string]any {
 		"end_time":   start.Add(time.Millisecond).UnixMilli(),
 		"resource":   map[string]any{"attributes": map[string]any{"service.name": "bron-sidecar"}},
 		"attributes": map[string]any{
-			ldv.AttrProcessingActivityID: "bd-bronquery-doorgifte@v1",
+			ldv.AttrProcessingActivityID: "https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-bronquery-doorgifte/v1",
 			ldv.AttrDataSubjectID:        "PI-abc123",
 			ldv.AttrDataSubjectIDType:    "pi",
 		},
@@ -139,7 +140,7 @@ func TestWriteRecordRejectsAnUnlawfulRecordWith422(t *testing.T) {
 	handler, _ := newTestHandler(t)
 
 	body := validBody()
-	body["attributes"].(map[string]any)[ldv.AttrProcessingActivityID] = "bd-ib-1999@v1"
+	body["attributes"].(map[string]any)[ldv.AttrProcessingActivityID] = "https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-ib-1999/v1"
 	response := post(t, handler, writeToken, body)
 	if response.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("status = %d, want 422", response.Code)
@@ -179,10 +180,10 @@ func TestWriteRecordRejectsUnknownFields(t *testing.T) {
 
 // Every record names a verwerkingsactiviteit; that reference has to resolve
 // somewhere, and this is the somewhere.
-func TestRegisterEntriesAreServedAtTheReferencedURI(t *testing.T) {
+func TestRegisterEntriesAreServedAtTheURITheRecordsCarry(t *testing.T) {
 	handler, _ := newTestHandler(t)
 
-	request := httptest.NewRequest(http.MethodGet, "/verwerkingsactiviteiten/bd-ib-2025@v1", nil)
+	request := httptest.NewRequest(http.MethodGet, "/verwerkingsactiviteiten/bd-ib-2025/v1", nil)
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {
@@ -207,7 +208,7 @@ func TestRegisterEntriesAreServedAtTheReferencedURI(t *testing.T) {
 func TestUnknownRegisterEntryIs404(t *testing.T) {
 	handler, _ := newTestHandler(t)
 
-	request := httptest.NewRequest(http.MethodGet, "/verwerkingsactiviteiten/bd-ib-1999@v1", nil)
+	request := httptest.NewRequest(http.MethodGet, "/verwerkingsactiviteiten/bd-ib-1999/v1", nil)
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusNotFound {
@@ -247,7 +248,7 @@ func TestReadRecordsByEachSelector(t *testing.T) {
 
 	for name, path := range map[string]string{
 		"by trace":    "/logboek/records?traceID=0af7651916cd43dd8448eb211c80319c",
-		"by activity": "/logboek/records?processingActivityID=bd-bronquery-doorgifte@v1",
+		"by activity": "/logboek/records?processingActivityID=" + url.QueryEscape("https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-bronquery-doorgifte/v1"),
 		"by subject":  "/logboek/records?dataSubjectId=PI-abc123&dataSubjectIdType=pi",
 	} {
 		t.Run(name, func(t *testing.T) {

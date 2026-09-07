@@ -19,7 +19,7 @@ type Portal struct {
 }
 
 // The verwerkingsactiviteiten of this portal, as named in GBO's register.
-const pseudonymisationActivity = "gbo-bsn-pseudonimisering@v1"
+const pseudonymisationActivity = "https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-bsn-pseudonimisering/v1"
 
 // record files one Dataverwerking. Nil-safe, so callers need no branch: a
 // deployment without a logbook is simply not in an LDV chain.

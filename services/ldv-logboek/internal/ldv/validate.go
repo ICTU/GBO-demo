@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 )
@@ -107,12 +108,20 @@ func validateMandatoryAttributes(record Record, resolve func(string) bool) error
 	if !SubjectIDTypes[attributeOf(record, AttrDataSubjectIDType)] {
 		return fmt.Errorf("%w: %s %q is not a known pseudonym space", ErrInvalidRecord, AttrDataSubjectIDType, attributeOf(record, AttrDataSubjectIDType))
 	}
-	reference := attributeOf(record, AttrProcessingActivityID)
-	if !referencePattern.MatchString(reference) {
-		return fmt.Errorf("%w: %s must be a versioned reference like 'bd-ib-2025@v1', got %q", ErrInvalidRecord, AttrProcessingActivityID, reference)
+	// §3.2.2.9: a URI, because a bare local reference means nothing to
+	// whoever reads the record later — possibly at another organisation.
+	activity := attributeOf(record, AttrProcessingActivityID)
+	if parsed, err := url.Parse(activity); err != nil || !parsed.IsAbs() || parsed.Host == "" {
+		return fmt.Errorf("%w: %s must be an absolute URI, got %q", ErrInvalidRecord, AttrProcessingActivityID, activity)
 	}
-	if resolve != nil && !resolve(reference) {
-		return fmt.Errorf("%w: %s %q does not resolve in this logbook's verwerkingsactiviteiten register", ErrInvalidRecord, AttrProcessingActivityID, reference)
+	if resolve != nil && !resolve(activity) {
+		return fmt.Errorf("%w: %s %q does not resolve in this logbook's verwerkingsactiviteiten register", ErrInvalidRecord, AttrProcessingActivityID, activity)
+	}
+	// The foreign-operation processor is a URL when present (§3.2.2.9).
+	if processor := attributeOf(record, AttrForeignOperationProcessor); processor != "" {
+		if parsed, err := url.Parse(processor); err != nil || !parsed.IsAbs() || parsed.Host == "" {
+			return fmt.Errorf("%w: %s must be an absolute URL, got %q", ErrInvalidRecord, AttrForeignOperationProcessor, processor)
+		}
 	}
 	return nil
 }

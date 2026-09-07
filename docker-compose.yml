@@ -474,7 +474,8 @@ services:
       - LDV_LOGBOOK_URL=http://logboek-bd:4016
       - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
       - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY:-local-demo-pseudonym-key}
-      - LDV_YEAR_ACTIVITY_TEMPLATE=bd-ib-%d@v1
+      - LDV_YEAR_ACTIVITY_TEMPLATE=https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-ib-%d/v1
+      - LDV_SCOPE_ACTIVITY_BASE=https://logboek.belastingdienst.nl/verwerkingsactiviteiten
     volumes:
       - ./services/graphql-server/config:/config:ro
     networks:
@@ -629,8 +630,8 @@ services:
       - LDV_LOGBOOK_URL=http://logboek-bd:4016
       - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
       - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY:-local-demo-pseudonym-key}
-      - LDV_RESOLUTION_ACTIVITY=bd-pi-bsn-resolutie@v1
-      - LDV_FORWARD_ACTIVITY=bd-bronquery-doorgifte@v1
+      - LDV_RESOLUTION_ACTIVITY=https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-pi-bsn-resolutie/v1
+      - LDV_FORWARD_ACTIVITY=https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-bronquery-doorgifte/v1
     networks:
       - backend
       - fsc-infra
@@ -671,8 +672,8 @@ services:
       - LDV_LOGBOOK_URL=http://logboek-brp:4016
       - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
       - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY_BRP:-local-demo-pseudonym-key-brp}
-      - LDV_RESOLUTION_ACTIVITY=brp-pi-bsn-resolutie@v1
-      - LDV_FORWARD_ACTIVITY=brp-bronquery-doorgifte@v1
+      - LDV_RESOLUTION_ACTIVITY=https://logboek.rvig.nl/verwerkingsactiviteiten/brp-pi-bsn-resolutie/v1
+      - LDV_FORWARD_ACTIVITY=https://logboek.rvig.nl/verwerkingsactiviteiten/brp-bronquery-doorgifte/v1
     networks:
       - backend
       - fsc-infra
