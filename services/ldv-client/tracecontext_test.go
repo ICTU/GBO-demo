@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"testing"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Propagation is OpenTelemetry's, so these tests are about the behaviour this
@@ -140,5 +142,50 @@ func TestIDValidation(t *testing.T) {
 	}
 	if IsTraceID("short") || IsSpanID("short") {
 		t.Error("malformed ids accepted")
+	}
+}
+
+// The regression this ordering exists to prevent, and it is not hypothetical:
+// behind otelhttp every request already carries a locally created server span.
+// Extracting against the live context returns that span when the headers hold
+// no traceparent — which is exactly the FSC hop — so the Fsc-Transaction-Id
+// was never consulted and every component filed its records under a trace id
+// of its own.
+func TestTheFscFallbackBeatsAnAmbientSpan(t *testing.T) {
+	ambient := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    trace.TraceID{0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11},
+		SpanID:     trace.SpanID{0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22},
+		TraceFlags: trace.FlagsSampled,
+	})
+	ctx := trace.ContextWithSpanContext(context.Background(), ambient)
+
+	// FSC stripped traceparent; only its own header survives the hop.
+	header := http.Header{}
+	header.Set("Fsc-Transaction-Id", "0af76519-16cd-43dd-8448-eb211c80319c")
+
+	if got := TraceContextFrom(ctx, header, "00f067aa0ba902b7").TraceID; got != "0af7651916cd43dd8448eb211c80319c" {
+		t.Fatalf("TraceID = %q, want the Fsc-Transaction-Id rather than the local span", got)
+	}
+}
+
+// The ambient span is the fallback of last resort, not of first: with no
+// header at all it is better than a fresh id, because it at least ties the
+// record to the trace this process is serving.
+func TestTheAmbientSpanIsUsedWhenNoHeaderCarriesATrace(t *testing.T) {
+	ambient := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    trace.TraceID{0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33},
+		SpanID:     trace.SpanID{0x44, 0x44, 0x44, 0x44, 0x44, 0x44, 0x44, 0x44},
+		TraceFlags: trace.FlagsSampled,
+	})
+	ctx := trace.ContextWithSpanContext(context.Background(), ambient)
+
+	if got := TraceContextFrom(ctx, http.Header{}, "00f067aa0ba902b7").TraceID; got != "33333333333333333333333333333333" {
+		t.Fatalf("TraceID = %q, want the ambient span", got)
+	}
+	// And a traceparent still beats it.
+	header := http.Header{}
+	header.Set("traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
+	if got := TraceContextFrom(ctx, header, "00f067aa0ba902b7").TraceID; got != "0af7651916cd43dd8448eb211c80319c" {
+		t.Fatalf("TraceID = %q, want the traceparent to win over the ambient span", got)
 	}
 }

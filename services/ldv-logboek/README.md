@@ -329,7 +329,6 @@ Records carry a handful of attributes the core standard does not define:
 
 | attribute | on | why it is not derivable |
 | --- | --- | --- |
-| `dpl.gbo.belastingjaar` | source query | which year's verstrekking this record is |
 | `dpl.gbo.betrokkeneRol` | BRP | aanvrager, or a relative named in the certificate |
 | `dpl.gbo.overledeneVerwerkt` | BRP | records that the deceased's data was disclosed while they are not a Betrokkene |
 | `dpl.gbo.consentId` / `dpl.gbo.consentCount` | consent register | which consent, and how many were shown |
@@ -341,9 +340,10 @@ attribute to carry `dpl.<extensienaam>.`, so `gbo.scope` — which is what these
 used to be — was outside the namespace the standard reserves and could not be
 made conformant by documenting it.
 
-Everything that followed from the verwerkingsactiviteit, the record's own
-status, or its `data_subject_id_type` was removed rather than renamed:
-`gbo.scope` (the activity is derived from it), `gbo.sidecar.subject_id_type`
+Eight attributes remain. Everything that followed from the
+verwerkingsactiviteit, the record's own status, or its `data_subject_id_type`
+was removed rather than renamed: `gbo.scope` and `gbo.belastingjaar` (a record
+naming `…/bd-ib-2025/v1` has already said which year), `gbo.sidecar.subject_id_type`
 (the record says it), `gbo.upstream.status` and `gbo.consent.status` (the
 record's status says it), plus `gbo.bsnk.recipient`, `gbo.graphql.variable`,
 `gbo.source_oin` and the consent's scopes and use case.

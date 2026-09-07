@@ -49,26 +49,47 @@ type TraceContext struct {
 	State string
 }
 
-// TraceContextFrom reads the incoming request's position in the trace.
+// TraceContextFrom reads the incoming request's position in the trace, in a
+// strict order:
 //
-// A standard traceparent wins. Failing that the Fsc-Transaction-Id is used —
-// the FSC hop strips traceparent, so on the far side that header is all there
-// is. The span is this component's own record, which the caller supplies.
+//	traceparent on the request  →  Fsc-Transaction-Id  →  X-Request-Id
+//	→  the ambient span  →  a fresh trace
+//
+// The ambient span comes last, and that ordering is the whole point. Behind
+// otelhttp every request already carries a locally created server span, so
+// asking the context first would always answer — and the FSC fallback, the one
+// thing that carries correlation across a hop that strips traceparent, would
+// never be reached. Every component would then file its records under a trace
+// id of its own, which is precisely the chain view this exists to make
+// possible.
+//
+// Hence the extraction runs against context.Background(): the propagator
+// returns its input unchanged when the carrier holds no valid traceparent, so
+// handing it the live context would let the ambient span through disguised as
+// an extracted one.
 func TraceContextFrom(ctx context.Context, header http.Header, spanID string) TraceContext {
-	extracted := trace.SpanContextFromContext(
-		propagator.Extract(ctx, propagation.HeaderCarrier(header)),
+	fromHeader := trace.SpanContextFromContext(
+		propagator.Extract(context.Background(), propagation.HeaderCarrier(header)),
 	)
-	if extracted.HasTraceID() {
+	if fromHeader.HasTraceID() {
 		return TraceContext{
-			TraceID: extracted.TraceID().String(),
+			TraceID: fromHeader.TraceID().String(),
 			SpanID:  spanID,
-			Sampled: extracted.IsSampled(),
-			State:   extracted.TraceState().String(),
+			Sampled: fromHeader.IsSampled(),
+			State:   fromHeader.TraceState().String(),
 		}
 	}
 	for _, name := range []string{"Fsc-Transaction-Id", "X-Request-Id"} {
 		if candidate := NormalizeTraceID(header.Get(name)); candidate != "" {
 			return TraceContext{TraceID: candidate, SpanID: spanID, Sampled: true}
+		}
+	}
+	if ambient := trace.SpanContextFromContext(ctx); ambient.HasTraceID() {
+		return TraceContext{
+			TraceID: ambient.TraceID().String(),
+			SpanID:  spanID,
+			Sampled: ambient.IsSampled(),
+			State:   ambient.TraceState().String(),
 		}
 	}
 	return TraceContext{SpanID: spanID, Sampled: true}

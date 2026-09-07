@@ -302,10 +302,21 @@ func TestReadExtensionSelectors(t *testing.T) {
 	for name, body := range map[string]any{
 		"by trace":      map[string]any{"traceId": "0af7651916cd43dd8448eb211c80319c"},
 		"by trace uuid": map[string]any{"traceId": "0af76519-16cd-43dd-8448-eb211c80319c"},
-		"by activity": map[string]any{"attributes": map[string]any{
+		// The shape the schema specifies: allOf over Attributes, so dpl sits
+		// at the top level of the request body — not under an `attributes`
+		// wrapper, which is where a *response* puts it.
+		"by activity, as the schema defines it": map[string]any{"dpl": map[string]any{"core": map[string]any{
+			"processingActivityId": "https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-bronquery-doorgifte/v1",
+		}}},
+		"by subject, as the schema defines it": map[string]any{"dpl": map[string]any{"core": map[string]any{
+			"dataSubjectId": "PI-abc123", "dataSubjectIdType": "pi",
+		}}},
+		// Tolerated: a caller holding a record's own attributes should not
+		// have to reshape them to ask about it.
+		"by activity, flat attributes": map[string]any{"attributes": map[string]any{
 			ldv.AttrProcessingActivityID: "https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-bronquery-doorgifte/v1",
 		}},
-		"by subject": map[string]any{"attributes": map[string]any{
+		"by subject, flat attributes": map[string]any{"attributes": map[string]any{
 			ldv.AttrDataSubjectID: "PI-abc123", ldv.AttrDataSubjectIDType: "pi",
 		}},
 	} {
@@ -395,5 +406,48 @@ func TestAnUnconfiguredTokenAuthorizesNobody(t *testing.T) {
 				t.Fatalf("status = %d, want 401 — an absent credential is not a credential", recorder.Code)
 			}
 		})
+	}
+}
+
+// The request and the response are asymmetric, and following the response's
+// shape on both sides made an official request fail on an unknown field. This
+// drives the real handler rather than the translation function, which is what
+// let that through.
+func TestTheSchemasRequestShapeIsAcceptedEndToEnd(t *testing.T) {
+	handler, _ := newTestHandler(t)
+	if response := post(t, handler, writeToken, validBody()); response.Code != http.StatusCreated {
+		t.Fatalf("seed write status = %d", response.Code)
+	}
+
+	response := read(t, handler, readToken, map[string]any{
+		"dpl": map[string]any{"core": map[string]any{
+			"dataSubjectId":     "PI-abc123",
+			"dataSubjectIdType": "pi",
+		}},
+	})
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body)
+	}
+	var payload struct {
+		Operations []map[string]any `json:"dataProcessingOperations"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(payload.Operations) != 1 {
+		t.Fatalf("read %d operations, want 1: %s", len(payload.Operations), response.Body)
+	}
+}
+
+// A body that carries only the narrowing fields still names no selector.
+func TestATimeWindowAloneIsNotASelector(t *testing.T) {
+	handler, _ := newTestHandler(t)
+
+	response := read(t, handler, readToken, map[string]any{
+		"startTime": "2026-09-02T00:00:00Z",
+		"endTime":   "2026-09-03T00:00:00Z",
+	})
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 — a window alone would return every Betrokkene in it", response.Code)
 	}
 }

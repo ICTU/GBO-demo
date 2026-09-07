@@ -214,10 +214,11 @@ func (l *sourceLogbook) logQuery(ctx context.Context, r *http.Request, facts *qu
 		years = []int{0}
 	}
 	for _, year := range years {
-		attributes := map[string]any{"gbo.scope": scope}
-		if year != 0 {
-			attributes["dpl.gbo.belastingjaar"] = year
-		}
+		// No attributes of our own: the belastingjaar is already in the
+		// verwerkingsactiviteit this record names (bd-ib-2025/v1), and the
+		// scope it came from is what that activity was generated from. An
+		// attribute that repeats the activity tells a reader nothing.
+		var attributes map[string]any
 		record := ldv.Record{
 			TraceID:      traceID,
 			SpanID:       ldv.SpanID(),

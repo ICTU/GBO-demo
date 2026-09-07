@@ -23,14 +23,33 @@ import (
 //
 // Errors are application/problem+json, per the extension.
 
-// readRequest is DataProcessingOperationRequest. The three selectors the
-// standard names are traceId and the two dpl.core attributes; startTime and
-// endTime narrow a result rather than selecting one.
+// readRequest is DataProcessingOperationRequest.
+//
+// The schema builds it with `allOf` over the Attributes schema, which puts
+// `dpl` at the *top level* of the request body — not under an `attributes`
+// wrapper the way it appears in a response. The request and the response are
+// asymmetric, and following the response's shape on both sides made an
+// official request fail on an unknown field.
+//
+// `attributes` is still accepted, because a caller holding a record's own
+// attributes should not have to reshape them to ask about it.
 type readRequest struct {
-	TraceID    string         `json:"traceId,omitempty"`
-	StartTime  *time.Time     `json:"startTime,omitempty"`
-	EndTime    *time.Time     `json:"endTime,omitempty"`
+	TraceID   string     `json:"traceId,omitempty"`
+	StartTime *time.Time `json:"startTime,omitempty"`
+	EndTime   *time.Time `json:"endTime,omitempty"`
+	// DPL is the selector object as the schema defines it.
+	DPL map[string]any `json:"dpl,omitempty"`
+	// Attributes is the tolerated alternative: the shape a response uses.
 	Attributes map[string]any `json:"attributes,omitempty"`
+}
+
+// selectors returns the attribute object to read selectors from, preferring
+// the shape the standard specifies.
+func (r readRequest) selectors() map[string]any {
+	if len(r.DPL) > 0 {
+		return map[string]any{"dpl": r.DPL}
+	}
+	return r.Attributes
 }
 
 // dataProcessingOperation is one record as the read extension renders it.
@@ -92,11 +111,12 @@ func (h *Handler) listDataProcessingOperations(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	selectors := request.selectors()
 	query := ldv.Query{
 		TraceID:              ldv.NormalizeTraceID(request.TraceID),
-		ProcessingActivityID: fromReadAttributes(request.Attributes, ldv.AttrProcessingActivityID),
-		DataSubjectID:        fromReadAttributes(request.Attributes, ldv.AttrDataSubjectID),
-		DataSubjectIDType:    fromReadAttributes(request.Attributes, ldv.AttrDataSubjectIDType),
+		ProcessingActivityID: fromReadAttributes(selectors, ldv.AttrProcessingActivityID),
+		DataSubjectID:        fromReadAttributes(selectors, ldv.AttrDataSubjectID),
+		DataSubjectIDType:    fromReadAttributes(selectors, ldv.AttrDataSubjectIDType),
 		StartTime:            request.StartTime,
 		EndTime:              request.EndTime,
 	}
