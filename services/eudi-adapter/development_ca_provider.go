@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"time"
 )
 
@@ -225,6 +226,7 @@ func (p *developmentCAProvider) Load(registration sourceRegistration) (certifica
 	}
 	registration.SourceOIN = identityOIN
 	registration.Name = identityName
+	registration.Description = certificateOrganizationDescription(issuer.cert)
 	binding, err := p.binding(registration)
 	if err != nil {
 		return certificateArtifacts{}, err
@@ -258,6 +260,39 @@ func certificateSourceIdentity(cert *x509.Certificate) (string, string, error) {
 		return "", "", fmt.Errorf("issuer certificate must contain exactly one organisation name")
 	}
 	return cert.Subject.SerialNumber, cert.Subject.Organization[0], nil
+}
+
+func defaultOrganizationDescription(name string) map[string]string {
+	return map[string]string{
+		"nl": "Lokale ontwikkelbron " + name,
+		"en": "Local development source " + name,
+	}
+}
+
+// certificateOrganizationDescription reads back an operator-provided
+// description, which a verifier cannot re-derive. Returns "" for the default.
+func certificateOrganizationDescription(cert *x509.Certificate) string {
+	extension, ok := findCertificateExtension(cert, issuerAuthExtensionOID)
+	if !ok {
+		return ""
+	}
+	var encoded string
+	if remaining, err := asn1.Unmarshal(extension.Value, &encoded); err != nil || len(remaining) != 0 {
+		return ""
+	}
+	var payload struct {
+		Organization struct {
+			Description map[string]string `json:"description"`
+			LegalName   map[string]string `json:"legalName"`
+		} `json:"organization"`
+	}
+	if err := json.Unmarshal([]byte(encoded), &payload); err != nil {
+		return ""
+	}
+	if reflect.DeepEqual(payload.Organization.Description, defaultOrganizationDescription(payload.Organization.LegalName["nl"])) {
+		return ""
+	}
+	return payload.Organization.Description["nl"]
 }
 
 func projectPublicCertificateArtifacts(root, sourceID string, artifacts certificateArtifacts) error {
@@ -355,6 +390,7 @@ func (s *publicDevelopmentCertificateStore) Load(registration sourceRegistration
 	}
 	registration.SourceOIN = identityOIN
 	registration.Name = identityName
+	registration.Description = certificateOrganizationDescription(issuer)
 	binding, err := s.provider.binding(registration)
 	if err != nil {
 		return certificateArtifacts{}, err
@@ -477,10 +513,14 @@ func (p *developmentCAProvider) ensureLeaf(directory, role string, subject pkix.
 }
 
 func developmentCertificateAuthPayloads(registration sourceRegistration, readerOrigin string) ([]byte, []byte, error) {
+	description := defaultOrganizationDescription(registration.Name)
+	if strings.TrimSpace(registration.Description) != "" {
+		description = map[string]string{"nl": registration.Description, "en": registration.Description}
+	}
 	organization := map[string]any{
 		"displayName": map[string]string{"nl": registration.Name, "en": registration.Name},
 		"legalName":   map[string]string{"nl": registration.Name, "en": registration.Name},
-		"description": map[string]string{"nl": "Lokale ontwikkelbron " + registration.Name, "en": "Local development source " + registration.Name},
+		"description": description,
 		"category":    map[string]string{"nl": "Overheid", "en": "Government"},
 		"countryCode": "nl",
 	}

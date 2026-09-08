@@ -61,6 +61,8 @@ type sourceRegistration struct {
 	DataAccess       sourceDataAccess       `json:"data_access" yaml:"data_access"`
 	// Logo is certificate-provisioning input, not source-published metadata.
 	Logo *organizationLogo `json:"-" yaml:"-"`
+	// Description is provisioning input too: the environment the issuer is in.
+	Description string `json:"-" yaml:"-"`
 }
 
 func (r sourceRegistration) certificateSetID() string {
