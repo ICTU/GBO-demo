@@ -1,24 +1,32 @@
-/* Waarden 1:1 overgenomen uit het design "GBO Landing.dc.html"
-   (claude.ai/design, project 0c7d9e4c). Niet zelf verzinnen — het design
-   is leidend. Alleen de media-queries onderaan zijn toegevoegd: het
-   design kent geen breakpoints omdat het altijd breed gerenderd wordt. */
+/* Structuur en maatvoering zijn 1:1 overgenomen uit het design
+   "GBO Landing.dc.html" (claude.ai/design, project 0c7d9e4c); niet zelf
+   verzinnen, het design is daarin leidend. Twee dingen komen er niet uit:
+   de media-queries onderaan (het design kent geen breakpoints omdat het
+   altijd breed gerenderd wordt), en het palet hieronder — dat volgt sinds
+   de communicatie-review de ICTU-huisstijl in plaats van de
+   Rijkshuisstijl waarmee het design was opgezet. */
 
 :root {
-  --blue: #01689b;
+  /* ICTU-huisstijl. --blue-deep blijft bijna-zwart en wordt bewust géén
+     ICTU-donkerblauw (#0e2b84): de donkere Pipeline-sectie grenst direct
+     aan de blauwe uitproberen-sectie, en die twee zouden dan in elkaar
+     overlopen. --accent heette --red toen de pagina nog Rijkshuisstijl
+     gebruikte. */
+  --blue: #0e2b84;
   --blue-deep: #05131f;
-  --red: #d52b1e;
+  --accent: #880095;
   --text: #1a1a1a;
   --text-2: #535353;
   --text-3: #767676;
   --grey-bg: #f3f3f3;
   --grey-border: #d3d3d3;
-  --pale-bg: #f3f7fa;
-  --pale-border: #d3e0e9;
-  --line: #a8c4d4;
-  --accent-light: #8fcbe8;
-  --tint-dvtp: #e7eff5;
-  --tint-eudi: #dfeaf2;
-  --tint-oots: #eaf1f6;
+  --pale-bg: #e0f8ff;
+  --pale-border: #c1f1ff;
+  --line: #457aff;
+  --accent-light: #63dbff;
+  --tint-dvtp: #e0f8ff;
+  --tint-eudi: #d8e0fb;
+  --tint-oots: #c1f1ff;
   --sans: "Fira Sans", Helvetica, Arial, sans-serif;
   --serif: "Source Serif 4", Georgia, serif;
   --gutter: clamp(20px, 6vw, 88px);
@@ -47,7 +55,7 @@ a {
 }
 
 a:hover {
-  color: var(--red);
+  color: var(--accent);
 }
 
 :focus {
@@ -168,7 +176,7 @@ a:hover {
 }
 
 .link-muted:hover {
-  color: var(--red);
+  color: var(--accent);
 }
 
 /* ── Voortgangsbalk ──────────────────────────────────────────────────── */
@@ -364,7 +372,7 @@ a:hover {
 
 .btn-invert:hover {
   background: var(--grey-bg);
-  color: var(--red);
+  color: var(--accent);
 }
 
 /* ── Stroomdiagram ───────────────────────────────────────────────────── */
@@ -372,7 +380,7 @@ a:hover {
 .flowband {
   padding: 0 var(--gutter);
   /* Bovenste helft loopt door in de hero-blauw, onderste helft is wit. */
-  background: linear-gradient(#01689b 50%, #ffffff 50%);
+  background: linear-gradient(var(--blue) 50%, #ffffff 50%);
 }
 
 .flowcard {
@@ -426,6 +434,23 @@ a:hover {
   color: var(--text-2);
 }
 
+/* De tekeningen erven hun lijnkleur via color/currentColor, zodat het
+   palet alleen hier staat en niet in de componenten. */
+.flow-link,
+.flow-fan {
+  color: var(--line);
+}
+
+.flow-pulse {
+  stroke: var(--blue);
+}
+
+/* Nieuwe toepassingen zijn nog niet aangesloten: gestippelde rail, en in
+   de puls-groep ontbreekt hij bewust. */
+.flow-rail--future {
+  stroke-dasharray: 3 5;
+}
+
 .flow-link {
   width: 100%;
   height: 100%;
@@ -452,20 +477,26 @@ a:hover {
   color: rgba(255, 255, 255, 0.9);
 }
 
+/* De waaier en de uitgangen zitten in dezelfde gridrij en rekken er allebei
+   op uit, dus ze zijn per definitie even hoog. De uitgangen verdelen die
+   hoogte over vier gelijke fracties, waardoor de rails uit FlowBand
+   (12,5 / 37,5 / 62,5 / 87,5) op elke breedte op de labels uitkomen — ook
+   als een omschrijving omwikkelt en de band meegroeit. */
 .flow-fan {
   width: 100%;
-  height: clamp(120px, 14vw, 190px);
+  height: 100%;
+  align-self: stretch;
   overflow: visible;
 }
 
 .flow-outputs {
-  display: flex;
-  flex-direction: column;
-  height: clamp(120px, 14vw, 190px);
+  display: grid;
+  grid-template-rows: repeat(4, 1fr);
+  align-self: stretch;
+  min-height: clamp(168px, 18.5vw, 236px);
 }
 
 .flow-output {
-  flex: 1;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -476,6 +507,14 @@ a:hover {
 .flow-output-name {
   font-size: clamp(14px, 1.3vw, 17px);
   color: var(--text);
+}
+
+.flow-output--future {
+  border-left-style: dashed;
+}
+
+.flow-output--future .flow-output-name {
+  color: var(--text-2);
 }
 
 .flow-output-desc {
@@ -527,6 +566,7 @@ a:hover {
 .stream-art svg {
   width: 68%;
   height: auto;
+  color: var(--blue);
 }
 
 .stream-art--dvtp {
@@ -598,6 +638,7 @@ a:hover {
   width: 80%;
   height: 3px;
   overflow: visible;
+  color: var(--accent-light);
 }
 
 .pipeline-steps {
@@ -827,7 +868,7 @@ a:hover {
 }
 
 .btn-primary:hover {
-  background: var(--red);
+  background: var(--accent);
   color: #ffffff;
 }
 
@@ -947,7 +988,7 @@ a:hover {
 }
 
 .infra-link:hover {
-  color: var(--red);
+  color: var(--accent);
 }
 
 /* ── Footer ──────────────────────────────────────────────────────────── */
@@ -1031,7 +1072,8 @@ a:hover {
   }
 
   .flow-outputs {
-    height: auto;
+    grid-template-rows: none;
+    min-height: 0;
     gap: 12px;
   }
 

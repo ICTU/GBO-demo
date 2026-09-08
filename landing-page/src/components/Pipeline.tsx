@@ -31,7 +31,7 @@ export default function Pipeline() {
               d="M0 0.5 H100"
               pathLength={100}
               fill="none"
-              stroke="#8fcbe8"
+              stroke="currentColor"
               strokeWidth="2"
               strokeDasharray="8 92"
               vectorEffect="non-scaling-stroke"

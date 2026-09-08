@@ -113,14 +113,16 @@ export default function Hero() {
         <div className="shell">
           <div className="hero-stack">
             <h1>
-              Gemeenschappelijke Bronontsluiting
-              <br />
               Demo-omgeving
+              <br />
+              Gemeenschappelijke Bronontsluiting
             </h1>
             <p className="hero-lede">
-              Gemeenschappelijke Bronontsluiting is de gestandaardiseerde ontsluiting waarmee
-              bronhouders hun gegevens direct interoperabel en herbruikbaar beschikbaar stellen.
-              Deze demo draait live op de Simulatieomgeving van het Federatief Datastelsel.
+              Het programma Gemeenschappelijke Bronontsluiting (GBO) ontwikkelt een
+              gestandaardiseerde ontsluiting waarmee bronhouders hun gegevens direct interoperabel
+              en herbruikbaar beschikbaar kunnen stellen. Deze demo laat zien hoe de voorgestelde
+              oplossing werkt in de praktijk. De demo draait live op de simulatieomgeving van het
+              Federatief Datastelsel.
             </p>
             <a href="#uitproberen" className="btn-invert">
               Zelf uitproberen

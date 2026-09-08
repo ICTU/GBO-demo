@@ -1,5 +1,18 @@
-/* Eén bron, één gestandaardiseerde ontsluiting, drie uitgangen. De
-   stippellijnen lopen mee met de gbo-flow-animatie uit tokens.css. */
+/* Eén bron, één gestandaardiseerde ontsluiting, vier uitgangen. De
+   stippellijnen lopen mee met de gbo-flow-animatie uit tokens.css.
+
+   De y-waarden van de rails zijn de middens van de vier uitgangen. Die
+   delen in tokens.css hun gridrij in vier gelijke fracties, en de viewBox
+   is 100 hoog, dus 12.5 / 37.5 / 62.5 / 87.5. Komt er een uitgang bij of
+   valt er een af, dan moeten deze waarden én grid-template-rows mee. */
+const FAN_RAILS = [
+  'M0 50 C 50 50, 50 12.5, 100 12.5',
+  'M0 50 C 50 50, 50 37.5, 100 37.5',
+  'M0 50 C 50 50, 50 62.5, 100 62.5',
+]
+
+const FAN_RAIL_FUTURE = 'M0 50 C 50 50, 50 87.5, 100 87.5'
+
 export default function FlowBand() {
   return (
     <div className="flowband">
@@ -25,16 +38,16 @@ export default function FlowBand() {
                 d="M0 50 H100"
                 pathLength={100}
                 fill="none"
-                stroke="#a8c4d4"
+                stroke="currentColor"
                 strokeWidth="1.4"
                 vectorEffect="non-scaling-stroke"
               />
               <path
+                className="flow-pulse"
                 data-flow=""
                 d="M0 50 H100"
                 pathLength={100}
                 fill="none"
-                stroke="#01689b"
                 strokeWidth="1.8"
                 strokeDasharray="7 93"
                 vectorEffect="non-scaling-stroke"
@@ -55,24 +68,31 @@ export default function FlowBand() {
               focusable="false"
               className="flow-fan"
             >
-              <g fill="none" stroke="#a8c4d4" strokeWidth="1.4" vectorEffect="non-scaling-stroke">
-                <path d="M0 50 C 50 50, 50 17, 100 17" pathLength={100} />
-                <path d="M0 50 H100" pathLength={100} />
-                <path d="M0 50 C 50 50, 50 83, 100 83" pathLength={100} />
-              </g>
-              {/* Alle drie de stromen horen bij de use cases; OOTS wordt later
-                  toegevoegd maar ligt hier niet stil. */}
               <g
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                vectorEffect="non-scaling-stroke"
+              >
+                {FAN_RAILS.map((d) => (
+                  <path key={d} d={d} pathLength={100} />
+                ))}
+                <path className="flow-rail--future" d={FAN_RAIL_FUTURE} pathLength={100} />
+              </g>
+              {/* Alle drie de use cases horen erbij; OOTS wordt later toegevoegd
+                  maar ligt hier niet stil. Nieuwe toepassingen krijgen geen puls:
+                  daar loopt nog niets overheen. */}
+              <g
+                className="flow-pulse"
                 data-flow=""
                 fill="none"
-                stroke="#01689b"
                 strokeWidth="1.8"
                 strokeDasharray="7 93"
                 vectorEffect="non-scaling-stroke"
               >
-                <path d="M0 50 C 50 50, 50 17, 100 17" pathLength={100} />
-                <path d="M0 50 H100" pathLength={100} />
-                <path d="M0 50 C 50 50, 50 83, 100 83" pathLength={100} />
+                {FAN_RAILS.map((d) => (
+                  <path key={d} d={d} pathLength={100} />
+                ))}
               </g>
             </svg>
 
@@ -87,9 +107,11 @@ export default function FlowBand() {
               </div>
               <div className="flow-output">
                 <div className="flow-output-name">DvTP</div>
-                <div className="flow-output-desc">
-                  Delen via Toestemming naar Private partijen
-                </div>
+                <div className="flow-output-desc">Delen via Toestemming naar Private partijen</div>
+              </div>
+              <div className="flow-output flow-output--future">
+                <div className="flow-output-name">Nieuwe toepassingen</div>
+                <div className="flow-output-desc">Zonder nieuwe koppeling per use case</div>
               </div>
             </div>
           </div>

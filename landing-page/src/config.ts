@@ -96,6 +96,7 @@ export const eudi = {
 /* Vaste externe bronnen — die verhuizen niet mee met de omgeving. */
 export const docs = {
   gbo: 'https://ictu.github.io/GBO/latest/',
+  informatiesite: 'https://gbo.pleio.nl/',
   github: 'https://github.com/ICTU/GBO-demo',
   fsc: 'https://fsc-standaard.nl/',
   simulatie: 'https://simulatie.datastelsel.nl/',

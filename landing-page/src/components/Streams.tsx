@@ -18,10 +18,10 @@ export default function Streams() {
           <article>
             <div className="stream-art stream-art--dvtp">
               <svg viewBox="0 0 200 120" aria-label="Burger geeft toestemming aan een dienstverlener">
-                <line x1="46" y1="60" x2="154" y2="60" stroke="#01689b" strokeWidth="1.5" />
-                <circle cx="46" cy="60" r="17" fill="none" stroke="#01689b" strokeWidth="1.5" />
-                <rect x="137" y="43" width="34" height="34" fill="none" stroke="#01689b" strokeWidth="1.5" />
-                <circle cx="100" cy="60" r="7" fill="#01689b" />
+                <line x1="46" y1="60" x2="154" y2="60" stroke="currentColor" strokeWidth="1.5" />
+                <circle cx="46" cy="60" r="17" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                <rect x="137" y="43" width="34" height="34" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                <circle cx="100" cy="60" r="7" fill="currentColor" />
               </svg>
             </div>
             <p className="stream-status">Live in deze demo</p>
@@ -46,9 +46,9 @@ export default function Streams() {
           <article>
             <div className="stream-art stream-art--eudi">
               <svg viewBox="0 0 200 120" aria-label="Credential in de wallet van de burger">
-                <rect x="62" y="30" width="76" height="60" rx="3" fill="none" stroke="#01689b" strokeWidth="1.5" />
-                <rect x="78" y="46" width="44" height="28" rx="2" fill="#01689b" />
-                <line x1="62" y1="102" x2="138" y2="102" stroke="#01689b" strokeWidth="1.5" opacity="0.4" />
+                <rect x="62" y="30" width="76" height="60" rx="3" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                <rect x="78" y="46" width="44" height="28" rx="2" fill="currentColor" />
+                <line x1="62" y1="102" x2="138" y2="102" stroke="currentColor" strokeWidth="1.5" opacity="0.4" />
               </svg>
             </div>
             <p className="stream-status">Live in deze demo</p>
@@ -72,9 +72,9 @@ export default function Streams() {
           <article>
             <div className="stream-art stream-art--oots">
               <svg viewBox="0 0 200 120" aria-label="Grensoverschrijdende uitwisseling tussen twee lidstaten">
-                <rect x="34" y="43" width="34" height="34" fill="none" stroke="#01689b" strokeWidth="1.5" />
-                <rect x="132" y="43" width="34" height="34" fill="none" stroke="#01689b" strokeWidth="1.5" />
-                <line x1="68" y1="60" x2="132" y2="60" stroke="#01689b" strokeWidth="1.5" strokeDasharray="5 6" />
+                <rect x="34" y="43" width="34" height="34" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                <rect x="132" y="43" width="34" height="34" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                <line x1="68" y1="60" x2="132" y2="60" stroke="currentColor" strokeWidth="1.5" strokeDasharray="5 6" />
               </svg>
             </div>
             <p className="stream-status">Coming soon</p>
