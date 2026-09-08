@@ -85,6 +85,7 @@ type onboardingOptions struct {
 	sourceID              string
 	sourceOIN             string
 	sourceName            string
+	sourceDescription     string
 	sourceLogoPath        string
 	certificateStoreName  string
 	readerPublicURL       string
@@ -140,7 +141,10 @@ func runOnboardingCommand(_ context.Context, arguments []string, dependencies on
 	if err != nil {
 		return true, err
 	}
-	registration := sourceRegistration{SourceID: options.sourceID, SourceOIN: options.sourceOIN, Name: options.sourceName}
+	registration := sourceRegistration{
+		SourceID: options.sourceID, SourceOIN: options.sourceOIN,
+		Name: options.sourceName, Description: options.sourceDescription,
+	}
 	if registration.Name == "" {
 		registration.Name = "Source " + registration.SourceOIN
 	}
@@ -173,6 +177,7 @@ func parseOnboardingOptions(command string, arguments []string, errorOutput io.W
 	set.StringVar(&options.sourceID, "source-id", "", "stable source identifier and certificate directory name")
 	set.StringVar(&options.sourceOIN, "source-oin", "", "20-digit OIN to bind the local development certificates to")
 	set.StringVar(&options.sourceName, "source-name", "", "source name for the certificate subject (defaults to a generic OIN-based name)")
+	set.StringVar(&options.sourceDescription, "source-description", "", "organisation description in the certificate authorization metadata (defaults to marking the source as a local development source)")
 	set.StringVar(&options.sourceLogoPath, "source-logo", "", "SVG, PNG or JPEG logo to embed in the certificate authorization metadata")
 	set.StringVar(&options.readerPublicURL, "reader-public-url", os.Getenv("EUDI_PUBLIC_URL"), "public issuance-server URL whose host becomes the reader certificate DNS SAN")
 	set.StringVar(&options.secretsDir, "secrets-dir", ".local/secrets", "filesystem secret directory")

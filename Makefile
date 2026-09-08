@@ -198,6 +198,7 @@ provision-development-certificates: require-development-cas
 		--source-id "$(SOURCE_ID)" \
 		--source-oin "$(SOURCE_OIN)" \
 		--source-name "$(SOURCE_NAME)" \
+		--source-description "$(SOURCE_DESCRIPTION)" \
 		--source-logo "$(if $(SOURCE_LOGO),$(abspath $(SOURCE_LOGO)),)" \
 		--reader-public-url "$${EUDI_PUBLIC_URL:-}" \
 		--secrets-dir "$(ONBOARDING_SECRETS_DIR)" \
