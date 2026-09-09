@@ -29,8 +29,9 @@ For every mode:
 - Docker with the Compose plugin;
 - Git, Make, Bash, `curl`, `jq`, OpenSSL and Python 3.9 or newer;
 - a local `.env` copied from `.env.example`;
-- non-empty `EUDI_POSTGRES_PASSWORD`, `SOURCE_REGISTRY_PASSWORD` and
-  `SOURCE_REGISTRY_READER_PASSWORD` values in `.env`.
+- non-empty `FTV_POSTGRES_PASSWORD`, `EUDI_POSTGRES_PASSWORD`,
+  `SOURCE_REGISTRY_PASSWORD` and `SOURCE_REGISTRY_READER_PASSWORD` values in
+  `.env`.
 
 The complete EUDI flow additionally requires:
 
@@ -218,7 +219,7 @@ The demo combines production-grade components with deliberate test doubles:
 | Area | In this repository |
 | --- | --- |
 | Transport | OpenFSC managers, controllers, Inways and Outways |
-| Authorization | OpenFTV PDP with OPA/Rego policies |
+| Authorization | OpenFTV v0.1.0 PDP with OPA/Rego policies |
 | Source access | Go GraphQL services behind source-side sidecars |
 | Observability | OpenTelemetry, Jaeger, Loki and Grafana |
 | Processing logs | `ldv-logboek` per Verantwoordelijke — Belastingdienst, RvIG and GBO (LDV v1.0.0), alongside the PDP's ADL and FSC-Logging |

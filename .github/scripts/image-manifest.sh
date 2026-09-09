@@ -96,8 +96,6 @@ eudi-adapter|.|./services/eudi-adapter/Dockerfile|services/eudi-adapter services
 graphql-server|.|./services/graphql-server/Dockerfile|services/graphql-server services/ldv-client|linux/amd64|false|graphql-server
 ldv-logboek|.|./services/ldv-logboek/Dockerfile|services/ldv-logboek services/ldv-client|linux/amd64|false|ldv-logboek
 landing-page|./landing-page|./landing-page/Dockerfile|landing-page|linux/amd64|false|landing-page
-openftv-manager|.|./services/openftv-manager/Dockerfile|services/openftv-manager|linux/amd64|false|openftv-manager
-openftv-manager-ui|.|./services/openftv-manager-ui/Dockerfile|services/openftv-manager-ui|linux/amd64|false|openftv-manager-ui
 openftv-pdp|.|./services/openftv-pdp/Dockerfile|services/openftv-pdp policies|linux/amd64|false|openftv-pdp
 sector-pip|./services/sector-pip|./services/sector-pip/Dockerfile|services/sector-pip|linux/amd64|false|sector-pip
 toestemmingsportaal-frontend|./toestemmingsportaal-frontend|./toestemmingsportaal-frontend/Dockerfile|toestemmingsportaal-frontend|linux/amd64|false|toestemmingsportaal-frontend

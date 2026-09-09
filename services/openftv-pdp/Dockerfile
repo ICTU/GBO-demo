@@ -1,8 +1,11 @@
-FROM golang:1.26.5-alpine AS builder
+FROM golang:1.27-alpine@sha256:26402d86be3d72e6a9410afa0108f03529f51f0c1b5eb7f503d0bc44cc7857ac AS builder
 
-# Pinned OpenFTV commit (main). Published registry images lag main and
-# lack Rego deny-reason passthrough (FTV-474), so we build from source.
-ARG OPENFTV_REF=5da6cf1e9c8a55385fbac61aa9eeb9fc889f2b8f
+# Released OpenFTV. Built from source rather than pulled, because the
+# GraphQL request-mapper below still has to be patched in (#331); the
+# published pdp image becomes usable once that patch is empty. Keep in
+# lockstep with the manager and management-interface image tags in
+# docker-compose.yml — CI fails when the three drift apart.
+ARG OPENFTV_REF=v0.1.0
 
 WORKDIR /build
 ADD https://gitlab.com/digilab.overheid.nl/ecosystem/ftv/open-ftv/-/archive/${OPENFTV_REF}/open-ftv-${OPENFTV_REF}.tar.gz /tmp/open-ftv.tar.gz
@@ -10,7 +13,9 @@ RUN tar -xzf /tmp/open-ftv.tar.gz -C /build --strip-components=1
 
 # GBO patch: GraphQL request-mapper (replaces the pdp-service context-
 # handler). Registered as the "graphqltocontext" mapping and wired into
-# the PDP controller via pdp.WithMappings (unwired upstream at this ref).
+# the PDP controller via pdp.WithMappings (unwired upstream at this ref:
+# PDP_REQUEST_MAPPINGS is parsed into cfg.RequestMappings, but no app
+# reads it).
 COPY services/openftv-pdp/mapper/graphql.go eam/mapping/graphql.go
 COPY services/openftv-pdp/mapper/graphql_test.go eam/mapping/graphql_test.go
 # Each patch step asserts it changed something. `sed -i` exits 0 when its
@@ -31,9 +36,9 @@ RUN set -eux; \
     patch_assert eam/mapping/mapper.go \
       '/mappers = append(mappers, BodyToContext)/a\ \t\tcase "graphqltocontext":\n\t\t\tmappers = append(mappers, GraphQLToContext)'; \
     patch_assert apps/pdp/server/auth.go \
-      '/pdp.WithADL(decisionLog),/a\ \t\tpdp.WithMappings(mapping.MappingsFromConfig(s.cfg.RequestMappings)...),'; \
+      's|WithOptions(pdp.WithADL(decisionLog))|WithOptions(pdp.WithADL(decisionLog), pdp.WithMappings(mapping.MappingsFromConfig(s.cfg.RequestMappings)...))|'; \
     patch_assert apps/pdp/server/auth.go \
-      's|handlers "gitlab.com/digilab.overheid.nl/ecosystem/ftv/open-ftv/eam/handlers/fiber"|handlers "gitlab.com/digilab.overheid.nl/ecosystem/ftv/open-ftv/eam/handlers/fiber"\n\t"gitlab.com/digilab.overheid.nl/ecosystem/ftv/open-ftv/eam/mapping"|'; \
+      's|"gitlab.com/digilab.overheid.nl/ecosystem/ftv/open-ftv/eam/log/decisions"|"gitlab.com/digilab.overheid.nl/ecosystem/ftv/open-ftv/eam/log/decisions"\n\t"gitlab.com/digilab.overheid.nl/ecosystem/ftv/open-ftv/eam/mapping"|'; \
     grep -q 'case "graphqltocontext":' eam/mapping/mapper.go; \
     grep -q 'pdp.WithMappings(' apps/pdp/server/auth.go
 

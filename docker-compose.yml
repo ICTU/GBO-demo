@@ -112,16 +112,14 @@ services:
       - PDP_POLICIES_LANGUAGE=rego
       - PDP_POLICIES_STORE=/policies
       - PDP_POLICIES_STORE_RECURSE=true
-      # The Authorization Decision Log. stdout by default; the manager
-      # profile points it at Postgres so the management interface's Logboek
-      # has something to read — its routes are only registered when the ADL
-      # is Postgres-backed, so without this the page 404s.
+      # The Authorization Decision Log, which the PDP writes and the
+      # management interface's Logboek reads. Postgres-backed and required:
+      # since v0.1.0 the PDP exits at startup without it, so postgres-ftv
+      # runs in every profile rather than only under `manager`. The schema
+      # is migrated on startup from the copy embedded in the binary.
       # NB: this is OpenFTV's ADL, not the embedded OPA console decision log
       # the dev-portal reads from Loki. Those are independent.
-      - PDP_ADL_TYPE=${GBO_ADL_TYPE:-stdout}
-      - PDP_ADL_PG_URL=${GBO_ADL_PG_URL:-}
-      - PDP_MIGRATE_SOURCE=${GBO_ADL_MIGRATE_SOURCE:-}
-      - PDP_MIGRATE_AUTO=${GBO_ADL_MIGRATE_AUTO:-false}
+      - PDP_ADL_PG_URL=postgres://ftv:${FTV_POSTGRES_PASSWORD}@postgres-ftv:5432/ftv_adl?sslmode=disable
       - PDP_ADL_SERVICE_NAME=gbo
       - PDP_LOG_LEVEL=info
       - PDP_REQUEST_MAPPINGS=graphqltocontext
@@ -158,6 +156,8 @@ services:
       # reachable inside fsc-infra_default.
       - fsc-infra
     depends_on:
+      postgres-ftv:
+        condition: service_healthy
       consent-register:
         condition: service_healthy
       bsnk-mock:
@@ -170,18 +170,13 @@ services:
       timeout: 3s
       retries: 5
 
-  # --- OpenFTV management plane (profile: manager) --------------------------
-  # The PAP+PIP half of OpenFTV. It owns the policies, bundles them, and
-  # ships them to every PDP named in services/openftv-manager/bundles/.
-  # This is what lets a source-holder manage its own policy without
-  # rebuilding a PDP image — the point of running a federated PDP at all.
-  #
-  # Opt-in, because it changes where policy comes from: without it the PDP
-  # loads ./policies from disk and hot-reloads on edit, which is the nicer
-  # loop while writing Rego. Start it with `make demo-manager`.
+  # --- OpenFTV databases and management plane -------------------------------
+  # postgres-ftv is NOT profiled: it holds the Authorization Decision Log the
+  # PDP writes, and the PDP refuses to start without it, so it runs in every
+  # profile. The Manager's own database (policies, attributes, entities) lives
+  # in the same instance and is only used under the `manager` profile.
   postgres-ftv:
     image: postgres:16-alpine
-    profiles: [manager]
     environment:
       POSTGRES_PASSWORD: ${FTV_POSTGRES_PASSWORD}
       POSTGRES_USER: ftv
@@ -197,21 +192,29 @@ services:
       timeout: 3s
       retries: 10
 
+  # The PAP+PIP half of OpenFTV (profile: manager). It owns the policies,
+  # bundles them, and ships them to every PDP named in
+  # services/openftv-manager/bundles/. This is what lets a source-holder
+  # manage its own policy without rebuilding a PDP image — the point of
+  # running a federated PDP at all.
+  #
+  # Opt-in, because it changes where policy comes from: without it the PDP
+  # loads ./policies from disk and hot-reloads on edit, which is the nicer
+  # loop while writing Rego. Start it with `make demo-manager`.
   openftv-manager:
     profiles: [manager]
-    build:
-      context: .
-      dockerfile: services/openftv-manager/Dockerfile
+    # Released upstream image, consumed as published. Keep the tag in
+    # lockstep with openftv-manager-ui and with OPENFTV_REF in
+    # services/openftv-pdp/Dockerfile — CI fails when they drift apart.
+    image: registry.gitlab.com/digilab.overheid.nl/ecosystem/ftv/open-ftv/manager:v0.1.0
     environment:
       # Managed policies live in Postgres — the Manager's PAP is built
       # without a file store (apps/manager/server/pap.go), so there is no
       # directory to point it at. scripts/seed-openftv-manager.py pushes
       # ./policies in over the API, which is the same path the management
-      # interface uses.
-      - MANAGER_PERSIST_TYPE=postgres
-      - MANAGER_PERSIST_POSTGRES_URL=postgres://ftv:${FTV_POSTGRES_PASSWORD}@postgres-ftv:5432/ftv_manager?sslmode=disable
-      - MANAGER_MIGRATE_SOURCE=*EMBED*
-      - MANAGER_MIGRATE_AUTO=true
+      # interface uses. The schema is migrated on startup from the copy
+      # embedded in the binary; there is no migration switch to set.
+      - MANAGER_DATABASE_URL=postgres://ftv:${FTV_POSTGRES_PASSWORD}@postgres-ftv:5432/ftv_manager?sslmode=disable
       # Deliberately NOT set to rego. MANAGER_POLICIES_LANGUAGE selects the
       # language of the policies that authorize the Manager's OWN API (it
       # seeds Cedar ones for that), and those share a store with the
@@ -239,11 +242,17 @@ services:
       - MANAGER_OIDC_JWKS_URL=http://keycloak:8080/realms/gbo/protocol/openid-connect/certs
       - MANAGER_OIDC_AUDIENCE=openftv-manager-api
       - MANAGER_OIDC_ROLES_CLAIM=roles
-      # Serves the Logboek in the management interface. initADL only
-      # registers its routes for a Postgres-backed decision log — any other
-      # value and the endpoints simply do not exist.
-      - MANAGER_ADL_TYPE=postgres
+      # Serves the Logboek in the management interface. The PDP writes this
+      # log and the Manager reads it, so both point at the same database.
+      # Required: the Manager exits without it.
       - MANAGER_ADL_PG_URL=postgres://ftv:${FTV_POSTGRES_PASSWORD}@postgres-ftv:5432/ftv_adl?sslmode=disable
+    # The published image carries no configuration of its own, so the
+    # Manager's own-API policies, bundle definitions and policy tags are
+    # mounted rather than baked in.
+    volumes:
+      - ./services/openftv-manager/authz:/authz:ro
+      - ./services/openftv-manager/bundles:/bundles:ro
+      - ./services/openftv-manager/tags:/tags:ro
     ports:
       # Management API (what the seed script and a UI talk to).
       - "${GBO_PORT_FTV_MANAGER:-9280}:8443"
@@ -272,9 +281,10 @@ services:
   # and over HTTPS unless that is localhost (see the PKCE note further down).
   openftv-manager-ui:
     profiles: [manager]
-    build:
-      context: .
-      dockerfile: services/openftv-manager-ui/Dockerfile
+    # Released upstream image, consumed as published. It already ships the
+    # nginx template that renders /runtime-env.js from the VITE_* below at
+    # container start, so one image serves any deployment.
+    image: registry.gitlab.com/digilab.overheid.nl/ecosystem/ftv/open-ftv/management-interface:v0.1.0
     environment:
       # Set as whole URLs rather than host+port, so the stack can sit behind
       # a TLS reverse proxy on separate hostnames. That is not optional for
@@ -286,6 +296,10 @@ services:
       - VITE_PIP_BASE_URL=${GBO_FTV_MANAGER_URL:-http://localhost:9280}
       - VITE_OIDC_AUTHORITY=${GBO_FTV_OIDC_AUTHORITY:-http://localhost:9284/realms/gbo}
       - VITE_OIDC_CLIENT_ID=openftv-manager-ui
+      # Not optional: the image's nginx template interpolates this one, and
+      # nginx refuses to start when it is unset. 102400 is the value the UI
+      # itself falls back to (src/config/env.ts).
+      - MANAGER_MAX_LOGO_SIZE=102400
     ports:
       - "${GBO_PORT_FTV_MANAGER_UI:-9283}:8080"
     networks: [backend]
