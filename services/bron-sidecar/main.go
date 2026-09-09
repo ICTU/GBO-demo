@@ -211,7 +211,11 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client) http.H
 			traceID:   ldv.TraceID(r.Context(), r.Header),
 			spanID:    ldv.SpanID(),
 			startTime: time.Now().UTC(),
-			processor: logbook.ForeignProcessor(r),
+		}
+		// A bron without a logbook is a supported configuration, so the
+		// client is legitimately nil here and must not be dereferenced.
+		if logbook != nil {
+			forward.processor = logbook.ForeignProcessor(r)
 		}
 
 		// Who the request is about, named the way it arrived. In the
