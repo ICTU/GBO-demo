@@ -21,15 +21,22 @@ import (
 // problem. The service already depends on OTel; using its propagator deletes
 // the edge cases rather than fixing them one at a time.
 //
-// The one place Trace Context cannot hold is the FSC hop. FSC v2.4.0 does not
-// forward `traceparent` between peers, and no amount of care on our side
-// changes what the Inway strips. There the chain falls back to the
-// Fsc-Transaction-Id, which is a UUID and therefore exactly a 16-byte trace-id
-// once the hyphens come off — so the same value continues on the far side,
-// reachable through a header FSC does propagate.
+// The FSC hop is where that stops being sufficient — though not for the reason
+// first assumed. `traceparent` is in fact forwarded across the demo's
+// outway/inway pair and arrives intact on the far side; what does not survive
+// is its authority. FSC gives every transaction its own Fsc-Transaction-Id, a
+// UUID v7 it validates strictly and rejects anything else for, so it cannot be
+// derived from a caller's trace id. Where a caller brings its own
+// `traceparent`, a request therefore carries two unrelated 128-bit ids at
+// once, and only one of them — the transaction id — is the one FSC's txlog and
+// the PDP's decision log record.
 //
-// That fallback is a profile deviation, not conformance, and is written up as
-// one in the logbook README.
+// So the transaction id wins whenever there is one. It is a UUID, and
+// therefore exactly a 16-byte trace-id once the hyphens come off, which is
+// what makes it usable as one.
+//
+// Preferring a header of FSC's invention over `traceparent` is a profile
+// deviation, not conformance, and is written up as one in the logbook README.
 
 // propagator handles traceparent and tracestate together, as W3C requires.
 var propagator = propagation.TraceContext{}
@@ -52,22 +59,41 @@ type TraceContext struct {
 // TraceContextFrom reads the incoming request's position in the trace, in a
 // strict order:
 //
-//	traceparent on the request  →  Fsc-Transaction-Id  →  X-Request-Id
+//	Fsc-Transaction-Id  →  traceparent on the request  →  X-Request-Id
 //	→  the ambient span  →  a fresh trace
 //
-// The ambient span comes last, and that ordering is the whole point. Behind
-// otelhttp every request already carries a locally created server span, so
-// asking the context first would always answer — and the FSC fallback, the one
-// thing that carries correlation across a hop that strips traceparent, would
-// never be reached. Every component would then file its records under a trace
-// id of its own, which is precisely the chain view this exists to make
-// possible.
+// The FSC transaction id comes first because it, not `traceparent`, is the
+// identifier the three logs actually share. The standard ties LDV, the
+// authorization decision log and FSC-Logging together by one trace id, and
+// FSC's txlog and the PDP's decision both key on the transaction id. A record
+// filed under anything else is unreachable from the other two.
+//
+// The two ids are not interchangeable and cannot be made so. FSC validates the
+// transaction id as a UUID v7 and rejects the request outright otherwise
+// ("invalid uuid version, must be v7"), so a caller's trace id can never
+// become the transaction id. Where a caller supplies its own `traceparent` —
+// any browser with OTel instrumentation does — the two therefore differ by
+// construction, and preferring `traceparent` files LDV records under an id the
+// decision log and the txlog have never heard of.
+//
+// `traceparent` still wins wherever there is no FSC transaction: inside one
+// Verantwoordelijke's own chain that is the only correlator there is, and W3C
+// Trace Context §3.1 requires continuing it.
+//
+// The ambient span comes last. Behind otelhttp every request already carries a
+// locally created server span, so asking the context earlier would always
+// answer and no header would ever be reached — every component would file its
+// records under a trace id of its own, which is precisely the chain view this
+// exists to make possible.
 //
 // Hence the extraction runs against context.Background(): the propagator
 // returns its input unchanged when the carrier holds no valid traceparent, so
 // handing it the live context would let the ambient span through disguised as
 // an extracted one.
 func TraceContextFrom(ctx context.Context, header http.Header, spanID string) TraceContext {
+	if candidate := NormalizeTraceID(header.Get("Fsc-Transaction-Id")); candidate != "" {
+		return TraceContext{TraceID: candidate, SpanID: spanID, Sampled: true}
+	}
 	fromHeader := trace.SpanContextFromContext(
 		propagator.Extract(context.Background(), propagation.HeaderCarrier(header)),
 	)
@@ -79,10 +105,8 @@ func TraceContextFrom(ctx context.Context, header http.Header, spanID string) Tr
 			State:   fromHeader.TraceState().String(),
 		}
 	}
-	for _, name := range []string{"Fsc-Transaction-Id", "X-Request-Id"} {
-		if candidate := NormalizeTraceID(header.Get(name)); candidate != "" {
-			return TraceContext{TraceID: candidate, SpanID: spanID, Sampled: true}
-		}
+	if candidate := NormalizeTraceID(header.Get("X-Request-Id")); candidate != "" {
+		return TraceContext{TraceID: candidate, SpanID: spanID, Sampled: true}
 	}
 	if ambient := trace.SpanContextFromContext(ctx); ambient.HasTraceID() {
 		return TraceContext{

@@ -83,7 +83,7 @@ func TestTracestateSurvivesTheHop(t *testing.T) {
 // The FSC hop strips traceparent, so on the far side the Fsc-Transaction-Id is
 // all there is — and it carries the same value, being a UUID. That fallback is
 // the documented profile deviation.
-func TestTraceContextFallsBackToTheFscTransactionID(t *testing.T) {
+func TestTheFscTransactionIDIsTheTraceID(t *testing.T) {
 	header := http.Header{}
 	header.Set("Fsc-Transaction-Id", "0af76519-16cd-43dd-8448-eb211c80319c")
 
@@ -91,10 +91,34 @@ func TestTraceContextFallsBackToTheFscTransactionID(t *testing.T) {
 	if traceContext.TraceID != "0af7651916cd43dd8448eb211c80319c" {
 		t.Fatalf("TraceID = %q, want the transaction id with the hyphens removed", traceContext.TraceID)
 	}
+}
 
+// The case that broke the chain view. Any browser with OTel instrumentation
+// sends its own traceparent, and FSC will not accept that trace id as a
+// transaction id (it validates UUID v7), so the request legitimately carries
+// two unrelated ids. Filing the record under the caller's trace put it beyond
+// the reach of the txlog and the decision log, which only know the FSC one.
+func TestTheFscTransactionIDBeatsACallersTraceparent(t *testing.T) {
+	header := http.Header{}
+	header.Set("Fsc-Transaction-Id", "0af76519-16cd-43dd-8448-eb211c80319c")
 	header.Set("traceparent", "00-11111111111111111111111111111111-b7ad6b7169203331-01")
-	if got := TraceContextFrom(context.Background(), header, "00f067aa0ba902b7").TraceID; got != "11111111111111111111111111111111" {
-		t.Errorf("TraceID = %q, want the traceparent to win", got)
+
+	got := TraceContextFrom(context.Background(), header, "00f067aa0ba902b7").TraceID
+	if got != "0af7651916cd43dd8448eb211c80319c" {
+		t.Errorf("TraceID = %q, want the FSC transaction id", got)
+	}
+}
+
+// Without an FSC transaction there is nothing to prefer, and W3C Trace Context
+// §3.1 requires continuing the caller's trace.
+func TestTraceparentWinsWhenThereIsNoFscTransaction(t *testing.T) {
+	header := http.Header{}
+	header.Set("traceparent", "00-11111111111111111111111111111111-b7ad6b7169203331-01")
+	header.Set("X-Request-Id", "0af76519-16cd-43dd-8448-eb211c80319c")
+
+	got := TraceContextFrom(context.Background(), header, "00f067aa0ba902b7").TraceID
+	if got != "11111111111111111111111111111111" {
+		t.Errorf("TraceID = %q, want the traceparent", got)
 	}
 }
 
