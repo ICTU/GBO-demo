@@ -392,3 +392,131 @@ func TestUpstreamClientHasTimeout(t *testing.T) {
 		t.Fatal("upstreamClient has no timeout")
 	}
 }
+
+// A chain view is one query per logbook joined on the trace id, because LDV
+// keeps each Verantwoordelijke's records in its own store. This checks the
+// join actually happens and that one unreachable logbook does not take the
+// whole view down with it.
+func TestLdvChainQueriesEveryLogbook(t *testing.T) {
+	var seenAuth, seenMethod, seenTrace string
+	bd := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenAuth = r.Header.Get("Authorization")
+		seenMethod = r.Method
+		var body struct {
+			TraceID string `json:"traceId"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		seenTrace = body.TraceID
+		// The read extension's own shape: metadata plus
+		// dataProcessingOperations, camelCase.
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"metadata": map[string]any{
+				"logbookId":        "https://logboek.belastingdienst.nl/data-processing-operations",
+				"organizationName": "Belastingdienst",
+			},
+			"dataProcessingOperations": []map[string]any{{
+				"traceId": seenTrace,
+				"spanId":  "b7ad6b7169203331",
+				"name":    "dataverwerking.bronbevraging",
+				"status":  "Ok",
+				"attributes": map[string]any{
+					"dpl.core.processing_activity_id": "https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-ib-2025/v1",
+				},
+			}},
+		})
+	}))
+	defer bd.Close()
+
+	// A logbook that is down must be visible as down, not as empty.
+	brp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer brp.Close()
+
+	cfg := config{
+		LdvReadToken: "read-token",
+		LdvLogbooks: []ldvLogbook{
+			{ID: "logboek-bd", Name: "BD", URL: bd.URL},
+			{ID: "logboek-brp", Name: "RvIG", URL: brp.URL},
+		},
+	}
+	srv := httptest.NewServer(handleLdvChain(cfg))
+	defer srv.Close()
+
+	// The portal holds the hyphenated Fsc-Transaction-Id; the logbook stores
+	// the OTel spelling of the same value.
+	response, err := http.Get(srv.URL + "/ldv/0af76519-16cd-43dd-8448-eb211c80319c")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer func() { _ = response.Body.Close() }()
+
+	var payload ldvChainResponse
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if payload.TraceID != "0af7651916cd43dd8448eb211c80319c" {
+		t.Errorf("trace_id = %q, want the OTel spelling", payload.TraceID)
+	}
+	if seenMethod != http.MethodPost {
+		t.Errorf("the logbook was queried with %s; the read extension is POST", seenMethod)
+	}
+	if seenTrace != "0af7651916cd43dd8448eb211c80319c" {
+		t.Errorf("the logbook was queried with %q", seenTrace)
+	}
+	// The logbook names itself, and that wins over our configured label.
+	if payload.Logbooks[0].Logbook.Name != "Belastingdienst" {
+		t.Errorf("logbook name = %q", payload.Logbooks[0].Logbook.Name)
+	}
+	if seenAuth != "Bearer read-token" {
+		t.Errorf("Authorization = %q", seenAuth)
+	}
+	if len(payload.Logbooks) != 2 {
+		t.Fatalf("got %d logbooks, want one result per configured logbook", len(payload.Logbooks))
+	}
+	if len(payload.Logbooks[0].Records) != 1 {
+		t.Errorf("the reachable logbook returned %d records", len(payload.Logbooks[0].Records))
+	}
+	if payload.Logbooks[1].Error == "" {
+		t.Error("an unreachable logbook must report an error rather than look empty")
+	}
+	if payload.Logbooks[1].Records == nil {
+		t.Error("records should be an empty list rather than null, so the UI needs no null check")
+	}
+}
+
+// With no logbooks configured the endpoint answers empty rather than failing,
+// the way the txlog endpoint does when fsc-infra is not running.
+func TestLdvChainWithoutConfiguredLogbooks(t *testing.T) {
+	srv := httptest.NewServer(handleLdvChain(config{}))
+	defer srv.Close()
+
+	response, err := http.Get(srv.URL + "/ldv/0af7651916cd43dd8448eb211c80319c")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", response.StatusCode)
+	}
+	var payload ldvChainResponse
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(payload.Logbooks) != 0 {
+		t.Fatalf("logbooks = %+v, want none", payload.Logbooks)
+	}
+}
+
+func TestParseLdvLogbooks(t *testing.T) {
+	logbooks := parseLdvLogbooks("logboek-bd=Belastingdienst=http://logboek-bd:4016/,logboek-brp=RvIG=http://logboek-brp:4016,broken,=x=y")
+	if len(logbooks) != 2 {
+		t.Fatalf("logbooks = %+v, want the two well-formed entries", logbooks)
+	}
+	if logbooks[0].URL != "http://logboek-bd:4016" {
+		t.Errorf("trailing slash not trimmed: %q", logbooks[0].URL)
+	}
+	if logbooks[1].Name != "RvIG" {
+		t.Errorf("name = %q", logbooks[1].Name)
+	}
+}

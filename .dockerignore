@@ -1,0 +1,20 @@
+# Applies only to builds whose context is the repository root. Several images
+# have one, because they reach outside their own service directory:
+# eudi-adapter, dev-portal-backend and openftv-pdp bake in ./policies, and the
+# services that write Logboek Dataverwerkingen records depend on the sibling
+# services/ldv-client module.
+#
+# Deliberately conservative: it lists only what no root-context Dockerfile
+# copies and what is large or secret. The nl-wallet submodule is the reason it
+# exists at all — without this every root-context build shipped it as context.
+# Anything a Dockerfile needs must NOT be listed here.
+.git
+.claude
+vendor
+.local
+**/node_modules
+**/*.db
+**/*.db-wal
+**/*.db-shm
+.env
+fsc-infra/.env

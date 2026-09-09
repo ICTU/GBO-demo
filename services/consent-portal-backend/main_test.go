@@ -74,7 +74,7 @@ func TestPortalGiveThenList(t *testing.T) {
 		BSNkURL:    bsnk.URL,
 		ConsentURL: register.URL,
 	}
-	srv := httptest.NewServer(newMux(cfg, portalhttp.NewHub()))
+	srv := httptest.NewServer(newMux(cfg, portalhttp.NewHub(), nil))
 	defer srv.Close()
 
 	// /health sanity check.
@@ -196,7 +196,7 @@ func assertPrivateAPICalls(t *testing.T, calls []consent.APICall) {
 // answered 500 "streaming not supported". Wire it exactly as main does.
 func TestSSEStreamsThroughAccessLog(t *testing.T) {
 	hub := portalhttp.NewHub()
-	srv := httptest.NewServer(logctx.WithAccessLog(newMux(config{Port: "0"}, hub)))
+	srv := httptest.NewServer(logctx.WithAccessLog(newMux(config{Port: "0"}, hub, nil)))
 	defer srv.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

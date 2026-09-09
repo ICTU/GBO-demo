@@ -1,0 +1,268 @@
+// Package sqlite stores LDV records durably.
+//
+// SQLite, like the dvtp-onboarding-register: the demo needs a store that
+// survives a restart and can be inspected with one command, not a cluster.
+// What matters for LDV is the write discipline — every Append commits before
+// it returns, and there is no batching layer anywhere in this package.
+package sqlite
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"ldv-logboek/internal/ldv"
+
+	_ "modernc.org/sqlite"
+)
+
+type Repository struct {
+	db *sql.DB
+}
+
+// The record columns are the LDV fields a reader queries on; resource and
+// attributes stay JSON because they are open maps. The primary key is
+// (trace_id, span_id) — the identity of the operation — which is what makes a
+// producer's retry idempotent rather than duplicating a Dataverwerking.
+const schema = `
+CREATE TABLE IF NOT EXISTS records (
+    trace_id TEXT NOT NULL,
+    span_id TEXT NOT NULL,
+    parent_span_id TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL,
+    status TEXT NOT NULL,
+    start_time TEXT NOT NULL,
+    end_time TEXT NOT NULL,
+    received_at TEXT NOT NULL,
+    processing_activity_id TEXT NOT NULL,
+    data_subject_id TEXT NOT NULL,
+    data_subject_id_type TEXT NOT NULL,
+    resource TEXT NOT NULL,
+    attributes TEXT NOT NULL,
+    PRIMARY KEY (trace_id, span_id)
+);
+-- The three axes the read extension queries on. A logbook is written once and
+-- read rarely, so the cost is in the write; these keep a read from scanning.
+CREATE INDEX IF NOT EXISTS records_by_activity ON records (processing_activity_id, received_at);
+CREATE INDEX IF NOT EXISTS records_by_subject ON records (data_subject_id_type, data_subject_id, received_at);
+CREATE INDEX IF NOT EXISTS records_by_trace ON records (trace_id, start_time);
+`
+
+// Open prepares the store. It creates the containing directory so a fresh
+// volume needs no init container.
+func Open(path string) (*Repository, error) {
+	if path != ":memory:" {
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+			return nil, fmt.Errorf("create database directory: %w", err)
+		}
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return nil, fmt.Errorf("open sqlite: %w", err)
+	}
+	db.SetMaxOpenConns(1)
+	// synchronous=FULL rather than the WAL default of NORMAL: a confirmed LDV
+	// write must survive an unclean shutdown, and "probably flushed" is not
+	// what the producer was told.
+	for _, pragma := range []string{
+		"PRAGMA busy_timeout = 5000",
+		"PRAGMA journal_mode = WAL",
+		"PRAGMA synchronous = FULL",
+	} {
+		if _, err := db.Exec(pragma); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("configure sqlite: %w", err)
+		}
+	}
+	if _, err := db.Exec(schema); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("initialize sqlite schema: %w", err)
+	}
+	return &Repository{db: db}, nil
+}
+
+func (r *Repository) Close() error { return r.db.Close() }
+
+// Append writes one record, synchronously. A primary-key collision is
+// reported as ldv.ErrDuplicateRecord so the core can distinguish a replay
+// from a storage failure.
+func (r *Repository) Append(ctx context.Context, stored ldv.Stored) error {
+	resource, err := json.Marshal(orEmptyMap(stored.Resource))
+	if err != nil {
+		return fmt.Errorf("encode resource: %w", err)
+	}
+	attributes, err := json.Marshal(stored.Attributes)
+	if err != nil {
+		return fmt.Errorf("encode attributes: %w", err)
+	}
+	_, err = r.db.ExecContext(ctx, `
+        INSERT INTO records (
+            trace_id, span_id, parent_span_id, name, status,
+            start_time, end_time, received_at,
+            processing_activity_id, data_subject_id, data_subject_id_type,
+            resource, attributes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+		stored.TraceID, stored.SpanID, stored.ParentSpanID, stored.Name, stored.Status,
+		formatTime(stored.StartTime), formatTime(stored.EndTime), formatTime(stored.ReceivedAt),
+		stored.ProcessingActivityID(), stored.DataSubjectID(), stored.DataSubjectIDType(),
+		string(resource), string(attributes),
+	)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return ldv.ErrDuplicateRecord
+		}
+		return fmt.Errorf("insert record: %w", err)
+	}
+	return nil
+}
+
+// Count reports how many records are stored. Used by the health endpoint and
+// by the restart-survival test.
+func (r *Repository) Count(ctx context.Context) (int, error) {
+	var count int
+	if err := r.db.QueryRowContext(ctx, `SELECT count(*) FROM records`).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count records: %w", err)
+	}
+	return count, nil
+}
+
+// Get returns the record stored under one identity, so the core can tell a
+// producer's replay from a different record that collides with it.
+func (r *Repository) Get(ctx context.Context, traceID, spanID string) (ldv.Stored, bool, error) {
+	records, err := r.Query(ctx, ldv.Query{TraceID: traceID, Limit: ldv.MaxReadLimit})
+	if err != nil {
+		return ldv.Stored{}, false, err
+	}
+	for _, stored := range records {
+		if stored.SpanID == spanID {
+			return stored, true, nil
+		}
+	}
+	return ldv.Stored{}, false, nil
+}
+
+// Query answers a read on one of the three axes. The core has already
+// validated that exactly one selector is set and capped the limit, so this
+// builds the WHERE clause from whatever is present.
+func (r *Repository) Query(ctx context.Context, query ldv.Query) ([]ldv.Stored, error) {
+	conditions := make([]string, 0, 3)
+	arguments := make([]any, 0, 4)
+	if query.TraceID != "" {
+		conditions = append(conditions, "trace_id = ?")
+		arguments = append(arguments, query.TraceID)
+	}
+	if query.ProcessingActivityID != "" {
+		conditions = append(conditions, "processing_activity_id = ?")
+		arguments = append(arguments, query.ProcessingActivityID)
+	}
+	if query.DataSubjectID != "" {
+		conditions = append(conditions, "data_subject_id = ?")
+		arguments = append(arguments, query.DataSubjectID)
+		if query.DataSubjectIDType != "" {
+			conditions = append(conditions, "data_subject_id_type = ?")
+			arguments = append(arguments, query.DataSubjectIDType)
+		}
+	}
+	if query.StartTime != nil {
+		conditions = append(conditions, "start_time >= ?")
+		arguments = append(arguments, formatTime(*query.StartTime))
+	}
+	if query.EndTime != nil {
+		conditions = append(conditions, "end_time <= ?")
+		arguments = append(arguments, formatTime(*query.EndTime))
+	}
+	arguments = append(arguments, query.Limit)
+
+	rows, err := r.db.QueryContext(ctx, `
+        SELECT trace_id, span_id, parent_span_id, name, status,
+               start_time, end_time, received_at, resource, attributes
+        FROM records WHERE `+strings.Join(conditions, " AND ")+`
+        ORDER BY start_time, span_id
+        LIMIT ?
+    `, arguments...)
+	if err != nil {
+		return nil, fmt.Errorf("query records: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	records := make([]ldv.Stored, 0)
+	for rows.Next() {
+		var (
+			stored                           ldv.Stored
+			startText, endText, receivedText string
+			resourceJSON, attributesJSON     string
+		)
+		if err := rows.Scan(
+			&stored.TraceID, &stored.SpanID, &stored.ParentSpanID, &stored.Name, &stored.Status,
+			&startText, &endText, &receivedText, &resourceJSON, &attributesJSON,
+		); err != nil {
+			return nil, fmt.Errorf("scan record: %w", err)
+		}
+		if stored.StartTime, err = parseTime(startText); err != nil {
+			return nil, err
+		}
+		if stored.EndTime, err = parseTime(endText); err != nil {
+			return nil, err
+		}
+		if stored.ReceivedAt, err = parseTime(receivedText); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(resourceJSON), &stored.Resource); err != nil {
+			return nil, fmt.Errorf("decode resource: %w", err)
+		}
+		if err := json.Unmarshal([]byte(attributesJSON), &stored.Attributes); err != nil {
+			return nil, fmt.Errorf("decode attributes: %w", err)
+		}
+		records = append(records, stored)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate records: %w", err)
+	}
+	return records, nil
+}
+
+func parseTime(text string) (time.Time, error) {
+	parsed, err := time.Parse(time.RFC3339Nano, text)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parse stored time %q: %w", text, err)
+	}
+	return parsed, nil
+}
+
+func orEmptyMap(resource map[string]any) map[string]any {
+	if resource == nil {
+		return map[string]any{}
+	}
+	return resource
+}
+
+// formatTime stores times as RFC 3339 with nanoseconds in UTC, so the text
+// ordering of the column equals the chronological ordering. The wire format is
+// epoch milliseconds; this is storage, where a sortable, readable column is
+// worth more than matching the transport.
+func formatTime(value time.Time) string {
+	return value.UTC().Format(time.RFC3339Nano)
+}
+
+// isUniqueViolation recognises the driver's constraint error. modernc's
+// sqlite reports it as a message rather than a typed error, so this matches on
+// the text; a false negative would surface as a 500 rather than as silent
+// data loss.
+func isUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	var target interface{ Error() string }
+	if !errors.As(err, &target) {
+		return false
+	}
+	message := strings.ToUpper(target.Error())
+	return strings.Contains(message, "UNIQUE CONSTRAINT FAILED") || strings.Contains(message, "SQLITE_CONSTRAINT_PRIMARYKEY")
+}

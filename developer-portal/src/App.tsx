@@ -6,8 +6,10 @@ import ResultPanel, { type ResultData } from './components/ResultPanel'
 import ArchStrip from './components/ArchStrip'
 import EudiQrPanel from './components/EudiQrPanel'
 import FscTxlogPanel from './components/FscTxlogPanel'
+import LdvPanel from './components/LdvPanel'
 import { useScenarios } from './hooks/useScenarios'
 import { useFscTxlog } from './hooks/useFscTxlog'
+import { useLdvChain } from './hooks/useLdvChain'
 import { useHistory } from './hooks/useHistory'
 import { useReferenceData } from './hooks/useReferenceData'
 import { useChainEvents } from './hooks/useChainEvents'
@@ -115,6 +117,9 @@ export default function App() {
   const { data: fscTxlog, loading: fscTxlogLoading, transactionId: fscTxID, overrides: fscOverrides } = useFscTxlog(
     archTraceId ?? undefined, archMode,
   )
+  // The LDV records hang off the same Fsc-Transaction-Id, so this reuses the
+  // id the txlog hook already resolved instead of finding it again.
+  const { data: ldvChain, loading: ldvLoading } = useLdvChain(fscTxID)
   // FSC-nodes come from the txlog (audit-proof replaces the 'no-otel'
   // fallback); pdp/opa come from the cross-trace-lookup on
   // Fsc-Transaction-Id. Applies to both flows that hit pdp-service via
@@ -418,7 +423,10 @@ export default function App() {
         />
 
         {(archMode === 'eudi-issuance' || archMode === 'use') && (
-          <FscTxlogPanel data={fscTxlog} transactionId={fscTxID} loading={fscTxlogLoading} />
+          <>
+            <FscTxlogPanel data={fscTxlog} transactionId={fscTxID} loading={fscTxlogLoading} />
+            <LdvPanel data={ldvChain} transactionId={fscTxID} loading={ldvLoading} />
+          </>
         )}
 
         <div className="grid4">

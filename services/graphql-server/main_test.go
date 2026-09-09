@@ -30,7 +30,7 @@ func TestPublishesSourceMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildSchema: %v", err)
 	}
-	srv := httptest.NewServer(newMux(&schema, tracer, publisher))
+	srv := httptest.NewServer(newMux(&schema, tracer, nil, publisher))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/.well-known/gbo")
@@ -88,7 +88,7 @@ func TestGraphQLHappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildSchema: %v", err)
 	}
-	srv := httptest.NewServer(newMux(&schema, tracer))
+	srv := httptest.NewServer(newMux(&schema, tracer, nil))
 	defer srv.Close()
 
 	body := `{"query":"query($bsn: BSN!) { ingeschrevenPersoon(bsn: $bsn) { bsn heeftBelastingjaarAangifte { belastingjaar status indieningsdatum ... on AangifteIH { verzamelinkomen { waarde valuta } } } } }","variables":{"bsn":"123456789"}}`
@@ -158,7 +158,7 @@ func TestGraphQLBelastingjarenFilter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildSchema: %v", err)
 	}
-	srv := httptest.NewServer(newMux(&schema, tracer))
+	srv := httptest.NewServer(newMux(&schema, tracer, nil))
 	defer srv.Close()
 
 	body := `{"query":"query($bsn: BSN!) { ingeschrevenPersoon(bsn: $bsn) { heeftBelastingjaarAangifte(belastingjaren: [2025]) { belastingjaar } } }","variables":{"bsn":"123456789"}}`
@@ -266,7 +266,7 @@ func testMux(t *testing.T) *http.ServeMux {
 	if err != nil {
 		t.Fatalf("buildSchema: %v", err)
 	}
-	return newMux(&schema, tracer)
+	return newMux(&schema, tracer, nil)
 }
 
 // This server serves GraphQL and nothing else: the playground moved to the
@@ -394,7 +394,7 @@ func TestGraphQLHealth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildSchema: %v", err)
 	}
-	srv := httptest.NewServer(newMux(&schema, tracer))
+	srv := httptest.NewServer(newMux(&schema, tracer, nil))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/health")

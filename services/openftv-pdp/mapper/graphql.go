@@ -280,7 +280,7 @@ func fetchConsent(headers map[string]string) map[string]any {
 	if validUntilErr != nil || claims.ExpiresAt == nil || !parsedValidUntil.Equal(claims.ExpiresAt.Time) {
 		return invalidConsent("valid_until does not match exp")
 	}
-	status, found, err := fetchConsentStatus(claims.ConsentID)
+	status, found, err := fetchConsentStatus(claims.ConsentID, firstHeader(headers, "Fsc-Transaction-Id", "X-Request-Id", "X-Request-ID"))
 	if err != nil {
 		return map[string]any{
 			"context_valid":    true,
@@ -404,13 +404,21 @@ func fetchConsentKeys(source string) (map[string]*ecdsa.PublicKey, error) {
 	return keys, nil
 }
 
-func fetchConsentStatus(consentID string) (string, bool, error) {
+// fetchConsentStatus asks the consent register whether the consent is still
+// live. txID is passed on rather than dropped: confirming a status is itself
+// a Dataverwerking that the register logs, and without the identifier that
+// record lands under a trace of its own — outside the very request it was
+// part of, and therefore invisible in a chain view that joins on it.
+func fetchConsentStatus(consentID, txID string) (string, bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	u := consentURL() + "/consents/" + url.PathEscape(consentID) + "/status"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return "", false, err
+	}
+	if txID != "" {
+		req.Header.Set("Fsc-Transaction-Id", txID)
 	}
 	resp, err := consentClient.Do(req)
 	if err != nil {

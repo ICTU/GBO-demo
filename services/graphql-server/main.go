@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	ldv "gbo-demo/ldv-client"
 	"log/slog"
 	"net/http"
 	"os"
@@ -58,10 +59,19 @@ const readHeaderTimeout = 10 * time.Second
 // in-flight requests finish, then close whatever is left.
 const shutdownTimeout = 15 * time.Second
 
+// ldvDeliveryInterval is how often the LDV spool is drained. Records are
+// durable the moment they are written, so this governs only how quickly they
+// reach the logbook, not whether they do.
+const ldvDeliveryInterval = 2 * time.Second
+
 type config struct {
 	Port               string
 	MockDataPath       string
 	SourceMetadataPath string
+	// LDVQuery describes how this bron names its verwerkingsactiviteiten.
+	// The same image serves BD, BRP and the deliberately unsecured demo
+	// source, so nothing about a register may be baked in.
+	LDVQuery ldvQueryConfig
 }
 
 func loadConfig() (config, error) {
@@ -69,6 +79,10 @@ func loadConfig() (config, error) {
 		Port:               getEnv("PORT", "4000"),
 		MockDataPath:       getEnv("MOCKDATA_PATH", "mockdata/citizens.json"),
 		SourceMetadataPath: os.Getenv("GBO_SOURCE_METADATA_PATH"),
+		LDVQuery: ldvQueryConfig{
+			YearActivityTemplate: os.Getenv("LDV_YEAR_ACTIVITY_TEMPLATE"),
+			ScopeActivityBase:    os.Getenv("LDV_SCOPE_ACTIVITY_BASE"),
+		},
 	}, nil
 }
 
@@ -223,16 +237,29 @@ var ingeschrevenPersoonType = graphql.NewObject(graphql.ObjectConfig{
 				if !ok {
 					return nil, nil
 				}
+				facts := queryFactsFrom(p.Context)
 				jarenRaw, _ := p.Args["belastingjaren"].([]interface{})
 				if len(jarenRaw) == 0 {
+					// No filter: the processing covers every year served.
+					years := make([]int, 0, len(persoon.HeeftBelastingjaarAangifte))
+					for _, a := range persoon.HeeftBelastingjaarAangifte {
+						years = append(years, a.Belastingjaar)
+					}
+					facts.noteYears(years)
 					return persoon.HeeftBelastingjaarAangifte, nil
 				}
 				yearSet := make(map[int]bool, len(jarenRaw))
+				requested := make([]int, 0, len(jarenRaw))
 				for _, y := range jarenRaw {
 					if yr, ok := y.(int); ok {
 						yearSet[yr] = true
+						requested = append(requested, yr)
 					}
 				}
+				// The requested years, not the matched ones: asking about a
+				// year is the Dataverwerking, whether or not it yielded an
+				// aangifte.
+				facts.noteYears(requested)
 				var filtered []AangifteIH
 				for _, a := range persoon.HeeftBelastingjaarAangifte {
 					if yearSet[a.Belastingjaar] {
@@ -264,6 +291,11 @@ func buildSchema(tracer trace.Tracer, store map[string]Citizen) (graphql.Schema,
 					if !exists {
 						return nil, nil
 					}
+					// The Betrokkene this query is about. Recorded here, at
+					// the point the bron actually looks the person up, so the
+					// LDV record describes the processing rather than the
+					// request that asked for it.
+					queryFactsFrom(ctx).noteSubject(bsn)
 					return citizen, nil
 				},
 			},
@@ -323,7 +355,7 @@ func initTracer(ctx context.Context) (func(context.Context) error, error) {
 // main so integration tests can wire the handlers to an httptest.Server
 // without starting the real listener. Schema + tracer are constructed by
 // main and injected here; loading mock data + env-reads stay in main.
-func newMux(schema *graphql.Schema, tracer trace.Tracer, publishers ...http.Handler) *http.ServeMux {
+func newMux(schema *graphql.Schema, tracer trace.Tracer, logbook *sourceLogbook, publishers ...http.Handler) *http.ServeMux {
 	mux := http.NewServeMux()
 	if len(publishers) > 0 && publishers[0] != nil {
 		mux.Handle("/.well-known/gbo", publishers[0])
@@ -345,7 +377,7 @@ func newMux(schema *graphql.Schema, tracer trace.Tracer, publishers ...http.Hand
 
 	// Wrap with OTel span
 	mux.HandleFunc("/graphql", func(w http.ResponseWriter, r *http.Request) {
-		_, span := tracer.Start(r.Context(), "graphql.query")
+		ctx, span := tracer.Start(r.Context(), "graphql.query")
 		defer span.End()
 		// The FSC-Inway proxies the Fsc-Transaction-Id through to the
 		// backend. Store it as a span attribute so the dev-portal can use a
@@ -354,7 +386,27 @@ func newMux(schema *graphql.Schema, tracer trace.Tracer, publishers ...http.Hand
 		if txID := r.Header.Get("Fsc-Transaction-Id"); txID != "" {
 			span.SetAttributes(attribute.String("gbo.fsc.transaction_id", txID))
 		}
-		gqlHandler.ServeHTTP(w, r.WithContext(r.Context()))
+
+		if logbook == nil {
+			gqlHandler.ServeHTTP(w, r.WithContext(ctx))
+			return
+		}
+
+		// The records are made durable in the local spool before this handler
+		// returns, so the answer no longer has to be held back waiting on the
+		// logbook. It is still buffered, because a record that cannot even be
+		// spooled means the processing is unrecorded, and that must not be
+		// answered with data.
+		start := time.Now().UTC()
+		factsCtx, facts := withQueryFacts(ctx)
+		buffered := newBufferedResponse()
+		gqlHandler.ServeHTTP(buffered, r.WithContext(factsCtx))
+
+		if err := logbook.logQuery(factsCtx, r, facts, start, buffered.status); err != nil {
+			http.Error(w, "the source query could not be logged; withholding the response", http.StatusInternalServerError)
+			return
+		}
+		buffered.flushTo(w)
 	})
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -374,7 +426,8 @@ func fatal(msg string, err error) {
 }
 
 func main() {
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", "graphql-server"))
+	serviceName := getEnv("OTEL_SERVICE_NAME", "graphql-server")
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", serviceName))
 	cfg, err := loadConfig()
 	if err != nil {
 		fatal("loading configuration from environment", err)
@@ -409,11 +462,46 @@ func main() {
 	if err != nil {
 		fatal("loading source metadata publisher", err)
 	}
+	// Either this bron is part of an LDV chain and cannot start without its
+	// logbook, or it is not and writes no records. The unsecured demo source
+	// runs the same image with no LDV_LOGBOOK_URL and takes the second path.
+	client, err := ldv.New(ldv.Config{
+		ServiceName:  serviceName,
+		LogbookURL:   os.Getenv("LDV_LOGBOOK_URL"),
+		WriteToken:   os.Getenv("LDV_WRITE_TOKEN"),
+		PseudonymKey: os.Getenv("LDV_SUBJECT_PSEUDONYM_KEY"),
+	})
+	if err != nil {
+		fatal("configuring the logboek client", err)
+	}
+	if client == nil {
+		slog.Warn("no LDV_LOGBOOK_URL configured; this bron writes no Logboek Dataverwerkingen records")
+	}
+
+	// A local spool: the record is made durable here and delivered to the
+	// logbook afterwards. Withholding a response never un-processed anything,
+	// so what matters is that the record cannot be lost — and the logbook
+	// stops being on the critical path of every request.
+	if client != nil {
+		outbox, err := ldv.OpenOutbox(getEnv("LDV_OUTBOX_PATH", "/data/ldv-outbox.jsonl"), client)
+		if err != nil {
+			fatal("opening the LDV outbox", err)
+		}
+		defer func() { _ = outbox.Close() }()
+		client.UseOutbox(outbox)
+		if pending, err := outbox.Pending(ctx); err == nil && pending > 0 {
+			slog.Info("LDV records waiting from a previous run", "pending", pending)
+		}
+		go outbox.Run(ctx, ldvDeliveryInterval)
+	}
+
+	logbook := newSourceLogbook(client, cfg.LDVQuery)
+
 	var mux *http.ServeMux
 	if publisher == nil {
-		mux = newMux(&schema, tracer)
+		mux = newMux(&schema, tracer, logbook)
 	} else {
-		mux = newMux(&schema, tracer, publisher)
+		mux = newMux(&schema, tracer, logbook, publisher)
 	}
 
 	srv := &http.Server{
