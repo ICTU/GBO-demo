@@ -59,14 +59,17 @@ SERVICE_INWAY_ADDRESS="${SERVICE_INWAY_ADDRESS:-https://bd-inway:443}"
 # Grant properties (fsc-core §Properties) on the service-connection grant.
 # They are part of the grant hash, so both peers countersign the regime the
 # consumer is judged under, and the provider Manager emits them in the access
-# token as the `prp` claim. Two consumers read them from there:
-#   flow            — authorization regime; the OpenFTV request-mapper
-#                     dispatches on it and denies when it is absent
+# token as the `prp` claim. One consumer reads them from there:
 #   subject_id_type — 'pseudonym' makes the bron-sidecar substitute PI -> BSN,
 #                     'direct' passes the query through unchanged
+#
+# `flow` used to sit here too. It is gone (#334): the authorization regime is
+# derived from the evidence on the request, so nothing needs it declared.
+# subject_id_type stays, because identifier format is not derivable without
+# guessing at it.
 # Requires OpenFSC >= v2.0.0 on every peer on the contract; the demo pins
 # v2.4.0 (fsc-infra/docker-compose.yml).
-default_grant_properties='{"flow": "eudi:attestation", "subject_id_type": "direct"}'
+default_grant_properties='{"subject_id_type": "direct"}'
 GRANT_PROPERTIES="${GRANT_PROPERTIES:-$default_grant_properties}"
 if ! jq -e 'type == "object"' >/dev/null 2>&1 <<<"$GRANT_PROPERTIES"; then
   echo "GRANT_PROPERTIES must be a JSON object, got: $GRANT_PROPERTIES" >&2

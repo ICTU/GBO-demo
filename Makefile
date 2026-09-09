@@ -436,15 +436,16 @@ fsc-seed-rvig-source: fsc-local-env
 
 # One FSC participant publishes two logical metadata services. The manually
 # configured service reference selects which source document is fetched.
-# Metadata transport is not a subject-bound flow, so its connection grants
-# carry only `flow`; no subject_id_type means the bron-sidecar passes through.
+# Metadata transport is not subject-bound, so its connection grants carry no
+# properties at all: no subject_id_type means the bron-sidecar passes through,
+# and the metadata policy path gates on subject, method and endpoint (#334).
 fsc-seed-metadata: fsc-local-env
 	docker run --rm \
 		--network $(FSC_INFRA_NETWORK) \
 		--env-file fsc-infra/.env \
 		-e SERVICE_NAME=gbo-metadata-bd \
 		-e SERVICE_ENDPOINT_URL=http://graphql-server:4000 \
-		-e GRANT_PROPERTIES='{"flow": "gbo:source-metadata"}' \
+		-e GRANT_PROPERTIES='{}' \
 		-e CREATE_GRANT_LINK=false \
 		-v $(PWD)/fsc-infra:/work:ro \
 		-w /work \
@@ -455,7 +456,7 @@ fsc-seed-metadata: fsc-local-env
 		--env-file fsc-infra/.env \
 		-e SERVICE_NAME=gbo-metadata-rvig \
 		-e SERVICE_ENDPOINT_URL=http://brp-graphql-server:4001 \
-		-e GRANT_PROPERTIES='{"flow": "gbo:source-metadata"}' \
+		-e GRANT_PROPERTIES='{}' \
 		-e CREATE_GRANT_LINK=false \
 		-v $(PWD)/fsc-infra:/work:ro \
 		-w /work \

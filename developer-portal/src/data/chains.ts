@@ -48,9 +48,10 @@ export const USE_BRANCHES: NodeDef[] = [
 
 // EUDI Route 1 — wallet receives a PuB-EAA credential. Transport uses real
 // OpenFSC. FSC-Inway is the PEP (via the built-in AuthZen plugin that
-// calls pdp-service directly). Same AuthZen path as DvTP; the difference
-// is only in the flow + subject_id_type grant-properties (EUDI:
-// eudi:attestation / direct — sidecar pass-through).
+// calls pdp-service directly). Same AuthZen path as DvTP; the difference is
+// the evidence the request carries — a disclosed PID here, a verified consent
+// token on the DvTP route — plus the subject_id_type grant-property (EUDI:
+// direct — sidecar pass-through).
 //
 // The last two nodes are bron-dependent: which register a run reads from
 // follows from the usecase (BD for the inkomensverklaringen, BRP for the akte

@@ -61,11 +61,19 @@ Check the `make fsc-seed-bri` output. Common causes:
 
 ## Every request denies with `NO_APPLICABLE_RULE`
 
-The authorization regime travels in the access token as the `prp` claim: the
-properties of the service-connection grant, countersigned by both peers. The
-PDP dispatches on `prp.flow` and denies when it is absent, and the
-bron-sidecar reads `prp.subject_id_type` to decide whether to resolve PI to
-BSN. Decode the token to see what the provider Manager actually issued:
+`NO_APPLICABLE_RULE` is the engine's closed-world default: no rule declares
+the requested field. Check the field against `covers_fields` in
+`policies/dvtp/gbo/rules/` first — that, not the grant, is the catalog.
+
+The authorization regime itself no longer travels in the token. It follows
+from the evidence on the request: a verified consent token selects the
+consent regime, its absence the PID regime, and a request carrying both is
+denied with `AMBIGUOUS_EVIDENCE`. So a deny that names a consent or PID axis
+is about the request, not about a missing grant property.
+
+One property still travels in `prp`: the bron-sidecar reads
+`prp.subject_id_type` to decide whether to resolve PI to BSN. Decode the token
+to see what the provider Manager actually issued:
 
 ```bash
 docker compose logs --no-log-prefix openftv-pdp | grep -o 'Bearer [A-Za-z0-9._-]*' | tail -1 \
@@ -74,8 +82,11 @@ docker compose logs --no-log-prefix openftv-pdp | grep -o 'Bearer [A-Za-z0-9._-]
 ```
 
 An empty or missing `prp` means the connection contract carries no grant
-properties. Contracts predating the move of `flow`/`subject_id_type` from the
-retired `additional-claims-service` back into the grant are such contracts.
+properties. That is expected for the metadata services, which need none; for a
+data service it means the sidecar falls back to pass-through, so a
+`subject_id_type: pseudonym` source will not resolve PI to BSN. Contracts
+predating the move of `subject_id_type` from the retired
+`additional-claims-service` back into the grant are such contracts.
 Re-run the seed — it detects the property mismatch, creates a new contract
 (contracts are immutable) and repoints the grant-link.
 

@@ -7,10 +7,12 @@ package dvtp.gbo.rules.eud0001
 # of per-request citizen consent (DvTP-flow), the wallet-app receives
 # the credential after PID-disclosure (EUDI-flow).
 #
-# Dispatch: this rule fires only for eudi:attestation (context.flow).
-# DVT0001 fires only for dvtp:query. Both rules can cover the same fields;
-# the engine's "first rule that grants → allow" logic picks the right one
-# per request.
+# Selection: this rule fires on the evidence the request carries, not on a
+# declared flow. pid_required makes it fail closed without a disclosed PID,
+# exactly as DVT0001's consent_required does without a verified consent, so
+# on any real request at most one of the two applies. Both rules cover the
+# same fields; a request carrying BOTH kinds of evidence is denied by the
+# engine with AMBIGUOUS_EVIDENCE rather than resolved by rule ordering.
 #
 # Deliberately NOT in this V1 spec:
 #   - PID-signature verification (adapter trusts BSN from disclosed PID)
@@ -59,7 +61,6 @@ allowed_actors := {
 # allowed_actors. All checks apply to the actual query sent to the source.
 spec := {
 	"rule_id": "EUD0001",
-	"flow": "eudi:attestation",
 	"consent_required": false,
 	"consent_must_cover_scope": false,
 	"pid_required": true,

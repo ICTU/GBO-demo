@@ -6,10 +6,10 @@ package dvtp.gbo.rules.eud0002
 # nabestaande discloses her PID; the source resolves the legally relevant
 # huwelijk and exposes only the fields that can enter the credential.
 #
-# Dispatch: like EUD0001 this rule fires only for eudi:attestation.
-# The flow selects the PID-based authorization model, not the source.
-# The two EUDI rules never compete for a field because their
-# covers_fields are disjoint.
+# Selection: like EUD0001 this rule fires on a disclosed PID rather than on
+# a declared flow; pid_required makes it fail closed without one. The two
+# EUDI rules never compete for a field because their covers_fields are
+# disjoint.
 #
 # Note on the data subject: the source-owned resolver is rooted at the
 # requester's own BSN (the disclosed PID) and selects a marriage from her own
@@ -55,7 +55,6 @@ allowed_actors := {
 # is the authorization surface; no catalog scope is manufactured by GBO.
 spec := {
 	"rule_id": "EUD0002",
-	"flow": "eudi:attestation",
 	"consent_required": false,
 	"consent_must_cover_scope": false,
 	"pid_required": true,

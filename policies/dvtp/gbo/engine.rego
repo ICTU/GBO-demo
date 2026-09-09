@@ -24,6 +24,8 @@ _field_decisions := [{"field": f.id, "result": _decide(f)} | some f in _data_fie
 
 response := {"decision": false, "context": {"reason_admin": {"code": "COVERAGE_UNVERIFIABLE"}}} if {
 	_coverage_unverifiable
+} else := {"decision": false, "context": {"reason_admin": {"code": "AMBIGUOUS_EVIDENCE"}}} if {
+	_ambiguous_evidence
 } else := {"decision": true, "context": {"granted": granted}} if {
 	count(_field_decisions) > 0
 	every fd in _field_decisions {
@@ -69,6 +71,24 @@ view := {
 default _coverage_unverifiable := false
 
 _coverage_unverifiable if input.context.resolved.coverage_unverifiable
+
+default _ambiguous_evidence := false
+
+# Two authorization bases on one request: a verified consent AND a
+# disclosed PID. The request-mapper makes these mutually exclusive by
+# construction today — it fills pip.consent or pip.pid, never both — but
+# that exclusivity is a property of the flow dispatch it used to key on,
+# not of the evidence itself. Nothing upstream guarantees it once the
+# regime follows from what the request carries.
+#
+# The engine must not resolve the ambiguity silently. _evaluate_field
+# grants on the FIRST rule that returns true, so a request carrying both
+# would be decided by rule ordering — precedence, not a decision. Deny,
+# and name the reason.
+_ambiguous_evidence if {
+	object.get(_pip_obj, "consent", {}).context_valid == true
+	object.get(object.get(_pip_obj, "pid", {}), "pi", "") != ""
+}
 
 # ── Binding: self-contained rules declare their scope in policy-as-code ──────
 
@@ -151,42 +171,19 @@ _ctx := {
 
 # Mirror pip.consent.pi onto ctx.resource.pi so the rule's constraint-
 # binding (input.burgerservicenummer == resource.pi) is evaluable.
-_pip_pi := object.get(object.get(object.get(input.context, "pip", {}), "consent", {}), "pi", "")
+_pip_obj := object.get(input.context, "pip", {})
+
+_pip_pi := object.get(object.get(_pip_obj, "consent", {}), "pi", "")
 
 # ── Per-rule evaluation (given field) ────────────────────────────────────────
 
 _eval(rid, field) := lib.evaluate(_rule_meta[rid].spec, object.union(_ctx, {"field": field}))
 
-# ── Flow dispatch ────────────────────────────────────────────────────────────
-# Rules declare their authorization basis in the spec: consent_required
-# (DvTP) or pid_required (EUDI). The request flow selects that authorization
-# model; it does not select a source or individual policy. The request-mapper
-# places the trusted FSC grant property in input.context.flow. Without this
-# dispatch a DvTP-flow deny would aggregate an EUDI rule's
-# PID_NOT_PRESENT (priority 55) over the genuine DvTP reason
-# (CONSENT_SCOPE_MISMATCH, YEAR_NOT_COVERED, CONSTRAINT_MISMATCH), and
-# vice versa — the documented "this rule fires only when ..." semantics
-# in the rule files.
-
-_flow_applicable(rid) if {
-	s := _rule_meta[rid].spec
-	object.get(s, "consent_required", false)
-	input.context.flow == "dvtp:query"
-} else if {
-	s := _rule_meta[rid].spec
-	object.get(s, "pid_required", false)
-	input.context.flow == object.get(s, "flow", "")
-} else if {
-	s := _rule_meta[rid].spec
-	not object.get(s, "consent_required", false)
-	not object.get(s, "pid_required", false)
-}
-
 # ── Per-field evaluation: cheap-first, short-circuit, lazy PIP ───────────────
 
-_cheap(policy_ids) := [r | some r in policy_ids; not _rule_meta[r].has_pip; _flow_applicable(r)]
+_cheap(policy_ids) := [r | some r in policy_ids; not _rule_meta[r].has_pip]
 
-_pip(policy_ids) := [r | some r in policy_ids; _rule_meta[r].has_pip; _flow_applicable(r)]
+_pip(policy_ids) := [r | some r in policy_ids; _rule_meta[r].has_pip]
 
 _decide(f) := {"decision": false, "context": {"reason_admin": {"code": "NO_APPLICABLE_RULE", "evaluated": []}}} if {
 	count(f.policy_ids) == 0
@@ -233,7 +230,7 @@ _evaluate_field(policy_ids, field) := result if {
 	]
 	result := {
 		"decision": false,
-		"context": {"reason_admin": {"code": _worst_code(evaluated), "evaluated": evaluated}},
+		"context": {"reason_admin": {"code": _best_reason(evaluated), "evaluated": evaluated}},
 	}
 }
 
@@ -295,6 +292,36 @@ _code_priority("SCOPE_NOT_ALLOWED") := 62
 _code_priority("NO_APPLICABLE_RULE") := 25
 
 default _code_priority(_) := 5
+
+# ── Rule-level reason selection ──────────────────────────────────────────────
+# Which of the evaluated rules gives the informative reason for this field?
+#
+# Priority alone is not enough. Rules covering the same field declare
+# different authorization bases — DVT0001 a verified consent, EUD0001 and
+# EUD0002 a disclosed PID — and each fails closed when its own basis is
+# absent. So on any request at least one rule denies for a reason that says
+# nothing about the request beyond "wrong regime": a consent-based request
+# collects PID_NOT_PRESENT (55) from the EUDI rules, and a PID-based request
+# collects CONSENT_CONTEXT_INVALID (70), the top of the table, from DVT0001.
+# Ranking those by priority buries the genuine reason.
+#
+# Cascade depth separates the two cases without the engine having to know
+# what a regime is. A rule whose basis does not fit this request passes
+# NOTHING before it stops: every axis ahead of its basis check is skipped
+# (inapplicable to its spec), and the basis check itself fails. A rule whose
+# basis does fit gets past it and fails on something substantive, having
+# passed at least one axis. So: take the rules that got furthest through
+# their own cascade, then apply the priority table among those.
+#
+# Skipped steps deliberately do not count — they are axes the rule does not
+# declare, not axes it satisfied.
+_passed_count(steps) := count([s | some s in steps; s.status == "pass"])
+
+_best_reason(evaluated) := code if {
+	depth := max([_passed_count(e.steps) | some e in evaluated])
+	deepest := [e | some e in evaluated; _passed_count(e.steps) == depth]
+	code := _worst_code(deepest)
+} else := "NO_APPLICABLE_RULE"
 
 _worst_code(evaluated) := code if {
 	some i in numbers.range(0, count(evaluated) - 1)

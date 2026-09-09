@@ -4,8 +4,11 @@
 # publication per service, multiple connections (per consumer).
 #
 # Grant properties:
-#   flow: dvtp:query          (policy dispatch)
 #   subject_id_type: pseudonym (sidecar substitutes PI -> BSN)
+#
+# No `flow`: the authorization regime follows from the evidence a request
+# carries — a verified consent token here — not from a declared property
+# (#334).
 #
 # Idempotent: skipped if the connection is Valid and the grant-link is
 # set.
@@ -35,7 +38,7 @@ HV_CA="$HV_INTERNAL_DIR/intermediate_ca.pem"
 # Grant properties (fsc-core §Properties). Part of the grant hash, so both
 # peers countersign them, and the provider Manager emits them in the access
 # token as the `prp` claim. See seed-bri-contract.sh for the full rationale.
-default_grant_properties='{"flow": "dvtp:query", "subject_id_type": "pseudonym"}'
+default_grant_properties='{"subject_id_type": "pseudonym"}'
 GRANT_PROPERTIES="${GRANT_PROPERTIES:-$default_grant_properties}"
 if ! jq -e 'type == "object"' >/dev/null 2>&1 <<<"$GRANT_PROPERTIES"; then
   echo "GRANT_PROPERTIES must be a JSON object, got: $GRANT_PROPERTIES" >&2
