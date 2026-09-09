@@ -38,22 +38,17 @@ than assumed, which is why this demo speaks plain HTTP: the confirmation is
 then unmistakable. An organisation that already has a verwerkingenlogging
 facility should adapt to it; the LDV interface is small enough.
 
-**Two ways this design would not survive production.**
+**One way this design would not survive production.**
 
-*The logbook is on the critical path.* Fail-closed means a logbook outage is a
-service outage, so it must be at least as available as everything it logs —
-a heavy demand for a single-instance SQLite service. The better shape is a
-local durable spool: the component writes the record to its own disk, is
-confirmed there, and forwards asynchronously. The hard guarantee survives —
-nothing lost, nothing sampled — without coupling availability to a remote
-service. What the producer needs confirmed is "durably recorded", not "durably
-recorded in the remote logbook". This demo does not make that distinction.
+*Nothing here is tamper-evident.* — see below. The logbook is no longer on the
+critical path: every producer spools locally and delivers afterwards, so an
+outage delays records rather than failing requests.
 
-*Nothing here is tamper-evident.* The store accepts `UPDATE` and `DELETE` like
-any other SQLite database, and a logbook an operator can edit is not evidence.
-Production wants WORM storage, hash chaining or an external notary. That sits
-under the same governance question as retention (Q-08), but it is also a
-storage decision made early rather than late.
+The store accepts `UPDATE` and `DELETE` like any other SQLite database, and a
+logbook an operator can edit is not evidence. Production wants WORM storage,
+hash chaining or an external notary. That sits under the same governance
+question as retention (Q-08), but it is also a storage decision made early
+rather than late.
 
 ## Why this is not the observability pipeline
 
@@ -85,24 +80,56 @@ An OTel-shaped log record with the mandatory fields — `trace_id`, `span_id`,
   "parent_span_id": "00f067aa0ba902b7",
   "name": "dataverwerking.bronbevraging",
   "status": "OK",
-  "start_time": "2026-09-02T10:00:00Z",
-  "end_time": "2026-09-02T10:00:00.012Z",
-  "resource": { "service.name": "graphql-server" },
+  "start_time": 1788343200000,
+  "end_time": 1788343201500,
+  "resource": { "attributes": { "service.name": "graphql-server" } },
   "attributes": {
-    "dpl.core.processing_activity_id": "bd-ib-2025@v1",
+    "dpl.core.processing_activity_id": "https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-ib-2025/v1",
     "dpl.core.data_subject_id": "PI-abc123",
     "dpl.core.data_subject_id_type": "pi",
-    "dpl.core.foreign_operation.processor": "fsc-peer:AAAABBBBCCCCDDDDEEEE",
-    "gbo.belastingjaar": 2025
+    "dpl.core.foreign_operation.processor": "https://fsc.gbo.overheid.nl/peers/AAAABBBBCCCCDDDDEEEE",
+    "dpl.gbo.belastingjaar": 2025
   }
 }
 ```
 
-`trace_id` **is** the `Fsc-Transaction-Id`, hyphens stripped — a UUID is
-exactly 32 hex characters, so LDV's `traceID`, the ADL's trace id and the FSC
-transaction log all carry one value for one request (REQ-55). That is a
-mitigation as much as a design: FSC v2.4.0 drops `traceparent` between peers,
-so the correlation handle has to travel in a field FSC does propagate.
+Times are `uint64` milliseconds since the epoch and `resource` nests under
+`attributes` because §3.2.2 says so; `processing_activity_id` and
+`foreign_operation.processor` are a URI and a URL for the same reason. The
+read extension answers in a different shape — camelCase, RFC 3339, nested
+attributes — and that translation happens at the read boundary.
+
+### Trace Context, and where it breaks
+
+§3.1 is unambiguous: when HTTP carries a dataverwerking between applications,
+W3C Trace Context **MUST** be used. So the chain correlates on `traceparent`.
+Every hop between our own components sets one, and every component reads one.
+
+**The FSC hop is a documented profile deviation** — though not the one first
+written up here. An earlier version of this section claimed FSC v2.4.0 strips
+`traceparent` between peers. Measured against the running demo that is simply
+false: `traceparent` is forwarded and arrives intact on the far side.
+
+What does not carry across is its *authority*. FSC gives every transaction its
+own `Fsc-Transaction-Id` and validates it strictly as a UUID v7 — an id derived
+from a caller's trace is rejected outright, with `invalid uuid version, must be
+v7`. So the transaction id can never be made equal to the trace id. Whenever a
+caller brings its own `traceparent` — any browser with OTel instrumentation
+does — a request carries two unrelated 128-bit ids at once, and only one of
+them is the id FSC's transaction log and the PDP's decision log record.
+
+**So the `Fsc-Transaction-Id` wins whenever there is one**, and `traceparent`
+governs everywhere else, including every hop between our own components. That
+ordering is the deviation: preferring a header of FSC's invention over the one
+§3.1 mandates. It is named here rather than papered over, because a reader has
+to be able to tell where the chain follows the standard and where it works
+around a transport that cannot.
+
+The ordering is also what makes the benefit real: LDV's `traceID`, the ADL's
+trace id and the FSC transaction log carry one value for one request (REQ-55).
+Preferring `traceparent` instead filed LDV records under an id the other two
+had never seen, which is exactly the correlation REQ-55 asks for and is the
+bug this ordering fixes.
 
 ### Never the BSN
 
@@ -200,7 +227,7 @@ which is the register requirement actually biting rather than being described.
 | | |
 | --- | --- |
 | `POST /logboek/records` | write one record. `201` with a confirmation, `200` when the (trace_id, span_id) was already stored, `400` on malformed JSON, `422` on an unlawful record, `401` without the bearer token. |
-| `GET /logboek/records?traceID=…` | the read extension. Also `?processingActivityID=…` and `?dataSubjectId=…&dataSubjectIdType=…`; `400` without one of the three, `401` without the read token. `limit` caps the answer (default 100, max 500) and the response says whether it truncated. |
+| `POST /data-processing-operations` | the read extension, as its OpenAPI defines it. Body carries `traceId` and/or the `dpl.core.*` selectors, optionally narrowed by `startTime`/`endTime`; `400` without a selector, `401` without the read token. Errors are `application/problem+json`. |
 | `GET /verwerkingsactiviteiten` | register index (unauthenticated) |
 | `GET /verwerkingsactiviteiten/{ref}` | one entry (unauthenticated) |
 | `GET /health` | liveness |
@@ -227,9 +254,17 @@ the DPO, a toezichthouder, incident response — is exactly the open governance
 question (Q-08), and answering it with an invented demo scheme would be worse
 than saying so.
 
-The read extension is deliberately not a query language. One axis per read, a
-result cap, and no free browsing: a logbook you can page through has become a
+The read extension is not a query language, and the standard says so: at least
+one of `traceId`, `dpl.core.processingActivityId` or `dpl.core.dataSubjectId`
+must be present, and a request without them is a 400. A result cap is
+RECOMMENDED and applied. A logbook you can page through freely has become a
 second copy of the data it describes.
+
+Note the two vocabularies. The write side is snake_case with epoch
+milliseconds; the read extension is camelCase with RFC 3339 and a
+`Ok`/`Error`/`Unset` status enum. That split is the standard's own, and each
+side follows its own specification rather than being unified into something
+neither defines.
 
 ## Configuration
 
@@ -240,15 +275,45 @@ second copy of the data it describes.
 | `REGISTER_PATH` | `/config/verwerkingsactiviteiten.json` | which Verantwoordelijke this instance is |
 | `LDV_WRITE_TOKEN` | — | required; the service refuses to start without it |
 | `LDV_READ_TOKEN` | — | the read extension refuses every request without it |
+| `LDV_LOGBOOK_ID` | derived from the register | the URI of this logbook's read API |
+| `LDV_TLS_CERT_PATH`, `LDV_TLS_KEY_PATH` | — | terminate TLS here. Both or neither: one without the other fails startup rather than quietly serving plaintext |
 
-## Producers: fail-closed
+## Producers: durable first, delivered after
 
 A component joins an LDV chain by having `LDV_LOGBOOK_URL` set. Once it is,
-a processing that cannot be logged **does not deliver**: the sidecar withholds
-the source response, the bron buffers its GraphQL answer until the records are
-confirmed and returns `500` otherwise. There is no third mode where records
-are dropped quietly — that is precisely the guarantee LDV adds over an
-observability pipeline.
+every record is made **durable locally** before the processing's response
+leaves, and delivered to the logbook afterwards with retries.
+
+That is a deliberate change from failing the request when the logbook is
+unreachable. Withholding a response never un-processed anything: by the time a
+record can fail to be delivered, the source has been queried and the BSN
+resolved. The Dataverwerking happened, and refusing to answer left it
+*unlogged* — the one thing LDV forbids.
+
+The guarantee is therefore about delivery: **once `Append` returns, the record
+reaches the logbook**. It is not a claim that the record and the processing it
+describes are atomic. For the components that only read, nothing is
+transactional and nothing can be: the source query and the spool write are two
+separate acts, and a crash between them loses the record for a processing that
+happened. The window is small and the failure mode is a broken disk rather
+than an unreachable service, which is the improvement — but it is a narrower
+window, not a closed one.
+
+Replay is safe by construction: the logbook keys on `(trace_id, span_id)` and
+reports an identical replay as a duplicate, so a crash between delivery and
+cursor advance costs nothing. A *different* record under a taken identity is
+refused with `409` rather than confirmed.
+
+**The consent register is the exception, and the interesting one.** Its outbox
+is a table in the same Postgres as the consents, so a consent and the record
+of the processing that created it commit in one transaction. A file spool
+could not do that: it is durable, but it is a second store, and two stores
+cannot be committed together — there would always be a window in which a
+consent exists that nothing logged, or a record describes a mutation that
+never happened.
+
+There is no third mode where records are dropped quietly. That is precisely
+the guarantee LDV adds over an observability pipeline.
 
 With `LDV_LOGBOOK_URL` unset a component is not in an LDV chain and writes no
 records at all. That is how `unsecured-graphql-server`, which runs the same
@@ -259,6 +324,7 @@ Producer configuration:
 | variable | |
 | --- | --- |
 | `LDV_LOGBOOK_URL` | the logbook of this component's Verantwoordelijke; unset means no LDV |
+| `LDV_OUTBOX_PATH` | where the local spool lives; must be on a volume that survives a restart |
 | `LDV_WRITE_TOKEN` | must match the logbook's |
 | `LDV_SUBJECT_PSEUDONYM_KEY` | key for `logboek-pseudoniem` derivation |
 | `LDV_RESOLUTION_ACTIVITY`, `LDV_FORWARD_ACTIVITY` | `bron-sidecar`/`brp-sidecar` only — the same image runs in front of every bron, and each bron's register names its activities in its own terms |
@@ -267,6 +333,37 @@ Producer configuration:
 `consent-register` and `consent-portal-backend` need no
 `LDV_SUBJECT_PSEUDONYM_KEY`: neither ever holds a BSN in a record, so there is
 nothing to derive a pseudonym from.
+
+## The `dpl.gbo` extension, and what it is not
+
+Records carry a handful of attributes the core standard does not define:
+
+| attribute | on | why it is not derivable |
+| --- | --- | --- |
+| `dpl.gbo.betrokkeneRol` | BRP | aanvrager, or a relative named in the certificate |
+| `dpl.gbo.overledeneVerwerkt` | BRP | records that the deceased's data was disclosed while they are not a Betrokkene |
+| `dpl.gbo.consentId` / `dpl.gbo.consentCount` | consent register | which consent, and how many were shown |
+| `dpl.gbo.pseudonimiseringAanleiding` | portal | which flow triggered the pseudonymisation |
+| `dpl.gbo.sourceId` / `dpl.gbo.typeId` / `dpl.gbo.attestatieClaims` | adapter | which source and attestation, and how much was disclosed |
+
+The prefix is not decoration. The extension guideline requires every added
+attribute to carry `dpl.<extensienaam>.`, so `gbo.scope` — which is what these
+used to be — was outside the namespace the standard reserves and could not be
+made conformant by documenting it.
+
+Eight attributes remain. Everything that followed from the
+verwerkingsactiviteit, the record's own status, or its `data_subject_id_type`
+was removed rather than renamed: `gbo.scope` and `gbo.belastingjaar` (a record
+naming `…/bd-ib-2025/v1` has already said which year), `gbo.sidecar.subject_id_type`
+(the record says it), `gbo.upstream.status` and `gbo.consent.status` (the
+record's status says it), plus `gbo.bsnk.recipient`, `gbo.graphql.variable`,
+`gbo.source_oin` and the consent's scopes and use case.
+
+**This extension is not vastgesteld.** It is a local demo extension, written
+down here and nowhere else. So the honest claim for this implementation is
+**LDV core with a documented local extension**, not full LDV conformance —
+alongside the FSC trace-context deviation above, which is the other place the
+chain departs from the standard on purpose.
 
 ## The client
 
@@ -293,6 +390,87 @@ purpose-built writer: no FSC boundary, no BSN, and therefore no use for the
 shared client's machinery.
 
 ## What the flows produce
+
+### Who writes what, and where
+
+Every Verantwoordelijke keeps its own logbook and writes only its own
+processing. Nothing federates these; what joins a request across them is the
+trace id, and nothing else.
+
+```mermaid
+flowchart LR
+    subgraph HV["Hypotheekverlener (dienstverlener)"]
+        DV[dienstverlener-backend]
+    end
+
+    subgraph BD["Verantwoordelijke: Belastingdienst"]
+        BS[bron-sidecar] --> GQL[graphql-server]
+        BS -.-> LBD[(logboek-bd)]
+        GQL -.-> LBD
+    end
+
+    subgraph RVIG["Verantwoordelijke: RvIG"]
+        BRPS[brp-sidecar] --> BRPQ[brp-graphql-server]
+        BRPS -.-> LBRP[(logboek-brp)]
+        BRPQ -.-> LBRP
+    end
+
+    subgraph GBO["Verantwoordelijke: GBO"]
+        CR[consent-register]
+        CPB[consent-portal-backend]
+        EA[eudi-adapter]
+        CR -.-> LGBO[(logboek-gbo)]
+        CPB -.-> LGBO
+        EA -.-> LGBO
+    end
+
+    DV -->|FSC| BS
+    EA -->|FSC| BS
+    EA -->|FSC| BRPS
+    EA --> CR
+
+    classDef book fill:#1f2933,stroke:#7b8794,color:#e4e7eb
+    class LBD,LBRP,LGBO book
+```
+
+Solid arrows are requests; dotted arrows are records being written. A component
+only ever writes to the logbook of the Verantwoordelijke it belongs to — the
+`eudi-adapter` calls the Belastingdienst but records nothing in `logboek-bd`,
+because what it did was GBO's processing, not BD's.
+
+### What each component logs
+
+| Component | Logboek | Verwerkingsactiviteit | Betrokkene heet daar |
+|---|---|---|---|
+| `bron-sidecar` | bd | `bd-pi-bsn-resolutie`, `bd-bronquery-doorgifte` | `pi` / `logboek-pseudoniem` |
+| `graphql-server` | bd | `bd-ib-2024`, `bd-ib-2025` | `pi` / `logboek-pseudoniem` |
+| `brp-sidecar` | brp | `brp-pi-bsn-resolutie`, `brp-bronquery-doorgifte` | `pi` / `logboek-pseudoniem` |
+| `brp-graphql-server` | brp | `brp-akte-overlijden`, `brp-persoonsgegevens-verstrekking` | `logboek-pseudoniem`, `brp-persoon-id` |
+| `consent-register` | gbo | `gbo-toestemming-verlenen`, `-intrekken`, `-status`, `-inzage` | `portal-subject` |
+| `consent-portal-backend` | gbo | `gbo-bsn-pseudonimisering` | `portal-subject` |
+| `eudi-adapter` | gbo | `gbo-pid-bsn-extractie`, `gbo-attestatie-samenstellen` | `portal-subject` |
+
+The last column is the part that surprises people. **The same citizen has a
+different name in every logbook**, by design — `PI-70e1c7ef…` at the
+Belastingdienst, `EP-c44cade3…` at GBO — and no party holds the mapping. That
+is what stops the three logbooks from being reassembled into the central
+register LDV exists to avoid. It is also what makes citizen inzage a real
+design problem rather than a query: see [Scope](#scope).
+
+### Which flow lands where
+
+A single DvTP query for two belastingjaren produces exactly this, and it is
+worth knowing by heart because it is the shape you check a change against:
+
+| Logboek | Records | Which |
+|---|---|---|
+| `logboek-bd` | 4 | `pi-bsn-resolutie`, `bronquery-doorgifte`, `bd-ib-2024`, `bd-ib-2025` |
+| `logboek-brp` | 0 | the flow never touches the BRP |
+| `logboek-gbo` | 1 | `toestemming-status` |
+
+An empty `logboek-brp` there is correct, not a failure. The EUDI flow is the
+mirror image: `logboek-brp` and `logboek-gbo` fill, and which BD records appear
+depends on the attestation requested.
 
 A DvTP query, in `logboek-bd`:
 
@@ -321,7 +499,7 @@ they exist only as part of that one processing.
 The deceased is **not** among them. The AVG protects living persons, so the
 person the certificate is about is not a Betrokkene of this processing even
 though their data is what gets disclosed. The requester's record carries
-`gbo.akte.overledene_verwerkt` so a reader sees that this was decided rather
+`dpl.gbo.overledeneVerwerkt` so a reader sees that this was decided rather
 than forgotten.
 
 A consent lifecycle, in `logboek-gbo` — each step under the portal-scoped
@@ -346,9 +524,11 @@ docker compose exec -T logboek-bd \
 
 `dpl.read.nextLogbookId` is what makes a chain view assemblable without one
 place that holds everything — which is precisely what LDV's
-per-Verantwoordelijke model rules out. The `eudi-adapter` sets it on the
-attestation-assembly record, naming the logbook of the bronhouder it called,
-so a reader follows the pointer and queries there with the same trace id.
+per-Verantwoordelijke model rules out. It is the **URI of the next logbook's
+read API**, so a reader follows it directly rather than having to know what a
+local name stands for. The `eudi-adapter` sets it on the attestation-assembly
+record, pointing at the bronhouder it called, and a read there with the same
+trace id returns that half of the request.
 
 The developer portal does that fan-out for you: its **Logboek
 Dataverwerkingen** panel queries every configured logbook in parallel and
@@ -358,8 +538,10 @@ as the PDP decision above them — which is the "one trace id, three standards"
 claim, made checkable rather than asserted.
 
 ```bash
-curl -s -H "Authorization: Bearer $LDV_READ_TOKEN" \
-  "http://localhost:9416/logboek/records?traceID=<32 hex chars>" | jq
+curl -s -X POST http://localhost:9416/data-processing-operations \
+  -H "Authorization: Bearer $LDV_READ_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"traceId":"<Fsc-Transaction-Id>"}' | jq
 
 # or the whole chain at once, through the portal backend
 curl -s "http://localhost:9407/ldv/<Fsc-Transaction-Id>" | jq

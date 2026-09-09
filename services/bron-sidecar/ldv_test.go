@@ -140,8 +140,9 @@ func TestPseudonymFlowLogsBothDataverwerkingen(t *testing.T) {
 	}
 	// The request was initiated by another application, on the far side of an
 	// FSC boundary.
-	if got := forward[0].Attributes[ldv.AttrForeignOperationProcessor]; got != "fsc-peer:AAAABBBBCCCCDDDDEEEE" {
-		t.Errorf("foreign_operation.processor = %v", got)
+	// §3.2.2.9 defines the processor as a URL, so an FSC peer id gets one.
+	if got, want := forward[0].Attributes[ldv.AttrForeignOperationProcessor], ldv.DefaultPeerURIBase+"/AAAABBBBCCCCDDDDEEEE"; got != want {
+		t.Errorf("foreign_operation.processor = %v, want %v", got, want)
 	}
 	ldvtest.AssertNoBSN(t, records, demoBSN)
 }
@@ -221,11 +222,14 @@ func TestTheSidecarPassesTraceMetadataToTheSource(t *testing.T) {
 	postQuery(t, sidecar.URL, map[string]string{"Fsc-Authorization": pseudonymToken(t)},
 		`{"query":"q","variables":{"bsn":"PI-abc123"}}`)
 
-	if received.Get(ldv.HeaderTraceID) == "" {
-		t.Error("the source was not given the LDV trace id")
+	// §3.1: the trace crosses on the standard traceparent, not on a header
+	// of our own.
+	traceContext := ldv.TraceContextFrom(t.Context(), received, "")
+	if !ldv.IsTraceID(traceContext.TraceID) {
+		t.Fatalf("the source was given no usable traceparent: %q", received.Get("traceparent"))
 	}
-	if received.Get(ldv.HeaderParentSpanID) == "" {
-		t.Error("the source was not given a parent span id")
+	if got := ldv.ParentSpanFromHeader(received); !ldv.IsSpanID(got) {
+		t.Errorf("parent span = %q, want the sidecar's forward span", got)
 	}
 	if got := received.Get(ldv.HeaderSubjectID); got != "PI-abc123" {
 		t.Errorf("subject header = %q, want the PI so both components name the Betrokkene alike", got)

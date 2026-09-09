@@ -1,8 +1,12 @@
+# Built from the repository root, like the services that write to it: the
+# logbook shares the wire DTO with them through the sibling ldv-client module,
+# which a build context scoped to this directory cannot see.
 FROM golang:1.26-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2 AS build
-WORKDIR /app
-COPY go.mod go.sum ./
+WORKDIR /src/services/ldv-logboek
+COPY services/ldv-client/ /src/services/ldv-client/
+COPY services/ldv-logboek/go.mod services/ldv-logboek/go.sum ./
 RUN go mod download
-COPY . .
+COPY services/ldv-logboek/ .
 RUN CGO_ENABLED=0 go build -o /server .
 
 FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
@@ -12,6 +16,6 @@ COPY --from=build /server /server
 # mount; a deployment overrides REGISTER_PATH and mounts its own. Which one an
 # instance serves is the only thing that makes it "the logbook of the
 # Belastingdienst" rather than of some other Verantwoordelijke.
-COPY config/ /config/
+COPY services/ldv-logboek/config/ /config/
 EXPOSE 4016
 CMD ["/server"]

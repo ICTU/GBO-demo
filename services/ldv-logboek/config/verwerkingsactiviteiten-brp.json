@@ -1,6 +1,7 @@
 {
   "verantwoordelijke": "RvIG",
-  "disclaimer": "Demo-stand-in voor een Register van Verwerkingsactiviteiten. Dit is GEEN RvVA: de inhoud is afgeleid van de scope-definities in de dienstencatalogus en van de infrastructurele verwerkingen in de keten, en heeft geen enkele juridische status. Het bestaat om de LDV-eis 'elk record verwijst naar een oplosbare, geversioneerde verwerkingsactiviteit' waar te kunnen maken en om het ontbreken van een echt register zichtbaar te houden.",
+  "base_uri": "https://logboek.rvig.nl/verwerkingsactiviteiten",
+  "disclaimer": "Demo-stand-in voor een Register van Verwerkingsactiviteiten. Dit is GEEN RvVA: de inhoud is afgeleid van de scope-definities in de dienstencatalogus en van de infrastructurele verwerkingen in de keten, en heeft geen enkele juridische status. Het bestaat om de LDV-eis 'elk record verwijst naar een oplosbare, geversioneerde verwerkingsactiviteit' waar te kunnen maken en om het ontbreken van een echt register zichtbaar te houden. De base_uri is een demo-hostnaam: hij maakt de verwijzing een geldige URI zoals de standaard eist (§3.2.2.9), maar er staat niets achter.",
   "activities": [
     {
       "id": "brp-pi-bsn-resolutie",

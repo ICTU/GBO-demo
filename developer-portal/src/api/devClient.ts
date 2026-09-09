@@ -137,23 +137,24 @@ export async function fetchFscTxlog(txID: string): Promise<FscTxlogResponse | nu
 // logbook joined on the trace id — the same Fsc-Transaction-Id the FSC
 // transaction log and the PDP decision carry. The backend fans out; this is
 // the other two thirds of the "one trace id, three standards" picture.
+// One dataProcessingOperation as the read extension returns it: camelCase
+// names and RFC 3339 times, which differ from the write side's snake_case and
+// epoch milliseconds. That is the standard's own split, not ours.
 export type LdvRecord = {
-  trace_id: string
-  span_id: string
-  parent_span_id?: string
+  traceId: string
+  spanId: string
+  parentSpanId?: string
   name: string
   status: string
-  start_time: string
-  end_time: string
-  received_at: string
-  resource?: Record<string, string>
+  startTime: string
+  endTime: string
+  resource?: { attributes: Record<string, unknown> }
   attributes: Record<string, unknown>
 }
 
 export type LdvLogbookResult = {
   logbook: { id: string; name: string }
   records: LdvRecord[]
-  truncated: boolean
   error?: string
 }
 

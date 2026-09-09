@@ -18,8 +18,8 @@ import (
 // Constants rather than configuration: this service is not a generic image,
 // and its processings are the two steps of an issuance it actually performs.
 const (
-	pidExtractionActivity    = "gbo-pid-bsn-extractie@v1"
-	attestationBuildActivity = "gbo-attestatie-samenstellen@v1"
+	pidExtractionActivity    = "https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-pid-bsn-extractie/v1"
+	attestationBuildActivity = "https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-attestatie-samenstellen/v1"
 )
 
 // issuanceLogbook is the adapter's view of GBO's logbook: the shared client,
@@ -30,10 +30,11 @@ const (
 // methods below are nil-safe and the handler needs no branch.
 type issuanceLogbook struct {
 	*ldv.Client
-	// nextLogbooks maps a source id onto the logbook of the Verantwoordelijke
-	// that holds it. An issuance is where GBO's own processing hands off to a
-	// bronhouder, so it is the one place in this chain that can say where the
-	// rest of the story is written down.
+	// nextLogbooks maps a source id onto the read-API URI of the logbook that
+	// holds the bronhouder's half of the request. The extension defines
+	// dpl.read.nextLogbookId as "uri naar uniek identificeerbare API volgens
+	// extensie lezen", so a reader can follow it rather than having to know
+	// what a local name like "logboek-bd" stands for.
 	nextLogbooks map[string]string
 }
 
@@ -75,10 +76,10 @@ type issuanceRecording struct {
 // ldvTraceIDForIssuance returns the trace id the whole chain will share.
 //
 // The adapter mints the Fsc-Transaction-Id itself and stashes it on the
-// context, so it is taken from there rather than from a header: when the
-// issuance-server sends its own traceparent the OTel trace id no longer
-// equals the FSC id, and reading the ambient trace would file the adapter's
-// records under an id the source's logbook never sees.
+// context, so it is taken from there rather than from a header: it is the only
+// identifier that survives the FSC hop, and the bronhouder's logbook will file
+// its half of this request under it. Reading the ambient OTel trace instead
+// would file the adapter's records under an id the source never sees.
 func ldvTraceIDForIssuance(ctx context.Context, header http.Header) string {
 	if fscTxID, ok := ctx.Value(fscTxIDCtxKey).(string); ok && fscTxID != "" {
 		if normalized := ldv.NormalizeTraceID(fscTxID); normalized != "" {
@@ -110,7 +111,7 @@ func (l *issuanceLogbook) logPIDExtraction(ctx context.Context, r *http.Request,
 		extractSpan: ldv.SpanID(),
 		subjectID:   subjectID,
 		subjectType: subjectType,
-		processor:   ldv.ForeignProcessor(r),
+		processor:   l.ForeignProcessor(r),
 	}
 	record := ldv.Record{
 		TraceID:      recording.traceID,
@@ -121,8 +122,8 @@ func (l *issuanceLogbook) logPIDExtraction(ctx context.Context, r *http.Request,
 		StartTime:    start,
 		EndTime:      time.Now().UTC(),
 		Attributes: ldv.Attributes(pidExtractionActivity, subjectID, subjectType, recording.processor, map[string]any{
-			"gbo.source_id": sourceID,
-			"gbo.type_id":   typeID,
+			"dpl.gbo.sourceId": sourceID,
+			"dpl.gbo.typeId":   typeID,
 		}),
 	}
 	if err := l.Write(ctx, record); err != nil {
@@ -152,12 +153,11 @@ func (l *issuanceLogbook) logAttestationAssembly(ctx context.Context, recording 
 			// Where this processing continues: the bronhouder logged its own
 			// half of this request under the same trace id.
 			ldv.AttrNextLogbookID: l.nextLogbooks[sourceID],
-			"gbo.source_id":       sourceID,
-			"gbo.source_oin":      sourceOIN,
-			"gbo.type_id":         typeID,
+			"dpl.gbo.sourceId":    sourceID,
+			"dpl.gbo.typeId":      typeID,
 			// How many claims ended up in the attestation, not which: the
 			// record says what was processed, it is not a copy of it.
-			"gbo.attestatie.claims": claims,
+			"dpl.gbo.attestatieClaims": claims,
 		}),
 	}
 	if err := l.Write(ctx, record); err != nil {

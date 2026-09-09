@@ -57,7 +57,7 @@ func issuanceUnderTest(t *testing.T, logbook *ldvtest.Logbook) string {
 		Port: "0", OutwayURL: outway.URL, SourceDataTransport: sourceTransportFSC,
 		SourceDataFSCServiceReference: "bri", SourceDataFSCGrantHash: "data-grant",
 	}
-	client := newIssuanceLogbook(logbook.Client(t, "eudi-adapter"), map[string]string{"belastingdienst": "logboek-bd"})
+	client := newIssuanceLogbook(logbook.Client(t, "eudi-adapter"), map[string]string{"belastingdienst": "https://logboek.belastingdienst.nl/data-processing-operations"})
 	server := httptest.NewServer(testMux(cfg, http.DefaultClient, metadata, client))
 	t.Cleanup(server.Close)
 	return server.URL
@@ -119,11 +119,11 @@ func TestAnIssuanceLogsBothDataverwerkingen(t *testing.T) {
 	}
 	// The record says how much was processed, not what: it is a record about
 	// the attestation, not a copy of it.
-	if got := assembly[0].Attributes["gbo.attestatie.claims"]; got == nil || got == float64(0) {
-		t.Errorf("gbo.attestatie.claims = %v, want the number of claims", got)
+	if got := assembly[0].Attributes["dpl.gbo.attestatieClaims"]; got == nil || got == float64(0) {
+		t.Errorf("dpl.gbo.attestatieClaims = %v, want the number of claims", got)
 	}
-	if got := assembly[0].Attributes["gbo.source_oin"]; got != "99999999900000000200" {
-		t.Errorf("gbo.source_oin = %v", got)
+	if got := assembly[0].Attributes["dpl.gbo.sourceId"]; got != "belastingdienst" {
+		t.Errorf("dpl.gbo.sourceId = %v", got)
 	}
 }
 
@@ -204,7 +204,7 @@ func TestAnIssuanceThatCannotBeLoggedNeverReachesTheSource(t *testing.T) {
 		t.Fatalf("load source metadata: %v", err)
 	}
 
-	client := newIssuanceLogbook(logbook.Client(t, "eudi-adapter"), map[string]string{"belastingdienst": "logboek-bd"})
+	client := newIssuanceLogbook(logbook.Client(t, "eudi-adapter"), map[string]string{"belastingdienst": "https://logboek.belastingdienst.nl/data-processing-operations"})
 	cfg := config{
 		Port: "0", OutwayURL: outway.URL, SourceDataTransport: sourceTransportFSC,
 		SourceDataFSCServiceReference: "bri", SourceDataFSCGrantHash: "data-grant",
@@ -303,8 +303,8 @@ func TestTheAssemblyRecordPointsAtTheSourcesLogbook(t *testing.T) {
 	if len(assembly) != 1 {
 		t.Fatalf("expected one assembly record, got %+v", logbook.Written())
 	}
-	if got := assembly[0].Attributes[ldv.AttrNextLogbookID]; got != "logboek-bd" {
-		t.Errorf("%s = %v, want logboek-bd", ldv.AttrNextLogbookID, got)
+	if got := assembly[0].Attributes[ldv.AttrNextLogbookID]; got != "https://logboek.belastingdienst.nl/data-processing-operations" {
+		t.Errorf("%s = %v, want the source logbook's read-API URI", ldv.AttrNextLogbookID, got)
 	}
 	// The extraction happens before any bronhouder is involved, so it points
 	// nowhere — and an absent pointer must not be written as an empty one.
@@ -315,11 +315,11 @@ func TestTheAssemblyRecordPointsAtTheSourcesLogbook(t *testing.T) {
 }
 
 func TestParseNextLogbooks(t *testing.T) {
-	mapping := parseNextLogbooks(" belastingdienst=logboek-bd , rvig=logboek-brp ,, malformed ,=x, y= ")
+	mapping := parseNextLogbooks(" belastingdienst=https://a.test/data-processing-operations , rvig=https://b.test/data-processing-operations ,, malformed ,=x, y= ")
 	if len(mapping) != 2 {
 		t.Fatalf("mapping = %#v, want the two well-formed entries", mapping)
 	}
-	if mapping["belastingdienst"] != "logboek-bd" || mapping["rvig"] != "logboek-brp" {
+	if mapping["belastingdienst"] != "https://a.test/data-processing-operations" || mapping["rvig"] != "https://b.test/data-processing-operations" {
 		t.Errorf("mapping = %#v", mapping)
 	}
 }

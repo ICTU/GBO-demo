@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -69,8 +68,8 @@ func TestSourceQueryLogsUnderTheSidecarsTraceAndSubject(t *testing.T) {
 	url := sourceUnderTest(t, logbook)
 
 	response := queryYear(t, url, map[string]string{
-		ldv.HeaderTraceID:       "0af7651916cd43dd8448eb211c80319c",
-		ldv.HeaderParentSpanID:  "b7ad6b7169203331",
+		// §3.1: the trace arrives on the standard traceparent.
+		"traceparent":           "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
 		ldv.HeaderSubjectID:     "PI-abc123",
 		ldv.HeaderSubjectIDType: ldv.SubjectTypePI,
 		"X-GBO-Scope":           "bd:ib:2025",
@@ -237,16 +236,20 @@ func TestEachYearGetsItsOwnActivityEvenUnderOneScope(t *testing.T) {
 		t.Fatalf("status = %d", response.StatusCode)
 	}
 
+	// The year lives in the verwerkingsactiviteit and nowhere else, so this
+	// asserts on the activity itself: one per year, each naming its own.
 	records := logbook.Written()
 	if len(records) != 2 {
 		t.Fatalf("wrote %d records, want one per year: %+v", len(records), records)
 	}
+	named := map[string]bool{}
 	for _, record := range records {
-		year, _ := record.Attributes["gbo.belastingjaar"].(float64)
 		activity, _ := record.Attributes[ldv.AttrProcessingActivityID].(string)
-		want := "bd-ib-" + strconv.Itoa(int(year)) + "@v1"
-		if activity != want {
-			t.Errorf("a record for %d names %q, want %q — the activity must match its own year", int(year), activity, want)
+		named[activity] = true
+	}
+	for _, want := range []string{activity2024, activity2025} {
+		if !named[want] {
+			t.Errorf("no record names %q; activities = %v", want, named)
 		}
 	}
 }

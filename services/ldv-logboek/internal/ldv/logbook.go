@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	ldvclient "gbo-demo/ldv-client"
 )
 
 // Repository is the port the logbook needs from durable storage. It is
@@ -37,6 +39,17 @@ var ErrDuplicateRecord = errors.New("record already stored")
 // logged while the logbook holds something else — the one lie a logbook must
 // not tell. The producer has a bug, and gets told so.
 var ErrConflictingRecord = errors.New("a different record is already stored under this identity")
+
+// NormalizeTraceID turns a UUID-shaped correlator into an OTel trace id, or
+// returns it unchanged when it already is one. The read extension types
+// traceId as a uuid while records store the hyphen-free form, so a caller may
+// legitimately send either.
+func NormalizeTraceID(value string) string {
+	if normalized := ldvclient.NormalizeTraceID(value); normalized != "" {
+		return normalized
+	}
+	return strings.TrimSpace(value)
+}
 
 // Clock is the logbook's own notion of now, injected so tests get a fixed
 // ReceivedAt.
@@ -127,7 +140,12 @@ type Query struct {
 	// Verantwoordelijken can name different people by the same string, so
 	// without it a subject query is ambiguous.
 	DataSubjectIDType string
-	Limit             int
+	// StartTime and EndTime narrow a result to a window. They are not
+	// selectors: a read still needs one of the three axes, because a window
+	// alone would return every Betrokkene in it.
+	StartTime *time.Time
+	EndTime   *time.Time
+	Limit     int
 }
 
 // ErrNoSelector is returned for a read that names none of the three axes.

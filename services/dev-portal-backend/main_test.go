@@ -328,17 +328,29 @@ func TestUpstreamClientHasTimeout(t *testing.T) {
 // join actually happens and that one unreachable logbook does not take the
 // whole view down with it.
 func TestLdvChainQueriesEveryLogbook(t *testing.T) {
-	var seenAuth, seenTrace string
+	var seenAuth, seenMethod, seenTrace string
 	bd := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seenAuth = r.Header.Get("Authorization")
-		seenTrace = r.URL.Query().Get("traceID")
+		seenMethod = r.Method
+		var body struct {
+			TraceID string `json:"traceId"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		seenTrace = body.TraceID
+		// The read extension's own shape: metadata plus
+		// dataProcessingOperations, camelCase.
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"records": []map[string]any{{
-				"trace_id": seenTrace,
-				"span_id":  "b7ad6b7169203331",
-				"name":     "dataverwerking.bronbevraging",
+			"metadata": map[string]any{
+				"logbookId":        "https://logboek.belastingdienst.nl/data-processing-operations",
+				"organizationName": "Belastingdienst",
+			},
+			"dataProcessingOperations": []map[string]any{{
+				"traceId": seenTrace,
+				"spanId":  "b7ad6b7169203331",
+				"name":    "dataverwerking.bronbevraging",
+				"status":  "Ok",
 				"attributes": map[string]any{
-					"dpl.core.processing_activity_id": "bd-ib-2025@v1",
+					"dpl.core.processing_activity_id": "https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-ib-2025/v1",
 				},
 			}},
 		})
@@ -354,7 +366,7 @@ func TestLdvChainQueriesEveryLogbook(t *testing.T) {
 	cfg := config{
 		LdvReadToken: "read-token",
 		LdvLogbooks: []ldvLogbook{
-			{ID: "logboek-bd", Name: "Belastingdienst", URL: bd.URL},
+			{ID: "logboek-bd", Name: "BD", URL: bd.URL},
 			{ID: "logboek-brp", Name: "RvIG", URL: brp.URL},
 		},
 	}
@@ -376,8 +388,15 @@ func TestLdvChainQueriesEveryLogbook(t *testing.T) {
 	if payload.TraceID != "0af7651916cd43dd8448eb211c80319c" {
 		t.Errorf("trace_id = %q, want the OTel spelling", payload.TraceID)
 	}
+	if seenMethod != http.MethodPost {
+		t.Errorf("the logbook was queried with %s; the read extension is POST", seenMethod)
+	}
 	if seenTrace != "0af7651916cd43dd8448eb211c80319c" {
 		t.Errorf("the logbook was queried with %q", seenTrace)
+	}
+	// The logbook names itself, and that wins over our configured label.
+	if payload.Logbooks[0].Logbook.Name != "Belastingdienst" {
+		t.Errorf("logbook name = %q", payload.Logbooks[0].Logbook.Name)
 	}
 	if seenAuth != "Bearer read-token" {
 		t.Errorf("Authorization = %q", seenAuth)

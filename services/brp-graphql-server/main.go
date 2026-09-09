@@ -147,6 +147,11 @@ const readHeaderTimeout = 10 * time.Second
 // in-flight requests finish, then close whatever is left.
 const shutdownTimeout = 15 * time.Second
 
+// ldvDeliveryInterval is how often the LDV spool is drained. Records are
+// durable the moment they are written, so this governs only how quickly they
+// reach the logbook, not whether they do.
+const ldvDeliveryInterval = 2 * time.Second
+
 type config struct {
 	Port               string
 	MockDataPath       string
@@ -908,10 +913,10 @@ func newMux(schema *graphql.Schema, tracer trace.Tracer, logbook *sourceLogbook,
 			return
 		}
 
-		// The query is a Dataverwerking of RvIG, so the answer is held back
-		// until the logbook has confirmed the records — one for the Betrokkene
-		// who asked and one for every further Betrokkene the certificate
-		// names.
+		// The records are made durable in the local spool before this handler
+		// returns, so the answer no longer waits on the logbook. It is still
+		// buffered: a record that cannot even be spooled means the processing
+		// is unrecorded, and that must not be answered with data.
 		start := time.Now().UTC()
 		factsCtx, facts := withQueryFacts(ctx)
 		buffered := newBufferedResponse()
@@ -993,6 +998,24 @@ func main() {
 	if err != nil {
 		fatal("configuring the logboek client", err)
 	}
+
+	// A local spool: the record is made durable here and delivered to the
+	// logbook afterwards. Withholding a response never un-processed anything,
+	// so what matters is that the record cannot be lost — and the logbook
+	// stops being on the critical path of every request.
+	if client != nil {
+		outbox, err := ldv.OpenOutbox(getEnv("LDV_OUTBOX_PATH", "/data/ldv-outbox.jsonl"), client)
+		if err != nil {
+			fatal("opening the LDV outbox", err)
+		}
+		defer func() { _ = outbox.Close() }()
+		client.UseOutbox(outbox)
+		if pending, err := outbox.Pending(ctx); err == nil && pending > 0 {
+			slog.Info("LDV records waiting from a previous run", "pending", pending)
+		}
+		go outbox.Run(ctx, ldvDeliveryInterval)
+	}
+
 	logbook := newSourceLogbook(client)
 	if client == nil {
 		slog.Warn("no LDV_LOGBOOK_URL configured; this bron writes no Logboek Dataverwerkingen records")

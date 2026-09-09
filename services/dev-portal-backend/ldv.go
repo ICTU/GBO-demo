@@ -12,11 +12,11 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -31,29 +31,34 @@ type ldvLogbook struct {
 	URL  string `json:"-"`
 }
 
-// ldvRecord is the stored record as the logbook returns it. The portal only
+// ldvRecord is one dataProcessingOperation as the read extension returns it:
+// camelCase names and RFC 3339 times, unlike the write side. The portal only
 // renders it, so the attributes stay an open map.
 type ldvRecord struct {
-	TraceID      string            `json:"trace_id"`
-	SpanID       string            `json:"span_id"`
-	ParentSpanID string            `json:"parent_span_id,omitempty"`
-	Name         string            `json:"name"`
-	Status       string            `json:"status"`
-	StartTime    string            `json:"start_time"`
-	EndTime      string            `json:"end_time"`
-	ReceivedAt   string            `json:"received_at"`
-	Resource     map[string]string `json:"resource,omitempty"`
-	Attributes   map[string]any    `json:"attributes"`
+	TraceID      string         `json:"traceId"`
+	SpanID       string         `json:"spanId"`
+	ParentSpanID string         `json:"parentSpanId,omitempty"`
+	Name         string         `json:"name"`
+	Status       string         `json:"status"`
+	StartTime    string         `json:"startTime"`
+	EndTime      string         `json:"endTime"`
+	Resource     *ldvResource   `json:"resource,omitempty"`
+	Attributes   map[string]any `json:"attributes"`
+}
+
+// ldvResource mirrors the nesting the standard defines: an object with an
+// attributes field, not a map of attributes directly.
+type ldvResource struct {
+	Attributes map[string]any `json:"attributes"`
 }
 
 // ldvLogbookResult wraps one logbook's answer plus an optional error, so the
 // UI can show that a logbook was unreachable without breaking the lookup —
 // and so an empty logbook is visibly different from a broken one.
 type ldvLogbookResult struct {
-	Logbook   ldvLogbook  `json:"logbook"`
-	Records   []ldvRecord `json:"records"`
-	Truncated bool        `json:"truncated"`
-	Error     string      `json:"error,omitempty"`
+	Logbook ldvLogbook  `json:"logbook"`
+	Records []ldvRecord `json:"records"`
+	Error   string      `json:"error,omitempty"`
 }
 
 type ldvChainResponse struct {
@@ -91,12 +96,18 @@ func handleLdvChain(cfg config) http.HandlerFunc {
 
 	fetch := func(logbook ldvLogbook, traceID string) ldvLogbookResult {
 		result := ldvLogbookResult{Logbook: logbook, Records: []ldvRecord{}}
-		endpoint := logbook.URL + "/logboek/records?traceID=" + url.QueryEscape(traceID)
-		request, err := http.NewRequest(http.MethodGet, endpoint, nil)
+		// The read extension is POST with a body, not a query string.
+		body, err := json.Marshal(map[string]any{"traceId": traceID})
 		if err != nil {
 			result.Error = err.Error()
 			return result
 		}
+		request, err := http.NewRequest(http.MethodPost, logbook.URL+"/data-processing-operations", bytes.NewReader(body))
+		if err != nil {
+			result.Error = err.Error()
+			return result
+		}
+		request.Header.Set("Content-Type", "application/json")
 		if cfg.LdvReadToken != "" {
 			request.Header.Set("Authorization", "Bearer "+cfg.LdvReadToken)
 		}
@@ -112,17 +123,28 @@ func handleLdvChain(cfg config) http.HandlerFunc {
 			return result
 		}
 		var payload struct {
-			Records   []ldvRecord `json:"records"`
-			Truncated bool        `json:"truncated"`
+			Metadata struct {
+				LogbookID        string `json:"logbookId"`
+				OrganizationName string `json:"organizationName"`
+			} `json:"metadata"`
+			Operations []ldvRecord `json:"dataProcessingOperations"`
 		}
 		if err := json.NewDecoder(io.LimitReader(response.Body, 4<<20)).Decode(&payload); err != nil {
 			result.Error = err.Error()
 			return result
 		}
-		if payload.Records != nil {
-			result.Records = payload.Records
+		if payload.Operations != nil {
+			result.Records = payload.Operations
 		}
-		result.Truncated = payload.Truncated
+		// The logbook names itself; prefer that over our configured label, so
+		// a chain view reached by following dpl.read.nextLogbookId shows the
+		// logbook's own identity rather than ours for it.
+		if payload.Metadata.OrganizationName != "" {
+			result.Logbook.Name = payload.Metadata.OrganizationName
+		}
+		if payload.Metadata.LogbookID != "" {
+			result.Logbook.ID = payload.Metadata.LogbookID
+		}
 		return result
 	}
 

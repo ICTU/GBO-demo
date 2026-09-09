@@ -111,6 +111,11 @@ func newSourceLogbook(client *ldv.Client, cfg ldvQueryConfig) *sourceLogbook {
 // ldvQueryConfig is the part of the LDV setup that is about this bron rather
 // than about the logbook protocol.
 type ldvQueryConfig struct {
+	// ScopeActivityBase turns a dienstencatalogus scope into a register URI:
+	// bd:ib:2025 becomes <base>/bd-ib-2025/v1. The register entries were
+	// generated from those same scope definitions, so the mapping is a
+	// rename rather than a lookup.
+	ScopeActivityBase string
 	// YearActivityTemplate turns a belastingjaar into a register reference,
 	// e.g. "bd-ib-%d@v1". Empty means this bron does not describe its
 	// verwerkingsactiviteiten per year, and the scope or the fallback decides.
@@ -140,8 +145,8 @@ func (l *sourceLogbook) activityForYear(scope string, year int) string {
 	if l.cfg.YearActivityTemplate != "" && year != 0 {
 		return fmt.Sprintf(l.cfg.YearActivityTemplate, year)
 	}
-	if scope != "" {
-		return strings.ReplaceAll(scope, ":", "-") + "@v1"
+	if scope != "" && l.cfg.ScopeActivityBase != "" {
+		return strings.TrimRight(l.cfg.ScopeActivityBase, "/") + "/" + strings.ReplaceAll(scope, ":", "-") + "/v1"
 	}
 	return ""
 }
@@ -199,9 +204,9 @@ func (l *sourceLogbook) logQuery(ctx context.Context, r *http.Request, facts *qu
 		return err
 	}
 	scope := r.Header.Get("X-GBO-Scope")
-	processor := ldv.ForeignProcessor(r)
+	processor := l.ForeignProcessor(r)
 	traceID := ldv.TraceID(ctx, r.Header)
-	parentSpanID := strings.TrimSpace(r.Header.Get(ldv.HeaderParentSpanID))
+	parentSpanID := ldv.ParentSpanFromHeader(r.Header)
 	end := time.Now().UTC()
 
 	years := facts.sortedYears()
@@ -209,10 +214,11 @@ func (l *sourceLogbook) logQuery(ctx context.Context, r *http.Request, facts *qu
 		years = []int{0}
 	}
 	for _, year := range years {
-		attributes := map[string]any{"gbo.scope": scope}
-		if year != 0 {
-			attributes["gbo.belastingjaar"] = year
-		}
+		// No attributes of our own: the belastingjaar is already in the
+		// verwerkingsactiviteit this record names (bd-ib-2025/v1), and the
+		// scope it came from is what that activity was generated from. An
+		// attribute that repeats the activity tells a reader nothing.
+		var attributes map[string]any
 		record := ldv.Record{
 			TraceID:      traceID,
 			SpanID:       ldv.SpanID(),

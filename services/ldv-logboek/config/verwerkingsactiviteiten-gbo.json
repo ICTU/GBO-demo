@@ -1,6 +1,7 @@
 {
   "verantwoordelijke": "GBO",
-  "disclaimer": "Demo-stand-in voor een Register van Verwerkingsactiviteiten. Dit is GEEN RvVA: de inhoud is afgeleid van de toestemmings- en uitgiftefuncties van de voorziening zelf, en heeft geen enkele juridische status. Het bestaat om de LDV-eis 'elk record verwijst naar een oplosbare, geversioneerde verwerkingsactiviteit' waar te kunnen maken en om het ontbreken van een echt register zichtbaar te houden.",
+  "base_uri": "https://logboek.gbo.overheid.nl/verwerkingsactiviteiten",
+  "disclaimer": "Demo-stand-in voor een Register van Verwerkingsactiviteiten. Dit is GEEN RvVA: de inhoud is afgeleid van de toestemmings- en uitgiftefuncties van de voorziening zelf, en heeft geen enkele juridische status. Het bestaat om de LDV-eis 'elk record verwijst naar een oplosbare, geversioneerde verwerkingsactiviteit' waar te kunnen maken en om het ontbreken van een echt register zichtbaar te houden. De base_uri is een demo-hostnaam: hij maakt de verwijzing een geldige URI zoals de standaard eist (§3.2.2.9), maar er staat niets achter.",
   "activities": [
     {
       "id": "gbo-toestemming-verlenen",

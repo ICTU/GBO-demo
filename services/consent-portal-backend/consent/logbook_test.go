@@ -78,7 +78,7 @@ func TestGiveConsentLogsThePseudonymisation(t *testing.T) {
 	if processing.End.Before(processing.Start) {
 		t.Error("end precedes start")
 	}
-	if got := processing.Attributes["gbo.pseudonimisering.aanleiding"]; got != "toestemming-verlenen" {
+	if got := processing.Attributes["dpl.gbo.pseudonimiseringAanleiding"]; got != "toestemming-verlenen" {
 		t.Errorf("aanleiding = %v", got)
 	}
 }
@@ -143,7 +143,7 @@ func TestListAndRevokeLogTheirPseudonymisation(t *testing.T) {
 			}
 			var found bool
 			for _, processing := range logbook.written() {
-				if processing.Attributes["gbo.pseudonimisering.aanleiding"] == exercise.aanleiding {
+				if processing.Attributes["dpl.gbo.pseudonimiseringAanleiding"] == exercise.aanleiding {
 					found = true
 				}
 			}

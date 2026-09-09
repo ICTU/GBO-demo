@@ -71,6 +71,11 @@ var fscTxIDCtxKey = fscTxIDCtxKeyType{}
 // headers, so a stalled connection cannot hold a handler open.
 const readHeaderTimeout = 10 * time.Second
 
+// ldvDeliveryInterval is how often the LDV spool is drained. Records are
+// durable the moment they are written, so this governs only how quickly they
+// reach the logbook, not whether they do.
+const ldvDeliveryInterval = 2 * time.Second
+
 // shutdownTimeout bounds the drain after SIGTERM: stop accepting, let
 // in-flight requests finish, then close whatever is left.
 const shutdownTimeout = 15 * time.Second
@@ -261,9 +266,9 @@ func handleSourceAttestation(cfg config, client *http.Client, runtime sourceMeta
 			return
 		}
 		trace.SpanFromContext(r.Context()).SetAttributes(
-			attribute.String("gbo.source_id", metadata.SourceID),
+			attribute.String("dpl.gbo.sourceId", metadata.SourceID),
 			attribute.String("gbo.source_oin", metadata.SourceOIN),
-			attribute.String("gbo.type_id", metadata.TypeID),
+			attribute.String("dpl.gbo.typeId", metadata.TypeID),
 		)
 		result, err := callSource(r.Context(), client, resolved, plan)
 		if err != nil {
@@ -476,6 +481,22 @@ func callViaFSC(ctx context.Context, client *http.Client, cfg config, plan sourc
 	trace.SpanFromContext(ctx).SetAttributes(attribute.String("gbo.fsc.transaction_id", fscTxID))
 	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(httpReq.Header))
 
+	// §3.1 requires Trace Context on an HTTP hop that carries a
+	// dataverwerking, so the traceparent is set to the id the chain actually
+	// shares rather than to whatever OTel happened to inject: when the
+	// issuance-server sends its own traceparent, the ambient trace id is not
+	// the Fsc-Transaction-Id, and the bronhouder would file its half of this
+	// request under a different id.
+	//
+	// FSC v2.4.0 strips the header before it reaches the source, which is why
+	// the Fsc-Transaction-Id above is not redundant. Sending it anyway costs
+	// nothing and stops being a workaround the day FSC forwards it.
+	if normalized := ldv.NormalizeTraceID(fscTxID); normalized != "" {
+		ldv.InjectTraceparent(httpReq.Header, ldv.TraceContext{
+			TraceID: normalized, SpanID: ldv.SpanID(), Sampled: true,
+		})
+	}
+
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return fscResult{}, err
@@ -601,6 +622,18 @@ func main() {
 	})
 	if err != nil {
 		fatal("configuring the logboek client", err)
+	}
+	if ldvClient != nil {
+		// A local spool: the record is durable before the source is called,
+		// and delivered to the logbook afterwards. Failing the request once
+		// the PID had been read would not have un-read it.
+		outbox, err := ldv.OpenOutbox(getEnv("LDV_OUTBOX_PATH", "/data/ldv-outbox.jsonl"), ldvClient)
+		if err != nil {
+			fatal("opening the LDV outbox", err)
+		}
+		defer func() { _ = outbox.Close() }()
+		ldvClient.UseOutbox(outbox)
+		go outbox.Run(ctx, ldvDeliveryInterval)
 	}
 	logbook := newIssuanceLogbook(ldvClient, parseNextLogbooks(os.Getenv("LDV_NEXT_LOGBOOK_IDS")))
 	if ldvClient == nil {

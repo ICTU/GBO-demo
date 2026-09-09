@@ -1,91 +1,109 @@
-// Package ldv holds the Logboek Dataverwerkingen core: the log record, the
-// verwerkingsactiviteiten register it must reference, and the single use case
-// the logbook offers — append a record and confirm it.
+// Package ldv holds the Logboek Dataverwerkingen core: the rules a record must
+// satisfy, the verwerkingsactiviteiten register it must reference, and the two
+// use cases the logbook offers — append a record and confirm it, and answer a
+// read.
 //
-// The core owns the rules and the ports; HTTP and SQLite are adapters.
-//
-// The record shape follows LDV v1.0.0, which reuses the OpenTelemetry log
-// record. That reuse is deliberate on the standard's side and deliberately
-// *not* an invitation to reuse our OTel pipeline: a span is observability
-// exhaust of a technical operation, sampled and short-lived, while an LDV
-// record is an administrative record of a Dataverwerking that MUST exist,
-// MUST be confirmed and MUST NOT be sampled (REQ-32). Same shape, different
-// guarantees — hence a separate store with its own service.
+// The record type itself comes from the ldv-client module, which owns the wire
+// format the standard defines. One type, one place where the format lives:
+// a logbook that hand-rolled its own DTO would be a second definition of the
+// same contract, free to drift from the one every producer uses.
 package ldv
 
 import (
 	"encoding/json"
 	"time"
+
+	ldvclient "gbo-demo/ldv-client"
 )
 
-// Attribute keys the standard reserves. Everything a component wants to add
-// beyond these lives under its own prefix (we use `gbo.`), so a reader can
-// tell normative fields from demo colour at a glance.
+// Record is the LDV log record (§3.2.2).
+type Record = ldvclient.Record
+
+// Attribute keys the standard reserves, re-exported so the core reads in its
+// own vocabulary without a second definition of the strings.
 const (
-	AttrProcessingActivityID = "dpl.core.processing_activity_id"
-	AttrDataSubjectID        = "dpl.core.data_subject_id"
-	AttrDataSubjectIDType    = "dpl.core.data_subject_id_type"
-
-	// AttrForeignOperationProcessor names the application that initiated the
-	// processing when it was not this Verantwoordelijke — the FSC peer on the
-	// other side of the boundary.
-	AttrForeignOperationProcessor = "dpl.core.foreign_operation.processor"
+	AttrProcessingActivityID      = ldvclient.AttrProcessingActivityID
+	AttrDataSubjectID             = ldvclient.AttrDataSubjectID
+	AttrDataSubjectIDType         = ldvclient.AttrDataSubjectIDType
+	AttrForeignOperationProcessor = ldvclient.AttrForeignOperationProcessor
+	AttrNextLogbookID             = ldvclient.AttrNextLogbookID
 )
 
-// Status values. UNSET is what OTel uses for "the producer did not say";
-// a Dataverwerking that ran to completion says OK or ERROR.
+// Status values. UNSET is what OTel uses for "the producer did not say"; a
+// Dataverwerking that ran to completion says OK or ERROR.
 const (
 	StatusUnset = "UNSET"
-	StatusOK    = "OK"
-	StatusError = "ERROR"
+	StatusOK    = ldvclient.StatusOK
+	StatusError = ldvclient.StatusError
 )
 
-// Record is one Dataverwerking, about one Betrokkene, at one Verantwoordelijke.
-//
-// TraceID ties it to every other record of the same request — the LDV records
-// of the other components, the ADL decision and the FSC transaction log all
-// carry the same value, because in this chain the trace id *is* the
-// Fsc-Transaction-Id (REQ-55).
-type Record struct {
-	TraceID      string            `json:"trace_id"`
-	SpanID       string            `json:"span_id"`
-	ParentSpanID string            `json:"parent_span_id,omitempty"`
-	Name         string            `json:"name"`
-	StartTime    time.Time         `json:"start_time"`
-	EndTime      time.Time         `json:"end_time"`
-	Status       string            `json:"status"`
-	Resource     map[string]string `json:"resource,omitempty"`
-	Attributes   map[string]any    `json:"attributes"`
-}
-
-// Attribute returns a string-valued attribute, or "" when it is absent or of
-// another type. Attributes are free-form JSON; the mandatory dpl.core ones are
-// strings and validation rejects anything else.
-func (r Record) Attribute(key string) string {
-	value, _ := r.Attributes[key].(string)
+// attributeOf returns a string-valued attribute of a record, or "" when it is
+// absent or of another type.
+func attributeOf(record Record, key string) string {
+	value, _ := record.Attributes[key].(string)
 	return value
 }
 
-// ProcessingActivityID is the reference into the Verantwoordelijke's register
-// of verwerkingsactiviteiten, in `<id>@<version>` form.
-func (r Record) ProcessingActivityID() string { return r.Attribute(AttrProcessingActivityID) }
-
-// DataSubjectID is the pseudonymous identifier of the Betrokkene. Never a BSN
-// (REQ-60/REQ-72) — DataSubjectIDType says which pseudonym space it lives in.
-func (r Record) DataSubjectID() string { return r.Attribute(AttrDataSubjectID) }
-
-// DataSubjectIDType names that pseudonym space. Mandatory: a bare identifier
-// without its type cannot be resolved by a later reader, and two components
-// may legitimately refer to the same Betrokkene by different pseudonyms.
-func (r Record) DataSubjectIDType() string { return r.Attribute(AttrDataSubjectIDType) }
-
 // Stored is a Record as the logbook holds it: the record itself plus what the
 // logbook stamped on receipt. ReceivedAt is the logbook's own clock, kept
-// apart from the producer's StartTime/EndTime so a clock skew is visible
-// rather than smoothed away.
+// apart from the producer's times so a clock skew stays visible rather than
+// being smoothed away.
 type Stored struct {
 	Record
-	ReceivedAt time.Time `json:"received_at"`
+	ReceivedAt time.Time
+}
+
+// ProcessingActivityID is the reference into the Verantwoordelijke's register,
+// as a URI.
+func (s Stored) ProcessingActivityID() string { return attributeOf(s.Record, AttrProcessingActivityID) }
+
+// DataSubjectID is the pseudonymous identifier of the Betrokkene. Never a BSN
+// (REQ-60/72); DataSubjectIDType says which pseudonym space it lives in.
+func (s Stored) DataSubjectID() string { return attributeOf(s.Record, AttrDataSubjectID) }
+
+// DataSubjectIDType names that pseudonym space.
+func (s Stored) DataSubjectIDType() string { return attributeOf(s.Record, AttrDataSubjectIDType) }
+
+// MarshalJSON is defined explicitly because the embedded Record carries its
+// own MarshalJSON. Without this, Go would promote that method and silently
+// drop ReceivedAt — the field this type exists to add.
+func (s Stored) MarshalJSON() ([]byte, error) {
+	record, err := json.Marshal(s.Record)
+	if err != nil {
+		return nil, err
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(record, &fields); err != nil {
+		return nil, err
+	}
+	fields["received_at"] = ldvclient.EpochMillis(s.ReceivedAt)
+	return json.Marshal(fields)
+}
+
+// UnmarshalJSON is the counterpart, and defined for the same reason: the
+// embedded Record's UnmarshalJSON would be promoted, and it rejects unknown
+// fields — so a Stored would fail to decode on the very field it adds.
+func (s *Stored) UnmarshalJSON(data []byte) error {
+	var envelope struct {
+		ReceivedAt uint64 `json:"received_at"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	delete(fields, "received_at")
+	record, err := json.Marshal(fields)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(record, &s.Record); err != nil {
+		return err
+	}
+	s.ReceivedAt = ldvclient.FromEpochMillis(envelope.ReceivedAt)
+	return nil
 }
 
 // SameProcessingAs reports whether another record describes the same
@@ -100,24 +118,12 @@ func (s Stored) SameProcessingAs(other Record) bool {
 		!s.StartTime.Equal(other.StartTime) || !s.EndTime.Equal(other.EndTime) {
 		return false
 	}
-	return sameStringMap(s.Resource, other.Resource) && sameJSONMap(s.Attributes, other.Attributes)
+	return sameJSONMap(s.Resource, other.Resource) && sameJSONMap(s.Attributes, other.Attributes)
 }
 
-func sameStringMap(a, b map[string]string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for key, value := range a {
-		if b[key] != value {
-			return false
-		}
-	}
-	return true
-}
-
-// sameJSONMap compares attribute maps by their JSON encoding, because the
-// values are open — numbers, lists and nested objects all occur — and Go's
-// == is not defined over them.
+// sameJSONMap compares open maps by their JSON encoding, because the values
+// are free-form — numbers, lists and nested objects all occur — and Go's ==
+// is not defined over them.
 func sameJSONMap(a, b map[string]any) bool {
 	if len(a) != len(b) {
 		return false

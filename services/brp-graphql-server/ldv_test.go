@@ -87,17 +87,17 @@ func TestAkteVanOverlijdenLogsARecordPerBetrokkene(t *testing.T) {
 		if got := child.Attributes[ldv.AttrProcessingActivityID]; got != akteActivity {
 			t.Errorf("child processing_activity_id = %v, want %s", got, akteActivity)
 		}
-		if got := child.Attributes["gbo.betrokkene.rol"]; got != "ouder-van-overledene" {
+		if got := child.Attributes["dpl.gbo.betrokkeneRol"]; got != "ouder-van-overledene" {
 			t.Errorf("child rol = %v", got)
 		}
 	}
-	if got := primary[0].Attributes["gbo.betrokkene.rol"]; got != "aanvrager" {
+	if got := primary[0].Attributes["dpl.gbo.betrokkeneRol"]; got != "aanvrager" {
 		t.Errorf("primary rol = %v, want aanvrager", got)
 	}
 	// The deceased's data is disclosed while the deceased is not a Betrokkene.
 	// The record says so, rather than leaving it looking like an omission.
-	if got := primary[0].Attributes["gbo.akte.overledene_verwerkt"]; got != true {
-		t.Errorf("gbo.akte.overledene_verwerkt = %v, want true", got)
+	if got := primary[0].Attributes["dpl.gbo.overledeneVerwerkt"]; got != true {
+		t.Errorf("dpl.gbo.overledeneVerwerkt = %v, want true", got)
 	}
 	// Every child names a distinct person.
 	subjects := map[any]bool{}
@@ -138,8 +138,8 @@ func TestAkteRequesterKeepsTheSidecarsPseudonym(t *testing.T) {
 	url := brpUnderTest(t, logbook)
 
 	brpQuery(t, url, map[string]string{
-		ldv.HeaderTraceID:       "0af7651916cd43dd8448eb211c80319c",
-		ldv.HeaderParentSpanID:  "b7ad6b7169203331",
+		// §3.1: the trace arrives on the standard traceparent.
+		"traceparent":           "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
 		ldv.HeaderSubjectID:     "PI-abc123",
 		ldv.HeaderSubjectIDType: ldv.SubjectTypePI,
 	}, akteQuery)
