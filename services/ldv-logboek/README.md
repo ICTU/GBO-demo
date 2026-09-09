@@ -105,20 +105,31 @@ attributes — and that translation happens at the read boundary.
 W3C Trace Context **MUST** be used. So the chain correlates on `traceparent`.
 Every hop between our own components sets one, and every component reads one.
 
-**The FSC hop is a documented profile deviation.** FSC v2.4.0 does not forward
-`traceparent` between peers — the Inway strips it, and nothing on our side
-changes that. There the chain falls back to the `Fsc-Transaction-Id`, which is
-a UUID and therefore exactly a 16-byte trace-id once the hyphens come off, so
-the same value continues on the far side through a header FSC does propagate.
-The adapter sends both, so the workaround stops being one the day FSC forwards
-the standard header.
+**The FSC hop is a documented profile deviation** — though not the one first
+written up here. An earlier version of this section claimed FSC v2.4.0 strips
+`traceparent` between peers. Measured against the running demo that is simply
+false: `traceparent` is forwarded and arrives intact on the far side.
 
-That is a deviation, not conformance, and it is named here rather than
-papered over: a reader has to be able to tell where the chain follows the
-standard and where it works around a transport that cannot.
+What does not carry across is its *authority*. FSC gives every transaction its
+own `Fsc-Transaction-Id` and validates it strictly as a UUID v7 — an id derived
+from a caller's trace is rejected outright, with `invalid uuid version, must be
+v7`. So the transaction id can never be made equal to the trace id. Whenever a
+caller brings its own `traceparent` — any browser with OTel instrumentation
+does — a request carries two unrelated 128-bit ids at once, and only one of
+them is the id FSC's transaction log and the PDP's decision log record.
 
-One consequence is a benefit: LDV's `traceID`, the ADL's trace id and the FSC
-transaction log all carry one value for one request (REQ-55).
+**So the `Fsc-Transaction-Id` wins whenever there is one**, and `traceparent`
+governs everywhere else, including every hop between our own components. That
+ordering is the deviation: preferring a header of FSC's invention over the one
+§3.1 mandates. It is named here rather than papered over, because a reader has
+to be able to tell where the chain follows the standard and where it works
+around a transport that cannot.
+
+The ordering is also what makes the benefit real: LDV's `traceID`, the ADL's
+trace id and the FSC transaction log carry one value for one request (REQ-55).
+Preferring `traceparent` instead filed LDV records under an id the other two
+had never seen, which is exactly the correlation REQ-55 asks for and is the
+bug this ordering fixes.
 
 ### Never the BSN
 
