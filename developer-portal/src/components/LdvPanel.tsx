@@ -12,13 +12,22 @@ import type { LdvChainResponse, LdvRecord } from '../api/devClient'
 // and never sampled, so an empty logbook here means nothing was processed,
 // not that a span was dropped.
 
-const ACTIVITY = 'dpl.core.processing_activity_id'
-const SUBJECT = 'dpl.core.data_subject_id'
-const SUBJECT_TYPE = 'dpl.core.data_subject_id_type'
-const NEXT_LOGBOOK = 'dpl.read.nextLogbookId'
+// Attribute paths, as the *read* extension renders them: nested objects in
+// camelCase. The core standard writes the same attributes flat and in
+// snake_case (`dpl.core.processing_activity_id`), and the logbook translates
+// between the two at its read boundary — so a panel reading a read response
+// has to use this shape, not the one the records are written in.
+const ACTIVITY = ['dpl', 'core', 'processingActivityId']
+const SUBJECT = ['dpl', 'core', 'dataSubjectId']
+const SUBJECT_TYPE = ['dpl', 'core', 'dataSubjectIdType']
+const NEXT_LOGBOOK = ['dpl', 'read', 'nextLogbookId']
 
-function text(record: LdvRecord, key: string): string {
-  const value = record.attributes?.[key]
+function text(record: LdvRecord, path: string[]): string {
+  let value: unknown = record.attributes
+  for (const segment of path) {
+    if (typeof value !== 'object' || value === null) return ''
+    value = (value as Record<string, unknown>)[segment]
+  }
   return typeof value === 'string' ? value : ''
 }
 
