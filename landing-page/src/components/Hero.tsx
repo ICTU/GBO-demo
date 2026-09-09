@@ -120,9 +120,8 @@ export default function Hero() {
             <p className="hero-lede">
               Het programma Gemeenschappelijke Bronontsluiting (GBO) ontwikkelt een
               gestandaardiseerde ontsluiting waarmee bronhouders hun gegevens direct interoperabel
-              en herbruikbaar beschikbaar kunnen stellen. Deze demo laat zien hoe de voorgestelde
-              oplossing werkt in de praktijk. De demo draait live op de simulatieomgeving van het
-              Federatief Datastelsel.
+              en herbruikbaar beschikbaar kunnen stellen. De demo draait live op de
+              simulatieomgeving van het Federatief Datastelsel.
             </p>
             <a href="#uitproberen" className="btn-invert">
               Zelf uitproberen
