@@ -50,6 +50,11 @@ const readHeaderTimeout = 10 * time.Second
 // in-flight requests finish, then close whatever is left.
 const shutdownTimeout = 15 * time.Second
 
+// ldvDeliveryInterval is how often the LDV spool is drained. Records are
+// durable the moment they are written, so this governs only how quickly they
+// reach the logbook, not whether they do.
+const ldvDeliveryInterval = 2 * time.Second
+
 type config struct {
 	Port          string
 	UpstreamURL   string // source service (e.g. http://graphql-server:4000)
@@ -206,7 +211,11 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client) http.H
 			traceID:   ldv.TraceID(r.Context(), r.Header),
 			spanID:    ldv.SpanID(),
 			startTime: time.Now().UTC(),
-			processor: ldv.ForeignProcessor(r),
+		}
+		// A bron without a logbook is a supported configuration, so the
+		// client is legitimately nil here and must not be dereferenced.
+		if logbook != nil {
+			forward.processor = logbook.ForeignProcessor(r)
 		}
 
 		// Who the request is about, named the way it arrived. In the
@@ -250,10 +259,7 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client) http.H
 						Status:       ldv.Status(resolveErr),
 						StartTime:    resolutionStart,
 						EndTime:      time.Now().UTC(),
-						Attributes: ldv.Attributes(cfg.LDVResolutionActivity, piVal, ldv.SubjectTypePI, forward.processor, map[string]any{
-							"gbo.graphql.variable": varName,
-							"gbo.bsnk.recipient":   cfg.OwnPeerOIN,
-						}),
+						Attributes:   ldv.Attributes(cfg.LDVResolutionActivity, piVal, ldv.SubjectTypePI, forward.processor, map[string]any{}),
 					}
 					if writeErr := logbook.Write(r.Context(), record); writeErr != nil {
 						ldv.LogFailure(record.Name, writeErr)
@@ -290,14 +296,15 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client) http.H
 		}
 		otel.GetTextMapPropagator().Inject(r.Context(), propagation.HeaderCarrier(req.Header))
 
-		// Hand the source the trace metadata it needs to file its own records
-		// under the same trace and below this one. Only metadata crosses:
-		// the records stay in each component's own logboek, and here both
-		// components happen to share one because they share a
-		// Verantwoordelijke.
+		// Hand the source its position in the trace, so it files its records
+		// under the same trace and below this one. On the standard
+		// traceparent (§3.1), which also replaces whatever OTel injected
+		// above: the LDV trace id is the one the whole chain shares, and two
+		// different trace ids on one request is the problem this avoids.
 		if logbook != nil {
-			req.Header.Set(ldv.HeaderTraceID, forward.traceID)
-			req.Header.Set(ldv.HeaderParentSpanID, forward.spanID)
+			ldv.InjectTraceparent(req.Header, ldv.TraceContext{
+				TraceID: forward.traceID, SpanID: forward.spanID, Sampled: true,
+			})
 			// In the pseudonym flow the source receives a BSN and would
 			// otherwise have to invent a subject reference. Passing the PI on
 			// keeps both components naming the same Betrokkene the same way.
@@ -323,24 +330,25 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client) http.H
 		// two-phase commit, and the reason this is fail-closed rather than
 		// best-effort.
 		if logbook != nil {
-			for variable, subject := range subjects {
+			for _, subject := range subjects {
 				subjectID, subjectType := subject, ldv.SubjectTypePI
 				if subjectIDType != "pseudonym" {
-					subjectID, subjectType = logbook.LocalPseudonym(subject), ldv.SubjectTypePseudonym
+					pseudonym, err := logbook.LocalPseudonym(subject)
+					if err != nil {
+						ldv.LogFailure("dataverwerking.bronquery-doorgifte", err)
+						http.Error(w, "the forward could not be logged; withholding the response", http.StatusInternalServerError)
+						return
+					}
+					subjectID, subjectType = pseudonym, ldv.SubjectTypePseudonym
 				}
 				record := ldv.Record{
-					TraceID:   forward.traceID,
-					SpanID:    forward.spanID,
-					Name:      "dataverwerking.bronquery-doorgifte",
-					Status:    ldv.StatusFromHTTP(resp.StatusCode),
-					StartTime: forward.startTime,
-					EndTime:   time.Now().UTC(),
-					Attributes: ldv.Attributes(cfg.LDVForwardActivity, subjectID, subjectType, forward.processor, map[string]any{
-						"gbo.graphql.variable":        variable,
-						"gbo.sidecar.subject_id_type": subjectIDType,
-						"gbo.upstream.status":         resp.StatusCode,
-						"gbo.scope":                   r.Header.Get("X-GBO-Scope"),
-					}),
+					TraceID:    forward.traceID,
+					SpanID:     forward.spanID,
+					Name:       "dataverwerking.bronquery-doorgifte",
+					Status:     ldv.StatusFromHTTP(resp.StatusCode),
+					StartTime:  forward.startTime,
+					EndTime:    time.Now().UTC(),
+					Attributes: ldv.Attributes(cfg.LDVForwardActivity, subjectID, subjectType, forward.processor, map[string]any{}),
 				}
 				if writeErr := logbook.Write(r.Context(), record); writeErr != nil {
 					ldv.LogFailure(record.Name, writeErr)
@@ -462,6 +470,17 @@ func main() {
 	}
 	if logbook == nil {
 		slog.Warn("no LDV_LOGBOOK_URL configured; this bron writes no Logboek Dataverwerkingen records")
+	}
+	if logbook != nil {
+		// A local spool: durable here, delivered afterwards. The logbook is
+		// no longer on the critical path of every forwarded request.
+		outbox, err := ldv.OpenOutbox(getEnv("LDV_OUTBOX_PATH", "/data/ldv-outbox.jsonl"), logbook)
+		if err != nil {
+			fatal("opening the LDV outbox", err)
+		}
+		defer func() { _ = outbox.Close() }()
+		logbook.UseOutbox(outbox)
+		go outbox.Run(ctx, ldvDeliveryInterval)
 	}
 
 	srv := &http.Server{

@@ -68,8 +68,8 @@ func TestSourceQueryLogsUnderTheSidecarsTraceAndSubject(t *testing.T) {
 	url := sourceUnderTest(t, logbook)
 
 	response := queryYear(t, url, map[string]string{
-		ldv.HeaderTraceID:       "0af7651916cd43dd8448eb211c80319c",
-		ldv.HeaderParentSpanID:  "b7ad6b7169203331",
+		// §3.1: the trace arrives on the standard traceparent.
+		"traceparent":           "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
 		ldv.HeaderSubjectID:     "PI-abc123",
 		ldv.HeaderSubjectIDType: ldv.SubjectTypePI,
 		"X-GBO-Scope":           "bd:ib:2025",
@@ -218,5 +218,38 @@ func TestAnUnknownSubjectWritesNoRecord(t *testing.T) {
 	}
 	if records := logbook.Written(); len(records) != 0 {
 		t.Fatalf("wrote %d records for an unknown subject: %+v", len(records), records)
+	}
+}
+
+// A query covering two years is two verstrekkingen, and each record has to
+// name the activity its own belastingjaar belongs to. The scope header can
+// only describe one of them, so preferring it made the 2024 record claim the
+// 2025 entry — the kind of mislabelling that only shows up once a real
+// multi-year request runs.
+func TestEachYearGetsItsOwnActivityEvenUnderOneScope(t *testing.T) {
+	logbook := ldvtest.New(t, activity2025, activity2024)
+	url := sourceUnderTest(t, logbook)
+
+	body := `{"query":"query($bsn: BSN!){ingeschrevenPersoon(bsn:$bsn){heeftBelastingjaarAangifte(belastingjaren:[2024,2025]){belastingjaar}}}","variables":{"bsn":"` + demoBSN + `"}}`
+	// The consumer was authorized under one scope, which names 2025 only.
+	if response := queryYear(t, url, map[string]string{"X-GBO-Scope": "bd:ib:2025"}, body); response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", response.StatusCode)
+	}
+
+	// The year lives in the verwerkingsactiviteit and nowhere else, so this
+	// asserts on the activity itself: one per year, each naming its own.
+	records := logbook.Written()
+	if len(records) != 2 {
+		t.Fatalf("wrote %d records, want one per year: %+v", len(records), records)
+	}
+	named := map[string]bool{}
+	for _, record := range records {
+		activity, _ := record.Attributes[ldv.AttrProcessingActivityID].(string)
+		named[activity] = true
+	}
+	for _, want := range []string{activity2024, activity2025} {
+		if !named[want] {
+			t.Errorf("no record names %q; activities = %v", want, named)
+		}
 	}
 }

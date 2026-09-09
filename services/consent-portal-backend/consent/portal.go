@@ -19,7 +19,7 @@ type Portal struct {
 }
 
 // The verwerkingsactiviteiten of this portal, as named in GBO's register.
-const pseudonymisationActivity = "gbo-bsn-pseudonimisering@v1"
+const pseudonymisationActivity = "https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-bsn-pseudonimisering/v1"
 
 // record files one Dataverwerking. Nil-safe, so callers need no branch: a
 // deployment without a logbook is simply not in an LDV chain.
@@ -117,8 +117,7 @@ func (p *Portal) GiveConsent(ctx context.Context, citizen BSN, in GiveInput) (Gr
 		Start:    pseudonymisationStart,
 		End:      p.now().UTC(),
 		Attributes: map[string]any{
-			"gbo.pseudonimisering.aanleiding": "toestemming-verlenen",
-			"gbo.consent.dienstverlener":      in.DienstverlenerOIN,
+			"dpl.gbo.pseudonimiseringAanleiding": "toestemming-verlenen",
 		},
 	}); err != nil {
 		return Granted{}, fmt.Errorf("log pseudonymisation: %w", err)
@@ -207,7 +206,7 @@ func (p *Portal) subjectRefFor(ctx context.Context, citizen BSN, aanleiding stri
 		Subject:    SubjectRef(ps.Pseudonym),
 		Start:      start,
 		End:        p.now().UTC(),
-		Attributes: map[string]any{"gbo.pseudonimisering.aanleiding": aanleiding},
+		Attributes: map[string]any{"dpl.gbo.pseudonimiseringAanleiding": aanleiding},
 	}); err != nil {
 		return "", fmt.Errorf("log pseudonymisation: %w", err)
 	}

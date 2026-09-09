@@ -9,9 +9,13 @@ package main
 
 import (
 	"context"
-	ldv "gbo-demo/ldv-client"
+	"encoding/json"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
+
+	ldv "gbo-demo/ldv-client"
 )
 
 // The verwerkingsactiviteiten of the consent register, as named in the GBO
@@ -19,10 +23,10 @@ import (
 // service is not a generic image, and its processings are the operations its
 // own API offers.
 const (
-	consentGrantActivity  = "gbo-toestemming-verlenen@v1"
-	consentRevokeActivity = "gbo-toestemming-intrekken@v1"
-	consentStatusActivity = "gbo-toestemming-status@v1"
-	consentListActivity   = "gbo-toestemming-inzage@v1"
+	consentGrantActivity  = "https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-toestemming-verlenen/v1"
+	consentRevokeActivity = "https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-toestemming-intrekken/v1"
+	consentStatusActivity = "https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-toestemming-status/v1"
+	consentListActivity   = "https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-toestemming-inzage/v1"
 
 	// The portal-scoped subject reference. The register holds nothing else:
 	// no BSN, and deliberately no PI either — the PI travels only inside the
@@ -50,45 +54,119 @@ func newRegisterLogbook(client *ldv.Client) *registerLogbook {
 	return &registerLogbook{Client: client}
 }
 
-// logConsentOperation records one Dataverwerking of the register.
-//
-// subjectRef is the portal-scoped reference of the Betrokkene whose consent
-// this is. An operation that resolved no consent — a status query for an id
-// that does not exist — touched nobody's personal data and writes no record;
-// the caller passes an empty reference for that.
-//
-// The error is meant to be propagated: an operation that cannot be logged
-// must fail rather than complete unlogged.
-func (l *registerLogbook) logConsentOperation(
-	ctx context.Context,
+// buildRecord assembles a record without writing it, so a mutation and its
+// record can go into one transaction. Returns nil when there is no logbook or
+// no Betrokkene to name — an operation that touched nobody's data.
+func (l *registerLogbook) buildRecord(
 	r *http.Request,
 	activity, name, subjectRef string,
 	start time.Time,
 	status int,
 	extra map[string]any,
-) error {
+) ([]byte, error) {
 	if l == nil || subjectRef == "" {
-		return nil
+		return nil, nil
 	}
 	record := ldv.Record{
-		TraceID:      ldv.TraceID(ctx, r.Header),
+		TraceID:      ldv.TraceID(r.Context(), r.Header),
 		SpanID:       ldv.SpanID(),
 		ParentSpanID: ldv.ParentSpanFromHeader(r.Header),
 		Name:         name,
 		Status:       ldv.StatusFromHTTP(status),
 		StartTime:    start,
 		EndTime:      time.Now().UTC(),
+		Resource:     l.Resource(),
 		Attributes: ldv.Attributes(
-			activity,
-			subjectRef, ldvSubjectTypePortalSubject,
-			ldv.ForeignProcessor(r), extra,
+			activity, subjectRef, ldvSubjectTypePortalSubject,
+			l.ForeignProcessor(r), extra,
 		),
 	}
-	if err := l.Write(ctx, record); err != nil {
-		ldv.LogFailure(record.Name, err)
+	encoded, err := json.Marshal(record)
+	if err != nil {
+		return nil, fmt.Errorf("encode LDV record: %w", err)
+	}
+	return encoded, nil
+}
+
+// logConsentOperation records one Dataverwerking that mutated nothing — a
+// status confirmation or a citizen's inzage. It goes into the same outbox as
+// the mutations, so this service has one spool rather than two.
+func (l *registerLogbook) logConsentOperation(
+	ctx context.Context,
+	store ConsentStore,
+	r *http.Request,
+	activity, name, subjectRef string,
+	start time.Time,
+	status int,
+	extra map[string]any,
+) error {
+	record, err := l.buildRecord(r, activity, name, subjectRef, start, status, extra)
+	if err != nil || record == nil {
+		return err
+	}
+	if err := store.AppendRecord(ctx, record); err != nil {
+		ldv.LogFailure(name, err)
 		return err
 	}
 	return nil
+}
+
+// deliverOutbox sends everything waiting to the logbook, oldest first, and
+// clears each record the logbook accepts. It stops at the first failure, so
+// order is preserved and nothing is skipped.
+//
+// Delivery is separate from writing on purpose: the record is durable the
+// moment the transaction commits, and getting it to the logbook afterwards is
+// a matter of when, not whether.
+func (l *registerLogbook) deliverOutbox(ctx context.Context, store ConsentStore) error {
+	if l == nil {
+		return nil
+	}
+	entries, err := store.PendingRecords(ctx, outboxBatchSize)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		var record ldv.Record
+		if err := json.Unmarshal(entry.Record, &record); err != nil {
+			// Undeliverable forever; clearing it is the only way forward, and
+			// it says so rather than disappearing.
+			ldv.LogFailure("undeliverable record in outbox", err)
+			if err := store.MarkDelivered(ctx, entry.ID); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := l.Write(ctx, record); err != nil {
+			return err
+		}
+		if err := store.MarkDelivered(ctx, entry.ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// outboxBatchSize bounds one delivery pass.
+const outboxBatchSize = 100
+
+// runOutbox drains the outbox on an interval until the context ends.
+func (l *registerLogbook) runOutbox(ctx context.Context, store ConsentStore, interval time.Duration) {
+	if l == nil {
+		return
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := l.deliverOutbox(ctx, store); err != nil {
+				slog.Warn("LDV outbox delivery failed; will retry", "err", err.Error())
+			}
+		}
+	}
 }
 
 // logFailure answers a request whose record the logbook did not confirm.

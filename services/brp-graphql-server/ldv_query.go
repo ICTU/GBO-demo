@@ -23,8 +23,8 @@ import (
 // service is not a generic image running in front of an arbitrary bron — it
 // *is* the BRP bron, and its processings are the ones its own schema offers.
 const (
-	akteActivity             = "brp-akte-overlijden@v1"
-	persoonsgegevensActivity = "brp-persoonsgegevens-verstrekking@v1"
+	akteActivity             = "https://logboek.rvig.nl/verwerkingsactiviteiten/brp-akte-overlijden/v1"
+	persoonsgegevensActivity = "https://logboek.rvig.nl/verwerkingsactiviteiten/brp-persoonsgegevens-verstrekking/v1"
 
 	// RvIG's own record identifier for a person in the BRP. Not a pseudonym,
 	// and it does not need to be: it names someone who appears in a
@@ -232,11 +232,14 @@ func (l *sourceLogbook) logQuery(ctx context.Context, r *http.Request, facts *qu
 	if bsn == "" {
 		return nil
 	}
-	subjectID, subjectType := l.Subject(r.Header, bsn)
-	processor := ldv.ForeignProcessor(r)
+	subjectID, subjectType, err := l.Subject(r.Header, bsn)
+	if err != nil {
+		ldv.LogFailure("dataverwerking.bronbevraging", err)
+		return err
+	}
+	processor := l.ForeignProcessor(r)
 	traceID := ldv.TraceID(ctx, r.Header)
 	parentSpanID := ldv.ParentSpanFromHeader(r.Header)
-	scope := r.Header.Get("X-GBO-Scope")
 	end := time.Now().UTC()
 
 	relatives := facts.otherBetrokkenen()
@@ -252,12 +255,11 @@ func (l *sourceLogbook) logQuery(ctx context.Context, r *http.Request, facts *qu
 			StartTime:    start,
 			EndTime:      end,
 			Attributes: ldv.Attributes(activity, subjectID, subjectType, processor, map[string]any{
-				"gbo.scope":          scope,
-				"gbo.betrokkene.rol": "aanvrager",
+				"dpl.gbo.betrokkeneRol": "aanvrager",
 				// Named explicitly because the certificate discloses the
 				// deceased's data while the deceased is not a Betrokkene: a
 				// reader should see that this was decided, not forgotten.
-				"gbo.akte.overledene_verwerkt": activity == akteActivity,
+				"dpl.gbo.overledeneVerwerkt": activity == akteActivity,
 			}),
 		}
 		if err := l.Write(ctx, primary); err != nil {
@@ -274,8 +276,7 @@ func (l *sourceLogbook) logQuery(ctx context.Context, r *http.Request, facts *qu
 				StartTime:    start,
 				EndTime:      end,
 				Attributes: ldv.Attributes(activity, relative.id, relative.idType, processor, map[string]any{
-					"gbo.scope":          scope,
-					"gbo.betrokkene.rol": relative.rol,
+					"dpl.gbo.betrokkeneRol": relative.rol,
 				}),
 			}
 			if err := l.Write(ctx, child); err != nil {

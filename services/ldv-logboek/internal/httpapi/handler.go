@@ -26,7 +26,11 @@ const maxBodyBytes = 256 << 10
 type Handler struct {
 	logbook    *ldv.Logbook
 	writeToken string
-	mux        *http.ServeMux
+	readToken  string
+	// logbookID is the URI of this read API — the value a record's
+	// dpl.read.nextLogbookId points at.
+	logbookID string
+	mux       *http.ServeMux
 }
 
 // NewHandler builds the routing tree. writeToken protects the write endpoint;
@@ -37,11 +41,15 @@ type Handler struct {
 // bearer token. Who may write to and read from a Verantwoordelijke's logboek
 // in reality is an open governance question (Q-08), and pretending to answer
 // it with a demo authorisation scheme would be worse than saying so.
-func NewHandler(logbook *ldv.Logbook, writeToken string) *Handler {
-	handler := &Handler{logbook: logbook, writeToken: writeToken, mux: http.NewServeMux()}
+// readToken protects the read extension. It is separate from writeToken
+// because writing and reading a logbook are different capabilities: every
+// instrumented component must write, and almost nothing should read.
+func NewHandler(logbook *ldv.Logbook, writeToken, readToken, logbookID string) *Handler {
+	handler := &Handler{logbook: logbook, writeToken: writeToken, readToken: readToken, logbookID: logbookID, mux: http.NewServeMux()}
 	handler.mux.HandleFunc("POST /logboek/records", handler.writeRecord)
+	handler.mux.HandleFunc("POST /data-processing-operations", handler.listDataProcessingOperations)
 	handler.mux.HandleFunc("GET /verwerkingsactiviteiten", handler.listActivities)
-	handler.mux.HandleFunc("GET /verwerkingsactiviteiten/{reference}", handler.getActivity)
+	handler.mux.HandleFunc("GET /verwerkingsactiviteiten/{id}/{version}", handler.getActivity)
 	handler.mux.HandleFunc("GET /health", handler.health)
 	return handler
 }
@@ -49,7 +57,7 @@ func NewHandler(logbook *ldv.Logbook, writeToken string) *Handler {
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) { h.mux.ServeHTTP(w, r) }
 
 func (h *Handler) writeRecord(w http.ResponseWriter, r *http.Request) {
-	if !h.authorized(r) {
+	if !authorized(r, h.writeToken) {
 		writeProblem(w, http.StatusUnauthorized, "unauthorized", "a valid bearer token is required to write to this logboek")
 		return
 	}
@@ -63,6 +71,14 @@ func (h *Handler) writeRecord(w http.ResponseWriter, r *http.Request) {
 
 	confirmation, err := h.logbook.Write(r.Context(), record)
 	if err != nil {
+		if errors.Is(err, ldv.ErrConflictingRecord) {
+			// A different Dataverwerking under an identity that is taken.
+			// Confirming it would tell the producer its record is logged
+			// while the logbook holds something else.
+			slog.Warn("rejected conflicting log record", "trace_id", record.TraceID, "span_id", record.SpanID)
+			writeProblem(w, http.StatusConflict, "conflicting_record", err.Error())
+			return
+		}
 		if errors.Is(err, ldv.ErrInvalidRecord) {
 			// 422, not 400: the JSON parsed fine, the record is not lawful.
 			// The producer is expected to treat this as a defect in itself,
@@ -92,13 +108,15 @@ func (h *Handler) listActivities(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"verantwoordelijke":       register.Verantwoordelijke,
 		"disclaimer":              register.Disclaimer,
-		"verwerkingsactiviteiten": register.References(),
+		"verwerkingsactiviteiten": register.URIs(),
 	})
 }
 
 func (h *Handler) getActivity(w http.ResponseWriter, r *http.Request) {
 	register := h.logbook.Register()
-	activity, found := register.Resolve(r.PathValue("reference"))
+	// Addressed by id and version, so the URI a record carries resolves when
+	// someone actually dereferences it.
+	activity, found := register.ResolveLocal(r.PathValue("id"), r.PathValue("version"))
 	if !found {
 		writeProblem(w, http.StatusNotFound, "unknown_verwerkingsactiviteit", "no such entry in this register")
 		return
@@ -106,6 +124,7 @@ func (h *Handler) getActivity(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"verantwoordelijke":     register.Verantwoordelijke,
 		"disclaimer":            register.Disclaimer,
+		"uri":                   activity.URI(register.BaseURI),
 		"verwerkingsactiviteit": activity,
 	})
 }
@@ -115,9 +134,18 @@ func (h *Handler) health(w http.ResponseWriter, r *http.Request) {
 }
 
 // authorized compares the bearer token in constant time.
-func (h *Handler) authorized(r *http.Request) bool {
+//
+// An unconfigured token authorizes nobody. Without this an empty server-side
+// token matched a request that sent no Authorization header at all — both
+// sides being the empty string — so a logbook started without
+// LDV_READ_TOKEN served every record to anyone while logging that it would
+// refuse every request. Absent credentials must never be a credential.
+func authorized(r *http.Request, token string) bool {
+	if token == "" {
+		return false
+	}
 	presented := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer"))
-	return subtle.ConstantTimeCompare([]byte(presented), []byte(h.writeToken)) == 1
+	return subtle.ConstantTimeCompare([]byte(presented), []byte(token)) == 1
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
@@ -126,9 +154,21 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	_ = json.NewEncoder(w).Encode(payload)
 }
 
-// writeProblem answers with a small machine-readable error. The detail is
-// echoed to the producer because every rejection here is a defect in the
-// producer that someone has to fix.
+// writeProblem answers with a machine-readable error. The read extension
+// specifies application/problem+json (RFC 9457), so that is what goes out —
+// with the legacy `error`/`detail` pair kept alongside the standard fields,
+// because the write side's producers already read them.
+//
+// The detail is echoed because every rejection here is a defect in the caller
+// that someone has to fix.
 func writeProblem(w http.ResponseWriter, status int, code, detail string) {
-	writeJSON(w, status, map[string]string{"error": code, "detail": detail})
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"type":   "about:blank",
+		"title":  http.StatusText(status),
+		"status": status,
+		"detail": detail,
+		"error":  code,
+	})
 }

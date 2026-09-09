@@ -58,6 +58,9 @@ const readHeaderTimeout = 10 * time.Second
 // in-flight requests finish, then close whatever is left.
 const shutdownTimeout = 15 * time.Second
 
+// ldvDeliveryInterval is how often the LDV spool is drained.
+const ldvDeliveryInterval = 2 * time.Second
+
 type config struct {
 	Port           string
 	SigningKeyPath string
@@ -90,6 +93,11 @@ func getEnv(key, fallback string) string {
 type Store struct {
 	mu       sync.RWMutex
 	consents map[string]*Consent
+	// outbox holds LDV records awaiting delivery, alongside the consents so
+	// the two are written under one lock — this store's equivalent of the
+	// transaction the Postgres one uses.
+	outbox       []OutboxEntry
+	nextOutboxID int64
 }
 
 type ConsentFilter struct {
@@ -98,23 +106,88 @@ type ConsentFilter struct {
 	Status     string
 }
 
+// ConsentStore is the consent register's storage, and — deliberately — its
+// LDV outbox as well.
+//
+// The two live together because a consent and the record of the processing
+// that created it must be written atomically. A file spool is durable but is a
+// second store, and two stores cannot be committed together: there would
+// always be a window in which a consent exists that nothing logged, or a
+// record describes a mutation that never happened.
 type ConsentStore interface {
-	Create(ctx context.Context, consent *Consent) error
+	// Create stores a consent and its LDV record in one transaction.
+	Create(ctx context.Context, consent *Consent, record []byte) error
 	List(ctx context.Context, filter ConsentFilter) ([]*Consent, error)
 	Get(ctx context.Context, consentID string) (*Consent, bool, error)
-	Revoke(ctx context.Context, consentID string) (*Consent, bool, error)
+	// Revoke revokes a consent and stores its record in one transaction. The
+	// record is built from the revoked consent, hence the function.
+	Revoke(ctx context.Context, consentID string, record func(*Consent) ([]byte, error)) (*Consent, bool, error)
+
+	// AppendRecord stores a record with nothing to be atomic with — the
+	// operations that read rather than mutate.
+	AppendRecord(ctx context.Context, record []byte) error
+	// PendingRecords returns spooled records oldest first.
+	PendingRecords(ctx context.Context, limit int) ([]OutboxEntry, error)
+	// MarkDelivered removes a record the logbook has accepted.
+	MarkDelivered(ctx context.Context, id int64) error
+}
+
+// OutboxEntry is one spooled record awaiting delivery.
+type OutboxEntry struct {
+	ID     int64
+	Record []byte
 }
 
 func NewStore() *Store {
 	return &Store{consents: make(map[string]*Consent)}
 }
 
-func (s *Store) Create(_ context.Context, consent *Consent) error {
+func (s *Store) Create(_ context.Context, consent *Consent, record []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// One lock covers both, which is this store's equivalent of the
+	// transaction the Postgres one uses.
 	s.consents[consent.ConsentID] = consent
+	s.appendLocked(record)
 
+	return nil
+}
+
+// appendLocked spools a record. The caller holds the lock.
+func (s *Store) appendLocked(record []byte) {
+	if len(record) == 0 {
+		return
+	}
+	s.nextOutboxID++
+	s.outbox = append(s.outbox, OutboxEntry{ID: s.nextOutboxID, Record: record})
+}
+
+func (s *Store) AppendRecord(_ context.Context, record []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.appendLocked(record)
+	return nil
+}
+
+func (s *Store) PendingRecords(_ context.Context, limit int) ([]OutboxEntry, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if limit > len(s.outbox) {
+		limit = len(s.outbox)
+	}
+	return append([]OutboxEntry(nil), s.outbox[:limit]...), nil
+}
+
+func (s *Store) MarkDelivered(_ context.Context, id int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for index, entry := range s.outbox {
+		if entry.ID == id {
+			s.outbox = append(s.outbox[:index], s.outbox[index+1:]...)
+			return nil
+		}
+	}
 	return nil
 }
 
@@ -164,7 +237,7 @@ func (s *Store) Get(_ context.Context, consentID string) (*Consent, bool, error)
 	return consent, ok, nil
 }
 
-func (s *Store) Revoke(_ context.Context, consentID string) (*Consent, bool, error) {
+func (s *Store) Revoke(_ context.Context, consentID string, record func(*Consent) ([]byte, error)) (*Consent, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -174,6 +247,11 @@ func (s *Store) Revoke(_ context.Context, consentID string) (*Consent, bool, err
 	}
 
 	consent.Status = "REVOKED"
+	encoded, err := record(consent)
+	if err != nil {
+		return nil, false, err
+	}
+	s.appendLocked(encoded)
 
 	return consent, true, nil
 }
@@ -330,26 +408,29 @@ func handleConsents(store ConsentStore, issuer *ConsentIssuer, logbook *register
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not issue consent token"})
 				return
 			}
-			if err := store.Create(r.Context(), c); err != nil {
-				slog.Error("create consent", "err", err.Error())
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not store consent"})
-				return
-			}
-
 			// Recording a consent is itself a Dataverwerking of the GBO
-			// voorziening. The record names the Betrokkene by the
-			// portal-scoped reference the register stores — never the PI,
-			// which exists here only inside the signed token.
-			if err := logbook.logConsentOperation(r.Context(), r,
+			// voorziening. The record is built here and stored in the same
+			// transaction as the consent, so neither can exist without the
+			// other — a consent nothing logged, or a record for a consent
+			// that was never created.
+			//
+			// It names the Betrokkene by the portal-scoped reference the
+			// register stores, never the PI, which exists here only inside
+			// the signed token.
+			record, err := logbook.buildRecord(r,
 				consentGrantActivity, "dataverwerking.toestemming-verlenen",
 				c.SubjectRef, start, http.StatusCreated,
 				map[string]any{
-					"gbo.consent.id":             c.ConsentID,
-					"gbo.consent.dienstverlener": c.DienstverlenrOIN,
-					"gbo.consent.scopes":         c.Scopes,
-					"gbo.consent.use_case":       c.UseCase,
-				}); err != nil {
+					"dpl.gbo.consentId": c.ConsentID,
+				})
+			if err != nil {
+				slog.Error("build consent record", "err", err.Error())
 				refuseUnlogged(w)
+				return
+			}
+			if err := store.Create(r.Context(), c, record); err != nil {
+				slog.Error("create consent", "err", err.Error())
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not store consent"})
 				return
 			}
 
@@ -362,7 +443,19 @@ func handleConsents(store ConsentStore, issuer *ConsentIssuer, logbook *register
 			// GET /consents?subject_ref=<portal-pseudonym>&scope=<scope>&status=<status>
 			// subject_ref exists only for citizen-facing ownership/listing. It
 			// is not an authorization input; the PDP uses the signed token.
+			//
+			// It is also mandatory. Without it this route read and returned
+			// every citizen's consents — a Dataverwerking about all of them at
+			// once, logged as none, because there was no single Betrokkene to
+			// name. Nothing asks for that listing; the portal always scopes to
+			// one citizen.
 			subjectRef := r.URL.Query().Get("subject_ref")
+			if strings.TrimSpace(subjectRef) == "" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{
+					"error": "subject_ref is required; an unscoped listing would read every citizen's consents",
+				})
+				return
+			}
 			scope := r.URL.Query().Get("scope")
 			statusFilter := r.URL.Query().Get("status")
 			result, err := store.List(r.Context(), ConsentFilter{
@@ -380,10 +473,10 @@ func handleConsents(store ConsentStore, issuer *ConsentIssuer, logbook *register
 			// Showing a citizen their own consents is a Dataverwerking too.
 			// A listing without a subject_ref is an operational query rather
 			// than inzage by a Betrokkene, and names nobody to log.
-			if err := logbook.logConsentOperation(r.Context(), r,
+			if err := logbook.logConsentOperation(r.Context(), store, r,
 				consentListActivity, "dataverwerking.toestemming-inzage",
 				subjectRef, start, http.StatusOK,
-				map[string]any{"gbo.consent.count": len(result)}); err != nil {
+				map[string]any{"dpl.gbo.consentCount": len(result)}); err != nil {
 				refuseUnlogged(w)
 				return
 			}
@@ -433,12 +526,11 @@ func handleConsentByID(store ConsentStore, logbook *registerLogbook) http.Handle
 			// status is a processing of that Betrokkene's data, and it is the
 			// step that makes a revocation take effect — so it is logged like
 			// any other, not treated as a read-only lookup.
-			if err := logbook.logConsentOperation(r.Context(), r,
+			if err := logbook.logConsentOperation(r.Context(), store, r,
 				consentStatusActivity, "dataverwerking.toestemming-status",
 				c.SubjectRef, start, http.StatusOK,
 				map[string]any{
-					"gbo.consent.id":     c.ConsentID,
-					"gbo.consent.status": c.Status,
+					"dpl.gbo.consentId": c.ConsentID,
 				}); err != nil {
 				refuseUnlogged(w)
 				return
@@ -467,10 +559,10 @@ func handleConsentByID(store ConsentStore, logbook *registerLogbook) http.Handle
 				return
 			}
 
-			if err := logbook.logConsentOperation(r.Context(), r,
+			if err := logbook.logConsentOperation(r.Context(), store, r,
 				consentListActivity, "dataverwerking.toestemming-inzage",
 				c.SubjectRef, start, http.StatusOK,
-				map[string]any{"gbo.consent.id": c.ConsentID}); err != nil {
+				map[string]any{"dpl.gbo.consentId": c.ConsentID}); err != nil {
 				refuseUnlogged(w)
 				return
 			}
@@ -478,7 +570,17 @@ func handleConsentByID(store ConsentStore, logbook *registerLogbook) http.Handle
 			writeJSON(w, http.StatusOK, c)
 
 		case http.MethodDelete:
-			c, ok, err := store.Revoke(r.Context(), id)
+			// The record is built from the revoked consent, so it can only be
+			// assembled once the revocation has happened — and it is written
+			// in the same transaction, so it cannot happen without a record.
+			c, ok, err := store.Revoke(r.Context(), id, func(revoked *Consent) ([]byte, error) {
+				return logbook.buildRecord(r,
+					consentRevokeActivity, "dataverwerking.toestemming-intrekken",
+					revoked.SubjectRef, start, http.StatusOK,
+					map[string]any{
+						"dpl.gbo.consentId": revoked.ConsentID,
+					})
+			})
 			if err != nil {
 				slog.Error("revoke consent", "err", err.Error())
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not revoke consent"})
@@ -489,22 +591,6 @@ func handleConsentByID(store ConsentStore, logbook *registerLogbook) http.Handle
 			if !ok {
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": "consent not found"})
 
-				return
-			}
-
-			// The revocation has already been stored, so this is the one
-			// place where fail-closed cannot undo the processing. It can
-			// still withhold the confirmation, which is what it does: the
-			// caller learns the operation did not complete cleanly rather
-			// than being told all is well while the logboek has no record.
-			if err := logbook.logConsentOperation(r.Context(), r,
-				consentRevokeActivity, "dataverwerking.toestemming-intrekken",
-				c.SubjectRef, start, http.StatusOK,
-				map[string]any{
-					"gbo.consent.id":     c.ConsentID,
-					"gbo.consent.status": c.Status,
-				}); err != nil {
-				refuseUnlogged(w)
 				return
 			}
 
@@ -556,6 +642,9 @@ func main() {
 		fatal("configuring the logboek client", err)
 	}
 	logbook := newRegisterLogbook(client)
+	// No file spool here: the outbox lives in the consent store, so a record
+	// and the mutation it describes commit together. Delivery runs from there.
+	go logbook.runOutbox(context.Background(), store, ldvDeliveryInterval)
 	if client == nil {
 		slog.Warn("no LDV_LOGBOOK_URL configured; this register writes no Logboek Dataverwerkingen records")
 	}

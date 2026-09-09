@@ -130,3 +130,41 @@ export async function fetchFscTxlog(txID: string): Promise<FscTxlogResponse | nu
   if (!res.ok) return null
   return res.json()
 }
+
+// Logboek Dataverwerkingen per trace (Logius LDV v1.0.0). LDV keeps each
+// Verantwoordelijke's records in that Verantwoordelijke's own logbook and
+// lets only trace metadata cross a boundary, so a chain view is a query per
+// logbook joined on the trace id — the same Fsc-Transaction-Id the FSC
+// transaction log and the PDP decision carry. The backend fans out; this is
+// the other two thirds of the "one trace id, three standards" picture.
+// One dataProcessingOperation as the read extension returns it: camelCase
+// names and RFC 3339 times, which differ from the write side's snake_case and
+// epoch milliseconds. That is the standard's own split, not ours.
+export type LdvRecord = {
+  traceId: string
+  spanId: string
+  parentSpanId?: string
+  name: string
+  status: string
+  startTime: string
+  endTime: string
+  resource?: { attributes: Record<string, unknown> }
+  attributes: Record<string, unknown>
+}
+
+export type LdvLogbookResult = {
+  logbook: { id: string; name: string }
+  records: LdvRecord[]
+  error?: string
+}
+
+export type LdvChainResponse = {
+  trace_id: string
+  logbooks: LdvLogbookResult[]
+}
+
+export async function fetchLdvChain(txID: string): Promise<LdvChainResponse | null> {
+  const res = await fetch(`${BASE}/ldv/${encodeURIComponent(txID)}`)
+  if (!res.ok) return null
+  return res.json()
+}

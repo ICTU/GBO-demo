@@ -378,17 +378,27 @@ services:
   # administrative, confirmed on write and never sampled. Separate store,
   # separate guarantees.
   logboek-bd:
-    build: ./services/ldv-logboek
+    build:
+      # Root context: the logbook shares the wire DTO with its producers
+      # through the sibling services/ldv-client module.
+      context: .
+      dockerfile: services/ldv-logboek/Dockerfile
     ports:
       - "127.0.0.1:${GBO_PORT_LOGBOEK_BD:-9416}:4016"
     environment:
       - OTEL_SERVICE_NAME=logboek-bd
       - DATABASE_PATH=/data/logboek.db
       - REGISTER_PATH=/config/verwerkingsactiviteiten-bd.json
+      # The URI of this logbook's read API — what a record's
+      # dpl.read.nextLogbookId points at, and what the read response names
+      # itself by.
+      - LDV_LOGBOOK_ID=https://logboek.belastingdienst.nl/data-processing-operations
       # Local-demo default. A deployment sets a real value; the token is the
       # whole access model here, and who may write to or read from a
       # Verantwoordelijke's logboek is an open governance question.
       - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
+      # Reading a logbook is a different capability from writing one.
+      - LDV_READ_TOKEN=${LDV_READ_TOKEN:-local-demo-logboek-read-token}
     volumes:
       - logboek-bd-data:/data
     networks:
@@ -403,14 +413,21 @@ services:
   # BRP chain's Dataverwerkingen belong to RvIG and must not land in the
   # Belastingdienst's logbook.
   logboek-brp:
-    build: ./services/ldv-logboek
+    build:
+      context: .
+      dockerfile: services/ldv-logboek/Dockerfile
     ports:
       - "127.0.0.1:${GBO_PORT_LOGBOEK_BRP:-9417}:4016"
     environment:
       - OTEL_SERVICE_NAME=logboek-brp
       - DATABASE_PATH=/data/logboek.db
       - REGISTER_PATH=/config/verwerkingsactiviteiten-brp.json
+      # The URI of this logbook's read API — what a record's
+      # dpl.read.nextLogbookId points at, and what the read response names
+      # itself by.
+      - LDV_LOGBOOK_ID=https://logboek.rvig.nl/data-processing-operations
       - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
+      - LDV_READ_TOKEN=${LDV_READ_TOKEN:-local-demo-logboek-read-token}
     volumes:
       - logboek-brp-data:/data
     networks:
@@ -426,14 +443,21 @@ services:
   # answers status questions and assembles attestations, and those are its own
   # processings rather than a bronhouder's.
   logboek-gbo:
-    build: ./services/ldv-logboek
+    build:
+      context: .
+      dockerfile: services/ldv-logboek/Dockerfile
     ports:
       - "127.0.0.1:${GBO_PORT_LOGBOEK_GBO:-9418}:4016"
     environment:
       - OTEL_SERVICE_NAME=logboek-gbo
       - DATABASE_PATH=/data/logboek.db
       - REGISTER_PATH=/config/verwerkingsactiviteiten-gbo.json
+      # The URI of this logbook's read API — what a record's
+      # dpl.read.nextLogbookId points at, and what the read response names
+      # itself by.
+      - LDV_LOGBOOK_ID=https://logboek.gbo.overheid.nl/data-processing-operations
       - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
+      - LDV_READ_TOKEN=${LDV_READ_TOKEN:-local-demo-logboek-read-token}
     volumes:
       - logboek-gbo-data:/data
     networks:
@@ -462,8 +486,12 @@ services:
       - LDV_LOGBOOK_URL=http://logboek-bd:4016
       - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
       - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY:-local-demo-pseudonym-key}
-      - LDV_YEAR_ACTIVITY_TEMPLATE=bd-ib-%d@v1
+      - LDV_YEAR_ACTIVITY_TEMPLATE=https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-ib-%d/v1
+      - LDV_SCOPE_ACTIVITY_BASE=https://logboek.belastingdienst.nl/verwerkingsactiviteiten
     volumes:
+      # The LDV spool must survive a restart; that is what makes a
+      # record durable before it reaches the logbook.
+      - ldv-outbox-graphql-server:/data
       - ./services/graphql-server/config:/config:ro
     networks:
       - backend
@@ -500,6 +528,9 @@ services:
       - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
       - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY_BRP:-local-demo-pseudonym-key-brp}
     volumes:
+      # The LDV spool must survive a restart; that is what makes a
+      # record durable before it reaches the logbook.
+      - ldv-outbox-brp-graphql-server:/data
       - ./services/brp-graphql-server/config:/config:ro
     networks:
       - backend
@@ -617,8 +648,12 @@ services:
       - LDV_LOGBOOK_URL=http://logboek-bd:4016
       - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
       - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY:-local-demo-pseudonym-key}
-      - LDV_RESOLUTION_ACTIVITY=bd-pi-bsn-resolutie@v1
-      - LDV_FORWARD_ACTIVITY=bd-bronquery-doorgifte@v1
+      - LDV_RESOLUTION_ACTIVITY=https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-pi-bsn-resolutie/v1
+      - LDV_FORWARD_ACTIVITY=https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-bronquery-doorgifte/v1
+    volumes:
+      # The LDV spool must survive a restart; that is what makes a
+      # record durable before it reaches the logbook.
+      - ldv-outbox-bron-sidecar:/data
     networks:
       - backend
       - fsc-infra
@@ -659,8 +694,12 @@ services:
       - LDV_LOGBOOK_URL=http://logboek-brp:4016
       - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
       - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY_BRP:-local-demo-pseudonym-key-brp}
-      - LDV_RESOLUTION_ACTIVITY=brp-pi-bsn-resolutie@v1
-      - LDV_FORWARD_ACTIVITY=brp-bronquery-doorgifte@v1
+      - LDV_RESOLUTION_ACTIVITY=https://logboek.rvig.nl/verwerkingsactiviteiten/brp-pi-bsn-resolutie/v1
+      - LDV_FORWARD_ACTIVITY=https://logboek.rvig.nl/verwerkingsactiviteiten/brp-bronquery-doorgifte/v1
+    volumes:
+      # The LDV spool must survive a restart; that is what makes a
+      # record durable before it reaches the logbook.
+      - ldv-outbox-brp-sidecar:/data
     networks:
       - backend
       - fsc-infra
@@ -678,7 +717,10 @@ services:
       retries: 5
 
   consent-portal-backend:
-    build: ./services/consent-portal-backend
+    build:
+      # Root context: shares services/ldv-client with the other LDV components.
+      context: .
+      dockerfile: services/consent-portal-backend/Dockerfile
     profiles: [dvtp, full]
     ports:
       - "${GBO_PORT_CONSENT_PORTAL_BACKEND:-9405}:4005"
@@ -692,6 +734,10 @@ services:
       # Dataverwerking — the one that makes every processing after it BSN-free.
       - LDV_LOGBOOK_URL=http://logboek-gbo:4016
       - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
+    volumes:
+      # The LDV spool must survive a restart; that is what makes a record
+      # durable before it reaches the logbook.
+      - ldv-outbox-consent-portal-backend:/data
     networks:
       - backend
     depends_on:
@@ -855,6 +901,11 @@ services:
       # peer-facing manager /v1/logs with a peer-cert (Logius
       # fsc-logging draft). For the demo we mount each org's existing
       # internal-cert and talk to the txlog-api directly.
+      # The Logboek Dataverwerkingen of each Verantwoordelijke. The chain
+      # view queries them in parallel and joins on the trace id, because LDV
+      # keeps the records in separate stores by design.
+      - LDV_LOGBOOKS=logboek-bd=Belastingdienst=http://logboek-bd:4016,logboek-brp=RvIG=http://logboek-brp:4016,logboek-gbo=GBO=http://logboek-gbo:4016
+      - LDV_READ_TOKEN=${LDV_READ_TOKEN:-local-demo-logboek-read-token}
       - FSC_TXLOG_EDI_URL=https://edi-txlog-api:9443
       - FSC_TXLOG_EDI_CERT=/certs/edi/internal-cert.pem
       - FSC_TXLOG_EDI_KEY=/certs/edi/internal-cert-key.pem
@@ -1149,6 +1200,13 @@ services:
       - LDV_LOGBOOK_URL=http://logboek-gbo:4016
       - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
       - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY_GBO:-local-demo-pseudonym-key-gbo}
+      # Where each source's half of the request is logged, so a reader can
+      # follow dpl.read.nextLogbookId across the organisation boundary.
+      - LDV_NEXT_LOGBOOK_IDS=belastingdienst=https://logboek.belastingdienst.nl/data-processing-operations,rvig=https://logboek.rvig.nl/data-processing-operations
+    volumes:
+      # The LDV spool must survive a restart; that is what makes a
+      # record durable before it reaches the logbook.
+      - ldv-outbox-eudi-adapter:/data
     depends_on:
       source-registry-migrations:
         condition: service_completed_successfully
@@ -1223,6 +1281,12 @@ networks:
 
 volumes:
   jaeger-badger:
+  ldv-outbox-bron-sidecar:
+  ldv-outbox-brp-sidecar:
+  ldv-outbox-graphql-server:
+  ldv-outbox-brp-graphql-server:
+  ldv-outbox-eudi-adapter:
+  ldv-outbox-consent-portal-backend:
   dev-portal-var:
   dvtp-onboarding-data:
   logboek-bd-data:

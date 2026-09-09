@@ -57,7 +57,7 @@ func issuanceUnderTest(t *testing.T, logbook *ldvtest.Logbook) string {
 		Port: "0", OutwayURL: outway.URL, SourceDataTransport: sourceTransportFSC,
 		SourceDataFSCServiceReference: "bri", SourceDataFSCGrantHash: "data-grant",
 	}
-	client := newIssuanceLogbook(logbook.Client(t, "eudi-adapter"))
+	client := newIssuanceLogbook(logbook.Client(t, "eudi-adapter"), map[string]string{"belastingdienst": "https://logboek.belastingdienst.nl/data-processing-operations"})
 	server := httptest.NewServer(testMux(cfg, http.DefaultClient, metadata, client))
 	t.Cleanup(server.Close)
 	return server.URL
@@ -119,11 +119,11 @@ func TestAnIssuanceLogsBothDataverwerkingen(t *testing.T) {
 	}
 	// The record says how much was processed, not what: it is a record about
 	// the attestation, not a copy of it.
-	if got := assembly[0].Attributes["gbo.attestatie.claims"]; got == nil || got == float64(0) {
-		t.Errorf("gbo.attestatie.claims = %v, want the number of claims", got)
+	if got := assembly[0].Attributes["dpl.gbo.attestatieClaims"]; got == nil || got == float64(0) {
+		t.Errorf("dpl.gbo.attestatieClaims = %v, want the number of claims", got)
 	}
-	if got := assembly[0].Attributes["gbo.source_oin"]; got != "99999999900000000200" {
-		t.Errorf("gbo.source_oin = %v", got)
+	if got := assembly[0].Attributes["dpl.gbo.sourceId"]; got != "belastingdienst" {
+		t.Errorf("dpl.gbo.sourceId = %v", got)
 	}
 }
 
@@ -204,7 +204,7 @@ func TestAnIssuanceThatCannotBeLoggedNeverReachesTheSource(t *testing.T) {
 		t.Fatalf("load source metadata: %v", err)
 	}
 
-	client := newIssuanceLogbook(logbook.Client(t, "eudi-adapter"))
+	client := newIssuanceLogbook(logbook.Client(t, "eudi-adapter"), map[string]string{"belastingdienst": "https://logboek.belastingdienst.nl/data-processing-operations"})
 	cfg := config{
 		Port: "0", OutwayURL: outway.URL, SourceDataTransport: sourceTransportFSC,
 		SourceDataFSCServiceReference: "bri", SourceDataFSCGrantHash: "data-grant",
@@ -286,5 +286,40 @@ func TestAttributesDropEmptyValues(t *testing.T) {
 	}
 	if strings.Contains(string(encoded), walletBSN) {
 		t.Fatalf("attributes contain the BSN: %s", encoded)
+	}
+}
+
+// The chain view is assembled by following pointers, not by one place holding
+// everything — which is what LDV's per-Verantwoordelijke model requires. The
+// issuance is the hop where GBO's processing hands off to a bronhouder, so it
+// is the record that has to say where the rest was written down.
+func TestTheAssemblyRecordPointsAtTheSourcesLogbook(t *testing.T) {
+	logbook := ldvtest.New(t, pidExtractionActivity, attestationBuildActivity)
+	url := issuanceUnderTest(t, logbook)
+
+	issue(t, url)
+
+	assembly := ldvtest.ByName(logbook.Written(), "dataverwerking.attestatie-samenstellen")
+	if len(assembly) != 1 {
+		t.Fatalf("expected one assembly record, got %+v", logbook.Written())
+	}
+	if got := assembly[0].Attributes[ldv.AttrNextLogbookID]; got != "https://logboek.belastingdienst.nl/data-processing-operations" {
+		t.Errorf("%s = %v, want the source logbook's read-API URI", ldv.AttrNextLogbookID, got)
+	}
+	// The extraction happens before any bronhouder is involved, so it points
+	// nowhere — and an absent pointer must not be written as an empty one.
+	extraction := ldvtest.ByName(logbook.Written(), "dataverwerking.pid-bsn-extractie")
+	if _, present := extraction[0].Attributes[ldv.AttrNextLogbookID]; present {
+		t.Error("the extraction record should carry no next-logbook pointer")
+	}
+}
+
+func TestParseNextLogbooks(t *testing.T) {
+	mapping := parseNextLogbooks(" belastingdienst=https://a.test/data-processing-operations , rvig=https://b.test/data-processing-operations ,, malformed ,=x, y= ")
+	if len(mapping) != 2 {
+		t.Fatalf("mapping = %#v, want the two well-formed entries", mapping)
+	}
+	if mapping["belastingdienst"] != "https://a.test/data-processing-operations" || mapping["rvig"] != "https://b.test/data-processing-operations" {
+		t.Errorf("mapping = %#v", mapping)
 	}
 }

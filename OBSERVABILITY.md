@@ -79,4 +79,6 @@ must never do, and exactly what this one must.
 The two are joined by one value: the trace id of an LDV record is the
 `Fsc-Transaction-Id`, the same identifier the ADL decision record and the FSC
 transaction logs carry, and the same one the developer portal already
-correlates on.
+correlates on. The portal's **Logboek Dataverwerkingen** panel makes that
+visible: per trace it shows the LDV records of every Verantwoordelijke next to
+the FSC transaction records and the PDP decision, all under one id.

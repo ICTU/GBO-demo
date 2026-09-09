@@ -59,6 +59,11 @@ const readHeaderTimeout = 10 * time.Second
 // in-flight requests finish, then close whatever is left.
 const shutdownTimeout = 15 * time.Second
 
+// ldvDeliveryInterval is how often the LDV spool is drained. Records are
+// durable the moment they are written, so this governs only how quickly they
+// reach the logbook, not whether they do.
+const ldvDeliveryInterval = 2 * time.Second
+
 type config struct {
 	Port               string
 	MockDataPath       string
@@ -76,6 +81,7 @@ func loadConfig() (config, error) {
 		SourceMetadataPath: os.Getenv("GBO_SOURCE_METADATA_PATH"),
 		LDVQuery: ldvQueryConfig{
 			YearActivityTemplate: os.Getenv("LDV_YEAR_ACTIVITY_TEMPLATE"),
+			ScopeActivityBase:    os.Getenv("LDV_SCOPE_ACTIVITY_BASE"),
 		},
 	}, nil
 }
@@ -386,10 +392,11 @@ func newMux(schema *graphql.Schema, tracer trace.Tracer, logbook *sourceLogbook,
 			return
 		}
 
-		// The query is a Dataverwerking of this Verantwoordelijke, so the
-		// answer is held back until the logbook has confirmed the records.
-		// Buffering costs a copy of a small JSON body and buys the guarantee
-		// that no data leaves unlogged.
+		// The records are made durable in the local spool before this handler
+		// returns, so the answer no longer has to be held back waiting on the
+		// logbook. It is still buffered, because a record that cannot even be
+		// spooled means the processing is unrecorded, and that must not be
+		// answered with data.
 		start := time.Now().UTC()
 		factsCtx, facts := withQueryFacts(ctx)
 		buffered := newBufferedResponse()
@@ -470,6 +477,24 @@ func main() {
 	if client == nil {
 		slog.Warn("no LDV_LOGBOOK_URL configured; this bron writes no Logboek Dataverwerkingen records")
 	}
+
+	// A local spool: the record is made durable here and delivered to the
+	// logbook afterwards. Withholding a response never un-processed anything,
+	// so what matters is that the record cannot be lost — and the logbook
+	// stops being on the critical path of every request.
+	if client != nil {
+		outbox, err := ldv.OpenOutbox(getEnv("LDV_OUTBOX_PATH", "/data/ldv-outbox.jsonl"), client)
+		if err != nil {
+			fatal("opening the LDV outbox", err)
+		}
+		defer func() { _ = outbox.Close() }()
+		client.UseOutbox(outbox)
+		if pending, err := outbox.Pending(ctx); err == nil && pending > 0 {
+			slog.Info("LDV records waiting from a previous run", "pending", pending)
+		}
+		go outbox.Run(ctx, ldvDeliveryInterval)
+	}
+
 	logbook := newSourceLogbook(client, cfg.LDVQuery)
 
 	var mux *http.ServeMux

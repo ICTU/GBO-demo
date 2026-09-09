@@ -43,6 +43,7 @@ import (
 	"gbo-demo/consent-portal-backend/portalhttp"
 	"gbo-demo/consent-portal-backend/register"
 	"gbo-demo/consent-portal-backend/upstream"
+	ldvclient "gbo-demo/ldv-client"
 	"net"
 	"os/signal"
 	"syscall"
@@ -70,6 +71,9 @@ const readHeaderTimeout = 10 * time.Second
 // in-flight requests finish, then close whatever is left.
 const shutdownTimeout = 15 * time.Second
 
+// ldvDeliveryInterval is how often the LDV spool is drained.
+const ldvDeliveryInterval = 2 * time.Second
+
 // streamGrace is how long ordinary in-flight requests get to finish before
 // the SSE streams are ended. Shutdown waits for active requests but does not
 // cancel their contexts, so /portal/events would otherwise hold the drain
@@ -85,9 +89,8 @@ type config struct {
 	DevPortalBackend string
 	// LogbookURL empty means this portal is not part of an LDV chain and
 	// writes no Dataverwerkingen records.
-	LogbookURL      string
-	LogbookToken    string
-	LogbookFallback string
+	LogbookURL   string
+	LogbookToken string
 }
 
 func loadConfig() config {
@@ -98,17 +101,8 @@ func loadConfig() config {
 		DevPortalBackend: getEnv("DEV_PORTAL_BACKEND_URL", ""),
 		LogbookURL:       getEnv("LDV_LOGBOOK_URL", ""),
 		LogbookToken:     getEnv("LDV_WRITE_TOKEN", ""),
-		LogbookFallback:  getEnv("LDV_FALLBACK_ACTIVITY", ""),
 	}
 }
-
-// How long to wait for the logbook at startup. A component that must log
-// cannot start without one; compose orders it after the logbook's health
-// check, and the retries only cover the gap on a cold stack.
-const (
-	ldvRegisterAttempts = 15
-	ldvRegisterBackoff  = time.Second
-)
 
 func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
@@ -150,15 +144,12 @@ func newPortal(cfg config, hub *portalhttp.Hub, logbook consent.Logbook) *consen
 // this deployment is not part of an LDV chain. A typed nil would satisfy the
 // interface while being nil underneath, so the concrete absence is turned
 // into an interface-level one here.
-func newLogbook(cfg config, serviceName string) (consent.Logbook, *ldv.Logbook, error) {
-	writer, err := ldv.New(serviceName, cfg.LogbookURL, cfg.LogbookToken, cfg.LogbookFallback)
-	if err != nil {
+func newLogbook(cfg config, serviceName string) (consent.Logbook, *ldvclient.Client, error) {
+	writer, client, err := ldv.New(serviceName, cfg.LogbookURL, cfg.LogbookToken)
+	if err != nil || writer == nil {
 		return nil, nil, err
 	}
-	if writer == nil {
-		return nil, nil, nil
-	}
-	return writer, writer, nil
+	return writer, client, nil
 }
 
 // newMux wires the core to its production adapters and builds the routing
@@ -217,17 +208,22 @@ func main() {
 
 	// Either this portal is part of GBO's LDV chain and cannot start without
 	// its logbook, or it is not and writes no records.
-	logbook, writer, err := newLogbook(cfg, serviceName)
+	logbook, ldvClient, err := newLogbook(cfg, serviceName)
 	if err != nil {
 		fatal("configuring the logboek adapter", err)
 	}
-	if writer != nil {
-		if err := writer.LoadRegister(context.Background(), ldvRegisterAttempts, ldvRegisterBackoff); err != nil {
-			fatal("reading the logboek verwerkingsactiviteiten register", err)
-		}
-		slog.Info("logboek configured", "fallback_activity", writer.Fallback())
-	} else {
+	if ldvClient == nil {
 		slog.Warn("no LDV_LOGBOOK_URL configured; this portal writes no Logboek Dataverwerkingen records")
+	} else {
+		// A local spool: the pseudonymisation record is durable before the
+		// consent is created, and reaches the logbook afterwards.
+		outbox, err := ldvclient.OpenOutbox(getEnv("LDV_OUTBOX_PATH", "/data/ldv-outbox.jsonl"), ldvClient)
+		if err != nil {
+			fatal("opening the LDV outbox", err)
+		}
+		defer func() { _ = outbox.Close() }()
+		ldvClient.UseOutbox(outbox)
+		go outbox.Run(context.Background(), ldvDeliveryInterval)
 	}
 
 	// BaseContext gives every request a context this process can cancel, which
