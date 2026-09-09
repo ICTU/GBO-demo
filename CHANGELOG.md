@@ -7,6 +7,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Changed
+- **The landing page follows the ICTU house style and the programme's own
+  wording.** Primary colour moves from Rijkshuisstijl hemelblauw `#01689b` to
+  ICTU `#0e2b84`, and the hover accent from Rijkshuisstijl red `#d52b1e` to
+  ICTU purple `#880095`; the derived tints, connector lines and rails move with
+  them, and every text/background pair now meets WCAG AA, most of them AAA.
+  Purple stays a hover colour, as red was — links themselves remain blue.
+  The hero title leads with "Demo-omgeving", the intro and the "Wat doet GBO?"
+  section take the programme's approved copy, "Wat het oplevert" becomes
+  "Voordelen GBO", and the section links to both the documentation environment
+  and the new information site (gbo.pleio.nl).
+  - The flow band gains a fourth outlet, "Nieuwe toepassingen", drawn on a
+    dashed rail and without a pulse: nothing runs over it yet. Its fan and its
+    labels now share one grid row and split it into four equal fractions, so
+    the rails meet the labels at every width instead of only where the
+    descriptions happen to fit on one line.
+  - Colours the drawings used to hardcode are inherited through `currentColor`,
+    so `tokens.css` is the only place the palette is written down.
 - Updated the remaining gRPC dependencies to the patched 1.83.1 release.
 - Brought the repository owner, contact and publiccode metadata in line with
   the ICTU GitHub policy.
