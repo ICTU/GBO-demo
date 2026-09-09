@@ -84,7 +84,7 @@ func TestPostgreSQLStorePersistsConsent(t *testing.T) {
 		ValidUntil: now.Add(24 * time.Hour),
 	}
 
-	if err := store.Create(ctx, consent); err != nil {
+	if err := store.Create(ctx, consent, nil); err != nil {
 		t.Fatalf("create consent: %v", err)
 	}
 	store.Close()
@@ -118,7 +118,7 @@ func TestPostgreSQLStorePersistsConsent(t *testing.T) {
 		t.Fatalf("unexpected filtered consents: %+v", filtered)
 	}
 
-	revoked, ok, err := reopened.Revoke(ctx, consentID)
+	revoked, ok, err := reopened.Revoke(ctx, consentID, noRecord)
 	if err != nil {
 		t.Fatalf("revoke consent: %v", err)
 	}
@@ -195,3 +195,7 @@ func TestPostgreSQLStoreMigratesLegacyNullSubjectRef(t *testing.T) {
 		t.Fatalf("subject_ref schema nullable=%q has_default=%v", nullable, hasDefault)
 	}
 }
+
+// noRecord stands in where a test is about the consent rather than the LDV
+// record that would normally travel with it in the same transaction.
+func noRecord(*Consent) ([]byte, error) { return nil, nil }

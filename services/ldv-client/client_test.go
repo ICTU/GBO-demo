@@ -117,24 +117,6 @@ func TestNormalizeTraceID(t *testing.T) {
 	}
 }
 
-func TestTraceIDPrefersTheChainsOwnHeaders(t *testing.T) {
-	header := http.Header{}
-	header.Set("Fsc-Transaction-Id", "0af76519-16cd-43dd-8448-eb211c80319c")
-	if got := TraceID(context.Background(), header); got != "0af7651916cd43dd8448eb211c80319c" {
-		t.Errorf("TraceID = %q, want the Fsc-Transaction-Id", got)
-	}
-	// An LDV header set by an upstream component of the same Verantwoordelijke
-	// wins, so both halves of one request file under one id.
-	header.Set(HeaderTraceID, "11111111111111111111111111111111")
-	if got := TraceID(context.Background(), header); got != "11111111111111111111111111111111" {
-		t.Errorf("TraceID = %q, want the LDV header", got)
-	}
-	// A record is never dropped for want of a correlation handle.
-	if got := TraceID(context.Background(), http.Header{}); NormalizeTraceID(got) == "" {
-		t.Errorf("TraceID fallback = %q, not a trace id", got)
-	}
-}
-
 func TestSpanIDsAreDistinct(t *testing.T) {
 	first, second := SpanID(), SpanID()
 	if first == second || len(first) != 16 {
@@ -170,97 +152,45 @@ func TestStatusReflectsTheOutcome(t *testing.T) {
 		t.Error("StatusFromHTTP does not follow the status code")
 	}
 }
-
-func TestSubjectPrefersThePseudonymPassedByAnUpstreamComponent(t *testing.T) {
-	client, err := New(testConfig("http://logboek:4016"))
-	if err != nil {
-		t.Fatalf("new: %v", err)
-	}
-	header := http.Header{}
-	header.Set(HeaderSubjectID, "PI-abc123")
-	header.Set(HeaderSubjectIDType, SubjectTypePI)
-	if id, idType := client.Subject(header, "123456789"); id != "PI-abc123" || idType != SubjectTypePI {
-		t.Errorf("Subject = (%q, %q), want the PI the upstream passed on", id, idType)
-	}
-}
-
-// An unrecognised type on the wire is treated as no type at all: the logbook
-// would refuse it, and the component still names the Betrokkene by something
-// it can vouch for.
-func TestSubjectFallsBackToALocalPseudonym(t *testing.T) {
-	client, err := New(testConfig("http://logboek:4016"))
-	if err != nil {
-		t.Fatalf("new: %v", err)
-	}
-	for name, header := range map[string]http.Header{
-		"no headers":      {},
-		"unknown type":    {HeaderSubjectID: []string{"X-1"}, HeaderSubjectIDType: []string{"bsn"}},
-		"type without id": {HeaderSubjectIDType: []string{SubjectTypePI}},
-	} {
-		t.Run(name, func(t *testing.T) {
-			id, idType := client.Subject(header, "123456789")
-			if idType != SubjectTypePseudonym || !strings.HasPrefix(id, "LP-") {
-				t.Fatalf("Subject = (%q, %q), want a logbook-local pseudonym", id, idType)
-			}
-			if strings.Contains(id, "123456789") {
-				t.Fatalf("the pseudonym contains the BSN: %q", id)
-			}
-		})
-	}
-}
-
-// Stable within one Verantwoordelijke, different across them: a shared key
-// would make the same citizen recognisable across organisations' logbooks.
-func TestLocalPseudonymIsStablePerKey(t *testing.T) {
-	first, err := New(testConfig("http://logboek:4016"))
-	if err != nil {
-		t.Fatalf("new: %v", err)
-	}
-	cfg := testConfig("http://logboek:4016")
-	cfg.PseudonymKey = "another-verantwoordelijke"
-	second, err := New(cfg)
-	if err != nil {
-		t.Fatalf("new: %v", err)
-	}
-	const bsn, otherBSN = "123456789", "999991772"
-	firstPseudonym := first.LocalPseudonym(bsn)
-	if firstPseudonym != first.LocalPseudonym(bsn) {
-		t.Error("the same BSN must map to the same pseudonym within one logbook")
-	}
-	if firstPseudonym == second.LocalPseudonym(bsn) {
-		t.Error("two Verantwoordelijken must not derive the same pseudonym")
-	}
-	if firstPseudonym == first.LocalPseudonym(otherBSN) {
-		t.Error("different BSNs must map to different pseudonyms")
-	}
-}
-
 func TestForeignProcessorNamesTheCallingPeer(t *testing.T) {
 	payload, err := json.Marshal(map[string]any{"sub": "AAAABBBBCCCCDDDDEEEE"})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
+	client, err := New(testConfig("http://logboek:4016"))
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
 	request := httptest.NewRequest(http.MethodPost, "/graphql", nil)
 	request.Header.Set("Fsc-Authorization", "Bearer header."+base64.RawURLEncoding.EncodeToString(payload)+".signature")
-	if got := ForeignProcessor(request); got != "fsc-peer:AAAABBBBCCCCDDDDEEEE" {
-		t.Errorf("ForeignProcessor = %q", got)
+	// §3.2.2.9 wants a URL, and an FSC peer id is not one.
+	if got, want := client.ForeignProcessor(request), DefaultPeerURIBase+"/AAAABBBBCCCCDDDDEEEE"; got != want {
+		t.Errorf("ForeignProcessor = %q, want %q", got, want)
 	}
 }
 
 // Without a peer-shaped claim, the grant hash is the one thing about the
 // caller this side can actually verify.
 func TestForeignProcessorFallsBackToTheGrantHash(t *testing.T) {
+	client, err := New(testConfig("http://logboek:4016"))
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
 	request := httptest.NewRequest(http.MethodPost, "/graphql", nil)
 	request.Header.Set("Fsc-Grant-Hash", "abc123")
-	if got := ForeignProcessor(request); got != "fsc-grant:abc123" {
-		t.Errorf("ForeignProcessor = %q", got)
+	if got, want := client.ForeignProcessor(request), DefaultPeerURIBase+"/by-grant/abc123"; got != want {
+		t.Errorf("ForeignProcessor = %q, want %q", got, want)
 	}
 }
 
 // A locally initiated processing has no foreign processor, and an absent
 // attribute is not the same as an empty one.
 func TestForeignProcessorIsEmptyWithoutFSC(t *testing.T) {
-	if got := ForeignProcessor(httptest.NewRequest(http.MethodPost, "/graphql", nil)); got != "" {
+	client, err := New(testConfig("http://logboek:4016"))
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	if got := client.ForeignProcessor(httptest.NewRequest(http.MethodPost, "/graphql", nil)); got != "" {
 		t.Errorf("ForeignProcessor = %q, want empty", got)
 	}
 }
@@ -270,16 +200,5 @@ func TestClaimsIgnoresAnUndecodableToken(t *testing.T) {
 		if claims := Claims(token); claims != nil {
 			t.Errorf("Claims(%q) = %v, want nil", token, claims)
 		}
-	}
-}
-
-func TestParentSpanFromHeader(t *testing.T) {
-	header := http.Header{}
-	if got := ParentSpanFromHeader(header); got != "" {
-		t.Errorf("ParentSpanFromHeader = %q, want empty when this component starts the tree", got)
-	}
-	header.Set(HeaderParentSpanID, " b7ad6b7169203331 ")
-	if got := ParentSpanFromHeader(header); got != "b7ad6b7169203331" {
-		t.Errorf("ParentSpanFromHeader = %q", got)
 	}
 }

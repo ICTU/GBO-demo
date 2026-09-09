@@ -61,9 +61,10 @@ authoritative per-hop message metadata.
 ## Not observability: the Logboek Dataverwerkingen
 
 Every Dataverwerking in the chain is also recorded in the logbook of the
-Verantwoordelijke that performed it — a separate store, served by
-[`ldv-logboek`](services/ldv-logboek/README.md), implementing Logius LDV
-v1.0.0. It uses the OpenTelemetry log-record shape, which makes it look like a
+Verantwoordelijke that performed it — `logboek-bd` for the Belastingdienst,
+`logboek-brp` for RvIG, `logboek-gbo` for the voorziening itself. Separate
+stores, served by [`ldv-logboek`](services/ldv-logboek/README.md), implementing
+Logius LDV v1.0.0. It uses the OpenTelemetry log-record shape, which makes it look like a
 second trace exporter. It is not, and the difference is the point: a span here
 is best-effort exhaust of a technical operation, sampled and short-lived,
 while an LDV record is an administrative record that must exist for every
@@ -78,4 +79,6 @@ must never do, and exactly what this one must.
 The two are joined by one value: the trace id of an LDV record is the
 `Fsc-Transaction-Id`, the same identifier the ADL decision record and the FSC
 transaction logs carry, and the same one the developer portal already
-correlates on.
+correlates on. The portal's **Logboek Dataverwerkingen** panel makes that
+visible: per trace it shows the LDV records of every Verantwoordelijke next to
+the FSC transaction records and the PDP decision, all under one id.

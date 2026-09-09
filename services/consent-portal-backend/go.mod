@@ -31,3 +31,8 @@ require (
 	google.golang.org/grpc v1.83.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
+
+require gbo-demo/ldv-client v0.0.0
+
+// One wire contract, one implementation of it.
+replace gbo-demo/ldv-client => ../ldv-client

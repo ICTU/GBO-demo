@@ -116,3 +116,45 @@ func TestHealth(t *testing.T) {
 		t.Fatalf("health status = %d, want 200", resp.StatusCode)
 	}
 }
+
+// A bron without a logbook is a supported configuration — main() only warns
+// when LDV_LOGBOOK_URL is unset. The forward must still work when such a bron
+// is called over FSC, which is the only case that reaches into the client for
+// the foreign processor.
+func TestForwardOverFSCWithoutALogbook(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"ingeschrevenPersoon":null}}`))
+	}))
+	defer upstream.Close()
+
+	cfg := config{
+		Port:          "0",
+		UpstreamURL:   upstream.URL,
+		BSNkURL:       "http://unused.invalid",
+		OwnPeerOIN:    "99999999900000000200",
+		PseudonymVars: "bsn",
+	}
+	srv := httptest.NewServer(newMux(cfg, &http.Client{Timeout: 5 * time.Second}, nil))
+	defer srv.Close()
+
+	body := `{"query":"query($bsn: BSN!) { ingeschrevenPersoon(bsn: $bsn) { burgerservicenummer } }","variables":{"bsn":"123456789"}}`
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/graphql", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	// The grant hash is what an inway always sets; it is the branch that
+	// reaches for the client's peer URI base.
+	req.Header.Set("Fsc-Grant-Hash", "$1$3$WHLGvnjSifhlcCQQXs4jzDCJt9PlDvjrFXe64yAD1miKBx1D")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		out, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200; body=%s", resp.StatusCode, out)
+	}
+}

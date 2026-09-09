@@ -56,7 +56,7 @@ func openRuntimeSourceRegistry(ctx context.Context, cfg config) (*postgresregist
 	})
 }
 
-func newSourceReleaseRuntimeMux(ctx context.Context, cfg config, client *http.Client, registry sourceReleaseReader) *http.ServeMux {
+func newSourceReleaseRuntimeMux(ctx context.Context, cfg config, client *http.Client, registry sourceReleaseReader, logbook *issuanceLogbook) *http.ServeMux {
 	runtime := &sourceReleaseRuntime{ctx: ctx, registry: registry, baseConfig: cfg, refreshInterval: cfg.SourceRegistryRefresh}
 	if runtime.refreshInterval <= 0 {
 		runtime.refreshInterval = 5 * time.Second
@@ -77,7 +77,7 @@ func newSourceReleaseRuntimeMux(ctx context.Context, cfg config, client *http.Cl
 			http.NotFound(w, request)
 			return
 		}
-		handleSourceAttestation(binding.config, client, binding.runtime).ServeHTTP(w, request)
+		handleSourceAttestation(binding.config, client, binding.runtime, logbook).ServeHTTP(w, request)
 	})
 	mux.HandleFunc("GET /types/", func(w http.ResponseWriter, request *http.Request) {
 		snapshot, err := runtime.current(request.Context(), time.Now())

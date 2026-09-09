@@ -64,9 +64,16 @@ func compileSourceMetadataSchema(t *testing.T) *jsonschema.Schema {
 	return schema
 }
 
-func testMux(cfg config, client *http.Client, metadataRuntime sourceMetadataRuntime) *http.ServeMux {
+// testMux builds the issuance route. The optional logbook lets the LDV tests
+// attach one; every other test runs without, which is the "not in an LDV
+// chain" configuration.
+func testMux(cfg config, client *http.Client, metadataRuntime sourceMetadataRuntime, logbook ...*issuanceLogbook) *http.ServeMux {
+	var writer *issuanceLogbook
+	if len(logbook) > 0 {
+		writer = logbook[0]
+	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /attestations/{sourceID}/{typeID}", handleSourceAttestation(cfg, client, metadataRuntime))
+	mux.HandleFunc("POST /attestations/{sourceID}/{typeID}", handleSourceAttestation(cfg, client, metadataRuntime, writer))
 	if publisher, ok := metadataRuntime.(http.Handler); ok {
 		mux.Handle("/types/", publisher)
 	}

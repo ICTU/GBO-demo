@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 )
@@ -24,12 +25,20 @@ var ErrInvalidRecord = errors.New("invalid log record")
 //     component holds only a BSN (the EUDI flow) and therefore has nothing
 //     else to name the Betrokkene by. A demo stand-in: it is stable within one
 //     Verantwoordelijke and meaningless outside it.
-//   - portal-subject      the portal-scoped subject reference of the
-//     consent-register (phase 2)
+//   - portal-subject      the portal-scoped subject reference the consent
+//     portal derives for the consent-register, so the register can list a
+//     citizen's consents without ever holding a PI or a BSN
+//   - brp-persoon-id      RvIG's own record identifier for a person in the
+//     BRP. Not a pseudonym, and deliberately so: it names a Betrokkene who
+//     appears in a certificate about someone else (a relative of the
+//     deceased) and for whom the source has no pseudonym at all. It is
+//     acceptable here precisely because the record never leaves RvIG's own
+//     logbook — a cross-organisation record would need a pseudonym.
 var SubjectIDTypes = map[string]bool{
 	"pi":                 true,
 	"logboek-pseudoniem": true,
 	"portal-subject":     true,
+	"brp-persoon-id":     true,
 }
 
 var (
@@ -96,15 +105,23 @@ func validateMandatoryAttributes(record Record, resolve func(string) bool) error
 			return fmt.Errorf("%w: %s must be a non-empty string", ErrInvalidRecord, key)
 		}
 	}
-	if !SubjectIDTypes[record.DataSubjectIDType()] {
-		return fmt.Errorf("%w: %s %q is not a known pseudonym space", ErrInvalidRecord, AttrDataSubjectIDType, record.DataSubjectIDType())
+	if !SubjectIDTypes[attributeOf(record, AttrDataSubjectIDType)] {
+		return fmt.Errorf("%w: %s %q is not a known pseudonym space", ErrInvalidRecord, AttrDataSubjectIDType, attributeOf(record, AttrDataSubjectIDType))
 	}
-	reference := record.ProcessingActivityID()
-	if !referencePattern.MatchString(reference) {
-		return fmt.Errorf("%w: %s must be a versioned reference like 'bd-ib-2025@v1', got %q", ErrInvalidRecord, AttrProcessingActivityID, reference)
+	// §3.2.2.9: a URI, because a bare local reference means nothing to
+	// whoever reads the record later — possibly at another organisation.
+	activity := attributeOf(record, AttrProcessingActivityID)
+	if parsed, err := url.Parse(activity); err != nil || !parsed.IsAbs() || parsed.Host == "" {
+		return fmt.Errorf("%w: %s must be an absolute URI, got %q", ErrInvalidRecord, AttrProcessingActivityID, activity)
 	}
-	if resolve != nil && !resolve(reference) {
-		return fmt.Errorf("%w: %s %q does not resolve in this logbook's verwerkingsactiviteiten register", ErrInvalidRecord, AttrProcessingActivityID, reference)
+	if resolve != nil && !resolve(activity) {
+		return fmt.Errorf("%w: %s %q does not resolve in this logbook's verwerkingsactiviteiten register", ErrInvalidRecord, AttrProcessingActivityID, activity)
+	}
+	// The foreign-operation processor is a URL when present (§3.2.2.9).
+	if processor := attributeOf(record, AttrForeignOperationProcessor); processor != "" {
+		if parsed, err := url.Parse(processor); err != nil || !parsed.IsAbs() || parsed.Host == "" {
+			return fmt.Errorf("%w: %s must be an absolute URL, got %q", ErrInvalidRecord, AttrForeignOperationProcessor, processor)
+		}
 	}
 	return nil
 }

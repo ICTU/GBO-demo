@@ -37,6 +37,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	ldv "gbo-demo/ldv-client"
 	"io"
 	"log/slog"
 	"net/http"
@@ -69,6 +70,11 @@ var fscTxIDCtxKey = fscTxIDCtxKeyType{}
 // readHeaderTimeout bounds how long a client may take to send its request
 // headers, so a stalled connection cannot hold a handler open.
 const readHeaderTimeout = 10 * time.Second
+
+// ldvDeliveryInterval is how often the LDV spool is drained. Records are
+// durable the moment they are written, so this governs only how quickly they
+// reach the logbook, not whether they do.
+const ldvDeliveryInterval = 2 * time.Second
 
 // shutdownTimeout bounds the drain after SIGTERM: stop accepting, let
 // in-flight requests finish, then close whatever is left.
@@ -192,9 +198,15 @@ type fscResult struct {
 // handleSourceAttestation is the only issuance path for onboarded types. The
 // route selects an activated source/type; concrete parameter values come from
 // the issuance request URL and are validated against the source declaration.
-func handleSourceAttestation(cfg config, client *http.Client, runtime sourceMetadataRuntime) http.HandlerFunc {
+func handleSourceAttestation(cfg config, client *http.Client, runtime sourceMetadataRuntime, logbook *issuanceLogbook) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		now := time.Now()
+		// Two Dataverwerkingen happen below: reading the BSN out of the
+		// disclosed PID, and assembling the attestation from what the source
+		// returned. Both are GBO's own, both are logged, and neither delivers
+		// if its record is not confirmed.
+		extractionStart := time.Now().UTC()
+		var recording issuanceRecording
 		resolved := cfg
 		var metadata *activeSourceMetadata
 		var err error
@@ -238,6 +250,15 @@ func handleSourceAttestation(cfg config, client *http.Client, runtime sourceMeta
 			http.Error(w, "no BSN in disclosed PID", http.StatusBadRequest)
 			return
 		}
+		// Logged before the source is called: a request that cannot be logged
+		// must not reach the bronhouder at all.
+		if logbook != nil {
+			recording, err = logbook.logPIDExtraction(r.Context(), r, bsn, extractionStart, metadata.SourceID, metadata.TypeID)
+			if err != nil {
+				http.Error(w, "the PID disclosure could not be logged; refusing the request", http.StatusInternalServerError)
+				return
+			}
+		}
 		plan, err := metadata.queryPlan(bsn, r.URL.Query())
 		if err != nil {
 			logSourceAttestationError(r, "parameters", err)
@@ -245,9 +266,9 @@ func handleSourceAttestation(cfg config, client *http.Client, runtime sourceMeta
 			return
 		}
 		trace.SpanFromContext(r.Context()).SetAttributes(
-			attribute.String("gbo.source_id", metadata.SourceID),
+			attribute.String("dpl.gbo.sourceId", metadata.SourceID),
 			attribute.String("gbo.source_oin", metadata.SourceOIN),
-			attribute.String("gbo.type_id", metadata.TypeID),
+			attribute.String("dpl.gbo.typeId", metadata.TypeID),
 		)
 		result, err := callSource(r.Context(), client, resolved, plan)
 		if err != nil {
@@ -255,6 +276,7 @@ func handleSourceAttestation(cfg config, client *http.Client, runtime sourceMeta
 			http.Error(w, "source request failed", http.StatusBadGateway)
 			return
 		}
+		assemblyStart := time.Now().UTC()
 		projection, err := metadata.project(result.Raw)
 		if err != nil {
 			logSourceAttestationError(r, "projection", err)
@@ -264,6 +286,15 @@ func handleSourceAttestation(cfg config, client *http.Client, runtime sourceMeta
 		if projection.Outcome == gbosimplev1.OutcomeNoData {
 			http.Error(w, "source has no data for this subject and parameters", http.StatusNotFound)
 			return
+		}
+		// The attestation exists now; it does not leave this process until
+		// the logbook has said so.
+		if logbook != nil {
+			if err := logbook.logAttestationAssembly(r.Context(), recording, assemblyStart,
+				metadata.SourceID, metadata.TypeID, metadata.SourceOIN, len(projection.Claims)); err != nil {
+				http.Error(w, "the attestation could not be logged; withholding it", http.StatusInternalServerError)
+				return
+			}
 		}
 		// nl-wallet turns attestation_type into the credential's vct and
 		// computes vct#integrity from the installed Type Metadata bytes. Both
@@ -450,6 +481,22 @@ func callViaFSC(ctx context.Context, client *http.Client, cfg config, plan sourc
 	trace.SpanFromContext(ctx).SetAttributes(attribute.String("gbo.fsc.transaction_id", fscTxID))
 	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(httpReq.Header))
 
+	// §3.1 requires Trace Context on an HTTP hop that carries a
+	// dataverwerking, so the traceparent is set to the id the chain actually
+	// shares rather than to whatever OTel happened to inject: when the
+	// issuance-server sends its own traceparent, the ambient trace id is not
+	// the Fsc-Transaction-Id, and the bronhouder would file its half of this
+	// request under a different id.
+	//
+	// FSC v2.4.0 strips the header before it reaches the source, which is why
+	// the Fsc-Transaction-Id above is not redundant. Sending it anyway costs
+	// nothing and stops being a workaround the day FSC forwards it.
+	if normalized := ldv.NormalizeTraceID(fscTxID); normalized != "" {
+		ldv.InjectTraceparent(httpReq.Header, ldv.TraceContext{
+			TraceID: normalized, SpanID: ldv.SpanID(), Sampled: true,
+		})
+	}
+
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return fscResult{}, err
@@ -564,7 +611,36 @@ func main() {
 		fatal("open Source Registry", err)
 	}
 	defer registry.Close()
-	runtimeHandler := http.Handler(newSourceReleaseRuntimeMux(ctx, cfg, client, registry))
+
+	// Either this adapter is part of GBO's LDV chain and cannot start without
+	// its logbook, or it is not and writes no records.
+	ldvClient, err := ldv.New(ldv.Config{
+		ServiceName:  getEnv("OTEL_SERVICE_NAME", "eudi-adapter"),
+		LogbookURL:   os.Getenv("LDV_LOGBOOK_URL"),
+		WriteToken:   os.Getenv("LDV_WRITE_TOKEN"),
+		PseudonymKey: os.Getenv("LDV_SUBJECT_PSEUDONYM_KEY"),
+	})
+	if err != nil {
+		fatal("configuring the logboek client", err)
+	}
+	if ldvClient != nil {
+		// A local spool: the record is durable before the source is called,
+		// and delivered to the logbook afterwards. Failing the request once
+		// the PID had been read would not have un-read it.
+		outbox, err := ldv.OpenOutbox(getEnv("LDV_OUTBOX_PATH", "/data/ldv-outbox.jsonl"), ldvClient)
+		if err != nil {
+			fatal("opening the LDV outbox", err)
+		}
+		defer func() { _ = outbox.Close() }()
+		ldvClient.UseOutbox(outbox)
+		go outbox.Run(ctx, ldvDeliveryInterval)
+	}
+	logbook := newIssuanceLogbook(ldvClient, parseNextLogbooks(os.Getenv("LDV_NEXT_LOGBOOK_IDS")))
+	if ldvClient == nil {
+		slog.Warn("no LDV_LOGBOOK_URL configured; this adapter writes no Logboek Dataverwerkingen records")
+	}
+
+	runtimeHandler := http.Handler(newSourceReleaseRuntimeMux(ctx, cfg, client, registry, logbook))
 	// Middleware order: withFscTraceContext wraps otelhttp — the header
 	// mutation must happen before otelhttp extracts the parent context.
 	srv := &http.Server{
