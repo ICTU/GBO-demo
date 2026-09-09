@@ -7,6 +7,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Changed
+- **The landing page returns to the palette it was designed in.** The ICTU
+  colours introduced in #322 are reverted: `#01689b` carries the page again,
+  `#d52b1e` is the hover accent, and the derived tints, connector lines and
+  rails go back with them. Only the colours revert — the reviewed copy, the
+  link to the information site and the fourth outlet in the flow band all stay.
+  The hero also drops "Deze demo laat zien hoe de voorgestelde oplossing werkt
+  in de praktijk" at the programme's request.
+- **The fan in the flow band no longer smears its pulse.** It was drawn in a
+  100×100 viewBox stretched into a 65×236 box with
+  `preserveAspectRatio="none"` — 0.65× horizontally against 2.36× vertically.
+  Dashes are uniform in path coordinates, so under that distortion they
+  streaked along the steep part of each curve. The fan is now drawn in real
+  pixels: a `ResizeObserver` (`useElementSize`) matches the viewBox to the box,
+  making the scale 1:1. The drawing is positioned out of flow, because an SVG
+  that derives its viewBox from its own height and also participates in layout
+  feeds its own measurement back into the row. The rails still meet the labels
+  at 12.5 / 37.5 / 62.5 / 87.5 percent at every width. The straight
+  source-to-GBO line keeps its normalised viewBox: it runs along one axis, so
+  nothing distorts there.
 - **OpenFTV moves to the released v0.1.0.** The demo no longer runs an
   unreleased build: the version tagged on 8 September 2026 contains the Rego
   deny-reason passthrough (FTV-474) the reason cascade was pinned to a bare

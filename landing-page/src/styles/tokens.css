@@ -1,32 +1,24 @@
-/* Structuur en maatvoering zijn 1:1 overgenomen uit het design
-   "GBO Landing.dc.html" (claude.ai/design, project 0c7d9e4c); niet zelf
-   verzinnen, het design is daarin leidend. Twee dingen komen er niet uit:
-   de media-queries onderaan (het design kent geen breakpoints omdat het
-   altijd breed gerenderd wordt), en het palet hieronder — dat volgt sinds
-   de communicatie-review de ICTU-huisstijl in plaats van de
-   Rijkshuisstijl waarmee het design was opgezet. */
+/* Waarden 1:1 overgenomen uit het design "GBO Landing.dc.html"
+   (claude.ai/design, project 0c7d9e4c). Niet zelf verzinnen — het design
+   is leidend. Alleen de media-queries onderaan zijn toegevoegd: het
+   design kent geen breakpoints omdat het altijd breed gerenderd wordt. */
 
 :root {
-  /* ICTU-huisstijl. --blue-deep blijft bijna-zwart en wordt bewust géén
-     ICTU-donkerblauw (#0e2b84): de donkere Pipeline-sectie grenst direct
-     aan de blauwe uitproberen-sectie, en die twee zouden dan in elkaar
-     overlopen. --accent heette --red toen de pagina nog Rijkshuisstijl
-     gebruikte. */
-  --blue: #0e2b84;
+  --blue: #01689b;
   --blue-deep: #05131f;
-  --accent: #880095;
+  --red: #d52b1e;
   --text: #1a1a1a;
   --text-2: #535353;
   --text-3: #767676;
   --grey-bg: #f3f3f3;
   --grey-border: #d3d3d3;
-  --pale-bg: #e0f8ff;
-  --pale-border: #c1f1ff;
-  --line: #457aff;
-  --accent-light: #63dbff;
-  --tint-dvtp: #e0f8ff;
-  --tint-eudi: #d8e0fb;
-  --tint-oots: #c1f1ff;
+  --pale-bg: #f3f7fa;
+  --pale-border: #d3e0e9;
+  --line: #a8c4d4;
+  --accent-light: #8fcbe8;
+  --tint-dvtp: #e7eff5;
+  --tint-eudi: #dfeaf2;
+  --tint-oots: #eaf1f6;
   --sans: "Fira Sans", Helvetica, Arial, sans-serif;
   --serif: "Source Serif 4", Georgia, serif;
   --gutter: clamp(20px, 6vw, 88px);
@@ -55,7 +47,7 @@ a {
 }
 
 a:hover {
-  color: var(--accent);
+  color: var(--red);
 }
 
 :focus {
@@ -176,7 +168,7 @@ a:hover {
 }
 
 .link-muted:hover {
-  color: var(--accent);
+  color: var(--red);
 }
 
 /* ── Voortgangsbalk ──────────────────────────────────────────────────── */
@@ -372,7 +364,7 @@ a:hover {
 
 .btn-invert:hover {
   background: var(--grey-bg);
-  color: var(--accent);
+  color: var(--red);
 }
 
 /* ── Stroomdiagram ───────────────────────────────────────────────────── */
@@ -437,7 +429,8 @@ a:hover {
 /* De tekeningen erven hun lijnkleur via color/currentColor, zodat het
    palet alleen hier staat en niet in de componenten. */
 .flow-link,
-.flow-fan {
+.flow-fan,
+.flow-fan-svg {
   color: var(--line);
 }
 
@@ -481,11 +474,22 @@ a:hover {
    op uit, dus ze zijn per definitie even hoog. De uitgangen verdelen die
    hoogte over vier gelijke fracties, waardoor de rails uit FlowBand
    (12,5 / 37,5 / 62,5 / 87,5) op elke breedte op de labels uitkomen — ook
-   als een omschrijving omwikkelt en de band meegroeit. */
+   als een omschrijving omwikkelt en de band meegroeit.
+
+   Het vak draagt daarbij de layout en de SVG ligt er los in: een tekening
+   die haar viewBox uit haar eigen hoogte afleidt mag die hoogte niet zelf
+   beïnvloeden (zie FlowBand.tsx). */
 .flow-fan {
+  position: relative;
+  width: 100%;
+  align-self: stretch;
+}
+
+.flow-fan-svg {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
-  align-self: stretch;
   overflow: visible;
 }
 
@@ -868,7 +872,7 @@ a:hover {
 }
 
 .btn-primary:hover {
-  background: var(--accent);
+  background: var(--red);
   color: #ffffff;
 }
 
@@ -988,7 +992,7 @@ a:hover {
 }
 
 .infra-link:hover {
-  color: var(--accent);
+  color: var(--red);
 }
 
 /* ── Footer ──────────────────────────────────────────────────────────── */
@@ -1067,7 +1071,8 @@ a:hover {
   }
 
   .flow-link,
-  .flow-fan {
+  .flow-fan,
+  .flow-fan-svg {
     display: none;
   }
 
