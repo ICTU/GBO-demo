@@ -7,6 +7,52 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Changed
+- **OpenFTV moves to the released v0.1.0.** The demo no longer runs an
+  unreleased build: the version tagged on 8 September 2026 contains the Rego
+  deny-reason passthrough (FTV-474) the reason cascade was pinned to a bare
+  `main` commit for.
+  - `openftv-manager` and `openftv-manager-ui` are **pulled, not built**. Both
+    Dockerfiles are gone; compose consumes
+    `…/open-ftv/manager:v0.1.0` and `…/open-ftv/management-interface:v0.1.0`
+    directly. The published Manager image carries no configuration of its own,
+    so its own-API policies, bundle definitions and policy tags are bind-mounted
+    instead of baked in. Neither image is published to ghcr any more.
+  - `openftv-pdp` builds from the **`v0.1.0` tag** rather than a bare commit
+    sha. It cannot use the published image yet, because the GraphQL
+    request-mapper still has to be patched into the binary (#331); the patch is
+    re-aimed at the refactored `apps/pdp/server/auth.go`, where the controller
+    is now assembled through a builder. CI fails when the PDP's ref and the two
+    image tags drift apart, or when the version is not a release tag.
+  - **The PDP now requires a Postgres Authorization Decision Log.** Upstream
+    dropped every other ADL backend and made it mandatory — the PDP exits at
+    startup without `PDP_ADL_PG_URL`. `postgres-ftv` therefore leaves the
+    `manager` profile and runs in every profile, and `FTV_POSTGRES_PASSWORD`
+    becomes required for every `make demo*` target rather than only
+    `make demo-manager`. In a shared cluster the ADL wants its own schema
+    (`?search_path=…`): it keeps its own migration bookkeeping.
+  - Configuration renamed with it: `MANAGER_PERSIST_TYPE` and
+    `MANAGER_PERSIST_POSTGRES_URL` become `MANAGER_DATABASE_URL`,
+    `PDP_ADL_TYPE` and `MANAGER_ADL_TYPE` are gone, and the `*_MIGRATE_SOURCE`
+    / `*_MIGRATE_AUTO` pairs disappear because both apps now migrate on
+    startup from the schema embedded in the binary.
+  - **The PDP's bundle pull needed a policy of its own.** Since v0.1.0 the
+    Manager's internal bundle endpoint runs through the same authorizer as its
+    UI API. Our Cedar policies are permit-only, and the PDP presents no
+    identity, so every retrieval returned 403 and the PDP never received a
+    bundle. `services/openftv-manager/authz/pdp-bundle.cedar` permits exactly
+    that one path, read-only.
+    Note when upgrading an existing deployment: the Manager seeds `/authz`
+    into Postgres only while the policy store is empty, and afterwards treats
+    the store as the source of truth. An existing `postgres-ftv` volume
+    therefore will not pick the new policy up — add it through the Manager's
+    API or the management interface, or recreate the volume.
+  - The management interface needs `MANAGER_MAX_LOGO_SIZE`: its bundled nginx
+    template interpolates the variable, and nginx refuses to start when it is
+    unset. Set to 102400, the value the UI itself falls back to.
+  - The PDP's builder image moves to Go 1.27; OpenFTV v0.1.0 requires 1.26.7
+    or newer.
+  - The published images are amd64-only, so on an arm64 host the two Manager
+    containers run emulated where they used to be built natively.
 - **The landing page follows the ICTU house style and the programme's own
   wording.** Primary colour moves from Rijkshuisstijl hemelblauw `#01689b` to
   ICTU `#0e2b84`, and the hover accent from Rijkshuisstijl red `#d52b1e` to

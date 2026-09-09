@@ -1,4 +1,4 @@
-.PHONY: up down logs clean certs demo-manager manager-seed fsc-local-env fsc-ca fsc-up fsc-all-up fsc-brp-certs fsc-databases fsc-down fsc-test fsc-clean \
+.PHONY: up down logs clean certs require-ftv-postgres demo-manager manager-seed fsc-local-env fsc-ca fsc-up fsc-all-up fsc-brp-certs fsc-databases fsc-down fsc-test fsc-clean \
         fsc-seed-bri fsc-seed-bri-hv fsc-seed-brp fsc-seed-rvig-source fsc-seed-metadata fsc-pdp-cert pdp-up \
         eudi-images source-metadata-up \
         require-development-cas provision-development-certificates reconcile-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
@@ -56,7 +56,13 @@ PORT_DVTP_ONBOARDING_REGISTER := $(or $(GBO_PORT_DVTP_ONBOARDING_REGISTER),9415)
 # hostname -I lists every address; the first is the LAN one.
 banner = @printf "  %-21s %s://localhost:%s  |  %s://%s:%s\n" "$(1)" "$(or $(3),http)" "$(2)" "$(or $(3),http)" "$$(hostname -I | awk '{print $$1}')" "$(2)"
 
-up: certs
+# The OpenFTV PDP writes its Authorization Decision Log to postgres-ftv and
+# refuses to start without it, so every profile needs this password — not
+# just `make demo-manager`.
+require-ftv-postgres:
+	@test -n "$(FTV_POSTGRES_PASSWORD)" || (echo "FTV_POSTGRES_PASSWORD is required (see .env.example)" >&2; exit 1)
+
+up: certs require-ftv-postgres
 	docker compose up --build -d
 
 down:
@@ -76,7 +82,7 @@ down:
 
 demo: demo-dvtp
 
-demo-minimal: certs
+demo-minimal: certs require-ftv-postgres
 	@echo "-> Base stack (no profile)"
 	docker compose up --build -d
 	@echo ""
@@ -88,16 +94,12 @@ demo-minimal: certs
 # PDP as a bundle, instead of the PDP loading ./policies from disk. Opt-in,
 # because it trades the edit-and-save hot-reload loop for a deliberate
 # deploy step — which is the point, but not what you want while writing Rego.
-demo-manager: certs
+demo-manager: certs require-ftv-postgres
 	@test -n "$(KEYCLOAK_ADMIN_PASSWORD)" || (echo "KEYCLOAK_ADMIN_PASSWORD is required" >&2; exit 1)
 	@test -n "$(FTV_MANAGER_AUDITOR_PASSWORD)" || (echo "FTV_MANAGER_AUDITOR_PASSWORD is required" >&2; exit 1)
 	@test -n "$(FTV_MANAGER_DEPLOY_PASSWORD)" || (echo "FTV_MANAGER_DEPLOY_PASSWORD is required" >&2; exit 1)
-	@test -n "$(FTV_POSTGRES_PASSWORD)" || (echo "FTV_POSTGRES_PASSWORD is required" >&2; exit 1)
 	@echo "-> Base stack + OpenFTV Manager (PAP/PIP, bundle distribution)"
 	GBO_BUNDLE_MANAGER=http://openftv-manager:9443/v1/bundle/gbo-pdp \
-	  GBO_ADL_TYPE=postgres \
-	  GBO_ADL_PG_URL=postgres://ftv:$${FTV_POSTGRES_PASSWORD}@postgres-ftv:5432/ftv_adl?sslmode=disable \
-	  GBO_ADL_MIGRATE_SOURCE='*EMBED*' GBO_ADL_MIGRATE_AUTO=true \
 	  docker compose --profile manager up --build -d
 	@echo "-> Waiting for the Manager to accept policies..."
 	@for i in $$(seq 1 30); do \
@@ -120,7 +122,7 @@ manager-seed:
 	./scripts/seed-openftv-manager.py --url http://localhost:$${GBO_PORT_FTV_MANAGER:-9280}
 	docker compose --profile manager restart openftv-pdp
 
-demo-dvtp: certs fsc-all-up fsc-seed-bri fsc-seed-bri-hv
+demo-dvtp: certs require-ftv-postgres fsc-all-up fsc-seed-bri fsc-seed-bri-hv
 	@echo "-> DvTP stack: base + dienstverlener + toestemmingsportaal (via real FSC)"
 	docker compose --profile dvtp up --build -d
 	@echo ""
@@ -221,7 +223,7 @@ onboard-demo-sources: require-development-cas certs
 	$(MAKE) provision-development-certificates SOURCE_ID=demo-unsecured SOURCE_OIN=$(DEVELOPMENT_UNSECURED_SOURCE_OIN) SOURCE_NAME="$(DEVELOPMENT_UNSECURED_SOURCE_NAME)" SOURCE_LOGO="$(DEVELOPMENT_UNSECURED_SOURCE_LOGO)"
 	$(MAKE) reconcile-sources
 
-demo-eudi: onboard-demo-sources eudi-images
+demo-eudi: require-ftv-postgres onboard-demo-sources eudi-images
 	@echo "-> EUDI stack: base + eudi branch + fsc-infra"
 	docker compose --profile eudi up --build -d
 	@echo ""
@@ -229,7 +231,7 @@ demo-eudi: onboard-demo-sources eudi-images
 	$(call banner,EUDI-adapter:,$(PORT_EUDI_ADAPTER))
 	$(call banner,Jaeger:,$(PORT_JAEGER))
 
-demo-full: onboard-demo-sources fsc-seed-bri-hv eudi-images
+demo-full: require-ftv-postgres onboard-demo-sources fsc-seed-bri-hv eudi-images
 	@echo "-> Full stack: everything on"
 	docker compose --profile full up --build -d
 
@@ -310,7 +312,7 @@ fsc-pdp-cert:
 # starts *after* fsc-infra; this pulls it forward. --wait only covers the
 # process healthcheck, so the explicit AuthZen probe also waits for the native
 # PIP pull to make the seeded Hypotheek-BV admission effective.
-pdp-up: certs fsc-pdp-cert
+pdp-up: certs require-ftv-postgres fsc-pdp-cert
 	docker compose up --build -d --wait --force-recreate openftv-pdp
 	./scripts/wait-openftv-admission.sh
 

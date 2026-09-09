@@ -186,6 +186,14 @@ jobs:
         working-directory: ${{ matrix.app }}
         run: npm test --if-present
 
+  scripts:
+    name: Scripts — unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Test Manager seed authentication
+        run: python3 -m unittest scripts/test_seed_openftv_manager.py
+
   docker:
     name: Docker — build (${{ matrix.service }})
     runs-on: ubuntu-latest
@@ -199,8 +207,6 @@ jobs:
           - bron-sidecar
           - graphql-server
           - ldv-logboek
-          - openftv-manager
-          - openftv-manager-ui
           - openftv-pdp
           - sector-pip
     steps:
@@ -209,30 +215,40 @@ jobs:
         run: |
           context="services/${{ matrix.service }}"
           # These reach outside their own service directory: dev-portal-backend
-          # and openftv-pdp bake in ./policies, both Manager images are built
-          # from the upstream OpenFTV tree, and the services that write LDV
-          # records depend on the sibling services/ldv-client module. Same
-          # context compose uses.
+          # and openftv-pdp bake in ./policies, and the services that write
+          # LDV records depend on the sibling services/ldv-client module.
+          # Same context compose uses.
           case "${{ matrix.service }}" in
-            bron-sidecar|brp-graphql-server|consent-portal-backend|consent-register|dev-portal-backend|eudi-adapter|graphql-server|ldv-logboek|openftv-pdp|openftv-manager|openftv-manager-ui) context=. ;;
+            bron-sidecar|brp-graphql-server|consent-portal-backend|consent-register|dev-portal-backend|eudi-adapter|graphql-server|ldv-logboek|openftv-pdp) context=. ;;
           esac
           docker build \
             --file "services/${{ matrix.service }}/Dockerfile" \
             --tag "gbo-demo/${{ matrix.service }}:ci" \
             "${context}"
-      - name: OPENFTV_REF identical in all OpenFTV Dockerfiles
+      # The PDP is still built from source (#331), so it names a git ref
+      # while the Manager and management interface name published image
+      # tags. All three must be the same OpenFTV version: the bundle format
+      # travels between the Manager and the PDP, and the management
+      # interface talks to the Manager's API.
+      - name: OpenFTV version identical across PDP, Manager and UI
         if: matrix.service == 'openftv-pdp'
         run: |
-          pdp="$(grep -oP 'OPENFTV_REF=\K[0-9a-f]+' services/openftv-pdp/Dockerfile)"
-          mgr="$(grep -oP 'OPENFTV_REF=\K[0-9a-f]+' services/openftv-manager/Dockerfile)"
-          ui="$(grep -oP 'OPENFTV_REF=\K[0-9a-f]+' services/openftv-manager-ui/Dockerfile)"
+          pdp="$(grep -oP '^ARG OPENFTV_REF=\K\S+' services/openftv-pdp/Dockerfile)"
+          mgr="$(grep -oP 'open-ftv/manager:\K\S+' docker-compose.yml)"
+          ui="$(grep -oP 'open-ftv/management-interface:\K\S+' docker-compose.yml)"
+          for v in "$pdp" "$mgr" "$ui"; do
+            test -n "$v" || { echo "OpenFTV version not found in all three places" >&2; exit 1; }
+          done
           if [ "$pdp" != "$mgr" ] || [ "$pdp" != "$ui" ]; then
-            echo "OPENFTV_REF differs: pdp=$pdp manager=$mgr ui=$ui" >&2
+            echo "OpenFTV version differs: pdp=$pdp manager=$mgr ui=$ui" >&2
             exit 1
           fi
-      - name: Test Manager seed authentication
-        if: matrix.service == 'openftv-manager'
-        run: python3 -m unittest scripts/test_seed_openftv_manager.py
+          # A bare commit sha would mean running something no other party can
+          # reproduce from a release. Require a tag.
+          case "$pdp" in
+            v*) ;;
+            *) echo "OpenFTV version '$pdp' is not a release tag" >&2; exit 1 ;;
+          esac
       - name: Verify packaged policy sources
         if: matrix.service == 'dev-portal-backend'
         run: |
@@ -244,7 +260,7 @@ jobs:
   result:
     name: CI result
     runs-on: ubuntu-latest
-    needs: [go, source-registry, rego, chart, frontend, docker]
+    needs: [go, source-registry, rego, chart, frontend, scripts, docker]
     if: always()
     steps:
       - name: Evaluate job results
