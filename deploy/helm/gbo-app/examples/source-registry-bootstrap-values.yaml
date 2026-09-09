@@ -1,0 +1,73 @@
+# source-registry-bootstrap — one-shot Job.
+#
+# Creates the source_registry database, the owner role and the read-only role
+# in the EUDI PostgreSQL instance. Idempotent: every statement in the script
+# is guarded, so rerunning the release is safe.
+#
+# It runs as a Job rather than an init container because it prepares a
+# database that several releases share; it belongs to no single workload, and
+# it must not run again on every pod restart.
+#
+# The script itself is not duplicated here. Create the ConfigMap from the
+# committed script so the two cannot drift:
+#
+#   kubectl create configmap gbo-source-registry-bootstrap \
+#     --from-file=bootstrap-source-registry.sh=scripts/bootstrap-source-registry.sh
+#
+# Order: this Job, then source-registry-migrations, then the adapter,
+# reconciler and issuance server.
+#
+# The two registry role Secrets carry a `password` key next to the `uri` key
+# the other releases read: this Job sets the passwords, they connect with them.
+
+job:
+  enabled: true
+
+image:
+  repository: postgres
+  tag: 16-alpine
+
+command: ["/scripts/bootstrap-source-registry.sh"]
+
+env:
+  - name: PGHOST
+    value: postgres-eudi
+  - name: PGPORT
+    value: "5432"
+  - name: PGUSER
+    value: wallet
+  - name: PGPASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: eudi-postgres-superuser
+        key: password
+  - name: SOURCE_REGISTRY_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: source-registry-writer
+        key: password
+  - name: SOURCE_REGISTRY_READER_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: source-registry-reader
+        key: password
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 70
+  runAsGroup: 70
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+  readOnlyRootFilesystem: true
+
+volumeMounts:
+  - name: bootstrap-script
+    mountPath: /scripts
+    readOnly: true
+
+volumes:
+  - name: bootstrap-script
+    configMap:
+      name: gbo-source-registry-bootstrap
+      defaultMode: 0555

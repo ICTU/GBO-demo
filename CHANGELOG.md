@@ -6,6 +6,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Added
+- **The `gbo-app` chart can express a one-shot workload.** `job.enabled`
+  renders a Job instead of a Deployment, Service and HTTPRoute — mutually
+  exclusive, because a release either serves traffic or runs to completion.
+  Combining it with `route.enabled` is a template error rather than a silently
+  ignored value.
+  - The Job is named `<fullname>-<release revision>`. A Job spec is immutable,
+    so a release that reruns a task creates a new object instead of patching
+    the old one; `kubectl get jobs` then reads as a history of attempts, and
+    Helm removes the previous revision's Job on upgrade.
+  - `parallelism` and `completions` are pinned to 1 and `replicaCount` is
+    ignored, so a schema migration runs once per release and never
+    concurrently with itself. `restartPolicy: Never` keeps a failed pod for
+    `kubectl logs`, and `activeDeadlineSeconds` (default 600) fails a wedged
+    migration instead of hanging.
+  - The three EUDI database tasks that had no home in the chart now have
+    example values files: `source-registry-bootstrap`,
+    `source-registry-migrations` and `eudi-migrations`.
+    `eudi-issuance-materialize` stays an init container — it writes
+    `issuance_server.toml` into the pod's own `emptyDir`, so it has to run in
+    that pod, before that container, every time.
+  - `postgres-eudi` gains an example too, and stays a Deployment with
+    `Recreate` and a ReadWriteOnce PVC rather than becoming a StatefulSet.
+    `Recreate` already guarantees that two postgres processes never open one
+    data directory; per-replica identity buys nothing for a single replica
+    reached through its Service. The reasoning is recorded in the values file
+    and in the new `deploy/helm/gbo-app/README.md`, which documents both
+    release shapes and where each one-shot workload belongs.
+  - The Deployment and the Job render from one shared pod spec helper, so the
+    two shapes cannot drift. Rendering is byte-identical for every existing
+    example values file. CI now templates every file in `examples/`.
+
 ### Changed
 - **OpenFTV moves to the released v0.1.0.** The demo no longer runs an
   unreleased build: the version tagged on 8 September 2026 contains the Rego

@@ -1,0 +1,37 @@
+# eudi-migrations — one-shot Job.
+#
+# Applies the nl-wallet issuance_server schema. The image ships a separate
+# migration binary next to the server binary, so the same image runs both
+# with a different entrypoint.
+#
+# A Job rather than an init container on the issuance server: the issuance
+# server and the adapter each migrate their own schema, and an init container
+# cannot order work across releases. Running it as its own release also means
+# a failed migration is a failed Job you can read, not a pod that restarts.
+
+job:
+  enabled: true
+
+image:
+  repository: ghcr.io/ictu/gbo-demo/eudi-issuance-server
+  tag: latest
+
+command: ["/issuance_server_migrations"]
+args:
+  - up
+
+env:
+  - name: DATABASE_URL
+    valueFrom:
+      secretKeyRef:
+        name: eudi-issuance-server-database
+        key: uri
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+  readOnlyRootFilesystem: true
