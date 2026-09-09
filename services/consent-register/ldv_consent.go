@@ -67,10 +67,11 @@ func (l *registerLogbook) buildRecord(
 	if l == nil || subjectRef == "" {
 		return nil, nil
 	}
+	traceID := ldv.TraceID(r.Context(), r.Header)
 	record := ldv.Record{
-		TraceID:      ldv.TraceID(r.Context(), r.Header),
+		TraceID:      traceID,
 		SpanID:       ldv.SpanID(),
-		ParentSpanID: ldv.ParentSpanFromHeader(r.Header),
+		ParentSpanID: ldv.ParentSpanFor(r.Header, traceID),
 		Name:         name,
 		Status:       ldv.StatusFromHTTP(status),
 		StartTime:    start,

@@ -488,9 +488,13 @@ func callViaFSC(ctx context.Context, client *http.Client, cfg config, plan sourc
 	// the Fsc-Transaction-Id, and the bronhouder would file its half of this
 	// request under a different id.
 	//
-	// FSC v2.4.0 strips the header before it reaches the source, which is why
-	// the Fsc-Transaction-Id above is not redundant. Sending it anyway costs
-	// nothing and stops being a workaround the day FSC forwards it.
+	// Both headers travel. FSC forwards traceparent untouched — the outway
+	// deletes exactly one header, Proxy-Authorization — so this is not a
+	// workaround for a header being stripped. The Fsc-Transaction-Id above is
+	// not redundant either: FSC validates it as a UUID v7 and rejects anything
+	// else, and it is the id the txlog and the decision log key on. Sending
+	// both means the wire carries one value under the name the standard
+	// mandates and under the name FSC's own records will use.
 	if normalized := ldv.NormalizeTraceID(fscTxID); normalized != "" {
 		ldv.InjectTraceparent(httpReq.Header, ldv.TraceContext{
 			TraceID: normalized, SpanID: ldv.SpanID(), Sampled: true,
