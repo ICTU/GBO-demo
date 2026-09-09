@@ -125,6 +125,15 @@ ordering is the deviation: preferring a header of FSC's invention over the one
 to be able to tell where the chain follows the standard and where it works
 around a transport that cannot.
 
+That ordering has one consequence for `parent_span_id`. §3.1 states the two
+together: an action started by another action takes the `trace_id` over
+unchanged **and** records that action's `span_id` as its parent. They are one
+rule. So where a caller's `traceparent` loses to the transaction id, the
+caller's span loses with it — it belongs to the trace that just lost, and
+recording it would name a parent no reader of this logbook can resolve. The
+record becomes a root instead, and the calling application is named where the
+standard puts it: `dpl.core.foreign_operation.processor`.
+
 The ordering is also what makes the benefit real: LDV's `traceID`, the ADL's
 trace id and the FSC transaction log carry one value for one request (REQ-55).
 Preferring `traceparent` instead filed LDV records under an id the other two

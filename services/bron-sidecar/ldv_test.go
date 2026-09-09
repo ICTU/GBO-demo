@@ -228,7 +228,7 @@ func TestTheSidecarPassesTraceMetadataToTheSource(t *testing.T) {
 	if !ldv.IsTraceID(traceContext.TraceID) {
 		t.Fatalf("the source was given no usable traceparent: %q", received.Get("traceparent"))
 	}
-	if got := ldv.ParentSpanFromHeader(received); !ldv.IsSpanID(got) {
+	if got := ldv.ParentSpanFor(received, traceContext.TraceID); !ldv.IsSpanID(got) {
 		t.Errorf("parent span = %q, want the sidecar's forward span", got)
 	}
 	if got := received.Get(ldv.HeaderSubjectID); got != "PI-abc123" {

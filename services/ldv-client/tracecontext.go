@@ -3,6 +3,7 @@ package ldvclient
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
@@ -178,14 +179,29 @@ func contextWithSpan(spanContext trace.SpanContext) context.Context {
 	return trace.ContextWithSpanContext(context.Background(), spanContext)
 }
 
-// ParentSpanFromHeader returns the span the caller was in, so this record
-// hangs under it. Empty when this component starts the tree, or when the hop
-// that delivered the request dropped the trace context.
-func ParentSpanFromHeader(header http.Header) string {
+// ParentSpanFor returns the span the caller was in, so this record hangs under
+// it — but only when the caller was in the same trace as this record.
+//
+// §3.1 states the two together: an action started by another action takes the
+// `trace_id` over unchanged *and* records that action's `span_id` as
+// `parent_span_id`. They are one rule, so where they come apart they must not
+// be combined. That happens on exactly one hop here: a caller brings its own
+// `traceparent` while the record is filed under the Fsc-Transaction-Id, which
+// is the id the source, the txlog and the decision log will use. The header's
+// span then belongs to a different trace, and a `parent_span_id` pointing into
+// it names a parent no reader of this logbook can resolve — the record looks
+// nested but hangs from nothing. A root record is the honest answer.
+//
+// Empty when this component starts the tree, when the hop that delivered the
+// request carried no trace context, or when the caller was in another trace.
+func ParentSpanFor(header http.Header, traceID string) string {
 	extracted := trace.SpanContextFromContext(
 		propagator.Extract(context.Background(), propagation.HeaderCarrier(header)),
 	)
 	if !extracted.HasSpanID() {
+		return ""
+	}
+	if !strings.EqualFold(extracted.TraceID().String(), strings.TrimSpace(traceID)) {
 		return ""
 	}
 	return extracted.SpanID().String()

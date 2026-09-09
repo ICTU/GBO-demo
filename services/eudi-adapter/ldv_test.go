@@ -58,7 +58,7 @@ func issuanceUnderTest(t *testing.T, logbook *ldvtest.Logbook) string {
 		SourceDataFSCServiceReference: "bri", SourceDataFSCGrantHash: "data-grant",
 	}
 	client := newIssuanceLogbook(logbook.Client(t, "eudi-adapter"), map[string]string{"belastingdienst": "https://logboek.belastingdienst.nl/data-processing-operations"})
-	server := httptest.NewServer(testMux(cfg, http.DefaultClient, metadata, client))
+	server := httptest.NewServer(withFscTraceContext(testMux(cfg, http.DefaultClient, metadata, client)))
 	t.Cleanup(server.Close)
 	return server.URL
 }
@@ -169,6 +169,48 @@ func TestIssuanceRecordsCarryTheFscTransactionID(t *testing.T) {
 	for _, record := range logbook.Written() {
 		if ldv.NormalizeTraceID(record.TraceID) == "" {
 			t.Errorf("record %q trace_id = %q, not an OTel trace id", record.Name, record.TraceID)
+		}
+	}
+}
+
+// A caller that brings its own traceparent — an issuance-server with OTel —
+// is in a different trace from the one these records are filed under: the
+// adapter mints the Fsc-Transaction-Id, and that is the id the source, the
+// txlog and the decision log will use. §3.1 takes the trace id and the parent
+// span from the same action, so the caller's span must not be recorded as the
+// parent of a record in another trace. It would name a parent no reader of
+// this logbook can resolve.
+func TestACallersOwnTraceDoesNotBecomeTheParentOfOurRecords(t *testing.T) {
+	const callersTrace = "4bf92f3577b34da6a3ce929d0e0e4736"
+	const callersSpan = "00f067aa0ba902b7"
+
+	logbook := ldvtest.New(t, allGBOActivities()...)
+	url := issuanceUnderTest(t, logbook)
+
+	request, err := http.NewRequest(http.MethodPost,
+		url+"/attestations/belastingdienst/inkomensverklaring?jaar=2025",
+		strings.NewReader(pidDisclosure))
+	if err != nil {
+		t.Fatalf("build issuance request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("traceparent", "00-"+callersTrace+"-"+callersSpan+"-01")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("post issuance request: %v", err)
+	}
+	defer func() { _ = response.Body.Close() }()
+
+	written := logbook.Written()
+	if len(written) == 0 {
+		t.Fatal("no records written")
+	}
+	for _, record := range written {
+		if record.TraceID == callersTrace {
+			t.Errorf("record %q is filed under the caller's trace, not the Fsc-Transaction-Id", record.Name)
+		}
+		if record.ParentSpanID == callersSpan {
+			t.Errorf("record %q hangs under the caller's span, which is in another trace", record.Name)
 		}
 	}
 }

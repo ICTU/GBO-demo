@@ -116,7 +116,7 @@ func (l *issuanceLogbook) logPIDExtraction(ctx context.Context, r *http.Request,
 	record := ldv.Record{
 		TraceID:      recording.traceID,
 		SpanID:       recording.extractSpan,
-		ParentSpanID: ldv.ParentSpanFromHeader(r.Header),
+		ParentSpanID: ldv.ParentSpanFor(r.Header, recording.traceID),
 		Name:         "dataverwerking.pid-bsn-extractie",
 		Status:       "OK",
 		StartTime:    start,

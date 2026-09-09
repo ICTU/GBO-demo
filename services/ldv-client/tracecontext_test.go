@@ -3,6 +3,7 @@ package ldvclient
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 
 	"go.opentelemetry.io/otel/trace"
@@ -80,9 +81,9 @@ func TestTracestateSurvivesTheHop(t *testing.T) {
 	}
 }
 
-// The FSC hop strips traceparent, so on the far side the Fsc-Transaction-Id is
-// all there is — and it carries the same value, being a UUID. That fallback is
-// the documented profile deviation.
+// The transaction id wins over traceparent, because it is the id FSC's txlog
+// and the PDP's decision log record. It is a UUID, so it is also a valid
+// 16-byte trace id — which is what lets one value serve both names.
 func TestTheFscTransactionIDIsTheTraceID(t *testing.T) {
 	header := http.Header{}
 	header.Set("Fsc-Transaction-Id", "0af76519-16cd-43dd-8448-eb211c80319c")
@@ -145,14 +146,29 @@ func TestInjectSkipsAnUnusableContext(t *testing.T) {
 	}
 }
 
-func TestParentSpanFromHeader(t *testing.T) {
+func TestParentSpanFor(t *testing.T) {
+	const callersTrace = "0af7651916cd43dd8448eb211c80319c"
+
 	header := http.Header{}
-	if got := ParentSpanFromHeader(header); got != "" {
-		t.Errorf("ParentSpanFromHeader = %q, want empty when this component starts the tree", got)
+	if got := ParentSpanFor(header, callersTrace); got != "" {
+		t.Errorf("ParentSpanFor = %q, want empty when this component starts the tree", got)
 	}
-	header.Set("traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
-	if got := ParentSpanFromHeader(header); got != "b7ad6b7169203331" {
-		t.Errorf("ParentSpanFromHeader = %q, want the caller's span", got)
+
+	header.Set("traceparent", "00-"+callersTrace+"-b7ad6b7169203331-01")
+	if got := ParentSpanFor(header, callersTrace); got != "b7ad6b7169203331" {
+		t.Errorf("ParentSpanFor = %q, want the caller's span", got)
+	}
+
+	// The caller was in another trace: this record is filed under the
+	// Fsc-Transaction-Id, so the caller's span is not its parent. Naming it
+	// anyway would produce a parent no reader of this logbook can resolve.
+	if got := ParentSpanFor(header, "4bf92f3577b34da6a3ce929d0e0e4736"); got != "" {
+		t.Errorf("ParentSpanFor = %q, want empty when the caller was in another trace", got)
+	}
+
+	// Case is not part of the identity: a hex id is the same id either way.
+	if got := ParentSpanFor(header, strings.ToUpper(callersTrace)); got != "b7ad6b7169203331" {
+		t.Errorf("ParentSpanFor = %q, want the caller's span regardless of hex case", got)
 	}
 }
 
