@@ -391,6 +391,87 @@ shared client's machinery.
 
 ## What the flows produce
 
+### Who writes what, and where
+
+Every Verantwoordelijke keeps its own logbook and writes only its own
+processing. Nothing federates these; what joins a request across them is the
+trace id, and nothing else.
+
+```mermaid
+flowchart LR
+    subgraph HV["Hypotheekverlener (dienstverlener)"]
+        DV[dienstverlener-backend]
+    end
+
+    subgraph BD["Verantwoordelijke: Belastingdienst"]
+        BS[bron-sidecar] --> GQL[graphql-server]
+        BS -.-> LBD[(logboek-bd)]
+        GQL -.-> LBD
+    end
+
+    subgraph RVIG["Verantwoordelijke: RvIG"]
+        BRPS[brp-sidecar] --> BRPQ[brp-graphql-server]
+        BRPS -.-> LBRP[(logboek-brp)]
+        BRPQ -.-> LBRP
+    end
+
+    subgraph GBO["Verantwoordelijke: GBO"]
+        CR[consent-register]
+        CPB[consent-portal-backend]
+        EA[eudi-adapter]
+        CR -.-> LGBO[(logboek-gbo)]
+        CPB -.-> LGBO
+        EA -.-> LGBO
+    end
+
+    DV -->|FSC| BS
+    EA -->|FSC| BS
+    EA -->|FSC| BRPS
+    EA --> CR
+
+    classDef book fill:#1f2933,stroke:#7b8794,color:#e4e7eb
+    class LBD,LBRP,LGBO book
+```
+
+Solid arrows are requests; dotted arrows are records being written. A component
+only ever writes to the logbook of the Verantwoordelijke it belongs to — the
+`eudi-adapter` calls the Belastingdienst but records nothing in `logboek-bd`,
+because what it did was GBO's processing, not BD's.
+
+### What each component logs
+
+| Component | Logboek | Verwerkingsactiviteit | Betrokkene heet daar |
+|---|---|---|---|
+| `bron-sidecar` | bd | `bd-pi-bsn-resolutie`, `bd-bronquery-doorgifte` | `pi` / `logboek-pseudoniem` |
+| `graphql-server` | bd | `bd-ib-2024`, `bd-ib-2025` | `pi` / `logboek-pseudoniem` |
+| `brp-sidecar` | brp | `brp-pi-bsn-resolutie`, `brp-bronquery-doorgifte` | `pi` / `logboek-pseudoniem` |
+| `brp-graphql-server` | brp | `brp-akte-overlijden`, `brp-persoonsgegevens-verstrekking` | `logboek-pseudoniem`, `brp-persoon-id` |
+| `consent-register` | gbo | `gbo-toestemming-verlenen`, `-intrekken`, `-status`, `-inzage` | `portal-subject` |
+| `consent-portal-backend` | gbo | `gbo-bsn-pseudonimisering` | `portal-subject` |
+| `eudi-adapter` | gbo | `gbo-pid-bsn-extractie`, `gbo-attestatie-samenstellen` | `portal-subject` |
+
+The last column is the part that surprises people. **The same citizen has a
+different name in every logbook**, by design — `PI-70e1c7ef…` at the
+Belastingdienst, `EP-c44cade3…` at GBO — and no party holds the mapping. That
+is what stops the three logbooks from being reassembled into the central
+register LDV exists to avoid. It is also what makes citizen inzage a real
+design problem rather than a query: see [Scope](#scope).
+
+### Which flow lands where
+
+A single DvTP query for two belastingjaren produces exactly this, and it is
+worth knowing by heart because it is the shape you check a change against:
+
+| Logboek | Records | Which |
+|---|---|---|
+| `logboek-bd` | 4 | `pi-bsn-resolutie`, `bronquery-doorgifte`, `bd-ib-2024`, `bd-ib-2025` |
+| `logboek-brp` | 0 | the flow never touches the BRP |
+| `logboek-gbo` | 1 | `toestemming-status` |
+
+An empty `logboek-brp` there is correct, not a failure. The EUDI flow is the
+mirror image: `logboek-brp` and `logboek-gbo` fill, and which BD records appear
+depends on the attestation requested.
+
 A DvTP query, in `logboek-bd`:
 
 ```
@@ -418,7 +499,7 @@ they exist only as part of that one processing.
 The deceased is **not** among them. The AVG protects living persons, so the
 person the certificate is about is not a Betrokkene of this processing even
 though their data is what gets disclosed. The requester's record carries
-`gbo.akte.overledene_verwerkt` so a reader sees that this was decided rather
+`dpl.gbo.overledeneVerwerkt` so a reader sees that this was decided rather
 than forgotten.
 
 A consent lifecycle, in `logboek-gbo` — each step under the portal-scoped
