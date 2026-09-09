@@ -1,24 +1,28 @@
-/* Waarden 1:1 overgenomen uit het design "GBO Landing.dc.html"
-   (claude.ai/design, project 0c7d9e4c). Niet zelf verzinnen — het design
-   is leidend. Alleen de media-queries onderaan zijn toegevoegd: het
-   design kent geen breakpoints omdat het altijd breed gerenderd wordt. */
+/* Layout en typografie 1:1 overgenomen uit het design "GBO Landing.dc.html"
+   (claude.ai/design, project 0c7d9e4c). Alleen de media-queries onderaan
+   zijn toegevoegd: het design kent geen breakpoints omdat het altijd breed
+   gerenderd wordt.
+
+   Het kleurenpalet volgt het ICTU-presentatiethema (theme1.xml van de
+   GBO-presentaties): accent1 #63dbff cyaan, accent2 #3a65ea blauw,
+   accent3 #b500c7 magenta, dk2 #44546a; de tinten komen uit de slides. */
 
 :root {
-  --blue: #01689b;
-  --blue-deep: #05131f;
-  --red: #d52b1e;
-  --text: #1a1a1a;
-  --text-2: #535353;
-  --text-3: #767676;
-  --grey-bg: #f3f3f3;
-  --grey-border: #d3d3d3;
-  --pale-bg: #f3f7fa;
-  --pale-border: #d3e0e9;
-  --line: #a8c4d4;
-  --accent-light: #8fcbe8;
-  --tint-dvtp: #e7eff5;
-  --tint-eudi: #dfeaf2;
-  --tint-oots: #eaf1f6;
+  --blue: #3a65ea; /* ICTU accent2 */
+  --blue-deep: #0f1a44; /* donkere afgeleide van --blue, zelfde tint */
+  --accent: #b500c7; /* ICTU accent3, hover-accent */
+  --text: #222222;
+  --text-2: #44546a; /* ICTU dk2 */
+  --text-3: #7f7f7f;
+  --grey-bg: #eff1f6;
+  --grey-border: #c9d6e3;
+  --pale-bg: #f3f8fc;
+  --pale-border: #c9d6e3;
+  --line: #a3b6f2; /* lichte afgeleide van --blue, voor lijnen op licht */
+  --accent-light: #63dbff; /* ICTU accent1, alleen op donkere secties */
+  --tint-dvtp: #e3eafb; /* lichtblauw */
+  --tint-eudi: #e7e0f6; /* lila */
+  --tint-oots: #e2f7fe; /* lichtcyaan */
   --sans: "Fira Sans", Helvetica, Arial, sans-serif;
   --serif: "Source Serif 4", Georgia, serif;
   --gutter: clamp(20px, 6vw, 88px);
@@ -47,7 +51,7 @@ a {
 }
 
 a:hover {
-  color: var(--red);
+  color: var(--accent);
 }
 
 :focus {
@@ -168,7 +172,7 @@ a:hover {
 }
 
 .link-muted:hover {
-  color: var(--red);
+  color: var(--accent);
 }
 
 /* ── Voortgangsbalk ──────────────────────────────────────────────────── */
@@ -364,7 +368,7 @@ a:hover {
 
 .btn-invert:hover {
   background: var(--grey-bg);
-  color: var(--red);
+  color: var(--accent);
 }
 
 /* ── Stroomdiagram ───────────────────────────────────────────────────── */
@@ -758,7 +762,7 @@ a:hover {
   font-size: clamp(26px, 3vw, 34px);
   line-height: 1;
   font-weight: 600;
-  color: var(--line);
+  color: var(--blue);
 }
 
 .tryout-title {
@@ -872,7 +876,7 @@ a:hover {
 }
 
 .btn-primary:hover {
-  background: var(--red);
+  background: var(--accent);
   color: #ffffff;
 }
 
@@ -992,7 +996,7 @@ a:hover {
 }
 
 .infra-link:hover {
-  color: var(--red);
+  color: var(--accent);
 }
 
 /* ── Footer ──────────────────────────────────────────────────────────── */

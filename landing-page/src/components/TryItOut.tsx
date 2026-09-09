@@ -114,7 +114,7 @@ export default function TryItOut() {
                     value={crossDeviceLink}
                     size={188}
                     bgColor="#ffffff"
-                    fgColor="#05131f"
+                    fgColor="#0f1a44"
                     marginSize={2}
                     aria-label={`QR-code om de ${usecase.label.toLowerCase()} in je NL Wallet te laden`}
                   />
