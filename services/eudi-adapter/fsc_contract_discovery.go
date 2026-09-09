@@ -191,6 +191,7 @@ type sourceReconciler struct {
 	outwayURL      string
 	schemaPath     string
 	publicBaseURL  string
+	metadataDir    string
 	sources        []sourceConfiguration
 	store          certificateStore
 	backend        activationBackend

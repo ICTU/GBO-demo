@@ -246,3 +246,91 @@ func fscSource(id string) Source {
 		DataAccessTransport: TransportFSC,
 	}
 }
+
+func fileMetadataFSCDataSource(id, path string) Source {
+	return Source{
+		ID: id, ProviderPeerID: "0000009958MINBZK0000", OIN: "00000000000000000001", Name: id,
+		MetadataEndpoint:    MetadataEndpoint{Transport: TransportFile, Path: path},
+		DataAccessTransport: TransportFSC,
+	}
+}
+
+// A source whose document is read from disk still calls its GraphQL service
+// over FSC. Pinning the data grant is what makes that call contract-bound, so
+// the grant lookup must follow the data leg rather than the metadata leg.
+func TestFileMetadataStillPinsTheFSCDataGrant(t *testing.T) {
+	now := time.Now().UTC()
+	source := fileMetadataFSCDataSource("centric", "centric/gbo.json")
+	locator := FileMetadataLocator("centric/gbo.json")
+	metadata := &testMetadata{responses: map[string]MetadataResponse{locator: {Payload: []byte(`{}`), ETag: `"sha256-abc"`}}, errors: map[string]error{}}
+	certificates := &testCertificates{errors: map[string]error{}}
+	activations := &testActivations{candidates: map[string]*testCandidate{}}
+	statuses := &testStatuses{bySource: map[string]Status{}}
+	contracts := testContracts{grants: map[string]Grant{source.ProviderPeerID + "/data": {Hash: "data-grant"}}}
+	service := newTestService(t, []Source{source}, contracts, metadata, certificates, activations, statuses)
+
+	report, err := service.Reconcile(context.Background(), now)
+	if err != nil || report.Err() != nil {
+		t.Fatalf("reconcile: err=%v report=%v", err, report.Err())
+	}
+	if len(metadata.requests) != 1 || metadata.requests[0].Path != "centric/gbo.json" || metadata.requests[0].Transport != TransportFile {
+		t.Fatalf("metadata requests = %+v", metadata.requests)
+	}
+	candidate := activations.candidates["centric"]
+	if candidate == nil || candidate.source.DataGrantHash != "data-grant" || candidate.source.DataServiceReference != "data" {
+		t.Fatalf("resolved source = %+v", candidate)
+	}
+	if candidate.source.MetadataTransportAuthenticated || !candidate.source.DataTransportAuthenticated {
+		t.Fatalf("transport authentication = %+v", candidate.source)
+	}
+	status := statuses.bySource["centric"]
+	if status.State != StateActive || status.TransportAuthenticated || !status.DataTransportAuthenticated {
+		t.Fatalf("status = %+v", status)
+	}
+}
+
+// Without a data contract the source has no authenticated way to answer a
+// query. Reporting that as a missing data contract keeps it out of a release
+// instead of activating it with an empty grant hash.
+func TestMissingDataContractBlocksFileMetadataSource(t *testing.T) {
+	now := time.Now().UTC()
+	source := fileMetadataFSCDataSource("centric", "centric/gbo.json")
+	locator := FileMetadataLocator("centric/gbo.json")
+	metadata := &testMetadata{responses: map[string]MetadataResponse{locator: {Payload: []byte(`{}`)}}, errors: map[string]error{}}
+	certificates := &testCertificates{errors: map[string]error{}}
+	activations := &testActivations{candidates: map[string]*testCandidate{}}
+	statuses := &testStatuses{bySource: map[string]Status{}}
+	service := newTestService(t, []Source{source}, testContracts{grants: map[string]Grant{}}, metadata, certificates, activations, statuses)
+
+	report, err := service.Reconcile(context.Background(), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Err() == nil || statuses.bySource["centric"].Reason != ReasonDataContractMissing {
+		t.Fatalf("report=%v status=%+v", report.Err(), statuses.bySource["centric"])
+	}
+	if len(activations.activated) != 0 {
+		t.Fatalf("activated without a data contract: %+v", activations.activated)
+	}
+}
+
+// The FSC Manager is needed by any source with an FSC leg, so a source that
+// takes only its data over FSC must not sail past an unreachable Manager.
+func TestFSCManagerFailureStopsSourcesWithFSCDataOnly(t *testing.T) {
+	now := time.Now().UTC()
+	source := fileMetadataFSCDataSource("centric", "centric/gbo.json")
+	locator := FileMetadataLocator("centric/gbo.json")
+	metadata := &testMetadata{responses: map[string]MetadataResponse{locator: {Payload: []byte(`{}`)}}, errors: map[string]error{}}
+	certificates := &testCertificates{errors: map[string]error{}}
+	activations := &testActivations{candidates: map[string]*testCandidate{}}
+	statuses := &testStatuses{bySource: map[string]Status{}}
+	service := newTestService(t, []Source{source}, testContracts{err: errors.New("manager unavailable")}, metadata, certificates, activations, statuses)
+
+	report, err := service.Reconcile(context.Background(), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Err() == nil || statuses.bySource["centric"].Reason != ReasonFSCManagerUnavailable {
+		t.Fatalf("report=%v status=%+v", report.Err(), statuses.bySource["centric"])
+	}
+}

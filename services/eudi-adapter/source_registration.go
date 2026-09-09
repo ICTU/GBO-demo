@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -30,6 +31,10 @@ var (
 const (
 	sourceTransportFSC       = "fsc"
 	sourceTransportUnsecured = "unsecured"
+	// sourceTransportFile serves the source document from operator-managed
+	// storage. It exists for sources that publish no metadata endpoint at all;
+	// it is a metadata-only profile, because a file cannot answer a query.
+	sourceTransportFile = "file"
 )
 
 type sourceMetadataEndpoint struct {
@@ -56,6 +61,8 @@ type sourceRegistration struct {
 	DataAccess       sourceDataAccess       `json:"data_access" yaml:"data_access"`
 	// Logo is certificate-provisioning input, not source-published metadata.
 	Logo *organizationLogo `json:"-" yaml:"-"`
+	// Description is provisioning input too: the environment the issuer is in.
+	Description string `json:"-" yaml:"-"`
 }
 
 func (r sourceRegistration) certificateSetID() string {
@@ -83,7 +90,9 @@ func (r sourceRegistration) validate() error {
 	if !sourceOINPattern.MatchString(r.SourceOIN) {
 		return fmt.Errorf("source registration source_oin must contain exactly 20 digits")
 	}
-	if r.MetadataEndpoint.Transport == sourceTransportFSC {
+	// One source is one FSC peer. The peer ID is required as soon as either
+	// leg speaks FSC, not only when the metadata leg does.
+	if r.MetadataEndpoint.Transport == sourceTransportFSC || r.DataAccess.Transport == sourceTransportFSC {
 		if !peerIDPattern.MatchString(r.ProviderPeerID) {
 			return fmt.Errorf("source registration provider_peer_id must contain exactly 20 alphanumeric characters")
 		}
@@ -101,6 +110,12 @@ func (r sourceRegistration) validate() error {
 	}
 	if r.MetadataEndpoint.Transport == sourceTransportFSC && r.DataAccess.Transport == sourceTransportFSC && r.MetadataEndpoint.ServiceReference == r.DataAccess.ServiceReference {
 		return fmt.Errorf("source registration metadata and data FSC services must be separate")
+	}
+	// Downgrading an authenticated description into an unauthenticated data
+	// call is never an onboarding stage a source is moving through, only a
+	// weakening of one it already reached.
+	if r.MetadataEndpoint.Transport == sourceTransportFSC && r.DataAccess.Transport == sourceTransportUnsecured {
+		return fmt.Errorf("source registration with FSC metadata must not take its data over unsecured transport")
 	}
 	return nil
 }
@@ -129,6 +144,16 @@ func (e sourceMetadataEndpoint) validate() error {
 		}
 		if e.GrantHash != "" {
 			return fmt.Errorf("grant_hash is not allowed for unsecured transport")
+		}
+	case sourceTransportFile:
+		if e.ServiceReference != "" || e.Endpoint != "" {
+			return fmt.Errorf("service_reference and endpoint are not allowed for file transport")
+		}
+		if err := validateStorageRelativePath(e.Path); err != nil {
+			return fmt.Errorf("path: %w", err)
+		}
+		if e.GrantHash != "" {
+			return fmt.Errorf("grant_hash is not allowed for file transport")
 		}
 	default:
 		return fmt.Errorf("unsupported transport %q", e.Transport)
@@ -162,6 +187,31 @@ func validateAbsoluteURLPath(value string) error {
 	parsed, err := url.ParseRequestURI(value)
 	if err != nil || !strings.HasPrefix(value, "/") || strings.HasPrefix(value, "//") || parsed.IsAbs() || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return fmt.Errorf("must be an absolute URL path without query or fragment")
+	}
+	return nil
+}
+
+// validateStorageRelativePath keeps a file-transported document inside the
+// operator-provided metadata root. Confinement is enforced here rather than at
+// read time so an escaping path is rejected during validation, before any
+// filesystem access happens.
+func validateStorageRelativePath(value string) error {
+	if value == "" {
+		return fmt.Errorf("is required for file transport")
+	}
+	if strings.ContainsRune(value, '\\') {
+		return fmt.Errorf("must use forward slashes")
+	}
+	if strings.HasPrefix(value, "/") || filepath.IsAbs(value) {
+		return fmt.Errorf("must be relative to the metadata directory")
+	}
+	if value != path.Clean(value) {
+		return fmt.Errorf("must be a clean relative path")
+	}
+	for _, segment := range strings.Split(value, "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			return fmt.Errorf("must not contain empty or traversing path segments")
+		}
 	}
 	return nil
 }

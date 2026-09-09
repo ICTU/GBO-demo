@@ -408,3 +408,65 @@ func TestAuthorizationPayloadMatchesOnlyPermitsCertificateOwnedLogo(t *testing.T
 		})
 	}
 }
+
+// A provisioned description is certificate-owned: the reconciler cannot
+// re-derive it, so it must read it back rather than insist on the default.
+// Without that, a deliberately provisioned description looks like tampering
+// and the source is blocked on CERTIFICATE_SET_INVALID.
+func TestProvisionedDescriptionSurvivesCertificateReload(t *testing.T) {
+	registration := sourceRegistration{
+		SourceID: "centric", SourceOIN: "99999999900000000600", Name: "Centric",
+		Description: "Gemeentelijke testomgeving Centric",
+	}
+	fixedNow := time.Date(2026, time.August, 5, 12, 0, 0, 0, time.UTC)
+	root := t.TempDir()
+	writeTestDevelopmentCAs(t, root, fixedNow)
+	provider := newDevelopmentCAProvider(root, "https://issuance.example")
+	provider.now = func() time.Time { return fixedNow }
+	if _, err := provider.Provision(registration); err != nil {
+		t.Fatalf("provision certificate set: %v", err)
+	}
+
+	// The reconciler knows the source_id and nothing else about the description.
+	if _, err := provider.Load(sourceRegistration{SourceID: "centric"}); err != nil {
+		t.Fatalf("load certificate set with a provisioned description: %v", err)
+	}
+	store := newPublicDevelopmentCertificateStore(root, "https://issuance.example")
+	store.provider.now = func() time.Time { return fixedNow }
+	if _, err := store.Load(sourceRegistration{SourceID: "centric"}); err != nil {
+		t.Fatalf("load public certificate set with a provisioned description: %v", err)
+	}
+
+	certificate, err := loadDevelopmentLeafCertificate(filepath.Join(root, "centric", "issuer-cert.der.b64"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := certificateOrganizationDescription(certificate); got != registration.Description {
+		t.Fatalf("certificate description = %q, want %q", got, registration.Description)
+	}
+}
+
+// The derived default is not an override. Reporting it as one would replace the
+// English default with the Dutch text, and the payload would stop matching
+// itself on the next reconciliation.
+func TestDefaultDescriptionIsNotTreatedAsAnOverride(t *testing.T) {
+	registration := sourceRegistration{
+		SourceID: "belastingdienst", SourceOIN: "99999999900000000200", Name: "Belastingdienst-mock",
+	}
+	fixedNow := time.Date(2026, time.August, 5, 12, 0, 0, 0, time.UTC)
+	root := t.TempDir()
+	writeTestDevelopmentCAs(t, root, fixedNow)
+	provider := newDevelopmentCAProvider(root, "https://issuance.example")
+	provider.now = func() time.Time { return fixedNow }
+	if _, err := provider.Provision(registration); err != nil {
+		t.Fatalf("provision certificate set: %v", err)
+	}
+
+	certificate, err := loadDevelopmentLeafCertificate(filepath.Join(root, "belastingdienst", "issuer-cert.der.b64"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := certificateOrganizationDescription(certificate); got != "" {
+		t.Fatalf("default description reported as override: %q", got)
+	}
+}

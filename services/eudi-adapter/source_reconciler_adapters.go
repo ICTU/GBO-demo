@@ -41,13 +41,19 @@ type sourceCatalogAdapter struct {
 func (a sourceCatalogAdapter) List(context.Context) ([]onboarding.Source, error) {
 	sources := make([]onboarding.Source, 0, len(a.sources))
 	for _, source := range a.sources {
+		metadata := onboarding.MetadataEndpoint{
+			Transport:        onboarding.Transport(source.MetadataEndpoint.Transport),
+			ServiceReference: source.MetadataEndpoint.ServiceReference,
+			Path:             sourceMetadataWellKnownPath,
+			Endpoint:         source.MetadataEndpoint.Endpoint,
+		}
+		if source.MetadataEndpoint.Transport == sourceTransportFile {
+			metadata.Path = source.MetadataEndpoint.Path
+		}
 		sources = append(sources, onboarding.Source{
-			ID: source.SourceID, ProviderPeerID: source.MetadataEndpoint.ProviderPeerID,
-			MetadataEndpoint: onboarding.MetadataEndpoint{
-				Transport: onboarding.Transport(source.MetadataEndpoint.Transport), ServiceReference: source.MetadataEndpoint.ServiceReference,
-				Path: sourceMetadataWellKnownPath, Endpoint: source.MetadataEndpoint.Endpoint,
-			},
-			DataAccessTransport: onboarding.Transport(source.MetadataEndpoint.Transport),
+			ID: source.SourceID, ProviderPeerID: source.providerPeerID(),
+			MetadataEndpoint:    metadata,
+			DataAccessTransport: onboarding.Transport(source.dataTransport()),
 		})
 	}
 	return sources, nil
@@ -82,7 +88,13 @@ type metadataClientAdapter struct {
 }
 
 func (a metadataClientAdapter) Fetch(ctx context.Context, request onboarding.MetadataRequest) (onboarding.MetadataResponse, error) {
-	fetched, err := fetchSourceMetadataCandidate(ctx, a.reconciler.sourceClient, request.URL, string(request.Transport), request.GrantHash, request.ETag)
+	var fetched sourceMetadataFetch
+	var err error
+	if request.Transport == onboarding.TransportFile {
+		fetched, err = readSourceMetadataFile(a.reconciler.metadataDir, request.Path, request.ETag)
+	} else {
+		fetched, err = fetchSourceMetadataCandidate(ctx, a.reconciler.sourceClient, request.URL, string(request.Transport), request.GrantHash, request.ETag)
+	}
 	if err != nil {
 		return onboarding.MetadataResponse{}, err
 	}
@@ -175,7 +187,8 @@ func (a activationRepositoryAdapter) Refresh(_ context.Context, existing *source
 		return nil, fmt.Errorf("activation backend cannot refresh a not-modified source")
 	}
 	registration := registrationFromResolvedSource(request.Source)
-	return lifecycle.RefreshCandidate(existing.Source.SourceID, registration, request.Source.MetadataURL, certificates, request.Source.TransportAuthenticated, request.CheckedAt)
+	return lifecycle.RefreshCandidate(existing.Source.SourceID, registration, request.Source.MetadataURL, certificates,
+		transportAuthentication{metadata: request.Source.MetadataTransportAuthenticated, data: request.Source.DataTransportAuthenticated}, request.CheckedAt)
 }
 
 func (a activationRepositoryAdapter) Info(activation *sourceActivation) (onboarding.CandidateInfo, error) {
@@ -212,10 +225,14 @@ func (a statusRepositoryAdapter) Put(_ context.Context, status onboarding.Status
 	return a.writer.Write(sourceReconcileStatus{
 		SourceID: status.SourceID, State: string(status.State), Reason: string(status.Reason), Message: status.Message,
 		MetadataVersion: status.MetadataVersion, DeploymentDigest: status.DeploymentDigest,
-		TransportAuthenticated: status.TransportAuthenticated, CheckedAt: status.CheckedAt,
+		TransportAuthenticated: status.TransportAuthenticated, DataTransportAuthenticated: status.DataTransportAuthenticated,
+		CheckedAt: status.CheckedAt,
 	})
 }
 
+// registrationFromResolvedSource fills the two legs independently. They were
+// once derived from a single transport, which is precisely what made an
+// FSC data call with a non-FSC description impossible to express.
 func registrationFromResolvedSource(resolved onboarding.ResolvedSource) sourceRegistration {
 	source := resolved.Source
 	registration := sourceRegistration{
@@ -223,14 +240,19 @@ func registrationFromResolvedSource(resolved onboarding.ResolvedSource) sourceRe
 		MetadataEndpoint: sourceMetadataEndpoint{Transport: string(source.MetadataEndpoint.Transport)},
 		DataAccess:       sourceDataAccess{Transport: string(source.DataAccessTransport)},
 	}
-	if source.MetadataEndpoint.Transport == onboarding.TransportFSC {
+	switch source.MetadataEndpoint.Transport {
+	case onboarding.TransportFSC:
 		registration.MetadataEndpoint.ServiceReference = source.MetadataEndpoint.ServiceReference
 		registration.MetadataEndpoint.Path = source.MetadataEndpoint.Path
 		registration.MetadataEndpoint.GrantHash = resolved.MetadataGrantHash
+	case onboarding.TransportFile:
+		registration.MetadataEndpoint.Path = source.MetadataEndpoint.Path
+	default:
+		registration.MetadataEndpoint.Endpoint = source.MetadataEndpoint.Endpoint
+	}
+	if source.DataAccessTransport == onboarding.TransportFSC {
 		registration.DataAccess.ServiceReference = resolved.DataServiceReference
 		registration.DataAccess.GrantHash = resolved.DataGrantHash
-	} else {
-		registration.MetadataEndpoint.Endpoint = source.MetadataEndpoint.Endpoint
 	}
 	return registration
 }

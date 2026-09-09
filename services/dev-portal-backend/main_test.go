@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -141,6 +144,73 @@ func TestCustomIssuanceScenarioKeepsEnteredConsumerPeerID(t *testing.T) {
 		return
 	}
 	t.Fatal("saved custom issuance scenario not returned")
+}
+
+func TestSaveScenarioRejectsIDThatEscapesStorageDirectory(t *testing.T) {
+	root := t.TempDir()
+	cfg := config{
+		VarDir:        filepath.Join(root, "var"),
+		PredefinedDir: t.TempDir(),
+	}
+	scenario := Scenario{
+		ID:      "../../escaped",
+		Name:    "Unsafe scenario",
+		Tab:     "issuance",
+		Payload: json.RawMessage(`{}`),
+	}
+	body, err := json.Marshal(scenario)
+	if err != nil {
+		t.Fatalf("encode scenario: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/scenarios", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handleScenarios(cfg).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("save status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "escaped.json")); !os.IsNotExist(err) {
+		t.Fatalf("scenario escaped storage directory: stat err = %v", err)
+	}
+}
+
+func TestPolicySourceConfinesReadsToPoliciesDirectory(t *testing.T) {
+	root := t.TempDir()
+	policiesDir := filepath.Join(root, "policies")
+	if err := os.Mkdir(policiesDir, 0o755); err != nil {
+		t.Fatalf("create policies directory: %v", err)
+	}
+	const validPolicy = "package valid"
+	if err := os.WriteFile(filepath.Join(policiesDir, "valid.rego"), []byte(validPolicy), 0o644); err != nil {
+		t.Fatalf("write valid policy: %v", err)
+	}
+	outside := filepath.Join(root, "outside.rego")
+	const secret = "outside-policy-content"
+	if err := os.WriteFile(outside, []byte(secret), 0o644); err != nil {
+		t.Fatalf("write outside policy: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(policiesDir, "escape.rego")); err != nil {
+		t.Fatalf("create escaping symlink: %v", err)
+	}
+
+	cfg := config{PoliciesDir: policiesDir}
+	req := httptest.NewRequest(http.MethodGet, "/policy-source?id=valid.rego", nil)
+	rec := httptest.NewRecorder()
+	handlePolicySource(cfg).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), validPolicy) {
+		t.Fatalf("valid policy response: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/policy-source?id=escape.rego", nil)
+	rec = httptest.NewRecorder()
+	handlePolicySource(cfg).ServeHTTP(rec, req)
+	if rec.Code == http.StatusOK {
+		t.Fatalf("policy source followed an escaping symlink; body=%s", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), secret) {
+		t.Fatal("policy source disclosed a file outside the policies directory")
+	}
 }
 
 // TestHealthAndEmptyHistory exercises the two happy-path endpoints that

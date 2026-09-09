@@ -7,6 +7,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Changed
+- **The landing page follows the ICTU house style and the programme's own
+  wording.** Primary colour moves from Rijkshuisstijl hemelblauw `#01689b` to
+  ICTU `#0e2b84`, and the hover accent from Rijkshuisstijl red `#d52b1e` to
+  ICTU purple `#880095`; the derived tints, connector lines and rails move with
+  them, and every text/background pair now meets WCAG AA, most of them AAA.
+  Purple stays a hover colour, as red was — links themselves remain blue.
+  The hero title leads with "Demo-omgeving", the intro and the "Wat doet GBO?"
+  section take the programme's approved copy, "Wat het oplevert" becomes
+  "Voordelen GBO", and the section links to both the documentation environment
+  and the new information site (gbo.pleio.nl).
+  - The flow band gains a fourth outlet, "Nieuwe toepassingen", drawn on a
+    dashed rail and without a pulse: nothing runs over it yet. Its fan and its
+    labels now share one grid row and split it into four equal fractions, so
+    the rails meet the labels at every width instead of only where the
+    descriptions happen to fit on one line.
+  - Colours the drawings used to hardcode are inherited through `currentColor`,
+    so `tokens.css` is the only place the palette is written down.
+- Updated the remaining gRPC dependencies to the patched 1.83.1 release.
+- Brought the repository owner, contact and publiccode metadata in line with
+  the ICTU GitHub policy.
+
+### Fixed
+- Confined developer-portal scenario writes and policy-source reads to their
+  configured roots, preventing path and symlink traversal.
+
+## [0.6.11] - 2026-09-07
+
+### Changed
+- **A source's metadata leg and data leg now choose their transport independently.** `data_access` returns to the source configuration, carrying only `transport` and `provider_peer_id`; the data service and grant hash stay derived from the source document and from current contracts. Omitting the block keeps the previous meaning, in which one transport served both legs.
+  - This unblocks the realistic onboarding order: a source whose GraphQL service is already published on FSC can be onboarded before it publishes `/.well-known/gbo`, instead of having to stand up a second FSC service first. The data call stays contract-bound throughout; only the description arrives another way.
+  - A new `file` metadata transport reads the source document from an operator-managed directory (`--metadata-dir`, `SOURCE_METADATA_PATH`; `source-metadata/` in Compose) for sources that publish no metadata endpoint at all. Paths are relative and confined to that directory, re-checked after symlink resolution, and the document digest takes the place of the ETag so the not-modified path behaves as it does over HTTP. Validation, OIN binding to the provisioned certificate set, and explicit promotion are unchanged — what is removed is the fetch, not the review.
+  - FSC metadata combined with unsecured data is rejected: that is a weakening of a position a source already reached, not a stage it is moving through. `file` metadata requires an explicit `data_access`, because a document on disk says nothing about how to reach the source. One source remains one FSC peer, so `provider_peer_id` is declared on whichever leg speaks FSC and never on both.
+  - The registry reports both legs. `data_transport_authenticated` joins `transport_authenticated` on candidates, statuses, release sources and `inspect-source-registry`; migration `002` backfills it from the existing value, which is exact for rows written when both legs shared one transport. The column sits outside the release digest document, so stored release IDs stay valid.
+  - Deployment migration: none required. Existing configurations, releases and databases keep working; a first reconciliation after the upgrade produces new candidate content and therefore a new release ID, as any metadata change does.
 - **`flow` and `subject_id_type` are grant properties again, and `additional-claims-service` is gone.** They now travel in `grant.data.properties` on the service-connection contract, which puts them in the grant hash — so both peers countersign the authorization regime the consumer is judged under, and the provider Manager emits them in the access token as the FSC-normative `prp` claim (fsc-core §Properties). The PDP request-mapper and the bron-sidecar read `prp` only; the OpenFSC `add` hook, its provider-side service, the checked-in `(outway_peer, service_peer, service_name)` mapping file and `ADDITIONAL_CLAIMS_API_ADDRESS` on `bd-manager`/`brp-manager` are removed.
   - The workaround was a version constraint, not a design: the simulation environment ran OpenFSC v1.44, which predates properties support. Properties have been supported end-to-end since v2.0.0 and the environment now runs v2.4.0. What the `add` route cost meanwhile: only the source Manager signed the regime, and the mapping file had to be hand-maintained next to the contracts — which is exactly how the Peer-ID migration broke it twice ([#244](https://github.com/ICTU/GBO-demo/issues/244), [#277](https://github.com/ICTU/GBO-demo/issues/277)).
   - Contracts are immutable, so this is new contracts rather than edited ones. The seed scripts now match on the desired properties as well as on the service, so re-running a seed detects a contract carrying the old (empty) properties, creates a replacement and repoints the grant-link at the new grant hash. The superseded contract stays Valid but unused until it expires; `make fsc-clean` removes it in a disposable environment.

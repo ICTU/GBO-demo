@@ -156,6 +156,24 @@ var (
 
 func userScenariosDir(cfg config) string { return filepath.Join(cfg.VarDir, "scenarios") }
 
+const maxScenarioIDLength = 128
+
+// validScenarioID keeps user-provided IDs to a filename-safe ASCII subset.
+// IDs are persisted as <id>.json and must never introduce a path component.
+func validScenarioID(id string) bool {
+	if id == "" || len(id) > maxScenarioIDLength {
+		return false
+	}
+	for i := range len(id) {
+		c := id[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 func ensureDir(p string) error {
 	return os.MkdirAll(p, 0o755)
 }
@@ -254,6 +272,10 @@ func handleScenarios(cfg config) http.HandlerFunc {
 			if s.ID == "" {
 				s.ID = "user-" + uuid.New().String()[:8]
 			}
+			if !validScenarioID(s.ID) {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid scenario id"})
+				return
+			}
 			dir := userScenariosDir(cfg)
 			if err := ensureDir(dir); err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -261,9 +283,14 @@ func handleScenarios(cfg config) http.HandlerFunc {
 			}
 			userScenariosMu.Lock()
 			defer userScenariosMu.Unlock()
-			path := filepath.Join(dir, s.ID+".json")
+			root, err := os.OpenRoot(dir)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			defer func() { _ = root.Close() }()
 			data, _ := json.MarshalIndent(s, "", "  ")
-			if err := os.WriteFile(path, data, 0o644); err != nil {
+			if err := root.WriteFile(s.ID+".json", data, 0o644); err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 				return
 			}
@@ -278,7 +305,7 @@ func handleScenarioByID(cfg config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		corsHeaders(w)
 		id := strings.TrimPrefix(r.URL.Path, "/scenarios/")
-		if id == "" || strings.Contains(id, "/") || strings.Contains(id, "..") {
+		if !validScenarioID(id) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
 			return
 		}
@@ -292,8 +319,17 @@ func handleScenarioByID(cfg config) http.HandlerFunc {
 		}
 		userScenariosMu.Lock()
 		defer userScenariosMu.Unlock()
-		path := filepath.Join(userScenariosDir(cfg), id+".json")
-		if err := os.Remove(path); err != nil {
+		root, err := os.OpenRoot(userScenariosDir(cfg))
+		if err != nil {
+			if os.IsNotExist(err) {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "scenario not found"})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		defer func() { _ = root.Close() }()
+		if err := root.Remove(id + ".json"); err != nil {
 			if os.IsNotExist(err) {
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": "scenario not found"})
 				return
@@ -775,38 +811,23 @@ func handlePolicySource(cfg config) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id query param required"})
 			return
 		}
-		full, ok := policyFilePath(cfg.PoliciesDir, id)
-		if !ok {
+		if !fs.ValidPath(id) || !strings.HasSuffix(id, ".rego") {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid policy id"})
 			return
 		}
-		raw, err := os.ReadFile(full)
+		root, err := os.OpenRoot(cfg.PoliciesDir)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		defer func() { _ = root.Close() }()
+		raw, err := root.ReadFile(filepath.FromSlash(id))
 		if err != nil {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "policy not found: " + id})
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"id": id, "raw": string(raw)})
 	}
-}
-
-// policyFilePath resolves a client-supplied policy id to a file inside
-// dir, rejecting anything that would escape it. Only .rego files are
-// served. (CodeQL: uncontrolled data used in path expression — the
-// returned path is provably inside dir.)
-func policyFilePath(dir, id string) (string, bool) {
-	if id == "" {
-		return "", false
-	}
-	clean := filepath.Clean(id)
-	if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, "../") || !strings.HasSuffix(clean, ".rego") {
-		return "", false
-	}
-	full := filepath.Join(dir, clean)
-	rel, err := filepath.Rel(dir, full)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, "../") {
-		return "", false
-	}
-	return full, true
 }
 
 // handlePolicySnippet locates the Rego file + line where a given reason-code

@@ -17,6 +17,7 @@ export type WalletUsecase = {
   label: string
   description?: string
   attestation_type: string
+  source_id: string
   source_oin: string
   type_id: string
   parameters: Record<string, string | number | boolean>
@@ -29,7 +30,12 @@ export async function loadWalletUsecases(): Promise<WalletUsecase[]> {
   if (!Array.isArray(offers) || offers.length === 0) {
     throw new Error('issuance-aanbod bevat geen producten')
   }
-  return offers
+
+  const centricOffers = offers
+    .filter((offer) => offer.source_id === 'centric')
+    .map((offer) => ({ ...offer, label: `${offer.label} (Centric)` }))
+
+  return [...offers.filter((offer) => offer.source_id !== 'centric'), ...centricOffers]
 }
 
 export type SessionType = 'same_device' | 'cross_device'
