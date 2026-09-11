@@ -1,0 +1,79 @@
+# postgres-eudi — the EUDI stack's PostgreSQL instance.
+#
+# Deployed as a Deployment with one replica, `Recreate` and a ReadWriteOnce
+# PVC. Not a StatefulSet, deliberately:
+#
+#   - a StatefulSet earns its keep through stable per-replica identity and
+#     per-replica volume claims. This instance has exactly one replica and one
+#     claim, and nothing addresses it by ordinal — every client reaches it
+#     through the Service name;
+#   - `Recreate` gives the property that actually matters here: the old pod
+#     releases the ReadWriteOnce volume before the new one attaches, so two
+#     postgres processes never open the same data directory;
+#   - the chart renders one workload kind per release. A third kind would be
+#     paid for by every release that reads this chart, in return for identity
+#     guarantees a single-replica demo database does not use.
+#
+# Revisit this if the demo ever grows replicas or streaming replication. Until
+# then the Deployment is the smaller thing that is equally correct.
+#
+# The database itself is demo scope. It carries no backup, no PITR and no
+# connection pooler; a real deployment would use a managed instance or an
+# operator rather than this file.
+
+fullnameOverride: postgres-eudi
+
+replicaCount: 1
+deploymentStrategy:
+  type: Recreate
+
+image:
+  repository: postgres
+  tag: 16-alpine
+
+# The chart names its single port `http` for every release. Harmless here:
+# the name is only used to wire the Service to the container port.
+containerPort: 5432
+
+# The chart only knows HTTP probes; postgres speaks its own protocol.
+health:
+  enabled: false
+
+env:
+  - name: POSTGRES_USER
+    value: wallet
+  - name: POSTGRES_DB
+    value: issuance_server
+  - name: POSTGRES_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: eudi-postgres-superuser
+        key: password
+  # A subdirectory of the mount point: many storage classes hand out a volume
+  # with a lost+found in it, and initdb refuses a non-empty data directory.
+  - name: PGDATA
+    value: /var/lib/postgresql/data/pgdata
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 70
+  runAsGroup: 70
+  fsGroup: 70
+  fsGroupChangePolicy: OnRootMismatch
+
+resources:
+  limits:
+    cpu: "1"
+    memory: 1Gi
+  requests:
+    cpu: 100m
+    memory: 256Mi
+
+volumeMounts:
+  - name: data
+    mountPath: /var/lib/postgresql/data
+
+volumes:
+  - name: data
+    persistentVolumeClaim:
+      claimName: postgres-eudi-data

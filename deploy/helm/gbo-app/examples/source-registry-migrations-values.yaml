@@ -1,0 +1,46 @@
+# source-registry-migrations — one-shot Job.
+#
+# Applies the Source Registry schema with the registry owner role, and grants
+# the read-only role the privileges the adapter and the issuance materializer
+# need. Depends on source-registry-bootstrap having created the database.
+#
+# A Job rather than an init container: schema changes must run once per
+# release and never concurrently. An init container would run on every pod
+# start, and once per replica.
+#
+# The reconciler can apply the same migrations itself with `--migrate`, as
+# `source-reconciler-values.yaml` does. Pick one: either the reconciler
+# migrates on start-up, or this Job runs first and the reconciler drops
+# `--migrate`. Running it as its own release keeps a schema change visible as
+# a step an operator approves rather than a side effect of a rollout.
+
+job:
+  enabled: true
+
+image:
+  repository: ghcr.io/ictu/gbo-demo/eudi-adapter
+  tag: latest
+
+command: ["./eudi-adapter"]
+args:
+  - migrate-source-registry
+
+env:
+  - name: SOURCE_REGISTRY_DATABASE_URL
+    valueFrom:
+      secretKeyRef:
+        name: source-registry-writer
+        key: uri
+  - name: SOURCE_REGISTRY_SCHEMA
+    value: source_registry
+  - name: SOURCE_REGISTRY_READER_ROLE
+    value: source_registry_reader
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+  readOnlyRootFilesystem: true
