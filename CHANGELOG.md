@@ -46,6 +46,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- **The authorization regime a request is judged under follows from the evidence it
+  carries, not from a `flow` grant property.** No component reads `flow` and no seed
+  writes one; `subject_id_type` stays, because identifier format is not derivable
+  without guessing at it
+  ([#334](https://github.com/ICTU/GBO-demo/issues/334)).
+  - The flow dispatch in `engine.rego` is gone. Every rule already declared its own
+    authorization basis — `consent_required` (DvTP) or `pid_required` (EUDI) — and
+    fails closed without it, so the dispatch was never doing the security work. What
+    it did do was keep the *reason* right, and no test could see that: five new
+    engine-level tests now assert the surfacing deny code in both directions, and
+    with the dispatch simply deleted all five degraded (a consent-based deny surfaced
+    `PID_NOT_PRESENT`, a PID-based deny surfaced `CONSENT_CONTEXT_INVALID` — the top
+    of the priority table).
+  - Reason aggregation replaces it, and is the better fix because it survives the
+    property's removal. `_best_reason` ranks the evaluated rules by how far each got
+    through its own cascade before applying the priority table: a rule whose basis
+    does not fit the request passes nothing, since every axis ahead of its basis
+    check is skipped and the basis check itself fails. All five reasons are
+    unchanged from the dispatch's behaviour. When depth cannot separate the
+    rules — every one passed nothing, as a failed enrichment produces — the
+    regime the request-mapper attempted breaks the tie, so a PID request whose
+    BSN could not be pseudonymised still surfaces `PID_NOT_PRESENT`.
+  - A request carrying **both** a verified consent and a disclosed PID is denied with
+    `AMBIGUOUS_EVIDENCE`. Without the guard the engine would have resolved it by rule
+    ordering — `_evaluate_field` grants on the first rule that returns true — which is
+    precedence, not a decision.
+  - The request-mapper selects the consent regime on a consent token and falls through
+    to the PID regime otherwise. A subject variable cannot discriminate: both regimes
+    carry one, a PI under `subject_id_type=pseudonym` and a raw BSN under `direct`, and
+    telling them apart by identifier shape is the guessing this change removes. The PID
+    regime is therefore entered by *absence*, and its only remaining gate is each EUDI
+    rule's `allowed_actors`; a test asserts that whitelist stays disjoint from the
+    consent-based consumers, because an OIN in both could skip the citizen's consent by
+    omitting the header. `flowFromHeaders`, `isEUDIFlow` and the FSC-token property
+    reader are removed. Identifier scrubbing does not depend on the regime: under
+    a consent token the subject variable is kept only when it is the verified
+    consent's own PI and blanked otherwise, so a consent header — valid or not —
+    cannot carry a raw BSN into OPA's input or its decision log.
+  - The source-metadata path keeps subject, method and endpoint as its gate. The PDP
+    cannot see which FSC service a request arrived on, so this admits one case it did
+    not before: a permitted OIN, on a contract other than the metadata one, issuing
+    `GET /.well-known/gbo`. Accepted deliberately — FSC routes each service to its own
+    upstream and the document is a public service description, so it is the same peer
+    reaching the same class of document — and recorded in the rule.
 - **The landing page returns to the palette it was designed in.** The ICTU
   colours introduced in #322 are reverted: `#01689b` carries the page again,
   `#d52b1e` is the hover accent, and the derived tints, connector lines and

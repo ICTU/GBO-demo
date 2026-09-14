@@ -14,95 +14,39 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+
+	"gitlab.com/digilab.overheid.nl/ecosystem/ftv/open-ftv/eam/models"
 )
 
-func TestIsEUDIFlow(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		flow string
-		want bool
-	}{
-		{flow: "eudi:attestation", want: true},
-		// Bron-specific variants were retired; the policy denies them
-		// (engine_test.rego), so the mapper must not treat them as
-		// wallet flows either.
-		{flow: "eudi:attestation:brp", want: false},
-		{flow: "dvtp:query", want: false},
-		{flow: "eudi:attestation-unknown", want: false},
-		{flow: "", want: false},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.flow, func(t *testing.T) {
-			t.Parallel()
-			if got := isEUDIFlow(tt.flow); got != tt.want {
-				t.Fatalf("isEUDIFlow(%q) = %v, want %v", tt.flow, got, tt.want)
-			}
-		})
-	}
-}
-
-// fscToken builds an unsigned JWT carrying the given claims payload. The
-// mapper reads the payload without verifying — FSC-Inway validated the
-// signature before it called us — so the header and signature are filler.
-func fscToken(payloadJSON string) string {
-	enc := base64.RawURLEncoding.EncodeToString
-	return enc([]byte(`{"alg":"none"}`)) + "." + enc([]byte(payloadJSON)) + ".sig"
-}
-
-func TestFlowFromHeaders(t *testing.T) {
+func TestHasConsentEvidence(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name    string
 		headers map[string]string
-		want    string
+		want    bool
 	}{
+		{name: "consent token present", headers: map[string]string{"x-gbo-consent-token": "ey.some.token"}, want: true},
+		{name: "no headers falls through to the PID regime", headers: map[string]string{}, want: false},
+		{name: "empty value is not evidence", headers: map[string]string{"x-gbo-consent-token": ""}, want: false},
 		{
-			name:    "grant-property claim",
-			headers: map[string]string{"fsc-authorization": "Bearer " + fscToken(`{"prp":{"flow":"dvtp:query"}}`)},
-			want:    "dvtp:query",
-		},
-		{
-			// `add` is the retired OpenFSC Additional Claims hook. Honouring
-			// it would accept a regime only the provider signed, next to the
-			// countersigned one in `prp`.
-			name:    "retired add claim is not honoured",
-			headers: map[string]string{"fsc-authorization": "Bearer " + fscToken(`{"add":{"flow":"eudi:attestation"}}`)},
-			want:    "",
-		},
-		{
-			name:    "no token denies rather than defaulting",
-			headers: map[string]string{},
-			want:    "",
-		},
-		{
-			name:    "claim without a flow",
-			headers: map[string]string{"fsc-authorization": "Bearer " + fscToken(`{"prp":{"subject_id_type":"pseudonym"}}`)},
-			want:    "",
-		},
-		{
-			name:    "undecodable token",
-			headers: map[string]string{"fsc-authorization": "Bearer not-a-jwt"},
-			want:    "",
-		},
-		{
-			// The X-GBO-Flow header let a caller name the regime it wanted
-			// to be judged under. It is no longer sent and no longer read;
-			// this guards against it coming back.
-			name:    "X-GBO-Flow header is not honoured",
-			headers: map[string]string{"x-gbo-flow": "dvtp:query"},
-			want:    "",
-		},
-		{
-			name: "header does not override the claim",
+			// The regime is no longer named by the caller. X-GBO-Flow was
+			// removed for letting a caller pick what it was judged under,
+			// and the FSC grant property that replaced it is gone too
+			// (#334); neither may come back through this door.
+			name: "a named flow does not select the regime",
 			headers: map[string]string{
-				"fsc-authorization": "Bearer " + fscToken(`{"prp":{"flow":"eudi:attestation"}}`),
 				"x-gbo-flow":        "dvtp:query",
+				"fsc-authorization": "Bearer ey.prp.flow",
 			},
-			want: "eudi:attestation",
+			want: false,
+		},
+		{
+			// A subject variable cannot discriminate — both regimes carry
+			// one — so nothing about the query changes this answer.
+			name:    "scope header alone is not consent evidence",
+			headers: map[string]string{"x-gbo-scope": "bd:ib:2025"},
+			want:    false,
 		},
 	}
 
@@ -110,8 +54,8 @@ func TestFlowFromHeaders(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := flowFromHeaders(tt.headers); got != tt.want {
-				t.Fatalf("flowFromHeaders() = %q, want %q", got, tt.want)
+			if got := hasConsentEvidence(tt.headers); got != tt.want {
+				t.Fatalf("hasConsentEvidence(%v) = %v, want %v", tt.headers, got, tt.want)
 			}
 		})
 	}
@@ -407,5 +351,162 @@ func TestFetchConsentFailsClosedForMissingOrUnknownStatus(t *testing.T) {
 				t.Fatalf("status %s did not fail closed: %#v", status, got)
 			}
 		})
+	}
+}
+
+// ── Identifier scrubbing ──────────────────────────────────────────────────
+// No raw BSN may reach OPA's input, and with it the decision log, whichever
+// regime a request claims. The consent header decides HOW the subject
+// identifier is made safe — kept only when it is the verified consent's own
+// PI, pseudonymised in the PID regime — never WHETHER.
+
+const demoBSN = "123456789"
+
+// graphQLRequest builds the PARC the PEP hands the mapper: the GraphQL body
+// on the action, the request headers on the context.
+func graphQLRequest(t *testing.T, headers map[string]string, variables map[string]any) *models.PARC {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{
+		"query":     `query($bsn: BSN!) { ingeschrevenPersoon(bsn: $bsn) { heeftBelastingjaarAangifte(belastingjaren: [2025]) { belastingjaar } } }`,
+		"variables": variables,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &models.PARC{
+		Principal: models.NewEntity("org", "99999999900000000300", models.NewAttributeSet()),
+		Action:    models.NewEntity("name", "POST", models.NewAttributeSet(models.NewAttribute(models.AttrBody, string(body)))),
+		Resource:  models.NewEntity("service", "bri", models.NewAttributeSet()),
+		Context:   models.NewAttributeSet(models.NewAttribute(models.AttrHeaders, headers)),
+	}
+}
+
+// decisionInput serialises everything the mapper hands on to OPA, so a test
+// can assert what never appears in it.
+func decisionInput(t *testing.T, parc *models.PARC) string {
+	t.Helper()
+	out, err := json.Marshal(parc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Guard against a vacuous negative check: the serialisation must carry
+	// the request itself, or "BSN absent" would prove nothing.
+	if !strings.Contains(string(out), "ingeschrevenPersoon") {
+		t.Fatalf("decision input does not carry the request: %s", out)
+	}
+	return string(out)
+}
+
+func subjectVariable(parc *models.PARC) any {
+	resource, _ := parc.Context.GetAttributeValue("resource").(map[string]any)
+	variables, _ := resource["variables"].(map[string]any)
+	return variables["bsn"]
+}
+
+func pidPI(parc *models.PARC) any {
+	pip, _ := parc.Context.GetAttributeValue("pip").(map[string]any)
+	pid, _ := pip["pid"].(map[string]any)
+	return pid["pi"]
+}
+
+func verifiedConsentToken(t *testing.T) string {
+	t.Helper()
+	resetConsentKeyCache(t)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := consentTestServer(t, key, "ACTIVE")
+	t.Cleanup(server.Close)
+	t.Setenv("GBO_CONSENT_URL", server.URL)
+	t.Setenv("GBO_CONSENT_ISSUER", "test-issuer")
+	t.Setenv("GBO_CONSENT_AUDIENCE", "test-audience")
+	return consentTestToken(t, key, "test-key", "test-audience", time.Now().Add(time.Hour))
+}
+
+func bsnkTestServer(t *testing.T, status int, pi string) {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/pseudonymize" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(map[string]string{"pi": pi})
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("GBO_BSNK_URL", server.URL)
+}
+
+// Review of #363: an unverifiable consent header switched scrubbing off, so
+// an EUDI request carrying one kept its raw BSN in the action body, the
+// resource variables and the resolved arguments.
+func TestConsentHeaderDoesNotBypassBSNScrubbing(t *testing.T) {
+	out := GraphQLToContext(graphQLRequest(t,
+		map[string]string{"X-GBO-Consent-Token": "invalid"},
+		map[string]any{"bsn": demoBSN},
+	))
+	if in := decisionInput(t, out); strings.Contains(in, demoBSN) {
+		t.Fatalf("raw BSN reached the decision input: %s", in)
+	}
+}
+
+// The verified consent's own PI is the one subject value the consent regime
+// expects, and it is kept: DVT0001's constraint binding compares against it.
+func TestVerifiedConsentKeepsItsOwnPI(t *testing.T) {
+	token := verifiedConsentToken(t)
+	out := GraphQLToContext(graphQLRequest(t,
+		map[string]string{"X-GBO-Consent-Token": token},
+		map[string]any{"bsn": "PI-abc123"},
+	))
+	if got := subjectVariable(out); got != "PI-abc123" {
+		t.Fatalf("subject variable = %#v, want the consent's own PI kept", got)
+	}
+}
+
+// Any other subject value under a verified consent is blanked, not
+// pseudonymised: pseudonymising a BSN yields that citizen's PI, which would
+// then satisfy DVT0001's constraint binding for a consumer that was never
+// meant to hold the BSN. Blanked, the binding fails as it does on main.
+func TestVerifiedConsentRedactsAnyOtherSubject(t *testing.T) {
+	token := verifiedConsentToken(t)
+	out := GraphQLToContext(graphQLRequest(t,
+		map[string]string{"X-GBO-Consent-Token": token},
+		map[string]any{"bsn": demoBSN},
+	))
+	if in := decisionInput(t, out); strings.Contains(in, demoBSN) {
+		t.Fatalf("raw BSN reached the decision input: %s", in)
+	}
+	if got := subjectVariable(out); got != "" {
+		t.Fatalf("subject variable = %#v, want it blanked", got)
+	}
+}
+
+func TestPIDRegimePseudonymisesTheBSN(t *testing.T) {
+	bsnkTestServer(t, http.StatusOK, "PI-2f1a7c9b40e6d853")
+	out := GraphQLToContext(graphQLRequest(t, map[string]string{}, map[string]any{"bsn": demoBSN}))
+	if in := decisionInput(t, out); strings.Contains(in, demoBSN) {
+		t.Fatalf("raw BSN reached the decision input: %s", in)
+	}
+	if got := pidPI(out); got != "PI-2f1a7c9b40e6d853" {
+		t.Fatalf("pip.pid.pi = %#v", got)
+	}
+	if got := subjectVariable(out); got != "PI-2f1a7c9b40e6d853" {
+		t.Fatalf("subject variable = %#v, want the PI substituted", got)
+	}
+}
+
+// A BSNk failure scrubs the identifier rather than passing it through. The
+// policy still sees that PID enrichment was attempted (pip.pid is present),
+// which is what keeps the deny reason PID_NOT_PRESENT.
+func TestFailedPseudonymisationScrubsRatherThanPassesThrough(t *testing.T) {
+	bsnkTestServer(t, http.StatusInternalServerError, "")
+	out := GraphQLToContext(graphQLRequest(t, map[string]string{}, map[string]any{"bsn": demoBSN}))
+	if in := decisionInput(t, out); strings.Contains(in, demoBSN) {
+		t.Fatalf("raw BSN reached the decision input: %s", in)
+	}
+	if got := pidPI(out); got != "" {
+		t.Fatalf("pip.pid.pi = %#v, want empty", got)
 	}
 }

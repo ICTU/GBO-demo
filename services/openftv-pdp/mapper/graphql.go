@@ -11,13 +11,15 @@ package mapping
 //   - context.resource  — {scope, query, variables}.
 //   - context.trace_id  — Fsc-Transaction-Id (falls back to X-Request-Id).
 //   - context.fsc       — {transaction_id}.
-//   - context.pip       — {consent} for the DvTP flow, {pid: {pi}} for
-//     the EUDI flow. Never the BSN; see pseudonymizeBSN.
+//   - context.pip       — {consent} when the request carries a consent
+//     token, {pid: {pi}} otherwise. Never the BSN; see pseudonymizeBSN.
 //
-// Flow dispatch reads the trusted grant property in the FSC token and
-// nothing else. A request that carries no flow gets an empty one, which
-// matches no rule (engine.rego `_flow_applicable`) and therefore denies
-// with NO_APPLICABLE_RULE.
+// The authorization regime is derived from the evidence on the request,
+// not from a grant property: a consent token selects the consent regime,
+// its absence the PID regime. Neither is trusted on its face — the token
+// is verified here, and every rule re-checks its own basis and fails
+// closed. A request carrying both is denied by the engine
+// (AMBIGUOUS_EVIDENCE) rather than resolved by precedence.
 
 import (
 	"context"
@@ -54,12 +56,10 @@ const (
 // mark the coverage unverifiable (fail-closed) instead of erroring.
 func GraphQLToContext(parc *models.PARC, opts ...Option) *models.PARC {
 	headers := headerMap(parc.Context.GetAttributeValue(models.AttrHeaders))
-	flow := flowFromHeaders(headers)
 	txID := firstHeader(headers, "Fsc-Transaction-Id", "X-Request-Id", "X-Request-ID")
 
 	ctx := models.NewAttributeSet(parc.Context)
 	ctx.AddAttributeKV("trace_id", txID)
-	ctx.AddAttributeKV("flow", flow)
 	ctx.AddAttributeKV("fsc", map[string]any{"transaction_id": txID})
 
 	attr := parc.Action.Attributes().GetAttribute(models.AttrBody)
@@ -83,41 +83,86 @@ func GraphQLToContext(parc *models.PARC, opts ...Option) *models.PARC {
 	ctx.AddAttributeKV("resource", resource)
 	ctx.AddAttributeKV("resolved", walkQuery(query, variables))
 
-	if isEUDIFlow(flow) {
-		// The BSN stops here. It is needed to reach the bron — the PEP
-		// forwards the original query untouched — but the policy engine
-		// evaluates on a pseudonymous identity, so that is all it is
-		// given. On pseudonymize failure the BSN is scrubbed to "" (fail
-		// closed: PID_NOT_PRESENT), never passed through.
-		bsn, _ := variables["bsn"].(string)
-		pi, err := pseudonymizeBSN(bsn)
-		if err != nil {
-			pi = ""
+	subject, _ := variables["bsn"].(string)
+
+	// The regime follows from the evidence the request carries, not from a
+	// property somebody declared (#334). Only one signal can be read here,
+	// before any rule runs: a consent token. It is positive, unforgeable
+	// evidence — fetchConsent verifies signature, issuer, audience and
+	// expiry — so its presence selects the consent regime.
+	//
+	// Everything else falls through to the PID regime. That asymmetry is
+	// deliberate but not free: a subject variable cannot discriminate,
+	// because BOTH regimes carry one (DvTP sends a PI under
+	// subject_id_type=pseudonym, EUDI a raw BSN), and telling them apart by
+	// identifier shape is the guessing this change exists to remove. So the
+	// PID regime is entered by ABSENCE of consent, and the only gate left on
+	// it is each EUDI rule's own allowed_actors whitelist. That whitelist
+	// must stay disjoint from the consent-based consumers — policies/dvtp/
+	// gbo/engine_test.rego asserts it, because an OIN in both could skip
+	// consent simply by omitting this header.
+	if hasConsentEvidence(headers) {
+		consent := fetchConsent(headers)
+		ctx.AddAttributeKV("pip", map[string]any{"consent": consent})
+		// Scrubbing does not depend on which regime the request claims: the
+		// header decides HOW the subject identifier is made safe, never
+		// WHETHER. The one subject value the consent regime expects is the
+		// verified consent's own PI — fetchConsent sets "pi" only when the
+		// token verified and its status was read — and that value is kept for
+		// DVT0001's constraint binding. Anything else is blanked rather than
+		// pseudonymised: pseudonymising a BSN yields that citizen's PI, which
+		// would then satisfy the binding for a consumer that was never meant
+		// to hold the BSN. Blanked, the binding fails with CONSTRAINT_MISMATCH.
+		verifiedPI, _ := consent["pi"].(string)
+		if subject == verifiedPI {
+			return &models.PARC{Principal: parc.Principal, Action: parc.Action, Resource: parc.Resource, Context: ctx}
 		}
-		ctx.AddAttributeKV("pip", map[string]any{"pid": map[string]any{"pi": pi}})
-		action := parc.Action
-		if bsn != "" {
-			substituteContext(ctx, bsn, pi)
-			// The raw body attribute is part of the decision-log input —
-			// rewrite the identifier in it too.
-			variables["bsn"] = pi
-			newBody, _ := json.Marshal(map[string]any{"query": query, "variables": variables})
-			action = models.NewEntity(parc.Action.Type(), parc.Action.ID(), models.NewAttributeSet(parc.Action.Attributes()))
-			action.Attributes().AddAttributeKV(models.AttrBody, string(newBody))
-		}
-		return &models.PARC{Principal: parc.Principal, Action: action, Resource: parc.Resource, Context: ctx}
-	} else if flow == "dvtp:query" {
-		ctx.AddAttributeKV("pip", map[string]any{"consent": fetchConsent(headers)})
-	} else {
-		ctx.AddAttributeKV("pip", map[string]any{"consent": invalidConsent("flow is not dvtp:query")})
+		return replaceSubject(parc, ctx, query, variables, subject, "")
 	}
 
-	return &models.PARC{
-		Principal: parc.Principal,
-		Action:    parc.Action,
-		Resource:  parc.Resource,
-		Context:   ctx,
+	// PID regime. The BSN stops here. It is needed to reach the bron — the
+	// PEP forwards the original query untouched — but the policy engine
+	// evaluates on a pseudonymous identity, so that is all it is given. On
+	// pseudonymize failure the BSN is scrubbed to "" (fail closed:
+	// PID_NOT_PRESENT), never passed through. pip.pid is set even then: it
+	// records that PID enrichment was attempted, which is what keeps the
+	// deny reason in this regime. A request with no subject variable yields
+	// an empty pi and denies the same way.
+	pi, err := pseudonymizeBSN(subject)
+	if err != nil {
+		pi = ""
 	}
+	ctx.AddAttributeKV("pip", map[string]any{"pid": map[string]any{"pi": pi}})
+	return replaceSubject(parc, ctx, query, variables, subject, pi)
+}
+
+// replaceSubject rewrites the subject identifier everywhere the decision
+// sees it: the context attributes the mapper just set, and the raw body
+// attribute, which is part of the decision-log input too. An empty subject
+// leaves nothing to replace.
+func replaceSubject(parc *models.PARC, ctx *models.AttributeSet, query string, variables map[string]any, from, to string) *models.PARC {
+	if from == "" || from == to {
+		return &models.PARC{Principal: parc.Principal, Action: parc.Action, Resource: parc.Resource, Context: ctx}
+	}
+	substituteContext(ctx, from, to)
+	variables["bsn"] = to
+	newBody, _ := json.Marshal(map[string]any{"query": query, "variables": variables})
+	action := models.NewEntity(parc.Action.Type(), parc.Action.ID(), models.NewAttributeSet(parc.Action.Attributes()))
+	action.Attributes().AddAttributeKV(models.AttrBody, string(newBody))
+	return &models.PARC{Principal: parc.Principal, Action: action, Resource: parc.Resource, Context: ctx}
+}
+
+// hasConsentEvidence reports whether the request carries a consent token,
+// which is the one signal available before any rule runs that positively
+// identifies the consent regime. It says nothing about whether the token is
+// valid — fetchConsent verifies that and fails closed — only that the caller
+// is asking to be judged under consent rather than under a disclosed PID.
+//
+// An empty header value is not evidence: it would select the consent regime
+// and then fail verification, denying with a consent reason a PID-based
+// caller cannot act on.
+func hasConsentEvidence(headers map[string]string) bool {
+	return headers["x-gbo-consent-token"] != ""
 }
 
 // pseudonymizeBSN resolves the wallet-disclosed BSN to a PI via BSNk,
@@ -174,16 +219,6 @@ func substituteContext(ctx *models.AttributeSet, from, to string) {
 		}
 		ctx.AddAttributeKV(key, substituteValue(attr.Value(), from, to))
 	}
-}
-
-// isEUDIFlow recognises the wallet attestation flow. Bron-specific
-// variants (`eudi:attestation:brp`) are gone: the bronprofiel is not an
-// axis of the flow, and both EUDI rules dispatch on the base name. A
-// suffixed value is therefore not a wallet flow — engine_test.rego
-// asserts it matches no rule, so accepting it here would pseudonymise a
-// request the policy is about to deny anyway.
-func isEUDIFlow(flow string) bool {
-	return flow == "eudi:attestation"
 }
 
 func substituteValue(v any, from, to string) any {
@@ -511,55 +546,6 @@ func firstHeader(headers map[string]string, keys ...string) string {
 		}
 	}
 	return ""
-}
-
-// flowFromHeaders dispatches on the trusted 'prp' claim in the FSC
-// access-token, and on nothing else. The token is read unsafely:
-// FSC-Inway validated the signature before invoking the PDP
-// (chain-of-trust).
-//
-// The flow is a property of the FSC grant (fsc-core §Properties): it is
-// agreed when the contract is negotiated, covered by both peers'
-// signatures because it is part of the grant hash, and emitted by the
-// provider's Manager as `prp` — so a caller has no say in which
-// authorization regime it is judged under. There is deliberately no
-// header fallback and no default: absent a claim the flow is empty,
-// which matches no rule and denies. Defaulting to `dvtp:query` would
-// silently select the consent-based regime for a request that never
-// asked for it.
-func flowFromHeaders(headers map[string]string) string {
-	auth := headers["fsc-authorization"]
-	if auth == "" {
-		return ""
-	}
-	claims := tokenClaims(strings.TrimSpace(strings.TrimPrefix(auth, "Bearer")))
-	if claims == nil {
-		return ""
-	}
-	props, ok := claims["prp"].(map[string]any)
-	if !ok {
-		return ""
-	}
-	flow, _ := props["flow"].(string)
-	return flow
-}
-
-func tokenClaims(token string) map[string]any {
-	parts := strings.Split(token, ".")
-	if len(parts) < 2 {
-		return nil
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		if payload, err = base64.URLEncoding.DecodeString(parts[1]); err != nil {
-			return nil
-		}
-	}
-	var claims map[string]any
-	if err := json.Unmarshal(payload, &claims); err != nil {
-		return nil
-	}
-	return claims
 }
 
 // ── Query walk ────────────────────────────────────────────────────────────
