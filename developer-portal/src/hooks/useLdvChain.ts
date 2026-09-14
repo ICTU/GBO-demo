@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import { fetchLdvChain, type LdvChainResponse } from '../api/devClient'
 
-// The LDV half of the three-standard picture. It hangs off the same
-// Fsc-Transaction-Id the FSC txlog and the PDP decision use, so this hook
-// takes the transaction id useFscTxlog already resolved rather than
-// rediscovering it from the Jaeger trace.
+// The LDV half of the three-standard picture. An LDV record carries the
+// request's trace id — the one on traceparent, taken over unchanged from hop
+// to hop — so this hook takes the run's trace id. The FSC txlog and the PDP
+// decision key on the Fsc-Transaction-Id instead; for a request that crosses
+// FSC once, and has no caller's trace of its own, the two are the same value.
 //
 // Records are confirmed on write and never sampled, so a record that exists is
 // never lost — but "written" and "readable here" stopped being the same moment
@@ -17,7 +18,7 @@ import { fetchLdvChain, type LdvChainResponse } from '../api/devClient'
 // So this polls like the Jaeger and Loki lookups beside it, and stops early on
 // the first tick that adds nothing. An empty result after the last attempt
 // still means what the panel says it means — nothing was processed.
-export function useLdvChain(transactionId: string | null): {
+export function useLdvChain(traceId: string | null): {
   data: LdvChainResponse | null
   loading: boolean
 } {
@@ -25,7 +26,7 @@ export function useLdvChain(transactionId: string | null): {
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (!transactionId) {
+    if (!traceId) {
       setData(null)
       return
     }
@@ -38,7 +39,7 @@ export function useLdvChain(transactionId: string | null): {
         for (const delay of [0, 500, 1000, 1500, 2500]) {
           if (delay > 0) await new Promise((r) => setTimeout(r, delay))
           if (cancelled) return
-          const chain = await fetchLdvChain(transactionId)
+          const chain = await fetchLdvChain(traceId)
           const count = countRecords(chain)
           if (count > bestCount) {
             best = chain
@@ -58,7 +59,7 @@ export function useLdvChain(transactionId: string | null): {
     return () => {
       cancelled = true
     }
-  }, [transactionId])
+  }, [traceId])
 
   return { data, loading }
 }

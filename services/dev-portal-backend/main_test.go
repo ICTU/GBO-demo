@@ -393,58 +393,80 @@ func TestUpstreamClientHasTimeout(t *testing.T) {
 	}
 }
 
-// A chain view is one query per logbook joined on the trace id, because LDV
-// keeps each Verantwoordelijke's records in its own store. This checks the
-// join actually happens and that one unreachable logbook does not take the
-// whole view down with it.
-func TestLdvChainQueriesEveryLogbook(t *testing.T) {
-	var seenAuth, seenMethod, seenTrace string
-	bd := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seenAuth = r.Header.Get("Authorization")
-		seenMethod = r.Method
+// ldvReadAPI is a stub logbook answering the read extension in its own shape:
+// metadata plus dataProcessingOperations, camelCase. It keeps the last
+// request's method, token and trace id for the test to check.
+type ldvReadAPI struct {
+	server                         *httptest.Server
+	method, authorization, traceID string
+}
+
+func newLdvReadAPI(t *testing.T, logbookID, organization string, records []map[string]any) *ldvReadAPI {
+	t.Helper()
+	api := &ldvReadAPI{}
+	api.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		api.method, api.authorization = r.Method, r.Header.Get("Authorization")
 		var body struct {
 			TraceID string `json:"traceId"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		seenTrace = body.TraceID
-		// The read extension's own shape: metadata plus
-		// dataProcessingOperations, camelCase.
+		api.traceID = body.TraceID
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"metadata": map[string]any{
-				"logbookId":        "https://logboek.belastingdienst.nl/data-processing-operations",
-				"organizationName": "Belastingdienst",
-			},
-			"dataProcessingOperations": []map[string]any{{
-				"traceId": seenTrace,
-				"spanId":  "b7ad6b7169203331",
-				"name":    "dataverwerking.bronbevraging",
-				"status":  "Ok",
-				"attributes": map[string]any{
-					"dpl.core.processing_activity_id": "https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-ib-2025/v1",
-				},
-			}},
+			"metadata":                 map[string]any{"logbookId": logbookID, "organizationName": organization},
+			"dataProcessingOperations": records,
 		})
 	}))
-	defer bd.Close()
+	t.Cleanup(api.server.Close)
+	return api
+}
 
-	// A logbook that is down must be visible as down, not as empty.
-	brp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func ldvPointer(next string) map[string]any {
+	return map[string]any{"dpl": map[string]any{"read": map[string]any{"nextLogbookId": next}}}
+}
+
+// The chain view reads the way the read extension says a reader does: it
+// starts at the logbook of the application that started the processing and
+// follows dpl.read.nextLogbookId from there, querying each logbook on the
+// trace id. A logbook no pointer leads to is still queried, and marked as
+// such, and one that is down is visible as down rather than as empty.
+func TestLdvChainFollowsNextLogbookIdFromTheStart(t *testing.T) {
+	const (
+		afnemerID     = "https://logboek.hypotheek-bv.test/data-processing-operations"
+		bdID          = "https://logboek.belastingdienst.nl/data-processing-operations"
+		rvigID        = "https://logboek.rvig.nl/data-processing-operations"
+		toestemmingID = "https://logboek.gbo.overheid.nl/toestemming/data-processing-operations"
+	)
+	afnemer := newLdvReadAPI(t, afnemerID, "Hypotheek-BV", []map[string]any{{
+		"traceId": "0af76519-16cd-43dd-8448-eb211c80319c", "spanId": "1111111111111111",
+		"name": "dataverwerking.inkomensgegevens-opvragen", "status": "Ok", "attributes": ldvPointer(bdID),
+	}})
+	bd := newLdvReadAPI(t, bdID, "Belastingdienst", []map[string]any{{
+		"traceId": "0af76519-16cd-43dd-8448-eb211c80319c", "spanId": "2222222222222222", "parentSpanId": "1111111111111111",
+		"name": "dataverwerking.bronquery-doorgifte", "status": "Ok", "attributes": map[string]any{},
+	}})
+	toestemming := newLdvReadAPI(t, toestemmingID, "GBO", []map[string]any{{
+		"traceId": "0af76519-16cd-43dd-8448-eb211c80319c", "spanId": "3333333333333333",
+		"name": "dataverwerking.toestemming-status", "status": "Ok", "attributes": map[string]any{},
+	}})
+	rvig := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "boom", http.StatusInternalServerError)
 	}))
-	defer brp.Close()
+	defer rvig.Close()
 
 	cfg := config{
 		LdvReadToken: "read-token",
 		LdvLogbooks: []ldvLogbook{
-			{ID: "logboek-bd", Name: "BD", URL: bd.URL},
-			{ID: "logboek-brp", Name: "RvIG", URL: brp.URL},
+			{ID: toestemmingID, Name: "GBO toestemming", URL: toestemming.server.URL},
+			{ID: bdID, Name: "BD", URL: bd.server.URL},
+			{ID: rvigID, Name: "RvIG", URL: rvig.URL},
+			{ID: afnemerID, Name: "HBV", URL: afnemer.server.URL, Start: true},
 		},
 	}
 	srv := httptest.NewServer(handleLdvChain(cfg))
 	defer srv.Close()
 
-	// The portal holds the hyphenated Fsc-Transaction-Id; the logbook stores
-	// the OTel spelling of the same value.
+	// A trace id that doubles as a transaction id may arrive hyphenated; the
+	// logbook stores the W3C spelling of the same value.
 	response, err := http.Get(srv.URL + "/ldv/0af76519-16cd-43dd-8448-eb211c80319c")
 	if err != nil {
 		t.Fatalf("get: %v", err)
@@ -456,32 +478,83 @@ func TestLdvChainQueriesEveryLogbook(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	if payload.TraceID != "0af7651916cd43dd8448eb211c80319c" {
-		t.Errorf("trace_id = %q, want the OTel spelling", payload.TraceID)
+		t.Errorf("trace_id = %q, want the W3C spelling", payload.TraceID)
 	}
-	if seenMethod != http.MethodPost {
-		t.Errorf("the logbook was queried with %s; the read extension is POST", seenMethod)
+	if bd.method != http.MethodPost {
+		t.Errorf("the logbook was queried with %s; the read extension is POST", bd.method)
 	}
-	if seenTrace != "0af7651916cd43dd8448eb211c80319c" {
-		t.Errorf("the logbook was queried with %q", seenTrace)
+	if bd.traceID != "0af7651916cd43dd8448eb211c80319c" {
+		t.Errorf("the logbook was queried with %q", bd.traceID)
+	}
+	if bd.authorization != "Bearer read-token" {
+		t.Errorf("Authorization = %q", bd.authorization)
+	}
+
+	want := []struct{ id, via, from string }{
+		{afnemerID, reachedAsStart, ""},
+		{bdID, reachedByPointer, afnemerID},
+		{toestemmingID, reachedWithout, ""},
+		{rvigID, reachedWithout, ""},
+	}
+	if len(payload.Logbooks) != len(want) {
+		t.Fatalf("got %d logbooks, want %d: %+v", len(payload.Logbooks), len(want), payload.Logbooks)
+	}
+	for i, expected := range want {
+		got := payload.Logbooks[i]
+		if got.Logbook.ID != expected.id || got.ReachedVia != expected.via || got.From != expected.from {
+			t.Errorf("logbook %d = %s reached via %q from %q, want %s via %q from %q",
+				i, got.Logbook.ID, got.ReachedVia, got.From, expected.id, expected.via, expected.from)
+		}
 	}
 	// The logbook names itself, and that wins over our configured label.
-	if payload.Logbooks[0].Logbook.Name != "Belastingdienst" {
-		t.Errorf("logbook name = %q", payload.Logbooks[0].Logbook.Name)
+	if payload.Logbooks[1].Logbook.Name != "Belastingdienst" {
+		t.Errorf("logbook name = %q", payload.Logbooks[1].Logbook.Name)
 	}
-	if seenAuth != "Bearer read-token" {
-		t.Errorf("Authorization = %q", seenAuth)
+	if len(payload.Logbooks[1].Records) != 1 {
+		t.Errorf("the followed logbook returned %d records", len(payload.Logbooks[1].Records))
 	}
-	if len(payload.Logbooks) != 2 {
-		t.Fatalf("got %d logbooks, want one result per configured logbook", len(payload.Logbooks))
-	}
-	if len(payload.Logbooks[0].Records) != 1 {
-		t.Errorf("the reachable logbook returned %d records", len(payload.Logbooks[0].Records))
-	}
-	if payload.Logbooks[1].Error == "" {
+	if payload.Logbooks[3].Error == "" {
 		t.Error("an unreachable logbook must report an error rather than look empty")
 	}
-	if payload.Logbooks[1].Records == nil {
+	if payload.Logbooks[3].Records == nil {
 		t.Error("records should be an empty list rather than null, so the UI needs no null check")
+	}
+}
+
+// A pointer to a logbook the portal has no address for is shown, not dropped:
+// the reader learns that the chain continues somewhere it cannot follow.
+func TestLdvChainShowsAPointerItCannotFollow(t *testing.T) {
+	const (
+		startID   = "https://logboek.hypotheek-bv.test/data-processing-operations"
+		elsewhere = "https://logboek.elders.test/data-processing-operations"
+	)
+	start := newLdvReadAPI(t, startID, "Hypotheek-BV", []map[string]any{{
+		"traceId": "0af7651916cd43dd8448eb211c80319c", "spanId": "1111111111111111",
+		"name": "dataverwerking.inkomensgegevens-opvragen", "status": "Ok", "attributes": ldvPointer(elsewhere),
+	}})
+	srv := httptest.NewServer(handleLdvChain(config{
+		LdvLogbooks: []ldvLogbook{{ID: startID, Name: "HBV", URL: start.server.URL, Start: true}},
+	}))
+	defer srv.Close()
+
+	response, err := http.Get(srv.URL + "/ldv/0af7651916cd43dd8448eb211c80319c")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	var payload ldvChainResponse
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(payload.Logbooks) != 2 {
+		t.Fatalf("got %d logbooks, want the start and the pointer it cannot follow", len(payload.Logbooks))
+	}
+	pointer := payload.Logbooks[1]
+	if pointer.Logbook.ID != elsewhere || pointer.ReachedVia != reachedByPointer || pointer.From != startID {
+		t.Errorf("pointer = %+v", pointer)
+	}
+	if pointer.Error == "" {
+		t.Error("a pointer the portal cannot follow must say so")
 	}
 }
 
@@ -509,14 +582,23 @@ func TestLdvChainWithoutConfiguredLogbooks(t *testing.T) {
 }
 
 func TestParseLdvLogbooks(t *testing.T) {
-	logbooks := parseLdvLogbooks("logboek-bd=Belastingdienst=http://logboek-bd:4016/,logboek-brp=RvIG=http://logboek-brp:4016,broken,=x=y")
-	if len(logbooks) != 2 {
-		t.Fatalf("logbooks = %+v, want the two well-formed entries", logbooks)
+	logbooks := parseLdvLogbooks("logboek-bd=Belastingdienst=http://logboek-bd:4016/,logboek-brp=RvIG=http://logboek-brp:4016,broken,=x=y," +
+		"https://logboek.hypotheek-bv.test/data-processing-operations=Hypotheek-BV=http://logboek-afnemer:4016=start")
+	if len(logbooks) != 3 {
+		t.Fatalf("logbooks = %+v, want the three well-formed entries", logbooks)
 	}
 	if logbooks[0].URL != "http://logboek-bd:4016" {
 		t.Errorf("trailing slash not trimmed: %q", logbooks[0].URL)
 	}
 	if logbooks[1].Name != "RvIG" {
 		t.Errorf("name = %q", logbooks[1].Name)
+	}
+	// The id is a read-API URI, which the '=' separator leaves intact, and a
+	// fourth field marks where a reader begins.
+	if logbooks[2].ID != "https://logboek.hypotheek-bv.test/data-processing-operations" || logbooks[2].URL != "http://logboek-afnemer:4016" {
+		t.Errorf("start entry = %+v", logbooks[2])
+	}
+	if !logbooks[2].Start || logbooks[0].Start {
+		t.Errorf("start flags = %v, %v; want only the marked entry", logbooks[0].Start, logbooks[2].Start)
 	}
 }

@@ -98,8 +98,17 @@ func TestShippedRegistersLoad(t *testing.T) {
 				"https://logboek.rvig.nl/verwerkingsactiviteiten/brp-persoonsgegevens-verstrekking/v1",
 			},
 		},
-		"GBO": {
-			path:              "../../config/verwerkingsactiviteiten-gbo.json",
+		"Hypotheek-BV": {
+			path:              "../../config/verwerkingsactiviteiten-afnemer.json",
+			verantwoordelijke: "Hypotheek-BV",
+			references: []string{
+				"https://logboek.hypotheek-bv.test/verwerkingsactiviteiten/hbv-inkomensgegevens-opvragen/v1",
+			},
+		},
+		// GBO keeps one logbook per system, so its register is split with
+		// them: each logbook accepts only the activities of its own system.
+		"GBO toestemming": {
+			path:              "../../config/verwerkingsactiviteiten-toestemming.json",
 			verantwoordelijke: "GBO",
 			references: []string{
 				"https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-toestemming-verlenen/v1",
@@ -107,6 +116,12 @@ func TestShippedRegistersLoad(t *testing.T) {
 				"https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-toestemming-status/v1",
 				"https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-toestemming-inzage/v1",
 				"https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-bsn-pseudonimisering/v1",
+			},
+		},
+		"GBO EUDI-adapter": {
+			path:              "../../config/verwerkingsactiviteiten-eudi-adapter.json",
+			verantwoordelijke: "GBO",
+			references: []string{
 				"https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-pid-bsn-extractie/v1",
 				"https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-attestatie-samenstellen/v1",
 			},

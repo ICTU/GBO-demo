@@ -109,8 +109,8 @@ func TestPseudonymFlowLogsBothDataverwerkingen(t *testing.T) {
 		t.Fatalf("expected one record of each kind, got %+v", records)
 	}
 
-	// The Fsc-Transaction-Id is the trace id, hyphens stripped — the same
-	// value the ADL and the FSC txlog carry for this request.
+	// The hop carried no traceparent, so the Fsc-Transaction-Id is the trace
+	// id, hyphens stripped — the same value the ADL and the FSC txlog carry.
 	const wantTrace = "0af7651916cd43dd8448eb211c80319c"
 	for _, record := range records {
 		if record.TraceID != wantTrace {
@@ -145,6 +145,42 @@ func TestPseudonymFlowLogsBothDataverwerkingen(t *testing.T) {
 		t.Errorf("foreign_operation.processor = %v, want %v", got, want)
 	}
 	ldvtest.AssertNoBSN(t, records, demoBSN)
+}
+
+// A caller that sends traceparent is followed, not overruled: its trace id is
+// taken over unchanged and its span becomes the forward's parent (§3.3.1). The
+// Fsc-Transaction-Id stays FSC's own; the ADL links the two.
+func TestACallersTraceparentIsTakenOver(t *testing.T) {
+	const callersTrace = "4bf92f3577b34da6a3ce929d0e0e4736"
+	const callersSpan = "00f067aa0ba902b7"
+
+	logbook := ldvtest.New(t, resolutionActivity, forwardActivity)
+	url := sidecarUnderTest(t, logbook)
+
+	response := postQuery(t, url, map[string]string{
+		"Fsc-Authorization":  pseudonymToken(t),
+		"Fsc-Transaction-Id": "0af76519-16cd-43dd-8448-eb211c80319c",
+		"traceparent":        "00-" + callersTrace + "-" + callersSpan + "-01",
+		"X-GBO-Scope":        "bd:ib:2025",
+	}, `{"query":"query($bsn: BSN!){ingeschrevenPersoon(bsn:$bsn){bsn}}","variables":{"bsn":"PI-abc123"}}`)
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("status = %d, body = %s", response.StatusCode, body)
+	}
+
+	records := logbook.Written()
+	for _, record := range records {
+		if record.TraceID != callersTrace {
+			t.Errorf("record %q trace_id = %q, want the caller's trace %q", record.Name, record.TraceID, callersTrace)
+		}
+	}
+	forward := ldvtest.ByName(records, "dataverwerking.bronquery-doorgifte")
+	if len(forward) != 1 {
+		t.Fatalf("expected one forward record, got %+v", records)
+	}
+	if forward[0].ParentSpanID != callersSpan {
+		t.Errorf("forward parent_span_id = %q, want the caller's span %q", forward[0].ParentSpanID, callersSpan)
+	}
 }
 
 // The direct (EUDI) flow holds only a BSN. It still logs the forward, and

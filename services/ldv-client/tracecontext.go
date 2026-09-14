@@ -22,22 +22,14 @@ import (
 // problem. The service already depends on OTel; using its propagator deletes
 // the edge cases rather than fixing them one at a time.
 //
-// The FSC hop is where that stops being sufficient — though not for the reason
-// first assumed. `traceparent` is in fact forwarded across the demo's
-// outway/inway pair and arrives intact on the far side; what does not survive
-// is its authority. FSC gives every transaction its own Fsc-Transaction-Id, a
-// UUID v7 it validates strictly and rejects anything else for, so it cannot be
-// derived from a caller's trace id. Where a caller brings its own
-// `traceparent`, a request therefore carries two unrelated 128-bit ids at
-// once, and only one of them — the transaction id — is the one FSC's txlog and
-// the PDP's decision log record.
-//
-// So the transaction id wins whenever there is one. It is a UUID, and
-// therefore exactly a 16-byte trace-id once the hyphens come off, which is
-// what makes it usable as one.
-//
-// Preferring a header of FSC's invention over `traceparent` is a profile
-// deviation, not conformance, and is written up as one in the logbook README.
+// The Fsc-Transaction-Id is not a substitute. FSC forwards `traceparent`
+// between peers untouched, but gives every transaction its own id, unique per
+// transaction (FSC-Logging §3.4.1.1). One processing that crosses FSC more
+// than once — a consumer that calls two sources, a source that calls onwards —
+// therefore carries several transaction ids and still one trace id, and LDV
+// §3.3.1 and the ADL both require taking that trace id over unchanged. The two
+// are linked where the standards link them: the ADL records
+// adl.fsc.transaction_id next to trace_id.
 
 // propagator handles traceparent and tracestate together, as W3C requires.
 var propagator = propagation.TraceContext{}
@@ -60,26 +52,18 @@ type TraceContext struct {
 // TraceContextFrom reads the incoming request's position in the trace, in a
 // strict order:
 //
-//	Fsc-Transaction-Id  →  traceparent on the request  →  X-Request-Id
+//	traceparent on the request  →  Fsc-Transaction-Id  →  X-Request-Id
 //	→  the ambient span  →  a fresh trace
 //
-// The FSC transaction id comes first because it, not `traceparent`, is the
-// identifier the three logs actually share. The standard ties LDV, the
-// authorization decision log and FSC-Logging together by one trace id, and
-// FSC's txlog and the PDP's decision both key on the transaction id. A record
-// filed under anything else is unreachable from the other two.
-//
-// The two ids are not interchangeable and cannot be made so. FSC validates the
-// transaction id as a UUID v7 and rejects the request outright otherwise
-// ("invalid uuid version, must be v7"), so a caller's trace id can never
-// become the transaction id. Where a caller supplies its own `traceparent` —
-// any browser with OTel instrumentation does — the two therefore differ by
-// construction, and preferring `traceparent` files LDV records under an id the
-// decision log and the txlog have never heard of.
-//
-// `traceparent` still wins wherever there is no FSC transaction: inside one
-// Verantwoordelijke's own chain that is the only correlator there is, and W3C
+// `traceparent` comes first because the standard says so: an action started
+// by another action takes its trace_id over unchanged (LDV §3.3.1), and W3C
 // Trace Context §3.1 requires continuing it.
+//
+// The transaction id is the fallback for a hop that arrives without one. It
+// is a UUID, and therefore exactly a 16-byte trace id once the hyphens come
+// off. At the entry of a chain the first component ties its trace to the
+// transaction id it mints, so for a request that crosses FSC once the trace
+// id, the decision log's transaction id and the txlog carry the same value.
 //
 // The ambient span comes last. Behind otelhttp every request already carries a
 // locally created server span, so asking the context earlier would always
@@ -92,9 +76,6 @@ type TraceContext struct {
 // handing it the live context would let the ambient span through disguised as
 // an extracted one.
 func TraceContextFrom(ctx context.Context, header http.Header, spanID string) TraceContext {
-	if candidate := NormalizeTraceID(header.Get("Fsc-Transaction-Id")); candidate != "" {
-		return TraceContext{TraceID: candidate, SpanID: spanID, Sampled: true}
-	}
 	fromHeader := trace.SpanContextFromContext(
 		propagator.Extract(context.Background(), propagation.HeaderCarrier(header)),
 	)
@@ -105,6 +86,9 @@ func TraceContextFrom(ctx context.Context, header http.Header, spanID string) Tr
 			Sampled: fromHeader.IsSampled(),
 			State:   fromHeader.TraceState().String(),
 		}
+	}
+	if candidate := NormalizeTraceID(header.Get("Fsc-Transaction-Id")); candidate != "" {
+		return TraceContext{TraceID: candidate, SpanID: spanID, Sampled: true}
 	}
 	if candidate := NormalizeTraceID(header.Get("X-Request-Id")); candidate != "" {
 		return TraceContext{TraceID: candidate, SpanID: spanID, Sampled: true}
@@ -185,12 +169,12 @@ func contextWithSpan(spanContext trace.SpanContext) context.Context {
 // §3.1 states the two together: an action started by another action takes the
 // `trace_id` over unchanged *and* records that action's `span_id` as
 // `parent_span_id`. They are one rule, so where they come apart they must not
-// be combined. That happens on exactly one hop here: a caller brings its own
-// `traceparent` while the record is filed under the Fsc-Transaction-Id, which
-// is the id the source, the txlog and the decision log will use. The header's
-// span then belongs to a different trace, and a `parent_span_id` pointing into
-// it names a parent no reader of this logbook can resolve — the record looks
-// nested but hangs from nothing. A root record is the honest answer.
+// be combined. With `traceparent` read first they normally cannot come apart,
+// because the record's trace id comes from the same header; the check guards a
+// component that chose its trace id elsewhere. A `parent_span_id` pointing
+// into another trace names a parent no reader of this logbook can resolve —
+// the record looks nested but hangs from nothing. A root record is the honest
+// answer.
 //
 // Empty when this component starts the tree, when the hop that delivered the
 // request carried no trace context, or when the caller was in another trace.

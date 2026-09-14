@@ -1,10 +1,13 @@
 # ldv-logboek — Logboek Dataverwerkingen
 
-One image, one instance per **Verantwoordelijke**: `logboek-bd`
-(Belastingdienst), `logboek-brp` (RvIG) and `logboek-gbo` (the voorziening
-itself). Nothing in the code knows about a particular organisation — an
-instance is "the Belastingdienst's" because of the register document it serves
-and the components configured to write to it.
+One image, one instance per logbook: `logboek-bd` (Belastingdienst),
+`logboek-brp` (RvIG), `logboek-afnemer` (Hypotheek-BV, the demo consumer), and
+for the voorziening itself `logboek-toestemming`
+(consent register and portal) and `logboek-eudi-adapter`. A Verantwoordelijke
+may keep more than one logbook; the read extension then treats each as a
+separate application with its own read API. Nothing in the code knows about a
+particular organisation — an instance is "the Belastingdienst's" because of
+the register document it serves and the components configured to write to it.
 
 LDV has each Verantwoordelijke log its own processing, with only trace
 metadata crossing a boundary, so a shared logbook would be the wrong shape
@@ -12,7 +15,7 @@ however convenient it looks in a demo. What ties the three together is one
 trace id, not one store.
 
 Implements the write side of [Logius LDV
-v1.0.0](https://logius-standaarden.github.io/LDV/): the third of the three
+v1.0.0](https://logius-standaarden.github.io/logboek-dataverwerkingen/): the third of the three
 logging standards this chain follows, alongside the Authorization Decision Log
 (PDP decisions) and FSC-Logging (transport transactions).
 
@@ -23,9 +26,9 @@ three organisations at once, and each of them needs a logbook to write to.
 
 **Ownership.** LDV puts the logbook with the Verantwoordelijke. In production
 the Belastingdienst and RvIG each run their own; GBO neither builds nor
-operates those. GBO runs one, for its own processing, and ships the *client* —
+operates those. GBO runs its own, for its own processing, and ships the *client* —
 the contract about record shape, mandatory attributes, confirmation and no
-sampling — to everyone else in the chain. Three near-identical instances is a
+sampling — to everyone else in the chain. Five near-identical instances are a
 simulation artefact, not an architecture proposal.
 
 **What you would run instead.** The record is OTel-shaped and the standard
@@ -99,46 +102,36 @@ Times are `uint64` milliseconds since the epoch and `resource` nests under
 read extension answers in a different shape — camelCase, RFC 3339, nested
 attributes — and that translation happens at the read boundary.
 
-### Trace Context, and where it breaks
+### Trace Context
 
 §3.1 is unambiguous: when HTTP carries a dataverwerking between applications,
-W3C Trace Context **MUST** be used. So the chain correlates on `traceparent`.
-Every hop between our own components sets one, and every component reads one.
+W3C Trace Context **MUST** be used, and an action started by another action
+takes the caller's `trace_id` over unchanged and records its `span_id` as
+`parent_span_id` (§3.3.1). So the chain correlates on `traceparent`, and every
+component reads it before anything else. FSC forwards `traceparent` between
+peers untouched.
 
-**The FSC hop is a documented profile deviation** — though not the one first
-written up here. An earlier version of this section claimed FSC v2.4.0 strips
-`traceparent` between peers. Measured against the running demo that is simply
-false: `traceparent` is forwarded and arrives intact on the far side.
+**The `Fsc-Transaction-Id` is not the trace id.** FSC gives every transaction
+its own id and validates it as a UUID v7, so one processing that crosses FSC
+more than once — a consumer that calls two sources, a source that calls
+onwards — carries several transaction ids while its trace id stays one. The two
+are linked where the standards link them: the ADL records
+`adl.fsc.transaction_id` next to `trace_id`, and the FSC transaction log keys
+on the transaction id.
 
-What does not carry across is its *authority*. FSC gives every transaction its
-own `Fsc-Transaction-Id` and validates it strictly as a UUID v7 — an id derived
-from a caller's trace is rejected outright, with `invalid uuid version, must be
-v7`. So the transaction id can never be made equal to the trace id. Whenever a
-caller brings its own `traceparent` — any browser with OTel instrumentation
-does — a request carries two unrelated 128-bit ids at once, and only one of
-them is the id FSC's transaction log and the PDP's decision log record.
+The transaction id is still the fallback for a hop that arrives without
+`traceparent`. At the entry of a chain the first component ties its trace to
+the transaction id it mints, so for a request that crosses FSC once the trace
+id, the ADL's transaction id and the txlog carry the same value.
 
-**So the `Fsc-Transaction-Id` wins whenever there is one**, and `traceparent`
-governs everywhere else, including every hop between our own components. That
-ordering is the deviation: preferring a header of FSC's invention over the one
-§3.1 mandates. It is named here rather than papered over, because a reader has
-to be able to tell where the chain follows the standard and where it works
-around a transport that cannot.
+One hop does not carry `traceparent` on the wire: the FSC Inway calls the PDP
+on a fresh context, with only `X-Request-Id` (the transaction id) as a header.
+It does copy the original request's headers into the AuthZEN context,
+`traceparent` included, and that is where the PDP reads the request's trace
+from when it asks the consent register for a status.
 
-That ordering has one consequence for `parent_span_id`. §3.1 states the two
-together: an action started by another action takes the `trace_id` over
-unchanged **and** records that action's `span_id` as its parent. They are one
-rule. So where a caller's `traceparent` loses to the transaction id, the
-caller's span loses with it — it belongs to the trace that just lost, and
-recording it would name a parent no reader of this logbook can resolve. The
-record becomes a root instead, and the calling application is named where the
-standard puts it: `dpl.core.foreign_operation.processor`.
-
-The ordering is also what makes the benefit real: LDV's `traceID`, the ADL's
-trace id and the FSC transaction log carry one value for one request (REQ-55).
-Preferring `traceparent` instead filed LDV records under an id the other two
-had never seen, which is exactly the correlation REQ-55 asks for and is the
-bug this ordering fixes.
+How a reader follows a chain across logbooks is described in
+[`docs/ldv`](../../docs/ldv/README.md).
 
 ### Never the BSN
 
@@ -195,8 +188,9 @@ the dienstencatalogus or becomes a separate facility is an open question; the
 stand-in exists to make that gap tangible without blocking, and every served
 entry carries a disclaimer saying so.
 
-One register per Verantwoordelijke, in [`config/`](config/). The
-Belastingdienst's ([`verwerkingsactiviteiten-bd.json`](config/verwerkingsactiviteiten-bd.json)):
+One register per Verantwoordelijke, in [`config/`](config/). GBO's is split
+over its two logbooks, so each accepts only the activities of its own system.
+The Belastingdienst's ([`verwerkingsactiviteiten-bd.json`](config/verwerkingsactiviteiten-bd.json)):
 
 | reference | Dataverwerking | logged by |
 | --- | --- | --- |
@@ -214,7 +208,13 @@ RvIG's ([`verwerkingsactiviteiten-brp.json`](config/verwerkingsactiviteiten-brp.
 | `brp-akte-overlijden@v1` | verstrekking akte van overlijden | `brp-graphql-server` |
 | `brp-persoonsgegevens-verstrekking@v1` | verstrekking BRP-persoonsgegevens | `brp-graphql-server` |
 
-GBO's own ([`verwerkingsactiviteiten-gbo.json`](config/verwerkingsactiviteiten-gbo.json)):
+Hypotheek-BV's, for `logboek-afnemer` ([`verwerkingsactiviteiten-afnemer.json`](config/verwerkingsactiviteiten-afnemer.json)) — a fictitious consumer's, applied provisionally (see [Scope](#scope)):
+
+| reference | Dataverwerking | logged by |
+| --- | --- | --- |
+| `hbv-inkomensgegevens-opvragen@v1` | asking a source for income data for a mortgage assessment | `dienstverlener-backend` |
+
+GBO's own, for `logboek-toestemming` ([`verwerkingsactiviteiten-toestemming.json`](config/verwerkingsactiviteiten-toestemming.json)):
 
 | reference | Dataverwerking | logged by |
 | --- | --- | --- |
@@ -223,6 +223,11 @@ GBO's own ([`verwerkingsactiviteiten-gbo.json`](config/verwerkingsactiviteiten-g
 | `gbo-toestemming-intrekken@v1` | revoking a consent | `consent-register` |
 | `gbo-toestemming-status@v1` | confirming a consent's status to the PDP | `consent-register` |
 | `gbo-toestemming-inzage@v1` | showing a citizen their own consents | `consent-register` |
+
+And for `logboek-eudi-adapter` ([`verwerkingsactiviteiten-eudi-adapter.json`](config/verwerkingsactiviteiten-eudi-adapter.json)):
+
+| reference | Dataverwerking | logged by |
+| --- | --- | --- |
 | `gbo-pid-bsn-extractie@v1` | reading the BSN out of a disclosed PID | `eudi-adapter` |
 | `gbo-attestatie-samenstellen@v1` | assembling an attestation from source data | `eudi-adapter` |
 
@@ -370,9 +375,7 @@ record's status says it), plus `gbo.bsnk.recipient`, `gbo.graphql.variable`,
 
 **This extension is not vastgesteld.** It is a local demo extension, written
 down here and nowhere else. So the honest claim for this implementation is
-**LDV core with a documented local extension**, not full LDV conformance —
-alongside the FSC trace-context deviation above, which is the other place the
-chain departs from the standard on purpose.
+**LDV core with a documented local extension**, not full LDV conformance.
 
 ## The client
 
@@ -410,6 +413,7 @@ trace id, and nothing else.
 flowchart LR
     subgraph HV["Hypotheekverlener (dienstverlener)"]
         DV[dienstverlener-backend]
+        DV -.-> LAFN[(logboek-afnemer)]
     end
 
     subgraph BD["Verantwoordelijke: Belastingdienst"]
@@ -428,9 +432,9 @@ flowchart LR
         CR[consent-register]
         CPB[consent-portal-backend]
         EA[eudi-adapter]
-        CR -.-> LGBO[(logboek-gbo)]
-        CPB -.-> LGBO
-        EA -.-> LGBO
+        CR -.-> LTOE[(logboek-toestemming)]
+        CPB -.-> LTOE
+        EA -.-> LEA[(logboek-eudi-adapter)]
     end
 
     DV -->|FSC| BS
@@ -439,7 +443,7 @@ flowchart LR
     EA --> CR
 
     classDef book fill:#1f2933,stroke:#7b8794,color:#e4e7eb
-    class LBD,LBRP,LGBO book
+    class LAFN,LBD,LBRP,LTOE,LEA book
 ```
 
 Solid arrows are requests; dotted arrows are records being written. A component
@@ -451,13 +455,14 @@ because what it did was GBO's processing, not BD's.
 
 | Component | Logboek | Verwerkingsactiviteit | Betrokkene heet daar |
 |---|---|---|---|
+| `dienstverlener-backend` | afnemer | `hbv-inkomensgegevens-opvragen` | `pi` |
 | `bron-sidecar` | bd | `bd-pi-bsn-resolutie`, `bd-bronquery-doorgifte` | `pi` / `logboek-pseudoniem` |
 | `graphql-server` | bd | `bd-ib-2024`, `bd-ib-2025` | `pi` / `logboek-pseudoniem` |
 | `brp-sidecar` | brp | `brp-pi-bsn-resolutie`, `brp-bronquery-doorgifte` | `pi` / `logboek-pseudoniem` |
 | `brp-graphql-server` | brp | `brp-akte-overlijden`, `brp-persoonsgegevens-verstrekking` | `logboek-pseudoniem`, `brp-persoon-id` |
-| `consent-register` | gbo | `gbo-toestemming-verlenen`, `-intrekken`, `-status`, `-inzage` | `portal-subject` |
-| `consent-portal-backend` | gbo | `gbo-bsn-pseudonimisering` | `portal-subject` |
-| `eudi-adapter` | gbo | `gbo-pid-bsn-extractie`, `gbo-attestatie-samenstellen` | `portal-subject` |
+| `consent-register` | toestemming | `gbo-toestemming-verlenen`, `-intrekken`, `-status`, `-inzage` | `portal-subject` |
+| `consent-portal-backend` | toestemming | `gbo-bsn-pseudonimisering` | `portal-subject` |
+| `eudi-adapter` | eudi-adapter | `gbo-pid-bsn-extractie`, `gbo-attestatie-samenstellen` | `logboek-pseudoniem` |
 
 The last column is the part that surprises people. **The same citizen has a
 different name in every logbook**, by design — `PI-70e1c7ef…` at the
@@ -473,25 +478,29 @@ worth knowing by heart because it is the shape you check a change against:
 
 | Logboek | Records | Which |
 |---|---|---|
+| `logboek-afnemer` | 1 | `inkomensgegevens-opvragen`, pointing at `logboek-bd` |
 | `logboek-bd` | 4 | `pi-bsn-resolutie`, `bronquery-doorgifte`, `bd-ib-2024`, `bd-ib-2025` |
 | `logboek-brp` | 0 | the flow never touches the BRP |
-| `logboek-gbo` | 1 | `toestemming-status` |
+| `logboek-toestemming` | 1 | `toestemming-status` |
+| `logboek-eudi-adapter` | 0 | the flow never touches the adapter |
 
 An empty `logboek-brp` there is correct, not a failure. The EUDI flow is the
-mirror image: `logboek-brp` and `logboek-gbo` fill, and which BD records appear
-depends on the attestation requested.
+mirror image: `logboek-brp` and `logboek-eudi-adapter` fill, and which BD
+records appear depends on the attestation requested.
 
-A DvTP query, in `logboek-bd`:
+A DvTP query, in `logboek-bd`, under the record in `logboek-afnemer` that made
+the call:
 
 ```
-Fsc-Transaction-Id 0af76519-…-c80319c
+trace 0af7651916cd43dd8448eb211c80319c
 └── bd-bronquery-doorgifte@v1   bron-sidecar   subject PI-abc123 (pi)
     ├── bd-pi-bsn-resolutie@v1  bron-sidecar   subject PI-abc123 (pi)
     └── bd-ib-2025@v1           graphql-server subject PI-abc123 (pi)
 ```
 
-The same trace id appears on the ADL decision record written by the OpenFTV
-PDP and in the FSC transaction log of both peers.
+For a request that crosses FSC once, the same value is the transaction id on
+the ADL decision record written by the OpenFTV PDP and in the FSC transaction
+log of both peers.
 
 The death-certificate attestation, in `logboek-brp`. One request, three
 Betrokkenen: the surviving partner who asked, and the two living relatives the
@@ -511,7 +520,7 @@ though their data is what gets disclosed. The requester's record carries
 `dpl.gbo.overledeneVerwerkt` so a reader sees that this was decided rather
 than forgotten.
 
-A consent lifecycle, in `logboek-gbo` — each step under the portal-scoped
+A consent lifecycle, in `logboek-toestemming` — each step under the portal-scoped
 reference, which is the only identifier this side ever holds:
 
 ```
@@ -535,41 +544,47 @@ docker compose exec -T logboek-bd \
 place that holds everything — which is precisely what LDV's
 per-Verantwoordelijke model rules out. It is the **URI of the next logbook's
 read API**, so a reader follows it directly rather than having to know what a
-local name stands for. The `eudi-adapter` sets it on the attestation-assembly
-record, pointing at the bronhouder it called, and a read there with the same
-trace id returns that half of the request.
+local name stands for. The consumer sets it on each call to a source, and the
+`eudi-adapter` on the attestation-assembly record, pointing at the bronhouder
+it called; a read there with the same trace id returns that half of the
+request.
 
-The developer portal does that fan-out for you: its **Logboek
-Dataverwerkingen** panel queries every configured logbook in parallel and
-renders the records as the tree their `parent_span_id` describes. It sits
-directly under the FSC transaction-log panel, and both show the same trace id
-as the PDP decision above them — which is the "one trace id, three standards"
-claim, made checkable rather than asserted.
+The developer portal reads a chain that way: its **Logboek Dataverwerkingen**
+panel starts at the logbooks of applications that start a processing, follows
+`dpl.read.nextLogbookId` from logbook to logbook, and renders the records as
+the tree their `parent_span_id` describes. Every logbook says how it was
+reached. `logboek-toestemming` is reached without a pointer — the status check
+that lands there is made by the PDP, which writes a decision log and not an
+LDV record — and the panel shows it as such rather than hiding the gap. How a
+reader follows a chain is written up in [`docs/ldv`](../../docs/ldv/README.md).
 
 ```bash
 curl -s -X POST http://localhost:9416/data-processing-operations \
   -H "Authorization: Bearer $LDV_READ_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"traceId":"<Fsc-Transaction-Id>"}' | jq
+  -d '{"traceId":"<trace-id>"}' | jq
 
-# or the whole chain at once, through the portal backend
-curl -s "http://localhost:9407/ldv/<Fsc-Transaction-Id>" | jq
+# or the whole chain at once, followed through the portal backend
+curl -s "http://localhost:9407/ldv/<trace-id>" | jq
 ```
 
 One DvTP query, as the running demo produces it:
 
 ```
-Belastingdienst — 3 records
+Hypotheek-BV — 1 record · startpunt
+  inkomensgegevens-opvragen [hbv-inkomensgegevens-opvragen@v1]  PI-70e1c7ef… (pi)  → Belastingdienst
+Belastingdienst — 3 records · via nextLogbookId uit Hypotheek-BV
   bronquery-doorgifte   [bd-bronquery-doorgifte@v1]  PI-70e1c7ef… (pi)
     pi-bsn-resolutie    [bd-pi-bsn-resolutie@v1]     PI-70e1c7ef… (pi)
     bronbevraging       [bd-ib-2025@v1]              PI-70e1c7ef… (pi)
-RvIG — 0 records
-GBO — 1 record
+GBO, logboek-toestemming — 1 record · geen pointer naartoe
   toestemming-status    [gbo-toestemming-status@v1]  EP-c44cade3… (portal-subject)
+Zonder records voor deze trace: GBO (logboek-eudi-adapter), RvIG
 ```
 
-Two Verantwoordelijken, one trace id, and the same Betrokkene named differently
-in each — which is what `data_subject_id_type` is for. RvIG is empty because
+Three Verantwoordelijken, one trace id. The Betrokkene is named by the PI the
+consumer was given where that PI travels, and by the portal-scoped reference at
+GBO — which is what `data_subject_id_type` is for. RvIG is empty because
 the BRP source was not involved, and an empty logbook means nothing was
 processed rather than that a record was dropped.
 
@@ -581,11 +596,12 @@ inzage via MijnToestemmingen is a separate follow-up.
 
 Out of scope entirely: retention terms, bewaarplicht, append-only and signing
 guarantees — governance questions where the LDV *profielen* mechanism is meant
-to land; a real RvVA; wallet-side processing; and the consumer's own
-processing.
+to land; a real RvVA; and wallet-side processing.
 
-That last one is a boundary rather than a gap. `dienstverlener-backend`
-receives and processes response data, which is a Dataverwerking — but of
-Hypotheek-BV, not of anything GBO delivers. Its logbook would be Hypotheek-BV's
-own, and instrumenting the mock consumer here would suggest the voorziening
-logs on a consumer's behalf, which is exactly what LDV says it must not do.
+The consumer's own processing is in, provisionally. `dienstverlener-backend`
+logs each call to a source in `logboek-afnemer`, which is Hypotheek-BV's own
+logbook and not the voorziening's: GBO does not log on a consumer's behalf. A
+private party is not bound by LDV, so whether consumers must do this is an
+open question. The demo does it because the read extension starts a chain at
+the application that started the processing, and without the consumer's
+records a reader cannot know which sources one processing touched.

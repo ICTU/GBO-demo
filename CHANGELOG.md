@@ -7,6 +7,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Changed
+- **LDV records take the caller's trace over instead of the FSC transaction
+  id** (#365). `ldv-client` reads `traceparent` before `Fsc-Transaction-Id`,
+  as LDV §3.3.1 and the ADL require; the transaction id is the fallback for a
+  hop that arrives without one. One processing that crosses FSC more than once
+  now keeps one trace id. The bron-sidecar records the caller's span as the
+  forward's parent, and the EUDI adapter hands the source the span of the
+  record that made the call instead of a random one.
+- **GBO's logbook is split per system** (#365): `logboek-toestemming` for the
+  consent register and portal, `logboek-eudi-adapter` for the adapter. GBO's
+  register of verwerkingsactiviteiten is split with it, so each logbook accepts
+  only its own system's activities.
+- **The consent status check carries trace context** (#365). The PDP sends the
+  consent register a `traceparent` with the request's trace and a span for the
+  lookup, so the status record lands in the request's trace, under that span,
+  instead of becoming a root.
+- **The demo consumer logs its own processing** (#365). `dienstverlener-backend`
+  writes each call to a source to `logboek-afnemer`, Hypotheek-BV's own
+  logbook, with a `dpl.read.nextLogbookId` to the source's read API, and hands
+  the source its record's span. The read extension starts a chain at the
+  application that started the processing; whether a private consumer must do
+  this is an open question, so the demo applies it provisionally.
+- **The dev-portal's LDV panel follows the chain instead of asking every
+  logbook** (#365). It queries on the request's trace id, starts at the
+  logbooks where a processing starts, and follows `dpl.read.nextLogbookId`;
+  every logbook says how it was reached. A logbook no pointer leads to — the
+  consent register's, whose status the PDP checks — is still queried and shown
+  as such. `LDV_LOGBOOKS` now names each logbook by its read-API URI and marks
+  the start logbooks.
 - **The landing page returns to the palette it was designed in.** The ICTU
   colours introduced in #322 are reverted: `#01689b` carries the page again,
   `#d52b1e` is the hover accent, and the derived tints, connector lines and

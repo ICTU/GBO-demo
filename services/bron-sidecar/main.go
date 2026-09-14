@@ -207,10 +207,14 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client) http.H
 		// The forward is the outer Dataverwerking; its span is the parent of
 		// the de-pseudonymisation below and of whatever the source logs
 		// downstream, so the whole request reads as one tree in the logboek.
+		traceID := ldv.TraceID(r.Context(), r.Header)
 		forward := ldvOperation{
-			traceID:   ldv.TraceID(r.Context(), r.Header),
-			spanID:    ldv.SpanID(),
-			startTime: time.Now().UTC(),
+			traceID: traceID,
+			spanID:  ldv.SpanID(),
+			// §3.3.1: when the caller was in the same trace, its span is this
+			// record's parent — across FSC, in the caller's own logbook.
+			parentSpanID: ldv.ParentSpanFor(r.Header, traceID),
+			startTime:    time.Now().UTC(),
 		}
 		// A bron without a logbook is a supported configuration, so the
 		// client is legitimately nil here and must not be dereferenced.
@@ -342,13 +346,14 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client) http.H
 					subjectID, subjectType = pseudonym, ldv.SubjectTypePseudonym
 				}
 				record := ldv.Record{
-					TraceID:    forward.traceID,
-					SpanID:     forward.spanID,
-					Name:       "dataverwerking.bronquery-doorgifte",
-					Status:     ldv.StatusFromHTTP(resp.StatusCode),
-					StartTime:  forward.startTime,
-					EndTime:    time.Now().UTC(),
-					Attributes: ldv.Attributes(cfg.LDVForwardActivity, subjectID, subjectType, forward.processor, map[string]any{}),
+					TraceID:      forward.traceID,
+					SpanID:       forward.spanID,
+					ParentSpanID: forward.parentSpanID,
+					Name:         "dataverwerking.bronquery-doorgifte",
+					Status:       ldv.StatusFromHTTP(resp.StatusCode),
+					StartTime:    forward.startTime,
+					EndTime:      time.Now().UTC(),
+					Attributes:   ldv.Attributes(cfg.LDVForwardActivity, subjectID, subjectType, forward.processor, map[string]any{}),
 				}
 				if writeErr := logbook.Write(r.Context(), record); writeErr != nil {
 					ldv.LogFailure(record.Name, writeErr)
@@ -375,10 +380,11 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client) http.H
 // ldvOperation is the identity and timing of one Dataverwerking while it is
 // still in progress.
 type ldvOperation struct {
-	traceID   string
-	spanID    string
-	startTime time.Time
-	processor string
+	traceID      string
+	spanID       string
+	parentSpanID string
+	startTime    time.Time
+	processor    string
 }
 
 func initTracer(ctx context.Context) (func(context.Context) error, error) {

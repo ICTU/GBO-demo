@@ -81,10 +81,9 @@ func TestTracestateSurvivesTheHop(t *testing.T) {
 	}
 }
 
-// The transaction id wins over traceparent, because it is the id FSC's txlog
-// and the PDP's decision log record. It is a UUID, so it is also a valid
-// 16-byte trace id — which is what lets one value serve both names.
-func TestTheFscTransactionIDIsTheTraceID(t *testing.T) {
+// A hop without traceparent falls back to the transaction id. It is a UUID,
+// so it is also a valid 16-byte trace id.
+func TestTheFscTransactionIDIsTheFallback(t *testing.T) {
 	header := http.Header{}
 	header.Set("Fsc-Transaction-Id", "0af76519-16cd-43dd-8448-eb211c80319c")
 
@@ -94,24 +93,22 @@ func TestTheFscTransactionIDIsTheTraceID(t *testing.T) {
 	}
 }
 
-// The case that broke the chain view. Any browser with OTel instrumentation
-// sends its own traceparent, and FSC will not accept that trace id as a
-// transaction id (it validates UUID v7), so the request legitimately carries
-// two unrelated ids. Filing the record under the caller's trace put it beyond
-// the reach of the txlog and the decision log, which only know the FSC one.
-func TestTheFscTransactionIDBeatsACallersTraceparent(t *testing.T) {
+// LDV §3.3.1: an action started by another takes the caller's trace over
+// unchanged. FSC gives every transaction its own id, so preferring it would
+// split one processing into as many traces as it has FSC hops; the ADL links
+// the two ids instead.
+func TestACallersTraceparentBeatsTheFscTransactionID(t *testing.T) {
 	header := http.Header{}
 	header.Set("Fsc-Transaction-Id", "0af76519-16cd-43dd-8448-eb211c80319c")
 	header.Set("traceparent", "00-11111111111111111111111111111111-b7ad6b7169203331-01")
 
 	got := TraceContextFrom(context.Background(), header, "00f067aa0ba902b7").TraceID
-	if got != "0af7651916cd43dd8448eb211c80319c" {
-		t.Errorf("TraceID = %q, want the FSC transaction id", got)
+	if got != "11111111111111111111111111111111" {
+		t.Errorf("TraceID = %q, want the caller's trace", got)
 	}
 }
 
-// Without an FSC transaction there is nothing to prefer, and W3C Trace Context
-// §3.1 requires continuing the caller's trace.
+// X-Request-Id is a fallback as well; it never beats a traceparent.
 func TestTraceparentWinsWhenThereIsNoFscTransaction(t *testing.T) {
 	header := http.Header{}
 	header.Set("traceparent", "00-11111111111111111111111111111111-b7ad6b7169203331-01")
@@ -159,9 +156,9 @@ func TestParentSpanFor(t *testing.T) {
 		t.Errorf("ParentSpanFor = %q, want the caller's span", got)
 	}
 
-	// The caller was in another trace: this record is filed under the
-	// Fsc-Transaction-Id, so the caller's span is not its parent. Naming it
-	// anyway would produce a parent no reader of this logbook can resolve.
+	// The caller was in another trace, so its span is not this record's
+	// parent. Naming it anyway would produce a parent no reader of this
+	// logbook can resolve.
 	if got := ParentSpanFor(header, "4bf92f3577b34da6a3ce929d0e0e4736"); got != "" {
 		t.Errorf("ParentSpanFor = %q, want empty when the caller was in another trace", got)
 	}
@@ -188,9 +185,8 @@ func TestIDValidation(t *testing.T) {
 // The regression this ordering exists to prevent, and it is not hypothetical:
 // behind otelhttp every request already carries a locally created server span.
 // Extracting against the live context returns that span when the headers hold
-// no traceparent — which is exactly the FSC hop — so the Fsc-Transaction-Id
-// was never consulted and every component filed its records under a trace id
-// of its own.
+// no traceparent, so the Fsc-Transaction-Id was never consulted and every
+// component filed its records under a trace id of its own.
 func TestTheFscFallbackBeatsAnAmbientSpan(t *testing.T) {
 	ambient := trace.NewSpanContext(trace.SpanContextConfig{
 		TraceID:    trace.TraceID{0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11},
@@ -199,7 +195,7 @@ func TestTheFscFallbackBeatsAnAmbientSpan(t *testing.T) {
 	})
 	ctx := trace.ContextWithSpanContext(context.Background(), ambient)
 
-	// FSC stripped traceparent; only its own header survives the hop.
+	// The hop carried no traceparent; only the transaction id arrived.
 	header := http.Header{}
 	header.Set("Fsc-Transaction-Id", "0af76519-16cd-43dd-8448-eb211c80319c")
 

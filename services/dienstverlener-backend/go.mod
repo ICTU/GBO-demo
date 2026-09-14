@@ -12,6 +12,7 @@ require (
 )
 
 require (
+	gbo-demo/ldv-client v0.0.0
 	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
@@ -30,3 +31,5 @@ require (
 	google.golang.org/grpc v1.83.2 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
+
+replace gbo-demo/ldv-client => ../ldv-client

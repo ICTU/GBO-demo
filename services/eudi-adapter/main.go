@@ -270,7 +270,13 @@ func handleSourceAttestation(cfg config, client *http.Client, runtime sourceMeta
 			attribute.String("gbo.source_oin", metadata.SourceOIN),
 			attribute.String("dpl.gbo.typeId", metadata.TypeID),
 		)
-		result, err := callSource(r.Context(), client, resolved, plan)
+		// The source's records hang under the assembly record, so the call
+		// carries that record's position in the trace.
+		sourceCtx := r.Context()
+		if logbook != nil {
+			sourceCtx = contextWithSourceCall(sourceCtx, recording)
+		}
+		result, err := callSource(sourceCtx, client, resolved, plan)
 		if err != nil {
 			logSourceAttestationError(r, "source_request", err)
 			http.Error(w, "source request failed", http.StatusBadGateway)
@@ -463,12 +469,12 @@ func callViaFSC(ctx context.Context, client *http.Client, cfg config, plan sourc
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Fsc-Grant-Hash", cfg.SourceDataFSCGrantHash)
-	// Reuse the Fsc-Transaction-Id that the middleware already generated
-	// and that also forms the trace-id. That way trace-id ==
-	// Fsc-Transaction-Id — a single identifier across the whole chain
-	// (adapter -> FSC txlog -> pdp span). If the context does not carry
-	// it (e.g. this function is called directly without the middleware),
-	// fall back to a fresh UUID.
+	// Reuse the Fsc-Transaction-Id that the middleware already generated.
+	// When the caller sent no traceparent the middleware tied the trace to it
+	// as well, so a request that crosses FSC once carries one value in the
+	// txlog, the decision log and the trace. If the context does not carry it
+	// (e.g. this function is called directly without the middleware), fall
+	// back to a fresh UUID.
 	fscTxID, _ := ctx.Value(fscTxIDCtxKey).(string)
 	if fscTxID == "" {
 		gen, err := newFscTransactionID()
@@ -482,23 +488,17 @@ func callViaFSC(ctx context.Context, client *http.Client, cfg config, plan sourc
 	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(httpReq.Header))
 
 	// §3.1 requires Trace Context on an HTTP hop that carries a
-	// dataverwerking, so the traceparent is set to the id the chain actually
-	// shares rather than to whatever OTel happened to inject: when the
-	// issuance-server sends its own traceparent, the ambient trace id is not
-	// the Fsc-Transaction-Id, and the bronhouder would file its half of this
-	// request under a different id.
+	// dataverwerking, and §3.3.1 files the source's records under the action
+	// that called it. With a logbook that action is the assembly record, so
+	// the traceparent carries its span rather than the one OTel injected: the
+	// same trace, but a parent a reader of the logbook can resolve.
 	//
 	// Both headers travel. FSC forwards traceparent untouched — the outway
-	// deletes exactly one header, Proxy-Authorization — so this is not a
-	// workaround for a header being stripped. The Fsc-Transaction-Id above is
-	// not redundant either: FSC validates it as a UUID v7 and rejects anything
-	// else, and it is the id the txlog and the decision log key on. Sending
-	// both means the wire carries one value under the name the standard
-	// mandates and under the name FSC's own records will use.
-	if normalized := ldv.NormalizeTraceID(fscTxID); normalized != "" {
-		ldv.InjectTraceparent(httpReq.Header, ldv.TraceContext{
-			TraceID: normalized, SpanID: ldv.SpanID(), Sampled: true,
-		})
+	// deletes exactly one header, Proxy-Authorization. The Fsc-Transaction-Id
+	// above is FSC's own: it validates it as a UUID v7, and the txlog and the
+	// decision log key on it.
+	if sourceCall, ok := sourceCallFrom(ctx); ok {
+		ldv.InjectTraceparent(httpReq.Header, sourceCall)
 	}
 
 	resp, err := client.Do(httpReq)

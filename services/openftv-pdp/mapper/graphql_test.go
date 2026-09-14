@@ -257,7 +257,9 @@ func TestConsentSigningKeyUsesBoundedStaleKeyOnJWKSFailure(t *testing.T) {
 	}
 }
 
-func consentTestServer(t *testing.T, key *ecdsa.PrivateKey, status string) *httptest.Server {
+// consentTestServer serves the register's JWKS and the status of consent
+// c-signed. A status request's headers are sent on captured, when given.
+func consentTestServer(t *testing.T, key *ecdsa.PrivateKey, status string, captured ...chan<- http.Header) *httptest.Server {
 	t.Helper()
 	encode := base64.RawURLEncoding.EncodeToString
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -270,6 +272,12 @@ func consentTestServer(t *testing.T, key *ecdsa.PrivateKey, status string) *http
 				"y": encode(key.Y.FillBytes(make([]byte, 32))),
 			}}})
 		case "/consents/c-signed/status":
+			for _, c := range captured {
+				select {
+				case c <- r.Header.Clone():
+				default:
+				}
+			}
 			if status == "NOT_FOUND" {
 				http.NotFound(w, r)
 				return
@@ -300,6 +308,83 @@ func TestFetchConsentVerifiesTokenAndExactStatus(t *testing.T) {
 	if got["pi"] != "PI-abc123" || got["dienstverlener_oin"] != "99999999900000000300" {
 		t.Fatalf("signed bindings missing: %#v", got)
 	}
+}
+
+// Confirming a status is a Dataverwerking the register logs, so the request
+// carries the trace it belongs to (LDV §3.1): the caller's trace when it came
+// along, otherwise the transaction id. The span is the lookup's own, so the
+// register's record hangs under it rather than under the caller's span.
+func TestTheStatusRequestCarriesTheRequestsTrace(t *testing.T) {
+	const callersTrace = "4bf92f3577b34da6a3ce929d0e0e4736"
+	const callersSpan = "00f067aa0ba902b7"
+	const txID = "0af76519-16cd-43dd-8448-eb211c80319c"
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	captured := make(chan http.Header, 1)
+	server := consentTestServer(t, key, "ACTIVE", captured)
+	defer server.Close()
+	t.Setenv("GBO_CONSENT_URL", server.URL)
+	t.Setenv("GBO_CONSENT_ISSUER", "test-issuer")
+	t.Setenv("GBO_CONSENT_AUDIENCE", "test-audience")
+	token := consentTestToken(t, key, "test-key", "test-audience", time.Now().Add(time.Hour))
+
+	for name, testCase := range map[string]struct {
+		headers   map[string]string
+		wantTrace string
+	}{
+		"caller's traceparent": {
+			headers: map[string]string{
+				"x-gbo-consent-token": token,
+				"fsc-transaction-id":  txID,
+				"traceparent":         "00-" + callersTrace + "-" + callersSpan + "-01",
+			},
+			wantTrace: callersTrace,
+		},
+		"transaction id only": {
+			headers:   map[string]string{"x-gbo-consent-token": token, "fsc-transaction-id": txID},
+			wantTrace: "0af7651916cd43dd8448eb211c80319c",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := fetchConsent(testCase.headers); got["status_available"] != true {
+				t.Fatalf("consent = %#v", got)
+			}
+			var header http.Header
+			select {
+			case header = <-captured:
+			default:
+				t.Fatal("the register was not asked for the status")
+			}
+			traceparent := header.Get("traceparent")
+			if len(traceparent) != 55 {
+				t.Fatalf("traceparent = %q, want a W3C traceparent", traceparent)
+			}
+			if got := traceparent[3:35]; got != testCase.wantTrace {
+				t.Errorf("trace = %q, want %q", got, testCase.wantTrace)
+			}
+			if span := traceparent[36:52]; span == callersSpan || !isSpanHex(span) {
+				t.Errorf("span = %q, want a fresh span for the lookup", span)
+			}
+			if header.Get("Fsc-Transaction-Id") != txID {
+				t.Errorf("Fsc-Transaction-Id = %q, want it passed on", header.Get("Fsc-Transaction-Id"))
+			}
+		})
+	}
+}
+
+func isSpanHex(value string) bool {
+	if len(value) != 16 || value == "0000000000000000" {
+		return false
+	}
+	for _, r := range value {
+		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func TestFetchConsentAllowsOnlyBoundedClockSkew(t *testing.T) {
