@@ -168,8 +168,9 @@ test_dvtp_allow_grants_via_consent_rule if {
 	result.context.granted[0].rule == "DVT0001"
 }
 
-# Neither a consent nor a PID. Every rule fails its own basis check, so no
-# rule out-ranks another on cascade depth and the priority table decides.
+# Neither a consent nor a PID, and no enrichment attempted either. Every
+# rule fails its own basis check, so neither cascade depth nor the attempted
+# regime separates them, and the priority table decides.
 test_no_evidence_denies if {
 	result := gbo.response with input as {
 		"subject": {"type": "org", "id": "99999999900000000300"},
@@ -233,4 +234,40 @@ test_pid_rule_actors_are_disjoint_from_consent_consumers if {
 		count(actors) > 0
 		count(actors & _dvtp_consumer_oins) == 0
 	}
+}
+
+# ── A failed enrichment keeps the regime it attempted ────────────────────
+# The request-mapper fills pip.consent when the request carries a consent
+# token and pip.pid otherwise — also when that attempt fails: an
+# unverifiable token, or a BSNk error that leaves pi empty. Every rule then
+# passes nothing, so cascade depth cannot separate them; the attempt can.
+# Review of #363: a PID-based request whose BSN could not be pseudonymised
+# surfaced CONSENT_CONTEXT_INVALID, where main said PID_NOT_PRESENT.
+
+_box1 := [{"id": "aangifte.box1", "parent": "AangifteIH", "name": "box1Inkomen", "scalar": false}]
+
+test_failed_pid_enrichment_surfaces_pid_not_present if {
+	result := gbo.response with input as {
+		"subject": {"type": "org", "id": "99999999900000000100"},
+		"context": {
+			"time": "2026-07-06T12:00:00Z",
+			"pip": {"pid": {"pi": ""}},
+			"resolved": {"fields": _box1, "args": {"belastingjaren.0": "2024"}},
+		},
+	}
+	result.decision == false
+	result.context.reason_admin.code == "PID_NOT_PRESENT"
+}
+
+test_unverifiable_consent_surfaces_consent_context_invalid if {
+	result := gbo.response with input as {
+		"subject": {"type": "org", "id": "99999999900000000300"},
+		"context": {
+			"time": "2026-07-06T12:00:00Z",
+			"pip": {"consent": {"context_valid": false, "status_available": false, "exists": false}},
+			"resolved": {"fields": _box1, "args": {"bsn": "", "belastingjaren.0": "2025"}},
+		},
+	}
+	result.decision == false
+	result.context.reason_admin.code == "CONSENT_CONTEXT_INVALID"
 }

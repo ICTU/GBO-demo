@@ -320,8 +320,37 @@ _passed_count(steps) := count([s | some s in steps; s.status == "pass"])
 _best_reason(evaluated) := code if {
 	depth := max([_passed_count(e.steps) | some e in evaluated])
 	deepest := [e | some e in evaluated; _passed_count(e.steps) == depth]
-	code := _worst_code(deepest)
+	code := _worst_code(_prefer_attempted(deepest))
 } else := "NO_APPLICABLE_RULE"
+
+# Tie-break: the regime the request attempted. Depth cannot separate the
+# rules when every one of them passed nothing — which is exactly what a
+# FAILED enrichment produces: an unverifiable consent token, or a BSNk error
+# that leaves pip.pid.pi empty. The attempt still says which regime the
+# request is under, because the request-mapper fills pip.consent when the
+# request carries a consent token and pip.pid otherwise, whether or not
+# that succeeds. A PID-based request whose BSN could not be pseudonymised is
+# a PID failure, not a consent one. With no attempt, or with both, the
+# priority table decides as before.
+_attempted_basis := "consent" if {
+	object.get(_pip_obj, "consent", null) != null
+	object.get(_pip_obj, "pid", null) == null
+} else := "pid" if {
+	object.get(_pip_obj, "pid", null) != null
+	object.get(_pip_obj, "consent", null) == null
+} else := ""
+
+_rule_basis(rid) := "consent" if {
+	object.get(_rule_meta[rid].spec, "consent_required", false)
+} else := "pid" if {
+	object.get(_rule_meta[rid].spec, "pid_required", false)
+} else := ""
+
+_prefer_attempted(entries) := matching if {
+	_attempted_basis != ""
+	matching := [e | some e in entries; _rule_basis(e.rule) == _attempted_basis]
+	count(matching) > 0
+} else := entries
 
 _worst_code(evaluated) := code if {
 	some i in numbers.range(0, count(evaluated) - 1)

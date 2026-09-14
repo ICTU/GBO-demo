@@ -64,7 +64,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     through its own cascade before applying the priority table: a rule whose basis
     does not fit the request passes nothing, since every axis ahead of its basis
     check is skipped and the basis check itself fails. All five reasons are
-    unchanged from the dispatch's behaviour.
+    unchanged from the dispatch's behaviour. When depth cannot separate the
+    rules — every one passed nothing, as a failed enrichment produces — the
+    regime the request-mapper attempted breaks the tie, so a PID request whose
+    BSN could not be pseudonymised still surfaces `PID_NOT_PRESENT`.
   - A request carrying **both** a verified consent and a disclosed PID is denied with
     `AMBIGUOUS_EVIDENCE`. Without the guard the engine would have resolved it by rule
     ordering — `_evaluate_field` grants on the first rule that returns true — which is
@@ -77,7 +80,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     rule's `allowed_actors`; a test asserts that whitelist stays disjoint from the
     consent-based consumers, because an OIN in both could skip the citizen's consent by
     omitting the header. `flowFromHeaders`, `isEUDIFlow` and the FSC-token property
-    reader are removed.
+    reader are removed. Identifier scrubbing does not depend on the regime: under
+    a consent token the subject variable is kept only when it is the verified
+    consent's own PI and blanked otherwise, so a consent header — valid or not —
+    cannot carry a raw BSN into OPA's input or its decision log.
   - The source-metadata path keeps subject, method and endpoint as its gate. The PDP
     cannot see which FSC service a request arrived on, so this admits one case it did
     not before: a permitted OIN, on a contract other than the metadata one, issuing

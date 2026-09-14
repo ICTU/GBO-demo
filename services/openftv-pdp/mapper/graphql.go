@@ -83,6 +83,8 @@ func GraphQLToContext(parc *models.PARC, opts ...Option) *models.PARC {
 	ctx.AddAttributeKV("resource", resource)
 	ctx.AddAttributeKV("resolved", walkQuery(query, variables))
 
+	subject, _ := variables["bsn"].(string)
+
 	// The regime follows from the evidence the request carries, not from a
 	// property somebody declared (#334). Only one signal can be read here,
 	// before any rule runs: a consent token. It is positive, unforgeable
@@ -100,48 +102,54 @@ func GraphQLToContext(parc *models.PARC, opts ...Option) *models.PARC {
 	// gbo/engine_test.rego asserts it, because an OIN in both could skip
 	// consent simply by omitting this header.
 	if hasConsentEvidence(headers) {
-		ctx.AddAttributeKV("pip", map[string]any{"consent": fetchConsent(headers)})
-		return &models.PARC{
-			Principal: parc.Principal,
-			Action:    parc.Action,
-			Resource:  parc.Resource,
-			Context:   ctx,
+		consent := fetchConsent(headers)
+		ctx.AddAttributeKV("pip", map[string]any{"consent": consent})
+		// Scrubbing does not depend on which regime the request claims: the
+		// header decides HOW the subject identifier is made safe, never
+		// WHETHER. The one subject value the consent regime expects is the
+		// verified consent's own PI — fetchConsent sets "pi" only when the
+		// token verified and its status was read — and that value is kept for
+		// DVT0001's constraint binding. Anything else is blanked rather than
+		// pseudonymised: pseudonymising a BSN yields that citizen's PI, which
+		// would then satisfy the binding for a consumer that was never meant
+		// to hold the BSN. Blanked, the binding fails with CONSTRAINT_MISMATCH.
+		verifiedPI, _ := consent["pi"].(string)
+		if subject == verifiedPI {
+			return &models.PARC{Principal: parc.Principal, Action: parc.Action, Resource: parc.Resource, Context: ctx}
 		}
+		return replaceSubject(parc, ctx, query, variables, subject, "")
 	}
 
-	{
-		// The BSN stops here. It is needed to reach the bron — the PEP
-		// forwards the original query untouched — but the policy engine
-		// evaluates on a pseudonymous identity, so that is all it is
-		// given. On pseudonymize failure the BSN is scrubbed to "" (fail
-		// closed: PID_NOT_PRESENT), never passed through. A request with
-		// no subject variable either yields an empty pi and denies the
-		// same way.
-		bsn, _ := variables["bsn"].(string)
-		pi, err := pseudonymizeBSN(bsn)
-		if err != nil {
-			pi = ""
-		}
-		ctx.AddAttributeKV("pip", map[string]any{"pid": map[string]any{"pi": pi}})
-		action := parc.Action
-		if bsn != "" {
-			substituteContext(ctx, bsn, pi)
-			// The raw body attribute is part of the decision-log input —
-			// rewrite the identifier in it too.
-			variables["bsn"] = pi
-			newBody, _ := json.Marshal(map[string]any{"query": query, "variables": variables})
-			action = models.NewEntity(parc.Action.Type(), parc.Action.ID(), models.NewAttributeSet(parc.Action.Attributes()))
-			action.Attributes().AddAttributeKV(models.AttrBody, string(newBody))
-		}
-		return &models.PARC{Principal: parc.Principal, Action: action, Resource: parc.Resource, Context: ctx}
+	// PID regime. The BSN stops here. It is needed to reach the bron — the
+	// PEP forwards the original query untouched — but the policy engine
+	// evaluates on a pseudonymous identity, so that is all it is given. On
+	// pseudonymize failure the BSN is scrubbed to "" (fail closed:
+	// PID_NOT_PRESENT), never passed through. pip.pid is set even then: it
+	// records that PID enrichment was attempted, which is what keeps the
+	// deny reason in this regime. A request with no subject variable yields
+	// an empty pi and denies the same way.
+	pi, err := pseudonymizeBSN(subject)
+	if err != nil {
+		pi = ""
 	}
+	ctx.AddAttributeKV("pip", map[string]any{"pid": map[string]any{"pi": pi}})
+	return replaceSubject(parc, ctx, query, variables, subject, pi)
+}
 
-	return &models.PARC{
-		Principal: parc.Principal,
-		Action:    parc.Action,
-		Resource:  parc.Resource,
-		Context:   ctx,
+// replaceSubject rewrites the subject identifier everywhere the decision
+// sees it: the context attributes the mapper just set, and the raw body
+// attribute, which is part of the decision-log input too. An empty subject
+// leaves nothing to replace.
+func replaceSubject(parc *models.PARC, ctx *models.AttributeSet, query string, variables map[string]any, from, to string) *models.PARC {
+	if from == "" || from == to {
+		return &models.PARC{Principal: parc.Principal, Action: parc.Action, Resource: parc.Resource, Context: ctx}
 	}
+	substituteContext(ctx, from, to)
+	variables["bsn"] = to
+	newBody, _ := json.Marshal(map[string]any{"query": query, "variables": variables})
+	action := models.NewEntity(parc.Action.Type(), parc.Action.ID(), models.NewAttributeSet(parc.Action.Attributes()))
+	action.Attributes().AddAttributeKV(models.AttrBody, string(newBody))
+	return &models.PARC{Principal: parc.Principal, Action: action, Resource: parc.Resource, Context: ctx}
 }
 
 // hasConsentEvidence reports whether the request carries a consent token,
