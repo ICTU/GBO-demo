@@ -40,6 +40,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   `dpl.read.nextLogbookId` from `LDV_BSNK_NEXT_LOGBOOK_ID`. BSNk has no read
   API in the demo, so the value is a page about the mock, the fallback the read
   extension allows for a party without one.
+- **A source names the Betrokkene in its own pseudonym space** (#367). The
+  sidecars log the PI→BSN resolution and the forward under a logbook-local
+  pseudonym derived from the BSN with the source's own key, and pass that on
+  to the source, instead of the PI the consumer sent. The PI now appears only
+  in the consumer's logbook, so logbooks of different Verantwoordelijken share
+  no identifier and join on the trace id alone.
+- **The EUDI adapter's call to a source stays under its assembly record.** Its
+  client is instrumented, and otelhttp injected its own client span over the
+  LDV position; `ldv.Transport`, placed inside the instrumentation, puts it
+  back. The assembly record is now also written when the source refuses, fails
+  or has no data, so a source's records never hang under a missing parent.
 - **The landing page returns to the palette it was designed in.** The ICTU
   colours introduced in #322 are reverted: `#01689b` carries the page again,
   `#d52b1e` is the hover accent, and the derived tints, connector lines and

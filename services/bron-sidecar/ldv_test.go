@@ -124,16 +124,21 @@ func TestPseudonymFlowLogsBothDataverwerkingen(t *testing.T) {
 		t.Errorf("the resolution record should hang under the forward record")
 	}
 
-	// The record about de-pseudonymisation names the Betrokkene by the PI the
-	// request arrived with, never by the BSN it produced.
-	if got := resolution[0].Attributes[ldv.AttrDataSubjectID]; got != "PI-abc123" {
-		t.Errorf("resolution data_subject_id = %v, want PI-abc123", got)
+	// Both records name the Betrokkene by this source's own pseudonym: not the
+	// BSN the resolution produced, and not the PI the request arrived with,
+	// which the caller's logbook holds too.
+	for _, record := range records {
+		subject, _ := record.Attributes[ldv.AttrDataSubjectID].(string)
+		if !strings.HasPrefix(subject, "LP-") || record.Attributes[ldv.AttrDataSubjectIDType] != ldv.SubjectTypePseudonym {
+			t.Errorf("record %q names the Betrokkene %q (%v), want a logbook-local pseudonym",
+				record.Name, subject, record.Attributes[ldv.AttrDataSubjectIDType])
+		}
+		if encoded, _ := json.Marshal(record); strings.Contains(string(encoded), "PI-abc123") {
+			t.Errorf("record %q contains the caller's PI: %s", record.Name, encoded)
+		}
 	}
-	if got := resolution[0].Attributes[ldv.AttrDataSubjectIDType]; got != ldv.SubjectTypePI {
-		t.Errorf("resolution data_subject_id_type = %v, want %s", got, ldv.SubjectTypePI)
-	}
-	if got := forward[0].Attributes[ldv.AttrDataSubjectID]; got != "PI-abc123" {
-		t.Errorf("forward data_subject_id = %v, want PI-abc123", got)
+	if resolution[0].Attributes[ldv.AttrDataSubjectID] != forward[0].Attributes[ldv.AttrDataSubjectID] {
+		t.Error("the resolution and the forward name the same Betrokkene differently")
 	}
 	if got := resolution[0].Attributes[ldv.AttrProcessingActivityID]; got != resolutionActivity {
 		t.Errorf("resolution processing_activity_id = %v, want %s", got, resolutionActivity)
@@ -279,11 +284,14 @@ func TestTheSidecarPassesTraceMetadataToTheSource(t *testing.T) {
 	if got := ldv.ParentSpanFor(received, traceContext.TraceID); !ldv.IsSpanID(got) {
 		t.Errorf("parent span = %q, want the sidecar's forward span", got)
 	}
-	if got := received.Get(ldv.HeaderSubjectID); got != "PI-abc123" {
-		t.Errorf("subject header = %q, want the PI so both components name the Betrokkene alike", got)
+	// The sidecar's own pseudonym, so both components name the Betrokkene
+	// alike — and not the PI, which would put the caller's identifier in the
+	// source's records.
+	if got := received.Get(ldv.HeaderSubjectID); !strings.HasPrefix(got, "LP-") {
+		t.Errorf("subject header = %q, want the sidecar's logbook-local pseudonym", got)
 	}
-	if got := received.Get(ldv.HeaderSubjectIDType); got != ldv.SubjectTypePI {
-		t.Errorf("subject type header = %q, want %s", got, ldv.SubjectTypePI)
+	if got := received.Get(ldv.HeaderSubjectIDType); got != ldv.SubjectTypePseudonym {
+		t.Errorf("subject type header = %q, want %s", got, ldv.SubjectTypePseudonym)
 	}
 }
 

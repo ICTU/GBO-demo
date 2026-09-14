@@ -88,8 +88,8 @@ An OTel-shaped log record with the mandatory fields — `trace_id`, `span_id`,
   "resource": { "attributes": { "service.name": "graphql-server" } },
   "attributes": {
     "dpl.core.processing_activity_id": "https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-ib-2025/v1",
-    "dpl.core.data_subject_id": "PI-abc123",
-    "dpl.core.data_subject_id_type": "pi",
+    "dpl.core.data_subject_id": "LP-5b1f0e8a2c47d9e3a6b0f1c2",
+    "dpl.core.data_subject_id_type": "logboek-pseudoniem",
     "dpl.core.foreign_operation.processor": "https://fsc.gbo.overheid.nl/peers/AAAABBBBCCCCDDDDEEEE",
     "dpl.gbo.belastingjaar": 2025
   }
@@ -140,8 +140,8 @@ and `dpl.core.data_subject_id_type` says which pseudonym space it lives in:
 
 | type | meaning |
 | --- | --- |
-| `pi` | the polymorphic identity the DvTP chain carries end to end |
-| `logboek-pseudoniem` | a key-derived, logbook-local reference, for components that hold only a BSN (the EUDI flow) |
+| `pi` | the polymorphic identity a consumer holds. It travels to the source, but the source logs under a pseudonym of its own |
+| `logboek-pseudoniem` | a key-derived, logbook-local reference, derived with the Verantwoordelijke's own key: what a source names the Betrokkene by, and what the EUDI adapter uses |
 | `portal-subject` | the portal-scoped reference the consent portal derives, and the only identifier the consent register ever holds |
 | `brp-persoon-id` | RvIG's own record identifier, for someone named in a certificate about another person |
 
@@ -457,19 +457,21 @@ because what it did was GBO's processing, not BD's.
 | Component | Logboek | Verwerkingsactiviteit | Betrokkene heet daar |
 |---|---|---|---|
 | `dienstverlener-backend` | afnemer | `hbv-inkomensgegevens-opvragen` | `pi` |
-| `bron-sidecar` | bd | `bd-pi-bsn-resolutie`, `bd-bronquery-doorgifte` | `pi` / `logboek-pseudoniem` |
-| `graphql-server` | bd | `bd-ib-2024`, `bd-ib-2025` | `pi` / `logboek-pseudoniem` |
-| `brp-sidecar` | brp | `brp-pi-bsn-resolutie`, `brp-bronquery-doorgifte` | `pi` / `logboek-pseudoniem` |
+| `bron-sidecar` | bd | `bd-pi-bsn-resolutie`, `bd-bronquery-doorgifte` | `logboek-pseudoniem` |
+| `graphql-server` | bd | `bd-ib-2024`, `bd-ib-2025` | `logboek-pseudoniem` |
+| `brp-sidecar` | brp | `brp-pi-bsn-resolutie`, `brp-bronquery-doorgifte` | `logboek-pseudoniem` |
 | `brp-graphql-server` | brp | `brp-akte-overlijden`, `brp-persoonsgegevens-verstrekking` | `logboek-pseudoniem`, `brp-persoon-id` |
 | `consent-register` | toestemming | `gbo-toestemming-verlenen`, `-intrekken`, `-status`, `-inzage` | `portal-subject` |
 | `consent-portal-backend` | toestemming | `gbo-bsn-pseudonimisering` | `portal-subject` |
 | `eudi-adapter` | eudi-adapter | `gbo-pid-bsn-extractie`, `gbo-attestatie-samenstellen` | `logboek-pseudoniem` |
 
 The last column is the part that surprises people. **The same citizen has a
-different name in every logbook**, by design — `PI-70e1c7ef…` at the
-Belastingdienst, `EP-c44cade3…` at GBO — and no party holds the mapping. That
-is what stops the three logbooks from being reassembled into the central
-register LDV exists to avoid. It is also what makes citizen inzage a real
+different name in every logbook**, by design — `PI-70e1c7ef…` at Hypotheek-BV,
+`LP-5b1f0e8a…` at the Belastingdienst, `EP-c44cade3…` at GBO — and no party
+holds the mapping. The PI travels to the source, but the source logs under a
+pseudonym of its own, so no identifier is shared between two logbooks. That
+is what stops the logbooks from being reassembled into the central register
+LDV exists to avoid. It is also what makes citizen inzage a real
 design problem rather than a query: see [Scope](#scope).
 
 ### Which flow lands where
@@ -494,9 +496,9 @@ the call:
 
 ```
 trace 0af7651916cd43dd8448eb211c80319c
-└── bd-bronquery-doorgifte@v1   bron-sidecar   subject PI-abc123 (pi)
-    ├── bd-pi-bsn-resolutie@v1  bron-sidecar   subject PI-abc123 (pi)
-    └── bd-ib-2025@v1           graphql-server subject PI-abc123 (pi)
+└── bd-bronquery-doorgifte@v1   bron-sidecar   subject LP-5b1f0e8a… (logboek-pseudoniem)
+    ├── bd-pi-bsn-resolutie@v1  bron-sidecar   subject LP-5b1f0e8a… (logboek-pseudoniem)
+    └── bd-ib-2025@v1           graphql-server subject LP-5b1f0e8a… (logboek-pseudoniem)
 ```
 
 For a request that crosses FSC once, the same value is the transaction id on
@@ -575,17 +577,16 @@ One DvTP query, as the running demo produces it:
 Hypotheek-BV — 1 record · startpunt
   inkomensgegevens-opvragen [hbv-inkomensgegevens-opvragen@v1]  PI-70e1c7ef… (pi)  → Belastingdienst
 Belastingdienst — 3 records · via nextLogbookId uit Hypotheek-BV
-  bronquery-doorgifte   [bd-bronquery-doorgifte@v1]  PI-70e1c7ef… (pi)
-    pi-bsn-resolutie    [bd-pi-bsn-resolutie@v1]     PI-70e1c7ef… (pi)
-    bronbevraging       [bd-ib-2025@v1]              PI-70e1c7ef… (pi)
+  bronquery-doorgifte   [bd-bronquery-doorgifte@v1]  LP-5b1f0e8a… (logboek-pseudoniem)
+    pi-bsn-resolutie    [bd-pi-bsn-resolutie@v1]     LP-5b1f0e8a… (logboek-pseudoniem)
+    bronbevraging       [bd-ib-2025@v1]              LP-5b1f0e8a… (logboek-pseudoniem)
 GBO, logboek-toestemming — 1 record · geen pointer naartoe
   toestemming-status    [gbo-toestemming-status@v1]  EP-c44cade3… (portal-subject)
 Zonder records voor deze trace: GBO (logboek-eudi-adapter), RvIG
 ```
 
-Three Verantwoordelijken, one trace id. The Betrokkene is named by the PI the
-consumer was given where that PI travels, and by the portal-scoped reference at
-GBO — which is what `data_subject_id_type` is for. RvIG is empty because
+Three Verantwoordelijken, one trace id, and the same Betrokkene named
+differently in each — which is what `data_subject_id_type` is for. RvIG is empty because
 the BRP source was not involved, and an empty logbook means nothing was
 processed rather than that a record was dropped.
 

@@ -227,11 +227,20 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client) http.H
 			forward.processor = logbook.ForeignProcessor(r)
 		}
 
-		// Who the request is about, named the way it arrived. In the
-		// pseudonym flow that is the PI; in the direct flow the sidecar holds
-		// only a BSN and must derive a logbook-local pseudonym instead,
-		// because REQ-60/72 keeps the BSN out of every record.
+		// Who the request is about, as it arrived: a PI in the pseudonym flow,
+		// a BSN in the direct one. Neither goes into a record. The sidecar
+		// names the Betrokkene in its own Verantwoordelijke's pseudonym space —
+		// a logbook-local pseudonym derived from the BSN with this source's
+		// key — so a record here shares no identifier with the caller's
+		// logbook, and logbooks join on the trace id alone.
 		subjects := subjectFromBody(body, pseudoVars)
+		// bsnOf maps a subject as it arrived onto the BSN it stands for.
+		bsnOf := map[string]string{}
+		if subjectIDType != "pseudonym" {
+			for _, subject := range subjects {
+				bsnOf[subject] = subject
+			}
+		}
 
 		if subjectIDType == "pseudonym" {
 			var gql struct {
@@ -256,10 +265,22 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client) http.H
 
 				// The de-pseudonymisation is itself a Dataverwerking, and it
 				// is logged whether or not it succeeded. The record names the
-				// Betrokkene by the PI the request arrived with — a record
-				// *about* turning a PI into a BSN still may not contain the
-				// BSN it produced.
+				// Betrokkene by this source's own pseudonym, derived from the
+				// BSN it produced — never the BSN itself, and not the PI,
+				// which the caller's logbook holds too. A PI that could not be
+				// resolved has no BSN to derive from; a pseudonym of the PI is
+				// still local, and still not the caller's identifier.
 				if logbook != nil {
+					named := bsn
+					if resolveErr != nil {
+						named = piVal
+					}
+					subjectID, err := logbook.LocalPseudonym(named)
+					if err != nil {
+						ldv.LogFailure("dataverwerking.pi-bsn-resolutie", err)
+						http.Error(w, "de-pseudonymisation could not be logged; refusing the request", http.StatusInternalServerError)
+						return
+					}
 					record := ldv.Record{
 						TraceID:      forward.traceID,
 						SpanID:       ldv.SpanID(),
@@ -268,7 +289,7 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client) http.H
 						Status:       ldv.Status(resolveErr),
 						StartTime:    resolutionStart,
 						EndTime:      time.Now().UTC(),
-						Attributes: ldv.Attributes(cfg.LDVResolutionActivity, piVal, ldv.SubjectTypePI, forward.processor, map[string]any{
+						Attributes: ldv.Attributes(cfg.LDVResolutionActivity, subjectID, ldv.SubjectTypePseudonym, forward.processor, map[string]any{
 							// BSNk did the transform; its side of it is logged there.
 							ldv.AttrNextLogbookID: cfg.LDVBSNkNextLogbookID,
 						}),
@@ -286,6 +307,7 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client) http.H
 					return
 				}
 				gql.Variables[varName] = bsn
+				bsnOf[piVal] = bsn
 				resolved++
 			}
 			span.SetAttributes(attribute.Int("gbo.sidecar.vars_resolved", resolved))
@@ -317,13 +339,15 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client) http.H
 			ldv.InjectTraceparent(req.Header, ldv.TraceContext{
 				TraceID: forward.traceID, SpanID: forward.spanID, Sampled: true,
 			})
-			// In the pseudonym flow the source receives a BSN and would
-			// otherwise have to invent a subject reference. Passing the PI on
-			// keeps both components naming the same Betrokkene the same way.
-			for _, pi := range subjects {
-				if subjectIDType == "pseudonym" {
-					req.Header.Set(ldv.HeaderSubjectID, pi)
-					req.Header.Set(ldv.HeaderSubjectIDType, ldv.SubjectTypePI)
+			// The source receives a BSN and would otherwise derive a subject
+			// reference of its own. Passing the sidecar's pseudonym on keeps
+			// both components naming the Betrokkene the same way.
+			for _, subject := range subjects {
+				if bsn := bsnOf[subject]; bsn != "" {
+					if pseudonym, err := logbook.LocalPseudonym(bsn); err == nil {
+						req.Header.Set(ldv.HeaderSubjectID, pseudonym)
+						req.Header.Set(ldv.HeaderSubjectIDType, ldv.SubjectTypePseudonym)
+					}
 				}
 				break
 			}
@@ -343,16 +367,17 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client) http.H
 		// best-effort.
 		if logbook != nil {
 			for _, subject := range subjects {
-				subjectID, subjectType := subject, ldv.SubjectTypePI
-				if subjectIDType != "pseudonym" {
-					pseudonym, err := logbook.LocalPseudonym(subject)
-					if err != nil {
-						ldv.LogFailure("dataverwerking.bronquery-doorgifte", err)
-						http.Error(w, "the forward could not be logged; withholding the response", http.StatusInternalServerError)
-						return
-					}
-					subjectID, subjectType = pseudonym, ldv.SubjectTypePseudonym
+				named := subject
+				if bsn := bsnOf[subject]; bsn != "" {
+					named = bsn
 				}
+				subjectID, err := logbook.LocalPseudonym(named)
+				if err != nil {
+					ldv.LogFailure("dataverwerking.bronquery-doorgifte", err)
+					http.Error(w, "the forward could not be logged; withholding the response", http.StatusInternalServerError)
+					return
+				}
+				subjectType := ldv.SubjectTypePseudonym
 				record := ldv.Record{
 					TraceID:      forward.traceID,
 					SpanID:       forward.spanID,
