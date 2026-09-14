@@ -1,3 +1,4 @@
+{{- if not .Values.job.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -29,85 +30,5 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
-      {{- with .Values.imagePullSecrets }}
-      imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.podSecurityContext }}
-      securityContext:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.initContainers }}
-      initContainers:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      containers:
-        - name: {{ .Chart.Name }}
-          {{- with .Values.securityContext }}
-          securityContext:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          image: "{{ required "image.repository is required" .Values.image.repository }}:{{ default .Chart.AppVersion .Values.image.tag }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
-          {{- with .Values.command }}
-          command:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          {{- with .Values.args }}
-          args:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          ports:
-            - name: http
-              containerPort: {{ .Values.containerPort }}
-              protocol: TCP
-          {{- with .Values.env }}
-          env:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          {{- with .Values.envFrom }}
-          envFrom:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          {{- with .Values.volumeMounts }}
-          volumeMounts:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          {{- if .Values.health.enabled }}
-          livenessProbe:
-            httpGet:
-              path: {{ .Values.healthPath | quote }}
-              port: {{ .Values.health.port | default "http" }}
-              scheme: {{ .Values.health.scheme | upper | quote }}
-            initialDelaySeconds: {{ .Values.health.initialDelaySeconds }}
-            periodSeconds: {{ .Values.health.periodSeconds }}
-            timeoutSeconds: {{ .Values.health.timeoutSeconds }}
-            failureThreshold: {{ .Values.health.failureThreshold }}
-          readinessProbe:
-            httpGet:
-              path: {{ .Values.healthPath | quote }}
-              port: {{ .Values.health.port | default "http" }}
-              scheme: {{ .Values.health.scheme | upper | quote }}
-            initialDelaySeconds: {{ .Values.health.initialDelaySeconds }}
-            periodSeconds: {{ .Values.health.periodSeconds }}
-            timeoutSeconds: {{ .Values.health.timeoutSeconds }}
-            failureThreshold: {{ .Values.health.failureThreshold }}
-          {{- end }}
-          resources:
-            {{- toYaml .Values.resources | nindent 12 }}
-      {{- with .Values.volumes }}
-      volumes:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.nodeSelector }}
-      nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.affinity }}
-      affinity:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+      {{- include "gbo-app.podSpec" . | trim | nindent 6 }}
+{{- end }}

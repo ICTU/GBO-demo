@@ -2,7 +2,7 @@
 # the sidecar depends on the sibling ldv-client module, which a build context
 # scoped to this directory cannot see. The `replace ../ldv-client` in go.mod
 # resolves because the two are laid out here the way they are in the tree.
-FROM golang:1.27-alpine@sha256:26402d86be3d72e6a9410afa0108f03529f51f0c1b5eb7f503d0bc44cc7857ac AS builder
+FROM golang:1.27-alpine@sha256:cf6fca6641884b8433441b2b0652976f975e1d0fdd26d177eaaf8596087f3125 AS builder
 WORKDIR /src/services/bron-sidecar
 COPY services/ldv-client/ /src/services/ldv-client/
 COPY services/bron-sidecar/go.mod services/bron-sidecar/go.sum ./

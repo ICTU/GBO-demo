@@ -401,7 +401,9 @@ func handleQuery(cfg config) http.HandlerFunc {
 			cfg.OutwayURL+cfg.OutwayPath, bytes.NewReader(proxyBody))
 		proxyReq.Header.Set("Content-Type", "application/json")
 		// Untrusted context-header: X-GBO-Scope carries the requested scope.
-		// (There is no X-GBO-Flow header; flow is a grant-property.)
+		// (There is no X-GBO-Flow header and no flow grant property: the
+		// consent token below is what puts this request under the consent
+		// regime, #334.)
 		proxyReq.Header.Set("X-GBO-Scope", req.ScopeID)
 		proxyReq.Header.Set("X-GBO-Consent-Token", req.ConsentToken)
 		proxyReq.Header.Set("Fsc-Transaction-Id", fscTxID)

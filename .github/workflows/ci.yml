@@ -157,6 +157,44 @@ jobs:
             echo 'shared onboarding PVC remains in the rendered issuance workload' >&2
             exit 1
           fi
+      - name: helm template — every example values file
+        run: |
+          for values in deploy/helm/gbo-app/examples/*-values.yaml; do
+            name="$(basename "$values" -values.yaml)"
+            helm template "$name" deploy/helm/gbo-app --values "$values" > /dev/null
+          done
+      - name: helm template — one-shot Jobs
+        run: |
+          for name in source-registry-bootstrap source-registry-migrations eudi-migrations; do
+            helm template "$name" deploy/helm/gbo-app \
+              --values "deploy/helm/gbo-app/examples/$name-values.yaml" > "/tmp/$name.yaml"
+            grep -q '^kind: Job$' "/tmp/$name.yaml"
+            grep -q 'restartPolicy: Never' "/tmp/$name.yaml"
+            grep -q 'parallelism: 1' "/tmp/$name.yaml"
+            if grep -qE '^kind: (Deployment|Service|HTTPRoute)$' "/tmp/$name.yaml"; then
+              echo "$name renders a serving workload alongside its Job" >&2
+              exit 1
+            fi
+            if grep -q 'livenessProbe' "/tmp/$name.yaml"; then
+              echo "$name renders HTTP probes on a workload that exits" >&2
+              exit 1
+            fi
+          done
+      - name: helm template — a Job release refuses an HTTPRoute
+        run: |
+          if helm template job-with-route deploy/helm/gbo-app \
+            --set job.enabled=true --set route.enabled=true \
+            --set route.hostname=example.test > /dev/null 2>&1; then
+            echo 'job.enabled together with route.enabled should fail to render' >&2
+            exit 1
+          fi
+      - name: helm template — postgres-eudi
+        run: |
+          helm template postgres-eudi deploy/helm/gbo-app \
+            --values deploy/helm/gbo-app/examples/postgres-eudi-values.yaml \
+            > /tmp/postgres-eudi.yaml
+          grep -q '^kind: Deployment$' /tmp/postgres-eudi.yaml
+          grep -q 'type: Recreate' /tmp/postgres-eudi.yaml
 
   frontend:
     name: Frontend — tsc --strict

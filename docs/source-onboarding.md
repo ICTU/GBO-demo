@@ -391,6 +391,19 @@ least-privilege credentials. Voorbeeldwaarden staan in
 [`source-reconciler-values.yaml`](../deploy/helm/gbo-app/examples/source-reconciler-values.yaml)
 en [`eudi-adapter-values.yaml`](../deploy/helm/gbo-app/examples/eudi-adapter-values.yaml).
 
+Het aanmaken van de registrydatabase en het toepassen van het schema zijn geen
+onderdeel van die drie rollen. Het zijn eenmalige taken, en ze draaien als Job
+via `job.enabled` in dezelfde chart:
+[`source-registry-bootstrap-values.yaml`](../deploy/helm/gbo-app/examples/source-registry-bootstrap-values.yaml)
+en
+[`source-registry-migrations-values.yaml`](../deploy/helm/gbo-app/examples/source-registry-migrations-values.yaml).
+Een schemawijziging draait daarmee één keer per release en nooit gelijktijdig
+met zichzelf, wat een init-container niet kan garanderen. Rol de bootstrap-Job
+uit, dan de migratie-Job, en pas daarna de reconciler, de adapter en de
+issuance-server. Welke vorm bij welke taak hoort — Deployment, Job of
+init-container — staat in
+[`deploy/helm/gbo-app/README.md`](../deploy/helm/gbo-app/README.md).
+
 Voer een eerste Kubernetes-activatie bij voorkeur in twee gecontroleerde
 stappen uit. Laat eerst een eenmalige reconciler-Job de complete kandidaatset
 naar de registry promoveren en controleer dat alle statussen `active` zijn.

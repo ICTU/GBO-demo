@@ -6,6 +6,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Added
+- **The `gbo-app` chart can express a one-shot workload.** `job.enabled`
+  renders a Job instead of a Deployment, Service and HTTPRoute — mutually
+  exclusive, because a release either serves traffic or runs to completion.
+  Combining it with `route.enabled` is a template error rather than a silently
+  ignored value.
+  - The Job is named `<fullname>-<release revision>`. A Job spec is immutable,
+    so a release that reruns a task creates a new object instead of patching
+    the old one; `kubectl get jobs` then reads as a history of attempts, and
+    Helm removes the previous revision's Job on upgrade.
+  - `parallelism` and `completions` are pinned to 1 and `replicaCount` is
+    ignored, so one release never runs a migration in two pods at once.
+    `restartPolicy: Never` keeps a failed pod for `kubectl logs`, and
+    `activeDeadlineSeconds` (default 600) fails a wedged migration instead of
+    hanging. Deploy Job releases with `--wait --wait-for-jobs` — plain
+    `--wait` does not wait for Jobs; Flux does by default.
+  - Helm creates a new revision's Job before deleting the previous one, in the
+    background, so attempts can overlap across revisions. Exclusion lives in
+    the database: `scripts/bootstrap-source-registry.sh` now holds an advisory
+    lock in each psql session, `migrate-source-registry` already held one, and
+    nl-wallet's migrator applies each run in a single transaction against a
+    primary-keyed history table, so two attempts cannot both commit.
+  - The three EUDI database tasks that had no home in the chart now have
+    example values files: `source-registry-bootstrap`,
+    `source-registry-migrations` and `eudi-migrations`.
+    `eudi-issuance-materialize` stays an init container — it writes
+    `issuance_server.toml` into the pod's own `emptyDir`, so it has to run in
+    that pod, before that container, every time.
+  - `postgres-eudi` gains an example too, and stays a Deployment with
+    `Recreate` and a ReadWriteOnce PVC rather than becoming a StatefulSet.
+    `Recreate` already guarantees that two postgres processes never open one
+    data directory; per-replica identity buys nothing for a single replica
+    reached through its Service. The reasoning is recorded in the values file
+    and in the new `deploy/helm/gbo-app/README.md`, which documents both
+    release shapes and where each one-shot workload belongs.
+  - The Deployment and the Job render from one shared pod spec helper, so the
+    two shapes cannot drift. Rendering is byte-identical for every existing
+    example values file. CI now templates every file in `examples/`.
+
 ### Changed
 - **LDV records take the caller's trace over instead of the FSC transaction
   id** (#365). `ldv-client` reads `traceparent` before `Fsc-Transaction-Id`,
@@ -51,6 +90,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   LDV position; `ldv.Transport`, placed inside the instrumentation, puts it
   back. The assembly record is now also written when the source refuses, fails
   or has no data, so a source's records never hang under a missing parent.
+- **The authorization regime a request is judged under follows from the evidence it
+  carries, not from a `flow` grant property.** No component reads `flow` and no seed
+  writes one; `subject_id_type` stays, because identifier format is not derivable
+  without guessing at it
+  ([#334](https://github.com/ICTU/GBO-demo/issues/334)).
+  - The flow dispatch in `engine.rego` is gone. Every rule already declared its own
+    authorization basis — `consent_required` (DvTP) or `pid_required` (EUDI) — and
+    fails closed without it, so the dispatch was never doing the security work. What
+    it did do was keep the *reason* right, and no test could see that: five new
+    engine-level tests now assert the surfacing deny code in both directions, and
+    with the dispatch simply deleted all five degraded (a consent-based deny surfaced
+    `PID_NOT_PRESENT`, a PID-based deny surfaced `CONSENT_CONTEXT_INVALID` — the top
+    of the priority table).
+  - Reason aggregation replaces it, and is the better fix because it survives the
+    property's removal. `_best_reason` ranks the evaluated rules by how far each got
+    through its own cascade before applying the priority table: a rule whose basis
+    does not fit the request passes nothing, since every axis ahead of its basis
+    check is skipped and the basis check itself fails. All five reasons are
+    unchanged from the dispatch's behaviour. When depth cannot separate the
+    rules — every one passed nothing, as a failed enrichment produces — the
+    regime the request-mapper attempted breaks the tie, so a PID request whose
+    BSN could not be pseudonymised still surfaces `PID_NOT_PRESENT`.
+  - A request carrying **both** a verified consent and a disclosed PID is denied with
+    `AMBIGUOUS_EVIDENCE`. Without the guard the engine would have resolved it by rule
+    ordering — `_evaluate_field` grants on the first rule that returns true — which is
+    precedence, not a decision.
+  - The request-mapper selects the consent regime on a consent token and falls through
+    to the PID regime otherwise. A subject variable cannot discriminate: both regimes
+    carry one, a PI under `subject_id_type=pseudonym` and a raw BSN under `direct`, and
+    telling them apart by identifier shape is the guessing this change removes. The PID
+    regime is therefore entered by *absence*, and its only remaining gate is each EUDI
+    rule's `allowed_actors`; a test asserts that whitelist stays disjoint from the
+    consent-based consumers, because an OIN in both could skip the citizen's consent by
+    omitting the header. `flowFromHeaders`, `isEUDIFlow` and the FSC-token property
+    reader are removed. Identifier scrubbing does not depend on the regime: under
+    a consent token the subject variable is kept only when it is the verified
+    consent's own PI and blanked otherwise, so a consent header — valid or not —
+    cannot carry a raw BSN into OPA's input or its decision log.
+  - The source-metadata path keeps subject, method and endpoint as its gate. The PDP
+    cannot see which FSC service a request arrived on, so this admits one case it did
+    not before: a permitted OIN, on a contract other than the metadata one, issuing
+    `GET /.well-known/gbo`. Accepted deliberately — FSC routes each service to its own
+    upstream and the document is a public service description, so it is the same peer
+    reaching the same class of document — and recorded in the rule.
 - **The landing page returns to the palette it was designed in.** The ICTU
   colours introduced in #322 are reverted: `#01689b` carries the page again,
   `#d52b1e` is the hover accent, and the derived tints, connector lines and

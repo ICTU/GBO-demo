@@ -1,3 +1,4 @@
+{{- if not .Values.job.enabled }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -13,3 +14,4 @@ spec:
       protocol: TCP
   selector:
     {{- include "gbo-app.selectorLabels" . | nindent 4 }}
+{{- end }}

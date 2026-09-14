@@ -12,19 +12,32 @@ package authz
 # context}. The GraphQL request-mapper inside this image places its
 # enrichment under input.context: context.resolved (GraphQL fields),
 # context.pip (consent/PID), context.resource (scope/query/variables/pi),
-# context.flow, context.trace_id. OpenFTV injects context.time.
+# context.trace_id. OpenFTV injects context.time.
 
 import data.dvtp.gbo
 
 default allow := false
 
 # Source-metadata is transported over its own FSC service and carries no
-# GraphQL body or citizen identifier. The countersigned grant property in the
-# FSC token selects this narrow policy path. Only the GBO consumer peer may
-# use it; method and endpoint remain exact so all other non-GraphQL traffic
-# stays fail-closed.
+# GraphQL body or citizen identifier. Subject, method and endpoint are each
+# pinned exactly, so all other non-GraphQL traffic stays fail-closed.
+#
+# What this rule can no longer tell is WHICH FSC service the request arrived
+# on. The PDP sees the caller's OIN, the method and the path; it does not see
+# the service name (the request-mapper reads fsc-authorization, the
+# transaction id, the scope header and the consent token — no service). The
+# flow property stood in for that, so dropping it widens this rule by exactly
+# one case: one of the two OINs below, arriving on a contract other than the
+# metadata one, issuing GET /.well-known/gbo.
+#
+# That is judged acceptable rather than harmless. FSC routes each service to
+# its own upstream (gbo-metadata-bd -> graphql-server:4000, the bri data
+# service -> the sidecar), and the document is a public description of a
+# service, carrying no citizen data. So the widening admits the same peer to
+# the same class of document — not a new principal, and not a new kind of
+# content. If the service name is ever surfaced to the PDP, gate on that and
+# the rule becomes exact again without reinstating a declared property.
 _source_metadata_request if {
-	input.context.flow == "gbo:source-metadata"
 	input.subject.id in {
 		"99999999900000000100", # local Docker Compose
 		"0000009961MINEZK0000", # simulation MinEZK
