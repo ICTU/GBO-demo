@@ -34,7 +34,8 @@ verwerking in een eigen logboek; GBO logt niet namens hem.
 Elke applicatie neemt `T` ongewijzigd over uit `traceparent` en zet de span van
 de aanroeper als `parent_span_id` (LDV §3.3.1). `X` is een transport-id. De ADL
 van de PDP legt `T` en `X` samen vast, zodat je vanuit een LDV-record de
-bijbehorende FSC-transactie vindt.
+bijbehorende FSC-transactie vindt. Achter de FSC Inway gebeurt dat nog niet;
+zie [#369](https://github.com/ICTU/GBO-demo/issues/369).
 
 ## De DvTP-bevraging
 
@@ -42,9 +43,13 @@ bijbehorende FSC-transactie vindt.
 
 - De afnemer stuurt `traceparent` `T` en `Fsc-Transaction-Id` `X` mee. Achter
   FSC loggen de sidecar en de graphql-server onder `T`.
-- De PDP legt zijn beslissing vast in de ADL, met `T` en `X`. De Inway zet de
-  headers van het oorspronkelijke verzoek, `traceparent` inbegrepen, in de
-  AuthZEN-context; daar leest de PDP `T` uit.
+- De PDP legt zijn beslissing vast in de ADL, met `T` en `X`. Dat is het
+  doel; nu krijgt het ADL-record achter de Inway een eigen trace en geen `X`,
+  omdat de Inway geen `traceparent` meestuurt en `X` als `X-Request-Id`
+  doorgeeft ([#369](https://github.com/ICTU/GBO-demo/issues/369)). De headers
+  van het oorspronkelijke verzoek, `traceparent` inbegrepen, staan wel in de
+  AuthZEN-context; daar leest de request-mapper van de PDP `T` uit voor de
+  statuscontrole.
 - De PDP vraagt de consentstatus op bij het register en stuurt `traceparent`
   mee. Het record in `logboek-toestemming` hangt onder de span van die
   opvraging.

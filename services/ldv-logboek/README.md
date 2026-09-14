@@ -117,18 +117,26 @@ more than once — a consumer that calls two sources, a source that calls
 onwards — carries several transaction ids while its trace id stays one. The two
 are linked where the standards link them: the ADL records
 `adl.fsc.transaction_id` next to `trace_id`, and the FSC transaction log keys
-on the transaction id.
+on the transaction id. Behind the FSC Inway the ADL does not do that yet; see
+below.
 
 The transaction id is still the fallback for a hop that arrives without
 `traceparent`. At the entry of a chain the first component ties its trace to
 the transaction id it mints, so for a request that crosses FSC once the trace
-id, the ADL's transaction id and the txlog carry the same value.
+id and the txlog carry the same value.
 
 One hop does not carry `traceparent` on the wire: the FSC Inway calls the PDP
 on a fresh context, with only `X-Request-Id` (the transaction id) as a header.
-It does copy the original request's headers into the AuthZEN context,
-`traceparent` included, and that is where the PDP reads the request's trace
-from when it asks the consent register for a status.
+It does copy the original request's headers into the AuthZEN context, under
+`context.headers` and `traceparent` included, and that is where the PDP's
+request-mapper reads the request's trace from when it asks the consent
+register for a status. OpenFTV itself does not look there. It takes the trace
+from a `traceparent` header or a top-level `context.traceparent`, and the
+transaction id from a `Fsc-Transaction-Id` header. So today the ADL record
+behind the Inway gets a trace of its own and no `adl.fsc.transaction_id`, and
+it links to neither the LDV records nor the txlog. ADL requires every
+component, the PEP included, to pass trace context on, so the fix belongs in
+the Inway ([#369](https://github.com/ICTU/GBO-demo/issues/369)).
 
 How a reader follows a chain across logbooks is described in
 [`docs/ldv`](../../docs/ldv/README.md).
@@ -501,9 +509,10 @@ trace 0af7651916cd43dd8448eb211c80319c
     └── bd-ib-2025@v1           graphql-server subject LP-5b1f0e8a… (logboek-pseudoniem)
 ```
 
-For a request that crosses FSC once, the same value is the transaction id on
-the ADL decision record written by the OpenFTV PDP and in the FSC transaction
-log of both peers.
+For a request that crosses FSC once, the same value is the transaction id in
+the FSC transaction log of both peers. The ADL decision record written by the
+OpenFTV PDP should carry it too, but behind the Inway it does not yet
+([#369](https://github.com/ICTU/GBO-demo/issues/369)).
 
 The death-certificate attestation, in `logboek-brp`. One request, three
 Betrokkenen: the surviving partner who asked, and the two living relatives the

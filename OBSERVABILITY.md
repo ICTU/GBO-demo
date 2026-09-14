@@ -80,8 +80,10 @@ must never do, and exactly what this one must.
 
 The two are joined by the trace id. An LDV record takes it over from
 `traceparent`, as the standard requires. The `Fsc-Transaction-Id` is FSC's own
-id per transaction; the ADL decision record carries both, and for a request
-that crosses FSC once the chain's entry makes them the same value. The
+id per transaction, and for a request that crosses FSC once the chain's entry
+makes them the same value. The ADL decision record is meant to carry both;
+behind the FSC Inway it does not yet, because the Inway passes no trace
+context to the PDP ([#369](https://github.com/ICTU/GBO-demo/issues/369)). The
 portal's **Logboek Dataverwerkingen** panel shows, per trace, the LDV records
 of every Verantwoordelijke next to the FSC transaction records and the PDP
 decision. How a reader follows a chain across logbooks is in
