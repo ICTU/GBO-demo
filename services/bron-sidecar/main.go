@@ -67,6 +67,10 @@ type config struct {
 	// each bron's register names its activities in its own terms.
 	LDVResolutionActivity string
 	LDVForwardActivity    string
+	// LDVBSNkNextLogbookID is where BSNk's processings can be looked up — its
+	// read API, or a contact page while it has none, as the read extension
+	// allows. The PI→BSN resolution records it as its next logbook.
+	LDVBSNkNextLogbookID string
 }
 
 func loadConfig() config {
@@ -79,6 +83,7 @@ func loadConfig() config {
 
 		LDVResolutionActivity: getEnv("LDV_RESOLUTION_ACTIVITY", ""),
 		LDVForwardActivity:    getEnv("LDV_FORWARD_ACTIVITY", ""),
+		LDVBSNkNextLogbookID:  getEnv("LDV_BSNK_NEXT_LOGBOOK_ID", ""),
 	}
 }
 
@@ -263,7 +268,10 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client) http.H
 						Status:       ldv.Status(resolveErr),
 						StartTime:    resolutionStart,
 						EndTime:      time.Now().UTC(),
-						Attributes:   ldv.Attributes(cfg.LDVResolutionActivity, piVal, ldv.SubjectTypePI, forward.processor, map[string]any{}),
+						Attributes: ldv.Attributes(cfg.LDVResolutionActivity, piVal, ldv.SubjectTypePI, forward.processor, map[string]any{
+							// BSNk did the transform; its side of it is logged there.
+							ldv.AttrNextLogbookID: cfg.LDVBSNkNextLogbookID,
+						}),
 					}
 					if writeErr := logbook.Write(r.Context(), record); writeErr != nil {
 						ldv.LogFailure(record.Name, writeErr)

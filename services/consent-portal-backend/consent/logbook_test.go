@@ -83,6 +83,33 @@ func TestGiveConsentLogsThePseudonymisation(t *testing.T) {
 	}
 }
 
+// BSNk did the transform, so the record points at where BSNk's side of it can
+// be looked up.
+func TestThePseudonymisationPointsAtThePseudonymisationService(t *testing.T) {
+	portal, _, logbook := portalWithLogbook(t)
+	portal.PseudonymsLogbook = "https://example.test/bsnk"
+
+	if _, err := portal.GiveConsent(context.Background(), citizenBSN, GiveInput{
+		DienstverlenerOIN: "00000001234567890000",
+		Scopes:            []string{"bd:ib:2025"},
+	}); err != nil {
+		t.Fatalf("give consent: %v", err)
+	}
+	if _, err := portal.ListConsents(context.Background(), citizenBSN); err != nil {
+		t.Fatalf("list consents: %v", err)
+	}
+
+	recorded := logbook.written()
+	if len(recorded) != 2 {
+		t.Fatalf("recorded %d processings, want 2: %+v", len(recorded), recorded)
+	}
+	for _, processing := range recorded {
+		if processing.NextLogbook != "https://example.test/bsnk" {
+			t.Errorf("%s: next logbook = %q", processing.Name, processing.NextLogbook)
+		}
+	}
+}
+
 // Fail-closed, and early enough to matter: the record is filed before the
 // consent is created, so a refused record leaves no consent behind.
 func TestGiveConsentThatCannotBeLoggedCreatesNoConsent(t *testing.T) {

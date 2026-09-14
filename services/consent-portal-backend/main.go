@@ -91,16 +91,20 @@ type config struct {
 	// writes no Dataverwerkingen records.
 	LogbookURL   string
 	LogbookToken string
+	// PseudonymsLogbook is where BSNk's processings can be looked up: its
+	// read API, or a contact page while it has none.
+	PseudonymsLogbook string
 }
 
 func loadConfig() config {
 	return config{
-		Port:             getEnv("PORT", "4005"),
-		BSNkURL:          getEnv("BSNK_URL", "http://bsnk-mock:4003"),
-		ConsentURL:       getEnv("CONSENT_URL", "http://consent-register:4002"),
-		DevPortalBackend: getEnv("DEV_PORTAL_BACKEND_URL", ""),
-		LogbookURL:       getEnv("LDV_LOGBOOK_URL", ""),
-		LogbookToken:     getEnv("LDV_WRITE_TOKEN", ""),
+		Port:              getEnv("PORT", "4005"),
+		BSNkURL:           getEnv("BSNK_URL", "http://bsnk-mock:4003"),
+		ConsentURL:        getEnv("CONSENT_URL", "http://consent-register:4002"),
+		DevPortalBackend:  getEnv("DEV_PORTAL_BACKEND_URL", ""),
+		LogbookURL:        getEnv("LDV_LOGBOOK_URL", ""),
+		LogbookToken:      getEnv("LDV_WRITE_TOKEN", ""),
+		PseudonymsLogbook: getEnv("LDV_BSNK_NEXT_LOGBOOK_ID", ""),
 	}
 }
 
@@ -132,11 +136,12 @@ func newPortal(cfg config, hub *portalhttp.Hub, logbook consent.Logbook) *consen
 	}
 
 	return &consent.Portal{
-		Pseudonyms: bsnk.Client{Base: cfg.BSNkURL, Caller: caller},
-		Consents:   register.Client{Base: cfg.ConsentURL, Caller: caller},
-		Watch:      watchers,
-		Logbook:    logbook,
-		OwnOIN:     portalOIN,
+		Pseudonyms:        bsnk.Client{Base: cfg.BSNkURL, Caller: caller},
+		Consents:          register.Client{Base: cfg.ConsentURL, Caller: caller},
+		Watch:             watchers,
+		Logbook:           logbook,
+		OwnOIN:            portalOIN,
+		PseudonymsLogbook: cfg.PseudonymsLogbook,
 	}
 }
 

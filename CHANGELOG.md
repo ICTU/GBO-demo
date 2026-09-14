@@ -35,6 +35,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   consent register's, whose status the PDP checks — is still queried and shown
   as such. `LDV_LOGBOOKS` now names each logbook by its read-API URI and marks
   the start logbooks.
+- **Records of a call to BSNk point at BSNk** (#365). The sidecars' PI→BSN
+  resolution and the consent portal's pseudonymisation set
+  `dpl.read.nextLogbookId` from `LDV_BSNK_NEXT_LOGBOOK_ID`. BSNk has no read
+  API in the demo, so the value is a page about the mock, the fallback the read
+  extension allows for a party without one.
 - **The landing page returns to the palette it was designed in.** The ICTU
   colours introduced in #322 are reverted: `#01689b` carries the page again,
   `#d52b1e` is the hover accent, and the derived tints, connector lines and

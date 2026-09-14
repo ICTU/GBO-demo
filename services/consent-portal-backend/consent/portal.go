@@ -16,6 +16,10 @@ type Portal struct {
 	Logbook    Logbook          // Logboek Dataverwerkingen; nil means not in an LDV chain
 	OwnOIN     string           // recipient_oin used for the portal-scoped subject reference
 	Now        func() time.Time // nil means time.Now; injected by tests
+	// PseudonymsLogbook is where the pseudonymisation service's processings
+	// can be looked up — its read API, or a contact page when it has none —
+	// recorded as the pseudonymisation's next logbook. Empty means unknown.
+	PseudonymsLogbook string
 }
 
 // The verwerkingsactiviteiten of this portal, as named in GBO's register.
@@ -116,6 +120,8 @@ func (p *Portal) GiveConsent(ctx context.Context, citizen BSN, in GiveInput) (Gr
 		Subject:  SubjectRef(portalSubject.Pseudonym),
 		Start:    pseudonymisationStart,
 		End:      p.now().UTC(),
+		// BSNk did the transform; its side of it is logged there, not here.
+		NextLogbook: p.PseudonymsLogbook,
 		Attributes: map[string]any{
 			"dpl.gbo.pseudonimiseringAanleiding": "toestemming-verlenen",
 		},
@@ -201,12 +207,13 @@ func (p *Portal) subjectRefFor(ctx context.Context, citizen BSN, aanleiding stri
 		return "", fmt.Errorf("pseudonymize: %w", err)
 	}
 	if err := p.record(ctx, Processing{
-		Activity:   pseudonymisationActivity,
-		Name:       "dataverwerking.bsn-pseudonimisering",
-		Subject:    SubjectRef(ps.Pseudonym),
-		Start:      start,
-		End:        p.now().UTC(),
-		Attributes: map[string]any{"dpl.gbo.pseudonimiseringAanleiding": aanleiding},
+		Activity:    pseudonymisationActivity,
+		Name:        "dataverwerking.bsn-pseudonimisering",
+		Subject:     SubjectRef(ps.Pseudonym),
+		Start:       start,
+		End:         p.now().UTC(),
+		NextLogbook: p.PseudonymsLogbook,
+		Attributes:  map[string]any{"dpl.gbo.pseudonimiseringAanleiding": aanleiding},
 	}); err != nil {
 		return "", fmt.Errorf("log pseudonymisation: %w", err)
 	}

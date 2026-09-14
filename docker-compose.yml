@@ -718,6 +718,10 @@ services:
       - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY:-local-demo-pseudonym-key}
       - LDV_RESOLUTION_ACTIVITY=https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-pi-bsn-resolutie/v1
       - LDV_FORWARD_ACTIVITY=https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-bronquery-doorgifte/v1
+      # Where BSNk's side of the PI→BSN resolution can be looked up. BSNk has
+      # no read API here — it is a mock — so this is the page describing it,
+      # the fallback the read extension allows for a party without one.
+      - LDV_BSNK_NEXT_LOGBOOK_ID=https://github.com/ICTU/GBO-demo/tree/main/services/bsnk-mock
     volumes:
       # The LDV spool must survive a restart; that is what makes a
       # record durable before it reaches the logbook.
@@ -764,6 +768,7 @@ services:
       - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY_BRP:-local-demo-pseudonym-key-brp}
       - LDV_RESOLUTION_ACTIVITY=https://logboek.rvig.nl/verwerkingsactiviteiten/brp-pi-bsn-resolutie/v1
       - LDV_FORWARD_ACTIVITY=https://logboek.rvig.nl/verwerkingsactiviteiten/brp-bronquery-doorgifte/v1
+      - LDV_BSNK_NEXT_LOGBOOK_ID=https://github.com/ICTU/GBO-demo/tree/main/services/bsnk-mock
     volumes:
       # The LDV spool must survive a restart; that is what makes a
       # record durable before it reaches the logbook.
@@ -803,6 +808,9 @@ services:
       # It shares a logbook with the consent register: one system, one logbook.
       - LDV_LOGBOOK_URL=http://logboek-toestemming:4016
       - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
+      # The pseudonymisation calls BSNk; its record points at the page
+      # describing the mock, which has no read API.
+      - LDV_BSNK_NEXT_LOGBOOK_ID=https://github.com/ICTU/GBO-demo/tree/main/services/bsnk-mock
     volumes:
       # The LDV spool must survive a restart; that is what makes a record
       # durable before it reaches the logbook.

@@ -343,6 +343,7 @@ Producer configuration:
 | `LDV_SUBJECT_PSEUDONYM_KEY` | key for `logboek-pseudoniem` derivation |
 | `LDV_RESOLUTION_ACTIVITY`, `LDV_FORWARD_ACTIVITY` | `bron-sidecar`/`brp-sidecar` only — the same image runs in front of every bron, and each bron's register names its activities in its own terms |
 | `LDV_YEAR_ACTIVITY_TEMPLATE` | `graphql-server` only, e.g. `bd-ib-%d@v1` |
+| `LDV_BSNK_NEXT_LOGBOOK_ID` | sidecars and `consent-portal-backend` — where BSNk's side of a transform can be looked up, set as `dpl.read.nextLogbookId` on the record of the call. BSNk has no read API in the demo, so it is a page about the mock, the fallback the read extension allows |
 
 `consent-register` and `consent-portal-backend` need no
 `LDV_SUBJECT_PSEUDONYM_KEY`: neither ever holds a BSN in a record, so there is

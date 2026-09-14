@@ -19,6 +19,8 @@ const (
 	// The BSN bsnk-mock resolves the demo PI to. It must never appear in a
 	// record, in either flow.
 	demoBSN = "123456789"
+	// Where BSNk's side of the resolution can be looked up.
+	bsnkContact = "https://example.test/bsnk-contact"
 )
 
 // pseudonymToken is an Fsc-Authorization token carrying the countersigned
@@ -58,6 +60,7 @@ func sidecarUnderTest(t *testing.T, logbook *ldvtest.Logbook) string {
 		PseudonymVars:         "bsn",
 		LDVResolutionActivity: resolutionActivity,
 		LDVForwardActivity:    forwardActivity,
+		LDVBSNkNextLogbookID:  bsnkContact,
 	}
 	client := logbook.Client(t, "bron-sidecar")
 	sidecar := httptest.NewServer(newMux(cfg, &http.Client{Timeout: 5 * time.Second}, client))
@@ -137,6 +140,15 @@ func TestPseudonymFlowLogsBothDataverwerkingen(t *testing.T) {
 	}
 	if got := forward[0].Attributes[ldv.AttrProcessingActivityID]; got != forwardActivity {
 		t.Errorf("forward processing_activity_id = %v, want %s", got, forwardActivity)
+	}
+	// The resolution called BSNk, another party, so it points there. The
+	// forward called the source behind the sidecar, which belongs to the same
+	// Verantwoordelijke and logs into the same logbook, so it points nowhere.
+	if got := resolution[0].Attributes[ldv.AttrNextLogbookID]; got != bsnkContact {
+		t.Errorf("resolution nextLogbookId = %v, want %s", got, bsnkContact)
+	}
+	if _, present := forward[0].Attributes[ldv.AttrNextLogbookID]; present {
+		t.Errorf("the forward points onwards, but its source logs into the same logbook")
 	}
 	// The request was initiated by another application, on the far side of an
 	// FSC boundary.
