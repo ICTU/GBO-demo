@@ -12,17 +12,27 @@ import data.dvtp.gbo.lib
 # ONE AuthZEN Decision (§6.2) = the AND across all covered fields, with
 # the per-field detail in decision.context.
 #
-# Adapted for consent-based policies: ctx carries input.context.pip +
+# Adapted for consent-based policies: ctx carries the PIP attributes +
 # input.context.resource so consent-checks (lib.evaluate) can access
 # them, and _eval passes the current `field` so field-in-consent works
-# per field. (OpenFTV: pdp-service enrichment lives under input.context.)
+# per field. The consent is resolved by the policy itself (consent.rego);
+# everything else comes from the request-mapper under input.context.
 # ═══════════════════════════════════════════════════════════════════════════
+
+import data.dvtp.gbo.consent
 
 # ── Entrypoint: one Decision = closed-world AND across all requested data fields ─
 
 _field_decisions := [{"field": f.id, "result": _decide(f)} | some f in _data_fields]
 
-response := {"decision": false, "context": {"reason_admin": {"code": "COVERAGE_UNVERIFIABLE"}}} if {
+# The resolved consent goes back into the response document. It is not in
+# input — the policy fetched it — so without this the decision log would
+# record a decision without the attribute it was taken on (#330, #332).
+response := object.union(_decision, {"context": {"pip": {"consent": consent.resolved}}}) if {
+	consent.resolved
+} else := _decision
+
+_decision := {"decision": false, "context": {"reason_admin": {"code": "COVERAGE_UNVERIFIABLE"}}} if {
 	_coverage_unverifiable
 } else := {"decision": false, "context": {"reason_admin": {"code": "AMBIGUOUS_EVIDENCE"}}} if {
 	_ambiguous_evidence
@@ -75,11 +85,12 @@ _coverage_unverifiable if input.context.resolved.coverage_unverifiable
 default _ambiguous_evidence := false
 
 # Two authorization bases on one request: a verified consent AND a
-# disclosed PID. The request-mapper makes these mutually exclusive by
-# construction today — it fills pip.consent or pip.pid, never both — but
-# that exclusivity is a property of the flow dispatch it used to key on,
-# not of the evidence itself. Nothing upstream guarantees it once the
-# regime follows from what the request carries.
+# disclosed PID. They are mutually exclusive by construction today — the
+# policy resolves pip.consent from a consent token, and the request-mapper
+# fills pip.pid only when there is none — but that exclusivity is a
+# property of how the two are wired, not of the evidence itself. Nothing
+# upstream guarantees it once the regime follows from what the request
+# carries.
 #
 # The engine must not resolve the ambiguity silently. _evaluate_field
 # grants on the FIRST rule that returns true, so a request carrying both
@@ -157,22 +168,30 @@ _args := object.get(object.get(input.context, "resolved", {}), "args", {})
 
 # ── Context for the rules ──────────────────────────────────────────────────
 # Contains consent-PIP + resource so lib.evaluate can perform consent-checks
-# without reading input.* itself (dependency-injection style). Consent is
-# verified and status-checked per request by the request-mapper
-# (context.pip.consent); the EUDI pid is per-request too (context.pip.pid).
+# without reading input.* itself (dependency-injection style). The consent
+# is verified and status-checked per evaluation by the policy itself
+# (consent.rego, via http.send); the EUDI pid comes from the request-mapper
+# (context.pip.pid).
 
 _ctx := {
 	"subject": input.subject,
 	"args": _args,
 	"time": object.get(input.context, "time", ""),
 	"resource": object.union(object.get(input.context, "resource", {}), {"pi": _pip_pi}),
-	"pip": object.get(input.context, "pip", {}),
+	"pip": _pip_obj,
 }
+
+# The PIP attributes the rules see. A pip.consent arriving in input is
+# dropped, never trusted: nothing upstream is meant to set it, and the
+# policy decides only on a consent it verified itself.
+_pip_obj := object.union(_input_pip, {"consent": consent.resolved}) if {
+	consent.resolved
+} else := _input_pip
+
+_input_pip := object.remove(object.get(input.context, "pip", {}), ["consent"])
 
 # Mirror pip.consent.pi onto ctx.resource.pi so the rule's constraint-
 # binding (input.burgerservicenummer == resource.pi) is evaluable.
-_pip_obj := object.get(input.context, "pip", {})
-
 _pip_pi := object.get(object.get(_pip_obj, "consent", {}), "pi", "")
 
 # ── Per-rule evaluation (given field) ────────────────────────────────────────
@@ -248,6 +267,16 @@ _outcome_steps(outcome) := outcome.context.reason_admin.steps if {
 # deeper causes (no consent) before derived ones (scope/fields).
 
 _code_priority("CONSENT_NOT_FOUND") := 60
+
+# Token verification failures. The signed-context axis reports one of these
+# in place of the generic CONSENT_CONTEXT_INVALID when consent.rego can say
+# which check failed. Only one arises per request; distinct values keep
+# _worst_code deterministic regardless.
+_code_priority("CONSENT_SIGNATURE_INVALID") := 73
+
+_code_priority("CONSENT_TOKEN_EXPIRED") := 72
+
+_code_priority("CONSENT_KEYS_UNAVAILABLE") := 71
 
 _code_priority("CONSENT_CONTEXT_INVALID") := 70
 
@@ -327,9 +356,9 @@ _best_reason(evaluated) := code if {
 # rules when every one of them passed nothing — which is exactly what a
 # FAILED enrichment produces: an unverifiable consent token, or a BSNk error
 # that leaves pip.pid.pi empty. The attempt still says which regime the
-# request is under, because the request-mapper fills pip.consent when the
-# request carries a consent token and pip.pid otherwise, whether or not
-# that succeeds. A PID-based request whose BSN could not be pseudonymised is
+# request is under, because pip.consent is resolved whenever the request
+# carries a consent token (consent.rego) and the request-mapper fills
+# pip.pid otherwise, whether or not that succeeds. A PID-based request whose BSN could not be pseudonymised is
 # a PID failure, not a consent one. With no attempt, or with both, the
 # priority table decides as before.
 _attempted_basis := "consent" if {

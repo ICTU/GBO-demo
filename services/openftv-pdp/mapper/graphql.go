@@ -2,8 +2,8 @@ package mapping
 
 // GraphQLToContext implements the GBO context-handler as an OpenFTV
 // request-mapper. It walks the GraphQL query carried in the action's
-// body attribute and enriches the PARC context with everything the
-// authz policy needs:
+// body attribute and enriches the PARC context with what the authz
+// policy needs from the request itself:
 //
 //   - context.resolved  — {fields, args, coverage_unverifiable} from the
 //     query walk. Schema-less: scalar = no selection set, parent types
@@ -11,45 +11,41 @@ package mapping
 //   - context.resource  — {scope, query, variables}.
 //   - context.trace_id  — Fsc-Transaction-Id (falls back to X-Request-Id).
 //   - context.fsc       — {transaction_id}.
-//   - context.pip       — {consent} when the request carries a consent
-//     token, {pid: {pi}} otherwise. Never the BSN; see pseudonymizeBSN.
+//   - context.pip       — {pid: {pi}} when the request carries no consent
+//     token. Never the BSN; see pseudonymizeBSN.
+//
+// The consent is not resolved here. The policy verifies a consent token
+// and reads the consent's live status itself (policies/dvtp/gbo/
+// consent.rego, #330): attribute retrieval is PDP work under FTV, and a
+// revocation has to deny on the first request after it.
 //
 // The authorization regime is derived from the evidence on the request,
 // not from a grant property: a consent token selects the consent regime,
-// its absence the PID regime. Neither is trusted on its face — the token
-// is verified here, and every rule re-checks its own basis and fails
+// its absence the PID regime. Neither is trusted on its face — the policy
+// verifies the token, and every rule re-checks its own basis and fails
 // closed. A request carrying both is denied by the engine
 // (AMBIGUOUS_EVIDENCE) rather than resolved by precedence.
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"net/http"
-	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/vektah/gqlparser/v2/ast"
 	"github.com/vektah/gqlparser/v2/parser"
 
 	"gitlab.com/digilab.overheid.nl/ecosystem/ftv/open-ftv/eam/models"
 )
 
-const (
-	gqlMaxDepth         = 64
-	consentClockSkew    = 30 * time.Second
-	consentJWKSCacheTTL = 5 * time.Minute
-	consentJWKSMaxStale = time.Hour
-)
+const gqlMaxDepth = 64
 
 // GraphQLToContext detects a GraphQL body in the action attributes and
 // enriches the context. Bodies that do not decode as a GraphQL request
@@ -87,9 +83,9 @@ func GraphQLToContext(parc *models.PARC, opts ...Option) *models.PARC {
 
 	// The regime follows from the evidence the request carries, not from a
 	// property somebody declared (#334). Only one signal can be read here,
-	// before any rule runs: a consent token. It is positive, unforgeable
-	// evidence — fetchConsent verifies signature, issuer, audience and
-	// expiry — so its presence selects the consent regime.
+	// before any rule runs: a consent token. Its presence selects the
+	// consent regime; the policy verifies it — signature, issuer, audience,
+	// expiry — and denies when it does not hold.
 	//
 	// Everything else falls through to the PID regime. That asymmetry is
 	// deliberate but not free: a subject variable cannot discriminate,
@@ -102,19 +98,22 @@ func GraphQLToContext(parc *models.PARC, opts ...Option) *models.PARC {
 	// gbo/engine_test.rego asserts it, because an OIN in both could skip
 	// consent simply by omitting this header.
 	if hasConsentEvidence(headers) {
-		consent := fetchConsent(headers)
-		ctx.AddAttributeKV("pip", map[string]any{"consent": consent})
 		// Scrubbing does not depend on which regime the request claims: the
 		// header decides HOW the subject identifier is made safe, never
-		// WHETHER. The one subject value the consent regime expects is the
-		// verified consent's own PI — fetchConsent sets "pi" only when the
-		// token verified and its status was read — and that value is kept for
-		// DVT0001's constraint binding. Anything else is blanked rather than
-		// pseudonymised: pseudonymising a BSN yields that citizen's PI, which
-		// would then satisfy the binding for a consumer that was never meant
-		// to hold the BSN. Blanked, the binding fails with CONSTRAINT_MISMATCH.
-		verifiedPI, _ := consent["pi"].(string)
-		if subject == verifiedPI {
+		// WHETHER. The consent regime expects a pseudonym — the consent's own
+		// PI, which DVT0001's constraint binding compares against the verified
+		// token. That comparison is the policy's now; this mapper does not
+		// verify the token, so it keeps a subject only if it has the shape of
+		// a PI and blanks anything else. Nothing of that shape is a BSN, so no
+		// BSN reaches the decision input, whether the token verifies or not.
+		// Shape decides only what may stay in the input here — never the
+		// regime, which is what the paragraph above rules out.
+		//
+		// It never pseudonymises: that would turn a BSN into that citizen's
+		// PI, which would then satisfy the binding for a consumer that was
+		// never meant to hold the BSN. Blanked, the binding fails with
+		// CONSTRAINT_MISMATCH, as it does for a PI other than the consent's.
+		if isPseudonym(subject) {
 			return &models.PARC{Principal: parc.Principal, Action: parc.Action, Resource: parc.Resource, Context: ctx}
 		}
 		return replaceSubject(parc, ctx, query, variables, subject, "")
@@ -155,7 +154,7 @@ func replaceSubject(parc *models.PARC, ctx *models.AttributeSet, query string, v
 // hasConsentEvidence reports whether the request carries a consent token,
 // which is the one signal available before any rule runs that positively
 // identifies the consent regime. It says nothing about whether the token is
-// valid — fetchConsent verifies that and fails closed — only that the caller
+// valid — the policy verifies that and fails closed — only that the caller
 // is asking to be judged under consent rather than under a disclosed PID.
 //
 // An empty header value is not evidence: it would select the consent regime
@@ -182,7 +181,7 @@ func pseudonymizeBSN(bsn string) (string, error) {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := consentClient.Do(req)
+	resp, err := bsnkClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -243,263 +242,15 @@ func substituteValue(v any, from, to string) any {
 	}
 }
 
-// ── Consent PIP (per-request, fail-closed) ─────────────────────────────────
+var bsnkClient = &http.Client{Timeout: 2 * time.Second}
 
-type consentClaims struct {
-	ConsentID        string   `json:"consent_id"`
-	PI               string   `json:"pi"`
-	Scopes           []string `json:"scopes"`
-	DienstverlenrOIN string   `json:"dienstverlener_oin"`
-	ValidUntil       string   `json:"valid_until"`
-	jwt.RegisteredClaims
-}
+// pseudonymPattern is the shape of a PI as BSNk issues it (services/
+// bsnk-mock), and the shape lib.rego's PID check accepts. A BSN is nine
+// digits, so nothing matching this can be one.
+var pseudonymPattern = regexp.MustCompile(`^PI-[0-9a-f]{16}$`)
 
-type jwkSet struct {
-	Keys []struct {
-		KTY string `json:"kty"`
-		CRV string `json:"crv"`
-		Alg string `json:"alg"`
-		Kid string `json:"kid"`
-		X   string `json:"x"`
-		Y   string `json:"y"`
-	} `json:"keys"`
-}
-
-func invalidConsent(reason string) map[string]any {
-	return map[string]any{
-		"context_valid":    false,
-		"status_available": false,
-		"exists":           false,
-		"invalid_reason":   reason,
-	}
-}
-
-// fetchConsent verifies the complete signed authorization context first and
-// then checks only the referenced consent's online status. No claim is filled
-// from a different request or an alternate consent record.
-func fetchConsent(headers map[string]string) map[string]any {
-	tokenString := headers["x-gbo-consent-token"]
-	if tokenString == "" {
-		return invalidConsent("consent token missing")
-	}
-	claims := &consentClaims{}
-	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (any, error) {
-		if token.Method != jwt.SigningMethodES256 {
-			return nil, fmt.Errorf("unexpected consent signing algorithm")
-		}
-		if typ, _ := token.Header["typ"].(string); typ != "gbo-consent+jwt" {
-			return nil, fmt.Errorf("unexpected consent token type")
-		}
-		kid, _ := token.Header["kid"].(string)
-		if kid == "" {
-			return nil, fmt.Errorf("consent signing key id missing")
-		}
-		return consentSigningKey(kid)
-	},
-		jwt.WithValidMethods([]string{jwt.SigningMethodES256.Alg()}),
-		jwt.WithIssuer(consentIssuer()),
-		jwt.WithAudience(consentAudience()),
-		jwt.WithExpirationRequired(),
-		jwt.WithIssuedAt(),
-		jwt.WithLeeway(consentClockSkew),
-	)
-	if err != nil || token == nil || !token.Valid {
-		return invalidConsent("consent token verification failed")
-	}
-	if claims.ConsentID == "" || claims.PI == "" || claims.Scopes == nil || claims.DienstverlenrOIN == "" ||
-		claims.ValidUntil == "" || claims.ID == "" || claims.IssuedAt == nil || claims.NotBefore == nil || claims.ExpiresAt == nil {
-		return invalidConsent("required consent claims missing")
-	}
-	validUntil := claims.ValidUntil
-	parsedValidUntil, validUntilErr := time.Parse(time.RFC3339, validUntil)
-	if validUntilErr != nil || claims.ExpiresAt == nil || !parsedValidUntil.Equal(claims.ExpiresAt.Time) {
-		return invalidConsent("valid_until does not match exp")
-	}
-	status, found, err := fetchConsentStatus(claims.ConsentID, firstHeader(headers, "Fsc-Transaction-Id", "X-Request-Id", "X-Request-ID"))
-	if err != nil {
-		return map[string]any{
-			"context_valid":    true,
-			"status_available": false,
-			"exists":           false,
-			"consent_id":       claims.ConsentID,
-		}
-	}
-	if found && status != "ACTIVE" && status != "REVOKED" {
-		return map[string]any{
-			"context_valid":    true,
-			"status_available": false,
-			"exists":           false,
-			"consent_id":       claims.ConsentID,
-		}
-	}
-	return map[string]any{
-		"context_valid":      true,
-		"status_available":   true,
-		"exists":             found,
-		"withdrawn":          found && status == "REVOKED",
-		"granted_scopes":     claims.Scopes,
-		"valid_until":        validUntil,
-		"pi":                 claims.PI,
-		"dienstverlener_oin": claims.DienstverlenrOIN,
-		"consent_id":         claims.ConsentID,
-		"jti":                claims.ID,
-	}
-}
-
-type consentKeyCache struct {
-	mu         sync.Mutex
-	source     string
-	keys       map[string]*ecdsa.PublicKey
-	freshUntil time.Time
-	staleUntil time.Time
-	now        func() time.Time
-}
-
-var cachedConsentKeys = consentKeyCache{now: time.Now}
-
-// consentSigningKey keeps known verification keys local to the PDP. An
-// unknown kid always triggers a refresh so key rotation takes effect without
-// waiting for the TTL. During a brief JWKS outage a previously verified key
-// remains usable for a bounded period; the separate online consent-status
-// check still fails closed if the consent register itself is unavailable.
-func consentSigningKey(kid string) (*ecdsa.PublicKey, error) {
-	cache := &cachedConsentKeys
-	cache.mu.Lock()
-	defer cache.mu.Unlock()
-
-	source := consentURL()
-	now := cache.now()
-	if cache.source != source {
-		cache.source = source
-		cache.keys = nil
-		cache.freshUntil = time.Time{}
-		cache.staleUntil = time.Time{}
-	}
-
-	known := cache.keys[kid]
-	if known != nil && now.Before(cache.freshUntil) {
-		return known, nil
-	}
-
-	keys, err := fetchConsentKeys(source)
-	if err != nil {
-		if known != nil && now.Before(cache.staleUntil) {
-			return known, nil
-		}
-		return nil, fmt.Errorf("consent verification keys unavailable: %w", err)
-	}
-
-	cache.keys = keys
-	cache.freshUntil = now.Add(consentJWKSCacheTTL)
-	cache.staleUntil = now.Add(consentJWKSMaxStale)
-	key := keys[kid]
-	if key == nil {
-		return nil, fmt.Errorf("unknown consent signing key")
-	}
-	return key, nil
-}
-
-func fetchConsentKeys(source string) (map[string]*ecdsa.PublicKey, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, source+"/.well-known/jwks.json", nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := consentClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("jwks status %d", resp.StatusCode)
-	}
-	var set jwkSet
-	if err := json.NewDecoder(resp.Body).Decode(&set); err != nil {
-		return nil, err
-	}
-	keys := make(map[string]*ecdsa.PublicKey, len(set.Keys))
-	for _, key := range set.Keys {
-		if key.KTY != "EC" || key.CRV != "P-256" || key.Alg != "ES256" || key.Kid == "" {
-			continue
-		}
-		x, errX := base64.RawURLEncoding.DecodeString(key.X)
-		y, errY := base64.RawURLEncoding.DecodeString(key.Y)
-		if errX != nil || errY != nil {
-			continue
-		}
-		pub := &ecdsa.PublicKey{Curve: elliptic.P256(), X: new(big.Int).SetBytes(x), Y: new(big.Int).SetBytes(y)}
-		if pub.Curve.IsOnCurve(pub.X, pub.Y) {
-			keys[key.Kid] = pub
-		}
-	}
-	if len(keys) == 0 {
-		return nil, fmt.Errorf("jwks contains no supported keys")
-	}
-	return keys, nil
-}
-
-// fetchConsentStatus asks the consent register whether the consent is still
-// live. txID is passed on rather than dropped: confirming a status is itself
-// a Dataverwerking that the register logs, and without the identifier that
-// record lands under a trace of its own — outside the very request it was
-// part of, and therefore invisible in a chain view that joins on it.
-func fetchConsentStatus(consentID, txID string) (string, bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	u := consentURL() + "/consents/" + url.PathEscape(consentID) + "/status"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return "", false, err
-	}
-	if txID != "" {
-		req.Header.Set("Fsc-Transaction-Id", txID)
-	}
-	resp, err := consentClient.Do(req)
-	if err != nil {
-		return "", false, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
-		return "", false, nil
-	}
-	if resp.StatusCode != http.StatusOK {
-		return "", false, fmt.Errorf("consent status %d", resp.StatusCode)
-	}
-	var status struct {
-		ConsentID string `json:"consent_id"`
-		Status    string `json:"status"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
-		return "", false, err
-	}
-	if status.ConsentID != consentID || status.Status == "" {
-		return "", false, fmt.Errorf("invalid consent status response")
-	}
-	return status.Status, true, nil
-}
-
-var consentClient = &http.Client{Timeout: 2 * time.Second}
-
-func consentURL() string {
-	if u := os.Getenv("GBO_CONSENT_URL"); u != "" {
-		return u
-	}
-	return "http://consent-register:4002"
-}
-
-func consentIssuer() string {
-	if value := os.Getenv("GBO_CONSENT_ISSUER"); value != "" {
-		return value
-	}
-	return "https://consent-register.gbo.test"
-}
-
-func consentAudience() string {
-	if value := os.Getenv("GBO_CONSENT_AUDIENCE"); value != "" {
-		return value
-	}
-	return "gbo:dvtp:pdp"
+func isPseudonym(subject string) bool {
+	return pseudonymPattern.MatchString(subject)
 }
 
 // decodeGraphQLBody accepts the body as a plain JSON string (FSC-Inway

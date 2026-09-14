@@ -46,6 +46,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- **The consent lookup moved out of the request-mapper and into the policy.** The
+  policy verifies the signed consent token and asks the consent register for the
+  consent's status itself, per evaluation, through `http.send`
+  ([#330](https://github.com/ICTU/GBO-demo/issues/330)). FTV places attribute
+  retrieval inside the PDP; the mapper now only reshapes the request it was given
+  and holds no consent-register URL, JWKS handling or consent claim shaping, which
+  unblocks [#331](https://github.com/ICTU/GBO-demo/issues/331).
+  - `policies/dvtp/gbo/consent.rego` resolves `pip.consent` in the shape the
+    cascade already read. The status request carries no cache directive, so a
+    revoked consent denies on the first request after revocation; OPA caches
+    identical calls within one evaluation, so many fields still cost one call. The
+    JWKS is cached for five minutes and refetched on an unknown `kid`. The bounded
+    stale-key fallback during a JWKS outage is gone: the register serves both the
+    keys and the status, so an outage denied anyway.
+  - The token is verified with `io.jwt.verify_es256` against the key its `kid`
+    names, and its claims are checked in Rego — not with `io.jwt.decode_verify`,
+    which reports every failure as one `false` and has no clock-skew leeway. Each
+    failure now denies with a reason of its own: `CONSENT_SIGNATURE_INVALID`
+    (forged, tampered, not ES256, unknown key), `CONSENT_TOKEN_EXPIRED`,
+    `CONSENT_KEYS_UNAVAILABLE` (JWKS unreachable), and `CONSENT_CONTEXT_INVALID`
+    for any other claim. An unreachable status endpoint still denies with
+    `CONSENT_STATUS_UNAVAILABLE`. Every call has a 2s timeout and
+    `raise_error: false`, so no failure leaves a rule undefined.
+  - The register's location, issuer and audience stay operator configuration:
+    `GBO_CONSENT_URL`, `GBO_CONSENT_ISSUER` and `GBO_CONSENT_AUDIENCE`, now read by
+    the policy through `opa.runtime().env`, with unchanged defaults.
+  - A `pip.consent` arriving in input is dropped rather than trusted; the policy
+    decides only on a consent it verified itself.
+  - What the register answered is not part of `input`, so the decision log no
+    longer records it there. The engine puts the resolved consent into its
+    response document (`context.pip.consent`), which is logged
+    ([#332](https://github.com/ICTU/GBO-demo/issues/332)). A decision is no longer
+    a pure function of (input, policy, data): replaying one would need OPA's
+    `nd_builtin_cache` in the log, which OpenFTV does not enable.
+  - Under a consent token the mapper can no longer compare the subject variable
+    with the verified consent's PI. It keeps the subject only when it has the shape
+    of a PI (`^PI-[0-9a-f]{16}$`) and blanks anything else, so no BSN reaches the
+    decision input whether the token verifies or not. A PI other than the
+    consent's is now kept rather than blanked; the constraint binding denies it
+    with `CONSTRAINT_MISMATCH` either way.
 - **The authorization regime a request is judged under follows from the evidence it
   carries, not from a `flow` grant property.** No component reads `flow` and no seed
   writes one; `subject_id_type` stays, because identifier format is not derivable

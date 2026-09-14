@@ -99,8 +99,9 @@ services:
   # OpenFTV PDP with the embedded OPA/Rego engine — the authorization
   # endpoint for FSC-Inway (AuthZEN, HTTPS on :8443). The GraphQL
   # context-handler runs INSIDE this image as a request-mapper
-  # (services/openftv-pdp/mapper, PDP_REQUEST_MAPPINGS); it verifies the
-  # signed consent context and checks its live status at the consent-register.
+  # (services/openftv-pdp/mapper, PDP_REQUEST_MAPPINGS). The policy itself
+  # verifies the signed consent context and checks its live status at the
+  # consent-register, per evaluation (http.send, policies/dvtp/gbo/consent.rego).
   # Note: PDP_POLICIES_LANGUAGE must be "rego" — the documented value
   # "OPA" makes OpenFTV silently skip all policy files (upstream quirk).
   openftv-pdp:
@@ -126,8 +127,10 @@ services:
       # Native OpenFTV PIP pull: refresh the DvTP admission entities over a
       # dedicated network shared only with the register.
       - PDP_PIP_PULL_CONFIGS=/pip-pull/dvtp-onboarding.yaml
-      # The mapper fetches verification keys and the referenced consent's
-      # current status per request. Any verification/status failure denies.
+      # Read by the policy through opa.runtime().env (policies/dvtp/gbo/
+      # consent.rego): it fetches the register's verification keys and the
+      # referenced consent's current status per evaluation. Any verification
+      # or status failure denies, with a reason of its own.
       - GBO_CONSENT_URL=http://consent-register:4002
       - GBO_CONSENT_ISSUER=https://consent-register.gbo.test
       - GBO_CONSENT_AUDIENCE=gbo:dvtp:pdp
