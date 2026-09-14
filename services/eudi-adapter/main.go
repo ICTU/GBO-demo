@@ -270,37 +270,53 @@ func handleSourceAttestation(cfg config, client *http.Client, runtime sourceMeta
 			attribute.String("gbo.source_oin", metadata.SourceOIN),
 			attribute.String("dpl.gbo.typeId", metadata.TypeID),
 		)
-		// The source's records hang under the assembly record, so the call
-		// carries that record's position in the trace.
+		// The assembly record covers asking the source and what is made of its
+		// answer. Its span travels with the call, so the source's records hang
+		// under it — which is why it is written for every outcome once the
+		// source has been asked, not only for an attestation that got made.
+		assemblyStart := time.Now().UTC()
 		sourceCtx := r.Context()
 		if logbook != nil {
 			sourceCtx = contextWithSourceCall(sourceCtx, recording)
 		}
+		logAssembly := func(claims int, failure error) bool {
+			if logbook == nil {
+				return true
+			}
+			if err := logbook.logAttestationAssembly(r.Context(), recording, assemblyStart,
+				metadata.SourceID, metadata.TypeID, metadata.SourceOIN, claims, failure); err != nil {
+				http.Error(w, "the attestation request could not be logged; withholding the answer", http.StatusInternalServerError)
+				return false
+			}
+			return true
+		}
 		result, err := callSource(sourceCtx, client, resolved, plan)
 		if err != nil {
 			logSourceAttestationError(r, "source_request", err)
-			http.Error(w, "source request failed", http.StatusBadGateway)
+			if logAssembly(0, err) {
+				http.Error(w, "source request failed", http.StatusBadGateway)
+			}
 			return
 		}
-		assemblyStart := time.Now().UTC()
 		projection, err := metadata.project(result.Raw)
 		if err != nil {
 			logSourceAttestationError(r, "projection", err)
-			http.Error(w, "source response could not be projected", http.StatusBadGateway)
+			if logAssembly(0, err) {
+				http.Error(w, "source response could not be projected", http.StatusBadGateway)
+			}
 			return
 		}
 		if projection.Outcome == gbosimplev1.OutcomeNoData {
-			http.Error(w, "source has no data for this subject and parameters", http.StatusNotFound)
+			// Asked and answered: the processing happened and produced nothing.
+			if logAssembly(0, nil) {
+				http.Error(w, "source has no data for this subject and parameters", http.StatusNotFound)
+			}
 			return
 		}
 		// The attestation exists now; it does not leave this process until
 		// the logbook has said so.
-		if logbook != nil {
-			if err := logbook.logAttestationAssembly(r.Context(), recording, assemblyStart,
-				metadata.SourceID, metadata.TypeID, metadata.SourceOIN, len(projection.Claims)); err != nil {
-				http.Error(w, "the attestation could not be logged; withholding it", http.StatusInternalServerError)
-				return
-			}
+		if !logAssembly(len(projection.Claims), nil) {
+			return
 		}
 		// nl-wallet turns attestation_type into the credential's vct and
 		// computes vct#integrity from the installed Type Metadata bytes. Both
@@ -498,7 +514,10 @@ func callViaFSC(ctx context.Context, client *http.Client, cfg config, plan sourc
 	// above is FSC's own: it validates it as a UUID v7, and the txlog and the
 	// decision log key on it.
 	if sourceCall, ok := sourceCallFrom(ctx); ok {
-		ldv.InjectTraceparent(httpReq.Header, sourceCall)
+		// On the request and on its context: the adapter's client is
+		// instrumented, and otelhttp injects its own client span after this
+		// line. ldv.Transport, inside it, puts this position back.
+		httpReq = ldv.CarryTraceparent(httpReq, sourceCall)
 	}
 
 	resp, err := client.Do(httpReq)
@@ -527,6 +546,17 @@ func callViaFSC(ctx context.Context, client *http.Client, cfg config, plan sourc
 		return fscResult{}, fmt.Errorf("graphql errors: %v", out.Errors)
 	}
 	return fscResult{Raw: respBody}, nil
+}
+
+// newSourceClient is the client the adapter calls sources with. It is
+// instrumented, and ldv.Transport sits inside the instrumentation, so the
+// source receives the LDV position of the record that made the call rather
+// than the client span otelhttp starts (§3.3.1).
+func newSourceClient() *http.Client {
+	return &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: otelhttp.NewTransport(ldv.Transport(http.DefaultTransport)),
+	}
 }
 
 func initTracer(ctx context.Context) (func(context.Context) error, error) {
@@ -606,10 +636,7 @@ func main() {
 	}
 	defer func() { _ = shutdown(ctx) }()
 
-	client := &http.Client{
-		Timeout:   10 * time.Second,
-		Transport: otelhttp.NewTransport(http.DefaultTransport),
-	}
+	client := newSourceClient()
 	registry, err := openRuntimeSourceRegistry(ctx, cfg)
 	if err != nil {
 		fatal("open Source Registry", err)

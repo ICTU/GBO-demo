@@ -225,3 +225,58 @@ func TestTheAmbientSpanIsUsedWhenNoHeaderCarriesATrace(t *testing.T) {
 		t.Fatalf("TraceID = %q, want the traceparent to win over the ambient span", got)
 	}
 }
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func capturing(sent *http.Header) http.RoundTripper {
+	return roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		*sent = r.Header.Clone()
+		return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody, Request: r}, nil
+	})
+}
+
+// An instrumented transport injects its own client span after the caller set
+// the traceparent, so the callee would hang its records under a span no
+// logbook holds. Transport, placed inside the instrumentation, puts the LDV
+// position back on the way out.
+func TestTransportRestoresThePositionAfterInstrumentation(t *testing.T) {
+	position := TraceContext{TraceID: "0af7651916cd43dd8448eb211c80319c", SpanID: "b7ad6b7169203331", Sampled: true}
+	var sent http.Header
+	inner := Transport(capturing(&sent))
+	// What otelhttp does: inject the client span it has just started.
+	instrumented := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		r = r.Clone(r.Context())
+		r.Header.Set("traceparent", "00-0af7651916cd43dd8448eb211c80319c-1111111111111111-01")
+		return inner.RoundTrip(r)
+	})
+
+	request, err := http.NewRequest(http.MethodGet, "http://source.test/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := instrumented.RoundTrip(CarryTraceparent(request, position)); err != nil {
+		t.Fatal(err)
+	}
+	if got := ParentSpanFor(sent, position.TraceID); got != position.SpanID {
+		t.Errorf("the callee would hang under span %q, want the LDV record's %q", got, position.SpanID)
+	}
+}
+
+// Without a position on the context the transport leaves the request alone.
+func TestTransportLeavesARequestWithoutAPositionAlone(t *testing.T) {
+	const traceparent = "00-0af7651916cd43dd8448eb211c80319c-1111111111111111-01"
+	var sent http.Header
+	request, err := http.NewRequest(http.MethodGet, "http://source.test/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("traceparent", traceparent)
+	if _, err := Transport(capturing(&sent)).RoundTrip(request); err != nil {
+		t.Fatal(err)
+	}
+	if got := sent.Get("traceparent"); got != traceparent {
+		t.Errorf("traceparent = %q, want it untouched", got)
+	}
+}

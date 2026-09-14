@@ -145,11 +145,16 @@ func (l *issuanceLogbook) logPIDExtraction(ctx context.Context, r *http.Request,
 	return recording, nil
 }
 
-// logAttestationAssembly records turning the source's answer into the
-// attestation that goes to the wallet. It hangs under the extraction record:
-// the assembly exists only because that step established whose attestation
-// this is.
-func (l *issuanceLogbook) logAttestationAssembly(ctx context.Context, recording issuanceRecording, start time.Time, sourceID, typeID, sourceOIN string, claims int) error {
+// logAttestationAssembly records asking the source and turning its answer into
+// the attestation that goes to the wallet. It hangs under the extraction
+// record: the assembly exists only because that step established whose
+// attestation this is.
+//
+// It is written for every outcome once the source has been asked. The source
+// logged its half under this record's span, and this record carries the
+// pointer to it. A refused or failed call is still a Dataverwerking, recorded
+// with status ERROR; one that found nothing is recorded with no claims.
+func (l *issuanceLogbook) logAttestationAssembly(ctx context.Context, recording issuanceRecording, start time.Time, sourceID, typeID, sourceOIN string, claims int, failure error) error {
 	if l == nil {
 		return nil
 	}
@@ -158,7 +163,7 @@ func (l *issuanceLogbook) logAttestationAssembly(ctx context.Context, recording 
 		SpanID:       recording.assemblySpan,
 		ParentSpanID: recording.extractSpan,
 		Name:         "dataverwerking.attestatie-samenstellen",
-		Status:       "OK",
+		Status:       ldv.Status(failure),
 		StartTime:    start,
 		EndTime:      time.Now().UTC(),
 		Attributes: ldv.Attributes(attestationBuildActivity, recording.subjectID, recording.subjectType, recording.processor, map[string]any{

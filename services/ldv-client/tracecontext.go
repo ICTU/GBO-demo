@@ -196,3 +196,39 @@ func IsSpanID(value string) bool {
 	spanID, err := trace.SpanIDFromHex(value)
 	return err == nil && spanID.IsValid()
 }
+
+// positionKey carries an LDV position on a request's context.
+type positionKey struct{}
+
+// CarryTraceparent puts position on the request's traceparent, and on its
+// context for Transport. A request sent through an OTel-instrumented transport
+// gets that transport's own client span injected over the header; Transport,
+// placed inside the instrumentation, puts the LDV position back.
+func CarryTraceparent(request *http.Request, position TraceContext) *http.Request {
+	InjectTraceparent(request.Header, position)
+	return request.WithContext(context.WithValue(request.Context(), positionKey{}, position))
+}
+
+// Transport wraps base so a request carrying an LDV position leaves with that
+// position on its traceparent, whatever an outer transport injected. Place it
+// inside the instrumentation — otelhttp.NewTransport(ldv.Transport(base)) — so
+// it runs last: the OTel client span is still recorded, but the callee's
+// records hang under the LDV record that made the call, which is the parent a
+// reader of the logbook can resolve (§3.3.1).
+func Transport(base http.RoundTripper) http.RoundTripper {
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return positionTransport{base: base}
+}
+
+type positionTransport struct{ base http.RoundTripper }
+
+func (t positionTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	if position, ok := request.Context().Value(positionKey{}).(TraceContext); ok {
+		// A RoundTripper may not modify the request it was given.
+		request = request.Clone(request.Context())
+		InjectTraceparent(request.Header, position)
+	}
+	return t.base.RoundTrip(request)
+}

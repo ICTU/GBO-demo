@@ -11,6 +11,10 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 // The BSN in the demo PID disclosure. It may not appear in any record.
@@ -46,8 +50,8 @@ func issuanceUnderTest(t *testing.T, logbook *ldvtest.Logbook) string {
 }
 
 // issuanceUnderTestWithOutway is issuanceUnderTest with a caller-supplied
-// Outway.
-func issuanceUnderTestWithOutway(t *testing.T, logbook *ldvtest.Logbook, outwayHandler http.HandlerFunc) string {
+// Outway and, optionally, the client the adapter calls it with.
+func issuanceUnderTestWithOutway(t *testing.T, logbook *ldvtest.Logbook, outwayHandler http.HandlerFunc, sourceClient ...*http.Client) string {
 	t.Helper()
 	metadataPayload, err := os.ReadFile("../graphql-server/config/gbo-source-metadata.json")
 	if err != nil {
@@ -76,7 +80,11 @@ func issuanceUnderTestWithOutway(t *testing.T, logbook *ldvtest.Logbook, outwayH
 		SourceDataFSCServiceReference: "bri", SourceDataFSCGrantHash: "data-grant",
 	}
 	client := newIssuanceLogbook(logbook.Client(t, "eudi-adapter"), map[string]string{"belastingdienst": "https://logboek.belastingdienst.nl/data-processing-operations"})
-	server := httptest.NewServer(withFscTraceContext(testMux(cfg, http.DefaultClient, metadata, client)))
+	httpClient := http.DefaultClient
+	if len(sourceClient) > 0 {
+		httpClient = sourceClient[0]
+	}
+	server := httptest.NewServer(withFscTraceContext(testMux(cfg, httpClient, metadata, client)))
 	t.Cleanup(server.Close)
 	return server.URL
 }
@@ -216,6 +224,80 @@ func TestTheSourceHangsUnderTheAssemblyRecord(t *testing.T) {
 	}
 	if got := ldv.ParentSpanFor(received, assembly[0].TraceID); got != assembly[0].SpanID {
 		t.Errorf("the source would hang under span %q, want the assembly record's %q", got, assembly[0].SpanID)
+	}
+}
+
+// The adapter calls sources through an instrumented client, and otelhttp
+// injects its own client span over the traceparent. The source must still
+// receive the assembly record's span, which ldv.Transport restores. This needs
+// a real tracer provider and propagator: with OTel's no-op defaults otelhttp
+// injects nothing, and the test would pass without the fix.
+func TestTheSourceHangsUnderTheAssemblyRecordThroughTheProductionClient(t *testing.T) {
+	previousProvider, previousPropagator := otel.GetTracerProvider(), otel.GetTextMapPropagator()
+	provider := sdktrace.NewTracerProvider()
+	otel.SetTracerProvider(provider)
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	t.Cleanup(func() {
+		otel.SetTracerProvider(previousProvider)
+		otel.SetTextMapPropagator(previousPropagator)
+		_ = provider.Shutdown(context.Background())
+	})
+
+	var received http.Header
+	logbook := ldvtest.New(t, allGBOActivities()...)
+	url := issuanceUnderTestWithOutway(t, logbook, capturingOutway(&received), newSourceClient())
+
+	if response := issue(t, url); response.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(response.Body)
+		t.Fatalf("status = %d, body = %s", response.StatusCode, raw)
+	}
+	assembly := ldvtest.ByName(logbook.Written(), "dataverwerking.attestatie-samenstellen")
+	if len(assembly) != 1 {
+		t.Fatalf("wrote %d assembly records, want 1", len(assembly))
+	}
+	if got := ldv.ParentSpanFor(received, assembly[0].TraceID); got != assembly[0].SpanID {
+		t.Errorf("through the production client the source hangs under span %q, want the assembly record's %q (traceparent %q)",
+			got, assembly[0].SpanID, received.Get("traceparent"))
+	}
+}
+
+// Once the source has been asked, the assembly record is written whatever came
+// back: the source logged its half under that record's span, and the record
+// carries the pointer to it. A refused or failed call is recorded as such.
+func TestAFailedSourceCallIsStillLogged(t *testing.T) {
+	for name, answer := range map[string]struct {
+		status int
+		body   string
+	}{
+		"refused by policy": {http.StatusForbidden, `{"reason":"CONSENT_REVOKED"}`},
+		"source failed":     {http.StatusInternalServerError, `boom`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var received http.Header
+			logbook := ldvtest.New(t, allGBOActivities()...)
+			url := issuanceUnderTestWithOutway(t, logbook, func(w http.ResponseWriter, r *http.Request) {
+				received = r.Header.Clone()
+				w.WriteHeader(answer.status)
+				_, _ = w.Write([]byte(answer.body))
+			})
+
+			if response := issue(t, url); response.StatusCode != http.StatusBadGateway {
+				t.Fatalf("status = %d, want 502", response.StatusCode)
+			}
+			assembly := ldvtest.ByName(logbook.Written(), "dataverwerking.attestatie-samenstellen")
+			if len(assembly) != 1 {
+				t.Fatalf("wrote %d assembly records, want 1: %+v", len(assembly), logbook.Written())
+			}
+			if assembly[0].Status != ldv.StatusError {
+				t.Errorf("status = %q, want %s", assembly[0].Status, ldv.StatusError)
+			}
+			if assembly[0].Attributes[ldv.AttrNextLogbookID] == nil {
+				t.Error("the record of a failed call lost its pointer to the source's logbook")
+			}
+			if got := ldv.ParentSpanFor(received, assembly[0].TraceID); got != assembly[0].SpanID {
+				t.Errorf("the source hangs under span %q, want the assembly record's %q", got, assembly[0].SpanID)
+			}
+		})
 	}
 }
 
@@ -414,5 +496,35 @@ func TestParseNextLogbooks(t *testing.T) {
 	}
 	if mapping["belastingdienst"] != "https://a.test/data-processing-operations" || mapping["rvig"] != "https://b.test/data-processing-operations" {
 		t.Errorf("mapping = %#v", mapping)
+	}
+}
+
+// A source that has nothing for this subject was still asked: the processing
+// happened and produced no claims, so it is recorded as such, and the source's
+// records still have their parent.
+func TestASourceWithNoDataIsStillLogged(t *testing.T) {
+	var received http.Header
+	logbook := ldvtest.New(t, allGBOActivities()...)
+	url := issuanceUnderTestWithOutway(t, logbook, func(w http.ResponseWriter, r *http.Request) {
+		received = r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data": {"ingeschrevenPersoon": {"heeftBelastingjaarAangifte": []}}}`))
+	})
+
+	if response := issue(t, url); response.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", response.StatusCode)
+	}
+	assembly := ldvtest.ByName(logbook.Written(), "dataverwerking.attestatie-samenstellen")
+	if len(assembly) != 1 {
+		t.Fatalf("wrote %d assembly records, want 1", len(assembly))
+	}
+	if assembly[0].Status != ldv.StatusOK {
+		t.Errorf("status = %q; a source that answered with nothing did not fail", assembly[0].Status)
+	}
+	if got := assembly[0].Attributes["dpl.gbo.attestatieClaims"]; got != float64(0) {
+		t.Errorf("attestatieClaims = %v, want 0", got)
+	}
+	if got := ldv.ParentSpanFor(received, assembly[0].TraceID); got != assembly[0].SpanID {
+		t.Errorf("the source hangs under span %q, want the assembly record's %q", got, assembly[0].SpanID)
 	}
 }
