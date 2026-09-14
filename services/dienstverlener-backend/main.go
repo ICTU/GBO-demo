@@ -29,6 +29,7 @@ import (
 	"strings"
 	"time"
 
+	ldv "gbo-demo/ldv-client"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
@@ -58,6 +59,9 @@ type config struct {
 	OutwayURL        string
 	OutwayPath       string
 	HTTPClient       *http.Client
+	// Logbook is Hypotheek-BV's own Logboek Dataverwerkingen. Nil means the
+	// consumer writes no records.
+	Logbook *queryLogbook
 }
 
 const upstreamRequestTimeout = 30 * time.Second
@@ -405,8 +409,28 @@ func handleQuery(cfg config) http.HandlerFunc {
 		proxyReq.Header.Set("Fsc-Transaction-Id", fscTxID)
 		span.SetAttributes(attribute.String("gbo.fsc.transaction_id", fscTxID))
 		otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(proxyReq.Header))
+		// Hypotheek-BV's record of this call is where a reader starts the
+		// chain, so the source's records hang under its span.
+		call := cfg.Logbook.begin(ctx, r)
+		call.inject(proxyReq.Header)
 
 		proxyResp, err := client.Do(proxyReq)
+		statusCode := 0
+		if err == nil {
+			statusCode = proxyResp.StatusCode
+		}
+		if logErr := cfg.Logbook.logSourceCall(ctx, call, req.ScopeID, pi, err, statusCode); logErr != nil {
+			if err == nil {
+				_ = proxyResp.Body.Close()
+			}
+			writeJSON(w, http.StatusInternalServerError, queryResponse{
+				Allowed:          false,
+				Reason:           "the query could not be logged; withholding the answer",
+				TraceID:          traceID,
+				FscTransactionID: fscTxID,
+			})
+			return
+		}
 		if err != nil {
 			log.Error("fsc outway call failed", "err", err.Error())
 			writeJSON(w, http.StatusBadGateway, queryResponse{
@@ -576,6 +600,28 @@ func main() {
 		defer cancel()
 		_ = shutdown(shutCtx)
 	}()
+
+	// Hypotheek-BV's own logbook. Without LDV_LOGBOOK_URL the consumer writes
+	// no records; with one, every call to a source is made durable in a local
+	// spool before its answer is used, and delivered afterwards.
+	logbookClient, err := ldv.New(ldv.Config{
+		ServiceName: "dienstverlener-backend",
+		LogbookURL:  os.Getenv("LDV_LOGBOOK_URL"),
+		WriteToken:  os.Getenv("LDV_WRITE_TOKEN"),
+	})
+	if err != nil {
+		fatal("configuring the logboek client", err)
+	}
+	if logbookClient != nil {
+		outbox, err := ldv.OpenOutbox(getEnv("LDV_OUTBOX_PATH", "/data/ldv-outbox.jsonl"), logbookClient)
+		if err != nil {
+			fatal("opening the LDV outbox", err)
+		}
+		defer func() { _ = outbox.Close() }()
+		logbookClient.UseOutbox(outbox)
+		go outbox.Run(ctx, ldvDeliveryInterval)
+	}
+	cfg.Logbook = newQueryLogbook(logbookClient, parseNextLogbooks(os.Getenv("LDV_NEXT_LOGBOOK_IDS")))
 
 	// Middleware order: withFscTraceContext wraps otelhttp — the header
 	// mutation must happen before otelhttp extracts the parent context.

@@ -67,6 +67,10 @@ type config struct {
 	// each bron's register names its activities in its own terms.
 	LDVResolutionActivity string
 	LDVForwardActivity    string
+	// LDVBSNkNextLogbookID is where BSNk's processings can be looked up — its
+	// read API, or a contact page while it has none, as the read extension
+	// allows. The PI→BSN resolution records it as its next logbook.
+	LDVBSNkNextLogbookID string
 }
 
 func loadConfig() config {
@@ -79,6 +83,7 @@ func loadConfig() config {
 
 		LDVResolutionActivity: getEnv("LDV_RESOLUTION_ACTIVITY", ""),
 		LDVForwardActivity:    getEnv("LDV_FORWARD_ACTIVITY", ""),
+		LDVBSNkNextLogbookID:  getEnv("LDV_BSNK_NEXT_LOGBOOK_ID", ""),
 	}
 }
 
@@ -207,10 +212,14 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client) http.H
 		// The forward is the outer Dataverwerking; its span is the parent of
 		// the de-pseudonymisation below and of whatever the source logs
 		// downstream, so the whole request reads as one tree in the logboek.
+		traceID := ldv.TraceID(r.Context(), r.Header)
 		forward := ldvOperation{
-			traceID:   ldv.TraceID(r.Context(), r.Header),
-			spanID:    ldv.SpanID(),
-			startTime: time.Now().UTC(),
+			traceID: traceID,
+			spanID:  ldv.SpanID(),
+			// §3.3.1: when the caller was in the same trace, its span is this
+			// record's parent — across FSC, in the caller's own logbook.
+			parentSpanID: ldv.ParentSpanFor(r.Header, traceID),
+			startTime:    time.Now().UTC(),
 		}
 		// A bron without a logbook is a supported configuration, so the
 		// client is legitimately nil here and must not be dereferenced.
@@ -218,11 +227,20 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client) http.H
 			forward.processor = logbook.ForeignProcessor(r)
 		}
 
-		// Who the request is about, named the way it arrived. In the
-		// pseudonym flow that is the PI; in the direct flow the sidecar holds
-		// only a BSN and must derive a logbook-local pseudonym instead,
-		// because REQ-60/72 keeps the BSN out of every record.
+		// Who the request is about, as it arrived: a PI in the pseudonym flow,
+		// a BSN in the direct one. Neither goes into a record. The sidecar
+		// names the Betrokkene in its own Verantwoordelijke's pseudonym space —
+		// a logbook-local pseudonym derived from the BSN with this source's
+		// key — so a record here shares no identifier with the caller's
+		// logbook, and logbooks join on the trace id alone.
 		subjects := subjectFromBody(body, pseudoVars)
+		// bsnOf maps a subject as it arrived onto the BSN it stands for.
+		bsnOf := map[string]string{}
+		if subjectIDType != "pseudonym" {
+			for _, subject := range subjects {
+				bsnOf[subject] = subject
+			}
+		}
 
 		if subjectIDType == "pseudonym" {
 			var gql struct {
@@ -246,26 +264,11 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client) http.H
 				bsn, resolveErr := resolvePI(r.Context(), client, cfg, piVal)
 
 				// The de-pseudonymisation is itself a Dataverwerking, and it
-				// is logged whether or not it succeeded. The record names the
-				// Betrokkene by the PI the request arrived with — a record
-				// *about* turning a PI into a BSN still may not contain the
-				// BSN it produced.
-				if logbook != nil {
-					record := ldv.Record{
-						TraceID:      forward.traceID,
-						SpanID:       ldv.SpanID(),
-						ParentSpanID: forward.spanID,
-						Name:         "dataverwerking.pi-bsn-resolutie",
-						Status:       ldv.Status(resolveErr),
-						StartTime:    resolutionStart,
-						EndTime:      time.Now().UTC(),
-						Attributes:   ldv.Attributes(cfg.LDVResolutionActivity, piVal, ldv.SubjectTypePI, forward.processor, map[string]any{}),
-					}
-					if writeErr := logbook.Write(r.Context(), record); writeErr != nil {
-						ldv.LogFailure(record.Name, writeErr)
-						http.Error(w, "de-pseudonymisation could not be logged; refusing the request", http.StatusInternalServerError)
-						return
-					}
+				// is logged whether or not it succeeded.
+				if err := logResolution(r.Context(), logbook, cfg, forward, piVal, bsn, resolveErr, resolutionStart); err != nil {
+					ldv.LogFailure("dataverwerking.pi-bsn-resolutie", err)
+					http.Error(w, "de-pseudonymisation could not be logged; refusing the request", http.StatusInternalServerError)
+					return
 				}
 
 				if resolveErr != nil {
@@ -274,6 +277,7 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client) http.H
 					return
 				}
 				gql.Variables[varName] = bsn
+				bsnOf[piVal] = bsn
 				resolved++
 			}
 			span.SetAttributes(attribute.Int("gbo.sidecar.vars_resolved", resolved))
@@ -305,16 +309,7 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client) http.H
 			ldv.InjectTraceparent(req.Header, ldv.TraceContext{
 				TraceID: forward.traceID, SpanID: forward.spanID, Sampled: true,
 			})
-			// In the pseudonym flow the source receives a BSN and would
-			// otherwise have to invent a subject reference. Passing the PI on
-			// keeps both components naming the same Betrokkene the same way.
-			for _, pi := range subjects {
-				if subjectIDType == "pseudonym" {
-					req.Header.Set(ldv.HeaderSubjectID, pi)
-					req.Header.Set(ldv.HeaderSubjectIDType, ldv.SubjectTypePI)
-				}
-				break
-			}
+			passSubject(req.Header, logbook, subjects, bsnOf)
 		}
 
 		resp, err := client.Do(req)
@@ -329,37 +324,10 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client) http.H
 		// instead of data — the strongest ordering available without a
 		// two-phase commit, and the reason this is fail-closed rather than
 		// best-effort.
-		if logbook != nil {
-			for _, subject := range subjects {
-				subjectID, subjectType := subject, ldv.SubjectTypePI
-				if subjectIDType != "pseudonym" {
-					pseudonym, err := logbook.LocalPseudonym(subject)
-					if err != nil {
-						ldv.LogFailure("dataverwerking.bronquery-doorgifte", err)
-						http.Error(w, "the forward could not be logged; withholding the response", http.StatusInternalServerError)
-						return
-					}
-					subjectID, subjectType = pseudonym, ldv.SubjectTypePseudonym
-				}
-				record := ldv.Record{
-					TraceID:    forward.traceID,
-					SpanID:     forward.spanID,
-					Name:       "dataverwerking.bronquery-doorgifte",
-					Status:     ldv.StatusFromHTTP(resp.StatusCode),
-					StartTime:  forward.startTime,
-					EndTime:    time.Now().UTC(),
-					Attributes: ldv.Attributes(cfg.LDVForwardActivity, subjectID, subjectType, forward.processor, map[string]any{}),
-				}
-				if writeErr := logbook.Write(r.Context(), record); writeErr != nil {
-					ldv.LogFailure(record.Name, writeErr)
-					http.Error(w, "the forward could not be logged; withholding the response", http.StatusInternalServerError)
-					return
-				}
-				// One forward, one Betrokkene: the demo's queries are
-				// single-subject, and a multi-subject body would need child
-				// records rather than a reused span id.
-				break
-			}
+		if err := logForward(r.Context(), logbook, cfg, forward, subjects, bsnOf, resp.StatusCode); err != nil {
+			ldv.LogFailure("dataverwerking.bronquery-doorgifte", err)
+			http.Error(w, "the forward could not be logged; withholding the response", http.StatusInternalServerError)
+			return
 		}
 
 		for k, vv := range resp.Header {
@@ -372,13 +340,96 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client) http.H
 	}
 }
 
+// logResolution records one de-pseudonymisation. The record names the
+// Betrokkene by this source's own pseudonym, derived from the BSN it produced
+// — never the BSN itself, and not the PI, which the caller's logbook holds
+// too. A PI that could not be resolved has no BSN to derive from; a pseudonym
+// of the PI is still local, and still not the caller's identifier.
+func logResolution(ctx context.Context, logbook *ldv.Client, cfg config, forward ldvOperation, pi, bsn string, resolveErr error, start time.Time) error {
+	if logbook == nil {
+		return nil
+	}
+	named := bsn
+	if resolveErr != nil {
+		named = pi
+	}
+	subjectID, err := logbook.LocalPseudonym(named)
+	if err != nil {
+		return err
+	}
+	return logbook.Write(ctx, ldv.Record{
+		TraceID:      forward.traceID,
+		SpanID:       ldv.SpanID(),
+		ParentSpanID: forward.spanID,
+		Name:         "dataverwerking.pi-bsn-resolutie",
+		Status:       ldv.Status(resolveErr),
+		StartTime:    start,
+		EndTime:      time.Now().UTC(),
+		Attributes: ldv.Attributes(cfg.LDVResolutionActivity, subjectID, ldv.SubjectTypePseudonym, forward.processor, map[string]any{
+			// BSNk did the transform; its side of it is logged there.
+			ldv.AttrNextLogbookID: cfg.LDVBSNkNextLogbookID,
+		}),
+	})
+}
+
+// passSubject hands the source the sidecar's name for the Betrokkene. The
+// source receives a BSN and would otherwise derive a reference of its own;
+// passing this one on keeps both components naming the Betrokkene alike.
+func passSubject(header http.Header, logbook *ldv.Client, subjects, bsnOf map[string]string) {
+	for _, subject := range subjects {
+		if bsn := bsnOf[subject]; bsn != "" {
+			if pseudonym, err := logbook.LocalPseudonym(bsn); err == nil {
+				header.Set(ldv.HeaderSubjectID, pseudonym)
+				header.Set(ldv.HeaderSubjectIDType, ldv.SubjectTypePseudonym)
+			}
+		}
+		return
+	}
+}
+
+// logForward records the forward once it has happened, before the response
+// leaves this process. If the logbook does not confirm, the caller gets an
+// error instead of data — the strongest ordering available without a
+// two-phase commit, and the reason this is fail-closed rather than
+// best-effort.
+//
+// One forward, one Betrokkene: the demo's queries are single-subject, and a
+// multi-subject body would need child records rather than a reused span id.
+func logForward(ctx context.Context, logbook *ldv.Client, cfg config, forward ldvOperation, subjects, bsnOf map[string]string, statusCode int) error {
+	if logbook == nil {
+		return nil
+	}
+	for _, subject := range subjects {
+		named := subject
+		if bsn := bsnOf[subject]; bsn != "" {
+			named = bsn
+		}
+		subjectID, err := logbook.LocalPseudonym(named)
+		if err != nil {
+			return err
+		}
+		return logbook.Write(ctx, ldv.Record{
+			TraceID:      forward.traceID,
+			SpanID:       forward.spanID,
+			ParentSpanID: forward.parentSpanID,
+			Name:         "dataverwerking.bronquery-doorgifte",
+			Status:       ldv.StatusFromHTTP(statusCode),
+			StartTime:    forward.startTime,
+			EndTime:      time.Now().UTC(),
+			Attributes:   ldv.Attributes(cfg.LDVForwardActivity, subjectID, ldv.SubjectTypePseudonym, forward.processor, map[string]any{}),
+		})
+	}
+	return nil
+}
+
 // ldvOperation is the identity and timing of one Dataverwerking while it is
 // still in progress.
 type ldvOperation struct {
-	traceID   string
-	spanID    string
-	startTime time.Time
-	processor string
+	traceID      string
+	spanID       string
+	parentSpanID string
+	startTime    time.Time
+	processor    string
 }
 
 func initTracer(ctx context.Context) (func(context.Context) error, error) {

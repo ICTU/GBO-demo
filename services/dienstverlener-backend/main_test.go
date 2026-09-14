@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	ldv "gbo-demo/ldv-client"
+	"gbo-demo/ldv-client/ldvtest"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -111,6 +113,100 @@ func TestDvtpQueryHappyPath(t *testing.T) {
 	// travel inside the query so the PDP can enforce per-year consent.
 	if !strings.Contains(outwayBody, "heeftBelastingjaarAangifte(belastingjaren: [2024])") {
 		t.Fatalf("query missing belastingjaren filter: %s", outwayBody)
+	}
+}
+
+// Hypotheek-BV logs its call to the source in its own logbook, with a pointer
+// to where the source logs its half. The record is the root of the chain, and
+// the source receives its span, so the source's records hang under it.
+func TestAQueryIsLoggedWithAPointerToTheSource(t *testing.T) {
+	const bdLogbook = "https://logboek.belastingdienst.nl/data-processing-operations"
+	logbook := ldvtest.New(t, queryActivity)
+	var received http.Header
+	outway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received = r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"ingeschrevenPersoon":{"bsn":"PI-abc123"}}}`))
+	}))
+	defer outway.Close()
+
+	cfg := config{
+		OutwayURL:  outway.URL,
+		OutwayPath: "/bri/graphql",
+		Logbook:    newQueryLogbook(logbook.Client(t, "dienstverlener-backend"), map[string]string{"bd": bdLogbook}),
+	}
+	srv := httptest.NewServer(newMux(cfg))
+	defer srv.Close()
+
+	body := testQueryBody("c-1", []string{"bd:ib:2025"}, map[string]any{"scope_id": "bd:ib:2025", "belastingjaren": []int{2025}})
+	resp, err := http.Post(srv.URL+"/api/dvtp/query", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, b)
+	}
+
+	records := logbook.Written()
+	if len(records) != 1 {
+		t.Fatalf("wrote %d records, want 1: %+v", len(records), records)
+	}
+	record := records[0]
+	if got := record.Attributes[ldv.AttrProcessingActivityID]; got != queryActivity {
+		t.Errorf("processing_activity_id = %v, want %s", got, queryActivity)
+	}
+	if got := record.Attributes[ldv.AttrNextLogbookID]; got != bdLogbook {
+		t.Errorf("nextLogbookId = %v, want the source's read API %s", got, bdLogbook)
+	}
+	if got := record.Attributes[ldv.AttrDataSubjectID]; got != "PI-abc123" {
+		t.Errorf("data_subject_id = %v, want the PI from the consent", got)
+	}
+	if record.ParentSpanID != "" {
+		t.Errorf("parent_span_id = %q; the consumer starts the chain", record.ParentSpanID)
+	}
+	if got := ldv.TraceContextFrom(context.Background(), received, "").TraceID; got != record.TraceID {
+		t.Errorf("the source received trace %q, want the record's %q", got, record.TraceID)
+	}
+	if got := ldv.ParentSpanFor(received, record.TraceID); got != record.SpanID {
+		t.Errorf("the source would hang under span %q, want the record's %q", got, record.SpanID)
+	}
+	if received.Get("Fsc-Transaction-Id") == "" {
+		t.Error("the outway received no Fsc-Transaction-Id")
+	}
+}
+
+// A call that cannot be logged withholds its answer: the data came in, but it
+// does not go out unrecorded.
+func TestAQueryThatCannotBeLoggedWithholdsTheAnswer(t *testing.T) {
+	logbook := ldvtest.New(t, queryActivity)
+	logbook.RefuseEverything()
+	outway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"ingeschrevenPersoon":{"bsn":"PI-abc123"}}}`))
+	}))
+	defer outway.Close()
+
+	cfg := config{
+		OutwayURL:  outway.URL,
+		OutwayPath: "/bri/graphql",
+		Logbook:    newQueryLogbook(logbook.Client(t, "dienstverlener-backend"), nil),
+	}
+	srv := httptest.NewServer(newMux(cfg))
+	defer srv.Close()
+
+	body := testQueryBody("c-1", []string{"bd:ib:2025"}, map[string]any{"scope_id": "bd:ib:2025", "belastingjaren": []int{2025}})
+	resp, err := http.Post(srv.URL+"/api/dvtp/query", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", resp.StatusCode)
+	}
+	if b, _ := io.ReadAll(resp.Body); strings.Contains(string(b), "ingeschrevenPersoon") {
+		t.Fatalf("the answer leaked despite the refused record: %s", b)
 	}
 }
 

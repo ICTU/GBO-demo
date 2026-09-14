@@ -66,27 +66,36 @@ func parseNextLogbooks(raw string) map[string]string {
 // issuanceRecording carries the identity of an issuance's records while the
 // request is still running, so the second record can hang under the first.
 type issuanceRecording struct {
-	traceID     string
-	extractSpan string
-	subjectID   string
-	subjectType string
-	processor   string
+	traceID      string
+	extractSpan  string
+	assemblySpan string
+	subjectID    string
+	subjectType  string
+	processor    string
 }
 
-// ldvTraceIDForIssuance returns the trace id the whole chain will share.
-//
-// The adapter mints the Fsc-Transaction-Id itself and stashes it on the
-// context, so it is taken from there rather than from a header: it is the only
-// identifier that survives the FSC hop, and the bronhouder's logbook will file
-// its half of this request under it. Reading the ambient OTel trace instead
-// would file the adapter's records under an id the source never sees.
-func ldvTraceIDForIssuance(ctx context.Context, header http.Header) string {
-	if fscTxID, ok := ctx.Value(fscTxIDCtxKey).(string); ok && fscTxID != "" {
-		if normalized := ldv.NormalizeTraceID(fscTxID); normalized != "" {
-			return normalized
-		}
-	}
-	return ldv.TraceID(ctx, header)
+// sourceCall is where the source call sits in the trace: under the assembly
+// record, whose nextLogbookId points at the bronhouder's logbook. That span is
+// minted together with the extraction so it exists before the call is made;
+// the record itself is written once the attestation is assembled.
+func (r issuanceRecording) sourceCall() ldv.TraceContext {
+	return ldv.TraceContext{TraceID: r.traceID, SpanID: r.assemblySpan, Sampled: true}
+}
+
+// sourceCallKey carries that position on the context, so callViaFSC can hand
+// it to the bronhouder without the recording being threaded through every
+// transport.
+type sourceCallKey struct{}
+
+func contextWithSourceCall(ctx context.Context, recording issuanceRecording) context.Context {
+	return context.WithValue(ctx, sourceCallKey{}, recording.sourceCall())
+}
+
+// sourceCallFrom returns the position set by contextWithSourceCall. Without a
+// logbook there is none, and the traceparent OTel injects is what travels.
+func sourceCallFrom(ctx context.Context) (ldv.TraceContext, bool) {
+	traceContext, ok := ctx.Value(sourceCallKey{}).(ldv.TraceContext)
+	return traceContext, ok
 }
 
 // logPIDExtraction records reading the BSN out of the disclosed PID — the
@@ -107,11 +116,14 @@ func (l *issuanceLogbook) logPIDExtraction(ctx context.Context, r *http.Request,
 		return issuanceRecording{}, err
 	}
 	recording := issuanceRecording{
-		traceID:     ldvTraceIDForIssuance(ctx, r.Header),
-		extractSpan: ldv.SpanID(),
-		subjectID:   subjectID,
-		subjectType: subjectType,
-		processor:   l.ForeignProcessor(r),
+		// The request's own trace: the caller's traceparent when it sent one,
+		// otherwise the one withFscTraceContext tied to the transaction id.
+		traceID:      ldv.TraceID(ctx, r.Header),
+		extractSpan:  ldv.SpanID(),
+		assemblySpan: ldv.SpanID(),
+		subjectID:    subjectID,
+		subjectType:  subjectType,
+		processor:    l.ForeignProcessor(r),
 	}
 	record := ldv.Record{
 		TraceID:      recording.traceID,
@@ -133,20 +145,25 @@ func (l *issuanceLogbook) logPIDExtraction(ctx context.Context, r *http.Request,
 	return recording, nil
 }
 
-// logAttestationAssembly records turning the source's answer into the
-// attestation that goes to the wallet. It hangs under the extraction record:
-// the assembly exists only because that step established whose attestation
-// this is.
-func (l *issuanceLogbook) logAttestationAssembly(ctx context.Context, recording issuanceRecording, start time.Time, sourceID, typeID, sourceOIN string, claims int) error {
+// logAttestationAssembly records asking the source and turning its answer into
+// the attestation that goes to the wallet. It hangs under the extraction
+// record: the assembly exists only because that step established whose
+// attestation this is.
+//
+// It is written for every outcome once the source has been asked. The source
+// logged its half under this record's span, and this record carries the
+// pointer to it. A refused or failed call is still a Dataverwerking, recorded
+// with status ERROR; one that found nothing is recorded with no claims.
+func (l *issuanceLogbook) logAttestationAssembly(ctx context.Context, recording issuanceRecording, start time.Time, sourceID, typeID, sourceOIN string, claims int, failure error) error {
 	if l == nil {
 		return nil
 	}
 	record := ldv.Record{
 		TraceID:      recording.traceID,
-		SpanID:       ldv.SpanID(),
+		SpanID:       recording.assemblySpan,
 		ParentSpanID: recording.extractSpan,
 		Name:         "dataverwerking.attestatie-samenstellen",
-		Status:       "OK",
+		Status:       ldv.Status(failure),
 		StartTime:    start,
 		EndTime:      time.Now().UTC(),
 		Attributes: ldv.Attributes(attestationBuildActivity, recording.subjectID, recording.subjectType, recording.processor, map[string]any{

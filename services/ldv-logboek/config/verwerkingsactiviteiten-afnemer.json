@@ -1,0 +1,24 @@
+{
+  "verantwoordelijke": "Hypotheek-BV",
+  "base_uri": "https://logboek.hypotheek-bv.test/verwerkingsactiviteiten",
+  "disclaimer": "Demo-stand-in voor een Register van Verwerkingsactiviteiten van een fictieve afnemer. Dit is GEEN RvVA en geen register van een bestaande organisatie. Een private afnemer valt niet onder LDV; de demo past het hier voorlopig toe, zodat een lezer een keten kan beginnen bij de partij die de verwerking startte. Of afnemers dit moeten doen, is een open vraag. De base_uri is een demo-hostnaam: er staat niets achter.",
+  "activities": [
+    {
+      "id": "hbv-inkomensgegevens-opvragen",
+      "version": "v1",
+      "name": "Opvragen van inkomensgegevens voor een hypotheekaanvraag",
+      "doel": "Het opvragen van de inkomensgegevens van een aanvrager bij de bron, met diens toestemming, om de hypotheekaanvraag te kunnen beoordelen.",
+      "grondslag": "Toestemming van de betrokkene.",
+      "categorieen_betrokkenen": [
+        "Aanvragers van een hypotheek"
+      ],
+      "categorieen_persoonsgegevens": [
+        "Polymorfe identiteit (PI) voor de afnemer",
+        "Inkomensgegevens per belastingjaar"
+      ],
+      "ontvangers": [
+        "Hypotheek-BV"
+      ]
+    }
+  ]
+}

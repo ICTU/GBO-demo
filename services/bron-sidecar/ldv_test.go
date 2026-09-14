@@ -19,6 +19,8 @@ const (
 	// The BSN bsnk-mock resolves the demo PI to. It must never appear in a
 	// record, in either flow.
 	demoBSN = "123456789"
+	// Where BSNk's side of the resolution can be looked up.
+	bsnkContact = "https://example.test/bsnk-contact"
 )
 
 // pseudonymToken is an Fsc-Authorization token carrying the countersigned
@@ -58,6 +60,7 @@ func sidecarUnderTest(t *testing.T, logbook *ldvtest.Logbook) string {
 		PseudonymVars:         "bsn",
 		LDVResolutionActivity: resolutionActivity,
 		LDVForwardActivity:    forwardActivity,
+		LDVBSNkNextLogbookID:  bsnkContact,
 	}
 	client := logbook.Client(t, "bron-sidecar")
 	sidecar := httptest.NewServer(newMux(cfg, &http.Client{Timeout: 5 * time.Second}, client))
@@ -109,8 +112,8 @@ func TestPseudonymFlowLogsBothDataverwerkingen(t *testing.T) {
 		t.Fatalf("expected one record of each kind, got %+v", records)
 	}
 
-	// The Fsc-Transaction-Id is the trace id, hyphens stripped — the same
-	// value the ADL and the FSC txlog carry for this request.
+	// The hop carried no traceparent, so the Fsc-Transaction-Id is the trace
+	// id, hyphens stripped — the same value the ADL and the FSC txlog carry.
 	const wantTrace = "0af7651916cd43dd8448eb211c80319c"
 	for _, record := range records {
 		if record.TraceID != wantTrace {
@@ -121,22 +124,36 @@ func TestPseudonymFlowLogsBothDataverwerkingen(t *testing.T) {
 		t.Errorf("the resolution record should hang under the forward record")
 	}
 
-	// The record about de-pseudonymisation names the Betrokkene by the PI the
-	// request arrived with, never by the BSN it produced.
-	if got := resolution[0].Attributes[ldv.AttrDataSubjectID]; got != "PI-abc123" {
-		t.Errorf("resolution data_subject_id = %v, want PI-abc123", got)
+	// Both records name the Betrokkene by this source's own pseudonym: not the
+	// BSN the resolution produced, and not the PI the request arrived with,
+	// which the caller's logbook holds too.
+	for _, record := range records {
+		subject, _ := record.Attributes[ldv.AttrDataSubjectID].(string)
+		if !strings.HasPrefix(subject, "LP-") || record.Attributes[ldv.AttrDataSubjectIDType] != ldv.SubjectTypePseudonym {
+			t.Errorf("record %q names the Betrokkene %q (%v), want a logbook-local pseudonym",
+				record.Name, subject, record.Attributes[ldv.AttrDataSubjectIDType])
+		}
+		if encoded, _ := json.Marshal(record); strings.Contains(string(encoded), "PI-abc123") {
+			t.Errorf("record %q contains the caller's PI: %s", record.Name, encoded)
+		}
 	}
-	if got := resolution[0].Attributes[ldv.AttrDataSubjectIDType]; got != ldv.SubjectTypePI {
-		t.Errorf("resolution data_subject_id_type = %v, want %s", got, ldv.SubjectTypePI)
-	}
-	if got := forward[0].Attributes[ldv.AttrDataSubjectID]; got != "PI-abc123" {
-		t.Errorf("forward data_subject_id = %v, want PI-abc123", got)
+	if resolution[0].Attributes[ldv.AttrDataSubjectID] != forward[0].Attributes[ldv.AttrDataSubjectID] {
+		t.Error("the resolution and the forward name the same Betrokkene differently")
 	}
 	if got := resolution[0].Attributes[ldv.AttrProcessingActivityID]; got != resolutionActivity {
 		t.Errorf("resolution processing_activity_id = %v, want %s", got, resolutionActivity)
 	}
 	if got := forward[0].Attributes[ldv.AttrProcessingActivityID]; got != forwardActivity {
 		t.Errorf("forward processing_activity_id = %v, want %s", got, forwardActivity)
+	}
+	// The resolution called BSNk, another party, so it points there. The
+	// forward called the source behind the sidecar, which belongs to the same
+	// Verantwoordelijke and logs into the same logbook, so it points nowhere.
+	if got := resolution[0].Attributes[ldv.AttrNextLogbookID]; got != bsnkContact {
+		t.Errorf("resolution nextLogbookId = %v, want %s", got, bsnkContact)
+	}
+	if _, present := forward[0].Attributes[ldv.AttrNextLogbookID]; present {
+		t.Errorf("the forward points onwards, but its source logs into the same logbook")
 	}
 	// The request was initiated by another application, on the far side of an
 	// FSC boundary.
@@ -145,6 +162,42 @@ func TestPseudonymFlowLogsBothDataverwerkingen(t *testing.T) {
 		t.Errorf("foreign_operation.processor = %v, want %v", got, want)
 	}
 	ldvtest.AssertNoBSN(t, records, demoBSN)
+}
+
+// A caller that sends traceparent is followed, not overruled: its trace id is
+// taken over unchanged and its span becomes the forward's parent (§3.3.1). The
+// Fsc-Transaction-Id stays FSC's own; the ADL links the two.
+func TestACallersTraceparentIsTakenOver(t *testing.T) {
+	const callersTrace = "4bf92f3577b34da6a3ce929d0e0e4736"
+	const callersSpan = "00f067aa0ba902b7"
+
+	logbook := ldvtest.New(t, resolutionActivity, forwardActivity)
+	url := sidecarUnderTest(t, logbook)
+
+	response := postQuery(t, url, map[string]string{
+		"Fsc-Authorization":  pseudonymToken(t),
+		"Fsc-Transaction-Id": "0af76519-16cd-43dd-8448-eb211c80319c",
+		"traceparent":        "00-" + callersTrace + "-" + callersSpan + "-01",
+		"X-GBO-Scope":        "bd:ib:2025",
+	}, `{"query":"query($bsn: BSN!){ingeschrevenPersoon(bsn:$bsn){bsn}}","variables":{"bsn":"PI-abc123"}}`)
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("status = %d, body = %s", response.StatusCode, body)
+	}
+
+	records := logbook.Written()
+	for _, record := range records {
+		if record.TraceID != callersTrace {
+			t.Errorf("record %q trace_id = %q, want the caller's trace %q", record.Name, record.TraceID, callersTrace)
+		}
+	}
+	forward := ldvtest.ByName(records, "dataverwerking.bronquery-doorgifte")
+	if len(forward) != 1 {
+		t.Fatalf("expected one forward record, got %+v", records)
+	}
+	if forward[0].ParentSpanID != callersSpan {
+		t.Errorf("forward parent_span_id = %q, want the caller's span %q", forward[0].ParentSpanID, callersSpan)
+	}
 }
 
 // The direct (EUDI) flow holds only a BSN. It still logs the forward, and
@@ -231,11 +284,14 @@ func TestTheSidecarPassesTraceMetadataToTheSource(t *testing.T) {
 	if got := ldv.ParentSpanFor(received, traceContext.TraceID); !ldv.IsSpanID(got) {
 		t.Errorf("parent span = %q, want the sidecar's forward span", got)
 	}
-	if got := received.Get(ldv.HeaderSubjectID); got != "PI-abc123" {
-		t.Errorf("subject header = %q, want the PI so both components name the Betrokkene alike", got)
+	// The sidecar's own pseudonym, so both components name the Betrokkene
+	// alike — and not the PI, which would put the caller's identifier in the
+	// source's records.
+	if got := received.Get(ldv.HeaderSubjectID); !strings.HasPrefix(got, "LP-") {
+		t.Errorf("subject header = %q, want the sidecar's logbook-local pseudonym", got)
 	}
-	if got := received.Get(ldv.HeaderSubjectIDType); got != ldv.SubjectTypePI {
-		t.Errorf("subject type header = %q, want %s", got, ldv.SubjectTypePI)
+	if got := received.Get(ldv.HeaderSubjectIDType); got != ldv.SubjectTypePseudonym {
+		t.Errorf("subject type header = %q, want %s", got, ldv.SubjectTypePseudonym)
 	}
 }
 

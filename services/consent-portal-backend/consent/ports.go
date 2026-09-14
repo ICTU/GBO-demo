@@ -53,6 +53,10 @@ type Processing struct {
 	Start   time.Time
 	End     time.Time
 	Failed  bool
+	// NextLogbook is where this processing continues when it called another
+	// party: the read API of that party's logbook, or a contact page when it
+	// has none. Empty when nothing else was called.
+	NextLogbook string
 	// Attributes is whatever local detail helps a reader; the adapter
 	// prefixes nothing, so callers pass fully-qualified `gbo.` keys.
 	Attributes map[string]any

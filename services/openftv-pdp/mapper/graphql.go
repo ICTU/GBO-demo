@@ -25,7 +25,9 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -315,7 +317,8 @@ func fetchConsent(headers map[string]string) map[string]any {
 	if validUntilErr != nil || claims.ExpiresAt == nil || !parsedValidUntil.Equal(claims.ExpiresAt.Time) {
 		return invalidConsent("valid_until does not match exp")
 	}
-	status, found, err := fetchConsentStatus(claims.ConsentID, firstHeader(headers, "Fsc-Transaction-Id", "X-Request-Id", "X-Request-ID"))
+	status, found, err := fetchConsentStatus(claims.ConsentID,
+		firstHeader(headers, "Fsc-Transaction-Id", "X-Request-Id", "X-Request-ID"), statusTraceparent(headers))
 	if err != nil {
 		return map[string]any{
 			"context_valid":    true,
@@ -440,11 +443,12 @@ func fetchConsentKeys(source string) (map[string]*ecdsa.PublicKey, error) {
 }
 
 // fetchConsentStatus asks the consent register whether the consent is still
-// live. txID is passed on rather than dropped: confirming a status is itself
-// a Dataverwerking that the register logs, and without the identifier that
-// record lands under a trace of its own — outside the very request it was
-// part of, and therefore invisible in a chain view that joins on it.
-func fetchConsentStatus(consentID, txID string) (string, bool, error) {
+// live. Confirming a status is itself a Dataverwerking that the register logs,
+// so the request carries the trace it belongs to: on traceparent, which LDV
+// §3.1 requires between applications, and the transaction id alongside for
+// the logs that key on it. Without them the record lands under a trace of its
+// own — outside the very request it was part of.
+func fetchConsentStatus(consentID, txID, traceparent string) (string, bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	u := consentURL() + "/consents/" + url.PathEscape(consentID) + "/status"
@@ -454,6 +458,9 @@ func fetchConsentStatus(consentID, txID string) (string, bool, error) {
 	}
 	if txID != "" {
 		req.Header.Set("Fsc-Transaction-Id", txID)
+	}
+	if traceparent != "" {
+		req.Header.Set("traceparent", traceparent)
 	}
 	resp, err := consentClient.Do(req)
 	if err != nil {
@@ -477,6 +484,41 @@ func fetchConsentStatus(consentID, txID string) (string, bool, error) {
 		return "", false, fmt.Errorf("invalid consent status response")
 	}
 	return status.Status, true, nil
+}
+
+// statusTraceparent is the traceparent the status request carries: the
+// request's own trace, and a fresh span for this lookup, under which the
+// register files its record. The trace comes from the caller's traceparent,
+// which the Inway copies into the AuthZEN context with the rest of the
+// request's headers, and otherwise from the transaction id, which the chain's
+// entry ties its trace to. Empty when neither yields a usable trace id; a
+// malformed traceparent is worse than none.
+func statusTraceparent(headers map[string]string) string {
+	traceID := ""
+	if incoming := firstHeader(headers, "traceparent"); len(incoming) >= 55 && incoming[2] == '-' && incoming[35] == '-' {
+		traceID = strings.ToLower(incoming[3:35])
+	}
+	if !isTraceID(traceID) {
+		traceID = strings.ToLower(strings.ReplaceAll(firstHeader(headers, "Fsc-Transaction-Id", "X-Request-Id", "X-Request-ID"), "-", ""))
+	}
+	if !isTraceID(traceID) {
+		return ""
+	}
+	span := make([]byte, 8)
+	if _, err := rand.Read(span); err != nil {
+		return ""
+	}
+	return "00-" + traceID + "-" + hex.EncodeToString(span) + "-01"
+}
+
+// isTraceID reports whether value is 32 lowercase hex characters and not the
+// all-zero id W3C Trace Context declares invalid.
+func isTraceID(value string) bool {
+	if len(value) != 32 || value == strings.Repeat("0", 32) {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
 }
 
 var consentClient = &http.Client{Timeout: 2 * time.Second}

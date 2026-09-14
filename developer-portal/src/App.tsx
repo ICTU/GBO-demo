@@ -119,7 +119,9 @@ export default function App() {
   )
   // The LDV records hang off the same Fsc-Transaction-Id, so this reuses the
   // id the txlog hook already resolved instead of finding it again.
-  const { data: ldvChain, loading: ldvLoading } = useLdvChain(fscTxID)
+  // LDV records carry the request's trace id, not the transaction id the
+  // txlog and the decision log key on.
+  const { data: ldvChain, loading: ldvLoading } = useLdvChain(archTraceId)
   // FSC-nodes come from the txlog (audit-proof replaces the 'no-otel'
   // fallback); pdp/opa come from the cross-trace-lookup on
   // Fsc-Transaction-Id. Applies to both flows that hit pdp-service via
@@ -425,7 +427,7 @@ export default function App() {
         {(archMode === 'eudi-issuance' || archMode === 'use') && (
           <>
             <FscTxlogPanel data={fscTxlog} transactionId={fscTxID} loading={fscTxlogLoading} />
-            <LdvPanel data={ldvChain} transactionId={fscTxID} loading={ldvLoading} />
+            <LdvPanel data={ldvChain} traceId={archTraceId} loading={ldvLoading} />
           </>
         )}
 
