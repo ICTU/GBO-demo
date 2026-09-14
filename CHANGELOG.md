@@ -6,6 +6,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Added
+- **The `gbo-app` chart can express a one-shot workload.** `job.enabled`
+  renders a Job instead of a Deployment, Service and HTTPRoute — mutually
+  exclusive, because a release either serves traffic or runs to completion.
+  Combining it with `route.enabled` is a template error rather than a silently
+  ignored value.
+  - The Job is named `<fullname>-<release revision>`. A Job spec is immutable,
+    so a release that reruns a task creates a new object instead of patching
+    the old one; `kubectl get jobs` then reads as a history of attempts, and
+    Helm removes the previous revision's Job on upgrade.
+  - `parallelism` and `completions` are pinned to 1 and `replicaCount` is
+    ignored, so one release never runs a migration in two pods at once.
+    `restartPolicy: Never` keeps a failed pod for `kubectl logs`, and
+    `activeDeadlineSeconds` (default 600) fails a wedged migration instead of
+    hanging. Deploy Job releases with `--wait --wait-for-jobs` — plain
+    `--wait` does not wait for Jobs; Flux does by default.
+  - Helm creates a new revision's Job before deleting the previous one, in the
+    background, so attempts can overlap across revisions. Exclusion lives in
+    the database: `scripts/bootstrap-source-registry.sh` now holds an advisory
+    lock in each psql session, `migrate-source-registry` already held one, and
+    nl-wallet's migrator applies each run in a single transaction against a
+    primary-keyed history table, so two attempts cannot both commit.
+  - The three EUDI database tasks that had no home in the chart now have
+    example values files: `source-registry-bootstrap`,
+    `source-registry-migrations` and `eudi-migrations`.
+    `eudi-issuance-materialize` stays an init container — it writes
+    `issuance_server.toml` into the pod's own `emptyDir`, so it has to run in
+    that pod, before that container, every time.
+  - `postgres-eudi` gains an example too, and stays a Deployment with
+    `Recreate` and a ReadWriteOnce PVC rather than becoming a StatefulSet.
+    `Recreate` already guarantees that two postgres processes never open one
+    data directory; per-replica identity buys nothing for a single replica
+    reached through its Service. The reasoning is recorded in the values file
+    and in the new `deploy/helm/gbo-app/README.md`, which documents both
+    release shapes and where each one-shot workload belongs.
+  - The Deployment and the Job render from one shared pod spec helper, so the
+    two shapes cannot drift. Rendering is byte-identical for every existing
+    example values file. CI now templates every file in `examples/`.
+
 ### Changed
 - **The landing page returns to the palette it was designed in.** The ICTU
   colours introduced in #322 are reverted: `#01689b` carries the page again,
