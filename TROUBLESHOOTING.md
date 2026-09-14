@@ -66,10 +66,10 @@ the requested field. Check the field against `covers_fields` in
 `policies/dvtp/gbo/rules/` first — that, not the grant, is the catalog.
 
 The authorization regime itself no longer travels in the token. It follows
-from the evidence on the request: a verified consent token selects the
-consent regime, its absence the PID regime, and a request carrying both is
-denied with `AMBIGUOUS_EVIDENCE`. So a deny that names a consent or PID axis
-is about the request, not about a missing grant property.
+from the evidence on the request: a consent token selects the consent
+regime, and its absence the PID regime — the two exclude each other by
+construction. So a deny that names a consent or PID axis is about the
+request, not about a missing grant property.
 
 One property still travels in `prp`: the bron-sidecar reads
 `prp.subject_id_type` to decide whether to resolve PI to BSN. Decode the token

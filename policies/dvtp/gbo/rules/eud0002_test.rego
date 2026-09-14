@@ -17,7 +17,7 @@ _base_ctx := {
 	"args": {"vars.bsn": "999991772"},
 	"time": "2026-07-27T12:00:00Z",
 	"resource": {"scope": ""},
-	"pip": {"pid": {"pi": "PI-9c4e10b7a6d2f385"}},
+	"pip": {},
 	"field": "Query.akteVanOverlijden",
 }
 
@@ -46,7 +46,7 @@ test_deny_actor_not_in_allowed_actors if {
 # ── PID ─────────────────────────────────────────────────────────────────
 
 test_deny_pid_missing if {
-	ctx := object.union(_base_ctx, {"pip": {"pid": {"pi": ""}}})
+	ctx := object.union(_base_ctx, {"args": {"vars.bsn": ""}})
 	result := lib.evaluate(eud0002.spec, ctx)
 	result.decision == false
 	result.context.reason_admin.code == "PID_NOT_PRESENT"

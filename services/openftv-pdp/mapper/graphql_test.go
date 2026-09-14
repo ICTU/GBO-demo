@@ -439,13 +439,15 @@ func TestFetchConsentFailsClosedForMissingOrUnknownStatus(t *testing.T) {
 	}
 }
 
-// ── Identifier scrubbing ──────────────────────────────────────────────────
-// No raw BSN may reach OPA's input, and with it the decision log, whichever
-// regime a request claims. The consent header decides HOW the subject
-// identifier is made safe — kept only when it is the verified consent's own
-// PI, pseudonymised in the PID regime — never WHETHER.
+// ── The mapper only maps ──────────────────────────────────────────────────
+// #364: the request-mapper does GraphQL mapping and consent-token
+// verification, nothing else. It makes no BSNk call and rewrites no
+// identifier, so a plain BSN in the query reaches the policy input as it
+// was sent — keeping it out of the decision logs is #368. Without a consent
+// token it adds no pip at all: the policy reads the PID regime from the
+// request itself.
 
-const demoBSN = "123456789"
+const plainBSN = "999991772"
 
 // graphQLRequest builds the PARC the PEP hands the mapper: the GraphQL body
 // on the action, the request headers on the context.
@@ -466,32 +468,10 @@ func graphQLRequest(t *testing.T, headers map[string]string, variables map[strin
 	}
 }
 
-// decisionInput serialises everything the mapper hands on to OPA, so a test
-// can assert what never appears in it.
-func decisionInput(t *testing.T, parc *models.PARC) string {
-	t.Helper()
-	out, err := json.Marshal(parc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Guard against a vacuous negative check: the serialisation must carry
-	// the request itself, or "BSN absent" would prove nothing.
-	if !strings.Contains(string(out), "ingeschrevenPersoon") {
-		t.Fatalf("decision input does not carry the request: %s", out)
-	}
-	return string(out)
-}
-
 func subjectVariable(parc *models.PARC) any {
 	resource, _ := parc.Context.GetAttributeValue("resource").(map[string]any)
 	variables, _ := resource["variables"].(map[string]any)
 	return variables["bsn"]
-}
-
-func pidPI(parc *models.PARC) any {
-	pip, _ := parc.Context.GetAttributeValue("pip").(map[string]any)
-	pid, _ := pip["pid"].(map[string]any)
-	return pid["pi"]
 }
 
 func verifiedConsentToken(t *testing.T) string {
@@ -509,89 +489,30 @@ func verifiedConsentToken(t *testing.T) string {
 	return consentTestToken(t, key, "test-key", "test-audience", time.Now().Add(time.Hour))
 }
 
-func bsnkTestServer(t *testing.T, status int, pi string) {
-	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/pseudonymize" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(status)
-		_ = json.NewEncoder(w).Encode(map[string]string{"pi": pi})
-	}))
-	t.Cleanup(server.Close)
-	t.Setenv("GBO_BSNK_URL", server.URL)
-}
-
-// Review of #363: an unverifiable consent header switched scrubbing off, so
-// an EUDI request carrying one kept its raw BSN in the action body, the
-// resource variables and the resolved arguments.
-func TestConsentHeaderDoesNotBypassBSNScrubbing(t *testing.T) {
-	out := GraphQLToContext(graphQLRequest(t,
-		map[string]string{"X-GBO-Consent-Token": "invalid"},
-		map[string]any{"bsn": demoBSN},
-	))
-	if in := decisionInput(t, out); strings.Contains(in, demoBSN) {
-		t.Fatalf("raw BSN reached the decision input: %s", in)
+func TestMapperLeavesAPlainBSNUntouched(t *testing.T) {
+	out := GraphQLToContext(graphQLRequest(t, map[string]string{}, map[string]any{"bsn": plainBSN}))
+	if got := subjectVariable(out); got != plainBSN {
+		t.Fatalf("subject variable = %#v, want the plain BSN as sent", got)
+	}
+	if pip := out.Context.GetAttributeValue("pip"); pip != nil {
+		t.Fatalf("pip = %#v, want none without a consent token", pip)
+	}
+	if body, _ := out.Action.Attributes().GetAttributeValue(models.AttrBody).(string); !strings.Contains(body, plainBSN) {
+		t.Fatalf("action body = %q, want the request as sent", body)
 	}
 }
 
-// The verified consent's own PI is the one subject value the consent regime
-// expects, and it is kept: DVT0001's constraint binding compares against it.
-func TestVerifiedConsentKeepsItsOwnPI(t *testing.T) {
+func TestMapperDoesNotRewriteTheSubjectUnderAConsentToken(t *testing.T) {
 	token := verifiedConsentToken(t)
 	out := GraphQLToContext(graphQLRequest(t,
 		map[string]string{"X-GBO-Consent-Token": token},
-		map[string]any{"bsn": "PI-abc123"},
+		map[string]any{"bsn": "PI-other"},
 	))
-	if got := subjectVariable(out); got != "PI-abc123" {
-		t.Fatalf("subject variable = %#v, want the consent's own PI kept", got)
+	if got := subjectVariable(out); got != "PI-other" {
+		t.Fatalf("subject variable = %#v, want it as sent", got)
 	}
-}
-
-// Any other subject value under a verified consent is blanked, not
-// pseudonymised: pseudonymising a BSN yields that citizen's PI, which would
-// then satisfy DVT0001's constraint binding for a consumer that was never
-// meant to hold the BSN. Blanked, the binding fails as it does on main.
-func TestVerifiedConsentRedactsAnyOtherSubject(t *testing.T) {
-	token := verifiedConsentToken(t)
-	out := GraphQLToContext(graphQLRequest(t,
-		map[string]string{"X-GBO-Consent-Token": token},
-		map[string]any{"bsn": demoBSN},
-	))
-	if in := decisionInput(t, out); strings.Contains(in, demoBSN) {
-		t.Fatalf("raw BSN reached the decision input: %s", in)
-	}
-	if got := subjectVariable(out); got != "" {
-		t.Fatalf("subject variable = %#v, want it blanked", got)
-	}
-}
-
-func TestPIDRegimePseudonymisesTheBSN(t *testing.T) {
-	bsnkTestServer(t, http.StatusOK, "PI-2f1a7c9b40e6d853")
-	out := GraphQLToContext(graphQLRequest(t, map[string]string{}, map[string]any{"bsn": demoBSN}))
-	if in := decisionInput(t, out); strings.Contains(in, demoBSN) {
-		t.Fatalf("raw BSN reached the decision input: %s", in)
-	}
-	if got := pidPI(out); got != "PI-2f1a7c9b40e6d853" {
-		t.Fatalf("pip.pid.pi = %#v", got)
-	}
-	if got := subjectVariable(out); got != "PI-2f1a7c9b40e6d853" {
-		t.Fatalf("subject variable = %#v, want the PI substituted", got)
-	}
-}
-
-// A BSNk failure scrubs the identifier rather than passing it through. The
-// policy still sees that PID enrichment was attempted (pip.pid is present),
-// which is what keeps the deny reason PID_NOT_PRESENT.
-func TestFailedPseudonymisationScrubsRatherThanPassesThrough(t *testing.T) {
-	bsnkTestServer(t, http.StatusInternalServerError, "")
-	out := GraphQLToContext(graphQLRequest(t, map[string]string{}, map[string]any{"bsn": demoBSN}))
-	if in := decisionInput(t, out); strings.Contains(in, demoBSN) {
-		t.Fatalf("raw BSN reached the decision input: %s", in)
-	}
-	if got := pidPI(out); got != "" {
-		t.Fatalf("pip.pid.pi = %#v, want empty", got)
+	pip, _ := out.Context.GetAttributeValue("pip").(map[string]any)
+	if consent, _ := pip["consent"].(map[string]any); consent["context_valid"] != true {
+		t.Fatalf("pip = %#v, want the verified consent", pip)
 	}
 }

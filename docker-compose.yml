@@ -131,9 +131,6 @@ services:
       - GBO_CONSENT_URL=http://consent-register:4002
       - GBO_CONSENT_ISSUER=https://consent-register.gbo.test
       - GBO_CONSENT_AUDIENCE=gbo:dvtp:pdp
-      # The EUDI flow resolves the wallet-disclosed BSN to a PI here; the
-      # policy engine (and its decision log) is never given the BSN.
-      - GBO_BSNK_URL=http://bsnk-mock:4003
       # Empty by default: the PDP then loads policies from /policies and
       # skips bundle retrieval entirely (apps/pdp/server/router.go). Set it
       # — `make demo-manager` does — to put the OpenFTV Manager in charge
