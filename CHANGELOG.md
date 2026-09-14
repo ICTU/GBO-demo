@@ -17,10 +17,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     the old one; `kubectl get jobs` then reads as a history of attempts, and
     Helm removes the previous revision's Job on upgrade.
   - `parallelism` and `completions` are pinned to 1 and `replicaCount` is
-    ignored, so a schema migration runs once per release and never
-    concurrently with itself. `restartPolicy: Never` keeps a failed pod for
-    `kubectl logs`, and `activeDeadlineSeconds` (default 600) fails a wedged
-    migration instead of hanging.
+    ignored, so one release never runs a migration in two pods at once.
+    `restartPolicy: Never` keeps a failed pod for `kubectl logs`, and
+    `activeDeadlineSeconds` (default 600) fails a wedged migration instead of
+    hanging. Deploy Job releases with `--wait --wait-for-jobs` — plain
+    `--wait` does not wait for Jobs; Flux does by default.
+  - Helm creates a new revision's Job before deleting the previous one, in the
+    background, so attempts can overlap across revisions. Exclusion lives in
+    the database: `scripts/bootstrap-source-registry.sh` now holds an advisory
+    lock in each psql session, `migrate-source-registry` already held one, and
+    nl-wallet's migrator applies each run in a single transaction against a
+    primary-keyed history table, so two attempts cannot both commit.
   - The three EUDI database tasks that had no home in the chart now have
     example values files: `source-registry-bootstrap`,
     `source-registry-migrations` and `eudi-migrations`.

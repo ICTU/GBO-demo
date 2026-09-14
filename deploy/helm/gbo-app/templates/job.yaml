@@ -15,9 +15,10 @@ metadata:
 spec:
   backoffLimit: {{ .Values.job.backoffLimit }}
   {{- /*
-  Pinned to the Job defaults on purpose, and not wired to replicaCount: two
-  pods running the same schema migration concurrently is the failure this
-  workload shape exists to prevent.
+  Pinned to the Job defaults on purpose, and not wired to replicaCount: one
+  release must never run the same migration in two pods at once. This does not
+  cover a previous revision's Job that Helm has not finished deleting; the
+  migration itself excludes that one (see README.md).
   */}}
   parallelism: 1
   completions: 1

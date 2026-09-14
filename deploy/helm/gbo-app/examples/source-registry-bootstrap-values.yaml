@@ -2,7 +2,9 @@
 #
 # Creates the source_registry database, the owner role and the read-only role
 # in the EUDI PostgreSQL instance. Idempotent: every statement in the script
-# is guarded, so rerunning the release is safe.
+# is guarded, so rerunning the release is safe, and each psql session holds an
+# advisory lock, so a run that overlaps the previous revision's Job waits for
+# it instead of racing it.
 #
 # It runs as a Job rather than an init container because it prepares a
 # database that several releases share; it belongs to no single workload, and

@@ -34,10 +34,15 @@ envFrom: []
 # (Deployment + Service + optional HTTPRoute) or runs a task to completion
 # (Job, no Service, no probes, no container port).
 #
-# Use it for work that must happen once per release and never twice at the
-# same time — the schema migrations. Work that must happen before *this* pod's
-# main container starts, such as materializing a config file, belongs in
-# initContainers instead. See deploy/helm/gbo-app/README.md.
+# Use it for work that must happen once per release — the schema migrations.
+# Work that must happen before *this* pod's main container starts, such as
+# materializing a config file, belongs in initContainers instead.
+#
+# Deploy a Job release with `--wait --wait-for-jobs`; plain `--wait` does not
+# wait for Jobs. A Job is one pod at a time, but Helm can start a new
+# revision's Job while the previous one is still running, so the task itself
+# must exclude a concurrent twin (a database lock, or transactional
+# migrations). See deploy/helm/gbo-app/README.md.
 job:
   enabled: false
   restartPolicy: Never

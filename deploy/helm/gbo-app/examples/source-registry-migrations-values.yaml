@@ -5,8 +5,11 @@
 # need. Depends on source-registry-bootstrap having created the database.
 #
 # A Job rather than an init container: schema changes must run once per
-# release and never concurrently. An init container would run on every pod
-# start, and once per replica.
+# release, not on every pod start and once per replica.
+#
+# An upgrade can briefly overlap with the previous revision's Job. The command
+# holds a PostgreSQL advisory lock for the whole run — the same lock the
+# reconciler's `--migrate` takes — so a second attempt waits for the first.
 #
 # The reconciler can apply the same migrations itself with `--migrate`, as
 # `source-reconciler-values.yaml` does. Pick one: either the reconciler

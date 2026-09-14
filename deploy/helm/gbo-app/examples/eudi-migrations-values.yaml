@@ -8,6 +8,12 @@
 # server and the adapter each migrate their own schema, and an init container
 # cannot order work across releases. Running it as its own release also means
 # a failed migration is a failed Job you can read, not a pod that restarts.
+#
+# An upgrade can briefly overlap with the previous revision's Job. The upstream
+# migrator takes no lock, but it applies the whole run in one PostgreSQL
+# transaction against a primary-keyed history table, so two attempts cannot
+# both commit a migration: the loser rolls back, fails, and its retry is a
+# no-op.
 
 job:
   enabled: true
