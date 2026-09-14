@@ -9,8 +9,9 @@
 //     and presents the token from the contract.
 //  3. The Inway receives the request, validates the token, and forwards
 //     to the backend service (PDP as AuthZen endpoint).
-//  4. PEP dispatches on the flow (BSN comes from the disclosed PID; no
-//     consent fetch, no BSNk transform).
+//  4. The PDP judges the request under the PID regime because it carries
+//     no consent token (#334). The BSN comes from the disclosed PID: no
+//     consent fetch, and no BSNk transform at the source.
 //  5. On PDP ALLOW: the bron answers; the adapter formats
 //     the response as an IssuableDocument list.
 //
