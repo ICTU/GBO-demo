@@ -1,12 +1,15 @@
-import type { LdvChainResponse, LdvRecord } from '../api/devClient'
+import type { LdvChainResponse, LdvLogbookResult, LdvRecord } from '../api/devClient'
 
 // Logboek Dataverwerkingen per Verantwoordelijke (Logius LDV v1.0.0).
 //
 // This is the third of the three logs the chain writes, next to the PDP's
 // decision (ADL) and the transport records (FSC-Logging). They are separate
 // stores by design — LDV has each Verantwoordelijke log its own processing —
-// and what joins them is the trace id shown in the header. Seeing the same
-// value on all three panels is the point of this one.
+// and the panel reads them the way the read extension says a reader does:
+// from the logbook where the processing started, along dpl.read.nextLogbookId.
+// Each logbook says how it was reached. One that no pointer leads to — the
+// consent register's, whose status the PDP checks — is still shown, marked as
+// such, rather than presented as if the chain led there.
 //
 // It is not the observability pipeline: these records are confirmed on write
 // and never sampled, so an empty logbook here means nothing was processed,
@@ -47,23 +50,40 @@ function depthOf(record: LdvRecord, bySpan: Map<string, LdvRecord>): number {
   return depth
 }
 
+function reachedLabel(entry: LdvLogbookResult, names: Map<string, string>): string {
+  switch (entry.reached_via) {
+    case 'start':
+      return 'startpunt'
+    case 'pointer':
+      return entry.from ? `via nextLogbookId uit ${names.get(entry.from) ?? entry.from}` : 'via nextLogbookId'
+    default:
+      return 'geen pointer naartoe'
+  }
+}
+
 export default function LdvPanel({
-  data, transactionId, loading,
+  data, traceId, loading,
 }: {
   data: LdvChainResponse | null
-  transactionId: string | null
+  traceId: string | null
   loading: boolean
 }) {
-  if (!transactionId && !loading) return null
+  if (!traceId && !loading) return null
 
-  const configured = (data?.logbooks?.length ?? 0) > 0
-  const total = data?.logbooks?.reduce((sum, l) => sum + (l.records?.length ?? 0), 0) ?? 0
+  const logbooks = data?.logbooks ?? []
+  const configured = logbooks.length > 0
+  const total = logbooks.reduce((sum, l) => sum + (l.records?.length ?? 0), 0)
+  const names = new Map(logbooks.map((l) => [l.logbook.id, l.logbook.name]))
+  // A logbook with nothing to show and nothing wrong goes on one line at the
+  // bottom, so the chain above reads without gaps between its steps.
+  const shown = logbooks.filter((l) => l.error || (l.records?.length ?? 0) > 0)
+  const silent = logbooks.filter((l) => !l.error && (l.records?.length ?? 0) === 0)
 
   return (
     <div className="panel ldv-panel">
       <div className="panel-h">
         <span className="t">
-          <span className="n">3.7</span>Logboek Dataverwerkingen · per verantwoordelijke
+          <span className="n">3.7</span>Logboek Dataverwerkingen · gevolgd via nextLogbookId
         </span>
         {data?.trace_id && (
           <span className="mono" style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--mute)' }}>
@@ -84,7 +104,7 @@ export default function LdvPanel({
         )}
         {!loading && configured && data && (
           <div className="ldv-logbooks">
-            {data.logbooks.map((entry) => {
+            {shown.map((entry) => {
               const records = entry.records ?? []
               const bySpan = new Map(records.map((r) => [r.spanId, r]))
               return (
@@ -92,11 +112,9 @@ export default function LdvPanel({
                   <div className="ldv-logbook-name">
                     <strong>{entry.logbook.name}</strong>
                     <code className="dim tiny" style={{ marginLeft: 6 }}>{entry.logbook.id}</code>
+                    <span className="dim tiny" style={{ marginLeft: 6 }}>· {reachedLabel(entry, names)}</span>
                     {entry.error && <span className="fsc-txlog-err">— {entry.error}</span>}
                   </div>
-                  {!entry.error && records.length === 0 && (
-                    <div className="dim tiny">geen records</div>
-                  )}
                   {records.length > 0 && (
                     <table className="fsc-txlog-table">
                       <thead>
@@ -117,7 +135,7 @@ export default function LdvPanel({
                                 <code>{record.name.replace('dataverwerking.', '')}</code>
                                 {next && (
                                   <span className="dim tiny" title="dpl.read.nextLogbookId">
-                                    {' '}→ {next}
+                                    {' '}→ {names.get(next) ?? next}
                                   </span>
                                 )}
                               </td>
@@ -141,6 +159,17 @@ export default function LdvPanel({
                 </div>
               )
             })}
+            {silent.length > 0 && (
+              <div className="dim tiny">
+                Zonder records voor deze trace:{' '}
+                {silent.map((entry, i) => (
+                  <span key={entry.logbook.id}>
+                    {i > 0 && ', '}
+                    <strong>{entry.logbook.name}</strong> <code>{entry.logbook.id}</code>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>

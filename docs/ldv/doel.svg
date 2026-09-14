@@ -1,0 +1,181 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 550" role="img" aria-labelledby="title desc">
+  <title id="title">De DvTP-bevraging in de Logboeken Dataverwerkingen</title>
+  <desc id="desc">Trace T loopt ongewijzigd door de keten. X is de FSC-transaction-id en staat samen met T in de ADL. De afnemer logt zelf en wijst met nextLogbookId naar het logboek van de Belastingdienst. De statuscheck gaat vanuit de PDP naar het consent-register; naar logboek-toestemming wijst geen LDV-pointer, omdat de PDP een ADL schrijft.</desc>
+  <style>
+    svg {
+      --bg: #ffffff; --lane: #eef1f7; --panel: #ffffff; --ink: #161d2e; --ink2: #44546a;
+      --muted: #6b7689; --line: #c9d6e3; --blue: #3a65ea; --magenta: #b500c7; --amber: #9a6500;
+      font-family: system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      svg {
+        --bg: #0d1117; --lane: #161c28; --panel: #1b2333; --ink: #e8ecf5; --ink2: #b4bfd3;
+        --muted: #8995ac; --line: #34425f; --blue: #8aa6ff; --magenta: #e27ff2; --amber: #f0b545;
+      }
+    }
+    text { text-anchor: middle; }
+    .st { text-anchor: start; }
+    .en { text-anchor: end; }
+    .bg { fill: var(--bg); }
+    .lane { fill: var(--lane); }
+    .ln { font-size: 13.5px; font-weight: 700; fill: var(--ink); }
+    .ls { font-size: 11px; fill: var(--muted); }
+    .box { fill: var(--panel); stroke: var(--line); stroke-width: 1.2; }
+    .nm { font-size: 12.5px; font-weight: 600; fill: var(--ink); }
+    .mo { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; fill: var(--ink2); }
+    .lb { font-size: 11px; fill: var(--ink2); }
+    .edge { stroke: var(--ink2); stroke-width: 1.4; fill: none; }
+    .write { stroke: var(--muted); stroke-width: 1.3; stroke-dasharray: 2 4; fill: none; }
+    .next { stroke: var(--magenta); stroke-width: 2.4; fill: none; }
+    .proc { stroke: var(--blue); stroke-width: 1.6; stroke-dasharray: 6 4; fill: none; }
+    .gap { stroke: var(--amber); stroke-width: 1.6; stroke-dasharray: 3 4; fill: none; }
+    .fsc { stroke: var(--ink2); stroke-width: 1; stroke-dasharray: 5 5; opacity: 0.7; }
+    .pill { fill: var(--panel); stroke: var(--ink2); stroke-width: 1; }
+    .pill-t { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 10.5px; font-weight: 500; fill: var(--ink); }
+    .mk { fill: var(--ink2); }
+    .mk-w { fill: var(--muted); }
+    .mk-next { fill: var(--magenta); }
+    .mk-proc { fill: var(--blue); }
+    .mk-gap { fill: var(--amber); }
+    .c-next { fill: var(--magenta); font-weight: 600; }
+    .c-proc { fill: var(--blue); font-weight: 600; }
+    .c-gap { fill: var(--amber); font-weight: 600; }
+    .step circle { fill: var(--ink); }
+    .step.amber circle { fill: var(--amber); }
+    .step text { fill: var(--bg); font-size: 11px; font-weight: 700; }
+  </style>
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker>
+    <marker id="arw" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk-w"/></marker>
+    <marker id="arn" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk-next"/></marker>
+    <marker id="arp" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk-proc"/></marker>
+    <marker id="arg" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk-gap"/></marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="980" height="550"/>
+
+  <!-- lanes -->
+  <rect class="lane" x="0" y="0" width="208" height="510" rx="10"/>
+  <rect class="lane" x="222" y="0" width="496" height="510" rx="10"/>
+  <rect class="lane" x="732" y="0" width="248" height="510" rx="10"/>
+  <text class="ln st" x="16" y="26">Hypotheek-BV</text>
+  <text class="ls st" x="16" y="43">afnemer · privaat</text>
+  <text class="ln st" x="238" y="26">Belastingdienst</text>
+  <text class="ls st" x="238" y="43">bron · Verantwoordelijke</text>
+  <text class="ln st" x="748" y="26">GBO · toestemming</text>
+  <text class="ls st" x="748" y="43">register + portaal, één logboek</text>
+
+  <line class="fsc" x1="215" y1="54" x2="215" y2="500"/>
+  <rect class="pill" x="196" y="50" width="38" height="18" rx="9"/>
+  <text class="pill-t" x="215" y="63">FSC</text>
+
+  <!-- row 1 -->
+  <rect class="box" x="290" y="100" width="150" height="46" rx="6"/>
+  <text class="nm" x="365" y="119">PDP (OpenFTV)</text>
+  <text class="mo" x="365" y="135">trace T</text>
+
+  <path class="box" d="M470,103 v40 a55,7 0 0 0 110,0 v-40"/>
+  <path class="box" d="M470,103 a55,7 0 0 0 110,0 a55,7 0 0 0 -110,0 z"/>
+  <text class="nm" x="525" y="127">ADL</text>
+  <text class="mo" x="525" y="142">T · fsc.tx X</text>
+
+  <path class="box" d="M598,103 v40 a56,7 0 0 0 112,0 v-40"/>
+  <path class="box" d="M598,103 a56,7 0 0 0 112,0 a56,7 0 0 0 -112,0 z"/>
+  <text class="nm" x="654" y="127">FSC-txlog</text>
+  <text class="mo" x="654" y="142">tx X</text>
+
+  <rect class="box" x="790" y="100" width="150" height="46" rx="6"/>
+  <text class="nm" x="865" y="119">consent-register</text>
+  <text class="mo" x="865" y="135">trace T</text>
+
+  <!-- row 2 -->
+  <rect class="box" x="30" y="210" width="150" height="46" rx="6"/>
+  <text class="nm" x="105" y="229">dienstverlener</text>
+  <text class="mo" x="105" y="245">trace T</text>
+
+  <rect class="box" x="290" y="210" width="150" height="46" rx="6"/>
+  <text class="nm" x="365" y="229">bron-sidecar</text>
+  <text class="mo" x="365" y="245">trace T</text>
+
+  <rect class="box" x="540" y="210" width="150" height="46" rx="6"/>
+  <text class="nm" x="615" y="229">graphql-server</text>
+  <text class="mo" x="615" y="245">trace T</text>
+
+  <!-- row 3: logbooks -->
+  <path class="box" d="M30,357 v40 a75,7 0 0 0 150,0 v-40"/>
+  <path class="box" d="M30,357 a75,7 0 0 0 150,0 a75,7 0 0 0 -150,0 z"/>
+  <text class="nm" x="105" y="381">logboek-afnemer</text>
+  <text class="mo" x="105" y="396">trace T</text>
+
+  <path class="box" d="M415,357 v40 a75,7 0 0 0 150,0 v-40"/>
+  <path class="box" d="M415,357 a75,7 0 0 0 150,0 a75,7 0 0 0 -150,0 z"/>
+  <text class="nm" x="490" y="381">logboek-bd</text>
+  <text class="mo" x="490" y="396">trace T</text>
+
+  <path class="box" d="M790,357 v40 a75,7 0 0 0 150,0 v-40"/>
+  <path class="box" d="M790,357 a75,7 0 0 0 150,0 a75,7 0 0 0 -150,0 z"/>
+  <text class="nm" x="865" y="381">logboek-toestemming</text>
+  <text class="mo" x="865" y="396">trace T · parent PDP</text>
+
+  <!-- requests -->
+  <line class="edge" x1="180" y1="233" x2="288" y2="233" marker-end="url(#ar)"/>
+  <text class="lb" x="252" y="226">query</text>
+  <text class="mo" x="252" y="249">T · X</text>
+
+  <line class="edge" x1="217" y1="123" x2="288" y2="123" marker-end="url(#ar)"/>
+  <text class="lb" x="252" y="116">AuthZEN</text>
+  <text class="mo" x="252" y="138">T · X</text>
+
+  <line class="edge" x1="440" y1="233" x2="538" y2="233" marker-end="url(#ar)"/>
+  <text class="mo" x="489" y="226">traceparent T</text>
+
+  <path class="edge" d="M365,100 V80 H865 V98" marker-end="url(#ar)"/>
+  <text class="lb" x="560" y="73">consentstatus · traceparent T</text>
+
+  <!-- writes -->
+  <line class="write" x1="440" y1="123" x2="468" y2="123" marker-end="url(#arw)"/>
+  <line class="write" x1="105" y1="256" x2="105" y2="349" marker-end="url(#arw)"/>
+  <line class="write" x1="365" y1="256" x2="458" y2="349" marker-end="url(#arw)"/>
+  <line class="write" x1="615" y1="256" x2="522" y2="349" marker-end="url(#arw)"/>
+  <line class="write" x1="865" y1="146" x2="865" y2="349" marker-end="url(#arw)"/>
+
+  <!-- nextLogbookId -->
+  <line class="next" x1="180" y1="380" x2="412" y2="380" marker-end="url(#arn)"/>
+  <text class="lb c-next" x="300" y="371">nextLogbookId</text>
+  <g class="step"><circle cx="300" cy="394" r="9"/><text x="300" y="398">2</text></g>
+
+  <!-- processor -->
+  <line class="proc" x1="432" y1="360" x2="184" y2="258" marker-end="url(#arp)"/>
+  <text class="lb c-proc" x="300" y="342">processor</text>
+  <path class="proc" d="M822,349 V172 H404 V149" marker-end="url(#arp)"/>
+  <text class="lb c-proc" x="610" y="166">processor</text>
+
+  <!-- where the route stops -->
+  <line class="gap" x1="565" y1="386" x2="788" y2="386" marker-end="url(#arg)"/>
+  <text class="lb c-gap" x="650" y="372">geen LDV-pointer</text>
+  <g class="step amber"><circle cx="676" cy="386" r="10"/><text x="676" y="390">4</text></g>
+  <text class="lb c-gap" x="676" y="416">PDP schrijft ADL</text>
+
+  <!-- reader -->
+  <rect class="box" x="30" y="452" width="150" height="40" rx="6"/>
+  <text class="nm" x="105" y="469">lezer</text>
+  <text class="mo" x="105" y="484">zoekt traceId T</text>
+  <line class="edge" x1="105" y1="452" x2="105" y2="406" marker-end="url(#ar)"/>
+  <g class="step"><circle cx="124" cy="430" r="9"/><text x="124" y="434">1</text></g>
+  <g class="step"><circle cx="490" cy="424" r="9"/><text x="490" y="428">3</text></g>
+
+  <!-- legend -->
+  <line class="edge" x1="20" y1="530" x2="50" y2="530"/>
+  <text class="lb st" x="58" y="534">verzoek</text>
+  <line class="write" x1="126" y1="530" x2="156" y2="530"/>
+  <text class="lb st" x="164" y="534">schrijft record</text>
+  <line class="next" x1="268" y1="530" x2="298" y2="530"/>
+  <text class="lb st" x="306" y="534">nextLogbookId</text>
+  <line class="proc" x1="406" y1="530" x2="436" y2="530"/>
+  <text class="lb st" x="444" y="534">processor</text>
+  <line class="gap" x1="516" y1="530" x2="546" y2="530"/>
+  <text class="lb st" x="554" y="534">geen pointer</text>
+  <g class="step"><circle cx="642" cy="530" r="7"/></g>
+  <text class="lb st" x="655" y="534">leesroute</text>
+  <text class="lb st" x="740" y="534">T = trace-id · X = transaction-id</text>
+</svg>

@@ -49,6 +49,13 @@ func New(serviceName, logbookURL, token string) (*Logbook, *ldvclient.Client, er
 // durable locally and delivered afterwards, so a citizen's action never waits
 // on the logbook — and never completes without a record either.
 func (l *Logbook) Record(ctx context.Context, processing consent.Processing) error {
+	extra := make(map[string]any, len(processing.Attributes)+1)
+	for key, value := range processing.Attributes {
+		extra[key] = value
+	}
+	// Where the processing continues, when it called another party. Empty is
+	// dropped, as the read extension requires when nothing else was called.
+	extra[ldvclient.AttrNextLogbookID] = processing.NextLogbook
 	attributes := ldvclient.Attributes(
 		processing.Activity,
 		string(processing.Subject),
@@ -56,7 +63,7 @@ func (l *Logbook) Record(ctx context.Context, processing consent.Processing) err
 		// No foreign operation processor: the citizen is the caller, so
 		// there is no other application to name.
 		"",
-		processing.Attributes,
+		extra,
 	)
 	status := ldvclient.StatusOK
 	if processing.Failed {

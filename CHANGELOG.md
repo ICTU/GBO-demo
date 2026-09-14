@@ -60,6 +60,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     JWKS is cached for five minutes and refetched on an unknown `kid`. The bounded
     stale-key fallback during a JWKS outage is gone: the register serves both the
     keys and the status, so an outage denied anyway.
+  - The status request keeps the trace context #365 gave it: a `traceparent`
+    with the request's trace — the caller's, else the transaction id — and a
+    fresh span for the lookup, next to `Fsc-Transaction-Id`.
   - The token is verified with `io.jwt.verify_es256` against the key its `kid`
     names, and its claims are checked in Rego — not with `io.jwt.decode_verify`,
     which reports every failure as one `false` and has no clock-skew leeway. Each
@@ -86,6 +89,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     decision input whether the token verifies or not. A PI other than the
     consent's is now kept rather than blanked; the constraint binding denies it
     with `CONSTRAINT_MISMATCH` either way.
+- **LDV records take the caller's trace over instead of the FSC transaction
+  id** (#365). `ldv-client` reads `traceparent` before `Fsc-Transaction-Id`,
+  as LDV §3.3.1 and the ADL require; the transaction id is the fallback for a
+  hop that arrives without one. One processing that crosses FSC more than once
+  now keeps one trace id. The bron-sidecar records the caller's span as the
+  forward's parent, and the EUDI adapter hands the source the span of the
+  record that made the call instead of a random one.
+- **GBO's logbook is split per system** (#365): `logboek-toestemming` for the
+  consent register and portal, `logboek-eudi-adapter` for the adapter. GBO's
+  register of verwerkingsactiviteiten is split with it, so each logbook accepts
+  only its own system's activities.
+- **The consent status check carries trace context** (#365). The PDP sends the
+  consent register a `traceparent` with the request's trace and a span for the
+  lookup, so the status record lands in the request's trace, under that span,
+  instead of becoming a root.
+- **The demo consumer logs its own processing** (#365). `dienstverlener-backend`
+  writes each call to a source to `logboek-afnemer`, Hypotheek-BV's own
+  logbook, with a `dpl.read.nextLogbookId` to the source's read API, and hands
+  the source its record's span. The read extension starts a chain at the
+  application that started the processing; whether a private consumer must do
+  this is an open question, so the demo applies it provisionally.
+- **The dev-portal's LDV panel follows the chain instead of asking every
+  logbook** (#365). It queries on the request's trace id, starts at the
+  logbooks where a processing starts, and follows `dpl.read.nextLogbookId`;
+  every logbook says how it was reached. A logbook no pointer leads to — the
+  consent register's, whose status the PDP checks — is still queried and shown
+  as such. `LDV_LOGBOOKS` now names each logbook by its read-API URI and marks
+  the start logbooks.
+- **Records of a call to BSNk point at BSNk** (#365). The sidecars' PI→BSN
+  resolution and the consent portal's pseudonymisation set
+  `dpl.read.nextLogbookId` from `LDV_BSNK_NEXT_LOGBOOK_ID`. BSNk has no read
+  API in the demo, so the value is a page about the mock, the fallback the read
+  extension allows for a party without one.
+- **A source names the Betrokkene in its own pseudonym space** (#367). The
+  sidecars log the PI→BSN resolution and the forward under a logbook-local
+  pseudonym derived from the BSN with the source's own key, and pass that on
+  to the source, instead of the PI the consumer sent. The PI now appears only
+  in the consumer's logbook, so logbooks of different Verantwoordelijken share
+  no identifier and join on the trace id alone.
+- **The EUDI adapter's call to a source stays under its assembly record.** Its
+  client is instrumented, and otelhttp injected its own client span over the
+  LDV position; `ldv.Transport`, placed inside the instrumentation, puts it
+  back. The assembly record is now also written when the source refuses, fails
+  or has no data, so a source's records never hang under a missing parent.
 - **The authorization regime a request is judged under follows from the evidence it
   carries, not from a `flow` grant property.** No component reads `flow` and no seed
   writes one; `subject_id_type` stays, because identifier format is not derivable

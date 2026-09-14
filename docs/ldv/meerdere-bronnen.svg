@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 250" role="img" aria-labelledby="title desc">
+  <title id="title">Eén verwerking, meerdere bronnen</title>
+  <desc id="desc">De afnemer bevraagt twee bronnen in één verwerking. Hij schrijft twee records onder trace T, elk met een nextLogbookId naar het logboek van de bron die hij aanriep. Elke aanroep is een eigen FSC-transactie; T blijft gelijk.</desc>
+  <style>
+    svg {
+      --bg: #ffffff; --panel: #ffffff; --ink: #161d2e; --ink2: #44546a; --muted: #6b7689;
+      --line: #c9d6e3; --blue: #3a65ea; --magenta: #b500c7;
+      font-family: system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      svg {
+        --bg: #0d1117; --panel: #1b2333; --ink: #e8ecf5; --ink2: #b4bfd3; --muted: #8995ac;
+        --line: #34425f; --blue: #8aa6ff; --magenta: #e27ff2;
+      }
+    }
+    text { text-anchor: middle; }
+    .bg { fill: var(--bg); }
+    .box { fill: var(--panel); stroke: var(--line); stroke-width: 1.2; }
+    .nm { font-size: 12.5px; font-weight: 600; fill: var(--ink); }
+    .mo { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; fill: var(--ink2); }
+    .lb { font-size: 11px; fill: var(--ink2); }
+    .next { stroke: var(--magenta); stroke-width: 2.4; fill: none; }
+    .mk-next { fill: var(--magenta); }
+    .c-next { fill: var(--magenta); font-weight: 600; }
+    .c-proc { fill: var(--blue); font-weight: 600; }
+  </style>
+  <defs>
+    <marker id="arn" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk-next"/></marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="640" height="250"/>
+
+  <path class="box" d="M20,105 v40 a75,7 0 0 0 150,0 v-40"/>
+  <path class="box" d="M20,105 a75,7 0 0 0 150,0 a75,7 0 0 0 -150,0 z"/>
+  <text class="nm" x="95" y="129">logboek-afnemer</text>
+  <text class="mo" x="95" y="144">2 records · trace T</text>
+
+  <path class="box" d="M440,47 v40 a85,7 0 0 0 170,0 v-40"/>
+  <path class="box" d="M440,47 a85,7 0 0 0 170,0 a85,7 0 0 0 -170,0 z"/>
+  <text class="nm" x="525" y="71">logboek-bd</text>
+  <text class="mo" x="525" y="86">trace T</text>
+
+  <path class="box" d="M440,157 v40 a85,7 0 0 0 170,0 v-40"/>
+  <path class="box" d="M440,157 a85,7 0 0 0 170,0 a85,7 0 0 0 -170,0 z"/>
+  <text class="nm" x="525" y="181">logboek-brp</text>
+  <text class="mo" x="525" y="196">trace T</text>
+
+  <line class="next" x1="170" y1="118" x2="436" y2="72" marker-end="url(#arn)"/>
+  <text class="lb c-next" x="290" y="76">nextLogbookId · record IB</text>
+  <line class="next" x1="170" y1="134" x2="436" y2="180" marker-end="url(#arn)"/>
+  <text class="lb c-next" x="290" y="192">nextLogbookId · record BRP</text>
+
+  <text class="lb c-proc" x="320" y="238">één trace T · twee FSC-transacties (X1, X2) · twee pointers</text>
+</svg>

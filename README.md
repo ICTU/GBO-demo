@@ -279,6 +279,7 @@ source activation, wallet trust and cached QR sessions is in
 - [Source metadata cache and Type Metadata](docs/source-metadata-cache.md)
 - [`gbo-simple-v1` mapping profile](docs/gbo-simple-v1.md)
 - [Logboek Dataverwerkingen](services/ldv-logboek/README.md)
+- [Following an LDV chain across logbooks](docs/ldv/README.md)
 - [Observability](OBSERVABILITY.md)
 - [Security](SECURITY.md)
 - [Contributing](CONTRIBUTING.md)

@@ -8,17 +8,18 @@
 // logbook, and MUST NOT be sampled (REQ-32). Hence a separate client, a
 // separate store, and a write path with no buffering in it anywhere.
 //
-// Fail-closed. When a logbook URL is configured, the component is part of an
-// LDV chain and a processing that cannot be logged does not happen: the caller
-// propagates Write's error and fails its own request. A component names the
-// verwerkingsactiviteit it performs; the logbook refuses a reference its own
-// register does not resolve, and that refusal fails the request like any
-// other. Checking the register up front would only move the same failure
-// earlier, at the cost of a second protocol between them. With no URL configured
-// the component is not in an LDV chain and New returns nil, so no records are
-// produced at all — that is how the deliberately unsecured demo source stays
-// out of it. There is no third mode where records are dropped quietly, because
-// that is precisely the guarantee LDV adds over an observability pipeline.
+// No record is lost. When a logbook URL is configured, the component is part
+// of an LDV chain. With an outbox attached, Write makes each record durable
+// locally before it returns and the outbox delivers it afterwards, with
+// retries; without one, Write returns only on the logbook's confirmation.
+// Either way an error from Write is propagated, and the caller fails its own
+// request on it. A component names the verwerkingsactiviteit it performs; the
+// logbook refuses a reference its own register does not resolve. With no URL
+// configured the component is not in an LDV chain and New returns nil, so no
+// records are produced at all — that is how the deliberately unsecured demo
+// source stays out of it. There is no third mode where records are dropped
+// quietly, because that is precisely the guarantee LDV adds over an
+// observability pipeline.
 package ldvclient
 
 import (
@@ -346,14 +347,11 @@ func StatusFromHTTP(statusCode int) string {
 
 var traceIDPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
-// TraceID derives a record's trace id from the request.
-//
-// A standard traceparent wins (§3.1). Where FSC has stripped it, the
-// Fsc-Transaction-Id carries the same value across the hop — a UUID is exactly
-// 32 hex characters once the hyphens come off, so LDV's traceID, the ADL's
-// trace id and the FSC transaction log all end up carrying one value for one
-// request. Then the ambient OTel trace, and finally a fresh id, so a record is
-// never dropped for want of a correlation handle.
+// TraceID derives a record's trace id from the request, in the order
+// TraceContextFrom sets out: a standard traceparent (§3.3.1), then the
+// Fsc-Transaction-Id for a hop that arrived without one, then the ambient OTel
+// trace, and finally a fresh id, so a record is never dropped for want of a
+// correlation handle.
 func TraceID(ctx context.Context, header http.Header) string {
 	if traceContext := TraceContextFrom(ctx, header, ""); traceContext.TraceID != "" {
 		return traceContext.TraceID

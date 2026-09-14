@@ -62,7 +62,9 @@ authoritative per-hop message metadata.
 
 Every Dataverwerking in the chain is also recorded in the logbook of the
 Verantwoordelijke that performed it — `logboek-bd` for the Belastingdienst,
-`logboek-brp` for RvIG, `logboek-gbo` for the voorziening itself. Separate
+`logboek-brp` for RvIG, and for the voorziening itself `logboek-toestemming`
+(consent register and portal) and `logboek-eudi-adapter`; the demo consumer
+keeps its own, `logboek-afnemer`. Separate
 stores, served by [`ldv-logboek`](services/ldv-logboek/README.md), implementing
 Logius LDV v1.0.0. It uses the OpenTelemetry log-record shape, which makes it look like a
 second trace exporter. It is not, and the difference is the point: a span here
@@ -76,9 +78,11 @@ guarantees. A component that cannot write its record fails its request rather
 than dropping the record — which is exactly what an observability pipeline
 must never do, and exactly what this one must.
 
-The two are joined by one value: the trace id of an LDV record is the
-`Fsc-Transaction-Id`, the same identifier the ADL decision record and the FSC
-transaction logs carry, and the same one the developer portal already
-correlates on. The portal's **Logboek Dataverwerkingen** panel makes that
-visible: per trace it shows the LDV records of every Verantwoordelijke next to
-the FSC transaction records and the PDP decision, all under one id.
+The two are joined by the trace id. An LDV record takes it over from
+`traceparent`, as the standard requires. The `Fsc-Transaction-Id` is FSC's own
+id per transaction; the ADL decision record carries both, and for a request
+that crosses FSC once the chain's entry makes them the same value. The
+portal's **Logboek Dataverwerkingen** panel shows, per trace, the LDV records
+of every Verantwoordelijke next to the FSC transaction records and the PDP
+decision. How a reader follows a chain across logbooks is in
+[`docs/ldv`](docs/ldv/README.md).

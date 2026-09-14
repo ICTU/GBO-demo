@@ -133,10 +133,13 @@ export async function fetchFscTxlog(txID: string): Promise<FscTxlogResponse | nu
 
 // Logboek Dataverwerkingen per trace (Logius LDV v1.0.0). LDV keeps each
 // Verantwoordelijke's records in that Verantwoordelijke's own logbook and
-// lets only trace metadata cross a boundary, so a chain view is a query per
-// logbook joined on the trace id — the same Fsc-Transaction-Id the FSC
-// transaction log and the PDP decision carry. The backend fans out; this is
-// the other two thirds of the "one trace id, three standards" picture.
+// lets only trace metadata cross a boundary, so the backend reads a chain the
+// way the read extension says a reader does: from the logbooks where a
+// processing starts, along dpl.read.nextLogbookId, each queried on the
+// request's trace id. The FSC transaction log and the PDP decision key on the
+// Fsc-Transaction-Id; for a request that crosses FSC once the two are the same
+// value. This is the other two thirds of the "one trace id, three standards"
+// picture.
 // One dataProcessingOperation as the read extension returns it: camelCase
 // names and RFC 3339 times, which differ from the write side's snake_case and
 // epoch milliseconds. That is the standard's own split, not ours.
@@ -156,6 +159,12 @@ export type LdvLogbookResult = {
   logbook: { id: string; name: string }
   records: LdvRecord[]
   error?: string
+  // How the chain view reached this logbook: the logbook of an application
+  // that starts a processing, a nextLogbookId in another logbook's records,
+  // or neither.
+  reached_via: 'start' | 'pointer' | 'none'
+  // The id of the logbook whose record pointed here.
+  from?: string
 }
 
 export type LdvChainResponse = {
@@ -163,8 +172,8 @@ export type LdvChainResponse = {
   logbooks: LdvLogbookResult[]
 }
 
-export async function fetchLdvChain(txID: string): Promise<LdvChainResponse | null> {
-  const res = await fetch(`${BASE}/ldv/${encodeURIComponent(txID)}`)
+export async function fetchLdvChain(traceID: string): Promise<LdvChainResponse | null> {
+  const res = await fetch(`${BASE}/ldv/${encodeURIComponent(traceID)}`)
   if (!res.ok) return null
   return res.json()
 }

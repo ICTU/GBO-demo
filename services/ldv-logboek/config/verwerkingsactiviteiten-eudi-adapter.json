@@ -1,0 +1,36 @@
+{
+  "verantwoordelijke": "GBO",
+  "base_uri": "https://logboek.gbo.overheid.nl/verwerkingsactiviteiten",
+  "disclaimer": "Demo-stand-in voor een Register van Verwerkingsactiviteiten. Dit is GEEN RvVA: de inhoud is afgeleid van de uitgiftefunctie van de voorziening zelf, en heeft geen enkele juridische status. Dit bestand is het deel van het GBO-register dat logboek-eudi-adapter aanneemt; het deel van het toestemmingsregister en -portaal staat in verwerkingsactiviteiten-toestemming.json. Het bestaat om de LDV-eis 'elk record verwijst naar een oplosbare, geversioneerde verwerkingsactiviteit' waar te kunnen maken en om het ontbreken van een echt register zichtbaar te houden. De base_uri is een demo-hostnaam: hij maakt de verwijzing een geldige URI zoals de standaard eist (§3.2.2.9), maar er staat niets achter.",
+  "activities": [
+    {
+      "id": "gbo-pid-bsn-extractie",
+      "version": "v1",
+      "name": "Uitlezen van het BSN uit een gepresenteerde PID",
+      "doel": "Het vaststellen wie de wallethouder is, door het BSN uit de gepresenteerde PID te halen, zodat de juiste bron bevraagd kan worden voor de attestatie die de burger aanvraagt.",
+      "grondslag": "De burger geeft zelf de opdracht tot uitgifte en presenteert daarvoor de PID.",
+      "categorieen_betrokkenen": [
+        "Wallethouders die een attestatie aanvragen"
+      ],
+      "categorieen_persoonsgegevens": [
+        "Burgerservicenummer uit de PID"
+      ]
+    },
+    {
+      "id": "gbo-attestatie-samenstellen",
+      "version": "v1",
+      "name": "Samenstellen van een attestatie uit brongegevens",
+      "doel": "Het omzetten van het antwoord van de bron naar de attestatie die aan de wallet wordt uitgegeven, volgens het gepubliceerde mappingprofiel van de bron.",
+      "grondslag": "De burger geeft zelf de opdracht tot uitgifte.",
+      "categorieen_betrokkenen": [
+        "Wallethouders die een attestatie aanvragen"
+      ],
+      "categorieen_persoonsgegevens": [
+        "De brongegevens die in de attestatie worden opgenomen"
+      ],
+      "ontvangers": [
+        "De EUDI-wallet van de betrokkene, via de issuance-server"
+      ]
+    }
+  ]
+}

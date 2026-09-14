@@ -199,14 +199,67 @@ test_revocation_takes_effect_on_the_next_request if {
 # it from cache, and a failure yields a response rather than an error.
 test_status_request_is_uncached_and_bounded if {
 	req := consent._status_request with input as _input(_token) with opa.runtime as _env
-	not req.cache
-	not req.force_cache
+	count({"cache", "force_cache"} & object.keys(req)) == 0
 	req.raise_error == false
 	req.timeout == "2s"
 }
 
 test_status_request_carries_the_transaction_id if {
 	req := consent._status_request with input as _input(_token) with opa.runtime as _env
+	req.headers["Fsc-Transaction-Id"] == "tx-330"
+}
+
+# ── Trace context on the status request (#365) ─────────────────────────────
+# The register's status record belongs to the request's trace: the caller's
+# when it came along, otherwise the transaction id. The span is the lookup's
+# own, so the record hangs under it rather than under the caller's span.
+
+_callers_trace := "4bf92f3577b34da6a3ce929d0e0e4736"
+
+_callers_span := "00f067aa0ba902b7"
+
+_traced(headers, context) := object.union(_request(headers), {"context": context})
+
+_status_traceparent(req) := tp if {
+	status_request := consent._status_request with input as req with opa.runtime as _env
+	tp := status_request.headers.traceparent
+}
+
+_is_traceparent(tp) if regex.match(`^00-[0-9a-f]{32}-[0-9a-f]{16}-01$`, tp)
+
+test_status_request_takes_the_callers_trace if {
+	tp := _status_traceparent(_request({
+		"X-Gbo-Consent-Token": _token,
+		"Traceparent": sprintf("00-%s-%s-01", [_callers_trace, _callers_span]),
+	}))
+	_is_traceparent(tp)
+	substring(tp, 3, 32) == _callers_trace
+	substring(tp, 36, 16) != _callers_span
+}
+
+test_status_request_takes_the_traceparent_openftv_lifted if {
+	tp := _status_traceparent(_traced(
+		{"X-Gbo-Consent-Token": _token},
+		{"traceparent": sprintf("00-%s-%s-01", [_callers_trace, _callers_span])},
+	))
+	substring(tp, 3, 32) == _callers_trace
+}
+
+test_status_request_falls_back_to_the_transaction_id if {
+	tp := _status_traceparent(_traced(
+		{"X-Gbo-Consent-Token": _token},
+		{"trace_id": "0af76519-16cd-43dd-8448-eb211c80319c"},
+	))
+	_is_traceparent(tp)
+	substring(tp, 3, 32) == "0af7651916cd43dd8448eb211c80319c"
+}
+
+# No usable trace — a malformed traceparent, a transaction id that is not a
+# trace id — sends none rather than a malformed one.
+test_status_request_without_a_usable_trace_carries_none if {
+	req := consent._status_request with input as _request({"X-Gbo-Consent-Token": _token, "traceparent": "garbage"})
+		with opa.runtime as _env
+	not req.headers.traceparent
 	req.headers["Fsc-Transaction-Id"] == "tx-330"
 }
 

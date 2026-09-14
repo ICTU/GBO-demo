@@ -203,25 +203,71 @@ _verification := _failure("CONSENT_CONTEXT_INVALID", "more than one consent toke
 _failure(code, reason) := {"code": code, "reason": reason}
 
 # ── Status ──────────────────────────────────────────────────────────────────
-# Asked on every evaluation, uncached. The transaction id travels along:
-# confirming a status is a Dataverwerking the register logs, and without the
-# id that record lands outside the request it was part of.
+# Asked on every evaluation, uncached. Confirming a status is itself a
+# Dataverwerking the register logs, so the request carries the trace it
+# belongs to (#365, LDV §3.1): a traceparent with the request's trace and a
+# span of its own for this lookup, under which the register files its record,
+# and the transaction id alongside for the logs that key on it. Without them
+# the record lands under a trace of its own — outside the request it was part
+# of.
 
-_status_request := object.union(
-	{
-		"method": "GET",
-		"url": sprintf("%s/consents/%s/status", [config.url, urlquery.encode(_claims.consent_id)]),
-		"timeout": _timeout,
-		"raise_error": false,
-	},
-	_transaction_header,
-)
+_status_request := {
+	"method": "GET",
+	"url": sprintf("%s/consents/%s/status", [config.url, urlquery.encode(_claims.consent_id)]),
+	"timeout": _timeout,
+	"raise_error": false,
+	"headers": object.union(_transaction_header, _traceparent_header),
+}
 
-_transaction_header := {"headers": {"Fsc-Transaction-Id": tx}} if {
+_transaction_header := {"Fsc-Transaction-Id": tx} if {
 	tx := input.context.trace_id
 	is_string(tx)
 	tx != ""
 } else := {}
+
+_traceparent_header := {"traceparent": sprintf("00-%s-%s-01", [_trace_id, _lookup_span])} if {
+	_trace_id
+} else := {}
+
+# The request's trace: the caller's traceparent, and otherwise the
+# transaction id, which the chain's entry ties its trace to. Undefined when
+# neither yields a valid trace id; a malformed traceparent is worse than none.
+_trace_id := id if {
+	tp := _incoming_traceparent
+	count(tp) >= 55
+	substring(tp, 2, 1) == "-"
+	substring(tp, 35, 1) == "-"
+	id := lower(substring(tp, 3, 32))
+	_valid_trace_id(id)
+} else := id if {
+	id := lower(replace(input.context.trace_id, "-", ""))
+	_valid_trace_id(id)
+}
+
+# The Inway copies the caller's traceparent into the AuthZEN context with the
+# rest of the headers; OpenFTV's own PEP lifts it into context.traceparent.
+_incoming_traceparent := values[0] if {
+	values := [v |
+		some name, v in object.get(input.context, "headers", {})
+		lower(name) == "traceparent"
+		is_string(v)
+	]
+	count(values) > 0
+} else := tp if {
+	tp := input.context.traceparent
+	is_string(tp)
+}
+
+# 32 lowercase hex characters, and not the all-zero id W3C Trace Context
+# declares invalid.
+_valid_trace_id(id) if {
+	regex.match(`^[0-9a-f]{32}$`, id)
+	id != "00000000000000000000000000000000"
+}
+
+# A fresh span for the lookup: 16 hex characters of a random UUID.
+# uuid.rfc4122 is random per evaluation; the argument only names the value.
+_lookup_span := substring(replace(uuid.rfc4122("consent-status-span"), "-", ""), 0, 16)
 
 _status_response := http.send(_status_request)
 
