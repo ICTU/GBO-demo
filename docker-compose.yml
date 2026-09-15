@@ -200,7 +200,11 @@ services:
   #
   # Opt-in, because it changes where policy comes from: without it the PDP
   # loads ./policies from disk and hot-reloads on edit, which is the nicer
-  # loop while writing Rego. Start it with `make demo-manager`.
+  # loop while writing Rego. The reload's `policy added/replaced` log line
+  # is not evidence the new rules are active: OpenFTV logs it for a module
+  # that failed to compile too, and keeps serving the previous rules (#151).
+  # Run `make policy-check` after an edit. Start the Manager with
+  # `make demo-manager`.
   openftv-manager:
     profiles: [manager]
     # Released upstream image, consumed as published. Keep the tag in
