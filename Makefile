@@ -71,7 +71,7 @@ require-ftv-postgres:
 # Same image and checks as the rego job in .github/workflows/ci.yml — bump
 # the digest in both places together.
 OPA_IMAGE ?= openpolicyagent/opa:1.9.0-static@sha256:60b6af32b58377718546ac7d4634eecbfe50ec36f7d3ca3f8ebf515f9826c2ac
-OPA = docker run --rm -v "$(PWD)/policies:/src/policies:ro" -w /src $(OPA_IMAGE)
+OPA = docker run --rm -v "$(CURDIR)/policies:/src/policies:ro" -w /src $(OPA_IMAGE)
 
 # The PAP loads every file under policies/ as Rego, and one that does not
 # parse drops every policy after it in walk order (see the rego job in ci.yml).
