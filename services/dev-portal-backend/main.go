@@ -55,6 +55,9 @@ type config struct {
 	// one per Verantwoordelijke, because that is where LDV puts them.
 	LdvLogbooks  []ldvLogbook
 	LdvReadToken string
+	// ADLDatabaseURL reaches the Authorization Decision Log with a
+	// SELECT-only role. Empty leaves the portal without its audit view.
+	ADLDatabaseURL string
 }
 
 const defaultDvtpConsumerPeerID = "99999999900000000300"
@@ -112,6 +115,7 @@ func loadConfig() config {
 		FscTxlogPeers:      peers,
 		LdvLogbooks:        parseLdvLogbooks(os.Getenv("LDV_LOGBOOKS")),
 		LdvReadToken:       os.Getenv("LDV_READ_TOKEN"),
+		ADLDatabaseURL:     os.Getenv("ADL_DATABASE_URL"),
 	}
 }
 
@@ -516,11 +520,13 @@ func passthroughFile(path string) http.HandlerFunc {
 
 // ── Decision lookup via Loki ────────────────────────────────────────────
 
-// The OpenFTV PDP writes one "Decision Log" line per evaluation to stdout
-// (embedded OPA console decision-logs). Promtail ships them to Loki under
-// the {compose_service="openftv-pdp"} label. We query by trace_id (which
-// the OpenFTV request-mapper injects into the AuthZEN context) and
-// entry.
+// Next to the ADL (adl.go), the embedded OPA writes one "Decision Log" line
+// per evaluation to stdout. Promtail ships them to Loki under the
+// {compose_service="openftv-pdp"} label. The line carries the whole
+// data.authz document, the policy's per-field detail included, which the ADL
+// does not; the dev-portal shows it as observability. Entries are matched on
+// input.context.trace_id, where the request-mapper puts the
+// Fsc-Transaction-Id.
 
 type lokiQueryResponse struct {
 	Status string `json:"status"`
@@ -565,76 +571,41 @@ func normalizeDecisionEntry(entry map[string]any) map[string]any {
 	return out
 }
 
-func handleDecision(cfg config) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		corsHeaders(w)
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		if r.Method != http.MethodGet {
-			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
-			return
-		}
-		traceID := r.URL.Query().Get("trace_id")
-		if traceID == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "trace_id query param required"})
-			return
-		}
+// decisionLookback bounds both lookups: plenty for the demo, and it keeps a
+// query from scanning a whole store.
+const decisionLookback = 30 * time.Minute
 
-		// Search the last 30 minutes — plenty for the demo, bounded to avoid scans.
-		now := time.Now()
-		expr := cfg.LokiDecisionQuery
-		u := fmt.Sprintf("%s/loki/api/v1/query_range?query=%s&start=%d&end=%d&limit=200&direction=backward",
-			cfg.LokiURL, url.QueryEscape(expr), now.Add(-30*time.Minute).UnixNano(), now.UnixNano())
+const adlQueryTimeout = 5 * time.Second
 
-		req, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, u, nil)
-		resp, err := upstreamClient.Do(req)
-		if err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "loki unreachable: " + err.Error()})
-			return
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(resp.Body)
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("loki %d: %s", resp.StatusCode, string(body))})
-			return
-		}
-		var lr lokiQueryResponse
-		if err := json.NewDecoder(resp.Body).Decode(&lr); err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "loki decode: " + err.Error()})
-			return
-		}
-
-		// Scan each line — accept the first whose trace_id matches.
-		for _, stream := range lr.Data.Result {
-			for _, v := range stream.Values {
-				line := v[1]
-				var entry map[string]any
-				if err := json.Unmarshal([]byte(line), &entry); err != nil {
-					continue
-				}
-				if traceIDOf(entry) == traceID {
-					writeJSON(w, http.StatusOK, normalizeDecisionEntry(entry))
-					return
-				}
-			}
-		}
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no decision log entry for trace_id (last 30m)"})
-	}
+type decisionsResponse struct {
+	Audit  decisionsAudit  `json:"audit"`
+	Engine decisionsEngine `json:"engine"`
 }
 
-// ── Explain & policy-source (generic, no package-pinning) ───────────────
+type decisionsAudit struct {
+	Records []adlRecord `json:"records"`
+	Error   string      `json:"error,omitempty"`
+}
 
-// handleExplain returns every decision that was recorded under a given
-// trace_id, with the captured input + normalized result for each.
+type decisionsEngine struct {
+	Decisions []map[string]any `json:"decisions"`
+	Error     string           `json:"error,omitempty"`
+}
+
+// handleDecisions returns what is recorded about the PDP decisions for one
+// FSC transaction, from two sources kept apart on purpose:
 //
-// TODO(OpenFTV): ?mode=full|fails used to replay the captured input
-// against OPA's ?explain API for a rule-by-rule evaluation trace.
-// OpenFTV PDP has no explain endpoint, so the replay is dropped and the
-// UI shows the decision-log detail only. Possible future workaround:
-// dev-only `opa eval --explain` sidecar (see ICTU-2 plan).
-func handleExplain(cfg config) http.HandlerFunc {
+//   - audit: the Authorization Decision Log, the authoritative record. It
+//     holds the AuthZEN request and response, so the decision and, on a
+//     denial, the reason code: OpenFTV transports nothing more.
+//   - engine: the embedded OPA's console decision log from Loki, which also
+//     carries the policy's per-field detail (granted[], denied_fields[],
+//     steps). Observability: best-effort, short retention, and gone the day
+//     the engine stops logging to the console.
+//
+// Each part reports its own error, so an unreachable Loki or an
+// unconfigured ADL empties one block without hiding the other.
+func handleDecisions(cfg config, adl adlStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		corsHeaders(w)
 		if r.Method == http.MethodOptions {
@@ -645,38 +616,56 @@ func handleExplain(cfg config) http.HandlerFunc {
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 			return
 		}
-		traceID := r.URL.Query().Get("trace_id")
-		if traceID == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "trace_id query param required"})
+		txID := r.URL.Query().Get("transaction_id")
+		if txID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "transaction_id query param required"})
 			return
 		}
-		mode := r.URL.Query().Get("mode") // "", "full", or "fails"
+		since := time.Now().Add(-decisionLookback)
+		out := decisionsResponse{
+			Audit:  decisionsAudit{Records: []adlRecord{}},
+			Engine: decisionsEngine{Decisions: []map[string]any{}},
+		}
 
-		decisions, err := lokiDecisionsForTrace(r.Context(), cfg, traceID)
-		if err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		// part=audit or part=engine asks for one part only, so a caller can
+		// fetch each on its own schedule: the decision of record never waits
+		// on Loki, and the engine detail never waits on the ADL.
+		part := r.URL.Query().Get("part")
+
+		if part != "engine" {
+			out.Audit = auditPart(r.Context(), adl, txID, since)
+		}
+		if part == "audit" {
+			writeJSON(w, http.StatusOK, out)
 			return
 		}
-		out := make([]map[string]any, 0, len(decisions))
-		for _, d := range decisions {
-			entry := normalizeDecisionEntry(d)
-			if mode == "full" || mode == "fails" {
-				entry["explanation_unavailable"] = "rule-evaluation trace is not available with the OpenFTV engine"
+
+		entries, err := lokiDecisionsForTrace(r.Context(), cfg, txID, since)
+		if err != nil {
+			out.Engine.Error = err.Error()
+		} else {
+			for _, e := range entries {
+				out.Engine.Decisions = append(out.Engine.Decisions, normalizeDecisionEntry(e))
 			}
-			out = append(out, entry)
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"decisions": out})
+		writeJSON(w, http.StatusOK, out)
 	}
 }
 
-// lokiDecisionsForTrace pulls every "Decision Log" line that matches the
-// given trace_id (last 30m) and returns the parsed entries in chronological
-// order (oldest first), deduplicated by decision_id.
-func lokiDecisionsForTrace(ctx context.Context, cfg config, traceID string) ([]map[string]any, error) {
+// lokiDecisionsForTrace pulls every "Decision Log" line since `since` that
+// matches the given trace_id and returns the parsed entries in
+// chronological order (oldest first), deduplicated by decision_id.
+//
+// There is no rule-by-rule evaluation trace next to it: OpenFTV exposes no
+// explain API, and replaying a recorded input would not reproduce the
+// decision, because the policy fetches the consent status over the network
+// while it evaluates. The per-field steps in the decision document are the
+// explanation this portal gives.
+func lokiDecisionsForTrace(ctx context.Context, cfg config, traceID string, since time.Time) ([]map[string]any, error) {
 	now := time.Now()
 	expr := cfg.LokiDecisionQuery
 	u := fmt.Sprintf("%s/loki/api/v1/query_range?query=%s&start=%d&end=%d&limit=500&direction=forward",
-		cfg.LokiURL, url.QueryEscape(expr), now.Add(-30*time.Minute).UnixNano(), now.UnixNano())
+		cfg.LokiURL, url.QueryEscape(expr), since.UnixNano(), now.UnixNano())
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	resp, err := upstreamClient.Do(req)
 	if err != nil {
@@ -699,7 +688,7 @@ func lokiDecisionsForTrace(ctx context.Context, cfg config, traceID string) ([]m
 	for _, stream := range lr.Data.Result {
 		for _, v := range stream.Values {
 			var entry map[string]any
-			if json.Unmarshal([]byte(v[1]), &entry) != nil {
+			if json.Unmarshal([]byte(repairDockerSplits(v[1])), &entry) != nil {
 				continue
 			}
 			if traceIDOf(entry) == traceID {
@@ -1009,7 +998,7 @@ func handlePolicyChain(cfg config) http.HandlerFunc {
 // Extracted from main so integration tests can wire the handlers to an
 // httptest.Server without starting the real listener or the hub's
 // cleanupLoop goroutine (tests can pass a hub they created themselves).
-func newMux(cfg config, hub *traceHub) *http.ServeMux {
+func newMux(cfg config, hub *traceHub, adl adlStore) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -1019,10 +1008,9 @@ func newMux(cfg config, hub *traceHub) *http.ServeMux {
 	mux.HandleFunc("/history", handleHistory(cfg))
 	mux.HandleFunc("/citizens", passthroughFile(cfg.CitizensFile))
 	mux.HandleFunc("/organizations", passthroughFile(cfg.OrganizationsFile))
-	mux.HandleFunc("/decision", handleDecision(cfg))
+	mux.HandleFunc("/decisions", handleDecisions(cfg, adl))
 	mux.HandleFunc("/policy-chain", handlePolicyChain(cfg))
 	mux.HandleFunc("/rules", handleRules(cfg))
-	mux.HandleFunc("/explain", handleExplain(cfg))
 	mux.HandleFunc("/policy-source", handlePolicySource(cfg))
 	mux.HandleFunc("/policy-snippet", handlePolicySnippet(cfg))
 
@@ -1040,7 +1028,17 @@ func main() {
 		WithAttrs([]slog.Attr{slog.String("service", "dev-portal-backend")})))
 
 	hub := newTraceHub(10 * time.Minute)
-	mux := newMux(cfg, hub)
+	// Without ADL_DATABASE_URL the portal still starts; its audit block then
+	// says the ADL is not configured.
+	var adl adlStore
+	if cfg.ADLDatabaseURL != "" {
+		store, err := newPgADLStore(cfg.ADLDatabaseURL)
+		if err != nil {
+			fatal("ADL store", err)
+		}
+		adl = store
+	}
+	mux := newMux(cfg, hub, adl)
 
 	// BaseContext gives every request a context this process can cancel, which
 	// is how the long-lived SSE streams are told to wind up at shutdown.

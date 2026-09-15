@@ -29,7 +29,8 @@ For every mode:
 - Docker with the Compose plugin;
 - Git, Make, Bash, `curl`, `jq`, OpenSSL and Python 3.9 or newer;
 - a local `.env` copied from `.env.example`;
-- non-empty `FTV_POSTGRES_PASSWORD`, `EUDI_POSTGRES_PASSWORD`,
+- non-empty `FTV_POSTGRES_PASSWORD`, `FTV_ADL_READER_PASSWORD`,
+  `EUDI_POSTGRES_PASSWORD`,
   `SOURCE_REGISTRY_PASSWORD` and `SOURCE_REGISTRY_READER_PASSWORD` values in
   `.env`.
 

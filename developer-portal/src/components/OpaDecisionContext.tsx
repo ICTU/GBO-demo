@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { fetchPolicySnippet, type OpaExplainDecision, type PolicySnippet } from '../api/devClient'
+import { fetchPolicySnippet, type EngineDecision, type PolicySnippet } from '../api/devClient'
 import { useRules } from '../hooks/useRules'
 import RuleSpecPanel from './RuleSpecPanel'
 import EvalTrace, { type EvalStep } from './EvalTrace'
@@ -19,7 +19,7 @@ import EvalTrace, { type EvalStep } from './EvalTrace'
 // still rendered as a fallback so older trace runs stay inspectable.
 
 type Props = {
-  decision: OpaExplainDecision
+  decision: EngineDecision
 }
 
 type GrantedEntry = { field?: string; rule: string; steps?: EvalStep[] }
@@ -37,7 +37,7 @@ type ContextRead = {
   legacyEvaluated?: LegacyEvaluated[]
 }
 
-function readContext(decision: OpaExplainDecision): ContextRead {
+function readContext(decision: EngineDecision): ContextRead {
   const r = (decision.result ?? {}) as { context?: Record<string, unknown> }
   const ctx = (r.context ?? {}) as Record<string, unknown>
   const reasonAdmin = ctx.reason_admin as { code?: string; evaluated?: unknown } | undefined

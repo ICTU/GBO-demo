@@ -1,19 +1,29 @@
 package authz
 
-# Entry-point evaluated by the OpenFTV PDP at path /authz. The OpenFTV
-# contract: `allow` (bool) gates the decision; `reason` (string) is
-# surfaced on DENY as context.reasonUser.en in the AuthZEN response.
+# Entry-point evaluated by the OpenFTV PDP at path /authz. OpenFTV reads two
+# keys from this package and nothing else: `allow` (bool) gates the
+# decision, and on DENY `reason` (string) becomes context.reason_user.en in
+# the AuthZEN response.
 #
-# OpenFTV evaluates the whole package document, so `response` is part of
-# the decision result and lands in the Decision Log — the dev-portal
-# reads granted[]/denied_fields[]/steps from there.
+# That response is what OpenFTV's Authorization Decision Log (ADL) records,
+# and the ADL is the authoritative audit record of an authorization
+# decision. So `reason` is the part of the decision detail that reaches the
+# audit record: the reason code of a denial. The FSC Inway also returns
+# reason_user to the caller in its 401, which is why `reason` is a code and
+# never carries data.
+#
+# `response` is the fuller document: granted[] and denied_fields[] per
+# field, with the deciding rule and its evaluation steps. OpenFTV does not
+# transport it. It appears only in the embedded OPA's console decision log,
+# which the developer portal reads from Loki as observability. It is not a
+# record of the decision, and nothing may depend on it as one.
 #
 # Input shape (OpenFTV AuthZEN mapping): {subject, action, resource,
 # context}. The GraphQL request-mapper inside this image places its
 # enrichment under input.context: context.resolved (GraphQL fields),
-# context.pip (PID), context.resource (scope/query/variables/pi),
-# context.trace_id. OpenFTV injects context.time. The consent is not in
-# input: data.dvtp.gbo.consent resolves it from the token in
+# context.resource (scope/query/variables/pi), context.trace_id and
+# context.fsc.transaction_id. OpenFTV injects context.time. The consent is
+# not in input: data.dvtp.gbo.consent resolves it from the token in
 # context.headers while the policy evaluates.
 
 import data.dvtp.gbo

@@ -55,6 +55,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- **The Authorization Decision Log is the audit source for authorization
+  decisions, and the developer portal reads it**
+  ([#332](https://github.com/ICTU/GBO-demo/issues/332)). The ADL record holds
+  the AuthZEN request and response: the decision and, on a denial, the policy's
+  reason code, which OpenFTV carries in `reason_user.en`. OpenFTV transports
+  nothing more, and that is accepted. Which rule granted or denied which field
+  stays in the embedded OPA's console decision log, which the portal now shows
+  as observability next to the ADL record rather than as the decision.
+  - `dev-portal-backend` serves `GET /decisions?transaction_id=` with the ADL
+    records and the console entries side by side, each part with its own
+    error. `part=audit` and `part=engine` fetch one part each, so the PDP's
+    colour, its reason code and the popover's ADL block never wait for Loki.
+    It replaces `/decision` and `/explain`. `/explain?mode=full|fails`
+    is gone rather than left as a TODO: OpenFTV has no explain API, and
+    replaying a recorded input would not reproduce the decision, because the
+    policy fetches the consent status while it evaluates.
+  - The portal reads the ADL with a SELECT-only role, `adl_reader`, which the
+    one-shot `postgres-ftv-init` creates on every `up`
+    (`FTV_ADL_READER_PASSWORD`, required like `FTV_POSTGRES_PASSWORD`; there
+    is no default). The PDP node is coloured
+    by the ADL record alone.
+  - Behind the FSC Inway the ADL record carries neither the request's trace nor
+    `adl.fsc.transaction_id` ([#369](https://github.com/ICTU/GBO-demo/issues/369)).
+    The portal finds it through the `Fsc-Transaction-Id` header in the
+    recorded request, and says which of the two matched.
+  - `policies/authz.rego` documents this contract, and tests pin it: `reason`
+    is the reason code, bare, and absent on an allow.
 - **The consent lookup moved out of the request-mapper and into the policy.** The
   policy verifies the signed consent token and asks the consent register for the
   consent's status itself, per evaluation, through `http.send`
@@ -286,6 +313,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ### Fixed
 - Confined developer-portal scenario writes and policy-source reads to their
   configured roots, preventing path and symlink traversal.
+- **The developer portal showed no engine detail for a denial.** A console
+  decision-log line longer than 16 KiB is split by Docker, and promtail rejoins
+  the pieces with each continuation's timestamp in between. A denial's line,
+  with its per-field steps, crosses that size, so it no longer parsed and was
+  skipped; where the timestamp landed inside a string, a shorter line parsed
+  with a corrupted value. The portal now removes the timestamps at the chunk
+  boundaries before parsing. Grafana's request-flow panel reads the same lines
+  and is not repaired.
+- `scripts/wait-openftv-admission.sh` read the failure reason from
+  `context.reasonUser.en`, a key OpenFTV does not write; it reads
+  `context.reason_user.en`.
+- `OBSERVABILITY.md` no longer claims that the PDP strips BSNs from its logs or
+  that `data.system.log.mask` applies; neither holds under OpenFTV.
+- Dependabot no longer watches the removed `services/pdp-service`.
 - The `dienstverlener-backend` image builds on main again. Since it started
   writing LDV records (#366) its Dockerfile copies the sibling
   `services/ldv-client` and expects the repo root as build context; compose

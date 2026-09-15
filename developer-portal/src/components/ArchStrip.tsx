@@ -7,7 +7,7 @@ import {
 } from '../data/chains'
 import type { BronProfile } from '../data/bronnen'
 import type { ArchStates } from '../hooks/useArchState'
-import { useExplain } from '../hooks/useExplain'
+import { useDecisions } from '../hooks/useDecisions'
 import type { ApiCall, Tab } from '../types'
 
 type Props = {
@@ -46,11 +46,11 @@ export default function ArchStrip({
   mode, setMode, states, apiCalls, traceId, pdpTraceIdOverride, bron,
   watching, onToggleWatch, watchError, watchShared, jaegerUrl, grafanaUrl,
 }: Props) {
-  // For flows through FSC-Inway (EUDI + DvTP) the PDP decision lives in
-  // the OpenFTV decision log, keyed by Fsc-Transaction-Id (see
-  // useFscTxlog). Other nodes still resolve against the adapter trace.
+  // For flows through FSC-Inway (EUDI + DvTP) the PDP decision is found by
+  // Fsc-Transaction-Id (see useFscTxlog). Other nodes still resolve against
+  // the adapter trace.
   const useCrossTrace = (mode === 'eudi-issuance' || mode === 'use') && !!pdpTraceIdOverride
-  const explainTraceId = useCrossTrace ? pdpTraceIdOverride : traceId
+  const decisionTxId = useCrossTrace ? pdpTraceIdOverride : traceId
   const pdpSpanTraceId = useCrossTrace ? pdpTraceIdOverride : traceId
   const [openNode, setOpenNode] = useState<string | null>(null)
   const chain: NodeDef[] =
@@ -62,14 +62,14 @@ export default function ArchStrip({
     : mode === 'eudi-issuance' ? EUDI_ISSUANCE_BRANCHES
     : []
 
-  // Fetch decision-log entries whenever a use- or EUDI-trace is shown —
-  // used both for the popover content AND for colouring the OPA node by
-  // policy outcome (DENY → red) rather than HTTP status (which is always
-  // 200 when OPA was reached, even on policy DENY). OPA has no OTel
-  // instrumentation, so the decision-log is the only source for its state.
-  const explain = useExplain(
-    explainTraceId,
-    !!explainTraceId && (mode === 'use' || mode === 'eudi-issuance'),
+  // Fetch the PDP decisions whenever a use- or EUDI-trace is shown — for
+  // the popover AND for colouring the PDP node by policy outcome (DENY →
+  // red) rather than HTTP status, which is 200 whenever the PDP answered,
+  // a policy DENY included. The engine has no OTel instrumentation, so the
+  // decision records are the only source for its state.
+  const decisions = useDecisions(
+    decisionTxId,
+    !!decisionTxId && (mode === 'use' || mode === 'eudi-issuance'),
   )
 
   // Two override-flavours with different timing:
@@ -79,11 +79,11 @@ export default function ArchStrip({
   //     apply only after the reveal-animation completes, so the DENY-
   //     punchline lands when the rest of the chain is already in place.
   //
-  //   1. OPA-node colour from policy decision (use-tab only):
-  //        ALLOW (context.granted)      → green
-  //        DENY  (context.reason_admin) → red
-  //      OPA always returns HTTP 200 even on policy-DENY, so the span-derived
-  //      colour can't distinguish ALLOW from DENY without the decision-log.
+  //   1. PDP/OPA colour from the decision the ADL recorded (use/EUDI):
+  //        decision true  → green
+  //        decision false → red
+  //      The ADL record is the decision of record, so it alone sets the
+  //      colour; the engine's console entry only adds detail in the popover.
   //
   //   2. Relay soothing: when ANY downstream node is red, the relay services
   //      (afnemer, fsc-outway, fsc-manager, fsc-inway) that only propagated
@@ -91,13 +91,9 @@ export default function ArchStrip({
   //      DENY (PEP/OPA red) and system errors (e.g. consent-pip 404 bubbling
   //      out as PEP 400). They did their job correctly — only the actual
   //      source-of-error should stay red.
-  const decisionCtx = (() => {
-    if ((mode !== 'use' && mode !== 'eudi-issuance') || explain.decisions.length === 0) return undefined
-    const d = explain.decisions[0]
-    return ((d.result ?? {}) as { context?: Record<string, unknown> }).context as
-      | { granted?: unknown; reason_admin?: unknown }
-      | undefined
-  })()
+  const recordedDecision = (mode === 'use' || mode === 'eudi-issuance')
+    ? decisions.audit.records[0]?.decision
+    : undefined
 
   const animationDone =
     Object.keys(states).length > 0 &&
@@ -106,33 +102,23 @@ export default function ArchStrip({
   const effectiveStates = (() => {
     const out = { ...states }
 
-    if (decisionCtx && animationDone) {
+    if (recordedDecision !== undefined && animationDone) {
       // Color BOTH the PDP node (the logical decision-unit) and the OPA
       // branch (the engine). HTTP-status alone can't distinguish ALLOW
-      // from DENY because OPA returns 200 for both — only the decision-
-      // log tells them apart. Two shapes are accepted: denied_fields
-      // (per-field) and reason_admin (single reason).
-      const ctx = decisionCtx as { granted?: unknown; reason_admin?: unknown; denied_fields?: unknown }
-      const isAllow = Array.isArray(ctx.granted) && (ctx.granted as unknown[]).length > 0
-      const isDeny = !isAllow && (ctx.reason_admin || (Array.isArray(ctx.denied_fields) && (ctx.denied_fields as unknown[]).length > 0))
-      if (isAllow) {
-        out.pdp = 'green'
-        out.opa = 'green'
-      } else if (isDeny) {
-        out.pdp = 'red'
-        out.opa = 'red'
-      }
+      // from DENY because the PDP returns 200 for both.
+      out.pdp = recordedDecision ? 'green' : 'red'
+      out.opa = out.pdp
     }
 
     // PDP is the logical "umbrella unit": if one of its sub-components
     // (the OPA decision-engine or the consent-pip PIP-lookup) fails, the
     // PDP-call fails as a whole. Force red as soon as a branch is red —
-    // even when decisionCtx is missing (PIP error before OPA is reached).
+    // even without a recorded decision (PIP error before OPA is reached).
     if (out['opa'] === 'red' || out['consent-pip'] === 'red') {
       out.pdp = 'red'
     }
 
-    // Relay soothing: independent of decisionCtx, so it also fires on
+    // Relay soothing: independent of the recorded decision, so it also fires on
     // pre-OPA system errors (BSNk timeout, sidecar unreachable, …).
     const downstreamRed = ['pdp', 'opa', 'consent-pip', 'sidecar', 'bsnk', 'bron']
       .some((id) => out[id] === 'red')
@@ -242,9 +228,9 @@ export default function ArchStrip({
                                 traceId={branchDef.id === 'opa' ? pdpSpanTraceId : traceId}
                                 jaegerUrl={jaegerUrl}
                                 grafanaUrl={grafanaUrl}
-                                explainDecisions={branchDef.id === 'opa' && (mode === 'use' || mode === 'eudi-issuance') ? explain.decisions : undefined}
-                                explainLoading={branchDef.id === 'opa' ? explain.loading : undefined}
-                                explainError={branchDef.id === 'opa' ? explain.error : undefined}
+                                decisions={branchDef.id === 'opa' && (mode === 'use' || mode === 'eudi-issuance') ? decisions : undefined}
+                                decisionsLoading={branchDef.id === 'opa' ? decisions.pending : undefined}
+                                decisionsError={branchDef.id === 'opa' ? decisions.error : undefined}
                               />
                             )}
                           </div>
@@ -260,9 +246,9 @@ export default function ArchStrip({
                       traceId={node.id === 'pdp' ? pdpSpanTraceId : traceId}
                       jaegerUrl={jaegerUrl}
                       grafanaUrl={grafanaUrl}
-                      explainDecisions={node.id === 'pdp' ? explain.decisions : undefined}
-                      explainLoading={node.id === 'pdp' ? explain.loading : undefined}
-                      explainError={node.id === 'pdp' ? explain.error : undefined}
+                      decisions={node.id === 'pdp' ? decisions : undefined}
+                      decisionsLoading={node.id === 'pdp' ? decisions.pending : undefined}
+                      decisionsError={node.id === 'pdp' ? decisions.error : undefined}
                     />
                   )}
                 </div>

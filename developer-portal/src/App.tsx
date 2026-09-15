@@ -16,7 +16,7 @@ import { useChainEvents } from './hooks/useChainEvents'
 import { useWatchNext } from './hooks/useWatchNext'
 import { issuanceFlow } from './api/portalClient'
 import { useQuery } from './api/dvtpClient'
-import { fetchExplain } from './api/devClient'
+import { fetchDecisions } from './api/devClient'
 import { newTraceContext } from './util/trace'
 import { consentTokenFor, storeConsentToken } from './util/consentTokens'
 import { loadIssuanceOffers, type IssuanceOffer } from './eudi'
@@ -47,21 +47,20 @@ function scopeYears(scopes: string[]): number[] {
     .sort((a, b) => a - b)
 }
 
-// opaReasonCode looks up the OPA decision for a trace and returns the
-// top-level reason code (YEAR_NOT_COVERED, CONSENT_SCOPE_MISMATCH, ...).
-// The decision log travels console → promtail → Loki asynchronously, so
-// retry briefly before giving up.
-async function opaReasonCode(traceId: string): Promise<string | null> {
-  for (let attempt = 0; attempt < 3; attempt++) {
+// opaReasonCode returns the reason code of a denial as the Authorization
+// Decision Log recorded it (YEAR_NOT_COVERED, CONSENT_SCOPE_MISMATCH, ...),
+// looked up by Fsc-Transaction-Id. OpenFTV batches its ADL writes for up to
+// five seconds, so retry briefly before giving up.
+async function opaReasonCode(transactionId: string): Promise<string | null> {
+  for (let attempt = 0; attempt < 8; attempt++) {
     try {
-      const decisions = await fetchExplain(traceId)
-      for (const d of decisions) {
-        const ctx = (d.result as { context?: { reason_admin?: { code?: string } } } | undefined)?.context
-        if (ctx?.reason_admin?.code) return ctx.reason_admin.code
+      const { audit } = await fetchDecisions(transactionId, { part: 'audit' })
+      for (const r of audit.records) {
+        if (r.reason) return r.reason
       }
-      if (decisions.length > 0) return null
+      if (audit.records.length > 0) return null
     } catch {
-      // not in Loki yet — retry
+      // not in the ADL yet — retry
     }
     await new Promise((r) => setTimeout(r, 800))
   }

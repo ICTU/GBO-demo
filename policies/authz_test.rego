@@ -64,3 +64,32 @@ test_graphql_request_from_metadata_peer_falls_through_to_engine if {
 	reason := authz.reason with input as input_doc
 	reason == "PID_NOT_PRESENT"
 }
+
+# `reason` is the only part of the decision detail OpenFTV transports: it
+# becomes reason_user.en in the AuthZEN response, and so the reason the
+# Authorization Decision Log records. It must be the policy's own reason
+# code, not a summary of it.
+test_deny_reason_is_the_reason_admin_code if {
+	input_doc := {
+		"subject": {"id": "99999999900000000100", "type": "identity"},
+		"action": {"id": "POST", "type": "name"},
+		"resource": {"id": "/graphql", "type": "uri"},
+		"context": {"resolved": {"fields": [], "args": {}}},
+	}
+	resp := authz.response with input as input_doc
+	not resp.decision
+	reason := authz.reason with input as input_doc
+	reason == resp.context.reason_admin.code
+}
+
+# The FSC Inway returns reason_user to the caller in its 401, so the reason
+# is a code and never carries a value from the request.
+test_deny_reason_is_a_bare_code if {
+	reason := authz.reason with input as metadata_input("POST", "/.well-known/gbo")
+	regex.match(`^[A-Z][A-Z0-9_]*$`, reason)
+}
+
+# An allow carries no reason; OpenFTV answers reason_user.en "ok".
+test_allow_carries_no_reason if {
+	not authz.reason with input as metadata_input("GET", "/.well-known/gbo")
+}

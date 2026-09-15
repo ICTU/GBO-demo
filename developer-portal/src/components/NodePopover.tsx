@@ -5,7 +5,7 @@ import { BRON_PROFILES, playgroundUrlFor } from '../data/bronnen'
 import type { NodeDef } from '../data/chains'
 import type { NodeState } from '../hooks/useArchState'
 import type { ApiCall } from '../types'
-import type { OpaExplainDecision } from '../api/devClient'
+import type { AdlRecord, EngineDecision, PdpDecisions } from '../api/devClient'
 import { hlJSON } from '../util/highlight'
 import { useSpanInspect, type SpanInspect } from '../hooks/useSpanInspect'
 
@@ -19,10 +19,13 @@ type Props = {
   traceId?: string
   jaegerUrl?: string
   grafanaUrl?: string
-  explainDecisions?: OpaExplainDecision[]
-  explainLoading?: boolean
-  explainError?: string | null
+  decisions?: PdpDecisions
+  // Which parts are still on their way; each block says so for itself.
+  decisionsLoading?: { audit: boolean; engine: boolean }
+  decisionsError?: string | null
 }
+
+const NOT_PENDING = { audit: false, engine: false }
 
 const STATE_LABEL: Record<NodeState, string> = {
   green: 'Geslaagd',
@@ -40,10 +43,12 @@ const STATE_COLOR: Record<NodeState, string> = {
   'no-otel': 'var(--mute)',
 }
 
+const NO_DECISIONS: PdpDecisions = { audit: { records: [] }, engine: { decisions: [] } }
+
 export default function NodePopover({
   node, state, apiCall, traceId,
   jaegerUrl = JAEGER_DEFAULT, grafanaUrl = GRAFANA_DEFAULT,
-  explainDecisions, explainLoading, explainError,
+  decisions, decisionsLoading, decisionsError,
 }: Props) {
   const stateColor = STATE_COLOR[state]
   const hasIO = !!apiCall
@@ -93,9 +98,9 @@ export default function NodePopover({
 
       {isOpaNode ? (
         <OpaPolicySection
-          decisions={explainDecisions ?? []}
-          loading={!!explainLoading}
-          error={explainError ?? null}
+          decisions={decisions ?? NO_DECISIONS}
+          loading={decisionsLoading ?? NOT_PENDING}
+          error={decisionsError ?? null}
         />
       ) : hasIO ? (
         <NodeIO
@@ -217,78 +222,172 @@ function groupAttrs(attrs: Record<string, string>, nodeId: string): Record<strin
   return g
 }
 
+const SECTION_TITLE = {
+  fontSize: 11, color: 'var(--mute)', fontWeight: 800, letterSpacing: '.05em',
+  textTransform: 'uppercase', marginBottom: 6,
+} as const
+
+const NOTE = { fontSize: 11, color: 'var(--mute)', lineHeight: 1.5, marginBottom: 8 } as const
+
+function decisionLabel(decision: boolean | undefined): { label: string; color: string } {
+  if (decision === true) return { label: 'ALLOW', color: 'var(--allow-br)' }
+  if (decision === false) return { label: 'DENY', color: 'var(--deny-br)' }
+  return { label: '—', color: 'var(--mute)' }
+}
+
+// The PDP popover shows two sources side by side and never merges them: the
+// Authorization Decision Log record, which is the decision of record, and
+// the engine's console decision log, which carries the policy's per-field
+// detail but is observability.
 function OpaPolicySection({
   decisions, loading, error,
-}: { decisions: OpaExplainDecision[]; loading: boolean; error: string | null }) {
-  const [activeIdx, setActiveIdx] = useState(0)
-
-  if (loading) {
-    return <div style={{ marginTop: 12, fontSize: 12, color: 'var(--mute)' }}>OPA-trace ophalen…</div>
+}: { decisions: PdpDecisions; loading: { audit: boolean; engine: boolean }; error: string | null }) {
+  const empty = decisions.audit.records.length === 0 && decisions.engine.decisions.length === 0
+  if ((loading.audit || loading.engine) && empty) {
+    return <div style={{ marginTop: 12, fontSize: 12, color: 'var(--mute)' }}>Beslissing ophalen…</div>
   }
-  if (error) {
+  if (error && empty) {
     return <div style={{ marginTop: 12, fontSize: 12, color: 'var(--deny-br)' }}>Fout: {error}</div>
   }
-  if (decisions.length === 0) {
-    return (
-      <div style={{ marginTop: 12, fontSize: 12, color: 'var(--mute)' }}>
-        Geen decision-log gevonden voor deze trace (laatste 30 min).
-      </div>
-    )
-  }
-
-  const active = decisions[Math.min(activeIdx, decisions.length - 1)]
-  const result = (active.result ?? {}) as { allow?: boolean; reason?: string }
-  const allowLabel = result.allow === true ? 'ALLOW' : result.allow === false ? 'DENY' : '—'
-  const allowColor = result.allow === true ? 'var(--allow-br)' : result.allow === false ? 'var(--deny-br)' : 'var(--mute)'
-
+  // Each block shows what has arrived; a part still on its way says so.
   return (
-    <div style={{ marginTop: 14 }}>
-      <div style={{ fontSize: 11, color: 'var(--mute)', fontWeight: 800, letterSpacing: '.05em', textTransform: 'uppercase', marginBottom: 6 }}>
-        OPA-beslissing{decisions.length > 1 ? `en (${decisions.length})` : ''}
-      </div>
+    <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {error && <div style={{ fontSize: 12, color: 'var(--deny-br)' }}>Fout bij opnieuw ophalen: {error}</div>}
+      <AuditSection records={decisions.audit.records} error={decisions.audit.error} loading={loading.audit} />
+      <EngineSection decisions={decisions.engine.decisions} error={decisions.engine.error} loading={loading.engine} />
+    </div>
+  )
+}
 
-      {decisions.length > 1 && (
-        <div style={{ display: 'flex', gap: 4, marginBottom: 10, flexWrap: 'wrap' }}>
-          {decisions.map((d, i) => {
-            const r = (d.result ?? {}) as { allow?: boolean }
-            const dot = r.allow === true ? 'var(--allow-br)' : r.allow === false ? 'var(--deny-br)' : 'var(--mute)'
-            const isActive = i === activeIdx
-            return (
-              <button
-                key={d.decision_id ?? i}
-                onClick={() => setActiveIdx(i)}
-                style={{
-                  border: `1px solid ${isActive ? 'var(--accent)' : 'var(--border-2)'}`,
-                  background: isActive ? 'var(--panel-2)' : 'transparent',
-                  color: 'var(--text)',
-                  borderRadius: 6, padding: '4px 9px', fontSize: 11, cursor: 'pointer',
-                  display: 'inline-flex', alignItems: 'center', gap: 6,
-                }}
-              >
-                <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: dot }} />
-                <span className="mono">{d.path ?? `decision ${i + 1}`}</span>
-              </button>
-            )
-          })}
+function AuditSection({ records, error, loading }: { records: AdlRecord[]; error?: string; loading: boolean }) {
+  return (
+    <div>
+      <div style={SECTION_TITLE}>Audit-record (ADL)</div>
+      <div style={NOTE}>
+        Het Authorization Decision Log is de autoritatieve vastlegging van deze beslissing: het
+        AuthZEN-request en -antwoord, dus de uitkomst en bij een weigering de reden-code.
+      </div>
+      {error ? (
+        <div style={{ fontSize: 12, color: 'var(--deny-br)' }}>ADL niet leesbaar: {error}</div>
+      ) : records.length === 0 ? (
+        <div style={{ fontSize: 12, color: 'var(--mute)' }}>
+          {loading
+            ? 'ADL-record ophalen…'
+            : 'Geen ADL-record gevonden voor deze transactie (laatste 30 min).'}
+        </div>
+      ) : (
+        records.map((r) => <AdlRecordCard key={`${r.trace_id}-${r.span_id}`} record={r} />)
+      )}
+    </div>
+  )
+}
+
+function AdlRecordCard({ record }: { record: AdlRecord }) {
+  const { label, color } = decisionLabel(record.decision)
+  const rows: [string, string][] = [
+    ['trace_id', record.trace_id],
+    ['span_id', record.span_id],
+    ['adl.fsc.transaction_id', record.fsc_transaction_id || '(leeg)'],
+    ['policies', String(record.policies)],
+  ]
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <span style={{ color, fontWeight: 800, fontSize: 15 }}>{label}</span>
+        {record.reason && <span className="mono" style={{ fontSize: 11, color: 'var(--mute)' }}>· {record.reason}</span>}
+        <span className="mono" style={{ marginLeft: 'auto', fontSize: 10.5, color: 'var(--mute)' }}>
+          {record.event_name} · {record.status}
+        </span>
+      </div>
+      {rows.map(([k, v]) => (
+        <div key={k} style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: 8, fontSize: 11 }}>
+          <span className="mono" style={{ color: 'var(--mute)' }}>{k}</span>
+          <span className="mono" style={{ color: 'var(--text)', wordBreak: 'break-all' }}>{v}</span>
+        </div>
+      ))}
+      {record.matched_on !== 'adl.fsc.transaction_id' && (
+        <div style={{ ...NOTE, marginTop: 6, marginBottom: 0 }}>
+          Gevonden via de <span className="mono">Fsc-Transaction-Id</span>-header in het vastgelegde
+          request: de Inway geeft het transactie-id niet door aan de PDP, dus{' '}
+          <span className="mono">adl.fsc.transaction_id</span> is leeg.
         </div>
       )}
+      <details style={{ marginTop: 8 }}>
+        <summary style={{ cursor: 'pointer', fontSize: 11, color: 'var(--mute)', fontWeight: 700 }}>Raw ADL-record</summary>
+        <pre className="codeblock codeblock--scroll" style={{ marginTop: 6 }} dangerouslySetInnerHTML={{ __html: hlJSON(record) }} />
+      </details>
+    </div>
+  )
+}
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <span style={{ color: allowColor, fontWeight: 800, fontSize: 15 }}>{allowLabel}</span>
-        {result.reason && <span className="mono" style={{ fontSize: 11, color: 'var(--mute)' }}>· {result.reason}</span>}
-        {active.path && (
-          <span className="mono" style={{ marginLeft: 'auto', fontSize: 10.5, color: 'var(--mute)' }}>
-            path: {active.path}
-          </span>
-        )}
+function EngineSection({ decisions, error, loading }: { decisions: EngineDecision[]; error?: string; loading: boolean }) {
+  const [activeIdx, setActiveIdx] = useState(0)
+  const active = decisions.length > 0 ? decisions[Math.min(activeIdx, decisions.length - 1)] : undefined
+  const result = (active?.result ?? {}) as { decision?: boolean }
+  const { label, color } = decisionLabel(result.decision)
+
+  return (
+    <div>
+      <div style={SECTION_TITLE}>
+        Engine-detail (observability){decisions.length > 1 ? ` · ${decisions.length}` : ''}
+      </div>
+      <div style={NOTE}>
+        Uit de console-decision-log van de embedded OPA, via Loki. Die draagt ook het detail per
+        veld, maar is geen vastlegging: best-effort en met een korte bewaartermijn.
       </div>
 
-      <OpaDecisionContext decision={active} />
+      {error ? (
+        <div style={{ fontSize: 12, color: 'var(--deny-br)' }}>Console-log niet leesbaar: {error}</div>
+      ) : !active ? (
+        <div style={{ fontSize: 12, color: 'var(--mute)' }}>
+          {loading
+            ? 'Engine-detail ophalen…'
+            : 'Geen console-decision-log gevonden voor deze transactie (laatste 30 min).'}
+        </div>
+      ) : (
+        <>
+          {decisions.length > 1 && (
+            <div style={{ display: 'flex', gap: 4, marginBottom: 10, flexWrap: 'wrap' }}>
+              {decisions.map((d, i) => {
+                const r = (d.result ?? {}) as { decision?: boolean }
+                const isActive = i === activeIdx
+                return (
+                  <button
+                    key={d.decision_id ?? i}
+                    onClick={() => setActiveIdx(i)}
+                    style={{
+                      border: `1px solid ${isActive ? 'var(--accent)' : 'var(--border-2)'}`,
+                      background: isActive ? 'var(--panel-2)' : 'transparent',
+                      color: 'var(--text)',
+                      borderRadius: 6, padding: '4px 9px', fontSize: 11, cursor: 'pointer',
+                      display: 'inline-flex', alignItems: 'center', gap: 6,
+                    }}
+                  >
+                    <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: decisionLabel(r.decision).color }} />
+                    <span className="mono">{d.path ?? `decision ${i + 1}`}</span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
 
-      <details style={{ marginTop: 10 }}>
-        <summary style={{ cursor: 'pointer', fontSize: 11, color: 'var(--mute)', fontWeight: 700 }}>Raw decision-log entry</summary>
-        <pre className="codeblock codeblock--scroll" style={{ marginTop: 6 }} dangerouslySetInnerHTML={{ __html: hlJSON(active) }} />
-      </details>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <span style={{ color, fontWeight: 800, fontSize: 15 }}>{label}</span>
+            {active.path && (
+              <span className="mono" style={{ marginLeft: 'auto', fontSize: 10.5, color: 'var(--mute)' }}>
+                path: {active.path}
+              </span>
+            )}
+          </div>
+
+          <OpaDecisionContext decision={active} />
+
+          <details style={{ marginTop: 10 }}>
+            <summary style={{ cursor: 'pointer', fontSize: 11, color: 'var(--mute)', fontWeight: 700 }}>Raw decision-log entry</summary>
+            <pre className="codeblock codeblock--scroll" style={{ marginTop: 6 }} dangerouslySetInnerHTML={{ __html: hlJSON(active) }} />
+          </details>
+        </>
+      )}
     </div>
   )
 }
