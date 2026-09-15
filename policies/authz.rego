@@ -11,8 +11,10 @@ package authz
 # Input shape (OpenFTV AuthZEN mapping): {subject, action, resource,
 # context}. The GraphQL request-mapper inside this image places its
 # enrichment under input.context: context.resolved (GraphQL fields),
-# context.pip (consent/PID), context.resource (scope/query/variables/pi),
-# context.trace_id. OpenFTV injects context.time.
+# context.pip (PID), context.resource (scope/query/variables/pi),
+# context.trace_id. OpenFTV injects context.time. The consent is not in
+# input: data.dvtp.gbo.consent resolves it from the token in
+# context.headers while the policy evaluates.
 
 import data.dvtp.gbo
 

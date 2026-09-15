@@ -46,9 +46,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- **The consent lookup moved out of the request-mapper and into the policy.** The
+  policy verifies the signed consent token and asks the consent register for the
+  consent's status itself, per evaluation, through `http.send`
+  ([#330](https://github.com/ICTU/GBO-demo/issues/330)). FTV places attribute
+  retrieval inside the PDP; the mapper now only reshapes the request it was given
+  and holds no consent-register URL, JWKS handling or consent claim shaping, which
+  unblocks [#331](https://github.com/ICTU/GBO-demo/issues/331).
+  - `policies/dvtp/gbo/consent.rego` resolves `pip.consent` in the shape the
+    cascade already read. The status request carries no cache directive, so a
+    revoked consent denies on the first request after revocation; OPA caches
+    identical calls within one evaluation, so many fields still cost one call. The
+    JWKS is cached for five minutes and refetched on an unknown `kid`. The bounded
+    stale-key fallback during a JWKS outage is gone: the register serves both the
+    keys and the status, so an outage denied anyway.
+  - The status request keeps the trace context #365 gave it: a `traceparent`
+    with the request's trace — the caller's, else the transaction id — and a
+    fresh span for the lookup, next to `Fsc-Transaction-Id`.
+  - The token is verified with `io.jwt.verify_es256` against the key its `kid`
+    names, and its claims are checked in Rego — not with `io.jwt.decode_verify`,
+    which reports every failure as one `false` and has no clock-skew leeway. Each
+    failure now denies with a reason of its own: `CONSENT_SIGNATURE_INVALID`
+    (forged, tampered, not ES256, unknown key), `CONSENT_TOKEN_EXPIRED`,
+    `CONSENT_KEYS_UNAVAILABLE` (JWKS unreachable), and `CONSENT_CONTEXT_INVALID`
+    for any other claim. An unreachable status endpoint still denies with
+    `CONSENT_STATUS_UNAVAILABLE`. Every call has a 2s timeout and
+    `raise_error: false`, so no failure leaves a rule undefined.
+  - The register's location, issuer and audience stay operator configuration:
+    `GBO_CONSENT_URL`, `GBO_CONSENT_ISSUER` and `GBO_CONSENT_AUDIENCE`, now read by
+    the policy through `opa.runtime().env`, with unchanged defaults.
+  - A `pip.consent` arriving in input is dropped rather than trusted; the policy
+    decides only on a consent it verified itself.
+  - What the register answered is not part of `input`, so the decision log no
+    longer records it there. The engine puts the resolved consent into its
+    response document (`context.pip.consent`), which is logged
+    ([#332](https://github.com/ICTU/GBO-demo/issues/332)). A decision is no longer
+    a pure function of (input, policy, data): replaying one would need OPA's
+    `nd_builtin_cache` in the log, which OpenFTV does not enable.
+  - With BSNk gone as well (#364), the mapper adds no `pip` at all and resolves no
+    attribute. The consent token travels on to the policy in `context.headers`;
+    `hasConsentEvidence` is gone with the rest.
 - **The PDP's request-mapper only maps.** It no longer calls BSNk and no longer
-  rewrites the subject identifier; what remains is GraphQL mapping and consent-token
-  verification ([#364](https://github.com/ICTU/GBO-demo/issues/364)).
+  rewrites the subject identifier ([#364](https://github.com/ICTU/GBO-demo/issues/364)).
+  Consent-token verification then moved into the policy too (#330, below), so what
+  remains is GraphQL mapping.
   - The EUDI flow keeps sending the plain BSN it reads from the wallet's PID
     disclosure. The mapper used to pseudonymise it through BSNk `/pseudonymize`
     during evaluation, only to keep it out of the policy input — no rule ever read

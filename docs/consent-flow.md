@@ -44,8 +44,8 @@ flowchart LR
     ConsumerBE --> Outway
     Outway --> Inway
     Inway --> Mapper
-    Mapper --> Register
     Mapper --> Policy
+    Policy --> Register
     Policy --> Inway
     Inway --> Source
     Source --> ConsumerBE
@@ -125,17 +125,17 @@ sequenceDiagram
     BE->>OUT: GraphQL met consent-token en scope
     OUT->>IN: Verstuur via FSC-contract en mTLS
     IN->>MAP: Vraag autorisatiebesluit met FSC-context
+    MAP->>POL: Verstrek query-, FSC-context en consent-token
 
     opt Sleutelcache is leeg, verlopen of kid is onbekend
-        MAP->>Register: Haal JWKS op
-        Register-->>MAP: Publieke ES256-sleutels
+        POL->>Register: Haal JWKS op (http.send)
+        Register-->>POL: Publieke ES256-sleutels
     end
-    MAP->>MAP: Verifieer token, bindings en tijdclaims
+    POL->>POL: Verifieer token, bindings en tijdclaims
 
-    MAP->>Register: Controleer status van exact consent-id
-    Register-->>MAP: ACTIVE, REVOKED of niet gevonden
+    POL->>Register: Controleer status van exact consent-id (http.send, zonder cache)
+    Register-->>POL: ACTIVE, REVOKED of niet gevonden
 
-    MAP->>POL: Verstrek consent-, query- en FSC-context
     POL->>POL: Controleer actor, PI, scope en geldigheid
 
     alt Alle controles slagen
@@ -151,10 +151,15 @@ sequenceDiagram
     end
 ```
 
-De mapper gebruikt een JWKS-cache, vernieuwt direct bij een onbekende `kid`
-en kan een bekende sleutel tijdens een korte storing begrensd stale gebruiken.
-De status van het specifieke consent wordt wel bij iedere aanvraag online
-gecontroleerd. JWT-tijdclaims hebben 30 seconden tolerantie voor klokverschil.
+De policy haalt het consent zelf op, tijdens de evaluatie (`http.send` vanuit
+`policies/dvtp/gbo/consent.rego`); de mapper verifieert en raadpleegt niets.
+De JWKS wordt vijf minuten gecachet en direct opnieuw opgehaald bij een
+onbekende `kid`. De status van het specifieke consent wordt bij iedere aanvraag
+zonder cache online gecontroleerd, zodat een intrekking bij de eerstvolgende
+aanvraag doorwerkt. JWT-tijdclaims hebben 30 seconden tolerantie voor
+klokverschil. Elke aanroep heeft een timeout van twee seconden; een
+onbereikbaar register levert een expliciete weigering op, geen ongedefinieerde
+regel.
 
 De policy geeft alleen `ALLOW` wanneer alle volgende relaties kloppen:
 
@@ -168,8 +173,9 @@ geldige ondertekening en geregistreerde claims
 ```
 
 Ontbrekende, ongeldige of niet-beschikbare context faalt gesloten met een
-gerichte reden, zoals `CONSENT_CONTEXT_INVALID`, `CONSENT_ACTOR_MISMATCH`,
-`CONSTRAINT_MISMATCH`, `CONSENT_SCOPE_MISMATCH`,
+gerichte reden, zoals `CONSENT_SIGNATURE_INVALID`, `CONSENT_TOKEN_EXPIRED`,
+`CONSENT_CONTEXT_INVALID`, `CONSENT_KEYS_UNAVAILABLE`,
+`CONSENT_ACTOR_MISMATCH`, `CONSTRAINT_MISMATCH`, `CONSENT_SCOPE_MISMATCH`,
 `CONSENT_STATUS_UNAVAILABLE` of `CONSENT_WITHDRAWN`.
 
 ## 3. Toestemming intrekken

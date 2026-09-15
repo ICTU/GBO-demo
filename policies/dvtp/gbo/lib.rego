@@ -24,7 +24,10 @@ package dvtp.gbo.lib
 #                                "status_available": bool, "withdrawn": bool,
 #                                "valid_until": "<RFC3339>",
 #                                "granted_scopes": [...],
-#                                "dienstverlener_oin": "..." } },
+#                                "dienstverlener_oin": "...",
+#                                "invalid_code": "<code>" } },
+#                 (resolved by data.dvtp.gbo.consent; invalid_code only
+#                  when context_valid is false)
 #     "field":    "Query.<path>.<name>"
 #   }
 #
@@ -419,8 +422,17 @@ _check_consent_context_valid(spec, ctx) := step if {
 } else := step if {
 	spec.consent_context_required
 	not ctx.pip.consent.context_valid == true
-	step := _step("CONSENT_CONTEXT_INVALID", "Signed consent context valid", "signature, issuer, audience and time claims valid", "fail")
+	step := _step(_context_invalid_code(ctx), "Signed consent context valid", "signature, issuer, audience and time claims valid", "fail")
 } else := _step_skipped("CONSENT_CONTEXT_INVALID", "Signed consent context valid", "n/a")
+
+# Which check failed, when the consent PIP could tell: a forged, expired or
+# unverifiable token each deny with a reason of their own. Without one — no
+# consent at all — the generic code stands.
+_context_invalid_code(ctx) := code if {
+	code := ctx.pip.consent.invalid_code
+	is_string(code)
+	code != ""
+} else := "CONSENT_CONTEXT_INVALID"
 
 _check_consent_status_available(spec, ctx) := step if {
 	spec.consent_status_required

@@ -2,31 +2,49 @@ package dvtp.gbo_test
 
 import data.dvtp.gbo
 
-# Engine-level ctx-shape: the request-mapper places the consent it
-# fetched in input.context.pip.consent; the engine mirrors its pi onto
-# ctx.resource for the constraint-binding rule.
+# Engine-level ctx-shape. The consent is resolved by the policy itself
+# (data.dvtp.gbo.consent, covered end to end in consent_test.rego); these
+# tests stand a resolved consent in for it with `with`, so they exercise the
+# engine alone. The engine mirrors the consent's pi onto ctx.resource for
+# the constraint-binding rule.
 
-_pip := {"consent": {"context_valid": true, "status_available": true, "exists": true, "withdrawn": false, "granted_scopes": ["bd:ib:2025"], "valid_until": "2030-01-01T00:00:00Z", "pi": "PI-abc123", "dienstverlener_oin": "peer-oin-123"}}
+_pip_consent := {"context_valid": true, "status_available": true, "exists": true, "withdrawn": false, "granted_scopes": ["bd:ib:2025"], "valid_until": "2030-01-01T00:00:00Z", "pi": "PI-abc123", "dienstverlener_oin": "peer-oin-123"}
 
 _input := {
 	"subject": {"type": "org", "id": "peer-oin-123"},
-	"context": {"resource": {"variables": {"bsn": "PI-abc123"}}, "pip": _pip},
+	"context": {"resource": {"variables": {"bsn": "PI-abc123"}}},
 }
 
-test_ctx_pip_passthrough if {
-	ctx := gbo._ctx with input as _input
+test_ctx_pip_carries_the_resolved_consent if {
+	ctx := gbo._ctx with input as _input with data.dvtp.gbo.consent.resolved as _pip_consent
 	ctx.pip.consent.exists == true
 	ctx.pip.consent.pi == "PI-abc123"
 }
 
 test_ctx_resource_pi_mirror if {
-	ctx := gbo._ctx with input as _input
+	ctx := gbo._ctx with input as _input with data.dvtp.gbo.consent.resolved as _pip_consent
 	ctx.resource.pi == "PI-abc123"
 }
 
 test_ctx_resource_pi_empty_without_consent if {
 	ctx := gbo._ctx with input as {"subject": {"type": "org", "id": "x"}, "context": {}}
 	ctx.resource.pi == ""
+}
+
+# A consent in input is not a consent the policy verified. Nothing upstream
+# is meant to set pip.consent any more; if something does, it is dropped
+# rather than decided on, and without a consent token the request is judged
+# under the PID regime.
+test_input_pip_consent_is_not_trusted if {
+	req := object.union(
+		_dvtp_input("bd:ib:2025", {"bsn": "PI-abc123", "belastingjaren.0": "2025"}),
+		{"context": {"pip": {"consent": _consent}}},
+	)
+	ctx := gbo._ctx with input as req
+	not ctx.pip.consent
+	result := gbo.response with input as req
+	result.decision == false
+	result.context.reason_admin.code == "PID_NOT_PRESENT"
 }
 
 # A PID-regime request: no consent token, so no pip.consent, and a plain
@@ -62,6 +80,19 @@ test_pid_evidence_selects_brp_rule_by_fields if {
 	result.context.granted[0].rule == "EUD0002"
 }
 
+# Without a consent token there is no consent to report, and the response
+# document says nothing about one.
+test_response_without_consent_carries_none if {
+	result := gbo.response with input as {
+		"subject": {"type": "org", "id": "99999999900000000100"},
+		"context": _eudi_context(
+			[{"id": "income.box1", "parent": "AangifteIH", "name": "box1Inkomen", "scalar": false}],
+			{"belastingjaren.0": "2024"},
+		),
+	}
+	not result.context.pip
+}
+
 # ── Deny-reason surfacing for consent-based requests ─────────────────────
 # The gap #334 step 1 closed: nothing in the suite asserted an engine-level
 # deny reason, so no test could see what the flow dispatch had been protecting.
@@ -85,12 +116,12 @@ _consent := {
 # A consent-carrying request for a field on the DVT0001 ∩ EUD0001 overlap.
 # The consent itself is valid throughout — each case fails on exactly one
 # DvTP axis, so the asserted code is the genuine reason and nothing else.
+# The consent is supplied per test, as the resolved one.
 _dvtp_input(scope, args) := {
 	"subject": {"type": "org", "id": "99999999900000000300"},
 	"context": {
 		"time": "2026-07-06T12:00:00Z",
 		"resource": {"scope": scope},
-		"pip": {"consent": _consent},
 		"resolved": {
 			"fields": [{
 				"id": "aangifte.box1",
@@ -105,18 +136,21 @@ _dvtp_input(scope, args) := {
 
 test_dvtp_deny_surfaces_year_not_covered if {
 	result := gbo.response with input as _dvtp_input("bd:ib:2025", {"bsn": "PI-abc123", "belastingjaren.0": "2024"})
+		with data.dvtp.gbo.consent.resolved as _consent
 	result.decision == false
 	result.context.reason_admin.code == "YEAR_NOT_COVERED"
 }
 
 test_dvtp_deny_surfaces_consent_scope_mismatch if {
 	result := gbo.response with input as _dvtp_input("bd:ib:2023", {"bsn": "PI-abc123", "belastingjaren.0": "2025"})
+		with data.dvtp.gbo.consent.resolved as _consent
 	result.decision == false
 	result.context.reason_admin.code == "CONSENT_SCOPE_MISMATCH"
 }
 
 test_dvtp_deny_surfaces_constraint_mismatch if {
 	result := gbo.response with input as _dvtp_input("bd:ib:2025", {"bsn": "PI-other", "belastingjaren.0": "2025"})
+		with data.dvtp.gbo.consent.resolved as _consent
 	result.decision == false
 	result.context.reason_admin.code == "CONSTRAINT_MISMATCH"
 }
@@ -166,8 +200,17 @@ test_eudi_deny_surfaces_actor_not_allowed if {
 
 test_dvtp_allow_grants_via_consent_rule if {
 	result := gbo.response with input as _dvtp_input("bd:ib:2025", {"bsn": "PI-abc123", "belastingjaren.0": "2025"})
+		with data.dvtp.gbo.consent.resolved as _consent
 	result.decision == true
 	result.context.granted[0].rule == "DVT0001"
+}
+
+# The decision log records the consent the decision was taken on: it is not
+# in input, so the response document carries it.
+test_dvtp_response_carries_the_consent if {
+	result := gbo.response with input as _dvtp_input("bd:ib:2025", {"bsn": "PI-abc123", "belastingjaren.0": "2025"})
+		with data.dvtp.gbo.consent.resolved as _consent
+	result.context.pip.consent == _consent
 }
 
 # No consent token, so the request is judged under the PID regime. A
@@ -191,10 +234,10 @@ test_no_consent_token_puts_the_request_under_the_pid_regime if {
 }
 
 # ── The invariant the PID regime now rests on ────────────────────────────
-# With `flow` gone, the request-mapper selects the consent regime on a
-# verified consent token and falls through to the PID regime otherwise.
-# Absence of a header is therefore what puts a request under the EUDI
-# rules, and the only gate left on them is each rule's own allowed_actors.
+# With `flow` gone, a consent token selects the consent regime and its
+# absence the PID regime. Absence of a header is therefore what puts a
+# request under the EUDI rules, and the only gate left on them is each
+# rule's own allowed_actors.
 #
 # That is safe exactly as long as no OIN is BOTH a designated EDI-issuer
 # and a consent-based consumer. Such an OIN could skip the citizen's
@@ -238,15 +281,31 @@ test_pid_regime_without_a_subject_surfaces_pid_not_present if {
 	result.context.reason_admin.code == "PID_NOT_PRESENT"
 }
 
+_unverifiable_input := {
+	"subject": {"type": "org", "id": "99999999900000000300"},
+	"context": {
+		"time": "2026-07-06T12:00:00Z",
+		"resolved": {"fields": _box1, "args": {"bsn": "", "belastingjaren.0": "2025"}},
+	},
+}
+
 test_unverifiable_consent_surfaces_consent_context_invalid if {
-	result := gbo.response with input as {
-		"subject": {"type": "org", "id": "99999999900000000300"},
-		"context": {
-			"time": "2026-07-06T12:00:00Z",
-			"pip": {"consent": {"context_valid": false, "status_available": false, "exists": false}},
-			"resolved": {"fields": _box1, "args": {"bsn": "", "belastingjaren.0": "2025"}},
-		},
-	}
+	result := gbo.response with input as _unverifiable_input
+		with data.dvtp.gbo.consent.resolved as {"context_valid": false, "status_available": false, "exists": false}
 	result.decision == false
 	result.context.reason_admin.code == "CONSENT_CONTEXT_INVALID"
+}
+
+# The consent PIP can say which check failed; the engine reports that, not
+# the generic code.
+test_unverifiable_consent_surfaces_its_invalid_code if {
+	result := gbo.response with input as _unverifiable_input
+		with data.dvtp.gbo.consent.resolved as {
+			"context_valid": false,
+			"status_available": false,
+			"exists": false,
+			"invalid_code": "CONSENT_SIGNATURE_INVALID",
+		}
+	result.decision == false
+	result.context.reason_admin.code == "CONSENT_SIGNATURE_INVALID"
 }
