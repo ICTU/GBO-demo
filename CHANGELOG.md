@@ -7,6 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Added
+- **`make policy-check` reports a broken policy before the PDP swallows it
+  (#335).** The PDP hot-reloads `policies/`, but OpenFTV logs
+  `policy added/replaced` for a module that failed to compile as well, stays
+  healthy and keeps answering with the previous rules (#151). The target runs
+  the only-Rego guard and `opa check` with the image CI pins, and names the
+  file and line of the error in a second or two without the stack running.
+  Every target that starts the PDP runs it first; `make policy-test` adds the
+  format diff and unit tests. The engine still swallows a broken module at
+  runtime — #151 stays open for that.
 - **The `gbo-app` chart can express a one-shot workload.** `job.enabled`
   renders a Job instead of a Deployment, Service and HTTPRoute — mutually
   exclusive, because a release either serves traffic or runs to completion.
@@ -318,6 +327,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - `OBSERVABILITY.md` no longer claims that the PDP strips BSNs from its logs or
   that `data.system.log.mask` applies; neither holds under OpenFTV.
 - Dependabot no longer watches the removed `services/pdp-service`.
+- The `dienstverlener-backend` image builds on main again. Since it started
+  writing LDV records (#366) its Dockerfile copies the sibling
+  `services/ldv-client` and expects the repo root as build context; compose
+  and `ci.yml` were updated, but the image manifest
+  (`.github/scripts/image-manifest.sh`) still built from the service
+  directory, so every `build` run on main failed on
+  `"/services/dienstverlener-backend": not found`. PR CI did not catch it:
+  `ci.yml` keeps its own context list, and `images.yml` only runs on main.
 
 ## [0.6.11] - 2026-09-07
 

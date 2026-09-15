@@ -241,11 +241,26 @@ check in the affected component, for example:
 ```bash
 (cd services/eudi-adapter && go test -timeout 60s ./...)
 
-docker run --rm -v "$(pwd)/policies:/w" -w /w \
-  openpolicyagent/opa:1.9.0-static test /w -v
+make policy-test   # opa check, format diff and Rego unit tests, same image as CI
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the pull-request checklist.
+
+### Editing policies
+
+The PDP in the default stack loads `policies/` from disk and hot-reloads on
+save. A module that does not compile is not rejected loudly: OpenFTV still
+logs `policy added/replaced`, stays healthy and keeps answering with the
+previous rules ([#151](https://github.com/ICTU/GBO-demo/issues/151)). A rule
+whose change has no effect is therefore often a rule that never compiled. Run
+
+```bash
+make policy-check
+```
+
+after every edit. It reports a syntax error with file and line in a second or
+two, without the stack running. Every `make` target that starts the PDP runs
+it first.
 
 ## Troubleshooting
 

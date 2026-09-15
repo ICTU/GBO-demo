@@ -89,7 +89,7 @@ consent-portal-backend|.|./services/consent-portal-backend/Dockerfile|services/c
 consent-register|.|./services/consent-register/Dockerfile|services/consent-register services/ldv-client|linux/amd64|false|consent-register
 dev-portal-backend|.|./services/dev-portal-backend/Dockerfile|services/dev-portal-backend policies|linux/amd64|false|dev-portal-backend
 developer-portal|./developer-portal|./developer-portal/Dockerfile|developer-portal|linux/amd64|false|developer-portal
-dienstverlener-backend|./services/dienstverlener-backend|./services/dienstverlener-backend/Dockerfile|services/dienstverlener-backend|linux/amd64|false|dienstverlener-backend
+dienstverlener-backend|.|./services/dienstverlener-backend/Dockerfile|services/dienstverlener-backend services/ldv-client|linux/amd64|false|dienstverlener-backend
 dienstverlener-mock|./dienstverlener-mock|./dienstverlener-mock/Dockerfile|dienstverlener-mock|linux/amd64|false|dienstverlener-mock
 dvtp-onboarding-register|./services/dvtp-onboarding-register|./services/dvtp-onboarding-register/Dockerfile|services/dvtp-onboarding-register|linux/amd64|false|dvtp-onboarding-register
 eudi-adapter|.|./services/eudi-adapter/Dockerfile|services/eudi-adapter services/ldv-client|linux/amd64|false|eudi-adapter
