@@ -286,6 +286,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ### Fixed
 - Confined developer-portal scenario writes and policy-source reads to their
   configured roots, preventing path and symlink traversal.
+- The `dienstverlener-backend` image builds on main again. Since it started
+  writing LDV records (#366) its Dockerfile copies the sibling
+  `services/ldv-client` and expects the repo root as build context; compose
+  and `ci.yml` were updated, but the image manifest
+  (`.github/scripts/image-manifest.sh`) still built from the service
+  directory, so every `build` run on main failed on
+  `"/services/dienstverlener-backend": not found`. PR CI did not catch it:
+  `ci.yml` keeps its own context list, and `images.yml` only runs on main.
 
 ## [0.6.11] - 2026-09-07
 
