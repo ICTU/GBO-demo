@@ -15,10 +15,10 @@ import data.dvtp.gbo.rules.eud0001
 # test via object.union.
 _base_ctx := {
 	"subject": {"type": "org", "id": "00000004000000004000"},
-	"args": {"belastingjaren.0": "2025"},
+	"args": {"vars.bsn": "999991772", "belastingjaren.0": "2025"},
 	"time": "2026-07-06T12:00:00Z",
 	"resource": {"scope": ""},
-	"pip": {"pid": {"pi": "PI-2f1a7c9b40e6d853"}},
+	"pip": {},
 	"field": "Query.ingeschrevenPersoon.heeftBelastingjaarAangifte",
 }
 
@@ -52,7 +52,7 @@ test_deny_non_numeric_year if {
 }
 
 test_deny_year_missing if {
-	ctx := object.union(object.remove(_base_ctx, ["args"]), {"args": {}})
+	ctx := object.union(object.remove(_base_ctx, ["args"]), {"args": {"vars.bsn": "999991772"}})
 	result := lib.evaluate(eud0001.spec, ctx)
 	result.decision == false
 	result.context.reason_admin.code == "YEAR_NOT_ALLOWED"
@@ -67,18 +67,20 @@ test_deny_actor_not_in_allowed_actors if {
 	result.context.reason_admin.code == "ACTOR_NOT_ALLOWED"
 }
 
-# ── PID-check remains present ───────────────────────────────────────────
+# ── PID-regime basis: no consent token, and a subject named ─────────────
 
 test_deny_pid_missing if {
 	# object.union is deep-merged; explicit empty bsn instead of pip=={}.
-	ctx := object.union(_base_ctx, {"pip": {"pid": {"pi": ""}}})
+	ctx := object.union(_base_ctx, {"args": {"vars.bsn": ""}})
 	result := lib.evaluate(eud0001.spec, ctx)
 	result.decision == false
 	result.context.reason_admin.code == "PID_NOT_PRESENT"
 }
 
-test_deny_pid_invalid_shape if {
-	ctx := object.union(_base_ctx, {"pip": {"pid": {"pi": "abc"}}})
+test_deny_when_a_consent_token_was_presented if {
+	# A consent token puts the request under the consent regime, whether or
+	# not it verified; the PID-regime basis must then fail.
+	ctx := object.union(_base_ctx, {"pip": {"consent": {"context_valid": false}}})
 	result := lib.evaluate(eud0001.spec, ctx)
 	result.decision == false
 	result.context.reason_admin.code == "PID_NOT_PRESENT"

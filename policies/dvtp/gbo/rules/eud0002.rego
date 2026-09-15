@@ -6,8 +6,8 @@ package dvtp.gbo.rules.eud0002
 # nabestaande discloses her PID; the source resolves the legally relevant
 # huwelijk and exposes only the fields that can enter the credential.
 #
-# Selection: like EUD0001 this rule fires on a disclosed PID rather than on
-# a declared flow; pid_required makes it fail closed without one. The two
+# Selection: like EUD0001 this rule fires in the PID regime rather than on
+# a declared flow; pid_required makes it fail closed outside it. The two
 # EUDI rules never compete for a field because their covers_fields are
 # disjoint.
 #

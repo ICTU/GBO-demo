@@ -33,7 +33,8 @@ test_ctx_resource_pi_empty_without_consent if {
 
 # A consent in input is not a consent the policy verified. Nothing upstream
 # is meant to set pip.consent any more; if something does, it is dropped
-# rather than decided on.
+# rather than decided on, and without a consent token the request is judged
+# under the PID regime.
 test_input_pip_consent_is_not_trusted if {
 	req := object.union(
 		_dvtp_input("bd:ib:2025", {"bsn": "PI-abc123", "belastingjaren.0": "2025"}),
@@ -43,13 +44,15 @@ test_input_pip_consent_is_not_trusted if {
 	not ctx.pip.consent
 	result := gbo.response with input as req
 	result.decision == false
-	result.context.reason_admin.code == "CONSENT_CONTEXT_INVALID"
+	result.context.reason_admin.code == "PID_NOT_PRESENT"
 }
 
-_eudi_context(fields, args) := {
-	"pip": {"pid": {"pi": "PI-2f1a7c9b40e6d853"}},
-	"resolved": {"fields": fields, "args": args},
-}
+# A PID-regime request: no consent token, so no pip.consent, and a plain
+# BSN in the source-declared subject variable, as the EUDI adapter sends it.
+_eudi_context(fields, args) := {"resolved": {
+	"fields": fields,
+	"args": object.union(args, {"vars.bsn": "999991772"}),
+}}
 
 test_pid_evidence_selects_income_rule_by_fields if {
 	ctx := _eudi_context(
@@ -159,13 +162,12 @@ test_dvtp_deny_surfaces_constraint_mismatch if {
 # On priority alone it would out-rank every genuine EUDI reason, not just
 # the low-priority ones.
 
-# A PID-carrying request for the same DVT0001 ∩ EUD0001 field: a
-# well-formed PID and no consent anywhere in the PIP.
+# A PID-regime request for the same DVT0001 ∩ EUD0001 field: no consent
+# token, and a plain BSN in the subject variable.
 _eudi_input(actor, year) := {
 	"subject": {"type": "org", "id": actor},
 	"context": {
 		"time": "2026-07-06T12:00:00Z",
-		"pip": {"pid": {"pi": "PI-2f1a7c9b40e6d853"}},
 		"resolved": {
 			"fields": [{
 				"id": "aangifte.box1",
@@ -173,7 +175,7 @@ _eudi_input(actor, year) := {
 				"name": "box1Inkomen",
 				"scalar": false,
 			}],
-			"args": {"belastingjaren.0": year},
+			"args": {"vars.bsn": "999991772", "belastingjaren.0": year},
 		},
 	},
 }
@@ -190,10 +192,11 @@ test_eudi_deny_surfaces_actor_not_allowed if {
 	result.context.reason_admin.code == "ACTOR_NOT_ALLOWED"
 }
 
-# ── Evidence decides the regime, and ambiguity is not resolved silently ──
+# ── Evidence decides the regime ──────────────────────────────────────────
 # With the flow dispatch gone, every rule covering the field is evaluated
-# on every request. These pin the three outcomes that follow from the
-# evidence alone: it fits one rule, it fits none, or it fits both.
+# on every request. A consent token selects the consent regime; its
+# absence, the PID regime. There is no third case: "both" cannot occur
+# when one regime is defined as the absence of the other.
 
 test_dvtp_allow_grants_via_consent_rule if {
 	result := gbo.response with input as _dvtp_input("bd:ib:2025", {"bsn": "PI-abc123", "belastingjaren.0": "2025"})
@@ -210,10 +213,11 @@ test_dvtp_response_carries_the_consent if {
 	result.context.pip.consent == _consent
 }
 
-# Neither a consent nor a PID, and no enrichment attempted either. Every
-# rule fails its own basis check, so neither cascade depth nor the attempted
-# regime separates them, and the priority table decides.
-test_no_evidence_denies if {
+# No consent token, so the request is judged under the PID regime. A
+# consent-based consumer that omits its token therefore meets the EUDI
+# rules' allowed_actors, not its consent — which is why that whitelist must
+# stay disjoint from the consent-based consumers (test below).
+test_no_consent_token_puts_the_request_under_the_pid_regime if {
 	result := gbo.response with input as {
 		"subject": {"type": "org", "id": "99999999900000000300"},
 		"context": {
@@ -221,32 +225,12 @@ test_no_evidence_denies if {
 			"pip": {},
 			"resolved": {
 				"fields": [{"id": "aangifte.box1", "parent": "AangifteIH", "name": "box1Inkomen", "scalar": false}],
-				"args": {"bsn": "PI-abc123", "belastingjaren.0": "2025"},
+				"args": {"bsn": "PI-abc123", "vars.bsn": "PI-abc123", "belastingjaren.0": "2025"},
 			},
 		},
 	}
 	result.decision == false
-	result.context.reason_admin.code == "CONSENT_CONTEXT_INVALID"
-}
-
-# Both a verified consent and a disclosed PID. Both DVT0001 and EUD0001
-# would grant; the engine must not pick one by rule ordering.
-test_both_evidence_denies_rather_than_picking_a_regime if {
-	result := gbo.response with input as {
-		"subject": {"type": "org", "id": "99999999900000000100"},
-		"context": {
-			"time": "2026-07-06T12:00:00Z",
-			"resource": {"scope": "bd:ib:2025"},
-			"pip": {"pid": {"pi": "PI-2f1a7c9b40e6d853"}},
-			"resolved": {
-				"fields": [{"id": "aangifte.box1", "parent": "AangifteIH", "name": "box1Inkomen", "scalar": false}],
-				"args": {"bsn": "PI-abc123", "belastingjaren.0": "2025"},
-			},
-		},
-	}
-		with data.dvtp.gbo.consent.resolved as object.union(_consent, {"dienstverlener_oin": "99999999900000000100"})
-	result.decision == false
-	result.context.reason_admin.code == "AMBIGUOUS_EVIDENCE"
+	result.context.reason_admin.code == "ACTOR_NOT_ALLOWED"
 }
 
 # ── The invariant the PID regime now rests on ────────────────────────────
@@ -276,23 +260,20 @@ test_pid_rule_actors_are_disjoint_from_consent_consumers if {
 	}
 }
 
-# ── A failed enrichment keeps the regime it attempted ────────────────────
-# pip.consent is resolved whenever the request carries a consent token, and
-# the request-mapper fills pip.pid otherwise — also when that attempt fails:
-# an unverifiable token, or a BSNk error that leaves pi empty. Every rule
-# then passes nothing, so cascade depth cannot separate them; the attempt
-# can. Review of #363: a PID-based request whose BSN could not be
-# pseudonymised surfaced CONSENT_CONTEXT_INVALID, where main said
-# PID_NOT_PRESENT.
+# ── A depth tie is broken by the regime the request is under ─────────────
+# When every rule passes nothing, cascade depth cannot separate them. The
+# regime can: pip.consent is present exactly when the request carried a
+# consent token — verified or not — and absent in the PID regime. Review of
+# #363: a PID-regime request whose evidence failed surfaced
+# CONSENT_CONTEXT_INVALID, where main said PID_NOT_PRESENT.
 
 _box1 := [{"id": "aangifte.box1", "parent": "AangifteIH", "name": "box1Inkomen", "scalar": false}]
 
-test_failed_pid_enrichment_surfaces_pid_not_present if {
+test_pid_regime_without_a_subject_surfaces_pid_not_present if {
 	result := gbo.response with input as {
 		"subject": {"type": "org", "id": "99999999900000000100"},
 		"context": {
 			"time": "2026-07-06T12:00:00Z",
-			"pip": {"pid": {"pi": ""}},
 			"resolved": {"fields": _box1, "args": {"belastingjaren.0": "2024"}},
 		},
 	}

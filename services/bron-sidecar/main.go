@@ -10,7 +10,10 @@
 //     speaks BSN, regardless of whether the consumer sends PI or BSN.
 //
 // Advantages over the previous pep-service pipeline:
-//   - BSN no longer ends up in the authorization envelope
+//   - In the DvTP flow the BSN stays out of the authorization envelope: the
+//     consumer sends a PI, and only this sidecar turns it into a BSN. The
+//     EUDI flow sends a plain BSN, which the PDP does see (#364; keeping it
+//     out of the PDP's decision logs is #368).
 //   - The sidecar is source-owned; the PDP does not perform data transformation
 //     (gateway responsibility, not policy responsibility)
 package main
