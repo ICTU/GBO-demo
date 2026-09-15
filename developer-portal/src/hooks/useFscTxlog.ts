@@ -83,7 +83,7 @@ export function useFscTxlog(traceId: string | undefined, mode: Tab): {
           if (delay > 0) await new Promise((r) => setTimeout(r, delay))
           if (cancelled) return
           try {
-            const { audit } = await fetchDecisions(txID, { auditOnly: true })
+            const { audit } = await fetchDecisions(txID, { part: 'audit' })
             const recorded = audit.records[0]?.decision
             if (recorded !== undefined) {
               decision = recorded

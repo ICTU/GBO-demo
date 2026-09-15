@@ -82,13 +82,14 @@ export type PdpDecisions = {
   engine: { decisions: EngineDecision[]; error?: string }
 }
 
-// fetchDecisions loads both parts. With `auditOnly` the backend skips Loki,
-// so a slow or unreachable Loki cannot delay the decision of record.
+// fetchDecisions loads both parts, or one: `part: 'audit'` skips Loki, so a
+// slow or unreachable Loki cannot delay the decision of record, and
+// `part: 'engine'` skips the ADL.
 export async function fetchDecisions(
   transactionId: string,
-  opts: { auditOnly?: boolean } = {},
+  opts: { part?: 'audit' | 'engine' } = {},
 ): Promise<PdpDecisions> {
-  const part = opts.auditOnly ? '&part=audit' : ''
+  const part = opts.part ? `&part=${opts.part}` : ''
   const res = await fetch(`${BASE}/decisions?transaction_id=${encodeURIComponent(transactionId)}${part}`)
   if (!res.ok) throw new Error(`fetchDecisions failed: ${res.status}`)
   const body = (await res.json()) as Partial<PdpDecisions>

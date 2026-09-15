@@ -54,7 +54,7 @@ function scopeYears(scopes: string[]): number[] {
 async function opaReasonCode(transactionId: string): Promise<string | null> {
   for (let attempt = 0; attempt < 8; attempt++) {
     try {
-      const { audit } = await fetchDecisions(transactionId, { auditOnly: true })
+      const { audit } = await fetchDecisions(transactionId, { part: 'audit' })
       for (const r of audit.records) {
         if (r.reason) return r.reason
       }

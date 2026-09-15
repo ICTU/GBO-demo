@@ -192,6 +192,26 @@ func TestDecisionsAuditPartSkipsLoki(t *testing.T) {
 	}
 }
 
+// part=engine answers from Loki without querying the ADL, so the engine
+// detail and the decision of record can be fetched apart.
+func TestDecisionsEnginePartSkipsTheADL(t *testing.T) {
+	adl := &fakeADL{}
+	cfg := config{VarDir: t.TempDir(), PredefinedDir: t.TempDir(), LokiURL: lokiWithDecision(t, "tx-1").URL}
+	srv := httptest.NewServer(newMux(cfg, newTraceHub(time.Minute), adl))
+	defer srv.Close()
+
+	_, out := getDecisions(t, srv, "?transaction_id=tx-1&part=engine")
+	if adl.gotTxID != "" {
+		t.Error("part=engine queried the ADL")
+	}
+	if len(out.Engine.Decisions) != 1 {
+		t.Errorf("engine decisions = %d, want 1", len(out.Engine.Decisions))
+	}
+	if len(out.Audit.Records) != 0 || out.Audit.Error != "" {
+		t.Errorf("audit = %+v, want an untouched empty part", out.Audit)
+	}
+}
+
 func TestDecisionsRequiresATransactionID(t *testing.T) {
 	cfg := config{VarDir: t.TempDir(), PredefinedDir: t.TempDir()}
 	srv := httptest.NewServer(newMux(cfg, newTraceHub(time.Minute), nil))

@@ -65,8 +65,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   as observability next to the ADL record rather than as the decision.
   - `dev-portal-backend` serves `GET /decisions?transaction_id=` with the ADL
     records and the console entries side by side, each part with its own
-    error. `part=audit` skips Loki, so the PDP's colour and reason code never
-    wait for it, and the popover shows an ADL record as soon as it arrives.
+    error. `part=audit` and `part=engine` fetch one part each, so the PDP's
+    colour, its reason code and the popover's ADL block never wait for Loki.
     It replaces `/decision` and `/explain`. `/explain?mode=full|fails`
     is gone rather than left as a TODO: OpenFTV has no explain API, and
     replaying a recorded input would not reproduce the decision, because the

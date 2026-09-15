@@ -175,6 +175,20 @@ func decisionFromResponse(raw json.RawMessage) (*bool, string) {
 	return resp.Decision, reason
 }
 
+// auditPart looks up the ADL records of one transaction for /decisions.
+func auditPart(ctx context.Context, adl adlStore, txID string, since time.Time) decisionsAudit {
+	if adl == nil {
+		return decisionsAudit{Records: []adlRecord{}, Error: "ADL not configured (ADL_DATABASE_URL)"}
+	}
+	ctx, cancel := context.WithTimeout(ctx, adlQueryTimeout)
+	defer cancel()
+	records, err := adl.DecisionsForTransaction(ctx, txID, since)
+	if err != nil {
+		return decisionsAudit{Records: []adlRecord{}, Error: err.Error()}
+	}
+	return decisionsAudit{Records: records}
+}
+
 func stringOrEmpty(s *string) string {
 	if s == nil {
 		return ""

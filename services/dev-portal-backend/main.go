@@ -627,23 +627,15 @@ func handleDecisions(cfg config, adl adlStore) http.HandlerFunc {
 			Engine: decisionsEngine{Decisions: []map[string]any{}},
 		}
 
-		if adl == nil {
-			out.Audit.Error = "ADL not configured (ADL_DATABASE_URL)"
-		} else {
-			ctx, cancel := context.WithTimeout(r.Context(), adlQueryTimeout)
-			records, err := adl.DecisionsForTransaction(ctx, txID, since)
-			cancel()
-			if err != nil {
-				out.Audit.Error = err.Error()
-			} else {
-				out.Audit.Records = records
-			}
-		}
+		// part=audit or part=engine asks for one part only, so a caller can
+		// fetch each on its own schedule: the decision of record never waits
+		// on Loki, and the engine detail never waits on the ADL.
+		part := r.URL.Query().Get("part")
 
-		// The PDP's colour and reason come from the audit part alone. A
-		// caller that needs only those asks for part=audit and skips Loki,
-		// so a slow or unreachable Loki cannot delay the decision of record.
-		if r.URL.Query().Get("part") == "audit" {
+		if part != "engine" {
+			out.Audit = auditPart(r.Context(), adl, txID, since)
+		}
+		if part == "audit" {
 			writeJSON(w, http.StatusOK, out)
 			return
 		}

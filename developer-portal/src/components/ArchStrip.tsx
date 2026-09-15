@@ -229,7 +229,7 @@ export default function ArchStrip({
                                 jaegerUrl={jaegerUrl}
                                 grafanaUrl={grafanaUrl}
                                 decisions={branchDef.id === 'opa' && (mode === 'use' || mode === 'eudi-issuance') ? decisions : undefined}
-                                decisionsLoading={branchDef.id === 'opa' ? decisions.loading : undefined}
+                                decisionsLoading={branchDef.id === 'opa' ? decisions.pending : undefined}
                                 decisionsError={branchDef.id === 'opa' ? decisions.error : undefined}
                               />
                             )}
@@ -247,7 +247,7 @@ export default function ArchStrip({
                       jaegerUrl={jaegerUrl}
                       grafanaUrl={grafanaUrl}
                       decisions={node.id === 'pdp' ? decisions : undefined}
-                      decisionsLoading={node.id === 'pdp' ? decisions.loading : undefined}
+                      decisionsLoading={node.id === 'pdp' ? decisions.pending : undefined}
                       decisionsError={node.id === 'pdp' ? decisions.error : undefined}
                     />
                   )}

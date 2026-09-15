@@ -20,9 +20,12 @@ type Props = {
   jaegerUrl?: string
   grafanaUrl?: string
   decisions?: PdpDecisions
-  decisionsLoading?: boolean
+  // Which parts are still on their way; each block says so for itself.
+  decisionsLoading?: { audit: boolean; engine: boolean }
   decisionsError?: string | null
 }
+
+const NOT_PENDING = { audit: false, engine: false }
 
 const STATE_LABEL: Record<NodeState, string> = {
   green: 'Geslaagd',
@@ -96,7 +99,7 @@ export default function NodePopover({
       {isOpaNode ? (
         <OpaPolicySection
           decisions={decisions ?? NO_DECISIONS}
-          loading={!!decisionsLoading}
+          loading={decisionsLoading ?? NOT_PENDING}
           error={decisionsError ?? null}
         />
       ) : hasIO ? (
@@ -238,9 +241,9 @@ function decisionLabel(decision: boolean | undefined): { label: string; color: s
 // detail but is observability.
 function OpaPolicySection({
   decisions, loading, error,
-}: { decisions: PdpDecisions; loading: boolean; error: string | null }) {
+}: { decisions: PdpDecisions; loading: { audit: boolean; engine: boolean }; error: string | null }) {
   const empty = decisions.audit.records.length === 0 && decisions.engine.decisions.length === 0
-  if (loading && empty) {
+  if ((loading.audit || loading.engine) && empty) {
     return <div style={{ marginTop: 12, fontSize: 12, color: 'var(--mute)' }}>Beslissing ophalen…</div>
   }
   if (error && empty) {
@@ -250,8 +253,8 @@ function OpaPolicySection({
   return (
     <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 16 }}>
       {error && <div style={{ fontSize: 12, color: 'var(--deny-br)' }}>Fout bij opnieuw ophalen: {error}</div>}
-      <AuditSection records={decisions.audit.records} error={decisions.audit.error} loading={loading} />
-      <EngineSection decisions={decisions.engine.decisions} error={decisions.engine.error} loading={loading} />
+      <AuditSection records={decisions.audit.records} error={decisions.audit.error} loading={loading.audit} />
+      <EngineSection decisions={decisions.engine.decisions} error={decisions.engine.error} loading={loading.engine} />
     </div>
   )
 }
