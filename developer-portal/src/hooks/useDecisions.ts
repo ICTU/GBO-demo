@@ -11,12 +11,20 @@ const cache = new Map<string, PdpDecisions>()
 
 const complete = (d: PdpDecisions) => d.audit.records.length > 0 && d.engine.decisions.length > 0
 
+// A part is settled once it returned data or an error. "Nothing yet" is the
+// only answer worth asking again, because both stores fill with a delay.
+const settled = (d: PdpDecisions) =>
+  (d.audit.records.length > 0 || !!d.audit.error) &&
+  (d.engine.decisions.length > 0 || !!d.engine.error)
+
 // useDecisions loads what is recorded about the PDP decisions for one FSC
 // transaction: the Authorization Decision Log record (audit) and the
 // engine's console decision-log entry (observability). Both arrive late —
 // OpenFTV batches its ADL writes for up to five seconds, and promtail ships
-// the console line to Loki — so it retries for about seven seconds, and
-// caches only once both are in.
+// the console line to Loki — so it asks again while a part has nothing yet,
+// for about seven seconds. Whatever has arrived is shown at once: an ADL
+// record never waits for the engine detail. Only a complete result is
+// cached.
 export function useDecisions(transactionId: string | undefined, enabled: boolean): State {
   const [state, setState] = useState<State>(() => ({
     ...(transactionId && cache.get(transactionId)) || EMPTY,
@@ -41,20 +49,14 @@ export function useDecisions(transactionId: string | undefined, enabled: boolean
       fetchDecisions(transactionId)
         .then((d) => {
           if (cancelled) return
-          if (complete(d)) {
-            cache.set(transactionId, d)
-            setState({ ...d, loading: false, error: null })
-            return
-          }
-          if (attempt >= 12) {
-            setState({ ...d, loading: false, error: null })
-            return
-          }
-          timer = setTimeout(tryFetch, Math.min(150 * attempt, 800))
+          if (complete(d)) cache.set(transactionId, d)
+          const done = settled(d) || attempt >= 12
+          setState({ ...d, loading: !done, error: null })
+          if (!done) timer = setTimeout(tryFetch, Math.min(150 * attempt, 800))
         })
         .catch((e: Error) => {
           if (cancelled) return
-          setState({ ...EMPTY, loading: false, error: e.message })
+          setState((s) => ({ ...s, loading: false, error: e.message }))
         })
     }
     tryFetch()

@@ -243,18 +243,20 @@ function OpaPolicySection({
   if (loading && empty) {
     return <div style={{ marginTop: 12, fontSize: 12, color: 'var(--mute)' }}>Beslissing ophalen…</div>
   }
-  if (error) {
+  if (error && empty) {
     return <div style={{ marginTop: 12, fontSize: 12, color: 'var(--deny-br)' }}>Fout: {error}</div>
   }
+  // Each block shows what has arrived; a part still on its way says so.
   return (
     <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <AuditSection records={decisions.audit.records} error={decisions.audit.error} />
-      <EngineSection decisions={decisions.engine.decisions} error={decisions.engine.error} />
+      {error && <div style={{ fontSize: 12, color: 'var(--deny-br)' }}>Fout bij opnieuw ophalen: {error}</div>}
+      <AuditSection records={decisions.audit.records} error={decisions.audit.error} loading={loading} />
+      <EngineSection decisions={decisions.engine.decisions} error={decisions.engine.error} loading={loading} />
     </div>
   )
 }
 
-function AuditSection({ records, error }: { records: AdlRecord[]; error?: string }) {
+function AuditSection({ records, error, loading }: { records: AdlRecord[]; error?: string; loading: boolean }) {
   return (
     <div>
       <div style={SECTION_TITLE}>Audit-record (ADL)</div>
@@ -266,7 +268,9 @@ function AuditSection({ records, error }: { records: AdlRecord[]; error?: string
         <div style={{ fontSize: 12, color: 'var(--deny-br)' }}>ADL niet leesbaar: {error}</div>
       ) : records.length === 0 ? (
         <div style={{ fontSize: 12, color: 'var(--mute)' }}>
-          Geen ADL-record gevonden voor deze transactie (laatste 30 min).
+          {loading
+            ? 'ADL-record ophalen…'
+            : 'Geen ADL-record gevonden voor deze transactie (laatste 30 min).'}
         </div>
       ) : (
         records.map((r) => <AdlRecordCard key={`${r.trace_id}-${r.span_id}`} record={r} />)
@@ -313,7 +317,7 @@ function AdlRecordCard({ record }: { record: AdlRecord }) {
   )
 }
 
-function EngineSection({ decisions, error }: { decisions: EngineDecision[]; error?: string }) {
+function EngineSection({ decisions, error, loading }: { decisions: EngineDecision[]; error?: string; loading: boolean }) {
   const [activeIdx, setActiveIdx] = useState(0)
   const active = decisions.length > 0 ? decisions[Math.min(activeIdx, decisions.length - 1)] : undefined
   const result = (active?.result ?? {}) as { decision?: boolean }
@@ -333,7 +337,9 @@ function EngineSection({ decisions, error }: { decisions: EngineDecision[]; erro
         <div style={{ fontSize: 12, color: 'var(--deny-br)' }}>Console-log niet leesbaar: {error}</div>
       ) : !active ? (
         <div style={{ fontSize: 12, color: 'var(--mute)' }}>
-          Geen console-decision-log gevonden voor deze transactie (laatste 30 min).
+          {loading
+            ? 'Engine-detail ophalen…'
+            : 'Geen console-decision-log gevonden voor deze transactie (laatste 30 min).'}
         </div>
       ) : (
         <>

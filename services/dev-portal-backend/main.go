@@ -640,6 +640,14 @@ func handleDecisions(cfg config, adl adlStore) http.HandlerFunc {
 			}
 		}
 
+		// The PDP's colour and reason come from the audit part alone. A
+		// caller that needs only those asks for part=audit and skips Loki,
+		// so a slow or unreachable Loki cannot delay the decision of record.
+		if r.URL.Query().Get("part") == "audit" {
+			writeJSON(w, http.StatusOK, out)
+			return
+		}
+
 		entries, err := lokiDecisionsForTrace(r.Context(), cfg, txID, since)
 		if err != nil {
 			out.Engine.Error = err.Error()

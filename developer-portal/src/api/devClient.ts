@@ -82,8 +82,14 @@ export type PdpDecisions = {
   engine: { decisions: EngineDecision[]; error?: string }
 }
 
-export async function fetchDecisions(transactionId: string): Promise<PdpDecisions> {
-  const res = await fetch(`${BASE}/decisions?transaction_id=${encodeURIComponent(transactionId)}`)
+// fetchDecisions loads both parts. With `auditOnly` the backend skips Loki,
+// so a slow or unreachable Loki cannot delay the decision of record.
+export async function fetchDecisions(
+  transactionId: string,
+  opts: { auditOnly?: boolean } = {},
+): Promise<PdpDecisions> {
+  const part = opts.auditOnly ? '&part=audit' : ''
+  const res = await fetch(`${BASE}/decisions?transaction_id=${encodeURIComponent(transactionId)}${part}`)
   if (!res.ok) throw new Error(`fetchDecisions failed: ${res.status}`)
   const body = (await res.json()) as Partial<PdpDecisions>
   return {

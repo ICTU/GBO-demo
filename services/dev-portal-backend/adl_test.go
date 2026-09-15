@@ -168,6 +168,30 @@ func TestDecisionsReportsAnUnconfiguredADL(t *testing.T) {
 	}
 }
 
+// part=audit answers from the ADL without touching Loki, so the decision of
+// record does not wait on an observability store.
+func TestDecisionsAuditPartSkipsLoki(t *testing.T) {
+	loki := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("part=audit queried Loki")
+	}))
+	defer loki.Close()
+	adl := &fakeADL{records: []adlRecord{{EventName: "adl.access_evaluation", Decision: ptr(true)}}}
+	cfg := config{VarDir: t.TempDir(), PredefinedDir: t.TempDir(), LokiURL: loki.URL}
+	srv := httptest.NewServer(newMux(cfg, newTraceHub(time.Minute), adl))
+	defer srv.Close()
+
+	status, out := getDecisions(t, srv, "?transaction_id=tx-1&part=audit")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	if len(out.Audit.Records) != 1 {
+		t.Errorf("audit records = %d, want 1", len(out.Audit.Records))
+	}
+	if len(out.Engine.Decisions) != 0 || out.Engine.Error != "" {
+		t.Errorf("engine = %+v, want an untouched empty part", out.Engine)
+	}
+}
+
 func TestDecisionsRequiresATransactionID(t *testing.T) {
 	cfg := config{VarDir: t.TempDir(), PredefinedDir: t.TempDir()}
 	srv := httptest.NewServer(newMux(cfg, newTraceHub(time.Minute), nil))
