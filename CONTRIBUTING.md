@@ -24,9 +24,8 @@ Before opening a PR:
    # Go lint + tests per service
    cd services/<name> && go test ./...
 
-   # Rego format + tests
-   docker run --rm -v $(pwd)/policies:/w -w /w openpolicyagent/opa:1.9.0-static fmt --diff /w
-   docker run --rm -v $(pwd)/policies:/w -w /w openpolicyagent/opa:1.9.0-static test /w -v
+   # Rego compile check, format diff + tests (same image as CI)
+   make policy-test
 
    # Frontend type-check
    cd <frontend> && npx tsc --noEmit
