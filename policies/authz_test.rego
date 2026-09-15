@@ -40,7 +40,8 @@ test_source_metadata_wrong_path_denied if {
 # The metadata rule must not widen into the data path. An allowed metadata
 # peer making a GraphQL request falls through to the rule-engine, which
 # denies it on the evidence like any other request — the metadata branch
-# does not short-circuit it to allow.
+# does not short-circuit it to allow. It carries no consent token and names
+# no subject, so the engine judges it a PID-regime request without a subject.
 test_graphql_request_from_metadata_peer_falls_through_to_engine if {
 	input_doc := {
 		"subject": {"id": "99999999900000000100", "type": "identity"},
@@ -61,5 +62,5 @@ test_graphql_request_from_metadata_peer_falls_through_to_engine if {
 	}
 	not authz.allow with input as input_doc
 	reason := authz.reason with input as input_doc
-	reason == "CONSENT_CONTEXT_INVALID"
+	reason == "PID_NOT_PRESENT"
 }

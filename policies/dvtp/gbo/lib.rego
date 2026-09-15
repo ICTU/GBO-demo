@@ -169,29 +169,38 @@ _check_constraint(spec, ctx) := step if {
 	step := _step("CONSTRAINT_MISMATCH", "Constraint-binding satisfied", sprintf("%s == resource.%s", [first.arg, first.resource_field]), "fail")
 } else := _step_skipped("CONSTRAINT_MISMATCH", "Constraint-binding satisfied", "no constraint configured")
 
-# EUDI-flow: validate that the adapter provided a subject from the
-# wallet's PID-disclosure. In V1 the adapter itself performs no crypto-
-# check on the PID-signature. This axis only checks presence + minimal
-# shape.
+# PID regime: the request carries no consent token, and it names a subject.
+# The EUDI adapter sends the BSN from the wallet's PID disclosure as it is,
+# in the source-declared subject variable (`subject_variable` in the source
+# metadata, `vars.bsn` in the resolved arguments). In V1 nothing verifies
+# the PID itself — the adapter trusts the disclosure — so this axis asserts
+# only that the request is about someone and is not a consent request.
 #
-# The subject arrives as a PI, not as a BSN: the request-mapper resolves
-# the disclosed BSN through BSNk and gives the engine only the
-# pseudonymous identity. No rule reads the value — this axis asserts
-# that a PID was disclosed, and DVT0001's constraint-binding compares PI
-# against PI — so the engine, and everything that reads its decision
-# log, has no reason to hold a BSN.
+# The consent half keeps the regimes apart. pip.consent is present exactly
+# when the request carried a consent token, verified or not, and both
+# regimes name a subject, so without it this axis would pass on every
+# consent-based request as well. A rule can name a different subject
+# variable with `subject_variable` in its spec.
 _check_pid_present(spec, ctx) := step if {
 	spec.pid_required
-	pi := object.get(object.get(ctx.pip, "pid", {}), "pi", "")
-	pi != ""
-	regex.match("^PI-[0-9a-f]{16}$", pi)
-	step := _step("PID_NOT_PRESENT", "PID disclosed by wallet", "input.context.pip.pid.pi ~ /^PI-[0-9a-f]{16}$/", "pass")
+	_pid_regime(spec, ctx)
+	step := _step("PID_NOT_PRESENT", _pid_label, _pid_expected(spec), "pass")
 } else := step if {
 	spec.pid_required
-	pi := object.get(object.get(ctx.pip, "pid", {}), "pi", "")
-	not regex.match("^PI-[0-9a-f]{16}$", pi)
-	step := _step("PID_NOT_PRESENT", "PID disclosed by wallet", "input.context.pip.pid.pi ~ /^PI-[0-9a-f]{16}$/", "fail")
-} else := _step_skipped("PID_NOT_PRESENT", "PID disclosed by wallet", "n/a (no PID-flow)")
+	not _pid_regime(spec, ctx)
+	step := _step("PID_NOT_PRESENT", _pid_label, _pid_expected(spec), "fail")
+} else := _step_skipped("PID_NOT_PRESENT", _pid_label, "n/a (no PID-flow)")
+
+_pid_label := "PID regime: no consent token, subject named"
+
+_pid_subject_key(spec) := sprintf("vars.%s", [object.get(spec, "subject_variable", "bsn")])
+
+_pid_expected(spec) := sprintf("no input.context.pip.consent, and %s in the query", [_pid_subject_key(spec)])
+
+_pid_regime(spec, ctx) if {
+	object.get(object.get(ctx, "pip", {}), "consent", null) == null
+	object.get(object.get(ctx, "args", {}), _pid_subject_key(spec), "") != ""
+}
 
 # Scope-authorization: only active when the rule explicitly declares an
 # allowed_scopes set. Without this axis a rule would only be scoped via

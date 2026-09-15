@@ -46,6 +46,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- **The PDP's request-mapper only maps.** It no longer calls BSNk and no longer
+  rewrites the subject identifier; what remains is GraphQL mapping and consent-token
+  verification ([#364](https://github.com/ICTU/GBO-demo/issues/364)).
+  - The EUDI flow keeps sending the plain BSN it reads from the wallet's PID
+    disclosure. The mapper used to pseudonymise it through BSNk `/pseudonymize`
+    during evaluation, only to keep it out of the policy input — no rule ever read
+    the resulting PI. `pseudonymizeBSN`, `bsnkURL`, the identifier rewriting and
+    `GBO_BSNK_URL` are gone, and with them the case where a BSNk outage surfaced as
+    the policy reason `PID_NOT_PRESENT`.
+  - **Plain BSNs now reach both PDP decision logs:** OpenFTV's ADL in Postgres, and
+    the console log in Loki that the developer portal reads. That is accepted for the
+    demo, and reverses the guarantee from July's review and #363's scrubbing. Whether
+    to mask the logs or transform the value first is
+    [#368](https://github.com/ICTU/GBO-demo/issues/368).
+  - The EUDI rules' basis check reads the request itself: *no consent token was
+    presented, and the query names a subject* (`vars.bsn`, the source-declared subject
+    variable). It used to match the shape of the PI the mapper got back, which proved
+    only that BSNk answered — bsnk-mock answers for any string.
+  - `AMBIGUOUS_EVIDENCE` is gone. With the PID regime defined as the absence of a
+    consent token, a request can no longer carry evidence for both.
 - **LDV records take the caller's trace over instead of the FSC transaction
   id** (#365). `ldv-client` reads `traceparent` before `Fsc-Transaction-Id`,
   as LDV §3.3.1 and the ADL require; the transaction id is the fallback for a
@@ -109,13 +129,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     does not fit the request passes nothing, since every axis ahead of its basis
     check is skipped and the basis check itself fails. All five reasons are
     unchanged from the dispatch's behaviour. When depth cannot separate the
-    rules — every one passed nothing, as a failed enrichment produces — the
-    regime the request-mapper attempted breaks the tie, so a PID request whose
-    BSN could not be pseudonymised still surfaces `PID_NOT_PRESENT`.
-  - A request carrying **both** a verified consent and a disclosed PID is denied with
-    `AMBIGUOUS_EVIDENCE`. Without the guard the engine would have resolved it by rule
-    ordering — `_evaluate_field` grants on the first rule that returns true — which is
-    precedence, not a decision.
+    rules — every one passed nothing — the regime the request is under breaks
+    the tie: a consent token puts it under the consent regime, and its absence
+    under the PID regime.
   - The request-mapper selects the consent regime on a consent token and falls through
     to the PID regime otherwise. A subject variable cannot discriminate: both regimes
     carry one, a PI under `subject_id_type=pseudonym` and a raw BSN under `direct`, and
@@ -124,10 +140,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     rule's `allowed_actors`; a test asserts that whitelist stays disjoint from the
     consent-based consumers, because an OIN in both could skip the citizen's consent by
     omitting the header. `flowFromHeaders`, `isEUDIFlow` and the FSC-token property
-    reader are removed. Identifier scrubbing does not depend on the regime: under
-    a consent token the subject variable is kept only when it is the verified
-    consent's own PI and blanked otherwise, so a consent header — valid or not —
-    cannot carry a raw BSN into OPA's input or its decision log.
+    reader are removed.
   - The source-metadata path keeps subject, method and endpoint as its gate. The PDP
     cannot see which FSC service a request arrived on, so this admits one case it did
     not before: a permitted OIN, on a contract other than the metadata one, issuing

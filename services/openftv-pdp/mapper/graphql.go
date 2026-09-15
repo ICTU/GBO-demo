@@ -12,14 +12,14 @@ package mapping
 //   - context.trace_id  — Fsc-Transaction-Id (falls back to X-Request-Id).
 //   - context.fsc       — {transaction_id}.
 //   - context.pip       — {consent} when the request carries a consent
-//     token, {pid: {pi}} otherwise. Never the BSN; see pseudonymizeBSN.
+//     token; absent otherwise.
 //
 // The authorization regime is derived from the evidence on the request,
 // not from a grant property: a consent token selects the consent regime,
-// its absence the PID regime. Neither is trusted on its face — the token
-// is verified here, and every rule re-checks its own basis and fails
-// closed. A request carrying both is denied by the engine
-// (AMBIGUOUS_EVIDENCE) rather than resolved by precedence.
+// its absence the PID regime. The token is verified here; everything else
+// about the request, the subject identifier included, reaches the policy
+// as it was sent (#364). Every rule re-checks its own basis and fails
+// closed.
 
 import (
 	"context"
@@ -85,73 +85,24 @@ func GraphQLToContext(parc *models.PARC, opts ...Option) *models.PARC {
 	ctx.AddAttributeKV("resource", resource)
 	ctx.AddAttributeKV("resolved", walkQuery(query, variables))
 
-	subject, _ := variables["bsn"].(string)
-
 	// The regime follows from the evidence the request carries, not from a
-	// property somebody declared (#334). Only one signal can be read here,
-	// before any rule runs: a consent token. It is positive, unforgeable
-	// evidence — fetchConsent verifies signature, issuer, audience and
-	// expiry — so its presence selects the consent regime.
+	// property somebody declared (#334). A consent token selects the consent
+	// regime: fetchConsent verifies it — signature, issuer, audience, expiry,
+	// online status — and hands the result to the policy as pip.consent.
+	// Everything else is the PID regime, entered by the ABSENCE of consent
+	// evidence, which the policy reads from the request itself; this mapper
+	// adds nothing for it (#364). A subject variable cannot discriminate the
+	// two — both regimes carry one — so each EUDI rule's allowed_actors is the
+	// gate on the PID regime, and it must stay disjoint from the consent-based
+	// consumers: policies/dvtp/gbo/engine_test.rego asserts it.
 	//
-	// Everything else falls through to the PID regime. That asymmetry is
-	// deliberate but not free: a subject variable cannot discriminate,
-	// because BOTH regimes carry one (DvTP sends a PI under
-	// subject_id_type=pseudonym, EUDI a raw BSN), and telling them apart by
-	// identifier shape is the guessing this change exists to remove. So the
-	// PID regime is entered by ABSENCE of consent, and the only gate left on
-	// it is each EUDI rule's own allowed_actors whitelist. That whitelist
-	// must stay disjoint from the consent-based consumers — policies/dvtp/
-	// gbo/engine_test.rego asserts it, because an OIN in both could skip
-	// consent simply by omitting this header.
+	// The subject identifier reaches the policy as it was sent: no BSNk call
+	// and no rewriting here. A plain BSN therefore reaches the policy input and
+	// its decision logs; how to keep it out of those is #368.
 	if hasConsentEvidence(headers) {
-		consent := fetchConsent(headers)
-		ctx.AddAttributeKV("pip", map[string]any{"consent": consent})
-		// Scrubbing does not depend on which regime the request claims: the
-		// header decides HOW the subject identifier is made safe, never
-		// WHETHER. The one subject value the consent regime expects is the
-		// verified consent's own PI — fetchConsent sets "pi" only when the
-		// token verified and its status was read — and that value is kept for
-		// DVT0001's constraint binding. Anything else is blanked rather than
-		// pseudonymised: pseudonymising a BSN yields that citizen's PI, which
-		// would then satisfy the binding for a consumer that was never meant
-		// to hold the BSN. Blanked, the binding fails with CONSTRAINT_MISMATCH.
-		verifiedPI, _ := consent["pi"].(string)
-		if subject == verifiedPI {
-			return &models.PARC{Principal: parc.Principal, Action: parc.Action, Resource: parc.Resource, Context: ctx}
-		}
-		return replaceSubject(parc, ctx, query, variables, subject, "")
+		ctx.AddAttributeKV("pip", map[string]any{"consent": fetchConsent(headers)})
 	}
-
-	// PID regime. The BSN stops here. It is needed to reach the bron — the
-	// PEP forwards the original query untouched — but the policy engine
-	// evaluates on a pseudonymous identity, so that is all it is given. On
-	// pseudonymize failure the BSN is scrubbed to "" (fail closed:
-	// PID_NOT_PRESENT), never passed through. pip.pid is set even then: it
-	// records that PID enrichment was attempted, which is what keeps the
-	// deny reason in this regime. A request with no subject variable yields
-	// an empty pi and denies the same way.
-	pi, err := pseudonymizeBSN(subject)
-	if err != nil {
-		pi = ""
-	}
-	ctx.AddAttributeKV("pip", map[string]any{"pid": map[string]any{"pi": pi}})
-	return replaceSubject(parc, ctx, query, variables, subject, pi)
-}
-
-// replaceSubject rewrites the subject identifier everywhere the decision
-// sees it: the context attributes the mapper just set, and the raw body
-// attribute, which is part of the decision-log input too. An empty subject
-// leaves nothing to replace.
-func replaceSubject(parc *models.PARC, ctx *models.AttributeSet, query string, variables map[string]any, from, to string) *models.PARC {
-	if from == "" || from == to {
-		return &models.PARC{Principal: parc.Principal, Action: parc.Action, Resource: parc.Resource, Context: ctx}
-	}
-	substituteContext(ctx, from, to)
-	variables["bsn"] = to
-	newBody, _ := json.Marshal(map[string]any{"query": query, "variables": variables})
-	action := models.NewEntity(parc.Action.Type(), parc.Action.ID(), models.NewAttributeSet(parc.Action.Attributes()))
-	action.Attributes().AddAttributeKV(models.AttrBody, string(newBody))
-	return &models.PARC{Principal: parc.Principal, Action: action, Resource: parc.Resource, Context: ctx}
+	return &models.PARC{Principal: parc.Principal, Action: parc.Action, Resource: parc.Resource, Context: ctx}
 }
 
 // hasConsentEvidence reports whether the request carries a consent token,
@@ -165,84 +116,6 @@ func replaceSubject(parc *models.PARC, ctx *models.AttributeSet, query string, v
 // caller cannot act on.
 func hasConsentEvidence(headers map[string]string) bool {
 	return headers["x-gbo-consent-token"] != ""
-}
-
-// pseudonymizeBSN resolves the wallet-disclosed BSN to a PI via BSNk,
-// so the policy engine (and its decision log, shipped to Loki) never
-// holds the BSN itself. No rule reads the identifier's value: the EUDI
-// rules only assert that a PID was disclosed, and the DvTP rule's
-// constraint-binding compares PI against PI.
-func pseudonymizeBSN(bsn string) (string, error) {
-	if bsn == "" {
-		return "", nil
-	}
-	u := bsnkURL() + "/pseudonymize"
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, strings.NewReader(`{"bsn":"`+bsn+`"}`))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := consentClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("bsnk status %d", resp.StatusCode)
-	}
-	var out struct {
-		PI string `json:"pi"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil || out.PI == "" {
-		return "", fmt.Errorf("bsnk returned no PI")
-	}
-	return out.PI, nil
-}
-
-func bsnkURL() string {
-	if u := os.Getenv("GBO_BSNK_URL"); u != "" {
-		return u
-	}
-	return "http://bsnk-mock:4003"
-}
-
-// substituteContext rewrites every occurrence of `from` to `to` in the
-// context attributes the mapper just set, at JSON value level rather
-// than by string search, so a BSN that happens to be a substring of
-// some other value is left alone. Covers resource.variables and the
-// resolved args (both derived from the query variables).
-func substituteContext(ctx *models.AttributeSet, from, to string) {
-	for _, key := range []string{"resource", "resolved"} {
-		attr := ctx.GetAttribute(key)
-		if attr == nil {
-			continue
-		}
-		ctx.AddAttributeKV(key, substituteValue(attr.Value(), from, to))
-	}
-}
-
-func substituteValue(v any, from, to string) any {
-	switch t := v.(type) {
-	case string:
-		if t == from {
-			return to
-		}
-		return t
-	case map[string]any:
-		for k, val := range t {
-			t[k] = substituteValue(val, from, to)
-		}
-		return t
-	case []any:
-		for i, val := range t {
-			t[i] = substituteValue(val, from, to)
-		}
-		return t
-	default:
-		return v
-	}
 }
 
 // ── Consent PIP (per-request, fail-closed) ─────────────────────────────────

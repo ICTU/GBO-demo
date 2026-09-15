@@ -8,11 +8,11 @@ package dvtp.gbo.rules.eud0001
 # the credential after PID-disclosure (EUDI-flow).
 #
 # Selection: this rule fires on the evidence the request carries, not on a
-# declared flow. pid_required makes it fail closed without a disclosed PID,
-# exactly as DVT0001's consent_required does without a verified consent, so
-# on any real request at most one of the two applies. Both rules cover the
-# same fields; a request carrying BOTH kinds of evidence is denied by the
-# engine with AMBIGUOUS_EVIDENCE rather than resolved by rule ordering.
+# declared flow. pid_required makes it fail closed unless the request is in
+# the PID regime — no consent token, and a subject named — exactly as
+# DVT0001's consent_required does without a verified consent. The two
+# regimes exclude each other by construction, so on any request at most one
+# of the two rules applies, although both cover the same fields.
 #
 # Deliberately NOT in this V1 spec:
 #   - PID-signature verification (adapter trusts BSN from disclosed PID)
