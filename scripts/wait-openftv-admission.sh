@@ -42,6 +42,6 @@ for _ in $(seq 1 "$max_attempts"); do
   sleep 1
 done
 
-reason=$(printf '%s' "$last_response" | jq -r '.context.reasonUser.en // .title // "no response"' 2>/dev/null || echo "no response")
+reason=$(printf '%s' "$last_response" | jq -r '.context.reason_user.en // .title // "no response"' 2>/dev/null || echo "no response")
 echo "OpenFTV did not load the seeded Hypotheek-BV admission within ${max_attempts}s (last result: $reason)" >&2
 exit 1

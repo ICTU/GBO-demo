@@ -118,8 +118,9 @@ services:
       # since v0.1.0 the PDP exits at startup without it, so postgres-ftv
       # runs in every profile rather than only under `manager`. The schema
       # is migrated on startup from the copy embedded in the binary.
-      # NB: this is OpenFTV's ADL, not the embedded OPA console decision log
-      # the dev-portal reads from Loki. Those are independent.
+      # NB: this is OpenFTV's ADL, the authoritative record of each decision.
+      # The embedded OPA's console decision log (stdout, via Loki) is a
+      # separate stream and observability only; the dev-portal shows both.
       - PDP_ADL_PG_URL=postgres://ftv:${FTV_POSTGRES_PASSWORD}@postgres-ftv:5432/ftv_adl?sslmode=disable
       - PDP_ADL_SERVICE_NAME=gbo
       - PDP_LOG_LEVEL=info
@@ -191,6 +192,29 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  # Creates the SELECT-only role the developer portal reads the Authorization
+  # Decision Log with. A one-shot rather than an initdb script: initdb runs
+  # only on an empty volume, this runs on every `up` and is idempotent, so an
+  # existing volume gets the role as well.
+  postgres-ftv-init:
+    image: postgres:16-alpine
+    environment:
+      PGHOST: postgres-ftv
+      PGUSER: ftv
+      PGPASSWORD: ${FTV_POSTGRES_PASSWORD}
+      PGDATABASE: ftv_adl
+      ADL_READER_PASSWORD: ${FTV_ADL_READER_PASSWORD}
+    # No default password: an unset one stops here, rather than leaving the
+    # role with an empty password.
+    command: ["sh", "-c", "test -n \"$$ADL_READER_PASSWORD\" || { echo 'FTV_ADL_READER_PASSWORD is required (see .env.example)' >&2; exit 1; }; psql -v ON_ERROR_STOP=1 -v reader_password=\"$$ADL_READER_PASSWORD\" -f /init/adl-reader.sql"]
+    volumes:
+      - ./services/openftv-manager/adl/adl-reader.sql:/init/adl-reader.sql:ro
+    networks: [backend]
+    depends_on:
+      postgres-ftv:
+        condition: service_healthy
+    restart: "no"
 
   # The PAP+PIP half of OpenFTV (profile: manager). It owns the policies,
   # bundles them, and ships them to every PDP named in
@@ -1027,6 +1051,9 @@ services:
       # policy edits visible without rebuilding it.
       - POLICIES_DIR=/policies
       - RULES_FILE=/rules.json
+      # The Authorization Decision Log, the record of every PDP decision,
+      # read with a SELECT-only role (postgres-ftv-init creates it).
+      - ADL_DATABASE_URL=postgres://adl_reader:${FTV_ADL_READER_PASSWORD}@postgres-ftv:5432/ftv_adl?sslmode=disable
     volumes:
       - dev-portal-var:/var
       - ./services/graphql-server/mockdata:/citizens:ro
@@ -1042,11 +1069,13 @@ services:
       # reached directly over their internal DNS names.
       - fsc-infra
     depends_on:
-      # /decision + /explain read the engine's decision log via Loki —
-      # cold-start without this dependency causes brief 502s until the
-      # engine's healthcheck flips.
+      # /decisions reads the ADL and, for the engine detail, the console
+      # decision log via Loki; cold-start without these dependencies causes
+      # brief errors until the engine's healthcheck flips.
       openftv-pdp:
         condition: service_healthy
+      postgres-ftv-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4007/health"]
       interval: 5s

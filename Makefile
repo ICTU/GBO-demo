@@ -58,9 +58,11 @@ banner = @printf "  %-21s %s://localhost:%s  |  %s://%s:%s\n" "$(1)" "$(or $(3),
 
 # The OpenFTV PDP writes its Authorization Decision Log to postgres-ftv and
 # refuses to start without it, so every profile needs this password — not
-# just `make demo-manager`.
+# just `make demo-manager`. The developer portal reads that log with a
+# SELECT-only role of its own, whose password is required alongside it.
 require-ftv-postgres:
 	@test -n "$(FTV_POSTGRES_PASSWORD)" || (echo "FTV_POSTGRES_PASSWORD is required (see .env.example)" >&2; exit 1)
+	@test -n "$(FTV_ADL_READER_PASSWORD)" || (echo "FTV_ADL_READER_PASSWORD is required (see .env.example)" >&2; exit 1)
 
 up: certs require-ftv-postgres
 	docker compose up --build -d

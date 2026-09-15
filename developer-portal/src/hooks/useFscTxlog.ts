@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { fetchTrace, spanTag } from '../api/jaegerClient'
-import { fetchExplain, fetchFscTxlog, type FscTxlogResponse } from '../api/devClient'
+import { fetchDecisions, fetchFscTxlog, type FscTxlogResponse } from '../api/devClient'
 import type { Tab } from '../types'
 import type { NodeStatus } from '../util/spanMapping'
 
@@ -12,18 +12,16 @@ import type { NodeStatus } from '../util/spanMapping'
 //   1. Fetch the adapter-trace → read the gbo.fsc.transaction_id tag.
 //   2. Fetch /api/dev/fsc/txlog/<uuid> → per FSC-peer a record with
 //      peer-IDs, service, contract-hash and direction.
-//   3. Fetch the PDP decision from the OpenFTV decision log via
-//      /explain?trace_id=<Fsc-Transaction-Id> — the OpenFTV request-
-//      mapper copies Fsc-Transaction-Id into context.trace_id, so the
-//      decision log correlates directly (no more Jaeger cross-trace-
-//      lookup; the OpenFTV PDP has no OTel instrumentation).
+//   3. Fetch the PDP decision via /decisions?transaction_id=<uuid>: the
+//      Authorization Decision Log record of that transaction, which is the
+//      decision of record (the OpenFTV PDP has no OTel instrumentation).
 //   4. Compute node-status overrides for ArchStrip:
 //        - edi-outway / edi-manager: 'green' if edi-peer has records
 //        - bd-inway:                 'green' if bd-peer has records
 //        - pdp / opa:                'green' when decision=true,
 //                                    'red' when false, 'grey' if no
-//                                    decision-log entry was found
-//   5. Also return decisionTraceKey so ArchStrip can point useExplain at
+//                                    ADL record was found
+//   5. Also return decisionTraceKey so ArchStrip can point useDecisions at
 //      the Fsc-Transaction-Id for the PDP-popover.
 //
 // Works for both flows that pass through FSC-Inway (EUDI and DvTP).
@@ -74,26 +72,26 @@ export function useFscTxlog(traceId: string | undefined, mode: Tab): {
         }
         setTransactionId(txID)
 
-        // Parallel: txlog per peer + decision via the decision log.
-        // Backoff-retry: promtail→Loki ingestion lags a few seconds
-        // behind the request, like OTel batching did before.
+        // Txlog per peer, then the decision from the ADL. Backoff-retry:
+        // OpenFTV batches its ADL writes for up to five seconds.
         let decision: boolean | undefined
         let decisionFound = false
         const txlogRes = await fetchFscTxlog(txID)
         if (cancelled) return
         setData(txlogRes)
-        for (const delay of [0, 500, 1000, 1500, 2000]) {
+        for (const delay of [0, 500, 1000, 1500, 2000, 2500]) {
           if (delay > 0) await new Promise((r) => setTimeout(r, delay))
           if (cancelled) return
           try {
-            const decisions = await fetchExplain(txID)
-            if (decisions.length > 0) {
-              decision = decisions[0].result?.decision === true
+            const { audit } = await fetchDecisions(txID)
+            const recorded = audit.records[0]?.decision
+            if (recorded !== undefined) {
+              decision = recorded
               decisionFound = true
               break
             }
           } catch {
-            // no decision-log entry (yet) — retry
+            // no ADL record (yet) — retry
           }
         }
 

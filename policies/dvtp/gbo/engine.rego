@@ -64,7 +64,7 @@ _decision := {"decision": false, "context": {"reason_admin": {"code": "COVERAGE_
 } else := {"decision": false, "context": {"reason_admin": {"code": "NO_APPLICABLE_RULE"}}}
 
 # Demo helper for the dev-portal UI render: per-field evaluations + the
-# args supplied by the context-handler. A production PEP uses only
+# args supplied by the request-mapper. A production PEP uses only
 # `response`.
 view := {
 	"response": response,

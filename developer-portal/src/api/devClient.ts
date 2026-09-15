@@ -45,24 +45,51 @@ export async function logHistory(run: Omit<HistoryRun, 'run_id' | 'ts'>): Promis
   return res.json()
 }
 
-export type OpaExplainDecision = {
+// A record of the Authorization Decision Log: the audit record of a PDP
+// decision. It holds the AuthZEN request and response, so the decision and
+// the reason code of a denial; the engine transports nothing more.
+export type AdlRecord = {
+  timestamp: number
+  trace_id: string
+  span_id: string
+  parent_span_id?: string
+  event_name: string
+  status: string
+  policies: number
+  fsc_transaction_id?: string
+  // Which id found the record: adl.fsc.transaction_id, or the
+  // Fsc-Transaction-Id header in the recorded request while the Inway does
+  // not pass it to the PDP.
+  matched_on: string
+  decision?: boolean
+  reason?: string
+  request?: unknown
+  response?: unknown
+}
+
+// An entry of the embedded OPA's console decision log (Loki), normalised:
+// `result` is the policy's decision document, per-field detail included.
+// Observability, not a record of the decision.
+export type EngineDecision = {
   decision_id?: string
   path?: string
   input?: Record<string, unknown>
   result?: Record<string, unknown>
-  result_replay?: unknown
-  explanation?: string[]
 }
 
-export async function fetchExplain(
-  traceId: string,
-  mode: 'none' | 'fails' | 'full' = 'none',
-): Promise<OpaExplainDecision[]> {
-  const q = mode === 'none' ? '' : `&mode=${mode}`
-  const res = await fetch(`${BASE}/explain?trace_id=${encodeURIComponent(traceId)}${q}`)
-  if (!res.ok) throw new Error(`fetchExplain failed: ${res.status}`)
-  const body = (await res.json()) as { decisions: OpaExplainDecision[] }
-  return body.decisions ?? []
+export type PdpDecisions = {
+  audit: { records: AdlRecord[]; error?: string }
+  engine: { decisions: EngineDecision[]; error?: string }
+}
+
+export async function fetchDecisions(transactionId: string): Promise<PdpDecisions> {
+  const res = await fetch(`${BASE}/decisions?transaction_id=${encodeURIComponent(transactionId)}`)
+  if (!res.ok) throw new Error(`fetchDecisions failed: ${res.status}`)
+  const body = (await res.json()) as Partial<PdpDecisions>
+  return {
+    audit: { records: body.audit?.records ?? [], error: body.audit?.error },
+    engine: { decisions: body.engine?.decisions ?? [], error: body.engine?.error },
+  }
 }
 
 export async function fetchPolicySource(id: string): Promise<{ id: string; raw: string }> {

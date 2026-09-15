@@ -224,7 +224,7 @@ func TestHealthAndEmptyHistory(t *testing.T) {
 		PredefinedDir: t.TempDir(),
 	}
 	hub := newTraceHub(10 * time.Minute)
-	srv := httptest.NewServer(newMux(cfg, hub))
+	srv := httptest.NewServer(newMux(cfg, hub, nil))
 	defer srv.Close()
 
 	// /health
@@ -361,24 +361,24 @@ func TestSlowUpstreamFailsInsteadOfHanging(t *testing.T) {
 	defer func() { upstreamClient = restore }()
 
 	cfg := config{VarDir: t.TempDir(), PredefinedDir: t.TempDir(), LokiURL: slowLoki.URL}
-	srv := httptest.NewServer(newMux(cfg, newTraceHub(10*time.Minute)))
+	srv := httptest.NewServer(newMux(cfg, newTraceHub(10*time.Minute), nil))
 	defer srv.Close()
 
-	done := make(chan int, 1)
+	done := make(chan decisionsResponse, 1)
 	go func() {
-		resp, err := http.Get(srv.URL + "/decision?trace_id=abc123")
-		if err != nil {
-			done <- -1
-			return
+		var out decisionsResponse
+		resp, err := http.Get(srv.URL + "/decisions?transaction_id=abc123")
+		if err == nil {
+			defer resp.Body.Close()
+			_ = json.NewDecoder(resp.Body).Decode(&out)
 		}
-		defer resp.Body.Close()
-		done <- resp.StatusCode
+		done <- out
 	}()
 
 	select {
-	case status := <-done:
-		if status == http.StatusOK {
-			t.Fatalf("slow upstream returned 200; expected a gateway failure")
+	case out := <-done:
+		if out.Engine.Error == "" {
+			t.Fatalf("slow Loki reported no error; expected the engine part to fail")
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("handler hung on an unresponsive upstream: the client has no timeout")
