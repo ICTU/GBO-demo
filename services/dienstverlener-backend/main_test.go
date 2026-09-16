@@ -513,19 +513,13 @@ func TestUseHistoryPostSurvivesHandlerReturn(t *testing.T) {
 	}
 }
 
-// inwayDenial is the body the FSC Inway returns on a policy DENY: RFC9457-ish,
-// with the reason code embedded in `message` and no `reason` field at all.
-// Tests that fake a `{"allowed":false,"reason":...}` body are pinning a
-// contract nothing in the chain produces.
+// inwayDenial is the body the FSC Inway sends on a policy deny.
 func inwayDenial(code string) string {
 	return `{"message":"authorization server denied request: reasonUser-en: ` +
 		code + `; ","source":"inway","code":"UNAUTHORIZED","metadata":null}`
 }
 
-// What a citizen is told rests on denial_code alone. A denial they can act on
-// is named; every other denial, including one carrying a real but
-// administrative policy code, collapses to UNAVAILABLE so the UI cannot
-// mention consent when consent is not the problem.
+// Only a revoked or expired consent is named; every other denial is UNAVAILABLE.
 func TestDvtpQueryDenialCodeIsCitizenSafe(t *testing.T) {
 	tests := map[string]struct {
 		upstreamStatus int
@@ -574,11 +568,9 @@ func TestDvtpQueryDenialCodeIsCitizenSafe(t *testing.T) {
 	}
 }
 
-// A source that cannot be reached is not a consent problem. The citizen must
-// not be pointed at their consent for it, so this path carries a code too
-// rather than leaving the UI to guess from an absent one.
+// A transport failure is not a consent problem.
 func TestDvtpQueryTransportFailureIsNotAConsentProblem(t *testing.T) {
-	// A closed listener: the address is well-formed and refuses connections.
+	// A closed listener refuses connections.
 	dead := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	deadURL := dead.URL
 	dead.Close()
@@ -609,8 +601,7 @@ func TestDvtpQueryTransportFailureIsNotAConsentProblem(t *testing.T) {
 	}
 }
 
-// An allowed query carries no denial code at all: the UI must not have to
-// distinguish "allowed" from "denied for a reason we will not name".
+// An allowed query carries no denial code.
 func TestDvtpQueryAllowedCarriesNoDenialCode(t *testing.T) {
 	outway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

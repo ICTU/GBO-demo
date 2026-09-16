@@ -1,27 +1,15 @@
-// What the citizen is told when their data could not be retrieved.
-//
-// The choice is made by denial_code, which the backend has already judged
-// disclosable (services/dienstverlener-backend/denial.go). This module never
-// looks at `reason`: that is technical text, and a citizen-facing sentence
-// must not depend on prose produced by another component.
-//
-// Anything not named here — an administrative policy denial, a transport
-// failure, a code added upstream after this was written — falls through to
-// one honest message that does not mention consent. Telling someone their
-// consent might be the problem when it is not points them at the one thing
-// they would go and "fix" themselves.
+// Citizen-facing text for a failed retrieval, chosen by denial_code (see
+// services/dienstverlener-backend/denial.go). Anything not named here gets
+// the generic message, which does not mention consent.
 
 export type DenialMessage = {
   title: string
   body: string
-  /** Retrying helps only when the failure could be temporary. */
   retry: boolean
-  /** Granting consent again is the route out. */
   reconsent: boolean
 }
 
-// A Map rather than an object: the code arrives over the network, and a
-// plain object lookup would answer for keys like "constructor".
+// A Map, so network input like "constructor" cannot hit a prototype key.
 const CITIZEN_MESSAGES = new Map<string, DenialMessage>([
   [
     'CONSENT_WITHDRAWN',
@@ -59,5 +47,4 @@ export function denialMessage(code?: string | null): DenialMessage {
   return CITIZEN_MESSAGES.get(code) ?? GENERIC
 }
 
-/** The codes this UI is willing to name. Exported for the tests. */
 export const NAMED_DENIAL_CODES = [...CITIZEN_MESSAGES.keys()]

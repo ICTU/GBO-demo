@@ -2,45 +2,18 @@ package main
 
 import "regexp"
 
-// ── The disclosure boundary for a denial ─────────────────────────────────
-//
-// A denial reaches this backend as free text. The FSC Inway answers 401
-// with an RFC9457-ish body whose `message` carries the policy's reason
-// code embedded in prose ("authorization server denied request:
-// reasonUser-en: CONSENT_WITHDRAWN; "), and older or other upstreams may
-// answer with a bare status and no reason at all.
-//
-// This file is where that prose stops. The backend decides what a citizen
-// may be told; the UI only renders what it is given, and switches on
-// DenialCode — never on Reason, which stays a technical string for logs
-// and for an operator-facing footer.
-//
-// Two rules follow from that split:
-//
-//   - Only codes a citizen can act on are passed through. A revoked or an
-//     expired consent is something they granted and can grant again.
-//     Everything else — ACTOR_NOT_ALLOWED, CONSTRAINT_MISMATCH,
-//     NO_APPLICABLE_RULE — tells a citizen nothing and discloses how the
-//     policy is structured, so it collapses to one honest message.
-//
-//   - An unrecognised code is not disclosable either. A code this backend
-//     does not know is a code whose citizen-safety nobody has judged, so
-//     it collapses too rather than being forwarded on the assumption that
-//     a new code is harmless.
+// This file decides what a citizen may be told about a denied query. The FSC
+// Inway embeds the policy's reason code in the prose of `message`; the UI
+// renders only the DenialCode derived from it. Codes a citizen can act on pass
+// through; everything else, including codes not listed here, becomes
+// DenialCodeUnavailable.
 
-// DenialCodeUnavailable is the catch-all: we could not retrieve the data,
-// and the reason is not the citizen's to act on. Every denial that is not
-// explicitly disclosable becomes this, including transport failures, so
-// the UI has exactly one field to switch on.
+// DenialCodeUnavailable covers every denial that is not disclosable,
+// transport failures included.
 const DenialCodeUnavailable = "UNAVAILABLE"
 
-// policyDenyCodes are the reason codes the GBO policy can produce, per the
-// priority cascade in policies/dvtp/gbo/engine.rego. Membership here means
-// "this backend recognises the code", not "this code may be shown".
-//
-// Keep in step with engine.rego: a code the policy emits but this set omits
-// degrades to DenialCodeUnavailable, which is safe but loses a message the
-// citizen could have acted on.
+// policyDenyCodes mirrors the codes in policies/dvtp/gbo/engine.rego. A code
+// missing here degrades safely to DenialCodeUnavailable.
 var policyDenyCodes = map[string]bool{
 	"ACTOR_NOT_ALLOWED":          true,
 	"CONSENT_ACTOR_MISMATCH":     true,
@@ -63,26 +36,19 @@ var policyDenyCodes = map[string]bool{
 	"YEAR_NOT_COVERED":           true,
 }
 
-// disclosableDenyCodes is the subset a citizen may be shown. Both describe
-// a consent the citizen gave and can give again, so naming them is both
-// actionable and safe. Adding to this set is a disclosure decision.
+// disclosableDenyCodes may be shown to a citizen: both concern a consent they
+// can grant again.
 var disclosableDenyCodes = map[string]bool{
 	"CONSENT_WITHDRAWN": true,
 	"CONSENT_EXPIRED":   true,
 }
 
-// upstreamCodeToken matches a SCREAMING_SNAKE_CASE token. The reason text
-// is not a stable contract — it has already changed shape once upstream —
-// so the code is recovered by looking for known codes anywhere in it
-// rather than by parsing a particular phrasing.
+// upstreamCodeToken finds codes anywhere in the text, because the phrasing
+// around them is not a contract.
 var upstreamCodeToken = regexp.MustCompile(`[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+`)
 
-// policyCodeFrom recovers the policy's reason code from an upstream denial
-// message, or "" when the message carries none this backend recognises.
-//
-// The highest-priority code wins when several appear, matching how
-// engine.rego picks the reason it reports: a message that happens to
-// mention a second code cannot demote the real one.
+// policyCodeFrom returns the known code in reason, or "". When several
+// appear, the engine.rego priority decides.
 func policyCodeFrom(reason string) string {
 	best := ""
 	for _, token := range upstreamCodeToken.FindAllString(reason, -1) {
@@ -96,8 +62,7 @@ func policyCodeFrom(reason string) string {
 	return best
 }
 
-// denyCodePriority mirrors _code_priority in policies/dvtp/gbo/engine.rego.
-// Only the ordering matters here, not the absolute values.
+// denyCodePriority mirrors _code_priority in engine.rego; only the order matters.
 func denyCodePriority(code string) int {
 	switch code {
 	case "CONSENT_SIGNATURE_INVALID":
@@ -139,10 +104,7 @@ func denyCodePriority(code string) int {
 	}
 }
 
-// denialCodeFor turns an upstream denial message into the code the UI may
-// render. Everything that is not explicitly disclosable — an
-// administrative denial, an unrecognised code, a transport failure with no
-// code at all — becomes DenialCodeUnavailable.
+// denialCodeFor returns the code the UI may render for reason.
 func denialCodeFor(reason string) string {
 	if code := policyCodeFrom(reason); disclosableDenyCodes[code] {
 		return code

@@ -24,7 +24,6 @@ type QueryResponse = {
   allowed: boolean
   data?: { data?: { ingeschrevenPersoon?: { heeftBelastingjaarAangifte?: AangifteRow[] } } }
   reason?: string
-  /** What the backend judged safe to tell the citizen. See denialMessage. */
   denial_code?: string
   trace_id?: string
   denied_years?: number[]
@@ -196,9 +195,7 @@ function ErrorPanel({
           {message.reconsent ? '← Opnieuw toestemming geven' : '← Opnieuw beginnen'}
         </Link>
       </div>
-      {/* The trace-id alone. A citizen can quote it to a helpdesk; the policy
-          reason code is operator detail and belongs in the developer portal,
-          not on this screen (#121). */}
+      {/* Trace-id only: the reason code is operator detail (#121). */}
       {traceId && (
         <div className="hb-debug-trace">
           <span>Technische details:</span> trace-id <code>{traceId}</code>

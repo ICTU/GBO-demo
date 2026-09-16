@@ -110,11 +110,9 @@ type queryRequest struct {
 type queryResponse struct {
 	Allowed bool            `json:"allowed"`
 	Data    json.RawMessage `json:"data,omitempty"`
-	// Reason is the technical denial text, for logs and an operator-facing
-	// footer. It is never the basis for what a citizen is told.
+	// Reason is technical text for logs and the developer portal.
 	Reason string `json:"reason,omitempty"`
-	// DenialCode is what the UI switches on: a code this backend has judged
-	// disclosable, or DenialCodeUnavailable. See denial.go for the boundary.
+	// DenialCode is what the UI renders; see denial.go.
 	DenialCode string `json:"denial_code,omitempty"`
 	TraceID    string `json:"trace_id"`
 	// FscTransactionID is the identifier that travels through the FSC
@@ -473,10 +471,7 @@ func handleQuery(cfg config) http.HandlerFunc {
 			return
 		}
 
-		// Two upstream shapes. The FSC Inway answers with an RFC9457-ish
-		// body whose `message` carries the reason; `reason` is the shape a
-		// PDP-fronting proxy returns. Neither is guaranteed to carry one,
-		// so the status stands in when both are empty.
+		// The FSC Inway puts the reason in `message`; other upstreams use `reason`.
 		var denyResp struct {
 			Allowed bool   `json:"allowed"`
 			Reason  string `json:"reason"`
@@ -490,8 +485,6 @@ func handleQuery(cfg config) http.HandlerFunc {
 		if reason == "" {
 			reason = fmt.Sprintf("upstream_error: status %d", proxyResp.StatusCode)
 		}
-		// policyCode is the reason as the policy meant it and belongs in the
-		// log; denialCode is the part the citizen may see.
 		policyCode := policyCodeFrom(reason)
 		denialCode := denialCodeFor(reason)
 		log.Info("query denied",
