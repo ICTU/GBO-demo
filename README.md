@@ -232,6 +232,36 @@ EUDI demo, the disclosed subject is not yet independently cryptographically
 bound to the selected source record before policy evaluation. See
 [SECURITY.md](SECURITY.md) for the security boundary and known limitations.
 
+### What a denial tells the citizen
+
+A denied request carries a policy reason code, and most of those codes are not
+the citizen's to see. `ACTOR_NOT_ALLOWED` or `CONSTRAINT_MISMATCH` tells them
+nothing they can act on and describes how the policy is built.
+
+The disclosure decision therefore sits in one place, on the server:
+`services/dienstverlener-backend/denial.go` maps the upstream reason onto a
+`denial_code`. Only `CONSENT_WITHDRAWN` and `CONSENT_EXPIRED` pass through —
+both describe a consent the citizen gave and can give again. Everything else,
+including an unrecognised code and every transport failure, becomes
+`UNAVAILABLE`.
+
+The consumer frontend renders that code and nothing else
+(`dienstverlener-mock/src/lib/denialMessage.ts`). It never reads `reason`,
+which stays technical text for logs and the developer portal. A code the
+frontend does not know falls through to the generic message rather than being
+shown, so a code added to the policy later cannot surface on a citizen's
+screen by default.
+
+The citizen screen shows the trace-id, which is something to quote to a
+helpdesk, and not the reason code, which is operator detail. The developer
+portal is where the full decision, its reason and the policy path are shown.
+
+One caveat while running this demo: the FSC Inway drops the PDP's reason
+before it reaches the consumer ([OpenFSC #308](https://gitlab.com/rinis-oss/fsc/open-fsc/-/issues/308)),
+so until that fix lands upstream every denial degrades to the generic message.
+The backend handles both cases; the specific messages appear once the Inway
+forwards the reason.
+
 ## Testing
 
 CI runs Go linting and tests, Rego validation and tests, frontend type checks,
