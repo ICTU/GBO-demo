@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { demoSessionHeader } from '../lib/demoSession'
+import { denialMessage } from '../lib/denialMessage'
 import {
   CompletedDossierItems,
   DossierUser,
@@ -23,6 +24,8 @@ type QueryResponse = {
   allowed: boolean
   data?: { data?: { ingeschrevenPersoon?: { heeftBelastingjaarAangifte?: AangifteRow[] } } }
   reason?: string
+  /** What the backend judged safe to tell the citizen. See denialMessage. */
+  denial_code?: string
   trace_id?: string
   denied_years?: number[]
 }
@@ -163,35 +166,42 @@ function Result({
 }
 
 function ErrorPanel({
-  reason,
+  denialCode,
   traceId,
   onRefresh,
   refreshing,
 }: {
-  reason: string
+  denialCode?: string
   traceId?: string
   onRefresh?: () => void
   refreshing?: boolean
 }) {
+  const message = denialMessage(denialCode)
+
   return (
     <div className="hb-card">
-      <h1>Ophalen mislukt</h1>
+      <h1>{message.title}</h1>
+      <p>{message.body}</p>
       <p>
-        We konden uw gegevens nu niet ophalen. Dit kan komen doordat de toestemming is ingetrokken
-        of verlopen.
+        U kunt uw aanvraag afronden door zelf inkomensbewijzen aan te leveren (loonstroken,
+        aangifte).
       </p>
       <div className="hb-actions-row">
-        {onRefresh && (
+        {message.retry && onRefresh && (
           <button className="hb-link" onClick={onRefresh} disabled={refreshing}>
             {refreshing ? 'Bezig…' : '↻ Opnieuw proberen'}
           </button>
         )}
-        <Link to="/" className="hb-link">← Opnieuw beginnen</Link>
+        <Link to="/" className="hb-link">
+          {message.reconsent ? '← Opnieuw toestemming geven' : '← Opnieuw beginnen'}
+        </Link>
       </div>
+      {/* The trace-id alone. A citizen can quote it to a helpdesk; the policy
+          reason code is operator detail and belongs in the developer portal,
+          not on this screen (#121). */}
       {traceId && (
         <div className="hb-debug-trace">
           <span>Technische details:</span> trace-id <code>{traceId}</code>
-          {reason && <> · reden <code>{reason}</code></>}
         </div>
       )}
     </div>
@@ -309,13 +319,9 @@ export default function Return() {
         {denied ? (
           <Denied />
         ) : !consentId || !consentToken ? (
-          <ErrorPanel reason="geen geldige consent-context ontvangen" />
+          <ErrorPanel />
         ) : fetchError ? (
-          <ErrorPanel
-            reason={`netwerkfout: ${fetchError}`}
-            onRefresh={() => runQuery(true)}
-            refreshing={refreshing}
-          />
+          <ErrorPanel onRefresh={() => runQuery(true)} refreshing={refreshing} />
         ) : !response ? (
           <Loading phase={phase} />
         ) : rows ? (
@@ -328,7 +334,7 @@ export default function Return() {
           />
         ) : (
           <ErrorPanel
-            reason={response.reason ?? 'onbekende fout'}
+            denialCode={response.denial_code}
             traceId={response.trace_id}
             onRefresh={() => runQuery(true)}
             refreshing={refreshing}
