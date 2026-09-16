@@ -310,6 +310,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - Brought the repository owner, contact and publiccode metadata in line with
   the ICTU GitHub policy.
 
+### Removed
+- **`sector-pip` is gone (#378).** It served sector membership to the old
+  token issuer and PEP; admission now runs through `dvtp-onboarding-register`
+  and the PDP's contract decision, and nothing called the service any more.
+  Its container, CI jobs, published image, Dependabot entry and
+  `GBO_PORT_SECTOR_PIP` are removed. The developer portal's organisation list
+  moved to `services/dev-portal-backend/organizations.json`, which is now also
+  baked into the backend image, so `ORGANIZATIONS_FILE` defaults to
+  `/organizations.json`.
+
 ### Fixed
 - Confined developer-portal scenario writes and policy-source reads to their
   configured roots, preventing path and symlink traversal.

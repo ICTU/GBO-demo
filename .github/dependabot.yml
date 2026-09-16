@@ -28,7 +28,6 @@ updates:
       - /services/dienstverlener-backend
       - /services/eudi-adapter
       - /services/graphql-server
-      - /services/sector-pip
     schedule:
       interval: weekly
     commit-message:

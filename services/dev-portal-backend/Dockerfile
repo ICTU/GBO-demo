@@ -10,6 +10,7 @@ RUN apk add --no-cache wget
 COPY --from=build /server /server
 COPY services/dev-portal-backend/scenarios /scenarios
 COPY services/dev-portal-backend/rules.json /rules.json
+COPY services/dev-portal-backend/organizations.json /organizations.json
 COPY policies /policies
 EXPOSE 4007
 CMD ["/server"]
