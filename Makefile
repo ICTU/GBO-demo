@@ -1,5 +1,5 @@
-.PHONY: up down logs clean certs require-ftv-postgres demo-manager manager-seed fsc-local-env fsc-ca fsc-up fsc-all-up fsc-brp-certs fsc-databases fsc-down fsc-test fsc-clean \
-        fsc-seed-bri fsc-seed-bri-hv fsc-seed-brp fsc-seed-rvig-source fsc-seed-metadata fsc-pdp-cert pdp-up \
+.PHONY: up down logs clean certs require-ftv-postgres demo-manager manager-seed fsc-local-env fsc-ca fsc-up fsc-all-up fsc-brp-certs fsc-consent-register-certs fsc-gbo-pdp-certs fsc-databases fsc-down fsc-test fsc-clean \
+        fsc-seed-bri fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-brp fsc-seed-rvig-source fsc-seed-metadata fsc-pdp-cert pdp-up \
         eudi-images source-metadata-up \
         require-development-cas provision-development-certificates reconcile-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
         demo-full demo-down eudi-config policy-check policy-test
@@ -153,7 +153,7 @@ manager-seed: policy-check
 	./scripts/seed-openftv-manager.py --url http://localhost:$${GBO_PORT_FTV_MANAGER:-9280}
 	docker compose --profile manager restart openftv-pdp
 
-demo-dvtp: policy-check certs require-ftv-postgres fsc-all-up fsc-seed-bri fsc-seed-bri-hv
+demo-dvtp: policy-check certs require-ftv-postgres fsc-all-up fsc-seed-bri fsc-seed-bri-hv fsc-seed-consent-status
 	@echo "-> DvTP stack: base + dienstverlener + toestemmingsportaal (via real FSC)"
 	docker compose --profile dvtp up --build -d
 	@echo ""
@@ -262,7 +262,7 @@ demo-eudi: policy-check require-ftv-postgres onboard-demo-sources eudi-images
 	$(call banner,EUDI-adapter:,$(PORT_EUDI_ADAPTER))
 	$(call banner,Jaeger:,$(PORT_JAEGER))
 
-demo-full: policy-check require-ftv-postgres onboard-demo-sources fsc-seed-bri-hv eudi-images
+demo-full: policy-check require-ftv-postgres onboard-demo-sources fsc-seed-bri-hv fsc-seed-consent-status eudi-images
 	@echo "-> Full stack: everything on"
 	docker compose --profile full up --build -d
 
@@ -326,6 +326,16 @@ fsc-hv-certs: fsc-up
 		bash fsc-infra/pki/bootstrap-hypotheekverlener.sh; \
 	fi
 
+fsc-consent-register-certs: fsc-up
+	@if [ ! -f fsc-infra/orgs/consent-register/pki/org/consent-register.pem ]; then \
+		bash fsc-infra/pki/bootstrap-consent-register.sh; \
+	fi
+
+fsc-gbo-pdp-certs: fsc-up
+	@if [ ! -f fsc-infra/orgs/gbo-pdp/pki/org/gbo-pdp.pem ]; then \
+		bash fsc-infra/pki/bootstrap-gbo-pdp.sh; \
+	fi
+
 fsc-bd-up: fsc-directory-up fsc-bd-certs fsc-pdp-cert
 	$(MAKE) pdp-up
 	$(FSC_COMPOSE) up --build -d cfssl certportal postgres directory-migrations-controller directory-migrations-manager directory-migrations-txlog-api directory-controller directory-manager directory-inway directory-txlog-api directory-ui bd-migrations-controller bd-migrations-manager bd-migrations-txlog-api bd-controller bd-manager bd-inway bd-txlog-api
@@ -347,7 +357,7 @@ pdp-up: policy-check certs require-ftv-postgres fsc-pdp-cert
 	docker compose up --build -d --wait --force-recreate openftv-pdp
 	./scripts/wait-openftv-admission.sh
 
-fsc-all-up: fsc-directory-certs fsc-edi-certs fsc-bd-certs fsc-brp-certs fsc-hv-certs fsc-pdp-cert
+fsc-all-up: fsc-directory-certs fsc-edi-certs fsc-bd-certs fsc-brp-certs fsc-hv-certs fsc-consent-register-certs fsc-gbo-pdp-certs fsc-pdp-cert
 	$(MAKE) fsc-databases
 	$(MAKE) pdp-up
 	$(FSC_COMPOSE) up --build -d
@@ -373,7 +383,9 @@ fsc-databases: fsc-local-env
 		echo "ERROR: FSC Postgres did not finish initialization" >&2; \
 		exit 1; \
 	fi
-	@for database in fsc_brp_controller fsc_brp_manager fsc_brp_txlog; do \
+	@for database in fsc_brp_controller fsc_brp_manager fsc_brp_txlog \
+		fsc_cr_controller fsc_cr_manager fsc_cr_txlog \
+		fsc_pdp_controller fsc_pdp_manager fsc_pdp_txlog; do \
 		exists=$$($(FSC_COMPOSE) exec -T postgres \
 			psql -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$$database'"); \
 		if [ "$$exists" != "1" ]; then \
@@ -402,6 +414,10 @@ fsc-clean:
 	rm -f fsc-infra/orgs/brp-mock/pki/internal/*.pem
 	rm -f fsc-infra/orgs/hypotheekverlener-mock/pki/org/*.pem
 	rm -f fsc-infra/orgs/hypotheekverlener-mock/pki/internal/*.pem
+	rm -f fsc-infra/orgs/consent-register/pki/org/*.pem
+	rm -f fsc-infra/orgs/consent-register/pki/internal/*.pem
+	rm -f fsc-infra/orgs/gbo-pdp/pki/org/*.pem
+	rm -f fsc-infra/orgs/gbo-pdp/pki/internal/*.pem
 	rm -f services/openftv-pdp/certs/*.pem
 
 # Contract-seed: register bri-service + publication + connection contract
@@ -430,6 +446,35 @@ fsc-seed-bri-hv: fsc-local-env
 		-w /work \
 		gbo-demo/pki-tools:local \
 		bash scripts/seed-bri-connection-hv.sh
+
+# The PDP asks the consent register for a consent's status over FSC (#383):
+# the register's peer publishes consent-status (its status-only listener),
+# the PDP's peer connects to it, and a grant-link on the PDP's Outway lets
+# the policy address it as /consent-status. The register's Manager signs the
+# connection only for peers admitted to it in the onboarding register.
+fsc-seed-consent-status: fsc-local-env
+	docker run --rm \
+		--network $(FSC_INFRA_NETWORK) \
+		--env-file fsc-infra/.env \
+		-e SERVICE_NAME=consent-status \
+		-e SERVICE_ENDPOINT_URL=http://consent-register:4012 \
+		-e SERVICE_INWAY_ADDRESS=https://cr-inway:443 \
+		-e PROVIDER_PEER_ID=99999999900000000700 \
+		-e PROVIDER_CONTROLLER_URL=https://cr-controller:9444 \
+		-e PROVIDER_MANAGER_URL=https://cr-manager:9443 \
+		-e PROVIDER_INTERNAL_DIR=/work/orgs/consent-register/pki/internal \
+		-e CONSUMER_PEER_ID=99999999900000000800 \
+		-e CONSUMER_MANAGER_URL=https://pdp-manager:9443 \
+		-e CONSUMER_INTERNAL_DIR=/work/orgs/gbo-pdp/pki/internal \
+		-e CONSUMER_ORG_CERT=/work/orgs/gbo-pdp/pki/org/gbo-pdp.pem \
+		-e CONSUMER_CONTROLLER_DB=fsc_pdp_controller \
+		-e GRANT_PROPERTIES='{}' \
+		-e GRANT_LINK_PATH=/consent-status \
+		-e OUTWAY_NAME=PdpOutway-01 \
+		-v $(PWD)/fsc-infra:/work:ro \
+		-w /work \
+		gbo-demo/pki-tools:local \
+		bash scripts/seed-bri-contract.sh
 
 # BRP/RvIG is a separate local FSC provider peer (Peer ID ...0400), with its own
 # Manager, Controller, Inway and contracts.

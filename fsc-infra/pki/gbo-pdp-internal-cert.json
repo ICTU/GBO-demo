@@ -1,0 +1,19 @@
+{
+  "CN": "gbo-pdp-internal",
+  "hosts": [
+    "pdp-controller",
+    "pdp-manager",
+    "pdp-outway",
+    "pdp-txlog-api"
+  ],
+  "key": {
+    "algo": "rsa",
+    "size": 4096
+  },
+  "names": [
+    {
+      "C": "NL",
+      "O": "GBO-DEMO PDP Internal"
+    }
+  ]
+}

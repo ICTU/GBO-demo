@@ -62,7 +62,10 @@ const shutdownTimeout = 15 * time.Second
 const ldvDeliveryInterval = 2 * time.Second
 
 type config struct {
-	Port           string
+	Port string
+	// StatusPort is the listener published as an FSC service; it serves
+	// only the status lookup (status.go).
+	StatusPort     string
 	SigningKeyPath string
 	SigningKeyID   string
 	TokenIssuer    string
@@ -72,6 +75,7 @@ type config struct {
 func loadConfig() (config, error) {
 	cfg := config{
 		Port:           getEnv("PORT", "4002"),
+		StatusPort:     getEnv("STATUS_PORT", "4012"),
 		SigningKeyPath: os.Getenv("CONSENT_SIGNING_KEY_PATH"),
 		SigningKeyID:   getEnv("CONSENT_SIGNING_KEY_ID", "gbo-consent-demo-1"),
 		TokenIssuer:    getEnv("CONSENT_TOKEN_ISSUER", "https://consent-register.gbo.test"),
@@ -489,8 +493,7 @@ func handleConsents(store ConsentStore, issuer *ConsentIssuer, logbook *register
 	}
 }
 
-// handleConsentByID serves a single consent: its status, its detail, and its
-// revocation.
+// handleConsentByID serves a single consent: its detail and its revocation.
 func handleConsentByID(store ConsentStore, logbook *registerLogbook) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now().UTC()
@@ -506,40 +509,10 @@ func handleConsentByID(store ConsentStore, logbook *registerLogbook) http.Handle
 			return
 		}
 
-		if strings.HasSuffix(id, "/status") {
-			if r.Method != http.MethodGet {
-				writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
-				return
-			}
-			consentID := strings.TrimSuffix(id, "/status")
-			c, ok, err := store.Get(r.Context(), consentID)
-			if err != nil {
-				slog.Error("get consent status", "err", err.Error())
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not get consent status"})
-				return
-			}
-			if !ok {
-				writeJSON(w, http.StatusNotFound, map[string]string{"error": "consent not found"})
-				return
-			}
-			// The PDP asks this on every request. Confirming a consent's
-			// status is a processing of that Betrokkene's data, and it is the
-			// step that makes a revocation take effect — so it is logged like
-			// any other, not treated as a read-only lookup.
-			if err := logbook.logConsentOperation(r.Context(), store, r,
-				consentStatusActivity, "dataverwerking.toestemming-status",
-				c.SubjectRef, start, http.StatusOK,
-				map[string]any{
-					"dpl.gbo.consentId": c.ConsentID,
-				}); err != nil {
-				refuseUnlogged(w)
-				return
-			}
-
-			writeJSON(w, http.StatusOK, map[string]any{
-				"consent_id": c.ConsentID,
-				"status":     c.Status,
-			})
+		// The status lookup is not served here: it has a listener of its own,
+		// reached over FSC (status.go).
+		if strings.Contains(id, "/") {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 			return
 		}
 
@@ -649,24 +622,32 @@ func main() {
 		slog.Warn("no LDV_LOGBOOK_URL configured; this register writes no Logboek Dataverwerkingen records")
 	}
 
-	srv := &http.Server{
-		Addr:              ":" + cfg.Port,
-		Handler:           otelhttp.NewHandler(withAccessLog(newMux(store, issuer, logbook)), serviceName),
-		ReadHeaderTimeout: readHeaderTimeout,
-	}
-	serve(srv)
+	serve(
+		&http.Server{
+			Addr:              ":" + cfg.Port,
+			Handler:           otelhttp.NewHandler(withAccessLog(newMux(store, issuer, logbook)), serviceName),
+			ReadHeaderTimeout: readHeaderTimeout,
+		},
+		&http.Server{
+			Addr:              ":" + cfg.StatusPort,
+			Handler:           otelhttp.NewHandler(withAccessLog(newStatusMux(store, logbook)), serviceName),
+			ReadHeaderTimeout: readHeaderTimeout,
+		},
+	)
 }
 
-// serve runs the server until the process is asked to stop, then drains it.
-// Without this a SIGTERM (docker compose down, a Kubernetes rollout) killed
-// in-flight requests outright.
-func serve(srv *http.Server) {
-	go func() {
-		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
-			fatal("listen and serve", err)
-		}
-	}()
-	slog.Info("listening", "addr", srv.Addr)
+// serve runs the servers until the process is asked to stop, then drains
+// them. Without this a SIGTERM (docker compose down, a Kubernetes rollout)
+// killed in-flight requests outright.
+func serve(servers ...*http.Server) {
+	for _, srv := range servers {
+		go func() {
+			if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+				fatal("listen and serve", err)
+			}
+		}()
+		slog.Info("listening", "addr", srv.Addr)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -676,8 +657,10 @@ func serve(srv *http.Server) {
 	slog.Info("shutting down")
 	drainCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
-	if err := srv.Shutdown(drainCtx); err != nil {
-		slog.Warn("drain did not finish; closing remaining connections", "err", err.Error())
-		_ = srv.Close()
+	for _, srv := range servers {
+		if err := srv.Shutdown(drainCtx); err != nil {
+			slog.Warn("drain did not finish; closing remaining connections", "addr", srv.Addr, "err", err.Error())
+			_ = srv.Close()
+		}
 	}
 }

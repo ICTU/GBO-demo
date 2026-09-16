@@ -1,0 +1,19 @@
+{
+  "CN": "consent-register-internal",
+  "hosts": [
+    "cr-controller",
+    "cr-manager",
+    "cr-inway",
+    "cr-txlog-api"
+  ],
+  "key": {
+    "algo": "rsa",
+    "size": 4096
+  },
+  "names": [
+    {
+      "C": "NL",
+      "O": "GBO-DEMO Toestemmingsregister Internal"
+    }
+  ]
+}

@@ -55,6 +55,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- **The PDP asks a consent's status over FSC
+  ([#383](https://github.com/ICTU/GBO-demo/issues/383)).** Until now anyone who
+  could reach the consent register and knew a `consent_id` got its status.
+  - The register serves the status lookup on a listener of its own
+    (`STATUS_PORT`, 4012), and serves nothing else there: an Inway forwards
+    every path under a service's endpoint, so sharing the portal's listener
+    would have published the citizen's consents over FSC as well. The portal's
+    listener no longer answers `/consents/{id}/status`.
+  - A lookup without an FSC peer in `Fsc-Authorization` gets a 401. The LDV
+    record's `processor` is that peer.
+  - Two new FSC peers: the consent register (`…0700`, `cr-*`, an Inway) and
+    the shared PDP (`…0800`, `pdp-*`, an Outway). The register's Manager signs
+    a connection only for a peer admitted to it in the onboarding register,
+    which admits the PDP's peer and nothing else. `make fsc-seed-consent-status`
+    seeds the service, the contracts and the Outway's `/consent-status`
+    grant-link; `make demo-dvtp` and `make demo-full` run it.
+  - The policy fetches the JWKS from the register directly
+    (`GBO_CONSENT_URL`) and the status through the Outway
+    (`GBO_CONSENT_STATUS_URL`).
+  - The contract is the authorization: any connected peer may ask the status
+    of a consent whose id it holds. Whether it is the PDP of the consent's
+    source is not checked.
+  - Existing local FSC environments need `make fsc-databases` (or a new
+    volume) for the new peers' databases; `make fsc-all-up` runs it.
 - **The Authorization Decision Log is the audit source for authorization
   decisions, and the developer portal reads it**
   ([#332](https://github.com/ICTU/GBO-demo/issues/332)). The ADL record holds

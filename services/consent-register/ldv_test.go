@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -32,6 +33,47 @@ func registerUnderTest(t *testing.T, logbook *ldvtest.Logbook) (string, ConsentS
 	server := httptest.NewServer(newMux(store, issuer, client))
 	t.Cleanup(server.Close)
 	return server.URL, store, client
+}
+
+// statusUnderTest serves the status listener over the same store and
+// logbook as the register the test already runs.
+func statusUnderTest(t *testing.T, store ConsentStore, client *registerLogbook) string {
+	t.Helper()
+	server := httptest.NewServer(newStatusMux(store, client))
+	t.Cleanup(server.Close)
+	return server.URL
+}
+
+// testPDPPeer is the FSC peer the status lookups in these tests come from.
+const testPDPPeer = "99999999900000000500"
+
+// fscAuthorization is the Fsc-Authorization header an Inway forwards: a
+// token for the connecting peer. Only its payload is read on this side.
+func fscAuthorization(t *testing.T, peer string) string {
+	t.Helper()
+	payload, err := json.Marshal(map[string]any{"sub": peer, "iss": "99999999900000000100"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return "Bearer header." + base64.RawURLEncoding.EncodeToString(payload) + ".signature"
+}
+
+// getStatus asks the status listener, as the given peer when it is not empty.
+func getStatus(t *testing.T, statusURL, consentID, peer string) *http.Response {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodGet, statusURL+"/consents/"+consentID+"/status", nil)
+	if err != nil {
+		t.Fatalf("build status request: %v", err)
+	}
+	if peer != "" {
+		request.Header.Set("Fsc-Authorization", fscAuthorization(t, peer))
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	t.Cleanup(func() { _ = response.Body.Close() })
+	return response
 }
 
 // drain delivers everything the outbox holds, so the fake logbook sees it.
@@ -124,11 +166,7 @@ func TestStatusAndRevocationAreLogged(t *testing.T) {
 
 	consentID := grant(t, url)
 
-	response, err := http.Get(url + "/consents/" + consentID + "/status")
-	if err != nil {
-		t.Fatalf("status: %v", err)
-	}
-	_ = response.Body.Close()
+	response := getStatus(t, statusUnderTest(t, store, client), consentID, testPDPPeer)
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("status endpoint = %d", response.StatusCode)
 	}
@@ -148,8 +186,13 @@ func TestStatusAndRevocationAreLogged(t *testing.T) {
 
 	drain(t, client, store)
 	records := logbook.Written()
-	if len(ldvtest.ByName(records, "dataverwerking.toestemming-status")) != 1 {
-		t.Errorf("expected one status record, got %+v", records)
+	statuses := ldvtest.ByName(records, "dataverwerking.toestemming-status")
+	if len(statuses) != 1 {
+		t.Fatalf("expected one status record, got %+v", records)
+	}
+	// The processor is the peer that asked, as the Inway vouched for it.
+	if got, want := statuses[0].Attributes[ldv.AttrForeignOperationProcessor], ldv.DefaultPeerURIBase+"/"+testPDPPeer; got != want {
+		t.Errorf("processor = %v, want %s", got, want)
 	}
 	revocations := ldvtest.ByName(records, "dataverwerking.toestemming-intrekken")
 	if len(revocations) != 1 {
@@ -297,13 +340,9 @@ func (f *failingStore) Create(context.Context, *Consent, []byte) error {
 // A status query for a consent that does not exist touched nobody's data.
 func TestAMissingConsentLogsNothing(t *testing.T) {
 	logbook := ldvtest.New(t, allGBOActivities()...)
-	url, store, client := registerUnderTest(t, logbook)
+	_, store, client := registerUnderTest(t, logbook)
 
-	response, err := http.Get(url + "/consents/c-does-not-exist/status")
-	if err != nil {
-		t.Fatalf("status: %v", err)
-	}
-	_ = response.Body.Close()
+	response := getStatus(t, statusUnderTest(t, store, client), "c-does-not-exist", testPDPPeer)
 	if response.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", response.StatusCode)
 	}

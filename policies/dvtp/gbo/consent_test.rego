@@ -30,6 +30,9 @@ _jwks := {"keys": [object.remove(_register_key, ["d"])]}
 
 _register := "http://consent-register:4002"
 
+# The status goes over FSC, through this PDP's Outway (#383).
+_outway := "http://pdp-outway:8080/consent-status"
+
 # The runtime environment, pinned: tests use the defaults, whatever the
 # shell running them exports.
 _env := {"env": {}}
@@ -98,7 +101,7 @@ _keys(req) := {"status_code": 200, "body": _jwks} if {
 _status(req, status) := {"status_code": 200, "body": {"consent_id": "c-signed", "status": status}} if {
 	_well_formed(req)
 	_uncached(req)
-	req.url == sprintf("%s/consents/c-signed/status", [_register])
+	req.url == sprintf("%s/consents/c-signed/status", [_outway])
 }
 
 _network_error := {"status_code": 0, "error": {"code": "eval_http_send_network_error", "message": "dial tcp: connection refused"}}
@@ -118,7 +121,7 @@ _register_unknown_status(req) := _status(req, "SUSPENDED")
 _register_consent_unknown(req) := _keys(req)
 
 _register_consent_unknown(req) := {"status_code": 404, "body": {"error": "consent not found"}} if {
-	req.url == sprintf("%s/consents/c-signed/status", [_register])
+	req.url == sprintf("%s/consents/c-signed/status", [_outway])
 }
 
 # The register is gone: every call fails at the network.
@@ -202,6 +205,17 @@ test_status_request_is_uncached_and_bounded if {
 	count({"cache", "force_cache"} & object.keys(req)) == 0
 	req.raise_error == false
 	req.timeout == "2s"
+}
+
+test_status_request_goes_through_the_outway if {
+	req := consent._status_request with input as _input(_token) with opa.runtime as _env
+	req.url == sprintf("%s/consents/c-signed/status", [_outway])
+}
+
+# The keys are public and come from the register itself, not over FSC.
+test_keys_come_from_the_register_directly if {
+	req := consent._jwks_request with opa.runtime as _env
+	req.url == sprintf("%s/.well-known/jwks.json", [_register])
 }
 
 test_status_request_carries_the_transaction_id if {

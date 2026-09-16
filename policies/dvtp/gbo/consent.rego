@@ -29,8 +29,14 @@ package dvtp.gbo.consent
 # The status is only asked for once the token verified, so a forged token
 # never reaches the register, and never creates a Dataverwerking there.
 #
-# Configuration is the operator's: GBO_CONSENT_URL, GBO_CONSENT_ISSUER and
-# GBO_CONSENT_AUDIENCE from the PDP's environment, defaulting to the demo
+# The keys and the status travel differently (#383). The JWKS is public and
+# fetched from the register directly. The status is asked over FSC: through
+# this PDP's Outway, under the grant-link for the register's consent-status
+# service, and the register answers only a peer the Inway authenticated.
+#
+# Configuration is the operator's: GBO_CONSENT_URL (the register, for the
+# JWKS), GBO_CONSENT_STATUS_URL (the Outway's grant-link), GBO_CONSENT_ISSUER
+# and GBO_CONSENT_AUDIENCE from the PDP's environment, defaulting to the demo
 # deployment.
 #
 # The cost, weighed in #330: a decision is no longer a pure function of
@@ -59,6 +65,7 @@ _setting(name, fallback) := value if {
 
 config := {
 	"url": _setting("GBO_CONSENT_URL", "http://consent-register:4002"),
+	"status_url": _setting("GBO_CONSENT_STATUS_URL", "http://pdp-outway:8080/consent-status"),
 	"issuer": _setting("GBO_CONSENT_ISSUER", "https://consent-register.gbo.test"),
 	"audience": _setting("GBO_CONSENT_AUDIENCE", "gbo:dvtp:pdp"),
 }
@@ -213,7 +220,7 @@ _failure(code, reason) := {"code": code, "reason": reason}
 
 _status_request := {
 	"method": "GET",
-	"url": sprintf("%s/consents/%s/status", [config.url, urlquery.encode(_claims.consent_id)]),
+	"url": sprintf("%s/consents/%s/status", [config.status_url, urlquery.encode(_claims.consent_id)]),
 	"timeout": _timeout,
 	"raise_error": false,
 	"headers": object.union(_transaction_header, _traceparent_header),
