@@ -355,8 +355,8 @@ func TestDvtpQueryDevPortalBypassesIntersection(t *testing.T) {
 		b, _ := io.ReadAll(r.Body)
 		outwayBody = string(b)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"allowed":false,"reason":"denied by policy: YEAR_NOT_COVERED"}`))
-		w.WriteHeader(http.StatusForbidden)
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(inwayDenial("YEAR_NOT_COVERED")))
 	}))
 	defer outway.Close()
 
@@ -392,8 +392,8 @@ func TestDvtpQueryRevokedConsentReachesPDP(t *testing.T) {
 	var outwayHits int
 	outway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		outwayHits++
-		w.WriteHeader(http.StatusForbidden)
-		_, _ = w.Write([]byte(`{"allowed":false,"reason":"denied by policy: CONSENT_WITHDRAWN"}`))
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(inwayDenial("CONSENT_WITHDRAWN")))
 	}))
 	defer outway.Close()
 
@@ -423,6 +423,9 @@ func TestDvtpQueryRevokedConsentReachesPDP(t *testing.T) {
 	}
 	if !strings.Contains(out.Reason, "CONSENT_WITHDRAWN") {
 		t.Fatalf("reason = %q, want the policy reason", out.Reason)
+	}
+	if out.DenialCode != "CONSENT_WITHDRAWN" {
+		t.Fatalf("denial_code = %q, want CONSENT_WITHDRAWN for the citizen UI", out.DenialCode)
 	}
 	if out.FscTransactionID == "" {
 		t.Fatal("expected fsc_transaction_id on the response for decision-log lookup")
@@ -507,5 +510,133 @@ func TestUseHistoryPostSurvivesHandlerReturn(t *testing.T) {
 	case <-done:
 	case <-time.After(3 * time.Second):
 		t.Fatal("post was cancelled with the handler; it must outlive it")
+	}
+}
+
+// inwayDenial is the body the FSC Inway returns on a policy DENY: RFC9457-ish,
+// with the reason code embedded in `message` and no `reason` field at all.
+// Tests that fake a `{"allowed":false,"reason":...}` body are pinning a
+// contract nothing in the chain produces.
+func inwayDenial(code string) string {
+	return `{"message":"authorization server denied request: reasonUser-en: ` +
+		code + `; ","source":"inway","code":"UNAUTHORIZED","metadata":null}`
+}
+
+// What a citizen is told rests on denial_code alone. A denial they can act on
+// is named; every other denial, including one carrying a real but
+// administrative policy code, collapses to UNAVAILABLE so the UI cannot
+// mention consent when consent is not the problem.
+func TestDvtpQueryDenialCodeIsCitizenSafe(t *testing.T) {
+	tests := map[string]struct {
+		upstreamStatus int
+		upstreamBody   string
+		wantCode       string
+	}{
+		"revoked consent":      {http.StatusUnauthorized, inwayDenial("CONSENT_WITHDRAWN"), "CONSENT_WITHDRAWN"},
+		"expired consent":      {http.StatusUnauthorized, inwayDenial("CONSENT_EXPIRED"), "CONSENT_EXPIRED"},
+		"administrative deny":  {http.StatusUnauthorized, inwayDenial("ACTOR_NOT_ALLOWED"), DenialCodeUnavailable},
+		"unknown future code":  {http.StatusUnauthorized, inwayDenial("SOME_FUTURE_CODE"), DenialCodeUnavailable},
+		"inway without reason": {http.StatusUnauthorized, `{"message":"authorization server denied request: ","code":"UNAUTHORIZED"}`, DenialCodeUnavailable},
+		"source unavailable":   {http.StatusInternalServerError, `{"error":"upstream exploded"}`, DenialCodeUnavailable},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			outway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.upstreamStatus)
+				_, _ = w.Write([]byte(tc.upstreamBody))
+			}))
+			defer outway.Close()
+
+			srv := httptest.NewServer(newMux(config{OutwayURL: outway.URL, OutwayPath: "/bri/graphql"}))
+			defer srv.Close()
+
+			body := testQueryBody("c-1", []string{"bd:ib:2025"},
+				map[string]any{"scope_id": "bd:ib:2025", "belastingjaren": []int{2025}})
+			resp, err := http.Post(srv.URL+"/api/dvtp/query", "application/json", strings.NewReader(body))
+			if err != nil {
+				t.Fatalf("post: %v", err)
+			}
+			defer resp.Body.Close()
+
+			var out queryResponse
+			if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if out.Allowed {
+				t.Fatalf("expected a denial, got %+v", out)
+			}
+			if out.DenialCode != tc.wantCode {
+				t.Fatalf("denial_code = %q, want %q (reason was %q)", out.DenialCode, tc.wantCode, out.Reason)
+			}
+		})
+	}
+}
+
+// A source that cannot be reached is not a consent problem. The citizen must
+// not be pointed at their consent for it, so this path carries a code too
+// rather than leaving the UI to guess from an absent one.
+func TestDvtpQueryTransportFailureIsNotAConsentProblem(t *testing.T) {
+	// A closed listener: the address is well-formed and refuses connections.
+	dead := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	deadURL := dead.URL
+	dead.Close()
+
+	srv := httptest.NewServer(newMux(config{OutwayURL: deadURL, OutwayPath: "/bri/graphql"}))
+	defer srv.Close()
+
+	body := testQueryBody("c-1", []string{"bd:ib:2025"},
+		map[string]any{"scope_id": "bd:ib:2025", "belastingjaren": []int{2025}})
+	resp, err := http.Post(srv.URL+"/api/dvtp/query", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var out queryResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Allowed {
+		t.Fatalf("expected a denial, got %+v", out)
+	}
+	if out.DenialCode != DenialCodeUnavailable {
+		t.Fatalf("denial_code = %q, want %q", out.DenialCode, DenialCodeUnavailable)
+	}
+	if !strings.Contains(out.Reason, "fsc_outway_call_failed") {
+		t.Fatalf("reason = %q, want the transport failure for the operator", out.Reason)
+	}
+}
+
+// An allowed query carries no denial code at all: the UI must not have to
+// distinguish "allowed" from "denied for a reason we will not name".
+func TestDvtpQueryAllowedCarriesNoDenialCode(t *testing.T) {
+	outway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"ingeschrevenPersoon":{"heeftBelastingjaarAangifte":[]}}}`))
+	}))
+	defer outway.Close()
+
+	srv := httptest.NewServer(newMux(config{OutwayURL: outway.URL, OutwayPath: "/bri/graphql"}))
+	defer srv.Close()
+
+	body := testQueryBody("c-1", []string{"bd:ib:2025"},
+		map[string]any{"scope_id": "bd:ib:2025", "belastingjaren": []int{2025}})
+	resp, err := http.Post(srv.URL+"/api/dvtp/query", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var out queryResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !out.Allowed {
+		t.Fatalf("expected allow, got %+v", out)
+	}
+	if out.DenialCode != "" {
+		t.Fatalf("denial_code = %q, want empty on an allow", out.DenialCode)
 	}
 }

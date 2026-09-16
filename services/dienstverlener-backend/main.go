@@ -110,8 +110,13 @@ type queryRequest struct {
 type queryResponse struct {
 	Allowed bool            `json:"allowed"`
 	Data    json.RawMessage `json:"data,omitempty"`
-	Reason  string          `json:"reason,omitempty"`
-	TraceID string          `json:"trace_id"`
+	// Reason is the technical denial text, for logs and an operator-facing
+	// footer. It is never the basis for what a citizen is told.
+	Reason string `json:"reason,omitempty"`
+	// DenialCode is what the UI switches on: a code this backend has judged
+	// disclosable, or DenialCodeUnavailable. See denial.go for the boundary.
+	DenialCode string `json:"denial_code,omitempty"`
+	TraceID    string `json:"trace_id"`
 	// FscTransactionID is the identifier that travels through the FSC
 	// chain (Fsc-Transaction-Id → X-Request-Id → the PDP's reconstructed
 	// OTel trace, and therefore the OpenFTV decision-log's input.context.trace_id).
@@ -341,10 +346,11 @@ func handleQuery(cfg config) http.HandlerFunc {
 		consentContext, err := decodeConsentTokenPayload(req.ConsentToken)
 		if err != nil {
 			log.Warn("consent token decode failed", "err", err.Error())
-			writeJSON(w, http.StatusForbidden, map[string]any{
-				"allowed":  false,
-				"reason":   "invalid_consent_token: " + err.Error(),
-				"trace_id": traceIDFromSpan(span),
+			writeJSON(w, http.StatusForbidden, queryResponse{
+				Allowed:    false,
+				Reason:     "invalid_consent_token: " + err.Error(),
+				DenialCode: DenialCodeUnavailable,
+				TraceID:    traceIDFromSpan(span),
 			})
 			return
 		}
@@ -426,6 +432,7 @@ func handleQuery(cfg config) http.HandlerFunc {
 			writeJSON(w, http.StatusInternalServerError, queryResponse{
 				Allowed:          false,
 				Reason:           "the query could not be logged; withholding the answer",
+				DenialCode:       DenialCodeUnavailable,
 				TraceID:          traceID,
 				FscTransactionID: fscTxID,
 			})
@@ -436,6 +443,7 @@ func handleQuery(cfg config) http.HandlerFunc {
 			writeJSON(w, http.StatusBadGateway, queryResponse{
 				Allowed:          false,
 				Reason:           "fsc_outway_call_failed: " + err.Error(),
+				DenialCode:       DenialCodeUnavailable,
 				TraceID:          traceID,
 				FscTransactionID: fscTxID,
 			})
@@ -465,18 +473,37 @@ func handleQuery(cfg config) http.HandlerFunc {
 			return
 		}
 
+		// Two upstream shapes. The FSC Inway answers with an RFC9457-ish
+		// body whose `message` carries the reason; `reason` is the shape a
+		// PDP-fronting proxy returns. Neither is guaranteed to carry one,
+		// so the status stands in when both are empty.
 		var denyResp struct {
 			Allowed bool   `json:"allowed"`
 			Reason  string `json:"reason"`
+			Message string `json:"message"`
 		}
 		_ = json.Unmarshal(proxyRespBody, &denyResp)
-		if denyResp.Reason == "" {
-			denyResp.Reason = fmt.Sprintf("upstream_error: status %d", proxyResp.StatusCode)
+		reason := denyResp.Reason
+		if reason == "" {
+			reason = denyResp.Message
 		}
-		log.Info("query denied", "consent_id", consentContext.ConsentID, "reason", denyResp.Reason, "trace_id", traceID)
+		if reason == "" {
+			reason = fmt.Sprintf("upstream_error: status %d", proxyResp.StatusCode)
+		}
+		// policyCode is the reason as the policy meant it and belongs in the
+		// log; denialCode is the part the citizen may see.
+		policyCode := policyCodeFrom(reason)
+		denialCode := denialCodeFor(reason)
+		log.Info("query denied",
+			"consent_id", consentContext.ConsentID,
+			"reason", reason,
+			"policy_code", policyCode,
+			"denial_code", denialCode,
+			"trace_id", traceID)
 		resp := queryResponse{
 			Allowed:          false,
-			Reason:           denyResp.Reason,
+			Reason:           reason,
+			DenialCode:       denialCode,
 			TraceID:          traceID,
 			FscTransactionID: fscTxID,
 		}
