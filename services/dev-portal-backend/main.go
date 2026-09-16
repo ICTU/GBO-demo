@@ -106,7 +106,7 @@ func loadConfig() config {
 		PredefinedDir:      getEnv("PREDEFINED_DIR", "/scenarios"),
 		DvtpConsumerPeerID: getEnv("DVTP_CONSUMER_PEER_ID", defaultDvtpConsumerPeerID),
 		CitizensFile:       getEnv("CITIZENS_FILE", "/citizens/citizens.json"),
-		OrganizationsFile:  getEnv("ORGANIZATIONS_FILE", "/orgs/organizations.json"),
+		OrganizationsFile:  getEnv("ORGANIZATIONS_FILE", "/organizations.json"),
 		LokiURL:            getEnv("LOKI_URL", "http://loki:3100"),
 		LokiDecisionQuery:  getEnv("LOKI_DECISION_QUERY", `{compose_service="openftv-pdp"} |= "Decision Log"`),
 		PoliciesDir:        getEnv("POLICIES_DIR", "/policies"),
@@ -493,8 +493,8 @@ func handleHistory(cfg config) http.HandlerFunc {
 // ── Passthrough: citizens + organizations ────────────────────────────────
 
 // passthroughFile returns the file as-is (the frontend parses it itself).
-// Prevents drift: the upstream mockdata files (citizens, organizations)
-// remain the single source of truth.
+// Prevents drift: the mockdata files (citizens, organizations) remain the
+// single source of truth.
 func passthroughFile(path string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		corsHeaders(w)

@@ -97,7 +97,6 @@ graphql-server|.|./services/graphql-server/Dockerfile|services/graphql-server se
 ldv-logboek|.|./services/ldv-logboek/Dockerfile|services/ldv-logboek services/ldv-client|linux/amd64|false|ldv-logboek
 landing-page|./landing-page|./landing-page/Dockerfile|landing-page|linux/amd64|false|landing-page
 openftv-pdp|.|./services/openftv-pdp/Dockerfile|services/openftv-pdp policies|linux/amd64|false|openftv-pdp
-sector-pip|./services/sector-pip|./services/sector-pip/Dockerfile|services/sector-pip|linux/amd64|false|sector-pip
 toestemmingsportaal-frontend|./toestemmingsportaal-frontend|./toestemmingsportaal-frontend/Dockerfile|toestemmingsportaal-frontend|linux/amd64|false|toestemmingsportaal-frontend
 eudi-issuance-server|./vendor/nl-wallet|./services/eudi-issuance-server/Dockerfile|vendor/nl-wallet services/eudi-issuance-server/Dockerfile|linux/amd64|recursive|eudi-issuance-server-amd64
 IMAGES

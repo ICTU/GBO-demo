@@ -388,26 +388,6 @@ services:
       timeout: 3s
       retries: 5
 
-  sector-pip:
-    build: ./services/sector-pip
-    ports:
-      - "${GBO_PORT_SECTOR_PIP:-9404}:4004"
-    environment:
-      - OTEL_SERVICE_NAME=sector-pip
-      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
-    volumes:
-      - ./services/sector-pip/config:/config:ro
-    networks:
-      - backend
-    depends_on:
-      otel-collector:
-        condition: service_started
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4004/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-
   # The Logboek Dataverwerkingen of the Belastingdienst (LDV v1.0.0). One
   # image, one instance per Verantwoordelijke — the same pattern as the
   # sidecars — because LDV has each Verantwoordelijke log its own processing
@@ -1021,7 +1001,7 @@ services:
     environment:
       - OTEL_SERVICE_NAME=dev-portal-backend
       - CITIZENS_FILE=/citizens/citizens.json
-      - ORGANIZATIONS_FILE=/orgs/organizations.json
+      - ORGANIZATIONS_FILE=/organizations.json
       # Optional deployment override; the backend owns the local demo default.
       - DVTP_CONSUMER_PEER_ID
       # FSC-txlog access (demo shortcut). Production would use the
@@ -1061,7 +1041,7 @@ services:
     volumes:
       - dev-portal-var:/var
       - ./services/graphql-server/mockdata:/citizens:ro
-      - ./services/sector-pip/config:/orgs:ro
+      - ./services/dev-portal-backend/organizations.json:/organizations.json:ro
       - ./policies:/policies:ro
       - ./services/dev-portal-backend/rules.json:/rules.json:ro
       - ./fsc-infra/orgs/edi-issuer/pki/internal:/certs/edi:ro
