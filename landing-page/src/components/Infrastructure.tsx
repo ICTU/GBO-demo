@@ -73,7 +73,7 @@ export default function Infrastructure() {
               Simulatieomgeving Federatief Datastelsel ↗
             </ExternalLink>
             <a href={docs.contactMail} className="infra-link">
-              Contact: jeroen.dekok@ictu.nl
+              Contact: gbo@ictu.nl
             </a>
           </div>
         </div>
