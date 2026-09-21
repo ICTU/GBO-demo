@@ -100,7 +100,7 @@ export const docs = {
   github: 'https://github.com/ICTU/GBO-demo',
   fsc: 'https://fsc-standaard.nl/',
   simulatie: 'https://simulatie.datastelsel.nl/',
-  contactMail: 'mailto:jeroen.dekok@ictu.nl',
+  contactMail: 'mailto:gbo@ictu.nl',
 } as const
 
 export const versionString = resolve(rc?.versionString, import.meta.env.VITE_VERSION_STRING, '')
