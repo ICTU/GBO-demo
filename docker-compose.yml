@@ -131,8 +131,11 @@ services:
       # Read by the policy through opa.runtime().env (policies/dvtp/gbo/
       # consent.rego): it fetches the register's verification keys and the
       # referenced consent's current status per evaluation. Any verification
-      # or status failure denies, with a reason of its own.
+      # or status failure denies, with a reason of its own. The keys come
+      # from the register directly; the status over FSC, through the PDP's
+      # own Outway (#383, make fsc-seed-consent-status).
       - GBO_CONSENT_URL=http://consent-register:4002
+      - GBO_CONSENT_STATUS_URL=http://pdp-outway:8080/consent-status
       - GBO_CONSENT_ISSUER=https://consent-register.gbo.test
       - GBO_CONSENT_AUDIENCE=gbo:dvtp:pdp
       # Empty by default: the PDP then loads policies from /policies and
@@ -661,6 +664,12 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
       - CONSENT_TOKEN_ISSUER=https://consent-register.gbo.test
       - CONSENT_TOKEN_AUDIENCE=gbo:dvtp:pdp
+      # The status lookup's own listener, published as the FSC service
+      # consent-status through cr-inway (#383). It serves nothing else, and
+      # it trusts the Fsc-Authorization header the Inway forwards — in the
+      # demo it is also reachable on the compose networks, which is accepted
+      # here and not in production.
+      - STATUS_PORT=4012
       # LDV: recording, revoking and status-confirming a consent are GBO's own
       # Dataverwerkingen. No pseudonym key: this service never sees a BSN, it
       # names the Betrokkene by the portal-scoped reference it is given.
@@ -669,6 +678,8 @@ services:
       - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY_GBO:-local-demo-pseudonym-key-gbo}
     networks:
       - backend
+      # cr-inway forwards consent-status here (STATUS_PORT).
+      - fsc-infra
     depends_on:
       otel-collector:
         condition: service_started

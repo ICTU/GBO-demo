@@ -95,7 +95,7 @@ once — the order matters, `fsc-seed-bri-hv` needs the `bri` publication the
 first target creates:
 
 ```bash
-make fsc-seed-bri fsc-seed-rvig-source fsc-seed-metadata fsc-seed-bri-hv
+make fsc-seed-bri fsc-seed-rvig-source fsc-seed-metadata fsc-seed-bri-hv fsc-seed-consent-status
 ```
 
 The `svc` claim in the decoded token names the failing service. To repair just
@@ -107,6 +107,7 @@ that one:
 | `bri` | Hypotheekverlener → Belastingdienst | `make fsc-seed-bri-hv` |
 | `brp` | EDI-issuer → Belastingdienst (RvIG source) | `make fsc-seed-rvig-source` |
 | `gbo-metadata-bd`, `gbo-metadata-rvig` | EDI-issuer → Belastingdienst | `make fsc-seed-metadata` |
+| `consent-status` | PDP → Toestemmingsregister | `make fsc-seed-consent-status` |
 
 The `sub` claim tells the two `bri` rows apart: `99999999900000000100` is the
 EDI-issuer, `99999999900000000300` the Hypotheekverlener.

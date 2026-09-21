@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# seed-bri-contract — reproduce a service contract between the
-# edi-issuer consumer and a configurable source provider.
+# seed-bri-contract — reproduce a service contract between a consumer
+# (the edi-issuer unless CONSUMER_* says otherwise) and a configurable
+# provider.
 #
 # Parameterised by provider, service, endpoint and grant-property settings so
 # the same script seeds every source peer and every service it offers. The
@@ -39,7 +40,7 @@ source "$SCRIPT_DIR/lib.sh"
 GROUP_ID="${GROUP_ID:-fsc-demo}"
 SERVICE_NAME="${SERVICE_NAME:-bri}"
 
-EDI_PEER_ID="${EDI_PEER_ID:-99999999900000000100}"   # EDI-issuer-org (consumer)
+CONSUMER_PEER_ID="${CONSUMER_PEER_ID:-99999999900000000100}"   # EDI-issuer-org by default
 PROVIDER_PEER_ID="${PROVIDER_PEER_ID:-99999999900000000200}"
 DIR_PEER_ID="${DIR_PEER_ID:-99999999900000000000}"   # Directory-peer
 
@@ -48,7 +49,7 @@ DIR_PEER_ID="${DIR_PEER_ID:-99999999900000000000}"   # Directory-peer
 # Controller accept mTLS with each org's internal-cert set.
 PROVIDER_CONTROLLER_URL="${PROVIDER_CONTROLLER_URL:-https://bd-controller:9444}"
 PROVIDER_MANAGER_URL="${PROVIDER_MANAGER_URL:-https://bd-manager:9443}"
-EDI_MANAGER_URL="${EDI_MANAGER_URL:-https://edi-manager:9443}"          # manager int
+CONSUMER_MANAGER_URL="${CONSUMER_MANAGER_URL:-https://edi-manager:9443}"          # manager int
 
 # Service endpoint — the bron-sidecar reads the grant property
 # subject_id_type and substitutes PI -> BSN if needed; direct mode is
@@ -76,36 +77,37 @@ if ! jq -e 'type == "object"' >/dev/null 2>&1 <<<"$GRANT_PROPERTIES"; then
   exit 1
 fi
 
-# Grant-link config (edi-Controller side). v2.4.0 has no REST endpoint
+# Grant-link config (consumer Controller side). v2.4.0 has no REST endpoint
 # for grant-link CRUD, so we upsert directly into the Controller DB
 # after contract-seed. Path must be a single segment (Outway matches
 # parts[0]).
 GRANT_LINK_PATH="${GRANT_LINK_PATH:-/bri}"
 CREATE_GRANT_LINK="${CREATE_GRANT_LINK:-true}"
 OUTWAY_NAME="${OUTWAY_NAME:-EdiOutway-01}"
+CONSUMER_CONTROLLER_DB="${CONSUMER_CONTROLLER_DB:-fsc_edi_controller}"
 PG_HOST="${PG_HOST:-postgres}"
 PG_USER="${PG_USER:-postgres}"
 export PGPASSWORD="${PGPASSWORD:-${FSC_POSTGRES_PASSWORD}}"
 
 # mTLS credentials (internal-cert per org, mounted under fsc-infra/orgs/*).
 PROVIDER_INTERNAL_DIR="${PROVIDER_INTERNAL_DIR:-$FSC_INFRA_DIR/orgs/belastingdienst-mock/pki/internal}"
-EDI_INTERNAL_DIR="$FSC_INFRA_DIR/orgs/edi-issuer/pki/internal"
+CONSUMER_INTERNAL_DIR="${CONSUMER_INTERNAL_DIR:-$FSC_INFRA_DIR/orgs/edi-issuer/pki/internal}"
 
 PROVIDER_CERT="$PROVIDER_INTERNAL_DIR/internal-cert.pem"
 PROVIDER_KEY="$PROVIDER_INTERNAL_DIR/internal-cert-key.pem"
 PROVIDER_CA="$PROVIDER_INTERNAL_DIR/intermediate_ca.pem"
 
-EDI_CERT="$EDI_INTERNAL_DIR/internal-cert.pem"
-EDI_KEY="$EDI_INTERNAL_DIR/internal-cert-key.pem"
-EDI_CA="$EDI_INTERNAL_DIR/intermediate_ca.pem"
+CONSUMER_CERT="$CONSUMER_INTERNAL_DIR/internal-cert.pem"
+CONSUMER_KEY="$CONSUMER_INTERNAL_DIR/internal-cert-key.pem"
+CONSUMER_CA="$CONSUMER_INTERNAL_DIR/intermediate_ca.pem"
 
 # Peer/org certs (needed for pubkey-thumbprint of the outway).
-EDI_ORG_CERT="$FSC_INFRA_DIR/orgs/edi-issuer/pki/org/edi-issuer.pem"
+CONSUMER_ORG_CERT="${CONSUMER_ORG_CERT:-$FSC_INFRA_DIR/orgs/edi-issuer/pki/org/edi-issuer.pem}"
 
-for f in "$PROVIDER_CERT" "$PROVIDER_KEY" "$PROVIDER_CA" "$EDI_CERT" "$EDI_KEY" "$EDI_CA" "$EDI_ORG_CERT"; do
+for f in "$PROVIDER_CERT" "$PROVIDER_KEY" "$PROVIDER_CA" "$CONSUMER_CERT" "$CONSUMER_KEY" "$CONSUMER_CA" "$CONSUMER_ORG_CERT"; do
   if [ ! -f "$f" ]; then
     echo "missing cert file: $f" >&2
-    echo "provision the EDI and selected provider FSC certificates first" >&2
+    echo "provision the consumer and provider FSC certificates first" >&2
     exit 1
   fi
 done
@@ -203,12 +205,12 @@ else
     fail_unsigned "publication contract for '$SERVICE_NAME'" "${st:-}"
 fi
 
-# ── 3. Create connection contract in edi-Manager ───────────────────────────
+# ── 3. Create connection contract in consumer Manager ───────────────────────────
 
-echo "[3/4] Create connection contract for '$SERVICE_NAME' at edi-Manager..."
+echo "[3/4] Create connection contract for '$SERVICE_NAME' at consumer Manager..."
 
-existing_conn=$(mtls_curl "$EDI_CERT" "$EDI_KEY" "$EDI_CA" \
-  "$EDI_MANAGER_URL/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=$SERVICE_NAME" \
+existing_conn=$(mtls_curl "$CONSUMER_CERT" "$CONSUMER_KEY" "$CONSUMER_CA" \
+  "$CONSUMER_MANAGER_URL/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=$SERVICE_NAME" \
   || echo '{}')
 
 # Contracts are immutable, so a changed regime means a NEW contract (new iv),
@@ -224,7 +226,7 @@ if echo "$existing_conn" | jq -e --arg svc "$SERVICE_NAME" --arg provider "$PROV
 else
   # Outway identification: SHA-256 hex of the peer public key (see openapi.yaml
   # publicKeyThumbprint schema). Outway shares the org-cert as its identity.
-  outway_thumbprint=$(pubkey_thumbprint_hex "$EDI_ORG_CERT")
+  outway_thumbprint=$(pubkey_thumbprint_hex "$CONSUMER_ORG_CERT")
   if [ -z "$outway_thumbprint" ]; then
     echo "  ✗ could not compute outway pubkey thumbprint"
     exit 1
@@ -237,7 +239,7 @@ else
     --argjson created_at "$(now_epoch)" \
     --arg svc_name "$SERVICE_NAME" \
     --arg provider_peer "$PROVIDER_PEER_ID" \
-    --arg edi_peer "$EDI_PEER_ID" \
+    --arg consumer_peer "$CONSUMER_PEER_ID" \
     --arg thumb "$outway_thumbprint" \
     --argjson properties "$GRANT_PROPERTIES" \
     '{
@@ -250,7 +252,7 @@ else
         grants: [{
           type: "GRANT_TYPE_SERVICE_CONNECTION",
           outway: {
-            peer_id: $edi_peer,
+            peer_id: $consumer_peer,
             identification: {
               type: "OUTWAY_IDENTIFICATION_TYPE_PUBLIC_KEY_THUMBPRINT",
               public_key_thumbprint: $thumb
@@ -261,8 +263,8 @@ else
         }]
       }
     }')
-  http_status=$(mtls_curl "$EDI_CERT" "$EDI_KEY" "$EDI_CA" \
-    "$EDI_MANAGER_URL/v1/contracts" \
+  http_status=$(mtls_curl "$CONSUMER_CERT" "$CONSUMER_KEY" "$CONSUMER_CA" \
+    "$CONSUMER_MANAGER_URL/v1/contracts" \
     -X POST -H "Content-Type: application/json" \
     -d "$conn_body" -o /tmp/seed-conn-out.txt -w "%{http_code}")
   if [ "$http_status" != "201" ]; then
@@ -273,8 +275,8 @@ else
   echo "  ✓ connection contract created; waiting for auto-sign..."
   for _ in $(seq 30); do
     sleep 1
-    contracts_json=$(mtls_curl "$EDI_CERT" "$EDI_KEY" "$EDI_CA" \
-      "$EDI_MANAGER_URL/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=$SERVICE_NAME")
+    contracts_json=$(mtls_curl "$CONSUMER_CERT" "$CONSUMER_KEY" "$CONSUMER_CA" \
+      "$CONSUMER_MANAGER_URL/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=$SERVICE_NAME")
     st=$(printf '%s' "$contracts_json" | jq -r --arg svc "$SERVICE_NAME" --arg provider "$PROVIDER_PEER_ID" --argjson properties "$GRANT_PROPERTIES" \
       'first(.contracts[]? | select(.content.grants[0].service.name == $svc and .content.grants[0].service.peer_id == $provider) | select((.content.grants[0].properties // {}) == $properties) | .state) // ""' 2>/dev/null)
     if [ "$st" = "CONTRACT_STATE_VALID" ]; then
@@ -286,10 +288,10 @@ else
     fail_unsigned "connection contract for '$SERVICE_NAME'" "${st:-}"
 fi
 
-# ── 4. Grant-link upsert in edi_controller ────────────────────────────
+# ── 4. Grant-link upsert in the consumer Controller ───────────────────
 # v2.4.0 has no REST endpoint for grant-links (only Controller-UI web
 # form). Direct SQL is the shortest path — the shape is stable and the
-# table is read frequently by edi-outway.
+# table is read frequently by the consumer's Outway.
 
 echo "[4/4] Upsert grant-link '$GRANT_LINK_PATH' → connection grant-hash..."
 if [ "$CREATE_GRANT_LINK" != "true" ]; then
@@ -306,8 +308,8 @@ fi
 # and write a dead grant-link that fails at routing time instead of here.
 # Selecting on the properties too, so a contract superseded by a property
 # change cannot keep the grant-link pointing at the previous regime.
-new_hash=$(mtls_curl "$EDI_CERT" "$EDI_KEY" "$EDI_CA" \
-  "${EDI_MANAGER_URL}/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=${SERVICE_NAME}" \
+new_hash=$(mtls_curl "$CONSUMER_CERT" "$CONSUMER_KEY" "$CONSUMER_CA" \
+  "${CONSUMER_MANAGER_URL}/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=${SERVICE_NAME}" \
   | jq -r --arg svc "$SERVICE_NAME" --arg provider "$PROVIDER_PEER_ID" --argjson properties "$GRANT_PROPERTIES" \
     'first(.contracts[]?
            | select(.state == "CONTRACT_STATE_VALID")
@@ -319,7 +321,7 @@ if [ -z "$new_hash" ]; then
   echo "  x no connection grant-hash found — abort"
   exit 1
 fi
-psql -h "$PG_HOST" -U "$PG_USER" -d fsc_edi_controller -c "
+psql -h "$PG_HOST" -U "$PG_USER" -d "$CONSUMER_CONTROLLER_DB" -c "
   INSERT INTO controller.outway_grant_links (outway_name, url_path, grant_hash, outway_group_id)
   VALUES ('$OUTWAY_NAME', '$GRANT_LINK_PATH', '$new_hash', '$GROUP_ID')
   ON CONFLICT (outway_group_id, outway_name, url_path)

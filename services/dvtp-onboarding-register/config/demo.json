@@ -1,7 +1,8 @@
 {
   "source_holders": [
     {"peer_id": "99999999900000000200", "name": "Belastingdienst"},
-    {"peer_id": "99999999900000000400", "name": "BRP (RvIG)"}
+    {"peer_id": "99999999900000000400", "name": "BRP (RvIG)"},
+    {"peer_id": "99999999900000000700", "name": "Toestemmingsregister (GBO)"}
   ],
   "system_participants": [
     {
@@ -9,6 +10,12 @@
       "name": "Demo EUDI-issuance (GBO)",
       "active": true,
       "allowed_source_peer_ids": ["99999999900000000200", "99999999900000000400"]
+    },
+    {
+      "peer_id": "99999999900000000800",
+      "name": "Demo PDP (GBO)",
+      "active": true,
+      "allowed_source_peer_ids": ["99999999900000000700"]
     }
   ],
   "seed_participants": [

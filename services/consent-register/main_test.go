@@ -23,7 +23,8 @@ func TestCreateThenGetConsent(t *testing.T) {
 		t.Fatal(err)
 	}
 	issuer.now = func() time.Time { return time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC) }
-	srv := httptest.NewServer(newMux(NewStore(), issuer, nil))
+	store := NewStore()
+	srv := httptest.NewServer(newMux(store, issuer, nil))
 	defer srv.Close()
 
 	createBody := bytes.NewBufferString(`{
@@ -116,11 +117,7 @@ func TestCreateThenGetConsent(t *testing.T) {
 		t.Fatalf("fetched status = %q, want ACTIVE", fetched.Status)
 	}
 
-	statusResp, err := http.Get(srv.URL + "/consents/" + created.ConsentID + "/status")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer statusResp.Body.Close()
+	statusResp := getStatus(t, statusUnderTest(t, store, nil), created.ConsentID, testPDPPeer)
 	statusBody, _ := io.ReadAll(statusResp.Body)
 	if statusResp.StatusCode != http.StatusOK || string(statusBody) == "" {
 		t.Fatalf("status response = %d %s", statusResp.StatusCode, statusBody)
