@@ -50,7 +50,7 @@ test('a prototype key is not mistaken for a message', () => {
 
 test('only codes the backend discloses are named here', async () => {
   const backend = await readFile(
-    new URL('../../services/dienstverlener-backend/denial.go', import.meta.url),
+    new URL('../../services/dienstverlener-backend/consumer/denial.go', import.meta.url),
     'utf8',
   )
   const block = backend.match(/disclosableDenyCodes = map\[string\]bool\{([^}]*)\}/)[1]

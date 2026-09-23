@@ -17,7 +17,7 @@ const DEFAULT_FIELDS = [
 ]
 
 // The backend generates the GraphQL-query itself based on `belastingjaren`
-// + `fields` (buildQuery in dienstverlener-backend/main.go): Bedrag-fields
+// + `fields` (buildQuery in dienstverlener-backend/consumer/kind.go): Bedrag-fields
 // are wrapped in an `... on AangifteIH` fragment, and the year filter
 // travels inside the query so the PDP can enforce per-year consent. The
 // query always contains `$bsn: BSN!` — the PI gets filled in by the backend
@@ -36,7 +36,7 @@ function previewQuery(fields: string[], jaren: number[]): string {
 }
 
 // The Installatie Register's question to LVG (buildOwnershipQuery in
-// dienstverlener-backend/query_kind.go): the PI from the token in $bsn, the
+// dienstverlener-backend/consumer/kind.go): the PI from the token in $bsn, the
 // VBO-id as asked. LVG answers with that VBO-id or null.
 const LVG_QUERY = `query($bsn: BSN!, $vboId: String!) {\n  vbo(bsn: $bsn, vboId: $vboId) {\n    vboId\n  }\n}`
 

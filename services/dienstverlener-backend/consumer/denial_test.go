@@ -1,4 +1,4 @@
-package main
+package consumer
 
 import "testing"
 
@@ -62,8 +62,8 @@ func TestPolicyCodeFromToleratesPhrasing(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			if got := policyCodeFrom(tc.reason); got != tc.want {
-				t.Fatalf("policyCodeFrom(%q) = %q, want %q", tc.reason, got, tc.want)
+			if got := PolicyCode(tc.reason); got != tc.want {
+				t.Fatalf("PolicyCode(%q) = %q, want %q", tc.reason, got, tc.want)
 			}
 		})
 	}
