@@ -6,7 +6,7 @@ import PartialConsentWarning from '../components/consent/PartialConsentWarning'
 import { useRedirectContext, clearRedirectContext } from '../hooks/useRedirectContext'
 import { usePortalToken } from '../hooks/usePortalToken'
 import { createConsent } from '../api/portalClient'
-import { SCOPE_GROUPS } from '../data/scopeGroups'
+import { requestedScopeGroups } from '../data/scopeGroups'
 
 function formatValidUntil(iso: string): string {
   if (!iso) return '3 maanden na toestemming'
@@ -31,17 +31,20 @@ export default function PortaalConsent() {
   const { token, clear } = usePortalToken()
   const navigate = useNavigate()
 
+  const requested = useMemo(() => requestedScopeGroups(ctx?.scope ?? []), [ctx])
+  const scopeGroups = requested.groups
+
   const [picked, setPicked] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(SCOPE_GROUPS.map((s) => [s.code, true])),
+    Object.fromEntries(scopeGroups.map((s) => [s.code, true])),
   )
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const selectedCount = useMemo(
-    () => SCOPE_GROUPS.filter((s) => picked[s.code]).length,
-    [picked],
+    () => scopeGroups.filter((s) => picked[s.code]).length,
+    [scopeGroups, picked],
   )
-  const partial = selectedCount > 0 && selectedCount < SCOPE_GROUPS.length
+  const partial = selectedCount > 0 && selectedCount < scopeGroups.length
 
   if (!ctx) {
     return (
@@ -57,16 +60,30 @@ export default function PortaalConsent() {
     navigate('/auth')
     return null
   }
+  if (requested.unknown.length > 0 || scopeGroups.length === 0) {
+    return (
+      <MijnOverheidLayout activeNav="toestemmingen" breadcrumb={[{ label: 'Home' }]}>
+        <div className="content-card">
+          <h1 className="page-title">Onbekend verzoek</h1>
+          <p>
+            {ctx.client_name} vraagt om gegevens die dit portaal niet kan tonen. U kunt hiervoor
+            geen toestemming geven.
+          </p>
+        </div>
+      </MijnOverheidLayout>
+    )
+  }
 
   const onGrant = async () => {
     setError(null)
     setSubmitting(true)
     try {
-      const chosen = SCOPE_GROUPS.filter((s) => picked[s.code]).map((s) => s.code)
+      const chosen = scopeGroups.filter((s) => picked[s.code]).map((s) => s.code)
       const result = await createConsent(token, {
         dienstverlener_oin: ctx.client_oin,
         scopes: chosen,
         validity_seconds: computeValiditySeconds(ctx.valid_until),
+        use_case: ctx.purpose,
       })
       sessionStorage.setItem(
         'gbo.last_consent',
@@ -121,7 +138,7 @@ export default function PortaalConsent() {
         </p>
 
         <div className="scope-list">
-          {SCOPE_GROUPS.map((s) => (
+          {scopeGroups.map((s) => (
             <ScopeToggle
               key={s.code}
               scope={s}
@@ -159,7 +176,7 @@ export default function PortaalConsent() {
             Annuleren
           </button>
           <span className="counter">
-            {selectedCount} van {SCOPE_GROUPS.length} onderdelen geselecteerd
+            {selectedCount} van {scopeGroups.length} onderdelen geselecteerd
           </span>
         </div>
       </div>

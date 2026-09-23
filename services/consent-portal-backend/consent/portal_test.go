@@ -413,3 +413,23 @@ func TestGiveConsentFailsWhenPseudonymizerFails(t *testing.T) {
 		t.Fatalf("registered %d consents despite BSNk failure", len(store.created))
 	}
 }
+
+func TestUseCaseFollowsTheStatedPurpose(t *testing.T) {
+	for _, tc := range []struct{ given, want string }{
+		{"Goedkeuring installatiegegevens", "Goedkeuring installatiegegevens"},
+		{"", DefaultUseCase},
+		{"   ", DefaultUseCase},
+	} {
+		p, _, store := testPortal(t, nil)
+		if _, err := p.GiveConsent(context.Background(), BSN("987654321"), GiveInput{
+			DienstverlenerOIN: "DV",
+			Scopes:            []string{"lvg:vbo:eigendom"},
+			UseCase:           tc.given,
+		}); err != nil {
+			t.Fatalf("give consent: %v", err)
+		}
+		if got := store.created[0].UseCase; got != tc.want {
+			t.Errorf("use case for %q = %q, want %q", tc.given, got, tc.want)
+		}
+	}
+}

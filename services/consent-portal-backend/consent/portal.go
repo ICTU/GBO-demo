@@ -3,6 +3,7 @@ package consent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -67,6 +68,7 @@ type GiveInput struct {
 	Scopes            []string
 	ScopeEntries      []ScopeEntry
 	ValiditySeconds   int
+	UseCase           string // the dienstverlener's stated purpose; DefaultUseCase when empty
 	Trigger           string // "dev-portal" when the dev-portal drove this; narrative only
 }
 
@@ -136,7 +138,7 @@ func (p *Portal) GiveConsent(ctx context.Context, citizen BSN, in GiveInput) (Gr
 		DienstverlenerOIN: in.DienstverlenerOIN,
 		Scopes:            in.Scopes,
 		ScopeEntries:      in.ScopeEntries,
-		UseCase:           UseCase,
+		UseCase:           useCaseOrDefault(in.UseCase),
 		ValiditySeconds:   in.ValiditySeconds,
 	})
 	if err != nil {
@@ -218,4 +220,11 @@ func (p *Portal) subjectRefFor(ctx context.Context, citizen BSN, aanleiding stri
 		return "", fmt.Errorf("log pseudonymisation: %w", err)
 	}
 	return SubjectRef(ps.Pseudonym), nil
+}
+
+func useCaseOrDefault(useCase string) string {
+	if useCase = strings.TrimSpace(useCase); useCase != "" {
+		return useCase
+	}
+	return DefaultUseCase
 }
