@@ -35,6 +35,11 @@ updates:
     commit-message:
       prefix: build(deps)
     open-pull-requests-limit: 10
+    # One PR per base image across all directories, instead of one per
+    # directory. An alpine digest bump would otherwise open nine PRs.
+    groups:
+      base-images:
+        group-by: dependency-name
 
   - package-ecosystem: github-actions
     directory: /
@@ -65,6 +70,11 @@ updates:
     commit-message:
       prefix: build(deps)
     open-pull-requests-limit: 10
+    # One PR per package across all frontends, instead of one per
+    # directory.
+    groups:
+      frontend-dependencies:
+        group-by: dependency-name
     ignore:
       # monaco-graphql is the consumer of monaco-editor in
       # developer-portal and its peer range is ">= 0.20.0 < 0.53". The
