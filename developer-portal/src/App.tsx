@@ -21,7 +21,7 @@ import { newTraceContext } from './util/trace'
 import { consentTokenFor, storeConsentToken } from './util/consentTokens'
 import { loadIssuanceOffers, type IssuanceOffer } from './eudi'
 import type {
-  ApiCall, EudiPayload, IssuancePayload, IssuanceResponse, Scenario, Tab, UsePayload, UseResponse,
+  ApiCall, EudiPayload, HistoryRun, IssuancePayload, IssuanceResponse, Scenario, Tab, UsePayload, UseResponse,
 } from './types'
 
 const EMPTY_ISSUANCE: IssuancePayload = {
@@ -255,8 +255,10 @@ export default function App() {
       setEudiPayload({ ...EMPTY_EUDI, ...(s.payload as EudiPayload) })
     } else {
       const scenarioUse = s.payload as UsePayload
+      const covers = (h: HistoryRun) =>
+        !scenarioUse.scope_id || ((h.payload as IssuancePayload).scopes ?? []).includes(scenarioUse.scope_id)
       const latestIssued = history.find(
-        (h) => h.tab === 'issuance' && h.outcome === 'allow' && h.consent_id,
+        (h) => h.tab === 'issuance' && h.outcome === 'allow' && h.consent_id && covers(h),
       )?.consent_id ?? ''
       const effectiveCid = scenarioUse.consent_id || usePayload.consent_id || latestIssued
       setUsePayload({

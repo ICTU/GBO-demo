@@ -1,0 +1,15 @@
+{
+  "id": "issuance-lvg-eigendom",
+  "name": "Issuance · LVG eigendomscheck (Installatie Register)",
+  "desc": "Consent van 123456789 aan het Installatie Register om bij LVG te controleren of een pand van hem is.",
+  "tab": "issuance",
+  "expected_outcome": "allow",
+  "payload": {
+    "citizen_bsn": "123456789",
+    "scopes": [
+      "lvg:vbo:eigendom"
+    ],
+    "validity_seconds": 31536000,
+    "use_case": "Goedkeuring installatiegegevens"
+  }
+}

@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import type { HistoryRun, IssuancePayload, UsePayload } from '../types'
 import { consentTokenFor } from '../util/consentTokens'
+import { consumerFor, isLvgScope } from '../util/consumer'
 
 type Props = {
   payload: UsePayload
@@ -34,6 +35,13 @@ function previewQuery(fields: string[], jaren: number[]): string {
   return `query($bsn: BSN!) {\n  ingeschrevenPersoon(bsn: $bsn) {\n    heeftBelastingjaarAangifte(belastingjaren: ${JSON.stringify(jaren)}) {\n      ${selection}\n    }\n  }\n}`
 }
 
+// The Installatie Register's question to LVG (buildOwnershipQuery in
+// dienstverlener-backend/query_kind.go): the PI from the token in $bsn, the
+// VBO-id as asked. LVG answers with that VBO-id or null.
+const LVG_QUERY = `query($bsn: BSN!, $vboId: String!) {\n  vbo(bsn: $bsn, vboId: $vboId) {\n    vboId\n  }\n}`
+
+const DEFAULT_VBO_ID = '0632010000099412'
+
 export default function UseForm({ payload, setPayload, history }: Props) {
   const issuedConsents = useMemo<IssuedConsent[]>(() => {
     const seen = new Set<string>()
@@ -62,18 +70,21 @@ export default function UseForm({ payload, setPayload, history }: Props) {
       .filter((y): y is string => !!y)
       .map(Number)
       .sort((a, b) => a - b)
+    const lvg = scopes.find(isLvgScope)
     setPayload({
       ...payload,
       consent_id: consentId,
       consent_token: consentTokenFor(consentId),
-      scope_id: scopes[0] ?? payload.scope_id,
+      scope_id: lvg ?? scopes[0] ?? payload.scope_id,
       belastingjaren: years.length > 0 ? years : payload.belastingjaren,
+      vbo_id: lvg ? payload.vbo_id || DEFAULT_VBO_ID : payload.vbo_id,
     })
   }
 
   const jaren = payload.belastingjaren ?? [2025]
   const fields = payload.fields ?? DEFAULT_FIELDS
-  const preview = previewQuery(fields, jaren)
+  const lvg = isLvgScope(payload.scope_id)
+  const preview = lvg ? LVG_QUERY : previewQuery(fields, jaren)
 
   return (
     <>
@@ -124,6 +135,23 @@ export default function UseForm({ payload, setPayload, history }: Props) {
       </div>
 
       <div className="field">
+        <label>Afnemer <span className="opt">(volgt uit de scope)</span></label>
+        <div className="inp mono">{consumerFor(payload.scope_id).name}</div>
+      </div>
+
+      {lvg ? (
+        <div className="field">
+          <label htmlFor="vbo">VBO-id <span className="opt">(LVG antwoordt met dit VBO-id als de burger eigenaar is, anders null)</span></label>
+          <input
+            id="vbo"
+            className="inp mono"
+            value={payload.vbo_id ?? ''}
+            onChange={(e) => setPayload({ ...payload, vbo_id: e.target.value.trim() })}
+            placeholder={DEFAULT_VBO_ID}
+          />
+        </div>
+      ) : (
+      <div className="field">
         <label htmlFor="jaren">Belastingjaren <span className="opt">(comma-separated; PDP checkt elk jaar tegen consent-scopes)</span></label>
         <input
           id="jaren"
@@ -138,6 +166,7 @@ export default function UseForm({ payload, setPayload, history }: Props) {
           }}
         />
       </div>
+      )}
 
       <div className="field">
         <label>

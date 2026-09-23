@@ -43,6 +43,7 @@ type config struct {
 	VarDir             string
 	PredefinedDir      string
 	DvtpConsumerPeerID string
+	IrConsumerPeerID   string
 	CitizensFile       string
 	OrganizationsFile  string
 	LokiURL            string
@@ -61,6 +62,10 @@ type config struct {
 }
 
 const defaultDvtpConsumerPeerID = "99999999900000000300"
+
+// defaultIrConsumerPeerID is the Installatie Register's Peer ID: the consumer
+// of every scenario that asks for an LVG scope.
+const defaultIrConsumerPeerID = "99999999900000001000"
 
 // fscTxlogPeer describes one FSC-org whose txlog-api we may query.
 // Demo shortcut: intra-org internal-cert used as client-cert. See
@@ -83,6 +88,7 @@ func loadConfig() config {
 	}{
 		{Prefix: "EDI", Name: "edi", SendGroupID: true},
 		{Prefix: "HV", Name: "hv", SendGroupID: true},
+		{Prefix: "IR", Name: "ir", SendGroupID: true},
 		{Prefix: "BD", Name: "bd", SendGroupID: true},
 		{Prefix: "BD_HV", Name: "bd-via-hv"},
 		{Prefix: "BD_EDI", Name: "bd-via-edi"},
@@ -105,6 +111,7 @@ func loadConfig() config {
 		VarDir:             getEnv("VAR_DIR", "/var"),
 		PredefinedDir:      getEnv("PREDEFINED_DIR", "/scenarios"),
 		DvtpConsumerPeerID: getEnv("DVTP_CONSUMER_PEER_ID", defaultDvtpConsumerPeerID),
+		IrConsumerPeerID:   getEnv("IR_CONSUMER_PEER_ID", defaultIrConsumerPeerID),
 		CitizensFile:       getEnv("CITIZENS_FILE", "/citizens/citizens.json"),
 		OrganizationsFile:  getEnv("ORGANIZATIONS_FILE", "/organizations.json"),
 		LokiURL:            getEnv("LOKI_URL", "http://loki:3100"),
@@ -228,7 +235,7 @@ func loadPredefinedScenarios(cfg config) ([]Scenario, error) {
 		if err := json.Unmarshal(scenarios[i].Payload, &payload); err != nil {
 			return nil, fmt.Errorf("decode predefined scenario %q payload: %w", scenarios[i].ID, err)
 		}
-		peerID, err := json.Marshal(cfg.DvtpConsumerPeerID)
+		peerID, err := json.Marshal(consumerPeerIDFor(cfg, payload["scopes"]))
 		if err != nil {
 			return nil, fmt.Errorf("encode DvTP consumer Peer ID: %w", err)
 		}
@@ -239,6 +246,20 @@ func loadPredefinedScenarios(cfg config) ([]Scenario, error) {
 		}
 	}
 	return scenarios, nil
+}
+
+// consumerPeerIDFor picks the consumer a predefined issuance scenario grants
+// its consent to. In the demo each source has one consumer: LVG's is the
+// Installatie Register, every other scope's is Hypotheek-BV.
+func consumerPeerIDFor(cfg config, rawScopes json.RawMessage) string {
+	var scopes []string
+	_ = json.Unmarshal(rawScopes, &scopes)
+	for _, scope := range scopes {
+		if strings.HasPrefix(scope, "lvg:") {
+			return cfg.IrConsumerPeerID
+		}
+	}
+	return cfg.DvtpConsumerPeerID
 }
 
 func handleScenarios(cfg config) http.HandlerFunc {

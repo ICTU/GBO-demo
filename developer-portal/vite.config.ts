@@ -39,6 +39,11 @@ export default defineConfig({
         rewrite: (p) => p.replace(/^\/dvtp-api/, ''),
         changeOrigin: true,
       },
+      '/ir-api': {
+        target: process.env.IR_API_TARGET ?? 'http://localhost:9410',
+        rewrite: (p) => p.replace(/^\/ir-api/, ''),
+        changeOrigin: true,
+      },
       '/eudi-api': {
         target: process.env.EUDI_API_TARGET ?? 'http://localhost:9409',
         rewrite: (p) => p.replace(/^\/eudi-api/, ''),
