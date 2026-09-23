@@ -199,3 +199,72 @@ func TestWatchNextFiresOncePerTrace(t *testing.T) {
 	hub.ingest(eudiSpan("eeee", "inkomensverklaring_2025"))
 	mustNotRecv(t, late, "watcher armed after the trace started")
 }
+
+func TestIsEntryPointSpan(t *testing.T) {
+	cases := []struct {
+		name  string
+		attrs map[string]string
+		want  bool
+	}{
+		// What the EUDI adapter emits today: stable semconv only.
+		{"stable semconv", map[string]string{"http.request.method": "POST", "url.path": "/pid/", "url.full": "http://eudi-adapter:8080/pid/", "http.response.status_code": "200"}, true},
+		{"legacy semconv", map[string]string{"http.method": "POST", "http.target": "/pid/"}, true},
+		{"legacy route", map[string]string{"http.method": "POST", "http.route": "/"}, true},
+		{"stable health GET", map[string]string{"http.request.method": "GET", "url.path": "/health"}, false},
+		{"no http attributes", map[string]string{}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := traceSpan{Service: "eudi-adapter", Attributes: c.attrs}
+			if got := isEntryPointSpan(s); got != c.want {
+				t.Fatalf("isEntryPointSpan = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+// A wallet-triggered issuance whose spans carry only the stable semconv must
+// still wake the watcher — the regression that left the portal grey.
+func TestWatchNextDeliversStableSemconvEUDITrace(t *testing.T) {
+	hub := newTraceHub(time.Minute)
+	ch, cancel := hub.watchNext("", "pid")
+	defer cancel()
+
+	hub.ingest(traceSpan{
+		TraceID: "stable",
+		Service: "eudi-adapter",
+		Attributes: map[string]string{
+			"http.request.method":       "POST",
+			"url.path":                  "/pid/",
+			"http.response.status_code": "200",
+			"gbo.usecase":               "pid",
+		},
+	})
+	evt, ok := recv(t, ch)
+	if !ok || evt.TraceID != "stable" {
+		t.Fatalf("got %+v ok=%v, want trace stable", evt, ok)
+	}
+}
+
+// dienstverlener-backend runs the same otelhttp as the EUDI adapter, so a
+// browser-started DVTP query arrives with stable semconv only as well.
+func TestWatchNextDeliversStableSemconvDVTPTrace(t *testing.T) {
+	hub := newTraceHub(time.Minute)
+	ch, cancel := hub.watchNext("dev-1", "")
+	defer cancel()
+
+	hub.ingest(traceSpan{
+		TraceID: "dvtp",
+		Service: "dienstverlener-backend",
+		Attributes: map[string]string{
+			"http.request.method":       "POST",
+			"url.path":                  "/api/dvtp/query",
+			"http.response.status_code": "200",
+			"gbo.demo.session":          "dev-1",
+		},
+	})
+	evt, ok := recv(t, ch)
+	if !ok || evt.TraceID != "dvtp" {
+		t.Fatalf("got %+v ok=%v, want trace dvtp", evt, ok)
+	}
+}

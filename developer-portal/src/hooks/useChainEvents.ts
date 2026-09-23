@@ -3,32 +3,9 @@ import {
   EUDI_ISSUANCE_NODE_IDS, ISSUANCE_NODE_IDS, USE_NODE_IDS, bronForSpans, nodeStatesFromSpans,
   type NodeStatus, type SpanInfo,
 } from '../util/spanMapping'
+import { asSpanInfo, type SpanEvent } from '../util/spanEvent'
 import type { BronProfile } from '../data/bronnen'
 import type { Tab } from '../types'
-
-type SpanEvent = {
-  trace_id: string
-  span_id: string
-  parent_id?: string
-  service: string
-  name: string
-  start_nanos: number
-  end_nanos: number
-  status_code: number
-  attributes?: Record<string, string>
-}
-
-function asSpanInfo(e: SpanEvent): SpanInfo {
-  return {
-    serviceName: e.service,
-    operationName: e.name,
-    httpPath: e.attributes?.['http.target'] ?? e.attributes?.['http.url'] ?? '',
-    error: e.status_code === 2 || (e.attributes?.['http.status_code']
-      ? parseInt(e.attributes['http.status_code'], 10) >= 400
-      : false),
-    sourceOIN: e.attributes?.['gbo.source_oin'] || undefined,
-  }
-}
 
 // Subscribes to /events?trace_id=X via SSE. Each span event reveals nodes in
 // the architecture-strip in real time — replaces the Jaeger Query API polling
