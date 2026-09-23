@@ -1,46 +1,44 @@
-// Package main implements the demo "dienstverlener-backend" — the server-side
-// component of a fictive data consumer (Hypotheek-BV). It owns the FSC-client
-// boundary: the browser frontend only talks to this backend, never to FSC or
-// PEP directly. In a production deployment this service would hold mTLS keys
-// and FSC Outway config.
+// Package main is the composition root of the demo consumer backend — the
+// server-side component of a fictive data consumer (Hypotheek-BV, or the
+// Installatie Register with QUERY_KIND=lvg). It owns the FSC-client boundary:
+// the browser frontend only talks to this backend, never to FSC or the PEP
+// directly. In a production deployment this service would hold mTLS keys and
+// FSC Outway config.
 //
-// Endpoint: POST /api/dvtp/query  {consent_token, scope_id?, belastingjaren?}
+// The code is laid out as ports and adapters, one package per dependency:
 //
-//	→ FSC Outway: pick contract by grant-link, sign token, open mTLS to Inway
-//	→ FSC Inway proxy: forward GraphQL query (with PI as bsn variable)
-//	   ↳ PEP → OpenFTV → BSNk Transform → graphql-server
-//	→ return  {allowed, data | reason, trace_id}
+//	consumer/      domain core — the question, the consent token's claims,
+//	               what a citizen may be told. Imports no transport library.
+//	outway/        driven adapter — the source, through the FSC Outway
+//	logbook/       driven adapter — the consumer's Logboek Dataverwerkingen
+//	devportal/     driven adapter — best-effort dev-portal timeline
+//	consumerhttp/  driving adapter — the HTTP API and its trace middleware
+//	main.go        configuration, wiring and process lifecycle, nothing else
 package main
 
 import (
-	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/base64"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
-	"strings"
+	"os/signal"
+	"syscall"
 	"time"
 
+	"gbo-demo/dienstverlener-backend/consumer"
+	"gbo-demo/dienstverlener-backend/consumerhttp"
+	"gbo-demo/dienstverlener-backend/devportal"
+	"gbo-demo/dienstverlener-backend/logbook"
+	"gbo-demo/dienstverlener-backend/outway"
 	ldv "gbo-demo/ldv-client"
 	"github.com/google/uuid"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
-	"go.opentelemetry.io/otel/trace"
-	"os/signal"
-	"syscall"
 )
 
 // readHeaderTimeout bounds how long a client may take to send its request
@@ -51,26 +49,28 @@ const readHeaderTimeout = 10 * time.Second
 // in-flight requests finish, then close whatever is left.
 const shutdownTimeout = 15 * time.Second
 
+// upstreamRequestTimeout bounds one call through the Outway.
+const upstreamRequestTimeout = 30 * time.Second
+
+// ldvDeliveryInterval is how often the LDV spool is drained. Records are
+// durable the moment they are written, so this governs only how quickly they
+// reach the logbook, not whether they do.
+const ldvDeliveryInterval = 2 * time.Second
+
 type config struct {
 	Port             string
 	OrgSector        string
 	DevPortalBackend string
 	OutwayURL        string
 	OutwayPath       string
-	HTTPClient       *http.Client
 	// Kind is what this consumer asks its source (QUERY_KIND): "bd" for
 	// Hypotheek-BV's income data, "lvg" for the Installatie Register's
 	// ownership check.
-	Kind queryKind
-	// Logbook is Hypotheek-BV's own Logboek Dataverwerkingen. Nil means the
-	// consumer writes no records.
-	Logbook *queryLogbook
+	Kind consumer.Kind
 }
 
-const upstreamRequestTimeout = 30 * time.Second
-
 func loadConfig() (config, error) {
-	kind, err := lookupQueryKind(getEnv("QUERY_KIND", "bd"))
+	kind, err := consumer.LookupKind(getEnv("QUERY_KIND", "bd"))
 	if err != nil {
 		return config{}, err
 	}
@@ -81,7 +81,6 @@ func loadConfig() (config, error) {
 		DevPortalBackend: getEnv("DEV_PORTAL_BACKEND_URL", ""),
 		OutwayURL:        getEnv("OUTWAY_URL", "http://hv-outway:8080"),
 		OutwayPath:       getEnv("OUTWAY_PATH", "/bri/graphql"),
-		HTTPClient:       &http.Client{Timeout: upstreamRequestTimeout},
 	}, nil
 }
 
@@ -91,390 +90,6 @@ func getEnv(key, fallback string) string {
 	}
 	return fallback
 }
-
-// ── HTTP helpers ─────────────────────────────────────────────────────────
-
-func corsHeaders(w http.ResponseWriter) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-}
-
-func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-// ── Query handler ────────────────────────────────────────────────────────
-
-type queryRequest struct {
-	ConsentToken   string   `json:"consent_token"`
-	ScopeID        string   `json:"scope_id,omitempty"`
-	Belastingjaren []int    `json:"belastingjaren,omitempty"`
-	Fields         []string `json:"fields,omitempty"`
-	// VboID is the verblijfsobject the Installatie Register asks about.
-	VboID string `json:"vbo_id,omitempty"`
-}
-
-type queryResponse struct {
-	Allowed bool            `json:"allowed"`
-	Data    json.RawMessage `json:"data,omitempty"`
-	// Reason is technical text for logs and the developer portal.
-	Reason string `json:"reason,omitempty"`
-	// DenialCode is what the UI renders; see denial.go.
-	DenialCode string `json:"denial_code,omitempty"`
-	TraceID    string `json:"trace_id"`
-	// FscTransactionID is the identifier that travels through the FSC
-	// chain (Fsc-Transaction-Id → X-Request-Id → the PDP's reconstructed
-	// OTel trace, and therefore the OpenFTV decision-log's input.context.trace_id).
-	// It equals TraceID only when no caller supplied a traceparent; the
-	// dev-portal always does, so decision-log lookups must use this one.
-	FscTransactionID string `json:"fsc_transaction_id,omitempty"`
-	// DeniedYears lists the requested belastingjaren the consent does not
-	// cover. The backend intersects requested years with the consent's
-	// scopes and only queries the covered ones (a query for an
-	// unconsented year would deny the whole request); the frontend
-	// renders the denied years greyed out.
-	DeniedYears []int `json:"denied_years,omitempty"`
-}
-
-// newFscTransactionID returns a UUID v7 used as both the FSC-transaction-id
-// and the OTel-trace-id — one identifier end-to-end across the chain. The
-// FSC-Outway strictly validates v7, so v4 is not accepted.
-func newFscTransactionID() string {
-	u, err := uuid.NewV7()
-	if err != nil {
-		return uuid.NewString()
-	}
-	return u.String()
-}
-
-// fscTxIDCtxKey stashes the Fsc-Transaction-Id generated by the middleware
-// so handleQuery can reuse it (instead of minting a second UUID — which
-// would break the correlation between the response trace_id and the PDP's
-// input.trace_id).
-type fscTxIDCtxKeyType struct{}
-
-var fscTxIDCtxKey = fscTxIDCtxKeyType{}
-
-// withFscTraceContext ties the OTel trace-id to the Fsc-Transaction-Id
-// (UUID v7, 128 bits — exactly the OTel trace-id format). Without it the
-// backend span gets a fresh random trace-id while the PDP reconstructs its
-// trace from the FSC-transaction-id, and the two never match — breaking
-// decision-log lookups by trace_id (dev-portal /explain). Same pattern as
-// the eudi-adapter. Sets the Traceparent header BEFORE otelhttp extracts
-// the parent context.
-func withFscTraceContext(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fscTxID := newFscTransactionID()
-		if r.Header.Get("Traceparent") == "" {
-			traceHex := strings.ReplaceAll(fscTxID, "-", "")
-			spanHex := randomSpanIDHex()
-			if len(traceHex) == 32 && spanHex != "" {
-				r.Header.Set("Traceparent", "00-"+traceHex+"-"+spanHex+"-01")
-			}
-		}
-		r = r.WithContext(context.WithValue(r.Context(), fscTxIDCtxKey, fscTxID))
-		next.ServeHTTP(w, r)
-	})
-}
-
-// withDemoSession copies X-Demo-Session onto the server span, which is how
-// the dev-portal's watch-mode tells one developer's run from another's. It
-// gates nothing. Wrap INSIDE otelhttp, or there is no span to annotate yet.
-func withDemoSession(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s := r.Header.Get("X-Demo-Session"); s != "" {
-			trace.SpanFromContext(r.Context()).SetAttributes(attribute.String("gbo.demo.session", s))
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-// randomSpanIDHex returns 8 bytes of hex — a valid OTel span-id.
-func randomSpanIDHex() string {
-	var b [8]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return ""
-	}
-	return hex.EncodeToString(b[:])
-}
-
-type consentTokenPayload struct {
-	ConsentID string   `json:"consent_id"`
-	PI        string   `json:"pi"`
-	Scopes    []string `json:"scopes"`
-}
-
-// decodeConsentTokenPayload reads only enough context to construct the
-// outgoing query. This is intentionally not an authorization decision: the
-// PDP verifies signature, issuer, audience, time, status and FSC actor before
-// granting access.
-func decodeConsentTokenPayload(token string) (consentTokenPayload, error) {
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return consentTokenPayload{}, fmt.Errorf("consent token is not a compact JWT")
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return consentTokenPayload{}, fmt.Errorf("decode consent token payload: %w", err)
-	}
-	var claims consentTokenPayload
-	if err := json.Unmarshal(payload, &claims); err != nil {
-		return consentTokenPayload{}, fmt.Errorf("decode consent token claims: %w", err)
-	}
-	if claims.ConsentID == "" || claims.PI == "" {
-		return consentTokenPayload{}, fmt.Errorf("consent token misses consent_id or pi")
-	}
-	return claims, nil
-}
-
-func handleQuery(cfg config) http.HandlerFunc {
-	client := cfg.HTTPClient
-	if client == nil {
-		client = &http.Client{Timeout: upstreamRequestTimeout}
-	}
-
-	kind := cfg.Kind
-
-	return func(w http.ResponseWriter, r *http.Request) {
-		corsHeaders(w)
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		if r.Method != http.MethodPost {
-			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
-			return
-		}
-
-		var req queryRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-			return
-		}
-		if req.ConsentToken == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "consent_token is required"})
-			return
-		}
-		if req.ScopeID == "" {
-			req.ScopeID = kind.defaultScope
-		}
-
-		tracer := otel.Tracer("dienstverlener-backend")
-		ctx, span := tracer.Start(r.Context(), "dvtp.query")
-		defer span.End()
-		log := loggerFromCtx(ctx)
-
-		// The backend talks to a real FSC-Outway.
-		//
-		// Step 1 — Read the signed consent artifact to construct the request.
-		// The PDP, not this consumer, is the authority that verifies it.
-		consentContext, err := decodeConsentTokenPayload(req.ConsentToken)
-		if err != nil {
-			log.Warn("consent token decode failed", "err", err.Error())
-			writeJSON(w, http.StatusForbidden, queryResponse{
-				Allowed:    false,
-				Reason:     "invalid_consent_token: " + err.Error(),
-				DenialCode: DenialCodeUnavailable,
-				TraceID:    traceIDFromSpan(span),
-			})
-			return
-		}
-		pi := consentContext.PI
-		fromDevPortal := r.Header.Get("X-Demo-Source") == "dev-portal"
-		built, err := kind.build(req, consentContext, fromDevPortal)
-		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
-		traceID := traceIDFromSpan(span)
-		// The identifier that travels through FSC (and therefore ends up
-		// as the OpenFTV decision-log's trace). The middleware already minted
-		// it; fall back only when the middleware is not in the chain
-		// (unit tests).
-		fscTxID, _ := ctx.Value(fscTxIDCtxKey).(string)
-		if fscTxID == "" {
-			fscTxID = newFscTransactionID()
-		}
-
-		// Step 2 — POST to the Outway at /bri/graphql. The body is pure
-		// GraphQL, with variables.bsn = PI (the sidecar at the source
-		// substitutes it back to BSN). No separate token-fetch is needed:
-		// the Outway picks a contract by grant-link, signs the token
-		// internally, and opens mTLS to the Inway.
-		proxyBody, _ := json.Marshal(map[string]any{
-			"query":     built.query,
-			"variables": built.variables,
-		})
-		proxyReq, _ := http.NewRequestWithContext(ctx, http.MethodPost,
-			cfg.OutwayURL+cfg.OutwayPath, bytes.NewReader(proxyBody))
-		proxyReq.Header.Set("Content-Type", "application/json")
-		// Untrusted context-header: X-GBO-Scope carries the requested scope.
-		// (There is no X-GBO-Flow header and no flow grant property: the
-		// consent token below is what puts this request under the consent
-		// regime, #334.)
-		proxyReq.Header.Set("X-GBO-Scope", req.ScopeID)
-		proxyReq.Header.Set("X-GBO-Consent-Token", req.ConsentToken)
-		proxyReq.Header.Set("Fsc-Transaction-Id", fscTxID)
-		span.SetAttributes(attribute.String("gbo.fsc.transaction_id", fscTxID))
-		otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(proxyReq.Header))
-		// Hypotheek-BV's record of this call is where a reader starts the
-		// chain, so the source's records hang under its span.
-		call := cfg.Logbook.begin(ctx, r)
-		call.inject(proxyReq.Header)
-
-		proxyResp, err := client.Do(proxyReq)
-		statusCode := 0
-		if err == nil {
-			statusCode = proxyResp.StatusCode
-		}
-		if logErr := cfg.Logbook.logSourceCall(ctx, call, req.ScopeID, pi, err, statusCode); logErr != nil {
-			if err == nil {
-				_ = proxyResp.Body.Close()
-			}
-			writeJSON(w, http.StatusInternalServerError, queryResponse{
-				Allowed:          false,
-				Reason:           "the query could not be logged; withholding the answer",
-				DenialCode:       DenialCodeUnavailable,
-				TraceID:          traceID,
-				FscTransactionID: fscTxID,
-			})
-			return
-		}
-		if err != nil {
-			log.Error("fsc outway call failed", "err", err.Error())
-			writeJSON(w, http.StatusBadGateway, queryResponse{
-				Allowed:          false,
-				Reason:           "fsc_outway_call_failed: " + err.Error(),
-				DenialCode:       DenialCodeUnavailable,
-				TraceID:          traceID,
-				FscTransactionID: fscTxID,
-			})
-			return
-		}
-		defer proxyResp.Body.Close()
-		proxyRespBody, _ := io.ReadAll(proxyResp.Body)
-
-		// Skip backend-side history-post when the dev-portal is the trigger;
-		// its frontend already logs the run (X-Demo-Source header signals,
-		// already read above).
-
-		// 200 = ALLOW with data, 403 = DENY with reason, other = error
-		if proxyResp.StatusCode == http.StatusOK {
-			log.Info("query allowed", "consent_id", consentContext.ConsentID, "trace_id", traceID)
-			resp := queryResponse{
-				Allowed:          true,
-				Data:             json.RawMessage(proxyRespBody),
-				TraceID:          traceID,
-				FscTransactionID: fscTxID,
-				DeniedYears:      built.deniedYears,
-			}
-			writeJSON(w, http.StatusOK, resp)
-			if cfg.DevPortalBackend != "" && !fromDevPortal {
-				go postUseHistory(context.WithoutCancel(ctx), cfg.DevPortalBackend, consentContext.ConsentID, req, resp, traceID)
-			}
-			return
-		}
-
-		// The FSC Inway puts the reason in `message`; other upstreams use `reason`.
-		var denyResp struct {
-			Allowed bool   `json:"allowed"`
-			Reason  string `json:"reason"`
-			Message string `json:"message"`
-		}
-		_ = json.Unmarshal(proxyRespBody, &denyResp)
-		reason := denyResp.Reason
-		if reason == "" {
-			reason = denyResp.Message
-		}
-		if reason == "" {
-			reason = fmt.Sprintf("upstream_error: status %d", proxyResp.StatusCode)
-		}
-		policyCode := policyCodeFrom(reason)
-		denialCode := denialCodeFor(reason)
-		log.Info("query denied",
-			"consent_id", consentContext.ConsentID,
-			"reason", reason,
-			"policy_code", policyCode,
-			"denial_code", denialCode,
-			"trace_id", traceID)
-		resp := queryResponse{
-			Allowed:          false,
-			Reason:           reason,
-			DenialCode:       denialCode,
-			TraceID:          traceID,
-			FscTransactionID: fscTxID,
-		}
-		writeJSON(w, http.StatusOK, resp)
-		if cfg.DevPortalBackend != "" && !fromDevPortal {
-			go postUseHistory(context.WithoutCancel(ctx), cfg.DevPortalBackend, consentContext.ConsentID, req, resp, traceID)
-		}
-	}
-}
-
-// Best-effort: log the use-query to dev-portal-backend history. Failures
-// are silent — the afnemer-flow is the primary concern.
-// postUseHistory records the run in the dev-portal timeline. Best-effort: it
-// runs in its own goroutine and every failure is logged and dropped.
-//
-// ctx must outlive the handler — pass context.WithoutCancel(ctx) — so the
-// post keeps the trace context without being cancelled when the handler
-// returns.
-func postUseHistory(ctx context.Context, devURL, consentID string, req queryRequest, qResp queryResponse, traceID string) {
-	outcome := "deny"
-	if qResp.Allowed {
-		outcome = "allow"
-	}
-	entry := map[string]any{
-		"scenario_name": fmt.Sprintf("Afnemer · use · scope %s", req.ScopeID),
-		"tab":           "use",
-		"payload": map[string]any{
-			"consent_id":     consentID,
-			"scope_id":       req.ScopeID,
-			"belastingjaren": req.Belastingjaren,
-			"fields":         req.Fields,
-		},
-		"trace_id":   traceID,
-		"outcome":    outcome,
-		"consent_id": consentID,
-		"response":   qResp,
-	}
-	body, _ := json.Marshal(entry)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, devURL+"/history", bytes.NewReader(body))
-	if err != nil {
-		slog.Warn("dev-portal-backend history post: build failed", "err", err.Error())
-		return
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	// Carry the trace across. Attaching the context alone is not enough: the
-	// client below has a plain transport, so without an explicit inject the
-	// post arrives at the dev-portal with no traceparent and shows up as an
-	// orphan rather than a child of the run that produced it. The service's
-	// other outbound calls already do this.
-	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(httpReq.Header))
-	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		slog.Warn("dev-portal-backend history post: unreachable", "err", err.Error())
-		return
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 300 {
-		slog.Warn("dev-portal-backend history post: bad status", "status", resp.StatusCode)
-	}
-}
-
-func traceIDFromSpan(span trace.Span) string {
-	sc := span.SpanContext()
-	if !sc.IsValid() {
-		return ""
-	}
-	return sc.TraceID().String()
-}
-
-// ── OTel setup ───────────────────────────────────────────────────────────
 
 func setupTracing(ctx context.Context, serviceName string) (func(context.Context) error, error) {
 	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
@@ -498,20 +113,6 @@ func setupTracing(ctx context.Context, serviceName string) (func(context.Context
 	return tp.Shutdown, nil
 }
 
-// ── Main ─────────────────────────────────────────────────────────────────
-
-// newMux builds the routing tree for the backend. Extracted from main so
-// integration tests can wire the handlers to an httptest.Server (with
-// stub OutwayURL in cfg) without starting the real listener.
-func newMux(cfg config) *http.ServeMux {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-	})
-	mux.HandleFunc("/api/dvtp/query", handleQuery(cfg))
-	return mux
-}
-
 func main() {
 	serviceName := getEnv("OTEL_SERVICE_NAME", "dienstverlener-backend")
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}).
@@ -532,8 +133,16 @@ func main() {
 		_ = shutdown(shutCtx)
 	}()
 
-	// Hypotheek-BV's own logbook. Without LDV_LOGBOOK_URL the consumer writes
-	// no records; with one, every call to a source is made durable in a local
+	c := &consumer.Consumer{
+		Kind: cfg.Kind,
+		Source: &outway.Source{
+			URL:    cfg.OutwayURL + cfg.OutwayPath,
+			Client: &http.Client{Timeout: upstreamRequestTimeout},
+		},
+	}
+
+	// The consumer's own logbook. Without LDV_LOGBOOK_URL it writes no
+	// records; with one, every call to a source is made durable in a local
 	// spool before its answer is used, and delivered afterwards.
 	logbookClient, err := ldv.New(ldv.Config{
 		ServiceName: serviceName,
@@ -551,14 +160,19 @@ func main() {
 		defer func() { _ = outbox.Close() }()
 		logbookClient.UseOutbox(outbox)
 		go outbox.Run(ctx, ldvDeliveryInterval)
+		c.Logbook = &logbook.Logbook{
+			Client:       logbookClient,
+			NextLogbooks: logbook.ParseNextLogbooks(os.Getenv("LDV_NEXT_LOGBOOK_IDS")),
+		}
 	}
-	cfg.Logbook = newQueryLogbook(logbookClient, cfg.Kind, parseNextLogbooks(os.Getenv("LDV_NEXT_LOGBOOK_IDS")))
 
-	// Middleware order: withFscTraceContext wraps otelhttp — the header
-	// mutation must happen before otelhttp extracts the parent context.
+	if cfg.DevPortalBackend != "" {
+		c.History = &devportal.History{Base: cfg.DevPortalBackend}
+	}
+
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           withFscTraceContext(otelhttp.NewHandler(withDemoSession(withAccessLog(newMux(cfg))), serviceName)),
+		Handler:           consumerhttp.NewHandler(c, serviceName),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 	slog.Info("starting",

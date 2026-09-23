@@ -1,4 +1,4 @@
-package main
+package consumer
 
 import "regexp"
 
@@ -47,9 +47,9 @@ var disclosableDenyCodes = map[string]bool{
 // around them is not a contract.
 var upstreamCodeToken = regexp.MustCompile(`[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+`)
 
-// policyCodeFrom returns the known code in reason, or "". When several
+// PolicyCode returns the known code in reason, or "". When several
 // appear, the engine.rego priority decides.
-func policyCodeFrom(reason string) string {
+func PolicyCode(reason string) string {
 	best := ""
 	for _, token := range upstreamCodeToken.FindAllString(reason, -1) {
 		if !policyDenyCodes[token] {
@@ -106,7 +106,7 @@ func denyCodePriority(code string) int {
 
 // denialCodeFor returns the code the UI may render for reason.
 func denialCodeFor(reason string) string {
-	if code := policyCodeFrom(reason); disclosableDenyCodes[code] {
+	if code := PolicyCode(reason); disclosableDenyCodes[code] {
 		return code
 	}
 	return DenialCodeUnavailable

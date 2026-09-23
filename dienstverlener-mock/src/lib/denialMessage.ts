@@ -1,5 +1,5 @@
 // Citizen-facing text for a failed retrieval, chosen by denial_code (see
-// services/dienstverlener-backend/denial.go). Anything not named here gets
+// services/dienstverlener-backend/consumer/denial.go). Anything not named here gets
 // the generic message, which does not mention consent.
 
 export type DenialMessage = {

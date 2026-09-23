@@ -239,7 +239,7 @@ the citizen's to see. `ACTOR_NOT_ALLOWED` or `CONSTRAINT_MISMATCH` tells them
 nothing they can act on and describes how the policy is built.
 
 The disclosure decision therefore sits in one place, on the server:
-`services/dienstverlener-backend/denial.go` maps the upstream reason onto a
+`services/dienstverlener-backend/consumer/denial.go` maps the upstream reason onto a
 `denial_code`. Only `CONSENT_WITHDRAWN` and `CONSENT_EXPIRED` pass through —
 both describe a consent the citizen gave and can give again. Everything else,
 including an unrecognised code and every transport failure, becomes
