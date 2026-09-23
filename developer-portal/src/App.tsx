@@ -113,7 +113,7 @@ export default function App() {
       .catch((error: Error) => setEudiOffersError(error.message))
   }, [])
 
-  const { states: archStates, ready: archReady, bron: archBron } = useChainEvents(archTraceId, archMode)
+  const { states: archStates, ready: archReady, bron: archBron, consumer: archConsumer } = useChainEvents(archTraceId, archMode)
   const { data: fscTxlog, loading: fscTxlogLoading, transactionId: fscTxID, overrides: fscOverrides } = useFscTxlog(
     archTraceId ?? undefined, archMode,
   )
@@ -427,6 +427,9 @@ export default function App() {
           traceId={archTraceId ?? undefined}
           pdpTraceIdOverride={fscOverrides.decisionTraceKey ?? undefined}
           bron={archBron}
+          // The trace names its consumer once its backend reports; until
+          // then, the one the use form would go through.
+          consumer={archConsumer ?? consumerFor(usePayload.scope_id)}
           watching={watching}
           onToggleWatch={() => { setWatchShared(false); setWatching((w) => !w) }}
           watchError={watchError}

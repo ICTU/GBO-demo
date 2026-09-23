@@ -3,6 +3,7 @@ import { fetchTrace, spanTag } from '../api/jaegerClient'
 import { fetchDecisions, fetchFscTxlog, type FscTxlogResponse } from '../api/devClient'
 import type { Tab } from '../types'
 import type { NodeStatus } from '../util/spanMapping'
+import { CONSUMERS } from '../util/consumer'
 
 // Bridge between our adapter-trace and the rest of the FSC chain. Broken
 // traceparent propagation (FSC without OTel + AuthZen-plugin using
@@ -122,9 +123,11 @@ function computeOverrides(
       if (peer.peer === 'edi') {
         out['edi-outway'] = 'green'
         out['edi-manager'] = 'green'
-      } else if (peer.peer === 'hv') {
-        out['hv-outway'] = 'green'
-        out['hv-manager'] = 'green'
+      } else if (CONSUMERS.some((c) => c.fscPeer === peer.peer)) {
+        // The use-chain's consumer peer: Hypotheek-BV's or the Installatie
+        // Register's, whichever carried this transaction.
+        out['outway'] = 'green'
+        out['outway-manager'] = 'green'
       } else if (peer.peer === 'bd') {
         out['bd-inway'] = 'green'
       }

@@ -6,6 +6,7 @@ import {
   BD_BRON, BRON_PROFILES, bronNodeForService, bronProfileBySourceOIN, type BronProfile,
 } from '../data/bronnen'
 import type { Tab } from '../types'
+import { CONSUMERS } from './consumer'
 
 export type NodeStatus = 'green' | 'red' | 'yellow' | 'grey' | 'no-otel'
 
@@ -91,25 +92,28 @@ function nodesForSpan(span: SpanInfo, mode: Tab): string[] {
     }
   }
 
-  // USE-flow (DvTP) — now runs on real FSC (Hypotheekverlener-mock).
-  // pep-service and fsc-mock are gone. The sidecar substitutes PI→BSN.
+  // USE-flow (DvTP) — runs on real FSC. The sidecar substitutes PI→BSN.
   switch (svc) {
-    case 'dienstverlener-backend': return ['afnemer']
     case 'pdp-service': return ['pdp']
     case 'opa': return ['opa']
     case 'consent-register': return ['consent-pip']
     case 'bsnk-mock': return ['bsnk']
-    // DvTP reaches the BD bron only — a BRP span in a use-trace would be a
-    // different flow, not this chain.
-    case BD_BRON.gatewaySvc: return ['sidecar']
-    case BD_BRON.bronSvc: return ['bron']
-    default: return []
   }
+  // The consumer's backend and its bron: Hypotheek-BV with the BD pair, the
+  // Installatie Register with the LVG pair. Which of the two a run was
+  // labels the nodes (see useChain); a BRP span in a use-trace would be a
+  // different flow, not this chain.
+  for (const c of CONSUMERS) {
+    if (svc === c.backendSvc) return ['afnemer']
+    if (svc === c.bron.gatewaySvc) return ['sidecar']
+    if (svc === c.bron.bronSvc) return ['bron']
+  }
+  return []
 }
 
 export const ISSUANCE_NODE_IDS = ['actor', 's02', 'bsnk', 's01']
 export const USE_NODE_IDS = [
-  'afnemer', 'hv-outway', 'hv-manager', 'bd-inway',
+  'afnemer', 'outway', 'outway-manager', 'bd-inway',
   'pdp', 'opa', 'consent-pip', 'sidecar', 'bsnk', 'bron',
 ]
 export const EUDI_ISSUANCE_NODE_IDS = [
@@ -165,14 +169,14 @@ export function nodeStatesFromSpans(
   }
 
   if (mode === 'use') {
-    // Same principle for the DvTP branch: OpenFSC containers
-    // hv-outway/hv-manager/bd-inway don't export spans; mark 'no-otel' if
-    // downstream arrived.
+    // Same principle for the DvTP branch: the OpenFSC containers (the
+    // consumer's outway and manager, bd-inway) don't export spans; mark
+    // 'no-otel' if downstream arrived.
     const anyDownstream = ['pdp', 'sidecar', 'bron'].some(
       (n) => result[n] === 'green' || result[n] === 'red',
     )
     if (anyDownstream) {
-      for (const n of ['hv-outway', 'hv-manager', 'bd-inway']) {
+      for (const n of ['outway', 'outway-manager', 'bd-inway']) {
         if (result[n] === 'grey') result[n] = 'no-otel'
       }
     }

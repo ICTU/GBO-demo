@@ -35,12 +35,12 @@ export function statesForIssuance(res: IssuanceResponse | null, error: boolean):
 
 export function statesForUse(res: UseResponse | null, error: boolean): ArchStates {
   // DvTP now follows the same AuthZen path as EUDI. Nodes:
-  //   afnemer → hv-outway → hv-manager (branch) → bd-inway →
+  //   afnemer → outway → outway-manager (branch) → bd-inway →
   //   pdp → opa (branch) + consent-pip (branch) → sidecar → bsnk (branch) → bron
   if (error) {
     return {
       afnemer: 'red',
-      'hv-outway': 'grey', 'hv-manager': 'grey', 'bd-inway': 'grey',
+      outway: 'grey', 'outway-manager': 'grey', 'bd-inway': 'grey',
       pdp: 'grey', opa: 'grey', 'consent-pip': 'grey',
       sidecar: 'grey', bsnk: 'grey', bron: 'grey',
     }
@@ -48,7 +48,7 @@ export function statesForUse(res: UseResponse | null, error: boolean): ArchState
   if (!res) return {}
   if (res.allowed) {
     return {
-      afnemer: 'green', 'hv-outway': 'green', 'hv-manager': 'green', 'bd-inway': 'green',
+      afnemer: 'green', outway: 'green', 'outway-manager': 'green', 'bd-inway': 'green',
       pdp: 'green', opa: 'green', 'consent-pip': 'green',
       sidecar: 'green', bsnk: 'green', bron: 'green',
     }
@@ -56,7 +56,7 @@ export function statesForUse(res: UseResponse | null, error: boolean): ArchState
   // DENY — default: the chain ran up to OPA and denied there.
   const r = (res.reason ?? '').toLowerCase()
   let s: ArchStates = {
-    afnemer: 'green', 'hv-outway': 'green', 'hv-manager': 'green', 'bd-inway': 'green',
+    afnemer: 'green', outway: 'green', 'outway-manager': 'green', 'bd-inway': 'green',
     pdp: 'green', 'consent-pip': 'green',
     opa: 'red', sidecar: 'grey', bsnk: 'grey', bron: 'grey',
   }
@@ -65,7 +65,7 @@ export function statesForUse(res: UseResponse | null, error: boolean): ArchState
   if (r.includes('consent_lookup_failed')) {
     s = {
       afnemer: 'red',
-      'hv-outway': 'grey', 'hv-manager': 'grey', 'bd-inway': 'grey',
+      outway: 'grey', 'outway-manager': 'grey', 'bd-inway': 'grey',
       pdp: 'grey', opa: 'grey', 'consent-pip': 'grey',
       sidecar: 'grey', bsnk: 'grey', bron: 'grey',
     }
@@ -73,8 +73,8 @@ export function statesForUse(res: UseResponse | null, error: boolean): ArchState
   // FSC transport errors (grant/inway) — outway or inway fails.
   else if (r.startsWith('fsc_') || r.includes('unauthorized')) {
     s = {
-      afnemer: 'green', 'hv-outway': 'red',
-      'hv-manager': 'grey', 'bd-inway': 'grey',
+      afnemer: 'green', outway: 'red',
+      'outway-manager': 'grey', 'bd-inway': 'grey',
       pdp: 'grey', opa: 'grey', 'consent-pip': 'grey',
       sidecar: 'grey', bsnk: 'grey', bron: 'grey',
     }

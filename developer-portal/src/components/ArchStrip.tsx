@@ -2,9 +2,9 @@ import { Fragment, useState } from 'react'
 import ArchNode from './ArchNode'
 import NodePopover from './NodePopover'
 import {
-  EUDI_ISSUANCE_BRANCHES, ISSUANCE_CHAIN, USE_BRANCHES, USE_CHAIN,
-  eudiIssuanceChain, type NodeDef,
+  EUDI_ISSUANCE_BRANCHES, ISSUANCE_CHAIN, eudiIssuanceChain, useBranches, useChain, type NodeDef,
 } from '../data/chains'
+import type { Consumer } from '../util/consumer'
 import type { BronProfile } from '../data/bronnen'
 import type { ArchStates } from '../hooks/useArchState'
 import { useDecisions } from '../hooks/useDecisions'
@@ -24,6 +24,9 @@ type Props = {
   // Bronprofiel of the run being shown (EUDI only) — decides which register
   // the last two nodes name. Derived from the trace, see bronForSpans.
   bron?: BronProfile
+  // Consumer of the run being shown (Use only) — decides whose backend, peer
+  // and bron the chain names. Derived from the trace, see consumerForServices.
+  consumer?: Consumer
   watching?: boolean
   onToggleWatch?: () => void
   watchError?: string | null
@@ -43,7 +46,7 @@ function apiCallForNode(nodeId: string, calls: ApiCall[] | undefined): ApiCall |
 }
 
 export default function ArchStrip({
-  mode, setMode, states, apiCalls, traceId, pdpTraceIdOverride, bron,
+  mode, setMode, states, apiCalls, traceId, pdpTraceIdOverride, bron, consumer,
   watching, onToggleWatch, watchError, watchShared, jaegerUrl, grafanaUrl,
 }: Props) {
   // For flows through FSC-Inway (EUDI + DvTP) the PDP decision is found by
@@ -56,9 +59,9 @@ export default function ArchStrip({
   const chain: NodeDef[] =
     mode === 'issuance' ? ISSUANCE_CHAIN
     : mode === 'eudi-issuance' ? eudiIssuanceChain(bron)
-    : USE_CHAIN
+    : useChain(consumer)
   const branches: NodeDef[] =
-    mode === 'use' ? USE_BRANCHES
+    mode === 'use' ? useBranches(consumer)
     : mode === 'eudi-issuance' ? EUDI_ISSUANCE_BRANCHES
     : []
 
@@ -123,7 +126,7 @@ export default function ArchStrip({
     const downstreamRed = ['pdp', 'opa', 'consent-pip', 'sidecar', 'bsnk', 'bron']
       .some((id) => out[id] === 'red')
     if (downstreamRed) {
-      for (const id of ['afnemer', 'hv-outway', 'hv-manager', 'bd-inway', 'edi-outway', 'edi-manager', 'eudi-adapter']) {
+      for (const id of ['afnemer', 'outway', 'outway-manager', 'bd-inway', 'edi-outway', 'edi-manager', 'eudi-adapter']) {
         if (out[id] === 'red') out[id] = 'green'
       }
     }

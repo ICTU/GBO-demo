@@ -71,6 +71,11 @@ export default defineConfig({
         rewrite: (p) => p.replace(/^\/bron-api\/brp/, ''),
         changeOrigin: true,
       },
+      '/bron-api/lvg': {
+        target: process.env.LVG_GRAPHQL_TARGET ?? 'http://localhost:9408',
+        rewrite: (p) => p.replace(/^\/bron-api\/lvg/, ''),
+        changeOrigin: true,
+      },
     },
   },
 })
