@@ -5,6 +5,7 @@ import {
 } from '../util/spanMapping'
 import { asSpanInfo, type SpanEvent } from '../util/spanEvent'
 import type { BronProfile } from '../data/bronnen'
+import { consumerForServices, type Consumer } from '../util/consumer'
 import type { Tab } from '../types'
 
 // Subscribes to /events?trace_id=X via SSE. Each span event reveals nodes in
@@ -14,7 +15,7 @@ import type { Tab } from '../types'
 export function useChainEvents(
   traceId: string | null,
   mode: Tab,
-): { states: Record<string, NodeStatus>; ready: boolean; bron: BronProfile } {
+): { states: Record<string, NodeStatus>; ready: boolean; bron: BronProfile; consumer: Consumer | undefined } {
   const expected = useMemo(
     () => (
       mode === 'issuance' ? ISSUANCE_NODE_IDS
@@ -76,5 +77,12 @@ export function useChainEvents(
   // backstop for runs that never reach the bron).
   const bron = useMemo(() => bronForSpans(collected), [collected])
 
-  return { states, ready, bron }
+  // The consumer this use-run went through — labels the consumer's half of
+  // the use strip. Undefined until its backend or bron shows up.
+  const consumer = useMemo(
+    () => consumerForServices(collected.map((sp) => sp.serviceName)),
+    [collected],
+  )
+
+  return { states, ready, bron, consumer }
 }

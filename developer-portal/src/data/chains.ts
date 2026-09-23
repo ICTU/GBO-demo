@@ -3,6 +3,7 @@
 // — not to an imagined ideal.
 
 import { BD_BRON, type BronProfile } from './bronnen'
+import { HYPOTHEEK_BV, type Consumer } from '../util/consumer'
 
 export type NodeDef = {
   id: string
@@ -19,32 +20,40 @@ export const ISSUANCE_CHAIN: NodeDef[] = [
   { id: 's01', role: 'S01', name: 'Consent-register', svc: 'consent-register' },
 ]
 
-// USE chain (DvTP) — now on real FSC via Hypotheekverlener-mock.
-// fsc-mock + pep-service are gone; DvTP follows the same AuthZen path as
-// EUDI. Difference with EUDI: bron-sidecar substitutes PI→BSN
+// USE chain (DvTP) — on real FSC. DvTP follows the same AuthZen path as
+// EUDI. Difference with EUDI: the sidecar substitutes PI→BSN
 // (subject_id_type=pseudonym from the grant-property).
-export const USE_CHAIN: NodeDef[] = [
-  { id: 'afnemer', role: 'Afnemer', name: 'Afnemer-stack', svc: 'dienstverlener-backend' },
-  { id: 'hv-outway', role: 'FSC', name: 'HV-Outway', svc: 'hv-outway' },
-  { id: 'bd-inway', role: 'FSC', name: 'BD-Inway', svc: 'bd-inway' },
-  // PDP is the logical decision-unit (XACML): context-handler (P3,
-  // context-handler now runs inside the OpenFTV PDP as a request-mapper). The engine hangs as a
-  // branch under the PDP the same way PIP-services do at the PEP. The
-  // PDP-node status reflects the DECISION outcome (override in ArchStrip);
-  // the OPA branch shows engine-status.
-  { id: 'pdp', role: 'PDP', name: 'Policy Decision', svc: 'pdp-service' },
-  // DvTP reaches the BD bron only (see BD_BRON).
-  { id: 'sidecar', role: 'Bron · Gateway', name: BD_BRON.gatewayName, svc: BD_BRON.gatewaySvc },
-  { id: 'bron', role: 'Bron', name: BD_BRON.bronName, svc: BD_BRON.bronSvc },
-]
+//
+// The consumer's half is consumer-dependent: Hypotheek-BV asks the BD bron
+// through its own peer, the Installatie Register asks LVG through its own.
+// Both sources sit behind the same provider Inway (bd-inway). The node ids
+// stay the same for both; which services they name is a labelling matter
+// (see consumerForServices in util/consumer).
+export function useChain(consumer: Consumer = HYPOTHEEK_BV): NodeDef[] {
+  return [
+    { id: 'afnemer', role: 'Afnemer', name: consumer.name, svc: consumer.backendSvc },
+    { id: 'outway', role: 'FSC', name: consumer.outwayName, svc: consumer.outwaySvc },
+    { id: 'bd-inway', role: 'FSC', name: 'BD-Inway', svc: 'bd-inway' },
+    // PDP is the logical decision-unit (XACML): context-handler (P3,
+    // context-handler now runs inside the OpenFTV PDP as a request-mapper). The engine hangs as a
+    // branch under the PDP the same way PIP-services do at the PEP. The
+    // PDP-node status reflects the DECISION outcome (override in ArchStrip);
+    // the OPA branch shows engine-status.
+    { id: 'pdp', role: 'PDP', name: 'Policy Decision', svc: 'pdp-service' },
+    { id: 'sidecar', role: 'Bron · Gateway', name: consumer.bron.gatewayName, svc: consumer.bron.gatewaySvc },
+    { id: 'bron', role: 'Bron', name: consumer.bron.bronName, svc: consumer.bron.bronSvc },
+  ]
+}
 
 // Branches: hang under a parent-node in the Use chain.
-export const USE_BRANCHES: NodeDef[] = [
-  { id: 'hv-manager', role: 'FSC · Manager', name: 'Contract + token', svc: 'hv-manager', branchOf: 'hv-outway' },
-  { id: 'consent-pip', role: 'S01 · PIP', name: 'Consent-PIP', svc: 'consent-register', branchOf: 'pdp' },
-  { id: 'opa', role: 'PDP · engine', name: 'OpenFTV', svc: 'opa', branchOf: 'pdp' },
-  { id: 'bsnk', role: 'BSNk', name: 'PI → BSN', svc: 'bsnk-mock', branchOf: 'sidecar' },
-]
+export function useBranches(consumer: Consumer = HYPOTHEEK_BV): NodeDef[] {
+  return [
+    { id: 'outway-manager', role: 'FSC · Manager', name: 'Contract + token', svc: consumer.managerSvc, branchOf: 'outway' },
+    { id: 'consent-pip', role: 'S01 · PIP', name: 'Consent-PIP', svc: 'consent-register', branchOf: 'pdp' },
+    { id: 'opa', role: 'PDP · engine', name: 'OpenFTV', svc: 'opa', branchOf: 'pdp' },
+    { id: 'bsnk', role: 'BSNk', name: 'PI → BSN', svc: 'bsnk-mock', branchOf: 'sidecar' },
+  ]
+}
 
 // EUDI Route 1 — wallet receives a PuB-EAA credential. Transport uses real
 // OpenFSC. FSC-Inway is the PEP (via the built-in AuthZen plugin that
@@ -87,11 +96,11 @@ export const EUDI_ISSUANCE_BRANCHES: NodeDef[] = [
 
 // Nodes for which we structurally get no OTel spans: browser-/Rust-side
 // steps without OTel instrumentation and OpenFSC containers (bd-inway/
-// edi-outway/edi-manager/hv-outway/hv-manager don't export traces without
-// specific OTel-config). The UI shows these as 'no-otel' instead of
+// edi-outway/edi-manager and the use-chain's outway/outway-manager don't
+// export traces without specific OTel-config). The UI shows these as 'no-otel' instead of
 // 'grey' — absence of data means "not measurable" here, not "not yet".
 export const NO_OTEL_NODE_IDS = new Set<string>([
   'wallet', 'demo-issuer', 'issuance-server',
   'edi-outway', 'bd-inway', 'edi-manager',
-  'hv-outway', 'hv-manager',
+  'outway', 'outway-manager',
 ])

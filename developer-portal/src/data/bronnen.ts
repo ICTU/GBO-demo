@@ -75,6 +75,17 @@ const BRP_EXAMPLE = `# Klik links in de Explorer velden aan om deze query aan te
 }
 `
 
+// Ask LVG whether a citizen owns a verblijfsobject. The answer is that VBO-id,
+// or null when the building is not theirs.
+const LVG_EXAMPLE = `# Is 123456789 eigenaar van Meidoornhof 12? LVG antwoordt met het VBO-id,
+# of met null als het pand niet van deze burger is.
+{
+  vbo(bsn: "123456789", vboId: "0632010000099412") {
+    vboId
+  }
+}
+`
+
 export const BRON_PROFILES: BronProfile[] = [
   {
     id: 'bd',
@@ -98,6 +109,21 @@ export const BRON_PROFILES: BronProfile[] = [
     graphqlPath: '/bron-api/brp/graphql',
     exampleQuery: BRP_EXAMPLE,
   },
+  {
+    // LVG is a logical source on the Belastingdienst's provider peer, so it
+    // shares that OIN: a source_oin lookup finds BD first. Only the DvTP
+    // use-chain reaches LVG, and that chain names its bron through the
+    // consumer (util/consumer), not through the OIN.
+    id: 'lvg',
+    sourceOIN: '99999999900000000200',
+    label: 'LVG',
+    gatewaySvc: 'lvg-sidecar',
+    gatewayName: 'LVG-sidecar',
+    bronSvc: 'lvg-graphql-server',
+    bronName: 'LVG GraphQL-server',
+    graphqlPath: '/bron-api/lvg/graphql',
+    exampleQuery: LVG_EXAMPLE,
+  },
 ]
 
 // Deep-link to the portal's playground for a bron. Same origin as the portal
@@ -107,9 +133,12 @@ export function playgroundUrlFor(bron: BronProfile): string {
 }
 
 // The BD bron: the resting state of the EUDI strip (shown until a run names
-// its own bron) and the only bron the DvTP use-flow reaches — the BRP service
+// its own bron) and Hypotheek-BV's bron in the DvTP use-flow. The BRP service
 // has no pseudonym-contract consumer.
 export const BD_BRON: BronProfile = BRON_PROFILES[0]
+
+// The LVG bron: the Installatie Register's, in the DvTP use-flow.
+export const LVG_BRON: BronProfile = BRON_PROFILES[2]
 
 export function bronProfileById(id: string | undefined): BronProfile | undefined {
   if (!id) return undefined

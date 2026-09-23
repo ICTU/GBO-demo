@@ -1296,6 +1296,7 @@ services:
       # are compose-internal names and ports, not published ones.
       - BD_GRAPHQL_TARGET=http://graphql-server:4000
       - BRP_GRAPHQL_TARGET=http://brp-graphql-server:4001
+      - LVG_GRAPHQL_TARGET=http://lvg-graphql-server:4008
       - VITE_JAEGER_PUBLIC_URL=${JAEGER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_JAEGER:-9686}}
       - VITE_GRAFANA_PUBLIC_URL=${GRAFANA_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_GRAFANA:-9300}}
       - EUDI_API_TARGET=http://eudi-adapter:4009
