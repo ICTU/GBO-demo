@@ -58,12 +58,21 @@ var entryPointRules = []entryPointRule{
 	{"eudi-adapter", "POST", "/"},
 }
 
-func isEntryPointSpan(s traceSpan) bool {
-	method := s.Attributes["http.method"]
-	target := s.Attributes["http.target"]
-	if target == "" {
-		target = s.Attributes["http.route"]
+// firstAttr returns the first non-empty attribute of keys. Services emit
+// both OTel HTTP semantic conventions: the older http.method/http.target and
+// the stable http.request.method/url.path the EUDI services use.
+func firstAttr(s traceSpan, keys ...string) string {
+	for _, k := range keys {
+		if v := s.Attributes[k]; v != "" {
+			return v
+		}
 	}
+	return ""
+}
+
+func isEntryPointSpan(s traceSpan) bool {
+	method := firstAttr(s, "http.method", "http.request.method")
+	target := firstAttr(s, "http.target", "http.route", "url.path")
 	for _, r := range entryPointRules {
 		if r.service == s.Service && r.method == method && strings.HasPrefix(target, r.pathPrefix) {
 			return true

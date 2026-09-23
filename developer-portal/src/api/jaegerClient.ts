@@ -68,7 +68,10 @@ export function isSpanError(span: JaegerSpan): boolean {
   for (const t of span.tags) {
     if (t.key === 'error' && (t.value === true || t.value === 'true')) return true
     if (t.key === 'otel.status_code' && t.value === 'ERROR') return true
-    if (t.key === 'http.status_code' && typeof t.value === 'number' && t.value >= 400) return true
+    // Old and stable OTel HTTP semconv; OTLP int attributes may reach us as strings.
+    if (t.key === 'http.status_code' || t.key === 'http.response.status_code') {
+      if (Number(t.value) >= 400) return true
+    }
   }
   return false
 }
