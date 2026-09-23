@@ -1,0 +1,19 @@
+# Clean (directive-free) SDL for the LVG bron (Landelijke Voorziening
+# Gebouwen) of the LVG/Installatie Register pilot. The PDP uses this as a
+# structural reference to bind queried fields to rules; it is NOT policy —
+# the binding lives in the rules themselves (covers_fields in LVG0001).
+#
+# Mirrored from lvg-graphql-server/main.go buildSchema() — keep in sync when
+# the bron-schema changes. Type names must not collide with the other
+# sources: the field map built from these files is global.
+
+scalar BSN
+
+type Query {
+  "Het verblijfsobject als de burger er eigenaar van is, anders null."
+  vbo(bsn: BSN!, vboId: String!): Verblijfsobject
+}
+
+type Verblijfsobject {
+  vboId: String!
+}

@@ -121,7 +121,7 @@ func TestDvtpQueryHappyPath(t *testing.T) {
 // the source receives its span, so the source's records hang under it.
 func TestAQueryIsLoggedWithAPointerToTheSource(t *testing.T) {
 	const bdLogbook = "https://logboek.belastingdienst.nl/data-processing-operations"
-	logbook := ldvtest.New(t, queryActivity)
+	logbook := ldvtest.New(t, queryKinds["bd"].activity)
 	var received http.Header
 	outway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		received = r.Header.Clone()
@@ -133,7 +133,7 @@ func TestAQueryIsLoggedWithAPointerToTheSource(t *testing.T) {
 	cfg := config{
 		OutwayURL:  outway.URL,
 		OutwayPath: "/bri/graphql",
-		Logbook:    newQueryLogbook(logbook.Client(t, "dienstverlener-backend"), map[string]string{"bd": bdLogbook}),
+		Logbook:    newQueryLogbook(logbook.Client(t, "dienstverlener-backend"), queryKinds["bd"], map[string]string{"bd": bdLogbook}),
 	}
 	srv := httptest.NewServer(newMux(cfg))
 	defer srv.Close()
@@ -154,8 +154,8 @@ func TestAQueryIsLoggedWithAPointerToTheSource(t *testing.T) {
 		t.Fatalf("wrote %d records, want 1: %+v", len(records), records)
 	}
 	record := records[0]
-	if got := record.Attributes[ldv.AttrProcessingActivityID]; got != queryActivity {
-		t.Errorf("processing_activity_id = %v, want %s", got, queryActivity)
+	if got := record.Attributes[ldv.AttrProcessingActivityID]; got != queryKinds["bd"].activity {
+		t.Errorf("processing_activity_id = %v, want %s", got, queryKinds["bd"].activity)
 	}
 	if got := record.Attributes[ldv.AttrNextLogbookID]; got != bdLogbook {
 		t.Errorf("nextLogbookId = %v, want the source's read API %s", got, bdLogbook)
@@ -180,7 +180,7 @@ func TestAQueryIsLoggedWithAPointerToTheSource(t *testing.T) {
 // A call that cannot be logged withholds its answer: the data came in, but it
 // does not go out unrecorded.
 func TestAQueryThatCannotBeLoggedWithholdsTheAnswer(t *testing.T) {
-	logbook := ldvtest.New(t, queryActivity)
+	logbook := ldvtest.New(t, queryKinds["bd"].activity)
 	logbook.RefuseEverything()
 	outway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -191,7 +191,7 @@ func TestAQueryThatCannotBeLoggedWithholdsTheAnswer(t *testing.T) {
 	cfg := config{
 		OutwayURL:  outway.URL,
 		OutwayPath: "/bri/graphql",
-		Logbook:    newQueryLogbook(logbook.Client(t, "dienstverlener-backend"), nil),
+		Logbook:    newQueryLogbook(logbook.Client(t, "dienstverlener-backend"), queryKinds["bd"], nil),
 	}
 	srv := httptest.NewServer(newMux(cfg))
 	defer srv.Close()

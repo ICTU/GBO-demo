@@ -1,0 +1,19 @@
+{
+  "CN": "installatieregister-internal",
+  "hosts": [
+    "ir-controller",
+    "ir-manager",
+    "ir-outway",
+    "ir-txlog-api"
+  ],
+  "key": {
+    "algo": "rsa",
+    "size": 4096
+  },
+  "names": [
+    {
+      "C": "NL",
+      "O": "GBO-DEMO Installatie Register Internal"
+    }
+  ]
+}

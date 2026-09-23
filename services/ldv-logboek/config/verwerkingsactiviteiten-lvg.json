@@ -1,0 +1,55 @@
+{
+  "verantwoordelijke": "Landelijke Voorziening Gebouwen (LVG)",
+  "base_uri": "https://logboek.lvg.test/verwerkingsactiviteiten",
+  "disclaimer": "Demo-stand-in voor een Register van Verwerkingsactiviteiten, voor de LVG/Installatie Register-pilot. Dit is GEEN RvVA en niet het register van de LVG: de inhoud is afgeleid van de scope-definitie en van de infrastructurele verwerkingen in de keten, en heeft geen enkele juridische status. De base_uri is een demo-hostnaam: er staat niets achter.",
+  "activities": [
+    {
+      "id": "lvg-pi-bsn-resolutie",
+      "version": "v1",
+      "name": "Depseudonimisatie polymorfe identiteit naar BSN",
+      "doel": "Een binnenkomende eigendomsvraag van het Installatie Register koppelen aan de juiste persoon, zonder dat het BSN buiten de bron komt.",
+      "grondslag": "Toestemming van de betrokkene.",
+      "categorieen_betrokkenen": [
+        "Eigenaren van een verblijfsobject"
+      ],
+      "categorieen_persoonsgegevens": [
+        "Polymorfe identiteit (PI)",
+        "Burgerservicenummer"
+      ]
+    },
+    {
+      "id": "lvg-bronquery-doorgifte",
+      "version": "v1",
+      "name": "Ontvangen en doorgeven van een bronbevraging",
+      "doel": "Een geautoriseerde bevraging van het Installatie Register aannemen, geschikt maken voor de bron en doorzetten naar de bronservice.",
+      "grondslag": "Toestemming van de betrokkene.",
+      "categorieen_betrokkenen": [
+        "Eigenaren van een verblijfsobject"
+      ],
+      "categorieen_persoonsgegevens": [
+        "Polymorfe identiteit (PI)"
+      ],
+      "ontvangers": [
+        "Bronservice LVG (lvg)"
+      ]
+    },
+    {
+      "id": "lvg-vbo-eigendom",
+      "version": "v1",
+      "name": "Controleren eigendom van een verblijfsobject",
+      "doel": "Bevestigen of de betrokkene eigenaar is van één opgegeven verblijfsobject. Het antwoord is dat verblijfsobject of niets; andere panden van de betrokkene blijven buiten beeld.",
+      "grondslag": "Toestemming van de betrokkene.",
+      "scope_id": "lvg:vbo:eigendom",
+      "categorieen_betrokkenen": [
+        "Eigenaren van een verblijfsobject"
+      ],
+      "categorieen_persoonsgegevens": [
+        "Burgerservicenummer",
+        "Eigendom van het opgegeven verblijfsobject (VBO-id)"
+      ],
+      "ontvangers": [
+        "Installatie Register"
+      ]
+    }
+  ]
+}

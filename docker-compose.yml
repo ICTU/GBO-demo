@@ -547,6 +547,55 @@ services:
       timeout: 3s
       retries: 5
 
+  # The LVG/IR pilot's two Verantwoordelijken: LVG logs the ownership check
+  # and its sidecar's PI resolution, the Installatie Register (like
+  # Hypotheek-BV above, provisionally) logs that it asked.
+  logboek-lvg:
+    build:
+      context: .
+      dockerfile: services/ldv-logboek/Dockerfile
+    ports:
+      - "127.0.0.1:${GBO_PORT_LOGBOEK_LVG:-9421}:4016"
+    environment:
+      - OTEL_SERVICE_NAME=logboek-lvg
+      - DATABASE_PATH=/data/logboek.db
+      - REGISTER_PATH=/config/verwerkingsactiviteiten-lvg.json
+      - LDV_LOGBOOK_ID=https://logboek.lvg.test/data-processing-operations
+      - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
+      - LDV_READ_TOKEN=${LDV_READ_TOKEN:-local-demo-logboek-read-token}
+    volumes:
+      - logboek-lvg-data:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4016/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  logboek-ir:
+    build:
+      context: .
+      dockerfile: services/ldv-logboek/Dockerfile
+    ports:
+      - "127.0.0.1:${GBO_PORT_LOGBOEK_IR:-9422}:4016"
+    environment:
+      - OTEL_SERVICE_NAME=logboek-ir
+      - DATABASE_PATH=/data/logboek.db
+      - REGISTER_PATH=/config/verwerkingsactiviteiten-ir.json
+      - LDV_LOGBOOK_ID=https://logboek.installatieregister.test/data-processing-operations
+      - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
+      - LDV_READ_TOKEN=${LDV_READ_TOKEN:-local-demo-logboek-read-token}
+    volumes:
+      - logboek-ir-data:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4016/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   graphql-server:
     build:
       # Root context: this service depends on the sibling services/ldv-client
@@ -808,6 +857,85 @@ services:
       timeout: 3s
       retries: 5
 
+  # Third logical source: LVG (Landelijke Voorziening Gebouwen), for the
+  # LVG/Installatie Register pilot. Published as service `lvg` under the same
+  # FSC participant as BD and RvIG; only the Installatie Register's peer is
+  # connected to it. It answers one question: does this citizen own this
+  # verblijfsobject? It logs to LVG's logbook, fail-closed.
+  lvg-graphql-server:
+    build:
+      # Root context: this service depends on the sibling services/ldv-client
+      # module, which a context scoped to its own directory cannot see.
+      context: .
+      dockerfile: services/lvg-graphql-server/Dockerfile
+    profiles: [dvtp, full]
+    ports:
+      - "${GBO_PORT_LVG_GRAPHQL:-9408}:4008"
+    environment:
+      - OTEL_SERVICE_NAME=lvg-graphql-server
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - LDV_LOGBOOK_URL=http://logboek-lvg:4016
+      - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
+      - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY_LVG:-local-demo-pseudonym-key-lvg}
+      # lvg:vbo:eigendom becomes .../lvg-vbo-eigendom/v1 in LVG's register.
+      - LDV_SCOPE_ACTIVITY_BASE=https://logboek.lvg.test/verwerkingsactiviteiten
+    volumes:
+      - ldv-outbox-lvg-graphql-server:/data
+    networks:
+      - backend
+      - fsc-infra
+    depends_on:
+      otel-collector:
+        condition: service_started
+      logboek-lvg:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4008/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # The same sidecar image in front of LVG: the Installatie Register sends a
+  # PI (grant property subject_id_type=pseudonym) and this turns it into the
+  # BSN the source speaks.
+  lvg-sidecar:
+    build:
+      context: .
+      dockerfile: services/bron-sidecar/Dockerfile
+    profiles: [dvtp, full]
+    ports:
+      - "${GBO_PORT_LVG_SIDECAR:-9412}:4011"
+    environment:
+      - OTEL_SERVICE_NAME=lvg-sidecar
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - UPSTREAM_URL=http://lvg-graphql-server:4008
+      - BSNK_URL=http://bsnk-mock:4003
+      - OWN_PEER_OIN=99999999900000000200
+      - PSEUDONYM_VARS=bsn
+      - LDV_LOGBOOK_URL=http://logboek-lvg:4016
+      - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
+      - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY_LVG:-local-demo-pseudonym-key-lvg}
+      - LDV_RESOLUTION_ACTIVITY=https://logboek.lvg.test/verwerkingsactiviteiten/lvg-pi-bsn-resolutie/v1
+      - LDV_FORWARD_ACTIVITY=https://logboek.lvg.test/verwerkingsactiviteiten/lvg-bronquery-doorgifte/v1
+      - LDV_BSNK_NEXT_LOGBOOK_ID=https://github.com/ICTU/GBO-demo/tree/main/services/bsnk-mock
+    volumes:
+      - ldv-outbox-lvg-sidecar:/data
+    networks:
+      - backend
+      - fsc-infra
+    depends_on:
+      lvg-graphql-server:
+        condition: service_healthy
+      bsnk-mock:
+        condition: service_healthy
+      logboek-lvg:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4011/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   consent-portal-backend:
     build:
       # Root context: shares services/ldv-client with the other LDV components.
@@ -896,6 +1024,43 @@ services:
       timeout: 3s
       retries: 5
 
+  # The same consumer backend, as the Installatie Register: QUERY_KIND=lvg
+  # asks LVG whether the citizen of the consent owns a verblijfsobject. Its
+  # own FSC peer (...1000) and Outway, so the PDP's actor binding tells it
+  # apart from Hypotheek-BV. It logs each question to LVG in IR's logbook.
+  ir-backend:
+    build:
+      context: .
+      dockerfile: services/dienstverlener-backend/Dockerfile
+    profiles: [dvtp, full]
+    ports:
+      - "${GBO_PORT_IR_BACKEND:-9410}:4010"
+    environment:
+      - PORT=4010
+      - QUERY_KIND=lvg
+      - OTEL_SERVICE_NAME=ir-backend
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      # Grant-link /lvg on the IR Outway (make fsc-seed-lvg) + backend path.
+      - OUTWAY_URL=http://ir-outway:8080
+      - OUTWAY_PATH=/lvg/graphql
+      - ORG_SECTOR=installatieregister
+      - LDV_LOGBOOK_URL=http://logboek-ir:4016
+      - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
+      - LDV_NEXT_LOGBOOK_IDS=lvg=https://logboek.lvg.test/data-processing-operations
+    volumes:
+      - ldv-outbox-ir-backend:/data
+    depends_on:
+      logboek-ir:
+        condition: service_healthy
+    networks:
+      - backend
+      - fsc-infra
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4010/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   # Frontends run as a Vite dev-server (live reload / HMR via source-mount).
   # The Dockerfile has an nginx final stage available — for a production
   # build (`target: final`), build it manually with `docker build`.
@@ -976,6 +1141,37 @@ services:
       dienstverlener-backend:
         condition: service_healthy
 
+  # The Installatie Register (Keyper) of the LVG/IR pilot: the installer's
+  # request, the owner's approval with the DvTP ownership check at LVG, and
+  # the installer's data behind a recurring check. Its IR state is mock and
+  # lives in the browser; the LVG question goes through ir-backend and FSC.
+  keyper-mock:
+    build:
+      context: ./keyper-mock
+      target: build
+    profiles: [dvtp, full]
+    command: npm run dev -- --host 0.0.0.0 --port 9004
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+      - IR_API_TARGET=http://ir-backend:4010
+      - VITE_CONSUMER_PEER_ID=${IR_PEER_ID:-99999999900000001000}
+      # Not one port up from this app, unlike the dienstverlener-mock.
+      - VITE_CONSENT_PORTAL_URL=${TOESTEMMINGSPORTAAL_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_TOESTEMMINGSPORTAAL:-9002}}
+    volumes:
+      - ./keyper-mock/src:/app/src
+      - ./keyper-mock/public:/app/public
+      - ./keyper-mock/index.html:/app/index.html
+      - ./keyper-mock/vite.config.ts:/app/vite.config.ts
+      - ./keyper-mock/tsconfig.json:/app/tsconfig.json
+    ports:
+      - "${GBO_PORT_KEYPER_MOCK:-9004}:9004"
+    networks:
+      - frontend
+      - backend
+    depends_on:
+      ir-backend:
+        condition: service_healthy
+
   toestemmingsportaal-frontend:
     build:
       context: ./toestemmingsportaal-frontend
@@ -987,7 +1183,7 @@ services:
       - PORTAL_API_TARGET=http://consent-portal-backend:4005
       # The bearer consent token may only return to explicitly trusted
       # consumer origins. Multiple origins can be supplied comma-separated.
-      - VITE_ALLOWED_RETURN_ORIGINS=${DIENSTVERLENER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_DV_MOCK:-9001}}
+      - VITE_ALLOWED_RETURN_ORIGINS=${DIENSTVERLENER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_DV_MOCK:-9001}},${KEYPER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_KEYPER_MOCK:-9004}}
     volumes:
       - ./toestemmingsportaal-frontend/src:/app/src
       - ./toestemmingsportaal-frontend/public:/app/public
@@ -1024,7 +1220,7 @@ services:
       # dpl.read.nextLogbookId holds, so the view can follow a pointer to an
       # address; "start" marks the logbooks of applications that start a
       # processing, where a reader begins.
-      - LDV_LOGBOOKS=https://logboek.hypotheek-bv.test/data-processing-operations=Hypotheek-BV=http://logboek-afnemer:4016=start,https://logboek.gbo.overheid.nl/eudi-adapter/data-processing-operations=GBO EUDI-adapter=http://logboek-eudi-adapter:4016=start,https://logboek.belastingdienst.nl/data-processing-operations=Belastingdienst=http://logboek-bd:4016,https://logboek.rvig.nl/data-processing-operations=RvIG=http://logboek-brp:4016,https://logboek.gbo.overheid.nl/toestemming/data-processing-operations=GBO toestemming=http://logboek-toestemming:4016
+      - LDV_LOGBOOKS=https://logboek.hypotheek-bv.test/data-processing-operations=Hypotheek-BV=http://logboek-afnemer:4016=start,https://logboek.gbo.overheid.nl/eudi-adapter/data-processing-operations=GBO EUDI-adapter=http://logboek-eudi-adapter:4016=start,https://logboek.belastingdienst.nl/data-processing-operations=Belastingdienst=http://logboek-bd:4016,https://logboek.rvig.nl/data-processing-operations=RvIG=http://logboek-brp:4016,https://logboek.gbo.overheid.nl/toestemming/data-processing-operations=GBO toestemming=http://logboek-toestemming:4016,https://logboek.installatieregister.test/data-processing-operations=Installatie Register=http://logboek-ir:4016=start,https://logboek.lvg.test/data-processing-operations=LVG=http://logboek-lvg:4016
       - LDV_READ_TOKEN=${LDV_READ_TOKEN:-local-demo-logboek-read-token}
       - FSC_TXLOG_EDI_URL=https://edi-txlog-api:9443
       - FSC_TXLOG_EDI_CERT=/certs/edi/internal-cert.pem
@@ -1034,6 +1230,10 @@ services:
       - FSC_TXLOG_HV_CERT=/certs/hv/internal-cert.pem
       - FSC_TXLOG_HV_KEY=/certs/hv/internal-cert-key.pem
       - FSC_TXLOG_HV_CA=/certs/hv/intermediate_ca.pem
+      - FSC_TXLOG_IR_URL=https://ir-txlog-api:9443
+      - FSC_TXLOG_IR_CERT=/certs/ir/internal-cert.pem
+      - FSC_TXLOG_IR_KEY=/certs/ir/internal-cert-key.pem
+      - FSC_TXLOG_IR_CA=/certs/ir/intermediate_ca.pem
       - FSC_TXLOG_BD_URL=https://bd-txlog-api:9443
       - FSC_TXLOG_BD_CERT=/certs/bd/internal-cert.pem
       - FSC_TXLOG_BD_KEY=/certs/bd/internal-cert-key.pem
@@ -1057,6 +1257,7 @@ services:
       - ./services/dev-portal-backend/rules.json:/rules.json:ro
       - ./fsc-infra/orgs/edi-issuer/pki/internal:/certs/edi:ro
       - ./fsc-infra/orgs/hypotheekverlener-mock/pki/internal:/certs/hv:ro
+      - ./fsc-infra/orgs/installatieregister/pki/internal:/certs/ir:ro
       - ./fsc-infra/orgs/belastingdienst-mock/pki/internal:/certs/bd:ro
     networks:
       - backend
@@ -1087,6 +1288,7 @@ services:
       - DEV_API_TARGET=http://dev-portal-backend:4007
       - PORTAL_API_TARGET=http://consent-portal-backend:4005
       - DVTP_API_TARGET=http://dienstverlener-backend:4006
+      - IR_API_TARGET=http://ir-backend:4010
       - JAEGER_API_TARGET=http://jaeger:16686
       # Bron-GraphQL behind the portal's own origin: the playground on
       # /playground queries /bron-api/<bron>/graphql, which the dev-server
@@ -1423,7 +1625,12 @@ volumes:
   logboek-toestemming-data:
   logboek-eudi-adapter-data:
   logboek-afnemer-data:
+  logboek-lvg-data:
+  logboek-ir-data:
   ldv-outbox-dienstverlener-backend:
+  ldv-outbox-ir-backend:
+  ldv-outbox-lvg-graphql-server:
+  ldv-outbox-lvg-sidecar:
   postgres-eudi-data:
   postgres-ftv-data:
   eudi-tsl-publish:

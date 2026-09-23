@@ -1,0 +1,24 @@
+{
+  "verantwoordelijke": "Installatie Register",
+  "base_uri": "https://logboek.installatieregister.test/verwerkingsactiviteiten",
+  "disclaimer": "Demo-stand-in voor een Register van Verwerkingsactiviteiten van het Installatie Register in de LVG-pilot. Dit is GEEN RvVA en niet het register van het Installatie Register. Een private afnemer valt niet onder LDV; de demo past het hier voorlopig toe, zodat een lezer een keten kan beginnen bij de partij die de verwerking startte. De base_uri is een demo-hostnaam: er staat niets achter.",
+  "activities": [
+    {
+      "id": "ir-eigendom-controleren",
+      "version": "v1",
+      "name": "Controleren eigendom van een pand bij de LVG",
+      "doel": "Vaststellen dat degene die toestemming geeft voor het delen van installatiegegevens eigenaar is van het pand, bij de goedkeuring en opnieuw bij iedere opvraging door een installateur.",
+      "grondslag": "Toestemming van de betrokkene.",
+      "categorieen_betrokkenen": [
+        "Eigenaren van een pand met geregistreerde installaties"
+      ],
+      "categorieen_persoonsgegevens": [
+        "Polymorfe identiteit (PI) voor de afnemer",
+        "VBO-id van het pand"
+      ],
+      "ontvangers": [
+        "Installatie Register"
+      ]
+    }
+  ]
+}

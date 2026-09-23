@@ -1,5 +1,5 @@
-// LDV wiring for the consumer: which of Hypotheek-BV's processings is a
-// Dataverwerking, and where it continues.
+// LDV wiring for the consumer: which of its processings is a Dataverwerking,
+// and where it continues.
 //
 // A private party is not bound by LDV. The demo applies it provisionally, in a
 // logbook that is Hypotheek-BV's own: the read extension starts a chain at the
@@ -16,10 +16,6 @@ import (
 	ldv "gbo-demo/ldv-client"
 )
 
-// queryActivity is Hypotheek-BV's verwerkingsactiviteit for asking a source
-// for the income data a mortgage assessment needs.
-const queryActivity = "https://logboek.hypotheek-bv.test/verwerkingsactiviteiten/hbv-inkomensgegevens-opvragen/v1"
-
 // ldvDeliveryInterval is how often the LDV spool is drained. Records are
 // durable the moment they are written, so this governs only how quickly they
 // reach the logbook, not whether they do.
@@ -30,6 +26,10 @@ const ldvDeliveryInterval = 2 * time.Second
 // consumer writes no records, so the methods below are nil-safe.
 type queryLogbook struct {
 	*ldv.Client
+	// activity and recordName come from the consumer's query kind: which of
+	// its verwerkingsactiviteiten a call to its source is.
+	activity   string
+	recordName string
 	// nextLogbooks maps a source, named by the prefix of its scopes ("bd" in
 	// "bd:ib:2025"), onto the read API of that source's logbook — the value of
 	// dpl.read.nextLogbookId. In a deployment it comes from the source's
@@ -38,11 +38,11 @@ type queryLogbook struct {
 }
 
 // newQueryLogbook wraps a client, or returns nil when there is none.
-func newQueryLogbook(client *ldv.Client, nextLogbooks map[string]string) *queryLogbook {
+func newQueryLogbook(client *ldv.Client, kind queryKind, nextLogbooks map[string]string) *queryLogbook {
 	if client == nil {
 		return nil
 	}
-	return &queryLogbook{Client: client, nextLogbooks: nextLogbooks}
+	return &queryLogbook{Client: client, activity: kind.activity, recordName: kind.recordName, nextLogbooks: nextLogbooks}
 }
 
 // parseNextLogbooks reads a "source=logbookID,source=logbookID" mapping. A
@@ -108,11 +108,11 @@ func (l *queryLogbook) logSourceCall(ctx context.Context, call sourceCall, scope
 	record := ldv.Record{
 		TraceID:   call.traceID,
 		SpanID:    call.spanID,
-		Name:      "dataverwerking.inkomensgegevens-opvragen",
+		Name:      l.recordName,
 		Status:    status,
 		StartTime: call.start,
 		EndTime:   time.Now().UTC(),
-		Attributes: ldv.Attributes(queryActivity, pi, ldv.SubjectTypePI, "", map[string]any{
+		Attributes: ldv.Attributes(l.activity, pi, ldv.SubjectTypePI, "", map[string]any{
 			// Where this processing continues: the source logs its half of
 			// the request under the same trace id.
 			ldv.AttrNextLogbookID: l.nextLogbooks[source],
