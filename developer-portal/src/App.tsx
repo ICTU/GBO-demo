@@ -20,8 +20,9 @@ import { fetchDecisions } from './api/devClient'
 import { newTraceContext } from './util/trace'
 import { consentTokenFor, storeConsentToken } from './util/consentTokens'
 import { loadIssuanceOffers, type IssuanceOffer } from './eudi'
+import { consumerFor, DEFAULT_VBO_ID, isLvgScope } from './util/consumer'
 import type {
-  ApiCall, EudiPayload, IssuancePayload, IssuanceResponse, Scenario, Tab, UsePayload, UseResponse,
+  ApiCall, EudiPayload, HistoryRun, IssuancePayload, IssuanceResponse, Scenario, Tab, UsePayload, UseResponse,
 } from './types'
 
 const EMPTY_ISSUANCE: IssuancePayload = {
@@ -255,10 +256,19 @@ export default function App() {
       setEudiPayload({ ...EMPTY_EUDI, ...(s.payload as EudiPayload) })
     } else {
       const scenarioUse = s.payload as UsePayload
+      // A consent is only usable through its own consumer: the scenario's
+      // scope picks that consumer, and a consent issued for the other one
+      // would be refused on actor binding rather than show what the
+      // scenario is about. Within the consumer any consent will do — deny
+      // scenarios deliberately ask for a scope it does not cover.
+      const consumer = consumerFor(scenarioUse.scope_id)
+      const sameConsumer = (h: HistoryRun) =>
+        ((h.payload as IssuancePayload).scopes ?? []).some((s) => consumerFor(s) === consumer)
       const latestIssued = history.find(
-        (h) => h.tab === 'issuance' && h.outcome === 'allow' && h.consent_id,
+        (h) => h.tab === 'issuance' && h.outcome === 'allow' && h.consent_id && sameConsumer(h),
       )?.consent_id ?? ''
-      const effectiveCid = scenarioUse.consent_id || usePayload.consent_id || latestIssued
+      const currentCid = consumerFor(usePayload.scope_id) === consumer ? usePayload.consent_id : ''
+      const effectiveCid = scenarioUse.consent_id || currentCid || latestIssued
       setUsePayload({
         ...EMPTY_USE,
         ...scenarioUse,
@@ -328,12 +338,14 @@ export default function App() {
         // scope, belastingjaren = every bd:ib:<year> scope — so a
         // both-years consent yields a both-years query by default.
         const issuedYears = scopeYears(issuancePayload.scopes)
+        const lvg = issuancePayload.scopes.find(isLvgScope)
         setUsePayload((u) => ({
           ...u,
           consent_id: res.consent_id,
           consent_token: res.consent_token,
-          scope_id: issuancePayload.scopes[0] ?? u.scope_id,
+          scope_id: lvg ?? issuancePayload.scopes[0] ?? u.scope_id,
           belastingjaren: issuedYears.length > 0 ? issuedYears : u.belastingjaren,
+          vbo_id: lvg ? u.vbo_id || DEFAULT_VBO_ID : u.vbo_id,
         }))
       } else {
         const res: UseResponse = await useQuery(usePayload, ctx.header)

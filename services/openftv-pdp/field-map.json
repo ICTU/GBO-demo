@@ -31,6 +31,7 @@
   "Query.__type": "__Type",
   "Query.akteVanOverlijden": "AkteVanOverlijden",
   "Query.ingeschrevenPersoon": "IngeschrevenPersoon",
+  "Query.vbo": "Verblijfsobject",
   "__Directive.args": "__InputValue",
   "__Field.args": "__InputValue",
   "__Field.type": "__Type",

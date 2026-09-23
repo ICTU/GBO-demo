@@ -21,6 +21,7 @@ export type CreateConsentRequest = {
   dienstverlener_oin: string
   scopes: string[]
   validity_seconds?: number
+  use_case?: string
 }
 
 export type CreateConsentResponse = {

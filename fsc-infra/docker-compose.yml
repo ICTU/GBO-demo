@@ -1312,5 +1312,168 @@ services:
       pdp-migrations-txlog-api:
         condition: service_started
 
+
+  # Installatie Register (Peer ID ...1000): the DvTP consumer that asks LVG
+  # whether a citizen owns a building. A peer of its own so the PDP's actor
+  # binding tells it apart from Hypotheek-BV.
+  ir-migrations-controller:
+    image: federatedserviceconnectivity/controller:v2.4.0
+    restart: on-failure
+    command: [/usr/local/bin/controller, migrate, up]
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_ir_controller?sslmode=disable&connect_timeout=2"
+    volumes:
+      - ./orgs/installatieregister/pki:/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  ir-migrations-manager:
+    image: federatedserviceconnectivity/manager:v2.4.0
+    restart: on-failure
+    command: [/usr/local/bin/manager, migrate, up]
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_ir_manager?sslmode=disable&connect_timeout=2"
+    volumes:
+      - ./orgs/installatieregister/pki:/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  ir-migrations-txlog-api:
+    image: federatedserviceconnectivity/txlog-api:v2.4.0
+    restart: on-failure
+    command: [/usr/local/bin/txlog-api, migrate, up]
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_ir_txlog?sslmode=disable&connect_timeout=2"
+    volumes:
+      - ./orgs/installatieregister/pki:/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  ir-controller:
+    image: federatedserviceconnectivity/controller:v2.4.0
+    restart: unless-stopped
+    ports:
+      - "${FSC_PORT_IR_CONTROLLER:-8100}:3001"
+    volumes:
+      - ./orgs/installatieregister/pki:/certs:ro
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      LISTEN_ADDRESS_UI: 0.0.0.0:3001
+      LISTEN_ADDRESS_REGISTRATION_API: 0.0.0.0:9443
+      LISTEN_ADDRESS_ADMINISTRATION_API: 0.0.0.0:9444
+      MANAGER_ADDRESS_INTERNAL: https://ir-manager:9443
+      DIRECTORY_ADDRESS: https://directory-manager:8443
+      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_ir_controller?sslmode=disable&connect_timeout=2"
+      AUDITLOG_TYPE: "stdout"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ir-manager:
+        condition: service_started
+      ir-migrations-controller:
+        condition: service_started
+
+  ir-manager:
+    image: federatedserviceconnectivity/manager:v2.4.0
+    restart: unless-stopped
+    volumes:
+      - ./orgs/installatieregister/pki:/certs:ro
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      TLS_GROUP_CERT: /certs/org/installatieregister.pem
+      TLS_GROUP_KEY: /certs/org/installatieregister-key.pem
+      TLS_GROUP_TOKEN_CERT: /certs/org/installatieregister.pem
+      TLS_GROUP_TOKEN_KEY: /certs/org/installatieregister-key.pem
+      TLS_GROUP_CONTRACT_CERT: /certs/org/installatieregister.pem
+      TLS_GROUP_CONTRACT_KEY: /certs/org/installatieregister-key.pem
+      TLS_INTERNAL_UNAUTHENTICATED_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_INTERNAL_UNAUTHENTICATED_CERT: /certs/internal/internal-cert.pem
+      TLS_INTERNAL_UNAUTHENTICATED_KEY: /certs/internal/internal-cert-key.pem
+      LISTEN_ADDRESS_INTERNAL: 0.0.0.0:9443
+      LISTEN_ADDRESS_INTERNAL_UNAUTHENTICATED: 0.0.0.0:9444
+      LISTEN_ADDRESS_EXTERNAL: 0.0.0.0:8443
+      CONTROLLER_REGISTRATION_API_ADDRESS: https://ir-controller:9443
+      TX_LOG_API_ADDRESS: https://ir-txlog-api:9443
+      SELF_ADDRESS: "https://ir-manager:8443"
+      DIRECTORY_MANAGER_ADDRESS: "https://directory-manager:8443"
+      DIRECTORY_PEER_ID: "99999999900000000000"
+      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_ir_manager?sslmode=disable&connect_timeout=2"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ir-migrations-manager:
+        condition: service_started
+      ir-txlog-api:
+        condition: service_started
+
+  ir-outway:
+    image: federatedserviceconnectivity/outway:v2.4.0
+    restart: unless-stopped
+    volumes:
+      - ./orgs/installatieregister/pki:/certs:ro
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      TLS_GROUP_CERT: /certs/org/installatieregister.pem
+      TLS_GROUP_KEY: /certs/org/installatieregister-key.pem
+      LISTEN_ADDRESS: 0.0.0.0:8080
+      NAME: IrOutway-01
+      CONTROLLER_REGISTRATION_API_ADDRESS: https://ir-controller:9443
+      TX_LOG_API_ADDRESS: https://ir-txlog-api:9443
+      MANAGER_INTERNAL_ADDRESS: https://ir-manager:9443
+      ENABLE_GRANT_HASH_SUGGESTION: "true"
+    depends_on:
+      - ir-controller
+      - ir-manager
+      - ir-txlog-api
+
+  ir-txlog-api:
+    image: federatedserviceconnectivity/txlog-api:v2.4.0
+    restart: unless-stopped
+    volumes:
+      - ./orgs/installatieregister/pki:/certs:ro
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      STORAGE_POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_ir_txlog?sslmode=disable&connect_timeout=2"
+      LISTEN_ADDRESS: 0.0.0.0:9443
+      LISTEN_ADDRESS_PLAIN: 0.0.0.0:8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ir-migrations-txlog-api:
+        condition: service_started
 volumes:
   postgres-data:

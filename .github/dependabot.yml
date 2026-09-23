@@ -18,6 +18,7 @@ updates:
     directories:
       - /developer-portal
       - /dienstverlener-mock
+      - /keyper-mock
       - /landing-page
       - /toestemmingsportaal-frontend
       - /services/bron-sidecar
@@ -28,6 +29,7 @@ updates:
       - /services/dienstverlener-backend
       - /services/eudi-adapter
       - /services/graphql-server
+      - /services/lvg-graphql-server
     schedule:
       interval: weekly
     commit-message:
@@ -53,6 +55,7 @@ updates:
     directories:
       - /developer-portal
       - /dienstverlener-mock
+      - /keyper-mock
       - /landing-page
       - /toestemmingsportaal-frontend
     schedule:

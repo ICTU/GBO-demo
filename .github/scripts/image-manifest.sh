@@ -91,9 +91,11 @@ dev-portal-backend|.|./services/dev-portal-backend/Dockerfile|services/dev-porta
 developer-portal|./developer-portal|./developer-portal/Dockerfile|developer-portal|linux/amd64|false|developer-portal
 dienstverlener-backend|.|./services/dienstverlener-backend/Dockerfile|services/dienstverlener-backend services/ldv-client|linux/amd64|false|dienstverlener-backend
 dienstverlener-mock|./dienstverlener-mock|./dienstverlener-mock/Dockerfile|dienstverlener-mock|linux/amd64|false|dienstverlener-mock
+keyper-mock|./keyper-mock|./keyper-mock/Dockerfile|keyper-mock|linux/amd64|false|keyper-mock
 dvtp-onboarding-register|./services/dvtp-onboarding-register|./services/dvtp-onboarding-register/Dockerfile|services/dvtp-onboarding-register|linux/amd64|false|dvtp-onboarding-register
 eudi-adapter|.|./services/eudi-adapter/Dockerfile|services/eudi-adapter services/ldv-client|linux/amd64|false|eudi-adapter
 graphql-server|.|./services/graphql-server/Dockerfile|services/graphql-server services/ldv-client|linux/amd64|false|graphql-server
+lvg-graphql-server|.|./services/lvg-graphql-server/Dockerfile|services/lvg-graphql-server services/ldv-client|linux/amd64|false|lvg-graphql-server
 ldv-logboek|.|./services/ldv-logboek/Dockerfile|services/ldv-logboek services/ldv-client|linux/amd64|false|ldv-logboek
 landing-page|./landing-page|./landing-page/Dockerfile|landing-page|linux/amd64|false|landing-page
 openftv-pdp|.|./services/openftv-pdp/Dockerfile|services/openftv-pdp policies|linux/amd64|false|openftv-pdp

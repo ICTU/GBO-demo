@@ -25,7 +25,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -59,6 +58,10 @@ type config struct {
 	OutwayURL        string
 	OutwayPath       string
 	HTTPClient       *http.Client
+	// Kind is what this consumer asks its source (QUERY_KIND): "bd" for
+	// Hypotheek-BV's income data, "lvg" for the Installatie Register's
+	// ownership check.
+	Kind queryKind
 	// Logbook is Hypotheek-BV's own Logboek Dataverwerkingen. Nil means the
 	// consumer writes no records.
 	Logbook *queryLogbook
@@ -66,15 +69,20 @@ type config struct {
 
 const upstreamRequestTimeout = 30 * time.Second
 
-func loadConfig() config {
+func loadConfig() (config, error) {
+	kind, err := lookupQueryKind(getEnv("QUERY_KIND", "bd"))
+	if err != nil {
+		return config{}, err
+	}
 	return config{
+		Kind:             kind,
 		Port:             getEnv("PORT", "4006"),
 		OrgSector:        getEnv("ORG_SECTOR", "hypotheekverlener"),
 		DevPortalBackend: getEnv("DEV_PORTAL_BACKEND_URL", ""),
 		OutwayURL:        getEnv("OUTWAY_URL", "http://hv-outway:8080"),
 		OutwayPath:       getEnv("OUTWAY_PATH", "/bri/graphql"),
 		HTTPClient:       &http.Client{Timeout: upstreamRequestTimeout},
-	}
+	}, nil
 }
 
 func getEnv(key, fallback string) string {
@@ -105,6 +113,8 @@ type queryRequest struct {
 	ScopeID        string   `json:"scope_id,omitempty"`
 	Belastingjaren []int    `json:"belastingjaren,omitempty"`
 	Fields         []string `json:"fields,omitempty"`
+	// VboID is the verblijfsobject the Installatie Register asks about.
+	VboID string `json:"vbo_id,omitempty"`
 }
 
 type queryResponse struct {
@@ -220,93 +230,13 @@ func decodeConsentTokenPayload(token string) (consentTokenPayload, error) {
 	return claims, nil
 }
 
-// consentedYears extracts the belastingjaren covered by granted scopes of
-// the form bd:ib:<year>.
-func consentedYears(scopes []string) []int {
-	var years []int
-	for _, s := range scopes {
-		rest, ok := strings.CutPrefix(s, "bd:ib:")
-		if !ok {
-			continue
-		}
-		if y, err := strconv.Atoi(rest); err == nil {
-			years = append(years, y)
-		}
-	}
-	return years
-}
-
-// intersectYears splits the requested years into the ones covered by the
-// consent (queryable) and the rest (denied).
-func intersectYears(requested, consented []int) (allowed, denied []int) {
-	set := make(map[int]bool, len(consented))
-	for _, y := range consented {
-		set[y] = true
-	}
-	for _, y := range requested {
-		if set[y] {
-			allowed = append(allowed, y)
-		} else {
-			denied = append(denied, y)
-		}
-	}
-	return allowed, denied
-}
-
-// buildQuery renders the GraphQL query against the BD bron-schema. The
-// query uses `bsn` as its argument, but the actual value passed in the
-// variable is a PI. This matches the EUDI shape exactly. The sidecar at
-// the source resolves PI→BSN (subject_id_type=pseudonym), so the source
-// always sees a BSN. The `$bsn` variable name is kept explicit so the PDP
-// AST-parser picks it up as the bsn argument.
-//
-// The belastingjaren filter travels INSIDE the query: the bron returns
-// all aangiften for a person, so per-year consent is only enforceable by
-// policy when the PDP can see the requested years (rule DVT0001's
-// years_in_scopes check). Default = the two most recent years.
-//
-// `fields` is an optional field-selection; empty = default set of 5
-// fields. Bedrag-fields (verzamelinkomen, box*Inkomen) only exist on the
-// concrete AangifteIH type, so they are wrapped in an inline fragment
-// with their scalar leaves selected. Scenarios that want to test
-// out-of-scope fields (e.g. box2Inkomen) set fields explicitly.
-func buildQuery(jaren []int, fields []string) string {
-	if len(jaren) == 0 {
-		jaren = []int{2024, 2025}
-	}
-	if len(fields) == 0 {
-		fields = []string{"belastingjaar", "verzamelinkomen", "box1Inkomen", "status", "indieningsdatum"}
-	}
-	var plain, bedragen []string
-	for _, f := range fields {
-		if bedragFields[f] {
-			bedragen = append(bedragen, f+" { waarde valuta }")
-		} else {
-			plain = append(plain, f)
-		}
-	}
-	selection := strings.Join(plain, " ")
-	if len(bedragen) > 0 {
-		selection += " ... on AangifteIH { " + strings.Join(bedragen, " ") + " }"
-	}
-	jarenJSON, _ := json.Marshal(jaren)
-	return fmt.Sprintf(`query($bsn: BSN!) { ingeschrevenPersoon(bsn: $bsn) { heeftBelastingjaarAangifte(belastingjaren: %s) { %s } } }`,
-		string(jarenJSON), selection)
-}
-
-// bedragFields are the AangifteIH fields of type Bedrag in the BD schema.
-var bedragFields = map[string]bool{
-	"verzamelinkomen": true,
-	"box1Inkomen":     true,
-	"box2Inkomen":     true,
-	"box3Inkomen":     true,
-}
-
 func handleQuery(cfg config) http.HandlerFunc {
 	client := cfg.HTTPClient
 	if client == nil {
 		client = &http.Client{Timeout: upstreamRequestTimeout}
 	}
+
+	kind := cfg.Kind
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		corsHeaders(w)
@@ -329,7 +259,7 @@ func handleQuery(cfg config) http.HandlerFunc {
 			return
 		}
 		if req.ScopeID == "" {
-			req.ScopeID = "bd:ib:2025"
+			req.ScopeID = kind.defaultScope
 		}
 
 		tracer := otel.Tracer("dienstverlener-backend")
@@ -352,27 +282,12 @@ func handleQuery(cfg config) http.HandlerFunc {
 			})
 			return
 		}
-		pi, scopes := consentContext.PI, consentContext.Scopes
-
-		// Per-year consent. Two consumer profiles:
-		//   - Browser flow (dienstverlener-mock): intersect requested years
-		//     with the consent's scopes and only query the covered ones,
-		//     so the citizen sees exactly the years they consented to and
-		//     the rest comes back as denied_years (greyed out in the UI).
-		//   - Dev-portal (X-Demo-Source): send the query exactly as
-		//     requested — the portal exists to demonstrate raw policy
-		//     outcomes, so a year outside the consent must produce the
-		//     policy deny (YEAR_NOT_COVERED) with a full trace, not a
-		//     client-side pre-filter.
-		jaren := req.Belastingjaren
-		if len(jaren) == 0 {
-			jaren = []int{2024, 2025}
-		}
+		pi := consentContext.PI
 		fromDevPortal := r.Header.Get("X-Demo-Source") == "dev-portal"
-		queryable := jaren
-		var deniedYears []int
-		if !fromDevPortal {
-			queryable, deniedYears = intersectYears(jaren, consentedYears(scopes))
+		built, err := kind.build(req, consentContext, fromDevPortal)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
 		}
 		traceID := traceIDFromSpan(span)
 		// The identifier that travels through FSC (and therefore ends up
@@ -384,22 +299,14 @@ func handleQuery(cfg config) http.HandlerFunc {
 			fscTxID = newFscTransactionID()
 		}
 
-		// Even a zero-overlap request reaches the PDP: otherwise token
-		// verification and online revocation could be bypassed locally.
-		if len(queryable) == 0 {
-			queryable = jaren
-		}
-
 		// Step 2 — POST to the Outway at /bri/graphql. The body is pure
 		// GraphQL, with variables.bsn = PI (the sidecar at the source
 		// substitutes it back to BSN). No separate token-fetch is needed:
 		// the Outway picks a contract by grant-link, signs the token
 		// internally, and opens mTLS to the Inway.
-		query := buildQuery(queryable, req.Fields)
-		vars := map[string]string{"bsn": pi}
 		proxyBody, _ := json.Marshal(map[string]any{
-			"query":     query,
-			"variables": vars,
+			"query":     built.query,
+			"variables": built.variables,
 		})
 		proxyReq, _ := http.NewRequestWithContext(ctx, http.MethodPost,
 			cfg.OutwayURL+cfg.OutwayPath, bytes.NewReader(proxyBody))
@@ -462,7 +369,7 @@ func handleQuery(cfg config) http.HandlerFunc {
 				Data:             json.RawMessage(proxyRespBody),
 				TraceID:          traceID,
 				FscTransactionID: fscTxID,
-				DeniedYears:      deniedYears,
+				DeniedYears:      built.deniedYears,
 			}
 			writeJSON(w, http.StatusOK, resp)
 			if cfg.DevPortalBackend != "" && !fromDevPortal {
@@ -606,12 +513,16 @@ func newMux(cfg config) *http.ServeMux {
 }
 
 func main() {
-	cfg := loadConfig()
+	serviceName := getEnv("OTEL_SERVICE_NAME", "dienstverlener-backend")
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}).
-		WithAttrs([]slog.Attr{slog.String("service", "dienstverlener-backend")})))
+		WithAttrs([]slog.Attr{slog.String("service", serviceName)})))
+	cfg, err := loadConfig()
+	if err != nil {
+		fatal("loading configuration from environment", err)
+	}
 
 	ctx := context.Background()
-	shutdown, err := setupTracing(ctx, "dienstverlener-backend")
+	shutdown, err := setupTracing(ctx, serviceName)
 	if err != nil {
 		slog.Error("otel setup failed", "err", err)
 	}
@@ -625,7 +536,7 @@ func main() {
 	// no records; with one, every call to a source is made durable in a local
 	// spool before its answer is used, and delivered afterwards.
 	logbookClient, err := ldv.New(ldv.Config{
-		ServiceName: "dienstverlener-backend",
+		ServiceName: serviceName,
 		LogbookURL:  os.Getenv("LDV_LOGBOOK_URL"),
 		WriteToken:  os.Getenv("LDV_WRITE_TOKEN"),
 	})
@@ -641,16 +552,16 @@ func main() {
 		logbookClient.UseOutbox(outbox)
 		go outbox.Run(ctx, ldvDeliveryInterval)
 	}
-	cfg.Logbook = newQueryLogbook(logbookClient, parseNextLogbooks(os.Getenv("LDV_NEXT_LOGBOOK_IDS")))
+	cfg.Logbook = newQueryLogbook(logbookClient, cfg.Kind, parseNextLogbooks(os.Getenv("LDV_NEXT_LOGBOOK_IDS")))
 
 	// Middleware order: withFscTraceContext wraps otelhttp — the header
 	// mutation must happen before otelhttp extracts the parent context.
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           withFscTraceContext(otelhttp.NewHandler(withDemoSession(withAccessLog(newMux(cfg))), "dienstverlener-backend")),
+		Handler:           withFscTraceContext(otelhttp.NewHandler(withDemoSession(withAccessLog(newMux(cfg))), serviceName)),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
-	slog.Info("dienstverlener-backend starting",
+	slog.Info("starting",
 		"addr", srv.Addr, "outway", cfg.OutwayURL+cfg.OutwayPath, "sector", cfg.OrgSector,
 		"req_id", uuid.New().String())
 	serve(srv)

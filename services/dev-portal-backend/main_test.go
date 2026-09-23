@@ -57,8 +57,12 @@ func TestPredefinedDvtpScenariosUseLocalDefaultWithoutConfiguration(t *testing.T
 		t.Fatalf("DvtpConsumerPeerID = %q, want local default %q", cfg.DvtpConsumerPeerID, defaultDvtpConsumerPeerID)
 	}
 	for id, payload := range dvtpIssuancePayloads(t, cfg) {
-		if payload.ConsumerPeerID != defaultDvtpConsumerPeerID {
-			t.Errorf("%s dienstverlener_oin = %q, want %q", id, payload.ConsumerPeerID, defaultDvtpConsumerPeerID)
+		want := defaultDvtpConsumerPeerID
+		if strings.HasPrefix(id, "issuance-lvg-") {
+			want = defaultIrConsumerPeerID
+		}
+		if payload.ConsumerPeerID != want {
+			t.Errorf("%s dienstverlener_oin = %q, want %q", id, payload.ConsumerPeerID, want)
 		}
 	}
 }
@@ -84,6 +88,15 @@ func TestPredefinedDvtpScenariosUseConfiguredPeerIDAndPreservePayload(t *testing
 			Scopes:          []string{"bd:ib:2025", "bd:ib:2024"},
 			ValiditySeconds: 7776000,
 			UseCase:         "hypotheek",
+		},
+		// LVG's consumer is the Installatie Register, whatever
+		// DVTP_CONSUMER_PEER_ID says.
+		"issuance-lvg-eigendom": {
+			CitizenBSN:      "123456789",
+			ConsumerPeerID:  defaultIrConsumerPeerID,
+			Scopes:          []string{"lvg:vbo:eigendom"},
+			ValiditySeconds: 31536000,
+			UseCase:         "Goedkeuring installatiegegevens",
 		},
 	}
 	if got := dvtpIssuancePayloads(t, cfg); !reflect.DeepEqual(got, want) {

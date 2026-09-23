@@ -7,6 +7,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Added
+- **LVG / Installatie Register.** The pilot's DvTP flow in the demo: the
+  Installatie Register asks the citizen in MijnOverheid for consent to check
+  at LVG whether a building is theirs, and asks LVG over FSC with the consent
+  token. See [docs/lvg-ir.md](docs/lvg-ir.md).
+  - `keyper-mock` (port 9004) plays IR/Keyper: the installer's request, the
+    owner's approval and the installer's data behind a recurring check.
+  - IR is an FSC consumer peer of its own (`…1000`, `ir-*`), so the PDP's
+    actor binding tells it apart from Hypotheek-BV.
+  - LVG is a third logical source on the shared provider peer, like RvIG:
+    service `lvg`, `lvg-sidecar` and `lvg-graphql-server`. `make fsc-seed-lvg`
+    publishes it and connects IR.
+  - Policy rule `LVG0001`: the DVT0001 consent checks, with the scope pinned
+    to `lvg:vbo:eigendom`.
+  - `dienstverlener-backend` takes `QUERY_KIND` (`bd` or `lvg`); `ir-backend`
+    is the same image with `lvg`.
+  - Two Logboeken Dataverwerkingen: `logboek-lvg` for the source and its
+    sidecar, and `logboek-ir` for the consumer, whose record points at LVG's
+    logbook.
+  - The developer portal routes a use-run by its scope: `lvg:*` goes through
+    `ir-backend` and predefined issuance grants it to IR's Peer ID. Three
+    scenarios cover issuance, an owner and a non-owner; the FSC txlog panel
+    includes IR's peer.
 - **`make policy-check` reports a broken policy before the PDP swallows it
   (#335).** The PDP hot-reloads `policies/`, but OpenFTV logs
   `policy added/replaced` for a module that failed to compile as well, stays
@@ -55,6 +77,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- **The toestemmingsportaal shows only the scopes the dienstverlener asks
+  for.** It parsed `scope` from the redirect but rendered and granted every
+  scope it knew. A scope it cannot describe now refuses the request instead
+  of being dropped.
+- **A consent's purpose comes from the dienstverlener.** The portal passes the
+  redirect's `purpose` on as `use_case`; the register no longer labels every
+  consent `hypotheek`, which stays the default when none is sent.
+- **Mijn toestemmingen names Hypotheek-BV again.** The name table still keyed
+  on an OIN from before the Peer-ID migration, so the list showed the raw
+  Peer ID.
 - **The PDP asks a consent's status over FSC
   ([#383](https://github.com/ICTU/GBO-demo/issues/383)).** Until now anyone who
   could reach the consent register and knew a `consent_id` got its status.
@@ -345,6 +377,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   `/organizations.json`.
 
 ### Fixed
+- **The toestemmingsportaal loads again.** Dependabot moved `react` to
+  19.3.0 but left `react-dom` at 19.2.8, and React refuses to render with the
+  two out of step; the portal showed a blank page.
 - Confined developer-portal scenario writes and policy-source reads to their
   configured roots, preventing path and symlink traversal.
 - **The developer portal showed no engine detail for a denial.** A console

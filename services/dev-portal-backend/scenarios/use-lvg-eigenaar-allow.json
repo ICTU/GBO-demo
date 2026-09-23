@@ -1,0 +1,12 @@
+{
+  "id": "use-lvg-eigenaar-allow",
+  "name": "Use · LVG eigenaar ALLOW",
+  "desc": "Het Installatie Register vraagt LVG of de burger eigenaar is van Meidoornhof 12; LVG geeft het VBO-id terug.",
+  "tab": "use",
+  "expected_outcome": "allow",
+  "payload": {
+    "consent_id": "",
+    "scope_id": "lvg:vbo:eigendom",
+    "vbo_id": "0632010000099412"
+  }
+}

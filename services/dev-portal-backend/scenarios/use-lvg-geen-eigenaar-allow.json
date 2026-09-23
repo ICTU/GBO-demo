@@ -1,0 +1,12 @@
+{
+  "id": "use-lvg-geen-eigenaar-allow",
+  "name": "Use · LVG geen eigenaar (null)",
+  "desc": "Dezelfde vraag voor Meidoornhof 12A, dat niet van de burger is: de PDP staat de vraag toe, LVG antwoordt null.",
+  "tab": "use",
+  "expected_outcome": "allow",
+  "payload": {
+    "consent_id": "",
+    "scope_id": "lvg:vbo:eigendom",
+    "vbo_id": "0632010000099413"
+  }
+}

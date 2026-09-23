@@ -33,6 +33,7 @@ jobs:
           - graphql-server
           - ldv-client
           - ldv-logboek
+          - lvg-graphql-server
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -205,6 +206,7 @@ jobs:
           - developer-portal
           - landing-page
           - dienstverlener-mock
+          - keyper-mock
           - toestemmingsportaal-frontend
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -244,6 +246,7 @@ jobs:
           - bron-sidecar
           - graphql-server
           - ldv-logboek
+          - lvg-graphql-server
           - openftv-pdp
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -255,7 +258,7 @@ jobs:
           # LDV records depend on the sibling services/ldv-client module.
           # Same context compose uses.
           case "${{ matrix.service }}" in
-            bron-sidecar|brp-graphql-server|consent-portal-backend|consent-register|dev-portal-backend|dienstverlener-backend|eudi-adapter|graphql-server|ldv-logboek|openftv-pdp) context=. ;;
+            bron-sidecar|brp-graphql-server|consent-portal-backend|consent-register|dev-portal-backend|dienstverlener-backend|eudi-adapter|graphql-server|ldv-logboek|lvg-graphql-server|openftv-pdp) context=. ;;
           esac
           docker build \
             --file "services/${{ matrix.service }}/Dockerfile" \

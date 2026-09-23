@@ -61,6 +61,7 @@ func TestDvtpQueryHappyPath(t *testing.T) {
 	defer outway.Close()
 
 	cfg := config{
+		Kind:       queryKinds["bd"],
 		Port:       "0",
 		OrgSector:  "hypotheekverlener",
 		OutwayURL:  outway.URL,
@@ -121,7 +122,7 @@ func TestDvtpQueryHappyPath(t *testing.T) {
 // the source receives its span, so the source's records hang under it.
 func TestAQueryIsLoggedWithAPointerToTheSource(t *testing.T) {
 	const bdLogbook = "https://logboek.belastingdienst.nl/data-processing-operations"
-	logbook := ldvtest.New(t, queryActivity)
+	logbook := ldvtest.New(t, queryKinds["bd"].activity)
 	var received http.Header
 	outway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		received = r.Header.Clone()
@@ -131,9 +132,10 @@ func TestAQueryIsLoggedWithAPointerToTheSource(t *testing.T) {
 	defer outway.Close()
 
 	cfg := config{
+		Kind:       queryKinds["bd"],
 		OutwayURL:  outway.URL,
 		OutwayPath: "/bri/graphql",
-		Logbook:    newQueryLogbook(logbook.Client(t, "dienstverlener-backend"), map[string]string{"bd": bdLogbook}),
+		Logbook:    newQueryLogbook(logbook.Client(t, "dienstverlener-backend"), queryKinds["bd"], map[string]string{"bd": bdLogbook}),
 	}
 	srv := httptest.NewServer(newMux(cfg))
 	defer srv.Close()
@@ -154,8 +156,8 @@ func TestAQueryIsLoggedWithAPointerToTheSource(t *testing.T) {
 		t.Fatalf("wrote %d records, want 1: %+v", len(records), records)
 	}
 	record := records[0]
-	if got := record.Attributes[ldv.AttrProcessingActivityID]; got != queryActivity {
-		t.Errorf("processing_activity_id = %v, want %s", got, queryActivity)
+	if got := record.Attributes[ldv.AttrProcessingActivityID]; got != queryKinds["bd"].activity {
+		t.Errorf("processing_activity_id = %v, want %s", got, queryKinds["bd"].activity)
 	}
 	if got := record.Attributes[ldv.AttrNextLogbookID]; got != bdLogbook {
 		t.Errorf("nextLogbookId = %v, want the source's read API %s", got, bdLogbook)
@@ -180,7 +182,7 @@ func TestAQueryIsLoggedWithAPointerToTheSource(t *testing.T) {
 // A call that cannot be logged withholds its answer: the data came in, but it
 // does not go out unrecorded.
 func TestAQueryThatCannotBeLoggedWithholdsTheAnswer(t *testing.T) {
-	logbook := ldvtest.New(t, queryActivity)
+	logbook := ldvtest.New(t, queryKinds["bd"].activity)
 	logbook.RefuseEverything()
 	outway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -189,9 +191,10 @@ func TestAQueryThatCannotBeLoggedWithholdsTheAnswer(t *testing.T) {
 	defer outway.Close()
 
 	cfg := config{
+		Kind:       queryKinds["bd"],
 		OutwayURL:  outway.URL,
 		OutwayPath: "/bri/graphql",
-		Logbook:    newQueryLogbook(logbook.Client(t, "dienstverlener-backend"), nil),
+		Logbook:    newQueryLogbook(logbook.Client(t, "dienstverlener-backend"), queryKinds["bd"], nil),
 	}
 	srv := httptest.NewServer(newMux(cfg))
 	defer srv.Close()
@@ -211,7 +214,7 @@ func TestAQueryThatCannotBeLoggedWithholdsTheAnswer(t *testing.T) {
 }
 
 func TestDvtpHealth(t *testing.T) {
-	srv := httptest.NewServer(newMux(config{}))
+	srv := httptest.NewServer(newMux(config{Kind: queryKinds["bd"]}))
 	defer srv.Close()
 	resp, err := http.Get(srv.URL + "/health")
 	if err != nil {
@@ -231,6 +234,7 @@ func TestDvtpQueryTimesOutWhenOutwayDoesNotRespond(t *testing.T) {
 	defer outway.Close()
 
 	cfg := config{
+		Kind:       queryKinds["bd"],
 		OutwayURL:  outway.URL,
 		OutwayPath: "/bri/graphql",
 		HTTPClient: &http.Client{Timeout: 25 * time.Millisecond},
@@ -275,6 +279,7 @@ func TestDvtpQueryIntersectsConsentedYears(t *testing.T) {
 	defer outway.Close()
 
 	cfg := config{
+		Kind:       queryKinds["bd"],
 		OutwayURL:  outway.URL,
 		OutwayPath: "/bri/graphql",
 	}
@@ -317,6 +322,7 @@ func TestDvtpQueryNoConsentedYears(t *testing.T) {
 	defer outway.Close()
 
 	cfg := config{
+		Kind:       queryKinds["bd"],
 		OutwayURL:  outway.URL,
 		OutwayPath: "/bri/graphql",
 	}
@@ -361,6 +367,7 @@ func TestDvtpQueryDevPortalBypassesIntersection(t *testing.T) {
 	defer outway.Close()
 
 	cfg := config{
+		Kind:       queryKinds["bd"],
 		OutwayURL:  outway.URL,
 		OutwayPath: "/bri/graphql",
 	}
@@ -398,6 +405,7 @@ func TestDvtpQueryRevokedConsentReachesPDP(t *testing.T) {
 	defer outway.Close()
 
 	cfg := config{
+		Kind:       queryKinds["bd"],
 		OutwayURL:  outway.URL,
 		OutwayPath: "/bri/graphql",
 	}
@@ -543,7 +551,7 @@ func TestDvtpQueryDenialCodeIsCitizenSafe(t *testing.T) {
 			}))
 			defer outway.Close()
 
-			srv := httptest.NewServer(newMux(config{OutwayURL: outway.URL, OutwayPath: "/bri/graphql"}))
+			srv := httptest.NewServer(newMux(config{Kind: queryKinds["bd"], OutwayURL: outway.URL, OutwayPath: "/bri/graphql"}))
 			defer srv.Close()
 
 			body := testQueryBody("c-1", []string{"bd:ib:2025"},
@@ -575,7 +583,7 @@ func TestDvtpQueryTransportFailureIsNotAConsentProblem(t *testing.T) {
 	deadURL := dead.URL
 	dead.Close()
 
-	srv := httptest.NewServer(newMux(config{OutwayURL: deadURL, OutwayPath: "/bri/graphql"}))
+	srv := httptest.NewServer(newMux(config{Kind: queryKinds["bd"], OutwayURL: deadURL, OutwayPath: "/bri/graphql"}))
 	defer srv.Close()
 
 	body := testQueryBody("c-1", []string{"bd:ib:2025"},
@@ -609,7 +617,7 @@ func TestDvtpQueryAllowedCarriesNoDenialCode(t *testing.T) {
 	}))
 	defer outway.Close()
 
-	srv := httptest.NewServer(newMux(config{OutwayURL: outway.URL, OutwayPath: "/bri/graphql"}))
+	srv := httptest.NewServer(newMux(config{Kind: queryKinds["bd"], OutwayURL: outway.URL, OutwayPath: "/bri/graphql"}))
 	defer srv.Close()
 
 	body := testQueryBody("c-1", []string{"bd:ib:2025"},

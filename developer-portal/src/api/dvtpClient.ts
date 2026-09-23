@@ -1,11 +1,10 @@
 import { demoSessionHeader } from '../util/demoSession'
 import type { UsePayload, UseResponse } from '../types'
-
-const BASE = '/dvtp-api'
+import { consumerFor } from '../util/consumer'
 
 export async function useQuery(payload: UsePayload, traceparent?: string): Promise<UseResponse> {
   const tpHeader: Record<string, string> = traceparent ? { traceparent } : {}
-  const res = await fetch(`${BASE}/api/dvtp/query`, {
+  const res = await fetch(`${consumerFor(payload.scope_id).proxy}/api/dvtp/query`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -19,6 +18,7 @@ export async function useQuery(payload: UsePayload, traceparent?: string): Promi
       scope_id: payload.scope_id,
       belastingjaren: payload.belastingjaren,
       fields: payload.fields,
+      vbo_id: payload.vbo_id,
     }),
   })
   if (!res.ok) {

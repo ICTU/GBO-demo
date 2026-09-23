@@ -119,5 +119,32 @@
       "rule_id": "EUD0002",
       "years_in_scopes": false
     }
+  },
+  "lvg0001": {
+    "covers_fields": [
+      "Query.vbo",
+      "Verblijfsobject.vboId"
+    ],
+    "covers_types": [],
+    "rule_id": "LVG0001",
+    "spec": {
+      "allowed_scopes": [
+        "lvg:vbo:eigendom"
+      ],
+      "consent_actor_binding": true,
+      "consent_context_required": true,
+      "consent_must_cover_scope": true,
+      "consent_required": true,
+      "consent_status_required": true,
+      "constraint_binding": [
+        {
+          "arg": "bsn",
+          "resource_field": "pi"
+        }
+      ],
+      "pip": null,
+      "rule_id": "LVG0001",
+      "years_in_scopes": false
+    }
   }
 }

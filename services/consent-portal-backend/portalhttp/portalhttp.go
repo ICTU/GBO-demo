@@ -64,6 +64,7 @@ type GiveConsentRequest struct {
 	Scopes           []string             `json:"scopes"`
 	ScopeEntries     []consent.ScopeEntry `json:"scope_entries"`
 	ValiditySeconds  int                  `json:"validity_seconds,omitempty"`
+	UseCase          string               `json:"use_case,omitempty"`
 }
 
 type GiveConsentResponse struct {
@@ -223,6 +224,7 @@ func handleGiveConsent(p *consent.Portal) http.HandlerFunc {
 				Scopes:            req.Scopes,
 				ScopeEntries:      req.ScopeEntries,
 				ValiditySeconds:   req.ValiditySeconds,
+				UseCase:           req.UseCase,
 				Trigger:           r.Header.Get("X-Demo-Source"),
 			}
 

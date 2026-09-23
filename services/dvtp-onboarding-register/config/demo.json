@@ -26,6 +26,12 @@
       "allowed_source_peer_ids": ["99999999900000000200"]
     },
     {
+      "peer_id": "99999999900000001000",
+      "name": "Demo Installatie Register",
+      "active": true,
+      "allowed_source_peer_ids": ["99999999900000000200"]
+    },
+    {
       "peer_id": "99999999900000000500",
       "name": "Demo Incassobureau BV",
       "active": false,

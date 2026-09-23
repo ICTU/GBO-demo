@@ -37,6 +37,7 @@ export async function issuanceFlow(
       dienstverlener_oin: payload.dienstverlener_oin,
       scopes: payload.scopes,
       validity_seconds: payload.validity_seconds ?? 7776000,
+      use_case: payload.use_case,
     }),
   })
   if (!consentRes.ok) {

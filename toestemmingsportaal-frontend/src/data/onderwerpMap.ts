@@ -7,11 +7,13 @@ export function deriveOnderwerp(scopes: string[]): string {
   if (has2025 && has2024) return 'Inkomensgegevens (IB 2025 + 2024)'
   if (has2025) return 'Inkomensgegevens (IB 2025)'
   if (has2024) return 'Inkomensgegevens (IB 2024)'
+  if (scopes.includes('lvg:vbo:eigendom')) return 'Eigendom verblijfsobject (LVG)'
   return scopes.join(', ')
 }
 
 const OIN_NAMES: Record<string, string> = {
-  '00000001234567890000': 'Hypotheek-BV',
+  '99999999900000000300': 'Hypotheek-BV',
+  '99999999900000001000': 'Installatie Register',
 }
 
 export function deriveAfnemerName(oin: string): string {
@@ -19,7 +21,9 @@ export function deriveAfnemerName(oin: string): string {
 }
 
 export function deriveDoel(useCase: string): string {
-  if (useCase === 'hypotheek') return 'Hypotheek-aanvraag (aankoop woning)'
+  // 'hypotheek' from the dev-portal; the dienstverlener-mock's redirect
+  // purpose, which the portal now stores, for the browser flow.
+  if (useCase === 'hypotheek' || useCase === 'Hypotheek-aanvraag') return 'Hypotheek-aanvraag (aankoop woning)'
   return useCase
 }
 

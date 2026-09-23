@@ -11,6 +11,8 @@ const SCOPE_OPTIONS = [
   { code: 'bd:ib:2025', label: 'Inkomstenbelasting 2025' },
   { code: 'bd:ib:2024', label: 'Inkomstenbelasting 2024' },
   { code: 'bd:ib:2023', label: 'Inkomstenbelasting 2023' },
+  // Granted to the Installatie Register, not Hypotheek-BV: pick its OIN.
+  { code: 'lvg:vbo:eigendom', label: 'LVG · eigendom verblijfsobject' },
 ]
 
 export default function IssuanceForm({ payload, setPayload, citizens, organizations }: Props) {

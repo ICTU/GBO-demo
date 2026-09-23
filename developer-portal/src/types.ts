@@ -29,6 +29,8 @@ export type UsePayload = {
   // Optional field-selection for the auto-generated query. Default = full set.
   // Used by scenarios that test out-of-scope fields (e.g. box2Inkomen).
   fields?: string[]
+  // The verblijfsobject the Installatie Register asks LVG about (lvg:* scopes).
+  vbo_id?: string
 }
 
 // EUDI-issuance is externally triggered (wallet scans a QR), so the payload
@@ -63,7 +65,12 @@ export type IssuanceResponse = {
 // Use-response from dienstverlener-backend
 export type UseResponse = {
   allowed: boolean
-  data?: { data?: { ingeschrevenPersoon?: { heeftBelastingjaarAangifte?: unknown[] } } }
+  data?: {
+    data?: {
+      ingeschrevenPersoon?: { heeftBelastingjaarAangifte?: unknown[] }
+      vbo?: { vboId?: string } | null
+    }
+  }
   reason?: string
   trace_id: string
   // The identifier that travelled through FSC and ended up in the OPA

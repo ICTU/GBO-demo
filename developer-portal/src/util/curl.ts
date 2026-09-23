@@ -1,4 +1,5 @@
 import type { IssuancePayload, UsePayload, Tab } from '../types'
+import { consumerFor } from './consumer'
 
 // Generates a curl-equivalent for the Submit action (bypasses the Vite
 // proxy: uses direct host-ports so copy-paste into a terminal works).
@@ -8,6 +9,7 @@ export function curlForIssuance(p: IssuancePayload): string {
     dienstverlener_oin: p.dienstverlener_oin,
     scopes: p.scopes,
     validity_seconds: p.validity_seconds ?? 7776000,
+    use_case: p.use_case,
   }
   return [
     `# 1. login (BSN → JWT)`,
@@ -25,13 +27,14 @@ export function curlForIssuance(p: IssuancePayload): string {
 
 export function curlForUse(p: UsePayload): string {
   return [
-    `curl -sS -X POST http://localhost:9406/api/dvtp/query \\`,
+    `curl -sS -X POST http://localhost:${consumerFor(p.scope_id).hostPort}/api/dvtp/query \\`,
     `  -H 'Content-Type: application/json' \\`,
     `  -d '${JSON.stringify({
       consent_token: p.consent_token,
       scope_id: p.scope_id,
       belastingjaren: p.belastingjaren,
       fields: p.fields,
+      vbo_id: p.vbo_id,
     })}'`,
   ].join('\n')
 }

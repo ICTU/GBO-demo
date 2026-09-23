@@ -48,6 +48,7 @@ _regen bd-mock         bd-mock-internal-ca.json       bd-mock-internal-cert.json
 _regen brp-mock        brp-mock-internal-ca.json      brp-mock-internal-cert.json   orgs/brp-mock
 _regen consent-register consent-register-internal-ca.json consent-register-internal-cert.json orgs/consent-register
 _regen gbo-pdp         gbo-pdp-internal-ca.json       gbo-pdp-internal-cert.json    orgs/gbo-pdp
+_regen installatieregister installatieregister-internal-ca.json installatieregister-internal-cert.json orgs/installatieregister
 
 echo
 echo ">>> Done. Restart all FSC containers to load the new internal certs."
