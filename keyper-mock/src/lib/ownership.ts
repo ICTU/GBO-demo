@@ -9,7 +9,7 @@ export type OwnershipResult = { outcome: Outcome; traceId?: string }
 
 type QueryResponse = {
   allowed: boolean
-  data?: { data?: { vbo?: { vboId?: string } | null } }
+  data?: { data?: { vbo?: { vboId?: string } | null }; errors?: unknown[] }
   trace_id?: string
 }
 
@@ -18,6 +18,8 @@ type QueryResponse = {
 // no data on an answer it cannot read.
 export function outcomeOf(response: QueryResponse, vboId: string): Outcome {
   if (!response.allowed) return 'unconfirmed'
+  // A null next to errors is a failed check, not LVG saying "not theirs".
+  if (response.data?.errors?.length) return 'unconfirmed'
   const graph = response.data?.data
   if (!graph || !('vbo' in graph)) return 'unconfirmed'
   if (graph.vbo === null) return 'not-owner'

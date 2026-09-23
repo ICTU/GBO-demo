@@ -21,7 +21,9 @@ export function deriveAfnemerName(oin: string): string {
 }
 
 export function deriveDoel(useCase: string): string {
-  if (useCase === 'hypotheek') return 'Hypotheek-aanvraag (aankoop woning)'
+  // 'hypotheek' from the dev-portal; the dienstverlener-mock's redirect
+  // purpose, which the portal now stores, for the browser flow.
+  if (useCase === 'hypotheek' || useCase === 'Hypotheek-aanvraag') return 'Hypotheek-aanvraag (aankoop woning)'
   return useCase
 }
 

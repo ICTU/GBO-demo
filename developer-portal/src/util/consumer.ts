@@ -11,6 +11,9 @@ export type Consumer = {
 export const HYPOTHEEK_BV: Consumer = { name: 'Hypotheek-BV', proxy: '/dvtp-api', hostPort: 9406 }
 export const INSTALLATIE_REGISTER: Consumer = { name: 'Installatie Register', proxy: '/ir-api', hostPort: 9410 }
 
+// The verblijfsobject an LVG question asks about unless the user names another.
+export const DEFAULT_VBO_ID = '0632010000099412'
+
 export function isLvgScope(scope?: string): boolean {
   return !!scope && scope.startsWith('lvg:')
 }

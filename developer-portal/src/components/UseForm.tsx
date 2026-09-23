@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import type { HistoryRun, IssuancePayload, UsePayload } from '../types'
 import { consentTokenFor } from '../util/consentTokens'
-import { consumerFor, isLvgScope } from '../util/consumer'
+import { consumerFor, DEFAULT_VBO_ID, isLvgScope } from '../util/consumer'
 
 type Props = {
   payload: UsePayload
@@ -39,8 +39,6 @@ function previewQuery(fields: string[], jaren: number[]): string {
 // dienstverlener-backend/query_kind.go): the PI from the token in $bsn, the
 // VBO-id as asked. LVG answers with that VBO-id or null.
 const LVG_QUERY = `query($bsn: BSN!, $vboId: String!) {\n  vbo(bsn: $bsn, vboId: $vboId) {\n    vboId\n  }\n}`
-
-const DEFAULT_VBO_ID = '0632010000099412'
 
 export default function UseForm({ payload, setPayload, history }: Props) {
   const issuedConsents = useMemo<IssuedConsent[]>(() => {

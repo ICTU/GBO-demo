@@ -236,12 +236,7 @@ func handleQuery(cfg config) http.HandlerFunc {
 		client = &http.Client{Timeout: upstreamRequestTimeout}
 	}
 
-	// The zero config asks what the backend's original consumer asks:
-	// Hypotheek-BV's income data.
 	kind := cfg.Kind
-	if kind.build == nil {
-		kind = queryKinds["bd"]
-	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		corsHeaders(w)

@@ -31,9 +31,6 @@ type builtQuery struct {
 	deniedYears []int
 }
 
-// errBadRequest marks a build error as the caller's.
-var errBadRequest = errors.New("bad request")
-
 var queryKinds = map[string]queryKind{
 	"bd": {
 		defaultScope: "bd:ib:2025",
@@ -96,7 +93,7 @@ func buildIncomeQuery(req queryRequest, consent consentTokenPayload, fromDevPort
 func buildOwnershipQuery(req queryRequest, consent consentTokenPayload, _ bool) (builtQuery, error) {
 	vboID := strings.TrimSpace(req.VboID)
 	if vboID == "" {
-		return builtQuery{}, fmt.Errorf("%w: vbo_id is required", errBadRequest)
+		return builtQuery{}, errors.New("vbo_id is required")
 	}
 	return builtQuery{
 		query:     `query($bsn: BSN!, $vboId: String!) { vbo(bsn: $bsn, vboId: $vboId) { vboId } }`,
