@@ -4,7 +4,9 @@ Status: normatief voor bronmetadata met `mapping_profile: gbo-simple-v1`.
 
 ## Doel en uitvoermodel
 
-Het profiel projecteert precies één door de GraphQL-query geselecteerd bronobject naar een vlak JSON-object met credentialclaims. De naam van een `mapping`-property is de doelclaim; `pointer` is een absolute RFC 6901 JSON Pointer relatief aan het geselecteerde bronobject. Daardoor zijn kopiëren, hernoemen en flattenen dezelfde operatie.
+Het profiel projecteert precies één door de GraphQL-query geselecteerd bronobject naar een vlak JSON-object met credentialclaims. Een mapping kent aan iedere doelclaim één regel toe; `pointer` is een absolute RFC 6901 JSON Pointer relatief aan het geselecteerde bronobject. Daardoor zijn kopiëren, hernoemen en flattenen dezelfde operatie.
+
+In het brondocument staat de mapping niet als los blok: iedere claim in `claims` heeft een `source`, en dat is precies één regel van dit profiel. De claimnaam is de sleutel in `claims`. GBO leidt de mapping daaruit af; labels, `sd` en Type Metadata zijn EUDI-presentatie en vallen buiten dit profiel (zie [Claims en Type Metadata](source-onboarding.md#claims-en-type-metadata)).
 
 De uitvoering is fail-closed:
 
@@ -15,6 +17,84 @@ De uitvoering is fail-closed:
 5. geef alleen bij volledig succes het gehele claimobject terug.
 
 Een fout in een verplichte of aanwezige claim breekt de volledige projectie af; alleen vooraf als optioneel gemarkeerde afwezige claims mogen ontbreken. Een lege resultatenlijst is de afzonderlijke uitkomst `no_data`; meer dan één resultaat is een fout.
+
+## Voorbeeld
+
+Een ingekorte versie van de inkomensdemo. In het brondocument staan onder meer:
+
+```json
+"graphql": {
+  "result_pointer": "/data/ingeschrevenPersoon/heeftBelastingjaarAangifte"
+},
+"mapping_profile": "gbo-simple-v1",
+"claims": {
+  "belastingjaar": {
+    "source": { "pointer": "/belastingjaar", "datatype": "gYear" },
+    "label": { "nl-NL": "Belastingjaar" }
+  },
+  "aangifte_status": {
+    "source": { "pointer": "/status", "datatype": "string" },
+    "label": { "nl-NL": "Status" }
+  },
+  "verzamelinkomen": {
+    "source": { "pointer": "/verzamelinkomen/waarde", "datatype": "integer" },
+    "label": { "nl-NL": "Verzamelinkomen" },
+    "description": { "nl-NL": "Bedrag in euro's" }
+  },
+  "indieningsdatum": {
+    "source": { "pointer": "/indieningsdatum", "datatype": "date", "optional": true },
+    "label": { "nl-NL": "Indieningsdatum" }
+  }
+}
+```
+
+Alleen de `source`-regels vallen onder dit profiel. GBO leidt er deze mapping uit af:
+
+```json
+{
+  "belastingjaar":   { "pointer": "/belastingjaar", "datatype": "gYear" },
+  "aangifte_status": { "pointer": "/status", "datatype": "string" },
+  "verzamelinkomen": { "pointer": "/verzamelinkomen/waarde", "datatype": "integer" },
+  "indieningsdatum": { "pointer": "/indieningsdatum", "datatype": "date", "optional": true }
+}
+```
+
+De bron antwoordt op de query met:
+
+```json
+{
+  "data": {
+    "ingeschrevenPersoon": {
+      "heeftBelastingjaarAangifte": [
+        {
+          "belastingjaar": 2025,
+          "status": "Definitief vastgesteld",
+          "indieningsdatum": null,
+          "verzamelinkomen": { "waarde": 43000, "valuta": "EUR" }
+        }
+      ]
+    }
+  }
+}
+```
+
+`result_pointer` selecteert de array met precies één resultaat, en iedere pointer wordt relatief aan dat object gelezen. De projectie is:
+
+```json
+{
+  "belastingjaar": 2025,
+  "aangifte_status": "Definitief vastgesteld",
+  "verzamelinkomen": 43000
+}
+```
+
+Wat hier gebeurt:
+
+- `aangifte_status` is een hernoeming van `/status`;
+- `verzamelinkomen` is geflattend uit `/verzamelinkomen/waarde`. `valuta` wordt niet gemapt en komt dus niet in het credential;
+- `indieningsdatum` is `null` en optioneel, en ontbreekt daarom. Zonder `optional: true` zou dezelfde response `GBO_SIMPLE_TYPE_MISMATCH` geven;
+- een lege array levert de uitkomst `no_data` op;
+- een waarde `43000.5` voor `verzamelinkomen` breekt de hele projectie af met `GBO_SIMPLE_TYPE_MISMATCH`, omdat `integer` geen breuk accepteert.
 
 ## Toegestane regels
 
@@ -38,7 +118,7 @@ Ook bedragen worden ongewijzigd gekopieerd:
 }
 ```
 
-Een bronwaarde `43000.50` blijft binnen het generieke mappingprofiel dus `43000.50`; GBO rondt niet af en kiest geen schaal. De huidige EUDI-capability gebruikt echter nl-wallet v0.5, dat geen niet-integrale attribuutwaarden kan representeren. EUDI-onboarding accepteert daarom voorlopig alleen `integer` voor bedragen; de inkomensdemo gebruikt gehele euro's. Een eventuele eenheid zoals `EUR` is declaratieve semantiek in `attribute_schema` en Type Metadata. Als een productiebron decimalen nodig heeft, moet eerst expliciet worden gekozen voor bijvoorbeeld een tekstrepresentatie of minor units; GBO voert die conversie niet stilzwijgend uit.
+Een bronwaarde `43000.50` blijft binnen het generieke mappingprofiel dus `43000.50`; GBO rondt niet af en kiest geen schaal. De huidige EUDI-capability gebruikt echter nl-wallet v0.5, dat geen niet-integrale attribuutwaarden kan representeren. EUDI-onboarding accepteert daarom voorlopig alleen `integer` voor bedragen; de inkomensdemo gebruikt gehele euro's. Een eenheid zoals `EUR` is geen onderdeel van het contract; de wallet toont haar via de claim-`description` (bijvoorbeeld "Bedrag in euro's"). Als een productiebron decimalen nodig heeft, moet eerst expliciet worden gekozen voor bijvoorbeeld een tekstrepresentatie of minor units; GBO voert die conversie niet stilzwijgend uit.
 
 ## Datatypes
 
@@ -51,7 +131,7 @@ Een bronwaarde `43000.50` blijft binnen het generieke mappingprofiel dus `43000.
 | `date` | canonieke RFC 3339 full-date `YYYY-MM-DD` | string |
 | `gYear` | geheel getal van 0 tot en met 9999 | dezelfde bronwaarde |
 
-`attribute_schema` moet voor iedere mappingclaim exact één overeenkomstige outputdefinitie bevatten. De huidige EUDI-subset mag bij `type: integer` een eenheid zoals `EUR` declareren; de projector interpreteert die eenheid niet. Het JSON Schema in Type Metadata moet hetzelfde type gebruiken, zodat een incompatibele walletpreview al tijdens onboarding wordt geweigerd.
+De credentialwaarde volgt dus uit het datatype. GBO genereert het JSON Schema in de Type Metadata uit dezelfde regels, zodat het schema per definitie overeenkomt met wat de projectie oplevert.
 
 ## Null en optionele claims
 
@@ -86,7 +166,7 @@ Er zijn geen conversies of operators voor filters, sortering, `first`, joins, co
 ## Machineleesbaar contract en conformance
 
 - Mapping-JSON Schema: `schemas/gbo-simple-v1.schema.json` (Draft 2020-12).
-- Envelope-schema: `schemas/gbo-source-metadata-v1.schema.json` verwijst via de vaste URN `urn:gov:nl:gbo:schema:gbo-simple-v1:1` naar dat profiel.
+- Envelope-schema: `schemas/gbo-source-metadata-v1.schema.json` verwijst voor iedere `claims.*.source` via de vaste URN `urn:gov:nl:gbo:schema:gbo-simple-v1:1#/$defs/rule` naar dat profiel.
 - Een externe validator moet `schemas/gbo-simple-v1.schema.json` vooraf onder die URN registreren; de testhelper laat deze bundelstap zien.
 - Onafhankelijke fixtures: `services/eudi-adapter/internal/gbosimplev1/testdata/cases.json`.
 - Uitvoeren: `cd services/eudi-adapter && go test ./internal/gbosimplev1`.

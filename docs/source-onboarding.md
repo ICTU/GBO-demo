@@ -10,8 +10,8 @@ organisatienaam uit die certificaten; dezelfde waarden staan daarom niet
 nogmaals in de bronconfig. De reconciler mint of vernieuwt geen certificaten.
 
 De bron blijft eigenaar van `/.well-known/gbo`. Dat document bevat per type de
-GraphQL-query, parameters, concrete walletaanbiedingen, mapping en Type
-Metadata. GBO bevat geen bron- of jaarcatalogus en de bron publiceert geen
+GraphQL-query, parameters, concrete walletaanbiedingen, de kaartpresentatie en
+de claims. GBO genereert daaruit de mapping en de Type Metadata. GBO bevat geen bron- of jaarcatalogus en de bron publiceert geen
 GraphQL-schema.
 
 ## Architectuur
@@ -31,7 +31,7 @@ flowchart LR
     end
 
     subgraph Provider["Bronhouder"]
-        G["GBO-metadata<br/>query, mapping, offers en Type Metadata"]
+        G["GBO-metadata<br/>query, offers, display en claims"]
         D["GraphQL-dataservice"]
     end
 
@@ -299,6 +299,89 @@ actieve release niet. Promotie van een nieuwe complete release faalt wel wanneer
 een handmatig geconfigureerde bron `pending`, `stale` of `blocked` is; een bron
 kan daardoor niet stil uit de walletproducten verdwijnen.
 
+## Claims en Type Metadata
+
+Een attestation bestaat uit `type_id`, `type_version`, `offers`, `graphql`,
+`mapping_profile`, `display` en `claims`. Iedere claim staat precies één keer
+in `claims`; de sleutel is de claimnaam in het credential:
+
+```json
+"display": {
+  "nl-NL": {
+    "name": "Akte van overlijden",
+    "description": "Overlijdensgegevens van de huwelijkspartner",
+    "summary": "{{overledene_voornamen}} ({{datum_overlijden}})",
+    "rendering": { "simple": { "background_color": "#3b3b46", "text_color": "#ffffff" } }
+  }
+},
+"claims": {
+  "datum_overlijden": {
+    "source": { "pointer": "/datum_overlijden", "datatype": "date" },
+    "label": { "nl-NL": "Datum overlijden" }
+  },
+  "overledene_voorvoegsel": {
+    "source": { "pointer": "/overledene_voorvoegsel", "datatype": "string", "optional": true },
+    "label": { "nl-NL": "Voorvoegsel overledene" },
+    "description": { "nl-NL": "Alleen aanwezig als er een voorvoegsel is" },
+    "sd": "allowed"
+  }
+}
+```
+
+- `source` is exact één `gbo-simple-v1`-regel en wordt door dat profiel
+  gevalideerd; zie [`gbo-simple-v1.md`](gbo-simple-v1.md). Labels en `sd` zijn
+  EUDI-presentatie en blijven buiten het profiel.
+- `label` is verplicht in minstens één taal; `description` is optioneel, maar
+  alleen in talen waarvoor ook een label bestaat.
+- `display` is per taal gekeyd, zodat dubbele talen niet kunnen voorkomen.
+- Een `{{placeholder}}` in `summary` moet exact een claimnaam zijn; anders
+  weigert onboarding het document.
+- De volgorde van `claims` en van de talen is de volgorde in de wallet.
+- Claimnamen die de issuer of wallet zelf zet (`vct`, `iss`, `status`, `cnf`,
+  `iat`, `nbf`, `exp`, `sub`, `attestation_qualification`) zijn niet
+  toegestaan.
+- Het formaat is gesloten: onbekende velden worden geweigerd. Er is geen
+  escape hatch om losse Type Metadata-velden door te geven; uitbreiding is een
+  GBO-wijziging.
+
+GBO genereert de gepubliceerde Type Metadata volledig:
+
+| Type Metadata | Afgeleid uit |
+| --- | --- |
+| `name`, `description` | de eerste taal in `display` |
+| `display[]` | `display`, met `lang` uit de sleutel |
+| `claims[].path` en `svg_id` | de claimnaam |
+| `claims[].display[]` | `label` en `description` |
+| `claims[].sd` | `sd`, standaard `always` |
+| `schema.properties` | `source.datatype`: `date` wordt `string` met `format: date`, `gYear` wordt `integer`, de rest blijft gelijk |
+| `schema.required` | alle claims zonder `optional: true`, plus `vct` en `vct#integrity` |
+| `vct`, `vct#integrity` | de VCT-URL en de gepubliceerde bytes |
+
+nl-wallet valideert ieder uitgegeven credential tegen dat schema. Omdat het
+schema uit dezelfde regels komt als de projectie, kan een bron geen schema
+publiceren dat afwijkt van wat de mapping werkelijk vult. Volgen latere
+SD-JWT VC-drafts een andere vorm (zoals het wegvallen van `schema`), dan is
+dat een wijziging in GBO en niet in ieder brondocument.
+
+Vastgelegde keuzes:
+
+- **`sd` standaard `always`.** Privacy by default; alleen afwijkingen worden
+  opgeschreven. `allowed` en `never` zijn uitdrukbaar, omdat rulebooks sommige
+  claims als niet selectief openbaar voorschrijven.
+- **Geen `unit`.** Niets las het veld en SD-JWT VC Type Metadata kent het niet.
+  Een eenheid die de gebruiker moet zien hoort in de claim-`description`, zoals
+  `"Bedrag in euro's"`.
+- **`schema_version` blijft `1.0`.** De vorm is in place gewijzigd, omdat er
+  nog geen externe bronnen waren; `mapping`, `attribute_schema` en
+  `type_metadata` worden niet meer geaccepteerd.
+- **`number` blijft geweigerd** voor de EUDI-capability: nl-wallet v0.5 kan
+  geen niet-integrale waarden representeren.
+
+Een wijziging van claims of display verandert de gepubliceerde Type Metadata
+en dus de integriteitswaarde. Verhoog daarom `type_version` (een nieuwe VCT),
+zodat eerder uitgegeven credentials naar hun eigen, ongewijzigde bytes blijven
+verwijzen.
+
 ## Wat staat waar?
 
 | Gegeven | Eigenaar/bron |
@@ -310,7 +393,8 @@ kan daardoor niet stil uit de walletproducten verdwijnen.
 | Juridische `source_oin`, organisatienaam en certificatenset | Vooraf beheerde certificaten onder de sleutel `source_id` |
 | FSC provider Peer ID, services en grant-hashes | actuele FSC-contracten |
 | GraphQL-endpoint, query, parameters, offers en mapping | `/.well-known/gbo` van de bron |
-| Kaartnaam, kleur, kaartlogo, claimlabels en claimschema | Type Metadata in het brondocument |
+| Kaartnaam, kleur, kaartlogo, summary en claimlabels | `display` en `claims` in het brondocument |
+| Claimschema, `required`, `svg_id` en `vct` | Door GBO gegenereerde Type Metadata |
 | Getoonde issuernaam en issuerlogo | vooraf beheerde issuer-/readercertificaten |
 | Kandidaten, statussen, immutable releases, Type Metadata en publieke offercatalogus | PostgreSQL Source Release Registry |
 | Actieve release | transactionele singleton `active_release_id` |

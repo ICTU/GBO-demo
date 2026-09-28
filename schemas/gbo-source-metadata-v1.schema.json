@@ -78,11 +78,10 @@
         "type_id",
         "type_version",
         "offers",
-        "type_metadata",
         "graphql",
         "mapping_profile",
-        "mapping",
-        "attribute_schema"
+        "display",
+        "claims"
       ],
       "properties": {
         "type_id": {
@@ -100,79 +99,50 @@
             "$ref": "#/$defs/offer"
           }
         },
-        "type_metadata": {
-          "$ref": "#/$defs/typeMetadata"
-        },
         "graphql": {
           "$ref": "#/$defs/graphql"
         },
         "mapping_profile": {
           "const": "gbo-simple-v1"
         },
-        "mapping": {
-          "$ref": "urn:gov:nl:gbo:schema:gbo-simple-v1:1"
+        "display": {
+          "description": "Card-level wallet presentation, keyed by language tag. GBO publishes it as Type Metadata display.",
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/languageTag"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/display"
+          }
         },
-        "attribute_schema": {
+        "claims": {
+          "description": "Every credential claim, defined once and keyed by claim name. GBO derives the gbo-simple-v1 mapping and the Type Metadata claims and schema from it.",
           "type": "object",
           "minProperties": 1,
           "maxProperties": 128,
           "propertyNames": {
             "maxLength": 64,
-            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+            "not": {
+              "enum": [
+                "vct",
+                "cnf",
+                "iss",
+                "nbf",
+                "exp",
+                "iat",
+                "sub",
+                "status",
+                "attestation_qualification"
+              ]
+            }
           },
           "additionalProperties": {
-            "$ref": "#/$defs/attribute"
+            "$ref": "#/$defs/claim"
           }
         }
       }
-    },
-    "typeMetadata": {
-      "type": "object",
-      "required": [
-        "name",
-        "claims",
-        "schema"
-      ],
-      "properties": {
-        "name": {
-          "type": "string",
-          "minLength": 1
-        },
-        "description": {
-          "type": "string"
-        },
-        "display": {
-          "type": "array",
-          "items": {
-            "type": "object"
-          }
-        },
-        "claims": {
-          "type": "array",
-          "items": {
-            "type": "object"
-          }
-        },
-        "schema": {
-          "type": "object"
-        }
-      },
-      "allOf": [
-        {
-          "not": {
-            "required": [
-              "vct"
-            ]
-          }
-        },
-        {
-          "not": {
-            "required": [
-              "vct#integrity"
-            ]
-          }
-        }
-      ]
     },
     "graphql": {
       "type": "object",
@@ -275,74 +245,84 @@
         }
       }
     },
-    "attribute": {
-      "oneOf": [
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "type"
-          ],
-          "properties": {
-            "type": {
-              "enum": [
-                "string",
-                "boolean",
-                "integer"
-              ]
-            }
-          }
+    "languageTag": {
+      "type": "string",
+      "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8})*$"
+    },
+    "localizedText": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "$ref": "#/$defs/languageTag"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "display": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
         },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "type",
-            "format"
-          ],
-          "properties": {
-            "type": {
-              "const": "string"
-            },
-            "format": {
-              "const": "date"
-            }
-          }
+        "description": {
+          "type": "string"
         },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "type",
-            "format"
-          ],
-          "properties": {
-            "type": {
-              "const": "integer"
-            },
-            "format": {
-              "const": "gYear"
-            }
-          }
+        "summary": {
+          "type": "string",
+          "description": "May reference claims as {{claim_name}}."
         },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "type",
-            "unit"
-          ],
-          "properties": {
-            "type": {
-              "const": "integer"
-            },
-            "unit": {
-              "type": "string",
-              "pattern": "^[A-Z]{3}$"
-            }
-          }
+        "rendering": {
+          "type": "object"
         }
-      ]
+      }
+    },
+    "claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "label"
+      ],
+      "properties": {
+        "source": {
+          "allOf": [
+            {
+              "$ref": "urn:gov:nl:gbo:schema:gbo-simple-v1:1#/$defs/rule"
+            },
+            {
+              "description": "nl-wallet v0.5 cannot represent non-integral numbers.",
+              "properties": {
+                "datatype": {
+                  "not": {
+                    "const": "number"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "label": {
+          "$ref": "#/$defs/localizedText"
+        },
+        "description": {
+          "$ref": "#/$defs/localizedText"
+        },
+        "sd": {
+          "enum": [
+            "always",
+            "allowed",
+            "never"
+          ],
+          "default": "always"
+        }
+      }
     }
   }
 }

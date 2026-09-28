@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -43,14 +42,13 @@ func (d sourceMetadataDocument) eudiAttestations() []sourceAttestationDefinition
 }
 
 type sourceAttestationDefinition struct {
-	TypeID          string                           `json:"type_id"`
-	TypeVersion     string                           `json:"type_version"`
-	Offers          []sourceOffer                    `json:"offers"`
-	GraphQL         sourceGraphQL                    `json:"graphql"`
-	MappingProfile  string                           `json:"mapping_profile"`
-	Mapping         gbosimplev1.Mapping              `json:"mapping"`
-	AttributeSchema map[string]sourceAttributeSchema `json:"attribute_schema"`
-	TypeMetadata    json.RawMessage                  `json:"type_metadata"`
+	TypeID         string         `json:"type_id"`
+	TypeVersion    string         `json:"type_version"`
+	Offers         []sourceOffer  `json:"offers"`
+	GraphQL        sourceGraphQL  `json:"graphql"`
+	MappingProfile string         `json:"mapping_profile"`
+	Display        sourceDisplays `json:"display"`
+	Claims         sourceClaims   `json:"claims"`
 }
 
 type sourceOffer struct {
@@ -72,24 +70,6 @@ type sourceGraphQL struct {
 type sourceParameter struct {
 	Type     string `json:"type"`
 	Required bool   `json:"required"`
-}
-
-type sourceAttributeSchema struct {
-	Type   string `json:"type"`
-	Format string `json:"format,omitempty"`
-	Unit   string `json:"unit,omitempty"`
-}
-
-func (a *sourceAttributeSchema) UnmarshalJSON(data []byte) error {
-	type plainAttributeSchema sourceAttributeSchema
-	var decoded plainAttributeSchema
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&decoded); err != nil {
-		return fmt.Errorf("invalid attribute_schema rule: %w", err)
-	}
-	*a = sourceAttributeSchema(decoded)
-	return nil
 }
 
 type mappingRule = gbosimplev1.Rule
@@ -128,13 +108,10 @@ func validateSourceAttestation(definition sourceAttestationDefinition) error {
 	if definition.MappingProfile != "gbo-simple-v1" {
 		return fmt.Errorf("unsupported mapping_profile %q", definition.MappingProfile)
 	}
-	if len(definition.Mapping) == 0 {
-		return fmt.Errorf("mapping must contain at least one claim")
-	}
-	if err := gbosimplev1.Validate(definition.Mapping); err != nil {
+	if err := validateSourceClaims(definition); err != nil {
 		return err
 	}
-	if err := validateAttributeSchema(definition); err != nil {
+	if err := validateSourceDisplay(definition); err != nil {
 		return err
 	}
 	document, err := parser.Parse(parser.ParseParams{Source: source.NewSource(&source.Source{Body: []byte(definition.GraphQL.Document), Name: "source-metadata.graphql"})})
@@ -279,52 +256,6 @@ func validateGraphQLEndpoint(graphql sourceGraphQL, transport string) error {
 	}
 }
 
-func validateAttributeSchema(definition sourceAttestationDefinition) error {
-	if len(definition.AttributeSchema) != len(definition.Mapping) {
-		return fmt.Errorf("attribute_schema must define exactly the mapped claims")
-	}
-	for claim, rule := range definition.Mapping {
-		attribute, ok := definition.AttributeSchema[claim]
-		if !ok {
-			return fmt.Errorf("attribute_schema is missing mapped claim %q", claim)
-		}
-		wantType, wantFormat := rule.Datatype, ""
-		switch rule.Datatype {
-		case "date":
-			wantType, wantFormat = "string", "date"
-		case "gYear":
-			wantType, wantFormat = "integer", "gYear"
-		}
-		if attribute.Type != wantType || attribute.Format != wantFormat {
-			return fmt.Errorf("attribute_schema claim %q must have type %q and format %q", claim, wantType, wantFormat)
-		}
-		if attribute.Type == "number" {
-			return fmt.Errorf("attribute_schema claim %q uses number, which nl-wallet v0.5 cannot represent; use integer or string", claim)
-		}
-		if attribute.Unit != "" {
-			if attribute.Type != "integer" {
-				return fmt.Errorf("attribute_schema claim %q can only declare a unit for type integer", claim)
-			}
-			if !isUppercaseAlpha3(attribute.Unit) {
-				return fmt.Errorf("attribute_schema claim %q unit must be a three-letter uppercase code", claim)
-			}
-		}
-	}
-	return nil
-}
-
-func isUppercaseAlpha3(unit string) bool {
-	if len(unit) != 3 {
-		return false
-	}
-	for i := 0; i < len(unit); i++ {
-		if unit[i] < 'A' || unit[i] > 'Z' {
-			return false
-		}
-	}
-	return true
-}
-
 func (s *activeSourceMetadata) current(_ time.Time) (*activeSourceMetadata, error) {
 	return s, nil
 }
@@ -424,7 +355,7 @@ func (s *activeSourceMetadata) project(rawGraphQL []byte) (gbosimplev1.Projectio
 	if err != nil {
 		return gbosimplev1.Projection{}, fmt.Errorf("decode GraphQL response for source projection: %w", err)
 	}
-	projection, err := gbosimplev1.Project(root, s.Definition.GraphQL.ResultPointer, s.Definition.Mapping)
+	projection, err := gbosimplev1.Project(root, s.Definition.GraphQL.ResultPointer, s.Definition.mapping())
 	if err != nil {
 		return gbosimplev1.Projection{}, fmt.Errorf("project source response: %w", err)
 	}
