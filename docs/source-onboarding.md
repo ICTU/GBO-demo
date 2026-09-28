@@ -374,6 +374,12 @@ Vastgelegde keuzes:
 - **`schema_version` blijft `1.0`.** De vorm is in place gewijzigd, omdat er
   nog geen externe bronnen waren; `mapping`, `attribute_schema` en
   `type_metadata` worden niet meer geaccepteerd.
+  Een registry die nog kandidaten van een oudere adapter bevat (snapshot
+  `schema_version` ongelijk aan `3.0`), behandelt die als afwezig: de
+  reconciler haalt de metadata volledig opnieuw op en activeert de bron
+  opnieuw. Een kandidaat die daarna nog steeds niet laadbaar is, wordt niet
+  gepromoveerd. Tot de nieuwe release actief is, weigert de issuance-runtime
+  de oude release.
 - **`number` blijft geweigerd** voor de EUDI-capability: nl-wallet v0.5 kan
   geen niet-integrale waarden representeren.
 

@@ -43,7 +43,7 @@ func TestMaterializeIssuanceReleaseUsesMountedSecretsWithoutPersistingThem(t *te
 		Claims: testClaims(map[string]mappingRule{"value": {Pointer: "/value", Datatype: "string"}}),
 	}
 	activation := &sourceActivation{
-		SchemaVersion: "2.0", Source: registration, MetadataURL: "https://metadata.example",
+		SchemaVersion: registrySnapshotSchemaVersion, Source: registration, MetadataURL: "https://metadata.example",
 		MetadataVersion: "1.0", MetadataPayloadDigest: strings.Repeat("a", 64), CheckedAt: now,
 		ExpiresAt: now.Add(2 * time.Hour), FreshUntil: now.Add(15 * time.Minute), StaleUntil: now.Add(time.Hour),
 		Types: []activatedType{{

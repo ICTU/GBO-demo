@@ -330,7 +330,7 @@ func runtimeTestRelease(t *testing.T, releaseID, sourceID, offerID string, now t
 		Claims: testClaims(map[string]mappingRule{"value": {Pointer: "/value", Datatype: "string"}}),
 	}
 	activation := &sourceActivation{
-		SchemaVersion: "2.0", Source: sourceRegistration{
+		SchemaVersion: registrySnapshotSchemaVersion, Source: sourceRegistration{
 			SourceID: sourceID, SourceOIN: "99999999900000000200", Name: sourceID,
 			MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportUnsecured, Endpoint: "https://metadata.example"},
 			DataAccess:       sourceDataAccess{Transport: sourceTransportUnsecured},
