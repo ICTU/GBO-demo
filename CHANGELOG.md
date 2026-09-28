@@ -77,6 +77,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- **A source defines each claim once.** An attestation's `mapping`,
+  `attribute_schema` and `type_metadata` are replaced by `display` and one
+  `claims` object, where each claim carries its `gbo-simple-v1` rule as
+  `source` plus `label`, optional `description` and `sd` (default `always`).
+  GBO generates the Type Metadata: `schema.required` is now exactly the
+  non-optional claims, and every claim gets `svg_id` equal to its name. `unit`
+  is dropped; `schema_version` stays `1.0`. The example documents move to the
+  new shape with a bumped `type_version`. See
+  [docs/source-onboarding.md](docs/source-onboarding.md#claims-en-type-metadata).
 - **The toestemmingsportaal shows only the scopes the dienstverlener asks
   for.** It parsed `scope` from the redirect but rendered and granted every
   scope it knew. A scope it cannot describe now refuses the request instead

@@ -155,30 +155,14 @@ func fetchSourceMetadataForTest(ctx context.Context, client *http.Client, cfg te
 	return nil, fmt.Errorf("source metadata has no attestation %q", cfg.TypeID)
 }
 
-func TestAttributeSchemaUnknownPropertiesRejectedByRuntimeAndEnvelopeSchema(t *testing.T) {
-	raw, err := os.ReadFile("../graphql-server/config/gbo-source-metadata.json")
-	if err != nil {
-		t.Fatalf("read shipped source metadata: %v", err)
-	}
+func TestClaimUnknownPropertiesRejectedByRuntimeAndEnvelopeSchema(t *testing.T) {
 	schema := compileSourceMetadataSchema(t)
-	for property, value := range map[string]any{"scale": 0, "anything": "goes"} {
+	for property, value := range map[string]any{"unit": "EUR", "svg_id": "verzamelinkomen", "anything": "goes"} {
 		t.Run(property, func(t *testing.T) {
-			var envelope map[string]any
-			if err := json.Unmarshal(raw, &envelope); err != nil {
-				t.Fatalf("decode source metadata: %v", err)
-			}
-			attestations := envelope["capabilities"].(map[string]any)["eudi"].(map[string]any)["attestations"].([]any)
-			attestation := attestations[0].(map[string]any)
-			attributes := attestation["attribute_schema"].(map[string]any)
-			amount := attributes["verzamelinkomen"].(map[string]any)
-			amount[property] = value
-			mutated, err := json.Marshal(envelope)
-			if err != nil {
-				t.Fatalf("encode mutated source metadata: %v", err)
-			}
-
-			var document sourceMetadataDocument
-			if err := json.Unmarshal(mutated, &document); err == nil || !strings.Contains(err.Error(), "unknown field") {
+			mutated := mutateShippedIncomeAttestation(t, func(attestation map[string]any) {
+				attestation["claims"].(map[string]any)["verzamelinkomen"].(map[string]any)[property] = value
+			})
+			if _, err := decodeSourceMetadataDocument(mutated); err == nil || !strings.Contains(err.Error(), "unknown field") {
 				t.Fatalf("runtime decode error = %v, want unknown field rejection", err)
 			}
 			metadata, err := jsonschema.UnmarshalJSON(bytes.NewReader(mutated))
@@ -186,68 +170,18 @@ func TestAttributeSchemaUnknownPropertiesRejectedByRuntimeAndEnvelopeSchema(t *t
 				t.Fatalf("parse mutated metadata for schema: %v", err)
 			}
 			if err := schema.Validate(metadata); err == nil {
-				t.Fatal("envelope schema accepted unknown attribute_schema property")
+				t.Fatal("envelope schema accepted unknown claim property")
 			}
 		})
 	}
 }
 
-func TestAttributeSchemaUnitRejectedByRuntimeAndEnvelopeSchema(t *testing.T) {
-	raw, err := os.ReadFile("../graphql-server/config/gbo-source-metadata.json")
+func TestEUDIClaimRejectsNumberUnsupportedByWallet(t *testing.T) {
+	mutated := mutateShippedIncomeAttestation(t, func(attestation map[string]any) {
+		attestation["claims"].(map[string]any)["verzamelinkomen"].(map[string]any)["source"].(map[string]any)["datatype"] = "number"
+	})
+	document, err := decodeSourceMetadataDocument(mutated)
 	if err != nil {
-		t.Fatalf("read shipped source metadata: %v", err)
-	}
-	var envelope map[string]any
-	if err := json.Unmarshal(raw, &envelope); err != nil {
-		t.Fatalf("decode source metadata: %v", err)
-	}
-	attestations := envelope["capabilities"].(map[string]any)["eudi"].(map[string]any)["attestations"].([]any)
-	attestation := attestations[0].(map[string]any)
-	attributes := attestation["attribute_schema"].(map[string]any)
-	amount := attributes["verzamelinkomen"].(map[string]any)
-	amount["unit"] = "eur"
-	mutated, err := json.Marshal(envelope)
-	if err != nil {
-		t.Fatalf("encode mutated source metadata: %v", err)
-	}
-
-	var document sourceMetadataDocument
-	if err := json.Unmarshal(mutated, &document); err != nil {
-		t.Fatalf("runtime decode error = %v", err)
-	}
-	if err := validateSourceAttestation(document.eudiAttestations()[0]); err == nil || !strings.Contains(err.Error(), "three-letter uppercase") {
-		t.Fatalf("runtime validation error = %v, want uppercase alpha-3 rejection", err)
-	}
-	metadata, err := jsonschema.UnmarshalJSON(bytes.NewReader(mutated))
-	if err != nil {
-		t.Fatalf("parse mutated metadata for schema: %v", err)
-	}
-	if err := compileSourceMetadataSchema(t).Validate(metadata); err == nil {
-		t.Fatal("envelope schema accepted lowercase attribute_schema unit")
-	}
-}
-
-func TestEUDIAttributeSchemaRejectsNumberUnsupportedByWallet(t *testing.T) {
-	raw, err := os.ReadFile("../graphql-server/config/gbo-source-metadata.json")
-	if err != nil {
-		t.Fatalf("read shipped source metadata: %v", err)
-	}
-	var envelope map[string]any
-	if err := json.Unmarshal(raw, &envelope); err != nil {
-		t.Fatalf("decode source metadata: %v", err)
-	}
-	attestations := envelope["capabilities"].(map[string]any)["eudi"].(map[string]any)["attestations"].([]any)
-	attestation := attestations[0].(map[string]any)
-	attestation["mapping"].(map[string]any)["verzamelinkomen"].(map[string]any)["datatype"] = "number"
-	attestation["attribute_schema"].(map[string]any)["verzamelinkomen"].(map[string]any)["type"] = "number"
-	attestation["type_metadata"].(map[string]any)["schema"].(map[string]any)["properties"].(map[string]any)["verzamelinkomen"].(map[string]any)["type"] = "number"
-	mutated, err := json.Marshal(envelope)
-	if err != nil {
-		t.Fatalf("encode mutated source metadata: %v", err)
-	}
-
-	var document sourceMetadataDocument
-	if err := json.Unmarshal(mutated, &document); err != nil {
 		t.Fatalf("runtime decode error = %v", err)
 	}
 	if err := validateSourceAttestation(document.eudiAttestations()[0]); err == nil || !strings.Contains(err.Error(), "nl-wallet v0.5 cannot represent") {
@@ -258,7 +192,80 @@ func TestEUDIAttributeSchemaRejectsNumberUnsupportedByWallet(t *testing.T) {
 		t.Fatalf("parse mutated metadata for schema: %v", err)
 	}
 	if err := compileSourceMetadataSchema(t).Validate(metadata); err == nil {
-		t.Fatal("envelope schema accepted a number attribute unsupported by nl-wallet v0.5")
+		t.Fatal("envelope schema accepted a number claim unsupported by nl-wallet v0.5")
+	}
+}
+
+func mutateShippedIncomeAttestation(t *testing.T, mutate func(attestation map[string]any)) []byte {
+	t.Helper()
+	raw, err := os.ReadFile("../graphql-server/config/gbo-source-metadata.json")
+	if err != nil {
+		t.Fatalf("read shipped source metadata: %v", err)
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		t.Fatalf("decode source metadata: %v", err)
+	}
+	attestations := envelope["capabilities"].(map[string]any)["eudi"].(map[string]any)["attestations"].([]any)
+	mutate(attestations[0].(map[string]any))
+	mutated, err := json.Marshal(envelope)
+	if err != nil {
+		t.Fatalf("encode mutated source metadata: %v", err)
+	}
+	return mutated
+}
+
+// Every shipped attestation publishes a schema that the credential its own
+// projection produces satisfies, so onboarding cannot publish a wallet
+// contract that issuance then violates.
+func TestShippedAttestationsSatisfyTheirGeneratedSchema(t *testing.T) {
+	for path, response := range map[string]string{
+		"../graphql-server/config/gbo-source-metadata.json": completeIncomeResponse,
+		"../graphql-server/config/gbo-source-metadata-unsecured.json": `{"data":{"ingeschrevenPersoon":{"heeftBelastingjaarAangifte":[
+			{"belastingjaar":2025,"status":"Definitief vastgesteld"}]}}}`,
+		"../brp-graphql-server/config/gbo-source-metadata.json": `{"data":{"akteVanOverlijden":[{
+			"overledene_geslachtsnaam":"Vries","overledene_voorvoegsel":null,"overledene_voornamen":"Sander",
+			"datum_overlijden":"2026-02-14","soort_verbintenis":"Huwelijk","verklaring_tekst":"Verklaring"}]}}`,
+	} {
+		t.Run(path, func(t *testing.T) {
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			document, err := decodeSourceMetadataDocument(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			definition := document.eudiAttestations()[0]
+			if err := validateSourceAttestation(definition); err != nil {
+				t.Fatalf("shipped attestation is invalid: %v", err)
+			}
+			publication, err := newTypeMetadataPublication("https://issuer.example", "example", definition)
+			if err != nil {
+				t.Fatal(err)
+			}
+			projection, err := (&activeSourceMetadata{Definition: definition}).project([]byte(response))
+			if err != nil {
+				t.Fatalf("project example response: %v", err)
+			}
+			credential := map[string]any{"vct": publication.VCT, "vct#integrity": publication.Integrity}
+			for claim, value := range projection.Claims {
+				credential[claim] = value
+			}
+			// Round-trip through JSON so numbers reach the validator as they
+			// would in an issued credential.
+			encoded, err := json.Marshal(credential)
+			if err != nil {
+				t.Fatal(err)
+			}
+			instance, err := jsonschema.UnmarshalJSON(bytes.NewReader(encoded))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := compilePublishedSchema(t, publication).Validate(instance); err != nil {
+				t.Fatalf("projected credential does not satisfy the generated schema: %v", err)
+			}
+		})
 	}
 }
 
@@ -405,7 +412,8 @@ func newIncomeSourceAdapter(t *testing.T, mapping map[string]mappingRule, bronRe
 				ResultPointer: "/data/ingeschrevenPersoon/heeftBelastingjaarAangifte",
 			},
 			MappingProfile: "gbo-simple-v1",
-			Mapping:        mapping,
+			Display:        testDisplay("Inkomensverklaring"),
+			Claims:         testClaims(mapping),
 		},
 	}
 	outway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
@@ -439,7 +447,7 @@ func TestSourceAttestationDoesNotExposeUpstreamErrorBody(t *testing.T) {
 		Definition: sourceAttestationDefinition{
 			Offers:  []sourceOffer{{ID: "example", Label: "Example", Parameters: map[string]any{}}},
 			GraphQL: sourceGraphQL{ServiceReference: "example", Endpoint: "/graphql", Document: "query Example($bsn: BSN!) { example(bsn: $bsn) { value } }", SubjectVariable: "bsn", ResultPointer: "/data/example"},
-			Mapping: map[string]mappingRule{"value": {Pointer: "/value", Datatype: "string"}},
+			Claims:  testClaims(map[string]mappingRule{"value": {Pointer: "/value", Datatype: "string"}}),
 		},
 	}
 	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
@@ -647,11 +655,14 @@ func TestSourceMetadataRejectedDuringOnboarding(t *testing.T) {
 						"result_pointer": "/data/ingeschrevenPersoon/heeftBelastingjaarAangifte",
 					},
 					"mapping_profile": "gbo-simple-v1",
-					"mapping": map[string]any{
-						"belastingjaar": map[string]any{"pointer": "/belastingjaar", "datatype": "gYear"},
+					"display": map[string]any{
+						"nl-NL": map[string]any{"name": "Inkomensverklaring", "summary": "{{belastingjaar}}"},
 					},
-					"attribute_schema": map[string]any{
-						"belastingjaar": map[string]any{"type": "integer", "format": "gYear"},
+					"claims": map[string]any{
+						"belastingjaar": map[string]any{
+							"source": map[string]any{"pointer": "/belastingjaar", "datatype": "gYear"},
+							"label":  map[string]any{"nl-NL": "Belastingjaar"},
+						},
 					},
 				}},
 			}},
@@ -700,6 +711,12 @@ func TestSourceMetadataRejectedDuringOnboarding(t *testing.T) {
 			),
 			expectedOIN: "00000001003214345000",
 			wantError:   "GBO_SIMPLE_MAPPING_INVALID",
+		},
+		{
+			name:        "summary placeholder that is not a claim",
+			payload:     bytes.Replace(metadataPayload(t, "00000001003214345000", validQuery), []byte(`{{belastingjaar}}`), []byte(`{{verzamelinkomen}}`), 1),
+			expectedOIN: "00000001003214345000",
+			wantError:   "is not a claim",
 		},
 		{
 			name:        "unsupported envelope schema version",

@@ -45,8 +45,9 @@ func (f *releaseOperationsFake) ActivateRelease(_ context.Context, releaseID str
 }
 
 func TestActivateSourceReleaseRollsBackPointerAfterTargetValidation(t *testing.T) {
-	first := onboarding.SourceRelease{ID: strings.Repeat("a", 64)}
-	second := onboarding.SourceRelease{ID: strings.Repeat("b", 64)}
+	now := time.Now().UTC()
+	first := runtimeTestRelease(t, strings.Repeat("a", 64), "belastingdienst", "first", now)
+	second := runtimeTestRelease(t, strings.Repeat("b", 64), "belastingdienst", "second", now)
 	registry := &releaseOperationsFake{
 		releases: map[string]onboarding.SourceRelease{first.ID: first, second.ID: second}, active: second.ID,
 	}
@@ -62,6 +63,26 @@ func TestActivateSourceReleaseRollsBackPointerAfterTargetValidation(t *testing.T
 	}
 	if registry.active != first.ID {
 		t.Fatal("missing rollback target changed the active release")
+	}
+}
+
+// A release written before the current snapshot schema stays in the
+// registry, but the adapter rejects it; rolling back to it must fail before
+// the active pointer moves.
+func TestActivateSourceReleaseRejectsReleaseTheAdapterCannotLoad(t *testing.T) {
+	now := time.Now().UTC()
+	current := runtimeTestRelease(t, strings.Repeat("a", 64), "belastingdienst", "current", now)
+	historical := runtimeTestRelease(t, strings.Repeat("b", 64), "belastingdienst", "historical", now)
+	historical.Sources[0].Snapshot = json.RawMessage(strings.Replace(string(historical.Sources[0].Snapshot),
+		`"schema_version":"`+registrySnapshotSchemaVersion+`"`, `"schema_version":"2.0"`, 1))
+	registry := &releaseOperationsFake{
+		releases: map[string]onboarding.SourceRelease{current.ID: current, historical.ID: historical}, active: current.ID,
+	}
+	if _, err := activateSourceRelease(context.Background(), registry, historical.ID); err == nil || !strings.Contains(err.Error(), "cannot load") {
+		t.Fatalf("error = %v, want rejection of an unloadable release", err)
+	}
+	if registry.active != current.ID {
+		t.Fatal("unloadable rollback target changed the active release")
 	}
 }
 

@@ -39,11 +39,11 @@ func TestMaterializeIssuanceReleaseUsesMountedSecretsWithoutPersistingThem(t *te
 	definition := sourceAttestationDefinition{
 		TypeID: "inkomensverklaring", TypeVersion: "1.0", Offers: []sourceOffer{offer},
 		GraphQL:        sourceGraphQL{Endpoint: "/graphql", Document: "query Income($bsn: String!) { income(bsn: $bsn) { value } }", SubjectVariable: "bsn", ResultPointer: "/data/income"},
-		MappingProfile: "gbo-simple-v1", Mapping: map[string]mappingRule{"value": {Pointer: "/value", Datatype: "string"}},
-		AttributeSchema: map[string]sourceAttributeSchema{"value": {Type: "string"}},
+		MappingProfile: "gbo-simple-v1", Display: testDisplay("Example"),
+		Claims: testClaims(map[string]mappingRule{"value": {Pointer: "/value", Datatype: "string"}}),
 	}
 	activation := &sourceActivation{
-		SchemaVersion: "2.0", Source: registration, MetadataURL: "https://metadata.example",
+		SchemaVersion: registrySnapshotSchemaVersion, Source: registration, MetadataURL: "https://metadata.example",
 		MetadataVersion: "1.0", MetadataPayloadDigest: strings.Repeat("a", 64), CheckedAt: now,
 		ExpiresAt: now.Add(2 * time.Hour), FreshUntil: now.Add(15 * time.Minute), StaleUntil: now.Add(time.Hour),
 		Types: []activatedType{{

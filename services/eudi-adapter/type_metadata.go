@@ -11,14 +11,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
-	"slices"
 	"strings"
-
-	"gbo-demo/eudi-adapter/internal/gbosimplev1"
 )
-
-var summaryPlaceholderPattern = regexp.MustCompile(`\{\{([^{}]+)\}\}`)
 
 // typeMetadataPublication is the immutable representation associated with one
 // source-owned type version. Integrity is calculated over Body exactly as it
@@ -41,31 +35,10 @@ func newTypeMetadataPublication(publicBaseURL, sourceID string, definition sourc
 		return nil, fmt.Errorf("valid source ID, type ID and type version are required")
 	}
 
-	decoder := json.NewDecoder(bytes.NewReader(definition.TypeMetadata))
-	decoder.UseNumber()
-	var metadata map[string]any
-	if err := decoder.Decode(&metadata); err != nil || metadata == nil {
-		return nil, fmt.Errorf("type_metadata must be a JSON object")
-	}
-	for _, forbidden := range []string{"vct", "vct#integrity"} {
-		if _, exists := metadata[forbidden]; exists {
-			return nil, fmt.Errorf("type_metadata must not define %q", forbidden)
-		}
-	}
-	if err := validateOptionalClaimsAgainstSchema(metadata, definition.Mapping); err != nil {
-		return nil, err
-	}
-	if err := validateTypeMetadataAttributeSchema(metadata, definition.AttributeSchema); err != nil {
-		return nil, err
-	}
-	if err := validateSummaryPlaceholders(metadata); err != nil {
-		return nil, err
-	}
-
 	path := "/types/" + url.PathEscape(sourceID) + "/" + url.PathEscape(definition.TypeID) + "/v" + url.PathEscape(definition.TypeVersion)
 	vct := strings.TrimRight(publicBaseURL, "/") + path
-	metadata["vct"] = vct
-	if err := addManagedCredentialSchema(metadata, vct); err != nil {
+	metadata, err := generateTypeMetadata(definition, vct)
+	if err != nil {
 		return nil, err
 	}
 	body, err := json.Marshal(metadata)
@@ -84,93 +57,101 @@ func newTypeMetadataPublication(publicBaseURL, sourceID string, definition sourc
 	}, nil
 }
 
-func validateTypeMetadataAttributeSchema(metadata map[string]any, attributes map[string]sourceAttributeSchema) error {
-	if len(attributes) == 0 {
-		return nil
+// generateTypeMetadata derives the complete SD-JWT VC Type Metadata from the
+// source's claims and display. The source cannot supply any part of it
+// directly, so the schema, its required list and the svg_id set always agree
+// with the mapping that fills the credential.
+func generateTypeMetadata(definition sourceAttestationDefinition, vct string) (map[string]any, error) {
+	if len(definition.Claims) == 0 || len(definition.Display) == 0 {
+		return nil, fmt.Errorf("type metadata requires claims and display")
 	}
-	schema, ok := metadata["schema"].(map[string]any)
-	if !ok {
-		return fmt.Errorf("type_metadata.schema must be a JSON object")
+	primary := definition.Display[0]
+	metadata := map[string]any{"vct": vct, "name": primary.Name}
+	if primary.Description != "" {
+		metadata["description"] = primary.Description
 	}
-	properties, ok := schema["properties"].(map[string]any)
-	if !ok {
-		return fmt.Errorf("type_metadata.schema.properties must define every mapped claim")
-	}
-	for claim, attribute := range attributes {
-		property, ok := properties[claim].(map[string]any)
-		if !ok {
-			return fmt.Errorf("type_metadata.schema.properties is missing mapped claim %q", claim)
-		}
-		if property["type"] != attribute.Type {
-			return fmt.Errorf("type_metadata schema claim %q must have type %q", claim, attribute.Type)
-		}
-		if attribute.Format == "date" && property["format"] != "date" {
-			return fmt.Errorf("type_metadata schema claim %q must have format %q", claim, attribute.Format)
-		}
-	}
-	return nil
-}
 
-func validateOptionalClaimsAgainstSchema(metadata map[string]any, mapping gbosimplev1.Mapping) error {
-	schema, ok := metadata["schema"].(map[string]any)
-	if !ok {
-		return fmt.Errorf("type_metadata.schema must be a JSON object")
-	}
-	required, _ := schema["required"].([]any)
-	for _, rawClaim := range required {
-		claim, ok := rawClaim.(string)
-		if !ok {
-			return fmt.Errorf("type_metadata.schema.required must contain only strings")
+	displays := make([]any, 0, len(definition.Display))
+	for _, display := range definition.Display {
+		entry := map[string]any{"lang": display.Lang, "name": display.Name}
+		if display.Description != "" {
+			entry["description"] = display.Description
 		}
-		if rule, mapped := mapping[claim]; mapped && rule.Optional {
-			return fmt.Errorf("mapping claim %q cannot be optional because Type Metadata requires it", claim)
+		if display.Summary != "" {
+			entry["summary"] = display.Summary
 		}
-	}
-	return nil
-}
-
-func validateSummaryPlaceholders(metadata map[string]any) error {
-	requiredIDs := make(map[string]struct{})
-	if displays, ok := metadata["display"].([]any); ok {
-		for _, rawDisplay := range displays {
-			display, ok := rawDisplay.(map[string]any)
-			if !ok {
-				continue
+		if len(display.Rendering) > 0 {
+			decoder := json.NewDecoder(bytes.NewReader(display.Rendering))
+			decoder.UseNumber()
+			var rendering map[string]any
+			if err := decoder.Decode(&rendering); err != nil || rendering == nil {
+				return nil, fmt.Errorf("display %q rendering must be a JSON object", display.Lang)
 			}
-			summary, _ := display["summary"].(string)
-			for _, match := range summaryPlaceholderPattern.FindAllStringSubmatch(summary, -1) {
-				if id := strings.TrimSpace(match[1]); id != "" {
-					requiredIDs[id] = struct{}{}
+			entry["rendering"] = rendering
+		}
+		displays = append(displays, entry)
+	}
+	metadata["display"] = displays
+
+	claims := make([]any, 0, len(definition.Claims))
+	properties := make(map[string]any, len(definition.Claims)+2)
+	required := make([]any, 0, len(definition.Claims)+2)
+	for _, claim := range definition.Claims {
+		labels := make([]any, 0, len(claim.Label))
+		for _, label := range claim.Label {
+			entry := map[string]any{"lang": label.Lang, "label": label.Text}
+			for _, description := range claim.Description {
+				if description.Lang == label.Lang {
+					entry["description"] = description.Text
 				}
 			}
+			labels = append(labels, entry)
+		}
+		sd := claim.SD
+		if sd == "" {
+			sd = "always"
+		}
+		claims = append(claims, map[string]any{
+			"path": []any{claim.Name}, "display": labels, "sd": sd, "svg_id": claim.Name,
+		})
+
+		property, err := credentialSchemaProperty(claim.Source.Datatype)
+		if err != nil {
+			return nil, fmt.Errorf("claim %q: %w", claim.Name, err)
+		}
+		properties[claim.Name] = property
+		if !claim.Source.Optional {
+			required = append(required, claim.Name)
 		}
 	}
-	if len(requiredIDs) == 0 {
-		return nil
+	metadata["claims"] = claims
+
+	properties["vct"] = map[string]any{"type": "string", "const": vct}
+	properties["vct#integrity"] = map[string]any{"type": "string", "pattern": `^sha256-[A-Za-z0-9+/]+={0,2}$`}
+	required = append(required, "vct", "vct#integrity")
+	metadata["schema"] = map[string]any{
+		"$schema":    "https://json-schema.org/draft/2020-12/schema",
+		"title":      primary.Name,
+		"type":       "object",
+		"properties": properties,
+		"required":   required,
 	}
-	availableIDs := make(map[string]struct{})
-	if claims, ok := metadata["claims"].([]any); ok {
-		for _, rawClaim := range claims {
-			claim, ok := rawClaim.(map[string]any)
-			if !ok {
-				continue
-			}
-			if id, ok := claim["svg_id"].(string); ok && id != "" {
-				availableIDs[id] = struct{}{}
-			}
-		}
+	return metadata, nil
+}
+
+// credentialSchemaProperty is the JSON Schema of the value a gbo-simple-v1
+// rule with this datatype copies into the credential.
+func credentialSchemaProperty(datatype string) (map[string]any, error) {
+	switch datatype {
+	case "string", "boolean", "integer":
+		return map[string]any{"type": datatype}, nil
+	case "date":
+		return map[string]any{"type": "string", "format": "date"}, nil
+	case "gYear":
+		return map[string]any{"type": "integer"}, nil
+	default:
+		return nil, fmt.Errorf("datatype %q has no credential representation", datatype)
 	}
-	missing := make([]string, 0)
-	for id := range requiredIDs {
-		if _, available := availableIDs[id]; !available {
-			missing = append(missing, id)
-		}
-	}
-	if len(missing) > 0 {
-		slices.Sort(missing)
-		return fmt.Errorf("type_metadata summary placeholders require matching claim svg_id values: %s", strings.Join(missing, ", "))
-	}
-	return nil
 }
 
 func validateTypeMetadataBaseURL(publicBaseURL string) error {
@@ -185,44 +166,6 @@ func validateTypeMetadataBaseURL(publicBaseURL string) error {
 			return fmt.Errorf("type metadata public base URL must use HTTPS outside loopback development")
 		}
 	}
-	return nil
-}
-
-func addManagedCredentialSchema(metadata map[string]any, vct string) error {
-	schema, ok := metadata["schema"].(map[string]any)
-	if !ok {
-		return fmt.Errorf("type_metadata.schema must be a JSON object")
-	}
-	propertiesValue, hasProperties := schema["properties"]
-	properties, ok := propertiesValue.(map[string]any)
-	if hasProperties && !ok {
-		return fmt.Errorf("type_metadata.schema.properties must be a JSON object")
-	}
-	if !hasProperties {
-		properties = make(map[string]any)
-		schema["properties"] = properties
-	}
-	properties["vct"] = map[string]any{"type": "string", "const": vct}
-	properties["vct#integrity"] = map[string]any{"type": "string", "pattern": `^sha256-[A-Za-z0-9+/]+={0,2}$`}
-	requiredValue, hasRequired := schema["required"]
-	required, ok := requiredValue.([]any)
-	if hasRequired && !ok {
-		return fmt.Errorf("type_metadata.schema.required must be an array")
-	}
-	seen := make(map[string]bool, len(required))
-	for _, value := range required {
-		name, ok := value.(string)
-		if !ok {
-			return fmt.Errorf("type_metadata.schema.required must contain only strings")
-		}
-		seen[name] = true
-	}
-	for _, name := range []string{"vct", "vct#integrity"} {
-		if !seen[name] {
-			required = append(required, name)
-		}
-	}
-	schema["required"] = required
 	return nil
 }
 

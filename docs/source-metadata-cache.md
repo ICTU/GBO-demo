@@ -47,9 +47,10 @@ geen representatie in het registry-model.
   `/types/{source-id}/{type-id}/v{type-version}`.
 - GBO voegt `vct` en `vct#integrity` toe en berekent de integriteitswaarde over
   precies de immutable bytes die via die VCT-URL worden geserveerd.
-- `type_metadata.schema` is verplichte broninput en moet een JSON-object zijn.
-- Iedere `{{placeholder}}` in een wallet-`summary` moet een gelijknamige
-  `svg_id` op een claim hebben.
+- GBO genereert de volledige Type Metadata uit `display` en `claims` van het
+  brondocument; zie [Claims en Type Metadata](source-onboarding.md#claims-en-type-metadata).
+- Iedere `{{placeholder}}` in een wallet-`summary` moet een claimnaam zijn;
+  iedere claim krijgt `svg_id` gelijk aan die naam.
 - Gepubliceerde typeversies worden niet automatisch verwijderd. Een
   retentiebeleid mag een versie pas verwijderen wanneer geen geldig credential
   er nog naar kan verwijzen.

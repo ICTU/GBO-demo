@@ -18,6 +18,16 @@ import (
 	"gbo-demo/eudi-adapter/internal/onboarding"
 )
 
+// registrySnapshotSchemaVersion changes whenever a stored snapshot can no
+// longer be decoded into a valid activation. 3.0 stores each definition in
+// the claims-once shape (issue #462) as an order-preserving string.
+const registrySnapshotSchemaVersion = "3.0"
+
+// errIncompatibleRegistrySnapshot marks a candidate written by an older
+// adapter. The reconciler treats it as absent and activates the source from
+// freshly fetched metadata, instead of blocking on a snapshot it cannot read.
+var errIncompatibleRegistrySnapshot = errors.New("registry source snapshot has an incompatible schema version")
+
 type registryActivationBackend struct {
 	ctx      context.Context
 	registry onboarding.SourceRegistry
@@ -60,12 +70,15 @@ type registryActivationSnapshot struct {
 }
 
 type registryActivatedType struct {
-	TypeID       string                      `json:"type_id"`
-	TypeVersion  string                      `json:"type_version"`
-	VCT          string                      `json:"vct"`
-	VCTIntegrity string                      `json:"vct_integrity"`
-	Offers       []sourceOffer               `json:"offers"`
-	Definition   sourceAttestationDefinition `json:"definition"`
+	TypeID       string        `json:"type_id"`
+	TypeVersion  string        `json:"type_version"`
+	VCT          string        `json:"vct"`
+	VCTIntegrity string        `json:"vct_integrity"`
+	Offers       []sourceOffer `json:"offers"`
+	// Definition is the attestation definition encoded as a JSON string. The
+	// registry stores snapshots as jsonb, which reorders object keys, and
+	// the order of claims and languages is the order the wallet shows.
+	Definition string `json:"definition"`
 }
 
 func newRegistryActivationBackend(ctx context.Context, registry onboarding.SourceRegistry) *registryActivationBackend {
@@ -83,7 +96,30 @@ func (b *registryActivationBackend) CurrentCandidate(sourceID string) (*sourceAc
 	if !found {
 		return nil, os.ErrNotExist
 	}
-	return activationFromRegistryCandidate(candidate)
+	activation, err := activationFromRegistryCandidate(candidate)
+	if errors.Is(err, errIncompatibleRegistrySnapshot) {
+		return nil, os.ErrNotExist
+	}
+	return activation, err
+}
+
+// RequireLoadableCandidates refuses a promotion that would activate a
+// candidate this adapter cannot load, such as one stored under an older
+// snapshot schema whose source could not be fetched again.
+func (b *registryActivationBackend) RequireLoadableCandidates(sourceIDs []string) error {
+	for _, sourceID := range sourceIDs {
+		candidate, found, err := b.registry.Candidate(b.ctx, sourceID)
+		if err != nil {
+			return err
+		}
+		if !found {
+			continue
+		}
+		if _, err := activationFromRegistryCandidate(candidate); err != nil {
+			return fmt.Errorf("source %q candidate cannot be loaded: %w", sourceID, err)
+		}
+	}
+	return nil
 }
 
 func (b *registryActivationBackend) Activate(validated *validatedSourceRegistration, certificates certificateArtifacts) (*sourceActivation, error) {
@@ -215,7 +251,7 @@ func activationFromValidatedSource(validated *validatedSourceRegistration) *sour
 	}
 	payloadDigest := sha256.Sum256(validated.Payload)
 	return &sourceActivation{
-		SchemaVersion: "2.0", Source: validated.Registration, MetadataURL: validated.MetadataURL,
+		SchemaVersion: registrySnapshotSchemaVersion, Source: validated.Registration, MetadataURL: validated.MetadataURL,
 		MetadataVersion: validated.Document.Version, MetadataPayloadDigest: hex.EncodeToString(payloadDigest[:]),
 		MetadataETag: validated.MetadataETag, ExpiresAt: validated.ExpiresAt,
 		CheckedAt:                  validated.ValidatedAt.UTC(),
@@ -278,14 +314,18 @@ func registrySnapshotFromActivation(activation *sourceActivation) (registryActiv
 	}
 	types := make([]registryActivatedType, len(activation.Types))
 	for index, activatedType := range activation.Types {
+		definition, err := json.Marshal(activatedType.Definition)
+		if err != nil {
+			return registryActivationSnapshot{}, fmt.Errorf("marshal definition of type %q: %w", activatedType.TypeID, err)
+		}
 		types[index] = registryActivatedType{
 			TypeID: activatedType.TypeID, TypeVersion: activatedType.TypeVersion,
 			VCT: activatedType.VCT, VCTIntegrity: activatedType.VCTIntegrity,
-			Offers: append([]sourceOffer(nil), activatedType.Offers...), Definition: activatedType.Definition,
+			Offers: append([]sourceOffer(nil), activatedType.Offers...), Definition: string(definition),
 		}
 	}
 	return registryActivationSnapshot{
-		SchemaVersion: "2.0", Source: activation.Source, MetadataURL: activation.MetadataURL,
+		SchemaVersion: registrySnapshotSchemaVersion, Source: activation.Source, MetadataURL: activation.MetadataURL,
 		MetadataVersion: activation.MetadataVersion, MetadataPayloadDigest: activation.MetadataPayloadDigest,
 		MetadataETag: activation.MetadataETag, ExpiresAt: activation.ExpiresAt,
 		CheckedAt:  activation.CheckedAt,
@@ -296,20 +336,33 @@ func registrySnapshotFromActivation(activation *sourceActivation) (registryActiv
 }
 
 func activationFromRegistryCandidate(candidate onboarding.SourceCandidate) (*sourceActivation, error) {
+	var version struct {
+		SchemaVersion string `json:"schema_version"`
+	}
+	if err := json.Unmarshal(candidate.Snapshot, &version); err != nil {
+		return nil, fmt.Errorf("decode registry source snapshot: %w", err)
+	}
+	if version.SchemaVersion != registrySnapshotSchemaVersion {
+		return nil, fmt.Errorf("%w: %q", errIncompatibleRegistrySnapshot, version.SchemaVersion)
+	}
 	var snapshot registryActivationSnapshot
 	decoder := json.NewDecoder(strings.NewReader(string(candidate.Snapshot)))
 	if err := decoder.Decode(&snapshot); err != nil {
 		return nil, fmt.Errorf("decode registry source snapshot: %w", err)
 	}
-	if snapshot.SchemaVersion != "2.0" || snapshot.Source.SourceID != candidate.SourceID {
+	if snapshot.Source.SourceID != candidate.SourceID {
 		return nil, fmt.Errorf("registry source snapshot is inconsistent")
 	}
 	types := make([]activatedType, len(snapshot.Types))
 	for index, stored := range snapshot.Types {
+		var definition sourceAttestationDefinition
+		if err := json.Unmarshal([]byte(stored.Definition), &definition); err != nil {
+			return nil, fmt.Errorf("decode registry definition of type %q: %w", stored.TypeID, err)
+		}
 		types[index] = activatedType{
 			TypeID: stored.TypeID, TypeVersion: stored.TypeVersion, VCT: stored.VCT,
 			VCTIntegrity: stored.VCTIntegrity, TypeMetadataReference: stored.VCT,
-			Offers: append([]sourceOffer(nil), stored.Offers...), Definition: stored.Definition,
+			Offers: append([]sourceOffer(nil), stored.Offers...), Definition: definition,
 		}
 		if err := types[index].validate(); err != nil {
 			return nil, fmt.Errorf("registry source snapshot type %q is invalid: %w", stored.TypeID, err)

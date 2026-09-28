@@ -97,7 +97,8 @@ func runReconcileCommand(ctx context.Context, arguments []string, dependencies r
 			}
 		}
 	}
-	backend = newRegistryActivationBackend(ctx, registry)
+	registryBackend := newRegistryActivationBackend(ctx, registry)
+	backend = registryBackend
 	statuses = registryStatusWriter{ctx: ctx, registry: registry}
 	var managerClient *http.Client
 	reconcile := func() error {
@@ -134,6 +135,9 @@ func runReconcileCommand(ctx context.Context, arguments []string, dependencies r
 			sourceIDs := make([]string, len(sources))
 			for index, source := range sources {
 				sourceIDs[index] = source.SourceID
+			}
+			if err := registryBackend.RequireLoadableCandidates(sourceIDs); err != nil {
+				return fmt.Errorf("promote complete source release: %w", err)
 			}
 			promotion, err := onboardingcore.PromoteCompleteSourceSet(ctx, registry, sourceIDs, dependencies.now())
 			if err != nil {

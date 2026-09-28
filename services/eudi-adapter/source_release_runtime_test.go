@@ -326,11 +326,11 @@ func runtimeTestRelease(t *testing.T, releaseID, sourceID, offerID string, now t
 	definition := sourceAttestationDefinition{
 		TypeID: "example", TypeVersion: "1.0", Offers: []sourceOffer{offer},
 		GraphQL:        sourceGraphQL{Endpoint: "/graphql", Document: "query Example($bsn: String!) { example(bsn: $bsn) { value } }", SubjectVariable: "bsn", ResultPointer: "/data/example"},
-		MappingProfile: "gbo-simple-v1", Mapping: map[string]mappingRule{"value": {Pointer: "/value", Datatype: "string"}},
-		AttributeSchema: map[string]sourceAttributeSchema{"value": {Type: "string"}},
+		MappingProfile: "gbo-simple-v1", Display: testDisplay("Example"),
+		Claims: testClaims(map[string]mappingRule{"value": {Pointer: "/value", Datatype: "string"}}),
 	}
 	activation := &sourceActivation{
-		SchemaVersion: "2.0", Source: sourceRegistration{
+		SchemaVersion: registrySnapshotSchemaVersion, Source: sourceRegistration{
 			SourceID: sourceID, SourceOIN: "99999999900000000200", Name: sourceID,
 			MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportUnsecured, Endpoint: "https://metadata.example"},
 			DataAccess:       sourceDataAccess{Transport: sourceTransportUnsecured},
