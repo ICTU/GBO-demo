@@ -1,7 +1,7 @@
 {
   "id": "use-veld-buiten-scope-deny",
   "name": "Use · veld buiten rule-coverage DENY",
-  "desc": "Query vraagt box2Inkomen — niet gedekt door DVT0001 → NO_APPLICABLE_RULE per-veld (EUD0001 dekt het veld wel, maar firet niet in de DvTP-flow).",
+  "desc": "Query vraagt box2Inkomen — niet gedekt door DVT0001. Alleen EUD0001 dekt het veld, en die eist een gedisclosede PID die een consent-request niet heeft → PID_NOT_PRESENT.",
   "tab": "use",
   "expected_outcome": "deny",
   "payload": {

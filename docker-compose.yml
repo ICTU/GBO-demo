@@ -1095,10 +1095,12 @@ services:
       - VITE_JAEGER_PUBLIC_URL=${JAEGER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_JAEGER:-9686}}
       - VITE_GRAFANA_PUBLIC_URL=${GRAFANA_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_GRAFANA:-9300}}
       # De FSC-controllers draaien in de fsc-infra-stack, met eigen
-      # FSC_PORT_*-poorten; vandaar losse overrides in plaats van GBO_PORT_*.
-      - VITE_FSC_CONTROLLER_BRON_URL=${FSC_CONTROLLER_BRON_URL:-http://${GBO_PUBLIC_HOST:-localhost}:8092}
-      - VITE_FSC_CONTROLLER_DVTP_URL=${FSC_CONTROLLER_DVTP_URL:-http://${GBO_PUBLIC_HOST:-localhost}:8096}
-      - VITE_FSC_CONTROLLER_EUDI_URL=${FSC_CONTROLLER_EUDI_URL:-http://${GBO_PUBLIC_HOST:-localhost}:8094}
+      # FSC_PORT_*-poorten; die volgen we hier, met dezelfde defaults als
+      # fsc-infra/docker-compose.yml. De bronhouder is de BD-peer, niet de
+      # directory-peer.
+      - VITE_FSC_CONTROLLER_BRON_URL=${FSC_CONTROLLER_BRON_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${FSC_PORT_BD_CONTROLLER:-8095}}
+      - VITE_FSC_CONTROLLER_DVTP_URL=${FSC_CONTROLLER_DVTP_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${FSC_PORT_HV_CONTROLLER:-8096}}
+      - VITE_FSC_CONTROLLER_EUDI_URL=${FSC_CONTROLLER_EUDI_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${FSC_PORT_EDI_CONTROLLER:-8094}}
       - VITE_VERSION_STRING=${VERSION_STRING:-}
     volumes:
       - ./landing-page/src:/app/src

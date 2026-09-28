@@ -19,9 +19,11 @@ rule_id := "DVT0001"
 # scalars (waarde, valuta) inherit coverage from this rule.
 # BelastingjaarAangifte/AangifteIH are NOT listed here: we declare their
 # covered fields explicitly in covers_fields, so that a field we
-# deliberately do NOT cover (e.g. box2Inkomen/box3Inkomen) comes back as
-# NO_APPLICABLE_RULE — model C: the rule IS the catalog, no separate
-# scope_fields table.
+# deliberately do NOT cover (e.g. box2Inkomen/box3Inkomen) is denied —
+# model C: the rule IS the catalog, no separate scope_fields table. The
+# reason is NO_APPLICABLE_RULE only when no other rule covers the field
+# either; box2Inkomen/box3Inkomen are covered by EUD0001, so a consent
+# request for them is denied with its PID_NOT_PRESENT.
 covers_types := {"Bedrag"}
 
 # Explicitly covered fields: ALL object-edges + the scalars this rule
