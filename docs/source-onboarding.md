@@ -459,6 +459,13 @@ rematerialiseren en de issuance-server te herstarten. In Kubernetes gebeurt
 dit door de issuance-pod opnieuw aan te maken, zodat de init-container opnieuw
 draait. Een onbekend release-ID wijzigt de actieve pointer niet.
 
+Het commando laadt de doelrelease eerst zoals de adapter dat doet, en weigert
+een release die de adapter niet kan laden, ook dan zonder de actieve pointer te
+wijzigen. Releases van vóór snapshotschema `3.0` (de claims-once-vorm) blijven
+in PostgreSQL staan, maar zijn met deze adapter geen rollbackdoel. Wie naar
+zo'n release terug wil, moet ook de adapter terugzetten naar een versie die
+dat schema leest.
+
 Een reconciler met `--watch --auto-promote` respecteert deze handmatige
 rollback. Wanneer de huidige kandidaatset al als release bestaat, maar een
 operator een andere bestaande release heeft geactiveerd, laat auto-promotie de

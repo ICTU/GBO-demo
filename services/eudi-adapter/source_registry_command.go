@@ -124,6 +124,12 @@ func activateSourceRelease(ctx context.Context, registry sourceReleaseOperations
 	if err != nil {
 		return onboarding.SourceRelease{}, err
 	}
+	// The adapter must be able to load the target, or activating it takes
+	// issuance down until another release is activated. A release stored
+	// under an older snapshot schema is the realistic case.
+	if _, err := buildReleaseRuntimeSnapshot(config{}, target); err != nil {
+		return onboarding.SourceRelease{}, fmt.Errorf("cannot activate Source Release %s, this adapter cannot load it: %w", target.ID, err)
+	}
 	if err := registry.ActivateRelease(ctx, target.ID); err != nil {
 		return onboarding.SourceRelease{}, err
 	}
