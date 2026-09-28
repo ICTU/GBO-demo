@@ -48,7 +48,7 @@ export const links = {
   fscControllerBron: resolve(
     rc?.fscControllerBronUrl,
     import.meta.env.VITE_FSC_CONTROLLER_BRON_URL,
-    'http://localhost:8092',
+    'http://localhost:8095',
   ),
   fscControllerDvtp: resolve(
     rc?.fscControllerDvtpUrl,
