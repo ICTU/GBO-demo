@@ -239,3 +239,62 @@ func TestSeedDemoIsIdempotentAndPreservesChanges(t *testing.T) {
 		t.Fatal("second seed overwrote operator change")
 	}
 }
+
+const testIntegratorPeerID = "0000009950INTEGR0000"
+
+func TestListForPolicyAttachesMandatesToTheIntegrator(t *testing.T) {
+	configuration := testConfiguration()
+	configuration.SeedParticipants = append(configuration.SeedParticipants, Participant{
+		PeerID: testIntegratorPeerID, Name: "Integrator BV", Active: true, AllowedSourcePeerIDs: []string{testBDPeerID},
+	})
+	configuration.Integrations = []Integration{{
+		IntegratorPeerID: testIntegratorPeerID, ServiceProviderPeerID: testPrivatePeerID, Rules: []string{"DVT0001", " DVT0001 "},
+	}}
+	repository := newMemoryRepository()
+	service, err := NewService(repository, configuration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.SeedDemo(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	participants, err := service.ListForPolicy(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	actsFor := map[string][]Mandate{}
+	for _, participant := range participants {
+		if participant.ActsFor == nil {
+			t.Fatalf("acts_for must be an empty list, not absent: %+v", participant)
+		}
+		actsFor[participant.PeerID] = participant.ActsFor
+	}
+	want := []Mandate{{PeerID: testPrivatePeerID, Rules: []string{"DVT0001"}}}
+	if !reflect.DeepEqual(actsFor[testIntegratorPeerID], want) {
+		t.Fatalf("integrator acts_for = %+v, want %+v", actsFor[testIntegratorPeerID], want)
+	}
+	if len(actsFor[testPrivatePeerID]) != 0 {
+		t.Fatalf("service provider acts for nobody, got %+v", actsFor[testPrivatePeerID])
+	}
+}
+
+func TestNewServiceRejectsInvalidIntegrations(t *testing.T) {
+	tests := map[string][]Integration{
+		"invalid integrator": {{IntegratorPeerID: "123", ServiceProviderPeerID: testPrivatePeerID, Rules: []string{"DVT0001"}}},
+		"acts for itself":    {{IntegratorPeerID: testIntegratorPeerID, ServiceProviderPeerID: testIntegratorPeerID, Rules: []string{"DVT0001"}}},
+		"no rules":           {{IntegratorPeerID: testIntegratorPeerID, ServiceProviderPeerID: testPrivatePeerID, Rules: []string{" "}}},
+		"duplicate": {
+			{IntegratorPeerID: testIntegratorPeerID, ServiceProviderPeerID: testPrivatePeerID, Rules: []string{"DVT0001"}},
+			{IntegratorPeerID: testIntegratorPeerID, ServiceProviderPeerID: testPrivatePeerID, Rules: []string{"LVG0001"}},
+		},
+	}
+	for name, integrations := range tests {
+		t.Run(name, func(t *testing.T) {
+			configuration := testConfiguration()
+			configuration.Integrations = integrations
+			if _, err := NewService(newMemoryRepository(), configuration); err == nil {
+				t.Fatal("NewService accepted an invalid integration")
+			}
+		})
+	}
+}

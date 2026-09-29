@@ -1,0 +1,19 @@
+{
+  "CN": "integrator-internal",
+  "hosts": [
+    "int-controller",
+    "int-manager",
+    "int-outway",
+    "int-txlog-api"
+  ],
+  "key": {
+    "algo": "rsa",
+    "size": 4096
+  },
+  "names": [
+    {
+      "C": "NL",
+      "O": "GBO-DEMO Integrator Internal"
+    }
+  ]
+}

@@ -15,12 +15,13 @@ func TestDenialCodeForDisclosesOnlyCitizenActionableCodes(t *testing.T) {
 		"revoked consent": {inwayMessage("CONSENT_WITHDRAWN"), "CONSENT_WITHDRAWN"},
 		"expired consent": {inwayMessage("CONSENT_EXPIRED"), "CONSENT_EXPIRED"},
 
-		"actor not allowed":   {inwayMessage("ACTOR_NOT_ALLOWED"), DenialCodeUnavailable},
-		"constraint mismatch": {inwayMessage("CONSTRAINT_MISMATCH"), DenialCodeUnavailable},
-		"no applicable rule":  {inwayMessage("NO_APPLICABLE_RULE"), DenialCodeUnavailable},
-		"scope mismatch":      {inwayMessage("CONSENT_SCOPE_MISMATCH"), DenialCodeUnavailable},
-		"signature invalid":   {inwayMessage("CONSENT_SIGNATURE_INVALID"), DenialCodeUnavailable},
-		"status unavailable":  {inwayMessage("CONSENT_STATUS_UNAVAILABLE"), DenialCodeUnavailable},
+		"actor not allowed":         {inwayMessage("ACTOR_NOT_ALLOWED"), DenialCodeUnavailable},
+		"integrator not registered": {inwayMessage("INTEGRATOR_NOT_REGISTERED"), DenialCodeUnavailable},
+		"constraint mismatch":       {inwayMessage("CONSTRAINT_MISMATCH"), DenialCodeUnavailable},
+		"no applicable rule":        {inwayMessage("NO_APPLICABLE_RULE"), DenialCodeUnavailable},
+		"scope mismatch":            {inwayMessage("CONSENT_SCOPE_MISMATCH"), DenialCodeUnavailable},
+		"signature invalid":         {inwayMessage("CONSENT_SIGNATURE_INVALID"), DenialCodeUnavailable},
+		"status unavailable":        {inwayMessage("CONSENT_STATUS_UNAVAILABLE"), DenialCodeUnavailable},
 
 		"unknown code": {inwayMessage("SOME_FUTURE_CODE"), DenialCodeUnavailable},
 

@@ -27,11 +27,35 @@ type Participant struct {
 	UpdatedAt            string   `json:"-"`
 }
 
+// Integration registers an integrator as processor for a service provider:
+// it may connect to a source on that provider's behalf, over an FSC delegated
+// connection, for the named rules only. Rules are the policy's rule
+// IDs, such as DVT0001: the rule is the use case the source authorizes.
+type Integration struct {
+	IntegratorPeerID      string   `json:"integrator_peer_id"`
+	ServiceProviderPeerID string   `json:"service_provider_peer_id"`
+	Rules                 []string `json:"rules"`
+}
+
+// Mandate is one integration as the policy reads it, on the integrator's entry.
+type Mandate struct {
+	PeerID string   `json:"peer_id"`
+	Rules  []string `json:"rules"`
+}
+
+// PolicyParticipant is a participant as the OpenFTV feed carries it: its
+// admission, and the service providers it may act for when it is an integrator.
+type PolicyParticipant struct {
+	Participant
+	ActsFor []Mandate `json:"acts_for"`
+}
+
 // Configuration contains deployment-specific FSC identities.
 type Configuration struct {
 	SourceHolders      []Source      `json:"source_holders"`
 	SystemParticipants []Participant `json:"system_participants,omitempty"`
 	SeedParticipants   []Participant `json:"seed_participants,omitempty"`
+	Integrations       []Integration `json:"integrations,omitempty"`
 }
 
 type Repository interface {
@@ -47,6 +71,7 @@ type Service struct {
 	sources            []Source
 	systemParticipants []Participant
 	seedParticipants   []Participant
+	mandates           map[string][]Mandate
 	reservedPeerIDs    map[string]bool
 	allowedSources     map[string]bool
 }
@@ -55,7 +80,7 @@ func NewService(repository Repository, configuration Configuration) (*Service, e
 	if repository == nil {
 		return nil, errors.New("repository is required")
 	}
-	service := &Service{repository: repository, reservedPeerIDs: make(map[string]bool), allowedSources: make(map[string]bool)}
+	service := &Service{repository: repository, mandates: make(map[string][]Mandate), reservedPeerIDs: make(map[string]bool), allowedSources: make(map[string]bool)}
 	for _, source := range configuration.SourceHolders {
 		source.PeerID = strings.TrimSpace(source.PeerID)
 		source.Name = strings.TrimSpace(source.Name)
@@ -97,7 +122,48 @@ func NewService(repository Repository, configuration Configuration) (*Service, e
 		seedPeerIDs[normalized.PeerID] = true
 		service.seedParticipants = append(service.seedParticipants, normalized)
 	}
+	if err := service.addIntegrations(configuration.Integrations); err != nil {
+		return nil, err
+	}
 	return service, nil
+}
+
+// addIntegrations validates the configured integrations. An integration does
+// not admit anyone: the integrator and the service provider each still need an
+// active entry of their own, and the policy fails closed on a mandate whose
+// integrator has none.
+func (s *Service) addIntegrations(integrations []Integration) error {
+	registered := make(map[[2]string]bool, len(integrations))
+	for _, integration := range integrations {
+		integrator := strings.TrimSpace(integration.IntegratorPeerID)
+		provider := strings.TrimSpace(integration.ServiceProviderPeerID)
+		if !validPeerID.MatchString(integrator) || !validPeerID.MatchString(provider) {
+			return fmt.Errorf("integration %q for %q: peer IDs must contain exactly 20 alphanumeric characters", integrator, provider)
+		}
+		if integrator == provider {
+			return fmt.Errorf("integration %q: an integrator cannot act for itself", integrator)
+		}
+		if registered[[2]string{integrator, provider}] {
+			return fmt.Errorf("duplicate integration %q for %q", integrator, provider)
+		}
+		registered[[2]string{integrator, provider}] = true
+		unique := make(map[string]bool, len(integration.Rules))
+		for _, rule := range integration.Rules {
+			if rule = strings.TrimSpace(rule); rule != "" {
+				unique[rule] = true
+			}
+		}
+		if len(unique) == 0 {
+			return fmt.Errorf("integration %q for %q requires at least one rule", integrator, provider)
+		}
+		rules := make([]string, 0, len(unique))
+		for rule := range unique {
+			rules = append(rules, rule)
+		}
+		sort.Strings(rules)
+		s.mandates[integrator] = append(s.mandates[integrator], Mandate{PeerID: provider, Rules: rules})
+	}
+	return nil
 }
 
 func (s *Service) Sources() []Source { return append([]Source(nil), s.sources...) }
@@ -120,14 +186,19 @@ func (s *Service) List(ctx context.Context) ([]Participant, error) {
 }
 
 // ListForPolicy includes configured technical participants in the OpenFTV
-// feed without persisting them or exposing them as mutable UI records.
-func (s *Service) ListForPolicy(ctx context.Context) ([]Participant, error) {
+// feed without persisting them or exposing them as mutable UI records, and
+// attaches each integrator's mandates to its entry.
+func (s *Service) ListForPolicy(ctx context.Context) ([]PolicyParticipant, error) {
 	participants, err := s.List(ctx)
 	if err != nil {
 		return nil, err
 	}
-	result := append([]Participant(nil), participants...)
-	result = append(result, s.systemParticipants...)
+	all := append(append([]Participant(nil), participants...), s.systemParticipants...)
+	result := make([]PolicyParticipant, 0, len(all))
+	for _, participant := range all {
+		actsFor := append([]Mandate{}, s.mandates[participant.PeerID]...)
+		result = append(result, PolicyParticipant{Participant: participant, ActsFor: actsFor})
+	}
 	return result, nil
 }
 

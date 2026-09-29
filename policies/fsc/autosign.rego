@@ -32,7 +32,9 @@ package doelbinding.auto_sign_contract
 #   input.context  = {doelbinding: "auto_sign_contract", ...}
 #
 # The payload is all the Manager knows at this point: no service name, no
-# outway thumbprint. Rules can therefore only judge WHO, not WHAT.
+# outway thumbprint, and for a delegated grant no word on which party is the
+# delegator. Rules can therefore only judge WHO, not WHAT, and not in which
+# role.
 #
 # ADMISSION DATA — private DvTP parties are pulled from the onboarding
 # register by OpenFTV's native PIP pull and appear under
@@ -42,6 +44,8 @@ package doelbinding.auto_sign_contract
 # its AuthZEN autosign input; see https://github.com/ICTU/GBO-demo/issues/240.
 # Technical participants such as the EUDI issuer are supplied by the same
 # operator-managed register configuration and therefore need no policy constant.
+# An integrator's entry also lists the service providers it may act for
+# (acts_for), which is what admits a delegated connection.
 #
 # OUTPUT — OpenFTV reads `allow` (bool) and, on deny, `reason` (string).
 # The whole package document reaches the decision log, so `response`
@@ -64,9 +68,11 @@ reason := response.context.reason_admin.code if {
 # This replaces --auto-sign-grants=serviceConnection, which the Manager
 # refuses to combine with a PDP address (manager/cmd/serve.go: both set is
 # a fatal error). The gate therefore has to live here: without it the
-# registry rule alone would also accept a delegated grant.
+# registry rule alone would also accept any delegated grant.
 
 grant_type_service_connection := 2
+
+grant_type_delegated_service_connection := 3
 
 # --- derived facts ----------------------------------------------------
 
@@ -129,6 +135,43 @@ _grant_types_allowed if {
 	_grant_types == {grant_type_service_connection}
 }
 
+_grant_types_allowed if {
+	_delegated
+}
+
+default _delegated := false
+
+_delegated if {
+	_grant_types == {grant_type_delegated_service_connection}
+}
+
+# A delegated connection names three parties: the integrator whose Outway
+# connects (delegatee), the service provider it connects for (delegator), and
+# us. Both counterparties pass the admission checks above in their own right,
+# and one of them must be registered as acting for the other.
+#
+# Which one is the delegator is not in the input: OpenFSC sends peer IDs,
+# not grant data. So this admits the pair, not the direction. That
+# is enough for admission, because the request policy judges the direction
+# on every call: the access token names the delegator, and dvtp.gbo checks
+# the connecting peer's mandate for it. A contract signed the wrong way
+# round is admitted here and denied there.
+default _delegation_registered := true
+
+_delegation_registered := false if {
+	_delegated
+	not _registered_pair
+}
+
+_registered_pair if {
+	count(_counterparties) == 2
+	some integrator in _counterparties
+	some represented in _counterparties
+	integrator != represented
+	some mandate in object.get(_parties[integrator], "acts_for", [])
+	mandate.peer_id == represented
+}
+
 default _has_counterparty := false
 
 _has_counterparty if {
@@ -161,6 +204,7 @@ _checks := [
 	{"code": "PARTY_NOT_IN_REGISTRY", "ok": _all_known},
 	{"code": "PARTY_NOT_ACTIVE", "ok": _all_active},
 	{"code": "SOURCE_NOT_ALLOWED", "ok": _source_allowed},
+	{"code": "DELEGATION_NOT_REGISTERED", "ok": _delegation_registered},
 ]
 
 _failed := [c |

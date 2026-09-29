@@ -26,3 +26,6 @@ sources:
                     - keyValue: allowed_source_peer_ids
                       valueField: allowed_source_peer_ids
                       required: true
+                    - keyValue: acts_for
+                      valueField: acts_for
+                      required: true

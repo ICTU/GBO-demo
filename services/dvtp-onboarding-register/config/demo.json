@@ -32,10 +32,23 @@
       "allowed_source_peer_ids": ["99999999900000000200"]
     },
     {
+      "peer_id": "99999999900000001100",
+      "name": "Demo Integrator BV",
+      "active": true,
+      "allowed_source_peer_ids": ["99999999900000000200"]
+    },
+    {
       "peer_id": "99999999900000000500",
       "name": "Demo Incassobureau BV",
       "active": false,
       "allowed_source_peer_ids": ["99999999900000000200"]
+    }
+  ],
+  "integrations": [
+    {
+      "integrator_peer_id": "99999999900000001100",
+      "service_provider_peer_id": "99999999900000000300",
+      "rules": ["DVT0001"]
     }
   ]
 }

@@ -18,6 +18,17 @@ Compose; a deployment should mount its own file. Technical participants are
 included in the internal OpenFTV feed but are neither persisted nor editable
 through the UI.
 
+Integrations are deployment configuration as well (`integrations`): an
+integrator's Peer ID, the service provider it may act for, and the policy rules
+(use cases) that covers, such as `DVT0001`. The OpenFTV feed carries them as
+`acts_for` on the integrator's entry. Contract autosign admits a delegated
+connection only for a registered pair, and the request policy checks the
+mandate on every delegated call; see [docs/integrator.md](../../docs/integrator.md).
+An integration admits no one by itself: the integrator and the service provider
+each still need an active participant entry. Every entry carries `acts_for`,
+empty when it acts for nobody, so a withdrawn integration replaces the pulled
+entity instead of leaving the old mandate behind.
+
 Kubernetes examples are provided in
 [`deploy/helm/gbo-app/examples/dvtp-onboarding-configmap.yaml`](../../deploy/helm/gbo-app/examples/dvtp-onboarding-configmap.yaml)
 and
