@@ -2,7 +2,7 @@
         fsc-seed-bri fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-lvg fsc-seed-int fsc-seed-brp fsc-seed-rvig-source fsc-seed-metadata fsc-pdp-cert pdp-up \
         eudi-images source-metadata-up \
         require-development-cas provision-development-certificates reconcile-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
-        demo-full demo-down eudi-config policy-check policy-test
+        demo-full demo-integrator demo-down eudi-config policy-check policy-test
 
 -include .env
 -include fsc-infra/.env
@@ -48,6 +48,7 @@ PORT_DEV_PORTAL := $(or $(GBO_PORT_DEVELOPER_PORTAL),9003)
 PORT_TOESTEMMINGSPORTAAL := $(or $(GBO_PORT_TOESTEMMINGSPORTAAL),9002)
 PORT_DV_MOCK := $(or $(GBO_PORT_DV_MOCK),9001)
 PORT_KEYPER_MOCK := $(or $(GBO_PORT_KEYPER_MOCK),9004)
+PORT_INTEGRATOR_BACKEND := $(or $(GBO_PORT_INTEGRATOR_BACKEND),9423)
 PORT_JAEGER := $(or $(GBO_PORT_JAEGER),9686)
 PORT_PDP := $(or $(GBO_PORT_OPA),9181)
 PORT_EUDI_ADAPTER := $(or $(GBO_PORT_EUDI_ADAPTER),9409)
@@ -154,7 +155,7 @@ manager-seed: policy-check
 	./scripts/seed-openftv-manager.py --url http://localhost:$${GBO_PORT_FTV_MANAGER:-9280}
 	docker compose --profile manager restart openftv-pdp
 
-demo-dvtp: policy-check certs require-ftv-postgres fsc-all-up fsc-seed-bri fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-lvg fsc-seed-int
+demo-dvtp: policy-check certs require-ftv-postgres fsc-all-up fsc-seed-bri fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-lvg
 	@echo "-> DvTP stack: base + dienstverlener + toestemmingsportaal (via real FSC)"
 	docker compose --profile dvtp up --build -d
 	@echo ""
@@ -264,13 +265,25 @@ demo-eudi: policy-check require-ftv-postgres onboard-demo-sources eudi-images
 	$(call banner,EUDI-adapter:,$(PORT_EUDI_ADAPTER))
 	$(call banner,Jaeger:,$(PORT_JAEGER))
 
-demo-full: policy-check require-ftv-postgres onboard-demo-sources fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-lvg fsc-seed-int eudi-images
+demo-full: policy-check require-ftv-postgres onboard-demo-sources fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-lvg eudi-images
 	@echo "-> Full stack: everything on"
 	docker compose --profile full up --build -d
 
+# Opt-in: an integrator that queries BD on behalf of Hypotheek-BV, next to
+# the direct path the demo uses by default. Run after demo-dvtp or demo-full:
+# it adds the integrator's FSC peer (...1100), seeds the delegated contract
+# and starts integrator-backend. The admission register already lists the
+# integrator; see docs/integrator.md.
+demo-integrator: fsc-int-certs
+	$(MAKE) fsc-databases
+	$(FSC_COMPOSE) --profile integrator up -d int-controller int-manager int-outway int-txlog-api
+	$(MAKE) fsc-seed-int
+	docker compose --profile integrator up --build -d integrator-backend
+	$(call banner,Integrator-backend:,$(PORT_INTEGRATOR_BACKEND))
+
 demo-down:
-	docker compose --profile full --profile manager down
-	$(FSC_COMPOSE) down
+	docker compose --profile full --profile manager --profile integrator down
+	$(FSC_COMPOSE) --profile integrator down
 
 logs:
 	docker compose logs -f
@@ -369,7 +382,7 @@ pdp-up: policy-check certs require-ftv-postgres fsc-pdp-cert
 	docker compose up --build -d --wait --force-recreate openftv-pdp
 	./scripts/wait-openftv-admission.sh
 
-fsc-all-up: fsc-directory-certs fsc-edi-certs fsc-bd-certs fsc-brp-certs fsc-hv-certs fsc-consent-register-certs fsc-gbo-pdp-certs fsc-ir-certs fsc-int-certs fsc-pdp-cert
+fsc-all-up: fsc-directory-certs fsc-edi-certs fsc-bd-certs fsc-brp-certs fsc-hv-certs fsc-consent-register-certs fsc-gbo-pdp-certs fsc-ir-certs fsc-pdp-cert
 	$(MAKE) fsc-databases
 	$(MAKE) pdp-up
 	$(FSC_COMPOSE) up --build -d
@@ -409,13 +422,13 @@ fsc-databases: fsc-local-env
 	done
 
 fsc-down:
-	$(FSC_COMPOSE) down
+	$(FSC_COMPOSE) --profile integrator down
 
 fsc-test: fsc-up
 	bash fsc-infra/test/request-org-cert.sh
 
 fsc-clean:
-	$(FSC_COMPOSE) down -v --rmi local
+	$(FSC_COMPOSE) --profile integrator down -v --rmi local
 	rm -f fsc-infra/pki/ca/*.pem fsc-infra/pki/ca/*.csr
 	rm -f fsc-infra/directory-peer/pki/org/*.pem
 	rm -f fsc-infra/directory-peer/pki/internal/*.pem
@@ -522,7 +535,8 @@ fsc-seed-lvg: fsc-local-env
 # Hypotheek-BV, over a DelegatedServiceConnection grant that the integrator,
 # HV (delegator) and BD all sign. BD's Manager admits it only when the
 # onboarding register lists the integrator as acting for HV. Needs the bri
-# publication from fsc-seed-bri.
+# publication from fsc-seed-bri and the integrator's peer; demo-integrator
+# runs it.
 fsc-seed-int: fsc-local-env
 	docker run --rm \
 		--network $(FSC_INFRA_NETWORK) \

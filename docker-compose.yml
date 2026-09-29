@@ -1071,11 +1071,13 @@ services:
   # It logs to Hypotheek-BV's logbook: the integrator processes on the
   # service provider's behalf and keeps nothing itself, so the record
   # belongs to the controller, not to the processor.
+  #
+  # Opt-in: profile "integrator", started by `make demo-integrator`.
   integrator-backend:
     build:
       context: .
       dockerfile: services/dienstverlener-backend/Dockerfile
-    profiles: [dvtp, full]
+    profiles: [integrator]
     ports:
       - "${GBO_PORT_INTEGRATOR_BACKEND:-9423}:4023"
     environment:

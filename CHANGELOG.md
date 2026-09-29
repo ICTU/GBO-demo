@@ -21,8 +21,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   - Contract autosign admits a `delegatedServiceConnection` when one
     counterparty is registered as acting for the other. Otherwise the
     contract is refused with `DELEGATION_NOT_REGISTERED`.
-  - `make fsc-seed-int` creates the three-party contract, signs it as
-    delegator and links it on the integrator's Outway.
+  - Opt-in: the demo keeps the direct path by default. `make demo-integrator`,
+    run after `demo-dvtp` or `demo-full`, adds the integrator's peer (compose
+    profile `integrator`), seeds the three-party contract (`make
+    fsc-seed-int`) and starts `integrator-backend`.
 - **LVG / Installatie Register.** The pilot's DvTP flow in the demo: the
   Installatie Register asks the citizen in MijnOverheid for consent to check
   at LVG whether a building is theirs, and asks LVG over FSC with the consent

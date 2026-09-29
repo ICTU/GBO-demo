@@ -175,8 +175,9 @@ for the component boundaries and the grant, use and revocation flows.
 A service provider can also query through an integrator: a processor with an
 FSC peer of its own that connects on the provider's behalf over a delegated
 connection. The consent then binds the provider, the FSC delegator, and the
-integrator needs a mandate in the DvTP onboarding register. See
-[docs/integrator.md](docs/integrator.md).
+integrator needs a mandate in the DvTP onboarding register. The demo uses the
+direct path by default; `make demo-integrator` adds the integrator to a running
+demo. See [docs/integrator.md](docs/integrator.md).
 
 `S01` is the architecture role identifier used in the demo diagrams for the
 consent-register; it is not a separate service. The demo consent token is a

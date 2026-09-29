@@ -164,9 +164,15 @@ LDV-standaard.
 
 ## Lokaal testen
 
-`make demo-dvtp` en `make demo-full` maken de integrator-peer aan en seeden
-het gedelegeerde contract (`make fsc-seed-int`). Geef daarna consent aan
-Hypotheek-BV (`…0300`) en stuur de query naar `integrator-backend`:
+De demo gebruikt standaard de directe route: Hypotheek-BV verbindt zelf. De
+integrator is opt-in. Start eerst `make demo-dvtp` of `make demo-full` en
+daarna `make demo-integrator`. Dat maakt de integrator-peer aan (compose-profiel
+`integrator`), seedt het gedelegeerde contract (`make fsc-seed-int`) en start
+`integrator-backend`. Het toelatingsregister kent de integrator al; zonder
+peer en contract doet die registratie niets.
+
+Geef daarna consent aan Hypotheek-BV (`…0300`) en stuur de query naar
+`integrator-backend`:
 
 ```bash
 login=$(curl -sS -X POST localhost:9405/portal/login \

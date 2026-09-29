@@ -1483,8 +1483,10 @@ services:
   # Integrator (Peer ID ...1100): a processor that connects to BD on behalf of
   # Hypotheek-BV, over a DelegatedServiceConnection grant naming Hypotheek-BV
   # as delegator. It has no service of its own, only an Outway.
+  # Opt-in: profile "integrator", started by `make demo-integrator`.
   int-migrations-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
+    profiles: [integrator]
     restart: on-failure
     command: [/usr/local/bin/controller, migrate, up]
     environment:
@@ -1502,6 +1504,7 @@ services:
 
   int-migrations-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
+    profiles: [integrator]
     restart: on-failure
     command: [/usr/local/bin/manager, migrate, up]
     environment:
@@ -1519,6 +1522,7 @@ services:
 
   int-migrations-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
+    profiles: [integrator]
     restart: on-failure
     command: [/usr/local/bin/txlog-api, migrate, up]
     environment:
@@ -1536,6 +1540,7 @@ services:
 
   int-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
+    profiles: [integrator]
     restart: unless-stopped
     ports:
       - "${FSC_PORT_INT_CONTROLLER:-8101}:3001"
@@ -1564,6 +1569,7 @@ services:
 
   int-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
+    profiles: [integrator]
     restart: unless-stopped
     volumes:
       - ./orgs/integrator/pki:/certs:ro
@@ -1601,6 +1607,7 @@ services:
 
   int-outway:
     image: federatedserviceconnectivity/outway:v2.4.0
+    profiles: [integrator]
     restart: unless-stopped
     volumes:
       - ./orgs/integrator/pki:/certs:ro
@@ -1625,6 +1632,7 @@ services:
 
   int-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
+    profiles: [integrator]
     restart: unless-stopped
     volumes:
       - ./orgs/integrator/pki:/certs:ro
