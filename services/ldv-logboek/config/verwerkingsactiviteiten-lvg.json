@@ -4,16 +4,16 @@
   "disclaimer": "Demo-stand-in voor een Register van Verwerkingsactiviteiten, voor de LVG/Installatie Register-pilot. Dit is GEEN RvVA en niet het register van de LVG: de inhoud is afgeleid van de scope-definitie en van de infrastructurele verwerkingen in de keten, en heeft geen enkele juridische status. De base_uri is een demo-hostnaam: er staat niets achter.",
   "activities": [
     {
-      "id": "lvg-pi-bsn-resolutie",
+      "id": "lvg-identiteit-ontsleuteling",
       "version": "v1",
-      "name": "Depseudonimisatie polymorfe identiteit naar BSN",
+      "name": "Ontsleuteling van de versleutelde identiteit naar BSN",
       "doel": "Een binnenkomende eigendomsvraag van het Installatie Register koppelen aan de juiste persoon, zonder dat het BSN buiten de bron komt.",
       "grondslag": "Toestemming van de betrokkene.",
       "categorieen_betrokkenen": [
         "Eigenaren van een verblijfsobject"
       ],
       "categorieen_persoonsgegevens": [
-        "Polymorfe identiteit (PI)",
+        "Versleutelde identiteit uit het toestemmingsbewijs",
         "Burgerservicenummer"
       ]
     },

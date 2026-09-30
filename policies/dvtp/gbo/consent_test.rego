@@ -51,7 +51,7 @@ _claims_expiring(exp) := {
 	"valid_until": time.format(exp * 1000000000),
 	"jti": "jti-1",
 	"consent_id": "c-signed",
-	"pi": "PI-abc123",
+	"encrypted_subject": {"99999999900000000200": {"identifier_type": "Identity", "key_set_version": 20260101, "value": "dmFsdWU="}},
 	"scopes": ["bd:ib:2025"],
 	"dienstverlener_oin": "99999999900000000300",
 }
@@ -71,7 +71,7 @@ _request(headers) := {
 		"trace_id": "tx-330",
 		"headers": headers,
 		"resource": {"scope": "bd:ib:2025"},
-		"resolved": {"fields": _box1, "args": {"bsn": "PI-abc123", "belastingjaren.0": "2025"}},
+		"resolved": {"fields": _box1, "args": {"bsn": "consent:subject", "belastingjaren.0": "2025"}},
 	},
 }
 
@@ -173,7 +173,6 @@ test_active_consent_resolves_the_signed_claims if {
 	c.status_available == true
 	c.exists == true
 	c.withdrawn == false
-	c.pi == "PI-abc123"
 	c.dienstverlener_oin == "99999999900000000300"
 	c.granted_scopes == ["bd:ib:2025"]
 	c.consent_id == "c-signed"
@@ -306,10 +305,11 @@ test_forged_signature_denies if {
 	_reason(_on_active(forged)) == "CONSENT_SIGNATURE_INVALID"
 }
 
-# The register's signature over other claims: here, another citizen's PI.
+# The register's signature over other claims: here, another citizen's
+# encrypted identity.
 test_tampered_claims_deny if {
 	[header, _, signature] := split(_token, ".")
-	payload := base64url.encode_no_pad(json.marshal(object.union(_claims, {"pi": "PI-2f1a7c9b40e6d853"})))
+	payload := base64url.encode_no_pad(json.marshal(object.union(_claims, {"encrypted_subject": {"99999999900000000200": {"identifier_type": "Identity", "key_set_version": 20260101, "value": "b3RoZXI="}}})))
 	_reason(_on_active(concat(".", [header, payload, signature]))) == "CONSENT_SIGNATURE_INVALID"
 }
 
@@ -362,13 +362,25 @@ test_claim_violations_deny_context_invalid if {
 		"wrong issuer": [_header, object.union(_claims, {"iss": "https://elsewhere.test"})],
 		"wrong audience": [_header, object.union(_claims, {"aud": ["gbo:other"]})],
 		"wrong type": [object.union(_header, {"typ": "JWT"}), _claims],
-		"missing pi": [_header, object.remove(_claims, ["pi"])],
 		"missing jti": [_header, object.remove(_claims, ["jti"])],
 		"missing scopes": [_header, object.remove(_claims, ["scopes"])],
 		"valid_until differs from exp": [_header, object.union(_claims, {"valid_until": "2030-01-01T00:00:00Z"})],
 	}
 	every _, c in cases {
 		_reason(_on_active(_sign(c[0], c[1]))) == "CONSENT_CONTEXT_INVALID"
+	}
+}
+
+# A token that carries no encrypted subject could never be answered by a
+# source, so it is not a consent token.
+test_token_without_encrypted_subject_denies_context_invalid if {
+	cases := {
+		"missing": object.remove(_claims, ["encrypted_subject"]),
+		"empty": object.union(object.remove(_claims, ["encrypted_subject"]), {"encrypted_subject": {}}),
+		"not an object": object.union(object.remove(_claims, ["encrypted_subject"]), {"encrypted_subject": "PI-abc123"}),
+	}
+	every _, claims in cases {
+		_reason(_on_active(_sign(_header, claims))) == "CONSENT_CONTEXT_INVALID"
 	}
 }
 

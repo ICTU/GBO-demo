@@ -39,7 +39,7 @@ func (refusingLogbook) Record(context.Context, consumer.Processing) error {
 
 func testToken(consentID string, scopes ...string) string {
 	encode := base64.RawURLEncoding.EncodeToString
-	payload, _ := json.Marshal(map[string]any{"consent_id": consentID, "pi": "PI-abc123", "scopes": scopes})
+	payload, _ := json.Marshal(map[string]any{"consent_id": consentID, "scopes": scopes})
 	return encode([]byte(`{"alg":"none"}`)) + "." + encode(payload) + ".sig"
 }
 
@@ -160,7 +160,7 @@ func TestAQueryIsLoggedWhereTheSourceCanFindIt(t *testing.T) {
 	var received http.Header
 	outwayServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		received = r.Header.Clone()
-		_, _ = w.Write([]byte(`{"data":{"ingeschrevenPersoon":{"bsn":"PI-abc123"}}}`))
+		_, _ = w.Write([]byte(`{"data":{"ingeschrevenPersoon":{"bsn":"999991772"}}}`))
 	}))
 	defer outwayServer.Close()
 	c := &consumer.Consumer{

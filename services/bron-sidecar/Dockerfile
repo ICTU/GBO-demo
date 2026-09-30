@@ -14,5 +14,8 @@ FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cab
 RUN apk add --no-cache ca-certificates wget
 WORKDIR /app
 COPY --from=builder /bron-sidecar .
+# Demo keys for the demo sources' OIN, as bsnk-mock issues them: they hold no
+# key material. A deployment mounts its own directory over SUBJECT_KEYS_DIR.
+COPY services/bron-sidecar/config/ ./config/
 EXPOSE 4011
 CMD ["./bron-sidecar"]

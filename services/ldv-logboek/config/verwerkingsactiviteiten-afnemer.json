@@ -13,7 +13,7 @@
         "Aanvragers van een hypotheek"
       ],
       "categorieen_persoonsgegevens": [
-        "Polymorfe identiteit (PI) voor de afnemer",
+        "Verwijzing naar de toestemming (geen identificator van de betrokkene)",
         "Inkomensgegevens per belastingjaar"
       ],
       "ontvangers": [

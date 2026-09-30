@@ -2,6 +2,7 @@ package consent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -11,12 +12,17 @@ import (
 // every domain rule: which consent is effectively active, who may revoke
 // what, and what the steps of a flow are. It knows nothing about HTTP.
 type Portal struct {
+	Identities Identities
 	Pseudonyms Pseudonymizer
 	Consents   Store
-	Watch      Observer         // process-lifetime watchers; nil is fine
-	Logbook    Logbook          // Logboek Dataverwerkingen; nil means not in an LDV chain
-	OwnOIN     string           // recipient_oin used for the portal-scoped subject reference
-	Now        func() time.Time // nil means time.Now; injected by tests
+	Watch      Observer // process-lifetime watchers; nil is fine
+	Logbook    Logbook  // Logboek Dataverwerkingen; nil means not in an LDV chain
+	OwnOIN     string   // recipient_oin used for the portal-scoped subject reference
+	// Sources are the parties a consent's token carries an encrypted identity
+	// for. BSNk makes those values only while the citizen is present, so every
+	// source that will answer must be known here, when consent is given.
+	Sources []Party
+	Now     func() time.Time // nil means time.Now; injected by tests
 	// PseudonymsLogbook is where the pseudonymisation service's processings
 	// can be looked up — its read API, or a contact page when it has none —
 	// recorded as the pseudonymisation's next logbook. Empty means unknown.
@@ -78,12 +84,16 @@ type Granted struct {
 	ConsentToken string
 }
 
-// GiveConsent derives the authorization PI and a separate portal-scoped
-// subject reference, then asks the consent register to persist the latter and sign the former.
+// GiveConsent has BSNk make an encrypted identity for each source, derives a
+// separate portal-scoped subject reference, then asks the consent register to
+// persist the latter and sign the former into the consent token.
 //
-// The ordering here is the privacy invariant: pseudonymisation happens first,
-// and nothing below that line holds a BSN it could hand onwards — Draft has
-// no field that would accept one.
+// The service provider gets no identifier of the citizen at all: the token
+// carries values only the sources can read.
+//
+// The ordering here is the privacy invariant: everything that needs the BSN
+// happens first, and nothing below that line holds a BSN it could hand
+// onwards — Draft has no field that would accept one.
 func (p *Portal) GiveConsent(ctx context.Context, citizen BSN, in GiveInput) (Granted, error) {
 	emit := p.stepEmitter(ctx, "give_consent")
 
@@ -91,18 +101,25 @@ func (p *Portal) GiveConsent(ctx context.Context, citizen BSN, in GiveInput) (Gr
 	// here before it fans out to BSNk and the consent register.
 	emit("portal_received", "toestemmingsportaal", map[string]any{"oin": in.DienstverlenerOIN})
 
-	// recipient_oin is the dienstverlener that will receive the pseudonym;
-	// PI becomes signed authorization material for that dienstverlener.
-	pseudonymisationStart := p.now().UTC()
-	emit("pseudonymizing", "bsnk-mock", map[string]any{"oin": in.DienstverlenerOIN})
-	ps, err := p.Pseudonyms.Pseudonymize(ctx, citizen, in.DienstverlenerOIN)
-	if err != nil {
-		return Granted{}, fmt.Errorf("pseudonymize: %w", err)
+	if len(p.Sources) == 0 {
+		return Granted{}, errors.New("no sources configured: a consent no source can read is not given")
 	}
-	emit("pseudonym_generated", "bsnk-mock", map[string]any{"pseudonym": ps.Pseudonym})
+	recipients := make([]string, len(p.Sources))
+	for i, source := range p.Sources {
+		recipients[i] = source.OIN
+	}
 
-	// The consent register needs a subject key for citizen listing, but must not persist PI.
-	// A second BSNk derivation scoped to the portal provides that key.
+	pseudonymisationStart := p.now().UTC()
+	emit("pseudonymizing", "bsnk-mock", map[string]any{"recipients": recipients})
+	subjects, err := p.Identities.EncryptFor(ctx, citizen, p.Sources)
+	if err != nil {
+		return Granted{}, fmt.Errorf("encrypt the subject for the sources: %w", err)
+	}
+	emit("pseudonym_generated", "bsnk-mock", map[string]any{"recipients": recipients})
+
+	// The consent register needs a subject key for citizen listing, and the
+	// values above are readable by the sources alone. A derivation scoped to
+	// the portal provides that key.
 	portalSubject, err := p.Pseudonyms.Pseudonymize(ctx, citizen, p.OwnOIN)
 	if err != nil {
 		return Granted{}, fmt.Errorf("derive portal subject reference: %w", err)
@@ -115,11 +132,11 @@ func (p *Portal) GiveConsent(ctx context.Context, citizen BSN, in GiveInput) (Gr
 	//
 	// It is logged under the reference it just produced, which is the only
 	// identifier this portal may write down: not the BSN it started from, and
-	// not the PI it derived for the dienstverlener.
+	// not a value it had made for a source.
 	if err := p.record(ctx, Processing{
 		Activity: pseudonymisationActivity,
 		Name:     "dataverwerking.bsn-pseudonimisering",
-		Subject:  SubjectRef(portalSubject.Pseudonym),
+		Subject:  SubjectRef(portalSubject),
 		Start:    pseudonymisationStart,
 		End:      p.now().UTC(),
 		// BSNk did the transform; its side of it is logged there, not here.
@@ -133,8 +150,8 @@ func (p *Portal) GiveConsent(ctx context.Context, citizen BSN, in GiveInput) (Gr
 
 	emit("consent_granting", "consent-register", map[string]any{"oin": in.DienstverlenerOIN})
 	rec, err := p.Consents.Create(ctx, Draft{
-		PI:                ps.PI,
-		SubjectRef:        SubjectRef(portalSubject.Pseudonym),
+		Subjects:          subjects,
+		SubjectRef:        SubjectRef(portalSubject),
 		DienstverlenerOIN: in.DienstverlenerOIN,
 		Scopes:            in.Scopes,
 		ScopeEntries:      in.ScopeEntries,
@@ -151,7 +168,7 @@ func (p *Portal) GiveConsent(ctx context.Context, citizen BSN, in GiveInput) (Gr
 
 // ListConsents returns the calling citizen's consents, annotated with the
 // effective status the UI renders. Filtering is by a portal-scoped subject
-// reference, which enforces per-citizen isolation without persisting PI.
+// reference, which enforces per-citizen isolation.
 func (p *Portal) ListConsents(ctx context.Context, citizen BSN) ([]Record, error) {
 	subjectRef, err := p.subjectRefFor(ctx, citizen, "toestemmingen-inzien")
 	if err != nil {
@@ -196,7 +213,6 @@ func (p *Portal) RevokeConsent(ctx context.Context, citizen BSN, consentID strin
 }
 
 // subjectRefFor derives a portal-specific pseudonym for citizen-facing lookup.
-// This is deliberately not the recipient-independent PI.
 //
 // The derivation is a Dataverwerking wherever it happens — listing and
 // revoking both start with it — so it is logged here rather than at each call
@@ -204,14 +220,14 @@ func (p *Portal) RevokeConsent(ctx context.Context, citizen BSN, consentID strin
 // which flow asked.
 func (p *Portal) subjectRefFor(ctx context.Context, citizen BSN, aanleiding string) (SubjectRef, error) {
 	start := p.now().UTC()
-	ps, err := p.Pseudonyms.Pseudonymize(ctx, citizen, p.OwnOIN)
+	pseudonym, err := p.Pseudonyms.Pseudonymize(ctx, citizen, p.OwnOIN)
 	if err != nil {
 		return "", fmt.Errorf("pseudonymize: %w", err)
 	}
 	if err := p.record(ctx, Processing{
 		Activity:    pseudonymisationActivity,
 		Name:        "dataverwerking.bsn-pseudonimisering",
-		Subject:     SubjectRef(ps.Pseudonym),
+		Subject:     SubjectRef(pseudonym),
 		Start:       start,
 		End:         p.now().UTC(),
 		NextLogbook: p.PseudonymsLogbook,
@@ -219,7 +235,7 @@ func (p *Portal) subjectRefFor(ctx context.Context, citizen BSN, aanleiding stri
 	}); err != nil {
 		return "", fmt.Errorf("log pseudonymisation: %w", err)
 	}
-	return SubjectRef(ps.Pseudonym), nil
+	return SubjectRef(pseudonym), nil
 }
 
 func useCaseOrDefault(useCase string) string {

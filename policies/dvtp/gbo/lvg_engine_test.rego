@@ -16,7 +16,6 @@ _lvg_consent := {
 	"withdrawn": false,
 	"valid_until": "2030-01-01T00:00:00Z",
 	"granted_scopes": ["lvg:vbo:eigendom"],
-	"pi": "PI-abc123",
 	"dienstverlener_oin": _lvg_ir,
 }
 
@@ -32,7 +31,7 @@ _lvg_input(actor, scope) := {
 		"resource": {"scope": scope},
 		"resolved": {
 			"fields": _lvg_fields,
-			"args": {"bsn": "PI-abc123", "vboId": "0632010000099412"},
+			"args": {"bsn": "consent:subject", "vboId": "0632010000099412"},
 		},
 	},
 }
@@ -60,7 +59,7 @@ test_engine_denies_an_lvg_consent_on_bd_fields if {
 			"resource": {"scope": "lvg:vbo:eigendom"},
 			"resolved": {
 				"fields": [{"id": "aangifte.box1", "parent": "AangifteIH", "name": "box1Inkomen", "scalar": false}],
-				"args": {"bsn": "PI-abc123", "belastingjaren.0": "2025"},
+				"args": {"bsn": "consent:subject", "belastingjaren.0": "2025"},
 			},
 		},
 	}

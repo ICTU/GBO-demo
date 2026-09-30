@@ -1,28 +1,37 @@
 // Package main implements the bron-sidecar — a gateway sitting between the
-// FSC-Inway and the source service. Its role:
+// FSC-Inway and the source service. The Inway proxies a request only after the
+// PDP has allowed it, so everything here runs after the authorization
+// decision. Its role:
 //
-//  1. Take the FSC-Authorization access-token from the incoming request and
-//     read the grant property 'subject_id_type':
-//     - "direct"    → pass-through (BSN is already in the query, no action)
-//     - "pseudonym" → resolve PI values in query-variables to BSN via
-//     BSNk-mock, substitute, forward
+//  1. Look at the evidence the request carries:
+//     - a consent token → the query names its subject with a placeholder.
+//     Take the encrypted identity made for this source out of the token,
+//     have the source's own decryption component read it, and put the BSN
+//     in the placeholder's place. No call to BSNk.
+//     - no consent token → pass-through (the BSN is already in the query)
 //  2. The source service (behind the sidecar) stays unchanged — it always
-//     speaks BSN, regardless of whether the consumer sends PI or BSN.
+//     speaks BSN, whatever the consumer sent.
 //
-// Advantages over the previous pep-service pipeline:
+// What this gives:
 //   - In the DvTP flow the BSN stays out of the authorization envelope: the
-//     consumer sends a PI, and only this sidecar turns it into a BSN. The
-//     EUDI flow sends a plain BSN, which the PDP does see (#364; keeping it
-//     out of the PDP's decision logs is #368).
+//     consumer holds no identifier of the citizen, and only this sidecar
+//     turns the token's value into a BSN. The EUDI flow sends a plain BSN,
+//     which the PDP does see (#364; keeping it out of the PDP's decision logs
+//     is #368).
 //   - The sidecar is source-owned; the PDP does not perform data transformation
 //     (gateway responsibility, not policy responsibility)
+//
+// The substitution itself is in the substitution package, apart from this
+// handler, and reaches the decryption component through the decryption
+// package.
 package main
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
+	"gbo-demo/bron-sidecar/decryption"
+	"gbo-demo/bron-sidecar/substitution"
 	ldv "gbo-demo/ldv-client"
 	"io"
 	"log/slog"
@@ -59,34 +68,39 @@ const shutdownTimeout = 15 * time.Second
 const ldvDeliveryInterval = 2 * time.Second
 
 type config struct {
-	Port          string
-	UpstreamURL   string // source service (e.g. http://graphql-server:4000)
-	BSNkURL       string // http://bsnk-mock:4003
-	OwnPeerOIN    string // passed to BSNk /transform as recipient_oin
-	PseudonymVars string // comma-separated variable names that carry PI values (default: "bsn")
-	// LDVResolutionActivity and LDVForwardActivity name this sidecar's two
+	Port        string
+	UpstreamURL string // source service (e.g. http://graphql-server:4000)
+	// OwnPeerOIN is this source's OIN: the party an encrypted identity must
+	// be made for.
+	OwnPeerOIN string
+	// PseudonymVars are the comma-separated names of the GraphQL variables
+	// that name the subject (default: "bsn").
+	PseudonymVars string
+	// DecryptionURL is the source's own decryption component.
+	DecryptionURL string
+	// SubjectKeysDir holds the source's decryption keys and BSNk's scheme
+	// keys. Empty means this source has none and answers no consent-based
+	// request.
+	SubjectKeysDir string
+	// LDVDecryptionActivity and LDVForwardActivity name this sidecar's two
 	// Dataverwerkingen in its Verantwoordelijke's register. They are
 	// configuration because the same image runs in front of every bron, and
 	// each bron's register names its activities in its own terms.
-	LDVResolutionActivity string
+	LDVDecryptionActivity string
 	LDVForwardActivity    string
-	// LDVBSNkNextLogbookID is where BSNk's processings can be looked up — its
-	// read API, or a contact page while it has none, as the read extension
-	// allows. The PI→BSN resolution records it as its next logbook.
-	LDVBSNkNextLogbookID string
 }
 
 func loadConfig() config {
 	return config{
-		Port:          getEnv("PORT", "4011"),
-		UpstreamURL:   getEnv("UPSTREAM_URL", "http://graphql-server:4000"),
-		BSNkURL:       getEnv("BSNK_URL", "http://bsnk-mock:4003"),
-		OwnPeerOIN:    getEnv("OWN_PEER_OIN", "99999999900000000200"),
-		PseudonymVars: getEnv("PSEUDONYM_VARS", "bsn"),
+		Port:           getEnv("PORT", "4011"),
+		UpstreamURL:    getEnv("UPSTREAM_URL", "http://graphql-server:4000"),
+		OwnPeerOIN:     getEnv("OWN_PEER_OIN", "99999999900000000200"),
+		PseudonymVars:  getEnv("PSEUDONYM_VARS", "bsn"),
+		DecryptionURL:  getEnv("DECRYPTION_URL", "http://decryption-component:4003"),
+		SubjectKeysDir: getEnv("SUBJECT_KEYS_DIR", ""),
 
-		LDVResolutionActivity: getEnv("LDV_RESOLUTION_ACTIVITY", ""),
+		LDVDecryptionActivity: getEnv("LDV_DECRYPTION_ACTIVITY", ""),
 		LDVForwardActivity:    getEnv("LDV_FORWARD_ACTIVITY", ""),
-		LDVBSNkNextLogbookID:  getEnv("LDV_BSNK_NEXT_LOGBOOK_ID", ""),
 	}
 }
 
@@ -97,64 +111,30 @@ func getEnv(k, fallback string) string {
 	return fallback
 }
 
-// grantPropertiesFromAuth returns the 'prp' claim of the Fsc-Authorization
-// token: the properties of the service-connection grant (fsc-core
-// §Properties), part of the grant hash and therefore countersigned by both
-// peers. Decoding happens in the LDV client's Claims, which does not verify —
-// the
-// chain-of-trust is on the FSC-Inway that already validated this token.
-// Returns nil for a missing/invalid token — the caller treats that as the
-// 'direct' flow (no data transformation).
-func grantPropertiesFromAuth(auth string) map[string]any {
-	properties, _ := ldv.Claims(auth)["prp"].(map[string]any)
-	return properties
+// consentTokenHeader carries the signed consent token. Its presence is what
+// puts a request under the consent regime, here as in the PDP.
+const consentTokenHeader = "X-GBO-Consent-Token"
+
+// subjectVariables splits the configured list of subject variable names.
+func subjectVariables(list string) []string {
+	var names []string
+	for _, name := range strings.Split(list, ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
-// resolvePI asks BSNk for PI → BSN. Only called when
-// subject_id_type=pseudonym. On error the caller returns HTTP 400 so the
-// source never sees a non-resolvable PI (fail-safe).
-func resolvePI(ctx context.Context, client *http.Client, cfg config, pi string) (string, error) {
-	body, _ := json.Marshal(map[string]string{
-		"pi":            pi,
-		"recipient_oin": cfg.OwnPeerOIN,
-	})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.BSNkURL+"/transform", bytes.NewReader(body))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("bsnk /transform status %d: %s", resp.StatusCode, string(b))
-	}
-	var out struct {
-		BSN string `json:"bsn"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return "", err
-	}
-	if out.BSN == "" {
-		return "", fmt.Errorf("bsnk returned empty bsn")
-	}
-	return out.BSN, nil
-}
-
-// subjectFromBody reads the pseudonym-carrying GraphQL variables out of the
-// request body without changing it. The sidecar already had to do this in the
-// pseudonym flow to substitute them; LDV needs it in the direct flow too,
-// because a record is per Betrokkene and the sidecar has to know who that is
-// before it can log the forward.
+// subjectFromBody reads the subject-carrying GraphQL variables out of the
+// request body without changing it. LDV needs them because a record is per
+// Betrokkene and the sidecar has to know who that is before it can log the
+// forward.
 //
 // A body that is not a GraphQL request, or that names no subject variable,
 // yields nothing. That is not a gap: a request that identifies no Betrokkene
 // is not a Dataverwerking of personal data, so there is no record to write.
-func subjectFromBody(body []byte, pseudoVars map[string]bool) map[string]string {
+func subjectFromBody(body []byte, subjectVars []string) map[string]string {
 	var gql struct {
 		Variables map[string]any `json:"variables"`
 	}
@@ -162,7 +142,7 @@ func subjectFromBody(body []byte, pseudoVars map[string]bool) map[string]string 
 		return nil
 	}
 	subjects := map[string]string{}
-	for name := range pseudoVars {
+	for _, name := range subjectVars {
 		if value, ok := gql.Variables[name].(string); ok && value != "" {
 			subjects[name] = value
 		}
@@ -170,24 +150,18 @@ func subjectFromBody(body []byte, pseudoVars map[string]bool) map[string]string 
 	return subjects
 }
 
-// forwardHandler inspects Fsc-Authorization, substitutes PI variables when
-// needed, and forwards to the upstream. GraphQL body shape: {"query": "...",
-// "variables": {...}}. We only rewrite variables listed in cfg.PseudonymVars;
-// the query itself stays unchanged (source schema unaffected).
+// forwardHandler puts the citizen of the consent in the placeholder's place
+// when the request carries a consent token, and forwards to the upstream.
+// GraphQL body shape: {"query": "...", "variables": {...}}. Only the variables
+// listed in cfg.PseudonymVars are rewritten; the query itself stays unchanged
+// (source schema unaffected).
 //
 // It is also where two of this Verantwoordelijke's Dataverwerkingen are
-// logged to its Logboek Dataverwerkingen: the de-pseudonymisation and the
-// forward itself. When a logbook is configured, a record that the logbook
+// logged to its Logboek Dataverwerkingen: the decryption of the identity and
+// the forward itself. When a logbook is configured, a record that the logbook
 // does not confirm fails the request — the response is withheld rather than
 // returned unlogged.
-func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client) http.HandlerFunc {
-	pseudoVars := map[string]bool{}
-	for _, v := range strings.Split(cfg.PseudonymVars, ",") {
-		v = strings.TrimSpace(v)
-		if v != "" {
-			pseudoVars[v] = true
-		}
-	}
+func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client, substitute substitution.Substituter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		span := trace.SpanFromContext(r.Context())
 
@@ -197,24 +171,21 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client) http.H
 			return
 		}
 
-		// Determine binding from the trusted grant property.
-		auth := r.Header.Get("Fsc-Authorization")
-		props := grantPropertiesFromAuth(auth)
-		subjectIDType, _ := props["subject_id_type"].(string)
-		if subjectIDType == "" {
-			subjectIDType = "direct" // fail-safe default
-		}
-		span.SetAttributes(attribute.String("gbo.sidecar.subject_id_type", subjectIDType))
+		// The evidence decides, not a contract property: a consent token
+		// means the subject is to be taken from it.
+		consentToken := r.Header.Get(consentTokenHeader)
+		underConsent := consentToken != ""
+		span.SetAttributes(attribute.Bool("gbo.sidecar.consent_token", underConsent))
 
 		slog.Info("sidecar request",
 			"method", r.Method, "path", r.URL.Path,
-			"subject_id_type", subjectIDType,
+			"consent_token", underConsent,
 			"body_len", len(body),
 		)
 
 		// The forward is the outer Dataverwerking; its span is the parent of
-		// the de-pseudonymisation below and of whatever the source logs
-		// downstream, so the whole request reads as one tree in the logboek.
+		// the decryption below and of whatever the source logs downstream, so
+		// the whole request reads as one tree in the logboek.
 		traceID := ldv.TraceID(r.Context(), r.Header)
 		forward := ldvOperation{
 			traceID: traceID,
@@ -230,61 +201,45 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client) http.H
 			forward.processor = logbook.ForeignProcessor(r)
 		}
 
-		// Who the request is about, as it arrived: a PI in the pseudonym flow,
-		// a BSN in the direct one. Neither goes into a record. The sidecar
+		// Who the request is about, as it arrived: the placeholder under a
+		// consent, a BSN otherwise. Neither goes into a record. The sidecar
 		// names the Betrokkene in its own Verantwoordelijke's pseudonym space —
 		// a logbook-local pseudonym derived from the BSN with this source's
 		// key — so a record here shares no identifier with the caller's
 		// logbook, and logbooks join on the trace id alone.
-		subjects := subjectFromBody(body, pseudoVars)
+		subjects := subjectFromBody(body, substitute.Variables)
 		// bsnOf maps a subject as it arrived onto the BSN it stands for.
 		bsnOf := map[string]string{}
-		if subjectIDType != "pseudonym" {
+		if !underConsent {
 			for _, subject := range subjects {
 				bsnOf[subject] = subject
 			}
 		}
 
-		if subjectIDType == "pseudonym" {
-			var gql struct {
-				Query     string                 `json:"query"`
-				Variables map[string]any         `json:"variables,omitempty"`
-				OpName    string                 `json:"operationName,omitempty"`
-				Extra     map[string]interface{} `json:"-"`
+		if underConsent {
+			decryptionStart := time.Now().UTC()
+			result, substituteErr := substitute.Apply(r.Context(), body, consentToken)
+
+			// Reading the identity is itself a Dataverwerking, and it is
+			// logged whether or not it succeeded. A request that named no
+			// subject decrypted nothing, so there is nothing to log for it.
+			if result.BSN != "" || (substituteErr != nil && result.ConsentID != "") {
+				if err := logDecryption(r.Context(), logbook, cfg, forward, result, substituteErr, decryptionStart); err != nil {
+					ldv.LogFailure("dataverwerking.identiteit-ontsleuteling", err)
+					http.Error(w, "the decryption could not be logged; refusing the request", http.StatusInternalServerError)
+					return
+				}
 			}
-			if err := json.Unmarshal(body, &gql); err != nil {
-				http.Error(w, "parse graphql body: "+err.Error(), http.StatusBadRequest)
+			if substituteErr != nil {
+				slog.Error("subject substitution failed", "err", substituteErr.Error())
+				http.Error(w, "the subject of the consent could not be filled in", http.StatusBadRequest)
 				return
 			}
-			// Substitute PI variables in place.
-			resolved := 0
-			for varName := range pseudoVars {
-				piVal, ok := gql.Variables[varName].(string)
-				if !ok || piVal == "" {
-					continue
-				}
-				resolutionStart := time.Now().UTC()
-				bsn, resolveErr := resolvePI(r.Context(), client, cfg, piVal)
-
-				// The de-pseudonymisation is itself a Dataverwerking, and it
-				// is logged whether or not it succeeded.
-				if err := logResolution(r.Context(), logbook, cfg, forward, piVal, bsn, resolveErr, resolutionStart); err != nil {
-					ldv.LogFailure("dataverwerking.pi-bsn-resolutie", err)
-					http.Error(w, "de-pseudonymisation could not be logged; refusing the request", http.StatusInternalServerError)
-					return
-				}
-
-				if resolveErr != nil {
-					slog.Error("PI resolve failed", "var", varName, "err", resolveErr.Error())
-					http.Error(w, "PI resolve failed for var "+varName, http.StatusBadRequest)
-					return
-				}
-				gql.Variables[varName] = bsn
-				bsnOf[piVal] = bsn
-				resolved++
+			if result.BSN != "" {
+				bsnOf[substitution.Placeholder] = result.BSN
 			}
-			span.SetAttributes(attribute.Int("gbo.sidecar.vars_resolved", resolved))
-			body, _ = json.Marshal(gql)
+			span.SetAttributes(attribute.Bool("gbo.sidecar.subject_substituted", result.BSN != ""))
+			body = result.Body
 		}
 
 		// Forward to upstream with original headers (except Host).
@@ -343,18 +298,21 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client) http.H
 	}
 }
 
-// logResolution records one de-pseudonymisation. The record names the
-// Betrokkene by this source's own pseudonym, derived from the BSN it produced
-// — never the BSN itself, and not the PI, which the caller's logbook holds
-// too. A PI that could not be resolved has no BSN to derive from; a pseudonym
-// of the PI is still local, and still not the caller's identifier.
-func logResolution(ctx context.Context, logbook *ldv.Client, cfg config, forward ldvOperation, pi, bsn string, resolveErr error, start time.Time) error {
+// logDecryption records one reading of an encrypted identity. The record
+// names the Betrokkene by this source's own pseudonym, derived from the BSN it
+// produced — never the BSN itself. A value that could not be read has no BSN
+// to derive from; the record is then named by a pseudonym of the consent,
+// which is still local and still names one citizen.
+//
+// The record points to no other logbook: the source read the value itself,
+// with its own keys.
+func logDecryption(ctx context.Context, logbook *ldv.Client, cfg config, forward ldvOperation, result substitution.Result, decryptErr error, start time.Time) error {
 	if logbook == nil {
 		return nil
 	}
-	named := bsn
-	if resolveErr != nil {
-		named = pi
+	named := result.BSN
+	if named == "" {
+		named = "consent:" + result.ConsentID
 	}
 	subjectID, err := logbook.LocalPseudonym(named)
 	if err != nil {
@@ -364,14 +322,11 @@ func logResolution(ctx context.Context, logbook *ldv.Client, cfg config, forward
 		TraceID:      forward.traceID,
 		SpanID:       ldv.SpanID(),
 		ParentSpanID: forward.spanID,
-		Name:         "dataverwerking.pi-bsn-resolutie",
-		Status:       ldv.Status(resolveErr),
+		Name:         "dataverwerking.identiteit-ontsleuteling",
+		Status:       ldv.Status(decryptErr),
 		StartTime:    start,
 		EndTime:      time.Now().UTC(),
-		Attributes: ldv.Attributes(cfg.LDVResolutionActivity, subjectID, ldv.SubjectTypePseudonym, forward.processor, map[string]any{
-			// BSNk did the transform; its side of it is logged there.
-			ldv.AttrNextLogbookID: cfg.LDVBSNkNextLogbookID,
-		}),
+		Attributes:   ldv.Attributes(cfg.LDVDecryptionActivity, subjectID, ldv.SubjectTypePseudonym, forward.processor, map[string]any{}),
 	})
 }
 
@@ -461,10 +416,34 @@ func initTracer(ctx context.Context) (func(context.Context) error, error) {
 	return tp.Shutdown, nil
 }
 
+// newSubstituter wires the substitution to the source's decryption component
+// and keys. A source without keys gets a component that refuses, so that a
+// consent-based request fails instead of reaching the source unsubstituted.
+func newSubstituter(cfg config, client *http.Client) (substitution.Substituter, error) {
+	component := decryption.Component{URL: cfg.DecryptionURL, Client: client}
+	if cfg.SubjectKeysDir != "" {
+		keys, schemeKeys, err := decryption.LoadKeys(cfg.SubjectKeysDir)
+		if err != nil {
+			return substitution.Substituter{}, err
+		}
+		component.Keys, component.SchemeKeys = keys, schemeKeys
+	}
+	return substitution.Substituter{
+		OwnOIN:    cfg.OwnPeerOIN,
+		Variables: subjectVariables(cfg.PseudonymVars),
+		Decrypter: component,
+	}, nil
+}
+
 // newMux builds the routing tree for the sidecar. Extracted from main so
-// integration tests can wire the handlers to an httptest.Server (with
-// stub upstream + BSNk URLs in cfg) without starting the real listener.
-func newMux(cfg config, client *http.Client, logbook *ldv.Client) *http.ServeMux {
+// integration tests can wire the handlers to an httptest.Server (with stub
+// upstream and decryption component URLs in cfg) without starting the real
+// listener.
+func newMux(cfg config, client *http.Client, logbook *ldv.Client) (*http.ServeMux, error) {
+	substitute, err := newSubstituter(cfg, client)
+	if err != nil {
+		return nil, err
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -472,8 +451,8 @@ func newMux(cfg config, client *http.Client, logbook *ldv.Client) *http.ServeMux
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 	// All non-health paths → forward.
-	mux.HandleFunc("/", forwardHandler(cfg, client, logbook))
-	return mux
+	mux.HandleFunc("/", forwardHandler(cfg, client, logbook, substitute))
+	return mux, nil
 }
 
 // fatal logs and ends the process. main is the only place in this service
@@ -537,16 +516,26 @@ func main() {
 		go outbox.Run(ctx, ldvDeliveryInterval)
 	}
 
+	// A source that answers consent-based requests cannot start without its
+	// keys: it would pass the placeholder on to the source instead.
+	mux, err := newMux(cfg, client, logbook)
+	if err != nil {
+		fatal("reading the decryption keys", err)
+	}
+	if cfg.SubjectKeysDir == "" {
+		slog.Warn("no SUBJECT_KEYS_DIR configured; this bron refuses consent-based requests")
+	}
+
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           otelhttp.NewHandler(newMux(cfg, client, logbook), serviceName),
+		Handler:           otelhttp.NewHandler(mux, serviceName),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 	slog.Info("sidecar starting",
 		"addr", srv.Addr,
 		"upstream", cfg.UpstreamURL,
-		"bsnk", cfg.BSNkURL,
-		"pseudonym_vars", cfg.PseudonymVars,
+		"decryption_component", cfg.DecryptionURL,
+		"subject_vars", cfg.PseudonymVars,
 	)
 	serve(srv)
 }

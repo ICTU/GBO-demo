@@ -21,9 +21,13 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"regexp"
+	"strconv"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -49,10 +53,13 @@ import (
 	"syscall"
 )
 
-// portalOIN is the portal's own OIN, used as recipient_oin when it needs the
-// caller's PI for its own sake (listing, ownership checks). The PI BSNk
-// returns is deterministic per BSN regardless of recipient_oin.
+// portalOIN is the portal's own OIN. BSNk makes the polymorphic values for it
+// when a citizen gives consent, and the portal's own reference to a citizen
+// (listing, ownership checks) is a pseudonym scoped to it.
 const portalOIN = "00000000000000000002" // mock-portal OIN
+
+// portalKeySetVersion is the version of the portal's own keys at BSNk.
+const portalKeySetVersion = 1
 
 // upstreamTimeout bounds every call to BSNk and the consent register. The
 // previous implementation used the package-global http.DefaultClient, which
@@ -94,9 +101,16 @@ type config struct {
 	// PseudonymsLogbook is where BSNk's processings can be looked up: its
 	// read API, or a contact page while it has none.
 	PseudonymsLogbook string
+	// Sources are the parties a consent token carries an encrypted identity
+	// for: each source's OIN and the version of its keys.
+	Sources []consent.Party
 }
 
-func loadConfig() config {
+func loadConfig() (config, error) {
+	sources, err := parseSources(os.Getenv("CONSENT_SOURCES"))
+	if err != nil {
+		return config{}, fmt.Errorf("CONSENT_SOURCES: %w", err)
+	}
 	return config{
 		Port:              getEnv("PORT", "4005"),
 		BSNkURL:           getEnv("BSNK_URL", "http://bsnk-mock:4003"),
@@ -105,7 +119,37 @@ func loadConfig() config {
 		LogbookURL:        getEnv("LDV_LOGBOOK_URL", ""),
 		LogbookToken:      getEnv("LDV_WRITE_TOKEN", ""),
 		PseudonymsLogbook: getEnv("LDV_BSNK_NEXT_LOGBOOK_ID", ""),
+		Sources:           sources,
+	}, nil
+}
+
+var sourceOIN = regexp.MustCompile(`^[0-9]{20}$`)
+
+// parseSources reads the sources a consent is given for, as a comma-separated
+// list of <OIN>@<key set version>. The version is the date the source's
+// certificate was issued, as YYYYMMDD. At least one source is required: a
+// consent no source can read is of no use.
+func parseSources(value string) ([]consent.Party, error) {
+	var sources []consent.Party
+	for _, entry := range strings.Split(value, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		oin, version, found := strings.Cut(entry, "@")
+		if !found || !sourceOIN.MatchString(oin) {
+			return nil, fmt.Errorf("%q is not <OIN of 20 digits>@<key set version>", entry)
+		}
+		keySetVersion, err := strconv.Atoi(version)
+		if err != nil || len(version) != 8 {
+			return nil, fmt.Errorf("%q: the key set version must be a date as YYYYMMDD", entry)
+		}
+		sources = append(sources, consent.Party{OIN: oin, KeySetVersion: keySetVersion})
 	}
+	if len(sources) == 0 {
+		return nil, errors.New("name at least one source, as <OIN>@<key set version>")
+	}
+	return sources, nil
 }
 
 func getEnv(key, fallback string) string {
@@ -135,12 +179,18 @@ func newPortal(cfg config, hub *portalhttp.Hub, logbook consent.Logbook) *consen
 		})
 	}
 
+	bsnkClient := bsnk.Client{
+		Base: cfg.BSNkURL, Caller: caller,
+		Requester: portalOIN, RequesterKeySetVersion: portalKeySetVersion,
+	}
 	return &consent.Portal{
-		Pseudonyms:        bsnk.Client{Base: cfg.BSNkURL, Caller: caller},
+		Identities:        bsnkClient,
+		Pseudonyms:        bsnkClient,
 		Consents:          register.Client{Base: cfg.ConsentURL, Caller: caller},
 		Watch:             watchers,
 		Logbook:           logbook,
 		OwnOIN:            portalOIN,
+		Sources:           cfg.Sources,
 		PseudonymsLogbook: cfg.PseudonymsLogbook,
 	}
 }
@@ -208,7 +258,10 @@ func main() {
 	shutdown := initTracer()
 	defer func() { _ = shutdown(context.Background()) }()
 
-	cfg := loadConfig()
+	cfg, err := loadConfig()
+	if err != nil {
+		fatal("reading the configuration", err)
+	}
 	hub := portalhttp.NewHub()
 
 	// Either this portal is part of GBO's LDV chain and cannot start without

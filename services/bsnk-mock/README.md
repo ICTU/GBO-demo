@@ -10,21 +10,22 @@ It serves three things.
 
 | Part | Endpoints | Stands in for |
 |---|---|---|
-| The first interface | `/pseudonymize`, `/transform` | Nothing real. The demo chain calls it today |
+| The first interface | `/pseudonymize` | Nothing real. The consent portal derives its own reference to a citizen with it |
 | BSNk | `/v2/…` | BSNk's own services |
 | Decryption | `/signed-encrypted-identity`, `/signed-encrypted-pseudonym` | The decryption component a party runs itself |
 
-The `/v2` endpoints and the decryption endpoints are meant to replace the
-first interface once its callers have moved.
+In the demo the consent portal activates a BSN and has it transformed into an
+encrypted identity per source, through `/v2`. A source reads its value through
+the decryption endpoints, on an instance of this image that serves nothing
+else (`DECRYPTION_COMPONENT_ONLY`), so that the source does not call BSNk.
 
 ## The first interface
 
-- `POST /pseudonymize` takes a BSN and a recipient OIN and returns a PI and a
-  pseudonym. The consent portal calls it.
-- `POST /transform` takes that PI and returns the BSN. A source's sidecar
-  calls it.
-
-The PI here is an opaque hash that the mock remembers in memory.
+`POST /pseudonymize` takes a BSN and a recipient OIN and returns a pseudonym:
+the same for one citizen at one recipient, different at every other. The
+consent portal calls it with its own OIN, to list and revoke a citizen's
+consents without holding the BSN. It goes once the portal gets that reference
+from an encrypted pseudonym made for itself.
 
 ## How BSNk works
 
@@ -265,8 +266,10 @@ A party reads its values itself, in a decryption component that it runs, with
 its own keys. These two endpoints take the requests and give the answers of
 that component, at the same paths, so that a caller written against them needs
 no code change to use the real one. That has not been tried against the real
-component. They are on this service only so that the demo needs one mock
-instead of two.
+component. They are in this image only so that the demo needs one mock instead
+of two. Start it with `DECRYPTION_COMPONENT_ONLY=true` and it serves these two
+endpoints and nothing of BSNk, which is how the demo runs the component of its
+sources.
 
 ### `POST /signed-encrypted-identity`
 
@@ -377,11 +380,13 @@ then the first of the current month.
 | `PORT` | `4003` | Listening port |
 | `BSN_AUTHORISED_OINS` | empty | Comma-separated OINs that may receive the BSN. Empty means no party can get an identity |
 | `RANDOMIZE_VALUES` | `false` | Whether values differ on every request |
+| `DECRYPTION_COMPONENT_ONLY` | `false` | Serve the decryption endpoints alone, as the component a party runs itself |
 
 ## Logboek Dataverwerkingen
 
-The components that call it record the call as a Dataverwerking of their own
-and set `dpl.read.nextLogbookId` to this page (`LDV_BSNK_NEXT_LOGBOOK_ID`).
+The consent portal records its call to BSNk as a Dataverwerking of its own
+and sets `dpl.read.nextLogbookId` to this page (`LDV_BSNK_NEXT_LOGBOOK_ID`).
+A source that reads its value calls nobody, so its record points nowhere.
 The read extension asks for the read API of the party that was called; for a
 party without one it allows a page with contact details instead. The mock
 keeps no logbook, so this page is the honest answer to where its side of a

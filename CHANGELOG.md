@@ -120,6 +120,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- **A consent token carries an encrypted identity per source, and no PI.**
+  The service provider holds no identifier of the citizen: its query names the
+  subject with the placeholder `consent:subject`, and the source puts the BSN
+  in its place after the PDP has allowed the request. This covers every DvTP
+  source in the demo. See [docs/consent-flow.md](docs/consent-flow.md).
+  - **Consent.** The portal activates the BSN at BSNk and has it transformed
+    into an encrypted identity for each source in `CONSENT_SOURCES`
+    (`<OIN>@<key set version>`), through `bsnk-mock`'s `/v2/activate` and
+    `/v2/transform`. The token's `pi` claim is replaced by
+    `encrypted_subject`, keyed by the party's OIN. The portal's own reference
+    to a citizen still comes from `/pseudonymize`.
+  - **PDP.** `DVT0001` and `LVG0001` require the subject argument to be the
+    placeholder. A literal value is denied with `CONSTRAINT_MISMATCH`. The
+    placeholder stands for the subject of a verified consent only, and a token
+    without `encrypted_subject` is refused with `CONSENT_CONTEXT_INVALID`.
+  - **Source.** `bron-sidecar` acts on the consent token, not on the
+    `subject_id_type` grant property. It takes the value for its own OIN from
+    the token, has the source's decryption component read it, accepts it only
+    when the value itself names that OIN, and replaces the placeholder. It no
+    longer calls BSNk. A request without a consent token passes through
+    unchanged. New settings: `DECRYPTION_URL` and `SUBJECT_KEYS_DIR`;
+    `BSNK_URL` and `LDV_BSNK_NEXT_LOGBOOK_ID` are gone from the sidecar, and
+    `LDV_RESOLUTION_ACTIVITY` is now `LDV_DECRYPTION_ACTIVITY`.
+  - **Decryption component.** A new `decryption-component` service runs the
+    `bsnk-mock` image with `DECRYPTION_COMPONENT_ONLY=true`, which serves the
+    decryption endpoints and nothing of BSNk. The sources' demo keys are in
+    the sidecar image (`services/bron-sidecar/config/demo-keys`); a deployment
+    mounts its own.
+  - **Logbooks.** The service provider logs under the consent id
+    (`data_subject_id_type` `consent-id`). The source's record of reading the
+    identity is `identiteit-ontsleuteling` (was `pi-bsn-resolutie`) and points
+    to no other logbook.
+  - **`bsnk-mock`.** `/transform` is removed and `/pseudonymize` returns a
+    pseudonym only.
+  - **Developer portal.** The use chain shows the source's decryption
+    component in place of BSNk.
 - The local FSC Postgres allows 300 connections instead of 100. Every peer's
   Controller, Manager and txlog pool shares that one server, and the tenth
   peer (the integrator) ran it out.

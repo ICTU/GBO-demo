@@ -4,10 +4,10 @@ package dvtp.gbo.rules.lvg0001
 #
 # The LVG/Installatie Register pilot: the citizen consents in MijnOverheid
 # that the Installatie Register may ask LVG whether a verblijfsobject is
-# theirs. The query names the citizen (as a PI from that consent) and one
-# VBO-id; LVG answers with that same VBO-id or null. The Installatie
-# Register's own consent for the installer is not a GBO consent and is not
-# checked here.
+# theirs. The query names the citizen with the placeholder for the subject of
+# that consent, and one VBO-id; LVG answers with that same VBO-id or null. The
+# Installatie Register's own consent for the installer is not a GBO consent and
+# is not checked here.
 #
 # The same consent checks as DVT0001, with the scope pinned to the one this
 # rule exists for: without allowed_scopes a token for bd:ib:2025, sent with
@@ -32,11 +32,11 @@ spec := {
 	"consent_actor_binding": true,
 	"consent_must_cover_scope": true,
 	"allowed_scopes": {"lvg:vbo:eigendom"},
-	# The PI in the query must be the PI of the verified consent, so the
-	# Installatie Register can only ask about the citizen who consented.
+	# The query names its subject with the placeholder, so the Installatie
+	# Register can only ask about the citizen of the verified consent.
 	"constraint_binding": [{
 		"arg": "bsn",
-		"resource_field": "pi",
+		"resource_field": "subject",
 	}],
 	"years_in_scopes": false,
 	"pip": null,

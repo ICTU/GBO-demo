@@ -5,8 +5,8 @@
 //
 //	internal/polymorphic/  core — BSNk's own model: activate, transform, keys,
 //	                       and reading a value. Imports no transport library.
-//	internal/legacy/       core — the first interface, which the demo chain
-//	                       still calls
+//	internal/legacy/       core — what is left of the first interface: the
+//	                       consent portal's own reference to a citizen
 //	internal/httpapi/      driving adapter — handlers and routing
 //	slogctx.go             trace-correlated access log
 //	main.go                configuration, construction, lifecycle
@@ -36,7 +36,6 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
 
 	"bsnk-mock/internal/httpapi"
-	"bsnk-mock/internal/legacy"
 	"bsnk-mock/internal/polymorphic"
 )
 
@@ -56,6 +55,10 @@ type config struct {
 	// Randomize makes issued values differ on every request, as they do
 	// with the real BSNk. Off by default, so that tests get stable values.
 	Randomize bool
+	// DecryptionComponentOnly serves the decryption component and nothing of
+	// BSNk. A party runs that component itself; an instance started this way
+	// stands in for it.
+	DecryptionComponentOnly bool
 }
 
 func loadConfig() (config, error) {
@@ -72,6 +75,13 @@ func loadConfig() (config, error) {
 		}
 		cfg.Randomize = randomize
 	}
+	if v := os.Getenv("DECRYPTION_COMPONENT_ONLY"); v != "" {
+		only, err := strconv.ParseBool(v)
+		if err != nil {
+			return config{}, fmt.Errorf("DECRYPTION_COMPONENT_ONLY must be true or false, got %q", v)
+		}
+		cfg.DecryptionComponentOnly = only
+	}
 	return cfg, nil
 }
 
@@ -84,11 +94,14 @@ func getEnv(key, fallback string) string {
 
 // newMux wires the cores to the HTTP adapter.
 func newMux(cfg config) (*http.ServeMux, error) {
+	if cfg.DecryptionComponentOnly {
+		return httpapi.NewDecryptionMux(), nil
+	}
 	mock, err := polymorphic.New(cfg.BSNAuthorisedOINs)
 	if err != nil {
 		return nil, fmt.Errorf("BSN_AUTHORISED_OINS: %w", err)
 	}
-	return httpapi.NewMux(legacy.NewStore(), mock, cfg.Randomize), nil
+	return httpapi.NewMux(mock, cfg.Randomize), nil
 }
 
 func initTracer() func(context.Context) error {

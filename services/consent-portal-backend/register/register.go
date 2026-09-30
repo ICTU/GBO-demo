@@ -1,5 +1,6 @@
 // Package register talks to the consent register, which stores a portal-scoped
-// subject reference and sees PI only transiently while issuing a signed token.
+// subject reference and sees the encrypted values per party only transiently
+// while issuing a signed token.
 // There is no method here that accepts a BSN, and there must never be one.
 //
 // The adapter translates representations; it does not decide outcomes. No
@@ -29,10 +30,18 @@ func (c Client) Create(ctx context.Context, d consent.Draft) (consent.Record, er
 		ConsentID    string `json:"consent_id"`
 		ConsentToken string `json:"consent_token"`
 	}
-	// PI is transient token material. subject_ref is the only subject value the consent register
-	// persists and returns.
+	// The encrypted values are transient token material. subject_ref is the
+	// only subject value the consent register persists and returns.
+	encrypted := make(map[string]any, len(d.Subjects))
+	for _, subject := range d.Subjects {
+		encrypted[subject.Party.OIN] = map[string]any{
+			"identifier_type": subject.IdentifierType,
+			"key_set_version": subject.Party.KeySetVersion,
+			"value":           subject.Value,
+		}
+	}
 	_, err := c.Caller.DoPrivate(ctx, "Create Consent", http.MethodPost, c.Base+"/consents", map[string]any{
-		"pi":                 string(d.PI),
+		"encrypted_subject":  encrypted,
 		"subject_ref":        string(d.SubjectRef),
 		"dienstverlener_oin": d.DienstverlenerOIN,
 		"scopes":             d.Scopes,

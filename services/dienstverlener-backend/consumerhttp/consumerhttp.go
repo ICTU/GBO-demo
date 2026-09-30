@@ -5,8 +5,8 @@
 // Endpoint: POST /api/dvtp/query  {consent_token, scope_id?, belastingjaren?, fields?, vbo_id?}
 //
 //	→ FSC Outway: pick contract by grant-link, sign token, open mTLS to Inway
-//	→ FSC Inway proxy: forward GraphQL query (with PI as bsn variable)
-//	   ↳ PEP → OpenFTV → sidecar (PI → BSN) → source
+//	→ FSC Inway proxy: forward GraphQL query (with the placeholder as bsn variable)
+//	   ↳ PEP → OpenFTV → sidecar (placeholder → BSN) → source
 //	→ return  {allowed, data | reason, denial_code, trace_id, fsc_transaction_id}
 package consumerhttp
 

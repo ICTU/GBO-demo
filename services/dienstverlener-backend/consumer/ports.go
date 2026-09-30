@@ -58,7 +58,9 @@ type Processing struct {
 	// verwerkingsactiviteiten the call is.
 	Activity string
 	Name     string
-	// Subject is the citizen as the consent names them: a PI, never a BSN.
+	// Subject names the citizen by the consent the call was made under. The
+	// consumer holds no identifier of the citizen: not a BSN, and not a
+	// pseudonym either.
 	Subject string
 	// Scope names the source, so the logbook can point to where the source
 	// logs its half.

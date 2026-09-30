@@ -17,7 +17,7 @@ import (
 func question() consumer.Question {
 	return consumer.Question{
 		Query:         `query($bsn: BSN!) { ingeschrevenPersoon(bsn: $bsn) { bsn } }`,
-		Variables:     map[string]any{"bsn": "PI-abc123"},
+		Variables:     map[string]any{"bsn": consumer.SubjectPlaceholder},
 		Scope:         "bd:ib:2025",
 		ConsentToken:  "a.b.c",
 		TransactionID: "0190c5a2-7b1e-7cc0-8f6e-1a2b3c4d5e6f",
@@ -44,7 +44,7 @@ func TestAQuestionReachesTheOutwayAsGraphQL(t *testing.T) {
 		path, header = r.URL.Path, r.Header.Clone()
 		b, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(b, &body)
-		_, _ = w.Write([]byte(`{"data":{"ingeschrevenPersoon":{"bsn":"PI-abc123"}}}`))
+		_, _ = w.Write([]byte(`{"data":{"ingeschrevenPersoon":{"bsn":"999991772"}}}`))
 	})
 
 	answer, err := s.Ask(context.Background(), question())
@@ -57,7 +57,7 @@ func TestAQuestionReachesTheOutwayAsGraphQL(t *testing.T) {
 	if path != "/bri/graphql" {
 		t.Errorf("path = %q, want the grant-link path", path)
 	}
-	if body.Query != question().Query || body.Variables["bsn"] != "PI-abc123" {
+	if body.Query != question().Query || body.Variables["bsn"] != consumer.SubjectPlaceholder {
 		t.Errorf("body = %+v, want the query and its variables", body)
 	}
 	if header.Get("X-GBO-Consent-Token") != "a.b.c" || header.Get("X-GBO-Scope") != "bd:ib:2025" {

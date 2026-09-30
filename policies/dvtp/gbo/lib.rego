@@ -21,7 +21,7 @@ package dvtp.gbo.lib
 #                   connects for, on a delegated connection },
 #     "args":     { "vars.<name>": value, "input.<name>": value, ... },
 #     "time":     "<RFC3339>",
-#     "resource": { "scope": "...", "pi": "..." },
+#     "resource": { "scope": "...", "subject": "<subject_placeholder>" },
 #     "pip":      { "consent": { "context_valid": bool, "exists": bool,
 #                                "status_available": bool, "withdrawn": bool,
 #                                "valid_until": "<RFC3339>",
@@ -44,6 +44,13 @@ package dvtp.gbo.lib
 #            "expected": "<first-fail.expected>",
 #            "steps": [...]}}}
 # ═══════════════════════════════════════════════════════════════════════════
+
+# What a consent-based query names its subject with. The consumer holds no
+# identifier of the citizen: the consent token carries an encrypted identity
+# per party, and the source puts its own decrypted value in this place after
+# an allow. A query that names anything else is asking about someone the
+# consent does not vouch for.
+subject_placeholder := "consent:subject"
 
 evaluate(spec, ctx) := result if {
 	steps := _steps_with_short_circuit(spec, ctx)
@@ -398,9 +405,12 @@ consent_covers_scope(ctx) if {
 
 # ── Constraint-binding-check ─────────────────────────────────────────────────
 
+# An empty resource value binds nothing: it means there is nothing to bind
+# to, not that an empty argument is what was asked for.
 constraint_binding_satisfied(fm, ctx) if {
 	arg_value := ctx.args[fm.arg]
 	res_value := object.get(ctx.resource, fm.resource_field, "")
+	res_value != ""
 	arg_value == res_value
 }
 

@@ -20,15 +20,15 @@ func processing() consumer.Processing {
 		At:       consumer.Position{TraceID: "4bf92f3577b34da6a3ce929d0e0e4736", SpanID: "00f067aa0ba902b7"},
 		Activity: consumer.Kinds["bd"].Activity,
 		Name:     consumer.Kinds["bd"].RecordName,
-		Subject:  "PI-abc123",
+		Subject:  "c-7f3a",
 		Scope:    "bd:ib:2025",
 		Start:    start,
 		End:      start.Add(time.Second),
 	}
 }
 
-// The consumer's record is the root of the chain, about the PI from the
-// consent, with a pointer to where the source logs its half.
+// The consumer's record is the root of the chain, about the citizen of the
+// consent it acted under, with a pointer to where the source logs its half.
 func TestARecordPointsToTheSourcesLogbook(t *testing.T) {
 	fake := ldvtest.New(t, consumer.Kinds["bd"].Activity)
 	l := &Logbook{Client: fake.Client(t, "dienstverlener-backend"), NextLogbooks: map[string]string{"bd": bdLogbook}}
@@ -54,8 +54,11 @@ func TestARecordPointsToTheSourcesLogbook(t *testing.T) {
 	if got := record.Attributes[ldv.AttrNextLogbookID]; got != bdLogbook {
 		t.Errorf("nextLogbookId = %v, want the source's read API", got)
 	}
-	if got := record.Attributes[ldv.AttrDataSubjectID]; got != "PI-abc123" {
-		t.Errorf("data_subject_id = %v, want the PI", got)
+	if got := record.Attributes[ldv.AttrDataSubjectID]; got != "c-7f3a" {
+		t.Errorf("data_subject_id = %v, want the consent id", got)
+	}
+	if got := record.Attributes[ldv.AttrDataSubjectIDType]; got != "consent-id" {
+		t.Errorf("data_subject_id_type = %v, want consent-id", got)
 	}
 	if record.Status != ldv.StatusOK {
 		t.Errorf("status = %q, want OK", record.Status)

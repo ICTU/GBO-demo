@@ -9,17 +9,25 @@ import (
 // exactly one adapter package (bsnk, register) and by in-memory fakes in the
 // tests. "Accept interfaces, return structs": the adapters are plain structs.
 
-// Pseudonyms is what BSNk returns: a recipient-scoped pseudonym plus the
-// recipient-independent PI used only inside the signed authorization context.
-type Pseudonyms struct {
-	Pseudonym string
-	PI        PI
+// Identities is BSNk seen from the core when a citizen gives consent: the BSN
+// goes in, and what comes out is an encrypted identity per party that only
+// that party can read.
+//
+// BSNk does this in two steps. It activates the BSN into polymorphic values
+// that only the portal can use, and transforms those into a value per party.
+// The polymorphic values live for the duration of this one call and leave the
+// portal nowhere, so the core does not see them.
+//
+// A party that may not receive the BSN makes the whole call fail: a consent
+// whose source cannot read the subject would be a consent nobody can use.
+type Identities interface {
+	EncryptFor(ctx context.Context, bsn BSN, parties []Party) ([]EncryptedSubject, error)
 }
 
-// Pseudonymizer is BSNk seen from the core: one RPC, no state. This is the
-// only port allowed to see a BSN.
+// Pseudonymizer derives the portal's own reference to a citizen: a pseudonym
+// scoped to the recipient it is asked for. One RPC, no state.
 type Pseudonymizer interface {
-	Pseudonymize(ctx context.Context, bsn BSN, recipientOIN string) (Pseudonyms, error)
+	Pseudonymize(ctx context.Context, bsn BSN, recipientOIN string) (string, error)
 }
 
 // Store is the consent register seen from the core. Citizen listing is keyed
@@ -47,8 +55,9 @@ type Processing struct {
 	// Name is the short name of the processing, for a human reading the log.
 	Name string
 	// Subject is the Betrokkene, named by the portal-scoped reference. Never
-	// a BSN and never a PI: the reference the register lists a citizen by is
-	// the only identifier this side is allowed to write down.
+	// a BSN and never a value made for another party: the reference the
+	// register lists a citizen by is the only identifier this side is allowed
+	// to write down.
 	Subject SubjectRef
 	Start   time.Time
 	End     time.Time
