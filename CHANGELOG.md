@@ -47,6 +47,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     `ir-backend` and predefined issuance grants it to IR's Peer ID. Three
     scenarios cover issuance, an owner and a non-owner; the FSC txlog panel
     includes IR's peer.
+- **`bsnk-mock` follows BSNk's own interface.** Under `/v2` it activates a
+  BSN into a polymorphic identity and pseudonym for the requester, transforms
+  those into an encrypted identity or pseudonym per party, and issues the
+  keys with which a party reads its values. The requests and answers are
+  BSNk's, as JSON instead of SOAP and with the same field names and fault
+  reasons. `/signed-encrypted-identity` and `/signed-encrypted-pseudonym`
+  stand in for the decryption component a party runs itself, with that
+  component's requests and answers.
+  - A value has the fields of the real structure and is the base64 of JSON
+    that anyone can decode, so a test can assert on the recipient, the key
+    set version or the BSN without a key. Nothing is encrypted.
+  - The mock enforces BSNk's rules: a polymorphic value is for its requester
+    only, an identity and the key to read it go only to a party that may
+    have the BSN (`BSN_AUTHORISED_OINS`), a transformation serves at most
+    four parties, and a value is read only with a key for its party and key
+    set version.
+  - Values are stable by default and differ on every request with
+    `RANDOMIZE_VALUES=true`.
+  - `/pseudonymize` and `/transform` are unchanged; no caller uses the new
+    endpoints yet.
+  - The service is laid out as ports and adapters: a core per interface
+    under `internal/`, one HTTP adapter, and `main.go` as the composition
+    root.
+
+  See [services/bsnk-mock/README.md](services/bsnk-mock/README.md).
 - **`make policy-check` reports a broken policy before the PDP swallows it
   (#335).** The PDP hot-reloads `policies/`, but OpenFTV logs
   `policy added/replaced` for a module that failed to compile as well, stays

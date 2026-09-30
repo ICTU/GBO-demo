@@ -9,10 +9,14 @@ import (
 )
 
 // Happy-path integration test: pseudonymize a demo BSN, then transform
-// the returned PI back to BSN. Verifies the mux wires the two handlers
-// through the shared store correctly.
+// the returned PI back to BSN. Verifies the composition root wires the two
+// handlers of the first interface through the shared store correctly.
 func TestPseudonymizeThenTransform(t *testing.T) {
-	srv := httptest.NewServer(newMux(NewStore()))
+	mux, err := newMux(config{})
+	if err != nil {
+		t.Fatalf("newMux: %v", err)
+	}
+	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
 	pseudReq := bytes.NewBufferString(`{"bsn":"987654321","recipient_oin":"99999999900000000200"}`)
@@ -52,5 +56,30 @@ func TestPseudonymizeThenTransform(t *testing.T) {
 	}
 	if tr.BSN != "987654321" {
 		t.Fatalf("BSN roundtrip mismatch: got %q, want %q", tr.BSN, "987654321")
+	}
+}
+
+func TestLoadConfig(t *testing.T) {
+	t.Setenv("BSN_AUTHORISED_OINS", " 99999999900000000200, 99999999900000000210 ,")
+	t.Setenv("RANDOMIZE_VALUES", "true")
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	if len(cfg.BSNAuthorisedOINs) != 2 || cfg.BSNAuthorisedOINs[1] != "99999999900000000210" || !cfg.Randomize {
+		t.Errorf("cfg = %+v", cfg)
+	}
+
+	t.Setenv("RANDOMIZE_VALUES", "sometimes")
+	if _, err := loadConfig(); err == nil {
+		t.Error("RANDOMIZE_VALUES=sometimes was accepted")
+	}
+}
+
+// A misconfigured list stops the service at start instead of silently
+// leaving a party without its BSN.
+func TestNewMuxRejectsAMalformedOIN(t *testing.T) {
+	if _, err := newMux(config{BSNAuthorisedOINs: []string{"bd-mock"}}); err == nil {
+		t.Error("newMux accepted a name as an OIN")
 	}
 }

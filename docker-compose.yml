@@ -747,6 +747,9 @@ services:
     environment:
       - OTEL_SERVICE_NAME=bsnk-mock
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      # The parties that may receive the BSN: the demo's source peer. Any
+      # other party can only get a pseudonym.
+      - BSN_AUTHORISED_OINS=${BSN_AUTHORISED_OINS:-99999999900000000200}
     networks:
       - backend
     depends_on:
