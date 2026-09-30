@@ -94,7 +94,9 @@ Het token bevat de bindings waarop de PDP later beslist:
 - issuer, audience en geldigheid via `iat`, `nbf`, `exp` en `valid_until`.
 
 De bestaande API-veldnaam `dienstverlener_oin` bevat in deze flow de FSC Peer
-ID waarmee de PDP de token aan `subject.id` bindt. De voorgedefinieerde
+ID waarmee de PDP de token aan `subject.id` bindt, of, als een integrator
+namens de dienstverlener verbindt, aan de delegator uit de FSC-verbinding (zie
+[Integrator namens een dienstverlener](integrator.md)). De voorgedefinieerde
 issuance-scenario's van het developer portal vullen dit veld vanuit
 `DVTP_CONSUMER_PEER_ID`; alleen lokaal geldt bij ontbrekende configuratie de
 default `99999999900000000300`. Handmatig ingevoerde en opgeslagen payloads
@@ -166,7 +168,8 @@ De policy geeft alleen `ALLOW` wanneer alle volgende relaties kloppen:
 ```text
 geldige ondertekening en geregistreerde claims
 + consent bestaat, is ACTIVE en is nog geldig
-+ FSC subject.id == dienstverlener_oin uit het token
++ FSC-delegator (anders subject.id) == dienstverlener_oin uit het token
++ bij delegatie: integrator gemandateerd voor die dienstverlener en regel
 + PI in de GraphQL-query == PI uit het token
 + scope, jaren en velden vallen binnen het consent
 = ALLOW
@@ -175,7 +178,8 @@ geldige ondertekening en geregistreerde claims
 Ontbrekende, ongeldige of niet-beschikbare context faalt gesloten met een
 gerichte reden, zoals `CONSENT_SIGNATURE_INVALID`, `CONSENT_TOKEN_EXPIRED`,
 `CONSENT_CONTEXT_INVALID`, `CONSENT_KEYS_UNAVAILABLE`,
-`CONSENT_ACTOR_MISMATCH`, `CONSTRAINT_MISMATCH`, `CONSENT_SCOPE_MISMATCH`,
+`CONSENT_ACTOR_MISMATCH`, `INTEGRATOR_NOT_REGISTERED`, `CONSTRAINT_MISMATCH`,
+`CONSENT_SCOPE_MISMATCH`,
 `CONSENT_STATUS_UNAVAILABLE` of `CONSENT_WITHDRAWN`.
 
 ## 3. Toestemming intrekken

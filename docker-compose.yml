@@ -1061,6 +1061,50 @@ services:
       timeout: 3s
       retries: 5
 
+  # The same consumer backend, run by an integrator for Hypotheek-BV:
+  # it asks BD the same income question with Hypotheek-BV's consent token,
+  # but connects through the integrator's own peer (...1100) and Outway, over
+  # a delegated connection naming Hypotheek-BV as delegator (make
+  # fsc-seed-int). The PDP binds the consent to Hypotheek-BV and checks the
+  # integrator's mandate separately.
+  #
+  # It logs to Hypotheek-BV's logbook: the integrator processes on the
+  # service provider's behalf and keeps nothing itself, so the record
+  # belongs to the controller, not to the processor.
+  #
+  # Opt-in: profile "integrator", started by `make demo-integrator`.
+  integrator-backend:
+    build:
+      context: .
+      dockerfile: services/dienstverlener-backend/Dockerfile
+    profiles: [integrator]
+    ports:
+      - "${GBO_PORT_INTEGRATOR_BACKEND:-9423}:4023"
+    environment:
+      - PORT=4023
+      - OTEL_SERVICE_NAME=integrator-backend
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      # Grant-link /bri on the integrator's Outway, bound to the delegated grant.
+      - OUTWAY_URL=http://int-outway:8080
+      - OUTWAY_PATH=/bri/graphql
+      - ORG_SECTOR=hypotheekverlener
+      - LDV_LOGBOOK_URL=http://logboek-afnemer:4016
+      - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
+      - LDV_NEXT_LOGBOOK_IDS=bd=https://logboek.belastingdienst.nl/data-processing-operations
+    volumes:
+      - ldv-outbox-integrator-backend:/data
+    depends_on:
+      logboek-afnemer:
+        condition: service_healthy
+    networks:
+      - backend
+      - fsc-infra
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4023/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   # Frontends run as a Vite dev-server (live reload / HMR via source-mount).
   # The Dockerfile has an nginx final stage available — for a production
   # build (`target: final`), build it manually with `docker build`.
@@ -1632,6 +1676,7 @@ volumes:
   logboek-ir-data:
   ldv-outbox-dienstverlener-backend:
   ldv-outbox-ir-backend:
+  ldv-outbox-integrator-backend:
   ldv-outbox-lvg-graphql-server:
   ldv-outbox-lvg-sidecar:
   postgres-eudi-data:

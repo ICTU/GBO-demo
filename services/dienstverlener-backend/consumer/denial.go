@@ -28,6 +28,7 @@ var policyDenyCodes = map[string]bool{
 	"CONSENT_WITHDRAWN":          true,
 	"CONSTRAINT_MISMATCH":        true,
 	"COVERAGE_UNVERIFIABLE":      true,
+	"INTEGRATOR_NOT_REGISTERED":  true,
 	"NO_APPLICABLE_RULE":         true,
 	"PID_NOT_PRESENT":            true,
 	"SCOPE_NOT_ALLOWED":          true,
@@ -77,6 +78,8 @@ func denyCodePriority(code string) int {
 		return 69
 	case "CONSENT_ACTOR_MISMATCH":
 		return 68
+	case "INTEGRATOR_NOT_REGISTERED":
+		return 66
 	case "ACTOR_NOT_ALLOWED":
 		return 65
 	case "YEAR_NOT_ALLOWED":

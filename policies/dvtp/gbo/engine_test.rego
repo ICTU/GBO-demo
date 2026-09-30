@@ -250,7 +250,10 @@ test_no_consent_token_puts_the_request_under_the_pid_regime if {
 # If it fails: do NOT widen the test. Either that OIN must not hold a
 # DvTP contract, or the PID regime needs positive evidence of its own
 # (see #334 — a verified PID assertion would remove the fall-through).
-_dvtp_consumer_oins := {"99999999900000000300"} # HV, seed-bri-connection-hv.sh
+_dvtp_consumer_oins := {
+	"99999999900000000300", # HV, seed-bri-connection-hv.sh
+	"99999999900000001100", # integrator for HV, seed-bri-delegation-int.sh
+}
 
 test_pid_rule_actors_are_disjoint_from_consent_consumers if {
 	every rule_id in {"EUD0001", "EUD0002"} {
@@ -308,4 +311,80 @@ test_unverifiable_consent_surfaces_its_invalid_code if {
 		}
 	result.decision == false
 	result.context.reason_admin.code == "CONSENT_SIGNATURE_INVALID"
+}
+
+# ── Delegated calls through the engine ───────────────────────────────────
+# The mandate comes from the admission register (data.entities, pulled by
+# OpenFTV), never from input. These cases cover the wiring the rule tests
+# stand in for with a ready-made pip.integrator.
+
+_integrator := "99999999900000001100"
+
+_registered := {_integrator: {
+	"name": "Demo Integrator BV",
+	"active": true,
+	"allowed_source_peer_ids": ["99999999900000000200"],
+	"acts_for": [{"peer_id": "99999999900000000300", "rules": ["DVT0001"]}],
+}}
+
+_delegated_input(integrator) := object.union(
+	_dvtp_input("bd:ib:2025", {"bsn": "PI-abc123", "belastingjaren.0": "2025"}),
+	{"subject": {
+		"type": "identity",
+		"id": integrator,
+		"attributes": {"outway_delegator_peer_id": "99999999900000000300"},
+	}},
+)
+
+test_delegated_call_by_registered_integrator_allowed if {
+	result := gbo.response with input as _delegated_input(_integrator)
+		with data.dvtp.gbo.consent.resolved as _consent
+		with data.entities.dvtp_participant as _registered
+	result.decision == true
+	result.context.granted[0].rule == "DVT0001"
+}
+
+test_delegated_call_by_unregistered_integrator_denied if {
+	result := gbo.response with input as _delegated_input("99999999900000001199")
+		with data.dvtp.gbo.consent.resolved as _consent
+		with data.entities.dvtp_participant as _registered
+	result.decision == false
+	result.context.reason_admin.code == "INTEGRATOR_NOT_REGISTERED"
+}
+
+test_delegated_call_without_admission_feed_denied if {
+	result := gbo.response with input as _delegated_input(_integrator)
+		with data.dvtp.gbo.consent.resolved as _consent
+	result.decision == false
+	result.context.reason_admin.code == "INTEGRATOR_NOT_REGISTERED"
+}
+
+# A mandate in input is not one the policy pulled: dropped, like pip.consent.
+test_input_pip_integrator_is_not_trusted if {
+	forged := {"integrator": _registered[_integrator]}
+	req := object.union(_delegated_input(_integrator), {"context": {"pip": forged}})
+	ctx := gbo._ctx with input as req
+		with data.dvtp.gbo.consent.resolved as _consent
+	not ctx.pip.integrator
+	result := gbo.response with input as req
+		with data.dvtp.gbo.consent.resolved as _consent
+	result.decision == false
+	result.context.reason_admin.code == "INTEGRATOR_NOT_REGISTERED"
+}
+
+# A direct call carries no mandate into the rules' context at all.
+test_direct_call_carries_no_integrator_pip if {
+	ctx := gbo._ctx with input as _dvtp_input("bd:ib:2025", {"bsn": "PI-abc123", "belastingjaren.0": "2025"})
+		with data.dvtp.gbo.consent.resolved as _consent
+		with data.entities.dvtp_participant as _registered
+	not ctx.pip.integrator
+}
+
+# Leaving the consent token out does not get a registered integrator into
+# the PID regime: the EUDI rules check the peer that connects.
+test_delegated_call_without_consent_token_denied if {
+	req := object.union(_delegated_input(_integrator), {"context": {"resolved": {"args": {"vars.bsn": "999991772", "belastingjaren.0": "2024"}}}})
+	result := gbo.response with input as req
+		with data.entities.dvtp_participant as _registered
+	result.decision == false
 }

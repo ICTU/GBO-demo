@@ -16,7 +16,9 @@ package dvtp.gbo.lib
 #
 # ctx-shape (provided by the dvtp.gbo engine):
 #   ctx := {
-#     "subject":  { ...AuthZEN subject; DVT0001 binds its FSC caller OIN },
+#     "subject":  { ...AuthZEN subject: id = the FSC peer that connects,
+#                   attributes.outway_delegator_peer_id = the peer it
+#                   connects for, on a delegated connection },
 #     "args":     { "vars.<name>": value, "input.<name>": value, ... },
 #     "time":     "<RFC3339>",
 #     "resource": { "scope": "...", "pi": "..." },
@@ -25,9 +27,12 @@ package dvtp.gbo.lib
 #                                "valid_until": "<RFC3339>",
 #                                "granted_scopes": [...],
 #                                "dienstverlener_oin": "...",
-#                                "invalid_code": "<code>" } },
-#                 (resolved by data.dvtp.gbo.consent; invalid_code only
-#                  when context_valid is false)
+#                                "invalid_code": "<code>" },
+#                 "integrator": { "active": bool,
+#                                 "acts_for": [{"peer_id", "rules"}] } },
+#                 (consent resolved by data.dvtp.gbo.consent; invalid_code
+#                  only when context_valid is false. integrator is the
+#                  acting peer's admission entry, on a delegated call only)
 #     "field":    "Query.<path>.<name>"
 #   }
 #
@@ -80,6 +85,7 @@ _raw_steps(spec, ctx) := [
 	_check_years_allowed(spec, ctx),
 	_check_years_in_scopes(spec, ctx),
 	_check_consent_actor_binding(spec, ctx),
+	_check_integrator_mandate(spec, ctx),
 	_check_actor_allowed(spec, ctx),
 ]
 
@@ -292,32 +298,86 @@ _check_years_in_scopes(spec, ctx) := step if {
 _check_actor_allowed(spec, ctx) := step if {
 	allowed := object.get(spec, "allowed_actors", set())
 	count(allowed) > 0
-	actor := object.get(ctx.subject, "id", "")
+	actor := acting_party(ctx)
 	actor in allowed
 	step := _step("ACTOR_NOT_ALLOWED", "Actor allowed for rule", sprintf("%q in spec.allowed_actors", [actor]), "pass")
 } else := step if {
 	allowed := object.get(spec, "allowed_actors", set())
 	count(allowed) > 0
-	actor := object.get(ctx.subject, "id", "")
+	actor := acting_party(ctx)
 	not actor in allowed
 	step := _step("ACTOR_NOT_ALLOWED", "Actor allowed for rule", sprintf("%q in spec.allowed_actors", [actor]), "fail")
 } else := _step_skipped("ACTOR_NOT_ALLOWED", "Actor allowed for rule", "no actor-whitelist configured")
 
+# ── Acting and represented party (FSC delegation) ──────────────────────────
+# A service provider calls a source itself, or through an integrator: a
+# processor that connects on its behalf under a DelegatedServiceConnection
+# grant naming the service provider as delegator. The source's Manager then
+# issues the access token to the integrator with the service provider in its
+# `act` claim, and the Inway hands both to the PDP: subject.id is the peer
+# that connects, subject.attributes.outway_delegator_peer_id the peer it
+# connects for (open-fsc common/authzen AuthZenSubject). The token is signed
+# by the source's own Manager from a contract all three parties signed, so
+# the delegator is as trustworthy as subject.id.
+#
+# The decision uses both. Consent binds the represented party: the service
+# provider the citizen consented to. The acting party needs authority of its
+# own for that provider and this rule: consent does not give it any.
+
+acting_party(ctx) := object.get(ctx.subject, "id", "")
+
+represented_party(ctx) := delegator if {
+	delegator := object.get(object.get(ctx.subject, "attributes", {}), "outway_delegator_peer_id", "")
+	is_string(delegator)
+	delegator != ""
+} else := acting_party(ctx)
+
+delegated(ctx) if represented_party(ctx) != acting_party(ctx)
+
 _check_consent_actor_binding(spec, ctx) := step if {
 	spec.consent_actor_binding
 	consent_actor_matches(ctx)
-	step := _step("CONSENT_ACTOR_MISMATCH", "FSC caller matches signed consent recipient", "subject.id == consent.dienstverlener_oin", "pass")
+	step := _step("CONSENT_ACTOR_MISMATCH", _binding_label, _binding_expected, "pass")
 } else := step if {
 	spec.consent_actor_binding
 	not consent_actor_matches(ctx)
-	step := _step("CONSENT_ACTOR_MISMATCH", "FSC caller matches signed consent recipient", "subject.id == consent.dienstverlener_oin", "fail")
-} else := _step_skipped("CONSENT_ACTOR_MISMATCH", "FSC caller matches signed consent recipient", "n/a")
+	step := _step("CONSENT_ACTOR_MISMATCH", _binding_label, _binding_expected, "fail")
+} else := _step_skipped("CONSENT_ACTOR_MISMATCH", _binding_label, "n/a")
+
+_binding_label := "Represented party matches signed consent recipient"
+
+_binding_expected := "(FSC delegator, else subject.id) == consent.dienstverlener_oin"
 
 consent_actor_matches(ctx) if {
-	actor := object.get(ctx.subject, "id", "")
+	party := represented_party(ctx)
 	consent_actor := object.get(ctx.pip.consent, "dienstverlener_oin", "")
-	actor != ""
-	actor == consent_actor
+	party != ""
+	party == consent_actor
+}
+
+# Every delegated call needs a mandate, whatever the rule: an integrator is
+# admitted per service provider and per rule, and a peer without one gets
+# nothing from connecting on someone's behalf. A direct call has no
+# integrator to check.
+_check_integrator_mandate(spec, ctx) := step if {
+	delegated(ctx)
+	integrator_mandated(spec, ctx)
+	step := _step("INTEGRATOR_NOT_REGISTERED", _mandate_label, _mandate_expected(spec, ctx), "pass")
+} else := step if {
+	delegated(ctx)
+	step := _step("INTEGRATOR_NOT_REGISTERED", _mandate_label, _mandate_expected(spec, ctx), "fail")
+} else := _step_skipped("INTEGRATOR_NOT_REGISTERED", _mandate_label, "n/a (direct call)")
+
+_mandate_label := "Integrator registered for represented party and rule"
+
+_mandate_expected(spec, ctx) := sprintf("%q active, acting for %q in %s", [acting_party(ctx), represented_party(ctx), spec.rule_id])
+
+integrator_mandated(spec, ctx) if {
+	integrator := object.get(object.get(ctx, "pip", {}), "integrator", {})
+	integrator.active == true
+	some mandate in object.get(integrator, "acts_for", [])
+	mandate.peer_id == represented_party(ctx)
+	spec.rule_id in mandate.rules
 }
 
 _step(code, label, expected, status) := {

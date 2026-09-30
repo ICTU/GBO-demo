@@ -29,4 +29,7 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "postgres" <<-EOSQL
     CREATE DATABASE fsc_ir_controller;
     CREATE DATABASE fsc_ir_manager;
     CREATE DATABASE fsc_ir_txlog;
+    CREATE DATABASE fsc_int_controller;
+    CREATE DATABASE fsc_int_manager;
+    CREATE DATABASE fsc_int_txlog;
 EOSQL

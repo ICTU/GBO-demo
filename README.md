@@ -172,6 +172,13 @@ issuance payloads and user-saved scenarios keep the value entered by the user.
 See [the DvTP consent architecture and sequence diagrams](docs/consent-flow.md)
 for the component boundaries and the grant, use and revocation flows.
 
+A service provider can also query through an integrator: a processor with an
+FSC peer of its own that connects on the provider's behalf over a delegated
+connection. The consent then binds the provider, the FSC delegator, and the
+integrator needs a mandate in the DvTP onboarding register. The demo uses the
+direct path by default; `make demo-integrator` adds the integrator to a running
+demo. See [docs/integrator.md](docs/integrator.md).
+
 `S01` is the architecture role identifier used in the demo diagrams for the
 consent-register; it is not a separate service. The demo consent token is a
 bearer JWT. The consent-register generates an ephemeral P-256 key
@@ -321,6 +328,7 @@ source activation, wallet trust and cached QR sessions is in
 ## Further reading
 
 - [DvTP consent architecture and flow](docs/consent-flow.md)
+- [An integrator acting for a service provider](docs/integrator.md)
 - [Source configuration and onboarding](docs/source-onboarding.md)
 - [Source metadata cache and Type Metadata](docs/source-metadata-cache.md)
 - [`gbo-simple-v1` mapping profile](docs/gbo-simple-v1.md)

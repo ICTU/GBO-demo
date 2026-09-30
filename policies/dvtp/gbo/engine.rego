@@ -160,14 +160,27 @@ _ctx := {
 	"pip": _pip_obj,
 }
 
-# The PIP attributes the rules see. A pip.consent arriving in input is
-# dropped, never trusted: nothing upstream is meant to set it, and the
-# policy decides only on a consent it verified itself.
-_pip_obj := object.union(_input_pip, {"consent": consent.resolved}) if {
+# The PIP attributes the rules see. A pip.consent or pip.integrator
+# arriving in input is dropped, never trusted: nothing upstream is meant to
+# set either, and the policy decides only on a consent it verified itself
+# and on admission data it pulled itself.
+_pip_obj := object.union(_pip_with_consent, _pip_integrator)
+
+_pip_with_consent := object.union(_input_pip, {"consent": consent.resolved}) if {
 	consent.resolved
 } else := _input_pip
 
-_input_pip := object.remove(object.get(input.context, "pip", {}), ["consent"])
+_input_pip := object.remove(object.get(input.context, "pip", {}), ["consent", "integrator"])
+
+# On a delegated call, the acting peer's entry in the DvTP admission
+# register: whether it is active, and for which service providers and rules
+# it may act (acts_for). OpenFTV pulls the register into data.entities, the
+# same feed contract autosign reads. A peer without an entry gets none, and
+# the mandate axis fails closed on it.
+_pip_integrator := {"integrator": entry} if {
+	lib.delegated({"subject": input.subject})
+	entry := data.entities.dvtp_participant[input.subject.id]
+} else := {}
 
 # Mirror pip.consent.pi onto ctx.resource.pi so the rule's constraint-
 # binding (input.burgerservicenummer == resource.pi) is evaluable.
@@ -262,6 +275,11 @@ _code_priority("CONSENT_CONTEXT_INVALID") := 70
 _code_priority("CONSENT_STATUS_UNAVAILABLE") := 69
 
 _code_priority("CONSENT_ACTOR_MISMATCH") := 68
+
+# A delegated call from a peer with no mandate for the represented party
+# and rule. Structural, like ACTOR_NOT_ALLOWED; below the consent binding,
+# which names the deeper cause when the integrator acts for the wrong party.
+_code_priority("INTEGRATOR_NOT_REGISTERED") := 66
 
 _code_priority("CONSENT_WITHDRAWN") := 50
 

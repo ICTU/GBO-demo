@@ -135,8 +135,65 @@ test_service_publication_denied if {
 	not is_allowed(contract_input(sort([bd, hv]), [1]))
 }
 
-test_delegated_service_connection_denied if {
-	not is_allowed(contract_input(sort([bd, hv]), [3]))
+# --- delegated connections -------------------------------------------
+# An integrator connects on behalf of a service provider. The contract names
+# the integrator, the provider and the source; the register says the
+# integrator may act for that provider.
+
+integrator := "0000009950INTEGR0000"
+
+with_integrator := object.union(participants, {integrator: {
+	"name": "Demo Integrator BV",
+	"active": true,
+	"allowed_source_peer_ids": [bd],
+	"acts_for": [{"peer_id": hv, "rules": ["DVT0001"]}],
+}})
+
+delegated_for(peer_ids) := contract_input(sort(peer_ids), [3])
+
+deny_reason_with(request, parties) := value if {
+	value := autosign.reason with input as request with data.entities as {"dvtp_participant": parties}
+}
+
+test_delegated_connection_for_registered_provider_allowed if {
+	autosign.allow with input as delegated_for([bd, hv, integrator])
+		with data.entities as {"dvtp_participant": with_integrator}
+}
+
+test_delegated_connection_for_unregistered_provider_denied if {
+	deny_reason_with(delegated_for([bd, edi, integrator]), with_integrator) == "DELEGATION_NOT_REGISTERED"
+}
+
+# Two ordinary participants, neither acting for the other.
+test_delegated_connection_between_unrelated_parties_denied if {
+	deny_reason_with(delegated_for([bd, hv, edi]), with_integrator) == "DELEGATION_NOT_REGISTERED"
+}
+
+# The integrator is admitted in its own right like any party: a suspended
+# one, or one without an entry, is refused before its mandate is read.
+test_delegated_connection_by_suspended_integrator_denied if {
+	suspended_integrator := object.union(with_integrator, {integrator: object.union(with_integrator[integrator], {"active": false})})
+	deny_reason_with(delegated_for([bd, hv, integrator]), suspended_integrator) == "PARTY_NOT_ACTIVE"
+}
+
+test_delegated_connection_by_unknown_integrator_denied if {
+	deny_reason(delegated_for([bd, hv, integrator])) == "PARTY_NOT_IN_REGISTRY"
+}
+
+# A mandate does not stand in for the provider's own admission.
+test_delegated_connection_for_suspended_provider_denied if {
+	for_suspended := object.union(with_integrator, {integrator: object.union(with_integrator[integrator], {"acts_for": [{"peer_id": suspended, "rules": ["DVT0001"]}]})})
+	deny_reason_with(delegated_for([bd, suspended, integrator]), for_suspended) == "PARTY_NOT_ACTIVE"
+}
+
+# Without grant data the direction is not visible here; the request policy
+# judges it per call. What admission can refuse is a third counterparty.
+test_delegated_connection_with_extra_party_denied if {
+	deny_reason_with(delegated_for([bd, hv, edi, integrator]), with_integrator) == "DELEGATION_NOT_REGISTERED"
+}
+
+test_delegated_service_publication_denied if {
+	not is_allowed(contract_input(sort([bd, hv]), [4]))
 }
 
 test_mixed_grant_types_denied if {

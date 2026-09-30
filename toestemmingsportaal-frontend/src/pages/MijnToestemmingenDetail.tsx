@@ -104,7 +104,6 @@ export default function MijnToestemmingenDetail() {
                 { label: 'Toestemmings-ID', value: <code className="mono">{consent.consent_id}</code> },
                 { label: 'Onderwerp', value: deriveOnderwerp(consent.scopes) },
                 { label: 'Doel', value: deriveDoel(consent.use_case) },
-                { label: 'Integrator', value: '—' },
                 { label: 'Geldig tot', value: formatGeldigTot(consent.valid_until) },
               ]}
             />

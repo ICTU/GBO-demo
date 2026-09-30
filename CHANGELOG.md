@@ -7,6 +7,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Added
+- **Integrator acting for a service provider.** An integrator peer
+  (`…1100`, `int-*`) queries BD on behalf of Hypotheek-BV over an FSC
+  DelegatedServiceConnection grant, and `integrator-backend` (port 9423) asks
+  the income question through it. See [docs/integrator.md](docs/integrator.md),
+  which also records the answers to the five questions in the issue.
+  - The policy separates the two roles. The consent binds the represented
+    party (the FSC delegator, else `subject.id`). The connecting peer needs a
+    mandate for that party and rule, or the call is denied with
+    `INTEGRATOR_NOT_REGISTERED`.
+  - The DvTP onboarding register takes `integrations` (integrator, service
+    provider, rules) and feeds them to OpenFTV as `acts_for`.
+  - Contract autosign admits a `delegatedServiceConnection` when one
+    counterparty is registered as acting for the other. Otherwise the
+    contract is refused with `DELEGATION_NOT_REGISTERED`.
+  - Opt-in: the demo keeps the direct path by default. `make demo-integrator`,
+    run after `demo-dvtp` or `demo-full`, adds the integrator's peer (compose
+    profile `integrator`), seeds the three-party contract (`make
+    fsc-seed-int`) and starts `integrator-backend`.
 - **LVG / Installatie Register.** The pilot's DvTP flow in the demo: the
   Installatie Register asks the citizen in MijnOverheid for consent to check
   at LVG whether a building is theirs, and asks LVG over FSC with the consent
@@ -77,6 +95,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- The local FSC Postgres allows 300 connections instead of 100. Every peer's
+  Controller, Manager and txlog pool shares that one server, and the tenth
+  peer (the integrator) ran it out.
 - **A source defines each claim once.** An attestation's `mapping`,
   `attribute_schema` and `type_metadata` are replaced by `display` and one
   `claims` object, where each claim carries its `gbo-simple-v1` rule as
@@ -376,6 +397,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   the ICTU GitHub policy.
 
 ### Removed
+- The consent detail page no longer shows an "Integrator" field. The DvTP
+  requirements no longer ask to tell the citizen about the integrator.
 - **`sector-pip` is gone (#378).** It served sector membership to the old
   token issuer and PEP; admission now runs through `dvtp-onboarding-register`
   and the PDP's contract decision, and nothing called the service any more.
