@@ -4,16 +4,16 @@
   "disclaimer": "Demo-stand-in voor een Register van Verwerkingsactiviteiten. Dit is GEEN RvVA: de inhoud is afgeleid van de scope-definities in de dienstencatalogus en van de infrastructurele verwerkingen in de keten, en heeft geen enkele juridische status. Het bestaat om de LDV-eis 'elk record verwijst naar een oplosbare, geversioneerde verwerkingsactiviteit' waar te kunnen maken en om het ontbreken van een echt register zichtbaar te houden. De base_uri is een demo-hostnaam: hij maakt de verwijzing een geldige URI zoals de standaard eist (§3.2.2.9), maar er staat niets achter.",
   "activities": [
     {
-      "id": "bd-pi-bsn-resolutie",
+      "id": "bd-identiteit-ontsleuteling",
       "version": "v1",
-      "name": "Depseudonimisatie polymorfe identiteit naar BSN",
+      "name": "Ontsleuteling van de versleutelde identiteit naar BSN",
       "doel": "Een binnenkomende bronbevraging van een DvTP-afnemer koppelen aan de juiste ingeschreven persoon, zonder dat het BSN buiten de bronhouder komt.",
       "grondslag": "Noodzakelijk voor de uitvoering van de wettelijke taak van de Belastingdienst; de verstrekking zelf berust op toestemming van de betrokkene.",
       "categorieen_betrokkenen": [
         "Belastingplichtigen met een aangifte inkomstenbelasting"
       ],
       "categorieen_persoonsgegevens": [
-        "Polymorfe identiteit (PI)",
+        "Versleutelde identiteit uit het toestemmingsbewijs",
         "Burgerservicenummer"
       ]
     },
@@ -27,7 +27,7 @@
         "Belastingplichtigen met een aangifte inkomstenbelasting"
       ],
       "categorieen_persoonsgegevens": [
-        "Polymorfe identiteit (PI)",
+        "Versleutelde identiteit uit het toestemmingsbewijs",
         "Gevraagde belastingjaren"
       ],
       "ontvangers": [

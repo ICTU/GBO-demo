@@ -2,36 +2,25 @@ package legacy
 
 import "testing"
 
-func TestAPIResolvesToTheBSNItWasMadeFor(t *testing.T) {
-	s := NewStore()
-	pi, pseudonym := s.Pseudonymize("987654321", "99999999900000000200")
-	if pi == "" || pseudonym == "" || pi == pseudonym {
-		t.Fatalf("pi %q, pseudonym %q", pi, pseudonym)
-	}
-	if bsn, ok := s.Resolve(pi); !ok || bsn != "987654321" {
-		t.Errorf("Resolve = %q, %v; want the BSN", bsn, ok)
-	}
-	if _, ok := s.Resolve("PI-0000000000000000"); ok {
-		t.Error("a PI the store never made resolved")
-	}
-}
+func TestAPseudonymIsPerCitizenAndPerRecipient(t *testing.T) {
+	const portal, other = "00000000000000000002", "99999999900000000300"
 
-func TestThePIIsPerBSNAndThePseudonymPerRecipient(t *testing.T) {
-	s := NewStore()
-	pi1, ps1 := s.Pseudonymize("987654321", "99999999900000000200")
-	pi2, ps2 := s.Pseudonymize("987654321", "99999999900000000300")
-	if pi1 != pi2 {
-		t.Error("one BSN gave two PIs")
+	first, again := Pseudonym("987654321", portal), Pseudonym("987654321", portal)
+	if first != again {
+		t.Error("one citizen got two pseudonyms at one recipient")
 	}
-	if ps1 == ps2 {
+	if Pseudonym("987654321", portal) == Pseudonym("987654321", other) {
 		t.Error("two recipients got the same pseudonym")
 	}
+	if Pseudonym("987654321", portal) == Pseudonym("123456789", portal) {
+		t.Error("two citizens got the same pseudonym")
+	}
 }
 
-// A PI made for the demo BSN before a restart still resolves after it.
-func TestAFreshStoreKnowsTheDemoBSN(t *testing.T) {
-	pi, _ := NewStore().Pseudonymize(demoBSN, "99999999900000000200")
-	if bsn, ok := NewStore().Resolve(pi); !ok || bsn != demoBSN {
-		t.Errorf("Resolve on a fresh store = %q, %v", bsn, ok)
+// The portal's reference to a citizen is stored with every consent, so the
+// value may not change under it.
+func TestThePseudonymIsStable(t *testing.T) {
+	if got := Pseudonym("123456789", "00000000000000000002"); got != "EP-c44cade392924e3b" {
+		t.Errorf("pseudonym = %s, want EP-c44cade392924e3b", got)
 	}
 }

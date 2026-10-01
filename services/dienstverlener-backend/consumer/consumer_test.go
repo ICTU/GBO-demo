@@ -45,7 +45,7 @@ func (h *fakeHistory) Observe(_ context.Context, run Run) { h.runs = append(h.ru
 
 func token(consentID string, scopes ...string) string {
 	encode := base64.RawURLEncoding.EncodeToString
-	payload, _ := json.Marshal(map[string]any{"consent_id": consentID, "pi": "PI-abc123", "scopes": scopes})
+	payload, _ := json.Marshal(map[string]any{"consent_id": consentID, "scopes": scopes})
 	return encode([]byte(`{"alg":"none"}`)) + "." + encode(payload) + ".sig"
 }
 
@@ -83,7 +83,7 @@ func inwayDeny(code string) string {
 
 // The consumer reads the token only to build the question, sends the token on
 // untouched for the PDP to verify, and passes the source's answer back.
-func TestAnIncomeQuestionIsAskedWithTheConsentsPI(t *testing.T) {
+func TestAnIncomeQuestionNamesTheSubjectWithThePlaceholder(t *testing.T) {
 	source := answering(`{"data":{"ingeschrevenPersoon":{}}}`)
 	c := &Consumer{Kind: Kinds["bd"], Source: source}
 	tok := token("c-1", "bd:ib:2024", "bd:ib:2025")
@@ -94,8 +94,8 @@ func TestAnIncomeQuestionIsAskedWithTheConsentsPI(t *testing.T) {
 	if q.ConsentToken != tok {
 		t.Error("the consent token was not forwarded untouched")
 	}
-	if q.Variables["bsn"] != "PI-abc123" {
-		t.Errorf("variables = %v, want the consent's PI as bsn", q.Variables)
+	if q.Variables["bsn"] != SubjectPlaceholder {
+		t.Errorf("variables = %v, want the placeholder as bsn", q.Variables)
 	}
 	// The year filter travels inside the query, so the PDP can enforce
 	// per-year consent.
@@ -172,8 +172,8 @@ func TestTheKindsDefaultScopeIsUsedWhenNoneIsNamed(t *testing.T) {
 // ── the ownership question ─────────────────────────────────────────────────
 
 // The Installatie Register asks LVG whether the citizen of the consent owns one
-// verblijfsobject: the PI and the VBO-id travel as variables, under the LVG
-// scope.
+// verblijfsobject: the placeholder and the VBO-id travel as variables, under
+// the LVG scope.
 func TestAnOwnershipQuestionNamesTheCitizenAndTheBuilding(t *testing.T) {
 	source := answering(`{"data":{"vbo":{"vboId":"0632010000099412"}}}`)
 	c := &Consumer{Kind: Kinds["lvg"], Source: source}
@@ -184,8 +184,8 @@ func TestAnOwnershipQuestionNamesTheCitizenAndTheBuilding(t *testing.T) {
 	if !strings.Contains(q.Query, "vbo(bsn: $bsn, vboId: $vboId)") {
 		t.Errorf("query = %q, want the ownership check", q.Query)
 	}
-	if q.Variables["bsn"] != "PI-abc123" || q.Variables["vboId"] != "0632010000099412" {
-		t.Errorf("variables = %v, want the consent's PI and the trimmed VBO-id", q.Variables)
+	if q.Variables["bsn"] != SubjectPlaceholder || q.Variables["vboId"] != "0632010000099412" {
+		t.Errorf("variables = %v, want the placeholder and the trimmed VBO-id", q.Variables)
 	}
 	if q.Scope != "lvg:vbo:eigendom" {
 		t.Errorf("scope = %q, want the LVG scope by default", q.Scope)
@@ -267,8 +267,8 @@ func TestACallIsLoggedUnderThePositionTheSourceReceives(t *testing.T) {
 	if p.At != logbook.at || p.Activity != Kinds["bd"].Activity || p.Name != Kinds["bd"].RecordName {
 		t.Errorf("processing = %+v, want the bd activity at the minted position", p)
 	}
-	if p.Subject != "PI-abc123" || p.Scope != "bd:ib:2025" || p.Failed {
-		t.Errorf("processing = %+v, want the PI, the scope and success", p)
+	if p.Subject != "c-1" || p.Scope != "bd:ib:2025" || p.Failed {
+		t.Errorf("processing = %+v, want the consent id, the scope and success", p)
 	}
 }
 
@@ -297,7 +297,7 @@ func TestAnUnloggedCallWithholdsTheAnswer(t *testing.T) {
 	history := &fakeHistory{}
 	c := &Consumer{
 		Kind:    Kinds["bd"],
-		Source:  answering(`{"data":{"ingeschrevenPersoon":{"bsn":"PI-abc123"}}}`),
+		Source:  answering(`{"data":{"ingeschrevenPersoon":{"bsn":"999991772"}}}`),
 		Logbook: &fakeLogbook{refuse: true},
 		History: history,
 	}

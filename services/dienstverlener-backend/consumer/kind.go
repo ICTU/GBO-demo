@@ -83,15 +83,15 @@ func buildIncomeQuery(req Request, claims consentClaims) (builtQuery, error) {
 	}
 	return builtQuery{
 		query:       buildQuery(queryable, req.Fields),
-		variables:   map[string]any{"bsn": claims.PI},
+		variables:   map[string]any{"bsn": SubjectPlaceholder},
 		deniedYears: deniedYears,
 	}, nil
 }
 
 // buildOwnershipQuery is the Installatie Register's question: does the
 // citizen of this consent own this verblijfsobject? LVG answers with the same
-// VBO-id or null. The PI goes in $bsn like every DvTP query; lvg-sidecar
-// resolves it.
+// VBO-id or null. The placeholder goes in $bsn like every DvTP query; the
+// sidecar at LVG puts the citizen of the consent in its place.
 func buildOwnershipQuery(req Request, claims consentClaims) (builtQuery, error) {
 	vboID := strings.TrimSpace(req.VboID)
 	if vboID == "" {
@@ -99,7 +99,7 @@ func buildOwnershipQuery(req Request, claims consentClaims) (builtQuery, error) 
 	}
 	return builtQuery{
 		query:     `query($bsn: BSN!, $vboId: String!) { vbo(bsn: $bsn, vboId: $vboId) { vboId } }`,
-		variables: map[string]any{"bsn": claims.PI, "vboId": vboID},
+		variables: map[string]any{"bsn": SubjectPlaceholder, "vboId": vboID},
 	}, nil
 }
 
@@ -137,11 +137,12 @@ func intersectYears(requested, consented []int) (allowed, denied []int) {
 }
 
 // buildQuery renders the GraphQL query against the BD bron-schema. The
-// query uses `bsn` as its argument, but the actual value passed in the
-// variable is a PI. This matches the EUDI shape exactly. The sidecar at
-// the source resolves PI→BSN (subject_id_type=pseudonym), so the source
-// always sees a BSN. The `$bsn` variable name is kept explicit so the PDP
-// AST-parser picks it up as the bsn argument.
+// query uses `bsn` as its argument, but the value passed in the variable is
+// the placeholder for the subject of the consent. The query has the EUDI
+// shape exactly. After the PDP's allow, the sidecar at the source replaces
+// the placeholder with the BSN it decrypts from the consent token, so the
+// source always sees a BSN. The `$bsn` variable name is kept explicit so the
+// PDP AST-parser picks it up as the bsn argument.
 //
 // The belastingjaren filter travels INSIDE the query: the bron returns
 // all aangiften for a person, so per-year consent is only enforceable by

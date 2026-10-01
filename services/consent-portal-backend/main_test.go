@@ -18,25 +18,22 @@ import (
 	"gbo-demo/consent-portal-backend/portalhttp"
 )
 
+// testSource is the source the portal under test gives consent for.
+const testSource = "99999999900000000200"
+
 // Happy-path integration test: login -> give consent -> list consents.
-// The bsnk-mock and consent-register downstreams are stubbed with two
+// The BSNk and consent-register downstreams are stubbed with two
 // httptest.Servers; the portal itself is wired through newMux.
 func TestPortalGiveThenList(t *testing.T) {
-	// Stub bsnk-mock: /pseudonymize returns deterministic pseudonym + pi.
-	bsnk := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/pseudonymize" {
-			t.Errorf("bsnk path = %q, want /pseudonymize", r.URL.Path)
-		}
-		_, _ = io.ReadAll(r.Body)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"pseudonym":"EP-abc","pi":"PI-xyz"}`))
-	}))
+	var transformed map[string]any
+	bsnk := stubBSNk(t, &transformed)
 	defer bsnk.Close()
 
 	// Stub consent-register: POST creates a token; GET lists by subject_ref.
 	var (
-		regMu   sync.Mutex
-		created []map[string]any
+		regMu    sync.Mutex
+		created  []map[string]any
+		received map[string]any
 	)
 	register := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -44,7 +41,10 @@ func TestPortalGiveThenList(t *testing.T) {
 		case r.Method == http.MethodPost && r.URL.Path == "/consents":
 			var body map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&body)
-			delete(body, "pi") // transient signing input is not persisted
+			regMu.Lock()
+			received, _ = body["encrypted_subject"].(map[string]any)
+			regMu.Unlock()
+			delete(body, "encrypted_subject") // transient signing input is not persisted
 			body["consent_id"] = "c-1"
 			body["status"] = "ACTIVE"
 			regMu.Lock()
@@ -73,6 +73,7 @@ func TestPortalGiveThenList(t *testing.T) {
 		Port:       "0",
 		BSNkURL:    bsnk.URL,
 		ConsentURL: register.URL,
+		Sources:    []consent.Party{{OIN: testSource, KeySetVersion: 20260101}},
 	}
 	srv := httptest.NewServer(newMux(cfg, portalhttp.NewHub(), nil))
 	defer srv.Close()
@@ -133,10 +134,15 @@ func TestPortalGiveThenList(t *testing.T) {
 	if give.ConsentToken != "signed-consent-token" {
 		t.Errorf("consent_token = %q", give.ConsentToken)
 	}
-	// The dev-portal renders one card per upstream call: recipient pseudonym,
+	// The dev-portal renders one card per upstream call: activate, transform,
 	// portal subject reference, then create. Guards against the call log quietly
 	// gaining or losing entries.
 	assertPrivateAPICalls(t, give.APICalls)
+
+	assertIdentityRequestedForTheSource(t, transformed)
+	regMu.Lock()
+	assertRegisterGotTheSourcesValue(t, received)
+	regMu.Unlock()
 	// The register must never have seen the plain BSN.
 	regMu.Lock()
 	sent, _ := json.Marshal(created)
@@ -172,12 +178,56 @@ func TestPortalGiveThenList(t *testing.T) {
 	}
 }
 
+// stubBSNk stands in for BSNk: activate gives the polymorphic values,
+// transform a value per party, and /pseudonymize the portal's own reference.
+// The transform request is kept in transformed.
+func stubBSNk(t *testing.T, transformed *map[string]any) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v2/activate":
+			_, _ = w.Write([]byte(`{"PolymorphicPseudonym":["signed-PI","signed-PP"]}`))
+		case "/v2/transform":
+			_ = json.NewDecoder(r.Body).Decode(transformed)
+			_, _ = w.Write([]byte(`{"Encrypted":[{"EntityID":"` + testSource + `","KeySetVersion":20260101,"IdentifierType":"Identity","value":"signed-VI"}]}`))
+		case "/pseudonymize":
+			_, _ = w.Write([]byte(`{"pseudonym":"EP-abc"}`))
+		default:
+			t.Errorf("unexpected BSNk call: %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+// BSNk was asked for an identity for the source, from the polymorphic
+// identity it had just made for the portal.
+func assertIdentityRequestedForTheSource(t *testing.T, transformed map[string]any) {
+	t.Helper()
+	parties, _ := transformed["RelyingParty"].([]any)
+	if transformed["Requester"] != portalOIN || transformed["PolymorphicIdentity"] != "signed-PI" || len(parties) != 1 {
+		t.Fatalf("transform request = %+v", transformed)
+	}
+	if party := parties[0].(map[string]any); party["EntityID"] != testSource || party["IdentifierType"] != "Identity" || party["KeySetVersion"] != float64(20260101) {
+		t.Errorf("relying party = %+v", party)
+	}
+}
+
+// The register got the value BSNk made, keyed by the party it is for.
+func assertRegisterGotTheSourcesValue(t *testing.T, received map[string]any) {
+	t.Helper()
+	value, _ := received[testSource].(map[string]any)
+	if value["value"] != "signed-VI" || value["identifier_type"] != "Identity" || value["key_set_version"] != float64(20260101) {
+		t.Errorf("encrypted_subject sent to the register = %+v", received)
+	}
+}
+
 func assertPrivateAPICalls(t *testing.T, calls []consent.APICall) {
 	t.Helper()
-	if len(calls) != 3 {
-		t.Fatalf("api_calls = %d, want 3: %+v", len(calls), calls)
+	if len(calls) != 4 {
+		t.Fatalf("api_calls = %d, want 4: %+v", len(calls), calls)
 	}
-	for i, want := range []string{"Pseudonymize BSN", "Pseudonymize BSN", "Create Consent"} {
+	for i, want := range []string{"Activate BSN", "Transform for the sources", "Pseudonymize BSN", "Create Consent"} {
 		if calls[i].Label != want {
 			t.Errorf("api_calls[%d].Label = %q, want %q", i, calls[i].Label, want)
 		}
@@ -228,7 +278,7 @@ func TestSSEStreamsThroughAccessLog(t *testing.T) {
 		hub.Observe(context.Background(), consent.Event{
 			Step:      "pseudonymizing",
 			Component: "bsnk-mock",
-			Data:      map[string]any{"oin": "DV"},
+			Data:      map[string]any{"recipients": []string{testSource}},
 		})
 	}()
 	for {
@@ -238,6 +288,31 @@ func TestSSEStreamsThroughAccessLog(t *testing.T) {
 		}
 		if strings.Contains(l, "pseudonymizing") {
 			return // delivered
+		}
+	}
+}
+
+func TestParseSources(t *testing.T) {
+	got, err := parseSources(" 99999999900000000200@20260101 , 99999999900000000210@20260314 ")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	want := []consent.Party{
+		{OIN: "99999999900000000200", KeySetVersion: 20260101},
+		{OIN: "99999999900000000210", KeySetVersion: 20260314},
+	}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("sources = %+v, want %+v", got, want)
+	}
+
+	for name, value := range map[string]string{
+		"none":                  "",
+		"no version":            "99999999900000000200",
+		"no OIN":                "belastingdienst@20260101",
+		"version is not a date": "99999999900000000200@1",
+	} {
+		if _, err := parseSources(value); err == nil {
+			t.Errorf("%s: %q was accepted", name, value)
 		}
 	}
 }

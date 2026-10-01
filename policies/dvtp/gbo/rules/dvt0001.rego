@@ -10,7 +10,8 @@ package dvtp.gbo.rules.dvt0001
 # Semantics: this rule grants a service provider (= consumer) access to
 # income-data fields IF a valid citizen consent exists for (consumer,
 # scope, fields), the consent is not withdrawn or expired, and the query
-# carries the subject PI from that same signed consent context.
+# names its subject with the placeholder, so that the subject can only be the
+# one that signed consent carries.
 
 rule_id := "DVT0001"
 
@@ -62,14 +63,14 @@ spec := {
 	# field we do not explicitly include → the engine's closed-world
 	# default denies with NO_APPLICABLE_RULE. No separate field-axis
 	# in lib anymore.
-	# The query supplies PI in the bsn-arg (the service provider holds
-	# PI via BSNk); the verified consent token fills pip.consent.pi.
-	# Binding: the pseudonym in the query must match the pseudonym in
-	# the fetched consent — proving that this query is executed for this
-	# consent, not a different consent from the same consumer.
+	# The query names its subject with the placeholder in the bsn-arg: the
+	# service provider holds no identifier of the citizen. The subject is
+	# the one the verified consent token carries, and the source puts its
+	# own decrypted value in place after this allow. A literal value here
+	# would be a subject the caller chose, so it is denied.
 	"constraint_binding": [{
 		"arg": "bsn",
-		"resource_field": "pi",
+		"resource_field": "subject",
 	}],
 	# Per-year consent: every belastingjaar in the query's belastingjaren
 	# filter must be covered by a bd:ib:<year> scope in the consent. A

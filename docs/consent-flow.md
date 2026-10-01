@@ -51,10 +51,13 @@ flowchart LR
     Source --> ConsumerBE
 ```
 
-Het consent-register bewaart geen PI. De PI staat alleen in het ondertekende
-consent-token en wordt tijdens het aanmaken daarvan kortstondig verwerkt. Voor
-burgergerichte listing en ownership gebruikt het register een afzonderlijke,
-portaalgebonden `subject_ref`.
+Het consent-token noemt de burger alleen in een versleutelde identiteit per
+bron: een waarde die BSNk voor het OIN van die bron maakt en die alleen die
+bron kan ontsleutelen. De dienstverlener krijgt geen identificator van de
+burger. Het consent-register bewaart die waarden niet; ze worden tijdens het
+aanmaken van het token kortstondig verwerkt. Voor burgergerichte listing en
+ownership gebruikt het register een afzonderlijke, portaalgebonden
+`subject_ref`.
 
 ## 1. Toestemming verlenen
 
@@ -72,13 +75,15 @@ sequenceDiagram
     UI->>Portal: Vraag toestemming voor OIN en scopes
     Citizen->>Portal: Log in en bevestig toestemming
 
-    Portal->>BSNk: Pseudonimiseer BSN voor dienstverlener
-    BSNk-->>Portal: PI voor gegevensuitwisseling
+    Portal->>BSNk: Activeer BSN
+    BSNk-->>Portal: Polymorfe identiteit, alleen bruikbaar voor het portaal
+    Portal->>BSNk: Transformeer voor de bronnen van deze toestemming
+    BSNk-->>Portal: Versleutelde identiteit per bron
     Portal->>BSNk: Pseudonimiseer BSN voor portaal
     BSNk-->>Portal: Portaalgebonden subject_ref
 
-    Portal->>Register: Maak consent met PI, subject_ref, OIN en scopes
-    Register->>DB: Bewaar consent zonder PI
+    Portal->>Register: Maak consent met waarde per bron, subject_ref, OIN en scopes
+    Register->>DB: Bewaar consent zonder de waarden per bron
     Register->>Register: Onderteken ES256 consent-token
     Register-->>Portal: Consent-id en consent-token
 
@@ -89,7 +94,9 @@ sequenceDiagram
 Het token bevat de bindings waarop de PDP later beslist:
 
 - `consent_id` en `jti`;
-- PI, scopes en optionele veldselecties;
+- `encrypted_subject`: per bron het OIN, de sleutelversie en de versleutelde
+  identiteit;
+- scopes en optionele veldselecties;
 - `dienstverlener_oin`;
 - issuer, audience en geldigheid via `iat`, `nbf`, `exp` en `valid_until`.
 
@@ -118,10 +125,12 @@ sequenceDiagram
     participant MAP as "OpenFTV mapper"
     participant Register as "Consent-register S01"
     participant POL as "Rego-policy DVT0001"
+    participant SC as "Sidecar bij de bron"
+    participant DEC as "Decryptiecomponent van de bron"
     participant SRC as "Gegevensbron"
 
     UI->>BE: Verstuur consent-token en gegevensvraag
-    BE->>BE: Lees PI en scopes voor GraphQL-aanvraag
+    BE->>BE: Lees scopes, zet de plaatshouder als subject
     Note right of BE: Dit is geen verificatie
 
     BE->>OUT: GraphQL met consent-token en scope
@@ -138,11 +147,14 @@ sequenceDiagram
     POL->>Register: Controleer status van exact consent-id (http.send, zonder cache)
     Register-->>POL: ACTIVE, REVOKED of niet gevonden
 
-    POL->>POL: Controleer actor, PI, scope en geldigheid
+    POL->>POL: Controleer actor, plaatshouder, scope en geldigheid
 
     alt Alle controles slagen
         POL-->>IN: ALLOW
-        IN->>SRC: Voer GraphQL-aanvraag uit
+        IN->>SC: Stuur de aanvraag door, met consent-token
+        SC->>DEC: Ontsleutel de waarde voor deze bron, met de eigen sleutels
+        DEC-->>SC: BSN
+        SC->>SRC: GraphQL-aanvraag met het BSN op de plek van de plaatshouder
         SRC-->>IN: Gegevens
         IN-->>BE: Gegevens
         BE-->>UI: Toon resultaat
@@ -170,10 +182,19 @@ geldige ondertekening en geregistreerde claims
 + consent bestaat, is ACTIVE en is nog geldig
 + FSC-delegator (anders subject.id) == dienstverlener_oin uit het token
 + bij delegatie: integrator gemandateerd voor die dienstverlener en regel
-+ PI in de GraphQL-query == PI uit het token
++ het subject in de GraphQL-query is de plaatshouder `consent:subject`
 + scope, jaren en velden vallen binnen het consent
 = ALLOW
 ```
+
+De dienstverlener noemt het subject met de plaatshouder en niet met een eigen
+waarde: het subject kan zo alleen de burger van het geverifieerde consent
+zijn. Pas na de `ALLOW` zet de sidecar bij de bron het BSN op de plek van de
+plaatshouder. De bron ontsleutelt daarvoor zelf de waarde die het token voor
+haar OIN draagt, met sleutels die ze vooraf heeft gekregen en zonder BSNk aan
+te roepen. Een waarde die voor een andere partij is gemaakt, accepteert de
+bron niet. Een aanvraag zonder consent-token (de EUDI-route) gaat ongewijzigd
+door.
 
 Ontbrekende, ongeldige of niet-beschikbare context faalt gesloten met een
 gerichte reden, zoals `CONSENT_SIGNATURE_INVALID`, `CONSENT_TOKEN_EXPIRED`,

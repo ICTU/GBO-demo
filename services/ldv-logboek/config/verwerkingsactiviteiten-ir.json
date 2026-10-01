@@ -13,7 +13,7 @@
         "Eigenaren van een pand met geregistreerde installaties"
       ],
       "categorieen_persoonsgegevens": [
-        "Polymorfe identiteit (PI) voor de afnemer",
+        "Verwijzing naar de toestemming (geen identificator van de betrokkene)",
         "VBO-id van het pand"
       ],
       "ontvangers": [

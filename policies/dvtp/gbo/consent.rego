@@ -177,11 +177,16 @@ _audience_matches if {
 }
 
 _required_claims_present if {
-	every name in ["consent_id", "pi", "dienstverlener_oin", "valid_until", "jti"] {
+	every name in ["consent_id", "dienstverlener_oin", "valid_until", "jti"] {
 		is_string(_claims[name])
 		_claims[name] != ""
 	}
 	is_array(_claims.scopes)
+
+	# The subject, as an encrypted value per party. The policy does not read
+	# the values; a token without any could never be answered by a source.
+	is_object(_claims.encrypted_subject)
+	count(_claims.encrypted_subject) > 0
 	every name in ["iat", "nbf", "exp"] {
 		is_number(_claims[name])
 	}
@@ -309,7 +314,6 @@ resolved := {
 	"withdrawn": _status.withdrawn,
 	"granted_scopes": _claims.scopes,
 	"valid_until": _claims.valid_until,
-	"pi": _claims.pi,
 	"dienstverlener_oin": _claims.dienstverlener_oin,
 	"consent_id": _claims.consent_id,
 	"jti": _claims.jti,

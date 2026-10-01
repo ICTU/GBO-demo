@@ -19,12 +19,16 @@ import (
 	"time"
 )
 
-// fakePI mirrors bsnk-mock: the PI is a hash of the BSN, so it does not embed
-// the BSN itself. Deriving it as "PI-"+bsn would make the leak test vacuous.
-func fakePI(bsn BSN) PI {
-	sum := sha256.Sum256([]byte("test-salt|" + string(bsn)))
-	return PI("PI-" + hex.EncodeToString(sum[:8]))
+// fakeValue stands in for what BSNk makes for one party: a hash of the BSN and
+// the party, so it does not embed the BSN itself. Deriving it as the BSN plus
+// the OIN would make the leak test vacuous.
+func fakeValue(bsn BSN, party Party) string {
+	sum := sha256.Sum256([]byte("value|" + string(bsn) + "|" + party.OIN))
+	return "VI-" + hex.EncodeToString(sum[:8])
 }
+
+// testSource is the one source the test portal gives consent for.
+var testSource = Party{OIN: "00000000000000000200", KeySetVersion: 20260101}
 
 func fakeSubjectRef(bsn BSN, recipientOIN string) SubjectRef {
 	sum := sha256.Sum256([]byte("subject-ref|" + string(bsn) + "|" + recipientOIN))
@@ -37,28 +41,40 @@ const testPortalOIN = "00000000000000000002"
 
 // ── Fakes ─────────────────────────────────────────────────────────────────
 
-type fakePseudo struct {
-	err       error
-	gotBSN    []BSN
-	gotOIN    []string
-	mu        sync.Mutex
-	pseudonym string
+// fakeBSNk is both of BSNk's ports: it makes a value per party and derives
+// the portal's own reference.
+type fakeBSNk struct {
+	err        error
+	gotBSN     []BSN
+	gotOIN     []string
+	gotParties [][]Party
+	mu         sync.Mutex
 }
 
-func (f *fakePseudo) Pseudonymize(_ context.Context, bsn BSN, recipientOIN string) (Pseudonyms, error) {
+func (f *fakeBSNk) EncryptFor(_ context.Context, bsn BSN, parties []Party) ([]EncryptedSubject, error) {
+	f.mu.Lock()
+	f.gotBSN = append(f.gotBSN, bsn)
+	f.gotParties = append(f.gotParties, parties)
+	f.mu.Unlock()
+	if f.err != nil {
+		return nil, f.err
+	}
+	subjects := make([]EncryptedSubject, len(parties))
+	for i, party := range parties {
+		subjects[i] = EncryptedSubject{Party: party, IdentifierType: "Identity", Value: fakeValue(bsn, party)}
+	}
+	return subjects, nil
+}
+
+func (f *fakeBSNk) Pseudonymize(_ context.Context, bsn BSN, recipientOIN string) (string, error) {
 	f.mu.Lock()
 	f.gotBSN = append(f.gotBSN, bsn)
 	f.gotOIN = append(f.gotOIN, recipientOIN)
 	f.mu.Unlock()
 	if f.err != nil {
-		return Pseudonyms{}, f.err
+		return "", f.err
 	}
-	p := f.pseudonym
-	if p == "" {
-		p = string(fakeSubjectRef(bsn, recipientOIN))
-	}
-	// PI is deterministic per BSN and independent of the recipient.
-	return Pseudonyms{Pseudonym: p, PI: fakePI(bsn)}, nil
+	return string(fakeSubjectRef(bsn, recipientOIN)), nil
 }
 
 type memStore struct {
@@ -143,15 +159,17 @@ func (r *recorder) Observe(_ context.Context, e Event) {
 	r.mu.Unlock()
 }
 
-func testPortal(t *testing.T, watch Observer) (*Portal, *fakePseudo, *memStore) {
+func testPortal(t *testing.T, watch Observer) (*Portal, *fakeBSNk, *memStore) {
 	t.Helper()
-	bsnk := &fakePseudo{}
+	bsnk := &fakeBSNk{}
 	store := newMemStore()
 	return &Portal{
+		Identities: bsnk,
 		Pseudonyms: bsnk,
 		Consents:   store,
 		Watch:      watch,
 		OwnOIN:     testPortalOIN,
+		Sources:    []Party{testSource},
 	}, bsnk, store
 }
 
@@ -272,9 +290,9 @@ func TestListIsolatesByCitizen(t *testing.T) {
 
 // ── The privacy invariant ─────────────────────────────────────────────────
 
-// The register receives PI only as transient signing material and receives a
-// portal-scoped pseudonym as its persistent subject. Plain BSN must never
-// cross the port.
+// The register receives the value per source only as transient signing
+// material and receives a portal-scoped pseudonym as its persistent subject.
+// Plain BSN must never cross the port.
 func TestBSNNeverReachesTheRegister(t *testing.T) {
 	p, bsnk, store := testPortal(t, nil)
 	const bsn = "987654321"
@@ -296,8 +314,9 @@ func TestBSNNeverReachesTheRegister(t *testing.T) {
 	if strings.Contains(string(payload), bsn) {
 		t.Fatalf("BSN leaked to the consent register: %s", payload)
 	}
-	if store.created[0].PI != fakePI(BSN(bsn)) {
-		t.Errorf("transient PI = %q, want derived PI", store.created[0].PI)
+	want := EncryptedSubject{Party: testSource, IdentifierType: "Identity", Value: fakeValue(BSN(bsn), testSource)}
+	if got := store.created[0].Subjects; len(got) != 1 || got[0] != want {
+		t.Errorf("subjects = %+v, want the value BSNk made for the source", got)
 	}
 	if store.created[0].SubjectRef != fakeSubjectRef(BSN(bsn), testPortalOIN) {
 		t.Errorf("subject_ref = %q, want portal-scoped pseudonym", store.created[0].SubjectRef)
@@ -309,9 +328,10 @@ func TestBSNNeverReachesTheRegister(t *testing.T) {
 	}
 }
 
-// Pseudonymisation must use the dienstverlener as recipient when granting,
-// and the portal's own OIN for the persistent subject reference.
-func TestRecipientOINPerFlow(t *testing.T) {
+// A value is made for the sources, and for nobody else: the service provider
+// gets no identifier of the citizen. The portal's own reference is scoped to
+// its own OIN.
+func TestValuesAreMadeForTheSourcesOnly(t *testing.T) {
 	p, bsnk, _ := testPortal(t, nil)
 	ctx := context.Background()
 
@@ -321,8 +341,25 @@ func TestRecipientOINPerFlow(t *testing.T) {
 	if _, err := p.ListConsents(ctx, BSN("111111111")); err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if got := bsnk.gotOIN; len(got) != 3 || got[0] != "DV-OIN" || got[1] != testPortalOIN || got[2] != testPortalOIN {
-		t.Errorf("recipient OINs = %v, want [DV-OIN %s %s]", got, testPortalOIN, testPortalOIN)
+	if got := bsnk.gotParties; len(got) != 1 || len(got[0]) != 1 || got[0][0] != testSource {
+		t.Errorf("BSNk made values for %v, want the source alone", got)
+	}
+	if got := bsnk.gotOIN; len(got) != 2 || got[0] != testPortalOIN || got[1] != testPortalOIN {
+		t.Errorf("pseudonym recipients = %v, want the portal itself, twice", got)
+	}
+}
+
+// BSNk makes a value only while the citizen is present, so a consent is not
+// given when there is no source to make one for.
+func TestGiveConsentNeedsASource(t *testing.T) {
+	p, bsnk, store := testPortal(t, nil)
+	p.Sources = nil
+
+	if _, err := p.GiveConsent(context.Background(), BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"}); err == nil {
+		t.Fatal("want an error when no source is configured")
+	}
+	if len(bsnk.gotBSN) != 0 || len(store.created) != 0 {
+		t.Errorf("BSNk saw %v and %d consents were registered", bsnk.gotBSN, len(store.created))
 	}
 }
 
@@ -408,7 +445,7 @@ func TestGiveConsentFailsWhenPseudonymizerFails(t *testing.T) {
 	if _, err := p.GiveConsent(context.Background(), BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"}); err == nil {
 		t.Fatal("want an error when BSNk fails")
 	}
-	// Nothing may be registered when we could not derive a PI.
+	// Nothing may be registered when BSNk made no value for the sources.
 	if len(store.created) != 0 {
 		t.Fatalf("registered %d consents despite BSNk failure", len(store.created))
 	}

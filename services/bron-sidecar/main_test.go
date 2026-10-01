@@ -1,8 +1,8 @@
 package main
 
 import (
-	"encoding/base64"
 	"encoding/json"
+	ldv "gbo-demo/ldv-client"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,43 +11,29 @@ import (
 	"time"
 )
 
-func TestGrantPropsReadTheCountersignedClaim(t *testing.T) {
-	payload, err := json.Marshal(map[string]any{
-		"prp": map[string]any{"subject_id_type": "pseudonym"},
-	})
+// mustMux builds the sidecar's routing tree, failing the test when its keys
+// cannot be read.
+func mustMux(t *testing.T, cfg config, client *http.Client, logbook *ldv.Client) *http.ServeMux {
+	t.Helper()
+	mux, err := newMux(cfg, client, logbook)
 	if err != nil {
-		t.Fatalf("marshal token payload: %v", err)
+		t.Fatalf("newMux: %v", err)
 	}
-	token := "header." + base64.RawURLEncoding.EncodeToString(payload) + ".signature"
-
-	properties := grantPropertiesFromAuth("Bearer " + token)
-	if properties["subject_id_type"] != "pseudonym" {
-		t.Fatalf("subject_id_type = %v, want pseudonym", properties["subject_id_type"])
-	}
+	return mux
 }
 
-// `add` is the retired OpenFSC Additional Claims hook: only the provider
-// Manager signed it, so honouring it would let an unilateral value decide
-// whether the source sees a BSN. Ignoring it degrades to `direct`.
-func TestGrantPropsIgnoreRetiredAddClaim(t *testing.T) {
-	payload, err := json.Marshal(map[string]any{
-		"add": map[string]any{"subject_id_type": "pseudonym"},
-	})
-	if err != nil {
-		t.Fatalf("marshal token payload: %v", err)
-	}
-	token := "header." + base64.RawURLEncoding.EncodeToString(payload) + ".signature"
+// Without a consent token the request is forwarded unchanged: the GraphQL
+// body goes to the upstream source verbatim and nothing is decrypted. The
+// stub upstream captures what it received so we can assert pass-through
+// fidelity.
+func TestWithoutAConsentTokenTheRequestIsForwardedUnchanged(t *testing.T) {
+	decryptions := 0
+	component := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		decryptions++
+		http.Error(w, "not expected", http.StatusInternalServerError)
+	}))
+	defer component.Close()
 
-	if properties := grantPropertiesFromAuth("Bearer " + token); properties != nil {
-		t.Fatalf("properties = %v, want nil", properties)
-	}
-}
-
-// Happy-path integration test for the sidecar's `direct` flow: no
-// grant property → default to `direct` → forward the GraphQL body verbatim
-// to the upstream source (BSNk not touched). The stub upstream captures
-// what it received so we can assert pass-through fidelity.
-func TestForwardDirectPassThrough(t *testing.T) {
 	var receivedBody string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
@@ -61,12 +47,12 @@ func TestForwardDirectPassThrough(t *testing.T) {
 	cfg := config{
 		Port:          "0",
 		UpstreamURL:   upstream.URL,
-		BSNkURL:       "http://unused.invalid",
+		DecryptionURL: component.URL,
 		OwnPeerOIN:    "99999999900000000200",
 		PseudonymVars: "bsn",
 	}
 	client := &http.Client{Timeout: 5 * time.Second}
-	srv := httptest.NewServer(newMux(cfg, client, nil))
+	srv := httptest.NewServer(mustMux(t, cfg, client, nil))
 	defer srv.Close()
 
 	reqBody := `{"query":"query($bsn: BSN!) { ingeschrevenPersoon(bsn: $bsn) { heeftBelastingjaarAangifte { belastingjaar } } }","variables":{"bsn":"123456789"}}`
@@ -80,9 +66,12 @@ func TestForwardDirectPassThrough(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body=%s", resp.StatusCode, body)
 	}
 
-	// The `direct` path forwards the body verbatim — no rewrite.
+	// No consent token, so the body is forwarded verbatim — no rewrite.
 	if receivedBody != reqBody {
 		t.Fatalf("upstream body mismatch:\n got: %s\nwant: %s", receivedBody, reqBody)
+	}
+	if decryptions != 0 {
+		t.Fatalf("the decryption component was called %d times without a consent token", decryptions)
 	}
 
 	var out struct {
@@ -103,8 +92,8 @@ func TestForwardDirectPassThrough(t *testing.T) {
 }
 
 func TestHealth(t *testing.T) {
-	cfg := config{UpstreamURL: "http://unused.invalid", BSNkURL: "http://unused.invalid", PseudonymVars: "bsn"}
-	srv := httptest.NewServer(newMux(cfg, &http.Client{Timeout: time.Second}, nil))
+	cfg := config{UpstreamURL: "http://unused.invalid", DecryptionURL: "http://unused.invalid", PseudonymVars: "bsn"}
+	srv := httptest.NewServer(mustMux(t, cfg, &http.Client{Timeout: time.Second}, nil))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/health")
@@ -131,11 +120,11 @@ func TestForwardOverFSCWithoutALogbook(t *testing.T) {
 	cfg := config{
 		Port:          "0",
 		UpstreamURL:   upstream.URL,
-		BSNkURL:       "http://unused.invalid",
+		DecryptionURL: "http://unused.invalid",
 		OwnPeerOIN:    "99999999900000000200",
 		PseudonymVars: "bsn",
 	}
-	srv := httptest.NewServer(newMux(cfg, &http.Client{Timeout: 5 * time.Second}, nil))
+	srv := httptest.NewServer(mustMux(t, cfg, &http.Client{Timeout: 5 * time.Second}, nil))
 	defer srv.Close()
 
 	body := `{"query":"query($bsn: BSN!) { ingeschrevenPersoon(bsn: $bsn) { burgerservicenummer } }","variables":{"bsn":"123456789"}}`
@@ -156,5 +145,14 @@ func TestForwardOverFSCWithoutALogbook(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		out, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status = %d, want 200; body=%s", resp.StatusCode, out)
+	}
+}
+
+// A source that is told where its keys are does not start without them: it
+// would otherwise pass the placeholder on to the source.
+func TestASourceDoesNotStartWithoutTheKeysItWasPointedAt(t *testing.T) {
+	cfg := config{UpstreamURL: "http://unused.invalid", PseudonymVars: "bsn", SubjectKeysDir: t.TempDir()}
+	if _, err := newMux(cfg, &http.Client{Timeout: time.Second}, nil); err == nil {
+		t.Fatal("newMux accepted a key directory without keys")
 	}
 }

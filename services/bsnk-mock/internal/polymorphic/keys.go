@@ -26,10 +26,12 @@ const (
 	EIKeyWithout = "WITHOUT_EI_DECRYPTION_KEY"
 )
 
-// Key file headers. The label and the headers are those of a real key file,
-// so that a component that reads the one reads the other.
+// Key file headers. The headers are those of a real key file, so that a
+// component that reads the one reads the other. The label is not: a real key
+// file is labelled EC PRIVATE KEY, and a mock key file holds no key. Its own
+// label says so, to a reader and to a secret scanner alike.
 const (
-	keyFileLabel          = "EC PRIVATE KEY"
+	keyFileLabel          = "BSNK MOCK DV KEY"
 	headerSchemeVersion   = "SchemeVersion"
 	headerSchemeKeySet    = "SchemeKeySetVersion"
 	headerSchemeKeySetOld = "SchemeKeyVersion"

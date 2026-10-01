@@ -13,21 +13,36 @@ import (
 	"time"
 )
 
-// BSN is a plain citizen identifier. It may cross exactly one port:
-// Pseudonymizer. No Store method accepts a BSN, so handing one to the consent
-// register is a compile error rather than something a reviewer has to catch.
-// That is the whole privacy promise of this service, in the type system.
+// BSN is a plain citizen identifier. It may cross the two ports that talk to
+// BSNk, Identities and Pseudonymizer, and no other. No Store method accepts a
+// BSN, so handing one to the consent register is a compile error rather than
+// something a reviewer has to catch. That is the whole privacy promise of
+// this service, in the type system.
 type BSN string
 
-// PI is the recipient-independent pseudonymous identity BSNk derives from a
-// BSN. The consent register only sees it transiently while signing the authorization context;
-// it is never part of the persisted consent record.
-type PI string
-
-// SubjectRef is a pseudonym scoped to the consent portal. The consent register may persist it
-// for citizen listing and ownership checks; unlike PI it cannot be reused by
+// SubjectRef is a pseudonym scoped to the consent portal. The consent register
+// may persist it for citizen listing and ownership checks; it means nothing to
 // a service provider or source holder.
 type SubjectRef string
+
+// Party is one recipient of the citizen's identity under a consent: a source
+// that answers the service provider's question. BSNk makes a value for one
+// party, identified by its OIN, and for one version of that party's keys.
+type Party struct {
+	OIN           string
+	KeySetVersion int
+}
+
+// EncryptedSubject is the citizen as one party may read them. Only that party
+// can decrypt the value, and the portal cannot: it is what goes into the
+// consent token in place of any identifier.
+type EncryptedSubject struct {
+	Party Party
+	// IdentifierType says what the value decrypts to, in BSNk's own words:
+	// "Identity" is the BSN.
+	IdentifierType string
+	Value          string
+}
 
 // Status is the consent status as the citizen experiences it, derived from
 // the register's own status plus the clock.
@@ -60,11 +75,11 @@ type ScopeEntry struct {
 	ConsentedFields []string `json:"consented_fields"`
 }
 
-// Draft is a consent about to be registered. PI is transient token material;
-// SubjectRef is the only persisted subject. There is deliberately no field
-// that would accept a BSN.
+// Draft is a consent about to be registered. Subjects is transient token
+// material; SubjectRef is the only persisted subject. There is deliberately no
+// field that would accept a BSN.
 type Draft struct {
-	PI                PI
+	Subjects          []EncryptedSubject
 	SubjectRef        SubjectRef
 	DienstverlenerOIN string
 	Scopes            []string
