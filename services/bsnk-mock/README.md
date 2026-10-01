@@ -206,8 +206,9 @@ may receive the BSN. `ProvideEIDecryptionKey` changes that:
 `EI_DECRYPTION_KEY_EXPECTED` refuses the request when the party may not,
 `WITHOUT_EI_DECRYPTION_KEY` leaves the key out.
 
-A key file is a PEM block labelled `EC PRIVATE KEY`, with the headers of a
-real key file:
+A key file is a PEM block with the headers of a real key file. A real one is
+labelled `EC PRIVATE KEY`; the mock's is labelled `BSNK MOCK DV KEY`, because
+it holds no key and should not be taken for one:
 
 ```text
 Recipient: 99999999900000000200

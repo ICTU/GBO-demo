@@ -153,7 +153,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     identity is `identiteit-ontsleuteling` (was `pi-bsn-resolutie`) and points
     to no other logbook.
   - **`bsnk-mock`.** `/transform` is removed and `/pseudonymize` returns a
-    pseudonym only.
+    pseudonym only. Its key files are labelled `BSNK MOCK DV KEY` instead of
+    `EC PRIVATE KEY`: they hold no key, and the old label made secret
+    scanners report them as private keys.
   - **Developer portal.** The use chain shows the source's decryption
     component in place of BSNk.
 - The local FSC Postgres allows 300 connections instead of 100. Every peer's

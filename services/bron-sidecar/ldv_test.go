@@ -25,7 +25,7 @@ const (
 	demoBSN = "123456789"
 	ownOIN  = "99999999900000000200"
 	// A key file of this source, as the key request hands it over.
-	keyFile = "-----BEGIN EC PRIVATE KEY-----\nRecipient: " + ownOIN + "\nType: EI Decryption\n\nbm8ga2V5IG1hdGVyaWFs\n-----END EC PRIVATE KEY-----\n"
+	keyFile = "-----BEGIN BSNK MOCK DV KEY-----\nRecipient: " + ownOIN + "\nType: EI Decryption\n\nbm8ga2V5IG1hdGVyaWFs\n-----END BSNK MOCK DV KEY-----\n"
 	// The query a consent-based consumer sends: the subject is the placeholder.
 	consentQuery = `{"query":"query($bsn: BSN!){ingeschrevenPersoon(bsn:$bsn){bsn}}","variables":{"bsn":"` + substitution.Placeholder + `"}}`
 )

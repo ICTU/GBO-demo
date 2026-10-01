@@ -12,7 +12,8 @@ every value.
 
 They come from `bsnk-mock` (`POST /v2/provide-dv-keys` and
 `GET /v2/scheme-keys`) and hold no key material: a key of the mock is its
-headers. A real source gets its key files from BSNk through a broker, keeps
+headers, and its label is `BSNK MOCK DV KEY`, not that of a private key. Real
+key files are secrets and never belong in this repository. A real source gets its key files from BSNk through a broker, keeps
 them itself, and keeps the files of an earlier key set version for as long as
 consent tokens made for it are valid.
 
