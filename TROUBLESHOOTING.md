@@ -73,9 +73,8 @@ request, not about a missing grant property.
 
 The bron-sidecar follows the same evidence: with a consent token it puts the
 citizen of that consent in the place of the placeholder, and without one it
-passes the request through. It reads no grant property. The seeds still put
-`subject_id_type` in `prp`; nothing acts on it. Decode the token to see what
-the provider Manager actually issued:
+passes the request through. It reads no grant property, and the seeds set
+none. Decode the token to see what the provider Manager actually issued:
 
 ```bash
 docker compose logs --no-log-prefix openftv-pdp | grep -o 'Bearer [A-Za-z0-9._-]*' | tail -1 \
@@ -84,11 +83,11 @@ docker compose logs --no-log-prefix openftv-pdp | grep -o 'Bearer [A-Za-z0-9._-]
 ```
 
 An empty or missing `prp` means the connection contract carries no grant
-properties. That is expected for the metadata services, which need none.
-Contracts predating the move of `subject_id_type` from the retired
-`additional-claims-service` back into the grant are such contracts.
-Re-run the seed — it detects the property mismatch, creates a new contract
-(contracts are immutable) and repoints the grant-link.
+properties, which is what the seeds create. A `prp` with `subject_id_type`
+comes from a contract seeded before that property was dropped. It does no
+harm, since nothing reads it. Re-run the seed to clear it: it detects the
+property mismatch, creates a new contract (contracts are immutable) and
+repoints the grant-link.
 
 Each seed target repairs only its own grants, so repair the whole demo at
 once — the order matters, `fsc-seed-bri-hv` needs the `bri` publication the

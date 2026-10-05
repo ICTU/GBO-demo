@@ -51,26 +51,23 @@ PROVIDER_CONTROLLER_URL="${PROVIDER_CONTROLLER_URL:-https://bd-controller:9444}"
 PROVIDER_MANAGER_URL="${PROVIDER_MANAGER_URL:-https://bd-manager:9443}"
 CONSUMER_MANAGER_URL="${CONSUMER_MANAGER_URL:-https://edi-manager:9443}"          # manager int
 
-# Service endpoint — the bron-sidecar reads the grant property
-# subject_id_type and substitutes PI -> BSN if needed; direct mode is
-# pass-through to the bron. For the demo always via a sidecar.
+# Service endpoint. For the demo always via a bron-sidecar: with a consent
+# token on the request it puts the citizen in the place of the placeholder,
+# without one it passes the request through to the bron.
 SERVICE_ENDPOINT_URL="${SERVICE_ENDPOINT_URL:-http://bron-sidecar:4011}"
 SERVICE_INWAY_ADDRESS="${SERVICE_INWAY_ADDRESS:-https://bd-inway:443}"
 
 # Grant properties (fsc-core §Properties) on the service-connection grant.
-# They are part of the grant hash, so both peers countersign the regime the
-# consumer is judged under, and the provider Manager emits them in the access
-# token as the `prp` claim. One consumer reads them from there:
-#   subject_id_type — 'pseudonym' makes the bron-sidecar substitute PI -> BSN,
-#                     'direct' passes the query through unchanged
+# They are part of the grant hash, so both peers countersign them, and the
+# provider Manager emits them in the access token as the `prp` claim.
 #
-# `flow` used to sit here too. It is gone (#334): the authorization regime is
-# derived from the evidence on the request, so nothing needs it declared.
-# subject_id_type stays, because identifier format is not derivable without
-# guessing at it.
+# No grant carries any today. `flow` went first (#334): the authorization
+# regime follows from the evidence on the request. `subject_id_type` followed
+# (#473): the bron-sidecar takes the subject from the consent token, not from
+# a declared identifier format. The parameter stays for properties to come.
 # Requires OpenFSC >= v2.0.0 on every peer on the contract; the demo pins
 # v2.4.0 (fsc-infra/docker-compose.yml).
-default_grant_properties='{"subject_id_type": "direct"}'
+default_grant_properties='{}'
 GRANT_PROPERTIES="${GRANT_PROPERTIES:-$default_grant_properties}"
 if ! jq -e 'type == "object"' >/dev/null 2>&1 <<<"$GRANT_PROPERTIES"; then
   echo "GRANT_PROPERTIES must be a JSON object, got: $GRANT_PROPERTIES" >&2
@@ -213,13 +210,13 @@ existing_conn=$(mtls_curl "$CONSUMER_CERT" "$CONSUMER_KEY" "$CONSUMER_CA" \
   "$CONSUMER_MANAGER_URL/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=$SERVICE_NAME" \
   || echo '{}')
 
-# Contracts are immutable, so a changed regime means a NEW contract (new iv),
+# Contracts are immutable, so changed properties mean a NEW contract (new iv),
 # not an update. Matching on the properties as well as on the service
 # therefore does double duty: it keeps the seed idempotent, and it re-seeds by
-# itself when the desired properties changed — as they did when flow and
-# subject_id_type moved out of the additional-claims mapping and back into the
-# grant. The superseded contract stays Valid but unused: step 4 repoints the
-# grant-link at the new grant hash. `make fsc-clean` removes the old one.
+# itself when the desired properties changed — as they did when
+# subject_id_type was dropped from the grant. The superseded contract stays
+# Valid but unused: step 4 repoints the grant-link at the new grant hash.
+# `make fsc-clean` removes the old one.
 if echo "$existing_conn" | jq -e --arg svc "$SERVICE_NAME" --arg provider "$PROVIDER_PEER_ID" --argjson properties "$GRANT_PROPERTIES" \
    '.contracts[]? | select(.state == "CONTRACT_STATE_VALID") | select(.content.grants[0].service.name == $svc and .content.grants[0].service.peer_id == $provider) | select((.content.grants[0].properties // {}) == $properties)' >/dev/null 2>&1; then
   echo "  → connection contract already Valid, skipping"
@@ -307,7 +304,7 @@ fi
 # Selecting on state as well, so a revoked contract cannot supply the hash
 # and write a dead grant-link that fails at routing time instead of here.
 # Selecting on the properties too, so a contract superseded by a property
-# change cannot keep the grant-link pointing at the previous regime.
+# change cannot keep the grant-link pointing at the previous properties.
 new_hash=$(mtls_curl "$CONSUMER_CERT" "$CONSUMER_KEY" "$CONSUMER_CA" \
   "${CONSUMER_MANAGER_URL}/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=${SERVICE_NAME}" \
   | jq -r --arg svc "$SERVICE_NAME" --arg provider "$PROVIDER_PEER_ID" --argjson properties "$GRANT_PROPERTIES" \

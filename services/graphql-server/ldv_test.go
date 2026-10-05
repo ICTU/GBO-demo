@@ -70,8 +70,8 @@ func TestSourceQueryLogsUnderTheSidecarsTraceAndSubject(t *testing.T) {
 	response := queryYear(t, url, map[string]string{
 		// §3.1: the trace arrives on the standard traceparent.
 		"traceparent":           "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
-		ldv.HeaderSubjectID:     "PI-abc123",
-		ldv.HeaderSubjectIDType: ldv.SubjectTypePI,
+		ldv.HeaderSubjectID:     "LP-abc123",
+		ldv.HeaderSubjectIDType: ldv.SubjectTypePseudonym,
 		"X-GBO-Scope":           "bd:ib:2025",
 	}, singleYearQuery)
 	if response.StatusCode != http.StatusOK {
@@ -92,8 +92,8 @@ func TestSourceQueryLogsUnderTheSidecarsTraceAndSubject(t *testing.T) {
 	if record.SpanID == record.ParentSpanID {
 		t.Error("a record must have its own span id")
 	}
-	if got := record.Attributes[ldv.AttrDataSubjectID]; got != "PI-abc123" {
-		t.Errorf("data_subject_id = %v, want the PI the sidecar passed on", got)
+	if got := record.Attributes[ldv.AttrDataSubjectID]; got != "LP-abc123" {
+		t.Errorf("data_subject_id = %v, want the pseudonym the sidecar passed on", got)
 	}
 	// The scope the consumer was authorized for selects the register entry
 	// generated from that same scope definition.

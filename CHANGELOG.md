@@ -490,6 +490,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   moved to `services/dev-portal-backend/organizations.json`, which is now also
   baked into the backend image, so `ORGANIZATIONS_FILE` defaults to
   `/organizations.json`.
+- **The `subject_id_type` grant property is gone (#473).** Nothing read it
+  since `bron-sidecar` takes the subject from the consent token. The seeds
+  create service-connection grants without properties (`GRANT_PROPERTIES`
+  defaults to `{}`). Re-running a seed on an existing demo creates a new
+  contract and repoints the grant-link. The logbook no longer accepts the
+  `pi` subject type, which no component wrote, and `ldv-client` drops
+  `SubjectTypePI`.
 
 ### Fixed
 - **The toestemmingsportaal loads again.** Dependabot moved `react` to

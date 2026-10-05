@@ -1,14 +1,12 @@
 #!/usr/bin/env bash
-# Connection contract HV -> BD for the bri-service with DvTP grant
-# properties. The publication contract (BD -> Directory) is unchanged — one
-# publication per service, multiple connections (per consumer).
+# Connection contract HV -> BD for the bri-service. The publication contract
+# (BD -> Directory) is unchanged — one publication per service, multiple
+# connections (per consumer).
 #
-# Grant properties:
-#   subject_id_type: pseudonym (sidecar substitutes PI -> BSN)
-#
-# No `flow`: the authorization regime follows from the evidence a request
-# carries — a verified consent token here — not from a declared property
-# (#334).
+# No grant properties: the authorization regime follows from the evidence a
+# request carries — a verified consent token here — not from a declared
+# property (#334), and the bron-sidecar takes the subject from that same
+# token (#473).
 #
 # Idempotent: skipped if the connection is Valid and the grant-link is
 # set.
@@ -38,7 +36,7 @@ HV_CA="$HV_INTERNAL_DIR/intermediate_ca.pem"
 # Grant properties (fsc-core §Properties). Part of the grant hash, so both
 # peers countersign them, and the provider Manager emits them in the access
 # token as the `prp` claim. See seed-bri-contract.sh for the full rationale.
-default_grant_properties='{"subject_id_type": "pseudonym"}'
+default_grant_properties='{}'
 GRANT_PROPERTIES="${GRANT_PROPERTIES:-$default_grant_properties}"
 if ! jq -e 'type == "object"' >/dev/null 2>&1 <<<"$GRANT_PROPERTIES"; then
   echo "GRANT_PROPERTIES must be a JSON object, got: $GRANT_PROPERTIES" >&2
@@ -69,7 +67,7 @@ existing=$(mtls_curl "$HV_CERT" "$HV_KEY" "$HV_CA" \
 
 # The Manager's ?service_name= filter is not honoured (see
 # seed-bri-contract.sh) — match the service name client-side. Matching the
-# properties too re-seeds automatically when the regime changed; contracts are
+# properties too re-seeds automatically when they changed; contracts are
 # immutable, so that is a new contract rather than an update.
 if echo "$existing" | jq -e --arg svc "$SERVICE_NAME" --argjson properties "$GRANT_PROPERTIES" \
    '.contracts[]? | select(.state == "CONTRACT_STATE_VALID") | select(.content.grants[0].service.name == $svc) | select((.content.grants[0].properties // {}) == $properties)' >/dev/null 2>&1; then
@@ -166,5 +164,4 @@ echo "  ✓ grant-link $OUTWAY_NAME $GRANT_LINK_PATH → ${new_hash:0:22}..."
 
 echo ""
 echo "HV -> BD contract-seed done. Dienstverlener-backend can POST"
-echo "to http://hv-outway:8080$GRANT_LINK_PATH (subject_id_type=pseudonym ->"
-echo "sidecar substitutes PI -> BSN)."
+echo "to http://hv-outway:8080$GRANT_LINK_PATH."
