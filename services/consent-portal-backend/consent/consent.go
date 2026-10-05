@@ -13,17 +13,30 @@ import (
 	"time"
 )
 
-// BSN is a plain citizen identifier. It may cross the two ports that talk to
-// BSNk, Identities and Pseudonymizer, and no other. No Store method accepts a
-// BSN, so handing one to the consent register is a compile error rather than
-// something a reviewer has to catch. That is the whole privacy promise of
-// this service, in the type system.
+// BSN is a plain citizen identifier. It may cross one port, Identities.Activate,
+// and no other; the portal also derives its own reference from it
+// (SubjectRefs). No Store method accepts a BSN, so handing one to the consent
+// register is a compile error rather than something a reviewer has to catch.
+// That is the whole privacy promise of this service, in the type system.
 type BSN string
 
-// SubjectRef is a pseudonym scoped to the consent portal. The consent register
-// may persist it for citizen listing and ownership checks; it means nothing to
-// a service provider or source holder.
+// SubjectRef is the portal's own reference to a citizen (see SubjectRefs).
+// The consent register may persist it for citizen listing and ownership
+// checks; it means nothing to a service provider or source holder.
 type SubjectRef string
+
+// Polymorphic is what BSNk returns when the portal activates a citizen: the
+// polymorphic identity (PI) and the polymorphic pseudonym (PP). Only the
+// portal can use them, and only by having BSNk transform them for a party.
+// The core does not look inside them.
+//
+// They are kept under the portal's reference to the citizen, so that the
+// portal activates a citizen once, at their first consent, and only
+// transforms after that.
+type Polymorphic struct {
+	PI string
+	PP string
+}
 
 // Party is one recipient of the citizen's identity under a consent: a source
 // that answers the service provider's question. BSNk makes a value for one

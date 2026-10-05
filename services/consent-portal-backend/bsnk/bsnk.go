@@ -20,7 +20,7 @@ import (
 // identifierIdentity is BSNk's name for a value that decrypts to the BSN.
 const identifierIdentity = "Identity"
 
-// Client implements consent.Identities and consent.Pseudonymizer over HTTP.
+// Client implements consent.Identities over HTTP.
 type Client struct {
 	Base   string
 	Caller upstream.Caller
@@ -54,10 +54,9 @@ type relyingParty struct {
 	IdentifierType string `json:"IdentifierType"`
 }
 
-// EncryptFor activates the BSN and has BSNk transform the polymorphic
-// identity into an encrypted identity per party. The polymorphic identity is
-// usable by the portal alone and does not outlive this call.
-func (c Client) EncryptFor(ctx context.Context, bsn consent.BSN, parties []consent.Party) ([]consent.EncryptedSubject, error) {
+// Activate turns a BSN into the polymorphic identity and pseudonym BSNk makes
+// for the portal.
+func (c Client) Activate(ctx context.Context, bsn consent.BSN) (consent.Polymorphic, error) {
 	var activated struct {
 		// PolymorphicPseudonym holds the polymorphic identity and the
 		// polymorphic pseudonym, in that order.
@@ -68,12 +67,17 @@ func (c Client) EncryptFor(ctx context.Context, bsn consent.BSN, parties []conse
 		RequesterKeySetVersion int    `json:"RequesterKeySetVersion"`
 		BSN                    string `json:"BSN"`
 	}{c.newRequest(), c.RequesterKeySetVersion, string(bsn)}, &activated); err != nil {
-		return nil, fmt.Errorf("activate: %w", err)
+		return consent.Polymorphic{}, err
 	}
 	if len(activated.PolymorphicPseudonym) != 2 {
-		return nil, fmt.Errorf("activate: got %d polymorphic values, want an identity and a pseudonym", len(activated.PolymorphicPseudonym))
+		return consent.Polymorphic{}, fmt.Errorf("got %d polymorphic values, want an identity and a pseudonym", len(activated.PolymorphicPseudonym))
 	}
+	return consent.Polymorphic{PI: activated.PolymorphicPseudonym[0], PP: activated.PolymorphicPseudonym[1]}, nil
+}
 
+// Transform has BSNk make an encrypted identity per party from the portal's
+// polymorphic identity.
+func (c Client) Transform(ctx context.Context, values consent.Polymorphic, parties []consent.Party) ([]consent.EncryptedSubject, error) {
 	relyingParties := make([]relyingParty, len(parties))
 	for i, party := range parties {
 		relyingParties[i] = relyingParty{EntityID: party.OIN, KeySetVersion: party.KeySetVersion, IdentifierType: identifierIdentity}
@@ -90,11 +94,11 @@ func (c Client) EncryptFor(ctx context.Context, bsn consent.BSN, parties []conse
 		request
 		PolymorphicIdentity string         `json:"PolymorphicIdentity"`
 		RelyingParty        []relyingParty `json:"RelyingParty"`
-	}{c.newRequest(), activated.PolymorphicPseudonym[0], relyingParties}, &transformed); err != nil {
-		return nil, fmt.Errorf("transform: %w", err)
+	}{c.newRequest(), values.PI, relyingParties}, &transformed); err != nil {
+		return nil, err
 	}
 	if len(transformed.Encrypted) != len(parties) {
-		return nil, fmt.Errorf("transform: got %d values for %d parties", len(transformed.Encrypted), len(parties))
+		return nil, fmt.Errorf("got %d values for %d parties", len(transformed.Encrypted), len(parties))
 	}
 
 	subjects := make([]consent.EncryptedSubject, len(transformed.Encrypted))
@@ -106,17 +110,4 @@ func (c Client) EncryptFor(ctx context.Context, bsn consent.BSN, parties []conse
 		}
 	}
 	return subjects, nil
-}
-
-// Pseudonymize derives the portal's own reference to a citizen.
-func (c Client) Pseudonymize(ctx context.Context, bsn consent.BSN, recipientOIN string) (string, error) {
-	var out struct {
-		Pseudonym string `json:"pseudonym"`
-	}
-	_, err := c.Caller.DoPrivate(ctx, "Pseudonymize BSN", http.MethodPost, c.Base+"/pseudonymize",
-		map[string]any{"bsn": string(bsn), "recipient_oin": recipientOIN}, &out)
-	if err != nil {
-		return "", err
-	}
-	return out.Pseudonym, nil
 }

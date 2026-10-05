@@ -151,7 +151,6 @@ func TestTheDecryptionComponentAloneServesNothingOfBSNk(t *testing.T) {
 		"/v2/activate":               http.StatusNotFound,
 		"/v2/transform":              http.StatusNotFound,
 		"/v2/provide-dv-keys":        http.StatusNotFound,
-		"/pseudonymize":              http.StatusNotFound,
 		"/transform":                 http.StatusNotFound,
 	} {
 		method := http.MethodPost

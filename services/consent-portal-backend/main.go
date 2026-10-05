@@ -54,8 +54,7 @@ import (
 )
 
 // portalOIN is the portal's own OIN. BSNk makes the polymorphic values for it
-// when a citizen gives consent, and the portal's own reference to a citizen
-// (listing, ownership checks) is a pseudonym scoped to it.
+// when it activates a citizen.
 const portalOIN = "00000000000000000002" // mock-portal OIN
 
 // portalKeySetVersion is the version of the portal's own keys at BSNk.
@@ -104,12 +103,28 @@ type config struct {
 	// Sources are the parties a consent token carries an encrypted identity
 	// for: each source's OIN and the version of its keys.
 	Sources []consent.Party
+	// SubjectRefKey is the secret the portal derives its reference to a
+	// citizen with, and SubjectRefKeyVersion names it.
+	SubjectRefKey        []byte
+	SubjectRefKeyVersion string
 }
+
+var subjectRefKeyVersion = regexp.MustCompile(`^[0-9A-Za-z]{1,16}$`)
 
 func loadConfig() (config, error) {
 	sources, err := parseSources(os.Getenv("CONSENT_SOURCES"))
 	if err != nil {
 		return config{}, fmt.Errorf("CONSENT_SOURCES: %w", err)
+	}
+	// Without the key every reference could be recomputed from a list of
+	// BSNs, so the portal does not start without one.
+	key := os.Getenv("SUBJECT_REF_KEY")
+	if len(key) < 32 {
+		return config{}, errors.New("SUBJECT_REF_KEY: a secret of at least 32 characters is required")
+	}
+	version := getEnv("SUBJECT_REF_KEY_VERSION", "1")
+	if !subjectRefKeyVersion.MatchString(version) {
+		return config{}, fmt.Errorf("SUBJECT_REF_KEY_VERSION: %q is not 1 to 16 letters and digits", version)
 	}
 	return config{
 		Port:              getEnv("PORT", "4005"),
@@ -120,6 +135,9 @@ func loadConfig() (config, error) {
 		LogbookToken:      getEnv("LDV_WRITE_TOKEN", ""),
 		PseudonymsLogbook: getEnv("LDV_BSNK_NEXT_LOGBOOK_ID", ""),
 		Sources:           sources,
+
+		SubjectRefKey:        []byte(key),
+		SubjectRefKeyVersion: version,
 	}, nil
 }
 
@@ -185,11 +203,10 @@ func newPortal(cfg config, hub *portalhttp.Hub, logbook consent.Logbook) *consen
 	}
 	return &consent.Portal{
 		Identities:        bsnkClient,
-		Pseudonyms:        bsnkClient,
+		SubjectRefs:       consent.SubjectRefs{Key: cfg.SubjectRefKey, Version: cfg.SubjectRefKeyVersion},
 		Consents:          register.Client{Base: cfg.ConsentURL, Caller: caller},
 		Watch:             watchers,
 		Logbook:           logbook,
-		OwnOIN:            portalOIN,
 		Sources:           cfg.Sources,
 		PseudonymsLogbook: cfg.PseudonymsLogbook,
 	}

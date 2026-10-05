@@ -21,6 +21,9 @@ import (
 // testSource is the source the portal under test gives consent for.
 const testSource = "99999999900000000200"
 
+// testSubjectRefKey is the portal's secret for its references in these tests.
+const testSubjectRefKey = "test-subject-ref-key-of-32-bytes!"
+
 // Happy-path integration test: login -> give consent -> list consents.
 // The BSNk and consent-register downstreams are stubbed with two
 // httptest.Servers; the portal itself is wired through newMux.
@@ -31,9 +34,10 @@ func TestPortalGiveThenList(t *testing.T) {
 
 	// Stub consent-register: POST creates a token; GET lists by subject_ref.
 	var (
-		regMu    sync.Mutex
-		created  []map[string]any
-		received map[string]any
+		regMu       sync.Mutex
+		created     []map[string]any
+		received    map[string]any
+		polymorphic = map[string]string{}
 	)
 	register := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -51,6 +55,21 @@ func TestPortalGiveThenList(t *testing.T) {
 			created = append(created, body)
 			regMu.Unlock()
 			_, _ = w.Write([]byte(`{"consent_id":"c-1","consent_token":"signed-consent-token"}`))
+		case strings.HasPrefix(r.URL.Path, "/subjects/") && strings.HasSuffix(r.URL.Path, "/polymorphic"):
+			regMu.Lock()
+			defer regMu.Unlock()
+			if r.Method == http.MethodPut {
+				body, _ := io.ReadAll(r.Body)
+				polymorphic[r.URL.Path] = string(body)
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			kept, ok := polymorphic[r.URL.Path]
+			if !ok {
+				http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+				return
+			}
+			_, _ = w.Write([]byte(kept))
 		case r.Method == http.MethodGet && r.URL.Path == "/consents":
 			subjectRef := r.URL.Query().Get("subject_ref")
 			regMu.Lock()
@@ -74,6 +93,9 @@ func TestPortalGiveThenList(t *testing.T) {
 		BSNkURL:    bsnk.URL,
 		ConsentURL: register.URL,
 		Sources:    []consent.Party{{OIN: testSource, KeySetVersion: 20260101}},
+
+		SubjectRefKey:        []byte(testSubjectRefKey),
+		SubjectRefKeyVersion: "1",
 	}
 	srv := httptest.NewServer(newMux(cfg, portalhttp.NewHub(), nil))
 	defer srv.Close()
@@ -134,10 +156,11 @@ func TestPortalGiveThenList(t *testing.T) {
 	if give.ConsentToken != "signed-consent-token" {
 		t.Errorf("consent_token = %q", give.ConsentToken)
 	}
-	// The dev-portal renders one card per upstream call: activate, transform,
-	// portal subject reference, then create. Guards against the call log quietly
-	// gaining or losing entries.
-	assertPrivateAPICalls(t, give.APICalls)
+	// The dev-portal renders one card per upstream call. A first consent
+	// finds no kept values, activates, keeps them, transforms and creates.
+	// Guards against the call log quietly gaining or losing entries.
+	assertPrivateAPICalls(t, give.APICalls,
+		"Find polymorphic values", "Activate BSN", "Keep polymorphic values", "Transform for the sources", "Create Consent")
 
 	assertIdentityRequestedForTheSource(t, transformed)
 	regMu.Lock()
@@ -178,8 +201,8 @@ func TestPortalGiveThenList(t *testing.T) {
 	}
 }
 
-// stubBSNk stands in for BSNk: activate gives the polymorphic values,
-// transform a value per party, and /pseudonymize the portal's own reference.
+// stubBSNk stands in for BSNk: activate gives the polymorphic values and
+// transform a value per party.
 // The transform request is kept in transformed.
 func stubBSNk(t *testing.T, transformed *map[string]any) *httptest.Server {
 	t.Helper()
@@ -191,8 +214,6 @@ func stubBSNk(t *testing.T, transformed *map[string]any) *httptest.Server {
 		case "/v2/transform":
 			_ = json.NewDecoder(r.Body).Decode(transformed)
 			_, _ = w.Write([]byte(`{"Encrypted":[{"EntityID":"` + testSource + `","KeySetVersion":20260101,"IdentifierType":"Identity","value":"signed-VI"}]}`))
-		case "/pseudonymize":
-			_, _ = w.Write([]byte(`{"pseudonym":"EP-abc"}`))
 		default:
 			t.Errorf("unexpected BSNk call: %s", r.URL.Path)
 			http.NotFound(w, r)
@@ -222,17 +243,19 @@ func assertRegisterGotTheSourcesValue(t *testing.T, received map[string]any) {
 	}
 }
 
-func assertPrivateAPICalls(t *testing.T, calls []consent.APICall) {
+func assertPrivateAPICalls(t *testing.T, calls []consent.APICall, labels ...string) {
 	t.Helper()
-	if len(calls) != 4 {
-		t.Fatalf("api_calls = %d, want 4: %+v", len(calls), calls)
+	if len(calls) != len(labels) {
+		t.Fatalf("api_calls = %d, want %d: %+v", len(calls), len(labels), calls)
 	}
-	for i, want := range []string{"Activate BSN", "Transform for the sources", "Pseudonymize BSN", "Create Consent"} {
+	for i, want := range labels {
 		if calls[i].Label != want {
 			t.Errorf("api_calls[%d].Label = %q, want %q", i, calls[i].Label, want)
 		}
-		if calls[i].Status != http.StatusOK {
-			t.Errorf("api_calls[%d].Status = %d, want 200", i, calls[i].Status)
+		// A first consent finds nothing kept: that lookup answers 404.
+		answered := calls[i].Status >= 200 && calls[i].Status < 300
+		if !answered && (want != "Find polymorphic values" || calls[i].Status != http.StatusNotFound) {
+			t.Errorf("api_calls[%d] %s: status %d", i, want, calls[i].Status)
 		}
 		if len(calls[i].RequestBody) != 0 || len(calls[i].ResponseBody) != 0 {
 			t.Errorf("api_calls[%d] exposed private request/response bodies", i)
@@ -314,5 +337,124 @@ func TestParseSources(t *testing.T) {
 		if _, err := parseSources(value); err == nil {
 			t.Errorf("%s: %q was accepted", name, value)
 		}
+	}
+}
+
+// A second consent of the same citizen finds the values kept at the first and
+// does not activate again.
+func TestASecondConsentOnlyTransforms(t *testing.T) {
+	var (
+		mu          sync.Mutex
+		activations int
+		polymorphic = map[string]string{}
+	)
+	var transformed map[string]any
+	bsnk := stubBSNk(t, &transformed)
+	defer bsnk.Close()
+	counting := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v2/activate" {
+			mu.Lock()
+			activations++
+			mu.Unlock()
+		}
+		proxy, _ := http.NewRequest(r.Method, bsnk.URL+r.URL.Path, r.Body)
+		resp, err := http.DefaultClient.Do(proxy)
+		if err != nil {
+			t.Errorf("stub BSNk: %v", err)
+			return
+		}
+		defer resp.Body.Close()
+		w.WriteHeader(resp.StatusCode)
+		_, _ = io.Copy(w, resp.Body)
+	}))
+	defer counting.Close()
+
+	register := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/polymorphic") && r.Method == http.MethodPut:
+			body, _ := io.ReadAll(r.Body)
+			polymorphic[r.URL.Path] = string(body)
+			w.WriteHeader(http.StatusNoContent)
+		case strings.HasSuffix(r.URL.Path, "/polymorphic"):
+			kept, ok := polymorphic[r.URL.Path]
+			if !ok {
+				http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+				return
+			}
+			_, _ = w.Write([]byte(kept))
+		case r.URL.Path == "/consents" && r.Method == http.MethodPost:
+			_, _ = w.Write([]byte(`{"consent_id":"c-1","consent_token":"signed-consent-token"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer register.Close()
+
+	srv := httptest.NewServer(newMux(config{
+		BSNkURL: counting.URL, ConsentURL: register.URL,
+		Sources:       []consent.Party{{OIN: testSource, KeySetVersion: 20260101}},
+		SubjectRefKey: []byte(testSubjectRefKey), SubjectRefKeyVersion: "1",
+	}, portalhttp.NewHub(), nil))
+	defer srv.Close()
+
+	loginResp, err := http.Post(srv.URL+"/portal/login", "application/json", bytes.NewBufferString(`{"citizen_bsn":"123456789"}`))
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	var login portalhttp.LoginResponse
+	_ = json.NewDecoder(loginResp.Body).Decode(&login)
+	_ = loginResp.Body.Close()
+
+	for i, labels := range [][]string{
+		{"Find polymorphic values", "Activate BSN", "Keep polymorphic values", "Transform for the sources", "Create Consent"},
+		{"Find polymorphic values", "Transform for the sources", "Create Consent"},
+	} {
+		req, _ := http.NewRequest(http.MethodPost, srv.URL+"/portal/consents",
+			strings.NewReader(`{"dienstverlener_oin":"00000003000000003000","scopes":["bd:ib:2025"]}`))
+		req.Header.Set("Authorization", "Bearer "+login.Token)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("consent %d: %v", i+1, err)
+		}
+		var give portalhttp.GiveConsentResponse
+		_ = json.NewDecoder(resp.Body).Decode(&give)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("consent %d: status %d", i+1, resp.StatusCode)
+		}
+		assertPrivateAPICalls(t, give.APICalls, labels...)
+	}
+	if activations != 1 {
+		t.Errorf("BSNk activated %d times for two consents of one citizen, want 1", activations)
+	}
+}
+
+func TestLoadConfigNeedsASubjectReferenceKey(t *testing.T) {
+	t.Setenv("CONSENT_SOURCES", testSource+"@20260101")
+
+	t.Setenv("SUBJECT_REF_KEY", "")
+	if _, err := loadConfig(); err == nil {
+		t.Error("the portal started without a subject reference key")
+	}
+	t.Setenv("SUBJECT_REF_KEY", "too-short")
+	if _, err := loadConfig(); err == nil {
+		t.Error("the portal accepted a key shorter than 32 characters")
+	}
+
+	t.Setenv("SUBJECT_REF_KEY", testSubjectRefKey)
+	t.Setenv("SUBJECT_REF_KEY_VERSION", "")
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	if string(cfg.SubjectRefKey) != testSubjectRefKey || cfg.SubjectRefKeyVersion != "1" {
+		t.Errorf("key %q, version %q", cfg.SubjectRefKey, cfg.SubjectRefKeyVersion)
+	}
+	t.Setenv("SUBJECT_REF_KEY_VERSION", "v-2")
+	if _, err := loadConfig(); err == nil {
+		t.Error("a key version with a dash was accepted; it would break the reference format")
 	}
 }

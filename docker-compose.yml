@@ -982,6 +982,11 @@ services:
       # while the citizen is present, so every source that will answer has to
       # be named here. The demo's sources share one OIN.
       - CONSENT_SOURCES=${CONSENT_SOURCES:-99999999900000000200@20260101}
+      # The portal's own reference to a citizen is an HMAC of the BSN under
+      # this secret; without it the reference could be recomputed from a list
+      # of BSNs. The version names the key and is part of every reference.
+      - SUBJECT_REF_KEY=${SUBJECT_REF_KEY:-local-demo-subject-ref-key-not-a-secret}
+      - SUBJECT_REF_KEY_VERSION=${SUBJECT_REF_KEY_VERSION:-1}
       # LDV: the pseudonymisation at consent intake is GBO's own
       # Dataverwerking — the one that makes every processing after it BSN-free.
       # It shares a logbook with the consent register: one system, one logbook.

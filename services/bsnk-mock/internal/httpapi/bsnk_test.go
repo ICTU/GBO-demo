@@ -423,7 +423,7 @@ func TestTheBSNAuthorisationListIsPublished(t *testing.T) {
 
 func TestEndpointsRejectOtherMethods(t *testing.T) {
 	srv := newTestServer(t, false)
-	for _, path := range []string{"/v2/activate", "/v2/transform", "/v2/provide-dv-keys", "/signed-encrypted-identity", "/signed-encrypted-pseudonym", "/pseudonymize"} {
+	for _, path := range []string{"/v2/activate", "/v2/transform", "/v2/provide-dv-keys", "/signed-encrypted-identity", "/signed-encrypted-pseudonym"} {
 		resp, err := http.Get(srv.URL + path)
 		if err != nil {
 			t.Fatalf("GET %s: %v", path, err)

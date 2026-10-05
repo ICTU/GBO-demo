@@ -1,9 +1,8 @@
-// Package httpapi is the driving adapter of the mock: it serves the three
-// interfaces over HTTP and translates between JSON and the two cores. Every
-// rule lives in those cores; a handler here reads a request, calls one use
-// case and writes the answer.
+// Package httpapi is the driving adapter of the mock: it serves its two
+// interfaces over HTTP and translates between JSON and the core. Every rule
+// lives in the core; a handler here reads a request, calls one use case and
+// writes the answer.
 //
-//	first.go       what is left of the first interface
 //	bsnk.go        BSNk's own interface, as JSON instead of SOAP
 //	decryption.go  the interface of the decryption component a party runs
 package httpapi
@@ -21,8 +20,6 @@ import (
 // query parameter randomize, whether it wants values that differ every time.
 func NewMux(mock *polymorphic.Mock, randomizeDefault bool) *http.ServeMux {
 	mux := NewDecryptionMux()
-
-	mux.HandleFunc("/pseudonymize", handlePseudonymize())
 
 	b := bsnk{mock: mock, randomizeDefault: randomizeDefault}
 	mux.HandleFunc("/v2/activate", post(b.activate))

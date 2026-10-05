@@ -6,26 +6,18 @@ It is a mock, not an implementation of BSNk. It follows BSNk's rules and its
 interface, and has none of its cryptography: every value it issues can be read
 by anyone. Use it with test BSNs only.
 
-It serves three things.
+It serves two things.
 
 | Part | Endpoints | Stands in for |
 |---|---|---|
-| The first interface | `/pseudonymize` | Nothing real. The consent portal derives its own reference to a citizen with it |
 | BSNk | `/v2/…` | BSNk's own services |
 | Decryption | `/signed-encrypted-identity`, `/signed-encrypted-pseudonym` | The decryption component a party runs itself |
 
-In the demo the consent portal activates a BSN and has it transformed into an
-encrypted identity per source, through `/v2`. A source reads its value through
-the decryption endpoints, on an instance of this image that serves nothing
-else (`DECRYPTION_COMPONENT_ONLY`), so that the source does not call BSNk.
-
-## The first interface
-
-`POST /pseudonymize` takes a BSN and a recipient OIN and returns a pseudonym:
-the same for one citizen at one recipient, different at every other. The
-consent portal calls it with its own OIN, to list and revoke a citizen's
-consents without holding the BSN. It goes once the portal gets that reference
-from an encrypted pseudonym made for itself.
+In the demo the consent portal activates a citizen's BSN once, at their first
+consent, and has the result transformed into an encrypted identity per source
+at every consent, through `/v2`. A source reads its value through the
+decryption endpoints, on an instance of this image that serves nothing else
+(`DECRYPTION_COMPONENT_ONLY`), so that the source does not call BSNk.
 
 ## How BSNk works
 

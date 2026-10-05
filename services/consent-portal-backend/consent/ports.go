@@ -9,36 +9,37 @@ import (
 // exactly one adapter package (bsnk, register) and by in-memory fakes in the
 // tests. "Accept interfaces, return structs": the adapters are plain structs.
 
-// Identities is BSNk seen from the core when a citizen gives consent: the BSN
-// goes in, and what comes out is an encrypted identity per party that only
-// that party can read.
+// Identities is BSNk seen from the core, in BSNk's own two steps.
 //
-// BSNk does this in two steps. It activates the BSN into polymorphic values
-// that only the portal can use, and transforms those into a value per party.
-// The polymorphic values live for the duration of this one call and leave the
-// portal nowhere, so the core does not see them.
+// Activate turns a BSN into the polymorphic values BSNk makes for the portal.
+// It is the only port a BSN crosses, and the portal calls it once per
+// citizen.
 //
-// A party that may not receive the BSN makes the whole call fail: a consent
-// whose source cannot read the subject would be a consent nobody can use.
+// Transform has BSNk make an encrypted identity for each party, from the
+// portal's polymorphic identity. BSNk allows it only while the citizen is
+// present, so the portal calls it when a consent is given. A party that may
+// not receive the BSN makes the whole call fail: a consent whose source
+// cannot read the subject would be a consent nobody can use.
 type Identities interface {
-	EncryptFor(ctx context.Context, bsn BSN, parties []Party) ([]EncryptedSubject, error)
-}
-
-// Pseudonymizer derives the portal's own reference to a citizen: a pseudonym
-// scoped to the recipient it is asked for. One RPC, no state.
-type Pseudonymizer interface {
-	Pseudonymize(ctx context.Context, bsn BSN, recipientOIN string) (string, error)
+	Activate(ctx context.Context, bsn BSN) (Polymorphic, error)
+	Transform(ctx context.Context, values Polymorphic, parties []Party) ([]EncryptedSubject, error)
 }
 
 // Store is the consent register seen from the core. Citizen listing is keyed
 // by a portal-scoped SubjectRef; Get and Revoke address a consent ID. Those
 // methods must return an error wrapping ErrNotFound when the record does not
 // exist, so the core can tell "missing" from "upstream broke".
+//
+// The register also keeps the polymorphic values of a citizen's first
+// activation, under the portal's reference to them. PolymorphicFor returns
+// an error wrapping ErrNotFound for a citizen who has none yet.
 type Store interface {
 	Create(ctx context.Context, d Draft) (Record, error)
 	ListBySubject(ctx context.Context, subject SubjectRef) ([]Record, error)
 	Get(ctx context.Context, consentID string) (Record, error)
 	Revoke(ctx context.Context, consentID string) error
+	PolymorphicFor(ctx context.Context, subject SubjectRef) (Polymorphic, error)
+	KeepPolymorphic(ctx context.Context, subject SubjectRef, values Polymorphic) error
 }
 
 // Processing is one Dataverwerking of this Verantwoordelijke, as the core

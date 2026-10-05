@@ -5,13 +5,11 @@
 //
 //	internal/polymorphic/  core — BSNk's own model: activate, transform, keys,
 //	                       and reading a value. Imports no transport library.
-//	internal/legacy/       core — what is left of the first interface: the
-//	                       consent portal's own reference to a citizen
 //	internal/httpapi/      driving adapter — handlers and routing
 //	slogctx.go             trace-correlated access log
 //	main.go                configuration, construction, lifecycle
 //
-// The cores have no driven adapters: the mock keeps nothing and calls nothing.
+// The core has no driven adapters: the mock keeps nothing and calls nothing.
 package main
 
 import (

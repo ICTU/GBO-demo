@@ -19,41 +19,62 @@ import (
 	"time"
 )
 
-// fakeValue stands in for what BSNk makes for one party: a hash of the BSN and
-// the party, so it does not embed the BSN itself. Deriving it as the BSN plus
-// the OIN would make the leak test vacuous.
-func fakeValue(bsn BSN, party Party) string {
-	sum := sha256.Sum256([]byte("value|" + string(bsn) + "|" + party.OIN))
+// fakeValue stands in for what BSNk makes for one party: a hash of the
+// polymorphic identity and the party, so it does not embed the BSN. Deriving
+// it from the BSN plus the OIN would make the leak test vacuous.
+func fakeValue(values Polymorphic, party Party) string {
+	sum := sha256.Sum256([]byte("value|" + values.PI + "|" + party.OIN))
 	return "VI-" + hex.EncodeToString(sum[:8])
+}
+
+// fakePI stands in for an activation: like a real one, it does not carry the
+// BSN in the clear.
+func fakePI(bsn BSN) string {
+	sum := sha256.Sum256([]byte("pi|" + string(bsn)))
+	return "PI-" + hex.EncodeToString(sum[:8])
 }
 
 // testSource is the one source the test portal gives consent for.
 var testSource = Party{OIN: "00000000000000000200", KeySetVersion: 20260101}
 
-func fakeSubjectRef(bsn BSN, recipientOIN string) SubjectRef {
-	sum := sha256.Sum256([]byte("subject-ref|" + string(bsn) + "|" + recipientOIN))
-	return SubjectRef("EP-" + hex.EncodeToString(sum[:8]))
-}
+// testSubjectRefs derives references the way the portal does in production,
+// under a test key.
+var testSubjectRefs = SubjectRefs{Key: []byte("test-subject-ref-key-of-32-bytes!"), Version: "1"}
 
-// testPortalOIN stands in for the portal's own OIN, which main supplies in
-// production.
-const testPortalOIN = "00000000000000000002"
+func subjectRefOf(t *testing.T, bsn BSN) SubjectRef {
+	t.Helper()
+	ref, err := testSubjectRefs.For(bsn)
+	if err != nil {
+		t.Fatalf("subject ref: %v", err)
+	}
+	return ref
+}
 
 // ── Fakes ─────────────────────────────────────────────────────────────────
 
-// fakeBSNk is both of BSNk's ports: it makes a value per party and derives
-// the portal's own reference.
+// fakeBSNk is BSNk's two steps: activate and transform.
 type fakeBSNk struct {
-	err        error
-	gotBSN     []BSN
-	gotOIN     []string
-	gotParties [][]Party
-	mu         sync.Mutex
+	err         error
+	activated   []BSN
+	transformed []Polymorphic
+	gotParties  [][]Party
+	mu          sync.Mutex
 }
 
-func (f *fakeBSNk) EncryptFor(_ context.Context, bsn BSN, parties []Party) ([]EncryptedSubject, error) {
+func (f *fakeBSNk) Activate(_ context.Context, bsn BSN) (Polymorphic, error) {
 	f.mu.Lock()
-	f.gotBSN = append(f.gotBSN, bsn)
+	f.activated = append(f.activated, bsn)
+	f.mu.Unlock()
+	if f.err != nil {
+		return Polymorphic{}, f.err
+	}
+	pi := fakePI(bsn)
+	return Polymorphic{PI: pi, PP: "PP-of-" + pi}, nil
+}
+
+func (f *fakeBSNk) Transform(_ context.Context, values Polymorphic, parties []Party) ([]EncryptedSubject, error) {
+	f.mu.Lock()
+	f.transformed = append(f.transformed, values)
 	f.gotParties = append(f.gotParties, parties)
 	f.mu.Unlock()
 	if f.err != nil {
@@ -61,32 +82,47 @@ func (f *fakeBSNk) EncryptFor(_ context.Context, bsn BSN, parties []Party) ([]En
 	}
 	subjects := make([]EncryptedSubject, len(parties))
 	for i, party := range parties {
-		subjects[i] = EncryptedSubject{Party: party, IdentifierType: "Identity", Value: fakeValue(bsn, party)}
+		subjects[i] = EncryptedSubject{Party: party, IdentifierType: "Identity", Value: fakeValue(values, party)}
 	}
 	return subjects, nil
 }
 
-func (f *fakeBSNk) Pseudonymize(_ context.Context, bsn BSN, recipientOIN string) (string, error) {
+func (f *fakeBSNk) calls() (activated int, transformed int) {
 	f.mu.Lock()
-	f.gotBSN = append(f.gotBSN, bsn)
-	f.gotOIN = append(f.gotOIN, recipientOIN)
-	f.mu.Unlock()
-	if f.err != nil {
-		return "", f.err
-	}
-	return string(fakeSubjectRef(bsn, recipientOIN)), nil
+	defer f.mu.Unlock()
+	return len(f.activated), len(f.transformed)
 }
 
 type memStore struct {
-	mu      sync.Mutex
-	recs    map[string]Record
-	created []Draft
-	seq     int
-	revoked []string
+	mu          sync.Mutex
+	recs        map[string]Record
+	created     []Draft
+	seq         int
+	revoked     []string
+	polymorphic map[SubjectRef]Polymorphic
 }
 
 func newMemStore() *memStore {
-	return &memStore{recs: make(map[string]Record)}
+	return &memStore{recs: make(map[string]Record), polymorphic: make(map[SubjectRef]Polymorphic)}
+}
+
+func (m *memStore) PolymorphicFor(_ context.Context, subject SubjectRef) (Polymorphic, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	values, ok := m.polymorphic[subject]
+	if !ok {
+		return Polymorphic{}, ErrNotFound
+	}
+	return values, nil
+}
+
+func (m *memStore) KeepPolymorphic(_ context.Context, subject SubjectRef, values Polymorphic) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, kept := m.polymorphic[subject]; !kept {
+		m.polymorphic[subject] = values
+	}
+	return nil
 }
 
 func (m *memStore) Create(_ context.Context, d Draft) (Record, error) {
@@ -164,12 +200,11 @@ func testPortal(t *testing.T, watch Observer) (*Portal, *fakeBSNk, *memStore) {
 	bsnk := &fakeBSNk{}
 	store := newMemStore()
 	return &Portal{
-		Identities: bsnk,
-		Pseudonyms: bsnk,
-		Consents:   store,
-		Watch:      watch,
-		OwnOIN:     testPortalOIN,
-		Sources:    []Party{testSource},
+		Identities:  bsnk,
+		SubjectRefs: testSubjectRefs,
+		Consents:    store,
+		Watch:       watch,
+		Sources:     []Party{testSource},
 	}, bsnk, store
 }
 
@@ -291,8 +326,8 @@ func TestListIsolatesByCitizen(t *testing.T) {
 // ── The privacy invariant ─────────────────────────────────────────────────
 
 // The register receives the value per source only as transient signing
-// material and receives a portal-scoped pseudonym as its persistent subject.
-// Plain BSN must never cross the port.
+// material and the portal's own reference as its persistent subject. Plain
+// BSN must never cross the port.
 func TestBSNNeverReachesTheRegister(t *testing.T) {
 	p, bsnk, store := testPortal(t, nil)
 	const bsn = "987654321"
@@ -307,45 +342,97 @@ func TestBSNNeverReachesTheRegister(t *testing.T) {
 	if len(store.created) != 1 {
 		t.Fatalf("created %d consents, want 1", len(store.created))
 	}
-	payload, err := json.Marshal(store.created[0])
+	payload, err := json.Marshal(struct {
+		Draft       Draft
+		Polymorphic map[SubjectRef]Polymorphic
+	}{store.created[0], store.polymorphic})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 	if strings.Contains(string(payload), bsn) {
 		t.Fatalf("BSN leaked to the consent register: %s", payload)
 	}
-	want := EncryptedSubject{Party: testSource, IdentifierType: "Identity", Value: fakeValue(BSN(bsn), testSource)}
+	kept := store.polymorphic[subjectRefOf(t, BSN(bsn))]
+	want := EncryptedSubject{Party: testSource, IdentifierType: "Identity", Value: fakeValue(kept, testSource)}
 	if got := store.created[0].Subjects; len(got) != 1 || got[0] != want {
 		t.Errorf("subjects = %+v, want the value BSNk made for the source", got)
 	}
-	if store.created[0].SubjectRef != fakeSubjectRef(BSN(bsn), testPortalOIN) {
-		t.Errorf("subject_ref = %q, want portal-scoped pseudonym", store.created[0].SubjectRef)
+	if store.created[0].SubjectRef != subjectRefOf(t, BSN(bsn)) {
+		t.Errorf("subject_ref = %q, want the portal's own reference", store.created[0].SubjectRef)
 	}
 	// The BSN is not merely absent downstream — it did reach the one port
 	// that is allowed to see it.
-	if len(bsnk.gotBSN) != 2 || bsnk.gotBSN[0] != BSN(bsn) || bsnk.gotBSN[1] != BSN(bsn) {
-		t.Errorf("BSNk saw %v, want two derivations for %s", bsnk.gotBSN, bsn)
+	if len(bsnk.activated) != 1 || bsnk.activated[0] != BSN(bsn) {
+		t.Errorf("BSNk activated %v, want %s once", bsnk.activated, bsn)
+	}
+}
+
+// A citizen is activated once, at their first consent. Every consent after it
+// uses the values kept under the portal's reference and is only transformed.
+func TestACitizenIsActivatedOnce(t *testing.T) {
+	p, bsnk, store := testPortal(t, nil)
+	ctx := context.Background()
+
+	for range 2 {
+		if _, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"}); err != nil {
+			t.Fatalf("give consent: %v", err)
+		}
+	}
+	if activated, transformed := bsnk.calls(); activated != 1 || transformed != 2 {
+		t.Errorf("activated %d and transformed %d times, want 1 and 2", activated, transformed)
+	}
+	kept, ok := store.polymorphic[subjectRefOf(t, BSN("111111111"))]
+	if !ok {
+		t.Fatal("the values of the activation were not kept")
+	}
+	for i, values := range bsnk.transformed {
+		if values != kept {
+			t.Errorf("transform %d used %+v, want the kept values", i, values)
+		}
+	}
+
+	// Another citizen is a first consent again.
+	if _, err := p.GiveConsent(ctx, BSN("222222222"), GiveInput{DienstverlenerOIN: "DV"}); err != nil {
+		t.Fatalf("give consent: %v", err)
+	}
+	if activated, _ := bsnk.calls(); activated != 2 {
+		t.Errorf("activated %d times after a second citizen, want 2", activated)
+	}
+}
+
+// Showing and revoking consents only need the portal's own reference, which
+// the portal derives itself: BSNk is not asked.
+func TestListingAndRevokingDoNotCallBSNk(t *testing.T) {
+	p, bsnk, _ := testPortal(t, nil)
+	ctx := context.Background()
+
+	granted, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"})
+	if err != nil {
+		t.Fatalf("give consent: %v", err)
+	}
+	activated, transformed := bsnk.calls()
+
+	if _, err := p.ListConsents(ctx, BSN("111111111")); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if err := p.RevokeConsent(ctx, BSN("111111111"), granted.ConsentID); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	if a, tr := bsnk.calls(); a != activated || tr != transformed {
+		t.Errorf("listing and revoking called BSNk: %d activations and %d transformations more", a-activated, tr-transformed)
 	}
 }
 
 // A value is made for the sources, and for nobody else: the service provider
-// gets no identifier of the citizen. The portal's own reference is scoped to
-// its own OIN.
+// gets no identifier of the citizen.
 func TestValuesAreMadeForTheSourcesOnly(t *testing.T) {
 	p, bsnk, _ := testPortal(t, nil)
-	ctx := context.Background()
 
-	if _, err := p.GiveConsent(ctx, BSN("111111111"), GiveInput{DienstverlenerOIN: "DV-OIN"}); err != nil {
+	if _, err := p.GiveConsent(context.Background(), BSN("111111111"), GiveInput{DienstverlenerOIN: "DV-OIN"}); err != nil {
 		t.Fatalf("give consent: %v", err)
-	}
-	if _, err := p.ListConsents(ctx, BSN("111111111")); err != nil {
-		t.Fatalf("list: %v", err)
 	}
 	if got := bsnk.gotParties; len(got) != 1 || len(got[0]) != 1 || got[0][0] != testSource {
 		t.Errorf("BSNk made values for %v, want the source alone", got)
-	}
-	if got := bsnk.gotOIN; len(got) != 2 || got[0] != testPortalOIN || got[1] != testPortalOIN {
-		t.Errorf("pseudonym recipients = %v, want the portal itself, twice", got)
 	}
 }
 
@@ -358,8 +445,8 @@ func TestGiveConsentNeedsASource(t *testing.T) {
 	if _, err := p.GiveConsent(context.Background(), BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"}); err == nil {
 		t.Fatal("want an error when no source is configured")
 	}
-	if len(bsnk.gotBSN) != 0 || len(store.created) != 0 {
-		t.Errorf("BSNk saw %v and %d consents were registered", bsnk.gotBSN, len(store.created))
+	if activated, _ := bsnk.calls(); activated != 0 || len(store.created) != 0 {
+		t.Errorf("BSNk activated %d times and %d consents were registered", activated, len(store.created))
 	}
 }
 
@@ -438,16 +525,17 @@ func TestDeniedRevokeDoesNotEmitRevoked(t *testing.T) {
 
 // ── Upstream failures ─────────────────────────────────────────────────────
 
-func TestGiveConsentFailsWhenPseudonymizerFails(t *testing.T) {
+func TestGiveConsentFailsWhenBSNkFails(t *testing.T) {
 	p, bsnk, store := testPortal(t, nil)
 	bsnk.err = errors.New("bsnk down")
 
 	if _, err := p.GiveConsent(context.Background(), BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"}); err == nil {
 		t.Fatal("want an error when BSNk fails")
 	}
-	// Nothing may be registered when BSNk made no value for the sources.
-	if len(store.created) != 0 {
-		t.Fatalf("registered %d consents despite BSNk failure", len(store.created))
+	// Nothing may be registered when BSNk made no value for the sources, and
+	// nothing is kept from an activation that did not happen.
+	if len(store.created) != 0 || len(store.polymorphic) != 0 {
+		t.Fatalf("registered %d consents and kept %d values despite BSNk failure", len(store.created), len(store.polymorphic))
 	}
 }
 

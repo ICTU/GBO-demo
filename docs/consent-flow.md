@@ -59,6 +59,14 @@ aanmaken van het token kortstondig verwerkt. Voor burgergerichte listing en
 ownership gebruikt het register een afzonderlijke, portaalgebonden
 `subject_ref`.
 
+Die `subject_ref` leidt het portaal zelf af: een HMAC van het BSN met een
+geheime sleutel van het portaal (`SUBJECT_REF_KEY`). Hetzelfde BSN geeft altijd
+dezelfde verwijzing, dus het portaal vindt een burger bij elke inlog terug
+zonder BSNk. Onder die verwijzing bewaart het register ook de polymorfe
+waarden uit de eerste activering. Het portaal activeert een burger dus één
+keer, bij de eerste toestemming; bij elke volgende toestemming laat het die
+waarden alleen nog transformeren. Bekijken en intrekken roepen BSNk niet aan.
+
 ## 1. Toestemming verlenen
 
 ```mermaid
@@ -75,12 +83,18 @@ sequenceDiagram
     UI->>Portal: Vraag toestemming voor OIN en scopes
     Citizen->>Portal: Log in en bevestig toestemming
 
-    Portal->>BSNk: Activeer BSN
-    BSNk-->>Portal: Polymorfe identiteit, alleen bruikbaar voor het portaal
+    Portal->>Portal: subject_ref = HMAC van het BSN
+    Portal->>Register: Zoek polymorfe waarden onder subject_ref
+    alt Eerste toestemming van deze burger
+        Register-->>Portal: Niet gevonden
+        Portal->>BSNk: Activeer BSN
+        BSNk-->>Portal: Polymorfe identiteit en pseudoniem, alleen bruikbaar voor het portaal
+        Portal->>Register: Bewaar ze onder subject_ref
+    else Volgende toestemming
+        Register-->>Portal: Polymorfe waarden
+    end
     Portal->>BSNk: Transformeer voor de bronnen van deze toestemming
     BSNk-->>Portal: Versleutelde identiteit per bron
-    Portal->>BSNk: Pseudonimiseer BSN voor portaal
-    BSNk-->>Portal: Portaalgebonden subject_ref
 
     Portal->>Register: Maak consent met waarde per bron, subject_ref, OIN en scopes
     Register->>DB: Bewaar consent zonder de waarden per bron

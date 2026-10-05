@@ -81,6 +81,35 @@ func (c Client) Get(ctx context.Context, consentID string) (consent.Record, erro
 	return recordFromRaw(raw), nil
 }
 
+// PolymorphicFor reads the polymorphic values kept for a citizen. They are
+// the portal's alone, so the call card shows no bodies.
+func (c Client) PolymorphicFor(ctx context.Context, subject consent.SubjectRef) (consent.Polymorphic, error) {
+	var out struct {
+		PI string `json:"pi"`
+		PP string `json:"pp"`
+	}
+	status, err := c.Caller.DoPrivate(ctx, "Find polymorphic values", http.MethodGet, c.polymorphicURL(subject), nil, &out)
+	if err != nil {
+		if status == http.StatusNotFound {
+			return consent.Polymorphic{}, consent.ErrNotFound
+		}
+		return consent.Polymorphic{}, err
+	}
+	return consent.Polymorphic{PI: out.PI, PP: out.PP}, nil
+}
+
+// KeepPolymorphic keeps the polymorphic values of a citizen's first
+// activation.
+func (c Client) KeepPolymorphic(ctx context.Context, subject consent.SubjectRef, values consent.Polymorphic) error {
+	_, err := c.Caller.DoPrivate(ctx, "Keep polymorphic values", http.MethodPut, c.polymorphicURL(subject),
+		map[string]string{"pi": values.PI, "pp": values.PP}, nil)
+	return err
+}
+
+func (c Client) polymorphicURL(subject consent.SubjectRef) string {
+	return c.Base + "/subjects/" + url.PathEscape(string(subject)) + "/polymorphic"
+}
+
 func (c Client) Revoke(ctx context.Context, consentID string) error {
 	status, err := c.Caller.Do(ctx, "Revoke Consent", http.MethodDelete, c.Base+"/consents/"+consentID, nil, nil)
 	if err != nil {

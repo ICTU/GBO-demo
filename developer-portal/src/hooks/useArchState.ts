@@ -16,7 +16,7 @@ export type ArchStates = Record<string, NodeState>
 // --------- Issuance ---------
 
 function isBSNkCall(url: string): boolean {
-  return url.includes('/v2/activate') || url.includes('/v2/transform') || url.includes('/pseudonymize')
+  return url.includes('/v2/activate') || url.includes('/v2/transform')
 }
 
 export function statesForIssuance(res: IssuanceResponse | null, error: boolean): ArchStates {
@@ -28,8 +28,9 @@ export function statesForIssuance(res: IssuanceResponse | null, error: boolean):
   const calls = res.api_calls ?? []
   for (const c of calls) {
     const ok = c.status >= 200 && c.status < 300
-    // BSNk is called three times: activate, transform, and the portal's own
-    // reference. One failure makes the node red, whatever came before it.
+    // BSNk is called once or twice: activate (at a citizen's first consent
+    // only) and transform. One failure makes the node red, whatever came
+    // before it.
     if (isBSNkCall(c.url)) states.bsnk = ok && states.bsnk !== 'red' ? 'green' : 'red'
     else if (c.url.includes('/consents')) states.s01 = ok ? 'green' : 'red'
   }
