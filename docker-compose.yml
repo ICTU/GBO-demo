@@ -9,6 +9,7 @@ services:
       - ./otel/collector-config.yaml:/etc/otelcol-contrib/config.yaml
     networks:
       - backend
+      - sources
 
   jaeger:
     image: jaegertracing/all-in-one:1.54
@@ -426,6 +427,7 @@ services:
       - logboek-bd-data:/data
     networks:
       - backend
+      - sources
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4016/health"]
       interval: 5s
@@ -455,6 +457,7 @@ services:
       - logboek-brp-data:/data
     networks:
       - backend
+      - sources
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4016/health"]
       interval: 5s
@@ -565,6 +568,7 @@ services:
       - logboek-lvg-data:/data
     networks:
       - backend
+      - sources
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4016/health"]
       interval: 5s
@@ -621,6 +625,7 @@ services:
       - ./services/graphql-server/config:/config:ro
     networks:
       - backend
+      - sources
       # bd-Inway forwards bri requests to graphql-server; must therefore
       # be reachable inside fsc-infra_default.
       - fsc-infra
@@ -661,6 +666,7 @@ services:
     networks:
       - backend
       - fsc-infra
+      - sources
     depends_on:
       otel-collector:
         condition: service_started
@@ -771,7 +777,7 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
       - DECRYPTION_COMPONENT_ONLY=true
     networks:
-      - backend
+      - sources
     depends_on:
       otel-collector:
         condition: service_started
@@ -794,8 +800,6 @@ services:
       # module, which a context scoped to its own directory cannot see.
       context: .
       dockerfile: services/bron-sidecar/Dockerfile
-    ports:
-      - "${GBO_PORT_BRON_SIDECAR:-9411}:4011"
     environment:
       - OTEL_SERVICE_NAME=bron-sidecar
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -817,9 +821,14 @@ services:
       # The LDV spool must survive a restart; that is what makes a
       # record durable before it reaches the logbook.
       - ldv-outbox-bron-sidecar:/data
+    # Only the Inways of the source reach the sidecar (source-gateways), and
+    # the sidecar reaches only what serves the source (sources): it is not on
+    # the networks the service providers use, and it publishes no port. The
+    # sidecar acts on a consent token after the PDP's allow; a caller that
+    # could reach it directly would skip that decision.
     networks:
-      - backend
-      - fsc-infra
+      - sources
+      - source-gateways
     depends_on:
       graphql-server:
         condition: service_healthy
@@ -843,8 +852,6 @@ services:
     build:
       context: .
       dockerfile: services/bron-sidecar/Dockerfile
-    ports:
-      - "${GBO_PORT_BRP_SIDECAR:-9413}:4011"
     environment:
       - OTEL_SERVICE_NAME=brp-sidecar
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -866,9 +873,14 @@ services:
       # The LDV spool must survive a restart; that is what makes a
       # record durable before it reaches the logbook.
       - ldv-outbox-brp-sidecar:/data
+    # Only the Inways of the source reach the sidecar (source-gateways), and
+    # the sidecar reaches only what serves the source (sources): it is not on
+    # the networks the service providers use, and it publishes no port. The
+    # sidecar acts on a consent token after the PDP's allow; a caller that
+    # could reach it directly would skip that decision.
     networks:
-      - backend
-      - fsc-infra
+      - sources
+      - source-gateways
     depends_on:
       brp-graphql-server:
         condition: service_healthy
@@ -909,6 +921,7 @@ services:
     networks:
       - backend
       - fsc-infra
+      - sources
     depends_on:
       otel-collector:
         condition: service_started
@@ -928,8 +941,6 @@ services:
       context: .
       dockerfile: services/bron-sidecar/Dockerfile
     profiles: [dvtp, full]
-    ports:
-      - "${GBO_PORT_LVG_SIDECAR:-9412}:4011"
     environment:
       - OTEL_SERVICE_NAME=lvg-sidecar
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -947,9 +958,14 @@ services:
       - LDV_FORWARD_ACTIVITY=https://logboek.lvg.test/verwerkingsactiviteiten/lvg-bronquery-doorgifte/v1
     volumes:
       - ldv-outbox-lvg-sidecar:/data
+    # Only the Inways of the source reach the sidecar (source-gateways), and
+    # the sidecar reaches only what serves the source (sources): it is not on
+    # the networks the service providers use, and it publishes no port. The
+    # sidecar acts on a consent token after the PDP's allow; a caller that
+    # could reach it directly would skip that decision.
     networks:
-      - backend
-      - fsc-infra
+      - sources
+      - source-gateways
     depends_on:
       lvg-graphql-server:
         condition: service_healthy
@@ -1687,6 +1703,16 @@ networks:
   backend:
   dvtp-onboarding:
   eudi:
+  # What serves the sources: the sidecars, the source services, the
+  # decryption component and the logbooks they write to. No service provider
+  # is on it.
+  sources:
+  # The network between the Inways of the sources and the sidecars behind
+  # them. The fsc-infra project owns it; a worktree running its own fsc-infra
+  # sets FSC_SOURCE_GATEWAY_NETWORK=<that project>_source-gateways in .env.
+  source-gateways:
+    name: ${FSC_SOURCE_GATEWAY_NETWORK:-fsc-infra_source-gateways}
+    external: true
   fsc-infra:
     # Which fsc-infra compose project to join. Defaults to the shared
     # single-tenant instance; a worktree running its own fsc-infra sets

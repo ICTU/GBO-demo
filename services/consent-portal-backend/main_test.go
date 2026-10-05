@@ -329,10 +329,14 @@ func TestParseSources(t *testing.T) {
 	}
 
 	for name, value := range map[string]string{
-		"none":                  "",
-		"no version":            "99999999900000000200",
-		"no OIN":                "belastingdienst@20260101",
-		"version is not a date": "99999999900000000200@1",
+		"none":                   "",
+		"no version":             "99999999900000000200",
+		"no OIN":                 "belastingdienst@20260101",
+		"version is not a date":  "99999999900000000200@1",
+		"30 February":            "99999999900000000200@20260230",
+		"month 13":               "99999999900000000200@20261301",
+		"version with a sign":    "99999999900000000200@+2026010",
+		"one source named twice": "99999999900000000200@20260101,99999999900000000200@20260314",
 	} {
 		if _, err := parseSources(value); err == nil {
 			t.Errorf("%s: %q was accepted", name, value)

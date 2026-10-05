@@ -741,6 +741,11 @@ services:
   bd-inway:
     image: federatedserviceconnectivity/inway:v2.4.0
     restart: unless-stopped
+    # The sidecars behind this Inway are reachable on source-gateways only,
+    # so that nothing but an Inway, after its PDP's allow, reaches them.
+    networks:
+      - default
+      - source-gateways
     volumes:
       - ./orgs/belastingdienst-mock/pki:/certs:ro
       # The OpenFTV PDP self-signed cert serves as CA for the AuthZen
@@ -927,6 +932,11 @@ services:
   brp-inway:
     image: federatedserviceconnectivity/inway:v2.4.0
     restart: unless-stopped
+    # The sidecars behind this Inway are reachable on source-gateways only,
+    # so that nothing but an Inway, after its PDP's allow, reaches them.
+    networks:
+      - default
+      - source-gateways
     volumes:
       - ./orgs/brp-mock/pki:/certs:ro
       - ../services/openftv-pdp/certs:/authzen-ca:ro
@@ -1653,3 +1663,9 @@ services:
 
 volumes:
   postgres-data:
+
+networks:
+  # Shared with the main stack's sidecars (see source-gateways there). Only the
+  # Inways that publish a source join it.
+  source-gateways:
+    name: ${FSC_PROJECT_NAME:-fsc-infra}_source-gateways

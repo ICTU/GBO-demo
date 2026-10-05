@@ -1,7 +1,10 @@
 // Package main implements the bron-sidecar — a gateway sitting between the
 // FSC-Inway and the source service. The Inway proxies a request only after the
 // PDP has allowed it, so everything here runs after the authorization
-// decision. Its role:
+// decision — provided nothing but the Inway can reach the sidecar. The
+// deployment has to make sure of that: a caller that reaches the sidecar
+// directly skips the PDP. In the demo the sidecar shares a network with the
+// Inways and with what serves the source, and with nothing else. Its role:
 //
 //  1. Look at the evidence the request carries:
 //     - a consent token → the query names its subject with a placeholder.

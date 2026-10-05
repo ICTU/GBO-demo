@@ -147,8 +147,13 @@ var sourceOIN = regexp.MustCompile(`^[0-9]{20}$`)
 // list of <OIN>@<key set version>. The version is the date the source's
 // certificate was issued, as YYYYMMDD. At least one source is required: a
 // consent no source can read is of no use.
+//
+// What BSNk would refuse is refused here, at start, rather than at every
+// consent: a version that is not a real date, and an OIN named twice, which a
+// transformation request does not accept.
 func parseSources(value string) ([]consent.Party, error) {
 	var sources []consent.Party
+	seen := map[string]bool{}
 	for _, entry := range strings.Split(value, ",") {
 		entry = strings.TrimSpace(entry)
 		if entry == "" {
@@ -158,10 +163,14 @@ func parseSources(value string) ([]consent.Party, error) {
 		if !found || !sourceOIN.MatchString(oin) {
 			return nil, fmt.Errorf("%q is not <OIN of 20 digits>@<key set version>", entry)
 		}
-		keySetVersion, err := strconv.Atoi(version)
-		if err != nil || len(version) != 8 {
+		if _, err := time.Parse("20060102", version); err != nil || len(version) != 8 {
 			return nil, fmt.Errorf("%q: the key set version must be a date as YYYYMMDD", entry)
 		}
+		keySetVersion, _ := strconv.Atoi(version)
+		if seen[oin] {
+			return nil, fmt.Errorf("%s is named twice; a source has one key set version at a time", oin)
+		}
+		seen[oin] = true
 		sources = append(sources, consent.Party{OIN: oin, KeySetVersion: keySetVersion})
 	}
 	if len(sources) == 0 {

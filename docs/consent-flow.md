@@ -210,6 +210,12 @@ te roepen. Een waarde die voor een andere partij is gemaakt, accepteert de
 bron niet. Een aanvraag zonder consent-token (de EUDI-route) gaat ongewijzigd
 door.
 
+Dat de vervanging pas na de beslissing komt, hangt eraan dat alleen de Inway
+de sidecar kan bereiken. In de demo zit de sidecar daarom alleen op een
+netwerk met de Inways van de bronnen (`source-gateways`) en op een netwerk met
+wat de bron bedient (`sources`), en publiceert hij geen poort. Een afnemer die
+de sidecar rechtstreeks zou bereiken, sloeg de PDP over.
+
 Ontbrekende, ongeldige of niet-beschikbare context faalt gesloten met een
 gerichte reden, zoals `CONSENT_SIGNATURE_INVALID`, `CONSENT_TOKEN_EXPIRED`,
 `CONSENT_CONTEXT_INVALID`, `CONSENT_KEYS_UNAVAILABLE`,

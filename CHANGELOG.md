@@ -129,7 +129,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     into an encrypted identity for each source in `CONSENT_SOURCES`
     (`<OIN>@<key set version>`), through `bsnk-mock`'s `/v2/activate` and
     `/v2/transform`. The token's `pi` claim is replaced by
-    `encrypted_subject`, keyed by the party's OIN.
+    `encrypted_subject`, keyed by the party's OIN. The portal does not start
+    with a key set version that is not a real date, or with a source named
+    twice.
   - **PDP.** `DVT0001` and `LVG0001` require the subject argument to be the
     placeholder. A literal value is denied with `CONSTRAINT_MISMATCH`. The
     placeholder stands for the subject of a verified consent only, and a token
@@ -142,6 +144,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     unchanged. New settings: `DECRYPTION_URL` and `SUBJECT_KEYS_DIR`;
     `BSNK_URL` and `LDV_BSNK_NEXT_LOGBOOK_ID` are gone from the sidecar, and
     `LDV_RESOLUTION_ACTIVITY` is now `LDV_DECRYPTION_ACTIVITY`.
+  - **Only the Inways reach the sidecars.** The sidecars act on a consent
+    token after the PDP's allow, so a caller that reached them directly would
+    skip the PDP. They now publish no port (`GBO_PORT_*_SIDECAR` are gone)
+    and sit on two networks only: `source-gateways`, shared with `bd-inway`
+    and `brp-inway` and owned by the fsc-infra project
+    (`FSC_SOURCE_GATEWAY_NETWORK`, which make derives from
+    `FSC_PROJECT_NAME`), and `sources`, with the source services, the
+    decryption component and the logbooks. No service provider is on either.
+    The source services stay reachable for the GraphQL playground.
   - **Decryption component.** A new `decryption-component` service runs the
     `bsnk-mock` image with `DECRYPTION_COMPONENT_ONLY=true`, which serves the
     decryption endpoints and nothing of BSNk. The sources' demo keys are in

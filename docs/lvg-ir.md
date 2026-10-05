@@ -24,7 +24,7 @@ alleen bij een bevestiging legt IR de toegang voor de installateur vast.
 | `ir-backend` (9410) | `dienstverlener-backend` met `QUERY_KIND=lvg`: stelt de eigendomsvraag via FSC |
 | IR-peer `…1000` | eigen FSC-afnemer (`ir-*` in `fsc-infra`), zodat de actorbinding IR onderscheidt |
 | service `lvg` | extra logische bron op de gedeelde provider-peer `…0200`, achter `bd-inway`, zoals RvIG |
-| `lvg-sidecar` (9412) | `bron-sidecar`: plaatshouder → BSN, uit het consent-token |
+| `lvg-sidecar` (alleen bereikbaar voor de Inway) | `bron-sidecar`: plaatshouder → BSN, uit het consent-token |
 | `lvg-graphql-server` (9408) | mock-LVG: `vbo(bsn, vboId) { vboId }` |
 | `LVG0001` | policy-regel: dezelfde consentcontroles als DVT0001, scope vastgepind op `lvg:vbo:eigendom` |
 | `logboek-lvg` (9421) | Logboek Dataverwerkingen van LVG: ontsleuteling van de identiteit, doorgifte en de eigendomscheck |
