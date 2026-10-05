@@ -9,6 +9,7 @@ services:
       - ./otel/collector-config.yaml:/etc/otelcol-contrib/config.yaml
     networks:
       - backend
+      - sources
 
   jaeger:
     image: jaegertracing/all-in-one:1.54
@@ -163,8 +164,6 @@ services:
       postgres-ftv:
         condition: service_healthy
       consent-register:
-        condition: service_healthy
-      bsnk-mock:
         condition: service_healthy
       dvtp-onboarding-register:
         condition: service_healthy
@@ -428,6 +427,7 @@ services:
       - logboek-bd-data:/data
     networks:
       - backend
+      - sources
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4016/health"]
       interval: 5s
@@ -457,6 +457,7 @@ services:
       - logboek-brp-data:/data
     networks:
       - backend
+      - sources
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4016/health"]
       interval: 5s
@@ -548,7 +549,7 @@ services:
       retries: 5
 
   # The LVG/IR pilot's two Verantwoordelijken: LVG logs the ownership check
-  # and its sidecar's PI resolution, the Installatie Register (like
+  # and its sidecar's reading of the identity, the Installatie Register (like
   # Hypotheek-BV above, provisionally) logs that it asked.
   logboek-lvg:
     build:
@@ -567,6 +568,7 @@ services:
       - logboek-lvg-data:/data
     networks:
       - backend
+      - sources
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4016/health"]
       interval: 5s
@@ -623,6 +625,7 @@ services:
       - ./services/graphql-server/config:/config:ro
     networks:
       - backend
+      - sources
       # bd-Inway forwards bri requests to graphql-server; must therefore
       # be reachable inside fsc-infra_default.
       - fsc-infra
@@ -663,6 +666,7 @@ services:
     networks:
       - backend
       - fsc-infra
+      - sources
     depends_on:
       otel-collector:
         condition: service_started
@@ -761,49 +765,74 @@ services:
       timeout: 3s
       retries: 5
 
-  # Gateway next to the source. Reads the countersigned grant property
-  # subject_id_type from the FSC token's `prp` claim; substitutes PI
-  # variables to BSN via bsnk-mock for 'pseudonym' contracts;
-  # pass-through for 'direct' contracts (current EUDI flow). Runs in
-  # fsc-infra_default so bd-inway can reach it; reaches graphql-server
-  # over the main stack backend network.
+  # The decryption component a source runs for itself: it reads a value BSNk
+  # made for the source, with the source's own keys, and calls nobody. The
+  # bsnk-mock image stands in for it, started so that it serves that component
+  # and nothing of BSNk. Every source would run its own; the demo's sources
+  # share this one, as they share one OIN.
+  decryption-component:
+    build: ./services/bsnk-mock
+    environment:
+      - OTEL_SERVICE_NAME=decryption-component
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - DECRYPTION_COMPONENT_ONLY=true
+    networks:
+      - sources
+    depends_on:
+      otel-collector:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4003/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Gateway next to the source, behind the Inway and therefore after the
+  # PDP's allow. A request with a consent token names its subject with a
+  # placeholder: the sidecar takes the encrypted identity made for this source
+  # out of the token, has the decryption component read it, and puts the BSN
+  # in the placeholder's place. A request without a consent token (the EUDI
+  # flow) passes through. Runs in fsc-infra_default so bd-inway can reach it;
+  # reaches graphql-server over the main stack backend network.
   bron-sidecar:
     build:
       # Root context: this service depends on the sibling services/ldv-client
       # module, which a context scoped to its own directory cannot see.
       context: .
       dockerfile: services/bron-sidecar/Dockerfile
-    ports:
-      - "${GBO_PORT_BRON_SIDECAR:-9411}:4011"
     environment:
       - OTEL_SERVICE_NAME=bron-sidecar
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
       - UPSTREAM_URL=http://graphql-server:4000
-      - BSNK_URL=http://bsnk-mock:4003
+      - DECRYPTION_URL=http://decryption-component:4003
+      # The source's decryption keys and BSNk's scheme keys. Demo keys for the
+      # sources' OIN are in the image; a deployment mounts its own.
+      - SUBJECT_KEYS_DIR=/app/config/demo-keys
       - OWN_PEER_OIN=99999999900000000200
       - PSEUDONYM_VARS=bsn
-      # LDV: the sidecar's two Dataverwerkingen — the PI→BSN resolution and
-      # the forward — go to the Belastingdienst's logboek.
+      # LDV: the sidecar's two Dataverwerkingen — reading the encrypted
+      # identity and the forward — go to the Belastingdienst's logboek.
       - LDV_LOGBOOK_URL=http://logboek-bd:4016
       - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
       - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY:-local-demo-pseudonym-key}
-      - LDV_RESOLUTION_ACTIVITY=https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-pi-bsn-resolutie/v1
+      - LDV_DECRYPTION_ACTIVITY=https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-identiteit-ontsleuteling/v1
       - LDV_FORWARD_ACTIVITY=https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-bronquery-doorgifte/v1
-      # Where BSNk's side of the PI→BSN resolution can be looked up. BSNk has
-      # no read API here — it is a mock — so this is the page describing it,
-      # the fallback the read extension allows for a party without one.
-      - LDV_BSNK_NEXT_LOGBOOK_ID=https://github.com/ICTU/GBO-demo/tree/main/services/bsnk-mock
     volumes:
       # The LDV spool must survive a restart; that is what makes a
       # record durable before it reaches the logbook.
       - ldv-outbox-bron-sidecar:/data
+    # Only the Inways of the source reach the sidecar (source-gateways), and
+    # the sidecar reaches only what serves the source (sources): it is not on
+    # the networks the service providers use, and it publishes no port. The
+    # sidecar acts on a consent token after the PDP's allow; a caller that
+    # could reach it directly would skip that decision.
     networks:
-      - backend
-      - fsc-infra
+      - sources
+      - source-gateways
     depends_on:
       graphql-server:
         condition: service_healthy
-      bsnk-mock:
+      decryption-component:
         condition: service_healthy
       logboek-bd:
         condition: service_healthy
@@ -815,21 +844,22 @@ services:
 
   # Same sidecar image in front of the BRP bron. The sidecar is bron-agnostic
   # (UPSTREAM_URL + PSEUDONYM_VARS), so a second bron needs a second instance,
-  # not a second implementation. The BRP service is EUDI-only for now
-  # (subject_id_type=direct), so in practice this is pass-through; it stays in
-  # place so a DvTP consumer with a pseudonym contract can be added later
-  # without moving the FSC service endpoint.
+  # not a second implementation. The BRP service is EUDI-only for now, so no
+  # request carries a consent token and in practice this is pass-through; it
+  # stays in place so a DvTP consumer can be added later without moving the
+  # FSC service endpoint.
   brp-sidecar:
     build:
       context: .
       dockerfile: services/bron-sidecar/Dockerfile
-    ports:
-      - "${GBO_PORT_BRP_SIDECAR:-9413}:4011"
     environment:
       - OTEL_SERVICE_NAME=brp-sidecar
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
       - UPSTREAM_URL=http://brp-graphql-server:4001
-      - BSNK_URL=http://bsnk-mock:4003
+      - DECRYPTION_URL=http://decryption-component:4003
+      # The source's decryption keys and BSNk's scheme keys. Demo keys for the
+      # sources' OIN are in the image; a deployment mounts its own.
+      - SUBJECT_KEYS_DIR=/app/config/demo-keys
       - OWN_PEER_OIN=99999999900000000200
       - PSEUDONYM_VARS=bsn
       # LDV: the same sidecar image in front of the BRP bron writes to RvIG's
@@ -837,20 +867,24 @@ services:
       - LDV_LOGBOOK_URL=http://logboek-brp:4016
       - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
       - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY_BRP:-local-demo-pseudonym-key-brp}
-      - LDV_RESOLUTION_ACTIVITY=https://logboek.rvig.nl/verwerkingsactiviteiten/brp-pi-bsn-resolutie/v1
+      - LDV_DECRYPTION_ACTIVITY=https://logboek.rvig.nl/verwerkingsactiviteiten/brp-identiteit-ontsleuteling/v1
       - LDV_FORWARD_ACTIVITY=https://logboek.rvig.nl/verwerkingsactiviteiten/brp-bronquery-doorgifte/v1
-      - LDV_BSNK_NEXT_LOGBOOK_ID=https://github.com/ICTU/GBO-demo/tree/main/services/bsnk-mock
     volumes:
       # The LDV spool must survive a restart; that is what makes a
       # record durable before it reaches the logbook.
       - ldv-outbox-brp-sidecar:/data
+    # Only the Inways of the source reach the sidecar (source-gateways), and
+    # the sidecar reaches only what serves the source (sources): it is not on
+    # the networks the service providers use, and it publishes no port. The
+    # sidecar acts on a consent token after the PDP's allow; a caller that
+    # could reach it directly would skip that decision.
     networks:
-      - backend
-      - fsc-infra
+      - sources
+      - source-gateways
     depends_on:
       brp-graphql-server:
         condition: service_healthy
-      bsnk-mock:
+      decryption-component:
         condition: service_healthy
       logboek-brp:
         condition: service_healthy
@@ -887,6 +921,7 @@ services:
     networks:
       - backend
       - fsc-infra
+      - sources
     depends_on:
       otel-collector:
         condition: service_started
@@ -898,38 +933,43 @@ services:
       timeout: 3s
       retries: 5
 
-  # The same sidecar image in front of LVG: the Installatie Register sends a
-  # PI (grant property subject_id_type=pseudonym) and this turns it into the
-  # BSN the source speaks.
+  # The same sidecar image in front of LVG: the Installatie Register names
+  # the citizen of its consent with the placeholder, and this puts the BSN the
+  # source speaks in its place.
   lvg-sidecar:
     build:
       context: .
       dockerfile: services/bron-sidecar/Dockerfile
     profiles: [dvtp, full]
-    ports:
-      - "${GBO_PORT_LVG_SIDECAR:-9412}:4011"
     environment:
       - OTEL_SERVICE_NAME=lvg-sidecar
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
       - UPSTREAM_URL=http://lvg-graphql-server:4008
-      - BSNK_URL=http://bsnk-mock:4003
+      - DECRYPTION_URL=http://decryption-component:4003
+      # The source's decryption keys and BSNk's scheme keys. Demo keys for the
+      # sources' OIN are in the image; a deployment mounts its own.
+      - SUBJECT_KEYS_DIR=/app/config/demo-keys
       - OWN_PEER_OIN=99999999900000000200
       - PSEUDONYM_VARS=bsn
       - LDV_LOGBOOK_URL=http://logboek-lvg:4016
       - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
       - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY_LVG:-local-demo-pseudonym-key-lvg}
-      - LDV_RESOLUTION_ACTIVITY=https://logboek.lvg.test/verwerkingsactiviteiten/lvg-pi-bsn-resolutie/v1
+      - LDV_DECRYPTION_ACTIVITY=https://logboek.lvg.test/verwerkingsactiviteiten/lvg-identiteit-ontsleuteling/v1
       - LDV_FORWARD_ACTIVITY=https://logboek.lvg.test/verwerkingsactiviteiten/lvg-bronquery-doorgifte/v1
-      - LDV_BSNK_NEXT_LOGBOOK_ID=https://github.com/ICTU/GBO-demo/tree/main/services/bsnk-mock
     volumes:
       - ldv-outbox-lvg-sidecar:/data
+    # Only the Inways of the source reach the sidecar (source-gateways), and
+    # the sidecar reaches only what serves the source (sources): it is not on
+    # the networks the service providers use, and it publishes no port. The
+    # sidecar acts on a consent token after the PDP's allow; a caller that
+    # could reach it directly would skip that decision.
     networks:
-      - backend
-      - fsc-infra
+      - sources
+      - source-gateways
     depends_on:
       lvg-graphql-server:
         condition: service_healthy
-      bsnk-mock:
+      decryption-component:
         condition: service_healthy
       logboek-lvg:
         condition: service_healthy
@@ -953,7 +993,17 @@ services:
       - BSNK_URL=http://bsnk-mock:4003
       - CONSENT_URL=http://consent-register:4002
       - DEV_PORTAL_BACKEND_URL=http://dev-portal-backend:4007
-      # LDV: the BSN→PI pseudonymisation at consent intake is GBO's own
+      # The sources a consent token carries an encrypted identity for, as
+      # <OIN>@<version of the source's keys>. BSNk makes those values only
+      # while the citizen is present, so every source that will answer has to
+      # be named here. The demo's sources share one OIN.
+      - CONSENT_SOURCES=${CONSENT_SOURCES:-99999999900000000200@20260101}
+      # The portal's own reference to a citizen is an HMAC of the BSN under
+      # this secret; without it the reference could be recomputed from a list
+      # of BSNs. The version names the key and is part of every reference.
+      - SUBJECT_REF_KEY=${SUBJECT_REF_KEY:-local-demo-subject-ref-key-not-a-secret}
+      - SUBJECT_REF_KEY_VERSION=${SUBJECT_REF_KEY_VERSION:-1}
+      # LDV: the pseudonymisation at consent intake is GBO's own
       # Dataverwerking — the one that makes every processing after it BSN-free.
       # It shares a logbook with the consent register: one system, one logbook.
       - LDV_LOGBOOK_URL=http://logboek-toestemming:4016
@@ -1653,6 +1703,16 @@ networks:
   backend:
   dvtp-onboarding:
   eudi:
+  # What serves the sources: the sidecars, the source services, the
+  # decryption component and the logbooks they write to. No service provider
+  # is on it.
+  sources:
+  # The network between the Inways of the sources and the sidecars behind
+  # them. The fsc-infra project owns it; a worktree running its own fsc-infra
+  # sets FSC_SOURCE_GATEWAY_NETWORK=<that project>_source-gateways in .env.
+  source-gateways:
+    name: ${FSC_SOURCE_GATEWAY_NETWORK:-fsc-infra_source-gateways}
+    external: true
   fsc-infra:
     # Which fsc-infra compose project to join. Defaults to the shared
     # single-tenant instance; a worktree running its own fsc-infra sets

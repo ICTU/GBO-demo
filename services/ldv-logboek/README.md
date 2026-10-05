@@ -140,7 +140,8 @@ and `dpl.core.data_subject_id_type` says which pseudonym space it lives in:
 
 | type | meaning |
 | --- | --- |
-| `pi` | the polymorphic identity a consumer holds. It travels to the source, but the source logs under a pseudonym of its own |
+| `consent-id` | the consent a service provider acted under. It holds no identifier of the citizen: the consent token carries the citizen only in values encrypted for the sources. A consent is about exactly one citizen, which the consent register knows |
+| `pi` | a polymorphic identity from BSNk. Accepted, but no component in the demo names a Betrokkene by one |
 | `logboek-pseudoniem` | a key-derived, logbook-local reference, derived with the Verantwoordelijke's own key: what a source names the Betrokkene by, and what the EUDI adapter uses |
 | `portal-subject` | the portal-scoped reference the consent portal derives, and the only identifier the consent register ever holds |
 | `brp-persoon-id` | RvIG's own record identifier, for someone named in a certificate about another person |
@@ -194,7 +195,7 @@ The Belastingdienst's ([`verwerkingsactiviteiten-bd.json`](config/verwerkingsact
 
 | reference | Dataverwerking | logged by |
 | --- | --- | --- |
-| `bd-pi-bsn-resolutie@v1` | PI → BSN resolution | `bron-sidecar` |
+| `bd-identiteit-ontsleuteling@v1` | reading the encrypted identity from the consent token | `bron-sidecar` |
 | `bd-bronquery-doorgifte@v1` | receiving and forwarding a bronbevraging | `bron-sidecar` |
 | `bd-ib-2025@v1` | verstrekking inkomensgegevens IB 2025 | `graphql-server` |
 | `bd-ib-2024@v1` | verstrekking inkomensgegevens IB 2024 | `graphql-server` |
@@ -203,7 +204,7 @@ RvIG's ([`verwerkingsactiviteiten-brp.json`](config/verwerkingsactiviteiten-brp.
 
 | reference | Dataverwerking | logged by |
 | --- | --- | --- |
-| `brp-pi-bsn-resolutie@v1` | PI → BSN resolution | `brp-sidecar` |
+| `brp-identiteit-ontsleuteling@v1` | reading the encrypted identity from the consent token | `brp-sidecar` |
 | `brp-bronquery-doorgifte@v1` | receiving and forwarding a bronbevraging | `brp-sidecar` |
 | `brp-akte-overlijden@v1` | verstrekking akte van overlijden | `brp-graphql-server` |
 | `brp-persoonsgegevens-verstrekking@v1` | verstrekking BRP-persoonsgegevens | `brp-graphql-server` |
@@ -218,7 +219,7 @@ GBO's own, for `logboek-toestemming` ([`verwerkingsactiviteiten-toestemming.json
 
 | reference | Dataverwerking | logged by |
 | --- | --- | --- |
-| `gbo-bsn-pseudonimisering@v1` | BSN → PI + portal-scoped reference at consent intake | `consent-portal-backend` |
+| `gbo-bsn-pseudonimisering@v1` | BSN → the portal's own reference (an HMAC), and at consent intake an encrypted identity per source | `consent-portal-backend` |
 | `gbo-toestemming-verlenen@v1` | recording a consent | `consent-register` |
 | `gbo-toestemming-intrekken@v1` | revoking a consent | `consent-register` |
 | `gbo-toestemming-status@v1` | confirming a consent's status to the PDP | `consent-register` |
@@ -341,9 +342,9 @@ Producer configuration:
 | `LDV_OUTBOX_PATH` | where the local spool lives; must be on a volume that survives a restart |
 | `LDV_WRITE_TOKEN` | must match the logbook's |
 | `LDV_SUBJECT_PSEUDONYM_KEY` | key for `logboek-pseudoniem` derivation |
-| `LDV_RESOLUTION_ACTIVITY`, `LDV_FORWARD_ACTIVITY` | `bron-sidecar`/`brp-sidecar` only — the same image runs in front of every bron, and each bron's register names its activities in its own terms |
+| `LDV_DECRYPTION_ACTIVITY`, `LDV_FORWARD_ACTIVITY` | `bron-sidecar`/`brp-sidecar` only — the same image runs in front of every bron, and each bron's register names its activities in its own terms |
 | `LDV_YEAR_ACTIVITY_TEMPLATE` | `graphql-server` only, e.g. `bd-ib-%d@v1` |
-| `LDV_BSNK_NEXT_LOGBOOK_ID` | sidecars and `consent-portal-backend` — where BSNk's side of a transform can be looked up, set as `dpl.read.nextLogbookId` on the record of the call. BSNk has no read API in the demo, so it is a page about the mock, the fallback the read extension allows |
+| `LDV_BSNK_NEXT_LOGBOOK_ID` | `consent-portal-backend` only — where BSNk's side of a consent intake can be looked up, set as `dpl.read.nextLogbookId` on that record. Deriving the portal's own reference and a source reading its value call nobody, so their records point nowhere. BSNk has no read API in the demo, so it is a page about the mock, the fallback the read extension allows |
 
 `consent-register` and `consent-portal-backend` need no
 `LDV_SUBJECT_PSEUDONYM_KEY`: neither ever holds a BSN in a record, so there is
@@ -456,20 +457,21 @@ because what it did was GBO's processing, not BD's.
 
 | Component | Logboek | Verwerkingsactiviteit | Betrokkene heet daar |
 |---|---|---|---|
-| `dienstverlener-backend` | afnemer | `hbv-inkomensgegevens-opvragen` | `pi` |
-| `bron-sidecar` | bd | `bd-pi-bsn-resolutie`, `bd-bronquery-doorgifte` | `logboek-pseudoniem` |
+| `dienstverlener-backend` | afnemer | `hbv-inkomensgegevens-opvragen` | `consent-id` |
+| `bron-sidecar` | bd | `bd-identiteit-ontsleuteling`, `bd-bronquery-doorgifte` | `logboek-pseudoniem` |
 | `graphql-server` | bd | `bd-ib-2024`, `bd-ib-2025` | `logboek-pseudoniem` |
-| `brp-sidecar` | brp | `brp-pi-bsn-resolutie`, `brp-bronquery-doorgifte` | `logboek-pseudoniem` |
+| `brp-sidecar` | brp | `brp-identiteit-ontsleuteling`, `brp-bronquery-doorgifte` | `logboek-pseudoniem` |
 | `brp-graphql-server` | brp | `brp-akte-overlijden`, `brp-persoonsgegevens-verstrekking` | `logboek-pseudoniem`, `brp-persoon-id` |
 | `consent-register` | toestemming | `gbo-toestemming-verlenen`, `-intrekken`, `-status`, `-inzage` | `portal-subject` |
 | `consent-portal-backend` | toestemming | `gbo-bsn-pseudonimisering` | `portal-subject` |
 | `eudi-adapter` | eudi-adapter | `gbo-pid-bsn-extractie`, `gbo-attestatie-samenstellen` | `logboek-pseudoniem` |
 
 The last column is the part that surprises people. **The same citizen has a
-different name in every logbook**, by design — `PI-70e1c7ef…` at Hypotheek-BV,
-`LP-5b1f0e8a…` at the Belastingdienst, `EP-c44cade3…` at GBO — and no party
-holds the mapping. The PI travels to the source, but the source logs under a
-pseudonym of its own, so no identifier is shared between two logbooks. That
+different name in every logbook**, by design — the consent `c-5d0e2b71…` at
+Hypotheek-BV, `LP-5b1f0e8a…` at the Belastingdienst, `EP-c44cade3…` at GBO —
+and no party holds the mapping. Hypotheek-BV holds no identifier of the
+citizen at all, and the source logs under a pseudonym of its own, so no
+identifier is shared between two logbooks. That
 is what stops the logbooks from being reassembled into the central register
 LDV exists to avoid. It is also what makes citizen inzage a real
 design problem rather than a query: see [Scope](#scope).
@@ -482,7 +484,7 @@ worth knowing by heart because it is the shape you check a change against:
 | Logboek | Records | Which |
 |---|---|---|
 | `logboek-afnemer` | 1 | `inkomensgegevens-opvragen`, pointing at `logboek-bd` |
-| `logboek-bd` | 4 | `pi-bsn-resolutie`, `bronquery-doorgifte`, `bd-ib-2024`, `bd-ib-2025` |
+| `logboek-bd` | 4 | `identiteit-ontsleuteling`, `bronquery-doorgifte`, `bd-ib-2024`, `bd-ib-2025` |
 | `logboek-brp` | 0 | the flow never touches the BRP |
 | `logboek-toestemming` | 1 | `toestemming-status` |
 | `logboek-eudi-adapter` | 0 | the flow never touches the adapter |
@@ -496,9 +498,9 @@ the call:
 
 ```
 trace 0af7651916cd43dd8448eb211c80319c
-└── bd-bronquery-doorgifte@v1   bron-sidecar   subject LP-5b1f0e8a… (logboek-pseudoniem)
-    ├── bd-pi-bsn-resolutie@v1  bron-sidecar   subject LP-5b1f0e8a… (logboek-pseudoniem)
-    └── bd-ib-2025@v1           graphql-server subject LP-5b1f0e8a… (logboek-pseudoniem)
+└── bd-bronquery-doorgifte@v1           bron-sidecar   subject LP-5b1f0e8a… (logboek-pseudoniem)
+    ├── bd-identiteit-ontsleuteling@v1  bron-sidecar   subject LP-5b1f0e8a… (logboek-pseudoniem)
+    └── bd-ib-2025@v1                   graphql-server subject LP-5b1f0e8a… (logboek-pseudoniem)
 ```
 
 For a request that crosses FSC once, the same value is the transaction id on
@@ -575,11 +577,11 @@ One DvTP query, as the running demo produces it:
 
 ```
 Hypotheek-BV — 1 record · startpunt
-  inkomensgegevens-opvragen [hbv-inkomensgegevens-opvragen@v1]  PI-70e1c7ef… (pi)  → Belastingdienst
+  inkomensgegevens-opvragen [hbv-inkomensgegevens-opvragen@v1]  c-5d0e2b71… (consent-id)  → Belastingdienst
 Belastingdienst — 3 records · via nextLogbookId uit Hypotheek-BV
-  bronquery-doorgifte   [bd-bronquery-doorgifte@v1]  LP-5b1f0e8a… (logboek-pseudoniem)
-    pi-bsn-resolutie    [bd-pi-bsn-resolutie@v1]     LP-5b1f0e8a… (logboek-pseudoniem)
-    bronbevraging       [bd-ib-2025@v1]              LP-5b1f0e8a… (logboek-pseudoniem)
+  bronquery-doorgifte          [bd-bronquery-doorgifte@v1]       LP-5b1f0e8a… (logboek-pseudoniem)
+    identiteit-ontsleuteling   [bd-identiteit-ontsleuteling@v1]  LP-5b1f0e8a… (logboek-pseudoniem)
+    bronbevraging              [bd-ib-2025@v1]                   LP-5b1f0e8a… (logboek-pseudoniem)
 GBO, logboek-toestemming — 1 record · geen pointer naartoe
   toestemming-status    [gbo-toestemming-status@v1]  EP-c44cade3… (portal-subject)
 Zonder records voor deze trace: GBO (logboek-eudi-adapter), RvIG

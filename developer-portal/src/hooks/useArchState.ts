@@ -15,6 +15,10 @@ export type ArchStates = Record<string, NodeState>
 
 // --------- Issuance ---------
 
+function isBSNkCall(url: string): boolean {
+  return url.includes('/v2/activate') || url.includes('/v2/transform')
+}
+
 export function statesForIssuance(res: IssuanceResponse | null, error: boolean): ArchStates {
   if (error) {
     return { actor: 'green', s02: 'red', bsnk: 'grey', s01: 'grey' }
@@ -24,7 +28,10 @@ export function statesForIssuance(res: IssuanceResponse | null, error: boolean):
   const calls = res.api_calls ?? []
   for (const c of calls) {
     const ok = c.status >= 200 && c.status < 300
-    if (c.url.includes('/pseudonymize')) states.bsnk = ok ? 'green' : 'red'
+    // BSNk is called once or twice: activate (at a citizen's first consent
+    // only) and transform. One failure makes the node red, whatever came
+    // before it.
+    if (isBSNkCall(c.url)) states.bsnk = ok && states.bsnk !== 'red' ? 'green' : 'red'
     else if (c.url.includes('/consents')) states.s01 = ok ? 'green' : 'red'
   }
   // If BSNk failed, S01 was never touched → stays grey (no update above).
@@ -36,13 +43,13 @@ export function statesForIssuance(res: IssuanceResponse | null, error: boolean):
 export function statesForUse(res: UseResponse | null, error: boolean): ArchStates {
   // DvTP now follows the same AuthZen path as EUDI. Nodes:
   //   afnemer → outway → outway-manager (branch) → bd-inway →
-  //   pdp → opa (branch) + consent-pip (branch) → sidecar → bsnk (branch) → bron
+  //   pdp → opa (branch) + consent-pip (branch) → sidecar → decryption (branch) → bron
   if (error) {
     return {
       afnemer: 'red',
       outway: 'grey', 'outway-manager': 'grey', 'bd-inway': 'grey',
       pdp: 'grey', opa: 'grey', 'consent-pip': 'grey',
-      sidecar: 'grey', bsnk: 'grey', bron: 'grey',
+      sidecar: 'grey', decryption: 'grey', bron: 'grey',
     }
   }
   if (!res) return {}
@@ -50,7 +57,7 @@ export function statesForUse(res: UseResponse | null, error: boolean): ArchState
     return {
       afnemer: 'green', outway: 'green', 'outway-manager': 'green', 'bd-inway': 'green',
       pdp: 'green', opa: 'green', 'consent-pip': 'green',
-      sidecar: 'green', bsnk: 'green', bron: 'green',
+      sidecar: 'green', decryption: 'green', bron: 'green',
     }
   }
   // DENY — default: the chain ran up to OPA and denied there.
@@ -58,7 +65,7 @@ export function statesForUse(res: UseResponse | null, error: boolean): ArchState
   let s: ArchStates = {
     afnemer: 'green', outway: 'green', 'outway-manager': 'green', 'bd-inway': 'green',
     pdp: 'green', 'consent-pip': 'green',
-    opa: 'red', sidecar: 'grey', bsnk: 'grey', bron: 'grey',
+    opa: 'red', sidecar: 'grey', decryption: 'grey', bron: 'grey',
   }
 
   // Consent-lookup failed at the afnemer-backend (before the FSC-hop).
@@ -67,7 +74,7 @@ export function statesForUse(res: UseResponse | null, error: boolean): ArchState
       afnemer: 'red',
       outway: 'grey', 'outway-manager': 'grey', 'bd-inway': 'grey',
       pdp: 'grey', opa: 'grey', 'consent-pip': 'grey',
-      sidecar: 'grey', bsnk: 'grey', bron: 'grey',
+      sidecar: 'grey', decryption: 'grey', bron: 'grey',
     }
   }
   // FSC transport errors (grant/inway) — outway or inway fails.
@@ -76,7 +83,7 @@ export function statesForUse(res: UseResponse | null, error: boolean): ArchState
       afnemer: 'green', outway: 'red',
       'outway-manager': 'grey', 'bd-inway': 'grey',
       pdp: 'grey', opa: 'grey', 'consent-pip': 'grey',
-      sidecar: 'grey', bsnk: 'grey', bron: 'grey',
+      sidecar: 'grey', decryption: 'grey', bron: 'grey',
     }
   }
   return s

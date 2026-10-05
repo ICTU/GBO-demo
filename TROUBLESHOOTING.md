@@ -71,9 +71,11 @@ regime, and its absence the PID regime — the two exclude each other by
 construction. So a deny that names a consent or PID axis is about the
 request, not about a missing grant property.
 
-One property still travels in `prp`: the bron-sidecar reads
-`prp.subject_id_type` to decide whether to resolve PI to BSN. Decode the token
-to see what the provider Manager actually issued:
+The bron-sidecar follows the same evidence: with a consent token it puts the
+citizen of that consent in the place of the placeholder, and without one it
+passes the request through. It reads no grant property. The seeds still put
+`subject_id_type` in `prp`; nothing acts on it. Decode the token to see what
+the provider Manager actually issued:
 
 ```bash
 docker compose logs --no-log-prefix openftv-pdp | grep -o 'Bearer [A-Za-z0-9._-]*' | tail -1 \
@@ -82,10 +84,8 @@ docker compose logs --no-log-prefix openftv-pdp | grep -o 'Bearer [A-Za-z0-9._-]
 ```
 
 An empty or missing `prp` means the connection contract carries no grant
-properties. That is expected for the metadata services, which need none; for a
-data service it means the sidecar falls back to pass-through, so a
-`subject_id_type: pseudonym` source will not resolve PI to BSN. Contracts
-predating the move of `subject_id_type` from the retired
+properties. That is expected for the metadata services, which need none.
+Contracts predating the move of `subject_id_type` from the retired
 `additional-claims-service` back into the grant are such contracts.
 Re-run the seed — it detects the property mismatch, creates a new contract
 (contracts are immutable) and repoints the grant-link.

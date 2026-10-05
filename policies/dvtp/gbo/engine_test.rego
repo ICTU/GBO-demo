@@ -5,30 +5,43 @@ import data.dvtp.gbo
 # Engine-level ctx-shape. The consent is resolved by the policy itself
 # (data.dvtp.gbo.consent, covered end to end in consent_test.rego); these
 # tests stand a resolved consent in for it with `with`, so they exercise the
-# engine alone. The engine mirrors the consent's pi onto ctx.resource for
+# engine alone. The engine puts the subject placeholder on ctx.resource for
 # the constraint-binding rule.
 
-_pip_consent := {"context_valid": true, "status_available": true, "exists": true, "withdrawn": false, "granted_scopes": ["bd:ib:2025"], "valid_until": "2030-01-01T00:00:00Z", "pi": "PI-abc123", "dienstverlener_oin": "peer-oin-123"}
+_pip_consent := {"context_valid": true, "status_available": true, "exists": true, "withdrawn": false, "granted_scopes": ["bd:ib:2025"], "valid_until": "2030-01-01T00:00:00Z", "dienstverlener_oin": "peer-oin-123"}
 
 _input := {
 	"subject": {"type": "org", "id": "peer-oin-123"},
-	"context": {"resource": {"variables": {"bsn": "PI-abc123"}}},
+	"context": {"resource": {"variables": {"bsn": "consent:subject"}}},
 }
 
 test_ctx_pip_carries_the_resolved_consent if {
 	ctx := gbo._ctx with input as _input with data.dvtp.gbo.consent.resolved as _pip_consent
 	ctx.pip.consent.exists == true
-	ctx.pip.consent.pi == "PI-abc123"
 }
 
-test_ctx_resource_pi_mirror if {
+test_ctx_resource_subject_is_the_placeholder if {
 	ctx := gbo._ctx with input as _input with data.dvtp.gbo.consent.resolved as _pip_consent
-	ctx.resource.pi == "PI-abc123"
+	ctx.resource.subject == "consent:subject"
 }
 
-test_ctx_resource_pi_empty_without_consent if {
+# Without a verified consent the placeholder stands for nobody.
+test_ctx_resource_subject_empty_without_consent if {
 	ctx := gbo._ctx with input as {"subject": {"type": "org", "id": "x"}, "context": {}}
-	ctx.resource.pi == ""
+	ctx.resource.subject == ""
+}
+
+test_ctx_resource_subject_empty_for_an_unverified_consent if {
+	ctx := gbo._ctx with input as _input with data.dvtp.gbo.consent.resolved as {"context_valid": false, "invalid_code": "CONSENT_SIGNATURE_INVALID"}
+	ctx.resource.subject == ""
+}
+
+# What a consent-based query must name its subject with is the policy's to
+# say. A request cannot move it by supplying its own.
+test_ctx_resource_subject_is_not_taken_from_the_request if {
+	req := {"subject": {"type": "org", "id": "x"}, "context": {"resource": {"subject": "999991772"}}}
+	ctx := gbo._ctx with input as req with data.dvtp.gbo.consent.resolved as _pip_consent
+	ctx.resource.subject == "consent:subject"
 }
 
 # A consent in input is not a consent the policy verified. Nothing upstream
@@ -37,7 +50,7 @@ test_ctx_resource_pi_empty_without_consent if {
 # under the PID regime.
 test_input_pip_consent_is_not_trusted if {
 	req := object.union(
-		_dvtp_input("bd:ib:2025", {"bsn": "PI-abc123", "belastingjaren.0": "2025"}),
+		_dvtp_input("bd:ib:2025", {"bsn": "consent:subject", "belastingjaren.0": "2025"}),
 		{"context": {"pip": {"consent": _consent}}},
 	)
 	ctx := gbo._ctx with input as req
@@ -109,7 +122,6 @@ _consent := {
 	"withdrawn": false,
 	"valid_until": "2030-01-01T00:00:00Z",
 	"granted_scopes": ["bd:ib:2025"],
-	"pi": "PI-abc123",
 	"dienstverlener_oin": "99999999900000000300",
 }
 
@@ -135,24 +147,38 @@ _dvtp_input(scope, args) := {
 }
 
 test_dvtp_deny_surfaces_year_not_covered if {
-	result := gbo.response with input as _dvtp_input("bd:ib:2025", {"bsn": "PI-abc123", "belastingjaren.0": "2024"})
+	result := gbo.response with input as _dvtp_input("bd:ib:2025", {"bsn": "consent:subject", "belastingjaren.0": "2024"})
 		with data.dvtp.gbo.consent.resolved as _consent
 	result.decision == false
 	result.context.reason_admin.code == "YEAR_NOT_COVERED"
 }
 
 test_dvtp_deny_surfaces_consent_scope_mismatch if {
-	result := gbo.response with input as _dvtp_input("bd:ib:2023", {"bsn": "PI-abc123", "belastingjaren.0": "2025"})
+	result := gbo.response with input as _dvtp_input("bd:ib:2023", {"bsn": "consent:subject", "belastingjaren.0": "2025"})
 		with data.dvtp.gbo.consent.resolved as _consent
 	result.decision == false
 	result.context.reason_admin.code == "CONSENT_SCOPE_MISMATCH"
 }
 
 test_dvtp_deny_surfaces_constraint_mismatch if {
-	result := gbo.response with input as _dvtp_input("bd:ib:2025", {"bsn": "PI-other", "belastingjaren.0": "2025"})
+	result := gbo.response with input as _dvtp_input("bd:ib:2025", {"bsn": "999991772", "belastingjaren.0": "2025"})
 		with data.dvtp.gbo.consent.resolved as _consent
 	result.decision == false
 	result.context.reason_admin.code == "CONSTRAINT_MISMATCH"
+}
+
+# The Inway hands the request body to the PDP only when Content-Type is
+# exactly application/json. With anything else, a charset parameter included,
+# the PDP sees no query: there are no fields, so no rule applies and the
+# request is denied, however valid its consent.
+test_a_request_whose_body_the_pdp_did_not_see_is_denied if {
+	req := {
+		"subject": {"type": "org", "id": "99999999900000000300"},
+		"context": {"time": "2026-07-06T12:00:00Z", "resource": {"scope": "bd:ib:2025"}},
+	}
+	result := gbo.response with input as req with data.dvtp.gbo.consent.resolved as _consent
+	result.decision == false
+	result.context.reason_admin.code == "NO_APPLICABLE_RULE"
 }
 
 # ── Deny-reason surfacing for PID-based requests ─────────────────────────
@@ -199,7 +225,7 @@ test_eudi_deny_surfaces_actor_not_allowed if {
 # when one regime is defined as the absence of the other.
 
 test_dvtp_allow_grants_via_consent_rule if {
-	result := gbo.response with input as _dvtp_input("bd:ib:2025", {"bsn": "PI-abc123", "belastingjaren.0": "2025"})
+	result := gbo.response with input as _dvtp_input("bd:ib:2025", {"bsn": "consent:subject", "belastingjaren.0": "2025"})
 		with data.dvtp.gbo.consent.resolved as _consent
 	result.decision == true
 	result.context.granted[0].rule == "DVT0001"
@@ -208,7 +234,7 @@ test_dvtp_allow_grants_via_consent_rule if {
 # The decision log records the consent the decision was taken on: it is not
 # in input, so the response document carries it.
 test_dvtp_response_carries_the_consent if {
-	result := gbo.response with input as _dvtp_input("bd:ib:2025", {"bsn": "PI-abc123", "belastingjaren.0": "2025"})
+	result := gbo.response with input as _dvtp_input("bd:ib:2025", {"bsn": "consent:subject", "belastingjaren.0": "2025"})
 		with data.dvtp.gbo.consent.resolved as _consent
 	result.context.pip.consent == _consent
 }
@@ -225,7 +251,7 @@ test_no_consent_token_puts_the_request_under_the_pid_regime if {
 			"pip": {},
 			"resolved": {
 				"fields": [{"id": "aangifte.box1", "parent": "AangifteIH", "name": "box1Inkomen", "scalar": false}],
-				"args": {"bsn": "PI-abc123", "vars.bsn": "PI-abc123", "belastingjaren.0": "2025"},
+				"args": {"bsn": "consent:subject", "vars.bsn": "consent:subject", "belastingjaren.0": "2025"},
 			},
 		},
 	}
@@ -328,7 +354,7 @@ _registered := {_integrator: {
 }}
 
 _delegated_input(integrator) := object.union(
-	_dvtp_input("bd:ib:2025", {"bsn": "PI-abc123", "belastingjaren.0": "2025"}),
+	_dvtp_input("bd:ib:2025", {"bsn": "consent:subject", "belastingjaren.0": "2025"}),
 	{"subject": {
 		"type": "identity",
 		"id": integrator,
@@ -374,7 +400,7 @@ test_input_pip_integrator_is_not_trusted if {
 
 # A direct call carries no mandate into the rules' context at all.
 test_direct_call_carries_no_integrator_pip if {
-	ctx := gbo._ctx with input as _dvtp_input("bd:ib:2025", {"bsn": "PI-abc123", "belastingjaren.0": "2025"})
+	ctx := gbo._ctx with input as _dvtp_input("bd:ib:2025", {"bsn": "consent:subject", "belastingjaren.0": "2025"})
 		with data.dvtp.gbo.consent.resolved as _consent
 		with data.entities.dvtp_participant as _registered
 	not ctx.pip.integrator

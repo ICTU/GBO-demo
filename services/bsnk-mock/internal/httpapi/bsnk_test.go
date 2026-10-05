@@ -17,7 +17,6 @@ import (
 	"testing"
 	"time"
 
-	"bsnk-mock/internal/legacy"
 	"bsnk-mock/internal/polymorphic"
 )
 
@@ -37,7 +36,7 @@ func newTestServer(t *testing.T, randomize bool) *httptest.Server {
 	if err != nil {
 		t.Fatalf("polymorphic.New: %v", err)
 	}
-	srv := httptest.NewServer(NewMux(legacy.NewStore(), mock, randomize))
+	srv := httptest.NewServer(NewMux(mock, randomize))
 	t.Cleanup(srv.Close)
 	return srv
 }
@@ -424,7 +423,7 @@ func TestTheBSNAuthorisationListIsPublished(t *testing.T) {
 
 func TestEndpointsRejectOtherMethods(t *testing.T) {
 	srv := newTestServer(t, false)
-	for _, path := range []string{"/v2/activate", "/v2/transform", "/v2/provide-dv-keys", "/signed-encrypted-identity", "/signed-encrypted-pseudonym", "/pseudonymize", "/transform"} {
+	for _, path := range []string{"/v2/activate", "/v2/transform", "/v2/provide-dv-keys", "/signed-encrypted-identity", "/signed-encrypted-pseudonym"} {
 		resp, err := http.Get(srv.URL + path)
 		if err != nil {
 			t.Fatalf("GET %s: %v", path, err)

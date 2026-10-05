@@ -48,6 +48,16 @@ ALTER TABLE consents DROP COLUMN IF EXISTS pi;
 
 CREATE INDEX IF NOT EXISTS consents_subject_ref_status_idx
     ON consents (subject_ref, status);
+
+-- The polymorphic values the portal got when it activated a citizen, under
+-- the portal's reference to that citizen. Apart from the consents: no consent
+-- query reads them.
+CREATE TABLE IF NOT EXISTS subject_polymorphic (
+    subject_ref text PRIMARY KEY,
+    pi text NOT NULL,
+    pp text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
 `
 
 type PostgreSQLStore struct {
@@ -95,6 +105,27 @@ func NewPostgreSQLStore(ctx context.Context, databaseURL string) (*PostgreSQLSto
 
 func (s *PostgreSQLStore) Close() {
 	s.pool.Close()
+}
+
+func (s *PostgreSQLStore) PolymorphicFor(ctx context.Context, subjectRef string) (Polymorphic, bool, error) {
+	var values Polymorphic
+	err := s.pool.QueryRow(ctx, `SELECT pi, pp FROM subject_polymorphic WHERE subject_ref = $1`, subjectRef).Scan(&values.PI, &values.PP)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Polymorphic{}, false, nil
+	}
+	if err != nil {
+		return Polymorphic{}, false, err
+	}
+	return values, true, nil
+}
+
+// KeepPolymorphic keeps the first pair a reference gets.
+func (s *PostgreSQLStore) KeepPolymorphic(ctx context.Context, subjectRef string, values Polymorphic) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO subject_polymorphic (subject_ref, pi, pp) VALUES ($1, $2, $3)
+		ON CONFLICT (subject_ref) DO NOTHING
+	`, subjectRef, values.PI, values.PP)
+	return err
 }
 
 // Create stores a consent and its LDV record in one transaction, so neither

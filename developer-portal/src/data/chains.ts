@@ -21,8 +21,9 @@ export const ISSUANCE_CHAIN: NodeDef[] = [
 ]
 
 // USE chain (DvTP) — on real FSC. DvTP follows the same AuthZen path as
-// EUDI. Difference with EUDI: the sidecar substitutes PI→BSN
-// (subject_id_type=pseudonym from the grant-property).
+// EUDI. Difference with EUDI: the request carries a consent token and names
+// its subject with a placeholder; after the PDP's allow the sidecar puts the
+// BSN in its place, read from the token by the source's decryption component.
 //
 // The consumer's half is consumer-dependent: Hypotheek-BV asks the BD bron
 // through its own peer, the Installatie Register asks LVG through its own.
@@ -51,7 +52,7 @@ export function useBranches(consumer: Consumer = HYPOTHEEK_BV): NodeDef[] {
     { id: 'outway-manager', role: 'FSC · Manager', name: 'Contract + token', svc: consumer.managerSvc, branchOf: 'outway' },
     { id: 'consent-pip', role: 'S01 · PIP', name: 'Consent-PIP', svc: 'consent-register', branchOf: 'pdp' },
     { id: 'opa', role: 'PDP · engine', name: 'OpenFTV', svc: 'opa', branchOf: 'pdp' },
-    { id: 'bsnk', role: 'BSNk', name: 'PI → BSN', svc: 'bsnk-mock', branchOf: 'sidecar' },
+    { id: 'decryption', role: 'Bron · Decryptie', name: 'VI → BSN', svc: 'decryption-component', branchOf: 'sidecar' },
   ]
 }
 
@@ -59,8 +60,8 @@ export function useBranches(consumer: Consumer = HYPOTHEEK_BV): NodeDef[] {
 // OpenFSC. FSC-Inway is the PEP (via the built-in AuthZen plugin that
 // calls pdp-service directly). Same AuthZen path as DvTP; the difference is
 // the evidence the request carries — a disclosed PID here, a verified consent
-// token on the DvTP route — plus the subject_id_type grant-property (EUDI:
-// direct — sidecar pass-through).
+// token on the DvTP route. Without a consent token the sidecar passes the
+// request through.
 //
 // The last two nodes are bron-dependent: which register a run reads from
 // follows from the usecase (BD for the inkomensverklaringen, BRP for the akte

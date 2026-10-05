@@ -19,8 +19,11 @@ var ErrInvalidRecord = errors.New("invalid log record")
 // has to resolve the record later, and leaving it open is exactly how a raw
 // identifier ends up in the field.
 //
-//   - pi                  polymorphic identity from BSNk, the identifier the
-//     DvTP chain works with end to end
+//   - pi                  polymorphic identity from BSNk
+//   - consent-id          the consent a service provider acted under. It
+//     holds no identifier of the citizen: the consent token carries the
+//     citizen only in values encrypted for the sources. A consent is about
+//     exactly one citizen, which the consent register knows
 //   - logboek-pseudoniem  a logbook-local, key-derived pseudonym, used where a
 //     component holds only a BSN (the EUDI flow) and therefore has nothing
 //     else to name the Betrokkene by. A demo stand-in: it is stable within one
@@ -36,6 +39,7 @@ var ErrInvalidRecord = errors.New("invalid log record")
 //     logbook — a cross-organisation record would need a pseudonym.
 var SubjectIDTypes = map[string]bool{
 	"pi":                 true,
+	"consent-id":         true,
 	"logboek-pseudoniem": true,
 	"portal-subject":     true,
 	"brp-persoon-id":     true,

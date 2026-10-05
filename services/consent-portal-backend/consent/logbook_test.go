@@ -66,10 +66,9 @@ func TestGiveConsentLogsThePseudonymisation(t *testing.T) {
 	if processing.Activity != pseudonymisationActivity {
 		t.Errorf("activity = %q, want %q", processing.Activity, pseudonymisationActivity)
 	}
-	// The record names the Betrokkene by the portal-scoped reference it just
-	// derived — not the BSN it started from, and not the PI it produced for
-	// the dienstverlener.
-	if want := fakeSubjectRef(citizenBSN, testPortalOIN); processing.Subject != want {
+	// The record names the Betrokkene by the portal's own reference — not the
+	// BSN it started from, and not a value made for a source.
+	if want := subjectRefOf(t, citizenBSN); processing.Subject != want {
 		t.Errorf("subject = %q, want the portal-scoped reference %q", processing.Subject, want)
 	}
 	if processing.Failed {
@@ -83,9 +82,10 @@ func TestGiveConsentLogsThePseudonymisation(t *testing.T) {
 	}
 }
 
-// BSNk did the transform, so the record points at where BSNk's side of it can
-// be looked up.
-func TestThePseudonymisationPointsAtThePseudonymisationService(t *testing.T) {
+// Giving consent calls BSNk, so its record points at where BSNk's side of it
+// can be looked up. Listing derives the reference without calling anyone, so
+// its record points nowhere.
+func TestOnlyTheRecordOfACallToBSNkPointsAtBSNk(t *testing.T) {
 	portal, _, logbook := portalWithLogbook(t)
 	portal.PseudonymsLogbook = "https://example.test/bsnk"
 
@@ -103,10 +103,11 @@ func TestThePseudonymisationPointsAtThePseudonymisationService(t *testing.T) {
 	if len(recorded) != 2 {
 		t.Fatalf("recorded %d processings, want 2: %+v", len(recorded), recorded)
 	}
-	for _, processing := range recorded {
-		if processing.NextLogbook != "https://example.test/bsnk" {
-			t.Errorf("%s: next logbook = %q", processing.Name, processing.NextLogbook)
-		}
+	if got := recorded[0].NextLogbook; got != "https://example.test/bsnk" {
+		t.Errorf("giving consent: next logbook = %q, want BSNk", got)
+	}
+	if got := recorded[1].NextLogbook; got != "" {
+		t.Errorf("listing: next logbook = %q, want none", got)
 	}
 }
 

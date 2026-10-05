@@ -97,6 +97,8 @@ func statusFor(err error) int {
 		return http.StatusNotFound
 	case errors.Is(err, consent.ErrNotOwned):
 		return http.StatusForbidden
+	case errors.Is(err, consent.ErrInvalidBSN):
+		return http.StatusBadRequest
 	default:
 		return http.StatusBadGateway
 	}

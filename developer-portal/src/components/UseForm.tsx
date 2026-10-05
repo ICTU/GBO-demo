@@ -20,10 +20,10 @@ const DEFAULT_FIELDS = [
 // + `fields` (buildQuery in dienstverlener-backend/consumer/kind.go): Bedrag-fields
 // are wrapped in an `... on AangifteIH` fragment, and the year filter
 // travels inside the query so the PDP can enforce per-year consent. The
-// query always contains `$bsn: BSN!` — the PI gets filled in by the backend
-// from the consent-token and travels to HV-Outway as `variables.bsn`. The
-// sidecar at the source resolves PI→BSN (subject_id_type=pseudonym in the
-// grant-property).
+// query always contains `$bsn: BSN!` — the backend puts the placeholder for
+// the consent's subject in `variables.bsn`, which is what travels to
+// HV-Outway. After the PDP's allow, the sidecar at the source puts the BSN in
+// its place, read from the consent token.
 function previewQuery(fields: string[], jaren: number[]): string {
   const bedrag = fields.filter((f) => ['verzamelinkomen', 'box1Inkomen', 'box2Inkomen', 'box3Inkomen'].includes(f))
   const plain = fields.filter((f) => !bedrag.includes(f))
@@ -36,7 +36,7 @@ function previewQuery(fields: string[], jaren: number[]): string {
 }
 
 // The Installatie Register's question to LVG (buildOwnershipQuery in
-// dienstverlener-backend/consumer/kind.go): the PI from the token in $bsn, the
+// dienstverlener-backend/consumer/kind.go): the placeholder in $bsn, the
 // VBO-id as asked. LVG answers with that VBO-id or null.
 const LVG_QUERY = `query($bsn: BSN!, $vboId: String!) {\n  vbo(bsn: $bsn, vboId: $vboId) {\n    vboId\n  }\n}`
 
@@ -168,7 +168,7 @@ export default function UseForm({ payload, setPayload, history }: Props) {
 
       <div className="field">
         <label>
-          GraphQL-query <span className="opt">(auto-generated; PI wordt in `variables.bsn` gezet vanuit het consent-token)</span>
+          GraphQL-query <span className="opt">(auto-generated; `variables.bsn` is de plaatshouder `consent:subject`, de bron zet er het BSN uit het consent-token voor in de plaats)</span>
         </label>
         <div className="ed-wrap">
           <div className="ed-bar">

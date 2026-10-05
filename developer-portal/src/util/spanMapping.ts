@@ -92,12 +92,13 @@ function nodesForSpan(span: SpanInfo, mode: Tab): string[] {
     }
   }
 
-  // USE-flow (DvTP) — runs on real FSC. The sidecar substitutes PI→BSN.
+  // USE-flow (DvTP) — runs on real FSC. The sidecar puts the BSN in the
+  // placeholder's place, read by the source's decryption component.
   switch (svc) {
     case 'pdp-service': return ['pdp']
     case 'opa': return ['opa']
     case 'consent-register': return ['consent-pip']
-    case 'bsnk-mock': return ['bsnk']
+    case 'decryption-component': return ['decryption']
   }
   // The consumer's backend and its bron: Hypotheek-BV with the BD pair, the
   // Installatie Register with the LVG pair. Which of the two a run was
@@ -114,7 +115,7 @@ function nodesForSpan(span: SpanInfo, mode: Tab): string[] {
 export const ISSUANCE_NODE_IDS = ['actor', 's02', 'bsnk', 's01']
 export const USE_NODE_IDS = [
   'afnemer', 'outway', 'outway-manager', 'bd-inway',
-  'pdp', 'opa', 'consent-pip', 'sidecar', 'bsnk', 'bron',
+  'pdp', 'opa', 'consent-pip', 'sidecar', 'decryption', 'bron',
 ]
 export const EUDI_ISSUANCE_NODE_IDS = [
   'wallet', 'demo-issuer', 'issuance-server',

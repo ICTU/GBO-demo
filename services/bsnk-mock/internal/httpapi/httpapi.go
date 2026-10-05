@@ -1,9 +1,8 @@
-// Package httpapi is the driving adapter of the mock: it serves the three
-// interfaces over HTTP and translates between JSON and the two cores. Every
-// rule lives in those cores; a handler here reads a request, calls one use
-// case and writes the answer.
+// Package httpapi is the driving adapter of the mock: it serves its two
+// interfaces over HTTP and translates between JSON and the core. Every rule
+// lives in the core; a handler here reads a request, calls one use case and
+// writes the answer.
 //
-//	first.go       the first interface, which the demo chain calls today
 //	bsnk.go        BSNk's own interface, as JSON instead of SOAP
 //	decryption.go  the interface of the decryption component a party runs
 package httpapi
@@ -12,7 +11,6 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"bsnk-mock/internal/legacy"
 	"bsnk-mock/internal/polymorphic"
 )
 
@@ -20,7 +18,23 @@ import (
 //
 // randomizeDefault applies when a request to BSNk does not say, with the
 // query parameter randomize, whether it wants values that differ every time.
-func NewMux(store *legacy.Store, mock *polymorphic.Mock, randomizeDefault bool) *http.ServeMux {
+func NewMux(mock *polymorphic.Mock, randomizeDefault bool) *http.ServeMux {
+	mux := NewDecryptionMux()
+
+	b := bsnk{mock: mock, randomizeDefault: randomizeDefault}
+	mux.HandleFunc("/v2/activate", post(b.activate))
+	mux.HandleFunc("/v2/transform", post(b.transform))
+	mux.HandleFunc("/v2/provide-dv-keys", post(b.provideDVKeys))
+	mux.HandleFunc("/v2/bsn-authorisation-list", get(b.authorisationList))
+	mux.HandleFunc("/v2/scheme-keys", get(b.schemeKeys))
+
+	return mux
+}
+
+// NewDecryptionMux builds the routing tree of the decryption component alone:
+// what a party runs for itself. It serves nothing of BSNk, so that a party
+// which is given only this cannot be calling BSNk.
+func NewDecryptionMux() *http.ServeMux {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -31,16 +45,6 @@ func NewMux(store *legacy.Store, mock *polymorphic.Mock, randomizeDefault bool) 
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
-
-	mux.HandleFunc("/pseudonymize", handlePseudonymize(store))
-	mux.HandleFunc("/transform", handleResolve(store))
-
-	b := bsnk{mock: mock, randomizeDefault: randomizeDefault}
-	mux.HandleFunc("/v2/activate", post(b.activate))
-	mux.HandleFunc("/v2/transform", post(b.transform))
-	mux.HandleFunc("/v2/provide-dv-keys", post(b.provideDVKeys))
-	mux.HandleFunc("/v2/bsn-authorisation-list", get(b.authorisationList))
-	mux.HandleFunc("/v2/scheme-keys", get(b.schemeKeys))
 
 	mux.HandleFunc("/signed-encrypted-identity", decryption(decryptIdentity))
 	mux.HandleFunc("/signed-encrypted-pseudonym", decryption(decryptPseudonym))

@@ -7,8 +7,10 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -17,13 +19,54 @@ import (
 
 const consentTokenType = "gbo-consent+jwt"
 
+// EncryptedSubject is the citizen as one party may read them: a value BSNk
+// made for that party's OIN and for one version of that party's keys. Only
+// that party can decrypt it, to the BSN or to its own pseudonym.
+type EncryptedSubject struct {
+	// IdentifierType is "Identity" for a value that decrypts to the BSN and
+	// "Pseudonym" for one that decrypts to the party's pseudonym.
+	IdentifierType string `json:"identifier_type"`
+	KeySetVersion  int    `json:"key_set_version"`
+	Value          string `json:"value"`
+}
+
+const (
+	identifierIdentity  = "Identity"
+	identifierPseudonym = "Pseudonym"
+)
+
+var partyOIN = regexp.MustCompile(`^[0-9]{20}$`)
+
+// validateEncryptedSubject checks the shape of what the token is about to
+// carry. Whether a value is genuine is not the register's to tell: BSNk
+// signed it, and the party it is for checks that when it decrypts.
+func validateEncryptedSubject(subject map[string]EncryptedSubject) error {
+	if len(subject) == 0 {
+		return errors.New("encrypted_subject is required (no plain BSN accepted)")
+	}
+	for oin, s := range subject {
+		if !partyOIN.MatchString(oin) {
+			return fmt.Errorf("encrypted_subject: %q is not an OIN of 20 digits", oin)
+		}
+		if s.IdentifierType != identifierIdentity && s.IdentifierType != identifierPseudonym {
+			return fmt.Errorf("encrypted_subject[%s]: identifier_type must be %s or %s", oin, identifierIdentity, identifierPseudonym)
+		}
+		if s.KeySetVersion <= 0 || s.Value == "" {
+			return fmt.Errorf("encrypted_subject[%s]: key_set_version and value are required", oin)
+		}
+	}
+	return nil
+}
+
 type ConsentClaims struct {
-	ConsentID        string       `json:"consent_id"`
-	PI               string       `json:"pi"`
-	Scopes           []string     `json:"scopes"`
-	ScopeEntries     []ScopeEntry `json:"scope_entries,omitempty"`
-	DienstverlenrOIN string       `json:"dienstverlener_oin"`
-	ValidUntil       string       `json:"valid_until"`
+	ConsentID string `json:"consent_id"`
+	// EncryptedSubject is keyed by the OIN of the party a value is for. The
+	// token names the citizen in no other way.
+	EncryptedSubject map[string]EncryptedSubject `json:"encrypted_subject"`
+	Scopes           []string                    `json:"scopes"`
+	ScopeEntries     []ScopeEntry                `json:"scope_entries,omitempty"`
+	DienstverlenrOIN string                      `json:"dienstverlener_oin"`
+	ValidUntil       string                      `json:"valid_until"`
 	jwt.RegisteredClaims
 }
 
@@ -75,11 +118,11 @@ func loadConsentSigningKey(path string) (*ecdsa.PrivateKey, error) {
 	return key, nil
 }
 
-func (i *ConsentIssuer) Sign(consent Consent, pi string) (string, error) {
+func (i *ConsentIssuer) Sign(consent Consent, subject map[string]EncryptedSubject) (string, error) {
 	now := i.now().UTC()
 	claims := ConsentClaims{
 		ConsentID:        consent.ConsentID,
-		PI:               pi,
+		EncryptedSubject: subject,
 		Scopes:           consent.Scopes,
 		ScopeEntries:     consent.ScopeEntries,
 		DienstverlenrOIN: consent.DienstverlenrOIN,

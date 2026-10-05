@@ -24,10 +24,10 @@ alleen bij een bevestiging legt IR de toegang voor de installateur vast.
 | `ir-backend` (9410) | `dienstverlener-backend` met `QUERY_KIND=lvg`: stelt de eigendomsvraag via FSC |
 | IR-peer `…1000` | eigen FSC-afnemer (`ir-*` in `fsc-infra`), zodat de actorbinding IR onderscheidt |
 | service `lvg` | extra logische bron op de gedeelde provider-peer `…0200`, achter `bd-inway`, zoals RvIG |
-| `lvg-sidecar` (9412) | `bron-sidecar`: PI → BSN |
+| `lvg-sidecar` (alleen bereikbaar voor de Inway) | `bron-sidecar`: plaatshouder → BSN, uit het consent-token |
 | `lvg-graphql-server` (9408) | mock-LVG: `vbo(bsn, vboId) { vboId }` |
 | `LVG0001` | policy-regel: dezelfde consentcontroles als DVT0001, scope vastgepind op `lvg:vbo:eigendom` |
-| `logboek-lvg` (9421) | Logboek Dataverwerkingen van LVG: PI-resolutie, doorgifte en de eigendomscheck |
+| `logboek-lvg` (9421) | Logboek Dataverwerkingen van LVG: ontsleuteling van de identiteit, doorgifte en de eigendomscheck |
 | `logboek-ir` (9422) | Logboek Dataverwerkingen van IR als afnemer, met `nextLogbookId` naar LVG |
 
 ## Flow
@@ -44,15 +44,15 @@ sequenceDiagram
     participant L as LVG
     K->>P: vraag toestemming (scope lvg:vbo:eigendom)
     B->>P: inloggen, akkoord
-    P->>R: consent met PI
+    P->>R: consent met versleutelde identiteit per bron
     R-->>P: consent-token
     P-->>K: consent-token
     B->>K: goedkeuren (IR-toestemming voor de installateur)
-    K->>PDP: vbo(PI, vboId) via IR-outway
+    K->>PDP: vbo(plaatshouder, vboId) via IR-outway
     PDP->>R: status?
     R-->>PDP: ACTIVE
     PDP->>S: ALLOW
-    Note over S: PI naar BSN via BSNk
+    Note over S: plaatshouder naar BSN, ontsleuteld uit het token
     S->>L: vbo(bsn, vboId)
     L-->>K: vboId of null
 ```
@@ -77,7 +77,7 @@ Verantwoordelijken:
 | Logboek | Verwerkingsactiviteit | Door |
 |---|---|---|
 | IR | `ir-eigendom-controleren` | `ir-backend`, met `nextLogbookId` naar LVG |
-| LVG | `lvg-pi-bsn-resolutie` | `lvg-sidecar`, met doorverwijzing naar BSNk |
+| LVG | `lvg-identiteit-ontsleuteling` | `lvg-sidecar` |
 | LVG | `lvg-bronquery-doorgifte` | `lvg-sidecar` |
 | LVG | `lvg-vbo-eigendom` | `lvg-graphql-server`, ook als het antwoord `null` is |
 

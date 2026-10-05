@@ -27,8 +27,9 @@ type Source struct {
 	Client *http.Client
 }
 
-// Ask sends the question. The body is plain GraphQL with variables.bsn = PI;
-// the sidecar at the source substitutes the BSN. 200 is an answer with data;
+// Ask sends the question. The body is plain GraphQL with the placeholder for
+// the consent's subject in variables.bsn; the sidecar at the source
+// substitutes the BSN. 200 is an answer with data;
 // any other status is a refusal, whose reason the Inway puts in `message`.
 func (s *Source) Ask(ctx context.Context, q consumer.Question) (consumer.Answer, error) {
 	body, err := json.Marshal(map[string]any{"query": q.Query, "variables": q.Variables})

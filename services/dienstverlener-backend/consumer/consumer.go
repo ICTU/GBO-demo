@@ -146,7 +146,7 @@ func (c *Consumer) Ask(ctx context.Context, req Request) (Result, error) {
 			At:       at,
 			Activity: c.Kind.Activity,
 			Name:     c.Kind.RecordName,
-			Subject:  claims.PI,
+			Subject:  claims.ConsentID,
 			Scope:    req.ScopeID,
 			Start:    start,
 			End:      c.now(),

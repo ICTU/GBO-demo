@@ -1,5 +1,6 @@
 // Package register talks to the consent register, which stores a portal-scoped
-// subject reference and sees PI only transiently while issuing a signed token.
+// subject reference and sees the encrypted values per party only transiently
+// while issuing a signed token.
 // There is no method here that accepts a BSN, and there must never be one.
 //
 // The adapter translates representations; it does not decide outcomes. No
@@ -29,10 +30,18 @@ func (c Client) Create(ctx context.Context, d consent.Draft) (consent.Record, er
 		ConsentID    string `json:"consent_id"`
 		ConsentToken string `json:"consent_token"`
 	}
-	// PI is transient token material. subject_ref is the only subject value the consent register
-	// persists and returns.
+	// The encrypted values are transient token material. subject_ref is the
+	// only subject value the consent register persists and returns.
+	encrypted := make(map[string]any, len(d.Subjects))
+	for _, subject := range d.Subjects {
+		encrypted[subject.Party.OIN] = map[string]any{
+			"identifier_type": subject.IdentifierType,
+			"key_set_version": subject.Party.KeySetVersion,
+			"value":           subject.Value,
+		}
+	}
 	_, err := c.Caller.DoPrivate(ctx, "Create Consent", http.MethodPost, c.Base+"/consents", map[string]any{
-		"pi":                 string(d.PI),
+		"encrypted_subject":  encrypted,
 		"subject_ref":        string(d.SubjectRef),
 		"dienstverlener_oin": d.DienstverlenerOIN,
 		"scopes":             d.Scopes,
@@ -70,6 +79,35 @@ func (c Client) Get(ctx context.Context, consentID string) (consent.Record, erro
 		return consent.Record{}, err
 	}
 	return recordFromRaw(raw), nil
+}
+
+// PolymorphicFor reads the polymorphic values kept for a citizen. They are
+// the portal's alone, so the call card shows no bodies.
+func (c Client) PolymorphicFor(ctx context.Context, subject consent.SubjectRef) (consent.Polymorphic, error) {
+	var out struct {
+		PI string `json:"pi"`
+		PP string `json:"pp"`
+	}
+	status, err := c.Caller.DoPrivate(ctx, "Find polymorphic values", http.MethodGet, c.polymorphicURL(subject), nil, &out)
+	if err != nil {
+		if status == http.StatusNotFound {
+			return consent.Polymorphic{}, consent.ErrNotFound
+		}
+		return consent.Polymorphic{}, err
+	}
+	return consent.Polymorphic{PI: out.PI, PP: out.PP}, nil
+}
+
+// KeepPolymorphic keeps the polymorphic values of a citizen's first
+// activation.
+func (c Client) KeepPolymorphic(ctx context.Context, subject consent.SubjectRef, values consent.Polymorphic) error {
+	_, err := c.Caller.DoPrivate(ctx, "Keep polymorphic values", http.MethodPut, c.polymorphicURL(subject),
+		map[string]string{"pi": values.PI, "pp": values.PP}, nil)
+	return err
+}
+
+func (c Client) polymorphicURL(subject consent.SubjectRef) string {
+	return c.Base + "/subjects/" + url.PathEscape(string(subject)) + "/polymorphic"
 }
 
 func (c Client) Revoke(ctx context.Context, consentID string) error {

@@ -29,9 +29,9 @@ const (
 	consentListActivity   = "https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-toestemming-inzage/v1"
 
 	// The portal-scoped subject reference. The register holds nothing else:
-	// no BSN, and deliberately no PI either — the PI travels only inside the
-	// signed consent token, so the reference that names a Betrokkene here is
-	// not the one the source chain works with. `data_subject_id_type` is what
+	// no BSN, and deliberately no encrypted value either — those travel only
+	// inside the signed consent token, so the reference that names a
+	// Betrokkene here is not one the source chain works with. `data_subject_id_type` is what
 	// makes that difference explicit rather than confusing (REQ-72).
 	ldvSubjectTypePortalSubject = "portal-subject"
 )

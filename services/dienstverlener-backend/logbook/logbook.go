@@ -15,6 +15,12 @@ import (
 	ldv "gbo-demo/ldv-client"
 )
 
+// subjectTypeConsent says that a record names the Betrokkene by the consent
+// the consumer acted under. The consumer has nothing else to name them by: the
+// consent token carries the citizen only in values encrypted for the sources.
+// A consent is about exactly one citizen, which the consent register knows.
+const subjectTypeConsent = "consent-id"
+
 // Logbook writes through the shared LDV client.
 type Logbook struct {
 	Client *ldv.Client
@@ -65,7 +71,7 @@ func (l *Logbook) Record(ctx context.Context, p consumer.Processing) error {
 		Status:    status,
 		StartTime: p.Start,
 		EndTime:   p.End,
-		Attributes: ldv.Attributes(p.Activity, p.Subject, ldv.SubjectTypePI, "", map[string]any{
+		Attributes: ldv.Attributes(p.Activity, p.Subject, subjectTypeConsent, "", map[string]any{
 			// Where this processing continues: the source logs its half of
 			// the request under the same trace id.
 			ldv.AttrNextLogbookID: l.NextLogbooks[source],

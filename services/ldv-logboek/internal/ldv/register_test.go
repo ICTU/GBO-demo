@@ -82,7 +82,7 @@ func TestShippedRegistersLoad(t *testing.T) {
 			path:              "../../config/verwerkingsactiviteiten-bd.json",
 			verantwoordelijke: "Belastingdienst",
 			references: []string{
-				"https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-pi-bsn-resolutie/v1",
+				"https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-identiteit-ontsleuteling/v1",
 				"https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-bronquery-doorgifte/v1",
 				"https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-ib-2025/v1",
 				"https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-ib-2024/v1",
@@ -92,7 +92,7 @@ func TestShippedRegistersLoad(t *testing.T) {
 			path:              "../../config/verwerkingsactiviteiten-brp.json",
 			verantwoordelijke: "RvIG",
 			references: []string{
-				"https://logboek.rvig.nl/verwerkingsactiviteiten/brp-pi-bsn-resolutie/v1",
+				"https://logboek.rvig.nl/verwerkingsactiviteiten/brp-identiteit-ontsleuteling/v1",
 				"https://logboek.rvig.nl/verwerkingsactiviteiten/brp-bronquery-doorgifte/v1",
 				"https://logboek.rvig.nl/verwerkingsactiviteiten/brp-akte-overlijden/v1",
 				"https://logboek.rvig.nl/verwerkingsactiviteiten/brp-persoonsgegevens-verstrekking/v1",

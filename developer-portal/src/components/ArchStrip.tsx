@@ -40,7 +40,7 @@ type Props = {
 function apiCallForNode(nodeId: string, calls: ApiCall[] | undefined): ApiCall | undefined {
   if (!calls) return undefined
   if (nodeId === 's02') return undefined // S02 is the "receiver" itself; no sub-call
-  if (nodeId === 'bsnk') return calls.find((c) => c.url.includes('/pseudonymize'))
+  if (nodeId === 'bsnk') return calls.find((c) => c.url.includes('/v2/transform'))
   if (nodeId === 's01') return calls.find((c) => c.url.includes('/consents'))
   return undefined
 }
@@ -122,8 +122,8 @@ export default function ArchStrip({
     }
 
     // Relay soothing: independent of the recorded decision, so it also fires on
-    // pre-OPA system errors (BSNk timeout, sidecar unreachable, …).
-    const downstreamRed = ['pdp', 'opa', 'consent-pip', 'sidecar', 'bsnk', 'bron']
+    // pre-OPA system errors (sidecar unreachable, …).
+    const downstreamRed = ['pdp', 'opa', 'consent-pip', 'sidecar', 'decryption', 'bron']
       .some((id) => out[id] === 'red')
     if (downstreamRed) {
       for (const id of ['afnemer', 'outway', 'outway-manager', 'bd-inway', 'edi-outway', 'edi-manager', 'eudi-adapter']) {

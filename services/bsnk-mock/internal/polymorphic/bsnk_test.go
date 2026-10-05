@@ -508,7 +508,7 @@ func TestAKeyFileHasTheHeadersOfARealOne(t *testing.T) {
 		"SchemeVersion": "1", "SchemeKeySetVersion": "1", "Type": "EI Decryption",
 		"Recipient": sourceX, "RecipientKeySetVersion": keys2026String,
 	}
-	if block.Type != "EC PRIVATE KEY" || len(block.Headers) != len(want) {
+	if block.Type != "BSNK MOCK DV KEY" || len(block.Headers) != len(want) {
 		t.Errorf("block type %q, headers %v", block.Type, block.Headers)
 	}
 	for k, v := range want {

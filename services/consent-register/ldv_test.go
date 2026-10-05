@@ -19,6 +19,16 @@ import (
 // derived by the portal; the register never sees the BSN behind it.
 const testSubjectRef = "EP-3f9a1c77b2"
 
+// What the portal hands over for the token: the citizen as one source may
+// read them. The register does not look inside the value.
+const testEncryptedValue = "dmFsdWUtdm9vci1kZS1icm9u"
+
+var testEncryptedSubject = map[string]any{
+	"99999999900000000200": map[string]any{
+		"identifier_type": "Identity", "key_set_version": 20260101, "value": testEncryptedValue,
+	},
+}
+
 // registerUnderTest returns the register's URL plus the pieces a test needs to
 // drain the outbox: records are committed with the mutation and delivered
 // afterwards, so a test asserts on both halves rather than on a single write.
@@ -94,7 +104,7 @@ func allGBOActivities() []string {
 func grant(t *testing.T, url string) string {
 	t.Helper()
 	body, err := json.Marshal(map[string]any{
-		"pi":                 "PI-abc123",
+		"encrypted_subject":  testEncryptedSubject,
 		"subject_ref":        testSubjectRef,
 		"dienstverlener_oin": "00000001234567890000",
 		"scopes":             []string{"bd:ib:2025"},
@@ -121,8 +131,8 @@ func grant(t *testing.T, url string) string {
 }
 
 // Recording a consent is a Dataverwerking of the voorziening, named by the
-// portal-scoped reference the register stores — never the PI, which exists
-// here only inside the signed token.
+// portal-scoped reference the register stores — never an encrypted value,
+// which exists here only inside the signed token.
 func TestGrantingAConsentIsLogged(t *testing.T) {
 	logbook := ldvtest.New(t, allGBOActivities()...)
 	url, store, client := registerUnderTest(t, logbook)
@@ -150,11 +160,11 @@ func TestGrantingAConsentIsLogged(t *testing.T) {
 	if got := record.Attributes["dpl.gbo.consentId"]; got != consentID {
 		t.Errorf("dpl.gbo.consentId = %v, want %s", got, consentID)
 	}
-	// The PI is authorization material for the dienstverlener, not an
-	// identifier this register may write down.
+	// The encrypted value is for the party it names, not an identifier this
+	// register may write down.
 	encoded, _ := json.Marshal(record)
-	if strings.Contains(string(encoded), "PI-abc123") {
-		t.Errorf("the PI leaked into the record: %s", encoded)
+	if strings.Contains(string(encoded), testEncryptedValue) {
+		t.Errorf("the encrypted subject leaked into the record: %s", encoded)
 	}
 }
 
@@ -304,7 +314,7 @@ func TestAFailedStoreLeavesNeitherConsentNorRecord(t *testing.T) {
 	defer server.Close()
 
 	body, err := json.Marshal(map[string]any{
-		"pi": "PI-abc123", "subject_ref": testSubjectRef,
+		"encrypted_subject": testEncryptedSubject, "subject_ref": testSubjectRef,
 		"dienstverlener_oin": "00000001234567890000", "scopes": []string{"bd:ib:2025"},
 	})
 	if err != nil {

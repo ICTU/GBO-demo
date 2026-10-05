@@ -14,7 +14,7 @@ import (
 
 // Happy-path integration test: create a consent, then fetch it by its
 // generated consent_id. Verifies the POST/GET handlers share the same
-// store while PI only exists inside the signed token.
+// store while the encrypted subject only exists inside the signed token.
 func TestCreateThenGetConsent(t *testing.T) {
 	issuer, err := NewConsentIssuer(config{
 		SigningKeyID: "test-key", TokenIssuer: "test-issuer", TokenAudience: "test-audience",
@@ -28,7 +28,7 @@ func TestCreateThenGetConsent(t *testing.T) {
 	defer srv.Close()
 
 	createBody := bytes.NewBufferString(`{
-		"pi": "PI-abc123",
+		"encrypted_subject": {"99999999900000000200": {"identifier_type": "Identity", "key_set_version": 20260101, "value": "dmFsdWU="}},
 		"subject_ref": "EP-portal-abc123",
 		"dienstverlener_oin": "00000001234567890000",
 		"scopes": ["bsn:read"],
@@ -57,8 +57,8 @@ func TestCreateThenGetConsent(t *testing.T) {
 	}
 	var createdRaw map[string]any
 	_ = json.Unmarshal(createdBody, &createdRaw)
-	if _, leaked := createdRaw["pi"]; leaked {
-		t.Fatalf("create response exposed standalone PI: %s", createdBody)
+	if _, leaked := createdRaw["encrypted_subject"]; leaked {
+		t.Fatalf("create response exposed the encrypted subject outside the token: %s", createdBody)
 	}
 	if created.ConsentID == "" {
 		t.Fatalf("empty consent_id in create response: %+v", created)
@@ -73,7 +73,8 @@ func TestCreateThenGetConsent(t *testing.T) {
 		t.Fatalf("issued consent token is invalid: %v", err)
 	}
 	claims := parsed.Claims.(*ConsentClaims)
-	if claims.PI != "PI-abc123" || claims.DienstverlenrOIN != "00000001234567890000" {
+	want := EncryptedSubject{IdentifierType: "Identity", KeySetVersion: 20260101, Value: "dmFsdWU="}
+	if claims.EncryptedSubject["99999999900000000200"] != want || claims.DienstverlenrOIN != "00000001234567890000" {
 		t.Fatalf("unexpected signed claims: %+v", claims)
 	}
 	if claims.ValidUntil == "" || claims.ID == "" || len(claims.Audience) != 1 {
@@ -107,8 +108,8 @@ func TestCreateThenGetConsent(t *testing.T) {
 	}
 	var raw map[string]any
 	_ = json.Unmarshal(fetchedBody, &raw)
-	if _, leaked := raw["pi"]; leaked {
-		t.Fatalf("persisted consent response leaked PI: %s", fetchedBody)
+	if _, leaked := raw["encrypted_subject"]; leaked {
+		t.Fatalf("persisted consent response leaked the encrypted subject: %s", fetchedBody)
 	}
 	if fetched.SubjectRef != "EP-portal-abc123" {
 		t.Fatalf("subject_ref mismatch: %q", fetched.SubjectRef)
@@ -124,8 +125,8 @@ func TestCreateThenGetConsent(t *testing.T) {
 	}
 	var statusRaw map[string]any
 	_ = json.Unmarshal(statusBody, &statusRaw)
-	if _, leaked := statusRaw["pi"]; leaked {
-		t.Fatalf("status response leaked PI: %s", statusBody)
+	if _, leaked := statusRaw["encrypted_subject"]; leaked {
+		t.Fatalf("status response leaked the encrypted subject: %s", statusBody)
 	}
 	if len(statusRaw) != 2 {
 		t.Fatalf("status response contains authorization details: %s", statusBody)
@@ -170,5 +171,42 @@ func TestPersistentStoreRequiresStableSigningKey(t *testing.T) {
 	t.Setenv("CONSENT_SIGNING_KEY_PATH", "")
 	if _, err := loadConfig(); err == nil {
 		t.Fatal("persistent consent store accepted an ephemeral signing key")
+	}
+}
+
+// A consent without a value for any party could never be answered by a
+// source, and a plain identifier in its place is refused.
+func TestCreateRefusesAConsentWithoutAnEncryptedSubject(t *testing.T) {
+	issuer, err := NewConsentIssuer(config{
+		SigningKeyID: "test-key", TokenIssuer: "test-issuer", TokenAudience: "test-audience",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(newMux(NewStore(), issuer, nil))
+	defer srv.Close()
+
+	for name, subject := range map[string]string{
+		"none":               ``,
+		"empty":              `"encrypted_subject": {},`,
+		"a plain identifier": `"pi": "PI-abc123",`,
+		"party is no OIN":    `"encrypted_subject": {"belastingdienst": {"identifier_type": "Identity", "key_set_version": 20260101, "value": "dmFsdWU="}},`,
+		"unknown type":       `"encrypted_subject": {"99999999900000000200": {"identifier_type": "BSN", "key_set_version": 20260101, "value": "dmFsdWU="}},`,
+		"no key set version": `"encrypted_subject": {"99999999900000000200": {"identifier_type": "Identity", "value": "dmFsdWU="}},`,
+		"no value":           `"encrypted_subject": {"99999999900000000200": {"identifier_type": "Identity", "key_set_version": 20260101}},`,
+	} {
+		body := bytes.NewBufferString(`{` + subject + `
+			"subject_ref": "EP-portal-abc123",
+			"dienstverlener_oin": "00000001234567890000",
+			"scopes": ["bsn:read"]
+		}`)
+		resp, err := http.Post(srv.URL+"/consents", "application/json", body)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400", name, resp.StatusCode)
+		}
 	}
 }

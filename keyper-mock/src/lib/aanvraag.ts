@@ -19,7 +19,7 @@ export type Aanvraag = {
   goedgekeurd?: string
   afgewezen?: string
   // The signed DvTP consent token from MijnOverheid. IR keeps it for the
-  // recurring check at LVG; its PI is readable by BSNk only.
+  // recurring check at LVG; the identity in it is readable by LVG only.
   consentToken?: string
 }
 

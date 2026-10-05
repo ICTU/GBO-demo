@@ -151,14 +151,24 @@ _args := object.get(object.get(input.context, "resolved", {}), "args", {})
 # is verified and status-checked per evaluation by the policy itself
 # (consent.rego, via http.send). The PID regime adds nothing to the PIP:
 # its rules read the request itself (#364).
+#
+# resource.subject is what a consent-based query must name its subject with:
+# the placeholder. It is set here, over anything the request supplied, so a
+# rule's constraint-binding compares the query's subject argument with it.
 
 _ctx := {
 	"subject": input.subject,
 	"args": _args,
 	"time": object.get(input.context, "time", ""),
-	"resource": object.union(object.get(input.context, "resource", {}), {"pi": _pip_pi}),
+	"resource": object.union(object.get(input.context, "resource", {}), {"subject": _consent_subject}),
 	"pip": _pip_obj,
 }
+
+# The placeholder stands for the subject of a verified consent. Without one
+# it stands for nobody, and no query argument matches it.
+_consent_subject := lib.subject_placeholder if {
+	object.get(object.get(_pip_obj, "consent", {}), "context_valid", false) == true
+} else := ""
 
 # The PIP attributes the rules see. A pip.consent or pip.integrator
 # arriving in input is dropped, never trusted: nothing upstream is meant to
@@ -181,10 +191,6 @@ _pip_integrator := {"integrator": entry} if {
 	lib.delegated({"subject": input.subject})
 	entry := data.entities.dvtp_participant[input.subject.id]
 } else := {}
-
-# Mirror pip.consent.pi onto ctx.resource.pi so the rule's constraint-
-# binding (input.burgerservicenummer == resource.pi) is evaluable.
-_pip_pi := object.get(object.get(_pip_obj, "consent", {}), "pi", "")
 
 # ── Per-rule evaluation (given field) ────────────────────────────────────────
 

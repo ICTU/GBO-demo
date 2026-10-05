@@ -199,3 +199,45 @@ func TestPostgreSQLStoreMigratesLegacyNullSubjectRef(t *testing.T) {
 // noRecord stands in where a test is about the consent rather than the LDV
 // record that would normally travel with it in the same transaction.
 func noRecord(*Consent) ([]byte, error) { return nil, nil }
+
+// The polymorphic values of a citizen's first activation survive a reopened
+// store, and a second pair for the same reference does not replace them.
+func TestPostgreSQLStoreKeepsThePolymorphicValues(t *testing.T) {
+	databaseURL := os.Getenv("TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("TEST_DATABASE_URL is not set")
+	}
+
+	ctx := context.Background()
+	store, err := NewPostgreSQLStore(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("create PostgreSQL store: %v", err)
+	}
+	subjectRef := "SR1-test-" + uuid.NewString()
+	t.Cleanup(func() {
+		if _, err := store.pool.Exec(ctx, `DELETE FROM subject_polymorphic WHERE subject_ref = $1`, subjectRef); err != nil {
+			t.Errorf("cleanup: %v", err)
+		}
+		store.Close()
+	})
+
+	if _, ok, err := store.PolymorphicFor(ctx, subjectRef); err != nil || ok {
+		t.Fatalf("before keeping: ok %v, err %v", ok, err)
+	}
+	if err := store.KeepPolymorphic(ctx, subjectRef, Polymorphic{PI: "signed-PI", PP: "signed-PP"}); err != nil {
+		t.Fatalf("keep: %v", err)
+	}
+	if err := store.KeepPolymorphic(ctx, subjectRef, Polymorphic{PI: "other-PI", PP: "other-PP"}); err != nil {
+		t.Fatalf("keep again: %v", err)
+	}
+
+	reopened, err := NewPostgreSQLStore(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer reopened.Close()
+	got, ok, err := reopened.PolymorphicFor(ctx, subjectRef)
+	if err != nil || !ok || got != (Polymorphic{PI: "signed-PI", PP: "signed-PP"}) {
+		t.Errorf("after reopening: %+v, ok %v, err %v; want the first pair", got, ok, err)
+	}
+}

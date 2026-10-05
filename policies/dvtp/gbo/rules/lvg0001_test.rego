@@ -22,15 +22,14 @@ _consent := {
 	"withdrawn": false,
 	"valid_until": "2030-01-01T00:00:00Z",
 	"granted_scopes": ["lvg:vbo:eigendom"],
-	"pi": "PI-abc123",
 	"dienstverlener_oin": _ir,
 }
 
 _base_ctx := {
 	"subject": {"type": "org", "id": _ir},
-	"args": {"bsn": "PI-abc123", "vboId": "0632010000099412"},
+	"args": {"bsn": "consent:subject", "vboId": "0632010000099412"},
 	"time": "2026-09-22T12:00:00Z",
-	"resource": {"scope": "lvg:vbo:eigendom", "pi": "PI-abc123"},
+	"resource": {"scope": "lvg:vbo:eigendom", "subject": "consent:subject"},
 	"pip": {"consent": _consent},
 	"field": "Query.vbo",
 }
@@ -60,7 +59,7 @@ test_deny_other_consumer_with_the_ir_consent if {
 }
 
 test_deny_question_about_another_citizen if {
-	ctx := object.union(_base_ctx, {"args": {"bsn": "PI-someone-else", "vboId": "0632010000099412"}})
+	ctx := object.union(_base_ctx, {"args": {"bsn": "999991772", "vboId": "0632010000099412"}})
 	result := lib.evaluate(lvg0001.spec, ctx)
 	result.decision == false
 	result.context.reason_admin.code == "CONSTRAINT_MISMATCH"

@@ -39,6 +39,9 @@ ONBOARDING_CERTIFICATE_STORE ?= public-filesystem
 # per-worktree fsc-infra side by side with another checkout's.
 FSC_PROJECT_NAME ?= fsc-infra
 FSC_INFRA_NETWORK ?= $(FSC_PROJECT_NAME)_default
+# The network between the Inways of the sources and the sidecars behind them,
+# owned by the same fsc-infra instance.
+FSC_SOURCE_GATEWAY_NETWORK ?= $(FSC_PROJECT_NAME)_source-gateways
 FSC_COMPOSE = docker compose -p $(FSC_PROJECT_NAME) -f fsc-infra/docker-compose.yml
 
 # Published host ports, with the same defaults compose applies. The demo

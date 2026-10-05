@@ -30,9 +30,9 @@ type ScopeEntry struct {
 	ConsentedFields []string `json:"consented_fields"`
 }
 
-// Consent stores only the consent-portal-specific subject reference. The PI is
-// accepted transiently while issuing the signed consent token, but is never
-// assigned to this persisted model.
+// Consent stores only the consent-portal-specific subject reference. The
+// encrypted values per party are accepted transiently while issuing the signed
+// consent token, but are never assigned to this persisted model.
 type Consent struct {
 	ConsentID        string       `json:"consent_id"`
 	Status           string       `json:"status"`
@@ -95,8 +95,9 @@ func getEnv(key, fallback string) string {
 }
 
 type Store struct {
-	mu       sync.RWMutex
-	consents map[string]*Consent
+	mu          sync.RWMutex
+	consents    map[string]*Consent
+	polymorphic map[string]Polymorphic
 	// outbox holds LDV records awaiting delivery, alongside the consents so
 	// the two are written under one lock — this store's equivalent of the
 	// transaction the Postgres one uses.
@@ -134,6 +135,27 @@ type ConsentStore interface {
 	PendingRecords(ctx context.Context, limit int) ([]OutboxEntry, error)
 	// MarkDelivered removes a record the logbook has accepted.
 	MarkDelivered(ctx context.Context, id int64) error
+
+	// PolymorphicFor returns the polymorphic values kept for a subject
+	// reference, and whether there are any.
+	PolymorphicFor(ctx context.Context, subjectRef string) (Polymorphic, bool, error)
+	// KeepPolymorphic keeps the polymorphic values for a subject reference.
+	// A reference keeps the first pair it got: two first consents given at
+	// once both activate, and either pair serves.
+	KeepPolymorphic(ctx context.Context, subjectRef string, values Polymorphic) error
+}
+
+// Polymorphic is what BSNk returned when the portal activated a citizen: the
+// polymorphic identity and the polymorphic pseudonym. Only the portal can use
+// them, and only by asking BSNk to transform them for a party. The register
+// keeps them, under the portal's reference to the citizen, so that the portal
+// activates a citizen once and not at every consent.
+//
+// They are never part of a consent: no consent, list or status answer
+// carries them.
+type Polymorphic struct {
+	PI string `json:"pi"`
+	PP string `json:"pp"`
 }
 
 // OutboxEntry is one spooled record awaiting delivery.
@@ -143,7 +165,23 @@ type OutboxEntry struct {
 }
 
 func NewStore() *Store {
-	return &Store{consents: make(map[string]*Consent)}
+	return &Store{consents: make(map[string]*Consent), polymorphic: make(map[string]Polymorphic)}
+}
+
+func (s *Store) PolymorphicFor(_ context.Context, subjectRef string) (Polymorphic, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values, ok := s.polymorphic[subjectRef]
+	return values, ok, nil
+}
+
+func (s *Store) KeepPolymorphic(_ context.Context, subjectRef string, values Polymorphic) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, kept := s.polymorphic[subjectRef]; !kept {
+		s.polymorphic[subjectRef] = values
+	}
+	return nil
 }
 
 func (s *Store) Create(_ context.Context, consent *Consent, record []byte) error {
@@ -335,6 +373,8 @@ func newMux(store ConsentStore, issuer *ConsentIssuer, logbook *registerLogbook)
 
 	mux.HandleFunc("/consents/", handleConsentByID(store, logbook))
 
+	mux.HandleFunc("/subjects/", handlePolymorphic(store))
+
 	return mux
 }
 
@@ -354,20 +394,20 @@ func handleConsents(store ConsentStore, issuer *ConsentIssuer, logbook *register
 		switch r.Method {
 		case http.MethodPost:
 			var req struct {
-				PI               string       `json:"pi"`
-				SubjectRef       string       `json:"subject_ref"`
-				DienstverlenrOIN string       `json:"dienstverlener_oin"`
-				Scopes           []string     `json:"scopes"`
-				ScopeEntries     []ScopeEntry `json:"scope_entries"`
-				UseCase          string       `json:"use_case"`
-				ValiditySeconds  int          `json:"validity_seconds"` // optional; consent lifetime
+				EncryptedSubject map[string]EncryptedSubject `json:"encrypted_subject"`
+				SubjectRef       string                      `json:"subject_ref"`
+				DienstverlenrOIN string                      `json:"dienstverlener_oin"`
+				Scopes           []string                    `json:"scopes"`
+				ScopeEntries     []ScopeEntry                `json:"scope_entries"`
+				UseCase          string                      `json:"use_case"`
+				ValiditySeconds  int                         `json:"validity_seconds"` // optional; consent lifetime
 			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 				return
 			}
-			if req.PI == "" {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "pi is required (no plain BSN accepted)"})
+			if err := validateEncryptedSubject(req.EncryptedSubject); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 				return
 			}
 			if req.SubjectRef == "" {
@@ -406,7 +446,7 @@ func handleConsents(store ConsentStore, issuer *ConsentIssuer, logbook *register
 				CreatedAt:        now,
 				ValidUntil:       now.Add(time.Duration(validity) * time.Second),
 			}
-			consentToken, err := issuer.Sign(*c, req.PI)
+			consentToken, err := issuer.Sign(*c, req.EncryptedSubject)
 			if err != nil {
 				slog.Error("sign consent token", "consent_id", c.ConsentID, "err", err.Error())
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not issue consent token"})
@@ -419,8 +459,8 @@ func handleConsents(store ConsentStore, issuer *ConsentIssuer, logbook *register
 			// that was never created.
 			//
 			// It names the Betrokkene by the portal-scoped reference the
-			// register stores, never the PI, which exists here only inside
-			// the signed token.
+			// register stores, never by an encrypted value, which exists here
+			// only inside the signed token.
 			record, err := logbook.buildRecord(r,
 				consentGrantActivity, "dataverwerking.toestemming-verlenen",
 				c.SubjectRef, start, http.StatusCreated,

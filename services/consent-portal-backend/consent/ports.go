@@ -9,28 +9,37 @@ import (
 // exactly one adapter package (bsnk, register) and by in-memory fakes in the
 // tests. "Accept interfaces, return structs": the adapters are plain structs.
 
-// Pseudonyms is what BSNk returns: a recipient-scoped pseudonym plus the
-// recipient-independent PI used only inside the signed authorization context.
-type Pseudonyms struct {
-	Pseudonym string
-	PI        PI
-}
-
-// Pseudonymizer is BSNk seen from the core: one RPC, no state. This is the
-// only port allowed to see a BSN.
-type Pseudonymizer interface {
-	Pseudonymize(ctx context.Context, bsn BSN, recipientOIN string) (Pseudonyms, error)
+// Identities is BSNk seen from the core, in BSNk's own two steps.
+//
+// Activate turns a BSN into the polymorphic values BSNk makes for the portal.
+// It is the only port a BSN crosses, and the portal calls it once per
+// citizen.
+//
+// Transform has BSNk make an encrypted identity for each party, from the
+// portal's polymorphic identity. BSNk allows it only while the citizen is
+// present, so the portal calls it when a consent is given. A party that may
+// not receive the BSN makes the whole call fail: a consent whose source
+// cannot read the subject would be a consent nobody can use.
+type Identities interface {
+	Activate(ctx context.Context, bsn BSN) (Polymorphic, error)
+	Transform(ctx context.Context, values Polymorphic, parties []Party) ([]EncryptedSubject, error)
 }
 
 // Store is the consent register seen from the core. Citizen listing is keyed
 // by a portal-scoped SubjectRef; Get and Revoke address a consent ID. Those
 // methods must return an error wrapping ErrNotFound when the record does not
 // exist, so the core can tell "missing" from "upstream broke".
+//
+// The register also keeps the polymorphic values of a citizen's first
+// activation, under the portal's reference to them. PolymorphicFor returns
+// an error wrapping ErrNotFound for a citizen who has none yet.
 type Store interface {
 	Create(ctx context.Context, d Draft) (Record, error)
 	ListBySubject(ctx context.Context, subject SubjectRef) ([]Record, error)
 	Get(ctx context.Context, consentID string) (Record, error)
 	Revoke(ctx context.Context, consentID string) error
+	PolymorphicFor(ctx context.Context, subject SubjectRef) (Polymorphic, error)
+	KeepPolymorphic(ctx context.Context, subject SubjectRef, values Polymorphic) error
 }
 
 // Processing is one Dataverwerking of this Verantwoordelijke, as the core
@@ -47,8 +56,9 @@ type Processing struct {
 	// Name is the short name of the processing, for a human reading the log.
 	Name string
 	// Subject is the Betrokkene, named by the portal-scoped reference. Never
-	// a BSN and never a PI: the reference the register lists a citizen by is
-	// the only identifier this side is allowed to write down.
+	// a BSN and never a value made for another party: the reference the
+	// register lists a citizen by is the only identifier this side is allowed
+	// to write down.
 	Subject SubjectRef
 	Start   time.Time
 	End     time.Time
