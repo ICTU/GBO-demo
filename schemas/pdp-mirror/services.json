@@ -1,0 +1,7 @@
+{
+  "services": {
+    "bri": { "path": "/graphql", "schema": "bd.graphql" },
+    "brp": { "path": "/graphql", "schema": "eudi/brp.graphql" },
+    "lvg": { "path": "/graphql", "schema": "lvg.graphql" }
+  }
+}

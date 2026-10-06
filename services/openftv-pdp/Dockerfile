@@ -18,6 +18,13 @@ RUN tar -xzf /tmp/open-ftv.tar.gz -C /build --strip-components=1
 # reads it).
 COPY services/openftv-pdp/mapper/graphql.go eam/mapping/graphql.go
 COPY services/openftv-pdp/mapper/graphql_test.go eam/mapping/graphql_test.go
+# The FTV GraphQL profile mapper: the core module, linked in with a replace
+# directive, and its OpenFTV adapter, registered as the "ftvgraphql"
+# mapping. It runs next to graphqltocontext until the policy reads its
+# output.
+COPY services/ftv-graphql-mapper /ftv-graphql-mapper
+COPY services/openftv-pdp/mapper/ftvgraphql.go eam/mapping/ftvgraphql.go
+COPY services/openftv-pdp/mapper/ftvgraphql_test.go eam/mapping/ftvgraphql_test.go
 # Each patch step asserts it changed something. `sed -i` exits 0 when its
 # pattern does not match, so an upstream rename would otherwise produce a
 # PDP in which the mapper is never registered — every policy then
@@ -35,14 +42,20 @@ RUN set -eux; \
     }; \
     patch_assert eam/mapping/mapper.go \
       '/mappers = append(mappers, BodyToContext)/a\ \t\tcase "graphqltocontext":\n\t\t\tmappers = append(mappers, GraphQLToContext)'; \
+    patch_assert eam/mapping/mapper.go \
+      '/mappers = append(mappers, GraphQLToContext)/a\ \t\tcase "ftvgraphql":\n\t\t\tmappers = append(mappers, FTVGraphQL)'; \
     patch_assert apps/pdp/server/auth.go \
       's|WithOptions(pdp.WithADL(decisionLog))|WithOptions(pdp.WithADL(decisionLog), pdp.WithMappings(mapping.MappingsFromConfig(s.cfg.RequestMappings)...))|'; \
     patch_assert apps/pdp/server/auth.go \
       's|"gitlab.com/digilab.overheid.nl/ecosystem/ftv/open-ftv/eam/log/decisions"|"gitlab.com/digilab.overheid.nl/ecosystem/ftv/open-ftv/eam/log/decisions"\n\t"gitlab.com/digilab.overheid.nl/ecosystem/ftv/open-ftv/eam/mapping"|'; \
     grep -q 'case "graphqltocontext":' eam/mapping/mapper.go; \
+    grep -q 'case "ftvgraphql":' eam/mapping/mapper.go; \
     grep -q 'pdp.WithMappings(' apps/pdp/server/auth.go
 
-RUN go get github.com/vektah/gqlparser/v2@v2.5.30 \
+# gqlparser at the version OpenFTV already requires, which is the version
+# the mapper module is tested with.
+RUN go mod edit -require=gbo-demo/ftv-graphql-mapper@v0.0.0 -replace=gbo-demo/ftv-graphql-mapper=/ftv-graphql-mapper \
+  && go get github.com/vektah/gqlparser/v2@v2.5.34 \
   && go mod tidy \
   && go test ./eam/mapping \
   && CGO_ENABLED=0 go build -ldflags="-s -w" -o /pdp ./apps/pdp/cmd/
@@ -51,6 +64,10 @@ FROM alpine:3.22
 RUN apk add --no-cache curl
 COPY --from=builder /pdp /
 COPY services/openftv-pdp/field-map.json /etc/gbo/field-map.json
+# The bundled GraphQL schemas and their manifest, one per FSC service
+# (GBO_FTV_GRAPHQL_DIR). The policy bundle pins their digests
+# (policies/dvtp/gbo/graphql_schemas.rego).
+COPY schemas/pdp-mirror /etc/gbo/ftv-graphql
 # Demo policies baked in (PDP_POLICIES_STORE points at /policies). The
 # upstream image carries no policies, so without this every runtime
 # would have to supply them separately — compose bind-mounts ./policies

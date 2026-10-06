@@ -125,7 +125,10 @@ services:
       - PDP_ADL_PG_URL=postgres://ftv:${FTV_POSTGRES_PASSWORD}@postgres-ftv:5432/ftv_adl?sslmode=disable
       - PDP_ADL_SERVICE_NAME=gbo
       - PDP_LOG_LEVEL=info
-      - PDP_REQUEST_MAPPINGS=graphqltocontext
+      # graphqltocontext feeds the current policy; ftvgraphql adds the FTV
+      # GraphQL profile's field list as input.resource.attributes.graphql,
+      # from the schema of the FSC service the request is for.
+      - PDP_REQUEST_MAPPINGS=graphqltocontext,ftvgraphql
       # Native OpenFTV PIP pull: refresh the DvTP admission entities over a
       # dedicated network shared only with the register.
       - PDP_PIP_PULL_CONFIGS=/pip-pull/dvtp-onboarding.yaml
@@ -152,6 +155,9 @@ services:
       - "${GBO_PORT_OPA_HEALTH:-9180}:8080"
     volumes:
       - ./policies:/policies:ro
+      # The bundled GraphQL schemas, read once at the first request: a
+      # change needs a restart, and a new pin (scripts/gen-graphql-pins.sh).
+      - ./schemas/pdp-mirror:/etc/gbo/ftv-graphql:ro
       - ./services/openftv-pdp/certs:/certs:ro
       - ./services/openftv-pdp/pip-pull:/pip-pull:ro
     networks:
