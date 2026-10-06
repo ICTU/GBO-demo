@@ -122,7 +122,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ### Changed
 - **A consent token carries an encrypted identity per source, and no PI.**
   The service provider holds no identifier of the citizen: its query names the
-  subject with the placeholder `consent:subject`, and the source puts the BSN
+  subject with the placeholder `consent:identity`, and the source puts the BSN
   in its place after the PDP has allowed the request. This covers every DvTP
   source in the demo. See [docs/consent-flow.md](docs/consent-flow.md).
   - **Consent.** The portal activates the BSN at BSNk and has it transformed
@@ -136,6 +136,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     placeholder. A literal value is denied with `CONSTRAINT_MISMATCH`. The
     placeholder stands for the subject of a verified consent only, and a token
     without `encrypted_subject` is refused with `CONSENT_CONTEXT_INVALID`.
+  - **Two placeholders (#473).** `consent:identity` asks for the BSN,
+    `consent:pseudonym` for the source's own pseudonym of the citizen; they
+    replace `consent:subject`. Each rule lists the placeholders its API
+    accepts (`placeholders` in its `constraint_binding`), and any other value
+    is denied with `CONSTRAINT_MISMATCH`. `DVT0001` and `LVG0001` accept
+    `consent:identity`. Each query kind of `dienstverlener-backend` names the
+    placeholder it sends. `bron-sidecar` refuses `consent:pseudonym` for now,
+    as the token carries no pseudonyms yet.
   - **Source.** `bron-sidecar` acts on the consent token, not on the
     `subject_id_type` grant property. It takes the value for its own OIN from
     the token, has the source's decryption component read it, accepts it only

@@ -25,7 +25,9 @@
       "constraint_binding": [
         {
           "arg": "bsn",
-          "resource_field": "subject"
+          "placeholders": [
+            "consent:identity"
+          ]
         }
       ],
       "pip": null,
@@ -139,7 +141,9 @@
       "constraint_binding": [
         {
           "arg": "bsn",
-          "resource_field": "subject"
+          "placeholders": [
+            "consent:identity"
+          ]
         }
       ],
       "pip": null,

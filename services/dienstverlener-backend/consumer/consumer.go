@@ -119,7 +119,7 @@ func (c *Consumer) Ask(ctx context.Context, req Request) (Result, error) {
 			TraceID:    req.TraceID,
 		}, nil
 	}
-	built, err := c.Kind.build(req, claims)
+	built, err := c.Kind.build(req, claims, c.Kind.Placeholder)
 	if err != nil {
 		return Result{}, err
 	}

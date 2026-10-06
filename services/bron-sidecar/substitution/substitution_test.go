@@ -50,7 +50,7 @@ func substituter(d Decrypter) Substituter {
 	return Substituter{OwnOIN: ownOIN, Variables: []string{"bsn"}, Decrypter: d}
 }
 
-const query = `{"query":"query($bsn: BSN!, $vboId: String!) { vbo(bsn: $bsn, vboId: $vboId) { vboId } }","variables":{"bsn":"consent:subject","vboId":"0632010000099412"},"operationName":"Eigendom"}`
+const query = `{"query":"query($bsn: BSN!, $vboId: String!) { vbo(bsn: $bsn, vboId: $vboId) { vboId } }","variables":{"bsn":"consent:identity","vboId":"0632010000099412"},"operationName":"Eigendom"}`
 
 func TestThePlaceholderBecomesTheBSNOfTheConsent(t *testing.T) {
 	decrypter := &fakeDecrypter{}
@@ -122,9 +122,10 @@ func TestALiteralSubjectIsRefused(t *testing.T) {
 	tok := token(t, map[string]any{ownOIN: identityFor(ownOIN)})
 
 	for name, body := range map[string]string{
-		"a BSN":        `{"query":"q","variables":{"bsn":"999991772"}}`,
-		"not a string": `{"query":"q","variables":{"bsn":999991772}}`,
-		"empty":        `{"query":"q","variables":{"bsn":""}}`,
+		"a BSN":                   `{"query":"q","variables":{"bsn":"999991772"}}`,
+		"not a string":            `{"query":"q","variables":{"bsn":999991772}}`,
+		"empty":                   `{"query":"q","variables":{"bsn":""}}`,
+		"the retired placeholder": `{"query":"q","variables":{"bsn":"consent:subject"}}`,
 	} {
 		if _, err := substituter(decrypter).Apply(context.Background(), []byte(body), tok); !errors.Is(err, ErrLiteralSubject) {
 			t.Errorf("%s: err = %v, want ErrLiteralSubject", name, err)
@@ -169,6 +170,26 @@ func TestAPseudonymIsNotAnIdentity(t *testing.T) {
 	}
 	if len(decrypter.got) != 0 {
 		t.Errorf("decrypted a pseudonym as an identity: %v", decrypter.got)
+	}
+}
+
+// A request for this source's pseudonym asks for a value the token does not
+// carry yet. It is refused like a token without a value for this source, and
+// the identity the token does carry is not read in its place.
+func TestARequestForThePseudonymIsRefused(t *testing.T) {
+	decrypter := &fakeDecrypter{}
+	tok := token(t, map[string]any{ownOIN: identityFor(ownOIN)})
+	body := strings.Replace(query, IdentityPlaceholder, PseudonymPlaceholder, 1)
+
+	result, err := substituter(decrypter).Apply(context.Background(), []byte(body), tok)
+	if !errors.Is(err, ErrNoValue) {
+		t.Fatalf("err = %v, want ErrNoValue", err)
+	}
+	if string(result.Body) != body || result.BSN != "" {
+		t.Errorf("result = %+v, want the request untouched", result)
+	}
+	if len(decrypter.got) != 0 {
+		t.Errorf("decrypted %v for a request that asked for a pseudonym", decrypter.got)
 	}
 }
 

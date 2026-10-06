@@ -3,11 +3,16 @@
 // with a placeholder.
 //
 // A consent-based request carries no identifier of the citizen. The consent
-// token carries an encrypted identity per party, and the query names its
-// subject with Placeholder. The PDP decides on the request as it was sent.
-// Only after its allow does the request reach this code, which takes the value
-// made for this source out of the token, has the source's own decryption
-// component read it, and replaces the placeholder with the BSN.
+// token carries encrypted values per party, and the query names its subject
+// with a placeholder for the form the source's API takes: IdentityPlaceholder
+// for the BSN, PseudonymPlaceholder for the source's own pseudonym. The PDP
+// decides on the request as it was sent. Only after its allow does the request
+// reach this code, which takes the value made for this source out of the
+// token, has the source's own decryption component read it, and replaces the
+// placeholder with the BSN.
+//
+// The token carries no pseudonyms yet, so a request for one is refused as a
+// token without a value for this source.
 //
 // The package imports no transport library. The decryption component is a
 // port, Decrypter, so that the substitution can move to wherever "after the
@@ -24,8 +29,14 @@ import (
 	"strings"
 )
 
-// Placeholder is what a consent-based query names its subject with.
-const Placeholder = "consent:subject"
+// The placeholders a consent-based query names its subject with.
+const (
+	// IdentityPlaceholder asks for the BSN of the citizen of the consent.
+	IdentityPlaceholder = "consent:identity"
+	// PseudonymPlaceholder asks for this source's own pseudonym of the
+	// citizen of the consent.
+	PseudonymPlaceholder = "consent:pseudonym"
+)
 
 // identifierIdentity is BSNk's name for a value that decrypts to the BSN.
 const identifierIdentity = "Identity"
@@ -71,11 +82,12 @@ type Result struct {
 var (
 	// ErrToken means the consent token could not be read.
 	ErrToken = errors.New("the consent token cannot be read")
-	// ErrNoValue means the token carries no identity for this source.
-	ErrNoValue = errors.New("the consent token carries no encrypted identity for this source")
+	// ErrNoValue means the token carries no value for this source in the
+	// form the request asks for.
+	ErrNoValue = errors.New("the consent token carries no encrypted value for this source in the requested form")
 	// ErrLiteralSubject means the request names its subject with a value of
 	// its own. Under a consent the subject comes from the token alone.
-	ErrLiteralSubject = errors.New("under a consent token the subject must be the placeholder")
+	ErrLiteralSubject = errors.New("under a consent token the subject must be a placeholder")
 	// ErrRecipient means the value turned out to be made for another party.
 	ErrRecipient = errors.New("the encrypted identity was made for another party")
 	// ErrBody means the request body is not a GraphQL request.
@@ -113,9 +125,10 @@ func readToken(token string) (claims, error) {
 // consent token is about.
 //
 // A request that names no subject is returned as it came and nothing is
-// decrypted. A request that names its subject with anything but the
+// decrypted. A request that names its subject with anything but a
 // placeholder is refused: the PDP denies those, so one that arrives here did
-// not come through it.
+// not come through it. A request for the pseudonym is refused with
+// ErrNoValue, since the token carries none.
 func (s Substituter) Apply(ctx context.Context, body []byte, consentToken string) (Result, error) {
 	token, err := readToken(consentToken)
 	if err != nil {
@@ -141,10 +154,17 @@ func (s Substituter) Apply(ctx context.Context, body []byte, consentToken string
 			continue
 		}
 		var value string
-		if err := json.Unmarshal(raw, &value); err != nil || value != Placeholder {
+		if err := json.Unmarshal(raw, &value); err != nil {
 			return result, fmt.Errorf("%w: variable %q", ErrLiteralSubject, name)
 		}
-		placeholders = append(placeholders, name)
+		switch value {
+		case IdentityPlaceholder:
+			placeholders = append(placeholders, name)
+		case PseudonymPlaceholder:
+			return result, fmt.Errorf("%w: variable %q asks for a pseudonym", ErrNoValue, name)
+		default:
+			return result, fmt.Errorf("%w: variable %q", ErrLiteralSubject, name)
+		}
 	}
 	if len(placeholders) == 0 {
 		return result, nil
@@ -152,7 +172,7 @@ func (s Substituter) Apply(ctx context.Context, body []byte, consentToken string
 
 	encrypted, present := token.EncryptedSubject[s.OwnOIN]
 	if !present {
-		return result, ErrNoValue
+		return result, fmt.Errorf("%w: no encrypted identity", ErrNoValue)
 	}
 	if encrypted.IdentifierType != identifierIdentity {
 		return result, fmt.Errorf("%w: the value for this source is a %q", ErrNoValue, encrypted.IdentifierType)

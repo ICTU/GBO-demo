@@ -17,7 +17,7 @@ import (
 func question() consumer.Question {
 	return consumer.Question{
 		Query:         `query($bsn: BSN!) { ingeschrevenPersoon(bsn: $bsn) { bsn } }`,
-		Variables:     map[string]any{"bsn": consumer.SubjectPlaceholder},
+		Variables:     map[string]any{"bsn": consumer.IdentityPlaceholder},
 		Scope:         "bd:ib:2025",
 		ConsentToken:  "a.b.c",
 		TransactionID: "0190c5a2-7b1e-7cc0-8f6e-1a2b3c4d5e6f",
@@ -57,7 +57,7 @@ func TestAQuestionReachesTheOutwayAsGraphQL(t *testing.T) {
 	if path != "/bri/graphql" {
 		t.Errorf("path = %q, want the grant-link path", path)
 	}
-	if body.Query != question().Query || body.Variables["bsn"] != consumer.SubjectPlaceholder {
+	if body.Query != question().Query || body.Variables["bsn"] != consumer.IdentityPlaceholder {
 		t.Errorf("body = %+v, want the query and its variables", body)
 	}
 	if header.Get("X-GBO-Consent-Token") != "a.b.c" || header.Get("X-GBO-Scope") != "bd:ib:2025" {

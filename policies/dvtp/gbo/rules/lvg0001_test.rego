@@ -27,9 +27,9 @@ _consent := {
 
 _base_ctx := {
 	"subject": {"type": "org", "id": _ir},
-	"args": {"bsn": "consent:subject", "vboId": "0632010000099412"},
+	"args": {"bsn": "consent:identity", "vboId": "0632010000099412"},
 	"time": "2026-09-22T12:00:00Z",
-	"resource": {"scope": "lvg:vbo:eigendom", "subject": "consent:subject"},
+	"resource": {"scope": "lvg:vbo:eigendom", "subject_placeholders": {"consent:identity", "consent:pseudonym"}},
 	"pip": {"consent": _consent},
 	"field": "Query.vbo",
 }
@@ -60,6 +60,14 @@ test_deny_other_consumer_with_the_ir_consent if {
 
 test_deny_question_about_another_citizen if {
 	ctx := object.union(_base_ctx, {"args": {"bsn": "999991772", "vboId": "0632010000099412"}})
+	result := lib.evaluate(lvg0001.spec, ctx)
+	result.decision == false
+	result.context.reason_admin.code == "CONSTRAINT_MISMATCH"
+}
+
+# LVG's API takes a BSN, not a pseudonym.
+test_deny_pseudonym_placeholder if {
+	ctx := object.union(_base_ctx, {"args": {"bsn": "consent:pseudonym", "vboId": "0632010000099412"}})
 	result := lib.evaluate(lvg0001.spec, ctx)
 	result.decision == false
 	result.context.reason_admin.code == "CONSTRAINT_MISMATCH"

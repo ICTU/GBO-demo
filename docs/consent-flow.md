@@ -196,14 +196,22 @@ geldige ondertekening en geregistreerde claims
 + consent bestaat, is ACTIVE en is nog geldig
 + FSC-delegator (anders subject.id) == dienstverlener_oin uit het token
 + bij delegatie: integrator gemandateerd voor die dienstverlener en regel
-+ het subject in de GraphQL-query is de plaatshouder `consent:subject`
++ het subject in de GraphQL-query is een plaatshouder die de regel accepteert
 + scope, jaren en velden vallen binnen het consent
 = ALLOW
 ```
 
-De dienstverlener noemt het subject met de plaatshouder en niet met een eigen
+De dienstverlener noemt het subject met een plaatshouder en niet met een eigen
 waarde: het subject kan zo alleen de burger van het geverifieerde consent
-zijn. Pas na de `ALLOW` zet de sidecar bij de bron het BSN op de plek van de
+zijn. De plaatshouder zegt welke vorm de API van de bron neemt:
+`consent:identity` voor een API die een BSN neemt, `consent:pseudonym` voor
+een API die het eigen pseudoniem van de bron neemt. Elke regel noemt de
+plaatshouders die zijn API accepteert; een andere waarde wordt geweigerd met
+`CONSTRAINT_MISMATCH`. `DVT0001` en `LVG0001` accepteren alleen
+`consent:identity`. Het token draagt nog geen pseudoniemen, dus de sidecar
+weigert `consent:pseudonym` voorlopig.
+
+Pas na de `ALLOW` zet de sidecar bij de bron het BSN op de plek van de
 plaatshouder. De bron ontsleutelt daarvoor zelf de waarde die het token voor
 haar OIN draagt, met sleutels die ze vooraf heeft gekregen en zonder BSNk aan
 te roepen. Een waarde die voor een andere partij is gemaakt, accepteert de

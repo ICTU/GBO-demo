@@ -239,7 +239,7 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client, substi
 				return
 			}
 			if result.BSN != "" {
-				bsnOf[substitution.Placeholder] = result.BSN
+				bsnOf[substitution.IdentityPlaceholder] = result.BSN
 			}
 			span.SetAttributes(attribute.Bool("gbo.sidecar.subject_substituted", result.BSN != ""))
 			body = result.Body

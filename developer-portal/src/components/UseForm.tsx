@@ -168,7 +168,7 @@ export default function UseForm({ payload, setPayload, history }: Props) {
 
       <div className="field">
         <label>
-          GraphQL-query <span className="opt">(auto-generated; `variables.bsn` is de plaatshouder `consent:subject`, de bron zet er het BSN uit het consent-token voor in de plaats)</span>
+          GraphQL-query <span className="opt">(auto-generated; `variables.bsn` is de plaatshouder `consent:identity`, de bron zet er het BSN uit het consent-token voor in de plaats)</span>
         </label>
         <div className="ed-wrap">
           <div className="ed-bar">

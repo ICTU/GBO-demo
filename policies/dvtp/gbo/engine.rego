@@ -152,23 +152,23 @@ _args := object.get(object.get(input.context, "resolved", {}), "args", {})
 # (consent.rego, via http.send). The PID regime adds nothing to the PIP:
 # its rules read the request itself (#364).
 #
-# resource.subject is what a consent-based query must name its subject with:
-# the placeholder. It is set here, over anything the request supplied, so a
-# rule's constraint-binding compares the query's subject argument with it.
+# resource.subject_placeholders are what a consent-based query may name its
+# subject with. They are set here, over anything the request supplied, so a
+# rule's constraint-binding checks the query's subject argument against them.
 
 _ctx := {
 	"subject": input.subject,
 	"args": _args,
 	"time": object.get(input.context, "time", ""),
-	"resource": object.union(object.get(input.context, "resource", {}), {"subject": _consent_subject}),
+	"resource": object.union(object.get(input.context, "resource", {}), {"subject_placeholders": _subject_placeholders}),
 	"pip": _pip_obj,
 }
 
-# The placeholder stands for the subject of a verified consent. Without one
-# it stands for nobody, and no query argument matches it.
-_consent_subject := lib.subject_placeholder if {
+# The placeholders stand for the subject of a verified consent. Without one
+# they stand for nobody, and no query argument matches them.
+_subject_placeholders := lib.subject_placeholders if {
 	object.get(object.get(_pip_obj, "consent", {}), "context_valid", false) == true
-} else := ""
+} else := set()
 
 # The PIP attributes the rules see. A pip.consent or pip.integrator
 # arriving in input is dropped, never trusted: nothing upstream is meant to

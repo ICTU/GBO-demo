@@ -126,7 +126,7 @@ export type RuleMeta = {
     consent_required?: boolean
     consent_must_cover_scope?: boolean
     consent_must_cover_fields?: boolean
-    constraint_binding?: { arg: string; resource_field: string }[]
+    constraint_binding?: { arg: string; placeholders: string[] }[]
     pip?: unknown
   }
 }

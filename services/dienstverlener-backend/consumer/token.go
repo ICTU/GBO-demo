@@ -17,10 +17,17 @@ type consentClaims struct {
 	Scopes    []string `json:"scopes"`
 }
 
-// SubjectPlaceholder is what a query names its subject with. The consumer
-// holds no identifier of the citizen; the source puts the citizen of the
-// consent in this place once the request is authorized.
-const SubjectPlaceholder = "consent:subject"
+// The placeholders a query names its subject with. The consumer holds no
+// identifier of the citizen; it names the form the source's API takes, and the
+// source puts the citizen of the consent in this place once the request is
+// authorized.
+const (
+	// IdentityPlaceholder is for an API that takes a BSN.
+	IdentityPlaceholder = "consent:identity"
+	// PseudonymPlaceholder is for an API that takes the source's own
+	// pseudonym of the citizen.
+	PseudonymPlaceholder = "consent:pseudonym"
+)
 
 // readConsentToken reads only enough to construct the question. This is
 // intentionally not an authorization decision: the PDP verifies signature,

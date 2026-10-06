@@ -15,13 +15,17 @@ import (
 type Kind struct {
 	// DefaultScope is the requested scope when the request names none.
 	DefaultScope string
+	// Placeholder is what the question names its subject with, by the form
+	// the source's API takes. The PDP accepts only the placeholders the
+	// source's rule lists.
+	Placeholder string
 	// Activity and RecordName describe the call in the consumer's own
 	// Logboek Dataverwerkingen.
 	Activity   string
 	RecordName string
-	// build turns the request and the consent's claims into the GraphQL
-	// question for the source. An error is the caller's.
-	build func(req Request, claims consentClaims) (builtQuery, error)
+	// build turns the request, the consent's claims and the placeholder into
+	// the GraphQL question for the source. An error is the caller's.
+	build func(req Request, claims consentClaims, placeholder string) (builtQuery, error)
 }
 
 type builtQuery struct {
@@ -35,12 +39,14 @@ type builtQuery struct {
 var Kinds = map[string]Kind{
 	"bd": {
 		DefaultScope: "bd:ib:2025",
+		Placeholder:  IdentityPlaceholder,
 		Activity:     "https://logboek.hypotheek-bv.test/verwerkingsactiviteiten/hbv-inkomensgegevens-opvragen/v1",
 		RecordName:   "dataverwerking.inkomensgegevens-opvragen",
 		build:        buildIncomeQuery,
 	},
 	"lvg": {
 		DefaultScope: "lvg:vbo:eigendom",
+		Placeholder:  IdentityPlaceholder,
 		Activity:     "https://logboek.installatieregister.test/verwerkingsactiviteiten/ir-eigendom-controleren/v1",
 		RecordName:   "dataverwerking.eigendom-controleren",
 		build:        buildOwnershipQuery,
@@ -66,7 +72,7 @@ func LookupKind(name string) (Kind, error) {
 //     demonstrate raw policy outcomes, so a year outside the consent must
 //     produce the policy deny (YEAR_NOT_COVERED) with a full trace, not a
 //     client-side pre-filter.
-func buildIncomeQuery(req Request, claims consentClaims) (builtQuery, error) {
+func buildIncomeQuery(req Request, claims consentClaims, placeholder string) (builtQuery, error) {
 	jaren := req.Belastingjaren
 	if len(jaren) == 0 {
 		jaren = []int{2024, 2025}
@@ -83,7 +89,7 @@ func buildIncomeQuery(req Request, claims consentClaims) (builtQuery, error) {
 	}
 	return builtQuery{
 		query:       buildQuery(queryable, req.Fields),
-		variables:   map[string]any{"bsn": SubjectPlaceholder},
+		variables:   map[string]any{"bsn": placeholder},
 		deniedYears: deniedYears,
 	}, nil
 }
@@ -92,14 +98,14 @@ func buildIncomeQuery(req Request, claims consentClaims) (builtQuery, error) {
 // citizen of this consent own this verblijfsobject? LVG answers with the same
 // VBO-id or null. The placeholder goes in $bsn like every DvTP query; the
 // sidecar at LVG puts the citizen of the consent in its place.
-func buildOwnershipQuery(req Request, claims consentClaims) (builtQuery, error) {
+func buildOwnershipQuery(req Request, claims consentClaims, placeholder string) (builtQuery, error) {
 	vboID := strings.TrimSpace(req.VboID)
 	if vboID == "" {
 		return builtQuery{}, errors.New("vbo_id is required")
 	}
 	return builtQuery{
 		query:     `query($bsn: BSN!, $vboId: String!) { vbo(bsn: $bsn, vboId: $vboId) { vboId } }`,
-		variables: map[string]any{"bsn": SubjectPlaceholder, "vboId": vboID},
+		variables: map[string]any{"bsn": placeholder, "vboId": vboID},
 	}, nil
 }
 

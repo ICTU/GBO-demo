@@ -27,7 +27,7 @@ const (
 	// A key file of this source, as the key request hands it over.
 	keyFile = "-----BEGIN BSNK MOCK DV KEY-----\nRecipient: " + ownOIN + "\nType: EI Decryption\n\nbm8ga2V5IG1hdGVyaWFs\n-----END BSNK MOCK DV KEY-----\n"
 	// The query a consent-based consumer sends: the subject is the placeholder.
-	consentQuery = `{"query":"query($bsn: BSN!){ingeschrevenPersoon(bsn:$bsn){bsn}}","variables":{"bsn":"` + substitution.Placeholder + `"}}`
+	consentQuery = `{"query":"query($bsn: BSN!){ingeschrevenPersoon(bsn:$bsn){bsn}}","variables":{"bsn":"` + substitution.IdentityPlaceholder + `"}}`
 )
 
 // callerToken is the Fsc-Authorization token of the consumer, as the Inway

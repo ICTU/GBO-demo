@@ -50,7 +50,7 @@ export default function RuleSpecPanel({ rule }: Props) {
             label="Constraint-binding"
             value={constraints.map((c, i) => (
               <div key={i} className="mono" style={{ fontSize: 11 }}>
-                {c.arg} <span style={{ color: 'var(--mute)' }}>==</span> resource.{c.resource_field}
+                {c.arg} <span style={{ color: 'var(--mute)' }}>∈</span> {'{'}{c.placeholders.join(', ')}{'}'}
               </div>
             ))}
           />
