@@ -1,0 +1,47 @@
+# The fictional schema of Appendix A of the FTV GraphQL profile (draft-01).
+# It exists only to exercise the mapping rules; it is no real source.
+
+scalar BSN
+
+type Query {
+  persoon(bsn: BSN!): Persoon
+  zoek(term: String!): [Zoekresultaat!]
+  aantalPersonen: Int
+}
+
+type Persoon {
+  bsn: BSN!
+  naam: String
+  adres(peildatum: String): Adres
+  inkomens(jaren: [Int!] = [2024], filter: InkomenFilter): [Inkomen!]
+}
+
+input InkomenFilter { minimum: Int = 0, valuta: String }
+
+type Adres { straat: String, plaats: String }
+
+interface Inkomen {
+  jaar: Int!
+  bedrag: Bedrag
+}
+
+type LoonInkomen implements Inkomen {
+  jaar: Int!
+  bedrag: Bedrag
+  werkgever: Werkgever
+}
+
+type WinstInkomen implements Inkomen {
+  jaar: Int!
+  bedrag: Bedrag
+}
+
+union Zoekresultaat = Persoon | Werkgever
+
+type Werkgever { naam: String }
+type Bedrag { waarde: Float!, valuta: String! }
+
+type Mutation {
+  wijzigAdres(bsn: BSN!, adres: AdresInput!): Persoon
+}
+input AdresInput { straat: String, plaats: String }
