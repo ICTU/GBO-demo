@@ -20,11 +20,11 @@ import (
 )
 
 // fakeValue stands in for what BSNk makes for one party: a hash of the
-// polymorphic identity and the party, so it does not embed the BSN. Deriving
-// it from the BSN plus the OIN would make the leak test vacuous.
-func fakeValue(values Polymorphic, party Party) string {
-	sum := sha256.Sum256([]byte("value|" + values.PI + "|" + party.OIN))
-	return "VI-" + hex.EncodeToString(sum[:8])
+// polymorphic values, the form and the party, so it does not embed the BSN.
+// Deriving it from the BSN plus the OIN would make the leak test vacuous.
+func fakeValue(values Polymorphic, form Form, party Party) string {
+	sum := sha256.Sum256([]byte("value|" + values.PI + "|" + values.PP + "|" + string(form) + "|" + party.OIN))
+	return string(form) + "-" + hex.EncodeToString(sum[:8])
 }
 
 // fakePI stands in for an activation: like a real one, it does not carry the
@@ -52,13 +52,29 @@ func subjectRefOf(t *testing.T, bsn BSN) SubjectRef {
 
 // ── Fakes ─────────────────────────────────────────────────────────────────
 
-// fakeBSNk is BSNk's two steps: activate and transform.
+// fakeBSNk is BSNk's steps: activate, the BSN authorisation list and
+// transform.
 type fakeBSNk struct {
 	err         error
 	activated   []BSN
 	transformed []Polymorphic
+	gotForms    []Form
 	gotParties  [][]Party
-	mu          sync.Mutex
+	// listed is the BSN authorisation list, and listErr fails reading it.
+	listed    []string
+	listErr   error
+	listReads int
+	mu        sync.Mutex
+}
+
+func (f *fakeBSNk) AuthorisedForBSN(context.Context) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.listReads++
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	return f.listed, nil
 }
 
 func (f *fakeBSNk) Activate(_ context.Context, bsn BSN) (Polymorphic, error) {
@@ -72,19 +88,20 @@ func (f *fakeBSNk) Activate(_ context.Context, bsn BSN) (Polymorphic, error) {
 	return Polymorphic{PI: pi, PP: "PP-of-" + pi}, nil
 }
 
-func (f *fakeBSNk) Transform(_ context.Context, values Polymorphic, parties []Party) ([]EncryptedSubject, error) {
+func (f *fakeBSNk) Transform(_ context.Context, values Polymorphic, form Form, parties []Party) (map[string]string, error) {
 	f.mu.Lock()
 	f.transformed = append(f.transformed, values)
+	f.gotForms = append(f.gotForms, form)
 	f.gotParties = append(f.gotParties, parties)
 	f.mu.Unlock()
 	if f.err != nil {
 		return nil, f.err
 	}
-	subjects := make([]EncryptedSubject, len(parties))
-	for i, party := range parties {
-		subjects[i] = EncryptedSubject{Party: party, IdentifierType: "Identity", Value: fakeValue(values, party)}
+	encrypted := make(map[string]string, len(parties))
+	for _, party := range parties {
+		encrypted[party.OIN] = fakeValue(values, form, party)
 	}
-	return subjects, nil
+	return encrypted, nil
 }
 
 func (f *fakeBSNk) calls() (activated int, transformed int) {
@@ -197,7 +214,7 @@ func (r *recorder) Observe(_ context.Context, e Event) {
 
 func testPortal(t *testing.T, watch Observer) (*Portal, *fakeBSNk, *memStore) {
 	t.Helper()
-	bsnk := &fakeBSNk{}
+	bsnk := &fakeBSNk{listed: []string{testSource.OIN}}
 	store := newMemStore()
 	return &Portal{
 		Identities:  bsnk,
@@ -353,9 +370,9 @@ func TestBSNNeverReachesTheRegister(t *testing.T) {
 		t.Fatalf("BSN leaked to the consent register: %s", payload)
 	}
 	kept := store.polymorphic[subjectRefOf(t, BSN(bsn))]
-	want := EncryptedSubject{Party: testSource, IdentifierType: "Identity", Value: fakeValue(kept, testSource)}
+	want := EncryptedSubject{Party: testSource, Pseudonym: fakeValue(kept, FormPseudonym, testSource), Identity: fakeValue(kept, FormIdentity, testSource)}
 	if got := store.created[0].Subjects; len(got) != 1 || got[0] != want {
-		t.Errorf("subjects = %+v, want the value BSNk made for the source", got)
+		t.Errorf("subjects = %+v, want the values BSNk made for the source", got)
 	}
 	if store.created[0].SubjectRef != subjectRefOf(t, BSN(bsn)) {
 		t.Errorf("subject_ref = %q, want the portal's own reference", store.created[0].SubjectRef)
@@ -378,8 +395,9 @@ func TestACitizenIsActivatedOnce(t *testing.T) {
 			t.Fatalf("give consent: %v", err)
 		}
 	}
-	if activated, transformed := bsnk.calls(); activated != 1 || transformed != 2 {
-		t.Errorf("activated %d and transformed %d times, want 1 and 2", activated, transformed)
+	// Two consents, each with a transformation per form.
+	if activated, transformed := bsnk.calls(); activated != 1 || transformed != 4 {
+		t.Errorf("activated %d and transformed %d times, want 1 and 4", activated, transformed)
 	}
 	kept, ok := store.polymorphic[subjectRefOf(t, BSN("111111111"))]
 	if !ok {
@@ -431,8 +449,101 @@ func TestValuesAreMadeForTheSourcesOnly(t *testing.T) {
 	if _, err := p.GiveConsent(context.Background(), BSN("111111111"), GiveInput{DienstverlenerOIN: "DV-OIN"}); err != nil {
 		t.Fatalf("give consent: %v", err)
 	}
-	if got := bsnk.gotParties; len(got) != 1 || len(got[0]) != 1 || got[0][0] != testSource {
-		t.Errorf("BSNk made values for %v, want the source alone", got)
+	for i, parties := range bsnk.gotParties {
+		if len(parties) != 1 || parties[0] != testSource {
+			t.Errorf("transformation %d made values for %v, want the source alone", i, parties)
+		}
+	}
+}
+
+// Every source gets a pseudonym. Only a source on the BSN authorisation list
+// also gets an identity; BSNk would refuse one for any other, and the portal
+// does not ask.
+func TestEverySourceGetsAPseudonymAndListedOnesAnIdentity(t *testing.T) {
+	p, bsnk, store := testPortal(t, nil)
+	unlisted := Party{OIN: "00000000000000000210", KeySetVersion: 20260301}
+	p.Sources = []Party{testSource, unlisted}
+
+	if _, err := p.GiveConsent(context.Background(), BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"}); err != nil {
+		t.Fatalf("give consent: %v", err)
+	}
+	if len(bsnk.gotForms) != 2 || bsnk.gotForms[0] != FormPseudonym || bsnk.gotForms[1] != FormIdentity {
+		t.Fatalf("transformed for %v, want pseudonyms, then identities", bsnk.gotForms)
+	}
+	if len(bsnk.gotParties[0]) != 2 {
+		t.Errorf("pseudonyms for %v, want both sources", bsnk.gotParties[0])
+	}
+	if got := bsnk.gotParties[1]; len(got) != 1 || got[0] != testSource {
+		t.Errorf("identities for %v, want the listed source alone", got)
+	}
+
+	kept := store.polymorphic[subjectRefOf(t, BSN("111111111"))]
+	subjects := store.created[0].Subjects
+	if len(subjects) != 2 {
+		t.Fatalf("subjects = %+v, want one per source", subjects)
+	}
+	if subjects[0].Identity != fakeValue(kept, FormIdentity, testSource) || subjects[0].Pseudonym != fakeValue(kept, FormPseudonym, testSource) {
+		t.Errorf("listed source = %+v, want an identity and a pseudonym", subjects[0])
+	}
+	if subjects[1].Identity != "" || subjects[1].Pseudonym != fakeValue(kept, FormPseudonym, unlisted) {
+		t.Errorf("unlisted source = %+v, want a pseudonym alone", subjects[1])
+	}
+}
+
+// With no source on the list, nobody gets an identity, and BSNk is not asked
+// for any.
+func TestNoSourceOnTheListGetsPseudonymsAlone(t *testing.T) {
+	p, bsnk, store := testPortal(t, nil)
+	bsnk.listed = nil
+
+	if _, err := p.GiveConsent(context.Background(), BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"}); err != nil {
+		t.Fatalf("give consent: %v", err)
+	}
+	if len(bsnk.gotForms) != 1 || bsnk.gotForms[0] != FormPseudonym {
+		t.Errorf("transformed for %v, want pseudonyms alone", bsnk.gotForms)
+	}
+	if got := store.created[0].Subjects; len(got) != 1 || got[0].Identity != "" || got[0].Pseudonym == "" {
+		t.Errorf("subjects = %+v, want a pseudonym and no identity", got)
+	}
+}
+
+// The portal reads the BSN authorisation list again once its copy is out of
+// date, and does not use a copy it could not renew.
+func TestTheAuthorisationListIsNotUsedOutOfDate(t *testing.T) {
+	p, bsnk, store := testPortal(t, nil)
+	now := time.Date(2026, 10, 6, 9, 0, 0, 0, time.UTC)
+	p.Now = func() time.Time { return now }
+	p.AuthorisationListMaxAge = time.Hour
+	give := func() error {
+		_, err := p.GiveConsent(context.Background(), BSN("111111111"), GiveInput{DienstverlenerOIN: "DV"})
+		return err
+	}
+
+	for range 2 {
+		if err := give(); err != nil {
+			t.Fatalf("give consent: %v", err)
+		}
+	}
+	if bsnk.listReads != 1 {
+		t.Errorf("read the list %d times within its age, want 1", bsnk.listReads)
+	}
+
+	now = now.Add(time.Hour)
+	if err := give(); err != nil {
+		t.Fatalf("give consent: %v", err)
+	}
+	if bsnk.listReads != 2 {
+		t.Errorf("read the list %d times, want it read again once out of date", bsnk.listReads)
+	}
+
+	now = now.Add(time.Hour)
+	bsnk.listErr = errors.New("BSNk unreachable")
+	created := len(store.created)
+	if err := give(); err == nil {
+		t.Fatal("want an error when the list is out of date and cannot be read")
+	}
+	if len(store.created) != created {
+		t.Error("a consent was registered on an out-of-date list")
 	}
 }
 

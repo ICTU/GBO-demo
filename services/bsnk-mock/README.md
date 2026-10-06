@@ -14,8 +14,9 @@ It serves two things.
 | Decryption | `/signed-encrypted-identity`, `/signed-encrypted-pseudonym` | The decryption component a party runs itself |
 
 In the demo the consent portal activates a citizen's BSN once, at their first
-consent, and has the result transformed into an encrypted identity per source
-at every consent, through `/v2`. A source reads its value through the
+consent, and has the result transformed at every consent, through `/v2`: into
+an encrypted pseudonym for every source, and into an encrypted identity for
+each source on the BSN authorisation list. A source reads its value through the
 decryption endpoints, on an instance of this image that serves nothing else
 (`DECRYPTION_COMPONENT_ONLY`), so that the source does not call BSNk.
 

@@ -126,7 +126,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   in its place after the PDP has allowed the request. This covers every DvTP
   source in the demo. See [docs/consent-flow.md](docs/consent-flow.md).
   - **Consent.** The portal activates the BSN at BSNk and has it transformed
-    into an encrypted identity for each source in `CONSENT_SOURCES`
+    into encrypted values for each source in `CONSENT_SOURCES`
     (`<OIN>@<key set version>`), through `bsnk-mock`'s `/v2/activate` and
     `/v2/transform`. The token's `pi` claim is replaced by
     `encrypted_subject`, keyed by the party's OIN. The portal does not start
@@ -142,8 +142,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     accepts (`placeholders` in its `constraint_binding`), and any other value
     is denied with `CONSTRAINT_MISMATCH`. `DVT0001` and `LVG0001` accept
     `consent:identity`. Each query kind of `dienstverlener-backend` names the
-    placeholder it sends. `bron-sidecar` refuses `consent:pseudonym` for now,
-    as the token carries no pseudonyms yet.
+    placeholder it sends.
+  - **A pseudonym for every source, an identity for the listed ones
+    (#473).** `encrypted_subject` holds, per OIN, a `pseudonym` and, for a
+    source on BSNk's BSN authorisation list, an `identity`, each with
+    `key_set_version` and `value`; `identifier_type` is gone. The portal reads
+    the list (`/v2/bsn-authorisation-list`), uses its copy for at most
+    `BSN_AUTHORISATION_LIST_MAX_AGE` (default `1h`), and gives no consent on
+    an out-of-date copy it cannot renew. It transforms once per form, with at
+    most four parties per request, so a consent with five or more sources
+    works. The register refuses a party without a pseudonym, and so does the
+    PDP (`CONSENT_CONTEXT_INVALID`), also for tokens issued before this
+    change. With `consent:pseudonym`, `bron-sidecar` has the
+    decryption component read the pseudonym (`/signed-encrypted-pseudonym`)
+    and puts the source's own pseudonym in place; the demo keys gain the EP
+    Decryption and EP Closing key files. No rule accepts `consent:pseudonym`
+    yet.
   - **Source.** `bron-sidecar` acts on the consent token, not on the
     `subject_id_type` grant property. It takes the value for its own OIN from
     the token, has the source's decryption component read it, accepts it only

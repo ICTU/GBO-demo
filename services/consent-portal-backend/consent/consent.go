@@ -38,23 +38,38 @@ type Polymorphic struct {
 	PP string
 }
 
-// Party is one recipient of the citizen's identity under a consent: a source
-// that answers the service provider's question. BSNk makes a value for one
-// party, identified by its OIN, and for one version of that party's keys.
+// Party is one recipient of the citizen under a consent: a source that
+// answers the service provider's question. BSNk makes a value for one party,
+// identified by its OIN, and for one version of that party's keys.
 type Party struct {
 	OIN           string
 	KeySetVersion int
 }
 
+// Form is what a value BSNk makes for a party decrypts to, in BSNk's own
+// words.
+type Form string
+
+const (
+	// FormIdentity decrypts to the BSN. BSNk makes one only for a party on
+	// its BSN authorisation list.
+	FormIdentity Form = "Identity"
+	// FormPseudonym decrypts to the party's own pseudonym of the citizen.
+	// BSNk makes one for any party.
+	FormPseudonym Form = "Pseudonym"
+)
+
 // EncryptedSubject is the citizen as one party may read them. Only that party
-// can decrypt the value, and the portal cannot: it is what goes into the
+// can decrypt the values, and the portal cannot: they are what goes into the
 // consent token in place of any identifier.
 type EncryptedSubject struct {
 	Party Party
-	// IdentifierType says what the value decrypts to, in BSNk's own words:
-	// "Identity" is the BSN.
-	IdentifierType string
-	Value          string
+	// Pseudonym decrypts to the party's own pseudonym of the citizen. Every
+	// party has one.
+	Pseudonym string
+	// Identity decrypts to the BSN. Empty for a party that is not on BSNk's
+	// BSN authorisation list.
+	Identity string
 }
 
 // Status is the consent status as the citizen experiences it, derived from

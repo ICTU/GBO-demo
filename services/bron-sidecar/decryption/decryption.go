@@ -74,37 +74,6 @@ func LoadKeys(dir string) (keys []string, schemeKeys map[string]string, err erro
 // BSNk's signature and that the source holds a key for the party and key set
 // version the value was made for; a failure comes back as plain text.
 func (c Component) Identity(ctx context.Context, value string) (substitution.Identity, error) {
-	if len(c.Keys) == 0 {
-		return substitution.Identity{}, errors.New("this source has no decryption keys configured")
-	}
-	body, err := json.Marshal(map[string]any{
-		"signedEncryptedIdentity": value,
-		"serviceProviderKeys":     c.Keys,
-		"schemeKeys":              c.SchemeKeys,
-	})
-	if err != nil {
-		return substitution.Identity{}, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.URL+"/signed-encrypted-identity", bytes.NewReader(body))
-	if err != nil {
-		return substitution.Identity{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
-
-	resp, err := c.Client.Do(req)
-	if err != nil {
-		return substitution.Identity{}, err
-	}
-	defer resp.Body.Close()
-	answer, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return substitution.Identity{}, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return substitution.Identity{}, fmt.Errorf("decryption component answered %d: %s", resp.StatusCode, strings.TrimSpace(string(answer)))
-	}
-
 	var out struct {
 		BSN          string `json:"bsn"`
 		DecodedInput struct {
@@ -115,8 +84,62 @@ func (c Component) Identity(ctx context.Context, value string) (substitution.Ide
 			} `json:"signedEI"`
 		} `json:"decodedInput"`
 	}
-	if err := json.Unmarshal(answer, &out); err != nil {
-		return substitution.Identity{}, fmt.Errorf("decryption component answer: %w", err)
+	if err := c.read(ctx, "/signed-encrypted-identity", "signedEncryptedIdentity", value, &out); err != nil {
+		return substitution.Identity{}, err
 	}
 	return substitution.Identity{BSN: out.BSN, Recipient: out.DecodedInput.SignedEI.EncryptedIdentity.Recipient}, nil
+}
+
+// Pseudonym has the component read an encrypted pseudonym, with the same
+// checks as for an identity. What comes back is the source's own pseudonym of
+// the citizen in the form the source stores it.
+func (c Component) Pseudonym(ctx context.Context, value string) (substitution.Pseudonym, error) {
+	var out struct {
+		Pseudonym        string `json:"pseudonym"`
+		DecodedPseudonym struct {
+			Recipient string `json:"recipient"`
+		} `json:"decodedPseudonym"`
+	}
+	if err := c.read(ctx, "/signed-encrypted-pseudonym", "signedEncryptedPseudonym", value, &out); err != nil {
+		return substitution.Pseudonym{}, err
+	}
+	return substitution.Pseudonym{Value: out.Pseudonym, Recipient: out.DecodedPseudonym.Recipient}, nil
+}
+
+// read hands the component one value with this source's keys, at path and
+// under field, and decodes its answer into out.
+func (c Component) read(ctx context.Context, path, field, value string, out any) error {
+	if len(c.Keys) == 0 {
+		return errors.New("this source has no decryption keys configured")
+	}
+	body, err := json.Marshal(map[string]any{
+		field:                 value,
+		"serviceProviderKeys": c.Keys,
+		"schemeKeys":          c.SchemeKeys,
+	})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.URL+path, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	answer, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("decryption component answered %d: %s", resp.StatusCode, strings.TrimSpace(string(answer)))
+	}
+	if err := json.Unmarshal(answer, out); err != nil {
+		return fmt.Errorf("decryption component answer: %w", err)
+	}
+	return nil
 }

@@ -9,20 +9,24 @@ import (
 // exactly one adapter package (bsnk, register) and by in-memory fakes in the
 // tests. "Accept interfaces, return structs": the adapters are plain structs.
 
-// Identities is BSNk seen from the core, in BSNk's own two steps.
+// Identities is BSNk seen from the core, in BSNk's own steps.
 //
 // Activate turns a BSN into the polymorphic values BSNk makes for the portal.
 // It is the only port a BSN crosses, and the portal calls it once per
 // citizen.
 //
-// Transform has BSNk make an encrypted identity for each party, from the
-// portal's polymorphic identity. BSNk allows it only while the citizen is
-// present, so the portal calls it when a consent is given. A party that may
-// not receive the BSN makes the whole call fail: a consent whose source
-// cannot read the subject would be a consent nobody can use.
+// AuthorisedForBSN reads BSNk's BSN authorisation list: the OINs of the
+// parties that may receive the BSN.
+//
+// Transform has BSNk make a value of one form for each party, from the
+// portal's polymorphic values, and returns them by OIN: a value for every
+// party, or an error. BSNk allows it only while the citizen is present, so
+// the portal calls it when a consent is given. A party BSNk refuses makes the
+// whole call fail.
 type Identities interface {
 	Activate(ctx context.Context, bsn BSN) (Polymorphic, error)
-	Transform(ctx context.Context, values Polymorphic, parties []Party) ([]EncryptedSubject, error)
+	AuthorisedForBSN(ctx context.Context) ([]string, error)
+	Transform(ctx context.Context, values Polymorphic, form Form, parties []Party) (map[string]string, error)
 }
 
 // Store is the consent register seen from the core. Citizen listing is keyed

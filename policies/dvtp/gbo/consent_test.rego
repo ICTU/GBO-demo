@@ -51,7 +51,10 @@ _claims_expiring(exp) := {
 	"valid_until": time.format(exp * 1000000000),
 	"jti": "jti-1",
 	"consent_id": "c-signed",
-	"encrypted_subject": {"99999999900000000200": {"identifier_type": "Identity", "key_set_version": 20260101, "value": "dmFsdWU="}},
+	"encrypted_subject": {"99999999900000000200": {
+		"identity": {"key_set_version": 20260101, "value": "dmFsdWU="},
+		"pseudonym": {"key_set_version": 20260101, "value": "cHNldWRv"},
+	}},
 	"scopes": ["bd:ib:2025"],
 	"dienstverlener_oin": "99999999900000000300",
 }
@@ -309,7 +312,7 @@ test_forged_signature_denies if {
 # encrypted identity.
 test_tampered_claims_deny if {
 	[header, _, signature] := split(_token, ".")
-	payload := base64url.encode_no_pad(json.marshal(object.union(_claims, {"encrypted_subject": {"99999999900000000200": {"identifier_type": "Identity", "key_set_version": 20260101, "value": "b3RoZXI="}}})))
+	payload := base64url.encode_no_pad(json.marshal(object.union(_claims, {"encrypted_subject": {"99999999900000000200": {"identity": {"key_set_version": 20260101, "value": "b3RoZXI="}}}})))
 	_reason(_on_active(concat(".", [header, payload, signature]))) == "CONSENT_SIGNATURE_INVALID"
 }
 
@@ -378,6 +381,8 @@ test_token_without_encrypted_subject_denies_context_invalid if {
 		"missing": object.remove(_claims, ["encrypted_subject"]),
 		"empty": object.union(object.remove(_claims, ["encrypted_subject"]), {"encrypted_subject": {}}),
 		"not an object": object.union(object.remove(_claims, ["encrypted_subject"]), {"encrypted_subject": "PI-abc123"}),
+		"a party without a pseudonym": object.union(object.remove(_claims, ["encrypted_subject"]), {"encrypted_subject": {"99999999900000000200": {"identity": {"key_set_version": 20260101, "value": "dmFsdWU="}}}}),
+		"the shape before pseudonyms": object.union(object.remove(_claims, ["encrypted_subject"]), {"encrypted_subject": {"99999999900000000200": {"identifier_type": "Identity", "key_set_version": 20260101, "value": "dmFsdWU="}}}),
 	}
 	every _, claims in cases {
 		_reason(_on_active(_sign(_header, claims))) == "CONSENT_CONTEXT_INVALID"

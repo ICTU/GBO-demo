@@ -44,7 +44,7 @@ sequenceDiagram
     participant L as LVG
     K->>P: vraag toestemming (scope lvg:vbo:eigendom)
     B->>P: inloggen, akkoord
-    P->>R: consent met versleutelde identiteit per bron
+    P->>R: consent met versleutelde waarden per bron
     R-->>P: consent-token
     P-->>K: consent-token
     B->>K: goedkeuren (IR-toestemming voor de installateur)

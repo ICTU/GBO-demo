@@ -993,11 +993,15 @@ services:
       - BSNK_URL=http://bsnk-mock:4003
       - CONSENT_URL=http://consent-register:4002
       - DEV_PORTAL_BACKEND_URL=http://dev-portal-backend:4007
-      # The sources a consent token carries an encrypted identity for, as
+      # The sources a consent token carries encrypted values for, as
       # <OIN>@<version of the source's keys>. BSNk makes those values only
       # while the citizen is present, so every source that will answer has to
       # be named here. The demo's sources share one OIN.
       - CONSENT_SOURCES=${CONSENT_SOURCES:-99999999900000000200@20260101}
+      # Every source gets a pseudonym; one on BSNk's BSN authorisation list
+      # also gets an identity. The portal reads the list again after this long,
+      # and gives no consent on a copy it could not renew.
+      - BSN_AUTHORISATION_LIST_MAX_AGE=${BSN_AUTHORISATION_LIST_MAX_AGE:-1h}
       # The portal's own reference to a citizen is an HMAC of the BSN under
       # this secret; without it the reference could be recomputed from a list
       # of BSNs. The version names the key and is part of every reference.

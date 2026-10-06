@@ -8,12 +8,13 @@
 //
 //  1. Look at the evidence the request carries:
 //     - a consent token → the query names its subject with a placeholder.
-//     Take the encrypted identity made for this source out of the token,
-//     have the source's own decryption component read it, and put the BSN
-//     in the placeholder's place. No call to BSNk.
+//     Take the value of the form it asks for, made for this source, out of
+//     the token, have the source's own decryption component read it, and put
+//     the BSN or the source's own pseudonym in the placeholder's place. No
+//     call to BSNk.
 //     - no consent token → pass-through (the BSN is already in the query)
-//  2. The source service (behind the sidecar) stays unchanged — it always
-//     speaks BSN, whatever the consumer sent.
+//  2. The source service (behind the sidecar) stays unchanged — it gets the
+//     form its API takes, whatever the consumer sent.
 //
 // What this gives:
 //   - In the DvTP flow the BSN stays out of the authorization envelope: the
@@ -204,18 +205,20 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client, substi
 			forward.processor = logbook.ForeignProcessor(r)
 		}
 
-		// Who the request is about, as it arrived: the placeholder under a
+		// Who the request is about, as it arrived: a placeholder under a
 		// consent, a BSN otherwise. Neither goes into a record. The sidecar
 		// names the Betrokkene in its own Verantwoordelijke's pseudonym space —
-		// a logbook-local pseudonym derived from the BSN with this source's
-		// key — so a record here shares no identifier with the caller's
-		// logbook, and logbooks join on the trace id alone.
+		// a logbook-local pseudonym derived, with this source's key, from the
+		// BSN or from this source's BSNk pseudonym of the citizen — so a record
+		// here shares no identifier with the caller's logbook, and logbooks
+		// join on the trace id alone.
 		subjects := subjectFromBody(body, substitute.Variables)
-		// bsnOf maps a subject as it arrived onto the BSN it stands for.
-		bsnOf := map[string]string{}
+		// filled maps a subject as it arrived onto what it stands for: the
+		// BSN, or this source's pseudonym of the citizen.
+		filled := map[string]string{}
 		if !underConsent {
 			for _, subject := range subjects {
-				bsnOf[subject] = subject
+				filled[subject] = subject
 			}
 		}
 
@@ -226,7 +229,7 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client, substi
 			// Reading the identity is itself a Dataverwerking, and it is
 			// logged whether or not it succeeded. A request that named no
 			// subject decrypted nothing, so there is nothing to log for it.
-			if result.BSN != "" || (substituteErr != nil && result.ConsentID != "") {
+			if result.BSN != "" || result.Pseudonym != "" || (substituteErr != nil && result.ConsentID != "") {
 				if err := logDecryption(r.Context(), logbook, cfg, forward, result, substituteErr, decryptionStart); err != nil {
 					ldv.LogFailure("dataverwerking.identiteit-ontsleuteling", err)
 					http.Error(w, "the decryption could not be logged; refusing the request", http.StatusInternalServerError)
@@ -239,9 +242,12 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client, substi
 				return
 			}
 			if result.BSN != "" {
-				bsnOf[substitution.IdentityPlaceholder] = result.BSN
+				filled[substitution.IdentityPlaceholder] = result.BSN
 			}
-			span.SetAttributes(attribute.Bool("gbo.sidecar.subject_substituted", result.BSN != ""))
+			if result.Pseudonym != "" {
+				filled[substitution.PseudonymPlaceholder] = result.Pseudonym
+			}
+			span.SetAttributes(attribute.Bool("gbo.sidecar.subject_substituted", result.BSN != "" || result.Pseudonym != ""))
 			body = result.Body
 		}
 
@@ -270,7 +276,7 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client, substi
 			ldv.InjectTraceparent(req.Header, ldv.TraceContext{
 				TraceID: forward.traceID, SpanID: forward.spanID, Sampled: true,
 			})
-			passSubject(req.Header, logbook, subjects, bsnOf)
+			passSubject(req.Header, logbook, subjects, filled)
 		}
 
 		resp, err := client.Do(req)
@@ -285,7 +291,7 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client, substi
 		// instead of data — the strongest ordering available without a
 		// two-phase commit, and the reason this is fail-closed rather than
 		// best-effort.
-		if err := logForward(r.Context(), logbook, cfg, forward, subjects, bsnOf, resp.StatusCode); err != nil {
+		if err := logForward(r.Context(), logbook, cfg, forward, subjects, filled, resp.StatusCode); err != nil {
 			ldv.LogFailure("dataverwerking.bronquery-doorgifte", err)
 			http.Error(w, "the forward could not be logged; withholding the response", http.StatusInternalServerError)
 			return
@@ -301,11 +307,12 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client, substi
 	}
 }
 
-// logDecryption records one reading of an encrypted identity. The record
-// names the Betrokkene by this source's own pseudonym, derived from the BSN it
-// produced — never the BSN itself. A value that could not be read has no BSN
-// to derive from; the record is then named by a pseudonym of the consent,
-// which is still local and still names one citizen.
+// logDecryption records one reading of an encrypted value. The record names
+// the Betrokkene by this source's logbook-local pseudonym, derived from what
+// the reading produced — the BSN or the source's BSNk pseudonym, never either
+// itself. A value that could not be read produced nothing to derive from; the
+// record is then named by a pseudonym of the consent, which is still local
+// and still names one citizen.
 //
 // The record points to no other logbook: the source read the value itself,
 // with its own keys.
@@ -314,6 +321,9 @@ func logDecryption(ctx context.Context, logbook *ldv.Client, cfg config, forward
 		return nil
 	}
 	named := result.BSN
+	if named == "" {
+		named = result.Pseudonym
+	}
 	if named == "" {
 		named = "consent:" + result.ConsentID
 	}
@@ -334,12 +344,13 @@ func logDecryption(ctx context.Context, logbook *ldv.Client, cfg config, forward
 }
 
 // passSubject hands the source the sidecar's name for the Betrokkene. The
-// source receives a BSN and would otherwise derive a reference of its own;
-// passing this one on keeps both components naming the Betrokkene alike.
-func passSubject(header http.Header, logbook *ldv.Client, subjects, bsnOf map[string]string) {
+// source receives a BSN or its own pseudonym and would otherwise derive a
+// reference of its own; passing this one on keeps both components naming the
+// Betrokkene alike.
+func passSubject(header http.Header, logbook *ldv.Client, subjects, filled map[string]string) {
 	for _, subject := range subjects {
-		if bsn := bsnOf[subject]; bsn != "" {
-			if pseudonym, err := logbook.LocalPseudonym(bsn); err == nil {
+		if named := filled[subject]; named != "" {
+			if pseudonym, err := logbook.LocalPseudonym(named); err == nil {
 				header.Set(ldv.HeaderSubjectID, pseudonym)
 				header.Set(ldv.HeaderSubjectIDType, ldv.SubjectTypePseudonym)
 			}
@@ -356,14 +367,14 @@ func passSubject(header http.Header, logbook *ldv.Client, subjects, bsnOf map[st
 //
 // One forward, one Betrokkene: the demo's queries are single-subject, and a
 // multi-subject body would need child records rather than a reused span id.
-func logForward(ctx context.Context, logbook *ldv.Client, cfg config, forward ldvOperation, subjects, bsnOf map[string]string, statusCode int) error {
+func logForward(ctx context.Context, logbook *ldv.Client, cfg config, forward ldvOperation, subjects, filled map[string]string, statusCode int) error {
 	if logbook == nil {
 		return nil
 	}
 	for _, subject := range subjects {
 		named := subject
-		if bsn := bsnOf[subject]; bsn != "" {
-			named = bsn
+		if value := filled[subject]; value != "" {
+			named = value
 		}
 		subjectID, err := logbook.LocalPseudonym(named)
 		if err != nil {

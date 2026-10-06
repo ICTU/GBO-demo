@@ -15,6 +15,21 @@ import (
 // Happy-path integration test: create a consent, then fetch it by its
 // generated consent_id. Verifies the POST/GET handlers share the same
 // store while the encrypted subject only exists inside the signed token.
+// assertSignedSubject checks the values the token carries for the two parties
+// of TestCreateThenGetConsent: one on the BSN authorisation list, one not.
+func assertSignedSubject(t *testing.T, subject map[string]EncryptedSubject) {
+	t.Helper()
+	listed, unlisted := subject["99999999900000000200"], subject["99999999900000000210"]
+	if listed.Identity == nil || *listed.Identity != (EncryptedValue{KeySetVersion: 20260101, Value: "dmFsdWU="}) ||
+		listed.Pseudonym == nil || *listed.Pseudonym != (EncryptedValue{KeySetVersion: 20260101, Value: "cHNldWRv"}) {
+		t.Fatalf("signed subject of the listed party = %+v", listed)
+	}
+	// A party without an identity gets none in the token, not an empty one.
+	if unlisted.Identity != nil || unlisted.Pseudonym == nil || unlisted.Pseudonym.Value != "cHNldWRvLTIxMA==" {
+		t.Fatalf("signed subject of the unlisted party = %+v", unlisted)
+	}
+}
+
 func TestCreateThenGetConsent(t *testing.T) {
 	issuer, err := NewConsentIssuer(config{
 		SigningKeyID: "test-key", TokenIssuer: "test-issuer", TokenAudience: "test-audience",
@@ -28,7 +43,10 @@ func TestCreateThenGetConsent(t *testing.T) {
 	defer srv.Close()
 
 	createBody := bytes.NewBufferString(`{
-		"encrypted_subject": {"99999999900000000200": {"identifier_type": "Identity", "key_set_version": 20260101, "value": "dmFsdWU="}},
+		"encrypted_subject": {
+			"99999999900000000200": {"identity": {"key_set_version": 20260101, "value": "dmFsdWU="}, "pseudonym": {"key_set_version": 20260101, "value": "cHNldWRv"}},
+			"99999999900000000210": {"pseudonym": {"key_set_version": 20260301, "value": "cHNldWRvLTIxMA=="}}
+		},
 		"subject_ref": "EP-portal-abc123",
 		"dienstverlener_oin": "00000001234567890000",
 		"scopes": ["bsn:read"],
@@ -73,8 +91,8 @@ func TestCreateThenGetConsent(t *testing.T) {
 		t.Fatalf("issued consent token is invalid: %v", err)
 	}
 	claims := parsed.Claims.(*ConsentClaims)
-	want := EncryptedSubject{IdentifierType: "Identity", KeySetVersion: 20260101, Value: "dmFsdWU="}
-	if claims.EncryptedSubject["99999999900000000200"] != want || claims.DienstverlenrOIN != "00000001234567890000" {
+	assertSignedSubject(t, claims.EncryptedSubject)
+	if claims.DienstverlenrOIN != "00000001234567890000" {
 		t.Fatalf("unexpected signed claims: %+v", claims)
 	}
 	if claims.ValidUntil == "" || claims.ID == "" || len(claims.Audience) != 1 {
@@ -187,13 +205,15 @@ func TestCreateRefusesAConsentWithoutAnEncryptedSubject(t *testing.T) {
 	defer srv.Close()
 
 	for name, subject := range map[string]string{
-		"none":               ``,
-		"empty":              `"encrypted_subject": {},`,
-		"a plain identifier": `"pi": "PI-abc123",`,
-		"party is no OIN":    `"encrypted_subject": {"belastingdienst": {"identifier_type": "Identity", "key_set_version": 20260101, "value": "dmFsdWU="}},`,
-		"unknown type":       `"encrypted_subject": {"99999999900000000200": {"identifier_type": "BSN", "key_set_version": 20260101, "value": "dmFsdWU="}},`,
-		"no key set version": `"encrypted_subject": {"99999999900000000200": {"identifier_type": "Identity", "value": "dmFsdWU="}},`,
-		"no value":           `"encrypted_subject": {"99999999900000000200": {"identifier_type": "Identity", "key_set_version": 20260101}},`,
+		"none":                ``,
+		"empty":               `"encrypted_subject": {},`,
+		"a plain identifier":  `"pi": "PI-abc123",`,
+		"party is no OIN":     `"encrypted_subject": {"belastingdienst": {"pseudonym": {"key_set_version": 20260101, "value": "cHNldWRv"}}},`,
+		"no pseudonym":        `"encrypted_subject": {"99999999900000000200": {"identity": {"key_set_version": 20260101, "value": "dmFsdWU="}}},`,
+		"the old shape":       `"encrypted_subject": {"99999999900000000200": {"identifier_type": "Identity", "key_set_version": 20260101, "value": "dmFsdWU="}},`,
+		"no key set version":  `"encrypted_subject": {"99999999900000000200": {"pseudonym": {"value": "cHNldWRv"}}},`,
+		"no value":            `"encrypted_subject": {"99999999900000000200": {"pseudonym": {"key_set_version": 20260101}}},`,
+		"incomplete identity": `"encrypted_subject": {"99999999900000000200": {"identity": {"value": "dmFsdWU="}, "pseudonym": {"key_set_version": 20260101, "value": "cHNldWRv"}}},`,
 	} {
 		body := bytes.NewBufferString(`{` + subject + `
 			"subject_ref": "EP-portal-abc123",

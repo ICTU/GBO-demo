@@ -218,7 +218,7 @@ GBO's own, for `logboek-toestemming` ([`verwerkingsactiviteiten-toestemming.json
 
 | reference | Dataverwerking | logged by |
 | --- | --- | --- |
-| `gbo-bsn-pseudonimisering@v1` | BSN → the portal's own reference (an HMAC), and at consent intake an encrypted identity per source | `consent-portal-backend` |
+| `gbo-bsn-pseudonimisering@v1` | BSN → the portal's own reference (an HMAC), and at consent intake an encrypted pseudonym per source, plus an encrypted identity for a source on the BSN authorisation list | `consent-portal-backend` |
 | `gbo-toestemming-verlenen@v1` | recording a consent | `consent-register` |
 | `gbo-toestemming-intrekken@v1` | revoking a consent | `consent-register` |
 | `gbo-toestemming-status@v1` | confirming a consent's status to the PDP | `consent-register` |

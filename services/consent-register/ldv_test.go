@@ -25,7 +25,8 @@ const testEncryptedValue = "dmFsdWUtdm9vci1kZS1icm9u"
 
 var testEncryptedSubject = map[string]any{
 	"99999999900000000200": map[string]any{
-		"identifier_type": "Identity", "key_set_version": 20260101, "value": testEncryptedValue,
+		"identity":  map[string]any{"key_set_version": 20260101, "value": testEncryptedValue},
+		"pseudonym": map[string]any{"key_set_version": 20260101, "value": testEncryptedValue},
 	},
 }
 

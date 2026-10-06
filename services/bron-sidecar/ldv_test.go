@@ -28,6 +28,11 @@ const (
 	keyFile = "-----BEGIN BSNK MOCK DV KEY-----\nRecipient: " + ownOIN + "\nType: EI Decryption\n\nbm8ga2V5IG1hdGVyaWFs\n-----END BSNK MOCK DV KEY-----\n"
 	// The query a consent-based consumer sends: the subject is the placeholder.
 	consentQuery = `{"query":"query($bsn: BSN!){ingeschrevenPersoon(bsn:$bsn){bsn}}","variables":{"bsn":"` + substitution.IdentityPlaceholder + `"}}`
+	// The same query to an API that takes the source's own pseudonym.
+	pseudonymQuery = `{"query":"query($bsn: BSN!){ingeschrevenPersoon(bsn:$bsn){bsn}}","variables":{"bsn":"` + substitution.PseudonymPlaceholder + `"}}`
+	// sourcePseudonym is the source's own pseudonym of the citizen, as its
+	// decryption component reads it from the pseudonym made for it.
+	sourcePseudonym = "eyJyZWNpcGllbnQiOiJzb3VyY2UifQ"
 )
 
 // callerToken is the Fsc-Authorization token of the consumer, as the Inway
@@ -41,14 +46,18 @@ func callerToken(t *testing.T) string {
 	return "Bearer header." + base64.RawURLEncoding.EncodeToString(payload) + ".signature"
 }
 
-// consentToken carries an encrypted identity for the given party. The sidecar
-// does not verify the token: the PDP did, before the Inway proxied.
+// consentToken carries an encrypted identity and an encrypted pseudonym for
+// the given party. The sidecar does not verify the token: the PDP did, before
+// the Inway proxied.
 func consentToken(t *testing.T, party string) string {
 	t.Helper()
 	payload, err := json.Marshal(map[string]any{
 		"consent_id": "c-7f3a",
 		"encrypted_subject": map[string]any{
-			party: map[string]any{"identifier_type": "Identity", "key_set_version": 20260101, "value": "identity-for:" + party},
+			party: map[string]any{
+				"identity":  map[string]any{"key_set_version": 20260101, "value": "identity-for:" + party},
+				"pseudonym": map[string]any{"key_set_version": 20260101, "value": "pseudonym-for:" + party},
+			},
 		},
 	})
 	if err != nil {
@@ -76,7 +85,8 @@ type chain struct {
 
 // sidecarUnderTest wires the sidecar against a stub source and a stub
 // decryption component plus a fake logbook. The component reads the test's
-// own values: "identity-for:<oin>" is the demo BSN, made for that OIN.
+// own values: "identity-for:<oin>" is the demo BSN and "pseudonym-for:<oin>"
+// the source's pseudonym, made for that OIN.
 func sidecarUnderTest(t *testing.T, logbook *ldvtest.Logbook) *chain {
 	t.Helper()
 	c := &chain{}
@@ -99,14 +109,23 @@ func sidecarUnderTest(t *testing.T, logbook *ldvtest.Logbook) *chain {
 		c.decryptionRequests = append(c.decryptionRequests, request)
 		refuse := c.refuseDecryption
 		c.mu.Unlock()
-		if r.URL.Path != "/signed-encrypted-identity" || refuse {
+		if refuse {
 			http.Error(w, "no matching key", http.StatusInternalServerError)
 			return
 		}
-		value, _ := request["signedEncryptedIdentity"].(string)
-		recipient := strings.TrimPrefix(value, "identity-for:")
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"bsn":"` + demoBSN + `","decodedInput":{"signedEI":{"encryptedIdentity":{"recipient":"` + recipient + `"}}}}`))
+		switch r.URL.Path {
+		case "/signed-encrypted-identity":
+			value, _ := request["signedEncryptedIdentity"].(string)
+			recipient := strings.TrimPrefix(value, "identity-for:")
+			_, _ = w.Write([]byte(`{"bsn":"` + demoBSN + `","decodedInput":{"signedEI":{"encryptedIdentity":{"recipient":"` + recipient + `"}}}}`))
+		case "/signed-encrypted-pseudonym":
+			value, _ := request["signedEncryptedPseudonym"].(string)
+			recipient := strings.TrimPrefix(value, "pseudonym-for:")
+			_, _ = w.Write([]byte(`{"pseudonym":"` + sourcePseudonym + `","decodedPseudonym":{"recipient":"` + recipient + `"}}`))
+		default:
+			http.Error(w, "unknown endpoint", http.StatusNotFound)
+		}
 	}))
 	t.Cleanup(component.Close)
 
@@ -198,6 +217,58 @@ func TestUnderAConsentTokenTheSourceReceivesTheBSN(t *testing.T) {
 	}
 	if schemeKeys, _ := request["schemeKeys"].(map[string]any); len(schemeKeys) != 1 {
 		t.Errorf("schemeKeys = %v, want the scheme keys from the key directory", request["schemeKeys"])
+	}
+}
+
+// Under a consent token, a query to an API that takes the source's own
+// pseudonym gets it in the placeholder's place, read from the pseudonym the
+// token carries for this source. The identity is not read, and the records
+// name the Betrokkene by a logbook-local pseudonym, not by the source's BSNk
+// pseudonym itself.
+func TestUnderAConsentTokenThePseudonymPlaceholderBecomesTheSourcesPseudonym(t *testing.T) {
+	logbook := ldvtest.New(t, decryptionActivity, forwardActivity)
+	c := sidecarUnderTest(t, logbook)
+
+	response := postQuery(t, c.url, map[string]string{
+		"Fsc-Authorization":   callerToken(t),
+		"X-GBO-Consent-Token": consentToken(t, ownOIN),
+	}, pseudonymQuery)
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("status = %d, body = %s", response.StatusCode, body)
+	}
+
+	if len(c.upstreamBodies) != 1 {
+		t.Fatalf("the source was called %d times, want 1", len(c.upstreamBodies))
+	}
+	var forwarded struct {
+		Variables map[string]any `json:"variables"`
+	}
+	if err := json.Unmarshal([]byte(c.upstreamBodies[0]), &forwarded); err != nil {
+		t.Fatalf("forwarded body: %v", err)
+	}
+	if forwarded.Variables["bsn"] != sourcePseudonym {
+		t.Errorf("the source received %v, want its pseudonym in the placeholder's place", forwarded.Variables)
+	}
+	if len(c.decryptionRequests) != 1 || c.decryptionRequests[0]["signedEncryptedPseudonym"] != "pseudonym-for:"+ownOIN {
+		t.Errorf("decryption requests = %v, want this source's pseudonym alone", c.decryptionRequests)
+	}
+
+	records := logbook.Written()
+	if len(records) != 2 {
+		t.Fatalf("wrote %d records, want 2: %+v", len(records), records)
+	}
+	for _, record := range records {
+		subject, _ := record.Attributes[ldv.AttrDataSubjectID].(string)
+		if !strings.HasPrefix(subject, "LP-") {
+			t.Errorf("record %q names the Betrokkene %q, want a logbook-local pseudonym", record.Name, subject)
+		}
+		if encoded, _ := json.Marshal(record); strings.Contains(string(encoded), sourcePseudonym) {
+			t.Errorf("record %q contains the source's pseudonym itself: %s", record.Name, encoded)
+		}
+	}
+	if records[0].Attributes[ldv.AttrDataSubjectID] != records[1].Attributes[ldv.AttrDataSubjectID] {
+		t.Error("the decryption and the forward name the same Betrokkene differently")
 	}
 }
 

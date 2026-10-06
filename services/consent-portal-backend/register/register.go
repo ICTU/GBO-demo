@@ -34,11 +34,13 @@ func (c Client) Create(ctx context.Context, d consent.Draft) (consent.Record, er
 	// only subject value the consent register persists and returns.
 	encrypted := make(map[string]any, len(d.Subjects))
 	for _, subject := range d.Subjects {
-		encrypted[subject.Party.OIN] = map[string]any{
-			"identifier_type": subject.IdentifierType,
-			"key_set_version": subject.Party.KeySetVersion,
-			"value":           subject.Value,
+		values := map[string]any{
+			"pseudonym": map[string]any{"key_set_version": subject.Party.KeySetVersion, "value": subject.Pseudonym},
 		}
+		if subject.Identity != "" {
+			values["identity"] = map[string]any{"key_set_version": subject.Party.KeySetVersion, "value": subject.Identity}
+		}
+		encrypted[subject.Party.OIN] = values
 	}
 	_, err := c.Caller.DoPrivate(ctx, "Create Consent", http.MethodPost, c.Base+"/consents", map[string]any{
 		"encrypted_subject":  encrypted,
