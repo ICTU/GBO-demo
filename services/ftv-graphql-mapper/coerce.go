@@ -442,7 +442,10 @@ func integral(n json.Number, lo, hi int64) (int64, bool) {
 	exp := 0
 	if hasExponent {
 		e, err := strconv.Atoi(exponent)
-		if err != nil {
+		// Beyond ±2^20 a non-zero value is either far outside int64 or
+		// keeps a fraction (the body holds fewer digits than that). The
+		// bound also keeps the arithmetic below from overflowing.
+		if err != nil || e > 1<<20 || e < -(1<<20) {
 			return 0, false
 		}
 		exp = e
@@ -451,7 +454,7 @@ func integral(n json.Number, lo, hi int64) (int64, bool) {
 	exp -= len(frac)
 	trimmed := strings.TrimRight(digits, "0")
 	exp += len(digits) - len(trimmed)
-	if exp < 0 || len(trimmed)+exp > 19 {
+	if exp < 0 || exp > 19-len(trimmed) {
 		return 0, false // a fraction remains, or beyond int64
 	}
 	text := trimmed + strings.Repeat("0", exp)

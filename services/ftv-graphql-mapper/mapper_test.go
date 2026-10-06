@@ -372,6 +372,8 @@ func TestIntegral(t *testing.T) {
 	for _, n := range []string{
 		"2024.5", "2024.0000000000000001", "2147483648", "-2147483649",
 		"1e400", "1e-400", "2.0245e3", "1e99999999999999999999",
+		"1e9223372036854775807", "10e9223372036854775807", "1.5e-9223372036854775808",
+		"1e1048577", "1e-1048577", "12345678901234567890",
 	} {
 		if got, ok := integral(json.Number(n), lo, hi); ok {
 			t.Errorf("integral(%s) = %d; want no integer", n, got)
@@ -389,6 +391,10 @@ func TestExactNumbers(t *testing.T) {
 			fail: failure(SubVariableError)},
 		{name: "ID beyond 2^53 stays exact", sdl: idSDL, body: `{ "query": "query ($i: ID) { a(id: $i) }", "variables": { "i": 9007199254740993.0 } }`,
 			fields: `[ { "path": ["a"], "parentType": "Query", "field": "a", "leaf": true, "args": { "id": { "value": "9007199254740993", "origin": "variable:i", "variables": ["i"] } } } ]`},
+		{name: "Int with the largest exponent", body: `{ "query": "query ($j: Int!) { persoon(bsn: \"1\") { inkomens(jaren: [$j]) { jaar } } }", "variables": { "j": 1e9223372036854775807 } }`,
+			fail: failure(SubVariableError)},
+		{name: "ID with the smallest exponent", sdl: idSDL, body: `{ "query": "query ($i: ID) { a(id: $i) }", "variables": { "i": 1.5e-9223372036854775808 } }`,
+			fail: failure(SubVariableError)},
 		{name: "ID with a fraction", sdl: idSDL, body: `{ "query": "query ($i: ID) { a(id: $i) }", "variables": { "i": 1.5 } }`,
 			fail: failure(SubVariableError)},
 	})
