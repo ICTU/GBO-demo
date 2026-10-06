@@ -131,7 +131,7 @@ func TestAkteRequesterIsNamedByALocalPseudonym(t *testing.T) {
 	}
 }
 
-// A sidecar in front of a pseudonym contract passes the PI on; the bron must
+// The sidecar passes its pseudonym on; the bron must
 // then name the requester the same way its sidecar did.
 func TestAkteRequesterKeepsTheSidecarsPseudonym(t *testing.T) {
 	logbook := ldvtest.New(t, akteActivity, persoonsgegevensActivity)
@@ -140,16 +140,16 @@ func TestAkteRequesterKeepsTheSidecarsPseudonym(t *testing.T) {
 	brpQuery(t, url, map[string]string{
 		// §3.1: the trace arrives on the standard traceparent.
 		"traceparent":           "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
-		ldv.HeaderSubjectID:     "PI-abc123",
-		ldv.HeaderSubjectIDType: ldv.SubjectTypePI,
+		ldv.HeaderSubjectID:     "LP-abc123",
+		ldv.HeaderSubjectIDType: ldv.SubjectTypePseudonym,
 	}, akteQuery)
 
 	primary := ldvtest.ByName(logbook.Written(), "dataverwerking.bronbevraging")
 	if len(primary) != 1 {
 		t.Fatalf("expected one primary record, got %d", len(primary))
 	}
-	if got := primary[0].Attributes[ldv.AttrDataSubjectID]; got != "PI-abc123" {
-		t.Errorf("data_subject_id = %v, want the PI the sidecar passed on", got)
+	if got := primary[0].Attributes[ldv.AttrDataSubjectID]; got != "LP-abc123" {
+		t.Errorf("data_subject_id = %v, want the pseudonym the sidecar passed on", got)
 	}
 	if primary[0].ParentSpanID != "b7ad6b7169203331" {
 		t.Errorf("parent_span_id = %q, want the sidecar's forward span", primary[0].ParentSpanID)

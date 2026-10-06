@@ -9,17 +9,15 @@ import (
 	"strings"
 )
 
-// Subject-id types. `pi` is the polymorphic identity the DvTP chain carries
-// end to end; `logboek-pseudoniem` is a key-derived, logbook-local stand-in
-// for where a component holds only a BSN (the EUDI flow) and has nothing else
-// to name the Betrokkene by. Never the BSN itself (REQ-60/72).
+// Subject-id types. `logboek-pseudoniem` is a key-derived, logbook-local
+// stand-in for where a component holds only a BSN and has nothing else to
+// name the Betrokkene by. Never the BSN itself (REQ-60/72).
 //
 // Types a single component owns are not declared here: the consent register's
 // portal-scoped reference and RvIG's own person id are meaningful only in
 // those components, and putting them in the shared client would suggest they
 // are interchangeable with these.
 const (
-	SubjectTypePI        = "pi"
 	SubjectTypePseudonym = "logboek-pseudoniem"
 )
 
@@ -63,15 +61,8 @@ func (c *Client) LocalPseudonym(bsn string) (string, error) {
 // the Betrokkene by something it can vouch for.
 func (c *Client) Subject(header http.Header, bsn string) (string, string, error) {
 	passed := strings.TrimSpace(header.Get(HeaderSubjectID))
-	switch strings.TrimSpace(header.Get(HeaderSubjectIDType)) {
-	case SubjectTypePI:
-		if passed != "" {
-			return passed, SubjectTypePI, nil
-		}
-	case SubjectTypePseudonym:
-		if passed != "" {
-			return passed, SubjectTypePseudonym, nil
-		}
+	if passed != "" && strings.TrimSpace(header.Get(HeaderSubjectIDType)) == SubjectTypePseudonym {
+		return passed, SubjectTypePseudonym, nil
 	}
 	pseudonym, err := c.LocalPseudonym(bsn)
 	if err != nil {

@@ -21,8 +21,8 @@ func validRecord() Record {
 		Resource:  map[string]any{"service.name": "bron-sidecar"},
 		Attributes: map[string]any{
 			AttrProcessingActivityID: "https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-ib-2025/v1",
-			AttrDataSubjectID:        "PI-abc123",
-			AttrDataSubjectIDType:    "pi",
+			AttrDataSubjectID:        "LP-abc123",
+			AttrDataSubjectIDType:    "logboek-pseudoniem",
 		},
 	}
 }
@@ -37,23 +37,24 @@ func TestValidateAcceptsAWellFormedRecord(t *testing.T) {
 
 func TestValidateRejectsMalformedRecords(t *testing.T) {
 	cases := map[string]func(*Record){
-		"short trace id":         func(r *Record) { r.TraceID = "0af7651916cd43dd" },
-		"uppercase trace id":     func(r *Record) { r.TraceID = strings.ToUpper(r.TraceID) },
-		"short span id":          func(r *Record) { r.SpanID = "b7ad6b71" },
-		"bad parent span id":     func(r *Record) { r.ParentSpanID = "nope" },
-		"empty name":             func(r *Record) { r.Name = "   " },
-		"unknown status":         func(r *Record) { r.Status = "SUCCEEDED" },
-		"zero start time":        func(r *Record) { r.StartTime = time.Time{} },
-		"zero end time":          func(r *Record) { r.EndTime = time.Time{} },
-		"end before start":       func(r *Record) { r.EndTime = r.StartTime.Add(-time.Second) },
-		"no processing activity": func(r *Record) { delete(r.Attributes, AttrProcessingActivityID) },
-		"no data subject":        func(r *Record) { delete(r.Attributes, AttrDataSubjectID) },
-		"no subject id type":     func(r *Record) { delete(r.Attributes, AttrDataSubjectIDType) },
-		"blank data subject":     func(r *Record) { r.Attributes[AttrDataSubjectID] = "  " },
-		"numeric data subject":   func(r *Record) { r.Attributes[AttrDataSubjectID] = 42 },
-		"unknown subject type":   func(r *Record) { r.Attributes[AttrDataSubjectIDType] = "bsn" },
-		"unversioned activity":   func(r *Record) { r.Attributes[AttrProcessingActivityID] = "bd-ib-2025" },
-		"activity with slash":    func(r *Record) { r.Attributes[AttrProcessingActivityID] = "../secrets@v1" },
+		"short trace id":          func(r *Record) { r.TraceID = "0af7651916cd43dd" },
+		"uppercase trace id":      func(r *Record) { r.TraceID = strings.ToUpper(r.TraceID) },
+		"short span id":           func(r *Record) { r.SpanID = "b7ad6b71" },
+		"bad parent span id":      func(r *Record) { r.ParentSpanID = "nope" },
+		"empty name":              func(r *Record) { r.Name = "   " },
+		"unknown status":          func(r *Record) { r.Status = "SUCCEEDED" },
+		"zero start time":         func(r *Record) { r.StartTime = time.Time{} },
+		"zero end time":           func(r *Record) { r.EndTime = time.Time{} },
+		"end before start":        func(r *Record) { r.EndTime = r.StartTime.Add(-time.Second) },
+		"no processing activity":  func(r *Record) { delete(r.Attributes, AttrProcessingActivityID) },
+		"no data subject":         func(r *Record) { delete(r.Attributes, AttrDataSubjectID) },
+		"no subject id type":      func(r *Record) { delete(r.Attributes, AttrDataSubjectIDType) },
+		"blank data subject":      func(r *Record) { r.Attributes[AttrDataSubjectID] = "  " },
+		"numeric data subject":    func(r *Record) { r.Attributes[AttrDataSubjectID] = 42 },
+		"unknown subject type":    func(r *Record) { r.Attributes[AttrDataSubjectIDType] = "bsn" },
+		"retired pi subject type": func(r *Record) { r.Attributes[AttrDataSubjectIDType] = "pi" },
+		"unversioned activity":    func(r *Record) { r.Attributes[AttrProcessingActivityID] = "bd-ib-2025" },
+		"activity with slash":     func(r *Record) { r.Attributes[AttrProcessingActivityID] = "../secrets@v1" },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {

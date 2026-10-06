@@ -37,14 +37,14 @@ func TestSubjectNeedsNoKeyWhenAPseudonymWasPassedOn(t *testing.T) {
 		t.Fatalf("new: %v", err)
 	}
 	header := http.Header{}
-	header.Set(HeaderSubjectID, "PI-abc123")
-	header.Set(HeaderSubjectIDType, SubjectTypePI)
+	header.Set(HeaderSubjectID, "LP-abc123")
+	header.Set(HeaderSubjectIDType, SubjectTypePseudonym)
 
 	id, idType, err := client.Subject(header, "123456789")
 	if err != nil {
 		t.Fatalf("Subject: %v", err)
 	}
-	if id != "PI-abc123" || idType != SubjectTypePI {
+	if id != "LP-abc123" || idType != SubjectTypePseudonym {
 		t.Fatalf("Subject = (%q, %q)", id, idType)
 	}
 }

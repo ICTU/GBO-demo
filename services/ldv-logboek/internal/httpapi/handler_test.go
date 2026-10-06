@@ -53,8 +53,8 @@ func validBody() map[string]any {
 		"resource":   map[string]any{"attributes": map[string]any{"service.name": "bron-sidecar"}},
 		"attributes": map[string]any{
 			ldv.AttrProcessingActivityID: "https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-bronquery-doorgifte/v1",
-			ldv.AttrDataSubjectID:        "PI-abc123",
-			ldv.AttrDataSubjectIDType:    "pi",
+			ldv.AttrDataSubjectID:        "LP-abc123",
+			ldv.AttrDataSubjectIDType:    "logboek-pseudoniem",
 		},
 	}
 }
@@ -309,7 +309,7 @@ func TestReadExtensionSelectors(t *testing.T) {
 			"processingActivityId": "https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-bronquery-doorgifte/v1",
 		}}},
 		"by subject, as the schema defines it": map[string]any{"dpl": map[string]any{"core": map[string]any{
-			"dataSubjectId": "PI-abc123", "dataSubjectIdType": "pi",
+			"dataSubjectId": "LP-abc123", "dataSubjectIdType": "logboek-pseudoniem",
 		}}},
 		// Tolerated: a caller holding a record's own attributes should not
 		// have to reshape them to ask about it.
@@ -317,7 +317,7 @@ func TestReadExtensionSelectors(t *testing.T) {
 			ldv.AttrProcessingActivityID: "https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-bronquery-doorgifte/v1",
 		}},
 		"by subject, flat attributes": map[string]any{"attributes": map[string]any{
-			ldv.AttrDataSubjectID: "PI-abc123", ldv.AttrDataSubjectIDType: "pi",
+			ldv.AttrDataSubjectID: "LP-abc123", ldv.AttrDataSubjectIDType: "logboek-pseudoniem",
 		}},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -421,8 +421,8 @@ func TestTheSchemasRequestShapeIsAcceptedEndToEnd(t *testing.T) {
 
 	response := read(t, handler, readToken, map[string]any{
 		"dpl": map[string]any{"core": map[string]any{
-			"dataSubjectId":     "PI-abc123",
-			"dataSubjectIdType": "pi",
+			"dataSubjectId":     "LP-abc123",
+			"dataSubjectIdType": "logboek-pseudoniem",
 		}},
 	})
 	if response.Code != http.StatusOK {

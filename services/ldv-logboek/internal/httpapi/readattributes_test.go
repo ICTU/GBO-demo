@@ -14,8 +14,8 @@ import (
 func TestStoredAttributesRenderInTheExtensionsNestedShape(t *testing.T) {
 	rendered := toReadAttributes(map[string]any{
 		ldv.AttrProcessingActivityID:      "https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-ib-2025/v1",
-		ldv.AttrDataSubjectID:             "PI-abc123",
-		ldv.AttrDataSubjectIDType:         "pi",
+		ldv.AttrDataSubjectID:             "LP-abc123",
+		ldv.AttrDataSubjectIDType:         "logboek-pseudoniem",
 		ldv.AttrForeignOperationProcessor: "https://fsc.gbo.overheid.nl/peers/AAAABBBBCCCCDDDDEEEE",
 		ldv.AttrNextLogbookID:             "https://logboek.rvig.nl/data-processing-operations",
 	})
@@ -42,8 +42,8 @@ func TestStoredAttributesRenderInTheExtensionsNestedShape(t *testing.T) {
 	if err := json.Unmarshal(encoded, &shape); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if shape.DPL.Core.ProcessingActivityID == "" || shape.DPL.Core.DataSubjectID != "PI-abc123" ||
-		shape.DPL.Core.DataSubjectIDType != "pi" || shape.DPL.Core.ForeignOperation.Processor == "" ||
+	if shape.DPL.Core.ProcessingActivityID == "" || shape.DPL.Core.DataSubjectID != "LP-abc123" ||
+		shape.DPL.Core.DataSubjectIDType != "logboek-pseudoniem" || shape.DPL.Core.ForeignOperation.Processor == "" ||
 		shape.DPL.Read.NextLogbookID == "" {
 		t.Fatalf("attributes did not land in the schema's shape: %s", encoded)
 	}
@@ -71,17 +71,17 @@ func TestSelectorsAreReadFromEitherSpelling(t *testing.T) {
 	nested := map[string]any{
 		"dpl": map[string]any{"core": map[string]any{
 			"processingActivityId": "https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-ib-2025/v1",
-			"dataSubjectId":        "PI-abc123",
+			"dataSubjectId":        "LP-abc123",
 		}},
 	}
 	if got := fromReadAttributes(nested, ldv.AttrProcessingActivityID); got == "" {
 		t.Error("the nested spelling was not read")
 	}
-	if got := fromReadAttributes(nested, ldv.AttrDataSubjectID); got != "PI-abc123" {
+	if got := fromReadAttributes(nested, ldv.AttrDataSubjectID); got != "LP-abc123" {
 		t.Errorf("dataSubjectId = %q", got)
 	}
-	flat := map[string]any{ldv.AttrDataSubjectID: "PI-abc123"}
-	if got := fromReadAttributes(flat, ldv.AttrDataSubjectID); got != "PI-abc123" {
+	flat := map[string]any{ldv.AttrDataSubjectID: "LP-abc123"}
+	if got := fromReadAttributes(flat, ldv.AttrDataSubjectID); got != "LP-abc123" {
 		t.Errorf("the flat spelling was not read: %q", got)
 	}
 	if got := fromReadAttributes(map[string]any{}, ldv.AttrDataSubjectID); got != "" {

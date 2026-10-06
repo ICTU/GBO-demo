@@ -469,9 +469,9 @@ fsc-seed-bri: fsc-local-env
 		gbo-demo/pki-tools:local \
 		bash scripts/seed-bri-contract.sh
 
-# Connection HV -> BD for bri (DvTP consumer with
-# subject_id_type=pseudonym). The bri publication contract already
-# exists via fsc-seed-bri; only the extra consumer connection is needed.
+# Connection HV -> BD for bri (DvTP consumer). The bri publication
+# contract already exists via fsc-seed-bri; only the extra consumer
+# connection is needed.
 fsc-seed-bri-hv: fsc-local-env
 	docker run --rm \
 		--network $(FSC_INFRA_NETWORK) \
@@ -502,7 +502,6 @@ fsc-seed-consent-status: fsc-local-env
 		-e CONSUMER_INTERNAL_DIR=/work/orgs/gbo-pdp/pki/internal \
 		-e CONSUMER_ORG_CERT=/work/orgs/gbo-pdp/pki/org/gbo-pdp.pem \
 		-e CONSUMER_CONTROLLER_DB=fsc_pdp_controller \
-		-e GRANT_PROPERTIES='{}' \
 		-e GRANT_LINK_PATH=/consent-status \
 		-e OUTWAY_NAME=PdpOutway-01 \
 		-v $(PWD)/fsc-infra:/work:ro \
@@ -513,8 +512,7 @@ fsc-seed-consent-status: fsc-local-env
 # LVG (Landelijke Voorziening Gebouwen) is one more logical source on the
 # shared provider peer (...0200), behind the same Inway, like RvIG next to BD.
 # Its only consumer is the Installatie Register's own peer (...1000), which
-# reaches it through a grant-link on its Outway at /lvg. The grant carries
-# subject_id_type=pseudonym: IR sends a PI, and lvg-sidecar resolves it.
+# reaches it through a grant-link on its Outway at /lvg.
 fsc-seed-lvg: fsc-local-env
 	docker run --rm \
 		--network $(FSC_INFRA_NETWORK) \
@@ -526,7 +524,6 @@ fsc-seed-lvg: fsc-local-env
 		-e CONSUMER_INTERNAL_DIR=/work/orgs/installatieregister/pki/internal \
 		-e CONSUMER_ORG_CERT=/work/orgs/installatieregister/pki/org/installatieregister.pem \
 		-e CONSUMER_CONTROLLER_DB=fsc_ir_controller \
-		-e GRANT_PROPERTIES='{"subject_id_type":"pseudonym"}' \
 		-e GRANT_LINK_PATH=/lvg \
 		-e OUTWAY_NAME=IrOutway-01 \
 		-v $(PWD)/fsc-infra:/work:ro \
@@ -585,16 +582,15 @@ fsc-seed-rvig-source: fsc-local-env
 
 # One FSC participant publishes two logical metadata services. The manually
 # configured service reference selects which source document is fetched.
-# Metadata transport is not subject-bound, so its connection grants carry no
-# properties at all: no subject_id_type means the bron-sidecar passes through,
-# and the metadata policy path gates on subject, method and endpoint (#334).
+# Metadata transport is not subject-bound: no consent token means the
+# bron-sidecar passes through, and the metadata policy path gates on subject,
+# method and endpoint (#334).
 fsc-seed-metadata: fsc-local-env
 	docker run --rm \
 		--network $(FSC_INFRA_NETWORK) \
 		--env-file fsc-infra/.env \
 		-e SERVICE_NAME=gbo-metadata-bd \
 		-e SERVICE_ENDPOINT_URL=http://graphql-server:4000 \
-		-e GRANT_PROPERTIES='{}' \
 		-e CREATE_GRANT_LINK=false \
 		-v $(PWD)/fsc-infra:/work:ro \
 		-w /work \
@@ -605,7 +601,6 @@ fsc-seed-metadata: fsc-local-env
 		--env-file fsc-infra/.env \
 		-e SERVICE_NAME=gbo-metadata-rvig \
 		-e SERVICE_ENDPOINT_URL=http://brp-graphql-server:4001 \
-		-e GRANT_PROPERTIES='{}' \
 		-e CREATE_GRANT_LINK=false \
 		-v $(PWD)/fsc-infra:/work:ro \
 		-w /work \

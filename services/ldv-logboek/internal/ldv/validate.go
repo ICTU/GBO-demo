@@ -19,7 +19,6 @@ var ErrInvalidRecord = errors.New("invalid log record")
 // has to resolve the record later, and leaving it open is exactly how a raw
 // identifier ends up in the field.
 //
-//   - pi                  polymorphic identity from BSNk
 //   - consent-id          the consent a service provider acted under. It
 //     holds no identifier of the citizen: the consent token carries the
 //     citizen only in values encrypted for the sources. A consent is about
@@ -38,7 +37,6 @@ var ErrInvalidRecord = errors.New("invalid log record")
 //     acceptable here precisely because the record never leaves RvIG's own
 //     logbook — a cross-organisation record would need a pseudonym.
 var SubjectIDTypes = map[string]bool{
-	"pi":                 true,
 	"consent-id":         true,
 	"logboek-pseudoniem": true,
 	"portal-subject":     true,

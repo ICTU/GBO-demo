@@ -49,9 +49,9 @@ HV_CERT="$HV_INTERNAL_DIR/internal-cert.pem"
 HV_KEY="$HV_INTERNAL_DIR/internal-cert-key.pem"
 HV_CA="$HV_INTERNAL_DIR/intermediate_ca.pem"
 
-# The same regime as HV's own connection: the integrator sends HV's PI, and
-# the bron-sidecar resolves it. See seed-bri-contract.sh for grant properties.
-default_grant_properties='{"subject_id_type": "pseudonym"}'
+# The same grant properties as HV's own connection, which is none. See
+# seed-bri-contract.sh for grant properties.
+default_grant_properties='{}'
 GRANT_PROPERTIES="${GRANT_PROPERTIES:-$default_grant_properties}"
 if ! jq -e 'type == "object"' >/dev/null 2>&1 <<<"$GRANT_PROPERTIES"; then
   echo "GRANT_PROPERTIES must be a JSON object, got: $GRANT_PROPERTIES" >&2
@@ -73,8 +73,8 @@ for f in "$INT_CERT" "$INT_KEY" "$INT_CA" "$INT_ORG_CERT" "$HV_CERT" "$HV_KEY" "
 done
 
 # The delegated connection contracts at the integrator's Manager for this
-# service, delegator and regime. As in seed-bri-contract.sh, the Manager
-# ignores ?service_name=, so the match is client-side.
+# service, delegator and grant properties. As in seed-bri-contract.sh, the
+# Manager ignores ?service_name=, so the match is client-side.
 delegated_contracts() {
   mtls_curl "$INT_CERT" "$INT_KEY" "$INT_CA" \
     "$INT_MANAGER_URL/v1/contracts?grant_type=GRANT_TYPE_DELEGATED_SERVICE_CONNECTION" \

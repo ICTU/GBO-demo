@@ -23,8 +23,8 @@ func sampleRecord(spanID string) ldv.Stored {
 			Resource:  map[string]any{"service.name": "bron-sidecar"},
 			Attributes: map[string]any{
 				ldv.AttrProcessingActivityID: "bd-ib-2025@v1",
-				ldv.AttrDataSubjectID:        "PI-abc123",
-				ldv.AttrDataSubjectIDType:    "pi",
+				ldv.AttrDataSubjectID:        "LP-abc123",
+				ldv.AttrDataSubjectIDType:    "logboek-pseudoniem",
 				"gbo.belastingjaren":         []any{float64(2025)},
 			},
 		},

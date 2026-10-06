@@ -141,7 +141,6 @@ and `dpl.core.data_subject_id_type` says which pseudonym space it lives in:
 | type | meaning |
 | --- | --- |
 | `consent-id` | the consent a service provider acted under. It holds no identifier of the citizen: the consent token carries the citizen only in values encrypted for the sources. A consent is about exactly one citizen, which the consent register knows |
-| `pi` | a polymorphic identity from BSNk. Accepted, but no component in the demo names a Betrokkene by one |
 | `logboek-pseudoniem` | a key-derived, logbook-local reference, derived with the Verantwoordelijke's own key: what a source names the Betrokkene by, and what the EUDI adapter uses |
 | `portal-subject` | the portal-scoped reference the consent portal derives, and the only identifier the consent register ever holds |
 | `brp-persoon-id` | RvIG's own record identifier, for someone named in a certificate about another person |
