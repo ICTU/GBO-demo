@@ -30,6 +30,7 @@ jobs:
           - dienstverlener-backend
           - dvtp-onboarding-register
           - eudi-adapter
+          - ftv-graphql-mapper
           - graphql-server
           - ldv-client
           - ldv-logboek
