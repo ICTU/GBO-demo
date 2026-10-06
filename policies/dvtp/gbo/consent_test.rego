@@ -71,7 +71,7 @@ _request(headers) := {
 		"trace_id": "tx-330",
 		"headers": headers,
 		"resource": {"scope": "bd:ib:2025"},
-		"resolved": {"fields": _box1, "args": {"bsn": "consent:subject", "belastingjaren.0": "2025"}},
+		"resolved": {"fields": _box1, "args": {"bsn": "consent:identity", "belastingjaren.0": "2025"}},
 	},
 }
 

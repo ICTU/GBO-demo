@@ -5,14 +5,14 @@ import data.dvtp.gbo
 # Engine-level ctx-shape. The consent is resolved by the policy itself
 # (data.dvtp.gbo.consent, covered end to end in consent_test.rego); these
 # tests stand a resolved consent in for it with `with`, so they exercise the
-# engine alone. The engine puts the subject placeholder on ctx.resource for
+# engine alone. The engine puts the subject placeholders on ctx.resource for
 # the constraint-binding rule.
 
 _pip_consent := {"context_valid": true, "status_available": true, "exists": true, "withdrawn": false, "granted_scopes": ["bd:ib:2025"], "valid_until": "2030-01-01T00:00:00Z", "dienstverlener_oin": "peer-oin-123"}
 
 _input := {
 	"subject": {"type": "org", "id": "peer-oin-123"},
-	"context": {"resource": {"variables": {"bsn": "consent:subject"}}},
+	"context": {"resource": {"variables": {"bsn": "consent:identity"}}},
 }
 
 test_ctx_pip_carries_the_resolved_consent if {
@@ -20,28 +20,28 @@ test_ctx_pip_carries_the_resolved_consent if {
 	ctx.pip.consent.exists == true
 }
 
-test_ctx_resource_subject_is_the_placeholder if {
+test_ctx_resource_has_both_placeholders if {
 	ctx := gbo._ctx with input as _input with data.dvtp.gbo.consent.resolved as _pip_consent
-	ctx.resource.subject == "consent:subject"
+	ctx.resource.subject_placeholders == {"consent:identity", "consent:pseudonym"}
 }
 
-# Without a verified consent the placeholder stands for nobody.
-test_ctx_resource_subject_empty_without_consent if {
+# Without a verified consent the placeholders stand for nobody.
+test_ctx_resource_placeholders_empty_without_consent if {
 	ctx := gbo._ctx with input as {"subject": {"type": "org", "id": "x"}, "context": {}}
-	ctx.resource.subject == ""
+	ctx.resource.subject_placeholders == set()
 }
 
-test_ctx_resource_subject_empty_for_an_unverified_consent if {
+test_ctx_resource_placeholders_empty_for_an_unverified_consent if {
 	ctx := gbo._ctx with input as _input with data.dvtp.gbo.consent.resolved as {"context_valid": false, "invalid_code": "CONSENT_SIGNATURE_INVALID"}
-	ctx.resource.subject == ""
+	ctx.resource.subject_placeholders == set()
 }
 
-# What a consent-based query must name its subject with is the policy's to
+# What a consent-based query may name its subject with is the policy's to
 # say. A request cannot move it by supplying its own.
-test_ctx_resource_subject_is_not_taken_from_the_request if {
-	req := {"subject": {"type": "org", "id": "x"}, "context": {"resource": {"subject": "999991772"}}}
+test_ctx_resource_placeholders_are_not_taken_from_the_request if {
+	req := {"subject": {"type": "org", "id": "x"}, "context": {"resource": {"subject_placeholders": ["999991772"]}}}
 	ctx := gbo._ctx with input as req with data.dvtp.gbo.consent.resolved as _pip_consent
-	ctx.resource.subject == "consent:subject"
+	ctx.resource.subject_placeholders == {"consent:identity", "consent:pseudonym"}
 }
 
 # A consent in input is not a consent the policy verified. Nothing upstream
@@ -50,7 +50,7 @@ test_ctx_resource_subject_is_not_taken_from_the_request if {
 # under the PID regime.
 test_input_pip_consent_is_not_trusted if {
 	req := object.union(
-		_dvtp_input("bd:ib:2025", {"bsn": "consent:subject", "belastingjaren.0": "2025"}),
+		_dvtp_input("bd:ib:2025", {"bsn": "consent:identity", "belastingjaren.0": "2025"}),
 		{"context": {"pip": {"consent": _consent}}},
 	)
 	ctx := gbo._ctx with input as req
@@ -147,14 +147,14 @@ _dvtp_input(scope, args) := {
 }
 
 test_dvtp_deny_surfaces_year_not_covered if {
-	result := gbo.response with input as _dvtp_input("bd:ib:2025", {"bsn": "consent:subject", "belastingjaren.0": "2024"})
+	result := gbo.response with input as _dvtp_input("bd:ib:2025", {"bsn": "consent:identity", "belastingjaren.0": "2024"})
 		with data.dvtp.gbo.consent.resolved as _consent
 	result.decision == false
 	result.context.reason_admin.code == "YEAR_NOT_COVERED"
 }
 
 test_dvtp_deny_surfaces_consent_scope_mismatch if {
-	result := gbo.response with input as _dvtp_input("bd:ib:2023", {"bsn": "consent:subject", "belastingjaren.0": "2025"})
+	result := gbo.response with input as _dvtp_input("bd:ib:2023", {"bsn": "consent:identity", "belastingjaren.0": "2025"})
 		with data.dvtp.gbo.consent.resolved as _consent
 	result.decision == false
 	result.context.reason_admin.code == "CONSENT_SCOPE_MISMATCH"
@@ -162,6 +162,15 @@ test_dvtp_deny_surfaces_consent_scope_mismatch if {
 
 test_dvtp_deny_surfaces_constraint_mismatch if {
 	result := gbo.response with input as _dvtp_input("bd:ib:2025", {"bsn": "999991772", "belastingjaren.0": "2025"})
+		with data.dvtp.gbo.consent.resolved as _consent
+	result.decision == false
+	result.context.reason_admin.code == "CONSTRAINT_MISMATCH"
+}
+
+# A placeholder the rule does not accept is denied as a whole request, not
+# passed on for the source to refuse.
+test_dvtp_deny_placeholder_the_rule_does_not_accept if {
+	result := gbo.response with input as _dvtp_input("bd:ib:2025", {"bsn": "consent:pseudonym", "belastingjaren.0": "2025"})
 		with data.dvtp.gbo.consent.resolved as _consent
 	result.decision == false
 	result.context.reason_admin.code == "CONSTRAINT_MISMATCH"
@@ -225,7 +234,7 @@ test_eudi_deny_surfaces_actor_not_allowed if {
 # when one regime is defined as the absence of the other.
 
 test_dvtp_allow_grants_via_consent_rule if {
-	result := gbo.response with input as _dvtp_input("bd:ib:2025", {"bsn": "consent:subject", "belastingjaren.0": "2025"})
+	result := gbo.response with input as _dvtp_input("bd:ib:2025", {"bsn": "consent:identity", "belastingjaren.0": "2025"})
 		with data.dvtp.gbo.consent.resolved as _consent
 	result.decision == true
 	result.context.granted[0].rule == "DVT0001"
@@ -234,7 +243,7 @@ test_dvtp_allow_grants_via_consent_rule if {
 # The decision log records the consent the decision was taken on: it is not
 # in input, so the response document carries it.
 test_dvtp_response_carries_the_consent if {
-	result := gbo.response with input as _dvtp_input("bd:ib:2025", {"bsn": "consent:subject", "belastingjaren.0": "2025"})
+	result := gbo.response with input as _dvtp_input("bd:ib:2025", {"bsn": "consent:identity", "belastingjaren.0": "2025"})
 		with data.dvtp.gbo.consent.resolved as _consent
 	result.context.pip.consent == _consent
 }
@@ -251,7 +260,7 @@ test_no_consent_token_puts_the_request_under_the_pid_regime if {
 			"pip": {},
 			"resolved": {
 				"fields": [{"id": "aangifte.box1", "parent": "AangifteIH", "name": "box1Inkomen", "scalar": false}],
-				"args": {"bsn": "consent:subject", "vars.bsn": "consent:subject", "belastingjaren.0": "2025"},
+				"args": {"bsn": "consent:identity", "vars.bsn": "consent:identity", "belastingjaren.0": "2025"},
 			},
 		},
 	}
@@ -354,7 +363,7 @@ _registered := {_integrator: {
 }}
 
 _delegated_input(integrator) := object.union(
-	_dvtp_input("bd:ib:2025", {"bsn": "consent:subject", "belastingjaren.0": "2025"}),
+	_dvtp_input("bd:ib:2025", {"bsn": "consent:identity", "belastingjaren.0": "2025"}),
 	{"subject": {
 		"type": "identity",
 		"id": integrator,
@@ -400,7 +409,7 @@ test_input_pip_integrator_is_not_trusted if {
 
 # A direct call carries no mandate into the rules' context at all.
 test_direct_call_carries_no_integrator_pip if {
-	ctx := gbo._ctx with input as _dvtp_input("bd:ib:2025", {"bsn": "consent:subject", "belastingjaren.0": "2025"})
+	ctx := gbo._ctx with input as _dvtp_input("bd:ib:2025", {"bsn": "consent:identity", "belastingjaren.0": "2025"})
 		with data.dvtp.gbo.consent.resolved as _consent
 		with data.entities.dvtp_participant as _registered
 	not ctx.pip.integrator

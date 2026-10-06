@@ -10,19 +10,19 @@ import data.dvtp.gbo.rules.dvt0001
 # the engine's field-binding. The spec is taken from the rule itself.
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Minimal ctx-shape that carries a valid consent, the placeholder as subject,
+# Minimal ctx-shape that carries a valid consent, the identity placeholder as subject,
 # a year filter covered by the consent's scopes, and the query-argument
 # that the constraint-binding checks. Overridden per test via object.union.
 _base_ctx := {
 	"subject": {"type": "org", "id": "99999999900000000300"},
 	"args": {
-		"bsn": "consent:subject",
+		"bsn": "consent:identity",
 		"belastingjaren.0": "2025",
 	},
 	"time": "2026-07-06T12:00:00Z",
 	"resource": {
 		"scope": "bd:ib:2025",
-		"subject": "consent:subject",
+		"subject_placeholders": {"consent:identity", "consent:pseudonym"},
 	},
 	"pip": {"consent": {
 		"context_valid": true,
@@ -203,9 +203,9 @@ test_deny_scope_not_in_granted_scopes if {
 	result.context.reason_admin.code == "CONSENT_SCOPE_MISMATCH"
 }
 
-# ── Constraint-binding (the query-arg must be the placeholder) ──────────
-# A literal value is a subject the caller chose; only the placeholder stands
-# for the subject of the consent.
+# ── Constraint-binding (the query-arg must be an accepted placeholder) ──
+# A literal value is a subject the caller chose; only a placeholder stands
+# for the subject of the consent, and only one the rule's API accepts.
 
 test_deny_literal_subject if {
 	ctx := object.union(_base_ctx, {"args": {"bsn": "999991772", "belastingjaren.0": "2025"}})
@@ -214,11 +214,52 @@ test_deny_literal_subject if {
 	result.context.reason_admin.code == "CONSTRAINT_MISMATCH"
 }
 
+# The income API takes a BSN. A query asking for the source's pseudonym is
+# stopped here, before the source.
+test_deny_pseudonym_placeholder if {
+	ctx := object.union(_base_ctx, {"args": {"bsn": "consent:pseudonym", "belastingjaren.0": "2025"}})
+	result := lib.evaluate(dvt0001.spec, ctx)
+	result.decision == false
+	result.context.reason_admin.code == "CONSTRAINT_MISMATCH"
+	result.context.reason_admin.expected == `bsn in ["consent:identity"]`
+}
+
+# The single placeholder of before is no placeholder any more.
+test_deny_retired_placeholder if {
+	ctx := object.union(_base_ctx, {"args": {"bsn": "consent:subject", "belastingjaren.0": "2025"}})
+	result := lib.evaluate(dvt0001.spec, ctx)
+	result.decision == false
+	result.context.reason_admin.code == "CONSTRAINT_MISMATCH"
+}
+
+# A rule whose API handles both forms lists both placeholders, and then
+# allows either.
+_both_spec := object.union(dvt0001.spec, {"constraint_binding": [{
+	"arg": "bsn",
+	"placeholders": {"consent:identity", "consent:pseudonym"},
+}]})
+
+test_allow_either_placeholder_when_the_rule_lists_both if {
+	every placeholder in ["consent:identity", "consent:pseudonym"] {
+		ctx := object.union(_base_ctx, {"args": {"bsn": placeholder, "belastingjaren.0": "2025"}})
+		lib.evaluate(_both_spec, ctx).decision == true
+	}
+}
+
+# Listing a placeholder does not make it stand for someone: without a
+# verified consent the engine provides none, and neither matches.
+test_deny_listed_placeholder_that_stands_for_nobody if {
+	ctx := object.union(_base_ctx, {"resource": {"subject_placeholders": set()}})
+	result := lib.evaluate(_both_spec, ctx)
+	result.decision == false
+	result.context.reason_admin.code == "CONSTRAINT_MISMATCH"
+}
+
 # ── Year-coverage (each requested year needs bd:ib:<year> in consent) ───
 
 test_allow_multiple_years_all_consented if {
 	ctx := object.union(_base_ctx, {
-		"args": {"bsn": "consent:subject", "belastingjaren.0": "2025", "belastingjaren.1": "2024"},
+		"args": {"bsn": "consent:identity", "belastingjaren.0": "2025", "belastingjaren.1": "2024"},
 		"pip": {"consent": object.union(_base_ctx.pip.consent, {"granted_scopes": ["bd:ib:2025", "bd:ib:2024"]})},
 	})
 	result := lib.evaluate(dvt0001.spec, ctx)
@@ -227,7 +268,7 @@ test_allow_multiple_years_all_consented if {
 
 test_deny_year_not_consented if {
 	# Consent covers 2025 only; the query asks for 2024 and 2025.
-	ctx := object.union(_base_ctx, {"args": {"bsn": "consent:subject", "belastingjaren.0": "2025", "belastingjaren.1": "2024"}})
+	ctx := object.union(_base_ctx, {"args": {"bsn": "consent:identity", "belastingjaren.0": "2025", "belastingjaren.1": "2024"}})
 	result := lib.evaluate(dvt0001.spec, ctx)
 	result.decision == false
 	result.context.reason_admin.code == "YEAR_NOT_COVERED"
@@ -255,7 +296,7 @@ test_allow_years_from_list_variable if {
 	ctx := object.union(
 		object.remove(_base_ctx, ["args"]),
 		{
-			"args": {"bsn": "consent:subject", "belastingjaren": [2025]},
+			"args": {"bsn": "consent:identity", "belastingjaren": [2025]},
 			"pip": {"consent": object.union(_base_ctx.pip.consent, {"granted_scopes": ["bd:ib:2025"]})},
 		},
 	)
@@ -266,7 +307,7 @@ test_allow_years_from_list_variable if {
 test_deny_year_from_list_variable_not_consented if {
 	ctx := object.union(
 		object.remove(_base_ctx, ["args"]),
-		{"args": {"bsn": "consent:subject", "belastingjaren": [2024, 2025]}},
+		{"args": {"bsn": "consent:identity", "belastingjaren": [2024, 2025]}},
 	)
 	result := lib.evaluate(dvt0001.spec, ctx)
 	result.decision == false
@@ -276,7 +317,7 @@ test_deny_year_from_list_variable_not_consented if {
 test_allow_year_from_scalar_variable if {
 	ctx := object.union(
 		object.remove(_base_ctx, ["args"]),
-		{"args": {"bsn": "consent:subject", "belastingjaren": 2025}},
+		{"args": {"bsn": "consent:identity", "belastingjaren": 2025}},
 	)
 	result := lib.evaluate(dvt0001.spec, ctx)
 	result.decision == true

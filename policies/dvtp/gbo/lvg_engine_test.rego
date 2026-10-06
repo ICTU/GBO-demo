@@ -31,7 +31,7 @@ _lvg_input(actor, scope) := {
 		"resource": {"scope": scope},
 		"resolved": {
 			"fields": _lvg_fields,
-			"args": {"bsn": "consent:subject", "vboId": "0632010000099412"},
+			"args": {"bsn": "consent:identity", "vboId": "0632010000099412"},
 		},
 	},
 }
@@ -59,7 +59,7 @@ test_engine_denies_an_lvg_consent_on_bd_fields if {
 			"resource": {"scope": "lvg:vbo:eigendom"},
 			"resolved": {
 				"fields": [{"id": "aangifte.box1", "parent": "AangifteIH", "name": "box1Inkomen", "scalar": false}],
-				"args": {"bsn": "consent:subject", "belastingjaren.0": "2025"},
+				"args": {"bsn": "consent:identity", "belastingjaren.0": "2025"},
 			},
 		},
 	}

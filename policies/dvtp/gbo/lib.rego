@@ -21,7 +21,9 @@ package dvtp.gbo.lib
 #                   connects for, on a delegated connection },
 #     "args":     { "vars.<name>": value, "input.<name>": value, ... },
 #     "time":     "<RFC3339>",
-#     "resource": { "scope": "...", "subject": "<subject_placeholder>" },
+#     "resource": { "scope": "...",
+#                   "subject_placeholders": {<placeholders that stand for
+#                                            the subject of the consent>} },
 #     "pip":      { "consent": { "context_valid": bool, "exists": bool,
 #                                "status_available": bool, "withdrawn": bool,
 #                                "valid_until": "<RFC3339>",
@@ -46,11 +48,18 @@ package dvtp.gbo.lib
 # ═══════════════════════════════════════════════════════════════════════════
 
 # What a consent-based query names its subject with. The consumer holds no
-# identifier of the citizen: the consent token carries an encrypted identity
-# per party, and the source puts its own decrypted value in this place after
-# an allow. A query that names anything else is asking about someone the
-# consent does not vouch for.
-subject_placeholder := "consent:subject"
+# identifier of the citizen: the consent token carries encrypted values per
+# party, and the source puts its own decrypted value in this place after an
+# allow. The placeholder says which form the source's API takes:
+# identity_placeholder the BSN, pseudonym_placeholder the source's own
+# pseudonym of the citizen. A rule lists the ones its API accepts in its
+# constraint_binding. A query that names anything else is asking about someone
+# the consent does not vouch for, or in a form the API does not take.
+identity_placeholder := "consent:identity"
+
+pseudonym_placeholder := "consent:pseudonym"
+
+subject_placeholders := {identity_placeholder, pseudonym_placeholder}
 
 evaluate(spec, ctx) := result if {
 	steps := _steps_with_short_circuit(spec, ctx)
@@ -182,7 +191,7 @@ _check_constraint(spec, ctx) := step if {
 	failing := [fm | some fm in bindings; not constraint_binding_satisfied(fm, ctx)]
 	count(failing) > 0
 	first := failing[0]
-	step := _step("CONSTRAINT_MISMATCH", "Constraint-binding satisfied", sprintf("%s == resource.%s", [first.arg, first.resource_field]), "fail")
+	step := _step("CONSTRAINT_MISMATCH", "Constraint-binding satisfied", sprintf("%s in %v", [first.arg, sort(first.placeholders)]), "fail")
 } else := _step_skipped("CONSTRAINT_MISMATCH", "Constraint-binding satisfied", "no constraint configured")
 
 # PID regime: the request carries no consent token, and it names a subject.
@@ -405,13 +414,14 @@ consent_covers_scope(ctx) if {
 
 # ── Constraint-binding-check ─────────────────────────────────────────────────
 
-# An empty resource value binds nothing: it means there is nothing to bind
-# to, not that an empty argument is what was asked for.
+# A binding names a query argument and the placeholders the rule's API
+# accepts in it. The argument must be one of those, and a placeholder only
+# counts while it stands for someone: without a verified consent the engine
+# leaves resource.subject_placeholders empty, and nothing matches.
 constraint_binding_satisfied(fm, ctx) if {
 	arg_value := ctx.args[fm.arg]
-	res_value := object.get(ctx.resource, fm.resource_field, "")
-	res_value != ""
-	arg_value == res_value
+	arg_value in fm.placeholders
+	arg_value in object.get(ctx.resource, "subject_placeholders", set())
 }
 
 # ── Year-coverage helpers ────────────────────────────────────────────────────

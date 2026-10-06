@@ -94,7 +94,7 @@ func TestAnIncomeQuestionNamesTheSubjectWithThePlaceholder(t *testing.T) {
 	if q.ConsentToken != tok {
 		t.Error("the consent token was not forwarded untouched")
 	}
-	if q.Variables["bsn"] != SubjectPlaceholder {
+	if q.Variables["bsn"] != IdentityPlaceholder {
 		t.Errorf("variables = %v, want the placeholder as bsn", q.Variables)
 	}
 	// The year filter travels inside the query, so the PDP can enforce
@@ -184,7 +184,7 @@ func TestAnOwnershipQuestionNamesTheCitizenAndTheBuilding(t *testing.T) {
 	if !strings.Contains(q.Query, "vbo(bsn: $bsn, vboId: $vboId)") {
 		t.Errorf("query = %q, want the ownership check", q.Query)
 	}
-	if q.Variables["bsn"] != SubjectPlaceholder || q.Variables["vboId"] != "0632010000099412" {
+	if q.Variables["bsn"] != IdentityPlaceholder || q.Variables["vboId"] != "0632010000099412" {
 		t.Errorf("variables = %v, want the placeholder and the trimmed VBO-id", q.Variables)
 	}
 	if q.Scope != "lvg:vbo:eigendom" {
@@ -205,6 +205,24 @@ func TestAnOwnershipQuestionNeedsABuilding(t *testing.T) {
 	}
 	if len(source.asked) != 0 {
 		t.Fatal("the source was asked without a VBO-id")
+	}
+}
+
+// The placeholder comes from the kind, not from the question: a source whose
+// API took the source's own pseudonym would get the pseudonym placeholder, in
+// the same place.
+func TestTheQuestionCarriesTheKindsPlaceholder(t *testing.T) {
+	for _, name := range []string{"bd", "lvg"} {
+		kind := Kinds[name]
+		kind.Placeholder = PseudonymPlaceholder
+		source := answering(`{"data":{}}`)
+		c := &Consumer{Kind: kind, Source: source}
+
+		ask(t, c, Request{ConsentToken: token("c-1", kind.DefaultScope), VboID: "0632010000099412"})
+
+		if got := onlyQuestion(t, source).Variables["bsn"]; got != PseudonymPlaceholder {
+			t.Errorf("%s: bsn = %v, want the kind's placeholder", name, got)
+		}
 	}
 }
 
