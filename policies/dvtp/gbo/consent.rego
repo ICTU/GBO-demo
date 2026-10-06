@@ -183,10 +183,15 @@ _required_claims_present if {
 	}
 	is_array(_claims.scopes)
 
-	# The subject, as an encrypted value per party. The policy does not read
-	# the values; a token without any could never be answered by a source.
+	# The subject, as encrypted values per party: a pseudonym for every
+	# party, and an identity for a party that may receive the BSN. The policy
+	# does not read the values; a token without any could never be answered
+	# by a source.
 	is_object(_claims.encrypted_subject)
 	count(_claims.encrypted_subject) > 0
+	every _, party in _claims.encrypted_subject {
+		is_object(party.pseudonym)
+	}
 	every name in ["iat", "nbf", "exp"] {
 		is_number(_claims[name])
 	}

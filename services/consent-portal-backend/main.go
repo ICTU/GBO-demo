@@ -100,9 +100,12 @@ type config struct {
 	// PseudonymsLogbook is where BSNk's processings can be looked up: its
 	// read API, or a contact page while it has none.
 	PseudonymsLogbook string
-	// Sources are the parties a consent token carries an encrypted identity
-	// for: each source's OIN and the version of its keys.
+	// Sources are the parties a consent token carries encrypted values for:
+	// each source's OIN and the version of its keys.
 	Sources []consent.Party
+	// AuthorisationListMaxAge is how long the portal uses its copy of BSNk's
+	// BSN authorisation list before reading it again.
+	AuthorisationListMaxAge time.Duration
 	// SubjectRefKey is the secret the portal derives its reference to a
 	// citizen with, and SubjectRefKeyVersion names it.
 	SubjectRefKey        []byte
@@ -126,6 +129,10 @@ func loadConfig() (config, error) {
 	if !subjectRefKeyVersion.MatchString(version) {
 		return config{}, fmt.Errorf("SUBJECT_REF_KEY_VERSION: %q is not 1 to 16 letters and digits", version)
 	}
+	listMaxAge, err := time.ParseDuration(getEnv("BSN_AUTHORISATION_LIST_MAX_AGE", "1h"))
+	if err != nil || listMaxAge < 0 {
+		return config{}, fmt.Errorf("BSN_AUTHORISATION_LIST_MAX_AGE: %q is not a duration such as 1h", os.Getenv("BSN_AUTHORISATION_LIST_MAX_AGE"))
+	}
 	return config{
 		Port:              getEnv("PORT", "4005"),
 		BSNkURL:           getEnv("BSNK_URL", "http://bsnk-mock:4003"),
@@ -135,6 +142,8 @@ func loadConfig() (config, error) {
 		LogbookToken:      getEnv("LDV_WRITE_TOKEN", ""),
 		PseudonymsLogbook: getEnv("LDV_BSNK_NEXT_LOGBOOK_ID", ""),
 		Sources:           sources,
+
+		AuthorisationListMaxAge: listMaxAge,
 
 		SubjectRefKey:        []byte(key),
 		SubjectRefKeyVersion: version,
@@ -218,6 +227,8 @@ func newPortal(cfg config, hub *portalhttp.Hub, logbook consent.Logbook) *consen
 		Logbook:           logbook,
 		Sources:           cfg.Sources,
 		PseudonymsLogbook: cfg.PseudonymsLogbook,
+
+		AuthorisationListMaxAge: cfg.AuthorisationListMaxAge,
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -17,15 +18,31 @@ type Portal struct {
 	Consents    Store
 	Watch       Observer // process-lifetime watchers; nil is fine
 	Logbook     Logbook  // Logboek Dataverwerkingen; nil means not in an LDV chain
-	// Sources are the parties a consent's token carries an encrypted identity
-	// for. BSNk makes those values only while the citizen is present, so every
+	// Sources are the parties a consent's token carries encrypted values for.
+	// BSNk makes those values only while the citizen is present, so every
 	// source that will answer must be known here, when consent is given.
 	Sources []Party
-	Now     func() time.Time // nil means time.Now; injected by tests
+	// AuthorisationListMaxAge is how long the portal uses its copy of BSNk's
+	// BSN authorisation list before reading it again. Zero reads it for every
+	// consent.
+	AuthorisationListMaxAge time.Duration
+	Now                     func() time.Time // nil means time.Now; injected by tests
 	// PseudonymsLogbook is where the pseudonymisation service's processings
 	// can be looked up — its read API, or a contact page when it has none —
 	// recorded as the pseudonymisation's next logbook. Empty means unknown.
 	PseudonymsLogbook string
+
+	authorisations authorisationList
+}
+
+// authorisationList is the portal's copy of BSNk's BSN authorisation list.
+// The list is to be read periodically and not used once it is out of date;
+// the copy is therefore read again after AuthorisationListMaxAge, and a copy
+// that cannot be renewed is not used at all.
+type authorisationList struct {
+	mu      sync.Mutex
+	listed  map[string]bool
+	fetched time.Time
 }
 
 // The verwerkingsactiviteiten of this portal, as named in GBO's register.
@@ -84,8 +101,10 @@ type Granted struct {
 }
 
 // GiveConsent derives the portal's own reference to the citizen, has BSNk
-// make an encrypted identity for each source, then asks the consent register
-// to persist the reference and sign the identities into the consent token.
+// make encrypted values for each source, then asks the consent register to
+// persist the reference and sign the values into the consent token. Every
+// source gets a pseudonym; a source on BSNk's BSN authorisation list also gets
+// an identity.
 //
 // BSNk activates a citizen once. At their first consent the portal activates
 // and keeps the polymorphic values; at every consent after that it finds them
@@ -125,7 +144,7 @@ func (p *Portal) GiveConsent(ctx context.Context, citizen BSN, in GiveInput) (Gr
 	if err != nil {
 		return Granted{}, err
 	}
-	subjects, err := p.Identities.Transform(ctx, values, p.Sources)
+	subjects, err := p.encrypt(ctx, values)
 	if err != nil {
 		return Granted{}, fmt.Errorf("encrypt the subject for the sources: %w", err)
 	}
@@ -170,6 +189,61 @@ func (p *Portal) GiveConsent(ctx context.Context, citizen BSN, in GiveInput) (Gr
 	emit("consent_granted", "consent-register", map[string]any{"consent_id": rec.ID})
 
 	return Granted{ConsentID: rec.ID, ConsentToken: rec.Token}, nil
+}
+
+// encrypt has BSNk make what the token carries for each source: a pseudonym
+// for every one, and an identity for the ones on the BSN authorisation list.
+// A party occurs once in a transformation, so the two forms take a call each.
+func (p *Portal) encrypt(ctx context.Context, values Polymorphic) ([]EncryptedSubject, error) {
+	listed, err := p.authorisedForBSN(ctx)
+	if err != nil {
+		return nil, err
+	}
+	pseudonyms, err := p.Identities.Transform(ctx, values, FormPseudonym, p.Sources)
+	if err != nil {
+		return nil, err
+	}
+	var authorised []Party
+	for _, source := range p.Sources {
+		if listed[source.OIN] {
+			authorised = append(authorised, source)
+		}
+	}
+	identities := map[string]string{}
+	if len(authorised) > 0 {
+		if identities, err = p.Identities.Transform(ctx, values, FormIdentity, authorised); err != nil {
+			return nil, err
+		}
+	}
+
+	subjects := make([]EncryptedSubject, len(p.Sources))
+	for i, source := range p.Sources {
+		subjects[i] = EncryptedSubject{Party: source, Pseudonym: pseudonyms[source.OIN], Identity: identities[source.OIN]}
+	}
+	return subjects, nil
+}
+
+// authorisedForBSN returns the parties that may receive the BSN, from a copy
+// of BSNk's list that is no older than AuthorisationListMaxAge.
+func (p *Portal) authorisedForBSN(ctx context.Context) (map[string]bool, error) {
+	list := &p.authorisations
+	list.mu.Lock()
+	defer list.mu.Unlock()
+
+	now := p.now()
+	if list.listed != nil && now.Sub(list.fetched) < p.AuthorisationListMaxAge {
+		return list.listed, nil
+	}
+	oins, err := p.Identities.AuthorisedForBSN(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("read the BSN authorisation list: %w", err)
+	}
+	listed := make(map[string]bool, len(oins))
+	for _, oin := range oins {
+		listed[oin] = true
+	}
+	list.listed, list.fetched = listed, now
+	return listed, nil
 }
 
 // ListConsents returns the calling citizen's consents, annotated with the

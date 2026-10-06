@@ -19,27 +19,29 @@ import (
 
 const consentTokenType = "gbo-consent+jwt"
 
-// EncryptedSubject is the citizen as one party may read them: a value BSNk
-// made for that party's OIN and for one version of that party's keys. Only
-// that party can decrypt it, to the BSN or to its own pseudonym.
-type EncryptedSubject struct {
-	// IdentifierType is "Identity" for a value that decrypts to the BSN and
-	// "Pseudonym" for one that decrypts to the party's pseudonym.
-	IdentifierType string `json:"identifier_type"`
-	KeySetVersion  int    `json:"key_set_version"`
-	Value          string `json:"value"`
+// EncryptedValue is one value BSNk made for a party and for one version of
+// that party's keys. Only that party can decrypt it.
+type EncryptedValue struct {
+	KeySetVersion int    `json:"key_set_version"`
+	Value         string `json:"value"`
 }
 
-const (
-	identifierIdentity  = "Identity"
-	identifierPseudonym = "Pseudonym"
-)
+// EncryptedSubject is the citizen as one party may read them. Every party
+// has a pseudonym: a value that decrypts to the party's own pseudonym of the
+// citizen. A party on the BSN authorisation list also has an identity: a
+// value that decrypts to the BSN.
+type EncryptedSubject struct {
+	Identity  *EncryptedValue `json:"identity,omitempty"`
+	Pseudonym *EncryptedValue `json:"pseudonym"`
+}
 
 var partyOIN = regexp.MustCompile(`^[0-9]{20}$`)
 
 // validateEncryptedSubject checks the shape of what the token is about to
 // carry. Whether a value is genuine is not the register's to tell: BSNk
-// signed it, and the party it is for checks that when it decrypts.
+// signed it, and the party it is for checks that when it decrypts. Who may
+// have an identity is not the register's to tell either: BSNk makes one only
+// for a party on its list.
 func validateEncryptedSubject(subject map[string]EncryptedSubject) error {
 	if len(subject) == 0 {
 		return errors.New("encrypted_subject is required (no plain BSN accepted)")
@@ -48,14 +50,21 @@ func validateEncryptedSubject(subject map[string]EncryptedSubject) error {
 		if !partyOIN.MatchString(oin) {
 			return fmt.Errorf("encrypted_subject: %q is not an OIN of 20 digits", oin)
 		}
-		if s.IdentifierType != identifierIdentity && s.IdentifierType != identifierPseudonym {
-			return fmt.Errorf("encrypted_subject[%s]: identifier_type must be %s or %s", oin, identifierIdentity, identifierPseudonym)
+		if s.Pseudonym == nil {
+			return fmt.Errorf("encrypted_subject[%s]: every party has a pseudonym", oin)
 		}
-		if s.KeySetVersion <= 0 || s.Value == "" {
-			return fmt.Errorf("encrypted_subject[%s]: key_set_version and value are required", oin)
+		if !s.Pseudonym.complete() {
+			return fmt.Errorf("encrypted_subject[%s].pseudonym: key_set_version and value are required", oin)
+		}
+		if s.Identity != nil && !s.Identity.complete() {
+			return fmt.Errorf("encrypted_subject[%s].identity: key_set_version and value are required", oin)
 		}
 	}
 	return nil
+}
+
+func (v EncryptedValue) complete() bool {
+	return v.KeySetVersion > 0 && v.Value != ""
 }
 
 type ConsentClaims struct {

@@ -7,12 +7,9 @@
 // with a placeholder for the form the source's API takes: IdentityPlaceholder
 // for the BSN, PseudonymPlaceholder for the source's own pseudonym. The PDP
 // decides on the request as it was sent. Only after its allow does the request
-// reach this code, which takes the value made for this source out of the
-// token, has the source's own decryption component read it, and replaces the
-// placeholder with the BSN.
-//
-// The token carries no pseudonyms yet, so a request for one is refused as a
-// token without a value for this source.
+// reach this code, which takes the value of that form made for this source out
+// of the token, has the source's own decryption component read it, and
+// replaces the placeholder with what it reads.
 //
 // The package imports no transport library. The decryption component is a
 // port, Decrypter, so that the substitution can move to wherever "after the
@@ -38,12 +35,19 @@ const (
 	PseudonymPlaceholder = "consent:pseudonym"
 )
 
-// identifierIdentity is BSNk's name for a value that decrypts to the BSN.
-const identifierIdentity = "Identity"
-
-// Identity is what the source reads from the value made for it.
+// Identity is what the source reads from the identity made for it.
 type Identity struct {
 	BSN string
+	// Recipient is the OIN of the party the value was made for, as the value
+	// itself says and BSNk signed.
+	Recipient string
+}
+
+// Pseudonym is what the source reads from the pseudonym made for it.
+type Pseudonym struct {
+	// Value is the source's own pseudonym of the citizen, in the form the
+	// source stores it.
+	Value string
 	// Recipient is the OIN of the party the value was made for, as the value
 	// itself says and BSNk signed.
 	Recipient string
@@ -53,6 +57,7 @@ type Identity struct {
 // reads a value with the source's keys and without calling BSNk.
 type Decrypter interface {
 	Identity(ctx context.Context, value string) (Identity, error)
+	Pseudonym(ctx context.Context, value string) (Pseudonym, error)
 }
 
 // Substituter replaces the placeholder in the subject variables of a request.
@@ -70,9 +75,12 @@ type Result struct {
 	// Body is the request body, with the placeholder replaced where the
 	// request named its subject with it.
 	Body []byte
-	// BSN is the citizen the request is now about. Empty when the request
-	// named no subject, in which case nothing was decrypted.
-	BSN string
+	// BSN is the citizen the request is now about, when it asked for the
+	// identity. Pseudonym is this source's pseudonym of the citizen, when it
+	// asked for the pseudonym. Both are empty when the request named no
+	// subject, in which case nothing was decrypted.
+	BSN       string
+	Pseudonym string
 	// ConsentID is the consent the token is for. It is filled as soon as the
 	// token could be read, also when Apply fails after that.
 	ConsentID string
@@ -89,7 +97,7 @@ var (
 	// its own. Under a consent the subject comes from the token alone.
 	ErrLiteralSubject = errors.New("under a consent token the subject must be a placeholder")
 	// ErrRecipient means the value turned out to be made for another party.
-	ErrRecipient = errors.New("the encrypted identity was made for another party")
+	ErrRecipient = errors.New("the encrypted value was made for another party")
 	// ErrBody means the request body is not a GraphQL request.
 	ErrBody = errors.New("the request body is not a GraphQL request")
 )
@@ -100,9 +108,15 @@ var (
 type claims struct {
 	ConsentID        string `json:"consent_id"`
 	EncryptedSubject map[string]struct {
-		IdentifierType string `json:"identifier_type"`
-		Value          string `json:"value"`
+		Identity  *encryptedValue `json:"identity"`
+		Pseudonym *encryptedValue `json:"pseudonym"`
 	} `json:"encrypted_subject"`
+}
+
+// encryptedValue is one value BSNk made for a party and a version of its keys.
+type encryptedValue struct {
+	KeySetVersion int    `json:"key_set_version"`
+	Value         string `json:"value"`
 }
 
 func readToken(token string) (claims, error) {
@@ -121,14 +135,17 @@ func readToken(token string) (claims, error) {
 	return c, nil
 }
 
-// Apply replaces the placeholder in body with the BSN of the citizen the
-// consent token is about.
+// Apply replaces each placeholder in body with what it asks for: the BSN for
+// IdentityPlaceholder, this source's pseudonym of the citizen for
+// PseudonymPlaceholder. Each is read from the value of that form the token
+// carries for this source.
 //
 // A request that names no subject is returned as it came and nothing is
 // decrypted. A request that names its subject with anything but a
 // placeholder is refused: the PDP denies those, so one that arrives here did
-// not come through it. A request for the pseudonym is refused with
-// ErrNoValue, since the token carries none.
+// not come through it. A request for a form the token has no value of for
+// this source is refused with ErrNoValue; a party not on the BSN
+// authorisation list has no identity.
 func (s Substituter) Apply(ctx context.Context, body []byte, consentToken string) (Result, error) {
 	token, err := readToken(consentToken)
 	if err != nil {
@@ -147,58 +164,88 @@ func (s Substituter) Apply(ctx context.Context, body []byte, consentToken string
 		}
 	}
 
-	var placeholders []string
+	// The subject variables, by the placeholder they name.
+	asked := map[string][]string{}
 	for _, name := range s.Variables {
 		raw, present := variables[name]
 		if !present {
 			continue
 		}
 		var value string
-		if err := json.Unmarshal(raw, &value); err != nil {
+		if err := json.Unmarshal(raw, &value); err != nil || (value != IdentityPlaceholder && value != PseudonymPlaceholder) {
 			return result, fmt.Errorf("%w: variable %q", ErrLiteralSubject, name)
 		}
-		switch value {
-		case IdentityPlaceholder:
-			placeholders = append(placeholders, name)
-		case PseudonymPlaceholder:
-			return result, fmt.Errorf("%w: variable %q asks for a pseudonym", ErrNoValue, name)
-		default:
-			return result, fmt.Errorf("%w: variable %q", ErrLiteralSubject, name)
-		}
+		asked[value] = append(asked[value], name)
 	}
-	if len(placeholders) == 0 {
+	if len(asked) == 0 {
 		return result, nil
 	}
 
-	encrypted, present := token.EncryptedSubject[s.OwnOIN]
-	if !present {
-		return result, fmt.Errorf("%w: no encrypted identity", ErrNoValue)
+	own := token.EncryptedSubject[s.OwnOIN]
+	var bsn, pseudonym string
+	if len(asked[IdentityPlaceholder]) > 0 {
+		if bsn, err = s.identity(ctx, own.Identity); err != nil {
+			return result, err
+		}
 	}
-	if encrypted.IdentifierType != identifierIdentity {
-		return result, fmt.Errorf("%w: the value for this source is a %q", ErrNoValue, encrypted.IdentifierType)
-	}
-	identity, err := s.Decrypter.Identity(ctx, encrypted.Value)
-	if err != nil {
-		return result, fmt.Errorf("decrypt the identity: %w", err)
-	}
-	// The token's key says whom a value is for, but only the value itself,
-	// which BSNk signed, is evidence of it.
-	if identity.Recipient != s.OwnOIN {
-		return result, fmt.Errorf("%w: %s", ErrRecipient, identity.Recipient)
-	}
-	if identity.BSN == "" {
-		return result, errors.New("decrypt the identity: the decryption component returned no BSN")
+	if len(asked[PseudonymPlaceholder]) > 0 {
+		if pseudonym, err = s.pseudonym(ctx, own.Pseudonym); err != nil {
+			return result, err
+		}
 	}
 
-	bsn, _ := json.Marshal(identity.BSN)
-	for _, name := range placeholders {
-		variables[name] = bsn
+	filled := map[string]string{IdentityPlaceholder: bsn, PseudonymPlaceholder: pseudonym}
+	for placeholder, names := range asked {
+		value, _ := json.Marshal(filled[placeholder])
+		for _, name := range names {
+			variables[name] = value
+		}
 	}
 	request["variables"], _ = json.Marshal(variables)
 	substituted, err := json.Marshal(request)
 	if err != nil {
 		return result, fmt.Errorf("%w: %v", ErrBody, err)
 	}
-	result.Body, result.BSN = substituted, identity.BSN
+	result.Body, result.BSN, result.Pseudonym = substituted, bsn, pseudonym
 	return result, nil
+}
+
+// identity reads the BSN from the identity the token carries for this
+// source.
+func (s Substituter) identity(ctx context.Context, encrypted *encryptedValue) (string, error) {
+	if encrypted == nil || encrypted.Value == "" {
+		return "", fmt.Errorf("%w: no encrypted identity", ErrNoValue)
+	}
+	identity, err := s.Decrypter.Identity(ctx, encrypted.Value)
+	if err != nil {
+		return "", fmt.Errorf("decrypt the identity: %w", err)
+	}
+	// The token's key says whom a value is for, but only the value itself,
+	// which BSNk signed, is evidence of it.
+	if identity.Recipient != s.OwnOIN {
+		return "", fmt.Errorf("%w: %s", ErrRecipient, identity.Recipient)
+	}
+	if identity.BSN == "" {
+		return "", errors.New("decrypt the identity: the decryption component returned no BSN")
+	}
+	return identity.BSN, nil
+}
+
+// pseudonym reads this source's pseudonym of the citizen from the pseudonym
+// the token carries for this source.
+func (s Substituter) pseudonym(ctx context.Context, encrypted *encryptedValue) (string, error) {
+	if encrypted == nil || encrypted.Value == "" {
+		return "", fmt.Errorf("%w: no encrypted pseudonym", ErrNoValue)
+	}
+	pseudonym, err := s.Decrypter.Pseudonym(ctx, encrypted.Value)
+	if err != nil {
+		return "", fmt.Errorf("decrypt the pseudonym: %w", err)
+	}
+	if pseudonym.Recipient != s.OwnOIN {
+		return "", fmt.Errorf("%w: %s", ErrRecipient, pseudonym.Recipient)
+	}
+	if pseudonym.Value == "" {
+		return "", errors.New("decrypt the pseudonym: the decryption component returned no pseudonym")
+	}
+	return pseudonym.Value, nil
 }

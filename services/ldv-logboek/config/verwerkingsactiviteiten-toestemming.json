@@ -14,7 +14,7 @@
       ],
       "categorieen_persoonsgegevens": [
         "Portaalgebonden subjectverwijzing",
-        "Versleutelde identiteit per bron in het ondertekende toestemmingstoken",
+        "Versleuteld pseudoniem en versleutelde identiteit per bron in het ondertekende toestemmingstoken",
         "Reikwijdte, doel en geldigheidsduur van de toestemming"
       ],
       "ontvangers": [
@@ -70,14 +70,14 @@
       "id": "gbo-bsn-pseudonimisering",
       "version": "v1",
       "name": "Pseudonimiseren van het BSN bij toestemmingsintake",
-      "doel": "Het omzetten van het BSN van de ingelogde burger naar een versleutelde identiteit per bron en een losse portaalgebonden subjectverwijzing, zodat het BSN de voorziening niet verlaat en het toestemmingsregister geen BSN vastlegt.",
+      "doel": "Het omzetten van het BSN van de ingelogde burger naar een versleuteld pseudoniem per bron, een versleutelde identiteit per bron op de Autorisatielijst BSN en een losse portaalgebonden subjectverwijzing, zodat het BSN de voorziening niet verlaat en het toestemmingsregister geen BSN vastlegt.",
       "grondslag": "Noodzakelijk voor de uitvoering van de voorziening; privacy by design.",
       "categorieen_betrokkenen": [
         "Burgers die inloggen op het toestemmingsportaal"
       ],
       "categorieen_persoonsgegevens": [
         "Burgerservicenummer",
-        "Versleutelde identiteit per bron",
+        "Versleuteld pseudoniem en versleutelde identiteit per bron",
         "Portaalgebonden subjectverwijzing"
       ]
     }

@@ -51,9 +51,10 @@ flowchart LR
     Source --> ConsumerBE
 ```
 
-Het consent-token noemt de burger alleen in een versleutelde identiteit per
-bron: een waarde die BSNk voor het OIN van die bron maakt en die alleen die
-bron kan ontsleutelen. De dienstverlener krijgt geen identificator van de
+Het consent-token noemt de burger alleen in versleutelde waarden per bron: een
+pseudoniem voor elke bron en een identiteit voor een bron op de
+Autorisatielijst BSN. BSNk maakt ze voor het OIN van die bron, en alleen die
+bron kan ze ontsleutelen. De dienstverlener krijgt geen identificator van de
 burger. Het consent-register bewaart die waarden niet; ze worden tijdens het
 aanmaken van het token kortstondig verwerkt. Voor burgergerichte listing en
 ownership gebruikt het register een afzonderlijke, portaalgebonden
@@ -93,8 +94,11 @@ sequenceDiagram
     else Volgende toestemming
         Register-->>Portal: Polymorfe waarden
     end
-    Portal->>BSNk: Transformeer voor de bronnen van deze toestemming
-    BSNk-->>Portal: Versleutelde identiteit per bron
+    Portal->>BSNk: Lees de Autorisatielijst BSN (hooguit eens per BSN_AUTHORISATION_LIST_MAX_AGE)
+    Portal->>BSNk: Transformeer naar pseudoniemen voor alle bronnen
+    BSNk-->>Portal: Versleuteld pseudoniem per bron
+    Portal->>BSNk: Transformeer naar identiteiten voor de bronnen op de lijst
+    BSNk-->>Portal: Versleutelde identiteit per bron op de lijst
 
     Portal->>Register: Maak consent met waarde per bron, subject_ref, OIN en scopes
     Register->>DB: Bewaar consent zonder de waarden per bron
@@ -108,8 +112,9 @@ sequenceDiagram
 Het token bevat de bindings waarop de PDP later beslist:
 
 - `consent_id` en `jti`;
-- `encrypted_subject`: per bron het OIN, de sleutelversie en de versleutelde
-  identiteit;
+- `encrypted_subject`: per bron, onder haar OIN, een versleuteld pseudoniem
+  (`pseudonym`) en, als de bron op de Autorisatielijst BSN staat, een
+  versleutelde identiteit (`identity`), elk met de sleutelversie;
 - scopes en optionele veldselecties;
 - `dienstverlener_oin`;
 - issuer, audience en geldigheid via `iat`, `nbf`, `exp` en `valid_until`.
@@ -208,14 +213,15 @@ zijn. De plaatshouder zegt welke vorm de API van de bron neemt:
 een API die het eigen pseudoniem van de bron neemt. Elke regel noemt de
 plaatshouders die zijn API accepteert; een andere waarde wordt geweigerd met
 `CONSTRAINT_MISMATCH`. `DVT0001` en `LVG0001` accepteren alleen
-`consent:identity`. Het token draagt nog geen pseudoniemen, dus de sidecar
-weigert `consent:pseudonym` voorlopig.
+`consent:identity`; geen demobron neemt nog een pseudoniem aan.
 
-Pas na de `ALLOW` zet de sidecar bij de bron het BSN op de plek van de
-plaatshouder. De bron ontsleutelt daarvoor zelf de waarde die het token voor
-haar OIN draagt, met sleutels die ze vooraf heeft gekregen en zonder BSNk aan
-te roepen. Een waarde die voor een andere partij is gemaakt, accepteert de
-bron niet. Een aanvraag zonder consent-token (de EUDI-route) gaat ongewijzigd
+Pas na de `ALLOW` zet de sidecar bij de bron het BSN of haar eigen pseudoniem
+op de plek van de plaatshouder. De bron ontsleutelt daarvoor zelf de waarde
+van die vorm die het token voor haar OIN draagt, met sleutels die ze vooraf
+heeft gekregen en zonder BSNk aan te roepen. Een waarde die voor een andere
+partij is gemaakt, accepteert de bron niet. Een bron die niet op de
+Autorisatielijst BSN staat, heeft alleen een pseudoniem: een vraag naar haar
+identiteit faalt bij de sidecar. Een aanvraag zonder consent-token (de EUDI-route) gaat ongewijzigd
 door.
 
 Dat de vervanging pas na de beslissing komt, hangt eraan dat alleen de Inway

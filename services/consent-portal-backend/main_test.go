@@ -28,7 +28,7 @@ const testSubjectRefKey = "test-subject-ref-key-of-32-bytes!"
 // The BSNk and consent-register downstreams are stubbed with two
 // httptest.Servers; the portal itself is wired through newMux.
 func TestPortalGiveThenList(t *testing.T) {
-	var transformed map[string]any
+	var transformed []map[string]any
 	bsnk := stubBSNk(t, &transformed)
 	defer bsnk.Close()
 
@@ -157,12 +157,14 @@ func TestPortalGiveThenList(t *testing.T) {
 		t.Errorf("consent_token = %q", give.ConsentToken)
 	}
 	// The dev-portal renders one card per upstream call. A first consent
-	// finds no kept values, activates, keeps them, transforms and creates.
-	// Guards against the call log quietly gaining or losing entries.
+	// finds no kept values, activates, keeps them, reads the BSN
+	// authorisation list, transforms per form and creates. Guards against
+	// the call log quietly gaining or losing entries.
 	assertPrivateAPICalls(t, give.APICalls,
-		"Find polymorphic values", "Activate BSN", "Keep polymorphic values", "Transform for the sources", "Create Consent")
+		"Find polymorphic values", "Activate BSN", "Keep polymorphic values", "Read the BSN authorisation list",
+		"Transform to pseudonyms", "Transform to identities", "Create Consent")
 
-	assertIdentityRequestedForTheSource(t, transformed)
+	assertValuesRequestedForTheSource(t, transformed)
 	regMu.Lock()
 	assertRegisterGotTheSourcesValue(t, received)
 	regMu.Unlock()
@@ -201,19 +203,46 @@ func TestPortalGiveThenList(t *testing.T) {
 	}
 }
 
-// stubBSNk stands in for BSNk: activate gives the polymorphic values and
-// transform a value per party.
-// The transform request is kept in transformed.
-func stubBSNk(t *testing.T, transformed *map[string]any) *httptest.Server {
+// stubBSNk stands in for BSNk: activate gives the polymorphic values, the
+// BSN authorisation list names the source, and transform gives a value per
+// party in the form asked for ("signed-VI" or "signed-VP").
+// Every transform request is kept in transformed.
+func stubBSNk(t *testing.T, transformed *[]map[string]any) *httptest.Server {
 	t.Helper()
+	var mu sync.Mutex
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/v2/activate":
 			_, _ = w.Write([]byte(`{"PolymorphicPseudonym":["signed-PI","signed-PP"]}`))
+		case "/v2/bsn-authorisation-list":
+			_, _ = w.Write([]byte(`{"AuthorizedOrganization":[{"OIN":"` + testSource + `"}]}`))
 		case "/v2/transform":
-			_ = json.NewDecoder(r.Body).Decode(transformed)
-			_, _ = w.Write([]byte(`{"Encrypted":[{"EntityID":"` + testSource + `","KeySetVersion":20260101,"IdentifierType":"Identity","value":"signed-VI"}]}`))
+			var req struct {
+				RelyingParty []struct {
+					EntityID       string
+					KeySetVersion  int
+					IdentifierType string
+				}
+			}
+			body, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(body, &req)
+			var kept map[string]any
+			_ = json.Unmarshal(body, &kept)
+			mu.Lock()
+			*transformed = append(*transformed, kept)
+			mu.Unlock()
+			type encrypted struct {
+				EntityID       string `json:"EntityID"`
+				KeySetVersion  int    `json:"KeySetVersion"`
+				IdentifierType string `json:"IdentifierType"`
+				Value          string `json:"value"`
+			}
+			var out struct{ Encrypted []encrypted }
+			for _, rp := range req.RelyingParty {
+				out.Encrypted = append(out.Encrypted, encrypted{rp.EntityID, rp.KeySetVersion, rp.IdentifierType, "signed-V" + rp.IdentifierType[:1]})
+			}
+			_ = json.NewEncoder(w).Encode(out)
 		default:
 			t.Errorf("unexpected BSNk call: %s", r.URL.Path)
 			http.NotFound(w, r)
@@ -221,24 +250,41 @@ func stubBSNk(t *testing.T, transformed *map[string]any) *httptest.Server {
 	}))
 }
 
-// BSNk was asked for an identity for the source, from the polymorphic
-// identity it had just made for the portal.
-func assertIdentityRequestedForTheSource(t *testing.T, transformed map[string]any) {
+// BSNk was asked for a pseudonym for the source, from the polymorphic
+// pseudonym it had just made for the portal, and then for an identity, from
+// the polymorphic identity: the source is on the BSN authorisation list.
+func assertValuesRequestedForTheSource(t *testing.T, transformed []map[string]any) {
 	t.Helper()
-	parties, _ := transformed["RelyingParty"].([]any)
-	if transformed["Requester"] != portalOIN || transformed["PolymorphicIdentity"] != "signed-PI" || len(parties) != 1 {
-		t.Fatalf("transform request = %+v", transformed)
+	if len(transformed) != 2 {
+		t.Fatalf("%d transform requests, want one per form", len(transformed))
 	}
-	if party := parties[0].(map[string]any); party["EntityID"] != testSource || party["IdentifierType"] != "Identity" || party["KeySetVersion"] != float64(20260101) {
-		t.Errorf("relying party = %+v", party)
+	for i, want := range []struct{ form, polymorphic, value string }{
+		{"Pseudonym", "PolymorphicPseudonym", "signed-PP"},
+		{"Identity", "PolymorphicIdentity", "signed-PI"},
+	} {
+		request := transformed[i]
+		parties, _ := request["RelyingParty"].([]any)
+		if request["Requester"] != portalOIN || request[want.polymorphic] != want.value || len(parties) != 1 {
+			t.Fatalf("%s request = %+v", want.form, request)
+		}
+		if party := parties[0].(map[string]any); party["EntityID"] != testSource || party["IdentifierType"] != want.form || party["KeySetVersion"] != float64(20260101) {
+			t.Errorf("%s relying party = %+v", want.form, party)
+		}
+	}
+	// A request carries the polymorphic value of its own form only.
+	if _, sent := transformed[0]["PolymorphicIdentity"]; sent {
+		t.Error("the pseudonym request carried the polymorphic identity")
 	}
 }
 
-// The register got the value BSNk made, keyed by the party it is for.
+// The register got the values BSNk made, keyed by the party they are for.
 func assertRegisterGotTheSourcesValue(t *testing.T, received map[string]any) {
 	t.Helper()
-	value, _ := received[testSource].(map[string]any)
-	if value["value"] != "signed-VI" || value["identifier_type"] != "Identity" || value["key_set_version"] != float64(20260101) {
+	values, _ := received[testSource].(map[string]any)
+	identity, _ := values["identity"].(map[string]any)
+	pseudonym, _ := values["pseudonym"].(map[string]any)
+	if identity["value"] != "signed-VI" || identity["key_set_version"] != float64(20260101) ||
+		pseudonym["value"] != "signed-VP" || pseudonym["key_set_version"] != float64(20260101) {
 		t.Errorf("encrypted_subject sent to the register = %+v", received)
 	}
 }
@@ -257,7 +303,8 @@ func assertPrivateAPICalls(t *testing.T, calls []consent.APICall, labels ...stri
 		if !answered && (want != "Find polymorphic values" || calls[i].Status != http.StatusNotFound) {
 			t.Errorf("api_calls[%d] %s: status %d", i, want, calls[i].Status)
 		}
-		if len(calls[i].RequestBody) != 0 || len(calls[i].ResponseBody) != 0 {
+		// The authorisation list names organisations, not the citizen.
+		if want != "Read the BSN authorisation list" && (len(calls[i].RequestBody) != 0 || len(calls[i].ResponseBody) != 0) {
 			t.Errorf("api_calls[%d] exposed private request/response bodies", i)
 		}
 	}
@@ -352,7 +399,7 @@ func TestASecondConsentOnlyTransforms(t *testing.T) {
 		activations int
 		polymorphic = map[string]string{}
 	)
-	var transformed map[string]any
+	var transformed []map[string]any
 	bsnk := stubBSNk(t, &transformed)
 	defer bsnk.Close()
 	counting := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -412,8 +459,8 @@ func TestASecondConsentOnlyTransforms(t *testing.T) {
 	_ = loginResp.Body.Close()
 
 	for i, labels := range [][]string{
-		{"Find polymorphic values", "Activate BSN", "Keep polymorphic values", "Transform for the sources", "Create Consent"},
-		{"Find polymorphic values", "Transform for the sources", "Create Consent"},
+		{"Find polymorphic values", "Activate BSN", "Keep polymorphic values", "Read the BSN authorisation list", "Transform to pseudonyms", "Transform to identities", "Create Consent"},
+		{"Find polymorphic values", "Read the BSN authorisation list", "Transform to pseudonyms", "Transform to identities", "Create Consent"},
 	} {
 		req, _ := http.NewRequest(http.MethodPost, srv.URL+"/portal/consents",
 			strings.NewReader(`{"dienstverlener_oin":"00000003000000003000","scopes":["bd:ib:2025"]}`))
