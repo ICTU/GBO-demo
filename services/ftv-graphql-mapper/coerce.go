@@ -2,10 +2,12 @@ package ftvgraphql
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/vektah/gqlparser/v2/ast"
 )
@@ -45,6 +47,20 @@ func coerceVariables(schema *ast.Schema, op *ast.OperationDefinition, supplied m
 		}
 	}
 	return vars, nil
+}
+
+// variableError is a coercion failure caused by the runtime value of a
+// variable rather than by the document: VARIABLE_ERROR, not INVALID_QUERY.
+type variableError struct{ error }
+
+func isVariableError(err error) bool {
+	var v variableError
+	return errors.As(err, &v)
+}
+
+// isOneOf reports a OneOf Input Object: exactly one field set, and not null.
+func isOneOf(def *ast.Definition) bool {
+	return def.Directives.ForName("oneOf") != nil
 }
 
 // argument resolves one argument of a selection (Section 6.5). ok is false
@@ -116,6 +132,11 @@ func (c *coercer) useVariable(name string, path []any) (variable, bool) {
 func (c *coercer) literal(t *ast.Type, v *ast.Value, path []any) (any, bool, error) {
 	if v.Kind == ast.Variable {
 		vv, ok := c.useVariable(v.Raw, path)
+		// A nullable variable with a default may stand in a non-null
+		// position; a null supplied for it is then an error.
+		if ok && vv.value == nil && t.NonNull {
+			return nil, false, variableError{fmt.Errorf("variable $%s is null in a non-null position", v.Raw)}
+		}
 		return vv.value, ok, nil
 	}
 	if v.Kind == ast.NullValue {
@@ -144,6 +165,9 @@ func (c *coercer) literal(t *ast.Type, v *ast.Value, path []any) (any, bool, err
 		if v.Kind != ast.ObjectValue {
 			return nil, false, fmt.Errorf("not an input object %s", def.Name)
 		}
+		if isOneOf(def) && (len(v.Children) != 1 || v.Children[0].Value.Kind == ast.NullValue) {
+			return nil, false, fmt.Errorf("OneOf Input Object %s needs exactly one non-null field", def.Name)
+		}
 		obj, err := c.inputObject(def, func(name string) (any, bool, error) {
 			written := v.Children.ForName(name)
 			if written == nil {
@@ -151,6 +175,10 @@ func (c *coercer) literal(t *ast.Type, v *ast.Value, path []any) (any, bool, err
 			}
 			return c.literal(def.Fields.ForName(name).Type, written, join(path, name))
 		}, path)
+		if err == nil && isOneOf(def) && !oneEntryNotNull(obj) {
+			// The one field was a variable without a value, or null.
+			err = variableError{fmt.Errorf("OneOf Input Object %s needs exactly one non-null field", def.Name)}
+		}
 		return obj, err == nil, err
 	}
 	return nil, false, fmt.Errorf("%s is not an input type", def.Name)
@@ -333,6 +361,9 @@ func (c *coercer) input(t *ast.Type, v any, path []any) (any, error) {
 				return nil, fmt.Errorf("unknown input field %s.%s", def.Name, name)
 			}
 		}
+		if isOneOf(def) && !oneEntryNotNull(obj) {
+			return nil, fmt.Errorf("OneOf Input Object %s needs exactly one non-null field", def.Name)
+		}
 		return c.inputObject(def, func(name string) (any, bool, error) {
 			fv, has := obj[name]
 			if !has {
@@ -343,6 +374,16 @@ func (c *coercer) input(t *ast.Type, v any, path []any) (any, error) {
 		}, path)
 	}
 	return nil, fmt.Errorf("%s is not an input type", def.Name)
+}
+
+func oneEntryNotNull(obj map[string]any) bool {
+	if len(obj) != 1 {
+		return false
+	}
+	for _, v := range obj {
+		return v != nil
+	}
+	return false
 }
 
 // scalarInput applies the input coercion of the built-in scalars to a JSON
@@ -384,17 +425,44 @@ func scalarInput(name string, v any) (any, error) {
 	return nil, fmt.Errorf("not a valid %s", name)
 }
 
-// integral reads a JSON number with an integral value within [lo, hi]:
-// 2024 and 2024.0 are the same Int, 2024.5 is not one.
+// integral reads a JSON number whose exact value is an integer within
+// [lo, hi]. It works on the decimal text, never through a float64: 2024,
+// 2024.0 and 2.024e3 are the same Int, while 2024.0000000000000001 is not
+// an integer although a float64 rounds it to one.
 func integral(n json.Number, lo, hi int64) (int64, bool) {
-	if i, err := strconv.ParseInt(string(n), 10, 64); err == nil {
-		return i, i >= lo && i <= hi
+	s := string(n)
+	neg := strings.HasPrefix(s, "-")
+	s = strings.TrimPrefix(s, "-")
+	mantissa, exponent, hasExponent := strings.Cut(strings.ToLower(s), "e")
+	intPart, frac, _ := strings.Cut(mantissa, ".")
+	digits := strings.TrimLeft(intPart+frac, "0")
+	if digits == "" {
+		return 0, lo <= 0 && 0 <= hi
 	}
-	f, err := strconv.ParseFloat(string(n), 64)
-	if err != nil || f != math.Trunc(f) || f < float64(lo) || f > float64(hi) {
+	exp := 0
+	if hasExponent {
+		e, err := strconv.Atoi(exponent)
+		if err != nil {
+			return 0, false
+		}
+		exp = e
+	}
+	// The value is digits × 10^exp, with no trailing zero in digits.
+	exp -= len(frac)
+	trimmed := strings.TrimRight(digits, "0")
+	exp += len(digits) - len(trimmed)
+	if exp < 0 || len(trimmed)+exp > 19 {
+		return 0, false // a fraction remains, or beyond int64
+	}
+	text := trimmed + strings.Repeat("0", exp)
+	if neg {
+		text = "-" + text
+	}
+	i, err := strconv.ParseInt(text, 10, 64)
+	if err != nil || i < lo || i > hi {
 		return 0, false
 	}
-	return int64(f), true
+	return i, true
 }
 
 // join returns a new path: path followed by segs.

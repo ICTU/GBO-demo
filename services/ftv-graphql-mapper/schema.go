@@ -41,6 +41,9 @@ func LoadSchema(sdl string) (*Schema, error) {
 	if s.Query == nil {
 		return nil, fmt.Errorf("schema has no query root type")
 	}
+	if err := checkOneOf(s); err != nil {
+		return nil, err
+	}
 	var executable []string
 	for name, d := range s.Directives {
 		if d.Position != nil && d.Position.Src != nil && d.Position.Src.BuiltIn {
@@ -59,4 +62,20 @@ func LoadSchema(sdl string) (*Schema, error) {
 	}
 	sum := sha256.Sum256([]byte(sdl))
 	return &Schema{schema: s, Digest: "sha256:" + hex.EncodeToString(sum[:])}, nil
+}
+
+// checkOneOf applies the type validation of a OneOf Input Object: every
+// field nullable and without a default. Coercion relies on both.
+func checkOneOf(s *ast.Schema) error {
+	for _, def := range s.Types {
+		if def.Kind != ast.InputObject || !isOneOf(def) {
+			continue
+		}
+		for _, f := range def.Fields {
+			if f.Type.NonNull || f.DefaultValue != nil {
+				return fmt.Errorf("OneOf Input Object %s: field %s must be nullable and without default", def.Name, f.Name)
+			}
+		}
+	}
+	return nil
 }

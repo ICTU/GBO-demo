@@ -2,7 +2,9 @@ package ftvgraphql
 
 import (
 	"fmt"
+	"runtime"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/vektah/gqlparser/v2/ast"
@@ -13,12 +15,15 @@ import (
 )
 
 // ruleTitles maps gqlparser's rule names to the section titles of the
-// Validation chapter of the GraphQL specification. The INVALID_QUERY
-// message carries only the title and the location: never the validator's
-// own message, which can suggest names from the schema ("Did you mean").
+// Validation chapter of the GraphQL specification (September 2025). The
+// INVALID_QUERY message carries only the title and the location: never the
+// validator's own message, which can suggest names from the schema ("Did
+// you mean"). Where one gqlparser rule covers several sections, ruleTitle
+// tells them apart.
 var ruleTitles = map[string]string{
+	"ExecutableDefinitions":        "Executable Definitions",
 	"FieldsOnCorrectType":          "Field Selections",
-	"FragmentsOnCompositeTypes":    "Fragments On Composite Types",
+	"FragmentsOnCompositeTypes":    "Fragments on Object, Interface or Union Types",
 	"KnownArgumentNames":           "Argument Names",
 	"KnownDirectives":              "Directives Are Defined",
 	"KnownFragmentNames":           "Fragment Spread Target Defined",
@@ -35,7 +40,7 @@ var ruleTitles = map[string]string{
 	"ScalarLeafs":                  "Leaf Field Selections",
 	"SingleFieldSubscriptions":     "Single Root Field",
 	"UniqueArgumentNames":          "Argument Uniqueness",
-	"UniqueDirectivesPerLocation":  "Directives Are Unique Per Location",
+	"UniqueDirectivesPerLocation":  "Directives Are Unique per Location",
 	"UniqueFragmentNames":          "Fragment Name Uniqueness",
 	"UniqueInputFieldNames":        "Input Object Field Uniqueness",
 	"UniqueOperationNames":         "Operation Name Uniqueness",
@@ -55,38 +60,89 @@ func validationRules() *validatorrules.Rules {
 }
 
 // validate validates the whole document against the bundled schema, within
-// the validation time limit (Section 6.4, step 1).
-func validate(schema *ast.Schema, doc *ast.QueryDocument, limit time.Duration) *Unverifiable {
+// the validation time limit (Section 6.4, step 1). typeSystemAt is the first
+// type-system definition the document holds, nil when it holds none.
+func validate(schema *ast.Schema, doc *ast.QueryDocument, typeSystemAt *ast.Position, limit time.Duration) *Unverifiable {
 	var errs gqlerror.List
-	if !within(limit, func() { errs = validator.ValidateWithRules(schema, doc, validationRules()) }) {
+	if !within(validationSlots, limit, func() { errs = validator.ValidateWithRules(schema, doc, validationRules()) }) {
 		return unverifiable(SubLimitExceeded, "validation time over %s", limit)
 	}
 	errs = append(errs, undefinedDirectives(doc)...)
+	if typeSystemAt != nil {
+		errs = append(errs, &gqlerror.Error{
+			Rule:      "ExecutableDefinitions",
+			Locations: []gqlerror.Location{{Line: typeSystemAt.Line, Column: typeSystemAt.Column}},
+		})
+	}
 	if len(errs) == 0 {
 		return nil
 	}
 	first := earliest(errs)
-	title, ok := ruleTitles[first.Rule]
-	if !ok {
-		title = first.Rule
-	}
+	title := ruleTitle(first, doc)
 	if len(first.Locations) == 0 {
 		return unverifiable(SubInvalidQuery, "%s", title)
 	}
 	return unverifiable(SubInvalidQuery, "%s at %d:%d", title, first.Locations[0].Line, first.Locations[0].Column)
 }
 
-// within runs fn and reports whether it finished in time. Validation cannot
-// be cancelled: on a timeout the goroutine finishes on its own, and its
-// result is discarded.
-func within(limit time.Duration, fn func()) bool {
+// ruleTitle names the section of the specification an error violates.
+func ruleTitle(e *gqlerror.Error, doc *ast.QueryDocument) string {
+	switch {
+	case e.Rule == "KnownDirectives" && strings.Contains(e.Message, "may not be used on"):
+		return "Directives Are in Valid Locations"
+	case e.Rule == "ValuesOfCorrectType" && strings.Contains(e.Message, "is not defined by type"):
+		return "Input Object Field Names"
+	case e.Rule == "ValuesOfCorrectType" && strings.Contains(e.Message, "of required type"):
+		return "Input Object Required Fields"
+	case e.Rule == "KnownTypeNames" && atVariableDefinition(e, doc):
+		return "Variables Are Input Types"
+	}
+	if title, ok := ruleTitles[e.Rule]; ok {
+		return title
+	}
+	return e.Rule
+}
+
+// atVariableDefinition reports an error located at a variable definition.
+// gqlparser reports an unknown type there, and at a fragment otherwise.
+func atVariableDefinition(e *gqlerror.Error, doc *ast.QueryDocument) bool {
+	if len(e.Locations) == 0 {
+		return false
+	}
+	loc := e.Locations[0]
+	for _, op := range doc.Operations {
+		for _, v := range op.VariableDefinitions {
+			if v.Position != nil && v.Position.Line == loc.Line && v.Position.Column == loc.Column {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// validationSlots bounds how many validations run at once. gqlparser's
+// validation cannot be cancelled: a validation that runs past its time
+// limit is abandoned, not stopped, and keeps its slot until it finishes.
+// Adversarial documents can therefore fill the slots, but never more than
+// this many goroutines and CPUs; new requests then fail closed.
+var validationSlots = make(chan struct{}, max(2, runtime.GOMAXPROCS(0)))
+
+// within runs fn in a validation slot and reports whether it finished
+// within limit. Waiting for a free slot counts against the same limit.
+func within(slots chan struct{}, limit time.Duration, fn func()) bool {
+	timer := time.NewTimer(limit)
+	defer timer.Stop()
+	select {
+	case slots <- struct{}{}:
+	case <-timer.C:
+		return false
+	}
 	done := make(chan struct{})
 	go func() {
+		defer func() { <-slots }()
 		fn()
 		close(done)
 	}()
-	timer := time.NewTimer(limit)
-	defer timer.Stop()
 	select {
 	case <-done:
 		return true

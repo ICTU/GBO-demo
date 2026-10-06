@@ -151,6 +151,10 @@ type mapping struct {
 	settings  Settings
 	limits    Limits
 	operation *Operation
+	// typeSystemAt is the first type-system definition in the document,
+	// which fails validation (Executable Definitions).
+	typeSystemAt *ast.Position
+	aliases      map[position]bool
 }
 
 // run applies the checks in the order Section 6.8 fixes: transport, body
@@ -175,7 +179,7 @@ func (m *mapping) run(req Request) ([]Field, *Unverifiable) {
 	if m.schema == nil {
 		return nil, &Unverifiable{Code: CodeConfigError, Subcode: SubSchemaUnavailable, Message: "no GraphQL schema loaded"}
 	}
-	if fail := validate(m.schema.schema, doc, m.limits.ValidationTime); fail != nil {
+	if fail := validate(m.schema.schema, doc, m.typeSystemAt, m.limits.ValidationTime); fail != nil {
 		return nil, fail
 	}
 	op, fail := selectOperation(doc, gql.OperationName)
@@ -193,7 +197,10 @@ func (m *mapping) run(req Request) ([]Field, *Unverifiable) {
 	if fail != nil {
 		return nil, fail
 	}
-	return walk(m.schema.schema, doc, op, vars, m.limits)
+	if fail := checkArguments(m.schema.schema, doc, op, vars); fail != nil {
+		return nil, fail
+	}
+	return walk(m.schema.schema, doc, op, vars, m.aliases, m.limits)
 }
 
 // parse parses the document and applies the limits of the parse stage.
@@ -201,7 +208,17 @@ func (m *mapping) parse(query string) (*ast.QueryDocument, *Unverifiable) {
 	if depth := queryNestingDepth(query); depth > m.limits.NestingDepth {
 		return nil, unverifiable(SubLimitExceeded, "GraphQL nesting depth over %d", m.limits.NestingDepth)
 	}
-	doc, err := parser.ParseQuery(&ast.Source{Name: "query", Input: query})
+	scan, err := scanDocument(query)
+	if err != nil {
+		return nil, unverifiable(SubParseError, "%s", err.Error())
+	}
+	if scan.typeSystem != "" {
+		if _, err := parser.ParseSchema(&ast.Source{Name: "query", Input: scan.typeSystem}); err != nil {
+			return nil, unverifiable(SubParseError, "%s", err.Error())
+		}
+	}
+	m.typeSystemAt, m.aliases = scan.typeSystemAt, scan.aliases
+	doc, err := parser.ParseQuery(&ast.Source{Name: "query", Input: scan.executable})
 	if err != nil {
 		return nil, unverifiable(SubParseError, "%s", err.Error())
 	}

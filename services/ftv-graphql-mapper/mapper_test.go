@@ -1,6 +1,8 @@
 package ftvgraphql
 
 import (
+	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -219,11 +221,18 @@ func TestSchema(t *testing.T) {
 }
 
 func TestValidationTimeLimit(t *testing.T) {
-	if within(10*time.Millisecond, func() { time.Sleep(time.Second) }) {
+	slots := make(chan struct{}, 1)
+	release := make(chan struct{})
+	if within(slots, 10*time.Millisecond, func() { <-release }) {
 		t.Error("slow validation reported as finished")
 	}
-	if !within(time.Second, func() {}) {
-		t.Error("fast validation reported as timed out")
+	// The abandoned validation still holds the only slot.
+	if within(slots, 10*time.Millisecond, func() {}) {
+		t.Error("validation ran while every slot was taken")
+	}
+	close(release)
+	if !within(slots, time.Second, func() {}) {
+		t.Error("slot not released after the abandoned validation finished")
 	}
 }
 
@@ -245,4 +254,159 @@ func run(t *testing.T, vectors []vector) {
 			assertOutput(t, Map(req, schema, settings), v)
 		})
 	}
+}
+
+func TestDocument(t *testing.T) {
+	invalidAt := func(msg string) *Unverifiable {
+		return &Unverifiable{Code: CodeCoverageUnverifiable, Subcode: SubInvalidQuery, Message: msg}
+	}
+	run(t, []vector{
+		{name: "description on an operation", body: `{ "query": "\"Aantal\" query Q { aantalPersonen }" }`,
+			fields: aantalFields, operation: `{"type": "query", "name": "Q"}`},
+		{name: "block description on a fragment", body: `{ "query": "{ persoon(bsn: \"999990011\") { ...N } } \"\"\"Naam\"\"\" fragment N on Persoon { naam }" }`,
+			fields: `[
+  { "path": ["persoon"], "parentType": "Query", "field": "persoon", "leaf": false,
+    "args": { "bsn": { "value": "999990011", "origin": "literal" } } },
+  { "path": ["persoon", "naam"], "parentType": "Persoon", "on": "Persoon", "field": "naam", "leaf": true }
+]`},
+		{name: "description on a variable definition", body: `{ "query": "query (\"de persoon\" $b: BSN!, \"\"\"jaar\"\"\" $j: Int = 2024) { persoon(bsn: $b) { inkomens(jaren: [$j]) { jaar } } }", "variables": { "b": "1" } }`,
+			fields: `[
+  { "path": ["persoon"], "parentType": "Query", "field": "persoon", "leaf": false, "args": { "bsn": { "value": "1", "origin": "variable:b", "variables": ["b"] } } },
+  { "path": ["persoon", "inkomens"], "parentType": "Persoon", "field": "inkomens", "leaf": false, "args": { "jaren": { "value": [2024], "origin": "mixed", "variables": ["j"] } } },
+  { "path": ["persoon", "inkomens", "jaar"], "parentType": "Inkomen", "field": "jaar", "leaf": true }
+]`},
+		{name: "a string default value is not a description", body: `{ "query": "query ($t: String! = \"x\" $u: String! = \"y\") { zoek(term: $t) { __typename } a: zoek(term: $u) { __typename } }" }`,
+			fields: `[
+  { "path": ["zoek"], "parentType": "Query", "field": "zoek", "leaf": false, "args": { "term": { "value": "x", "origin": "default:t", "variables": ["t"] } } },
+  { "path": ["zoek", "__typename"], "parentType": "Zoekresultaat", "field": "__typename", "leaf": true },
+  { "path": ["a"], "alias": "a", "parentType": "Query", "field": "zoek", "leaf": false, "args": { "term": { "value": "y", "origin": "default:u", "variables": ["u"] } } },
+  { "path": ["a", "__typename"], "parentType": "Zoekresultaat", "field": "__typename", "leaf": true }
+]`},
+		{name: "positions after a blanked description stay those of the document", body: `{ "query": "\"\"\"ëën\ntwee\"\"\" query Q { nieuwVeld }" }`,
+			fail: invalidAt("Field Selections at 2:19")},
+		{name: "description on the query shorthand", body: `{ "query": "\"Aantal\" { aantalPersonen }" }`, fail: failure(SubParseError)},
+		{name: "description on an extension", body: `{ "query": "\"x\" extend type Persoon { y: Int } { aantalPersonen }" }`, fail: failure(SubParseError)},
+		{name: "type definition next to an operation", body: `{ "query": "{ aantalPersonen }\ntype X { a: Int }" }`,
+			fail: invalidAt("Executable Definitions at 2:1")},
+		{name: "described type definition before an operation", body: `{ "query": "\"t\" type X { a: Int } query { aantalPersonen }" }`,
+			fail: invalidAt("Executable Definitions at 1:1")},
+		{name: "every kind of type-system definition", body: `{ "query": "schema { query: Query } scalar S @specifiedBy(url: \"u\") interface I implements & J & K @d { a: Int } union U = | A | B enum E { A } input In { a: Int = 1 } directive @d(a: Int) repeatable on | FIELD_DEFINITION | OBJECT extend schema @d extend union U = C query Q { aantalPersonen }" }`,
+			fail: invalidAt("Executable Definitions at 1:1")},
+		{name: "type named like an operation keyword", body: `{ "query": "type query { a: Int } query { aantalPersonen }" }`,
+			fail: invalidAt("Executable Definitions at 1:1")},
+		{name: "type-system definitions only", body: `{ "query": "type X { a: Int }" }`, fail: failure(SubNoOperation)},
+		{name: "broken type definition", body: `{ "query": "type X { a } { aantalPersonen }" }`, fail: failure(SubParseError)},
+		{name: "fields of a type definition are greedy", body: `{ "query": "type X { aantalPersonen }" }`, fail: failure(SubParseError)},
+		{name: "directive in a wrong location", body: `{ "query": "query @include(if: true) { aantalPersonen }" }`,
+			fail: invalidAt("Directives Are in Valid Locations at 1:8")},
+		{name: "unknown input object field", body: `{ "query": "{ persoon(bsn: \"1\") { inkomens(jaren: [1], filter: {maximum: 1}) { jaar } } }" }`,
+			fail: invalidAt("Input Object Field Names at 1:53")},
+		{name: "required input object field missing", body: `{ "query": "query ($x: AdresVerplicht) { aantalPersonen }" }`,
+			sdl:  "input AdresVerplicht { straat: String! } type Query { aantalPersonen(a: AdresVerplicht): Int }",
+			fail: invalidAt("All Variables Used at 1:8")},
+		{name: "required input object field missing in a literal", body: `{ "query": "{ aantalPersonen(a: {}) }" }`,
+			sdl:  "input AdresVerplicht { straat: String! } type Query { aantalPersonen(a: AdresVerplicht): Int }",
+			fail: invalidAt("Input Object Required Fields at 1:21")},
+		{name: "unknown variable type", body: `{ "query": "query ($x: Nope) { aantalPersonen }" }`,
+			fail: invalidAt("Variables Are Input Types at 1:8")},
+		{name: "unknown variable type in use", body: `{ "query": "query ($x: Nope) { zoek(term: $x) { __typename } }" }`,
+			fail: invalidAt("Variables Are Input Types at 1:8")},
+		{name: "unknown fragment type", body: `{ "query": "{ persoon(bsn: \"1\") { ... on Nope { naam } } }" }`,
+			fail: invalidAt("Fragment Spread Type Existence at 1:27")},
+		{name: "fragment on a scalar", body: `{ "query": "{ persoon(bsn: \"1\") { ... on BSN { naam } } }" }`,
+			fail: invalidAt("Fragments on Object, Interface or Union Types at 1:27")},
+	})
+}
+
+const oneOfSDL = `input Sel @oneOf { a: Int, b: String }
+type Query { f(s: Sel): Int, g(s: Sel!): Int }`
+
+func TestOneOf(t *testing.T) {
+	varError := failure(SubVariableError)
+	run(t, []vector{
+		{name: "variable with one field", sdl: oneOfSDL, body: `{ "query": "query ($s: Sel) { f(s: $s) }", "variables": { "s": { "a": 1 } } }`,
+			fields: `[ { "path": ["f"], "parentType": "Query", "field": "f", "leaf": true, "args": { "s": { "value": { "a": 1 }, "origin": "variable:s", "variables": ["s"] } } } ]`},
+		{name: "variable with two fields", sdl: oneOfSDL, body: `{ "query": "query ($s: Sel) { f(s: $s) }", "variables": { "s": { "a": 1, "b": "x" } } }`, fail: varError},
+		{name: "variable with no field", sdl: oneOfSDL, body: `{ "query": "query ($s: Sel) { f(s: $s) }", "variables": { "s": {} } }`, fail: varError},
+		{name: "variable with a null field", sdl: oneOfSDL, body: `{ "query": "query ($s: Sel) { f(s: $s) }", "variables": { "s": { "a": null } } }`, fail: varError},
+		{name: "literal with one field", sdl: oneOfSDL, body: `{ "query": "{ f(s: {b: \"x\"}) }" }`,
+			fields: `[ { "path": ["f"], "parentType": "Query", "field": "f", "leaf": true, "args": { "s": { "value": { "b": "x" }, "origin": "literal" } } } ]`},
+		{name: "literal with two fields", sdl: oneOfSDL, body: `{ "query": "{ f(s: {a: 1, b: \"x\"}) }" }`, fail: failure(SubInvalidQuery)},
+		{name: "literal with a null field", sdl: oneOfSDL, body: `{ "query": "{ f(s: {a: null}) }" }`, fail: failure(SubInvalidQuery)},
+		{name: "literal field from a nullable variable", sdl: oneOfSDL, body: `{ "query": "query ($a: Int) { f(s: {a: $a}) }" }`, fail: failure(SubInvalidQuery)},
+		{name: "literal field from a non-null variable", sdl: oneOfSDL, body: `{ "query": "query ($a: Int!) { f(s: {a: $a}) }", "variables": { "a": 3 } }`,
+			fields: `[ { "path": ["f"], "parentType": "Query", "field": "f", "leaf": true, "args": { "s": { "value": { "a": 3 }, "origin": "mixed", "variables": ["a"] } } } ]`},
+	})
+	for name, sdl := range map[string]string{
+		"non-null field":     "input Sel @oneOf { a: Int! } type Query { f(s: Sel): Int }",
+		"field with default": "input Sel @oneOf { a: Int = 1 } type Query { f(s: Sel): Int }",
+	} {
+		if _, err := LoadSchema(sdl); err == nil {
+			t.Errorf("%s: LoadSchema accepted %q", name, sdl)
+		}
+	}
+}
+
+func TestNullVariableInNonNullPosition(t *testing.T) {
+	body := `{ "query": "query ($jaar: Int = 2024) { persoon(bsn: \"1\") { inkomens(jaren: [$jaar]) { jaar } } }", "variables": { "jaar": null } }`
+	run(t, []vector{
+		{name: "null for a defaulted variable in a non-null item", body: body, fail: failure(SubVariableError)},
+		// Variables come before the walk limits (Section 6.8).
+		{name: "reported before a walk limit", body: body,
+			edit: func(_ *Request, s *Settings) { s.Limits.FieldRecords = 1 }, fail: failure(SubVariableError)},
+		{name: "null for a defaulted variable as a non-null argument", body: `{ "query": "query ($b: BSN = \"1\") { persoon(bsn: $b) { naam } }", "variables": { "b": null } }`,
+			fail: failure(SubVariableError)},
+	})
+}
+
+func TestIntegral(t *testing.T) {
+	const lo, hi = -2147483648, 2147483647
+	for n, want := range map[string]int64{
+		"2024": 2024, "2024.0": 2024, "2.024e3": 2024, "2.024E+3": 2024, "20240e-1": 2024,
+		"-0": 0, "0.0e99999999999999999999": 0, "-2147483648": lo, "2147483647": hi,
+	} {
+		if got, ok := integral(json.Number(n), lo, hi); !ok || got != want {
+			t.Errorf("integral(%s) = %d, %v; want %d", n, got, ok, want)
+		}
+	}
+	for _, n := range []string{
+		"2024.5", "2024.0000000000000001", "2147483648", "-2147483649",
+		"1e400", "1e-400", "2.0245e3", "1e99999999999999999999",
+	} {
+		if got, ok := integral(json.Number(n), lo, hi); ok {
+			t.Errorf("integral(%s) = %d; want no integer", n, got)
+		}
+	}
+	if got, ok := integral("9007199254740993.0", math.MinInt64, math.MaxInt64); !ok || got != 9007199254740993 {
+		t.Errorf("integral beyond 2^53 = %d, %v; want exact 9007199254740993", got, ok)
+	}
+}
+
+func TestExactNumbers(t *testing.T) {
+	idSDL := "type Query { a(id: ID): Int }"
+	run(t, []vector{
+		{name: "Int just above an integer", body: `{ "query": "query ($j: Int!) { persoon(bsn: \"1\") { inkomens(jaren: [$j]) { jaar } } }", "variables": { "j": 2024.0000000000000001 } }`,
+			fail: failure(SubVariableError)},
+		{name: "ID beyond 2^53 stays exact", sdl: idSDL, body: `{ "query": "query ($i: ID) { a(id: $i) }", "variables": { "i": 9007199254740993.0 } }`,
+			fields: `[ { "path": ["a"], "parentType": "Query", "field": "a", "leaf": true, "args": { "id": { "value": "9007199254740993", "origin": "variable:i", "variables": ["i"] } } } ]`},
+		{name: "ID with a fraction", sdl: idSDL, body: `{ "query": "query ($i: ID) { a(id: $i) }", "variables": { "i": 1.5 } }`,
+			fail: failure(SubVariableError)},
+	})
+}
+
+func TestWrittenAliases(t *testing.T) {
+	run(t, []vector{
+		{name: "alias equal to the field name", body: `{ "query": "{ aantalPersonen: aantalPersonen }" }`,
+			fields: `[ { "path": ["aantalPersonen"], "alias": "aantalPersonen", "parentType": "Query", "field": "aantalPersonen", "leaf": true } ]`},
+		{name: "aliases equal to the field name count against the limit", body: `{ "query": "{ x: aantalPersonen aantalPersonen: aantalPersonen }" }`,
+			edit: func(_ *Request, s *Settings) { s.Limits.AliasedSelections = 1 }, fail: failure(SubLimitExceeded)},
+		{name: "in a fragment, next to arguments and directives", body: `{ "query": "{ ...F } fragment F on Query { aantalPersonen: aantalPersonen @skip(if: false) persoon(bsn: \"1\") { inkomens(jaren: [1], filter: {valuta: \"EUR\"}) { jaar } } }" }`,
+			fields: `[
+  { "path": ["aantalPersonen"], "alias": "aantalPersonen", "parentType": "Query", "on": "Query", "field": "aantalPersonen", "leaf": true },
+  { "path": ["persoon"], "parentType": "Query", "on": "Query", "field": "persoon", "leaf": false, "args": { "bsn": { "value": "1", "origin": "literal" } } },
+  { "path": ["persoon", "inkomens"], "parentType": "Persoon", "field": "inkomens", "leaf": false,
+    "args": { "jaren": { "value": [1], "origin": "literal" }, "filter": { "value": { "minimum": 0, "valuta": "EUR" }, "origin": "literal", "schemaDefaults": [["minimum"]] } } },
+  { "path": ["persoon", "inkomens", "jaar"], "parentType": "Inkomen", "field": "jaar", "leaf": true }
+]`},
+	})
 }

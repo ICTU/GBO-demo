@@ -8,9 +8,9 @@ import (
 // after fragment expansion (Section 6.4, steps 2 to 10). It runs on a
 // validated document, so every name it looks up exists; where one does not,
 // it fails closed rather than guess.
-func walk(schema *ast.Schema, doc *ast.QueryDocument, op *ast.OperationDefinition, vars map[string]variable, limits Limits) ([]Field, *Unverifiable) {
+func walk(schema *ast.Schema, doc *ast.QueryDocument, op *ast.OperationDefinition, vars map[string]variable, aliases map[position]bool, limits Limits) ([]Field, *Unverifiable) {
 	root := schema.Query
-	w := &walker{schema: schema, doc: doc, vars: vars, limits: limits, fields: []Field{}}
+	w := &walker{schema: schema, doc: doc, vars: vars, written: aliases, limits: limits, fields: []Field{}}
 	if fail := w.selections(op.SelectionSet, root, nil, ""); fail != nil {
 		return nil, fail
 	}
@@ -21,6 +21,7 @@ type walker struct {
 	schema  *ast.Schema
 	doc     *ast.QueryDocument
 	vars    map[string]variable
+	written map[position]bool // fields written with an alias
 	limits  Limits
 	fields  []Field
 	aliases int
@@ -61,11 +62,12 @@ func (w *walker) field(s *ast.Field, parent *ast.Definition, path []string, on s
 	if parent == nil {
 		return unverifiable(SubInvalidQuery, "Field Selections")
 	}
-	// The response key: gqlparser sets Alias to the name when none is
-	// written, so `naam: naam` reads as no alias. Both give the same key.
+	// The response key. gqlparser sets Alias to the name when none is
+	// written; the scanner knows whether one was, so `naam: naam` is an
+	// alias and counts against the alias limit.
 	fieldPath := append(append(make([]string, 0, len(path)+1), path...), s.Alias)
 	rec := Field{Path: fieldPath, ParentType: parent.Name, On: on, Field: s.Name, Leaf: len(s.SelectionSet) == 0}
-	if s.Alias != s.Name {
+	if s.Alias != s.Name || (s.Position != nil && w.written[position{s.Position.Line, s.Position.Column}]) {
 		rec.Alias = s.Alias
 	}
 	if fail := w.checkLimits(rec); fail != nil {
@@ -91,6 +93,68 @@ func (w *walker) field(s *ast.Field, parent *ast.Definition, path []string, on s
 		return nil
 	}
 	return w.selections(s.SelectionSet, w.schema.Types[def.Type.Name()], fieldPath, "")
+}
+
+// checkArguments coerces the arguments of every field selection in the
+// operation once, before the walk, so that a variable whose value cannot
+// stand in its position fails with VARIABLE_ERROR at the variables stage
+// (Section 6.8), ahead of any walk limit. A fragment spread many times is
+// checked once: its arguments do not depend on where it is spread.
+func checkArguments(schema *ast.Schema, doc *ast.QueryDocument, op *ast.OperationDefinition, vars map[string]variable) *Unverifiable {
+	seen := map[string]bool{}
+	var varErr *Unverifiable
+	var visit func(ast.SelectionSet) *Unverifiable
+	visit = func(set ast.SelectionSet) *Unverifiable {
+		for _, sel := range set {
+			switch s := sel.(type) {
+			case *ast.Field:
+				if s.Definition != nil {
+					for _, ad := range s.Definition.Arguments {
+						var written *ast.Value
+						if a := s.Arguments.ForName(ad.Name); a != nil {
+							written = a.Value
+						}
+						_, _, err := argument(schema, vars, ad, written)
+						switch {
+						case isVariableError(err) && varErr == nil:
+							varErr = unverifiable(SubVariableError, "argument %s: %s", ad.Name, err)
+						case err != nil && !isVariableError(err):
+							return valueError(written)
+						}
+					}
+				}
+				if fail := visit(s.SelectionSet); fail != nil {
+					return fail
+				}
+			case *ast.InlineFragment:
+				if fail := visit(s.SelectionSet); fail != nil {
+					return fail
+				}
+			case *ast.FragmentSpread:
+				if f := doc.Fragments.ForName(s.Name); f != nil && !seen[s.Name] {
+					seen[s.Name] = true
+					if fail := visit(f.SelectionSet); fail != nil {
+						return fail
+					}
+				}
+			}
+		}
+		return nil
+	}
+	if fail := visit(op.SelectionSet); fail != nil {
+		return fail
+	}
+	return varErr
+}
+
+// valueError is a literal that validation let through but input coercion
+// refuses: a validation failure (Values of Correct Type).
+func valueError(written *ast.Value) *Unverifiable {
+	line, col := 0, 0
+	if written != nil && written.Position != nil {
+		line, col = written.Position.Line, written.Position.Column
+	}
+	return unverifiable(SubInvalidQuery, "Values of Correct Type at %d:%d", line, col)
 }
 
 // checkLimits applies the walk limits at each emission, so fragment fan-out
@@ -121,12 +185,11 @@ func (w *walker) args(def *ast.FieldDefinition, s *ast.Field) (map[string]Arg, *
 			written = a.Value
 		}
 		arg, ok, err := argument(w.schema, w.vars, ad, written)
+		if isVariableError(err) {
+			return nil, unverifiable(SubVariableError, "argument %s: %s", ad.Name, err)
+		}
 		if err != nil {
-			line, col := 0, 0
-			if written != nil && written.Position != nil {
-				line, col = written.Position.Line, written.Position.Column
-			}
-			return nil, unverifiable(SubInvalidQuery, "Values of Correct Type at %d:%d", line, col)
+			return nil, valueError(written)
 		}
 		if !ok {
 			continue

@@ -187,7 +187,7 @@ func unicodeEscape(s string, i int) (rune, bool) {
 	if i+6 > len(s) || s[i] != '\\' || s[i+1] != 'u' {
 		return 0, false
 	}
-	n, err := strconv.ParseUint(s[i+2:i+6], 16, 32)
+	n, err := strconv.ParseUint(s[i+2:i+6], 16, 16)
 	if err != nil {
 		return 0, false
 	}
