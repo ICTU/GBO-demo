@@ -9,8 +9,10 @@
 # interface covariance (Aftrekpost/VermogensBestanddeel narrow the
 # FiscaalFeit.categorie type), and the mock bron only serves AangifteIH.
 #
-# Mirrored from graphql-server/main.go buildSchema() — keep in sync when
-# the bron-schema changes.
+# Mirrors graphql-server/main.go buildSchema().
+# CI checks that every element here has the same definition in the running
+# source (scripts/check-schema-drift.sh); the source may have more. A change
+# to the source schema that touches this file fails until both agree.
 
 scalar BSN
 scalar CodelijstISO4217

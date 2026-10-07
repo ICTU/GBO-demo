@@ -3,9 +3,12 @@
 # structural reference to bind queried fields to rules; it is NOT policy —
 # the binding lives in the rules themselves (covers_fields in LVG0001).
 #
-# Mirrored from lvg-graphql-server/main.go buildSchema() — keep in sync when
-# the bron-schema changes. Type names must not collide with the other
-# sources: the field map built from these files is global.
+# Mirrors lvg-graphql-server/main.go buildSchema().
+# CI checks that every element here has the same definition in the running
+# source (scripts/check-schema-drift.sh); the source may have more. A change
+# to the source schema that touches this file fails until both agree.
+# Type names must not collide with the other sources: rules bind on
+# Type.field keys, which are not scoped per service.
 
 scalar BSN
 
