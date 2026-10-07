@@ -31,6 +31,12 @@ func TestOnlyTheTransportSubsetIsForwarded(t *testing.T) {
 		{"other charset", http.MethodPost, "/graphql", map[string]string{"Content-Type": "application/json; charset=latin1"}, http.StatusUnsupportedMediaType},
 		{"other parameter", http.MethodPost, "/graphql", map[string]string{"Content-Type": "application/json; profile=x"}, http.StatusUnsupportedMediaType},
 		{"no content type", http.MethodPost, "/graphql", nil, http.StatusUnsupportedMediaType},
+		// A general media-type parser reads these as charset=utf-8; the PDP's
+		// mapper refuses them, so the source must too.
+		{"RFC 2231 charset", http.MethodPost, "/graphql", map[string]string{"Content-Type": "application/json; charset*=us-ascii''utf-8"}, http.StatusUnsupportedMediaType},
+		{"RFC 2231 continuation", http.MethodPost, "/graphql", map[string]string{"Content-Type": "application/json; charset*0=utf; charset*1=-8"}, http.StatusUnsupportedMediaType},
+		{"trailing semicolon", http.MethodPost, "/graphql", map[string]string{"Content-Type": "application/json;"}, http.StatusUnsupportedMediaType},
+		{"space around =", http.MethodPost, "/graphql", map[string]string{"Content-Type": "application/json ; charset = utf-8"}, http.StatusUnsupportedMediaType},
 
 		{"post with a query string", http.MethodPost, "/graphql?query=%7B__typename%7D", map[string]string{"Content-Type": "application/json"}, http.StatusBadRequest},
 		{"post with a bare question mark", http.MethodPost, "/graphql?", map[string]string{"Content-Type": "application/json"}, http.StatusBadRequest},

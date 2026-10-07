@@ -36,6 +36,12 @@ func TestTransport(t *testing.T) {
 		{name: "other charset", body: naamQuery, edit: setHeader("Content-Type", "application/json; charset=latin1"), fail: rejected},
 		{name: "other parameter", body: naamQuery, edit: setHeader("Content-Type", "application/json; boundary=x"), fail: rejected},
 		{name: "graphql-response media type", body: naamQuery, edit: setHeader("Content-Type", "application/graphql-response+json"), fail: rejected},
+		// Forms a general media-type parser reads as charset=utf-8; refused here,
+		// and by the source through the same function.
+		{name: "RFC 2231 charset", body: naamQuery, edit: setHeader("Content-Type", "application/json; charset*=us-ascii''utf-8"), fail: rejected},
+		{name: "RFC 2231 continuation", body: naamQuery, edit: setHeader("Content-Type", "application/json; charset*0=utf; charset*1=-8"), fail: rejected},
+		{name: "trailing semicolon", body: naamQuery, edit: setHeader("Content-Type", "application/json;"), fail: rejected},
+		{name: "space around =", body: naamQuery, edit: setHeader("Content-Type", "application/json ; charset = utf-8"), fail: rejected},
 		{name: "header name in lower case", body: naamQuery, edit: func(r *Request, _ *Settings) {
 			r.Headers = map[string]any{"content-type": "application/json"}
 		}, fields: naamFields},

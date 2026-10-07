@@ -1,7 +1,7 @@
 package main
 
 import (
-	"mime"
+	ftvgraphql "gbo-demo/ftv-graphql-mapper"
 	"net/http"
 	"strings"
 )
@@ -34,22 +34,13 @@ func refuseTransport(r *http.Request, graphQLPath string) (int, string) {
 	return 0, ""
 }
 
-// jsonContentType holds for exactly one application/json value, with no
-// parameter other than charset=utf-8, compared case-insensitively.
+// jsonContentType holds for exactly one Content-Type value that the PDP's
+// mapper accepts. The mapper's own function decides, not a general
+// media-type parser: that would accept forms the mapper refuses
+// (charset*=…, a trailing semicolon), and the source would run a request
+// the PDP never judged.
 func jsonContentType(values []string) bool {
-	if len(values) != 1 {
-		return false
-	}
-	mediaType, params, err := mime.ParseMediaType(values[0])
-	if err != nil || mediaType != "application/json" {
-		return false
-	}
-	for name, value := range params {
-		if name != "charset" || !strings.EqualFold(value, "utf-8") {
-			return false
-		}
-	}
-	return true
+	return len(values) == 1 && ftvgraphql.IsJSONMediaType(values[0])
 }
 
 // transportOnly forwards a request to next only when it is in the transport
