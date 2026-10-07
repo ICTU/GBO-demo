@@ -41,5 +41,4 @@ spec := {
 		"placeholders": {"consent:identity"},
 	}],
 	"years_in_scopes": false,
-	"pip": null,
 }

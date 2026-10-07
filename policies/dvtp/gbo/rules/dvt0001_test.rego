@@ -72,6 +72,17 @@ test_deny_invalid_signed_context if {
 	result.context.reason_admin.code == "CONSENT_CONTEXT_INVALID"
 }
 
+# The trace stops at the first failing check: everything after it is
+# skipped, also when the very first check fails.
+test_checks_after_the_first_failure_are_skipped if {
+	ctx := object.union(_base_ctx, {"pip": {"consent": object.union(_base_ctx.pip.consent, {"context_valid": false})}})
+	steps := lib.evaluate(dvt0001.spec, ctx).context.reason_admin.steps
+	steps[0].status == "fail"
+	every step in array.slice(steps, 1, count(steps)) {
+		step.status == "skipped"
+	}
+}
+
 test_deny_status_unavailable if {
 	ctx := object.union(_base_ctx, {"pip": {"consent": object.union(_base_ctx.pip.consent, {"status_available": false})}})
 	result := lib.evaluate(dvt0001.spec, ctx)

@@ -28,7 +28,6 @@ _r0001 := {
 		"rule_id": "r-0001",
 		"allowed_years": {y | some y in numbers.range(2000, 2024)},
 		"years_argument": {"field": "Persoon.inkomens", "arg": "jaren"},
-		"pip": null,
 	},
 }
 

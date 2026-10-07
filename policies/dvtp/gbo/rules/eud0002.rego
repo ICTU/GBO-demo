@@ -62,5 +62,4 @@ spec := {
 	"subject_argument": {"field": "Query.akteVanOverlijden", "arg": "bsn"},
 	"allowed_actors": allowed_actors,
 	"years_in_scopes": false,
-	"pip": null,
 }

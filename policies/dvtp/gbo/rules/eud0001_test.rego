@@ -117,7 +117,6 @@ _rule_without_whitelists := {
 	"consent_must_cover_scope": false,
 	"pid_required": true,
 	"subject_argument": {"field": "Query.ingeschrevenPersoon", "arg": "bsn"},
-	"pip": null,
 }
 
 # A PID rule that names no argument for the subject has no field that names

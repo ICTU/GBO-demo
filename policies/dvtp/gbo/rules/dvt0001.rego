@@ -82,5 +82,4 @@ spec := {
 	# makes a query for both years fail with YEAR_NOT_COVERED.
 	"years_in_scopes": true,
 	"years_argument": {"field": "IngeschrevenPersoon.heeftBelastingjaarAangifte", "arg": "belastingjaren"},
-	"pip": null,
 }

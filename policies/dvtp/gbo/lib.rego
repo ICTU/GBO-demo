@@ -113,13 +113,9 @@ _short_circuit(raw) := result if {
 	result := [_skip_after(raw[i], i, first_fail_idx) | some i in numbers.range(0, count(raw) - 1)]
 } else := raw
 
-_first_fail_index(steps) := idx if {
-	some i in numbers.range(0, count(steps) - 1)
-	steps[i].status == "fail"
-	idx := i
-	every j in numbers.range(0, i - 1) {
-		steps[j].status != "fail"
-	}
+_first_fail_index(steps) := min(fails) if {
+	fails := [i | some i, step in steps; step.status == "fail"]
+	count(fails) > 0
 } else := -1
 
 # Steps after the first fail get status "skipped" (= no longer evaluated
@@ -136,45 +132,29 @@ _skip_after(step, i, fail_idx) := step if i <= fail_idx
 # Verbose but unavoidable in Rego — boolean-rules are undefined-when-false
 # and cannot be passed directly as function-arg.
 
-_check_consent_exists(spec, ctx) := step if {
-	spec.consent_required
-	ctx.pip.consent.exists == true
-	step := _step("CONSENT_NOT_FOUND", "Consent exists in PIP", "consent.exists == true", "pass")
-} else := step if {
-	spec.consent_required
-	not ctx.pip.consent.exists == true
-	step := _step("CONSENT_NOT_FOUND", "Consent exists in PIP", "consent.exists == true", "fail")
-} else := _step_skipped("CONSENT_NOT_FOUND", "Consent exists in PIP", "n/a")
+_check_consent_exists(spec, ctx) := _axis(
+	{"code": "CONSENT_NOT_FOUND", "label": "Consent exists in PIP", "expected": "consent.exists == true"},
+	_flag(spec, "consent_required"),
+	_consent(ctx, "exists", false) == true,
+)
 
-_check_consent_not_withdrawn(spec, ctx) := step if {
-	spec.consent_required
-	ctx.pip.consent.withdrawn == false
-	step := _step("CONSENT_WITHDRAWN", "Consent not withdrawn", "consent.withdrawn == false", "pass")
-} else := step if {
-	spec.consent_required
-	ctx.pip.consent.withdrawn == true
-	step := _step("CONSENT_WITHDRAWN", "Consent not withdrawn", "consent.withdrawn == false", "fail")
-} else := _step_skipped("CONSENT_WITHDRAWN", "Consent not withdrawn", "n/a")
+_check_consent_not_withdrawn(spec, ctx) := _axis(
+	{"code": "CONSENT_WITHDRAWN", "label": "Consent not withdrawn", "expected": "consent.withdrawn == false"},
+	_flag(spec, "consent_required"),
+	_consent(ctx, "withdrawn", null) == false,
+)
 
-_check_consent_not_expired(spec, ctx) := step if {
-	spec.consent_required
-	within_validity_window(ctx)
-	step := _step("CONSENT_EXPIRED", "Consent within validity window", sprintf("now < %s", [object.get(ctx.pip.consent, "valid_until", "?")]), "pass")
-} else := step if {
-	spec.consent_required
-	not within_validity_window(ctx)
-	step := _step("CONSENT_EXPIRED", "Consent within validity window", sprintf("now < %s", [object.get(ctx.pip.consent, "valid_until", "?")]), "fail")
-} else := _step_skipped("CONSENT_EXPIRED", "Consent within validity window", "n/a")
+_check_consent_not_expired(spec, ctx) := _axis(
+	{"code": "CONSENT_EXPIRED", "label": "Consent within validity window", "expected": sprintf("now < %s", [_consent(ctx, "valid_until", "?")])},
+	_flag(spec, "consent_required"),
+	within_validity_window(ctx),
+)
 
-_check_consent_covers_scope(spec, ctx) := step if {
-	spec.consent_must_cover_scope
-	consent_covers_scope(ctx)
-	step := _step("CONSENT_SCOPE_MISMATCH", "Scope covered by consent", sprintf("%q in consent.granted_scopes", [object.get(ctx.resource, "scope", "")]), "pass")
-} else := step if {
-	spec.consent_must_cover_scope
-	not consent_covers_scope(ctx)
-	step := _step("CONSENT_SCOPE_MISMATCH", "Scope covered by consent", sprintf("%q in consent.granted_scopes", [object.get(ctx.resource, "scope", "")]), "fail")
-} else := _step_skipped("CONSENT_SCOPE_MISMATCH", "Scope covered by consent", "n/a")
+_check_consent_covers_scope(spec, ctx) := _axis(
+	{"code": "CONSENT_SCOPE_MISMATCH", "label": "Scope covered by consent", "expected": sprintf("%q in consent.granted_scopes", [_scope(ctx)])},
+	_flag(spec, "consent_must_cover_scope"),
+	consent_covers_scope(ctx),
+)
 
 _check_constraint(spec, ctx) := step if {
 	# All constraint-bindings on this field must be satisfied (AND). For
@@ -214,21 +194,19 @@ _constraint_skip_reason(spec) := "not on this field" if {
 # consent-based request as well. It holds on every field. The subject half
 # is checked on the field that carries the argument; the other fields of
 # the request depend on that field, which the AND across fields requires.
-_check_pid_present(spec, ctx) := step if {
-	spec.pid_required
-	_pid_regime(spec, ctx)
-	step := _step("PID_NOT_PRESENT", _pid_label, _pid_expected(spec), "pass")
-} else := step if {
-	spec.pid_required
-	not _pid_regime(spec, ctx)
-	step := _step("PID_NOT_PRESENT", _pid_label, _pid_expected(spec), "fail")
-} else := _step_skipped("PID_NOT_PRESENT", _pid_label, "n/a (no PID-flow)")
+_check_pid_present(spec, ctx) := _axis(
+	{"code": "PID_NOT_PRESENT", "label": _pid_label, "expected": _pid_expected(spec), "skipped": "n/a (no PID-flow)"},
+	_flag(spec, "pid_required"),
+	_pid_regime(spec, ctx),
+)
 
 _pid_label := "PID regime: no consent token, subject named"
 
 _pid_expected(spec) := sprintf("no consent token, and %s.%s named", [spec.subject_argument.field, spec.subject_argument.arg]) if {
 	spec.subject_argument
 } else := "no consent token, and a subject_argument declared by the rule"
+
+default _pid_regime(_, _) := false
 
 _pid_regime(spec, ctx) if {
 	object.get(object.get(ctx, "pip", {}), "consent", null) == null
@@ -258,50 +236,21 @@ _subject_named(spec, ctx) if {
 # arbitrary resource.scope-string could pass through — the authoritative
 # source of scope per policy-path would be missing. DvTP covers this via
 # consent-scope-cover; EUDI via a rule-declared whitelist.
-_check_scope_allowed(spec, ctx) := step if {
-	allowed := object.get(spec, "allowed_scopes", set())
-	count(allowed) > 0
-	scope := object.get(ctx.resource, "scope", "")
-	scope in allowed
-	step := _step("SCOPE_NOT_ALLOWED", "Scope allowed for rule", sprintf("%q in spec.allowed_scopes", [scope]), "pass")
-} else := step if {
-	allowed := object.get(spec, "allowed_scopes", set())
-	count(allowed) > 0
-	scope := object.get(ctx.resource, "scope", "")
-	not scope in allowed
-	step := _step("SCOPE_NOT_ALLOWED", "Scope allowed for rule", sprintf("%q in spec.allowed_scopes", [scope]), "fail")
-} else := _step_skipped("SCOPE_NOT_ALLOWED", "Scope allowed for rule", "no scope-whitelist configured")
+_check_scope_allowed(spec, ctx) := _axis(
+	{"code": "SCOPE_NOT_ALLOWED", "label": "Scope allowed for rule", "expected": sprintf("%q in spec.allowed_scopes", [_scope(ctx)]), "skipped": "no scope-whitelist configured"},
+	count(object.get(spec, "allowed_scopes", set())) > 0,
+	_scope(ctx) in object.get(spec, "allowed_scopes", set()),
+)
 
 # Direct year authorization for source-owned EUDI queries. Unlike the DvTP
 # consent path this checks the actual GraphQL selector against a rule-owned
 # set; it does not manufacture or trust a GBO catalog scope.
-_check_years_allowed(spec, ctx) := _step_skipped("YEAR_NOT_ALLOWED", "Requested years allowed for rule", "not on this field") if {
-	count(object.get(spec, "allowed_years", set())) > 0
-	not _years_apply(spec, ctx)
-} else := step if {
-	allowed := object.get(spec, "allowed_years", set())
-	count(allowed) > 0
-	years := _requested_years(spec, ctx)
-	count(years) > 0
-	allowed_text := {sprintf("%v", [year]) | some year in allowed}
-	disallowed := [y | some y in years; not sprintf("%v", [y]) in allowed_text]
-	count(disallowed) == 0
-	step := _step("YEAR_NOT_ALLOWED", "Requested years allowed for rule", sprintf("%d year(s) allowed", [count(years)]), "pass")
-} else := step if {
-	allowed := object.get(spec, "allowed_years", set())
-	count(allowed) > 0
-	years := _requested_years(spec, ctx)
-	count(years) > 0
-	allowed_text := {sprintf("%v", [year]) | some year in allowed}
-	disallowed := [y | some y in years; not sprintf("%v", [y]) in allowed_text]
-	count(disallowed) > 0
-	step := _step("YEAR_NOT_ALLOWED", "Requested years allowed for rule", sprintf("%v in spec.allowed_years", [disallowed[0]]), "fail")
-} else := step if {
-	allowed := object.get(spec, "allowed_years", set())
-	count(allowed) > 0
-	count(_requested_years(spec, ctx)) == 0
-	step := _step("YEAR_NOT_ALLOWED", "Requested years allowed for rule", "belastingjaren filter present in query", "fail")
-} else := _step_skipped("YEAR_NOT_ALLOWED", "Requested years allowed for rule", "no year-whitelist configured")
+_check_years_allowed(spec, ctx) := _years_step(
+	{"code": "YEAR_NOT_ALLOWED", "label": "Requested years allowed for rule", "passed": "allowed", "missing": "%v in spec.allowed_years", "skipped": "no year-whitelist configured"},
+	count(object.get(spec, "allowed_years", set())) > 0,
+	spec, ctx,
+	[y | some y in _requested_years(spec, ctx); not sprintf("%v", [y]) in {sprintf("%v", [a]) | some a in object.get(spec, "allowed_years", set())}],
+)
 
 # Year-coverage: only active when the rule sets years_in_scopes. Every
 # belastingjaar requested in the query (the argument the rule names in
@@ -311,30 +260,12 @@ _check_years_allowed(spec, ctx) := _step_skipped("YEAR_NOT_ALLOWED", "Requested 
 # person, so per-year authorization is only enforceable when the year
 # selector travels inside the query; a missing filter therefore fails
 # closed.
-_check_years_in_scopes(spec, ctx) := _step_skipped("YEAR_NOT_COVERED", "Requested years covered by scopes", "not on this field") if {
-	spec.years_in_scopes
-	not _years_apply(spec, ctx)
-} else := step if {
-	spec.years_in_scopes
-	years := _requested_years(spec, ctx)
-	count(years) > 0
-	scopes := _available_scopes(spec, ctx)
-	uncovered := [y | some y in years; not sprintf("bd:ib:%v", [y]) in scopes]
-	count(uncovered) == 0
-	step := _step("YEAR_NOT_COVERED", "Requested years covered by scopes", sprintf("%d year(s) covered", [count(years)]), "pass")
-} else := step if {
-	spec.years_in_scopes
-	years := _requested_years(spec, ctx)
-	count(years) > 0
-	scopes := _available_scopes(spec, ctx)
-	uncovered := [y | some y in years; not sprintf("bd:ib:%v", [y]) in scopes]
-	count(uncovered) > 0
-	step := _step("YEAR_NOT_COVERED", "Requested years covered by scopes", sprintf("bd:ib:%v in scopes", [uncovered[0]]), "fail")
-} else := step if {
-	spec.years_in_scopes
-	count(_requested_years(spec, ctx)) == 0
-	step := _step("YEAR_NOT_COVERED", "Requested years covered by scopes", "belastingjaren filter present in query", "fail")
-} else := _step_skipped("YEAR_NOT_COVERED", "Requested years covered by scopes", "n/a")
+_check_years_in_scopes(spec, ctx) := _years_step(
+	{"code": "YEAR_NOT_COVERED", "label": "Requested years covered by scopes", "passed": "covered", "missing": "bd:ib:%v in scopes", "skipped": "n/a"},
+	_flag(spec, "years_in_scopes"),
+	spec, ctx,
+	[y | some y in _requested_years(spec, ctx); not sprintf("bd:ib:%v", [y]) in _available_scopes(spec, ctx)],
+)
 
 # Actor-authorization: only explicitly designated actors may trigger this
 # rule. Supports e.g. eIDAS art. 5a-style designation: one designated
@@ -342,19 +273,11 @@ _check_years_in_scopes(spec, ctx) := _step_skipped("YEAR_NOT_COVERED", "Requeste
 # the FSC-transport (grant + inway) could trigger the rule; with this
 # axis there is a separate policy-check that the actor is also allowed
 # at rule-level.
-_check_actor_allowed(spec, ctx) := step if {
-	allowed := object.get(spec, "allowed_actors", set())
-	count(allowed) > 0
-	actor := acting_party(ctx)
-	actor in allowed
-	step := _step("ACTOR_NOT_ALLOWED", "Actor allowed for rule", sprintf("%q in spec.allowed_actors", [actor]), "pass")
-} else := step if {
-	allowed := object.get(spec, "allowed_actors", set())
-	count(allowed) > 0
-	actor := acting_party(ctx)
-	not actor in allowed
-	step := _step("ACTOR_NOT_ALLOWED", "Actor allowed for rule", sprintf("%q in spec.allowed_actors", [actor]), "fail")
-} else := _step_skipped("ACTOR_NOT_ALLOWED", "Actor allowed for rule", "no actor-whitelist configured")
+_check_actor_allowed(spec, ctx) := _axis(
+	{"code": "ACTOR_NOT_ALLOWED", "label": "Actor allowed for rule", "expected": sprintf("%q in spec.allowed_actors", [acting_party(ctx)]), "skipped": "no actor-whitelist configured"},
+	count(object.get(spec, "allowed_actors", set())) > 0,
+	acting_party(ctx) in object.get(spec, "allowed_actors", set()),
+)
 
 # ── Acting and represented party (FSC delegation) ──────────────────────────
 # A service provider calls a source itself, or through an integrator: a
@@ -379,21 +302,21 @@ represented_party(ctx) := delegator if {
 	delegator != ""
 } else := acting_party(ctx)
 
+default delegated(_) := false
+
 delegated(ctx) if represented_party(ctx) != acting_party(ctx)
 
-_check_consent_actor_binding(spec, ctx) := step if {
-	spec.consent_actor_binding
-	consent_actor_matches(ctx)
-	step := _step("CONSENT_ACTOR_MISMATCH", _binding_label, _binding_expected, "pass")
-} else := step if {
-	spec.consent_actor_binding
-	not consent_actor_matches(ctx)
-	step := _step("CONSENT_ACTOR_MISMATCH", _binding_label, _binding_expected, "fail")
-} else := _step_skipped("CONSENT_ACTOR_MISMATCH", _binding_label, "n/a")
+_check_consent_actor_binding(spec, ctx) := _axis(
+	{"code": "CONSENT_ACTOR_MISMATCH", "label": _binding_label, "expected": _binding_expected},
+	_flag(spec, "consent_actor_binding"),
+	consent_actor_matches(ctx),
+)
 
 _binding_label := "Represented party matches signed consent recipient"
 
 _binding_expected := "(FSC delegator, else subject.id) == consent.dienstverlener_oin"
+
+default consent_actor_matches(_) := false
 
 consent_actor_matches(ctx) if {
 	party := represented_party(ctx)
@@ -406,18 +329,17 @@ consent_actor_matches(ctx) if {
 # admitted per service provider and per rule, and a peer without one gets
 # nothing from connecting on someone's behalf. A direct call has no
 # integrator to check.
-_check_integrator_mandate(spec, ctx) := step if {
-	delegated(ctx)
-	integrator_mandated(spec, ctx)
-	step := _step("INTEGRATOR_NOT_REGISTERED", _mandate_label, _mandate_expected(spec, ctx), "pass")
-} else := step if {
-	delegated(ctx)
-	step := _step("INTEGRATOR_NOT_REGISTERED", _mandate_label, _mandate_expected(spec, ctx), "fail")
-} else := _step_skipped("INTEGRATOR_NOT_REGISTERED", _mandate_label, "n/a (direct call)")
+_check_integrator_mandate(spec, ctx) := _axis(
+	{"code": "INTEGRATOR_NOT_REGISTERED", "label": _mandate_label, "expected": _mandate_expected(spec, ctx), "skipped": "n/a (direct call)"},
+	delegated(ctx),
+	integrator_mandated(spec, ctx),
+)
 
 _mandate_label := "Integrator registered for represented party and rule"
 
 _mandate_expected(spec, ctx) := sprintf("%q active, acting for %q in %s", [acting_party(ctx), represented_party(ctx), spec.rule_id])
+
+default integrator_mandated(_, _) := false
 
 integrator_mandated(spec, ctx) if {
 	integrator := object.get(object.get(ctx, "pip", {}), "integrator", {})
@@ -436,7 +358,41 @@ _step(code, label, expected, status) := {
 
 _step_skipped(code, label, expected) := _step(code, label, expected, "skipped")
 
+# A step from a check: skipped when the rule does not declare it (active is
+# false), otherwise pass or fail on whether it holds. Both arguments are
+# true or false, never undefined: an undefined argument would drop the step.
+_axis(check, active, holds) := _step(check.code, check.label, check.expected, "pass") if {
+	active
+	holds
+} else := _step(object.get(check, "fail_code", check.code), check.label, check.expected, "fail") if {
+	active
+} else := _step_skipped(check.code, check.label, object.get(check, "skipped", "n/a"))
+
+# The year checks have a third outcome: no years in the query at all, which
+# fails closed (the source would return every year).
+_years_step(check, active, spec, ctx, missing) := _step_skipped(check.code, check.label, "not on this field") if {
+	active
+	not _years_apply(spec, ctx)
+} else := _step(check.code, check.label, sprintf("%d year(s) %s", [count(_requested_years(spec, ctx)), check.passed]), "pass") if {
+	active
+	count(_requested_years(spec, ctx)) > 0
+	count(missing) == 0
+} else := _step(check.code, check.label, sprintf(check.missing, [missing[0]]), "fail") if {
+	active
+	count(_requested_years(spec, ctx)) > 0
+} else := _step(check.code, check.label, "belastingjaren filter present in query", "fail") if {
+	active
+} else := _step_skipped(check.code, check.label, check.skipped)
+
+_flag(spec, name) := object.get(spec, name, false) == true
+
+_consent(ctx, name, default_value) := object.get(ctx, ["pip", "consent", name], default_value)
+
+_scope(ctx) := object.get(object.get(ctx, "resource", {}), "scope", "")
+
 # ── Consent-scope-check ──────────────────────────────────────────────────────
+
+default consent_covers_scope(_) := false
 
 consent_covers_scope(ctx) if {
 	some s in ctx.pip.consent.granted_scopes
@@ -500,6 +456,8 @@ argument(binding, ctx) := entry.value if {
 
 # ── Validity window ──────────────────────────────────────────────────────────
 
+default within_validity_window(_) := false
+
 within_validity_window(ctx) if {
 	now_ns := _now_ns(ctx)
 	end_ns := time.parse_rfc3339_ns(ctx.pip.consent.valid_until)
@@ -512,15 +470,11 @@ _now_ns(ctx) := time.now_ns() if {
 	not ctx.time
 } else := time.now_ns() if ctx.time == ""
 
-_check_consent_context_valid(spec, ctx) := step if {
-	spec.consent_context_required
-	ctx.pip.consent.context_valid == true
-	step := _step("CONSENT_CONTEXT_INVALID", "Signed consent context valid", "signature, issuer, audience and time claims valid", "pass")
-} else := step if {
-	spec.consent_context_required
-	not ctx.pip.consent.context_valid == true
-	step := _step(_context_invalid_code(ctx), "Signed consent context valid", "signature, issuer, audience and time claims valid", "fail")
-} else := _step_skipped("CONSENT_CONTEXT_INVALID", "Signed consent context valid", "n/a")
+_check_consent_context_valid(spec, ctx) := _axis(
+	{"code": "CONSENT_CONTEXT_INVALID", "fail_code": _context_invalid_code(ctx), "label": "Signed consent context valid", "expected": "signature, issuer, audience and time claims valid"},
+	_flag(spec, "consent_context_required"),
+	_consent(ctx, "context_valid", false) == true,
+)
 
 # Which check failed, when the consent PIP could tell: a forged, expired or
 # unverifiable token each deny with a reason of their own. Without one — no
@@ -531,12 +485,8 @@ _context_invalid_code(ctx) := code if {
 	code != ""
 } else := "CONSENT_CONTEXT_INVALID"
 
-_check_consent_status_available(spec, ctx) := step if {
-	spec.consent_status_required
-	ctx.pip.consent.status_available == true
-	step := _step("CONSENT_STATUS_UNAVAILABLE", "Consent status available", "online consent-register status check succeeded", "pass")
-} else := step if {
-	spec.consent_status_required
-	not ctx.pip.consent.status_available == true
-	step := _step("CONSENT_STATUS_UNAVAILABLE", "Consent status available", "online consent-register status check succeeded", "fail")
-} else := _step_skipped("CONSENT_STATUS_UNAVAILABLE", "Consent status available", "n/a")
+_check_consent_status_available(spec, ctx) := _axis(
+	{"code": "CONSENT_STATUS_UNAVAILABLE", "label": "Consent status available", "expected": "online consent-register status check succeeded"},
+	_flag(spec, "consent_status_required"),
+	_consent(ctx, "status_available", false) == true,
+)
