@@ -262,23 +262,25 @@ type Buitenlandsadres implements Adres {
   land: CodelijstISO3166!
 }
 
+# Only the deceased's names and date of death are always present; the
+# source returns null for any other field a record lacks.
 type AkteVanOverlijden {
   overledene_geslachtsnaam: String!
-  overledene_voorvoegsel: String!
+  overledene_voorvoegsel: String
   overledene_voornamen: String!
-  overledene_geboortedatum: String!
-  overledene_geboorteplaats: String!
-  overledene_geboorteland: String!
-  overledene_geslacht: String!
-  overledene_ouders: String!
+  overledene_geboortedatum: String
+  overledene_geboorteplaats: String
+  overledene_geboorteland: String
+  overledene_geslacht: String
+  overledene_ouders: String
   datum_overlijden: String!
-  plaats_overlijden: String!
-  land_overlijden: String!
-  soort_verbintenis: String!
-  echtgenoot_geslachtsnaam: String!
-  echtgenoot_voorvoegsel: String!
-  echtgenoot_voornamen: String!
-  verklaring_tekst: String!
+  plaats_overlijden: String
+  land_overlijden: String
+  soort_verbintenis: String
+  echtgenoot_geslachtsnaam: String
+  echtgenoot_voorvoegsel: String
+  echtgenoot_voornamen: String
+  verklaring_tekst: String
 }
 
 type Query {
