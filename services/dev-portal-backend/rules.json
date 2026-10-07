@@ -31,7 +31,6 @@
           ]
         }
       ],
-      "pip": null,
       "rule_id": "DVT0001",
       "years_argument": {
         "arg": "belastingjaren",
@@ -81,7 +80,6 @@
       "consent_must_cover_scope": false,
       "consent_required": false,
       "pid_required": true,
-      "pip": null,
       "rule_id": "EUD0001",
       "subject_argument": {
         "arg": "bsn",
@@ -130,7 +128,6 @@
       "consent_must_cover_scope": false,
       "consent_required": false,
       "pid_required": true,
-      "pip": null,
       "rule_id": "EUD0002",
       "subject_argument": {
         "arg": "bsn",
@@ -164,7 +161,6 @@
           ]
         }
       ],
-      "pip": null,
       "rule_id": "LVG0001",
       "years_in_scopes": false
     }

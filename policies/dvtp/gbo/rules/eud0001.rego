@@ -70,5 +70,4 @@ spec := {
 	"years_argument": {"field": "IngeschrevenPersoon.heeftBelastingjaarAangifte", "arg": "belastingjaren"},
 	"allowed_actors": allowed_actors,
 	"years_in_scopes": false,
-	"pip": null,
 }

@@ -99,7 +99,6 @@ _rule_meta[rid] := meta if {
 	meta := {
 		"covers_types": object.get(m, "covers_types", set()),
 		"covers_fields": object.get(m, "covers_fields", set()),
-		"has_pip": object.get(m.spec, "pip", null) != null,
 		"spec": m.spec,
 	}
 }
@@ -245,11 +244,7 @@ _outcomes[i][rid] := _eval(rid, f.record) if {
 	some rid in f.policy_ids
 }
 
-# ── Per-field evaluation: cheap-first, short-circuit, lazy PIP ───────────────
-
-_cheap(policy_ids) := [r | some r in policy_ids; not _rule_meta[r].has_pip]
-
-_pip(policy_ids) := [r | some r in policy_ids; _rule_meta[r].has_pip]
+# ── Per-field evaluation: the first bound rule that allows grants ────────────
 
 _decide(f) := {"decision": false, "context": {"reason_admin": {"code": "NO_APPLICABLE_RULE", "evaluated": []}}} if {
 	count(f.policy_ids) == 0
@@ -260,23 +255,9 @@ _decide(f) := _evaluate_field(f.policy_ids, _outcomes[f.index]) if {
 }
 
 _evaluate_field(policy_ids, outcome) := result if {
-	cheap := _cheap(policy_ids)
-	allow_idxs := [i |
-		some i in numbers.range(0, count(cheap) - 1)
-		outcome[cheap[i]].decision == true
-	]
-	count(allow_idxs) > 0
-	first := min(allow_idxs)
-	rid := cheap[first]
-	result := {"decision": true, "context": {
-		"granted_by": rid,
-		"granted_steps": _outcome_steps(outcome[rid]),
-	}}
-} else := result if {
-	pip := _pip(policy_ids)
-	count(pip) >= 1
-	outcome[pip[0]].decision == true
-	rid := pip[0]
+	allowing := [rid | some rid in policy_ids; outcome[rid].decision == true]
+	count(allowing) > 0
+	rid := allowing[0]
 	result := {"decision": true, "context": {
 		"granted_by": rid,
 		"granted_steps": _outcome_steps(outcome[rid]),
@@ -285,14 +266,12 @@ _evaluate_field(policy_ids, outcome) := result if {
 	# No rule allowed: aggregate reason_admin with the worst code and
 	# carry per-rule steps so the UI can show the cascade-trace (pass/
 	# fail/skipped per axis) for each evaluated rule.
-	cheap := _cheap(policy_ids)
-	pip := _pip(policy_ids)
 	evaluated := [{
 		"rule": r,
 		"code": _outcome_code(outcome[r]),
 		"steps": _outcome_steps(outcome[r]),
 	} |
-		some r in array.concat(cheap, pip)
+		some r in policy_ids
 	]
 	result := {
 		"decision": false,
