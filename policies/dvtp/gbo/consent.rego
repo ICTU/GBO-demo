@@ -1,50 +1,20 @@
 package dvtp.gbo.consent
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Consent PIP: resolved by the policy, per evaluation (#330).
+# Consent PIP: verifies the citizen's consent token on the request and asks
+# the consent register whether that consent is still ACTIVE, while the policy
+# evaluates.
 #
-# FTV places attribute retrieval inside the PDP — L4, step 3 of the request
-# flow: the PDP asks its PIP while it decides. This package is that step for
-# the citizen's consent. It reads the signed consent token off the request,
-# verifies it against the consent register's JWKS, and asks the register
-# whether the consent the token names is still ACTIVE.
+# The status is fetched with http.send on every evaluation, not through
+# OpenFTV's network PIP, which refreshes on an interval: a revoked consent
+# must deny on the very next request. It is asked over FSC through this PDP's
+# Outway, so the register answers only a peer the Inway authenticated. The
+# JWKS is public and fetched from the register directly.
 #
-# The status call is why this is http.send and not OpenFTV's configured
-# network PIP: that PIP is a loader on a refresh interval, and a revoked
-# consent must deny on the first request after revocation. The status
-# request therefore carries no cache directive. OPA does cache identical
-# calls within one evaluation, so evaluating many fields costs one call.
+# No failure leaves `resolved` undefined: every http.send has a timeout and
+# raise_error false, and every outcome maps to a reason code.
 #
-# No failure leaves a rule undefined. Every http.send runs with an explicit
-# timeout and raise_error false, and every outcome maps onto the pip.consent
-# shape lib.rego's cascade reads. A token that does not verify carries
-# invalid_code, which the cascade reports as the deny reason:
-#
-#   CONSENT_KEYS_UNAVAILABLE   the register's JWKS could not be fetched
-#   CONSENT_SIGNATURE_INVALID  not a JWT, not ES256, unknown key, bad signature
-#   CONSENT_TOKEN_EXPIRED      exp has passed, beyond the clock-skew leeway
-#   CONSENT_CONTEXT_INVALID    any other claim: typ, iss, aud, nbf, iat,
-#                              required claims, valid_until != exp
-#
-# The status is only asked for once the token verified, so a forged token
-# never reaches the register, and never creates a Dataverwerking there.
-#
-# The keys and the status travel differently (#383). The JWKS is public and
-# fetched from the register directly. The status is asked over FSC: through
-# this PDP's Outway, under the grant-link for the register's consent-status
-# service, and the register answers only a peer the Inway authenticated.
-#
-# Configuration is the operator's: GBO_CONSENT_URL (the register, for the
-# JWKS), GBO_CONSENT_STATUS_URL (the Outway's grant-link), GBO_CONSENT_ISSUER
-# and GBO_CONSENT_AUDIENCE from the PDP's environment, defaulting to the demo
-# deployment.
-#
-# The cost, weighed in #330: a decision is no longer a pure function of
-# (input, policy, data). What the register answered is not in input, so the
-# decision log cannot show it — the engine puts the resolved consent back
-# into its response document for that reason. Replaying a decision record
-# would need OPA's nd_builtin_cache in the log, which OpenFTV does not enable.
-# ═══════════════════════════════════════════════════════════════════════════
+# What the register answered is not in input, so the decision log cannot show
+# it; the engine copies the resolved consent into its response for that reason.
 
 _token_type := "gbo-consent+jwt"
 
@@ -52,7 +22,7 @@ _clock_skew_ns := 30 * 1000000000
 
 _timeout := "2s"
 
-# Verification keys may be cached; a key is not a status. See _jwks.
+# Keys may be cached; a status may not.
 _jwks_cache_seconds := 300
 
 _env := object.get(opa.runtime(), "env", {})
@@ -63,6 +33,7 @@ _setting(name, fallback) := value if {
 	value != ""
 } else := fallback
 
+# From the PDP's environment, defaulting to the demo deployment.
 config := {
 	"url": _setting("GBO_CONSENT_URL", "http://consent-register:4002"),
 	"status_url": _setting("GBO_CONSENT_STATUS_URL", "http://pdp-outway:8080/consent-status"),
@@ -71,8 +42,8 @@ config := {
 }
 
 # ── The token ───────────────────────────────────────────────────────────────
-# X-GBO-Consent-Token, in whatever case the PEP forwarded the header name.
-# More than one value is not resolved by picking one.
+# X-GBO-Consent-Token, in any header-name case. Two tokens are rejected, not
+# resolved by picking one: which consent was judged would be ambiguous.
 
 _token_values contains value if {
 	some name, value in object.get(input.context, "headers", {})
@@ -81,9 +52,8 @@ _token_values contains value if {
 	value != ""
 }
 
-# Whether the request carries consent evidence at all. Without a token,
-# `resolved` is undefined: the request is not under the consent regime, and
-# pip.consent stays absent.
+# Without a token the request is not under the consent regime and `resolved`
+# stays undefined.
 present if count(_token_values) > 0
 
 token := t if {
@@ -98,10 +68,9 @@ _header := _decoded[0]
 _claims := _decoded[1]
 
 # ── Verification keys ──────────────────────────────────────────────────────
-# The register's JWKS, cached for _jwks_cache_seconds. A kid the cached set
-# does not know bypasses the cache, so a rotated key is picked up on first
-# sight. There is no stale fallback during an outage: the register that
-# serves the keys also answers the status, so an outage denies regardless.
+# An unknown kid bypasses the cache, so a rotated key is picked up at once.
+# No stale fallback: the register that serves the keys also answers the
+# status, so an outage denies anyway.
 
 _jwks_request := {
 	"method": "GET",
@@ -125,8 +94,7 @@ _keys_available if {
 	is_array(_jwks.body.keys)
 }
 
-# The key the token names. Only ES256 on P-256 is accepted, whatever else
-# the set carries.
+# The key the token names; only ES256 on P-256 is accepted.
 _key(jwks, kid) := keys[0] if {
 	keys := [k |
 		some k in jwks.keys
@@ -183,10 +151,9 @@ _required_claims_present if {
 	}
 	is_array(_claims.scopes)
 
-	# The subject, as encrypted values per party: a pseudonym for every
-	# party, and an identity for a party that may receive the BSN. The policy
-	# does not read the values; a token without any could never be answered
-	# by a source.
+	# Encrypted subject per party: always a pseudonym, plus an identity for a
+	# party that may receive the BSN. The policy does not read them, but a
+	# token without any could never be answered by a source.
 	is_object(_claims.encrypted_subject)
 	count(_claims.encrypted_subject) > 0
 	every _, party in _claims.encrypted_subject {
@@ -200,8 +167,9 @@ _required_claims_present if {
 _valid_until_matches_exp if time.parse_rfc3339_ns(_claims.valid_until) == _ns(_claims.exp)
 
 # ── Verification outcome ───────────────────────────────────────────────────
-# Signature before claims: the claims of a token that does not verify are
-# not the register's, so they are not reasons.
+# Signature before claims: the claims of an unverified token are not the
+# register's, so they are not reasons. The status is asked only after this
+# passes, so a forged token never reaches the register.
 
 _verification := _failure("CONSENT_CONTEXT_INVALID", "more than one consent token") if {
 	not token
@@ -220,14 +188,9 @@ _verification := _failure("CONSENT_CONTEXT_INVALID", "more than one consent toke
 _failure(code, reason) := {"code": code, "reason": reason}
 
 # ── Status ──────────────────────────────────────────────────────────────────
-# Asked on every evaluation, uncached. Confirming a status is itself a
-# Dataverwerking the register logs, so the request carries the trace it
-# belongs to (#365, LDV §3.1): a traceparent with the request's trace and a
-# span of its own for this lookup, under which the register files its record,
-# and the transaction id alongside for the logs that key on it. Without them
-# the record lands under a trace of its own — outside the request it was part
-# of.
-
+# Uncached. The register logs each lookup as a Dataverwerking, so the request
+# carries the caller's trace (with a span of its own) and transaction id;
+# otherwise that record would land outside the request it belongs to.
 _status_request := {
 	"method": "GET",
 	"url": sprintf("%s/consents/%s/status", [config.status_url, urlquery.encode(_claims.consent_id)]),
@@ -240,8 +203,8 @@ _transaction_header := {"Fsc-Transaction-Id": _transaction_id} if {
 	_transaction_id
 } else := {}
 
-# The FSC transaction id, from the request headers the Inway forwards, and
-# otherwise X-Request-ID. More than one value is not resolved by picking one.
+# The FSC transaction id, else X-Request-ID. Two values are not resolved by
+# picking one.
 _transaction_id := tx if {
 	values := _header_values("fsc-transaction-id")
 	count(values) == 1
@@ -263,9 +226,9 @@ _traceparent_header := {"traceparent": sprintf("00-%s-%s-01", [_trace_id, _looku
 	_trace_id
 } else := {}
 
-# The request's trace: the caller's traceparent, and otherwise the
-# transaction id, which the chain's entry ties its trace to. Undefined when
-# neither yields a valid trace id; a malformed traceparent is worse than none.
+# The caller's traceparent, else the transaction id (the chain's entry ties
+# its trace to it). Undefined when neither is valid: a malformed traceparent
+# is worse than none.
 _trace_id := id if {
 	tp := _incoming_traceparent
 	count(tp) >= 55
@@ -278,8 +241,8 @@ _trace_id := id if {
 	_valid_trace_id(id)
 }
 
-# The Inway copies the caller's traceparent into the AuthZEN context with the
-# rest of the headers; OpenFTV's own PEP lifts it into context.traceparent.
+# The Inway passes it among the headers; OpenFTV's own PEP puts it in
+# context.traceparent.
 _incoming_traceparent := values[0] if {
 	values := [v |
 		some name, v in object.get(input.context, "headers", {})
@@ -292,23 +255,21 @@ _incoming_traceparent := values[0] if {
 	is_string(tp)
 }
 
-# 32 lowercase hex characters, and not the all-zero id W3C Trace Context
-# declares invalid.
+# 32 lowercase hex characters, not all zero (invalid in W3C Trace Context).
 _valid_trace_id(id) if {
 	regex.match(`^[0-9a-f]{32}$`, id)
 	id != "00000000000000000000000000000000"
 }
 
-# A fresh span for the lookup: 16 hex characters of a random UUID.
-# uuid.rfc4122 is random per evaluation; the argument only names the value.
+# A fresh span id; uuid.rfc4122 is random per evaluation, the argument only
+# names the value.
 _lookup_span := substring(replace(uuid.rfc4122("consent-status-span"), "-", ""), 0, 16)
 
 _status_response := http.send(_status_request)
 
-# ACTIVE and REVOKED are the only statuses with a meaning here. Anything
-# else — a mismatched consent_id, a timeout, a register error — leaves the
-# status unavailable, which denies (CONSENT_STATUS_UNAVAILABLE). A 404 is an
-# answer: the register does not know the consent (CONSENT_NOT_FOUND).
+# Only ACTIVE and REVOKED count as answers, and a 404 means the register does
+# not know the consent. Anything else (a mismatched consent_id, a timeout, an
+# error) makes the status unavailable, which denies.
 _status := {"available": true, "exists": true, "withdrawn": status == "REVOKED"} if {
 	_status_response.status_code == 200
 	_status_response.body.consent_id == _claims.consent_id
@@ -319,6 +280,7 @@ _status := {"available": true, "exists": true, "withdrawn": status == "REVOKED"}
 } else := {"available": false, "exists": false, "withdrawn": false}
 
 # ── pip.consent ─────────────────────────────────────────────────────────────
+# The shape the rule cascade reads; invalid_code becomes the deny reason.
 
 resolved := {
 	"context_valid": false,

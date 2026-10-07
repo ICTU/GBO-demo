@@ -4,18 +4,12 @@ import data.dvtp.gbo
 import data.dvtp.gbo.fixtures_test as fx
 
 # ═══════════════════════════════════════════════════════════════════════════
-# The decision vectors of Appendix A of the FTV GraphQL profile (draft-01),
-# run against the engine with the appendix's own rule r-0001 in place of
-# the GBO rules, on the appendix's fictional schema. The mapper output of
-# each vector is the one the mapper's tests check
-# (services/ftv-graphql-mapper/vectors_test.go).
+# The decision vectors of the FTV GraphQL profile's Appendix A (draft-01),
+# run with the appendix's rule r-0001 on its fictional schema. Each vector's
+# mapper output is the one services/ftv-graphql-mapper/vectors_test.go checks.
 #
-# r-0001 covers the keys and types the appendix lists. Of its conditions,
-# "every year at most 2024" on Persoon.inkomens is the engine's year check;
-# the other two (a consented bsn, a peildatum present) have no GBO check,
-# so the vectors that turn on them are not here. Per-field codes are the
-# GBO codes, not the appendix's reference codes: the top-level code of the
-# profile arrives with the decision context.
+# Vectors that turn on a consented bsn or a peildatum are left out: GBO has
+# no such check. Field codes are GBO's, not the appendix's reference codes.
 # ═══════════════════════════════════════════════════════════════════════════
 
 _digest := "sha256:appendix-a"
@@ -159,8 +153,7 @@ test_a32_union_with_typename_only_denies_the_root if {
 	_denied(result) == [[0, "Query.zoek", "NO_APPLICABLE_RULE"]]
 }
 
-# A root field is bound by its key only: a rule bound through Query does
-# not cover it.
+# A root field binds by its key only, even when a rule covers Query.
 test_a33_root_leaf_never_inherits if {
 	through_query := object.union(_r0001, {"covers_types": _r0001.covers_types | {"Query"}})
 	result := _decide_output(_output([_rec(["aantalPersonen"], "Query", "aantalPersonen", true)]), {"r0001": through_query})
@@ -197,7 +190,7 @@ test_a39_interface_key_without_type_condition_allows if {
 	result.decision == true
 }
 
-# ── What the mapper could not verify, and a missing or foreign schema ────
+# ── Unverifiable requests and a missing or foreign schema ────────────────
 
 _failed(code, subcode) := object.union(_output([]), {"unverifiable": {"code": code, "subcode": subcode, "message": "test"}})
 

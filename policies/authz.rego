@@ -1,30 +1,11 @@
 package authz
 
-# Entry-point evaluated by the OpenFTV PDP at path /authz. OpenFTV reads two
-# keys from this package and nothing else: `allow` (bool) gates the
-# decision, and on DENY `reason` (string) becomes context.reason_user.en in
-# the AuthZEN response.
+# Entry point evaluated by the OpenFTV PDP at /authz.
 #
-# That response is what OpenFTV's Authorization Decision Log (ADL) records,
-# and the ADL is the authoritative audit record of an authorization
-# decision. So `reason` is the part of the decision detail that reaches the
-# audit record: the reason code of a denial. The FSC Inway also returns
-# reason_user to the caller in its 401, which is why `reason` is a code and
-# never carries data.
-#
-# `response` is the fuller document: granted[] and denied_fields[] per
-# field, with the deciding rule and its evaluation steps. OpenFTV does not
-# transport it. It appears only in the embedded OPA's console decision log,
-# which the developer portal reads from Loki as observability. It is not a
-# record of the decision, and nothing may depend on it as one.
-#
-# Input shape (OpenFTV AuthZEN mapping): {subject, action, resource,
-# context}. The FTV GraphQL mapper inside this image adds the field list of
-# a GraphQL request as input.resource.attributes.graphql, validated against
-# the schema of the FSC service in input.subject.attributes.service_name.
-# OpenFTV injects context.time. The consent is not in input:
-# data.dvtp.gbo.consent resolves it from the token in context.headers while
-# the policy evaluates.
+# Input follows the OpenFTV AuthZEN mapping: {subject, action, resource,
+# context}. For a GraphQL request the FTV mapper adds the requested fields as
+# input.resource.attributes.graphql. The consent is not in input:
+# data.dvtp.gbo.consent resolves it from the token in context.headers.
 
 import data.dvtp.gbo
 
@@ -58,6 +39,11 @@ else := gbo.response
 
 allow if response.decision
 
+# OpenFTV transports only `allow` and `reason`. On a deny, `reason` becomes
+# reason_user.en, which the authoritative decision log (ADL) records and the
+# FSC Inway returns to the caller, so it is a bare code that never carries
+# request data. The richer `response` reaches only the OPA console decision
+# log, which the developer portal reads; it is not a record of the decision.
 reason := response.context.reason_admin.code if {
 	not response.decision
 }

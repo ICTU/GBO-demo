@@ -5,16 +5,12 @@ import data.dvtp.gbo.lib
 import data.dvtp.gbo.rules.eud0001
 
 # ═══════════════════════════════════════════════════════════════════════════
-# EUD0001 axes — concrete query year + actor + PID.
-#
-# Tests run against lib.evaluate(spec, ctx) to isolate the check-axes from
-# the engine's field-binding. The spec is taken from the rule itself so
-# that allowed_years / allowed_actors come from a single source.
+# EUD0001 checks (year, actor, PID), through lib.evaluate with the rule's
+# own spec, apart from the engine.
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Minimal ctx-shape that all EUD0001-checks can handle, on the field that
-# carries the years. Overridden per test via object.union; _on puts the ctx
-# on another field.
+# A PID request on the field that carries the years. _on moves the ctx to
+# another field.
 _base_ctx := {
 	"subject": {"type": "org", "id": "00000004000000004000"},
 	"time": "2026-07-06T12:00:00Z",
@@ -43,7 +39,7 @@ test_allow_simulation_eudi_issuer if {
 	result.decision == true
 }
 
-# ── Direct year authorization ──────────────────────────────────────────
+# ── Years ──────────────────────────────────────────────────────────────
 
 test_deny_year_not_allowed if {
 	result := lib.evaluate(eud0001.spec, _on(fx.declarations(fx.literal([2023]))))
@@ -70,7 +66,7 @@ test_deny_year_from_a_schema_default if {
 	result.context.reason_admin.code == "YEAR_NOT_ALLOWED"
 }
 
-# ── Actor-authorization ─────────────────────────────────────────────────
+# ── Actor ───────────────────────────────────────────────────────────────
 
 test_deny_actor_not_in_allowed_actors if {
 	ctx := object.union(_base_ctx, {"subject": {"type": "org", "id": "00000001234567890000"}})
@@ -79,7 +75,7 @@ test_deny_actor_not_in_allowed_actors if {
 	result.context.reason_admin.code == "ACTOR_NOT_ALLOWED"
 }
 
-# ── PID-regime basis: no consent token, and a subject named ─────────────
+# ── PID regime: no consent token, and a subject named ───────────────────
 
 test_deny_pid_missing if {
 	result := lib.evaluate(eud0001.spec, _on(fx.person("")))
@@ -96,20 +92,17 @@ test_deny_placeholder_without_consent if {
 }
 
 test_deny_when_a_consent_token_was_presented if {
-	# A consent token puts the request under the consent regime, whether or
-	# not it verified; the PID-regime basis must then fail.
+	# Any consent token, verified or not, puts the request outside the PID
+	# regime.
 	ctx := object.union(_base_ctx, {"pip": {"consent": {"context_valid": false}}})
 	result := lib.evaluate(eud0001.spec, ctx)
 	result.decision == false
 	result.context.reason_admin.code == "PID_NOT_PRESENT"
 }
 
-# ── Axis activation is conditional on rule-declaration ─────────────────
-# Each policy-path must carry scope- and actor-authorization, but the
-# source per path differs. DVT0001 carries its scope-authorization via
-# consent-scope-cover (rule-owned source) and declares no allowed_scopes
-# — the scope-axis must then be silent, otherwise DVT0001 would break on
-# every request. Same pattern for actor.
+# ── Checks apply only when the rule declares them ──────────────────────
+# A rule without allowed_scopes or allowed_actors, such as DVT0001, must not
+# be denied by those checks.
 
 _rule_without_whitelists := {
 	"rule_id": "TEST_NO_WHITELISTS",

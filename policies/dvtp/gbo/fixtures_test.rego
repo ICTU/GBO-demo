@@ -1,10 +1,7 @@
 package dvtp.gbo.fixtures_test
 
-# The input of the policy tests: a GraphQL request as the FSC Inway hands it
-# to the PDP, with the field list the FTV GraphQL mapper adds (profile
-# Section 6.2). The records are what the mapper emits for the demo
-# consumers' queries against the bundled schemas, so a test reads like the
-# request it stands for.
+# Test input: a GraphQL request as the Inway hands it to the PDP, with the
+# field list the mapper adds (Section 6.2) for the demo consumers' queries.
 
 import data.dvtp.gbo.graphql_schemas
 
@@ -32,8 +29,7 @@ request_with(actor, service, output, headers) := {
 	"context": {"time": "2026-07-06T12:00:00Z", "headers": headers},
 }
 
-# The headers of a consent-based request, without the token: the tests that
-# need a consent stand one in for data.dvtp.gbo.consent.resolved.
+# Headers without a consent token; tests that need a consent stand one in.
 scope_headers(scope) := {"Content-Type": "application/json", "X-Gbo-Scope": scope}
 
 # ── Arguments ────────────────────────────────────────────────────────────

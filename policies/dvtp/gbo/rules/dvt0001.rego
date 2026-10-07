@@ -1,40 +1,23 @@
 package dvtp.gbo.rules.dvt0001
 
-# DVT0001 — Income data via consent.
+# DVT0001 — Income data under a citizen's consent.
 #
-# Self-contained rule for the GBO rule-engine: the rule itself carries its
-# scope (covers_types + covers_fields) and its evaluation criteria (spec).
-# The engine binds this rule to every requested field that falls within
-# scope and evaluates the spec via dvtp.gbo.lib.evaluate.
-#
-# Semantics: this rule grants a service provider (= consumer) access to
-# income-data fields IF a valid citizen consent exists for (consumer,
-# scope, fields), the consent is not withdrawn or expired, and the query
-# names its subject with the identity placeholder, so that the subject can
-# only be the one that signed consent carries.
+# Grants a service provider the income declaration fields when the citizen's
+# consent is valid, not withdrawn or expired, given to that provider, and
+# covers the scope and every requested year. The query names its subject with
+# the identity placeholder, so the subject can only be the consent's citizen.
 
 rule_id := "DVT0001"
 
-# Object-types whose SCALAR fields we cover (inheritance):
-# Bedrag (the amount object under verzamelinkomen/box*Inkomen) — all its
-# scalars (waarde, valuta) inherit coverage from this rule.
-# BelastingjaarAangifte/AangifteIH are NOT listed here: we declare their
-# covered fields explicitly in covers_fields, so that a field we
-# deliberately do NOT cover (e.g. box2Inkomen/box3Inkomen) is denied —
-# model C: the rule IS the catalog, no separate scope_fields table. The
-# reason is NO_APPLICABLE_RULE only when no other rule covers the field
-# either; box2Inkomen/box3Inkomen are covered by EUD0001, so a consent
-# request for them is denied with its PID_NOT_PRESENT.
+# Bedrag's scalars (waarde, valuta) are covered through their type. The
+# declaration types are listed field by field instead, so box2Inkomen and
+# box3Inkomen stay uncovered here; under consent EUD0001 denies them with
+# PID_NOT_PRESENT.
 covers_types := {"Bedrag"}
 
-# Explicitly covered fields: ALL object-edges, the root field + the scalars
-# this rule grants. Anything not listed here falls outside coverage → the
-# engine's closed-world default gives NO_APPLICABLE_RULE → DENY.
-#
-# Fields that live on the BelastingjaarAangifte interface are declared for
-# both the interface and the concrete AangifteIH: the resolved parent-type
-# depends on whether the query selects the field at interface level or
-# inside an `... on AangifteIH` fragment.
+# Anything not listed is denied by the engine's closed world. Interface fields
+# are listed for both BelastingjaarAangifte and AangifteIH: the parent type
+# depends on whether the query selects them inside `... on AangifteIH`.
 covers_fields := {
 	# the root field, which names the subject, and the object-edges
 	"Query.ingeschrevenPersoon",
@@ -50,8 +33,6 @@ covers_fields := {
 	"AangifteIH.indieningsdatum",
 }
 
-# Evaluation spec: which checks must hold for access. lib.evaluate runs
-# this cascade and returns the first failing DENY-reason.
 spec := {
 	"rule_id": "DVT0001",
 	"consent_required": true,
@@ -59,27 +40,17 @@ spec := {
 	"consent_status_required": true,
 	"consent_actor_binding": true,
 	"consent_must_cover_scope": true,
-	# Field-coverage now comes from covers_fields above (model C). A
-	# field we do not explicitly include → the engine's closed-world
-	# default denies with NO_APPLICABLE_RULE. No separate field-axis
-	# in lib anymore.
-	# The query names its subject with a placeholder in the root field's
-	# bsn argument: the service provider holds no identifier of the
-	# citizen. The subject is the one the verified consent token carries,
-	# and the source puts its own decrypted value in place after this
-	# allow. The income API takes a BSN, so only the identity placeholder
-	# is accepted. A literal value here would be a subject the caller
-	# chose, so it is denied. Each selection of the root field is checked
-	# on its own argument.
+	# The root field's bsn must be the identity placeholder: the provider
+	# holds no identifier of the citizen, and the source puts in the BSN from
+	# the verified consent token. A literal BSN would be a subject the caller
+	# chose, so it is denied. The income API takes a BSN, not a pseudonym.
 	"constraint_binding": [{
 		"field": "Query.ingeschrevenPersoon",
 		"arg": "bsn",
 		"placeholders": {"consent:identity"},
 	}],
-	# Per-year consent: every belastingjaar in the belastingjaren argument
-	# of heeftBelastingjaarAangifte must be covered by a bd:ib:<year>
-	# scope in the consent. A citizen who consents to 2025 but not 2024
-	# makes a query for both years fail with YEAR_NOT_COVERED.
+	# Every requested belastingjaar needs a bd:ib:<year> scope in the
+	# consent: a consent for 2025 only denies a query for 2024 and 2025.
 	"years_in_scopes": true,
 	"years_argument": {"field": "IngeschrevenPersoon.heeftBelastingjaarAangifte", "arg": "belastingjaren"},
 }

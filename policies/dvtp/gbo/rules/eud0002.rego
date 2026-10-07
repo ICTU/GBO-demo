@@ -1,35 +1,22 @@
 package dvtp.gbo.rules.eud0002
 
-# EUD0002 — Akte van overlijden via EUDI-wallet attestation.
+# EUD0002 — Akte van overlijden for an EUDI wallet attestation.
 #
-# Third policy-path, over the source-owned BRP attestation view. The
-# nabestaande discloses her PID; the source resolves the legally relevant
-# huwelijk and exposes only the fields that can enter the credential.
+# Grants a designated issuer the death certificate view of the BRP, in the
+# PID regime only. The surviving spouse discloses her PID; the source
+# resolves the relevant marriage and exposes only the fields that can enter
+# the credential. Its fields are disjoint from EUD0001's.
 #
-# Selection: like EUD0001 this rule fires in the PID regime rather than on
-# a declared flow; pid_required makes it fail closed outside it. The two
-# EUDI rules never compete for a field because their covers_fields are
-# disjoint.
+# The PDP sees the resolver and its flat output, not how the source picks the
+# marriage from her own persoonslijst. Picking the partner whose death ended
+# it is a security-sensitive source invariant, tested in the BRP service.
 #
-# Note on the data subject: the source-owned resolver is rooted at the
-# requester's own BSN (the disclosed PID) and selects a marriage from her own
-# persoonslijst. The PDP can constrain this resolver and its flat output
-# fields, but cannot inspect the underlying marriage walk. Correctly selecting
-# the partner whose death ended that marriage is therefore a security-sensitive
-# source invariant and is tested in the BRP service.
-#
-# Deliberately NOT in this V1 spec (same carve-outs as EUD0001):
-#   - PID-signature verification (adapter trusts BSN from disclosed PID)
-#   - Wallet-cert check
+# Not checked here: the PID signature and the wallet certificate.
 
 rule_id := "EUD0002"
 
-# No covers_types: unlike the BD path (Bedrag) there is no shared value-
-# object here whose scalars need type-level inheritance. Every field the
-# akte-query touches is declared explicitly below, so the engine's
-# closed-world default (NO_APPLICABLE_RULE) catches anything broader —
-# e.g. woontOp, heeftNationaliteit or gezag are BRP fields this rule
-# deliberately does NOT cover.
+# No shared value object here. Every field is listed, so other BRP fields
+# (woontOp, heeftNationaliteit, gezag) fall to the engine's closed world.
 covers_types := set()
 
 covers_fields := {"Query.akteVanOverlijden"} | {
@@ -43,16 +30,15 @@ sprintf("AkteVanOverlijden.%s", [field]) |
 	}
 }
 
-# Same designated EDI-issuers as EUD0001: the actor-whitelist is about who
-# may have an attestation issued at all, not about which bron it reads.
+# Same issuers as EUD0001: the list says who may issue attestations at all,
+# not which source they read.
 allowed_actors := {
 	"00000004000000004000",
 	"0000009961MINEZK0000",
 	"99999999900000000100",
 }
 
-# Evaluation spec: PID present + designated actor. The closed-world field set
-# is the authorization surface; no catalog scope is manufactured by GBO.
+# No scope or year check: the closed set of fields is what this rule grants.
 spec := {
 	"rule_id": "EUD0002",
 	"consent_required": false,

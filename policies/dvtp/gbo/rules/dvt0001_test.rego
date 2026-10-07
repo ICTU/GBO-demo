@@ -5,18 +5,14 @@ import data.dvtp.gbo.lib
 import data.dvtp.gbo.rules.dvt0001
 
 # ═══════════════════════════════════════════════════════════════════════════
-# DVT0001 axes — consent + constraint-binding.
-#
-# Tests run against lib.evaluate(spec, ctx) to isolate the check-axes from
-# the engine's field-binding. The spec is taken from the rule itself. The
-# ctx carries the record of one field: the consent axes hold on every field,
-# the subject binding on the root field and the year coverage on
-# heeftBelastingjaarAangifte, each with that field's own argument.
+# DVT0001 checks, through lib.evaluate with the rule's own spec, apart from
+# the engine. Each ctx is one field: the consent checks hold on every field,
+# the subject binding on the root field, the year check on
+# heeftBelastingjaarAangifte.
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Minimal ctx-shape that carries a valid consent, on the field whose year
-# filter the consent's scopes cover. Overridden per test via object.union;
-# _on puts the ctx on another field.
+# A valid consent, on the field whose year filter it covers. _on moves the
+# ctx to another field.
 _base_ctx := {
 	"subject": {"type": "org", "id": "99999999900000000300"},
 	"time": "2026-07-06T12:00:00Z",
@@ -72,8 +68,8 @@ test_deny_invalid_signed_context if {
 	result.context.reason_admin.code == "CONSENT_CONTEXT_INVALID"
 }
 
-# The trace stops at the first failing check: everything after it is
-# skipped, also when the very first check fails.
+# The portal trace stops at the first failure, also when it is the very
+# first check.
 test_checks_after_the_first_failure_are_skipped if {
 	ctx := object.union(_base_ctx, {"pip": {"consent": object.union(_base_ctx.pip.consent, {"context_valid": false})}})
 	steps := lib.evaluate(dvt0001.spec, ctx).context.reason_admin.steps
@@ -98,11 +94,8 @@ test_deny_fsc_actor_does_not_match_signed_recipient if {
 }
 
 # ── Delegated calls: an integrator acting for the service provider ──────
-# Over a DelegatedServiceConnection grant the integrator's peer connects
-# (subject.id) and the Inway names the service provider it connects for
-# (subject.attributes.outway_delegator_peer_id). The consent binds the
-# service provider; the integrator needs a mandate of its own, which the
-# engine supplies from the admission register as pip.integrator.
+# The consent binds the provider (the delegator); the integrator (subject.id)
+# needs its own mandate, supplied as pip.integrator.
 
 _integrator := "99999999900000001100"
 
@@ -177,9 +170,7 @@ test_deny_delegated_call_from_a_suspended_integrator if {
 	result.context.reason_admin.code == "INTEGRATOR_NOT_REGISTERED"
 }
 
-# The integrator is registered for the provider it names, but the consent
-# was given to another provider: the binding holds against the represented
-# party, so a mandate for one provider cannot spend another's consent.
+# A mandate for one provider cannot spend another provider's consent.
 test_deny_delegated_call_under_another_providers_consent if {
 	ctx := _delegated_ctx(_mandate)
 	other := object.union(ctx, {"pip": {"consent": object.union(_base_ctx.pip.consent, {"dienstverlener_oin": "99999999900000000999"})}})
@@ -188,9 +179,8 @@ test_deny_delegated_call_under_another_providers_consent if {
 	result.context.reason_admin.code == "CONSENT_ACTOR_MISMATCH"
 }
 
-# Nor can the integrator spend a consent given to itself on behalf of a
-# provider it names: the recipient must be the represented party, not the
-# peer that connects.
+# Nor can the integrator spend a consent given to itself: the recipient must
+# be the represented party, not the peer that connects.
 test_deny_delegated_call_under_a_consent_to_the_integrator if {
 	ctx := _delegated_ctx(_mandate)
 	own := object.union(ctx, {"pip": {"consent": object.union(_base_ctx.pip.consent, {"dienstverlener_oin": _integrator})}})
@@ -199,7 +189,7 @@ test_deny_delegated_call_under_a_consent_to_the_integrator if {
 	result.context.reason_admin.code == "CONSENT_ACTOR_MISMATCH"
 }
 
-# ── Consent-existence ───────────────────────────────────────────────────
+# ── Consent exists ──────────────────────────────────────────────────────
 
 test_deny_consent_not_found if {
 	ctx := object.union(_base_ctx, {"pip": {"consent": {"exists": false}}})
@@ -208,7 +198,7 @@ test_deny_consent_not_found if {
 	result.context.reason_admin.code == "CONSENT_NOT_FOUND"
 }
 
-# ── Consent-status ──────────────────────────────────────────────────────
+# ── Consent status ──────────────────────────────────────────────────────
 
 test_deny_consent_withdrawn if {
 	ctx := object.union(_base_ctx, {"pip": {"consent": object.union(_base_ctx.pip.consent, {"withdrawn": true})}})
@@ -224,7 +214,7 @@ test_deny_consent_expired if {
 	result.context.reason_admin.code == "CONSENT_EXPIRED"
 }
 
-# ── Scope-membership in consent ─────────────────────────────────────────
+# ── Scope in consent ────────────────────────────────────────────────────
 
 test_deny_scope_not_in_granted_scopes if {
 	ctx := object.union(_base_ctx, {
@@ -236,9 +226,8 @@ test_deny_scope_not_in_granted_scopes if {
 	result.context.reason_admin.code == "CONSENT_SCOPE_MISMATCH"
 }
 
-# ── Constraint-binding (the query-arg must be an accepted placeholder) ──
-# A literal value is a subject the caller chose; only a placeholder stands
-# for the subject of the consent, and only one the rule's API accepts.
+# ── Constraint binding: the subject must be an accepted placeholder ─────
+# A literal value is a subject the caller chose.
 
 test_deny_literal_subject if {
 	result := lib.evaluate(dvt0001.spec, _on_person("999991772"))
@@ -246,8 +235,7 @@ test_deny_literal_subject if {
 	result.context.reason_admin.code == "CONSTRAINT_MISMATCH"
 }
 
-# The income API takes a BSN. A query asking for the source's pseudonym is
-# stopped here, before the source.
+# The income API takes a BSN; a pseudonym is stopped before the source.
 test_deny_pseudonym_placeholder if {
 	result := lib.evaluate(dvt0001.spec, _on_person("consent:pseudonym"))
 	result.decision == false
@@ -255,15 +243,14 @@ test_deny_pseudonym_placeholder if {
 	result.context.reason_admin.expected == `Query.ingeschrevenPersoon.bsn in ["consent:identity"]`
 }
 
-# The single placeholder of before is no placeholder any more.
+# consent:subject is not a placeholder, so it counts as a literal.
 test_deny_retired_placeholder if {
 	result := lib.evaluate(dvt0001.spec, _on_person("consent:subject"))
 	result.decision == false
 	result.context.reason_admin.code == "CONSTRAINT_MISMATCH"
 }
 
-# A rule whose API handles both forms lists both placeholders, and then
-# allows either.
+# A rule whose API takes both forms lists both placeholders.
 _both_spec := object.union(dvt0001.spec, {"constraint_binding": [{
 	"field": "Query.ingeschrevenPersoon",
 	"arg": "bsn",
@@ -292,7 +279,7 @@ test_deny_subject_from_a_schema_default if {
 	result.context.reason_admin.code == "CONSTRAINT_MISMATCH"
 }
 
-# ── Year-coverage (each requested year needs bd:ib:<year> in consent) ───
+# ── Years: each needs bd:ib:<year> in the consent ───────────────────────
 
 test_allow_multiple_years_all_consented if {
 	ctx := object.union(_on_years(fx.literal([2025, 2024])), {"pip": {"consent": object.union(_base_ctx.pip.consent, {"granted_scopes": ["bd:ib:2025", "bd:ib:2024"]})}})
@@ -308,8 +295,7 @@ test_deny_year_not_consented if {
 }
 
 test_deny_year_filter_missing if {
-	# No belastingjaren in the query — the bron would return all years,
-	# so per-year policy cannot hold: fail closed.
+	# Without a filter the source returns every year: fail closed.
 	result := lib.evaluate(dvt0001.spec, _on(fx.declarations_without_years))
 	result.decision == false
 	result.context.reason_admin.code == "YEAR_NOT_COVERED"
@@ -328,9 +314,8 @@ test_deny_years_with_an_explicit_null if {
 	result.context.reason_admin.code == "YEAR_NOT_COVERED"
 }
 
-# ── Year-coverage via a GraphQL list variable ──────────────────────────
-# The mapper coerces the argument to a list, whether the query wrote a
-# literal list, a variable, or a list with a variable in it.
+# ── Years from a GraphQL variable ──────────────────────────────────────
+# The mapper coerces a variable, or a list with one in it, to a list.
 
 test_allow_years_from_list_variable if {
 	result := lib.evaluate(dvt0001.spec, _on_years(fx.variable("jaren", [2025])))

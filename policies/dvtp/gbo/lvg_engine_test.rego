@@ -3,8 +3,8 @@ package dvtp.gbo_test
 import data.dvtp.gbo
 import data.dvtp.gbo.fixtures_test as fx
 
-# LVG0001 through the engine: the ownership-check fields of the LVG source
-# bind to it, and the two consent regimes do not open each other's fields.
+# LVG0001 through the engine. A BD consent does not open LVG fields, nor an
+# LVG consent BD fields.
 
 _lvg_ir := "99999999900000001000"
 
@@ -45,8 +45,7 @@ test_engine_denies_a_bd_consent_on_lvg_fields if {
 	result.context.reason_admin.code == "SCOPE_NOT_ALLOWED"
 }
 
-# Without a consent token no rule covers the LVG fields: LVG0001 needs a
-# consent, so the PID regime has nothing for them.
+# LVG0001 is a consent rule, so the PID regime has no rule for LVG fields.
 test_engine_has_no_rule_for_lvg_without_a_consent_token if {
 	result := gbo.response with input as fx.request(fx.eudi_issuer, "lvg", fx.ownership_fields("999991772"), {})
 	result.decision == false

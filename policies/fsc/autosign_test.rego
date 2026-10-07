@@ -136,9 +136,7 @@ test_service_publication_denied if {
 }
 
 # --- delegated connections -------------------------------------------
-# An integrator connects on behalf of a service provider. The contract names
-# the integrator, the provider and the source; the register says the
-# integrator may act for that provider.
+# An integrator connects for a service provider it is registered to act for.
 
 integrator := "0000009950INTEGR0000"
 
@@ -164,13 +162,11 @@ test_delegated_connection_for_unregistered_provider_denied if {
 	deny_reason_with(delegated_for([bd, edi, integrator]), with_integrator) == "DELEGATION_NOT_REGISTERED"
 }
 
-# Two ordinary participants, neither acting for the other.
 test_delegated_connection_between_unrelated_parties_denied if {
 	deny_reason_with(delegated_for([bd, hv, edi]), with_integrator) == "DELEGATION_NOT_REGISTERED"
 }
 
-# The integrator is admitted in its own right like any party: a suspended
-# one, or one without an entry, is refused before its mandate is read.
+# The integrator must be admitted in its own right; a mandate is not enough.
 test_delegated_connection_by_suspended_integrator_denied if {
 	suspended_integrator := object.union(with_integrator, {integrator: object.union(with_integrator[integrator], {"active": false})})
 	deny_reason_with(delegated_for([bd, hv, integrator]), suspended_integrator) == "PARTY_NOT_ACTIVE"
@@ -186,8 +182,7 @@ test_delegated_connection_for_suspended_provider_denied if {
 	deny_reason_with(delegated_for([bd, suspended, integrator]), for_suspended) == "PARTY_NOT_ACTIVE"
 }
 
-# Without grant data the direction is not visible here; the request policy
-# judges it per call. What admission can refuse is a third counterparty.
+# The direction is not visible here, but a third counterparty is refused.
 test_delegated_connection_with_extra_party_denied if {
 	deny_reason_with(delegated_for([bd, hv, edi, integrator]), with_integrator) == "DELEGATION_NOT_REGISTERED"
 }

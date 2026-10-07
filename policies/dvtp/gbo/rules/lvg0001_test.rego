@@ -5,11 +5,8 @@ import data.dvtp.gbo.lib
 import data.dvtp.gbo.rules.lvg0001
 
 # ═══════════════════════════════════════════════════════════════════════════
-# LVG0001 — the ownership check of the LVG/Installatie Register pilot.
-#
-# The axes run against lib.evaluate(spec, ctx). The engine cases, which bind
-# the rule through its covered fields, live in lvg_engine_test.rego: a test
-# package under rules/ would be walked by the engine itself.
+# LVG0001 checks, through lib.evaluate. The engine cases live in
+# lvg_engine_test.rego: the engine would walk a test package under rules/.
 # ═══════════════════════════════════════════════════════════════════════════
 
 _ir := "99999999900000001000"
@@ -42,8 +39,8 @@ test_allow_consented_ownership_check if {
 }
 
 test_deny_scope_other_than_lvg if {
-	# A consent for BD income data, sent with its own scope: it covers that
-	# scope, so only the rule's scope pin stops it on LVG fields.
+	# A BD consent sent with its own scope covers it; only the scope pin
+	# stops it on LVG fields.
 	ctx := object.union(_base_ctx, {
 		"resource": object.union(_base_ctx.resource, {"scope": "bd:ib:2025"}),
 		"pip": {"consent": object.union(_consent, {"granted_scopes": ["bd:ib:2025"]})},
