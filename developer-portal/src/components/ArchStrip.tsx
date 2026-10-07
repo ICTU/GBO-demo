@@ -16,10 +16,9 @@ type Props = {
   states: ArchStates
   apiCalls?: ApiCall[]
   traceId?: string
-  // useFscTxlog resolves the Fsc-Transaction-Id; the OpenFTV request-
-  // mapper copies it into context.trace_id, so useExplain finds the
-  // OpenFTV decision-log directly against it. (No PDP spans exist
-  // anymore — the OpenFTV PDP has no OTel instrumentation.)
+  // useFscTxlog resolves the Fsc-Transaction-Id; the backend finds the
+  // PDP's decision logs by that header in the request the PDP logged. (No
+  // PDP spans exist — the OpenFTV PDP has no OTel instrumentation.)
   pdpTraceIdOverride?: string
   // Bronprofiel of the run being shown (EUDI only) — decides which register
   // the last two nodes name. Derived from the trace, see bronForSpans.

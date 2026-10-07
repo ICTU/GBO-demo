@@ -35,8 +35,8 @@ export function useChain(consumer: Consumer = HYPOTHEEK_BV): NodeDef[] {
     { id: 'afnemer', role: 'Afnemer', name: consumer.name, svc: consumer.backendSvc },
     { id: 'outway', role: 'FSC', name: consumer.outwayName, svc: consumer.outwaySvc },
     { id: 'bd-inway', role: 'FSC', name: 'BD-Inway', svc: 'bd-inway' },
-    // PDP is the logical decision-unit (XACML): context-handler (P3,
-    // context-handler now runs inside the OpenFTV PDP as a request-mapper). The engine hangs as a
+    // PDP is the logical decision-unit (XACML); the FTV GraphQL profile
+    // mapper runs inside the OpenFTV PDP as a request-mapper. The engine hangs as a
     // branch under the PDP the same way PIP-services do at the PEP. The
     // PDP-node status reflects the DECISION outcome (override in ArchStrip);
     // the OPA branch shows engine-status.
