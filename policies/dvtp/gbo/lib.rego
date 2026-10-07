@@ -19,7 +19,6 @@ package dvtp.gbo.lib
 #     "subject":  { ...AuthZEN subject: id = the FSC peer that connects,
 #                   attributes.outway_delegator_peer_id = the peer it
 #                   connects for, on a delegated connection },
-#     "args":     { "vars.<name>": value, "input.<name>": value, ... },
 #     "time":     "<RFC3339>",
 #     "resource": { "scope": "...",
 #                   "subject_placeholders": {<placeholders that stand for
@@ -35,7 +34,9 @@ package dvtp.gbo.lib
 #                 (consent resolved by data.dvtp.gbo.consent; invalid_code
 #                  only when context_valid is false. integrator is the
 #                  acting peer's admission entry, on a delegated call only)
-#     "field":    "Query.<path>.<name>"
+#     "field":    { the mapper's record of the field under evaluation:
+#                   path, parentType, field, leaf, args (FTV GraphQL
+#                   profile, Section 6.2) }
 #   }
 #
 # evaluate(spec, ctx) returns:
@@ -61,15 +62,16 @@ pseudonym_placeholder := "consent:pseudonym"
 
 subject_placeholders := {identity_placeholder, pseudonym_placeholder}
 
-evaluate(spec, ctx) := result if {
-	steps := _steps_with_short_circuit(spec, ctx)
-	failing := [s | some s in steps; s.status == "fail"]
-	count(failing) == 0
-	result := {"decision": true, "context": {"steps": steps}}
+evaluate(spec, ctx) := _outcome(spec, _short_circuit(_raw_steps(spec, ctx)))
+
+# The steps are computed once per evaluation and passed on: a function
+# result is not cached, so recomputing them per branch doubles the work.
+_outcome(spec, steps) := {"decision": true, "context": {"steps": steps}} if {
+	every s in steps {
+		s.status != "fail"
+	}
 } else := result if {
-	steps := _steps_with_short_circuit(spec, ctx)
 	failing := [s | some s in steps; s.status == "fail"]
-	count(failing) > 0
 	first := failing[0]
 	result := {
 		"decision": false,
@@ -105,12 +107,11 @@ _raw_steps(spec, ctx) := [
 	_check_actor_allowed(spec, ctx),
 ]
 
-_steps_with_short_circuit(spec, ctx) := result if {
-	raw := _raw_steps(spec, ctx)
+_short_circuit(raw) := result if {
 	first_fail_idx := _first_fail_index(raw)
 	first_fail_idx >= 0
 	result := [_skip_after(raw[i], i, first_fail_idx) | some i in numbers.range(0, count(raw) - 1)]
-} else := _raw_steps(spec, ctx)
+} else := raw
 
 _first_fail_index(steps) := idx if {
 	some i in numbers.range(0, count(steps) - 1)
@@ -176,36 +177,43 @@ _check_consent_covers_scope(spec, ctx) := step if {
 } else := _step_skipped("CONSENT_SCOPE_MISMATCH", "Scope covered by consent", "n/a")
 
 _check_constraint(spec, ctx) := step if {
-	# All constraint-bindings must be satisfied (AND). For multi-binding
-	# we report the FIRST unsatisfied binding as the expected-string so
-	# that the error message stays specific. For ALL-pass we show the
-	# number of bindings that were verified.
-	bindings := object.get(spec, "constraint_binding", [])
+	# All constraint-bindings on this field must be satisfied (AND). For
+	# multi-binding we report the FIRST unsatisfied binding as the
+	# expected-string so that the error message stays specific. For
+	# ALL-pass we show the number of bindings that were verified.
+	bindings := _bound_constraints(spec, ctx)
 	count(bindings) > 0
 	failing := [fm | some fm in bindings; not constraint_binding_satisfied(fm, ctx)]
 	count(failing) == 0
 	step := _step("CONSTRAINT_MISMATCH", "Constraint-binding satisfied", sprintf("%d binding(s) satisfied", [count(bindings)]), "pass")
 } else := step if {
-	bindings := object.get(spec, "constraint_binding", [])
+	bindings := _bound_constraints(spec, ctx)
 	count(bindings) > 0
 	failing := [fm | some fm in bindings; not constraint_binding_satisfied(fm, ctx)]
 	count(failing) > 0
 	first := failing[0]
-	step := _step("CONSTRAINT_MISMATCH", "Constraint-binding satisfied", sprintf("%s in %v", [first.arg, sort(first.placeholders)]), "fail")
-} else := _step_skipped("CONSTRAINT_MISMATCH", "Constraint-binding satisfied", "no constraint configured")
+	step := _step("CONSTRAINT_MISMATCH", "Constraint-binding satisfied", sprintf("%s.%s in %v", [first.field, first.arg, sort(first.placeholders)]), "fail")
+} else := _step_skipped("CONSTRAINT_MISMATCH", "Constraint-binding satisfied", _constraint_skip_reason(spec))
+
+_bound_constraints(spec, ctx) := [fm | some fm in object.get(spec, "constraint_binding", []); bound_here(fm, ctx)]
+
+_constraint_skip_reason(spec) := "not on this field" if {
+	count(object.get(spec, "constraint_binding", [])) > 0
+} else := "no constraint configured"
 
 # PID regime: the request carries no consent token, and it names a subject.
 # The EUDI adapter sends the BSN from the wallet's PID disclosure as it is,
-# in the source-declared subject variable (`subject_variable` in the source
-# metadata, `vars.bsn` in the resolved arguments). In V1 nothing verifies
-# the PID itself — the adapter trusts the disclosure — so this axis asserts
-# only that the request is about someone and is not a consent request.
+# in the argument the rule names in `subject_argument` (the root field's
+# `bsn`). In V1 nothing verifies the PID itself — the adapter trusts the
+# disclosure — so this axis asserts only that the request is about someone
+# and is not a consent request.
 #
 # The consent half keeps the regimes apart. pip.consent is present exactly
 # when the request carried a consent token, verified or not, and both
 # regimes name a subject, so without it this axis would pass on every
-# consent-based request as well. A rule can name a different subject
-# variable with `subject_variable` in its spec.
+# consent-based request as well. It holds on every field. The subject half
+# is checked on the field that carries the argument; the other fields of
+# the request depend on that field, which the AND across fields requires.
 _check_pid_present(spec, ctx) := step if {
 	spec.pid_required
 	_pid_regime(spec, ctx)
@@ -218,13 +226,30 @@ _check_pid_present(spec, ctx) := step if {
 
 _pid_label := "PID regime: no consent token, subject named"
 
-_pid_subject_key(spec) := sprintf("vars.%s", [object.get(spec, "subject_variable", "bsn")])
-
-_pid_expected(spec) := sprintf("no input.context.pip.consent, and %s in the query", [_pid_subject_key(spec)])
+_pid_expected(spec) := sprintf("no consent token, and %s.%s named", [spec.subject_argument.field, spec.subject_argument.arg]) if {
+	spec.subject_argument
+} else := "no consent token, and a subject_argument declared by the rule"
 
 _pid_regime(spec, ctx) if {
 	object.get(object.get(ctx, "pip", {}), "consent", null) == null
-	object.get(object.get(ctx, "args", {}), _pid_subject_key(spec), "") != ""
+	_subject_named(spec, ctx)
+}
+
+# A placeholder names nobody here: it stands for the subject of a consent,
+# and in the PID regime there is none.
+_subject_named(spec, ctx) if {
+	bound_here(spec.subject_argument, ctx)
+	value := argument(spec.subject_argument, ctx)
+	is_string(value)
+	value != ""
+	not value in subject_placeholders
+}
+
+# On another field the subject is not this field's to name. A rule that
+# declares no subject_argument has no field that names one: it fails.
+_subject_named(spec, ctx) if {
+	spec.subject_argument
+	not bound_here(spec.subject_argument, ctx)
 }
 
 # Scope-authorization: only active when the rule explicitly declares an
@@ -250,10 +275,13 @@ _check_scope_allowed(spec, ctx) := step if {
 # Direct year authorization for source-owned EUDI queries. Unlike the DvTP
 # consent path this checks the actual GraphQL selector against a rule-owned
 # set; it does not manufacture or trust a GBO catalog scope.
-_check_years_allowed(spec, ctx) := step if {
+_check_years_allowed(spec, ctx) := _step_skipped("YEAR_NOT_ALLOWED", "Requested years allowed for rule", "not on this field") if {
+	count(object.get(spec, "allowed_years", set())) > 0
+	not _years_apply(spec, ctx)
+} else := step if {
 	allowed := object.get(spec, "allowed_years", set())
 	count(allowed) > 0
-	years := _requested_years(ctx)
+	years := _requested_years(spec, ctx)
 	count(years) > 0
 	allowed_text := {sprintf("%v", [year]) | some year in allowed}
 	disallowed := [y | some y in years; not sprintf("%v", [y]) in allowed_text]
@@ -262,7 +290,7 @@ _check_years_allowed(spec, ctx) := step if {
 } else := step if {
 	allowed := object.get(spec, "allowed_years", set())
 	count(allowed) > 0
-	years := _requested_years(ctx)
+	years := _requested_years(spec, ctx)
 	count(years) > 0
 	allowed_text := {sprintf("%v", [year]) | some year in allowed}
 	disallowed := [y | some y in years; not sprintf("%v", [y]) in allowed_text]
@@ -271,21 +299,24 @@ _check_years_allowed(spec, ctx) := step if {
 } else := step if {
 	allowed := object.get(spec, "allowed_years", set())
 	count(allowed) > 0
-	count(_requested_years(ctx)) == 0
+	count(_requested_years(spec, ctx)) == 0
 	step := _step("YEAR_NOT_ALLOWED", "Requested years allowed for rule", "belastingjaren filter present in query", "fail")
 } else := _step_skipped("YEAR_NOT_ALLOWED", "Requested years allowed for rule", "no year-whitelist configured")
 
 # Year-coverage: only active when the rule sets years_in_scopes. Every
-# belastingjaar requested in the query (flattened args "belastingjaren.N")
-# must be covered by a scope of the form bd:ib:<year> in the available
+# belastingjaar requested in the query (the argument the rule names in
+# years_argument) must be covered by a scope of the form bd:ib:<year> in the available
 # scopes — the consent's granted_scopes (DvTP) or the rule's
 # allowed_scopes (EUDI). The BD bron-schema returns ALL aangiften for a
 # person, so per-year authorization is only enforceable when the year
 # selector travels inside the query; a missing filter therefore fails
 # closed.
-_check_years_in_scopes(spec, ctx) := step if {
+_check_years_in_scopes(spec, ctx) := _step_skipped("YEAR_NOT_COVERED", "Requested years covered by scopes", "not on this field") if {
 	spec.years_in_scopes
-	years := _requested_years(ctx)
+	not _years_apply(spec, ctx)
+} else := step if {
+	spec.years_in_scopes
+	years := _requested_years(spec, ctx)
 	count(years) > 0
 	scopes := _available_scopes(spec, ctx)
 	uncovered := [y | some y in years; not sprintf("bd:ib:%v", [y]) in scopes]
@@ -293,7 +324,7 @@ _check_years_in_scopes(spec, ctx) := step if {
 	step := _step("YEAR_NOT_COVERED", "Requested years covered by scopes", sprintf("%d year(s) covered", [count(years)]), "pass")
 } else := step if {
 	spec.years_in_scopes
-	years := _requested_years(ctx)
+	years := _requested_years(spec, ctx)
 	count(years) > 0
 	scopes := _available_scopes(spec, ctx)
 	uncovered := [y | some y in years; not sprintf("bd:ib:%v", [y]) in scopes]
@@ -301,7 +332,7 @@ _check_years_in_scopes(spec, ctx) := step if {
 	step := _step("YEAR_NOT_COVERED", "Requested years covered by scopes", sprintf("bd:ib:%v in scopes", [uncovered[0]]), "fail")
 } else := step if {
 	spec.years_in_scopes
-	count(_requested_years(ctx)) == 0
+	count(_requested_years(spec, ctx)) == 0
 	step := _step("YEAR_NOT_COVERED", "Requested years covered by scopes", "belastingjaren filter present in query", "fail")
 } else := _step_skipped("YEAR_NOT_COVERED", "Requested years covered by scopes", "n/a")
 
@@ -414,45 +445,28 @@ consent_covers_scope(ctx) if {
 
 # ── Constraint-binding-check ─────────────────────────────────────────────────
 
-# A binding names a query argument and the placeholders the rule's API
+# A binding names a field, its argument and the placeholders the rule's API
 # accepts in it. The argument must be one of those, and a placeholder only
 # counts while it stands for someone: without a verified consent the engine
 # leaves resource.subject_placeholders empty, and nothing matches.
 constraint_binding_satisfied(fm, ctx) if {
-	arg_value := ctx.args[fm.arg]
-	arg_value in fm.placeholders
-	arg_value in object.get(ctx.resource, "subject_placeholders", set())
+	value := argument(fm, ctx)
+	value in fm.placeholders
+	value in object.get(ctx.resource, "subject_placeholders", set())
 }
 
 # ── Year-coverage helpers ────────────────────────────────────────────────────
-# The requested belastingjaren reach the rules in two shapes, depending on
-# how the consumer wrote the query:
-#
-#   1. Literal list — `belastingjaren: [2024, 2025]`. The PDP's
-#      flattenValue walks the list and stores one arg per element:
-#      "belastingjaren.0", "belastingjaren.1" (values as strings).
-#   2. Variable — `belastingjaren: $jaren`. The resolved variable is
-#      stored whole under the un-suffixed key "belastingjaren", as an
-#      array (or a bare scalar for a single year).
-#
-# Both must be recognised: missing one would deny a perfectly valid query
-# with YEAR_NOT_COVERED. sprintf %v normalises string/number elements.
+# The requested belastingjaren are the value of the argument the rule names
+# in years_argument, on that field. The mapper coerced it to a list,
+# whether the query wrote a literal list, a variable, or one year. A rule
+# that checks years but names no argument applies everywhere and finds no
+# years: it fails closed rather than check nothing.
 
-_requested_years(ctx) := _flattened_years(ctx) | _variable_years(ctx)
+_years_apply(spec, ctx) if bound_here(spec.years_argument, ctx)
 
-_flattened_years(ctx) := {y |
-	some k, v in ctx.args
-	startswith(k, "belastingjaren.")
-	y := v
-}
+_years_apply(spec, ctx) if not spec.years_argument
 
-_variable_years(ctx) := {y | some y in ctx.args.belastingjaren} if {
-	is_array(ctx.args.belastingjaren)
-} else := {ctx.args.belastingjaren} if {
-	is_number(ctx.args.belastingjaren)
-} else := {ctx.args.belastingjaren} if {
-	is_string(ctx.args.belastingjaren)
-} else := set()
+_requested_years(spec, ctx) := {y | some y in argument(spec.years_argument, ctx)}
 
 # Scopes available to the flow: the consent's granted_scopes (DvTP) union
 # the rule's own allowed_scopes (EUDI). Exactly one of the two is non-empty
@@ -463,22 +477,25 @@ _available_scopes(spec, ctx) := scopes if {
 	scopes := {s | some s in consent_scopes} | {s | some s in rule_scopes}
 }
 
-# ── Field-in-consent-check ───────────────────────────────────────────────────
+# ── Arguments ────────────────────────────────────────────────────────────────
+# A check that reads a query argument is bound to the field that carries it:
+# `field` names the field key ("ParentType.field"), `arg` the argument. It
+# applies to that field's own record only, with that record's own value, so
+# two selections of the field are each judged on their own arguments (FTV
+# GraphQL profile, Section 9.4). On every other field it does not apply.
 
-field_in_consent(ctx) if {
-	leaf := last_segment(ctx.field)
-	some f in object.get(ctx.resource, "consented_fields", [])
-	f == leaf
-}
+field_key(field) := sprintf("%s.%s", [field.parentType, field.field])
 
-field_is_scalar_leaf(ctx) if {
-	some f in input.context.resolved.fields
-	f.id == ctx.field
-	f.scalar
-}
+bound_here(binding, ctx) if field_key(ctx.field) == binding.field
 
-last_segment(path) := segs[count(segs) - 1] if {
-	segs := split(path, ".")
+# The argument's value as the request supplied it. Undefined when the
+# argument is absent, or when its value came from a schema default in whole
+# or in part: the source executes its own default, which the bundled schema
+# need not match. A check that needs the value then fails.
+argument(binding, ctx) := entry.value if {
+	entry := ctx.field.args[binding.arg]
+	entry.origin != "schema-default"
+	not entry.schemaDefaults
 }
 
 # ── Validity window ──────────────────────────────────────────────────────────

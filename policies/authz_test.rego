@@ -1,6 +1,7 @@
 package authz_test
 
 import data.authz
+import data.dvtp.gbo.fixtures_test as fx
 
 # The metadata path is gated by subject, method and endpoint. No declared
 # property takes part, so the fixture carries none — every case below turns
@@ -43,23 +44,7 @@ test_source_metadata_wrong_path_denied if {
 # does not short-circuit it to allow. It carries no consent token and names
 # no subject, so the engine judges it a PID-regime request without a subject.
 test_graphql_request_from_metadata_peer_falls_through_to_engine if {
-	input_doc := {
-		"subject": {"id": "99999999900000000100", "type": "identity"},
-		"action": {"id": "POST", "type": "name"},
-		"resource": {"id": "/graphql", "type": "uri"},
-		"context": {
-			"pip": {},
-			"resolved": {
-				"fields": [{
-					"id": "aangifte.box1",
-					"parent": "AangifteIH",
-					"name": "box1Inkomen",
-					"scalar": false,
-				}],
-				"args": {},
-			},
-		},
-	}
+	input_doc := fx.income("99999999900000000100", "", [2024], {})
 	not authz.allow with input as input_doc
 	reason := authz.reason with input as input_doc
 	reason == "PID_NOT_PRESENT"
@@ -70,12 +55,7 @@ test_graphql_request_from_metadata_peer_falls_through_to_engine if {
 # Authorization Decision Log records. It must be the policy's own reason
 # code, not a summary of it.
 test_deny_reason_is_the_reason_admin_code if {
-	input_doc := {
-		"subject": {"id": "99999999900000000100", "type": "identity"},
-		"action": {"id": "POST", "type": "name"},
-		"resource": {"id": "/graphql", "type": "uri"},
-		"context": {"resolved": {"fields": [], "args": {}}},
-	}
+	input_doc := fx.request("99999999900000000100", "bri", [], {})
 	resp := authz.response with input as input_doc
 	not resp.decision
 	reason := authz.reason with input as input_doc

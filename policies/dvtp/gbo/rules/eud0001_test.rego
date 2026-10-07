@@ -1,5 +1,6 @@
 package dvtp.gbo.rules.eud0001_test
 
+import data.dvtp.gbo.fixtures_test as fx
 import data.dvtp.gbo.lib
 import data.dvtp.gbo.rules.eud0001
 
@@ -11,21 +12,28 @@ import data.dvtp.gbo.rules.eud0001
 # that allowed_years / allowed_actors come from a single source.
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Minimal ctx-shape that all EUD0001-checks can handle. Overridden per
-# test via object.union.
+# Minimal ctx-shape that all EUD0001-checks can handle, on the field that
+# carries the years. Overridden per test via object.union; _on puts the ctx
+# on another field.
 _base_ctx := {
 	"subject": {"type": "org", "id": "00000004000000004000"},
-	"args": {"vars.bsn": "999991772", "belastingjaren.0": "2025"},
 	"time": "2026-07-06T12:00:00Z",
 	"resource": {"scope": ""},
 	"pip": {},
-	"field": "Query.ingeschrevenPersoon.heeftBelastingjaarAangifte",
+	"field": fx.declarations(fx.literal([2025])),
 }
+
+_on(field) := object.union(object.remove(_base_ctx, ["field"]), {"field": field})
 
 # ── Happy path ──────────────────────────────────────────────────────────
 
 test_allow_valid_actor_year_pid if {
 	result := lib.evaluate(eud0001.spec, _base_ctx)
+	result.decision == true
+}
+
+test_allow_on_the_root_field_naming_the_subject if {
+	result := lib.evaluate(eud0001.spec, _on(fx.person("999991772")))
 	result.decision == true
 }
 
@@ -38,22 +46,26 @@ test_allow_simulation_eudi_issuer if {
 # ── Direct year authorization ──────────────────────────────────────────
 
 test_deny_year_not_allowed if {
-	ctx := object.union(_base_ctx, {"args": {"belastingjaren.0": "2023"}})
-	result := lib.evaluate(eud0001.spec, ctx)
+	result := lib.evaluate(eud0001.spec, _on(fx.declarations(fx.literal([2023]))))
 	result.decision == false
 	result.context.reason_admin.code == "YEAR_NOT_ALLOWED"
 }
 
-test_deny_non_numeric_year if {
-	ctx := object.union(_base_ctx, {"args": {"belastingjaren.0": "2023x"}})
-	result := lib.evaluate(eud0001.spec, ctx)
-	result.decision == false
-	result.context.reason_admin.code == "YEAR_NOT_ALLOWED"
+# The EUDI query writes the year as a variable in a list.
+test_allow_year_from_a_variable_in_a_list if {
+	mixed := {"value": [2024], "origin": "mixed", "variables": ["jaar"]}
+	result := lib.evaluate(eud0001.spec, _on(fx.declarations(mixed)))
+	result.decision == true
 }
 
 test_deny_year_missing if {
-	ctx := object.union(object.remove(_base_ctx, ["args"]), {"args": {"vars.bsn": "999991772"}})
-	result := lib.evaluate(eud0001.spec, ctx)
+	result := lib.evaluate(eud0001.spec, _on(fx.declarations_without_years))
+	result.decision == false
+	result.context.reason_admin.code == "YEAR_NOT_ALLOWED"
+}
+
+test_deny_year_from_a_schema_default if {
+	result := lib.evaluate(eud0001.spec, _on(fx.declarations(fx.schema_default([2025]))))
 	result.decision == false
 	result.context.reason_admin.code == "YEAR_NOT_ALLOWED"
 }
@@ -70,11 +82,17 @@ test_deny_actor_not_in_allowed_actors if {
 # ── PID-regime basis: no consent token, and a subject named ─────────────
 
 test_deny_pid_missing if {
-	# object.union is deep-merged; explicit empty bsn instead of pip=={}.
-	ctx := object.union(_base_ctx, {"args": {"vars.bsn": ""}})
-	result := lib.evaluate(eud0001.spec, ctx)
+	result := lib.evaluate(eud0001.spec, _on(fx.person("")))
 	result.decision == false
 	result.context.reason_admin.code == "PID_NOT_PRESENT"
+}
+
+test_deny_placeholder_without_consent if {
+	every placeholder in ["consent:identity", "consent:pseudonym"] {
+		result := lib.evaluate(eud0001.spec, _on(fx.person(placeholder)))
+		result.decision == false
+		result.context.reason_admin.code == "PID_NOT_PRESENT"
+	}
 }
 
 test_deny_when_a_consent_token_was_presented if {
@@ -98,7 +116,26 @@ _rule_without_whitelists := {
 	"consent_required": false,
 	"consent_must_cover_scope": false,
 	"pid_required": true,
+	"subject_argument": {"field": "Query.ingeschrevenPersoon", "arg": "bsn"},
 	"pip": null,
+}
+
+# A PID rule that names no argument for the subject has no field that names
+# one: it fails closed rather than skip the subject.
+test_pid_rule_without_subject_argument_fails_closed if {
+	spec := object.remove(_rule_without_whitelists, ["subject_argument"])
+	every field in [fx.person("999991772"), fx.declarations(fx.literal([2025])), fx.year] {
+		result := lib.evaluate(spec, _on(field))
+		result.context.reason_admin.code == "PID_NOT_PRESENT"
+	}
+}
+
+# A year check that names no argument finds no years: it fails closed.
+test_year_rule_without_years_argument_fails_closed if {
+	spec := object.remove(eud0001.spec, ["years_argument"])
+	result := lib.evaluate(spec, _base_ctx)
+	result.decision == false
+	result.context.reason_admin.code == "YEAR_NOT_ALLOWED"
 }
 
 test_scope_axis_inactive_without_whitelist if {

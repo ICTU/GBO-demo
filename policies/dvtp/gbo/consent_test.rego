@@ -2,6 +2,7 @@ package dvtp.gbo.consent_test
 
 import data.dvtp.gbo
 import data.dvtp.gbo.consent
+import data.dvtp.gbo.fixtures_test as fx
 
 # ═══════════════════════════════════════════════════════════════════════════
 # The consent PIP end to end: real ES256 tokens, the register mocked at
@@ -65,18 +66,16 @@ _sign(header, claims) := io.jwt.encode_sign(header, claims, _register_key)
 
 _token := _sign(_header, _claims)
 
-_box1 := [{"id": "aangifte.box1", "parent": "AangifteIH", "name": "box1Inkomen", "scalar": false}]
-
-_request(headers) := {
-	"subject": {"type": "org", "id": "99999999900000000300"},
-	"context": {
-		"time": "2026-07-06T12:00:00Z",
-		"trace_id": "tx-330",
-		"headers": headers,
-		"resource": {"scope": "bd:ib:2025"},
-		"resolved": {"fields": _box1, "args": {"bsn": "consent:identity", "belastingjaren.0": "2025"}},
-	},
-}
+# Two fields are enough to reach a decision on the consent: these tests are
+# about the token and the register, not about binding fields to rules (the
+# engine tests cover that). Every field runs the whole rule cascade, so a
+# shorter request keeps these signature-heavy tests quick.
+_request(headers) := fx.request(
+	fx.hv,
+	"bri",
+	[fx.person("consent:identity"), fx.declarations(fx.literal([2025]))],
+	object.union(object.union(fx.scope_headers("bd:ib:2025"), {"Fsc-Transaction-Id": "tx-330"}), headers),
+)
 
 _input(token) := _request({"X-Gbo-Consent-Token": token})
 
@@ -225,6 +224,16 @@ test_status_request_carries_the_transaction_id if {
 	req.headers["Fsc-Transaction-Id"] == "tx-330"
 }
 
+# Without the FSC transaction id, X-Request-ID stands in for it.
+test_status_request_falls_back_to_the_request_id if {
+	req := consent._status_request with input as object.union(
+		_request({"X-Gbo-Consent-Token": _token}),
+		{"context": {"headers": {"Fsc-Transaction-Id": "", "X-Request-ID": "req-465"}}},
+	)
+		with opa.runtime as _env
+	req.headers["Fsc-Transaction-Id"] == "req-465"
+}
+
 # ── Trace context on the status request (#365) ─────────────────────────────
 # The register's status record belongs to the request's trace: the caller's
 # when it came along, otherwise the transaction id. The span is the lookup's
@@ -262,10 +271,10 @@ test_status_request_takes_the_traceparent_openftv_lifted if {
 }
 
 test_status_request_falls_back_to_the_transaction_id if {
-	tp := _status_traceparent(_traced(
-		{"X-Gbo-Consent-Token": _token},
-		{"trace_id": "0af76519-16cd-43dd-8448-eb211c80319c"},
-	))
+	tp := _status_traceparent(_request({
+		"X-Gbo-Consent-Token": _token,
+		"Fsc-Transaction-Id": "0af76519-16cd-43dd-8448-eb211c80319c",
+	}))
 	_is_traceparent(tp)
 	substring(tp, 3, 32) == "0af7651916cd43dd8448eb211c80319c"
 }
@@ -360,33 +369,58 @@ test_not_before_beyond_clock_skew_denies if {
 
 # ── Other claims ────────────────────────────────────────────────────────────
 
-test_claim_violations_deny_context_invalid if {
-	cases := {
-		"wrong issuer": [_header, object.union(_claims, {"iss": "https://elsewhere.test"})],
-		"wrong audience": [_header, object.union(_claims, {"aud": ["gbo:other"]})],
-		"wrong type": [object.union(_header, {"typ": "JWT"}), _claims],
-		"missing jti": [_header, object.remove(_claims, ["jti"])],
-		"missing scopes": [_header, object.remove(_claims, ["scopes"])],
-		"valid_until differs from exp": [_header, object.union(_claims, {"valid_until": "2030-01-01T00:00:00Z"})],
-	}
-	every _, c in cases {
-		_reason(_on_active(_sign(c[0], c[1]))) == "CONSENT_CONTEXT_INVALID"
-	}
+# One test per violation: each signs and evaluates one token, so a slow
+# runner never has to fit a whole series into one test's time limit.
+_denies_context_invalid(header, claims) if {
+	_reason(_on_active(_sign(header, claims))) == "CONSENT_CONTEXT_INVALID"
+}
+
+test_wrong_issuer_denies_context_invalid if {
+	_denies_context_invalid(_header, object.union(_claims, {"iss": "https://elsewhere.test"}))
+}
+
+test_wrong_audience_denies_context_invalid if {
+	_denies_context_invalid(_header, object.union(_claims, {"aud": ["gbo:other"]}))
+}
+
+test_wrong_type_denies_context_invalid if {
+	_denies_context_invalid(object.union(_header, {"typ": "JWT"}), _claims)
+}
+
+test_missing_jti_denies_context_invalid if {
+	_denies_context_invalid(_header, object.remove(_claims, ["jti"]))
+}
+
+test_missing_scopes_denies_context_invalid if {
+	_denies_context_invalid(_header, object.remove(_claims, ["scopes"]))
+}
+
+test_valid_until_other_than_exp_denies_context_invalid if {
+	_denies_context_invalid(_header, object.union(_claims, {"valid_until": "2030-01-01T00:00:00Z"}))
 }
 
 # A token that carries no encrypted subject could never be answered by a
 # source, so it is not a consent token.
-test_token_without_encrypted_subject_denies_context_invalid if {
-	cases := {
-		"missing": object.remove(_claims, ["encrypted_subject"]),
-		"empty": object.union(object.remove(_claims, ["encrypted_subject"]), {"encrypted_subject": {}}),
-		"not an object": object.union(object.remove(_claims, ["encrypted_subject"]), {"encrypted_subject": "PI-abc123"}),
-		"a party without a pseudonym": object.union(object.remove(_claims, ["encrypted_subject"]), {"encrypted_subject": {"99999999900000000200": {"identity": {"key_set_version": 20260101, "value": "dmFsdWU="}}}}),
-		"the shape before pseudonyms": object.union(object.remove(_claims, ["encrypted_subject"]), {"encrypted_subject": {"99999999900000000200": {"identifier_type": "Identity", "key_set_version": 20260101, "value": "dmFsdWU="}}}),
-	}
-	every _, claims in cases {
-		_reason(_on_active(_sign(_header, claims))) == "CONSENT_CONTEXT_INVALID"
-	}
+_with_encrypted_subject(value) := object.union(object.remove(_claims, ["encrypted_subject"]), {"encrypted_subject": value})
+
+test_missing_encrypted_subject_denies_context_invalid if {
+	_denies_context_invalid(_header, object.remove(_claims, ["encrypted_subject"]))
+}
+
+test_empty_encrypted_subject_denies_context_invalid if {
+	_denies_context_invalid(_header, _with_encrypted_subject({}))
+}
+
+test_encrypted_subject_not_an_object_denies_context_invalid if {
+	_denies_context_invalid(_header, _with_encrypted_subject("PI-abc123"))
+}
+
+test_party_without_a_pseudonym_denies_context_invalid if {
+	_denies_context_invalid(_header, _with_encrypted_subject({"99999999900000000200": {"identity": {"key_set_version": 20260101, "value": "dmFsdWU="}}}))
+}
+
+test_encrypted_subject_shape_before_pseudonyms_denies_context_invalid if {
+	_denies_context_invalid(_header, _with_encrypted_subject({"99999999900000000200": {"identifier_type": "Identity", "key_set_version": 20260101, "value": "dmFsdWU="}}))
 }
 
 test_single_audience_string_verifies if {

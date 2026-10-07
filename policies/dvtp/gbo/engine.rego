@@ -5,25 +5,24 @@ import data.dvtp.gbo.lib
 # ═══════════════════════════════════════════════════════════════════════════
 # GBO rule-engine PDP-runtime for DvTP (binding + decision + aggregation).
 #
-# Generic, rule-agnostic runtime. The policy consists of the self-contained
-# rules in ./rules/*.rego (pure data: rule_id + covers_types + covers_fields
-# + spec). The runtime binds each requested field to the applicable rules,
-# evaluates those rules via lib.evaluate(spec, ctx), and aggregates into
-# ONE AuthZEN Decision (§6.2) = the AND across all covered fields, with
-# the per-field detail in decision.context.
+# Generic, rule-agnostic runtime of the FTV GraphQL profile's policy model
+# (Section 9). The policy consists of the self-contained rules in
+# ./rules/*.rego (pure data: rule_id + covers_types + covers_fields + spec).
+# The runtime reads the field list the mapper adds to the request
+# (input.resource.attributes.graphql, Section 6.2), binds each data field to
+# the applicable rules, evaluates those rules via lib.evaluate(spec, ctx)
+# with the field's own record, and aggregates into ONE decision = the AND
+# across all data fields, with the per-field detail in decision.context.
 #
-# Adapted for consent-based policies: ctx carries the PIP attributes +
-# input.context.resource so consent-checks (lib.evaluate) can access
-# them, and _eval passes the current `field` so field-in-consent works
-# per field. The consent is resolved by the policy itself (consent.rego);
-# everything else comes from the request-mapper under input.context.
+# The consent is resolved by the policy itself (consent.rego); the scope is
+# the X-GBO-Scope header the consumer declares, which the rules validate.
 # ═══════════════════════════════════════════════════════════════════════════
 
 import data.dvtp.gbo.consent
 
 # ── Entrypoint: one Decision = closed-world AND across all requested data fields ─
 
-_field_decisions := [{"field": f.id, "result": _decide(f)} | some f in _data_fields]
+_field_decisions := [{"field": f.id, "key": f.key, "index": f.index, "result": _decide(f)} | some f in _data_fields]
 
 # The resolved consent goes back into the response document. It is not in
 # input — the policy fetched it — so without this the decision log would
@@ -32,8 +31,8 @@ response := object.union(_decision, {"context": {"pip": {"consent": consent.reso
 	consent.resolved
 } else := _decision
 
-_decision := {"decision": false, "context": {"reason_admin": {"code": "COVERAGE_UNVERIFIABLE"}}} if {
-	_coverage_unverifiable
+_decision := {"decision": false, "context": {"reason_admin": _request_failure}} if {
+	_request_failure
 } else := {"decision": true, "context": {"granted": granted}} if {
 	count(_field_decisions) > 0
 	every fd in _field_decisions {
@@ -41,6 +40,7 @@ _decision := {"decision": false, "context": {"reason_admin": {"code": "COVERAGE_
 	}
 	granted := [{
 		"field": fd.field,
+		"key": fd.key,
 		"rule": fd.result.context.granted_by,
 		"steps": object.get(fd.result.context, "granted_steps", []),
 	} |
@@ -50,6 +50,8 @@ _decision := {"decision": false, "context": {"reason_admin": {"code": "COVERAGE_
 	count(_field_decisions) > 0
 	denied := [{
 		"field": fd.field,
+		"key": fd.key,
+		"index": fd.index,
 		"code": fd.result.context.reason_admin.code,
 		"evaluated": fd.result.context.reason_admin.evaluated,
 	} |
@@ -59,26 +61,35 @@ _decision := {"decision": false, "context": {"reason_admin": {"code": "COVERAGE_
 	count(denied) > 0
 	deny_ctx := {
 		"denied_fields": denied,
-		"reason_admin": {"code": _worst_code([{"code": d.code} | some d in denied])},
+		"reason_admin": {"code": _request_reason(denied)},
 	}
 } else := {"decision": false, "context": {"reason_admin": {"code": "NO_APPLICABLE_RULE"}}}
 
-# Demo helper for the dev-portal UI render: per-field evaluations + the
-# args supplied by the request-mapper. A production PEP uses only
-# `response`.
-view := {
-	"response": response,
-	"evaluations": [_decide(f) | some f in _data_fields],
-	"derived": {
-		"evaluations": [_field_eval(f) | some f in _data_fields],
-		"resolvedArguments": _args,
-		"coverage_unverifiable": _coverage_unverifiable,
-	},
+# ── The mapper's output, checked before any rule (Section 9.5) ───────────────
+# In this order: the output is there, its schema is the one the bundle pins
+# for the service, the mapper could verify the request, and the request asks
+# for at least one data field. Any failure denies the request as a whole.
+
+_profile := "ftv-graphql/0.1"
+
+_gql := input.resource.attributes.graphql
+
+_service := object.get(object.get(input.subject, "attributes", {}), "service_name", "")
+
+_request_failure := {"code": "CONFIG_ERROR", "subcode": "MAPPER_OUTPUT_MISSING"} if {
+	not _gql.profile == _profile
+} else := {"code": "CONFIG_ERROR", "subcode": "SCHEMA_MISMATCH"} if {
+	_gql.schema != null
+	not _schema_pinned
+} else := object.filter(_gql.unverifiable, {"code", "subcode"}) if {
+	_gql.unverifiable != null
+} else := {"code": "NO_DATA_FIELDS"} if {
+	count(_data_fields) == 0
 }
 
-default _coverage_unverifiable := false
-
-_coverage_unverifiable if input.context.resolved.coverage_unverifiable
+# The schemas travel with the PDP image; the bundle pins each service's
+# digest (graphql_schemas.rego). A schema without a pin is not pinned.
+_schema_pinned if _gql.schema.digest == data.dvtp.gbo.graphql_schemas.digests[_service]
 
 # ── Binding: self-contained rules declare their scope in policy-as-code ──────
 
@@ -108,42 +119,45 @@ _type_rules(t) := [rid |
 	t in m.covers_types
 ]
 
-# Effective ruleset per requested field:
-#   1. field-level declared → those rules (override; scalars AND edges);
-#   2. otherwise known scalar → inherit from parent type;
-#   3. otherwise → empty → NO_APPLICABLE_RULE.
+# Effective ruleset per data field, by its key ParentType.field (Section 9.3):
+#   1. rules that name the key → those rules;
+#   2. otherwise a leaf without arguments, outside the root type → the
+#      rules that cover its parent type;
+#   3. otherwise → none → NO_APPLICABLE_RULE.
+# A field with arguments, a root field and an edge are only ever bound by
+# their own key: a rule bound through a type does not see the arguments,
+# and would cover entry points added to the schema later.
 default _effective_policy_ids(_, _) := []
 
 _effective_policy_ids(_, key) := _field_rules(key) if _field_declared[key]
 
-_effective_policy_ids(rf, key) := _type_rules(rf.parent) if {
+_effective_policy_ids(rf, key) := _type_rules(rf.parentType) if {
 	not _field_declared[key]
-	object.get(rf, "known", true)
-	rf.scalar
+	rf.leaf == true
+	not rf.args
+	not rf.parentType in _root_types
 }
 
 # ── Data fields with ruleset (closed-world) ──────────────────────────────────
+# Every record but __typename and the inside of introspection (Section 9.2).
+# Root fields are data fields: they run a resolver with their arguments.
+# Each record is its own decision, however many share a key or a path.
 
 _root_types := {"Query", "Mutation", "Subscription"}
 
 _data_fields := [df |
-	some rf in input.context.resolved.fields
-	not rf.parent in _root_types
-	not startswith(rf.name, "__")
-	key := sprintf("%s.%s", [rf.parent, rf.name])
+	some i, rf in _gql.fields
+	rf.field != "__typename"
+	not startswith(rf.parentType, "__")
+	key := sprintf("%s.%s", [rf.parentType, rf.field])
 	df := {
-		"id": rf.id,
+		"index": i,
+		"id": concat(".", rf.path),
+		"key": key,
+		"record": rf,
 		"policy_ids": _effective_policy_ids(rf, key),
 	}
 ]
-
-_field_eval(f) := {"resource": {
-	"type": "graphql_field",
-	"id": f.id,
-	"properties": {"policy_ids": f.policy_ids},
-}}
-
-_args := object.get(object.get(input.context, "resolved", {}), "args", {})
 
 # ── Context for the rules ──────────────────────────────────────────────────
 # Contains consent-PIP + resource so lib.evaluate can perform consent-checks
@@ -153,16 +167,30 @@ _args := object.get(object.get(input.context, "resolved", {}), "args", {})
 # its rules read the request itself (#364).
 #
 # resource.subject_placeholders are what a consent-based query may name its
-# subject with. They are set here, over anything the request supplied, so a
-# rule's constraint-binding checks the query's subject argument against them.
+# subject with. They are set here, so a rule's constraint-binding checks the
+# query's subject argument against them.
 
 _ctx := {
 	"subject": input.subject,
-	"args": _args,
 	"time": object.get(input.context, "time", ""),
-	"resource": object.union(object.get(input.context, "resource", {}), {"subject_placeholders": _subject_placeholders}),
+	"resource": {"scope": _declared_scope, "subject_placeholders": _subject_placeholders},
 	"pip": _pip_obj,
 }
+
+# The scope the consumer declares in X-GBO-Scope, in whatever case the PEP
+# forwarded the header name. Untrusted: the rules check it against the
+# consent's scopes or their own. More than one value is not resolved by
+# picking one.
+_scope_values contains value if {
+	some name, value in object.get(input.context, "headers", {})
+	lower(name) == "x-gbo-scope"
+	is_string(value)
+}
+
+_declared_scope := scope if {
+	count(_scope_values) == 1
+	some scope in _scope_values
+} else := ""
 
 # The placeholders stand for the subject of a verified consent. Without one
 # they stand for nobody, and no query argument matches them.
@@ -196,6 +224,15 @@ _pip_integrator := {"integrator": entry} if {
 
 _eval(rid, field) := lib.evaluate(_rule_meta[rid].spec, object.union(_ctx, {"field": field}))
 
+# Every bound rule evaluated once per data field, by field index. A partial
+# rule is cached within the evaluation; a function call is not, and the
+# per-field logic below reads an outcome several times.
+_outcomes[i][rid] := _eval(rid, f.record) if {
+	some f in _data_fields
+	i := f.index
+	some rid in f.policy_ids
+}
+
 # ── Per-field evaluation: cheap-first, short-circuit, lazy PIP ───────────────
 
 _cheap(policy_ids) := [r | some r in policy_ids; not _rule_meta[r].has_pip]
@@ -206,31 +243,31 @@ _decide(f) := {"decision": false, "context": {"reason_admin": {"code": "NO_APPLI
 	count(f.policy_ids) == 0
 }
 
-_decide(f) := _evaluate_field(f.policy_ids, f.id) if {
+_decide(f) := _evaluate_field(f.policy_ids, _outcomes[f.index]) if {
 	count(f.policy_ids) > 0
 }
 
-_evaluate_field(policy_ids, field) := result if {
+_evaluate_field(policy_ids, outcome) := result if {
 	cheap := _cheap(policy_ids)
 	allow_idxs := [i |
 		some i in numbers.range(0, count(cheap) - 1)
-		_eval(cheap[i], field).decision == true
+		outcome[cheap[i]].decision == true
 	]
 	count(allow_idxs) > 0
 	first := min(allow_idxs)
 	rid := cheap[first]
 	result := {"decision": true, "context": {
 		"granted_by": rid,
-		"granted_steps": _outcome_steps(_eval(rid, field)),
+		"granted_steps": _outcome_steps(outcome[rid]),
 	}}
 } else := result if {
 	pip := _pip(policy_ids)
 	count(pip) >= 1
-	_eval(pip[0], field).decision == true
+	outcome[pip[0]].decision == true
 	rid := pip[0]
 	result := {"decision": true, "context": {
 		"granted_by": rid,
-		"granted_steps": _outcome_steps(_eval(rid, field)),
+		"granted_steps": _outcome_steps(outcome[rid]),
 	}}
 } else := result if {
 	# No rule allowed: aggregate reason_admin with the worst code and
@@ -240,8 +277,8 @@ _evaluate_field(policy_ids, field) := result if {
 	pip := _pip(policy_ids)
 	evaluated := [{
 		"rule": r,
-		"code": _outcome_code(_eval(r, field)),
-		"steps": _outcome_steps(_eval(r, field)),
+		"code": _outcome_code(outcome[r]),
+		"steps": _outcome_steps(outcome[r]),
 	} |
 		some r in array.concat(cheap, pip)
 	]
@@ -377,6 +414,18 @@ _prefer_attempted(entries) := matching if {
 	matching := [e | some e in entries; _rule_basis(e.rule) == _attempted_basis]
 	count(matching) > 0
 } else := entries
+
+# The reason for the request as a whole: the worst of its fields' reasons,
+# with one exception. In the PID regime the subject is named on one field
+# (the root field's argument) and the other fields are judged without it.
+# When no subject is named, the other fields fail on whatever comes next
+# (the actor, the year), but those failures belong to a request about
+# nobody: the missing subject is the reason.
+_request_reason(denied) := "PID_NOT_PRESENT" if {
+	_attempted_basis == "pid"
+	some d in denied
+	d.code == "PID_NOT_PRESENT"
+} else := _worst_code([{"code": d.code} | some d in denied])
 
 _worst_code(evaluated) := code if {
 	some i in numbers.range(0, count(evaluated) - 1)

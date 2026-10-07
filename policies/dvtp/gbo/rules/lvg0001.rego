@@ -18,7 +18,7 @@ rule_id := "LVG0001"
 covers_types := set()
 
 covers_fields := {
-	# object-edge (parent-traversal requires it)
+	# the root field, which names the subject and the VBO-id
 	"Query.vbo",
 	# the only answer: the requested VBO-id, when the citizen owns it
 	"Verblijfsobject.vboId",
@@ -36,6 +36,7 @@ spec := {
 	# Register can only ask about the citizen of the verified consent. LVG's
 	# API takes a BSN, so only the identity placeholder is accepted.
 	"constraint_binding": [{
+		"field": "Query.vbo",
 		"arg": "bsn",
 		"placeholders": {"consent:identity"},
 	}],

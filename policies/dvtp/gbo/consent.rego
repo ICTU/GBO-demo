@@ -236,11 +236,28 @@ _status_request := {
 	"headers": object.union(_transaction_header, _traceparent_header),
 }
 
-_transaction_header := {"Fsc-Transaction-Id": tx} if {
-	tx := input.context.trace_id
-	is_string(tx)
-	tx != ""
+_transaction_header := {"Fsc-Transaction-Id": _transaction_id} if {
+	_transaction_id
 } else := {}
+
+# The FSC transaction id, from the request headers the Inway forwards, and
+# otherwise X-Request-ID. More than one value is not resolved by picking one.
+_transaction_id := tx if {
+	values := _header_values("fsc-transaction-id")
+	count(values) == 1
+	some tx in values
+} else := tx if {
+	values := _header_values("x-request-id")
+	count(values) == 1
+	some tx in values
+}
+
+_header_values(lower_name) := {v |
+	some name, v in object.get(input.context, "headers", {})
+	lower(name) == lower_name
+	is_string(v)
+	v != ""
+}
 
 _traceparent_header := {"traceparent": sprintf("00-%s-%s-01", [_trace_id, _lookup_span])} if {
 	_trace_id
@@ -257,7 +274,7 @@ _trace_id := id if {
 	id := lower(substring(tp, 3, 32))
 	_valid_trace_id(id)
 } else := id if {
-	id := lower(replace(input.context.trace_id, "-", ""))
+	id := lower(replace(_transaction_id, "-", ""))
 	_valid_trace_id(id)
 }
 
