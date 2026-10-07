@@ -82,6 +82,7 @@ while IFS='|' read -r service context dockerfile paths platforms \
       }]' <<<"${images}"
   )"
 done <<'IMAGES'
+asi-provider|./services/asi-provider|./services/asi-provider/Dockerfile|services/asi-provider|linux/amd64|false|asi-provider
 bron-sidecar|.|./services/bron-sidecar/Dockerfile|services/bron-sidecar services/ldv-client services/ftv-graphql-mapper|linux/amd64|false|bron-sidecar
 brp-graphql-server|.|./services/brp-graphql-server/Dockerfile|services/brp-graphql-server services/ldv-client|linux/amd64|false|brp-graphql-server
 bsnk-mock|./services/bsnk-mock|./services/bsnk-mock/Dockerfile|services/bsnk-mock|linux/amd64|false|bsnk-mock

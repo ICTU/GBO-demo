@@ -28,13 +28,26 @@ type serverConfig struct {
 
 type server struct{ cfg serverConfig }
 
+// basePath is the default basePath of the server template in ETSI TS 119 478
+// Annex B.
+const basePath = "/authsrc-api"
+
 func newServer(cfg serverConfig) http.Handler {
 	s := &server{cfg: cfg}
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /verify", s.authenticated(s.verify))
-	mux.HandleFunc("POST /retrieve", s.authenticated(s.retrieve))
+	mux.HandleFunc("POST "+basePath+"/verify", s.authenticated(s.verify))
+	mux.HandleFunc("POST "+basePath+"/retrieve", s.authenticated(s.retrieve))
+	mux.HandleFunc("GET /openapi.json", serveJSON(publishedContract))
+	mux.HandleFunc("GET /"+dataserviceFileName, serveJSON(mustReadOpenAPIFile(dataserviceFile)))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	return mux
+}
+
+func serveJSON(body []byte) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
+	}
 }
 
 // --- request and response shapes (ETSI TS 119 478 Annex B) ------------------
@@ -244,6 +257,9 @@ func decodeStrict(body io.Reader, v any) error {
 	dec := json.NewDecoder(io.LimitReader(body, 1<<20))
 	if err := dec.Decode(v); err != nil {
 		return errors.New("request body is not valid JSON for this operation: " + err.Error())
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return errors.New("request body contains data after the JSON object")
 	}
 	return nil
 }

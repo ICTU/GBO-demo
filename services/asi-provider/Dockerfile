@@ -10,6 +10,5 @@ RUN apk add --no-cache ca-certificates wget
 WORKDIR /app
 COPY --from=builder /asi-provider .
 COPY testdata/persons.json ./testdata/persons.json
-COPY openapi/ ./openapi/
 EXPOSE 4020
 CMD ["./asi-provider"]

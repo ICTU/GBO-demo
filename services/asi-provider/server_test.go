@@ -37,6 +37,7 @@ const (
 
 	tokenFrouke = "test-token-frouke"
 	tokenTom    = "test-token-tom"
+	tokenSanne  = "test-token-sanne"
 )
 
 type testEnv struct {
@@ -67,6 +68,7 @@ func newTestServer(t *testing.T) testEnv {
 			Tokens: map[string]string{
 				tokenFrouke: "999991772",
 				tokenTom:    "555555555",
+				tokenSanne:  "987654321",
 			},
 			Provider:        provider{LegalName: "GBO demo ASIP (test)"},
 			AuthenticSource: provider{LegalName: "Basisregistratie Personen (mock)"},
@@ -97,6 +99,10 @@ func TestVerifyMatchWithVariation(t *testing.T) { // case 2
 	// diacritics: é is an admissible variation of e
 	res := verifyAttribute(t, env, tokenFrouke, idGivenName, `{"given_name":"Froukë"}`)
 	assertResult(t, res, idGivenName, resultVariation)
+	// transliteration of a Latin letter that does not decompose (ICAO 9303):
+	// the ligature ĳ is written ij, so "Meĳer" varies from "Meijer"
+	res = verifyAttribute(t, env, tokenSanne, idFamilyName, `{"family_name":"Meĳer"}`)
+	assertResult(t, res, idFamilyName, resultVariation)
 }
 
 func TestVerifyNoMatch(t *testing.T) { // case 3
@@ -160,6 +166,7 @@ func TestVerifyMalformedIs400(t *testing.T) { // case 9
 	env := newTestServer(t)
 	for name, body := range map[string]string{
 		"not JSON":                         `{"attributes":`,
+		"trailing data after the object":   verifyBody(idFamilyName, `{"family_name":"Jansen"}`) + ` trailing`,
 		"neither attributes nor fragments": `{}`,
 		"attribute without attributeValue": `{"attributes":[{"attributeIdentifier":"` + idFamilyName + `"}]}`,
 		"attributeValue is not an object":  `{"attributes":[{"attributeIdentifier":"` + idFamilyName + `","attributeValue":"Jansen"}]}`,
@@ -286,15 +293,18 @@ func verifyAttribute(t *testing.T, env testEnv, token, id, value string) []attri
 	return resp.AttributeVerificationResults
 }
 
+// post sends a request to an operation of the contract (path without the
+// base path) and checks that the response conforms to the published contract.
 func post(t *testing.T, env testEnv, path, token, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, basePath+path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	rec := httptest.NewRecorder()
 	env.handler.ServeHTTP(rec, req)
+	assertConformsToContract(t, req, body, rec, path)
 	return rec
 }
 

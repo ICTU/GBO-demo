@@ -110,14 +110,17 @@ func normaliseTree(v any, norm func(string) string) any {
 // normaliseString applies the admissible orthographic variations of
 // REQ-ASIP-6.1.1.1-10 that this mock supports, in this order:
 //
-//  1. diacritics are removed (é → e, ë → e);
-//  2. hyphens become spaces;
-//  3. runs of white space collapse to one space, and leading and trailing
+//  1. Latin letters that do not decompose are transliterated as in
+//     ICAO Doc 9303 (ß → ss, æ → ae, ø → oe, ĳ → ij, and so on);
+//  2. diacritics are removed (é → e, ë → e);
+//  3. hyphens become spaces;
+//  4. runs of white space collapse to one space, and leading and trailing
 //     white space is removed;
-//  4. case is folded.
+//  5. case is folded.
 //
-// Transliteration between scripts is not supported.
+// Transliteration between scripts (Cyrillic, Greek, ...) is not supported.
 func normaliseString(s string) string {
+	s = latinTransliteration.Replace(s)
 	stripped, _, err := transform.String(transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC), s)
 	if err == nil {
 		s = stripped
@@ -126,6 +129,22 @@ func normaliseString(s string) string {
 	s = strings.Join(strings.Fields(s), " ")
 	return strings.ToLower(s)
 }
+
+// latinTransliteration maps the Latin letters that removing diacritics does
+// not cover to their ICAO Doc 9303 transliteration.
+var latinTransliteration = strings.NewReplacer(
+	"ß", "ss", "ẞ", "SS",
+	"Æ", "AE", "æ", "ae",
+	"Ø", "OE", "ø", "oe",
+	"Œ", "OE", "œ", "oe",
+	"Ĳ", "IJ", "ĳ", "ij",
+	"Þ", "TH", "þ", "th",
+	"Ð", "D", "ð", "d",
+	"Đ", "D", "đ", "d",
+	"Ł", "L", "ł", "l",
+	"Ħ", "H", "ħ", "h",
+	"ı", "i",
+)
 
 // jsonPath resolves the subset of RFC 9535 JSONPath this mock supports:
 // a root "$" followed by member names (".name" or "['name']") and array
