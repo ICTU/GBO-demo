@@ -12,18 +12,16 @@ func TestDenialCodeForDisclosesOnlyCitizenActionableCodes(t *testing.T) {
 		reason string
 		want   string
 	}{
-		"revoked consent": {inwayMessage("CONSENT_WITHDRAWN"), "CONSENT_WITHDRAWN"},
-		"expired consent": {inwayMessage("CONSENT_EXPIRED"), "CONSENT_EXPIRED"},
+		"refused field": {inwayMessage("FIELD_NOT_PERMITTED"), "FIELD_NOT_PERMITTED"},
 
-		"actor not allowed":         {inwayMessage("ACTOR_NOT_ALLOWED"), DenialCodeUnavailable},
-		"integrator not registered": {inwayMessage("INTEGRATOR_NOT_REGISTERED"), DenialCodeUnavailable},
-		"constraint mismatch":       {inwayMessage("CONSTRAINT_MISMATCH"), DenialCodeUnavailable},
-		"no applicable rule":        {inwayMessage("NO_APPLICABLE_RULE"), DenialCodeUnavailable},
-		"scope mismatch":            {inwayMessage("CONSENT_SCOPE_MISMATCH"), DenialCodeUnavailable},
-		"signature invalid":         {inwayMessage("CONSENT_SIGNATURE_INVALID"), DenialCodeUnavailable},
-		"status unavailable":        {inwayMessage("CONSENT_STATUS_UNAVAILABLE"), DenialCodeUnavailable},
+		"access denied":         {inwayMessage("ACCESS_DENIED"), DenialCodeUnavailable},
+		"unverifiable request":  {inwayMessage("COVERAGE_UNVERIFIABLE PARSE_ERROR"), DenialCodeUnavailable},
+		"operation unsupported": {inwayMessage("OPERATION_NOT_SUPPORTED"), DenialCodeUnavailable},
+		"no data fields":        {inwayMessage("NO_DATA_FIELDS"), DenialCodeUnavailable},
 
-		"unknown code": {inwayMessage("SOME_FUTURE_CODE"), DenialCodeUnavailable},
+		// The policy no longer tells a consumer why a field was refused.
+		"old consent code": {inwayMessage("CONSENT_WITHDRAWN"), DenialCodeUnavailable},
+		"unknown code":     {inwayMessage("SOME_FUTURE_CODE"), DenialCodeUnavailable},
 
 		"bare status":     {"upstream_error: status 401", DenialCodeUnavailable},
 		"outway down":     {"fsc_outway_call_failed: dial tcp: connection refused", DenialCodeUnavailable},
@@ -45,20 +43,13 @@ func TestPolicyCodeFromToleratesPhrasing(t *testing.T) {
 		reason string
 		want   string
 	}{
-		"inway prose":     {inwayMessage("CONSENT_WITHDRAWN"), "CONSENT_WITHDRAWN"},
-		"bare code":       {"CONSENT_WITHDRAWN", "CONSENT_WITHDRAWN"},
-		"legacy prefix":   {"denied by policy: CONSENT_WITHDRAWN", "CONSENT_WITHDRAWN"},
+		"inway prose":     {inwayMessage("FIELD_NOT_PERMITTED"), "FIELD_NOT_PERMITTED"},
+		"bare code":       {"FIELD_NOT_PERMITTED", "FIELD_NOT_PERMITTED"},
+		"legacy prefix":   {"denied by policy: ACCESS_DENIED", "ACCESS_DENIED"},
+		"with subcode":    {inwayMessage("COVERAGE_UNVERIFIABLE PARSE_ERROR"), "COVERAGE_UNVERIFIABLE"},
 		"no code present": {"upstream_error: status 401", ""},
 		"unknown token":   {"denied by policy: SOME_FUTURE_CODE", ""},
-
-		"priority wins": {
-			"reasonUser-en: CONSENT_SIGNATURE_INVALID; steps: CONSENT_WITHDRAWN, NO_APPLICABLE_RULE",
-			"CONSENT_SIGNATURE_INVALID",
-		},
-		"priority wins reversed": {
-			"steps: NO_APPLICABLE_RULE, CONSENT_WITHDRAWN; reasonUser-en: CONSENT_SIGNATURE_INVALID",
-			"CONSENT_SIGNATURE_INVALID",
-		},
+		"old code":        {"denied by policy: CONSENT_WITHDRAWN", ""},
 	}
 
 	for name, tc := range tests {

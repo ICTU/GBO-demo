@@ -101,7 +101,7 @@ func TestARefusalCarriesTheUpstreamReason(t *testing.T) {
 		body   string
 		want   string
 	}{
-		"inway":     {http.StatusUnauthorized, `{"message":"authorization server denied request: reasonUser-en: CONSENT_WITHDRAWN; ","code":"UNAUTHORIZED"}`, "authorization server denied request: reasonUser-en: CONSENT_WITHDRAWN; "},
+		"inway":     {http.StatusUnauthorized, `{"message":"authorization server denied request: reasonUser-en: FIELD_NOT_PERMITTED; ","code":"UNAUTHORIZED"}`, "authorization server denied request: reasonUser-en: FIELD_NOT_PERMITTED; "},
 		"reason":    {http.StatusForbidden, `{"allowed":false,"reason":"YEAR_NOT_COVERED"}`, "YEAR_NOT_COVERED"},
 		"bare":      {http.StatusInternalServerError, `upstream exploded`, "upstream_error: status 500"},
 		"not a 200": {http.StatusNoContent, ``, "upstream_error: status 204"},

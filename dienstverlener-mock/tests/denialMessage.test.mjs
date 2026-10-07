@@ -5,25 +5,23 @@ import { NAMED_DENIAL_CODES, denialMessage } from '../src/lib/denialMessage.ts'
 
 const mentionsConsent = (m) => /toestemming/i.test(`${m.title} ${m.body}`)
 
-test('a revoked consent is named, and says so without hedging', () => {
-  const m = denialMessage('CONSENT_WITHDRAWN')
-  assert.match(m.title, /ingetrokken/i)
-  assert.doesNotMatch(m.body, /kan komen doordat|mogelijk|misschien/i)
+test('a refused field offers to consent again, without naming a cause', () => {
+  const m = denialMessage('FIELD_NOT_PERMITTED')
+  assert.match(m.title, /niet ophalen/i)
+  assert.match(m.body, /opnieuw toestemming/i)
+  assert.doesNotMatch(`${m.title} ${m.body}`, /ingetrokken|verlopen/i)
   assert.equal(m.reconsent, true)
   assert.equal(m.retry, false)
 })
 
-test('an expired consent gets its own message, distinct from a revoked one', () => {
-  const expired = denialMessage('CONSENT_EXPIRED')
-  const revoked = denialMessage('CONSENT_WITHDRAWN')
-  assert.match(expired.title, /verlopen/i)
-  assert.notEqual(expired.title, revoked.title)
-  assert.notEqual(expired.body, revoked.body)
-  assert.equal(expired.retry, false)
+test('the old consent codes are no longer named', () => {
+  for (const code of ['CONSENT_WITHDRAWN', 'CONSENT_EXPIRED']) {
+    assert.deepEqual(denialMessage(code), denialMessage(undefined))
+  }
 })
 
 test('an administrative denial never mentions consent', () => {
-  for (const code of ['UNAVAILABLE', 'ACTOR_NOT_ALLOWED', 'CONSTRAINT_MISMATCH', 'NO_APPLICABLE_RULE']) {
+  for (const code of ['UNAVAILABLE', 'ACCESS_DENIED', 'COVERAGE_UNVERIFIABLE', 'NO_DATA_FIELDS']) {
     const m = denialMessage(code)
     assert.equal(mentionsConsent(m), false, `${code} mentions consent`)
   }

@@ -160,8 +160,10 @@ contracts and generated configuration in the required order.
    [consumer mock](http://localhost:9001), which immediately runs the query.
 4. Open the [developer portal](http://localhost:9003) to inspect the policy
    decision, trace and FSC transaction.
-5. Revoke the consent and repeat the query. The PDP now denies it with
-   `CONSENT_WITHDRAWN`.
+5. Revoke the consent and repeat the query. The PDP now denies it. The
+   consumer is told only `FIELD_NOT_PERMITTED`, so the consumer mock offers to
+   consent again without naming a cause; the developer portal shows the
+   field's own reason, `CONSENT_WITHDRAWN`.
 
 The developer portal injects `DVTP_CONSUMER_PEER_ID` into the
 `dienstverlener_oin` field of its predefined DvTP issuance scenarios. It uses

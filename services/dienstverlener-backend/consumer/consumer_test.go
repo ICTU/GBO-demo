@@ -148,7 +148,7 @@ func TestAQuestionWithoutConsentedYearsStillReachesThePDP(t *testing.T) {
 // the requested years verbatim, so the PDP denies an unconsented year with a
 // full trace.
 func TestADevPortalRunIsAskedAsRequested(t *testing.T) {
-	source := refusing(inwayDeny("YEAR_NOT_COVERED"))
+	source := refusing(inwayDeny("FIELD_NOT_PERMITTED"))
 	c := &Consumer{Kind: Kinds["bd"], Source: source}
 
 	ask(t, c, Request{ConsentToken: token("c-1", "bd:ib:2025"), Belastingjaren: []int{2024, 2025}, FromDevPortal: true})
@@ -293,7 +293,7 @@ func TestACallIsLoggedUnderThePositionTheSourceReceives(t *testing.T) {
 // A refused or failed call is a processing too.
 func TestARefusedOrFailedCallIsLoggedAsFailed(t *testing.T) {
 	for name, source := range map[string]*fakeSource{
-		"refused":     refusing(inwayDeny("CONSENT_WITHDRAWN")),
+		"refused":     refusing(inwayDeny("FIELD_NOT_PERMITTED")),
 		"unreachable": {err: errors.New("fsc_outway_call_failed: connection refused")},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -332,13 +332,13 @@ func TestAnUnloggedCallWithholdsTheAnswer(t *testing.T) {
 
 // ── what a citizen may be told ─────────────────────────────────────────────
 
-// Only a revoked or expired consent is named; every other denial is
-// UNAVAILABLE.
+// Only a refused field is named, so the citizen can consent again; every
+// other denial is UNAVAILABLE.
 func TestADenialIsCitizenSafe(t *testing.T) {
 	for name, tc := range map[string]struct{ reason, want string }{
-		"revoked consent":     {inwayDeny("CONSENT_WITHDRAWN"), "CONSENT_WITHDRAWN"},
-		"expired consent":     {inwayDeny("CONSENT_EXPIRED"), "CONSENT_EXPIRED"},
-		"administrative deny": {inwayDeny("ACTOR_NOT_ALLOWED"), DenialCodeUnavailable},
+		"refused field":       {inwayDeny("FIELD_NOT_PERMITTED"), "FIELD_NOT_PERMITTED"},
+		"access denied":       {inwayDeny("ACCESS_DENIED"), DenialCodeUnavailable},
+		"old consent code":    {inwayDeny("CONSENT_WITHDRAWN"), DenialCodeUnavailable},
 		"unknown future code": {inwayDeny("SOME_FUTURE_CODE"), DenialCodeUnavailable},
 		"source unavailable":  {"upstream_error: status 500", DenialCodeUnavailable},
 	} {
@@ -389,7 +389,7 @@ func TestTheTimelineSeesEveryAnsweredQuestion(t *testing.T) {
 		want   int
 	}{
 		"allowed":     {answering(`{}`), 1},
-		"denied":      {refusing(inwayDeny("CONSENT_WITHDRAWN")), 1},
+		"denied":      {refusing(inwayDeny("FIELD_NOT_PERMITTED")), 1},
 		"unreachable": {&fakeSource{err: errors.New("down")}, 0},
 	} {
 		t.Run(name, func(t *testing.T) {
