@@ -334,6 +334,7 @@ source activation, wallet trust and cached QR sessions is in
 - [Source configuration and onboarding](docs/source-onboarding.md)
 - [Source metadata cache and Type Metadata](docs/source-metadata-cache.md)
 - [`gbo-simple-v1` mapping profile](docs/gbo-simple-v1.md)
+- [How GBO implements the FTV GraphQL profile](docs/ftv-graphql-profile.md)
 - [Logboek Dataverwerkingen](services/ldv-logboek/README.md)
 - [Following an LDV chain across logbooks](docs/ldv/README.md)
 - [Observability](OBSERVABILITY.md)
