@@ -9,15 +9,14 @@
 # its per-scalar annotations are dropped (the mock bron does not enforce the
 # formaat-restricties, and the PDP only needs the type graph).
 #
-# Mirrored from brp-graphql-server/main.go buildSchema() — keep in sync when
-# the bron-schema changes. One deliberate divergence: graphql-go cannot
+# Mirrors brp-graphql-server/main.go buildSchema().
+# CI checks that every element here has the same definition in the running
+# source (scripts/check-schema-drift.sh); the source may have more. A change
+# to the source schema that touches this file fails until both agree.
+# One deliberate divergence, which the check allows: graphql-go cannot
 # express interface-implements-interface, so the mock declares Partij and
 # IngeschrevenPersoon side by side; gqlparser does support it, so the
-# relationship is preserved here.
-#
-# Used to generate the field map for the BRP attestation policy. The generic
-# FSC flow `eudi:attestation` selects PID-based authorization.
-# The requested fields select this BRP policy path rather than the BD rule.
+# relationship is preserved here. Both sides have the same object types.
 
 scalar BAGID
 scalar BSN
