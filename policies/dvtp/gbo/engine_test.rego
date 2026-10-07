@@ -42,6 +42,21 @@ test_ctx_resource_placeholders_are_not_taken_from_the_request if {
 	ctx.resource.subject_placeholders == {"consent:identity", "consent:pseudonym"}
 }
 
+# The rules see every mapper record (for checks that deny over several
+# fields) and the resource without the mapper's output (profile 9.4).
+test_ctx_carries_all_fields_and_the_resource_without_the_mapper if {
+	typename := {"path": ["ingeschrevenPersoon", "__typename"], "parentType": "IngeschrevenPersoon", "field": "__typename", "leaf": true}
+	fields := array.concat(fx.income_fields("consent:identity", fx.literal([2025])), [typename])
+	req := object.union(fx.request(fx.hv, "bri", fields, fx.scope_headers("bd:ib:2025")), {"resource": {"attributes": {"path": "/graphql"}}})
+	ctx := gbo._ctx with input as req with data.dvtp.gbo.consent.resolved as _pip_consent
+	ctx.fields == fields
+	ctx.resource.type == "uri"
+	ctx.resource.id == "/graphql"
+	ctx.resource.attributes == {"path": "/graphql"}
+	ctx.resource.scope == "bd:ib:2025"
+	ctx.resource.subject_placeholders == {"consent:identity", "consent:pseudonym"}
+}
+
 # The scope is the one the consumer declares, in any header-name case.
 test_ctx_resource_scope_is_the_declared_header if {
 	ctx := gbo._ctx with input as {"subject": {"id": "x"}, "context": {"headers": {"x-gbo-scope": "bd:ib:2025"}}}

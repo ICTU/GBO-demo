@@ -173,9 +173,21 @@ _data_fields := [df |
 _ctx := {
 	"subject": input.subject,
 	"time": object.get(input.context, "time", ""),
-	"resource": {"scope": _declared_scope, "subject_placeholders": _subject_placeholders},
+	"fields": object.get(_resource_attributes, ["graphql", "fields"], []),
+	"resource": object.union(_resource_without_mapper, {"scope": _declared_scope, "subject_placeholders": _subject_placeholders}),
 	"pip": _pip_obj,
 }
+
+# The evaluation context of the FTV profile (Section 9.4): every mapper
+# record of the request as `fields` (__typename and introspection included),
+# for checks that deny over several fields, and the resource without the
+# mapper's output. GBO adds the declared scope and the subject placeholders.
+_resource_attributes := object.get(object.get(input, "resource", {}), "attributes", {})
+
+_resource_without_mapper := object.union(
+	object.remove(object.get(input, "resource", {}), ["attributes"]),
+	{"attributes": object.remove(_resource_attributes, ["graphql"])},
+)
 
 # The scope the consumer declares in X-GBO-Scope, in whatever case the PEP
 # forwarded the header name. Untrusted: the rules check it against the
