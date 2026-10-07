@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/getkin/kin-openapi/routers"
 )
 
 // provider is the provider object of the ETSI dataservice schema
@@ -32,15 +35,27 @@ type server struct{ cfg serverConfig }
 // Annex B.
 const basePath = "/authsrc-api"
 
-func newServer(cfg serverConfig) http.Handler {
+func newServer(cfg serverConfig) (http.Handler, error) {
+	doc, err := loadContractDoc()
+	if err != nil {
+		return nil, fmt.Errorf("published contract: %w", err)
+	}
+	verifyRoute, err := contractRoute(doc, "/verify")
+	if err != nil {
+		return nil, err
+	}
+	retrieveRoute, err := contractRoute(doc, "/retrieve")
+	if err != nil {
+		return nil, err
+	}
 	s := &server{cfg: cfg}
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST "+basePath+"/verify", s.authenticated(s.verify))
-	mux.HandleFunc("POST "+basePath+"/retrieve", s.authenticated(s.retrieve))
+	mux.HandleFunc("POST "+basePath+"/verify", s.authenticated(conformant(verifyRoute, s.verify)))
+	mux.HandleFunc("POST "+basePath+"/retrieve", s.authenticated(conformant(retrieveRoute, s.retrieve)))
 	mux.HandleFunc("GET /openapi.json", serveJSON(publishedContract))
 	mux.HandleFunc("GET /"+dataserviceFileName, serveJSON(mustReadOpenAPIFile(dataserviceFile)))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	return mux
+	return mux, nil
 }
 
 func serveJSON(body []byte) http.HandlerFunc {
@@ -109,6 +124,19 @@ func (s *server) authenticated(next handlerWithSubject) http.HandlerFunc {
 		bsn, known := s.cfg.Tokens[token]
 		if !ok || token == "" || !known {
 			writeProblem(w, http.StatusUnauthorized, "Unauthorized", "a valid access token is required")
+			return
+		}
+		next(w, r, bsn)
+	}
+}
+
+// conformant rejects a request that does not conform to the request schema of
+// the published contract with 400, before any other check of its content.
+func conformant(route *routers.Route, next handlerWithSubject) handlerWithSubject {
+	return func(w http.ResponseWriter, r *http.Request, bsn string) {
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
+		if err := validateRequest(r, route); err != nil {
+			writeProblem(w, http.StatusBadRequest, "Bad Request", err.Error())
 			return
 		}
 		next(w, r, bsn)
@@ -253,8 +281,10 @@ func (s *server) retrieve(w http.ResponseWriter, r *http.Request, bsn string) {
 
 // --- helpers -------------------------------------------------------------------
 
+const maxRequestBody = 1 << 20
+
 func decodeStrict(body io.Reader, v any) error {
-	dec := json.NewDecoder(io.LimitReader(body, 1<<20))
+	dec := json.NewDecoder(io.LimitReader(body, maxRequestBody))
 	if err := dec.Decode(v); err != nil {
 		return errors.New("request body is not valid JSON for this operation: " + err.Error())
 	}

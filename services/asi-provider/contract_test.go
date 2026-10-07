@@ -7,13 +7,11 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"sync"
 	"testing"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
-	"github.com/getkin/kin-openapi/routers"
 )
 
 var (
@@ -22,21 +20,10 @@ var (
 	contractErr  error
 )
 
-// loadContract parses the published contract with kin-openapi. The relative
-// reference to the dataservice schema resolves to the embedded copy.
+// loadContract parses the published contract once for all tests.
 func loadContract(t *testing.T) *openapi3.T {
 	t.Helper()
-	contractOnce.Do(func() {
-		loader := openapi3.NewLoader()
-		loader.IsExternalRefsAllowed = true
-		loader.ReadFromURIFunc = func(_ *openapi3.Loader, location *url.URL) ([]byte, error) {
-			return openapiFiles.ReadFile(location.Path)
-		}
-		contractDoc, contractErr = loader.LoadFromDataWithPath(publishedContract, &url.URL{Path: "openapi/openapi.json"})
-		if contractErr == nil {
-			contractErr = contractDoc.Validate(context.Background())
-		}
-	})
+	contractOnce.Do(func() { contractDoc, contractErr = loadContractDoc() })
 	if contractErr != nil {
 		t.Fatalf("published contract: %v", contractErr)
 	}
@@ -44,19 +31,23 @@ func loadContract(t *testing.T) *openapi3.T {
 }
 
 // assertConformsToContract validates a response against the published
-// contract: status code, headers (including the seal) and body.
+// contract: status code, headers (including the seal) and body. A body the
+// contract does not describe fails too.
 func assertConformsToContract(t *testing.T, req *http.Request, reqBody string, rec *httptest.ResponseRecorder, path string) {
 	t.Helper()
 	doc := loadContract(t)
-	item := doc.Paths.Find(path)
-	if item == nil || item.Post == nil {
-		t.Fatalf("contract has no POST %s", path)
+	route, err := contractRoute(doc, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp := route.Operation.Responses.Status(rec.Code); resp != nil && len(resp.Value.Content) == 0 && rec.Body.Len() > 0 {
+		t.Fatalf("POST %s: response %d has a body the contract does not describe: %s", path, rec.Code, rec.Body)
 	}
 	req.Body = io.NopCloser(bytes.NewBufferString(reqBody))
 	input := &openapi3filter.ResponseValidationInput{
 		RequestValidationInput: &openapi3filter.RequestValidationInput{
 			Request: req,
-			Route:   &routers.Route{Spec: doc, Path: path, PathItem: item, Method: http.MethodPost, Operation: item.Post},
+			Route:   route,
 		},
 		Status: rec.Code,
 		Header: rec.Header(),
@@ -91,8 +82,13 @@ func TestPublishedContract(t *testing.T) {
 			t.Errorf("%s: 200 has no required X-JWS-Signature header", path)
 		}
 		for _, status := range []int{400, 401, 404, 501} {
-			if op.Responses.Status(status) == nil {
+			resp := op.Responses.Status(status)
+			if resp == nil {
 				t.Errorf("%s: contract has no %d response", path, status)
+				continue
+			}
+			if resp.Value.Content.Get("application/problem+json") == nil {
+				t.Errorf("%s: %d has no problem details body", path, status)
 			}
 		}
 	}

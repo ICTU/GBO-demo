@@ -38,6 +38,9 @@ Configuration: `ASIP_ADDR` (default `:4020`), `ASIP_SOURCE_FILE`, `ASIP_SEAL_KEY
 - **Bearer token**: Annex B defines no security scheme; clause 6.1.3 requires an access token from the authorization server.
 - **`X-JWS-Signature`** on every 200: the seal the law requires (below).
 - **400 and 501 on `/retrieve`**: REQ-ASIP-6.1.2.2-06 lists them; Annex B lists only 200, 401 and 404.
+- **Problem details on 401, and on 404 of `/retrieve`**: Annex B describes no body there; this mock returns the same RFC 9457 problem as on its other errors.
+
+Every request is validated against the request schemas of the contract before anything else is looked at, so a malformed request gets 400 before an unknown attribute (404) or an unsupported mandate (501). An attribute identifier must be an absolute URI.
 
 `GET /19478-dataservice-schema.json` serves the schema the contract references.
 

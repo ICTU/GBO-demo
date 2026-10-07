@@ -1,9 +1,17 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
+
+	"github.com/getkin/kin-openapi/openapi3"
+	"github.com/getkin/kin-openapi/openapi3filter"
+	"github.com/getkin/kin-openapi/routers"
 )
 
 // The published contract is the OpenAPI of ETSI TS 119 478 Annex B, unchanged,
@@ -82,4 +90,55 @@ func mergePatch(target, patch any) any {
 		t[k] = mergePatch(t[k], v)
 	}
 	return t
+}
+
+func init() {
+	// kin-openapi does not check format "uri" by itself. The ETSI schemas use
+	// it for attribute identifiers: an absolute URI, with a scheme.
+	openapi3.DefineStringFormatValidator("uri", openapi3.NewCallbackValidator(func(v string) error {
+		u, err := url.Parse(v)
+		if err != nil || !u.IsAbs() {
+			return errors.New("not an absolute URI")
+		}
+		return nil
+	}))
+	// Keep validation errors short: they end up in problem details.
+	openapi3.SchemaErrorDetailsDisabled = true
+}
+
+// loadContractDoc parses the published contract. The relative reference to
+// the dataservice schema resolves to the embedded copy.
+func loadContractDoc() (*openapi3.T, error) {
+	loader := openapi3.NewLoader()
+	loader.IsExternalRefsAllowed = true
+	loader.ReadFromURIFunc = func(_ *openapi3.Loader, location *url.URL) ([]byte, error) {
+		return openapiFiles.ReadFile(location.Path)
+	}
+	doc, err := loader.LoadFromDataWithPath(publishedContract, &url.URL{Path: "openapi/openapi.json"})
+	if err != nil {
+		return nil, err
+	}
+	if err := doc.Validate(context.Background(), openapi3.EnableSchemaFormatValidation()); err != nil {
+		return nil, err
+	}
+	return doc, nil
+}
+
+// contractRoute returns the POST operation of path (without the base path).
+func contractRoute(doc *openapi3.T, path string) (*routers.Route, error) {
+	item := doc.Paths.Find(path)
+	if item == nil || item.Post == nil {
+		return nil, fmt.Errorf("contract has no POST %s", path)
+	}
+	return &routers.Route{Spec: doc, Path: path, PathItem: item, Method: http.MethodPost, Operation: item.Post}, nil
+}
+
+// validateRequest checks a request against the published contract. The
+// bearer token is checked before, by the server itself.
+func validateRequest(r *http.Request, route *routers.Route) error {
+	return openapi3filter.ValidateRequest(r.Context(), &openapi3filter.RequestValidationInput{
+		Request: r,
+		Route:   route,
+		Options: &openapi3filter.Options{AuthenticationFunc: openapi3filter.NoopAuthenticationFunc},
+	})
 }

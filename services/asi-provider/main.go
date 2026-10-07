@@ -51,7 +51,7 @@ func serve() error {
 	if err != nil {
 		return err
 	}
-	handler := newServer(serverConfig{
+	handler, err := newServer(serverConfig{
 		Source:          source,
 		Catalogue:       defaultCatalogue(),
 		Sealer:          newSealer(key, chain),
@@ -59,6 +59,9 @@ func serve() error {
 		Provider:        provider{LegalName: env("ASIP_PROVIDER_NAME", "GBO demo ASIP")},
 		AuthenticSource: provider{LegalName: env("ASIP_AUTHENTIC_SOURCE_NAME", "Basisregistratie Personen (mock)")},
 	})
+	if err != nil {
+		return err
+	}
 	addr := env("ASIP_ADDR", ":4020")
 	log.Printf("asi-provider listening on %s (stub tokens: not a conformant authorization server)", addr)
 	srv := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}

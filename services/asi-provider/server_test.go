@@ -60,21 +60,22 @@ func newTestServer(t *testing.T) testEnv {
 	pool := x509.NewCertPool()
 	pool.AddCert(caCert)
 
-	return testEnv{
-		handler: newServer(serverConfig{
-			Source:    source,
-			Catalogue: defaultCatalogue(),
-			Sealer:    newSealer(sealKey, []*x509.Certificate{sealCert, caCert}),
-			Tokens: map[string]string{
-				tokenFrouke: "999991772",
-				tokenTom:    "555555555",
-				tokenSanne:  "987654321",
-			},
-			Provider:        provider{LegalName: "GBO demo ASIP (test)"},
-			AuthenticSource: provider{LegalName: "Basisregistratie Personen (mock)"},
-		}),
-		caPool: pool,
+	handler, err := newServer(serverConfig{
+		Source:    source,
+		Catalogue: defaultCatalogue(),
+		Sealer:    newSealer(sealKey, []*x509.Certificate{sealCert, caCert}),
+		Tokens: map[string]string{
+			tokenFrouke: "999991772",
+			tokenTom:    "555555555",
+			tokenSanne:  "987654321",
+		},
+		Provider:        provider{LegalName: "GBO demo ASIP (test)"},
+		AuthenticSource: provider{LegalName: "Basisregistratie Personen (mock)"},
+	})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
 	}
+	return testEnv{handler: handler, caPool: pool}
 }
 
 // --- case 1-6: attribute verification ---------------------------------------
@@ -174,6 +175,23 @@ func TestVerifyMalformedIs400(t *testing.T) { // case 9
 	} {
 		t.Run(name, func(t *testing.T) {
 			rec := post(t, env, "/verify", tokenFrouke, body)
+			assertProblem(t, rec, http.StatusBadRequest)
+		})
+	}
+}
+
+// A request that does not conform to the request schema is malformed, before
+// an unknown identifier (404) or an unsupported mandate (501) is considered.
+func TestSchemaViolationIs400BeforeOtherChecks(t *testing.T) { // case 9b, 9c
+	env := newTestServer(t)
+	for _, tc := range []struct{ name, path, body string }{
+		{"verify: identifier is not a URI", "/verify", verifyBody("family_name", `{"family_name":"Jansen"}`)},
+		{"retrieve: identifier is not a URI", "/retrieve", `{"attributeIdentifiers":[{"attributeIdentifier":"family_name"}]}`},
+		{"verify: mandate is not an object", "/verify", `{"attributes":[{"attributeIdentifier":"` + idFamilyName + `","attributeValue":{"family_name":"Jansen"}}],"mandate":"guardian"}`},
+		{"retrieve: mandate is not an object", "/retrieve", `{"attributeIdentifiers":[{"attributeIdentifier":"` + idFamilyName + `"}],"mandate":"guardian"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := post(t, env, tc.path, tokenFrouke, tc.body)
 			assertProblem(t, rec, http.StatusBadRequest)
 		})
 	}

@@ -40,6 +40,15 @@
                 "$ref": "#/components/headers/X-JWS-Signature"
               }
             }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problem"
+                }
+              }
+            }
           }
         }
       }
@@ -56,6 +65,24 @@
           },
           "400": {
             "description": "Indicates that the submitted content was malformed (REQ-ASIP-6.1.2.2-06).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problem"
+                }
+              }
+            }
+          },
+          "404": {
             "content": {
               "application/problem+json": {
                 "schema": {
