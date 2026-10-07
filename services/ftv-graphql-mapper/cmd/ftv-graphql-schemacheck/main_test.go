@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -30,18 +31,58 @@ const introspection = `{"data":{"__schema":{"queryType":{"name":"Query"},"types"
   {"kind":"OBJECT","name":"Query","fields":[{"name":"jaar","args":[],"type":{"kind":"SCALAR","name":"Int"}}]},
   {"kind":"SCALAR","name":"Int"}]}}}`
 
+// Like graphql-go: introspection takes includeDeprecated on fields only.
+const legacyCapabilities = `{"data":{"field":{"fields":[{"name":"args","args":[]}]},
+  "type":{"fields":[{"name":"inputFields","args":[]}]}}}`
+
+const modernCapabilities = `{"data":{"field":{"fields":[{"name":"args","args":[{"name":"includeDeprecated"}]}]},
+  "type":{"fields":[{"name":"inputFields","args":[{"name":"includeDeprecated"}]}]}}}`
+
+// source answers the capability query with caps and the introspection with
+// status and body; it records the introspection query it got.
 func source(t *testing.T, status int, body string) string {
 	t.Helper()
+	url, _ := sourceWith(t, legacyCapabilities, status, body)
+	return url
+}
+
+func sourceWith(t *testing.T, caps string, status int, body string) (string, *string) {
+	t.Helper()
+	var asked string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.Header.Get("Content-Type") != "application/json" {
 			http.Error(w, "transport", http.StatusBadRequest)
 			return
 		}
+		var req struct {
+			Query string `json:"query"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if strings.Contains(req.Query, "FTVSchemaCheckCapabilities") {
+			_, _ = w.Write([]byte(caps))
+			return
+		}
+		asked = req.Query
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(body))
 	}))
 	t.Cleanup(srv.Close)
-	return srv.URL + "/graphql"
+	return srv.URL + "/graphql", &asked
+}
+
+// A source that can hide deprecated arguments and input fields is asked for
+// them.
+func TestSchemaCheckAsksForDeprecatedElementsWhereTheyCanHide(t *testing.T) {
+	url, asked := sourceWith(t, modernCapabilities, 200, introspection)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"-catalog", catalog(t, "type Query { jaar: Int }"), "-service", "bri", "-url", url}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit = %d; stderr=%s", code, &stderr)
+	}
+	for _, want := range []string{"args(includeDeprecated: true)", "inputFields(includeDeprecated: true)"} {
+		if !strings.Contains(*asked, want) {
+			t.Errorf("introspection query lacks %s", want)
+		}
+	}
 }
 
 func TestSchemaCheck(t *testing.T) {

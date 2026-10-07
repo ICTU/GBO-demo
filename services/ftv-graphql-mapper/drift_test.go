@@ -149,3 +149,51 @@ func TestAnUnusableIntrospectionIsRefused(t *testing.T) {
 		}
 	}
 }
+
+// Where a source can hide deprecated arguments and input fields, the query
+// asks for them; where it cannot, it does not send an argument it rejects.
+func TestIntrospectionQueryAsksForDeprecatedElements(t *testing.T) {
+	modern := IntrospectionQuery(Capabilities{DeprecatedArgs: true, DeprecatedInputFields: true})
+	for _, want := range []string{"args(includeDeprecated: true)", "inputFields(includeDeprecated: true)"} {
+		if !strings.Contains(modern, want) {
+			t.Errorf("modern query lacks %s", want)
+		}
+	}
+	legacy := IntrospectionQuery(Capabilities{})
+	for _, unwanted := range []string{"args(includeDeprecated", "inputFields(includeDeprecated"} {
+		if strings.Contains(legacy, unwanted) {
+			t.Errorf("legacy query contains %s", unwanted)
+		}
+	}
+}
+
+func TestCapabilities(t *testing.T) {
+	const modern = `{"data":{
+  "field":{"fields":[{"name":"name","args":[]},{"name":"args","args":[{"name":"includeDeprecated"}]}]},
+  "type":{"fields":[{"name":"fields","args":[{"name":"includeDeprecated"}]},{"name":"inputFields","args":[{"name":"includeDeprecated"}]}]}}}`
+	// graphql-go v0.8: includeDeprecated on fields only.
+	const legacy = `{"data":{
+  "field":{"fields":[{"name":"args","args":[]}]},
+  "type":{"fields":[{"name":"fields","args":[{"name":"includeDeprecated"}]},{"name":"inputFields","args":[]}]}}}`
+	for name, tc := range map[string]struct {
+		body string
+		want Capabilities
+	}{
+		"modern": {modern, Capabilities{DeprecatedArgs: true, DeprecatedInputFields: true}},
+		"legacy": {legacy, Capabilities{}},
+	} {
+		got, err := ParseCapabilities([]byte(tc.body))
+		if err != nil || got != tc.want {
+			t.Errorf("%s: got %+v, %v; want %+v", name, got, err, tc.want)
+		}
+	}
+	for name, body := range map[string]string{
+		"errors":     `{"errors":[{"message":"no"}]}`,
+		"no __Field": `{"data":{"field":null,"type":{"fields":[]}}}`,
+		"not JSON":   `<html>`,
+	} {
+		if _, err := ParseCapabilities([]byte(body)); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}

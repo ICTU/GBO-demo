@@ -17,8 +17,79 @@ import (
 // compared. Enum values are, as a set: a value the bundle does not know can
 // still come back in a field the policy released.
 
-// IntrospectionQuery asks a source for what Drift compares.
-const IntrospectionQuery = `query FTVSchemaCheck {
+// CapabilityQuery asks a source whether its introspection takes
+// includeDeprecated on arguments and input fields. Where it does, a
+// deprecated argument or input field is hidden unless asked for, and could
+// slip past the check. Where it does not, the server predates deprecating
+// them and hides none; graphql-go, which the demo sources use, is such a
+// server, and rejects the argument.
+const CapabilityQuery = `query FTVSchemaCheckCapabilities {
+  field: __type(name: "__Field") { fields { name args { name } } }
+  type: __type(name: "__Type") { fields { name args { name } } }
+}`
+
+// Capabilities are what a source's introspection supports.
+type Capabilities struct {
+	DeprecatedArgs        bool // __Field.args(includeDeprecated:)
+	DeprecatedInputFields bool // __Type.inputFields(includeDeprecated:)
+}
+
+// ParseCapabilities reads the answer to CapabilityQuery.
+func ParseCapabilities(data []byte) (Capabilities, error) {
+	type meta struct {
+		Fields []struct {
+			Name string `json:"name"`
+			Args []struct {
+				Name string `json:"name"`
+			} `json:"args"`
+		} `json:"fields"`
+	}
+	var resp struct {
+		Data struct {
+			Field *meta `json:"field"`
+			Type  *meta `json:"type"`
+		} `json:"data"`
+		Errors json.RawMessage `json:"errors"`
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return Capabilities{}, fmt.Errorf("capability response: %w", err)
+	}
+	if len(resp.Errors) > 0 && string(resp.Errors) != "null" {
+		return Capabilities{}, fmt.Errorf("capability response carries errors: %s", resp.Errors)
+	}
+	if resp.Data.Field == nil || resp.Data.Type == nil {
+		return Capabilities{}, fmt.Errorf("capability response lacks __Field or __Type")
+	}
+	takes := func(m *meta, field string) bool {
+		for _, f := range m.Fields {
+			if f.Name != field {
+				continue
+			}
+			for _, a := range f.Args {
+				if a.Name == "includeDeprecated" {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return Capabilities{
+		DeprecatedArgs:        takes(resp.Data.Field, "args"),
+		DeprecatedInputFields: takes(resp.Data.Type, "inputFields"),
+	}, nil
+}
+
+// IntrospectionQuery asks a source for what Drift compares, deprecated
+// elements included wherever the source can hide them.
+func IntrospectionQuery(c Capabilities) string {
+	args, inputFields := "args", "inputFields"
+	if c.DeprecatedArgs {
+		args = "args(includeDeprecated: true)"
+	}
+	if c.DeprecatedInputFields {
+		inputFields = "inputFields(includeDeprecated: true)"
+	}
+	return `query FTVSchemaCheck {
   __schema {
     queryType { name }
     mutationType { name }
@@ -26,8 +97,8 @@ const IntrospectionQuery = `query FTVSchemaCheck {
     types {
       kind
       name
-      fields(includeDeprecated: true) { name args { ...InputValue } type { ...TypeRef } }
-      inputFields { ...InputValue }
+      fields(includeDeprecated: true) { name ` + args + ` { ...InputValue } type { ...TypeRef } }
+      ` + inputFields + ` { ...InputValue }
       possibleTypes { name }
       enumValues(includeDeprecated: true) { name }
     }
@@ -39,6 +110,7 @@ fragment TypeRef on __Type {
   ofType { kind name ofType { kind name ofType { kind name ofType { kind name
     ofType { kind name ofType { kind name ofType { kind name } } } } } } }
 }`
+}
 
 // SourceSchema is a source's running schema, as its introspection reports it.
 type SourceSchema struct {

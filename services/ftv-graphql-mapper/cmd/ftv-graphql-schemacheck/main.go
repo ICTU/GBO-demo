@@ -3,6 +3,8 @@
 // against has the same definition in the source's schema (Sections 7.4 and
 // 11). The source's schema comes from a running source, by introspection,
 // or from a saved introspection response, e.g. of a build not yet deployed.
+// A saved response must include deprecated arguments and input fields:
+// produce it with the query IntrospectionQuery returns.
 //
 //	ftv-graphql-schemacheck -catalog <dir> -service <name> -url <graphql-url>
 //	ftv-graphql-schemacheck -catalog <dir> -service <name> -introspection <file>
@@ -82,10 +84,24 @@ func run(args []string, stdout, stderr io.Writer) int {
 	return 1
 }
 
-// introspect asks a source for its schema, in the transport the profile
-// allows: POST with a JSON body.
+// introspect asks a source for its schema, deprecated arguments and input
+// fields included where the source can hide them.
 func introspect(url string) ([]byte, error) {
-	body, _ := json.Marshal(map[string]string{"query": ftvgraphql.IntrospectionQuery})
+	answer, err := post(url, ftvgraphql.CapabilityQuery)
+	if err != nil {
+		return nil, err
+	}
+	caps, err := ftvgraphql.ParseCapabilities(answer)
+	if err != nil {
+		return nil, err
+	}
+	return post(url, ftvgraphql.IntrospectionQuery(caps))
+}
+
+// post sends one query, in the transport the profile allows: POST with a
+// JSON body.
+func post(url, query string) ([]byte, error) {
+	body, _ := json.Marshal(map[string]string{"query": query})
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Post(url, "application/json", bytes.NewReader(body))
 	if err != nil {
