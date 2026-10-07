@@ -10,25 +10,16 @@ export type DenialMessage = {
 }
 
 // A Map, so network input like "constructor" cannot hit a prototype key.
+// The policy does not tell a dienstverlener why a field was refused, so the
+// message names no cause; it offers the one useful action, consenting again.
 const CITIZEN_MESSAGES = new Map<string, DenialMessage>([
   [
-    'CONSENT_WITHDRAWN',
+    'FIELD_NOT_PERMITTED',
     {
-      title: 'Uw toestemming is ingetrokken',
+      title: 'Deze gegevens mogen wij niet ophalen',
       body:
-        'U heeft uw toestemming om inkomensgegevens op te halen bij de Belastingdienst ' +
-        'ingetrokken. Daarom hebben wij die gegevens niet opgehaald.',
-      retry: false,
-      reconsent: true,
-    },
-  ],
-  [
-    'CONSENT_EXPIRED',
-    {
-      title: 'Uw toestemming is verlopen',
-      body:
-        'Uw toestemming om inkomensgegevens op te halen bij de Belastingdienst is verlopen. ' +
-        'Toestemming geldt een beperkte tijd.',
+        'Wij mogen uw inkomensgegevens niet ophalen bij de Belastingdienst. ' +
+        'U kunt opnieuw toestemming geven.',
       retry: false,
       reconsent: true,
     },

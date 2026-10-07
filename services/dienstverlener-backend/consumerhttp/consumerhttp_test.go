@@ -79,7 +79,7 @@ func TestEachOutcomeHasItsStatus(t *testing.T) {
 		allowed  bool
 	}{
 		"allowed": {&consumer.Consumer{Kind: consumer.Kinds["bd"], Source: &fakeSource{answer: consumer.Answer{Allowed: true, Data: json.RawMessage(`{}`)}}}, valid, http.StatusOK, true},
-		"denied":  {&consumer.Consumer{Kind: consumer.Kinds["bd"], Source: &fakeSource{answer: consumer.Answer{Reason: "CONSENT_WITHDRAWN"}}}, valid, http.StatusOK, false},
+		"denied":  {&consumer.Consumer{Kind: consumer.Kinds["bd"], Source: &fakeSource{answer: consumer.Answer{Reason: "FIELD_NOT_PERMITTED"}}}, valid, http.StatusOK, false},
 		"unreadable token": {&consumer.Consumer{Kind: consumer.Kinds["bd"], Source: &fakeSource{}},
 			queryBody(map[string]any{"consent_token": "not-a-jwt"}), http.StatusForbidden, false},
 		"unlogged": {&consumer.Consumer{Kind: consumer.Kinds["bd"], Source: &fakeSource{answer: consumer.Answer{Allowed: true}}, Logbook: refusingLogbook{}},

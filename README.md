@@ -160,8 +160,10 @@ contracts and generated configuration in the required order.
    [consumer mock](http://localhost:9001), which immediately runs the query.
 4. Open the [developer portal](http://localhost:9003) to inspect the policy
    decision, trace and FSC transaction.
-5. Revoke the consent and repeat the query. The PDP now denies it with
-   `CONSENT_WITHDRAWN`.
+5. Revoke the consent and repeat the query. The PDP now denies it. The
+   consumer is told only `FIELD_NOT_PERMITTED`, so the consumer mock offers to
+   consent again without naming a cause; the developer portal shows the
+   field's own reason, `CONSENT_WITHDRAWN`.
 
 The developer portal injects `DVTP_CONSUMER_PEER_ID` into the
 `dienstverlener_oin` field of its predefined DvTP issuance scenarios. It uses
@@ -241,16 +243,16 @@ bound to the selected source record before policy evaluation. See
 
 ### What a denial tells the citizen
 
-A denied request carries a policy reason code, and most of those codes are not
-the citizen's to see. `ACTOR_NOT_ALLOWED` or `CONSTRAINT_MISMATCH` tells them
-nothing they can act on and describes how the policy is built.
+A denied request carries the code the policy gives the consumer, following the
+FTV GraphQL profile: it says that the request was refused, never why or which
+field. The reason per field stays with the PDP and the developer portal.
 
-The disclosure decision therefore sits in one place, on the server:
+The disclosure decision sits in one place, on the server:
 `services/dienstverlener-backend/consumer/denial.go` maps the upstream reason onto a
-`denial_code`. Only `CONSENT_WITHDRAWN` and `CONSENT_EXPIRED` pass through —
-both describe a consent the citizen gave and can give again. Everything else,
-including an unrecognised code and every transport failure, becomes
-`UNAVAILABLE`.
+`denial_code`. Only `FIELD_NOT_PERMITTED` passes through — a refused field is
+the one denial the citizen can act on, by giving consent again. Everything
+else, including `ACCESS_DENIED`, an unrecognised code and every transport
+failure, becomes `UNAVAILABLE`.
 
 The consumer frontend renders that code and nothing else
 (`dienstverlener-mock/src/lib/denialMessage.ts`). It never reads `reason`,
