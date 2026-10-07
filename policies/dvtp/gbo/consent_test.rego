@@ -149,7 +149,25 @@ _on_status_down(token) := r if {
 	r := {"consent": consent.resolved, "response": gbo.response} with input as _input(token) with http.send as _register_status_down with opa.runtime as _env
 }
 
-_reason(r) := r.response.context.reason_admin.code
+# The code every denied field carries: a consent problem fails them all alike.
+_reason(r) := code if {
+	codes := fx.field_codes(r.response)
+	count(codes) == 1
+	some code in codes
+}
+
+# The consumer learns only that access was denied; the trace says which
+# check of the consent PIP failed.
+_server_problem(r, check) if {
+	r.response.decision == false
+	fx.client(r.response) == {"code": "ACCESS_DENIED"}
+	fx.request_code(r.response) == {"code": "PIP_UNAVAILABLE"}
+	some d in fx.denied(r.response)
+	some t in d.trace
+	some step in t.steps
+	step.code == check
+	step.status == "fail"
+}
 
 # ── Active consent ──────────────────────────────────────────────────────────
 
@@ -276,22 +294,25 @@ test_unknown_consent_denies_not_found if {
 	_reason(_on_consent_unknown(_token)) == "CONSENT_NOT_FOUND"
 }
 
-# ── An unreachable or unhelpful register denies with a reason ──────────────
+# ── An unreachable or unhelpful register is a server problem ──────────────
 
-test_unreachable_register_denies_with_keys_unavailable if {
+test_unreachable_register_denies_with_pip_unavailable if {
 	r := _on_down(_token)
-	r.response.decision == false
-	_reason(r) == "CONSENT_KEYS_UNAVAILABLE"
+	_reason(r) == "PIP_UNAVAILABLE"
+	_server_problem(r, "CONSENT_KEYS_UNAVAILABLE")
 }
 
-test_status_unreachable_denies_with_status_unavailable if {
+test_status_unreachable_denies_with_pip_unavailable if {
 	r := _on_status_down(_token)
 	r.consent.context_valid == true
-	_reason(r) == "CONSENT_STATUS_UNAVAILABLE"
+	_reason(r) == "PIP_UNAVAILABLE"
+	_server_problem(r, "CONSENT_STATUS_UNAVAILABLE")
 }
 
-test_unexpected_status_denies_with_status_unavailable if {
-	_reason(_on_unknown_status(_token)) == "CONSENT_STATUS_UNAVAILABLE"
+test_unexpected_status_denies_with_pip_unavailable if {
+	r := _on_unknown_status(_token)
+	_reason(r) == "PIP_UNAVAILABLE"
+	_server_problem(r, "CONSENT_STATUS_UNAVAILABLE")
 }
 
 # ── A token the register did not sign ──────────────────────────────────────

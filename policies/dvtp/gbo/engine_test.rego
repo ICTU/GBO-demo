@@ -52,6 +52,52 @@ test_ctx_carries_all_fields_and_the_resource_without_the_mapper if {
 	ctx.resource.subject_placeholders == {"consent:identity", "consent:pseudonym"}
 }
 
+# ── What the administrator sees (profile Section 10.1) ───────────────────
+
+test_admin_view_of_a_refused_field if {
+	result := gbo.response with input as _dvtp_input("bd:ib:2025", "consent:identity", [2024])
+		with data.dvtp.gbo.consent.resolved as _consent
+	admin := fx.admin(result)
+	admin.code == "FIELD_NOT_PERMITTED"
+	admin.schema_digest == data.dvtp.gbo.graphql_schemas.digests.bri
+	count(admin.denied_fields) == 1
+	some denied in admin.denied_fields
+	denied.key == "IngeschrevenPersoon.heeftBelastingjaarAangifte"
+	denied.index == 1
+	denied.path == ["ingeschrevenPersoon", "heeftBelastingjaarAangifte"]
+	denied.code == "YEAR_NOT_COVERED"
+	denied.evaluated == ["DVT0001"]
+	denied.trace[0].rule == "DVT0001"
+	some step in denied.trace[0].steps
+	step.code == "YEAR_NOT_COVERED"
+	step.status == "fail"
+}
+
+# The consumer's view and the texts hide which field was refused; only the
+# administrator's view names it.
+test_consumer_view_names_no_field if {
+	result := gbo.response with input as _dvtp_input("bd:ib:2025", "consent:identity", [2024])
+		with data.dvtp.gbo.consent.resolved as _consent
+	fx.client(result) == {"code": "FIELD_NOT_PERMITTED"}
+	result.context.reason_user == {"en": "Field not permitted"}
+	result.context.reason_admin == result.context.reason_user
+}
+
+# A request the mapper could not verify has no fields to list; the
+# administrator gets the mapper's message, the consumer only the subcode.
+test_admin_view_of_an_unverifiable_request if {
+	output := {
+		"profile": "ftv-graphql/0.1",
+		"operation": null,
+		"schema": {"digest": data.dvtp.gbo.graphql_schemas.digests.bri},
+		"fields": [],
+		"unverifiable": {"code": "COVERAGE_UNVERIFIABLE", "subcode": "INVALID_QUERY", "message": "Field Selections at 1:31"},
+	}
+	result := gbo.response with input as fx.request_with(fx.hv, "bri", output, {})
+	fx.admin(result) == {"code": "COVERAGE_UNVERIFIABLE", "subcode": "INVALID_QUERY", "message": "Field Selections at 1:31", "schema_digest": data.dvtp.gbo.graphql_schemas.digests.bri}
+	fx.client(result) == {"code": "FIELD_NOT_PERMITTED"}
+}
+
 # The scope is the one the consumer declares, in any header-name case.
 test_ctx_resource_scope_is_the_declared_header if {
 	ctx := gbo._ctx with input as {"subject": {"id": "x"}, "context": {"headers": {"x-gbo-scope": "bd:ib:2025"}}}
@@ -72,7 +118,7 @@ test_input_pip_consent_is_not_trusted if {
 	not ctx.pip.consent
 	result := gbo.response with input as req
 	result.decision == false
-	result.context.reason_admin.code == "PID_NOT_PRESENT"
+	fx.refused_for(result, "PID_NOT_PRESENT")
 }
 
 # A PID-regime request: no consent token, and a plain BSN in the root
@@ -103,14 +149,14 @@ test_mapper_output_missing_denies if {
 	req := object.remove(_dvtp_input("bd:ib:2025", "consent:identity", [2025]), ["resource"])
 	result := gbo.response with input as req with data.dvtp.gbo.consent.resolved as _consent
 	result.decision == false
-	result.context.reason_admin == {"code": "CONFIG_ERROR", "subcode": "MAPPER_OUTPUT_MISSING"}
+	fx.request_code(result) == {"code": "CONFIG_ERROR", "subcode": "MAPPER_OUTPUT_MISSING"}
 }
 
 test_mapper_output_of_another_profile_denies if {
 	output := object.union(fx.graphql("bri", fx.income_fields("consent:identity", fx.literal([2025]))), {"profile": "ftv-graphql/0.2"})
 	result := gbo.response with input as fx.request_with(fx.hv, "bri", output, fx.scope_headers("bd:ib:2025"))
 		with data.dvtp.gbo.consent.resolved as _consent
-	result.context.reason_admin.subcode == "MAPPER_OUTPUT_MISSING"
+	fx.request_code(result).subcode == "MAPPER_OUTPUT_MISSING"
 }
 
 test_schema_other_than_the_pin_denies if {
@@ -118,7 +164,7 @@ test_schema_other_than_the_pin_denies if {
 		with data.dvtp.gbo.consent.resolved as _consent
 		with data.dvtp.gbo.graphql_schemas.digests as {"bri": "sha256:other"}
 	result.decision == false
-	result.context.reason_admin == {"code": "CONFIG_ERROR", "subcode": "SCHEMA_MISMATCH"}
+	fx.request_code(result) == {"code": "CONFIG_ERROR", "subcode": "SCHEMA_MISMATCH"}
 }
 
 # A schema the bundle does not pin is not one the rules were written for.
@@ -126,7 +172,7 @@ test_schema_of_an_unpinned_service_denies if {
 	output := fx.graphql("bri", fx.income_fields("consent:identity", fx.literal([2025])))
 	result := gbo.response with input as fx.request_with(fx.hv, "onbekend", output, fx.scope_headers("bd:ib:2025"))
 		with data.dvtp.gbo.consent.resolved as _consent
-	result.context.reason_admin.subcode == "SCHEMA_MISMATCH"
+	fx.request_code(result).subcode == "SCHEMA_MISMATCH"
 }
 
 # The mapper's code passes unchanged. The Inway hands the PDP the body only
@@ -142,7 +188,7 @@ test_unverifiable_request_denies_with_the_mappers_code if {
 	result := gbo.response with input as fx.request_with(fx.hv, "bri", output, fx.scope_headers("bd:ib:2025"))
 		with data.dvtp.gbo.consent.resolved as _consent
 	result.decision == false
-	result.context.reason_admin == {"code": "COVERAGE_UNVERIFIABLE", "subcode": "UNSUPPORTED_TRANSPORT"}
+	fx.request_code(result) == {"code": "COVERAGE_UNVERIFIABLE", "subcode": "UNSUPPORTED_TRANSPORT"}
 }
 
 # Without a schema there is no pin to compare: the mapper's code stands.
@@ -155,7 +201,7 @@ test_unavailable_schema_denies_with_the_mappers_code if {
 		"unverifiable": {"code": "CONFIG_ERROR", "subcode": "SCHEMA_UNAVAILABLE", "message": "no GraphQL schema loaded"},
 	}
 	result := gbo.response with input as fx.request_with(fx.hv, "bri", output, {})
-	result.context.reason_admin == {"code": "CONFIG_ERROR", "subcode": "SCHEMA_UNAVAILABLE"}
+	fx.request_code(result) == {"code": "CONFIG_ERROR", "subcode": "SCHEMA_UNAVAILABLE"}
 }
 
 test_typename_alone_has_no_data_fields if {
@@ -163,7 +209,7 @@ test_typename_alone_has_no_data_fields if {
 	result := gbo.response with input as fx.request(fx.hv, "bri", [typename], fx.scope_headers("bd:ib:2025"))
 		with data.dvtp.gbo.consent.resolved as _consent
 	result.decision == false
-	result.context.reason_admin == {"code": "NO_DATA_FIELDS"}
+	fx.request_code(result) == {"code": "NO_DATA_FIELDS"}
 }
 
 # ── Root fields are data fields ──────────────────────────────────────────
@@ -181,8 +227,8 @@ test_each_selection_of_the_root_is_judged_on_its_own_argument if {
 	result := gbo.response with input as fx.request(fx.hv, "bri", fields, fx.scope_headers("bd:ib:2025"))
 		with data.dvtp.gbo.consent.resolved as _consent
 	result.decision == false
-	result.context.reason_admin.code == "CONSTRAINT_MISMATCH"
-	[d.field | some d in result.context.denied_fields] == ["b"]
+	fx.refused_for(result, "CONSTRAINT_MISMATCH")
+	[concat(".", d.path) | some d in fx.denied(result)] == ["b"]
 }
 
 # Introspection is a root field like any other, and no rule covers it.
@@ -198,8 +244,8 @@ test_introspection_next_to_a_permitted_query_denies if {
 	result := gbo.response with input as fx.request(fx.hv, "bri", fields, fx.scope_headers("bd:ib:2025"))
 		with data.dvtp.gbo.consent.resolved as _consent
 	result.decision == false
-	[d.key | some d in result.context.denied_fields] == ["Query.__schema"]
-	result.context.denied_fields[0].code == "NO_APPLICABLE_RULE"
+	[d.key | some d in fx.denied(result)] == ["Query.__schema"]
+	fx.denied(result)[0].code == "NO_APPLICABLE_RULE"
 }
 
 # ── Arguments are read from the field that carries them ─────────────────
@@ -213,7 +259,7 @@ test_years_from_a_schema_default_deny if {
 	result := gbo.response with input as fx.request(fx.hv, "bri", fields, fx.scope_headers("bd:ib:2025"))
 		with data.dvtp.gbo.consent.resolved as _consent
 	result.decision == false
-	result.context.reason_admin.code == "YEAR_NOT_COVERED"
+	fx.refused_for(result, "YEAR_NOT_COVERED")
 }
 
 test_years_written_as_a_variable_are_read if {
@@ -232,14 +278,14 @@ test_edge_outside_the_rule_denies if {
 	result := gbo.response with input as fx.request(fx.hv, "bri", fields, fx.scope_headers("bd:ib:2025"))
 		with data.dvtp.gbo.consent.resolved as _consent
 	result.decision == false
-	[d.key | some d in result.context.denied_fields] == ["AangifteIH.box2Inkomen"]
-	result.context.reason_admin.code == "NO_APPLICABLE_RULE"
+	[d.key | some d in fx.denied(result)] == ["AangifteIH.box2Inkomen"]
+	fx.refused_for(result, "NO_APPLICABLE_RULE")
 }
 
 # ── The regime decides which rules are evaluated ─────────────────────────
 # The trace of a denied field shows only the rules of the request's regime.
 
-_evaluated_rules(result) := {e.rule | some d in result.context.denied_fields; some e in d.evaluated}
+_evaluated_rules(result) := {rule | some d in fx.denied(result); some rule in d.evaluated}
 
 test_a_consent_request_is_judged_by_consent_rules_only if {
 	result := gbo.response with input as _dvtp_input("bd:ib:2025", "consent:identity", [2024])
@@ -276,21 +322,21 @@ test_dvtp_deny_surfaces_year_not_covered if {
 	result := gbo.response with input as _dvtp_input("bd:ib:2025", "consent:identity", [2024])
 		with data.dvtp.gbo.consent.resolved as _consent
 	result.decision == false
-	result.context.reason_admin.code == "YEAR_NOT_COVERED"
+	fx.refused_for(result, "YEAR_NOT_COVERED")
 }
 
 test_dvtp_deny_surfaces_consent_scope_mismatch if {
 	result := gbo.response with input as _dvtp_input("bd:ib:2023", "consent:identity", [2025])
 		with data.dvtp.gbo.consent.resolved as _consent
 	result.decision == false
-	result.context.reason_admin.code == "CONSENT_SCOPE_MISMATCH"
+	fx.refused_for(result, "CONSENT_SCOPE_MISMATCH")
 }
 
 test_dvtp_deny_surfaces_constraint_mismatch if {
 	result := gbo.response with input as _dvtp_input("bd:ib:2025", "999991772", [2025])
 		with data.dvtp.gbo.consent.resolved as _consent
 	result.decision == false
-	result.context.reason_admin.code == "CONSTRAINT_MISMATCH"
+	fx.refused_for(result, "CONSTRAINT_MISMATCH")
 }
 
 # Denied here rather than passed on for the source to refuse.
@@ -298,7 +344,7 @@ test_dvtp_deny_placeholder_the_rule_does_not_accept if {
 	result := gbo.response with input as _dvtp_input("bd:ib:2025", "consent:pseudonym", [2025])
 		with data.dvtp.gbo.consent.resolved as _consent
 	result.decision == false
-	result.context.reason_admin.code == "CONSTRAINT_MISMATCH"
+	fx.refused_for(result, "CONSTRAINT_MISMATCH")
 }
 
 # ── Deny reasons without a consent token ─────────────────────────────────
@@ -310,13 +356,13 @@ _eudi_input(actor, year) := fx.income(actor, "999991772", [year], {})
 test_eudi_deny_surfaces_year_not_allowed if {
 	result := gbo.response with input as _eudi_input("99999999900000000100", 2023)
 	result.decision == false
-	result.context.reason_admin.code == "YEAR_NOT_ALLOWED"
+	fx.refused_for(result, "YEAR_NOT_ALLOWED")
 }
 
 test_eudi_deny_surfaces_actor_not_allowed if {
 	result := gbo.response with input as _eudi_input("99999999900000000999", 2024)
 	result.decision == false
-	result.context.reason_admin.code == "ACTOR_NOT_ALLOWED"
+	fx.refused_for(result, "ACTOR_NOT_ALLOWED")
 }
 
 # ── Evidence decides the regime ──────────────────────────────────────────
@@ -343,7 +389,7 @@ test_no_consent_token_and_a_placeholder_names_no_subject if {
 	every placeholder in ["consent:identity", "consent:pseudonym"] {
 		result := gbo.response with input as _dvtp_input("bd:ib:2025", placeholder, [2025])
 		result.decision == false
-		result.context.reason_admin.code == "PID_NOT_PRESENT"
+		fx.refused_for(result, "PID_NOT_PRESENT")
 	}
 }
 
@@ -352,7 +398,7 @@ test_no_consent_token_and_a_placeholder_names_no_subject if {
 test_no_consent_token_and_a_real_bsn_meets_the_actor_check if {
 	result := gbo.response with input as _dvtp_input("bd:ib:2025", "999991772", [2025])
 	result.decision == false
-	result.context.reason_admin.code == "ACTOR_NOT_ALLOWED"
+	fx.refused_for(result, "ACTOR_NOT_ALLOWED")
 }
 
 # ── Invariant: EUDI actors are never consent-based consumers ─────────────
@@ -465,21 +511,21 @@ test_argument_check_catches_a_rule_that_names_none if {
 test_pid_regime_without_a_subject_surfaces_pid_not_present if {
 	result := gbo.response with input as fx.income(fx.eudi_issuer, "", [2024], {})
 	result.decision == false
-	result.context.reason_admin.code == "PID_NOT_PRESENT"
+	fx.refused_for(result, "PID_NOT_PRESENT")
 }
 
-# The other fields fail on the actor (the mortgage provider is no designated
-# issuer), but the missing subject is still the request's reason.
-test_pid_regime_without_a_subject_outranks_the_actor if {
+# Each field keeps its own reason: the person field the missing subject,
+# the fields below it the actor (the mortgage provider is no designated
+# issuer). The consumer is told only that fields were refused.
+test_pid_regime_without_a_subject_keeps_each_fields_reason if {
 	result := gbo.response with input as fx.income(fx.hv, "", [2025], {})
-	result.decision == false
-	"ACTOR_NOT_ALLOWED" in {d.code | some d in result.context.denied_fields}
-	result.context.reason_admin.code == "PID_NOT_PRESENT"
+	[d.code | some d in fx.denied(result); d.key == "Query.ingeschrevenPersoon"] == ["PID_NOT_PRESENT"]
+	"ACTOR_NOT_ALLOWED" in fx.field_codes(result)
+	fx.client(result) == {"code": "FIELD_NOT_PERMITTED"}
 }
 
-# Under a consent token the worst field reason stands: here the integrator's,
-# over a field no consent rule covers.
-test_consent_regime_keeps_the_worst_field_reason if {
+# Under a consent token too, each field keeps its own reason.
+test_consent_regime_fields_keep_their_own_reasons if {
 	fields := array.concat(
 		fx.income_fields("consent:identity", fx.literal([2025])),
 		[fx.box("box2Inkomen")],
@@ -491,8 +537,8 @@ test_consent_regime_keeps_the_worst_field_reason if {
 		with data.dvtp.gbo.consent.resolved as _consent
 		with data.entities.dvtp_participant as {}
 	result.decision == false
-	"NO_APPLICABLE_RULE" in {d.code | some d in result.context.denied_fields}
-	result.context.reason_admin.code == "INTEGRATOR_NOT_REGISTERED"
+	"NO_APPLICABLE_RULE" in {d.code | some d in fx.denied(result)}
+	fx.refused_for(result, "INTEGRATOR_NOT_REGISTERED")
 }
 
 _unverifiable_input := fx.income(fx.hv, "", [2025], {})
@@ -501,7 +547,7 @@ test_unverifiable_consent_surfaces_consent_context_invalid if {
 	result := gbo.response with input as _unverifiable_input
 		with data.dvtp.gbo.consent.resolved as {"context_valid": false, "status_available": false, "exists": false}
 	result.decision == false
-	result.context.reason_admin.code == "CONSENT_CONTEXT_INVALID"
+	fx.refused_for(result, "CONSENT_CONTEXT_INVALID")
 }
 
 # The engine reports the specific code the consent PIP gives.
@@ -514,7 +560,7 @@ test_unverifiable_consent_surfaces_its_invalid_code if {
 			"invalid_code": "CONSENT_SIGNATURE_INVALID",
 		}
 	result.decision == false
-	result.context.reason_admin.code == "CONSENT_SIGNATURE_INVALID"
+	fx.refused_for(result, "CONSENT_SIGNATURE_INVALID")
 }
 
 # ── Delegated calls through the engine ───────────────────────────────────
@@ -551,14 +597,38 @@ test_delegated_call_by_unregistered_integrator_denied if {
 		with data.dvtp.gbo.consent.resolved as _consent
 		with data.entities.dvtp_participant as _registered
 	result.decision == false
-	result.context.reason_admin.code == "INTEGRATOR_NOT_REGISTERED"
+	fx.refused_for(result, "INTEGRATOR_NOT_REGISTERED")
 }
 
-test_delegated_call_without_admission_feed_denied if {
+# No admission register at all is a PIP failure, not a missing mandate: the
+# consumer learns only that access was denied.
+test_delegated_call_without_admission_register_is_pip_unavailable if {
 	result := gbo.response with input as _delegated_input(_integrator)
 		with data.dvtp.gbo.consent.resolved as _consent
 	result.decision == false
-	result.context.reason_admin.code == "INTEGRATOR_NOT_REGISTERED"
+	fx.client(result) == {"code": "ACCESS_DENIED"}
+	fx.request_code(result) == {"code": "PIP_UNAVAILABLE"}
+	fx.field_codes(result) == {"PIP_UNAVAILABLE"}
+	some d in fx.denied(result)
+	some t in d.trace
+	some step in t.steps
+	step.code == "INTEGRATOR_REGISTER_UNAVAILABLE"
+	step.status == "fail"
+}
+
+# An empty register is a register: nobody is admitted.
+test_delegated_call_with_empty_admission_register_denied if {
+	result := gbo.response with input as _delegated_input(_integrator)
+		with data.dvtp.gbo.consent.resolved as _consent
+		with data.entities.dvtp_participant as {}
+	fx.refused_for(result, "INTEGRATOR_NOT_REGISTERED")
+}
+
+# A direct call has no integrator, so the register is not needed.
+test_direct_call_without_admission_register_allowed if {
+	result := gbo.response with input as _dvtp_input("bd:ib:2025", "consent:identity", [2025])
+		with data.dvtp.gbo.consent.resolved as _consent
+	result.decision == true
 }
 
 # A mandate in input is not one the policy pulled: dropped, like pip.consent.
@@ -567,11 +637,23 @@ test_input_pip_integrator_is_not_trusted if {
 	req := object.union(_delegated_input(_integrator), {"context": {"pip": forged}})
 	ctx := gbo._ctx with input as req
 		with data.dvtp.gbo.consent.resolved as _consent
+		with data.entities.dvtp_participant as {}
 	not ctx.pip.integrator
 	result := gbo.response with input as req
 		with data.dvtp.gbo.consent.resolved as _consent
+		with data.entities.dvtp_participant as {}
 	result.decision == false
-	result.context.reason_admin.code == "INTEGRATOR_NOT_REGISTERED"
+	fx.refused_for(result, "INTEGRATOR_NOT_REGISTERED")
+}
+
+# Nor is the register's availability: only the engine decides it is missing.
+test_input_pip_register_state_is_not_trusted if {
+	forged := {"integrator_register": "unavailable"}
+	req := object.union(_delegated_input(_integrator), {"context": {"pip": forged}})
+	result := gbo.response with input as req
+		with data.dvtp.gbo.consent.resolved as _consent
+		with data.entities.dvtp_participant as _registered
+	result.decision == true
 }
 
 test_direct_call_carries_no_integrator_pip if {

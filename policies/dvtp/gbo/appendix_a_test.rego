@@ -41,7 +41,7 @@ _decide_output(output, rules) := result if {
 
 _decide(fields) := _decide_output(_output(fields), {"r0001": _r0001})
 
-_denied(result) := [[d.index, d.key, d.code] | some d in result.context.denied_fields]
+_denied(result) := [[d.index, d.key, d.code] | some d in fx.denied(result)]
 
 # ── Records ──────────────────────────────────────────────────────────────
 
@@ -98,7 +98,7 @@ test_a4_an_alias_does_not_change_the_key if {
 	])
 	result := _decide(fields)
 	_denied(result) == [[6, "LoonInkomen.werkgever", "NO_APPLICABLE_RULE"], [7, "Werkgever.naam", "NO_APPLICABLE_RULE"]]
-	result.context.denied_fields[0].field == "persoon.inkomens.w"
+	fx.denied(result)[0].path == ["persoon", "inkomens", "w"]
 }
 
 test_a7_variable_default_is_judged if {
@@ -130,7 +130,7 @@ test_a26_introspection_only_denies_the_root_field if {
 
 test_a26_typename_alone_has_no_data_fields if {
 	result := _decide([_rec(["__typename"], "Query", "__typename", true)])
-	result.context.reason_admin == {"code": "NO_DATA_FIELDS"}
+	fx.request_code(result) == {"code": "NO_DATA_FIELDS"}
 }
 
 test_a31_the_concrete_type_the_rule_does_not_name_denies if {
@@ -197,30 +197,30 @@ _failed(code, subcode) := object.union(_output([]), {"unverifiable": {"code": co
 test_a3_a10_unverifiable_requests_deny_with_the_mappers_code if {
 	every subcode in ["INVALID_QUERY", "OPERATION_AMBIGUOUS", "PARSE_ERROR", "UNSUPPORTED_TRANSPORT"] {
 		result := _decide_output(_failed("COVERAGE_UNVERIFIABLE", subcode), {"r0001": _r0001})
-		result.context.reason_admin == {"code": "COVERAGE_UNVERIFIABLE", "subcode": subcode}
+		fx.request_code(result) == {"code": "COVERAGE_UNVERIFIABLE", "subcode": subcode}
 	}
 }
 
 test_a13_mutation_denies if {
 	output := object.union(_output([]), {"unverifiable": {"code": "OPERATION_NOT_SUPPORTED", "message": "operation type mutation"}})
 	result := _decide_output(output, {"r0001": _r0001})
-	result.context.reason_admin == {"code": "OPERATION_NOT_SUPPORTED"}
+	fx.request_code(result) == {"code": "OPERATION_NOT_SUPPORTED"}
 }
 
 test_a24_schema_missing_denies if {
 	output := object.union(_failed("CONFIG_ERROR", "SCHEMA_UNAVAILABLE"), {"schema": null})
 	result := _decide_output(output, {"r0001": _r0001})
-	result.context.reason_admin == {"code": "CONFIG_ERROR", "subcode": "SCHEMA_UNAVAILABLE"}
+	fx.request_code(result) == {"code": "CONFIG_ERROR", "subcode": "SCHEMA_UNAVAILABLE"}
 }
 
 test_a25_pinned_digest_mismatch_denies if {
 	output := object.union(_output(_a1), {"schema": {"digest": "sha256:9f2c"}})
 	result := _decide_output(output, {"r0001": _r0001})
-	result.context.reason_admin == {"code": "CONFIG_ERROR", "subcode": "SCHEMA_MISMATCH"}
+	fx.request_code(result) == {"code": "CONFIG_ERROR", "subcode": "SCHEMA_MISMATCH"}
 }
 
 test_a40_mapper_output_missing_denies if {
 	result := gbo.response with input as {"subject": {"id": "x", "attributes": {"service_name": "appendix-a"}}, "resource": {"type": "uri", "id": "/graphql"}, "context": {}}
 		with data.dvtp.gbo.rules as {"r0001": _r0001}
-	result.context.reason_admin == {"code": "CONFIG_ERROR", "subcode": "MAPPER_OUTPUT_MISSING"}
+	fx.request_code(result) == {"code": "CONFIG_ERROR", "subcode": "MAPPER_OUTPUT_MISSING"}
 }

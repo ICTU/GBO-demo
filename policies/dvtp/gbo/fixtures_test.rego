@@ -113,3 +113,22 @@ ownership_fields(bsn) := [
 	vbo(bsn),
 	{"path": ["vbo", "vboId"], "parentType": "Verblijfsobject", "field": "vboId", "leaf": true},
 ]
+
+# ── Reading a denied response (profile Section 10.1) ─────────────────────
+
+client(result) := result.context.graphql.client
+
+admin(result) := result.context.graphql.admin
+
+request_code(result) := object.filter(admin(result), {"code", "subcode"})
+
+denied(result) := object.get(admin(result), "denied_fields", [])
+
+field_codes(result) := {d.code | some d in denied(result)}
+
+# The consumer is told a field was refused, and some field was, with code.
+refused_for(result, code) if {
+	result.decision == false
+	client(result) == {"code": "FIELD_NOT_PERMITTED"}
+	code in field_codes(result)
+}
