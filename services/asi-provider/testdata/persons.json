@@ -1,0 +1,44 @@
+{
+  "_comment": "Test persons for the ASIP mock, taken from services/brp-graphql-server/mockdata/personen.json. Each attribute value is the JSON object the catalogue schema describes. A person without a value for an attribute (Tom Willems has no Dutch address) yields Unknown.",
+  "persons": [
+    {
+      "bsn": "999991772",
+      "attributes": {
+        "family_name": {"family_name": "Jansen"},
+        "given_name": {"given_name": "Frouke"},
+        "birth_date": {"birth_date": "2000-03-24"},
+        "nationality": {"nationalities": ["NL", "BE"]},
+        "address": {"street": "Coolsingel", "house_number": "12 B", "postal_code": "3011 AD", "city": "Rotterdam", "country": "NL"}
+      }
+    },
+    {
+      "bsn": "123456789",
+      "attributes": {
+        "family_name": {"family_name": "Bakker"},
+        "given_name": {"given_name": "Joost Pieter"},
+        "birth_date": {"birth_date": "1989-02-11"},
+        "nationality": {"nationalities": ["NL"]},
+        "address": {"street": "Oudegracht", "house_number": "233", "postal_code": "3511 NK", "city": "Utrecht", "country": "NL"}
+      }
+    },
+    {
+      "bsn": "987654321",
+      "attributes": {
+        "family_name": {"family_name": "Meijer"},
+        "given_name": {"given_name": "Sanne"},
+        "birth_date": {"birth_date": "1994-12-30"},
+        "nationality": {"nationalities": ["NL"]},
+        "address": {"street": "Vismarkt", "house_number": "5", "postal_code": "9711 KS", "city": "Groningen", "country": "NL"}
+      }
+    },
+    {
+      "bsn": "555555555",
+      "attributes": {
+        "family_name": {"family_name": "Willems"},
+        "given_name": {"given_name": "Tom"},
+        "birth_date": {"birth_date": "1982-05-08"},
+        "nationality": {"nationalities": ["BE"]}
+      }
+    }
+  ]
+}
