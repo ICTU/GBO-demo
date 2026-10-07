@@ -276,10 +276,15 @@ consent_actor_matches(ctx) if {
 # Every delegated call needs a mandate for this provider and this rule,
 # whatever the rule declares. A direct call has no integrator to check.
 _check_integrator_mandate(spec, ctx) := _axis(
-	{"code": "INTEGRATOR_NOT_REGISTERED", "label": _mandate_label, "expected": _mandate_expected(spec, ctx), "skipped": "n/a (direct call)"},
+	{"code": "INTEGRATOR_NOT_REGISTERED", "fail_code": _mandate_fail_code(ctx), "label": _mandate_label, "expected": _mandate_expected(spec, ctx), "skipped": "n/a (direct call)"},
 	delegated(ctx),
 	integrator_mandated(spec, ctx),
 )
+
+# Without the admission register no mandate can be checked: a PIP failure.
+_mandate_fail_code(ctx) := "INTEGRATOR_REGISTER_UNAVAILABLE" if {
+	object.get(ctx, ["pip", "integrator_register"], "") == "unavailable"
+} else := "INTEGRATOR_NOT_REGISTERED"
 
 _mandate_label := "Integrator registered for represented party and rule"
 

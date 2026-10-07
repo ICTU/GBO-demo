@@ -600,11 +600,35 @@ test_delegated_call_by_unregistered_integrator_denied if {
 	fx.refused_for(result, "INTEGRATOR_NOT_REGISTERED")
 }
 
-test_delegated_call_without_admission_feed_denied if {
+# No admission register at all is a PIP failure, not a missing mandate: the
+# consumer learns only that access was denied.
+test_delegated_call_without_admission_register_is_pip_unavailable if {
 	result := gbo.response with input as _delegated_input(_integrator)
 		with data.dvtp.gbo.consent.resolved as _consent
 	result.decision == false
+	fx.client(result) == {"code": "ACCESS_DENIED"}
+	fx.request_code(result) == {"code": "PIP_UNAVAILABLE"}
+	fx.field_codes(result) == {"PIP_UNAVAILABLE"}
+	some d in fx.denied(result)
+	some t in d.trace
+	some step in t.steps
+	step.code == "INTEGRATOR_REGISTER_UNAVAILABLE"
+	step.status == "fail"
+}
+
+# An empty register is a register: nobody is admitted.
+test_delegated_call_with_empty_admission_register_denied if {
+	result := gbo.response with input as _delegated_input(_integrator)
+		with data.dvtp.gbo.consent.resolved as _consent
+		with data.entities.dvtp_participant as {}
 	fx.refused_for(result, "INTEGRATOR_NOT_REGISTERED")
+}
+
+# A direct call has no integrator, so the register is not needed.
+test_direct_call_without_admission_register_allowed if {
+	result := gbo.response with input as _dvtp_input("bd:ib:2025", "consent:identity", [2025])
+		with data.dvtp.gbo.consent.resolved as _consent
+	result.decision == true
 }
 
 # A mandate in input is not one the policy pulled: dropped, like pip.consent.
@@ -613,11 +637,23 @@ test_input_pip_integrator_is_not_trusted if {
 	req := object.union(_delegated_input(_integrator), {"context": {"pip": forged}})
 	ctx := gbo._ctx with input as req
 		with data.dvtp.gbo.consent.resolved as _consent
+		with data.entities.dvtp_participant as {}
 	not ctx.pip.integrator
 	result := gbo.response with input as req
 		with data.dvtp.gbo.consent.resolved as _consent
+		with data.entities.dvtp_participant as {}
 	result.decision == false
 	fx.refused_for(result, "INTEGRATOR_NOT_REGISTERED")
+}
+
+# Nor is the register's availability: only the engine decides it is missing.
+test_input_pip_register_state_is_not_trusted if {
+	forged := {"integrator_register": "unavailable"}
+	req := object.union(_delegated_input(_integrator), {"context": {"pip": forged}})
+	result := gbo.response with input as req
+		with data.dvtp.gbo.consent.resolved as _consent
+		with data.entities.dvtp_participant as _registered
+	result.decision == true
 }
 
 test_direct_call_carries_no_integrator_pip if {

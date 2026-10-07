@@ -266,13 +266,17 @@ _pip_with_consent := object.union(_input_pip, {"consent": consent.resolved}) if 
 	consent.resolved
 } else := _input_pip
 
-_input_pip := object.remove(object.get(input.context, "pip", {}), ["consent", "integrator"])
+_input_pip := object.remove(object.get(input.context, "pip", {}), ["consent", "integrator", "integrator_register"])
 
 # On a delegated call, the acting peer's entry in the admission register
-# (data.entities, pulled by OpenFTV). Without one the mandate check fails.
+# (data.entities, pulled by OpenFTV). Not listed fails the mandate check; no
+# register at all is a PIP failure.
 _pip_integrator := {"integrator": entry} if {
 	lib.delegated({"subject": input.subject})
 	entry := data.entities.dvtp_participant[input.subject.id]
+} else := {"integrator_register": "unavailable"} if {
+	lib.delegated({"subject": input.subject})
+	not data.entities.dvtp_participant
 } else := {}
 
 _eval(rid, field) := lib.evaluate(_rule_meta[rid].spec, object.union(_ctx, {"field": field}))
@@ -325,9 +329,9 @@ _field_code(evaluated) := "PIP_UNAVAILABLE" if {
 	e.code in _pip_unavailable
 } else := evaluated[0].code
 
-# The consent register, or its keys, did not answer: a server problem, not
-# the consumer's. The trace still shows which.
-_pip_unavailable := {"CONSENT_STATUS_UNAVAILABLE", "CONSENT_KEYS_UNAVAILABLE"}
+# The consent register, its keys or the admission register did not answer: a
+# server problem, not the consumer's. The trace still shows which.
+_pip_unavailable := {"CONSENT_STATUS_UNAVAILABLE", "CONSENT_KEYS_UNAVAILABLE", "INTEGRATOR_REGISTER_UNAVAILABLE"}
 
 # A deny's steps are under context.reason_admin.steps, an allow's under steps.
 _outcome_steps(outcome) := outcome.context.reason_admin.steps if {
