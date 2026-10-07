@@ -45,6 +45,14 @@ test_engine_denies_a_bd_consent_on_lvg_fields if {
 	result.context.reason_admin.code == "SCOPE_NOT_ALLOWED"
 }
 
+# Without a consent token no rule covers the LVG fields: LVG0001 needs a
+# consent, so the PID regime has nothing for them.
+test_engine_has_no_rule_for_lvg_without_a_consent_token if {
+	result := gbo.response with input as fx.request(fx.eudi_issuer, "lvg", fx.ownership_fields("999991772"), {})
+	result.decision == false
+	result.context.reason_admin.code == "NO_APPLICABLE_RULE"
+}
+
 test_engine_denies_an_lvg_consent_on_bd_fields if {
 	# The other direction: the ownership consent does not open income data.
 	result := gbo.response with input as fx.income(_lvg_ir, "consent:identity", [2025], fx.scope_headers("lvg:vbo:eigendom"))
