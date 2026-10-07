@@ -53,10 +53,10 @@ export default function OpaDecisionContext({ decision }: Props) {
   }
 
   const grantedCount = view.granted?.length ?? 0
-  const totalFields = grantedCount + (view.denied?.length ?? 0)
+  const deniedCount = view.denied?.length ?? 0
   return (
     <div style={{ marginTop: 10 }}>
-      <DecisionBanner view={view} grantedCount={grantedCount} totalFields={totalFields} />
+      <DecisionBanner view={view} grantedCount={grantedCount} deniedCount={deniedCount} />
       <DecisionDetail view={view} />
       {view.granted && view.granted.length > 0 && (
         <FieldList title="Toegestaan" color={ALLOW_COLOR} glyph="✓" fields={view.granted} />
@@ -75,11 +75,10 @@ export default function OpaDecisionContext({ decision }: Props) {
 }
 
 function DecisionBanner({
-  view, grantedCount, totalFields,
-}: { view: DecisionView; grantedCount: number; totalFields: number }) {
+  view, grantedCount, deniedCount,
+}: { view: DecisionView; grantedCount: number; deniedCount: number }) {
   const color = view.allowed ? ALLOW_COLOR : DENY_COLOR
   const bg = view.allowed ? 'rgba(80, 200, 120, 0.10)' : 'rgba(255, 80, 100, 0.10)'
-  const refused = totalFields - grantedCount
   return (
     <div style={{
       padding: '8px 12px', borderRadius: 6, marginBottom: 10,
@@ -91,7 +90,7 @@ function DecisionBanner({
       </div>
       <div style={{ fontSize: 11, color: MUTE_COLOR, textAlign: 'right' }}>
         {view.allowed
-          ? `${grantedCount} van ${totalFields} velden toegestaan`
+          ? `${grantedCount} ${grantedCount === 1 ? 'veld' : 'velden'} toegestaan`
           : <>
               {view.consumerCode && (
                 <span title="De code die de afnemer terugkreeg (FTV GraphQL-profiel): nooit welk veld of waarom">
@@ -104,7 +103,8 @@ function DecisionBanner({
                   {view.consumerCode ? 'Beheerder' : 'Reden'}: <span className="mono" style={{ color: 'var(--text)' }}>{view.adminCode}</span>
                 </span>
               )}
-              {totalFields > 0 && <> · <span style={{ whiteSpace: 'nowrap' }}>{refused} van {totalFields} velden geweigerd</span></>}
+              {/* A deny lists only the refused fields, so there is no total. */}
+              {deniedCount > 0 && <> · <span style={{ whiteSpace: 'nowrap' }}>{deniedCount} {deniedCount === 1 ? 'veld' : 'velden'} geweigerd</span></>}
             </>}
       </div>
     </div>
