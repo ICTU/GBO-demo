@@ -120,7 +120,7 @@
       "id": 3,
       "type": "logs",
       "title": "Autorisatie-beslissingen (OpenFTV decision-log)",
-      "description": "Canonieke PDP-beslissingen direct uit de OpenFTV PDP (embedded OPA). Elke regel: decision_id, allow/deny + reason, en de input (subject.id, context.resource.scope, context.trace_id). Klik op een regel om uit te klappen en trace_id naar Jaeger te volgen.",
+      "description": "Canonieke PDP-beslissingen direct uit de OpenFTV PDP (embedded OPA). Elke regel: decision_id, allow/deny + reason, en de input (subject.id, de GraphQL-velden, de request-headers). Klik op een regel om uit te klappen; de Fsc-Transaction-Id-header in context.headers koppelt de regel aan de FSC-transactie.",
       "datasource": {
         "type": "loki",
         "uid": "loki"

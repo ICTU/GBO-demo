@@ -546,8 +546,8 @@ func passthroughFile(path string) http.HandlerFunc {
 // {compose_service="openftv-pdp"} label. The line carries the whole
 // data.authz document, the policy's per-field detail included, which the ADL
 // does not; the dev-portal shows it as observability. Entries are matched on
-// input.context.trace_id, where the request-mapper puts the
-// Fsc-Transaction-Id.
+// the Fsc-Transaction-Id header the Inway passed to the PDP, as the ADL
+// lookup does.
 
 type lokiQueryResponse struct {
 	Status string `json:"status"`
@@ -558,13 +558,18 @@ type lokiQueryResponse struct {
 	} `json:"data"`
 }
 
-// traceIDOf extracts the trace_id from an OpenFTV decision-log entry.
-// the request-mapper places Fsc-Transaction-Id in input.context.trace_id.
+// traceIDOf returns the Fsc-Transaction-Id of an OpenFTV decision-log entry:
+// the header in input.context.headers, its name in any case.
 func traceIDOf(entry map[string]any) string {
 	input, _ := entry["input"].(map[string]any)
 	ctx, _ := input["context"].(map[string]any)
-	tid, _ := ctx["trace_id"].(string)
-	return tid
+	headers, _ := ctx["headers"].(map[string]any)
+	for name, value := range headers {
+		if tid, ok := value.(string); ok && strings.EqualFold(name, "Fsc-Transaction-Id") {
+			return tid
+		}
+	}
+	return ""
 }
 
 // normalizeDecisionEntry reshapes an OpenFTV decision-log line into the
@@ -674,7 +679,7 @@ func handleDecisions(cfg config, adl adlStore) http.HandlerFunc {
 }
 
 // lokiDecisionsForTrace pulls every "Decision Log" line since `since` that
-// matches the given trace_id and returns the parsed entries in
+// matches the given Fsc-Transaction-Id and returns the parsed entries in
 // chronological order (oldest first), deduplicated by decision_id.
 //
 // There is no rule-by-rule evaluation trace next to it: OpenFTV exposes no

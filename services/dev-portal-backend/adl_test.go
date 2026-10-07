@@ -88,7 +88,7 @@ func lokiWithDecision(t *testing.T, txID string) *httptest.Server {
 	line, _ := json.Marshal(map[string]any{
 		"decision_id": "d-1",
 		"path":        "authz",
-		"input":       map[string]any{"context": map[string]any{"trace_id": txID}},
+		"input":       map[string]any{"context": map[string]any{"headers": map[string]any{"Fsc-Transaction-Id": txID}}},
 		"result": map[string]any{
 			"allow":  false,
 			"reason": "NO_APPLICABLE_RULE",
@@ -219,5 +219,20 @@ func TestDecisionsRequiresATransactionID(t *testing.T) {
 
 	if status, _ := getDecisions(t, srv, ""); status != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", status)
+	}
+}
+
+func TestTraceIDOfReadsTheTransactionHeaderInAnyCase(t *testing.T) {
+	entry := func(headers map[string]any) map[string]any {
+		return map[string]any{"input": map[string]any{"context": map[string]any{"headers": headers}}}
+	}
+	if got := traceIDOf(entry(map[string]any{"fsc-transaction-id": "tx-1"})); got != "tx-1" {
+		t.Errorf("lower-case header: got %q, want tx-1", got)
+	}
+	if got := traceIDOf(entry(map[string]any{"X-Request-Id": "tx-2"})); got != "" {
+		t.Errorf("no transaction header: got %q, want none", got)
+	}
+	if got := traceIDOf(map[string]any{}); got != "" {
+		t.Errorf("no input: got %q, want none", got)
 	}
 }

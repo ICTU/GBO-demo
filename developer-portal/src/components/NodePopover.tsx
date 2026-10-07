@@ -215,7 +215,7 @@ function groupAttrs(attrs: Record<string, string>, nodeId: string): Record<strin
       push(label, 'body', v)
     }
     else if (k === 'gbo.authzen.response') push('← AuthZEN-response (terug van PDP)', 'body', v)
-    else if (k === 'gbo.opa.input') push('→ OPA-input (uitgaand naar OPA, na context-handler-enrichment)', 'body', v)
+    else if (k === 'gbo.opa.input') push('→ OPA-input (uitgaand naar OPA, na de request-mapper van het FTV GraphQL-profiel)', 'body', v)
     else if (k === 'gbo.opa.output') push('← OPA-output (decision terug van OPA)', 'response', v)
     else push('Other', k, v)
   }

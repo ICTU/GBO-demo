@@ -157,17 +157,17 @@ func newFscTransactionID() string {
 
 // fscTxIDCtxKey stashes the Fsc-Transaction-Id the middleware generated, so
 // the handler reuses it instead of minting a second UUID — which would break
-// the correlation between the response's trace_id and the PDP's trace.
+// the correlation between the response's trace_id and the transaction the
+// PDP's decision logs record.
 type fscTxIDCtxKeyType struct{}
 
 var fscTxIDCtxKey = fscTxIDCtxKeyType{}
 
 // withFscTraceContext ties the OTel trace id to the Fsc-Transaction-Id (UUID
 // v7, 128 bits — exactly the OTel trace-id format). Without it the backend
-// span gets a fresh random trace id while the PDP reconstructs its trace from
-// the FSC transaction id, and the two never match — breaking decision-log
-// lookups by trace_id (dev-portal /explain). Same pattern as the
-// eudi-adapter. Sets the Traceparent header BEFORE otelhttp extracts the
+// span gets a fresh random trace id, unrelated to the Fsc-Transaction-Id
+// header the PDP's decision logs record, so a trace from Jaeger no longer
+// leads to its decision. Same pattern as the eudi-adapter. Sets the Traceparent header BEFORE otelhttp extracts the
 // parent context.
 func withFscTraceContext(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

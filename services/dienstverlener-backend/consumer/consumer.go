@@ -76,8 +76,8 @@ type Result struct {
 	DenialCode string `json:"denial_code,omitempty"`
 	TraceID    string `json:"trace_id"`
 	// TransactionID is the identifier that travelled through the FSC chain
-	// (Fsc-Transaction-Id → X-Request-Id → the PDP's reconstructed trace, and
-	// so the OpenFTV decision log's input.context.trace_id). It equals TraceID
+	// (the Fsc-Transaction-Id header, which the OpenFTV decision log records
+	// in input.context.headers). It equals TraceID
 	// only when no caller supplied a traceparent; the dev-portal always does,
 	// so decision-log lookups must use this one.
 	TransactionID string `json:"fsc_transaction_id,omitempty"`

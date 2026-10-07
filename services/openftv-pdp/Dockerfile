@@ -11,17 +11,11 @@ WORKDIR /build
 ADD https://gitlab.com/digilab.overheid.nl/ecosystem/ftv/open-ftv/-/archive/${OPENFTV_REF}/open-ftv-${OPENFTV_REF}.tar.gz /tmp/open-ftv.tar.gz
 RUN tar -xzf /tmp/open-ftv.tar.gz -C /build --strip-components=1
 
-# GBO patch: GraphQL request-mapper (replaces the pdp-service context-
-# handler). Registered as the "graphqltocontext" mapping and wired into
-# the PDP controller via pdp.WithMappings (unwired upstream at this ref:
-# PDP_REQUEST_MAPPINGS is parsed into cfg.RequestMappings, but no app
-# reads it).
-COPY services/openftv-pdp/mapper/graphql.go eam/mapping/graphql.go
-COPY services/openftv-pdp/mapper/graphql_test.go eam/mapping/graphql_test.go
-# The FTV GraphQL profile mapper: the core module, linked in with a replace
-# directive, and its OpenFTV adapter, registered as the "ftvgraphql"
-# mapping. It runs next to graphqltocontext until the policy reads its
-# output.
+# GBO patch: the FTV GraphQL profile mapper. The core module is linked in
+# with a replace directive; its OpenFTV adapter is registered as the
+# "ftvgraphql" mapping and wired into the PDP controller via
+# pdp.WithMappings (unwired upstream at this ref: PDP_REQUEST_MAPPINGS is
+# parsed into cfg.RequestMappings, but no app reads it).
 COPY services/ftv-graphql-mapper /ftv-graphql-mapper
 COPY services/openftv-pdp/mapper/ftvgraphql.go eam/mapping/ftvgraphql.go
 COPY services/openftv-pdp/mapper/ftvgraphql_test.go eam/mapping/ftvgraphql_test.go
@@ -41,14 +35,11 @@ RUN set -eux; \
       fi; \
     }; \
     patch_assert eam/mapping/mapper.go \
-      '/mappers = append(mappers, BodyToContext)/a\ \t\tcase "graphqltocontext":\n\t\t\tmappers = append(mappers, GraphQLToContext)'; \
-    patch_assert eam/mapping/mapper.go \
-      '/mappers = append(mappers, GraphQLToContext)/a\ \t\tcase "ftvgraphql":\n\t\t\tmappers = append(mappers, FTVGraphQL)'; \
+      '/mappers = append(mappers, BodyToContext)/a\ \t\tcase "ftvgraphql":\n\t\t\tmappers = append(mappers, FTVGraphQL)'; \
     patch_assert apps/pdp/server/auth.go \
       's|WithOptions(pdp.WithADL(decisionLog))|WithOptions(pdp.WithADL(decisionLog), pdp.WithMappings(mapping.MappingsFromConfig(s.cfg.RequestMappings)...))|'; \
     patch_assert apps/pdp/server/auth.go \
       's|"gitlab.com/digilab.overheid.nl/ecosystem/ftv/open-ftv/eam/log/decisions"|"gitlab.com/digilab.overheid.nl/ecosystem/ftv/open-ftv/eam/log/decisions"\n\t"gitlab.com/digilab.overheid.nl/ecosystem/ftv/open-ftv/eam/mapping"|'; \
-    grep -q 'case "graphqltocontext":' eam/mapping/mapper.go; \
     grep -q 'case "ftvgraphql":' eam/mapping/mapper.go; \
     grep -q 'pdp.WithMappings(' apps/pdp/server/auth.go
 
@@ -63,7 +54,6 @@ RUN go mod edit -require=gbo-demo/ftv-graphql-mapper@v0.0.0 -replace=gbo-demo/ft
 FROM alpine:3.22
 RUN apk add --no-cache curl
 COPY --from=builder /pdp /
-COPY services/openftv-pdp/field-map.json /etc/gbo/field-map.json
 # The bundled GraphQL schemas and their manifest, one per FSC service
 # (GBO_FTV_GRAPHQL_DIR). The policy bundle pins their digests
 # (policies/dvtp/gbo/graphql_schemas.rego).
