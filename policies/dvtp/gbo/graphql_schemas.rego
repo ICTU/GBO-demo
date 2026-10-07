@@ -7,6 +7,6 @@ package dvtp.gbo.graphql_schemas
 
 digests := {
 	"bri": "sha256:e890aab3ea7d5988debf46f561517d85420f11fc5fe0eb0bf45cbaed77b48b72",
-	"brp": "sha256:635dbe16fa2152cf1c838bc458e840f8892466b7ab7e79587d112975437494ce",
+	"brp": "sha256:f8205460bf800367f5688f983dceaf881615c8dbde01704e0d061dfd2d978fa2",
 	"lvg": "sha256:f22ff9c1ee6bcd5b23a458cc5e79bd5a4ece3f074ea6a7717b980d57c6a6879a",
 }
