@@ -93,10 +93,15 @@ policy-check:
 	@echo "-> policies/ compiles"
 
 # Format diff and unit tests on top: slower, for before a PR rather than
-# after every edit.
+# after every edit. The consent tests sign and verify real ES256 tokens and
+# evaluate the decision for every field of the request, which takes several
+# seconds per test when they run in parallel: above OPA's default limit of
+# 5s per test. Same value as the opa test step in ci.yml.
+OPA_TEST_TIMEOUT ?= 30s
+
 policy-test: policy-check
 	$(OPA) fmt --diff policies
-	$(OPA) test policies -v
+	$(OPA) test policies -v --timeout $(OPA_TEST_TIMEOUT)
 
 up: policy-check certs require-ftv-postgres
 	docker compose up --build -d

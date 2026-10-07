@@ -27,16 +27,16 @@ rule_id := "DVT0001"
 # request for them is denied with its PID_NOT_PRESENT.
 covers_types := {"Bedrag"}
 
-# Explicitly covered fields: ALL object-edges + the scalars this rule
-# grants. Anything not listed here falls outside coverage → the engine's
-# closed-world default gives NO_APPLICABLE_RULE → DENY.
+# Explicitly covered fields: ALL object-edges, the root field + the scalars
+# this rule grants. Anything not listed here falls outside coverage → the
+# engine's closed-world default gives NO_APPLICABLE_RULE → DENY.
 #
 # Fields that live on the BelastingjaarAangifte interface are declared for
 # both the interface and the concrete AangifteIH: the resolved parent-type
 # depends on whether the query selects the field at interface level or
 # inside an `... on AangifteIH` fragment.
 covers_fields := {
-	# object-edges (parent-traversal requires these)
+	# the root field, which names the subject, and the object-edges
 	"Query.ingeschrevenPersoon",
 	"IngeschrevenPersoon.heeftBelastingjaarAangifte",
 	"AangifteIH.verzamelinkomen",
@@ -63,20 +63,24 @@ spec := {
 	# field we do not explicitly include → the engine's closed-world
 	# default denies with NO_APPLICABLE_RULE. No separate field-axis
 	# in lib anymore.
-	# The query names its subject with a placeholder in the bsn-arg: the
-	# service provider holds no identifier of the citizen. The subject is
-	# the one the verified consent token carries, and the source puts its
-	# own decrypted value in place after this allow. The income API takes a
-	# BSN, so only the identity placeholder is accepted. A literal value
-	# here would be a subject the caller chose, so it is denied.
+	# The query names its subject with a placeholder in the root field's
+	# bsn argument: the service provider holds no identifier of the
+	# citizen. The subject is the one the verified consent token carries,
+	# and the source puts its own decrypted value in place after this
+	# allow. The income API takes a BSN, so only the identity placeholder
+	# is accepted. A literal value here would be a subject the caller
+	# chose, so it is denied. Each selection of the root field is checked
+	# on its own argument.
 	"constraint_binding": [{
+		"field": "Query.ingeschrevenPersoon",
 		"arg": "bsn",
 		"placeholders": {"consent:identity"},
 	}],
-	# Per-year consent: every belastingjaar in the query's belastingjaren
-	# filter must be covered by a bd:ib:<year> scope in the consent. A
-	# citizen who consents to 2025 but not 2024 makes a query for both
-	# years fail with YEAR_NOT_COVERED.
+	# Per-year consent: every belastingjaar in the belastingjaren argument
+	# of heeftBelastingjaarAangifte must be covered by a bd:ib:<year>
+	# scope in the consent. A citizen who consents to 2025 but not 2024
+	# makes a query for both years fail with YEAR_NOT_COVERED.
 	"years_in_scopes": true,
+	"years_argument": {"field": "IngeschrevenPersoon.heeftBelastingjaarAangifte", "arg": "belastingjaren"},
 	"pip": null,
 }

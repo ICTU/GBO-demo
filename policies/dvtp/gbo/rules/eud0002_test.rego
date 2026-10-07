@@ -1,5 +1,6 @@
 package dvtp.gbo.rules.eud0002_test
 
+import data.dvtp.gbo.fixtures_test as fx
 import data.dvtp.gbo.lib
 import data.dvtp.gbo.rules.eud0001
 import data.dvtp.gbo.rules.eud0002
@@ -14,12 +15,13 @@ import data.dvtp.gbo.rules.eud0002
 
 _base_ctx := {
 	"subject": {"type": "org", "id": "00000004000000004000"},
-	"args": {"vars.bsn": "999991772"},
 	"time": "2026-07-27T12:00:00Z",
 	"resource": {"scope": ""},
 	"pip": {},
-	"field": "Query.akteVanOverlijden",
+	"field": fx.death_certificate_fields("999991772")[0],
 }
+
+_on(field) := object.union(object.remove(_base_ctx, ["field"]), {"field": field})
 
 # ── Happy path ──────────────────────────────────────────────────────────
 
@@ -46,8 +48,7 @@ test_deny_actor_not_in_allowed_actors if {
 # ── PID ─────────────────────────────────────────────────────────────────
 
 test_deny_pid_missing if {
-	ctx := object.union(_base_ctx, {"args": {"vars.bsn": ""}})
-	result := lib.evaluate(eud0002.spec, ctx)
+	result := lib.evaluate(eud0002.spec, _on(fx.death_certificate_fields("")[0]))
 	result.decision == false
 	result.context.reason_admin.code == "PID_NOT_PRESENT"
 }
@@ -57,9 +58,8 @@ test_deny_pid_missing if {
 # lib's third clause ("no requested years") would fail closed. This test
 # pins that the axis stays declared-off for this rule.
 
-test_allow_without_any_year_args if {
-	ctx := object.union(_base_ctx, {"args": {}})
-	result := lib.evaluate(eud0002.spec, ctx)
+test_allow_on_a_leaf_of_the_certificate if {
+	result := lib.evaluate(eud0002.spec, _on(fx.death_certificate_fields("999991772")[1]))
 	result.decision == true
 }
 

@@ -1,6 +1,7 @@
 package dvtp.gbo_test
 
 import data.dvtp.gbo
+import data.dvtp.gbo.fixtures_test as fx
 
 # LVG0001 through the engine: the ownership-check fields of the LVG source
 # bind to it, and the two consent regimes do not open each other's fields.
@@ -19,28 +20,22 @@ _lvg_consent := {
 	"dienstverlener_oin": _lvg_ir,
 }
 
-_lvg_fields := [
-	{"id": "vbo", "parent": "Query", "name": "vbo", "scalar": false},
-	{"id": "vbo.vboId", "parent": "Verblijfsobject", "name": "vboId", "scalar": true},
-]
-
-_lvg_input(actor, scope) := {
-	"subject": {"type": "org", "id": actor},
-	"context": {
-		"time": "2026-09-22T12:00:00Z",
-		"resource": {"scope": scope},
-		"resolved": {
-			"fields": _lvg_fields,
-			"args": {"bsn": "consent:identity", "vboId": "0632010000099412"},
-		},
-	},
-}
+_lvg_input(actor, scope) := fx.request(actor, "lvg", fx.ownership_fields("consent:identity"), fx.scope_headers(scope))
 
 test_engine_allows_the_ownership_check_via_lvg0001 if {
 	result := gbo.response with input as _lvg_input(_lvg_ir, "lvg:vbo:eigendom")
 		with data.dvtp.gbo.consent.resolved as _lvg_consent
 	result.decision == true
-	result.context.granted[0].rule == "LVG0001"
+	every g in result.context.granted {
+		g.rule == "LVG0001"
+	}
+}
+
+test_engine_denies_a_question_about_another_citizen if {
+	req := fx.request(_lvg_ir, "lvg", fx.ownership_fields("999991772"), fx.scope_headers("lvg:vbo:eigendom"))
+	result := gbo.response with input as req with data.dvtp.gbo.consent.resolved as _lvg_consent
+	result.decision == false
+	result.context.reason_admin.code == "CONSTRAINT_MISMATCH"
 }
 
 test_engine_denies_a_bd_consent_on_lvg_fields if {
@@ -52,17 +47,7 @@ test_engine_denies_a_bd_consent_on_lvg_fields if {
 
 test_engine_denies_an_lvg_consent_on_bd_fields if {
 	# The other direction: the ownership consent does not open income data.
-	result := gbo.response with input as {
-		"subject": {"type": "org", "id": _lvg_ir},
-		"context": {
-			"time": "2026-09-22T12:00:00Z",
-			"resource": {"scope": "lvg:vbo:eigendom"},
-			"resolved": {
-				"fields": [{"id": "aangifte.box1", "parent": "AangifteIH", "name": "box1Inkomen", "scalar": false}],
-				"args": {"bsn": "consent:identity", "belastingjaren.0": "2025"},
-			},
-		},
-	}
+	result := gbo.response with input as fx.income(_lvg_ir, "consent:identity", [2025], fx.scope_headers("lvg:vbo:eigendom"))
 		with data.dvtp.gbo.consent.resolved as _lvg_consent
 	result.decision == false
 }

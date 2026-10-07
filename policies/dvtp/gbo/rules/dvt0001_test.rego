@@ -1,5 +1,6 @@
 package dvtp.gbo.rules.dvt0001_test
 
+import data.dvtp.gbo.fixtures_test as fx
 import data.dvtp.gbo.lib
 import data.dvtp.gbo.rules.dvt0001
 
@@ -7,18 +8,17 @@ import data.dvtp.gbo.rules.dvt0001
 # DVT0001 axes — consent + constraint-binding.
 #
 # Tests run against lib.evaluate(spec, ctx) to isolate the check-axes from
-# the engine's field-binding. The spec is taken from the rule itself.
+# the engine's field-binding. The spec is taken from the rule itself. The
+# ctx carries the record of one field: the consent axes hold on every field,
+# the subject binding on the root field and the year coverage on
+# heeftBelastingjaarAangifte, each with that field's own argument.
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Minimal ctx-shape that carries a valid consent, the identity placeholder as subject,
-# a year filter covered by the consent's scopes, and the query-argument
-# that the constraint-binding checks. Overridden per test via object.union.
+# Minimal ctx-shape that carries a valid consent, on the field whose year
+# filter the consent's scopes cover. Overridden per test via object.union;
+# _on puts the ctx on another field.
 _base_ctx := {
 	"subject": {"type": "org", "id": "99999999900000000300"},
-	"args": {
-		"bsn": "consent:identity",
-		"belastingjaren.0": "2025",
-	},
 	"time": "2026-07-06T12:00:00Z",
 	"resource": {
 		"scope": "bd:ib:2025",
@@ -33,14 +33,36 @@ _base_ctx := {
 		"granted_scopes": ["bd:ib:2025"],
 		"dienstverlener_oin": "99999999900000000300",
 	}},
-	"field": "Query.ingeschrevenPersoon.heeftBelastingjaarAangifte",
+	"field": fx.declarations(fx.literal([2025])),
 }
+
+# object.union merges recursively, so a field is swapped, not merged.
+_on(field) := object.union(object.remove(_base_ctx, ["field"]), {"field": field})
+
+_on_person(bsn) := _on(fx.person(bsn))
+
+_on_years(years_arg) := _on(fx.declarations(years_arg))
 
 # ── Happy path ──────────────────────────────────────────────────────────
 
 test_allow_valid_consent_and_binding if {
 	result := lib.evaluate(dvt0001.spec, _base_ctx)
 	result.decision == true
+}
+
+test_allow_on_the_root_field_with_the_identity_placeholder if {
+	result := lib.evaluate(dvt0001.spec, _on_person("consent:identity"))
+	result.decision == true
+	_step_status(result, "CONSTRAINT_MISMATCH") == "pass"
+	_step_status(result, "YEAR_NOT_COVERED") == "skipped"
+}
+
+# A leaf carries no argument; only the consent axes apply to it.
+test_allow_on_a_leaf if {
+	result := lib.evaluate(dvt0001.spec, _on(fx.amount("box1Inkomen")))
+	result.decision == true
+	_step_status(result, "CONSTRAINT_MISMATCH") == "skipped"
+	_step_status(result, "YEAR_NOT_COVERED") == "skipped"
 }
 
 test_deny_invalid_signed_context if {
@@ -208,8 +230,7 @@ test_deny_scope_not_in_granted_scopes if {
 # for the subject of the consent, and only one the rule's API accepts.
 
 test_deny_literal_subject if {
-	ctx := object.union(_base_ctx, {"args": {"bsn": "999991772", "belastingjaren.0": "2025"}})
-	result := lib.evaluate(dvt0001.spec, ctx)
+	result := lib.evaluate(dvt0001.spec, _on_person("999991772"))
 	result.decision == false
 	result.context.reason_admin.code == "CONSTRAINT_MISMATCH"
 }
@@ -217,17 +238,15 @@ test_deny_literal_subject if {
 # The income API takes a BSN. A query asking for the source's pseudonym is
 # stopped here, before the source.
 test_deny_pseudonym_placeholder if {
-	ctx := object.union(_base_ctx, {"args": {"bsn": "consent:pseudonym", "belastingjaren.0": "2025"}})
-	result := lib.evaluate(dvt0001.spec, ctx)
+	result := lib.evaluate(dvt0001.spec, _on_person("consent:pseudonym"))
 	result.decision == false
 	result.context.reason_admin.code == "CONSTRAINT_MISMATCH"
-	result.context.reason_admin.expected == `bsn in ["consent:identity"]`
+	result.context.reason_admin.expected == `Query.ingeschrevenPersoon.bsn in ["consent:identity"]`
 }
 
 # The single placeholder of before is no placeholder any more.
 test_deny_retired_placeholder if {
-	ctx := object.union(_base_ctx, {"args": {"bsn": "consent:subject", "belastingjaren.0": "2025"}})
-	result := lib.evaluate(dvt0001.spec, ctx)
+	result := lib.evaluate(dvt0001.spec, _on_person("consent:subject"))
 	result.decision == false
 	result.context.reason_admin.code == "CONSTRAINT_MISMATCH"
 }
@@ -235,22 +254,29 @@ test_deny_retired_placeholder if {
 # A rule whose API handles both forms lists both placeholders, and then
 # allows either.
 _both_spec := object.union(dvt0001.spec, {"constraint_binding": [{
+	"field": "Query.ingeschrevenPersoon",
 	"arg": "bsn",
 	"placeholders": {"consent:identity", "consent:pseudonym"},
 }]})
 
 test_allow_either_placeholder_when_the_rule_lists_both if {
 	every placeholder in ["consent:identity", "consent:pseudonym"] {
-		ctx := object.union(_base_ctx, {"args": {"bsn": placeholder, "belastingjaren.0": "2025"}})
-		lib.evaluate(_both_spec, ctx).decision == true
+		lib.evaluate(_both_spec, _on_person(placeholder)).decision == true
 	}
 }
 
 # Listing a placeholder does not make it stand for someone: without a
 # verified consent the engine provides none, and neither matches.
 test_deny_listed_placeholder_that_stands_for_nobody if {
-	ctx := object.union(_base_ctx, {"resource": {"subject_placeholders": set()}})
+	ctx := object.union(_on_person("consent:identity"), {"resource": {"subject_placeholders": set()}})
 	result := lib.evaluate(_both_spec, ctx)
+	result.decision == false
+	result.context.reason_admin.code == "CONSTRAINT_MISMATCH"
+}
+
+# A placeholder from a schema default is no placeholder the caller wrote.
+test_deny_subject_from_a_schema_default if {
+	result := lib.evaluate(dvt0001.spec, _on(fx.person_as(["ingeschrevenPersoon"], fx.schema_default("consent:identity"))))
 	result.decision == false
 	result.context.reason_admin.code == "CONSTRAINT_MISMATCH"
 }
@@ -258,67 +284,56 @@ test_deny_listed_placeholder_that_stands_for_nobody if {
 # ── Year-coverage (each requested year needs bd:ib:<year> in consent) ───
 
 test_allow_multiple_years_all_consented if {
-	ctx := object.union(_base_ctx, {
-		"args": {"bsn": "consent:identity", "belastingjaren.0": "2025", "belastingjaren.1": "2024"},
-		"pip": {"consent": object.union(_base_ctx.pip.consent, {"granted_scopes": ["bd:ib:2025", "bd:ib:2024"]})},
-	})
+	ctx := object.union(_on_years(fx.literal([2025, 2024])), {"pip": {"consent": object.union(_base_ctx.pip.consent, {"granted_scopes": ["bd:ib:2025", "bd:ib:2024"]})}})
 	result := lib.evaluate(dvt0001.spec, ctx)
 	result.decision == true
 }
 
 test_deny_year_not_consented if {
 	# Consent covers 2025 only; the query asks for 2024 and 2025.
-	ctx := object.union(_base_ctx, {"args": {"bsn": "consent:identity", "belastingjaren.0": "2025", "belastingjaren.1": "2024"}})
-	result := lib.evaluate(dvt0001.spec, ctx)
+	result := lib.evaluate(dvt0001.spec, _on_years(fx.literal([2025, 2024])))
 	result.decision == false
 	result.context.reason_admin.code == "YEAR_NOT_COVERED"
 }
 
 test_deny_year_filter_missing if {
 	# No belastingjaren in the query — the bron would return all years,
-	# so per-year policy cannot hold: fail closed. (object.union merges
-	# recursively, so the key must be removed from the base ctx itself.)
-	ctx := object.union(
-		object.remove(_base_ctx, ["args"]),
-		{"args": object.remove(_base_ctx.args, ["belastingjaren.0"])},
-	)
-	result := lib.evaluate(dvt0001.spec, ctx)
+	# so per-year policy cannot hold: fail closed.
+	result := lib.evaluate(dvt0001.spec, _on(fx.declarations_without_years))
+	result.decision == false
+	result.context.reason_admin.code == "YEAR_NOT_COVERED"
+}
+
+# The source executes its own default, which need not be the bundled one.
+test_deny_years_from_a_schema_default if {
+	result := lib.evaluate(dvt0001.spec, _on_years(fx.schema_default([2025])))
+	result.decision == false
+	result.context.reason_admin.code == "YEAR_NOT_COVERED"
+}
+
+test_deny_years_with_an_explicit_null if {
+	result := lib.evaluate(dvt0001.spec, _on_years(fx.variable("jaren", null)))
 	result.decision == false
 	result.context.reason_admin.code == "YEAR_NOT_COVERED"
 }
 
 # ── Year-coverage via a GraphQL list variable ──────────────────────────
-# `heeftBelastingjaarAangifte(belastingjaren: $jaren)` — the PDP stores
-# the resolved variable whole under the un-suffixed key, not as
-# belastingjaren.0/.1. Both shapes must be recognised.
+# The mapper coerces the argument to a list, whether the query wrote a
+# literal list, a variable, or a list with a variable in it.
 
 test_allow_years_from_list_variable if {
-	ctx := object.union(
-		object.remove(_base_ctx, ["args"]),
-		{
-			"args": {"bsn": "consent:identity", "belastingjaren": [2025]},
-			"pip": {"consent": object.union(_base_ctx.pip.consent, {"granted_scopes": ["bd:ib:2025"]})},
-		},
-	)
-	result := lib.evaluate(dvt0001.spec, ctx)
+	result := lib.evaluate(dvt0001.spec, _on_years(fx.variable("jaren", [2025])))
 	result.decision == true
 }
 
 test_deny_year_from_list_variable_not_consented if {
-	ctx := object.union(
-		object.remove(_base_ctx, ["args"]),
-		{"args": {"bsn": "consent:identity", "belastingjaren": [2024, 2025]}},
-	)
-	result := lib.evaluate(dvt0001.spec, ctx)
+	result := lib.evaluate(dvt0001.spec, _on_years(fx.variable("jaren", [2024, 2025])))
 	result.decision == false
 	result.context.reason_admin.code == "YEAR_NOT_COVERED"
 }
 
-test_allow_year_from_scalar_variable if {
-	ctx := object.union(
-		object.remove(_base_ctx, ["args"]),
-		{"args": {"bsn": "consent:identity", "belastingjaren": 2025}},
-	)
-	result := lib.evaluate(dvt0001.spec, ctx)
+test_allow_years_from_a_variable_in_a_list if {
+	mixed := {"value": [2025], "origin": "mixed", "variables": ["jaar"]}
+	result := lib.evaluate(dvt0001.spec, _on_years(mixed))
 	result.decision == true
 }

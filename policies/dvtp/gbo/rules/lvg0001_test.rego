@@ -1,5 +1,6 @@
 package dvtp.gbo.rules.lvg0001_test
 
+import data.dvtp.gbo.fixtures_test as fx
 import data.dvtp.gbo.lib
 import data.dvtp.gbo.rules.lvg0001
 
@@ -27,12 +28,13 @@ _consent := {
 
 _base_ctx := {
 	"subject": {"type": "org", "id": _ir},
-	"args": {"bsn": "consent:identity", "vboId": "0632010000099412"},
 	"time": "2026-09-22T12:00:00Z",
 	"resource": {"scope": "lvg:vbo:eigendom", "subject_placeholders": {"consent:identity", "consent:pseudonym"}},
 	"pip": {"consent": _consent},
-	"field": "Query.vbo",
+	"field": fx.vbo("consent:identity"),
 }
+
+_on(field) := object.union(object.remove(_base_ctx, ["field"]), {"field": field})
 
 test_allow_consented_ownership_check if {
 	result := lib.evaluate(lvg0001.spec, _base_ctx)
@@ -59,16 +61,14 @@ test_deny_other_consumer_with_the_ir_consent if {
 }
 
 test_deny_question_about_another_citizen if {
-	ctx := object.union(_base_ctx, {"args": {"bsn": "999991772", "vboId": "0632010000099412"}})
-	result := lib.evaluate(lvg0001.spec, ctx)
+	result := lib.evaluate(lvg0001.spec, _on(fx.vbo("999991772")))
 	result.decision == false
 	result.context.reason_admin.code == "CONSTRAINT_MISMATCH"
 }
 
 # LVG's API takes a BSN, not a pseudonym.
 test_deny_pseudonym_placeholder if {
-	ctx := object.union(_base_ctx, {"args": {"bsn": "consent:pseudonym", "vboId": "0632010000099412"}})
-	result := lib.evaluate(lvg0001.spec, ctx)
+	result := lib.evaluate(lvg0001.spec, _on(fx.vbo("consent:pseudonym")))
 	result.decision == false
 	result.context.reason_admin.code == "CONSTRAINT_MISMATCH"
 }

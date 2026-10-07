@@ -111,7 +111,7 @@ jobs:
       - name: opa test
         run: |
           docker run --rm -v $(pwd)/policies:/w -w /w \
-            $OPA_IMAGE test /w -v
+            $OPA_IMAGE test /w -v --timeout 30s
       - name: rules.json is up to date
         run: |
           ./scripts/gen-rules-json.sh

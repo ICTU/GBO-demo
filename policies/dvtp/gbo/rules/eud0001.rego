@@ -64,7 +64,10 @@ spec := {
 	"consent_required": false,
 	"consent_must_cover_scope": false,
 	"pid_required": true,
+	# The disclosed BSN, in the root field's argument.
+	"subject_argument": {"field": "Query.ingeschrevenPersoon", "arg": "bsn"},
 	"allowed_years": allowed_years,
+	"years_argument": {"field": "IngeschrevenPersoon.heeftBelastingjaarAangifte", "arg": "belastingjaren"},
 	"allowed_actors": allowed_actors,
 	"years_in_scopes": false,
 	"pip": null,

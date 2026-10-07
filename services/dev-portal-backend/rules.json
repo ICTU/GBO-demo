@@ -25,6 +25,7 @@
       "constraint_binding": [
         {
           "arg": "bsn",
+          "field": "Query.ingeschrevenPersoon",
           "placeholders": [
             "consent:identity"
           ]
@@ -32,6 +33,10 @@
       ],
       "pip": null,
       "rule_id": "DVT0001",
+      "years_argument": {
+        "arg": "belastingjaren",
+        "field": "IngeschrevenPersoon.heeftBelastingjaarAangifte"
+      },
       "years_in_scopes": true
     }
   },
@@ -78,6 +83,14 @@
       "pid_required": true,
       "pip": null,
       "rule_id": "EUD0001",
+      "subject_argument": {
+        "arg": "bsn",
+        "field": "Query.ingeschrevenPersoon"
+      },
+      "years_argument": {
+        "arg": "belastingjaren",
+        "field": "IngeschrevenPersoon.heeftBelastingjaarAangifte"
+      },
       "years_in_scopes": false
     }
   },
@@ -119,6 +132,10 @@
       "pid_required": true,
       "pip": null,
       "rule_id": "EUD0002",
+      "subject_argument": {
+        "arg": "bsn",
+        "field": "Query.akteVanOverlijden"
+      },
       "years_in_scopes": false
     }
   },
@@ -141,6 +158,7 @@
       "constraint_binding": [
         {
           "arg": "bsn",
+          "field": "Query.vbo",
           "placeholders": [
             "consent:identity"
           ]

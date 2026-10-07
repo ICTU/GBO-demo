@@ -19,41 +19,30 @@ package authz
 # record of the decision, and nothing may depend on it as one.
 #
 # Input shape (OpenFTV AuthZEN mapping): {subject, action, resource,
-# context}. The GraphQL request-mapper inside this image places its
-# enrichment under input.context: context.resolved (GraphQL fields),
-# context.resource (scope/query/variables/pi), context.trace_id and
-# context.fsc.transaction_id. OpenFTV injects context.time. The consent is
-# not in input: data.dvtp.gbo.consent resolves it from the token in
-# context.headers while the policy evaluates.
+# context}. The FTV GraphQL mapper inside this image adds the field list of
+# a GraphQL request as input.resource.attributes.graphql, validated against
+# the schema of the FSC service in input.subject.attributes.service_name.
+# OpenFTV injects context.time. The consent is not in input:
+# data.dvtp.gbo.consent resolves it from the token in context.headers while
+# the policy evaluates.
 
 import data.dvtp.gbo
 
 default allow := false
 
-# Source-metadata is transported over its own FSC service and carries no
-# GraphQL body or citizen identifier. Subject, method and endpoint are each
-# pinned exactly, so all other non-GraphQL traffic stays fail-closed.
-#
-# What this rule can no longer tell is WHICH FSC service the request arrived
-# on. The PDP sees the caller's OIN, the method and the path; it does not see
-# the service name (the request-mapper reads fsc-authorization, the
-# transaction id, the scope header and the consent token — no service). The
-# flow property stood in for that, so dropping it widens this rule by exactly
-# one case: one of the two OINs below, arriving on a contract other than the
-# metadata one, issuing GET /.well-known/gbo.
-#
-# That is judged acceptable rather than harmless. FSC routes each service to
-# its own upstream (gbo-metadata-bd -> graphql-server:4000, the bri data
-# service -> the sidecar), and the document is a public description of a
-# service, carrying no citizen data. So the widening admits the same peer to
-# the same class of document — not a new principal, and not a new kind of
-# content. If the service name is ever surfaced to the PDP, gate on that and
-# the rule becomes exact again without reinstating a declared property.
+# The source-metadata document: public, without GraphQL body or citizen data.
+# Allowed only for two known peers, on one of the metadata services, on
+# exactly GET /.well-known/gbo. The FSC service is the signed service_name
+# of the access token. The same path on a data service is judged like any
+# other request: this exception does not skip the GraphQL checks there.
+_metadata_services := {"gbo-metadata-bd", "gbo-metadata-rvig"}
+
 _source_metadata_request if {
 	input.subject.id in {
 		"99999999900000000100", # local Docker Compose
 		"0000009961MINEZK0000", # simulation MinEZK
 	}
+	input.subject.attributes.service_name in _metadata_services
 	input.action.id == "GET"
 	input.resource.id == "/.well-known/gbo"
 }
