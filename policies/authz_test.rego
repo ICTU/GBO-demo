@@ -3,9 +3,8 @@ package authz_test
 import data.authz
 import data.dvtp.gbo.fixtures_test as fx
 
-# The metadata path is gated by subject, method and endpoint. No declared
-# property takes part, so the fixture carries none — every case below turns
-# on one of the three conditions that remain.
+# The metadata path is gated by subject, FSC service, method and path; each
+# case below varies one of them.
 metadata_input(method, path) := metadata_input_on("gbo-metadata-bd", method, path)
 
 metadata_input_on(service, method, path) := {
@@ -59,11 +58,8 @@ test_source_metadata_wrong_path_denied if {
 	not authz.allow with input as metadata_input("GET", "/.well-known/other")
 }
 
-# The metadata rule must not widen into the data path. An allowed metadata
-# peer making a GraphQL request falls through to the rule-engine, which
-# denies it on the evidence like any other request — the metadata branch
-# does not short-circuit it to allow. It carries no consent token and names
-# no subject, so the engine judges it a PID-regime request without a subject.
+# A metadata peer making a GraphQL request is judged by the rule engine like
+# any other request; the metadata rule must not short-circuit it to allow.
 test_graphql_request_from_metadata_peer_falls_through_to_engine if {
 	input_doc := fx.income("99999999900000000100", "", [2024], {})
 	not authz.allow with input as input_doc
@@ -71,10 +67,8 @@ test_graphql_request_from_metadata_peer_falls_through_to_engine if {
 	reason == "PID_NOT_PRESENT"
 }
 
-# `reason` is the only part of the decision detail OpenFTV transports: it
-# becomes reason_user.en in the AuthZEN response, and so the reason the
-# Authorization Decision Log records. It must be the policy's own reason
-# code, not a summary of it.
+# `reason` is what the decision log records, so it must be the policy's own
+# reason code, not a summary of it.
 test_deny_reason_is_the_reason_admin_code if {
 	input_doc := fx.request("99999999900000000100", "bri", [], {})
 	resp := authz.response with input as input_doc
@@ -83,8 +77,8 @@ test_deny_reason_is_the_reason_admin_code if {
 	reason == resp.context.reason_admin.code
 }
 
-# The FSC Inway returns reason_user to the caller in its 401, so the reason
-# is a code and never carries a value from the request.
+# The Inway returns the reason to the caller, so it must never carry request
+# data.
 test_deny_reason_is_a_bare_code if {
 	reason := authz.reason with input as metadata_input("POST", "/.well-known/gbo")
 	regex.match(`^[A-Z][A-Z0-9_]*$`, reason)

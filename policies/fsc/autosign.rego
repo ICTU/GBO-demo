@@ -1,55 +1,24 @@
 package doelbinding.auto_sign_contract
 
-# Contract acceptance for an OpenFSC Manager (the bronhouder side).
+# Contract auto-signing for the OpenFSC Manager on the source holder's side.
+# The Manager posts an AuthZEN evaluation when a peer submits a contract and
+# counter-signs only on allow. This decides whether parties may connect at
+# all, not what a request may read; it shares nothing with data.authz.
 #
-# SCOPE — this package decides whether a *contract* submitted by a peer is
-# counter-signed. It is deliberately separate from data.authz, which
-# decides individual *data requests* (the DvTP/EUDI GraphQL traffic). The
-# two share no rules, no reason codes and no input shape; a contract says
-# "these parties may connect at all", a request says "this field may be
-# read now". Do not import dvtp.gbo here.
+# The package name is fixed: the Manager sends doelbinding
+# "auto_sign_contract" and OpenFTV derives the OPA path from it. Renamed, the
+# policy resolves to nothing and every contract stays pending.
 #
-# WHO CALLS THIS — the Manager itself, not an Inway. With
-# --authzen-auto-sign-pdp-address set, ReceiveContractHandler posts an
-# AuthZEN evaluation the moment a peer submits a contract, and signs only
-# on decision=true (open-fsc manager/pkg/autosigner/pdp/authzen_auto_signer.go).
+# Input: subject.attributes holds self_peer_id and peer_ids (every party on
+# the contract), resource.attributes.grant_types the grant codes. The Manager
+# sends no service name and no delegation direction, so this judges who
+# connects, not to which service or in which role.
 #
-# PACKAGE NAME IS NOT FREE — the Manager hard-codes
-# context.doelbinding = "auto_sign_contract", and OpenFTV derives the OPA
-# entrypoint from it (eam/pdp/opa-embedded/auth.go, determinePath), so the
-# decision is read from data.doelbinding.auto_sign_contract. Renaming this
-# package silently disables the policy: the path then resolves to nothing
-# and every contract stays pending.
+# Admitted parties come from the onboarding register, pulled by OpenFTV into
+# data.entities.dvtp_participant. Each lists the sources it was admitted to,
+# by Peer ID, and for an integrator the service providers it acts for.
 #
-# INPUT (AuthZEN PARC, after OpenFTV's entity mapping):
-#
-#   input.subject  = {type: "peer_id", id: <our own Peer ID>,
-#                     attributes: {self_peer_id: <our Peer ID>,
-#                                  peer_ids: [<every Peer ID on the contract>]}}
-#   input.action   = {type: "name", id: "autosign_contract"}
-#   input.resource = {type: "contract", id: <content hash>,
-#                     attributes: {grant_types: [<int>, ...]}}
-#   input.context  = {doelbinding: "auto_sign_contract", ...}
-#
-# The payload is all the Manager knows at this point: no service name, no
-# outway thumbprint, and for a delegated grant no word on which party is the
-# delegator. Rules can therefore only judge WHO, not WHAT, and not in which
-# role.
-#
-# ADMISSION DATA — private DvTP parties are pulled from the onboarding
-# register by OpenFTV's native PIP pull and appear under
-# data.entities.dvtp_participant. Each entry explicitly lists the sources to
-# which it was admitted, identified directly by the source holder's Peer ID.
-# Service-specific admission needs OpenFSC to retain the service details in
-# its AuthZEN autosign input; see https://github.com/ICTU/GBO-demo/issues/240.
-# Technical participants such as the EUDI issuer are supplied by the same
-# operator-managed register configuration and therefore need no policy constant.
-# An integrator's entry also lists the service providers it may act for
-# (acts_for), which is what admits a delegated connection.
-#
-# OUTPUT — OpenFTV reads `allow` (bool) and, on deny, `reason` (string).
-# The whole package document reaches the decision log, so `response`
-# carries the detail needed to explain a refusal.
+# `reason` is the refusal code; `response` explains it in the decision log.
 
 default allow := false
 
@@ -61,14 +30,9 @@ reason := response.context.reason_admin.code if {
 
 # --- grant types ------------------------------------------------------
 #
-# Integer codes from the Manager's domain (manager/domain/contract/grant_type.go):
-#   1 servicePublication            3 delegatedServiceConnection
-#   2 serviceConnection             4 delegatedServicePublication
-#
-# This replaces --auto-sign-grants=serviceConnection, which the Manager
-# refuses to combine with a PDP address (manager/cmd/serve.go: both set is
-# a fatal error). The gate therefore has to live here: without it the
-# registry rule alone would also accept any delegated grant.
+# Codes from the OpenFSC Manager. Its --auto-sign-grants flag cannot be
+# combined with a PDP address, so the grant gate lives here; without it the
+# registry checks would also accept any delegated grant.
 
 grant_type_service_connection := 2
 
@@ -88,8 +52,7 @@ _parties := _pulled_participants
 
 _grant_types := {t | some t in input.resource.attributes.grant_types}
 
-# Every party on the contract except ourselves. A plain service connection
-# has exactly one; delegated grants carry more.
+# Every party on the contract except ourselves.
 _counterparties := {p |
 	some p in input.subject.attributes.peer_ids
 	p != input.subject.attributes.self_peer_id
@@ -115,8 +78,8 @@ _wrong_source := {p |
 
 # --- checks -----------------------------------------------------------
 #
-# Each check is a complete boolean rule (default false) so that a
-# malformed input denies rather than leaving the check undefined.
+# Each check defaults to false, so malformed input denies rather than
+# leaving a check undefined.
 
 default _well_formed := false
 
@@ -145,17 +108,12 @@ _delegated if {
 	_grant_types == {grant_type_delegated_service_connection}
 }
 
-# A delegated connection names three parties: the integrator whose Outway
-# connects (delegatee), the service provider it connects for (delegator), and
-# us. Both counterparties pass the admission checks above in their own right,
-# and one of them must be registered as acting for the other.
-#
-# Which one is the delegator is not in the input: OpenFSC sends peer IDs,
-# not grant data. So this admits the pair, not the direction. That
-# is enough for admission, because the request policy judges the direction
-# on every call: the access token names the delegator, and dvtp.gbo checks
-# the connecting peer's mandate for it. A contract signed the wrong way
-# round is admitted here and denied there.
+# A delegated connection names the integrator, the service provider it acts
+# for, and us. Both counterparties must pass the checks above, and one must
+# be registered as acting for the other. The input does not say which is the
+# delegator, so this admits the pair, not the direction. That is safe: the
+# request policy checks the mandate on every call, so a contract signed the
+# wrong way round is admitted here and denied there.
 default _delegation_registered := true
 
 _delegation_registered := false if {

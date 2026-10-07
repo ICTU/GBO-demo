@@ -4,14 +4,11 @@ import data.dvtp.gbo
 import data.dvtp.gbo.consent
 import data.dvtp.gbo.fixtures_test as fx
 
-# ═══════════════════════════════════════════════════════════════════════════
 # The consent PIP end to end: real ES256 tokens, the register mocked at
-# http.send. Tests that go through gbo.response assert the reason a PEP would
-# see; tests that read consent.resolved assert the attribute itself.
-# ═══════════════════════════════════════════════════════════════════════════
+# http.send. Tests through gbo.response assert the deny reason; tests on
+# consent.resolved assert the attribute itself.
 
-# Test-only P-256 keys, generated for this file. _register_key stands in for
-# the consent register's signing key.
+# Test-only P-256 key standing in for the consent register's signing key.
 _register_key := {
 	"kty": "EC", "crv": "P-256", "alg": "ES256", "use": "sig",
 	"kid": "gbo-consent-demo-1",
@@ -31,11 +28,9 @@ _jwks := {"keys": [object.remove(_register_key, ["d"])]}
 
 _register := "http://consent-register:4002"
 
-# The status goes over FSC, through this PDP's Outway (#383).
 _outway := "http://pdp-outway:8080/consent-status"
 
-# The runtime environment, pinned: tests use the defaults, whatever the
-# shell running them exports.
+# Pinned so the tests use the defaults, whatever the shell exports.
 _env := {"env": {}}
 
 # 2026-07-06T12:00:00Z, the evaluation time every input carries.
@@ -66,10 +61,8 @@ _sign(header, claims) := io.jwt.encode_sign(header, claims, _register_key)
 
 _token := _sign(_header, _claims)
 
-# Two fields are enough to reach a decision on the consent: these tests are
-# about the token and the register, not about binding fields to rules (the
-# engine tests cover that). Every field runs the whole rule cascade, so a
-# shorter request keeps these signature-heavy tests quick.
+# Two fields suffice: these tests are about the token and the register, and
+# every extra field runs the whole cascade in these already slow tests.
 _request(headers) := fx.request(
 	fx.hv,
 	"bri",
@@ -80,10 +73,9 @@ _request(headers) := fx.request(
 _input(token) := _request({"X-Gbo-Consent-Token": token})
 
 # ── The register, mocked at http.send ──────────────────────────────────────
-# Every mock answers only a well-formed request: an explicit timeout and
-# raise_error false. The status endpoint answers only an uncached request.
-# A policy that dropped either would get no answer, and the ALLOW test
-# below would fail — that is what pins "no cache in the revocation path".
+# The mocks answer only a request with a timeout and raise_error false, and
+# the status only an uncached one. A policy that dropped either would fail the
+# ALLOW test: that pins "no cache in the revocation path".
 
 _well_formed(req) if {
 	req.timeout != ""
@@ -126,15 +118,13 @@ _register_consent_unknown(req) := {"status_code": 404, "body": {"error": "consen
 	req.url == sprintf("%s/consents/c-signed/status", [_outway])
 }
 
-# The register is gone: every call fails at the network.
 _register_down(_) := _network_error
 
-# The keys answer — as they would from cache — and the status call fails.
+# The keys answer, as they would from cache; the status call fails.
 _register_status_down(req) := _keys(req)
 
 _register_status_down(req) := _network_error if endswith(req.url, "/status")
 
-# The resolved consent and the decision, for one token against one register.
 _on_active(token) := r if {
 	r := {"consent": consent.resolved, "response": gbo.response} with input as _input(token) with http.send as _register_active with opa.runtime as _env
 }
@@ -180,8 +170,7 @@ test_active_consent_resolves_the_signed_claims if {
 	c.consent_id == "c-signed"
 }
 
-# What the decision was taken on reaches the decision log, through the
-# response document — it is not in input.
+# The register's answer is not in input, so the response must carry it.
 test_response_carries_the_resolved_consent if {
 	r := _on_active(_token)
 	r.response.context.pip.consent == r.consent
@@ -199,8 +188,8 @@ test_revocation_takes_effect_on_the_next_request if {
 	_on_revoked(_token).response.decision == false
 }
 
-# The structural half: nothing in the status request lets http.send serve
-# it from cache, and a failure yields a response rather than an error.
+# Nothing lets http.send serve the status from cache, and a failure yields a
+# response rather than an error.
 test_status_request_is_uncached_and_bounded if {
 	req := consent._status_request with input as _input(_token) with opa.runtime as _env
 	count({"cache", "force_cache"} & object.keys(req)) == 0
@@ -213,7 +202,6 @@ test_status_request_goes_through_the_outway if {
 	req.url == sprintf("%s/consents/c-signed/status", [_outway])
 }
 
-# The keys are public and come from the register itself, not over FSC.
 test_keys_come_from_the_register_directly if {
 	req := consent._jwks_request with opa.runtime as _env
 	req.url == sprintf("%s/.well-known/jwks.json", [_register])
@@ -224,7 +212,6 @@ test_status_request_carries_the_transaction_id if {
 	req.headers["Fsc-Transaction-Id"] == "tx-330"
 }
 
-# Without the FSC transaction id, X-Request-ID stands in for it.
 test_status_request_falls_back_to_the_request_id if {
 	req := consent._status_request with input as object.union(
 		_request({"X-Gbo-Consent-Token": _token}),
@@ -234,10 +221,9 @@ test_status_request_falls_back_to_the_request_id if {
 	req.headers["Fsc-Transaction-Id"] == "req-465"
 }
 
-# ── Trace context on the status request (#365) ─────────────────────────────
-# The register's status record belongs to the request's trace: the caller's
-# when it came along, otherwise the transaction id. The span is the lookup's
-# own, so the record hangs under it rather than under the caller's span.
+# ── Trace context on the status request ────────────────────────────────────
+# The register's record joins the request's trace, under a span of the
+# lookup's own rather than the caller's.
 
 _callers_trace := "4bf92f3577b34da6a3ce929d0e0e4736"
 
@@ -279,8 +265,6 @@ test_status_request_falls_back_to_the_transaction_id if {
 	substring(tp, 3, 32) == "0af7651916cd43dd8448eb211c80319c"
 }
 
-# No usable trace — a malformed traceparent, a transaction id that is not a
-# trace id — sends none rather than a malformed one.
 test_status_request_without_a_usable_trace_carries_none if {
 	req := consent._status_request with input as _request({"X-Gbo-Consent-Token": _token, "traceparent": "garbage"})
 		with opa.runtime as _env
@@ -317,8 +301,7 @@ test_forged_signature_denies if {
 	_reason(_on_active(forged)) == "CONSENT_SIGNATURE_INVALID"
 }
 
-# The register's signature over other claims: here, another citizen's
-# encrypted identity.
+# A real signature over altered claims: another citizen's encrypted identity.
 test_tampered_claims_deny if {
 	[header, _, signature] := split(_token, ".")
 	payload := base64url.encode_no_pad(json.marshal(object.union(_claims, {"encrypted_subject": {"99999999900000000200": {"identity": {"key_set_version": 20260101, "value": "b3RoZXI="}}}})))
@@ -347,8 +330,8 @@ test_expired_token_denies_token_expired if {
 	_reason(_on_active(token)) == "CONSENT_TOKEN_EXPIRED"
 }
 
-# Within the 30s leeway the token still verifies, and the consent's own
-# validity window denies it instead.
+# Within the 30s leeway the token verifies; the consent's own validity
+# window denies it instead.
 test_expiry_within_clock_skew_verifies if {
 	r := _on_active(_sign(_header, _claims_expiring(_now - 20)))
 	r.consent.context_valid == true
@@ -369,8 +352,8 @@ test_not_before_beyond_clock_skew_denies if {
 
 # ── Other claims ────────────────────────────────────────────────────────────
 
-# One test per violation: each signs and evaluates one token, so a slow
-# runner never has to fit a whole series into one test's time limit.
+# One test per violation, so a slow runner never has to fit a series of
+# signatures into one test's time limit.
 _denies_context_invalid(header, claims) if {
 	_reason(_on_active(_sign(header, claims))) == "CONSENT_CONTEXT_INVALID"
 }
@@ -399,8 +382,6 @@ test_valid_until_other_than_exp_denies_context_invalid if {
 	_denies_context_invalid(_header, object.union(_claims, {"valid_until": "2030-01-01T00:00:00Z"}))
 }
 
-# A token that carries no encrypted subject could never be answered by a
-# source, so it is not a consent token.
 _with_encrypted_subject(value) := object.union(object.remove(_claims, ["encrypted_subject"]), {"encrypted_subject": value})
 
 test_missing_encrypted_subject_denies_context_invalid if {

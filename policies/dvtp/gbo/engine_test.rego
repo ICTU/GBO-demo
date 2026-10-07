@@ -3,11 +3,8 @@ package dvtp.gbo_test
 import data.dvtp.gbo
 import data.dvtp.gbo.fixtures_test as fx
 
-# Engine-level ctx-shape. The consent is resolved by the policy itself
-# (data.dvtp.gbo.consent, covered end to end in consent_test.rego); these
-# tests stand a resolved consent in for it with `with`, so they exercise the
-# engine alone. The engine puts the subject placeholders on ctx.resource for
-# the constraint-binding rule.
+# The policy resolves the consent itself (tested in consent_test.rego). These
+# tests stand in a resolved consent with `with`, so they test the engine alone.
 
 _pip_consent := {"context_valid": true, "status_available": true, "exists": true, "withdrawn": false, "granted_scopes": ["bd:ib:2025"], "valid_until": "2030-01-01T00:00:00Z", "dienstverlener_oin": "peer-oin-123"}
 
@@ -23,7 +20,6 @@ test_ctx_resource_has_both_placeholders if {
 	ctx.resource.subject_placeholders == {"consent:identity", "consent:pseudonym"}
 }
 
-# Without a verified consent the placeholders stand for nobody.
 test_ctx_resource_placeholders_empty_without_consent if {
 	ctx := gbo._ctx with input as {"subject": {"type": "org", "id": "x"}, "context": {}}
 	ctx.resource.subject_placeholders == set()
@@ -34,8 +30,7 @@ test_ctx_resource_placeholders_empty_for_an_unverified_consent if {
 	ctx.resource.subject_placeholders == set()
 }
 
-# What a consent-based query may name its subject with is the policy's to
-# say. A request cannot move it by supplying its own.
+# The policy decides which placeholders exist; a request cannot add its own.
 test_ctx_resource_placeholders_are_not_taken_from_the_request if {
 	req := {"subject": {"type": "org", "id": "x"}, "context": {"resource": {"subject_placeholders": ["999991772"]}}}
 	ctx := gbo._ctx with input as req with data.dvtp.gbo.consent.resolved as _pip_consent
@@ -69,10 +64,8 @@ test_ctx_resource_scope_twice_is_no_scope if {
 	ctx.resource.scope == ""
 }
 
-# A consent in input is not a consent the policy verified. Nothing upstream
-# is meant to set pip.consent any more; if something does, it is dropped
-# rather than decided on, and without a consent token the request is judged
-# under the PID regime, where its placeholder names nobody.
+# A consent in input is not one the policy verified, so it is dropped. With
+# no token the request is in the PID regime, where a placeholder names nobody.
 test_input_pip_consent_is_not_trusted if {
 	req := object.union(_dvtp_input("bd:ib:2025", "consent:identity", [2025]), {"context": {"pip": {"consent": _consent}}})
 	ctx := gbo._ctx with input as req
@@ -98,16 +91,13 @@ test_pid_evidence_selects_brp_rule_by_fields if {
 	}
 }
 
-# Without a consent token there is no consent to report, and the response
-# document says nothing about one.
 test_response_without_consent_carries_none if {
 	result := gbo.response with input as fx.income(fx.eudi_issuer, "999991772", [2024], {})
 	not result.context.pip
 }
 
-# ── The mapper's output, checked before any rule ─────────────────────────
-# Section 9.5 of the FTV GraphQL profile, in its order. Each failure denies
-# the request as a whole, whatever the rules would say.
+# ── The mapper's output, checked before any rule (Section 9.5) ───────────
+# Each failure denies the whole request, whatever the rules would say.
 
 test_mapper_output_missing_denies if {
 	req := object.remove(_dvtp_input("bd:ib:2025", "consent:identity", [2025]), ["resource"])
@@ -139,9 +129,8 @@ test_schema_of_an_unpinned_service_denies if {
 	result.context.reason_admin.subcode == "SCHEMA_MISMATCH"
 }
 
-# What the mapper could not verify, the engine passes on unchanged. The
-# Inway hands the body to the PDP only for Content-Type exactly
-# application/json; with anything else the mapper sees no body.
+# The mapper's code passes unchanged. The Inway hands the PDP the body only
+# for Content-Type exactly application/json; otherwise the mapper sees none.
 test_unverifiable_request_denies_with_the_mappers_code if {
 	output := {
 		"profile": "ftv-graphql/0.1",
@@ -178,8 +167,7 @@ test_typename_alone_has_no_data_fields if {
 }
 
 # ── Root fields are data fields ──────────────────────────────────────────
-# A root field runs a resolver with its arguments. It is bound by its own
-# key, and each selection is judged on its own arguments.
+# Bound by their own key; each selection is judged on its own arguments.
 
 # Two persons under two aliases: the second names a BSN the caller chose.
 test_each_selection_of_the_root_is_judged_on_its_own_argument if {
@@ -235,8 +223,7 @@ test_years_written_as_a_variable_are_read if {
 	result.decision == true
 }
 
-# An edge DVT0001 does not cover is denied, also when its leaves would
-# inherit coverage from their type.
+# Denied even though the edge's leaves would inherit coverage from their type.
 test_edge_outside_the_rule_denies if {
 	fields := array.concat(
 		fx.income_fields("consent:identity", fx.literal([2025])),
@@ -250,8 +237,7 @@ test_edge_outside_the_rule_denies if {
 }
 
 # ── The regime decides which rules are evaluated ─────────────────────────
-# Under a consent token only consent rules judge a field, without one only
-# PID rules. The trace of a denied field shows exactly those.
+# The trace of a denied field shows only the rules of the request's regime.
 
 _evaluated_rules(result) := {e.rule | some d in result.context.denied_fields; some e in d.evaluated}
 
@@ -268,10 +254,9 @@ test_a_pid_request_is_judged_by_pid_rules_only if {
 	_evaluated_rules(result) == {"EUD0001"}
 }
 
-# ── Deny-reason surfacing for consent-based requests ─────────────────────
-# Fields covered by both DVT0001 and EUD0001 (the root, the declarations,
-# box1Inkomen). Under a consent token only DVT0001 judges them, so the
-# reason is its own, never EUD0001's PID_NOT_PRESENT.
+# ── Deny reasons under a consent token ───────────────────────────────────
+# DVT0001 and EUD0001 cover the same fields; only DVT0001 judges them here,
+# so the reason is its own, never EUD0001's PID_NOT_PRESENT.
 
 _consent := {
 	"context_valid": true,
@@ -283,9 +268,8 @@ _consent := {
 	"dienstverlener_oin": "99999999900000000300",
 }
 
-# The consent itself is valid throughout — each case fails on exactly one
-# DvTP axis, so the asserted code is the genuine reason and nothing else.
-# The consent is supplied per test, as the resolved one.
+# The consent is valid throughout and supplied per test; each case fails on
+# exactly one check, so the asserted code is the genuine reason.
 _dvtp_input(scope, bsn, years) := fx.income(fx.hv, bsn, years, fx.scope_headers(scope))
 
 test_dvtp_deny_surfaces_year_not_covered if {
@@ -309,8 +293,7 @@ test_dvtp_deny_surfaces_constraint_mismatch if {
 	result.context.reason_admin.code == "CONSTRAINT_MISMATCH"
 }
 
-# A placeholder the rule does not accept is denied as a whole request, not
-# passed on for the source to refuse.
+# Denied here rather than passed on for the source to refuse.
 test_dvtp_deny_placeholder_the_rule_does_not_accept if {
 	result := gbo.response with input as _dvtp_input("bd:ib:2025", "consent:pseudonym", [2025])
 		with data.dvtp.gbo.consent.resolved as _consent
@@ -318,10 +301,9 @@ test_dvtp_deny_placeholder_the_rule_does_not_accept if {
 	result.context.reason_admin.code == "CONSTRAINT_MISMATCH"
 }
 
-# ── Deny-reason surfacing for PID-based requests ─────────────────────────
-# The mirror of the cases above: without a consent token only the EUDI
-# rules judge, so DVT0001's CONSENT_CONTEXT_INVALID never hides the
-# genuine EUDI reason.
+# ── Deny reasons without a consent token ─────────────────────────────────
+# Only the EUDI rules judge, so DVT0001's CONSENT_CONTEXT_INVALID never hides
+# the EUDI reason.
 
 _eudi_input(actor, year) := fx.income(actor, "999991772", [year], {})
 
@@ -338,10 +320,7 @@ test_eudi_deny_surfaces_actor_not_allowed if {
 }
 
 # ── Evidence decides the regime ──────────────────────────────────────────
-# Every rule covering the field is evaluated on every request. A consent
-# token selects the consent regime; its absence, the PID regime. There is
-# no third case: "both" cannot occur when one regime is defined as the
-# absence of the other.
+# A token selects the consent regime, its absence the PID regime: no third.
 
 test_dvtp_allow_grants_via_consent_rule if {
 	result := gbo.response with input as _dvtp_input("bd:ib:2025", "consent:identity", [2025])
@@ -352,17 +331,14 @@ test_dvtp_allow_grants_via_consent_rule if {
 	}
 }
 
-# The decision log records the consent the decision was taken on: it is not
-# in input, so the response document carries it.
+# The consent is not in input, so the response carries it for the log.
 test_dvtp_response_carries_the_consent if {
 	result := gbo.response with input as _dvtp_input("bd:ib:2025", "consent:identity", [2025])
 		with data.dvtp.gbo.consent.resolved as _consent
 	result.context.pip.consent == _consent
 }
 
-# No consent token, so the request is judged under the PID regime. A
-# placeholder stands for the subject of a consent, and there is none: the
-# query names nobody, whichever placeholder it uses.
+# Without a consent token a placeholder stands for nobody.
 test_no_consent_token_and_a_placeholder_names_no_subject if {
 	every placeholder in ["consent:identity", "consent:pseudonym"] {
 		result := gbo.response with input as _dvtp_input("bd:ib:2025", placeholder, [2025])
@@ -372,31 +348,22 @@ test_no_consent_token_and_a_placeholder_names_no_subject if {
 }
 
 # A consent-based consumer that omits its token and names a real BSN meets
-# the EUDI rules' allowed_actors, not its consent — which is why that
-# whitelist must stay disjoint from the consent-based consumers (test below).
+# only the EUDI rules' allowed_actors: hence the invariant below.
 test_no_consent_token_and_a_real_bsn_meets_the_actor_check if {
 	result := gbo.response with input as _dvtp_input("bd:ib:2025", "999991772", [2025])
 	result.decision == false
 	result.context.reason_admin.code == "ACTOR_NOT_ALLOWED"
 }
 
-# ── The invariant the PID regime now rests on ────────────────────────────
-# A consent token selects the consent regime and its absence the PID
-# regime. Absence of a header is therefore what puts a request under the
-# EUDI rules, and the only gate left on them is each rule's own
-# allowed_actors.
+# ── Invariant: EUDI actors are never consent-based consumers ─────────────
+# Without a consent token a request falls under the EUDI rules, gated only by
+# each rule's allowed_actors. An OIN that is both a designated issuer and a
+# consent-based consumer could skip the citizen's consent, with its scope and
+# year checks, by omitting the token. This is a deployment fact, so the test
+# pins the seeded consumers.
 #
-# That is safe exactly as long as no OIN is BOTH a designated EDI-issuer
-# and a consent-based consumer. Such an OIN could skip the citizen's
-# consent — and with it consent_must_cover_scope and years_in_scopes —
-# simply by omitting the consent token, and be judged instead under the
-# rule's own allowed_years. This test is the enforcement of that
-# invariant; it is a deployment fact, so it pins the seeded consumer
-# rather than deriving anything.
-#
-# If it fails: do NOT widen the test. Either that OIN must not hold a
-# DvTP contract, or the PID regime needs positive evidence of its own (a
-# verified PID assertion would remove the fall-through).
+# If it fails, do NOT widen this test. Either that OIN must not hold a DvTP
+# contract, or the PID regime needs evidence of its own (a verified PID).
 _dvtp_consumer_oins := {
 	"99999999900000000300", # HV, seed-bri-connection-hv.sh
 	"99999999900000001100", # integrator for HV, seed-bri-delegation-int.sh
@@ -411,8 +378,8 @@ test_pid_rule_actors_are_disjoint_from_consent_consumers if {
 }
 
 # ── Every GBO rule names one regime ──────────────────────────────────────
-# A rule that names none is evaluated in both regimes; one that names both
-# would be judged as a consent rule only. Neither is meant for a GBO rule.
+# A rule naming none is evaluated in both regimes; one naming both is judged
+# as a consent rule only.
 
 _regime_violations contains sprintf("%s: names no regime", [rid]) if {
 	some rid, m in gbo._rule_meta
@@ -444,9 +411,8 @@ test_regime_check_catches_none_and_both if {
 }
 
 # ── Every check that reads an argument names it ──────────────────────────
-# A rule that turns on a year, PID or placeholder check without naming the
-# field and argument it reads denies every request at runtime (fail closed).
-# This catches the omission before the rule reaches a PDP.
+# Such a check without its field and argument denies every request (fail
+# closed); this catches the omission before the rule reaches a PDP.
 
 _argument_violations contains sprintf("%s: %s without years_argument", [rid, check]) if {
 	some rid, m in gbo._rule_meta
@@ -480,7 +446,6 @@ test_every_argument_check_names_its_argument if {
 	count(violations) == 0
 }
 
-# The check itself catches each omission.
 test_argument_check_catches_a_rule_that_names_none if {
 	broken := {
 		"years": {"rule_id": "Y", "covers_fields": set(), "spec": {"rule_id": "Y", "allowed_years": {2025}}},
@@ -496,8 +461,6 @@ test_argument_check_catches_a_rule_that_names_none if {
 }
 
 # ── Failed evidence gives the regime's own reason ────────────────────────
-# A PID-regime request without a subject surfaces PID_NOT_PRESENT; a
-# consent token that does not verify surfaces the consent's reason.
 
 test_pid_regime_without_a_subject_surfaces_pid_not_present if {
 	result := gbo.response with input as fx.income(fx.eudi_issuer, "", [2024], {})
@@ -505,9 +468,8 @@ test_pid_regime_without_a_subject_surfaces_pid_not_present if {
 	result.context.reason_admin.code == "PID_NOT_PRESENT"
 }
 
-# Without a subject, the other fields fail on the next check — here the
-# actor, as the mortgage provider is no designated issuer. The missing
-# subject is still the request's reason.
+# The other fields fail on the actor (the mortgage provider is no designated
+# issuer), but the missing subject is still the request's reason.
 test_pid_regime_without_a_subject_outranks_the_actor if {
 	result := gbo.response with input as fx.income(fx.hv, "", [2025], {})
 	result.decision == false
@@ -515,9 +477,8 @@ test_pid_regime_without_a_subject_outranks_the_actor if {
 	result.context.reason_admin.code == "PID_NOT_PRESENT"
 }
 
-# The exception is the PID regime's alone: under a consent token the worst
-# field reason stands, here the integrator's over a field no consent rule
-# covers.
+# Under a consent token the worst field reason stands: here the integrator's,
+# over a field no consent rule covers.
 test_consent_regime_keeps_the_worst_field_reason if {
 	fields := array.concat(
 		fx.income_fields("consent:identity", fx.literal([2025])),
@@ -543,8 +504,7 @@ test_unverifiable_consent_surfaces_consent_context_invalid if {
 	result.context.reason_admin.code == "CONSENT_CONTEXT_INVALID"
 }
 
-# The consent PIP can say which check failed; the engine reports that, not
-# the generic code.
+# The engine reports the specific code the consent PIP gives.
 test_unverifiable_consent_surfaces_its_invalid_code if {
 	result := gbo.response with input as _unverifiable_input
 		with data.dvtp.gbo.consent.resolved as {
@@ -558,9 +518,8 @@ test_unverifiable_consent_surfaces_its_invalid_code if {
 }
 
 # ── Delegated calls through the engine ───────────────────────────────────
-# The mandate comes from the admission register (data.entities, pulled by
-# OpenFTV), never from input. These cases cover the wiring the rule tests
-# stand in for with a ready-made pip.integrator.
+# The mandate comes from the admission register (data.entities), never from
+# input. The rule tests use a ready-made pip.integrator; these test the wiring.
 
 _integrator := "99999999900000001100"
 
@@ -615,7 +574,6 @@ test_input_pip_integrator_is_not_trusted if {
 	result.context.reason_admin.code == "INTEGRATOR_NOT_REGISTERED"
 }
 
-# A direct call carries no mandate into the rules' context at all.
 test_direct_call_carries_no_integrator_pip if {
 	ctx := gbo._ctx with input as _dvtp_input("bd:ib:2025", "consent:identity", [2025])
 		with data.dvtp.gbo.consent.resolved as _consent

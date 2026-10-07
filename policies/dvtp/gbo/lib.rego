@@ -1,61 +1,41 @@
 package dvtp.gbo.lib
 
 # ═══════════════════════════════════════════════════════════════════════════
-# DvTP evaluation library for GBO rule-engine rules.
+# Evaluation library for GBO rules.
 #
-# Consent-driven primitives (vs. iWlz' role-driven equivalent): each rule-
-# spec describes which consent-checks must hold for the current field. The
-# engine calls evaluate(spec, ctx) per field; ctx.field carries the field
-# the check applies to (needed for field-in-consent).
+# The engine calls evaluate(spec, ctx) for one rule on one requested field.
+# The spec says which checks the rule requires; evaluate runs them in a fixed
+# order and denies with the code of the first check that fails.
 #
-# Cascade-output: evaluate emits ALL checks with their status (pass / fail /
-# skipped). The first failing check wins as the DENY-reason; subsequent
-# checks are "skipped" (short-circuit semantics). This gives the UI a real
-# trace that can be rendered like iWlz' "Show PDP evaluation (N steps)"
-# instead of only the final code.
+# The result also lists every check as a step (pass, fail or skipped), with
+# every check after the first failure marked skipped. The decision does not
+# need this list. It exists for the developer portal, a demo feature that
+# shows per rule which checks passed, failed or were skipped.
 #
-# ctx-shape (provided by the dvtp.gbo engine):
-#   ctx := {
-#     "subject":  { ...AuthZEN subject: id = the FSC peer that connects,
-#                   attributes.outway_delegator_peer_id = the peer it
-#                   connects for, on a delegated connection },
-#     "time":     "<RFC3339>",
-#     "resource": { "scope": "...",
-#                   "subject_placeholders": {<placeholders that stand for
-#                                            the subject of the consent>} },
-#     "pip":      { "consent": { "context_valid": bool, "exists": bool,
-#                                "status_available": bool, "withdrawn": bool,
-#                                "valid_until": "<RFC3339>",
-#                                "granted_scopes": [...],
-#                                "dienstverlener_oin": "...",
-#                                "invalid_code": "<code>" },
-#                 "integrator": { "active": bool,
-#                                 "acts_for": [{"peer_id", "rules"}] } },
-#                 (consent resolved by data.dvtp.gbo.consent; invalid_code
-#                  only when context_valid is false. integrator is the
-#                  acting peer's admission entry, on a delegated call only)
-#     "field":    { the mapper's record of the field under evaluation:
-#                   path, parentType, field, leaf, args (FTV GraphQL
-#                   profile, Section 6.2) }
-#   }
+# ctx, built by the dvtp.gbo engine:
+#   subject   AuthZEN subject: id is the FSC peer that connects,
+#             attributes.outway_delegator_peer_id the peer it connects for
+#             on a delegated connection
+#   time      RFC3339
+#   resource  scope, and subject_placeholders: the placeholders that stand
+#             for the subject of a verified consent
+#   pip       consent (from data.dvtp.gbo.consent): context_valid,
+#             invalid_code, status_available, exists, withdrawn, valid_until,
+#             granted_scopes, dienstverlener_oin. integrator: the acting
+#             peer's admission entry {active, acts_for}, on a delegated call
+#   field     the mapper's record of this field: path, parentType, field,
+#             leaf, args
 #
-# evaluate(spec, ctx) returns:
-#   ALLOW: {"decision": true,  "context": {"steps": [{code, status, label, expected, actual?}, ...]}}
-#   DENY:  {"decision": false, "context": {"reason_admin": {
-#            "code": "<first-fail>",
-#            "rule": "<spec.rule_id>",
-#            "expected": "<first-fail.expected>",
-#            "steps": [...]}}}
+# evaluate returns
+#   allow: {"decision": true,  "context": {"steps": [...]}}
+#   deny:  {"decision": false, "context": {"reason_admin":
+#            {"code", "rule", "expected", "steps"}}}
 # ═══════════════════════════════════════════════════════════════════════════
 
-# What a consent-based query names its subject with. The consumer holds no
-# identifier of the citizen: the consent token carries encrypted values per
-# party, and the source puts its own decrypted value in this place after an
-# allow. The placeholder says which form the source's API takes:
-# identity_placeholder the BSN, pseudonym_placeholder the source's own
-# pseudonym of the citizen. A rule lists the ones its API accepts in its
-# constraint_binding. A query that names anything else is asking about someone
-# the consent does not vouch for, or in a form the API does not take.
+# The placeholders a consent-based query names its subject with. The consumer
+# holds no identifier of the citizen; after an allow the source puts in their
+# place its own value from the consent token: the BSN for identity, its own
+# pseudonym of the citizen for pseudonym. A rule lists the ones its API takes.
 identity_placeholder := "consent:identity"
 
 pseudonym_placeholder := "consent:pseudonym"
@@ -64,8 +44,8 @@ subject_placeholders := {identity_placeholder, pseudonym_placeholder}
 
 evaluate(spec, ctx) := _outcome(spec, _short_circuit(_raw_steps(spec, ctx)))
 
-# The steps are computed once per evaluation and passed on: a function
-# result is not cached, so recomputing them per branch doubles the work.
+# The steps are passed in, computed once: Rego does not cache function
+# results, so computing them per branch would double the work.
 _outcome(spec, steps) := {"decision": true, "context": {"steps": steps}} if {
 	every s in steps {
 		s.status != "fail"
@@ -84,11 +64,10 @@ _outcome(spec, steps) := {"decision": true, "context": {"steps": steps}} if {
 	}
 }
 
-# ── Cascade: raw step-list + short-circuit modifier ──────────────────────────
-# All checks are first evaluated independently (pass/fail). Then we mark all
-# checks AFTER the first fail as "skipped" — this fits the semantics that a
-# DENY truncates the cascade, and the iWlz rendering that shows "skipped" as
-# a separate status.
+# ── Cascade ──────────────────────────────────────────────────────────────────
+# Each check is evaluated on its own; _short_circuit then marks every check
+# after the first failure as skipped, so the portal trace stops where the
+# decision did.
 
 _raw_steps(spec, ctx) := [
 	_check_consent_context_valid(spec, ctx),
@@ -118,19 +97,11 @@ _first_fail_index(steps) := min(fails) if {
 	count(fails) > 0
 } else := -1
 
-# Steps after the first fail get status "skipped" (= no longer evaluated
-# because an earlier axis already denied). Steps up to and including the
-# fail keep their original status.
 _skip_after(step, i, fail_idx) := object.union(step, {"status": "skipped"}) if i > fail_idx
 
 _skip_after(step, i, fail_idx) := step if i <= fail_idx
 
-# ── The consent-axes as _check_*(spec, ctx) → {code, status, label, expected} ─
-# Each check has a PASS-clause (the condition holds → step.status="pass"),
-# a FAIL-clause (the condition does not hold → step.status="fail"), and a
-# SKIPPED-clause (the spec does not activate this check → step.status="skipped").
-# Verbose but unavoidable in Rego — boolean-rules are undefined-when-false
-# and cannot be passed directly as function-arg.
+# ── Checks: each _check_*(spec, ctx) returns one step ────────────────────────
 
 _check_consent_exists(spec, ctx) := _axis(
 	{"code": "CONSENT_NOT_FOUND", "label": "Consent exists in PIP", "expected": "consent.exists == true"},
@@ -157,10 +128,8 @@ _check_consent_covers_scope(spec, ctx) := _axis(
 )
 
 _check_constraint(spec, ctx) := step if {
-	# All constraint-bindings on this field must be satisfied (AND). For
-	# multi-binding we report the FIRST unsatisfied binding as the
-	# expected-string so that the error message stays specific. For
-	# ALL-pass we show the number of bindings that were verified.
+	# Every binding on this field must hold; a failure names the first one
+	# that does not.
 	bindings := _bound_constraints(spec, ctx)
 	count(bindings) > 0
 	failing := [fm | some fm in bindings; not constraint_binding_satisfied(fm, ctx)]
@@ -181,19 +150,14 @@ _constraint_skip_reason(spec) := "not on this field" if {
 	count(object.get(spec, "constraint_binding", [])) > 0
 } else := "no constraint configured"
 
-# PID regime: the request carries no consent token, and it names a subject.
-# The EUDI adapter sends the BSN from the wallet's PID disclosure as it is,
-# in the argument the rule names in `subject_argument` (the root field's
-# `bsn`). In V1 nothing verifies the PID itself — the adapter trusts the
-# disclosure — so this axis asserts only that the request is about someone
-# and is not a consent request.
+# PID regime: no consent token, and a subject named in the rule's
+# subject_argument, where the EUDI adapter puts the BSN from the wallet's PID
+# disclosure. The PID itself is not verified here; the adapter trusts it.
 #
-# The consent half keeps the regimes apart. pip.consent is present exactly
-# when the request carried a consent token, verified or not, and both
-# regimes name a subject, so without it this axis would pass on every
-# consent-based request as well. It holds on every field. The subject half
-# is checked on the field that carries the argument; the other fields of
-# the request depend on that field, which the AND across fields requires.
+# The no-token half keeps the regimes apart: pip.consent is present whenever
+# a consent token came along, verified or not, and both regimes name a
+# subject. It holds on every field; the subject half only on the field that
+# carries the argument, and the AND across fields covers the rest.
 _check_pid_present(spec, ctx) := _axis(
 	{"code": "PID_NOT_PRESENT", "label": _pid_label, "expected": _pid_expected(spec), "skipped": "n/a (no PID-flow)"},
 	_flag(spec, "pid_required"),
@@ -230,21 +194,17 @@ _subject_named(spec, ctx) if {
 	not bound_here(spec.subject_argument, ctx)
 }
 
-# Scope-authorization: only active when the rule explicitly declares an
-# allowed_scopes set. Without this axis a rule would only be scoped via
-# covers_fields (implicitly through the engine's closed-world), and any
-# arbitrary resource.scope-string could pass through — the authoritative
-# source of scope per policy-path would be missing. DvTP covers this via
-# consent-scope-cover; EUDI via a rule-declared whitelist.
+# Active only when the rule declares allowed_scopes. It pins the scopes a
+# rule accepts, which consent-scope coverage alone does not: a token for
+# another scope, sent with that scope, covers it.
 _check_scope_allowed(spec, ctx) := _axis(
 	{"code": "SCOPE_NOT_ALLOWED", "label": "Scope allowed for rule", "expected": sprintf("%q in spec.allowed_scopes", [_scope(ctx)]), "skipped": "no scope-whitelist configured"},
 	count(object.get(spec, "allowed_scopes", set())) > 0,
 	_scope(ctx) in object.get(spec, "allowed_scopes", set()),
 )
 
-# Direct year authorization for source-owned EUDI queries. Unlike the DvTP
-# consent path this checks the actual GraphQL selector against a rule-owned
-# set; it does not manufacture or trust a GBO catalog scope.
+# Every requested year must be in the rule's own allowed_years. No scope is
+# involved.
 _check_years_allowed(spec, ctx) := _years_step(
 	{"code": "YEAR_NOT_ALLOWED", "label": "Requested years allowed for rule", "passed": "allowed", "missing": "%v in spec.allowed_years", "skipped": "no year-whitelist configured"},
 	count(object.get(spec, "allowed_years", set())) > 0,
@@ -252,14 +212,10 @@ _check_years_allowed(spec, ctx) := _years_step(
 	[y | some y in _requested_years(spec, ctx); not sprintf("%v", [y]) in {sprintf("%v", [a]) | some a in object.get(spec, "allowed_years", set())}],
 )
 
-# Year-coverage: only active when the rule sets years_in_scopes. Every
-# belastingjaar requested in the query (the argument the rule names in
-# years_argument) must be covered by a scope of the form bd:ib:<year> in the available
-# scopes — the consent's granted_scopes (DvTP) or the rule's
-# allowed_scopes (EUDI). The BD bron-schema returns ALL aangiften for a
-# person, so per-year authorization is only enforceable when the year
-# selector travels inside the query; a missing filter therefore fails
-# closed.
+# Every requested year needs a bd:ib:<year> scope among the available
+# scopes. The source returns every year for a person unless the query
+# filters, so per-year authorization holds only when the filter is in the
+# query: a missing filter fails closed.
 _check_years_in_scopes(spec, ctx) := _years_step(
 	{"code": "YEAR_NOT_COVERED", "label": "Requested years covered by scopes", "passed": "covered", "missing": "bd:ib:%v in scopes", "skipped": "n/a"},
 	_flag(spec, "years_in_scopes"),
@@ -267,12 +223,9 @@ _check_years_in_scopes(spec, ctx) := _years_step(
 	[y | some y in _requested_years(spec, ctx); not sprintf("bd:ib:%v", [y]) in _available_scopes(spec, ctx)],
 )
 
-# Actor-authorization: only explicitly designated actors may trigger this
-# rule. Supports e.g. eIDAS art. 5a-style designation: one designated
-# EDI-issuer per attestation-type. Without this axis, any OIN that passes
-# the FSC-transport (grant + inway) could trigger the rule; with this
-# axis there is a separate policy-check that the actor is also allowed
-# at rule-level.
+# Active only when the rule declares allowed_actors: only designated parties
+# may use the rule (as in eIDAS art. 5a designation of issuers), on top of
+# what the FSC grant admits.
 _check_actor_allowed(spec, ctx) := _axis(
 	{"code": "ACTOR_NOT_ALLOWED", "label": "Actor allowed for rule", "expected": sprintf("%q in spec.allowed_actors", [acting_party(ctx)]), "skipped": "no actor-whitelist configured"},
 	count(object.get(spec, "allowed_actors", set())) > 0,
@@ -280,19 +233,14 @@ _check_actor_allowed(spec, ctx) := _axis(
 )
 
 # ── Acting and represented party (FSC delegation) ──────────────────────────
-# A service provider calls a source itself, or through an integrator: a
-# processor that connects on its behalf under a DelegatedServiceConnection
-# grant naming the service provider as delegator. The source's Manager then
-# issues the access token to the integrator with the service provider in its
-# `act` claim, and the Inway hands both to the PDP: subject.id is the peer
-# that connects, subject.attributes.outway_delegator_peer_id the peer it
-# connects for (open-fsc common/authzen AuthZenSubject). The token is signed
-# by the source's own Manager from a contract all three parties signed, so
-# the delegator is as trustworthy as subject.id.
+# A service provider calls a source itself, or through an integrator under a
+# DelegatedServiceConnection grant. The Inway then gives the integrator as
+# subject.id and the provider as outway_delegator_peer_id. Both come from a
+# token the source's own Manager signed, on a contract all three parties
+# signed, so the delegator is as trustworthy as subject.id.
 #
-# The decision uses both. Consent binds the represented party: the service
-# provider the citizen consented to. The acting party needs authority of its
-# own for that provider and this rule: consent does not give it any.
+# Consent binds the represented party: the provider the citizen consented
+# to. The acting party needs a mandate of its own; consent gives it none.
 
 acting_party(ctx) := object.get(ctx.subject, "id", "")
 
@@ -325,10 +273,8 @@ consent_actor_matches(ctx) if {
 	party == consent_actor
 }
 
-# Every delegated call needs a mandate, whatever the rule: an integrator is
-# admitted per service provider and per rule, and a peer without one gets
-# nothing from connecting on someone's behalf. A direct call has no
-# integrator to check.
+# Every delegated call needs a mandate for this provider and this rule,
+# whatever the rule declares. A direct call has no integrator to check.
 _check_integrator_mandate(spec, ctx) := _axis(
 	{"code": "INTEGRATOR_NOT_REGISTERED", "label": _mandate_label, "expected": _mandate_expected(spec, ctx), "skipped": "n/a (direct call)"},
 	delegated(ctx),
@@ -358,9 +304,9 @@ _step(code, label, expected, status) := {
 
 _step_skipped(code, label, expected) := _step(code, label, expected, "skipped")
 
-# A step from a check: skipped when the rule does not declare it (active is
-# false), otherwise pass or fail on whether it holds. Both arguments are
-# true or false, never undefined: an undefined argument would drop the step.
+# A step from a check: skipped when the rule does not declare it, otherwise
+# pass or fail. active and holds must be true or false, never undefined: an
+# undefined argument would drop the step.
 _axis(check, active, holds) := _step(check.code, check.label, check.expected, "pass") if {
 	active
 	holds
@@ -368,8 +314,8 @@ _axis(check, active, holds) := _step(check.code, check.label, check.expected, "p
 	active
 } else := _step_skipped(check.code, check.label, object.get(check, "skipped", "n/a"))
 
-# The year checks have a third outcome: no years in the query at all, which
-# fails closed (the source would return every year).
+# The year checks have a third outcome: no years in the query, which fails
+# closed because the source would return every year.
 _years_step(check, active, spec, ctx, missing) := _step_skipped(check.code, check.label, "not on this field") if {
 	active
 	not _years_apply(spec, ctx)
@@ -390,7 +336,7 @@ _consent(ctx, name, default_value) := object.get(ctx, ["pip", "consent", name], 
 
 _scope(ctx) := object.get(object.get(ctx, "resource", {}), "scope", "")
 
-# ── Consent-scope-check ──────────────────────────────────────────────────────
+# ── Consent scope ────────────────────────────────────────────────────────────
 
 default consent_covers_scope(_) := false
 
@@ -399,24 +345,21 @@ consent_covers_scope(ctx) if {
 	s == ctx.resource.scope
 }
 
-# ── Constraint-binding-check ─────────────────────────────────────────────────
+# ── Constraint binding ───────────────────────────────────────────────────────
 
-# A binding names a field, its argument and the placeholders the rule's API
-# accepts in it. The argument must be one of those, and a placeholder only
-# counts while it stands for someone: without a verified consent the engine
-# leaves resource.subject_placeholders empty, and nothing matches.
+# The argument must be a placeholder the binding lists, and one that stands
+# for someone: without a verified consent resource.subject_placeholders is
+# empty, so nothing matches.
 constraint_binding_satisfied(fm, ctx) if {
 	value := argument(fm, ctx)
 	value in fm.placeholders
 	value in object.get(ctx.resource, "subject_placeholders", set())
 }
 
-# ── Year-coverage helpers ────────────────────────────────────────────────────
-# The requested belastingjaren are the value of the argument the rule names
-# in years_argument, on that field. The mapper coerced it to a list,
-# whether the query wrote a literal list, a variable, or one year. A rule
-# that checks years but names no argument applies everywhere and finds no
-# years: it fails closed rather than check nothing.
+# ── Years ────────────────────────────────────────────────────────────────────
+# The requested years are the value of years_argument on its own field,
+# which the mapper coerces to a list. A rule that checks years but names no
+# argument finds none on any field, so it fails closed.
 
 _years_apply(spec, ctx) if bound_here(spec.years_argument, ctx)
 
@@ -424,9 +367,7 @@ _years_apply(spec, ctx) if not spec.years_argument
 
 _requested_years(spec, ctx) := {y | some y in argument(spec.years_argument, ctx)}
 
-# Scopes available to the flow: the consent's granted_scopes (DvTP) union
-# the rule's own allowed_scopes (EUDI). Exactly one of the two is non-empty
-# per flow.
+# The consent's granted_scopes together with the rule's own allowed_scopes.
 _available_scopes(spec, ctx) := scopes if {
 	consent_scopes := object.get(object.get(ctx.pip, "consent", {}), "granted_scopes", [])
 	rule_scopes := object.get(spec, "allowed_scopes", [])
@@ -434,20 +375,17 @@ _available_scopes(spec, ctx) := scopes if {
 }
 
 # ── Arguments ────────────────────────────────────────────────────────────────
-# A check that reads a query argument is bound to the field that carries it:
-# `field` names the field key ("ParentType.field"), `arg` the argument. It
-# applies to that field's own record only, with that record's own value, so
-# two selections of the field are each judged on their own arguments (FTV
-# GraphQL profile, Section 9.4). On every other field it does not apply.
+# A check that reads an argument is bound to one field ("ParentType.field")
+# and argument, and reads that field's own value: each selection of the field
+# is judged on its own arguments. On other fields the check does not apply.
 
 field_key(field) := sprintf("%s.%s", [field.parentType, field.field])
 
 bound_here(binding, ctx) if field_key(ctx.field) == binding.field
 
-# The argument's value as the request supplied it. Undefined when the
-# argument is absent, or when its value came from a schema default in whole
-# or in part: the source executes its own default, which the bundled schema
-# need not match. A check that needs the value then fails.
+# The value as the request supplied it. Undefined when absent or (partly)
+# from a schema default: the source applies its own default, which need not
+# match the bundled schema, so a check that needs the value fails.
 argument(binding, ctx) := entry.value if {
 	entry := ctx.field.args[binding.arg]
 	entry.origin != "schema-default"
@@ -476,9 +414,8 @@ _check_consent_context_valid(spec, ctx) := _axis(
 	_consent(ctx, "context_valid", false) == true,
 )
 
-# Which check failed, when the consent PIP could tell: a forged, expired or
-# unverifiable token each deny with a reason of their own. Without one — no
-# consent at all — the generic code stands.
+# A forged, expired or unverifiable token denies with the consent PIP's own
+# code for it; without one, e.g. no consent at all, the generic code stands.
 _context_invalid_code(ctx) := code if {
 	code := ctx.pip.consent.invalid_code
 	is_string(code)

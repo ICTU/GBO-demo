@@ -6,11 +6,8 @@ import data.dvtp.gbo.rules.eud0001
 import data.dvtp.gbo.rules.eud0002
 
 # ═══════════════════════════════════════════════════════════════════════════
-# EUD0002 axes — actor + PID, without a GBO-owned scope or year-axis.
-#
-# Same approach as eud0001_test: evaluate lib.evaluate(spec, ctx) directly so
-# the axes are isolated from the engine's field-binding, with the spec taken
-# from the rule itself.
+# EUD0002 checks (actor, PID; no scope or year), through lib.evaluate with
+# the rule's own spec, apart from the engine.
 # ═══════════════════════════════════════════════════════════════════════════
 
 _base_ctx := {
@@ -36,7 +33,7 @@ test_allow_simulation_eudi_issuer if {
 	result.decision == true
 }
 
-# ── Actor-authorization ─────────────────────────────────────────────────
+# ── Actor ───────────────────────────────────────────────────────────────
 
 test_deny_actor_not_in_allowed_actors if {
 	ctx := object.union(_base_ctx, {"subject": {"type": "org", "id": "00000001234567890000"}})
@@ -53,10 +50,8 @@ test_deny_pid_missing if {
 	result.context.reason_admin.code == "PID_NOT_PRESENT"
 }
 
-# ── Year-axis is off ────────────────────────────────────────────────────
-# The BRP query carries no belastingjaren; with years_in_scopes on, the
-# lib's third clause ("no requested years") would fail closed. This test
-# pins that the axis stays declared-off for this rule.
+# ── Year check is off ───────────────────────────────────────────────────
+# The BRP query has no year filter, so a year check would fail closed.
 
 test_allow_on_a_leaf_of_the_certificate if {
 	result := lib.evaluate(eud0002.spec, _on(fx.death_certificate_fields("999991772")[1]))
@@ -71,8 +66,7 @@ test_year_axis_skipped if {
 }
 
 # ── Rule separation ─────────────────────────────────────────────────────
-# The two EUDI rules must not cover each other's fields: a BD field must
-# never be released under the akte-scope, and vice versa.
+# Neither EUDI rule may release the other's fields.
 
 test_covers_fields_disjoint_from_eud0001 if {
 	count(eud0001.covers_fields & eud0002.covers_fields) == 0
