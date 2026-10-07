@@ -98,8 +98,8 @@ services:
         condition: service_healthy
 
   # OpenFTV PDP with the embedded OPA/Rego engine — the authorization
-  # endpoint for FSC-Inway (AuthZEN, HTTPS on :8443). The GraphQL
-  # context-handler runs INSIDE this image as a request-mapper
+  # endpoint for FSC-Inway (AuthZEN, HTTPS on :8443). The FTV GraphQL
+  # profile mapper runs INSIDE this image as a request-mapper
   # (services/openftv-pdp/mapper, PDP_REQUEST_MAPPINGS). The policy itself
   # verifies the signed consent context and checks its live status at the
   # consent-register, per evaluation (http.send, policies/dvtp/gbo/consent.rego).
@@ -125,10 +125,10 @@ services:
       - PDP_ADL_PG_URL=postgres://ftv:${FTV_POSTGRES_PASSWORD}@postgres-ftv:5432/ftv_adl?sslmode=disable
       - PDP_ADL_SERVICE_NAME=gbo
       - PDP_LOG_LEVEL=info
-      # graphqltocontext feeds the current policy; ftvgraphql adds the FTV
-      # GraphQL profile's field list as input.resource.attributes.graphql,
-      # from the schema of the FSC service the request is for.
-      - PDP_REQUEST_MAPPINGS=graphqltocontext,ftvgraphql
+      # ftvgraphql adds the FTV GraphQL profile's field list as
+      # input.resource.attributes.graphql, from the schema of the FSC service
+      # the request is for. Without it the policy denies every request.
+      - PDP_REQUEST_MAPPINGS=ftvgraphql
       # Native OpenFTV PIP pull: refresh the DvTP admission entities over a
       # dedicated network shared only with the register.
       - PDP_PIP_PULL_CONFIGS=/pip-pull/dvtp-onboarding.yaml

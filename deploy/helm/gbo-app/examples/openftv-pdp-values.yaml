@@ -19,6 +19,10 @@ env:
     value: "true"
   - name: PDP_ADL_SERVICE_NAME
     value: gbo
+  # The FTV GraphQL profile mapper, built into the image: it gives the policy
+  # the request's field list. Without it the policy denies every request.
+  - name: PDP_REQUEST_MAPPINGS
+    value: ftvgraphql
   # The Authorization Decision Log. Postgres-backed and required: the PDP
   # exits at startup without it. A dedicated schema keeps the ADL's own
   # migration bookkeeping out of the way of anything else in a shared
