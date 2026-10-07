@@ -21,6 +21,7 @@ jobs:
       fail-fast: false
       matrix:
         service:
+          - asi-provider
           - bron-sidecar
           - brp-graphql-server
           - bsnk-mock
@@ -252,6 +253,7 @@ jobs:
       fail-fast: false
       matrix:
         service:
+          - asi-provider
           - dev-portal-backend
           - dvtp-onboarding-register
           - eudi-adapter

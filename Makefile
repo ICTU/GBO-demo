@@ -1,7 +1,7 @@
 .PHONY: up down logs clean certs require-ftv-postgres demo-manager manager-seed fsc-local-env fsc-ca fsc-up fsc-all-up fsc-brp-certs fsc-consent-register-certs fsc-gbo-pdp-certs fsc-ir-certs fsc-int-certs fsc-databases fsc-down fsc-test fsc-clean \
         fsc-seed-bri fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-lvg fsc-seed-int fsc-seed-brp fsc-seed-rvig-source fsc-seed-metadata fsc-pdp-cert pdp-up \
         eudi-images source-metadata-up \
-        require-development-cas provision-development-certificates reconcile-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
+        require-development-cas provision-development-certificates provision-asip-seal-certificate reconcile-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
         demo-full demo-integrator demo-down eudi-config policy-check policy-test
 
 -include .env
@@ -234,6 +234,16 @@ require-development-cas:
 	@test -f "$(DEVELOPMENT_CA_DIR)/issuer-ca-cert.pem" || { echo "ERROR: pre-provisioned EUDI CA file is required: $(DEVELOPMENT_CA_DIR)/issuer-ca-cert.pem"; exit 1; }
 	@test -f "$(DEVELOPMENT_CA_DIR)/reader-ca-key.pem" || { echo "ERROR: pre-provisioned EUDI CA file is required: $(DEVELOPMENT_CA_DIR)/reader-ca-key.pem"; exit 1; }
 	@test -f "$(DEVELOPMENT_CA_DIR)/reader-ca-cert.pem" || { echo "ERROR: pre-provisioned EUDI CA file is required: $(DEVELOPMENT_CA_DIR)/reader-ca-cert.pem"; exit 1; }
+
+# Development seal certificate for the ASIP mock (services/asi-provider),
+# issued by the pre-provisioned development issuer CA. Not a qualified
+# certificate for electronic seals.
+ASIP_SEAL_DIR ?= $(ONBOARDING_SECRETS_DIR)/asi-provider
+provision-asip-seal-certificate: require-development-cas
+	@cd services/asi-provider && go run . provision-seal-certificate \
+		--ca-key "$(DEVELOPMENT_CA_DIR)/issuer-ca-key.pem" \
+		--ca-cert "$(DEVELOPMENT_CA_DIR)/issuer-ca-cert.pem" \
+		--out-dir "$(ASIP_SEAL_DIR)"
 
 provision-development-certificates: require-development-cas
 	@test -n "$(SOURCE_ID)" || { echo "ERROR: SOURCE_ID=<source_id> is required"; exit 1; }

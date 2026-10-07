@@ -1,0 +1,317 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+        "title": "ETSI TS 119 478 (Authentic Source Interface)",
+        "description": "Specification of interfaces related to Authentic Sources",
+        "contact": {
+            "name": "ETSI ESI",
+            "url": "https://www.etsi.org/committee/esi",
+            "email": "ESI@LIST.ETSI.ORG"
+        },
+        "license": {
+            "name": "BSD-3-Clause",
+            "url": "https://forge.etsi.org/legal-matters"
+        },
+        "version": "1.1.1"
+    },
+    "servers": [
+        {
+            "url": "http://127.0.0.1:{port}/{basePath}",
+            "description": "ETSI TS 119 478 (Authentic Source Interface) instance",
+            "variables": {
+                "port": {
+                    "default": "443"
+                },
+                "basePath": {
+                    "default": "authsrc-api"
+                }
+            }
+        }
+    ],
+    "paths": {
+        "/verify": {
+            "post": {
+                "operationId": "verifyRequest",
+                "requestBody": {
+                    "description": "The Verify call is the interface for qualified trust service providers according to Article 45e of the amended eIDAS-regulation, which allows to verify at least the attributes listed Annex VI of the regulation, wherever those attributes rely on authentic sources within the public sector, at the request of the user.",
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/verifyRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Indicates that the submitted set of attributes was successfully verified by the verification service.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/verifyResponse"
+                            }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Indicates that the submitted content was malformed.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {"$ref": "#/components/schemas/problem"}
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Indicates that the request was not successful due to an authentication or authorization error."
+                    },
+                    "404": {
+                        "description": "Indicates that the verification of the set of attributes was not successful.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {"$ref": "#/components/schemas/problem"}
+                            }
+                        }
+                    },
+                    "501": {
+                        "description": "Indicates that the requested optional feature is not implemented.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {"$ref": "#/components/schemas/problem"}
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/retrieve": {
+            "post": {
+                "operationId": "retrieveRequest",
+                "requestBody": {
+                    "description": "The Retrieve call enables a user to retrieve one ore more of its attributes from an authentic source, if this functionality is supported by the ASIP.",
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/retrieveRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Indicates that the retrieval of the requested attributes was successfull.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/retrieveResponse"
+                            }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Indicates that the request was not successful due to an authentication or authorization error."
+                    },
+                    "404": {
+                        "description": "Indicates that the requested attribute, identified by the provided URI, was not found."
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "attribute": {
+                "type": "object",
+                "properties":  {
+                    "attributeIdentifier": {
+                        "type": "string",
+                        "format": "uri"
+                    },
+                    "attributeValue": {
+                        "type": "object"
+                    }
+                },  
+                "required": [
+                    "attributeIdentifier",
+                    "attributeValue"
+                ]             
+            },
+            "attributeFragment": {
+                "type": "object",
+                "properties":  {
+                    "attributeIdentifier": {
+                        "type": "string",
+                        "format": "uri"
+                    },
+                    "location": {
+                        "type": "string"
+                    },
+                    "value": {
+                        "type": "object"
+                    }
+                },  
+                "required": [
+                    "attributeIdentifier",
+                    "location",
+                    "value"
+                ]             
+            },
+            "attributeVerificationResult": {
+                "type": "object",
+                "properties":  {
+                    "attributeIdentifier": {
+                        "type": "string",
+                        "format": "uri"
+                    },
+                    "attributeVerificationResult": {
+                        "type": "string",
+                        "format": "uri"
+                    },
+                    "attributeValue": {
+                        "type": "object"
+                    }
+                },
+                "required": [
+                    "attributeIdentifier",
+                    "attributeVerificationResult"
+                ]             
+            },
+            "fragmentVerificationResult": {
+                "type": "object",
+                "properties":  {
+                    "attributeIdentifier": {
+                        "type": "string",
+                        "format": "uri"
+                    },
+                    "fragmentVerificationResult": {
+                        "type": "string",
+                        "format": "uri"
+                    },
+                    "fragmentValue": {
+                        "type": "object"
+                    }
+                },
+                "required": [
+                    "attributeIdentifier", 
+                    "fragmentVerificationResult"
+                ]             
+            },
+            "problem": {
+                "title": "Problem",
+                "description": "A Problem Details object (RFC 9457)",
+                "type": "object",
+                "properties": {
+                    "type": {
+                        "type": "string",
+                        "format": "uri",
+                        "description": "A URI reference that identifies the problem type. ",
+                        "default": "about:blank"
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": " A short summary of the problem type, readable for engineer",
+                        "example": "Service unavailable"
+                    },
+                    "status": {
+                        "type": "integer",
+                        "format": "int32",
+                        "description": "The HTTP status code generated by the origin server for this occurrence of the problem",
+                        "minimum": 200,
+                        "example": 583
+                    },
+                    "detail": {
+                        "type": "string",
+                        "description": "A human-readable explanation specific to this occurrence of the problem"
+                    },
+                    "instance": {
+                        "type": "string",
+                        "format": "uri-reference",
+                        "description": "A URI reference that identifies the specific occurrence of the problem. It may or may not yield further information if dereferenced"
+                    }
+                },
+                "required": [
+                    "title",
+                    "status",
+                    "type"
+                ]
+            },
+            "retrieveRequest": {
+                "type": "object",
+                "properties":  {
+                    "attributeIdentifiers": {
+                        "type": "array",
+                        "items": { 
+                            "properties": {
+                                "attributeIdentifier": {
+                                    "type": "string",
+                                    "format": "uri"
+                                }
+                            }
+                        }
+                    },
+                    "mandate": {
+                        "type": "object"
+                    }
+                },  
+                "required": [
+                    "attributeIdentifiers"
+                ]             
+            },
+            "retrieveResponse": {
+                "type": "object",
+                "properties":  {
+                    "attributes": {
+                        "type": "array",
+                        "items": {"$ref": "#/components/schemas/attribute"}                        
+                    } ,                  
+                    "provider": {"$ref": "19478-dataservice-schema.json#/definitions/provider"},                
+                    "authenticSource": {"$ref": "19478-dataservice-schema.json#/definitions/provider"},
+                    "mandateResult": {
+                        "type": "object"
+                    }
+                },             
+                "required": [
+                    "provider"
+                ]             
+            },
+            "verifyRequest": {
+                "type": "object",
+                "properties": {
+                    "attributes": {
+                        "type": "array",
+                        "items": {"$ref": "#/components/schemas/attribute"}
+                    },
+                    "attributeFragments": {
+                        "type": "array",
+                        "items": {"$ref": "#/components/schemas/attributeFragment"}
+                    },
+                    "mandate": {
+                        "type": "object"
+                    }
+                }             
+            },
+            "verifyResponse": {
+                "type": "object",
+                "properties": { 
+                    "attributeVerificationResults": {
+                        "type": "array",
+                        "items": {"$ref": "#/components/schemas/attributeVerificationResult"}
+                    },
+                    "fragmentVerificationResults": {
+                        "type": "array",
+                        "items": {"$ref": "#/components/schemas/fragmentVerificationResult"}
+                    },
+                    "provider": {"$ref": "19478-dataservice-schema.json#/definitions/provider"},                
+                    "authenticSource": {"$ref": "19478-dataservice-schema.json#/definitions/provider"},    
+                    "mandateResult": {
+                        "type": "object"
+                    }
+                },
+                "required": [
+                    "provider"
+                ]             
+            }
+        }
+    }
+}
