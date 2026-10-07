@@ -103,18 +103,41 @@ _rule_meta[rid] := meta if {
 	}
 }
 
+# ── The regime decides which rules apply ─────────────────────────────────────
+# A consent token puts the request in the consent regime, its absence in
+# the PID regime: pip.consent is present exactly when the request carried a
+# token, verified or not. Only the rules of that regime are bound, plus any
+# rule that names no regime (a test rule; every GBO rule names one). So a
+# consent request is never judged by a PID rule, and a field outside the
+# regime's rules has no applicable rule.
+
+_regime := "consent" if {
+	object.get(_pip_obj, "consent", null) != null
+} else := "pid"
+
+_rule_regime(spec) := "consent" if {
+	object.get(spec, "consent_required", false) == true
+} else := "pid" if {
+	object.get(spec, "pid_required", false) == true
+} else := ""
+
+_active_rules[rid] := m if {
+	some rid, m in _rule_meta
+	_rule_regime(m.spec) in {"", _regime}
+}
+
 _field_declared contains key if {
-	some _, m in _rule_meta
+	some _, m in _active_rules
 	some key in m.covers_fields
 }
 
 _field_rules(key) := [rid |
-	some rid, m in _rule_meta
+	some rid, m in _active_rules
 	key in m.covers_fields
 ]
 
 _type_rules(t) := [rid |
-	some rid, m in _rule_meta
+	some rid, m in _active_rules
 	t in m.covers_types
 ]
 
@@ -275,7 +298,7 @@ _evaluate_field(policy_ids, outcome) := result if {
 	]
 	result := {
 		"decision": false,
-		"context": {"reason_admin": {"code": _best_reason(evaluated), "evaluated": evaluated}},
+		"context": {"reason_admin": {"code": _worst_code(evaluated), "evaluated": evaluated}},
 	}
 }
 
@@ -353,59 +376,6 @@ _code_priority("NO_APPLICABLE_RULE") := 25
 
 default _code_priority(_) := 5
 
-# ── Rule-level reason selection ──────────────────────────────────────────────
-# Which of the evaluated rules gives the informative reason for this field?
-#
-# Priority alone is not enough. Rules covering the same field declare
-# different authorization bases — DVT0001 a verified consent, EUD0001 and
-# EUD0002 a disclosed PID — and each fails closed when its own basis is
-# absent. So on any request at least one rule denies for a reason that says
-# nothing about the request beyond "wrong regime": a consent-based request
-# collects PID_NOT_PRESENT (55) from the EUDI rules, and a PID-based request
-# collects CONSENT_CONTEXT_INVALID (70), the top of the table, from DVT0001.
-# Ranking those by priority buries the genuine reason.
-#
-# Cascade depth separates the two cases without the engine having to know
-# what a regime is. A rule whose basis does not fit this request passes
-# NOTHING before it stops: every axis ahead of its basis check is skipped
-# (inapplicable to its spec), and the basis check itself fails. A rule whose
-# basis does fit gets past it and fails on something substantive, having
-# passed at least one axis. So: take the rules that got furthest through
-# their own cascade, then apply the priority table among those.
-#
-# Skipped steps deliberately do not count — they are axes the rule does not
-# declare, not axes it satisfied.
-_passed_count(steps) := count([s | some s in steps; s.status == "pass"])
-
-_best_reason(evaluated) := code if {
-	depth := max([_passed_count(e.steps) | some e in evaluated])
-	deepest := [e | some e in evaluated; _passed_count(e.steps) == depth]
-	code := _worst_code(_prefer_attempted(deepest))
-} else := "NO_APPLICABLE_RULE"
-
-# Tie-break: the regime the request is under. Depth cannot separate the
-# rules when every one of them passed nothing — an unverifiable consent
-# token, or a PID-regime request that names no subject. The regime still
-# can: pip.consent is present exactly when the request carried a consent
-# token, verified or not (consent.rego resolves it whenever there is one),
-# and the PID regime is its absence. A PID-regime failure is a PID failure,
-# not a consent one.
-_attempted_basis := "consent" if {
-	object.get(_pip_obj, "consent", null) != null
-} else := "pid"
-
-_rule_basis(rid) := "consent" if {
-	object.get(_rule_meta[rid].spec, "consent_required", false)
-} else := "pid" if {
-	object.get(_rule_meta[rid].spec, "pid_required", false)
-} else := ""
-
-_prefer_attempted(entries) := matching if {
-	_attempted_basis != ""
-	matching := [e | some e in entries; _rule_basis(e.rule) == _attempted_basis]
-	count(matching) > 0
-} else := entries
-
 # The reason for the request as a whole: the worst of its fields' reasons,
 # with one exception. In the PID regime the subject is named on one field
 # (the root field's argument) and the other fields are judged without it.
@@ -413,7 +383,7 @@ _prefer_attempted(entries) := matching if {
 # (the actor, the year), but those failures belong to a request about
 # nobody: the missing subject is the reason.
 _request_reason(denied) := "PID_NOT_PRESENT" if {
-	_attempted_basis == "pid"
+	_regime == "pid"
 	some d in denied
 	d.code == "PID_NOT_PRESENT"
 } else := _worst_code([{"code": d.code} | some d in denied])

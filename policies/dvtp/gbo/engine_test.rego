@@ -246,15 +246,32 @@ test_edge_outside_the_rule_denies if {
 		with data.dvtp.gbo.consent.resolved as _consent
 	result.decision == false
 	[d.key | some d in result.context.denied_fields] == ["AangifteIH.box2Inkomen"]
+	result.context.reason_admin.code == "NO_APPLICABLE_RULE"
+}
+
+# ── The regime decides which rules are evaluated ─────────────────────────
+# Under a consent token only consent rules judge a field, without one only
+# PID rules. The trace of a denied field shows exactly those.
+
+_evaluated_rules(result) := {e.rule | some d in result.context.denied_fields; some e in d.evaluated}
+
+test_a_consent_request_is_judged_by_consent_rules_only if {
+	result := gbo.response with input as _dvtp_input("bd:ib:2025", "consent:identity", [2024])
+		with data.dvtp.gbo.consent.resolved as _consent
+	result.decision == false
+	_evaluated_rules(result) == {"DVT0001"}
+}
+
+test_a_pid_request_is_judged_by_pid_rules_only if {
+	result := gbo.response with input as _eudi_input("99999999900000000100", 2023)
+	result.decision == false
+	_evaluated_rules(result) == {"EUD0001"}
 }
 
 # ── Deny-reason surfacing for consent-based requests ─────────────────────
 # Fields covered by both DVT0001 and EUD0001 (the root, the declarations,
-# box1Inkomen). A consent-based request carries no PID, so EUD0001 is
-# evaluated there and denies with PID_NOT_PRESENT (priority 55). On
-# priority alone that would out-rank the genuine DvTP reason
-# (CONSENT_SCOPE_MISMATCH 40, YEAR_NOT_COVERED 41, CONSTRAINT_MISMATCH 30);
-# _best_reason ranks by cascade depth first.
+# box1Inkomen). Under a consent token only DVT0001 judges them, so the
+# reason is its own, never EUD0001's PID_NOT_PRESENT.
 
 _consent := {
 	"context_valid": true,
@@ -302,11 +319,9 @@ test_dvtp_deny_placeholder_the_rule_does_not_accept if {
 }
 
 # ── Deny-reason surfacing for PID-based requests ─────────────────────────
-# The mirror of the cases above, and the sharper half of the problem. A
-# PID-based request carries no consent, so DVT0001 fails on its FIRST axis
-# with CONSENT_CONTEXT_INVALID (priority 70), the top of the whole table.
-# On priority alone it would out-rank every genuine EUDI reason, not just
-# the low-priority ones.
+# The mirror of the cases above: without a consent token only the EUDI
+# rules judge, so DVT0001's CONSENT_CONTEXT_INVALID never hides the
+# genuine EUDI reason.
 
 _eudi_input(actor, year) := fx.income(actor, "999991772", [year], {})
 
@@ -395,6 +410,39 @@ test_pid_rule_actors_are_disjoint_from_consent_consumers if {
 	}
 }
 
+# ── Every GBO rule names one regime ──────────────────────────────────────
+# A rule that names none is evaluated in both regimes; one that names both
+# would be judged as a consent rule only. Neither is meant for a GBO rule.
+
+_regime_violations contains sprintf("%s: names no regime", [rid]) if {
+	some rid, m in gbo._rule_meta
+	not _names_regime(m.spec, "consent_required")
+	not _names_regime(m.spec, "pid_required")
+}
+
+_regime_violations contains sprintf("%s: names both regimes", [rid]) if {
+	some rid, m in gbo._rule_meta
+	_names_regime(m.spec, "consent_required")
+	_names_regime(m.spec, "pid_required")
+}
+
+_names_regime(spec, flag) if object.get(spec, flag, false) == true
+
+test_every_rule_names_one_regime if {
+	violations := _regime_violations
+	print("rules without exactly one regime:", violations)
+	count(violations) == 0
+}
+
+test_regime_check_catches_none_and_both if {
+	broken := {
+		"none": {"rule_id": "N", "covers_fields": set(), "spec": {"rule_id": "N"}},
+		"both": {"rule_id": "B", "covers_fields": set(), "spec": {"rule_id": "B", "consent_required": true, "pid_required": true}},
+	}
+	violations := _regime_violations with data.dvtp.gbo.rules as broken
+	violations == {"N: names no regime", "B: names both regimes"}
+}
+
 # ── Every check that reads an argument names it ──────────────────────────
 # A rule that turns on a year, PID or placeholder check without naming the
 # field and argument it reads denies every request at runtime (fail closed).
@@ -447,12 +495,9 @@ test_argument_check_catches_a_rule_that_names_none if {
 	}
 }
 
-# ── A depth tie is broken by the regime the request is under ─────────────
-# When every rule passes nothing, cascade depth cannot separate them. The
-# regime can: pip.consent is present exactly when the request carried a
-# consent token — verified or not — and absent in the PID regime. A
-# PID-regime request whose evidence failed surfaces PID_NOT_PRESENT, not
-# CONSENT_CONTEXT_INVALID.
+# ── Failed evidence gives the regime's own reason ────────────────────────
+# A PID-regime request without a subject surfaces PID_NOT_PRESENT; a
+# consent token that does not verify surfaces the consent's reason.
 
 test_pid_regime_without_a_subject_surfaces_pid_not_present if {
 	result := gbo.response with input as fx.income(fx.eudi_issuer, "", [2024], {})
@@ -471,7 +516,8 @@ test_pid_regime_without_a_subject_outranks_the_actor if {
 }
 
 # The exception is the PID regime's alone: under a consent token the worst
-# field reason stands, also next to a field only the PID rule covers.
+# field reason stands, here the integrator's over a field no consent rule
+# covers.
 test_consent_regime_keeps_the_worst_field_reason if {
 	fields := array.concat(
 		fx.income_fields("consent:identity", fx.literal([2025])),
@@ -484,7 +530,7 @@ test_consent_regime_keeps_the_worst_field_reason if {
 		with data.dvtp.gbo.consent.resolved as _consent
 		with data.entities.dvtp_participant as {}
 	result.decision == false
-	"PID_NOT_PRESENT" in {d.code | some d in result.context.denied_fields}
+	"NO_APPLICABLE_RULE" in {d.code | some d in result.context.denied_fields}
 	result.context.reason_admin.code == "INTEGRATOR_NOT_REGISTERED"
 }
 
