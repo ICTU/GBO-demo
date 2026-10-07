@@ -13,7 +13,7 @@ import data.dvtp.gbo.consent
 
 # ── Entrypoint: allowed only when every data field is allowed ──────────────
 
-_field_decisions := [{"field": f.id, "key": f.key, "index": f.index, "result": _decide(f)} | some f in _data_fields]
+_field_decisions := [{"field": f.id, "path": f.record.path, "key": f.key, "index": f.index, "result": _decide(f)} | some f in _data_fields]
 
 # The resolved consent is added to the response: the policy fetched it, so
 # without this the decision log would lack the attribute it decided on.
@@ -21,42 +21,91 @@ response := object.union(_decision, {"context": {"pip": {"consent": consent.reso
 	consent.resolved
 } else := _decision
 
-# OpenFTV passes on only the decision and its reason. granted, denied_fields
-# and their steps are for the developer portal (a demo feature), which shows
-# per field which rule granted it or why it was denied.
-_decision := {"decision": false, "context": {"reason_admin": _request_failure}} if {
-	_request_failure
-} else := {"decision": true, "context": {"granted": granted}} if {
+# OpenFTV passes on only the decision and authz.rego's `reason`. A deny
+# carries the profile's context (Section 10.1): the same text as reason_user
+# and reason_admin, graphql.client with what the consumer may learn, and
+# graphql.admin with the detail. granted, the denied fields and their trace
+# are also what the developer portal (a demo feature) shows.
+_decision := {"decision": true, "context": {"granted": _granted}} if {
+	not _request_failure
 	count(_field_decisions) > 0
 	every fd in _field_decisions {
 		fd.result.decision == true
 	}
-	granted := [{
-		"field": fd.field,
-		"key": fd.key,
-		"rule": fd.result.context.granted_by,
-		"steps": object.get(fd.result.context, "granted_steps", []),
-	} |
-		some fd in _field_decisions
-	]
-} else := {"decision": false, "context": deny_ctx} if {
-	count(_field_decisions) > 0
-	denied := [{
-		"field": fd.field,
-		"key": fd.key,
-		"index": fd.index,
-		"code": fd.result.context.reason_admin.code,
-		"evaluated": fd.result.context.reason_admin.evaluated,
-	} |
-		some fd in _field_decisions
-		fd.result.decision == false
-	]
-	count(denied) > 0
-	deny_ctx := {
-		"denied_fields": denied,
-		"reason_admin": {"code": _request_reason(denied)},
-	}
-} else := {"decision": false, "context": {"reason_admin": {"code": "NO_APPLICABLE_RULE"}}}
+} else := {"decision": false, "context": {
+	"reason_admin": {"en": _reason_text},
+	"reason_user": {"en": _reason_text},
+	"graphql": {"client": _client, "admin": _admin},
+}}
+
+_granted := [{
+	"field": fd.field,
+	"key": fd.key,
+	"rule": fd.result.context.granted_by,
+	"steps": object.get(fd.result.context, "granted_steps", []),
+} |
+	some fd in _field_decisions
+]
+
+# Per denied field: its position, path and key, its code, the rules that
+# were bound, and each rule's trace.
+_denied_fields := [{
+	"index": fd.index,
+	"path": fd.path,
+	"key": fd.key,
+	"code": fd.result.context.reason_admin.code,
+	"evaluated": [e.rule | some e in fd.result.context.reason_admin.evaluated],
+	"trace": fd.result.context.reason_admin.evaluated,
+} |
+	some fd in _field_decisions
+	fd.result.decision == false
+]
+
+# ── The request's code (Section 9.5) and what the consumer sees (10.2) ──────
+
+# A check on the mapper's output fails first; then a server problem on any
+# field; else the request is denied because fields are.
+_request_code := _request_failure if {
+	_request_failure
+} else := {"code": "PIP_UNAVAILABLE"} if {
+	some d in _denied_fields
+	d.code == "PIP_UNAVAILABLE"
+} else := {"code": "FIELD_NOT_PERMITTED"}
+
+_admin := object.union(object.union(_request_code, _admin_digest), _admin_fields)
+
+_admin_digest := {"schema_digest": _gql.schema.digest} if {
+	is_string(_gql.schema.digest)
+} else := {}
+
+_admin_fields := {"denied_fields": _denied_fields} if {
+	not _request_failure
+} else := {}
+
+# Server problems are ours, not the consumer's: it learns only that access
+# was denied. The consumer is also not told which field was refused, nor
+# whether an unknown field exists (Section 14): both would let it map the
+# schema by trying names.
+_server_class := {"CONFIG_ERROR", "PIP_UNAVAILABLE"}
+
+_client := {"code": "ACCESS_DENIED"} if {
+	_request_code.code in _server_class
+} else := {"code": "FIELD_NOT_PERMITTED"} if {
+	_request_code.subcode == "INVALID_QUERY"
+} else := object.filter(_request_code, {"code", "subcode"})
+
+_client_texts := {
+	"FIELD_NOT_PERMITTED": "Field not permitted",
+	"ACCESS_DENIED": "Access denied",
+	"COVERAGE_UNVERIFIABLE": "Request could not be verified",
+	"OPERATION_NOT_SUPPORTED": "Operation not supported",
+	"NO_DATA_FIELDS": "No data fields requested",
+}
+
+# reason_admin gets the same hiding as reason_user: some PEPs pass it on.
+_reason_text := sprintf("%s (%s)", [object.get(_client_texts, _client.code, _client.code), _client.subcode]) if {
+	_client.subcode
+} else := object.get(_client_texts, _client.code, _client.code)
 
 # ── Checks on the mapper's output, before any rule (Section 9.5) ────────────
 # Checked in this order; any failure denies the whole request.
@@ -72,7 +121,7 @@ _request_failure := {"code": "CONFIG_ERROR", "subcode": "MAPPER_OUTPUT_MISSING"}
 } else := {"code": "CONFIG_ERROR", "subcode": "SCHEMA_MISMATCH"} if {
 	_gql.schema != null
 	not _schema_pinned
-} else := object.filter(_gql.unverifiable, {"code", "subcode"}) if {
+} else := object.filter(_gql.unverifiable, {"code", "subcode", "message"}) if {
 	_gql.unverifiable != null
 } else := {"code": "NO_DATA_FIELDS"} if {
 	count(_data_fields) == 0
@@ -255,8 +304,9 @@ _evaluate_field(policy_ids, outcome) := result if {
 		"granted_steps": _outcome_steps(outcome[rid]),
 	}}
 } else := result if {
-	# No rule allowed: the worst code, plus each rule's steps for the
-	# developer portal's trace (pass/fail/skipped per check).
+	# No rule allowed. Each rule's code and steps form the trace; the
+	# field's code follows the profile (Section 9.4): a server problem if any
+	# rule hit one, else the first denying rule's code.
 	evaluated := [{
 		"rule": r,
 		"code": _outcome_code(outcome[r]),
@@ -266,9 +316,18 @@ _evaluate_field(policy_ids, outcome) := result if {
 	]
 	result := {
 		"decision": false,
-		"context": {"reason_admin": {"code": _worst_code(evaluated), "evaluated": evaluated}},
+		"context": {"reason_admin": {"code": _field_code(evaluated), "evaluated": evaluated}},
 	}
 }
+
+_field_code(evaluated) := "PIP_UNAVAILABLE" if {
+	some e in evaluated
+	e.code in _pip_unavailable
+} else := evaluated[0].code
+
+# The consent register, or its keys, did not answer: a server problem, not
+# the consumer's. The trace still shows which.
+_pip_unavailable := {"CONSENT_STATUS_UNAVAILABLE", "CONSENT_KEYS_UNAVAILABLE"}
 
 # A deny's steps are under context.reason_admin.steps, an allow's under steps.
 _outcome_steps(outcome) := outcome.context.reason_admin.steps if {
@@ -276,77 +335,6 @@ _outcome_steps(outcome) := outcome.context.reason_admin.steps if {
 } else := outcome.context.steps if {
 	outcome.context.steps
 } else := []
-
-# ── Deny reason: the worst field code ───────────────────────────────────────
-# System errors outrank policy denies; among those a deeper cause (no
-# consent) outranks a derived one (scope, fields). Every code has its own
-# priority, so _worst_code is deterministic when several fire.
-
-_code_priority("CONSENT_NOT_FOUND") := 60
-
-# Token verification failures, reported instead of the generic
-# CONSENT_CONTEXT_INVALID when consent.rego can say which check failed.
-_code_priority("CONSENT_SIGNATURE_INVALID") := 73
-
-_code_priority("CONSENT_TOKEN_EXPIRED") := 72
-
-_code_priority("CONSENT_KEYS_UNAVAILABLE") := 71
-
-_code_priority("CONSENT_CONTEXT_INVALID") := 70
-
-_code_priority("CONSENT_STATUS_UNAVAILABLE") := 69
-
-_code_priority("CONSENT_ACTOR_MISMATCH") := 68
-
-# A delegated call without a mandate. Below the consent binding, which names
-# the deeper cause when the integrator acts for the wrong party.
-_code_priority("INTEGRATOR_NOT_REGISTERED") := 66
-
-_code_priority("CONSENT_WITHDRAWN") := 50
-
-_code_priority("CONSENT_EXPIRED") := 45
-
-_code_priority("CONSENT_SCOPE_MISMATCH") := 40
-
-# A requested belastingjaar without a matching bd:ib:<year> scope.
-_code_priority("YEAR_NOT_COVERED") := 41
-
-_code_priority("YEAR_NOT_ALLOWED") := 63
-
-_code_priority("CONSTRAINT_MISMATCH") := 30
-
-# EUDI: without a BSN there is nothing to judge.
-_code_priority("PID_NOT_PRESENT") := 55
-
-# EUDI: a disallowed actor or scope means the rule does not apply at all, a
-# deeper cause than a missing PID, so both rank above PID_NOT_PRESENT.
-_code_priority("ACTOR_NOT_ALLOWED") := 65
-
-_code_priority("SCOPE_NOT_ALLOWED") := 62
-
-# The closed-world default: no rule covers the field.
-_code_priority("NO_APPLICABLE_RULE") := 25
-
-default _code_priority(_) := 5
-
-# The request's reason is its worst field reason, except in the PID regime.
-# There only the root field names the subject; without one the other fields
-# fail on later checks (actor, year) of a request about nobody, so the
-# missing subject is the reason.
-_request_reason(denied) := "PID_NOT_PRESENT" if {
-	_regime == "pid"
-	some d in denied
-	d.code == "PID_NOT_PRESENT"
-} else := _worst_code([{"code": d.code} | some d in denied])
-
-_worst_code(evaluated) := code if {
-	some i in numbers.range(0, count(evaluated) - 1)
-	code := evaluated[i].code
-	prio := _code_priority(code)
-	every j in numbers.range(0, count(evaluated) - 1) {
-		_code_priority(evaluated[j].code) <= prio
-	}
-} else := "NO_APPLICABLE_RULE"
 
 _outcome_code(outcome) := outcome.context.reason_admin.code if {
 	outcome.context.reason_admin.code

@@ -35,21 +35,21 @@ test_engine_denies_a_question_about_another_citizen if {
 	req := fx.request(_lvg_ir, "lvg", fx.ownership_fields("999991772"), fx.scope_headers("lvg:vbo:eigendom"))
 	result := gbo.response with input as req with data.dvtp.gbo.consent.resolved as _lvg_consent
 	result.decision == false
-	result.context.reason_admin.code == "CONSTRAINT_MISMATCH"
+	fx.refused_for(result, "CONSTRAINT_MISMATCH")
 }
 
 test_engine_denies_a_bd_consent_on_lvg_fields if {
 	result := gbo.response with input as _lvg_input(_lvg_hv, "bd:ib:2025")
 		with data.dvtp.gbo.consent.resolved as object.union(_lvg_consent, {"granted_scopes": ["bd:ib:2025"], "dienstverlener_oin": _lvg_hv})
 	result.decision == false
-	result.context.reason_admin.code == "SCOPE_NOT_ALLOWED"
+	fx.refused_for(result, "SCOPE_NOT_ALLOWED")
 }
 
 # LVG0001 is a consent rule, so the PID regime has no rule for LVG fields.
 test_engine_has_no_rule_for_lvg_without_a_consent_token if {
 	result := gbo.response with input as fx.request(fx.eudi_issuer, "lvg", fx.ownership_fields("999991772"), {})
 	result.decision == false
-	result.context.reason_admin.code == "NO_APPLICABLE_RULE"
+	fx.refused_for(result, "NO_APPLICABLE_RULE")
 }
 
 test_engine_denies_an_lvg_consent_on_bd_fields if {

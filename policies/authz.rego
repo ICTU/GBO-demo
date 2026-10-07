@@ -41,9 +41,11 @@ allow if response.decision
 
 # OpenFTV transports only `allow` and `reason`. On a deny, `reason` becomes
 # reason_user.en, which the authoritative decision log (ADL) records and the
-# FSC Inway returns to the caller, so it is a bare code that never carries
-# request data. The richer `response` reaches only the OPA console decision
-# log, which the developer portal reads; it is not a record of the decision.
-reason := response.context.reason_admin.code if {
+# FSC Inway returns to the caller: the consumer's code (graphql.client) and,
+# for an unverifiable request, its subcode, e.g. "COVERAGE_UNVERIFIABLE
+# PARSE_ERROR". Never request data. The rest of `response` reaches only the
+# OPA console decision log, which the developer portal reads.
+reason := concat(" ", [part | some part in [client.code, object.get(client, "subcode", "")]; part != ""]) if {
 	not response.decision
+	client := response.context.graphql.client
 }
