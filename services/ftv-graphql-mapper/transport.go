@@ -17,7 +17,7 @@ func checkTransport(req Request, graphqlPath string) (string, *Unverifiable) {
 		return "", unverifiable(SubUnsupportedTransport, "method %q is not POST", req.Method)
 	}
 	contentType, present, ok := header(req.Headers, "Content-Type")
-	if !ok || !present || !isJSONMediaType(contentType) {
+	if !ok || !present || !IsJSONMediaType(contentType) {
 		return "", unverifiable(SubUnsupportedTransport, "Content-Type is not application/json")
 	}
 	for _, name := range []string{"Upgrade", "Content-Encoding"} {
@@ -49,9 +49,12 @@ func header(headers map[string]any, name string) (value string, present, ok bool
 	return value, present, true
 }
 
-// isJSONMediaType accepts application/json with at most the parameter
+// IsJSONMediaType accepts application/json with at most the parameter
 // charset=utf-8, names and values compared case-insensitively (RFC 9110).
-func isJSONMediaType(v string) bool {
+// Nothing else: no RFC 2231 forms (charset*), no empty parameter, no space
+// around "=". Exported so the source applies this exact rule (guarantee H1):
+// a general media-type parser accepts forms this one refuses.
+func IsJSONMediaType(v string) bool {
 	parts := strings.Split(v, ";")
 	if !strings.EqualFold(strings.TrimSpace(parts[0]), "application/json") {
 		return false

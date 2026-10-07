@@ -11,6 +11,7 @@ require (
 )
 
 require (
+	github.com/agnivade/levenshtein v1.2.1 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
@@ -18,6 +19,7 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 // indirect
+	github.com/vektah/gqlparser/v2 v2.5.34 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.45.0 // indirect
 	go.opentelemetry.io/otel/metric v1.45.0 // indirect
@@ -31,9 +33,16 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 )
 
-require gbo-demo/ldv-client v0.0.0
+require (
+	gbo-demo/ftv-graphql-mapper v0.0.0
+	gbo-demo/ldv-client v0.0.0
+)
 
 // The LDV client is a sibling module in this repository rather than a
 // published one: a change to it has to be usable by the services in the same
 // commit, without a tag in between.
 replace gbo-demo/ldv-client => ../ldv-client
+
+// The source accepts a Content-Type by the PDP mapper's own rule, so the two
+// cannot drift apart (transport.go).
+replace gbo-demo/ftv-graphql-mapper => ../ftv-graphql-mapper

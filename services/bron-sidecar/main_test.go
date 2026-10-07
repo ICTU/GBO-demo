@@ -13,7 +13,7 @@ import (
 
 // mustMux builds the sidecar's routing tree, failing the test when its keys
 // cannot be read.
-func mustMux(t *testing.T, cfg config, client *http.Client, logbook *ldv.Client) *http.ServeMux {
+func mustMux(t *testing.T, cfg config, client *http.Client, logbook *ldv.Client) http.Handler {
 	t.Helper()
 	mux, err := newMux(cfg, client, logbook)
 	if err != nil {

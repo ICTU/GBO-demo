@@ -4,8 +4,12 @@
 // decision — provided nothing but the Inway can reach the sidecar. The
 // deployment has to make sure of that: a caller that reaches the sidecar
 // directly skips the PDP. In the demo the sidecar shares a network with the
-// Inways and with what serves the source, and with nothing else. Its role:
+// Inways and with what serves the source, and with nothing else. It is part
+// of the source: the request arrives here exactly as the PDP judged it. Its
+// role:
 //
+//  0. Refuse every request outside the FTV GraphQL profile's transport
+//     subset: POST with a JSON body on the one GraphQL path (transport.go).
 //  1. Look at the evidence the request carries:
 //     - a consent token → the query names its subject with a placeholder.
 //     Take the value of the form it asks for, made for this source, out of
@@ -92,6 +96,8 @@ type config struct {
 	// each bron's register names its activities in its own terms.
 	LDVDecryptionActivity string
 	LDVForwardActivity    string
+	// GraphQLPath is the one path GraphQL is served on (transport.go).
+	GraphQLPath string
 }
 
 func loadConfig() config {
@@ -105,6 +111,7 @@ func loadConfig() config {
 
 		LDVDecryptionActivity: getEnv("LDV_DECRYPTION_ACTIVITY", ""),
 		LDVForwardActivity:    getEnv("LDV_FORWARD_ACTIVITY", ""),
+		GraphQLPath:           getEnv("GRAPHQL_PATH", defaultGraphQLPath),
 	}
 }
 
@@ -453,7 +460,10 @@ func newSubstituter(cfg config, client *http.Client) (substitution.Substituter, 
 // integration tests can wire the handlers to an httptest.Server (with stub
 // upstream and decryption component URLs in cfg) without starting the real
 // listener.
-func newMux(cfg config, client *http.Client, logbook *ldv.Client) (*http.ServeMux, error) {
+//
+// The transport check sits in front of the ServeMux, which would otherwise
+// clean the path (//graphql → /graphql) before anything could compare it.
+func newMux(cfg config, client *http.Client, logbook *ldv.Client) (http.Handler, error) {
 	substitute, err := newSubstituter(cfg, client)
 	if err != nil {
 		return nil, err
@@ -464,9 +474,18 @@ func newMux(cfg config, client *http.Client, logbook *ldv.Client) (*http.ServeMu
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
-	// All non-health paths → forward.
-	mux.HandleFunc("/", forwardHandler(cfg, client, logbook, substitute))
-	return mux, nil
+	graphQLPath := cfg.GraphQLPath
+	if graphQLPath == "" {
+		graphQLPath = defaultGraphQLPath
+	}
+	forward := transportOnly(graphQLPath, forwardHandler(cfg, client, logbook, substitute))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			mux.ServeHTTP(w, r)
+			return
+		}
+		forward.ServeHTTP(w, r)
+	}), nil
 }
 
 // fatal logs and ends the process. main is the only place in this service
