@@ -28,11 +28,12 @@ argument(f, name) := entry.value if {
 	not entry.schemaDefaults
 }
 
-# The years an argument asks for, as text: the mapper coerces a single value
-# to a list, and a year may arrive as number or string. Empty when the
-# argument is missing, so a year check fails closed: the source returns
-# every year unless the query filters.
-requested_years(f, name) := {sprintf("%v", [y]) | some y in argument(f, name)}
+# The values a list argument was given, as a set (the mapper coerces a single
+# value to a list). Empty when the request gave none: the argument is
+# missing, null, or from a schema default. A filter check then refuses on
+# count(...) == 0, so no filter never passes: without one the source
+# returns everything.
+argument_values(f, name) := {v | some v in argument(f, name)}
 
 # ── Placeholders ─────────────────────────────────────────────────────────────
 # The names a consent-based query gives its subject. The consumer holds no

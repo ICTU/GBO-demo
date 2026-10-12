@@ -79,13 +79,13 @@ deny_field[i] contains "CONSTRAINT_MISMATCH" if {
 deny_field[i] contains "YEAR_NOT_COVERED" if {
 	some i, f in lib.fields
 	lib.key(f) == "IngeschrevenPersoon.heeftBelastingjaarAangifte"
-	some year in lib.requested_years(f, "belastingjaren")
-	not sprintf("bd:ib:%s", [year]) in helper.consent.granted_scopes
+	some year in lib.argument_values(f, "belastingjaren")
+	not sprintf("bd:ib:%d", [year]) in helper.consent.granted_scopes
 }
 
 # No year filter fails too: the source would return every year.
 deny_field[i] contains "YEAR_NOT_COVERED" if {
 	some i, f in lib.fields
 	lib.key(f) == "IngeschrevenPersoon.heeftBelastingjaarAangifte"
-	count(lib.requested_years(f, "belastingjaren")) == 0
+	count(lib.argument_values(f, "belastingjaren")) == 0
 }

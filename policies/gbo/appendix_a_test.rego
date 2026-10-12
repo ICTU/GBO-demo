@@ -24,7 +24,7 @@ _r0001 := {
 # Its one check: the years on Persoon.inkomens lie in 2000-2024. A rule
 # passed in with `with` is data, so its deny_field is worked out for the
 # request here, as the engine would find it in a rule package.
-_r0001_allowed_years := {sprintf("%v", [y]) | some y in numbers.range(2000, 2024)}
+_r0001_allowed_years := {y | some y in numbers.range(2000, 2024)}
 
 _r0001_deny_field := {i: {"YEAR_NOT_ALLOWED"} |
 	some i, f in lib.fields
@@ -33,7 +33,7 @@ _r0001_deny_field := {i: {"YEAR_NOT_ALLOWED"} |
 }
 
 _r0001_years_allowed(f) if {
-	years := lib.requested_years(f, "jaren")
+	years := lib.argument_values(f, "jaren")
 	count(years) > 0
 	every y in years {
 		y in _r0001_allowed_years
