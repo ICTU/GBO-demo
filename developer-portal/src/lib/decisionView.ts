@@ -139,3 +139,22 @@ export function readDecision(result: unknown): DecisionView {
 
   return { shape: 'none', allowed }
 }
+
+// The server problems the engine reports on the field as PIP_UNAVAILABLE
+// (_pip_unavailable in policies/gbo/engine.rego); the rule's own code says
+// which one it was.
+const SERVER_PROBLEMS = new Set(['CONSENT_STATUS_UNAVAILABLE', 'CONSENT_KEYS_UNAVAILABLE', 'INTEGRATOR_REGISTER_UNAVAILABLE'])
+
+// What to open for a refused field: the reason and the rule that gave it.
+// That is the rule whose code is the field's; for PIP_UNAVAILABLE, which no
+// rule gives itself, the first rule that hit a server problem, with its code.
+export function causeOf(field: FieldOutcome): { code: string; rule?: string } | undefined {
+  if (!field.code) return undefined
+  const own = field.rules.find((r) => r.code === field.code)
+  if (own) return { code: field.code, rule: own.rule }
+  const server = field.code === 'PIP_UNAVAILABLE'
+    ? field.rules.find((r) => r.code !== undefined && SERVER_PROBLEMS.has(r.code))
+    : undefined
+  if (server?.code) return { code: server.code, rule: server.rule }
+  return { code: field.code }
+}

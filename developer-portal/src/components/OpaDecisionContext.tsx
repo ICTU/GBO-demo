@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { fetchPolicySnippet, type EngineDecision, type PolicySnippet } from '../api/devClient'
 import { useRules } from '../hooks/useRules'
-import { readDecision, type DecisionView, type FieldOutcome, type Step } from '../lib/decisionView'
+import { causeOf, readDecision, type DecisionView, type FieldOutcome, type Step } from '../lib/decisionView'
 import RuleSpecPanel from './RuleSpecPanel'
 import EvalTrace from './EvalTrace'
 
@@ -147,18 +147,18 @@ function FieldList({
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         {fields.map((f, i) => {
-          const clickable = Boolean(f.code && onCauseClick)
-          // The rule whose code is the field's: its file shows the reason.
-          const causeRule = f.rules.find((r) => r.code === f.code)?.rule
+          // The reason and the rule that gave it: that rule's file shows it.
+          const cause = causeOf(f)
+          const clickable = Boolean(cause && onCauseClick)
           return (
             <div key={i} style={{ padding: '4px 6px', borderRadius: 4, background: 'transparent' }}>
               <div
-                onClick={clickable ? () => onCauseClick!(f.code!, causeRule) : undefined}
+                onClick={clickable ? () => onCauseClick!(cause!.code, cause!.rule) : undefined}
                 style={{
                   display: 'grid', gridTemplateColumns: '18px 1fr auto', gap: 8, alignItems: 'baseline',
                   cursor: clickable ? 'pointer' : 'default',
                 }}
-                title={clickable ? `Klik om de Rego-regel voor ${f.code} te tonen` : f.key}
+                title={clickable ? `Klik om de Rego-regel voor ${cause!.code} te tonen` : f.key}
               >
                 <span style={{ color, fontWeight: 800, textAlign: 'center' }}>{glyph}</span>
                 <div style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>

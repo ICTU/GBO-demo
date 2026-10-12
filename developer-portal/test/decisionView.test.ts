@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readDecision } from '../src/lib/decisionView.ts'
+import { causeOf, readDecision } from '../src/lib/decisionView.ts'
 
 const trace = [{ rule: 'DVT0001', code: 'YEAR_NOT_COVERED', reasons: ['YEAR_NOT_COVERED'] }]
 
@@ -126,4 +126,25 @@ test('anything else renders as nothing to show', () => {
   for (const result of [undefined, null, {}, { decision: false, context: {} }]) {
     assert.equal(readDecision(result).shape, 'none')
   }
+})
+
+test('a refused field opens the rule whose code is its own', () => {
+  const field = { path: 'vbo', code: 'CONSENT_WITHDRAWN', rules: [{ rule: 'LVG0001', code: 'CONSENT_WITHDRAWN' }] }
+  assert.deepEqual(causeOf(field), { code: 'CONSENT_WITHDRAWN', rule: 'LVG0001' })
+})
+
+test('PIP_UNAVAILABLE opens the rule that hit the server problem, with its code', () => {
+  const field = {
+    path: 'ingeschrevenPersoon',
+    code: 'PIP_UNAVAILABLE',
+    rules: [
+      { rule: 'DVT0001', code: 'CONSENT_EXPIRED' },
+      { rule: 'LVG0001', code: 'CONSENT_STATUS_UNAVAILABLE' },
+    ],
+  }
+  assert.deepEqual(causeOf(field), { code: 'CONSENT_STATUS_UNAVAILABLE', rule: 'LVG0001' })
+})
+
+test('a field code no rule gave, such as NO_APPLICABLE_RULE, opens without a rule', () => {
+  assert.deepEqual(causeOf({ path: 'woontOp', code: 'NO_APPLICABLE_RULE', rules: [] }), { code: 'NO_APPLICABLE_RULE' })
 })
