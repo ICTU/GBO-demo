@@ -101,11 +101,13 @@ func (s *server) authorize(w http.ResponseWriter, r *http.Request) {
 		authorizeErrorPage(w, "unknown client_id")
 		return
 	}
-	redirectURI := q.Get("redirect_uri")
-	if !slices.Contains(c.RedirectURIs, redirectURI) {
+	// Redirect only to the registered value, never to the one in the request.
+	i := slices.Index(c.RedirectURIs, q.Get("redirect_uri"))
+	if i < 0 {
 		authorizeErrorPage(w, "redirect_uri is not registered for this client")
 		return
 	}
+	redirectURI := c.RedirectURIs[i]
 	// From here on errors go back to the client (RFC 6749 section 4.1.2.1).
 	fail := func(code, description string) {
 		redirectWith(w, r, redirectURI, url.Values{"error": {code}, "error_description": {description}, "state": {q.Get("state")}})
