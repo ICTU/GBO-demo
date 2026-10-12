@@ -1,4 +1,4 @@
-package dvtp.gbo.rules.eud0001
+package gbo.rules.eud0001
 
 # EUD0001 — Income declaration for an EUDI wallet attestation.
 #

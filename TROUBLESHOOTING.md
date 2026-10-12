@@ -63,7 +63,7 @@ Check the `make fsc-seed-bri` output. Common causes:
 
 `NO_APPLICABLE_RULE` is the engine's closed-world default: no rule declares
 the requested field. Check the field against `covers_fields` in
-`policies/dvtp/gbo/rules/` first — that, not the grant, is the catalog.
+`policies/gbo/rules/` first — that, not the grant, is the catalog.
 
 The authorization regime itself no longer travels in the token. It follows
 from the evidence on the request: a consent token selects the consent

@@ -48,14 +48,14 @@ De testvectoren van Appendix A staan in `vectors_test.go`.
 | Eis | Hoe |
 |---|---|
 | Het SDL waartegen de regels zijn geschreven, zonder executable directives (§7.1) | `schemas/pdp-mirror`, per FSC-service in `services.json` |
-| Buiten de bundel geladen, dus digest gepind (§7.1, §7.3) | het SDL zit in het PDP-image; de bundel pint de digest in `policies/dvtp/gbo/graphql_schemas.rego` (`scripts/gen-graphql-pins.sh`, CI controleert actualiteit) |
+| Buiten de bundel geladen, dus digest gepind (§7.1, §7.3) | het SDL zit in het PDP-image; de bundel pint de digest in `policies/gbo/graphql_schemas.rego` (`scripts/gen-graphql-pins.sh`, CI controleert actualiteit) |
 | Geen schema ophalen of introspectie op runtime (§7.1) | de mapper leest alleen de bestanden in het image |
 | Drift tussen kopie en bron blokkeert (§7.4, H3) | `scripts/check-schema-drift.sh` start de drie bronnen en vergelijkt elk element van de kopie met hun introspectie; CI-job `schema-drift`. Beleid en bronnen staan in één repository, dus één job dekt beide pijplijnen |
 
 ## Policy-engine (§9)
 
-`policies/dvtp/gbo/engine.rego` voert de controles uit, de regels staan in
-`policies/dvtp/gbo/rules/`.
+`policies/gbo/engine.rego` voert de controles uit, de regels staan in
+`policies/gbo/rules/`.
 
 | Eis | Hoe |
 |---|---|

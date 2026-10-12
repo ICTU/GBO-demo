@@ -1,7 +1,7 @@
 package authz_test
 
 import data.authz
-import data.dvtp.gbo.fixtures_test as fx
+import data.gbo.fixtures_test as fx
 
 # The metadata path is gated by subject, FSC service, method and path; each
 # case below varies one of them.
@@ -73,7 +73,7 @@ test_graphql_request_from_metadata_peer_falls_through_to_engine if {
 # returns it to the caller.
 
 _reason_for(input_doc, c) := r if {
-	r := authz.reason with input as input_doc with data.dvtp.gbo.consent.resolved as c
+	r := authz.reason with input as input_doc with data.gbo.consent.resolved as c
 }
 
 _consent := {"context_valid": true, "status_available": true, "exists": true, "withdrawn": false, "valid_until": "2030-01-01T00:00:00Z", "granted_scopes": ["bd:ib:2025"], "dienstverlener_oin": fx.hv}
@@ -82,7 +82,7 @@ _unverifiable(code, subcode) := fx.request_with(
 	fx.hv, "bri", {
 		"profile": "ftv-graphql/0.1",
 		"operation": null,
-		"schema": {"digest": data.dvtp.gbo.graphql_schemas.digests.bri},
+		"schema": {"digest": data.gbo.graphql_schemas.digests.bri},
 		"fields": [],
 		"unverifiable": {"code": code, "subcode": subcode, "message": "test"},
 	},
@@ -105,7 +105,7 @@ test_reason_for_an_unverifiable_request_carries_the_subcode if {
 }
 
 test_reason_for_a_mutation if {
-	input_doc := fx.request_with(fx.hv, "bri", {"profile": "ftv-graphql/0.1", "operation": {"type": "mutation", "name": null}, "schema": {"digest": data.dvtp.gbo.graphql_schemas.digests.bri}, "fields": [], "unverifiable": {"code": "OPERATION_NOT_SUPPORTED", "message": "test"}}, {})
+	input_doc := fx.request_with(fx.hv, "bri", {"profile": "ftv-graphql/0.1", "operation": {"type": "mutation", "name": null}, "schema": {"digest": data.gbo.graphql_schemas.digests.bri}, "fields": [], "unverifiable": {"code": "OPERATION_NOT_SUPPORTED", "message": "test"}}, {})
 	_reason_for(input_doc, _consent) == "OPERATION_NOT_SUPPORTED"
 }
 

@@ -185,7 +185,7 @@ sequenceDiagram
 ```
 
 De policy haalt het consent zelf op, tijdens de evaluatie (`http.send` vanuit
-`policies/dvtp/gbo/consent.rego`); de mapper verifieert en raadpleegt niets.
+`policies/gbo/consent.rego`); de mapper verifieert en raadpleegt niets.
 De JWKS wordt vijf minuten gecachet en direct opnieuw opgehaald bij een
 onbekende `kid`. De status van het specifieke consent wordt bij iedere aanvraag
 zonder cache online gecontroleerd, zodat een intrekking bij de eerstvolgende

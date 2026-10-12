@@ -1,8 +1,8 @@
-package dvtp.gbo.consent_test
+package gbo.consent_test
 
-import data.dvtp.gbo
-import data.dvtp.gbo.consent
-import data.dvtp.gbo.fixtures_test as fx
+import data.gbo
+import data.gbo.consent
+import data.gbo.fixtures_test as fx
 
 # The consent PIP end to end: real ES256 tokens, the register mocked at
 # http.send. Tests through gbo.response assert the deny reason; tests on

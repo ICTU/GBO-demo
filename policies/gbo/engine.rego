@@ -1,6 +1,6 @@
-package dvtp.gbo
+package gbo
 
-import data.dvtp.gbo.lib
+import data.gbo.lib
 
 # ═══════════════════════════════════════════════════════════════════════════
 # GBO PDP runtime of the FTV GraphQL profile's policy model (Section 9). It
@@ -9,7 +9,7 @@ import data.dvtp.gbo.lib
 # data field is allowed.
 # ═══════════════════════════════════════════════════════════════════════════
 
-import data.dvtp.gbo.consent
+import data.gbo.consent
 
 # ── Entrypoint: allowed only when every data field is allowed ──────────────
 
@@ -128,12 +128,12 @@ _request_failure := {"code": "CONFIG_ERROR", "subcode": "MAPPER_OUTPUT_MISSING"}
 }
 
 # The bundle pins each service's schema digest; a service without one fails.
-_schema_pinned if _gql.schema.digest == data.dvtp.gbo.graphql_schemas.digests[_service]
+_schema_pinned if _gql.schema.digest == data.gbo.graphql_schemas.digests[_service]
 
 # ── Rules declare their own scope ───────────────────────────────────────────
 
 _rule_meta[rid] := meta if {
-	some _, m in data.dvtp.gbo.rules
+	some _, m in data.gbo.rules
 	rid := m.rule_id
 	meta := {
 		"covers_types": object.get(m, "covers_types", set()),

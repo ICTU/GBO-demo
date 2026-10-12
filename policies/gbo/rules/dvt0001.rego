@@ -1,4 +1,4 @@
-package dvtp.gbo.rules.dvt0001
+package gbo.rules.dvt0001
 
 # DVT0001 — Income data under a citizen's consent.
 #

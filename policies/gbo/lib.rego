@@ -1,4 +1,4 @@
-package dvtp.gbo.lib
+package gbo.lib
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Evaluation library for GBO rules.
@@ -12,14 +12,14 @@ package dvtp.gbo.lib
 # need this list. It exists for the developer portal, a demo feature that
 # shows per rule which checks passed, failed or were skipped.
 #
-# ctx, built by the dvtp.gbo engine:
+# ctx, built by the gbo engine:
 #   subject   AuthZEN subject: id is the FSC peer that connects,
 #             attributes.outway_delegator_peer_id the peer it connects for
 #             on a delegated connection
 #   time      RFC3339
 #   resource  scope, and subject_placeholders: the placeholders that stand
 #             for the subject of a verified consent
-#   pip       consent (from data.dvtp.gbo.consent): context_valid,
+#   pip       consent (from data.gbo.consent): context_valid,
 #             invalid_code, status_available, exists, withdrawn, valid_until,
 #             granted_scopes, dienstverlener_oin. integrator: the acting
 #             peer's admission entry {active, acts_for}, on a delegated call

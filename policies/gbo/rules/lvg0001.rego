@@ -1,4 +1,4 @@
-package dvtp.gbo.rules.lvg0001
+package gbo.rules.lvg0001
 
 # LVG0001 — Ownership check of a verblijfsobject under a citizen's consent.
 #

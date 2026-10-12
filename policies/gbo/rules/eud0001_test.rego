@@ -1,8 +1,8 @@
-package dvtp.gbo.rules.eud0001_test
+package gbo.rules.eud0001_test
 
-import data.dvtp.gbo.fixtures_test as fx
-import data.dvtp.gbo.lib
-import data.dvtp.gbo.rules.eud0001
+import data.gbo.fixtures_test as fx
+import data.gbo.lib
+import data.gbo.rules.eud0001
 
 # ═══════════════════════════════════════════════════════════════════════════
 # EUD0001 checks (year, actor, PID), through lib.evaluate with the rule's

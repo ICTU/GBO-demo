@@ -1,4 +1,4 @@
-package dvtp.gbo.consent
+package gbo.consent
 
 # Consent PIP: verifies the citizen's consent token on the request and asks
 # the consent register whether that consent is still ACTIVE, while the policy
