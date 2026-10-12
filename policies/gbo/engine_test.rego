@@ -284,6 +284,25 @@ test_dvtp_deny_placeholder_the_rule_does_not_accept if {
 	fx.refused_for(result, "CONSTRAINT_MISMATCH")
 }
 
+# The ownership consent on the person alone: refused by the scope pin.
+test_dvtp_deny_an_lvg_consent_asking_only_for_the_person if {
+	req := fx.request(fx.hv, "bri", [fx.person("consent:identity")], fx.scope_headers("lvg:vbo:eigendom"))
+	result := gbo.response with input as req
+		with data.gbo.consent.resolved as object.union(_consent, {"granted_scopes": ["lvg:vbo:eigendom"]})
+	result.decision == false
+	fx.field_codes(result) == {"SCOPE_NOT_ALLOWED"}
+}
+
+# Without a scope the consent covers none; that stays the code, the scope pin
+# comes after it.
+test_dvtp_without_a_scope_the_code_stays_consent_scope_mismatch if {
+	result := gbo.response with input as fx.income(fx.hv, "consent:identity", [2025], {})
+		with data.gbo.consent.resolved as _consent
+	fx.field_codes(result) == {"CONSENT_SCOPE_MISMATCH"}
+	some d in fx.denied(result)
+	"SCOPE_NOT_ALLOWED" in d.trace[0].reasons
+}
+
 # ── Deny reasons without a consent token ─────────────────────────────────
 # Only the EUDI rules judge, so DVT0001's CONSENT_CONTEXT_INVALID never hides
 # the EUDI reason.

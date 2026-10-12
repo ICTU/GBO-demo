@@ -57,6 +57,11 @@ deny contains "CONSENT_SCOPE_MISMATCH" if not helper.consent_covers_declared_sco
 
 deny contains "CONSENT_ACTOR_MISMATCH" if not helper.consent_given_to_caller
 
+# Only the income question, for one belastingjaar. The consent checks alone
+# would not do: a consent for lvg:vbo:eigendom, sent with that scope, covers
+# it.
+deny contains "SCOPE_NOT_ALLOWED" if not regex.match(`^bd:ib:[0-9]{4}$`, lib.declared_scope)
+
 # ── The question ─────────────────────────────────────────────────────────────
 
 # The root field's bsn must be the identity placeholder: the provider holds
