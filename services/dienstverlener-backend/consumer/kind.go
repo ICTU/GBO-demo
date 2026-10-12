@@ -153,7 +153,7 @@ func intersectYears(requested, consented []int) (allowed, denied []int) {
 // The belastingjaren filter travels INSIDE the query: the bron returns
 // all aangiften for a person, so per-year consent is only enforceable by
 // policy when the PDP can see the requested years (rule DVT0001's
-// years_in_scopes check). Default = the two most recent years.
+// YEAR_NOT_COVERED check). Default = the two most recent years.
 //
 // `fields` is an optional field-selection; empty = default set of 5
 // fields. Bedrag-fields (verzamelinkomen, box*Inkomen) only exist on the

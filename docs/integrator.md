@@ -50,11 +50,11 @@ sequenceDiagram
 `dienstverlener_oin` wordt vergeleken met de **vertegenwoordigde** partij: de
 delegator uit de gedelegeerde verbinding, en bij een directe aanroep
 `subject.id` zoals voorheen. De integrator komt aan zijn bevoegdheid via een
-eigen mandaat, niet via het consent: een aparte stap
+eigen mandaat, niet via het consent: de engine
 (`INTEGRATOR_NOT_REGISTERED`) eist dat de verbindende peer in het
 toelatingsregister actief is en voor die dienstverlener en die regel mag
-handelen. Een gedelegeerde aanroep zonder mandaat faalt op die stap, ook bij
-regels zonder consent. De binding wordt dus niet opgerekt: een integrator kan
+handelen. Dat geldt voor elke regel, ook als de regel het zelf niet noemt, en
+ook bij regels zonder consent. De binding wordt dus niet opgerekt: een integrator kan
 geen consent gebruiken dat aan een andere dienstverlener of aan hemzelf is
 gegeven (`CONSENT_ACTOR_MISMATCH`).
 
@@ -77,14 +77,15 @@ OpenFTV zet die in OPA-input onder `input.subject.attributes`: de delegator,
 maar ook `service_name`, `grant_hash` en `service_peer_id`. De policy leest de
 twee rollen apart:
 
-- `acting_party(ctx)`: `subject.id`, de peer die verbindt;
-- `represented_party(ctx)`: de delegator, of `subject.id` bij een directe
+- `lib.acting_party`: `subject.id`, de peer die verbindt;
+- `lib.represented_party`: de delegator, of `subject.id` bij een directe
   aanroep.
 
 Een delegator die gelijk is aan de verbindende peer telt als directe aanroep.
-`allowed_actors` (EUDI-regels) blijft de verbindende peer controleren.
-Weglaten van het consent-token helpt een integrator dus niet: dan valt hij
-onder het PID-regime en daar staat hij niet in `allowed_actors`.
+De EUDI-regels blijven de verbindende peer controleren tegen de aangewezen
+uitgevers (`designated_issuers` in `rules/eudi/helper.rego`). Weglaten van het
+consent-token helpt een integrator dus niet: dan valt hij onder het
+PID-regime en daar staat hij niet tussen de aangewezen uitgevers.
 
 ### 3. Toelating
 
@@ -194,4 +195,5 @@ curl -sS -X POST localhost:9423/api/dvtp/query \
 | geen integratie in het register | `INTEGRATOR_NOT_REGISTERED`; een nieuw gedelegeerd contract blijft `proposed` met `DELEGATION_NOT_REGISTERED` |
 
 De policytests dekken dezelfde gevallen voor directe en gedelegeerde
-aanroepen (`dvt0001_test.rego`, `engine_test.rego`, `autosign_test.rego`).
+aanroepen (`dvt0001_test.rego`, `engine_test.rego`, `lvg_engine_test.rego`,
+`autosign_test.rego`).

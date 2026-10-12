@@ -6,52 +6,6 @@ import data.gbo.fixtures_test as fx
 # The policy resolves the consent itself (tested in consent_test.rego). These
 # tests stand in a resolved consent with `with`, so they test the engine alone.
 
-_pip_consent := {"context_valid": true, "status_available": true, "exists": true, "withdrawn": false, "granted_scopes": ["bd:ib:2025"], "valid_until": "2030-01-01T00:00:00Z", "dienstverlener_oin": "peer-oin-123"}
-
-_input := {"subject": {"type": "org", "id": "peer-oin-123"}, "context": {}}
-
-test_ctx_pip_carries_the_resolved_consent if {
-	ctx := gbo._ctx with input as _input with data.gbo.consent.resolved as _pip_consent
-	ctx.pip.consent.exists == true
-}
-
-test_ctx_resource_has_both_placeholders if {
-	ctx := gbo._ctx with input as _input with data.gbo.consent.resolved as _pip_consent
-	ctx.resource.subject_placeholders == {"consent:identity", "consent:pseudonym"}
-}
-
-test_ctx_resource_placeholders_empty_without_consent if {
-	ctx := gbo._ctx with input as {"subject": {"type": "org", "id": "x"}, "context": {}}
-	ctx.resource.subject_placeholders == set()
-}
-
-test_ctx_resource_placeholders_empty_for_an_unverified_consent if {
-	ctx := gbo._ctx with input as _input with data.gbo.consent.resolved as {"context_valid": false, "invalid_code": "CONSENT_SIGNATURE_INVALID"}
-	ctx.resource.subject_placeholders == set()
-}
-
-# The policy decides which placeholders exist; a request cannot add its own.
-test_ctx_resource_placeholders_are_not_taken_from_the_request if {
-	req := {"subject": {"type": "org", "id": "x"}, "context": {"resource": {"subject_placeholders": ["999991772"]}}}
-	ctx := gbo._ctx with input as req with data.gbo.consent.resolved as _pip_consent
-	ctx.resource.subject_placeholders == {"consent:identity", "consent:pseudonym"}
-}
-
-# The rules see every mapper record (for checks that deny over several
-# fields) and the resource without the mapper's output (profile 9.4).
-test_ctx_carries_all_fields_and_the_resource_without_the_mapper if {
-	typename := {"path": ["ingeschrevenPersoon", "__typename"], "parentType": "IngeschrevenPersoon", "field": "__typename", "leaf": true}
-	fields := array.concat(fx.income_fields("consent:identity", fx.literal([2025])), [typename])
-	req := object.union(fx.request(fx.hv, "bri", fields, fx.scope_headers("bd:ib:2025")), {"resource": {"attributes": {"path": "/graphql"}}})
-	ctx := gbo._ctx with input as req with data.gbo.consent.resolved as _pip_consent
-	ctx.fields == fields
-	ctx.resource.type == "uri"
-	ctx.resource.id == "/graphql"
-	ctx.resource.attributes == {"path": "/graphql"}
-	ctx.resource.scope == "bd:ib:2025"
-	ctx.resource.subject_placeholders == {"consent:identity", "consent:pseudonym"}
-}
-
 # ── What the administrator sees (profile Section 10.1) ───────────────────
 
 test_admin_view_of_a_refused_field if {
@@ -67,10 +21,7 @@ test_admin_view_of_a_refused_field if {
 	denied.path == ["ingeschrevenPersoon", "heeftBelastingjaarAangifte"]
 	denied.code == "YEAR_NOT_COVERED"
 	denied.evaluated == ["DVT0001"]
-	denied.trace[0].rule == "DVT0001"
-	some step in denied.trace[0].steps
-	step.code == "YEAR_NOT_COVERED"
-	step.status == "fail"
+	denied.trace == [{"rule": "DVT0001", "code": "YEAR_NOT_COVERED", "reasons": ["YEAR_NOT_COVERED"]}]
 }
 
 # The consumer's view and the texts hide which field was refused; only the
@@ -98,24 +49,10 @@ test_admin_view_of_an_unverifiable_request if {
 	fx.client(result) == {"code": "FIELD_NOT_PERMITTED"}
 }
 
-# The scope is the one the consumer declares, in any header-name case.
-test_ctx_resource_scope_is_the_declared_header if {
-	ctx := gbo._ctx with input as {"subject": {"id": "x"}, "context": {"headers": {"x-gbo-scope": "bd:ib:2025"}}}
-	ctx.resource.scope == "bd:ib:2025"
-}
-
-# Two values under two spellings are not resolved by picking one.
-test_ctx_resource_scope_twice_is_no_scope if {
-	ctx := gbo._ctx with input as {"subject": {"id": "x"}, "context": {"headers": {"X-Gbo-Scope": "bd:ib:2025", "x-gbo-scope": "bd:ib:2024"}}}
-	ctx.resource.scope == ""
-}
-
 # A consent in input is not one the policy verified, so it is dropped. With
 # no token the request is in the PID regime, where a placeholder names nobody.
 test_input_pip_consent_is_not_trusted if {
 	req := object.union(_dvtp_input("bd:ib:2025", "consent:identity", [2025]), {"context": {"pip": {"consent": _consent}}})
-	ctx := gbo._ctx with input as req
-	not ctx.pip.consent
 	result := gbo.response with input as req
 	result.decision == false
 	fx.refused_for(result, "PID_NOT_PRESENT")
@@ -394,7 +331,7 @@ test_no_consent_token_and_a_placeholder_names_no_subject if {
 }
 
 # A consent-based consumer that omits its token and names a real BSN meets
-# only the EUDI rules' allowed_actors: hence the invariant below.
+# only the EUDI rules' designated issuers: hence the invariant below.
 test_no_consent_token_and_a_real_bsn_meets_the_actor_check if {
 	result := gbo.response with input as _dvtp_input("bd:ib:2025", "999991772", [2025])
 	result.decision == false
@@ -403,7 +340,7 @@ test_no_consent_token_and_a_real_bsn_meets_the_actor_check if {
 
 # ── Invariant: EUDI actors are never consent-based consumers ─────────────
 # Without a consent token a request falls under the EUDI rules, gated only by
-# each rule's allowed_actors. An OIN that is both a designated issuer and a
+# the designated issuers. An OIN that is both a designated issuer and a
 # consent-based consumer could skip the citizen's consent, with its scope and
 # year checks, by omitting the token. This is a deployment fact, so the test
 # pins the seeded consumers.
@@ -416,30 +353,18 @@ _dvtp_consumer_oins := {
 }
 
 test_pid_rule_actors_are_disjoint_from_consent_consumers if {
-	every rule_id in {"EUD0001", "EUD0002"} {
-		actors := object.get(gbo._rule_meta[rule_id].spec, "allowed_actors", set())
-		count(actors) > 0
-		count(actors & _dvtp_consumer_oins) == 0
-	}
+	issuers := data.gbo.rules.eudi.helper.designated_issuers
+	count(issuers) > 0
+	count(issuers & _dvtp_consumer_oins) == 0
 }
 
 # ── Every GBO rule names one regime ──────────────────────────────────────
-# A rule naming none is evaluated in both regimes; one naming both is judged
-# as a consent rule only.
+# A rule naming none is evaluated in both regimes.
 
 _regime_violations contains sprintf("%s: names no regime", [rid]) if {
 	some rid, m in gbo._rule_meta
-	not _names_regime(m.spec, "consent_required")
-	not _names_regime(m.spec, "pid_required")
+	not m.regime in {"consent", "pid"}
 }
-
-_regime_violations contains sprintf("%s: names both regimes", [rid]) if {
-	some rid, m in gbo._rule_meta
-	_names_regime(m.spec, "consent_required")
-	_names_regime(m.spec, "pid_required")
-}
-
-_names_regime(spec, flag) if object.get(spec, flag, false) == true
 
 test_every_rule_names_one_regime if {
 	violations := _regime_violations
@@ -447,63 +372,13 @@ test_every_rule_names_one_regime if {
 	count(violations) == 0
 }
 
-test_regime_check_catches_none_and_both if {
-	broken := {
-		"none": {"rule_id": "N", "covers_fields": set(), "spec": {"rule_id": "N"}},
-		"both": {"rule_id": "B", "covers_fields": set(), "spec": {"rule_id": "B", "consent_required": true, "pid_required": true}},
-	}
+test_regime_check_catches_a_rule_without_one if {
+	broken := {"test": {
+		"none": {"rule_id": "N", "covers_fields": set()},
+		"other": {"rule_id": "O", "regime": "both", "covers_fields": set()},
+	}}
 	violations := _regime_violations with data.gbo.rules as broken
-	violations == {"N: names no regime", "B: names both regimes"}
-}
-
-# ── Every check that reads an argument names it ──────────────────────────
-# Such a check without its field and argument denies every request (fail
-# closed); this catches the omission before the rule reaches a PDP.
-
-_argument_violations contains sprintf("%s: %s without years_argument", [rid, check]) if {
-	some rid, m in gbo._rule_meta
-	some check in {"allowed_years", "years_in_scopes"}
-	not object.get(m.spec, check, false) in {false, set(), []}
-	not _names_argument(object.get(m.spec, "years_argument", null))
-}
-
-_argument_violations contains sprintf("%s: pid_required without subject_argument", [rid]) if {
-	some rid, m in gbo._rule_meta
-	m.spec.pid_required == true
-	not _names_argument(object.get(m.spec, "subject_argument", null))
-}
-
-_argument_violations contains sprintf("%s: constraint_binding entry without field and arg", [rid]) if {
-	some rid, m in gbo._rule_meta
-	some binding in object.get(m.spec, "constraint_binding", [])
-	not _names_argument(binding)
-}
-
-_names_argument(binding) if {
-	is_string(binding.field)
-	contains(binding.field, ".")
-	is_string(binding.arg)
-	binding.arg != ""
-}
-
-test_every_argument_check_names_its_argument if {
-	violations := _argument_violations
-	print("rules with a check that names no argument:", violations)
-	count(violations) == 0
-}
-
-test_argument_check_catches_a_rule_that_names_none if {
-	broken := {
-		"years": {"rule_id": "Y", "covers_fields": set(), "spec": {"rule_id": "Y", "allowed_years": {2025}}},
-		"pid": {"rule_id": "P", "covers_fields": set(), "spec": {"rule_id": "P", "pid_required": true}},
-		"bsn": {"rule_id": "B", "covers_fields": set(), "spec": {"rule_id": "B", "constraint_binding": [{"arg": "bsn", "placeholders": {"consent:identity"}}]}},
-	}
-	violations := _argument_violations with data.gbo.rules as broken
-	violations == {
-		"Y: allowed_years without years_argument",
-		"P: pid_required without subject_argument",
-		"B: constraint_binding entry without field and arg",
-	}
+	violations == {"N: names no regime", "O: names no regime"}
 }
 
 # ── Failed evidence gives the regime's own reason ────────────────────────
@@ -611,9 +486,7 @@ test_delegated_call_without_admission_register_is_pip_unavailable if {
 	fx.field_codes(result) == {"PIP_UNAVAILABLE"}
 	some d in fx.denied(result)
 	some t in d.trace
-	some step in t.steps
-	step.code == "INTEGRATOR_REGISTER_UNAVAILABLE"
-	step.status == "fail"
+	"INTEGRATOR_REGISTER_UNAVAILABLE" in t.reasons
 }
 
 # An empty register is a register: nobody is admitted.
@@ -635,10 +508,6 @@ test_direct_call_without_admission_register_allowed if {
 test_input_pip_integrator_is_not_trusted if {
 	forged := {"integrator": _registered[_integrator]}
 	req := object.union(_delegated_input(_integrator), {"context": {"pip": forged}})
-	ctx := gbo._ctx with input as req
-		with data.gbo.consent.resolved as _consent
-		with data.entities.dvtp_participant as {}
-	not ctx.pip.integrator
 	result := gbo.response with input as req
 		with data.gbo.consent.resolved as _consent
 		with data.entities.dvtp_participant as {}
@@ -656,13 +525,6 @@ test_input_pip_register_state_is_not_trusted if {
 	result.decision == true
 }
 
-test_direct_call_carries_no_integrator_pip if {
-	ctx := gbo._ctx with input as _dvtp_input("bd:ib:2025", "consent:identity", [2025])
-		with data.gbo.consent.resolved as _consent
-		with data.entities.dvtp_participant as _registered
-	not ctx.pip.integrator
-}
-
 # Leaving the consent token out does not get a registered integrator into
 # the PID regime: the EUDI rules check the peer that connects.
 test_delegated_call_without_consent_token_denied if {
@@ -670,4 +532,91 @@ test_delegated_call_without_consent_token_denied if {
 	result := gbo.response with input as req
 		with data.entities.dvtp_participant as _registered
 	result.decision == false
+}
+
+# ── The mandate is the engine's, for every rule ─────────────────────────
+
+_with_mandate(acts_for, active) := {_integrator: object.union(_registered[_integrator], {"acts_for": acts_for, "active": active})}
+
+test_delegated_call_for_an_unregistered_provider_denied if {
+	result := gbo.response with input as _delegated_input(_integrator)
+		with data.gbo.consent.resolved as _consent
+		with data.entities.dvtp_participant as _with_mandate([{"peer_id": "99999999900000000999", "rules": ["DVT0001"]}], true)
+	fx.refused_for(result, "INTEGRATOR_NOT_REGISTERED")
+}
+
+test_delegated_call_for_an_unregistered_rule_denied if {
+	result := gbo.response with input as _delegated_input(_integrator)
+		with data.gbo.consent.resolved as _consent
+		with data.entities.dvtp_participant as _with_mandate([{"peer_id": "99999999900000000300", "rules": ["LVG0001"]}], true)
+	fx.refused_for(result, "INTEGRATOR_NOT_REGISTERED")
+}
+
+test_delegated_call_from_a_suspended_integrator_denied if {
+	result := gbo.response with input as _delegated_input(_integrator)
+		with data.gbo.consent.resolved as _consent
+		with data.entities.dvtp_participant as _with_mandate(_registered[_integrator].acts_for, false)
+	fx.refused_for(result, "INTEGRATOR_NOT_REGISTERED")
+}
+
+# The service provider cannot claim the delegator attribute for itself: a
+# delegator equal to the connecting peer is a direct call, which needs no
+# register.
+test_delegator_equal_to_caller_is_a_direct_call if {
+	req := object.union(_dvtp_input("bd:ib:2025", "consent:identity", [2025]), {"subject": {"attributes": {"outway_delegator_peer_id": fx.hv}}})
+	result := gbo.response with input as req
+		with data.gbo.consent.resolved as _consent
+	result.decision == true
+}
+
+# The mandate comes after the rule's own reasons: an integrator that is no
+# designated issuer and has no mandate is refused as no designated issuer.
+# Both reasons are in the trace.
+test_mandate_comes_after_the_rules_own_reasons if {
+	req := object.union(fx.income(_integrator, "999991772", [2024], {}), {"subject": {"attributes": {"outway_delegator_peer_id": fx.hv}}})
+	result := gbo.response with input as req
+		with data.entities.dvtp_participant as _registered
+	fx.field_codes(result) == {"ACTOR_NOT_ALLOWED"}
+	some d in fx.denied(result)
+	d.trace == [{"rule": "EUD0001", "code": "ACTOR_NOT_ALLOWED", "reasons": ["ACTOR_NOT_ALLOWED", "INTEGRATOR_NOT_REGISTERED"]}]
+}
+
+# ── A rule's code is its most fundamental reason ────────────────────────
+
+# A token that does not verify fails most of the consent's conditions; the
+# code names the token, the trace keeps the rest.
+test_an_unverified_token_is_the_code_and_the_trace_keeps_the_rest if {
+	result := gbo.response with input as _dvtp_input("bd:ib:2025", "consent:identity", [2025])
+		with data.gbo.consent.resolved as {"context_valid": false, "status_available": false, "exists": false}
+	fx.field_codes(result) == {"CONSENT_CONTEXT_INVALID"}
+	some d in fx.denied(result)
+	some t in d.trace
+	t.code == "CONSENT_CONTEXT_INVALID"
+	t.reasons[0] == "CONSENT_CONTEXT_INVALID"
+	"CONSENT_WITHDRAWN" in t.reasons
+	"CONSENT_ACTOR_MISMATCH" in t.reasons
+}
+
+# A reason the engine does not know still refuses, after the known ones; a
+# new code can never let a field through.
+_rule_with(deny) := {"test": {"r": {
+	"rule_id": "R",
+	"covers_fields": {"Query.ingeschrevenPersoon"},
+	"deny": deny,
+}}}
+
+_person_only := fx.request(fx.hv, "bri", [fx.person("999991772")], {})
+
+test_an_unknown_reason_refuses_after_the_known_ones if {
+	result := gbo.response with input as _person_only
+		with data.gbo.rules as _rule_with({"SOMETHING_NEW", "CONSENT_EXPIRED"})
+	result.decision == false
+	fx.denied(result)[0].trace == [{"rule": "R", "code": "CONSENT_EXPIRED", "reasons": ["CONSENT_EXPIRED", "SOMETHING_NEW"]}]
+}
+
+test_an_unknown_reason_alone_is_the_code if {
+	result := gbo.response with input as _person_only
+		with data.gbo.rules as _rule_with({"SOMETHING_NEW"})
+	result.decision == false
+	fx.field_codes(result) == {"SOMETHING_NEW"}
 }

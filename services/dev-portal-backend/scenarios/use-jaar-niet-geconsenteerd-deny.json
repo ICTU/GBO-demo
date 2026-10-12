@@ -1,7 +1,7 @@
 {
   "id": "use-jaar-niet-geconsenteerd-deny",
   "name": "Use · jaar buiten consent DENY (YEAR_NOT_COVERED)",
-  "desc": "Consent is alleen verleend voor bd:ib:2025 (koppel met 'Issuance · hypotheek 2025 only'), maar de query vraagt 2024 én 2025. DVT0001's years_in_scopes-check eist dat elk gevraagd belastingjaar een bd:ib:<jaar>-scope in de consent heeft → DENY YEAR_NOT_COVERED.",
+  "desc": "Consent is alleen verleend voor bd:ib:2025 (koppel met 'Issuance · hypotheek 2025 only'), maar de query vraagt 2024 én 2025. DVT0001 eist dat elk gevraagd belastingjaar een bd:ib:<jaar>-scope in de consent heeft → DENY YEAR_NOT_COVERED.",
   "tab": "use",
   "expected_outcome": "deny",
   "payload": {

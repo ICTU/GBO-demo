@@ -164,9 +164,7 @@ _server_problem(r, check) if {
 	fx.request_code(r.response) == {"code": "PIP_UNAVAILABLE"}
 	some d in fx.denied(r.response)
 	some t in d.trace
-	some step in t.steps
-	step.code == check
-	step.status == "fail"
+	check in t.reasons
 }
 
 # ── Active consent ──────────────────────────────────────────────────────────
