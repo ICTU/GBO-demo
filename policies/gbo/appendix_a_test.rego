@@ -2,6 +2,7 @@ package gbo.appendix_a_test
 
 import data.gbo
 import data.gbo.fixtures_test as fx
+import data.gbo.lib
 
 # ═══════════════════════════════════════════════════════════════════════════
 # The decision vectors of the FTV GraphQL profile's Appendix A (draft-01),
@@ -18,11 +19,25 @@ _r0001 := {
 	"rule_id": "r-0001",
 	"covers_types": {"Persoon", "Inkomen", "LoonInkomen", "Bedrag", "Adres"},
 	"covers_fields": {"Query.persoon", "Persoon.inkomens", "Inkomen.bedrag", "LoonInkomen.bedrag", "Persoon.adres"},
-	"spec": {
-		"rule_id": "r-0001",
-		"allowed_years": {y | some y in numbers.range(2000, 2024)},
-		"years_argument": {"field": "Persoon.inkomens", "arg": "jaren"},
-	},
+}
+
+# Its one check: the years on Persoon.inkomens lie in 2000-2024. A rule
+# passed in with `with` is data, so its deny_field is worked out for the
+# request here, as the engine would find it in a rule package.
+_r0001_allowed_years := {sprintf("%v", [y]) | some y in numbers.range(2000, 2024)}
+
+_r0001_deny_field := {i: {"YEAR_NOT_ALLOWED"} |
+	some i, f in lib.fields
+	lib.key(f) == "Persoon.inkomens"
+	not _r0001_years_allowed(f)
+}
+
+_r0001_years_allowed(f) if {
+	years := lib.requested_years(f, "jaren")
+	count(years) > 0
+	every y in years {
+		y in _r0001_allowed_years
+	}
 }
 
 _output(fields) := {
@@ -33,13 +48,15 @@ _output(fields) := {
 	"unverifiable": null,
 }
 
-_decide_output(output, rules) := result if {
-	result := gbo.response with input as fx.request_with("00000001000000000001", "appendix-a", output, {})
-		with data.gbo.rules as rules
+_decide_output(output, rule) := result if {
+	req := fx.request_with("00000001000000000001", "appendix-a", output, {})
+	deny_field := _r0001_deny_field with input as req
+	result := gbo.response with input as req
+		with data.gbo.rules as {"appendix_a": {"r0001": object.union(rule, {"deny_field": deny_field})}}
 		with data.gbo.graphql_schemas.digests as {"appendix-a": _digest}
 }
 
-_decide(fields) := _decide_output(_output(fields), {"r0001": _r0001})
+_decide(fields) := _decide_output(_output(fields), _r0001)
 
 _denied(result) := [[d.index, d.key, d.code] | some d in fx.denied(result)]
 
@@ -156,7 +173,7 @@ test_a32_union_with_typename_only_denies_the_root if {
 # A root field binds by its key only, even when a rule covers Query.
 test_a33_root_leaf_never_inherits if {
 	through_query := object.union(_r0001, {"covers_types": _r0001.covers_types | {"Query"}})
-	result := _decide_output(_output([_rec(["aantalPersonen"], "Query", "aantalPersonen", true)]), {"r0001": through_query})
+	result := _decide_output(_output([_rec(["aantalPersonen"], "Query", "aantalPersonen", true)]), through_query)
 	_denied(result) == [[0, "Query.aantalPersonen", "NO_APPLICABLE_RULE"]]
 }
 
@@ -196,31 +213,31 @@ _failed(code, subcode) := object.union(_output([]), {"unverifiable": {"code": co
 
 test_a3_a10_unverifiable_requests_deny_with_the_mappers_code if {
 	every subcode in ["INVALID_QUERY", "OPERATION_AMBIGUOUS", "PARSE_ERROR", "UNSUPPORTED_TRANSPORT"] {
-		result := _decide_output(_failed("COVERAGE_UNVERIFIABLE", subcode), {"r0001": _r0001})
+		result := _decide_output(_failed("COVERAGE_UNVERIFIABLE", subcode), _r0001)
 		fx.request_code(result) == {"code": "COVERAGE_UNVERIFIABLE", "subcode": subcode}
 	}
 }
 
 test_a13_mutation_denies if {
 	output := object.union(_output([]), {"unverifiable": {"code": "OPERATION_NOT_SUPPORTED", "message": "operation type mutation"}})
-	result := _decide_output(output, {"r0001": _r0001})
+	result := _decide_output(output, _r0001)
 	fx.request_code(result) == {"code": "OPERATION_NOT_SUPPORTED"}
 }
 
 test_a24_schema_missing_denies if {
 	output := object.union(_failed("CONFIG_ERROR", "SCHEMA_UNAVAILABLE"), {"schema": null})
-	result := _decide_output(output, {"r0001": _r0001})
+	result := _decide_output(output, _r0001)
 	fx.request_code(result) == {"code": "CONFIG_ERROR", "subcode": "SCHEMA_UNAVAILABLE"}
 }
 
 test_a25_pinned_digest_mismatch_denies if {
 	output := object.union(_output(_a1), {"schema": {"digest": "sha256:9f2c"}})
-	result := _decide_output(output, {"r0001": _r0001})
+	result := _decide_output(output, _r0001)
 	fx.request_code(result) == {"code": "CONFIG_ERROR", "subcode": "SCHEMA_MISMATCH"}
 }
 
 test_a40_mapper_output_missing_denies if {
 	result := gbo.response with input as {"subject": {"id": "x", "attributes": {"service_name": "appendix-a"}}, "resource": {"type": "uri", "id": "/graphql"}, "context": {}}
-		with data.gbo.rules as {"r0001": _r0001}
+		with data.gbo.rules as {"appendix_a": {"r0001": _r0001}}
 	fx.request_code(result) == {"code": "CONFIG_ERROR", "subcode": "MAPPER_OUTPUT_MISSING"}
 }

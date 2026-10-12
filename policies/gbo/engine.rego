@@ -5,7 +5,7 @@ import data.gbo.lib
 # ═══════════════════════════════════════════════════════════════════════════
 # GBO PDP runtime of the FTV GraphQL profile's policy model (Section 9). It
 # binds each data field of the mapper's field list to the rules in ./rules,
-# evaluates them with lib.evaluate, and allows the request only when every
+# collects their reasons to refuse it, and allows the request only when every
 # data field is allowed.
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -42,13 +42,12 @@ _granted := [{
 	"field": fd.field,
 	"key": fd.key,
 	"rule": fd.result.context.granted_by,
-	"steps": object.get(fd.result.context, "granted_steps", []),
 } |
 	some fd in _field_decisions
 ]
 
 # Per denied field: its position, path and key, its code, the rules that
-# were bound, and each rule's trace.
+# were bound, and each rule's code and reasons.
 _denied_fields := [{
 	"index": fd.index,
 	"path": fd.path,
@@ -130,36 +129,42 @@ _request_failure := {"code": "CONFIG_ERROR", "subcode": "MAPPER_OUTPUT_MISSING"}
 # The bundle pins each service's schema digest; a service without one fails.
 _schema_pinned if _gql.schema.digest == data.gbo.graphql_schemas.digests[_service]
 
-# ── Rules declare their own scope ───────────────────────────────────────────
+# ── The rules ───────────────────────────────────────────────────────────────
+# Every package in a regime directory under ./rules (rules/dvtp, rules/eudi)
+# that names a rule_id is a rule. deny holds its reasons about the request as
+# a whole, deny_field[i] those about data field i; a rule grants a field when
+# neither has a reason for it.
 
-_rule_meta[rid] := meta if {
-	some _, m in data.gbo.rules
-	rid := m.rule_id
-	meta := {
-		"covers_types": object.get(m, "covers_types", set()),
-		"covers_fields": object.get(m, "covers_fields", set()),
-		"spec": m.spec,
-	}
+_rule_meta[rid] := {
+	"regime": _rule_doc(dir, pkg, "regime", ""),
+	"covers_types": _rule_doc(dir, pkg, "covers_types", set()),
+	"covers_fields": _rule_doc(dir, pkg, "covers_fields", set()),
+	"deny": _rule_doc(dir, pkg, "deny", set()),
+	"deny_field": _rule_doc(dir, pkg, "deny_field", {}),
+} if {
+	some dir, pkg
+	rid := data.gbo.rules[dir][pkg].rule_id
+	is_string(rid)
 }
+
+# One document of a rule package, never the whole package: the rule's tests
+# live next to it and would be evaluated with every decision.
+_rule_doc(dir, pkg, name, _) := data.gbo.rules[dir][pkg][name]
+
+_rule_doc(dir, pkg, name, fallback) := fallback if not data.gbo.rules[dir][pkg][name]
 
 # ── The regime decides which rules apply ────────────────────────────────────
 # A consent token, verified or not, puts the request in the consent regime
-# (pip.consent is set exactly then); without one, the PID regime. Only that
-# regime's rules bind, plus rules naming no regime (test rules only).
+# (consent.resolved is set exactly then); without one, the PID regime. Only
+# that regime's rules bind, plus rules naming no regime (test rules only).
 
 _regime := "consent" if {
-	object.get(_pip_obj, "consent", null) != null
+	consent.resolved
 } else := "pid"
-
-_rule_regime(spec) := "consent" if {
-	object.get(spec, "consent_required", false) == true
-} else := "pid" if {
-	object.get(spec, "pid_required", false) == true
-} else := ""
 
 _active_rules[rid] := m if {
 	some rid, m in _rule_meta
-	_rule_regime(m.spec) in {"", _regime}
+	m.regime in {"", _regime}
 }
 
 _field_declared contains key if {
@@ -204,7 +209,7 @@ _data_fields := [df |
 	some i, rf in _gql.fields
 	rf.field != "__typename"
 	not startswith(rf.parentType, "__")
-	key := sprintf("%s.%s", [rf.parentType, rf.field])
+	key := lib.key(rf)
 	df := {
 		"index": i,
 		"id": concat(".", rf.path),
@@ -214,109 +219,61 @@ _data_fields := [df |
 	}
 ]
 
-# ── Context for the rules ───────────────────────────────────────────────────
-# lib.evaluate reads only this context, never input; the consent in it was
-# verified by the policy itself (consent.rego). subject_placeholders are the
-# names a consent-based query may give its subject.
+# ── The integrator's mandate ────────────────────────────────────────────────
+# Every delegated call needs a mandate for the represented provider and the
+# rule that grants, whatever the rule says: it is about who may act for
+# whom, like the FSC delegation itself, so no rule can leave it out. The
+# admission register is data.entities, pulled by OpenFTV; a direct call has
+# no integrator to check.
 
-_ctx := {
-	"subject": input.subject,
-	"time": object.get(input.context, "time", ""),
-	"fields": object.get(_resource_attributes, ["graphql", "fields"], []),
-	"resource": object.union(_resource_without_mapper, {"scope": _declared_scope, "subject_placeholders": _subject_placeholders}),
-	"pip": _pip_obj,
-}
-
-# The evaluation context of the FTV profile (Section 9.4): every mapper
-# record of the request as `fields` (__typename and introspection included),
-# for checks that deny over several fields, and the resource without the
-# mapper's output. GBO adds the declared scope and the subject placeholders.
-_resource_attributes := object.get(object.get(input, "resource", {}), "attributes", {})
-
-_resource_without_mapper := object.union(
-	object.remove(object.get(input, "resource", {}), ["attributes"]),
-	{"attributes": object.remove(_resource_attributes, ["graphql"])},
-)
-
-# The scope the consumer declares in X-GBO-Scope, header name in any case.
-# Untrusted: the rules check it against the consent's scopes or their own.
-# Two values give no scope rather than one picked: the pick would be
-# arbitrary, and the source could act on the other.
-_scope_values contains value if {
-	some name, value in object.get(input.context, "headers", {})
-	lower(name) == "x-gbo-scope"
-	is_string(value)
-}
-
-_declared_scope := scope if {
-	count(_scope_values) == 1
-	some scope in _scope_values
-} else := ""
-
-# Without a verified consent the placeholders stand for nobody.
-_subject_placeholders := lib.subject_placeholders if {
-	object.get(object.get(_pip_obj, "consent", {}), "context_valid", false) == true
+_mandate_reasons(rid) := {"INTEGRATOR_REGISTER_UNAVAILABLE"} if {
+	lib.delegated
+	not data.entities.dvtp_participant
+} else := {"INTEGRATOR_NOT_REGISTERED"} if {
+	lib.delegated
+	not _mandated(rid)
 } else := set()
 
-# A pip.consent or pip.integrator in input is dropped: the policy decides
-# only on a consent it verified and admission data it pulled itself.
-_pip_obj := object.union(_pip_with_consent, _pip_integrator)
+_mandated(rid) if {
+	integrator := data.entities.dvtp_participant[lib.acting_party]
+	integrator.active == true
+	some mandate in object.get(integrator, "acts_for", [])
+	mandate.peer_id == lib.represented_party
+	rid in mandate.rules
+}
 
-_pip_with_consent := object.union(_input_pip, {"consent": consent.resolved}) if {
-	consent.resolved
-} else := _input_pip
+# ── Per field: the first bound rule without reasons grants ─────────────────
 
-_input_pip := object.remove(object.get(input.context, "pip", {}), ["consent", "integrator", "integrator_register"])
-
-# On a delegated call, the acting peer's entry in the admission register
-# (data.entities, pulled by OpenFTV). Not listed fails the mandate check; no
-# register at all is a PIP failure.
-_pip_integrator := {"integrator": entry} if {
-	lib.delegated({"subject": input.subject})
-	entry := data.entities.dvtp_participant[input.subject.id]
-} else := {"integrator_register": "unavailable"} if {
-	lib.delegated({"subject": input.subject})
-	not data.entities.dvtp_participant
-} else := {}
-
-_eval(rid, field) := lib.evaluate(_rule_meta[rid].spec, object.union(_ctx, {"field": field}))
-
-# Each bound rule evaluated once per data field. A partial rule is cached, a
-# function call is not, and the per-field logic reads an outcome repeatedly.
-_outcomes[i][rid] := _eval(rid, f.record) if {
+# Each bound rule's reasons to refuse each data field: its own about the
+# request and about this field, and the mandate. A partial rule is cached,
+# a function call is not, and the per-field logic reads them repeatedly.
+_reasons[i][rid] := reasons if {
 	some f in _data_fields
 	i := f.index
 	some rid in f.policy_ids
+	m := _rule_meta[rid]
+	reasons := (m.deny | object.get(m.deny_field, i, set())) | _mandate_reasons(rid)
 }
-
-# ── Per field: the first bound rule that allows grants ──────────────────────
 
 _decide(f) := {"decision": false, "context": {"reason_admin": {"code": "NO_APPLICABLE_RULE", "evaluated": []}}} if {
 	count(f.policy_ids) == 0
 }
 
-_decide(f) := _evaluate_field(f.policy_ids, _outcomes[f.index]) if {
+_decide(f) := _evaluate_field(f.policy_ids, _reasons[f.index]) if {
 	count(f.policy_ids) > 0
 }
 
-_evaluate_field(policy_ids, outcome) := result if {
-	allowing := [rid | some rid in policy_ids; outcome[rid].decision == true]
+_evaluate_field(policy_ids, reasons) := {"decision": true, "context": {"granted_by": rid}} if {
+	allowing := [r | some r in policy_ids; count(reasons[r]) == 0]
 	count(allowing) > 0
 	rid := allowing[0]
-	result := {"decision": true, "context": {
-		"granted_by": rid,
-		"granted_steps": _outcome_steps(outcome[rid]),
-	}}
 } else := result if {
-	# No rule allowed. Each rule's code and steps form the trace; the
-	# field's code follows the profile (Section 9.4): a server problem if any
-	# rule hit one, else the first denying rule's code.
-	evaluated := [{
-		"rule": r,
-		"code": _outcome_code(outcome[r]),
-		"steps": _outcome_steps(outcome[r]),
-	} |
+	# No rule allowed. Each rule's reasons form the trace, its code the
+	# first of them; the field's code follows the profile (Section 9.4): a
+	# server problem if any rule's code is one, else the first rule's code.
+	evaluated := [{"rule": r, "code": ordered[0], "reasons": ordered} |
 		some r in policy_ids
+		ordered := _ordered(reasons[r])
 	]
 	result := {
 		"decision": false,
@@ -333,13 +290,32 @@ _field_code(evaluated) := "PIP_UNAVAILABLE" if {
 # server problem, not the consumer's. The trace still shows which.
 _pip_unavailable := {"CONSENT_STATUS_UNAVAILABLE", "CONSENT_KEYS_UNAVAILABLE", "INTEGRATOR_REGISTER_UNAVAILABLE"}
 
-# A deny's steps are under context.reason_admin.steps, an allow's under steps.
-_outcome_steps(outcome) := outcome.context.reason_admin.steps if {
-	outcome.context.reason_admin.steps
-} else := outcome.context.steps if {
-	outcome.context.steps
-} else := []
+# A rule can give several reasons at once; its code is the first in this
+# order, so an administrator sees the most fundamental one: the token, then
+# the consent's state, then the question, then who asks. A reason not listed
+# still refuses, and comes after the listed ones.
+_reason_order := [
+	"CONSENT_CONTEXT_INVALID",
+	"CONSENT_SIGNATURE_INVALID",
+	"CONSENT_KEYS_UNAVAILABLE",
+	"CONSENT_TOKEN_EXPIRED",
+	"CONSENT_STATUS_UNAVAILABLE",
+	"CONSENT_NOT_FOUND",
+	"CONSENT_WITHDRAWN",
+	"CONSENT_EXPIRED",
+	"CONSENT_SCOPE_MISMATCH",
+	"CONSTRAINT_MISMATCH",
+	"PID_NOT_PRESENT",
+	"SCOPE_NOT_ALLOWED",
+	"YEAR_NOT_ALLOWED",
+	"YEAR_NOT_COVERED",
+	"CONSENT_ACTOR_MISMATCH",
+	"ACTOR_NOT_ALLOWED",
+	"INTEGRATOR_REGISTER_UNAVAILABLE",
+	"INTEGRATOR_NOT_REGISTERED",
+]
 
-_outcome_code(outcome) := outcome.context.reason_admin.code if {
-	outcome.context.reason_admin.code
-} else := "UNKNOWN"
+_ordered(reasons) := array.concat(
+	[r | some r in _reason_order; r in reasons],
+	sort([r | some r in reasons; not r in _reason_order]),
+)

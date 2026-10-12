@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import { fetchPolicySnippet, type EngineDecision, type PolicySnippet } from '../api/devClient'
 import { useRules } from '../hooks/useRules'
-import { readDecision, type DecisionView, type FieldOutcome, type Step } from '../lib/decisionView'
+import { causeOf, readDecision, type DecisionView, type FieldOutcome, type Step } from '../lib/decisionView'
 import RuleSpecPanel from './RuleSpecPanel'
 import EvalTrace from './EvalTrace'
 
 // Renders the policy's decision, as read by readDecision: per field which
-// rule granted it or why it was refused, with each rule's trace. A deny
+// rule granted it or why it was refused, with each rule's reasons. A deny
 // shows both what the consumer was told and the request's own code: the
 // consumer hears only the FTV GraphQL profile's code for it (never which
 // field, never why), the administrator sees the rest here.
@@ -26,17 +26,17 @@ const MUTE_COLOR = 'var(--mute)'
 
 export default function OpaDecisionContext({ decision }: Props) {
   const view = readDecision(decision.result)
-  const [snippetCode, setSnippetCode] = useState<string | null>(null)
+  const [snippet, setSnippet] = useState<{ code: string; rule?: string } | null>(null)
   const path = decision.path ?? ''
   const { rules: allRules } = useRules()
 
-  // The rules this decision mentions, to show their spec below the fields.
+  // The rules this decision mentions, to show their source below the fields.
   const mentionedRuleIds = new Set<string>()
   for (const f of [...(view.granted ?? []), ...(view.denied ?? [])]) {
     f.rules.forEach((r) => mentionedRuleIds.add(r.rule))
   }
   const mentionedRules = allRules.filter((r) => mentionedRuleIds.has(r.rule_id))
-  const openSnippet = path ? (code: string) => setSnippetCode(code) : undefined
+  const openSnippet = path ? (code: string, rule?: string) => setSnippet({ code, rule }) : undefined
 
   if (view.shape === 'none') {
     return (
@@ -67,8 +67,8 @@ export default function OpaDecisionContext({ decision }: Props) {
       {mentionedRules.map((r) => (
         <RuleSpecPanel key={r.rule_id} rule={r} />
       ))}
-      {snippetCode && path && (
-        <PolicySnippetModal path={path} code={snippetCode} onClose={() => setSnippetCode(null)} />
+      {snippet && path && (
+        <PolicySnippetModal path={path} code={snippet.code} rule={snippet.rule} onClose={() => setSnippet(null)} />
       )}
     </div>
   )
@@ -138,7 +138,7 @@ function FieldList({
   color: string
   glyph: string
   fields: FieldOutcome[]
-  onCauseClick?: (code: string) => void
+  onCauseClick?: (code: string, rule?: string) => void
 }) {
   return (
     <div style={{ marginTop: 8 }}>
@@ -147,16 +147,18 @@ function FieldList({
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         {fields.map((f, i) => {
-          const clickable = Boolean(f.code && onCauseClick)
+          // The reason and the rule that gave it: that rule's file shows it.
+          const cause = causeOf(f)
+          const clickable = Boolean(cause && onCauseClick)
           return (
             <div key={i} style={{ padding: '4px 6px', borderRadius: 4, background: 'transparent' }}>
               <div
-                onClick={clickable ? () => onCauseClick!(f.code!) : undefined}
+                onClick={clickable ? () => onCauseClick!(cause!.code, cause!.rule) : undefined}
                 style={{
                   display: 'grid', gridTemplateColumns: '18px 1fr auto', gap: 8, alignItems: 'baseline',
                   cursor: clickable ? 'pointer' : 'default',
                 }}
-                title={clickable ? `Klik om de Rego-regel voor ${f.code} te tonen` : f.key}
+                title={clickable ? `Klik om de Rego-regel voor ${cause!.code} te tonen` : f.key}
               >
                 <span style={{ color, fontWeight: 800, textAlign: 'center' }}>{glyph}</span>
                 <div style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -193,11 +195,17 @@ function FieldList({
                 </div>
               </div>
               {f.rules.map((r, j) => (
-                r.steps && r.steps.length > 0 && (
-                  <div key={`tr-${j}`} style={{ marginLeft: 26 }}>
-                    <EvalTrace ruleId={r.rule} steps={r.steps as Step[]} />
-                  </div>
-                )
+                r.reasons && r.reasons.length > 0
+                  ? (
+                    <div key={`rs-${j}`} className="mono" style={{ marginLeft: 26, marginTop: 2, fontSize: 10, color: MUTE_COLOR }}>
+                      {r.rule}: {r.reasons.join(', ')}
+                    </div>
+                  )
+                  : r.steps && r.steps.length > 0 && (
+                    <div key={`tr-${j}`} style={{ marginLeft: 26 }}>
+                      <EvalTrace ruleId={r.rule} steps={r.steps as Step[]} />
+                    </div>
+                  )
               ))}
             </div>
           )
@@ -250,17 +258,17 @@ function LegacyEvaluatedList({
   )
 }
 
-function PolicySnippetModal({ path, code, onClose }: { path: string; code: string; onClose: () => void }) {
+function PolicySnippetModal({ path, code, rule, onClose }: { path: string; code: string; rule?: string; onClose: () => void }) {
   const [snippet, setSnippet] = useState<PolicySnippet | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    fetchPolicySnippet(path, code)
+    fetchPolicySnippet(path, code, rule)
       .then((s) => { if (!cancelled) setSnippet(s) })
       .catch((e: Error) => { if (!cancelled) setError(e.message) })
     return () => { cancelled = true }
-  }, [path, code])
+  }, [path, code, rule])
 
   const lines = snippet?.raw.split('\n') ?? []
   const target = snippet?.line ?? 0

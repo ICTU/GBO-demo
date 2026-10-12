@@ -1,4 +1,4 @@
-package gbo.rules.eud0002
+package gbo.rules.eudi.eud0002
 
 # EUD0002 — Akte van overlijden for an EUDI wallet attestation.
 #
@@ -11,9 +11,15 @@ package gbo.rules.eud0002
 # marriage from her own persoonslijst. Picking the partner whose death ended
 # it is a security-sensitive source invariant, tested in the BRP service.
 #
-# Not checked here: the PID signature and the wallet certificate.
+# Not checked here: the PID signature and the wallet certificate. No scope
+# or year check: the closed set of fields is what this rule grants.
+
+import data.gbo.lib
+import data.gbo.rules.eudi.helper
 
 rule_id := "EUD0002"
+
+regime := "pid"
 
 # No shared value object here. Every field is listed, so other BRP fields
 # (woontOp, heeftNationaliteit, gezag) fall to the engine's closed world.
@@ -30,22 +36,17 @@ sprintf("AkteVanOverlijden.%s", [field]) |
 	}
 }
 
-# Same issuers as EUD0001: the list says who may issue attestations at all,
-# not which source they read.
-allowed_actors := {
-	"00000004000000004000",
-	"0000009961MINEZK0000",
-	"99999999900000000100",
-}
+# ── The caller ───────────────────────────────────────────────────────────────
 
-# No scope or year check: the closed set of fields is what this rule grants.
-spec := {
-	"rule_id": "EUD0002",
-	"consent_required": false,
-	"consent_must_cover_scope": false,
-	"pid_required": true,
-	# The disclosed BSN, in the root field's argument.
-	"subject_argument": {"field": "Query.akteVanOverlijden", "arg": "bsn"},
-	"allowed_actors": allowed_actors,
-	"years_in_scopes": false,
+deny contains "PID_NOT_PRESENT" if helper.consent_token_presented
+
+deny contains "ACTOR_NOT_ALLOWED" if not helper.issuer_designated
+
+# ── The question ─────────────────────────────────────────────────────────────
+
+# The disclosed BSN, in the root field's argument.
+deny_field[i] contains "PID_NOT_PRESENT" if {
+	some i, f in lib.fields
+	lib.key(f) == "Query.akteVanOverlijden"
+	not helper.names_a_citizen(f, "bsn")
 }

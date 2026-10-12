@@ -4,7 +4,8 @@
 //   profile — a deny carries the FTV GraphQL profile's decision context:
 //             graphql.client (what the consumer was told) and graphql.admin
 //             (the request's code, the mapper's message, the schema digest
-//             and the denied fields with each rule's trace).
+//             and the denied fields with each rule's reasons; decisions
+//             logged before the rules gave reasons carry steps instead).
 //   gbo     — decisions logged before that: context.denied_fields and
 //             reason_admin.code.
 //   legacy  — the oldest traces: reason_admin.evaluated as one cascade.
@@ -18,7 +19,8 @@ export type Step = {
   status: 'pass' | 'fail' | 'skipped'
 }
 
-export type RuleOutcome = { rule: string; code?: string; steps?: Step[] }
+// reasons: every reason the rule gave to refuse, its code first.
+export type RuleOutcome = { rule: string; code?: string; reasons?: string[]; steps?: Step[] }
 
 export type FieldOutcome = {
   path: string
@@ -54,18 +56,27 @@ const codeWithSubcode = (o: Obj): string | undefined => {
   return sub ? `${code} ${sub}` : code
 }
 
+// A rule's reasons, or the steps of a decision logged before rules gave
+// reasons; whichever the decision carries.
+const evidence = (r: Obj): Pick<RuleOutcome, 'reasons' | 'steps'> => {
+  const reasons = list(r.reasons)
+  if (reasons) return { reasons: reasons.map(String) }
+  const steps = list(r.steps)
+  return steps ? { steps: steps as Step[] } : {}
+}
+
 const rules = (v: unknown): RuleOutcome[] =>
   (list(v) ?? []).filter(isObj).map((r) => ({
     rule: str(r.rule) ?? '—',
     code: str(r.code),
-    steps: list(r.steps) as Step[] | undefined,
+    ...evidence(r),
   }))
 
 const granted = (ctx: Obj): FieldOutcome[] | undefined =>
   list(ctx.granted)?.filter(isObj).map((g) => ({
     path: str(g.field) ?? '(geen veld)',
     key: str(g.key),
-    rules: [{ rule: str(g.rule) ?? '—', steps: list(g.steps) as Step[] | undefined }],
+    rules: [{ rule: str(g.rule) ?? '—', ...evidence(g) }],
   }))
 
 export function readDecision(result: unknown): DecisionView {
@@ -127,4 +138,23 @@ export function readDecision(result: unknown): DecisionView {
   }
 
   return { shape: 'none', allowed }
+}
+
+// The server problems the engine reports on the field as PIP_UNAVAILABLE
+// (_pip_unavailable in policies/gbo/engine.rego); the rule's own code says
+// which one it was.
+const SERVER_PROBLEMS = new Set(['CONSENT_STATUS_UNAVAILABLE', 'CONSENT_KEYS_UNAVAILABLE', 'INTEGRATOR_REGISTER_UNAVAILABLE'])
+
+// What to open for a refused field: the reason and the rule that gave it.
+// That is the rule whose code is the field's; for PIP_UNAVAILABLE, which no
+// rule gives itself, the first rule that hit a server problem, with its code.
+export function causeOf(field: FieldOutcome): { code: string; rule?: string } | undefined {
+  if (!field.code) return undefined
+  const own = field.rules.find((r) => r.code === field.code)
+  if (own) return { code: field.code, rule: own.rule }
+  const server = field.code === 'PIP_UNAVAILABLE'
+    ? field.rules.find((r) => r.code !== undefined && SERVER_PROBLEMS.has(r.code))
+    : undefined
+  if (server?.code) return { code: server.code, rule: server.rule }
+  return { code: field.code }
 }

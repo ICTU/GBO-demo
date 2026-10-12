@@ -615,3 +615,97 @@ func TestParseLdvLogbooks(t *testing.T) {
 		t.Errorf("start flags = %v, %v; want only the marked entry", logbooks[0].Start, logbooks[2].Start)
 	}
 }
+
+// writeRuleFixture lays out two consent rules, their regime's helper and an
+// engine file, plus the rules.json that names the rules' packages. The same
+// reason code appears in several files, as it does in the real policies.
+func writeRuleFixture(t *testing.T) config {
+	t.Helper()
+	root := t.TempDir()
+	policiesDir := filepath.Join(root, "policies")
+	files := map[string]string{
+		"gbo/engine.rego":             "package gbo\n\n_order := [\"CONSENT_WITHDRAWN\", \"HELPER_ONLY\"]\n",
+		"gbo/rules/dvtp/dvt0001.rego": "package gbo.rules.dvtp.dvt0001\n\ndeny contains \"CONSENT_WITHDRAWN\" if not helper.consent_active\n",
+		"gbo/rules/dvtp/lvg0001.rego": "package gbo.rules.dvtp.lvg0001\n\nrule_id := \"LVG0001\"\n\ndeny contains \"CONSENT_WITHDRAWN\" if not helper.consent_active\n",
+		"gbo/rules/dvtp/helper.rego":  "package gbo.rules.dvtp.helper\n\nreason := \"HELPER_ONLY\"\n",
+	}
+	for name, content := range files {
+		path := filepath.Join(policiesDir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("create %s: %v", name, err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	rules := `{
+		"gbo.rules.dvtp.dvt0001": {"rule_id": "DVT0001", "regime": "consent", "package": "gbo.rules.dvtp.dvt0001"},
+		"gbo.rules.dvtp.lvg0001": {"rule_id": "LVG0001", "regime": "consent", "package": "gbo.rules.dvtp.lvg0001"}
+	}`
+	rulesFile := filepath.Join(root, "rules.json")
+	if err := os.WriteFile(rulesFile, []byte(rules), 0o644); err != nil {
+		t.Fatalf("write rules.json: %v", err)
+	}
+	return config{PoliciesDir: policiesDir, RulesFile: rulesFile}
+}
+
+func snippetFor(t *testing.T, cfg config, query string) (id string, line int) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/policy-snippet?"+query, nil)
+	rec := httptest.NewRecorder()
+	handlePolicySnippet(cfg).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("snippet %s: status=%d body=%s", query, rec.Code, rec.Body.String())
+	}
+	var got struct {
+		ID   string `json:"id"`
+		Line int    `json:"line"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode snippet: %v", err)
+	}
+	return got.ID, got.Line
+}
+
+// A code several rules give is shown in the file of the rule that refused.
+func TestPolicySnippetShowsTheRefusingRulesOwnFile(t *testing.T) {
+	cfg := writeRuleFixture(t)
+	id, line := snippetFor(t, cfg, "path=authz&code=CONSENT_WITHDRAWN&rule=LVG0001")
+	if id != "gbo/rules/dvtp/lvg0001.rego" || line != 5 {
+		t.Fatalf("snippet = %s:%d, want gbo/rules/dvtp/lvg0001.rego:5", id, line)
+	}
+}
+
+// A code the rule's file does not hold is looked for in its regime's helper.
+func TestPolicySnippetFallsBackToTheRegimeHelper(t *testing.T) {
+	cfg := writeRuleFixture(t)
+	id, _ := snippetFor(t, cfg, "path=authz&code=HELPER_ONLY&rule=LVG0001")
+	if id != "gbo/rules/dvtp/helper.rego" {
+		t.Fatalf("snippet file = %s, want gbo/rules/dvtp/helper.rego", id)
+	}
+}
+
+// The rule panel shows the rule's Rego, so /rules carries each rule's source.
+func TestRulesCarryTheirRegoSource(t *testing.T) {
+	cfg := writeRuleFixture(t)
+	req := httptest.NewRequest(http.MethodGet, "/rules", nil)
+	rec := httptest.NewRecorder()
+	handleRules(cfg).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("rules: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var rules []struct {
+		RuleID   string `json:"rule_id"`
+		SourceID string `json:"source_id"`
+		Source   string `json:"source"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &rules); err != nil {
+		t.Fatalf("decode rules: %v", err)
+	}
+	if len(rules) != 2 || rules[1].RuleID != "LVG0001" {
+		t.Fatalf("rules = %+v, want DVT0001 and LVG0001 in that order", rules)
+	}
+	if rules[1].SourceID != "gbo/rules/dvtp/lvg0001.rego" || !strings.HasPrefix(rules[1].Source, "package gbo.rules.dvtp.lvg0001\n") {
+		t.Fatalf("LVG0001 source = %q (%s)", rules[1].Source, rules[1].SourceID)
+	}
+}

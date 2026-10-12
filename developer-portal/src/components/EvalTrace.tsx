@@ -1,15 +1,9 @@
 import { useState } from 'react'
 
-// Renders a rule's cascade-trace: each check-axis with its status
-// (pass / fail / skipped) — equivalent to iWlz' "Toon PDP-evaluatie
-// (N stappen)" feature, but driven by our RFC0052-versie-GBO lib
-// output where each rule's evaluate() emits the full step-list.
-//
-// Steps come from policy via:
-//   ALLOW: granted[i].steps          (engine: granted_steps)
-//   DENY:  denied_fields[i].evaluated[j].steps
-//
-// Each step: {code, label, expected, status: "pass"|"fail"|"skipped"}.
+// Renders the step trace of a decision logged before the rules gave
+// reasons: each check with its status (pass / fail / skipped), as the old
+// evaluation library emitted it. Current decisions carry each rule's
+// reasons instead, shown by OpaDecisionContext.
 
 export type EvalStep = {
   code: string

@@ -1,8 +1,23 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readDecision } from '../src/lib/decisionView.ts'
+import { causeOf, readDecision } from '../src/lib/decisionView.ts'
 
-const trace = [{ rule: 'DVT0001', code: 'YEAR_NOT_COVERED', steps: [{ code: 'YEAR_NOT_COVERED', label: 'Years', expected: 'bd:ib:2024 in scopes', status: 'fail' }] }]
+const trace = [{ rule: 'DVT0001', code: 'YEAR_NOT_COVERED', reasons: ['YEAR_NOT_COVERED'] }]
+
+const stepTrace = [{ rule: 'DVT0001', code: 'YEAR_NOT_COVERED', steps: [{ code: 'YEAR_NOT_COVERED', label: 'Years', expected: 'bd:ib:2024 in scopes', status: 'fail' }] }]
+
+const refusal = (t: unknown) => ({
+  decision: false,
+  context: {
+    graphql: {
+      client: { code: 'FIELD_NOT_PERMITTED' },
+      admin: {
+        code: 'FIELD_NOT_PERMITTED',
+        denied_fields: [{ index: 1, path: ['ingeschrevenPersoon', 'heeftBelastingjaarAangifte'], code: 'YEAR_NOT_COVERED', evaluated: ['DVT0001'], trace: t }],
+      },
+    },
+  },
+})
 
 test('a refused field: what the consumer was told next to the field reason', () => {
   const view = readDecision({
@@ -39,6 +54,15 @@ test('a refused field: what the consumer was told next to the field reason', () 
   }])
 })
 
+test('a rule that gives several reasons keeps them all, its code first', () => {
+  const reasons = [{ rule: 'DVT0001', code: 'CONSENT_CONTEXT_INVALID', reasons: ['CONSENT_CONTEXT_INVALID', 'CONSENT_WITHDRAWN'] }]
+  assert.deepEqual(readDecision(refusal(reasons)).denied?.[0].rules, reasons)
+})
+
+test('a refusal logged with steps, before rules gave reasons, still reads', () => {
+  assert.deepEqual(readDecision(refusal(stepTrace)).denied?.[0].rules, stepTrace)
+})
+
 test('an unverifiable request: the hidden and the real code, and the mapper message', () => {
   const view = readDecision({
     decision: false,
@@ -68,10 +92,10 @@ test('a server problem: the consumer saw access denied', () => {
 test('an allow lists the granting rule per field', () => {
   const view = readDecision({
     decision: true,
-    context: { granted: [{ field: 'ingeschrevenPersoon', key: 'Query.ingeschrevenPersoon', rule: 'DVT0001', steps: [] }] },
+    context: { granted: [{ field: 'ingeschrevenPersoon', key: 'Query.ingeschrevenPersoon', rule: 'DVT0001' }] },
   })
   assert.equal(view.allowed, true)
-  assert.deepEqual(view.granted, [{ path: 'ingeschrevenPersoon', key: 'Query.ingeschrevenPersoon', rules: [{ rule: 'DVT0001', steps: [] }] }])
+  assert.deepEqual(view.granted, [{ path: 'ingeschrevenPersoon', key: 'Query.ingeschrevenPersoon', rules: [{ rule: 'DVT0001' }] }])
 })
 
 test('a decision logged before the decision context still renders', () => {
@@ -102,4 +126,25 @@ test('anything else renders as nothing to show', () => {
   for (const result of [undefined, null, {}, { decision: false, context: {} }]) {
     assert.equal(readDecision(result).shape, 'none')
   }
+})
+
+test('a refused field opens the rule whose code is its own', () => {
+  const field = { path: 'vbo', code: 'CONSENT_WITHDRAWN', rules: [{ rule: 'LVG0001', code: 'CONSENT_WITHDRAWN' }] }
+  assert.deepEqual(causeOf(field), { code: 'CONSENT_WITHDRAWN', rule: 'LVG0001' })
+})
+
+test('PIP_UNAVAILABLE opens the rule that hit the server problem, with its code', () => {
+  const field = {
+    path: 'ingeschrevenPersoon',
+    code: 'PIP_UNAVAILABLE',
+    rules: [
+      { rule: 'DVT0001', code: 'CONSENT_EXPIRED' },
+      { rule: 'LVG0001', code: 'CONSENT_STATUS_UNAVAILABLE' },
+    ],
+  }
+  assert.deepEqual(causeOf(field), { code: 'CONSENT_STATUS_UNAVAILABLE', rule: 'LVG0001' })
+})
+
+test('a field code no rule gave, such as NO_APPLICABLE_RULE, opens without a rule', () => {
+  assert.deepEqual(causeOf({ path: 'woontOp', code: 'NO_APPLICABLE_RULE', rules: [] }), { code: 'NO_APPLICABLE_RULE' })
 })

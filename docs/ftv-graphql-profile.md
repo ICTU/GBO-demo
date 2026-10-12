@@ -54,8 +54,12 @@ De testvectoren van Appendix A staan in `vectors_test.go`.
 
 ## Policy-engine (§9)
 
-`policies/gbo/engine.rego` voert de controles uit, de regels staan in
-`policies/gbo/rules/`.
+De regels staan per regime in `policies/gbo/rules/` (`dvtp` voor toestemming,
+`eudi` voor PID), met per regime een `helper.rego` voor wat de regels delen.
+Elke regel schrijft zijn controles uit als `deny contains "<CODE>" if ...`
+voor het verzoek als geheel en `deny_field[i]` voor één veld.
+`policies/gbo/engine.rego` bindt de velden aan de regels, controleert het
+mandaat van een integrator en kiest per veld de code.
 
 | Eis | Hoe |
 |---|---|
