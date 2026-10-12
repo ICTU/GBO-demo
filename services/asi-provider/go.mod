@@ -2,7 +2,10 @@ module gbo-demo/asi-provider
 
 go 1.25.0
 
-require golang.org/x/text v0.41.0
+require (
+	github.com/go-jose/go-jose/v4 v4.1.5
+	golang.org/x/text v0.41.0
+)
 
 require (
 	github.com/go-openapi/swag/jsonname v0.25.5 // indirect

@@ -1,0 +1,8 @@
+{
+  "persons": [
+    { "login_hint": "frouke", "bsn": "999991772" },
+    { "login_hint": "joost", "bsn": "123456789" },
+    { "login_hint": "sanne", "bsn": "987654321" },
+    { "login_hint": "tom", "bsn": "555555555" }
+  ]
+}

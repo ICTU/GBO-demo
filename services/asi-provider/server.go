@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 
 	"github.com/getkin/kin-openapi/routers"
 )
@@ -22,9 +21,8 @@ type serverConfig struct {
 	Source    *memorySource
 	Catalogue catalogue
 	Sealer    *sealer
-	// Tokens maps a stub bearer token to the BSN of a test person. Slice 2
-	// replaces this with access tokens from the authorization server.
-	Tokens          map[string]string
+	// Tokens validates the access tokens of the authorization server.
+	Tokens          *tokenValidator
 	Provider        provider
 	AuthenticSource provider
 }
@@ -50,8 +48,8 @@ func newServer(cfg serverConfig) (http.Handler, error) {
 	}
 	s := &server{cfg: cfg}
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST "+basePath+"/verify", s.authenticated(conformant(verifyRoute, s.verify)))
-	mux.HandleFunc("POST "+basePath+"/retrieve", s.authenticated(conformant(retrieveRoute, s.retrieve)))
+	mux.HandleFunc("POST "+basePath+"/verify", s.authenticated("verify", conformant(verifyRoute, s.verify)))
+	mux.HandleFunc("POST "+basePath+"/retrieve", s.authenticated("retrieve", conformant(retrieveRoute, s.retrieve)))
 	mux.HandleFunc("GET /openapi.json", serveJSON(publishedContract))
 	mux.HandleFunc("GET /"+dataserviceFileName, serveJSON(mustReadOpenAPIFile(dataserviceFile)))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
@@ -114,16 +112,17 @@ type retrieveResponse struct {
 	AuthenticSource provider    `json:"authenticSource"`
 }
 
-// --- authentication (stub for slice 1) ---------------------------------------
+// --- authentication -------------------------------------------------------------
 
 type handlerWithSubject func(w http.ResponseWriter, r *http.Request, bsn string)
 
-func (s *server) authenticated(next handlerWithSubject) http.HandlerFunc {
+// authenticated validates the access token for operation before anything
+// else; the BSN of the user comes from the token.
+func (s *server) authenticated(operation string, next handlerWithSubject) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-		bsn, known := s.cfg.Tokens[token]
-		if !ok || token == "" || !known {
-			writeProblem(w, http.StatusUnauthorized, "Unauthorized", "a valid access token is required")
+		bsn, failure := s.cfg.Tokens.authenticate(r, operation)
+		if failure != nil {
+			writeAuthFailure(w, failure)
 			return
 		}
 		next(w, r, bsn)

@@ -1,8 +1,9 @@
 package main
 
-// Contract tests for the ASIP mock, slice 1 (ETSI TS 119 478 V1.1.1 clause
-// 6.1.1 and 6.1.2). One test per agreed case; the numbers refer to the case
-// table in the slice issue.
+// Contract tests for the ASIP mock (ETSI TS 119 478 V1.1.1 clause 6.1.1 and
+// 6.1.2). One test per agreed case; the numbers refer to the case table of
+// slice 1 (#498). Since slice 2 (#503) every request carries a DPoP-bound
+// access token; the token cases are in token_test.go.
 
 import (
 	"bytes"
@@ -35,20 +36,32 @@ const (
 	resultVariation = "http://uri.etsi.org/19478/VerificationResult/MatchWithVariation"
 	resultUnknown   = "http://uri.etsi.org/19478/VerificationResult/Unknown"
 
-	tokenFrouke = "test-token-frouke"
-	tokenTom    = "test-token-tom"
-	tokenSanne  = "test-token-sanne"
+	bsnFrouke = "999991772"
+	bsnTom    = "555555555"
+	bsnSanne  = "987654321"
 )
 
 type testEnv struct {
 	handler http.Handler
 	caPool  *x509.CertPool
+	authz   *testAuthorizationServer
+	qtsp    *testQTSP
 }
 
 // newTestServer wires the server with the test persons, the provisional
-// catalogue, a seal certificate from an ephemeral test CA, and the stub
-// tokens of slice 1.
+// catalogue, a seal certificate from an ephemeral test CA, and the keys of a
+// test authorization server.
 func newTestServer(t *testing.T) testEnv {
+	t.Helper()
+	return newTestServerWith(t, newTestAuthorizationServer(t), newTestQTSP(t))
+}
+
+func newTestServerWith(t *testing.T, authz *testAuthorizationServer, qtsp *testQTSP) testEnv {
+	t.Helper()
+	return newTestServerWithKeys(t, authz, qtsp, staticKeys(authz.jwks))
+}
+
+func newTestServerWithKeys(t *testing.T, authz *testAuthorizationServer, qtsp *testQTSP, keys keySource) testEnv {
 	t.Helper()
 	caKey, caCert := newTestCA(t)
 	sealKey, sealCert := newTestSealCertificate(t, caKey, caCert)
@@ -61,28 +74,24 @@ func newTestServer(t *testing.T) testEnv {
 	pool.AddCert(caCert)
 
 	handler, err := newServer(serverConfig{
-		Source:    source,
-		Catalogue: defaultCatalogue(),
-		Sealer:    newSealer(sealKey, []*x509.Certificate{sealCert, caCert}),
-		Tokens: map[string]string{
-			tokenFrouke: "999991772",
-			tokenTom:    "555555555",
-			tokenSanne:  "987654321",
-		},
+		Source:          source,
+		Catalogue:       defaultCatalogue(),
+		Sealer:          newSealer(sealKey, []*x509.Certificate{sealCert, caCert}),
+		Tokens:          newTokenValidator(testIssuer, testPublicURL, keys),
 		Provider:        provider{LegalName: "GBO demo ASIP (test)"},
 		AuthenticSource: provider{LegalName: "Basisregistratie Personen (mock)"},
 	})
 	if err != nil {
 		t.Fatalf("new server: %v", err)
 	}
-	return testEnv{handler: handler, caPool: pool}
+	return testEnv{handler: handler, caPool: pool, authz: authz, qtsp: qtsp}
 }
 
 // --- case 1-6: attribute verification ---------------------------------------
 
 func TestVerifyMatch(t *testing.T) { // case 1
 	env := newTestServer(t)
-	res := verifyAttribute(t, env, tokenFrouke, idFamilyName, `{"family_name":"Jansen"}`)
+	res := verifyAttribute(t, env, env.person(bsnFrouke), idFamilyName, `{"family_name":"Jansen"}`)
 	assertResult(t, res, idFamilyName, resultMatch)
 	assertNoAttributeValue(t, res)
 }
@@ -93,22 +102,22 @@ func TestVerifyMatchWithVariation(t *testing.T) { // case 2
 		`{"family_name":"JANSEN"}`,   // case
 		`{"family_name":" Jansen "}`, // surrounding spaces
 	} {
-		res := verifyAttribute(t, env, tokenFrouke, idFamilyName, claimed)
+		res := verifyAttribute(t, env, env.person(bsnFrouke), idFamilyName, claimed)
 		assertResult(t, res, idFamilyName, resultVariation)
 		assertNoAttributeValue(t, res)
 	}
 	// diacritics: é is an admissible variation of e
-	res := verifyAttribute(t, env, tokenFrouke, idGivenName, `{"given_name":"Froukë"}`)
+	res := verifyAttribute(t, env, env.person(bsnFrouke), idGivenName, `{"given_name":"Froukë"}`)
 	assertResult(t, res, idGivenName, resultVariation)
 	// transliteration of a Latin letter that does not decompose (ICAO 9303):
 	// the ligature ĳ is written ij, so "Meĳer" varies from "Meijer"
-	res = verifyAttribute(t, env, tokenSanne, idFamilyName, `{"family_name":"Meĳer"}`)
+	res = verifyAttribute(t, env, env.person(bsnSanne), idFamilyName, `{"family_name":"Meĳer"}`)
 	assertResult(t, res, idFamilyName, resultVariation)
 }
 
 func TestVerifyNoMatch(t *testing.T) { // case 3
 	env := newTestServer(t)
-	res := verifyAttribute(t, env, tokenFrouke, idFamilyName, `{"family_name":"Bakker"}`)
+	res := verifyAttribute(t, env, env.person(bsnFrouke), idFamilyName, `{"family_name":"Bakker"}`)
 	assertResult(t, res, idFamilyName, resultNoMatch)
 }
 
@@ -116,20 +125,20 @@ func TestVerifyUnknownWhenSourceHoldsNoValue(t *testing.T) { // case 4
 	// ETSI REQ-ASIP-6.1.1.2-04: Unknown "indicates that no authentic source
 	// data was available to determine a match for the attribute for the user".
 	env := newTestServer(t)
-	res := verifyAttribute(t, env, tokenTom, idAddress,
+	res := verifyAttribute(t, env, env.person(bsnTom), idAddress,
 		`{"street":"Grote Markt","house_number":"1","postal_code":"1000","city":"Brussel","country":"BE"}`)
 	assertResult(t, res, idAddress, resultUnknown)
 }
 
 func TestVerifyUnknownWhenNotTheAuthenticSource(t *testing.T) { // case 5
 	env := newTestServer(t)
-	res := verifyAttribute(t, env, tokenFrouke, idDiploma, `{"qualification":"MSc"}`)
+	res := verifyAttribute(t, env, env.person(bsnFrouke), idDiploma, `{"qualification":"MSc"}`)
 	assertResult(t, res, idDiploma, resultUnknown)
 }
 
 func TestVerifyUnknownAttributeIdentifierIs404(t *testing.T) { // case 6
 	env := newTestServer(t)
-	rec := post(t, env, "/verify", tokenFrouke, verifyBody(idNotInCat, `{"size":43}`))
+	rec := post(t, env, "/verify", env.person(bsnFrouke), verifyBody(idNotInCat, `{"size":43}`))
 	assertProblem(t, rec, http.StatusNotFound)
 }
 
@@ -138,7 +147,7 @@ func TestVerifyUnknownAttributeIdentifierIs404(t *testing.T) { // case 6
 func TestVerifyFragment(t *testing.T) { // case 7
 	env := newTestServer(t)
 	body := `{"attributeFragments":[{"attributeIdentifier":"` + idAddress + `","location":"$.city","value":{"city":"Rotterdam"}}]}`
-	rec := post(t, env, "/verify", tokenFrouke, body)
+	rec := post(t, env, "/verify", env.person(bsnFrouke), body)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body)
 	}
@@ -159,7 +168,7 @@ func TestVerifyFragment(t *testing.T) { // case 7
 func TestVerifyMandateIs501(t *testing.T) { // case 8
 	env := newTestServer(t)
 	body := `{"attributes":[{"attributeIdentifier":"` + idFamilyName + `","attributeValue":{"family_name":"Jansen"}}],"mandate":{"type":"guardian"}}`
-	rec := post(t, env, "/verify", tokenFrouke, body)
+	rec := post(t, env, "/verify", env.person(bsnFrouke), body)
 	assertProblem(t, rec, http.StatusNotImplemented)
 }
 
@@ -174,7 +183,7 @@ func TestVerifyMalformedIs400(t *testing.T) { // case 9
 		"fragment without location":        `{"attributeFragments":[{"attributeIdentifier":"` + idAddress + `","value":{"city":"Rotterdam"}}]}`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			rec := post(t, env, "/verify", tokenFrouke, body)
+			rec := post(t, env, "/verify", env.person(bsnFrouke), body)
 			assertProblem(t, rec, http.StatusBadRequest)
 		})
 	}
@@ -191,24 +200,8 @@ func TestSchemaViolationIs400BeforeOtherChecks(t *testing.T) { // case 9b, 9c
 		{"retrieve: mandate is not an object", "/retrieve", `{"attributeIdentifiers":[{"attributeIdentifier":"` + idFamilyName + `"}],"mandate":"guardian"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			rec := post(t, env, tc.path, tokenFrouke, tc.body)
+			rec := post(t, env, tc.path, env.person(bsnFrouke), tc.body)
 			assertProblem(t, rec, http.StatusBadRequest)
-		})
-	}
-}
-
-func TestMissingOrInvalidTokenIs401(t *testing.T) { // case 10
-	env := newTestServer(t)
-	body := verifyBody(idFamilyName, `{"family_name":"Jansen"}`)
-	for name, token := range map[string]string{
-		"no token":      "",
-		"unknown token": "not-a-test-token",
-	} {
-		t.Run(name, func(t *testing.T) {
-			for _, path := range []string{"/verify", "/retrieve"} {
-				rec := post(t, env, path, token, body)
-				assertProblem(t, rec, http.StatusUnauthorized)
-			}
 		})
 	}
 }
@@ -221,7 +214,7 @@ func TestSuccessfulResponsesAreSealed(t *testing.T) { // case 11
 		{"/verify", verifyBody(idFamilyName, `{"family_name":"Jansen"}`)},
 		{"/retrieve", `{"attributeIdentifiers":[{"attributeIdentifier":"` + idFamilyName + `"}]}`},
 	} {
-		rec := post(t, env, tc.path, tokenFrouke, tc.body)
+		rec := post(t, env, tc.path, env.person(bsnFrouke), tc.body)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%s: status = %d, want 200; body %s", tc.path, rec.Code, rec.Body)
 		}
@@ -233,7 +226,7 @@ func TestSuccessfulResponsesAreSealed(t *testing.T) { // case 11
 
 func TestRetrieveReturnsValue(t *testing.T) { // case 12
 	env := newTestServer(t)
-	rec := post(t, env, "/retrieve", tokenFrouke, `{"attributeIdentifiers":[{"attributeIdentifier":"`+idFamilyName+`"}]}`)
+	rec := post(t, env, "/retrieve", env.person(bsnFrouke), `{"attributeIdentifiers":[{"attributeIdentifier":"`+idFamilyName+`"}]}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body)
 	}
@@ -258,7 +251,7 @@ func TestRetrieveReturnsValue(t *testing.T) { // case 12
 
 func TestRetrieveUnknownAttributeIdentifierIs404(t *testing.T) { // case 12, error path
 	env := newTestServer(t)
-	rec := post(t, env, "/retrieve", tokenFrouke, `{"attributeIdentifiers":[{"attributeIdentifier":"`+idNotInCat+`"}]}`)
+	rec := post(t, env, "/retrieve", env.person(bsnFrouke), `{"attributeIdentifiers":[{"attributeIdentifier":"`+idNotInCat+`"}]}`)
 	assertProblem(t, rec, http.StatusNotFound)
 }
 
@@ -268,7 +261,7 @@ func TestVerifyResponseNamesProviderAndAuthenticSource(t *testing.T) {
 	// REQ-ASIP-6.1.1.2-07: provider is required; the authentic source is
 	// named so a sealing intermediary still identifies the responsible body.
 	env := newTestServer(t)
-	rec := post(t, env, "/verify", tokenFrouke, verifyBody(idFamilyName, `{"family_name":"Jansen"}`))
+	rec := post(t, env, "/verify", env.person(bsnFrouke), verifyBody(idFamilyName, `{"family_name":"Jansen"}`))
 	var resp struct {
 		Provider *struct {
 			LegalName string `json:"legalName"`
@@ -298,9 +291,9 @@ func verifyBody(id, value string) string {
 	return `{"attributes":[{"attributeIdentifier":"` + id + `","attributeValue":` + value + `}]}`
 }
 
-func verifyAttribute(t *testing.T, env testEnv, token, id, value string) []attributeResult {
+func verifyAttribute(t *testing.T, env testEnv, auth authFunc, id, value string) []attributeResult {
 	t.Helper()
-	rec := post(t, env, "/verify", token, verifyBody(id, value))
+	rec := post(t, env, "/verify", auth, verifyBody(id, value))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body)
 	}
@@ -312,13 +305,14 @@ func verifyAttribute(t *testing.T, env testEnv, token, id, value string) []attri
 }
 
 // post sends a request to an operation of the contract (path without the
-// base path) and checks that the response conforms to the published contract.
-func post(t *testing.T, env testEnv, path, token, body string) *httptest.ResponseRecorder {
+// base path) with the credentials auth adds, and checks that the response
+// conforms to the published contract.
+func post(t *testing.T, env testEnv, path string, auth authFunc, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, basePath+path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+	if auth != nil {
+		auth(t, req)
 	}
 	rec := httptest.NewRecorder()
 	env.handler.ServeHTTP(rec, req)

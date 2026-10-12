@@ -19,10 +19,10 @@ import (
 //
 // The completions are not deviations from ETSI. They fill in what Annex B
 // leaves open and the normative text or the law requires: the concrete
-// server (the base path is the ETSI default), the bearer token of
-// clause 6.1.3, the seal header required by Implementing Regulation (EU)
-// 2026/1735, and the 400 and 501 responses of /retrieve that
-// REQ-ASIP-6.1.2.2-06 lists but Annex B omits.
+// server (the base path is the ETSI default), the OAuth 2.0 authorization of
+// clause 6.1.3 with the WWW-Authenticate challenge on 401, the seal header
+// required by Implementing Regulation (EU) 2026/1735, and the 400 and 501
+// responses of /retrieve that REQ-ASIP-6.1.2.2-06 lists but Annex B omits.
 
 //go:embed openapi/19478-authentic-source-interface-openapi.json openapi/19478-dataservice-schema.json openapi/completions.json
 var openapiFiles embed.FS
@@ -134,7 +134,7 @@ func contractRoute(doc *openapi3.T, path string) (*routers.Route, error) {
 }
 
 // validateRequest checks a request against the published contract. The
-// bearer token is checked before, by the server itself.
+// access token is checked before, by the server itself.
 func validateRequest(r *http.Request, route *routers.Route) error {
 	return openapi3filter.ValidateRequest(r.Context(), &openapi3filter.RequestValidationInput{
 		Request: r,
