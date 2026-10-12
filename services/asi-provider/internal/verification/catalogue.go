@@ -1,4 +1,4 @@
-package main
+package verification
 
 // The provisional catalogue of attributes. There is no Dutch catalogue of
 // attributes yet, so the identifiers are placeholders of the form
@@ -10,25 +10,28 @@ package main
 
 const attributeBase = "https://gbo.example/attributes/"
 
-type catalogueEntry struct {
+// Entry is an attribute in the catalogue.
+type Entry struct {
 	// Name is the key under which the value is stored in the source.
 	Name string
 	// Ours is true when this source is the authentic source for the attribute.
 	Ours bool
 }
 
-type catalogue map[string]catalogueEntry
+// Catalogue maps attribute identifiers to entries.
+type Catalogue map[string]Entry
 
-func defaultCatalogue() catalogue {
-	c := catalogue{}
+// DefaultCatalogue is the provisional catalogue of the mock.
+func DefaultCatalogue() Catalogue {
+	c := Catalogue{}
 	for _, name := range []string{"family_name", "given_name", "birth_date", "nationality", "address"} {
-		c[attributeBase+name+"/1"] = catalogueEntry{Name: name, Ours: true}
+		c[attributeBase+name+"/1"] = Entry{Name: name, Ours: true}
 	}
-	c[attributeBase+"education_qualification/1"] = catalogueEntry{Name: "education_qualification", Ours: false}
+	c[attributeBase+"education_qualification/1"] = Entry{Name: "education_qualification", Ours: false}
 	return c
 }
 
-func (c catalogue) lookup(id string) (catalogueEntry, bool) {
+func (c Catalogue) lookup(id string) (Entry, bool) {
 	e, ok := c[id]
 	return e, ok
 }

@@ -1,4 +1,4 @@
-package main
+package httpapi
 
 import (
 	"bytes"
@@ -71,7 +71,7 @@ func TestPublishedContract(t *testing.T) {
 		t.Fatalf("GET /openapi.json: status = %d", rec.Code)
 	}
 	doc := loadContract(t)
-	if got := doc.Servers[0].URL; got != "http://localhost:4020"+basePath {
+	if got := doc.Servers[0].URL; got != "http://localhost:4020"+BasePath {
 		t.Errorf("server = %s", got)
 	}
 	if s := doc.Components.SecuritySchemes["oauth2"]; s == nil || s.Value.Flows == nil || s.Value.Flows.AuthorizationCode == nil {

@@ -1,8 +1,7 @@
-package main
+package httpapi
 
 import (
 	"context"
-	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +11,8 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
 	"github.com/getkin/kin-openapi/routers"
+
+	"gbo-demo/asi-provider/openapi"
 )
 
 // The published contract is the OpenAPI of ETSI TS 119 478 Annex B, unchanged,
@@ -24,14 +25,14 @@ import (
 // required by Implementing Regulation (EU) 2026/1735, and the 400 and 501
 // responses of /retrieve that REQ-ASIP-6.1.2.2-06 lists but Annex B omits.
 
-//go:embed openapi/19478-authentic-source-interface-openapi.json openapi/19478-dataservice-schema.json openapi/completions.json
-var openapiFiles embed.FS
+// The files are embedded by package openapi, next to them.
+var openapiFiles = openapi.Files
 
 const (
-	etsiOpenAPIFile     = "openapi/19478-authentic-source-interface-openapi.json"
-	dataserviceFile     = "openapi/19478-dataservice-schema.json"
-	completionsFile     = "openapi/completions.json"
-	dataserviceFileName = "19478-dataservice-schema.json"
+	etsiOpenAPIFile     = openapi.ETSIFile
+	dataserviceFile     = openapi.DataserviceFile
+	completionsFile     = openapi.CompletionsFile
+	dataserviceFileName = openapi.DataserviceFile
 )
 
 // publishedContract is served on /openapi.json. The files are embedded, so a
@@ -114,7 +115,7 @@ func loadContractDoc() (*openapi3.T, error) {
 	loader.ReadFromURIFunc = func(_ *openapi3.Loader, location *url.URL) ([]byte, error) {
 		return openapiFiles.ReadFile(location.Path)
 	}
-	doc, err := loader.LoadFromDataWithPath(publishedContract, &url.URL{Path: "openapi/openapi.json"})
+	doc, err := loader.LoadFromDataWithPath(publishedContract, &url.URL{Path: "openapi.json"})
 	if err != nil {
 		return nil, err
 	}

@@ -1,4 +1,7 @@
-package main
+// Package memorysource is the in-memory authentic source: per BSN, the
+// attribute values from a JSON file. It implements verification.Source.
+// Slice 4 of #336 puts a query through the existing chain next to it.
+package memorysource
 
 import (
 	"encoding/json"
@@ -6,14 +9,14 @@ import (
 	"os"
 )
 
-// memorySource is the in-memory authentic source of slice 1. It holds, per
-// BSN, the attribute values as the JSON objects the catalogue describes.
-// Slice 4 replaces it with a query through the existing chain.
-type memorySource struct {
+// Source holds, per BSN, the attribute values as the JSON objects the
+// catalogue describes.
+type Source struct {
 	persons map[string]map[string]json.RawMessage
 }
 
-func loadMemorySource(path string) (*memorySource, error) {
+// Load reads the persons file.
+func Load(path string) (*Source, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read source: %w", err)
@@ -27,7 +30,7 @@ func loadMemorySource(path string) (*memorySource, error) {
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return nil, fmt.Errorf("parse source: %w", err)
 	}
-	s := &memorySource{persons: map[string]map[string]json.RawMessage{}}
+	s := &Source{persons: map[string]map[string]json.RawMessage{}}
 	for _, p := range doc.Persons {
 		if p.BSN == "" {
 			return nil, fmt.Errorf("parse source: person without bsn")
@@ -37,9 +40,9 @@ func loadMemorySource(path string) (*memorySource, error) {
 	return s, nil
 }
 
-// value returns the stored value of an attribute for a person, and false when
+// Value returns the stored value of an attribute for a person, and false when
 // the source holds none.
-func (s *memorySource) value(bsn, name string) (json.RawMessage, bool) {
+func (s *Source) Value(bsn, name string) (json.RawMessage, bool) {
 	attrs, ok := s.persons[bsn]
 	if !ok {
 		return nil, false

@@ -1,4 +1,6 @@
-package main
+// Package seal seals response bodies with a detached JWS, and reads the seal
+// key and certificate chain.
+package seal
 
 import (
 	"crypto"
@@ -13,7 +15,7 @@ import (
 	"math/big"
 )
 
-// sealer seals a response body as required by CIR (EU) 2025/1569
+// Sealer seals a response body as required by CIR (EU) 2025/1569
 // Article 9(4), as amended by CIR (EU) 2026/1735: every verification result is
 // signed or sealed by the responsible body or the designated intermediary.
 //
@@ -23,23 +25,24 @@ import (
 // carries the certificate chain in x5c, leaf first, so a QTSP can validate the
 // seal against the trusted lists. The body itself stays plain JSON as the
 // OpenAPI specifies.
-type sealer struct {
+type Sealer struct {
 	key  crypto.Signer
 	x5c  []string
 	prot string
 }
 
-func newSealer(key crypto.Signer, chain []*x509.Certificate) *sealer {
+// New returns a Sealer for key and its certificate chain, leaf first.
+func New(key crypto.Signer, chain []*x509.Certificate) *Sealer {
 	x5c := make([]string, len(chain))
 	for i, c := range chain {
 		x5c[i] = base64.StdEncoding.EncodeToString(c.Raw)
 	}
 	header, _ := json.Marshal(map[string]any{"alg": "ES256", "x5c": x5c})
-	return &sealer{key: key, x5c: x5c, prot: base64.RawURLEncoding.EncodeToString(header)}
+	return &Sealer{key: key, x5c: x5c, prot: base64.RawURLEncoding.EncodeToString(header)}
 }
 
-// seal returns the detached JWS "<protected>..<signature>" over body.
-func (s *sealer) seal(body []byte) (string, error) {
+// Seal returns the detached JWS "<protected>..<signature>" over body.
+func (s *Sealer) Seal(body []byte) (string, error) {
 	signingInput := s.prot + "." + base64.RawURLEncoding.EncodeToString(body)
 	digest := sha256.Sum256([]byte(signingInput))
 	der, err := s.key.Sign(rand.Reader, digest[:], crypto.SHA256)

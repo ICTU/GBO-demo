@@ -1,4 +1,4 @@
-package main
+package httpapi
 
 // Contract tests for the ASIP mock (ETSI TS 119 478 V1.1.1 clause 6.1.1 and
 // 6.1.2). One test per agreed case; the numbers refer to the case table of
@@ -22,6 +22,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"gbo-demo/asi-provider/internal/accesstoken"
+	"gbo-demo/asi-provider/internal/memorysource"
+	"gbo-demo/asi-provider/internal/seal"
+	"gbo-demo/asi-provider/internal/verification"
 )
 
 const (
@@ -58,28 +63,27 @@ func newTestServer(t *testing.T) testEnv {
 
 func newTestServerWith(t *testing.T, authz *testAuthorizationServer, qtsp *testQTSP) testEnv {
 	t.Helper()
-	return newTestServerWithKeys(t, authz, qtsp, staticKeys(authz.jwks))
+	return newTestServerWithKeys(t, authz, qtsp, accesstoken.StaticKeys(authz.jwks))
 }
 
-func newTestServerWithKeys(t *testing.T, authz *testAuthorizationServer, qtsp *testQTSP, keys keySource) testEnv {
+func newTestServerWithKeys(t *testing.T, authz *testAuthorizationServer, qtsp *testQTSP, keys accesstoken.KeySource) testEnv {
 	t.Helper()
 	caKey, caCert := newTestCA(t)
 	sealKey, sealCert := newTestSealCertificate(t, caKey, caCert)
 
-	source, err := loadMemorySource("testdata/persons.json")
+	source, err := memorysource.Load("../../testdata/persons.json")
 	if err != nil {
 		t.Fatalf("load source: %v", err)
 	}
 	pool := x509.NewCertPool()
 	pool.AddCert(caCert)
 
-	handler, err := newServer(serverConfig{
-		Source:          source,
-		Catalogue:       defaultCatalogue(),
-		Sealer:          newSealer(sealKey, []*x509.Certificate{sealCert, caCert}),
-		Tokens:          newTokenValidator(testIssuer, testPublicURL, keys),
-		Provider:        provider{LegalName: "GBO demo ASIP (test)"},
-		AuthenticSource: provider{LegalName: "Basisregistratie Personen (mock)"},
+	handler, err := NewHandler(Config{
+		Verification:    verification.NewService(source, verification.DefaultCatalogue()),
+		Sealer:          seal.New(sealKey, []*x509.Certificate{sealCert, caCert}),
+		Tokens:          accesstoken.NewValidator(testIssuer, testPublicURL+BasePath, testPublicURL, keys),
+		Provider:        Provider{LegalName: "GBO demo ASIP (test)"},
+		AuthenticSource: Provider{LegalName: "Basisregistratie Personen (mock)"},
 	})
 	if err != nil {
 		t.Fatalf("new server: %v", err)
@@ -309,7 +313,7 @@ func verifyAttribute(t *testing.T, env testEnv, auth authFunc, id, value string)
 // conforms to the published contract.
 func post(t *testing.T, env testEnv, path string, auth authFunc, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, basePath+path, strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, BasePath+path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	if auth != nil {
 		auth(t, req)

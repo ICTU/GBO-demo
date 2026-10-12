@@ -1,4 +1,6 @@
-package main
+// Package sealcert is the provision-seal-certificate command: it issues a
+// development seal certificate for the ASIP from the development CA.
+package sealcert
 
 import (
 	"crypto/ecdsa"
@@ -15,6 +17,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"gbo-demo/asi-provider/internal/seal"
 )
 
 // oidOrganizationIdentifier is the X.520 organizationIdentifier attribute
@@ -22,11 +26,11 @@ import (
 // organisation in a seal certificate.
 var oidOrganizationIdentifier = asn1.ObjectIdentifier{2, 5, 4, 97}
 
-// provisionSealCertificate issues a development seal certificate for the
+// Provision issues a development seal certificate for the
 // ASIP from the pre-provisioned development issuer CA. It is NOT a qualified
 // certificate for electronic seals: it only lets the mock seal its results
 // and lets clients practise validating the seal.
-func provisionSealCertificate(args []string) error {
+func Provision(args []string) error {
 	fs := flag.NewFlagSet("provision-seal-certificate", flag.ContinueOnError)
 	caKeyPath := fs.String("ca-key", "", "PEM file with the development CA private key")
 	caCertPath := fs.String("ca-cert", "", "PEM file with the development CA certificate")
@@ -88,7 +92,7 @@ func provisionSealCertificate(args []string) error {
 }
 
 func loadCA(keyPath, certPath string) (*ecdsa.PrivateKey, *x509.Certificate, error) {
-	signer, chain, err := loadSealMaterial(keyPath, certPath)
+	signer, chain, err := seal.LoadMaterial(keyPath, certPath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("load development CA: %w", err)
 	}

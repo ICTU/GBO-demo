@@ -26,6 +26,22 @@ A request needs an access token from the authorization server, obtained through 
 
 Configuration: `ASIP_ADDR` (default `:4020`), `ASIP_PUBLIC_URL` (the scheme and host QTSPs use, default `http://localhost:4020`; the token audience is this URL plus `/authsrc-api`), `ASIP_AUTHORIZATION_SERVER` (the issuer, default `http://localhost:4021`), `ASIP_SOURCE_FILE`, `ASIP_SEAL_KEY_FILE`, `ASIP_SEAL_CERT_FILE` (chain, leaf first), `ASIP_PROVIDER_NAME`, `ASIP_AUTHENTIC_SOURCE_NAME`.
 
+## Layout
+
+Ports and adapters, as `AGENTS.md` asks for a service with an authorization boundary:
+
+| Package | |
+|---|---|
+| `internal/verification` | the core: Verify and Retrieve, the catalogue, matching and JSONPath fragments. Port `Source` |
+| `internal/accesstoken` | the ASIP as resource server: access token, DPoP proof and scope. Port `KeySource` |
+| `internal/asmetadata` | `KeySource`: the keys from the metadata of the authorization server |
+| `internal/memorysource` | `Source`: the persons file |
+| `internal/seal` | the seal on every result |
+| `internal/sealcert` | the `provision-seal-certificate` command |
+| `internal/httpapi` | `/verify`, `/retrieve` and the contract: validation, problem details, `WWW-Authenticate` |
+| `openapi` | the contract files, embedded |
+| `main.go` | composition root |
+
 ## The contract
 
 `GET /openapi.json` serves the contract: the OpenAPI of ETSI TS 119 478 Annex B, unchanged (`openapi/19478-authentic-source-interface-openapi.json`), with the completions in `openapi/completions.json` applied as a JSON Merge Patch (RFC 7386). The completions do not deviate from ETSI; they fill in what Annex B leaves open:

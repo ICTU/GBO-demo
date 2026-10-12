@@ -1,4 +1,4 @@
-package main
+package httpapi
 
 // Token cases of slice 2 (#503): the ASIP as resource server of ETSI
 // TS 119 478 clause 6.1.3. The numbers refer to the case table of #503.
@@ -12,7 +12,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -21,6 +20,9 @@ import (
 
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
+
+	"gbo-demo/asi-provider/internal/accesstoken"
+	"gbo-demo/asi-provider/internal/asmetadata"
 )
 
 const (
@@ -78,8 +80,8 @@ func TestInvalidAccessTokenIs401(t *testing.T) { // case 4-10, 18
 		"9b: no exp":            env.presenting(with(func(c map[string]any) { delete(c, "exp") }), nil),
 		"10: Bearer scheme":     env.withScheme("Bearer"),
 		"10b: not DPoP-bound":   env.presenting(with(func(c map[string]any) { delete(c, "cnf") }), nil),
-		"18: no BSN claim":      env.presenting(with(func(c map[string]any) { delete(c, bsnClaim) }), nil),
-		"18b: empty BSN claim":  env.presenting(with(func(c map[string]any) { c[bsnClaim] = "" }), nil),
+		"18: no BSN claim":      env.presenting(with(func(c map[string]any) { delete(c, accesstoken.BSNClaim) }), nil),
+		"18b: empty BSN claim":  env.presenting(with(func(c map[string]any) { c[accesstoken.BSNClaim] = "" }), nil),
 		"not a JWT at all":      env.presentingToken(func(*testing.T) string { return "not-a-jwt" }, nil),
 		"DPoP scheme, no token": func(_ *testing.T, req *http.Request) { req.Header.Set("Authorization", "DPoP ") },
 	} {
@@ -128,7 +130,7 @@ func TestInvalidDPoPProofIs401(t *testing.T) { // case 12-15
 			req.Header.Set("Authorization", "DPoP "+token)
 			req.Header.Set("DPoP", otherQTSP.proof(t, req.Method, testPublicURL+req.URL.Path, token, nil))
 		},
-		"13: proof for another URL":     env.presenting(claims, func(p map[string]any) { p["htu"] = testPublicURL + basePath + "/retrieve" }),
+		"13: proof for another URL":     env.presenting(claims, func(p map[string]any) { p["htu"] = testPublicURL + BasePath + "/retrieve" }),
 		"13b: proof for another method": env.presenting(claims, func(p map[string]any) { p["htm"] = http.MethodGet }),
 		"14: ath of another token":      env.presenting(claims, func(p map[string]any) { p["ath"] = accessTokenHash("another-token") }),
 		"15: proof too old":             env.presenting(claims, func(p map[string]any) { p["iat"] = ago(2 * time.Minute) }),
@@ -154,7 +156,7 @@ func TestInvalidDPoPProofIs401(t *testing.T) { // case 12-15
 func TestReplayedDPoPProofIs401(t *testing.T) { // case 16
 	env := newTestServer(t)
 	token := env.authz.sign(t, env.authz.claims(bsnFrouke, "verify", env.qtsp.jkt))
-	proof := env.qtsp.proof(t, http.MethodPost, testPublicURL+basePath+"/verify", token, nil)
+	proof := env.qtsp.proof(t, http.MethodPost, testPublicURL+BasePath+"/verify", token, nil)
 	auth := func(_ *testing.T, req *http.Request) {
 		req.Header.Set("Authorization", "DPoP "+token)
 		req.Header.Set("DPoP", proof)
@@ -219,40 +221,11 @@ func TestOrderOfChecks(t *testing.T) { // case 20
 	}
 }
 
-// --- keys of the authorization server ------------------------------------------
-
-// The ASIP takes the keys from the jwks_uri in the metadata of the
-// authorization server (RFC 8414, RFC 9068 section 4).
-func TestKeysFromAuthorizationServerMetadata(t *testing.T) {
-	authz := newTestAuthorizationServer(t)
-	var as *httptest.Server
-	as = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case strings.HasSuffix(r.URL.Path, "/.well-known/oauth-authorization-server"):
-			_ = json.NewEncoder(w).Encode(map[string]string{"issuer": as.URL, "jwks_uri": as.URL + "/jwks.json"})
-		case r.URL.Path == "/jwks.json":
-			_ = json.NewEncoder(w).Encode(authz.jwks)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer as.Close()
-	keys, err := newRemoteKeys(as.URL).keys(t.Context(), testKeyID)
-	if err != nil || len(keys) != 1 || keys[0].KeyID != testKeyID {
-		t.Fatalf("keys = %v, %v; want the key of the authorization server", keys, err)
-	}
-	// RFC 8414 section 3.3: the issuer in the metadata must be the issuer the
-	// ASIP is configured with.
-	if _, err := newRemoteKeys(as.URL+"/other").keys(t.Context(), testKeyID); !errors.Is(err, errKeysUnavailable) {
-		t.Fatalf("metadata of another issuer was accepted: %v", err)
-	}
-}
-
 // When the keys of the authorization server cannot be obtained, no token can
 // be validated. That is not the client's fault: 503, an addition to Annex B.
 func TestUnavailableAuthorizationServerIs503(t *testing.T) {
 	authz, qtsp := newTestAuthorizationServer(t), newTestQTSP(t)
-	env := newTestServerWithKeys(t, authz, qtsp, newRemoteKeys("http://127.0.0.1:1"))
+	env := newTestServerWithKeys(t, authz, qtsp, asmetadata.New("http://127.0.0.1:1"))
 	for _, path := range []string{"/verify", "/retrieve"} {
 		rec := post(t, env, path, env.person(bsnFrouke), verifyBody(idFamilyName, `{"family_name":"Jansen"}`))
 		assertProblem(t, rec, http.StatusServiceUnavailable)
@@ -285,16 +258,16 @@ func newTestAuthorizationServer(t *testing.T) *testAuthorizationServer {
 func (a *testAuthorizationServer) claims(bsn, scope, jkt string) map[string]any {
 	now := time.Now()
 	return map[string]any{
-		"iss":       testIssuer,
-		"sub":       "opaque-per-token",
-		"aud":       testPublicURL + basePath,
-		"client_id": "test-qtsp",
-		"iat":       now.Unix(),
-		"exp":       now.Add(10 * time.Minute).Unix(),
-		"jti":       randomTestID(),
-		"scope":     scope,
-		"cnf":       map[string]string{"jkt": jkt},
-		bsnClaim:    bsn,
+		"iss":                testIssuer,
+		"sub":                "opaque-per-token",
+		"aud":                testPublicURL + BasePath,
+		"client_id":          "test-qtsp",
+		"iat":                now.Unix(),
+		"exp":                now.Add(10 * time.Minute).Unix(),
+		"jti":                randomTestID(),
+		"scope":              scope,
+		"cnf":                map[string]string{"jkt": jkt},
+		accesstoken.BSNClaim: bsn,
 	}
 }
 

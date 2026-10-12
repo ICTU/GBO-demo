@@ -1,4 +1,4 @@
-package main
+package verification
 
 import (
 	"encoding/json"
@@ -16,10 +16,10 @@ import (
 
 // Verification results, ETSI TS 119 478 REQ-ASIP-6.1.1.2-04.
 const (
-	resultURIMatch     = "http://uri.etsi.org/19478/VerificationResult/Match"
-	resultURINoMatch   = "http://uri.etsi.org/19478/VerificationResult/NoMatch"
-	resultURIVariation = "http://uri.etsi.org/19478/VerificationResult/MatchWithVariation"
-	resultURIUnknown   = "http://uri.etsi.org/19478/VerificationResult/Unknown"
+	ResultMatch     = "http://uri.etsi.org/19478/VerificationResult/Match"
+	ResultNoMatch   = "http://uri.etsi.org/19478/VerificationResult/NoMatch"
+	ResultVariation = "http://uri.etsi.org/19478/VerificationResult/MatchWithVariation"
+	ResultUnknown   = "http://uri.etsi.org/19478/VerificationResult/Unknown"
 )
 
 // compareValues compares the value a QTSP claims with the value the source
@@ -31,12 +31,12 @@ const (
 //   - NoMatch: otherwise.
 func compareValues(claimed, held any) string {
 	if equalValues(claimed, held, identity) {
-		return resultURIMatch
+		return ResultMatch
 	}
 	if equalValues(claimed, held, normaliseString) {
-		return resultURIVariation
+		return ResultVariation
 	}
-	return resultURINoMatch
+	return ResultNoMatch
 }
 
 func identity(s string) string { return s }
