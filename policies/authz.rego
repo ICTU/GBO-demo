@@ -5,9 +5,9 @@ package authz
 # Input follows the OpenFTV AuthZEN mapping: {subject, action, resource,
 # context}. For a GraphQL request the FTV mapper adds the requested fields as
 # input.resource.attributes.graphql. The consent is not in input:
-# data.dvtp.gbo.consent resolves it from the token in context.headers.
+# data.gbo.consent resolves it from the token in context.headers.
 
-import data.dvtp.gbo
+import data.gbo
 
 default allow := false
 

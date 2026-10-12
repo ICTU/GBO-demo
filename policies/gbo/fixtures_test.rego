@@ -1,9 +1,9 @@
-package dvtp.gbo.fixtures_test
+package gbo.fixtures_test
 
 # Test input: a GraphQL request as the Inway hands it to the PDP, with the
 # field list the mapper adds (Section 6.2) for the demo consumers' queries.
 
-import data.dvtp.gbo.graphql_schemas
+import data.gbo.graphql_schemas
 
 hv := "99999999900000000300"
 

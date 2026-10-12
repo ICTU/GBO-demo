@@ -1,8 +1,8 @@
-package dvtp.gbo.rules.lvg0001_test
+package gbo.rules.lvg0001_test
 
-import data.dvtp.gbo.fixtures_test as fx
-import data.dvtp.gbo.lib
-import data.dvtp.gbo.rules.lvg0001
+import data.gbo.fixtures_test as fx
+import data.gbo.lib
+import data.gbo.rules.lvg0001
 
 # ═══════════════════════════════════════════════════════════════════════════
 # LVG0001 checks, through lib.evaluate. The engine cases live in

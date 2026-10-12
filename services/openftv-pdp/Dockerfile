@@ -56,7 +56,7 @@ RUN apk add --no-cache curl
 COPY --from=builder /pdp /
 # The bundled GraphQL schemas and their manifest, one per FSC service
 # (GBO_FTV_GRAPHQL_DIR). The policy bundle pins their digests
-# (policies/dvtp/gbo/graphql_schemas.rego).
+# (policies/gbo/graphql_schemas.rego).
 COPY schemas/pdp-mirror /etc/gbo/ftv-graphql
 # Demo policies baked in (PDP_POLICIES_STORE points at /policies). The
 # upstream image carries no policies, so without this every runtime

@@ -1,7 +1,7 @@
-package dvtp.gbo.appendix_a_test
+package gbo.appendix_a_test
 
-import data.dvtp.gbo
-import data.dvtp.gbo.fixtures_test as fx
+import data.gbo
+import data.gbo.fixtures_test as fx
 
 # ═══════════════════════════════════════════════════════════════════════════
 # The decision vectors of the FTV GraphQL profile's Appendix A (draft-01),
@@ -35,8 +35,8 @@ _output(fields) := {
 
 _decide_output(output, rules) := result if {
 	result := gbo.response with input as fx.request_with("00000001000000000001", "appendix-a", output, {})
-		with data.dvtp.gbo.rules as rules
-		with data.dvtp.gbo.graphql_schemas.digests as {"appendix-a": _digest}
+		with data.gbo.rules as rules
+		with data.gbo.graphql_schemas.digests as {"appendix-a": _digest}
 }
 
 _decide(fields) := _decide_output(_output(fields), {"r0001": _r0001})
@@ -221,6 +221,6 @@ test_a25_pinned_digest_mismatch_denies if {
 
 test_a40_mapper_output_missing_denies if {
 	result := gbo.response with input as {"subject": {"id": "x", "attributes": {"service_name": "appendix-a"}}, "resource": {"type": "uri", "id": "/graphql"}, "context": {}}
-		with data.dvtp.gbo.rules as {"r0001": _r0001}
+		with data.gbo.rules as {"r0001": _r0001}
 	fx.request_code(result) == {"code": "CONFIG_ERROR", "subcode": "MAPPER_OUTPUT_MISSING"}
 }

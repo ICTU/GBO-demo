@@ -120,7 +120,7 @@ jobs:
       - name: GraphQL schema pins are up to date
         run: |
           ./scripts/gen-graphql-pins.sh
-          git diff --exit-code -- policies/dvtp/gbo/graphql_schemas.rego
+          git diff --exit-code -- policies/gbo/graphql_schemas.rego
 
   # Guarantee H3 of the FTV GraphQL profile: the schema the PDP validates
   # against matches what each source runs. Policy and sources live in this

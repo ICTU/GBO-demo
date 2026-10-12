@@ -34,7 +34,7 @@ func TestRender(t *testing.T) {
 	if !strings.HasSuffix(got, want) {
 		t.Errorf("render:\n%s\nwant suffix:\n%s", got, want)
 	}
-	if !strings.Contains(got, "package dvtp.gbo.graphql_schemas\n") {
+	if !strings.Contains(got, "package gbo.graphql_schemas\n") {
 		t.Errorf("render has no package line:\n%s", got)
 	}
 }

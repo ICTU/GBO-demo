@@ -3,7 +3,7 @@
 # The digest of the GraphQL schema the PDP loads per FSC service. The
 # schemas travel with the PDP image, not with this bundle, so the bundle
 # pins them, and the policy can refuse an evaluation against another one.
-package dvtp.gbo.graphql_schemas
+package gbo.graphql_schemas
 
 digests := {
 	"bri": "sha256:d17d09a9d36a5843f341f57ece804b805067841812566edc704a7090d53a143f",

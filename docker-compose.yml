@@ -102,7 +102,7 @@ services:
   # profile mapper runs INSIDE this image as a request-mapper
   # (services/openftv-pdp/mapper, PDP_REQUEST_MAPPINGS). The policy itself
   # verifies the signed consent context and checks its live status at the
-  # consent-register, per evaluation (http.send, policies/dvtp/gbo/consent.rego).
+  # consent-register, per evaluation (http.send, policies/gbo/consent.rego).
   # Note: PDP_POLICIES_LANGUAGE must be "rego" — the documented value
   # "OPA" makes OpenFTV silently skip all policy files (upstream quirk).
   openftv-pdp:
@@ -132,7 +132,7 @@ services:
       # Native OpenFTV PIP pull: refresh the DvTP admission entities over a
       # dedicated network shared only with the register.
       - PDP_PIP_PULL_CONFIGS=/pip-pull/dvtp-onboarding.yaml
-      # Read by the policy through opa.runtime().env (policies/dvtp/gbo/
+      # Read by the policy through opa.runtime().env (policies/gbo/
       # consent.rego): it fetches the register's verification keys and the
       # referenced consent's current status per evaluation. Any verification
       # or status failure denies, with a reason of its own. The keys come

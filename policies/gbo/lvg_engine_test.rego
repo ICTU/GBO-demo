@@ -1,7 +1,7 @@
-package dvtp.gbo_test
+package gbo_test
 
-import data.dvtp.gbo
-import data.dvtp.gbo.fixtures_test as fx
+import data.gbo
+import data.gbo.fixtures_test as fx
 
 # LVG0001 through the engine. A BD consent does not open LVG fields, nor an
 # LVG consent BD fields.
@@ -24,7 +24,7 @@ _lvg_input(actor, scope) := fx.request(actor, "lvg", fx.ownership_fields("consen
 
 test_engine_allows_the_ownership_check_via_lvg0001 if {
 	result := gbo.response with input as _lvg_input(_lvg_ir, "lvg:vbo:eigendom")
-		with data.dvtp.gbo.consent.resolved as _lvg_consent
+		with data.gbo.consent.resolved as _lvg_consent
 	result.decision == true
 	every g in result.context.granted {
 		g.rule == "LVG0001"
@@ -33,14 +33,14 @@ test_engine_allows_the_ownership_check_via_lvg0001 if {
 
 test_engine_denies_a_question_about_another_citizen if {
 	req := fx.request(_lvg_ir, "lvg", fx.ownership_fields("999991772"), fx.scope_headers("lvg:vbo:eigendom"))
-	result := gbo.response with input as req with data.dvtp.gbo.consent.resolved as _lvg_consent
+	result := gbo.response with input as req with data.gbo.consent.resolved as _lvg_consent
 	result.decision == false
 	fx.refused_for(result, "CONSTRAINT_MISMATCH")
 }
 
 test_engine_denies_a_bd_consent_on_lvg_fields if {
 	result := gbo.response with input as _lvg_input(_lvg_hv, "bd:ib:2025")
-		with data.dvtp.gbo.consent.resolved as object.union(_lvg_consent, {"granted_scopes": ["bd:ib:2025"], "dienstverlener_oin": _lvg_hv})
+		with data.gbo.consent.resolved as object.union(_lvg_consent, {"granted_scopes": ["bd:ib:2025"], "dienstverlener_oin": _lvg_hv})
 	result.decision == false
 	fx.refused_for(result, "SCOPE_NOT_ALLOWED")
 }
@@ -55,6 +55,6 @@ test_engine_has_no_rule_for_lvg_without_a_consent_token if {
 test_engine_denies_an_lvg_consent_on_bd_fields if {
 	# The other direction: the ownership consent does not open income data.
 	result := gbo.response with input as fx.income(_lvg_ir, "consent:identity", [2025], fx.scope_headers("lvg:vbo:eigendom"))
-		with data.dvtp.gbo.consent.resolved as _lvg_consent
+		with data.gbo.consent.resolved as _lvg_consent
 	result.decision == false
 }

@@ -1,8 +1,8 @@
-package dvtp.gbo.rules.dvt0001_test
+package gbo.rules.dvt0001_test
 
-import data.dvtp.gbo.fixtures_test as fx
-import data.dvtp.gbo.lib
-import data.dvtp.gbo.rules.dvt0001
+import data.gbo.fixtures_test as fx
+import data.gbo.lib
+import data.gbo.rules.dvt0001
 
 # ═══════════════════════════════════════════════════════════════════════════
 # DVT0001 checks, through lib.evaluate with the rule's own spec, apart from

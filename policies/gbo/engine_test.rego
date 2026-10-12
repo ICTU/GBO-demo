@@ -1,7 +1,7 @@
-package dvtp.gbo_test
+package gbo_test
 
-import data.dvtp.gbo
-import data.dvtp.gbo.fixtures_test as fx
+import data.gbo
+import data.gbo.fixtures_test as fx
 
 # The policy resolves the consent itself (tested in consent_test.rego). These
 # tests stand in a resolved consent with `with`, so they test the engine alone.
@@ -11,12 +11,12 @@ _pip_consent := {"context_valid": true, "status_available": true, "exists": true
 _input := {"subject": {"type": "org", "id": "peer-oin-123"}, "context": {}}
 
 test_ctx_pip_carries_the_resolved_consent if {
-	ctx := gbo._ctx with input as _input with data.dvtp.gbo.consent.resolved as _pip_consent
+	ctx := gbo._ctx with input as _input with data.gbo.consent.resolved as _pip_consent
 	ctx.pip.consent.exists == true
 }
 
 test_ctx_resource_has_both_placeholders if {
-	ctx := gbo._ctx with input as _input with data.dvtp.gbo.consent.resolved as _pip_consent
+	ctx := gbo._ctx with input as _input with data.gbo.consent.resolved as _pip_consent
 	ctx.resource.subject_placeholders == {"consent:identity", "consent:pseudonym"}
 }
 
@@ -26,14 +26,14 @@ test_ctx_resource_placeholders_empty_without_consent if {
 }
 
 test_ctx_resource_placeholders_empty_for_an_unverified_consent if {
-	ctx := gbo._ctx with input as _input with data.dvtp.gbo.consent.resolved as {"context_valid": false, "invalid_code": "CONSENT_SIGNATURE_INVALID"}
+	ctx := gbo._ctx with input as _input with data.gbo.consent.resolved as {"context_valid": false, "invalid_code": "CONSENT_SIGNATURE_INVALID"}
 	ctx.resource.subject_placeholders == set()
 }
 
 # The policy decides which placeholders exist; a request cannot add its own.
 test_ctx_resource_placeholders_are_not_taken_from_the_request if {
 	req := {"subject": {"type": "org", "id": "x"}, "context": {"resource": {"subject_placeholders": ["999991772"]}}}
-	ctx := gbo._ctx with input as req with data.dvtp.gbo.consent.resolved as _pip_consent
+	ctx := gbo._ctx with input as req with data.gbo.consent.resolved as _pip_consent
 	ctx.resource.subject_placeholders == {"consent:identity", "consent:pseudonym"}
 }
 
@@ -43,7 +43,7 @@ test_ctx_carries_all_fields_and_the_resource_without_the_mapper if {
 	typename := {"path": ["ingeschrevenPersoon", "__typename"], "parentType": "IngeschrevenPersoon", "field": "__typename", "leaf": true}
 	fields := array.concat(fx.income_fields("consent:identity", fx.literal([2025])), [typename])
 	req := object.union(fx.request(fx.hv, "bri", fields, fx.scope_headers("bd:ib:2025")), {"resource": {"attributes": {"path": "/graphql"}}})
-	ctx := gbo._ctx with input as req with data.dvtp.gbo.consent.resolved as _pip_consent
+	ctx := gbo._ctx with input as req with data.gbo.consent.resolved as _pip_consent
 	ctx.fields == fields
 	ctx.resource.type == "uri"
 	ctx.resource.id == "/graphql"
@@ -56,10 +56,10 @@ test_ctx_carries_all_fields_and_the_resource_without_the_mapper if {
 
 test_admin_view_of_a_refused_field if {
 	result := gbo.response with input as _dvtp_input("bd:ib:2025", "consent:identity", [2024])
-		with data.dvtp.gbo.consent.resolved as _consent
+		with data.gbo.consent.resolved as _consent
 	admin := fx.admin(result)
 	admin.code == "FIELD_NOT_PERMITTED"
-	admin.schema_digest == data.dvtp.gbo.graphql_schemas.digests.bri
+	admin.schema_digest == data.gbo.graphql_schemas.digests.bri
 	count(admin.denied_fields) == 1
 	some denied in admin.denied_fields
 	denied.key == "IngeschrevenPersoon.heeftBelastingjaarAangifte"
@@ -77,7 +77,7 @@ test_admin_view_of_a_refused_field if {
 # administrator's view names it.
 test_consumer_view_names_no_field if {
 	result := gbo.response with input as _dvtp_input("bd:ib:2025", "consent:identity", [2024])
-		with data.dvtp.gbo.consent.resolved as _consent
+		with data.gbo.consent.resolved as _consent
 	fx.client(result) == {"code": "FIELD_NOT_PERMITTED"}
 	result.context.reason_user == {"en": "Field not permitted"}
 	result.context.reason_admin == result.context.reason_user
@@ -89,12 +89,12 @@ test_admin_view_of_an_unverifiable_request if {
 	output := {
 		"profile": "ftv-graphql/0.1",
 		"operation": null,
-		"schema": {"digest": data.dvtp.gbo.graphql_schemas.digests.bri},
+		"schema": {"digest": data.gbo.graphql_schemas.digests.bri},
 		"fields": [],
 		"unverifiable": {"code": "COVERAGE_UNVERIFIABLE", "subcode": "INVALID_QUERY", "message": "Field Selections at 1:31"},
 	}
 	result := gbo.response with input as fx.request_with(fx.hv, "bri", output, {})
-	fx.admin(result) == {"code": "COVERAGE_UNVERIFIABLE", "subcode": "INVALID_QUERY", "message": "Field Selections at 1:31", "schema_digest": data.dvtp.gbo.graphql_schemas.digests.bri}
+	fx.admin(result) == {"code": "COVERAGE_UNVERIFIABLE", "subcode": "INVALID_QUERY", "message": "Field Selections at 1:31", "schema_digest": data.gbo.graphql_schemas.digests.bri}
 	fx.client(result) == {"code": "FIELD_NOT_PERMITTED"}
 }
 
@@ -147,7 +147,7 @@ test_response_without_consent_carries_none if {
 
 test_mapper_output_missing_denies if {
 	req := object.remove(_dvtp_input("bd:ib:2025", "consent:identity", [2025]), ["resource"])
-	result := gbo.response with input as req with data.dvtp.gbo.consent.resolved as _consent
+	result := gbo.response with input as req with data.gbo.consent.resolved as _consent
 	result.decision == false
 	fx.request_code(result) == {"code": "CONFIG_ERROR", "subcode": "MAPPER_OUTPUT_MISSING"}
 }
@@ -155,14 +155,14 @@ test_mapper_output_missing_denies if {
 test_mapper_output_of_another_profile_denies if {
 	output := object.union(fx.graphql("bri", fx.income_fields("consent:identity", fx.literal([2025]))), {"profile": "ftv-graphql/0.2"})
 	result := gbo.response with input as fx.request_with(fx.hv, "bri", output, fx.scope_headers("bd:ib:2025"))
-		with data.dvtp.gbo.consent.resolved as _consent
+		with data.gbo.consent.resolved as _consent
 	fx.request_code(result).subcode == "MAPPER_OUTPUT_MISSING"
 }
 
 test_schema_other_than_the_pin_denies if {
 	result := gbo.response with input as _dvtp_input("bd:ib:2025", "consent:identity", [2025])
-		with data.dvtp.gbo.consent.resolved as _consent
-		with data.dvtp.gbo.graphql_schemas.digests as {"bri": "sha256:other"}
+		with data.gbo.consent.resolved as _consent
+		with data.gbo.graphql_schemas.digests as {"bri": "sha256:other"}
 	result.decision == false
 	fx.request_code(result) == {"code": "CONFIG_ERROR", "subcode": "SCHEMA_MISMATCH"}
 }
@@ -171,7 +171,7 @@ test_schema_other_than_the_pin_denies if {
 test_schema_of_an_unpinned_service_denies if {
 	output := fx.graphql("bri", fx.income_fields("consent:identity", fx.literal([2025])))
 	result := gbo.response with input as fx.request_with(fx.hv, "onbekend", output, fx.scope_headers("bd:ib:2025"))
-		with data.dvtp.gbo.consent.resolved as _consent
+		with data.gbo.consent.resolved as _consent
 	fx.request_code(result).subcode == "SCHEMA_MISMATCH"
 }
 
@@ -181,12 +181,12 @@ test_unverifiable_request_denies_with_the_mappers_code if {
 	output := {
 		"profile": "ftv-graphql/0.1",
 		"operation": null,
-		"schema": {"digest": data.dvtp.gbo.graphql_schemas.digests.bri},
+		"schema": {"digest": data.gbo.graphql_schemas.digests.bri},
 		"fields": [],
 		"unverifiable": {"code": "COVERAGE_UNVERIFIABLE", "subcode": "UNSUPPORTED_TRANSPORT", "message": "body absent or not a string"},
 	}
 	result := gbo.response with input as fx.request_with(fx.hv, "bri", output, fx.scope_headers("bd:ib:2025"))
-		with data.dvtp.gbo.consent.resolved as _consent
+		with data.gbo.consent.resolved as _consent
 	result.decision == false
 	fx.request_code(result) == {"code": "COVERAGE_UNVERIFIABLE", "subcode": "UNSUPPORTED_TRANSPORT"}
 }
@@ -207,7 +207,7 @@ test_unavailable_schema_denies_with_the_mappers_code if {
 test_typename_alone_has_no_data_fields if {
 	typename := {"path": ["__typename"], "parentType": "Query", "field": "__typename", "leaf": true}
 	result := gbo.response with input as fx.request(fx.hv, "bri", [typename], fx.scope_headers("bd:ib:2025"))
-		with data.dvtp.gbo.consent.resolved as _consent
+		with data.gbo.consent.resolved as _consent
 	result.decision == false
 	fx.request_code(result) == {"code": "NO_DATA_FIELDS"}
 }
@@ -225,7 +225,7 @@ test_each_selection_of_the_root_is_judged_on_its_own_argument if {
 		],
 	)
 	result := gbo.response with input as fx.request(fx.hv, "bri", fields, fx.scope_headers("bd:ib:2025"))
-		with data.dvtp.gbo.consent.resolved as _consent
+		with data.gbo.consent.resolved as _consent
 	result.decision == false
 	fx.refused_for(result, "CONSTRAINT_MISMATCH")
 	[concat(".", d.path) | some d in fx.denied(result)] == ["b"]
@@ -242,7 +242,7 @@ test_introspection_next_to_a_permitted_query_denies if {
 		],
 	)
 	result := gbo.response with input as fx.request(fx.hv, "bri", fields, fx.scope_headers("bd:ib:2025"))
-		with data.dvtp.gbo.consent.resolved as _consent
+		with data.gbo.consent.resolved as _consent
 	result.decision == false
 	[d.key | some d in fx.denied(result)] == ["Query.__schema"]
 	fx.denied(result)[0].code == "NO_APPLICABLE_RULE"
@@ -257,7 +257,7 @@ test_years_from_a_schema_default_deny if {
 		fx.year,
 	]
 	result := gbo.response with input as fx.request(fx.hv, "bri", fields, fx.scope_headers("bd:ib:2025"))
-		with data.dvtp.gbo.consent.resolved as _consent
+		with data.gbo.consent.resolved as _consent
 	result.decision == false
 	fx.refused_for(result, "YEAR_NOT_COVERED")
 }
@@ -265,7 +265,7 @@ test_years_from_a_schema_default_deny if {
 test_years_written_as_a_variable_are_read if {
 	fields := [fx.person("consent:identity"), fx.declarations(fx.variable("jaren", [2025])), fx.year]
 	result := gbo.response with input as fx.request(fx.hv, "bri", fields, fx.scope_headers("bd:ib:2025"))
-		with data.dvtp.gbo.consent.resolved as _consent
+		with data.gbo.consent.resolved as _consent
 	result.decision == true
 }
 
@@ -276,7 +276,7 @@ test_edge_outside_the_rule_denies if {
 		[fx.box("box2Inkomen"), fx.amount("box2Inkomen")],
 	)
 	result := gbo.response with input as fx.request(fx.hv, "bri", fields, fx.scope_headers("bd:ib:2025"))
-		with data.dvtp.gbo.consent.resolved as _consent
+		with data.gbo.consent.resolved as _consent
 	result.decision == false
 	[d.key | some d in fx.denied(result)] == ["AangifteIH.box2Inkomen"]
 	fx.refused_for(result, "NO_APPLICABLE_RULE")
@@ -289,7 +289,7 @@ _evaluated_rules(result) := {rule | some d in fx.denied(result); some rule in d.
 
 test_a_consent_request_is_judged_by_consent_rules_only if {
 	result := gbo.response with input as _dvtp_input("bd:ib:2025", "consent:identity", [2024])
-		with data.dvtp.gbo.consent.resolved as _consent
+		with data.gbo.consent.resolved as _consent
 	result.decision == false
 	_evaluated_rules(result) == {"DVT0001"}
 }
@@ -320,21 +320,21 @@ _dvtp_input(scope, bsn, years) := fx.income(fx.hv, bsn, years, fx.scope_headers(
 
 test_dvtp_deny_surfaces_year_not_covered if {
 	result := gbo.response with input as _dvtp_input("bd:ib:2025", "consent:identity", [2024])
-		with data.dvtp.gbo.consent.resolved as _consent
+		with data.gbo.consent.resolved as _consent
 	result.decision == false
 	fx.refused_for(result, "YEAR_NOT_COVERED")
 }
 
 test_dvtp_deny_surfaces_consent_scope_mismatch if {
 	result := gbo.response with input as _dvtp_input("bd:ib:2023", "consent:identity", [2025])
-		with data.dvtp.gbo.consent.resolved as _consent
+		with data.gbo.consent.resolved as _consent
 	result.decision == false
 	fx.refused_for(result, "CONSENT_SCOPE_MISMATCH")
 }
 
 test_dvtp_deny_surfaces_constraint_mismatch if {
 	result := gbo.response with input as _dvtp_input("bd:ib:2025", "999991772", [2025])
-		with data.dvtp.gbo.consent.resolved as _consent
+		with data.gbo.consent.resolved as _consent
 	result.decision == false
 	fx.refused_for(result, "CONSTRAINT_MISMATCH")
 }
@@ -342,7 +342,7 @@ test_dvtp_deny_surfaces_constraint_mismatch if {
 # Denied here rather than passed on for the source to refuse.
 test_dvtp_deny_placeholder_the_rule_does_not_accept if {
 	result := gbo.response with input as _dvtp_input("bd:ib:2025", "consent:pseudonym", [2025])
-		with data.dvtp.gbo.consent.resolved as _consent
+		with data.gbo.consent.resolved as _consent
 	result.decision == false
 	fx.refused_for(result, "CONSTRAINT_MISMATCH")
 }
@@ -370,7 +370,7 @@ test_eudi_deny_surfaces_actor_not_allowed if {
 
 test_dvtp_allow_grants_via_consent_rule if {
 	result := gbo.response with input as _dvtp_input("bd:ib:2025", "consent:identity", [2025])
-		with data.dvtp.gbo.consent.resolved as _consent
+		with data.gbo.consent.resolved as _consent
 	result.decision == true
 	every g in result.context.granted {
 		g.rule == "DVT0001"
@@ -380,7 +380,7 @@ test_dvtp_allow_grants_via_consent_rule if {
 # The consent is not in input, so the response carries it for the log.
 test_dvtp_response_carries_the_consent if {
 	result := gbo.response with input as _dvtp_input("bd:ib:2025", "consent:identity", [2025])
-		with data.dvtp.gbo.consent.resolved as _consent
+		with data.gbo.consent.resolved as _consent
 	result.context.pip.consent == _consent
 }
 
@@ -452,7 +452,7 @@ test_regime_check_catches_none_and_both if {
 		"none": {"rule_id": "N", "covers_fields": set(), "spec": {"rule_id": "N"}},
 		"both": {"rule_id": "B", "covers_fields": set(), "spec": {"rule_id": "B", "consent_required": true, "pid_required": true}},
 	}
-	violations := _regime_violations with data.dvtp.gbo.rules as broken
+	violations := _regime_violations with data.gbo.rules as broken
 	violations == {"N: names no regime", "B: names both regimes"}
 }
 
@@ -498,7 +498,7 @@ test_argument_check_catches_a_rule_that_names_none if {
 		"pid": {"rule_id": "P", "covers_fields": set(), "spec": {"rule_id": "P", "pid_required": true}},
 		"bsn": {"rule_id": "B", "covers_fields": set(), "spec": {"rule_id": "B", "constraint_binding": [{"arg": "bsn", "placeholders": {"consent:identity"}}]}},
 	}
-	violations := _argument_violations with data.dvtp.gbo.rules as broken
+	violations := _argument_violations with data.gbo.rules as broken
 	violations == {
 		"Y: allowed_years without years_argument",
 		"P: pid_required without subject_argument",
@@ -534,7 +534,7 @@ test_consent_regime_fields_keep_their_own_reasons if {
 		fx.request(_integrator, "bri", fields, fx.scope_headers("bd:ib:2025")),
 		{"subject": {"attributes": {"outway_delegator_peer_id": "99999999900000000300"}}},
 	)
-		with data.dvtp.gbo.consent.resolved as _consent
+		with data.gbo.consent.resolved as _consent
 		with data.entities.dvtp_participant as {}
 	result.decision == false
 	"NO_APPLICABLE_RULE" in {d.code | some d in fx.denied(result)}
@@ -545,7 +545,7 @@ _unverifiable_input := fx.income(fx.hv, "", [2025], {})
 
 test_unverifiable_consent_surfaces_consent_context_invalid if {
 	result := gbo.response with input as _unverifiable_input
-		with data.dvtp.gbo.consent.resolved as {"context_valid": false, "status_available": false, "exists": false}
+		with data.gbo.consent.resolved as {"context_valid": false, "status_available": false, "exists": false}
 	result.decision == false
 	fx.refused_for(result, "CONSENT_CONTEXT_INVALID")
 }
@@ -553,7 +553,7 @@ test_unverifiable_consent_surfaces_consent_context_invalid if {
 # The engine reports the specific code the consent PIP gives.
 test_unverifiable_consent_surfaces_its_invalid_code if {
 	result := gbo.response with input as _unverifiable_input
-		with data.dvtp.gbo.consent.resolved as {
+		with data.gbo.consent.resolved as {
 			"context_valid": false,
 			"status_available": false,
 			"exists": false,
@@ -586,7 +586,7 @@ _delegated_input(integrator) := object.union(
 
 test_delegated_call_by_registered_integrator_allowed if {
 	result := gbo.response with input as _delegated_input(_integrator)
-		with data.dvtp.gbo.consent.resolved as _consent
+		with data.gbo.consent.resolved as _consent
 		with data.entities.dvtp_participant as _registered
 	result.decision == true
 	result.context.granted[0].rule == "DVT0001"
@@ -594,7 +594,7 @@ test_delegated_call_by_registered_integrator_allowed if {
 
 test_delegated_call_by_unregistered_integrator_denied if {
 	result := gbo.response with input as _delegated_input("99999999900000001199")
-		with data.dvtp.gbo.consent.resolved as _consent
+		with data.gbo.consent.resolved as _consent
 		with data.entities.dvtp_participant as _registered
 	result.decision == false
 	fx.refused_for(result, "INTEGRATOR_NOT_REGISTERED")
@@ -604,7 +604,7 @@ test_delegated_call_by_unregistered_integrator_denied if {
 # consumer learns only that access was denied.
 test_delegated_call_without_admission_register_is_pip_unavailable if {
 	result := gbo.response with input as _delegated_input(_integrator)
-		with data.dvtp.gbo.consent.resolved as _consent
+		with data.gbo.consent.resolved as _consent
 	result.decision == false
 	fx.client(result) == {"code": "ACCESS_DENIED"}
 	fx.request_code(result) == {"code": "PIP_UNAVAILABLE"}
@@ -619,7 +619,7 @@ test_delegated_call_without_admission_register_is_pip_unavailable if {
 # An empty register is a register: nobody is admitted.
 test_delegated_call_with_empty_admission_register_denied if {
 	result := gbo.response with input as _delegated_input(_integrator)
-		with data.dvtp.gbo.consent.resolved as _consent
+		with data.gbo.consent.resolved as _consent
 		with data.entities.dvtp_participant as {}
 	fx.refused_for(result, "INTEGRATOR_NOT_REGISTERED")
 }
@@ -627,7 +627,7 @@ test_delegated_call_with_empty_admission_register_denied if {
 # A direct call has no integrator, so the register is not needed.
 test_direct_call_without_admission_register_allowed if {
 	result := gbo.response with input as _dvtp_input("bd:ib:2025", "consent:identity", [2025])
-		with data.dvtp.gbo.consent.resolved as _consent
+		with data.gbo.consent.resolved as _consent
 	result.decision == true
 }
 
@@ -636,11 +636,11 @@ test_input_pip_integrator_is_not_trusted if {
 	forged := {"integrator": _registered[_integrator]}
 	req := object.union(_delegated_input(_integrator), {"context": {"pip": forged}})
 	ctx := gbo._ctx with input as req
-		with data.dvtp.gbo.consent.resolved as _consent
+		with data.gbo.consent.resolved as _consent
 		with data.entities.dvtp_participant as {}
 	not ctx.pip.integrator
 	result := gbo.response with input as req
-		with data.dvtp.gbo.consent.resolved as _consent
+		with data.gbo.consent.resolved as _consent
 		with data.entities.dvtp_participant as {}
 	result.decision == false
 	fx.refused_for(result, "INTEGRATOR_NOT_REGISTERED")
@@ -651,14 +651,14 @@ test_input_pip_register_state_is_not_trusted if {
 	forged := {"integrator_register": "unavailable"}
 	req := object.union(_delegated_input(_integrator), {"context": {"pip": forged}})
 	result := gbo.response with input as req
-		with data.dvtp.gbo.consent.resolved as _consent
+		with data.gbo.consent.resolved as _consent
 		with data.entities.dvtp_participant as _registered
 	result.decision == true
 }
 
 test_direct_call_carries_no_integrator_pip if {
 	ctx := gbo._ctx with input as _dvtp_input("bd:ib:2025", "consent:identity", [2025])
-		with data.dvtp.gbo.consent.resolved as _consent
+		with data.gbo.consent.resolved as _consent
 		with data.entities.dvtp_participant as _registered
 	not ctx.pip.integrator
 }

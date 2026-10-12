@@ -739,7 +739,7 @@ func lokiDecisionsForTrace(ctx context.Context, cfg config, traceID string, sinc
 // handleRules serves the pre-generated rules.json (rule metadata:
 // covers_types, covers_fields, spec) so the dev-portal's RuleSpecPanel
 // can render a rule's declared scope + evaluation criteria. OpenFTV PDP
-// has no data-API to evaluate data.dvtp.gbo.rules live, so the file is
+// has no data-API to evaluate data.gbo.rules live, so the file is
 // generated from the Rego sources by scripts/gen-rules-json.sh (CI
 // checks freshness). Content is identical to the old live evaluation.
 func handleRules(cfg config) http.HandlerFunc {
@@ -776,7 +776,7 @@ func handleRules(cfg config) http.HandlerFunc {
 
 // policyFile is one Rego source file read from the policies directory.
 type policyFile struct {
-	ID  string // path relative to the policies dir, e.g. "dvtp/gbo/engine.rego"
+	ID  string // path relative to the policies dir, e.g. "gbo/engine.rego"
 	Raw string
 }
 
@@ -809,7 +809,7 @@ func readPolicyFiles(dir string) ([]policyFile, error) {
 
 // handlePolicySource returns the raw Rego for a single policy file.
 // Used for the "click rule → show snippet" feature. `id` query-param is
-// the policy path relative to the policies dir (e.g. "dvtp/gbo/engine.rego").
+// the policy path relative to the policies dir (e.g. "gbo/engine.rego").
 func handlePolicySource(cfg config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		corsHeaders(w)
@@ -851,8 +851,8 @@ func handlePolicySource(cfg config) http.HandlerFunc {
 // render a snippet view centred on that line.
 //
 // Generic across policies that follow the convention `:= "<code>"` in a
-// rule body. Path is the policy package-path (e.g. "dvtp/gbo/lib" maps to
-// `package dvtp.authz`).
+// rule body. Path is the policy package-path (e.g. "gbo/lib" maps to
+// `package gbo.lib`).
 func handlePolicySnippet(cfg config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		corsHeaders(w)
@@ -996,13 +996,13 @@ func handlePolicyChain(cfg config) http.HandlerFunc {
 		// Find the evaluation library; that's where the cascade lives.
 		var raw string
 		for _, p := range policies {
-			if strings.Contains(p.Raw, "package dvtp.gbo.lib") {
+			if strings.Contains(p.Raw, "package gbo.lib") {
 				raw = p.Raw
 				break
 			}
 		}
 		if raw == "" {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "dvtp.gbo.lib policy not found on disk"})
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "gbo.lib policy not found on disk"})
 			return
 		}
 		matches := chainRE.FindAllStringSubmatch(raw, -1)

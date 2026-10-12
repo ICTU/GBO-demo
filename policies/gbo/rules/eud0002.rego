@@ -1,4 +1,4 @@
-package dvtp.gbo.rules.eud0002
+package gbo.rules.eud0002
 
 # EUD0002 — Akte van overlijden for an EUDI wallet attestation.
 #
