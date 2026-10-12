@@ -1,4 +1,4 @@
-package main
+package httpapi
 
 // Cases of slice 2 (#503) for the authorization server of ETSI TS 119 478
 // clause 6.1.3. The numbers refer to the case table of #503; case 24
@@ -14,13 +14,15 @@ import (
 
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
+
+	"gbo-demo/asi-authorization-server/internal/authorization"
 )
 
 // --- case 23: metadata -----------------------------------------------------------
 
 func TestMetadata(t *testing.T) { // case 23
 	as := newTestAS(t)
-	resp, err := http.Get(as.srv.URL + metadataPath)
+	resp, err := http.Get(as.srv.URL + authorization.MetadataPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,9 +33,9 @@ func TestMetadata(t *testing.T) { // case 23
 	}
 	for field, want := range map[string]any{
 		"issuer":                                as.srv.URL,
-		"authorization_endpoint":                as.srv.URL + authorizePath,
-		"token_endpoint":                        as.srv.URL + tokenPath,
-		"jwks_uri":                              as.srv.URL + jwksPath,
+		"authorization_endpoint":                as.srv.URL + authorization.AuthorizePath,
+		"token_endpoint":                        as.srv.URL + authorization.TokenPath,
+		"jwks_uri":                              as.srv.URL + authorization.JWKSPath,
 		"code_challenge_methods_supported":      []any{"S256"},
 		"token_endpoint_auth_methods_supported": []any{"private_key_jwt"},
 		"dpop_signing_alg_values_supported":     []any{"ES256"},
@@ -74,11 +76,11 @@ func TestFullFlowIssuesDPoPBoundAccessToken(t *testing.T) { // case 24
 		t.Fatalf("header = %+v, want typ at+jwt, alg ES256 and a kid", header)
 	}
 	for field, want := range map[string]any{
-		"iss":       as.srv.URL,
-		"aud":       testResource,
-		"client_id": testClientID,
-		"scope":     "verify",
-		bsnClaim:    bsnFrouke,
+		"iss":                  as.srv.URL,
+		"aud":                  testResource,
+		"client_id":            testClientID,
+		"scope":                "verify",
+		authorization.BSNClaim: bsnFrouke,
 	} {
 		if claims[field] != want {
 			t.Errorf("%s = %v, want %v", field, claims[field], want)
@@ -208,7 +210,7 @@ func TestCodeIsSingleUseShortLivedAndBoundToTheClient(t *testing.T) { // case 32
 		as := newTestAS(t)
 		p := newPKCE()
 		code := as.code(t, authorizeParams(p))
-		as.offset = authorizationCodeLifetime + time.Second
+		as.offset = authorization.AuthorizationCodeLifetime + time.Second
 		assertTokenError(t, as.postToken(t, as.tokenForm(t, code, p), as.proof(t, nil)), http.StatusBadRequest, "invalid_grant")
 	})
 	t.Run("redeemed by another client", func(t *testing.T) {
@@ -262,7 +264,7 @@ func TestClientAuthenticationIsPrivateKeyJWT(t *testing.T) { // case 33, 34
 		{"33d: client_secret_post", func(_ *testing.T, f url.Values, _ *http.Request) { f.Set("client_secret", "secret") }},
 		{"33e: another client_assertion_type", func(_ *testing.T, f url.Values, _ *http.Request) { f.Set("client_assertion_type", "urn:other") }},
 		{"34: signed with another key", func(t *testing.T, f url.Values, _ *http.Request) {
-			claims := map[string]any{"iss": testClientID, "sub": testClientID, "aud": as.srv.URL, "exp": as.now().Add(time.Minute).Unix(), "jti": randomID()}
+			claims := map[string]any{"iss": testClientID, "sub": testClientID, "aud": as.srv.URL, "exp": as.now().Add(time.Minute).Unix(), "jti": authorization.RandomID()}
 			f.Set("client_assertion", signJWT(t, newECKey(t), testClientID+"-key", "", claims, false))
 		}},
 		{"34b: aud is not the authorization server", func(t *testing.T, f url.Values, _ *http.Request) {
@@ -288,7 +290,7 @@ func TestClientAuthenticationIsPrivateKeyJWT(t *testing.T) { // case 33, 34
 		t.Run(tc.name, func(t *testing.T) {
 			p := newPKCE()
 			form := as.tokenForm(t, as.code(t, authorizeParams(p)), p)
-			req, _ := http.NewRequest(http.MethodPost, as.srv.URL+tokenPath, nil)
+			req, _ := http.NewRequest(http.MethodPost, as.srv.URL+authorization.TokenPath, nil)
 			tc.edit(t, form, req)
 			assertTokenError(t, as.sendForm(t, req, form, as.proof(t, nil)), http.StatusUnauthorized, "invalid_client")
 		})
@@ -314,7 +316,7 @@ func TestTokenEndpointAsAudienceIsAccepted(t *testing.T) {
 	as := newTestAS(t)
 	p := newPKCE()
 	form := as.tokenForm(t, as.code(t, authorizeParams(p)), p)
-	form.Set("client_assertion", as.assertion(t, testClientID, func(c map[string]any) { c["aud"] = as.srv.URL + tokenPath }))
+	form.Set("client_assertion", as.assertion(t, testClientID, func(c map[string]any) { c["aud"] = as.srv.URL + authorization.TokenPath }))
 	if r := as.postToken(t, form, as.proof(t, nil)); r.status != http.StatusOK {
 		t.Fatalf("token response = %d %v, want 200", r.status, r.body)
 	}
@@ -327,7 +329,7 @@ func TestTokenRequestNeedsAValidDPoPProof(t *testing.T) { // case 35
 	for name, proofs := range map[string]func(t *testing.T) []string{
 		"no proof": func(*testing.T) []string { return nil },
 		"proof for another URL": func(t *testing.T) []string {
-			return []string{as.proof(t, func(c map[string]any) { c["htu"] = as.srv.URL + authorizePath })}
+			return []string{as.proof(t, func(c map[string]any) { c["htu"] = as.srv.URL + authorization.AuthorizePath })}
 		},
 		"proof for another method": func(t *testing.T) []string {
 			return []string{as.proof(t, func(c map[string]any) { c["htm"] = http.MethodGet })}
@@ -339,10 +341,10 @@ func TestTokenRequestNeedsAValidDPoPProof(t *testing.T) { // case 35
 			return []string{as.proof(t, func(c map[string]any) { delete(c, "jti") })}
 		},
 		"proof typ is not dpop+jwt": func(t *testing.T) []string {
-			return []string{signJWT(t, as.dpopKey, "", "JWT", map[string]any{"jti": randomID(), "htm": "POST", "htu": as.srv.URL + tokenPath, "iat": as.now().Unix()}, true)}
+			return []string{signJWT(t, as.dpopKey, "", "JWT", map[string]any{"jti": authorization.RandomID(), "htm": "POST", "htu": as.srv.URL + authorization.TokenPath, "iat": as.now().Unix()}, true)}
 		},
 		"proof without jwk": func(t *testing.T) []string {
-			return []string{signJWT(t, as.dpopKey, "", "dpop+jwt", map[string]any{"jti": randomID(), "htm": "POST", "htu": as.srv.URL + tokenPath, "iat": as.now().Unix()}, false)}
+			return []string{signJWT(t, as.dpopKey, "", "dpop+jwt", map[string]any{"jti": authorization.RandomID(), "htm": "POST", "htu": as.srv.URL + authorization.TokenPath, "iat": as.now().Unix()}, false)}
 		},
 		"two proofs": func(t *testing.T) []string { return []string{as.proof(t, nil), as.proof(t, nil)} },
 	} {
@@ -369,7 +371,7 @@ func TestTokenRequestNeedsAValidDPoPProof(t *testing.T) { // case 35
 // basic authentication) and the DPoP proofs given.
 func (as *testAS) sendForm(t *testing.T, req *http.Request, form url.Values, proofs ...string) tokenResponse {
 	t.Helper()
-	r, _ := http.NewRequest(http.MethodPost, as.srv.URL+tokenPath, strings.NewReader(form.Encode()))
+	r, _ := http.NewRequest(http.MethodPost, as.srv.URL+authorization.TokenPath, strings.NewReader(form.Encode()))
 	for k, v := range req.Header {
 		r.Header[k] = v
 	}
@@ -382,7 +384,7 @@ func (as *testAS) sendForm(t *testing.T, req *http.Request, form url.Values, pro
 
 func fetchJWKS(t *testing.T, as *testAS) jose.JSONWebKeySet {
 	t.Helper()
-	resp, err := http.Get(as.srv.URL + jwksPath)
+	resp, err := http.Get(as.srv.URL + authorization.JWKSPath)
 	if err != nil {
 		t.Fatal(err)
 	}

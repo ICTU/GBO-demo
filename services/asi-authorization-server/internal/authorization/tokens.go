@@ -1,4 +1,4 @@
-package main
+package authorization
 
 import (
 	"crypto"
@@ -16,20 +16,22 @@ import (
 // to the client's DPoP key (cnf.jkt), and carry the identification data of
 // the user. Until slice 9 of #336 that is the BSN in plain text (D3).
 
-const accessTokenLifetime = 10 * time.Minute
+// AccessTokenLifetime is the lifetime of an access token.
+const AccessTokenLifetime = 10 * time.Minute
 
-// bsnClaim is a collision-resistant claim name (RFC 9068 section 2.2.2): the
+// BSNClaim is a collision-resistant claim name (RFC 9068 section 2.2.2): the
 // BSN has no entry in the IANA JWT registry. The namespace is provisional,
 // like the attribute identifiers (D8).
-const bsnClaim = "https://gbo.example/claims/bsn"
+const BSNClaim = "https://gbo.example/claims/bsn"
 
-type tokenIssuer struct {
+// TokenIssuer signs access tokens.
+type TokenIssuer struct {
 	issuer string
 	signer jose.Signer
 	jwks   jose.JSONWebKeySet
 }
 
-func newTokenIssuer(issuer string, key *ecdsa.PrivateKey) (*tokenIssuer, error) {
+func NewTokenIssuer(issuer string, key *ecdsa.PrivateKey) (*TokenIssuer, error) {
 	pub := jose.JSONWebKey{Key: &key.PublicKey, Algorithm: string(jose.ES256), Use: "sig"}
 	thumbprint, err := pub.Thumbprint(crypto.SHA256)
 	if err != nil {
@@ -41,23 +43,23 @@ func newTokenIssuer(issuer string, key *ecdsa.PrivateKey) (*tokenIssuer, error) 
 	if err != nil {
 		return nil, err
 	}
-	return &tokenIssuer{issuer: issuer, signer: signer, jwks: jose.JSONWebKeySet{Keys: []jose.JSONWebKey{pub}}}, nil
+	return &TokenIssuer{issuer: issuer, signer: signer, jwks: jose.JSONWebKeySet{Keys: []jose.JSONWebKey{pub}}}, nil
 }
 
 // issue returns an access token. sub is an opaque identifier per token (D3),
 // so two tokens for the same user cannot be linked through it.
-func (ti *tokenIssuer) issue(clientID, audience, scope, bsn, jkt string, now time.Time) (string, error) {
+func (ti *TokenIssuer) issue(clientID, audience, scope, bsn, jkt string, now time.Time) (string, error) {
 	claims := map[string]any{
 		"iss":       ti.issuer,
-		"sub":       randomID(),
+		"sub":       RandomID(),
 		"aud":       audience,
 		"client_id": clientID,
 		"iat":       now.Unix(),
-		"exp":       now.Add(accessTokenLifetime).Unix(),
-		"jti":       randomID(),
+		"exp":       now.Add(AccessTokenLifetime).Unix(),
+		"jti":       RandomID(),
 		"scope":     scope,
 		"cnf":       map[string]string{"jkt": jkt},
-		bsnClaim:    bsn,
+		BSNClaim:    bsn,
 	}
 	token, err := jwt.Signed(ti.signer).Claims(claims).Serialize()
 	if err != nil {
@@ -66,8 +68,8 @@ func (ti *tokenIssuer) issue(clientID, audience, scope, bsn, jkt string, now tim
 	return token, nil
 }
 
-// randomID returns 128 random bits, base64url-encoded.
-func randomID() string {
+// RandomID returns 128 random bits, base64url-encoded.
+func RandomID() string {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
 	return base64.RawURLEncoding.EncodeToString(b)

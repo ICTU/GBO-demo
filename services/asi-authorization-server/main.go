@@ -8,30 +8,43 @@
 //
 // User identification is a stub: login_hint names a test person. It is not
 // conformant identity proofing; slice 3 of #336 replaces it.
+//
+// This file is the composition root: configuration, construction, lifecycle.
 package main
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
-	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
-	"slices"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
-	"github.com/go-jose/go-jose/v4"
+	"gbo-demo/asi-authorization-server/internal/authorization"
+	"gbo-demo/asi-authorization-server/internal/clientconfig"
+	"gbo-demo/asi-authorization-server/internal/httpapi"
+	"gbo-demo/asi-authorization-server/internal/testpersons"
+)
+
+const (
+	readHeaderTimeout = 10 * time.Second
+	shutdownTimeout   = 15 * time.Second
 )
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", "asi-authorization-server"))
 	if err := serve(); err != nil {
-		log.Fatal(err)
+		slog.Error("serving asi-authorization-server", "err", err)
+		os.Exit(1)
 	}
 }
 
@@ -41,29 +54,48 @@ func serve() error {
 	if err != nil {
 		return err
 	}
-	tokens, err := newTokenIssuer(issuer, key)
+	tokens, err := authorization.NewTokenIssuer(issuer, key)
 	if err != nil {
 		return err
 	}
-	clients, err := loadClients(os.Getenv("AZSP_CLIENTS_FILE"))
+	clients, err := clientconfig.Load(os.Getenv("AZSP_CLIENTS_FILE"))
 	if err != nil {
 		return err
 	}
-	persons, err := loadTestPersons(env("AZSP_TEST_PERSONS_FILE", "testdata/test-persons.json"))
+	persons, err := testpersons.Load(env("AZSP_TEST_PERSONS_FILE", "testdata/test-persons.json"))
 	if err != nil {
 		return err
 	}
-	handler := newServer(serverConfig{
+	service := authorization.NewService(authorization.Config{
 		Issuer:     issuer,
 		Resource:   strings.TrimRight(env("AZSP_RESOURCE", "http://localhost:4020/authsrc-api"), "/"),
 		Clients:    clients,
 		Identifier: persons,
 		Tokens:     tokens,
 	})
-	addr := env("AZSP_ADDR", ":4021")
-	log.Printf("asi-authorization-server listening on %s (issuer %s, %d clients); user identification is a stub (login_hint names a test person): not conformant", addr, issuer, len(clients))
-	srv := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
-	return srv.ListenAndServe()
+	srv := &http.Server{Addr: env("AZSP_ADDR", ":4021"), Handler: httpapi.NewHandler(service), ReadHeaderTimeout: readHeaderTimeout}
+	errc := make(chan error, 1)
+	go func() {
+		slog.Info("listening", "addr", srv.Addr, "issuer", issuer, "clients", clients.Len(),
+			"identification", "stub: login_hint names a test person, not conformant")
+		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+			errc <- err
+		}
+	}()
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	select {
+	case err := <-errc:
+		return err
+	case <-ctx.Done():
+	}
+	drainCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	if err := srv.Shutdown(drainCtx); err != nil {
+		slog.Warn("graceful shutdown did not finish", "err", err)
+	}
+	return nil
 }
 
 func env(name, fallback string) string {
@@ -78,7 +110,7 @@ func env(name, fallback string) string {
 // acceptable for tokens that live ten minutes.
 func loadSigningKey(path string) (*ecdsa.PrivateKey, error) {
 	if path == "" {
-		log.Printf("AZSP_SIGNING_KEY_FILE not set: using an ephemeral signing key")
+		slog.Warn("AZSP_SIGNING_KEY_FILE not set: using an ephemeral signing key")
 		return ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	}
 	raw, err := os.ReadFile(path)
@@ -98,47 +130,4 @@ func loadSigningKey(path string) (*ecdsa.PrivateKey, error) {
 		return nil, errors.New("signing key must be an ECDSA P-256 key")
 	}
 	return key, nil
-}
-
-// loadClients reads the registered clients. Without a file there are none;
-// dynamic client registration follows in the second pull request of slice 2.
-func loadClients(path string) (map[string]*client, error) {
-	clients := map[string]*client{}
-	if path == "" {
-		return clients, nil
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read clients: %w", err)
-	}
-	var doc struct {
-		Clients []struct {
-			ClientID     string             `json:"client_id"`
-			RedirectURIs []string           `json:"redirect_uris"`
-			Scope        string             `json:"scope"`
-			JWKS         jose.JSONWebKeySet `json:"jwks"`
-		} `json:"clients"`
-	}
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		return nil, fmt.Errorf("parse clients: %w", err)
-	}
-	for _, c := range doc.Clients {
-		if c.ClientID == "" || len(c.RedirectURIs) == 0 || len(c.JWKS.Keys) == 0 {
-			return nil, fmt.Errorf("client %q: client_id, redirect_uris and jwks are required", c.ClientID)
-		}
-		for _, k := range c.JWKS.Keys {
-			if !k.IsPublic() {
-				return nil, fmt.Errorf("client %q: jwks must contain public keys only", c.ClientID)
-			}
-		}
-		scopes := map[string]bool{}
-		for _, sc := range strings.Fields(c.Scope) {
-			if !slices.Contains(operationScopes, sc) {
-				return nil, fmt.Errorf("client %q: scope %q is not verify or retrieve", c.ClientID, sc)
-			}
-			scopes[sc] = true
-		}
-		clients[c.ClientID] = &client{ID: c.ClientID, RedirectURIs: c.RedirectURIs, Scopes: scopes, Keys: c.JWKS}
-	}
-	return clients, nil
 }

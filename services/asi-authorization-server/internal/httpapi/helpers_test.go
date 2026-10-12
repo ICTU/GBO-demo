@@ -1,4 +1,4 @@
-package main
+package httpapi
 
 import (
 	"crypto"
@@ -18,6 +18,10 @@ import (
 
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
+
+	"gbo-demo/asi-authorization-server/internal/authorization"
+	"gbo-demo/asi-authorization-server/internal/clientconfig"
+	"gbo-demo/asi-authorization-server/internal/testpersons"
 )
 
 const (
@@ -56,29 +60,29 @@ func newTestASFor(t *testing.T, resource string) *testAS {
 	var handler http.Handler
 	as.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { handler.ServeHTTP(w, r) }))
 	t.Cleanup(as.srv.Close)
-	tokens, err := newTokenIssuer(as.srv.URL, newECKey(t))
+	tokens, err := authorization.NewTokenIssuer(as.srv.URL, newECKey(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	clients := map[string]*client{}
+	var clients []*authorization.Client
 	for id, scopes := range map[string][]string{testClientID: {"verify", "retrieve"}, otherClientID: {"verify", "retrieve"}, verifyOnlyID: {"verify"}} {
 		key := newECKey(t)
 		as.keys[id] = key
-		c := &client{ID: id, RedirectURIs: []string{testRedirectURI}, Scopes: map[string]bool{},
+		c := &authorization.Client{ID: id, RedirectURIs: []string{testRedirectURI}, Scopes: map[string]bool{},
 			Keys: jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: &key.PublicKey, KeyID: id + "-key", Algorithm: "ES256", Use: "sig"}}}}
 		for _, sc := range scopes {
 			c.Scopes[sc] = true
 		}
-		clients[id] = c
+		clients = append(clients, c)
 	}
-	handler = newServer(serverConfig{
+	handler = NewHandler(authorization.NewService(authorization.Config{
 		Issuer:     as.srv.URL,
 		Resource:   resource,
-		Clients:    clients,
-		Identifier: stubIdentifier{persons: map[string]string{"frouke": bsnFrouke, "tom": "555555555"}},
+		Clients:    clientconfig.New(clients...),
+		Identifier: testpersons.New(map[string]string{"frouke": bsnFrouke, "tom": "555555555"}),
 		Tokens:     tokens,
 		Now:        as.now,
-	})
+	}))
 	return as
 }
 
@@ -113,7 +117,7 @@ func authorizeParams(p pkce) url.Values {
 func (as *testAS) authorize(t *testing.T, params url.Values) *http.Response {
 	t.Helper()
 	c := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	resp, err := c.Get(as.srv.URL + authorizePath + "?" + params.Encode())
+	resp, err := c.Get(as.srv.URL + authorization.AuthorizePath + "?" + params.Encode())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +173,7 @@ func (as *testAS) assertion(t *testing.T, clientID string, edit func(map[string]
 		"aud": as.srv.URL,
 		"iat": now.Unix(),
 		"exp": now.Add(time.Minute).Unix(),
-		"jti": randomID(),
+		"jti": authorization.RandomID(),
 	}
 	if edit != nil {
 		edit(claims)
@@ -180,7 +184,7 @@ func (as *testAS) assertion(t *testing.T, clientID string, edit func(map[string]
 // proof is a DPoP proof for the token endpoint; edit may change its claims.
 func (as *testAS) proof(t *testing.T, edit func(map[string]any)) string {
 	t.Helper()
-	claims := map[string]any{"jti": randomID(), "htm": http.MethodPost, "htu": as.srv.URL + tokenPath, "iat": as.now().Unix()}
+	claims := map[string]any{"jti": authorization.RandomID(), "htm": http.MethodPost, "htu": as.srv.URL + authorization.TokenPath, "iat": as.now().Unix()}
 	if edit != nil {
 		edit(claims)
 	}
@@ -193,7 +197,7 @@ func (as *testAS) tokenForm(t *testing.T, code string, p pkce) url.Values {
 		"code":                  {code},
 		"redirect_uri":          {testRedirectURI},
 		"code_verifier":         {p.verifier},
-		"client_assertion_type": {clientAssertionType},
+		"client_assertion_type": {authorization.ClientAssertionType},
 		"client_assertion":      {as.assertion(t, testClientID, nil)},
 	}
 }
@@ -207,7 +211,7 @@ type tokenResponse struct {
 // postToken sends a token request with the DPoP proofs given.
 func (as *testAS) postToken(t *testing.T, form url.Values, proofs ...string) tokenResponse {
 	t.Helper()
-	req, _ := http.NewRequest(http.MethodPost, as.srv.URL+tokenPath, strings.NewReader(form.Encode()))
+	req, _ := http.NewRequest(http.MethodPost, as.srv.URL+authorization.TokenPath, strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	for _, p := range proofs {
 		req.Header.Add("DPoP", p)

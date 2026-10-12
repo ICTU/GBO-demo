@@ -1,4 +1,4 @@
-package main
+package clientconfig
 
 import (
 	"crypto/ecdsa"
@@ -30,18 +30,21 @@ func TestLoadClients(t *testing.T) {
 		}
 		return c
 	}
-	load := func(t *testing.T, c map[string]any) (map[string]*client, error) {
+	load := func(t *testing.T, c map[string]any) (*Registry, error) {
 		t.Helper()
 		raw, _ := json.Marshal(map[string]any{"clients": []any{c}})
 		path := filepath.Join(t.TempDir(), "clients.json")
 		if err := os.WriteFile(path, raw, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		return loadClients(path)
+		return Load(path)
 	}
 	clients, err := load(t, clientDoc(nil))
-	if err != nil || clients["qtsp"] == nil || !clients["qtsp"].Scopes["verify"] || !clients["qtsp"].Scopes["retrieve"] {
-		t.Fatalf("clients = %v, %v; want the client with verify and retrieve", clients, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c, ok := clients.Client("qtsp"); !ok || !c.Scopes["verify"] || !c.Scopes["retrieve"] {
+		t.Fatalf("client = %+v, want the client with verify and retrieve", c)
 	}
 	for name, edit := range map[string]func(map[string]any){
 		"no client_id":                 func(c map[string]any) { delete(c, "client_id") },

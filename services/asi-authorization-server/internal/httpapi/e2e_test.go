@@ -1,4 +1,4 @@
-package main
+package httpapi
 
 // Case 24 through /verify and case 37 of #503: the whole flow across both
 // services. The test builds services/asi-provider and starts it as a process;
@@ -25,13 +25,15 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"gbo-demo/asi-authorization-server/internal/authorization"
 )
 
 func TestEndToEndVerify(t *testing.T) { // case 24 (through /verify), case 37
 	if testing.Short() {
 		t.Skip("builds and starts services/asi-provider")
 	}
-	asipDir := filepath.Join("..", "asi-provider")
+	asipDir := filepath.Join("..", "..", "..", "asi-provider")
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "asi-provider")
 	build := exec.Command("go", "build", "-o", bin, ".")
@@ -114,7 +116,7 @@ func (as *testAS) callASIP(t *testing.T, endpoint, token, body string) asipRespo
 	t.Helper()
 	digest := sha256.Sum256([]byte(token))
 	proof := signJWT(t, as.dpopKey, "", "dpop+jwt", map[string]any{
-		"jti": randomID(), "htm": http.MethodPost, "htu": endpoint, "iat": time.Now().Unix(),
+		"jti": authorization.RandomID(), "htm": http.MethodPost, "htu": endpoint, "iat": time.Now().Unix(),
 		"ath": base64.RawURLEncoding.EncodeToString(digest[:]),
 	}, true)
 	req, _ := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(body))
