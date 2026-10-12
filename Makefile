@@ -89,6 +89,12 @@ policy-check:
 	  echo "$$stray" >&2; \
 	  exit 1; \
 	fi
+	@dupes=$$(find policies -name '*.rego' -exec basename {} \; | sort | uniq -d); \
+	if [ -n "$$dupes" ]; then \
+	  echo "Rego file names used twice under policies/ (OpenFTV keys policies by file name):" >&2; \
+	  echo "$$dupes" >&2; \
+	  exit 1; \
+	fi
 	@$(OPA) check policies
 	@echo "-> policies/ compiles"
 

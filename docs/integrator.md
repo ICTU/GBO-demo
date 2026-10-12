@@ -83,7 +83,7 @@ twee rollen apart:
 
 Een delegator die gelijk is aan de verbindende peer telt als directe aanroep.
 De EUDI-regels blijven de verbindende peer controleren tegen de aangewezen
-uitgevers (`designated_issuers` in `rules/eudi/helper.rego`). Weglaten van het
+uitgevers (`designated_issuers` in `rules/eudi/eudi_helper.rego`). Weglaten van het
 consent-token helpt een integrator dus niet: dan valt hij onder het
 PID-regime en daar staat hij niet tussen de aangewezen uitgevers.
 
