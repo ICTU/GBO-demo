@@ -87,6 +87,22 @@ test_deny_fsc_actor_does_not_match_signed_recipient if {
 	_reasons(req, _consent) == {"CONSENT_ACTOR_MISMATCH"}
 }
 
+# ── Only the income question ────────────────────────────────────────────
+
+# A consent for the ownership question, sent with its own scope, passes the
+# consent checks; only the scope pin stops it on income fields.
+test_deny_a_consent_for_another_question if {
+	req := fx.request(fx.hv, "bri", [fx.person("consent:identity")], fx.scope_headers("lvg:vbo:eigendom"))
+	_reasons(req, _with_consent({"granted_scopes": ["lvg:vbo:eigendom"]})) == {"SCOPE_NOT_ALLOWED"}
+}
+
+test_deny_a_scope_that_names_no_belastingjaar if {
+	every scope in ["bd:ib:", "bd:ib:20x5"] {
+		req := fx.request(fx.hv, "bri", [fx.person("consent:identity")], fx.scope_headers(scope))
+		_reasons(req, _with_consent({"granted_scopes": [scope]})) == {"SCOPE_NOT_ALLOWED"}
+	}
+}
+
 # ── Delegated calls: the consent binds the represented provider ─────────
 
 _integrator := "99999999900000001100"
