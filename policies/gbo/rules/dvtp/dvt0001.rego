@@ -12,12 +12,15 @@ import data.gbo.rules.dvtp.helper
 
 rule_id := "DVT0001"
 
+# Bound only when a consent token comes along; without one the EUDI rules
+# judge the request. This decides whose reasons are reported, not access:
+# without a verified token the consent checks below deny anyway.
 regime := "consent"
 
 # Bedrag's scalars (waarde, valuta) are covered through their type. The
 # declaration types are listed field by field instead, so box2Inkomen and
-# box3Inkomen stay uncovered here; under consent EUD0001 denies them with
-# PID_NOT_PRESENT.
+# box3Inkomen stay uncovered here; under consent no rule covers them, and
+# they are denied with NO_APPLICABLE_RULE.
 covers_types := {"Bedrag"}
 
 # Anything not listed is denied by the engine's closed world. Interface fields
