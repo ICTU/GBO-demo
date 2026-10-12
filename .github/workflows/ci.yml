@@ -21,6 +21,7 @@ jobs:
       fail-fast: false
       matrix:
         service:
+          - asi-authorization-server
           - asi-provider
           - bron-sidecar
           - brp-graphql-server
@@ -253,6 +254,7 @@ jobs:
       fail-fast: false
       matrix:
         service:
+          - asi-authorization-server
           - asi-provider
           - dev-portal-backend
           - dvtp-onboarding-register
