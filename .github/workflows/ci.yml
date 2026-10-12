@@ -102,6 +102,18 @@ jobs:
             echo "$stray" >&2
             exit 1
           fi
+      # The PAP also keys each policy by its file name, not its path: a
+      # second file with the same name replaces the first, and the package
+      # it declared is gone. Every decision then fails ("compiler has
+      # errors"), while opa test, which loads by path, stays green.
+      - name: policies/ uses each file name once
+        run: |
+          dupes=$(find policies -name '*.rego' -exec basename {} \; | sort | uniq -d)
+          if [ -n "$dupes" ]; then
+            echo "Rego file names used twice under policies/ (OpenFTV keys policies by file name):" >&2
+            echo "$dupes" >&2
+            exit 1
+          fi
       - name: opa fmt --diff
         run: |
           docker run --rm -v $(pwd)/policies:/w -w /w \

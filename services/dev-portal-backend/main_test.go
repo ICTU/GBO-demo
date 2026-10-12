@@ -624,10 +624,10 @@ func writeRuleFixture(t *testing.T) config {
 	root := t.TempDir()
 	policiesDir := filepath.Join(root, "policies")
 	files := map[string]string{
-		"gbo/engine.rego":             "package gbo\n\n_order := [\"CONSENT_WITHDRAWN\", \"HELPER_ONLY\"]\n",
-		"gbo/rules/dvtp/dvt0001.rego": "package gbo.rules.dvtp.dvt0001\n\ndeny contains \"CONSENT_WITHDRAWN\" if not helper.consent_active\n",
-		"gbo/rules/dvtp/lvg0001.rego": "package gbo.rules.dvtp.lvg0001\n\nrule_id := \"LVG0001\"\n\ndeny contains \"CONSENT_WITHDRAWN\" if not helper.consent_active\n",
-		"gbo/rules/dvtp/helper.rego":  "package gbo.rules.dvtp.helper\n\nreason := \"HELPER_ONLY\"\n",
+		"gbo/engine.rego":                 "package gbo\n\n_order := [\"CONSENT_WITHDRAWN\", \"HELPER_ONLY\"]\n",
+		"gbo/rules/dvtp/dvt0001.rego":     "package gbo.rules.dvtp.dvt0001\n\ndeny contains \"CONSENT_WITHDRAWN\" if not helper.consent_active\n",
+		"gbo/rules/dvtp/lvg0001.rego":     "package gbo.rules.dvtp.lvg0001\n\nrule_id := \"LVG0001\"\n\ndeny contains \"CONSENT_WITHDRAWN\" if not helper.consent_active\n",
+		"gbo/rules/dvtp/dvtp_helper.rego": "package gbo.rules.dvtp.helper\n\nreason := \"HELPER_ONLY\"\n",
 	}
 	for name, content := range files {
 		path := filepath.Join(policiesDir, filepath.FromSlash(name))
@@ -680,8 +680,8 @@ func TestPolicySnippetShowsTheRefusingRulesOwnFile(t *testing.T) {
 func TestPolicySnippetFallsBackToTheRegimeHelper(t *testing.T) {
 	cfg := writeRuleFixture(t)
 	id, _ := snippetFor(t, cfg, "path=authz&code=HELPER_ONLY&rule=LVG0001")
-	if id != "gbo/rules/dvtp/helper.rego" {
-		t.Fatalf("snippet file = %s, want gbo/rules/dvtp/helper.rego", id)
+	if id != "gbo/rules/dvtp/dvtp_helper.rego" {
+		t.Fatalf("snippet file = %s, want gbo/rules/dvtp/dvtp_helper.rego", id)
 	}
 }
 
