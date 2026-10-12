@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -73,15 +74,21 @@ func TestPublishedContract(t *testing.T) {
 	if got := doc.Servers[0].URL; got != "http://localhost:4020"+basePath {
 		t.Errorf("server = %s", got)
 	}
-	if doc.Components.SecuritySchemes["bearerAuth"] == nil {
-		t.Errorf("contract has no bearer security scheme")
+	if s := doc.Components.SecuritySchemes["oauth2"]; s == nil || s.Value.Flows == nil || s.Value.Flows.AuthorizationCode == nil {
+		t.Errorf("contract has no oauth2 security scheme with the authorization code flow")
 	}
 	for _, path := range []string{"/verify", "/retrieve"} {
 		op := doc.Paths.Find(path).Post
 		if h := op.Responses.Status(http.StatusOK).Value.Headers["X-JWS-Signature"]; h == nil || !h.Value.Required {
 			t.Errorf("%s: 200 has no required X-JWS-Signature header", path)
 		}
-		for _, status := range []int{400, 401, 404, 501} {
+		if h := op.Responses.Status(http.StatusUnauthorized).Value.Headers["WWW-Authenticate"]; h == nil || !h.Value.Required {
+			t.Errorf("%s: 401 has no required WWW-Authenticate header", path)
+		}
+		if op.Security == nil || len(*op.Security) != 1 || len((*op.Security)[0]["oauth2"]) != 1 || (*op.Security)[0]["oauth2"][0] != strings.TrimPrefix(path, "/") {
+			t.Errorf("%s: security is not the oauth2 scope of the operation", path)
+		}
+		for _, status := range []int{400, 401, 404, 501, 503} {
 			resp := op.Responses.Status(status)
 			if resp == nil {
 				t.Errorf("%s: contract has no %d response", path, status)

@@ -2,9 +2,10 @@
 // after ETSI TS 119 478 V1.1.1 clause 6.1: a QTSP verifies whether an
 // attribute it holds matches the authentic source.
 //
-// Slice 1 covers the contract layer: /verify and /retrieve against an
-// in-memory source, every result sealed. The authorization server is a stub:
-// fixed test tokens identify test persons. It is not conformant.
+// /verify and /retrieve answer against an in-memory source, and every result
+// is sealed. Every request carries a DPoP-bound access token from the
+// authorization server (services/asi-authorization-server, clause 6.1.3);
+// the user's BSN comes from that token.
 //
 // Usage:
 //
@@ -46,16 +47,13 @@ func serve() error {
 	if err != nil {
 		return err
 	}
-	tokens, err := parseStubTokens(env("ASIP_STUB_TOKENS",
-		"test-token-frouke:999991772,test-token-joost:123456789,test-token-sanne:987654321,test-token-tom:555555555"))
-	if err != nil {
-		return err
-	}
+	issuer := strings.TrimRight(env("ASIP_AUTHORIZATION_SERVER", "http://localhost:4021"), "/")
+	publicURL := strings.TrimRight(env("ASIP_PUBLIC_URL", "http://localhost:4020"), "/")
 	handler, err := newServer(serverConfig{
 		Source:          source,
 		Catalogue:       defaultCatalogue(),
 		Sealer:          newSealer(key, chain),
-		Tokens:          tokens,
+		Tokens:          newTokenValidator(issuer, publicURL, newRemoteKeys(issuer)),
 		Provider:        provider{LegalName: env("ASIP_PROVIDER_NAME", "GBO demo ASIP")},
 		AuthenticSource: provider{LegalName: env("ASIP_AUTHENTIC_SOURCE_NAME", "Basisregistratie Personen (mock)")},
 	})
@@ -63,7 +61,7 @@ func serve() error {
 		return err
 	}
 	addr := env("ASIP_ADDR", ":4020")
-	log.Printf("asi-provider listening on %s (stub tokens: not a conformant authorization server)", addr)
+	log.Printf("asi-provider listening on %s (resource %s, authorization server %s)", addr, publicURL+basePath, issuer)
 	srv := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	return srv.ListenAndServe()
 }
@@ -73,19 +71,6 @@ func env(name, fallback string) string {
 		return v
 	}
 	return fallback
-}
-
-// parseStubTokens reads "token:bsn,token:bsn".
-func parseStubTokens(spec string) (map[string]string, error) {
-	tokens := map[string]string{}
-	for _, pair := range strings.Split(spec, ",") {
-		token, bsn, ok := strings.Cut(strings.TrimSpace(pair), ":")
-		if !ok || token == "" || bsn == "" {
-			return nil, fmt.Errorf("ASIP_STUB_TOKENS: %q is not token:bsn", pair)
-		}
-		tokens[token] = bsn
-	}
-	return tokens, nil
 }
 
 // loadSealMaterial reads the seal key and the certificate chain (leaf first)

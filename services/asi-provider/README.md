@@ -1,6 +1,6 @@
 # asi-provider — ASIP mock (ETSI TS 119 478)
 
-A mock Authentic Source Interface Provider. A qualified trust service provider (QTSP) asks whether an attribute value it holds for a person matches the authentic source, and gets one of `Match`, `NoMatch`, `MatchWithVariation` or `Unknown` back. Part of epic #336; this is slice 1 (#498).
+A mock Authentic Source Interface Provider. A qualified trust service provider (QTSP) asks whether an attribute value it holds for a person matches the authentic source, and gets one of `Match`, `NoMatch`, `MatchWithVariation` or `Unknown` back. Part of epic #336: slice 1 (#498) built the contract layer, slice 2 (#503) the authorization.
 
 ## What is real and what is not
 
@@ -9,7 +9,7 @@ A mock Authentic Source Interface Provider. A qualified trust service provider (
 | `POST /authsrc-api/verify` and `POST /authsrc-api/retrieve` (ETSI TS 119 478 V1.1.1 clause 6.1.1 and 6.1.2) | implemented against the contract below; the tests validate every response against it |
 | Sealed results | every successful response is sealed; the certificate is a **development** certificate, not a qualified one |
 | Authentic source | in-memory, `testdata/persons.json` (the persons of the BRP mock) |
-| Authorization server (clause 6.1.3) | **stub**: fixed test tokens identify test persons. Not conformant; slice 2 replaces it |
+| Authorization (clause 6.1.3) | every request needs a DPoP-bound access token from [`asi-authorization-server`](../asi-authorization-server); the BSN of the user comes from the token. User identification at the authorization server is still a stub |
 | Attribute identifiers | provisional (`https://gbo.example/attributes/<name>/1`); there is no Dutch catalogue of attributes yet |
 
 ## Run
@@ -22,25 +22,36 @@ ASIP_SEAL_CERT_FILE=../../.local/secrets/asi-provider/seal-cert.pem \
 go run .
 ```
 
-```bash
-curl -s -X POST localhost:4020/authsrc-api/verify \
-  -H 'Authorization: Bearer test-token-frouke' -H 'Content-Type: application/json' \
-  -d '{"attributes":[{"attributeIdentifier":"https://gbo.example/attributes/family_name/1","attributeValue":{"family_name":"Jansen"}}]}'
-```
+A request needs an access token from the authorization server, obtained through the authorization code flow; see [`asi-authorization-server`](../asi-authorization-server). There is no client to do that by hand yet (slice 6 of #336); the end-to-end test of the authorization server runs the whole flow against this service.
 
-Configuration: `ASIP_ADDR` (default `:4020`), `ASIP_SOURCE_FILE`, `ASIP_SEAL_KEY_FILE`, `ASIP_SEAL_CERT_FILE` (chain, leaf first), `ASIP_STUB_TOKENS` (`token:bsn,…`; defaults to `test-token-frouke`, `test-token-joost`, `test-token-sanne`, `test-token-tom`), `ASIP_PROVIDER_NAME`, `ASIP_AUTHENTIC_SOURCE_NAME`.
+Configuration: `ASIP_ADDR` (default `:4020`), `ASIP_PUBLIC_URL` (the scheme and host QTSPs use, default `http://localhost:4020`; the token audience is this URL plus `/authsrc-api`), `ASIP_AUTHORIZATION_SERVER` (the issuer, default `http://localhost:4021`), `ASIP_SOURCE_FILE`, `ASIP_SEAL_KEY_FILE`, `ASIP_SEAL_CERT_FILE` (chain, leaf first), `ASIP_PROVIDER_NAME`, `ASIP_AUTHENTIC_SOURCE_NAME`.
 
 ## The contract
 
 `GET /openapi.json` serves the contract: the OpenAPI of ETSI TS 119 478 Annex B, unchanged (`openapi/19478-authentic-source-interface-openapi.json`), with the completions in `openapi/completions.json` applied as a JSON Merge Patch (RFC 7386). The completions do not deviate from ETSI; they fill in what Annex B leaves open:
 
 - **Server**: `http://localhost:4020/authsrc-api` fills in the Annex B server template; `authsrc-api` is its default base path.
-- **Bearer token**: Annex B defines no security scheme; clause 6.1.3 requires an access token from the authorization server.
+- **OAuth 2.0**: Annex B defines no security scheme; clause 6.1.3 requires an access token from the authorization server. The contract describes the authorization code flow with the URLs of the authorization server and requires the scope of each operation (REQ-DIP-5.3.3-03-02-01 asks the OpenAPI to name the authorization server).
+- **`WWW-Authenticate`** on every 401: RFC 6750 section 3 and RFC 9068 section 4 require the challenge.
+- **503**: when the keys of the authorization server cannot be obtained, no token can be validated. That is not an error of the client's token, so the mock answers 503 rather than 401. Annex B lists no 503.
 - **`X-JWS-Signature`** on every 200: the seal the law requires (below).
 - **400 and 501 on `/retrieve`**: REQ-ASIP-6.1.2.2-06 lists them; Annex B lists only 200, 401 and 404.
 - **Problem details on 401, and on 404 of `/retrieve`**: Annex B describes no body there; this mock returns the same RFC 9457 problem as on its other errors.
 
-Every request is validated against the request schemas of the contract before anything else is looked at, so a malformed request gets 400 before an unknown attribute (404) or an unsupported mandate (501). An attribute identifier must be an absolute URI.
+The access token is checked first (401). Then the request is validated against the request schemas of the contract, so a malformed request gets 400 before an unsupported mandate (501) or an unknown attribute (404). An attribute identifier must be an absolute URI.
+
+## The access token
+
+Every request carries `Authorization: DPoP <token>` and a `DPoP` proof header. The ASIP validates, as RFC 9068 section 4 and RFC 9449 sections 4.3 and 7 require:
+
+- `typ` is `at+jwt`; the signature verifies with a key from the `jwks_uri` in the metadata of the authorization server (ES256, or RS256 as RFC 9068 section 2.1 requires); `iss` is the authorization server; `aud` is this ASIP; `exp` has not passed (30 seconds leeway);
+- the token is DPoP-bound (`cnf.jkt`) and carries the BSN (`https://gbo.example/claims/bsn`);
+- exactly one proof, `typ` `dpop+jwt`, signed with its public `jwk`, for this method and URL, for this token (`ath`), at most 60 seconds from now, used once, and its key is the key the token is bound to;
+- the scope contains the operation: `verify` for `/verify`, `retrieve` for `/retrieve`.
+
+Every failure is 401 with a `WWW-Authenticate: DPoP` challenge and a problem body: `invalid_token`, `invalid_request` (no proof), `invalid_dpop_proof`, or `insufficient_scope`. ETSI TS 119 478 lists 401 for "an authentication or authorization error"; RFC 6750 would use 403 for `insufficient_scope`.
+
+A token without the BSN claim is `invalid_token`. A BSN the source does not know yields `Unknown`. When the ASIP cannot obtain the keys of the authorization server and holds none from before, it answers 503.
 
 `GET /19478-dataservice-schema.json` serves the schema the contract references.
 
