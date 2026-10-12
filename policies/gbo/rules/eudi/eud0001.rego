@@ -39,7 +39,7 @@ covers_fields := {
 }
 
 # Checked against the year filter in the query itself; no scope involved.
-allowed_years := {"2024", "2025"}
+allowed_years := {2024, 2025}
 
 # ── The caller ───────────────────────────────────────────────────────────────
 
@@ -60,7 +60,7 @@ deny_field[i] contains "PID_NOT_PRESENT" if {
 deny_field[i] contains "YEAR_NOT_ALLOWED" if {
 	some i, f in lib.fields
 	lib.key(f) == "IngeschrevenPersoon.heeftBelastingjaarAangifte"
-	some year in lib.requested_years(f, "belastingjaren")
+	some year in lib.argument_values(f, "belastingjaren")
 	not year in allowed_years
 }
 
@@ -68,5 +68,5 @@ deny_field[i] contains "YEAR_NOT_ALLOWED" if {
 deny_field[i] contains "YEAR_NOT_ALLOWED" if {
 	some i, f in lib.fields
 	lib.key(f) == "IngeschrevenPersoon.heeftBelastingjaarAangifte"
-	count(lib.requested_years(f, "belastingjaren")) == 0
+	count(lib.argument_values(f, "belastingjaren")) == 0
 }
