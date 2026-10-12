@@ -12,6 +12,9 @@ import data.gbo.rules.dvtp.helper
 
 rule_id := "LVG0001"
 
+# Bound only when a consent token comes along; without one the EUDI rules
+# judge the request. This decides whose reasons are reported, not access:
+# without a verified token the consent checks below deny anyway.
 regime := "consent"
 
 covers_types := set()

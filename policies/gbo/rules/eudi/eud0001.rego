@@ -15,6 +15,9 @@ import data.gbo.rules.eudi.helper
 
 rule_id := "EUD0001"
 
+# Bound only without a consent token; with one the consent rules judge the
+# request. This decides whose reasons are reported, not access: with a
+# token, PID_NOT_PRESENT below denies anyway.
 regime := "pid"
 
 # DVT0001's fields plus box 2 and box 3.

@@ -19,21 +19,33 @@ import data.gbo.rules.eudi.helper
 
 rule_id := "EUD0002"
 
+# Bound only without a consent token; with one the consent rules judge the
+# request. This decides whose reasons are reported, not access: with a
+# token, PID_NOT_PRESENT below denies anyway.
 regime := "pid"
 
 # No shared value object here. Every field is listed, so other BRP fields
 # (woontOp, heeftNationaliteit, gezag) fall to the engine's closed world.
 covers_types := set()
 
-covers_fields := {"Query.akteVanOverlijden"} | {
-sprintf("AkteVanOverlijden.%s", [field]) |
-	some field in {
-		"overledene_geslachtsnaam", "overledene_voorvoegsel", "overledene_voornamen",
-		"overledene_geboortedatum", "overledene_geboorteplaats", "overledene_geboorteland",
-		"overledene_geslacht", "overledene_ouders", "datum_overlijden", "plaats_overlijden",
-		"land_overlijden", "soort_verbintenis", "echtgenoot_geslachtsnaam",
-		"echtgenoot_voorvoegsel", "echtgenoot_voornamen", "verklaring_tekst",
-	}
+covers_fields := {
+	"Query.akteVanOverlijden",
+	"AkteVanOverlijden.overledene_geslachtsnaam",
+	"AkteVanOverlijden.overledene_voorvoegsel",
+	"AkteVanOverlijden.overledene_voornamen",
+	"AkteVanOverlijden.overledene_geboortedatum",
+	"AkteVanOverlijden.overledene_geboorteplaats",
+	"AkteVanOverlijden.overledene_geboorteland",
+	"AkteVanOverlijden.overledene_geslacht",
+	"AkteVanOverlijden.overledene_ouders",
+	"AkteVanOverlijden.datum_overlijden",
+	"AkteVanOverlijden.plaats_overlijden",
+	"AkteVanOverlijden.land_overlijden",
+	"AkteVanOverlijden.soort_verbintenis",
+	"AkteVanOverlijden.echtgenoot_geslachtsnaam",
+	"AkteVanOverlijden.echtgenoot_voorvoegsel",
+	"AkteVanOverlijden.echtgenoot_voornamen",
+	"AkteVanOverlijden.verklaring_tekst",
 }
 
 # ── The caller ───────────────────────────────────────────────────────────────
