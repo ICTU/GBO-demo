@@ -107,28 +107,26 @@ export async function fetchPolicySource(id: string): Promise<{ id: string; raw: 
 
 export type PolicySnippet = { id: string; line: number; raw: string }
 
-export async function fetchPolicySnippet(path: string, code: string): Promise<PolicySnippet | null> {
-  const res = await fetch(`${BASE}/policy-snippet?path=${encodeURIComponent(path)}&code=${encodeURIComponent(code)}`)
+// With rule, the snippet comes from the file of the rule that refused: the
+// same code appears in several rules.
+export async function fetchPolicySnippet(path: string, code: string, rule?: string): Promise<PolicySnippet | null> {
+  const ruleParam = rule ? `&rule=${encodeURIComponent(rule)}` : ''
+  const res = await fetch(`${BASE}/policy-snippet?path=${encodeURIComponent(path)}&code=${encodeURIComponent(code)}${ruleParam}`)
   if (res.status === 404) return null
   if (!res.ok) throw new Error(`fetchPolicySnippet failed: ${res.status}`)
   return res.json()
 }
 
-// Rule-metadata as emitted by RFC0052-versie-GBO self-contained rules. The
-// dev-portal-backend /rules endpoint flattens the rules map to a list,
-// dropping the package-leaf key (each rule carries its own rule_id).
+// A rule as the dev-portal-backend /rules endpoint lists it: its metadata
+// from rules.json and its Rego source, which says what it checks.
 export type RuleMeta = {
   rule_id: string
+  regime?: string
+  package?: string
   covers_types?: string[]
   covers_fields?: string[]
-  spec: {
-    rule_id: string
-    consent_required?: boolean
-    consent_must_cover_scope?: boolean
-    consent_must_cover_fields?: boolean
-    constraint_binding?: { arg: string; placeholders: string[] }[]
-    pip?: unknown
-  }
+  source_id?: string
+  source?: string
 }
 
 export async function listRules(): Promise<RuleMeta[]> { return jsonGet('/rules') }

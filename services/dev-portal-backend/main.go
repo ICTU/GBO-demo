@@ -736,12 +736,12 @@ func lokiDecisionsForTrace(ctx context.Context, cfg config, traceID string, sinc
 	return out, nil
 }
 
-// handleRules serves the pre-generated rules.json (rule metadata:
-// covers_types, covers_fields, spec) so the dev-portal's RuleSpecPanel
-// can render a rule's declared scope + evaluation criteria. OpenFTV PDP
-// has no data-API to evaluate data.gbo.rules live, so the file is
-// generated from the Rego sources by scripts/gen-rules-json.sh (CI
-// checks freshness). Content is identical to the old live evaluation.
+// handleRules serves the pre-generated rules.json (per rule its rule_id,
+// regime, package, covers_types and covers_fields) with each rule's Rego
+// source, so the dev-portal's rule panel shows what the rule checks: the
+// rule itself is the explanation. OpenFTV PDP has no data-API to evaluate
+// data.gbo.rules live, so the file is generated from the Rego sources by
+// scripts/gen-rules-json.sh (CI checks freshness).
 func handleRules(cfg config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		corsHeaders(w)
@@ -753,25 +753,59 @@ func handleRules(cfg config) http.HandlerFunc {
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 			return
 		}
-		raw, err := os.ReadFile(cfg.RulesFile)
+		rules, err := readRules(cfg.RulesFile)
 		if err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "rules.json unreadable (run scripts/gen-rules-json.sh): " + err.Error()})
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 			return
 		}
-		// File shape: { "<rule_pkg_leaf>": {rule_id, covers_types, covers_fields, spec} }
-		var rules map[string]json.RawMessage
-		if err := json.Unmarshal(raw, &rules); err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "rules.json decode: " + err.Error()})
+		policies, err := readPolicyFiles(cfg.PoliciesDir)
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "read policies: " + err.Error()})
 			return
 		}
-		// Flatten to a list — the package-leaf key (e.g. "dvt0001") is
-		// redundant since each rule carries its own rule_id.
-		out := make([]json.RawMessage, 0, len(rules))
-		for _, m := range rules {
-			out = append(out, m)
+		out := make([]map[string]any, 0, len(rules))
+		for _, rule := range rules {
+			if pkg, ok := rule["package"].(string); ok {
+				if p, found := policyDeclaring(policies, pkg); found {
+					rule["source_id"] = p.ID
+					rule["source"] = p.Raw
+				}
+			}
+			out = append(out, rule)
 		}
+		sort.Slice(out, func(i, j int) bool {
+			return fmt.Sprint(out[i]["rule_id"]) < fmt.Sprint(out[j]["rule_id"])
+		})
 		writeJSON(w, http.StatusOK, out)
 	}
+}
+
+// readRules reads rules.json: { "<package>": {rule_id, regime, package, ...} }.
+func readRules(path string) ([]map[string]any, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("rules.json unreadable (run scripts/gen-rules-json.sh): %w", err)
+	}
+	var byPackage map[string]map[string]any
+	if err := json.Unmarshal(raw, &byPackage); err != nil {
+		return nil, fmt.Errorf("rules.json decode: %w", err)
+	}
+	rules := make([]map[string]any, 0, len(byPackage))
+	for _, rule := range byPackage {
+		rules = append(rules, rule)
+	}
+	return rules, nil
+}
+
+// policyDeclaring returns the file that declares the given Rego package.
+func policyDeclaring(policies []policyFile, pkg string) (policyFile, bool) {
+	decl := regexp.MustCompile(`(?m)^package\s+` + regexp.QuoteMeta(pkg) + `\s*$`)
+	for _, p := range policies {
+		if decl.MatchString(p.Raw) {
+			return p, true
+		}
+	}
+	return policyFile{}, false
 }
 
 // policyFile is one Rego source file read from the policies directory.
@@ -846,13 +880,13 @@ func handlePolicySource(cfg config) http.HandlerFunc {
 }
 
 // handlePolicySnippet locates the Rego file + line where a given reason-code
-// string literal appears (in `:= "<code>"` form, the convention used by
-// reason-cascade rules). Returns the raw file + matched line so the UI can
+// string literal appears. Returns the raw file + matched line so the UI can
 // render a snippet view centred on that line.
 //
-// Generic across policies that follow the convention `:= "<code>"` in a
-// rule body. Path is the policy package-path (e.g. "gbo/lib" maps to
-// `package gbo.lib`).
+// With `rule` (a rule_id) it looks first in that rule's own file, then in
+// the helper of its regime directory: the same code appears in several
+// rules, and the one that refused is the one to show. Path is the policy
+// package-path of the decision (e.g. "gbo/lib" maps to `package gbo.lib`).
 func handlePolicySnippet(cfg config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		corsHeaders(w)
@@ -877,12 +911,10 @@ func handlePolicySnippet(cfg config) http.HandlerFunc {
 			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "read policies: " + err.Error()})
 			return
 		}
-		// Four-tier search, most-specific-first. The goal is to land on the
-		// line that EMITS this code as a DENY-reason, not on lookup-tables
-		// or the matching PASS-clause:
-		//   1. file declaring the request's package AND containing the literal
-		//   2. line containing BOTH <needle> AND `"fail")` (RFC0052-style
-		//      GBO-lib: `_step("<CODE>", ..., "fail")` on one line)
+		// Search most-specific-first. The goal is to land on the line that
+		// EMITS this code as a deny reason, not on a lookup table:
+		//   1. the refusing rule's own file, then its regime's helper
+		//   2. file declaring the request's package AND containing the literal
 		//   3. line containing BOTH <needle> AND `deny_reason(` (older
 		//      reason-cascade style)
 		//   4. fall-through: any line containing the literal
@@ -891,18 +923,24 @@ func handlePolicySnippet(cfg config) http.HandlerFunc {
 			id, raw string
 			line    int
 		}
-		for _, p := range policies {
-			if !strings.Contains(p.Raw, "package "+pkgName) {
-				continue
-			}
-			if line := findLineWith(p.Raw, needle); line > 0 {
-				picked.id, picked.raw, picked.line = p.ID, p.Raw, line
-				break
+		if ruleID := r.URL.Query().Get("rule"); ruleID != "" {
+			for _, pkg := range rulePackages(cfg.RulesFile, ruleID) {
+				p, found := policyDeclaring(policies, pkg)
+				if !found {
+					continue
+				}
+				if line := findLineWith(p.Raw, needle); line > 0 {
+					picked.id, picked.raw, picked.line = p.ID, p.Raw, line
+					break
+				}
 			}
 		}
 		if picked.id == "" {
 			for _, p := range policies {
-				if line := findLineWithAll(p.Raw, needle, `"fail")`); line > 0 {
+				if !strings.Contains(p.Raw, "package "+pkgName) {
+					continue
+				}
+				if line := findLineWith(p.Raw, needle); line > 0 {
 					picked.id, picked.raw, picked.line = p.ID, p.Raw, line
 					break
 				}
@@ -936,10 +974,31 @@ func handlePolicySnippet(cfg config) http.HandlerFunc {
 	}
 }
 
+// rulePackages gives the packages to search for a rule's code: the rule's
+// own, then the helper of its regime directory (gbo.rules.dvtp.helper for
+// gbo.rules.dvtp.lvg0001). None when the rule is unknown.
+func rulePackages(rulesFile, ruleID string) []string {
+	rules, err := readRules(rulesFile)
+	if err != nil {
+		return nil
+	}
+	for _, rule := range rules {
+		pkg, ok := rule["package"].(string)
+		if !ok || rule["rule_id"] != ruleID {
+			continue
+		}
+		pkgs := []string{pkg}
+		if i := strings.LastIndex(pkg, "."); i > 0 {
+			pkgs = append(pkgs, pkg[:i]+".helper")
+		}
+		return pkgs
+	}
+	return nil
+}
+
 // findLineWithAll returns the 1-based line number of the first line in raw
-// that contains ALL given needles. Used to match e.g. `_step("CODE", "fail")`
-// where the code + status-marker live on the same line but in different
-// positions.
+// that contains ALL given needles. Used to match e.g. `deny_reason(` next to
+// the code, where both live on the same line but in different positions.
 func findLineWithAll(raw string, needles ...string) int {
 	lines := strings.Split(raw, "\n")
 	for i, l := range lines {
@@ -967,57 +1026,6 @@ func findLineWith(raw, needle string) int {
 	return 0
 }
 
-// ── Policy chain (derived from the Rego sources on disk) ────────────────
-
-// Parses the ordered deny-cascade out of the evaluation library: the
-// `_step("<CODE>", ...)` literals in lib.rego appear in cascade order
-// (consent-exists → not-withdrawn → not-expired → scope → constraint →
-// pid → scope-whitelist → actor-whitelist). Keeps the developer-portal
-// in sync with the policy without hardcoding.
-
-var chainRE = regexp.MustCompile(`_step\("([^"]+)"`)
-
-func handlePolicyChain(cfg config) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		corsHeaders(w)
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		if r.Method != http.MethodGet {
-			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
-			return
-		}
-		policies, err := readPolicyFiles(cfg.PoliciesDir)
-		if err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "read policies: " + err.Error()})
-			return
-		}
-		// Find the evaluation library; that's where the cascade lives.
-		var raw string
-		for _, p := range policies {
-			if strings.Contains(p.Raw, "package gbo.lib") {
-				raw = p.Raw
-				break
-			}
-		}
-		if raw == "" {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "gbo.lib policy not found on disk"})
-			return
-		}
-		matches := chainRE.FindAllStringSubmatch(raw, -1)
-		seen := make(map[string]bool)
-		codes := make([]string, 0, len(matches))
-		for _, m := range matches {
-			if !seen[m[1]] {
-				seen[m[1]] = true
-				codes = append(codes, m[1])
-			}
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"codes": codes})
-	}
-}
-
 // ── Main ─────────────────────────────────────────────────────────────────
 
 // newMux builds the routing tree with the given config and trace-hub.
@@ -1035,7 +1043,6 @@ func newMux(cfg config, hub *traceHub, adl adlStore) *http.ServeMux {
 	mux.HandleFunc("/citizens", passthroughFile(cfg.CitizensFile))
 	mux.HandleFunc("/organizations", passthroughFile(cfg.OrganizationsFile))
 	mux.HandleFunc("/decisions", handleDecisions(cfg, adl))
-	mux.HandleFunc("/policy-chain", handlePolicyChain(cfg))
 	mux.HandleFunc("/rules", handleRules(cfg))
 	mux.HandleFunc("/policy-source", handlePolicySource(cfg))
 	mux.HandleFunc("/policy-snippet", handlePolicySnippet(cfg))

@@ -1,63 +1,25 @@
 import type { RuleMeta } from '../api/devClient'
 
-// Renders a rule's declared bereik + evaluation criteria in human-readable
-// form. Mirrors the iWlz playground's "Toon rule-spec & bron" panel but
-// adapted to our consent-driven spec-shape (vs iWlz' role-driven).
-//
-// Spec-driven rendering: every truthy field in spec produces a row. Unknown
-// future fields fall through to a generic key:value row instead of being
-// silently ignored — keeps the panel discoverable as the rule-model grows.
+// Shows a rule as it is written: its Rego source. Each rule states its
+// checks as `deny contains "<CODE>" if <condition>`, so the source is the
+// explanation of what it checks; the panel adds only the fields it covers.
 
 type Props = {
   rule: RuleMeta
 }
 
-const KNOWN: Record<string, string> = {
-  consent_required: 'Toestemming vereist',
-  consent_must_cover_scope: 'Toestemming dekt scope',
-  consent_must_cover_fields: 'Toestemming dekt velden',
-  pip: 'PIP-lookup',
-}
-
-function fmtBool(v: unknown): string {
-  if (v === true) return 'ja'
-  if (v === false) return 'nee'
-  if (v === null || v === undefined) return 'n.v.t.'
-  return String(v)
-}
-
 export default function RuleSpecPanel({ rule }: Props) {
-  const spec = rule.spec
-  const constraints = spec.constraint_binding ?? []
-  const knownKeys = Object.keys(KNOWN)
-  const extraKeys = Object.keys(spec).filter(
-    (k) => k !== 'rule_id' && k !== 'constraint_binding' && !knownKeys.includes(k),
-  )
   return (
     <div style={{
       marginTop: 10, padding: '10px 12px', borderRadius: 6,
       background: 'var(--panel-2)', border: '1px solid var(--border-2)',
     }}>
       <div style={{ fontSize: 11, color: 'var(--mute)', fontWeight: 700, marginBottom: 8 }}>
-        Regel-spec · {rule.rule_id}
+        Regel · {rule.rule_id}
+        {rule.regime && <span style={{ fontWeight: 400 }}> · regime {rule.regime}</span>}
+        {rule.source_id && <span className="mono" style={{ fontWeight: 400, marginLeft: 6 }}>({rule.source_id})</span>}
       </div>
       <Grid>
-        {knownKeys.map((k) => (
-          <Row key={k} label={KNOWN[k]} value={fmtBool((spec as Record<string, unknown>)[k])} />
-        ))}
-        {constraints.length > 0 && (
-          <Row
-            label="Constraint-binding"
-            value={constraints.map((c, i) => (
-              <div key={i} className="mono" style={{ fontSize: 11 }}>
-                {c.arg} <span style={{ color: 'var(--mute)' }}>∈</span> {'{'}{c.placeholders.join(', ')}{'}'}
-              </div>
-            ))}
-          />
-        )}
-        {extraKeys.map((k) => (
-          <Row key={k} label={k} value={fmtBool((spec as Record<string, unknown>)[k])} />
-        ))}
         {(rule.covers_types?.length ?? 0) > 0 && (
           <Row
             label="Dekt types"
@@ -79,6 +41,17 @@ export default function RuleSpecPanel({ rule }: Props) {
           />
         )}
       </Grid>
+      {rule.source
+        ? (
+          <pre className="codeblock" style={{ marginTop: 8, maxHeight: '50vh', overflow: 'auto', fontSize: 11 }}>
+            {rule.source}
+          </pre>
+        )
+        : (
+          <div style={{ fontSize: 11, color: 'var(--mute)', marginTop: 8 }}>
+            Broncode niet gevonden.
+          </div>
+        )}
     </div>
   )
 }
