@@ -7,6 +7,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Added
+- **ASIP mock (ETSI TS 119 478).** A mock Authentic Source Interface
+  Provider for qualified trust service providers (epic #336).
+  - `asi-provider` (port 4020): `POST /authsrc-api/verify` and `/retrieve`
+    (clause 6.1.1 and 6.1.2) against an in-memory source, with the results
+    `Match`, `NoMatch`, `MatchWithVariation` and `Unknown`. Every result is
+    sealed with a detached JWS in `X-JWS-Signature`; the seal certificate
+    comes from the development CA (`make provision-asip-seal-certificate`).
+    `/openapi.json` publishes the contract: Annex B unchanged, plus
+    completions as a JSON Merge Patch (#498).
+  - `asi-authorization-server` (port 4021): the authorization server of
+    clause 6.1.3, with the authorization code flow, PKCE, `private_key_jwt`
+    and DPoP-bound JWT access tokens per RFC 9068. Clients are registered in
+    configuration; user identification is a stub that is not conformant
+    (#503).
+  - The ASIP validates every access token and DPoP proof, and takes the BSN
+    of the user from the token, in plain text until slice 9 of #336.
+  - Both services are laid out as ports and adapters: a core under
+    `internal/`, an HTTP adapter, and `main.go` as the composition root.
+
+  See [services/asi-provider/README.md](services/asi-provider/README.md) and
+  [services/asi-authorization-server/README.md](services/asi-authorization-server/README.md).
 - **Integrator acting for a service provider.** An integrator peer
   (`…1100`, `int-*`) queries BD on behalf of Hypotheek-BV over an FSC
   DelegatedServiceConnection grant, and `integrator-backend` (port 9423) asks

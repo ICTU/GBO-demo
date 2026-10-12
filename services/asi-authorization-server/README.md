@@ -50,7 +50,19 @@ A clients file registers each client with its redirect URIs, its scopes and the 
 }
 ```
 
-There is no client to try the flow by hand yet; the reference QTSP client is slice 6 of #336. `e2e_test.go` runs the whole flow against a started `asi-provider`.
+There is no client to try the flow by hand yet; the reference QTSP client is slice 6 of #336. `internal/httpapi/e2e_test.go` runs the whole flow against a started `asi-provider`.
+
+## Layout
+
+Ports and adapters, as `AGENTS.md` asks for a service with an authorization boundary:
+
+| Package | |
+|---|---|
+| `internal/authorization` | the core: the authorization and token requests, PKCE, codes, client authentication, DPoP proofs, token issuance. Ports `Clients` and `Identifier` |
+| `internal/clientconfig` | `Clients` from the configuration file |
+| `internal/testpersons` | `Identifier`: the identification stub |
+| `internal/httpapi` | the endpoints, and the translation to the responses of RFC 6749 |
+| `main.go` | composition root |
 
 ## The access token
 

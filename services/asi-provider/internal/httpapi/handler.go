@@ -1,0 +1,301 @@
+// Package httpapi is the HTTP interface of the ASIP: POST /verify and
+// /retrieve of ETSI TS 119 478 clause 6.1.1 and 6.1.2 under the base path of
+// Annex B, and the published contract. It validates every request against
+// the contract, has the access token checked, calls the verification core,
+// and seals every result.
+package httpapi
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+
+	"github.com/getkin/kin-openapi/routers"
+
+	"gbo-demo/asi-provider/internal/accesstoken"
+	"gbo-demo/asi-provider/internal/seal"
+	"gbo-demo/asi-provider/internal/verification"
+)
+
+// BasePath is the default basePath of the server template in ETSI TS 119 478
+// Annex B.
+const BasePath = "/authsrc-api"
+
+// Provider is the provider object of the ETSI dataservice schema
+// (19478-dataservice-schema.json#/definitions/provider).
+type Provider struct {
+	LegalName string `json:"legalName"`
+}
+
+type Config struct {
+	Verification *verification.Service
+	// Tokens validates the access tokens of the authorization server.
+	Tokens          *accesstoken.Validator
+	Sealer          *seal.Sealer
+	Provider        Provider
+	AuthenticSource Provider
+}
+
+type handler struct{ cfg Config }
+
+func NewHandler(cfg Config) (http.Handler, error) {
+	doc, err := loadContractDoc()
+	if err != nil {
+		return nil, fmt.Errorf("published contract: %w", err)
+	}
+	verifyRoute, err := contractRoute(doc, "/verify")
+	if err != nil {
+		return nil, err
+	}
+	retrieveRoute, err := contractRoute(doc, "/retrieve")
+	if err != nil {
+		return nil, err
+	}
+	h := &handler{cfg: cfg}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST "+BasePath+"/verify", h.authenticated("verify", conformant(verifyRoute, h.verify)))
+	mux.HandleFunc("POST "+BasePath+"/retrieve", h.authenticated("retrieve", conformant(retrieveRoute, h.retrieve)))
+	mux.HandleFunc("GET /openapi.json", serveJSON(publishedContract))
+	mux.HandleFunc("GET /"+dataserviceFileName, serveJSON(mustReadOpenAPIFile(dataserviceFile)))
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	return mux, nil
+}
+
+func serveJSON(body []byte) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
+	}
+}
+
+// --- request and response shapes (ETSI TS 119 478 Annex B) ------------------
+
+type attribute struct {
+	AttributeIdentifier string          `json:"attributeIdentifier"`
+	AttributeValue      json.RawMessage `json:"attributeValue"`
+}
+
+type attributeFragment struct {
+	AttributeIdentifier string          `json:"attributeIdentifier"`
+	Location            string          `json:"location"`
+	Value               json.RawMessage `json:"value"`
+}
+
+type verifyRequest struct {
+	Attributes         []attribute         `json:"attributes"`
+	AttributeFragments []attributeFragment `json:"attributeFragments"`
+	Mandate            json.RawMessage     `json:"mandate"`
+}
+
+type attributeVerificationResult struct {
+	AttributeIdentifier         string `json:"attributeIdentifier"`
+	AttributeVerificationResult string `json:"attributeVerificationResult"`
+}
+
+type fragmentVerificationResult struct {
+	AttributeIdentifier        string `json:"attributeIdentifier"`
+	FragmentVerificationResult string `json:"fragmentVerificationResult"`
+}
+
+type verifyResponse struct {
+	AttributeVerificationResults []attributeVerificationResult `json:"attributeVerificationResults,omitempty"`
+	FragmentVerificationResults  []fragmentVerificationResult  `json:"fragmentVerificationResults,omitempty"`
+	Provider                     Provider                      `json:"provider"`
+	AuthenticSource              Provider                      `json:"authenticSource"`
+}
+
+type retrieveRequest struct {
+	AttributeIdentifiers []struct {
+		AttributeIdentifier string `json:"attributeIdentifier"`
+	} `json:"attributeIdentifiers"`
+	Mandate json.RawMessage `json:"mandate"`
+}
+
+type retrieveResponse struct {
+	Attributes      []attribute `json:"attributes"`
+	Provider        Provider    `json:"provider"`
+	AuthenticSource Provider    `json:"authenticSource"`
+}
+
+// --- authentication --------------------------------------------------------------
+
+type handlerWithSubject func(w http.ResponseWriter, r *http.Request, bsn string)
+
+// authenticated validates the access token for operation before anything
+// else; the BSN of the user comes from the token.
+func (h *handler) authenticated(operation string, next handlerWithSubject) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		bsn, failure := h.cfg.Tokens.Authenticate(r.Context(), accesstoken.Request{
+			Method:        r.Method,
+			Path:          r.URL.Path,
+			Authorization: r.Header.Get("Authorization"),
+			DPoP:          r.Header.Values("DPoP"),
+		}, operation)
+		if failure != nil {
+			writeAuthFailure(w, failure)
+			return
+		}
+		next(w, r, bsn)
+	}
+}
+
+// writeAuthFailure answers with 401, the WWW-Authenticate challenge of
+// RFC 9449 section 7.1 and a problem body. Every failure is 401, as ETSI
+// TS 119 478 lists for "an authentication or authorization error"
+// (REQ-ASIP-6.1.1.2-12), also insufficient_scope, for which RFC 6750 would
+// use 403. When no token can be validated at all, the answer is 503.
+func writeAuthFailure(w http.ResponseWriter, f *accesstoken.Failure) {
+	if f.Unavailable {
+		writeProblem(w, http.StatusServiceUnavailable, "Service Unavailable", f.Description)
+		return
+	}
+	challenge := `DPoP algs="ES256"`
+	if f.Code != "" {
+		challenge = fmt.Sprintf(`DPoP error="%s", error_description="%s", algs="ES256"`, f.Code, f.Description)
+		if f.Scope != "" {
+			challenge += fmt.Sprintf(`, scope="%s"`, f.Scope)
+		}
+	}
+	w.Header().Set("WWW-Authenticate", challenge)
+	writeProblem(w, http.StatusUnauthorized, "Unauthorized", f.Description)
+}
+
+// conformant rejects a request that does not conform to the request schema of
+// the published contract with 400, before any other check of its content.
+func conformant(route *routers.Route, next handlerWithSubject) handlerWithSubject {
+	return func(w http.ResponseWriter, r *http.Request, bsn string) {
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
+		if err := validateRequest(r, route); err != nil {
+			writeProblem(w, http.StatusBadRequest, "Bad Request", err.Error())
+			return
+		}
+		next(w, r, bsn)
+	}
+}
+
+// --- /verify -------------------------------------------------------------------
+
+func (h *handler) verify(w http.ResponseWriter, r *http.Request, bsn string) {
+	var req verifyRequest
+	if err := decodeStrict(r.Body, &req); err != nil {
+		writeProblem(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	in := verification.VerifyRequest{Mandate: hasMandate(req.Mandate)}
+	for _, a := range req.Attributes {
+		in.Attributes = append(in.Attributes, verification.Attribute{Identifier: a.AttributeIdentifier, Value: a.AttributeValue})
+	}
+	for _, f := range req.AttributeFragments {
+		in.Fragments = append(in.Fragments, verification.Fragment{Identifier: f.AttributeIdentifier, Location: f.Location, Value: f.Value})
+	}
+	result, err := h.cfg.Verification.Verify(bsn, in)
+	if err != nil {
+		writeUseCaseError(w, err)
+		return
+	}
+	resp := verifyResponse{Provider: h.cfg.Provider, AuthenticSource: h.cfg.AuthenticSource}
+	for _, a := range result.Attributes {
+		resp.AttributeVerificationResults = append(resp.AttributeVerificationResults, attributeVerificationResult{
+			AttributeIdentifier: a.Identifier, AttributeVerificationResult: a.Result,
+		})
+	}
+	for _, f := range result.Fragments {
+		resp.FragmentVerificationResults = append(resp.FragmentVerificationResults, fragmentVerificationResult{
+			AttributeIdentifier: f.Identifier, FragmentVerificationResult: f.Result,
+		})
+	}
+	h.writeSealed(w, resp)
+}
+
+// --- /retrieve -----------------------------------------------------------------
+
+func (h *handler) retrieve(w http.ResponseWriter, r *http.Request, bsn string) {
+	var req retrieveRequest
+	if err := decodeStrict(r.Body, &req); err != nil {
+		writeProblem(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	ids := make([]string, 0, len(req.AttributeIdentifiers))
+	for _, a := range req.AttributeIdentifiers {
+		ids = append(ids, a.AttributeIdentifier)
+	}
+	attrs, err := h.cfg.Verification.Retrieve(bsn, ids, hasMandate(req.Mandate))
+	if err != nil {
+		writeUseCaseError(w, err)
+		return
+	}
+	resp := retrieveResponse{Attributes: []attribute{}, Provider: h.cfg.Provider, AuthenticSource: h.cfg.AuthenticSource}
+	for _, a := range attrs {
+		resp.Attributes = append(resp.Attributes, attribute{AttributeIdentifier: a.Identifier, AttributeValue: a.Value})
+	}
+	h.writeSealed(w, resp)
+}
+
+// --- helpers -------------------------------------------------------------------
+
+const maxRequestBody = 1 << 20
+
+// writeUseCaseError maps an error of the verification core to the status
+// codes of REQ-ASIP-6.1.1.2-12.
+func writeUseCaseError(w http.ResponseWriter, err error) {
+	var malformed *verification.MalformedError
+	var unknown *verification.UnknownAttributeError
+	switch {
+	case errors.As(err, &malformed):
+		writeProblem(w, http.StatusBadRequest, "Bad Request", err.Error())
+	case errors.Is(err, verification.ErrMandate):
+		writeProblem(w, http.StatusNotImplemented, "Not Implemented", err.Error())
+	case errors.As(err, &unknown):
+		writeProblem(w, http.StatusNotFound, "Not Found", err.Error())
+	default:
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "the request could not be processed")
+	}
+}
+
+func decodeStrict(body io.Reader, v any) error {
+	dec := json.NewDecoder(io.LimitReader(body, maxRequestBody))
+	if err := dec.Decode(v); err != nil {
+		return errors.New("request body is not valid JSON for this operation: " + err.Error())
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return errors.New("request body contains data after the JSON object")
+	}
+	return nil
+}
+
+func hasMandate(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	return len(trimmed) > 0 && !bytes.Equal(trimmed, []byte("null"))
+}
+
+func (h *handler) writeSealed(w http.ResponseWriter, v any) {
+	body, err := json.Marshal(v)
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "could not encode the response")
+		return
+	}
+	sig, err := h.cfg.Sealer.Seal(body)
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "could not seal the response")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-JWS-Signature", sig)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
+}
+
+// writeProblem writes an RFC 9457 problem as the ETSI OpenAPI requires.
+func writeProblem(w http.ResponseWriter, status int, title, detail string) {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"type":   "about:blank",
+		"title":  title,
+		"status": status,
+		"detail": detail,
+	})
+}
