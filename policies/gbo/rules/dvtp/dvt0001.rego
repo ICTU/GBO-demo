@@ -80,7 +80,7 @@ deny_field[i] contains "YEAR_NOT_COVERED" if {
 	some i, f in lib.fields
 	lib.key(f) == "IngeschrevenPersoon.heeftBelastingjaarAangifte"
 	some year in lib.argument_values(f, "belastingjaren")
-	not sprintf("bd:ib:%d", [year]) in helper.consent.granted_scopes
+	not helper.consent_covers(sprintf("bd:ib:%d", [year]))
 }
 
 # No year filter fails too: the source would return every year.

@@ -19,9 +19,14 @@ key(f) := sprintf("%s.%s", [f.parentType, f.field])
 # The value of an argument as the request supplied it. Undefined when absent
 # or (partly) from a schema default: the source applies its own default,
 # which need not match the bundled schema, so a check on it must fail
-# (Section 9.4). Write such a check as `not argument(f, a) == x`, never
-# `argument(f, a) != x`: the latter is undefined, not true, for a missing
-# value and would let the field through.
+# (Section 9.4).
+#
+# Do not negate a comparison on it: `not argument(f, a) == x` and
+# `argument(f, a) != x` both let a missing value through, because Rego
+# evaluates the call before the negation, and an undefined result fails the
+# whole rule instead. Ask through a rule or function of its own, negated as
+# a whole (`not helper.names_consent_citizen(f, ...)`), so that `not`
+# negates the whole question.
 argument(f, name) := entry.value if {
 	entry := f.args[name]
 	entry.origin != "schema-default"

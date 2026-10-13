@@ -47,10 +47,17 @@ default consent_expired := true
 
 consent_expired := false if lib.now_ns < time.parse_rfc3339_ns(consent.valid_until)
 
+# The citizen consented to this scope. Always true or false, so a rule can
+# negate it: `not x in consent.granted_scopes` would let a consent without
+# granted_scopes through.
+default consent_covers(_) := false
+
+consent_covers(scope) if scope in consent.granted_scopes
+
 # The citizen consented to the scope the consumer declares.
 default consent_covers_declared_scope := false
 
-consent_covers_declared_scope if lib.declared_scope in consent.granted_scopes
+consent_covers_declared_scope if consent_covers(lib.declared_scope)
 
 # The consent names the party the call is made for: on a delegated call the
 # service provider, not the integrator. Consent gives the integrator no

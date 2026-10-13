@@ -13,7 +13,14 @@ import data.gbo.consent
 
 # ── Entrypoint: allowed only when every data field is allowed ──────────────
 
-_field_decisions := [{"field": f.id, "path": f.record.path, "key": f.key, "index": f.index, "result": _decide(f)} | some f in _data_fields]
+_field_decisions := [{"field": f.id, "path": f.record.path, "key": f.key, "index": f.index, "result": _decision_on(f)} | some f in _data_fields]
+
+# A field is never dropped: one whose decision cannot be made, such as under
+# a rule that does not evaluate, is refused as a fault in the policy.
+# Dropped, it would leave every other field to decide alone.
+_decision_on(f) := result if {
+	result := _decide(f)
+} else := {"decision": false, "context": {"reason_admin": {"code": "RULE_NOT_EVALUABLE", "evaluated": []}}}
 
 # The resolved consent is added to the response: the policy fetched it, so
 # without this the decision log would lack the attribute it decided on.
@@ -62,10 +69,14 @@ _denied_fields := [{
 
 # ── The request's code (Section 9.5) and what the consumer sees (10.2) ──────
 
-# A check on the mapper's output fails first; then a server problem on any
-# field; else the request is denied because fields are.
+# A check on the mapper's output fails first; then a field no rule could
+# decide; then a server problem on any field; else the request is denied
+# because fields are.
 _request_code := _request_failure if {
 	_request_failure
+} else := {"code": "CONFIG_ERROR", "subcode": "RULE_NOT_EVALUABLE"} if {
+	some d in _denied_fields
+	d.code == "RULE_NOT_EVALUABLE"
 } else := {"code": "PIP_UNAVAILABLE"} if {
 	some d in _denied_fields
 	d.code == "PIP_UNAVAILABLE"

@@ -182,6 +182,12 @@ test_deny_years_from_a_schema_default if {
 	_reasons_on(_years(fx.schema_default([2025])), _consent, 1) == {"YEAR_NOT_COVERED"}
 }
 
+# A consent without granted_scopes covers no year.
+test_deny_years_under_a_consent_without_scopes if {
+	consent := object.remove(_consent, ["granted_scopes"])
+	"YEAR_NOT_COVERED" in _reasons_on(_years(fx.literal([2025])), consent, 1)
+}
+
 test_deny_years_with_an_explicit_null if {
 	_reasons_on(_years(fx.variable("jaren", null)), _consent, 1) == {"YEAR_NOT_COVERED"}
 }
