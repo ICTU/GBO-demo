@@ -36,6 +36,7 @@ func TestMetadata(t *testing.T) { // case 23
 		"authorization_endpoint":                as.srv.URL + authorization.AuthorizePath,
 		"token_endpoint":                        as.srv.URL + authorization.TokenPath,
 		"jwks_uri":                              as.srv.URL + authorization.JWKSPath,
+		"registration_endpoint":                 as.srv.URL + authorization.RegisterPath,
 		"code_challenge_methods_supported":      []any{"S256"},
 		"token_endpoint_auth_methods_supported": []any{"private_key_jwt"},
 		"dpop_signing_alg_values_supported":     []any{"ES256"},

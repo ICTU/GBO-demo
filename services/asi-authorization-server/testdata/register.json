@@ -1,0 +1,16 @@
+{
+  "entries": [
+    {
+      "registryURI": "https://register.gbo.example/wrp/test-qtsp",
+      "identifiers": ["NTRNL-90000001"],
+      "legalName": "GBO demo test QTSP",
+      "entitlements": ["https://uri.etsi.org/19475/Entitlement/QEAA_Provider"]
+    },
+    {
+      "registryURI": "https://register.gbo.example/wrp/test-service-provider",
+      "identifiers": ["NTRNL-90000002"],
+      "legalName": "GBO demo test service provider",
+      "entitlements": ["https://uri.etsi.org/19475/Entitlement/Service_Provider"]
+    }
+  ]
+}

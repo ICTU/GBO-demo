@@ -33,14 +33,19 @@ const (
 	bsnFrouke       = "999991772"
 )
 
-// testAS runs the authorization server with three registered clients and the
-// stub identification of two test persons. offset shifts its clock.
+// testAS runs the authorization server with three clients from
+// configuration, the stub identification of two test persons, a register and
+// a trust anchor for dynamic client registration. offset shifts its clock.
 type testAS struct {
-	srv     *httptest.Server
-	keys    map[string]*ecdsa.PrivateKey // client_id -> client key
-	dpopKey *ecdsa.PrivateKey
-	jkt     string
-	offset  time.Duration
+	srv      *httptest.Server
+	service  *authorization.Service
+	keys     map[string]*ecdsa.PrivateKey // client_id -> client key
+	kids     map[string]string            // client_id -> kid, for registered clients
+	dpopKey  *ecdsa.PrivateKey
+	jkt      string
+	offset   time.Duration
+	register *fakeRegister
+	ca       *testCA
 }
 
 func newTestAS(t *testing.T) *testAS {
@@ -49,7 +54,7 @@ func newTestAS(t *testing.T) *testAS {
 
 func newTestASFor(t *testing.T, resource string) *testAS {
 	t.Helper()
-	as := &testAS{keys: map[string]*ecdsa.PrivateKey{}, dpopKey: newECKey(t)}
+	as := &testAS{keys: map[string]*ecdsa.PrivateKey{}, kids: map[string]string{}, dpopKey: newECKey(t), register: newFakeRegister(), ca: newTestCA(t)}
 	jwk := jose.JSONWebKey{Key: &as.dpopKey.PublicKey}
 	thumbprint, err := jwk.Thumbprint(crypto.SHA256)
 	if err != nil {
@@ -75,14 +80,17 @@ func newTestASFor(t *testing.T, resource string) *testAS {
 		}
 		clients = append(clients, c)
 	}
-	handler = NewHandler(authorization.NewService(authorization.Config{
-		Issuer:     as.srv.URL,
-		Resource:   resource,
-		Clients:    clientconfig.New(clients...),
-		Identifier: testpersons.New(map[string]string{"frouke": bsnFrouke, "tom": "555555555"}),
-		Tokens:     tokens,
-		Now:        as.now,
-	}))
+	as.service = authorization.NewService(authorization.Config{
+		Issuer:       as.srv.URL,
+		Resource:     resource,
+		Clients:      clientconfig.New(clients...),
+		Identifier:   testpersons.New(map[string]string{"frouke": bsnFrouke, "tom": "555555555"}),
+		Tokens:       tokens,
+		Register:     as.register,
+		TrustAnchors: as.ca.pool(),
+		Now:          as.now,
+	})
+	handler = NewHandler(as.service)
 	return as
 }
 
@@ -178,7 +186,11 @@ func (as *testAS) assertion(t *testing.T, clientID string, edit func(map[string]
 	if edit != nil {
 		edit(claims)
 	}
-	return signJWT(t, as.keys[clientID], clientID+"-key", "", claims, false)
+	kid := clientID + "-key"
+	if k, ok := as.kids[clientID]; ok {
+		kid = k
+	}
+	return signJWT(t, as.keys[clientID], kid, "", claims, false)
 }
 
 // proof is a DPoP proof for the token endpoint; edit may change its claims.

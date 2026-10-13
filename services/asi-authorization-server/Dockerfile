@@ -10,5 +10,6 @@ RUN apk add --no-cache ca-certificates wget
 WORKDIR /app
 COPY --from=builder /asi-authorization-server .
 COPY testdata/test-persons.json ./testdata/test-persons.json
+COPY testdata/register.json ./testdata/register.json
 EXPOSE 4021
 CMD ["./asi-authorization-server"]
