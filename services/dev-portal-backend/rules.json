@@ -1,4 +1,29 @@
 {
+  "gbo.rules.asi.asi0001": {
+    "covers_fields": [
+      "Binnenlandsadres.huisletter",
+      "Binnenlandsadres.huisnummer",
+      "Binnenlandsadres.huisnummertoevoeging",
+      "Binnenlandsadres.postcode",
+      "Binnenlandsadres.straatnaam",
+      "Binnenlandsadres.woonplaatsnaam",
+      "IngeschrevenPersoon.geboortedatum",
+      "IngeschrevenPersoon.geslachtsnaam",
+      "IngeschrevenPersoon.heeftNationaliteit",
+      "IngeschrevenPersoon.voornamen",
+      "IngeschrevenPersoon.voorvoegsel",
+      "Ingezetene.woontOp",
+      "Nationaliteit.nationaliteit",
+      "Query.ingeschrevenPersoon"
+    ],
+    "covers_types": [],
+    "package": "gbo.rules.asi.asi0001",
+    "regime": "pid",
+    "rule_id": "ASI0001",
+    "services": [
+      "brp"
+    ]
+  },
   "gbo.rules.dvtp.dvt0001": {
     "covers_fields": [
       "AangifteIH.belastingjaar",

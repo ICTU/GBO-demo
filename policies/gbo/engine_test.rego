@@ -375,6 +375,7 @@ test_pid_rule_actors_are_disjoint_from_consent_consumers if {
 	issuers := data.gbo.rules.eudi.helper.designated_issuers
 	count(issuers) > 0
 	count(issuers & _dvtp_consumer_oins) == 0
+	not data.gbo.rules.asi.asi0001.asip in _dvtp_consumer_oins
 }
 
 # ── The service decides which rules apply ────────────────────────────────
@@ -432,6 +433,40 @@ test_an_empty_service_set_binds_nowhere if {
 		result := gbo.response with input as _person_on(service) with data.gbo.rules as _scoped(set())
 		fx.field_codes(result) == {"NO_APPLICABLE_RULE"}
 	}
+}
+
+# ── The ASIP reads the BRP through ASI0001 ───────────────────────────────
+
+test_asip_personal_data_is_granted_by_asi0001 if {
+	result := gbo.response with input as fx.request(fx.asip, "brp", fx.personal_fields("999991772"), {})
+	result.decision == true
+	every g in result.context.granted {
+		g.rule == "ASI0001"
+	}
+}
+
+# EUD0001 names no service and also binds the brp root; it does not grant
+# the ASIP, and the leaves are ASI0001's alone.
+test_another_actor_is_refused_the_personal_data if {
+	result := gbo.response with input as fx.request(fx.eudi_issuer, "brp", fx.personal_fields("999991772"), {})
+	result.decision == false
+	fx.field_codes(result) == {"ACTOR_NOT_ALLOWED"}
+}
+
+test_asip_other_brp_fields_have_no_rule if {
+	marriage := fx.brp_field("IngeschrevenPersoon", "heeftHuwelijk", ["ingeschrevenPersoon", "heeftHuwelijk"])
+	result := gbo.response with input as fx.request(fx.asip, "brp", [fx.person("999991772"), marriage], {})
+	result.decision == false
+	[[d.index, d.code] | some d in fx.denied(result)] == [[1, "NO_APPLICABLE_RULE"]]
+}
+
+# On bri ASI0001 does not bind: the ASIP meets EUD0001 alone, and is no
+# designated issuer.
+test_asip_income_is_judged_by_eud0001_alone if {
+	result := gbo.response with input as fx.income(fx.asip, "999991772", [2025], {})
+	result.decision == false
+	fx.field_codes(result) == {"ACTOR_NOT_ALLOWED"}
+	_evaluated_rules(result) == {"EUD0001"}
 }
 
 # ── Every GBO rule names one regime ──────────────────────────────────────
