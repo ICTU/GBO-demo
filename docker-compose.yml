@@ -1204,6 +1204,9 @@ services:
       - ASIP_PUBLIC_URL=http://localhost:${GBO_PORT_ASI_PROVIDER:-9424}
       - ASIP_AUTHORIZATION_SERVER=http://localhost:${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}
       - ASIP_AUTHORIZATION_SERVER_INTERNAL_URL=http://asi-authorization-server:4021
+      # The ASIP's own Outway; /brp is the grant-link make fsc-seed-asip sets.
+      - ASIP_OUTWAY_URL=http://asip-outway:8080
+      - ASIP_OUTWAY_PATH=/brp/graphql
       - ASIP_SEAL_KEY_FILE=/seal/seal-key.pem
       - ASIP_SEAL_CERT_FILE=/seal/seal-cert.pem
     volumes:

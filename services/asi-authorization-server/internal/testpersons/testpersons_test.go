@@ -15,7 +15,7 @@ func TestLoad(t *testing.T) {
 		t.Fatalf("Load = %d persons, %v; want the four test persons", s.Len(), err)
 	}
 	id, ok := s.Identify("frouke")
-	if !ok || id.BSN != "999991772" || id.Birthdate != "2000-03-24" || id.PlaceOfBirth.Locality != "Rotterdam" || len(id.Nationalities) != 2 {
+	if !ok || id.BSN != "999991772" || id.Birthdate != "2000-03-24" || id.PlaceOfBirth.Locality != "Leeuwarden" || len(id.Nationalities) != 2 {
 		t.Fatalf("frouke = %+v, want her identity", id)
 	}
 	valid := func() map[string]any {

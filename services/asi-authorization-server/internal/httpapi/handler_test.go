@@ -91,8 +91,8 @@ func TestFullFlowIssuesDPoPBoundAccessToken(t *testing.T) { // case 24
 		}
 	}
 	// S2: the PID attributes of the chosen test person.
-	if pob, _ := claims["place_of_birth"].(map[string]any); pob["country"] != "NL" || pob["locality"] != "Rotterdam" || len(pob) != 2 {
-		t.Errorf("place_of_birth = %v, want country NL and locality Rotterdam", claims["place_of_birth"])
+	if pob, _ := claims["place_of_birth"].(map[string]any); pob["country"] != "NL" || pob["locality"] != "Leeuwarden" || len(pob) != 2 {
+		t.Errorf("place_of_birth = %v, want country NL and locality Leeuwarden", claims["place_of_birth"])
 	}
 	if n, _ := claims["nationalities"].([]any); len(n) != 2 || n[0] != "NL" || n[1] != "BE" {
 		t.Errorf("nationalities = %v, want [NL BE]", claims["nationalities"])

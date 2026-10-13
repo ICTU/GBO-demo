@@ -2,7 +2,7 @@ package httpapi
 
 // Case 24 through /verify and case 37 of #503: the whole flow across both
 // services. The test builds services/asi-provider and starts it as a process;
-// this test plays the QTSP.
+// this test plays the QTSP, and a fake Outway the BRP behind it.
 
 import (
 	"bytes"
@@ -18,6 +18,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -49,6 +50,8 @@ func TestEndToEndVerify(t *testing.T) { // case 24 (through /verify), case 37, c
 	t.Cleanup(func() { log.SetOutput(os.Stderr) })
 	as := newTestASFor(t, asipURL+"/authsrc-api")
 
+	outway := newFakeBRPOutway(t)
+
 	var asipLogs syncBuffer
 	asip := exec.Command(bin)
 	asip.Dir = asipDir
@@ -58,6 +61,7 @@ func TestEndToEndVerify(t *testing.T) { // case 24 (through /verify), case 37, c
 		"ASIP_AUTHORIZATION_SERVER="+as.srv.URL,
 		"ASIP_SEAL_KEY_FILE="+keyFile,
 		"ASIP_SEAL_CERT_FILE="+certFile,
+		"ASIP_OUTWAY_URL="+outway.URL,
 	)
 	asip.Stdout, asip.Stderr = &asipLogs, &asipLogs
 	if err := asip.Start(); err != nil {
@@ -85,6 +89,9 @@ func TestEndToEndVerify(t *testing.T) { // case 24 (through /verify), case 37, c
 	if err := json.Unmarshal(resp.body, &result); err != nil || len(result.AttributeVerificationResults) != 1 ||
 		result.AttributeVerificationResults[0].AttributeVerificationResult != "http://uri.etsi.org/19478/VerificationResult/Match" {
 		t.Fatalf("/verify body = %s, want one Match", resp.body)
+	}
+	if got := outway.asked(); len(got) != 1 || got[0] != bsnFrouke {
+		t.Fatalf("the BRP was asked for %v, want the BSN of the chosen person once", got)
 	}
 	if resp.header.Get("X-JWS-Signature") == "" {
 		t.Fatalf("/verify response is not sealed")
@@ -116,12 +123,52 @@ func TestEndToEndVerify(t *testing.T) { // case 24 (through /verify), case 37, c
 	_ = asip.Process.Kill()
 	_ = asip.Wait()
 	for name, logs := range map[string]string{"asi-authorization-server": asLogs.String(), "asi-provider": asipLogs.String()} {
-		for _, value := range []string{bsnFrouke, "Jansen", "Frouke", "2000-03-24", "Rotterdam"} {
+		for _, value := range []string{bsnFrouke, "Jansen", "Frouke", "2000-03-24", "Leeuwarden"} {
 			if strings.Contains(logs, value) {
 				t.Errorf("%s log contains %q:\n%s", name, value, logs)
 			}
 		}
 	}
+}
+
+// fakeBRPOutway answers the ASIP's queries on the grant-link /brp/graphql:
+// the surname of the chosen test person, no one else.
+type fakeBRPOutway struct {
+	*httptest.Server
+	mu   sync.Mutex
+	bsns []string
+}
+
+func newFakeBRPOutway(t *testing.T) *fakeBRPOutway {
+	t.Helper()
+	o := &fakeBRPOutway{}
+	o.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Variables struct {
+				BSN string `json:"bsn"`
+			} `json:"variables"`
+		}
+		if r.URL.Path != "/brp/graphql" || json.NewDecoder(r.Body).Decode(&req) != nil {
+			http.Error(w, "not the grant-link", http.StatusNotFound)
+			return
+		}
+		o.mu.Lock()
+		o.bsns = append(o.bsns, req.Variables.BSN)
+		o.mu.Unlock()
+		if req.Variables.BSN != bsnFrouke {
+			_, _ = w.Write([]byte(`{"data":{"ingeschrevenPersoon":null}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":{"ingeschrevenPersoon":{"geslachtsnaam":"Jansen","voorvoegsel":null}}}`))
+	}))
+	t.Cleanup(o.Close)
+	return o
+}
+
+func (o *fakeBRPOutway) asked() []string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return append([]string(nil), o.bsns...)
 }
 
 type asipResponse struct {

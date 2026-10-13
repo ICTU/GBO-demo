@@ -250,7 +250,7 @@ func (as *testAS) decide(t *testing.T, tx string, cookie *http.Cookie, form url.
 var (
 	testFrouke = testpersons.Person{ID: "frouke", Identity: authorization.Identity{
 		BSN: bsnFrouke, FamilyName: "Jansen", GivenName: "Frouke", Birthdate: "2000-03-24",
-		PlaceOfBirth: authorization.PlaceOfBirth{Country: "NL", Locality: "Rotterdam"}, Nationalities: []string{"NL", "BE"},
+		PlaceOfBirth: authorization.PlaceOfBirth{Country: "NL", Locality: "Leeuwarden"}, Nationalities: []string{"NL", "BE"},
 	}}
 	testTom = testpersons.Person{ID: "tom", Identity: authorization.Identity{
 		BSN: "555555555", FamilyName: "Willems", GivenName: "Tom", Birthdate: "1982-05-08",
