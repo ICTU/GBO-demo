@@ -9,18 +9,22 @@ package gbo.rules.dvtp.dvt0001
 #
 # How to read this rule
 #
-# requirements lists what must hold for the request as a whole. Each entry
-# is a condition ("holds") and the code a refused field gets when it does
-# not hold.
-# checks(f) lists what must hold for one field, chosen by the field's key.
-# A field without conditions of its own gets an empty list.
+# The file has three parts. The rule: requirements lists what must hold for
+# the request as a whole, and requirements_for(f) what must hold for one
+# field, chosen by the field's key. Each line is require(condition, code):
+# the condition, and the code a refused field gets when it does not hold.
+# The conditions: each defined with a default of false and one body that
+# says when it holds. From requirements to deny: the same in every rule, it
+# turns each condition that does not hold into a refusal with its code.
+#
 # A field is allowed when every condition, for the request and for the
-# field, is true. A condition that cannot be evaluated at all makes the
+# field, is true. A condition that cannot be evaluated at all makes its
 # whole list disappear, and then the field is refused: nothing passes
 # unchecked.
 
 import data.gbo.consent
 import data.gbo.lib
+import data.gbo.lib.require
 
 rule_id := "DVT0001"
 
@@ -53,50 +57,95 @@ covers_fields := {
 	"AangifteIH.indieningsdatum",
 }
 
-# ── The request ──────────────────────────────────────────────────────────────
+# ── The rule ─────────────────────────────────────────────────────────────────
 
 requirements := [
-	# The consent is valid: verified, known to the register, not withdrawn,
-	# not expired. The code says which of these failed.
-	{"holds": consent.valid, "code": consent.problem},
-	# It was given to the party the call is made for.
-	{"holds": consent.given_to_caller, "code": "CONSENT_ACTOR_MISMATCH"},
-	# It covers the scope the consumer declares.
-	{"holds": consent.covers_declared_scope, "code": "CONSENT_SCOPE_MISMATCH"},
-	# That scope is the income question, for one belastingjaar. The consent
-	# checks alone would not do: a consent for lvg:vbo:eigendom, sent with
-	# that scope, covers it.
-	{"holds": regex.match(`^bd:ib:[0-9]{4}$`, lib.declared_scope), "code": "SCOPE_NOT_ALLOWED"},
+	require(consent.valid, consent.problem),
+	require(consent.given_to_caller, "CONSENT_ACTOR_MISMATCH"),
+	require(consent.covers_declared_scope, "CONSENT_SCOPE_MISMATCH"),
+	require(asks_the_income_question, "SCOPE_NOT_ALLOWED"),
 ]
 
-# ── The fields ───────────────────────────────────────────────────────────────
+# For every field of the request, its list is requirements_for(f). This line
+# is the same in every rule: OPA cannot let the engine call a function for
+# each field, so the rule lays the lists out by the field's position itself.
+field_requirements[i] := requirements_for(f) if some i, f in lib.fields
 
-field_requirements[i] := checks(f) if some i, f in lib.fields
-
-# The question is about the consent's citizen: bsn is the identity
-# placeholder, for which the source puts in the BSN from the verified
-# consent token, not a BSN the provider chose. The income API takes a BSN,
-# not a pseudonym.
-checks(f) := [{"holds": lib.argument_is(f, "bsn", "consent:identity"), "code": "CONSTRAINT_MISMATCH"}] if {
+requirements_for(f) := [require(asks_about_the_consenting_citizen(f), "CONSTRAINT_MISMATCH")] if {
 	lib.key(f) == "Query.ingeschrevenPersoon"
 }
 
-# Years were asked for, and the consent covers each of them: a consent for
-# 2025 only refuses a query for 2024 and 2025. No year filter refuses too,
-# as the source would return every year.
-checks(f) := [{"holds": years_consented(f), "code": "YEAR_NOT_COVERED"}] if {
+requirements_for(f) := [require(years_are_consented(f), "YEAR_NOT_COVERED")] if {
 	lib.key(f) == "IngeschrevenPersoon.heeftBelastingjaarAangifte"
 }
 
-# Every other field has no condition of its own.
-checks(f) := [] if not lib.key(f) in {"Query.ingeschrevenPersoon", "IngeschrevenPersoon.heeftBelastingjaarAangifte"}
+requirements_for(f) := [] if not lib.key(f) in fields_with_conditions
 
-default years_consented(_) := false
+# The fields that have a condition of their own, above. Every other field
+# has none and gets an empty list.
+fields_with_conditions := {"Query.ingeschrevenPersoon", "IngeschrevenPersoon.heeftBelastingjaarAangifte"}
 
-years_consented(f) if {
+# ── The conditions ───────────────────────────────────────────────────────────
+
+# The consumer asks the income question, for one belastingjaar. The consent
+# checks alone would not do: a consent for lvg:vbo:eigendom, sent with that
+# scope, covers it.
+default asks_the_income_question := false
+
+asks_the_income_question if regex.match(`^bd:ib:[0-9]{4}$`, lib.declared_scope)
+
+# The question is about the citizen who consented: bsn is the identity
+# placeholder, which the source replaces with the BSN from the verified
+# consent token, not a BSN the provider chose. The income API takes a BSN,
+# not a pseudonym.
+default asks_about_the_consenting_citizen(_) := false
+
+asks_about_the_consenting_citizen(f) if lib.argument_is(f, "bsn", "consent:identity")
+
+# Years were asked for, and the consent covers each of them: a consent for
+# 2025 only refuses a query for 2024 and 2025. No year filter fails too, as
+# the source would return every year.
+default years_are_consented(_) := false
+
+years_are_consented(f) if {
 	years := lib.argument_values(f, "belastingjaren")
 	count(years) > 0
 	every year in years {
 		consent.covers(sprintf("bd:ib:%d", [year]))
 	}
 }
+
+# ── From requirements to deny ────────────────────────────────────────────────
+# The same in every rule written this way; the engine reads only deny and
+# deny_field. A field is refused with the code of each requirement that does
+# not hold. A list that is missing could not be evaluated, and refuses too.
+# A field with arguments needs a condition of its own: without one, any
+# value of its arguments would pass.
+
+deny contains r.code if {
+	some r in requirements
+	not holds(r)
+}
+
+deny contains "RULE_NOT_EVALUABLE" if not requirements
+
+deny_field[i] contains r.code if {
+	some i, list in field_requirements
+	some r in list
+	not holds(r)
+}
+
+deny_field[i] contains "RULE_NOT_EVALUABLE" if {
+	some i, _ in lib.fields
+	not field_requirements[i]
+}
+
+deny_field[i] contains "FIELD_ARGUMENTS_UNCHECKED" if {
+	some i, f in lib.fields
+	count(object.get(f, "args", {})) > 0
+	field_requirements[i] == []
+}
+
+# Only a condition that is exactly true holds. Asked through a rule of its
+# own, so that `not` negates the whole question.
+holds(r) if r.holds == true
