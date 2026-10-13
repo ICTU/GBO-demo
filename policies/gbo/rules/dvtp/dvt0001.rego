@@ -9,15 +9,16 @@ package gbo.rules.dvtp.dvt0001
 #
 # How to read this rule
 #
-# The rule comes first, the definitions of its conditions after it.
-# requirements lists what must hold for the request as a whole, and
-# requirements_for(f) what must hold for one field, chosen by the field's
-# key. Each line is require(condition, code): the condition, and the code a
-# refused field gets when it does not hold. A field is allowed when every
-# condition, for the request and for the field, is true.
+# The file has three parts. The rule: requirements lists what must hold for
+# the request as a whole, and requirements_for(f) what must hold for one
+# field, chosen by the field's key. Each line is require(condition, code):
+# the condition, and the code a refused field gets when it does not hold.
+# The conditions: each defined with a default of false and one body that
+# says when it holds. From requirements to deny: the same in every rule, it
+# turns each condition that does not hold into a refusal with its code.
 #
-# Each condition is defined below with a default of false and one body that
-# says when it holds. A condition that cannot be evaluated at all makes its
+# A field is allowed when every condition, for the request and for the
+# field, is true. A condition that cannot be evaluated at all makes its
 # whole list disappear, and then the field is refused: nothing passes
 # unchecked.
 
@@ -113,3 +114,38 @@ years_are_consented(f) if {
 		consent.covers(sprintf("bd:ib:%d", [year]))
 	}
 }
+
+# ── From requirements to deny ────────────────────────────────────────────────
+# The same in every rule written this way; the engine reads only deny and
+# deny_field. A field is refused with the code of each requirement that does
+# not hold. A list that is missing could not be evaluated, and refuses too.
+# A field with arguments needs a condition of its own: without one, any
+# value of its arguments would pass.
+
+deny contains r.code if {
+	some r in requirements
+	not holds(r)
+}
+
+deny contains "RULE_NOT_EVALUABLE" if not requirements
+
+deny_field[i] contains r.code if {
+	some i, list in field_requirements
+	some r in list
+	not holds(r)
+}
+
+deny_field[i] contains "RULE_NOT_EVALUABLE" if {
+	some i, _ in lib.fields
+	not field_requirements[i]
+}
+
+deny_field[i] contains "FIELD_ARGUMENTS_UNCHECKED" if {
+	some i, f in lib.fields
+	count(object.get(f, "args", {})) > 0
+	field_requirements[i] == []
+}
+
+# Only a condition that is exactly true holds. Asked through a rule of its
+# own, so that `not` negates the whole question.
+holds(r) if r.holds == true

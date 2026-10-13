@@ -659,65 +659,14 @@ test_a_field_without_a_decision_is_refused_not_dropped if {
 	[[d.index, d.code] | some d in fx.denied(result)] == [[0, "RULE_NOT_EVALUABLE"]]
 }
 
-# ── The requirements form ───────────────────────────────────────────────
-# A test rule passed in as data: the root field (position 0, with an
-# argument) and a leaf (position 1, without one).
-
-_two_fields := fx.request(fx.hv, "bri", [fx.person("999991772"), fx.year], {})
-
-_holds(code) := {"holds": true, "code": code}
-
-_requirements_rule(rule) := {"test": {"r": object.union(
-	{"rule_id": "R", "covers_fields": {"Query.ingeschrevenPersoon", "BelastingjaarAangifte.belastingjaar"}},
-	rule,
-)}}
-
-test_requirements_that_all_hold_allow if {
-	rule := {"requirements": [_holds("A")], "field_requirements": {0: [_holds("B")], 1: []}}
-	result := gbo.response with input as _two_fields with data.gbo.rules as _requirements_rule(rule)
-	result.decision == true
-	{g.rule | some g in result.context.granted} == {"R"}
-}
-
-# A requirement that cannot be evaluated makes the whole list undefined: a
-# fault in the rule, refused on every field and reported as one.
-test_an_undefined_request_requirement_refuses_every_field_as_a_rule_fault if {
-	rule := {"field_requirements": {0: [_holds("B")], 1: []}}
-	result := gbo.response with input as _two_fields with data.gbo.rules as _requirements_rule(rule)
-	result.decision == false
-	fx.client(result) == {"code": "ACCESS_DENIED"}
-	fx.request_code(result) == {"code": "CONFIG_ERROR", "subcode": "RULE_NOT_EVALUABLE"}
-	[[d.index, d.code] | some d in fx.denied(result)] == [[0, "RULE_NOT_EVALUABLE"], [1, "RULE_NOT_EVALUABLE"]]
-}
-
-test_an_undefined_field_requirement_refuses_only_that_field if {
-	rule := {"requirements": [], "field_requirements": {0: [_holds("B")]}}
-	result := gbo.response with input as _two_fields with data.gbo.rules as _requirements_rule(rule)
-	fx.request_code(result) == {"code": "CONFIG_ERROR", "subcode": "RULE_NOT_EVALUABLE"}
-	[[d.index, d.code] | some d in fx.denied(result)] == [[1, "RULE_NOT_EVALUABLE"]]
-}
-
-test_only_a_condition_that_is_exactly_true_holds if {
-	rule := {"requirements": [{"holds": "ja", "code": "NOT_TRUE"}], "field_requirements": {0: [_holds("B")], 1: []}}
-	result := gbo.response with input as _two_fields with data.gbo.rules as _requirements_rule(rule)
-	fx.client(result) == {"code": "FIELD_NOT_PERMITTED"}
-	fx.field_codes(result) == {"NOT_TRUE"}
-}
-
-# A field with arguments needs a condition of its own, or any value of them
-# would pass; a field without arguments needs none.
-test_a_field_with_arguments_and_no_condition_is_a_rule_fault if {
-	rule := {"requirements": [], "field_requirements": {0: [], 1: []}}
-	result := gbo.response with input as _two_fields with data.gbo.rules as _requirements_rule(rule)
-	fx.client(result) == {"code": "ACCESS_DENIED"}
-	fx.request_code(result) == {"code": "CONFIG_ERROR", "subcode": "FIELD_ARGUMENTS_UNCHECKED"}
-	[[d.index, d.code] | some d in fx.denied(result)] == [[0, "FIELD_ARGUMENTS_UNCHECKED"]]
-}
-
-# Why the form fails closed: in Rego a list with one undefined element is
-# itself undefined, so a condition on missing data cannot drop out alone.
-_list_with_missing_data := [_holds("A"), {"holds": data.gbo.no_such_document, "code": "B"}]
-
-test_a_condition_on_missing_data_leaves_the_whole_list_undefined if {
-	not _list_with_missing_data
+# ── A fault in a rule is reported as one ─────────────────────────────────
+# A rule that could not evaluate its conditions, or leaves a field's
+# arguments unchecked, says so with its own code; the consumer then hears
+# only that access was denied.
+test_a_rule_fault_is_reported_as_a_config_error if {
+	every code in ["RULE_NOT_EVALUABLE", "FIELD_ARGUMENTS_UNCHECKED"] {
+		result := gbo.response with input as _person_only with data.gbo.rules as _rule_with({code})
+		fx.client(result) == {"code": "ACCESS_DENIED"}
+		fx.request_code(result) == {"code": "CONFIG_ERROR", "subcode": code}
+	}
 }

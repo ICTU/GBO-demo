@@ -32,25 +32,16 @@ _years(years_arg) := _with_fields([fx.person("consent:identity"), fx.declaration
 
 _with_consent(changes) := object.union(_consent, changes)
 
-# The codes of the requirements that do not hold. A list that is undefined
-# leaves this undefined too, so the test fails rather than pass empty.
-_unmet(requirements) := {r.code | some r in requirements; not _holds(r)}
-
-_holds(r) if r.holds == true
-
 # Every reason the rule gives, for the request and for any field.
 _reasons(req, consent) := r if {
-	request := dvt0001.requirements with input as req with data.gbo.consent.resolved as consent
-	fields := dvt0001.field_requirements with input as req with data.gbo.consent.resolved as consent
-	count(fields) == count(object.get(req, ["resource", "attributes", "graphql", "fields"], []))
-	r := _unmet(request) | {x | some checks in fields; some x in _unmet(checks)}
+	r := dvt0001.deny | {x | some reasons in dvt0001.deny_field; some x in reasons} with input as req
+		with data.gbo.consent.resolved as consent
 }
 
 # The reasons for the field at position i.
 _reasons_on(req, consent, i) := r if {
-	request := dvt0001.requirements with input as req with data.gbo.consent.resolved as consent
-	checks := dvt0001.field_requirements[i] with input as req with data.gbo.consent.resolved as consent
-	r := _unmet(request) | _unmet(checks)
+	r := dvt0001.deny | object.get(dvt0001.deny_field, i, set()) with input as req
+		with data.gbo.consent.resolved as consent
 }
 
 # ── Allowed ─────────────────────────────────────────────────────────────
@@ -216,4 +207,49 @@ test_deny_year_from_list_variable_not_consented if {
 test_allow_years_from_a_variable_in_a_list if {
 	mixed := {"value": [2025], "origin": "mixed", "variables": ["jaar"]}
 	_reasons(_years(mixed), _consent) == set()
+}
+
+# ── From requirements to deny ───────────────────────────────────────────
+# A condition that cannot be evaluated is simulated by a function that never
+# gives a value: OPA cannot replace a rule by "undefined" in a test.
+
+_never(_) if false
+
+_never2(_, _) if false
+
+_no_conditions(_) := []
+
+# A requirement for the request that cannot be evaluated refuses with
+# RULE_NOT_EVALUABLE, which the engine reports as a fault in the policy.
+test_an_undefined_request_requirement_refuses if {
+	r := dvt0001.deny with input as _request with data.gbo.consent.resolved as _consent
+		with data.gbo.lib.require as _never2
+	"RULE_NOT_EVALUABLE" in r
+}
+
+# A field requirement that cannot be evaluated refuses only that field.
+test_an_undefined_field_requirement_refuses_only_that_field if {
+	request := dvt0001.deny with input as _request with data.gbo.consent.resolved as _consent
+		with data.gbo.rules.dvtp.dvt0001.asks_about_the_consenting_citizen as _never
+	fields := dvt0001.deny_field with input as _request with data.gbo.consent.resolved as _consent
+		with data.gbo.rules.dvtp.dvt0001.asks_about_the_consenting_citizen as _never
+	request == set()
+	object.get(fields, 0, set()) == {"RULE_NOT_EVALUABLE"}
+	object.get(fields, 1, set()) == set()
+}
+
+# Only a condition that is exactly true holds.
+test_only_a_condition_that_is_exactly_true_holds if {
+	r := dvt0001.deny with input as _request with data.gbo.consent.resolved as _consent
+		with data.gbo.rules.dvtp.dvt0001.requirements as [{"holds": "ja", "code": "NOT_TRUE"}]
+	r == {"NOT_TRUE"}
+}
+
+# A field with arguments but no condition of its own is refused; a field
+# without arguments needs none.
+test_a_field_with_arguments_and_no_condition_is_refused if {
+	fields := dvt0001.deny_field with input as _request with data.gbo.consent.resolved as _consent
+		with data.gbo.rules.dvtp.dvt0001.requirements_for as _no_conditions
+	object.get(fields, 0, set()) == {"FIELD_ARGUMENTS_UNCHECKED"}
+	object.get(fields, 2, set()) == set()
 }
