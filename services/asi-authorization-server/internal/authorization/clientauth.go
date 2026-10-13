@@ -39,7 +39,7 @@ func (s *Service) authenticateClient(r TokenRequest, now time.Time) (*Client, er
 	if err := tok.UnsafeClaimsWithoutVerification(&unverified); err != nil {
 		return nil, errors.New("client_assertion has no readable claims")
 	}
-	c, ok := s.cfg.Clients.Client(unverified.Issuer)
+	c, ok := s.client(unverified.Issuer)
 	if !ok {
 		return nil, errors.New("unknown client")
 	}

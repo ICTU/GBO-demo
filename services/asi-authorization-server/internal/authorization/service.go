@@ -9,6 +9,7 @@ package authorization
 import (
 	"crypto/sha256"
 	"crypto/subtle"
+	"crypto/x509"
 	"encoding/base64"
 	"regexp"
 	"slices"
@@ -27,6 +28,8 @@ const (
 	JWKSPath      = "/jwks.json"
 	AuthorizePath = "/authorize"
 	TokenPath     = "/token"
+	// RegisterPath is the client registration endpoint (RFC 7591).
+	RegisterPath = "/register"
 
 	// AuthorizationCodeLifetime: codes are single-use and short-lived.
 	AuthorizationCodeLifetime = 60 * time.Second
@@ -78,11 +81,16 @@ type Config struct {
 	Clients    Clients
 	Identifier Identifier
 	Tokens     *TokenIssuer
-	Now        func() time.Time
+	// Register is the register of wallet-relying parties; TrustAnchors are
+	// the roots the certificates of registering clients must chain to.
+	Register     Register
+	TrustAnchors *x509.CertPool
+	Now          func() time.Time
 }
 
 type Service struct {
 	cfg         Config
+	registered  *registeredClients
 	codes       *codeStore
 	assertions  *replayCache
 	proofReplay *replayCache
@@ -92,7 +100,13 @@ func NewService(cfg Config) *Service {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	return &Service{cfg: cfg, codes: &codeStore{codes: map[string]authorizationCode{}}, assertions: newReplayCache(), proofReplay: newReplayCache()}
+	return &Service{
+		cfg:         cfg,
+		registered:  &registeredClients{clients: map[string]*registeredClient{}},
+		codes:       &codeStore{codes: map[string]authorizationCode{}},
+		assertions:  newReplayCache(),
+		proofReplay: newReplayCache(),
+	}
 }
 
 // --- metadata (RFC 8414) -----------------------------------------------------
@@ -103,6 +117,7 @@ func (s *Service) Metadata() map[string]any {
 		"authorization_endpoint":                s.cfg.Issuer + AuthorizePath,
 		"token_endpoint":                        s.cfg.Issuer + TokenPath,
 		"jwks_uri":                              s.cfg.Issuer + JWKSPath,
+		"registration_endpoint":                 s.cfg.Issuer + RegisterPath,
 		"response_types_supported":              []string{"code"},
 		"grant_types_supported":                 []string{"authorization_code"},
 		"scopes_supported":                      OperationScopes,
@@ -141,7 +156,7 @@ var codeChallengePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 // redirect_uri is a NotRedirectableError; every other outcome goes back to
 // the client.
 func (s *Service) Authorize(req AuthorizationRequest) (AuthorizationResponse, error) {
-	c, ok := s.cfg.Clients.Client(req.ClientID)
+	c, ok := s.client(req.ClientID)
 	if !ok {
 		return AuthorizationResponse{}, &NotRedirectableError{Description: "unknown client_id"}
 	}

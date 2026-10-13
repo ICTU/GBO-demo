@@ -1,6 +1,6 @@
 // Package httpapi is the HTTP interface of the authorization server: the
-// RFC 8414 metadata, the JWKS, the authorization endpoint and the token
-// endpoint. It translates requests to the authorization core and its answers
+// RFC 8414 metadata, the JWKS, the authorization endpoint, the token
+// endpoint and the client registration endpoint. It translates requests to the authorization core and its answers
 // to the responses of RFC 6749.
 package httpapi
 
@@ -19,6 +19,7 @@ func NewHandler(service *authorization.Service) http.Handler {
 	mux.HandleFunc("GET "+authorization.JWKSPath, h.jwks)
 	mux.HandleFunc("GET "+authorization.AuthorizePath, h.authorize)
 	mux.HandleFunc("POST "+authorization.TokenPath, h.token)
+	mux.HandleFunc("POST "+authorization.RegisterPath, h.register)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	return mux
 }
@@ -90,6 +91,46 @@ func (h *handler) token(w http.ResponseWriter, r *http.Request) {
 		"expires_in":   resp.ExpiresIn,
 		"scope":        resp.Scope,
 	})
+}
+
+// register is the client registration endpoint (RFC 7591 section 3).
+func (h *handler) register(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	var body map[string]json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		registrationError(w, &authorization.Error{Code: "invalid_client_metadata", Description: "the request body is not a JSON object"})
+		return
+	}
+	var statement string
+	if raw, ok := body["software_statement"]; ok {
+		_ = json.Unmarshal(raw, &statement)
+		delete(body, "software_statement")
+	}
+	c, oauthErr := h.service.Register(r.Context(), authorization.RegistrationRequest{Metadata: body, SoftwareStatement: statement})
+	if oauthErr != nil {
+		registrationError(w, oauthErr)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"client_id":                  c.ClientID,
+		"client_id_issued_at":        c.ClientIDIssuedAt.Unix(),
+		"redirect_uris":              c.RedirectURIs,
+		"scope":                      c.Scope,
+		"token_endpoint_auth_method": c.TokenEndpointAuthMethod,
+		"grant_types":                []string{"authorization_code"},
+		"response_types":             []string{"code"},
+		"jwks":                       c.JWKS,
+	})
+}
+
+// registrationError writes an error response of RFC 7591 section 3.2.2:
+// 400, or 503 when the register cannot be consulted.
+func registrationError(w http.ResponseWriter, e *authorization.Error) {
+	status := http.StatusBadRequest
+	if e.Code == "temporarily_unavailable" {
+		status = http.StatusServiceUnavailable
+	}
+	writeJSON(w, status, map[string]string{"error": e.Code, "error_description": e.Description})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

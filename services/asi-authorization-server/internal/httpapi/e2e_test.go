@@ -29,7 +29,7 @@ import (
 	"gbo-demo/asi-authorization-server/internal/authorization"
 )
 
-func TestEndToEndVerify(t *testing.T) { // case 24 (through /verify), case 37
+func TestEndToEndVerify(t *testing.T) { // case 24 (through /verify), case 37, case D2
 	if testing.Short() {
 		t.Skip("builds and starts services/asi-provider")
 	}
@@ -89,6 +89,23 @@ func TestEndToEndVerify(t *testing.T) { // case 24 (through /verify), case 37
 	if resp.header.Get("X-JWS-Signature") == "" {
 		t.Fatalf("/verify response is not sealed")
 	}
+	// D2: a client registered with a sealed software statement runs the same
+	// flow with the key of its certificate.
+	id := as.registerQTSP(t)
+	p = newPKCE()
+	params := authorizeParams(p)
+	params.Set("client_id", id)
+	form := as.tokenForm(t, as.code(t, params), p)
+	form.Set("client_assertion", as.assertion(t, id, nil))
+	tr := as.postToken(t, form, as.proof(t, nil))
+	if tr.status != http.StatusOK {
+		t.Fatalf("token response for the registered client = %d %v, want 200", tr.status, tr.body)
+	}
+	registeredToken, _ := tr.body["access_token"].(string)
+	if r := as.callASIP(t, asipURL+"/authsrc-api/verify", registeredToken, body); r.status != http.StatusOK {
+		t.Fatalf("/verify with the token of the registered client = %d %s, want 200", r.status, r.body)
+	}
+
 	// The token is for verify only.
 	if r := as.callASIP(t, asipURL+"/authsrc-api/retrieve", token, `{"attributeIdentifiers":[{"attributeIdentifier":"https://gbo.example/attributes/family_name/1"}]}`); r.status != http.StatusUnauthorized {
 		t.Fatalf("/retrieve with a verify token = %d, want 401", r.status)

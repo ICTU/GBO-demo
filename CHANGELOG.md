@@ -19,7 +19,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   - `asi-authorization-server` (port 4021): the authorization server of
     clause 6.1.3, with the authorization code flow, PKCE, `private_key_jwt`
     and DPoP-bound JWT access tokens per RFC 9068. Clients are registered in
-    configuration; user identification is a stub that is not conformant
+    configuration or through dynamic client registration with a software
+    statement sealed with the QTSP's certificate, checked against a stub
+    register for the `QEAA_Provider` entitlement and re-verified
+    periodically (`make provision-asip-qtsp-certificate` issues a test
+    certificate). User identification is a stub that is not conformant
     (#503).
   - The ASIP validates every access token and DPoP proof, and takes the BSN
     of the user from the token, in plain text until slice 9 of #336.

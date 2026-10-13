@@ -10,6 +10,11 @@
 // conformant identity proofing; slice 3 of #336 replaces it.
 //
 // This file is the composition root: configuration, construction, lifecycle.
+//
+// Usage:
+//
+//	asi-authorization-server                              serve (configuration from the environment)
+//	asi-authorization-server provision-qtsp-certificate   issue a test QTSP certificate
 package main
 
 import (
@@ -32,6 +37,8 @@ import (
 	"gbo-demo/asi-authorization-server/internal/authorization"
 	"gbo-demo/asi-authorization-server/internal/clientconfig"
 	"gbo-demo/asi-authorization-server/internal/httpapi"
+	"gbo-demo/asi-authorization-server/internal/qtspcert"
+	"gbo-demo/asi-authorization-server/internal/stubregister"
 	"gbo-demo/asi-authorization-server/internal/testpersons"
 )
 
@@ -42,6 +49,13 @@ const (
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", "asi-authorization-server"))
+	if len(os.Args) > 1 && os.Args[1] == "provision-qtsp-certificate" {
+		if err := qtspcert.Provision(os.Args[2:]); err != nil {
+			slog.Error("provisioning QTSP certificate", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := serve(); err != nil {
 		slog.Error("serving asi-authorization-server", "err", err)
 		os.Exit(1)
@@ -66,17 +80,31 @@ func serve() error {
 	if err != nil {
 		return err
 	}
+	register, err := stubregister.Load(env("AZSP_REGISTER_FILE", "testdata/register.json"))
+	if err != nil {
+		return err
+	}
+	anchors, err := loadTrustAnchors(os.Getenv("AZSP_TRUST_ANCHORS_FILE"))
+	if err != nil {
+		return err
+	}
+	recheckInterval, err := time.ParseDuration(env("AZSP_ENTITLEMENT_RECHECK_INTERVAL", "1h"))
+	if err != nil || recheckInterval <= 0 {
+		return fmt.Errorf("AZSP_ENTITLEMENT_RECHECK_INTERVAL: %q is not a positive duration", os.Getenv("AZSP_ENTITLEMENT_RECHECK_INTERVAL"))
+	}
 	service := authorization.NewService(authorization.Config{
-		Issuer:     issuer,
-		Resource:   strings.TrimRight(env("AZSP_RESOURCE", "http://localhost:4020/authsrc-api"), "/"),
-		Clients:    clients,
-		Identifier: persons,
-		Tokens:     tokens,
+		Issuer:       issuer,
+		Resource:     strings.TrimRight(env("AZSP_RESOURCE", "http://localhost:4020/authsrc-api"), "/"),
+		Clients:      clients,
+		Identifier:   persons,
+		Tokens:       tokens,
+		Register:     register,
+		TrustAnchors: anchors,
 	})
 	srv := &http.Server{Addr: env("AZSP_ADDR", ":4021"), Handler: httpapi.NewHandler(service), ReadHeaderTimeout: readHeaderTimeout}
 	errc := make(chan error, 1)
 	go func() {
-		slog.Info("listening", "addr", srv.Addr, "issuer", issuer, "clients", clients.Len(),
+		slog.Info("listening", "addr", srv.Addr, "issuer", issuer, "clients", clients.Len(), "register_entries", register.Len(),
 			"identification", "stub: login_hint names a test person, not conformant")
 		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 			errc <- err
@@ -85,6 +113,7 @@ func serve() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go recheckEntitlements(ctx, service, recheckInterval)
 	select {
 	case err := <-errc:
 		return err
@@ -96,6 +125,41 @@ func serve() error {
 		slog.Warn("graceful shutdown did not finish", "err", err)
 	}
 	return nil
+}
+
+// recheckEntitlements verifies the entitlements of the registered clients
+// again at every interval (ETSI TS 119 478 clause 6.1.3.2, figure 2, step 2).
+func recheckEntitlements(ctx context.Context, service *authorization.Service, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			res := service.RecheckEntitlements(ctx)
+			slog.Info("entitlements re-verified", "checked", res.Checked, "deactivated", res.Deactivated, "register_unavailable", res.Unavailable)
+		}
+	}
+}
+
+// loadTrustAnchors reads the roots the certificates of registering clients
+// must chain to: the development reader CA. Without them, dynamic client
+// registration refuses every client.
+func loadTrustAnchors(path string) (*x509.CertPool, error) {
+	if path == "" {
+		slog.Warn("AZSP_TRUST_ANCHORS_FILE not set: dynamic client registration refuses every client")
+		return nil, nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read trust anchors: %w", err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(raw) {
+		return nil, errors.New("trust anchors file contains no certificate")
+	}
+	return pool, nil
 }
 
 func env(name, fallback string) string {
