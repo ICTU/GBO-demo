@@ -13,7 +13,9 @@ The ASIP and the authorization server may be operated by one party, but they are
 | DPoP-bound access tokens (REQ-AZSP-6.1.3.1-06) | implemented; every token is bound |
 | JWT access tokens per RFC 9068 (REQ-AZSP-6.1.3.1-08) | implemented; contents below |
 | Metadata (RFC 8414) and JWKS | implemented |
-| Client registration | **in configuration only**; dynamic client registration with a sealed software statement (REQ-AZSP-6.1.3.2-01) is the second pull request of #503 |
+| Dynamic client registration with a sealed software statement (REQ-AZSP-6.1.3.2-01) | implemented; see below. Clients can also be registered in configuration |
+| Register of wallet-relying parties (CIR (EU) 2025/848, D9) | **stub**: entries from `testdata/register.json`; the national register and its API (ETSI/EUDI TS5) are not available to this project |
+| QTSP certificates (REQ-AZSP-6.1.3.2-02) | **test certificates** from the development reader CA, not Wallet-Relying Party Access Certificates according to ETSI TS 119 411-8 |
 | User identification (REQ-AZSP-6.1.3.1-02) | **stub, not conformant**: the client names a test person in `login_hint` and no user is involved. Slice 3 replaces it with a test-person chooser, slice 7 with OpenID4VP PID disclosure |
 | mTLS, PAR, refresh tokens | not offered (see below) |
 
@@ -25,15 +27,19 @@ The ASIP and the authorization server may be operated by one party, but they are
 | `GET /jwks.json` | the public token signing key |
 | `GET /authorize` | authorization request: `response_type=code`, `client_id`, `redirect_uri`, `scope` (`verify`, `retrieve` or both), `state`, `code_challenge`, `code_challenge_method=S256`, optionally `resource`, and `login_hint` for the stub |
 | `POST /token` | token request: `grant_type=authorization_code`, `code`, `redirect_uri`, `code_verifier`, `client_assertion_type`, `client_assertion`, and a `DPoP` proof header |
+| `POST /register` | client registration (RFC 7591): `redirect_uris`, `scope`, optionally `token_endpoint_auth_method`, and the `software_statement` |
 
 ## Run
 
 ```bash
+make provision-asip-qtsp-certificate
 cd services/asi-authorization-server
-AZSP_CLIENTS_FILE=clients.json go run .
+AZSP_TRUST_ANCHORS_FILE=../../.local/secrets/development-ca/reader-ca-cert.pem go run .
 ```
 
-Configuration: `AZSP_ADDR` (default `:4021`), `AZSP_ISSUER` (the public base URL, default `http://localhost:4021`), `AZSP_RESOURCE` (the ASIP base URL, default `http://localhost:4020/authsrc-api`), `AZSP_SIGNING_KEY_FILE` (PEM, ECDSA P-256; without it the server generates a key at start, so tokens do not survive a restart), `AZSP_CLIENTS_FILE`, `AZSP_TEST_PERSONS_FILE` (default `testdata/test-persons.json`).
+`make provision-asip-qtsp-certificate` issues a test QTSP certificate from the development reader CA, with the `organizationIdentifier` of the test QTSP in `testdata/register.json` (`NTRNL-90000001`). A test QTSP signs its software statement and its client assertions with its key.
+
+Configuration: `AZSP_ADDR` (default `:4021`), `AZSP_ISSUER` (the public base URL, default `http://localhost:4021`), `AZSP_RESOURCE` (the ASIP base URL, default `http://localhost:4020/authsrc-api`), `AZSP_SIGNING_KEY_FILE` (PEM, ECDSA P-256; without it the server generates a key at start, so tokens do not survive a restart), `AZSP_CLIENTS_FILE`, `AZSP_TEST_PERSONS_FILE` (default `testdata/test-persons.json`), `AZSP_REGISTER_FILE` (default `testdata/register.json`), `AZSP_TRUST_ANCHORS_FILE` (PEM; the roots QTSP certificates must chain to, the development reader CA; without it every registration is refused), `AZSP_ENTITLEMENT_RECHECK_INTERVAL` (default `1h`).
 
 A clients file registers each client with its redirect URIs, its scopes and the public keys of its client assertions:
 
@@ -52,14 +58,28 @@ A clients file registers each client with its redirect URIs, its scopes and the 
 
 There is no client to try the flow by hand yet; the reference QTSP client is slice 6 of #336. `internal/httpapi/e2e_test.go` runs the whole flow against a started `asi-provider`.
 
+## Dynamic client registration
+
+A QTSP registers once per authorization server, before its first authorization request, and keeps the `client_id` it gets back (RFC 7591). It finds the registration endpoint in the metadata.
+
+- **Software statement.** The QTSP signs it with the key of its X.509 certificate, ES256 or PS256, the chain in `x5c` (REQ-TSP-6.1.3.2-01). It must contain `iss`, `registryURI`, `iat` and `exp`; it must not be expired or issued in the future. There is no maximum lifetime: a replayed statement registers a client nobody can authenticate without the certificate key. Metadata in the statement take precedence over plain JSON members (RFC 7591 section 3.1.1).
+- **Certificate.** It must chain to a trust anchor, be valid now, allow digital signatures and carry an `organizationIdentifier`.
+- **Register.** The entry `registryURI` points to must carry the entitlement `https://uri.etsi.org/19475/Entitlement/QEAA_Provider` (Article 45e concerns QTSPs issuing qualified electronic attestations of attributes) and have the `organizationIdentifier` of the certificate among its identifiers. TS5 also uses `http://data.europa.eu/eudi/entitlement/...` in an example; only the form of its table is accepted.
+- **Client.** The key of the certificate is the client key for `private_key_jwt`; the response returns it in `jwks` with its `kid`. `jwks` and `jwks_uri` in the request are refused; `token_endpoint_auth_method` must be `private_key_jwt` and is that when omitted. The scope is `verify`, `retrieve` or both; redirect URIs are absolute https URIs without fragment.
+- **Errors** (RFC 7591 section 3.2.2): `invalid_software_statement` for the statement and the certificate, `unapproved_software_statement` for the register, `invalid_client_metadata` and `invalid_redirect_uri` for the metadata. When the register cannot be consulted, a registration gets 503 with `temporarily_unavailable`.
+- **Re-verification.** Every `AZSP_ENTITLEMENT_RECHECK_INTERVAL` the entitlement of every registered client is looked up again (clause 6.1.3.2, figure 2). A client that is no longer approved is deactivated: its token requests are `invalid_client`, its authorization requests get the error page; tokens already issued expire normally. When the register cannot be consulted, the client stays active until the next successful check. **That is a demo choice, to be reassessed for production.**
+- **Storage.** Registered clients are kept in memory. After a restart of the authorization server a QTSP gets `invalid_client` and must register again; the reference client of slice 6 has to handle that. There is no client configuration endpoint (RFC 7592).
+
 ## Layout
 
 Ports and adapters, as `AGENTS.md` asks for a service with an authorization boundary:
 
 | Package | |
 |---|---|
-| `internal/authorization` | the core: the authorization and token requests, PKCE, codes, client authentication, DPoP proofs, token issuance. Ports `Clients` and `Identifier` |
+| `internal/authorization` | the core: the authorization, token and registration requests, PKCE, codes, client authentication, DPoP proofs, token issuance, re-verification. Ports `Clients`, `Identifier` and `Register` |
 | `internal/clientconfig` | `Clients` from the configuration file |
+| `internal/stubregister` | `Register`: the stub register |
+| `internal/qtspcert` | the `provision-qtsp-certificate` command |
 | `internal/testpersons` | `Identifier`: the identification stub |
 | `internal/httpapi` | the endpoints, and the translation to the responses of RFC 6749 |
 | `main.go` | composition root |
