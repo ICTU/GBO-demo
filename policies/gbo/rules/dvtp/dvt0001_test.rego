@@ -32,16 +32,25 @@ _years(years_arg) := _with_fields([fx.person("consent:identity"), fx.declaration
 
 _with_consent(changes) := object.union(_consent, changes)
 
+# The codes of the requirements that do not hold. A list that is undefined
+# leaves this undefined too, so the test fails rather than pass empty.
+_unmet(requirements) := {r.code | some r in requirements; not _holds(r)}
+
+_holds(r) if r.holds == true
+
 # Every reason the rule gives, for the request and for any field.
 _reasons(req, consent) := r if {
-	r := dvt0001.deny | {x | some reasons in dvt0001.deny_field; some x in reasons} with input as req
-		with data.gbo.consent.resolved as consent
+	request := dvt0001.requirements with input as req with data.gbo.consent.resolved as consent
+	fields := dvt0001.field_requirements with input as req with data.gbo.consent.resolved as consent
+	count(fields) == count(object.get(req, ["resource", "attributes", "graphql", "fields"], []))
+	r := _unmet(request) | {x | some checks in fields; some x in _unmet(checks)}
 }
 
 # The reasons for the field at position i.
 _reasons_on(req, consent, i) := r if {
-	r := dvt0001.deny | object.get(dvt0001.deny_field, i, set()) with input as req
-		with data.gbo.consent.resolved as consent
+	request := dvt0001.requirements with input as req with data.gbo.consent.resolved as consent
+	checks := dvt0001.field_requirements[i] with input as req with data.gbo.consent.resolved as consent
+	r := _unmet(request) | _unmet(checks)
 }
 
 # ── Allowed ─────────────────────────────────────────────────────────────
@@ -144,9 +153,10 @@ test_deny_retired_placeholder if {
 	_reasons_on(_person(fx.literal("consent:subject")), _consent, 0) == {"CONSTRAINT_MISMATCH"}
 }
 
-# A placeholder stands for someone only under a verified consent.
+# A placeholder stands for someone only under a verified consent: without
+# one the consent requirement refuses the field.
 test_deny_placeholder_that_stands_for_nobody if {
-	"CONSTRAINT_MISMATCH" in _reasons_on(_person(fx.literal("consent:identity")), _with_consent({"context_valid": false}), 0)
+	_reasons_on(_person(fx.literal("consent:identity")), _with_consent({"context_valid": false}), 0) == {"CONSENT_CONTEXT_INVALID"}
 }
 
 # A placeholder from a schema default is no placeholder the caller wrote.

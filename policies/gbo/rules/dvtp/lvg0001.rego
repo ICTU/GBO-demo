@@ -53,5 +53,5 @@ deny contains "SCOPE_NOT_ALLOWED" if lib.declared_scope != "lvg:vbo:eigendom"
 deny_field[i] contains "CONSTRAINT_MISMATCH" if {
 	some i, f in lib.fields
 	lib.key(f) == "Query.vbo"
-	not helper.names_consent_citizen(f, "bsn", {lib.identity_placeholder})
+	not helper.names_consent_citizen(f, "bsn", {"consent:identity"})
 }
