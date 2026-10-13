@@ -80,6 +80,9 @@ func read(path string) (map[string]authorization.RegisterEntry, error) {
 		if e.RegistryURI == "" || len(e.Identifiers) == 0 {
 			return nil, fmt.Errorf("register entry %q: registryURI and identifiers are required", e.RegistryURI)
 		}
+		if _, dup := entries[e.RegistryURI]; dup {
+			return nil, fmt.Errorf("register entry %q: registryURI is used more than once", e.RegistryURI)
+		}
 		entries[e.RegistryURI] = authorization.RegisterEntry{Identifiers: e.Identifiers, LegalName: e.LegalName, Entitlements: e.Entitlements}
 	}
 	return entries, nil

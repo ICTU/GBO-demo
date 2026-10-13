@@ -47,6 +47,20 @@ func TestLoad(t *testing.T) {
 			}
 		})
 	}
+	// Two persons with one id: the chooser would show both, but the second
+	// would be identified as the first.
+	t.Run("id used twice", func(t *testing.T) {
+		second := valid()
+		second["bsn"] = "2"
+		raw, _ := json.Marshal(map[string]any{"persons": []any{valid(), second}})
+		path := filepath.Join(t.TempDir(), "persons.json")
+		if err := os.WriteFile(path, raw, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(path); err == nil {
+			t.Fatalf("two test persons with the same id were accepted")
+		}
+	})
 	raw, _ := json.Marshal(map[string]any{"persons": []any{valid()}})
 	path := filepath.Join(t.TempDir(), "persons.json")
 	_ = os.WriteFile(path, raw, 0o600)

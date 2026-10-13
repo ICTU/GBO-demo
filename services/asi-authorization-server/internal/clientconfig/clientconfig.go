@@ -58,10 +58,15 @@ func Load(path string) (*Registry, error) {
 		return nil, fmt.Errorf("parse clients: %w", err)
 	}
 	var clients []*authorization.Client
+	seen := map[string]bool{}
 	for _, c := range doc.Clients {
 		if c.ClientID == "" || len(c.RedirectURIs) == 0 || len(c.JWKS.Keys) == 0 {
 			return nil, fmt.Errorf("client %q: client_id, redirect_uris and jwks are required", c.ClientID)
 		}
+		if seen[c.ClientID] {
+			return nil, fmt.Errorf("client %q: client_id is used more than once", c.ClientID)
+		}
+		seen[c.ClientID] = true
 		for _, k := range c.JWKS.Keys {
 			if !k.IsPublic() {
 				return nil, fmt.Errorf("client %q: jwks must contain public keys only", c.ClientID)

@@ -53,8 +53,8 @@ func (s Stub) Len() int { return len(s.persons) }
 
 var countryCode = regexp.MustCompile(`^[A-Z]{2}$`)
 
-// Load reads the test persons file. Every person needs an id, a BSN and the
-// five mandatory PID attributes; otherwise the file is refused.
+// Load reads the test persons file. Every person needs a unique id, a BSN and
+// the five mandatory PID attributes; otherwise the file is refused.
 func Load(path string) (Stub, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -75,6 +75,7 @@ func Load(path string) (Stub, error) {
 		return Stub{}, fmt.Errorf("parse test persons: %w", err)
 	}
 	var persons []Person
+	seen := map[string]bool{}
 	for _, p := range doc.Persons {
 		invalid := func(reason string) (Stub, error) {
 			return Stub{}, fmt.Errorf("test person %q: %s", p.ID, reason)
@@ -82,6 +83,8 @@ func Load(path string) (Stub, error) {
 		switch {
 		case p.ID == "" || p.BSN == "":
 			return invalid("id and bsn are required")
+		case seen[p.ID]:
+			return invalid("id is used more than once")
 		case p.FamilyName == "" || p.GivenName == "":
 			return invalid("family_name and given_name are required")
 		}
@@ -103,6 +106,7 @@ func Load(path string) (Stub, error) {
 				return invalid("nationalities must be ISO 3166-1 alpha-2 codes")
 			}
 		}
+		seen[p.ID] = true
 		persons = append(persons, Person{ID: p.ID, Identity: authorization.Identity{
 			BSN: p.BSN, FamilyName: p.FamilyName, GivenName: p.GivenName, Birthdate: p.Birthdate,
 			PlaceOfBirth: pob, Nationalities: p.Nationalities,

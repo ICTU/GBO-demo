@@ -26,6 +26,8 @@ func TestLoad(t *testing.T) {
 		"no registryURI": `{"entries":[{"identifiers":["NTRNL-1"]}]}`,
 		"no identifiers": `{"entries":[{"registryURI":"https://r.test/x"}]}`,
 		"not JSON":       `entries`,
+		"registryURI used twice": `{"entries":[{"registryURI":"https://r.test/x","identifiers":["NTRNL-1"],"entitlements":[]},` +
+			`{"registryURI":"https://r.test/x","identifiers":["NTRNL-1"],"entitlements":["` + authorization.QEAAProviderEntitlement + `"]}]}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "register.json")
