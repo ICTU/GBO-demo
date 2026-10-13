@@ -141,15 +141,16 @@ _request_failure := {"code": "CONFIG_ERROR", "subcode": "MAPPER_OUTPUT_MISSING"}
 _schema_pinned if _gql.schema.digest == data.gbo.graphql_schemas.digests[_service]
 
 # ── The rules ───────────────────────────────────────────────────────────────
-# Every package in a regime directory under ./rules (rules/dvtp, rules/eudi)
-# that names a rule_id is a rule. deny holds its reasons about the request as
-# a whole, deny_field[i] those about data field i; a rule grants a field when
-# neither has a reason for it.
+# Every package in a directory under ./rules (rules/asi, rules/dvtp,
+# rules/eudi) that names a rule_id is a rule. deny holds its reasons about the
+# request as a whole, deny_field[i] those about data field i; a rule grants a
+# field when neither has a reason for it.
 
 _rule_meta[rid] := {
 	"regime": _rule_doc(dir, pkg, "regime", ""),
 	"covers_types": _rule_doc(dir, pkg, "covers_types", set()),
 	"covers_fields": _rule_doc(dir, pkg, "covers_fields", set()),
+	"services": _rule_doc(dir, pkg, "services", null),
 	"deny": _rule_doc(dir, pkg, "deny", set()),
 	"deny_field": _rule_doc(dir, pkg, "deny_field", {}),
 } if {
@@ -176,7 +177,18 @@ _regime := "consent" if {
 _active_rules[rid] := m if {
 	some rid, m in _rule_meta
 	m.regime in {"", _regime}
+	_serves(m)
 }
+
+# ── The service decides which rules apply ───────────────────────────────────
+# A field key names a type and field, not the schema: two services can share
+# a key (Query.ingeschrevenPersoon is in both bri and brp). A rule naming
+# services binds only on those, by the FSC service signed in the contract; a
+# rule naming none binds on every service. An empty set binds nowhere.
+
+_serves(m) if m.services == null
+
+_serves(m) if _service in m.services
 
 _field_declared contains key if {
 	some _, m in _active_rules

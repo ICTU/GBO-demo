@@ -377,6 +377,63 @@ test_pid_rule_actors_are_disjoint_from_consent_consumers if {
 	count(issuers & _dvtp_consumer_oins) == 0
 }
 
+# ── The service decides which rules apply ────────────────────────────────
+# Query.ingeschrevenPersoon is a key of both bri and brp. A rule naming
+# services binds only on those; a rule naming none on every service.
+
+_scoped(services) := {"test": {"s": {
+	"rule_id": "S",
+	"covers_fields": {"Query.ingeschrevenPersoon"},
+	"services": services,
+	"deny": set(),
+}}}
+
+_unscoped := {"test": {"u": {
+	"rule_id": "U",
+	"covers_fields": {"Query.ingeschrevenPersoon"},
+	"deny": set(),
+}}}
+
+_person_on(service) := fx.request(fx.hv, service, [fx.person("999991772")], {})
+
+test_a_rule_for_brp_does_not_bind_on_bri if {
+	result := gbo.response with input as _person_on("bri") with data.gbo.rules as _scoped({"brp"})
+	fx.field_codes(result) == {"NO_APPLICABLE_RULE"}
+}
+
+test_a_rule_for_brp_binds_on_brp if {
+	result := gbo.response with input as _person_on("brp") with data.gbo.rules as _scoped({"brp"})
+	result.decision == true
+	result.context.granted[0].rule == "S"
+}
+
+test_a_rule_naming_no_service_binds_on_every_service if {
+	every service in ["bri", "brp"] {
+		result := gbo.response with input as _person_on(service) with data.gbo.rules as _unscoped
+		result.context.granted[0].rule == "U"
+	}
+}
+
+# Without a signed service a scoped rule has nothing to match; the schema
+# is left out, or the missing pin would deny first.
+test_a_rule_for_a_service_does_not_bind_without_one if {
+	req := json.remove(
+		fx.request_with(fx.hv, "", object.union(fx.graphql("bri", [fx.person("999991772")]), {"schema": null}), {}),
+		["subject/attributes/service_name"],
+	)
+	result := gbo.response with input as req with data.gbo.rules as _scoped({"brp"})
+	fx.field_codes(result) == {"NO_APPLICABLE_RULE"}
+	unscoped := gbo.response with input as req with data.gbo.rules as _unscoped
+	unscoped.context.granted[0].rule == "U"
+}
+
+test_an_empty_service_set_binds_nowhere if {
+	every service in ["bri", "brp"] {
+		result := gbo.response with input as _person_on(service) with data.gbo.rules as _scoped(set())
+		fx.field_codes(result) == {"NO_APPLICABLE_RULE"}
+	}
+}
+
 # ── Every GBO rule names one regime ──────────────────────────────────────
 # A rule naming none is evaluated in both regimes.
 
