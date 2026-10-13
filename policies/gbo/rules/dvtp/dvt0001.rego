@@ -71,7 +71,7 @@ deny contains "SCOPE_NOT_ALLOWED" if not regex.match(`^bd:ib:[0-9]{4}$`, lib.dec
 deny_field[i] contains "CONSTRAINT_MISMATCH" if {
 	some i, f in lib.fields
 	lib.key(f) == "Query.ingeschrevenPersoon"
-	not helper.names_consent_citizen(f, "bsn", {lib.identity_placeholder})
+	not helper.names_consent_citizen(f, "bsn", {"consent:identity"})
 }
 
 # Every requested belastingjaar needs a bd:ib:<year> scope in the consent: a

@@ -43,14 +43,12 @@ argument_values(f, name) := {v | some v in argument(f, name)}
 # ── Placeholders ─────────────────────────────────────────────────────────────
 # The names a consent-based query gives its subject. The consumer holds no
 # identifier of the citizen; after an allow the source puts in their place
-# its own value from the consent token: the BSN for identity, its pseudonym
-# of the citizen for pseudonym.
+# its own value from the consent token: the BSN for consent:identity, its
+# pseudonym of the citizen for consent:pseudonym. A rule names the one its
+# API takes; this set is for checks on every placeholder, such as that a
+# real BSN is none of them.
 
-identity_placeholder := "consent:identity"
-
-pseudonym_placeholder := "consent:pseudonym"
-
-subject_placeholders := {identity_placeholder, pseudonym_placeholder}
+subject_placeholders := {"consent:identity", "consent:pseudonym"}
 
 # ── Scope ────────────────────────────────────────────────────────────────────
 # The scope the consumer declares in X-GBO-Scope, header name in any case.
