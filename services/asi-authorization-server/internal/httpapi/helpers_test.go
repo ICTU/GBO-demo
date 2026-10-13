@@ -54,7 +54,18 @@ func newTestAS(t *testing.T) *testAS {
 
 func newTestASFor(t *testing.T, resource string) *testAS {
 	t.Helper()
+	return newTestASWithRegister(t, resource, nil)
+}
+
+// newTestASWithRegister uses register instead of the fake register when it
+// is not nil.
+func newTestASWithRegister(t *testing.T, resource string, register authorization.Register) *testAS {
+	t.Helper()
 	as := &testAS{keys: map[string]*ecdsa.PrivateKey{}, kids: map[string]string{}, dpopKey: newECKey(t), register: newFakeRegister(), ca: newTestCA(t)}
+	var reg authorization.Register = as.register
+	if register != nil {
+		reg = register
+	}
 	jwk := jose.JSONWebKey{Key: &as.dpopKey.PublicKey}
 	thumbprint, err := jwk.Thumbprint(crypto.SHA256)
 	if err != nil {
@@ -86,7 +97,7 @@ func newTestASFor(t *testing.T, resource string) *testAS {
 		Clients:      clientconfig.New(clients...),
 		Identifier:   testpersons.New(map[string]string{"frouke": bsnFrouke, "tom": "555555555"}),
 		Tokens:       tokens,
-		Register:     as.register,
+		Register:     reg,
 		TrustAnchors: as.ca.pool(),
 		Now:          as.now,
 	})

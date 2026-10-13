@@ -15,6 +15,8 @@ import (
 	"encoding/json"
 	"math/big"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -24,6 +26,7 @@ import (
 	"github.com/go-jose/go-jose/v4/jwt"
 
 	"gbo-demo/asi-authorization-server/internal/authorization"
+	"gbo-demo/asi-authorization-server/internal/stubregister"
 )
 
 const (
@@ -217,6 +220,39 @@ func TestRecheckDeactivatesAClientWithoutEntitlement(t *testing.T) { // D22
 	assertTokenError(t, as.postToken(t, form, as.proof(t, nil)), http.StatusUnauthorized, "invalid_client")
 	if resp := as.authorize(t, params); resp.StatusCode != http.StatusBadRequest || resp.Header.Get("Location") != "" {
 		t.Fatalf("authorization request of a deactivated client = %d, Location %q; want 400 without redirect", resp.StatusCode, resp.Header.Get("Location"))
+	}
+}
+
+// D22 through the stub register the demo runs: withdrawing the entitlement
+// from the register file deactivates the client at the next re-verification,
+// without a restart.
+func TestRecheckSeesAWithdrawalInTheRegisterFile(t *testing.T) { // D22, real adapter
+	path := filepath.Join(t.TempDir(), "register.json")
+	writeRegister := func(entitlement string) {
+		t.Helper()
+		doc := `{"entries":[{"registryURI":"` + qtspRegistryURI + `","identifiers":["` + qtspOrganizationID + `"],"entitlements":["` + entitlement + `"]}]}`
+		if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeRegister(authorization.QEAAProviderEntitlement)
+	register, err := stubregister.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	as := newTestASWithRegister(t, testResource, register)
+	id := as.registerQTSP(t)
+	if res := as.service.RecheckEntitlements(context.Background()); res.Deactivated != 0 {
+		t.Fatalf("recheck before the withdrawal = %+v, want nothing deactivated", res)
+	}
+	writeRegister(serviceProvider)
+	if res := as.service.RecheckEntitlements(context.Background()); res.Deactivated != 1 {
+		t.Fatalf("recheck after the withdrawal = %+v, want the client deactivated", res)
+	}
+	params := authorizeParams(newPKCE())
+	params.Set("client_id", id)
+	if resp := as.authorize(t, params); resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("authorization request of the deactivated client = %d, want 400", resp.StatusCode)
 	}
 }
 

@@ -38,3 +38,38 @@ func TestLoad(t *testing.T) {
 		})
 	}
 }
+
+// The file is read again on every lookup: a withdrawn entitlement is seen
+// without a restart, and a file that cannot be read is an unavailable
+// register.
+func TestLookupReadsTheFileAgain(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "register.json")
+	write := func(doc string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(`{"entries":[{"registryURI":"https://r.test/q","identifiers":["NTRNL-1"],"entitlements":["` + authorization.QEAAProviderEntitlement + `"]}]}`)
+	r, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e, err := r.Lookup(context.Background(), "https://r.test/q"); err != nil || len(e.Entitlements) != 1 {
+		t.Fatalf("entry = %+v, %v; want QEAA_Provider", e, err)
+	}
+	write(`{"entries":[{"registryURI":"https://r.test/q","identifiers":["NTRNL-1"],"entitlements":[]}]}`)
+	if e, err := r.Lookup(context.Background(), "https://r.test/q"); err != nil || len(e.Entitlements) != 0 {
+		t.Fatalf("entry after withdrawal = %+v, %v; want no entitlements", e, err)
+	}
+	write(`{"entries":`)
+	if _, err := r.Lookup(context.Background(), "https://r.test/q"); !errors.Is(err, authorization.ErrRegisterUnavailable) {
+		t.Fatalf("corrupt file: err = %v, want ErrRegisterUnavailable", err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Lookup(context.Background(), "https://r.test/q"); !errors.Is(err, authorization.ErrRegisterUnavailable) {
+		t.Fatalf("missing file: err = %v, want ErrRegisterUnavailable", err)
+	}
+}
