@@ -225,7 +225,7 @@ func TestOrderOfChecks(t *testing.T) { // case 20
 // be validated. That is not the client's fault: 503, an addition to Annex B.
 func TestUnavailableAuthorizationServerIs503(t *testing.T) {
 	authz, qtsp := newTestAuthorizationServer(t), newTestQTSP(t)
-	env := newTestServerWithKeys(t, authz, qtsp, asmetadata.New("http://127.0.0.1:1"))
+	env := newTestServerWithKeys(t, authz, qtsp, asmetadata.New("http://127.0.0.1:1", ""))
 	for _, path := range []string{"/verify", "/retrieve"} {
 		rec := post(t, env, path, env.person(bsnFrouke), verifyBody(idFamilyName, `{"family_name":"Jansen"}`))
 		assertProblem(t, rec, http.StatusServiceUnavailable)

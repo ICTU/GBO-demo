@@ -66,10 +66,13 @@ func serve() error {
 	}
 	issuer := strings.TrimRight(env("ASIP_AUTHORIZATION_SERVER", "http://localhost:4021"), "/")
 	publicURL := strings.TrimRight(env("ASIP_PUBLIC_URL", "http://localhost:4020"), "/")
+	// The address the ASIP reaches the authorization server on, when it
+	// differs from the issuer (compose: the issuer is a host address).
+	issuerInternal := os.Getenv("ASIP_AUTHORIZATION_SERVER_INTERNAL_URL")
 	resource := publicURL + httpapi.BasePath
 	handler, err := httpapi.NewHandler(httpapi.Config{
 		Verification:    verification.NewService(source, verification.DefaultCatalogue()),
-		Tokens:          accesstoken.NewValidator(issuer, resource, publicURL, asmetadata.New(issuer)),
+		Tokens:          accesstoken.NewValidator(issuer, resource, publicURL, asmetadata.New(issuer, issuerInternal)),
 		Sealer:          seal.New(key, chain),
 		Provider:        httpapi.Provider{LegalName: env("ASIP_PROVIDER_NAME", "GBO demo ASIP")},
 		AuthenticSource: httpapi.Provider{LegalName: env("ASIP_AUTHENTIC_SOURCE_NAME", "Basisregistratie Personen (mock)")},
