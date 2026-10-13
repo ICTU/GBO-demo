@@ -1,8 +1,8 @@
-.PHONY: up down logs clean certs require-ftv-postgres demo-manager manager-seed fsc-local-env fsc-ca fsc-up fsc-all-up fsc-brp-certs fsc-consent-register-certs fsc-gbo-pdp-certs fsc-ir-certs fsc-int-certs fsc-databases fsc-down fsc-test fsc-clean \
-        fsc-seed-bri fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-lvg fsc-seed-int fsc-seed-brp fsc-seed-rvig-source fsc-seed-metadata fsc-pdp-cert pdp-up \
+.PHONY: up down logs clean certs require-ftv-postgres demo-manager manager-seed fsc-local-env fsc-ca fsc-up fsc-all-up fsc-brp-certs fsc-consent-register-certs fsc-gbo-pdp-certs fsc-ir-certs fsc-int-certs fsc-asip-certs fsc-databases fsc-down fsc-test fsc-clean \
+        fsc-seed-bri fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-lvg fsc-seed-int fsc-seed-asip fsc-seed-brp fsc-seed-rvig-source fsc-seed-metadata fsc-pdp-cert pdp-up \
         eudi-images source-metadata-up \
         require-development-cas provision-development-certificates provision-asip-seal-certificate provision-asip-qtsp-certificate reconcile-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
-        demo-full demo-integrator demo-down eudi-config policy-check policy-test
+        demo-full demo-integrator demo-asi demo-down eudi-config policy-check policy-test
 
 -include .env
 -include fsc-infra/.env
@@ -52,6 +52,8 @@ PORT_TOESTEMMINGSPORTAAL := $(or $(GBO_PORT_TOESTEMMINGSPORTAAL),9002)
 PORT_DV_MOCK := $(or $(GBO_PORT_DV_MOCK),9001)
 PORT_KEYPER_MOCK := $(or $(GBO_PORT_KEYPER_MOCK),9004)
 PORT_INTEGRATOR_BACKEND := $(or $(GBO_PORT_INTEGRATOR_BACKEND),9423)
+PORT_ASI_PROVIDER := $(or $(GBO_PORT_ASI_PROVIDER),9424)
+PORT_ASI_AUTHORIZATION_SERVER := $(or $(GBO_PORT_ASI_AUTHORIZATION_SERVER),9425)
 PORT_JAEGER := $(or $(GBO_PORT_JAEGER),9686)
 PORT_PDP := $(or $(GBO_PORT_OPA),9181)
 PORT_EUDI_ADAPTER := $(or $(GBO_PORT_EUDI_ADAPTER),9409)
@@ -316,9 +318,24 @@ demo-integrator: fsc-int-certs
 	docker compose --profile integrator up --build -d integrator-backend
 	$(call banner,Integrator-backend:,$(PORT_INTEGRATOR_BACKEND))
 
+# Opt-in: the ASIP mock of the ETSI TS 119 478 route (services/asi-provider,
+# services/asi-authorization-server; epic #336). Run after demo-eudi or
+# demo-full: those publish the BRP source (service brp on ...0200). It adds the
+# ASIP's FSC peer (...1200), seeds its contract for brp with the grant link
+# /brp, issues the development seal certificate when missing, and starts both
+# services. The admission register lists the ASIP as a system participant.
+demo-asi: fsc-asip-certs
+	$(MAKE) fsc-databases
+	$(FSC_COMPOSE) --profile asi up -d asip-controller asip-manager asip-outway asip-txlog-api
+	$(MAKE) fsc-seed-asip
+	@test -f "$(ASIP_SEAL_DIR)/seal-cert.pem" || $(MAKE) provision-asip-seal-certificate
+	docker compose --profile asi up --build -d asi-authorization-server asi-provider
+	$(call banner,ASI authorization server:,$(PORT_ASI_AUTHORIZATION_SERVER))
+	$(call banner,ASIP:,$(PORT_ASI_PROVIDER))
+
 demo-down:
-	docker compose --profile full --profile manager --profile integrator down
-	$(FSC_COMPOSE) --profile integrator down
+	docker compose --profile full --profile manager --profile integrator --profile asi down
+	$(FSC_COMPOSE) --profile integrator --profile asi down
 
 logs:
 	docker compose logs -f
@@ -396,6 +413,11 @@ fsc-int-certs: fsc-up
 		bash fsc-infra/pki/bootstrap-integrator.sh; \
 	fi
 
+fsc-asip-certs: fsc-up
+	@if [ ! -f fsc-infra/orgs/asip/pki/org/asip.pem ]; then \
+		bash fsc-infra/pki/bootstrap-asip.sh; \
+	fi
+
 fsc-bd-up: fsc-directory-up fsc-bd-certs fsc-pdp-cert
 	$(MAKE) pdp-up
 	$(FSC_COMPOSE) up --build -d cfssl certportal postgres directory-migrations-controller directory-migrations-manager directory-migrations-txlog-api directory-controller directory-manager directory-inway directory-txlog-api directory-ui bd-migrations-controller bd-migrations-manager bd-migrations-txlog-api bd-controller bd-manager bd-inway bd-txlog-api
@@ -447,7 +469,8 @@ fsc-databases: fsc-local-env
 		fsc_cr_controller fsc_cr_manager fsc_cr_txlog \
 		fsc_pdp_controller fsc_pdp_manager fsc_pdp_txlog \
 		fsc_ir_controller fsc_ir_manager fsc_ir_txlog \
-		fsc_int_controller fsc_int_manager fsc_int_txlog; do \
+		fsc_int_controller fsc_int_manager fsc_int_txlog \
+		fsc_asip_controller fsc_asip_manager fsc_asip_txlog; do \
 		exists=$$($(FSC_COMPOSE) exec -T postgres \
 			psql -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$$database'"); \
 		if [ "$$exists" != "1" ]; then \
@@ -457,13 +480,13 @@ fsc-databases: fsc-local-env
 	done
 
 fsc-down:
-	$(FSC_COMPOSE) --profile integrator down
+	$(FSC_COMPOSE) --profile integrator --profile asi down
 
 fsc-test: fsc-up
 	bash fsc-infra/test/request-org-cert.sh
 
 fsc-clean:
-	$(FSC_COMPOSE) --profile integrator down -v --rmi local
+	$(FSC_COMPOSE) --profile integrator --profile asi down -v --rmi local
 	rm -f fsc-infra/pki/ca/*.pem fsc-infra/pki/ca/*.csr
 	rm -f fsc-infra/directory-peer/pki/org/*.pem
 	rm -f fsc-infra/directory-peer/pki/internal/*.pem
@@ -484,6 +507,8 @@ fsc-clean:
 	rm -f fsc-infra/orgs/installatieregister/pki/internal/*.pem
 	rm -f fsc-infra/orgs/integrator/pki/org/*.pem
 	rm -f fsc-infra/orgs/integrator/pki/internal/*.pem
+	rm -f fsc-infra/orgs/asip/pki/org/*.pem
+	rm -f fsc-infra/orgs/asip/pki/internal/*.pem
 	rm -f services/openftv-pdp/certs/*.pem
 
 # Contract-seed: register bri-service + publication + connection contract
@@ -577,6 +602,28 @@ fsc-seed-int: fsc-local-env
 		-w /work \
 		gbo-demo/pki-tools:local \
 		bash scripts/seed-bri-delegation-int.sh
+
+# The ASIP (...1200) connects to the BRP source (service brp, published on
+# ...0200 by fsc-seed-rvig-source) through a grant link on its Outway at /brp.
+# BD's Manager admits it because the onboarding register lists the ASIP with
+# source peer ...0200. demo-asi runs it.
+fsc-seed-asip: fsc-local-env
+	docker run --rm \
+		--network $(FSC_INFRA_NETWORK) \
+		--env-file fsc-infra/.env \
+		-e SERVICE_NAME=brp \
+		-e SERVICE_ENDPOINT_URL=http://brp-sidecar:4011 \
+		-e CONSUMER_PEER_ID=99999999900000001200 \
+		-e CONSUMER_MANAGER_URL=https://asip-manager:9443 \
+		-e CONSUMER_INTERNAL_DIR=/work/orgs/asip/pki/internal \
+		-e CONSUMER_ORG_CERT=/work/orgs/asip/pki/org/asip.pem \
+		-e CONSUMER_CONTROLLER_DB=fsc_asip_controller \
+		-e GRANT_LINK_PATH=/brp \
+		-e OUTWAY_NAME=AsipOutway-01 \
+		-v $(PWD)/fsc-infra:/work:ro \
+		-w /work \
+		gbo-demo/pki-tools:local \
+		bash scripts/seed-bri-contract.sh
 
 # BRP/RvIG is a separate local FSC provider peer (Peer ID ...0400), with its own
 # Manager, Controller, Inway and contracts.

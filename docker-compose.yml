@@ -1168,6 +1168,58 @@ services:
       timeout: 3s
       retries: 5
 
+  # ASIP mock of the ETSI TS 119 478 route (epic #336): the authorization
+  # server where a QTSP registers and obtains a token, and the ASIP that
+  # verifies attributes against the BRP source. Opt-in: profile "asi",
+  # started by `make demo-asi`. Both publish host ports, because the QTSP and
+  # the user's browser reach them from the host: the issuer and the ASIP's
+  # public URL are those host addresses. The ASIP fetches the authorization
+  # server's keys over the internal network.
+  asi-authorization-server:
+    build: ./services/asi-authorization-server
+    profiles: [asi]
+    ports:
+      - "${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}:4021"
+    environment:
+      - AZSP_ISSUER=http://localhost:${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}
+      - AZSP_RESOURCE=http://localhost:${GBO_PORT_ASI_PROVIDER:-9424}/authsrc-api
+      - AZSP_TRUST_ANCHORS_FILE=/trust/reader-ca-cert.pem
+      - AZSP_ENTITLEMENT_RECHECK_INTERVAL=${ASI_ENTITLEMENT_RECHECK_INTERVAL:-1h}
+    volumes:
+      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/development-ca/reader-ca-cert.pem:/trust/reader-ca-cert.pem:ro
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4021/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  asi-provider:
+    build: ./services/asi-provider
+    profiles: [asi]
+    ports:
+      - "${GBO_PORT_ASI_PROVIDER:-9424}:4020"
+    environment:
+      - ASIP_PUBLIC_URL=http://localhost:${GBO_PORT_ASI_PROVIDER:-9424}
+      - ASIP_AUTHORIZATION_SERVER=http://localhost:${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}
+      - ASIP_AUTHORIZATION_SERVER_INTERNAL_URL=http://asi-authorization-server:4021
+      - ASIP_SEAL_KEY_FILE=/seal/seal-key.pem
+      - ASIP_SEAL_CERT_FILE=/seal/seal-cert.pem
+    volumes:
+      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/asi-provider:/seal:ro
+    depends_on:
+      asi-authorization-server:
+        condition: service_healthy
+    networks:
+      - backend
+      - fsc-infra
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4020/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   # Frontends run as a Vite dev-server (live reload / HMR via source-mount).
   # The Dockerfile has an nginx final stage available — for a production
   # build (`target: final`), build it manually with `docker build`.

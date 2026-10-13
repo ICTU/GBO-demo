@@ -14,6 +14,16 @@ A mock Authentic Source Interface Provider. A qualified trust service provider (
 
 ## Run
 
+In the demo stack, after `make demo-eudi` or `make demo-full`:
+
+```bash
+make demo-asi
+```
+
+This adds the ASIP's FSC peer (OIN `99999999900000001200`, compose profile `asi`), lists it in the onboarding register with source peer `…0200`, seeds its connection contract for the BRP source (`brp`) with the grant link `/brp` on its Outway, issues the development seal certificate when missing, and starts both services: the authorization server on `GBO_PORT_ASI_AUTHORIZATION_SERVER` (default 9425) and the ASIP on `GBO_PORT_ASI_PROVIDER` (default 9424). Both are reached from the host: the issuer and the ASIP's public URL are host addresses, and the ASIP fetches the authorization server's keys on its internal address (`ASIP_AUTHORIZATION_SERVER_INTERNAL_URL`).
+
+On its own:
+
 ```bash
 make provision-asip-seal-certificate
 cd services/asi-provider
@@ -24,7 +34,7 @@ go run .
 
 A request needs an access token from the authorization server, obtained through the authorization code flow; see [`asi-authorization-server`](../asi-authorization-server). There is no client to do that by hand yet (slice 6 of #336); the end-to-end test of the authorization server runs the whole flow against this service.
 
-Configuration: `ASIP_ADDR` (default `:4020`), `ASIP_PUBLIC_URL` (the scheme and host QTSPs use, default `http://localhost:4020`; the token audience is this URL plus `/authsrc-api`), `ASIP_AUTHORIZATION_SERVER` (the issuer, default `http://localhost:4021`), `ASIP_SOURCE_FILE`, `ASIP_SEAL_KEY_FILE`, `ASIP_SEAL_CERT_FILE` (chain, leaf first), `ASIP_PROVIDER_NAME`, `ASIP_AUTHENTIC_SOURCE_NAME`.
+Configuration: `ASIP_ADDR` (default `:4020`), `ASIP_PUBLIC_URL` (the scheme and host QTSPs use, default `http://localhost:4020`; the token audience is this URL plus `/authsrc-api`), `ASIP_AUTHORIZATION_SERVER` (the issuer, default `http://localhost:4021`), `ASIP_AUTHORIZATION_SERVER_INTERNAL_URL` (where the ASIP reaches the authorization server when that differs from the issuer), `ASIP_SOURCE_FILE`, `ASIP_SEAL_KEY_FILE`, `ASIP_SEAL_CERT_FILE` (chain, leaf first), `ASIP_PROVIDER_NAME`, `ASIP_AUTHENTIC_SOURCE_NAME`.
 
 ## Layout
 

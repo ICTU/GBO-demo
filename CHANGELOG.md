@@ -28,6 +28,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     token carries the mandatory PID attributes next to the BSN (#523).
   - The ASIP validates every access token and DPoP proof, and takes the BSN
     of the user from the token, in plain text until slice 9 of #336.
+  - `make demo-asi` adds both services to a running `demo-eudi` or
+    `demo-full`: the ASIP as an FSC consumer peer of its own (...1200,
+    compose profile `asi`), listed in the onboarding register, with a
+    connection contract for the BRP source (`brp`) (#525).
   - Both services are laid out as ports and adapters: a core under
     `internal/`, an HTTP adapter, and `main.go` as the composition root.
 

@@ -181,6 +181,13 @@ integrator needs a mandate in the DvTP onboarding register. The demo uses the
 direct path by default; `make demo-integrator` adds the integrator to a running
 demo. See [docs/integrator.md](docs/integrator.md).
 
+A qualified trust service provider (QTSP) can verify attributes of a citizen
+against the BRP through the ASIP mock of the ETSI TS 119 478 route
+(`services/asi-provider`, `services/asi-authorization-server`). The ASIP is an
+FSC consumer peer of its own (...1200). `make demo-asi` adds it to a running
+`demo-eudi` or `demo-full`; see
+[services/asi-provider/README.md](services/asi-provider/README.md).
+
 `S01` is the architecture role identifier used in the demo diagrams for the
 consent-register; it is not a separate service. The demo consent token is a
 bearer JWT. The consent-register generates an ephemeral P-256 key

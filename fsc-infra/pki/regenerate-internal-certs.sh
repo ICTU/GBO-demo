@@ -50,6 +50,7 @@ _regen consent-register consent-register-internal-ca.json consent-register-inter
 _regen gbo-pdp         gbo-pdp-internal-ca.json       gbo-pdp-internal-cert.json    orgs/gbo-pdp
 _regen installatieregister installatieregister-internal-ca.json installatieregister-internal-cert.json orgs/installatieregister
 _regen integrator      integrator-internal-ca.json    integrator-internal-cert.json orgs/integrator
+_regen asip            asip-internal-ca.json          asip-internal-cert.json       orgs/asip
 
 echo
 echo ">>> Done. Restart all FSC containers to load the new internal certs."
