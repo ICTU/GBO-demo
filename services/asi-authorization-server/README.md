@@ -96,7 +96,6 @@ A JWT according to RFC 9068, signed with ES256, `typ` `at+jwt`, with:
 | `scope` | `verify`, `retrieve` or both: the operations ETSI TS 119 478 authorizes (clause 6.1.3.2) |
 | `cnf.jkt` | the thumbprint of the client's DPoP key (RFC 9449 section 6) |
 | `https://gbo.example/claims/bsn` | the BSN of the user, **in plain text** (D3). The BSN has no entry in the IANA JWT registry, so the claim name is collision-resistant (RFC 9068 section 2.2.2); the namespace is provisional (D8). Slice 9 of #336 protects it |
-
 | `family_name`, `given_name`, `birthdate`, `place_of_birth`, `nationalities` | the mandatory PID attributes of the user (CIR (EU) 2024/2977), under the names of the IANA JWT Claims Registry (RFC 9068 section 2.2.2), which the SD-JWT VC encoding of the PID rulebook uses too. `place_of_birth` is an object with `country`, `region` and/or `locality`; `nationalities` an array of ISO 3166-1 alpha-2 codes |
 
 The ASIP uses only the BSN; it does not check the PID claims.
