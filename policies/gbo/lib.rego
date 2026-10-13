@@ -39,6 +39,14 @@ default argument_is(_, _, _) := false
 
 argument_is(f, name, value) if argument(f, name) == value
 
+# ── Requirements ─────────────────────────────────────────────────────────────
+
+# One requirement of a rule in the requirements form: a condition and the
+# code a refused field gets when it does not hold. Undefined when the
+# condition is, which makes the rule's whole list undefined: the engine then
+# refuses, so a condition can never drop out unnoticed.
+require(holds, code) := {"holds": holds, "code": code}
+
 # The values a list argument was given, as a set (the mapper coerces a single
 # value to a list). Empty when the request gave none: the argument is
 # missing, null, or from a schema default. A filter check then refuses on

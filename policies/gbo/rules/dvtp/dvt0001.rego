@@ -9,18 +9,21 @@ package gbo.rules.dvtp.dvt0001
 #
 # How to read this rule
 #
-# requirements lists what must hold for the request as a whole. Each entry
-# is a condition ("holds") and the code a refused field gets when it does
-# not hold.
-# checks(f) lists what must hold for one field, chosen by the field's key.
-# A field without conditions of its own gets an empty list.
-# A field is allowed when every condition, for the request and for the
-# field, is true. A condition that cannot be evaluated at all makes the
+# The rule comes first, the definitions of its conditions after it.
+# requirements lists what must hold for the request as a whole, and
+# requirements_for(f) what must hold for one field, chosen by the field's
+# key. Each line is require(condition, code): the condition, and the code a
+# refused field gets when it does not hold. A field is allowed when every
+# condition, for the request and for the field, is true.
+#
+# Each condition is defined below with a default of false and one body that
+# says when it holds. A condition that cannot be evaluated at all makes its
 # whole list disappear, and then the field is refused: nothing passes
 # unchecked.
 
 import data.gbo.consent
 import data.gbo.lib
+import data.gbo.lib.require
 
 rule_id := "DVT0001"
 
@@ -53,47 +56,57 @@ covers_fields := {
 	"AangifteIH.indieningsdatum",
 }
 
-# ── The request ──────────────────────────────────────────────────────────────
+# ── The rule ─────────────────────────────────────────────────────────────────
 
 requirements := [
-	# The consent is valid: verified, known to the register, not withdrawn,
-	# not expired. The code says which of these failed.
-	{"holds": consent.valid, "code": consent.problem},
-	# It was given to the party the call is made for.
-	{"holds": consent.given_to_caller, "code": "CONSENT_ACTOR_MISMATCH"},
-	# It covers the scope the consumer declares.
-	{"holds": consent.covers_declared_scope, "code": "CONSENT_SCOPE_MISMATCH"},
-	# That scope is the income question, for one belastingjaar. The consent
-	# checks alone would not do: a consent for lvg:vbo:eigendom, sent with
-	# that scope, covers it.
-	{"holds": regex.match(`^bd:ib:[0-9]{4}$`, lib.declared_scope), "code": "SCOPE_NOT_ALLOWED"},
+	require(consent.valid, consent.problem),
+	require(consent.given_to_caller, "CONSENT_ACTOR_MISMATCH"),
+	require(consent.covers_declared_scope, "CONSENT_SCOPE_MISMATCH"),
+	require(asks_the_income_question, "SCOPE_NOT_ALLOWED"),
 ]
 
-# ── The fields ───────────────────────────────────────────────────────────────
+# For every field of the request, its list is requirements_for(f). This line
+# is the same in every rule: OPA cannot let the engine call a function for
+# each field, so the rule lays the lists out by the field's position itself.
+field_requirements[i] := requirements_for(f) if some i, f in lib.fields
 
-field_requirements[i] := checks(f) if some i, f in lib.fields
-
-# The question is about the consent's citizen: bsn is the identity
-# placeholder, for which the source puts in the BSN from the verified
-# consent token, not a BSN the provider chose. The income API takes a BSN,
-# not a pseudonym.
-checks(f) := [{"holds": lib.argument_is(f, "bsn", "consent:identity"), "code": "CONSTRAINT_MISMATCH"}] if {
+requirements_for(f) := [require(asks_about_the_consenting_citizen(f), "CONSTRAINT_MISMATCH")] if {
 	lib.key(f) == "Query.ingeschrevenPersoon"
 }
 
-# Years were asked for, and the consent covers each of them: a consent for
-# 2025 only refuses a query for 2024 and 2025. No year filter refuses too,
-# as the source would return every year.
-checks(f) := [{"holds": years_consented(f), "code": "YEAR_NOT_COVERED"}] if {
+requirements_for(f) := [require(years_are_consented(f), "YEAR_NOT_COVERED")] if {
 	lib.key(f) == "IngeschrevenPersoon.heeftBelastingjaarAangifte"
 }
 
-# Every other field has no condition of its own.
-checks(f) := [] if not lib.key(f) in {"Query.ingeschrevenPersoon", "IngeschrevenPersoon.heeftBelastingjaarAangifte"}
+requirements_for(f) := [] if not lib.key(f) in fields_with_conditions
 
-default years_consented(_) := false
+# The fields that have a condition of their own, above. Every other field
+# has none and gets an empty list.
+fields_with_conditions := {"Query.ingeschrevenPersoon", "IngeschrevenPersoon.heeftBelastingjaarAangifte"}
 
-years_consented(f) if {
+# ── The conditions ───────────────────────────────────────────────────────────
+
+# The consumer asks the income question, for one belastingjaar. The consent
+# checks alone would not do: a consent for lvg:vbo:eigendom, sent with that
+# scope, covers it.
+default asks_the_income_question := false
+
+asks_the_income_question if regex.match(`^bd:ib:[0-9]{4}$`, lib.declared_scope)
+
+# The question is about the citizen who consented: bsn is the identity
+# placeholder, which the source replaces with the BSN from the verified
+# consent token, not a BSN the provider chose. The income API takes a BSN,
+# not a pseudonym.
+default asks_about_the_consenting_citizen(_) := false
+
+asks_about_the_consenting_citizen(f) if lib.argument_is(f, "bsn", "consent:identity")
+
+# Years were asked for, and the consent covers each of them: a consent for
+# 2025 only refuses a query for 2024 and 2025. No year filter fails too, as
+# the source would return every year.
+default years_are_consented(_) := false
+
+years_are_consented(f) if {
 	years := lib.argument_values(f, "belastingjaren")
 	count(years) > 0
 	every year in years {

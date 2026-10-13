@@ -27,3 +27,13 @@ test_fields_are_every_mapper_record if {
 	got := lib.fields with input as fx.request(fx.hv, "bri", fields, fx.scope_headers("bd:ib:2025"))
 	got == fields
 }
+
+# ── Requirements ─────────────────────────────────────────────────────────
+
+# require keeps the requirements form closed: a requirement on missing data
+# leaves the whole list undefined, which the engine refuses.
+_list_with_a_requirement_on_missing_data := [lib.require(true, "A"), lib.require(data.gbo.no_such_document, "B")]
+
+test_a_requirement_on_missing_data_leaves_its_list_undefined if {
+	not _list_with_a_requirement_on_missing_data
+}
