@@ -1,8 +1,41 @@
 {
+  "_comment": "Test persons of the identification stub. Names, birth dates and nationalities equal the source of the ASIP (services/asi-provider/testdata/persons.json); the places of birth are test data.",
   "persons": [
-    { "login_hint": "frouke", "bsn": "999991772" },
-    { "login_hint": "joost", "bsn": "123456789" },
-    { "login_hint": "sanne", "bsn": "987654321" },
-    { "login_hint": "tom", "bsn": "555555555" }
+    {
+      "id": "frouke",
+      "bsn": "999991772",
+      "family_name": "Jansen",
+      "given_name": "Frouke",
+      "birthdate": "2000-03-24",
+      "place_of_birth": { "country": "NL", "locality": "Rotterdam" },
+      "nationalities": ["NL", "BE"]
+    },
+    {
+      "id": "joost",
+      "bsn": "123456789",
+      "family_name": "Bakker",
+      "given_name": "Joost Pieter",
+      "birthdate": "1989-02-11",
+      "place_of_birth": { "country": "NL", "locality": "Utrecht" },
+      "nationalities": ["NL"]
+    },
+    {
+      "id": "sanne",
+      "bsn": "987654321",
+      "family_name": "Meijer",
+      "given_name": "Sanne",
+      "birthdate": "1994-12-30",
+      "place_of_birth": { "country": "NL", "locality": "Groningen" },
+      "nationalities": ["NL"]
+    },
+    {
+      "id": "tom",
+      "bsn": "555555555",
+      "family_name": "Willems",
+      "given_name": "Tom",
+      "birthdate": "1982-05-08",
+      "place_of_birth": { "country": "BE", "locality": "Antwerpen" },
+      "nationalities": ["BE"]
+    }
   ]
 }

@@ -29,7 +29,7 @@ import (
 	"gbo-demo/asi-authorization-server/internal/authorization"
 )
 
-func TestEndToEndVerify(t *testing.T) { // case 24 (through /verify), case 37, case D2
+func TestEndToEndVerify(t *testing.T) { // case 24 (through /verify), case 37, case D2; S12, S13 (through the chooser)
 	if testing.Short() {
 		t.Skip("builds and starts services/asi-provider")
 	}
@@ -111,12 +111,15 @@ func TestEndToEndVerify(t *testing.T) { // case 24 (through /verify), case 37, c
 		t.Fatalf("/retrieve with a verify token = %d, want 401", r.status)
 	}
 
-	// Case 37: no log line of either service contains the plaintext BSN.
+	// Case 37, S13: no log line of either service contains the BSN or a PID
+	// value of the test person.
 	_ = asip.Process.Kill()
 	_ = asip.Wait()
 	for name, logs := range map[string]string{"asi-authorization-server": asLogs.String(), "asi-provider": asipLogs.String()} {
-		if strings.Contains(logs, bsnFrouke) {
-			t.Errorf("%s log contains the BSN:\n%s", name, logs)
+		for _, value := range []string{bsnFrouke, "Jansen", "Frouke", "2000-03-24", "Rotterdam"} {
+			if strings.Contains(logs, value) {
+				t.Errorf("%s log contains %q:\n%s", name, value, logs)
+			}
 		}
 	}
 }

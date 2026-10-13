@@ -52,13 +52,6 @@ type Clients interface {
 	Client(id string) (*Client, bool)
 }
 
-// Identifier identifies the user during the authorization request
-// (REQ-AZSP-6.1.3.1-02) and returns the BSN. It is the seam where slice 3
-// puts the test-person chooser and slice 7 the OpenID4VP PID disclosure.
-type Identifier interface {
-	Identify(loginHint string) (bsn string, ok bool)
-}
-
 // Error is an OAuth error response: RFC 6749 sections 4.1.2.1 and 5.2,
 // RFC 8707 and RFC 9449.
 type Error struct{ Code, Description string }
@@ -89,11 +82,12 @@ type Config struct {
 }
 
 type Service struct {
-	cfg         Config
-	registered  *registeredClients
-	codes       *codeStore
-	assertions  *replayCache
-	proofReplay *replayCache
+	cfg          Config
+	registered   *registeredClients
+	transactions *transactionStore
+	codes        *codeStore
+	assertions   *replayCache
+	proofReplay  *replayCache
 }
 
 func NewService(cfg Config) *Service {
@@ -101,11 +95,12 @@ func NewService(cfg Config) *Service {
 		cfg.Now = time.Now
 	}
 	return &Service{
-		cfg:         cfg,
-		registered:  &registeredClients{clients: map[string]*registeredClient{}},
-		codes:       &codeStore{codes: map[string]authorizationCode{}},
-		assertions:  newReplayCache(),
-		proofReplay: newReplayCache(),
+		cfg:          cfg,
+		registered:   &registeredClients{clients: map[string]*registeredClient{}},
+		transactions: &transactionStore{m: map[string]pendingAuthorization{}},
+		codes:        &codeStore{codes: map[string]authorizationCode{}},
+		assertions:   newReplayCache(),
+		proofReplay:  newReplayCache(),
 	}
 }
 
@@ -130,31 +125,36 @@ func (s *Service) Metadata() map[string]any {
 
 func (s *Service) JWKS() jose.JSONWebKeySet { return s.cfg.Tokens.jwks }
 
+// Issuer is the issuer identifier: the public base URL of this server.
+func (s *Service) Issuer() string { return s.cfg.Issuer }
+
 // --- authorization request (RFC 6749 section 4.1.1) ---------------------------
 
 type AuthorizationRequest struct {
 	ResponseType, ClientID, RedirectURI, Scope, State string
 	CodeChallenge, CodeChallengeMethod                string
 	Resources                                         []string
-	// LoginHint names a test person for the identification stub.
+	// LoginHint may name a test person to preselect; it never identifies.
 	LoginHint string
 }
 
 // AuthorizationResponse goes back to the client at RedirectURI: a Code, or
-// an Err (RFC 6749 sections 4.1.2 and 4.1.2.1), with the State.
+// an Err (RFC 6749 sections 4.1.2 and 4.1.2.1), with the State. A valid
+// authorization request is Pending: the user decides first.
 type AuthorizationResponse struct {
 	RedirectURI string
 	Code        string
 	State       string
 	Err         *Error
+	Pending     *Transaction
 }
 
 // codeChallengePattern is a base64url SHA-256 digest: 43 characters.
 var codeChallengePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 
 // Authorize handles an authorization request. An unknown client or
-// redirect_uri is a NotRedirectableError; every other outcome goes back to
-// the client.
+// redirect_uri is a NotRedirectableError; an invalid request goes back to the
+// client; a valid one becomes a transaction for the user to decide.
 func (s *Service) Authorize(req AuthorizationRequest) (AuthorizationResponse, error) {
 	c, ok := s.client(req.ClientID)
 	if !ok {
@@ -184,19 +184,21 @@ func (s *Service) Authorize(req AuthorizationRequest) (AuthorizationResponse, er
 	if !ok {
 		return fail("invalid_target", "resource must be "+s.cfg.Resource)
 	}
-	bsn, ok := s.cfg.Identifier.Identify(req.LoginHint)
-	if !ok {
-		return fail("access_denied", "the user could not be identified")
-	}
-	resp.Code = s.codes.put(authorizationCode{
-		clientID:    c.ID,
+	binding := RandomID()
+	id := s.transactions.put(pendingAuthorization{
+		binding:     binding,
 		redirectURI: resp.RedirectURI,
-		scope:       scope,
-		challenge:   req.CodeChallenge,
-		audience:    audience,
-		bsn:         bsn,
-		expires:     s.cfg.Now().Add(AuthorizationCodeLifetime),
+		state:       req.State,
+		code: authorizationCode{
+			clientID:    c.ID,
+			redirectURI: resp.RedirectURI,
+			scope:       scope,
+			challenge:   req.CodeChallenge,
+			audience:    audience,
+		},
+		expires: s.cfg.Now().Add(TransactionLifetime),
 	})
+	resp.Pending = &Transaction{ID: id, Binding: binding, ClientID: c.ID, Scope: scope, Persons: s.cfg.Identifier.Persons(), Preselected: req.LoginHint}
 	return resp, nil
 }
 
@@ -289,7 +291,7 @@ func (s *Service) Token(req TokenRequest) (TokenResponse, *Error) {
 	if _, ok := s.resource(req.Resources, code.audience); !ok {
 		return TokenResponse{}, &Error{Code: "invalid_target", Description: "resource must be " + code.audience}
 	}
-	token, err := s.cfg.Tokens.issue(c.ID, code.audience, code.scope, code.bsn, jkt, now)
+	token, err := s.cfg.Tokens.issue(c.ID, code.audience, code.scope, code.identity, jkt, now)
 	if err != nil {
 		return TokenResponse{}, &Error{Code: "server_error", Description: "could not issue the access token"}
 	}
@@ -312,8 +314,9 @@ func pkceMatches(challenge, verifier string) bool {
 // --- authorization codes -------------------------------------------------------
 
 type authorizationCode struct {
-	clientID, redirectURI, scope, challenge, audience, bsn string
-	expires                                                time.Time
+	clientID, redirectURI, scope, challenge, audience string
+	identity                                          Identity
+	expires                                           time.Time
 }
 
 type codeStore struct {

@@ -82,10 +82,20 @@ func TestFullFlowIssuesDPoPBoundAccessToken(t *testing.T) { // case 24
 		"client_id":            testClientID,
 		"scope":                "verify",
 		authorization.BSNClaim: bsnFrouke,
+		"family_name":          "Jansen",
+		"given_name":           "Frouke",
+		"birthdate":            "2000-03-24",
 	} {
 		if claims[field] != want {
 			t.Errorf("%s = %v, want %v", field, claims[field], want)
 		}
+	}
+	// S2: the PID attributes of the chosen test person.
+	if pob, _ := claims["place_of_birth"].(map[string]any); pob["country"] != "NL" || pob["locality"] != "Rotterdam" || len(pob) != 2 {
+		t.Errorf("place_of_birth = %v, want country NL and locality Rotterdam", claims["place_of_birth"])
+	}
+	if n, _ := claims["nationalities"].([]any); len(n) != 2 || n[0] != "NL" || n[1] != "BE" {
+		t.Errorf("nationalities = %v, want [NL BE]", claims["nationalities"])
 	}
 	if cnf, _ := claims["cnf"].(map[string]any); cnf["jkt"] != as.jkt {
 		t.Errorf("cnf = %v, want jkt %s", claims["cnf"], as.jkt)
@@ -136,7 +146,7 @@ func TestResourceIndicator(t *testing.T) { // case 26
 
 // --- case 27-30, 36: the authorization request ---------------------------------
 
-func TestAuthorizationRequestErrors(t *testing.T) { // case 27, 28, 30, 36
+func TestAuthorizationRequestErrors(t *testing.T) { // case 27, 28, 30; S4
 	as := newTestAS(t)
 	for _, tc := range []struct {
 		name string
@@ -150,8 +160,6 @@ func TestAuthorizationRequestErrors(t *testing.T) { // case 27, 28, 30, 36
 		{"30: scope outside the registration", func(q url.Values) { q.Set("client_id", verifyOnlyID); q.Set("scope", "retrieve") }, "invalid_scope"},
 		{"30b: unknown scope", func(q url.Values) { q.Set("scope", "verify admin") }, "invalid_scope"},
 		{"30c: no scope", func(q url.Values) { q.Del("scope") }, "invalid_scope"},
-		{"36: unknown test person", func(q url.Values) { q.Set("login_hint", "nobody") }, "access_denied"},
-		{"36b: no login_hint", func(q url.Values) { q.Del("login_hint") }, "access_denied"},
 		{"response_type is not code", func(q url.Values) { q.Set("response_type", "token") }, "unsupported_response_type"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

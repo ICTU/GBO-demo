@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -95,7 +96,7 @@ func newTestASWithRegister(t *testing.T, resource string, register authorization
 		Issuer:       as.srv.URL,
 		Resource:     resource,
 		Clients:      clientconfig.New(clients...),
-		Identifier:   testpersons.New(map[string]string{"frouke": bsnFrouke, "tom": "555555555"}),
+		Identifier:   testpersons.New(testFrouke, testTom),
 		Tokens:       tokens,
 		Register:     reg,
 		TrustAnchors: as.ca.pool(),
@@ -169,15 +170,93 @@ func assertAuthorizeError(t *testing.T, resp *http.Response, code string) {
 	}
 }
 
-// code runs the authorization request and returns the authorization code.
+// code runs the authorization request, picks the test person named in
+// login_hint (Frouke without one) on the chooser and approves, and returns
+// the authorization code.
 func (as *testAS) code(t *testing.T, params url.Values) string {
 	t.Helper()
-	q := redirectParams(t, as.authorize(t, params))
+	person := params.Get("login_hint")
+	if person == "" {
+		person = "frouke"
+	}
+	tx := as.startAuthorization(t, params)
+	q := redirectParams(t, as.decide(t, tx.id, tx.cookie, url.Values{"person": {person}, "decision": {"approve"}}))
 	if q.Get("error") != "" || q.Get("code") == "" {
 		t.Fatalf("redirect = %v, want a code", q)
 	}
 	return q.Get("code")
 }
+
+// pendingTx is a chooser page: the transaction and its browser cookie.
+type pendingTx struct {
+	id     string
+	cookie *http.Cookie
+	page   string
+	header http.Header
+}
+
+var transactionField = regexp.MustCompile(`name="transaction" value="([^"]+)"`)
+
+// startAuthorization sends a valid authorization request and returns the
+// chooser it answers with.
+func (as *testAS) startAuthorization(t *testing.T, params url.Values) pendingTx {
+	t.Helper()
+	c := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err := c.Get(as.srv.URL + authorization.AuthorizePath + "?" + params.Encode())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("authorization request = %d, want the chooser (200); Location %q", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	m := transactionField.FindStringSubmatch(string(body))
+	if m == nil {
+		t.Fatalf("chooser has no transaction field:\n%s", body)
+	}
+	var cookie *http.Cookie
+	for _, ck := range resp.Cookies() {
+		if ck.Name == "azsp_tx_"+m[1] {
+			cookie = ck
+		}
+	}
+	if cookie == nil {
+		t.Fatalf("chooser set no transaction cookie")
+	}
+	return pendingTx{id: m[1], cookie: cookie, page: string(body), header: resp.Header}
+}
+
+// decide posts a decision for transaction tx with cookie (none when nil).
+func (as *testAS) decide(t *testing.T, tx string, cookie *http.Cookie, form url.Values) *http.Response {
+	t.Helper()
+	form.Set("transaction", tx)
+	req, _ := http.NewRequest(http.MethodPost, as.srv.URL+DecisionPath, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if cookie != nil {
+		req.AddCookie(cookie)
+	}
+	c := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return resp
+}
+
+// The test persons of the stub in these tests.
+var (
+	testFrouke = testpersons.Person{ID: "frouke", Identity: authorization.Identity{
+		BSN: bsnFrouke, FamilyName: "Jansen", GivenName: "Frouke", Birthdate: "2000-03-24",
+		PlaceOfBirth: authorization.PlaceOfBirth{Country: "NL", Locality: "Rotterdam"}, Nationalities: []string{"NL", "BE"},
+	}}
+	testTom = testpersons.Person{ID: "tom", Identity: authorization.Identity{
+		BSN: "555555555", FamilyName: "Willems", GivenName: "Tom", Birthdate: "1982-05-08",
+		PlaceOfBirth: authorization.PlaceOfBirth{Country: "BE", Locality: "Antwerpen"}, Nationalities: []string{"BE"},
+	}}
+)
 
 // --- token request -------------------------------------------------------------
 

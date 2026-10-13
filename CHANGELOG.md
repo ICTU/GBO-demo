@@ -23,8 +23,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     statement sealed with the QTSP's certificate, checked against a stub
     register for the `QEAA_Provider` entitlement and re-verified
     periodically (`make provision-asip-qtsp-certificate` issues a test
-    certificate). User identification is a stub that is not conformant
-    (#503).
+    certificate) (#503). User identification is a test-person chooser where
+    the user also approves or denies the request; it is not conformant. The
+    token carries the mandatory PID attributes next to the BSN (#523).
   - The ASIP validates every access token and DPoP proof, and takes the BSN
     of the user from the token, in plain text until slice 9 of #336.
   - Both services are laid out as ports and adapters: a core under
