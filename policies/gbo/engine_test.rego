@@ -639,3 +639,21 @@ test_an_unknown_reason_alone_is_the_code if {
 	result.decision == false
 	fx.field_codes(result) == {"SOMETHING_NEW"}
 }
+
+# ── A field is never dropped ─────────────────────────────────────────────
+# A rule that does not evaluate (here: deny is not a set) leaves its field
+# without a decision. That field is refused as a fault in the policy, not
+# dropped while the other fields decide alone.
+_broken_and_sound_rules := {"test": {
+	"broken": {"rule_id": "BROKEN", "covers_fields": {"Query.ingeschrevenPersoon"}, "deny": "not a set"},
+	"sound": {"rule_id": "SOUND", "covers_fields": {"BelastingjaarAangifte.belastingjaar"}, "deny": set()},
+}}
+
+test_a_field_without_a_decision_is_refused_not_dropped if {
+	req := fx.request(fx.hv, "bri", [fx.person("999991772"), fx.year], {})
+	result := gbo.response with input as req with data.gbo.rules as _broken_and_sound_rules
+	result.decision == false
+	fx.client(result) == {"code": "ACCESS_DENIED"}
+	fx.request_code(result) == {"code": "CONFIG_ERROR", "subcode": "RULE_NOT_EVALUABLE"}
+	[[d.index, d.code] | some d in fx.denied(result)] == [[0, "RULE_NOT_EVALUABLE"]]
+}
