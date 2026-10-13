@@ -30,9 +30,13 @@ func TestLoadClients(t *testing.T) {
 		}
 		return c
 	}
-	load := func(t *testing.T, c map[string]any) (*Registry, error) {
+	load := func(t *testing.T, cs ...map[string]any) (*Registry, error) {
 		t.Helper()
-		raw, _ := json.Marshal(map[string]any{"clients": []any{c}})
+		list := make([]any, len(cs))
+		for i, c := range cs {
+			list[i] = c
+		}
+		raw, _ := json.Marshal(map[string]any{"clients": list})
 		path := filepath.Join(t.TempDir(), "clients.json")
 		if err := os.WriteFile(path, raw, 0o600); err != nil {
 			t.Fatal(err)
@@ -45,6 +49,11 @@ func TestLoadClients(t *testing.T) {
 	}
 	if c, ok := clients.Client("qtsp"); !ok || !c.Scopes["verify"] || !c.Scopes["retrieve"] {
 		t.Fatalf("client = %+v, want the client with verify and retrieve", c)
+	}
+	// The second of two clients with one client_id would silently replace
+	// the first.
+	if _, err := load(t, clientDoc(nil), clientDoc(func(c map[string]any) { c["scope"] = "verify" })); err == nil {
+		t.Fatalf("two clients with the same client_id were accepted")
 	}
 	for name, edit := range map[string]func(map[string]any){
 		"no client_id":                 func(c map[string]any) { delete(c, "client_id") },

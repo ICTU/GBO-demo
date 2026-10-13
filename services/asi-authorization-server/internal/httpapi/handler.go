@@ -8,23 +8,28 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"gbo-demo/asi-authorization-server/internal/authorization"
 )
 
 func NewHandler(service *authorization.Service) http.Handler {
-	h := &handler{service: service}
+	h := &handler{service: service, secureCookies: strings.HasPrefix(service.Issuer(), "https://")}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+authorization.MetadataPath, h.metadata)
 	mux.HandleFunc("GET "+authorization.JWKSPath, h.jwks)
 	mux.HandleFunc("GET "+authorization.AuthorizePath, h.authorize)
+	mux.HandleFunc("POST "+DecisionPath, h.decision)
 	mux.HandleFunc("POST "+authorization.TokenPath, h.token)
 	mux.HandleFunc("POST "+authorization.RegisterPath, h.register)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	return mux
 }
 
-type handler struct{ service *authorization.Service }
+type handler struct {
+	service       *authorization.Service
+	secureCookies bool
+}
 
 func (h *handler) metadata(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, h.service.Metadata())
@@ -52,6 +57,47 @@ func (h *handler) authorize(w http.ResponseWriter, r *http.Request) {
 		authorizeErrorPage(w, err.Error())
 		return
 	}
+	if resp.Pending != nil {
+		writeChooser(w, resp.Pending, h.secureCookies)
+		return
+	}
+	redirectAuthorization(w, r, resp)
+}
+
+// decision receives the user's choice on the chooser page.
+func (h *handler) decision(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
+	if err := r.ParseForm(); err != nil {
+		authorizeErrorPage(w, "the decision is not a form")
+		return
+	}
+	tx := r.PostForm.Get("transaction")
+	var binding string
+	if c, err := r.Cookie(transactionCookiePrefix + tx); err == nil {
+		binding = c.Value
+	}
+	choice := r.PostForm.Get("decision")
+	if choice != "approve" && choice != "deny" {
+		authorizeErrorPage(w, "the decision must be approve or deny")
+		return
+	}
+	resp, err := h.service.Decide(authorization.Decision{
+		TransactionID: tx,
+		Binding:       binding,
+		PersonID:      r.PostForm.Get("person"),
+		Approve:       choice == "approve",
+	})
+	if err != nil {
+		authorizeErrorPage(w, err.Error())
+		return
+	}
+	http.SetCookie(w, &http.Cookie{Name: transactionCookiePrefix + tx, Path: authorization.AuthorizePath, MaxAge: -1, HttpOnly: true, Secure: h.secureCookies, SameSite: http.SameSiteStrictMode})
+	redirectAuthorization(w, r, resp)
+}
+
+// redirectAuthorization sends the authorization response to the client: the
+// code, or the error, with the state (RFC 6749 sections 4.1.2 and 4.1.2.1).
+func redirectAuthorization(w http.ResponseWriter, r *http.Request, resp authorization.AuthorizationResponse) {
 	params := url.Values{"code": {resp.Code}, "state": {resp.State}}
 	if resp.Err != nil {
 		params = url.Values{"error": {resp.Err.Code}, "error_description": {resp.Err.Description}, "state": {resp.State}}
@@ -151,15 +197,6 @@ func tokenError(w http.ResponseWriter, e *authorization.Error) {
 		status = http.StatusInternalServerError
 	}
 	writeJSON(w, status, map[string]string{"error": e.Code, "error_description": e.Description})
-}
-
-// authorizeErrorPage answers an authorization request that cannot be
-// redirected safely: the client or its redirect_uri is unknown
-// (RFC 6749 section 4.1.2.1).
-func authorizeErrorPage(w http.ResponseWriter, description string) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(http.StatusBadRequest)
-	_, _ = w.Write([]byte("invalid_request: " + description + "\n"))
 }
 
 func redirectWith(w http.ResponseWriter, r *http.Request, redirectURI string, params url.Values) {

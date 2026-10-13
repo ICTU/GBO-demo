@@ -6,8 +6,9 @@
 // they are separate roles (ASIP and AZSP), so they are separate services with
 // separate keys.
 //
-// User identification is a stub: login_hint names a test person. It is not
-// conformant identity proofing; slice 3 of #336 replaces it.
+// User identification is a stub: the user picks a test person on a page and
+// approves or denies the request. It is not conformant identity proofing;
+// slice 7 of #336 adds OpenID4VP PID disclosure.
 //
 // This file is the composition root: configuration, construction, lifecycle.
 //
@@ -105,7 +106,7 @@ func serve() error {
 	errc := make(chan error, 1)
 	go func() {
 		slog.Info("listening", "addr", srv.Addr, "issuer", issuer, "clients", clients.Len(), "register_entries", register.Len(),
-			"identification", "stub: login_hint names a test person, not conformant")
+			"test_persons", persons.Len(), "identification", "stub: test-person chooser, not conformant")
 		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 			errc <- err
 		}

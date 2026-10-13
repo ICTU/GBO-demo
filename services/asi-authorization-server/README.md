@@ -16,7 +16,7 @@ The ASIP and the authorization server may be operated by one party, but they are
 | Dynamic client registration with a sealed software statement (REQ-AZSP-6.1.3.2-01) | implemented; see below. Clients can also be registered in configuration |
 | Register of wallet-relying parties (CIR (EU) 2025/848, D9) | **stub**: entries from `testdata/register.json`, read again on every lookup; the national register and its API (ETSI/EUDI TS5) are not available to this project |
 | QTSP certificates (REQ-AZSP-6.1.3.2-02) | **test certificates** from the development reader CA, not Wallet-Relying Party Access Certificates according to ETSI TS 119 411-8 |
-| User identification (REQ-AZSP-6.1.3.1-02) | **stub, not conformant**: the client names a test person in `login_hint` and no user is involved. Slice 3 replaces it with a test-person chooser, slice 7 with OpenID4VP PID disclosure |
+| User identification and authorization by the user (REQ-AZSP-6.1.3.1-02; clause 6.1.3.3, step 7) | **stub, not conformant**: a page where the user picks a test person and approves or denies the request; nothing is checked. Slice 7 adds OpenID4VP PID disclosure with the NL Wallet |
 | mTLS, PAR, refresh tokens | not offered (see below) |
 
 ## Endpoints
@@ -25,7 +25,8 @@ The ASIP and the authorization server may be operated by one party, but they are
 |---|---|
 | `GET /.well-known/oauth-authorization-server` | metadata (RFC 8414) |
 | `GET /jwks.json` | the public token signing key |
-| `GET /authorize` | authorization request: `response_type=code`, `client_id`, `redirect_uri`, `scope` (`verify`, `retrieve` or both), `state`, `code_challenge`, `code_challenge_method=S256`, optionally `resource`, and `login_hint` for the stub |
+| `GET /authorize` | authorization request: `response_type=code`, `client_id`, `redirect_uri`, `scope` (`verify`, `retrieve` or both), `state`, `code_challenge`, `code_challenge_method=S256`, optionally `resource` and `login_hint`. A valid request gets the test-person chooser |
+| `POST /authorize/decision` | the user's decision on the chooser: `transaction`, `person`, `decision` (`approve` or `deny`); answers with the redirect to the client |
 | `POST /token` | token request: `grant_type=authorization_code`, `code`, `redirect_uri`, `code_verifier`, `client_assertion_type`, `client_assertion`, and a `DPoP` proof header |
 | `POST /register` | client registration (RFC 7591): `redirect_uris`, `scope`, optionally `token_endpoint_auth_method`, and the `software_statement` |
 
@@ -80,7 +81,7 @@ Ports and adapters, as `AGENTS.md` asks for a service with an authorization boun
 | `internal/clientconfig` | `Clients` from the configuration file |
 | `internal/stubregister` | `Register`: the stub register |
 | `internal/qtspcert` | the `provision-qtsp-certificate` command |
-| `internal/testpersons` | `Identifier`: the identification stub |
+| `internal/testpersons` | `Identifier`: the test persons of the chooser |
 | `internal/httpapi` | the endpoints, and the translation to the responses of RFC 6749 |
 | `main.go` | composition root |
 
@@ -95,8 +96,17 @@ A JWT according to RFC 9068, signed with ES256, `typ` `at+jwt`, with:
 | `scope` | `verify`, `retrieve` or both: the operations ETSI TS 119 478 authorizes (clause 6.1.3.2) |
 | `cnf.jkt` | the thumbprint of the client's DPoP key (RFC 9449 section 6) |
 | `https://gbo.example/claims/bsn` | the BSN of the user, **in plain text** (D3). The BSN has no entry in the IANA JWT registry, so the claim name is collision-resistant (RFC 9068 section 2.2.2); the namespace is provisional (D8). Slice 9 of #336 protects it |
+| `family_name`, `given_name`, `birthdate`, `place_of_birth`, `nationalities` | the mandatory PID attributes of the user (CIR (EU) 2024/2977), under the names of the IANA JWT Claims Registry (RFC 9068 section 2.2.2), which the SD-JWT VC encoding of the PID rulebook uses too. `place_of_birth` is an object with `country`, `region` and/or `locality`; `nationalities` an array of ISO 3166-1 alpha-2 codes |
 
-The PID attributes (family name, given names, birth date, birth place, nationality) follow in slice 3.
+The ASIP uses only the BSN; it does not check the PID claims.
+
+## The test-person chooser
+
+A valid authorization request gets a page, in Dutch, with a banner that it is a test environment without real identification. The user picks a test person and approves or denies the request for the operation the client asks (`verify`, `retrieve`). Deny gives `access_denied`; approve gives the code. `login_hint` only preselects a test person.
+
+- The request waits as a transaction: kept server-side, valid for 5 minutes, used once, and bound to the browser by an HttpOnly, SameSite=Strict cookie set with the page. A decision for an unknown, used or expired transaction, without the cookie, or for an unknown test person gets an error page, not a redirect.
+- The page is not cached and may not be framed.
+- The test persons are in `AZSP_TEST_PERSONS_FILE` (default `testdata/test-persons.json`) with their BSN and the five PID attributes; names, birth dates and nationalities equal the source of the ASIP, the places of birth are test data. A person without all of them stops the server at start.
 
 ## Interpretations and choices
 
