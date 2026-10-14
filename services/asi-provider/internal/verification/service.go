@@ -45,6 +45,14 @@ func (e *UnknownAttributeError) Error() string {
 	return "unknown attribute identifier: " + e.Identifier
 }
 
+// NotHeldError is a requested attribute the source holds no value for, on
+// retrieve: 404 (REQ-ASIP-6.1.2.2-06). Verify answers Unknown instead.
+type NotHeldError struct{ Identifier string }
+
+func (e *NotHeldError) Error() string {
+	return "the authentic source holds no value for attribute " + e.Identifier
+}
+
 // Attribute is an attribute with its value.
 type Attribute struct {
 	Identifier string
@@ -123,7 +131,8 @@ func (s *Service) Verify(ctx context.Context, bsn string, req VerifyRequest) (Ve
 }
 
 // Retrieve returns the stored values of the requested attributes for the
-// person with bsn. An attribute the source holds no value for is left out.
+// person with bsn. If the source holds no value for one of them, the request
+// is not found as a whole: there is no partial result.
 func (s *Service) Retrieve(ctx context.Context, bsn string, identifiers []string, mandate bool) ([]Attribute, error) {
 	if len(identifiers) == 0 {
 		return nil, &MalformedError{Reason: "attributeIdentifiers must contain at least one attribute"}
@@ -140,11 +149,13 @@ func (s *Service) Retrieve(ctx context.Context, bsn string, identifiers []string
 	if err != nil {
 		return nil, err
 	}
-	out := []Attribute{}
+	out := make([]Attribute, 0, len(identifiers))
 	for _, id := range identifiers {
-		if v, ok := held[id]; ok {
-			out = append(out, Attribute{Identifier: id, Value: v.raw})
+		v, ok := held[id]
+		if !ok {
+			return nil, &NotHeldError{Identifier: id}
 		}
+		out = append(out, Attribute{Identifier: id, Value: v.raw})
 	}
 	return out, nil
 }

@@ -137,7 +137,7 @@ This mock seals the exact response body with a detached JWS (RFC 7515, appendix 
 Where ETSI TS 119 478 leaves room, this mock chooses as follows (D10 in #336):
 
 - **`Unknown`** means "no authentic source data was available to determine a match for the attribute for the user" (REQ-ASIP-6.1.1.2-04): the source holds no value for this person. The ARF (QTSPAS_02) answers `NoMatch` in the second case; ETSI clause 6.1.1 is the legally designated text, so it prevails.
-- **404** is returned only for an attribute identifier that is not in the catalogue of the data service, also when it is another data service's.
+- **404** is returned for an attribute identifier that is not in the catalogue of the data service, also when it is another data service's; and on `/retrieve`, when the source holds no value for one of the requested attributes. Retrieve gives no partial result, so a 200 always carries every requested attribute (REQ-ASIP-6.1.2.2-06, -02-01). On `/verify` a missing value is `Unknown`.
 - **No value is returned.** `Match` and `MatchWithVariation` carry no `attributeValue`, although Implementing Regulation (EU) 2026/1735 Annex IV allows it.
 - **`MatchWithVariation`** is returned when the values are equal after transliterating Latin letters that do not decompose as in ICAO Doc 9303 (ß → ss, æ → ae, ø → oe, ĳ → ij, …), removing diacritics, treating hyphens as spaces, collapsing white space and folding case. Transliteration between scripts (Cyrillic, Greek, …) is not supported.
 - **Arrays** (such as nationalities) are compared as sets: order does not matter.

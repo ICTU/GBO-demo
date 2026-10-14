@@ -107,9 +107,15 @@ func TestVerifyErrors(t *testing.T) {
 
 func TestRetrieve(t *testing.T) {
 	s := newTestService()
-	attrs, err := s.Retrieve(context.Background(), bsn, []string{idFamilyName, idGivenName}, false)
+	attrs, err := s.Retrieve(context.Background(), bsn, []string{idFamilyName}, false)
 	if err != nil || len(attrs) != 1 || attrs[0].Identifier != idFamilyName || string(attrs[0].Value) != `{"family_name":"Jansen"}` {
-		t.Fatalf("Retrieve = %+v, %v; want only the family name", attrs, err)
+		t.Fatalf("Retrieve = %+v, %v; want the family name", attrs, err)
+	}
+	// R3: one of the attributes has no value: not found, and no partial
+	// result (REQ-ASIP-6.1.2.2-06).
+	var notHeld *NotHeldError
+	if attrs, err := s.Retrieve(context.Background(), bsn, []string{idFamilyName, idGivenName}, false); !errors.As(err, &notHeld) || notHeld.Identifier != idGivenName || attrs != nil {
+		t.Fatalf("Retrieve with a missing value = %+v, %v; want NotHeldError for %s", attrs, err, idGivenName)
 	}
 	var malformed *MalformedError
 	var unknown *UnknownAttributeError
@@ -166,7 +172,7 @@ func TestOneQuestionToTheSourcePerRequest(t *testing.T) {
 	}
 
 	src.calls = nil
-	attrs, err := s.Retrieve(context.Background(), bsn, []string{idFamilyName, idAddress, idGivenName}, false)
+	attrs, err := s.Retrieve(context.Background(), bsn, []string{idFamilyName, idAddress}, false)
 	if err != nil || len(src.calls) != 1 || len(attrs) != 2 {
 		t.Fatalf("Retrieve = %+v, %v; calls %v, want one call and two values", attrs, err, src.calls)
 	}

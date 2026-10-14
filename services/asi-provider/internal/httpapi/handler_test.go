@@ -280,6 +280,36 @@ func TestRetrieveReturnsValue(t *testing.T) { // case 12
 	assertJSONEqual(t, resp.Attributes[0].AttributeValue, `{"family_name":"Jansen"}`)
 }
 
+// R2, R3: an attribute the source holds no value for is not found (404,
+// REQ-ASIP-6.1.2.2-06), also next to one it does hold: there is no partial
+// result, so the attributes of a 200 are never empty (REQ-ASIP-6.1.2.2-02-01).
+// The problem names the attribute and, like every error, is not sealed.
+func TestRetrieveWithoutAValueIs404(t *testing.T) {
+	env := newTestServer(t)
+	for name, ids := range map[string][]string{
+		"one attribute, no value":       {idAddress},
+		"one with a value, one without": {idFamilyName, idAddress},
+	} {
+		t.Run(name, func(t *testing.T) {
+			body, _ := json.Marshal(map[string]any{"attributeIdentifiers": func() []map[string]string {
+				out := []map[string]string{}
+				for _, id := range ids {
+					out = append(out, map[string]string{"attributeIdentifier": id})
+				}
+				return out
+			}()})
+			rec := post(t, env, "/retrieve", env.person(bsnTom), string(body))
+			if sig := rec.Header().Get("X-JWS-Signature"); sig != "" {
+				t.Errorf("a 404 is sealed: %s", sig)
+			}
+			if !strings.Contains(rec.Body.String(), idAddress) {
+				t.Errorf("the problem does not name %s: %s", idAddress, rec.Body)
+			}
+			assertProblem(t, rec, http.StatusNotFound)
+		})
+	}
+}
+
 func TestRetrieveUnknownAttributeIdentifierIs404(t *testing.T) { // case 12, error path
 	env := newTestServer(t)
 	rec := post(t, env, "/retrieve", env.person(bsnFrouke), `{"attributeIdentifiers":[{"attributeIdentifier":"`+idNotInCat+`"}]}`)

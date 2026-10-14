@@ -329,12 +329,13 @@ const maxRequestBody = 1 << 20
 func writeUseCaseError(w http.ResponseWriter, err error) {
 	var malformed *verification.MalformedError
 	var unknown *verification.UnknownAttributeError
+	var notHeld *verification.NotHeldError
 	switch {
 	case errors.As(err, &malformed):
 		writeProblem(w, http.StatusBadRequest, "Bad Request", err.Error())
 	case errors.Is(err, verification.ErrMandate):
 		writeProblem(w, http.StatusNotImplemented, "Not Implemented", err.Error())
-	case errors.As(err, &unknown):
+	case errors.As(err, &unknown), errors.As(err, &notHeld):
 		writeProblem(w, http.StatusNotFound, "Not Found", err.Error())
 	case errors.Is(err, verification.ErrSourceUnavailable):
 		slog.Warn("authentic source unavailable", "err", err)

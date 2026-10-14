@@ -606,6 +606,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   `SubjectTypePI`.
 
 ### Fixed
+- **Retrieve answered 200 without the attributes the source holds no value
+  for.** It left them out, and with none left the response had an empty
+  `attributes` array. It now answers 404 naming the attribute, with no
+  partial result (ETSI TS 119 478 REQ-ASIP-6.1.2.2-06 and -02-01). Verify is
+  unchanged: a missing value is `Unknown` (#533).
 - **The ASIP named the wrong metadata URL for an issuer with a path.** It
   appended `/.well-known/oauth-authorization-server` to the issuer; RFC 8414
   section 3.1 puts the suffix between the host and the path. The contract's
