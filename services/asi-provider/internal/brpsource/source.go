@@ -2,8 +2,9 @@
 // asked over FSC through the ASIP's own Outway and grant-link. The Inway's
 // PDP judges each query (rule ASI0001). It implements verification.Source.
 //
-// Per attribute the ASIP writes its own query, with only the fields that
-// attribute needs, and the BSN from the access token as a variable.
+// Per request the ASIP writes one query of its own, with only the fields the
+// requested attributes need, and the BSN from the access token as a
+// variable: one FSC transaction and one PDP decision per request.
 package brpsource
 
 import (
@@ -67,26 +68,40 @@ func New(outwayURL, path string) *Source {
 	}
 }
 
-// Value asks the BRP for one attribute of the person with bsn. A person the
-// BRP does not know, or a field it holds no value for, is no value: false.
-func (s *Source) Value(ctx context.Context, bsn, name string) (json.RawMessage, bool, error) {
-	selection, ok := selections[name]
-	if !ok {
-		return nil, false, fmt.Errorf("no BRP query for attribute %q", name)
+// Values asks the BRP once for the attributes with names of the person with
+// bsn. A person the BRP does not know, or a field it holds no value for, is
+// no value: the name is absent.
+func (s *Source) Values(ctx context.Context, bsn string, names []string) (map[string]json.RawMessage, error) {
+	var parts []string
+	for _, name := range names {
+		selection, ok := selections[name]
+		if !ok {
+			return nil, fmt.Errorf("no BRP query for attribute %q", name)
+		}
+		if !slices.Contains(parts, selection) {
+			parts = append(parts, selection)
+		}
 	}
-	p, err := s.query(ctx, bsn, selection)
-	if err != nil || p == nil {
-		return nil, false, err
-	}
-	value, ok := p.attribute(name)
-	if !ok {
-		return nil, false, nil
-	}
-	raw, err := json.Marshal(value)
+	p, err := s.query(ctx, bsn, strings.Join(parts, " "))
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
-	return raw, true, nil
+	values := map[string]json.RawMessage{}
+	if p == nil {
+		return values, nil
+	}
+	for _, name := range names {
+		value, ok := p.attribute(name)
+		if !ok {
+			continue
+		}
+		raw, err := json.Marshal(value)
+		if err != nil {
+			return nil, err
+		}
+		values[name] = raw
+	}
+	return values, nil
 }
 
 // person is the part of IngeschrevenPersoon the selections ask for.
@@ -160,7 +175,7 @@ func joinNonEmpty(parts ...string) string {
 // BSN, so they can be logged.
 func (s *Source) query(ctx context.Context, bsn, selection string) (*person, error) {
 	body, err := json.Marshal(map[string]any{
-		"query":     "query AsiAttribute($bsn: BSN!) { ingeschrevenPersoon(bsn: $bsn) { " + selection + " } }",
+		"query":     "query AsiAttributes($bsn: BSN!) { ingeschrevenPersoon(bsn: $bsn) { " + selection + " } }",
 		"variables": map[string]string{"bsn": bsn},
 	})
 	if err != nil {

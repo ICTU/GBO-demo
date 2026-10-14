@@ -64,7 +64,7 @@ Ports and adapters, as `AGENTS.md` asks for a service with an authorization boun
 | `internal/verification` | the core: Verify and Retrieve, the catalogue, matching and JSONPath fragments. Port `Source` |
 | `internal/accesstoken` | the ASIP as resource server: access token, DPoP proof and scope. Port `KeySource` |
 | `internal/asmetadata` | `KeySource`: the keys from the metadata of the authorization server |
-| `internal/brpsource` | `Source`: the BRP over FSC, one GraphQL query per attribute |
+| `internal/brpsource` | `Source`: the BRP over FSC, one GraphQL query per request |
 | `internal/dataservice` | the data services file |
 | `internal/seal` | the seal on every result |
 | `internal/sealcert` | the `provision-seal-certificate` command |
@@ -89,7 +89,7 @@ The access token is checked first (401). Then the request is validated against t
 
 ## The authentic source
 
-The ASIP is an FSC consumer peer of its own (`99999999900000001200`) with a connection contract for the BRP service `brp`. Per attribute it posts its own GraphQL query to the grant-link `/brp/graphql` on its Outway, with only the fields of that attribute and the BSN from the access token as the variable `bsn`. Every query carries a `Fsc-Transaction-Id` (UUID v7) and a `traceparent` whose trace id is that UUID.
+The ASIP is an FSC consumer peer of its own (`99999999900000001200`) with a connection contract for the BRP service `brp`. Per request it posts one GraphQL query of its own to the grant-link `/brp/graphql` on its Outway, with only the fields of the requested attributes and the BSN from the access token as the variable `bsn`: one FSC transaction and one PDP decision per request. If the chain refuses a field, the whole request fails (500): in this chain that is a fault in the deployment. ETSI TS 119 478 does not prescribe how an ASIP asks its source. Every query carries a `Fsc-Transaction-Id` (UUID v7) and a `traceparent` whose trace id is that UUID.
 
 | Attribute | BRP fields | Value |
 |---|---|---|

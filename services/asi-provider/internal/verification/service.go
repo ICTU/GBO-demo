@@ -9,15 +9,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 )
 
-// Source is the authentic source. Value returns the stored value of an
-// attribute for a person, as the JSON object the catalogue describes, and
-// false when the source holds none. An error means the source gave no
-// answer: ErrSourceUnavailable when it could not be reached, any other error
-// when it refused or answered in a way the ASIP cannot read.
+// Source is the authentic source. Values asks it once for the attributes
+// with names for a person, and returns per name the stored value as the JSON
+// object the catalogue describes; a name the source holds no value for is
+// absent. An error means the source gave no answer: ErrSourceUnavailable
+// when it could not be reached, any other error when it refused or answered
+// in a way the ASIP cannot read.
 type Source interface {
-	Value(ctx context.Context, bsn, name string) (json.RawMessage, bool, error)
+	Values(ctx context.Context, bsn string, names []string) (map[string]json.RawMessage, error)
 }
 
 var (
@@ -102,16 +104,16 @@ func (s *Service) Verify(ctx context.Context, bsn string, req VerifyRequest) (Ve
 			return VerifyResult{}, &UnknownAttributeError{Identifier: id}
 		}
 	}
+	held, err := s.held(ctx, bsn, requestedIdentifiers(req))
+	if err != nil {
+		return VerifyResult{}, err
+	}
 	var res VerifyResult
 	for _, a := range req.Attributes {
-		result, err := s.verifyAttribute(ctx, bsn, a)
-		if err != nil {
-			return VerifyResult{}, err
-		}
-		res.Attributes = append(res.Attributes, Result{Identifier: a.Identifier, Result: result})
+		res.Attributes = append(res.Attributes, Result{Identifier: a.Identifier, Result: verifyAttribute(held, a)})
 	}
 	for _, f := range req.Fragments {
-		result, err := s.verifyFragment(ctx, bsn, f)
+		result, err := verifyFragment(held, f)
 		if err != nil {
 			return VerifyResult{}, err
 		}
@@ -129,42 +131,78 @@ func (s *Service) Retrieve(ctx context.Context, bsn string, identifiers []string
 	if mandate {
 		return nil, ErrMandate
 	}
-	out := []Attribute{}
 	for _, id := range identifiers {
-		entry, ok := s.catalogue.lookup(id)
-		if !ok {
+		if _, ok := s.catalogue.lookup(id); !ok {
 			return nil, &UnknownAttributeError{Identifier: id}
 		}
-		raw, ok, err := s.source.Value(ctx, bsn, entry.Name)
-		if err != nil {
-			return nil, err
-		}
-		if ok {
-			out = append(out, Attribute{Identifier: id, Value: raw})
+	}
+	held, err := s.held(ctx, bsn, identifiers)
+	if err != nil {
+		return nil, err
+	}
+	out := []Attribute{}
+	for _, id := range identifiers {
+		if v, ok := held[id]; ok {
+			out = append(out, Attribute{Identifier: id, Value: v.raw})
 		}
 	}
 	return out, nil
 }
 
-func (s *Service) verifyAttribute(ctx context.Context, bsn string, a Attribute) (string, error) {
-	held, ok, err := s.heldValue(ctx, bsn, a.Identifier)
-	if err != nil || !ok {
-		return ResultUnknown, err
+// heldValue is a value the source holds, as it came and decoded.
+type heldValue struct {
+	raw     json.RawMessage
+	decoded any
+}
+
+// held asks the source once for the attributes with identifiers ids, which
+// are in the catalogue, and returns the values it holds by identifier. An
+// attribute without a value is absent: Unknown (ETSI TS 119 478
+// REQ-ASIP-6.1.1.2-04).
+func (s *Service) held(ctx context.Context, bsn string, ids []string) (map[string]heldValue, error) {
+	var names []string
+	for _, id := range ids {
+		entry, _ := s.catalogue.lookup(id)
+		if !slices.Contains(names, entry.Name) {
+			names = append(names, entry.Name)
+		}
+	}
+	values, err := s.source.Values(ctx, bsn, names)
+	if err != nil {
+		return nil, err
+	}
+	held := map[string]heldValue{}
+	for _, id := range ids {
+		entry, _ := s.catalogue.lookup(id)
+		raw, ok := values[entry.Name]
+		var v any
+		if !ok || json.Unmarshal(raw, &v) != nil {
+			continue
+		}
+		held[id] = heldValue{raw: raw, decoded: v}
+	}
+	return held, nil
+}
+
+func verifyAttribute(held map[string]heldValue, a Attribute) string {
+	v, ok := held[a.Identifier]
+	if !ok {
+		return ResultUnknown
 	}
 	var claimed any
 	_ = json.Unmarshal(a.Value, &claimed)
-	return compareValues(claimed, held), nil
+	return compareValues(claimed, v.decoded)
 }
 
 // verifyFragment compares a fragment. The ETSI schema requires the fragment
 // value to be an object; this mock reads it as {"<last member name>": value},
 // for example location "$.city" with value {"city": "Rotterdam"}.
-func (s *Service) verifyFragment(ctx context.Context, bsn string, f Fragment) (string, error) {
-	held, ok, err := s.heldValue(ctx, bsn, f.Identifier)
-	if err != nil || !ok {
-		return ResultUnknown, err
+func verifyFragment(held map[string]heldValue, f Fragment) (string, error) {
+	v, ok := held[f.Identifier]
+	if !ok {
+		return ResultUnknown, nil
 	}
-	selected, member, err := jsonPath(held, f.Location)
+	selected, member, err := jsonPath(v.decoded, f.Location)
 	if errors.Is(err, errPathEmpty) {
 		return ResultUnknown, nil
 	}
@@ -181,22 +219,6 @@ func (s *Service) verifyFragment(ctx context.Context, bsn string, f Fragment) (s
 		return "", &MalformedError{Reason: `fragment value must be an object with the single member "` + member + `"`}
 	}
 	return compareValues(value, selected), nil
-}
-
-// heldValue returns the decoded value the source holds, and false when the
-// source holds no value for this person: Unknown (ETSI TS 119 478
-// REQ-ASIP-6.1.1.2-04). Verify has checked that id is in the catalogue.
-func (s *Service) heldValue(ctx context.Context, bsn, id string) (any, bool, error) {
-	entry, _ := s.catalogue.lookup(id)
-	raw, ok, err := s.source.Value(ctx, bsn, entry.Name)
-	if err != nil || !ok {
-		return nil, false, err
-	}
-	var v any
-	if err := json.Unmarshal(raw, &v); err != nil {
-		return nil, false, nil
-	}
-	return v, true, nil
 }
 
 // validateVerifyRequest enforces the required members of the ETSI schema and

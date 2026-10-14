@@ -23,10 +23,11 @@ const (
 // outway is a fake Outway: it records the last request and answers with
 // status and body.
 type outway struct {
-	status int
-	body   string
-	got    *http.Request
-	query  struct {
+	status   int
+	body     string
+	requests int
+	got      *http.Request
+	query    struct {
 		Query     string            `json:"query"`
 		Variables map[string]string `json:"variables"`
 	}
@@ -37,6 +38,7 @@ func newOutway(t *testing.T, status int, body string) (*outway, *Source) {
 	o := &outway{status: status, body: body}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		o.got = r
+		o.requests++
 		raw, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(raw, &o.query)
 		w.WriteHeader(o.status)
@@ -56,10 +58,11 @@ const frouke = `"geslachtsnaam":"Jansen","voorvoegsel":null,"voornamen":"Frouke"
 
 func value(t *testing.T, s *Source, name string) (string, bool) {
 	t.Helper()
-	raw, ok, err := s.Value(context.Background(), bsn, name)
+	values, err := s.Values(context.Background(), bsn, []string{name})
 	if err != nil {
-		t.Fatalf("Value(%s): %v", name, err)
+		t.Fatalf("Values(%s): %v", name, err)
 	}
+	raw, ok := values[name]
 	return string(raw), ok
 }
 
@@ -164,7 +167,7 @@ func TestFailures(t *testing.T) {
 		{"not JSON", outwaySource(http.StatusOK, `<html>`), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, err := tc.source(t).Value(context.Background(), bsn, "family_name")
+			_, err := tc.source(t).Values(context.Background(), bsn, []string{"family_name", "address"})
 			if err == nil {
 				t.Fatal("err = nil")
 			}
@@ -189,10 +192,40 @@ func outwaySource(status int, body string) func(t *testing.T) *Source {
 // not asked.
 func TestAttributeWithoutAQuery(t *testing.T) {
 	o, s := newOutway(t, http.StatusOK, brpPerson(frouke))
-	if _, _, err := s.Value(context.Background(), bsn, "education_qualification"); err == nil {
+	if _, err := s.Values(context.Background(), bsn, []string{"family_name", "education_qualification"}); err == nil {
 		t.Fatal("err = nil")
 	}
 	if o.got != nil {
 		t.Fatal("the chain was asked")
+	}
+}
+
+// Several attributes: one request, with the fields of each once; a person
+// without a resident's address has the other values (Q1, Q2, Q8).
+func TestOneQueryForSeveralAttributes(t *testing.T) {
+	o, s := newOutway(t, http.StatusOK, brpPerson(`"geslachtsnaam":"Willems","voorvoegsel":null,"voornamen":"Tom"`))
+	values, err := s.Values(context.Background(), bsn, []string{"family_name", "given_name", "address", "family_name"})
+	if err != nil || o.requests != 1 {
+		t.Fatalf("Values = %v; %d requests, want one", err, o.requests)
+	}
+	q := o.query.Query
+	if !strings.Contains(q, "{ voorvoegsel geslachtsnaam voornamen ... on Ingezetene { woontOp {") || strings.Count(q, "geslachtsnaam") != 1 ||
+		strings.Contains(q, "heeftNationaliteit") || strings.Contains(q, bsn) {
+		t.Errorf("query = %q, want the fields of the three attributes once and the BSN as a variable", q)
+	}
+	if string(values["family_name"]) != `{"family_name":"Willems"}` || string(values["given_name"]) != `{"given_name":"Tom"}` {
+		t.Errorf("values = %s", values)
+	}
+	if _, ok := values["address"]; ok {
+		t.Errorf("a non-resident has an address value: %s", values["address"])
+	}
+}
+
+// A person the BRP does not know: one request, no values (Q3).
+func TestAnUnknownPersonHasNoValues(t *testing.T) {
+	o, s := newOutway(t, http.StatusOK, `{"data":{"ingeschrevenPersoon":null}}`)
+	values, err := s.Values(context.Background(), bsn, []string{"family_name", "address"})
+	if err != nil || len(values) != 0 || o.requests != 1 {
+		t.Fatalf("Values = %v, %v; %d requests", values, err, o.requests)
 	}
 }
