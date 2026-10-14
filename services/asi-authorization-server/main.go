@@ -93,15 +93,9 @@ func serve() error {
 	if err != nil || recheckInterval <= 0 {
 		return fmt.Errorf("AZSP_ENTITLEMENT_RECHECK_INTERVAL: %q is not a positive duration", os.Getenv("AZSP_ENTITLEMENT_RECHECK_INTERVAL"))
 	}
-	// The base URLs of the ASIP's data services, separated by commas.
-	var resources []string
-	for _, r := range strings.Split(env("AZSP_RESOURCES", "http://localhost:4020/brp/authsrc-api"), ",") {
-		if r = strings.TrimRight(strings.TrimSpace(r), "/"); r != "" {
-			resources = append(resources, r)
-		}
-	}
-	if len(resources) == 0 {
-		return errors.New("AZSP_RESOURCES names no data service of the ASIP")
+	resources, err := parseResources(env("AZSP_RESOURCES", "http://localhost:4020/brp/authsrc-api=Basisregistratie Personen (mock)"))
+	if err != nil {
+		return err
 	}
 	service := authorization.NewService(authorization.Config{
 		Issuer:       issuer,
@@ -171,6 +165,28 @@ func loadTrustAnchors(path string) (*x509.CertPool, error) {
 		return nil, errors.New("trust anchors file contains no certificate")
 	}
 	return pool, nil
+}
+
+// parseResources reads the ASIP's data services: base URL and the name of
+// its authentic source, as url=name, separated by commas. The user sees the
+// name when approving, so it is required.
+func parseResources(value string) ([]authorization.Resource, error) {
+	var resources []authorization.Resource
+	for _, entry := range strings.Split(value, ",") {
+		if strings.TrimSpace(entry) == "" {
+			continue
+		}
+		url, name, _ := strings.Cut(entry, "=")
+		url, name = strings.TrimRight(strings.TrimSpace(url), "/"), strings.TrimSpace(name)
+		if url == "" || name == "" {
+			return nil, fmt.Errorf("AZSP_RESOURCES: %q is not url=name", strings.TrimSpace(entry))
+		}
+		resources = append(resources, authorization.Resource{URL: url, Name: name})
+	}
+	if len(resources) == 0 {
+		return nil, errors.New("AZSP_RESOURCES names no data service of the ASIP")
+	}
+	return resources, nil
 }
 
 func env(name, fallback string) string {

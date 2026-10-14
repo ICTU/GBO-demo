@@ -58,6 +58,13 @@ type Error struct{ Code, Description string }
 
 func (e *Error) Error() string { return e.Code + ": " + e.Description }
 
+// Resource is a data service of the ASIP. Name is what the user is shown:
+// the authentic source the authorization is for.
+type Resource struct {
+	URL  string
+	Name string
+}
+
 // NotRedirectableError is an authorization request that cannot be answered
 // with a redirect: the client or its redirect_uri is unknown
 // (RFC 6749 section 4.1.2.1).
@@ -68,10 +75,10 @@ func (e *NotRedirectableError) Error() string { return e.Description }
 type Config struct {
 	// Issuer is the public base URL of this server and the iss of its tokens.
 	Issuer string
-	// Resources are the base URLs of the ASIP's data services, one per
-	// authentic source: the accepted resource indicators (RFC 8707). An
+	// Resources are the ASIP's data services, one per authentic source: their
+	// base URLs are the accepted resource indicators (RFC 8707). An
 	// authorization names exactly one, and its tokens have it as aud.
-	Resources  []string
+	Resources  []Resource
 	Clients    Clients
 	Identifier Identifier
 	Tokens     *TokenIssuer
@@ -183,7 +190,7 @@ func (s *Service) Authorize(req AuthorizationRequest) (AuthorizationResponse, er
 	}
 	audience, ok := s.resource(req.Resources, "")
 	if !ok {
-		return fail("invalid_target", "resource must be one data service of the ASIP: "+strings.Join(s.cfg.Resources, ", "))
+		return fail("invalid_target", "resource must be one data service of the ASIP: "+strings.Join(s.resourceURLs(), ", "))
 	}
 	binding := RandomID()
 	id := s.transactions.put(pendingAuthorization{
@@ -199,7 +206,7 @@ func (s *Service) Authorize(req AuthorizationRequest) (AuthorizationResponse, er
 		},
 		expires: s.cfg.Now().Add(TransactionLifetime),
 	})
-	resp.Pending = &Transaction{ID: id, Binding: binding, ClientID: c.ID, Scope: scope, Persons: s.cfg.Identifier.Persons(), Preselected: req.LoginHint}
+	resp.Pending = &Transaction{ID: id, Binding: binding, ClientID: c.ID, Scope: scope, Source: s.resourceName(audience), Persons: s.cfg.Identifier.Persons(), Preselected: req.LoginHint}
 	return resp, nil
 }
 
@@ -242,10 +249,27 @@ func (s *Service) resource(indicators []string, bound string) (string, bool) {
 			return "", false
 		}
 	}
-	if len(indicators) != 1 || !slices.Contains(s.cfg.Resources, indicators[0]) {
+	if len(indicators) != 1 || !slices.Contains(s.resourceURLs(), indicators[0]) {
 		return "", false
 	}
 	return indicators[0], true
+}
+
+func (s *Service) resourceURLs() []string {
+	urls := make([]string, 0, len(s.cfg.Resources))
+	for _, r := range s.cfg.Resources {
+		urls = append(urls, r.URL)
+	}
+	return urls
+}
+
+func (s *Service) resourceName(url string) string {
+	for _, r := range s.cfg.Resources {
+		if r.URL == url {
+			return r.Name
+		}
+	}
+	return ""
 }
 
 // --- token request (RFC 6749 section 4.1.3) ------------------------------------

@@ -96,7 +96,7 @@ func newTestASWithRegister(t *testing.T, resource string, register authorization
 	}
 	as.service = authorization.NewService(authorization.Config{
 		Issuer:       as.srv.URL,
-		Resources:    []string{resource, testResource2},
+		Resources:    []authorization.Resource{{URL: resource, Name: "Basisregistratie Personen (test)"}, {URL: testResource2, Name: "DUO (test)"}},
 		Clients:      clientconfig.New(clients...),
 		Identifier:   testpersons.New(testFrouke, testTom),
 		Tokens:       tokens,

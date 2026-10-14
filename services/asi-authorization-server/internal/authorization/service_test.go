@@ -46,7 +46,7 @@ func newTestService(t *testing.T) *Service {
 	}
 	return NewService(Config{
 		Issuer:     "https://as.test",
-		Resources:  []string{resource, resource2},
+		Resources:  []Resource{{URL: resource, Name: "BRP"}, {URL: resource2, Name: "DUO"}},
 		Clients:    fakeClients{"qtsp": {ID: "qtsp", RedirectURIs: []string{redirectURI}, Scopes: map[string]bool{"verify": true}}},
 		Identifier: fakeIdentifier{"frouke": {BSN: "999991772", GivenName: "Frouke"}},
 		Tokens:     tokens,
@@ -72,8 +72,8 @@ func TestAuthorize(t *testing.T) {
 	if err != nil || resp.Err != nil || resp.Code != "" || resp.Pending == nil || resp.RedirectURI != redirectURI || resp.State != "s" {
 		t.Fatalf("Authorize = %+v, %v; want a pending transaction for the registered redirect_uri", resp, err)
 	}
-	if p := resp.Pending; p.ID == "" || p.Binding == "" || p.Preselected != "frouke" || len(p.Persons) != 1 {
-		t.Fatalf("transaction = %+v, want an id, a binding, the test persons and frouke preselected", p)
+	if p := resp.Pending; p.ID == "" || p.Binding == "" || p.Preselected != "frouke" || len(p.Persons) != 1 || p.Source != "BRP" {
+		t.Fatalf("transaction = %+v, want an id, a binding, the test persons, frouke preselected and the BRP data service", p)
 	}
 	for _, tc := range []struct {
 		name string
