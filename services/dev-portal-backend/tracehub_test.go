@@ -200,6 +200,25 @@ func TestWatchNextFiresOncePerTrace(t *testing.T) {
 	mustNotRecv(t, late, "watcher armed after the trace started")
 }
 
+// A QTSP's /verify or /retrieve at the ASIP is a flow entry; its health
+// check and published contract are not (C2).
+func TestIsEntryPointSpanASIP(t *testing.T) {
+	for _, c := range []struct {
+		method, path string
+		want         bool
+	}{
+		{"POST", "/brp/authsrc-api/verify", true},
+		{"POST", "/brp/authsrc-api/retrieve", true},
+		{"GET", "/healthz", false},
+		{"GET", "/brp/openapi.json", false},
+	} {
+		s := traceSpan{Service: "asi-provider", Attributes: map[string]string{"http.request.method": c.method, "url.path": c.path}}
+		if got := isEntryPointSpan(s); got != c.want {
+			t.Errorf("%s %s: isEntryPointSpan = %v, want %v", c.method, c.path, got, c.want)
+		}
+	}
+}
+
 func TestIsEntryPointSpan(t *testing.T) {
 	cases := []struct {
 		name  string

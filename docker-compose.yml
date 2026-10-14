@@ -1402,6 +1402,12 @@ services:
       - FSC_TXLOG_IR_CERT=/certs/ir/internal-cert.pem
       - FSC_TXLOG_IR_KEY=/certs/ir/internal-cert-key.pem
       - FSC_TXLOG_IR_CA=/certs/ir/intermediate_ca.pem
+      # The ASIP's peer (compose profile asi); without make demo-asi the
+      # lookup reports it unreachable and the other peers still answer.
+      - FSC_TXLOG_ASIP_URL=https://asip-txlog-api:9443
+      - FSC_TXLOG_ASIP_CERT=/certs/asip/internal-cert.pem
+      - FSC_TXLOG_ASIP_KEY=/certs/asip/internal-cert-key.pem
+      - FSC_TXLOG_ASIP_CA=/certs/asip/intermediate_ca.pem
       - FSC_TXLOG_BD_URL=https://bd-txlog-api:9443
       - FSC_TXLOG_BD_CERT=/certs/bd/internal-cert.pem
       - FSC_TXLOG_BD_KEY=/certs/bd/internal-cert-key.pem
@@ -1426,6 +1432,7 @@ services:
       - ./fsc-infra/orgs/edi-issuer/pki/internal:/certs/edi:ro
       - ./fsc-infra/orgs/hypotheekverlener-mock/pki/internal:/certs/hv:ro
       - ./fsc-infra/orgs/installatieregister/pki/internal:/certs/ir:ro
+      - ./fsc-infra/orgs/asip/pki/internal:/certs/asip:ro
       - ./fsc-infra/orgs/belastingdienst-mock/pki/internal:/certs/bd:ro
     networks:
       - backend

@@ -56,6 +56,9 @@ var entryPointRules = []entryPointRule{
 	// EUDI: the issuance-server POSTs to eudi-adapter's root on every
 	// wallet-triggered issuance. Only /-POST is a flow-entry (health is GET).
 	{"eudi-adapter", "POST", "/"},
+	// ASI: a QTSP POSTs /<data service>/authsrc-api/verify or /retrieve;
+	// those are the ASIP's only POSTs (health and contracts are GET).
+	{"asi-provider", "POST", "/"},
 }
 
 // firstAttr returns the first non-empty attribute of keys. Services emit

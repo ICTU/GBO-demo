@@ -42,6 +42,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     authorization server accepts one data service per authorization
     (`resource` is required, `AZSP_RESOURCES`). An attribute of another data
     service is 404 (#525).
+  - The ASIP asks a source once per request, with the fields of all
+    requested attributes: one FSC transaction and one PDP decision per
+    request. It exports OTel spans with `gbo.fsc.transaction_id`, and the
+    developer portal backend watches its requests and reads its peer's
+    transaction log (`asip`) (#525).
   - Rules name the FSC services they bind on (`services`): a field key such
     as `Query.ingeschrevenPersoon` is shared by `bri` and `brp`. EUD0001 and
     DVT0001 bind on `bri`, EUD0002 on `brp`, LVG0001 on `lvg`; a policy test

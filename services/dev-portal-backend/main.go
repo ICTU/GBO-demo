@@ -89,6 +89,7 @@ func loadConfig() config {
 		{Prefix: "EDI", Name: "edi", SendGroupID: true},
 		{Prefix: "HV", Name: "hv", SendGroupID: true},
 		{Prefix: "IR", Name: "ir", SendGroupID: true},
+		{Prefix: "ASIP", Name: "asip", SendGroupID: true},
 		{Prefix: "BD", Name: "bd", SendGroupID: true},
 		{Prefix: "BD_HV", Name: "bd-via-hv"},
 		{Prefix: "BD_EDI", Name: "bd-via-edi"},
