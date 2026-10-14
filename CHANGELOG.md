@@ -60,6 +60,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     side where the user starts, and a CLI with test-harness options for the
     error answers. The authorization server now allows an http redirect URI
     on a loopback address (#533).
+  - The reference QTSP has a request API for the developer portal: it lays
+    a request down and gets a one-time start URL that carries only an id,
+    and fetches the outcome (pending, done with the result per attribute
+    and the seal check, denied, or failed) for 10 minutes (#533).
   - The developer portal has an ASI tab: it watches a QTSP's verify or
     retrieve at the ASIP and shows the chain (QTSP, ASIP, its Outway,
     bd-inway, PDP, BRP), the transaction log of `asip` and BD, and the PDP

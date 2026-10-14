@@ -32,6 +32,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -56,6 +57,8 @@ type stack struct {
 	sealAnchor *x509.CertPool
 	logs       map[string]*syncBuffer
 }
+
+var brpCalls atomic.Int64
 
 var (
 	stackOnce sync.Once
@@ -147,8 +150,10 @@ func buildStack() (*stack, error) {
 }
 
 // fakeBRP answers the ASIP's queries as the BRP behind FSC does: Frouke a
-// resident, Tom a non-resident, anyone else unknown.
+// resident, Tom a non-resident, anyone else unknown. brpCalls counts the
+// queries, so a test can show the ASIP did not ask the source.
 func fakeBRP(w http.ResponseWriter, r *http.Request) {
+	brpCalls.Add(1)
 	var req struct {
 		Variables struct {
 			BSN string `json:"bsn"`
