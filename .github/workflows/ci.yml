@@ -22,6 +22,7 @@ jobs:
       matrix:
         service:
           - asi-authorization-server
+          - asi-discovery-stub
           - asi-provider
           - bron-sidecar
           - brp-graphql-server
@@ -267,6 +268,7 @@ jobs:
       matrix:
         service:
           - asi-authorization-server
+          - asi-discovery-stub
           - asi-provider
           - dev-portal-backend
           - dvtp-onboarding-register

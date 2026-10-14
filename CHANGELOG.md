@@ -47,6 +47,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     request. It exports OTel spans with `gbo.fsc.transaction_id`, and the
     developer portal backend watches its requests and reads its peer's
     transaction log (`asip`) (#525).
+  - Discovery: each data service of the ASIP publishes a `dataService`
+    record per attribute (`/<data service>/dataservices`), and
+    `asi-discovery-stub` (port 9426, compose profile `asi`) answers the
+    Discover Interface's `retrieve` query from them; its contract is the
+    Annex A OpenAPI. The ASIP's contract names the authorization server's
+    metadata in `x-oauth-authorization-server` (#533).
   - The developer portal has an ASI tab: it watches a QTSP's verify or
     retrieve at the ASIP and shows the chain (QTSP, ASIP, its Outway,
     bd-inway, PDP, BRP), the transaction log of `asip` and BD, and the PDP

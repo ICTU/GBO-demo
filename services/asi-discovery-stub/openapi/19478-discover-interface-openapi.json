@@ -1,0 +1,215 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+        "title": "OpenAPI Document Specification for Discover Interface of ETSI TS 119 478",
+        "contact": {
+            "name": "ETSI ESI",
+            "url": "https://www.etsi.org/committee/esi",
+            "email": "ESI@LIST.ETSI.ORG"
+        },
+        "license": {
+            "name": "BSD-3-Clause",
+            "url": "https://forge.etsi.org/legal-matters"
+        },
+        "version": "1.1.1"
+    },
+    "tags": [
+        {
+            "name": "Discover",
+            "description": "Discover Interface"
+        }
+    ],
+    "paths": {
+        "/search": {
+            "get": {
+                "tags": ["Discover", "Search"],
+                "summary": "Find Attributes (search)",
+                "description": "The search query allows to search for catalogued attribute-related metadata in the semantic repository, optionally filtered by specific metadata",
+                "parameters": [
+                    {
+                        "name": "assetType",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "enum": ["attribute"]
+                        }
+                    },
+                    {
+                        "name": "creator",
+                        "in": "query",
+                        "required": false,
+                        "schema": {"type": "string"}
+                    },
+                    {
+                        "name": "country",
+                        "in": "query",
+                        "required": false,
+                        "schema": {"type": "string"}
+                    },
+                    {
+                        "name": "text",
+                        "in": "query",
+                        "required": false,
+                        "schema": {"type": "string"}
+                    },
+                    {
+                        "name": "semanticDataSpecification",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "uri"
+                        }
+                    },
+                    {
+                        "name": "schemaMediaType",
+                        "in": "query",
+                        "required": false,
+                        "schema": {"type": "string"}
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful response of the /search query.",
+                        "content": {
+                            "application/x-ebrs+xml": {
+                                "schema": {
+                                    "type": "string",
+                                    "format": "xml",
+                                    "externalDocs": {
+                                        "description": "ISO 15000-3 QueryResponse",
+                                        "url": "https://docs.oasis-open.org/regrep/regrep-core/v4.0/os/xsd/rs.xsd"
+                                    }
+                                }
+                            },
+                            "application/json": {
+                                "schema": {"$ref": "19478-attribute-schema.json#/definitions/attributes"}
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unsuccessful response of the /search query.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {"$ref": "#/components/schemas/Problem"}
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/retrieve": {
+            "get": {
+                "tags": ["Discover", "Retrieve"],
+                "summary": "Find Data Services for Attributes (retrieve)",
+                "description": "The purpose of the retrieve query is to look-up data services in the Data Service Directory for the verification or retrieval of attributes within a given Member State.",
+                "parameters": [
+                    {
+                        "name": "queryType",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "enum": ["dataServices"]
+                        }
+                    },
+                    {
+                        "name": "attributeIdentifier",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "uri"
+                        }
+                    },
+                    {
+                        "name": "country",
+                        "in": "query",
+                        "required": false,
+                        "schema": {"type": "string"}
+                    },
+                    {
+                        "name": "conformsTo",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful response of the /retrieve query.",
+                        "content": {
+                            "application/x-ebrs+xml": {
+                                "schema": {
+                                    "type": "string",
+                                    "format": "xml",
+                                    "externalDocs": {
+                                        "description": "ISO 15000-3 QueryResponse",
+                                        "url": "https://docs.oasis-open.org/regrep/regrep-core/v4.0/os/xsd/rs.xsd"
+                                    }
+                                }
+                            },
+                            "application/json": {
+                                "schema": {"$ref": "19478-dataservice-schema.json#/definitions/dataServices"}
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Unsuccessful response of the /retrieve query.",
+                        "content": {
+                            "application/problem+json": {
+                                "schema": {"$ref": "#/components/schemas/Problem"}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "Problem": {
+                "title": "Problem",
+                "description": "A Problem Details object (RFC 9457).",
+                "type": "object",
+                "properties": {
+                    "type": {
+                        "type": "string",
+                        "format": "uri",
+                        "description": "An URI reference that identifies the problem type.",
+                        "default": "about:blank"
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "A short summary of the problem type, readable for an engineer.",
+                        "example": "Service unavailable"
+                    },
+                    "status": {
+                        "type": "integer",
+                        "format": "int32",
+                        "description": "The HTTP status code generated by the origin server for this occurrence of the problem.",
+                        "minimum": 200,
+                        "example": 583
+                    },
+                    "detail": {
+                        "type": "string",
+                        "description": "A human-readable explanation specific to this occurrence of the problem."
+                    },
+                    "instance": {
+                        "type": "string",
+                        "format": "uri-reference",
+                        "description": "A URI reference that identifies the specific occurrence of the problem. It may or may not yield further information, if dereferenced."
+                    }
+                },
+                "required": [
+                    "title",
+                    "status",
+                    "type"
+                ]
+            }
+        }
+    }
+}

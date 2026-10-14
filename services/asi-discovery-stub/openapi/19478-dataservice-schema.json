@@ -1,0 +1,73 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",    
+    "title": "JSON schema for dataservice query response",
+    "description": "This JSON schema is referenced within the OpenAPI Document Specification for Discover Interface of ETSI TS 119 478 (v1.1.1)",
+    "type": "object",
+    "definitions": {
+        "dataServices": {
+            "type": "object",
+            "properties": {
+                "dataServices": {
+                    "type": "array",
+                    "items": {"$ref": "#/definitions/dataService"}
+                }
+            },
+            "additionalProperties": false
+        },
+        "dataService": {
+            "type": "object",
+            "properties": {
+                "attributeIdentifier": {"type": "string", "format": "uri"},
+                "endpointDescription": {"type": "string", "format": "uri"},
+                "endpointURI": {"type": "string"},
+                "provider": { "$ref": "#/definitions/provider"},
+                "country": {"type": "string"}
+            },
+            "additionalProperties": false,
+            "required": ["attributeIdentifier", "endpointDescription", "endpointURI", "provider"]
+        },
+		"identifier" : 
+		{
+			"type": "object",
+			"properties":
+			{
+				"identifier":
+				{
+					"type" : "string"
+				},
+				"type":
+				{
+					"type" : "string", "format" : "uri"
+				}
+			},
+            "additionalProperties": false,
+            "required": ["identifier", "type"]
+		},
+        "law": {
+            "type": "object",
+            "properties": {
+                "legislationIdentifier":  {"type": "string", "format": "uri"},
+                "legalBasis": {"type": "string" }
+            },
+            "additionalProperties": false,
+            "required": ["legislationIdentifier"]            
+        },
+        "provider": {
+            "type": "object",
+            "properties": {
+                "legalName":  {"type": "string"},
+                "identifiers": {
+                    "type": "array",
+                    "items": {"$ref": "#/definitions/identifier"}
+                },
+                "establishedByLaw": {"$ref": "#/definitions/law"},
+                "currentAddress": {"type": "string"}
+            },
+            "additionalProperties": false,            
+            "required": ["legalName"]           
+        }
+    },
+    "allOf": [
+        {"$ref": "#/definitions/dataServices"}
+    ]
+}

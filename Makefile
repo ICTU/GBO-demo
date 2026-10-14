@@ -54,6 +54,7 @@ PORT_KEYPER_MOCK := $(or $(GBO_PORT_KEYPER_MOCK),9004)
 PORT_INTEGRATOR_BACKEND := $(or $(GBO_PORT_INTEGRATOR_BACKEND),9423)
 PORT_ASI_PROVIDER := $(or $(GBO_PORT_ASI_PROVIDER),9424)
 PORT_ASI_AUTHORIZATION_SERVER := $(or $(GBO_PORT_ASI_AUTHORIZATION_SERVER),9425)
+PORT_ASI_DISCOVERY := $(or $(GBO_PORT_ASI_DISCOVERY),9426)
 PORT_JAEGER := $(or $(GBO_PORT_JAEGER),9686)
 PORT_PDP := $(or $(GBO_PORT_OPA),9181)
 PORT_EUDI_ADAPTER := $(or $(GBO_PORT_EUDI_ADAPTER),9409)
@@ -323,15 +324,17 @@ demo-integrator: fsc-int-certs
 # demo-full: those publish the BRP source (service brp on ...0200). It adds the
 # ASIP's FSC peer (...1200), seeds its contract for brp with the grant link
 # /brp, issues the development seal certificate when missing, and starts both
-# services. The admission register lists the ASIP as a system participant.
+# services and the discovery stub. The admission register lists the ASIP as a
+# system participant.
 demo-asi: fsc-asip-certs
 	$(MAKE) fsc-databases
 	$(FSC_COMPOSE) --profile asi up -d asip-controller asip-manager asip-outway asip-txlog-api
 	$(MAKE) fsc-seed-asip
 	@test -f "$(ASIP_SEAL_DIR)/seal-cert.pem" || $(MAKE) provision-asip-seal-certificate
-	docker compose --profile asi up --build -d asi-authorization-server asi-provider
+	docker compose --profile asi up --build -d asi-authorization-server asi-provider asi-discovery-stub
 	$(call banner,ASI authorization server:,$(PORT_ASI_AUTHORIZATION_SERVER))
 	$(call banner,ASIP:,$(PORT_ASI_PROVIDER))
+	$(call banner,ASI discovery (stub):,$(PORT_ASI_DISCOVERY))
 
 demo-down:
 	docker compose --profile full --profile manager --profile integrator --profile asi down

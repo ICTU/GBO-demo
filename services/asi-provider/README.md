@@ -49,11 +49,16 @@ ETSI TS 119 478 lets a response name one authentic source (REQ-ASIP-6.1.1.2-08),
 | `id` | the path segment |
 | `provider` | the legal name of the ASIP in the responses |
 | `authentic_source` | the legal name of the authentic source; empty when the ASIP is the authentic source, and then the responses name none |
+| `country` | the Member State of the data service (ISO 3166-1 alpha-2), in its discovery records |
 | `source` | the adapter that asks the source; it is code (`brp`: `internal/brpsource`) |
 | `grant_path` | the grant-link of the ASIP's FSC contract with the source, on its Outway |
 | `attributes` | per attribute identifier, the name the adapter knows it by |
 
 The ASIP does not start with a data service named twice, an unknown adapter, an attribute the adapter cannot ask for, or a field it does not know (a misspelt `authentic_source` would otherwise drop the source from the responses). The authorization server must know the base URL of each data service as a resource (`AZSP_RESOURCES`); a token is for one data service. An attribute of another data service is not in the catalogue: 404. All data services share one seal for now; who holds it is open (#225).
+
+### Discovery records
+
+`GET /<data service>/dataservices` serves the data service's `dataService` records (ETSI TS 119 478 clause 5.3.3, `19478-dataservice-schema.json`), one per attribute: what the ASIP hands to the Data Service Directory. `endpointURI` is the data service's base URL (for verify and retrieve), `endpointDescription` its contract, `provider` the ASIP's legal name and `country` the data service's country. The provider carries no `identifiers` or `establishedByLaw`: there is no EU identifier type for an OIN, and the demo ASIP has no EUID, LEI or legal basis, so the "should" of REQ-DIP-5.3.3-03-04-04 is not met. [`asi-discovery-stub`](../asi-discovery-stub) answers the Discover Interface's `retrieve` query from these records.
 
 ## Layout
 
@@ -75,10 +80,10 @@ Ports and adapters, as `AGENTS.md` asks for a service with an authorization boun
 
 ## The contract
 
-`GET /openapi.json` serves the contract: the OpenAPI of ETSI TS 119 478 Annex B, unchanged (`openapi/19478-authentic-source-interface-openapi.json`), with the completions in `openapi/completions.json` applied as a JSON Merge Patch (RFC 7386). The completions do not deviate from ETSI; they fill in what Annex B leaves open:
+`GET /<data service>/openapi.json` serves the contract of a data service: the OpenAPI of ETSI TS 119 478 Annex B, unchanged (`openapi/19478-authentic-source-interface-openapi.json`), with the completions in `openapi/completions.json` applied as a JSON Merge Patch (RFC 7386). The completions do not deviate from ETSI; they fill in what Annex B leaves open:
 
 - **Server**: the base URL of the data service, e.g. `http://localhost:4020/brp/authsrc-api`, fills in the Annex B server template; `authsrc-api` is its default base path.
-- **OAuth 2.0**: Annex B defines no security scheme; clause 6.1.3 requires an access token from the authorization server. The contract describes the authorization code flow with the URLs of the configured authorization server (`ASIP_AUTHORIZATION_SERVER`) and requires the scope of each operation (REQ-DIP-5.3.3-03-02-01 asks the OpenAPI to name the authorization server).
+- **OAuth 2.0**: Annex B defines no security scheme; clause 6.1.3 requires an access token from the authorization server. The contract describes the authorization code flow with the URLs of the configured authorization server (`ASIP_AUTHORIZATION_SERVER`), names its RFC 8414 metadata in `x-oauth-authorization-server`, and requires the scope of each operation (REQ-DIP-5.3.3-03-02-01 asks the OpenAPI to specify the authorization server's metadata).
 - **`WWW-Authenticate`** on every 401: RFC 6750 section 3 and RFC 9068 section 4 require the challenge.
 - **503**: when the keys of the authorization server cannot be obtained, no token can be validated. That is not an error of the client's token, so the mock answers 503 rather than 401. The same when the BRP cannot be reached: that is not `Unknown`, which says the source holds no data. Annex B lists no 503.
 - **500**: when the chain refuses the ASIP's query (the PDP denies it, or the BRP answers errors). That is a fault in the deployment, not a missing value. Annex B lists no 500.
