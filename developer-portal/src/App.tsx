@@ -199,9 +199,16 @@ export default function App() {
       })
       return
     }
+    // DvTP and ASI paths: if the user just clicked Submit themselves
+    // (submitting=true), don't overwrite — the local run wins; watch will
+    // pick things back up next round once a real citizen/consumer-flow
+    // arrives.
+    if (submitting) return
     // ASI: a QTSP's verify or retrieve at the ASIP. The QTSP is outside the
     // demo, so there is no response to show here and no payload to log; the
     // chain, the FSC transaction log and the PDP decision are the evidence.
+    // After the guard above: a run of the user's own (or a wait for the
+    // wallet) keeps the screen.
     if (mode === 'asi-verify') {
       setArchApiCalls(undefined)
       setResult({
@@ -216,10 +223,6 @@ export default function App() {
       setTab('asi-verify')
       return
     }
-    // DvTP paths: if the user just clicked Submit themselves (submitting=true),
-    // don't overwrite — the local run wins; watch will pick things back up
-    // next round once a real citizen/consumer-flow arrives.
-    if (submitting) return
     setArchApiCalls(undefined)
     setResult(null)
     setArchTraceId(traceId)
