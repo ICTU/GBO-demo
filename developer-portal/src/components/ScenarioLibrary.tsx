@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
-import type { Scenario, Tab } from '../types'
+import type { AsiExpected, Scenario, Tab } from '../types'
+import { EXPECTED_LABEL } from '../lib/asiRequest'
 
 type Props = {
   scenarios: Scenario[]
@@ -9,15 +10,28 @@ type Props = {
   onDelete: (id: string) => void
 }
 
-type Filter = 'all' | 'dvtp' | 'eudi'
+type Filter = 'all' | 'dvtp' | 'eudi' | 'asi'
 
 const DVTP_TABS = new Set<Tab>(['issuance', 'use'])
 const EUDI_TABS = new Set<Tab>(['eudi-issuance'])
+const ASI_TABS = new Set<Tab>(['asi-verify'])
 
 function inFilter(s: Scenario, f: Filter): boolean {
   if (f === 'all') return true
   if (f === 'dvtp') return DVTP_TABS.has(s.tab)
+  if (f === 'asi') return ASI_TABS.has(s.tab)
   return EUDI_TABS.has(s.tab)
+}
+
+// Four filters share the column: narrower padding than a .seg-btn, and an
+// equal share of the width each.
+const FILTER_BUTTON = { flex: 1, minWidth: 0, padding: '6px 6px' } as const
+
+// The chip of an ASI scenario: the outcome it expects. A match is green, a
+// no-match red; the others are neither.
+function asiChip(expected: AsiExpected) {
+  const tone = expected === 'match' ? ' allow' : expected === 'no-match' ? ' deny' : ' tab'
+  return <span className={`chip${tone}`}>{EXPECTED_LABEL[expected]}</span>
 }
 
 export default function ScenarioLibrary({ scenarios, loading, error, onLoad, onDelete }: Props) {
@@ -27,6 +41,7 @@ export default function ScenarioLibrary({ scenarios, loading, error, onLoad, onD
     all: scenarios.length,
     dvtp: scenarios.filter((s) => DVTP_TABS.has(s.tab)).length,
     eudi: scenarios.filter((s) => EUDI_TABS.has(s.tab)).length,
+    asi: scenarios.filter((s) => ASI_TABS.has(s.tab)).length,
   }), [scenarios])
 
   const visible = useMemo(() => scenarios.filter((s) => inFilter(s, filter)), [scenarios, filter])
@@ -44,7 +59,7 @@ export default function ScenarioLibrary({ scenarios, loading, error, onLoad, onD
             type="button"
             className={`seg-btn${filter === 'all' ? ' on' : ''}`}
             onClick={() => setFilter('all')}
-            style={{ flex: 1 }}
+            style={FILTER_BUTTON}
           >
             Alles ({counts.all})
           </button>
@@ -52,7 +67,7 @@ export default function ScenarioLibrary({ scenarios, loading, error, onLoad, onD
             type="button"
             className={`seg-btn${filter === 'dvtp' ? ' on' : ''}`}
             onClick={() => setFilter('dvtp')}
-            style={{ flex: 1 }}
+            style={FILTER_BUTTON}
           >
             DvTP ({counts.dvtp})
           </button>
@@ -60,9 +75,17 @@ export default function ScenarioLibrary({ scenarios, loading, error, onLoad, onD
             type="button"
             className={`seg-btn${filter === 'eudi' ? ' on' : ''}`}
             onClick={() => setFilter('eudi')}
-            style={{ flex: 1 }}
+            style={FILTER_BUTTON}
           >
             EUDI ({counts.eudi})
+          </button>
+          <button
+            type="button"
+            className={`seg-btn${filter === 'asi' ? ' on' : ''}`}
+            onClick={() => setFilter('asi')}
+            style={FILTER_BUTTON}
+          >
+            ASI ({counts.asi})
           </button>
         </div>
       </div>
@@ -80,6 +103,8 @@ export default function ScenarioLibrary({ scenarios, loading, error, onLoad, onD
               <div className="scn-name">{s.name}</div>
               {s.expected_outcome === 'allow' && <span className="chip allow">ALLOW</span>}
               {s.expected_outcome === 'deny' && <span className="chip deny">DENY</span>}
+              {s.tab === 'asi-verify' && s.expected_outcome && s.expected_outcome in EXPECTED_LABEL &&
+                asiChip(s.expected_outcome as AsiExpected)}
             </div>
             <div className="scn-desc">{s.desc}</div>
             <div className="scn-acts">

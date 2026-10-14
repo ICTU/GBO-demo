@@ -1461,6 +1461,10 @@ services:
       - FSC_TXLOG_ASIP_CERT=/certs/asip/internal-cert.pem
       - FSC_TXLOG_ASIP_KEY=/certs/asip/internal-cert-key.pem
       - FSC_TXLOG_ASIP_CA=/certs/asip/intermediate_ca.pem
+      # The reference QTSP's request API (compose profile asi), where the ASI
+      # tab lays a request down; without make demo-asi the tab says the QTSP
+      # is unreachable.
+      - QTSP_URL=http://qtsp-reference:4023
       - FSC_TXLOG_BD_URL=https://bd-txlog-api:9443
       - FSC_TXLOG_BD_CERT=/certs/bd/internal-cert.pem
       - FSC_TXLOG_BD_KEY=/certs/bd/internal-cert-key.pem
@@ -1527,9 +1531,6 @@ services:
       - LVG_GRAPHQL_TARGET=http://lvg-graphql-server:4008
       - VITE_JAEGER_PUBLIC_URL=${JAEGER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_JAEGER:-9686}}
       - VITE_GRAFANA_PUBLIC_URL=${GRAFANA_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_GRAFANA:-9300}}
-      # The reference QTSP's page (compose profile asi); its web side works
-      # with the browser on this machine, so localhost.
-      - VITE_QTSP_PUBLIC_URL=http://localhost:${GBO_PORT_QTSP:-9427}
       - EUDI_API_TARGET=http://eudi-adapter:4009
       # The EUDI QR is built client-side; these env vars drive the universal-link.
       # VITE_* is public — ends up in the built bundle (no secrets here).

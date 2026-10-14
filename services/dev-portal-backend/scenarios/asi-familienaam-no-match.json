@@ -1,0 +1,17 @@
+{
+  "id": "asi-familienaam-no-match",
+  "name": "ASI · Familienaam NO MATCH",
+  "desc": "De QTSP heeft \"Janssen\", de bron \"Jansen\": ook na normalisatie verschillend, dus NoMatch. De ASIP geeft de waarde van de bron niet terug. Kies Frouke Jansen.",
+  "tab": "asi-verify",
+  "expected_outcome": "no-match",
+  "payload": {
+    "operation": "verify",
+    "attributes": [
+      {
+        "identifier": "https://gbo.example/attributes/family_name/1",
+        "value": "{\"family_name\":\"Janssen\"}"
+      }
+    ],
+    "person": "Frouke Jansen"
+  }
+}
