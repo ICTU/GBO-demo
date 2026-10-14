@@ -98,6 +98,10 @@ func TestNoValue(t *testing.T) {
 	for _, tc := range []struct{ name, body, attribute string }{
 		{"unknown person", `{"data":{"ingeschrevenPersoon":null}}`, "family_name"},
 		{"non-resident address", brpPerson(`"geslachtsnaam":"Willems"`), "address"},
+		{"address without postcode", brpPerson(`"woontOp":{"straatnaam":"Coolsingel","huisnummer":12,"postcode":null,"woonplaatsnaam":"Rotterdam"}`), "address"},
+		{"address without street", brpPerson(`"woontOp":{"straatnaam":"","huisnummer":12,"postcode":"3011 AD","woonplaatsnaam":"Rotterdam"}`), "address"},
+		{"address without number", brpPerson(`"woontOp":{"straatnaam":"Coolsingel","postcode":"3011 AD","woonplaatsnaam":"Rotterdam"}`), "address"},
+		{"address without city", brpPerson(`"woontOp":{"straatnaam":"Coolsingel","huisnummer":12,"postcode":"3011 AD"}`), "address"},
 		{"no given names", brpPerson(`"voornamen":null`), "given_name"},
 		{"no birth date", brpPerson(`"geboortedatum":null`), "birth_date"},
 		{"no nationality", brpPerson(`"heeftNationaliteit":[]`), "nationality"},

@@ -115,8 +115,11 @@ func (p *person) attribute(name string) (any, bool) {
 		}
 		return map[string][]string{"nationalities": codes}, len(codes) > 0
 	case "address":
+		// Every member of the attribute is required: an address the BRP
+		// holds in part (postcode is nullable) is no value, not a partial
+		// one. Letter and addition are optional parts of the number.
 		a := p.WoontOp
-		if a == nil {
+		if a == nil || a.Straatnaam == "" || a.Huisnummer == 0 || a.Postcode == "" || a.Woonplaatsnaam == "" {
 			return nil, false
 		}
 		return map[string]string{

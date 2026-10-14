@@ -80,7 +80,7 @@ The ASIP is an FSC consumer peer of its own (`99999999900000001200`) with a conn
 | `nationality` | `heeftNationaliteit { nationaliteit }` | `{"nationalities": [ISO codes]}` |
 | `address` | `... on Ingezetene { woontOp { … } }` | `{"street", "house_number" (number, letter and addition separated by spaces), "postal_code", "city", "country": "NL"}` |
 
-A person the BRP does not know, or a field it holds no value for, yields `Unknown`. So does the address of a non-resident: a foreign address in the BRP has free lines, not the members of the attribute. The diploma is in the catalogue but not the BRP's; it is `Unknown` without a query.
+A person the BRP does not know, or a field it holds no value for, yields `Unknown`; an address yields it unless street, house number, postal code and city are all there. So does the address of a non-resident: a foreign address in the BRP has free lines, not the members of the attribute. The diploma is in the catalogue but not the BRP's; it is `Unknown` without a query.
 
 Rule `ASI0001` (`policies/gbo/rules/asi/asi0001.rego`) grants these fields to the ASIP's peer, without a consent token, for a BSN that names a citizen, on the service `brp` only. Any other BRP field falls to the closed world of the policy engine.
 
