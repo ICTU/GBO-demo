@@ -1,0 +1,70 @@
+package harness
+
+import (
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"testing"
+)
+
+// fakeAS shows a chooser and redirects to the client with the request's
+// state, or with returnState when set.
+func fakeAS(t *testing.T, returnState string) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /authorize", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("prompt") == "deny-now" {
+			http.Redirect(w, r, "https://qtsp.test/callback?error=invalid_target&state="+r.URL.Query().Get("state"), http.StatusFound)
+			return
+		}
+		http.SetCookie(w, &http.Cookie{Name: "tx", Value: r.URL.Query().Get("state")})
+		_, _ = io.WriteString(w, `<form method="post" action="/authorize/decision"><input type="hidden" name="transaction" value="t1">`)
+	})
+	mux.HandleFunc("POST /authorize/decision", func(w http.ResponseWriter, r *http.Request) {
+		c, err := r.Cookie("tx")
+		if err != nil || r.FormValue("transaction") != "t1" || r.FormValue("person") != "frouke" {
+			http.Error(w, "bad decision", http.StatusBadRequest)
+			return
+		}
+		state := c.Value
+		if returnState != "" {
+			state = returnState
+		}
+		q := url.Values{"state": {state}}
+		if r.FormValue("decision") == "approve" {
+			q.Set("code", "c1")
+		} else {
+			q.Set("error", "access_denied")
+		}
+		http.Redirect(w, r, "https://qtsp.test/callback?"+q.Encode(), http.StatusFound)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestDecide(t *testing.T) {
+	as := fakeAS(t, "")
+	ctx := context.Background()
+	cb, err := Decide(ctx, http.DefaultClient, as.URL+"/authorize?state=s1", "frouke", true)
+	if err != nil || cb.Code != "c1" || cb.State != "s1" {
+		t.Fatalf("approve: %+v, %v", cb, err)
+	}
+	cb, err = Decide(ctx, http.DefaultClient, as.URL+"/authorize?state=s2", "frouke", false)
+	if err != nil || cb.Error != "access_denied" || cb.Code != "" {
+		t.Fatalf("deny: %+v, %v", cb, err)
+	}
+	cb, err = Decide(ctx, http.DefaultClient, as.URL+"/authorize?state=s3&prompt=deny-now", "frouke", true)
+	if err != nil || cb.Error != "invalid_target" {
+		t.Fatalf("refused request: %+v, %v", cb, err)
+	}
+}
+
+// A redirect with another state does not belong to this request.
+func TestDecideRefusesAnotherState(t *testing.T) {
+	if _, err := Decide(context.Background(), http.DefaultClient, fakeAS(t, "forged").URL+"/authorize?state=s1", "frouke", true); err == nil {
+		t.Fatal("err = nil, want another state refused")
+	}
+}
