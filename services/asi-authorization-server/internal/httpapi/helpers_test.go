@@ -33,7 +33,7 @@ const (
 	testResource    = "https://asip.test/brp/authsrc-api"
 	// testResource2 is a second data service of the ASIP.
 	testResource2 = "https://asip.test/duo/authsrc-api"
-	bsnFrouke       = "999991772"
+	bsnFrouke     = "999991772"
 )
 
 // testAS runs the authorization server with three clients from
