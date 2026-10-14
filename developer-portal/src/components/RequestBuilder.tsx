@@ -38,6 +38,8 @@ export default function RequestBuilder({
       ? 'POST consent-portal-backend /portal/consents'
     : tab === 'use'
       ? 'POST dienstverlener-backend /api/dvtp/query'
+    : tab === 'asi-verify'
+      ? 'QTSP → POST asi-provider /<dataservice>/authsrc-api/verify'
       : 'QR-scan → wallet → eudi-issuance-server → eudi-adapter'
 
   const canSubmit =
@@ -45,16 +47,22 @@ export default function RequestBuilder({
       ? !!issuancePayload.citizen_bsn && !!issuancePayload.dienstverlener_oin && issuancePayload.scopes.length > 0
     : tab === 'use'
       ? !!usePayload.consent_id && !!usePayload.consent_token
+    : tab === 'asi-verify'
+      ? true
       : !!eudiPayload.usecase
 
   const curlText =
     tab === 'eudi-issuance'
       ? '# EUDI-flow start via wallet-QR — geen curl-equivalent'
+    : tab === 'asi-verify'
+      ? '# ASI-flow start bij een QTSP (registratie, keuzepagina, DPoP-token) — de QTSP-mock volgt'
       : curlFor(tab, tab === 'issuance' ? issuancePayload : usePayload)
 
   const submitLabel =
     tab === 'eudi-issuance'
       ? (submitting ? 'Wacht op wallet…' : 'Open QR-page + start')
+    : tab === 'asi-verify'
+      ? 'Meekijken'
       : (submitting ? 'Bezig…' : 'Verzenden')
 
   return (
@@ -70,6 +78,9 @@ export default function RequestBuilder({
             </button>
             <button className={`seg-btn${tab === 'eudi-issuance' ? ' on' : ''}`} onClick={() => setTab('eudi-issuance')}>
               EUDI
+            </button>
+            <button className={`seg-btn${tab === 'asi-verify' ? ' on' : ''}`} onClick={() => setTab('asi-verify')}>
+              ASI
             </button>
           </div>
           <span style={{ marginLeft: 'auto', fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--mute)' }}>
@@ -99,13 +110,23 @@ export default function RequestBuilder({
           />
         )}
 
+        {tab === 'asi-verify' && (
+          <p style={{ fontSize: 13, lineHeight: 1.5, margin: '0 0 12px' }}>
+            Een gekwalificeerde trust service provider (QTSP) laat attributen van een burger
+            verifiëren bij een dataservice van de ASIP (ETSI TS 119 478). De QTSP zit buiten
+            de demo; het portal start het verzoek dus niet zelf. Met <em>Meekijken</em> pikt
+            het de eerstvolgende <code>verify</code> of <code>retrieve</code> op, en toont de
+            keten, het FSC-transactielog en de PDP-beslissing.
+          </p>
+        )}
+
         <HttpPreview text={curlText} />
 
         <div className="btnrow">
           <button className="btn pri" onClick={onSubmit} disabled={!canSubmit || submitting}>
             {submitLabel}
           </button>
-          <button className="btn" onClick={onSaveAsScenario} disabled={submitting}>
+          <button className="btn" onClick={onSaveAsScenario} disabled={submitting || tab === 'asi-verify'}>
             Opslaan als scenario
           </button>
         </div>

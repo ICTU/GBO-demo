@@ -2,7 +2,7 @@
 // What's here must correspond 1:1 to the real services in docker-compose.yml
 // — not to an imagined ideal.
 
-import { BD_BRON, type BronProfile } from './bronnen'
+import { BD_BRON, BRP_BRON, type BronProfile } from './bronnen'
 import { HYPOTHEEK_BV, type Consumer } from '../util/consumer'
 
 export type NodeDef = {
@@ -95,6 +95,30 @@ export const EUDI_ISSUANCE_BRANCHES: NodeDef[] = [
   { id: 'opa', role: 'PDP · engine', name: 'OpenFTV', svc: 'opa', branchOf: 'pdp' },
 ]
 
+// ASI (ETSI TS 119 478) — a QTSP verifies or retrieves attributes at a data
+// service of the ASIP, which asks the authentic source over its own FSC peer.
+// The authorization server is not in this request: the QTSP got its token
+// before, so it hangs as a branch under the QTSP, without spans. The QTSP is
+// outside the demo (no mock yet), so it has no spans either. The last two
+// nodes follow the source of the run; the ASIP's only data service is brp.
+export function asiChain(bron: BronProfile = BRP_BRON): NodeDef[] {
+  return [
+    { id: 'qtsp', role: 'QTSP', name: 'Trust service provider', svc: 'qtsp (extern)' },
+    { id: 'asi-provider', role: 'ASIP', name: 'ASIP', svc: 'asi-provider' },
+    { id: 'asip-outway', role: 'FSC', name: 'ASIP-Outway', svc: 'asip-outway' },
+    { id: 'bd-inway', role: 'FSC', name: 'BD-Inway', svc: 'bd-inway' },
+    { id: 'pdp', role: 'PDP', name: 'Policy Decision', svc: 'pdp-service' },
+    { id: 'sidecar', role: 'Bron · Gateway', name: bron.gatewayName, svc: bron.gatewaySvc },
+    { id: 'bron', role: 'Bron', name: bron.bronName, svc: bron.bronSvc },
+  ]
+}
+
+export const ASI_BRANCHES: NodeDef[] = [
+  { id: 'asi-authorization-server', role: 'Autorisatie', name: 'Token (eerder)', svc: 'asi-authorization-server', branchOf: 'qtsp' },
+  { id: 'asip-manager', role: 'FSC · Manager', name: 'Contract + token', svc: 'asip-manager', branchOf: 'asip-outway' },
+  { id: 'opa', role: 'PDP · engine', name: 'OpenFTV', svc: 'opa', branchOf: 'pdp' },
+]
+
 // Nodes for which we structurally get no OTel spans: browser-/Rust-side
 // steps without OTel instrumentation and OpenFSC containers (bd-inway/
 // edi-outway/edi-manager and the use-chain's outway/outway-manager don't
@@ -104,4 +128,5 @@ export const NO_OTEL_NODE_IDS = new Set<string>([
   'wallet', 'demo-issuer', 'issuance-server',
   'edi-outway', 'bd-inway', 'edi-manager',
   'outway', 'outway-manager',
+  'qtsp', 'asi-authorization-server', 'asip-outway', 'asip-manager',
 ])

@@ -125,6 +125,8 @@ export type RuleMeta = {
   package?: string
   covers_types?: string[]
   covers_fields?: string[]
+  // The FSC services the rule binds on (a field key can be in two schemas).
+  services?: string[]
   source_id?: string
   source?: string
 }

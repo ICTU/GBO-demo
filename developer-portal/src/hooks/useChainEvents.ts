@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  EUDI_ISSUANCE_NODE_IDS, ISSUANCE_NODE_IDS, USE_NODE_IDS, bronForSpans, nodeStatesFromSpans,
+  ASI_NODE_IDS, EUDI_ISSUANCE_NODE_IDS, ISSUANCE_NODE_IDS, USE_NODE_IDS, bronForSpans, nodeStatesFromSpans,
   type NodeStatus, type SpanInfo,
 } from '../util/spanMapping'
 import { asSpanInfo, type SpanEvent } from '../util/spanEvent'
@@ -20,6 +20,7 @@ export function useChainEvents(
     () => (
       mode === 'issuance' ? ISSUANCE_NODE_IDS
       : mode === 'eudi-issuance' ? EUDI_ISSUANCE_NODE_IDS
+      : mode === 'asi-verify' ? ASI_NODE_IDS
       : USE_NODE_IDS
     ),
     [mode],

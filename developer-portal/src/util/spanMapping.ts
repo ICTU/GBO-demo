@@ -5,7 +5,7 @@ import {
 import {
   BD_BRON, BRON_PROFILES, bronNodeForService, bronProfileBySourceOIN, type BronProfile,
 } from '../data/bronnen'
-import type { Tab } from '../types'
+import { viaFsc, type Tab } from '../types'
 import { CONSUMERS } from './consumer'
 
 export type NodeStatus = 'green' | 'red' | 'yellow' | 'grey' | 'no-otel'
@@ -92,6 +92,20 @@ function nodesForSpan(span: SpanInfo, mode: Tab): string[] {
     }
   }
 
+  if (mode === 'asi-verify') {
+    // ASI: the ASIP asks the source over its own peer. The QTSP, the
+    // authorization server and the OpenFSC containers have no spans.
+    switch (svc) {
+      case 'asi-provider': return ['asi-provider']
+      case 'pdp-service': return ['pdp']
+      case 'opa': return ['opa']
+      default: {
+        const bronNode = bronNodeForService(svc)
+        return bronNode ? [bronNode] : []
+      }
+    }
+  }
+
   // USE-flow (DvTP) — runs on real FSC. The sidecar puts the BSN in the
   // placeholder's place, read by the source's decryption component.
   switch (svc) {
@@ -117,6 +131,11 @@ export const USE_NODE_IDS = [
   'afnemer', 'outway', 'outway-manager', 'bd-inway',
   'pdp', 'opa', 'consent-pip', 'sidecar', 'decryption', 'bron',
 ]
+export const ASI_NODE_IDS = [
+  'qtsp', 'asi-authorization-server', 'asi-provider',
+  'asip-outway', 'asip-manager', 'bd-inway',
+  'pdp', 'opa', 'sidecar', 'bron',
+]
 export const EUDI_ISSUANCE_NODE_IDS = [
   'wallet', 'demo-issuer', 'issuance-server',
   'eudi-adapter', 'edi-outway', 'bd-inway',
@@ -127,6 +146,7 @@ export const EUDI_ISSUANCE_NODE_IDS = [
 function nodeIdsFor(mode: Tab): string[] {
   if (mode === 'issuance') return ISSUANCE_NODE_IDS
   if (mode === 'eudi-issuance') return EUDI_ISSUANCE_NODE_IDS
+  if (mode === 'asi-verify') return ASI_NODE_IDS
   return USE_NODE_IDS
 }
 
@@ -164,6 +184,26 @@ export function nodeStatesFromSpans(
     )
     if (anyDownstream) {
       for (const n of ['wallet', 'demo-issuer', 'issuance-server', 'edi-outway', 'bd-inway', 'edi-manager']) {
+        if (result[n] === 'grey') result[n] = 'no-otel'
+      }
+    }
+  }
+
+  if (mode === 'asi-verify') {
+    // The QTSP is outside the demo and the authorization server is not in
+    // this request; the OpenFSC containers export no spans. Once the ASIP
+    // has a span the request happened: they are not measurable, not unseen.
+    if (result['asi-provider'] === 'green' || result['asi-provider'] === 'red') {
+      for (const n of ['qtsp', 'asi-authorization-server']) {
+        if (result[n] === 'grey') result[n] = 'no-otel'
+      }
+    }
+    // The chain behind the ASIP only when the request went through it.
+    const anyDownstream = ['pdp', 'sidecar', 'bron'].some(
+      (n) => result[n] === 'green' || result[n] === 'red',
+    )
+    if (anyDownstream) {
+      for (const n of ['asip-outway', 'asip-manager', 'bd-inway']) {
         if (result[n] === 'grey') result[n] = 'no-otel'
       }
     }
@@ -232,9 +272,10 @@ export function computeRevealOrder(
 
   // Insert PDP + OPA right after the PEP-equivalent so the reveal-order is
   // causal even if the spans race in the collector.
-  //   - For both 'use' and 'eudi-issuance': PEP-equivalent is FSC-Inway
-  //     (id 'bd-inway') which calls pdp-service via the AuthZen plugin.
-  if (mode === 'use' || mode === 'eudi-issuance') {
+  //   - For every flow through FSC (use, EUDI, ASI): PEP-equivalent is
+  //     FSC-Inway (id 'bd-inway') which calls pdp-service via the AuthZen
+  //     plugin.
+  if (viaFsc(mode)) {
     const pepEquivId = 'bd-inway'
     let insertAfter = order.findIndex((o) => o.node === pepEquivId)
     for (const n of ['pdp', 'opa']) {
@@ -254,6 +295,15 @@ export function computeRevealOrder(
     // Prepend the wallet-branch (no OTel spans, so never reached via span-loop).
     // Show them upfront in reveal-order so the strip animates left-to-right.
     for (const n of ['issuance-server', 'demo-issuer', 'wallet']) {
+      if (!expected.includes(n) || seen.has(n)) continue
+      order.unshift({ node: n, status: finalStates[n] ?? 'grey' })
+      seen.add(n)
+    }
+  }
+
+  if (mode === 'asi-verify') {
+    // The QTSP and its token come first; neither has a span.
+    for (const n of ['asi-authorization-server', 'qtsp']) {
       if (!expected.includes(n) || seen.has(n)) continue
       order.unshift({ node: n, status: finalStates[n] ?? 'grey' })
       seen.add(n)

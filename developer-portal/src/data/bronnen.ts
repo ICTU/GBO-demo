@@ -137,6 +137,10 @@ export function playgroundUrlFor(bron: BronProfile): string {
 // has no pseudonym-contract consumer.
 export const BD_BRON: BronProfile = BRON_PROFILES[0]
 
+// The BRP bron: the akte van overlijden on the EUDI route, and the ASIP's
+// data service brp.
+export const BRP_BRON: BronProfile = BRON_PROFILES[1]
+
 // The LVG bron: the Installatie Register's, in the DvTP use-flow.
 export const LVG_BRON: BronProfile = BRON_PROFILES[2]
 

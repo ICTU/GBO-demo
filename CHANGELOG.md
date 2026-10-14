@@ -47,6 +47,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     request. It exports OTel spans with `gbo.fsc.transaction_id`, and the
     developer portal backend watches its requests and reads its peer's
     transaction log (`asip`) (#525).
+  - The developer portal has an ASI tab: it watches a QTSP's verify or
+    retrieve at the ASIP and shows the chain (QTSP, ASIP, its Outway,
+    bd-inway, PDP, BRP), the transaction log of `asip` and BD, and the PDP
+    decision; the rule panel shows the services a rule binds on (#525).
   - Rules name the FSC services they bind on (`services`): a field key such
     as `Query.ingeschrevenPersoon` is shared by `bri` and `brp`. EUD0001 and
     DVT0001 bind on `bri`, EUD0002 on `brp`, LVG0001 on `lvg`; a policy test

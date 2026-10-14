@@ -13,6 +13,9 @@ function modeForService(service: string): Tab | null {
   // Wallet-side (wallet/demo-issuer/issuance-server) has no OTel; the first
   // GBO-side span for an EUDI-flow is always eudi-adapter.
   if (service === 'eudi-adapter') return 'eudi-issuance'
+  // ASI: a QTSP's verify or retrieve at the ASIP; the QTSP is outside the
+  // demo, so the ASIP is the first span.
+  if (service === 'asi-provider') return 'asi-verify'
   return null
 }
 

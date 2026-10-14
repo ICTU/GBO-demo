@@ -20,6 +20,18 @@ export default function RuleSpecPanel({ rule }: Props) {
         {rule.source_id && <span className="mono" style={{ fontWeight: 400, marginLeft: 6 }}>({rule.source_id})</span>}
       </div>
       <Grid>
+        {rule.services && (
+          <Row
+            label="Geldt op diensten"
+            value={
+              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                {rule.services.length > 0
+                  ? rule.services.map((s) => <Chip key={s}>{s}</Chip>)
+                  : <span style={{ color: 'var(--mute)' }}>geen</span>}
+              </div>
+            }
+          />
+        )}
         {(rule.covers_types?.length ?? 0) > 0 && (
           <Row
             label="Dekt types"

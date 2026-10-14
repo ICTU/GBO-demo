@@ -21,8 +21,10 @@ import { newTraceContext } from './util/trace'
 import { consentTokenFor, storeConsentToken } from './util/consentTokens'
 import { loadIssuanceOffers, type IssuanceOffer } from './eudi'
 import { consumerFor, DEFAULT_VBO_ID, isLvgScope } from './util/consumer'
-import type {
-  ApiCall, EudiPayload, HistoryRun, IssuancePayload, IssuanceResponse, Scenario, Tab, UsePayload, UseResponse,
+import {
+  viaFsc,
+  type ApiCall, type EudiPayload, type HistoryRun, type IssuancePayload, type IssuanceResponse, type Scenario,
+  type Tab, type UsePayload, type UseResponse,
 } from './types'
 
 const EMPTY_ISSUANCE: IssuancePayload = {
@@ -126,7 +128,7 @@ export default function App() {
   // fallback); pdp/opa come from the cross-trace-lookup on
   // Fsc-Transaction-Id. Applies to both flows that hit pdp-service via
   // FSC-Inway (EUDI and DvTP).
-  const mergedStates = archMode === 'eudi-issuance' || archMode === 'use'
+  const mergedStates = viaFsc(archMode)
     ? { ...archStates, ...fscOverrides.states }
     : archStates
 
@@ -197,10 +199,30 @@ export default function App() {
       })
       return
     }
-    // DvTP paths: if the user just clicked Submit themselves (submitting=true),
-    // don't overwrite — the local run wins; watch will pick things back up
-    // next round once a real citizen/consumer-flow arrives.
+    // DvTP and ASI paths: if the user just clicked Submit themselves
+    // (submitting=true), don't overwrite — the local run wins; watch will
+    // pick things back up next round once a real citizen/consumer-flow
+    // arrives.
     if (submitting) return
+    // ASI: a QTSP's verify or retrieve at the ASIP. The QTSP is outside the
+    // demo, so there is no response to show here and no payload to log; the
+    // chain, the FSC transaction log and the PDP decision are the evidence.
+    // After the guard above: a run of the user's own (or a wait for the
+    // wallet) keeps the screen.
+    if (mode === 'asi-verify') {
+      setArchApiCalls(undefined)
+      setResult({
+        outcome: 'unknown',
+        status: 0,
+        body: { trace_id: traceId },
+        trace_id: traceId,
+        narrative: 'ASI-verzoek van een QTSP gedetecteerd. Het antwoord gaat naar de QTSP; zie de keten, het FSC-transactielog en de PDP-beslissing per hop.',
+      })
+      setArchTraceId(traceId)
+      setArchMode('asi-verify')
+      setTab('asi-verify')
+      return
+    }
     setArchApiCalls(undefined)
     setResult(null)
     setArchTraceId(traceId)
@@ -296,6 +318,15 @@ export default function App() {
     // trace_id to seed — it renders the QR (universal-link client-side
     // assembled), enables watch, and waits for eudi-adapter's first span
     // (useWatchNext handles this).
+    // ASI starts at a QTSP, outside the demo: watch for its request.
+    if (tab === 'asi-verify') {
+      setResult(null)
+      setArchApiCalls(undefined)
+      setArchTraceId(null)
+      setArchMode('asi-verify')
+      if (!watching) setWatching(true)
+      return
+    }
     if (tab === 'eudi-issuance') {
       setResult(null)
       setArchApiCalls(undefined)
@@ -438,7 +469,7 @@ export default function App() {
           grafanaUrl={GRAFANA_PUBLIC_URL}
         />
 
-        {(archMode === 'eudi-issuance' || archMode === 'use') && (
+        {viaFsc(archMode) && (
           <>
             <FscTxlogPanel data={fscTxlog} transactionId={fscTxID} loading={fscTxlogLoading} />
             <LdvPanel data={ldvChain} traceId={archTraceId} loading={ldvLoading} />

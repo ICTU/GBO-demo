@@ -2,13 +2,14 @@ import { Fragment, useState } from 'react'
 import ArchNode from './ArchNode'
 import NodePopover from './NodePopover'
 import {
-  EUDI_ISSUANCE_BRANCHES, ISSUANCE_CHAIN, eudiIssuanceChain, useBranches, useChain, type NodeDef,
+  ASI_BRANCHES, EUDI_ISSUANCE_BRANCHES, ISSUANCE_CHAIN, asiChain, eudiIssuanceChain, useBranches, useChain,
+  type NodeDef,
 } from '../data/chains'
 import type { Consumer } from '../util/consumer'
-import type { BronProfile } from '../data/bronnen'
+import { BD_BRON, BRP_BRON, type BronProfile } from '../data/bronnen'
 import type { ArchStates } from '../hooks/useArchState'
 import { useDecisions } from '../hooks/useDecisions'
-import type { ApiCall, Tab } from '../types'
+import { viaFsc, type ApiCall, type Tab } from '../types'
 
 type Props = {
   mode: Tab
@@ -51,17 +52,20 @@ export default function ArchStrip({
   // For flows through FSC-Inway (EUDI + DvTP) the PDP decision is found by
   // Fsc-Transaction-Id (see useFscTxlog). Other nodes still resolve against
   // the adapter trace.
-  const useCrossTrace = (mode === 'eudi-issuance' || mode === 'use') && !!pdpTraceIdOverride
+  const useCrossTrace = viaFsc(mode) && !!pdpTraceIdOverride
   const decisionTxId = useCrossTrace ? pdpTraceIdOverride : traceId
   const pdpSpanTraceId = useCrossTrace ? pdpTraceIdOverride : traceId
   const [openNode, setOpenNode] = useState<string | null>(null)
   const chain: NodeDef[] =
     mode === 'issuance' ? ISSUANCE_CHAIN
     : mode === 'eudi-issuance' ? eudiIssuanceChain(bron)
+    // Until a run names its source, the ASIP's only data service: brp.
+    : mode === 'asi-verify' ? asiChain(!bron || bron === BD_BRON ? BRP_BRON : bron)
     : useChain(consumer)
   const branches: NodeDef[] =
     mode === 'use' ? useBranches(consumer)
     : mode === 'eudi-issuance' ? EUDI_ISSUANCE_BRANCHES
+    : mode === 'asi-verify' ? ASI_BRANCHES
     : []
 
   // Fetch the PDP decisions whenever a use- or EUDI-trace is shown — for
@@ -71,7 +75,7 @@ export default function ArchStrip({
   // decision records are the only source for its state.
   const decisions = useDecisions(
     decisionTxId,
-    !!decisionTxId && (mode === 'use' || mode === 'eudi-issuance'),
+    !!decisionTxId && viaFsc(mode),
   )
 
   // Two override-flavours with different timing:
@@ -93,7 +97,7 @@ export default function ArchStrip({
   //      DENY (PEP/OPA red) and system errors (e.g. consent-pip 404 bubbling
   //      out as PEP 400). They did their job correctly — only the actual
   //      source-of-error should stay red.
-  const recordedDecision = (mode === 'use' || mode === 'eudi-issuance')
+  const recordedDecision = viaFsc(mode)
     ? decisions.audit.records[0]?.decision
     : undefined
 
@@ -125,7 +129,10 @@ export default function ArchStrip({
     const downstreamRed = ['pdp', 'opa', 'consent-pip', 'sidecar', 'decryption', 'bron']
       .some((id) => out[id] === 'red')
     if (downstreamRed) {
-      for (const id of ['afnemer', 'outway', 'outway-manager', 'bd-inway', 'edi-outway', 'edi-manager', 'eudi-adapter']) {
+      for (const id of [
+        'afnemer', 'outway', 'outway-manager', 'bd-inway', 'edi-outway', 'edi-manager', 'eudi-adapter',
+        'asi-provider', 'asip-outway', 'asip-manager',
+      ]) {
         if (out[id] === 'red') out[id] = 'green'
       }
     }
@@ -143,6 +150,7 @@ export default function ArchStrip({
           Architectuur · {
             mode === 'issuance' ? 'issuance-keten'
             : mode === 'eudi-issuance' ? 'EUDI-issuance-keten'
+            : mode === 'asi-verify' ? 'ASI-verificatieketen'
             : 'use-keten'
           }
         </span>
@@ -182,6 +190,12 @@ export default function ArchStrip({
             onClick={(e) => { e.stopPropagation(); setMode('eudi-issuance') }}
           >
             EUDI
+          </button>
+          <button
+            className={mode === 'asi-verify' ? 'on' : ''}
+            onClick={(e) => { e.stopPropagation(); setMode('asi-verify') }}
+          >
+            ASI
           </button>
         </div>
       </div>
@@ -230,7 +244,7 @@ export default function ArchStrip({
                                 traceId={branchDef.id === 'opa' ? pdpSpanTraceId : traceId}
                                 jaegerUrl={jaegerUrl}
                                 grafanaUrl={grafanaUrl}
-                                decisions={branchDef.id === 'opa' && (mode === 'use' || mode === 'eudi-issuance') ? decisions : undefined}
+                                decisions={branchDef.id === 'opa' && viaFsc(mode) ? decisions : undefined}
                                 decisionsLoading={branchDef.id === 'opa' ? decisions.pending : undefined}
                                 decisionsError={branchDef.id === 'opa' ? decisions.error : undefined}
                               />
