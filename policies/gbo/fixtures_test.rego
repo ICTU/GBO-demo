@@ -98,6 +98,24 @@ death_certificate_fields(bsn) := [
 	{"path": ["akteVanOverlijden", "verklaring_tekst"], "parentType": "AkteVanOverlijden", "field": "verklaring_tekst", "leaf": true},
 ]
 
+# ── BRP personal data, as the ASIP asks it ───────────────────────────────
+#   query($bsn: BSN!) { ingeschrevenPersoon(bsn: $bsn) {
+#     geslachtsnaam heeftNationaliteit { nationaliteit }
+#     ... on Ingezetene { woontOp { straatnaam } } } }
+
+asip := "99999999900000001200"
+
+brp_field(parent, field, path) := {"path": path, "parentType": parent, "field": field, "leaf": true}
+
+personal_fields(bsn) := [
+	person(bsn),
+	brp_field("IngeschrevenPersoon", "geslachtsnaam", ["ingeschrevenPersoon", "geslachtsnaam"]),
+	object.union(brp_field("IngeschrevenPersoon", "heeftNationaliteit", ["ingeschrevenPersoon", "heeftNationaliteit"]), {"leaf": false}),
+	brp_field("Nationaliteit", "nationaliteit", ["ingeschrevenPersoon", "heeftNationaliteit", "nationaliteit"]),
+	object.union(brp_field("Ingezetene", "woontOp", ["ingeschrevenPersoon", "woontOp"]), {"on": "Ingezetene", "leaf": false}),
+	brp_field("Binnenlandsadres", "straatnaam", ["ingeschrevenPersoon", "woontOp", "straatnaam"]),
+]
+
 # ── LVG ownership ────────────────────────────────────────────────────────
 #   query($bsn: BSN!, $vboId: String!) { vbo(bsn: $bsn, vboId: $vboId) { vboId } }
 

@@ -73,8 +73,18 @@
               }
             }
           },
+          "500": {
+            "description": "The chain refused the ASIP's query to the authentic source: a fault in the deployment, not a missing value. Annex B lists no 500.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problem"
+                }
+              }
+            }
+          },
           "503": {
-            "description": "The authorization server's keys are unavailable, so no access token can be validated. Annex B lists no 503; this mock answers it rather than blame the client's token with 401.",
+            "description": "The authorization server's keys or the authentic source are unavailable: no access token can be validated, or the source gives no answer. Annex B lists no 503; this mock answers it rather than blame the client's token with 401, or report a missing value as Unknown.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -136,6 +146,16 @@
               }
             }
           },
+          "500": {
+            "description": "The chain refused the ASIP's query to the authentic source: a fault in the deployment, not a missing value. Annex B lists no 500.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problem"
+                }
+              }
+            }
+          },
           "501": {
             "description": "Indicates that the requested optional feature is not implemented (REQ-ASIP-6.1.2.2-06).",
             "content": {
@@ -147,7 +167,7 @@
             }
           },
           "503": {
-            "description": "The authorization server's keys are unavailable, so no access token can be validated. Annex B lists no 503; this mock answers it rather than blame the client's token with 401.",
+            "description": "The authorization server's keys or the authentic source are unavailable: no access token can be validated, or the source gives no answer. Annex B lists no 503; this mock answers it rather than blame the client's token with 401, or report a missing value as Unknown.",
             "content": {
               "application/problem+json": {
                 "schema": {

@@ -17,6 +17,9 @@ rule_id := "DVT0001"
 # without a verified token the consent checks below deny anyway.
 regime := "consent"
 
+# The income declaration is bri's; Query.ingeschrevenPersoon is also brp's root.
+services := {"bri"}
+
 # Bedrag's scalars (waarde, valuta) are covered through their type. The
 # declaration types are listed field by field instead, so box2Inkomen and
 # box3Inkomen stay uncovered here; under consent no rule covers them, and

@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 
 	"github.com/getkin/kin-openapi/routers"
@@ -191,7 +192,7 @@ func (h *handler) verify(w http.ResponseWriter, r *http.Request, bsn string) {
 	for _, f := range req.AttributeFragments {
 		in.Fragments = append(in.Fragments, verification.Fragment{Identifier: f.AttributeIdentifier, Location: f.Location, Value: f.Value})
 	}
-	result, err := h.cfg.Verification.Verify(bsn, in)
+	result, err := h.cfg.Verification.Verify(r.Context(), bsn, in)
 	if err != nil {
 		writeUseCaseError(w, err)
 		return
@@ -222,7 +223,7 @@ func (h *handler) retrieve(w http.ResponseWriter, r *http.Request, bsn string) {
 	for _, a := range req.AttributeIdentifiers {
 		ids = append(ids, a.AttributeIdentifier)
 	}
-	attrs, err := h.cfg.Verification.Retrieve(bsn, ids, hasMandate(req.Mandate))
+	attrs, err := h.cfg.Verification.Retrieve(r.Context(), bsn, ids, hasMandate(req.Mandate))
 	if err != nil {
 		writeUseCaseError(w, err)
 		return
@@ -239,7 +240,9 @@ func (h *handler) retrieve(w http.ResponseWriter, r *http.Request, bsn string) {
 const maxRequestBody = 1 << 20
 
 // writeUseCaseError maps an error of the verification core to the status
-// codes of REQ-ASIP-6.1.1.2-12.
+// codes of REQ-ASIP-6.1.1.2-12, plus 503 for a source that cannot be reached
+// and 500 for one that refuses: neither is a missing value (Unknown). The
+// errors name no BSN, so they can be logged.
 func writeUseCaseError(w http.ResponseWriter, err error) {
 	var malformed *verification.MalformedError
 	var unknown *verification.UnknownAttributeError
@@ -250,7 +253,11 @@ func writeUseCaseError(w http.ResponseWriter, err error) {
 		writeProblem(w, http.StatusNotImplemented, "Not Implemented", err.Error())
 	case errors.As(err, &unknown):
 		writeProblem(w, http.StatusNotFound, "Not Found", err.Error())
+	case errors.Is(err, verification.ErrSourceUnavailable):
+		slog.Warn("authentic source unavailable", "err", err)
+		writeProblem(w, http.StatusServiceUnavailable, "Service Unavailable", "the authentic source is unavailable")
 	default:
+		slog.Error("authentic source query failed", "err", err)
 		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "the request could not be processed")
 	}
 }

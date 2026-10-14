@@ -1,5 +1,5 @@
 {
-  "_comment": "Test persons of the identification stub. Names, birth dates and nationalities equal the source of the ASIP (services/asi-provider/testdata/persons.json); the places of birth are test data.",
+  "_comment": "Test persons of the identification stub. BSN, names, birth dates, places of birth and nationalities equal the BRP mock (services/brp-graphql-server/mockdata/personen.json), the source the ASIP asks.",
   "persons": [
     {
       "id": "frouke",
@@ -7,7 +7,7 @@
       "family_name": "Jansen",
       "given_name": "Frouke",
       "birthdate": "2000-03-24",
-      "place_of_birth": { "country": "NL", "locality": "Rotterdam" },
+      "place_of_birth": { "country": "NL", "locality": "Leeuwarden" },
       "nationalities": ["NL", "BE"]
     },
     {

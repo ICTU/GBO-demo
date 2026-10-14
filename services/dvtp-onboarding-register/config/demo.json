@@ -16,6 +16,12 @@
       "name": "Demo PDP (GBO)",
       "active": true,
       "allowed_source_peer_ids": ["99999999900000000700"]
+    },
+    {
+      "peer_id": "99999999900000001200",
+      "name": "Demo ASIP (GBO, ETSI TS 119 478)",
+      "active": true,
+      "allowed_source_peer_ids": ["99999999900000000200"]
     }
   ],
   "seed_participants": [

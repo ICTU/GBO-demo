@@ -38,13 +38,43 @@ func TestKeysFromAuthorizationServerMetadata(t *testing.T) {
 		}
 	}))
 	defer as.Close()
-	keys, err := New(as.URL).Keys(t.Context(), testKeyID)
+	keys, err := New(as.URL, "").Keys(t.Context(), testKeyID)
 	if err != nil || len(keys) != 1 || keys[0].KeyID != testKeyID {
 		t.Fatalf("keys = %v, %v; want the key of the authorization server", keys, err)
 	}
 	// RFC 8414 section 3.3: the issuer in the metadata must be the issuer the
 	// ASIP is configured with.
-	if _, err := New(as.URL+"/other").Keys(t.Context(), testKeyID); !errors.Is(err, accesstoken.ErrKeysUnavailable) {
+	if _, err := New(as.URL+"/other", "").Keys(t.Context(), testKeyID); !errors.Is(err, accesstoken.ErrKeysUnavailable) {
 		t.Fatalf("metadata of another issuer was accepted: %v", err)
+	}
+}
+
+// In compose the issuer is a host address the ASIP container cannot reach:
+// it fetches metadata and keys on the internal address, and still requires
+// the metadata to name the public issuer.
+func TestKeysThroughTheInternalAddress(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const issuer = "http://public.as.test:9425"
+	jwks := jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: &key.PublicKey, KeyID: testKeyID, Algorithm: "ES256", Use: "sig"}}}
+	internal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/oauth-authorization-server":
+			_ = json.NewEncoder(w).Encode(map[string]string{"issuer": issuer, "jwks_uri": issuer + "/jwks.json"})
+		case "/jwks.json":
+			_ = json.NewEncoder(w).Encode(jwks)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer internal.Close()
+	keys, err := New(issuer, internal.URL).Keys(t.Context(), testKeyID)
+	if err != nil || len(keys) != 1 {
+		t.Fatalf("keys = %v, %v; want the key through the internal address", keys, err)
+	}
+	if _, err := New("http://other.as.test", internal.URL).Keys(t.Context(), testKeyID); !errors.Is(err, accesstoken.ErrKeysUnavailable) {
+		t.Fatalf("metadata naming another issuer was accepted through the internal address: %v", err)
 	}
 }

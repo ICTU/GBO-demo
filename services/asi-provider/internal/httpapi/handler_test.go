@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"gbo-demo/asi-provider/internal/accesstoken"
-	"gbo-demo/asi-provider/internal/memorysource"
 	"gbo-demo/asi-provider/internal/seal"
 	"gbo-demo/asi-provider/internal/verification"
 )
@@ -68,13 +67,14 @@ func newTestServerWith(t *testing.T, authz *testAuthorizationServer, qtsp *testQ
 
 func newTestServerWithKeys(t *testing.T, authz *testAuthorizationServer, qtsp *testQTSP, keys accesstoken.KeySource) testEnv {
 	t.Helper()
+	return newTestServerWithSource(t, authz, qtsp, keys, testPersons)
+}
+
+func newTestServerWithSource(t *testing.T, authz *testAuthorizationServer, qtsp *testQTSP, keys accesstoken.KeySource, source verification.Source) testEnv {
+	t.Helper()
 	caKey, caCert := newTestCA(t)
 	sealKey, sealCert := newTestSealCertificate(t, caKey, caCert)
 
-	source, err := memorysource.Load("../../testdata/persons.json")
-	if err != nil {
-		t.Fatalf("load source: %v", err)
-	}
 	pool := x509.NewCertPool()
 	pool.AddCert(caCert)
 

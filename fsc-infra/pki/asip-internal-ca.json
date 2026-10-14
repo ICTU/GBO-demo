@@ -1,0 +1,16 @@
+{
+  "CN": "GBO-DEMO Internal CA (asip)",
+  "key": {
+    "algo": "rsa",
+    "size": 4096
+  },
+  "names": [
+    {
+      "C": "NL",
+      "O": "GBO-DEMO ASIP Internal"
+    }
+  ],
+  "ca": {
+    "expiry": "43800h"
+  }
+}
