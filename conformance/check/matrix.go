@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -101,7 +102,7 @@ func Check(m *Matrix, root string) (string, []string) {
 		}
 		known[id] = true
 	}
-	tests := testIndex{root: root, funcs: map[string]map[string]bool{}}
+	tests := testIndex{root: root, funcs: map[string]map[string]bool{}, literals: map[string]map[string]bool{}}
 
 	for _, id := range sortedKeys(m.Requirements) {
 		if !known[id] {
@@ -115,7 +116,7 @@ func Check(m *Matrix, root string) (string, []string) {
 		if g.Prefix == "" || !matched {
 			problems = append(problems, fmt.Sprintf("%s: covers no requirement ID of the list", name))
 		}
-		problems = append(problems, g.Status.problems(name, &tests)...)
+		problems = append(problems, g.problems(name, &tests)...)
 	}
 
 	count := map[string]map[string]int{}
@@ -197,22 +198,29 @@ func (s Status) problems(name string, tests *testIndex) []string {
 }
 
 // testIndex finds Go test functions: a reference is <dir>:<TestName>, or
-// <dir>:<TestName>/<subtest>, with dir relative to the repository root.
+// <dir>:<TestName>/<subtest>, with dir relative to the repository root. A
+// subtest cannot be listed without running the tests, so its name, and each
+// part of a nested one, must at least be a string literal in a test file of
+// that directory: a removed or misspelt subtest is then caught.
 type testIndex struct {
-	root  string
-	funcs map[string]map[string]bool
+	root     string
+	funcs    map[string]map[string]bool
+	literals map[string]map[string]bool
 }
 
-var testFunc = regexp.MustCompile(`(?m)^func (Test\w*)\(`)
+var (
+	testFunc      = regexp.MustCompile(`(?m)^func (Test\w*)\(`)
+	stringLiteral = regexp.MustCompile("\"((?:[^\"\\\\\n]|\\\\.)*)\"|`([^`]*)`")
+)
 
 func (x *testIndex) exists(ref string) error {
 	dir, name, ok := strings.Cut(ref, ":")
 	if !ok || dir == "" || name == "" {
 		return fmt.Errorf("test %q is not <dir>:<TestName>", ref)
 	}
-	name, _, _ = strings.Cut(name, "/")
+	name, subtest, _ := strings.Cut(name, "/")
 	if x.funcs[dir] == nil {
-		x.funcs[dir] = map[string]bool{}
+		x.funcs[dir], x.literals[dir] = map[string]bool{}, map[string]bool{}
 		files, err := filepath.Glob(filepath.Join(x.root, dir, "*_test.go"))
 		if err != nil {
 			return err
@@ -225,10 +233,22 @@ func (x *testIndex) exists(ref string) error {
 			for _, m := range testFunc.FindAllSubmatch(src, -1) {
 				x.funcs[dir][string(m[1])] = true
 			}
+			for _, m := range stringLiteral.FindAllSubmatch(src, -1) {
+				if lit, err := strconv.Unquote(string(m[0])); err == nil {
+					x.literals[dir][lit] = true
+				}
+			}
 		}
 	}
 	if !x.funcs[dir][name] {
 		return fmt.Errorf("test %s does not exist", ref)
+	}
+	if subtest != "" {
+		for _, part := range strings.Split(subtest, "/") {
+			if !x.literals[dir][part] {
+				return fmt.Errorf("subtest %s does not exist", ref)
+			}
+		}
 	}
 	return nil
 }

@@ -15,7 +15,7 @@ A status is one of:
 - `not-applicable`: it does not apply to this ASIP; `reason` says why;
 - `failing`: not met; `reason` says why and `slice` where it will be met.
 
-A test is `<dir>:<TestName>`, or `<dir>:<TestName>/<subtest>`, with the directory relative to the repository root.
+A test is `<dir>:<TestName>`, or `<dir>:<TestName>/<subtest>`, with the directory relative to the repository root. A subtest cannot be listed without running the tests, so the check requires its name (each part of a nested one) to be a string literal in a test file of that directory: a removed or misspelt subtest is caught, a renamed literal that still exists elsewhere is not.
 
 The check fails when an ID of the list has no entry and no group, when an entry or group names an ID that is not in the list, when a status lacks what it requires, or when a named test does not exist. It does not run the tests: the services' CI jobs do. On success it prints the count per role (ASIP, AZSP, AZP, DIP, TSP) and status.
 

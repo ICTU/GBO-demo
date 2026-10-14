@@ -23,7 +23,7 @@ func fixture(t *testing.T, matrix string) (code int, stdout, stderr string) {
 			t.Fatal(err)
 		}
 	}
-	write("services/asip/verify_test.go", "package asip\n\nfunc TestVerify(t *testing.T) {}\n\nfunc TestRetrieve(t *testing.T) {}\n")
+	write("services/asip/verify_test.go", "package asip\n\nfunc TestVerify(t *testing.T) {\n\tt.Run(\"the request body\", func(t *testing.T) {})\n}\n\nfunc TestRetrieve(t *testing.T) {}\n")
 	write("conformance/ids.txt", "# IDs only\nREQ-ASIP-6.1.1.1-01\nREQ-ASIP-6.1.1.1-02\nREQ-AZSP-6.1.3.1-02\nREQ-ASIP-6.2.1-01\nREQ-ASIP-6.2.1-02\n")
 	write("conformance/matrix.yaml", matrix)
 	var out, errs bytes.Buffer
@@ -87,6 +87,7 @@ func TestATestThatDoesNotExistFails(t *testing.T) {
 	expectFailure(t, replace("services/asip:TestRetrieve", "services/asip:TestRetreive"), "test services/asip:TestRetreive does not exist")
 	expectFailure(t, replace("services/asip:TestRetrieve", "services/nope:TestRetrieve"), "test services/nope:TestRetrieve does not exist")
 	expectFailure(t, replace("services/asip:TestRetrieve", "TestRetrieve"), `test "TestRetrieve" is not <dir>:<TestName>`)
+	expectFailure(t, replace("TestVerify/the request body", "TestVerify/this subtest does not exist"), "subtest services/asip:TestVerify/this subtest does not exist does not exist")
 }
 
 // K3: an unknown status, or a status without what it requires.
