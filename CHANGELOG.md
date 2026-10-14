@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Added
+- **Conformance matrix for ETSI TS 119 478** (`conformance/`): a status per
+  requirement ID of the specification (passed, stub, not-applicable or
+  failing), with the tests that prove it or the reason, read as Implementing
+  Regulation (EU) 2026/1735 Annex IV adapts it. A CI job checks that every ID
+  is covered, that every named test exists, and prints the count per role
+  (#533).
 - **ASIP mock (ETSI TS 119 478).** A mock Authentic Source Interface
   Provider for qualified trust service providers (epic #336).
   - `asi-provider` (port 4020): `POST /<data service>/authsrc-api/verify` and `/retrieve`

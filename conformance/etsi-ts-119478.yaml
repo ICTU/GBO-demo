@@ -1,0 +1,381 @@
+# The conformance claim of the ASI route against ETSI TS 119 478 V1.1.1:
+# a status per requirement ID (see README.md). The requirements are read as
+# Implementing Regulation (EU) 2026/1735 Annex IV adapts them: that is the
+# text the regulation designates.
+spec: ETSI TS 119 478 V1.1.1 (2026-01)
+ids: etsi-ts-119478-ids.txt
+
+groups:
+  - prefix: REQ-ASIP-6.2.
+    status: not-applicable
+    reason: The ASIP chooses the HTTP / OAuth interface of clause 6.1 (REQ-ASIP-4.3-04 allows either); clause 6.2 is the ISO 15000 interface, which it does not offer.
+  - prefix: REQ-DIP-
+    status: not-applicable
+    reason: Requirements on the Discover Interface Provider, a role outside the ASIP; the demo plays it with services/asi-discovery-stub.
+  - prefix: REQ-TSP-
+    status: not-applicable
+    reason: Requirements on the trust service provider that asks, a role outside the ASIP; the demo plays it with services/qtsp-reference.
+
+requirements:
+  REQ-ASIP-4.3-01:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestVerifyMatch"
+      - "services/qtsp-reference:TestVerifyThroughTheChain"
+  REQ-ASIP-4.3-02:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestRetrieveReturnsValue"
+      - "services/qtsp-reference:TestRetrieve"
+  REQ-ASIP-4.3-03:
+    status: stub
+    tests:
+      - "services/asi-provider/internal/httpapi:TestInvalidAccessTokenIs401"
+      - "services/asi-provider/internal/httpapi:TestInvalidDPoPProofIs401"
+      - "services/asi-authorization-server/internal/httpapi:TestUnapprovedSoftwareStatement"
+      - "services/qtsp-reference:TestVerifyThroughTheChain"
+    reason: Token, DPoP and registration checks are real, but whether the request comes from a legitimate user rests on the test-person chooser and the QTSP's entitlement on a stub register with test certificates.
+  REQ-ASIP-4.3-04:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestPublishedContract"
+      - "services/asi-provider/internal/httpapi:TestCompletionsOnlyAdd"
+  REQ-ASIP-6.1.1.1-01:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestVerifyMatch"
+      - "services/asi-provider/internal/httpapi:TestCompletionsOnlyAdd"
+  REQ-ASIP-6.1.1.1-02:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestVerifyMatch"
+      - "services/asi-provider/internal/httpapi:TestVerifyFragment"
+  REQ-ASIP-6.1.1.1-03:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestVerifyMatch"
+  REQ-ASIP-6.1.1.1-03-01:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestVerifyMatch"
+      - "services/asi-provider/internal/verification:TestOneQuestionToTheSourcePerRequest"
+  REQ-ASIP-6.1.1.1-04:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestVerifyFragment"
+  REQ-ASIP-6.1.1.1-04-01:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestVerifyFragment"
+      - "services/asi-provider/internal/verification:TestVerifyFragment"
+  REQ-ASIP-6.1.1.1-05:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestVerifyMalformedIs400/neither attributes nor fragments"
+  REQ-ASIP-6.1.1.1-06:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestVerifyMalformedIs400/attribute without attributeValue"
+      - "services/asi-provider/internal/httpapi:TestVerifyMatch"
+  REQ-ASIP-6.1.1.1-06-01:
+    status: stub
+    tests:
+      - "services/asi-provider/internal/httpapi:TestSchemaViolationIs400BeforeOtherChecks"
+      - "services/asi-provider/internal/httpapi:TestVerifyUnknownAttributeIdentifierIs404"
+    reason: The URI form is enforced, but the identifiers are provisional placeholders with name and version, not entries from the EU catalogue of attributes, which does not exist for these attributes yet.
+  REQ-ASIP-6.1.1.1-06-02:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestVerifyMatch"
+      - "services/asi-provider/internal/httpapi:TestVerifyNoMatch"
+  REQ-ASIP-6.1.1.1-06-02-01:
+    status: stub
+    tests:
+      - "services/asi-provider/internal/httpapi:TestVerifyMalformedIs400/attributeValue is not an object"
+    reason: Only that the value is a JSON object is checked; there is no registered JSON schema per attribute type, so the value shapes are the provisional catalogue's own.
+  REQ-ASIP-6.1.1.1-07:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestVerifyMalformedIs400/fragment without location"
+      - "services/asi-provider/internal/httpapi:TestVerifyFragment"
+  REQ-ASIP-6.1.1.1-07-01:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestSchemaViolationIs400BeforeOtherChecks/verify: fragment identifier is not a URI"
+  REQ-ASIP-6.1.1.1-07-02:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestVerifyFragment"
+      - "services/asi-provider/internal/verification:TestVerifyFragment"
+  REQ-ASIP-6.1.1.1-07-03:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestVerifyFragment"
+  REQ-ASIP-6.1.1.1-08:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestVerifyMatch"
+      - "services/asi-provider/internal/httpapi:TestVerifyNoMatch"
+      - "services/asi-provider/internal/verification:TestVerifyResults"
+  REQ-ASIP-6.1.1.1-08-01:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestVerifyFragment"
+  REQ-ASIP-6.1.1.1-09:
+    status: not-applicable
+    reason: The ASIP supports fragment verification, so the 501 for unsupported fragments never arises.
+  REQ-ASIP-6.1.1.1-10:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestVerifyMatchWithVariation"
+      - "services/asi-provider/internal/verification:TestVerifyResults"
+  REQ-ASIP-6.1.1.1-10-01:
+    status: failing
+    reason: The ASIP supports fuzzy matching but returns no stored value. Annex IV of Implementing Regulation (EU) 2026/1735 makes the value optional in 6.1.1.2-04 but does not adapt this requirement, so read literally it is not met.
+    slice: "#533: open question in the harvest of slice 6 (Annex IV and this requirement disagree)"
+  REQ-ASIP-6.1.1.1-11:
+    status: not-applicable
+    reason: Requests on behalf of another data subject (mandate) are not supported; such requests get 501.
+  REQ-ASIP-6.1.1.1-12:
+    status: not-applicable
+    reason: Mandate handling is an optional feature this ASIP does not offer.
+  REQ-ASIP-6.1.1.1-13:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestVerifyMandateIs501"
+      - "services/qtsp-reference:TestErrorAnswers/501 mandate"
+  REQ-ASIP-6.1.1.2-01:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestVerifyMatch"
+      - "services/asi-provider/internal/httpapi:TestVerifyResponseNamesProviderAndAuthenticSource"
+  REQ-ASIP-6.1.1.2-02:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestVerifyMatch"
+  REQ-ASIP-6.1.1.2-02-01:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/verification:TestOneQuestionToTheSourcePerRequest"
+      - "services/asi-provider/internal/httpapi:TestVerifyMatch"
+  REQ-ASIP-6.1.1.2-03:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestVerifyMatch"
+  REQ-ASIP-6.1.1.2-04:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestVerifyMatch"
+      - "services/asi-provider/internal/httpapi:TestVerifyMatchWithVariation"
+      - "services/asi-provider/internal/httpapi:TestVerifyNoMatch"
+      - "services/asi-provider/internal/httpapi:TestVerifyUnknownWhenSourceHoldsNoValue"
+      - "services/qtsp-reference:TestVerifyThroughTheChain"
+  REQ-ASIP-6.1.1.2-04-01:
+    status: not-applicable
+    reason: Adapted to optional by Implementing Regulation (EU) 2026/1735 Annex IV; the ASIP returns no attributeValue (asi-provider README, Interpretations).
+  REQ-ASIP-6.1.1.2-04-02:
+    status: not-applicable
+    reason: Adapted to optional by Implementing Regulation (EU) 2026/1735 Annex IV; it applies only when an attributeValue is returned, which this ASIP does not do.
+  REQ-ASIP-6.1.1.2-04-03:
+    status: not-applicable
+    reason: Adapted to optional by Implementing Regulation (EU) 2026/1735 Annex IV; it applies only when an attributeValue is returned, which this ASIP does not do.
+  REQ-ASIP-6.1.1.2-05:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestVerifyFragment"
+      - "services/asi-provider/internal/verification:TestOneQuestionToTheSourcePerRequest"
+  REQ-ASIP-6.1.1.2-06:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestVerifyFragment"
+  REQ-ASIP-6.1.1.2-06-01:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestVerifyFragment"
+  REQ-ASIP-6.1.1.2-06-02:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestVerifyFragment"
+      - "services/asi-provider/internal/verification:TestVerifyFragment"
+  REQ-ASIP-6.1.1.2-06-03:
+    status: not-applicable
+    reason: The structure of fragmentValue; the ASIP returns none (optional under Implementing Regulation (EU) 2026/1735 Annex IV).
+  REQ-ASIP-6.1.1.2-06-04-01:
+    status: not-applicable
+    reason: Adapted to optional by Implementing Regulation (EU) 2026/1735 Annex IV; the ASIP returns no fragmentValue.
+  REQ-ASIP-6.1.1.2-06-04-02:
+    status: not-applicable
+    reason: Adapted to optional by Implementing Regulation (EU) 2026/1735 Annex IV; it applies only when a fragmentValue is returned, which this ASIP does not do.
+  REQ-ASIP-6.1.1.2-06-04-03:
+    status: not-applicable
+    reason: Adapted to optional by Implementing Regulation (EU) 2026/1735 Annex IV; it applies only when a fragmentValue is returned, which this ASIP does not do.
+  REQ-ASIP-6.1.1.2-07:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestVerifyResponseNamesProviderAndAuthenticSource"
+  REQ-ASIP-6.1.1.2-08:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestVerifyResponseNamesProviderAndAuthenticSource"
+      - "services/asi-provider/internal/httpapi:TestADataServiceWithoutAuthenticSourceNamesNone"
+  REQ-ASIP-6.1.1.2-09:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestVerifyResponseNamesProviderAndAuthenticSource"
+  REQ-ASIP-6.1.1.2-10:
+    status: not-applicable
+    reason: Mandate handling is not offered, so there is never a mandate result.
+  REQ-ASIP-6.1.1.2-11:
+    status: not-applicable
+    reason: Mandate handling is not supported, so the condition never arises.
+  REQ-ASIP-6.1.1.2-12:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestVerifyMatch"
+      - "services/asi-provider/internal/httpapi:TestVerifyMalformedIs400"
+      - "services/asi-provider/internal/httpapi:TestRequestWithoutTokenIs401"
+      - "services/asi-provider/internal/httpapi:TestInvalidAccessTokenIs401"
+      - "services/asi-provider/internal/httpapi:TestVerifyUnknownAttributeIdentifierIs404"
+      - "services/asi-provider/internal/httpapi:TestVerifyMandateIs501"
+      - "services/asi-provider/internal/httpapi:TestOrderOfChecks"
+      - "services/qtsp-reference:TestErrorAnswers"
+  REQ-ASIP-6.1.2.1-01:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestRetrieveReturnsValue"
+      - "services/asi-provider/internal/httpapi:TestCompletionsOnlyAdd"
+  REQ-ASIP-6.1.2.1-02:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestRetrieveReturnsValue"
+      - "services/asi-provider/internal/verification:TestRetrieve"
+  REQ-ASIP-6.1.2.1-03:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/verification:TestRetrieve"
+      - "services/qtsp-reference:TestRetrieve"
+  REQ-ASIP-6.1.2.1-03-01:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestRetrieveReturnsValue"
+      - "services/asi-provider/internal/httpapi:TestRetrieveUnknownAttributeIdentifierIs404"
+  REQ-ASIP-6.1.2.1-04:
+    status: not-applicable
+    reason: Retrieval on behalf of another data subject (mandate) is not offered; such requests get 501.
+  REQ-ASIP-6.1.2.2-01:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestRetrieveReturnsValue"
+  REQ-ASIP-6.1.2.2-02:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestRetrieveReturnsValue"
+      - "services/qtsp-reference:TestRetrieve"
+  REQ-ASIP-6.1.2.2-02-01:
+    status: failing
+    reason: When the source holds no value for any requested attribute, the 200 response has an empty attributes array.
+    slice: "#533: retrieve answers 404 when a requested attribute has no value"
+  REQ-ASIP-6.1.2.2-03:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestRetrieveReturnsValue"
+  REQ-ASIP-6.1.2.2-04:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestRetrieveReturnsValue"
+      - "services/asi-provider/internal/httpapi:TestADataServiceWithoutAuthenticSourceNamesNone"
+  REQ-ASIP-6.1.2.2-05:
+    status: not-applicable
+    reason: Mandate handling is not offered, so there is never a mandate result.
+  REQ-ASIP-6.1.2.2-05-01:
+    status: not-applicable
+    reason: Mandate handling is not supported, so the condition never arises.
+  REQ-ASIP-6.1.2.2-06:
+    status: failing
+    reason: An attribute the source holds no value for is left out of a 200 response instead of yielding 404 (not found).
+    slice: "#533: retrieve answers 404 when a requested attribute has no value"
+  REQ-ASIP-B-01:
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestCompletionsOnlyAdd"
+      - "services/asi-provider/internal/httpapi:TestPublishedContract"
+      - "services/asi-provider/internal/httpapi:TestVerifyMatch"
+  REQ-ASIP-C-01:
+    status: not-applicable
+    reason: The ASIP offers only the HTTP / OAuth interface, not the ISO 15000 interface.
+  REQ-AZP-4.4-01:
+    status: passed
+    tests:
+      - "services/asi-authorization-server/internal/httpapi:TestEndToEndVerify"
+      - "services/qtsp-reference:TestVerifyThroughTheChain"
+  REQ-AZP-4.4-02:
+    status: not-applicable
+    reason: The ISO 15000 interface is not offered.
+  REQ-AZSP-6.1.3.1-01:
+    status: passed
+    tests:
+      - "services/asi-authorization-server/internal/httpapi:TestFullFlowIssuesDPoPBoundAccessToken"
+      - "services/asi-authorization-server/internal/httpapi:TestGrantTypeMustBeAuthorizationCode"
+      - "services/asi-authorization-server/internal/httpapi:TestAuthorizationRequestErrors"
+      - "services/asi-authorization-server/internal/httpapi:TestEndToEndVerify"
+  REQ-AZSP-6.1.3.1-02:
+    status: stub
+    tests:
+      - "services/asi-authorization-server/internal/httpapi:TestChooserPage"
+      - "services/asi-authorization-server/internal/httpapi:TestFullFlowIssuesDPoPBoundAccessToken"
+      - "services/asi-authorization-server/internal/httpapi:TestEndToEndVerify"
+      - "services/asi-provider/internal/httpapi:TestTokenIdentifiesThePerson"
+    reason: The user is "identified" by picking a test person on the chooser page, which checks nothing; slice 7 replaces it with wallet PID identification.
+  REQ-AZSP-6.1.3.1-03:
+    status: not-applicable
+    reason: Neither OpenID4VP with the EUDI Wallet nor a TS 119 461 procedure is used yet; the chooser stub stands in until slice 7.
+  REQ-AZSP-6.1.3.1-04:
+    status: passed
+    tests:
+      - "services/asi-authorization-server/internal/httpapi:TestAuthorizationRequestErrors"
+      - "services/asi-authorization-server/internal/httpapi:TestWrongCodeVerifierIsInvalidGrant"
+      - "services/asi-authorization-server/internal/authorization:TestPKCEMatches"
+  REQ-AZSP-6.1.3.1-05:
+    status: passed
+    tests:
+      - "services/asi-authorization-server/internal/httpapi:TestClientAuthenticationIsPrivateKeyJWT"
+      - "services/asi-authorization-server/internal/httpapi:TestReplayedClientAssertionIsInvalidClient"
+      - "services/asi-authorization-server/internal/httpapi:TestMetadata"
+  REQ-AZSP-6.1.3.1-06:
+    status: passed
+    tests:
+      - "services/asi-authorization-server/internal/httpapi:TestFullFlowIssuesDPoPBoundAccessToken"
+      - "services/asi-authorization-server/internal/httpapi:TestTokenRequestNeedsAValidDPoPProof"
+      - "services/asi-provider/internal/httpapi:TestInvalidDPoPProofIs401"
+  REQ-AZSP-6.1.3.1-07:
+    status: passed
+    tests:
+      - "services/asi-authorization-server/internal/httpapi:TestRegistration"
+      - "services/asi-authorization-server/internal/httpapi:TestRegisteredClientGetsAToken"
+      - "services/asi-authorization-server/internal/httpapi:TestMetadata"
+  REQ-AZSP-6.1.3.1-08:
+    status: stub
+    tests:
+      - "services/asi-authorization-server/internal/httpapi:TestFullFlowIssuesDPoPBoundAccessToken"
+      - "services/asi-provider/internal/httpapi:TestInvalidAccessTokenIs401"
+    reason: The token format and the PID claims are real, but the identity they carry comes from the test-person chooser (see 6.1.3.1-02).
+  REQ-AZSP-6.1.3.2-01:
+    status: passed
+    tests:
+      - "services/asi-authorization-server/internal/httpapi:TestRegistration"
+      - "services/asi-authorization-server/internal/httpapi:TestInvalidSoftwareStatement"
+      - "services/asi-authorization-server/internal/httpapi:TestStatementMetadataTakePrecedence"
+  REQ-AZSP-6.1.3.2-02:
+    status: stub
+    tests:
+      - "services/asi-authorization-server/internal/httpapi:TestUnapprovedSoftwareStatement"
+      - "services/asi-authorization-server/internal/httpapi:TestRecheckDeactivatesAClientWithoutEntitlement"
+      - "services/asi-authorization-server/internal/httpapi:TestRecheckSeesAWithdrawalInTheRegisterFile"
+    reason: Certificates are test certificates from the development reader CA, not WRPACs, and entitlements come from a file-based stub register instead of the national register.
+  REQ-AZSP-6.1.3.4-01:
+    status: failing
+    reason: Individual measures are tested (single-use short-lived codes, exact redirect URIs, PKCE, replay checks, DPoP), but the security considerations are not weighed as a whole anywhere.
+    slice: "#336 slice 8 (documentation): a recorded review per referenced RFC"
+  REQ-AZSP-6.1.3.4-02:
+    status: not-applicable
+    reason: An organisational requirement on the production operator (an ISMS); the demo is not operated as a production service.

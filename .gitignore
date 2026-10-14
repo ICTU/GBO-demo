@@ -2,6 +2,8 @@
 # binary there; the pattern below ignores those.
 services/*/server
 services/*/*[!.go]
+# The binary `go build` leaves in the conformance check.
+conformance/check/conformance-check
 !services/*/go.*
 !services/*/Dockerfile
 !services/*/Dockerfile.dockerignore
