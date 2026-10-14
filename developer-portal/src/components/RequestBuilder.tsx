@@ -55,14 +55,14 @@ export default function RequestBuilder({
     tab === 'eudi-issuance'
       ? '# EUDI-flow start via wallet-QR — geen curl-equivalent'
     : tab === 'asi-verify'
-      ? '# ASI-flow start bij een QTSP (registratie, keuzepagina, DPoP-token) — de QTSP-mock volgt'
+      ? '# ASI-flow start bij de referentie-QTSP (discovery, registratie, keuzepagina, DPoP-token)'
       : curlFor(tab, tab === 'issuance' ? issuancePayload : usePayload)
 
   const submitLabel =
     tab === 'eudi-issuance'
       ? (submitting ? 'Wacht op wallet…' : 'Open QR-page + start')
     : tab === 'asi-verify'
-      ? 'Meekijken'
+      ? 'Start bij de QTSP'
       : (submitting ? 'Bezig…' : 'Verzenden')
 
   return (
@@ -113,10 +113,11 @@ export default function RequestBuilder({
         {tab === 'asi-verify' && (
           <p style={{ fontSize: 13, lineHeight: 1.5, margin: '0 0 12px' }}>
             Een gekwalificeerde trust service provider (QTSP) laat attributen van een burger
-            verifiëren bij een dataservice van de ASIP (ETSI TS 119 478). De QTSP zit buiten
-            de demo; het portal start het verzoek dus niet zelf. Met <em>Meekijken</em> pikt
-            het de eerstvolgende <code>verify</code> of <code>retrieve</code> op, en toont de
-            keten, het FSC-transactielog en de PDP-beslissing.
+            verifiëren bij een dataservice van de ASIP (ETSI TS 119 478). <em>Start bij de QTSP</em>
+            opent de pagina van de referentie-QTSP in een nieuw tabblad en zet meekijken aan.
+            Daar kiest u de attributen en geeft u als testpersoon toestemming; het portal pikt
+            dan de <code>verify</code> of <code>retrieve</code> op, en toont de keten, het
+            FSC-transactielog en de PDP-beslissing.
           </p>
         )}
 

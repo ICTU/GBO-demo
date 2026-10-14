@@ -57,6 +57,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     retrieve at the ASIP and shows the chain (QTSP, ASIP, its Outway,
     bd-inway, PDP, BRP), the transaction log of `asip` and BD, and the PDP
     decision; the rule panel shows the services a rule binds on (#525).
+    "Start bij de QTSP" on the ASI tab opens the reference QTSP's page and
+    turns watch on (#533).
   - Rules name the FSC services they bind on (`services`): a field key such
     as `Query.ingeschrevenPersoon` is shared by `bri` and `brp`. EUD0001 and
     DVT0001 bind on `bri`, EUD0002 on `brp`, LVG0001 on `lvg`; a policy test
