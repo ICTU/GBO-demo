@@ -115,8 +115,8 @@ func (h *Handler) start(w http.ResponseWriter, r *http.Request) {
 	plan, err := h.client.Plan(ctx, ids)
 	var none *qtsp.NoDataServiceError
 	switch {
-	case errors.Is(err, qtsp.ErrSeveralDataServices):
-		errorPage(w, http.StatusBadRequest, "Deze attributen horen bij verschillende bronnen. Vraag ze apart aan: een toestemming geldt voor één bron.")
+	case errors.Is(err, qtsp.ErrNoCommonDataService):
+		errorPage(w, http.StatusBadRequest, "Geen enkele bron levert al deze attributen. Vraag ze apart aan: een toestemming geldt voor één bron.")
 		return
 	case errors.As(err, &none):
 		errorPage(w, http.StatusBadRequest, "Voor "+none.Attribute+" is geen dataservice gevonden.")

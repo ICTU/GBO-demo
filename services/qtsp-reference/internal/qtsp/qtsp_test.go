@@ -23,7 +23,10 @@ const (
 // per attribute, and edits to break the chain.
 type world struct {
 	srv       *httptest.Server
-	endpoints map[string]string
+	endpoints map[string][]string
+	// tenant puts the authorization server under a path: issuer
+	// <srv>/<tenant>, metadata at /.well-known/oauth-authorization-server/<tenant>.
+	tenant    string
 	server    string // the contract's server; empty means the endpoint
 	issuer    string // the metadata's issuer; empty means the server's URL
 	registers atomic.Int32
@@ -32,12 +35,12 @@ type world struct {
 
 func newWorld(t *testing.T) *world {
 	t.Helper()
-	w := &world{endpoints: map[string]string{}}
+	w := &world{endpoints: map[string][]string{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /retrieve", func(rw http.ResponseWriter, r *http.Request) {
 		id := r.URL.Query().Get("attributeIdentifier")
 		records := []map[string]any{}
-		if ep, ok := w.endpoints[id]; ok {
+		for _, ep := range w.endpoints[id] {
 			records = append(records, map[string]any{"attributeIdentifier": id, "endpointURI": w.srv.URL + ep,
 				"endpointDescription": w.srv.URL + ep + "/openapi.json", "provider": map[string]any{"legalName": "ASIP"}})
 		}
@@ -50,10 +53,10 @@ func newWorld(t *testing.T) *world {
 		}
 		_ = json.NewEncoder(rw).Encode(map[string]any{"servers": []any{map[string]any{"url": server}},
 			"components": map[string]any{"securitySchemes": map[string]any{"oauth2": map[string]any{
-				"x-oauth-authorization-server": w.srv.URL + "/.well-known/oauth-authorization-server"}}}})
+				"x-oauth-authorization-server": w.srv.URL + "/.well-known/oauth-authorization-server" + w.tenantPath()}}}})
 	})
-	mux.HandleFunc("GET /.well-known/oauth-authorization-server", func(rw http.ResponseWriter, _ *http.Request) {
-		issuer := w.srv.URL
+	mux.HandleFunc("GET /.well-known/oauth-authorization-server/{tenant...}", func(rw http.ResponseWriter, r *http.Request) {
+		issuer := w.srv.URL + w.tenantPath()
 		if w.issuer != "" {
 			issuer = w.issuer
 		}
@@ -74,6 +77,13 @@ func newWorld(t *testing.T) *world {
 	return w
 }
 
+func (w *world) tenantPath() string {
+	if w.tenant == "" {
+		return ""
+	}
+	return "/" + w.tenant
+}
+
 func (w *world) client(t *testing.T) *Client {
 	t.Helper()
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -86,7 +96,7 @@ func (w *world) client(t *testing.T) *Client {
 
 func TestPlanFollowsTheRecords(t *testing.T) {
 	w := newWorld(t)
-	w.endpoints[idFamilyName] = "/brp/authsrc-api"
+	w.endpoints[idFamilyName] = []string{"/brp/authsrc-api"}
 	p, err := w.client(t).Plan(context.Background(), []string{idFamilyName})
 	if err != nil || p.EndpointURI != w.srv.URL+"/brp/authsrc-api" || p.Server.TokenEndpoint != w.srv.URL+"/token" {
 		t.Fatalf("Plan = %+v, %v", p, err)
@@ -105,8 +115,8 @@ func TestPlanRefuses(t *testing.T) {
 	}{
 		"no data service (Q-C6)": {func(*world) {}, []string{idFamilyName, "https://gbo.example/attributes/shoe_size/1"},
 			func(err error) bool { var e *NoDataServiceError; return errors.As(err, &e) }},
-		"two data services (Q-C7)": {func(w *world) { w.endpoints[idDiploma] = "/duo/authsrc-api" }, []string{idFamilyName, idDiploma},
-			func(err error) bool { return errors.Is(err, ErrSeveralDataServices) }},
+		"two data services (Q-C7)": {func(w *world) { w.endpoints[idDiploma] = []string{"/duo/authsrc-api"} }, []string{idFamilyName, idDiploma},
+			func(err error) bool { return errors.Is(err, ErrNoCommonDataService) }},
 		"contract for another endpoint": {func(w *world) { w.server = "https://elsewhere.test/authsrc-api" }, []string{idFamilyName},
 			func(err error) bool { return err != nil }},
 		"metadata of another issuer": {func(w *world) { w.issuer = "https://elsewhere.test" }, []string{idFamilyName},
@@ -114,7 +124,7 @@ func TestPlanRefuses(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			w := newWorld(t)
-			w.endpoints[idFamilyName] = "/brp/authsrc-api"
+			w.endpoints[idFamilyName] = []string{"/brp/authsrc-api"}
 			tc.edit(w)
 			if _, err := w.client(t).Plan(context.Background(), tc.ids); !tc.check(err) {
 				t.Fatalf("err = %v", err)
@@ -128,7 +138,7 @@ func TestPlanRefuses(t *testing.T) {
 
 func TestRegister(t *testing.T) {
 	w := newWorld(t)
-	w.endpoints[idFamilyName] = "/brp/authsrc-api"
+	w.endpoints[idFamilyName] = []string{"/brp/authsrc-api"}
 	c := w.client(t)
 	p, err := c.Plan(context.Background(), []string{idFamilyName})
 	if err != nil {
@@ -143,7 +153,7 @@ func TestRegister(t *testing.T) {
 	}
 
 	refusing := newWorld(t)
-	refusing.endpoints[idFamilyName] = "/brp/authsrc-api"
+	refusing.endpoints[idFamilyName] = []string{"/brp/authsrc-api"}
 	refusing.register = func(rw http.ResponseWriter) {
 		rw.WriteHeader(http.StatusBadRequest)
 		_, _ = rw.Write([]byte(`{"error":"unapproved_software_statement","error_description":"no QEAA_Provider entitlement"}`))
@@ -156,11 +166,57 @@ func TestRegister(t *testing.T) {
 	}
 
 	unavailable := newWorld(t)
-	unavailable.endpoints[idFamilyName] = "/brp/authsrc-api"
+	unavailable.endpoints[idFamilyName] = []string{"/brp/authsrc-api"}
 	unavailable.register = func(rw http.ResponseWriter) { rw.WriteHeader(http.StatusServiceUnavailable) }
 	c = unavailable.client(t)
 	p, _ = c.Plan(context.Background(), []string{idFamilyName})
 	if _, err := c.Register(context.Background(), p.Server); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("unavailable: err = %v", err)
+	}
+}
+
+// A directory with several ASIPs: the plan takes a data service that
+// provides every attribute, the same one on every run.
+func TestPlanChoosesACommonDataService(t *testing.T) {
+	w := newWorld(t)
+	w.endpoints[idFamilyName] = []string{"/b/authsrc-api", "/a/authsrc-api"}
+	p, err := w.client(t).Plan(context.Background(), []string{idFamilyName})
+	if err != nil || p.EndpointURI != w.srv.URL+"/a/authsrc-api" {
+		t.Fatalf("one attribute, two data services: %+v, %v; want the first by endpoint", p.EndpointURI, err)
+	}
+	w.endpoints[idDiploma] = []string{"/b/authsrc-api"}
+	p, err = w.client(t).Plan(context.Background(), []string{idFamilyName, idDiploma})
+	if err != nil || p.EndpointURI != w.srv.URL+"/b/authsrc-api" {
+		t.Fatalf("the one data service with both: %+v, %v", p.EndpointURI, err)
+	}
+}
+
+// An authorization server under a path (RFC 8414 section 3.1).
+func TestPlanAcceptsAnIssuerWithAPath(t *testing.T) {
+	w := newWorld(t)
+	w.endpoints[idFamilyName] = []string{"/brp/authsrc-api"}
+	w.tenant = "issuer1"
+	p, err := w.client(t).Plan(context.Background(), []string{idFamilyName})
+	if err != nil || p.Server.Issuer != w.srv.URL+"/issuer1" {
+		t.Fatalf("Plan = %+v, %v", p.Server, err)
+	}
+}
+
+func TestMetadataURL(t *testing.T) {
+	for issuer, want := range map[string]string{
+		"https://example.com":         "https://example.com/.well-known/oauth-authorization-server",
+		"https://example.com/":        "https://example.com/.well-known/oauth-authorization-server",
+		"https://example.com/issuer1": "https://example.com/.well-known/oauth-authorization-server/issuer1",
+		"https://example.com/a/b/":    "https://example.com/.well-known/oauth-authorization-server/a/b",
+		"http://localhost:9425":       "http://localhost:9425/.well-known/oauth-authorization-server",
+	} {
+		if got, err := MetadataURL(issuer); err != nil || got != want {
+			t.Errorf("MetadataURL(%q) = %q, %v; want %q", issuer, got, err, want)
+		}
+	}
+	for _, bad := range []string{"", "example.com", "https://example.com?x=1", "https://example.com#f"} {
+		if _, err := MetadataURL(bad); err == nil {
+			t.Errorf("MetadataURL(%q): err = nil", bad)
+		}
 	}
 }

@@ -25,6 +25,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -108,18 +109,22 @@ func (e *NoDataServiceError) Error() string {
 	return "no data service for attribute " + e.Attribute
 }
 
-// ErrSeveralDataServices: the attributes of one request belong to more than
-// one data service; a token is for one data service, so one request is too.
-var ErrSeveralDataServices = errors.New("the attributes belong to more than one data service: request them separately")
+// ErrNoCommonDataService: no single data service provides all attributes of
+// the request; a token is for one data service, so one request is too.
+var ErrNoCommonDataService = errors.New("no single data service provides all the attributes: request them separately")
 
-// Plan discovers the data service of the attributes, its contract and its
-// authorization server.
+// Plan discovers a data service that provides all the attributes, its
+// contract and its authorization server. A directory can list several data
+// services for an attribute (several ASIPs); the plan takes those that
+// provide every requested attribute, and of those the first by endpoint, so
+// the choice is the same on every run.
 func (c *Client) Plan(ctx context.Context, attributes []string) (Plan, error) {
 	if len(attributes) == 0 {
 		return Plan{}, errors.New("no attributes")
 	}
-	p := Plan{Attributes: attributes}
-	for _, id := range attributes {
+	type record struct{ endpoint, contract, provider string }
+	var common map[string]record
+	for i, id := range attributes {
 		q := url.Values{"queryType": {"dataServices"}, "attributeIdentifier": {id}, "conformsTo": {httpInterface}}
 		var out struct {
 			DataServices []struct {
@@ -136,13 +141,30 @@ func (c *Client) Plan(ctx context.Context, attributes []string) (Plan, error) {
 		if len(out.DataServices) == 0 {
 			return Plan{}, &NoDataServiceError{Attribute: id}
 		}
+		found := map[string]record{}
 		for _, ds := range out.DataServices {
-			if p.EndpointURI != "" && ds.EndpointURI != p.EndpointURI {
-				return Plan{}, ErrSeveralDataServices
+			found[ds.EndpointURI] = record{ds.EndpointURI, ds.EndpointDescription, ds.Provider.LegalName}
+		}
+		if i == 0 {
+			common = found
+			continue
+		}
+		for endpoint := range common {
+			if _, ok := found[endpoint]; !ok {
+				delete(common, endpoint)
 			}
-			p.EndpointURI, p.Contract, p.Provider = ds.EndpointURI, ds.EndpointDescription, ds.Provider.LegalName
 		}
 	}
+	if len(common) == 0 {
+		return Plan{}, ErrNoCommonDataService
+	}
+	endpoints := make([]string, 0, len(common))
+	for endpoint := range common {
+		endpoints = append(endpoints, endpoint)
+	}
+	slices.Sort(endpoints)
+	chosen := common[endpoints[0]]
+	p := Plan{Attributes: attributes, EndpointURI: chosen.endpoint, Contract: chosen.contract, Provider: chosen.provider}
 	var contract struct {
 		Servers []struct {
 			URL string `json:"url"`
@@ -168,11 +190,24 @@ func (c *Client) Plan(ctx context.Context, attributes []string) (Plan, error) {
 	if err := c.getJSON(ctx, metadata, &p.Server); err != nil {
 		return Plan{}, fmt.Errorf("authorization server metadata: %w", err)
 	}
-	// RFC 8414 section 3.3: the issuer is the prefix of its metadata URL.
-	if p.Server.Issuer == "" || !strings.HasPrefix(metadata, strings.TrimRight(p.Server.Issuer, "/")+"/.well-known/") {
+	// RFC 8414 section 3.3: the metadata must be at the URL its issuer
+	// gives (section 3.1).
+	if want, err := MetadataURL(p.Server.Issuer); err != nil || metadata != want {
 		return Plan{}, fmt.Errorf("authorization server metadata at %s names issuer %q", metadata, p.Server.Issuer)
 	}
 	return p, nil
+}
+
+// MetadataURL is where RFC 8414 section 3.1 puts the metadata of issuer: the
+// well-known suffix between the host and the issuer's path, so issuer
+// https://example.com/issuer1 has its metadata at
+// https://example.com/.well-known/oauth-authorization-server/issuer1.
+func MetadataURL(issuer string) (string, error) {
+	u, err := url.Parse(issuer)
+	if err != nil || u.Scheme == "" || u.Host == "" || u.RawQuery != "" || u.Fragment != "" {
+		return "", fmt.Errorf("issuer %q is not a URL without query or fragment", issuer)
+	}
+	return u.Scheme + "://" + u.Host + "/.well-known/oauth-authorization-server" + strings.TrimRight(u.Path, "/"), nil
 }
 
 // --- Register ------------------------------------------------------------------
