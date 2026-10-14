@@ -73,7 +73,7 @@ func TestOneTraceAndOneTransactionPerRequest(t *testing.T) {
 	}
 	attrs := map[string]string{}
 	for _, kv := range query.Attributes() {
-		attrs[string(kv.Key)] = kv.Value.Emit()
+		attrs[string(kv.Key)] = kv.Value.String()
 	}
 	if attrs[tracing.TransactionIDAttribute] != tx || attrs["gbo.asi.attributes"] != `["family_name","address"]` {
 		t.Errorf("BRP query attributes = %v, want transaction %s and the two attribute names", attrs, tx)
@@ -104,7 +104,7 @@ func TestSpansHoldNoPersonalData(t *testing.T) {
 	for _, span := range rec.Ended() {
 		texts := []string{span.Name(), span.Status().Description}
 		for _, kv := range span.Attributes() {
-			texts = append(texts, kv.Value.Emit())
+			texts = append(texts, kv.Value.String())
 		}
 		for _, text := range texts {
 			if slices.ContainsFunc(personal, func(p string) bool { return strings.Contains(text, p) }) {
