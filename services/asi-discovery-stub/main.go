@@ -43,7 +43,11 @@ func serve() error {
 	if len(sources) == 0 {
 		return errors.New("DIP_SOURCES is required: the URLs of the ASIP data services' records, separated by commas")
 	}
-	handler, err := newHandler(newDirectory(sources))
+	dir, err := newDirectory(sources)
+	if err != nil {
+		return err
+	}
+	handler, err := newHandler(dir)
 	if err != nil {
 		return err
 	}

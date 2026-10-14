@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -8,6 +9,10 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/santhosh-tekuri/jsonschema/v6"
+
+	"gbo-demo/asi-discovery-stub/openapi"
 )
 
 // httpInterface is the conformsTo value of the HTTP-based authentic source
@@ -33,14 +38,38 @@ type query struct {
 type directory struct {
 	sources []string
 	client  *http.Client
+	// schema is definitions/dataServices of 19478-dataservice-schema.json:
+	// a source's document must conform before any record is passed on.
+	schema *jsonschema.Schema
 }
 
-func newDirectory(sources []string) *directory {
-	return &directory{sources: sources, client: &http.Client{Timeout: sourceTimeout}}
+func newDirectory(sources []string) (*directory, error) {
+	schema, err := dataServicesSchema()
+	if err != nil {
+		return nil, fmt.Errorf("dataservice schema: %w", err)
+	}
+	return &directory{sources: sources, client: &http.Client{Timeout: sourceTimeout}, schema: schema}, nil
+}
+
+func dataServicesSchema() (*jsonschema.Schema, error) {
+	raw, err := openapi.Files.ReadFile("19478-dataservice-schema.json")
+	if err != nil {
+		return nil, err
+	}
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
+	if err != nil {
+		return nil, err
+	}
+	c := jsonschema.NewCompiler()
+	if err := c.AddResource("19478-dataservice-schema.json", doc); err != nil {
+		return nil, err
+	}
+	return c.Compile("19478-dataservice-schema.json#/definitions/dataServices")
 }
 
 // retrieve returns the dataService records that match q. A source that
-// cannot be read is left out and logged: the other sources still answer.
+// cannot be read, or whose document does not conform to the ETSI schema, is
+// left out and logged: the other sources still answer.
 func (d *directory) retrieve(ctx context.Context, q query) []json.RawMessage {
 	matches := []json.RawMessage{}
 	if q.conformsTo != "" && q.conformsTo != httpInterface {
@@ -69,7 +98,9 @@ func (d *directory) retrieve(ctx context.Context, q query) []json.RawMessage {
 	return matches
 }
 
-// read fetches the records of one ASIP data service.
+// read fetches the records of one ASIP data service and checks them against
+// the ETSI schema: a record without its endpoint, description or provider
+// must not reach a QTSP as a valid answer.
 func (d *directory) read(ctx context.Context, source string) ([]json.RawMessage, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, source, nil)
 	if err != nil {
@@ -83,10 +114,21 @@ func (d *directory) read(ctx context.Context, source string) ([]json.RawMessage,
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("status %d", resp.StatusCode)
 	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxRecordsBody))
+	if err != nil {
+		return nil, err
+	}
+	inst, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
+	if err != nil {
+		return nil, fmt.Errorf("decode records: %w", err)
+	}
+	if err := d.schema.Validate(inst); err != nil {
+		return nil, fmt.Errorf("records do not conform to 19478-dataservice-schema.json: %w", err)
+	}
 	var doc struct {
 		DataServices []json.RawMessage `json:"dataServices"`
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxRecordsBody)).Decode(&doc); err != nil {
+	if err := json.Unmarshal(raw, &doc); err != nil {
 		return nil, fmt.Errorf("decode records: %w", err)
 	}
 	return doc.DataServices, nil

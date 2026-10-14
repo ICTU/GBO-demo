@@ -45,7 +45,11 @@ func source(t *testing.T, records ...map[string]any) string {
 
 func newTestHandler(t *testing.T, sources ...string) http.Handler {
 	t.Helper()
-	h, err := newHandler(newDirectory(sources))
+	dir, err := newDirectory(sources)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := newHandler(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +148,8 @@ func TestRetrieveFilters(t *testing.T) { // R4, R5
 	}
 }
 
-// An ASIP that cannot be read is left out; the others still answer (R6).
+// An ASIP that cannot be read, or whose records do not conform to the ETSI
+// schema, is left out; the others still answer (R6).
 func TestAnUnreachableSourceIsLeftOut(t *testing.T) {
 	down := httptest.NewServer(http.NotFoundHandler())
 	down.Close()
@@ -156,7 +161,13 @@ func TestAnUnreachableSourceIsLeftOut(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"dataServices": []any{record(idFamilyName, "stale", "NL")}})
 	}))
 	t.Cleanup(failing.Close)
-	h := newTestHandler(t, down.URL+"/dataservices", broken.URL, failing.URL, source(t, record(idFamilyName, "brp", "NL")))
+	// Records missing their required members, and one with a member the
+	// schema does not allow.
+	incomplete := source(t, map[string]any{"attributeIdentifier": idFamilyName, "country": "NL"})
+	extra := record(idFamilyName, "extra", "NL")
+	extra["unexpected"] = true
+	h := newTestHandler(t, down.URL+"/dataservices", broken.URL, failing.URL, incomplete, source(t, extra),
+		source(t, record(idFamilyName, "brp", "NL")))
 	if status, got := retrieve(t, h, params(idFamilyName)); status != http.StatusOK || len(got) != 1 {
 		t.Fatalf("= %d %v, want the reachable record", status, got)
 	}
