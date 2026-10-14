@@ -218,6 +218,7 @@ func TestSchemaViolationIs400BeforeOtherChecks(t *testing.T) { // case 9b, 9c
 	for _, tc := range []struct{ name, path, body string }{
 		{"verify: identifier is not a URI", "/verify", verifyBody("family_name", `{"family_name":"Jansen"}`)},
 		{"retrieve: identifier is not a URI", "/retrieve", `{"attributeIdentifiers":[{"attributeIdentifier":"family_name"}]}`},
+		{"verify: fragment identifier is not a URI", "/verify", `{"attributeFragments":[{"attributeIdentifier":"address","location":"$.city","value":{"city":"Rotterdam"}}]}`},
 		{"verify: mandate is not an object", "/verify", `{"attributes":[{"attributeIdentifier":"` + idFamilyName + `","attributeValue":{"family_name":"Jansen"}}],"mandate":"guardian"}`},
 		{"retrieve: mandate is not an object", "/retrieve", `{"attributeIdentifiers":[{"attributeIdentifier":"` + idFamilyName + `"}],"mandate":"guardian"}`},
 	} {
@@ -260,10 +261,18 @@ func TestRetrieveReturnsValue(t *testing.T) { // case 12
 		Provider *struct {
 			LegalName string `json:"legalName"`
 		} `json:"provider"`
+		AuthenticSource *struct {
+			LegalName string `json:"legalName"`
+		} `json:"authenticSource"`
 	}
 	decode(t, rec, &resp)
 	if resp.Provider == nil || resp.Provider.LegalName == "" {
 		t.Fatalf("retrieveResponse has no provider")
+	}
+	// The BRP data service answers for an authentic source other than the
+	// provider, and names it (REQ-ASIP-6.1.2.2-04).
+	if resp.AuthenticSource == nil || resp.AuthenticSource.LegalName != "Basisregistratie Personen (mock)" {
+		t.Fatalf("retrieveResponse authenticSource = %+v, want the BRP", resp.AuthenticSource)
 	}
 	if len(resp.Attributes) != 1 || resp.Attributes[0].AttributeIdentifier != idFamilyName {
 		t.Fatalf("attributes = %+v, want one %s", resp.Attributes, idFamilyName)
