@@ -310,7 +310,7 @@ func TestWeb(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := "http://" + l.Addr().String()
-	srv := &http.Server{Handler: web.NewHandler(s.client(t, base+"/callback", s.sealAnchor, registryURI), web.DemoAttributes)}
+	srv := &http.Server{Handler: web.NewHandler(s.client(t, base+"/callback", s.sealAnchor, registryURI), web.DemoAttributes, base)}
 	go func() { _ = srv.Serve(l) }()
 	t.Cleanup(func() { _ = srv.Close() })
 
@@ -349,6 +349,18 @@ func TestWeb(t *testing.T) {
 		return resp.Header.Get("Location")
 	}
 
+	// Served over https, the session cookie is Secure.
+	t.Run("W2 Secure over https", func(t *testing.T) {
+		h := web.NewHandler(s.client(t, "https://qtsp.test/callback", s.sealAnchor, registryURI), web.DemoAttributes, "https://qtsp.test")
+		form := url.Values{"operation": {"verify"}, "use:" + idFamilyName: {"1"}, "value:" + idFamilyName: {`{"family_name":"Jansen"}`}}
+		req := httptest.NewRequest(http.MethodPost, "/start", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusFound || !strings.Contains(rec.Header().Get("Set-Cookie"), "Secure") {
+			t.Fatalf("POST /start = %d, Set-Cookie %q; want a Secure session cookie", rec.Code, rec.Header().Get("Set-Cookie"))
+		}
+	})
 	t.Run("W3 result", func(t *testing.T) {
 		resp, page := fetch(t, browser, http.MethodGet, decide(t, start(t), "approve"), nil)
 		if resp.StatusCode != http.StatusOK || !strings.Contains(page, "Zegel geldig") || !strings.Contains(page, "Match") {

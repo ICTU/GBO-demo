@@ -55,13 +55,19 @@ type session struct {
 type Handler struct {
 	client     *qtsp.Client
 	attributes []Attribute
-	mu         sync.Mutex
-	sessions   map[string]*session
-	now        func() time.Time
+	// secure marks the session cookie Secure: the QTSP is served over https.
+	secure   bool
+	mu       sync.Mutex
+	sessions map[string]*session
+	now      func() time.Time
 }
 
-func NewHandler(client *qtsp.Client, attributes []Attribute) http.Handler {
-	h := &Handler{client: client, attributes: attributes, sessions: map[string]*session{}, now: time.Now}
+// NewHandler serves the web side. publicURL is where the user reaches it;
+// over https the session cookie is Secure. On http it can only be loopback
+// (the authorization server allows no other http redirect URI), where a
+// browser may refuse a Secure cookie.
+func NewHandler(client *qtsp.Client, attributes []Attribute, publicURL string) http.Handler {
+	h := &Handler{client: client, attributes: attributes, secure: strings.HasPrefix(publicURL, "https://"), sessions: map[string]*session{}, now: time.Now}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", h.form)
 	mux.HandleFunc("POST /start", h.start)
@@ -132,7 +138,7 @@ func (h *Handler) start(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
 	h.sessions[id] = s
 	h.mu.Unlock()
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: id, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: int(sessionLifetime.Seconds())})
+	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: id, Path: "/", HttpOnly: true, Secure: h.secure, SameSite: http.SameSiteLaxMode, MaxAge: int(sessionLifetime.Seconds())})
 	http.Redirect(w, r, h.client.AuthorizationURL(plan, reg, operation, s.state, challenge), http.StatusFound)
 }
 

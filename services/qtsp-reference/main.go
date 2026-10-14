@@ -73,7 +73,8 @@ func serve() error {
 	if err != nil {
 		return err
 	}
-	srv := &http.Server{Addr: env("QTSP_ADDR", ":4023"), Handler: web.NewHandler(client, web.DemoAttributes), ReadHeaderTimeout: readHeaderTimeout}
+	handler := web.NewHandler(client, web.DemoAttributes, env("QTSP_PUBLIC_URL", "http://localhost:4023"))
+	srv := &http.Server{Addr: env("QTSP_ADDR", ":4023"), Handler: handler, ReadHeaderTimeout: readHeaderTimeout}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	errc := make(chan error, 2)
