@@ -186,8 +186,9 @@ against the BRP through the ASIP mock of the ETSI TS 119 478 route
 (`services/asi-provider`, `services/asi-authorization-server`). The ASIP is an
 FSC consumer peer of its own (...1200). `make demo-asi` adds it to a running
 `demo-eudi` or `demo-full`; the developer portal's ASI tab watches its
-requests, and a stub of the Discover Interface (`services/asi-discovery-stub`)
-finds its data services per attribute. See
+requests, a stub of the Discover Interface (`services/asi-discovery-stub`)
+finds its data services per attribute, and a reference QTSP
+(`services/qtsp-reference`, http://localhost:9427) is where a user starts. See
 [services/asi-provider/README.md](services/asi-provider/README.md).
 
 `S01` is the architecture role identifier used in the demo diagrams for the

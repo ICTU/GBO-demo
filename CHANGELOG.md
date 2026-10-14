@@ -53,6 +53,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     Discover Interface's `retrieve` query from them; its contract is the
     Annex A OpenAPI. The ASIP's contract names the authorization server's
     metadata in `x-oauth-authorization-server` (#533).
+  - A reference QTSP (`qtsp-reference`, port 9427, compose profile `asi`):
+    it discovers an attribute's data service, registers with its
+    authorization server, lets the user authorize, takes a DPoP-bound token,
+    verifies or retrieves, and accepts a result only with a valid seal. A web
+    side where the user starts, and a CLI with test-harness options for the
+    error answers. The authorization server now allows an http redirect URI
+    on a loopback address (#533).
   - The developer portal has an ASI tab: it watches a QTSP's verify or
     retrieve at the ASIP and shows the chain (QTSP, ASIP, its Outway,
     bd-inway, PDP, BRP), the transaction log of `asip` and BD, and the PDP

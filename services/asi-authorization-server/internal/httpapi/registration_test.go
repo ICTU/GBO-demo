@@ -181,12 +181,26 @@ func TestInvalidClientMetadata(t *testing.T) { // D14-D17, D21
 		{"D16b: jwks_uri", func(b map[string]any) { b["jwks_uri"] = "https://qtsp.test/jwks" }, "invalid_client_metadata"},
 		{"D17: no redirect_uris", func(b map[string]any) { delete(b, "redirect_uris") }, "invalid_redirect_uri"},
 		{"D17b: http redirect_uri", func(b map[string]any) { b["redirect_uris"] = []string{"http://qtsp.test/callback"} }, "invalid_redirect_uri"},
+		{"D17d: http on a LAN address", func(b map[string]any) { b["redirect_uris"] = []string{"http://192.168.1.20:9427/callback"} }, "invalid_redirect_uri"},
+		{"D17e: http on a name that starts like localhost", func(b map[string]any) { b["redirect_uris"] = []string{"http://localhost.qtsp.test/callback"} }, "invalid_redirect_uri"},
+		{"D17f: another scheme", func(b map[string]any) { b["redirect_uris"] = []string{"ftp://localhost/callback"} }, "invalid_redirect_uri"},
 		{"D17c: redirect_uri with a fragment", func(b map[string]any) { b["redirect_uris"] = []string{"https://qtsp.test/callback#x"} }, "invalid_redirect_uri"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body := registrationBody(as.statement(t, q, nil))
 			tc.edit(body)
 			assertRegistrationError(t, as.postRegistration(t, body), http.StatusBadRequest, tc.code)
+		})
+	}
+	// http is allowed on a loopback address only: browser and client on the
+	// same machine (RFC 8252 section 7.3).
+	for _, u := range []string{"http://localhost:9427/callback", "http://127.0.0.1:4023/callback", "http://[::1]:4023/callback"} {
+		t.Run("D17g: loopback "+u, func(t *testing.T) {
+			body := registrationBody(as.statement(t, q, nil))
+			body["redirect_uris"] = []string{u}
+			if r := as.postRegistration(t, body); r.status != http.StatusCreated {
+				t.Fatalf("status = %d %v, want 201", r.status, r.body)
+			}
 		})
 	}
 	t.Run("D21: body is not JSON", func(t *testing.T) {
