@@ -48,7 +48,9 @@ type DataService struct {
 type Config struct {
 	// PublicURL is the scheme and host QTSPs use; with the base path of a
 	// data service it is the server of that data service's contract.
-	PublicURL    string
+	PublicURL string
+	// Issuer is the authorization server: the contracts name its endpoints.
+	Issuer       string
 	Sealer       *seal.Sealer
 	DataServices []DataService
 }
@@ -86,7 +88,7 @@ func NewHandler(cfg Config) (http.Handler, error) {
 		seen[ds.ID] = true
 		h := &handler{ds: ds, sealer: cfg.Sealer}
 		base := BasePathOf(ds.ID)
-		published, err := contractFor(cfg.PublicURL + base)
+		published, err := contractFor(cfg.PublicURL+base, cfg.Issuer)
 		if err != nil {
 			return nil, err
 		}

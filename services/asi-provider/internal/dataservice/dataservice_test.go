@@ -51,6 +51,8 @@ func TestRefused(t *testing.T) {
 		"no grant path":         `{"data_services":[` + strings.Replace(brp, `"grant_path":"/brp/graphql"`, `"grant_path":""`, 1) + `]}`,
 		"no attributes":         `{"data_services":[` + strings.Replace(brp, `{"https://gbo.example/attributes/family_name/1":"family_name"}`, `{}`, 1) + `]}`,
 		"not JSON":              `{`,
+		"misspelt field":        `{"data_services":[` + strings.Replace(brp, `"authentic_source"`, `"authentic_sorce"`, 1) + `]}`,
+		"unknown top-level":     `{"dataservices":[` + brp + `]}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := Load(write(t, body), adapters); err == nil {

@@ -53,7 +53,7 @@ ETSI TS 119 478 lets a response name one authentic source (REQ-ASIP-6.1.1.2-08),
 | `grant_path` | the grant-link of the ASIP's FSC contract with the source, on its Outway |
 | `attributes` | per attribute identifier, the name the adapter knows it by |
 
-The ASIP does not start with a data service named twice, an unknown adapter, or an attribute the adapter cannot ask for. The authorization server must know the base URL of each data service as a resource (`AZSP_RESOURCES`); a token is for one data service. An attribute of another data service is not in the catalogue: 404. All data services share one seal for now; who holds it is open (#225).
+The ASIP does not start with a data service named twice, an unknown adapter, an attribute the adapter cannot ask for, or a field it does not know (a misspelt `authentic_source` would otherwise drop the source from the responses). The authorization server must know the base URL of each data service as a resource (`AZSP_RESOURCES`); a token is for one data service. An attribute of another data service is not in the catalogue: 404. All data services share one seal for now; who holds it is open (#225).
 
 ## Layout
 
@@ -77,7 +77,7 @@ Ports and adapters, as `AGENTS.md` asks for a service with an authorization boun
 `GET /openapi.json` serves the contract: the OpenAPI of ETSI TS 119 478 Annex B, unchanged (`openapi/19478-authentic-source-interface-openapi.json`), with the completions in `openapi/completions.json` applied as a JSON Merge Patch (RFC 7386). The completions do not deviate from ETSI; they fill in what Annex B leaves open:
 
 - **Server**: the base URL of the data service, e.g. `http://localhost:4020/brp/authsrc-api`, fills in the Annex B server template; `authsrc-api` is its default base path.
-- **OAuth 2.0**: Annex B defines no security scheme; clause 6.1.3 requires an access token from the authorization server. The contract describes the authorization code flow with the URLs of the authorization server and requires the scope of each operation (REQ-DIP-5.3.3-03-02-01 asks the OpenAPI to name the authorization server).
+- **OAuth 2.0**: Annex B defines no security scheme; clause 6.1.3 requires an access token from the authorization server. The contract describes the authorization code flow with the URLs of the configured authorization server (`ASIP_AUTHORIZATION_SERVER`) and requires the scope of each operation (REQ-DIP-5.3.3-03-02-01 asks the OpenAPI to name the authorization server).
 - **`WWW-Authenticate`** on every 401: RFC 6750 section 3 and RFC 9068 section 4 require the challenge.
 - **503**: when the keys of the authorization server cannot be obtained, no token can be validated. That is not an error of the client's token, so the mock answers 503 rather than 401. The same when the BRP cannot be reached: that is not `Unknown`, which says the source holds no data. Annex B lists no 503.
 - **500**: when the chain refuses the ASIP's query (the PDP denies it, or the BRP answers errors). That is a fault in the deployment, not a missing value. Annex B lists no 500.

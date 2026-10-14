@@ -80,6 +80,7 @@ func newTestServerWithSource(t *testing.T, authz *testAuthorizationServer, qtsp 
 
 	handler, err := NewHandler(Config{
 		PublicURL: testPublicURL,
+		Issuer:    testIssuer,
 		Sealer:    seal.New(sealKey, []*x509.Certificate{sealCert, caCert}),
 		DataServices: []DataService{{
 			ID:              "brp",

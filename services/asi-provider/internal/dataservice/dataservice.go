@@ -9,6 +9,7 @@
 package dataservice
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -47,10 +48,15 @@ func Load(path string, adapters map[string][]string) ([]DataService, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read data services: %w", err)
 	}
+	// An unknown field is refused: a misspelt authentic_source would
+	// otherwise read as empty, and the responses would name no source.
 	var doc struct {
+		Comment      string        `json:"_comment"`
 		DataServices []DataService `json:"data_services"`
 	}
-	if err := json.Unmarshal(raw, &doc); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&doc); err != nil {
 		return nil, fmt.Errorf("parse data services: %w", err)
 	}
 	if len(doc.DataServices) == 0 {

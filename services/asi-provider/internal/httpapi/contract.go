@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
@@ -74,9 +75,14 @@ func contract() ([]byte, error) {
 	return json.MarshalIndent(mergePatch(b, p), "", "  ")
 }
 
+// completionsIssuer is the authorization server the completions name: the
+// standalone default. contractFor puts the configured issuer in its place.
+const completionsIssuer = "http://localhost:4021"
+
 // contractFor returns the published contract of a data service: its base URL
-// is the server.
-func contractFor(serverURL string) ([]byte, error) {
+// is the server, and the OAuth URLs (authorization, token, metadata) are the
+// issuer's, so a QTSP on another host finds endpoints it can reach.
+func contractFor(serverURL, issuer string) ([]byte, error) {
 	var doc map[string]any
 	if err := json.Unmarshal(publishedContract, &doc); err != nil {
 		return nil, err
@@ -87,7 +93,30 @@ func contractFor(serverURL string) ([]byte, error) {
 	}
 	server, _ := servers[0].(map[string]any)
 	server["url"] = serverURL
+	components, _ := doc["components"].(map[string]any)
+	schemes, _ := components["securitySchemes"].(map[string]any)
+	if schemes["oauth2"] == nil {
+		return nil, errors.New("the completions have no oauth2 security scheme")
+	}
+	schemes["oauth2"] = withIssuer(schemes["oauth2"], issuer)
 	return json.MarshalIndent(doc, "", "  ")
+}
+
+// withIssuer replaces the completions' issuer in every string of v.
+func withIssuer(v any, issuer string) any {
+	switch t := v.(type) {
+	case string:
+		return strings.ReplaceAll(t, completionsIssuer, issuer)
+	case map[string]any:
+		for k, x := range t {
+			t[k] = withIssuer(x, issuer)
+		}
+	case []any:
+		for i, x := range t {
+			t[i] = withIssuer(x, issuer)
+		}
+	}
+	return v
 }
 
 // mergePatch applies an RFC 7386 JSON Merge Patch.

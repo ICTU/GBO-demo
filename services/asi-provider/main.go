@@ -95,7 +95,7 @@ func serve() error {
 			AuthenticSource: authenticSource,
 		})
 	}
-	handler, err := httpapi.NewHandler(httpapi.Config{PublicURL: publicURL, Sealer: seal.New(key, chain), DataServices: dataServices})
+	handler, err := httpapi.NewHandler(httpapi.Config{PublicURL: publicURL, Issuer: issuer, Sealer: seal.New(key, chain), DataServices: dataServices})
 	if err != nil {
 		return err
 	}

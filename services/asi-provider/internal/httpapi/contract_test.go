@@ -78,6 +78,31 @@ func TestPublishedContract(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &served); err != nil || len(served.Servers) != 1 || served.Servers[0].URL != testPublicURL+testBase {
 		t.Errorf("servers = %+v, want the data service %s", served.Servers, testPublicURL+testBase)
 	}
+	// The OAuth endpoints are the configured issuer's, nowhere localhost.
+	var oauth struct {
+		Components struct {
+			SecuritySchemes struct {
+				OAuth2 struct {
+					Description string `json:"description"`
+					Flows       struct {
+						AuthorizationCode struct {
+							AuthorizationURL string `json:"authorizationUrl"`
+							TokenURL         string `json:"tokenUrl"`
+						} `json:"authorizationCode"`
+					} `json:"flows"`
+				} `json:"oauth2"`
+			} `json:"securitySchemes"`
+		} `json:"components"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &oauth)
+	o := oauth.Components.SecuritySchemes.OAuth2
+	if o.Flows.AuthorizationCode.AuthorizationURL != testIssuer+"/authorize" || o.Flows.AuthorizationCode.TokenURL != testIssuer+"/token" ||
+		!strings.Contains(o.Description, testIssuer+"/.well-known/oauth-authorization-server") {
+		t.Errorf("oauth2 = %+v, want the endpoints of %s", o, testIssuer)
+	}
+	if strings.Contains(rec.Body.String(), completionsIssuer) {
+		t.Errorf("the published contract still names %s", completionsIssuer)
+	}
 	// B7: no contract outside a data service, none for an unknown one.
 	for _, path := range []string{"/openapi.json", "/nope/openapi.json"} {
 		r := httptest.NewRecorder()
