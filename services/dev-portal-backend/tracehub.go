@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -47,18 +48,20 @@ type entryPointRule struct {
 	service    string
 	method     string
 	pathPrefix string
+	// path, when set, must match the whole path instead of the prefix.
+	path *regexp.Regexp
 }
 
 var entryPointRules = []entryPointRule{
-	{"consent-portal-backend", "POST", "/portal/consents"},
-	{"consent-portal-backend", "DELETE", "/portal/consents/"},
-	{"dienstverlener-backend", "POST", "/api/dvtp/query"},
+	{"consent-portal-backend", "POST", "/portal/consents", nil},
+	{"consent-portal-backend", "DELETE", "/portal/consents/", nil},
+	{"dienstverlener-backend", "POST", "/api/dvtp/query", nil},
 	// EUDI: the issuance-server POSTs to eudi-adapter's root on every
 	// wallet-triggered issuance. Only /-POST is a flow-entry (health is GET).
-	{"eudi-adapter", "POST", "/"},
-	// ASI: a QTSP POSTs /<data service>/authsrc-api/verify or /retrieve;
-	// those are the ASIP's only POSTs (health and contracts are GET).
-	{"asi-provider", "POST", "/"},
+	{"eudi-adapter", "POST", "/", nil},
+	// ASI: a QTSP's verify or retrieve at a data service of the ASIP. Any
+	// other POST (a contract, an unknown path) is not a flow.
+	{"asi-provider", "POST", "", regexp.MustCompile(`^/[a-z0-9][a-z0-9-]*/authsrc-api/(verify|retrieve)$`)},
 }
 
 // firstAttr returns the first non-empty attribute of keys. Services emit
@@ -77,7 +80,14 @@ func isEntryPointSpan(s traceSpan) bool {
 	method := firstAttr(s, "http.method", "http.request.method")
 	target := firstAttr(s, "http.target", "http.route", "url.path")
 	for _, r := range entryPointRules {
-		if r.service == s.Service && r.method == method && strings.HasPrefix(target, r.pathPrefix) {
+		if r.service != s.Service || r.method != method {
+			continue
+		}
+		matched := strings.HasPrefix(target, r.pathPrefix)
+		if r.path != nil {
+			matched = r.path.MatchString(target)
+		}
+		if matched {
 			return true
 		}
 	}

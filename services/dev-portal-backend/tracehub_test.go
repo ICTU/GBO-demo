@@ -209,8 +209,19 @@ func TestIsEntryPointSpanASIP(t *testing.T) {
 	}{
 		{"POST", "/brp/authsrc-api/verify", true},
 		{"POST", "/brp/authsrc-api/retrieve", true},
+		{"POST", "/duo/authsrc-api/verify", true},
 		{"GET", "/healthz", false},
 		{"GET", "/brp/openapi.json", false},
+		{"GET", "/brp/authsrc-api/verify", false},
+		// A POST that is no verify or retrieve: a contract, an unknown or
+		// old path, an operation the contract does not have.
+		{"POST", "/brp/openapi.json", false},
+		{"POST", "/", false},
+		{"POST", "/nope", false},
+		{"POST", "/authsrc-api/verify", false},
+		{"POST", "/brp/authsrc-api/other", false},
+		{"POST", "/brp/authsrc-api/verify/extra", false},
+		{"POST", "/BRP/authsrc-api/verify", false},
 	} {
 		s := traceSpan{Service: "asi-provider", Attributes: map[string]string{"http.request.method": c.method, "url.path": c.path}}
 		if got := isEntryPointSpan(s); got != c.want {
