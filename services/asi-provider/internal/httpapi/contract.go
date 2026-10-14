@@ -98,7 +98,11 @@ func contractFor(serverURL, issuer string) ([]byte, error) {
 	if schemes["oauth2"] == nil {
 		return nil, errors.New("the completions have no oauth2 security scheme")
 	}
-	schemes["oauth2"] = withIssuer(schemes["oauth2"], issuer)
+	oauth2, _ := withIssuer(schemes["oauth2"], issuer).(map[string]any)
+	// The metadata of the authorization server, machine-readable
+	// (REQ-DIP-5.3.3-03-02-01; RFC 8414).
+	oauth2["x-oauth-authorization-server"] = issuer + "/.well-known/oauth-authorization-server"
+	schemes["oauth2"] = oauth2
 	return json.MarshalIndent(doc, "", "  ")
 }
 

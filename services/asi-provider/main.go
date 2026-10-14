@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -88,8 +89,15 @@ func serve() error {
 		if ds.AuthenticSource != "" {
 			authenticSource = &httpapi.Provider{LegalName: ds.AuthenticSource}
 		}
+		identifiers := make([]string, 0, len(ds.Attributes))
+		for id := range ds.Attributes {
+			identifiers = append(identifiers, id)
+		}
+		slices.Sort(identifiers)
 		dataServices = append(dataServices, httpapi.DataService{
 			ID:              ds.ID,
+			Attributes:      identifiers,
+			Country:         ds.Country,
 			Verification:    verification.NewService(newAdapter(ds.Source, outway, ds.GrantPath), catalogue),
 			Tokens:          accesstoken.NewValidator(issuer, publicURL+httpapi.BasePathOf(ds.ID), publicURL, keys),
 			Provider:        httpapi.Provider{LegalName: ds.Provider},

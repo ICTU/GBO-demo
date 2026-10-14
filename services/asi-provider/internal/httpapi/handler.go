@@ -45,6 +45,10 @@ type DataService struct {
 	// AuthenticSource is nil when the ASIP is the authentic source: the
 	// responses then name none (REQ-ASIP-6.1.1.2-08, REQ-ASIP-6.1.2.2-04).
 	AuthenticSource *Provider
+	// Attributes are the identifiers of the attributes the data service
+	// provides, and Country its Member State: its discovery records.
+	Attributes []string
+	Country    string
 }
 
 type Config struct {
@@ -99,6 +103,11 @@ func NewHandler(cfg Config) (http.Handler, error) {
 		// The endpointDescription of the data service (REQ-DIP-5.3.3-03-02),
 		// with the schema it references next to it.
 		mux.HandleFunc("GET /"+ds.ID+"/openapi.json", serveJSON(published))
+		records, err := json.MarshalIndent(dataServiceRecords(cfg.PublicURL, ds), "", "  ")
+		if err != nil {
+			return nil, err
+		}
+		mux.HandleFunc("GET /"+ds.ID+"/dataservices", serveJSON(records))
 		mux.HandleFunc("GET /"+ds.ID+"/"+dataserviceFileName, serveJSON(mustReadOpenAPIFile(dataserviceFile)))
 	}
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
@@ -110,6 +119,39 @@ func serveJSON(body []byte) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(body)
 	}
+}
+
+// --- discovery records (ETSI TS 119 478 clause 5.3.3) -------------------------
+
+// dataServiceRecord is a dataService of the Data Service Directory
+// (19478-dataservice-schema.json#/definitions/dataService): where a QTSP
+// verifies or retrieves one attribute.
+type dataServiceRecord struct {
+	AttributeIdentifier string   `json:"attributeIdentifier"`
+	EndpointDescription string   `json:"endpointDescription"`
+	EndpointURI         string   `json:"endpointURI"`
+	Provider            Provider `json:"provider"`
+	Country             string   `json:"country"`
+}
+
+// dataServiceRecords are the records of a data service, one per attribute:
+// what the ASIP hands to the Data Service Directory. The endpoint is the
+// data service's base URL, for verify and retrieve; its description is its
+// contract. The provider carries no identifiers or legal basis yet: there is
+// no EU identifier type for an OIN, and the demo ASIP has none other
+// (REQ-DIP-5.3.3-03-04-04 is a should).
+func dataServiceRecords(publicURL string, ds DataService) map[string][]dataServiceRecord {
+	records := []dataServiceRecord{}
+	for _, id := range ds.Attributes {
+		records = append(records, dataServiceRecord{
+			AttributeIdentifier: id,
+			EndpointDescription: publicURL + "/" + ds.ID + "/openapi.json",
+			EndpointURI:         publicURL + BasePathOf(ds.ID),
+			Provider:            ds.Provider,
+			Country:             ds.Country,
+		})
+	}
+	return map[string][]dataServiceRecord{"dataServices": records}
 }
 
 // --- request and response shapes (ETSI TS 119 478 Annex B) ------------------

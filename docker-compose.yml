@@ -1227,6 +1227,27 @@ services:
       timeout: 3s
       retries: 5
 
+  # Stub of the Discover Interface Provider (ETSI TS 119 478 clause 5), an
+  # external role: answers the retrieve query from the records the ASIP's
+  # data services publish. One source per data service, separated by commas.
+  asi-discovery-stub:
+    build: ./services/asi-discovery-stub
+    profiles: [asi]
+    ports:
+      - "${GBO_PORT_ASI_DISCOVERY:-9426}:4022"
+    environment:
+      - DIP_SOURCES=http://asi-provider:4020/brp/dataservices
+    depends_on:
+      asi-provider:
+        condition: service_healthy
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4022/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   # Frontends run as a Vite dev-server (live reload / HMR via source-mount).
   # The Dockerfile has an nginx final stage available — for a production
   # build (`target: final`), build it manually with `docker build`.

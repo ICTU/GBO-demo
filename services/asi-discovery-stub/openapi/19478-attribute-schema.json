@@ -1,0 +1,64 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",  
+    "title": "JSON schema for attribute query response",
+    "description": "This JSON schema is referenced within the OpenAPI Document Specification for Discover Interface of ETSI TS 119 478 (v1.1.1)",
+    "type": "object",
+    "definitions": {
+        "attributes": {
+            "type": "object",
+            "properties": {
+                "attributes": {
+                    "type": "array",
+                    "items": {"$ref": "#/definitions/attribute"}
+                }
+            }
+        },
+        "attribute": {
+            "type": "object",
+            "properties": {
+                "attributeIdentifier": {"type": "string", "format": "uri"},
+                "title": {
+                    "type": "array",
+                    "items": {"$ref": "#/definitions/localizedString"}
+                },
+                "description": {
+                    "type": "array",
+                    "items": {"$ref": "#/definitions/localizedString"}
+                },
+                "creator": {"type": "string"},
+                "country": {"type": "string"},
+                "semanticDataSpecification": {"type": "string", "format": "uri"},
+                "schemaDistributions": { 
+                   "type": "array", 
+                   "items": {"$ref": "#/definitions/schemaDistribution"}
+                   }
+            },
+            "required": [
+                "attributeIdentifier"
+            ]
+        },
+        "localizedString": {
+            "type": "object",
+            "properties": {
+                "value": {"type": "string"},
+                "language": {"type": "string"}
+            },
+            "required": [
+                "value",
+                "language"
+            ],
+            "additionalProperties": false
+        },
+        "schemaDistribution": {
+            "type": "object",
+            "properties" : {
+                "accessURL": {"type": "string", "format": "uri"},
+                "mediaType": {"type": "string"}            
+            },
+            "required": ["accessURL", "mediaType"]
+        } 
+    },
+    "allOf": [
+        {"$ref": "#/definitions/attributes"}
+    ]
+}
