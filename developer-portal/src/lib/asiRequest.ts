@@ -20,6 +20,9 @@ export type AsiRequestView = {
   results?: { identifier: string; label: string; result?: string; value?: unknown }[]
   error?: string
   error_description?: string
+  // trace_id is the trace of the QTSP's call at the ASIP: the chain of this
+  // request. Absent until the call is made, and for a denial.
+  trace_id?: string
 }
 
 export type AsiRequestBody = {
@@ -71,6 +74,12 @@ export const EXPECTED_LABEL: Record<AsiExpected, string> = {
   'no-match': 'NO MATCH',
   unknown: 'UNKNOWN',
   retrieve: 'OPHALEN',
+}
+
+// traceOf is the trace whose chain belongs to this request: only the one the
+// QTSP reports, never another ASI trace that happens to arrive meanwhile.
+export function traceOf(v: AsiRequestView): string | null {
+  return v.status === 'pending' ? null : v.trace_id ?? null
 }
 
 // summary is the line the result panel shows above the per-attribute table.

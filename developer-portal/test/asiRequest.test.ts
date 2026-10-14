@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { display, expectedOf, requestBody, summary, type AsiRequestView } from '../src/lib/asiRequest.ts'
+import { display, expectedOf, requestBody, summary, traceOf, type AsiRequestView } from '../src/lib/asiRequest.ts'
 
 const familyName = 'https://gbo.example/attributes/family_name/1'
 const nationality = 'https://gbo.example/attributes/nationality/1'
@@ -52,4 +52,11 @@ test('P3: a denial, a failure and an invalid seal give no expected outcome', () 
   const unsealed: AsiRequestView = { ...done([]), seal: { valid: false, error: 'unknown anchor' } }
   assert.equal(summary(unsealed), 'Zegel ongeldig — resultaat niet geaccepteerd. unknown anchor')
   assert.equal(expectedOf(unsealed), undefined)
+})
+
+test('the chain of a request is the trace the QTSP reports for it, once it has ended', () => {
+  const v: AsiRequestView = { ...done([{ identifier: familyName, label: 'Familienaam', result: 'Match' }]), trace_id: 'a'.repeat(32) }
+  assert.equal(traceOf(v), 'a'.repeat(32))
+  assert.equal(traceOf({ ...v, status: 'pending' }), null)
+  assert.equal(traceOf({ id: 'r', start_url: '', status: 'denied', operation: 'verify', error: 'access_denied' }), null)
 })

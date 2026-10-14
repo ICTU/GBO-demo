@@ -18,7 +18,7 @@ import { issuanceFlow } from './api/portalClient'
 import { useQuery } from './api/dvtpClient'
 import { fetchDecisions } from './api/devClient'
 import { createAsiRequest, getAsiRequest, listAsiAttributes } from './api/asiClient'
-import { expectedOf, requestBody, type AsiAttribute, type AsiRequestView } from './lib/asiRequest'
+import { expectedOf, requestBody, traceOf, type AsiAttribute, type AsiRequestView } from './lib/asiRequest'
 import { newTraceContext } from './util/trace'
 import { consentTokenFor, storeConsentToken } from './util/consentTokens'
 import { loadIssuanceOffers, type IssuanceOffer } from './eudi'
@@ -87,12 +87,12 @@ const ASI_FOLLOW_MS = 10 * 60 * 1000
 // asiResult is the result panel's view of an ASI request at the QTSP. The
 // outcome is the citizen's and the ASIP's, not a PDP verdict, so the panel
 // shows it in its own block (result.asi) rather than as ALLOW or DENY.
-function asiResult(view: AsiRequestView, traceId: string | null): ResultData {
+function asiResult(view: AsiRequestView): ResultData {
   return {
     outcome: view.status === 'failed' ? 'error' : 'unknown',
     status: 200,
     body: view,
-    trace_id: traceId ?? undefined,
+    trace_id: traceOf(view) ?? undefined,
     asi: view,
   }
 }
@@ -122,11 +122,10 @@ export default function App() {
   const [asiAttributes, setAsiAttributes] = useState<AsiAttribute[]>([])
   const [asiAttributesError, setAsiAttributesError] = useState('')
   const [asiView, setAsiView] = useState<AsiRequestView | null>(null)
-  // The ASI request this portal laid down and still follows, and the trace
-  // of its call at the ASIP once the watch picks it up. A new request
-  // replaces the old one, which then stops being followed.
+  // The ASI request this portal laid down and still follows. A new request
+  // replaces the old one, which then stops being followed; once it ends, the
+  // watch shows other QTSPs' requests again.
   const asiOwnRef = useRef<string | null>(null)
-  const asiTraceRef = useRef<string | null>(null)
   const [result, setResult] = useState<ResultData | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [archApiCalls, setArchApiCalls] = useState<ApiCall[] | undefined>(undefined)
@@ -240,21 +239,14 @@ export default function App() {
       })
       return
     }
-    // ASI: a QTSP's verify or retrieve at the ASIP. For a request this portal
-    // laid down, the trace joins the result the QTSP reports; for any other
-    // QTSP request there is no response to show, and the chain, the FSC
-    // transaction log and the PDP decision are the evidence.
+    // ASI: a QTSP's verify or retrieve at the ASIP. While this portal follows
+    // a request of its own, the chain comes from the trace the QTSP reports
+    // for it, so any ASI trace the watch sees meanwhile is someone else's and
+    // is left alone. For other QTSP requests there is no response to show,
+    // and the chain, the FSC transaction log and the PDP decision are the
+    // evidence.
     if (mode === 'asi-verify') {
-      if (asiOwnRef.current) {
-        asiTraceRef.current = traceId
-        setArchApiCalls(undefined)
-        setArchTraceId(traceId)
-        setArchMode('asi-verify')
-        setTab('asi-verify')
-        setResult((r) => (r?.asi ? { ...r, trace_id: traceId } : r))
-        return
-      }
-      if (submitting) return
+      if (asiOwnRef.current || submitting) return
       setArchApiCalls(undefined)
       setResult({
         outcome: 'unknown',
@@ -385,7 +377,6 @@ export default function App() {
       }
       const win = window.open('about:blank', '_blank')
       asiOwnRef.current = null
-      asiTraceRef.current = null
       setAsiView(null)
       setResult(null)
       setArchApiCalls(undefined)
@@ -417,7 +408,7 @@ export default function App() {
       const id = view.id
       asiOwnRef.current = id
       setAsiView(view)
-      setResult(asiResult(view, null))
+      setResult(asiResult(view))
       const deadline = Date.now() + ASI_FOLLOW_MS
       while (view.status === 'pending' && Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 1000))
@@ -429,8 +420,15 @@ export default function App() {
         }
       }
       if (asiOwnRef.current !== id) return
+      asiOwnRef.current = null
       setAsiView(view)
-      setResult(asiResult(view, asiTraceRef.current))
+      setResult(asiResult(view))
+      const traceId = traceOf(view)
+      if (traceId) {
+        setArchApiCalls(undefined)
+        setArchTraceId(traceId)
+        setArchMode('asi-verify')
+      }
       return
     }
     if (tab === 'eudi-issuance') {
