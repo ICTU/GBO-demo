@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { fetchTrace, spanTag } from '../api/jaegerClient'
 import { fetchDecisions, fetchFscTxlog, type FscTxlogResponse } from '../api/devClient'
-import type { Tab } from '../types'
+import { viaFsc, type Tab } from '../types'
 import type { NodeStatus } from '../util/spanMapping'
 import { CONSUMERS } from '../util/consumer'
 
@@ -44,7 +44,7 @@ export function useFscTxlog(traceId: string | undefined, mode: Tab): {
   const [overrides, setOverrides] = useState<FscOverrides>({ states: {}, decisionTraceKey: null })
 
   useEffect(() => {
-    if (!traceId || (mode !== 'eudi-issuance' && mode !== 'use')) {
+    if (!traceId || !viaFsc(mode)) {
       setData(null); setTransactionId(null); setOverrides({ states: {}, decisionTraceKey: null }); return
     }
     let cancelled = false
@@ -128,6 +128,9 @@ function computeOverrides(
         // Register's, whichever carried this transaction.
         out['outway'] = 'green'
         out['outway-manager'] = 'green'
+      } else if (peer.peer === 'asip') {
+        out['asip-outway'] = 'green'
+        out['asip-manager'] = 'green'
       } else if (peer.peer === 'bd') {
         out['bd-inway'] = 'green'
       }

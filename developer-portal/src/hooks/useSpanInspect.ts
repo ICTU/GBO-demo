@@ -98,6 +98,14 @@ function collectMatches(nodeId: string): Match[] {
   if (nodeId === 'sidecar') {
     return BRON_PROFILES.map((b) => ({ service: b.gatewaySvc, operation: b.gatewaySvc }))
   }
+  // The ASIP: its request span names the data service, its query span the
+  // FSC transaction and the attributes asked for.
+  if (nodeId === 'asi-provider') {
+    return [
+      { service: 'asi-provider', pathPrefix: '/' },
+      { service: 'asi-provider', operation: 'BRP query' },
+    ]
+  }
   const primary = NODE_SPAN_MATCH[nodeId]
   if (!primary) return []
   return [primary]

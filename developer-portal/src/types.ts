@@ -1,6 +1,12 @@
 // Domain types shared across multiple components.
 
-export type Tab = 'issuance' | 'use' | 'eudi-issuance'
+export type Tab = 'issuance' | 'use' | 'eudi-issuance' | 'asi-verify'
+
+// The flows whose requests cross FSC to a source behind bd-inway: their FSC
+// transaction log and PDP decision are found by the Fsc-Transaction-Id.
+export function viaFsc(tab: Tab): boolean {
+  return tab === 'use' || tab === 'eudi-issuance' || tab === 'asi-verify'
+}
 export type Outcome = 'allow' | 'deny' | 'error' | 'unknown'
 
 export type Scenario = {
