@@ -1209,6 +1209,8 @@ services:
       # The ASIP's own Outway; the grant-link per data service is in
       # config/dataservices.json (/brp is the one make fsc-seed-asip sets).
       - ASIP_OUTWAY_URL=http://asip-outway:8080
+      - OTEL_SERVICE_NAME=asi-provider
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
       - ASIP_SEAL_KEY_FILE=/seal/seal-key.pem
       - ASIP_SEAL_CERT_FILE=/seal/seal-cert.pem
     volumes:

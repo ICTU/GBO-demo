@@ -119,9 +119,8 @@ func TestNoValue(t *testing.T) {
 	}
 }
 
-// One query per attribute, through the grant-link, with only that
-// attribute's fields and the BSN as a variable; Fsc-Transaction-Id is a
-// UUID v7 and the traceparent's trace id (G12).
+// The query goes through the grant-link, with only the attribute's fields
+// and the BSN as a variable; Fsc-Transaction-Id is a UUID v7 (G12).
 func TestTheQueryThroughTheChain(t *testing.T) {
 	o, s := newOutway(t, http.StatusOK, brpPerson(frouke))
 	value(t, s, "family_name")
@@ -143,10 +142,6 @@ func TestTheQueryThroughTheChain(t *testing.T) {
 	id, err := uuid.Parse(tx)
 	if err != nil || id.Version() != 7 {
 		t.Fatalf("Fsc-Transaction-Id = %q, want a UUID v7", tx)
-	}
-	parts := strings.Split(o.got.Header.Get("Traceparent"), "-")
-	if len(parts) != 4 || parts[0] != "00" || parts[1] != strings.ReplaceAll(tx, "-", "") || len(parts[2]) != 16 {
-		t.Errorf("traceparent = %q, want the transaction id as trace id", o.got.Header.Get("Traceparent"))
 	}
 }
 

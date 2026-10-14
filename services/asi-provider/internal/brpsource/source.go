@@ -10,8 +10,6 @@ package brpsource
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,8 +19,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
+	"gbo-demo/asi-provider/internal/tracing"
 	"gbo-demo/asi-provider/internal/verification"
 )
 
@@ -64,7 +67,7 @@ type Source struct {
 func New(outwayURL, path string) *Source {
 	return &Source{
 		endpoint: strings.TrimRight(outwayURL, "/") + "/" + strings.TrimLeft(path, "/"),
-		client:   &http.Client{Timeout: requestTimeout},
+		client:   &http.Client{Timeout: requestTimeout, Transport: otelhttp.NewTransport(http.DefaultTransport)},
 	}
 }
 
@@ -82,7 +85,7 @@ func (s *Source) Values(ctx context.Context, bsn string, names []string) (map[st
 			parts = append(parts, selection)
 		}
 	}
-	p, err := s.query(ctx, bsn, strings.Join(parts, " "))
+	p, err := s.query(ctx, bsn, names, strings.Join(parts, " "))
 	if err != nil {
 		return nil, err
 	}
@@ -172,8 +175,24 @@ func joinNonEmpty(parts ...string) string {
 
 // query posts one GraphQL query through the Outway and returns the person,
 // nil when the BRP does not know the BSN. Errors name the status, never the
-// BSN, so they can be logged.
-func (s *Source) query(ctx context.Context, bsn, selection string) (*person, error) {
+// BSN, so they can be logged. Its span names the FSC transaction and the
+// attributes asked for, never the BSN or a value.
+func (s *Source) query(ctx context.Context, bsn string, names []string, selection string) (_ *person, err error) {
+	txID, err := tracing.TransactionID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ctx, span := otel.Tracer("asi-provider/brpsource").Start(ctx, "BRP query", trace.WithAttributes(
+		attribute.String(tracing.TransactionIDAttribute, txID),
+		attribute.StringSlice("gbo.asi.attributes", names),
+	))
+	defer func() {
+		if err != nil {
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+	}()
+
 	body, err := json.Marshal(map[string]any{
 		"query":     "query AsiAttributes($bsn: BSN!) { ingeschrevenPersoon(bsn: $bsn) { " + selection + " } }",
 		"variables": map[string]string{"bsn": bsn},
@@ -185,13 +204,9 @@ func (s *Source) query(ctx context.Context, bsn, selection string) (*person, err
 	if err != nil {
 		return nil, err
 	}
-	txID, traceparent, err := newTraceHeaders()
-	if err != nil {
-		return nil, err
-	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Fsc-Transaction-Id", txID)
-	req.Header.Set("Traceparent", traceparent)
+	// The instrumented client adds the traceparent of its span, in this trace.
 
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -232,22 +247,6 @@ func fscCode(raw []byte) string {
 	}
 	_ = json.Unmarshal(raw, &e)
 	return e.Code
-}
-
-// newTraceHeaders returns a Fsc-Transaction-Id, a UUID v7 (the Outway
-// rejects other versions), and a traceparent whose trace id is that UUID: the
-// FSC transaction log, the PDP's decision log and the trace share one value.
-func newTraceHeaders() (string, string, error) {
-	id, err := uuid.NewV7()
-	if err != nil {
-		return "", "", fmt.Errorf("generate Fsc-Transaction-Id: %w", err)
-	}
-	var span [8]byte
-	if _, err := rand.Read(span[:]); err != nil {
-		return "", "", err
-	}
-	trace := strings.ReplaceAll(id.String(), "-", "")
-	return id.String(), "00-" + trace + "-" + hex.EncodeToString(span[:]) + "-01", nil
 }
 
 var _ verification.Source = (*Source)(nil)

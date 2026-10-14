@@ -66,6 +66,7 @@ Ports and adapters, as `AGENTS.md` asks for a service with an authorization boun
 | `internal/asmetadata` | `KeySource`: the keys from the metadata of the authorization server |
 | `internal/brpsource` | `Source`: the BRP over FSC, one GraphQL query per request |
 | `internal/dataservice` | the data services file |
+| `internal/tracing` | the `Fsc-Transaction-Id` of a request, its trace, and the OTLP exporter |
 | `internal/seal` | the seal on every result |
 | `internal/sealcert` | the `provision-seal-certificate` command |
 | `internal/httpapi` | per data service `/verify`, `/retrieve` and the contract: validation, problem details, `WWW-Authenticate` |
@@ -89,7 +90,7 @@ The access token is checked first (401). Then the request is validated against t
 
 ## The authentic source
 
-The ASIP is an FSC consumer peer of its own (`99999999900000001200`) with a connection contract for the BRP service `brp`. Per request it posts one GraphQL query of its own to the grant-link `/brp/graphql` on its Outway, with only the fields of the requested attributes and the BSN from the access token as the variable `bsn`: one FSC transaction and one PDP decision per request. If the chain refuses a field, the whole request fails (500): in this chain that is a fault in the deployment. ETSI TS 119 478 does not prescribe how an ASIP asks its source. Every query carries a `Fsc-Transaction-Id` (UUID v7) and a `traceparent` whose trace id is that UUID.
+The ASIP is an FSC consumer peer of its own (`99999999900000001200`) with a connection contract for the BRP service `brp`. Per request it posts one GraphQL query of its own to the grant-link `/brp/graphql` on its Outway, with only the fields of the requested attributes and the BSN from the access token as the variable `bsn`: one FSC transaction and one PDP decision per request. If the chain refuses a field, the whole request fails (500): in this chain that is a fault in the deployment. ETSI TS 119 478 does not prescribe how an ASIP asks its source. Every request gets one `Fsc-Transaction-Id` (UUID v7) for its query. Without a `traceparent` from the QTSP, the trace id is that UUID, so the FSC transaction log, the PDP's decision log and the trace share one value; with one, the request joins the QTSP's trace. The ASIP exports spans over OTLP when `OTEL_EXPORTER_OTLP_ENDPOINT` is set (`OTEL_SERVICE_NAME`, default `asi-provider`): the request, with the data service as `gbo.asi.data_service`, and the BRP query, with `gbo.fsc.transaction_id` and the attribute names as `gbo.asi.attributes`. No span holds the BSN or a value. The developer portal watches `POST` requests to the ASIP and finds the transaction log of the ASIP's peer (`asip`) and the PDP decision from that transaction id.
 
 | Attribute | BRP fields | Value |
 |---|---|---|
