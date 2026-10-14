@@ -5,6 +5,7 @@
       "id": "brp",
       "provider": "GBO demo ASIP",
       "authentic_source": "Basisregistratie Personen (mock)",
+      "country": "NL",
       "source": "brp",
       "grant_path": "/brp/graphql",
       "attributes": {

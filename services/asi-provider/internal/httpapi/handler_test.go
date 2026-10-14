@@ -88,6 +88,8 @@ func newTestServerWithSource(t *testing.T, authz *testAuthorizationServer, qtsp 
 			Tokens:          accesstoken.NewValidator(testIssuer, testPublicURL+testBase, testPublicURL, keys),
 			Provider:        Provider{LegalName: "GBO demo ASIP (test)"},
 			AuthenticSource: &Provider{LegalName: "Basisregistratie Personen (mock)"},
+			Attributes:      []string{idAddress, idFamilyName, idGivenName},
+			Country:         "NL",
 		}, {
 			// A second data service whose source is the ASIP itself: its
 			// responses name no authentic source.
@@ -95,6 +97,8 @@ func newTestServerWithSource(t *testing.T, authz *testAuthorizationServer, qtsp 
 			Verification: verification.NewService(diplomas, duoCatalogue),
 			Tokens:       accesstoken.NewValidator(testIssuer, testPublicURL+duoBase, testPublicURL, keys),
 			Provider:     Provider{LegalName: "DUO (test)"},
+			Attributes:   []string{idDiploma},
+			Country:      "NL",
 		}},
 	})
 	if err != nil {

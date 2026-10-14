@@ -20,7 +20,7 @@ func write(t *testing.T, body string) string {
 	return path
 }
 
-const brp = `{"id":"brp","provider":"GBO demo ASIP","authentic_source":"BRP","source":"brp","grant_path":"/brp/graphql",
+const brp = `{"id":"brp","provider":"GBO demo ASIP","authentic_source":"BRP","country":"NL","source":"brp","grant_path":"/brp/graphql",
 	"attributes":{"https://gbo.example/attributes/family_name/1":"family_name"}}`
 
 // The file in config/ loads with the adapters of the ASIP's composition root.
@@ -48,6 +48,8 @@ func TestRefused(t *testing.T) {
 		"identifier not a URI":  `{"data_services":[` + strings.Replace(brp, `"https://gbo.example/attributes/family_name/1"`, `"family_name"`, 1) + `]}`,
 		"id not a segment":      `{"data_services":[` + strings.Replace(brp, `"id":"brp"`, `"id":"brp/x"`, 1) + `]}`,
 		"no provider":           `{"data_services":[` + strings.Replace(brp, `"provider":"GBO demo ASIP"`, `"provider":""`, 1) + `]}`,
+		"no country":            `{"data_services":[` + strings.Replace(brp, `"country":"NL",`, ``, 1) + `]}`,
+		"country not a code":    `{"data_services":[` + strings.Replace(brp, `"country":"NL"`, `"country":"Nederland"`, 1) + `]}`,
 		"no grant path":         `{"data_services":[` + strings.Replace(brp, `"grant_path":"/brp/graphql"`, `"grant_path":""`, 1) + `]}`,
 		"no attributes":         `{"data_services":[` + strings.Replace(brp, `{"https://gbo.example/attributes/family_name/1":"family_name"}`, `{}`, 1) + `]}`,
 		"not JSON":              `{`,

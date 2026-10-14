@@ -27,6 +27,9 @@ type DataService struct {
 	// AuthenticSource is the legal name of the authentic source, empty when
 	// the ASIP is the authentic source: then the responses name none.
 	AuthenticSource string `json:"authentic_source"`
+	// Country is the Member State of the data service (ISO 3166-1 alpha-2),
+	// in its discovery records.
+	Country string `json:"country"`
 	// Source names the adapter that asks the authentic source.
 	Source string `json:"source"`
 	// GrantPath is the grant-link of the ASIP's FSC contract with the source,
@@ -37,7 +40,10 @@ type DataService struct {
 	Attributes map[string]string `json:"attributes"`
 }
 
-var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+var (
+	idPattern      = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+	countryPattern = regexp.MustCompile(`^[A-Z]{2}$`)
+)
 
 // Load reads the data services from path. adapters lists per adapter the
 // attribute names it can ask for. A file that names an unknown adapter, an
@@ -73,6 +79,9 @@ func Load(path string, adapters map[string][]string) ([]DataService, error) {
 		seen[ds.ID] = true
 		if ds.Provider == "" {
 			return nil, fmt.Errorf("data service %q: provider is required", ds.ID)
+		}
+		if !countryPattern.MatchString(ds.Country) {
+			return nil, fmt.Errorf("data service %q: country must be an ISO 3166-1 alpha-2 code", ds.ID)
 		}
 		names, ok := adapters[ds.Source]
 		if !ok {
