@@ -1181,8 +1181,8 @@ services:
     ports:
       - "${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}:4021"
     environment:
-      - AZSP_ISSUER=http://localhost:${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}
-      - AZSP_RESOURCE=http://localhost:${GBO_PORT_ASI_PROVIDER:-9424}/authsrc-api
+      - AZSP_ISSUER=${ASI_AUTHORIZATION_SERVER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}}
+      - AZSP_RESOURCE=${ASI_PROVIDER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_PROVIDER:-9424}}/authsrc-api
       - AZSP_TRUST_ANCHORS_FILE=/trust/reader-ca-cert.pem
       - AZSP_ENTITLEMENT_RECHECK_INTERVAL=${ASI_ENTITLEMENT_RECHECK_INTERVAL:-1h}
     volumes:
@@ -1201,8 +1201,8 @@ services:
     ports:
       - "${GBO_PORT_ASI_PROVIDER:-9424}:4020"
     environment:
-      - ASIP_PUBLIC_URL=http://localhost:${GBO_PORT_ASI_PROVIDER:-9424}
-      - ASIP_AUTHORIZATION_SERVER=http://localhost:${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}
+      - ASIP_PUBLIC_URL=${ASI_PROVIDER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_PROVIDER:-9424}}
+      - ASIP_AUTHORIZATION_SERVER=${ASI_AUTHORIZATION_SERVER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}}
       - ASIP_AUTHORIZATION_SERVER_INTERNAL_URL=http://asi-authorization-server:4021
       # The ASIP's own Outway; /brp is the grant-link make fsc-seed-asip sets.
       - ASIP_OUTWAY_URL=http://asip-outway:8080
