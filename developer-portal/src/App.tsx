@@ -79,6 +79,12 @@ const JAEGER_PUBLIC_URL =
   import.meta.env.VITE_JAEGER_PUBLIC_URL ||
   'http://localhost:9686'
 
+// The reference QTSP's page, where an ASI request starts.
+const QTSP_PUBLIC_URL =
+  window.__GBO_RUNTIME_CONFIG__?.qtspPublicUrl ||
+  import.meta.env.VITE_QTSP_PUBLIC_URL ||
+  'http://localhost:9427'
+
 const GRAFANA_PUBLIC_URL =
   window.__GBO_RUNTIME_CONFIG__?.grafanaPublicUrl ||
   import.meta.env.VITE_GRAFANA_PUBLIC_URL ||
@@ -318,8 +324,10 @@ export default function App() {
     // trace_id to seed — it renders the QR (universal-link client-side
     // assembled), enables watch, and waits for eudi-adapter's first span
     // (useWatchNext handles this).
-    // ASI starts at a QTSP, outside the demo: watch for its request.
+    // ASI starts at the reference QTSP: open its page and watch for the
+    // request it makes. Still in the click, so the browser allows the tab.
     if (tab === 'asi-verify') {
+      window.open(QTSP_PUBLIC_URL, '_blank', 'noopener')
       setResult(null)
       setArchApiCalls(undefined)
       setArchTraceId(null)
