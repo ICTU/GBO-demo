@@ -35,8 +35,9 @@ const (
 	dataserviceFileName = openapi.DataserviceFile
 )
 
-// publishedContract is served on /openapi.json. The files are embedded, so a
-// failure here is a build defect, caught by the tests.
+// publishedContract is the contract with the server of the completions; each
+// data service publishes it with its own server (contractFor). The files are
+// embedded, so a failure here is a build defect, caught by the tests.
 var publishedContract = func() []byte {
 	c, err := contract()
 	if err != nil {
@@ -71,6 +72,22 @@ func contract() ([]byte, error) {
 		return nil, fmt.Errorf("parse completions: %w", err)
 	}
 	return json.MarshalIndent(mergePatch(b, p), "", "  ")
+}
+
+// contractFor returns the published contract of a data service: its base URL
+// is the server.
+func contractFor(serverURL string) ([]byte, error) {
+	var doc map[string]any
+	if err := json.Unmarshal(publishedContract, &doc); err != nil {
+		return nil, err
+	}
+	servers, _ := doc["servers"].([]any)
+	if len(servers) != 1 {
+		return nil, errors.New("the completions name not exactly one server")
+	}
+	server, _ := servers[0].(map[string]any)
+	server["url"] = serverURL
+	return json.MarshalIndent(doc, "", "  ")
 }
 
 // mergePatch applies an RFC 7386 JSON Merge Patch.

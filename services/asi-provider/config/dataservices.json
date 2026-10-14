@@ -1,0 +1,19 @@
+{
+  "_comment": "The data services of the ASIP, one per authentic source, each under /<id>/authsrc-api. The authorization server must know each base URL as a resource (AZSP_RESOURCES). Identifiers are provisional: there is no Dutch catalogue of attributes yet.",
+  "data_services": [
+    {
+      "id": "brp",
+      "provider": "GBO demo ASIP",
+      "authentic_source": "Basisregistratie Personen (mock)",
+      "source": "brp",
+      "grant_path": "/brp/graphql",
+      "attributes": {
+        "https://gbo.example/attributes/family_name/1": "family_name",
+        "https://gbo.example/attributes/given_name/1": "given_name",
+        "https://gbo.example/attributes/birth_date/1": "birth_date",
+        "https://gbo.example/attributes/nationality/1": "nationality",
+        "https://gbo.example/attributes/address/1": "address"
+      }
+    }
+  ]
+}

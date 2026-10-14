@@ -48,7 +48,9 @@ func TestEndToEndVerify(t *testing.T) { // case 24 (through /verify), case 37, c
 	var asLogs syncBuffer
 	log.SetOutput(&asLogs)
 	t.Cleanup(func() { log.SetOutput(os.Stderr) })
-	as := newTestASFor(t, asipURL+"/authsrc-api")
+	// The BRP data service of the ASIP.
+	brp := asipURL + "/brp/authsrc-api"
+	as := newTestASFor(t, brp)
 
 	outway := newFakeBRPOutway(t)
 
@@ -74,10 +76,12 @@ func TestEndToEndVerify(t *testing.T) { // case 24 (through /verify), case 37, c
 	waitHealthy(t, asipURL+"/healthz", &asipLogs)
 
 	p := newPKCE()
-	token := as.accessToken(t, authorizeParams(p), p)
+	params := authorizeParams(p)
+	params.Set("resource", brp)
+	token := as.accessToken(t, params, p)
 
 	body := `{"attributes":[{"attributeIdentifier":"https://gbo.example/attributes/family_name/1","attributeValue":{"family_name":"Jansen"}}]}`
-	resp := as.callASIP(t, asipURL+"/authsrc-api/verify", token, body)
+	resp := as.callASIP(t, brp+"/verify", token, body)
 	if resp.status != http.StatusOK {
 		t.Fatalf("/verify = %d %s, want 200\nasi-provider log:\n%s", resp.status, resp.body, asipLogs.String())
 	}
@@ -100,7 +104,8 @@ func TestEndToEndVerify(t *testing.T) { // case 24 (through /verify), case 37, c
 	// flow with the key of its certificate.
 	id := as.registerQTSP(t)
 	p = newPKCE()
-	params := authorizeParams(p)
+	params = authorizeParams(p)
+	params.Set("resource", brp)
 	params.Set("client_id", id)
 	form := as.tokenForm(t, as.code(t, params), p)
 	form.Set("client_assertion", as.assertion(t, id, nil))
@@ -109,12 +114,12 @@ func TestEndToEndVerify(t *testing.T) { // case 24 (through /verify), case 37, c
 		t.Fatalf("token response for the registered client = %d %v, want 200", tr.status, tr.body)
 	}
 	registeredToken, _ := tr.body["access_token"].(string)
-	if r := as.callASIP(t, asipURL+"/authsrc-api/verify", registeredToken, body); r.status != http.StatusOK {
+	if r := as.callASIP(t, brp+"/verify", registeredToken, body); r.status != http.StatusOK {
 		t.Fatalf("/verify with the token of the registered client = %d %s, want 200", r.status, r.body)
 	}
 
 	// The token is for verify only.
-	if r := as.callASIP(t, asipURL+"/authsrc-api/retrieve", token, `{"attributeIdentifiers":[{"attributeIdentifier":"https://gbo.example/attributes/family_name/1"}]}`); r.status != http.StatusUnauthorized {
+	if r := as.callASIP(t, brp+"/retrieve", token, `{"attributeIdentifiers":[{"attributeIdentifier":"https://gbo.example/attributes/family_name/1"}]}`); r.status != http.StatusUnauthorized {
 		t.Fatalf("/retrieve with a verify token = %d, want 401", r.status)
 	}
 

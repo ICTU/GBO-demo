@@ -26,6 +26,25 @@ func (f fakeSource) Value(_ context.Context, bsn, name string) (json.RawMessage,
 	return json.RawMessage(v), ok, nil
 }
 
+const (
+	// testBase and duoBase are the base paths of the test data services.
+	testBase = "/brp" + BasePath
+	duoBase  = "/duo" + BasePath
+)
+
+// brpCatalogue is the BRP data service's; the diploma is DUO's.
+var brpCatalogue = verification.Catalogue{
+	idFamilyName: {Name: "family_name"},
+	idGivenName:  {Name: "given_name"},
+	idAddress:    {Name: "address"},
+}
+
+var duoCatalogue = verification.Catalogue{idDiploma: {Name: "education_qualification"}}
+
+var diplomas = fakeSource{persons: map[string]map[string]string{
+	bsnFrouke: {"education_qualification": `{"qualification":"MSc"}`},
+}}
+
 // The persons of the BRP mock the tests use. Tom is not resident: he has no
 // address in the attribute's shape.
 var testPersons = fakeSource{persons: map[string]map[string]string{
