@@ -30,7 +30,8 @@ func (f fakeIdentifier) Identify(id string) (Identity, bool) { p, ok := f[id]; r
 
 const (
 	redirectURI = "https://qtsp.test/callback"
-	resource    = "https://asip.test/authsrc-api"
+	resource    = "https://asip.test/brp/authsrc-api"
+	resource2   = "https://asip.test/duo/authsrc-api"
 )
 
 func newTestService(t *testing.T) *Service {
@@ -45,7 +46,7 @@ func newTestService(t *testing.T) *Service {
 	}
 	return NewService(Config{
 		Issuer:     "https://as.test",
-		Resource:   resource,
+		Resources:  []string{resource, resource2},
 		Clients:    fakeClients{"qtsp": {ID: "qtsp", RedirectURIs: []string{redirectURI}, Scopes: map[string]bool{"verify": true}}},
 		Identifier: fakeIdentifier{"frouke": {BSN: "999991772", GivenName: "Frouke"}},
 		Tokens:     tokens,
@@ -61,7 +62,7 @@ func validRequest() AuthorizationRequest {
 	return AuthorizationRequest{
 		ResponseType: "code", ClientID: "qtsp", RedirectURI: redirectURI, Scope: "verify", State: "s",
 		CodeChallenge: challenge("a-code-verifier-of-at-least-forty-three-characters"), CodeChallengeMethod: "S256",
-		LoginHint: "frouke",
+		LoginHint: "frouke", Resources: []string{resource},
 	}
 }
 
@@ -84,6 +85,8 @@ func TestAuthorize(t *testing.T) {
 		{"no PKCE", func(r *AuthorizationRequest) { r.CodeChallenge = "" }, "invalid_request"},
 		{"plain PKCE", func(r *AuthorizationRequest) { r.CodeChallengeMethod = "plain" }, "invalid_request"},
 		{"another resource", func(r *AuthorizationRequest) { r.Resources = []string{"https://other.test"} }, "invalid_target"},
+		{"no resource", func(r *AuthorizationRequest) { r.Resources = nil }, "invalid_target"},
+		{"two data services", func(r *AuthorizationRequest) { r.Resources = []string{resource, resource2} }, "invalid_target"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := validRequest()

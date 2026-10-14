@@ -25,7 +25,7 @@ The ASIP and the authorization server may be operated by one party, but they are
 |---|---|
 | `GET /.well-known/oauth-authorization-server` | metadata (RFC 8414) |
 | `GET /jwks.json` | the public token signing key |
-| `GET /authorize` | authorization request: `response_type=code`, `client_id`, `redirect_uri`, `scope` (`verify`, `retrieve` or both), `state`, `code_challenge`, `code_challenge_method=S256`, optionally `resource` and `login_hint`. A valid request gets the test-person chooser |
+| `GET /authorize` | authorization request: `response_type=code`, `client_id`, `redirect_uri`, `scope` (`verify`, `retrieve` or both), `state`, `code_challenge`, `code_challenge_method=S256`, `resource` (one data service of the ASIP), optionally `login_hint`. A valid request gets the test-person chooser |
 | `POST /authorize/decision` | the user's decision on the chooser: `transaction`, `person`, `decision` (`approve` or `deny`); answers with the redirect to the client |
 | `POST /token` | token request: `grant_type=authorization_code`, `code`, `redirect_uri`, `code_verifier`, `client_assertion_type`, `client_assertion`, and a `DPoP` proof header |
 | `POST /register` | client registration (RFC 7591): `redirect_uris`, `scope`, optionally `token_endpoint_auth_method`, and the `software_statement` |
@@ -40,7 +40,7 @@ AZSP_TRUST_ANCHORS_FILE=../../.local/secrets/development-ca/reader-ca-cert.pem g
 
 `make provision-asip-qtsp-certificate` issues a test QTSP certificate from the development reader CA, with the `organizationIdentifier` of the test QTSP in `testdata/register.json` (`NTRNL-90000001`). A test QTSP signs its software statement and its client assertions with its key.
 
-Configuration: `AZSP_ADDR` (default `:4021`), `AZSP_ISSUER` (the public base URL, default `http://localhost:4021`), `AZSP_RESOURCE` (the ASIP base URL, default `http://localhost:4020/authsrc-api`), `AZSP_SIGNING_KEY_FILE` (PEM, ECDSA P-256; without it the server generates a key at start, so tokens do not survive a restart), `AZSP_CLIENTS_FILE`, `AZSP_TEST_PERSONS_FILE` (default `testdata/test-persons.json`), `AZSP_REGISTER_FILE` (default `testdata/register.json`), `AZSP_TRUST_ANCHORS_FILE` (PEM; the roots QTSP certificates must chain to, the development reader CA; without it every registration is refused), `AZSP_ENTITLEMENT_RECHECK_INTERVAL` (default `1h`).
+Configuration: `AZSP_ADDR` (default `:4021`), `AZSP_ISSUER` (the public base URL, default `http://localhost:4021`), `AZSP_RESOURCES` (the base URLs of the ASIP's data services, separated by commas, default `http://localhost:4020/brp/authsrc-api`), `AZSP_SIGNING_KEY_FILE` (PEM, ECDSA P-256; without it the server generates a key at start, so tokens do not survive a restart), `AZSP_CLIENTS_FILE`, `AZSP_TEST_PERSONS_FILE` (default `testdata/test-persons.json`), `AZSP_REGISTER_FILE` (default `testdata/register.json`), `AZSP_TRUST_ANCHORS_FILE` (PEM; the roots QTSP certificates must chain to, the development reader CA; without it every registration is refused), `AZSP_ENTITLEMENT_RECHECK_INTERVAL` (default `1h`).
 
 A clients file registers each client with its redirect URIs, its scopes and the public keys of its client assertions:
 
@@ -114,7 +114,7 @@ A valid authorization request gets a page, in Dutch, with a banner that it is a 
 - **No PAR.** The FAPI 2.0 Security Profile requires pushed authorization requests; ETSI TS 119 478 only asks to "take into account" FAPI 2.0 (REQ-AZSP-6.1.3.4-01). A stricter server than ETSI would exclude QTSPs that implement ETSI only.
 - **Algorithms.** Tokens are signed with ES256. Client assertions may use ES256 or PS256, DPoP proofs ES256. RFC 9068 section 2.1 requires resource servers to support RS256, which FAPI 2.0 does not allow; the ASIP accepts it, this server never uses it.
 - **Authorization per operation**, not per attribute: ETSI TS 119 478 defines the scopes `verify` and `retrieve` and no binding of a token to attributes.
-- **Resource indicator.** `resource` (RFC 8707) is optional; the only accepted value is the ASIP base URL, any other value is `invalid_target`.
+- **Resource indicator.** `resource` (RFC 8707) is required on the authorization request and names exactly one data service of the ASIP: with several there is no default, and a token is for one data service, its `aud`. A token request may repeat it or leave it out. Anything else is `invalid_target`. A QTSP that verifies attributes of two authentic sources authorizes twice.
 - **Codes** are single-use and valid for 60 seconds; a code presented by another client or with another `redirect_uri` is consumed and refused.
 - **Clock leeway**: 30 seconds on client assertions; DPoP proofs are accepted within 60 seconds of their `iat` and only once.
 - No log line contains the BSN.

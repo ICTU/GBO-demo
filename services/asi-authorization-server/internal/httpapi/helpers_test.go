@@ -30,7 +30,9 @@ const (
 	otherClientID   = "other-qtsp"
 	verifyOnlyID    = "verify-only-qtsp"
 	testRedirectURI = "https://qtsp.test/callback"
-	testResource    = "https://asip.test/authsrc-api"
+	testResource    = "https://asip.test/brp/authsrc-api"
+	// testResource2 is a second data service of the ASIP.
+	testResource2 = "https://asip.test/duo/authsrc-api"
 	bsnFrouke       = "999991772"
 )
 
@@ -94,7 +96,7 @@ func newTestASWithRegister(t *testing.T, resource string, register authorization
 	}
 	as.service = authorization.NewService(authorization.Config{
 		Issuer:       as.srv.URL,
-		Resource:     resource,
+		Resources:    []string{resource, testResource2},
 		Clients:      clientconfig.New(clients...),
 		Identifier:   testpersons.New(testFrouke, testTom),
 		Tokens:       tokens,
@@ -130,6 +132,7 @@ func authorizeParams(p pkce) url.Values {
 		"code_challenge":        {p.challenge},
 		"code_challenge_method": {"S256"},
 		"login_hint":            {"frouke"},
+		"resource":              {testResource},
 	}
 }
 

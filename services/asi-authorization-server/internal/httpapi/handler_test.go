@@ -123,24 +123,35 @@ func TestSubIsOpaquePerToken(t *testing.T) { // case 25
 	}
 }
 
+// One data service per authorization: its base URL is the aud of the token
+// (case 26; B3, B4 of the data services).
 func TestResourceIndicator(t *testing.T) { // case 26
 	as := newTestAS(t)
 
-	p := newPKCE()
-	params := authorizeParams(p)
-	params.Set("resource", testResource)
-	_, claims := verifyAccessToken(t, as, as.accessToken(t, params, p))
-	if claims["aud"] != testResource {
-		t.Fatalf("aud = %v, want %s", claims["aud"], testResource)
+	for _, resource := range []string{testResource, testResource2} {
+		p := newPKCE()
+		params := authorizeParams(p)
+		params.Set("resource", resource)
+		_, claims := verifyAccessToken(t, as, as.accessToken(t, params, p))
+		if claims["aud"] != resource {
+			t.Fatalf("aud = %v, want %s", claims["aud"], resource)
+		}
 	}
 
-	params = authorizeParams(newPKCE())
-	params.Set("resource", "https://other-asip.test/authsrc-api")
-	assertAuthorizeError(t, as.authorize(t, params), "invalid_target")
+	for name, edit := range map[string]func(url.Values){
+		"unknown data service": func(v url.Values) { v.Set("resource", "https://other-asip.test/authsrc-api") },
+		"no resource":          func(v url.Values) { v.Del("resource") },
+		"two data services":    func(v url.Values) { v["resource"] = []string{testResource, testResource2} },
+	} {
+		params := authorizeParams(newPKCE())
+		edit(params)
+		t.Run(name, func(t *testing.T) { assertAuthorizeError(t, as.authorize(t, params), "invalid_target") })
+	}
 
-	p = newPKCE()
+	// A token request names the data service of the code, or none.
+	p := newPKCE()
 	form := as.tokenForm(t, as.code(t, authorizeParams(p)), p)
-	form.Set("resource", "https://other-asip.test/authsrc-api")
+	form.Set("resource", testResource2)
 	assertTokenError(t, as.postToken(t, form, as.proof(t, nil)), http.StatusBadRequest, "invalid_target")
 }
 

@@ -93,9 +93,19 @@ func serve() error {
 	if err != nil || recheckInterval <= 0 {
 		return fmt.Errorf("AZSP_ENTITLEMENT_RECHECK_INTERVAL: %q is not a positive duration", os.Getenv("AZSP_ENTITLEMENT_RECHECK_INTERVAL"))
 	}
+	// The base URLs of the ASIP's data services, separated by commas.
+	var resources []string
+	for _, r := range strings.Split(env("AZSP_RESOURCES", "http://localhost:4020/brp/authsrc-api"), ",") {
+		if r = strings.TrimRight(strings.TrimSpace(r), "/"); r != "" {
+			resources = append(resources, r)
+		}
+	}
+	if len(resources) == 0 {
+		return errors.New("AZSP_RESOURCES names no data service of the ASIP")
+	}
 	service := authorization.NewService(authorization.Config{
 		Issuer:       issuer,
-		Resource:     strings.TrimRight(env("AZSP_RESOURCE", "http://localhost:4020/authsrc-api"), "/"),
+		Resources:    resources,
 		Clients:      clients,
 		Identifier:   persons,
 		Tokens:       tokens,
