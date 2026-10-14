@@ -1,8 +1,8 @@
-// Package httpapi is the HTTP interface of the ASIP: POST /verify and
-// /retrieve of ETSI TS 119 478 clause 6.1.1 and 6.1.2 under the base path of
-// Annex B, and the published contract. It validates every request against
-// the contract, has the access token checked, calls the verification core,
-// and seals every result.
+// Package httpapi is the HTTP interface of the ASIP: per data service, POST
+// /verify and /retrieve of ETSI TS 119 478 clause 6.1.1 and 6.1.2 under
+// /<data service>/authsrc-api (the base path of Annex B), and its published
+// contract. It validates every request against the contract, has the access
+// token checked, calls the verification core, and seals every result.
 package httpapi
 
 import (
@@ -31,18 +31,42 @@ type Provider struct {
 	LegalName string `json:"legalName"`
 }
 
-type Config struct {
+// DataService is one authentic source behind the ASIP.
+type DataService struct {
+	// ID is the path segment of the data service: /<ID>/authsrc-api.
+	ID           string
 	Verification *verification.Service
-	// Tokens validates the access tokens of the authorization server.
-	Tokens          *accesstoken.Validator
-	Sealer          *seal.Sealer
-	Provider        Provider
-	AuthenticSource Provider
+	// Tokens validates the access tokens of the authorization server for
+	// this data service: its base URL is their audience.
+	Tokens   *accesstoken.Validator
+	Provider Provider
+	// AuthenticSource is nil when the ASIP is the authentic source: the
+	// responses then name none (REQ-ASIP-6.1.1.2-08, REQ-ASIP-6.1.2.2-04).
+	AuthenticSource *Provider
 }
 
-type handler struct{ cfg Config }
+type Config struct {
+	// PublicURL is the scheme and host QTSPs use; with the base path of a
+	// data service it is the server of that data service's contract.
+	PublicURL string
+	// Issuer is the authorization server: the contracts name its endpoints.
+	Issuer       string
+	Sealer       *seal.Sealer
+	DataServices []DataService
+}
+
+// BasePathOf is the base path of a data service.
+func BasePathOf(id string) string { return "/" + id + BasePath }
+
+type handler struct {
+	ds     DataService
+	sealer *seal.Sealer
+}
 
 func NewHandler(cfg Config) (http.Handler, error) {
+	if len(cfg.DataServices) == 0 {
+		return nil, errors.New("the ASIP serves no data service")
+	}
 	doc, err := loadContractDoc()
 	if err != nil {
 		return nil, fmt.Errorf("published contract: %w", err)
@@ -55,12 +79,26 @@ func NewHandler(cfg Config) (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
-	h := &handler{cfg: cfg}
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST "+BasePath+"/verify", h.authenticated("verify", conformant(verifyRoute, h.verify)))
-	mux.HandleFunc("POST "+BasePath+"/retrieve", h.authenticated("retrieve", conformant(retrieveRoute, h.retrieve)))
-	mux.HandleFunc("GET /openapi.json", serveJSON(publishedContract))
-	mux.HandleFunc("GET /"+dataserviceFileName, serveJSON(mustReadOpenAPIFile(dataserviceFile)))
+	seen := map[string]bool{}
+	for _, ds := range cfg.DataServices {
+		if seen[ds.ID] {
+			return nil, fmt.Errorf("data service %q is named twice", ds.ID)
+		}
+		seen[ds.ID] = true
+		h := &handler{ds: ds, sealer: cfg.Sealer}
+		base := BasePathOf(ds.ID)
+		published, err := contractFor(cfg.PublicURL+base, cfg.Issuer)
+		if err != nil {
+			return nil, err
+		}
+		mux.HandleFunc("POST "+base+"/verify", h.authenticated("verify", conformant(verifyRoute, h.verify)))
+		mux.HandleFunc("POST "+base+"/retrieve", h.authenticated("retrieve", conformant(retrieveRoute, h.retrieve)))
+		// The endpointDescription of the data service (REQ-DIP-5.3.3-03-02),
+		// with the schema it references next to it.
+		mux.HandleFunc("GET /"+ds.ID+"/openapi.json", serveJSON(published))
+		mux.HandleFunc("GET /"+ds.ID+"/"+dataserviceFileName, serveJSON(mustReadOpenAPIFile(dataserviceFile)))
+	}
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	return mux, nil
 }
@@ -105,7 +143,7 @@ type verifyResponse struct {
 	AttributeVerificationResults []attributeVerificationResult `json:"attributeVerificationResults,omitempty"`
 	FragmentVerificationResults  []fragmentVerificationResult  `json:"fragmentVerificationResults,omitempty"`
 	Provider                     Provider                      `json:"provider"`
-	AuthenticSource              Provider                      `json:"authenticSource"`
+	AuthenticSource              *Provider                     `json:"authenticSource,omitempty"`
 }
 
 type retrieveRequest struct {
@@ -118,7 +156,7 @@ type retrieveRequest struct {
 type retrieveResponse struct {
 	Attributes      []attribute `json:"attributes"`
 	Provider        Provider    `json:"provider"`
-	AuthenticSource Provider    `json:"authenticSource"`
+	AuthenticSource *Provider   `json:"authenticSource,omitempty"`
 }
 
 // --- authentication --------------------------------------------------------------
@@ -129,7 +167,7 @@ type handlerWithSubject func(w http.ResponseWriter, r *http.Request, bsn string)
 // else; the BSN of the user comes from the token.
 func (h *handler) authenticated(operation string, next handlerWithSubject) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		bsn, failure := h.cfg.Tokens.Authenticate(r.Context(), accesstoken.Request{
+		bsn, failure := h.ds.Tokens.Authenticate(r.Context(), accesstoken.Request{
 			Method:        r.Method,
 			Path:          r.URL.Path,
 			Authorization: r.Header.Get("Authorization"),
@@ -192,12 +230,12 @@ func (h *handler) verify(w http.ResponseWriter, r *http.Request, bsn string) {
 	for _, f := range req.AttributeFragments {
 		in.Fragments = append(in.Fragments, verification.Fragment{Identifier: f.AttributeIdentifier, Location: f.Location, Value: f.Value})
 	}
-	result, err := h.cfg.Verification.Verify(r.Context(), bsn, in)
+	result, err := h.ds.Verification.Verify(r.Context(), bsn, in)
 	if err != nil {
 		writeUseCaseError(w, err)
 		return
 	}
-	resp := verifyResponse{Provider: h.cfg.Provider, AuthenticSource: h.cfg.AuthenticSource}
+	resp := verifyResponse{Provider: h.ds.Provider, AuthenticSource: h.ds.AuthenticSource}
 	for _, a := range result.Attributes {
 		resp.AttributeVerificationResults = append(resp.AttributeVerificationResults, attributeVerificationResult{
 			AttributeIdentifier: a.Identifier, AttributeVerificationResult: a.Result,
@@ -223,12 +261,12 @@ func (h *handler) retrieve(w http.ResponseWriter, r *http.Request, bsn string) {
 	for _, a := range req.AttributeIdentifiers {
 		ids = append(ids, a.AttributeIdentifier)
 	}
-	attrs, err := h.cfg.Verification.Retrieve(r.Context(), bsn, ids, hasMandate(req.Mandate))
+	attrs, err := h.ds.Verification.Retrieve(r.Context(), bsn, ids, hasMandate(req.Mandate))
 	if err != nil {
 		writeUseCaseError(w, err)
 		return
 	}
-	resp := retrieveResponse{Attributes: []attribute{}, Provider: h.cfg.Provider, AuthenticSource: h.cfg.AuthenticSource}
+	resp := retrieveResponse{Attributes: []attribute{}, Provider: h.ds.Provider, AuthenticSource: h.ds.AuthenticSource}
 	for _, a := range attrs {
 		resp.Attributes = append(resp.Attributes, attribute{AttributeIdentifier: a.Identifier, AttributeValue: a.Value})
 	}
@@ -284,7 +322,7 @@ func (h *handler) writeSealed(w http.ResponseWriter, v any) {
 		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "could not encode the response")
 		return
 	}
-	sig, err := h.cfg.Sealer.Seal(body)
+	sig, err := h.sealer.Seal(body)
 	if err != nil {
 		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "could not seal the response")
 		return

@@ -56,17 +56,19 @@ type chooserPerson struct {
 }
 
 // operationText describes the requested operations to the user.
-func operationText(scope string) string {
+// operationText names what the client asks, and at which authentic source:
+// an authorization is for one data service.
+func operationText(scope, source string) string {
 	var parts []string
 	for _, sc := range strings.Fields(scope) {
 		switch sc {
 		case "verify":
-			parts = append(parts, "gegevens van u te laten verifiëren bij de authentieke bron")
+			parts = append(parts, "gegevens van u te laten verifiëren")
 		case "retrieve":
-			parts = append(parts, "gegevens van u op te halen bij de authentieke bron")
+			parts = append(parts, "gegevens van u op te halen")
 		}
 	}
-	return strings.Join(parts, " en ")
+	return strings.Join(parts, " en ") + " bij " + source
 }
 
 // writePage sends a page that must not be cached or framed.
@@ -97,7 +99,7 @@ func writeChooser(w http.ResponseWriter, tx *authorization.Transaction, secure b
 	})
 	writePage(w, http.StatusOK, chooserPage, map[string]any{
 		"ClientID":      tx.ClientID,
-		"Operation":     operationText(tx.Scope),
+		"Operation":     operationText(tx.Scope, tx.Source),
 		"Action":        DecisionPath,
 		"TransactionID": tx.ID,
 		"Persons":       persons,

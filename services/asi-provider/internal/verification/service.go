@@ -121,8 +121,7 @@ func (s *Service) Verify(ctx context.Context, bsn string, req VerifyRequest) (Ve
 }
 
 // Retrieve returns the stored values of the requested attributes for the
-// person with bsn. An attribute this source is not the authentic source for,
-// or holds no value for, is left out.
+// person with bsn. An attribute the source holds no value for is left out.
 func (s *Service) Retrieve(ctx context.Context, bsn string, identifiers []string, mandate bool) ([]Attribute, error) {
 	if len(identifiers) == 0 {
 		return nil, &MalformedError{Reason: "attributeIdentifiers must contain at least one attribute"}
@@ -135,9 +134,6 @@ func (s *Service) Retrieve(ctx context.Context, bsn string, identifiers []string
 		entry, ok := s.catalogue.lookup(id)
 		if !ok {
 			return nil, &UnknownAttributeError{Identifier: id}
-		}
-		if !entry.Ours {
-			continue
 		}
 		raw, ok, err := s.source.Value(ctx, bsn, entry.Name)
 		if err != nil {
@@ -187,16 +183,11 @@ func (s *Service) verifyFragment(ctx context.Context, bsn string, f Fragment) (s
 	return compareValues(value, selected), nil
 }
 
-// heldValue returns the decoded value the source holds, and false when there
-// is no authentic source data for it: the attribute is not ours, or the source
-// holds no value for this person. Both yield Unknown
-// (ETSI TS 119 478 REQ-ASIP-6.1.1.2-04). An attribute that is not ours is not
-// asked of the source.
+// heldValue returns the decoded value the source holds, and false when the
+// source holds no value for this person: Unknown (ETSI TS 119 478
+// REQ-ASIP-6.1.1.2-04). Verify has checked that id is in the catalogue.
 func (s *Service) heldValue(ctx context.Context, bsn, id string) (any, bool, error) {
 	entry, _ := s.catalogue.lookup(id)
-	if !entry.Ours {
-		return nil, false, nil
-	}
 	raw, ok, err := s.source.Value(ctx, bsn, entry.Name)
 	if err != nil || !ok {
 		return nil, false, err

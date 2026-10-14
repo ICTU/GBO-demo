@@ -1,8 +1,8 @@
 {
   "servers": [
     {
-      "url": "http://localhost:4020/authsrc-api",
-      "description": "GBO demo ASIP mock. Port and base path fill in the server template of ETSI TS 119 478 Annex B; the base path is the ETSI default."
+      "url": "http://localhost:4020/brp/authsrc-api",
+      "description": "One data service of the GBO demo ASIP mock: /<data service>/authsrc-api, one per authentic source. Port and base path fill in the server template of ETSI TS 119 478 Annex B; the base path is the ETSI default."
     }
   ],
   "components": {

@@ -26,17 +26,26 @@ func (f *fakeSource) Value(_ context.Context, bsn, name string) (json.RawMessage
 
 const (
 	bsn          = "999991772"
-	idFamilyName = attributeBase + "family_name/1"
-	idAddress    = attributeBase + "address/1"
-	idDiploma    = attributeBase + "education_qualification/1"
-	idNotInCat   = attributeBase + "shoe_size/1"
+	attributes   = "https://gbo.example/attributes/"
+	idFamilyName = attributes + "family_name/1"
+	idGivenName  = attributes + "given_name/1"
+	idAddress    = attributes + "address/1"
+	idDiploma    = attributes + "education_qualification/1"
+	idNotInCat   = attributes + "shoe_size/1"
 )
+
+// catalogue is the BRP's: the diploma is another source's.
+var catalogue = Catalogue{
+	idFamilyName: {Name: "family_name"},
+	idGivenName:  {Name: "given_name"},
+	idAddress:    {Name: "address"},
+}
 
 func newTestService() *Service {
 	return NewService(&fakeSource{values: map[string]map[string]string{bsn: {
 		"family_name": `{"family_name":"Jansen"}`,
 		"address":     `{"city":"Rotterdam"}`,
-	}}}, DefaultCatalogue())
+	}}}, catalogue)
 }
 
 func verifyOne(t *testing.T, s *Service, id, value string) string {
@@ -54,8 +63,7 @@ func TestVerifyResults(t *testing.T) {
 		{"equal", idFamilyName, `{"family_name":"Jansen"}`, ResultMatch},
 		{"documented variation", idFamilyName, `{"family_name":" JANSEN "}`, ResultVariation},
 		{"different", idFamilyName, `{"family_name":"Bakker"}`, ResultNoMatch},
-		{"no value for this person", attributeBase + "given_name/1", `{"given_name":"Frouke"}`, ResultUnknown},
-		{"not the authentic source", idDiploma, `{"qualification":"MSc"}`, ResultUnknown},
+		{"no value for this person", idGivenName, `{"given_name":"Frouke"}`, ResultUnknown},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := verifyOne(t, s, tc.id, tc.value); got != tc.want {
@@ -93,7 +101,7 @@ func TestVerifyErrors(t *testing.T) {
 
 func TestRetrieve(t *testing.T) {
 	s := newTestService()
-	attrs, err := s.Retrieve(context.Background(), bsn, []string{idFamilyName, idDiploma, attributeBase + "given_name/1"}, false)
+	attrs, err := s.Retrieve(context.Background(), bsn, []string{idFamilyName, idGivenName}, false)
 	if err != nil || len(attrs) != 1 || attrs[0].Identifier != idFamilyName || string(attrs[0].Value) != `{"family_name":"Jansen"}` {
 		t.Fatalf("Retrieve = %+v, %v; want only the family name", attrs, err)
 	}
@@ -110,15 +118,17 @@ func TestRetrieve(t *testing.T) {
 	}
 }
 
-// The diploma is not ours: the source is not asked, and the answer is Unknown.
-func TestNotOursIsNotAskedOfTheSource(t *testing.T) {
+// An attribute of another source is not in this catalogue: 404, and the
+// source is not asked.
+func TestAnotherSourcesAttributeIsUnknownHere(t *testing.T) {
 	src := &fakeSource{}
-	s := NewService(src, DefaultCatalogue())
-	if got := verifyOne(t, s, idDiploma, `{"qualification":"MSc"}`); got != ResultUnknown {
-		t.Fatalf("result = %s, want Unknown", got)
+	s := NewService(src, catalogue)
+	var unknown *UnknownAttributeError
+	if _, err := s.Verify(context.Background(), bsn, VerifyRequest{Attributes: []Attribute{{Identifier: idDiploma, Value: json.RawMessage(`{"qualification":"MSc"}`)}}}); !errors.As(err, &unknown) {
+		t.Fatalf("Verify: err = %v, want UnknownAttributeError", err)
 	}
-	if _, err := s.Retrieve(context.Background(), bsn, []string{idDiploma}, false); err != nil {
-		t.Fatalf("Retrieve: %v", err)
+	if _, err := s.Retrieve(context.Background(), bsn, []string{idDiploma}, false); !errors.As(err, &unknown) {
+		t.Fatalf("Retrieve: err = %v, want UnknownAttributeError", err)
 	}
 	if len(src.asked) != 0 {
 		t.Fatalf("source asked for %v, want nothing", src.asked)
@@ -129,7 +139,7 @@ func TestNotOursIsNotAskedOfTheSource(t *testing.T) {
 func TestSourceErrorIsNotUnknown(t *testing.T) {
 	failure := errors.New("refused")
 	for _, err := range []error{ErrSourceUnavailable, failure} {
-		s := NewService(&fakeSource{err: err}, DefaultCatalogue())
+		s := NewService(&fakeSource{err: err}, catalogue)
 		ctx := context.Background()
 		if _, got := s.Verify(ctx, bsn, VerifyRequest{Attributes: []Attribute{{Identifier: idFamilyName, Value: json.RawMessage(`{"family_name":"Jansen"}`)}}}); !errors.Is(got, err) {
 			t.Fatalf("Verify attribute: err = %v, want %v", got, err)

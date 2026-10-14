@@ -79,11 +79,23 @@ func newTestServerWithSource(t *testing.T, authz *testAuthorizationServer, qtsp 
 	pool.AddCert(caCert)
 
 	handler, err := NewHandler(Config{
-		Verification:    verification.NewService(source, verification.DefaultCatalogue()),
-		Sealer:          seal.New(sealKey, []*x509.Certificate{sealCert, caCert}),
-		Tokens:          accesstoken.NewValidator(testIssuer, testPublicURL+BasePath, testPublicURL, keys),
-		Provider:        Provider{LegalName: "GBO demo ASIP (test)"},
-		AuthenticSource: Provider{LegalName: "Basisregistratie Personen (mock)"},
+		PublicURL: testPublicURL,
+		Issuer:    testIssuer,
+		Sealer:    seal.New(sealKey, []*x509.Certificate{sealCert, caCert}),
+		DataServices: []DataService{{
+			ID:              "brp",
+			Verification:    verification.NewService(source, brpCatalogue),
+			Tokens:          accesstoken.NewValidator(testIssuer, testPublicURL+testBase, testPublicURL, keys),
+			Provider:        Provider{LegalName: "GBO demo ASIP (test)"},
+			AuthenticSource: &Provider{LegalName: "Basisregistratie Personen (mock)"},
+		}, {
+			// A second data service whose source is the ASIP itself: its
+			// responses name no authentic source.
+			ID:           "duo",
+			Verification: verification.NewService(diplomas, duoCatalogue),
+			Tokens:       accesstoken.NewValidator(testIssuer, testPublicURL+duoBase, testPublicURL, keys),
+			Provider:     Provider{LegalName: "DUO (test)"},
+		}},
 	})
 	if err != nil {
 		t.Fatalf("new server: %v", err)
@@ -134,10 +146,12 @@ func TestVerifyUnknownWhenSourceHoldsNoValue(t *testing.T) { // case 4
 	assertResult(t, res, idAddress, resultUnknown)
 }
 
-func TestVerifyUnknownWhenNotTheAuthenticSource(t *testing.T) { // case 5
+// The diploma is another data service's: 404 here (case 5, since the data
+// services; B5).
+func TestVerifyAnotherDataServicesAttributeIs404(t *testing.T) { // case 5
 	env := newTestServer(t)
-	res := verifyAttribute(t, env, env.person(bsnFrouke), idDiploma, `{"qualification":"MSc"}`)
-	assertResult(t, res, idDiploma, resultUnknown)
+	rec := post(t, env, "/verify", env.person(bsnFrouke), verifyBody(idDiploma, `{"qualification":"MSc"}`))
+	assertProblem(t, rec, http.StatusNotFound)
 }
 
 func TestVerifyUnknownAttributeIdentifierIs404(t *testing.T) { // case 6
@@ -309,11 +323,17 @@ func verifyAttribute(t *testing.T, env testEnv, auth authFunc, id, value string)
 }
 
 // post sends a request to an operation of the contract (path without the
-// base path) with the credentials auth adds, and checks that the response
-// conforms to the published contract.
+// base path) of the BRP data service with the credentials auth adds, and
+// checks that the response conforms to the published contract.
 func post(t *testing.T, env testEnv, path string, auth authFunc, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, BasePath+path, strings.NewReader(body))
+	return postTo(t, env, testBase, path, auth, body)
+}
+
+// postTo is post to the data service with base path base.
+func postTo(t *testing.T, env testEnv, base, path string, auth authFunc, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, base+path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	if auth != nil {
 		auth(t, req)

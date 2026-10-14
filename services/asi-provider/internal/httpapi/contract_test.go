@@ -66,14 +66,52 @@ func assertConformsToContract(t *testing.T, req *http.Request, reqBody string, r
 func TestPublishedContract(t *testing.T) {
 	env := newTestServer(t)
 	rec := httptest.NewRecorder()
-	env.handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/openapi.json", nil))
+	env.handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/brp/openapi.json", nil))
 	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /openapi.json: status = %d", rec.Code)
+		t.Fatalf("GET /brp/openapi.json: status = %d", rec.Code)
+	}
+	var served struct {
+		Servers []struct {
+			URL string `json:"url"`
+		} `json:"servers"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &served); err != nil || len(served.Servers) != 1 || served.Servers[0].URL != testPublicURL+testBase {
+		t.Errorf("servers = %+v, want the data service %s", served.Servers, testPublicURL+testBase)
+	}
+	// The OAuth endpoints are the configured issuer's, nowhere localhost.
+	var oauth struct {
+		Components struct {
+			SecuritySchemes struct {
+				OAuth2 struct {
+					Description string `json:"description"`
+					Flows       struct {
+						AuthorizationCode struct {
+							AuthorizationURL string `json:"authorizationUrl"`
+							TokenURL         string `json:"tokenUrl"`
+						} `json:"authorizationCode"`
+					} `json:"flows"`
+				} `json:"oauth2"`
+			} `json:"securitySchemes"`
+		} `json:"components"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &oauth)
+	o := oauth.Components.SecuritySchemes.OAuth2
+	if o.Flows.AuthorizationCode.AuthorizationURL != testIssuer+"/authorize" || o.Flows.AuthorizationCode.TokenURL != testIssuer+"/token" ||
+		!strings.Contains(o.Description, testIssuer+"/.well-known/oauth-authorization-server") {
+		t.Errorf("oauth2 = %+v, want the endpoints of %s", o, testIssuer)
+	}
+	if strings.Contains(rec.Body.String(), completionsIssuer) {
+		t.Errorf("the published contract still names %s", completionsIssuer)
+	}
+	// B7: no contract outside a data service, none for an unknown one.
+	for _, path := range []string{"/openapi.json", "/nope/openapi.json"} {
+		r := httptest.NewRecorder()
+		env.handler.ServeHTTP(r, httptest.NewRequest(http.MethodGet, path, nil))
+		if r.Code != http.StatusNotFound {
+			t.Errorf("GET %s: status = %d, want 404", path, r.Code)
+		}
 	}
 	doc := loadContract(t)
-	if got := doc.Servers[0].URL; got != "http://localhost:4020"+BasePath {
-		t.Errorf("server = %s", got)
-	}
 	if s := doc.Components.SecuritySchemes["oauth2"]; s == nil || s.Value.Flows == nil || s.Value.Flows.AuthorizationCode == nil {
 		t.Errorf("contract has no oauth2 security scheme with the authorization code flow")
 	}
@@ -101,7 +139,7 @@ func TestPublishedContract(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	env.handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/"+dataserviceFileName, nil))
+	env.handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/brp/"+dataserviceFileName, nil))
 	if rec.Code != http.StatusOK || !json.Valid(rec.Body.Bytes()) {
 		t.Fatalf("GET /%s: status = %d", dataserviceFileName, rec.Code)
 	}

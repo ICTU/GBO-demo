@@ -49,10 +49,12 @@ type Identifier interface {
 // Transaction is a valid authorization request waiting for the user. Binding
 // is a secret the browser keeps (a cookie); the decision must present it.
 type Transaction struct {
-	ID          string
-	Binding     string
-	ClientID    string
-	Scope       string
+	ID       string
+	Binding  string
+	ClientID string
+	Scope    string
+	// Source is the name of the data service the authorization is for.
+	Source      string
 	Persons     []TestPerson
 	Preselected string
 }

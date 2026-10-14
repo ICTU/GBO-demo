@@ -2,8 +2,10 @@
 // after ETSI TS 119 478 V1.1.1 clause 6.1: a QTSP verifies whether an
 // attribute it holds matches the authentic source.
 //
-// /verify and /retrieve answer against the BRP, asked over FSC through the
-// ASIP's own Outway, and every result is sealed. Every request carries a DPoP-bound access token from the
+// The ASIP serves a data service per authentic source, configured in
+// ASIP_DATASERVICES_FILE, under /<data service>/authsrc-api. /verify and
+// /retrieve answer against that source, asked over FSC through the ASIP's own
+// Outway, and every result is sealed. Every request carries a DPoP-bound access token from the
 // authorization server (services/asi-authorization-server, clause 6.1.3);
 // the user's BSN comes from that token.
 //
@@ -29,6 +31,7 @@ import (
 	"gbo-demo/asi-provider/internal/accesstoken"
 	"gbo-demo/asi-provider/internal/asmetadata"
 	"gbo-demo/asi-provider/internal/brpsource"
+	"gbo-demo/asi-provider/internal/dataservice"
 	"gbo-demo/asi-provider/internal/httpapi"
 	"gbo-demo/asi-provider/internal/seal"
 	"gbo-demo/asi-provider/internal/sealcert"
@@ -58,9 +61,12 @@ func main() {
 func serve() error {
 	outway := os.Getenv("ASIP_OUTWAY_URL")
 	if outway == "" {
-		return errors.New("ASIP_OUTWAY_URL is required: the ASIP's FSC Outway, through which it asks the BRP")
+		return errors.New("ASIP_OUTWAY_URL is required: the ASIP's FSC Outway, through which it asks the authentic sources")
 	}
-	source := brpsource.New(outway, env("ASIP_OUTWAY_PATH", "/brp/graphql"))
+	services, err := dataservice.Load(env("ASIP_DATASERVICES_FILE", "config/dataservices.json"), adapterAttributes)
+	if err != nil {
+		return err
+	}
 	key, chain, err := seal.LoadMaterial(os.Getenv("ASIP_SEAL_KEY_FILE"), os.Getenv("ASIP_SEAL_CERT_FILE"))
 	if err != nil {
 		return err
@@ -70,21 +76,33 @@ func serve() error {
 	// The address the ASIP reaches the authorization server on, when it
 	// differs from the issuer (compose: the issuer is a host address).
 	issuerInternal := os.Getenv("ASIP_AUTHORIZATION_SERVER_INTERNAL_URL")
-	resource := publicURL + httpapi.BasePath
-	handler, err := httpapi.NewHandler(httpapi.Config{
-		Verification:    verification.NewService(source, verification.DefaultCatalogue()),
-		Tokens:          accesstoken.NewValidator(issuer, resource, publicURL, asmetadata.New(issuer, issuerInternal)),
-		Sealer:          seal.New(key, chain),
-		Provider:        httpapi.Provider{LegalName: env("ASIP_PROVIDER_NAME", "GBO demo ASIP")},
-		AuthenticSource: httpapi.Provider{LegalName: env("ASIP_AUTHENTIC_SOURCE_NAME", "Basisregistratie Personen (mock)")},
-	})
+	keys := asmetadata.New(issuer, issuerInternal)
+	var dataServices []httpapi.DataService
+	for _, ds := range services {
+		catalogue := verification.Catalogue{}
+		for id, name := range ds.Attributes {
+			catalogue[id] = verification.Entry{Name: name}
+		}
+		var authenticSource *httpapi.Provider
+		if ds.AuthenticSource != "" {
+			authenticSource = &httpapi.Provider{LegalName: ds.AuthenticSource}
+		}
+		dataServices = append(dataServices, httpapi.DataService{
+			ID:              ds.ID,
+			Verification:    verification.NewService(newAdapter(ds.Source, outway, ds.GrantPath), catalogue),
+			Tokens:          accesstoken.NewValidator(issuer, publicURL+httpapi.BasePathOf(ds.ID), publicURL, keys),
+			Provider:        httpapi.Provider{LegalName: ds.Provider},
+			AuthenticSource: authenticSource,
+		})
+	}
+	handler, err := httpapi.NewHandler(httpapi.Config{PublicURL: publicURL, Issuer: issuer, Sealer: seal.New(key, chain), DataServices: dataServices})
 	if err != nil {
 		return err
 	}
 	srv := &http.Server{Addr: env("ASIP_ADDR", ":4020"), Handler: handler, ReadHeaderTimeout: readHeaderTimeout}
 	errc := make(chan error, 1)
 	go func() {
-		slog.Info("listening", "addr", srv.Addr, "resource", resource, "authorization_server", issuer, "outway", outway)
+		slog.Info("listening", "addr", srv.Addr, "public_url", publicURL, "data_services", len(dataServices), "authorization_server", issuer, "outway", outway)
 		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 			errc <- err
 		}
@@ -103,6 +121,20 @@ func serve() error {
 		slog.Warn("graceful shutdown did not finish", "err", err)
 	}
 	return nil
+}
+
+// adapterAttributes lists per source adapter the attributes it can ask for;
+// the data services file may name only these.
+var adapterAttributes = map[string][]string{"brp": brpsource.Attributes()}
+
+// newAdapter returns the adapter that asks an authentic source through the
+// Outway. dataservice.Load has checked the name.
+func newAdapter(name, outway, grantPath string) verification.Source {
+	switch name {
+	case "brp":
+		return brpsource.New(outway, grantPath)
+	}
+	panic("no adapter " + name)
 }
 
 func env(name, fallback string) string {

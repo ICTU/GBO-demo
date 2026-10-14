@@ -130,7 +130,7 @@ func TestInvalidDPoPProofIs401(t *testing.T) { // case 12-15
 			req.Header.Set("Authorization", "DPoP "+token)
 			req.Header.Set("DPoP", otherQTSP.proof(t, req.Method, testPublicURL+req.URL.Path, token, nil))
 		},
-		"13: proof for another URL":     env.presenting(claims, func(p map[string]any) { p["htu"] = testPublicURL + BasePath + "/retrieve" }),
+		"13: proof for another URL":     env.presenting(claims, func(p map[string]any) { p["htu"] = testPublicURL + testBase + "/retrieve" }),
 		"13b: proof for another method": env.presenting(claims, func(p map[string]any) { p["htm"] = http.MethodGet }),
 		"14: ath of another token":      env.presenting(claims, func(p map[string]any) { p["ath"] = accessTokenHash("another-token") }),
 		"15: proof too old":             env.presenting(claims, func(p map[string]any) { p["iat"] = ago(2 * time.Minute) }),
@@ -156,7 +156,7 @@ func TestInvalidDPoPProofIs401(t *testing.T) { // case 12-15
 func TestReplayedDPoPProofIs401(t *testing.T) { // case 16
 	env := newTestServer(t)
 	token := env.authz.sign(t, env.authz.claims(bsnFrouke, "verify", env.qtsp.jkt))
-	proof := env.qtsp.proof(t, http.MethodPost, testPublicURL+BasePath+"/verify", token, nil)
+	proof := env.qtsp.proof(t, http.MethodPost, testPublicURL+testBase+"/verify", token, nil)
 	auth := func(_ *testing.T, req *http.Request) {
 		req.Header.Set("Authorization", "DPoP "+token)
 		req.Header.Set("DPoP", proof)
@@ -260,7 +260,7 @@ func (a *testAuthorizationServer) claims(bsn, scope, jkt string) map[string]any 
 	return map[string]any{
 		"iss":                testIssuer,
 		"sub":                "opaque-per-token",
-		"aud":                testPublicURL + BasePath,
+		"aud":                testPublicURL + testBase,
 		"client_id":          "test-qtsp",
 		"iat":                now.Unix(),
 		"exp":                now.Add(10 * time.Minute).Unix(),

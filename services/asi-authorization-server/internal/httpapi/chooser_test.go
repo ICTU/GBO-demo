@@ -12,12 +12,24 @@ import (
 	"time"
 )
 
+// The user sees which authentic source the authorization is for: one data
+// service per authorization.
+func TestChooserNamesTheDataService(t *testing.T) {
+	as := newTestAS(t)
+	params := authorizeParams(newPKCE())
+	params.Set("resource", testResource2)
+	tx := as.startAuthorization(t, params)
+	if !strings.Contains(tx.page, "bij DUO (test)") || strings.Contains(tx.page, "Basisregistratie Personen") {
+		t.Errorf("chooser for the second data service does not name it alone:\n%s", tx.page)
+	}
+}
+
 func TestChooserPage(t *testing.T) { // S1
 	as := newTestAS(t)
 	params := authorizeParams(newPKCE())
 	params.Del("login_hint")
 	tx := as.startAuthorization(t, params)
-	for _, want := range []string{"Testomgeving — geen echte identificatie", "Frouke Jansen", "Tom Willems", testClientID, "laten verifiëren", `value="approve"`, `value="deny"`} {
+	for _, want := range []string{"Testomgeving — geen echte identificatie", "Frouke Jansen", "Tom Willems", testClientID, "laten verifiëren bij Basisregistratie Personen (test)", `value="approve"`, `value="deny"`} {
 		if !strings.Contains(tx.page, want) {
 			t.Errorf("chooser lacks %q", want)
 		}

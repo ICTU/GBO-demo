@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -38,6 +39,17 @@ var selections = map[string]string{
 	"birth_date":  "geboortedatum",
 	"nationality": "heeftNationaliteit { nationaliteit }",
 	"address":     "... on Ingezetene { woontOp { straatnaam huisnummer huisletter huisnummertoevoeging postcode woonplaatsnaam } }",
+}
+
+// Attributes returns the names of the attributes this adapter can ask the
+// BRP for.
+func Attributes() []string {
+	names := make([]string, 0, len(selections))
+	for name := range selections {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
 }
 
 // Source asks the BRP through the Outway.

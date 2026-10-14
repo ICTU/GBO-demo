@@ -9,7 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ### Added
 - **ASIP mock (ETSI TS 119 478).** A mock Authentic Source Interface
   Provider for qualified trust service providers (epic #336).
-  - `asi-provider` (port 4020): `POST /authsrc-api/verify` and `/retrieve`
+  - `asi-provider` (port 4020): `POST /<data service>/authsrc-api/verify` and `/retrieve`
     (clause 6.1.1 and 6.1.2) against the BRP, with the results
     `Match`, `NoMatch`, `MatchWithVariation` and `Unknown`. Every result is
     sealed with a detached JWS in `X-JWS-Signature`; the seal certificate
@@ -36,6 +36,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     birth, nationality, a resident's address); rule `ASI0001` grants the
     ASIP those fields, on `brp` only. A source that cannot be reached is 503,
     a refusal in the chain 500 (#525).
+  - One ASIP for several authentic sources: a data service per source under
+    `/<data service>/authsrc-api` (`config/dataservices.json`), each with its
+    own contract, catalogue, `authenticSource` and token audience. The
+    authorization server accepts one data service per authorization
+    (`resource` is required, `AZSP_RESOURCES`). An attribute of another data
+    service is 404 (#525).
   - Rules name the FSC services they bind on (`services`): a field key such
     as `Query.ingeschrevenPersoon` is shared by `bri` and `brp`. EUD0001 and
     DVT0001 bind on `bri`, EUD0002 on `brp`, LVG0001 on `lvg`; a policy test
