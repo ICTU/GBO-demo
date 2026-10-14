@@ -34,11 +34,11 @@ var resultPage = template.Must(template.New("result").Parse(`<!doctype html>
 ` + banner + `
 <h1>Resultaat</h1>
 <p>Dataservice <code>{{.DataService}}</code>{{if .Provider}} van {{.Provider}}{{end}}{{if .Source}}, bron {{.Source}}{{end}}.</p>
-{{if .Problem}}<p class="bad">De ASIP gaf status {{.Status}}: {{.Problem}}</p>
-{{else if .SealError}}<p class="bad"><strong>Zegel ongeldig — resultaat niet geaccepteerd.</strong> {{.SealError}}</p>
-{{else}}<p class="ok">Zegel geldig, verzegeld door {{.Signer}}.</p>
+{{if .Problem}}<p class="bad">De ASIP gaf status {{.ASIPStatus}}: {{.Problem}}</p>
+{{else if not .Seal.Valid}}<p class="bad"><strong>Zegel ongeldig — resultaat niet geaccepteerd.</strong> {{.Seal.Error}}</p>
+{{else}}<p class="ok">Zegel geldig, verzegeld door {{.Seal.Signer}}.</p>
 <table><tr><th>Attribuut</th><th>{{if eq .Operation "verify"}}Uitkomst{{else}}Waarde{{end}}</th></tr>
-{{range .Rows}}<tr><td>{{.Label}}</td><td>{{.Result}}</td></tr>
+{{range .Results}}<tr><td>{{.Label}}</td><td>{{.Display}}</td></tr>
 {{end}}</table>{{end}}
 <p><a href="/">Nieuwe aanvraag</a></p>
 </body></html>

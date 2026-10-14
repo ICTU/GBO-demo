@@ -11,11 +11,22 @@ It discovers its way rather than being configured with URLs:
 3. **Register** (RFC 7591) with a software statement sealed with the QTSP certificate, carrying its `registryURI`. This happens once per authorization server; the web side does it at start.
 4. **Authorize**: the authorization code flow with PKCE S256, `state`, the operation as scope, and `resource` = the record's `endpointURI`.
 5. **Token**: `private_key_jwt` with the certificate key, and a DPoP proof. The token is DPoP-bound.
-6. **Verify or retrieve** with the token and a DPoP proof. A 200 is accepted only with a valid **seal**: the detached JWS in `X-JWS-Signature` over the exact body, whose certificate chain leads to `QTSP_SEAL_TRUST_ANCHORS`. Otherwise the result is reported as not accepted.
+6. **Verify or retrieve** with the token and a DPoP proof, in a W3C trace of its own (`traceparent`), which the ASIP's spans join. A 200 is accepted only with a valid **seal**: the detached JWS in `X-JWS-Signature` over the exact body, whose certificate chain leads to `QTSP_SEAL_TRUST_ANCHORS`. Otherwise the result is reported as not accepted.
 
 ## Web
 
 `GET /` shows a form: verify or retrieve, and the five BRP attributes of the demo with the values of test person Frouke Jansen as examples. `POST /start` plans, registers if needed, and sends the browser to the authorization server. It keeps `state` and the PKCE verifier in a session behind an HttpOnly, SameSite=Lax cookie (in memory, 10 minutes). `GET /callback` checks the session and `state`, takes the token, asks the ASIP, and shows the result per attribute with the seal check. A denial shows "Geweigerd"; a callback without a matching session or `state` is refused before any token request.
+
+### Request API
+
+The developer portal lays a request down here and follows it, while the user still goes through the QTSP:
+
+- `GET /api/attributes`: the attributes the form offers, with an example value.
+- `POST /api/requests` with `{"operation":"verify","attributes":[{"identifier":"…","value":{…}}]}` (for `retrieve`, without values). The QTSP checks the request, finds the data service and registers, as the form does, and answers 201 with an `id` and a `start_url`. A request it does not start gets an RFC 9457 problem with the reason: 400 for an invalid request, 422 when no data service provides the attributes, 502 when discovery or registration fails.
+- `start_url` (`/requests/{id}/start`) sends the browser to the authorization server. It carries only the id, so no value appears in a URL, and it works once (410 after that). The user returns to the result page.
+- `GET /api/requests/{id}`: `pending` until the user returns, then `done` (the result per attribute, the seal check, and `trace_id`: the trace of the call at the ASIP), `denied` (the OAuth error) or `failed` (an error answer of the ASIP, or no token).
+
+A request and its outcome can be fetched for 10 minutes; then it is gone (404). The API has no access control, like the other mocks of the demo: anyone who can reach the port can lay a request down.
 
 The authorization server allows an http redirect URI on a loopback address only, so the web side works with the browser on the same machine (`http://localhost:9427`).
 
@@ -66,8 +77,8 @@ If the authorization server refuses the registration (for example, no `QEAA_Prov
 | `internal/seal` | validation of the seal on a result |
 | `internal/harness` | the test harness at the chooser |
 | `internal/cli` | the CLI: options, one run, the report |
-| `internal/web` | the web side |
+| `internal/web` | the web side and the request API |
 | `internal/urlmap` | the transport map from public to internal URLs |
 | `main.go` | composition root |
 
-`e2e_test.go` builds the authorization server, the ASIP and the DIP stub and starts them, with a fake Outway in front of the BRP. Through them it runs every verification result, the error answers 400, 401, 404 and 501, retrieve, a seal from another anchor, a refused registration, a denial, and the web side from form to result.
+`e2e_test.go` builds the authorization server, the ASIP and the DIP stub and starts them, with a fake Outway in front of the BRP. Through them it runs every verification result, the error answers 400, 401, 404 and 501, retrieve, a seal from another anchor, a refused registration, a denial, the web side from form to result, and the request API (`api_e2e_test.go`).
