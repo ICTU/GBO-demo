@@ -18,12 +18,17 @@ type fakeSource struct {
 	err     error
 }
 
-func (f fakeSource) Value(_ context.Context, bsn, name string) (json.RawMessage, bool, error) {
+func (f fakeSource) Values(_ context.Context, bsn string, names []string) (map[string]json.RawMessage, error) {
 	if f.err != nil {
-		return nil, false, f.err
+		return nil, f.err
 	}
-	v, ok := f.persons[bsn][name]
-	return json.RawMessage(v), ok, nil
+	out := map[string]json.RawMessage{}
+	for _, name := range names {
+		if v, ok := f.persons[bsn][name]; ok {
+			out[name] = json.RawMessage(v)
+		}
+	}
+	return out, nil
 }
 
 const (

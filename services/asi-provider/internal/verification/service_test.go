@@ -4,24 +4,30 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 )
 
 // fakeSource is an in-memory source: BSN -> attribute name -> value. With
-// err set it fails every call; asked records the names it was asked for.
+// err set it fails every call; calls records the names of each call.
 type fakeSource struct {
 	values map[string]map[string]string
 	err    error
-	asked  []string
+	calls  [][]string
 }
 
-func (f *fakeSource) Value(_ context.Context, bsn, name string) (json.RawMessage, bool, error) {
-	f.asked = append(f.asked, name)
+func (f *fakeSource) Values(_ context.Context, bsn string, names []string) (map[string]json.RawMessage, error) {
+	f.calls = append(f.calls, names)
 	if f.err != nil {
-		return nil, false, f.err
+		return nil, f.err
 	}
-	v, ok := f.values[bsn][name]
-	return json.RawMessage(v), ok, nil
+	out := map[string]json.RawMessage{}
+	for _, name := range names {
+		if v, ok := f.values[bsn][name]; ok {
+			out[name] = json.RawMessage(v)
+		}
+	}
+	return out, nil
 }
 
 const (
@@ -130,8 +136,59 @@ func TestAnotherSourcesAttributeIsUnknownHere(t *testing.T) {
 	if _, err := s.Retrieve(context.Background(), bsn, []string{idDiploma}, false); !errors.As(err, &unknown) {
 		t.Fatalf("Retrieve: err = %v, want UnknownAttributeError", err)
 	}
-	if len(src.asked) != 0 {
-		t.Fatalf("source asked for %v, want nothing", src.asked)
+	if len(src.calls) != 0 {
+		t.Fatalf("source asked for %v, want nothing", src.calls)
+	}
+}
+
+// One request asks the source once, for the attributes of its attributes
+// and fragments together, each name once (Q1, Q4, Q5).
+func TestOneQuestionToTheSourcePerRequest(t *testing.T) {
+	src := &fakeSource{values: map[string]map[string]string{bsn: {
+		"family_name": `{"family_name":"Jansen"}`,
+		"address":     `{"city":"Rotterdam"}`,
+	}}}
+	s := NewService(src, catalogue)
+	res, err := s.Verify(context.Background(), bsn, VerifyRequest{
+		Attributes: []Attribute{
+			{Identifier: idFamilyName, Value: json.RawMessage(`{"family_name":"Jansen"}`)},
+			{Identifier: idGivenName, Value: json.RawMessage(`{"given_name":"Frouke"}`)},
+			{Identifier: idAddress, Value: json.RawMessage(`{"city":"Rotterdam"}`)},
+		},
+		Fragments: []Fragment{{Identifier: idAddress, Location: "$.city", Value: json.RawMessage(`{"city":"Rotterdam"}`)}},
+	})
+	if err != nil || len(src.calls) != 1 || !slices.Equal(src.calls[0], []string{"family_name", "given_name", "address"}) {
+		t.Fatalf("Verify = %v; calls %v, want one call for family_name, given_name and address", err, src.calls)
+	}
+	got := []string{res.Attributes[0].Result, res.Attributes[1].Result, res.Attributes[2].Result, res.Fragments[0].Result}
+	if !slices.Equal(got, []string{ResultMatch, ResultUnknown, ResultMatch, ResultMatch}) {
+		t.Fatalf("results = %v", got)
+	}
+
+	src.calls = nil
+	attrs, err := s.Retrieve(context.Background(), bsn, []string{idFamilyName, idAddress, idGivenName}, false)
+	if err != nil || len(src.calls) != 1 || len(attrs) != 2 {
+		t.Fatalf("Retrieve = %+v, %v; calls %v, want one call and two values", attrs, err, src.calls)
+	}
+}
+
+// An attribute outside the catalogue next to a valid one: 404, and the
+// source is not asked (Q7).
+func TestAnUnknownAttributeAsksNothing(t *testing.T) {
+	src := &fakeSource{}
+	s := NewService(src, catalogue)
+	var unknown *UnknownAttributeError
+	if _, err := s.Verify(context.Background(), bsn, VerifyRequest{Attributes: []Attribute{
+		{Identifier: idFamilyName, Value: json.RawMessage(`{"family_name":"Jansen"}`)},
+		{Identifier: idNotInCat, Value: json.RawMessage(`{}`)},
+	}}); !errors.As(err, &unknown) {
+		t.Fatalf("Verify: err = %v, want UnknownAttributeError", err)
+	}
+	if _, err := s.Retrieve(context.Background(), bsn, []string{idFamilyName, idNotInCat}, false); !errors.As(err, &unknown) {
+		t.Fatalf("Retrieve: err = %v, want UnknownAttributeError", err)
+	}
+	if len(src.calls) != 0 {
+		t.Fatalf("source asked for %v, want nothing", src.calls)
 	}
 }
 

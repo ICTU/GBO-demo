@@ -35,6 +35,7 @@ import (
 	"gbo-demo/asi-provider/internal/httpapi"
 	"gbo-demo/asi-provider/internal/seal"
 	"gbo-demo/asi-provider/internal/sealcert"
+	"gbo-demo/asi-provider/internal/tracing"
 	"gbo-demo/asi-provider/internal/verification"
 )
 
@@ -99,7 +100,12 @@ func serve() error {
 	if err != nil {
 		return err
 	}
-	srv := &http.Server{Addr: env("ASIP_ADDR", ":4020"), Handler: handler, ReadHeaderTimeout: readHeaderTimeout}
+	shutdownTracing, err := tracing.Init(context.Background(), env("OTEL_SERVICE_NAME", "asi-provider"))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = shutdownTracing(context.Background()) }()
+	srv := &http.Server{Addr: env("ASIP_ADDR", ":4020"), Handler: tracing.Middleware(handler, "asi-provider"), ReadHeaderTimeout: readHeaderTimeout}
 	errc := make(chan error, 1)
 	go func() {
 		slog.Info("listening", "addr", srv.Addr, "public_url", publicURL, "data_services", len(dataServices), "authorization_server", issuer, "outway", outway)

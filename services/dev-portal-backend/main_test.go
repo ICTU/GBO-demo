@@ -328,6 +328,23 @@ func TestLoadConfigAllowsKubernetesLokiSelector(t *testing.T) {
 	}
 }
 
+// The ASIP's peer is a txlog source of its own (C5).
+func TestLoadConfigReadsTheASIPPeer(t *testing.T) {
+	t.Setenv("FSC_TXLOG_ASIP_URL", "https://asip-txlog-api:9443")
+	t.Setenv("FSC_TXLOG_ASIP_CERT", "/certs/asip/internal-cert.pem")
+	t.Setenv("FSC_TXLOG_ASIP_KEY", "/certs/asip/internal-cert-key.pem")
+	t.Setenv("FSC_TXLOG_ASIP_CA", "/certs/asip/intermediate_ca.pem")
+	for _, peer := range loadConfig().FscTxlogPeers {
+		if peer.Name == "asip" {
+			if peer.URL != "https://asip-txlog-api:9443" || peer.Cert != "/certs/asip/internal-cert.pem" || peer.Key != "/certs/asip/internal-cert-key.pem" || peer.CA != "/certs/asip/intermediate_ca.pem" || !peer.SendGroupID {
+				t.Fatalf("asip peer = %+v", peer)
+			}
+			return
+		}
+	}
+	t.Fatal("no txlog source asip")
+}
+
 func TestLoadConfigSupportsProviderLogsForBothConsumerPeers(t *testing.T) {
 	t.Setenv("FSC_TXLOG_BD_HV_URL", "https://manager.example.test")
 	t.Setenv("FSC_TXLOG_BD_HV_CERT", "/certs/hv/tls.crt")

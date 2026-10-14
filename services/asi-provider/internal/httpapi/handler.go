@@ -15,6 +15,8 @@ import (
 	"net/http"
 
 	"github.com/getkin/kin-openapi/routers"
+	otelattribute "go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"gbo-demo/asi-provider/internal/accesstoken"
 	"gbo-demo/asi-provider/internal/seal"
@@ -167,6 +169,7 @@ type handlerWithSubject func(w http.ResponseWriter, r *http.Request, bsn string)
 // else; the BSN of the user comes from the token.
 func (h *handler) authenticated(operation string, next handlerWithSubject) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		trace.SpanFromContext(r.Context()).SetAttributes(otelattribute.String("gbo.asi.data_service", h.ds.ID))
 		bsn, failure := h.ds.Tokens.Authenticate(r.Context(), accesstoken.Request{
 			Method:        r.Method,
 			Path:          r.URL.Path,
