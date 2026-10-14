@@ -185,10 +185,12 @@ A qualified trust service provider (QTSP) can verify attributes of a citizen
 against the BRP through the ASIP mock of the ETSI TS 119 478 route
 (`services/asi-provider`, `services/asi-authorization-server`). The ASIP is an
 FSC consumer peer of its own (...1200). `make demo-asi` adds it to a running
-`demo-eudi` or `demo-full`; the developer portal's ASI tab watches its
-requests, a stub of the Discover Interface (`services/asi-discovery-stub`)
-finds its data services per attribute, and a reference QTSP
-(`services/qtsp-reference`, http://localhost:9427) is where a user starts. See
+`demo-eudi` or `demo-full`; a stub of the Discover Interface
+(`services/asi-discovery-stub`) finds its data services per attribute, and a
+reference QTSP (`services/qtsp-reference`, http://localhost:9427) is where a
+user starts. The developer portal's ASI tab lays a request down at that QTSP,
+with scenarios for each verification result, and shows the outcome next to
+the chain. See
 [services/asi-provider/README.md](services/asi-provider/README.md).
 
 `S01` is the architecture role identifier used in the demo diagrams for the

@@ -1,0 +1,17 @@
+{
+  "id": "asi-familienaam-match",
+  "name": "ASI · Familienaam MATCH",
+  "desc": "Een QTSP laat de familienaam van Frouke Jansen verifiëren bij de BRP-dataservice van de ASIP, met de waarde zoals de bron die heeft. Kies in de keuzepagina Frouke Jansen en geef toestemming; de ASIP antwoordt Match, verzegeld.",
+  "tab": "asi-verify",
+  "expected_outcome": "match",
+  "payload": {
+    "operation": "verify",
+    "attributes": [
+      {
+        "identifier": "https://gbo.example/attributes/family_name/1",
+        "value": "{\"family_name\":\"Jansen\"}"
+      }
+    ],
+    "person": "Frouke Jansen"
+  }
+}

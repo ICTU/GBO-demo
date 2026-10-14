@@ -1,12 +1,14 @@
 import IssuanceForm from './IssuanceForm'
 import UseForm from './UseForm'
 import EudiForm from './EudiForm'
+import AsiForm from './AsiForm'
 import HttpPreview from './HttpPreview'
 import { curlFor } from '../util/curl'
 import type {
-  Citizen, EudiPayload, HistoryRun, IssuancePayload, Organization, Tab, UsePayload,
+  AsiPayload, Citizen, EudiPayload, HistoryRun, IssuancePayload, Organization, Tab, UsePayload,
 } from '../types'
 import type { IssuanceOffer } from '../eudi'
+import type { AsiAttribute } from '../lib/asiRequest'
 
 type Props = {
   tab: Tab
@@ -25,13 +27,17 @@ type Props = {
   submitting: boolean
   eudiOffers: IssuanceOffer[]
   eudiOffersError: string
+  asiPayload: AsiPayload
+  setAsiPayload: (p: AsiPayload) => void
+  asiAttributes: AsiAttribute[]
+  asiAttributesError: string
 }
 
 export default function RequestBuilder({
   tab, setTab, issuancePayload, setIssuancePayload, usePayload, setUsePayload,
   eudiPayload, setEudiPayload,
   citizens, organizations, history, onSubmit, onSaveAsScenario, submitting,
-  eudiOffers, eudiOffersError,
+  eudiOffers, eudiOffersError, asiPayload, setAsiPayload, asiAttributes, asiAttributesError,
 }: Props) {
   const endpoint =
     tab === 'issuance'
@@ -39,7 +45,7 @@ export default function RequestBuilder({
     : tab === 'use'
       ? 'POST dienstverlener-backend /api/dvtp/query'
     : tab === 'asi-verify'
-      ? 'QTSP → POST asi-provider /<dataservice>/authsrc-api/verify'
+      ? `referentie-QTSP → POST asi-provider /<dataservice>/authsrc-api/${asiPayload.operation}`
       : 'QR-scan → wallet → eudi-issuance-server → eudi-adapter'
 
   const canSubmit =
@@ -48,21 +54,21 @@ export default function RequestBuilder({
     : tab === 'use'
       ? !!usePayload.consent_id && !!usePayload.consent_token
     : tab === 'asi-verify'
-      ? true
+      ? asiPayload.attributes.length > 0
       : !!eudiPayload.usecase
 
   const curlText =
     tab === 'eudi-issuance'
       ? '# EUDI-flow start via wallet-QR — geen curl-equivalent'
     : tab === 'asi-verify'
-      ? '# ASI-flow start bij de referentie-QTSP (discovery, registratie, keuzepagina, DPoP-token)'
+      ? '# ASI-flow: de referentie-QTSP doet discovery, registratie, de doorverwijzing naar de keuzepagina, het DPoP-token en de aanroep'
       : curlFor(tab, tab === 'issuance' ? issuancePayload : usePayload)
 
   const submitLabel =
     tab === 'eudi-issuance'
       ? (submitting ? 'Wacht op wallet…' : 'Open QR-page + start')
     : tab === 'asi-verify'
-      ? 'Start bij de QTSP'
+      ? (submitting ? 'Wacht op de burger…' : 'Aanvragen')
       : (submitting ? 'Bezig…' : 'Verzenden')
 
   return (
@@ -111,14 +117,12 @@ export default function RequestBuilder({
         )}
 
         {tab === 'asi-verify' && (
-          <p style={{ fontSize: 13, lineHeight: 1.5, margin: '0 0 12px' }}>
-            Een gekwalificeerde trust service provider (QTSP) laat attributen van een burger
-            verifiëren bij een dataservice van de ASIP (ETSI TS 119 478). <em>Start bij de QTSP</em>
-            opent de pagina van de referentie-QTSP in een nieuw tabblad en zet meekijken aan.
-            Daar kiest u de attributen en geeft u als testpersoon toestemming; het portal pikt
-            dan de <code>verify</code> of <code>retrieve</code> op, en toont de keten, het
-            FSC-transactielog en de PDP-beslissing.
-          </p>
+          <AsiForm
+            payload={asiPayload}
+            setPayload={setAsiPayload}
+            attributes={asiAttributes}
+            attributesError={asiAttributesError}
+          />
         )}
 
         <HttpPreview text={curlText} />
@@ -127,7 +131,7 @@ export default function RequestBuilder({
           <button className="btn pri" onClick={onSubmit} disabled={!canSubmit || submitting}>
             {submitLabel}
           </button>
-          <button className="btn" onClick={onSaveAsScenario} disabled={submitting || tab === 'asi-verify'}>
+          <button className="btn" onClick={onSaveAsScenario} disabled={submitting}>
             Opslaan als scenario
           </button>
         </div>

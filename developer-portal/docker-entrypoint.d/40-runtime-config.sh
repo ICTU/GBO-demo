@@ -9,11 +9,9 @@ escape_json_string() {
 escaped_eudi_public_url="$(escape_json_string "${EUDI_PUBLIC_URL:-${VITE_EUDI_PUBLIC_URL:-}}")"
 escaped_jaeger_public_url="$(escape_json_string "${JAEGER_PUBLIC_URL:-${VITE_JAEGER_PUBLIC_URL:-}}")"
 escaped_grafana_public_url="$(escape_json_string "${GRAFANA_PUBLIC_URL:-${VITE_GRAFANA_PUBLIC_URL:-}}")"
-escaped_qtsp_public_url="$(escape_json_string "${QTSP_PUBLIC_URL:-${VITE_QTSP_PUBLIC_URL:-}}")"
 
-printf 'window.__GBO_RUNTIME_CONFIG__ = {"eudiPublicUrl":"%s","jaegerPublicUrl":"%s","grafanaPublicUrl":"%s","qtspPublicUrl":"%s"};\n' \
+printf 'window.__GBO_RUNTIME_CONFIG__ = {"eudiPublicUrl":"%s","jaegerPublicUrl":"%s","grafanaPublicUrl":"%s"};\n' \
   "$escaped_eudi_public_url" \
   "$escaped_jaeger_public_url" \
   "$escaped_grafana_public_url" \
-  "$escaped_qtsp_public_url" \
   > /usr/share/nginx/html/runtime-config.js

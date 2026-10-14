@@ -17,13 +17,15 @@ import { useWatchNext } from './hooks/useWatchNext'
 import { issuanceFlow } from './api/portalClient'
 import { useQuery } from './api/dvtpClient'
 import { fetchDecisions } from './api/devClient'
+import { createAsiRequest, getAsiRequest, listAsiAttributes } from './api/asiClient'
+import { expectedOf, requestBody, type AsiAttribute, type AsiRequestView } from './lib/asiRequest'
 import { newTraceContext } from './util/trace'
 import { consentTokenFor, storeConsentToken } from './util/consentTokens'
 import { loadIssuanceOffers, type IssuanceOffer } from './eudi'
 import { consumerFor, DEFAULT_VBO_ID, isLvgScope } from './util/consumer'
 import {
   viaFsc,
-  type ApiCall, type EudiPayload, type HistoryRun, type IssuancePayload, type IssuanceResponse, type Scenario,
+  type ApiCall, type AsiPayload, type EudiPayload, type HistoryRun, type IssuancePayload, type IssuanceResponse, type Scenario,
   type Tab, type UsePayload, type UseResponse,
 } from './types'
 
@@ -74,16 +76,31 @@ const EMPTY_EUDI: EudiPayload = {
   usecase: '',
 }
 
+const EMPTY_ASI: AsiPayload = {
+  operation: 'verify',
+  attributes: [],
+}
+
+// How long the portal follows an ASI request: as long as the QTSP keeps it.
+const ASI_FOLLOW_MS = 10 * 60 * 1000
+
+// asiResult is the result panel's view of an ASI request at the QTSP. The
+// outcome is the citizen's and the ASIP's, not a PDP verdict, so the panel
+// shows it in its own block (result.asi) rather than as ALLOW or DENY.
+function asiResult(view: AsiRequestView, traceId: string | null): ResultData {
+  return {
+    outcome: view.status === 'failed' ? 'error' : 'unknown',
+    status: 200,
+    body: view,
+    trace_id: traceId ?? undefined,
+    asi: view,
+  }
+}
+
 const JAEGER_PUBLIC_URL =
   window.__GBO_RUNTIME_CONFIG__?.jaegerPublicUrl ||
   import.meta.env.VITE_JAEGER_PUBLIC_URL ||
   'http://localhost:9686'
-
-// The reference QTSP's page, where an ASI request starts.
-const QTSP_PUBLIC_URL =
-  window.__GBO_RUNTIME_CONFIG__?.qtspPublicUrl ||
-  import.meta.env.VITE_QTSP_PUBLIC_URL ||
-  'http://localhost:9427'
 
 const GRAFANA_PUBLIC_URL =
   window.__GBO_RUNTIME_CONFIG__?.grafanaPublicUrl ||
@@ -101,6 +118,15 @@ export default function App() {
   const [eudiPayload, setEudiPayload] = useState<EudiPayload>(EMPTY_EUDI)
   const [eudiOffers, setEudiOffers] = useState<IssuanceOffer[]>([])
   const [eudiOffersError, setEudiOffersError] = useState('')
+  const [asiPayload, setAsiPayload] = useState<AsiPayload>(EMPTY_ASI)
+  const [asiAttributes, setAsiAttributes] = useState<AsiAttribute[]>([])
+  const [asiAttributesError, setAsiAttributesError] = useState('')
+  const [asiView, setAsiView] = useState<AsiRequestView | null>(null)
+  // The ASI request this portal laid down and still follows, and the trace
+  // of its call at the ASIP once the watch picks it up. A new request
+  // replaces the old one, which then stops being followed.
+  const asiOwnRef = useRef<string | null>(null)
+  const asiTraceRef = useRef<string | null>(null)
   const [result, setResult] = useState<ResultData | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [archApiCalls, setArchApiCalls] = useState<ApiCall[] | undefined>(undefined)
@@ -119,6 +145,15 @@ export default function App() {
         }))
       })
       .catch((error: Error) => setEudiOffersError(error.message))
+    void listAsiAttributes()
+      .then((attributes) => {
+        setAsiAttributes(attributes)
+        // Like the QTSP's own form: the first attribute, with its example.
+        setAsiPayload((current) => current.attributes.length > 0 || attributes.length === 0
+          ? current
+          : { ...current, attributes: [{ identifier: attributes[0].identifier, value: JSON.stringify(attributes[0].example) }] })
+      })
+      .catch((error: Error) => setAsiAttributesError(error.message))
   }, [])
 
   const { states: archStates, ready: archReady, bron: archBron, consumer: archConsumer } = useChainEvents(archTraceId, archMode)
@@ -205,17 +240,21 @@ export default function App() {
       })
       return
     }
-    // DvTP and ASI paths: if the user just clicked Submit themselves
-    // (submitting=true), don't overwrite — the local run wins; watch will
-    // pick things back up next round once a real citizen/consumer-flow
-    // arrives.
-    if (submitting) return
-    // ASI: a QTSP's verify or retrieve at the ASIP. The QTSP is outside the
-    // demo, so there is no response to show here and no payload to log; the
-    // chain, the FSC transaction log and the PDP decision are the evidence.
-    // After the guard above: a run of the user's own (or a wait for the
-    // wallet) keeps the screen.
+    // ASI: a QTSP's verify or retrieve at the ASIP. For a request this portal
+    // laid down, the trace joins the result the QTSP reports; for any other
+    // QTSP request there is no response to show, and the chain, the FSC
+    // transaction log and the PDP decision are the evidence.
     if (mode === 'asi-verify') {
+      if (asiOwnRef.current) {
+        asiTraceRef.current = traceId
+        setArchApiCalls(undefined)
+        setArchTraceId(traceId)
+        setArchMode('asi-verify')
+        setTab('asi-verify')
+        setResult((r) => (r?.asi ? { ...r, trace_id: traceId } : r))
+        return
+      }
+      if (submitting) return
       setArchApiCalls(undefined)
       setResult({
         outcome: 'unknown',
@@ -229,6 +268,11 @@ export default function App() {
       setTab('asi-verify')
       return
     }
+    // DvTP paths: if the user just clicked Submit themselves
+    // (submitting=true), don't overwrite — the local run wins; watch will
+    // pick things back up next round once a real citizen/consumer-flow
+    // arrives.
+    if (submitting) return
     setArchApiCalls(undefined)
     setResult(null)
     setArchTraceId(traceId)
@@ -282,6 +326,8 @@ export default function App() {
       setIssuancePayload({ ...EMPTY_ISSUANCE, ...(s.payload as IssuancePayload) })
     } else if (s.tab === 'eudi-issuance') {
       setEudiPayload({ ...EMPTY_EUDI, ...(s.payload as EudiPayload) })
+    } else if (s.tab === 'asi-verify') {
+      setAsiPayload({ ...EMPTY_ASI, ...(s.payload as AsiPayload) })
     } else {
       const scenarioUse = s.payload as UsePayload
       // A consent is only usable through its own consumer: the scenario's
@@ -306,12 +352,14 @@ export default function App() {
     }
   }
 
-  const onLoadFromHistory = (run: { tab: Tab; payload: IssuancePayload | UsePayload | EudiPayload }) => {
+  const onLoadFromHistory = (run: { tab: Tab; payload: IssuancePayload | UsePayload | EudiPayload | AsiPayload }) => {
     handleSetTab(run.tab)
     if (run.tab === 'issuance') {
       setIssuancePayload({ ...EMPTY_ISSUANCE, ...(run.payload as IssuancePayload) })
     } else if (run.tab === 'eudi-issuance') {
       setEudiPayload({ ...EMPTY_EUDI, ...(run.payload as EudiPayload) })
+    } else if (run.tab === 'asi-verify') {
+      setAsiPayload({ ...EMPTY_ASI, ...(run.payload as AsiPayload) })
     } else {
       const p = run.payload as UsePayload
       setUsePayload({ ...EMPTY_USE, ...p, consent_token: p.consent_token || consentTokenFor(p.consent_id) })
@@ -324,15 +372,65 @@ export default function App() {
     // trace_id to seed — it renders the QR (universal-link client-side
     // assembled), enables watch, and waits for eudi-adapter's first span
     // (useWatchNext handles this).
-    // ASI starts at the reference QTSP: open its page and watch for the
-    // request it makes. Still in the click, so the browser allows the tab.
+    // ASI: lay the request down at the reference QTSP, send a new tab to its
+    // start URL (the citizen goes to the authorization server there), and
+    // follow the outcome. The tab is opened in the click, so the browser
+    // allows it, and gets its address once the QTSP answers.
     if (tab === 'asi-verify') {
-      window.open(QTSP_PUBLIC_URL, '_blank', 'noopener')
+      const labels = Object.fromEntries(asiAttributes.map((a) => [a.identifier, a.label]))
+      const built = requestBody(asiPayload, labels)
+      if ('error' in built) {
+        setResult({ outcome: 'error', status: 0, body: { error: built.error }, narrative: built.error })
+        return
+      }
+      const win = window.open('about:blank', '_blank')
+      asiOwnRef.current = null
+      asiTraceRef.current = null
+      setAsiView(null)
       setResult(null)
       setArchApiCalls(undefined)
       setArchTraceId(null)
       setArchMode('asi-verify')
       if (!watching) setWatching(true)
+      setSubmitting(true)
+      let view: AsiRequestView
+      try {
+        view = await createAsiRequest(built.body)
+      } catch (err) {
+        win?.close()
+        setResult({
+          outcome: 'error',
+          status: 0,
+          body: { error: (err as Error).message },
+          narrative: `De QTSP nam de aanvraag niet aan: ${(err as Error).message}`,
+        })
+        return
+      } finally {
+        setSubmitting(false)
+      }
+      if (win) {
+        win.opener = null
+        win.location.href = view.start_url
+      } else {
+        window.open(view.start_url, '_blank', 'noopener')
+      }
+      const id = view.id
+      asiOwnRef.current = id
+      setAsiView(view)
+      setResult(asiResult(view, null))
+      const deadline = Date.now() + ASI_FOLLOW_MS
+      while (view.status === 'pending' && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 1000))
+        if (asiOwnRef.current !== id) return
+        try {
+          view = await getAsiRequest(id)
+        } catch {
+          // The QTSP was briefly unreachable: try again until the deadline.
+        }
+      }
+      if (asiOwnRef.current !== id) return
+      setAsiView(view)
+      setResult(asiResult(view, asiTraceRef.current))
       return
     }
     if (tab === 'eudi-issuance') {
@@ -446,10 +544,13 @@ export default function App() {
       name,
       desc,
       tab,
-      expected_outcome: result?.outcome === 'error' ? 'allow' : (result?.outcome ?? 'allow'),
+      expected_outcome:
+        tab === 'asi-verify' ? (asiView ? expectedOf(asiView) : undefined)
+        : result?.outcome === 'error' ? 'allow' : (result?.outcome ?? 'allow'),
       payload:
         tab === 'issuance' ? issuancePayload
         : tab === 'eudi-issuance' ? eudiPayload
+        : tab === 'asi-verify' ? asiPayload
         : usePayload,
     } as Scenario)
   }
@@ -512,6 +613,10 @@ export default function App() {
               submitting={submitting}
               eudiOffers={eudiOffers}
               eudiOffersError={eudiOffersError}
+              asiPayload={asiPayload}
+              setAsiPayload={setAsiPayload}
+              asiAttributes={asiAttributes}
+              asiAttributesError={asiAttributesError}
             />
           </div>
           <div className="col">

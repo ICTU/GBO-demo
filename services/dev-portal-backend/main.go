@@ -59,6 +59,9 @@ type config struct {
 	// ADLDatabaseURL reaches the Authorization Decision Log with a
 	// SELECT-only role. Empty leaves the portal without its audit view.
 	ADLDatabaseURL string
+	// QtspURL reaches the reference QTSP's request API (asi.go). Empty
+	// leaves the ASI tab without its form.
+	QtspURL string
 }
 
 const defaultDvtpConsumerPeerID = "99999999900000000300"
@@ -124,6 +127,7 @@ func loadConfig() config {
 		LdvLogbooks:        parseLdvLogbooks(os.Getenv("LDV_LOGBOOKS")),
 		LdvReadToken:       os.Getenv("LDV_READ_TOKEN"),
 		ADLDatabaseURL:     os.Getenv("ADL_DATABASE_URL"),
+		QtspURL:            strings.TrimRight(os.Getenv("QTSP_URL"), "/"),
 	}
 }
 
@@ -1053,6 +1057,7 @@ func newMux(cfg config, hub *traceHub, adl adlStore) *http.ServeMux {
 	mux.HandleFunc("/v1/traces", handleOTLPTraces(hub))
 	mux.HandleFunc("/events", handleChainEvents(hub))
 	mux.HandleFunc("/watch-next", handleWatchNext(hub))
+	mux.HandleFunc("/asi/", handleAsi(cfg))
 	return mux
 }
 

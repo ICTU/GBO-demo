@@ -5,6 +5,5 @@ interface Window {
     eudiPublicUrl?: string
     jaegerPublicUrl?: string
     grafanaPublicUrl?: string
-    qtspPublicUrl?: string
   }
 }

@@ -9,14 +9,18 @@ export function viaFsc(tab: Tab): boolean {
 }
 export type Outcome = 'allow' | 'deny' | 'error' | 'unknown'
 
+// The outcome an ASI scenario expects: a verification result of ETSI TS
+// 119 478, or the value of a retrieve.
+export type AsiExpected = 'match' | 'match-with-variation' | 'no-match' | 'unknown' | 'retrieve'
+
 export type Scenario = {
   id: string
   name: string
   desc: string
   tab: Tab
-  expected_outcome?: Outcome
+  expected_outcome?: Outcome | AsiExpected
   user_saved: boolean
-  payload: IssuancePayload | UsePayload | EudiPayload
+  payload: IssuancePayload | UsePayload | EudiPayload | AsiPayload
 }
 
 export type IssuancePayload = {
@@ -47,6 +51,16 @@ export type UsePayload = {
 // product's adapter route from source OIN, type and concrete parameters.
 export type EudiPayload = {
   usecase: string
+}
+
+// An ASI request as the portal lays it down at the reference QTSP. Values
+// are kept as the text the user edits; they are JSON when sent. The test
+// person is a hint: the user picks the person at the authorization server's
+// chooser.
+export type AsiPayload = {
+  operation: 'verify' | 'retrieve'
+  attributes: { identifier: string; value?: string }[]
+  person?: string
 }
 
 export type ApiCall = {
@@ -92,7 +106,7 @@ export type HistoryRun = {
   run_id: string
   scenario_name: string
   tab: Tab
-  payload: IssuancePayload | UsePayload | EudiPayload
+  payload: IssuancePayload | UsePayload | EudiPayload | AsiPayload
   trace_id: string
   outcome: Outcome
   ts: string

@@ -1,0 +1,17 @@
+{
+  "id": "asi-familienaam-match-met-variatie",
+  "name": "ASI · Familienaam MATCH MET VARIATIE",
+  "desc": "Dezelfde verificatie met \"jansen\" in kleine letters. Gelijk na normalisatie (hoofdletters, accenten, koppeltekens, spaties, ICAO-transliteratie), dus MatchWithVariation. Kies Frouke Jansen.",
+  "tab": "asi-verify",
+  "expected_outcome": "match-with-variation",
+  "payload": {
+    "operation": "verify",
+    "attributes": [
+      {
+        "identifier": "https://gbo.example/attributes/family_name/1",
+        "value": "{\"family_name\":\"jansen\"}"
+      }
+    ],
+    "person": "Frouke Jansen"
+  }
+}

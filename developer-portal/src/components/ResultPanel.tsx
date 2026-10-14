@@ -1,5 +1,6 @@
 import { hlJSON } from '../util/highlight'
 import type { Outcome } from '../types'
+import { display, summary, type AsiRequestView } from '../lib/asiRequest'
 
 export type ResultData = {
   outcome: Outcome
@@ -8,6 +9,9 @@ export type ResultData = {
   trace_id?: string
   reason?: string
   narrative?: string
+  // asi is an ASI request at the reference QTSP: its status, the seal
+  // check and the result per attribute.
+  asi?: AsiRequestView
 }
 
 type Props = {
@@ -53,6 +57,8 @@ export default function ResultPanel({ result, pending = false, jaegerUrl = JAEGE
               </div>
             )}
 
+            {result.asi && <AsiOutcome view={result.asi} />}
+
             {result.reason && (
               <div className="kv">
                 <span className="k">Reden</span>
@@ -93,6 +99,41 @@ export default function ResultPanel({ result, pending = false, jaegerUrl = JAEGE
           </>
         )}
       </div>
+    </div>
+  )
+}
+
+function AsiOutcome({ view }: { view: AsiRequestView }) {
+  const accepted = view.status === 'done' && view.seal?.valid
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div className={`verdict ${accepted ? 'allow' : view.status === 'pending' ? '' : 'deny'}`}>
+        <div className="verdict-badge">
+          {view.status === 'pending' ? 'WACHT' : view.status === 'done' ? (accepted ? 'RESULTAAT' : 'NIET GEACCEPTEERD') : view.status === 'denied' ? 'GEWEIGERD' : 'MISLUKT'}
+        </div>
+        <div className="verdict-sub">{summary(view)}</div>
+      </div>
+      {view.data_service && (
+        <div className="kv">
+          <span className="k">Dataservice</span>
+          <span className="v mono">{view.data_service}{view.source ? ` · ${view.source}` : ''}</span>
+        </div>
+      )}
+      {accepted && view.results && view.results.length > 0 && (
+        <table>
+          <thead>
+            <tr><th>Attribuut</th><th>{view.operation === 'verify' ? 'Uitkomst' : 'Waarde'}</th></tr>
+          </thead>
+          <tbody>
+            {view.results.map((r) => (
+              <tr key={r.identifier}>
+                <td>{r.label}</td>
+                <td className="mono">{display(r)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   )
 }
