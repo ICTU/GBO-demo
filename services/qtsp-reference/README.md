@@ -11,7 +11,7 @@ It discovers its way rather than being configured with URLs:
 3. **Register** (RFC 7591) with a software statement sealed with the QTSP certificate, carrying its `registryURI`. This happens once per authorization server; the web side does it at start.
 4. **Authorize**: the authorization code flow with PKCE S256, `state`, the operation as scope, and `resource` = the record's `endpointURI`.
 5. **Token**: `private_key_jwt` with the certificate key, and a DPoP proof. The token is DPoP-bound.
-6. **Verify or retrieve** with the token and a DPoP proof. A 200 is accepted only with a valid **seal**: the detached JWS in `X-JWS-Signature` over the exact body, whose certificate chain leads to `QTSP_SEAL_TRUST_ANCHORS`. Otherwise the result is reported as not accepted.
+6. **Verify or retrieve** with the token and a DPoP proof, in a W3C trace of its own (`traceparent`), which the ASIP's spans join. A 200 is accepted only with a valid **seal**: the detached JWS in `X-JWS-Signature` over the exact body, whose certificate chain leads to `QTSP_SEAL_TRUST_ANCHORS`. Otherwise the result is reported as not accepted.
 
 ## Web
 
@@ -24,7 +24,7 @@ The developer portal lays a request down here and follows it, while the user sti
 - `GET /api/attributes`: the attributes the form offers, with an example value.
 - `POST /api/requests` with `{"operation":"verify","attributes":[{"identifier":"…","value":{…}}]}` (for `retrieve`, without values). The QTSP checks the request, finds the data service and registers, as the form does, and answers 201 with an `id` and a `start_url`. A request it does not start gets an RFC 9457 problem with the reason: 400 for an invalid request, 422 when no data service provides the attributes, 502 when discovery or registration fails.
 - `start_url` (`/requests/{id}/start`) sends the browser to the authorization server. It carries only the id, so no value appears in a URL, and it works once (410 after that). The user returns to the result page.
-- `GET /api/requests/{id}`: `pending` until the user returns, then `done` (the result per attribute and the seal check), `denied` (the OAuth error) or `failed` (an error answer of the ASIP, or no token).
+- `GET /api/requests/{id}`: `pending` until the user returns, then `done` (the result per attribute, the seal check, and `trace_id`: the trace of the call at the ASIP), `denied` (the OAuth error) or `failed` (an error answer of the ASIP, or no token).
 
 A request and its outcome can be fetched for 10 minutes; then it is gone (404). The API has no access control, like the other mocks of the demo: anyone who can reach the port can lay a request down.
 

@@ -3,6 +3,7 @@ package web
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"time"
 
@@ -68,7 +69,8 @@ func (h *Handler) createRequest(w http.ResponseWriter, r *http.Request) {
 	var body requestBody
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(&body); err != nil {
+	// One JSON object and nothing after it.
+	if err := dec.Decode(&body); err != nil || dec.Decode(&struct{}{}) != io.EOF {
 		writeProblem(w, http.StatusBadRequest, "De aanvraag is geen geldige JSON.")
 		return
 	}

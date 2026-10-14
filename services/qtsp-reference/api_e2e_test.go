@@ -35,8 +35,9 @@ type apiRequest struct {
 		Result     string          `json:"result"`
 		Value      json.RawMessage `json:"value"`
 	} `json:"results"`
-	Error  string `json:"error"`
-	Detail string `json:"detail"`
+	Error   string `json:"error"`
+	Detail  string `json:"detail"`
+	TraceID string `json:"trace_id"`
 }
 
 // apiEnv is the QTSP's web side on a local port, in front of the stack.
@@ -130,6 +131,7 @@ func TestRequestAPIInvalid(t *testing.T) {
 	e := newAPIEnv(t)
 	for name, body := range map[string]string{
 		"not JSON":           `{"operation":`,
+		"JSON after JSON":    verifyFamilyName(`{"family_name":"Jansen"}`) + ` {}`,
 		"unknown field":      `{"operation":"verify","attributes":[],"bsn":"1"}`,
 		"no operation":       `{"attributes":[{"identifier":"` + idFamilyName + `","value":{"family_name":"Jansen"}}]}`,
 		"no attributes":      `{"operation":"verify","attributes":[]}`,
@@ -177,6 +179,9 @@ func TestRequestAPIVerify(t *testing.T) {
 		if got.Status != "done" || got.Seal == nil || !got.Seal.Valid || len(got.Results) != 1 || got.Results[0].Result != tc.want {
 			t.Errorf("%s: %+v, want done, a valid seal and %s", tc.value, got, tc.want)
 		}
+		if !regexp.MustCompile(`^[0-9a-f]{32}$`).MatchString(got.TraceID) {
+			t.Errorf("%s: trace_id %q, want the trace of the call at the ASIP", tc.value, got.TraceID)
+		}
 	}
 	created := e.create(t, `{"operation":"verify","attributes":[{"identifier":"`+idAddress+`","value":{"street":"Coolsingel"}}]}`)
 	if got := e.run(t, created, "tom", "approve"); got.Status != "done" || len(got.Results) != 1 || got.Results[0].Result != "Unknown" {
@@ -199,7 +204,7 @@ func TestRequestAPIDenied(t *testing.T) {
 	created := e.create(t, verifyFamilyName(`{"family_name":"Jansen"}`))
 	before := brpCalls.Load()
 	got := e.run(t, created, "frouke", "deny")
-	if got.Status != "denied" || got.Error != "access_denied" || got.Results != nil {
+	if got.Status != "denied" || got.Error != "access_denied" || got.Results != nil || got.TraceID != "" {
 		t.Errorf("%+v, want denied with access_denied", got)
 	}
 	if brpCalls.Load() != before {

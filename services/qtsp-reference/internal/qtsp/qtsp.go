@@ -19,6 +19,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -388,6 +389,9 @@ type Response struct {
 	Body      []byte
 	Seal      *seal.Check
 	SealError error
+	// TraceID is the W3C trace the call was sent in: the ASIP's spans of
+	// this request join it, so whoever follows the request finds them.
+	TraceID string
 }
 
 // Accepted says the QTSP may use the result: a 200 with a valid seal.
@@ -405,9 +409,11 @@ func (c *Client) Call(ctx context.Context, p Plan, operation, token string, body
 	if err != nil {
 		return Response{}, err
 	}
+	traceID, spanID := hexID(16), hexID(8)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "DPoP "+token)
 	req.Header.Set("DPoP", proof)
+	req.Header.Set("Traceparent", "00-"+traceID+"-"+spanID+"-01")
 	resp, err := c.cfg.HTTP.Do(req)
 	if err != nil {
 		return Response{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
@@ -417,7 +423,7 @@ func (c *Client) Call(ctx context.Context, p Plan, operation, token string, body
 	if err != nil {
 		return Response{}, err
 	}
-	out := Response{Status: resp.StatusCode, Body: raw}
+	out := Response{Status: resp.StatusCode, Body: raw, TraceID: traceID}
 	if resp.StatusCode == http.StatusOK {
 		check, err := seal.Validate(resp.Header.Get(seal.Header), raw, c.cfg.SealAnchors)
 		if err != nil {
@@ -507,6 +513,13 @@ func x5c(chain []*x509.Certificate) []string {
 		out[i] = base64.StdEncoding.EncodeToString(c.Raw)
 	}
 	return out
+}
+
+// hexID is n random bytes in lowercase hex, as W3C trace context writes ids.
+func hexID(n int) string {
+	b := make([]byte, n)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
 func randomID(n int) string {

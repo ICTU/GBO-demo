@@ -288,6 +288,9 @@ type outcome struct {
 	// result is not accepted and Results is empty.
 	Seal    *sealView `json:"seal,omitempty"`
 	Results []row     `json:"results,omitempty"`
+	// TraceID is the trace of the call at the ASIP, so the portal shows the
+	// chain of this request and no other.
+	TraceID string `json:"trace_id,omitempty"`
 	// Error is a denial (an OAuth error code) or why the request failed.
 	Error            string `json:"error,omitempty"`
 	ErrorDescription string `json:"error_description,omitempty"`
@@ -317,7 +320,7 @@ func (r row) Display() string {
 }
 
 func (h *Handler) result(p prepared, resp qtsp.Response) outcome {
-	out := outcome{Status: statusDone, Operation: p.operation, DataService: p.plan.EndpointURI, Provider: p.plan.Provider}
+	out := outcome{Status: statusDone, Operation: p.operation, DataService: p.plan.EndpointURI, Provider: p.plan.Provider, TraceID: resp.TraceID}
 	if resp.Status != http.StatusOK {
 		var problem struct{ Title, Detail string }
 		_ = json.Unmarshal(resp.Body, &problem)

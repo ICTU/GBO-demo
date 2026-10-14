@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"sync/atomic"
 	"testing"
 )
@@ -218,5 +219,34 @@ func TestMetadataURL(t *testing.T) {
 		if _, err := MetadataURL(bad); err == nil {
 			t.Errorf("MetadataURL(%q): err = nil", bad)
 		}
+	}
+}
+
+// The call to the ASIP carries a W3C traceparent whose trace the response
+// names, so the ASIP's spans of this request can be found; each call gets
+// its own trace.
+func TestCallSendsItsTrace(t *testing.T) {
+	var got []string
+	asip := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.Header.Get("Traceparent"))
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer asip.Close()
+	c := newWorld(t).client(t)
+	plan := Plan{EndpointURI: asip.URL + "/brp/authsrc-api"}
+	first, err := c.Call(context.Background(), plan, "verify", "token", []byte(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _ := c.Call(context.Background(), plan, "verify", "token", []byte(`{}`))
+	traceparent := regexp.MustCompile(`^00-([0-9a-f]{32})-[0-9a-f]{16}-01$`)
+	for i, resp := range []Response{first, second} {
+		m := traceparent.FindStringSubmatch(got[i])
+		if m == nil || m[1] != resp.TraceID {
+			t.Errorf("call %d: traceparent %q, response trace %q", i, got[i], resp.TraceID)
+		}
+	}
+	if first.TraceID == second.TraceID {
+		t.Error("two calls share a trace")
 	}
 }
