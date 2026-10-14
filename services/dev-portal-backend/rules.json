@@ -1,4 +1,29 @@
 {
+  "gbo.rules.asi.asi0001": {
+    "covers_fields": [
+      "Binnenlandsadres.huisletter",
+      "Binnenlandsadres.huisnummer",
+      "Binnenlandsadres.huisnummertoevoeging",
+      "Binnenlandsadres.postcode",
+      "Binnenlandsadres.straatnaam",
+      "Binnenlandsadres.woonplaatsnaam",
+      "IngeschrevenPersoon.geboortedatum",
+      "IngeschrevenPersoon.geslachtsnaam",
+      "IngeschrevenPersoon.heeftNationaliteit",
+      "IngeschrevenPersoon.voornamen",
+      "IngeschrevenPersoon.voorvoegsel",
+      "Ingezetene.woontOp",
+      "Nationaliteit.nationaliteit",
+      "Query.ingeschrevenPersoon"
+    ],
+    "covers_types": [],
+    "package": "gbo.rules.asi.asi0001",
+    "regime": "pid",
+    "rule_id": "ASI0001",
+    "services": [
+      "brp"
+    ]
+  },
   "gbo.rules.dvtp.dvt0001": {
     "covers_fields": [
       "AangifteIH.belastingjaar",
@@ -17,7 +42,10 @@
     ],
     "package": "gbo.rules.dvtp.dvt0001",
     "regime": "consent",
-    "rule_id": "DVT0001"
+    "rule_id": "DVT0001",
+    "services": [
+      "bri"
+    ]
   },
   "gbo.rules.dvtp.lvg0001": {
     "covers_fields": [
@@ -27,7 +55,10 @@
     "covers_types": [],
     "package": "gbo.rules.dvtp.lvg0001",
     "regime": "consent",
-    "rule_id": "LVG0001"
+    "rule_id": "LVG0001",
+    "services": [
+      "lvg"
+    ]
   },
   "gbo.rules.eudi.eud0001": {
     "covers_fields": [
@@ -49,7 +80,10 @@
     ],
     "package": "gbo.rules.eudi.eud0001",
     "regime": "pid",
-    "rule_id": "EUD0001"
+    "rule_id": "EUD0001",
+    "services": [
+      "bri"
+    ]
   },
   "gbo.rules.eudi.eud0002": {
     "covers_fields": [
@@ -74,6 +108,9 @@
     "covers_types": [],
     "package": "gbo.rules.eudi.eud0002",
     "regime": "pid",
-    "rule_id": "EUD0002"
+    "rule_id": "EUD0002",
+    "services": [
+      "brp"
+    ]
   }
 }

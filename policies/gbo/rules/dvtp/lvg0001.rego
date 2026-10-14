@@ -17,6 +17,8 @@ rule_id := "LVG0001"
 # without a verified token the consent checks below deny anyway.
 regime := "consent"
 
+services := {"lvg"}
+
 covers_types := set()
 
 covers_fields := {

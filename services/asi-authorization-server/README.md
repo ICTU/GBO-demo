@@ -106,7 +106,7 @@ A valid authorization request gets a page, in Dutch, with a banner that it is a 
 
 - The request waits as a transaction: kept server-side, valid for 5 minutes, used once, and bound to the browser by an HttpOnly, SameSite=Strict cookie set with the page. A decision for an unknown, used or expired transaction, without the cookie, or for an unknown test person gets an error page, not a redirect.
 - The page is not cached and may not be framed.
-- The test persons are in `AZSP_TEST_PERSONS_FILE` (default `testdata/test-persons.json`) with their BSN and the five PID attributes; names, birth dates and nationalities equal the source of the ASIP, the places of birth are test data. A person without all of them stops the server at start.
+- The test persons are in `AZSP_TEST_PERSONS_FILE` (default `testdata/test-persons.json`) with their BSN and the five PID attributes; they equal the BRP mock, the source the ASIP asks. A person without all of them stops the server at start.
 
 ## Interpretations and choices
 

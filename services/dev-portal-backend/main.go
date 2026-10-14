@@ -737,7 +737,7 @@ func lokiDecisionsForTrace(ctx context.Context, cfg config, traceID string, sinc
 }
 
 // handleRules serves the pre-generated rules.json (per rule its rule_id,
-// regime, package, covers_types and covers_fields) with each rule's Rego
+// regime, package, covers_types, covers_fields and services) with each rule's Rego
 // source, so the dev-portal's rule panel shows what the rule checks: the
 // rule itself is the explanation. OpenFTV PDP has no data-API to evaluate
 // data.gbo.rules live, so the file is generated from the Rego sources by

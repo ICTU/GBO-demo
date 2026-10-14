@@ -1,17 +1,27 @@
 package verification
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"testing"
 )
 
-// fakeSource is an in-memory source: BSN -> attribute name -> value.
-type fakeSource map[string]map[string]string
+// fakeSource is an in-memory source: BSN -> attribute name -> value. With
+// err set it fails every call; asked records the names it was asked for.
+type fakeSource struct {
+	values map[string]map[string]string
+	err    error
+	asked  []string
+}
 
-func (f fakeSource) Value(bsn, name string) (json.RawMessage, bool) {
-	v, ok := f[bsn][name]
-	return json.RawMessage(v), ok
+func (f *fakeSource) Value(_ context.Context, bsn, name string) (json.RawMessage, bool, error) {
+	f.asked = append(f.asked, name)
+	if f.err != nil {
+		return nil, false, f.err
+	}
+	v, ok := f.values[bsn][name]
+	return json.RawMessage(v), ok, nil
 }
 
 const (
@@ -23,15 +33,15 @@ const (
 )
 
 func newTestService() *Service {
-	return NewService(fakeSource{bsn: {
+	return NewService(&fakeSource{values: map[string]map[string]string{bsn: {
 		"family_name": `{"family_name":"Jansen"}`,
 		"address":     `{"city":"Rotterdam"}`,
-	}}, DefaultCatalogue())
+	}}}, DefaultCatalogue())
 }
 
 func verifyOne(t *testing.T, s *Service, id, value string) string {
 	t.Helper()
-	res, err := s.Verify(bsn, VerifyRequest{Attributes: []Attribute{{Identifier: id, Value: json.RawMessage(value)}}})
+	res, err := s.Verify(context.Background(), bsn, VerifyRequest{Attributes: []Attribute{{Identifier: id, Value: json.RawMessage(value)}}})
 	if err != nil || len(res.Attributes) != 1 || res.Attributes[0].Identifier != id {
 		t.Fatalf("Verify = %+v, %v; want one result for %s", res, err, id)
 	}
@@ -56,7 +66,7 @@ func TestVerifyResults(t *testing.T) {
 }
 
 func TestVerifyFragment(t *testing.T) {
-	res, err := newTestService().Verify(bsn, VerifyRequest{Fragments: []Fragment{{Identifier: idAddress, Location: "$.city", Value: json.RawMessage(`{"city":"Rotterdam"}`)}}})
+	res, err := newTestService().Verify(context.Background(), bsn, VerifyRequest{Fragments: []Fragment{{Identifier: idAddress, Location: "$.city", Value: json.RawMessage(`{"city":"Rotterdam"}`)}}})
 	if err != nil || len(res.Fragments) != 1 || res.Fragments[0].Result != ResultMatch {
 		t.Fatalf("Verify = %+v, %v; want one Match for the fragment", res, err)
 	}
@@ -67,35 +77,68 @@ func TestVerifyErrors(t *testing.T) {
 	s := newTestService()
 	var malformed *MalformedError
 	var unknown *UnknownAttributeError
-	if _, err := s.Verify(bsn, VerifyRequest{Mandate: true}); !errors.As(err, &malformed) {
+	if _, err := s.Verify(context.Background(), bsn, VerifyRequest{Mandate: true}); !errors.As(err, &malformed) {
 		t.Fatalf("empty request with mandate: err = %v, want MalformedError", err)
 	}
-	if _, err := s.Verify(bsn, VerifyRequest{Attributes: []Attribute{{Identifier: idNotInCat, Value: json.RawMessage(`{}`)}}, Mandate: true}); !errors.Is(err, ErrMandate) {
+	if _, err := s.Verify(context.Background(), bsn, VerifyRequest{Attributes: []Attribute{{Identifier: idNotInCat, Value: json.RawMessage(`{}`)}}, Mandate: true}); !errors.Is(err, ErrMandate) {
 		t.Fatalf("mandate: err = %v, want ErrMandate", err)
 	}
-	if _, err := s.Verify(bsn, VerifyRequest{Attributes: []Attribute{{Identifier: idNotInCat, Value: json.RawMessage(`{}`)}}}); !errors.As(err, &unknown) || unknown.Identifier != idNotInCat {
+	if _, err := s.Verify(context.Background(), bsn, VerifyRequest{Attributes: []Attribute{{Identifier: idNotInCat, Value: json.RawMessage(`{}`)}}}); !errors.As(err, &unknown) || unknown.Identifier != idNotInCat {
 		t.Fatalf("unknown attribute: err = %v, want UnknownAttributeError", err)
 	}
-	if _, err := s.Verify(bsn, VerifyRequest{Attributes: []Attribute{{Identifier: idFamilyName, Value: json.RawMessage(`"Jansen"`)}}}); !errors.As(err, &malformed) {
+	if _, err := s.Verify(context.Background(), bsn, VerifyRequest{Attributes: []Attribute{{Identifier: idFamilyName, Value: json.RawMessage(`"Jansen"`)}}}); !errors.As(err, &malformed) {
 		t.Fatalf("value not an object: err = %v, want MalformedError", err)
 	}
 }
 
 func TestRetrieve(t *testing.T) {
 	s := newTestService()
-	attrs, err := s.Retrieve(bsn, []string{idFamilyName, idDiploma, attributeBase + "given_name/1"}, false)
+	attrs, err := s.Retrieve(context.Background(), bsn, []string{idFamilyName, idDiploma, attributeBase + "given_name/1"}, false)
 	if err != nil || len(attrs) != 1 || attrs[0].Identifier != idFamilyName || string(attrs[0].Value) != `{"family_name":"Jansen"}` {
 		t.Fatalf("Retrieve = %+v, %v; want only the family name", attrs, err)
 	}
 	var malformed *MalformedError
 	var unknown *UnknownAttributeError
-	if _, err := s.Retrieve(bsn, nil, true); !errors.As(err, &malformed) {
+	if _, err := s.Retrieve(context.Background(), bsn, nil, true); !errors.As(err, &malformed) {
 		t.Fatalf("no identifiers: err = %v, want MalformedError", err)
 	}
-	if _, err := s.Retrieve(bsn, []string{idFamilyName}, true); !errors.Is(err, ErrMandate) {
+	if _, err := s.Retrieve(context.Background(), bsn, []string{idFamilyName}, true); !errors.Is(err, ErrMandate) {
 		t.Fatalf("mandate: err = %v, want ErrMandate", err)
 	}
-	if _, err := s.Retrieve(bsn, []string{idNotInCat}, false); !errors.As(err, &unknown) {
+	if _, err := s.Retrieve(context.Background(), bsn, []string{idNotInCat}, false); !errors.As(err, &unknown) {
 		t.Fatalf("unknown attribute: err = %v, want UnknownAttributeError", err)
+	}
+}
+
+// The diploma is not ours: the source is not asked, and the answer is Unknown.
+func TestNotOursIsNotAskedOfTheSource(t *testing.T) {
+	src := &fakeSource{}
+	s := NewService(src, DefaultCatalogue())
+	if got := verifyOne(t, s, idDiploma, `{"qualification":"MSc"}`); got != ResultUnknown {
+		t.Fatalf("result = %s, want Unknown", got)
+	}
+	if _, err := s.Retrieve(context.Background(), bsn, []string{idDiploma}, false); err != nil {
+		t.Fatalf("Retrieve: %v", err)
+	}
+	if len(src.asked) != 0 {
+		t.Fatalf("source asked for %v, want nothing", src.asked)
+	}
+}
+
+// A source that gives no answer is an error, never Unknown.
+func TestSourceErrorIsNotUnknown(t *testing.T) {
+	failure := errors.New("refused")
+	for _, err := range []error{ErrSourceUnavailable, failure} {
+		s := NewService(&fakeSource{err: err}, DefaultCatalogue())
+		ctx := context.Background()
+		if _, got := s.Verify(ctx, bsn, VerifyRequest{Attributes: []Attribute{{Identifier: idFamilyName, Value: json.RawMessage(`{"family_name":"Jansen"}`)}}}); !errors.Is(got, err) {
+			t.Fatalf("Verify attribute: err = %v, want %v", got, err)
+		}
+		if _, got := s.Verify(ctx, bsn, VerifyRequest{Fragments: []Fragment{{Identifier: idAddress, Location: "$.city", Value: json.RawMessage(`{"city":"Rotterdam"}`)}}}); !errors.Is(got, err) {
+			t.Fatalf("Verify fragment: err = %v, want %v", got, err)
+		}
+		if _, got := s.Retrieve(ctx, bsn, []string{idFamilyName}, false); !errors.Is(got, err) {
+			t.Fatalf("Retrieve: err = %v, want %v", got, err)
+		}
 	}
 }

@@ -375,6 +375,141 @@ test_pid_rule_actors_are_disjoint_from_consent_consumers if {
 	issuers := data.gbo.rules.eudi.helper.designated_issuers
 	count(issuers) > 0
 	count(issuers & _dvtp_consumer_oins) == 0
+	not data.gbo.rules.asi.asi0001.asip in _dvtp_consumer_oins
+}
+
+# ── The service decides which rules apply ────────────────────────────────
+# Query.ingeschrevenPersoon is a key of both bri and brp. A rule naming
+# services binds only on those; a rule naming none on every service.
+
+_scoped(services) := {"test": {"s": {
+	"rule_id": "S",
+	"covers_fields": {"Query.ingeschrevenPersoon"},
+	"services": services,
+	"deny": set(),
+}}}
+
+_unscoped := {"test": {"u": {
+	"rule_id": "U",
+	"covers_fields": {"Query.ingeschrevenPersoon"},
+	"deny": set(),
+}}}
+
+_person_on(service) := fx.request(fx.hv, service, [fx.person("999991772")], {})
+
+test_a_rule_for_brp_does_not_bind_on_bri if {
+	result := gbo.response with input as _person_on("bri") with data.gbo.rules as _scoped({"brp"})
+	fx.field_codes(result) == {"NO_APPLICABLE_RULE"}
+}
+
+test_a_rule_for_brp_binds_on_brp if {
+	result := gbo.response with input as _person_on("brp") with data.gbo.rules as _scoped({"brp"})
+	result.decision == true
+	result.context.granted[0].rule == "S"
+}
+
+test_a_rule_naming_no_service_binds_on_every_service if {
+	every service in ["bri", "brp"] {
+		result := gbo.response with input as _person_on(service) with data.gbo.rules as _unscoped
+		result.context.granted[0].rule == "U"
+	}
+}
+
+# Without a signed service a scoped rule has nothing to match; the schema
+# is left out, or the missing pin would deny first.
+test_a_rule_for_a_service_does_not_bind_without_one if {
+	req := json.remove(
+		fx.request_with(fx.hv, "", object.union(fx.graphql("bri", [fx.person("999991772")]), {"schema": null}), {}),
+		["subject/attributes/service_name"],
+	)
+	result := gbo.response with input as req with data.gbo.rules as _scoped({"brp"})
+	fx.field_codes(result) == {"NO_APPLICABLE_RULE"}
+	unscoped := gbo.response with input as req with data.gbo.rules as _unscoped
+	unscoped.context.granted[0].rule == "U"
+}
+
+test_an_empty_service_set_binds_nowhere if {
+	every service in ["bri", "brp"] {
+		result := gbo.response with input as _person_on(service) with data.gbo.rules as _scoped(set())
+		fx.field_codes(result) == {"NO_APPLICABLE_RULE"}
+	}
+}
+
+# ── The ASIP reads the BRP through ASI0001 ───────────────────────────────
+
+test_asip_personal_data_is_granted_by_asi0001 if {
+	result := gbo.response with input as fx.request(fx.asip, "brp", fx.personal_fields("999991772"), {})
+	result.decision == true
+	every g in result.context.granted {
+		g.rule == "ASI0001"
+	}
+}
+
+# On brp ASI0001 alone covers these fields, and it grants the ASIP only.
+test_another_actor_is_refused_the_personal_data if {
+	result := gbo.response with input as fx.request(fx.eudi_issuer, "brp", fx.personal_fields("999991772"), {})
+	result.decision == false
+	fx.field_codes(result) == {"ACTOR_NOT_ALLOWED"}
+}
+
+test_asip_other_brp_fields_have_no_rule if {
+	marriage := fx.brp_field("IngeschrevenPersoon", "heeftHuwelijk", ["ingeschrevenPersoon", "heeftHuwelijk"])
+	result := gbo.response with input as fx.request(fx.asip, "brp", [fx.person("999991772"), marriage], {})
+	result.decision == false
+	[[d.index, d.code] | some d in fx.denied(result)] == [[1, "NO_APPLICABLE_RULE"]]
+}
+
+# On bri ASI0001 does not bind: the ASIP meets EUD0001 alone, and is no
+# designated issuer.
+test_asip_income_is_judged_by_eud0001_alone if {
+	result := gbo.response with input as fx.income(fx.asip, "999991772", [2025], {})
+	result.decision == false
+	fx.field_codes(result) == {"ACTOR_NOT_ALLOWED"}
+	_evaluated_rules(result) == {"EUD0001"}
+}
+
+# A rule of one service grants nothing on another, not even a root field
+# alone: ingeschrevenPersoon(bsn) { __typename } would tell whether the
+# person exists and of which type.
+test_a_root_field_alone_is_judged_by_the_services_rules if {
+	brp := gbo.response with input as fx.request(fx.eudi_issuer, "brp", [fx.person("999991772")], {})
+	brp.decision == false
+	[[d.index, d.code] | some d in fx.denied(brp)] == [[0, "ACTOR_NOT_ALLOWED"]]
+	_evaluated_rules(brp) == {"ASI0001"}
+
+	bri := gbo.response with input as fx.request(fx.asip, "bri", [fx.person("999991772")], {})
+	bri.decision == false
+	_evaluated_rules(bri) == {"EUD0001"}
+}
+
+# ── Every GBO rule names its services ────────────────────────────────────
+# A rule naming none binds on every service, and would judge a key another
+# service shares.
+
+_service_violations contains sprintf("%s: names no services", [rid]) if {
+	some rid, m in gbo._rule_meta
+	m.services == null
+}
+
+_service_violations contains sprintf("%s: names services that are not a set", [rid]) if {
+	some rid, m in gbo._rule_meta
+	m.services != null
+	not is_set(m.services)
+}
+
+test_every_rule_names_its_services if {
+	violations := _service_violations
+	print("rules without services:", violations)
+	count(violations) == 0
+}
+
+test_service_check_catches_a_rule_without_them if {
+	broken := {"test": {
+		"none": {"rule_id": "N", "regime": "pid", "covers_fields": set()},
+		"list": {"rule_id": "L", "regime": "pid", "services": ["brp"], "covers_fields": set()},
+	}}
+	violations := _service_violations with data.gbo.rules as broken
+	violations == {"N: names no services", "L: names services that are not a set"}
 }
 
 # ── Every GBO rule names one regime ──────────────────────────────────────

@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - **ASIP mock (ETSI TS 119 478).** A mock Authentic Source Interface
   Provider for qualified trust service providers (epic #336).
   - `asi-provider` (port 4020): `POST /authsrc-api/verify` and `/retrieve`
-    (clause 6.1.1 and 6.1.2) against an in-memory source, with the results
+    (clause 6.1.1 and 6.1.2) against the BRP, with the results
     `Match`, `NoMatch`, `MatchWithVariation` and `Unknown`. Every result is
     sealed with a detached JWS in `X-JWS-Signature`; the seal certificate
     comes from the development CA (`make provision-asip-seal-certificate`).
@@ -31,7 +31,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   - `make demo-asi` adds both services to a running `demo-eudi` or
     `demo-full`: the ASIP as an FSC consumer peer of its own (...1200,
     compose profile `asi`), listed in the onboarding register, with a
-    connection contract for the BRP source (`brp`) (#525).
+    connection contract for the BRP source (`brp`). The ASIP asks the BRP
+    through its Outway with a query of its own per attribute (name, date of
+    birth, nationality, a resident's address); rule `ASI0001` grants the
+    ASIP those fields, on `brp` only. A source that cannot be reached is 503,
+    a refusal in the chain 500 (#525).
+  - Rules name the FSC services they bind on (`services`): a field key such
+    as `Query.ingeschrevenPersoon` is shared by `bri` and `brp`. EUD0001 and
+    DVT0001 bind on `bri`, EUD0002 on `brp`, LVG0001 on `lvg`; a policy test
+    requires every rule to name its services, so a root field alone on
+    another service is no longer granted (#525).
   - Both services are laid out as ports and adapters: a core under
     `internal/`, an HTTP adapter, and `main.go` as the composition root.
 

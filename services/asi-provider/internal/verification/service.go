@@ -6,21 +6,28 @@ package verification
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 )
 
 // Source is the authentic source. Value returns the stored value of an
 // attribute for a person, as the JSON object the catalogue describes, and
-// false when the source holds none.
+// false when the source holds none. An error means the source gave no
+// answer: ErrSourceUnavailable when it could not be reached, any other error
+// when it refused or answered in a way the ASIP cannot read.
 type Source interface {
-	Value(bsn, name string) (json.RawMessage, bool)
+	Value(ctx context.Context, bsn, name string) (json.RawMessage, bool, error)
 }
 
 var (
 	// ErrMandate: requests on behalf of another person are not supported
 	// (REQ-ASIP-6.1.1.2-12, 501).
 	ErrMandate = errors.New("requests on behalf of another person (mandate) are not supported")
+
+	// ErrSourceUnavailable: the authentic source could not be reached (503).
+	// Not Unknown: that result means the source holds no data.
+	ErrSourceUnavailable = errors.New("authentic source unavailable")
 )
 
 // MalformedError is a request the use case cannot process: 400.
@@ -83,7 +90,7 @@ func NewService(source Source, catalogue Catalogue) *Service {
 // Verify compares the claimed values with the source for the person with
 // bsn. It never returns the stored value: Match and MatchWithVariation carry
 // no attributeValue in this mock.
-func (s *Service) Verify(bsn string, req VerifyRequest) (VerifyResult, error) {
+func (s *Service) Verify(ctx context.Context, bsn string, req VerifyRequest) (VerifyResult, error) {
 	if err := validateVerifyRequest(req); err != nil {
 		return VerifyResult{}, err
 	}
@@ -97,10 +104,14 @@ func (s *Service) Verify(bsn string, req VerifyRequest) (VerifyResult, error) {
 	}
 	var res VerifyResult
 	for _, a := range req.Attributes {
-		res.Attributes = append(res.Attributes, Result{Identifier: a.Identifier, Result: s.verifyAttribute(bsn, a)})
+		result, err := s.verifyAttribute(ctx, bsn, a)
+		if err != nil {
+			return VerifyResult{}, err
+		}
+		res.Attributes = append(res.Attributes, Result{Identifier: a.Identifier, Result: result})
 	}
 	for _, f := range req.Fragments {
-		result, err := s.verifyFragment(bsn, f)
+		result, err := s.verifyFragment(ctx, bsn, f)
 		if err != nil {
 			return VerifyResult{}, err
 		}
@@ -112,7 +123,7 @@ func (s *Service) Verify(bsn string, req VerifyRequest) (VerifyResult, error) {
 // Retrieve returns the stored values of the requested attributes for the
 // person with bsn. An attribute this source is not the authentic source for,
 // or holds no value for, is left out.
-func (s *Service) Retrieve(bsn string, identifiers []string, mandate bool) ([]Attribute, error) {
+func (s *Service) Retrieve(ctx context.Context, bsn string, identifiers []string, mandate bool) ([]Attribute, error) {
 	if len(identifiers) == 0 {
 		return nil, &MalformedError{Reason: "attributeIdentifiers must contain at least one attribute"}
 	}
@@ -128,30 +139,34 @@ func (s *Service) Retrieve(bsn string, identifiers []string, mandate bool) ([]At
 		if !entry.Ours {
 			continue
 		}
-		if raw, ok := s.source.Value(bsn, entry.Name); ok {
+		raw, ok, err := s.source.Value(ctx, bsn, entry.Name)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
 			out = append(out, Attribute{Identifier: id, Value: raw})
 		}
 	}
 	return out, nil
 }
 
-func (s *Service) verifyAttribute(bsn string, a Attribute) string {
-	held, ok := s.heldValue(bsn, a.Identifier)
-	if !ok {
-		return ResultUnknown
+func (s *Service) verifyAttribute(ctx context.Context, bsn string, a Attribute) (string, error) {
+	held, ok, err := s.heldValue(ctx, bsn, a.Identifier)
+	if err != nil || !ok {
+		return ResultUnknown, err
 	}
 	var claimed any
 	_ = json.Unmarshal(a.Value, &claimed)
-	return compareValues(claimed, held)
+	return compareValues(claimed, held), nil
 }
 
 // verifyFragment compares a fragment. The ETSI schema requires the fragment
 // value to be an object; this mock reads it as {"<last member name>": value},
 // for example location "$.city" with value {"city": "Rotterdam"}.
-func (s *Service) verifyFragment(bsn string, f Fragment) (string, error) {
-	held, ok := s.heldValue(bsn, f.Identifier)
-	if !ok {
-		return ResultUnknown, nil
+func (s *Service) verifyFragment(ctx context.Context, bsn string, f Fragment) (string, error) {
+	held, ok, err := s.heldValue(ctx, bsn, f.Identifier)
+	if err != nil || !ok {
+		return ResultUnknown, err
 	}
 	selected, member, err := jsonPath(held, f.Location)
 	if errors.Is(err, errPathEmpty) {
@@ -175,21 +190,22 @@ func (s *Service) verifyFragment(bsn string, f Fragment) (string, error) {
 // heldValue returns the decoded value the source holds, and false when there
 // is no authentic source data for it: the attribute is not ours, or the source
 // holds no value for this person. Both yield Unknown
-// (ETSI TS 119 478 REQ-ASIP-6.1.1.2-04).
-func (s *Service) heldValue(bsn, id string) (any, bool) {
+// (ETSI TS 119 478 REQ-ASIP-6.1.1.2-04). An attribute that is not ours is not
+// asked of the source.
+func (s *Service) heldValue(ctx context.Context, bsn, id string) (any, bool, error) {
 	entry, _ := s.catalogue.lookup(id)
 	if !entry.Ours {
-		return nil, false
+		return nil, false, nil
 	}
-	raw, ok := s.source.Value(bsn, entry.Name)
-	if !ok {
-		return nil, false
+	raw, ok, err := s.source.Value(ctx, bsn, entry.Name)
+	if err != nil || !ok {
+		return nil, false, err
 	}
 	var v any
 	if err := json.Unmarshal(raw, &v); err != nil {
-		return nil, false
+		return nil, false, nil
 	}
-	return v, true
+	return v, true, nil
 }
 
 // validateVerifyRequest enforces the required members of the ETSI schema and

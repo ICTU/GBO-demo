@@ -20,6 +20,9 @@ rule_id := "EUD0001"
 # token, PID_NOT_PRESENT below denies anyway.
 regime := "pid"
 
+# The income declaration is bri's; Query.ingeschrevenPersoon is also brp's root.
+services := {"bri"}
+
 # DVT0001's fields plus box 2 and box 3.
 covers_types := {"Bedrag"}
 

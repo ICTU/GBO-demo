@@ -1,6 +1,6 @@
 # asi-provider — ASIP mock (ETSI TS 119 478)
 
-A mock Authentic Source Interface Provider. A qualified trust service provider (QTSP) asks whether an attribute value it holds for a person matches the authentic source, and gets one of `Match`, `NoMatch`, `MatchWithVariation` or `Unknown` back. Part of epic #336: slice 1 (#498) built the contract layer, slice 2 (#503) the authorization.
+A mock Authentic Source Interface Provider. A qualified trust service provider (QTSP) asks whether an attribute value it holds for a person matches the authentic source, and gets one of `Match`, `NoMatch`, `MatchWithVariation` or `Unknown` back. Part of epic #336: slice 1 (#498) built the contract layer, slice 2 (#503) the authorization, slice 4 (#525) the chain to the BRP.
 
 ## What is real and what is not
 
@@ -8,7 +8,7 @@ A mock Authentic Source Interface Provider. A qualified trust service provider (
 |---|---|
 | `POST /authsrc-api/verify` and `POST /authsrc-api/retrieve` (ETSI TS 119 478 V1.1.1 clause 6.1.1 and 6.1.2) | implemented against the contract below; the tests validate every response against it |
 | Sealed results | every successful response is sealed; the certificate is a **development** certificate, not a qualified one |
-| Authentic source | in-memory, `testdata/persons.json` (the persons of the BRP mock) |
+| Authentic source | the BRP mock, asked over FSC through the ASIP's own Outway; the PDP of the BRP Inway judges each query (rule `ASI0001`) |
 | Authorization (clause 6.1.3) | every request needs a DPoP-bound access token from [`asi-authorization-server`](../asi-authorization-server); the BSN of the user comes from the token. User identification at the authorization server is still a stub |
 | Attribute identifiers | provisional (`https://gbo.example/attributes/<name>/1`); there is no Dutch catalogue of attributes yet |
 
@@ -22,19 +22,20 @@ make demo-asi
 
 This adds the ASIP's FSC peer (OIN `99999999900000001200`, compose profile `asi`), lists it in the onboarding register with source peer `…0200`, seeds its connection contract for the BRP source (`brp`) with the grant link `/brp` on its Outway, issues the development seal certificate when missing, and starts both services: the authorization server on `GBO_PORT_ASI_AUTHORIZATION_SERVER` (default 9425) and the ASIP on `GBO_PORT_ASI_PROVIDER` (default 9424). Both are reached from the host: the issuer and the ASIP's public URL are host addresses (`http://<GBO_PUBLIC_HOST>:<port>`, or `ASI_AUTHORIZATION_SERVER_PUBLIC_URL` and `ASI_PROVIDER_PUBLIC_URL`; set `GBO_PUBLIC_HOST` to the LAN address when the QTSP or the browser runs on another machine), and the ASIP fetches the authorization server's keys on its internal address (`ASIP_AUTHORIZATION_SERVER_INTERNAL_URL`).
 
-On its own:
+On its own, it needs an Outway with a contract for `brp`; outside the stack every query then answers 503:
 
 ```bash
 make provision-asip-seal-certificate
 cd services/asi-provider
 ASIP_SEAL_KEY_FILE=../../.local/secrets/asi-provider/seal-key.pem \
 ASIP_SEAL_CERT_FILE=../../.local/secrets/asi-provider/seal-cert.pem \
+ASIP_OUTWAY_URL=http://localhost:8080 \
 go run .
 ```
 
 A request needs an access token from the authorization server, obtained through the authorization code flow; see [`asi-authorization-server`](../asi-authorization-server). There is no client to do that by hand yet (slice 6 of #336); the end-to-end test of the authorization server runs the whole flow against this service.
 
-Configuration: `ASIP_ADDR` (default `:4020`), `ASIP_PUBLIC_URL` (the scheme and host QTSPs use, default `http://localhost:4020`; the token audience is this URL plus `/authsrc-api`), `ASIP_AUTHORIZATION_SERVER` (the issuer, default `http://localhost:4021`), `ASIP_AUTHORIZATION_SERVER_INTERNAL_URL` (where the ASIP reaches the authorization server when that differs from the issuer), `ASIP_SOURCE_FILE`, `ASIP_SEAL_KEY_FILE`, `ASIP_SEAL_CERT_FILE` (chain, leaf first), `ASIP_PROVIDER_NAME`, `ASIP_AUTHENTIC_SOURCE_NAME`.
+Configuration: `ASIP_ADDR` (default `:4020`), `ASIP_PUBLIC_URL` (the scheme and host QTSPs use, default `http://localhost:4020`; the token audience is this URL plus `/authsrc-api`), `ASIP_AUTHORIZATION_SERVER` (the issuer, default `http://localhost:4021`), `ASIP_AUTHORIZATION_SERVER_INTERNAL_URL` (where the ASIP reaches the authorization server when that differs from the issuer), `ASIP_OUTWAY_URL` (required: the ASIP's Outway), `ASIP_OUTWAY_PATH` (the grant-link of the BRP contract, default `/brp/graphql`), `ASIP_SEAL_KEY_FILE`, `ASIP_SEAL_CERT_FILE` (chain, leaf first), `ASIP_PROVIDER_NAME`, `ASIP_AUTHENTIC_SOURCE_NAME`.
 
 ## Layout
 
@@ -45,7 +46,7 @@ Ports and adapters, as `AGENTS.md` asks for a service with an authorization boun
 | `internal/verification` | the core: Verify and Retrieve, the catalogue, matching and JSONPath fragments. Port `Source` |
 | `internal/accesstoken` | the ASIP as resource server: access token, DPoP proof and scope. Port `KeySource` |
 | `internal/asmetadata` | `KeySource`: the keys from the metadata of the authorization server |
-| `internal/memorysource` | `Source`: the persons file |
+| `internal/brpsource` | `Source`: the BRP over FSC, one GraphQL query per attribute |
 | `internal/seal` | the seal on every result |
 | `internal/sealcert` | the `provision-seal-certificate` command |
 | `internal/httpapi` | `/verify`, `/retrieve` and the contract: validation, problem details, `WWW-Authenticate` |
@@ -59,12 +60,29 @@ Ports and adapters, as `AGENTS.md` asks for a service with an authorization boun
 - **Server**: `http://localhost:4020/authsrc-api` fills in the Annex B server template; `authsrc-api` is its default base path.
 - **OAuth 2.0**: Annex B defines no security scheme; clause 6.1.3 requires an access token from the authorization server. The contract describes the authorization code flow with the URLs of the authorization server and requires the scope of each operation (REQ-DIP-5.3.3-03-02-01 asks the OpenAPI to name the authorization server).
 - **`WWW-Authenticate`** on every 401: RFC 6750 section 3 and RFC 9068 section 4 require the challenge.
-- **503**: when the keys of the authorization server cannot be obtained, no token can be validated. That is not an error of the client's token, so the mock answers 503 rather than 401. Annex B lists no 503.
+- **503**: when the keys of the authorization server cannot be obtained, no token can be validated. That is not an error of the client's token, so the mock answers 503 rather than 401. The same when the BRP cannot be reached: that is not `Unknown`, which says the source holds no data. Annex B lists no 503.
+- **500**: when the chain refuses the ASIP's query (the PDP denies it, or the BRP answers errors). That is a fault in the deployment, not a missing value. Annex B lists no 500.
 - **`X-JWS-Signature`** on every 200: the seal the law requires (below).
 - **400 and 501 on `/retrieve`**: REQ-ASIP-6.1.2.2-06 lists them; Annex B lists only 200, 401 and 404.
 - **Problem details on 401, and on 404 of `/retrieve`**: Annex B describes no body there; this mock returns the same RFC 9457 problem as on its other errors.
 
 The access token is checked first (401). Then the request is validated against the request schemas of the contract, so a malformed request gets 400 before an unsupported mandate (501) or an unknown attribute (404). An attribute identifier must be an absolute URI.
+
+## The authentic source
+
+The ASIP is an FSC consumer peer of its own (`99999999900000001200`) with a connection contract for the BRP service `brp`. Per attribute it posts its own GraphQL query to the grant-link `/brp/graphql` on its Outway, with only the fields of that attribute and the BSN from the access token as the variable `bsn`. Every query carries a `Fsc-Transaction-Id` (UUID v7) and a `traceparent` whose trace id is that UUID.
+
+| Attribute | BRP fields | Value |
+|---|---|---|
+| `family_name` | `voorvoegsel`, `geslachtsnaam` | `{"family_name": "<voorvoegsel> <geslachtsnaam>"}` |
+| `given_name` | `voornamen` | `{"given_name": …}` |
+| `birth_date` | `geboortedatum` | `{"birth_date": …}` |
+| `nationality` | `heeftNationaliteit { nationaliteit }` | `{"nationalities": [ISO codes]}` |
+| `address` | `... on Ingezetene { woontOp { … } }` | `{"street", "house_number" (number, letter and addition separated by spaces), "postal_code", "city", "country": "NL"}` |
+
+A person the BRP does not know, or a field it holds no value for, yields `Unknown`; an address yields it unless street, house number, postal code and city are all there. So does the address of a non-resident: a foreign address in the BRP has free lines, not the members of the attribute. The diploma is in the catalogue but not the BRP's; it is `Unknown` without a query.
+
+Rule `ASI0001` (`policies/gbo/rules/asi/asi0001.rego`) grants these fields to the ASIP's peer, without a consent token, for a BSN that names a citizen, on the service `brp` only. Any other BRP field falls to the closed world of the policy engine.
 
 ## The access token
 
@@ -77,7 +95,7 @@ Every request carries `Authorization: DPoP <token>` and a `DPoP` proof header. T
 
 Every failure is 401 with a `WWW-Authenticate: DPoP` challenge and a problem body: `invalid_token`, `invalid_request` (no proof), `invalid_dpop_proof`, or `insufficient_scope`. ETSI TS 119 478 lists 401 for "an authentication or authorization error"; RFC 6750 would use 403 for `insufficient_scope`.
 
-A token without the BSN claim is `invalid_token`. A BSN the source does not know yields `Unknown`. When the ASIP cannot obtain the keys of the authorization server and holds none from before, it answers 503.
+A token without the BSN claim is `invalid_token`. A BSN the BRP does not know yields `Unknown`. When the ASIP cannot obtain the keys of the authorization server and holds none from before, it answers 503.
 
 `GET /19478-dataservice-schema.json` serves the schema the contract references.
 

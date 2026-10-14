@@ -2,8 +2,8 @@
 // after ETSI TS 119 478 V1.1.1 clause 6.1: a QTSP verifies whether an
 // attribute it holds matches the authentic source.
 //
-// /verify and /retrieve answer against an in-memory source, and every result
-// is sealed. Every request carries a DPoP-bound access token from the
+// /verify and /retrieve answer against the BRP, asked over FSC through the
+// ASIP's own Outway, and every result is sealed. Every request carries a DPoP-bound access token from the
 // authorization server (services/asi-authorization-server, clause 6.1.3);
 // the user's BSN comes from that token.
 //
@@ -28,8 +28,8 @@ import (
 
 	"gbo-demo/asi-provider/internal/accesstoken"
 	"gbo-demo/asi-provider/internal/asmetadata"
+	"gbo-demo/asi-provider/internal/brpsource"
 	"gbo-demo/asi-provider/internal/httpapi"
-	"gbo-demo/asi-provider/internal/memorysource"
 	"gbo-demo/asi-provider/internal/seal"
 	"gbo-demo/asi-provider/internal/sealcert"
 	"gbo-demo/asi-provider/internal/verification"
@@ -56,10 +56,11 @@ func main() {
 }
 
 func serve() error {
-	source, err := memorysource.Load(env("ASIP_SOURCE_FILE", "testdata/persons.json"))
-	if err != nil {
-		return err
+	outway := os.Getenv("ASIP_OUTWAY_URL")
+	if outway == "" {
+		return errors.New("ASIP_OUTWAY_URL is required: the ASIP's FSC Outway, through which it asks the BRP")
 	}
+	source := brpsource.New(outway, env("ASIP_OUTWAY_PATH", "/brp/graphql"))
 	key, chain, err := seal.LoadMaterial(os.Getenv("ASIP_SEAL_KEY_FILE"), os.Getenv("ASIP_SEAL_CERT_FILE"))
 	if err != nil {
 		return err
@@ -83,7 +84,7 @@ func serve() error {
 	srv := &http.Server{Addr: env("ASIP_ADDR", ":4020"), Handler: handler, ReadHeaderTimeout: readHeaderTimeout}
 	errc := make(chan error, 1)
 	go func() {
-		slog.Info("listening", "addr", srv.Addr, "resource", resource, "authorization_server", issuer)
+		slog.Info("listening", "addr", srv.Addr, "resource", resource, "authorization_server", issuer, "outway", outway)
 		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 			errc <- err
 		}

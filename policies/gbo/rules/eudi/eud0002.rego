@@ -24,6 +24,8 @@ rule_id := "EUD0002"
 # token, PID_NOT_PRESENT below denies anyway.
 regime := "pid"
 
+services := {"brp"}
+
 # No shared value object here. Every field is listed, so other BRP fields
 # (woontOp, heeftNationaliteit, gezag) fall to the engine's closed world.
 covers_types := set()
