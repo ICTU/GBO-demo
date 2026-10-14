@@ -194,6 +194,14 @@ func TestVerifyMandateIs501(t *testing.T) { // case 8
 	assertProblem(t, rec, http.StatusNotImplemented)
 }
 
+// A mandate is not supported on retrieve either (REQ-ASIP-6.1.2.2-06).
+func TestRetrieveMandateIs501(t *testing.T) {
+	env := newTestServer(t)
+	body := `{"attributeIdentifiers":[{"attributeIdentifier":"` + idFamilyName + `"}],"mandate":{"type":"guardian"}}`
+	rec := post(t, env, "/retrieve", env.person(bsnFrouke), body)
+	assertProblem(t, rec, http.StatusNotImplemented)
+}
+
 func TestVerifyMalformedIs400(t *testing.T) { // case 9
 	env := newTestServer(t)
 	for name, body := range map[string]string{

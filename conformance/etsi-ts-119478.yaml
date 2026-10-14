@@ -272,9 +272,10 @@ requirements:
       - "services/asi-provider/internal/httpapi:TestRetrieveReturnsValue"
       - "services/qtsp-reference:TestRetrieve"
   REQ-ASIP-6.1.2.2-02-01:
-    status: failing
-    reason: When the source holds no value for any requested attribute, the 200 response has an empty attributes array.
-    slice: "#533: retrieve answers 404 when a requested attribute has no value"
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestRetrieveReturnsValue"
+      - "services/asi-provider/internal/httpapi:TestRetrieveWithoutAValueIs404"
   REQ-ASIP-6.1.2.2-03:
     status: passed
     tests:
@@ -291,9 +292,14 @@ requirements:
     status: not-applicable
     reason: Mandate handling is not supported, so the condition never arises.
   REQ-ASIP-6.1.2.2-06:
-    status: failing
-    reason: An attribute the source holds no value for is left out of a 200 response instead of yielding 404 (not found).
-    slice: "#533: retrieve answers 404 when a requested attribute has no value"
+    status: passed
+    tests:
+      - "services/asi-provider/internal/httpapi:TestRetrieveReturnsValue"
+      - "services/asi-provider/internal/httpapi:TestSchemaViolationIs400BeforeOtherChecks/retrieve: identifier is not a URI"
+      - "services/asi-provider/internal/httpapi:TestRequestWithoutTokenIs401"
+      - "services/asi-provider/internal/httpapi:TestRetrieveUnknownAttributeIdentifierIs404"
+      - "services/asi-provider/internal/httpapi:TestRetrieveWithoutAValueIs404"
+      - "services/asi-provider/internal/httpapi:TestRetrieveMandateIs501"
   REQ-ASIP-B-01:
     status: passed
     tests:
