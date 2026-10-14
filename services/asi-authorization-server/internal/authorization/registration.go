@@ -306,6 +306,23 @@ type clientMetadata struct {
 	scopes       map[string]bool
 }
 
+// secureRedirect allows https, and http only on a loopback address: the
+// browser and the client then run on the same machine (RFC 8252 section 7.3),
+// as the demo's reference QTSP does. Any other address needs https.
+func secureRedirect(u *url.URL) bool {
+	if u.Host == "" {
+		return false
+	}
+	switch u.Scheme {
+	case "https":
+		return true
+	case "http":
+		host := u.Hostname()
+		return host == "localhost" || host == "127.0.0.1" || host == "::1"
+	}
+	return false
+}
+
 func parseClientMetadata(m map[string]json.RawMessage) (clientMetadata, *Error) {
 	invalid := func(description string) (clientMetadata, *Error) {
 		return clientMetadata{}, &Error{Code: "invalid_client_metadata", Description: description}
@@ -353,8 +370,8 @@ func parseClientMetadata(m map[string]json.RawMessage) (clientMetadata, *Error) 
 	}
 	for _, u := range redirectURIs {
 		parsed, err := url.Parse(u)
-		if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.Fragment != "" {
-			return clientMetadata{}, &Error{Code: "invalid_redirect_uri", Description: "a redirect_uri must be an absolute https URI without fragment: " + u}
+		if err != nil || !secureRedirect(parsed) || parsed.Fragment != "" {
+			return clientMetadata{}, &Error{Code: "invalid_redirect_uri", Description: "a redirect_uri must be an absolute https URI, or http on a loopback address, without fragment: " + u}
 		}
 	}
 	return clientMetadata{redirectURIs: redirectURIs, scope: strings.Join(granted, " "), scopes: scopes}, nil
