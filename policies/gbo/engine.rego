@@ -69,14 +69,14 @@ _denied_fields := [{
 
 # ── The request's code (Section 9.5) and what the consumer sees (10.2) ──────
 
-# A check on the mapper's output fails first; then a field no rule could
-# decide; then a server problem on any field; else the request is denied
+# A check on the mapper's output fails first; then a rule that could not be
+# evaluated; then a server problem on any field; else the request is denied
 # because fields are.
 _request_code := _request_failure if {
 	_request_failure
-} else := {"code": "CONFIG_ERROR", "subcode": "RULE_NOT_EVALUABLE"} if {
-	some d in _denied_fields
-	d.code == "RULE_NOT_EVALUABLE"
+} else := {"code": "CONFIG_ERROR", "subcode": codes[0]} if {
+	codes := sort([d.code | some d in _denied_fields; d.code in _rule_errors])
+	count(codes) > 0
 } else := {"code": "PIP_UNAVAILABLE"} if {
 	some d in _denied_fields
 	d.code == "PIP_UNAVAILABLE"
@@ -142,16 +142,30 @@ _schema_pinned if _gql.schema.digest == data.gbo.graphql_schemas.digests[_servic
 
 # ── The rules ───────────────────────────────────────────────────────────────
 # Every package in a regime directory under ./rules (rules/dvtp, rules/eudi)
-# that names a rule_id is a rule. deny holds its reasons about the request as
-# a whole, deny_field[i] those about data field i; a rule grants a field when
-# neither has a reason for it.
+# that names a rule_id is a rule. It states its conditions in one of two
+# forms:
+#
+#   deny          deny holds its reasons about the request as a whole,
+#                 deny_field[i] those about data field i; the rule grants a
+#                 field when neither has a reason for it.
+#   requirements  requirements lists what must hold for the request,
+#                 field_requirements[i] what must hold for data field i,
+#                 each a condition ("holds") with its code; the rule grants
+#                 a field when every condition is true.
+#
+# A rule without a deny document is in the requirements form. That form
+# fails closed by construction: a condition that is undefined makes its
+# whole list undefined, and a missing list refuses the field.
 
 _rule_meta[rid] := {
 	"regime": _rule_doc(dir, pkg, "regime", ""),
 	"covers_types": _rule_doc(dir, pkg, "covers_types", set()),
 	"covers_fields": _rule_doc(dir, pkg, "covers_fields", set()),
+	"form": _rule_form(dir, pkg),
 	"deny": _rule_doc(dir, pkg, "deny", set()),
 	"deny_field": _rule_doc(dir, pkg, "deny_field", {}),
+	"requirements": _rule_doc(dir, pkg, "requirements", null),
+	"field_requirements": _rule_doc(dir, pkg, "field_requirements", {}),
 } if {
 	some dir, pkg
 	rid := data.gbo.rules[dir][pkg].rule_id
@@ -163,6 +177,10 @@ _rule_meta[rid] := {
 _rule_doc(dir, pkg, name, _) := data.gbo.rules[dir][pkg][name]
 
 _rule_doc(dir, pkg, name, fallback) := fallback if not data.gbo.rules[dir][pkg][name]
+
+_rule_form(dir, pkg) := "deny" if {
+	data.gbo.rules[dir][pkg].deny
+} else := "requirements"
 
 # ── The regime decides which rules apply ────────────────────────────────────
 # A consent token, verified or not, puts the request in the consent regime
@@ -262,9 +280,45 @@ _reasons[i][rid] := reasons if {
 	some f in _data_fields
 	i := f.index
 	some rid in f.policy_ids
-	m := _rule_meta[rid]
-	reasons := (m.deny | object.get(m.deny_field, i, set())) | _mandate_reasons(rid)
+	reasons := _rule_reasons(_rule_meta[rid], f) | _mandate_reasons(rid)
 }
+
+_rule_reasons(m, f) := m.deny | object.get(m.deny_field, f.index, set()) if {
+	m.form == "deny"
+}
+
+_rule_reasons(m, f) := _unmet_requirements(m, f) if {
+	m.form == "requirements"
+}
+
+# Written positively on purpose: `not is_array(x[i])` with x[i] missing is
+# not true in Rego but makes the whole body fail, so a missing list would
+# slip through. Here a missing list leaves the first clause undefined, and
+# the else refuses: it could not be evaluated, a fault in the rule.
+_unmet_requirements(m, f) := _field_unmet(m.requirements, checks, f) if {
+	is_array(m.requirements)
+	checks := m.field_requirements[f.index]
+	is_array(checks)
+} else := {"RULE_NOT_EVALUABLE"}
+
+# A field with arguments needs a condition of its own: without one, any
+# value of its arguments would pass.
+_field_unmet(requirements, checks, f) := {"FIELD_ARGUMENTS_UNCHECKED"} if {
+	count(object.get(f.record, "args", {})) > 0
+	count(checks) == 0
+} else := _unmet(requirements) | _unmet(checks)
+
+# Only a condition that is exactly true holds. Asked through a rule of its
+# own, so `not` negates the whole question and a missing holds counts as
+# not holding.
+_unmet(requirements) := {_requirement_code(r) | some r in requirements; not _holds(r)}
+
+_holds(r) if r.holds == true
+
+_requirement_code(r) := r.code if {
+	is_string(r.code)
+	r.code != ""
+} else := "RULE_NOT_EVALUABLE"
 
 _decide(f) := {"decision": false, "context": {"reason_admin": {"code": "NO_APPLICABLE_RULE", "evaluated": []}}} if {
 	count(f.policy_ids) == 0
@@ -292,10 +346,17 @@ _evaluate_field(policy_ids, reasons) := {"decision": true, "context": {"granted_
 	}
 }
 
-_field_code(evaluated) := "PIP_UNAVAILABLE" if {
+_field_code(evaluated) := rule_errors[0] if {
+	rule_errors := [e.code | some e in evaluated; e.code in _rule_errors]
+	count(rule_errors) > 0
+} else := "PIP_UNAVAILABLE" if {
 	some e in evaluated
 	e.code in _pip_unavailable
 } else := evaluated[0].code
+
+# A rule that could not be evaluated, or that leaves a field's arguments
+# unchecked: a fault in the policy, reported as CONFIG_ERROR.
+_rule_errors := {"RULE_NOT_EVALUABLE", "FIELD_ARGUMENTS_UNCHECKED"}
 
 # The consent register, its keys or the admission register did not answer: a
 # server problem, not the consumer's. The trace still shows which.
@@ -306,6 +367,8 @@ _pip_unavailable := {"CONSENT_STATUS_UNAVAILABLE", "CONSENT_KEYS_UNAVAILABLE", "
 # the consent's state, then the question, then who asks. A reason not listed
 # still refuses, and comes after the listed ones.
 _reason_order := [
+	"RULE_NOT_EVALUABLE",
+	"FIELD_ARGUMENTS_UNCHECKED",
 	"CONSENT_CONTEXT_INVALID",
 	"CONSENT_SIGNATURE_INVALID",
 	"CONSENT_KEYS_UNAVAILABLE",

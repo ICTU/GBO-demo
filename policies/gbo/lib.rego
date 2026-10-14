@@ -18,20 +18,26 @@ key(f) := sprintf("%s.%s", [f.parentType, f.field])
 
 # The value of an argument as the request supplied it. Undefined when absent
 # or (partly) from a schema default: the source applies its own default,
-# which need not match the bundled schema, so a check on it must fail
-# (Section 9.4).
+# which need not match the bundled schema, so a check that needs the value
+# must fail (Section 9.4).
 #
 # Do not negate a comparison on it: `not argument(f, a) == x` and
 # `argument(f, a) != x` both let a missing value through, because Rego
 # evaluates the call before the negation, and an undefined result fails the
-# whole rule instead. Ask through a rule or function of its own, negated as
-# a whole (`not helper.names_consent_citizen(f, ...)`), so that `not`
-# negates the whole question.
+# whole rule instead. Ask through a rule that is always true or false,
+# such as argument_is, so that `not` negates the whole question.
 argument(f, name) := entry.value if {
 	entry := f.args[name]
 	entry.origin != "schema-default"
 	not entry.schemaDefaults
 }
+
+# The argument was given exactly this value. Always true or false: a missing
+# argument or one from a schema default is not the value, so a requirement
+# on it refuses with its own code rather than becoming undefined.
+default argument_is(_, _, _) := false
+
+argument_is(f, name, value) if argument(f, name) == value
 
 # The values a list argument was given, as a set (the mapper coerces a single
 # value to a list). Empty when the request gave none: the argument is
@@ -43,14 +49,12 @@ argument_values(f, name) := {v | some v in argument(f, name)}
 # ── Placeholders ─────────────────────────────────────────────────────────────
 # The names a consent-based query gives its subject. The consumer holds no
 # identifier of the citizen; after an allow the source puts in their place
-# its own value from the consent token: the BSN for identity, its pseudonym
-# of the citizen for pseudonym.
+# its own value from the consent token: the BSN for consent:identity, its
+# pseudonym of the citizen for consent:pseudonym. A rule names the one its
+# API takes; this set is for checks on every placeholder, such as that a
+# real BSN is none of them.
 
-identity_placeholder := "consent:identity"
-
-pseudonym_placeholder := "consent:pseudonym"
-
-subject_placeholders := {identity_placeholder, pseudonym_placeholder}
+subject_placeholders := {"consent:identity", "consent:pseudonym"}
 
 # ── Scope ────────────────────────────────────────────────────────────────────
 # The scope the consumer declares in X-GBO-Scope, header name in any case.

@@ -602,8 +602,9 @@ test_mandate_comes_after_the_rules_own_reasons if {
 
 # ── A rule's code is its most fundamental reason ────────────────────────
 
-# A token that does not verify fails most of the consent's conditions; the
-# code names the token, the trace keeps the rest.
+# A token that does not verify fails the consent and what depends on it;
+# the code names the token. The consent's own state gives one reason, its
+# first problem, and the trace keeps the rest.
 test_an_unverified_token_is_the_code_and_the_trace_keeps_the_rest if {
 	result := gbo.response with input as _dvtp_input("bd:ib:2025", "consent:identity", [2025])
 		with data.gbo.consent.resolved as {"context_valid": false, "status_available": false, "exists": false}
@@ -612,7 +613,7 @@ test_an_unverified_token_is_the_code_and_the_trace_keeps_the_rest if {
 	some t in d.trace
 	t.code == "CONSENT_CONTEXT_INVALID"
 	t.reasons[0] == "CONSENT_CONTEXT_INVALID"
-	"CONSENT_WITHDRAWN" in t.reasons
+	not "CONSENT_WITHDRAWN" in t.reasons
 	"CONSENT_ACTOR_MISMATCH" in t.reasons
 }
 
@@ -656,4 +657,67 @@ test_a_field_without_a_decision_is_refused_not_dropped if {
 	fx.client(result) == {"code": "ACCESS_DENIED"}
 	fx.request_code(result) == {"code": "CONFIG_ERROR", "subcode": "RULE_NOT_EVALUABLE"}
 	[[d.index, d.code] | some d in fx.denied(result)] == [[0, "RULE_NOT_EVALUABLE"]]
+}
+
+# ── The requirements form ───────────────────────────────────────────────
+# A test rule passed in as data: the root field (position 0, with an
+# argument) and a leaf (position 1, without one).
+
+_two_fields := fx.request(fx.hv, "bri", [fx.person("999991772"), fx.year], {})
+
+_holds(code) := {"holds": true, "code": code}
+
+_requirements_rule(rule) := {"test": {"r": object.union(
+	{"rule_id": "R", "covers_fields": {"Query.ingeschrevenPersoon", "BelastingjaarAangifte.belastingjaar"}},
+	rule,
+)}}
+
+test_requirements_that_all_hold_allow if {
+	rule := {"requirements": [_holds("A")], "field_requirements": {0: [_holds("B")], 1: []}}
+	result := gbo.response with input as _two_fields with data.gbo.rules as _requirements_rule(rule)
+	result.decision == true
+	{g.rule | some g in result.context.granted} == {"R"}
+}
+
+# A requirement that cannot be evaluated makes the whole list undefined: a
+# fault in the rule, refused on every field and reported as one.
+test_an_undefined_request_requirement_refuses_every_field_as_a_rule_fault if {
+	rule := {"field_requirements": {0: [_holds("B")], 1: []}}
+	result := gbo.response with input as _two_fields with data.gbo.rules as _requirements_rule(rule)
+	result.decision == false
+	fx.client(result) == {"code": "ACCESS_DENIED"}
+	fx.request_code(result) == {"code": "CONFIG_ERROR", "subcode": "RULE_NOT_EVALUABLE"}
+	[[d.index, d.code] | some d in fx.denied(result)] == [[0, "RULE_NOT_EVALUABLE"], [1, "RULE_NOT_EVALUABLE"]]
+}
+
+test_an_undefined_field_requirement_refuses_only_that_field if {
+	rule := {"requirements": [], "field_requirements": {0: [_holds("B")]}}
+	result := gbo.response with input as _two_fields with data.gbo.rules as _requirements_rule(rule)
+	fx.request_code(result) == {"code": "CONFIG_ERROR", "subcode": "RULE_NOT_EVALUABLE"}
+	[[d.index, d.code] | some d in fx.denied(result)] == [[1, "RULE_NOT_EVALUABLE"]]
+}
+
+test_only_a_condition_that_is_exactly_true_holds if {
+	rule := {"requirements": [{"holds": "ja", "code": "NOT_TRUE"}], "field_requirements": {0: [_holds("B")], 1: []}}
+	result := gbo.response with input as _two_fields with data.gbo.rules as _requirements_rule(rule)
+	fx.client(result) == {"code": "FIELD_NOT_PERMITTED"}
+	fx.field_codes(result) == {"NOT_TRUE"}
+}
+
+# A field with arguments needs a condition of its own, or any value of them
+# would pass; a field without arguments needs none.
+test_a_field_with_arguments_and_no_condition_is_a_rule_fault if {
+	rule := {"requirements": [], "field_requirements": {0: [], 1: []}}
+	result := gbo.response with input as _two_fields with data.gbo.rules as _requirements_rule(rule)
+	fx.client(result) == {"code": "ACCESS_DENIED"}
+	fx.request_code(result) == {"code": "CONFIG_ERROR", "subcode": "FIELD_ARGUMENTS_UNCHECKED"}
+	[[d.index, d.code] | some d in fx.denied(result)] == [[0, "FIELD_ARGUMENTS_UNCHECKED"]]
+}
+
+# Why the form fails closed: in Rego a list with one undefined element is
+# itself undefined, so a condition on missing data cannot drop out alone.
+_list_with_missing_data := [_holds("A"), {"holds": data.gbo.no_such_document, "code": "B"}]
+
+test_a_condition_on_missing_data_leaves_the_whole_list_undefined if {
+	not _list_with_missing_data
 }

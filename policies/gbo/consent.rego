@@ -1,5 +1,7 @@
 package gbo.consent
 
+import data.gbo.lib
+
 # Consent PIP: verifies the citizen's consent token on the request and asks
 # the consent register whether that consent is still ACTIVE, while the policy
 # evaluates.
@@ -304,3 +306,63 @@ resolved := {
 } if {
 	present
 }
+
+# ── What the rules read ─────────────────────────────────────────────────────
+# The consent as a rule states it: consent.valid, consent.given_to_caller,
+# consent.covers(scope). Each is always true or false, never undefined, so a
+# rule that lists them as requirements can rely on them; without a token
+# they are all false.
+
+_consent := c if {
+	c := resolved
+} else := {}
+
+# The consent itself holds: the token verified, the register answered, and
+# the consent exists, is not withdrawn and has not expired.
+default valid := false
+
+valid if problem == ""
+
+# Why the consent is not valid, the first that fails in this order; "" when
+# it is. The order is the engine's order of reasons, so a field's code is the
+# same as when each check was a reason of its own.
+problem := _invalid_reason if {
+	not _consent.context_valid == true
+} else := "CONSENT_STATUS_UNAVAILABLE" if {
+	not _consent.status_available == true
+} else := "CONSENT_NOT_FOUND" if {
+	not _consent.exists == true
+} else := "CONSENT_WITHDRAWN" if {
+	not _consent.withdrawn == false
+} else := "CONSENT_EXPIRED" if {
+	not lib.now_ns < time.parse_rfc3339_ns(_consent.valid_until)
+} else := ""
+
+# Why the token did not verify, as the verification above named it (forged,
+# expired, keys unreachable); without a reason, e.g. no token, the generic
+# code.
+_invalid_reason := code if {
+	code := _consent.invalid_code
+	is_string(code)
+	code != ""
+} else := "CONSENT_CONTEXT_INVALID"
+
+# The consent names the party the call is made for: on a delegated call the
+# service provider, not the integrator. Consent gives the integrator no
+# mandate; the engine checks that separately.
+default given_to_caller := false
+
+given_to_caller if {
+	lib.represented_party != ""
+	lib.represented_party == _consent.dienstverlener_oin
+}
+
+# The citizen consented to this scope.
+default covers(_) := false
+
+covers(scope) if scope in _consent.granted_scopes
+
+# The citizen consented to the scope the consumer declares.
+default covers_declared_scope := false
+
+covers_declared_scope if covers(lib.declared_scope)

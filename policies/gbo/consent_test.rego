@@ -459,3 +459,25 @@ test_register_location_is_operator_configuration if {
 	cfg.audience == "aud-x"
 	cfg.issuer == "https://consent-register.gbo.test"
 }
+
+# ── What the rules read ─────────────────────────────────────────────────────
+
+_state := {"context_valid": true, "status_available": true, "exists": true, "withdrawn": false, "valid_until": "2030-01-01T00:00:00Z", "granted_scopes": ["bd:ib:2025"], "dienstverlener_oin": fx.hv}
+
+_state_request := fx.income(fx.hv, "consent:identity", [2025], fx.scope_headers("bd:ib:2025"))
+
+test_a_consent_that_holds_is_valid_with_no_problem if {
+	valid := consent.valid with input as _state_request with data.gbo.consent.resolved as _state
+	problem := consent.problem with input as _state_request with data.gbo.consent.resolved as _state
+	valid == true
+	problem == ""
+}
+
+# Without a token every statement is false and the problem is the token's;
+# none is undefined, so a rule's requirements stay defined.
+test_without_a_token_the_statements_are_false_not_undefined if {
+	consent.valid == false with input as _state_request
+	consent.problem == "CONSENT_CONTEXT_INVALID" with input as _state_request
+	consent.given_to_caller == false with input as _state_request
+	consent.covers_declared_scope == false with input as _state_request
+}

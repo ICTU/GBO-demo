@@ -19,6 +19,7 @@ _r0001 := {
 	"rule_id": "r-0001",
 	"covers_types": {"Persoon", "Inkomen", "LoonInkomen", "Bedrag", "Adres"},
 	"covers_fields": {"Query.persoon", "Persoon.inkomens", "Inkomen.bedrag", "LoonInkomen.bedrag", "Persoon.adres"},
+	"deny": set(),
 }
 
 # Its one check: the years on Persoon.inkomens lie in 2000-2024. A rule
