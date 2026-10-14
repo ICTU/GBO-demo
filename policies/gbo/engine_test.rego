@@ -445,8 +445,7 @@ test_asip_personal_data_is_granted_by_asi0001 if {
 	}
 }
 
-# EUD0001 names no service and also binds the brp root; it does not grant
-# the ASIP, and the leaves are ASI0001's alone.
+# On brp ASI0001 alone covers these fields, and it grants the ASIP only.
 test_another_actor_is_refused_the_personal_data if {
 	result := gbo.response with input as fx.request(fx.eudi_issuer, "brp", fx.personal_fields("999991772"), {})
 	result.decision == false
@@ -467,6 +466,50 @@ test_asip_income_is_judged_by_eud0001_alone if {
 	result.decision == false
 	fx.field_codes(result) == {"ACTOR_NOT_ALLOWED"}
 	_evaluated_rules(result) == {"EUD0001"}
+}
+
+# A rule of one service grants nothing on another, not even a root field
+# alone: ingeschrevenPersoon(bsn) { __typename } would tell whether the
+# person exists and of which type.
+test_a_root_field_alone_is_judged_by_the_services_rules if {
+	brp := gbo.response with input as fx.request(fx.eudi_issuer, "brp", [fx.person("999991772")], {})
+	brp.decision == false
+	[[d.index, d.code] | some d in fx.denied(brp)] == [[0, "ACTOR_NOT_ALLOWED"]]
+	_evaluated_rules(brp) == {"ASI0001"}
+
+	bri := gbo.response with input as fx.request(fx.asip, "bri", [fx.person("999991772")], {})
+	bri.decision == false
+	_evaluated_rules(bri) == {"EUD0001"}
+}
+
+# ── Every GBO rule names its services ────────────────────────────────────
+# A rule naming none binds on every service, and would judge a key another
+# service shares.
+
+_service_violations contains sprintf("%s: names no services", [rid]) if {
+	some rid, m in gbo._rule_meta
+	m.services == null
+}
+
+_service_violations contains sprintf("%s: names services that are not a set", [rid]) if {
+	some rid, m in gbo._rule_meta
+	m.services != null
+	not is_set(m.services)
+}
+
+test_every_rule_names_its_services if {
+	violations := _service_violations
+	print("rules without services:", violations)
+	count(violations) == 0
+}
+
+test_service_check_catches_a_rule_without_them if {
+	broken := {"test": {
+		"none": {"rule_id": "N", "regime": "pid", "covers_fields": set()},
+		"list": {"rule_id": "L", "regime": "pid", "services": ["brp"], "covers_fields": set()},
+	}}
+	violations := _service_violations with data.gbo.rules as broken
+	violations == {"N: names no services", "L: names services that are not a set"}
 }
 
 # ── Every GBO rule names one regime ──────────────────────────────────────

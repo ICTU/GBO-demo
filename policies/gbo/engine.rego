@@ -184,7 +184,8 @@ _active_rules[rid] := m if {
 # A field key names a type and field, not the schema: two services can share
 # a key (Query.ingeschrevenPersoon is in both bri and brp). A rule naming
 # services binds only on those, by the FSC service signed in the contract; a
-# rule naming none binds on every service. An empty set binds nowhere.
+# rule naming none binds on every service (test rules only: every GBO rule
+# names its services). An empty set binds nowhere.
 
 _serves(m) if m.services == null
 

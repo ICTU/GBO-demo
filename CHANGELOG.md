@@ -36,9 +36,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     birth, nationality, a resident's address); rule `ASI0001` grants the
     ASIP those fields, on `brp` only. A source that cannot be reached is 503,
     a refusal in the chain 500 (#525).
-  - Rules can name the FSC services they bind on (`services`): a field key
-    such as `Query.ingeschrevenPersoon` is shared by `bri` and `brp`. A rule
-    naming none binds on every service, as before (#525).
+  - Rules name the FSC services they bind on (`services`): a field key such
+    as `Query.ingeschrevenPersoon` is shared by `bri` and `brp`. EUD0001 and
+    DVT0001 bind on `bri`, EUD0002 on `brp`, LVG0001 on `lvg`; a policy test
+    requires every rule to name its services, so a root field alone on
+    another service is no longer granted (#525).
   - Both services are laid out as ports and adapters: a core under
     `internal/`, an HTTP adapter, and `main.go` as the composition root.
 
