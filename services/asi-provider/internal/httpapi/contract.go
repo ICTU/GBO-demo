@@ -13,6 +13,7 @@ import (
 	"github.com/getkin/kin-openapi/openapi3filter"
 	"github.com/getkin/kin-openapi/routers"
 
+	"gbo-demo/asi-provider/internal/asmetadata"
 	"gbo-demo/asi-provider/openapi"
 )
 
@@ -101,7 +102,11 @@ func contractFor(serverURL, issuer string) ([]byte, error) {
 	oauth2, _ := withIssuer(schemes["oauth2"], issuer).(map[string]any)
 	// The metadata of the authorization server, machine-readable
 	// (REQ-DIP-5.3.3-03-02-01; RFC 8414).
-	oauth2["x-oauth-authorization-server"] = issuer + "/.well-known/oauth-authorization-server"
+	metadata, err := asmetadata.MetadataURL(issuer)
+	if err != nil {
+		return nil, err
+	}
+	oauth2["x-oauth-authorization-server"] = metadata
 	schemes["oauth2"] = oauth2
 	return json.MarshalIndent(doc, "", "  ")
 }

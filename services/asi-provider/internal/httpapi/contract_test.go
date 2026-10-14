@@ -175,3 +175,26 @@ func TestCompletionsOnlyAdd(t *testing.T) {
 	}
 	walk("", base, merged)
 }
+
+// An issuer with a path: the contract names the metadata where RFC 8414
+// section 3.1 puts it, the well-known suffix before the path.
+func TestContractNamesTheMetadataOfAnIssuerWithAPath(t *testing.T) {
+	published, err := contractFor("https://asip.test/brp/authsrc-api", "https://as.test/tenant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Components struct {
+			SecuritySchemes struct {
+				OAuth2 map[string]any `json:"oauth2"`
+			} `json:"securitySchemes"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(published, &doc); err != nil {
+		t.Fatal(err)
+	}
+	const want = "https://as.test/.well-known/oauth-authorization-server/tenant"
+	if got := doc.Components.SecuritySchemes.OAuth2["x-oauth-authorization-server"]; got != want {
+		t.Errorf("x-oauth-authorization-server = %v, want %s", got, want)
+	}
+}

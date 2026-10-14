@@ -581,6 +581,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   `SubjectTypePI`.
 
 ### Fixed
+- **The ASIP named the wrong metadata URL for an issuer with a path.** It
+  appended `/.well-known/oauth-authorization-server` to the issuer; RFC 8414
+  section 3.1 puts the suffix between the host and the path. The contract's
+  `x-oauth-authorization-server` and the ASIP's own key fetch now use that
+  location. Issuers without a path are unchanged.
 - **The toestemmingsportaal loads again.** Dependabot moved `react` to
   19.3.0 but left `react-dom` at 19.2.8, and React refuses to render with the
   two out of step; the portal showed a blank page.

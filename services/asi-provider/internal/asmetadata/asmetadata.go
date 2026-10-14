@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -38,6 +39,17 @@ type Keys struct {
 // issuer, fetched from internal when that is not empty.
 func New(issuer, internal string) *Keys {
 	return &Keys{issuer: issuer, internal: strings.TrimRight(internal, "/"), client: &http.Client{Timeout: 5 * time.Second}}
+}
+
+// MetadataURL returns where the metadata of the authorization server with
+// issuer identifier issuer is: the well-known suffix goes between the host and
+// the path of the issuer (RFC 8414 section 3.1).
+func MetadataURL(issuer string) (string, error) {
+	u, err := url.Parse(issuer)
+	if err != nil || u.Scheme == "" || u.Host == "" || u.RawQuery != "" || u.Fragment != "" {
+		return "", fmt.Errorf("issuer %q is not a URL without query or fragment", issuer)
+	}
+	return u.Scheme + "://" + u.Host + "/.well-known/oauth-authorization-server" + strings.TrimRight(u.Path, "/"), nil
 }
 
 // reach maps a URL of the authorization server to the address the ASIP
@@ -74,7 +86,16 @@ func (k *Keys) fetch(ctx context.Context) (jose.JSONWebKeySet, error) {
 		Issuer  string `json:"issuer"`
 		JWKSURI string `json:"jwks_uri"`
 	}
-	if err := k.getJSON(ctx, k.reach(k.issuer+"/.well-known/oauth-authorization-server"), &meta); err != nil {
+	// The internal base stands in for the issuer, path included.
+	base := k.issuer
+	if k.internal != "" {
+		base = k.internal
+	}
+	metadata, err := MetadataURL(base)
+	if err != nil {
+		return jose.JSONWebKeySet{}, err
+	}
+	if err := k.getJSON(ctx, metadata, &meta); err != nil {
 		return jose.JSONWebKeySet{}, err
 	}
 	if meta.Issuer != k.issuer || meta.JWKSURI == "" {
