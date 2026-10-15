@@ -83,7 +83,7 @@ Ports and adapters, as `AGENTS.md` asks for a service with an authorization boun
 | `internal/clientconfig` | `Clients` from the configuration file |
 | `internal/stubregister` | `Register`: the stub register |
 | `internal/qtspcert` | the `provision-qtsp-certificate` command |
-| `internal/walletverifier` | the `provision-wallet-verifier` command: the reader certificate and configuration of the NL Wallet verifier (`services/asi-wallet-verifier`) |
+| `internal/walletverifier` | the NL Wallet as identification means: the client of the verifier's API (start a disclosure session, follow its status, read the disclosed PID), and the `provision-wallet-verifier` command: the reader certificate and configuration of the verifier (`services/asi-wallet-verifier`) |
 | `internal/digidmock` | `Identifier`: the DigiD mock, an adapter with its login page, in two files so it can move to a service of its own |
 | `internal/httpapi` | the endpoints, and the translation to the responses of RFC 6749 |
 | `main.go` | composition root |
@@ -106,7 +106,7 @@ The ASIP uses only the BSN; it does not check the PID claims.
 
 ## The request page and the DigiD mock
 
-A valid authorization request gets one page, in Dutch, with a banner that it is a test environment without real identification. It names the QTSP by its legal name (the register entry for a registered client, taken again at every re-verification; `client_name` in the configuration; else the `client_id`), the operation it asks (`verify`, `retrieve`) and the authentic source. The user logs in with DigiD (mock), or denies: Weigeren gives `access_denied`. The NL Wallet is shown but inactive until slice 7.
+A valid authorization request gets one page, in Dutch, with a banner that it is a test environment without real identification. It names the QTSP by its legal name (the register entry for a registered client, taken again at every re-verification; `client_name` in the configuration; else the `client_id`), the operation it asks (`verify`, `retrieve`) and the authentic source. The user logs in with the NL Wallet or DigiD (mock), or denies: Weigeren gives `access_denied`. Without a configured verifier the NL Wallet is shown but disabled.
 
 Choosing a means starts the approval; the grant is established only after the login succeeds (RFC 6749 section 3.1; ETSI TS 119 478 figure 3, step 9). There is no second confirmation page.
 
