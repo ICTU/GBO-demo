@@ -12,26 +12,35 @@
 # Public Hostname routes:
 #   EUDI_PUBLIC_URL host -> http://eudi-issuance-server:18001
 #   EUDI_BRI_URL host    -> http://eudi-adapter:4009
+#   ASI_WALLET_VERIFIER_PUBLIC_URL host -> http://asi-wallet-verifier:8001
+#     (the NL Wallet verifier of the ASI route, profile asi; slice 7 of #336)
 #
-# The complete EUDI_PUBLIC_URL host must have a final Cloudflare Cache Rule
+# The complete EUDI_PUBLIC_URL host, and the ASI_WALLET_VERIFIER_PUBLIC_URL
+# host, must have a final Cloudflare Cache Rule
 # with Cache eligibility = Bypass cache. Purge the hostname after adding the
 # rule. Both issuer metadata and request_uri responses are dynamic.
 services:
   eudi-tunnel:
     image: cloudflare/cloudflared:latest
-    profiles: [eudi, full]
+    profiles: [eudi, full, asi]
     command:
       - tunnel
       - --no-autoupdate
       - run
       - --token
       - ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in .env (Cloudflare Zero Trust -> Tunnels -> connector token)}
+    # Each route needs its service only in the profiles that run it.
     depends_on:
       eudi-issuance-server:
         condition: service_started
+        required: false
       eudi-adapter:
         condition: service_started
-    networks: [eudi]
+        required: false
+      asi-wallet-verifier:
+        condition: service_started
+        required: false
+    networks: [eudi, backend]
 
 networks:
   eudi:

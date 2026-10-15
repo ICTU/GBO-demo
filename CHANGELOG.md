@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Added
+- **ASI wallet verifier** (`asi-wallet-verifier`, port 9428, compose profile
+  `asi`): nl-wallet's `verification_server`, built from the vendor checkout
+  like the issuance server (`make asi-wallet-verifier-image`). `make
+  provision-asi-wallet-verifier` issues the reader certificate of usecase
+  `asi-login` from the development reader CA and writes its configuration;
+  `make demo-asi` starts it when the nl-wallet sources are present (#546).
 - **Conformance matrix for ETSI TS 119 478** (`conformance/`): a status per
   requirement ID of the specification (passed, stub, not-applicable or
   failing), with the tests that prove it or the reason, read as Implementing

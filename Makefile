@@ -1,7 +1,7 @@
 .PHONY: up down logs clean certs require-ftv-postgres demo-manager manager-seed fsc-local-env fsc-ca fsc-up fsc-all-up fsc-brp-certs fsc-consent-register-certs fsc-gbo-pdp-certs fsc-ir-certs fsc-int-certs fsc-asip-certs fsc-databases fsc-down fsc-test fsc-clean \
         fsc-seed-bri fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-lvg fsc-seed-int fsc-seed-asip fsc-seed-brp fsc-seed-rvig-source fsc-seed-metadata fsc-pdp-cert pdp-up \
-        eudi-images source-metadata-up \
-        require-development-cas provision-development-certificates provision-asip-seal-certificate provision-asip-qtsp-certificate reconcile-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
+        eudi-images asi-wallet-verifier-image source-metadata-up \
+        require-development-cas provision-development-certificates provision-asip-seal-certificate provision-asip-qtsp-certificate provision-asi-wallet-verifier reconcile-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
         demo-full demo-integrator demo-asi demo-down eudi-config policy-check policy-test
 
 -include .env
@@ -56,6 +56,7 @@ PORT_ASI_PROVIDER := $(or $(GBO_PORT_ASI_PROVIDER),9424)
 PORT_ASI_AUTHORIZATION_SERVER := $(or $(GBO_PORT_ASI_AUTHORIZATION_SERVER),9425)
 PORT_ASI_DISCOVERY := $(or $(GBO_PORT_ASI_DISCOVERY),9426)
 PORT_QTSP := $(or $(GBO_PORT_QTSP),9427)
+PORT_ASI_WALLET_VERIFIER := $(or $(GBO_PORT_ASI_WALLET_VERIFIER),9428)
 PORT_JAEGER := $(or $(GBO_PORT_JAEGER),9686)
 PORT_PDP := $(or $(GBO_PORT_OPA),9181)
 PORT_EUDI_ADAPTER := $(or $(GBO_PORT_EUDI_ADAPTER),9409)
@@ -230,6 +231,29 @@ eudi-images:
 	    -f services/eudi-issuance-server/Dockerfile "$$NLWALLET_PATH"; \
 	fi
 
+# asi-wallet-verifier: nl-wallet's verification_server, the OpenID4VP
+# verifier of the ASI authorization server (slice 7 of #336). Built from the
+# same nl-wallet checkout as eudi-issuance-server and stamped with its
+# revision in the same way, so it is rebuilt when the submodule moves and
+# stays in lockstep with the wallet app.
+asi-wallet-verifier-image:
+	@if [ ! -f "$$NLWALLET_PATH/wallet_core/Cargo.toml" ]; then \
+	  echo "ERROR: nl-wallet sources not found at $$NLWALLET_PATH"; \
+	  echo "       Run: git submodule update --init vendor/nl-wallet"; \
+	  exit 1; \
+	fi
+	@rev="$$(git -C "$$NLWALLET_PATH" describe --tags --always --dirty 2>/dev/null || echo unknown)"; \
+	built="$$(docker image inspect gbo/asi-wallet-verifier:dev \
+	    --format '{{index .Config.Labels "gbo.nlwallet-rev"}}' 2>/dev/null || true)"; \
+	if [ -n "$$built" ] && [ "$$built" = "$$rev" ]; then \
+	  echo "-> gbo/asi-wallet-verifier:dev is current (nl-wallet $$rev)"; \
+	else \
+	  echo "-> Building gbo/asi-wallet-verifier:dev from $$NLWALLET_PATH (nl-wallet $$rev)"; \
+	  docker build -t gbo/asi-wallet-verifier:dev \
+	    --label gbo.nlwallet-rev="$$rev" \
+	    -f services/asi-wallet-verifier/Dockerfile "$$NLWALLET_PATH"; \
+	fi
+
 source-metadata-up: policy-check
 	EUDI_PUBLIC_URL="$${EUDI_PUBLIC_URL:-http://localhost:8001}" \
 	EUDI_BRI_URL="$${EUDI_BRI_URL:-http://localhost:9409}" \
@@ -254,6 +278,28 @@ provision-asip-seal-certificate: require-development-cas
 		--ca-key "$(DEVELOPMENT_CA_DIR)/issuer-ca-key.pem" \
 		--ca-cert "$(DEVELOPMENT_CA_DIR)/issuer-ca-cert.pem" \
 		--out-dir "$(ASIP_SEAL_DIR)"
+
+# Configuration of the ASI wallet verifier (nl-wallet's verification_server,
+# slice 7 of #336): the reader certificate of usecase asi-login from the
+# development reader CA, which the test wallet trusts, with the verifier's
+# public host as DNS SAN; trust in the development issuer CA and the
+# pre-production PID issuer; and the API key of its internal API. Run again
+# when ASI_WALLET_VERIFIER_PUBLIC_URL changes.
+ASI_WALLET_VERIFIER_DIR ?= $(ONBOARDING_SECRETS_DIR)/asi-wallet-verifier
+ASI_WALLET_VERIFIER_PUBLIC_URL ?= http://localhost:$(PORT_ASI_WALLET_VERIFIER)
+# Base of the wallet's universal link in the QR code; the verifier appends
+# "disclosure". The default is the pre-production NL Wallet (TestFlight).
+ASI_WALLET_UL_BASE ?= https://app.preproductie.wallet.edi.bzk.nl/deeplink/
+provision-asi-wallet-verifier: require-development-cas
+	@cd services/asi-authorization-server && go run . provision-wallet-verifier \
+		--ca-key "$(DEVELOPMENT_CA_DIR)/reader-ca-key.pem" \
+		--ca-cert "$(DEVELOPMENT_CA_DIR)/reader-ca-cert.pem" \
+		--issuer-ca "$(DEVELOPMENT_CA_DIR)/issuer-ca-cert.pem" \
+		--pid-issuer-anchors ../asi-wallet-verifier/pid-issuer-anchors.txt \
+		--public-url "$(ASI_WALLET_VERIFIER_PUBLIC_URL)" \
+		--universal-link-base "$(ASI_WALLET_UL_BASE)" \
+		--request-origin "$(or $(ASI_AUTHORIZATION_SERVER_PUBLIC_URL),http://$(or $(GBO_PUBLIC_HOST),localhost):$(PORT_ASI_AUTHORIZATION_SERVER))" \
+		--out-dir "$(ASI_WALLET_VERIFIER_DIR)"
 
 # Test QTSP certificate for the ASIP authorization server
 # (services/asi-authorization-server), issued by the development reader CA.
@@ -335,10 +381,20 @@ demo-asi: fsc-asip-certs
 	@test -f "$(ASIP_SEAL_DIR)/seal-cert.pem" || $(MAKE) provision-asip-seal-certificate
 	@test -f "$(ASIP_QTSP_DIR)/qtsp-cert.pem" || $(MAKE) provision-asip-qtsp-certificate
 	docker compose --profile asi up --build -d asi-authorization-server asi-provider asi-discovery-stub qtsp-reference
+	@# The wallet verifier needs the nl-wallet sources; without them the ASI
+	@# route runs with DigiD (mock) only.
+	@if [ -f "$$NLWALLET_PATH/wallet_core/Cargo.toml" ]; then \
+	  $(MAKE) asi-wallet-verifier-image && \
+	  { test -f "$(ASI_WALLET_VERIFIER_DIR)/verification_server.toml" || $(MAKE) provision-asi-wallet-verifier; } && \
+	  docker compose --profile asi up -d asi-wallet-verifier; \
+	else \
+	  echo "-> no nl-wallet sources at $$NLWALLET_PATH: the ASI wallet verifier is not started (DigiD (mock) only)"; \
+	fi
 	$(call banner,ASI authorization server:,$(PORT_ASI_AUTHORIZATION_SERVER))
 	$(call banner,ASIP:,$(PORT_ASI_PROVIDER))
 	$(call banner,ASI discovery (stub):,$(PORT_ASI_DISCOVERY))
 	$(call banner,Reference QTSP:,$(PORT_QTSP))
+	$(call banner,ASI wallet verifier:,$(PORT_ASI_WALLET_VERIFIER))
 
 demo-down:
 	docker compose --profile full --profile manager --profile integrator --profile asi down

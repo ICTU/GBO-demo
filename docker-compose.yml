@@ -1197,6 +1197,25 @@ services:
       timeout: 3s
       retries: 5
 
+  # The NL Wallet verifier of the ASI authorization server (slice 7 of #336):
+  # nl-wallet's verification_server, built from the vendor checkout by
+  # make asi-wallet-verifier-image. The wallet reaches its public port (8001)
+  # at ASI_WALLET_VERIFIER_PUBLIC_URL, which must be HTTPS for a real wallet
+  # (a tunnel, like EUDI_PUBLIC_URL); the authorization server uses the
+  # internal port (8002) with the API key. make provision-asi-wallet-verifier
+  # writes the configuration, with the reader certificate of usecase
+  # asi-login from the development reader CA. The image is a scratch image
+  # without a shell, so there is no healthcheck.
+  asi-wallet-verifier:
+    image: gbo/asi-wallet-verifier:dev
+    profiles: [asi]
+    ports:
+      - "${GBO_PORT_ASI_WALLET_VERIFIER:-9428}:8001"
+    volumes:
+      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/asi-wallet-verifier/verification_server.toml:/verification_server.toml:ro
+    networks:
+      - backend
+
   asi-provider:
     build: ./services/asi-provider
     profiles: [asi]
