@@ -54,6 +54,38 @@ type Identifier interface {
 // presented. The transaction stays, so the user can try again.
 var ErrNotIdentified = errors.New("the user was not identified")
 
+// SessionIdentifier is a means that first opens a session with the user's
+// device, such as the NL Wallet: Start opens it, Progress follows it, and
+// Identify takes the finished session as its credential. The core keeps the
+// session with the transaction and never takes one from the browser, so a
+// session cannot be carried over to another transaction: whoever sees the
+// QR code of a session does not get the login.
+type SessionIdentifier interface {
+	Identifier
+	Start(ctx context.Context) (session string, err error)
+	Progress(ctx context.Context, session string) (Progress, error)
+}
+
+// Progress is how far the user is with a session: waiting (with the link to
+// show, while there is one), done, or failed (declined, cancelled or
+// expired).
+type Progress struct {
+	State SessionState
+	Link  string
+}
+
+type SessionState int
+
+const (
+	SessionWaiting SessionState = iota
+	SessionDone
+	SessionFailed
+)
+
+// ErrMeansUnavailable: the means cannot be reached now. The transaction
+// stays, so the user can choose another means.
+var ErrMeansUnavailable = errors.New("the identification means is unavailable")
+
 // Transaction is a valid authorization request waiting for the user. Binding
 // is a secret the browser keeps (a cookie); the decision must present it.
 type Transaction struct {
@@ -84,6 +116,9 @@ type pendingAuthorization struct {
 	state       string
 	code        authorizationCode
 	expires     time.Time
+	// means and session are the session a SessionIdentifier opened for
+	// this transaction.
+	means, session string
 }
 
 type transactionStore struct {
@@ -113,6 +148,31 @@ func (s *transactionStore) live(id, binding string, now time.Time) bool {
 	return ok && subtle.ConstantTimeCompare([]byte(p.binding), []byte(binding)) == 1 && !now.After(p.expires)
 }
 
+// peek returns transaction id of the browser with binding, without
+// completing it.
+func (s *transactionStore) peek(id, binding string, now time.Time) (pendingAuthorization, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p, ok := s.m[id]
+	if !ok || subtle.ConstantTimeCompare([]byte(p.binding), []byte(binding)) != 1 || now.After(p.expires) {
+		return pendingAuthorization{}, false
+	}
+	return p, true
+}
+
+// attach keeps the session a means opened with transaction id.
+func (s *transactionStore) attach(id, binding, means, session string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p, ok := s.m[id]
+	if !ok || subtle.ConstantTimeCompare([]byte(p.binding), []byte(binding)) != 1 {
+		return false
+	}
+	p.means, p.session = means, session
+	s.m[id] = p
+	return true
+}
+
 // take removes and returns the transaction when binding matches. A wrong
 // binding leaves the transaction in place, so a party that only knows the
 // identifier cannot spoil it for the user.
@@ -139,6 +199,60 @@ func (s *Service) Offers(means string) bool {
 	return ok
 }
 
+// Transaction returns the transaction for the browser that holds binding,
+// to show its request again.
+func (s *Service) Transaction(transactionID, binding string) (*Transaction, bool) {
+	p, ok := s.transactions.peek(transactionID, binding, s.cfg.Now())
+	if !ok {
+		return nil, false
+	}
+	name := p.code.clientID
+	if c, ok := s.client(p.code.clientID); ok && c.Name != "" {
+		name = c.Name
+	}
+	return &Transaction{ID: transactionID, Binding: binding, ClientID: p.code.clientID, ClientName: name, Scope: p.code.scope, Source: s.resourceName(p.code.audience)}, true
+}
+
+// StartSession has a session means open a session with the user's device
+// for the transaction, and keeps it with the transaction. When the means
+// cannot be reached the error is ErrMeansUnavailable and the transaction
+// stays.
+func (s *Service) StartSession(ctx context.Context, transactionID, binding, means string) error {
+	identifier, ok := s.cfg.Identifiers[means].(SessionIdentifier)
+	if !ok {
+		return &NotRedirectableError{Description: "the identification means is not available"}
+	}
+	if !s.Pending(transactionID, binding) {
+		return notPending
+	}
+	session, err := identifier.Start(ctx)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrMeansUnavailable, err)
+	}
+	if !s.transactions.attach(transactionID, binding, means, session) {
+		return notPending
+	}
+	return nil
+}
+
+// SessionProgress is how far the user is with the session of the
+// transaction.
+func (s *Service) SessionProgress(ctx context.Context, transactionID, binding string) (Progress, error) {
+	p, ok := s.transactions.peek(transactionID, binding, s.cfg.Now())
+	if !ok {
+		return Progress{}, notPending
+	}
+	identifier, ok := s.cfg.Identifiers[p.means].(SessionIdentifier)
+	if !ok || p.session == "" {
+		return Progress{}, &NotRedirectableError{Description: "the transaction has no session with an identification means"}
+	}
+	progress, err := identifier.Progress(ctx, p.session)
+	if err != nil {
+		return Progress{}, fmt.Errorf("%w: %v", ErrMeansUnavailable, err)
+	}
+	return progress, nil
+}
+
 // Deny completes a transaction with the user's refusal: access_denied to
 // the client. An unknown, used or expired transaction, or a wrong browser
 // binding, cannot be redirected.
@@ -160,10 +274,19 @@ func (s *Service) LogIn(ctx context.Context, l Login) (AuthorizationResponse, er
 	if !ok {
 		return AuthorizationResponse{}, &NotRedirectableError{Description: "the identification means is not available"}
 	}
-	if !s.Pending(l.TransactionID, l.Binding) {
+	p, ok := s.transactions.peek(l.TransactionID, l.Binding, s.cfg.Now())
+	if !ok {
 		return AuthorizationResponse{}, notPending
 	}
-	identity, err := identifier.Identify(ctx, l.Credential)
+	credential := l.Credential
+	if _, isSession := identifier.(SessionIdentifier); isSession {
+		// The session kept with the transaction, never one from outside.
+		if p.means != l.Means || p.session == "" {
+			return AuthorizationResponse{}, fmt.Errorf("%w: no session of this means for the transaction", ErrNotIdentified)
+		}
+		credential = p.session
+	}
+	identity, err := identifier.Identify(ctx, credential)
 	if err != nil {
 		return AuthorizationResponse{}, fmt.Errorf("%w: %v", ErrNotIdentified, err)
 	}
@@ -171,14 +294,14 @@ func (s *Service) LogIn(ctx context.Context, l Login) (AuthorizationResponse, er
 		return AuthorizationResponse{}, fmt.Errorf("%w: the means gave no BSN", ErrNotIdentified)
 	}
 	identity.Means = l.Means
-	p, err := s.takeTransaction(l.TransactionID, l.Binding)
+	taken, err := s.takeTransaction(l.TransactionID, l.Binding)
 	if err != nil {
 		return AuthorizationResponse{}, err
 	}
-	code := p.code
+	code := taken.code
 	code.identity = identity
 	code.expires = s.cfg.Now().Add(AuthorizationCodeLifetime)
-	return AuthorizationResponse{RedirectURI: p.redirectURI, State: p.state, Code: s.codes.put(code)}, nil
+	return AuthorizationResponse{RedirectURI: taken.redirectURI, State: taken.state, Code: s.codes.put(code)}, nil
 }
 
 var notPending = &NotRedirectableError{Description: "the authorization request is unknown, used, expired or was started in another browser"}

@@ -84,10 +84,12 @@ export default function AsiForm({ payload, setPayload, attributes, attributesErr
 
       <div className="hint" style={{ fontSize: 12, color: 'var(--mute)', marginTop: 8 }}>
         <em>Aanvragen</em> legt de aanvraag neer bij de referentie-QTSP en opent een nieuw
-        tabblad naar de autorisatieserver van de bron. Daar logt u in met DigiD (mock)
-        {payload.person ? <> als <b>{payload.person}</b></> : null}, wat het verzoek goedkeurt,
-        of weigert u. Het resultaat verschijnt hier, met de keten, het FSC-transactielog en de
-        PDP-beslissing.
+        tabblad naar de autorisatieserver van de bron. Daar logt u in, wat het verzoek goedkeurt,
+        of weigert u. Met DigiD (mock) vult u zelf het BSN in
+        {payload.person ? <>, bijvoorbeeld van <b>{payload.person}</b></> : null}. Met de NL Wallet
+        komt het BSN uit het persoonsidentificatiebewijs in uw wallet; het resultaat hangt er dan
+        van af of de BRP (mock) die persoon kent. Het resultaat verschijnt hier, met de keten, het
+        FSC-transactielog en de PDP-beslissing.
       </div>
     </>
   )

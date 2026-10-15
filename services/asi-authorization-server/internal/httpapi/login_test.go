@@ -15,13 +15,13 @@ import (
 )
 
 // L1: one screen names the QTSP by its legal name, what it asks and at which
-// source, and offers DigiD (mock), the wallet (inactive) and deny.
+// source, and offers DigiD (mock), the NL Wallet (#546) and deny.
 func TestRequestPage(t *testing.T) {
 	as := newTestAS(t)
 	tx := as.startAuthorization(t, authorizeParams(newPKCE()))
 	for _, want := range []string{
 		"Testomgeving — geen echte identificatie", testClientName, "laten verifiëren bij Basisregistratie Personen (test)",
-		`value="digid">Inloggen met DigiD (mock)`, `value="wallet" disabled>Inloggen met NL Wallet`, `value="deny">Weigeren`,
+		`value="digid">Inloggen met DigiD (mock)`, `value="wallet">Inloggen met NL Wallet`, `value="deny">Weigeren`,
 	} {
 		if !strings.Contains(tx.page, want) {
 			t.Errorf("request page lacks %q:\n%s", want, tx.page)
@@ -151,7 +151,8 @@ func TestChoiceThatCannotBeRedirected(t *testing.T) {
 			tx := as.startAuthorization(t, authorizeParams(newPKCE()))
 			return as.decide(t, tx.id, nil, url.Values{"decision": {"deny"}})
 		}},
-		{"L8: the wallet while it is inactive", func(t *testing.T, as *testAS) *http.Response {
+		{"L8: the wallet when no verifier is configured", func(t *testing.T, _ *testAS) *http.Response {
+			as := newTestASWithoutWallet(t)
 			tx := as.startAuthorization(t, authorizeParams(newPKCE()))
 			return as.decide(t, tx.id, tx.cookie, url.Values{"decision": {"wallet"}})
 		}},
@@ -169,11 +170,14 @@ func TestChoiceThatCannotBeRedirected(t *testing.T) {
 	}
 }
 
-// L8: after a refused wallet choice the transaction is still there for
-// DigiD.
+// L8: without a verifier the wallet is shown but inactive, and after a
+// refused wallet choice the transaction is still there for DigiD.
 func TestWalletChoiceLeavesTheTransaction(t *testing.T) {
-	as := newTestAS(t)
+	as := newTestASWithoutWallet(t)
 	tx := as.startAuthorization(t, authorizeParams(newPKCE()))
+	if !strings.Contains(tx.page, `value="wallet" disabled>Inloggen met NL Wallet`) {
+		t.Errorf("without a verifier the wallet is not inactive:\n%s", tx.page)
+	}
 	_ = as.decide(t, tx.id, tx.cookie, url.Values{"decision": {"wallet"}})
 	if q := redirectParams(t, as.digidLogin(t, tx.id, tx.cookie, bsnFrouke)); q.Get("code") == "" {
 		t.Fatalf("DigiD after the wallet choice = %v, want a code", q)

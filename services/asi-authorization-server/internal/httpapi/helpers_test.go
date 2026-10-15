@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -8,12 +9,14 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,6 +26,7 @@ import (
 	"gbo-demo/asi-authorization-server/internal/authorization"
 	"gbo-demo/asi-authorization-server/internal/clientconfig"
 	"gbo-demo/asi-authorization-server/internal/digidmock"
+	"gbo-demo/asi-authorization-server/internal/walletverifier"
 )
 
 const (
@@ -53,6 +57,8 @@ type testAS struct {
 	offset   time.Duration
 	register *fakeRegister
 	ca       *testCA
+	// wallet stands in for the NL Wallet verifier.
+	wallet *fakeWallet
 }
 
 func newTestAS(t *testing.T) *testAS {
@@ -68,7 +74,18 @@ func newTestASFor(t *testing.T, resource string) *testAS {
 // is not nil.
 func newTestASWithRegister(t *testing.T, resource string, register authorization.Register) *testAS {
 	t.Helper()
-	as := &testAS{keys: map[string]*ecdsa.PrivateKey{}, kids: map[string]string{}, dpopKey: newECKey(t), register: newFakeRegister(), ca: newTestCA(t)}
+	return newTestASWith(t, resource, register, true)
+}
+
+// newTestASWithoutWallet runs the server without the NL Wallet as means.
+func newTestASWithoutWallet(t *testing.T) *testAS {
+	t.Helper()
+	return newTestASWith(t, testResource, nil, false)
+}
+
+func newTestASWith(t *testing.T, resource string, register authorization.Register, withWallet bool) *testAS {
+	t.Helper()
+	as := &testAS{wallet: newFakeWallet(), keys: map[string]*ecdsa.PrivateKey{}, kids: map[string]string{}, dpopKey: newECKey(t), register: newFakeRegister(), ca: newTestCA(t)}
 	var reg authorization.Register = as.register
 	if register != nil {
 		reg = register
@@ -102,11 +119,15 @@ func newTestASWithRegister(t *testing.T, resource string, register authorization
 		}
 		clients = append(clients, c)
 	}
+	identifiers := map[string]authorization.Identifier{digidmock.Means: digidmock.Identifier{}}
+	if withWallet {
+		identifiers[walletverifier.Means] = as.wallet
+	}
 	as.service = authorization.NewService(authorization.Config{
 		Issuer:       as.srv.URL,
 		Resources:    []authorization.Resource{{URL: resource, Name: "Basisregistratie Personen (test)"}, {URL: testResource2, Name: "DUO (test)"}},
 		Clients:      clientconfig.New(clients...),
-		Identifiers:  map[string]authorization.Identifier{digidmock.Means: digidmock.Identifier{}},
+		Identifiers:  identifiers,
 		Tokens:       tokens,
 		Register:     reg,
 		TrustAnchors: as.ca.pool(),
@@ -414,4 +435,55 @@ func newECKey(t *testing.T) *ecdsa.PrivateKey {
 		t.Fatal(err)
 	}
 	return key
+}
+
+// fakeWallet is the NL Wallet verifier as SessionIdentifier, in memory: a
+// test sets how each session goes.
+type fakeWallet struct {
+	mu       sync.Mutex
+	next     int
+	startErr error
+	sessions map[string]*fakeWalletSession
+}
+
+type fakeWalletSession struct {
+	progress    authorization.Progress
+	progressErr error
+	identity    authorization.Identity
+	identifyErr error
+}
+
+func newFakeWallet() *fakeWallet { return &fakeWallet{sessions: map[string]*fakeWalletSession{}} }
+
+func (f *fakeWallet) Start(context.Context) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.startErr != nil {
+		return "", f.startErr
+	}
+	f.next++
+	id := fmt.Sprintf("session-%d", f.next)
+	f.sessions[id] = &fakeWalletSession{progress: authorization.Progress{State: authorization.SessionWaiting, Link: "https://app.example/deeplink/" + id}}
+	return id, nil
+}
+
+func (f *fakeWallet) Progress(_ context.Context, session string) (authorization.Progress, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	s := f.sessions[session]
+	return s.progress, s.progressErr
+}
+
+func (f *fakeWallet) Identify(_ context.Context, session string) (authorization.Identity, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	s := f.sessions[session]
+	return s.identity, s.identifyErr
+}
+
+// set changes how session goes.
+func (f *fakeWallet) set(session string, edit func(*fakeWalletSession)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	edit(f.sessions[session])
 }

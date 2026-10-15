@@ -6,10 +6,10 @@
 // they are separate roles (ASIP and AZSP), so they are separate services with
 // separate keys.
 //
-// User identification is a stub: one page shows the request, and the user
-// logs in with a DigiD mock, which provides the BSN only, or denies. It is
-// not conformant identity proofing; slice 7 of #336 adds OpenID4VP PID
-// disclosure.
+// User identification: one page shows the request, and the user logs in or
+// denies. Two means: a DigiD mock, which provides the BSN only and is not
+// conformant identity proofing, and the NL Wallet through OpenID4VP PID
+// disclosure, offered when a verification server is configured.
 //
 // This file is the composition root: configuration, construction, lifecycle.
 //
@@ -30,9 +30,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -103,13 +105,17 @@ func serve() error {
 	if err != nil {
 		return err
 	}
+	identifiers := map[string]authorization.Identifier{digidmock.Means: digidmock.Identifier{}}
+	if wallet, err := walletVerifier(); err != nil {
+		return err
+	} else if wallet != nil {
+		identifiers[walletverifier.Means] = wallet
+	}
 	service := authorization.NewService(authorization.Config{
-		Issuer:    issuer,
-		Resources: resources,
-		Clients:   clients,
-		// DigiD (mock) is the one identification means until the wallet
-		// (slice 7 of #336).
-		Identifiers:  map[string]authorization.Identifier{digidmock.Means: digidmock.Identifier{}},
+		Issuer:       issuer,
+		Resources:    resources,
+		Clients:      clients,
+		Identifiers:  identifiers,
 		Tokens:       tokens,
 		Register:     register,
 		TrustAnchors: anchors,
@@ -118,7 +124,7 @@ func serve() error {
 	errc := make(chan error, 1)
 	go func() {
 		slog.Info("listening", "addr", srv.Addr, "issuer", issuer, "clients", clients.Len(), "register_entries", register.Len(),
-			"identification", "stub: DigiD mock, not conformant")
+			"identification_means", slices.Sorted(maps.Keys(identifiers)))
 		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 			errc <- err
 		}
@@ -229,4 +235,27 @@ func loadSigningKey(path string) (*ecdsa.PrivateKey, error) {
 		return nil, errors.New("signing key must be an ECDSA P-256 key")
 	}
 	return key, nil
+}
+
+// walletVerifier is the NL Wallet as identification means, when the
+// verifier is configured: AZSP_WALLET_VERIFIER_URL (its internal API),
+// AZSP_WALLET_VERIFIER_STATUS_URL (its wallet API, where the session status
+// is) and the API key in AZSP_WALLET_VERIFIER_API_KEY_FILE. Without the key
+// file the wallet is not offered and DigiD (mock) is the only means.
+func walletVerifier() (*walletverifier.Client, error) {
+	internal := os.Getenv("AZSP_WALLET_VERIFIER_URL")
+	if internal == "" {
+		return nil, nil
+	}
+	keyFile := env("AZSP_WALLET_VERIFIER_API_KEY_FILE", "/wallet-verifier/api-key")
+	key, err := os.ReadFile(keyFile)
+	if errors.Is(err, os.ErrNotExist) {
+		slog.Warn("NL Wallet verifier not configured: no API key; logging in with the NL Wallet is not offered", "file", keyFile)
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	status := env("AZSP_WALLET_VERIFIER_STATUS_URL", internal)
+	return walletverifier.New(internal, status, strings.TrimSpace(string(key))), nil
 }
