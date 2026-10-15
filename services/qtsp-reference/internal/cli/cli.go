@@ -1,6 +1,6 @@
 // Package cli runs the reference QTSP's flow from the command line, against
 // any ASIP reachable through a Discover Interface: discover, register,
-// authorize (the chooser played by the test harness), token, and verify or
+// authorize (the DigiD mock login played by the test harness), token, and verify or
 // retrieve with the seal checked. Options marked "test harness" provoke the
 // error answers of the acceptance criteria; a real QTSP has none of them.
 package cli
@@ -23,8 +23,9 @@ import (
 // Options of one run.
 type Options struct {
 	// Operation is verify or retrieve.
-	Operation  string
-	Person     string
+	Operation string
+	// BSN is what the harness logs in with at the DigiD mock.
+	BSN        string
 	Attributes []qtsp.Attribute
 	// Test harness: the user denies; the token is tampered with (401); the
 	// request claims a mandate (501); the body is malformed (400); an
@@ -48,7 +49,7 @@ func Parse(operation string, args []string, stderr io.Writer) (Options, error) {
 	o := Options{Operation: operation}
 	var attrs multi
 	fs.Var(&attrs, "attr", "attribute: identifier=JSON value (verify) or identifier (retrieve); repeatable")
-	fs.StringVar(&o.Person, "person", "frouke", "test person the harness picks at the chooser")
+	fs.StringVar(&o.BSN, "bsn", "999991772", "BSN the harness logs in with at the DigiD mock")
 	fs.BoolVar(&o.Deny, "deny", false, "test harness: the user denies the request")
 	fs.BoolVar(&o.TamperToken, "tamper-token", false, "test harness: send a tampered access token (401)")
 	fs.BoolVar(&o.Mandate, "mandate", false, "test harness: claim to act for another person (501)")
@@ -95,7 +96,7 @@ func Run(ctx context.Context, c *qtsp.Client, httpClient *http.Client, o Options
 	}
 	verifier, challenge := qtsp.PKCE()
 	state := qtsp.State()
-	cb, err := harness.Decide(ctx, httpClient, c.AuthorizationURL(plan, reg, o.Operation, state, challenge), o.Person, !o.Deny)
+	cb, err := harness.Decide(ctx, httpClient, c.AuthorizationURL(plan, reg, o.Operation, state, challenge), o.BSN, !o.Deny)
 	if err != nil {
 		return out, err
 	}

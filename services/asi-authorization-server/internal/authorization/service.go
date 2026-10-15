@@ -41,7 +41,10 @@ var OperationScopes = []string{"verify", "retrieve"}
 
 // Client is a registered client.
 type Client struct {
-	ID           string
+	ID string
+	// Name is the legal name the user sees: from the register entry for a
+	// registered client, from the configuration for a configured one.
+	Name         string
 	RedirectURIs []string
 	Scopes       map[string]bool
 	Keys         jose.JSONWebKeySet
@@ -78,10 +81,9 @@ type Config struct {
 	// Resources are the ASIP's data services, one per authentic source: their
 	// base URLs are the accepted resource indicators (RFC 8707). An
 	// authorization names exactly one, and its tokens have it as aud.
-	Resources  []Resource
-	Clients    Clients
-	Identifier Identifier
-	Tokens     *TokenIssuer
+	Resources []Resource
+	Clients   Clients
+	Tokens    *TokenIssuer
 	// Register is the register of wallet-relying parties; TrustAnchors are
 	// the roots the certificates of registering clients must chain to.
 	Register     Register
@@ -142,8 +144,6 @@ type AuthorizationRequest struct {
 	ResponseType, ClientID, RedirectURI, Scope, State string
 	CodeChallenge, CodeChallengeMethod                string
 	Resources                                         []string
-	// LoginHint may name a test person to preselect; it never identifies.
-	LoginHint string
 }
 
 // AuthorizationResponse goes back to the client at RedirectURI: a Code, or
@@ -206,7 +206,11 @@ func (s *Service) Authorize(req AuthorizationRequest) (AuthorizationResponse, er
 		},
 		expires: s.cfg.Now().Add(TransactionLifetime),
 	})
-	resp.Pending = &Transaction{ID: id, Binding: binding, ClientID: c.ID, Scope: scope, Source: s.resourceName(audience), Persons: s.cfg.Identifier.Persons(), Preselected: req.LoginHint}
+	name := c.Name
+	if name == "" {
+		name = c.ID
+	}
+	resp.Pending = &Transaction{ID: id, Binding: binding, ClientID: c.ID, ClientName: name, Scope: scope, Source: s.resourceName(audience)}
 	return resp, nil
 }
 

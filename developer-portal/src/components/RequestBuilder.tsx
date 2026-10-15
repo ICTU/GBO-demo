@@ -61,7 +61,7 @@ export default function RequestBuilder({
     tab === 'eudi-issuance'
       ? '# EUDI-flow start via wallet-QR — geen curl-equivalent'
     : tab === 'asi-verify'
-      ? '# ASI-flow: de referentie-QTSP doet discovery, registratie, de doorverwijzing naar de keuzepagina, het DPoP-token en de aanroep'
+      ? '# ASI-flow: de referentie-QTSP doet discovery, registratie, de doorverwijzing naar het inloggen met DigiD (mock), het DPoP-token en de aanroep'
       : curlFor(tab, tab === 'issuance' ? issuancePayload : usePayload)
 
   const submitLabel =

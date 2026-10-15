@@ -7,17 +7,23 @@ import (
 )
 
 // The user is identified and authorizes the request during the
-// authorization request (REQ-AZSP-6.1.3.1-02; clause 6.1.3.3, step 7). The
-// authorization endpoint answers a valid request with a transaction; the
-// user's decision completes it.
+// authorization request (REQ-AZSP-6.1.3.1-02; clause 6.1.3.3, steps 7-11).
+// The authorization endpoint answers a valid request with a transaction. The
+// user denies it, or logs in with an identification means; the grant is
+// established only when the login succeeds (RFC 6749 section 3.1).
 
 // TransactionLifetime is how long the user has to decide.
 const TransactionLifetime = 5 * time.Minute
 
-// Identity is the identification data of the user: the BSN and the mandatory
-// PID attributes (CIR (EU) 2024/2977), as they go into the access token.
+// Identity is the identification data of the user, as it goes into the
+// access token: the BSN, the means that identified the user, and the
+// mandatory PID attributes (CIR (EU) 2024/2977) when the means provides them.
+// DigiD provides the BSN only; the wallet (slice 7 of #336) the PID.
 type Identity struct {
-	BSN           string
+	BSN string
+	// Means names the identification means; the token carries it as acr
+	// and amr.
+	Means         string
 	FamilyName    string
 	GivenName     string
 	Birthdate     string // YYYY-MM-DD
@@ -33,38 +39,27 @@ type PlaceOfBirth struct {
 	Locality string `json:"locality,omitempty"`
 }
 
-// TestPerson is a person the chooser offers.
-type TestPerson struct {
-	ID   string
-	Name string
-}
-
-// Identifier identifies the user. It is the seam where slice 7 puts the
-// OpenID4VP PID disclosure; now it is the test-person chooser.
-type Identifier interface {
-	Persons() []TestPerson
-	Identify(personID string) (Identity, bool)
-}
-
 // Transaction is a valid authorization request waiting for the user. Binding
 // is a secret the browser keeps (a cookie); the decision must present it.
 type Transaction struct {
 	ID       string
 	Binding  string
 	ClientID string
-	Scope    string
+	// ClientName is the legal name of the client from its registration,
+	// or its client_id when it has none.
+	ClientName string
+	Scope      string
 	// Source is the name of the data service the authorization is for.
-	Source      string
-	Persons     []TestPerson
-	Preselected string
+	Source string
 }
 
-// Decision is the user's answer to a transaction.
+// Decision is the user's answer to a transaction: a denial, or the identity
+// a means established for the user, which approves the request.
 type Decision struct {
 	TransactionID string
 	Binding       string
-	PersonID      string
 	Approve       bool
+	Identity      Identity
 }
 
 type pendingAuthorization struct {
@@ -93,6 +88,15 @@ func (s *transactionStore) put(p pendingAuthorization) string {
 	return id
 }
 
+// live reports whether transaction id is waiting for the browser with
+// binding, without completing it.
+func (s *transactionStore) live(id, binding string, now time.Time) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p, ok := s.m[id]
+	return ok && subtle.ConstantTimeCompare([]byte(p.binding), []byte(binding)) == 1 && !now.After(p.expires)
+}
+
 // take removes and returns the transaction when binding matches. A wrong
 // binding leaves the transaction in place, so a party that only knows the
 // identifier cannot spoil it for the user.
@@ -107,8 +111,15 @@ func (s *transactionStore) take(id, binding string) (pendingAuthorization, bool)
 	return p, true
 }
 
+// Pending reports whether a transaction is still waiting for the browser that
+// holds binding, so a means can log the user in before Decide completes it.
+func (s *Service) Pending(transactionID, binding string) bool {
+	return s.transactions.live(transactionID, binding, s.cfg.Now())
+}
+
 // Decide completes a transaction. An unknown, used or expired transaction, a
-// wrong browser binding or an unknown test person cannot be redirected.
+// wrong browser binding, or an approval without an identity cannot be
+// redirected.
 func (s *Service) Decide(d Decision) (AuthorizationResponse, error) {
 	p, ok := s.transactions.take(d.TransactionID, d.Binding)
 	if !ok || s.cfg.Now().After(p.expires) {
@@ -119,12 +130,11 @@ func (s *Service) Decide(d Decision) (AuthorizationResponse, error) {
 		resp.Err = &Error{Code: "access_denied", Description: "the user denied the request"}
 		return resp, nil
 	}
-	identity, ok := s.cfg.Identifier.Identify(d.PersonID)
-	if !ok {
-		return AuthorizationResponse{}, &NotRedirectableError{Description: "unknown test person"}
+	if d.Identity.BSN == "" || d.Identity.Means == "" {
+		return AuthorizationResponse{}, &NotRedirectableError{Description: "the user was not identified"}
 	}
 	code := p.code
-	code.identity = identity
+	code.identity = d.Identity
 	code.expires = s.cfg.Now().Add(AuthorizationCodeLifetime)
 	resp.Code = s.codes.put(code)
 	return resp, nil

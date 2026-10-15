@@ -34,7 +34,7 @@ requirements:
       - "services/asi-provider/internal/httpapi:TestInvalidDPoPProofIs401"
       - "services/asi-authorization-server/internal/httpapi:TestUnapprovedSoftwareStatement"
       - "services/qtsp-reference:TestVerifyThroughTheChain"
-    reason: Token, DPoP and registration checks are real, but whether the request comes from a legitimate user rests on the test-person chooser and the QTSP's entitlement on a stub register with test certificates.
+    reason: Token, DPoP and registration checks are real, but whether the request comes from a legitimate user rests on a DigiD mock that checks nothing, and the QTSP's entitlement on a stub register with test certificates.
   REQ-ASIP-4.3-04:
     status: passed
     tests:
@@ -327,14 +327,15 @@ requirements:
   REQ-AZSP-6.1.3.1-02:
     status: stub
     tests:
-      - "services/asi-authorization-server/internal/httpapi:TestChooserPage"
+      - "services/asi-authorization-server/internal/httpapi:TestRequestPage"
+      - "services/asi-authorization-server/internal/httpapi:TestDigiDLogin"
       - "services/asi-authorization-server/internal/httpapi:TestFullFlowIssuesDPoPBoundAccessToken"
       - "services/asi-authorization-server/internal/httpapi:TestEndToEndVerify"
       - "services/asi-provider/internal/httpapi:TestTokenIdentifiesThePerson"
-    reason: The user is "identified" by picking a test person on the chooser page, which checks nothing; slice 7 replaces it with wallet PID identification.
+    reason: The user is "identified" by a DigiD mock where the BSN is typed as the password, which checks nothing but nine digits; slice 7 adds wallet PID identification.
   REQ-AZSP-6.1.3.1-03:
     status: not-applicable
-    reason: Neither OpenID4VP with the EUDI Wallet nor a TS 119 461 procedure is used yet; the chooser stub stands in until slice 7.
+    reason: A may; neither OpenID4VP with the EUDI Wallet nor a TS 119 461 procedure is used yet. The DigiD mock stands in until slice 7; whether real DigiD would count as such a procedure is open.
   REQ-AZSP-6.1.3.1-04:
     status: passed
     tests:
@@ -364,7 +365,7 @@ requirements:
     tests:
       - "services/asi-authorization-server/internal/httpapi:TestFullFlowIssuesDPoPBoundAccessToken"
       - "services/asi-provider/internal/httpapi:TestInvalidAccessTokenIs401"
-    reason: The token format and the PID claims are real, but the identity they carry comes from the test-person chooser (see 6.1.3.1-02).
+    reason: The token format is real, but with DigiD it carries the BSN only, with acr/amr naming the means, and no PID attributes (D7 in #336, a GBO interpretation); the identity comes from the DigiD mock (see 6.1.3.1-02).
   REQ-AZSP-6.1.3.2-01:
     status: passed
     tests:

@@ -54,9 +54,9 @@ export type EudiPayload = {
 }
 
 // An ASI request as the portal lays it down at the reference QTSP. Values
-// are kept as the text the user edits; they are JSON when sent. The test
-// person is a hint: the user picks the person at the authorization server's
-// chooser.
+// are kept as the text the user edits; they are JSON when sent. The person
+// is a hint: the user logs in with that BSN at the authorization server's
+// DigiD mock.
 export type AsiPayload = {
   operation: 'verify' | 'retrieve'
   attributes: { identifier: string; value?: string }[]

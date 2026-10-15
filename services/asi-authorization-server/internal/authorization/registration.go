@@ -143,7 +143,8 @@ func (s *Service) Register(ctx context.Context, req RegistrationRequest) (Regist
 		return RegisteredClient{}, &Error{Code: "invalid_software_statement", Description: err.Error()}
 	}
 	organizationID := organizationIdentifier(leaf)
-	if oauthErr := s.approve(ctx, statement.RegistryURI, organizationID); oauthErr != nil {
+	entry, oauthErr := s.approve(ctx, statement.RegistryURI, organizationID)
+	if oauthErr != nil {
 		return RegisteredClient{}, oauthErr
 	}
 	// Metadata in the software statement take precedence over plain JSON
@@ -165,7 +166,7 @@ func (s *Service) Register(ctx context.Context, req RegistrationRequest) (Regist
 		return RegisteredClient{}, &Error{Code: "invalid_software_statement", Description: "the certificate key is not usable"}
 	}
 	key.KeyID = base64.RawURLEncoding.EncodeToString(thumbprint)
-	c := &Client{ID: RandomID(), RedirectURIs: m.redirectURIs, Scopes: m.scopes, Keys: jose.JSONWebKeySet{Keys: []jose.JSONWebKey{key}}}
+	c := &Client{ID: RandomID(), Name: entry.LegalName, RedirectURIs: m.redirectURIs, Scopes: m.scopes, Keys: jose.JSONWebKeySet{Keys: []jose.JSONWebKey{key}}}
 	s.registered.add(&registeredClient{client: c, registryURI: statement.RegistryURI, organizationID: organizationID, active: true})
 	return RegisteredClient{
 		ClientID:                c.ID,
@@ -179,22 +180,22 @@ func (s *Service) Register(ctx context.Context, req RegistrationRequest) (Regist
 
 // approve looks up the entry in the register: it must exist, carry the
 // QEAA_Provider entitlement, and name the organisation of the certificate.
-func (s *Service) approve(ctx context.Context, registryURI, organizationID string) *Error {
+func (s *Service) approve(ctx context.Context, registryURI, organizationID string) (RegisterEntry, *Error) {
 	if s.cfg.Register == nil {
-		return &Error{Code: "temporarily_unavailable", Description: "no register is configured"}
+		return RegisterEntry{}, &Error{Code: "temporarily_unavailable", Description: "no register is configured"}
 	}
 	entry, err := s.cfg.Register.Lookup(ctx, registryURI)
 	switch {
 	case errors.Is(err, ErrRegisterUnavailable):
-		return &Error{Code: "temporarily_unavailable", Description: "the register cannot be consulted"}
+		return RegisterEntry{}, &Error{Code: "temporarily_unavailable", Description: "the register cannot be consulted"}
 	case err != nil:
-		return &Error{Code: "unapproved_software_statement", Description: "registryURI is not in the register"}
+		return RegisterEntry{}, &Error{Code: "unapproved_software_statement", Description: "registryURI is not in the register"}
 	case !slices.Contains(entry.Entitlements, QEAAProviderEntitlement):
-		return &Error{Code: "unapproved_software_statement", Description: "the register entry has no QEAA_Provider entitlement"}
+		return RegisterEntry{}, &Error{Code: "unapproved_software_statement", Description: "the register entry has no QEAA_Provider entitlement"}
 	case !slices.Contains(entry.Identifiers, organizationID):
-		return &Error{Code: "unapproved_software_statement", Description: "the organizationIdentifier of the certificate is not an identifier of the register entry"}
+		return RegisterEntry{}, &Error{Code: "unapproved_software_statement", Description: "the organizationIdentifier of the certificate is not an identifier of the register entry"}
 	}
-	return nil
+	return entry, nil
 }
 
 // RecheckResult reports a re-verification run.
@@ -211,7 +212,7 @@ func (s *Service) RecheckEntitlements(ctx context.Context) RecheckResult {
 	var res RecheckResult
 	for _, c := range s.registered.snapshot() {
 		res.Checked++
-		oauthErr := s.approve(ctx, c.registryURI, c.organizationID)
+		_, oauthErr := s.approve(ctx, c.registryURI, c.organizationID)
 		switch {
 		case oauthErr == nil:
 		case oauthErr.Code == "temporarily_unavailable":

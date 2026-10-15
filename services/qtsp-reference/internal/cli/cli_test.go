@@ -22,8 +22,8 @@ import (
 var sealCheck = seal.Check{Signer: "CN=seal"}
 
 func TestParse(t *testing.T) {
-	o, err := Parse("verify", []string{"--attr", `https://a.test/x/1={"x":"y"}`, "--person", "tom", "--mandate"}, io.Discard)
-	if err != nil || o.Person != "tom" || !o.Mandate || len(o.Attributes) != 1 || string(o.Attributes[0].Value) != `{"x":"y"}` {
+	o, err := Parse("verify", []string{"--attr", `https://a.test/x/1={"x":"y"}`, "--bsn", "555555555", "--mandate"}, io.Discard)
+	if err != nil || o.BSN != "555555555" || !o.Mandate || len(o.Attributes) != 1 || string(o.Attributes[0].Value) != `{"x":"y"}` {
 		t.Fatalf("Parse = %+v, %v", o, err)
 	}
 	for _, tc := range []struct {

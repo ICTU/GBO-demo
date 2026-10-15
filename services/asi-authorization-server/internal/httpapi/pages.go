@@ -6,13 +6,16 @@ import (
 	"strings"
 
 	"gbo-demo/asi-authorization-server/internal/authorization"
+	"gbo-demo/asi-authorization-server/internal/digidmock"
 )
 
-// The pages of the authorization endpoint: the test-person chooser, where the
-// user is identified and authorizes the request, and the error page for a
+// The pages of the authorization endpoint: the request page, where the user
+// sees who asks what at which source and logs in with a means or denies, the
+// login page of the DigiD mock (package digidmock), and the error page for a
 // request that cannot be redirected. In Dutch, without external assets.
 
-// DecisionPath receives the user's decision on the chooser.
+// DecisionPath receives the user's choice on the request page: deny, or a
+// means to log in with.
 const DecisionPath = authorization.AuthorizePath + "/decision"
 
 // transactionCookiePrefix names the cookie that binds a transaction to the
@@ -24,21 +27,22 @@ var pageStyle = template.CSS(`body{font-family:system-ui,sans-serif;max-width:40
 fieldset{border:1px solid #ccc;padding:1rem}label{display:block;margin:.4rem 0}
 button{margin:1rem .5rem 0 0;padding:.5rem 1.2rem;font-size:1rem}`)
 
-const banner = `<p class="banner"><strong>Testomgeving — geen echte identificatie.</strong> U kiest een testpersoon; er wordt niets gecontroleerd. Dit is een stub en voldoet niet aan ETSI TS 119 478 REQ-AZSP-6.1.3.1-02.</p>`
+const banner = `<p class="banner"><strong>Testomgeving — geen echte identificatie.</strong> Inloggen gaat met een mock van DigiD; er wordt niets gecontroleerd. Dit voldoet niet aan ETSI TS 119 478 REQ-AZSP-6.1.3.1-02.</p>`
 
-var chooserPage = template.Must(template.New("chooser").Parse(`<!doctype html>
+// requestPage asks the user to log in, which approves the request once the
+// login succeeds, or to deny it. The wallet follows in slice 7 of #336.
+var requestPage = template.Must(template.New("request").Parse(`<!doctype html>
 <html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Inloggen (testomgeving)</title><style>{{.Style}}</style></head><body>
+<title>Toestemming geven (testomgeving)</title><style>{{.Style}}</style></head><body>
 ` + banner + `
-<h1>Toegang verlenen</h1>
-<p>Client <code>{{.ClientID}}</code> vraagt toestemming om {{.Operation}}.</p>
+<h1>Toestemming geven</h1>
+<p><strong>{{.ClientName}}</strong> vraagt toestemming om {{.Operation}}.</p>
+<p>Log in om toestemming te geven:</p>
 <form method="post" action="{{.Action}}">
 <input type="hidden" name="transaction" value="{{.TransactionID}}">
-<fieldset><legend>Kies een testpersoon</legend>
-{{range .Persons}}<label><input type="radio" name="person" value="{{.ID}}" required{{if .Selected}} checked{{end}}> {{.Name}}</label>
-{{end}}</fieldset>
-<button type="submit" name="decision" value="approve">Toestaan</button>
-<button type="submit" name="decision" value="deny" formnovalidate>Weigeren</button>
+<p><button type="submit" name="decision" value="digid">Inloggen met DigiD (mock)</button></p>
+<p><button type="submit" name="decision" value="wallet" disabled>Inloggen met NL Wallet</button> <small>volgt</small></p>
+<p><button type="submit" name="decision" value="deny">Weigeren</button></p>
 </form></body></html>
 `))
 
@@ -49,11 +53,6 @@ var errorPage = template.Must(template.New("error").Parse(`<!doctype html>
 <p>invalid_request: {{.Description}}</p>
 </body></html>
 `))
-
-type chooserPerson struct {
-	ID, Name string
-	Selected bool
-}
 
 // operationText describes the requested operations to the user.
 // operationText names what the client asks, and at which authentic source:
@@ -83,11 +82,9 @@ func writePage(w http.ResponseWriter, status int, page *template.Template, data 
 	_ = page.Execute(w, data)
 }
 
-func writeChooser(w http.ResponseWriter, tx *authorization.Transaction, secure bool) {
-	persons := make([]chooserPerson, len(tx.Persons))
-	for i, p := range tx.Persons {
-		persons[i] = chooserPerson{ID: p.ID, Name: p.Name, Selected: p.ID == tx.Preselected}
-	}
+// writeRequestPage shows the request and binds the transaction to this
+// browser with a cookie.
+func writeRequestPage(w http.ResponseWriter, tx *authorization.Transaction, secure bool) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     transactionCookiePrefix + tx.ID,
 		Value:    tx.Binding,
@@ -97,12 +94,23 @@ func writeChooser(w http.ResponseWriter, tx *authorization.Transaction, secure b
 		Secure:   secure,
 		SameSite: http.SameSiteStrictMode,
 	})
-	writePage(w, http.StatusOK, chooserPage, map[string]any{
-		"ClientID":      tx.ClientID,
+	writePage(w, http.StatusOK, requestPage, map[string]any{
+		"ClientName":    tx.ClientName,
 		"Operation":     operationText(tx.Scope, tx.Source),
 		"Action":        DecisionPath,
 		"TransactionID": tx.ID,
-		"Persons":       persons,
+	})
+}
+
+// writeDigiDPage shows the login page of the DigiD mock for transaction tx,
+// with message when the BSN was refused.
+func writeDigiDPage(w http.ResponseWriter, status int, tx, username, message string) {
+	writePage(w, status, digidmock.Page, map[string]any{
+		"Action":        digidmock.Path,
+		"Cancel":        DecisionPath,
+		"TransactionID": tx,
+		"Username":      username,
+		"Message":       message,
 	})
 }
 

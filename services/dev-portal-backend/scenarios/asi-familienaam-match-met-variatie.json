@@ -1,7 +1,7 @@
 {
   "id": "asi-familienaam-match-met-variatie",
   "name": "ASI · Familienaam MATCH MET VARIATIE",
-  "desc": "Dezelfde verificatie met \"jansen\" in kleine letters. Gelijk na normalisatie (hoofdletters, accenten, koppeltekens, spaties, ICAO-transliteratie), dus MatchWithVariation. Kies Frouke Jansen.",
+  "desc": "Dezelfde verificatie met \"jansen\" in kleine letters. Gelijk na normalisatie (hoofdletters, accenten, koppeltekens, spaties, ICAO-transliteratie), dus MatchWithVariation. Log in met DigiD (mock) met BSN 999991772.",
   "tab": "asi-verify",
   "expected_outcome": "match-with-variation",
   "payload": {
@@ -12,6 +12,6 @@
         "value": "{\"family_name\":\"jansen\"}"
       }
     ],
-    "person": "Frouke Jansen"
+    "person": "Frouke Jansen (BSN 999991772)"
   }
 }

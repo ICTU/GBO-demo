@@ -14,9 +14,11 @@ import (
 
 // Access tokens are JWTs according to RFC 9068 (REQ-AZSP-6.1.3.1-08), bound
 // to the client's DPoP key (cnf.jkt), and carry the identification data of
-// the user: the BSN, in plain text until slice 9 of #336 (D3), and the
-// mandatory PID attributes under the names of the IANA JWT Claims Registry
-// (RFC 9068 section 2.2.2), which the SD-JWT VC encoding of the PID uses too.
+// the user: the BSN, in plain text until slice 9 of #336 (D3); the means
+// that identified the user as acr and amr (RFC 9068 section 2.2.3.1); and,
+// when the means provides them, the mandatory PID attributes under the names
+// of the IANA JWT Claims Registry (RFC 9068 section 2.2.2), which the SD-JWT
+// VC encoding of the PID uses too. DigiD provides the BSN only (D7).
 
 // AccessTokenLifetime is the lifetime of an access token.
 const AccessTokenLifetime = 10 * time.Minute
@@ -52,21 +54,25 @@ func NewTokenIssuer(issuer string, key *ecdsa.PrivateKey) (*TokenIssuer, error) 
 // so two tokens for the same user cannot be linked through it.
 func (ti *TokenIssuer) issue(clientID, audience, scope string, id Identity, jkt string, now time.Time) (string, error) {
 	claims := map[string]any{
-		"iss":            ti.issuer,
-		"sub":            RandomID(),
-		"aud":            audience,
-		"client_id":      clientID,
-		"iat":            now.Unix(),
-		"exp":            now.Add(AccessTokenLifetime).Unix(),
-		"jti":            RandomID(),
-		"scope":          scope,
-		"cnf":            map[string]string{"jkt": jkt},
-		BSNClaim:         id.BSN,
-		"family_name":    id.FamilyName,
-		"given_name":     id.GivenName,
-		"birthdate":      id.Birthdate,
-		"place_of_birth": id.PlaceOfBirth,
-		"nationalities":  id.Nationalities,
+		"iss":       ti.issuer,
+		"sub":       RandomID(),
+		"aud":       audience,
+		"client_id": clientID,
+		"iat":       now.Unix(),
+		"exp":       now.Add(AccessTokenLifetime).Unix(),
+		"jti":       RandomID(),
+		"scope":     scope,
+		"cnf":       map[string]string{"jkt": jkt},
+		BSNClaim:    id.BSN,
+		"acr":       id.Means,
+		"amr":       []string{id.Means},
+	}
+	if id.FamilyName != "" {
+		claims["family_name"] = id.FamilyName
+		claims["given_name"] = id.GivenName
+		claims["birthdate"] = id.Birthdate
+		claims["place_of_birth"] = id.PlaceOfBirth
+		claims["nationalities"] = id.Nationalities
 	}
 	token, err := jwt.Signed(ti.signer).Claims(claims).Serialize()
 	if err != nil {

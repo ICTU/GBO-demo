@@ -52,7 +52,7 @@ type testEnv struct {
 	qtsp    *testQTSP
 }
 
-// newTestServer wires the server with the test persons, the provisional
+// newTestServer wires the server with the fake source's persons, the provisional
 // catalogue, a seal certificate from an ephemeral test CA, and the keys of a
 // test authorization server.
 func newTestServer(t *testing.T) testEnv {

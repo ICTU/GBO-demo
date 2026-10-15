@@ -22,7 +22,7 @@ import (
 
 	"gbo-demo/asi-authorization-server/internal/authorization"
 	"gbo-demo/asi-authorization-server/internal/clientconfig"
-	"gbo-demo/asi-authorization-server/internal/testpersons"
+	"gbo-demo/asi-authorization-server/internal/digidmock"
 )
 
 const (
@@ -34,11 +34,15 @@ const (
 	// testResource2 is a second data service of the ASIP.
 	testResource2 = "https://asip.test/duo/authsrc-api"
 	bsnFrouke     = "999991772"
+	bsnTom        = "555555555"
+	// testClientName is the legal name of testClientID in its configuration.
+	testClientName = "Test QTSP (configuratie)"
 )
 
 // testAS runs the authorization server with three clients from
-// configuration, the stub identification of two test persons, a register and
-// a trust anchor for dynamic client registration. offset shifts its clock.
+// configuration, a register and a trust anchor for dynamic client
+// registration; the user logs in with the DigiD mock. offset shifts its
+// clock.
 type testAS struct {
 	srv      *httptest.Server
 	service  *authorization.Service
@@ -87,7 +91,11 @@ func newTestASWithRegister(t *testing.T, resource string, register authorization
 	for id, scopes := range map[string][]string{testClientID: {"verify", "retrieve"}, otherClientID: {"verify", "retrieve"}, verifyOnlyID: {"verify"}} {
 		key := newECKey(t)
 		as.keys[id] = key
-		c := &authorization.Client{ID: id, RedirectURIs: []string{testRedirectURI}, Scopes: map[string]bool{},
+		name := ""
+		if id == testClientID {
+			name = testClientName
+		}
+		c := &authorization.Client{ID: id, Name: name, RedirectURIs: []string{testRedirectURI}, Scopes: map[string]bool{},
 			Keys: jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: &key.PublicKey, KeyID: id + "-key", Algorithm: "ES256", Use: "sig"}}}}
 		for _, sc := range scopes {
 			c.Scopes[sc] = true
@@ -98,7 +106,6 @@ func newTestASWithRegister(t *testing.T, resource string, register authorization
 		Issuer:       as.srv.URL,
 		Resources:    []authorization.Resource{{URL: resource, Name: "Basisregistratie Personen (test)"}, {URL: testResource2, Name: "DUO (test)"}},
 		Clients:      clientconfig.New(clients...),
-		Identifier:   testpersons.New(testFrouke, testTom),
 		Tokens:       tokens,
 		Register:     reg,
 		TrustAnchors: as.ca.pool(),
@@ -131,7 +138,6 @@ func authorizeParams(p pkce) url.Values {
 		"state":                 {"state-123"},
 		"code_challenge":        {p.challenge},
 		"code_challenge_method": {"S256"},
-		"login_hint":            {"frouke"},
 		"resource":              {testResource},
 	}
 }
@@ -173,24 +179,28 @@ func assertAuthorizeError(t *testing.T, resp *http.Response, code string) {
 	}
 }
 
-// code runs the authorization request, picks the test person named in
-// login_hint (Frouke without one) on the chooser and approves, and returns
-// the authorization code.
+// code runs the authorization request, logs in with the DigiD mock as
+// Frouke, and returns the authorization code.
 func (as *testAS) code(t *testing.T, params url.Values) string {
 	t.Helper()
-	person := params.Get("login_hint")
-	if person == "" {
-		person = "frouke"
-	}
+	return as.codeFor(t, params, bsnFrouke)
+}
+
+// codeFor logs in with the DigiD mock with bsn.
+func (as *testAS) codeFor(t *testing.T, params url.Values, bsn string) string {
+	t.Helper()
 	tx := as.startAuthorization(t, params)
-	q := redirectParams(t, as.decide(t, tx.id, tx.cookie, url.Values{"person": {person}, "decision": {"approve"}}))
+	if resp := as.decide(t, tx.id, tx.cookie, url.Values{"decision": {"digid"}}); resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("choosing DigiD = %d, want 303 to its login page", resp.StatusCode)
+	}
+	q := redirectParams(t, as.digidLogin(t, tx.id, tx.cookie, bsn))
 	if q.Get("error") != "" || q.Get("code") == "" {
 		t.Fatalf("redirect = %v, want a code", q)
 	}
 	return q.Get("code")
 }
 
-// pendingTx is a chooser page: the transaction and its browser cookie.
+// pendingTx is a request page: the transaction and its browser cookie.
 type pendingTx struct {
 	id     string
 	cookie *http.Cookie
@@ -201,7 +211,7 @@ type pendingTx struct {
 var transactionField = regexp.MustCompile(`name="transaction" value="([^"]+)"`)
 
 // startAuthorization sends a valid authorization request and returns the
-// chooser it answers with.
+// request page it answers with.
 func (as *testAS) startAuthorization(t *testing.T, params url.Values) pendingTx {
 	t.Helper()
 	c := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
@@ -212,11 +222,11 @@ func (as *testAS) startAuthorization(t *testing.T, params url.Values) pendingTx 
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("authorization request = %d, want the chooser (200); Location %q", resp.StatusCode, resp.Header.Get("Location"))
+		t.Fatalf("authorization request = %d, want the request page (200); Location %q", resp.StatusCode, resp.Header.Get("Location"))
 	}
 	m := transactionField.FindStringSubmatch(string(body))
 	if m == nil {
-		t.Fatalf("chooser has no transaction field:\n%s", body)
+		t.Fatalf("request page has no transaction field:\n%s", body)
 	}
 	var cookie *http.Cookie
 	for _, ck := range resp.Cookies() {
@@ -225,16 +235,45 @@ func (as *testAS) startAuthorization(t *testing.T, params url.Values) pendingTx 
 		}
 	}
 	if cookie == nil {
-		t.Fatalf("chooser set no transaction cookie")
+		t.Fatalf("request page set no transaction cookie")
 	}
 	return pendingTx{id: m[1], cookie: cookie, page: string(body), header: resp.Header}
 }
 
-// decide posts a decision for transaction tx with cookie (none when nil).
+// decide posts a choice on the request page for transaction tx with cookie
+// (none when nil).
 func (as *testAS) decide(t *testing.T, tx string, cookie *http.Cookie, form url.Values) *http.Response {
 	t.Helper()
+	return as.postForm(t, DecisionPath, tx, cookie, form)
+}
+
+// digidLogin posts the DigiD mock's login form with bsn as the password.
+func (as *testAS) digidLogin(t *testing.T, tx string, cookie *http.Cookie, bsn string) *http.Response {
+	t.Helper()
+	return as.postForm(t, digidmock.Path, tx, cookie, url.Values{"username": {"j.dejong"}, "bsn": {bsn}})
+}
+
+// get fetches path with cookie (none when nil), without following redirects.
+func (as *testAS) get(t *testing.T, path string, cookie *http.Cookie) (*http.Response, string) {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodGet, as.srv.URL+path, nil)
+	if cookie != nil {
+		req.AddCookie(cookie)
+	}
+	c := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	return resp, string(body)
+}
+
+func (as *testAS) postForm(t *testing.T, path, tx string, cookie *http.Cookie, form url.Values) *http.Response {
+	t.Helper()
 	form.Set("transaction", tx)
-	req, _ := http.NewRequest(http.MethodPost, as.srv.URL+DecisionPath, strings.NewReader(form.Encode()))
+	req, _ := http.NewRequest(http.MethodPost, as.srv.URL+path, strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	if cookie != nil {
 		req.AddCookie(cookie)
@@ -248,18 +287,6 @@ func (as *testAS) decide(t *testing.T, tx string, cookie *http.Cookie, form url.
 	_, _ = io.Copy(io.Discard, resp.Body)
 	return resp
 }
-
-// The test persons of the stub in these tests.
-var (
-	testFrouke = testpersons.Person{ID: "frouke", Identity: authorization.Identity{
-		BSN: bsnFrouke, FamilyName: "Jansen", GivenName: "Frouke", Birthdate: "2000-03-24",
-		PlaceOfBirth: authorization.PlaceOfBirth{Country: "NL", Locality: "Leeuwarden"}, Nationalities: []string{"NL", "BE"},
-	}}
-	testTom = testpersons.Person{ID: "tom", Identity: authorization.Identity{
-		BSN: "555555555", FamilyName: "Willems", GivenName: "Tom", Birthdate: "1982-05-08",
-		PlaceOfBirth: authorization.PlaceOfBirth{Country: "BE", Locality: "Antwerpen"}, Nationalities: []string{"BE"},
-	}}
-)
 
 // --- token request -------------------------------------------------------------
 

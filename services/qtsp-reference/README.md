@@ -32,11 +32,11 @@ The authorization server allows an http redirect URI on a loopback address only,
 
 ## CLI
 
-The same flow from the command line. The test harness plays the user at the test-person chooser; a real user does that in a browser.
+The same flow from the command line. The test harness plays the user at the authorization server: it logs in with the DigiD mock with `--bsn` (default `999991772`, Frouke Jansen), or denies; a real user does that in a browser.
 
 ```bash
-qtsp-reference verify --attr 'https://gbo.example/attributes/family_name/1={"family_name":"Jansen"}' --person frouke
-qtsp-reference retrieve --attr https://gbo.example/attributes/address/1 --person frouke
+qtsp-reference verify --attr 'https://gbo.example/attributes/family_name/1={"family_name":"Jansen"}' --bsn 999991772
+qtsp-reference retrieve --attr https://gbo.example/attributes/address/1 --bsn 999991772
 ```
 
 Test-harness options provoke the error answers of the acceptance criteria:
@@ -75,7 +75,7 @@ If the authorization server refuses the registration (for example, no `QEAA_Prov
 |---|---|
 | `internal/qtsp` | the flow: discover, register, authorize, token, verify or retrieve, and the seal check |
 | `internal/seal` | validation of the seal on a result |
-| `internal/harness` | the test harness at the chooser |
+| `internal/harness` | the test harness at the authorization server (request page and DigiD mock) |
 | `internal/cli` | the CLI: options, one run, the report |
 | `internal/web` | the web side and the request API |
 | `internal/urlmap` | the transport map from public to internal URLs |

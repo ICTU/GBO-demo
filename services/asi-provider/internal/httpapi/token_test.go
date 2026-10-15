@@ -329,7 +329,7 @@ func (q *testQTSP) signProof(t *testing.T, typ string, claims map[string]any) st
 }
 
 // person returns the credentials of a QTSP that went through the flow for
-// the test person with bsn: a token for verify and retrieve, and a fresh
+// the person with bsn: a token for verify and retrieve, and a fresh
 // DPoP proof per request.
 func (env testEnv) person(bsn string) authFunc {
 	return env.presenting(env.authz.claims(bsn, "verify retrieve", env.qtsp.jkt), nil)

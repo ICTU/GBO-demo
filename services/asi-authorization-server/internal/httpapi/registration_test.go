@@ -71,6 +71,10 @@ func TestRegisteredClientGetsAToken(t *testing.T) { // D2 (to the token)
 	p := newPKCE()
 	params := authorizeParams(p)
 	params.Set("client_id", id)
+	// The user sees the legal name of the register entry (#544).
+	if tx := as.startAuthorization(t, params); !strings.Contains(tx.page, "<strong>Test QTSP</strong>") || strings.Contains(tx.page, id) {
+		t.Errorf("request page does not name the registered QTSP by its legal name:\n%s", tx.page)
+	}
 	form := as.tokenForm(t, as.code(t, params), p)
 	form.Set("client_assertion", as.assertion(t, id, nil))
 	if r := as.postToken(t, form, as.proof(t, nil)); r.status != http.StatusOK {

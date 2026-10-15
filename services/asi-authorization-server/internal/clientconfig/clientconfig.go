@@ -48,7 +48,9 @@ func Load(path string) (*Registry, error) {
 	}
 	var doc struct {
 		Clients []struct {
-			ClientID     string             `json:"client_id"`
+			ClientID string `json:"client_id"`
+			// ClientName is the legal name the user sees (RFC 7591).
+			ClientName   string             `json:"client_name"`
 			RedirectURIs []string           `json:"redirect_uris"`
 			Scope        string             `json:"scope"`
 			JWKS         jose.JSONWebKeySet `json:"jwks"`
@@ -79,7 +81,7 @@ func Load(path string) (*Registry, error) {
 			}
 			scopes[sc] = true
 		}
-		clients = append(clients, &authorization.Client{ID: c.ClientID, RedirectURIs: c.RedirectURIs, Scopes: scopes, Keys: c.JWKS})
+		clients = append(clients, &authorization.Client{ID: c.ClientID, Name: c.ClientName, RedirectURIs: c.RedirectURIs, Scopes: scopes, Keys: c.JWKS})
 	}
 	return New(clients...), nil
 }

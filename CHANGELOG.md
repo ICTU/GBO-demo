@@ -29,9 +29,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     statement sealed with the QTSP's certificate, checked against a stub
     register for the `QEAA_Provider` entitlement and re-verified
     periodically (`make provision-asip-qtsp-certificate` issues a test
-    certificate) (#503). User identification is a test-person chooser where
-    the user also approves or denies the request; it is not conformant. The
-    token carries the mandatory PID attributes next to the BSN (#523).
+    certificate) (#503). One page shows the request, naming the QTSP by its
+    legal name, and the user logs in with a DigiD mock, which approves the
+    request, or denies it; the NL Wallet is shown but follows in slice 7. It
+    is not conformant. With DigiD the token carries the BSN only, with
+    `acr`/`amr` `digid-mock`; the test-person chooser and its PID claims are
+    gone (#523, #544).
   - The ASIP validates every access token and DPoP proof, and takes the BSN
     of the user from the token, in plain text until slice 9 of #336.
   - `make demo-asi` adds both services to a running `demo-eudi` or

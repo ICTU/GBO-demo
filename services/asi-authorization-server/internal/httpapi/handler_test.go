@@ -82,20 +82,21 @@ func TestFullFlowIssuesDPoPBoundAccessToken(t *testing.T) { // case 24
 		"client_id":            testClientID,
 		"scope":                "verify",
 		authorization.BSNClaim: bsnFrouke,
-		"family_name":          "Jansen",
-		"given_name":           "Frouke",
-		"birthdate":            "2000-03-24",
+		"acr":                  "digid-mock",
 	} {
 		if claims[field] != want {
 			t.Errorf("%s = %v, want %v", field, claims[field], want)
 		}
 	}
-	// S2: the PID attributes of the chosen test person.
-	if pob, _ := claims["place_of_birth"].(map[string]any); pob["country"] != "NL" || pob["locality"] != "Leeuwarden" || len(pob) != 2 {
-		t.Errorf("place_of_birth = %v, want country NL and locality Leeuwarden", claims["place_of_birth"])
+	// L4: DigiD provides the BSN only. The token names the means, and has no
+	// PID attributes.
+	if amr, _ := claims["amr"].([]any); len(amr) != 1 || amr[0] != "digid-mock" {
+		t.Errorf("amr = %v, want [digid-mock]", claims["amr"])
 	}
-	if n, _ := claims["nationalities"].([]any); len(n) != 2 || n[0] != "NL" || n[1] != "BE" {
-		t.Errorf("nationalities = %v, want [NL BE]", claims["nationalities"])
+	for _, pid := range []string{"family_name", "given_name", "birthdate", "place_of_birth", "nationalities"} {
+		if v, ok := claims[pid]; ok {
+			t.Errorf("%s = %v, want no PID attribute with DigiD", pid, v)
+		}
 	}
 	if cnf, _ := claims["cnf"].(map[string]any); cnf["jkt"] != as.jkt {
 		t.Errorf("cnf = %v, want jkt %s", claims["cnf"], as.jkt)

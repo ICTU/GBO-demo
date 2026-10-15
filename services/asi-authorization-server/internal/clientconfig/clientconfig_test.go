@@ -23,7 +23,7 @@ func TestLoadClients(t *testing.T) {
 	public := jose.JSONWebKey{Key: &key.PublicKey, KeyID: "k"}
 	private := jose.JSONWebKey{Key: key, KeyID: "k"}
 	clientDoc := func(edit func(map[string]any)) map[string]any {
-		c := map[string]any{"client_id": "qtsp", "redirect_uris": []string{"https://qtsp.test/cb"}, "scope": "verify retrieve",
+		c := map[string]any{"client_id": "qtsp", "client_name": "Test QTSP", "redirect_uris": []string{"https://qtsp.test/cb"}, "scope": "verify retrieve",
 			"jwks": map[string]any{"keys": []any{public}}}
 		if edit != nil {
 			edit(c)
@@ -47,8 +47,8 @@ func TestLoadClients(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c, ok := clients.Client("qtsp"); !ok || !c.Scopes["verify"] || !c.Scopes["retrieve"] {
-		t.Fatalf("client = %+v, want the client with verify and retrieve", c)
+	if c, ok := clients.Client("qtsp"); !ok || !c.Scopes["verify"] || !c.Scopes["retrieve"] || c.Name != "Test QTSP" {
+		t.Fatalf("client = %+v, want the client with verify and retrieve, named by client_name", c)
 	}
 	// The second of two clients with one client_id would silently replace
 	// the first.
