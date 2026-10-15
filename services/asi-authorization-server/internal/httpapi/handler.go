@@ -6,6 +6,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -68,22 +69,23 @@ func (h *handler) authorize(w http.ResponseWriter, r *http.Request) {
 
 // decision receives the user's choice on the request page: deny, which
 // completes the transaction, or a means to log in with. Logging in approves
-// the request once it succeeds.
+// the request once the means identifies the user.
 func (h *handler) decision(w http.ResponseWriter, r *http.Request) {
 	tx, binding, ok := h.transactionForm(w, r)
 	if !ok {
 		return
 	}
-	switch r.PostForm.Get("decision") {
-	case "deny":
-		h.complete(w, r, authorization.Decision{TransactionID: tx, Binding: binding})
-	case "digid":
+	switch choice := r.PostForm.Get("decision"); {
+	case choice == "deny":
+		resp, err := h.service.Deny(tx, binding)
+		h.complete(w, r, tx, resp, err)
+	case choice == "digid" && h.service.Offers(digidmock.Means):
 		if !h.service.Pending(tx, binding) {
 			authorizeErrorPage(w, "the authorization request is unknown, used, expired or was started in another browser")
 			return
 		}
 		http.Redirect(w, r, digidmock.Path+"?"+url.Values{"transaction": {tx}}.Encode(), http.StatusSeeOther)
-	case "wallet":
+	case choice == "wallet":
 		authorizeErrorPage(w, "logging in with the NL Wallet is not available yet")
 	default:
 		authorizeErrorPage(w, "the decision must be deny, digid or wallet")
@@ -101,25 +103,21 @@ func (h *handler) digidPage(w http.ResponseWriter, r *http.Request) {
 	writeDigiDPage(w, http.StatusOK, tx, "", "")
 }
 
-// digidLogin logs the user in with the DigiD mock: a BSN of nine digits
-// identifies the user and approves the request; anything else shows the page
-// again.
+// digidLogin passes what the user typed to the core, which has the DigiD
+// mock identify the user and approves the request; when it does not, the
+// page shows again.
 func (h *handler) digidLogin(w http.ResponseWriter, r *http.Request) {
 	tx, binding, ok := h.transactionForm(w, r)
 	if !ok {
 		return
 	}
-	if !h.service.Pending(tx, binding) {
-		authorizeErrorPage(w, "the authorization request is unknown, used, expired or was started in another browser")
-		return
-	}
-	bsn := strings.TrimSpace(r.PostForm.Get("bsn"))
-	if !digidmock.ValidBSN(bsn) {
+	resp, err := h.service.LogIn(r.Context(), authorization.Login{TransactionID: tx, Binding: binding, Means: digidmock.Means,
+		Credential: strings.TrimSpace(r.PostForm.Get("bsn"))})
+	if errors.Is(err, authorization.ErrNotIdentified) {
 		writeDigiDPage(w, http.StatusBadRequest, tx, r.PostForm.Get("username"), "Vul als wachtwoord een BSN van 9 cijfers in.")
 		return
 	}
-	h.complete(w, r, authorization.Decision{TransactionID: tx, Binding: binding, Approve: true,
-		Identity: authorization.Identity{BSN: bsn, Means: digidmock.Means}})
+	h.complete(w, r, tx, resp, err)
 }
 
 // transactionForm reads a posted form with a transaction, and the binding
@@ -141,15 +139,14 @@ func (h *handler) binding(r *http.Request, tx string) string {
 	return ""
 }
 
-// complete ends the transaction with the user's decision and sends the
-// answer to the client.
-func (h *handler) complete(w http.ResponseWriter, r *http.Request, d authorization.Decision) {
-	resp, err := h.service.Decide(d)
+// complete sends the answer that ended transaction tx to the client, or
+// the error page when it cannot be redirected.
+func (h *handler) complete(w http.ResponseWriter, r *http.Request, tx string, resp authorization.AuthorizationResponse, err error) {
 	if err != nil {
 		authorizeErrorPage(w, err.Error())
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: transactionCookiePrefix + d.TransactionID, Path: authorization.AuthorizePath, MaxAge: -1, HttpOnly: true, Secure: h.secureCookies, SameSite: http.SameSiteStrictMode})
+	http.SetCookie(w, &http.Cookie{Name: transactionCookiePrefix + tx, Path: authorization.AuthorizePath, MaxAge: -1, HttpOnly: true, Secure: h.secureCookies, SameSite: http.SameSiteStrictMode})
 	redirectAuthorization(w, r, resp)
 }
 

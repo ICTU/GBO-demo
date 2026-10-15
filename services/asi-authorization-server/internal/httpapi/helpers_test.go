@@ -106,6 +106,7 @@ func newTestASWithRegister(t *testing.T, resource string, register authorization
 		Issuer:       as.srv.URL,
 		Resources:    []authorization.Resource{{URL: resource, Name: "Basisregistratie Personen (test)"}, {URL: testResource2, Name: "DUO (test)"}},
 		Clients:      clientconfig.New(clients...),
+		Identifiers:  map[string]authorization.Identifier{digidmock.Means: digidmock.Identifier{}},
 		Tokens:       tokens,
 		Register:     reg,
 		TrustAnchors: as.ca.pool(),

@@ -83,7 +83,10 @@ type Config struct {
 	// authorization names exactly one, and its tokens have it as aud.
 	Resources []Resource
 	Clients   Clients
-	Tokens    *TokenIssuer
+	// Identifiers are the identification means, by the name the token
+	// carries in acr and amr.
+	Identifiers map[string]Identifier
+	Tokens      *TokenIssuer
 	// Register is the register of wallet-relying parties; TrustAnchors are
 	// the roots the certificates of registering clients must chain to.
 	Register     Register

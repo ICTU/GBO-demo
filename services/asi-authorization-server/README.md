@@ -78,11 +78,11 @@ Ports and adapters, as `AGENTS.md` asks for a service with an authorization boun
 
 | Package | |
 |---|---|
-| `internal/authorization` | the core: the authorization, token and registration requests, PKCE, codes, client authentication, DPoP proofs, token issuance, re-verification. Ports `Clients` and `Register`; the identity of the user comes with the decision |
+| `internal/authorization` | the core: the authorization, token and registration requests, PKCE, codes, client authentication, DPoP proofs, token issuance, re-verification. Ports `Clients`, `Register` and `Identifier`: an identification means identifies the user behind the port, and the core names the means in the token |
 | `internal/clientconfig` | `Clients` from the configuration file |
 | `internal/stubregister` | `Register`: the stub register |
 | `internal/qtspcert` | the `provision-qtsp-certificate` command |
-| `internal/digidmock` | the DigiD mock: the BSN check and the login page, in two files so it can move to a service of its own |
+| `internal/digidmock` | `Identifier`: the DigiD mock, an adapter with its login page, in two files so it can move to a service of its own |
 | `internal/httpapi` | the endpoints, and the translation to the responses of RFC 6749 |
 | `main.go` | composition root |
 
@@ -104,11 +104,11 @@ The ASIP uses only the BSN; it does not check the PID claims.
 
 ## The request page and the DigiD mock
 
-A valid authorization request gets one page, in Dutch, with a banner that it is a test environment without real identification. It names the QTSP by its legal name (the register entry for a registered client, `client_name` in the configuration, else the `client_id`), the operation it asks (`verify`, `retrieve`) and the authentic source. The user logs in with DigiD (mock), or denies: Weigeren gives `access_denied`. The NL Wallet is shown but inactive until slice 7.
+A valid authorization request gets one page, in Dutch, with a banner that it is a test environment without real identification. It names the QTSP by its legal name (the register entry for a registered client, taken again at every re-verification; `client_name` in the configuration; else the `client_id`), the operation it asks (`verify`, `retrieve`) and the authentic source. The user logs in with DigiD (mock), or denies: Weigeren gives `access_denied`. The NL Wallet is shown but inactive until slice 7.
 
 Choosing a means starts the approval; the grant is established only after the login succeeds (RFC 6749 section 3.1; ETSI TS 119 478 figure 3, step 9). There is no second confirmation page.
 
-- The DigiD mock (`internal/digidmock`) is a page in the style of DigiD, like the toestemmingsportaal's: the username is ignored and the password field carries the BSN. A BSN that is not nine digits keeps the page open with an error; there is no eleven-test, because not every BSN of the demo's test data passes it. A nine-digit BSN the source does not know logs in, and the ASIP answers `Unknown`. It is not real DigiD.
+- The DigiD mock (`internal/digidmock`) is an adapter of the core's `Identifier` port: the web layer passes on what the user typed, and the core has the means identify the user and names the means itself. Its page is in the style of DigiD, like the toestemmingsportaal's: the username is ignored and the password field carries the BSN. A BSN that is not nine digits keeps the page open with an error; there is no eleven-test, because not every BSN of the demo's test data passes it. A nine-digit BSN the source does not know logs in, and the ASIP answers `Unknown`. It is not real DigiD.
 - With DigiD the token carries the BSN only, with `acr`/`amr` `digid-mock`: DigiD provides no further identification data. Read literally, REQ-AZSP-6.1.3.1-08 asks for the identification data of the user; this is a GBO interpretation (D7).
 - The request waits as a transaction: kept server-side, valid for 5 minutes, used once, and bound to the browser by an HttpOnly, SameSite=Strict cookie set with the page. A choice or login for an unknown, used or expired transaction, or without the cookie, gets an error page, not a redirect.
 - The pages are not cached and may not be framed.

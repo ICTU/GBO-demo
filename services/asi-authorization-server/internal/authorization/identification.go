@@ -1,7 +1,10 @@
 package authorization
 
 import (
+	"context"
 	"crypto/subtle"
+	"errors"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -39,6 +42,18 @@ type PlaceOfBirth struct {
 	Locality string `json:"locality,omitempty"`
 }
 
+// Identifier is an identification means (REQ-AZSP-6.1.3.1-02): it turns what
+// the user presented into the identity of the user. The DigiD mock is one;
+// the wallet (slice 7 of #336) another. The core names the means in the
+// identity itself, so a means cannot claim to be another.
+type Identifier interface {
+	Identify(ctx context.Context, credential string) (Identity, error)
+}
+
+// ErrNotIdentified: the means did not identify the user with what was
+// presented. The transaction stays, so the user can try again.
+var ErrNotIdentified = errors.New("the user was not identified")
+
 // Transaction is a valid authorization request waiting for the user. Binding
 // is a secret the browser keeps (a cookie); the decision must present it.
 type Transaction struct {
@@ -53,13 +68,14 @@ type Transaction struct {
 	Source string
 }
 
-// Decision is the user's answer to a transaction: a denial, or the identity
-// a means established for the user, which approves the request.
-type Decision struct {
+// Login is the user logging in with a means, which approves the request
+// once the means identifies the user: Credential is what the user presented
+// to it.
+type Login struct {
 	TransactionID string
 	Binding       string
-	Approve       bool
-	Identity      Identity
+	Means         string
+	Credential    string
 }
 
 type pendingAuthorization struct {
@@ -112,30 +128,66 @@ func (s *transactionStore) take(id, binding string) (pendingAuthorization, bool)
 }
 
 // Pending reports whether a transaction is still waiting for the browser that
-// holds binding, so a means can log the user in before Decide completes it.
+// holds binding, so the user can be shown a means to log in with.
 func (s *Service) Pending(transactionID, binding string) bool {
 	return s.transactions.live(transactionID, binding, s.cfg.Now())
 }
 
-// Decide completes a transaction. An unknown, used or expired transaction, a
-// wrong browser binding, or an approval without an identity cannot be
-// redirected.
-func (s *Service) Decide(d Decision) (AuthorizationResponse, error) {
-	p, ok := s.transactions.take(d.TransactionID, d.Binding)
-	if !ok || s.cfg.Now().After(p.expires) {
-		return AuthorizationResponse{}, &NotRedirectableError{Description: "the authorization request is unknown, used, expired or was started in another browser"}
+// Offers reports whether means is an identification means of this server.
+func (s *Service) Offers(means string) bool {
+	_, ok := s.cfg.Identifiers[means]
+	return ok
+}
+
+// Deny completes a transaction with the user's refusal: access_denied to
+// the client. An unknown, used or expired transaction, or a wrong browser
+// binding, cannot be redirected.
+func (s *Service) Deny(transactionID, binding string) (AuthorizationResponse, error) {
+	p, err := s.takeTransaction(transactionID, binding)
+	if err != nil {
+		return AuthorizationResponse{}, err
 	}
-	resp := AuthorizationResponse{RedirectURI: p.redirectURI, State: p.state}
-	if !d.Approve {
-		resp.Err = &Error{Code: "access_denied", Description: "the user denied the request"}
-		return resp, nil
+	return AuthorizationResponse{RedirectURI: p.redirectURI, State: p.state, Err: &Error{Code: "access_denied", Description: "the user denied the request"}}, nil
+}
+
+// LogIn identifies the user with the means of l and, when that succeeds,
+// approves the transaction: the identity, with the means named by the core,
+// goes with the code into the token. When the means does not identify the
+// user the error is ErrNotIdentified and the transaction stays. An unknown
+// means, transaction or browser binding cannot be redirected.
+func (s *Service) LogIn(ctx context.Context, l Login) (AuthorizationResponse, error) {
+	identifier, ok := s.cfg.Identifiers[l.Means]
+	if !ok {
+		return AuthorizationResponse{}, &NotRedirectableError{Description: "the identification means is not available"}
 	}
-	if d.Identity.BSN == "" || d.Identity.Means == "" {
-		return AuthorizationResponse{}, &NotRedirectableError{Description: "the user was not identified"}
+	if !s.Pending(l.TransactionID, l.Binding) {
+		return AuthorizationResponse{}, notPending
+	}
+	identity, err := identifier.Identify(ctx, l.Credential)
+	if err != nil {
+		return AuthorizationResponse{}, fmt.Errorf("%w: %v", ErrNotIdentified, err)
+	}
+	if identity.BSN == "" {
+		return AuthorizationResponse{}, fmt.Errorf("%w: the means gave no BSN", ErrNotIdentified)
+	}
+	identity.Means = l.Means
+	p, err := s.takeTransaction(l.TransactionID, l.Binding)
+	if err != nil {
+		return AuthorizationResponse{}, err
 	}
 	code := p.code
-	code.identity = d.Identity
+	code.identity = identity
 	code.expires = s.cfg.Now().Add(AuthorizationCodeLifetime)
-	resp.Code = s.codes.put(code)
-	return resp, nil
+	return AuthorizationResponse{RedirectURI: p.redirectURI, State: p.state, Code: s.codes.put(code)}, nil
+}
+
+var notPending = &NotRedirectableError{Description: "the authorization request is unknown, used, expired or was started in another browser"}
+
+// takeTransaction completes a transaction of the browser with binding.
+func (s *Service) takeTransaction(id, binding string) (pendingAuthorization, error) {
+	p, ok := s.transactions.take(id, binding)
+	if !ok || s.cfg.Now().After(p.expires) {
+		return pendingAuthorization{}, notPending
+	}
+	return p, nil
 }

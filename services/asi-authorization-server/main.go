@@ -38,6 +38,7 @@ import (
 
 	"gbo-demo/asi-authorization-server/internal/authorization"
 	"gbo-demo/asi-authorization-server/internal/clientconfig"
+	"gbo-demo/asi-authorization-server/internal/digidmock"
 	"gbo-demo/asi-authorization-server/internal/httpapi"
 	"gbo-demo/asi-authorization-server/internal/qtspcert"
 	"gbo-demo/asi-authorization-server/internal/stubregister"
@@ -94,9 +95,12 @@ func serve() error {
 		return err
 	}
 	service := authorization.NewService(authorization.Config{
-		Issuer:       issuer,
-		Resources:    resources,
-		Clients:      clients,
+		Issuer:    issuer,
+		Resources: resources,
+		Clients:   clients,
+		// DigiD (mock) is the one identification means until the wallet
+		// (slice 7 of #336).
+		Identifiers:  map[string]authorization.Identifier{digidmock.Means: digidmock.Identifier{}},
 		Tokens:       tokens,
 		Register:     register,
 		TrustAnchors: anchors,
