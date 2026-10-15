@@ -84,6 +84,7 @@ while IFS='|' read -r service context dockerfile paths platforms \
 done <<'IMAGES'
 asi-authorization-server|./services/asi-authorization-server|./services/asi-authorization-server/Dockerfile|services/asi-authorization-server|linux/amd64|false|asi-authorization-server
 asi-provider|./services/asi-provider|./services/asi-provider/Dockerfile|services/asi-provider|linux/amd64|false|asi-provider
+asi-discovery-stub|./services/asi-discovery-stub|./services/asi-discovery-stub/Dockerfile|services/asi-discovery-stub|linux/amd64|false|asi-discovery-stub
 bron-sidecar|.|./services/bron-sidecar/Dockerfile|services/bron-sidecar services/ldv-client services/ftv-graphql-mapper|linux/amd64|false|bron-sidecar
 brp-graphql-server|.|./services/brp-graphql-server/Dockerfile|services/brp-graphql-server services/ldv-client|linux/amd64|false|brp-graphql-server
 bsnk-mock|./services/bsnk-mock|./services/bsnk-mock/Dockerfile|services/bsnk-mock|linux/amd64|false|bsnk-mock
@@ -101,6 +102,7 @@ lvg-graphql-server|.|./services/lvg-graphql-server/Dockerfile|services/lvg-graph
 ldv-logboek|.|./services/ldv-logboek/Dockerfile|services/ldv-logboek services/ldv-client|linux/amd64|false|ldv-logboek
 landing-page|./landing-page|./landing-page/Dockerfile|landing-page|linux/amd64|false|landing-page
 openftv-pdp|.|./services/openftv-pdp/Dockerfile|services/openftv-pdp policies|linux/amd64|false|openftv-pdp
+qtsp-reference|./services/qtsp-reference|./services/qtsp-reference/Dockerfile|services/qtsp-reference|linux/amd64|false|qtsp-reference
 toestemmingsportaal-frontend|./toestemmingsportaal-frontend|./toestemmingsportaal-frontend/Dockerfile|toestemmingsportaal-frontend|linux/amd64|false|toestemmingsportaal-frontend
 eudi-issuance-server|./vendor/nl-wallet|./services/eudi-issuance-server/Dockerfile|vendor/nl-wallet services/eudi-issuance-server/Dockerfile|linux/amd64|recursive|eudi-issuance-server-amd64
 IMAGES
