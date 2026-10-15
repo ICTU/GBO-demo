@@ -372,7 +372,8 @@ demo-integrator: fsc-int-certs
 # ASIP's FSC peer (...1200), seeds its contract for brp with the grant link
 # /brp, issues the development seal certificate when missing, and starts both
 # services, the discovery stub and the reference QTSP (with a test QTSP
-# certificate when missing). The admission register lists the ASIP as a
+# certificate when missing), the NL Wallet verifier and, with the tunnel
+# overlay, the Cloudflare tunnel. The admission register lists the ASIP as a
 # system participant.
 demo-asi: fsc-asip-certs
 	$(MAKE) fsc-databases
@@ -389,6 +390,12 @@ demo-asi: fsc-asip-certs
 	  docker compose --profile asi up -d asi-wallet-verifier; \
 	else \
 	  echo "-> no nl-wallet sources at $$NLWALLET_PATH: the ASI wallet verifier is not started (DigiD (mock) only)"; \
+	fi
+	@# With the Cloudflare tunnel overlay (COMPOSE_FILE), the wallet reaches the
+	@# verifier through the tunnel: start it, or recreate it so it joins the
+	@# backend network. --no-deps leaves the EUDI services alone.
+	@if docker compose --profile asi config --services 2>/dev/null | grep -qx eudi-tunnel; then \
+	  docker compose --profile asi up -d --no-deps eudi-tunnel; \
 	fi
 	$(call banner,ASI authorization server:,$(PORT_ASI_AUTHORIZATION_SERVER))
 	$(call banner,ASIP:,$(PORT_ASI_PROVIDER))
