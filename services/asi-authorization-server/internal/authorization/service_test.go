@@ -1,6 +1,7 @@
 package authorization
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -11,22 +12,25 @@ import (
 	"time"
 )
 
-// fakeClients and fakeIdentifier are in-memory stand-ins for the adapters.
+// fakeClients is an in-memory stand-in for the client registry.
 type fakeClients map[string]*Client
 
 func (f fakeClients) Client(id string) (*Client, bool) { c, ok := f[id]; return c, ok }
 
-type fakeIdentifier map[string]Identity
+// fakeIdentifier identifies the user by a BSN of nine characters. It claims
+// another means and PID data, which the core must not take over blindly:
+// the core names the means itself.
+type fakeIdentifier struct{}
 
-func (f fakeIdentifier) Persons() []TestPerson {
-	var out []TestPerson
-	for id, p := range f {
-		out = append(out, TestPerson{ID: id, Name: p.GivenName})
+func (fakeIdentifier) Identify(_ context.Context, credential string) (Identity, error) {
+	switch {
+	case credential == "no-bsn":
+		return Identity{FamilyName: "Jansen"}, nil
+	case len(credential) != 9:
+		return Identity{}, errors.New("not nine characters")
 	}
-	return out
+	return Identity{BSN: credential, Means: "forged", FamilyName: "Jansen"}, nil
 }
-
-func (f fakeIdentifier) Identify(id string) (Identity, bool) { p, ok := f[id]; return p, ok }
 
 const (
 	redirectURI = "https://qtsp.test/callback"
@@ -45,11 +49,11 @@ func newTestService(t *testing.T) *Service {
 		t.Fatal(err)
 	}
 	return NewService(Config{
-		Issuer:     "https://as.test",
-		Resources:  []Resource{{URL: resource, Name: "BRP"}, {URL: resource2, Name: "DUO"}},
-		Clients:    fakeClients{"qtsp": {ID: "qtsp", RedirectURIs: []string{redirectURI}, Scopes: map[string]bool{"verify": true}}},
-		Identifier: fakeIdentifier{"frouke": {BSN: "999991772", GivenName: "Frouke"}},
-		Tokens:     tokens,
+		Issuer:      "https://as.test",
+		Resources:   []Resource{{URL: resource, Name: "BRP"}, {URL: resource2, Name: "DUO"}},
+		Clients:     fakeClients{"qtsp": {ID: "qtsp", Name: "Test QTSP", RedirectURIs: []string{redirectURI}, Scopes: map[string]bool{"verify": true}}},
+		Identifiers: map[string]Identifier{"test-means": fakeIdentifier{}},
+		Tokens:      tokens,
 	})
 }
 
@@ -62,7 +66,7 @@ func validRequest() AuthorizationRequest {
 	return AuthorizationRequest{
 		ResponseType: "code", ClientID: "qtsp", RedirectURI: redirectURI, Scope: "verify", State: "s",
 		CodeChallenge: challenge("a-code-verifier-of-at-least-forty-three-characters"), CodeChallengeMethod: "S256",
-		LoginHint: "frouke", Resources: []string{resource},
+		Resources: []string{resource},
 	}
 }
 
@@ -72,8 +76,8 @@ func TestAuthorize(t *testing.T) {
 	if err != nil || resp.Err != nil || resp.Code != "" || resp.Pending == nil || resp.RedirectURI != redirectURI || resp.State != "s" {
 		t.Fatalf("Authorize = %+v, %v; want a pending transaction for the registered redirect_uri", resp, err)
 	}
-	if p := resp.Pending; p.ID == "" || p.Binding == "" || p.Preselected != "frouke" || len(p.Persons) != 1 || p.Source != "BRP" {
-		t.Fatalf("transaction = %+v, want an id, a binding, the test persons, frouke preselected and the BRP data service", p)
+	if p := resp.Pending; p.ID == "" || p.Binding == "" || p.ClientName != "Test QTSP" || p.Source != "BRP" {
+		t.Fatalf("transaction = %+v, want an id, a binding, the client's legal name and the BRP data service", p)
 	}
 	for _, tc := range []struct {
 		name string
@@ -122,9 +126,11 @@ func TestPKCEMatches(t *testing.T) {
 	}
 }
 
-// The user's decision completes a transaction once, from the browser that
-// started it, before it expires.
-func TestDecide(t *testing.T) {
+// The user's login or denial completes a transaction once, from the browser
+// that started it, before it expires; the identification is the means's,
+// behind the Identifier port.
+func TestLogInAndDeny(t *testing.T) {
+	ctx := context.Background()
 	start := func(t *testing.T, s *Service) *Transaction {
 		t.Helper()
 		resp, err := s.Authorize(validRequest())
@@ -133,40 +139,72 @@ func TestDecide(t *testing.T) {
 		}
 		return resp.Pending
 	}
-	t.Run("approve", func(t *testing.T) {
+	login := func(tx *Transaction, credential string) Login {
+		return Login{TransactionID: tx.ID, Binding: tx.Binding, Means: "test-means", Credential: credential}
+	}
+	t.Run("login approves, once, with the means named by the core", func(t *testing.T) {
 		s := newTestService(t)
 		tx := start(t, s)
-		resp, err := s.Decide(Decision{TransactionID: tx.ID, Binding: tx.Binding, PersonID: "frouke", Approve: true})
+		resp, err := s.LogIn(ctx, login(tx, "999991772"))
 		if err != nil || resp.Code == "" || resp.Err != nil || resp.State != "s" {
-			t.Fatalf("Decide = %+v, %v; want a code", resp, err)
+			t.Fatalf("LogIn = %+v, %v; want a code", resp, err)
 		}
-		if _, err := s.Decide(Decision{TransactionID: tx.ID, Binding: tx.Binding, PersonID: "frouke", Approve: true}); err == nil {
+		code, _ := s.codes.take(resp.Code)
+		if code.identity.BSN != "999991772" || code.identity.Means != "test-means" {
+			t.Fatalf("identity = %+v, want the BSN and the means test-means", code.identity)
+		}
+		if _, err := s.LogIn(ctx, login(tx, "999991772")); err == nil {
 			t.Fatalf("a used transaction was accepted again")
+		}
+	})
+	t.Run("not identified: the transaction stays", func(t *testing.T) {
+		s := newTestService(t)
+		tx := start(t, s)
+		for _, credential := range []string{"123", "no-bsn"} {
+			if _, err := s.LogIn(ctx, login(tx, credential)); !errors.Is(err, ErrNotIdentified) {
+				t.Fatalf("LogIn with %q = %v, want ErrNotIdentified", credential, err)
+			}
+		}
+		if resp, err := s.LogIn(ctx, login(tx, "999991772")); err != nil || resp.Code == "" {
+			t.Fatalf("LogIn after a failed attempt = %+v, %v; want a code", resp, err)
 		}
 	})
 	t.Run("deny", func(t *testing.T) {
 		s := newTestService(t)
 		tx := start(t, s)
-		resp, err := s.Decide(Decision{TransactionID: tx.ID, Binding: tx.Binding})
+		resp, err := s.Deny(tx.ID, tx.Binding)
 		if err != nil || resp.Err == nil || resp.Err.Code != "access_denied" || resp.Code != "" {
-			t.Fatalf("Decide = %+v, %v; want access_denied", resp, err)
+			t.Fatalf("Deny = %+v, %v; want access_denied", resp, err)
 		}
 	})
-	for name, d := range map[string]func(tx *Transaction) Decision{
-		"unknown transaction": func(tx *Transaction) Decision {
-			return Decision{TransactionID: "unknown", Binding: tx.Binding, PersonID: "frouke", Approve: true}
+	for name, run := range map[string]func(s *Service, tx *Transaction) error{
+		"unknown means": func(s *Service, tx *Transaction) error {
+			l := login(tx, "999991772")
+			l.Means = "wallet"
+			_, err := s.LogIn(ctx, l)
+			return err
 		},
-		"another browser": func(tx *Transaction) Decision {
-			return Decision{TransactionID: tx.ID, Binding: "other", PersonID: "frouke", Approve: true}
+		"unknown transaction": func(s *Service, tx *Transaction) error {
+			l := login(tx, "999991772")
+			l.TransactionID = "unknown"
+			_, err := s.LogIn(ctx, l)
+			return err
 		},
-		"unknown person": func(tx *Transaction) Decision {
-			return Decision{TransactionID: tx.ID, Binding: tx.Binding, PersonID: "nobody", Approve: true}
+		"another browser": func(s *Service, tx *Transaction) error {
+			l := login(tx, "999991772")
+			l.Binding = "other"
+			_, err := s.LogIn(ctx, l)
+			return err
+		},
+		"deny from another browser": func(s *Service, tx *Transaction) error {
+			_, err := s.Deny(tx.ID, "other")
+			return err
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s := newTestService(t)
 			var notRedirectable *NotRedirectableError
-			if _, err := s.Decide(d(start(t, s))); !errors.As(err, &notRedirectable) {
+			if err := run(s, start(t, s)); !errors.As(err, &notRedirectable) {
 				t.Fatalf("err = %v, want NotRedirectableError", err)
 			}
 		})
@@ -174,16 +212,19 @@ func TestDecide(t *testing.T) {
 	t.Run("another browser does not spoil the transaction", func(t *testing.T) {
 		s := newTestService(t)
 		tx := start(t, s)
-		_, _ = s.Decide(Decision{TransactionID: tx.ID, Binding: "other", PersonID: "frouke", Approve: true})
-		if resp, err := s.Decide(Decision{TransactionID: tx.ID, Binding: tx.Binding, PersonID: "frouke", Approve: true}); err != nil || resp.Code == "" {
-			t.Fatalf("Decide after a wrong binding = %+v, %v; want a code", resp, err)
+		other := login(tx, "999991772")
+		other.Binding = "other"
+		_, _ = s.LogIn(ctx, other)
+		_, _ = s.Deny(tx.ID, "other")
+		if resp, err := s.LogIn(ctx, login(tx, "999991772")); err != nil || resp.Code == "" {
+			t.Fatalf("LogIn after a wrong binding = %+v, %v; want a code", resp, err)
 		}
 	})
 	t.Run("expired", func(t *testing.T) {
 		s := newTestService(t)
 		tx := start(t, s)
 		s.cfg.Now = func() time.Time { return time.Now().Add(TransactionLifetime + time.Second) }
-		if _, err := s.Decide(Decision{TransactionID: tx.ID, Binding: tx.Binding, PersonID: "frouke", Approve: true}); err == nil {
+		if _, err := s.LogIn(ctx, login(tx, "999991772")); err == nil {
 			t.Fatalf("an expired transaction was accepted")
 		}
 	})

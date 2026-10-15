@@ -6,9 +6,10 @@
 // they are separate roles (ASIP and AZSP), so they are separate services with
 // separate keys.
 //
-// User identification is a stub: the user picks a test person on a page and
-// approves or denies the request. It is not conformant identity proofing;
-// slice 7 of #336 adds OpenID4VP PID disclosure.
+// User identification is a stub: one page shows the request, and the user
+// logs in with a DigiD mock, which provides the BSN only, or denies. It is
+// not conformant identity proofing; slice 7 of #336 adds OpenID4VP PID
+// disclosure.
 //
 // This file is the composition root: configuration, construction, lifecycle.
 //
@@ -37,10 +38,10 @@ import (
 
 	"gbo-demo/asi-authorization-server/internal/authorization"
 	"gbo-demo/asi-authorization-server/internal/clientconfig"
+	"gbo-demo/asi-authorization-server/internal/digidmock"
 	"gbo-demo/asi-authorization-server/internal/httpapi"
 	"gbo-demo/asi-authorization-server/internal/qtspcert"
 	"gbo-demo/asi-authorization-server/internal/stubregister"
-	"gbo-demo/asi-authorization-server/internal/testpersons"
 )
 
 const (
@@ -77,10 +78,6 @@ func serve() error {
 	if err != nil {
 		return err
 	}
-	persons, err := testpersons.Load(env("AZSP_TEST_PERSONS_FILE", "testdata/test-persons.json"))
-	if err != nil {
-		return err
-	}
 	register, err := stubregister.Load(env("AZSP_REGISTER_FILE", "testdata/register.json"))
 	if err != nil {
 		return err
@@ -98,10 +95,12 @@ func serve() error {
 		return err
 	}
 	service := authorization.NewService(authorization.Config{
-		Issuer:       issuer,
-		Resources:    resources,
-		Clients:      clients,
-		Identifier:   persons,
+		Issuer:    issuer,
+		Resources: resources,
+		Clients:   clients,
+		// DigiD (mock) is the one identification means until the wallet
+		// (slice 7 of #336).
+		Identifiers:  map[string]authorization.Identifier{digidmock.Means: digidmock.Identifier{}},
 		Tokens:       tokens,
 		Register:     register,
 		TrustAnchors: anchors,
@@ -110,7 +109,7 @@ func serve() error {
 	errc := make(chan error, 1)
 	go func() {
 		slog.Info("listening", "addr", srv.Addr, "issuer", issuer, "clients", clients.Len(), "register_entries", register.Len(),
-			"test_persons", persons.Len(), "identification", "stub: test-person chooser, not conformant")
+			"identification", "stub: DigiD mock, not conformant")
 		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 			errc <- err
 		}

@@ -3,7 +3,7 @@
 // data service's authorization server, lets the user authorize, takes a
 // DPoP-bound token, verifies or retrieves, and accepts a result only with a
 // valid seal. The web side is where a user starts; the CLI runs the same
-// flow with the test-person chooser played by a test harness.
+// flow with the DigiD mock login played by a test harness.
 //
 // This file is the composition root.
 //

@@ -9,7 +9,6 @@ FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cab
 RUN apk add --no-cache ca-certificates wget
 WORKDIR /app
 COPY --from=builder /asi-authorization-server .
-COPY testdata/test-persons.json ./testdata/test-persons.json
 COPY testdata/register.json ./testdata/register.json
 EXPOSE 4021
 CMD ["./asi-authorization-server"]

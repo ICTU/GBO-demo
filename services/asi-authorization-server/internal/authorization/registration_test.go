@@ -28,14 +28,15 @@ func (f *fakeRegister) Lookup(_ context.Context, uri string) (RegisterEntry, err
 // organisation of the certificate.
 func TestApprove(t *testing.T) {
 	reg := &fakeRegister{entries: map[string]RegisterEntry{
-		"qtsp":     {Identifiers: []string{"NTRNL-1"}, Entitlements: []string{QEAAProviderEntitlement}},
+		"qtsp":     {Identifiers: []string{"NTRNL-1"}, LegalName: "Test QTSP", Entitlements: []string{QEAAProviderEntitlement}},
 		"provider": {Identifiers: []string{"NTRNL-1"}, Entitlements: []string{"https://uri.etsi.org/19475/Entitlement/Service_Provider"}},
 		"other":    {Identifiers: []string{"NTRNL-2"}, Entitlements: []string{QEAAProviderEntitlement}},
 		"data-eu":  {Identifiers: []string{"NTRNL-1"}, Entitlements: []string{"http://data.europa.eu/eudi/entitlement/QEAA_Provider"}},
 	}}
 	s := NewService(Config{Register: reg})
-	if err := s.approve(context.Background(), "qtsp", "NTRNL-1"); err != nil {
-		t.Fatalf("approve = %v, want approved", err)
+	// The entry gives the legal name the user sees (F in #544).
+	if entry, err := s.approve(context.Background(), "qtsp", "NTRNL-1"); err != nil || entry.LegalName != "Test QTSP" {
+		t.Fatalf("approve = %+v, %v; want approved with the entry", entry, err)
 	}
 	for _, tc := range []struct{ name, uri, reason string }{
 		{"unknown registryURI", "unknown", "not in the register"},
@@ -44,17 +45,17 @@ func TestApprove(t *testing.T) {
 		{"entitlement in the other URI form of TS5", "data-eu", "no QEAA_Provider entitlement"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := s.approve(context.Background(), tc.uri, "NTRNL-1")
+			_, err := s.approve(context.Background(), tc.uri, "NTRNL-1")
 			if err == nil || err.Code != "unapproved_software_statement" || !strings.Contains(err.Description, tc.reason) {
 				t.Fatalf("approve = %v, want unapproved_software_statement: %s", err, tc.reason)
 			}
 		})
 	}
 	reg.unavailable = true
-	if err := s.approve(context.Background(), "qtsp", "NTRNL-1"); err == nil || err.Code != "temporarily_unavailable" {
+	if _, err := s.approve(context.Background(), "qtsp", "NTRNL-1"); err == nil || err.Code != "temporarily_unavailable" {
 		t.Fatalf("approve with the register unavailable = %v, want temporarily_unavailable", err)
 	}
-	if err := NewService(Config{}).approve(context.Background(), "qtsp", "NTRNL-1"); err == nil || err.Code != "temporarily_unavailable" {
+	if _, err := NewService(Config{}).approve(context.Background(), "qtsp", "NTRNL-1"); err == nil || err.Code != "temporarily_unavailable" {
 		t.Fatalf("approve without a register = %v, want temporarily_unavailable", err)
 	}
 }

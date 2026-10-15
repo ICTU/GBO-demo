@@ -29,7 +29,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -37,6 +36,7 @@ import (
 	"time"
 
 	"gbo-demo/qtsp-reference/internal/cli"
+	"gbo-demo/qtsp-reference/internal/harness"
 	"gbo-demo/qtsp-reference/internal/qtsp"
 	"gbo-demo/qtsp-reference/internal/web"
 )
@@ -213,17 +213,17 @@ func results(t *testing.T, o cli.Outcome) []string {
 func TestVerifyThroughTheChain(t *testing.T) {
 	s := startStack(t)
 	for _, tc := range []struct {
-		name, person string
-		attr         qtsp.Attribute
-		want         string
+		name, bsn string
+		attr      qtsp.Attribute
+		want      string
 	}{
-		{"Match", "frouke", attr(idFamilyName, `{"family_name":"Jansen"}`), "Match"},
-		{"MatchWithVariation", "frouke", attr(idFamilyName, `{"family_name":"JANSEN"}`), "MatchWithVariation"},
-		{"NoMatch", "frouke", attr(idFamilyName, `{"family_name":"Bakker"}`), "NoMatch"},
-		{"Unknown", "tom", attr(idAddress, `{"street":"Meir","house_number":"44","postal_code":"2000","city":"Antwerpen","country":"BE"}`), "Unknown"},
+		{"Match", bsnFrouke, attr(idFamilyName, `{"family_name":"Jansen"}`), "Match"},
+		{"MatchWithVariation", bsnFrouke, attr(idFamilyName, `{"family_name":"JANSEN"}`), "MatchWithVariation"},
+		{"NoMatch", bsnFrouke, attr(idFamilyName, `{"family_name":"Bakker"}`), "NoMatch"},
+		{"Unknown", bsnTom, attr(idAddress, `{"street":"Meir","house_number":"44","postal_code":"2000","city":"Antwerpen","country":"BE"}`), "Unknown"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			o, err := s.run(t, cli.Options{Operation: "verify", Person: tc.person, Attributes: []qtsp.Attribute{tc.attr}})
+			o, err := s.run(t, cli.Options{Operation: "verify", BSN: tc.bsn, Attributes: []qtsp.Attribute{tc.attr}})
 			if err != nil || !o.Response.Accepted() || o.Plan.EndpointURI == "" {
 				t.Fatalf("outcome %+v, %v\n%s", o.Response, err, s.logs["asi-provider"])
 			}
@@ -250,7 +250,7 @@ func TestErrorAnswers(t *testing.T) {
 		{"501 mandate", cli.Options{Mandate: true}, http.StatusNotImplemented},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			tc.o.Operation, tc.o.Person, tc.o.Attributes = "verify", "frouke", jansen
+			tc.o.Operation, tc.o.BSN, tc.o.Attributes = "verify", bsnFrouke, jansen
 			o, err := s.run(t, tc.o)
 			if err != nil || o.Response.Status != tc.want || o.Response.Accepted() {
 				t.Fatalf("status = %d, %v; want %d", o.Response.Status, err, tc.want)
@@ -262,7 +262,7 @@ func TestErrorAnswers(t *testing.T) {
 // Q-C4: retrieve gives the values, sealed.
 func TestRetrieve(t *testing.T) {
 	s := startStack(t)
-	o, err := s.run(t, cli.Options{Operation: "retrieve", Person: "frouke",
+	o, err := s.run(t, cli.Options{Operation: "retrieve", BSN: bsnFrouke,
 		Attributes: []qtsp.Attribute{{Identifier: idFamilyName}, {Identifier: idAddress}}})
 	if err != nil || !o.Response.Accepted() || !bytes.Contains(o.Response.Body, []byte(`"family_name":"Jansen"`)) ||
 		!bytes.Contains(o.Response.Body, []byte(`"house_number":"12 B"`)) {
@@ -279,7 +279,7 @@ func TestASealFromAnotherAnchorIsNotAccepted(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	o, err := cli.Run(ctx, s.client(t, "https://qtsp.test/callback", anchors, registryURI), http.DefaultClient,
-		cli.Options{Operation: "verify", Person: "frouke", Attributes: []qtsp.Attribute{attr(idFamilyName, `{"family_name":"Jansen"}`)}})
+		cli.Options{Operation: "verify", BSN: bsnFrouke, Attributes: []qtsp.Attribute{attr(idFamilyName, `{"family_name":"Jansen"}`)}})
 	if err != nil || o.Response.Status != http.StatusOK || o.Response.Accepted() || o.Response.SealError == nil {
 		t.Fatalf("outcome %+v, %v; want a 200 that is not accepted", o.Response, err)
 	}
@@ -289,7 +289,7 @@ func TestASealFromAnotherAnchorIsNotAccepted(t *testing.T) {
 func TestNoResult(t *testing.T) {
 	s := startStack(t)
 	var none *qtsp.NoDataServiceError
-	if _, err := s.run(t, cli.Options{Operation: "verify", Person: "frouke",
+	if _, err := s.run(t, cli.Options{Operation: "verify", BSN: bsnFrouke,
 		Attributes: []qtsp.Attribute{attr("https://gbo.example/attributes/shoe_size/1", `{}`)}}); !errors.As(err, &none) {
 		t.Errorf("no data service: err = %v", err)
 	}
@@ -297,10 +297,10 @@ func TestNoResult(t *testing.T) {
 	defer cancel()
 	var refused *qtsp.RegistrationError
 	if _, err := cli.Run(ctx, s.client(t, "https://qtsp.test/callback", s.sealAnchor, "https://register.gbo.example/wrp/unknown"), http.DefaultClient,
-		cli.Options{Operation: "verify", Person: "frouke", Attributes: []qtsp.Attribute{attr(idFamilyName, `{"family_name":"Jansen"}`)}}); !errors.As(err, &refused) {
+		cli.Options{Operation: "verify", BSN: bsnFrouke, Attributes: []qtsp.Attribute{attr(idFamilyName, `{"family_name":"Jansen"}`)}}); !errors.As(err, &refused) {
 		t.Errorf("registration refused: err = %v", err)
 	}
-	o, err := s.run(t, cli.Options{Operation: "verify", Person: "frouke", Deny: true,
+	o, err := s.run(t, cli.Options{Operation: "verify", BSN: bsnFrouke, Deny: true,
 		Attributes: []qtsp.Attribute{attr(idFamilyName, `{"family_name":"Jansen"}`)}})
 	if err != nil || o.Denied == nil || o.Denied.Error != "access_denied" || o.Response.Status != 0 {
 		t.Errorf("denied: %+v, %v", o, err)
@@ -342,16 +342,7 @@ func TestWeb(t *testing.T) {
 		return loc.String()
 	}
 	decide := func(t *testing.T, authorization, decision string) string {
-		_, page := fetch(t, browser, http.MethodGet, authorization, nil)
-		tx := regexp.MustCompile(`name="transaction" value="([^"]+)"`).FindStringSubmatch(page)
-		action := regexp.MustCompile(`<form method="post" action="([^"]+)"`).FindStringSubmatch(page)
-		if tx == nil || action == nil {
-			t.Fatalf("no chooser:\n%s", page)
-		}
-		u, _ := url.Parse(authorization)
-		post, _ := u.Parse(action[1])
-		resp, _ := fetch(t, browser, http.MethodPost, post.String(), url.Values{"transaction": {tx[1]}, "person": {"frouke"}, "decision": {decision}})
-		return resp.Header.Get("Location")
+		return login(t, base+"/callback", authorization, bsnFrouke, decision == "approve")
 	}
 
 	// Served over https, the session cookie is Secure.
@@ -398,7 +389,7 @@ func TestWeb(t *testing.T) {
 // the token (it logs only errors, which carry none).
 func TestNoBSNInTheLogs(t *testing.T) {
 	s := startStack(t)
-	if _, err := s.run(t, cli.Options{Operation: "verify", Person: "frouke", Attributes: []qtsp.Attribute{attr(idFamilyName, `{"family_name":"Jansen"}`)}}); err != nil {
+	if _, err := s.run(t, cli.Options{Operation: "verify", BSN: bsnFrouke, Attributes: []qtsp.Attribute{attr(idFamilyName, `{"family_name":"Jansen"}`)}}); err != nil {
 		t.Fatal(err)
 	}
 	for name, logs := range s.logs {
@@ -406,6 +397,25 @@ func TestNoBSNInTheLogs(t *testing.T) {
 			t.Errorf("%s log contains the BSN", name)
 		}
 	}
+}
+
+// login plays the citizen at the authorization server with the harness: it
+// logs in with the DigiD mock with bsn, or denies, and returns the callback
+// URL the browser follows back to the QTSP.
+func login(t *testing.T, callback, authorization, bsn string, approve bool) string {
+	t.Helper()
+	cb, err := harness.Decide(context.Background(), http.DefaultClient, authorization, bsn, approve)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := url.Values{"state": {cb.State}}
+	if cb.Code != "" {
+		q.Set("code", cb.Code)
+	} else {
+		q.Set("error", cb.Error)
+		q.Set("error_description", cb.ErrorDescription)
+	}
+	return callback + "?" + q.Encode()
 }
 
 func fetch(t *testing.T, c *http.Client, method, target string, form url.Values) (*http.Response, string) {

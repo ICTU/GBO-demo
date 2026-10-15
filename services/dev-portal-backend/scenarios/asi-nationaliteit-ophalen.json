@@ -1,7 +1,7 @@
 {
   "id": "asi-nationaliteit-ophalen",
   "name": "ASI · Nationaliteit OPHALEN",
-  "desc": "De QTSP haalt de nationaliteiten van Frouke Jansen op bij de bron (retrieve): [\"NL\",\"BE\"], verzegeld. Kies Frouke Jansen.",
+  "desc": "De QTSP haalt de nationaliteiten van Frouke Jansen op bij de bron (retrieve): [\"NL\",\"BE\"], verzegeld. Log in met DigiD (mock) met BSN 999991772.",
   "tab": "asi-verify",
   "expected_outcome": "retrieve",
   "payload": {
@@ -11,6 +11,6 @@
         "identifier": "https://gbo.example/attributes/nationality/1"
       }
     ],
-    "person": "Frouke Jansen"
+    "person": "Frouke Jansen (BSN 999991772)"
   }
 }

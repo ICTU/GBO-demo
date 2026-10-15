@@ -71,6 +71,10 @@ func TestRegisteredClientGetsAToken(t *testing.T) { // D2 (to the token)
 	p := newPKCE()
 	params := authorizeParams(p)
 	params.Set("client_id", id)
+	// The user sees the legal name of the register entry (#544).
+	if tx := as.startAuthorization(t, params); !strings.Contains(tx.page, "<strong>Test QTSP</strong>") || strings.Contains(tx.page, id) {
+		t.Errorf("request page does not name the registered QTSP by its legal name:\n%s", tx.page)
+	}
 	form := as.tokenForm(t, as.code(t, params), p)
 	form.Set("client_assertion", as.assertion(t, id, nil))
 	if r := as.postToken(t, form, as.proof(t, nil)); r.status != http.StatusOK {
@@ -234,6 +238,34 @@ func TestRecheckDeactivatesAClientWithoutEntitlement(t *testing.T) { // D22
 	assertTokenError(t, as.postToken(t, form, as.proof(t, nil)), http.StatusUnauthorized, "invalid_client")
 	if resp := as.authorize(t, params); resp.StatusCode != http.StatusBadRequest || resp.Header.Get("Location") != "" {
 		t.Fatalf("authorization request of a deactivated client = %d, Location %q; want 400 without redirect", resp.StatusCode, resp.Header.Get("Location"))
+	}
+}
+
+// The user sees the legal name the register holds now: a re-verification
+// takes a changed name, while authorizations run alongside it.
+func TestRecheckTakesAChangedLegalName(t *testing.T) {
+	as := newTestAS(t)
+	id := as.registerQTSP(t)
+	params := authorizeParams(newPKCE())
+	params.Set("client_id", id)
+	as.register.set(qtspRegistryURI, authorization.RegisterEntry{Identifiers: []string{qtspOrganizationID}, LegalName: "Test QTSP B.V.", Entitlements: []string{authorization.QEAAProviderEntitlement}})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range 20 {
+			as.service.RecheckEntitlements(context.Background())
+		}
+	}()
+	valid := authorization.AuthorizationRequest{ResponseType: "code", ClientID: id, RedirectURI: testRedirectURI, Scope: "verify",
+		CodeChallenge: newPKCE().challenge, CodeChallengeMethod: "S256", Resources: []string{testResource}}
+	for range 20 {
+		if resp, err := as.service.Authorize(valid); err != nil || resp.Pending == nil || resp.Pending.ClientName == "" {
+			t.Fatalf("Authorize = %+v, %v; want a transaction naming the client", resp, err)
+		}
+	}
+	<-done
+	if tx := as.startAuthorization(t, params); !strings.Contains(tx.page, "<strong>Test QTSP B.V.</strong>") {
+		t.Fatalf("request page after the re-verification does not show the new legal name:\n%s", tx.page)
 	}
 }
 

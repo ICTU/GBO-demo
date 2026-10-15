@@ -84,9 +84,9 @@ export default function AsiForm({ payload, setPayload, attributes, attributesErr
 
       <div className="hint" style={{ fontSize: 12, color: 'var(--mute)', marginTop: 8 }}>
         <em>Aanvragen</em> legt de aanvraag neer bij de referentie-QTSP en opent een nieuw
-        tabblad naar de autorisatieserver van de bron. Daar kiest u de testpersoon
-        {payload.person ? <> (<b>{payload.person}</b>)</> : null} en geeft u toestemming of
-        weigert u. Het resultaat verschijnt hier, met de keten, het FSC-transactielog en de
+        tabblad naar de autorisatieserver van de bron. Daar logt u in met DigiD (mock)
+        {payload.person ? <> als <b>{payload.person}</b></> : null}, wat het verzoek goedkeurt,
+        of weigert u. Het resultaat verschijnt hier, met de keten, het FSC-transactielog en de
         PDP-beslissing.
       </div>
     </>

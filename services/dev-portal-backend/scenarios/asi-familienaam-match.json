@@ -1,7 +1,7 @@
 {
   "id": "asi-familienaam-match",
   "name": "ASI · Familienaam MATCH",
-  "desc": "Een QTSP laat de familienaam van Frouke Jansen verifiëren bij de BRP-dataservice van de ASIP, met de waarde zoals de bron die heeft. Kies in de keuzepagina Frouke Jansen en geef toestemming; de ASIP antwoordt Match, verzegeld.",
+  "desc": "Een QTSP laat de familienaam van Frouke Jansen verifiëren bij de BRP-dataservice van de ASIP, met de waarde zoals de bron die heeft. Log in met DigiD (mock) met BSN 999991772; de ASIP antwoordt Match, verzegeld.",
   "tab": "asi-verify",
   "expected_outcome": "match",
   "payload": {
@@ -12,6 +12,6 @@
         "value": "{\"family_name\":\"Jansen\"}"
       }
     ],
-    "person": "Frouke Jansen"
+    "person": "Frouke Jansen (BSN 999991772)"
   }
 }

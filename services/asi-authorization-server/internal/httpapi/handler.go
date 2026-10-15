@@ -6,11 +6,13 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
 
 	"gbo-demo/asi-authorization-server/internal/authorization"
+	"gbo-demo/asi-authorization-server/internal/digidmock"
 )
 
 func NewHandler(service *authorization.Service) http.Handler {
@@ -20,6 +22,8 @@ func NewHandler(service *authorization.Service) http.Handler {
 	mux.HandleFunc("GET "+authorization.JWKSPath, h.jwks)
 	mux.HandleFunc("GET "+authorization.AuthorizePath, h.authorize)
 	mux.HandleFunc("POST "+DecisionPath, h.decision)
+	mux.HandleFunc("GET "+digidmock.Path, h.digidPage)
+	mux.HandleFunc("POST "+digidmock.Path, h.digidLogin)
 	mux.HandleFunc("POST "+authorization.TokenPath, h.token)
 	mux.HandleFunc("POST "+authorization.RegisterPath, h.register)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
@@ -51,42 +55,93 @@ func (h *handler) authorize(w http.ResponseWriter, r *http.Request) {
 		CodeChallenge:       q.Get("code_challenge"),
 		CodeChallengeMethod: q.Get("code_challenge_method"),
 		Resources:           q["resource"],
-		LoginHint:           q.Get("login_hint"),
 	})
 	if err != nil {
 		authorizeErrorPage(w, err.Error())
 		return
 	}
 	if resp.Pending != nil {
-		writeChooser(w, resp.Pending, h.secureCookies)
+		writeRequestPage(w, resp.Pending, h.secureCookies)
 		return
 	}
 	redirectAuthorization(w, r, resp)
 }
 
-// decision receives the user's choice on the chooser page.
+// decision receives the user's choice on the request page: deny, which
+// completes the transaction, or a means to log in with. Logging in approves
+// the request once the means identifies the user.
 func (h *handler) decision(w http.ResponseWriter, r *http.Request) {
+	tx, binding, ok := h.transactionForm(w, r)
+	if !ok {
+		return
+	}
+	switch choice := r.PostForm.Get("decision"); {
+	case choice == "deny":
+		resp, err := h.service.Deny(tx, binding)
+		h.complete(w, r, tx, resp, err)
+	case choice == "digid" && h.service.Offers(digidmock.Means):
+		if !h.service.Pending(tx, binding) {
+			authorizeErrorPage(w, "the authorization request is unknown, used, expired or was started in another browser")
+			return
+		}
+		http.Redirect(w, r, digidmock.Path+"?"+url.Values{"transaction": {tx}}.Encode(), http.StatusSeeOther)
+	case choice == "wallet":
+		authorizeErrorPage(w, "logging in with the NL Wallet is not available yet")
+	default:
+		authorizeErrorPage(w, "the decision must be deny, digid or wallet")
+	}
+}
+
+// digidPage shows the login page of the DigiD mock for a pending
+// transaction of this browser.
+func (h *handler) digidPage(w http.ResponseWriter, r *http.Request) {
+	tx := r.URL.Query().Get("transaction")
+	if !h.service.Pending(tx, h.binding(r, tx)) {
+		authorizeErrorPage(w, "the authorization request is unknown, used, expired or was started in another browser")
+		return
+	}
+	writeDigiDPage(w, http.StatusOK, tx, "", "")
+}
+
+// digidLogin passes what the user typed to the core, which has the DigiD
+// mock identify the user and approves the request; when it does not, the
+// page shows again.
+func (h *handler) digidLogin(w http.ResponseWriter, r *http.Request) {
+	tx, binding, ok := h.transactionForm(w, r)
+	if !ok {
+		return
+	}
+	resp, err := h.service.LogIn(r.Context(), authorization.Login{TransactionID: tx, Binding: binding, Means: digidmock.Means,
+		Credential: strings.TrimSpace(r.PostForm.Get("bsn"))})
+	if errors.Is(err, authorization.ErrNotIdentified) {
+		writeDigiDPage(w, http.StatusBadRequest, tx, r.PostForm.Get("username"), "Vul als wachtwoord een BSN van 9 cijfers in.")
+		return
+	}
+	h.complete(w, r, tx, resp, err)
+}
+
+// transactionForm reads a posted form with a transaction, and the binding
+// this browser holds for it.
+func (h *handler) transactionForm(w http.ResponseWriter, r *http.Request) (tx, binding string, ok bool) {
 	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
 	if err := r.ParseForm(); err != nil {
-		authorizeErrorPage(w, "the decision is not a form")
-		return
+		authorizeErrorPage(w, "the request is not a form")
+		return "", "", false
 	}
-	tx := r.PostForm.Get("transaction")
-	var binding string
+	tx = r.PostForm.Get("transaction")
+	return tx, h.binding(r, tx), true
+}
+
+func (h *handler) binding(r *http.Request, tx string) string {
 	if c, err := r.Cookie(transactionCookiePrefix + tx); err == nil {
-		binding = c.Value
+		return c.Value
 	}
-	choice := r.PostForm.Get("decision")
-	if choice != "approve" && choice != "deny" {
-		authorizeErrorPage(w, "the decision must be approve or deny")
-		return
-	}
-	resp, err := h.service.Decide(authorization.Decision{
-		TransactionID: tx,
-		Binding:       binding,
-		PersonID:      r.PostForm.Get("person"),
-		Approve:       choice == "approve",
-	})
+	return ""
+}
+
+// complete sends the answer that ended transaction tx to the client, or
+// the error page when it cannot be redirected.
+func (h *handler) complete(w http.ResponseWriter, r *http.Request, tx string, resp authorization.AuthorizationResponse, err error) {
 	if err != nil {
 		authorizeErrorPage(w, err.Error())
 		return
