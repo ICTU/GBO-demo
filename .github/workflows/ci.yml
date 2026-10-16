@@ -366,7 +366,7 @@ jobs:
   result:
     name: CI result
     runs-on: ubuntu-latest
-    needs: [go, conformance, source-registry, rego, schema-drift, chart, frontend, scripts, docker]
+    needs: [go, conformance, source-registry, rego, schema-drift, chart, frontend, scripts, docker, image-manifest]
     if: always()
     steps:
       - name: Evaluate job results
