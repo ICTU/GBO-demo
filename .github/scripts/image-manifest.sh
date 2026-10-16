@@ -103,6 +103,7 @@ landing-page|./landing-page|./landing-page/Dockerfile|landing-page|linux/amd64|f
 openftv-pdp|.|./services/openftv-pdp/Dockerfile|services/openftv-pdp policies|linux/amd64|false|openftv-pdp
 toestemmingsportaal-frontend|./toestemmingsportaal-frontend|./toestemmingsportaal-frontend/Dockerfile|toestemmingsportaal-frontend|linux/amd64|false|toestemmingsportaal-frontend
 eudi-issuance-server|./vendor/nl-wallet|./services/eudi-issuance-server/Dockerfile|vendor/nl-wallet services/eudi-issuance-server/Dockerfile|linux/amd64|recursive|eudi-issuance-server-amd64
+asi-wallet-verifier|./vendor/nl-wallet|./services/asi-wallet-verifier/Dockerfile|vendor/nl-wallet services/asi-wallet-verifier/Dockerfile|linux/amd64|recursive|asi-wallet-verifier-amd64
 IMAGES
 
 # Every image the tree can build is either published above or listed here

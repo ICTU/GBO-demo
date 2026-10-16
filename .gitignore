@@ -8,6 +8,8 @@ conformance/check/conformance-check
 !services/*/Dockerfile
 !services/*/Dockerfile.dockerignore
 !services/*/main.go
+# Trust anchors of the ASI wallet verifier (base64 DER, one per line).
+!services/asi-wallet-verifier/pid-issuer-anchors.txt
 # Web assets baked into a binary with go:embed — the binary-catching pattern
 # above matches any filename not ending in `.go`, including these.
 !services/*/*.html

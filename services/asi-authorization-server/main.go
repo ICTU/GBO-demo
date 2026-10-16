@@ -17,6 +17,7 @@
 //
 //	asi-authorization-server                              serve (configuration from the environment)
 //	asi-authorization-server provision-qtsp-certificate   issue a test QTSP certificate
+//	asi-authorization-server provision-wallet-verifier    configure the NL Wallet verifier
 package main
 
 import (
@@ -42,6 +43,7 @@ import (
 	"gbo-demo/asi-authorization-server/internal/httpapi"
 	"gbo-demo/asi-authorization-server/internal/qtspcert"
 	"gbo-demo/asi-authorization-server/internal/stubregister"
+	"gbo-demo/asi-authorization-server/internal/walletverifier"
 )
 
 const (
@@ -51,6 +53,13 @@ const (
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", "asi-authorization-server"))
+	if len(os.Args) > 1 && os.Args[1] == "provision-wallet-verifier" {
+		if err := walletverifier.Provision(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "provision-qtsp-certificate" {
 		if err := qtspcert.Provision(os.Args[2:]); err != nil {
 			slog.Error("provisioning QTSP certificate", "err", err)
