@@ -13,6 +13,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   provision-asi-wallet-verifier` issues the reader certificate of usecase
   `asi-login` from the development reader CA and writes its configuration;
   `make demo-asi` starts it when the nl-wallet sources are present (#546).
+- **Logging in with the NL Wallet at the ASI authorization server.** "Inloggen
+  met NL Wallet" opens an OpenID4VP disclosure session at the wallet
+  verifier and shows its QR code; once the wallet disclosed the PID the
+  token carries the BSN, `family_name`, `given_name`, `birthdate`,
+  `nationalities` and `acr`/`amr` `nl-wallet`. The session is kept with the
+  transaction; declined, expired or unusable brings the user back to the
+  request page; an unreachable verifier gives a 503 page (#546).
 - **Conformance matrix for ETSI TS 119 478** (`conformance/`): a status per
   requirement ID of the specification (passed, stub, not-applicable or
   failing), with the tests that prove it or the reason, read as Implementing
