@@ -122,6 +122,15 @@ func TestWalletUnavailable(t *testing.T) {
 	if resp, page := as.get(t, path, tx.cookie); resp.StatusCode != http.StatusServiceUnavailable || !strings.Contains(page, "niet beschikbaar") {
 		t.Fatalf("following with the verifier unreachable = %d:\n%s", resp.StatusCode, page)
 	}
+	// The session is done, but the disclosed attributes cannot be fetched.
+	as.wallet.set(session, func(s *fakeWalletSession) {
+		s.progressErr = nil
+		s.progress = authorization.Progress{State: authorization.SessionDone}
+		s.identifyErr = fmt.Errorf("%w: GET disclosed_attributes: 502", authorization.ErrMeansUnavailable)
+	})
+	if resp, page := as.get(t, path, tx.cookie); resp.StatusCode != http.StatusServiceUnavailable || !strings.Contains(page, "niet beschikbaar") {
+		t.Fatalf("done, then the verifier unreachable = %d:\n%s", resp.StatusCode, page)
+	}
 	if q := redirectParams(t, as.digidLogin(t, tx.id, tx.cookie, bsnFrouke)); q.Get("code") == "" {
 		t.Fatalf("DigiD after the verifier was unreachable = %v, want a code", q)
 	}

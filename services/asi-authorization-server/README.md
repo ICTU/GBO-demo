@@ -122,9 +122,9 @@ With the NL Wallet the authorization server has the citizen disclose the PID thr
 - choosing the wallet opens a disclosure session for usecase `asi-login` that asks `bsn`, `family_name`, `given_name`, `birthdate` and `nationalities` of `urn:eudi:pid:nl:1`. The core keeps the session with the transaction and never takes one from the browser, so a finished session cannot be carried over to another transaction (the QR code shows the session);
 - the wallet page shows the QR code (cross-device) and refreshes itself every two seconds; it has no script, so the strict CSP stays (it allows `data:` images);
 - when the wallet disclosed the PID, the core logs the user in: the token carries the BSN, the four PID attributes and `acr`/`amr` `nl-wallet`. The NL PID has no place of birth, so one of the five mandatory PID attributes is missing;
-- declined in the wallet or expired, or a disclosure without a BSN or of another type: the request page again, with why, and the transaction stays. An unreachable verifier: a 503 page, and the transaction stays for DigiD (mock).
+- declined in the wallet or expired, or a disclosure without a BSN or of another type: the request page again, with why, and the transaction stays. A verifier that cannot be reached, fails or refuses the API key, also when it fetches the disclosed attributes of a finished session: a 503 page, and the transaction stays for DigiD (mock).
 
-Configuration: `AZSP_WALLET_VERIFIER_URL` (internal API), `AZSP_WALLET_VERIFIER_STATUS_URL` (wallet API, for the session status) and `AZSP_WALLET_VERIFIER_API_KEY_FILE`; without the key file the wallet is not offered.
+Configuration: `AZSP_WALLET_VERIFIER_URL` (internal API), `AZSP_WALLET_VERIFIER_STATUS_URL` (wallet API, for the session status) and `AZSP_WALLET_VERIFIER_API_KEY_FILE`, read at startup; without the key file the wallet is not offered. Compose mounts only the directory with the key, not the verifier's configuration.
 
 ## Interpretations and choices
 

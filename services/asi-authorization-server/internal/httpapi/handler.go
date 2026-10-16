@@ -93,7 +93,7 @@ func (h *handler) decision(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, authorization.ErrMeansUnavailable):
 			slog.Warn("NL Wallet verifier unavailable", "err", err)
-			unavailablePage(w, "De NL Wallet is nu niet beschikbaar. Ga terug en log in met DigiD (mock), of weiger het verzoek.")
+			unavailablePage(w, walletUnavailable)
 		case err != nil:
 			authorizeErrorPage(w, err.Error())
 		default:
@@ -145,7 +145,7 @@ func (h *handler) walletPage(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, authorization.ErrMeansUnavailable):
 		slog.Warn("NL Wallet verifier unavailable", "err", err)
-		unavailablePage(w, "De NL Wallet is nu niet beschikbaar. Ga terug en log in met DigiD (mock), of weiger het verzoek.")
+		unavailablePage(w, walletUnavailable)
 		return
 	case err != nil:
 		authorizeErrorPage(w, err.Error())
@@ -158,6 +158,11 @@ func (h *handler) walletPage(w http.ResponseWriter, r *http.Request) {
 		h.requestAgain(w, tx, binding, "Niet ingelogd met de NL Wallet: geweigerd in de wallet, of de tijd is verstreken.")
 	case authorization.SessionDone:
 		resp, err := h.service.LogIn(r.Context(), authorization.Login{TransactionID: tx, Binding: binding, Means: walletverifier.Means})
+		if errors.Is(err, authorization.ErrMeansUnavailable) {
+			slog.Warn("NL Wallet verifier unavailable", "err", err)
+			unavailablePage(w, walletUnavailable)
+			return
+		}
 		if errors.Is(err, authorization.ErrNotIdentified) {
 			slog.Info("NL Wallet disclosure did not identify the user", "err", err)
 			h.requestAgain(w, tx, binding, "Niet ingelogd met de NL Wallet: de wallet gaf geen bruikbaar persoonsidentificatiebewijs.")
@@ -166,6 +171,10 @@ func (h *handler) walletPage(w http.ResponseWriter, r *http.Request) {
 		h.complete(w, r, tx, resp, err)
 	}
 }
+
+// walletUnavailable says the NL Wallet cannot be used now; the transaction
+// stays.
+const walletUnavailable = "De NL Wallet is nu niet beschikbaar. Ga terug en log in met DigiD (mock), of weiger het verzoek."
 
 // requestAgain shows the request page of a pending transaction with why the
 // login did not succeed; the user chooses again.

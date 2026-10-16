@@ -7,11 +7,11 @@ The nl-wallet issuance server cannot take this role: it exposes only the wallet-
 ## Build and run
 
 - `make asi-wallet-verifier-image` builds `gbo/asi-wallet-verifier:dev` from `$NLWALLET_PATH` (default `vendor/nl-wallet`) with this `Dockerfile`, stamped with the nl-wallet revision, like `eudi-issuance-server`.
-- `make provision-asi-wallet-verifier` writes `verification_server.toml` and `api-key` to `$(ONBOARDING_SECRETS_DIR)/asi-wallet-verifier` (command `provision-wallet-verifier` of the authorization server):
+- `make provision-asi-wallet-verifier` writes `verification_server.toml` to `$(ONBOARDING_SECRETS_DIR)/asi-wallet-verifier`, and the API key of the internal API to `$(ONBOARDING_SECRETS_DIR)/asi-authorization-server-wallet/api-key`: the authorization server mounts only that directory, not the configuration with the reader's private key (command `provision-wallet-verifier` of the authorization server):
   - the reader certificate of usecase `asi-login`, issued by the development reader CA (`ca.gbo-reader`, which the test wallet trusts). The verifier's public host is its DNS SAN, and its reader authorisation allows `bsn`, `family_name`, `given_name`, `birthdate` and `nationalities` of `urn:eudi:pid:nl:1`;
   - trust in the development issuer CA and in the pre-production PID issuer CA (`pid-issuer-anchors.txt`);
   - sessions in memory, and the internal API behind a generated API key.
-- `make demo-asi` builds, provisions (once) and starts it when the nl-wallet sources are present. Without them, the ASI route runs with DigiD (mock) only.
+- `make demo-asi` builds and provisions it when the nl-wallet sources are present, before it starts the authorization server, which reads the API key at startup; after a new provisioning it recreates the ASI services. Without the sources, the ASI route runs with DigiD (mock) only.
 
 ## Ports
 

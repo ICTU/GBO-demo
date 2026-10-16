@@ -83,7 +83,8 @@ func (c *Client) Progress(ctx context.Context, session string) (authorization.Pr
 
 // Identify fetches the disclosed attributes of the finished session and
 // takes the PID: a disclosure of PIDType with a BSN. Anything else does not
-// identify the user.
+// identify the user; a verifier that cannot be reached, fails or refuses the
+// API key is ErrMeansUnavailable.
 func (c *Client) Identify(ctx context.Context, session string) (authorization.Identity, error) {
 	var out []struct {
 		ID           string `json:"id"`
@@ -134,11 +135,17 @@ func (c *Client) do(ctx context.Context, method, target string, body []byte, int
 	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %v", authorization.ErrMeansUnavailable, err)
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if resp.StatusCode != http.StatusOK {
+	switch {
+	case resp.StatusCode == http.StatusOK:
+	case resp.StatusCode >= 500, resp.StatusCode == http.StatusUnauthorized, resp.StatusCode == http.StatusForbidden:
+		// The verifier fails, or refuses our API key: it is unavailable,
+		// not a disclosure that does not identify the user.
+		return fmt.Errorf("%w: %s %s: %d", authorization.ErrMeansUnavailable, method, req.URL.Path, resp.StatusCode)
+	default:
 		return fmt.Errorf("%s %s: %d", method, req.URL.Path, resp.StatusCode)
 	}
 	return json.Unmarshal(raw, out)

@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -266,5 +267,36 @@ func TestSessionMeansUsesTheKeptSession(t *testing.T) {
 	}
 	if resp, err := s.LogIn(ctx, login); err != nil || resp.Code == "" || len(eager.seen) != 1 || eager.seen[0] != "kept-session" {
 		t.Fatalf("LogIn = %+v, %v, means asked with %v; want a code with the kept session", resp, err, eager.seen)
+	}
+}
+
+// unavailableSession is a session means whose session is done, but which
+// cannot be reached when the core asks for the identity.
+type unavailableSession struct{ eagerSession }
+
+func (unavailableSession) Identify(context.Context, string) (Identity, error) {
+	return Identity{}, fmt.Errorf("%w: connection refused", ErrMeansUnavailable)
+}
+
+// X5 in the core: a means that cannot be reached after the session is done
+// is unavailable, not a failed identification, and the transaction stays.
+func TestLogInWhenTheMeansIsUnavailable(t *testing.T) {
+	ctx := context.Background()
+	s := newTestService(t)
+	s.cfg.Identifiers["wallet"] = &unavailableSession{}
+	resp, err := s.Authorize(validRequest())
+	if err != nil || resp.Pending == nil {
+		t.Fatal(err)
+	}
+	tx := resp.Pending
+	if err := s.StartSession(ctx, tx.ID, tx.Binding, "wallet"); err != nil {
+		t.Fatal(err)
+	}
+	login := Login{TransactionID: tx.ID, Binding: tx.Binding, Means: "wallet"}
+	if _, err := s.LogIn(ctx, login); !errors.Is(err, ErrMeansUnavailable) || errors.Is(err, ErrNotIdentified) {
+		t.Fatalf("LogIn = %v, want unavailable and not 'not identified'", err)
+	}
+	if _, ok := s.Transaction(tx.ID, tx.Binding); !ok {
+		t.Fatal("the transaction is gone after the means was unavailable")
 	}
 }

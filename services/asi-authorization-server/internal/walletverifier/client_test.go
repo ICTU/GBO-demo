@@ -3,6 +3,7 @@ package walletverifier
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -17,7 +18,9 @@ import (
 type fakeVerifier struct {
 	status    string
 	disclosed string
-	started   map[string]any
+	// disclosedStatus, when set, answers the disclosed attributes with it.
+	disclosedStatus int
+	started         map[string]any
 }
 
 func (f *fakeVerifier) server(t *testing.T) *httptest.Server {
@@ -45,6 +48,10 @@ func (f *fakeVerifier) server(t *testing.T) *httptest.Server {
 		_, _ = io.WriteString(w, f.status)
 	})
 	mux.HandleFunc("GET /disclosure/sessions/s1/disclosed_attributes", internal(func(w http.ResponseWriter, _ *http.Request) {
+		if f.disclosedStatus != 0 {
+			w.WriteHeader(f.disclosedStatus)
+			return
+		}
 		_, _ = io.WriteString(w, f.disclosed)
 	}))
 	srv := httptest.NewServer(mux)
@@ -116,8 +123,32 @@ func TestIdentify(t *testing.T) {
 		"nothing":          `[]`,
 	} {
 		f.disclosed = disclosed
-		if _, err := c.Identify(context.Background(), "s1"); err == nil {
-			t.Errorf("%s: identified the user", name)
+		if _, err := c.Identify(context.Background(), "s1"); err == nil || errors.Is(err, authorization.ErrMeansUnavailable) {
+			t.Errorf("%s: Identify = %v, want not identified", name, err)
 		}
+	}
+}
+
+// X5 after the session is done: a verifier that cannot be reached, fails or
+// refuses the API key is unavailable; an unknown session does not identify
+// the user.
+func TestIdentifyWhenTheVerifierFails(t *testing.T) {
+	f := &fakeVerifier{disclosed: pidDisclosure}
+	srv := f.server(t)
+	for status, unavailable := range map[int]bool{http.StatusInternalServerError: true, http.StatusBadGateway: true, http.StatusNotFound: false} {
+		f.disclosedStatus = status
+		_, err := New(srv.URL, srv.URL, "secret").Identify(context.Background(), "s1")
+		if err == nil || errors.Is(err, authorization.ErrMeansUnavailable) != unavailable {
+			t.Errorf("disclosed attributes %d: Identify = %v, want unavailable %v", status, err, unavailable)
+		}
+	}
+	f.disclosedStatus = 0
+	if _, err := New(srv.URL, srv.URL, "wrong").Identify(context.Background(), "s1"); !errors.Is(err, authorization.ErrMeansUnavailable) {
+		t.Errorf("API key refused: Identify = %v, want unavailable", err)
+	}
+	down := httptest.NewServer(http.NotFoundHandler())
+	down.Close()
+	if _, err := New(down.URL, down.URL, "secret").Identify(context.Background(), "s1"); !errors.Is(err, authorization.ErrMeansUnavailable) {
+		t.Errorf("verifier unreachable: Identify = %v, want unavailable", err)
 	}
 }

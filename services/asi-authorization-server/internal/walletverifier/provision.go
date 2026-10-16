@@ -46,7 +46,9 @@ var (
 )
 
 // Provision issues the reader certificate and writes, in the output
-// directory, verification_server.toml and api-key.
+// directory, verification_server.toml (with the reader's private key), and
+// the API key of the internal API to its own file: the authorization server
+// gets only that file, not the verifier's configuration.
 func Provision(args []string) error {
 	fs := flag.NewFlagSet("provision-wallet-verifier", flag.ContinueOnError)
 	caKeyPath := fs.String("ca-key", "", "PEM file with the development reader CA private key")
@@ -60,7 +62,8 @@ func Provision(args []string) error {
 	// "disclosure_based_issuance" (EUDI_UL_BASE).
 	universalLink := fs.String("universal-link-base", "https://app.preproductie.wallet.edi.bzk.nl/deeplink/", "base of the wallet's universal link")
 	organization := fs.String("organization", "GBO demo ASIP (autorisatieserver)", "organisation the wallet shows")
-	outDir := fs.String("out-dir", "", "directory for verification_server.toml and api-key")
+	outDir := fs.String("out-dir", "", "directory for verification_server.toml")
+	apiKeyFile := fs.String("api-key-file", "", "file for the API key of the internal API, which the authorization server reads (default: api-key in out-dir)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -115,10 +118,18 @@ func Provision(args []string) error {
 	if err := os.WriteFile(filepath.Join(*outDir, "verification_server.toml"), []byte(config.TOML()), 0o600); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(*outDir, "api-key"), []byte(config.APIKey), 0o600); err != nil {
+	if inOutDir := filepath.Join(*outDir, "api-key"); *apiKeyFile == "" {
+		*apiKeyFile = inOutDir
+	} else if err := os.Remove(inOutDir); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err // an API key of an earlier layout, next to the configuration
+	}
+	if err := os.MkdirAll(filepath.Dir(*apiKeyFile), 0o700); err != nil {
 		return err
 	}
-	fmt.Printf("-> wallet verifier configuration written to %s (verification_server.toml, api-key); reader certificate for %s\n", *outDir, pub.Hostname())
+	if err := os.WriteFile(*apiKeyFile, []byte(config.APIKey), 0o600); err != nil {
+		return err
+	}
+	fmt.Printf("-> wallet verifier configuration written to %s (verification_server.toml), API key to %s; reader certificate for %s\n", *outDir, *apiKeyFile, pub.Hostname())
 	return nil
 }
 

@@ -45,13 +45,28 @@ func TestProvision(t *testing.T) {
 	readerKey, readerCert := writeCA(t, dir, "reader-ca")
 	_, issuerCert := writeCA(t, dir, "issuer-ca")
 	out := filepath.Join(dir, "out")
+	keyFile := filepath.Join(dir, "client", "api-key")
+	// An API key of the earlier layout, next to the configuration, goes.
+	_ = os.MkdirAll(out, 0o700)
+	_ = os.WriteFile(filepath.Join(out, "api-key"), []byte("old"), 0o600)
 	if err := Provision([]string{"--ca-key", readerKey, "--ca-cert", readerCert, "--issuer-ca", issuerCert,
-		"--public-url", "https://verifier.test", "--request-origin", "https://as.test", "--out-dir", out}); err != nil {
+		"--public-url", "https://verifier.test", "--request-origin", "https://as.test", "--out-dir", out, "--api-key-file", keyFile}); err != nil {
 		t.Fatal(err)
 	}
 	raw, _ := os.ReadFile(filepath.Join(out, "verification_server.toml"))
 	config := string(raw)
-	apiKey, _ := os.ReadFile(filepath.Join(out, "api-key"))
+	// The authorization server mounts only the API key, apart from the
+	// verifier's configuration with the reader's private key.
+	apiKey, err := os.ReadFile(keyFile)
+	if err != nil || len(apiKey) == 0 {
+		t.Fatalf("API key file: %v", err)
+	}
+	if entries, _ := os.ReadDir(filepath.Dir(keyFile)); len(entries) != 1 {
+		t.Errorf("the API key's directory holds %d files, want only the key", len(entries))
+	}
+	if _, err := os.Stat(filepath.Join(out, "api-key")); err == nil {
+		t.Error("the API key is also next to the verifier's configuration")
+	}
 	for _, want := range []string{`[usecases.asi-login]`, `url = "memory://"`, `public_url = "https://verifier.test/"`, `api_key = "` + string(apiKey) + `"`} {
 		if !strings.Contains(config, want) {
 			t.Errorf("configuration lacks %s", want)

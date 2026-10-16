@@ -267,7 +267,8 @@ func (s *Service) Deny(transactionID, binding string) (AuthorizationResponse, er
 // LogIn identifies the user with the means of l and, when that succeeds,
 // approves the transaction: the identity, with the means named by the core,
 // goes with the code into the token. When the means does not identify the
-// user the error is ErrNotIdentified and the transaction stays. An unknown
+// user the error is ErrNotIdentified, when it cannot be reached
+// ErrMeansUnavailable; in both cases the transaction stays. An unknown
 // means, transaction or browser binding cannot be redirected.
 func (s *Service) LogIn(ctx context.Context, l Login) (AuthorizationResponse, error) {
 	identifier, ok := s.cfg.Identifiers[l.Means]
@@ -287,6 +288,9 @@ func (s *Service) LogIn(ctx context.Context, l Login) (AuthorizationResponse, er
 		credential = p.session
 	}
 	identity, err := identifier.Identify(ctx, credential)
+	if errors.Is(err, ErrMeansUnavailable) {
+		return AuthorizationResponse{}, err // the transaction stays
+	}
 	if err != nil {
 		return AuthorizationResponse{}, fmt.Errorf("%w: %v", ErrNotIdentified, err)
 	}
