@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -228,4 +229,74 @@ func TestLogInAndDeny(t *testing.T) {
 			t.Fatalf("an expired transaction was accepted")
 		}
 	})
+}
+
+// eagerSession is a session means that would identify the user with any
+// credential, even none: the core must hand it only the session it keeps
+// with the transaction.
+type eagerSession struct{ seen []string }
+
+func (e *eagerSession) Start(context.Context) (string, error) { return "kept-session", nil }
+func (e *eagerSession) Progress(context.Context, string) (Progress, error) {
+	return Progress{State: SessionDone}, nil
+}
+func (e *eagerSession) Identify(_ context.Context, credential string) (Identity, error) {
+	e.seen = append(e.seen, credential)
+	return Identity{BSN: "999991772"}, nil
+}
+
+// X7 in the core: a session means identifies with the session kept with
+// the transaction, never with a credential from outside, and not at all
+// before a session was started for the transaction.
+func TestSessionMeansUsesTheKeptSession(t *testing.T) {
+	ctx := context.Background()
+	s := newTestService(t)
+	eager := &eagerSession{}
+	s.cfg.Identifiers["wallet"] = eager
+	resp, err := s.Authorize(validRequest())
+	if err != nil || resp.Pending == nil {
+		t.Fatal(err)
+	}
+	tx := resp.Pending
+	login := Login{TransactionID: tx.ID, Binding: tx.Binding, Means: "wallet", Credential: "session-of-someone-else"}
+	if _, err := s.LogIn(ctx, login); !errors.Is(err, ErrNotIdentified) || len(eager.seen) != 0 {
+		t.Fatalf("LogIn before a session = %v, means asked with %v; want not identified, means not asked", err, eager.seen)
+	}
+	if err := s.StartSession(ctx, tx.ID, tx.Binding, "wallet"); err != nil {
+		t.Fatal(err)
+	}
+	if resp, err := s.LogIn(ctx, login); err != nil || resp.Code == "" || len(eager.seen) != 1 || eager.seen[0] != "kept-session" {
+		t.Fatalf("LogIn = %+v, %v, means asked with %v; want a code with the kept session", resp, err, eager.seen)
+	}
+}
+
+// unavailableSession is a session means whose session is done, but which
+// cannot be reached when the core asks for the identity.
+type unavailableSession struct{ eagerSession }
+
+func (unavailableSession) Identify(context.Context, string) (Identity, error) {
+	return Identity{}, fmt.Errorf("%w: connection refused", ErrMeansUnavailable)
+}
+
+// X5 in the core: a means that cannot be reached after the session is done
+// is unavailable, not a failed identification, and the transaction stays.
+func TestLogInWhenTheMeansIsUnavailable(t *testing.T) {
+	ctx := context.Background()
+	s := newTestService(t)
+	s.cfg.Identifiers["wallet"] = &unavailableSession{}
+	resp, err := s.Authorize(validRequest())
+	if err != nil || resp.Pending == nil {
+		t.Fatal(err)
+	}
+	tx := resp.Pending
+	if err := s.StartSession(ctx, tx.ID, tx.Binding, "wallet"); err != nil {
+		t.Fatal(err)
+	}
+	login := Login{TransactionID: tx.ID, Binding: tx.Binding, Means: "wallet"}
+	if _, err := s.LogIn(ctx, login); !errors.Is(err, ErrMeansUnavailable) || errors.Is(err, ErrNotIdentified) {
+		t.Fatalf("LogIn = %v, want unavailable and not 'not identified'", err)
+	}
+	if _, ok := s.Transaction(tx.ID, tx.Binding); !ok {
+		t.Fatal("the transaction is gone after the means was unavailable")
+	}
 }

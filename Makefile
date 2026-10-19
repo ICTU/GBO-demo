@@ -284,8 +284,12 @@ provision-asip-seal-certificate: require-development-cas
 # development reader CA, which the test wallet trusts, with the verifier's
 # public host as DNS SAN; trust in the development issuer CA and the
 # pre-production PID issuer; and the API key of its internal API. Run again
-# when ASI_WALLET_VERIFIER_PUBLIC_URL changes.
+# when ASI_WALLET_VERIFIER_PUBLIC_URL changes; the next make demo-asi then
+# recreates the ASI services (marker .provisioned).
 ASI_WALLET_VERIFIER_DIR ?= $(ONBOARDING_SECRETS_DIR)/asi-wallet-verifier
+# The API key of the verifier's internal API, apart from its configuration:
+# the authorization server mounts only this directory.
+ASI_WALLET_VERIFIER_CLIENT_DIR ?= $(ONBOARDING_SECRETS_DIR)/asi-authorization-server-wallet
 ASI_WALLET_VERIFIER_PUBLIC_URL ?= http://localhost:$(PORT_ASI_WALLET_VERIFIER)
 # Base of the wallet's universal link in the QR code; the verifier appends
 # "disclosure". The default is the pre-production NL Wallet (TestFlight).
@@ -299,7 +303,9 @@ provision-asi-wallet-verifier: require-development-cas
 		--public-url "$(ASI_WALLET_VERIFIER_PUBLIC_URL)" \
 		--universal-link-base "$(ASI_WALLET_UL_BASE)" \
 		--request-origin "$(or $(ASI_AUTHORIZATION_SERVER_PUBLIC_URL),http://$(or $(GBO_PUBLIC_HOST),localhost):$(PORT_ASI_AUTHORIZATION_SERVER))" \
-		--out-dir "$(ASI_WALLET_VERIFIER_DIR)"
+		--out-dir "$(ASI_WALLET_VERIFIER_DIR)" \
+		--api-key-file "$(ASI_WALLET_VERIFIER_CLIENT_DIR)/api-key"
+	@touch "$(ASI_WALLET_VERIFIER_DIR)/.provisioned"
 
 # Test QTSP certificate for the ASIP authorization server
 # (services/asi-authorization-server), issued by the development reader CA.
@@ -381,16 +387,20 @@ demo-asi: fsc-asip-certs
 	$(MAKE) fsc-seed-asip
 	@test -f "$(ASIP_SEAL_DIR)/seal-cert.pem" || $(MAKE) provision-asip-seal-certificate
 	@test -f "$(ASIP_QTSP_DIR)/qtsp-cert.pem" || $(MAKE) provision-asip-qtsp-certificate
-	docker compose --profile asi up --build -d asi-authorization-server asi-provider asi-discovery-stub qtsp-reference
 	@# The wallet verifier needs the nl-wallet sources; without them the ASI
-	@# route runs with DigiD (mock) only.
-	@if [ -f "$$NLWALLET_PATH/wallet_core/Cargo.toml" ]; then \
-	  $(MAKE) asi-wallet-verifier-image && \
-	  { test -f "$(ASI_WALLET_VERIFIER_DIR)/verification_server.toml" || $(MAKE) provision-asi-wallet-verifier; } && \
-	  docker compose --profile asi up -d asi-wallet-verifier; \
-	else \
-	  echo "-> no nl-wallet sources at $$NLWALLET_PATH: the ASI wallet verifier is not started (DigiD (mock) only)"; \
-	fi
+	@# route runs with DigiD (mock) only. It is provisioned before the
+	@# authorization server starts, which reads the API key at startup.
+	@if [ -f "$$NLWALLET_PATH/wallet_core/Cargo.toml" ]; then $(MAKE) asi-wallet-verifier-image; \
+	else echo "-> no nl-wallet sources at $$NLWALLET_PATH: the ASI wallet verifier is not started (DigiD (mock) only)"; fi
+	@if [ -f "$$NLWALLET_PATH/wallet_core/Cargo.toml" ] && { [ ! -f "$(ASI_WALLET_VERIFIER_DIR)/verification_server.toml" ] || [ ! -f "$(ASI_WALLET_VERIFIER_CLIENT_DIR)/api-key" ]; }; then \
+	  $(MAKE) provision-asi-wallet-verifier; fi
+	@# After a new provisioning (its marker) the services are recreated:
+	@# compose does not see the new files, and the QTSP registers again, as
+	@# the authorization server keeps registrations in memory.
+	@recreate=; if [ -f "$(ASI_WALLET_VERIFIER_DIR)/.provisioned" ]; then recreate=--force-recreate; fi; \
+	docker compose --profile asi up --build -d $$recreate asi-authorization-server asi-provider asi-discovery-stub qtsp-reference && \
+	if [ -f "$$NLWALLET_PATH/wallet_core/Cargo.toml" ]; then docker compose --profile asi up -d $$recreate asi-wallet-verifier; fi && \
+	rm -f "$(ASI_WALLET_VERIFIER_DIR)/.provisioned"
 	@# With the Cloudflare tunnel overlay (COMPOSE_FILE), the wallet reaches the
 	@# verifier through the tunnel: start it, or recreate it so it joins the
 	@# backend network. --no-deps leaves the EUDI services alone.

@@ -7,12 +7,14 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
 
 	"gbo-demo/asi-authorization-server/internal/authorization"
 	"gbo-demo/asi-authorization-server/internal/digidmock"
+	"gbo-demo/asi-authorization-server/internal/walletverifier"
 )
 
 func NewHandler(service *authorization.Service) http.Handler {
@@ -24,6 +26,7 @@ func NewHandler(service *authorization.Service) http.Handler {
 	mux.HandleFunc("POST "+DecisionPath, h.decision)
 	mux.HandleFunc("GET "+digidmock.Path, h.digidPage)
 	mux.HandleFunc("POST "+digidmock.Path, h.digidLogin)
+	mux.HandleFunc("GET "+WalletPath, h.walletPage)
 	mux.HandleFunc("POST "+authorization.TokenPath, h.token)
 	mux.HandleFunc("POST "+authorization.RegisterPath, h.register)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
@@ -61,7 +64,7 @@ func (h *handler) authorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if resp.Pending != nil {
-		writeRequestPage(w, resp.Pending, h.secureCookies)
+		writeRequestPage(w, resp.Pending, h.secureCookies, h.service.Offers(walletverifier.Means), "")
 		return
 	}
 	redirectAuthorization(w, r, resp)
@@ -85,8 +88,19 @@ func (h *handler) decision(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		http.Redirect(w, r, digidmock.Path+"?"+url.Values{"transaction": {tx}}.Encode(), http.StatusSeeOther)
+	case choice == "wallet" && h.service.Offers(walletverifier.Means):
+		err := h.service.StartSession(r.Context(), tx, binding, walletverifier.Means)
+		switch {
+		case errors.Is(err, authorization.ErrMeansUnavailable):
+			slog.Warn("NL Wallet verifier unavailable", "err", err)
+			unavailablePage(w, walletUnavailable)
+		case err != nil:
+			authorizeErrorPage(w, err.Error())
+		default:
+			http.Redirect(w, r, WalletPath+"?"+url.Values{"transaction": {tx}}.Encode(), http.StatusSeeOther)
+		}
 	case choice == "wallet":
-		authorizeErrorPage(w, "logging in with the NL Wallet is not available yet")
+		authorizeErrorPage(w, "logging in with the NL Wallet is not available")
 	default:
 		authorizeErrorPage(w, "the decision must be deny, digid or wallet")
 	}
@@ -118,6 +132,59 @@ func (h *handler) digidLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.complete(w, r, tx, resp, err)
+}
+
+// walletPage follows the wallet session of the transaction: the QR code
+// while the user has not finished; the login once the wallet disclosed the
+// PID; the request page again when the user declined in the wallet, the
+// session expired, or the disclosure did not identify the user.
+func (h *handler) walletPage(w http.ResponseWriter, r *http.Request) {
+	tx := r.URL.Query().Get("transaction")
+	binding := h.binding(r, tx)
+	progress, err := h.service.SessionProgress(r.Context(), tx, binding)
+	switch {
+	case errors.Is(err, authorization.ErrMeansUnavailable):
+		slog.Warn("NL Wallet verifier unavailable", "err", err)
+		unavailablePage(w, walletUnavailable)
+		return
+	case err != nil:
+		authorizeErrorPage(w, err.Error())
+		return
+	}
+	switch progress.State {
+	case authorization.SessionWaiting:
+		writeWalletPage(w, tx, progress.Link)
+	case authorization.SessionFailed:
+		h.requestAgain(w, tx, binding, "Niet ingelogd met de NL Wallet: geweigerd in de wallet, of de tijd is verstreken.")
+	case authorization.SessionDone:
+		resp, err := h.service.LogIn(r.Context(), authorization.Login{TransactionID: tx, Binding: binding, Means: walletverifier.Means})
+		if errors.Is(err, authorization.ErrMeansUnavailable) {
+			slog.Warn("NL Wallet verifier unavailable", "err", err)
+			unavailablePage(w, walletUnavailable)
+			return
+		}
+		if errors.Is(err, authorization.ErrNotIdentified) {
+			slog.Info("NL Wallet disclosure did not identify the user", "err", err)
+			h.requestAgain(w, tx, binding, "Niet ingelogd met de NL Wallet: de wallet gaf geen bruikbaar persoonsidentificatiebewijs.")
+			return
+		}
+		h.complete(w, r, tx, resp, err)
+	}
+}
+
+// walletUnavailable says the NL Wallet cannot be used now; the transaction
+// stays.
+const walletUnavailable = "De NL Wallet is nu niet beschikbaar. Ga terug en log in met DigiD (mock), of weiger het verzoek."
+
+// requestAgain shows the request page of a pending transaction with why the
+// login did not succeed; the user chooses again.
+func (h *handler) requestAgain(w http.ResponseWriter, tx, binding, message string) {
+	pending, ok := h.service.Transaction(tx, binding)
+	if !ok {
+		authorizeErrorPage(w, "the authorization request is unknown, used, expired or was started in another browser")
+		return
+	}
+	writeRequestPage(w, pending, h.secureCookies, h.service.Offers(walletverifier.Means), message)
 }
 
 // transactionForm reads a posted form with a transaction, and the binding
