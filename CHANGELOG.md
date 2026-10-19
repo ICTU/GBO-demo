@@ -232,6 +232,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- **The landing page uses the ICTU-GBO house-style colours.** Blue is
+  `#2e62e6`, the accessible variant of ICTU blue (5.2:1 on white, where
+  `#457aff` reaches only 3.8:1); dark sections, the footer and the wallet QR
+  use `#0e2b84`; hover is the darker blue `#2651bd` instead of magenta. The
+  stream tints follow the palette: blue for DvTP, purple for EUDI, light blue
+  for OOTS.
 - **A consent token carries an encrypted identity per source, and no PI.**
   The service provider holds no identifier of the citizen: its query names the
   subject with the placeholder `consent:identity`, and the source puts the BSN
