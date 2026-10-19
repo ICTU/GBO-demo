@@ -13,6 +13,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
 
 	"github.com/getkin/kin-openapi/routers"
 	otelattribute "go.opentelemetry.io/otel/attribute"
@@ -205,14 +206,14 @@ type retrieveResponse struct {
 
 // --- authentication --------------------------------------------------------------
 
-type handlerWithSubject func(w http.ResponseWriter, r *http.Request, bsn string)
+type handlerWithSubject func(w http.ResponseWriter, r *http.Request, subject accesstoken.Subject)
 
 // authenticated validates the access token for operation before anything
 // else; the BSN of the user comes from the token.
 func (h *handler) authenticated(operation string, next handlerWithSubject) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		trace.SpanFromContext(r.Context()).SetAttributes(otelattribute.String("gbo.asi.data_service", h.ds.ID))
-		bsn, failure := h.ds.Tokens.Authenticate(r.Context(), accesstoken.Request{
+		subject, failure := h.ds.Tokens.Authenticate(r.Context(), accesstoken.Request{
 			Method:        r.Method,
 			Path:          r.URL.Path,
 			Authorization: r.Header.Get("Authorization"),
@@ -222,7 +223,7 @@ func (h *handler) authenticated(operation string, next handlerWithSubject) http.
 			writeAuthFailure(w, failure)
 			return
 		}
-		next(w, r, bsn)
+		next(w, r, subject)
 	}
 }
 
@@ -250,19 +251,19 @@ func writeAuthFailure(w http.ResponseWriter, f *accesstoken.Failure) {
 // conformant rejects a request that does not conform to the request schema of
 // the published contract with 400, before any other check of its content.
 func conformant(route *routers.Route, next handlerWithSubject) handlerWithSubject {
-	return func(w http.ResponseWriter, r *http.Request, bsn string) {
+	return func(w http.ResponseWriter, r *http.Request, subject accesstoken.Subject) {
 		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
 		if err := validateRequest(r, route); err != nil {
 			writeProblem(w, http.StatusBadRequest, "Bad Request", err.Error())
 			return
 		}
-		next(w, r, bsn)
+		next(w, r, subject)
 	}
 }
 
 // --- /verify -------------------------------------------------------------------
 
-func (h *handler) verify(w http.ResponseWriter, r *http.Request, bsn string) {
+func (h *handler) verify(w http.ResponseWriter, r *http.Request, subject accesstoken.Subject) {
 	var req verifyRequest
 	if err := decodeStrict(r.Body, &req); err != nil {
 		writeProblem(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -275,7 +276,18 @@ func (h *handler) verify(w http.ResponseWriter, r *http.Request, bsn string) {
 	for _, f := range req.AttributeFragments {
 		in.Fragments = append(in.Fragments, verification.Fragment{Identifier: f.AttributeIdentifier, Location: f.Location, Value: f.Value})
 	}
-	result, err := h.ds.Verification.Verify(r.Context(), bsn, in)
+	ids := make([]string, 0, len(req.Attributes)+len(req.AttributeFragments))
+	for _, a := range req.Attributes {
+		ids = append(ids, a.AttributeIdentifier)
+	}
+	for _, f := range req.AttributeFragments {
+		ids = append(ids, f.AttributeIdentifier)
+	}
+	if failure := attributesAuthorized(subject.Attributes, ids); failure != nil {
+		writeAuthFailure(w, failure)
+		return
+	}
+	result, err := h.ds.Verification.Verify(r.Context(), subject.BSN, in)
 	if err != nil {
 		writeUseCaseError(w, err)
 		return
@@ -296,7 +308,7 @@ func (h *handler) verify(w http.ResponseWriter, r *http.Request, bsn string) {
 
 // --- /retrieve -----------------------------------------------------------------
 
-func (h *handler) retrieve(w http.ResponseWriter, r *http.Request, bsn string) {
+func (h *handler) retrieve(w http.ResponseWriter, r *http.Request, subject accesstoken.Subject) {
 	var req retrieveRequest
 	if err := decodeStrict(r.Body, &req); err != nil {
 		writeProblem(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -306,7 +318,11 @@ func (h *handler) retrieve(w http.ResponseWriter, r *http.Request, bsn string) {
 	for _, a := range req.AttributeIdentifiers {
 		ids = append(ids, a.AttributeIdentifier)
 	}
-	attrs, err := h.ds.Verification.Retrieve(r.Context(), bsn, ids, hasMandate(req.Mandate))
+	if failure := attributesAuthorized(subject.Attributes, ids); failure != nil {
+		writeAuthFailure(w, failure)
+		return
+	}
+	attrs, err := h.ds.Verification.Retrieve(r.Context(), subject.BSN, ids, hasMandate(req.Mandate))
 	if err != nil {
 		writeUseCaseError(w, err)
 		return
@@ -316,6 +332,15 @@ func (h *handler) retrieve(w http.ResponseWriter, r *http.Request, bsn string) {
 		resp.Attributes = append(resp.Attributes, attribute{AttributeIdentifier: a.Identifier, AttributeValue: a.Value})
 	}
 	h.writeSealed(w, resp)
+}
+
+func attributesAuthorized(authorized, requested []string) *accesstoken.Failure {
+	for _, id := range requested {
+		if !slices.Contains(authorized, id) {
+			return &accesstoken.Failure{Code: "insufficient_scope", Description: "the access token does not authorize attribute " + id}
+		}
+	}
+	return nil
 }
 
 // --- helpers -------------------------------------------------------------------

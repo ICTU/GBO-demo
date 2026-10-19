@@ -9,7 +9,7 @@ It discovers its way rather than being configured with URLs:
 1. **Discover** (clause 5.3): the Discover Interface (`QTSP_DIP_URL`, the demo's `asi-discovery-stub`) gives the `dataService` record of each requested attribute. All attributes of one request must belong to one data service, because a token is for one data service.
 2. The record's `endpointDescription` is the data service's **contract**. Its server must be the record's `endpointURI`. Its `x-oauth-authorization-server` names the **authorization server's metadata** (RFC 8414), and the issuer must be the prefix of that URL.
 3. **Register** (RFC 7591) with a software statement sealed with the QTSP certificate, carrying its `registryURI`. This happens once per authorization server; the web side does it at start.
-4. **Authorize**: the authorization code flow with PKCE S256, `state`, the operation as scope, and `resource` = the record's `endpointURI`.
+4. **Authorize**: the authorization code flow with PKCE S256, `state`, the operation as scope, `resource` = the record's `endpointURI`, and RFC 9396 `authorization_details` containing that resource, operation and the selected attribute identifiers.
 5. **Token**: `private_key_jwt` with the certificate key, and a DPoP proof. The token is DPoP-bound.
 6. **Verify or retrieve** with the token and a DPoP proof, in a W3C trace of its own (`traceparent`), which the ASIP's spans join. A 200 is accepted only with a valid **seal**: the detached JWS in `X-JWS-Signature` over the exact body, whose certificate chain leads to `QTSP_SEAL_TRUST_ANCHORS`. Otherwise the result is reported as not accepted.
 

@@ -29,6 +29,7 @@ func NewHandler(service *authorization.Service) http.Handler {
 	mux.HandleFunc("GET "+WalletPath, h.walletPage)
 	mux.HandleFunc("POST "+authorization.TokenPath, h.token)
 	mux.HandleFunc("POST "+authorization.RegisterPath, h.register)
+	mux.Handle("GET "+StaticPath, staticHandler())
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	return mux
 }
@@ -50,14 +51,15 @@ func (h *handler) jwks(w http.ResponseWriter, _ *http.Request) {
 func (h *handler) authorize(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	resp, err := h.service.Authorize(authorization.AuthorizationRequest{
-		ResponseType:        q.Get("response_type"),
-		ClientID:            q.Get("client_id"),
-		RedirectURI:         q.Get("redirect_uri"),
-		Scope:               q.Get("scope"),
-		State:               q.Get("state"),
-		CodeChallenge:       q.Get("code_challenge"),
-		CodeChallengeMethod: q.Get("code_challenge_method"),
-		Resources:           q["resource"],
+		ResponseType:         q.Get("response_type"),
+		ClientID:             q.Get("client_id"),
+		RedirectURI:          q.Get("redirect_uri"),
+		Scope:                q.Get("scope"),
+		State:                q.Get("state"),
+		CodeChallenge:        q.Get("code_challenge"),
+		CodeChallengeMethod:  q.Get("code_challenge_method"),
+		Resources:            q["resource"],
+		AuthorizationDetails: q.Get(authorization.AuthorizationDetailsClaim),
 	})
 	if err != nil {
 		authorizeErrorPage(w, err.Error())

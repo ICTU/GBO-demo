@@ -19,7 +19,8 @@ import (
 const (
 	// BSNClaim carries the identification data of the user: the BSN in plain
 	// text until slice 9 of #336 (D3). Provisional namespace (D8).
-	BSNClaim = "https://gbo.example/claims/bsn"
+	BSNClaim                 = "https://gbo.example/claims/bsn"
+	AuthorizationDetailsType = "https://gbo.example/authorization-details/authentic-source-attributes"
 
 	// tokenLeeway allows for clock skew on exp, nbf and iat.
 	tokenLeeway = 30 * time.Second
@@ -36,7 +37,20 @@ type accessTokenClaims struct {
 	Cnf      struct {
 		JKT string `json:"jkt"`
 	} `json:"cnf"`
-	BSN string `json:"https://gbo.example/claims/bsn"`
+	BSN                  string `json:"https://gbo.example/claims/bsn"`
+	AuthorizationDetails []struct {
+		Type                 string   `json:"type"`
+		Locations            []string `json:"locations"`
+		Actions              []string `json:"actions"`
+		AttributeIdentifiers []string `json:"attribute_identifiers"`
+	} `json:"authorization_details"`
+}
+
+// Subject is the user and exact attribute set authorized by the access
+// token. Handlers must not use the BSN for attributes outside this set.
+type Subject struct {
+	BSN        string
+	Attributes []string
 }
 
 // KeySource returns the verification keys of the authorization server; with
@@ -90,28 +104,28 @@ func NewValidator(issuer, audience, publicURL string, keys KeySource) *Validator
 }
 
 // Authenticate validates the token and the DPoP proof of r for operation
-// (verify or retrieve) and returns the BSN of the user.
-func (v *Validator) Authenticate(ctx context.Context, r Request, operation string) (string, *Failure) {
+// (verify or retrieve) and returns the user and authorized attributes.
+func (v *Validator) Authenticate(ctx context.Context, r Request, operation string) (Subject, *Failure) {
 	invalid := func(description string) *Failure {
 		return &Failure{Code: "invalid_token", Description: description}
 	}
 	if r.Authorization == "" {
-		return "", &Failure{Description: "a DPoP-bound access token is required"}
+		return Subject{}, &Failure{Description: "a DPoP-bound access token is required"}
 	}
 	scheme, token, _ := strings.Cut(r.Authorization, " ")
 	if !strings.EqualFold(scheme, "DPoP") || token == "" {
-		return "", invalid("the access token is DPoP-bound: use the DPoP authorization scheme")
+		return Subject{}, invalid("the access token is DPoP-bound: use the DPoP authorization scheme")
 	}
 	tok, err := jwt.ParseSigned(token, accessTokenAlgorithms)
 	if err != nil {
-		return "", invalid("the access token is not a JWT signed with ES256 or RS256")
+		return Subject{}, invalid("the access token is not a JWT signed with ES256 or RS256")
 	}
 	if typ, _ := tok.Headers[0].ExtraHeaders[jose.HeaderType].(string); !strings.EqualFold(typ, "at+jwt") && !strings.EqualFold(typ, "application/at+jwt") {
-		return "", invalid(`the access token must have typ "at+jwt"`)
+		return Subject{}, invalid(`the access token must have typ "at+jwt"`)
 	}
 	keys, err := v.keys.Keys(ctx, tok.Headers[0].KeyID)
 	if errors.Is(err, ErrKeysUnavailable) {
-		return "", &Failure{Unavailable: true, Description: err.Error()}
+		return Subject{}, &Failure{Unavailable: true, Description: err.Error()}
 	}
 	var claims accessTokenClaims
 	verified := false
@@ -122,32 +136,46 @@ func (v *Validator) Authenticate(ctx context.Context, r Request, operation strin
 		}
 	}
 	if !verified {
-		return "", invalid("the access token signature does not verify with a key of the authorization server")
+		return Subject{}, invalid("the access token signature does not verify with a key of the authorization server")
 	}
 	now := v.now()
 	if err := claims.ValidateWithLeeway(jwt.Expected{Issuer: v.issuer, AnyAudience: jwt.Audience{v.audience}, Time: now}, tokenLeeway); err != nil || claims.Expiry == nil {
-		return "", invalid("the access token has another issuer or audience, or is expired")
+		return Subject{}, invalid("the access token has another issuer or audience, or is expired")
 	}
 	if claims.Cnf.JKT == "" {
-		return "", invalid("the access token is not DPoP-bound")
+		return Subject{}, invalid("the access token is not DPoP-bound")
 	}
 	if claims.BSN == "" {
-		return "", invalid("the access token carries no identification data of the user")
+		return Subject{}, invalid("the access token carries no identification data of the user")
+	}
+	if len(claims.AuthorizationDetails) != 1 {
+		return Subject{}, invalid("the access token must carry exactly one ASI authorization detail")
+	}
+	detail := claims.AuthorizationDetails[0]
+	if detail.Type != AuthorizationDetailsType || !slices.Equal(detail.Locations, []string{v.audience}) || !slices.Equal(detail.Actions, strings.Fields(claims.Scope)) || len(detail.AttributeIdentifiers) == 0 {
+		return Subject{}, invalid("the access token authorization details do not match this data service and operation")
+	}
+	seen := map[string]bool{}
+	for _, id := range detail.AttributeIdentifiers {
+		if id == "" || seen[id] {
+			return Subject{}, invalid("the access token authorization details contain invalid attribute identifiers")
+		}
+		seen[id] = true
 	}
 	if len(r.DPoP) == 0 {
-		return "", &Failure{Code: "invalid_request", Description: "a DPoP proof is required"}
+		return Subject{}, &Failure{Code: "invalid_request", Description: "a DPoP proof is required"}
 	}
 	jkt, err := verifyDPoPProof(r.DPoP, r.Method, v.publicURL+r.Path, token, now, v.replay)
 	if err != nil {
-		return "", &Failure{Code: "invalid_dpop_proof", Description: err.Error()}
+		return Subject{}, &Failure{Code: "invalid_dpop_proof", Description: err.Error()}
 	}
 	if jkt != claims.Cnf.JKT {
-		return "", &Failure{Code: "invalid_dpop_proof", Description: "the DPoP proof key is not the key the access token is bound to"}
+		return Subject{}, &Failure{Code: "invalid_dpop_proof", Description: "the DPoP proof key is not the key the access token is bound to"}
 	}
 	if !slices.Contains(strings.Fields(claims.Scope), operation) {
-		return "", &Failure{Code: "insufficient_scope", Description: "the access token does not authorize " + operation, Scope: operation}
+		return Subject{}, &Failure{Code: "insufficient_scope", Description: "the access token does not authorize " + operation, Scope: operation}
 	}
-	return claims.BSN, nil
+	return Subject{BSN: claims.BSN, Attributes: slices.Clone(detail.AttributeIdentifiers)}, nil
 }
 
 // StaticKeys is a fixed key set.

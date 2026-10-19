@@ -142,8 +142,8 @@ func readerPayload(organization, origin string) []byte {
 	}
 	payload, _ := json.Marshal(map[string]any{
 		"purposeStatement": map[string]string{
-			"nl": "Inloggen om toestemming te geven voor de verificatie van uw gegevens bij een authentieke bron",
-			"en": "Log in to authorise the verification of your data at an authentic source",
+			"nl": "Inloggen bij de bron om een verzoek van een vertrouwensdienst goed te keuren",
+			"en": "Log in at the source to approve a request of a trust service provider",
 		},
 		"retentionPolicy": map[string]any{"intentToRetain": false},
 		"sharingPolicy":   map[string]any{"intentToShare": false},

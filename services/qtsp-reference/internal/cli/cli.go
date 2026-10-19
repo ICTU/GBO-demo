@@ -89,6 +89,12 @@ func Run(ctx context.Context, c *qtsp.Client, httpClient *http.Client, o Options
 	if err != nil {
 		return Outcome{}, err
 	}
+	// The test harness can deliberately bypass discovery to exercise the
+	// ASIP's unknown-attribute response. The attribute is still authorized:
+	// authorization and catalogue membership are separate checks.
+	if o.ExtraAttribute != "" {
+		plan.Attributes = append(plan.Attributes, o.ExtraAttribute)
+	}
 	out := Outcome{Plan: plan}
 	reg, err := Register(ctx, c, plan.Server, 30*time.Second)
 	if err != nil {

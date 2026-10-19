@@ -7,6 +7,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Added
+- **The ASI authorization server's pages in NL Design System's Voorbeeld
+  theme** (#547): the request, wallet and error pages use the neutral theme
+  and Utrecht components, served from the server itself without script or
+  inline style. The request page says in plain language who asks what at
+  which source, and that logging in at the source approves the QTSP's
+  request; the wallet's reader certificate says the citizen logs in at the
+  source to approve a request of a trust service provider (run make
+  provision-asi-wallet-verifier again to get it). The pages and the reference
+  QTSP work on a phone. The page also lists the selected attributes; RFC 9396
+  `authorization_details` binds them to the authorization code and access
+  token, and the ASIP refuses attributes outside that approved set.
 - **ASI wallet verifier** (`asi-wallet-verifier`, port 9428, compose profile
   `asi`): nl-wallet's `verification_server`, built from the vendor checkout
   like the issuance server (`make asi-wallet-verifier-image`). `make

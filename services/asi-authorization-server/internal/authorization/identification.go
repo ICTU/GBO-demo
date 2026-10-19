@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 )
@@ -97,7 +98,8 @@ type Transaction struct {
 	ClientName string
 	Scope      string
 	// Source is the name of the data service the authorization is for.
-	Source string
+	Source     string
+	Attributes []string
 }
 
 // Login is the user logging in with a means, which approves the request
@@ -210,7 +212,7 @@ func (s *Service) Transaction(transactionID, binding string) (*Transaction, bool
 	if c, ok := s.client(p.code.clientID); ok && c.Name != "" {
 		name = c.Name
 	}
-	return &Transaction{ID: transactionID, Binding: binding, ClientID: p.code.clientID, ClientName: name, Scope: p.code.scope, Source: s.resourceName(p.code.audience)}, true
+	return &Transaction{ID: transactionID, Binding: binding, ClientID: p.code.clientID, ClientName: name, Scope: p.code.scope, Source: s.resourceName(p.code.audience), Attributes: slices.Clone(p.code.detail.AttributeIdentifiers)}, true
 }
 
 // StartSession has a session means open a session with the user's device

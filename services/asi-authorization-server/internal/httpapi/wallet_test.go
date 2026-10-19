@@ -37,7 +37,7 @@ func TestWalletShowsTheQRCode(t *testing.T) {
 	tx := as.startAuthorization(t, authorizeParams(newPKCE()))
 	path, session := as.startWallet(t, tx)
 	resp, page := as.get(t, path, tx.cookie)
-	if resp.StatusCode != http.StatusOK || !strings.Contains(page, `<img src="data:image/png;base64,`) || !strings.Contains(page, `http-equiv="refresh"`) {
+	if resp.StatusCode != http.StatusOK || !strings.Contains(page, `src="data:image/png;base64,`) || !strings.Contains(page, `http-equiv="refresh"`) {
 		t.Fatalf("wallet page = %d:\n%s", resp.StatusCode, page)
 	}
 	if csp := resp.Header.Get("Content-Security-Policy"); !strings.Contains(csp, "img-src data:") || strings.Contains(csp, "script-src") {

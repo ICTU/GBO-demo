@@ -1,0 +1,106 @@
+/* The pages of the authorization server, on top of NL Design System's
+   Voorbeeld theme and Utrecht components (static/nlds). Only layout here;
+   colours, type and components come from the theme's tokens. */
+
+html,
+body {
+  margin: 0;
+}
+
+body {
+  background-color: var(--basis-color-default-bg-subtle, #f5f5f5);
+  color: var(--basis-color-default-color-document, #1a1a1a);
+  font-family: var(--basis-text-font-family-default, sans-serif);
+  line-height: var(--basis-text-line-height-md, 1.5);
+}
+
+.azsp-header {
+  background-color: var(--utrecht-page-header-background-color, #fff);
+  border-block-end: 4px solid var(--basis-color-accent-1-border-default, #00579e);
+}
+
+.azsp-header__content,
+.azsp-main {
+  box-sizing: border-box;
+  margin-inline: auto;
+  max-inline-size: 44rem;
+  padding-inline: 1rem;
+}
+
+.azsp-header__content {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  padding-block: 1rem;
+}
+
+.azsp-header__service {
+  font-weight: var(--basis-text-font-weight-bold, 700);
+  margin: 0;
+}
+
+.azsp-header__demo {
+  color: var(--basis-color-default-color-subtle, #555);
+  margin: 0;
+}
+
+.azsp-main {
+  padding-block: 1.5rem 3rem;
+}
+
+.azsp-card {
+  background-color: var(--basis-color-default-bg-document, #fff);
+  border: 1px solid var(--basis-color-default-border-subtle, #ddd);
+  border-radius: var(--basis-border-radius-md, 4px);
+  display: grid;
+  gap: 1.25rem;
+  padding: 1.5rem;
+}
+
+.azsp-card > * {
+  margin-block: 0;
+}
+
+.azsp-request {
+  display: grid;
+  gap: 0.5rem 1rem;
+  grid-template-columns: max-content 1fr;
+  margin: 0;
+}
+
+.azsp-request dt {
+  font-weight: var(--basis-text-font-weight-bold, 700);
+}
+
+.azsp-request dd {
+  margin: 0;
+}
+
+.azsp-means {
+  display: grid;
+  gap: 0.75rem;
+  justify-items: start;
+}
+
+.azsp-qr {
+  block-size: auto;
+  display: block;
+  inline-size: 100%;
+  max-inline-size: 280px;
+}
+
+/* On a narrow screen the request summary stacks. */
+@media (max-width: 30rem) {
+  .azsp-card {
+    padding: 1rem;
+  }
+
+  .azsp-request {
+    grid-template-columns: 1fr;
+  }
+
+  .azsp-request dd {
+    margin-block-end: 0.5rem;
+  }
+}

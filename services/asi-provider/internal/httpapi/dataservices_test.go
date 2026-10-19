@@ -20,6 +20,7 @@ func TestATokenIsForOneDataService(t *testing.T) { // B2
 
 	claims := env.authz.claims(bsnFrouke, "verify", env.qtsp.jkt)
 	claims["aud"] = testPublicURL + duoBase
+	claims["authorization_details"].([]map[string]any)[0]["locations"] = []string{testPublicURL + duoBase}
 	if rec := postTo(t, env, duoBase, "/verify", env.presenting(claims, nil), body); rec.Code != http.StatusOK {
 		t.Fatalf("token for the duo data service at duo: status = %d %s, want 200", rec.Code, rec.Body)
 	}
@@ -32,6 +33,7 @@ func TestADataServiceWithoutAuthenticSourceNamesNone(t *testing.T) { // B6
 	env := newTestServer(t)
 	claims := env.authz.claims(bsnFrouke, "verify retrieve", env.qtsp.jkt)
 	claims["aud"] = testPublicURL + duoBase
+	claims["authorization_details"].([]map[string]any)[0]["locations"] = []string{testPublicURL + duoBase}
 	for _, op := range []struct{ path, body string }{
 		{"/verify", verifyBody(idDiploma, `{"qualification":"MSc"}`)},
 		{"/retrieve", `{"attributeIdentifiers":[{"attributeIdentifier":"` + idDiploma + `"}]}`},

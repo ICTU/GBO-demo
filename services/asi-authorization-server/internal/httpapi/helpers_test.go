@@ -152,7 +152,7 @@ func newPKCE() pkce {
 }
 
 func authorizeParams(p pkce) url.Values {
-	return url.Values{
+	q := url.Values{
 		"response_type":         {"code"},
 		"client_id":             {testClientID},
 		"redirect_uri":          {testRedirectURI},
@@ -162,6 +162,18 @@ func authorizeParams(p pkce) url.Values {
 		"code_challenge_method": {"S256"},
 		"resource":              {testResource},
 	}
+	setAuthorizationDetails(q, "https://gbo.example/attributes/family_name/1")
+	return q
+}
+
+func setAuthorizationDetails(q url.Values, attributes ...string) {
+	details, _ := json.Marshal([]map[string]any{{
+		"type":                  authorization.AuthorizationDetailsType,
+		"locations":             []string{q.Get("resource")},
+		"actions":               strings.Fields(q.Get("scope")),
+		"attribute_identifiers": attributes,
+	}})
+	q.Set(authorization.AuthorizationDetailsClaim, string(details))
 }
 
 // authorize sends an authorization request without following the redirect.

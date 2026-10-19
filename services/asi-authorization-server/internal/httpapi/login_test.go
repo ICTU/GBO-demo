@@ -20,7 +20,7 @@ func TestRequestPage(t *testing.T) {
 	as := newTestAS(t)
 	tx := as.startAuthorization(t, authorizeParams(newPKCE()))
 	for _, want := range []string{
-		"Testomgeving — geen echte identificatie", testClientName, "laten verifiëren bij Basisregistratie Personen (test)",
+		"Testomgeving — geen echte identificatie", testClientName, "wil bij Basisregistratie Personen (test) laten controleren of gegevens over u kloppen.", "Controleren of gegevens kloppen",
 		`value="digid">Inloggen met DigiD (mock)`, `value="wallet">Inloggen met NL Wallet`, `value="deny">Weigeren`,
 	} {
 		if !strings.Contains(tx.page, want) {
@@ -50,6 +50,7 @@ func TestRequestPageWithoutALegalName(t *testing.T) {
 	params := authorizeParams(newPKCE())
 	params.Set("client_id", otherClientID)
 	params.Set("resource", testResource2)
+	setAuthorizationDetails(params, "https://gbo.example/attributes/education_qualification/1")
 	tx := as.startAuthorization(t, params)
 	if !strings.Contains(tx.page, otherClientID) || !strings.Contains(tx.page, "bij DUO (test)") || strings.Contains(tx.page, "Basisregistratie Personen") {
 		t.Errorf("request page does not name the client_id and the second data service alone:\n%s", tx.page)
