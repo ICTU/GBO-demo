@@ -121,16 +121,17 @@ func NewService(cfg Config) *Service {
 
 func (s *Service) Metadata() map[string]any {
 	return map[string]any{
-		"issuer":                                s.cfg.Issuer,
-		"authorization_endpoint":                s.cfg.Issuer + AuthorizePath,
-		"token_endpoint":                        s.cfg.Issuer + TokenPath,
-		"jwks_uri":                              s.cfg.Issuer + JWKSPath,
-		"registration_endpoint":                 s.cfg.Issuer + RegisterPath,
-		"response_types_supported":              []string{"code"},
-		"grant_types_supported":                 []string{"authorization_code"},
-		"scopes_supported":                      OperationScopes,
-		"code_challenge_methods_supported":      []string{"S256"},
-		"token_endpoint_auth_methods_supported": []string{"private_key_jwt"},
+		"issuer":                                           s.cfg.Issuer,
+		"authorization_endpoint":                           s.cfg.Issuer + AuthorizePath,
+		"token_endpoint":                                   s.cfg.Issuer + TokenPath,
+		"jwks_uri":                                         s.cfg.Issuer + JWKSPath,
+		"registration_endpoint":                            s.cfg.Issuer + RegisterPath,
+		"response_types_supported":                         []string{"code"},
+		"grant_types_supported":                            []string{"authorization_code"},
+		"scopes_supported":                                 OperationScopes,
+		"authorization_details_types_supported":            []string{AuthorizationDetailsType},
+		"code_challenge_methods_supported":                 []string{"S256"},
+		"token_endpoint_auth_methods_supported":            []string{"private_key_jwt"},
 		"token_endpoint_auth_signing_alg_values_supported": clientAssertionAlgorithms,
 		"dpop_signing_alg_values_supported":                dpopAlgorithms,
 	}
@@ -147,6 +148,7 @@ type AuthorizationRequest struct {
 	ResponseType, ClientID, RedirectURI, Scope, State string
 	CodeChallenge, CodeChallengeMethod                string
 	Resources                                         []string
+	AuthorizationDetails                              string
 }
 
 // AuthorizationResponse goes back to the client at RedirectURI: a Code, or
@@ -195,6 +197,10 @@ func (s *Service) Authorize(req AuthorizationRequest) (AuthorizationResponse, er
 	if !ok {
 		return fail("invalid_target", "resource must be one data service of the ASIP: "+strings.Join(s.resourceURLs(), ", "))
 	}
+	detail, err := parseAuthorizationDetails(req.AuthorizationDetails, audience, scope)
+	if err != nil {
+		return fail("invalid_request", err.Error())
+	}
 	binding := RandomID()
 	id := s.transactions.put(pendingAuthorization{
 		binding:     binding,
@@ -206,6 +212,7 @@ func (s *Service) Authorize(req AuthorizationRequest) (AuthorizationResponse, er
 			scope:       scope,
 			challenge:   req.CodeChallenge,
 			audience:    audience,
+			detail:      detail,
 		},
 		expires: s.cfg.Now().Add(TransactionLifetime),
 	})
@@ -213,7 +220,7 @@ func (s *Service) Authorize(req AuthorizationRequest) (AuthorizationResponse, er
 	if name == "" {
 		name = c.ID
 	}
-	resp.Pending = &Transaction{ID: id, Binding: binding, ClientID: c.ID, ClientName: name, Scope: scope, Source: s.resourceName(audience)}
+	resp.Pending = &Transaction{ID: id, Binding: binding, ClientID: c.ID, ClientName: name, Scope: scope, Source: s.resourceName(audience), Attributes: slices.Clone(detail.AttributeIdentifiers)}
 	return resp, nil
 }
 
@@ -328,7 +335,7 @@ func (s *Service) Token(req TokenRequest) (TokenResponse, *Error) {
 	if _, ok := s.resource(req.Resources, code.audience); !ok {
 		return TokenResponse{}, &Error{Code: "invalid_target", Description: "resource must be " + code.audience}
 	}
-	token, err := s.cfg.Tokens.issue(c.ID, code.audience, code.scope, code.identity, jkt, now)
+	token, err := s.cfg.Tokens.issue(c.ID, code.audience, code.scope, code.detail, code.identity, jkt, now)
 	if err != nil {
 		return TokenResponse{}, &Error{Code: "server_error", Description: "could not issue the access token"}
 	}
@@ -352,6 +359,7 @@ func pkceMatches(challenge, verifier string) bool {
 
 type authorizationCode struct {
 	clientID, redirectURI, scope, challenge, audience string
+	detail                                            AuthorizationDetail
 	identity                                          Identity
 	expires                                           time.Time
 }

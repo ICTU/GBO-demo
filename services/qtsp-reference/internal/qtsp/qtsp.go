@@ -40,6 +40,8 @@ import (
 // httpInterface is the conformsTo of the HTTP-based interface (clause 6.1).
 const httpInterface = "urn:ietf:rfc:9110"
 
+const authorizationDetailsType = "https://gbo.example/authorization-details/authentic-source-attributes"
+
 const maxBody = 1 << 20
 
 // Config is what a QTSP brings: where to discover, its certificate and key,
@@ -308,6 +310,17 @@ func State() string { return randomID(16) }
 // AuthorizationURL is where the user's browser goes: the authorization
 // request for operation (verify or retrieve) at the plan's data service.
 func (c *Client) AuthorizationURL(p Plan, reg Registration, operation, state, challenge string) string {
+	details, _ := json.Marshal([]struct {
+		Type                 string   `json:"type"`
+		Locations            []string `json:"locations"`
+		Actions              []string `json:"actions"`
+		AttributeIdentifiers []string `json:"attribute_identifiers"`
+	}{{
+		Type:                 authorizationDetailsType,
+		Locations:            []string{p.EndpointURI},
+		Actions:              []string{operation},
+		AttributeIdentifiers: slices.Clone(p.Attributes),
+	}})
 	q := url.Values{
 		"response_type":         {"code"},
 		"client_id":             {reg.ClientID},
@@ -317,6 +330,7 @@ func (c *Client) AuthorizationURL(p Plan, reg Registration, operation, state, ch
 		"code_challenge":        {challenge},
 		"code_challenge_method": {"S256"},
 		"resource":              {p.EndpointURI},
+		"authorization_details": {string(details)},
 	}
 	return p.Server.AuthorizationEndpoint + "?" + q.Encode()
 }

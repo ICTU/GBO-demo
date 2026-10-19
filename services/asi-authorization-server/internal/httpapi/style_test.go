@@ -98,12 +98,14 @@ func TestRequestPageInPlainLanguage(t *testing.T) {
 	} {
 		params := authorizeParams(newPKCE())
 		params.Set("scope", tc.scope)
+		setAuthorizationDetails(params, "https://gbo.example/attributes/family_name/1")
 		tx := as.startAuthorization(t, params)
 		for _, want := range []string{
 			"<strong>" + testClientName + "</strong> " + tc.lead,
 			"<dd>" + testClientName + ", een vertrouwensdienst</dd>",
 			tc.request,
 			"<dd>Basisregistratie Personen (test)</dd>",
+			"<li>Achternaam</li>",
 			"U logt in bij de bron. Daarmee geeft u " + testClientName + " toestemming voor dit verzoek.",
 		} {
 			if !strings.Contains(tx.page, want) {

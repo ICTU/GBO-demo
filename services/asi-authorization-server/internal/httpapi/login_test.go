@@ -50,6 +50,7 @@ func TestRequestPageWithoutALegalName(t *testing.T) {
 	params := authorizeParams(newPKCE())
 	params.Set("client_id", otherClientID)
 	params.Set("resource", testResource2)
+	setAuthorizationDetails(params, "https://gbo.example/attributes/education_qualification/1")
 	tx := as.startAuthorization(t, params)
 	if !strings.Contains(tx.page, otherClientID) || !strings.Contains(tx.page, "bij DUO (test)") || strings.Contains(tx.page, "Basisregistratie Personen") {
 		t.Errorf("request page does not name the client_id and the second data service alone:\n%s", tx.page)

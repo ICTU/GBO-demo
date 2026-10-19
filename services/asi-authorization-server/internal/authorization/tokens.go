@@ -52,20 +52,21 @@ func NewTokenIssuer(issuer string, key *ecdsa.PrivateKey) (*TokenIssuer, error) 
 
 // issue returns an access token. sub is an opaque identifier per token (D3),
 // so two tokens for the same user cannot be linked through it.
-func (ti *TokenIssuer) issue(clientID, audience, scope string, id Identity, jkt string, now time.Time) (string, error) {
+func (ti *TokenIssuer) issue(clientID, audience, scope string, detail AuthorizationDetail, id Identity, jkt string, now time.Time) (string, error) {
 	claims := map[string]any{
-		"iss":       ti.issuer,
-		"sub":       RandomID(),
-		"aud":       audience,
-		"client_id": clientID,
-		"iat":       now.Unix(),
-		"exp":       now.Add(AccessTokenLifetime).Unix(),
-		"jti":       RandomID(),
-		"scope":     scope,
-		"cnf":       map[string]string{"jkt": jkt},
-		BSNClaim:    id.BSN,
-		"acr":       id.Means,
-		"amr":       []string{id.Means},
+		"iss":                     ti.issuer,
+		"sub":                     RandomID(),
+		"aud":                     audience,
+		"client_id":               clientID,
+		"iat":                     now.Unix(),
+		"exp":                     now.Add(AccessTokenLifetime).Unix(),
+		"jti":                     RandomID(),
+		"scope":                   scope,
+		AuthorizationDetailsClaim: []AuthorizationDetail{detail},
+		"cnf":                     map[string]string{"jkt": jkt},
+		BSNClaim:                  id.BSN,
+		"acr":                     id.Means,
+		"amr":                     []string{id.Means},
 	}
 	if id.FamilyName != "" {
 		claims["family_name"] = id.FamilyName

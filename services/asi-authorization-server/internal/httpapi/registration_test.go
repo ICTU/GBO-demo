@@ -257,7 +257,8 @@ func TestRecheckTakesAChangedLegalName(t *testing.T) {
 		}
 	}()
 	valid := authorization.AuthorizationRequest{ResponseType: "code", ClientID: id, RedirectURI: testRedirectURI, Scope: "verify",
-		CodeChallenge: newPKCE().challenge, CodeChallengeMethod: "S256", Resources: []string{testResource}}
+		CodeChallenge: newPKCE().challenge, CodeChallengeMethod: "S256", Resources: []string{testResource},
+		AuthorizationDetails: authorizeParams(newPKCE()).Get(authorization.AuthorizationDetailsClaim)}
 	for range 20 {
 		if resp, err := as.service.Authorize(valid); err != nil || resp.Pending == nil || resp.Pending.ClientName == "" {
 			t.Fatalf("Authorize = %+v, %v; want a transaction naming the client", resp, err)

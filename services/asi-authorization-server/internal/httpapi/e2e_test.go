@@ -78,6 +78,7 @@ func TestEndToEndVerify(t *testing.T) { // case 24 (through /verify), case 37, c
 	p := newPKCE()
 	params := authorizeParams(p)
 	params.Set("resource", brp)
+	setAuthorizationDetails(params, "https://gbo.example/attributes/family_name/1")
 	token := as.accessToken(t, params, p)
 
 	body := `{"attributes":[{"attributeIdentifier":"https://gbo.example/attributes/family_name/1","attributeValue":{"family_name":"Jansen"}}]}`
@@ -106,6 +107,7 @@ func TestEndToEndVerify(t *testing.T) { // case 24 (through /verify), case 37, c
 	p = newPKCE()
 	params = authorizeParams(p)
 	params.Set("resource", brp)
+	setAuthorizationDetails(params, "https://gbo.example/attributes/family_name/1")
 	params.Set("client_id", id)
 	form := as.tokenForm(t, as.code(t, params), p)
 	form.Set("client_assertion", as.assertion(t, id, nil))

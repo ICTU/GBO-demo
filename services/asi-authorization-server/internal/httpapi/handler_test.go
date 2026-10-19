@@ -43,6 +43,7 @@ func TestMetadata(t *testing.T) { // case 23
 		"scopes_supported":                      []any{"verify", "retrieve"},
 		"response_types_supported":              []any{"code"},
 		"grant_types_supported":                 []any{"authorization_code"},
+		"authorization_details_types_supported": []any{authorization.AuthorizationDetailsType},
 	} {
 		got, _ := json.Marshal(meta[field])
 		w, _ := json.Marshal(want)
@@ -101,6 +102,15 @@ func TestFullFlowIssuesDPoPBoundAccessToken(t *testing.T) { // case 24
 	if cnf, _ := claims["cnf"].(map[string]any); cnf["jkt"] != as.jkt {
 		t.Errorf("cnf = %v, want jkt %s", claims["cnf"], as.jkt)
 	}
+	details, _ := claims[authorization.AuthorizationDetailsClaim].([]any)
+	if len(details) != 1 {
+		t.Fatalf("authorization_details = %v, want one detail", claims[authorization.AuthorizationDetailsClaim])
+	}
+	detail, _ := details[0].(map[string]any)
+	ids, _ := detail["attribute_identifiers"].([]any)
+	if detail["type"] != authorization.AuthorizationDetailsType || len(ids) != 1 || ids[0] != "https://gbo.example/attributes/family_name/1" {
+		t.Errorf("authorization_details = %v, want the approved family-name request", claims[authorization.AuthorizationDetailsClaim])
+	}
 	iat, _ := claims["iat"].(float64)
 	exp, _ := claims["exp"].(float64)
 	if exp-iat <= 0 || exp-iat > 600 {
@@ -133,6 +143,7 @@ func TestResourceIndicator(t *testing.T) { // case 26
 		p := newPKCE()
 		params := authorizeParams(p)
 		params.Set("resource", resource)
+		setAuthorizationDetails(params, "https://gbo.example/attributes/family_name/1")
 		_, claims := verifyAccessToken(t, as, as.accessToken(t, params, p))
 		if claims["aud"] != resource {
 			t.Fatalf("aud = %v, want %s", claims["aud"], resource)

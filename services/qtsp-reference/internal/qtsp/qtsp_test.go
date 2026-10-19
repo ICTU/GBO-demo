@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"regexp"
+	"slices"
 	"sync/atomic"
 	"testing"
 )
@@ -105,6 +106,17 @@ func TestPlanFollowsTheRecords(t *testing.T) {
 	u, _ := url.Parse(w.client(t).AuthorizationURL(p, Registration{ClientID: "c1"}, "verify", "s", "ch"))
 	if q := u.Query(); q.Get("resource") != p.EndpointURI || q.Get("code_challenge_method") != "S256" || q.Get("scope") != "verify" || q.Get("state") != "s" {
 		t.Errorf("authorization URL = %s", u)
+	}
+	var details []struct {
+		Type                 string   `json:"type"`
+		Locations            []string `json:"locations"`
+		Actions              []string `json:"actions"`
+		AttributeIdentifiers []string `json:"attribute_identifiers"`
+	}
+	if err := json.Unmarshal([]byte(u.Query().Get("authorization_details")), &details); err != nil || len(details) != 1 ||
+		details[0].Type != authorizationDetailsType || !slices.Equal(details[0].Locations, []string{p.EndpointURI}) ||
+		!slices.Equal(details[0].Actions, []string{"verify"}) || !slices.Equal(details[0].AttributeIdentifiers, []string{idFamilyName}) {
+		t.Errorf("authorization_details = %+v, %v; want the selected data service, operation and attribute", details, err)
 	}
 }
 

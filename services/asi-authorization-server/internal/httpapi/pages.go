@@ -93,6 +93,7 @@ var requestPage = page("request", "Toestemming geven", "", `<h1 class="utrecht-h
 <dt>Aanvrager</dt><dd>{{.ClientName}}, een vertrouwensdienst</dd>
 <dt>Verzoek</dt><dd>{{.Request}}</dd>
 <dt>Bron</dt><dd>{{.Source}}</dd>
+<dt>Gegevens</dt><dd><ul class="azsp-attributes">{{range .Attributes}}<li>{{.}}</li>{{end}}</ul></dd>
 </dl>
 {{if .Message}}<div class="utrecht-alert utrecht-alert--error" role="alert"><div class="utrecht-alert__content"><div class="utrecht-alert__message"><p class="utrecht-paragraph"><strong>{{.Message}}</strong></p></div></div></div>{{end}}
 <h2 class="utrecht-heading-2">Inloggen</h2>
@@ -147,6 +148,30 @@ func operationText(scope string) (operation, request string) {
 	return strings.Join(ops, " en "), request
 }
 
+func requestedAttributes(ids []string) []string {
+	labels := map[string]string{
+		"family_name": "Achternaam",
+		"given_name":  "Voornamen",
+		"birth_date":  "Geboortedatum",
+		"nationality": "Nationaliteit",
+		"address":     "Adres",
+	}
+	attributes := make([]string, 0, len(ids))
+	for _, id := range ids {
+		name := id
+		parts := strings.Split(strings.TrimSuffix(id, "/"), "/")
+		if len(parts) >= 2 {
+			key := parts[len(parts)-2]
+			name = strings.ReplaceAll(key, "_", " ")
+			if label := labels[key]; label != "" {
+				name = label
+			}
+		}
+		attributes = append(attributes, name)
+	}
+	return attributes
+}
+
 // writePage sends a page that must not be cached or framed. Its style
 // sheets come from this server; it has no script.
 func writePage(w http.ResponseWriter, status int, page *template.Template, data map[string]any) {
@@ -177,6 +202,7 @@ func writeRequestPage(w http.ResponseWriter, tx *authorization.Transaction, secu
 		"Operation":     operation,
 		"Request":       request,
 		"Source":        tx.Source,
+		"Attributes":    requestedAttributes(tx.Attributes),
 		"Action":        DecisionPath,
 		"TransactionID": tx.ID,
 		"Wallet":        wallet,

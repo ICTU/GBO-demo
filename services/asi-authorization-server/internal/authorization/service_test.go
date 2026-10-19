@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -67,7 +68,8 @@ func validRequest() AuthorizationRequest {
 	return AuthorizationRequest{
 		ResponseType: "code", ClientID: "qtsp", RedirectURI: redirectURI, Scope: "verify", State: "s",
 		CodeChallenge: challenge("a-code-verifier-of-at-least-forty-three-characters"), CodeChallengeMethod: "S256",
-		Resources: []string{resource},
+		Resources:            []string{resource},
+		AuthorizationDetails: `[{"type":"https://gbo.example/authorization-details/authentic-source-attributes","locations":["https://asip.test/brp/authsrc-api"],"actions":["verify"],"attribute_identifiers":["https://gbo.example/attributes/family_name/1"]}]`,
 	}
 }
 
@@ -92,6 +94,16 @@ func TestAuthorize(t *testing.T) {
 		{"another resource", func(r *AuthorizationRequest) { r.Resources = []string{"https://other.test"} }, "invalid_target"},
 		{"no resource", func(r *AuthorizationRequest) { r.Resources = nil }, "invalid_target"},
 		{"two data services", func(r *AuthorizationRequest) { r.Resources = []string{resource, resource2} }, "invalid_target"},
+		{"no authorization details", func(r *AuthorizationRequest) { r.AuthorizationDetails = "" }, "invalid_request"},
+		{"attributes for another resource", func(r *AuthorizationRequest) {
+			r.AuthorizationDetails = strings.ReplaceAll(r.AuthorizationDetails, resource, resource2)
+		}, "invalid_request"},
+		{"actions differ from scope", func(r *AuthorizationRequest) {
+			r.AuthorizationDetails = strings.ReplaceAll(r.AuthorizationDetails, `"verify"`, `"retrieve"`)
+		}, "invalid_request"},
+		{"duplicate attribute", func(r *AuthorizationRequest) {
+			r.AuthorizationDetails = strings.ReplaceAll(r.AuthorizationDetails, `"https://gbo.example/attributes/family_name/1"]`, `"https://gbo.example/attributes/family_name/1","https://gbo.example/attributes/family_name/1"]`)
+		}, "invalid_request"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := validRequest()

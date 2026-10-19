@@ -74,14 +74,18 @@ func TestInvalidAccessTokenIs401(t *testing.T) { // case 4-10, 18
 		"6: typ is not at+jwt": env.presentingToken(func(t *testing.T) string {
 			return signJWT(t, env.authz.key, jose.ES256, testKeyID, "JWT", valid())
 		}, nil),
-		"7: another issuer":     env.presenting(with(func(c map[string]any) { c["iss"] = "https://other-as.test" }), nil),
-		"8: another audience":   env.presenting(with(func(c map[string]any) { c["aud"] = "https://other-asip.test/authsrc-api" }), nil),
-		"9: expired":            env.presenting(with(func(c map[string]any) { c["iat"], c["exp"] = ago(11*time.Minute), ago(time.Minute) }), nil),
-		"9b: no exp":            env.presenting(with(func(c map[string]any) { delete(c, "exp") }), nil),
-		"10: Bearer scheme":     env.withScheme("Bearer"),
-		"10b: not DPoP-bound":   env.presenting(with(func(c map[string]any) { delete(c, "cnf") }), nil),
-		"18: no BSN claim":      env.presenting(with(func(c map[string]any) { delete(c, accesstoken.BSNClaim) }), nil),
-		"18b: empty BSN claim":  env.presenting(with(func(c map[string]any) { c[accesstoken.BSNClaim] = "" }), nil),
+		"7: another issuer":        env.presenting(with(func(c map[string]any) { c["iss"] = "https://other-as.test" }), nil),
+		"8: another audience":      env.presenting(with(func(c map[string]any) { c["aud"] = "https://other-asip.test/authsrc-api" }), nil),
+		"9: expired":               env.presenting(with(func(c map[string]any) { c["iat"], c["exp"] = ago(11*time.Minute), ago(time.Minute) }), nil),
+		"9b: no exp":               env.presenting(with(func(c map[string]any) { delete(c, "exp") }), nil),
+		"10: Bearer scheme":        env.withScheme("Bearer"),
+		"10b: not DPoP-bound":      env.presenting(with(func(c map[string]any) { delete(c, "cnf") }), nil),
+		"18: no BSN claim":         env.presenting(with(func(c map[string]any) { delete(c, accesstoken.BSNClaim) }), nil),
+		"18b: empty BSN claim":     env.presenting(with(func(c map[string]any) { c[accesstoken.BSNClaim] = "" }), nil),
+		"no authorization details": env.presenting(with(func(c map[string]any) { delete(c, "authorization_details") }), nil),
+		"authorization details for another resource": env.presenting(with(func(c map[string]any) {
+			c["authorization_details"].([]map[string]any)[0]["locations"] = []string{"https://other-asip.test/authsrc-api"}
+		}), nil),
 		"not a JWT at all":      env.presentingToken(func(*testing.T) string { return "not-a-jwt" }, nil),
 		"DPoP scheme, no token": func(_ *testing.T, req *http.Request) { req.Header.Set("Authorization", "DPoP ") },
 	} {
@@ -186,6 +190,25 @@ func TestInsufficientScopeIs401(t *testing.T) { // case 17
 	}
 }
 
+func TestTokenOnlyAuthorizesSelectedAttributes(t *testing.T) {
+	env := newTestServer(t)
+	claims := env.authz.claims(bsnFrouke, "verify retrieve", env.qtsp.jkt)
+	detail := claims["authorization_details"].([]map[string]any)[0]
+	detail["attribute_identifiers"] = []string{idFamilyName}
+
+	for _, tc := range []struct{ path, body string }{
+		{"/verify", verifyBody(idAddress, `{"street":"Lange Voorhout"}`)},
+		{"/verify", `{"attributeFragments":[{"attributeIdentifier":"` + idAddress + `","location":"$.city","value":{"city":"Den Haag"}}]}`},
+		{"/retrieve", `{"attributeIdentifiers":[{"attributeIdentifier":"` + idAddress + `"}]}`},
+	} {
+		rec := post(t, env, tc.path, env.presenting(claims, nil), tc.body)
+		assertAuthError(t, rec, "insufficient_scope")
+		if !strings.Contains(rec.Body.String(), idAddress) {
+			t.Fatalf("%s response does not name the unauthorized attribute: %s", tc.path, rec.Body)
+		}
+	}
+}
+
 // --- case 19: a BSN the source does not know ------------------------------------
 
 func TestBSNUnknownToTheSourceIsUnknown(t *testing.T) { // case 19
@@ -268,6 +291,12 @@ func (a *testAuthorizationServer) claims(bsn, scope, jkt string) map[string]any 
 		"scope":              scope,
 		"cnf":                map[string]string{"jkt": jkt},
 		accesstoken.BSNClaim: bsn,
+		"authorization_details": []map[string]any{{
+			"type":                  accesstoken.AuthorizationDetailsType,
+			"locations":             []string{testPublicURL + testBase},
+			"actions":               strings.Fields(scope),
+			"attribute_identifiers": []string{idAddress, idFamilyName, idGivenName, idDiploma, idNotInCat},
+		}},
 	}
 }
 
