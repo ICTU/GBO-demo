@@ -172,6 +172,17 @@ jobs:
       - name: bundled schemas match the running sources
         run: ./scripts/check-schema-drift.sh
 
+  image-manifest:
+    name: Image manifest — every Dockerfile published
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The images workflow runs this on main only; here a new Dockerfile
+      # that is not in the manifest fails the pull request instead of the
+      # build on main.
+      - name: every Dockerfile is published or listed as unpublished
+        run: .github/scripts/image-manifest.sh > /dev/null
+
   chart:
     name: Helm chart — lint + template
     runs-on: ubuntu-latest
@@ -355,7 +366,7 @@ jobs:
   result:
     name: CI result
     runs-on: ubuntu-latest
-    needs: [go, conformance, source-registry, rego, schema-drift, chart, frontend, scripts, docker]
+    needs: [go, conformance, source-registry, rego, schema-drift, chart, frontend, scripts, docker, image-manifest]
     if: always()
     steps:
       - name: Evaluate job results
