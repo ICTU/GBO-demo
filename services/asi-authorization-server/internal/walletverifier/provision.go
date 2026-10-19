@@ -129,7 +129,7 @@ func Provision(args []string) error {
 	if err := os.WriteFile(*apiKeyFile, []byte(config.APIKey), 0o600); err != nil {
 		return err
 	}
-	fmt.Printf("-> wallet verifier configuration written to %s (verification_server.toml), API key to %s; reader certificate for %s\n", *outDir, *apiKeyFile, pub.Hostname())
+	fmt.Printf("-> wallet verifier configuration written to %s (verification_server.toml), and its API key; reader certificate for %s\n", *outDir, pub.Hostname())
 	return nil
 }
 
