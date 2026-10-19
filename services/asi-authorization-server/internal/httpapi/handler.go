@@ -29,6 +29,7 @@ func NewHandler(service *authorization.Service) http.Handler {
 	mux.HandleFunc("GET "+WalletPath, h.walletPage)
 	mux.HandleFunc("POST "+authorization.TokenPath, h.token)
 	mux.HandleFunc("POST "+authorization.RegisterPath, h.register)
+	mux.Handle("GET "+StaticPath, staticHandler())
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	return mux
 }

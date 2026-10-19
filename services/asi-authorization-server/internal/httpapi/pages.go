@@ -1,8 +1,10 @@
 package httpapi
 
 import (
+	"embed"
 	"encoding/base64"
 	"html/template"
+	"io/fs"
 	"net/http"
 	"strings"
 
@@ -14,7 +16,8 @@ import (
 // The pages of the authorization endpoint: the request page, where the user
 // sees who asks what at which source and logs in with a means or denies, the
 // login page of the DigiD mock (package digidmock), and the error page for a
-// request that cannot be redirected. In Dutch, without external assets.
+// request that cannot be redirected. In Dutch, in NL Design System's
+// Voorbeeld theme, served from this server: no external assets.
 
 // WalletPath follows the user's NL Wallet session: the QR code, then the
 // login.
@@ -28,82 +31,130 @@ const DecisionPath = authorization.AuthorizePath + "/decision"
 // browser that started it; the transaction identifier completes the name.
 const transactionCookiePrefix = "azsp_tx_"
 
-var pageStyle = template.CSS(`body{font-family:system-ui,sans-serif;max-width:40rem;margin:2rem auto;padding:0 1rem;color:#1a1a1a}
-.banner{background:#fff3cd;border:2px solid #b8860b;padding:.75rem 1rem;margin-bottom:1.5rem}
-fieldset{border:1px solid #ccc;padding:1rem}label{display:block;margin:.4rem 0}
-button{margin:1rem .5rem 0 0;padding:.5rem 1.2rem;font-size:1rem}`)
+// StaticPath serves the pages' style sheets (static/): NL Design System's
+// Voorbeeld theme and Utrecht components, and the layout on top.
+const StaticPath = "/static/"
 
-const banner = `<p class="banner"><strong>Testomgeving — geen echte identificatie.</strong> Inloggen gaat met een mock van DigiD, waar niets wordt gecontroleerd, of met de NL Wallet uit de testomgeving.</p>`
+//go:embed static/*.css static/nlds/*.css
+var staticFiles embed.FS
+
+// staticHandler serves the style sheets, which may be cached.
+func staticHandler() http.Handler {
+	files, _ := fs.Sub(staticFiles, "static")
+	server := http.StripPrefix(StaticPath, http.FileServerFS(files))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/") {
+			http.NotFound(w, r) // no directory listings
+			return
+		}
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		server.ServeHTTP(w, r)
+	})
+}
+
+// page builds a page of the authorization server: the header, the test
+// environment banner, and body in a card.
+func page(name, title, head, body string) *template.Template {
+	return template.Must(template.New(name).Parse(`<!doctype html>
+<html lang="nl" class="voorbeeld-theme"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+` + head + `<title>` + title + ` (testomgeving)</title>
+<link rel="stylesheet" href="` + StaticPath + `nlds/voorbeeld-theme.css">
+<link rel="stylesheet" href="` + StaticPath + `nlds/utrecht-components.css">
+<link rel="stylesheet" href="` + StaticPath + `azsp.css"></head>
+<body>
+<header class="azsp-header"><div class="azsp-header__content">
+<p class="azsp-header__service">Autorisatieserver van de bron</p><p class="azsp-header__demo">GBO demo</p>
+</div></header>
+<main class="azsp-main"><div class="azsp-card">
+<div class="utrecht-alert utrecht-alert--warning" role="note"><div class="utrecht-alert__content"><div class="utrecht-alert__message">
+<p class="utrecht-paragraph"><strong>Testomgeving — geen echte identificatie.</strong> Inloggen gaat met een mock van DigiD, waar niets wordt gecontroleerd, of met de NL Wallet uit de testomgeving.</p>
+</div></div></div>
+` + body + `
+</div></main></body></html>
+`))
+}
+
+const (
+	primaryButton   = `class="utrecht-button utrecht-button--primary-action"`
+	secondaryButton = `class="utrecht-button utrecht-button--secondary-action"`
+	subtleButton    = `class="utrecht-button utrecht-button--subtle"`
+)
 
 // requestPage asks the user to log in, which approves the request once the
-// login succeeds, or to deny it. Message says why an earlier login did not
-// succeed. The wallet button works when the NL Wallet verifier is
-// configured.
-var requestPage = template.Must(template.New("request").Parse(`<!doctype html>
-<html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Toestemming geven (testomgeving)</title><style>{{.Style}}</style></head><body>
-` + banner + `
-<h1>Toestemming geven</h1>
-<p><strong>{{.ClientName}}</strong> vraagt toestemming om {{.Operation}}.</p>
-{{if .Message}}<p role="alert"><strong>{{.Message}}</strong></p>{{end}}
-<p>Log in om toestemming te geven:</p>
+// login succeeds, or to deny it. It says who asks what at which source, and
+// that the user logs in at the source and approves the request of the QTSP:
+// the NL Wallet names the authorization server, not the QTSP. Message says
+// why an earlier login did not succeed. The wallet button works when the NL
+// Wallet verifier is configured.
+var requestPage = page("request", "Toestemming geven", "", `<h1 class="utrecht-heading-1">Toestemming geven</h1>
+<p class="utrecht-paragraph utrecht-paragraph--lead"><strong>{{.ClientName}}</strong> wil bij {{.Source}} {{.Operation}}.</p>
+<dl class="azsp-request">
+<dt>Aanvrager</dt><dd>{{.ClientName}}, een vertrouwensdienst</dd>
+<dt>Verzoek</dt><dd>{{.Request}}</dd>
+<dt>Bron</dt><dd>{{.Source}}</dd>
+</dl>
+{{if .Message}}<div class="utrecht-alert utrecht-alert--error" role="alert"><div class="utrecht-alert__content"><div class="utrecht-alert__message"><p class="utrecht-paragraph"><strong>{{.Message}}</strong></p></div></div></div>{{end}}
+<h2 class="utrecht-heading-2">Inloggen</h2>
+<p class="utrecht-paragraph">U logt in bij de bron. Daarmee geeft u {{.ClientName}} toestemming voor dit verzoek.</p>
 <form method="post" action="{{.Action}}">
 <input type="hidden" name="transaction" value="{{.TransactionID}}">
-<p><button type="submit" name="decision" value="digid">Inloggen met DigiD (mock)</button></p>
-<p>{{if .Wallet}}<button type="submit" name="decision" value="wallet">Inloggen met NL Wallet</button>{{else}}<button type="submit" name="decision" value="wallet" disabled>Inloggen met NL Wallet</button> <small>niet beschikbaar</small>{{end}}</p>
-<p><button type="submit" name="decision" value="deny">Weigeren</button></p>
-</form></body></html>
-`))
+<div class="azsp-means">
+{{if .Wallet}}<button type="submit" `+primaryButton+` name="decision" value="wallet">Inloggen met NL Wallet</button>{{else}}<button type="submit" `+primaryButton+` name="decision" value="wallet" disabled>Inloggen met NL Wallet</button>
+<p class="utrecht-paragraph">De NL Wallet is nu niet beschikbaar.</p>{{end}}
+<button type="submit" `+secondaryButton+` name="decision" value="digid">Inloggen met DigiD (mock)</button>
+<button type="submit" `+subtleButton+` name="decision" value="deny">Weigeren</button>
+</div>
+</form>`)
 
 // walletPage shows the QR code of the disclosure session and follows the
 // session by refreshing itself; it needs no script.
-var walletPage = template.Must(template.New("wallet").Parse(`<!doctype html>
-<html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="2">
-<title>Inloggen met NL Wallet (testomgeving)</title><style>{{.Style}}</style></head><body>
-` + banner + `
-<h1>Inloggen met NL Wallet</h1>
-{{if .QR}}<p>Scan deze code met de NL Wallet op uw telefoon.</p>
-<p><img src="{{.QR}}" alt="QR-code voor de NL Wallet" width="280" height="280"></p>
-{{else}}<p>Ga verder in de NL Wallet op uw telefoon.</p>{{end}}
+var walletPage = page("wallet", "Inloggen met NL Wallet", `<meta http-equiv="refresh" content="2">
+`, `<h1 class="utrecht-heading-1">Inloggen met NL Wallet</h1>
+{{if .QR}}<p class="utrecht-paragraph">Scan deze code met de NL Wallet op uw telefoon.</p>
+<img class="azsp-qr" src="{{.QR}}" alt="QR-code voor de NL Wallet" width="280" height="280">
+{{else}}<p class="utrecht-paragraph">Ga verder in de NL Wallet op uw telefoon.</p>{{end}}
 <form method="post" action="{{.Action}}">
 <input type="hidden" name="transaction" value="{{.TransactionID}}">
-<p><button type="submit" name="decision" value="deny">Weigeren</button></p>
-</form></body></html>
-`))
+<div class="azsp-means"><button type="submit" `+subtleButton+` name="decision" value="deny">Weigeren</button></div>
+</form>`)
 
-var errorPage = template.Must(template.New("error").Parse(`<!doctype html>
-<html lang="nl"><head><meta charset="utf-8"><title>Verzoek niet mogelijk</title><style>{{.Style}}</style></head><body>
-` + banner + `
-<h1>Dit verzoek kan niet worden afgehandeld</h1>
-<p>invalid_request: {{.Description}}</p>
-</body></html>
-`))
+var errorPage = page("error", "Verzoek niet mogelijk", "", `<h1 class="utrecht-heading-1">Dit verzoek kan niet worden afgehandeld</h1>
+<p class="utrecht-paragraph">invalid_request: {{.Description}}</p>`)
 
-// operationText describes the requested operations to the user.
-// operationText names what the client asks, and at which authentic source:
-// an authorization is for one data service.
-func operationText(scope, source string) string {
-	var parts []string
+var unavailableTemplate = page("unavailable", "Niet beschikbaar", "", `<h1 class="utrecht-heading-1">Niet beschikbaar</h1>
+<p class="utrecht-paragraph">{{.Message}}</p>`)
+
+// operationText says in plain language what the client asks, after "wil bij
+// <source>"; requestText names it as a noun phrase. An authorization is for
+// one data service.
+func operationText(scope string) (operation, request string) {
+	var ops, reqs []string
 	for _, sc := range strings.Fields(scope) {
 		switch sc {
 		case "verify":
-			parts = append(parts, "gegevens van u te laten verifiëren")
+			ops = append(ops, "laten controleren of gegevens over u kloppen")
+			reqs = append(reqs, "controleren of gegevens kloppen")
 		case "retrieve":
-			parts = append(parts, "gegevens van u op te halen")
+			ops = append(ops, "gegevens over u opvragen")
+			reqs = append(reqs, "gegevens opvragen")
 		}
 	}
-	return strings.Join(parts, " en ") + " bij " + source
+	request = strings.Join(reqs, " en ")
+	if request != "" {
+		request = strings.ToUpper(request[:1]) + request[1:]
+	}
+	return strings.Join(ops, " en "), request
 }
 
-// writePage sends a page that must not be cached or framed.
+// writePage sends a page that must not be cached or framed. Its style
+// sheets come from this server; it has no script.
 func writePage(w http.ResponseWriter, status int, page *template.Template, data map[string]any) {
-	data["Style"] = pageStyle
 	h := w.Header()
 	h.Set("Content-Type", "text/html; charset=utf-8")
 	h.Set("Cache-Control", "no-store")
 	h.Set("X-Frame-Options", "DENY")
-	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'none'; base-uri 'none'")
+	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; img-src data:; frame-ancestors 'none'; base-uri 'none'")
 	w.WriteHeader(status)
 	_ = page.Execute(w, data)
 }
@@ -120,9 +171,12 @@ func writeRequestPage(w http.ResponseWriter, tx *authorization.Transaction, secu
 		Secure:   secure,
 		SameSite: http.SameSiteStrictMode,
 	})
+	operation, request := operationText(tx.Scope)
 	writePage(w, http.StatusOK, requestPage, map[string]any{
 		"ClientName":    tx.ClientName,
-		"Operation":     operationText(tx.Scope, tx.Source),
+		"Operation":     operation,
+		"Request":       request,
+		"Source":        tx.Source,
 		"Action":        DecisionPath,
 		"TransactionID": tx.ID,
 		"Wallet":        wallet,
@@ -158,14 +212,6 @@ func writeDigiDPage(w http.ResponseWriter, status int, tx, username, message str
 func unavailablePage(w http.ResponseWriter, message string) {
 	writePage(w, http.StatusServiceUnavailable, unavailableTemplate, map[string]any{"Message": message})
 }
-
-var unavailableTemplate = template.Must(template.New("unavailable").Parse(`<!doctype html>
-<html lang="nl"><head><meta charset="utf-8"><title>Niet beschikbaar</title><style>{{.Style}}</style></head><body>
-` + banner + `
-<h1>Niet beschikbaar</h1>
-<p>{{.Message}}</p>
-</body></html>
-`))
 
 // authorizeErrorPage answers a request that cannot be redirected safely
 // (RFC 6749 section 4.1.2.1).

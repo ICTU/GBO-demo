@@ -100,9 +100,13 @@ func TestProvision(t *testing.T) {
 			var p struct {
 				Origin     string                `json:"requestOriginBaseUrl"`
 				Authorized map[string][][]string `json:"authorizedAttributes"`
+				Purpose    map[string]string     `json:"purposeStatement"`
 			}
 			_ = json.Unmarshal([]byte(payload), &p)
+			// The wallet names the authorization server, not the QTSP: the
+			// purpose says the citizen approves a request of a trust service.
 			auth = p.Origin == "https://as.test" && len(p.Authorized[PIDType]) == 2*len(PIDClaims) &&
+				p.Purpose["nl"] == "Inloggen bij de bron om een verzoek van een vertrouwensdienst goed te keuren" &&
 				slices.ContainsFunc(p.Authorized[PIDType], func(path []string) bool { return slices.Equal(path, []string{PIDType, "bsn"}) })
 		}
 	}

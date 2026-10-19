@@ -20,7 +20,7 @@ func TestRequestPage(t *testing.T) {
 	as := newTestAS(t)
 	tx := as.startAuthorization(t, authorizeParams(newPKCE()))
 	for _, want := range []string{
-		"Testomgeving — geen echte identificatie", testClientName, "laten verifiëren bij Basisregistratie Personen (test)",
+		"Testomgeving — geen echte identificatie", testClientName, "wil bij Basisregistratie Personen (test) laten controleren of gegevens over u kloppen.", "Controleren of gegevens kloppen",
 		`value="digid">Inloggen met DigiD (mock)`, `value="wallet">Inloggen met NL Wallet`, `value="deny">Weigeren`,
 	} {
 		if !strings.Contains(tx.page, want) {
