@@ -134,22 +134,7 @@ func TestMaterializeIssuanceReleaseUsesMountedSecretsWithoutPersistingThem(t *te
 		t.Fatal(err)
 	}
 
-	if err := os.RemoveAll(filepath.Join(secrets, qtspCertificateSetID)); err != nil {
-		t.Fatal(err)
-	}
-	var warnings bytes.Buffer
-	withoutQTSP := filepath.Join(t.TempDir(), "issuance_server.toml")
-	options.outputPath, options.warnings = withoutQTSP, &warnings
-	if err := materializeIssuanceRelease(options, persistedRelease); err != nil {
-		t.Fatalf("materialize without optional QTSP certificates: %v", err)
-	}
-	withoutQTSPBody, err := os.ReadFile(withoutQTSP)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(withoutQTSPBody), qtspUsecase) || !strings.Contains(warnings.String(), "QTSP certificates are absent") {
-		t.Fatalf("optional QTSP result contains usecase=%t warning=%q", strings.Contains(string(withoutQTSPBody), qtspUsecase), warnings.String())
-	}
+	assertMaterializesWithoutOptionalQTSP(t, secrets, options, persistedRelease)
 
 	if err := os.Remove(artifacts.IssuerKeyReference); err != nil {
 		t.Fatal(err)
@@ -158,6 +143,23 @@ func TestMaterializeIssuanceReleaseUsesMountedSecretsWithoutPersistingThem(t *te
 	options.outputPath = missingOutput
 	if err := materializeIssuanceRelease(options, persistedRelease); err == nil || !strings.Contains(err.Error(), "issuer-key.der.b64") {
 		t.Fatalf("materialize without issuer key error = %v", err)
+	}
+}
+
+func assertMaterializesWithoutOptionalQTSP(t *testing.T, secrets string, options issuanceReleaseOptions, release onboarding.SourceRelease) {
+	t.Helper()
+	if err := os.RemoveAll(filepath.Join(secrets, qtspCertificateSetID)); err != nil {
+		t.Fatal(err)
+	}
+	var warnings bytes.Buffer
+	output := filepath.Join(t.TempDir(), "issuance_server.toml")
+	options.outputPath, options.warnings = output, &warnings
+	if err := materializeIssuanceRelease(options, release); err != nil {
+		t.Fatalf("materialize without optional QTSP certificates: %v", err)
+	}
+	rendered := readTestFile(t, output)
+	if strings.Contains(rendered, qtspUsecase) || !strings.Contains(warnings.String(), "QTSP certificates are absent") {
+		t.Fatalf("optional QTSP result contains usecase=%t warning=%q", strings.Contains(rendered, qtspUsecase), warnings.String())
 	}
 }
 
