@@ -1187,7 +1187,7 @@ services:
       - AZSP_RESOURCES=${ASI_PROVIDER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_PROVIDER:-9424}}/brp/authsrc-api=Basisregistratie Personen (mock)
       - AZSP_TRUST_ANCHORS_FILE=/trust/reader-ca-cert.pem
       - AZSP_ENTITLEMENT_RECHECK_INTERVAL=${ASI_ENTITLEMENT_RECHECK_INTERVAL:-1h}
-      - AZSP_REQUIRE_AUTHORIZATION_DETAILS=${AZSP_REQUIRE_AUTHORIZATION_DETAILS:-false}
+      - AZSP_REQUIRE_AUTHORIZATION_DETAILS=${ASI_REQUIRE_AUTHORIZATION_DETAILS:-false}
       # The NL Wallet verifier (asi-wallet-verifier): its internal API, its
       # wallet API for the session status, and the API key that make
       # provision-asi-wallet-verifier writes to its own directory (not the

@@ -7,6 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Added
+- **Per-attribute binding is optional on the ASI route** (#571): an
+  authorization request without RFC 9396 `authorization_details` is accepted
+  and produces a token bound to the data service and ETSI operation scope
+  only; the ASIP then allows every attribute in that data service's catalogue.
+  When a valid detail is supplied, the selected attributes remain bound to
+  the code and token and the ASIP still refuses attributes outside that set.
+  Set `AZSP_REQUIRE_AUTHORIZATION_DETAILS=true` on the authorization server
+  (`ASI_REQUIRE_AUTHORIZATION_DETAILS=true` in Compose) to require the
+  per-attribute detail.
 - **The reference QTSP issues a test statement to the NL Wallet** (#549):
   after an accepted ASI verification or retrieval, the result page offers a
   QR code for the central issuance server. The QTSP keeps the result for ten
