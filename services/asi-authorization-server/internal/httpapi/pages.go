@@ -1,8 +1,10 @@
 package httpapi
 
 import (
+	"crypto/sha256"
 	"embed"
 	"encoding/base64"
+	"encoding/hex"
 	"html/template"
 	"io/fs"
 	"net/http"
@@ -38,16 +40,31 @@ const StaticPath = "/static/"
 //go:embed static/*.css static/*.png static/nlds/*.css
 var staticFiles embed.FS
 
-// staticHandler serves the style sheets, which may be cached.
+// staticHandler serves the style sheets and images. Each has an ETag of its
+// content and Cache-Control no-cache: the browser keeps a copy but asks
+// whether it changed (304 if not), so a new release shows at once.
 func staticHandler() http.Handler {
 	files, _ := fs.Sub(staticFiles, "static")
+	etags := map[string]string{}
+	_ = fs.WalkDir(files, ".", func(name string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			if raw, err := fs.ReadFile(files, name); err == nil {
+				sum := sha256.Sum256(raw)
+				etags[name] = `"` + hex.EncodeToString(sum[:8]) + `"`
+			}
+		}
+		return nil
+	})
 	server := http.StripPrefix(StaticPath, http.FileServerFS(files))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/") {
 			http.NotFound(w, r) // no directory listings
 			return
 		}
-		w.Header().Set("Cache-Control", "public, max-age=3600")
+		if etag, ok := etags[strings.TrimPrefix(r.URL.Path, StaticPath)]; ok {
+			w.Header().Set("ETag", etag)
+		}
+		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		server.ServeHTTP(w, r)
 	})
