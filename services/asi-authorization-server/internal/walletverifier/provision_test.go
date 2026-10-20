@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"maps"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -72,6 +73,9 @@ func TestProvision(t *testing.T) {
 			t.Errorf("configuration lacks %s", want)
 		}
 	}
+	if strings.Contains(config, "[usecases."+QTSPUsecase+"]") {
+		t.Error("the QTSP's usecase without --qtsp-request-origin")
+	}
 	m := regexp.MustCompile(`(?m)^certificate = "([^"]+)"`).FindStringSubmatch(config)
 	if m == nil {
 		t.Fatal("no usecase certificate")
@@ -112,6 +116,55 @@ func TestProvision(t *testing.T) {
 	}
 	if !eku || !auth {
 		t.Errorf("reader EKU %v, reader authorisation for the PID claims %v; want both", eku, auth)
+	}
+}
+
+// Slice 14: with --qtsp-request-origin the verifier also gets the QTSP's
+// usecase, with its own reader certificate: the QTSP's organisation and
+// purpose, and the four PID attributes it may ask, not the BSN.
+func TestProvisionQTSPUsecase(t *testing.T) {
+	dir := t.TempDir()
+	readerKey, readerCert := writeCA(t, dir, "reader-ca")
+	_, issuerCert := writeCA(t, dir, "issuer-ca")
+	out := filepath.Join(dir, "out")
+	if err := Provision([]string{"--ca-key", readerKey, "--ca-cert", readerCert, "--issuer-ca", issuerCert,
+		"--public-url", "https://verifier.test", "--request-origin", "https://as.test", "--qtsp-request-origin", "https://qtsp.test",
+		"--out-dir", out}); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(out, "verification_server.toml"))
+	certs := map[string]string{}
+	for _, m := range regexp.MustCompile(`(?s)\[usecases\.([a-z-]+)\].*?\ncertificate = "([^"]+)"`).FindAllStringSubmatch(string(raw), -1) {
+		certs[m[1]] = m[2]
+	}
+	if len(certs) != 2 || certs[Usecase] == "" || certs[QTSPUsecase] == "" || certs[Usecase] == certs[QTSPUsecase] {
+		t.Fatalf("usecases %v, want %s and %s with their own certificate", slices.Collect(maps.Keys(certs)), Usecase, QTSPUsecase)
+	}
+	der, _ := base64.StdEncoding.DecodeString(certs[QTSPUsecase])
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p struct {
+		Origin       string                `json:"requestOriginBaseUrl"`
+		Authorized   map[string][][]string `json:"authorizedAttributes"`
+		Purpose      map[string]string     `json:"purposeStatement"`
+		Organization struct {
+			DisplayName map[string]string `json:"displayName"`
+		} `json:"organization"`
+	}
+	for _, ext := range cert.Extensions {
+		if ext.Id.Equal(readerAuthExtensionOID) {
+			var payload string
+			_, _ = asn1.Unmarshal(ext.Value, &payload)
+			_ = json.Unmarshal([]byte(payload), &p)
+		}
+	}
+	bsn := slices.ContainsFunc(p.Authorized[PIDType], func(path []string) bool { return slices.Contains(path, "bsn") })
+	if p.Origin != "https://qtsp.test" || p.Organization.DisplayName["nl"] != "GBO demo test QTSP" ||
+		p.Purpose["nl"] != "Inloggen bij de vertrouwensdienst om een verklaring aan te vragen" ||
+		len(p.Authorized[PIDType]) != 2*len(QTSPClaims) || bsn {
+		t.Errorf("QTSP reader authorisation = %+v; want the QTSP's origin, organisation and purpose, and the four attributes without the BSN", p)
 	}
 }
 
