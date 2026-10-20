@@ -46,7 +46,38 @@ func ValidBSN(s string) bool { return bsnPattern.MatchString(s) }
 //go:embed page.html
 var pageSource string
 
-// Page is the login page. Its data: Action (Path), Cancel (where Annuleren
-// denies the request), TransactionID, Username and Message (why the BSN was
-// refused, if it was).
+// Page is the login page, laid out like the DigiD mock of the
+// toestemmingsportaal: first the choice of a method, then, for the chosen
+// method, the form. Its data: Action (Path), Cancel (where Annuleren denies
+// the request), TransactionID, Methods, Method (the chosen one, or none),
+// Username, BSN and Message (why the BSN was refused, if it was).
 var Page = template.Must(template.New("digid").Parse(pageSource))
+
+// Method is a login method as DigiD offers it. The mock treats them all the
+// same: a username, and the BSN as the password.
+type Method struct{ ID, Title, Subtitle string }
+
+// Methods are the methods the page offers, as in the toestemmingsportaal.
+var Methods = []Method{
+	{"app", "Met de DigiD app", "De makkelijkste manier om veilig in te loggen"},
+	{"sms", "Met een sms-controle", ""},
+	{"rijbewijs", "Met mijn rijbewijs", ""},
+	{"id-kaart", "Met mijn identiteitskaart", ""},
+}
+
+// KnownMethod reports whether id is one of Methods.
+func KnownMethod(id string) bool {
+	for _, m := range Methods {
+		if m.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// The form's prefill: the username does nothing, and the BSN is that of
+// test person Frouke Jansen, whom most ASI scenarios of the demo use.
+const (
+	DefaultUsername = "j.dejong"
+	DefaultBSN      = "999991772"
+)

@@ -1,13 +1,120 @@
 /* The login page of the DigiD mock (package digidmock): it imitates DigiD,
-   not the authorization server, so it has its own style. */
-body{font-family:system-ui,sans-serif;margin:0;color:#1a1a1a;background:#f3f3f3}
-header{background:#fff;border-bottom:4px solid #e17000;padding:1rem 1.5rem;display:flex;align-items:center;gap:.8rem}
-.logo{background:#e17000;color:#fff;font-weight:700;padding:.35rem .6rem;border-radius:4px}
-main{max-width:30rem;margin:2rem auto;background:#fff;padding:1.5rem 2rem;border:1px solid #ddd}
-.banner{background:#fff3cd;border:2px solid #b8860b;padding:.6rem .8rem;margin-bottom:1rem;font-size:.9rem}
-label{display:block;margin:.8rem 0 .3rem;font-weight:600}
-input[type=text],input[type=password]{width:100%;box-sizing:border-box;padding:.5rem;font-size:1rem}
-.error{color:#b00020;font-weight:600}
-button{margin-top:1.2rem;padding:.6rem 1.4rem;font-size:1rem;border:0;border-radius:4px;cursor:pointer}
-.primary{background:#e17000;color:#fff}
-.secondary{background:#eee}
+   not the authorization server, so it has its own style. It follows the
+   DigiD mock of the toestemmingsportaal (toestemmingsportaal-frontend),
+   so both routes of the demo show the same DigiD. */
+
+:root {
+  --digid-page-bg: #15171A;
+  --digid-surface: #1F2126;
+  --digid-card: #2A2E33;
+  --digid-card-border: #4A4F58;
+  --digid-rule: #3A3F46;
+  --digid-orange: #E17000;
+  --digid-orange-dark: #A85400;
+  --digid-text: #E8E8E8;
+  --digid-mute: #C9CDD1;
+  --digid-link: #75A9D6;
+  --digid-accent-bar: #154273;
+  --ink-900: #0A2845;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--digid-page-bg);
+  color: var(--digid-text);
+  font-family: "Public Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.digid-container { max-width: 520px; width: 100%; margin: 0 auto; padding: 36px 24px; }
+.digid-surface { background: var(--digid-surface); display: flex; flex-direction: column; }
+.digid-surface-header { position: relative; padding: 20px 24px 12px; display: flex; align-items: center; min-height: 80px; }
+.digid-lang { color: var(--digid-link); text-decoration: underline; text-underline-offset: 3px; font-size: 13px; }
+.digid-rijkswapen { position: absolute; left: 50%; top: 0; transform: translateX(-50%); height: 72px; width: auto; display: block; }
+.digid-content { padding: 28px 32px 32px; }
+.digid-brandrow { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+.digid-brandrow img { width: 44px; height: 44px; border-radius: 8px; display: block; }
+.digid-brandrow .label { font-weight: 700; color: #fff; line-height: 1.2; font-size: 16px; }
+
+.digid-mock {
+  background: rgba(225, 112, 0, 0.06);
+  border-left: 3px solid var(--digid-orange);
+  padding: 12px 14px;
+  font-size: 13px;
+  color: var(--digid-mute);
+  margin: 0 0 18px;
+}
+.digid-mock strong { color: #fff; }
+
+.digid-title { color: var(--digid-orange); font-size: 22px; font-weight: 700; margin: 0 0 16px; letter-spacing: -0.2px; }
+
+.digid-methods { display: flex; flex-direction: column; gap: 12px; }
+.digid-method {
+  background: var(--digid-card);
+  border: 1px solid var(--digid-card-border);
+  color: var(--digid-text);
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  text-decoration: none;
+}
+.digid-method:hover, .digid-method:focus-visible { border-color: var(--digid-orange); }
+.digid-method.selected { border-color: var(--digid-orange); box-shadow: inset 0 0 0 1px var(--digid-orange); }
+.digid-method-icon { width: 40px; height: 40px; display: grid; place-items: center; color: var(--digid-orange); flex-shrink: 0; }
+.digid-method-body { flex: 1; min-width: 0; }
+.digid-method-title { display: block; font-weight: 700; color: #fff; font-size: 15px; line-height: 1.2; }
+.digid-method-subtitle { display: block; font-size: 13px; color: var(--digid-mute); margin-top: 2px; }
+
+.digid-form { margin-top: 20px; padding: 18px; background: rgba(225, 112, 0, 0.06); border: 1px solid rgba(225, 112, 0, 0.25); }
+.digid-form label { display: block; font-size: 13px; color: var(--digid-mute); margin-bottom: 6px; }
+.digid-form label.second { margin-top: 12px; }
+.digid-form input {
+  width: 100%;
+  background: #fff;
+  color: var(--ink-900);
+  border: 0;
+  font-size: 16px;
+  padding: 12px;
+  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+.digid-form .help { font-size: 12px; color: var(--digid-mute); margin-top: 6px; }
+.digid-form .error { font-size: 13px; color: #ff8a80; margin-top: 8px; }
+.digid-btn {
+  margin-top: 14px;
+  background: var(--digid-orange);
+  color: #fff;
+  border: 0;
+  padding: 12px 22px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  box-shadow: inset 0 -3px 0 var(--digid-orange-dark);
+}
+.digid-btn:hover { background: var(--digid-orange-dark); }
+
+.digid-cancel {
+  margin-top: 26px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+}
+.digid-cancel:hover { color: var(--digid-orange); }
+
+.digid-help { margin-top: 28px; padding-top: 18px; border-top: 1px solid var(--digid-rule); font-size: 14px; color: var(--digid-mute); line-height: 1.55; }
+
+.digid-bottombar { display: flex; justify-content: center; padding-bottom: 22px; }
+.digid-bottombar-inner { width: 28px; height: 10px; background: var(--digid-accent-bar); }

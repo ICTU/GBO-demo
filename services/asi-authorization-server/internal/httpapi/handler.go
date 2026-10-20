@@ -116,7 +116,11 @@ func (h *handler) digidPage(w http.ResponseWriter, r *http.Request) {
 		authorizeErrorPage(w, "the authorization request is unknown, used, expired or was started in another browser")
 		return
 	}
-	writeDigiDPage(w, http.StatusOK, tx, "", "")
+	method := r.URL.Query().Get("method")
+	if !digidmock.KnownMethod(method) {
+		method = "" // the choice of a method first
+	}
+	writeDigiDPage(w, http.StatusOK, tx, method, digidmock.DefaultUsername, digidmock.DefaultBSN, "")
 }
 
 // digidLogin passes what the user typed to the core, which has the DigiD
@@ -130,7 +134,11 @@ func (h *handler) digidLogin(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.service.LogIn(r.Context(), authorization.Login{TransactionID: tx, Binding: binding, Means: digidmock.Means,
 		Credential: strings.TrimSpace(r.PostForm.Get("bsn"))})
 	if errors.Is(err, authorization.ErrNotIdentified) {
-		writeDigiDPage(w, http.StatusBadRequest, tx, r.PostForm.Get("username"), "Vul als wachtwoord een BSN van 9 cijfers in.")
+		method := r.PostForm.Get("method")
+		if !digidmock.KnownMethod(method) {
+			method = digidmock.Methods[0].ID
+		}
+		writeDigiDPage(w, http.StatusBadRequest, tx, method, r.PostForm.Get("username"), r.PostForm.Get("bsn"), "Vul als wachtwoord een BSN van 9 cijfers in.")
 		return
 	}
 	h.complete(w, r, tx, resp, err)

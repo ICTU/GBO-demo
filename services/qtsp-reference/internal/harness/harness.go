@@ -1,6 +1,7 @@
 // Package harness plays the user at the authorization server of the GBO demo,
 // so the CLI and CI can run the flow without a browser: on the request page
-// it logs in with the DigiD mock, or denies. It is a test harness: a real
+// it logs in with the DigiD mock (choosing the DigiD app as method), or
+// denies. It is a test harness: a real
 // user identifies and decides in a browser, and the DigiD mock itself checks
 // nothing.
 package harness
@@ -69,6 +70,11 @@ func Decide(ctx context.Context, client *http.Client, authorizationURL, bsn stri
 		if err != nil {
 			return Callback{}, err
 		}
+		// The DigiD mock first offers a choice of method; any method gives
+		// the same form.
+		q := login.Query()
+		q.Set("method", "app")
+		login.RawQuery = q.Encode()
 		resp, page, err = b.do(ctx, http.MethodGet, login, nil)
 		if err != nil {
 			return Callback{}, err

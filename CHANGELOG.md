@@ -232,6 +232,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- **The ASI authorization server's DigiD mock looks like the toestemmingsportaal's**:
+  first the choice of a method, then the form, prefilled with the BSN of test
+  person Frouke Jansen (999991772). Still without script; the CSP now allows
+  images from the server itself.
 - **The landing page uses the ICTU-GBO house-style colours.** Blue is
   `#2e62e6`, the accessible variant of ICTU blue (5.2:1 on white, where
   `#457aff` reaches only 3.8:1); dark sections, the footer and the wallet QR

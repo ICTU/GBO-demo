@@ -35,7 +35,7 @@ const transactionCookiePrefix = "azsp_tx_"
 // Voorbeeld theme and Utrecht components, and the layout on top.
 const StaticPath = "/static/"
 
-//go:embed static/*.css static/nlds/*.css
+//go:embed static/*.css static/*.png static/nlds/*.css
 var staticFiles embed.FS
 
 // staticHandler serves the style sheets, which may be cached.
@@ -179,7 +179,7 @@ func writePage(w http.ResponseWriter, status int, page *template.Template, data 
 	h.Set("Content-Type", "text/html; charset=utf-8")
 	h.Set("Cache-Control", "no-store")
 	h.Set("X-Frame-Options", "DENY")
-	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; img-src data:; frame-ancestors 'none'; base-uri 'none'")
+	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'")
 	w.WriteHeader(status)
 	_ = page.Execute(w, data)
 }
@@ -224,12 +224,15 @@ func writeWalletPage(w http.ResponseWriter, tx, link string) {
 
 // writeDigiDPage shows the login page of the DigiD mock for transaction tx,
 // with message when the BSN was refused.
-func writeDigiDPage(w http.ResponseWriter, status int, tx, username, message string) {
+func writeDigiDPage(w http.ResponseWriter, status int, tx, method, username, bsn, message string) {
 	writePage(w, status, digidmock.Page, map[string]any{
 		"Action":        digidmock.Path,
 		"Cancel":        DecisionPath,
 		"TransactionID": tx,
+		"Methods":       digidmock.Methods,
+		"Method":        method,
 		"Username":      username,
+		"BSN":           bsn,
 		"Message":       message,
 	})
 }

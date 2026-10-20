@@ -77,6 +77,11 @@ func TestStaticStyleSheets(t *testing.T) {
 			t.Errorf("GET %s = %d, %q, nosniff %q, %d bytes; want CSS", path, resp.StatusCode, resp.Header.Get("Content-Type"), resp.Header.Get("X-Content-Type-Options"), len(body))
 		}
 	}
+	for _, path := range []string{"/static/rijkswapen.png", "/static/Logo_of_DigiD.png"} {
+		if resp, body := as.get(t, path, nil); resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != "image/png" || len(body) == 0 {
+			t.Errorf("GET %s = %d, %q; want the DigiD mock's image", path, resp.StatusCode, resp.Header.Get("Content-Type"))
+		}
+	}
 	for _, path := range []string{"/static/", "/static/nlds/", "/static/missing.css", "/static/nlds/README.md", "/static/../pages.go"} {
 		if resp, _ := as.get(t, path, nil); resp.StatusCode == http.StatusOK {
 			t.Errorf("GET %s = 200, want no file", path)
