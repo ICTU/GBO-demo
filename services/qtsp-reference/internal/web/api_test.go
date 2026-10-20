@@ -10,7 +10,7 @@ import (
 // Q8: a request, and its outcome, can be fetched for ten minutes; after
 // that the request and its start URL are gone.
 func TestARequestExpires(t *testing.T) {
-	h := newHandler(nil, DemoAttributes, "http://localhost:4023")
+	h := newHandler(nil, DemoAttributes, "http://localhost:4023", nil)
 	now := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
 	h.now = func() time.Time { return now }
 	h.requests["r1"] = &request{prepared: prepared{operation: "verify"}, expires: now.Add(requestLifetime)}

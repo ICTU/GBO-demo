@@ -1294,9 +1294,16 @@ services:
       - QTSP_KEY_FILE=/qtsp/qtsp-key.pem
       - QTSP_CERT_FILE=/qtsp/qtsp-cert.pem
       - QTSP_SEAL_TRUST_ANCHORS=/anchors/issuer-ca-cert.pem
+      # Login with the NL Wallet (slice 14 of #336): usecase qtsp-login on
+      # the authorization server's wallet verifier, with the same API key, a
+      # demo shortcut. Without the key the wallet login is not offered.
+      - QTSP_WALLET_VERIFIER_URL=http://asi-wallet-verifier:8002
+      - QTSP_WALLET_VERIFIER_STATUS_URL=http://asi-wallet-verifier:8001
+      - QTSP_WALLET_VERIFIER_API_KEY_FILE=/wallet-verifier/api-key
     volumes:
       - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/asi-qtsp:/qtsp:ro
       - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/development-ca:/anchors:ro
+      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/asi-authorization-server-wallet:/wallet-verifier:ro
     depends_on:
       asi-discovery-stub:
         condition: service_healthy

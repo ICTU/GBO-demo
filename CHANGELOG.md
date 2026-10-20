@@ -7,6 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Added
+- **The citizen logs in at the reference QTSP** (#560): before a request
+  starts, with the NL Wallet (the PID's name, date of birth and
+  nationalities, not the BSN, through usecase `qtsp-login` of the wallet
+  verifier, which the QTSP shares with the authorization server as a demo
+  shortcut) or with test data (a mock that checks nothing). A login lasts 30
+  minutes; the pages name the citizen. The request API accepts `login_hint`
+  test data, which the developer portal sends from the scenario, so a demo
+  runs without a phone. The CLI does not log in.
 - **The ASI authorization server's pages in NL Design System's Voorbeeld
   theme** (#547): the request, wallet and error pages use the neutral theme
   and Utrecht components, served from the server itself without script or

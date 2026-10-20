@@ -3,7 +3,7 @@
 // to the authorization server, and the return with the code, after which the
 // QTSP takes a token, asks the ASIP and shows the result with its seal check.
 // The developer portal can lay a request down through the request API
-// (api.go) and follow its outcome.
+// (api.go) and follow its outcome. The citizen logs in first (login.go).
 package web
 
 import (
@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"gbo-demo/qtsp-reference/internal/login"
 	"gbo-demo/qtsp-reference/internal/qtsp"
 )
 
@@ -53,7 +54,10 @@ type session struct {
 	// request is the request of the request API this session runs, if any:
 	// the callback records its outcome there.
 	request string
-	expires time.Time
+	// identity is the citizen who logged in at the QTSP and started the
+	// request, for the issuance of the attestation (slice 13).
+	identity login.Identity
+	expires  time.Time
 }
 
 // prepared is a checked request whose data service is found and at whose
@@ -80,24 +84,28 @@ type Handler struct {
 	secure bool
 	// publicURL is where the user reaches the QTSP: the base of start URLs.
 	publicURL string
-	mu        sync.Mutex
-	sessions  map[string]*session
-	requests  map[string]*request
-	now       func() time.Time
+	// wallet is the NL Wallet as login means; nil when it is not
+	// configured, and then only the mock login is offered.
+	wallet   login.Wallet
+	mu       sync.Mutex
+	sessions map[string]*session
+	requests map[string]*request
+	logins   map[string]*loginState
+	now      func() time.Time
 }
 
 // NewHandler serves the web side. publicURL is where the user reaches it;
-// over https the session cookie is Secure. On http it can only be loopback
-// (the authorization server allows no other http redirect URI), where a
-// browser may refuse a Secure cookie.
-func NewHandler(client *qtsp.Client, attributes []Attribute, publicURL string) http.Handler {
-	return newHandler(client, attributes, publicURL).routes()
+// over https the cookies are Secure. On http it can only be loopback (the
+// authorization server allows no other http redirect URI), where a browser
+// may refuse a Secure cookie. wallet is the NL Wallet as login means, or nil.
+func NewHandler(client *qtsp.Client, attributes []Attribute, publicURL string, wallet login.Wallet) http.Handler {
+	return newHandler(client, attributes, publicURL, wallet).routes()
 }
 
-func newHandler(client *qtsp.Client, attributes []Attribute, publicURL string) *Handler {
+func newHandler(client *qtsp.Client, attributes []Attribute, publicURL string, wallet login.Wallet) *Handler {
 	return &Handler{
 		client: client, attributes: attributes, secure: strings.HasPrefix(publicURL, "https://"), publicURL: strings.TrimRight(publicURL, "/"),
-		sessions: map[string]*session{}, requests: map[string]*request{}, now: time.Now,
+		wallet: wallet, sessions: map[string]*session{}, requests: map[string]*request{}, logins: map[string]*loginState{}, now: time.Now,
 	}
 }
 
@@ -110,17 +118,33 @@ func (h *Handler) routes() http.Handler {
 	mux.HandleFunc("POST /api/requests", h.createRequest)
 	mux.HandleFunc("GET /api/requests/{id}", h.getRequest)
 	mux.HandleFunc("GET /requests/{id}/start", h.startRequest)
+	mux.HandleFunc("POST /login/mock", h.mockLogin)
+	mux.HandleFunc("POST /login/wallet", h.walletStart)
+	mux.HandleFunc("GET /login/wallet", h.walletPage)
+	mux.HandleFunc("POST /logout", h.logout)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	return mux
 }
 
-func (h *Handler) form(w http.ResponseWriter, _ *http.Request) {
-	render(w, http.StatusOK, formPage, map[string]any{"Attributes": h.attributes})
+// form is the request form for a logged-in citizen, and otherwise the login
+// page: no request without a login.
+func (h *Handler) form(w http.ResponseWriter, r *http.Request) {
+	id := h.loggedIn(r)
+	if id == nil {
+		h.loginPage(w, http.StatusOK, "", "", loginHint{})
+		return
+	}
+	render(w, http.StatusOK, formPage, map[string]any{"Attributes": h.attributes, "Who": id})
 }
 
 // start plans the request, registers when needed, and sends the browser to
 // the authorization server.
 func (h *Handler) start(w http.ResponseWriter, r *http.Request) {
+	id := h.loggedIn(r)
+	if id == nil {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		errorPage(w, http.StatusBadRequest, "Het formulier kon niet worden gelezen.")
 		return
@@ -139,7 +163,7 @@ func (h *Handler) start(w http.ResponseWriter, r *http.Request) {
 		errorPage(w, refused.status, refused.message)
 		return
 	}
-	h.begin(w, r, p, "")
+	h.begin(w, r, p, "", *id)
 }
 
 // prepare checks a request, finds the data service that provides all its
@@ -188,11 +212,11 @@ func (h *Handler) prepare(ctx context.Context, operation string, attrs []qtsp.At
 	return prepared{operation: operation, attributes: attrs, plan: plan, reg: reg}, nil
 }
 
-// begin keeps state and the PKCE verifier in a session of this browser and
-// sends it to the authorization server.
-func (h *Handler) begin(w http.ResponseWriter, r *http.Request, p prepared, requestID string) {
+// begin keeps state, the PKCE verifier and the logged-in citizen in a
+// session of this browser and sends it to the authorization server.
+func (h *Handler) begin(w http.ResponseWriter, r *http.Request, p prepared, requestID string, citizen login.Identity) {
 	verifier, challenge := qtsp.PKCE()
-	s := &session{prepared: p, state: qtsp.State(), verifier: verifier, request: requestID, expires: h.now().Add(sessionLifetime)}
+	s := &session{prepared: p, state: qtsp.State(), verifier: verifier, request: requestID, identity: citizen, expires: h.now().Add(sessionLifetime)}
 	id := randomID()
 	h.mu.Lock()
 	h.sessions[id] = s
@@ -241,7 +265,7 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	o := h.result(s.prepared, resp)
 	h.finish(s.request, o)
-	render(w, http.StatusOK, resultPage, o)
+	render(w, http.StatusOK, resultPage, resultView{outcome: o, Who: h.loggedIn(r)})
 }
 
 // take returns and removes the browser's session, if it is still valid.
@@ -294,6 +318,12 @@ type outcome struct {
 	// Error is a denial (an OAuth error code) or why the request failed.
 	Error            string `json:"error,omitempty"`
 	ErrorDescription string `json:"error_description,omitempty"`
+}
+
+// resultView is the result page: the outcome, and who is logged in.
+type resultView struct {
+	outcome
+	Who *login.Identity
 }
 
 type sealView struct {

@@ -2,7 +2,8 @@
 // 119 478): it discovers an attribute's data service, registers with the
 // data service's authorization server, lets the user authorize, takes a
 // DPoP-bound token, verifies or retrieves, and accepts a result only with a
-// valid seal. The web side is where a user starts; the CLI runs the same
+// valid seal. The web side is where a user starts, after logging in at the
+// QTSP with the NL Wallet or test data (a mock); the CLI runs the same
 // flow with the DigiD mock login played by a test harness.
 //
 // This file is the composition root.
@@ -30,8 +31,10 @@ import (
 	"time"
 
 	"gbo-demo/qtsp-reference/internal/cli"
+	loginport "gbo-demo/qtsp-reference/internal/login"
 	"gbo-demo/qtsp-reference/internal/qtsp"
 	"gbo-demo/qtsp-reference/internal/urlmap"
+	"gbo-demo/qtsp-reference/internal/walletlogin"
 	"gbo-demo/qtsp-reference/internal/web"
 )
 
@@ -73,7 +76,11 @@ func serve() error {
 	if err != nil {
 		return err
 	}
-	handler := web.NewHandler(client, web.DemoAttributes, env("QTSP_PUBLIC_URL", "http://localhost:4023"))
+	wallet, err := walletLogin()
+	if err != nil {
+		return err
+	}
+	handler := web.NewHandler(client, web.DemoAttributes, env("QTSP_PUBLIC_URL", "http://localhost:4023"), wallet)
 	srv := &http.Server{Addr: env("QTSP_ADDR", ":4023"), Handler: handler, ReadHeaderTimeout: readHeaderTimeout}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -225,4 +232,27 @@ func env(name, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// walletLogin is the NL Wallet as the citizen's login means, when the
+// verifier is configured: QTSP_WALLET_VERIFIER_URL (its internal API),
+// QTSP_WALLET_VERIFIER_STATUS_URL (its wallet API, where the session status
+// is) and the API key in QTSP_WALLET_VERIFIER_API_KEY_FILE. Without the key
+// file only the mock login is offered.
+func walletLogin() (loginport.Wallet, error) {
+	internal := os.Getenv("QTSP_WALLET_VERIFIER_URL")
+	if internal == "" {
+		return nil, nil
+	}
+	keyFile := env("QTSP_WALLET_VERIFIER_API_KEY_FILE", "/wallet-verifier/api-key")
+	key, err := os.ReadFile(keyFile)
+	if errors.Is(err, os.ErrNotExist) {
+		slog.Warn("NL Wallet verifier not configured: no API key; logging in with the NL Wallet is not offered", "file", keyFile)
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	status := env("QTSP_WALLET_VERIFIER_STATUS_URL", internal)
+	return walletlogin.New(internal, status, strings.TrimSpace(string(key))), nil
 }

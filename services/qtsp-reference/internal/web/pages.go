@@ -14,7 +14,11 @@ fieldset{margin:1rem 0;border:1px solid #d0d7de;border-radius:6px}label{display:
 textarea{width:100%;box-sizing:border-box;font-family:monospace;font-size:.85rem}
 table{border-collapse:collapse;margin:1rem 0;width:100%}td,th{border:1px solid #d0d7de;padding:.4rem .6rem;text-align:left}
 .ok{color:#1a7f37}.bad{color:#cf222e}
-button{padding:.6rem 1.4rem;font-size:1rem;background:#1f883d;color:#fff;border:0;border-radius:6px;cursor:pointer}`
+button{padding:.6rem 1.4rem;font-size:1rem;background:#1f883d;color:#fff;border:0;border-radius:6px;cursor:pointer}
+button:disabled{background:#8c959f;cursor:not-allowed}
+input{display:block;width:100%;box-sizing:border-box;padding:.4rem;font-size:1rem;margin-bottom:.6rem}
+.who{background:#f6f8fa;border:1px solid #d0d7de;border-radius:6px;padding:.5rem .8rem}
+.inline{display:inline}button.link{background:none;color:#0969da;padding:0 0 0 .5rem;text-decoration:underline}`
 
 const banner = `<p class="banner"><strong>Referentie-QTSP (testomgeving).</strong> Een gekwalificeerde trust service provider laat attributen verifiëren of ophalen bij de bron (ETSI TS 119 478). Dit is de referentieclient van de demo, geen echte QTSP.</p>`
 
@@ -24,6 +28,7 @@ var formPage = template.Must(template.New("form").Parse(`<!doctype html>
 <header><p>Referentie-QTSP · testclient</p></header>
 <main>
 ` + banner + `
+` + who + `
 <h1>Attestatie aanvragen</h1>
 <p>Kies de attributen die de QTSP bij de bron laat verifiëren (met de waarde die de QTSP van u heeft) of ophaalt. U wordt doorgestuurd naar de autorisatieserver van de bron om u te identificeren en toestemming te geven.</p>
 <form method="post" action="/start">
@@ -45,6 +50,7 @@ var resultPage = template.Must(template.New("result").Parse(`<!doctype html>
 <header><p>Referentie-QTSP · testclient</p></header>
 <main>
 ` + banner + `
+` + who + `
 <h1>Resultaat</h1>
 <p>Dataservice <code>{{.DataService}}</code>{{if .Provider}} van {{.Provider}}{{end}}{{if .Source}}, bron {{.Source}}{{end}}.</p>
 {{if .Problem}}<p class="bad">De ASIP gaf status {{.ASIPStatus}}: {{.Problem}}</p>

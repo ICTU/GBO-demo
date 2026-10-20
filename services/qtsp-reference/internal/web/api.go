@@ -25,8 +25,10 @@ const requestLifetime = 10 * time.Minute
 // request is a request laid down through the API.
 type request struct {
 	prepared
-	// started is set when the start URL is opened: it works once.
+	// started is set when the start URL begins the request: it works once.
 	started bool
+	// hint is test data for the mock login, if the request carried it.
+	hint    *loginHint
 	outcome *outcome
 	expires time.Time
 }
@@ -48,7 +50,10 @@ func (h *Handler) listAttributes(w http.ResponseWriter, _ *http.Request) {
 }
 
 type requestBody struct {
-	Operation  string `json:"operation"`
+	// LoginHint is test data that prefills the mock login, so a demo runs
+	// without a phone. It stays on the server; the start URL has only an id.
+	LoginHint  *loginHint `json:"login_hint"`
+	Operation  string     `json:"operation"`
 	Attributes []struct {
 		Identifier string          `json:"identifier"`
 		Value      json.RawMessage `json:"value"`
@@ -85,7 +90,7 @@ func (h *Handler) createRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := randomID()
-	req := &request{prepared: p, expires: h.now().Add(requestLifetime)}
+	req := &request{prepared: p, hint: body.LoginHint, expires: h.now().Add(requestLifetime)}
 	h.mu.Lock()
 	h.purge()
 	h.requests[id] = req
@@ -113,15 +118,17 @@ func (h *Handler) getRequest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, view)
 }
 
-// startRequest is the start URL: it sends the browser to the authorization
-// server, once.
+// startRequest is the start URL: without a login the login page, after
+// which the citizen returns here; with a login it sends the browser to the
+// authorization server, once.
 func (h *Handler) startRequest(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	citizen := h.loggedIn(r)
 	h.mu.Lock()
 	h.purge()
 	req := h.requests[id]
 	started := req != nil && req.started
-	if req != nil {
+	if req != nil && citizen != nil {
 		req.started = true
 	}
 	h.mu.Unlock()
@@ -130,8 +137,10 @@ func (h *Handler) startRequest(w http.ResponseWriter, r *http.Request) {
 		errorPage(w, http.StatusNotFound, "Deze aanvraag bestaat niet of is verlopen.")
 	case started:
 		errorPage(w, http.StatusGone, "Deze aanvraag is al gestart. Leg een nieuwe aanvraag neer.")
+	case citizen == nil:
+		h.loginPage(w, http.StatusOK, id, "", loginHint{})
 	default:
-		h.begin(w, r, req.prepared, id)
+		h.begin(w, r, req.prepared, id, *citizen)
 	}
 }
 
