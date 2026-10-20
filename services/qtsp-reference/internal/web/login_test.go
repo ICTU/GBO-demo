@@ -122,7 +122,9 @@ func (e loginEnv) loggedInAs(t *testing.T, c *http.Client) string {
 func TestLoginPage(t *testing.T) {
 	e := newLoginEnv(t, &fakeWallet{})
 	resp, page := e.do(t, browser(), http.MethodGet, "/", nil)
-	for _, want := range []string{`<button type="submit">Inloggen met NL Wallet</button>`, `action="/login/mock"`, "niet uw BSN", "hier wordt niets gecontroleerd"} {
+	for _, want := range []string{`<button type="submit">Inloggen met NL Wallet</button>`, `action="/login/mock"`, "niet uw BSN", "hier wordt niets gecontroleerd",
+		// Without test data from a request, the mock is prefilled with Frouke Jansen.
+		`value="Jansen"`, `value="Frouke"`, `value="2000-03-24"`, `value="NL, BE"`} {
 		if resp.StatusCode != http.StatusOK || !strings.Contains(page, want) {
 			t.Errorf("login page lacks %q:\n%s", want, page)
 		}

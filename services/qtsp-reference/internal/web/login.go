@@ -104,8 +104,13 @@ func (h *Handler) dropLogin(r *http.Request) {
 	}
 }
 
+// defaultMock prefills the mock login when a request brings no test data:
+// test person Frouke Jansen, whom most ASI scenarios of the demo use.
+var defaultMock = loginHint{FamilyName: "Jansen", GivenName: "Frouke", Birthdate: "2000-03-24", Nationalities: []string{"NL", "BE"}}
+
 // loginPage shows the two means; request is a request of the request API to
-// start after the login, whose test data prefills the mock.
+// start after the login, whose test data prefills the mock, and otherwise
+// defaultMock does.
 func (h *Handler) loginPage(w http.ResponseWriter, status int, request, message string, mock loginHint) {
 	if mock.empty() && request != "" {
 		h.mu.Lock()
@@ -113,6 +118,9 @@ func (h *Handler) loginPage(w http.ResponseWriter, status int, request, message 
 			mock = *req.hint
 		}
 		h.mu.Unlock()
+	}
+	if mock.empty() {
+		mock = defaultMock
 	}
 	render(w, status, loginTemplate, map[string]any{
 		"Request": request, "Message": message, "Wallet": h.wallet != nil,
