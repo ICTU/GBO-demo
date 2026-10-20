@@ -39,6 +39,25 @@ const PIDType = "urn:eudi:pid:nl:1"
 // mandatory PID attributes the NL PID has. It has no place of birth.
 var PIDClaims = []string{"bsn", "family_name", "given_name", "birthdate", "nationalities"}
 
+// QTSPUsecase is the usecase of the reference QTSP's login: a demo
+// shortcut, as the QTSP shares this verifier with the authorization server
+// (slice 14 of #336). It has its own reader certificate.
+const QTSPUsecase = "qtsp-login"
+
+// QTSPClaims are the PID claims the QTSP may ask: the mandatory PID
+// attributes the NL PID has, not the BSN, which a QTSP may not process.
+var QTSPClaims = []string{"family_name", "given_name", "birthdate", "nationalities"}
+
+// reader is what a reader certificate tells the wallet: who asks, why, and
+// which PID claims it may ask.
+type reader struct {
+	organization, origin         string
+	descriptionNL, descriptionEN string
+	categoryNL, categoryEN       string
+	purposeNL, purposeEN         string
+	claims                       []string
+}
+
 var (
 	readerAuthExtensionOID = asn1.ObjectIdentifier{2, 1, 123, 1}
 	readerEKUOID           = asn1.ObjectIdentifier{1, 0, 18013, 5, 1, 6}
@@ -62,6 +81,8 @@ func Provision(args []string) error {
 	// "disclosure_based_issuance" (EUDI_UL_BASE).
 	universalLink := fs.String("universal-link-base", "https://app.preproductie.wallet.edi.bzk.nl/deeplink/", "base of the wallet's universal link")
 	organization := fs.String("organization", "GBO demo ASIP (autorisatieserver)", "organisation the wallet shows")
+	qtspOrigin := fs.String("qtsp-request-origin", "", "the reference QTSP's public URL; when set, the verifier also gets usecase "+QTSPUsecase)
+	qtspOrganization := fs.String("qtsp-organization", "GBO demo test QTSP", "organisation the wallet shows for the QTSP")
 	outDir := fs.String("out-dir", "", "directory for verification_server.toml")
 	apiKeyFile := fs.String("api-key-file", "", "file for the API key of the internal API, which the authorization server reads (default: api-key in out-dir)")
 	if err := fs.Parse(args); err != nil {
@@ -78,9 +99,31 @@ func Provision(args []string) error {
 	if err != nil {
 		return err
 	}
-	certDER, keyDER, err := issueReaderCertificate(caKey, caCert, pub.Hostname(), readerPayload(*organization, *origin))
-	if err != nil {
-		return err
+	readers := map[string]reader{Usecase: {
+		organization: *organization, categoryNL: "Overheid", categoryEN: "Government",
+		descriptionNL: "Autorisatieserver van de ASI van de GBO-demo", descriptionEN: "Authorization server of the GBO demo's ASI",
+		purposeNL: "Inloggen bij de bron om een verzoek van een vertrouwensdienst goed te keuren",
+		purposeEN: "Log in at the source to approve a request of a trust service provider",
+		origin:    *origin, claims: PIDClaims,
+	}}
+	names := []string{Usecase}
+	if *qtspOrigin != "" {
+		readers[QTSPUsecase] = reader{
+			organization: *qtspOrganization, categoryNL: "Vertrouwensdienst", categoryEN: "Trust service",
+			descriptionNL: "Referentie-QTSP van de GBO-demo (testomgeving)", descriptionEN: "Reference QTSP of the GBO demo (test environment)",
+			purposeNL: "Inloggen bij de vertrouwensdienst om een verklaring aan te vragen",
+			purposeEN: "Log in at the trust service provider to request an attestation",
+			origin:    *qtspOrigin, claims: QTSPClaims,
+		}
+		names = append(names, QTSPUsecase)
+	}
+	var usecases []UsecaseConfig
+	for _, name := range names {
+		certDER, keyDER, err := issueReaderCertificate(caKey, caCert, pub.Hostname(), readerPayload(readers[name]))
+		if err != nil {
+			return err
+		}
+		usecases = append(usecases, UsecaseConfig{Name: name, ReaderKey: base64.StdEncoding.EncodeToString(keyDER), ReaderCertificate: base64.StdEncoding.EncodeToString(certDER)})
 	}
 	issuerDER, err := pemCertificate(*issuerCA)
 	if err != nil {
@@ -109,8 +152,7 @@ func Provision(args []string) error {
 		ReaderAnchors:     []string{base64.StdEncoding.EncodeToString(caCert.Raw)},
 		EphemeralIDSecret: hex.EncodeToString(secret),
 		APIKey:            hex.EncodeToString(apiKey),
-		ReaderKey:         base64.StdEncoding.EncodeToString(keyDER),
-		ReaderCertificate: base64.StdEncoding.EncodeToString(certDER),
+		Usecases:          usecases,
 	}
 	if err := os.MkdirAll(*outDir, 0o700); err != nil {
 		return err
@@ -129,33 +171,30 @@ func Provision(args []string) error {
 	if err := os.WriteFile(*apiKeyFile, []byte(config.APIKey), 0o600); err != nil {
 		return err
 	}
-	fmt.Printf("-> wallet verifier configuration written to %s (verification_server.toml), and its API key; reader certificate for %s\n", *outDir, pub.Hostname())
+	fmt.Printf("-> wallet verifier configuration written to %s (verification_server.toml), and its API key; reader certificates for %s (%s)\n", *outDir, pub.Hostname(), strings.Join(names, ", "))
 	return nil
 }
 
 // readerPayload is the reader authorisation metadata the wallet shows and
 // enforces: who asks, why, and which PID attributes it may ask.
-func readerPayload(organization, origin string) []byte {
+func readerPayload(r reader) []byte {
 	var authorized [][]string
-	for _, c := range PIDClaims {
+	for _, c := range r.claims {
 		authorized = append(authorized, []string{PIDType, c}, []string{c})
 	}
 	payload, _ := json.Marshal(map[string]any{
-		"purposeStatement": map[string]string{
-			"nl": "Inloggen bij de bron om een verzoek van een vertrouwensdienst goed te keuren",
-			"en": "Log in at the source to approve a request of a trust service provider",
-		},
-		"retentionPolicy": map[string]any{"intentToRetain": false},
-		"sharingPolicy":   map[string]any{"intentToShare": false},
-		"deletionPolicy":  map[string]any{"deleteable": true},
+		"purposeStatement": map[string]string{"nl": r.purposeNL, "en": r.purposeEN},
+		"retentionPolicy":  map[string]any{"intentToRetain": false},
+		"sharingPolicy":    map[string]any{"intentToShare": false},
+		"deletionPolicy":   map[string]any{"deleteable": true},
 		"organization": map[string]any{
-			"displayName": map[string]string{"nl": organization, "en": organization},
-			"legalName":   map[string]string{"nl": organization, "en": organization},
-			"description": map[string]string{"nl": "Autorisatieserver van de ASI van de GBO-demo", "en": "Authorization server of the GBO demo's ASI"},
-			"category":    map[string]string{"nl": "Overheid", "en": "Government"},
+			"displayName": map[string]string{"nl": r.organization, "en": r.organization},
+			"legalName":   map[string]string{"nl": r.organization, "en": r.organization},
+			"description": map[string]string{"nl": r.descriptionNL, "en": r.descriptionEN},
+			"category":    map[string]string{"nl": r.categoryNL, "en": r.categoryEN},
 			"countryCode": "nl",
 		},
-		"requestOriginBaseUrl": origin,
+		"requestOriginBaseUrl": r.origin,
 		"authorizedAttributes": map[string]any{PIDType: authorized},
 	})
 	return payload

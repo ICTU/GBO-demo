@@ -280,9 +280,11 @@ provision-asip-seal-certificate: require-development-cas
 		--out-dir "$(ASIP_SEAL_DIR)"
 
 # Configuration of the ASI wallet verifier (nl-wallet's verification_server,
-# slice 7 of #336): the reader certificate of usecase asi-login from the
-# development reader CA, which the test wallet trusts, with the verifier's
-# public host as DNS SAN; trust in the development issuer CA and the
+# slice 7 of #336): the reader certificates of usecase asi-login (the
+# authorization server) and qtsp-login (the reference QTSP, slice 14; a demo
+# shortcut, as the two share this verifier) from the development reader CA,
+# which the test wallet trusts, with the verifier's public host as DNS SAN;
+# trust in the development issuer CA and the
 # pre-production PID issuer; and the API key of its internal API. Run again
 # when ASI_WALLET_VERIFIER_PUBLIC_URL changes; the next make demo-asi then
 # recreates the ASI services (marker .provisioned).
@@ -303,6 +305,7 @@ provision-asi-wallet-verifier: require-development-cas
 		--public-url "$(ASI_WALLET_VERIFIER_PUBLIC_URL)" \
 		--universal-link-base "$(ASI_WALLET_UL_BASE)" \
 		--request-origin "$(or $(ASI_AUTHORIZATION_SERVER_PUBLIC_URL),http://$(or $(GBO_PUBLIC_HOST),localhost):$(PORT_ASI_AUTHORIZATION_SERVER))" \
+		--qtsp-request-origin "http://localhost:$(PORT_QTSP)" \
 		--out-dir "$(ASI_WALLET_VERIFIER_DIR)" \
 		--api-key-file "$(ASI_WALLET_VERIFIER_CLIENT_DIR)/api-key"
 	@touch "$(ASI_WALLET_VERIFIER_DIR)/.provisioned"
@@ -389,10 +392,11 @@ demo-asi: fsc-asip-certs
 	@test -f "$(ASIP_QTSP_DIR)/qtsp-cert.pem" || $(MAKE) provision-asip-qtsp-certificate
 	@# The wallet verifier needs the nl-wallet sources; without them the ASI
 	@# route runs with DigiD (mock) only. It is provisioned before the
-	@# authorization server starts, which reads the API key at startup.
+	@# authorization server and the QTSP start, which read the API key at
+	@# startup; again when the configuration lacks the QTSP's usecase.
 	@if [ -f "$$NLWALLET_PATH/wallet_core/Cargo.toml" ]; then $(MAKE) asi-wallet-verifier-image; \
 	else echo "-> no nl-wallet sources at $$NLWALLET_PATH: the ASI wallet verifier is not started (DigiD (mock) only)"; fi
-	@if [ -f "$$NLWALLET_PATH/wallet_core/Cargo.toml" ] && { [ ! -f "$(ASI_WALLET_VERIFIER_DIR)/verification_server.toml" ] || [ ! -f "$(ASI_WALLET_VERIFIER_CLIENT_DIR)/api-key" ]; }; then \
+	@if [ -f "$$NLWALLET_PATH/wallet_core/Cargo.toml" ] && { [ ! -f "$(ASI_WALLET_VERIFIER_CLIENT_DIR)/api-key" ] || ! grep -q '^\[usecases.qtsp-login\]' "$(ASI_WALLET_VERIFIER_DIR)/verification_server.toml" 2>/dev/null; }; then \
 	  $(MAKE) provision-asi-wallet-verifier; fi
 	@# After a new provisioning (its marker) the services are recreated:
 	@# compose does not see the new files, and the QTSP registers again, as
