@@ -14,31 +14,45 @@ env:
   OPA_IMAGE: openpolicyagent/opa:1.9.0-static@sha256:60b6af32b58377718546ac7d4634eecbfe50ec36f7d3ca3f8ebf515f9826c2ac
 
 jobs:
+  changes:
+    name: Plan CI
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.plan.outputs.go }}
+      frontend: ${{ steps.plan.outputs.frontend }}
+      docker: ${{ steps.plan.outputs.docker }}
+      conformance: ${{ steps.plan.outputs.conformance }}
+      source_registry: ${{ steps.plan.outputs.source_registry }}
+      rego: ${{ steps.plan.outputs.rego }}
+      schema_drift: ${{ steps.plan.outputs.schema_drift }}
+      image_manifest: ${{ steps.plan.outputs.image_manifest }}
+      chart: ${{ steps.plan.outputs.chart }}
+      scripts: ${{ steps.plan.outputs.scripts }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Select checks affected by this change
+        id: plan
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [[ -z "${BASE_SHA}" || "${BASE_SHA}" =~ ^0+$ ]]; then
+            BASE_SHA="$(git hash-object -t tree /dev/null)"
+          fi
+          git diff --name-only "${BASE_SHA}" "${HEAD_SHA}" |
+            .github/scripts/ci-plan.sh
+
   go:
     name: Go — lint + test
+    needs: changes
+    if: needs.changes.outputs.go != '[]'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        service:
-          - asi-authorization-server
-          - asi-discovery-stub
-          - asi-provider
-          - bron-sidecar
-          - brp-graphql-server
-          - bsnk-mock
-          - consent-portal-backend
-          - consent-register
-          - dev-portal-backend
-          - dienstverlener-backend
-          - dvtp-onboarding-register
-          - eudi-adapter
-          - ftv-graphql-mapper
-          - graphql-server
-          - ldv-client
-          - ldv-logboek
-          - lvg-graphql-server
-          - qtsp-reference
+        service: ${{ fromJSON(needs.changes.outputs.go) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -57,6 +71,8 @@ jobs:
 
   conformance:
     name: ETSI TS 119 478 — conformance matrix
+    needs: changes
+    if: needs.changes.outputs.conformance == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -81,6 +97,8 @@ jobs:
 
   source-registry:
     name: Source Registry — PostgreSQL migrations + atomicity
+    needs: changes
+    if: needs.changes.outputs.source_registry == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -111,6 +129,8 @@ jobs:
 
   rego:
     name: Rego — fmt + check + test
+    needs: changes
+    if: needs.changes.outputs.rego == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -166,6 +186,8 @@ jobs:
   # repository, so one job covers the bundle pipeline and the source pipeline.
   schema-drift:
     name: GraphQL schemas — no drift from the sources
+    needs: changes
+    if: needs.changes.outputs.schema_drift == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -174,6 +196,8 @@ jobs:
 
   image-manifest:
     name: Image manifest — every Dockerfile published
+    needs: changes
+    if: needs.changes.outputs.image_manifest == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -185,6 +209,8 @@ jobs:
 
   chart:
     name: Helm chart — lint + template
+    needs: changes
+    if: needs.changes.outputs.chart == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -261,16 +287,13 @@ jobs:
 
   frontend:
     name: Frontend — tsc --strict
+    needs: changes
+    if: needs.changes.outputs.frontend != '[]'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        app:
-          - developer-portal
-          - landing-page
-          - dienstverlener-mock
-          - keyper-mock
-          - toestemmingsportaal-frontend
+        app: ${{ fromJSON(needs.changes.outputs.frontend) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -290,6 +313,8 @@ jobs:
 
   scripts:
     name: Scripts — unit tests
+    needs: changes
+    if: needs.changes.outputs.scripts == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -298,23 +323,13 @@ jobs:
 
   docker:
     name: Docker — build (${{ matrix.service }})
+    needs: changes
+    if: needs.changes.outputs.docker != '[]'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        service:
-          - asi-authorization-server
-          - asi-discovery-stub
-          - asi-provider
-          - dev-portal-backend
-          - dvtp-onboarding-register
-          - eudi-adapter
-          - bron-sidecar
-          - graphql-server
-          - ldv-logboek
-          - lvg-graphql-server
-          - openftv-pdp
-          - qtsp-reference
+        service: ${{ fromJSON(needs.changes.outputs.docker) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build image
@@ -366,14 +381,14 @@ jobs:
   result:
     name: CI result
     runs-on: ubuntu-latest
-    needs: [go, conformance, source-registry, rego, schema-drift, chart, frontend, scripts, docker, image-manifest]
+    needs: [changes, go, conformance, source-registry, rego, schema-drift, image-manifest, chart, frontend, scripts, docker]
     if: always()
     steps:
       - name: Evaluate job results
         run: |
           results='${{ toJSON(needs) }}'
           echo "$results" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
-          if echo "$results" | jq -e 'any(.result != "success")' > /dev/null; then
+          if echo "$results" | jq -e 'any(.result != "success" and .result != "skipped")' > /dev/null; then
             echo "One or more CI jobs failed" >&2
             exit 1
           fi

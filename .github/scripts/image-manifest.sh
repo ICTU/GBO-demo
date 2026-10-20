@@ -85,23 +85,23 @@ done <<'IMAGES'
 asi-authorization-server|./services/asi-authorization-server|./services/asi-authorization-server/Dockerfile|services/asi-authorization-server|linux/amd64|false|asi-authorization-server
 asi-provider|./services/asi-provider|./services/asi-provider/Dockerfile|services/asi-provider|linux/amd64|false|asi-provider
 asi-discovery-stub|./services/asi-discovery-stub|./services/asi-discovery-stub/Dockerfile|services/asi-discovery-stub|linux/amd64|false|asi-discovery-stub
-bron-sidecar|.|./services/bron-sidecar/Dockerfile|services/bron-sidecar services/ldv-client services/ftv-graphql-mapper|linux/amd64|false|bron-sidecar
-brp-graphql-server|.|./services/brp-graphql-server/Dockerfile|services/brp-graphql-server services/ldv-client|linux/amd64|false|brp-graphql-server
+bron-sidecar|.|./services/bron-sidecar/Dockerfile|.dockerignore services/bron-sidecar services/ldv-client services/ftv-graphql-mapper|linux/amd64|false|bron-sidecar
+brp-graphql-server|.|./services/brp-graphql-server/Dockerfile|.dockerignore services/brp-graphql-server services/ldv-client|linux/amd64|false|brp-graphql-server
 bsnk-mock|./services/bsnk-mock|./services/bsnk-mock/Dockerfile|services/bsnk-mock|linux/amd64|false|bsnk-mock
-consent-portal-backend|.|./services/consent-portal-backend/Dockerfile|services/consent-portal-backend services/ldv-client|linux/amd64|false|consent-portal-backend
-consent-register|.|./services/consent-register/Dockerfile|services/consent-register services/ldv-client|linux/amd64|false|consent-register
+consent-portal-backend|.|./services/consent-portal-backend/Dockerfile|.dockerignore services/consent-portal-backend services/ldv-client|linux/amd64|false|consent-portal-backend
+consent-register|.|./services/consent-register/Dockerfile|.dockerignore services/consent-register services/ldv-client|linux/amd64|false|consent-register
 dev-portal-backend|.|./services/dev-portal-backend/Dockerfile|services/dev-portal-backend policies|linux/amd64|false|dev-portal-backend
 developer-portal|./developer-portal|./developer-portal/Dockerfile|developer-portal|linux/amd64|false|developer-portal
-dienstverlener-backend|.|./services/dienstverlener-backend/Dockerfile|services/dienstverlener-backend services/ldv-client|linux/amd64|false|dienstverlener-backend
+dienstverlener-backend|.|./services/dienstverlener-backend/Dockerfile|.dockerignore services/dienstverlener-backend services/ldv-client|linux/amd64|false|dienstverlener-backend
 dienstverlener-mock|./dienstverlener-mock|./dienstverlener-mock/Dockerfile|dienstverlener-mock|linux/amd64|false|dienstverlener-mock
 keyper-mock|./keyper-mock|./keyper-mock/Dockerfile|keyper-mock|linux/amd64|false|keyper-mock
 dvtp-onboarding-register|./services/dvtp-onboarding-register|./services/dvtp-onboarding-register/Dockerfile|services/dvtp-onboarding-register|linux/amd64|false|dvtp-onboarding-register
-eudi-adapter|.|./services/eudi-adapter/Dockerfile|services/eudi-adapter services/ldv-client|linux/amd64|false|eudi-adapter
-graphql-server|.|./services/graphql-server/Dockerfile|services/graphql-server services/ldv-client|linux/amd64|false|graphql-server
-lvg-graphql-server|.|./services/lvg-graphql-server/Dockerfile|services/lvg-graphql-server services/ldv-client|linux/amd64|false|lvg-graphql-server
-ldv-logboek|.|./services/ldv-logboek/Dockerfile|services/ldv-logboek services/ldv-client|linux/amd64|false|ldv-logboek
+eudi-adapter|.|./services/eudi-adapter/Dockerfile|.dockerignore services/eudi-adapter services/ldv-client|linux/amd64|false|eudi-adapter
+graphql-server|.|./services/graphql-server/Dockerfile|.dockerignore services/graphql-server services/ldv-client|linux/amd64|false|graphql-server
+lvg-graphql-server|.|./services/lvg-graphql-server/Dockerfile|.dockerignore services/lvg-graphql-server services/ldv-client|linux/amd64|false|lvg-graphql-server
+ldv-logboek|.|./services/ldv-logboek/Dockerfile|.dockerignore services/ldv-logboek services/ldv-client|linux/amd64|false|ldv-logboek
 landing-page|./landing-page|./landing-page/Dockerfile|landing-page|linux/amd64|false|landing-page
-openftv-pdp|.|./services/openftv-pdp/Dockerfile|services/openftv-pdp policies|linux/amd64|false|openftv-pdp
+openftv-pdp|.|./services/openftv-pdp/Dockerfile|.dockerignore services/openftv-pdp services/ftv-graphql-mapper schemas/pdp-mirror policies|linux/amd64|false|openftv-pdp
 qtsp-reference|./services/qtsp-reference|./services/qtsp-reference/Dockerfile|services/qtsp-reference|linux/amd64|false|qtsp-reference
 toestemmingsportaal-frontend|./toestemmingsportaal-frontend|./toestemmingsportaal-frontend/Dockerfile|toestemmingsportaal-frontend|linux/amd64|false|toestemmingsportaal-frontend
 eudi-issuance-server|./vendor/nl-wallet|./services/eudi-issuance-server/Dockerfile|vendor/nl-wallet services/eudi-issuance-server/Dockerfile|linux/amd64|recursive|eudi-issuance-server-amd64
