@@ -1,7 +1,7 @@
 {
   "id": "asi-familienaam-no-match",
   "name": "ASI · Familienaam NO MATCH",
-  "desc": "De QTSP heeft \"Janssen\", de bron \"Jansen\": ook na normalisatie verschillend, dus NoMatch. De ASIP geeft de waarde van de bron niet terug. Log in met DigiD (mock) met BSN 999991772.",
+  "desc": "De QTSP heeft \"Janssen\", de bron \"Jansen\": ook na normalisatie verschillend, dus NoMatch. De ASIP geeft de waarde van de bron niet terug. Log bij de QTSP in met de testgegevens (mock) en bij de autorisatieserver met DigiD (mock) met BSN 999991772.",
   "tab": "asi-verify",
   "expected_outcome": "no-match",
   "payload": {
@@ -12,6 +12,15 @@
         "value": "{\"family_name\":\"Janssen\"}"
       }
     ],
-    "person": "Frouke Jansen (BSN 999991772)"
+    "person": "Frouke Jansen (BSN 999991772)",
+    "login": {
+      "family_name": "Jansen",
+      "given_name": "Frouke",
+      "birthdate": "2000-03-24",
+      "nationalities": [
+        "NL",
+        "BE"
+      ]
+    }
   }
 }

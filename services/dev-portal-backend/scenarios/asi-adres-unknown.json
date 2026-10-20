@@ -1,7 +1,7 @@
 {
   "id": "asi-adres-unknown",
   "name": "ASI · Adres UNKNOWN",
-  "desc": "Tom Willems staat in de RNI en heeft geen Nederlands adres in de BRP: de bron heeft geen waarde, dus Unknown. Log in met DigiD (mock) met BSN 555555555.",
+  "desc": "Tom Willems staat in de RNI en heeft geen Nederlands adres in de BRP: de bron heeft geen waarde, dus Unknown. Log bij de QTSP in met de testgegevens (mock) en bij de autorisatieserver met DigiD (mock) met BSN 555555555.",
   "tab": "asi-verify",
   "expected_outcome": "unknown",
   "payload": {
@@ -12,6 +12,14 @@
         "value": "{\"street\":\"Coolsingel\",\"house_number\":\"12 B\",\"postal_code\":\"3011 AD\",\"city\":\"Rotterdam\",\"country\":\"NL\"}"
       }
     ],
-    "person": "Tom Willems (BSN 555555555)"
+    "person": "Tom Willems (BSN 555555555)",
+    "login": {
+      "family_name": "Willems",
+      "given_name": "Tom",
+      "birthdate": "1982-05-08",
+      "nationalities": [
+        "BE"
+      ]
+    }
   }
 }

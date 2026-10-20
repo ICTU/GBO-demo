@@ -1,6 +1,6 @@
 // The ASI tab's request at the reference QTSP: building the request the QTSP
 // accepts, and reading its outcome. Pure, so it is tested without a browser.
-import type { AsiExpected, AsiPayload } from '../types.ts'
+import type { AsiExpected, AsiLoginHint, AsiPayload } from '../types.ts'
 
 // An attribute the QTSP can request (GET /api/attributes).
 export type AsiAttribute = { identifier: string; label: string; example: unknown }
@@ -28,10 +28,13 @@ export type AsiRequestView = {
 export type AsiRequestBody = {
   operation: 'verify' | 'retrieve'
   attributes: { identifier: string; value?: unknown }[]
+  // login_hint prefills the QTSP's mock login; it stays on the QTSP.
+  login_hint?: AsiLoginHint
 }
 
 // requestBody turns the form into the body of POST /api/requests: the values
-// are parsed as JSON for a verify and left out for a retrieve. An error names
+// are parsed as JSON for a verify and left out for a retrieve, and the
+// scenario's test data goes along for the QTSP's mock login. An error names
 // the attribute whose value is not JSON.
 export function requestBody(p: AsiPayload, labels: Record<string, string> = {}): { body: AsiRequestBody } | { error: string } {
   if (p.attributes.length === 0) return { error: 'Kies ten minste één attribuut.' }
@@ -47,7 +50,7 @@ export function requestBody(p: AsiPayload, labels: Record<string, string> = {}):
       return { error: `De waarde van ${labels[a.identifier] ?? a.identifier} is geen JSON.` }
     }
   }
-  return { body: { operation: p.operation, attributes } }
+  return { body: { operation: p.operation, attributes, ...(p.login ? { login_hint: p.login } : {}) } }
 }
 
 // The verification results of ETSI TS 119 478 as the QTSP names them, and
