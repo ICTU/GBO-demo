@@ -12,6 +12,14 @@ test('P2: a verify sends each value as JSON', () => {
   )
 })
 
+test('slice 14: the scenario\'s test data goes along for the QTSP\'s mock login', () => {
+  const login = { family_name: 'Jansen', given_name: 'Frouke', birthdate: '2000-03-24', nationalities: ['NL', 'BE'] }
+  assert.deepEqual(
+    requestBody({ operation: 'retrieve', attributes: [{ identifier: nationality }], login }),
+    { body: { operation: 'retrieve', attributes: [{ identifier: nationality }], login_hint: login } },
+  )
+})
+
 test('P2: a retrieve sends no values', () => {
   assert.deepEqual(
     requestBody({ operation: 'retrieve', attributes: [{ identifier: nationality, value: 'not even JSON' }] }),

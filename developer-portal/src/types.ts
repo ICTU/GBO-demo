@@ -56,12 +56,16 @@ export type EudiPayload = {
 // An ASI request as the portal lays it down at the reference QTSP. Values
 // are kept as the text the user edits; they are JSON when sent. The person
 // is a hint: the user logs in with that BSN at the authorization server's
-// DigiD mock.
+// DigiD mock. login is the scenario's test data for the QTSP's mock login:
+// the QTSP shows it prefilled, so a demo runs without a phone.
 export type AsiPayload = {
   operation: 'verify' | 'retrieve'
   attributes: { identifier: string; value?: string }[]
   person?: string
+  login?: AsiLoginHint
 }
+
+export type AsiLoginHint = { family_name: string; given_name: string; birthdate: string; nationalities: string[] }
 
 export type ApiCall = {
   id: string
