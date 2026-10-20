@@ -35,6 +35,7 @@ import (
 	"os"
 	"os/signal"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -105,6 +106,10 @@ func serve() error {
 	if err != nil {
 		return err
 	}
+	requireAuthorizationDetails, err := boolEnv("AZSP_REQUIRE_AUTHORIZATION_DETAILS", false)
+	if err != nil {
+		return err
+	}
 	identifiers := map[string]authorization.Identifier{digidmock.Means: digidmock.Identifier{}}
 	if wallet, err := walletVerifier(); err != nil {
 		return err
@@ -112,13 +117,14 @@ func serve() error {
 		identifiers[walletverifier.Means] = wallet
 	}
 	service := authorization.NewService(authorization.Config{
-		Issuer:       issuer,
-		Resources:    resources,
-		Clients:      clients,
-		Identifiers:  identifiers,
-		Tokens:       tokens,
-		Register:     register,
-		TrustAnchors: anchors,
+		Issuer:                      issuer,
+		Resources:                   resources,
+		Clients:                     clients,
+		Identifiers:                 identifiers,
+		Tokens:                      tokens,
+		RequireAuthorizationDetails: requireAuthorizationDetails,
+		Register:                    register,
+		TrustAnchors:                anchors,
 	})
 	srv := &http.Server{Addr: env("AZSP_ADDR", ":4021"), Handler: httpapi.NewHandler(service), ReadHeaderTimeout: readHeaderTimeout}
 	errc := make(chan error, 1)
@@ -208,6 +214,18 @@ func env(name, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func boolEnv(name string, fallback bool) (bool, error) {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return fallback, nil
+	}
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, fmt.Errorf("%s: %q is not a boolean", name, raw)
+	}
+	return value, nil
 }
 
 // loadSigningKey reads the ES256 token signing key. Without a file the server

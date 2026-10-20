@@ -133,3 +133,21 @@ func TestRequestPageInPlainLanguage(t *testing.T) {
 		}
 	}
 }
+
+func TestRequestPageWithoutAuthorizationDetailsOmitsAttributes(t *testing.T) {
+	as := newTestAS(t)
+	for _, scope := range []string{"verify", "retrieve", "verify retrieve"} {
+		params := authorizeParams(newPKCE())
+		params.Set("scope", scope)
+		params.Del(authorization.AuthorizationDetailsClaim)
+		page := as.startAuthorization(t, params).page
+		for _, want := range []string{testClientName, "Basisregistratie Personen (test)", "<dt>Verzoek</dt>"} {
+			if !strings.Contains(page, want) {
+				t.Errorf("scope %q: request page lacks %q:\n%s", scope, want, page)
+			}
+		}
+		if strings.Contains(page, "<dt>Gegevens</dt>") || strings.Contains(page, "azsp-attributes") {
+			t.Errorf("scope %q: operation-only request page shows an attribute list:\n%s", scope, page)
+		}
+	}
+}

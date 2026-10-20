@@ -87,6 +87,10 @@ type Config struct {
 	// carries in acr and amr.
 	Identifiers map[string]Identifier
 	Tokens      *TokenIssuer
+	// RequireAuthorizationDetails preserves strict per-attribute binding for
+	// deployments whose policy requires it. By default, ETSI operation scopes
+	// are sufficient when an authorization request omits the optional detail.
+	RequireAuthorizationDetails bool
 	// Register is the register of wallet-relying parties; TrustAnchors are
 	// the roots the certificates of registering clients must chain to.
 	Register     Register
@@ -149,6 +153,7 @@ type AuthorizationRequest struct {
 	CodeChallenge, CodeChallengeMethod                string
 	Resources                                         []string
 	AuthorizationDetails                              string
+	AuthorizationDetailsPresent                       bool
 }
 
 // AuthorizationResponse goes back to the client at RedirectURI: a Code, or
@@ -197,7 +202,8 @@ func (s *Service) Authorize(req AuthorizationRequest) (AuthorizationResponse, er
 	if !ok {
 		return fail("invalid_target", "resource must be one data service of the ASIP: "+strings.Join(s.resourceURLs(), ", "))
 	}
-	detail, err := parseAuthorizationDetails(req.AuthorizationDetails, audience, scope)
+	detailsPresent := req.AuthorizationDetailsPresent || req.AuthorizationDetails != ""
+	detail, err := parseOptionalAuthorizationDetails(req.AuthorizationDetails, audience, scope, detailsPresent, s.cfg.RequireAuthorizationDetails)
 	if err != nil {
 		return fail("invalid_request", err.Error())
 	}
@@ -220,7 +226,7 @@ func (s *Service) Authorize(req AuthorizationRequest) (AuthorizationResponse, er
 	if name == "" {
 		name = c.ID
 	}
-	resp.Pending = &Transaction{ID: id, Binding: binding, ClientID: c.ID, ClientName: name, Scope: scope, Source: s.resourceName(audience), Attributes: slices.Clone(detail.AttributeIdentifiers)}
+	resp.Pending = &Transaction{ID: id, Binding: binding, ClientID: c.ID, ClientName: name, Scope: scope, Source: s.resourceName(audience), Attributes: authorizationDetailAttributes(detail)}
 	return resp, nil
 }
 
@@ -359,9 +365,16 @@ func pkceMatches(challenge, verifier string) bool {
 
 type authorizationCode struct {
 	clientID, redirectURI, scope, challenge, audience string
-	detail                                            AuthorizationDetail
+	detail                                            *AuthorizationDetail
 	identity                                          Identity
 	expires                                           time.Time
+}
+
+func authorizationDetailAttributes(detail *AuthorizationDetail) []string {
+	if detail == nil {
+		return nil
+	}
+	return slices.Clone(detail.AttributeIdentifiers)
 }
 
 type codeStore struct {

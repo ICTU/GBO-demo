@@ -283,7 +283,7 @@ func (h *handler) verify(w http.ResponseWriter, r *http.Request, subject accesst
 	for _, f := range req.AttributeFragments {
 		ids = append(ids, f.AttributeIdentifier)
 	}
-	if failure := attributesAuthorized(subject.Attributes, ids); failure != nil {
+	if failure := attributesAuthorized(subject, ids); failure != nil {
 		writeAuthFailure(w, failure)
 		return
 	}
@@ -318,7 +318,7 @@ func (h *handler) retrieve(w http.ResponseWriter, r *http.Request, subject acces
 	for _, a := range req.AttributeIdentifiers {
 		ids = append(ids, a.AttributeIdentifier)
 	}
-	if failure := attributesAuthorized(subject.Attributes, ids); failure != nil {
+	if failure := attributesAuthorized(subject, ids); failure != nil {
 		writeAuthFailure(w, failure)
 		return
 	}
@@ -334,9 +334,12 @@ func (h *handler) retrieve(w http.ResponseWriter, r *http.Request, subject acces
 	h.writeSealed(w, resp)
 }
 
-func attributesAuthorized(authorized, requested []string) *accesstoken.Failure {
+func attributesAuthorized(subject accesstoken.Subject, requested []string) *accesstoken.Failure {
+	if !subject.RestrictedToAttributes {
+		return nil
+	}
 	for _, id := range requested {
-		if !slices.Contains(authorized, id) {
+		if !slices.Contains(subject.Attributes, id) {
 			return &accesstoken.Failure{Code: "insufficient_scope", Description: "the access token does not authorize attribute " + id}
 		}
 	}

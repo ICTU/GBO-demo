@@ -121,6 +121,20 @@ func TestFullFlowIssuesDPoPBoundAccessToken(t *testing.T) { // case 24
 	}
 }
 
+func TestFullFlowWithoutAuthorizationDetailsIssuesOperationOnlyToken(t *testing.T) {
+	as := newTestAS(t)
+	p := newPKCE()
+	params := authorizeParams(p)
+	params.Del(authorization.AuthorizationDetailsClaim)
+	_, claims := verifyAccessToken(t, as, as.accessToken(t, params, p))
+	if _, exists := claims[authorization.AuthorizationDetailsClaim]; exists {
+		t.Fatalf("authorization_details = %v, want the claim to be absent", claims[authorization.AuthorizationDetailsClaim])
+	}
+	if claims["scope"] != "verify" || claims["aud"] != testResource {
+		t.Fatalf("scope = %v, aud = %v; want operation and data-service binding", claims["scope"], claims["aud"])
+	}
+}
+
 func TestSubIsOpaquePerToken(t *testing.T) { // case 25
 	as := newTestAS(t)
 	var subs []any
@@ -183,6 +197,7 @@ func TestAuthorizationRequestErrors(t *testing.T) { // case 27, 28, 30; S4
 		{"30: scope outside the registration", func(q url.Values) { q.Set("client_id", verifyOnlyID); q.Set("scope", "retrieve") }, "invalid_scope"},
 		{"30b: unknown scope", func(q url.Values) { q.Set("scope", "verify admin") }, "invalid_scope"},
 		{"30c: no scope", func(q url.Values) { q.Del("scope") }, "invalid_scope"},
+		{"blank authorization_details", func(q url.Values) { q.Set(authorization.AuthorizationDetailsClaim, "") }, "invalid_request"},
 		{"response_type is not code", func(q url.Values) { q.Set("response_type", "token") }, "unsupported_response_type"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

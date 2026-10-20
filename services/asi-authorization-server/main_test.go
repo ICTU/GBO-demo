@@ -15,3 +15,19 @@ func TestParseResources(t *testing.T) {
 		}
 	}
 }
+
+func TestBoolEnv(t *testing.T) {
+	const name = "TEST_AZSP_BOOLEAN"
+	t.Setenv(name, "")
+	if got, err := boolEnv(name, false); err != nil || got {
+		t.Fatalf("boolEnv unset = %t, %v; want false", got, err)
+	}
+	t.Setenv(name, "true")
+	if got, err := boolEnv(name, false); err != nil || !got {
+		t.Fatalf("boolEnv true = %t, %v; want true", got, err)
+	}
+	t.Setenv(name, "sometimes")
+	if _, err := boolEnv(name, false); err == nil {
+		t.Fatal("boolEnv accepted an invalid boolean")
+	}
+}

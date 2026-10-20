@@ -7,6 +7,7 @@ package accesstoken
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -37,20 +38,25 @@ type accessTokenClaims struct {
 	Cnf      struct {
 		JKT string `json:"jkt"`
 	} `json:"cnf"`
-	BSN                  string `json:"https://gbo.example/claims/bsn"`
-	AuthorizationDetails []struct {
-		Type                 string   `json:"type"`
-		Locations            []string `json:"locations"`
-		Actions              []string `json:"actions"`
-		AttributeIdentifiers []string `json:"attribute_identifiers"`
-	} `json:"authorization_details"`
+	BSN                  string          `json:"https://gbo.example/claims/bsn"`
+	AuthorizationDetails json.RawMessage `json:"authorization_details"`
 }
 
-// Subject is the user and exact attribute set authorized by the access
-// token. Handlers must not use the BSN for attributes outside this set.
+type authorizationDetail struct {
+	Type                 string   `json:"type"`
+	Locations            []string `json:"locations"`
+	Actions              []string `json:"actions"`
+	AttributeIdentifiers []string `json:"attribute_identifiers"`
+}
+
+// Subject is the user and, when RestrictedToAttributes is true, the exact
+// attribute set authorized by the access token. Without an authorization
+// detail, the operation scope authorizes every attribute in the data
+// service's catalogue.
 type Subject struct {
-	BSN        string
-	Attributes []string
+	BSN                    string
+	Attributes             []string
+	RestrictedToAttributes bool
 }
 
 // KeySource returns the verification keys of the authorization server; with
@@ -148,19 +154,9 @@ func (v *Validator) Authenticate(ctx context.Context, r Request, operation strin
 	if claims.BSN == "" {
 		return Subject{}, invalid("the access token carries no identification data of the user")
 	}
-	if len(claims.AuthorizationDetails) != 1 {
-		return Subject{}, invalid("the access token must carry exactly one ASI authorization detail")
-	}
-	detail := claims.AuthorizationDetails[0]
-	if detail.Type != AuthorizationDetailsType || !slices.Equal(detail.Locations, []string{v.audience}) || !slices.Equal(detail.Actions, strings.Fields(claims.Scope)) || len(detail.AttributeIdentifiers) == 0 {
-		return Subject{}, invalid("the access token authorization details do not match this data service and operation")
-	}
-	seen := map[string]bool{}
-	for _, id := range detail.AttributeIdentifiers {
-		if id == "" || seen[id] {
-			return Subject{}, invalid("the access token authorization details contain invalid attribute identifiers")
-		}
-		seen[id] = true
+	attributes, restricted, err := authorizedAttributes(claims.AuthorizationDetails, v.audience, claims.Scope)
+	if err != nil {
+		return Subject{}, invalid(err.Error())
 	}
 	if len(r.DPoP) == 0 {
 		return Subject{}, &Failure{Code: "invalid_request", Description: "a DPoP proof is required"}
@@ -175,7 +171,29 @@ func (v *Validator) Authenticate(ctx context.Context, r Request, operation strin
 	if !slices.Contains(strings.Fields(claims.Scope), operation) {
 		return Subject{}, &Failure{Code: "insufficient_scope", Description: "the access token does not authorize " + operation, Scope: operation}
 	}
-	return Subject{BSN: claims.BSN, Attributes: slices.Clone(detail.AttributeIdentifiers)}, nil
+	return Subject{BSN: claims.BSN, Attributes: attributes, RestrictedToAttributes: restricted}, nil
+}
+
+func authorizedAttributes(raw json.RawMessage, audience, scope string) ([]string, bool, error) {
+	if len(raw) == 0 {
+		return nil, false, nil
+	}
+	var details []authorizationDetail
+	if err := json.Unmarshal(raw, &details); err != nil || len(details) != 1 {
+		return nil, false, errors.New("authorization_details must be absent or contain exactly one ASI authorization detail")
+	}
+	detail := details[0]
+	if detail.Type != AuthorizationDetailsType || !slices.Equal(detail.Locations, []string{audience}) || !slices.Equal(detail.Actions, strings.Fields(scope)) || len(detail.AttributeIdentifiers) == 0 {
+		return nil, false, errors.New("the access token authorization details do not match this data service and operation")
+	}
+	seen := map[string]bool{}
+	for _, id := range detail.AttributeIdentifiers {
+		if id == "" || seen[id] {
+			return nil, false, errors.New("the access token authorization details contain invalid attribute identifiers")
+		}
+		seen[id] = true
+	}
+	return slices.Clone(detail.AttributeIdentifiers), true, nil
 }
 
 // StaticKeys is a fixed key set.

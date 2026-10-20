@@ -82,6 +82,12 @@ func TestAuthorize(t *testing.T) {
 	if p := resp.Pending; p.ID == "" || p.Binding == "" || p.ClientName != "Test QTSP" || p.Source != "BRP" {
 		t.Fatalf("transaction = %+v, want an id, a binding, the client's legal name and the BRP data service", p)
 	}
+	withoutDetails := validRequest()
+	withoutDetails.AuthorizationDetails = ""
+	resp, err = s.Authorize(withoutDetails)
+	if err != nil || resp.Err != nil || resp.Pending == nil || len(resp.Pending.Attributes) != 0 {
+		t.Fatalf("Authorize without authorization_details = %+v, %v; want an operation-only pending transaction", resp, err)
+	}
 	for _, tc := range []struct {
 		name string
 		edit func(*AuthorizationRequest)
@@ -94,7 +100,20 @@ func TestAuthorize(t *testing.T) {
 		{"another resource", func(r *AuthorizationRequest) { r.Resources = []string{"https://other.test"} }, "invalid_target"},
 		{"no resource", func(r *AuthorizationRequest) { r.Resources = nil }, "invalid_target"},
 		{"two data services", func(r *AuthorizationRequest) { r.Resources = []string{resource, resource2} }, "invalid_target"},
-		{"no authorization details", func(r *AuthorizationRequest) { r.AuthorizationDetails = "" }, "invalid_request"},
+		{"blank authorization details", func(r *AuthorizationRequest) {
+			r.AuthorizationDetails = ""
+			r.AuthorizationDetailsPresent = true
+		}, "invalid_request"},
+		{"empty authorization details", func(r *AuthorizationRequest) { r.AuthorizationDetails = "[]" }, "invalid_request"},
+		{"unknown authorization details type", func(r *AuthorizationRequest) {
+			r.AuthorizationDetails = strings.ReplaceAll(r.AuthorizationDetails, AuthorizationDetailsType, "https://example.test/other")
+		}, "invalid_request"},
+		{"no attribute identifiers", func(r *AuthorizationRequest) {
+			r.AuthorizationDetails = strings.ReplaceAll(r.AuthorizationDetails, `,"attribute_identifiers":["https://gbo.example/attributes/family_name/1"]`, "")
+		}, "invalid_request"},
+		{"invalid attribute identifier", func(r *AuthorizationRequest) {
+			r.AuthorizationDetails = strings.ReplaceAll(r.AuthorizationDetails, "https://gbo.example/attributes/family_name/1", "family_name")
+		}, "invalid_request"},
 		{"attributes for another resource", func(r *AuthorizationRequest) {
 			r.AuthorizationDetails = strings.ReplaceAll(r.AuthorizationDetails, resource, resource2)
 		}, "invalid_request"},
@@ -126,6 +145,17 @@ func TestAuthorize(t *testing.T) {
 				t.Fatalf("err = %v, want NotRedirectableError", err)
 			}
 		})
+	}
+}
+
+func TestAuthorizeCanRequireAuthorizationDetails(t *testing.T) {
+	s := newTestService(t)
+	s.cfg.RequireAuthorizationDetails = true
+	req := validRequest()
+	req.AuthorizationDetails = ""
+	resp, err := s.Authorize(req)
+	if err != nil || resp.Err == nil || resp.Err.Code != "invalid_request" {
+		t.Fatalf("Authorize without required authorization_details = %+v, %v; want invalid_request", resp, err)
 	}
 }
 
