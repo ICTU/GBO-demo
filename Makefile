@@ -402,6 +402,7 @@ demo-asi: fsc-asip-certs
 	$(MAKE) fsc-seed-asip
 	@test -f "$(ASIP_SEAL_DIR)/seal-cert.pem" || $(MAKE) provision-asip-seal-certificate
 	@test -f "$(ASIP_QTSP_DIR)/qtsp-cert.pem" || $(MAKE) provision-asip-qtsp-certificate
+	@if [ -n "$(EUDI_PUBLIC_URL)" ]; then $(MAKE) provision-qtsp-issuance-certificates; fi
 	@# The wallet verifier needs the nl-wallet sources; without them the ASI
 	@# route runs with DigiD (mock) only. It is provisioned before the
 	@# authorization server and the QTSP start, which read the API key at

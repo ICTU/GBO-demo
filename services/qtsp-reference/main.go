@@ -48,6 +48,8 @@ const (
 	shutdownTimeout   = 15 * time.Second
 )
 
+var errIssuanceUnavailable = errors.New("QTSP issuance callback material is unavailable")
+
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)).With("service", "qtsp-reference"))
 	if len(os.Args) > 1 && (os.Args[1] == "verify" || os.Args[1] == "retrieve") {
@@ -90,18 +92,12 @@ func serve() error {
 	if err != nil {
 		return err
 	}
+	issuanceSrv, link, err := optionalIssuanceServer(store, link)
+	if err != nil {
+		return err
+	}
 	handler := web.NewHandlerWithIssuance(client, web.DemoAttributes, env("QTSP_PUBLIC_URL", "http://localhost:4023"), wallet, store, link)
 	srv := &http.Server{Addr: env("QTSP_ADDR", ":4023"), Handler: handler, ReadHeaderTimeout: readHeaderTimeout}
-	var issuanceSrv *http.Server
-	if link != "" {
-		issuanceSrv, err = newIssuanceServer(store)
-		if err != nil {
-			return err
-		}
-		if issuanceSrv == nil {
-			return errors.New("QTSP issuance TLS certificate is required when EUDI_PUBLIC_URL is configured")
-		}
-	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	errc := make(chan error, 2)
@@ -139,6 +135,18 @@ func serve() error {
 	return srv.Shutdown(drainCtx)
 }
 
+func optionalIssuanceServer(store *issuance.Store, link string) (*http.Server, string, error) {
+	if link == "" {
+		return nil, "", nil
+	}
+	server, err := newIssuanceServer(store)
+	if errors.Is(err, errIssuanceUnavailable) || (err == nil && server == nil) {
+		slog.Warn("wallet issuance disabled because callback certificate material is absent")
+		return nil, "", nil
+	}
+	return server, link, err
+}
+
 func walletIssuanceLink(publicURL, universalLinkBase string) (string, error) {
 	if strings.TrimSpace(publicURL) == "" {
 		return "", nil
@@ -162,20 +170,44 @@ func walletIssuanceLink(publicURL, universalLinkBase string) (string, error) {
 
 func newIssuanceServer(store *issuance.Store) (*http.Server, error) {
 	keyFile, certFile := os.Getenv("QTSP_ISSUANCE_TLS_KEY_FILE"), os.Getenv("QTSP_ISSUANCE_TLS_CERT_FILE")
-	if keyFile == "" && certFile == "" {
+	callbackPathFile := os.Getenv("QTSP_ISSUANCE_CALLBACK_PATH_FILE")
+	if keyFile == "" && certFile == "" && callbackPathFile == "" {
 		return nil, nil
 	}
-	if keyFile == "" || certFile == "" {
-		return nil, errors.New("QTSP_ISSUANCE_TLS_KEY_FILE and QTSP_ISSUANCE_TLS_CERT_FILE must be configured together")
+	if keyFile == "" || certFile == "" || callbackPathFile == "" {
+		return nil, errors.New("QTSP_ISSUANCE_TLS_KEY_FILE, QTSP_ISSUANCE_TLS_CERT_FILE and QTSP_ISSUANCE_CALLBACK_PATH_FILE must be configured together")
 	}
 	certificate, err := loadBase64TLSKeyPair(keyFile, certFile)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("%w: %v", errIssuanceUnavailable, err)
+		}
 		return nil, fmt.Errorf("load issuance callback TLS certificate: %w", err)
 	}
+	tokenBody, err := os.ReadFile(callbackPathFile)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("%w: %v", errIssuanceUnavailable, err)
+		}
+		return nil, fmt.Errorf("load issuance callback path: %w", err)
+	}
+	callbackToken, err := parseCallbackToken(string(tokenBody))
+	if err != nil {
+		return nil, err
+	}
 	return &http.Server{
-		Addr: env("QTSP_ISSUANCE_ADDR", ":4443"), Handler: issuancecallback.Handler(store), ReadHeaderTimeout: readHeaderTimeout,
+		Addr: env("QTSP_ISSUANCE_ADDR", ":4443"), Handler: issuancecallback.Handler(store, callbackToken), ReadHeaderTimeout: readHeaderTimeout,
 		TLSConfig: &tls.Config{Certificates: []tls.Certificate{certificate}, MinVersion: tls.VersionTLS12},
 	}, nil
+}
+
+func parseCallbackToken(raw string) (string, error) {
+	token := strings.TrimSpace(raw)
+	decoded, err := base64.RawURLEncoding.DecodeString(token)
+	if err != nil || len(decoded) != 24 {
+		return "", errors.New("QTSP issuance callback path must contain one 24-byte base64url token")
+	}
+	return token, nil
 }
 
 func loadBase64TLSKeyPair(keyFile, certFile string) (tls.Certificate, error) {

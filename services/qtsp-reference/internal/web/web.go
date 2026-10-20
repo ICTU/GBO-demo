@@ -328,6 +328,10 @@ type outcome struct {
 	// result is not accepted and Results is empty.
 	Seal    *sealView `json:"seal,omitempty"`
 	Results []row     `json:"results,omitempty"`
+	// Evidence is private issuance input. In particular, a verify value is
+	// what the QTSP submitted, not a value returned by the source, so it must
+	// not acquire the public API meaning of results[].value.
+	Evidence []issuance.Evidence `json:"-"`
 	// TraceID is the trace of the call at the ASIP, so the portal shows the
 	// chain of this request and no other.
 	TraceID string `json:"trace_id,omitempty"`
@@ -350,17 +354,13 @@ func (h *Handler) offerIssuance(identity login.Identity, requested []qtsp.Attrib
 	if h.issuance == nil || h.issuanceLink == "" || out.Status != statusDone || out.Seal == nil || !out.Seal.Valid || !completeEvidence(requested, out.Results) {
 		return ""
 	}
-	evidence := make([]issuance.Evidence, 0, len(out.Results))
-	for _, result := range out.Results {
-		evidence = append(evidence, issuance.Evidence{Name: result.Label, Outcome: result.Result, Value: result.Value})
-	}
 	code, err := qr.Encode(h.issuanceLink, qr.M)
 	if err != nil {
 		return ""
 	}
 	if !h.issuance.Add(issuance.Request{
 		Identity: identity, Operation: out.Operation, Source: out.Source,
-		VerifiedAt: h.now().UTC(), Evidence: evidence, ExpectedAttributes: len(requested),
+		VerifiedAt: h.now().UTC(), Evidence: out.Evidence, ExpectedAttributes: len(requested),
 	}) {
 		return ""
 	}
@@ -443,13 +443,15 @@ func (h *Handler) result(p prepared, resp qtsp.Response) outcome {
 		out.Source = res.AuthenticSource.LegalName
 	}
 	for _, v := range res.Verify {
+		value := requestedValue(p.attributes, v.Identifier)
 		out.Results = append(out.Results, row{
 			Identifier: v.Identifier, Label: h.label(v.Identifier), Result: v.Result[strings.LastIndex(v.Result, "/")+1:],
-			Value: requestedValue(p.attributes, v.Identifier),
 		})
+		out.Evidence = append(out.Evidence, issuance.Evidence{Name: h.label(v.Identifier), Outcome: v.Result[strings.LastIndex(v.Result, "/")+1:], Value: value})
 	}
 	for _, v := range res.Retrieve {
 		out.Results = append(out.Results, row{Identifier: v.Identifier, Label: h.label(v.Identifier), Value: v.Value})
+		out.Evidence = append(out.Evidence, issuance.Evidence{Name: h.label(v.Identifier), Value: v.Value})
 	}
 	return out
 }

@@ -1307,6 +1307,7 @@ services:
       - QTSP_ISSUANCE_ADDR=:4443
       - QTSP_ISSUANCE_TLS_KEY_FILE=/issuance/tls-key.der.b64
       - QTSP_ISSUANCE_TLS_CERT_FILE=/issuance/tls-cert.der.b64
+      - QTSP_ISSUANCE_CALLBACK_PATH_FILE=/issuance/callback-path
     volumes:
       - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/asi-qtsp:/qtsp:ro
       - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/development-ca:/anchors:ro

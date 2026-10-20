@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -29,6 +30,13 @@ func TestMaterializeIssuanceReleaseUsesMountedSecretsWithoutPersistingThem(t *te
 		t.Fatal(err)
 	}
 	qtspArtifacts, err := provider.Provision(qtspRegistration("99999999900000001300", "GBO demo test QTSP"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := provider.ProvisionTLSServerCertificate(qtspRegistration("99999999900000001300", "GBO demo test QTSP"), "qtsp-reference"); err != nil {
+		t.Fatal(err)
+	}
+	callbackToken, err := ensureQTSPCallbackToken(secrets)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,9 +116,9 @@ func TestMaterializeIssuanceReleaseUsesMountedSecretsWithoutPersistingThem(t *te
 		t.Fatal("materialized issuance TOML is missing release settings or secret material")
 	}
 	for _, want := range []string{
-		`[disclosure_settings."qtsp-attestation"]`, `base_url = "https://qtsp-reference:4443/attestations"`,
+		`[disclosure_settings."qtsp-attestation"]`, `base_url = "https://qtsp-reference:4443/attestations/` + callbackToken + `"`,
 		`path = ["family_name"]`, `path = ["nationalities"]`, `[attestation_settings."https://gbo.ictu.nl/credentials/qtsp-attestation/v1"]`,
-		`valid_days = 30`, `copies_per_format = { "dc+sd-jwt" = 1 }`, `attestation_qualification = "EAA"`, strings.TrimSpace(readTestFile(t, qtspArtifacts.ReaderCertReference)),
+		`valid_days = 30`, `copies_per_format = { "dc+sd-jwt" = 4 }`, `attestation_qualification = "EAA"`, strings.TrimSpace(readTestFile(t, qtspArtifacts.ReaderCertReference)),
 	} {
 		if !strings.Contains(string(rendered), want) {
 			t.Errorf("materialized issuance TOML does not contain %q", want)
@@ -124,6 +132,23 @@ func TestMaterializeIssuanceReleaseUsesMountedSecretsWithoutPersistingThem(t *te
 	}
 	if _, err := os.Stat(filepath.Join(runtimeDir, "source-release.json")); err != nil {
 		t.Fatal(err)
+	}
+
+	if err := os.RemoveAll(filepath.Join(secrets, qtspCertificateSetID)); err != nil {
+		t.Fatal(err)
+	}
+	var warnings bytes.Buffer
+	withoutQTSP := filepath.Join(t.TempDir(), "issuance_server.toml")
+	options.outputPath, options.warnings = withoutQTSP, &warnings
+	if err := materializeIssuanceRelease(options, persistedRelease); err != nil {
+		t.Fatalf("materialize without optional QTSP certificates: %v", err)
+	}
+	withoutQTSPBody, err := os.ReadFile(withoutQTSP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(withoutQTSPBody), qtspUsecase) || !strings.Contains(warnings.String(), "QTSP certificates are absent") {
+		t.Fatalf("optional QTSP result contains usecase=%t warning=%q", strings.Contains(string(withoutQTSPBody), qtspUsecase), warnings.String())
 	}
 
 	if err := os.Remove(artifacts.IssuerKeyReference); err != nil {

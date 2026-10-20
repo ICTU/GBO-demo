@@ -47,6 +47,25 @@ func TestProvisionQTSPCertificatesAuthorizesPIDClaimsAndInternalTLS(t *testing.T
 	if !certificateHasEKU(tlsCert, serverAuthEKUOID) || !containsUsage(tlsCert.ExtKeyUsage, x509.ExtKeyUsageServerAuth) {
 		t.Fatalf("TLS EKUs = %v/%v, want serverAuth", tlsCert.ExtKeyUsage, tlsCert.UnknownExtKeyUsage)
 	}
+	callbackPath := filepath.Join(directory, qtspCallbackPathFile)
+	callbackBody, err := os.ReadFile(callbackPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	callbackToken, err := parseQTSPCallbackToken(string(callbackBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(callbackPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("callback path mode = %v, want 0600", info.Mode().Perm())
+	}
+	if second, err := ensureQTSPCallbackToken(root); err != nil || second != callbackToken {
+		t.Fatalf("callback token changed: second=%q err=%v", second, err)
+	}
 }
 
 func containsUsage(usages []x509.ExtKeyUsage, want x509.ExtKeyUsage) bool {
@@ -66,6 +85,27 @@ func TestQTSPCallbackRequiresHTTPS(t *testing.T) {
 	}
 	if err := validateQTSPCallbackURL("https://qtsp-reference:4443/attestations"); err != nil {
 		t.Fatal(err)
+	}
+	if got, err := qtspCallbackURL("https://qtsp-reference:4443/attestations", "secret"); err != nil || got != "https://qtsp-reference:4443/attestations/secret" {
+		t.Fatalf("secret callback URL = %q, err %v", got, err)
+	}
+}
+
+func TestQTSPMaterialDetectsAbsentAndPartialSets(t *testing.T) {
+	root := t.TempDir()
+	available, err := qtspMaterialAvailable(root)
+	if err != nil || available {
+		t.Fatalf("absent material: available=%t err=%v", available, err)
+	}
+	directory := filepath.Join(root, qtspCertificateSetID)
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "issuer-key.der.b64"), []byte("partial"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := qtspMaterialAvailable(root); err == nil {
+		t.Fatal("partial material was accepted")
 	}
 }
 

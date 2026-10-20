@@ -11,16 +11,19 @@ import (
 	"gbo-demo/qtsp-reference/internal/login"
 )
 
-const AttestationPath = "/attestations"
+const attestationPath = "/attestations/"
 
 // Handler exposes only the callback and a health check on the internal TLS
 // listener. Unknown paths retain net/http's 404/405 behaviour.
-func Handler(store *issuance.Store) http.Handler {
+func Handler(store *issuance.Store, callbackToken string) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST "+AttestationPath, func(w http.ResponseWriter, r *http.Request) { attestations(store, w, r) })
+	mux.HandleFunc("POST "+Path(callbackToken), func(w http.ResponseWriter, r *http.Request) { attestations(store, w, r) })
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	return mux
 }
+
+// Path is the unguessable callback path shared through the mounted secret.
+func Path(callbackToken string) string { return attestationPath + callbackToken }
 
 func attestations(store *issuance.Store, w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()

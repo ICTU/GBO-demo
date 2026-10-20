@@ -50,7 +50,7 @@ func TestPendingAttestationIsIssuedOnceToMatchingPID(t *testing.T) {
 	}
 }
 
-func TestDifferentExpiredAndAmbiguousPIDReceiveNothing(t *testing.T) {
+func TestDifferentAndExpiredPIDReceiveNothingAndNewestRequestWins(t *testing.T) {
 	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
 	store := NewStore(func() time.Time { return now })
 	request := Request{
@@ -65,10 +65,11 @@ func TestDifferentExpiredAndAmbiguousPIDReceiveNothing(t *testing.T) {
 		t.Fatalf("other citizen document = %+v, want nil", document)
 	}
 
-	// A second pending result for the same identity is deliberately ambiguous.
+	// A second pending result for the same identity replaces the first.
+	request.Source = "Newest source"
 	store.Add(request)
-	if document := store.Take(frouke); document != nil {
-		t.Fatalf("ambiguous document = %+v, want nil", document)
+	if document := store.Take(frouke); document == nil || document.Attributes["source_legal_name"] != "Newest source" {
+		t.Fatalf("replacement document = %+v, want newest request", document)
 	}
 
 	expiredStore := NewStore(func() time.Time { return now })

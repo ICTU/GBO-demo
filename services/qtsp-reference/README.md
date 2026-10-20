@@ -44,11 +44,13 @@ The authorization server allows an http redirect URI on a loopback address only,
 
 ## Wallet issuance
 
-An accepted result is kept in memory for at most ten minutes and is removed after its first issuance. The wallet discloses `family_name`, `given_name`, `birthdate` and `nationalities` from its PID. These must equal the identity from the QTSP login; nationality order does not matter. No match, an expired or already used result, or more than one matching result returns an empty document list. This is a demo binding and is not a unique civil identity check.
+An accepted result is kept in memory for at most ten minutes and is removed after its first issuance. The wallet discloses `family_name`, `given_name`, `birthdate` and `nationalities` from its PID. These must equal the identity from the QTSP login; nationality order does not matter. A newer successful request for the same identity replaces the previous pending request. No match, an expired or already used result returns an empty document list. This is a demo binding and is not a unique civil identity check.
 
-The issued SD-JWT VC has VCT `https://gbo.ictu.nl/credentials/qtsp-attestation/v1`, is valid for 30 days and contains the subject's name and birth date, the accepted result per attribute, the source's legal name, the issuer and verification date. It always states that it is a test and not a qualified electronic attestation of attributes. `NoMatch` and `Unknown` never create a pending statement.
+The issued SD-JWT VC has VCT `https://gbo.ictu.nl/credentials/qtsp-attestation/v1`, is valid for 30 days and contains the subject's name and birth date, the accepted result per attribute, the source's legal name, the issuer and verification date. The issuance server creates four cryptographic copies for unlinkability and Proof of Association, as it does for the source attestations; the wallet presents these as one card. For `MatchWithVariation` it records the value submitted by the QTSP alongside that outcome; the ASIP response does not provide the differing source value, so the statement does not present the submitted value as an exact source match. It always states that it is a test and not a qualified electronic attestation of attributes. `NoMatch` and `Unknown` never create a pending statement.
 
-The existing central `eudi-issuance-server` remains unmodified. Its generated configuration adds a separate usecase and QTSP reader, issuer and status-list certificates. The QTSP callback listens only on the Compose networks at `https://qtsp-reference:4443/attestations`; its server certificate chains to the development issuer CA pinned by the issuance server. There is no client-certificate support in the configured callback client, so the internal network boundary is a deliberate demo shortcut.
+The existing central `eudi-issuance-server` remains unmodified. Its generated configuration adds a separate usecase and QTSP reader, issuer and status-list certificates. The QTSP callback listens only on the Compose networks under `https://qtsp-reference:4443/attestations/<secret>`; the secret path is generated with the certificates and shared only through their mounted directory. Its server certificate chains to the development issuer CA pinned by the issuance server. The path prevents other containers from calling the obvious endpoint accidentally, but it is not a replacement for client authentication. There is no client-certificate support in the configured callback client, so the internal network boundary remains a deliberate demo shortcut.
+
+Missing QTSP issuance certificates do not take down either route: the QTSP logs a warning and continues without the wallet action, while the central materializer warns and emits the ordinary source-issuance configuration. A partial certificate set remains a startup error. `make demo-asi` provisions the set when `EUDI_PUBLIC_URL` is configured.
 
 ## CLI
 
@@ -87,7 +89,7 @@ Configuration:
 - `QTSP_SEAL_TRUST_ANCHORS` (required: the roots of seal certificates);
 - `QTSP_WALLET_VERIFIER_URL` (the verifier's internal API), `QTSP_WALLET_VERIFIER_STATUS_URL` (its wallet API, for the session status) and `QTSP_WALLET_VERIFIER_API_KEY_FILE`; without the key file only the mock login is offered;
 - `EUDI_PUBLIC_URL` and `EUDI_UL_BASE`, used to construct the static wallet issuance link; without `EUDI_PUBLIC_URL` no issuance action is shown;
-- `QTSP_ISSUANCE_ADDR` (default `:4443`), `QTSP_ISSUANCE_TLS_KEY_FILE` and `QTSP_ISSUANCE_TLS_CERT_FILE`, for the internal HTTPS callback;
+- `QTSP_ISSUANCE_ADDR` (default `:4443`), `QTSP_ISSUANCE_TLS_KEY_FILE`, `QTSP_ISSUANCE_TLS_CERT_FILE` and `QTSP_ISSUANCE_CALLBACK_PATH_FILE`, for the internal HTTPS callback;
 - `QTSP_URL_MAP`: `public=internal,…`. The records and contracts name public URLs, which a container cannot reach. The map changes the transport only; DPoP proofs and audiences keep the public URLs.
 
 If the authorization server refuses the registration (for example, no `QEAA_Provider` entitlement), the QTSP stops with the reason. While discovery or the server is unavailable, it tries again.

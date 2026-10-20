@@ -12,6 +12,8 @@ import (
 	"gbo-demo/qtsp-reference/internal/login"
 )
 
+const testCallbackToken = "test-callback-token"
+
 func TestCallbackExchangesNestedPIDForOneDocument(t *testing.T) {
 	store := issuance.NewStore(time.Now)
 	store.Add(issuance.Request{
@@ -52,11 +54,13 @@ func TestCallbackRejectsMalformedInputAndOtherRoutes(t *testing.T) {
 	if bad.Code != http.StatusBadRequest {
 		t.Fatalf("malformed status = %d, want 400", bad.Code)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/other", strings.NewReader("[]"))
-	rec := httptest.NewRecorder()
-	Handler(store).ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("unknown route status = %d, want 404", rec.Code)
+	for _, path := range []string{"/other", "/attestations"} {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader("[]"))
+		rec := httptest.NewRecorder()
+		Handler(store, testCallbackToken).ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("unknown route %s status = %d, want 404", path, rec.Code)
+		}
 	}
 }
 
@@ -66,9 +70,9 @@ func pidDisclosure(attributes string) string {
 
 func post(t *testing.T, store *issuance.Store, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, AttestationPath, strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, Path(testCallbackToken), strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	Handler(store).ServeHTTP(rec, req)
+	Handler(store, testCallbackToken).ServeHTTP(rec, req)
 	return rec
 }

@@ -85,6 +85,16 @@ func (s *Store) Add(request Request) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.prune(now)
+	// A static issuance link cannot distinguish two pending results for the
+	// same identity. Keep the most recent successful request so a quick second
+	// demo scenario does not make both requests unusable.
+	s.pending = slices.DeleteFunc(s.pending, func(candidate pending) bool {
+		replaced := sameIdentity(candidate.Identity, request.Identity)
+		if replaced {
+			candidate.timer.Stop()
+		}
+		return replaced
+	})
 	s.nextID++
 	candidate := pending{Request: request, id: s.nextID, expires: now.Add(Lifetime)}
 	id := candidate.id
@@ -141,7 +151,7 @@ func (s *Store) Take(identity login.Identity) *Document {
 			matches = append(matches, index)
 		}
 	}
-	// Refuse ambiguity: neither an arbitrary nor the newest result is chosen.
+	// Defensive refusal if state was populated outside Add's replacement rule.
 	if len(matches) != 1 {
 		return nil
 	}
@@ -176,9 +186,9 @@ func sameIdentity(left, right login.Identity) bool {
 }
 
 func sortedUnique(values []string) []string {
-	copy := append([]string(nil), values...)
-	slices.Sort(copy)
-	return slices.Compact(copy)
+	result := append([]string(nil), values...)
+	slices.Sort(result)
+	return slices.Compact(result)
 }
 
 func document(request Request) *Document {

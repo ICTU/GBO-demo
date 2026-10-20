@@ -2,7 +2,10 @@ package main
 
 import (
 	"net/url"
+	"path/filepath"
 	"testing"
+
+	"gbo-demo/qtsp-reference/internal/issuance"
 )
 
 func TestWalletIssuanceLink(t *testing.T) {
@@ -23,6 +26,17 @@ func TestWalletIssuanceLink(t *testing.T) {
 	}
 	if got := query.Get("client_id"); got != "x509_san_dns:issuance.example" {
 		t.Errorf("client_id = %q", got)
+	}
+}
+
+func TestMissingIssuanceCertificatesDisableOnlyWalletIssuance(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+	t.Setenv("QTSP_ISSUANCE_TLS_KEY_FILE", filepath.Join(missing, "tls-key.der.b64"))
+	t.Setenv("QTSP_ISSUANCE_TLS_CERT_FILE", filepath.Join(missing, "tls-cert.der.b64"))
+	t.Setenv("QTSP_ISSUANCE_CALLBACK_PATH_FILE", filepath.Join(missing, "callback-path"))
+	server, link, err := optionalIssuanceServer(issuance.NewStore(nil), "https://wallet.example/issue")
+	if err != nil || server != nil || link != "" {
+		t.Fatalf("optional issuance = server %v link %q err %v, want disabled without error", server, link, err)
 	}
 }
 

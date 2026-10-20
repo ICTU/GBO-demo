@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -17,6 +19,7 @@ const (
 	qtspUsecase          = "qtsp-attestation"
 	qtspVCT              = "https://gbo.ictu.nl/credentials/qtsp-attestation/v1"
 	qtspMetadataFilename = "type-qtsp-attestation-v1.json"
+	qtspCallbackPathFile = "callback-path"
 )
 
 func qtspRegistration(oin, name string) sourceRegistration {
@@ -65,8 +68,77 @@ func runQTSPIssuanceProvisionCommand(arguments []string, stdout, stderr io.Write
 	if err := provider.ProvisionTLSServerCertificate(registration, *tlsHost); err != nil {
 		return true, fmt.Errorf("provision QTSP callback TLS certificate: %w", err)
 	}
+	if _, err := ensureQTSPCallbackToken(*secretsDir); err != nil {
+		return true, fmt.Errorf("provision QTSP callback path: %w", err)
+	}
 	_, _ = fmt.Fprintln(stdout, "development issuance and callback certificates provisioned for the reference QTSP")
 	return true, nil
+}
+
+func ensureQTSPCallbackToken(secretsDir string) (string, error) {
+	directory := filepath.Join(secretsDir, qtspCertificateSetID)
+	if err := ensurePrivateDirectory(directory); err != nil {
+		return "", err
+	}
+	path := filepath.Join(directory, qtspCallbackPathFile)
+	if body, err := os.ReadFile(path); err == nil {
+		return parseQTSPCallbackToken(string(body))
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	value := make([]byte, 24)
+	if _, err := rand.Read(value); err != nil {
+		return "", err
+	}
+	token := base64.RawURLEncoding.EncodeToString(value)
+	if err := writeFileAtomically(directory, qtspCallbackPathFile, []byte(token+"\n"), 0o600); err != nil {
+		return "", err
+	}
+	return token, nil
+}
+
+func parseQTSPCallbackToken(raw string) (string, error) {
+	token := strings.TrimSpace(raw)
+	decoded, err := base64.RawURLEncoding.DecodeString(token)
+	if err != nil || len(decoded) != 24 {
+		return "", fmt.Errorf("QTSP callback path must contain one 24-byte base64url token")
+	}
+	return token, nil
+}
+
+func qtspMaterialAvailable(secretsDir string) (bool, error) {
+	directory := filepath.Join(secretsDir, qtspCertificateSetID)
+	required := []string{
+		"issuer-key.der.b64", "issuer-cert.der.b64", "reader-key.der.b64", "reader-cert.der.b64",
+		"status-key.der.b64", "status-cert.der.b64", "tls-key.der.b64", "tls-cert.der.b64", qtspCallbackPathFile,
+	}
+	present := 0
+	for _, name := range required {
+		_, err := os.Stat(filepath.Join(directory, name))
+		switch {
+		case err == nil:
+			present++
+		case os.IsNotExist(err):
+		default:
+			return false, err
+		}
+	}
+	if present == 0 {
+		return false, nil
+	}
+	if present != len(required) {
+		return false, fmt.Errorf("reference QTSP certificate set is partial (%d of %d required files)", present, len(required))
+	}
+	return true, nil
+}
+
+func qtspCallbackURL(baseURL, token string) (string, error) {
+	if err := validateQTSPCallbackURL(baseURL); err != nil {
+		return "", err
+	}
+	parsed, _ := url.Parse(baseURL)
+	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/" + token
+	return parsed.String(), nil
 }
 
 func appendQTSPDisclosureSettings(builder *strings.Builder, callbackURL, callbackTrustAnchor string, material issuanceCertificateMaterial) {
@@ -77,7 +149,7 @@ func appendQTSPDisclosureSettings(builder *strings.Builder, callbackURL, callbac
 		_, _ = fmt.Fprintf(builder, "  { path = [%s] },\n", strconv.Quote(claim))
 	}
 	_, _ = fmt.Fprintf(builder, "]\n\n[disclosure_settings.%s.attestation_url_config]\nbase_url = %s\ntrust_anchors = [%s]\n", key, strconv.Quote(callbackURL), strconv.Quote(callbackTrustAnchor))
-	appendAttestationSettingsWithValidity(builder, qtspVCT, material, 30, 1, "EAA")
+	appendAttestationSettingsWithValidity(builder, qtspVCT, material, 30, 4, "EAA")
 }
 
 func installQTSPMetadata(sourcePath, outputPath string) (string, error) {
