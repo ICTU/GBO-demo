@@ -275,7 +275,7 @@ var walletTemplate = template.Must(template.New("wallet").Parse(`<!doctype html>
 ` + banner + `
 <h1>Inloggen met NL Wallet</h1>
 {{if .QR}}<p>Scan deze code met de NL Wallet op uw telefoon.</p>
-<p><img src="{{.QR}}" alt="QR-code voor de NL Wallet" width="280" height="280"></p>
+<p class="qr"><img src="{{.QR}}" alt="QR-code voor de NL Wallet" width="280" height="280"></p>
 {{else}}<p>Ga verder in de NL Wallet op uw telefoon.</p>{{end}}
 <p><a href="/">Terug</a></p>
 </main></body></html>

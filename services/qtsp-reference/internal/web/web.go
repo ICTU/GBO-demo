@@ -20,8 +20,10 @@ import (
 	"sync"
 	"time"
 
+	"gbo-demo/qtsp-reference/internal/issuance"
 	"gbo-demo/qtsp-reference/internal/login"
 	"gbo-demo/qtsp-reference/internal/qtsp"
+	"rsc.io/qr"
 )
 
 // Attribute is an attribute the form offers, with an example value.
@@ -87,11 +89,15 @@ type Handler struct {
 	// wallet is the NL Wallet as login means; nil when it is not
 	// configured, and then only the mock login is offered.
 	wallet   login.Wallet
-	mu       sync.Mutex
-	sessions map[string]*session
-	requests map[string]*request
-	logins   map[string]*loginState
-	now      func() time.Time
+	issuance *issuance.Store
+	// issuanceLink is the static cross-device universal link for the QTSP
+	// usecase. The issuance server creates the actual session when scanned.
+	issuanceLink string
+	mu           sync.Mutex
+	sessions     map[string]*session
+	requests     map[string]*request
+	logins       map[string]*loginState
+	now          func() time.Time
 }
 
 // NewHandler serves the web side. publicURL is where the user reaches it;
@@ -100,6 +106,14 @@ type Handler struct {
 // may refuse a Secure cookie. wallet is the NL Wallet as login means, or nil.
 func NewHandler(client *qtsp.Client, attributes []Attribute, publicURL string, wallet login.Wallet) http.Handler {
 	return newHandler(client, attributes, publicURL, wallet).routes()
+}
+
+// NewHandlerWithIssuance adds the test-attestation action to accepted result
+// pages. The store is shared with the internal HTTPS callback listener.
+func NewHandlerWithIssuance(client *qtsp.Client, attributes []Attribute, publicURL string, wallet login.Wallet, store *issuance.Store, link string) http.Handler {
+	handler := newHandler(client, attributes, publicURL, wallet)
+	handler.issuance, handler.issuanceLink = store, link
+	return handler.routes()
 }
 
 func newHandler(client *qtsp.Client, attributes []Attribute, publicURL string, wallet login.Wallet) *Handler {
@@ -265,7 +279,9 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	o := h.result(s.prepared, resp)
 	h.finish(s.request, o)
-	render(w, http.StatusOK, resultPage, resultView{outcome: o, Who: h.loggedIn(r)})
+	view := resultView{outcome: o, Who: h.loggedIn(r)}
+	view.WalletQR = h.offerIssuance(s.identity, s.attributes, o)
+	render(w, http.StatusOK, resultPage, view)
 }
 
 // take returns and removes the browser's session, if it is still valid.
@@ -312,6 +328,10 @@ type outcome struct {
 	// result is not accepted and Results is empty.
 	Seal    *sealView `json:"seal,omitempty"`
 	Results []row     `json:"results,omitempty"`
+	// Evidence is private issuance input. In particular, a verify value is
+	// what the QTSP submitted, not a value returned by the source, so it must
+	// not acquire the public API meaning of results[].value.
+	Evidence []issuance.Evidence `json:"-"`
 	// TraceID is the trace of the call at the ASIP, so the portal shows the
 	// chain of this request and no other.
 	TraceID string `json:"trace_id,omitempty"`
@@ -323,7 +343,50 @@ type outcome struct {
 // resultView is the result page: the outcome, and who is logged in.
 type resultView struct {
 	outcome
-	Who *login.Identity
+	Who      *login.Identity
+	WalletQR template.URL
+}
+
+// offerIssuance stores no result unless every requested verification
+// succeeded (or every retrieval returned a value). It returns the QR only
+// after the pending result exists, so the page never offers a dead action.
+func (h *Handler) offerIssuance(identity login.Identity, requested []qtsp.Attribute, out outcome) template.URL {
+	if h.issuance == nil || h.issuanceLink == "" || out.Status != statusDone || out.Seal == nil || !out.Seal.Valid || !completeEvidence(requested, out.Results) {
+		return ""
+	}
+	code, err := qr.Encode(h.issuanceLink, qr.M)
+	if err != nil {
+		return ""
+	}
+	if !h.issuance.Add(issuance.Request{
+		Identity: identity, Operation: out.Operation, Source: out.Source,
+		VerifiedAt: h.now().UTC(), Evidence: out.Evidence, ExpectedAttributes: len(requested),
+	}) {
+		return ""
+	}
+	return template.URL("data:image/png;base64," + base64.StdEncoding.EncodeToString(code.PNG()))
+}
+
+func completeEvidence(requested []qtsp.Attribute, results []row) bool {
+	if len(requested) == 0 || len(results) != len(requested) {
+		return false
+	}
+	seen := make(map[string]struct{}, len(results))
+	for _, result := range results {
+		if result.Identifier == "" {
+			return false
+		}
+		seen[result.Identifier] = struct{}{}
+	}
+	if len(seen) != len(requested) {
+		return false
+	}
+	for _, attribute := range requested {
+		if _, found := seen[attribute.Identifier]; !found {
+			return false
+		}
+	}
+	return true
 }
 
 type sealView struct {
@@ -380,12 +443,26 @@ func (h *Handler) result(p prepared, resp qtsp.Response) outcome {
 		out.Source = res.AuthenticSource.LegalName
 	}
 	for _, v := range res.Verify {
-		out.Results = append(out.Results, row{Identifier: v.Identifier, Label: h.label(v.Identifier), Result: v.Result[strings.LastIndex(v.Result, "/")+1:]})
+		value := requestedValue(p.attributes, v.Identifier)
+		out.Results = append(out.Results, row{
+			Identifier: v.Identifier, Label: h.label(v.Identifier), Result: v.Result[strings.LastIndex(v.Result, "/")+1:],
+		})
+		out.Evidence = append(out.Evidence, issuance.Evidence{Name: h.label(v.Identifier), Outcome: v.Result[strings.LastIndex(v.Result, "/")+1:], Value: value})
 	}
 	for _, v := range res.Retrieve {
 		out.Results = append(out.Results, row{Identifier: v.Identifier, Label: h.label(v.Identifier), Value: v.Value})
+		out.Evidence = append(out.Evidence, issuance.Evidence{Name: h.label(v.Identifier), Value: v.Value})
 	}
 	return out
+}
+
+func requestedValue(attributes []qtsp.Attribute, identifier string) json.RawMessage {
+	for _, attribute := range attributes {
+		if attribute.Identifier == identifier {
+			return append(json.RawMessage(nil), attribute.Value...)
+		}
+	}
+	return nil
 }
 
 func (h *Handler) lookup(id string) (string, bool) {

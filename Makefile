@@ -1,7 +1,7 @@
 .PHONY: up down logs clean certs require-ftv-postgres demo-manager manager-seed fsc-local-env fsc-ca fsc-up fsc-all-up fsc-brp-certs fsc-consent-register-certs fsc-gbo-pdp-certs fsc-ir-certs fsc-int-certs fsc-asip-certs fsc-databases fsc-down fsc-test fsc-clean \
         fsc-seed-bri fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-lvg fsc-seed-int fsc-seed-asip fsc-seed-brp fsc-seed-rvig-source fsc-seed-metadata fsc-pdp-cert pdp-up \
         eudi-images asi-wallet-verifier-image source-metadata-up \
-        require-development-cas provision-development-certificates provision-asip-seal-certificate provision-asip-qtsp-certificate provision-asi-wallet-verifier reconcile-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
+        require-development-cas provision-development-certificates provision-qtsp-issuance-certificates provision-asip-seal-certificate provision-asip-qtsp-certificate provision-asi-wallet-verifier reconcile-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
         demo-full demo-integrator demo-asi demo-down eudi-config policy-check policy-test
 
 -include .env
@@ -26,6 +26,8 @@ DEVELOPMENT_BRP_SOURCE_LOGO ?= assets/issuer-logos/rvig.svg
 DEVELOPMENT_UNSECURED_SOURCE_OIN ?= 99999999900000000900
 DEVELOPMENT_UNSECURED_SOURCE_NAME ?= Demo unsecured source
 DEVELOPMENT_UNSECURED_SOURCE_LOGO ?= assets/issuer-logos/belastingdienst.svg
+DEVELOPMENT_QTSP_OIN ?= 99999999900000001300
+DEVELOPMENT_QTSP_NAME ?= GBO demo test QTSP
 ONBOARDING_OUTWAY_URL ?= http://localhost:$(or $(FSC_PORT_EDI_OUTWAY),8087)
 ONBOARDING_SECRETS_DIR ?= $(PWD)/.local/secrets
 ONBOARDING_PUBLIC_CERTIFICATES_DIR ?= $(PWD)/.local/public-certificates
@@ -334,6 +336,16 @@ provision-development-certificates: require-development-cas
 		--secrets-dir "$(ONBOARDING_SECRETS_DIR)" \
 		--public-certificates-dir "$(ONBOARDING_PUBLIC_CERTIFICATES_DIR)"
 
+# Wallet reader, issuer, status-list and internal callback TLS certificates
+# of the reference QTSP. They are separate from its ASIP client certificate.
+provision-qtsp-issuance-certificates: require-development-cas
+	@cd services/eudi-adapter && go run . provision-qtsp-issuance-certificates \
+		--qtsp-oin "$(DEVELOPMENT_QTSP_OIN)" \
+		--qtsp-name "$(DEVELOPMENT_QTSP_NAME)" \
+		--reader-public-url "$${EUDI_PUBLIC_URL:?set EUDI_PUBLIC_URL before provisioning QTSP issuance}" \
+		--secrets-dir "$(ONBOARDING_SECRETS_DIR)" \
+		--tls-host qtsp-reference
+
 reconcile-sources:
 	docker compose --profile onboarding run --build --rm source-reconciler
 
@@ -351,7 +363,7 @@ onboard-demo-sources: require-development-cas certs
 	$(MAKE) provision-development-certificates SOURCE_ID=demo-unsecured SOURCE_OIN=$(DEVELOPMENT_UNSECURED_SOURCE_OIN) SOURCE_NAME="$(DEVELOPMENT_UNSECURED_SOURCE_NAME)" SOURCE_LOGO="$(DEVELOPMENT_UNSECURED_SOURCE_LOGO)"
 	$(MAKE) reconcile-sources
 
-demo-eudi: policy-check require-ftv-postgres onboard-demo-sources eudi-images
+demo-eudi: policy-check require-ftv-postgres onboard-demo-sources provision-qtsp-issuance-certificates eudi-images
 	@echo "-> EUDI stack: base + eudi branch + fsc-infra"
 	docker compose --profile eudi up --build -d
 	@echo ""
@@ -359,7 +371,7 @@ demo-eudi: policy-check require-ftv-postgres onboard-demo-sources eudi-images
 	$(call banner,EUDI-adapter:,$(PORT_EUDI_ADAPTER))
 	$(call banner,Jaeger:,$(PORT_JAEGER))
 
-demo-full: policy-check require-ftv-postgres onboard-demo-sources fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-lvg eudi-images
+demo-full: policy-check require-ftv-postgres onboard-demo-sources provision-qtsp-issuance-certificates fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-lvg eudi-images
 	@echo "-> Full stack: everything on"
 	docker compose --profile full up --build -d
 
@@ -390,6 +402,7 @@ demo-asi: fsc-asip-certs
 	$(MAKE) fsc-seed-asip
 	@test -f "$(ASIP_SEAL_DIR)/seal-cert.pem" || $(MAKE) provision-asip-seal-certificate
 	@test -f "$(ASIP_QTSP_DIR)/qtsp-cert.pem" || $(MAKE) provision-asip-qtsp-certificate
+	@if [ -n "$(EUDI_PUBLIC_URL)" ]; then $(MAKE) provision-qtsp-issuance-certificates; fi
 	@# The wallet verifier needs the nl-wallet sources; without them the ASI
 	@# route runs with DigiD (mock) only. It is provisioned before the
 	@# authorization server and the QTSP start, which read the API key at

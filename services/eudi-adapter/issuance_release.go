@@ -20,12 +20,15 @@ import (
 )
 
 type issuanceReleaseOptions struct {
-	databaseURL    string
-	databaseSchema string
-	secretsDir     string
-	templatePath   string
-	adapterBaseURL string
-	outputPath     string
+	databaseURL        string
+	databaseSchema     string
+	secretsDir         string
+	templatePath       string
+	adapterBaseURL     string
+	outputPath         string
+	qtspAttestationURL string
+	qtspMetadataPath   string
+	warnings           io.Writer
 }
 
 func runIssuanceReleaseCommand(ctx context.Context, arguments []string, stdout, stderr io.Writer) (bool, error) {
@@ -34,13 +37,15 @@ func runIssuanceReleaseCommand(ctx context.Context, arguments []string, stdout, 
 	}
 	set := flag.NewFlagSet(arguments[0], flag.ContinueOnError)
 	set.SetOutput(stderr)
-	options := issuanceReleaseOptions{}
+	options := issuanceReleaseOptions{warnings: stderr}
 	set.StringVar(&options.databaseURL, "database-url", os.Getenv("SOURCE_REGISTRY_DATABASE_URL"), "read-only PostgreSQL Source Registry connection URL")
 	set.StringVar(&options.databaseSchema, "database-schema", getEnv("SOURCE_REGISTRY_SCHEMA", "source_registry"), "PostgreSQL Source Registry schema")
 	set.StringVar(&options.secretsDir, "secrets-dir", getEnv("ONBOARDING_SECRETS_DIR", "/source-certificates"), "mounted source certificate Secret directory")
 	set.StringVar(&options.templatePath, "template", "/app/issuance_server.toml.example", "issuance-server TOML template")
 	set.StringVar(&options.adapterBaseURL, "adapter-base-url", os.Getenv("EUDI_BRI_URL"), "public GBO adapter base URL")
 	set.StringVar(&options.outputPath, "output", "/runtime/issuance_server.toml", "pod-local issuance-server TOML output")
+	set.StringVar(&options.qtspAttestationURL, "qtsp-attestation-url", os.Getenv("QTSP_ATTESTATION_URL"), "internal HTTPS attestation callback of the reference QTSP")
+	set.StringVar(&options.qtspMetadataPath, "qtsp-type-metadata", "/app/qtsp_attestation_metadata.json", "reference QTSP Type Metadata JSON")
 	if err := set.Parse(arguments[1:]); err != nil {
 		return true, err
 	}
@@ -76,8 +81,8 @@ func materializeIssuanceRelease(options issuanceReleaseOptions, release onboardi
 	if err != nil {
 		return err
 	}
-	if release.ID == "" || len(release.Sources) == 0 {
-		return fmt.Errorf("active Source Release is incomplete")
+	if err := validateIssuanceRelease(release); err != nil {
+		return err
 	}
 
 	var settings strings.Builder
@@ -163,6 +168,9 @@ func materializeIssuanceRelease(options issuanceReleaseOptions, release onboardi
 			appendAttestationSettings(&settings, activatedType.VCT, material)
 		}
 	}
+	if err := appendOptionalQTSPSettings(options, &settings, &metadataFiles, issuerAnchors, readerAnchors, seenOfferKeys, seenVCTs); err != nil {
+		return err
+	}
 	if len(seenOfferKeys) == 0 {
 		return fmt.Errorf("active Source Release contains no issuance offers")
 	}
@@ -194,6 +202,73 @@ func materializeIssuanceRelease(options issuanceReleaseOptions, release onboardi
 	if err := writeFileAtomically(filepath.Dir(options.outputPath), "source-release.json", marker, 0o644); err != nil {
 		return fmt.Errorf("write Source Release marker: %w", err)
 	}
+	return nil
+}
+
+func validateIssuanceRelease(release onboarding.SourceRelease) error {
+	if release.ID == "" || len(release.Sources) == 0 {
+		return fmt.Errorf("active Source Release is incomplete")
+	}
+	return nil
+}
+
+func appendOptionalQTSPSettings(
+	options issuanceReleaseOptions,
+	settings *strings.Builder,
+	metadataFiles *[]string,
+	issuerAnchors, readerAnchors, seenOfferKeys, seenVCTs map[string]struct{},
+) error {
+	if options.qtspAttestationURL == "" {
+		return nil
+	}
+	if err := validateQTSPCallbackURL(options.qtspAttestationURL); err != nil {
+		return err
+	}
+	available, err := qtspMaterialAvailable(options.secretsDir)
+	if err != nil {
+		return fmt.Errorf("reference QTSP certificates: %w", err)
+	}
+	if !available {
+		warnings := options.warnings
+		if warnings == nil {
+			warnings = io.Discard
+		}
+		_, _ = fmt.Fprintln(warnings, "warning: reference QTSP certificates are absent; materializing source issuance without the QTSP usecase")
+		return nil
+	}
+	if _, duplicate := seenOfferKeys[qtspUsecase]; duplicate {
+		return fmt.Errorf("reference QTSP usecase %q collides with a Source Release offer", qtspUsecase)
+	}
+	if _, duplicate := seenVCTs[qtspVCT]; duplicate {
+		return fmt.Errorf("reference QTSP VCT %q collides with a Source Release attestation type", qtspVCT)
+	}
+	seenOfferKeys[qtspUsecase] = struct{}{}
+	seenVCTs[qtspVCT] = struct{}{}
+	artifacts := certificateArtifactsForMountedSecret(options.secretsDir, qtspCertificateSetID)
+	material, err := loadIssuanceCertificateMaterial(artifacts)
+	if err != nil {
+		return fmt.Errorf("reference QTSP certificates: %w", err)
+	}
+	tokenBody, err := os.ReadFile(filepath.Join(options.secretsDir, qtspCertificateSetID, qtspCallbackPathFile))
+	if err != nil {
+		return fmt.Errorf("read reference QTSP callback path: %w", err)
+	}
+	token, err := parseQTSPCallbackToken(string(tokenBody))
+	if err != nil {
+		return err
+	}
+	callbackURL, err := qtspCallbackURL(options.qtspAttestationURL, token)
+	if err != nil {
+		return err
+	}
+	metadataPath, err := installQTSPMetadata(options.qtspMetadataPath, options.outputPath)
+	if err != nil {
+		return err
+	}
+	issuerAnchors[material.issuerCA] = struct{}{}
+	readerAnchors[material.readerCA] = struct{}{}
+	*metadataFiles = append(*metadataFiles, metadataPath)
+	appendQTSPDisclosureSettings(settings, callbackURL, material.issuerCA, material)
 	return nil
 }
 
