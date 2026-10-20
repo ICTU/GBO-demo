@@ -307,7 +307,8 @@ func TestNoResult(t *testing.T) {
 	}
 }
 
-// Q-W1 to Q-W5: the web side from form to result.
+// Q-W1 to Q-W5: the web side from login and form to result (T1, T7, T9 of
+// slice 14 with the mock login).
 func TestWeb(t *testing.T) {
 	s := startStack(t)
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -315,16 +316,28 @@ func TestWeb(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := "http://" + l.Addr().String()
-	srv := &http.Server{Handler: web.NewHandler(s.client(t, base+"/callback", s.sealAnchor, registryURI), web.DemoAttributes, base)}
+	srv := &http.Server{Handler: web.NewHandler(s.client(t, base+"/callback", s.sealAnchor, registryURI), web.DemoAttributes, base, nil)}
 	go func() { _ = srv.Serve(l) }()
 	t.Cleanup(func() { _ = srv.Close() })
 
 	jar, _ := cookiejar.New(nil)
 	browser := &http.Client{Jar: jar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
+	// T1: no form without a login.
 	resp, body := fetch(t, browser, http.MethodGet, base+"/", nil)
-	if resp.StatusCode != http.StatusOK || !strings.Contains(body, `action="/start"`) {
-		t.Fatalf("W1: GET / = %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK || strings.Contains(body, `action="/start"`) || !strings.Contains(body, `action="/login/mock"`) {
+		t.Fatalf("T1: GET / without a login = %d\n%s", resp.StatusCode, body)
+	}
+	if resp, _ := fetch(t, browser, http.MethodPost, base+"/start", url.Values{"operation": {"verify"}}); resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("T1: POST /start without a login = %d, want 303 to the login page", resp.StatusCode)
+	}
+	// T9: the mock login, then the form names the citizen.
+	if resp, _ := fetch(t, browser, http.MethodPost, base+"/login/mock", mockLogin()); resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("T9: mock login = %d", resp.StatusCode)
+	}
+	resp, body = fetch(t, browser, http.MethodGet, base+"/", nil)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, `action="/start"`) || !strings.Contains(body, "Ingelogd als <strong>Frouke Jansen</strong> (testgegevens, mock)") {
+		t.Fatalf("W1: GET / after the login = %d\n%s", resp.StatusCode, body)
 	}
 
 	start := func(t *testing.T) string {
@@ -345,14 +358,25 @@ func TestWeb(t *testing.T) {
 		return login(t, base+"/callback", authorization, bsnFrouke, decision == "approve")
 	}
 
-	// Served over https, the session cookie is Secure.
+	// Served over https, the login and session cookies are Secure.
 	t.Run("W2 Secure over https", func(t *testing.T) {
-		h := web.NewHandler(s.client(t, "https://qtsp.test/callback", s.sealAnchor, registryURI), web.DemoAttributes, "https://qtsp.test")
+		h := web.NewHandler(s.client(t, "https://qtsp.test/callback", s.sealAnchor, registryURI), web.DemoAttributes, "https://qtsp.test", nil)
+		post := func(path string, form url.Values, cookies ...*http.Cookie) *httptest.ResponseRecorder {
+			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			for _, c := range cookies {
+				req.AddCookie(c)
+			}
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			return rec
+		}
+		loggedIn := post("/login/mock", mockLogin())
+		if !strings.Contains(loggedIn.Header().Get("Set-Cookie"), "Secure") {
+			t.Fatalf("mock login Set-Cookie %q; want a Secure login cookie", loggedIn.Header().Get("Set-Cookie"))
+		}
 		form := url.Values{"operation": {"verify"}, "use:" + idFamilyName: {"1"}, "value:" + idFamilyName: {`{"family_name":"Jansen"}`}}
-		req := httptest.NewRequest(http.MethodPost, "/start", strings.NewReader(form.Encode()))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, req)
+		rec := post("/start", form, loggedIn.Result().Cookies()...)
 		if rec.Code != http.StatusFound || !strings.Contains(rec.Header().Get("Set-Cookie"), "Secure") {
 			t.Fatalf("POST /start = %d, Set-Cookie %q; want a Secure session cookie", rec.Code, rec.Header().Get("Set-Cookie"))
 		}
@@ -397,6 +421,11 @@ func TestNoBSNInTheLogs(t *testing.T) {
 			t.Errorf("%s log contains the BSN", name)
 		}
 	}
+}
+
+// mockLogin is the mock login form with test person Frouke Jansen.
+func mockLogin() url.Values {
+	return url.Values{"family_name": {"Jansen"}, "given_name": {"Frouke"}, "birthdate": {"2000-03-24"}, "nationalities": {"NL, BE"}}
 }
 
 // login plays the citizen at the authorization server with the harness: it

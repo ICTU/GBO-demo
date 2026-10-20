@@ -1,6 +1,6 @@
 # qtsp-reference — reference QTSP for the ASI route (ETSI TS 119 478)
 
-The client side of the Authentic Source Interface: a qualified trust service provider (QTSP) that has an ASIP verify or retrieve attributes of a user. It is the demo's reference client and a place where a user starts. It is not a real QTSP: it issues no attestation. Part of epic #336, slice 6 (#533).
+The client side of the Authentic Source Interface: a qualified trust service provider (QTSP) that has an ASIP verify or retrieve attributes of a user. It is the demo's reference client and a place where a user starts. The citizen logs in at the QTSP before a request starts. It is not a real QTSP: it issues no attestation. Part of epic #336, slice 6 (#533) and slice 14 (#560).
 
 ## What it does
 
@@ -13,17 +13,28 @@ It discovers its way rather than being configured with URLs:
 5. **Token**: `private_key_jwt` with the certificate key, and a DPoP proof. The token is DPoP-bound.
 6. **Verify or retrieve** with the token and a DPoP proof, in a W3C trace of its own (`traceparent`), which the ASIP's spans join. A 200 is accepted only with a valid **seal**: the detached JWS in `X-JWS-Signature` over the exact body, whose certificate chain leads to `QTSP_SEAL_TRUST_ANCHORS`. Otherwise the result is reported as not accepted.
 
+## Login
+
+The QTSP identifies the citizen itself before a request starts (eIDAS Article 24(1)). It asks the name, the date of birth and the nationalities, never the BSN: a QTSP may not process it. Two means:
+
+- **NL Wallet**: a disclosure of the NL PID (`urn:eudi:pid:nl:1`: `family_name`, `given_name`, `birthdate`, `nationalities`) through usecase `qtsp-login` of the wallet verifier (`services/asi-wallet-verifier`), with the QTSP's own reader certificate. `POST /login/wallet` starts the session and keeps it with this browser's login; `GET /login/wallet` shows the QR code and refreshes itself until the wallet has disclosed. Declined or expired, or a disclosure without all four attributes: the login page with the reason. The verifier unreachable: a 503 page, and the mock still works. Without a configured verifier the wallet button is disabled.
+- **Test data (mock)**: `POST /login/mock` with the four attributes (date of birth as YYYY-MM-DD, nationalities as country codes separated by commas). It checks nothing else; it exists for demos and CI.
+
+A login is kept in memory behind an HttpOnly, SameSite=Lax cookie for 30 minutes and serves several requests; `POST /logout` ends it. The pages name the citizen ("Ingelogd als …"). The QTSP logs no name, date of birth or nationality.
+
+**Demo shortcut**: the QTSP shares the verifier and its API key with the authorization server. In production each relying party has its own verifier and keys.
+
 ## Web
 
-`GET /` shows a form: verify or retrieve, and the five BRP attributes of the demo with the values of test person Frouke Jansen as examples. `POST /start` plans, registers if needed, and sends the browser to the authorization server. It keeps `state` and the PKCE verifier in a session behind an HttpOnly, SameSite=Lax cookie (in memory, 10 minutes). `GET /callback` checks the session and `state`, takes the token, asks the ASIP, and shows the result per attribute with the seal check. A denial shows "Geweigerd"; a callback without a matching session or `state` is refused before any token request.
+`GET /` shows the login page without a login, and otherwise a form: verify or retrieve, and the five BRP attributes of the demo with the values of test person Frouke Jansen as examples. `POST /start` (with a login; otherwise back to the login page) plans, registers if needed, and sends the browser to the authorization server. It keeps `state` and the PKCE verifier in a session behind an HttpOnly, SameSite=Lax cookie (in memory, 10 minutes). `GET /callback` checks the session and `state`, takes the token, asks the ASIP, and shows the result per attribute with the seal check. A denial shows "Geweigerd"; a callback without a matching session or `state` is refused before any token request.
 
 ### Request API
 
 The developer portal lays a request down here and follows it, while the user still goes through the QTSP:
 
 - `GET /api/attributes`: the attributes the form offers, with an example value.
-- `POST /api/requests` with `{"operation":"verify","attributes":[{"identifier":"…","value":{…}}]}` (for `retrieve`, without values). The QTSP checks the request, finds the data service and registers, as the form does, and answers 201 with an `id` and a `start_url`. A request it does not start gets an RFC 9457 problem with the reason: 400 for an invalid request, 422 when no data service provides the attributes, 502 when discovery or registration fails.
-- `start_url` (`/requests/{id}/start`) sends the browser to the authorization server. It carries only the id, so no value appears in a URL, and it works once (410 after that). The user returns to the result page.
+- `POST /api/requests` with `{"operation":"verify","attributes":[{"identifier":"…","value":{…}}]}` (for `retrieve`, without values), and optionally `login_hint` with test data for the mock login (`family_name`, `given_name`, `birthdate`, `nationalities`), which stays on the server. The QTSP checks the request, finds the data service and registers, as the form does, and answers 201 with an `id` and a `start_url`. A request it does not start gets an RFC 9457 problem with the reason: 400 for an invalid request, 422 when no data service provides the attributes, 502 when discovery or registration fails.
+- `start_url` (`/requests/{id}/start`) shows the login page when the browser has no login, with the mock prefilled from `login_hint`; after the login the browser returns to it. With a login it sends the browser to the authorization server. It carries only the id, so no value appears in a URL, and it works once (410 after that). The user returns to the result page.
 - `GET /api/requests/{id}`: `pending` until the user returns, then `done` (the result per attribute, the seal check, and `trace_id`: the trace of the call at the ASIP), `denied` (the OAuth error) or `failed` (an error answer of the ASIP, or no token).
 
 A request and its outcome can be fetched for 10 minutes; then it is gone (404). The API has no access control, like the other mocks of the demo: anyone who can reach the port can lay a request down.
@@ -65,6 +76,7 @@ Configuration:
 - `QTSP_KEY_FILE` and `QTSP_CERT_FILE` (required: the certificate key and chain, leaf first);
 - `QTSP_REGISTRY_URI` (default the test QTSP's entry);
 - `QTSP_SEAL_TRUST_ANCHORS` (required: the roots of seal certificates);
+- `QTSP_WALLET_VERIFIER_URL` (the verifier's internal API), `QTSP_WALLET_VERIFIER_STATUS_URL` (its wallet API, for the session status) and `QTSP_WALLET_VERIFIER_API_KEY_FILE`; without the key file only the mock login is offered;
 - `QTSP_URL_MAP`: `public=internal,…`. The records and contracts name public URLs, which a container cannot reach. The map changes the transport only; DPoP proofs and audiences keep the public URLs.
 
 If the authorization server refuses the registration (for example, no `QEAA_Provider` entitlement), the QTSP stops with the reason. While discovery or the server is unavailable, it tries again.
@@ -77,8 +89,10 @@ If the authorization server refuses the registration (for example, no `QEAA_Prov
 | `internal/seal` | validation of the seal on a result |
 | `internal/harness` | the test harness at the authorization server (request page and DigiD mock) |
 | `internal/cli` | the CLI: options, one run, the report |
-| `internal/web` | the web side and the request API |
+| `internal/login` | who the citizen is: the identity, the wallet port, the mock's checks |
+| `internal/walletlogin` | the NL Wallet as login means, through the wallet verifier |
+| `internal/web` | the web side, the login and the request API |
 | `internal/urlmap` | the transport map from public to internal URLs |
 | `main.go` | composition root |
 
-`e2e_test.go` builds the authorization server, the ASIP and the DIP stub and starts them, with a fake Outway in front of the BRP. Through them it runs every verification result, the error answers 400, 401, 404 and 501, retrieve, a seal from another anchor, a refused registration, a denial, the web side from form to result, and the request API (`api_e2e_test.go`).
+`e2e_test.go` builds the authorization server, the ASIP and the DIP stub and starts them, with a fake Outway in front of the BRP. Through them it runs every verification result, the error answers 400, 401, 404 and 501, retrieve, a seal from another anchor, a refused registration, a denial, the web side from login and form to result, and the request API with the login (`api_e2e_test.go`). `internal/web/login_test.go` tests the wallet login against a fake verifier.

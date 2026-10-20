@@ -51,7 +51,7 @@ func newAPIEnv(t *testing.T) apiEnv {
 	}
 	base := "http://" + l.Addr().String()
 	attributes := append(append([]web.Attribute{}, web.DemoAttributes...), web.Attribute{Identifier: idShoeSize, Label: "Schoenmaat", Example: `{"shoe_size":42}`})
-	srv := &http.Server{Handler: web.NewHandler(s.client(t, base+"/callback", s.sealAnchor, registryURI), attributes, base)}
+	srv := &http.Server{Handler: web.NewHandler(s.client(t, base+"/callback", s.sealAnchor, registryURI), attributes, base, nil)}
 	go func() { _ = srv.Serve(l) }()
 	t.Cleanup(func() { _ = srv.Close() })
 	return apiEnv{base: base}
@@ -80,18 +80,17 @@ func (e apiEnv) create(t *testing.T, body string) apiRequest {
 	return created
 }
 
-// run opens the start URL in a new browser, logs in with the DigiD mock
-// with bsn and approves (decision "approve") or denies, and returns the
-// request as the API then shows it. While the user is at the authorization
-// server, the request is pending (Q5).
+// run opens the start URL in a new browser, logs in at the QTSP with the
+// mock login, then at the authorization server with the DigiD mock with bsn
+// and approves (decision "approve") or denies, and returns the request as
+// the API then shows it. While the user is at the authorization server, the
+// request is pending (Q5).
 func (e apiEnv) run(t *testing.T, created apiRequest, bsn, decision string) apiRequest {
 	t.Helper()
-	jar, _ := cookiejar.New(nil)
-	browser := &http.Client{Jar: jar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	resp, _ := fetch(t, browser, http.MethodGet, created.StartURL, nil)
-	authorization := resp.Header.Get("Location")
-	if resp.StatusCode != http.StatusFound || authorization == "" {
-		t.Fatalf("start URL = %d", resp.StatusCode)
+	browser := newBrowser()
+	authorization := e.loginAndStart(t, browser, created)
+	if authorization == "" {
+		t.Fatal("start URL: no redirect to the authorization server")
 	}
 	if _, pending := e.api(t, http.MethodGet, "/api/requests/"+created.ID, ""); pending.Status != "pending" || !pending.Started {
 		t.Fatalf("Q5: while the user is at the authorization server: %+v", pending)
@@ -101,6 +100,63 @@ func (e apiEnv) run(t *testing.T, created apiRequest, bsn, decision string) apiR
 	}
 	_, got := e.api(t, http.MethodGet, "/api/requests/"+created.ID, "")
 	return got
+}
+
+func newBrowser() *http.Client {
+	jar, _ := cookiejar.New(nil)
+	return &http.Client{Jar: jar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+}
+
+// loginAndStart opens the start URL without a login: the login page, the
+// request not yet started (N3). It logs in with the mock and follows back to
+// the start URL, which sends the browser to the authorization server; it
+// returns that URL.
+func (e apiEnv) loginAndStart(t *testing.T, browser *http.Client, created apiRequest) string {
+	t.Helper()
+	resp, page := fetch(t, browser, http.MethodGet, created.StartURL, nil)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(page, `action="/login/mock"`) || !strings.Contains(page, `value="`+created.ID+`"`) {
+		t.Fatalf("N3: start URL without a login = %d\n%s", resp.StatusCode, page)
+	}
+	if _, view := e.api(t, http.MethodGet, "/api/requests/"+created.ID, ""); view.Started {
+		t.Fatal("N3: the login page started the request")
+	}
+	form := mockLogin()
+	form.Set("request", created.ID)
+	resp, _ = fetch(t, browser, http.MethodPost, e.base+"/login/mock", form)
+	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/requests/"+created.ID+"/start" {
+		t.Fatalf("N3: mock login = %d to %q, want the start URL", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	resp, _ = fetch(t, browser, http.MethodGet, created.StartURL, nil)
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("start URL after the login = %d", resp.StatusCode)
+	}
+	return resp.Header.Get("Location")
+}
+
+// N3: test data laid down with a request prefills the mock login; it is not
+// in the start URL.
+func TestRequestAPILoginHint(t *testing.T) {
+	e := newAPIEnv(t)
+	body := `{"login_hint":{"family_name":"Jansen","given_name":"Frouke","birthdate":"2000-03-24","nationalities":["NL","BE"]},` +
+		strings.TrimPrefix(verifyFamilyName(`{"family_name":"Jansen"}`), "{")
+	created := e.create(t, body)
+	if strings.Contains(created.StartURL, "Frouke") {
+		t.Fatalf("start URL %q carries test data", created.StartURL)
+	}
+	resp, page := fetch(t, newBrowser(), http.MethodGet, created.StartURL, nil)
+	for _, want := range []string{`value="Jansen"`, `value="Frouke"`, `value="2000-03-24"`, `value="NL, BE"`} {
+		if resp.StatusCode != http.StatusOK || !strings.Contains(page, want) {
+			t.Errorf("login page lacks %s:\n%s", want, page)
+		}
+	}
+	// A browser that is logged in goes straight to the authorization server.
+	browser := newBrowser()
+	if resp, _ := fetch(t, browser, http.MethodPost, e.base+"/login/mock", mockLogin()); resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("mock login = %d", resp.StatusCode)
+	}
+	if resp, _ := fetch(t, browser, http.MethodGet, e.create(t, verifyFamilyName(`{"family_name":"Jansen"}`)).StartURL, nil); resp.StatusCode != http.StatusFound {
+		t.Errorf("start URL when logged in = %d, want a redirect to the authorization server", resp.StatusCode)
+	}
 }
 
 func verifyFamilyName(value string) string {
@@ -149,9 +205,9 @@ func TestRequestAPINoDataService(t *testing.T) {
 func TestRequestAPIStartsOnce(t *testing.T) {
 	e := newAPIEnv(t)
 	created := e.create(t, verifyFamilyName(`{"family_name":"Jansen"}`))
-	browser := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	if resp, _ := fetch(t, browser, http.MethodGet, created.StartURL, nil); resp.StatusCode != http.StatusFound {
-		t.Fatalf("first open = %d, want a redirect to the authorization server", resp.StatusCode)
+	browser := newBrowser()
+	if e.loginAndStart(t, browser, created) == "" {
+		t.Fatal("first open: no redirect to the authorization server")
 	}
 	if resp, _ := fetch(t, browser, http.MethodGet, created.StartURL, nil); resp.StatusCode != http.StatusGone {
 		t.Errorf("second open = %d, want 410", resp.StatusCode)
