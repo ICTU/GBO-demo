@@ -18,7 +18,7 @@ It discovers its way rather than being configured with URLs:
 The QTSP identifies the citizen itself before a request starts (eIDAS Article 24(1)). It asks the name, the date of birth and the nationalities, never the BSN: a QTSP may not process it. Two means:
 
 - **NL Wallet**: a disclosure of the NL PID (`urn:eudi:pid:nl:1`: `family_name`, `given_name`, `birthdate`, `nationalities`) through usecase `qtsp-login` of the wallet verifier (`services/asi-wallet-verifier`), with the QTSP's own reader certificate. `POST /login/wallet` starts the session and keeps it with this browser's login; `GET /login/wallet` shows the QR code and refreshes itself until the wallet has disclosed. Declined or expired, or a disclosure without all four attributes: the login page with the reason. The verifier unreachable: a 503 page, and the mock still works. Without a configured verifier the wallet button is disabled.
-- **Test data (mock)**: `POST /login/mock` with the four attributes (date of birth as YYYY-MM-DD, nationalities as country codes separated by commas). It checks nothing else; it exists for demos and CI.
+- **Test data (mock)**: prefilled with test person Frouke Jansen, or with the request's `login_hint`. `POST /login/mock` with the four attributes (date of birth as YYYY-MM-DD, nationalities as country codes separated by commas). It checks nothing else; it exists for demos and CI.
 
 A login is kept in memory behind an HttpOnly, SameSite=Lax cookie for 30 minutes and serves several requests; `POST /logout` ends it. The pages name the citizen ("Ingelogd als …"). The QTSP logs no name, date of birth or nationality.
 

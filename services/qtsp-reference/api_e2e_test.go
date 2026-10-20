@@ -137,17 +137,21 @@ func (e apiEnv) loginAndStart(t *testing.T, browser *http.Client, created apiReq
 // in the start URL.
 func TestRequestAPILoginHint(t *testing.T) {
 	e := newAPIEnv(t)
-	body := `{"login_hint":{"family_name":"Jansen","given_name":"Frouke","birthdate":"2000-03-24","nationalities":["NL","BE"]},` +
+	body := `{"login_hint":{"family_name":"Willems","given_name":"Tom","birthdate":"1982-05-08","nationalities":["BE"]},` +
 		strings.TrimPrefix(verifyFamilyName(`{"family_name":"Jansen"}`), "{")
 	created := e.create(t, body)
-	if strings.Contains(created.StartURL, "Frouke") {
+	if strings.Contains(created.StartURL, "Tom") {
 		t.Fatalf("start URL %q carries test data", created.StartURL)
 	}
 	resp, page := fetch(t, newBrowser(), http.MethodGet, created.StartURL, nil)
-	for _, want := range []string{`value="Jansen"`, `value="Frouke"`, `value="2000-03-24"`, `value="NL, BE"`} {
+	// The request's test data, not the default.
+	for _, want := range []string{`value="Willems"`, `value="Tom"`, `value="1982-05-08"`, `value="BE"`} {
 		if resp.StatusCode != http.StatusOK || !strings.Contains(page, want) {
 			t.Errorf("login page lacks %s:\n%s", want, page)
 		}
+	}
+	if strings.Contains(page, `value="Frouke"`) {
+		t.Errorf("login page shows the default instead of the request's test data:\n%s", page)
 	}
 	// A browser that is logged in goes straight to the authorization server.
 	browser := newBrowser()
