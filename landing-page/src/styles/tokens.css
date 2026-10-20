@@ -3,26 +3,27 @@
    zijn toegevoegd: het design kent geen breakpoints omdat het altijd breed
    gerenderd wordt.
 
-   Het kleurenpalet volgt het ICTU-presentatiethema (theme1.xml van de
-   GBO-presentaties): accent1 #63dbff cyaan, accent2 #3a65ea blauw,
-   accent3 #b500c7 magenta, dk2 #44546a; de tinten komen uit de slides. */
+   Het kleurenpalet volgt de huisstijlkleuren ICTU-GBO. Voor websites geldt
+   #2e62e6 in plaats van ICTU-blauw #457aff: dat haalt op wit geen AA
+   (3,8:1), #2e62e6 wel (5,2:1). Grijzen en randen staan niet in het palet
+   en zijn afgeleid. */
 
 :root {
-  --blue: #3a65ea; /* ICTU accent2 */
-  --blue-deep: #0f1a44; /* donkere afgeleide van --blue, zelfde tint */
-  --accent: #b500c7; /* ICTU accent3, hover-accent */
+  --blue: #2e62e6; /* toegankelijk ICTU-blauw (AA) */
+  --blue-deep: #0e2b84; /* donkerblauw */
+  --accent: #2651bd; /* donkerder blauw (AAA), hover */
   --text: #222222;
-  --text-2: #44546a; /* ICTU dk2 */
+  --text-2: #44546a;
   --text-3: #7f7f7f;
   --grey-bg: #eff1f6;
   --grey-border: #c9d6e3;
-  --pale-bg: #f3f8fc;
+  --pale-bg: #ecf1fb; /* blauwe tint */
   --pale-border: #c9d6e3;
   --line: #a3b6f2; /* lichte afgeleide van --blue, voor lijnen op licht */
-  --accent-light: #63dbff; /* ICTU accent1, alleen op donkere secties */
-  --tint-dvtp: #e3eafb; /* lichtblauw */
-  --tint-eudi: #e7e0f6; /* lila */
-  --tint-oots: #e2f7fe; /* lichtcyaan */
+  --accent-light: #63dbff; /* lichtblauw, alleen op donkere secties */
+  --tint-dvtp: #ecf1fb; /* blauwe tint */
+  --tint-eudi: #f8e6f9; /* paarse tint */
+  --tint-oots: #e6f8ff; /* lichtblauwe tint */
   --sans: "Fira Sans", Helvetica, Arial, sans-serif;
   --serif: "Source Serif 4", Georgia, serif;
   --gutter: clamp(20px, 6vw, 88px);
