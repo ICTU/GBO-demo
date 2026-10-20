@@ -77,6 +77,25 @@ func TestStaticStyleSheets(t *testing.T) {
 			t.Errorf("GET %s = %d, %q, nosniff %q, %d bytes; want CSS", path, resp.StatusCode, resp.Header.Get("Content-Type"), resp.Header.Get("X-Content-Type-Options"), len(body))
 		}
 	}
+	// A changed file reaches the browser at once: no-cache with an ETag of
+	// the content, and 304 while it is unchanged.
+	resp, _ := as.get(t, "/static/digid-mock.css", nil)
+	etag := resp.Header.Get("ETag")
+	if resp.Header.Get("Cache-Control") != "no-cache" || len(etag) < 10 {
+		t.Errorf("Cache-Control %q, ETag %q; want no-cache and an ETag", resp.Header.Get("Cache-Control"), etag)
+	}
+	req, _ := http.NewRequest(http.MethodGet, as.srv.URL+"/static/digid-mock.css", nil)
+	req.Header.Set("If-None-Match", etag)
+	if again, err := http.DefaultClient.Do(req); err != nil || again.StatusCode != http.StatusNotModified {
+		t.Errorf("unchanged with If-None-Match = %v, %v; want 304", again, err)
+	} else {
+		_ = again.Body.Close()
+	}
+	for _, path := range []string{"/static/rijkswapen.png", "/static/Logo_of_DigiD.png"} {
+		if resp, body := as.get(t, path, nil); resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != "image/png" || len(body) == 0 {
+			t.Errorf("GET %s = %d, %q; want the DigiD mock's image", path, resp.StatusCode, resp.Header.Get("Content-Type"))
+		}
+	}
 	for _, path := range []string{"/static/", "/static/nlds/", "/static/missing.css", "/static/nlds/README.md", "/static/../pages.go"} {
 		if resp, _ := as.get(t, path, nil); resp.StatusCode == http.StatusOK {
 			t.Errorf("GET %s = 200, want no file", path)

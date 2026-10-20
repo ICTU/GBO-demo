@@ -40,7 +40,7 @@ func TestWalletShowsTheQRCode(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || !strings.Contains(page, `src="data:image/png;base64,`) || !strings.Contains(page, `http-equiv="refresh"`) {
 		t.Fatalf("wallet page = %d:\n%s", resp.StatusCode, page)
 	}
-	if csp := resp.Header.Get("Content-Security-Policy"); !strings.Contains(csp, "img-src data:") || strings.Contains(csp, "script-src") {
+	if csp := resp.Header.Get("Content-Security-Policy"); !strings.Contains(csp, "img-src 'self' data:") || strings.Contains(csp, "script-src") {
 		t.Errorf("Content-Security-Policy = %q, want data images and no script", csp)
 	}
 	// Once the wallet has the request: no QR code, continue in the wallet.

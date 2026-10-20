@@ -64,7 +64,9 @@ func TestDenyIsAccessDenied(t *testing.T) {
 	assertAuthorizeError(t, as.decide(t, tx.id, tx.cookie, url.Values{"decision": {"deny"}}), "access_denied")
 }
 
-// L3: DigiD (mock) leads to its login page, and a login goes straight back
+// L3: DigiD (mock) leads to its login page, laid out like the DigiD mock of
+// the toestemmingsportaal: first the choice of a method, then the form,
+// prefilled with test person Frouke Jansen's BSN; a login goes straight back
 // to the client with a code.
 func TestDigiDLogin(t *testing.T) {
 	as := newTestAS(t)
@@ -75,15 +77,29 @@ func TestDigiDLogin(t *testing.T) {
 		t.Fatalf("choosing DigiD = %d to %q, want 303 to %s", resp.StatusCode, loc, digidmock.Path)
 	}
 	page, body := as.get(t, loc, tx.cookie)
-	if page.StatusCode != http.StatusOK || !strings.Contains(body, "Mock van DigiD") || !strings.Contains(body, `name="bsn"`) || !strings.Contains(body, tx.id) {
-		t.Fatalf("DigiD page = %d:\n%s", page.StatusCode, body)
+	if page.StatusCode != http.StatusOK || !strings.Contains(body, "Mock van DigiD") || !strings.Contains(body, "Hoe wilt u inloggen?") || strings.Contains(body, `name="bsn"`) {
+		t.Fatalf("DigiD page = %d, want the choice of a method and no form yet:\n%s", page.StatusCode, body)
+	}
+	for _, m := range digidmock.Methods {
+		if !strings.Contains(body, "transaction="+tx.id+"&amp;method="+m.ID) || !strings.Contains(body, m.Title) {
+			t.Errorf("DigiD page lacks method %s:\n%s", m.ID, body)
+		}
+	}
+	if _, other := as.get(t, loc+"&method=not-a-method", tx.cookie); strings.Contains(other, `name="bsn"`) {
+		t.Errorf("an unknown method shows the form:\n%s", other)
+	}
+	page, body = as.get(t, loc+"&method=sms", tx.cookie)
+	for _, want := range []string{`name="bsn" value="` + digidmock.DefaultBSN + `"`, `name="username" value="` + digidmock.DefaultUsername + `"`, `name="method" value="sms"`, `class="digid-method selected"`, tx.id} {
+		if page.StatusCode != http.StatusOK || !strings.Contains(body, want) {
+			t.Errorf("DigiD form lacks %q:\n%s", want, body)
+		}
 	}
 	q := redirectParams(t, as.digidLogin(t, tx.id, tx.cookie, bsnFrouke))
 	if q.Get("code") == "" || q.Get("state") != "state-123" {
 		t.Fatalf("redirect after the DigiD login = %v, want a code and the state", q)
 	}
 	// Annuleren on the DigiD page posts deny to the request page's endpoint.
-	if !strings.Contains(body, `formaction="`+DecisionPath+`" name="decision" value="deny"`) {
+	if !strings.Contains(body, `<form method="post" action="`+DecisionPath+`">`) || !strings.Contains(body, `name="decision" value="deny"`) {
 		t.Errorf("DigiD page has no Annuleren that denies:\n%s", body)
 	}
 }

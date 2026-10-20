@@ -1,8 +1,10 @@
 package httpapi
 
 import (
+	"crypto/sha256"
 	"embed"
 	"encoding/base64"
+	"encoding/hex"
 	"html/template"
 	"io/fs"
 	"net/http"
@@ -35,19 +37,34 @@ const transactionCookiePrefix = "azsp_tx_"
 // Voorbeeld theme and Utrecht components, and the layout on top.
 const StaticPath = "/static/"
 
-//go:embed static/*.css static/nlds/*.css
+//go:embed static/*.css static/*.png static/nlds/*.css
 var staticFiles embed.FS
 
-// staticHandler serves the style sheets, which may be cached.
+// staticHandler serves the style sheets and images. Each has an ETag of its
+// content and Cache-Control no-cache: the browser keeps a copy but asks
+// whether it changed (304 if not), so a new release shows at once.
 func staticHandler() http.Handler {
 	files, _ := fs.Sub(staticFiles, "static")
+	etags := map[string]string{}
+	_ = fs.WalkDir(files, ".", func(name string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			if raw, err := fs.ReadFile(files, name); err == nil {
+				sum := sha256.Sum256(raw)
+				etags[name] = `"` + hex.EncodeToString(sum[:8]) + `"`
+			}
+		}
+		return nil
+	})
 	server := http.StripPrefix(StaticPath, http.FileServerFS(files))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/") {
 			http.NotFound(w, r) // no directory listings
 			return
 		}
-		w.Header().Set("Cache-Control", "public, max-age=3600")
+		if etag, ok := etags[strings.TrimPrefix(r.URL.Path, StaticPath)]; ok {
+			w.Header().Set("ETag", etag)
+		}
+		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		server.ServeHTTP(w, r)
 	})
@@ -179,7 +196,7 @@ func writePage(w http.ResponseWriter, status int, page *template.Template, data 
 	h.Set("Content-Type", "text/html; charset=utf-8")
 	h.Set("Cache-Control", "no-store")
 	h.Set("X-Frame-Options", "DENY")
-	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; img-src data:; frame-ancestors 'none'; base-uri 'none'")
+	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'")
 	w.WriteHeader(status)
 	_ = page.Execute(w, data)
 }
@@ -224,12 +241,15 @@ func writeWalletPage(w http.ResponseWriter, tx, link string) {
 
 // writeDigiDPage shows the login page of the DigiD mock for transaction tx,
 // with message when the BSN was refused.
-func writeDigiDPage(w http.ResponseWriter, status int, tx, username, message string) {
+func writeDigiDPage(w http.ResponseWriter, status int, tx, method, username, bsn, message string) {
 	writePage(w, status, digidmock.Page, map[string]any{
 		"Action":        digidmock.Path,
 		"Cancel":        DecisionPath,
 		"TransactionID": tx,
+		"Methods":       digidmock.Methods,
+		"Method":        method,
 		"Username":      username,
+		"BSN":           bsn,
 		"Message":       message,
 	})
 }
