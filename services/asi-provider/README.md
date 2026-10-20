@@ -115,13 +115,13 @@ Every request carries `Authorization: DPoP <token>` and a `DPoP` proof header. T
 
 - `typ` is `at+jwt`; the signature verifies with a key from the `jwks_uri` in the metadata of the authorization server (ES256, or RS256 as RFC 9068 section 2.1 requires); `iss` is the authorization server; `aud` is this ASIP; `exp` has not passed (30 seconds leeway);
 - the token is DPoP-bound (`cnf.jkt`) and carries the BSN (`https://gbo.example/claims/bsn`);
-- it carries exactly one RFC 9396 `authorization_details` object for this data service and the token's operations; every attribute in a verify, fragment or retrieve request must occur in its `attribute_identifiers`;
+- when it carries an RFC 9396 `authorization_details` object, there is exactly one for this data service and the token's operations, and every attribute in a verify, fragment or retrieve request must occur in its `attribute_identifiers`; without that claim, the operation scope authorizes every attribute in this data service's catalogue;
 - exactly one proof, `typ` `dpop+jwt`, signed with its public `jwk`, for this method and URL, for this token (`ath`), at most 60 seconds from now, used once, and its key is the key the token is bound to;
 - the scope contains the operation: `verify` for `/verify`, `retrieve` for `/retrieve`.
 
 Every failure is 401 with a `WWW-Authenticate: DPoP` challenge and a problem body: `invalid_token`, `invalid_request` (no proof), `invalid_dpop_proof`, or `insufficient_scope`. ETSI TS 119 478 lists 401 for "an authentication or authorization error"; RFC 6750 would use 403 for `insufficient_scope`.
 
-A token without the BSN claim or valid authorization details is `invalid_token`. A request for an attribute outside the approved set is `insufficient_scope`. A BSN the BRP does not know yields `Unknown`. When the ASIP cannot obtain the keys of the authorization server and holds none from before, it answers 503.
+A token without the BSN claim is `invalid_token`. An absent `authorization_details` claim is accepted; a present but invalid claim is `invalid_token`. With a valid detail, a request for an attribute outside the approved set is `insufficient_scope`; without one, the data service's catalogue remains the boundary and an unknown attribute is 404. A BSN the BRP does not know yields `Unknown`. When the ASIP cannot obtain the keys of the authorization server and holds none from before, it answers 503.
 
 `GET /19478-dataservice-schema.json` serves the schema the contract references.
 

@@ -110,7 +110,7 @@ var requestPage = page("request", "Toestemming geven", "", `<h1 class="utrecht-h
 <dt>Aanvrager</dt><dd>{{.ClientName}}, een vertrouwensdienst</dd>
 <dt>Verzoek</dt><dd>{{.Request}}</dd>
 <dt>Bron</dt><dd>{{.Source}}</dd>
-<dt>Gegevens</dt><dd><ul class="azsp-attributes">{{range .Attributes}}<li>{{.}}</li>{{end}}</ul></dd>
+{{if .Attributes}}<dt>Gegevens</dt><dd><ul class="azsp-attributes">{{range .Attributes}}<li>{{.}}</li>{{end}}</ul></dd>{{end}}
 </dl>
 {{if .Message}}<div class="utrecht-alert utrecht-alert--error" role="alert"><div class="utrecht-alert__content"><div class="utrecht-alert__message"><p class="utrecht-paragraph"><strong>{{.Message}}</strong></p></div></div></div>{{end}}
 <h2 class="utrecht-heading-2">Inloggen</h2>

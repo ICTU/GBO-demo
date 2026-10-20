@@ -5,7 +5,6 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
-	"slices"
 	"sync"
 	"time"
 )
@@ -212,7 +211,7 @@ func (s *Service) Transaction(transactionID, binding string) (*Transaction, bool
 	if c, ok := s.client(p.code.clientID); ok && c.Name != "" {
 		name = c.Name
 	}
-	return &Transaction{ID: transactionID, Binding: binding, ClientID: p.code.clientID, ClientName: name, Scope: p.code.scope, Source: s.resourceName(p.code.audience), Attributes: slices.Clone(p.code.detail.AttributeIdentifiers)}, true
+	return &Transaction{ID: transactionID, Binding: binding, ClientID: p.code.clientID, ClientName: name, Scope: p.code.scope, Source: s.resourceName(p.code.audience), Attributes: authorizationDetailAttributes(p.code.detail)}, true
 }
 
 // StartSession has a session means open a session with the user's device

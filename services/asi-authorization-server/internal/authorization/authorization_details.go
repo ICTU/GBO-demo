@@ -28,11 +28,25 @@ type AuthorizationDetail struct {
 	AttributeIdentifiers []string `json:"attribute_identifiers"`
 }
 
+func parseOptionalAuthorizationDetails(raw, audience, scope string, present, required bool) (*AuthorizationDetail, error) {
+	if !present {
+		if required {
+			return nil, errors.New("authorization_details must be a JSON array with one ASI authorization detail")
+		}
+		return nil, nil
+	}
+	detail, err := parseAuthorizationDetails(raw, audience, scope)
+	if err != nil {
+		return nil, err
+	}
+	return &detail, nil
+}
+
 func parseAuthorizationDetails(raw, audience, scope string) (AuthorizationDetail, error) {
 	dec := json.NewDecoder(strings.NewReader(raw))
 	dec.DisallowUnknownFields()
 	var details []AuthorizationDetail
-	if raw == "" || dec.Decode(&details) != nil {
+	if dec.Decode(&details) != nil {
 		return AuthorizationDetail{}, errors.New("authorization_details must be a JSON array with one ASI authorization detail")
 	}
 	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {

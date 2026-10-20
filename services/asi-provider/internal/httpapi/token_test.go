@@ -74,17 +74,29 @@ func TestInvalidAccessTokenIs401(t *testing.T) { // case 4-10, 18
 		"6: typ is not at+jwt": env.presentingToken(func(t *testing.T) string {
 			return signJWT(t, env.authz.key, jose.ES256, testKeyID, "JWT", valid())
 		}, nil),
-		"7: another issuer":        env.presenting(with(func(c map[string]any) { c["iss"] = "https://other-as.test" }), nil),
-		"8: another audience":      env.presenting(with(func(c map[string]any) { c["aud"] = "https://other-asip.test/authsrc-api" }), nil),
-		"9: expired":               env.presenting(with(func(c map[string]any) { c["iat"], c["exp"] = ago(11*time.Minute), ago(time.Minute) }), nil),
-		"9b: no exp":               env.presenting(with(func(c map[string]any) { delete(c, "exp") }), nil),
-		"10: Bearer scheme":        env.withScheme("Bearer"),
-		"10b: not DPoP-bound":      env.presenting(with(func(c map[string]any) { delete(c, "cnf") }), nil),
-		"18: no BSN claim":         env.presenting(with(func(c map[string]any) { delete(c, accesstoken.BSNClaim) }), nil),
-		"18b: empty BSN claim":     env.presenting(with(func(c map[string]any) { c[accesstoken.BSNClaim] = "" }), nil),
-		"no authorization details": env.presenting(with(func(c map[string]any) { delete(c, "authorization_details") }), nil),
+		"7: another issuer":    env.presenting(with(func(c map[string]any) { c["iss"] = "https://other-as.test" }), nil),
+		"8: another audience":  env.presenting(with(func(c map[string]any) { c["aud"] = "https://other-asip.test/authsrc-api" }), nil),
+		"9: expired":           env.presenting(with(func(c map[string]any) { c["iat"], c["exp"] = ago(11*time.Minute), ago(time.Minute) }), nil),
+		"9b: no exp":           env.presenting(with(func(c map[string]any) { delete(c, "exp") }), nil),
+		"10: Bearer scheme":    env.withScheme("Bearer"),
+		"10b: not DPoP-bound":  env.presenting(with(func(c map[string]any) { delete(c, "cnf") }), nil),
+		"18: no BSN claim":     env.presenting(with(func(c map[string]any) { delete(c, accesstoken.BSNClaim) }), nil),
+		"18b: empty BSN claim": env.presenting(with(func(c map[string]any) { c[accesstoken.BSNClaim] = "" }), nil),
 		"authorization details for another resource": env.presenting(with(func(c map[string]any) {
 			c["authorization_details"].([]map[string]any)[0]["locations"] = []string{"https://other-asip.test/authsrc-api"}
+		}), nil),
+		"authorization details for another operation": env.presenting(with(func(c map[string]any) {
+			c["authorization_details"].([]map[string]any)[0]["actions"] = []string{"retrieve"}
+		}), nil),
+		"authorization details of another type": env.presenting(with(func(c map[string]any) {
+			c["authorization_details"].([]map[string]any)[0]["type"] = "https://example.test/other"
+		}), nil),
+		"more than one authorization detail": env.presenting(with(func(c map[string]any) {
+			detail := c["authorization_details"].([]map[string]any)[0]
+			c["authorization_details"] = []map[string]any{detail, detail}
+		}), nil),
+		"empty authorization details": env.presenting(with(func(c map[string]any) {
+			c["authorization_details"] = []map[string]any{}
 		}), nil),
 		"not a JWT at all":      env.presentingToken(func(*testing.T) string { return "not-a-jwt" }, nil),
 		"DPoP scheme, no token": func(_ *testing.T, req *http.Request) { req.Header.Set("Authorization", "DPoP ") },
@@ -94,6 +106,34 @@ func TestInvalidAccessTokenIs401(t *testing.T) { // case 4-10, 18
 			assertAuthError(t, rec, "invalid_token")
 		})
 	}
+}
+
+func TestTokenWithoutAuthorizationDetailsAuthorizesTheDataServiceCatalogue(t *testing.T) {
+	env := newTestServer(t)
+	operationOnly := func(scope string) map[string]any {
+		claims := env.authz.claims(bsnFrouke, scope, env.qtsp.jkt)
+		delete(claims, "authorization_details")
+		return claims
+	}
+
+	for _, tc := range []struct {
+		name, path, body string
+	}{
+		{"verify family name", "/verify", verifyBody(idFamilyName, `{"family_name":"Jansen"}`)},
+		{"verify address fragment", "/verify", `{"attributeFragments":[{"attributeIdentifier":"` + idAddress + `","location":"$.city","value":{"city":"Rotterdam"}}]}`},
+		{"retrieve given name", "/retrieve", `{"attributeIdentifiers":[{"attributeIdentifier":"` + idGivenName + `"}]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			scope := strings.TrimPrefix(tc.path, "/")
+			rec := post(t, env, tc.path, env.presenting(operationOnly(scope), nil), tc.body)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body)
+			}
+		})
+	}
+
+	rec := post(t, env, "/verify", env.presenting(operationOnly("verify"), nil), verifyBody(idNotInCat, `{"size":43}`))
+	assertProblem(t, rec, http.StatusNotFound)
 }
 
 // RFC 9068 section 2.1: resource servers support RS256. The authorization

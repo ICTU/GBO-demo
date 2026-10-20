@@ -95,8 +95,19 @@ func TestEndToEndVerify(t *testing.T) { // case 24 (through /verify), case 37, c
 		result.AttributeVerificationResults[0].AttributeVerificationResult != "http://uri.etsi.org/19478/VerificationResult/Match" {
 		t.Fatalf("/verify body = %s, want one Match", resp.body)
 	}
-	if got := outway.asked(); len(got) != 1 || got[0] != bsnFrouke {
-		t.Fatalf("the BRP was asked for %v, want the BSN of the chosen person once", got)
+
+	// An ETSI client that sends no RFC 9396 extension gets an operation-only
+	// token, which can use every attribute in this data service's catalogue.
+	p = newPKCE()
+	params = authorizeParams(p)
+	params.Set("resource", brp)
+	params.Del(authorization.AuthorizationDetailsClaim)
+	operationOnlyToken := as.accessToken(t, params, p)
+	if r := as.callASIP(t, brp+"/verify", operationOnlyToken, body); r.status != http.StatusOK {
+		t.Fatalf("/verify with an operation-only token = %d %s, want 200", r.status, r.body)
+	}
+	if got := outway.asked(); len(got) != 2 || got[0] != bsnFrouke || got[1] != bsnFrouke {
+		t.Fatalf("the BRP was asked for %v, want the BSN of the chosen person twice", got)
 	}
 	if resp.header.Get("X-JWS-Signature") == "" {
 		t.Fatalf("/verify response is not sealed")
