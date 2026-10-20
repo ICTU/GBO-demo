@@ -1,0 +1,90 @@
+{
+  "vct": "https://gbo.ictu.nl/credentials/qtsp-attestation/v1",
+  "name": "Testverklaring attribuutverificatie",
+  "description": "Niet-gekwalificeerde testverklaring van de referentie-QTSP.",
+  "display": [
+    {
+      "lang": "nl-NL",
+      "name": "Testverklaring attribuutverificatie",
+      "description": "Test — geen gekwalificeerde elektronische attestatie van attributen.",
+      "summary": "Verificatie voor {{subject_given_name}} {{subject_family_name}}"
+    },
+    {
+      "lang": "en-US",
+      "name": "Attribute verification test statement",
+      "description": "Test — not a qualified electronic attestation of attributes.",
+      "summary": "Verification for {{subject_given_name}} {{subject_family_name}}"
+    }
+  ],
+  "claims": [
+    {
+      "path": ["subject_family_name"],
+      "display": [{"lang": "nl-NL", "label": "Familienaam"}, {"lang": "en-US", "label": "Family name"}],
+      "sd": "always",
+      "svg_id": "subject_family_name"
+    },
+    {
+      "path": ["subject_given_name"],
+      "display": [{"lang": "nl-NL", "label": "Voornamen"}, {"lang": "en-US", "label": "Given names"}],
+      "sd": "always",
+      "svg_id": "subject_given_name"
+    },
+    {
+      "path": ["subject_birthdate"],
+      "display": [{"lang": "nl-NL", "label": "Geboortedatum"}, {"lang": "en-US", "label": "Date of birth"}],
+      "sd": "always",
+      "svg_id": "subject_birthdate"
+    },
+    {
+      "path": ["attribute_evidence"],
+      "display": [{"lang": "nl-NL", "label": "Gecontroleerde attributen"}, {"lang": "en-US", "label": "Verified attributes"}],
+      "sd": "always",
+      "svg_id": "attribute_evidence"
+    },
+    {
+      "path": ["source_legal_name"],
+      "display": [{"lang": "nl-NL", "label": "Bron"}, {"lang": "en-US", "label": "Source"}],
+      "sd": "always",
+      "svg_id": "source_legal_name"
+    },
+    {
+      "path": ["issuer_name"],
+      "display": [{"lang": "nl-NL", "label": "Uitgever"}, {"lang": "en-US", "label": "Issuer"}],
+      "sd": "always",
+      "svg_id": "issuer_name"
+    },
+    {
+      "path": ["verification_date"],
+      "display": [{"lang": "nl-NL", "label": "Datum van verificatie"}, {"lang": "en-US", "label": "Verification date"}],
+      "sd": "always",
+      "svg_id": "verification_date"
+    },
+    {
+      "path": ["qualification"],
+      "display": [{"lang": "nl-NL", "label": "Status"}, {"lang": "en-US", "label": "Status"}],
+      "sd": "never",
+      "svg_id": "qualification"
+    }
+  ],
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "Testverklaring attribuutverificatie",
+    "type": "object",
+    "properties": {
+      "vct": {"type": "string", "const": "https://gbo.ictu.nl/credentials/qtsp-attestation/v1"},
+      "vct#integrity": {"type": "string", "pattern": "^sha256-[A-Za-z0-9+/]+={0,2}$"},
+      "subject_family_name": {"type": "string"},
+      "subject_given_name": {"type": "string"},
+      "subject_birthdate": {"type": "string", "format": "date"},
+      "attribute_evidence": {"type": "string", "minLength": 1},
+      "source_legal_name": {"type": "string"},
+      "issuer_name": {"type": "string", "const": "GBO demo test QTSP"},
+      "verification_date": {"type": "string", "format": "date-time"},
+      "qualification": {"type": "string", "const": "TEST — not a qualified electronic attestation of attributes"}
+    },
+    "required": [
+      "vct", "vct#integrity", "subject_family_name", "subject_given_name", "subject_birthdate",
+      "attribute_evidence", "source_legal_name", "issuer_name", "verification_date", "qualification"
+    ]
+  }
+}

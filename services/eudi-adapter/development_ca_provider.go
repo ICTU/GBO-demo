@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 )
@@ -28,6 +29,7 @@ var (
 	issuerEKUOID           = asn1.ObjectIdentifier{1, 0, 18013, 5, 1, 2}
 	readerEKUOID           = asn1.ObjectIdentifier{1, 0, 18013, 5, 1, 6}
 	statusEKUOID           = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 127}
+	serverAuthEKUOID       = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 1}
 	extendedKeyUsageOID    = asn1.ObjectIdentifier{2, 5, 29, 37}
 )
 
@@ -169,6 +171,29 @@ func (p *developmentCAProvider) Provision(registration sourceRegistration) (cert
 		sourceOIN:             registration.SourceOIN,
 		sourceName:            registration.Name,
 	}, nil
+}
+
+// ProvisionTLSServerCertificate issues the internal HTTPS certificate used
+// by an attestation callback. It deliberately chains to the issuer CA: the
+// issuance server pins that CA for callback transport.
+func (p *developmentCAProvider) ProvisionTLSServerCertificate(registration sourceRegistration, host string) error {
+	if p == nil || p.root == "" || strings.TrimSpace(host) == "" {
+		return fmt.Errorf("development CA secret directory and TLS host are required")
+	}
+	issuerCA, err := p.loadPreProvisionedCA(filepath.Join(p.root, "development-ca"), "issuer")
+	if err != nil {
+		return err
+	}
+	directory := filepath.Join(p.root, registration.certificateSetID())
+	if err := ensurePrivateDirectory(directory); err != nil {
+		return err
+	}
+	subject := pkix.Name{CommonName: host, Organization: []string{registration.Name}, SerialNumber: registration.SourceOIN}
+	leaf, err := p.ensureLeaf(directory, "tls", subject, host, issuerCA, serverAuthEKUOID, nil, nil)
+	if err != nil {
+		return err
+	}
+	return validateExpectedDevelopmentLeaf(leaf.cert, issuerCA.cert, subject, host, serverAuthEKUOID, nil, nil, p.now())
 }
 
 // Load reads and validates certificates that were provisioned explicitly. It
@@ -547,12 +572,19 @@ func developmentCertificateAuthPayloads(registration sourceRegistration, readerO
 		},
 		"organization":         organization,
 		"requestOriginBaseUrl": readerOrigin,
-		"authorizedAttributes": map[string]any{"urn:eudi:pid:nl:1": [][]string{{"urn:eudi:pid:nl:1", "bsn"}, {"bsn"}}},
+		"authorizedAttributes": readerAttributes(registration),
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("marshal development reader authorization metadata: %w", err)
 	}
 	return issuer, reader, nil
+}
+
+func readerAttributes(registration sourceRegistration) map[string][][]string {
+	if registration.ReaderAttributes != nil {
+		return registration.ReaderAttributes
+	}
+	return map[string][][]string{"urn:eudi:pid:nl:1": {{"urn:eudi:pid:nl:1", "bsn"}, {"bsn"}}}
 }
 
 func validateProvisionedCertificate(cert, ca *x509.Certificate, registration sourceRegistration, eku asn1.ObjectIdentifier, now time.Time) error {
@@ -562,7 +594,7 @@ func validateProvisionedCertificate(cert, ca *x509.Certificate, registration sou
 	if len(cert.Subject.Organization) != 1 || cert.Subject.Organization[0] != registration.Name {
 		return fmt.Errorf("certificate is not bound to source name %q", registration.Name)
 	}
-	if !containsOID(cert.UnknownExtKeyUsage, eku) {
+	if !certificateHasEKU(cert, eku) {
 		return fmt.Errorf("certificate does not contain required EKU %s", eku.String())
 	}
 	pool := x509.NewCertPool()
@@ -594,7 +626,7 @@ func validateExpectedDevelopmentLeaf(cert, ca *x509.Certificate, subject pkix.Na
 		return fmt.Errorf("certificate DNS SAN does not match %q", host)
 	}
 	ekuExtension, ok := findCertificateExtension(cert, extendedKeyUsageOID)
-	if !ok || !ekuExtension.Critical || !containsOID(cert.UnknownExtKeyUsage, eku) {
+	if !ok || !ekuExtension.Critical || !certificateHasEKU(cert, eku) {
 		return fmt.Errorf("certificate does not contain the required critical EKU %s", eku.String())
 	}
 	if len(authOID) > 0 {
@@ -614,6 +646,13 @@ func validateExpectedDevelopmentLeaf(cert, ca *x509.Certificate, subject pkix.Na
 		return fmt.Errorf("certificate chain is not trusted: %w", err)
 	}
 	return nil
+}
+
+func certificateHasEKU(cert *x509.Certificate, eku asn1.ObjectIdentifier) bool {
+	if eku.Equal(serverAuthEKUOID) && slices.Contains(cert.ExtKeyUsage, x509.ExtKeyUsageServerAuth) {
+		return true
+	}
+	return containsOID(cert.UnknownExtKeyUsage, eku)
 }
 
 // authorizationPayloadMatches permits an explicitly provisioned organization

@@ -18,12 +18,15 @@ package main
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/pem"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -31,6 +34,8 @@ import (
 	"time"
 
 	"gbo-demo/qtsp-reference/internal/cli"
+	"gbo-demo/qtsp-reference/internal/issuance"
+	"gbo-demo/qtsp-reference/internal/issuancecallback"
 	loginport "gbo-demo/qtsp-reference/internal/login"
 	"gbo-demo/qtsp-reference/internal/qtsp"
 	"gbo-demo/qtsp-reference/internal/urlmap"
@@ -80,8 +85,23 @@ func serve() error {
 	if err != nil {
 		return err
 	}
-	handler := web.NewHandler(client, web.DemoAttributes, env("QTSP_PUBLIC_URL", "http://localhost:4023"), wallet)
+	store := issuance.NewStore(time.Now)
+	link, err := walletIssuanceLink(os.Getenv("EUDI_PUBLIC_URL"), env("EUDI_UL_BASE", "https://app.preproductie.wallet.edi.bzk.nl/deeplink/disclosure_based_issuance"))
+	if err != nil {
+		return err
+	}
+	handler := web.NewHandlerWithIssuance(client, web.DemoAttributes, env("QTSP_PUBLIC_URL", "http://localhost:4023"), wallet, store, link)
 	srv := &http.Server{Addr: env("QTSP_ADDR", ":4023"), Handler: handler, ReadHeaderTimeout: readHeaderTimeout}
+	var issuanceSrv *http.Server
+	if link != "" {
+		issuanceSrv, err = newIssuanceServer(store)
+		if err != nil {
+			return err
+		}
+		if issuanceSrv == nil {
+			return errors.New("QTSP issuance TLS certificate is required when EUDI_PUBLIC_URL is configured")
+		}
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	errc := make(chan error, 2)
@@ -91,6 +111,14 @@ func serve() error {
 			errc <- err
 		}
 	}()
+	if issuanceSrv != nil {
+		go func() {
+			slog.Info("listening for issuance callbacks", "addr", issuanceSrv.Addr)
+			if err := issuanceSrv.ListenAndServeTLS("", ""); !errors.Is(err, http.ErrServerClosed) {
+				errc <- err
+			}
+		}()
+	}
 	go func() {
 		if err := registerAtStart(ctx, client); err != nil {
 			errc <- err
@@ -103,7 +131,89 @@ func serve() error {
 	}
 	drainCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
+	if issuanceSrv != nil {
+		if err := issuanceSrv.Shutdown(drainCtx); err != nil {
+			return err
+		}
+	}
 	return srv.Shutdown(drainCtx)
+}
+
+func walletIssuanceLink(publicURL, universalLinkBase string) (string, error) {
+	if strings.TrimSpace(publicURL) == "" {
+		return "", nil
+	}
+	issuer, err := url.Parse(strings.TrimRight(publicURL, "/"))
+	if err != nil || issuer.Scheme != "https" || issuer.Host == "" || issuer.Hostname() == "" || issuer.User != nil || (issuer.Path != "" && issuer.Path != "/") || issuer.RawQuery != "" || issuer.Fragment != "" {
+		return "", errors.New("EUDI_PUBLIC_URL must be a root HTTPS URL")
+	}
+	base, err := url.Parse(universalLinkBase)
+	if err != nil || base.Scheme != "https" || base.Host == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" {
+		return "", errors.New("EUDI_UL_BASE must be an absolute HTTPS URL without credentials, query or fragment")
+	}
+	requestURI := strings.TrimRight(issuer.String(), "/") + "/disclosure/" + issuance.Usecase + "/request_uri?session_type=cross_device"
+	query := base.Query()
+	query.Set("request_uri", requestURI)
+	query.Set("request_uri_method", "post")
+	query.Set("client_id", "x509_san_dns:"+issuer.Hostname())
+	base.RawQuery = query.Encode()
+	return base.String(), nil
+}
+
+func newIssuanceServer(store *issuance.Store) (*http.Server, error) {
+	keyFile, certFile := os.Getenv("QTSP_ISSUANCE_TLS_KEY_FILE"), os.Getenv("QTSP_ISSUANCE_TLS_CERT_FILE")
+	if keyFile == "" && certFile == "" {
+		return nil, nil
+	}
+	if keyFile == "" || certFile == "" {
+		return nil, errors.New("QTSP_ISSUANCE_TLS_KEY_FILE and QTSP_ISSUANCE_TLS_CERT_FILE must be configured together")
+	}
+	certificate, err := loadBase64TLSKeyPair(keyFile, certFile)
+	if err != nil {
+		return nil, fmt.Errorf("load issuance callback TLS certificate: %w", err)
+	}
+	return &http.Server{
+		Addr: env("QTSP_ISSUANCE_ADDR", ":4443"), Handler: issuancecallback.Handler(store), ReadHeaderTimeout: readHeaderTimeout,
+		TLSConfig: &tls.Config{Certificates: []tls.Certificate{certificate}, MinVersion: tls.VersionTLS12},
+	}, nil
+}
+
+func loadBase64TLSKeyPair(keyFile, certFile string) (tls.Certificate, error) {
+	read := func(path string) ([]byte, error) {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(raw)))
+		if err != nil {
+			return nil, fmt.Errorf("%s is not base64 DER: %w", path, err)
+		}
+		return decoded, nil
+	}
+	keyDER, err := read(keyFile)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	certDER, err := read(certFile)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	parsed, err := x509.ParsePKCS8PrivateKey(keyDER)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	key, ok := parsed.(*ecdsa.PrivateKey)
+	if !ok {
+		return tls.Certificate{}, errors.New("issuance callback TLS key is not ECDSA")
+	}
+	cert, err := x509.ParseCertificate(certDER)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	if !key.PublicKey.Equal(cert.PublicKey) {
+		return tls.Certificate{}, errors.New("issuance callback TLS key does not match its certificate")
+	}
+	return tls.Certificate{Certificate: [][]byte{certDER}, PrivateKey: key, Leaf: cert}, nil
 }
 
 // registerAtStart registers with the authorization server of the demo's data

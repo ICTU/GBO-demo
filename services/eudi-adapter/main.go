@@ -596,6 +596,12 @@ func fatal(msg string, err error) {
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if handled, err := runQTSPIssuanceProvisionCommand(os.Args[1:], os.Stdout, os.Stderr); handled {
+		if err != nil {
+			fatal("QTSP issuance certificate provisioning failed", err)
+		}
+		return
+	}
 	if handled, err := runIssuanceReleaseCommand(ctx, os.Args[1:], os.Stdout, os.Stderr); handled {
 		if err != nil {
 			fatal("issuance Source Release materialization failed", err)

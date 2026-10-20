@@ -164,10 +164,18 @@ func appendDisclosureSettings(builder *strings.Builder, key, endpoint, adapterTr
 }
 
 func appendAttestationSettings(builder *strings.Builder, vct string, material issuanceCertificateMaterial) {
+	appendAttestationSettingsWithValidity(builder, vct, material, 365, 4, "")
+}
+
+func appendAttestationSettingsWithValidity(builder *strings.Builder, vct string, material issuanceCertificateMaterial, validDays, copies int, qualification string) {
 	statusDigest := sha256.Sum256([]byte(vct))
 	statusPath := "/tsl/" + hex.EncodeToString(statusDigest[:])
 	quotedVCT := strconv.Quote(vct)
-	_, _ = fmt.Fprintf(builder, "\n[attestation_settings.%s]\nvalid_days = 365\ncopies_per_format = { \"dc+sd-jwt\" = 4 }\nprivate_key_type = \"software\"\nprivate_key = %s\ncertificate = %s\n\n", quotedVCT, strconv.Quote(material.issuerKey), strconv.Quote(material.issuerCert))
+	_, _ = fmt.Fprintf(builder, "\n[attestation_settings.%s]\nvalid_days = %d\ncopies_per_format = { \"dc+sd-jwt\" = %d }\nprivate_key_type = \"software\"\nprivate_key = %s\ncertificate = %s\n", quotedVCT, validDays, copies, strconv.Quote(material.issuerKey), strconv.Quote(material.issuerCert))
+	if qualification != "" {
+		_, _ = fmt.Fprintf(builder, "attestation_qualification = %s\n", strconv.Quote(qualification))
+	}
+	_, _ = builder.WriteString("\n")
 	_, _ = fmt.Fprintf(builder, "[attestation_settings.%s.status_list]\ncontext_path = %s\npublish_dir = \"/tsl-publish\"\nprivate_key_type = \"software\"\nprivate_key = %s\ncertificate = %s\n", quotedVCT, strconv.Quote(statusPath), strconv.Quote(material.statusKey), strconv.Quote(material.statusCert))
 }
 

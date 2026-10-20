@@ -1,6 +1,6 @@
 # qtsp-reference — reference QTSP for the ASI route (ETSI TS 119 478)
 
-The client side of the Authentic Source Interface: a qualified trust service provider (QTSP) that has an ASIP verify or retrieve attributes of a user. It is the demo's reference client and a place where a user starts. The citizen logs in at the QTSP before a request starts. It is not a real QTSP: it issues no attestation. Part of epic #336, slice 6 (#533) and slice 14 (#560).
+The client side of the Authentic Source Interface: a qualified trust service provider (QTSP) that has an ASIP verify or retrieve attributes of a user. It is the demo's reference client and a place where a user starts. The citizen logs in at the QTSP before a request starts. It is not a real QTSP: it issues only a clearly marked, non-qualified test statement. Part of epic #336.
 
 ## What it does
 
@@ -12,6 +12,7 @@ It discovers its way rather than being configured with URLs:
 4. **Authorize**: the authorization code flow with PKCE S256, `state`, the operation as scope, `resource` = the record's `endpointURI`, and RFC 9396 `authorization_details` containing that resource, operation and the selected attribute identifiers.
 5. **Token**: `private_key_jwt` with the certificate key, and a DPoP proof. The token is DPoP-bound.
 6. **Verify or retrieve** with the token and a DPoP proof, in a W3C trace of its own (`traceparent`), which the ASIP's spans join. A 200 is accepted only with a valid **seal**: the detached JWS in `X-JWS-Signature` over the exact body, whose certificate chain leads to `QTSP_SEAL_TRUST_ANCHORS`. Otherwise the result is reported as not accepted.
+7. **Issue a test statement to the NL Wallet** after every requested verification returned `Match` or `MatchWithVariation`, or every requested value was retrieved. The result page shows the static QR code of usecase `qtsp-attestation`. The central issuance server asks the QTSP for the pending statement over internal HTTPS and signs it with the QTSP's own issuer certificate.
 
 ## Login
 
@@ -40,6 +41,14 @@ The developer portal lays a request down here and follows it, while the user sti
 A request and its outcome can be fetched for 10 minutes; then it is gone (404). The API has no access control, like the other mocks of the demo: anyone who can reach the port can lay a request down.
 
 The authorization server allows an http redirect URI on a loopback address only, so the web side works with the browser on the same machine (`http://localhost:9427`).
+
+## Wallet issuance
+
+An accepted result is kept in memory for at most ten minutes and is removed after its first issuance. The wallet discloses `family_name`, `given_name`, `birthdate` and `nationalities` from its PID. These must equal the identity from the QTSP login; nationality order does not matter. No match, an expired or already used result, or more than one matching result returns an empty document list. This is a demo binding and is not a unique civil identity check.
+
+The issued SD-JWT VC has VCT `https://gbo.ictu.nl/credentials/qtsp-attestation/v1`, is valid for 30 days and contains the subject's name and birth date, the accepted result per attribute, the source's legal name, the issuer and verification date. It always states that it is a test and not a qualified electronic attestation of attributes. `NoMatch` and `Unknown` never create a pending statement.
+
+The existing central `eudi-issuance-server` remains unmodified. Its generated configuration adds a separate usecase and QTSP reader, issuer and status-list certificates. The QTSP callback listens only on the Compose networks at `https://qtsp-reference:4443/attestations`; its server certificate chains to the development issuer CA pinned by the issuance server. There is no client-certificate support in the configured callback client, so the internal network boundary is a deliberate demo shortcut.
 
 ## CLI
 
@@ -77,6 +86,8 @@ Configuration:
 - `QTSP_REGISTRY_URI` (default the test QTSP's entry);
 - `QTSP_SEAL_TRUST_ANCHORS` (required: the roots of seal certificates);
 - `QTSP_WALLET_VERIFIER_URL` (the verifier's internal API), `QTSP_WALLET_VERIFIER_STATUS_URL` (its wallet API, for the session status) and `QTSP_WALLET_VERIFIER_API_KEY_FILE`; without the key file only the mock login is offered;
+- `EUDI_PUBLIC_URL` and `EUDI_UL_BASE`, used to construct the static wallet issuance link; without `EUDI_PUBLIC_URL` no issuance action is shown;
+- `QTSP_ISSUANCE_ADDR` (default `:4443`), `QTSP_ISSUANCE_TLS_KEY_FILE` and `QTSP_ISSUANCE_TLS_CERT_FILE`, for the internal HTTPS callback;
 - `QTSP_URL_MAP`: `public=internal,…`. The records and contracts name public URLs, which a container cannot reach. The map changes the transport only; DPoP proofs and audiences keep the public URLs.
 
 If the authorization server refuses the registration (for example, no `QEAA_Provider` entitlement), the QTSP stops with the reason. While discovery or the server is unavailable, it tries again.
@@ -91,6 +102,8 @@ If the authorization server refuses the registration (for example, no `QEAA_Prov
 | `internal/cli` | the CLI: options, one run, the report |
 | `internal/login` | who the citizen is: the identity, the wallet port, the mock's checks |
 | `internal/walletlogin` | the NL Wallet as login means, through the wallet verifier |
+| `internal/issuance` | transport-independent short-lived identity binding and one-time statement creation |
+| `internal/issuancecallback` | the issuance-server HTTPS callback adapter |
 | `internal/web` | the web side, the login and the request API |
 | `internal/urlmap` | the transport map from public to internal URLs |
 | `main.go` | composition root |

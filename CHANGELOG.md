@@ -7,6 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Added
+- **The reference QTSP issues a test statement to the NL Wallet** (#549):
+  after an accepted ASI verification or retrieval, the result page offers a
+  QR code for the central issuance server. The QTSP keeps the result for ten
+  minutes and releases it once only when the wallet discloses the same name,
+  date of birth and nationalities as the QTSP login. The central server uses
+  separate QTSP reader, issuer and status-list certificates and calls the
+  QTSP over CA-pinned internal HTTPS. The 30-day SD-JWT VC is visibly marked
+  as a non-qualified test statement; `NoMatch`, `Unknown`, mismatched,
+  expired and ambiguous identities receive nothing.
 - **The citizen logs in at the reference QTSP** (#560): before a request
   starts, with the NL Wallet (the PID's name, date of birth and
   nationalities, not the BSN, through usecase `qtsp-login` of the wallet

@@ -28,6 +28,10 @@ func TestMaterializeIssuanceReleaseUsesMountedSecretsWithoutPersistingThem(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
+	qtspArtifacts, err := provider.Provision(qtspRegistration("99999999900000001300", "GBO demo test QTSP"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	certificateSet, err := publicCertificateSet(registration.certificateSetID(), artifacts)
 	if err != nil {
 		t.Fatal(err)
@@ -83,6 +87,8 @@ func TestMaterializeIssuanceReleaseUsesMountedSecretsWithoutPersistingThem(t *te
 		secretsDir:     secrets,
 		templatePath:   filepath.Join("config", "issuance_server.toml.example"),
 		adapterBaseURL: "https://adapter.example", outputPath: output,
+		qtspAttestationURL: "https://qtsp-reference:4443/attestations",
+		qtspMetadataPath:   filepath.Join("config", "qtsp_attestation_metadata.json"),
 	}
 	if err := materializeIssuanceRelease(options, persistedRelease); err != nil {
 		t.Fatal(err)
@@ -101,7 +107,19 @@ func TestMaterializeIssuanceReleaseUsesMountedSecretsWithoutPersistingThem(t *te
 	if !strings.Contains(string(rendered), "inkomensverklaring") || !strings.Contains(string(rendered), "private_key =") {
 		t.Fatal("materialized issuance TOML is missing release settings or secret material")
 	}
+	for _, want := range []string{
+		`[disclosure_settings."qtsp-attestation"]`, `base_url = "https://qtsp-reference:4443/attestations"`,
+		`path = ["family_name"]`, `path = ["nationalities"]`, `[attestation_settings."https://gbo.ictu.nl/credentials/qtsp-attestation/v1"]`,
+		`valid_days = 30`, `copies_per_format = { "dc+sd-jwt" = 1 }`, `attestation_qualification = "EAA"`, strings.TrimSpace(readTestFile(t, qtspArtifacts.ReaderCertReference)),
+	} {
+		if !strings.Contains(string(rendered), want) {
+			t.Errorf("materialized issuance TOML does not contain %q", want)
+		}
+	}
 	if _, err := os.Stat(filepath.Join(runtimeDir, "type-belastingdienst-inkomensverklaring-v1.0.json")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(runtimeDir, qtspMetadataFilename)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(runtimeDir, "source-release.json")); err != nil {
@@ -116,4 +134,13 @@ func TestMaterializeIssuanceReleaseUsesMountedSecretsWithoutPersistingThem(t *te
 	if err := materializeIssuanceRelease(options, persistedRelease); err == nil || !strings.Contains(err.Error(), "issuer-key.der.b64") {
 		t.Fatalf("materialize without issuer key error = %v", err)
 	}
+}
+
+func readTestFile(t *testing.T, path string) string {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(body)
 }

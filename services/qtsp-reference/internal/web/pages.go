@@ -59,6 +59,12 @@ var resultPage = template.Must(template.New("result").Parse(`<!doctype html>
 <table><tr><th>Attribuut</th><th>{{if eq .Operation "verify"}}Uitkomst{{else}}Waarde{{end}}</th></tr>
 {{range .Results}}<tr><td>{{.Label}}</td><td>{{.Display}}</td></tr>
 {{end}}</table>{{end}}
+{{if .WalletQR}}<section>
+<h2>Zet de verklaring in uw NL Wallet</h2>
+<p>Deze verklaring is een test en geen gekwalificeerde elektronische attestatie van attributen.</p>
+<p>Scan deze code met de NL Wallet op uw telefoon.</p>
+<p><img src="{{.WalletQR}}" alt="QR-code om de testverklaring in de NL Wallet te zetten" width="280" height="280"></p>
+</section>{{end}}
 <p><a href="/">Nieuwe aanvraag</a></p>
 </main></body></html>
 `))

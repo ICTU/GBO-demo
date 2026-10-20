@@ -63,6 +63,10 @@ type sourceRegistration struct {
 	Logo *organizationLogo `json:"-" yaml:"-"`
 	// Description is provisioning input too: the environment the issuer is in.
 	Description string `json:"-" yaml:"-"`
+	// ReaderAttributes overrides the PID attributes in a development reader
+	// certificate. Ordinary sources use the BSN default; supplemental issuers
+	// such as the reference QTSP disclose a different PID subset.
+	ReaderAttributes map[string][][]string `json:"-" yaml:"-"`
 }
 
 func (r sourceRegistration) certificateSetID() string {

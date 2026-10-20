@@ -14,5 +14,6 @@ RUN apk add --no-cache ca-certificates wget
 WORKDIR /app
 COPY --from=builder /eudi-adapter .
 COPY services/eudi-adapter/config/issuance_server.toml.example ./issuance_server.toml.example
+COPY services/eudi-adapter/config/qtsp_attestation_metadata.json ./qtsp_attestation_metadata.json
 EXPOSE 4009
 CMD ["./eudi-adapter"]

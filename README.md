@@ -190,7 +190,10 @@ FSC consumer peer of its own (...1200). `make demo-asi` adds it to a running
 reference QTSP (`services/qtsp-reference`, http://localhost:9427) is where a
 user starts. The developer portal's ASI tab lays a request down at that QTSP,
 with scenarios for each verification result, and shows the outcome next to
-the chain. See
+the chain. After a successful result, the QTSP offers a clearly marked,
+non-qualified test statement to the same citizen's NL Wallet. The existing
+central issuance server uses a separate QTSP usecase and certificate set and
+fetches the pending statement over internal HTTPS. See
 [services/asi-provider/README.md](services/asi-provider/README.md).
 
 `S01` is the architecture role identifier used in the demo diagrams for the
