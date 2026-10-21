@@ -1,7 +1,7 @@
 # OpenFTV PDP with the embedded OPA/Rego engine (replaces the bare OPA
 # deployment). Image is built from services/openftv-pdp/Dockerfile, from the
-# OpenFTV v0.1.0 release tag: the published pdp image cannot be used until
-# the GraphQL request-mapper no longer has to be patched in (#331).
+# OpenFTV v0.1.0 release tag: this release lacks the FTV GraphQL profile
+# mapper and its PDP wiring, so the published pdp image cannot yet be used.
 image:
   repository: ghcr.io/ictu/gbo-demo/openftv-pdp
   tag: latest

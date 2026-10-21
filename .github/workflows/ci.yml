@@ -346,7 +346,7 @@ jobs:
             --file "services/${{ matrix.service }}/Dockerfile" \
             --tag "gbo-demo/${{ matrix.service }}:ci" \
             "${context}"
-      # The PDP is still built from source (#331), so it names a git ref
+      # The PDP still needs the FTV GraphQL mapper patch, so it names a git ref
       # while the Manager and management interface name published image
       # tags. All three must be the same OpenFTV version: the bundle format
       # travels between the Manager and the PDP, and the management

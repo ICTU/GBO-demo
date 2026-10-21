@@ -1,9 +1,10 @@
 FROM golang:1.27-alpine@sha256:26402d86be3d72e6a9410afa0108f03529f51f0c1b5eb7f503d0bc44cc7857ac AS builder
 
-# Released OpenFTV. Built from source rather than pulled, because the
-# GraphQL request-mapper below still has to be patched in (#331); the
-# published pdp image becomes usable once that patch is empty. Keep in
-# lockstep with the manager and management-interface image tags in
+# Released OpenFTV. Built from source because v0.1.0 does not include the
+# FTV GraphQL profile mapper or wire configured request mappings into the
+# PDP. Once both are available upstream, this patch can be removed and the
+# published pdp image can be used. Keep the release tag in lockstep with
+# the manager and management-interface image tags in
 # docker-compose.yml — CI fails when the three drift apart.
 ARG OPENFTV_REF=v0.1.0
 
