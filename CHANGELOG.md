@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Added
+- **Documentation of the ASI route** (#336, slice 8): `docs/asi-route.md`
+  states for each part of the route whether it is real, stubbed, a GBO
+  interpretation or a demo shortcut. `conformance/security-considerations.md`
+  weighs the security considerations of ETSI TS 119 478 clause 6.1.3.4 item by
+  item against RFC 9700 and the FAPI 2.0 Security Profile; REQ-AZSP-6.1.3.4-01
+  is now passed. Outdated statements in the ASI service READMEs are corrected.
 - **Same-device NL Wallet login at the ASI authorization server** (#548):
   the wallet page always shows an “Open NL Wallet” universal link and the
   cross-device QR code, with CSS putting the button first on a narrow screen

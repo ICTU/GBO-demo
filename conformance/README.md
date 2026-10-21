@@ -24,3 +24,5 @@ cd conformance/check && go run . -matrix ../etsi-ts-119478.yaml -root ../..
 ```
 
 The roles DIP (the Discover Interface Provider) and TSP (the trust service provider that asks) are outside the ASIP's claim; the demo plays them with `services/asi-discovery-stub` and `services/qtsp-reference`.
+
+The security considerations the authorization server must take into account (REQ-AZSP-6.1.3.4-01) are weighed in [`security-considerations.md`](security-considerations.md).

@@ -389,9 +389,15 @@ requirements:
       - "services/asi-authorization-server/internal/httpapi:TestRecheckSeesAWithdrawalInTheRegisterFile"
     reason: Certificates are test certificates from the development reader CA, not WRPACs, and entitlements come from a file-based stub register instead of the national register.
   REQ-AZSP-6.1.3.4-01:
-    status: failing
-    reason: Individual measures are tested (single-use short-lived codes, exact redirect URIs, PKCE, replay checks, DPoP), but the security considerations are not weighed as a whole anywhere.
-    slice: "#336 slice 8 (documentation): a recorded review per referenced RFC"
+    status: passed
+    tests:
+      - "services/asi-authorization-server/internal/httpapi:TestUnknownClientOrRedirectURIIsNotRedirected"
+      - "services/asi-authorization-server/internal/httpapi:TestAuthorizationRequestErrors"
+      - "services/asi-authorization-server/internal/httpapi:TestCodeIsSingleUseShortLivedAndBoundToTheClient"
+      - "services/asi-authorization-server/internal/httpapi:TestReplayedClientAssertionIsInvalidClient"
+      - "services/asi-authorization-server/internal/httpapi:TestFullFlowIssuesDPoPBoundAccessToken"
+      - "services/asi-provider/internal/httpapi:TestReplayedDPoPProofIs401"
+    reason: The security considerations are weighed in conformance/security-considerations.md, item by item against RFC 9700 section 2 and the FAPI 2.0 Security Profile section 5, with RFC 7636 and RFC 6819 where they add to them. The requirement asks to take them into account; what is not met is recorded there as a demo choice or as open.
   REQ-AZSP-6.1.3.4-02:
     status: not-applicable
     reason: An organisational requirement on the production operator (an ISMS); the demo is not operated as a production service.

@@ -26,4 +26,3 @@ A real wallet reaches the verifier only over HTTPS. Point a tunnel at the public
 ## Known gaps
 
 - The NL PID of nl-wallet v0.5.0 has no place of birth, although CIR (EU) 2024/2977 makes `birth_place` mandatory.
-- The image is not in the published image manifest yet, like the reference QTSP and the DIP stub.

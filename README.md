@@ -194,7 +194,9 @@ the chain. After a successful result, the QTSP offers a clearly marked,
 non-qualified test statement to the same citizen's NL Wallet. The existing
 central issuance server uses a separate QTSP usecase and certificate set and
 fetches the pending statement over internal HTTPS. See
-[services/asi-provider/README.md](services/asi-provider/README.md).
+[services/asi-provider/README.md](services/asi-provider/README.md), and
+[docs/asi-route.md](docs/asi-route.md) for what in this route is real,
+stubbed or a GBO interpretation.
 
 `S01` is the architecture role identifier used in the demo diagrams for the
 consent-register; it is not a separate service. The demo consent token is a

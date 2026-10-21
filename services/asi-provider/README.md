@@ -10,7 +10,7 @@ A mock Authentic Source Interface Provider. A qualified trust service provider (
 | Data services | one per authentic source (`config/dataservices.json`); the demo has one, `brp` |
 | Sealed results | every successful response is sealed; the certificate is a **development** certificate, not a qualified one |
 | Authentic source | the BRP mock, asked over FSC through the ASIP's own Outway; the PDP of the BRP Inway judges each query (rule `ASI0001`) |
-| Authorization (clause 6.1.3) | every request needs a DPoP-bound access token from [`asi-authorization-server`](../asi-authorization-server); the BSN of the user comes from the token. User identification at the authorization server is still a stub |
+| Authorization (clause 6.1.3) | every request needs a DPoP-bound access token from [`asi-authorization-server`](../asi-authorization-server); the BSN of the user comes from the token. The authorization server identifies the user with the NL Wallet, or with a DigiD mock (stub) |
 | Attribute identifiers | provisional (`https://gbo.example/attributes/<name>/1`); there is no Dutch catalogue of attributes yet |
 
 ## Run
@@ -34,7 +34,7 @@ ASIP_OUTWAY_URL=http://localhost:8080 \
 go run .
 ```
 
-A request needs an access token from the authorization server, obtained through the authorization code flow; see [`asi-authorization-server`](../asi-authorization-server). There is no client to do that by hand yet (slice 6 of #336); the end-to-end test of the authorization server runs the whole flow against this service.
+A request needs an access token from the authorization server, obtained through the authorization code flow; see [`asi-authorization-server`](../asi-authorization-server). The reference QTSP ([`qtsp-reference`](../qtsp-reference)) runs the whole flow; the end-to-end test of the authorization server does so against this service.
 
 Configuration: `ASIP_ADDR` (default `:4020`), `ASIP_PUBLIC_URL` (the scheme and host QTSPs use, default `http://localhost:4020`; the token audience of a data service is this URL plus `/<data service>/authsrc-api`), `ASIP_AUTHORIZATION_SERVER` (the issuer, default `http://localhost:4021`), `ASIP_AUTHORIZATION_SERVER_INTERNAL_URL` (where the ASIP reaches the authorization server when that differs from the issuer), `ASIP_OUTWAY_URL` (required: the ASIP's Outway), `ASIP_DATASERVICES_FILE` (default `config/dataservices.json`), `ASIP_SEAL_KEY_FILE`, `ASIP_SEAL_CERT_FILE` (chain, leaf first).
 
