@@ -50,6 +50,14 @@ else := {}
 
 _parties := _pulled_participants
 
+# An empty register is available data: it admits nobody. Only a missing
+# dvtp_participant document means the PIP pull did not supply a register.
+default _register_available := false
+
+_register_available if {
+	data.entities.dvtp_participant
+}
+
 _grant_types := {t | some t in input.resource.attributes.grant_types}
 
 # Every party on the contract except ourselves.
@@ -159,6 +167,7 @@ _checks := [
 	{"code": "NOT_AN_AUTOSIGN_REQUEST", "ok": _well_formed},
 	{"code": "GRANT_TYPE_NOT_ALLOWED", "ok": _grant_types_allowed},
 	{"code": "NO_COUNTERPARTY", "ok": _has_counterparty},
+	{"code": "ADMISSION_REGISTER_UNAVAILABLE", "ok": _register_available},
 	{"code": "PARTY_NOT_IN_REGISTRY", "ok": _all_known},
 	{"code": "PARTY_NOT_ACTIVE", "ok": _all_active},
 	{"code": "SOURCE_NOT_ALLOWED", "ok": _source_allowed},

@@ -686,6 +686,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   `SubjectTypePI`.
 
 ### Fixed
+- **Contract auto-sign distinguishes an unavailable admission register**
+  (#491): a missing OpenFTV PIP document now refuses with
+  `ADMISSION_REGISTER_UNAVAILABLE`, while an empty or incomplete register
+  continues to refuse with `PARTY_NOT_IN_REGISTRY`. The operator guidance
+  treats the former as a register or PIP pull failure.
 - **Retrieve answered 200 without the attributes the source holds no value
   for.** It left them out, and with none left the response had an empty
   `attributes` array. It now answers 404 naming the attribute, with no

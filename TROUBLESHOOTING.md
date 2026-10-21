@@ -59,6 +59,14 @@ Check the `make fsc-seed-bri` output. Common causes:
                     "https://bd-manager:9443/v1/contracts?grant_type=GRANT_TYPE_SERVICE_PUBLICATION" | jq'
   ```
 
+  If it remains pending, inspect the latest `auto_sign_contract` decision in
+  `docker compose logs --no-log-prefix openftv-pdp`. A refusal with
+  `ADMISSION_REGISTER_UNAVAILABLE` means the PDP has no
+  `data.entities.dvtp_participant` document: check the onboarding register
+  and OpenFTV PIP pull. `PARTY_NOT_IN_REGISTRY` means the document is present
+  but does not contain the peer: admit that peer in the register. The Manager
+  does not counter-sign in either case.
+
 ## Every request denies with `NO_APPLICABLE_RULE`
 
 `NO_APPLICABLE_RULE` is the engine's closed-world default: no rule declares
