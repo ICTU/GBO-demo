@@ -62,16 +62,34 @@ var ErrNotIdentified = errors.New("the user was not identified")
 // QR code of a session does not get the login.
 type SessionIdentifier interface {
 	Identifier
-	Start(ctx context.Context) (session string, err error)
+	Start(ctx context.Context, returnURLTemplate string) (session string, err error)
 	Progress(ctx context.Context, session string) (Progress, error)
+}
+
+// ReturningSessionIdentifier is a session means that can release an identity
+// after the user's device returned the browser with a verifier nonce. The
+// core first binds the returned session to this browser's transaction and
+// only then passes the kept session and nonce to the means.
+type ReturningSessionIdentifier interface {
+	SessionIdentifier
+	IdentifyReturn(ctx context.Context, session, nonce string) (Identity, error)
 }
 
 // Progress is how far the user is with a session: waiting (with the link to
 // show, while there is one), done, or failed (declined, cancelled or
 // expired).
 type Progress struct {
-	State SessionState
-	Link  string
+	State          SessionState
+	Link           string
+	SameDeviceLink string
+}
+
+// SessionReturn is the result after a device returned the browser: the
+// verifier may still be waiting, may report that the login failed, or may
+// complete the authorization with a response for the client.
+type SessionReturn struct {
+	Progress Progress
+	Response AuthorizationResponse
 }
 
 type SessionState int
@@ -218,7 +236,7 @@ func (s *Service) Transaction(transactionID, binding string) (*Transaction, bool
 // for the transaction, and keeps it with the transaction. When the means
 // cannot be reached the error is ErrMeansUnavailable and the transaction
 // stays.
-func (s *Service) StartSession(ctx context.Context, transactionID, binding, means string) error {
+func (s *Service) StartSession(ctx context.Context, transactionID, binding, means, returnURLTemplate string) error {
 	identifier, ok := s.cfg.Identifiers[means].(SessionIdentifier)
 	if !ok {
 		return &NotRedirectableError{Description: "the identification means is not available"}
@@ -226,7 +244,7 @@ func (s *Service) StartSession(ctx context.Context, transactionID, binding, mean
 	if !s.Pending(transactionID, binding) {
 		return notPending
 	}
-	session, err := identifier.Start(ctx)
+	session, err := identifier.Start(ctx, returnURLTemplate)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrMeansUnavailable, err)
 	}
@@ -295,11 +313,54 @@ func (s *Service) LogIn(ctx context.Context, l Login) (AuthorizationResponse, er
 	if err != nil {
 		return AuthorizationResponse{}, fmt.Errorf("%w: %v", ErrNotIdentified, err)
 	}
+	return s.completeIdentification(l.TransactionID, l.Binding, l.Means, identity)
+}
+
+// ReturnSession completes a same-device login. The session token in the
+// return URL must be the session kept with this transaction and browser;
+// only then may the verifier nonce be used to retrieve the identity.
+func (s *Service) ReturnSession(ctx context.Context, transactionID, binding, means, session, nonce string) (SessionReturn, error) {
+	identifier, ok := s.cfg.Identifiers[means].(ReturningSessionIdentifier)
+	if !ok {
+		return SessionReturn{}, &NotRedirectableError{Description: "the identification means does not support a browser return"}
+	}
+	p, ok := s.transactions.peek(transactionID, binding, s.cfg.Now())
+	if !ok || p.means != means || p.session == "" || subtle.ConstantTimeCompare([]byte(p.session), []byte(session)) != 1 {
+		return SessionReturn{}, notPending
+	}
+	if nonce == "" {
+		return SessionReturn{}, fmt.Errorf("%w: the return nonce is missing", ErrNotIdentified)
+	}
+	progress, err := identifier.Progress(ctx, p.session)
+	if err != nil {
+		return SessionReturn{}, fmt.Errorf("%w: %v", ErrMeansUnavailable, err)
+	}
+	if progress.State != SessionDone {
+		return SessionReturn{Progress: progress}, nil
+	}
+	identity, err := identifier.IdentifyReturn(ctx, p.session, nonce)
+	if errors.Is(err, ErrMeansUnavailable) {
+		return SessionReturn{}, err
+	}
+	if err != nil {
+		return SessionReturn{}, fmt.Errorf("%w: %v", ErrNotIdentified, err)
+	}
+	response, err := s.completeIdentification(transactionID, binding, means, identity)
+	if err != nil {
+		return SessionReturn{}, err
+	}
+	return SessionReturn{
+		Progress: Progress{State: SessionDone},
+		Response: response,
+	}, nil
+}
+
+func (s *Service) completeIdentification(transactionID, binding, means string, identity Identity) (AuthorizationResponse, error) {
 	if identity.BSN == "" {
 		return AuthorizationResponse{}, fmt.Errorf("%w: the means gave no BSN", ErrNotIdentified)
 	}
-	identity.Means = l.Means
-	taken, err := s.takeTransaction(l.TransactionID, l.Binding)
+	identity.Means = means
+	taken, err := s.takeTransaction(transactionID, binding)
 	if err != nil {
 		return AuthorizationResponse{}, err
 	}

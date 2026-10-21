@@ -406,10 +406,14 @@ demo-asi: fsc-asip-certs
 	@# The wallet verifier needs the nl-wallet sources; without them the ASI
 	@# route runs with DigiD (mock) only. It is provisioned before the
 	@# authorization server and the QTSP start, which read the API key at
-	@# startup; again when the configuration lacks the QTSP's usecase.
+	@# startup; again when the configuration lacks the QTSP's usecase or
+	@# its ASI return mode differs from the configured public URL.
 	@if [ -f "$$NLWALLET_PATH/wallet_core/Cargo.toml" ]; then $(MAKE) asi-wallet-verifier-image; \
 	else echo "-> no nl-wallet sources at $$NLWALLET_PATH: the ASI wallet verifier is not started (DigiD (mock) only)"; fi
-	@if [ -f "$$NLWALLET_PATH/wallet_core/Cargo.toml" ] && { [ ! -f "$(ASI_WALLET_VERIFIER_CLIENT_DIR)/api-key" ] || ! grep -q '^\[usecases.qtsp-login\]' "$(ASI_WALLET_VERIFIER_DIR)/verification_server.toml" 2>/dev/null; }; then \
+	@desired_return_mode=neither; \
+	case "$(or $(ASI_AUTHORIZATION_SERVER_PUBLIC_URL),http://$(or $(GBO_PUBLIC_HOST),localhost):$(PORT_ASI_AUTHORIZATION_SERVER))" in https://*) desired_return_mode=same_device ;; esac; \
+	current_return_mode=$$(awk '/^\[usecases\.asi-login\]$$/ { in_login=1; next } /^\[/ { in_login=0 } in_login && /^session_type_return_url = / { gsub(/"/, "", $$3); print $$3; exit }' "$(ASI_WALLET_VERIFIER_DIR)/verification_server.toml" 2>/dev/null); \
+	if [ -f "$$NLWALLET_PATH/wallet_core/Cargo.toml" ] && { [ ! -f "$(ASI_WALLET_VERIFIER_CLIENT_DIR)/api-key" ] || ! grep -q '^\[usecases.qtsp-login\]' "$(ASI_WALLET_VERIFIER_DIR)/verification_server.toml" 2>/dev/null || [ "$$current_return_mode" != "$$desired_return_mode" ]; }; then \
 	  $(MAKE) provision-asi-wallet-verifier; fi
 	@# After a new provisioning (its marker) the services are recreated:
 	@# compose does not see the new files, and the QTSP registers again, as

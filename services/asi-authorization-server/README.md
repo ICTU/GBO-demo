@@ -16,7 +16,7 @@ The ASIP and the authorization server may be operated by one party, but they are
 | Dynamic client registration with a sealed software statement (REQ-AZSP-6.1.3.2-01) | implemented; see below. Clients can also be registered in configuration |
 | Register of wallet-relying parties (CIR (EU) 2025/848, D9) | **stub**: entries from `testdata/register.json`, read again on every lookup; the national register and its API (ETSI/EUDI TS5) are not available to this project |
 | QTSP certificates (REQ-AZSP-6.1.3.2-02) | **test certificates** from the development reader CA, not Wallet-Relying Party Access Certificates according to ETSI TS 119 411-8 |
-| User identification and authorization by the user (REQ-AZSP-6.1.3.1-02, -03; clause 6.1.3.3, steps 7-11) | one page shows the request and offers a login with the **NL Wallet** (OpenID4VP PID disclosure through nl-wallet's verification_server, cross-device) or with a **DigiD mock**, which checks nothing and provides the BSN only (stub, not conformant) |
+| User identification and authorization by the user (REQ-AZSP-6.1.3.1-02, -03; clause 6.1.3.3, steps 7-11) | one page shows the request and offers a login with the **NL Wallet** (OpenID4VP PID disclosure through nl-wallet's verification_server, on the same device when the issuer uses HTTPS or cross-device with a QR code) or with a **DigiD mock**, which checks nothing and provides the BSN only (stub, not conformant) |
 | mTLS, PAR, refresh tokens | not offered (see below) |
 
 ## Endpoints
@@ -27,7 +27,8 @@ The ASIP and the authorization server may be operated by one party, but they are
 | `GET /jwks.json` | the public token signing key |
 | `GET /authorize` | authorization request: `response_type=code`, `client_id`, `redirect_uri`, `scope` (`verify`, `retrieve` or both), `state`, `code_challenge`, `code_challenge_method=S256`, `resource` (one data service of the ASIP), and optionally one RFC 9396 `authorization_details` object that binds the same resource and operations to selected attribute identifiers. A valid request gets the request page |
 | `POST /authorize/decision` | the user's choice on the request page: `transaction`, `decision` (`deny`, `digid` or `wallet`). Deny answers with the redirect to the client; `digid` leads to the DigiD mock; `wallet` opens a disclosure session and leads to the wallet page (refused when no verifier is configured, 503 when it is unreachable) |
-| `GET /authorize/wallet` | the NL Wallet: the QR code of the disclosure session, refreshing itself; once the wallet disclosed the PID, the redirect to the client; when declined, expired or unusable, the request page again |
+| `GET /authorize/wallet` | the NL Wallet: the same-device universal link and cross-device QR code of the disclosure session, refreshing itself; once the wallet disclosed the PID, the redirect to the client; when declined, expired or unusable, the request page again |
+| `GET /authorize/wallet/return` | return from a same-device wallet session: `transaction`, `session_token` and the verifier's return `nonce`; the session and browser must belong to that transaction before the disclosed PID is requested |
 | `GET`, `POST /authorize/digid` | the DigiD mock: the login page, and the login with `transaction`, `username` (ignored) and `bsn`; a login answers with the redirect to the client |
 | `POST /token` | token request: `grant_type=authorization_code`, `code`, `redirect_uri`, `code_verifier`, `client_assertion_type`, `client_assertion`, and a `DPoP` proof header |
 | `POST /register` | client registration (RFC 7591): `redirect_uris`, `scope`, optionally `token_endpoint_auth_method`, and the `software_statement` |
@@ -79,11 +80,11 @@ Ports and adapters, as `AGENTS.md` asks for a service with an authorization boun
 
 | Package | |
 |---|---|
-| `internal/authorization` | the core: the authorization, token and registration requests, PKCE, codes, client authentication, DPoP proofs, token issuance, re-verification. Ports `Clients`, `Register` and `Identifier`: an identification means identifies the user behind the port, and the core names the means in the token |
+| `internal/authorization` | the core: the authorization, token and registration requests, PKCE, codes, client authentication, DPoP proofs, token issuance, re-verification and the binding of a wallet return to its transaction and browser. Ports `Clients`, `Register` and `Identifier`: an identification means identifies the user behind the port, and the core names the means in the token |
 | `internal/clientconfig` | `Clients` from the configuration file |
 | `internal/stubregister` | `Register`: the stub register |
 | `internal/qtspcert` | the `provision-qtsp-certificate` command |
-| `internal/walletverifier` | the NL Wallet as identification means: the client of the verifier's API (start a disclosure session, follow its status, read the disclosed PID), and the `provision-wallet-verifier` command: the reader certificate and configuration of the verifier (`services/asi-wallet-verifier`) |
+| `internal/walletverifier` | the NL Wallet as identification means: the client of the verifier's API (start a disclosure session with its return template, obtain both device links, follow its status and read the disclosed PID with the return nonce when required), and the `provision-wallet-verifier` command: the reader certificate and configuration of the verifier (`services/asi-wallet-verifier`) |
 | `internal/digidmock` | `Identifier`: the DigiD mock, an adapter with its login page, in two files so it can move to a service of its own |
 | `internal/httpapi` | the endpoints, and the translation to the responses of RFC 6749 |
 | `main.go` | composition root |
@@ -121,12 +122,13 @@ Choosing a means starts the approval; the grant is established only after the lo
 
 With the NL Wallet the authorization server has the citizen disclose the PID through nl-wallet's `verification_server` (`services/asi-wallet-verifier`), behind the core's `SessionIdentifier` port (`internal/walletverifier`):
 
-- choosing the wallet opens a disclosure session for usecase `asi-login` that asks `bsn`, `family_name`, `given_name`, `birthdate` and `nationalities` of `urn:eudi:pid:nl:1`. The core keeps the session with the transaction and never takes one from the browser, so a finished session cannot be carried over to another transaction (the QR code shows the session);
-- the wallet page shows the QR code (cross-device) and refreshes itself every two seconds; it has no script, so the strict CSP stays (it allows `data:` images);
+- choosing the wallet opens a disclosure session for usecase `asi-login` that asks `bsn`, `family_name`, `given_name`, `birthdate` and `nationalities` of `urn:eudi:pid:nl:1`. The core keeps the session with the transaction and never takes one from the browser, so a finished session cannot be carried over to another transaction;
+- the wallet page always offers the universal link as “Open NL Wallet” and the cross-device QR code. On a narrow screen CSS puts the button first. It refreshes every two seconds and has no script, so the strict CSP stays (it allows `data:` images). Because nl-wallet accepts only an HTTPS return template, a local HTTP issuer shows the same-device button disabled with an explanation while the QR flow remains available;
+- for an HTTPS issuer, the session start carries a return template for `/authorize/wallet/return`. The verifier is provisioned with `session_type_return_url = "same_device"`: the wallet returns only a same-device browser, with the session token and a verifier nonce. The core first checks that the session is the one stored with this browser's transaction and only then asks the verifier for the PID with that nonce. Cross-device login continues to use the polling page, including when the optional same-device link cannot be obtained;
 - when the wallet disclosed the PID, the core logs the user in: the token carries the BSN, the four PID attributes and `acr`/`amr` `nl-wallet`. The NL PID has no place of birth, so one of the five mandatory PID attributes is missing;
-- declined in the wallet or expired, or a disclosure without a BSN or of another type: the request page again, with why, and the transaction stays. A verifier that cannot be reached, fails or refuses the API key, also when it fetches the disclosed attributes of a finished session: a 503 page, and the transaction stays for DigiD (mock).
+- declined in the wallet or expired, a return without the correct nonce, or a disclosure without a BSN or of another type: the request page again, with why, and the transaction stays. A verifier that cannot be reached, fails or refuses the API key, also when it fetches the disclosed attributes of a finished session: a 503 page, and the transaction stays for DigiD (mock). A run with the real wallet on one phone remains a follow-up until the ASI route is available over HTTPS in the simulation environment.
 
-Configuration: `AZSP_WALLET_VERIFIER_URL` (internal API), `AZSP_WALLET_VERIFIER_STATUS_URL` (wallet API, for the session status) and `AZSP_WALLET_VERIFIER_API_KEY_FILE`, read at startup; without the key file the wallet is not offered. Compose mounts only the directory with the key, not the verifier's configuration.
+Configuration: `AZSP_WALLET_VERIFIER_URL` (internal API), `AZSP_WALLET_VERIFIER_STATUS_URL` (wallet API, for the session status) and `AZSP_WALLET_VERIFIER_API_KEY_FILE`, read at startup; without the key file the wallet is not offered. Compose mounts only the directory with the key, not the verifier's configuration. `make demo-asi` reprovisions when the return mode required by `ASI_AUTHORIZATION_SERVER_PUBLIC_URL` differs from the current configuration. Run `make provision-asi-wallet-verifier` again after changing that URL's host: the reader certificate also binds the origin.
 
 ## Interpretations and choices
 

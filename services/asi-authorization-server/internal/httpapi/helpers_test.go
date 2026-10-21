@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -84,6 +85,10 @@ func newTestASWithoutWallet(t *testing.T) *testAS {
 }
 
 func newTestASWith(t *testing.T, resource string, register authorization.Register, withWallet bool) *testAS {
+	return newTestASWithIssuer(t, resource, register, withWallet, "")
+}
+
+func newTestASWithIssuer(t *testing.T, resource string, register authorization.Register, withWallet bool, issuer string) *testAS {
 	t.Helper()
 	as := &testAS{wallet: newFakeWallet(), keys: map[string]*ecdsa.PrivateKey{}, kids: map[string]string{}, dpopKey: newECKey(t), register: newFakeRegister(), ca: newTestCA(t)}
 	var reg authorization.Register = as.register
@@ -100,7 +105,10 @@ func newTestASWith(t *testing.T, resource string, register authorization.Registe
 	var handler http.Handler
 	as.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { handler.ServeHTTP(w, r) }))
 	t.Cleanup(as.srv.Close)
-	tokens, err := authorization.NewTokenIssuer(as.srv.URL, newECKey(t))
+	if issuer == "" {
+		issuer = as.srv.URL
+	}
+	tokens, err := authorization.NewTokenIssuer(issuer, newECKey(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +132,7 @@ func newTestASWith(t *testing.T, resource string, register authorization.Registe
 		identifiers[walletverifier.Means] = as.wallet
 	}
 	as.service = authorization.NewService(authorization.Config{
-		Issuer:       as.srv.URL,
+		Issuer:       issuer,
 		Resources:    []authorization.Resource{{URL: resource, Name: "Basisregistratie Personen (test)"}, {URL: testResource2, Name: "DUO (test)"}},
 		Clients:      clientconfig.New(clients...),
 		Identifiers:  identifiers,
@@ -332,7 +340,7 @@ func (as *testAS) assertion(t *testing.T, clientID string, edit func(map[string]
 	claims := map[string]any{
 		"iss": clientID,
 		"sub": clientID,
-		"aud": as.srv.URL,
+		"aud": as.service.Issuer(),
 		"iat": now.Unix(),
 		"exp": now.Add(time.Minute).Unix(),
 		"jti": authorization.RandomID(),
@@ -350,7 +358,7 @@ func (as *testAS) assertion(t *testing.T, clientID string, edit func(map[string]
 // proof is a DPoP proof for the token endpoint; edit may change its claims.
 func (as *testAS) proof(t *testing.T, edit func(map[string]any)) string {
 	t.Helper()
-	claims := map[string]any{"jti": authorization.RandomID(), "htm": http.MethodPost, "htu": as.srv.URL + authorization.TokenPath, "iat": as.now().Unix()}
+	claims := map[string]any{"jti": authorization.RandomID(), "htm": http.MethodPost, "htu": as.service.Issuer() + authorization.TokenPath, "iat": as.now().Unix()}
 	if edit != nil {
 		edit(claims)
 	}
@@ -452,10 +460,11 @@ func newECKey(t *testing.T) *ecdsa.PrivateKey {
 // fakeWallet is the NL Wallet verifier as SessionIdentifier, in memory: a
 // test sets how each session goes.
 type fakeWallet struct {
-	mu       sync.Mutex
-	next     int
-	startErr error
-	sessions map[string]*fakeWalletSession
+	mu                sync.Mutex
+	next              int
+	startErr          error
+	returnURLTemplate string
+	sessions          map[string]*fakeWalletSession
 }
 
 type fakeWalletSession struct {
@@ -463,19 +472,25 @@ type fakeWalletSession struct {
 	progressErr error
 	identity    authorization.Identity
 	identifyErr error
+	returnNonce string
 }
 
 func newFakeWallet() *fakeWallet { return &fakeWallet{sessions: map[string]*fakeWalletSession{}} }
 
-func (f *fakeWallet) Start(context.Context) (string, error) {
+func (f *fakeWallet) Start(_ context.Context, returnURLTemplate string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.startErr != nil {
 		return "", f.startErr
 	}
+	f.returnURLTemplate = returnURLTemplate
 	f.next++
 	id := fmt.Sprintf("session-%d", f.next)
-	f.sessions[id] = &fakeWalletSession{progress: authorization.Progress{State: authorization.SessionWaiting, Link: "https://app.example/deeplink/" + id}}
+	f.sessions[id] = &fakeWalletSession{progress: authorization.Progress{
+		State:          authorization.SessionWaiting,
+		Link:           "https://app.example/deeplink/cross/" + id,
+		SameDeviceLink: "https://app.example/deeplink/same/" + id,
+	}}
 	return id, nil
 }
 
@@ -490,6 +505,16 @@ func (f *fakeWallet) Identify(_ context.Context, session string) (authorization.
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	s := f.sessions[session]
+	return s.identity, s.identifyErr
+}
+
+func (f *fakeWallet) IdentifyReturn(_ context.Context, session, nonce string) (authorization.Identity, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	s := f.sessions[session]
+	if nonce == "" || nonce != s.returnNonce {
+		return authorization.Identity{}, errors.New("the return nonce is not valid")
+	}
 	return s.identity, s.identifyErr
 }
 
