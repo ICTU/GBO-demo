@@ -60,7 +60,7 @@ A clients file registers each client with its redirect URIs, its scopes and the 
 }
 ```
 
-There is no client to try the flow by hand yet; the reference QTSP client is slice 6 of #336. `internal/httpapi/e2e_test.go` runs the whole flow against a started `asi-provider`.
+The reference QTSP ([`qtsp-reference`](../qtsp-reference)) runs the flow by hand; `internal/httpapi/e2e_test.go` runs the whole flow against a started `asi-provider`.
 
 ## Dynamic client registration
 
@@ -100,7 +100,7 @@ A JWT according to RFC 9068, signed with ES256, `typ` `at+jwt`, with:
 | `scope` | `verify`, `retrieve` or both: the operations ETSI TS 119 478 authorizes (clause 6.1.3.2) |
 | `authorization_details` | present when the request supplied the optional RFC 9396 detail approved by the user: its `locations`, `actions` and `attribute_identifiers` bind the token to one data service, the operation(s) and selected attributes; absent for ETSI operation-only authorization |
 | `cnf.jkt` | the thumbprint of the client's DPoP key (RFC 9449 section 6) |
-| `acr`, `amr` | the means that identified the user (RFC 9068 section 2.2.3.1): `digid-mock` |
+| `acr`, `amr` | the means that identified the user (RFC 9068 section 2.2.3.1): `nl-wallet` or `digid-mock` |
 | `https://gbo.example/claims/bsn` | the BSN of the user, **in plain text** (D3). The BSN has no entry in the IANA JWT registry, so the claim name is collision-resistant (RFC 9068 section 2.2.2); the namespace is provisional (D8). Slice 9 of #336 protects it |
 | `family_name`, `given_name`, `birthdate`, `place_of_birth`, `nationalities` | only when the means provides them, which DigiD does not (D7): the mandatory PID attributes of the user (CIR (EU) 2024/2977), under the names of the IANA JWT Claims Registry (RFC 9068 section 2.2.2), which the SD-JWT VC encoding of the PID rulebook uses too. `place_of_birth` is an object with `country`, `region` and/or `locality`; `nationalities` an array of ISO 3166-1 alpha-2 codes |
 
@@ -131,6 +131,9 @@ With the NL Wallet the authorization server has the citizen disclose the PID thr
 Configuration: `AZSP_WALLET_VERIFIER_URL` (internal API), `AZSP_WALLET_VERIFIER_STATUS_URL` (wallet API, for the session status) and `AZSP_WALLET_VERIFIER_API_KEY_FILE`, read at startup; without the key file the wallet is not offered. Compose mounts only the directory with the key, not the verifier's configuration. `make demo-asi` reprovisions when the return mode required by `ASI_AUTHORIZATION_SERVER_PUBLIC_URL` differs from the current configuration. Run `make provision-asi-wallet-verifier` again after changing that URL's host: the reader certificate also binds the origin.
 
 ## Interpretations and choices
+
+The security considerations of clause 6.1.3.4 (RFC 9700, FAPI 2.0, RFC 7636, RFC 6819) are weighed item by item in [`conformance/security-considerations.md`](../../conformance/security-considerations.md); an overview of the whole route is in [`docs/asi-route.md`](../../docs/asi-route.md).
+
 
 - **One mechanism of each.** REQ-AZSP-6.1.3.1-05 and -06 require mTLS or `private_key_jwt`, and mTLS or DPoP. This server offers `private_key_jwt` and DPoP. A production deployment should consider mTLS.
 - **No PAR.** The FAPI 2.0 Security Profile requires pushed authorization requests; ETSI TS 119 478 only asks to "take into account" FAPI 2.0 (REQ-AZSP-6.1.3.4-01). A stricter server than ETSI would exclude QTSPs that implement ETSI only.
