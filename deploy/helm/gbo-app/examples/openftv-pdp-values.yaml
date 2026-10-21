@@ -23,6 +23,34 @@ env:
   # the request's field list. Without it the policy denies every request.
   - name: PDP_REQUEST_MAPPINGS
     value: ftvgraphql
+  # Native PIP pull of the DvTP admission register. Apply the companion
+  # openftv-pdp-pip-pull-configmap.yaml in the same namespace first.
+  - name: PDP_PIP_PULL_CONFIGS
+    value: /pip-pull/dvtp-onboarding.yaml
+  # The policy fetches verification keys directly from the consent register
+  # and checks live status through the PDP Outway. Replace these service URLs
+  # with the addresses in this deployment. The issuer and audience must match
+  # the consent register's CONSENT_TOKEN_ISSUER and CONSENT_TOKEN_AUDIENCE.
+  # These four values are identifiers/addresses, not credentials.
+  - name: GBO_CONSENT_URL
+    value: http://consent-register:4002
+  - name: GBO_CONSENT_STATUS_URL
+    value: http://pdp-outway:8080/consent-status
+  - name: GBO_CONSENT_ISSUER
+    value: https://consent-register.gbo.test
+  - name: GBO_CONSENT_AUDIENCE
+    value: gbo:dvtp:pdp
+  # The Inway AuthZen plugin connects to the PDP over HTTPS. Mount a TLS
+  # Secret whose certificate is trusted by that Inway and covers the PDP's
+  # Kubernetes service name.
+  - name: PDP_TLS_CERT
+    value: /certs/tls.crt
+  - name: PDP_TLS_KEY
+    value: /certs/tls.key
+  # Optional: set PDP_BUNDLE_MANAGER to the OpenFTV Manager's URL only when
+  # it distributes policies. With this variable unset, /policies is used.
+  # - name: PDP_BUNDLE_MANAGER
+  #   value: http://openftv-manager:9443/v1/bundle/gbo-pdp
   # The Authorization Decision Log. Postgres-backed and required: the PDP
   # exits at startup without it. A dedicated schema keeps the ADL's own
   # migration bookkeeping out of the way of anything else in a shared
@@ -40,6 +68,25 @@ env:
 healthPath: /healthz
 health:
   port: 8080
+
+# The PIP configuration is deployment-specific; its register URL lives in
+# the companion ConfigMap. TLS material is supplied by a Secret, never by
+# the example values file or the container image.
+volumeMounts:
+  - name: pip-pull
+    mountPath: /pip-pull
+    readOnly: true
+  - name: pdp-tls
+    mountPath: /certs
+    readOnly: true
+
+volumes:
+  - name: pip-pull
+    configMap:
+      name: openftv-pdp-pip-pull
+  - name: pdp-tls
+    secret:
+      secretName: openftv-pdp-tls
 
 # Policies are baked into the image at /policies (services/openftv-pdp/
 # Dockerfile, build context = repo root), so no ConfigMap is needed —
