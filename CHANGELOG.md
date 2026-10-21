@@ -7,6 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Added
+- **Same-device NL Wallet login at the ASI authorization server** (#548):
+  the wallet page always shows an “Open NL Wallet” universal link and the
+  cross-device QR code, with CSS putting the button first on a narrow screen
+  and no JavaScript or CSP relaxation. After a same-device disclosure the
+  wallet returns with a verifier nonce; the authorization core first binds
+  its session token to the transaction and browser before the verifier may
+  release the PID. A local HTTP issuer keeps the button visible but disabled
+  and the QR flow working. The real-phone run follows when the ASI route is
+  available over HTTPS in the simulation environment.
 - **Per-attribute binding is optional on the ASI route** (#571): an
   authorization request without RFC 9396 `authorization_details` is accepted
   and produces a token bound to the data service and ETSI operation scope

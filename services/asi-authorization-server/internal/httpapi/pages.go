@@ -25,6 +25,9 @@ import (
 // login.
 const WalletPath = authorization.AuthorizePath + "/wallet"
 
+// WalletReturnPath receives the browser after a same-device wallet session.
+const WalletReturnPath = WalletPath + "/return"
+
 // DecisionPath receives the user's choice on the request page: deny, or a
 // means to log in with.
 const DecisionPath = authorization.AuthorizePath + "/decision"
@@ -129,8 +132,19 @@ var requestPage = page("request", "Toestemming geven", "", `<h1 class="utrecht-h
 // session by refreshing itself; it needs no script.
 var walletPage = page("wallet", "Inloggen met NL Wallet", `<meta http-equiv="refresh" content="2">
 `, `<h1 class="utrecht-heading-1">Inloggen met NL Wallet</h1>
-{{if .QR}}<p class="utrecht-paragraph">Scan deze code met de NL Wallet op uw telefoon.</p>
+{{if .QR}}<div class="azsp-wallet-options">
+<section class="azsp-wallet-option azsp-wallet-option--qr" aria-labelledby="wallet-other-device">
+<h2 class="utrecht-heading-2" id="wallet-other-device">Met een ander apparaat</h2>
+<p class="utrecht-paragraph">Scan deze code met de NL Wallet op uw telefoon.</p>
 <img class="azsp-qr" src="{{.QR}}" alt="QR-code voor de NL Wallet" width="280" height="280">
+</section>
+<section class="azsp-wallet-option azsp-wallet-option--same" aria-labelledby="wallet-same-device">
+<h2 class="utrecht-heading-2" id="wallet-same-device">Op dit apparaat</h2>
+{{if .SameDeviceEnabled}}<a `+primaryButton+` href="{{.SameDeviceLink}}">Open NL Wallet</a>
+{{else}}<button type="button" `+primaryButton+` disabled>Open NL Wallet</button>
+<p class="utrecht-paragraph">Inloggen op hetzelfde apparaat vereist HTTPS.</p>{{end}}
+</section>
+</div>
 {{else}}<p class="utrecht-paragraph">Ga verder in de NL Wallet op uw telefoon.</p>{{end}}
 <form method="post" action="{{.Action}}">
 <input type="hidden" name="transaction" value="{{.TransactionID}}">
@@ -227,16 +241,24 @@ func writeRequestPage(w http.ResponseWriter, tx *authorization.Transaction, secu
 	})
 }
 
-// writeWalletPage shows the QR code of link, or, once the wallet has it,
-// that the user continues in the wallet.
-func writeWalletPage(w http.ResponseWriter, tx, link string) {
+// writeWalletPage shows the same-device link and the QR code, or, once the
+// wallet has the request, that the user continues in the wallet. Same-device
+// login needs an HTTPS issuer; local HTTP keeps the choice visible but
+// disabled.
+func writeWalletPage(w http.ResponseWriter, tx string, progress authorization.Progress, sameDeviceEnabled bool) {
 	var image template.URL
-	if link != "" {
-		if code, err := qr.Encode(link, qr.M); err == nil {
+	if progress.Link != "" {
+		if code, err := qr.Encode(progress.Link, qr.M); err == nil {
 			image = template.URL("data:image/png;base64," + base64.StdEncoding.EncodeToString(code.PNG()))
 		}
 	}
-	writePage(w, http.StatusOK, walletPage, map[string]any{"QR": image, "Action": DecisionPath, "TransactionID": tx})
+	writePage(w, http.StatusOK, walletPage, map[string]any{
+		"QR":                image,
+		"SameDeviceLink":    progress.SameDeviceLink,
+		"SameDeviceEnabled": sameDeviceEnabled && progress.SameDeviceLink != "",
+		"Action":            DecisionPath,
+		"TransactionID":     tx,
+	})
 }
 
 // writeDigiDPage shows the login page of the DigiD mock for transaction tx,

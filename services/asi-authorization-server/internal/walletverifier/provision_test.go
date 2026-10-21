@@ -73,6 +73,9 @@ func TestProvision(t *testing.T) {
 			t.Errorf("configuration lacks %s", want)
 		}
 	}
+	if !regexp.MustCompile(`(?s)\[usecases\.asi-login\].*?session_type_return_url = "same_device"`).MatchString(config) {
+		t.Errorf("asi-login does not return same-device HTTPS sessions:\n%s", config)
+	}
 	if strings.Contains(config, "[usecases."+QTSPUsecase+"]") {
 		t.Error("the QTSP's usecase without --qtsp-request-origin")
 	}
@@ -119,6 +122,24 @@ func TestProvision(t *testing.T) {
 	}
 }
 
+// Local HTTP cannot be a verifier return URL. Provisioning therefore keeps
+// the asi-login usecase cross-device-only while the page explains why its
+// same-device button is disabled.
+func TestProvisionLocalHTTPHasNoReturnURL(t *testing.T) {
+	dir := t.TempDir()
+	readerKey, readerCert := writeCA(t, dir, "reader-ca")
+	_, issuerCert := writeCA(t, dir, "issuer-ca")
+	out := filepath.Join(dir, "out")
+	if err := Provision([]string{"--ca-key", readerKey, "--ca-cert", readerCert, "--issuer-ca", issuerCert,
+		"--public-url", "https://verifier.test", "--request-origin", "http://localhost:9425", "--out-dir", out}); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(out, "verification_server.toml"))
+	if !regexp.MustCompile(`(?s)\[usecases\.asi-login\].*?session_type_return_url = "neither"`).Match(raw) {
+		t.Errorf("local asi-login usecase enables a return URL:\n%s", raw)
+	}
+}
+
 // Slice 14: with --qtsp-request-origin the verifier also gets the QTSP's
 // usecase, with its own reader certificate: the QTSP's organisation and
 // purpose, and the four PID attributes it may ask, not the BSN.
@@ -133,8 +154,13 @@ func TestProvisionQTSPUsecase(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw, _ := os.ReadFile(filepath.Join(out, "verification_server.toml"))
+	config := string(raw)
+	if !regexp.MustCompile(`(?s)\[usecases\.asi-login\].*?session_type_return_url = "same_device"`).MatchString(config) ||
+		!regexp.MustCompile(`(?s)\[usecases\.`+QTSPUsecase+`\].*?session_type_return_url = "neither"`).MatchString(config) {
+		t.Errorf("return modes are not limited to same-device asi-login:\n%s", config)
+	}
 	certs := map[string]string{}
-	for _, m := range regexp.MustCompile(`(?s)\[usecases\.([a-z-]+)\].*?\ncertificate = "([^"]+)"`).FindAllStringSubmatch(string(raw), -1) {
+	for _, m := range regexp.MustCompile(`(?s)\[usecases\.([a-z-]+)\].*?\ncertificate = "([^"]+)"`).FindAllStringSubmatch(config, -1) {
 		certs[m[1]] = m[2]
 	}
 	if len(certs) != 2 || certs[Usecase] == "" || certs[QTSPUsecase] == "" || certs[Usecase] == certs[QTSPUsecase] {

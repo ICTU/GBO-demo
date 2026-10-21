@@ -278,7 +278,7 @@ func TestLogInAndDeny(t *testing.T) {
 // with the transaction.
 type eagerSession struct{ seen []string }
 
-func (e *eagerSession) Start(context.Context) (string, error) { return "kept-session", nil }
+func (e *eagerSession) Start(context.Context, string) (string, error) { return "kept-session", nil }
 func (e *eagerSession) Progress(context.Context, string) (Progress, error) {
 	return Progress{State: SessionDone}, nil
 }
@@ -304,7 +304,7 @@ func TestSessionMeansUsesTheKeptSession(t *testing.T) {
 	if _, err := s.LogIn(ctx, login); !errors.Is(err, ErrNotIdentified) || len(eager.seen) != 0 {
 		t.Fatalf("LogIn before a session = %v, means asked with %v; want not identified, means not asked", err, eager.seen)
 	}
-	if err := s.StartSession(ctx, tx.ID, tx.Binding, "wallet"); err != nil {
+	if err := s.StartSession(ctx, tx.ID, tx.Binding, "wallet", ""); err != nil {
 		t.Fatal(err)
 	}
 	if resp, err := s.LogIn(ctx, login); err != nil || resp.Code == "" || len(eager.seen) != 1 || eager.seen[0] != "kept-session" {
@@ -331,7 +331,7 @@ func TestLogInWhenTheMeansIsUnavailable(t *testing.T) {
 		t.Fatal(err)
 	}
 	tx := resp.Pending
-	if err := s.StartSession(ctx, tx.ID, tx.Binding, "wallet"); err != nil {
+	if err := s.StartSession(ctx, tx.ID, tx.Binding, "wallet", ""); err != nil {
 		t.Fatal(err)
 	}
 	login := Login{TransactionID: tx.ID, Binding: tx.Binding, Means: "wallet"}

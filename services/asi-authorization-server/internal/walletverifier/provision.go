@@ -95,6 +95,10 @@ func Provision(args []string) error {
 	if err != nil || pub.Hostname() == "" {
 		return fmt.Errorf("--public-url %q has no host", *publicURL)
 	}
+	requestOrigin, err := url.Parse(*origin)
+	if err != nil || requestOrigin.Hostname() == "" {
+		return fmt.Errorf("--request-origin %q has no host", *origin)
+	}
 	caKey, caCert, err := loadCA(*caKeyPath, *caCertPath)
 	if err != nil {
 		return err
@@ -123,7 +127,14 @@ func Provision(args []string) error {
 		if err != nil {
 			return err
 		}
-		usecases = append(usecases, UsecaseConfig{Name: name, ReaderKey: base64.StdEncoding.EncodeToString(keyDER), ReaderCertificate: base64.StdEncoding.EncodeToString(certDER)})
+		returnMode := "neither"
+		if name == Usecase && requestOrigin.Scheme == "https" {
+			returnMode = "same_device"
+		}
+		usecases = append(usecases, UsecaseConfig{
+			Name: name, ReaderKey: base64.StdEncoding.EncodeToString(keyDER), ReaderCertificate: base64.StdEncoding.EncodeToString(certDER),
+			SessionTypeReturnURL: returnMode,
+		})
 	}
 	issuerDER, err := pemCertificate(*issuerCA)
 	if err != nil {

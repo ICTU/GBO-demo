@@ -141,6 +141,35 @@ body {
   max-inline-size: 280px;
 }
 
+.azsp-wallet-options {
+  display: grid;
+  gap: 2rem;
+  grid-template-areas: "qr same";
+  grid-template-columns: minmax(0, 1fr) minmax(14rem, 1fr);
+}
+
+.azsp-wallet-option {
+  align-content: start;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.azsp-wallet-option > * {
+  margin-block: 0;
+}
+
+.azsp-wallet-option--qr {
+  grid-area: qr;
+}
+
+.azsp-wallet-option--same {
+  grid-area: same;
+}
+
+.azsp-wallet-option--same .utrecht-button {
+  justify-self: start;
+}
+
 .utrecht-heading-1,
 .utrecht-heading-2 {
   color: var(--azsp-navy);
@@ -286,6 +315,11 @@ body {
 
 /* On a narrow screen the request summary stacks. */
 @media (max-width: 38rem) {
+  .azsp-wallet-options {
+    grid-template-areas: "same" "qr";
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .azsp-means {
     align-items: stretch;
     flex-direction: column;
