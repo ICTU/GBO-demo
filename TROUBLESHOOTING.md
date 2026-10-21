@@ -48,8 +48,13 @@ Restart the migration container with `docker compose … restart edi-migrations-
 Check the `make fsc-seed-bri` output. Common causes:
 
 - **HTTP 500 `unknown protocol`**: manager v2.4.0 versus script mismatch. Verify that `services/dev-portal-backend/fsctxlog.go` and this script use the same FSC version.
-- **HTTP 401**: manager is missing the auto-sign flag. Check `fsc-infra/docker-compose.yml` — `directory-manager` needs `--auto-sign-grants=servicePublication` and `bd-manager` needs `--auto-sign-grants=serviceConnection`.
-- **Contract stays pending**: auto-sign polls asynchronously; wait 5-10s and check state:
+- **HTTP 401**: inspect the responding Manager's logs and the client
+  certificate used by the seed. Auto-sign configuration is separate:
+  `directory-manager` uses `--auto-sign-grants=servicePublication`; source
+  Managers use `--authzen-auto-sign-pdp-address` for connection contracts.
+  These two options cannot be combined on one Manager.
+- **Publication contract stays pending**: `directory-manager` signs these by
+  grant type. Wait 5-10s and check the publication state at `bd-manager`:
   ```bash
   docker run --rm --network fsc-infra_default \
     -v $(pwd)/fsc-infra:/work:ro gbo-demo/pki-tools:local \
@@ -58,6 +63,20 @@ Check the `make fsc-seed-bri` output. Common causes:
                     --cacert /work/orgs/belastingdienst-mock/pki/internal/intermediate_ca.pem \
                     "https://bd-manager:9443/v1/contracts?grant_type=GRANT_TYPE_SERVICE_PUBLICATION" | jq'
   ```
+
+- **Connection contract stays pending**: the source Manager asks the
+  auto-sign PDP to decide whether to counter-sign. Inspect the decision:
+
+  ```bash
+  docker compose logs --no-log-prefix openftv-pdp \
+    | grep auto_sign_contract | tail -1 | jq .result.response
+  ```
+
+  `ADMISSION_REGISTER_UNAVAILABLE` means the PDP has no
+  `data.entities.dvtp_participant` document: check the onboarding register
+  and OpenFTV PIP pull. `PARTY_NOT_IN_REGISTRY` means the document is present
+  but does not contain the peer: admit that peer in the register. The source
+  Manager does not counter-sign in either case.
 
 ## Every request denies with `NO_APPLICABLE_RULE`
 

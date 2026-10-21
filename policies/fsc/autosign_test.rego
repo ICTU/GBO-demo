@@ -83,6 +83,21 @@ test_system_issuer_denied_without_pip_data if {
 	not autosign.allow with input as connection(edi)
 }
 
+test_missing_admission_register_reason if {
+	value := autosign.reason with input as connection(edi) with data.entities as {}
+	value == "ADMISSION_REGISTER_UNAVAILABLE"
+}
+
+test_missing_entities_reason if {
+	value := autosign.reason with input as connection(edi)
+	value == "ADMISSION_REGISTER_UNAVAILABLE"
+}
+
+test_empty_admission_register_is_present if {
+	value := autosign.reason with input as connection(edi) with data.entities as {"dvtp_participant": {}}
+	value == "PARTY_NOT_IN_REGISTRY"
+}
+
 test_system_issuer_allowed_for_brp if {
 	is_allowed(connection_for(brp, edi))
 }
