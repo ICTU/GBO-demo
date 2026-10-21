@@ -7,6 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Added
+- **Complete OpenFTV PDP Helm example** (#492): mount a ConfigMap for the
+  DvTP admission-register pull and a TLS Secret for the Inway connection, set
+  the consent-register addresses and token identifiers, and document which
+  values must be supplied by each deployment. The PDP source-build comment
+  now names the remaining GraphQL mapper patch instead of the completed #331.
 - **Documentation of the ASI route** (#336, slice 8): `docs/asi-route.md`
   states for each part of the route whether it is real, stubbed, a GBO
   interpretation or a demo shortcut. `conformance/security-considerations.md`

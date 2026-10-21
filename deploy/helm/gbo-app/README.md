@@ -118,7 +118,33 @@ replication.
 
 ## Examples
 
-Every file in `examples/` is a values file for one release, except
-`dvtp-onboarding-configmap.yaml`, which is a plain manifest the register
-release mounts. CI renders each of them on every push, so an example that
-stops templating fails the build.
+Every file in `examples/` is a values file for one release, except the two
+`*-configmap.yaml` files, which are plain manifests mounted by their
+respective releases. When the chart changes, CI renders the PDP and other
+selected values examples, so a templating error in those examples fails the
+build.
+
+### OpenFTV PDP dependencies
+
+Before installing the PDP with
+[`openftv-pdp-values.yaml`](examples/openftv-pdp-values.yaml), apply
+[`openftv-pdp-pip-pull-configmap.yaml`](examples/openftv-pdp-pip-pull-configmap.yaml)
+in the same namespace. Set its `uri` to the DvTP admission register's internal
+address. The PDP reads that file from `/pip-pull/dvtp-onboarding.yaml` and
+refreshes admission entities from the register. This separate ConfigMap is a
+demo shortcut: the chart has no application-specific config generator, and a
+real deployment must manage and roll out changes to this configuration.
+
+Create a Kubernetes TLS Secret named `openftv-pdp-tls` in that namespace with
+keys `tls.crt` and `tls.key`. Its certificate must cover the PDP service DNS
+name and be trusted by the Inway that calls the PDP over HTTPS. The example
+mounts it at `/certs`; never put the private key in values or a ConfigMap.
+
+Set `GBO_CONSENT_URL` and `GBO_CONSENT_STATUS_URL` to the reachable consent
+register and PDP Outway addresses. Set `GBO_CONSENT_ISSUER` and
+`GBO_CONSENT_AUDIENCE` to the values the consent register uses when signing
+tokens. These are deployment-specific addresses and identifiers, not secrets.
+The existing `PDP_ADL_PG_URL` comes from the `openftv-adl` Secret because it
+contains database credentials. Set the optional `PDP_BUNDLE_MANAGER` only
+when an OpenFTV Manager distributes policies; otherwise the image's
+`/policies` directory is used.
