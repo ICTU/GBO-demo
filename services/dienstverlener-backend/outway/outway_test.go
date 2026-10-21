@@ -60,8 +60,11 @@ func TestAQuestionReachesTheOutwayAsGraphQL(t *testing.T) {
 	if body.Query != question().Query || body.Variables["bsn"] != consumer.IdentityPlaceholder {
 		t.Errorf("body = %+v, want the query and its variables", body)
 	}
-	if header.Get("X-GBO-Consent-Token") != "a.b.c" || header.Get("X-GBO-Scope") != "bd:ib:2025" {
-		t.Errorf("headers = %v, want the consent token and the scope", header)
+	if header.Get("X-GBO-Consent-Token") != "a.b.c" {
+		t.Errorf("headers = %v, want the consent token", header)
+	}
+	if header.Get("X-GBO-Scope") != "" {
+		t.Errorf("headers = %v, want no declared scope", header)
 	}
 	if header.Get("Fsc-Transaction-Id") != question().TransactionID {
 		t.Errorf("Fsc-Transaction-Id = %q, want the question's", header.Get("Fsc-Transaction-Id"))

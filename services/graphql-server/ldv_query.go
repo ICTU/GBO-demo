@@ -12,7 +12,6 @@ import (
 	ldv "gbo-demo/ldv-client"
 	"net/http"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 )
@@ -111,42 +110,24 @@ func newSourceLogbook(client *ldv.Client, cfg ldvQueryConfig) *sourceLogbook {
 // ldvQueryConfig is the part of the LDV setup that is about this bron rather
 // than about the logbook protocol.
 type ldvQueryConfig struct {
-	// ScopeActivityBase turns a dienstencatalogus scope into a register URI:
-	// bd:ib:2025 becomes <base>/bd-ib-2025/v1. The register entries were
-	// generated from those same scope definitions, so the mapping is a
-	// rename rather than a lookup.
-	ScopeActivityBase string
 	// YearActivityTemplate turns a belastingjaar into a register reference,
 	// e.g. "bd-ib-%d@v1". Empty means this bron does not describe its
-	// verwerkingsactiviteiten per year, and the scope or the fallback decides.
+	// verwerkingsactiviteiten per year.
 	YearActivityTemplate string
 }
 
 // activityForYear names the verwerkingsactiviteit of one processing.
 //
-// The belastingjaar decides, because a record and its activity have to agree:
-// a query covering 2024 and 2025 is two verstrekkingen, and the scope header
-// can only ever describe one of them. Preferring the scope made the 2024
-// record claim bd-ib-2025@v1 while its own gbo.belastingjaar said 2024 —
-// internally contradictory, and wrong in the direction that matters, since
-// the register entry is what someone would be held to afterwards.
-//
-// The scope is the fallback for a request that names no year at all. It maps
-// straight onto a reference because the register entries were generated from
-// those same scope definitions; both routes land on the same entry for the
-// single-year case, which is why the collision went unnoticed until a
-// two-year query ran against the real stack.
+// A query covering 2024 and 2025 is two verstrekkingen, each named from its
+// own belastingjaar. A request without a year has no year-specific activity.
 //
 // A reference this bron's register does not hold is refused by the logbook and
 // fails the request. That is intended rather than a gap: a verstrekking whose
 // verwerkingsactiviteit is not described is one nobody can account for
 // afterwards.
-func (l *sourceLogbook) activityForYear(scope string, year int) string {
+func (l *sourceLogbook) activityForYear(year int) string {
 	if l.cfg.YearActivityTemplate != "" && year != 0 {
 		return fmt.Sprintf(l.cfg.YearActivityTemplate, year)
-	}
-	if scope != "" && l.cfg.ScopeActivityBase != "" {
-		return strings.TrimRight(l.cfg.ScopeActivityBase, "/") + "/" + strings.ReplaceAll(scope, ":", "-") + "/v1"
 	}
 	return ""
 }
@@ -203,7 +184,6 @@ func (l *sourceLogbook) logQuery(ctx context.Context, r *http.Request, facts *qu
 		ldv.LogFailure("dataverwerking.bronbevraging", err)
 		return err
 	}
-	scope := r.Header.Get("X-GBO-Scope")
 	processor := l.ForeignProcessor(r)
 	traceID := ldv.TraceID(ctx, r.Header)
 	parentSpanID := ldv.ParentSpanFor(r.Header, traceID)
@@ -214,10 +194,8 @@ func (l *sourceLogbook) logQuery(ctx context.Context, r *http.Request, facts *qu
 		years = []int{0}
 	}
 	for _, year := range years {
-		// No attributes of our own: the belastingjaar is already in the
-		// verwerkingsactiviteit this record names (bd-ib-2025/v1), and the
-		// scope it came from is what that activity was generated from. An
-		// attribute that repeats the activity tells a reader nothing.
+		// The belastingjaar is already in the activity this record names
+		// (bd-ib-2025/v1); repeating it as an attribute adds nothing.
 		var attributes map[string]any
 		record := ldv.Record{
 			TraceID:      traceID,
@@ -228,7 +206,7 @@ func (l *sourceLogbook) logQuery(ctx context.Context, r *http.Request, facts *qu
 			StartTime:    start,
 			EndTime:      end,
 			Attributes: ldv.Attributes(
-				l.activityForYear(scope, year),
+				l.activityForYear(year),
 				subjectID, subjectType, processor, attributes,
 			),
 		}

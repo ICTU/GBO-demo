@@ -623,7 +623,6 @@ services:
       - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
       - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY:-local-demo-pseudonym-key}
       - LDV_YEAR_ACTIVITY_TEMPLATE=https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-ib-%d/v1
-      - LDV_SCOPE_ACTIVITY_BASE=https://logboek.belastingdienst.nl/verwerkingsactiviteiten
     volumes:
       # The LDV spool must survive a restart; that is what makes a
       # record durable before it reaches the logbook.
@@ -921,7 +920,7 @@ services:
       - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
       - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY_LVG:-local-demo-pseudonym-key-lvg}
       # lvg:vbo:eigendom becomes .../lvg-vbo-eigendom/v1 in LVG's register.
-      - LDV_SCOPE_ACTIVITY_BASE=https://logboek.lvg.test/verwerkingsactiviteiten
+      - LDV_ACTIVITY_BASE=https://logboek.lvg.test/verwerkingsactiviteiten
     volumes:
       - ldv-outbox-lvg-graphql-server:/data
     networks:

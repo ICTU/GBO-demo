@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	ldv "gbo-demo/ldv-client"
+	"gbo-demo/ldv-client/ldvtest"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -74,12 +76,52 @@ func TestUnknownCitizenGetsNull(t *testing.T) {
 	}
 }
 
-func TestActivityFollowsTheScope(t *testing.T) {
-	l := &sourceLogbook{cfg: ldvQueryConfig{ScopeActivityBase: "https://lvg.example/activiteiten/"}}
-	if got, want := l.activity("lvg:vbo:eigendom"), "https://lvg.example/activiteiten/lvg-vbo-eigendom/v1"; got != want {
+func TestActivityIsFixedForOwnership(t *testing.T) {
+	l := &sourceLogbook{cfg: ldvQueryConfig{ActivityBase: "https://lvg.example/activiteiten/"}}
+	if got, want := l.activity(), "https://lvg.example/activiteiten/lvg-vbo-eigendom/v1"; got != want {
 		t.Errorf("activity = %q, want %q", got, want)
 	}
-	if got := l.activity(""); got != "" {
-		t.Errorf("activity without scope = %q, want empty", got)
+	l.cfg.ActivityBase = ""
+	if got := l.activity(); got != "" {
+		t.Errorf("activity without base = %q, want empty", got)
+	}
+}
+
+func TestActivityBaseAcceptsPreviousEnvironmentName(t *testing.T) {
+	t.Setenv("LDV_ACTIVITY_BASE", "")
+	t.Setenv("LDV_SCOPE_ACTIVITY_BASE", "https://old.example/activities")
+	if got := loadConfig().LDVQuery.ActivityBase; got != "https://old.example/activities" {
+		t.Errorf("fallback activity base = %q", got)
+	}
+
+	t.Setenv("LDV_ACTIVITY_BASE", "https://new.example/activities")
+	if got := loadConfig().LDVQuery.ActivityBase; got != "https://new.example/activities" {
+		t.Errorf("preferred activity base = %q", got)
+	}
+}
+
+func TestOwnershipQueryLogsItsFixedActivityWithoutAScopeHeader(t *testing.T) {
+	const activity = "https://lvg.example/activiteiten/lvg-vbo-eigendom/v1"
+	logbook := ldvtest.New(t, activity)
+	store, err := loadMockData("mockdata/owners.json")
+	if err != nil {
+		t.Fatalf("loadMockData: %v", err)
+	}
+	tracer := otel.Tracer("lvg-graphql-server-test")
+	schema, err := buildSchema(tracer, store)
+	if err != nil {
+		t.Fatalf("buildSchema: %v", err)
+	}
+	sourceLog := newSourceLogbook(logbook.Client(t, "lvg-graphql-server"), ldvQueryConfig{ActivityBase: "https://lvg.example/activiteiten"})
+	srv := httptest.NewServer(newMux(&schema, tracer, sourceLog))
+	t.Cleanup(srv.Close)
+
+	queryVbo(t, srv, "123456789", "0632010000099412")
+	records := logbook.Written()
+	if len(records) != 1 {
+		t.Fatalf("wrote %d records, want 1: %+v", len(records), records)
+	}
+	if got := records[0].Attributes[ldv.AttrProcessingActivityID]; got != activity {
+		t.Errorf("processing_activity_id = %v, want %s", got, activity)
 	}
 }

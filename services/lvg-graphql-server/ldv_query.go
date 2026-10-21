@@ -51,11 +51,9 @@ func (f *queryFacts) subject() string {
 	return f.bsn
 }
 
-// ldvQueryConfig names this source's verwerkingsactiviteiten.
+// ldvQueryConfig names this source's fixed verwerkingsactiviteit.
 type ldvQueryConfig struct {
-	// ScopeActivityBase turns the scope into a register URI:
-	// lvg:vbo:eigendom becomes <base>/lvg-vbo-eigendom/v1.
-	ScopeActivityBase string
+	ActivityBase string
 }
 
 // sourceLogbook is nil when the source is not part of an LDV chain; its
@@ -72,11 +70,11 @@ func newSourceLogbook(client *ldv.Client, cfg ldvQueryConfig) *sourceLogbook {
 	return &sourceLogbook{Client: client, cfg: cfg}
 }
 
-func (l *sourceLogbook) activity(scope string) string {
-	if scope == "" || l.cfg.ScopeActivityBase == "" {
+func (l *sourceLogbook) activity() string {
+	if l.cfg.ActivityBase == "" {
 		return ""
 	}
-	return strings.TrimRight(l.cfg.ScopeActivityBase, "/") + "/" + strings.ReplaceAll(scope, ":", "-") + "/v1"
+	return strings.TrimRight(l.cfg.ActivityBase, "/") + "/lvg-vbo-eigendom/v1"
 }
 
 // logQuery writes one record per ownership check. A query that resolved no
@@ -104,7 +102,7 @@ func (l *sourceLogbook) logQuery(ctx context.Context, r *http.Request, facts *qu
 		StartTime:    start,
 		EndTime:      time.Now().UTC(),
 		Attributes: ldv.Attributes(
-			l.activity(r.Header.Get("X-GBO-Scope")),
+			l.activity(),
 			subjectID, subjectType, l.ForeignProcessor(r), nil,
 		),
 	}

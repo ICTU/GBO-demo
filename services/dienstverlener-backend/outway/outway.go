@@ -41,10 +41,6 @@ func (s *Source) Ask(ctx context.Context, q consumer.Question) (consumer.Answer,
 		return consumer.Answer{}, fmt.Errorf("fsc_outway_call_failed: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	// Untrusted context header: X-GBO-Scope carries the requested scope.
-	// (There is no X-GBO-Flow header and no flow grant property: the consent
-	// token is what puts this request under the consent regime, #334.)
-	req.Header.Set("X-GBO-Scope", q.Scope)
 	req.Header.Set("X-GBO-Consent-Token", q.ConsentToken)
 	req.Header.Set("Fsc-Transaction-Id", q.TransactionID)
 	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))

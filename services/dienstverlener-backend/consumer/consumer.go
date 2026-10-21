@@ -29,7 +29,8 @@ type Consumer struct {
 // Request is one question as the consumer's caller puts it.
 type Request struct {
 	ConsentToken string
-	// ScopeID is sent as the requested scope; empty means the Kind's default.
+	// ScopeID identifies the requested use in this consumer's logbook; empty
+	// means the Kind's default. The source receives the query and consent.
 	ScopeID        string
 	Belastingjaren []int
 	Fields         []string

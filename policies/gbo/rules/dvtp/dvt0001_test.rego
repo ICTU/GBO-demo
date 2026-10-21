@@ -21,9 +21,9 @@ _consent := {
 	"dienstverlener_oin": fx.hv,
 }
 
-_request := fx.income(fx.hv, "consent:identity", [2025], fx.scope_headers("bd:ib:2025"))
+_request := fx.income(fx.hv, "consent:identity", [2025], fx.headers)
 
-# The request with other fields, keeping the consumer and the scope.
+# The request with other fields, keeping the consumer.
 _with_fields(fields) := object.union(_request, {"resource": {"attributes": {"graphql": {"fields": fields}}}})
 
 _person(bsn_arg) := _with_fields([fx.person_as(["ingeschrevenPersoon"], bsn_arg), fx.declarations(fx.literal([2025]))])
@@ -52,7 +52,7 @@ test_allow_valid_consent_and_binding if {
 
 # A leaf carries no argument; only the consent applies to it.
 test_allow_on_a_leaf if {
-	_reasons_on(fx.income(fx.hv, "999991772", [2024], fx.scope_headers("bd:ib:2025")), _consent, 4) == set()
+	_reasons_on(fx.income(fx.hv, "999991772", [2024], fx.headers), _consent, 4) == set()
 }
 
 # ── The consent ─────────────────────────────────────────────────────────
@@ -77,28 +77,26 @@ test_deny_consent_expired if {
 	_reasons(_request, _with_consent({"valid_until": "2020-01-01T00:00:00Z"})) == {"CONSENT_EXPIRED"}
 }
 
-test_deny_scope_not_in_granted_scopes if {
-	req := fx.income(fx.hv, "consent:identity", [2025], fx.scope_headers("bd:ib:2024"))
-	"CONSENT_SCOPE_MISMATCH" in _reasons(req, _consent)
+test_deny_year_not_in_granted_scopes if {
+	"YEAR_NOT_COVERED" in _reasons(_request, _with_consent({"granted_scopes": ["bd:ib:2024"]}))
 }
 
 test_deny_fsc_actor_does_not_match_signed_recipient if {
-	req := fx.income("99999999900000000999", "consent:identity", [2025], fx.scope_headers("bd:ib:2025"))
+	req := fx.income("99999999900000000999", "consent:identity", [2025], fx.headers)
 	_reasons(req, _consent) == {"CONSENT_ACTOR_MISMATCH"}
 }
 
 # ── Only the income question ────────────────────────────────────────────
 
-# A consent for the ownership question, sent with its own scope, passes the
-# consent checks; only the scope pin stops it on income fields.
+# A consent for the ownership question cannot open even the BD root field.
 test_deny_a_consent_for_another_question if {
-	req := fx.request(fx.hv, "bri", [fx.person("consent:identity")], fx.scope_headers("lvg:vbo:eigendom"))
+	req := fx.request(fx.hv, "bri", [fx.person("consent:identity")], fx.headers)
 	_reasons(req, _with_consent({"granted_scopes": ["lvg:vbo:eigendom"]})) == {"SCOPE_NOT_ALLOWED"}
 }
 
-test_deny_a_scope_that_names_no_belastingjaar if {
+test_deny_a_consent_scope_that_names_no_belastingjaar if {
 	every scope in ["bd:ib:", "bd:ib:20x5"] {
-		req := fx.request(fx.hv, "bri", [fx.person("consent:identity")], fx.scope_headers(scope))
+		req := fx.request(fx.hv, "bri", [fx.person("consent:identity")], fx.headers)
 		_reasons(req, _with_consent({"granted_scopes": [scope]})) == {"SCOPE_NOT_ALLOWED"}
 	}
 }

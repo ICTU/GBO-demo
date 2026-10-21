@@ -313,7 +313,6 @@ func TestConsentFlowLogsBothDataverwerkingen(t *testing.T) {
 	response := postQuery(t, c.url, map[string]string{
 		"Fsc-Authorization":   callerToken(t),
 		"Fsc-Transaction-Id":  "0af76519-16cd-43dd-8448-eb211c80319c",
-		"X-GBO-Scope":         "bd:ib:2025",
 		"X-GBO-Consent-Token": consentToken(t, ownOIN),
 	}, consentQuery)
 	if response.StatusCode != http.StatusOK {
@@ -424,7 +423,6 @@ func TestACallersTraceparentIsTakenOver(t *testing.T) {
 		"Fsc-Authorization":   callerToken(t),
 		"Fsc-Transaction-Id":  "0af76519-16cd-43dd-8448-eb211c80319c",
 		"traceparent":         "00-" + callersTrace + "-" + callersSpan + "-01",
-		"X-GBO-Scope":         "bd:ib:2025",
 		"X-GBO-Consent-Token": consentToken(t, ownOIN),
 	}, consentQuery)
 	if response.StatusCode != http.StatusOK {
