@@ -1,5 +1,7 @@
 # Apply in the PDP namespace before installing the PDP release. Change the
 # register URI if its Kubernetes service name, namespace or port differs.
+# Keep the pull mapping in sync with
+# services/openftv-pdp/pip-pull/dvtp-onboarding.yaml.
 apiVersion: v1
 kind: ConfigMap
 metadata:

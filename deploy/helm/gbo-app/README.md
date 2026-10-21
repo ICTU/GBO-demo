@@ -120,8 +120,9 @@ replication.
 
 Every file in `examples/` is a values file for one release, except the two
 `*-configmap.yaml` files, which are plain manifests mounted by their
-respective releases. CI renders the PDP and other selected values examples on
-every push, so a templating error in those examples fails the build.
+respective releases. When the chart changes, CI renders the PDP and other
+selected values examples, so a templating error in those examples fails the
+build.
 
 ### OpenFTV PDP dependencies
 
