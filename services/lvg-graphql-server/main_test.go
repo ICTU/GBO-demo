@@ -87,6 +87,19 @@ func TestActivityIsFixedForOwnership(t *testing.T) {
 	}
 }
 
+func TestActivityBaseAcceptsPreviousEnvironmentName(t *testing.T) {
+	t.Setenv("LDV_ACTIVITY_BASE", "")
+	t.Setenv("LDV_SCOPE_ACTIVITY_BASE", "https://old.example/activities")
+	if got := loadConfig().LDVQuery.ActivityBase; got != "https://old.example/activities" {
+		t.Errorf("fallback activity base = %q", got)
+	}
+
+	t.Setenv("LDV_ACTIVITY_BASE", "https://new.example/activities")
+	if got := loadConfig().LDVQuery.ActivityBase; got != "https://new.example/activities" {
+		t.Errorf("preferred activity base = %q", got)
+	}
+}
+
 func TestOwnershipQueryLogsItsFixedActivityWithoutAScopeHeader(t *testing.T) {
 	const activity = "https://lvg.example/activiteiten/lvg-vbo-eigendom/v1"
 	logbook := ldvtest.New(t, activity)

@@ -58,8 +58,8 @@ deny contains "CONSENT_EXPIRED" if helper.consent_expired
 
 deny contains "CONSENT_ACTOR_MISMATCH" if not helper.consent_given_to_caller
 
-# The root field can appear without a belastingjaar field. Require at least
-# one income scope even then, so an LVG-only consent cannot open BD's root.
+# Reject an LVG-only consent on BD fields with the rule's scope reason. The
+# year check below still requires consent for every requested belastingjaar.
 income_scope_granted if {
 	some scope in helper.consent.granted_scopes
 	regex.match(`^bd:ib:[0-9]{4}$`, scope)
