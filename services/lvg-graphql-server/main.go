@@ -58,7 +58,7 @@ func loadConfig() config {
 		Port:         getEnv("PORT", "4008"),
 		MockDataPath: getEnv("MOCKDATA_PATH", "mockdata/owners.json"),
 		LDVQuery: ldvQueryConfig{
-			ScopeActivityBase: os.Getenv("LDV_SCOPE_ACTIVITY_BASE"),
+			ActivityBase: os.Getenv("LDV_ACTIVITY_BASE"),
 		},
 	}
 }

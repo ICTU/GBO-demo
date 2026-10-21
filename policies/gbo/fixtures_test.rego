@@ -30,7 +30,7 @@ request_with(actor, service, output, headers) := {
 }
 
 # Headers without a consent token; tests that need a consent stand one in.
-scope_headers(scope) := {"Content-Type": "application/json", "X-Gbo-Scope": scope}
+headers := {"Content-Type": "application/json"}
 
 # ── Arguments ────────────────────────────────────────────────────────────
 

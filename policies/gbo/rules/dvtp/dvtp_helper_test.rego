@@ -5,7 +5,7 @@ import data.gbo.rules.dvtp.helper
 
 _consent := {"context_valid": true, "status_available": true, "exists": true, "withdrawn": false, "granted_scopes": ["bd:ib:2025"], "valid_until": "2030-01-01T00:00:00Z", "dienstverlener_oin": fx.hv}
 
-_request := fx.income(fx.hv, "consent:identity", [2025], fx.scope_headers("bd:ib:2025"))
+_request := fx.income(fx.hv, "consent:identity", [2025], fx.headers)
 
 _both := {"consent:identity", "consent:pseudonym"}
 

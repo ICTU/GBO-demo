@@ -67,7 +67,7 @@ _request(headers) := fx.request(
 	fx.hv,
 	"bri",
 	[fx.person("consent:identity"), fx.declarations(fx.literal([2025]))],
-	object.union(object.union(fx.scope_headers("bd:ib:2025"), {"Fsc-Transaction-Id": "tx-330"}), headers),
+	object.union(object.union(fx.headers, {"Fsc-Transaction-Id": "tx-330"}), headers),
 )
 
 _input(token) := _request({"X-Gbo-Consent-Token": token})

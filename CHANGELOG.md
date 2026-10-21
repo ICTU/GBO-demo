@@ -275,6 +275,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- **The DvTP flow no longer sends `X-GBO-Scope`** (#483). The PDP checks BD
+  years and LVG's fixed scope against the verified consent. The BD source
+  names LDV activities from the processed year; LVG uses its fixed ownership
+  activity. A query for an unconsented year still returns `YEAR_NOT_COVERED`.
 - **The ASI authorization server's DigiD mock looks like the toestemmingsportaal's**:
   first the choice of a method, then the form, prefilled with the BSN of test
   person Frouke Jansen (999991772). Still without script; the CSP now allows

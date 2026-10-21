@@ -72,7 +72,6 @@ func TestSourceQueryLogsUnderTheSidecarsTraceAndSubject(t *testing.T) {
 		"traceparent":           "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
 		ldv.HeaderSubjectID:     "LP-abc123",
 		ldv.HeaderSubjectIDType: ldv.SubjectTypePseudonym,
-		"X-GBO-Scope":           "bd:ib:2025",
 	}, singleYearQuery)
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", response.StatusCode)
@@ -95,15 +94,14 @@ func TestSourceQueryLogsUnderTheSidecarsTraceAndSubject(t *testing.T) {
 	if got := record.Attributes[ldv.AttrDataSubjectID]; got != "LP-abc123" {
 		t.Errorf("data_subject_id = %v, want the pseudonym the sidecar passed on", got)
 	}
-	// The scope the consumer was authorized for selects the register entry
-	// generated from that same scope definition.
+	// The requested year selects the register entry.
 	if got := record.Attributes[ldv.AttrProcessingActivityID]; got != activity2025 {
 		t.Errorf("processing_activity_id = %v, want %s", got, activity2025)
 	}
 	ldvtest.AssertNoBSN(t, records, demoBSN)
 }
 
-// The EUDI flow carries no scope header and no pseudonym: the source holds
+// The EUDI flow carries no pseudonym: the source holds
 // only a BSN and must derive a logbook-local reference from it.
 func TestSourceQueryWithoutSidecarMetadataUsesALocalPseudonymAndTheYear(t *testing.T) {
 	logbook := ldvtest.New(t, activity2025, activity2024)
@@ -120,7 +118,7 @@ func TestSourceQueryWithoutSidecarMetadataUsesALocalPseudonymAndTheYear(t *testi
 	if got := records[0].Attributes[ldv.AttrDataSubjectIDType]; got != ldv.SubjectTypePseudonym {
 		t.Errorf("data_subject_id_type = %v, want %s", got, ldv.SubjectTypePseudonym)
 	}
-	// No scope header, so the belastingjaar decides which activity applies.
+	// The belastingjaar decides which activity applies.
 	if got := records[0].Attributes[ldv.AttrProcessingActivityID]; got != activity2025 {
 		t.Errorf("processing_activity_id = %v, want %s", got, activity2025)
 	}
@@ -221,18 +219,14 @@ func TestAnUnknownSubjectWritesNoRecord(t *testing.T) {
 	}
 }
 
-// A query covering two years is two verstrekkingen, and each record has to
-// name the activity its own belastingjaar belongs to. The scope header can
-// only describe one of them, so preferring it made the 2024 record claim the
-// 2025 entry — the kind of mislabelling that only shows up once a real
-// multi-year request runs.
-func TestEachYearGetsItsOwnActivityEvenUnderOneScope(t *testing.T) {
+// A query covering two years is two verstrekkingen, each named for its own
+// belastingjaar.
+func TestEachYearGetsItsOwnActivity(t *testing.T) {
 	logbook := ldvtest.New(t, activity2025, activity2024)
 	url := sourceUnderTest(t, logbook)
 
 	body := `{"query":"query($bsn: BSN!){ingeschrevenPersoon(bsn:$bsn){heeftBelastingjaarAangifte(belastingjaren:[2024,2025]){belastingjaar}}}","variables":{"bsn":"` + demoBSN + `"}}`
-	// The consumer was authorized under one scope, which names 2025 only.
-	if response := queryYear(t, url, map[string]string{"X-GBO-Scope": "bd:ib:2025"}, body); response.StatusCode != http.StatusOK {
+	if response := queryYear(t, url, nil, body); response.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", response.StatusCode)
 	}
 

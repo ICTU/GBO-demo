@@ -90,7 +90,7 @@ _unverifiable(code, subcode) := fx.request_with(
 )
 
 test_reason_for_a_refused_field_names_no_field if {
-	_reason_for(fx.income(fx.hv, "consent:identity", [2024], fx.scope_headers("bd:ib:2025")), _consent) == "FIELD_NOT_PERMITTED"
+	_reason_for(fx.income(fx.hv, "consent:identity", [2024], fx.headers), _consent) == "FIELD_NOT_PERMITTED"
 }
 
 # An unknown field reads as a refused one, so trying names maps nothing.
@@ -116,7 +116,7 @@ test_reason_for_typename_alone if {
 
 # Our configuration errors are not the consumer's to know about.
 test_reason_for_a_configuration_error_is_access_denied if {
-	unpinned := fx.request_with(fx.hv, "onbekend", object.union(fx.graphql("bri", fx.income_fields("consent:identity", fx.literal([2025]))), {}), fx.scope_headers("bd:ib:2025"))
+	unpinned := fx.request_with(fx.hv, "onbekend", object.union(fx.graphql("bri", fx.income_fields("consent:identity", fx.literal([2025]))), {}), fx.headers)
 	_reason_for(unpinned, _consent) == "ACCESS_DENIED"
 	_reason_for(_unverifiable("CONFIG_ERROR", "SCHEMA_UNAVAILABLE"), _consent) == "ACCESS_DENIED"
 	_reason_for(object.remove(fx.request(fx.hv, "bri", [], {}), ["resource"]), _consent) == "ACCESS_DENIED"
@@ -126,7 +126,7 @@ test_reason_for_a_configuration_error_is_access_denied if {
 # reason: the request did not fail on what the consumer asked.
 test_reason_for_an_unreachable_register_is_access_denied if {
 	fields := array.concat(fx.income_fields("consent:identity", fx.literal([2025])), [fx.box("box2Inkomen")])
-	input_doc := fx.request(fx.hv, "bri", fields, fx.scope_headers("bd:ib:2025"))
+	input_doc := fx.request(fx.hv, "bri", fields, fx.headers)
 	_reason_for(input_doc, object.union(_consent, {"status_available": false})) == "ACCESS_DENIED"
 }
 

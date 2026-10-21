@@ -53,7 +53,7 @@ function scopeYears(scopes: string[]): number[] {
 }
 
 // opaReasonCode returns the reason code of a denial as the Authorization
-// Decision Log recorded it (YEAR_NOT_COVERED, CONSENT_SCOPE_MISMATCH, ...),
+// Decision Log recorded it (YEAR_NOT_COVERED, SCOPE_NOT_ALLOWED, ...),
 // looked up by Fsc-Transaction-Id. OpenFTV batches its ADL writes for up to
 // five seconds, so retry briefly before giving up.
 async function opaReasonCode(transactionId: string): Promise<string | null> {
@@ -325,8 +325,8 @@ export default function App() {
       // A consent is only usable through its own consumer: the scenario's
       // scope picks that consumer, and a consent issued for the other one
       // would be refused on actor binding rather than show what the
-      // scenario is about. Within the consumer any consent will do — deny
-      // scenarios deliberately ask for a scope it does not cover.
+      // scenario is about. Within the consumer the PDP evaluates the query
+      // against the consent; deny scenarios ask for uncovered years.
       const consumer = consumerFor(scenarioUse.scope_id)
       const sameConsumer = (h: HistoryRun) =>
         ((h.payload as IssuancePayload).scopes ?? []).some((s) => consumerFor(s) === consumer)
@@ -505,7 +505,7 @@ export default function App() {
           outcome,
         })
         // On deny: enrich with the OPA reason-code (YEAR_NOT_COVERED,
-        // CONSENT_SCOPE_MISMATCH, …). The FSC-inway only returns a bare
+        // SCOPE_NOT_ALLOWED, …). The FSC-inway only returns a bare
         // 401; the real reason lives in the OPA decision log, shipped
         // via Loki — hence a short retry loop while promtail catches up.
         // Look the decision up by the identifier that actually reached

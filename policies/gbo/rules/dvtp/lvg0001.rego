@@ -40,13 +40,10 @@ deny contains "CONSENT_WITHDRAWN" if not helper.consent_active
 
 deny contains "CONSENT_EXPIRED" if helper.consent_expired
 
-deny contains "CONSENT_SCOPE_MISMATCH" if not helper.consent_covers_declared_scope
-
 deny contains "CONSENT_ACTOR_MISMATCH" if not helper.consent_given_to_caller
 
-# Only the ownership question. The consent check alone would not do: a token
-# for bd:ib:2025, sent with that scope, covers it.
-deny contains "SCOPE_NOT_ALLOWED" if lib.declared_scope != "lvg:vbo:eigendom"
+# Only the ownership question. A BD consent cannot open LVG fields.
+deny contains "SCOPE_NOT_ALLOWED" if not helper.consent_covers("lvg:vbo:eigendom")
 
 # ── The question ─────────────────────────────────────────────────────────────
 

@@ -105,7 +105,6 @@ De tests van Appendix A staan in `appendix_a_test.rego`.
 - **Geen `traceparent` van de Inway.** Correlatie loopt via `X-Request-ID`
   (de `Fsc-Transaction-Id`), wat het profiel toestaat.
 
-Buiten het profiel, eigen aan GBO: de header `X-GBO-Scope` (een gedeclareerde
-scope die de regels tegen de toestemming toetsen; wordt verwijderd) en de
-uitzondering in `policies/authz.rego` voor het bronmetadatadocument
-(`GET /.well-known/gbo` op de metadataservices, zonder GraphQL).
+Buiten het profiel, eigen aan GBO: de uitzondering in `policies/authz.rego`
+voor het bronmetadatadocument (`GET /.well-known/gbo` op de metadataservices,
+zonder GraphQL).

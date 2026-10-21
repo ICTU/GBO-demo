@@ -202,7 +202,7 @@ geldige ondertekening en geregistreerde claims
 + FSC-delegator (anders subject.id) == dienstverlener_oin uit het token
 + bij delegatie: integrator gemandateerd voor die dienstverlener en regel
 + het subject in de GraphQL-query is een plaatshouder die de regel accepteert
-+ scope, jaren en velden vallen binnen het consent
++ de scope van de regel, gevraagde jaren en velden vallen binnen het consent
 = ALLOW
 ```
 
@@ -234,7 +234,6 @@ Ontbrekende, ongeldige of niet-beschikbare context faalt gesloten met een
 gerichte reden, zoals `CONSENT_SIGNATURE_INVALID`, `CONSENT_TOKEN_EXPIRED`,
 `CONSENT_CONTEXT_INVALID`, `CONSENT_KEYS_UNAVAILABLE`,
 `CONSENT_ACTOR_MISMATCH`, `INTEGRATOR_NOT_REGISTERED`, `CONSTRAINT_MISMATCH`,
-`CONSENT_SCOPE_MISMATCH`,
 `CONSENT_STATUS_UNAVAILABLE` of `CONSENT_WITHDRAWN`.
 
 ## 3. Toestemming intrekken

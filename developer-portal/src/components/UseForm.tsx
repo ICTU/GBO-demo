@@ -122,7 +122,7 @@ export default function UseForm({ payload, setPayload, history }: Props) {
       </div>
 
       <div className="field">
-        <label htmlFor="scope">Scope-ID <span className="opt">(geldig in token-claim; PDP checkt scope ⊆ consent.granted_scopes)</span></label>
+        <label htmlFor="scope">Scope-ID <span className="opt">(voor deze aanvraag; de PDP toetst de query aan de scopes in het consent)</span></label>
         <input
           id="scope"
           className="inp mono"

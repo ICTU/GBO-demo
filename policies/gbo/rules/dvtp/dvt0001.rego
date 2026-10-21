@@ -4,7 +4,7 @@ package gbo.rules.dvtp.dvt0001
 #
 # Grants a service provider the income declaration fields when the citizen's
 # consent is valid, not withdrawn or expired, given to that provider, and
-# covers the scope and every requested year. The query names its subject with
+# covers every requested year. The query names its subject with
 # the identity placeholder, so the subject can only be the consent's citizen.
 
 import data.gbo.lib
@@ -56,14 +56,16 @@ deny contains "CONSENT_WITHDRAWN" if not helper.consent_active
 
 deny contains "CONSENT_EXPIRED" if helper.consent_expired
 
-deny contains "CONSENT_SCOPE_MISMATCH" if not helper.consent_covers_declared_scope
-
 deny contains "CONSENT_ACTOR_MISMATCH" if not helper.consent_given_to_caller
 
-# Only the income question, for one belastingjaar. The consent checks alone
-# would not do: a consent for lvg:vbo:eigendom, sent with that scope, covers
-# it.
-deny contains "SCOPE_NOT_ALLOWED" if not regex.match(`^bd:ib:[0-9]{4}$`, lib.declared_scope)
+# The root field can appear without a belastingjaar field. Require at least
+# one income scope even then, so an LVG-only consent cannot open BD's root.
+income_scope_granted if {
+	some scope in helper.consent.granted_scopes
+	regex.match(`^bd:ib:[0-9]{4}$`, scope)
+}
+
+deny contains "SCOPE_NOT_ALLOWED" if not income_scope_granted
 
 # ── The question ─────────────────────────────────────────────────────────────
 

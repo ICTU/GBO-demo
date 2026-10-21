@@ -15,8 +15,8 @@ import (
 type Question struct {
 	Query     string
 	Variables map[string]any
-	// Scope is the requested scope. It is untrusted context for the PDP; the
-	// consent token is what puts the request under the consent regime.
+	// Scope names the consumer's requested use for its own logbook. The source
+	// call derives authorization and activity from the query and consent.
 	Scope        string
 	ConsentToken string
 	// TransactionID is the identifier that travels through FSC and ends up as

@@ -20,10 +20,10 @@ _lvg_consent := {
 	"dienstverlener_oin": _lvg_ir,
 }
 
-_lvg_input(actor, scope) := fx.request(actor, "lvg", fx.ownership_fields("consent:identity"), fx.scope_headers(scope))
+_lvg_input(actor) := fx.request(actor, "lvg", fx.ownership_fields("consent:identity"), fx.headers)
 
 test_engine_allows_the_ownership_check_via_lvg0001 if {
-	result := gbo.response with input as _lvg_input(_lvg_ir, "lvg:vbo:eigendom")
+	result := gbo.response with input as _lvg_input(_lvg_ir)
 		with data.gbo.consent.resolved as _lvg_consent
 	result.decision == true
 	every g in result.context.granted {
@@ -32,14 +32,14 @@ test_engine_allows_the_ownership_check_via_lvg0001 if {
 }
 
 test_engine_denies_a_question_about_another_citizen if {
-	req := fx.request(_lvg_ir, "lvg", fx.ownership_fields("999991772"), fx.scope_headers("lvg:vbo:eigendom"))
+	req := fx.request(_lvg_ir, "lvg", fx.ownership_fields("999991772"), fx.headers)
 	result := gbo.response with input as req with data.gbo.consent.resolved as _lvg_consent
 	result.decision == false
 	fx.refused_for(result, "CONSTRAINT_MISMATCH")
 }
 
 test_engine_denies_a_bd_consent_on_lvg_fields if {
-	result := gbo.response with input as _lvg_input(_lvg_hv, "bd:ib:2025")
+	result := gbo.response with input as _lvg_input(_lvg_hv)
 		with data.gbo.consent.resolved as object.union(_lvg_consent, {"granted_scopes": ["bd:ib:2025"], "dienstverlener_oin": _lvg_hv})
 	result.decision == false
 	fx.refused_for(result, "SCOPE_NOT_ALLOWED")
@@ -54,14 +54,15 @@ test_engine_has_no_rule_for_lvg_without_a_consent_token if {
 
 test_engine_denies_an_lvg_consent_on_bd_fields if {
 	# The other direction: the ownership consent does not open income data.
-	result := gbo.response with input as fx.income(_lvg_ir, "consent:identity", [2025], fx.scope_headers("lvg:vbo:eigendom"))
+	result := gbo.response with input as fx.income(_lvg_ir, "consent:identity", [2025], fx.headers)
 		with data.gbo.consent.resolved as _lvg_consent
 	result.decision == false
+	fx.refused_for(result, "SCOPE_NOT_ALLOWED")
 }
 
 # The mandate holds for LVG0001 too, although the rule does not name it.
 test_engine_denies_a_delegated_ownership_check_without_mandate if {
-	req := object.union(_lvg_input("99999999900000001100", "lvg:vbo:eigendom"), {"subject": {"attributes": {"outway_delegator_peer_id": _lvg_ir}}})
+	req := object.union(_lvg_input("99999999900000001100"), {"subject": {"attributes": {"outway_delegator_peer_id": _lvg_ir}}})
 	result := gbo.response with input as req
 		with data.gbo.consent.resolved as _lvg_consent
 		with data.entities.dvtp_participant as {"99999999900000001100": {"active": true, "acts_for": [{"peer_id": _lvg_ir, "rules": ["DVT0001"]}]}}

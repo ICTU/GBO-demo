@@ -54,11 +54,6 @@ default consent_covers(_) := false
 
 consent_covers(scope) if scope in consent.granted_scopes
 
-# The citizen consented to the scope the consumer declares.
-default consent_covers_declared_scope := false
-
-consent_covers_declared_scope if consent_covers(lib.declared_scope)
-
 # The consent names the party the call is made for: on a delegated call the
 # service provider, not the integrator. Consent gives the integrator no
 # mandate; the engine checks that separately.

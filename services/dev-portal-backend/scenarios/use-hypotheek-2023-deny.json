@@ -1,7 +1,7 @@
 {
   "id": "use-hypotheek-2023-deny",
-  "name": "Use · scope bd:ib:2023 DENY (niet geconsenteerd)",
-  "desc": "Scope bd:ib:2023 niet in consent (alleen 2025 verleend) → CONSENT_SCOPE_MISMATCH.",
+  "name": "Use · belastingjaar 2023 DENY (niet geconsenteerd)",
+  "desc": "De query vraagt belastingjaar 2023, maar het consent verleent alleen bd:ib:2025 → YEAR_NOT_COVERED.",
   "tab": "use",
   "expected_outcome": "deny",
   "payload": {

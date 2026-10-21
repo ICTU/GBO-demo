@@ -2,7 +2,7 @@ package gbo.lib
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Reading the request, for every rule in either regime: the mapper's fields
-# and their arguments, the declared scope, the caller, and the time. No
+# and their arguments, the caller, and the time. No
 # checks live here; the rules under ./rules hold those.
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -51,23 +51,6 @@ identity_placeholder := "consent:identity"
 pseudonym_placeholder := "consent:pseudonym"
 
 subject_placeholders := {identity_placeholder, pseudonym_placeholder}
-
-# ── Scope ────────────────────────────────────────────────────────────────────
-# The scope the consumer declares in X-GBO-Scope, header name in any case.
-# Untrusted: the rules check it against the consent's scopes or their own.
-# Two values give no scope rather than one picked: the pick would be
-# arbitrary, and the source could act on the other.
-
-_scope_values contains value if {
-	some name, value in object.get(input, ["context", "headers"], {})
-	lower(name) == "x-gbo-scope"
-	is_string(value)
-}
-
-declared_scope := scope if {
-	count(_scope_values) == 1
-	some scope in _scope_values
-} else := ""
 
 # ── Caller (FSC delegation) ──────────────────────────────────────────────────
 # A service provider calls a source itself, or through an integrator under a
