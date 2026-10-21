@@ -42,21 +42,21 @@ grant_type_delegated_service_connection := 3
 
 _subject_attributes := object.get(object.get(input, "subject", {}), "attributes", {})
 _source_peer_id := object.get(_subject_attributes, "self_peer_id", "")
-_pulled_participants := object.get(data.entities, "dvtp_participant", {}) if {
+_pulled_participants := object.get(data.entities, "dvtp_participant", null) if {
 	data.entities
 }
 
-else := {}
-
-_parties := _pulled_participants
+else := null
 
 # An empty register is available data: it admits nobody. Only a missing
 # dvtp_participant document means the PIP pull did not supply a register.
-default _register_available := false
+_register_available := _pulled_participants != null
 
-_register_available if {
-	data.entities.dvtp_participant
+_parties := _pulled_participants if {
+	_register_available
 }
+
+else := {}
 
 _grant_types := {t | some t in input.resource.attributes.grant_types}
 
