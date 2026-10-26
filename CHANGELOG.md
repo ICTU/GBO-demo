@@ -280,6 +280,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- **The reference QTSP folds the seal check away** (#336): a valid seal is
+  shown under "Technische details", with the organisation that sealed it;
+  an invalid seal stays in view.
 - **The reference QTSP's request page offers products** (#336): "Wat wilt u
   laten verifiëren?" with cards instead of JSON fields. Adres is filled in
   field by field; Standplaatsvergunning is shown as coming soon. The page only
