@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/go-jose/go-jose/v4"
 )
@@ -20,6 +21,9 @@ const Header = "X-JWS-Signature"
 type Check struct {
 	// Signer is the subject of the seal certificate.
 	Signer string
+	// Organization is the organisation in that subject, a readable name of
+	// who sealed it; empty when the certificate names none.
+	Organization string
 }
 
 // Validate checks the detached JWS over body: its certificate chain must lead
@@ -46,5 +50,5 @@ func Validate(signature string, body []byte, anchors *x509.CertPool) (Check, err
 	if _, err := jws.Verify(leaf.PublicKey); err != nil {
 		return Check{}, errors.New("the seal does not verify over the response body")
 	}
-	return Check{Signer: leaf.Subject.String()}, nil
+	return Check{Signer: leaf.Subject.String(), Organization: strings.Join(leaf.Subject.Organization, ", ")}, nil
 }
