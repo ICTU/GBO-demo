@@ -122,7 +122,7 @@ func (e loginEnv) loggedInAs(t *testing.T, c *http.Client) string {
 func TestLoginPage(t *testing.T) {
 	e := newLoginEnv(t, &fakeWallet{})
 	resp, page := e.do(t, browser(), http.MethodGet, "/", nil)
-	for _, want := range []string{`<button type="submit">Inloggen met NL Wallet</button>`, `action="/login/mock"`, "niet uw BSN", "hier wordt niets gecontroleerd",
+	for _, want := range []string{`<button class="qp-btn block" type="submit">Inloggen met NL Wallet</button>`, `action="/login/mock"`, "niet uw BSN", "hier wordt niets gecontroleerd",
 		// Without test data from a request, the mock is prefilled with Frouke Jansen.
 		`value="Jansen"`, `value="Frouke"`, `value="2000-03-24"`, `value="NL, BE"`} {
 		if resp.StatusCode != http.StatusOK || !strings.Contains(page, want) {
@@ -133,7 +133,7 @@ func TestLoginPage(t *testing.T) {
 		t.Error("the request form without a login")
 	}
 	_, page = newLoginEnv(t, nil).do(t, browser(), http.MethodGet, "/", nil)
-	if !strings.Contains(page, `<button type="submit" disabled>Inloggen met NL Wallet</button> <small>niet beschikbaar</small>`) {
+	if !strings.Contains(page, `<button class="qp-btn block" type="submit" disabled>Inloggen met NL Wallet</button> <small class="sec">niet beschikbaar</small>`) {
 		t.Errorf("without a verifier the wallet is not disabled:\n%s", page)
 	}
 }
