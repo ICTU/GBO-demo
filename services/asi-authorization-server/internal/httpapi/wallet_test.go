@@ -75,7 +75,7 @@ func TestWalletShowsTheQRCode(t *testing.T) {
 				s.progress.Link = ""
 				s.progress.SameDeviceLink = ""
 			})
-			if _, page := as.get(t, path, tx.cookie); strings.Contains(page, "<img") || strings.Contains(page, "Open NL Wallet") || !strings.Contains(page, "Ga verder in de NL Wallet") {
+			if _, page := as.get(t, path, tx.cookie); strings.Contains(page, "QR-code voor de NL Wallet") || strings.Contains(page, "Open NL Wallet") || !strings.Contains(page, "Ga verder in de NL Wallet") {
 				t.Errorf("wallet page while the wallet has the request:\n%s", page)
 			}
 		})

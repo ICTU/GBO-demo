@@ -1,358 +1,406 @@
-/* The pages of the authorization server, on top of NL Design System's
-   Voorbeeld theme and Utrecht components (static/nlds). The accessible ICTU/
-   GBO web palette connects these pages to the GBO simulation environment. */
-
+/*
+ * The pages of the authorization server: a government look in the colours of
+ * the demo's consent portal (Rijksblauw, the coat of arms, the ribbon), so a
+ * viewer tells this login and consent service apart from the QTSP. No
+ * organisation's name or logo; no script; served from this server.
+ */
 :root {
-  --azsp-blue: #2e62e6;
-  --azsp-blue-dark: #2651bd;
-  --azsp-navy: #0e2b84;
-  --azsp-purple: #880095;
-  --azsp-cyan: #63dbff;
-  --azsp-magenta: #ff33ff;
-  --azsp-page: #ecf1fb;
-  --azsp-info: #e6f8ff;
-  --azsp-notice: #f8e6f9;
-  --azsp-rule: #d7dff0;
-  --azsp-muted: #4d5874;
-  --azsp-font: "Century Gothic", "Avenir Next", Avenir, ui-sans-serif, system-ui, sans-serif;
+  --lint: #01689b;
+  --lint-d: #003e69;
+  --ink: #0a2845;
+  --ink2: #154273;
+  --mu: #535353;
+  --bg: #f3f3f3;
+  --ln: #e6e6e6;
+  --focus: #f9e11e;
+  --wa-bg: #fff4d9;
+  --wa-ln: #e7c778;
+  --wa-t: #7e4a00;
+  --no: #a90061;
 }
 
 * {
   box-sizing: border-box;
 }
 
-html,
 body {
   margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
-body {
-  background-color: var(--azsp-page);
-  color: #182247;
-  font-family: var(--azsp-font);
-  font-size: 1rem;
-  line-height: 1.55;
+a {
+  color: var(--lint);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
-.azsp-header {
-  background-color: var(--azsp-blue);
-  box-shadow: inset 0 -1px 0 rgb(255 255 255 / 20%);
-  overflow: hidden;
-  position: relative;
+a:hover {
+  color: var(--lint-d);
 }
 
-.azsp-header::after {
-  border: 1px solid rgb(255 255 255 / 14%);
-  border-radius: 50%;
-  block-size: 15rem;
-  content: "";
-  inline-size: 15rem;
-  inset-block-start: -6rem;
-  inset-inline-end: -3rem;
-  position: absolute;
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 6px var(--ink);
 }
 
-.azsp-header__content,
-.azsp-main {
-  box-sizing: border-box;
-  margin-inline: auto;
-  max-inline-size: 48rem;
-  padding-inline: 1rem;
-}
-
-.azsp-header__content {
-  align-items: baseline;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem 0.75rem;
-  padding-block: 1.15rem;
-  position: relative;
-  z-index: 1;
-}
-
-.azsp-header__content::before {
-  color: #fff;
-  content: "GBO";
-  font-size: 1.1rem;
+h1 {
+  font-size: 28px;
+  line-height: 1.25;
   font-weight: 700;
-  letter-spacing: 0.02em;
+  color: var(--ink);
+  margin: 0 0 10px;
+  letter-spacing: -0.01em;
 }
 
-.azsp-header__service {
-  color: #fff;
-  font-size: 1rem;
-  font-weight: 400;
-  margin: 0;
+h2 {
+  font-size: 20px;
+  line-height: 1.3;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0 0 8px;
 }
 
-.azsp-header__demo {
-  color: rgb(255 255 255 / 78%);
-  margin: 0;
+p {
+  margin: 0 0 14px;
 }
 
-.azsp-main {
-  padding-block: 2rem 3rem;
+/* Header: the coat of arms centred against the top, the service on the left,
+   the ribbon below. */
+.as-hd {
+  background: #fff;
 }
 
-.azsp-card {
-  background-color: #fff;
-  border: 1px solid var(--azsp-rule);
-  border-radius: 6px;
-  box-shadow: 0 10px 30px rgb(14 43 132 / 8%);
+.as-hd-in {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 24px;
   display: grid;
-  gap: 1.25rem;
-  padding: 2rem;
-}
-
-.azsp-card > * {
-  margin-block: 0;
-}
-
-.azsp-request {
-  background: var(--azsp-page);
-  border: 1px solid var(--azsp-rule);
-  border-radius: 4px;
-  display: grid;
-  gap: 0.5rem 1rem;
-  grid-template-columns: max-content 1fr;
-  margin: 0;
-  padding: 1.25rem 1.5rem;
-}
-
-.azsp-request dt {
-  font-weight: var(--basis-text-font-weight-bold, 700);
-}
-
-.azsp-request dd {
-  margin: 0;
-}
-
-.azsp-means {
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
 }
 
-.azsp-qr {
-  block-size: auto;
+.as-wapen {
   display: block;
-  inline-size: 100%;
-  max-inline-size: 280px;
+  height: 80px;
+  width: auto;
+  grid-column: 2;
 }
 
-.azsp-wallet-options {
+.as-title {
+  grid-column: 1;
+  grid-row: 1;
+  margin: 0;
+  font-size: 19px;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.25;
+}
+
+.as-title small {
+  display: block;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--mu);
+}
+
+.as-lint {
+  height: 3px;
+  background: var(--lint);
+}
+
+/* Content */
+.as-main {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 28px 24px 48px;
+}
+
+.as-demo {
+  display: flex;
+  gap: 10px;
+  background: var(--wa-bg);
+  border: 1px solid var(--wa-ln);
+  color: var(--wa-t);
+  padding: 11px 14px;
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0 0 20px;
+}
+
+.as-demo p {
+  margin: 0;
+}
+
+.as-alert {
+  display: flex;
+  gap: 10px;
+  background: #fff;
+  border: 1px solid var(--ln);
+  border-left: 4px solid var(--no);
+  padding: 12px 14px;
+  font-size: 15px;
+  margin: 0 0 20px;
+}
+
+.as-alert p {
+  margin: 0;
+}
+
+.as-card {
+  display: block;
+  background: #fff;
+  border: 1px solid var(--ln);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+  padding: 30px 32px;
+}
+
+.as-lead {
+  font-size: 17px;
+  color: var(--ink2);
+}
+
+.as-dl {
   display: grid;
-  gap: 2rem;
-  grid-template-areas: "qr same";
-  grid-template-columns: minmax(0, 1fr) minmax(14rem, 1fr);
+  grid-template-columns: 150px 1fr;
+  gap: 10px 18px;
+  margin: 20px 0 14px;
+  padding: 18px 20px;
+  background: var(--bg);
+  border: 1px solid var(--ln);
 }
 
-.azsp-wallet-option {
-  align-content: start;
+.as-dl dt {
+  color: var(--mu);
+  font-size: 14.5px;
+}
+
+.as-dl dd {
+  margin: 0;
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.as-dl ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.as-note {
+  font-size: 14.5px;
+  color: var(--mu);
+  margin: 0 0 4px;
+}
+
+.as-sec {
+  margin-top: 30px;
+  padding-top: 24px;
+  border-top: 1px solid var(--ln);
+}
+
+.as-choice {
   display: grid;
-  gap: 0.75rem;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin: 18px 0 16px;
 }
 
-.azsp-wallet-option > * {
-  margin-block: 0;
-}
-
-.azsp-wallet-option--qr {
-  grid-area: qr;
-}
-
-.azsp-wallet-option--same {
-  grid-area: same;
-}
-
-.azsp-wallet-option--same .utrecht-button {
-  justify-self: start;
-}
-
-.utrecht-heading-1,
-.utrecht-heading-2 {
-  color: var(--azsp-navy);
-  font-family: var(--azsp-font);
+.as-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 12px 18px;
+  background: var(--lint);
+  color: #fff;
+  border: 0;
+  box-shadow: inset 0 -3px 0 var(--lint-d);
+  font: inherit;
   font-weight: 700;
-  letter-spacing: -0.015em;
+  font-size: 16px;
+  text-decoration: none;
+  cursor: pointer;
   line-height: 1.2;
 }
 
-.utrecht-heading-1 {
-  font-size: 2rem;
-}
-
-.utrecht-heading-2 {
-  font-size: 1.45rem;
-}
-
-.utrecht-paragraph {
-  color: var(--azsp-navy);
-  font-family: var(--azsp-font);
-  line-height: 1.55;
-}
-
-.utrecht-paragraph--lead {
-  font-size: 1.1rem;
-}
-
-.utrecht-alert {
-  border-radius: 0;
-  font-family: var(--azsp-font);
-}
-
-.utrecht-alert--warning {
-  background: var(--azsp-notice);
-  border: 1px solid #e0b8e3;
-  border-inline-start: 4px solid var(--azsp-purple);
-  color: #57105e;
-}
-
-.utrecht-alert--warning .utrecht-paragraph {
-  color: #57105e;
-}
-
-.utrecht-button {
-  border-radius: 4px;
-  box-shadow: 0 2px 0 rgb(14 43 132 / 18%);
-  font-family: var(--azsp-font);
-  font-size: 1rem;
-  font-weight: 700;
-  min-block-size: 2.75rem;
-  padding: 0.65rem 1.35rem;
-  transform: none;
-}
-
-.utrecht-button--primary-action {
-  --utrecht-button-primary-action-active-background-color: var(--azsp-blue-dark);
-  --utrecht-button-primary-action-active-border-color: var(--azsp-blue-dark);
-  --utrecht-button-primary-action-active-color: #fff;
-  --utrecht-button-primary-action-background-color: var(--azsp-blue);
-  --utrecht-button-primary-action-border-color: var(--azsp-blue);
-  --utrecht-button-primary-action-color: #fff;
-  --utrecht-button-primary-action-disabled-background-color: #9cb7cb;
-  --utrecht-button-primary-action-disabled-border-color: #9cb7cb;
-  --utrecht-button-primary-action-disabled-color: #fff;
-  --utrecht-button-primary-action-focus-background-color: var(--azsp-blue-dark);
-  --utrecht-button-primary-action-focus-border-color: var(--azsp-blue-dark);
-  --utrecht-button-primary-action-focus-color: #fff;
-  --utrecht-button-primary-action-hover-background-color: var(--azsp-blue-dark);
-  --utrecht-button-primary-action-hover-border-color: var(--azsp-blue-dark);
-  --utrecht-button-primary-action-hover-color: #fff;
-  background: var(--azsp-blue);
-  border-color: var(--azsp-blue);
+.as-btn:hover {
+  background: var(--lint-d);
   color: #fff;
 }
 
-.utrecht-button--primary-action:hover {
-  background: var(--azsp-blue-dark);
-  border-color: var(--azsp-blue-dark);
-  color: #fff;
+.as-btn img {
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
+  display: block;
 }
 
-.utrecht-button--secondary-action {
-  --utrecht-button-secondary-action-active-background-color: var(--azsp-page);
-  --utrecht-button-secondary-action-active-border-color: var(--azsp-blue-dark);
-  --utrecht-button-secondary-action-active-color: var(--azsp-blue-dark);
-  --utrecht-button-secondary-action-background-color: #fff;
-  --utrecht-button-secondary-action-border-color: var(--azsp-blue);
-  --utrecht-button-secondary-action-color: var(--azsp-blue);
-  --utrecht-button-secondary-action-focus-background-color: #fff;
-  --utrecht-button-secondary-action-focus-border-color: var(--azsp-blue-dark);
-  --utrecht-button-secondary-action-focus-color: var(--azsp-blue-dark);
-  --utrecht-button-secondary-action-hover-background-color: var(--azsp-page);
-  --utrecht-button-secondary-action-hover-border-color: var(--azsp-blue-dark);
-  --utrecht-button-secondary-action-hover-color: var(--azsp-blue-dark);
-  background: #fff;
-  border-color: var(--azsp-blue);
-  color: var(--azsp-blue);
-}
-
-.utrecht-button--secondary-action:hover {
-  background: var(--azsp-page);
-  border-color: var(--azsp-blue-dark);
-  color: var(--azsp-blue-dark);
-}
-
-.utrecht-button--subtle {
-  --utrecht-button-subtle-active-background-color: var(--azsp-page);
-  --utrecht-button-subtle-active-border-color: transparent;
-  --utrecht-button-subtle-active-color: var(--azsp-blue-dark);
-  --utrecht-button-subtle-background-color: transparent;
-  --utrecht-button-subtle-border-color: transparent;
-  --utrecht-button-subtle-color: var(--azsp-navy);
-  --utrecht-button-subtle-focus-background-color: transparent;
-  --utrecht-button-subtle-focus-border-color: transparent;
-  --utrecht-button-subtle-focus-color: var(--azsp-blue-dark);
-  --utrecht-button-subtle-hover-background-color: var(--azsp-page);
-  --utrecht-button-subtle-hover-border-color: transparent;
-  --utrecht-button-subtle-hover-color: var(--azsp-blue-dark);
-  background: transparent;
-  border-color: transparent;
+.as-btn:disabled {
+  background: #b6c4d0;
   box-shadow: none;
-  color: var(--azsp-navy);
-  text-decoration: underline;
-  text-underline-offset: 0.18em;
-}
-
-.utrecht-button--subtle:hover {
-  background: var(--azsp-page);
-  color: var(--azsp-blue-dark);
-}
-
-.utrecht-button:focus-visible {
-  outline: 3px solid var(--azsp-magenta);
-  outline-offset: 3px;
-}
-
-.utrecht-button:disabled {
-  background: #9cb7cb;
-  border-color: #9cb7cb;
-  color: #fff;
   cursor: not-allowed;
 }
 
-/* On a narrow screen the request summary stacks. */
-@media (max-width: 38rem) {
-  .azsp-wallet-options {
-    grid-template-areas: "same" "qr";
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .azsp-means {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .azsp-means .utrecht-button {
-    justify-content: center;
-    max-inline-size: none;
-  }
+.as-btn.sec {
+  background: #fff;
+  color: var(--lint);
+  box-shadow: inset 0 0 0 2px var(--lint);
 }
 
-@media (max-width: 30rem) {
-  .azsp-main {
-    padding-block: 0;
-    padding-inline: 0;
+.as-btn.sec:hover {
+  background: #eef4f8;
+}
+
+.as-btn.sec:disabled {
+  color: var(--mu);
+  box-shadow: inset 0 0 0 2px #b6c4d0;
+  background: #fff;
+}
+
+.as-deny {
+  background: none;
+  border: 0;
+  padding: 6px 0;
+  font: inherit;
+  font-size: 15.5px;
+  color: var(--lint);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.as-deny:hover {
+  color: var(--lint-d);
+}
+
+.as-hint {
+  font-size: 13.5px;
+  color: var(--mu);
+  margin: 8px 0 0;
+}
+
+.as-ft {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0 24px 30px;
+  font-size: 13px;
+  color: var(--mu);
+}
+
+/* Wallet page: the QR code for another device, the button for this one. */
+.as-qr {
+  display: flex;
+  gap: 26px;
+  align-items: flex-start;
+  margin: 18px 0;
+}
+
+.as-qr section {
+  flex: 1;
+  min-width: 0;
+}
+
+.as-qr-box {
+  display: block;
+  width: 220px;
+  height: 220px;
+  padding: 12px;
+  background: #fff;
+  border: 1px solid var(--ln);
+}
+
+.as-qr-box img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+}
+
+/* Error pages */
+.as-err {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.as-err-ic {
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 20px;
+  background: #f7e1ee;
+  color: var(--no);
+}
+
+/* Phone */
+@media (max-width: 620px) {
+  .as-hd-in {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    padding: 0 16px 12px;
+    text-align: center;
   }
 
-  .azsp-card {
-    border: 0;
-    border-radius: 0;
-    box-shadow: none;
-    padding: 1rem;
+  .as-wapen {
+    grid-column: 1;
+    height: 66px;
   }
 
-  .utrecht-heading-1 {
-    font-size: 1.75rem;
+  .as-title {
+    grid-column: 1;
+    grid-row: 2;
+    font-size: 17px;
+    margin-top: 8px;
   }
 
-  .azsp-request {
+  .as-main {
+    padding: 18px 12px 32px;
+  }
+
+  .as-card {
+    padding: 22px 18px;
+  }
+
+  h1 {
+    font-size: 23px;
+  }
+
+  .as-dl {
+    grid-template-columns: 1fr;
+    gap: 2px;
+    padding: 14px 16px;
+  }
+
+  .as-dl dd {
+    margin-bottom: 10px;
+  }
+
+  .as-choice {
     grid-template-columns: 1fr;
   }
 
-  .azsp-request dd {
-    margin-block-end: 0.5rem;
+  .as-qr {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .as-qr-box {
+    width: 100%;
+    max-width: 260px;
+    height: auto;
+    aspect-ratio: 1;
+    margin: 0 auto;
+  }
+
+  .as-ft {
+    padding: 0 16px 24px;
   }
 }
