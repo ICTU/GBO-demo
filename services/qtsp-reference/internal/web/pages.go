@@ -84,6 +84,8 @@ input[type=text]:focus{border-color:var(--pri-d)}
 .qp-seal{display:flex;gap:14px;align-items:flex-start;border:1px solid #B9E0D3;background:var(--ok-bg);border-radius:9px;padding:16px 18px;color:var(--ok-t)}
 .qp-seal.bad{border-color:var(--no-ln);background:var(--no-bg);color:var(--no-t)}
 .qp-seal svg{flex:0 0 34px}
+.qp-seal p{margin:8px 0 0}
+.qp-details summary{cursor:pointer;font-weight:700;color:var(--h)}.qp-details[open] summary{margin-bottom:14px}
 .qp-qrwrap{display:flex;gap:24px;align-items:center}
 .qp-qr{flex:0 0 220px;width:220px;height:220px;padding:12px;background:#fff;border:1px solid var(--ln);border-radius:10px}
 .qp-qr img{display:block;width:100%;height:100%;image-rendering:pixelated}
@@ -150,11 +152,16 @@ var resultPage = template.Must(template.New("result").Funcs(template.FuncMap{"ba
 <tbody>{{$verify := eq .Operation "verify"}}{{range .Results}}<tr><td class="attr">{{.Label}}</td>{{if $verify}}<td class="val">{{shown .Submitted}}</td><td>{{with badge .Result}}<span class="qp-badge {{.Class}}"><i aria-hidden="true">{{.Icon}}</i>{{.Text}}</span>{{end}}</td>{{else}}<td class="val">{{shown .Value}}</td>{{end}}</tr>
 {{end}}</tbody></table>{{end}}
 </section>
-{{if and (not .Problem) .Seal}}<section class="qp-card">
+{{if and (not .Problem) .Seal}}{{if .Seal.Valid}}<details class="qp-card qp-details">
+<summary>Technische details</summary>
 <h2>Zegelcontrole</h2>
-{{if .Seal.Valid}}<div class="qp-seal"><svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><circle cx="17" cy="17" r="15" fill="#0F8A6A"/><path d="m10.5 17.5 4.2 4.2 8.8-9" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg><div><strong>Zegel geldig</strong>, verzegeld door {{.Seal.Signer}}. Het antwoord komt van de bron en is niet gewijzigd.</div></div>
-{{else}}<div class="qp-seal bad"><div><strong>Zegel ongeldig</strong>: het resultaat is niet geaccepteerd. {{.Seal.Error}}</div></div>{{end}}
-</section>{{end}}
+<div class="qp-seal"><svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><circle cx="17" cy="17" r="15" fill="#0F8A6A"/><path d="m10.5 17.5 4.2 4.2 8.8-9" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg><div><strong>Zegel geldig.</strong> Het antwoord is verzegeld door {{or .Seal.Organization "de bronkant"}} en onderweg niet gewijzigd.
+<p class="sec">Zegelcertificaat: <span class="mono">{{.Seal.Signer}}</span></p></div></div>
+</details>
+{{else}}<section class="qp-card">
+<h2>Zegelcontrole</h2>
+<div class="qp-seal bad"><div><strong>Zegel ongeldig</strong>: het resultaat is niet geaccepteerd. {{.Seal.Error}}</div></div>
+</section>{{end}}{{end}}
 {{if .WalletQR}}<section class="qp-card">
 <h2>Zet de verklaring in uw NL Wallet</h2>
 <div class="qp-qrwrap">

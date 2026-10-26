@@ -394,7 +394,9 @@ func completeEvidence(requested []qtsp.Attribute, results []row) bool {
 type sealView struct {
 	Valid  bool   `json:"valid"`
 	Signer string `json:"signer,omitempty"`
-	Error  string `json:"error,omitempty"`
+	// Organization is for the result page only.
+	Organization string `json:"-"`
+	Error        string `json:"error,omitempty"`
 }
 
 // row is one attribute: the verification result (Match, NoMatch,
@@ -429,7 +431,7 @@ func (h *Handler) result(p prepared, resp qtsp.Response) outcome {
 		out.Seal = &sealView{Error: resp.SealError.Error()}
 		return out
 	}
-	out.Seal = &sealView{Valid: true, Signer: resp.Seal.Signer}
+	out.Seal = &sealView{Valid: true, Signer: resp.Seal.Signer, Organization: resp.Seal.Organization}
 	var res struct {
 		Verify []struct {
 			Identifier string `json:"attributeIdentifier"`

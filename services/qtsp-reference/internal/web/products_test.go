@@ -140,3 +140,23 @@ func TestResultPageShowsTheAddress(t *testing.T) {
 		}
 	}
 }
+
+// A valid seal is a technical detail, folded away under "Technische details";
+// an invalid seal stays in view, because the result is then not accepted.
+func TestSealCheckIsATechnicalDetail(t *testing.T) {
+	page := func(s *sealView) string {
+		rec := httptest.NewRecorder()
+		render(rec, http.StatusOK, resultPage, resultView{outcome: outcome{Status: statusDone, Operation: "verify", Seal: s}})
+		return rec.Body.String()
+	}
+	valid := page(&sealView{Valid: true, Signer: "CN=ASIP seal,O=GBO demo", Organization: "GBO demo"})
+	details := strings.Index(valid, `<details class="qp-card qp-details">`)
+	if details < 0 || !strings.Contains(valid, "<summary>Technische details</summary>") || strings.Index(valid, "Zegel geldig.") < details ||
+		!strings.Contains(valid, "verzegeld door GBO demo") {
+		t.Errorf("valid seal not folded under Technische details:\n%s", valid)
+	}
+	invalid := page(&sealView{Error: "the seal does not verify over the response body"})
+	if strings.Contains(invalid, "<details") || !strings.Contains(invalid, "Zegel ongeldig") {
+		t.Errorf("invalid seal not in view:\n%s", invalid)
+	}
+}
