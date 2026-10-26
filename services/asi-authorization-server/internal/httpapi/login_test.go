@@ -20,8 +20,8 @@ func TestRequestPage(t *testing.T) {
 	as := newTestAS(t)
 	tx := as.startAuthorization(t, authorizeParams(newPKCE()))
 	for _, want := range []string{
-		"Testomgeving — geen echte identificatie", testClientName, "wil bij Basisregistratie Personen (test) laten controleren of gegevens over u kloppen.", "Controleren of gegevens kloppen",
-		`value="digid">Inloggen met DigiD (mock)`, `value="wallet">Inloggen met NL Wallet`, `value="deny">Weigeren`,
+		"Testomgeving — geen echte identificatie", testClientName, "Daarvoor wil " + testClientName + " bij Basisregistratie Personen (test) laten controleren of uw gegevens kloppen.", "Controleren of uw gegevens kloppen",
+		`value="digid"><img src="/static/Logo_of_DigiD.png" alt="">Inloggen met DigiD (mock)`, `value="wallet">Inloggen met NL Wallet`, `value="deny">Geen toestemming geven`,
 	} {
 		if !strings.Contains(tx.page, want) {
 			t.Errorf("request page lacks %q:\n%s", want, tx.page)

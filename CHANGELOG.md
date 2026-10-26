@@ -280,6 +280,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- **The ASI authorization server's pages get a government look** (#336): the
+  coat of arms, the ribbon and Rijksblauw of the demo's consent portal,
+  without an organisation's name, replace NL Design System's Voorbeeld theme,
+  so the login and consent service is told apart from the QTSP. The request
+  page names the QTSP that gets consent, what it learns, and that the citizen
+  logs in at this service, not at the QTSP; "Weigeren" is now "Geen
+  toestemming geven".
 - **The reference QTSP folds the seal check away** (#336): a valid seal is
   shown under "Technische details", with the organisation that sealed it;
   an invalid seal stays in view.

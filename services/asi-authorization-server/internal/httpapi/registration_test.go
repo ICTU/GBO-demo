@@ -72,7 +72,7 @@ func TestRegisteredClientGetsAToken(t *testing.T) { // D2 (to the token)
 	params := authorizeParams(p)
 	params.Set("client_id", id)
 	// The user sees the legal name of the register entry (#544).
-	if tx := as.startAuthorization(t, params); !strings.Contains(tx.page, "<strong>Test QTSP</strong>") || strings.Contains(tx.page, id) {
+	if tx := as.startAuthorization(t, params); !strings.Contains(tx.page, "<h1>Toestemming voor Test QTSP</h1>") || strings.Contains(tx.page, id) {
 		t.Errorf("request page does not name the registered QTSP by its legal name:\n%s", tx.page)
 	}
 	form := as.tokenForm(t, as.code(t, params), p)
@@ -265,7 +265,7 @@ func TestRecheckTakesAChangedLegalName(t *testing.T) {
 		}
 	}
 	<-done
-	if tx := as.startAuthorization(t, params); !strings.Contains(tx.page, "<strong>Test QTSP B.V.</strong>") {
+	if tx := as.startAuthorization(t, params); !strings.Contains(tx.page, "<h1>Toestemming voor Test QTSP B.V.</h1>") {
 		t.Fatalf("request page after the re-verification does not show the new legal name:\n%s", tx.page)
 	}
 }

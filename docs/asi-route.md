@@ -61,7 +61,7 @@ Behind the ASIP the request goes through the demo's generic chain: the ASIP's ow
 | Login with DigiD (mock) | **stub**: checks nothing and provides the BSN only; not real DigiD |
 | The identification data in the token: with the NL Wallet the BSN, names, birth date and nationalities; with DigiD (mock) the BSN only | **GBO interpretation** of what the token carries. The NL PID has no place of birth, one of the mandatory PID attributes |
 | The BSN in plain text in the token | **demo shortcut**: the QTSP can read it; slice 9 protects it |
-| Pages in NL Design System's neutral theme, without script | **real**; not the house style of an organisation |
+| Pages in a government look (coat of arms, Rijksblauw), without script | **real**; no name of an organisation |
 | No PAR, no mTLS, no refresh tokens | **GBO interpretation**: one mechanism of each pair ETSI offers; see the security considerations |
 | No `iss` in the authorization response (RFC 9207); issued tokens remain valid after an entitlement is withdrawn | open, see the security considerations |
 
