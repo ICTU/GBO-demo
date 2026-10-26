@@ -236,47 +236,51 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
-// who is the line that names the logged-in citizen, with Uitloggen.
-const who = `{{with .Who}}<p class="who">Ingelogd als <strong>{{.Name}}</strong>{{if .Mocked}} (testgegevens, mock){{end}}
-<form method="post" action="/logout" class="inline"><button type="submit" class="link">Uitloggen</button></form></p>{{end}}`
+// who names the logged-in citizen in the header, with Uitloggen.
+const who = `{{with .Who}}<span class="qp-user">Ingelogd als <strong>{{.Name}}</strong>{{if .Mocked}} (testgegevens, mock){{end}} ·
+<form method="post" action="/logout"><button type="submit">Uitloggen</button></form></span>{{end}}`
 
-var loginTemplate = template.Must(template.New("login").Parse(`<!doctype html>
-<html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+var loginTemplate = template.Must(template.New("login").Parse(head + `
 <title>Inloggen</title><style>` + style + `</style></head><body>
-<header><p>Referentie-QTSP · testclient</p></header>
-<main>
-` + banner + `
+` + top + `
+<main class="qp-main"><div class="qp-card qp-narrow">
 <h1>Inloggen</h1>
-{{if .Message}}<p class="bad" role="alert"><strong>{{.Message}}</strong></p>{{end}}
-<p>Log in om een verklaring aan te vragen. De vertrouwensdienst vraagt uw naam, geboortedatum en nationaliteit uit uw persoonsidentificatiebewijs, niet uw BSN.</p>
+{{if .Message}}<div class="qp-errsum" role="alert"><b>{{.Message}}</b></div>{{end}}
+<p class="lead">Log in om een verklaring aan te vragen. De vertrouwensdienst vraagt uw naam, geboortedatum en nationaliteit uit uw persoonsidentificatiebewijs, niet uw BSN.</p>
 <form method="post" action="/login/wallet">
 <input type="hidden" name="request" value="{{.Request}}">
-<p>{{if .Wallet}}<button type="submit">Inloggen met NL Wallet</button>{{else}}<button type="submit" disabled>Inloggen met NL Wallet</button> <small>niet beschikbaar</small>{{end}}</p>
+{{if .Wallet}}<button class="qp-btn block" type="submit">Inloggen met NL Wallet</button>{{else}}<button class="qp-btn block" type="submit" disabled>Inloggen met NL Wallet</button> <small class="sec">niet beschikbaar</small>{{end}}
 </form>
+<div class="qp-or">of</div>
 <form method="post" action="/login/mock">
 <input type="hidden" name="request" value="{{.Request}}">
 <fieldset><legend>Inloggen met testgegevens (mock)</legend>
-<p class="banner">Mock: hier wordt niets gecontroleerd. Alleen voor de demo en tests.</p>
-<label for="family_name">Achternaam</label><input id="family_name" name="family_name" value="{{.FamilyName}}" autocomplete="off">
-<label for="given_name">Voornamen</label><input id="given_name" name="given_name" value="{{.GivenName}}" autocomplete="off">
-<label for="birthdate">Geboortedatum (JJJJ-MM-DD)</label><input id="birthdate" name="birthdate" value="{{.Birthdate}}" autocomplete="off">
-<label for="nationalities">Nationaliteit (landcodes, bijvoorbeeld NL, BE)</label><input id="nationalities" name="nationalities" value="{{.Nationalities}}" autocomplete="off">
+<div class="qp-note warn"><span aria-hidden="true">!</span><div>Mock: hier wordt niets gecontroleerd. Alleen voor de demo en tests.</div></div>
+<div class="qp-grid2">
+<div class="qp-fld"><label for="family_name">Achternaam</label><input type="text" id="family_name" name="family_name" value="{{.FamilyName}}" autocomplete="off"></div>
+<div class="qp-fld"><label for="given_name">Voornamen</label><input type="text" id="given_name" name="given_name" value="{{.GivenName}}" autocomplete="off"></div>
+<div class="qp-fld"><label for="birthdate">Geboortedatum <span class="hint">(JJJJ-MM-DD)</span></label><input type="text" id="birthdate" name="birthdate" value="{{.Birthdate}}" inputmode="numeric" autocomplete="off"></div>
+<div class="qp-fld"><label for="nationalities">Nationaliteit <span class="hint">(bv. NL, BE)</span></label><input type="text" id="nationalities" name="nationalities" value="{{.Nationalities}}" autocomplete="off"></div>
+</div>
+<button class="qp-btn sec" type="submit">Inloggen met testgegevens (mock)</button>
 </fieldset>
-<button type="submit">Inloggen met testgegevens (mock)</button>
-</form></main></body></html>
-`))
+</form>
+</div></main>
+` + foot))
 
-var walletTemplate = template.Must(template.New("wallet").Parse(`<!doctype html>
-<html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+var walletTemplate = template.Must(template.New("wallet").Parse(head + `
 <meta http-equiv="refresh" content="2">
 <title>Inloggen met NL Wallet</title><style>` + style + `</style></head><body>
-<header><p>Referentie-QTSP · testclient</p></header>
-<main>
-` + banner + `
+` + top + `
+<main class="qp-main"><div class="qp-card qp-narrow">
 <h1>Inloggen met NL Wallet</h1>
-{{if .QR}}<p>Scan deze code met de NL Wallet op uw telefoon.</p>
-<p class="qr"><img src="{{.QR}}" alt="QR-code voor de NL Wallet" width="280" height="280"></p>
-{{else}}<p>Ga verder in de NL Wallet op uw telefoon.</p>{{end}}
-<p><a href="/">Terug</a></p>
-</main></body></html>
-`))
+{{if .QR}}<p class="lead">Scan deze code met de NL Wallet op uw telefoon.</p>
+<div class="qp-qrwrap">
+<div class="qp-qr"><img src="{{.QR}}" alt="QR-code voor de NL Wallet" width="280" height="280"></div>
+<div><ol class="qp-steps"><li>Open de NL Wallet</li><li>Kies <strong>QR-code scannen</strong></li><li>Bevestig welke gegevens u deelt</li></ol>
+<div class="qp-live">Deze pagina ververst zichzelf</div></div>
+</div>
+{{else}}<p class="lead">Ga verder in de NL Wallet op uw telefoon.</p><div class="qp-live">Deze pagina ververst zichzelf</div>{{end}}
+<div class="qp-actions"><a href="/">Terug</a></div>
+</div></main>
+` + foot))

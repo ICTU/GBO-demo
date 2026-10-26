@@ -341,7 +341,7 @@ func TestWeb(t *testing.T) {
 	}
 
 	start := func(t *testing.T) string {
-		form := url.Values{"operation": {"verify"}, "use:" + idFamilyName: {"1"}, "value:" + idFamilyName: {`{"family_name":"Jansen"}`}}
+		form := addressForm()
 		resp, _ := fetch(t, browser, http.MethodPost, base+"/start", form)
 		loc, _ := url.Parse(resp.Header.Get("Location"))
 		q := loc.Query()
@@ -375,7 +375,7 @@ func TestWeb(t *testing.T) {
 		if !strings.Contains(loggedIn.Header().Get("Set-Cookie"), "Secure") {
 			t.Fatalf("mock login Set-Cookie %q; want a Secure login cookie", loggedIn.Header().Get("Set-Cookie"))
 		}
-		form := url.Values{"operation": {"verify"}, "use:" + idFamilyName: {"1"}, "value:" + idFamilyName: {`{"family_name":"Jansen"}`}}
+		form := addressForm()
 		rec := post("/start", form, loggedIn.Result().Cookies()...)
 		if rec.Code != http.StatusFound || !strings.Contains(rec.Header().Get("Set-Cookie"), "Secure") {
 			t.Fatalf("POST /start = %d, Set-Cookie %q; want a Secure session cookie", rec.Code, rec.Header().Get("Set-Cookie"))
@@ -547,4 +547,13 @@ func (s *syncBuffer) String() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.b.String()
+}
+
+// addressForm is the request page with the address product chosen, filled
+// with Frouke Jansen's address.
+func addressForm() url.Values {
+	return url.Values{
+		"product": {"address"}, "f-address-street": {"Coolsingel"}, "f-address-house_number": {"12 B"},
+		"f-address-postal_code": {"3011 AD"}, "f-address-city": {"Rotterdam"}, "f-address-country": {"NL"},
+	}
 }

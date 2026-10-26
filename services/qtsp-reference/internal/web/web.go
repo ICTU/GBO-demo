@@ -82,6 +82,9 @@ func (r *refusal) Error() string { return r.message }
 type Handler struct {
 	client     *qtsp.Client
 	attributes []Attribute
+	// products are what the request page offers; the request API keeps
+	// offering every attribute.
+	products []Product
 	// secure marks the session cookie Secure: the QTSP is served over https.
 	secure bool
 	// publicURL is where the user reaches the QTSP: the base of start URLs.
@@ -118,7 +121,7 @@ func NewHandlerWithIssuance(client *qtsp.Client, attributes []Attribute, publicU
 
 func newHandler(client *qtsp.Client, attributes []Attribute, publicURL string, wallet login.Wallet) *Handler {
 	return &Handler{
-		client: client, attributes: attributes, secure: strings.HasPrefix(publicURL, "https://"), publicURL: strings.TrimRight(publicURL, "/"),
+		client: client, attributes: attributes, products: DemoProducts, secure: strings.HasPrefix(publicURL, "https://"), publicURL: strings.TrimRight(publicURL, "/"),
 		wallet: wallet, sessions: map[string]*session{}, requests: map[string]*request{}, logins: map[string]*loginState{}, now: time.Now,
 	}
 }
@@ -148,11 +151,11 @@ func (h *Handler) form(w http.ResponseWriter, r *http.Request) {
 		h.loginPage(w, http.StatusOK, "", "", loginHint{})
 		return
 	}
-	render(w, http.StatusOK, formPage, map[string]any{"Attributes": h.attributes, "Who": id})
+	h.renderForm(w, http.StatusOK, defaultForm(h.products), id)
 }
 
-// start plans the request, registers when needed, and sends the browser to
-// the authorization server.
+// start reads the chosen product, plans the verification, registers when
+// needed, and sends the browser to the authorization server.
 func (h *Handler) start(w http.ResponseWriter, r *http.Request) {
 	id := h.loggedIn(r)
 	if id == nil {
@@ -163,15 +166,14 @@ func (h *Handler) start(w http.ResponseWriter, r *http.Request) {
 		errorPage(w, http.StatusBadRequest, "Het formulier kon niet worden gelezen.")
 		return
 	}
-	var attrs []qtsp.Attribute
-	for _, a := range h.attributes {
-		if r.PostForm.Get("use:"+a.Identifier) == "" {
-			continue
-		}
-		value := strings.TrimSpace(r.PostForm.Get("value:" + a.Identifier))
-		attrs = append(attrs, qtsp.Attribute{Identifier: a.Identifier, Value: json.RawMessage(value)})
+	// The page offers products to verify; retrieval stays with the request
+	// API.
+	attr, f, ok := readProduct(h.products, r.PostForm)
+	if !ok {
+		h.renderForm(w, http.StatusBadRequest, f, id)
+		return
 	}
-	p, err := h.prepare(r.Context(), r.PostForm.Get("operation"), attrs)
+	p, err := h.prepare(r.Context(), "verify", []qtsp.Attribute{attr})
 	var refused *refusal
 	if errors.As(err, &refused) {
 		errorPage(w, refused.status, refused.message)
@@ -402,6 +404,9 @@ type row struct {
 	Label      string          `json:"label"`
 	Result     string          `json:"result,omitempty"`
 	Value      json.RawMessage `json:"value,omitempty"`
+	// Submitted is the value the QTSP had verified, for the result page
+	// only: the request API does not return it.
+	Submitted json.RawMessage `json:"-"`
 }
 
 // Display is what the result page shows for the attribute.
@@ -445,7 +450,7 @@ func (h *Handler) result(p prepared, resp qtsp.Response) outcome {
 	for _, v := range res.Verify {
 		value := requestedValue(p.attributes, v.Identifier)
 		out.Results = append(out.Results, row{
-			Identifier: v.Identifier, Label: h.label(v.Identifier), Result: v.Result[strings.LastIndex(v.Result, "/")+1:],
+			Identifier: v.Identifier, Label: h.label(v.Identifier), Result: v.Result[strings.LastIndex(v.Result, "/")+1:], Submitted: value,
 		})
 		out.Evidence = append(out.Evidence, issuance.Evidence{Name: h.label(v.Identifier), Outcome: v.Result[strings.LastIndex(v.Result, "/")+1:], Value: value})
 	}
