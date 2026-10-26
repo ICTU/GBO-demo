@@ -287,6 +287,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   page names the QTSP that gets consent, what it learns, and that the citizen
   logs in at this service, not at the QTSP; "Weigeren" is now "Geen
   toestemming geven".
+- **The reference QTSP's request page offers products** (#336): "Wat wilt u
+  laten verifiëren?" with cards instead of JSON fields. Adres is filled in
+  field by field; Standplaatsvergunning is shown as coming soon. The page only
+  verifies; the request API keeps retrieval and every attribute for the
+  developer portal. The QTSP's pages get a green look of their own, so it is
+  told apart from the authorization server and the government portals.
 - **The DvTP flow no longer sends `X-GBO-Scope`** (#483). The PDP checks BD
   years and LVG's fixed scope against the verified consent. The BD source
   names LDV activities from the processed year; LVG uses its fixed ownership
