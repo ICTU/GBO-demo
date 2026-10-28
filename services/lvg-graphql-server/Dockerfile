@@ -2,7 +2,7 @@
 # this bron depends on the sibling ldv-client module, which a build context
 # scoped to this directory cannot see. The `replace ../ldv-client` in go.mod
 # resolves because the two are laid out here the way they are in the tree.
-FROM golang:1.27-alpine@sha256:f92b6ef800e499660581efdabdf25d9d817a9d124eaf900924f0504e7e27e12d AS builder
+FROM golang:1.27-alpine@sha256:b8c9b82affbbb82a020bbcf998dad2ba9516944ac7e883524642a481a9505e9c AS builder
 WORKDIR /src/services/lvg-graphql-server
 COPY services/ldv-client/ /src/services/ldv-client/
 COPY services/lvg-graphql-server/go.mod services/lvg-graphql-server/go.sum ./
