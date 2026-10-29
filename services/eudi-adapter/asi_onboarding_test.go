@@ -231,22 +231,15 @@ func TestASIOnboarding(t *testing.T) {
 	})
 }
 
-// O8: the release keeps asi. The capturing backend sees the validated
-// document; this goes through the snapshot the registry stores.
-func TestASISurvivesTheReleaseSnapshot(t *testing.T) {
-	result := reconcileDocuments(t, testSchemaPath, map[string]map[string]any{"demo": withASI(t, unsecuredDocument(t))})
-	validated := result.activated(t, "demo")
-	want := validated.Document.Capabilities.ASI
-	if want == nil {
-		t.Fatal("validated document has no asi")
-	}
-
+// storedSnapshot turns a validated source into the release candidate the
+// registry stores, and returns its snapshot as the registry hands it back:
+// jsonb re-sorts object keys.
+func storedSnapshot(t *testing.T, validated *validatedSourceRegistration) onboarding.SourceCandidate {
+	t.Helper()
 	candidate, err := registryCandidateFromActivation(activationFromValidatedSource(validated), onboarding.PublicCertificateSet{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The registry stores the snapshot as jsonb; decode it the way a read
-	// back from the registry does.
 	var stored map[string]any
 	if err := json.Unmarshal(candidate.Snapshot, &stored); err != nil {
 		t.Fatal(err)
@@ -254,11 +247,76 @@ func TestASISurvivesTheReleaseSnapshot(t *testing.T) {
 	if candidate.Snapshot, err = json.Marshal(stored); err != nil {
 		t.Fatal(err)
 	}
-	restored, err := activationFromRegistryCandidate(candidate)
-	if err != nil {
+	return candidate
+}
+
+func snapshotVersion(t *testing.T, candidate onboarding.SourceCandidate) string {
+	t.Helper()
+	var snapshot struct {
+		SchemaVersion string `json:"schema_version"`
+	}
+	if err := json.Unmarshal(candidate.Snapshot, &snapshot); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(restored.ASI, want) {
-		t.Fatalf("asi after the release snapshot = %+v, want %+v", restored.ASI, want)
-	}
+	return snapshot.SchemaVersion
+}
+
+// The release keeps asi, under a snapshot version an adapter without asi
+// does not read: it would otherwise drop asi when it rewrites the candidate.
+func TestASIReleaseSnapshot(t *testing.T) {
+	t.Run("S1 a source without asi stays at 3.0", func(t *testing.T) {
+		result := reconcileDocuments(t, testSchemaPath, map[string]map[string]any{"demo": unsecuredDocument(t)})
+		candidate := storedSnapshot(t, result.activated(t, "demo"))
+		if version := snapshotVersion(t, candidate); version != "3.0" {
+			t.Fatalf("snapshot schema_version = %q, want 3.0", version)
+		}
+		if strings.Contains(string(candidate.Snapshot), `"asi"`) {
+			t.Fatalf("snapshot without asi holds an asi field: %s", candidate.Snapshot)
+		}
+		restored, err := activationFromRegistryCandidate(candidate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if restored.ASI != nil {
+			t.Fatalf("restored asi = %+v, want none", restored.ASI)
+		}
+	})
+
+	t.Run("S2 a source with asi is 4.0 and keeps asi", func(t *testing.T) {
+		result := reconcileDocuments(t, testSchemaPath, map[string]map[string]any{"demo": withASI(t, unsecuredDocument(t))})
+		validated := result.activated(t, "demo")
+		candidate := storedSnapshot(t, validated)
+		if version := snapshotVersion(t, candidate); version != "4.0" {
+			t.Fatalf("snapshot schema_version = %q, want 4.0", version)
+		}
+		restored, err := activationFromRegistryCandidate(candidate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := validated.Document.Capabilities.ASI
+		if want == nil || !reflect.DeepEqual(restored.ASI, want) {
+			t.Fatalf("asi after the release snapshot = %+v, want %+v", restored.ASI, want)
+		}
+	})
+
+	t.Run("S3 an older reader does not take a snapshot with asi for 3.0", func(t *testing.T) {
+		// An adapter without asi accepts exactly 3.0 and treats any other
+		// version as absent (TestIncompatibleRegistrySnapshotIsTreatedAsAbsent).
+		olderReaderAccepts := func(version string) bool { return version == "3.0" }
+		result := reconcileDocuments(t, testSchemaPath, map[string]map[string]any{"demo": withASI(t, unsecuredDocument(t))})
+		if version := snapshotVersion(t, storedSnapshot(t, result.activated(t, "demo"))); olderReaderAccepts(version) {
+			t.Fatalf("snapshot with asi has schema_version %q, which an older reader would rewrite without asi", version)
+		}
+	})
+
+	t.Run("S4 a stored 3.0 snapshot from before asi", func(t *testing.T) {
+		release := runtimeTestRelease(t, strings.Repeat("a", 64), "belastingdienst", "offer", time.Now().UTC())
+		source := release.Sources[0]
+		if version := snapshotVersion(t, onboarding.SourceCandidate{Snapshot: source.Snapshot}); version != "3.0" {
+			t.Fatalf("fixture schema_version = %q, want 3.0", version)
+		}
+		if _, err := activationFromRegistryCandidate(onboarding.SourceCandidate{SourceID: source.SourceID, Snapshot: source.Snapshot}); err != nil {
+			t.Fatal(err)
+		}
+	})
 }

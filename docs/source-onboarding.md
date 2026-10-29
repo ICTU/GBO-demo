@@ -375,7 +375,7 @@ Vastgelegde keuzes:
   nog geen externe bronnen waren; `mapping`, `attribute_schema` en
   `type_metadata` worden niet meer geaccepteerd.
   Een registry die nog kandidaten van een oudere adapter bevat (snapshot
-  `schema_version` ongelijk aan `3.0`), behandelt die als afwezig: de
+  `schema_version` anders dan `3.0` of `4.0`), behandelt die als afwezig: de
   reconciler haalt de metadata volledig opnieuw op en activeert de bron
   opnieuw. Een kandidaat die daarna nog steeds niet laadbaar is, wordt niet
   gepromoveerd. Tot de nieuwe release actief is, weigert de issuance-runtime
@@ -407,6 +407,11 @@ release; de ASIP leest het nog niet.
   toe, maar onboarding eist per bron issuer-, reader- en statuscertificaten, en
   welke certificaten een bron nodig heeft die alleen verificatie aanbiedt, is
   nog niet uitgewerkt.
+- **Een bron met `asi` krijgt snapshotversie `4.0`** in de Source Registry;
+  zonder `asi` blijft het `3.0`. Een adapter van vóór `asi` leest alleen
+  `3.0`. Na een rollback haalt hij een bron met `asi` dus opnieuw op en
+  weigert hij het 1.1-document, in plaats van de kandidaat zonder `asi` te
+  herschrijven. Bronnen zonder `asi` merken niets van de rollback.
 - **De attribuutcatalogus staat naast het schema** (`asi-attributes.json` in de
   map van `--schema`). Kan de reconciler hem niet lezen, dan worden alleen de
   bronnen met `asi` geweigerd; bronnen zonder `asi` gaan door.
