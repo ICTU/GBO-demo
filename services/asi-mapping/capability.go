@@ -93,31 +93,45 @@ func (g GraphQL) validate() error {
 	if operation.VariableDefinitions.ForName(g.SubjectVariable) == nil {
 		return fmt.Errorf("graphql.subject_variable %q is not a variable of the query", g.SubjectVariable)
 	}
-	spreads := countSpreads(operation.SelectionSet, selectedFragment)
-	for _, fragment := range document.Fragments {
-		spreads += countSpreads(fragment.SelectionSet, selectedFragment)
+	if len(document.Fragments) > 0 {
+		return fmt.Errorf("graphql.document must not hold a fragment definition")
 	}
-	if spreads != 1 {
-		return fmt.Errorf("graphql.document must hold ...%s exactly once, has %d", selectedFragment, spreads)
+	if len(operation.Directives) > 0 {
+		return fmt.Errorf("graphql.document must not hold a directive")
 	}
-	return nil
+	return validatePath(operation.SelectionSet)
 }
 
-func countSpreads(set ast.SelectionSet, name string) int {
-	count := 0
-	for _, selection := range set {
-		switch s := selection.(type) {
+// validatePath checks that the query is one path of fields that ends in
+// ...Selected alone, so the ASIP asks the source for nothing but the fields
+// it derives from the requested attributes.
+func validatePath(set ast.SelectionSet) error {
+	const shape = "graphql.document must be one path of fields that ends in ...%s alone"
+	for {
+		if len(set) != 1 {
+			return fmt.Errorf(shape+": a selection on the path holds %d selections, not one", selectedFragment, len(set))
+		}
+		switch s := set[0].(type) {
 		case *ast.Field:
-			count += countSpreads(s.SelectionSet, name)
-		case *ast.InlineFragment:
-			count += countSpreads(s.SelectionSet, name)
-		case *ast.FragmentSpread:
-			if s.Name == name {
-				count++
+			if len(s.Directives) > 0 {
+				return fmt.Errorf(shape+": field %q has a directive", selectedFragment, s.Name)
 			}
+			if len(s.SelectionSet) == 0 {
+				return fmt.Errorf(shape+": the path ends in field %q", selectedFragment, s.Name)
+			}
+			set = s.SelectionSet
+		case *ast.FragmentSpread:
+			if s.Name != selectedFragment {
+				return fmt.Errorf(shape+": the path ends in ...%s", selectedFragment, s.Name)
+			}
+			if len(s.Directives) > 0 {
+				return fmt.Errorf(shape+": ...%s has a directive", selectedFragment, s.Name)
+			}
+			return nil
+		default:
+			return fmt.Errorf(shape+": the path holds an inline fragment; use on", selectedFragment)
 		}
 	}
-	return count
 }
 
 func (a Attribute) validate(schema *ValueSchema) error {

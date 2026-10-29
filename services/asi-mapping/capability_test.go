@@ -96,6 +96,30 @@ func TestValidateRejects(t *testing.T) {
 		{"W13 list member without each", func(c *Capability) {
 			c.attribute("nationality").Fields["nationalities"] = Field{Pointer: "/heeftNationaliteit/nationaliteit"}
 		}, "nationalities"},
+		{"W15 fixed field next to Selected", func(c *Capability) {
+			c.GraphQL.Document = "query Asi($bsn: BSN!) { ingeschrevenPersoon(bsn: $bsn) { burgerservicenummer ...Selected } }"
+		}, "2 selections"},
+		{"W16 second root field", func(c *Capability) {
+			c.GraphQL.Document = "query Asi($bsn: BSN!) { ingeschrevenPersoon(bsn: $bsn) { ...Selected } kiesrecht(bsn: $bsn) { uitgesloten } }"
+		}, "2 selections"},
+		{"W17 inline fragment on the path", func(c *Capability) {
+			c.GraphQL.Document = "query Asi($bsn: BSN!) { ingeschrevenPersoon(bsn: $bsn) { ... on Ingezetene { ...Selected } } }"
+		}, "inline fragment"},
+		{"W18 unused fragment holding Selected", func(c *Capability) {
+			c.GraphQL.Document = "query Asi($bsn: BSN!) { ingeschrevenPersoon(bsn: $bsn) { voornamen } } fragment Los on IngeschrevenPersoon { ...Selected }"
+		}, "fragment definition"},
+		{"W19 used fragment definition", func(c *Capability) {
+			c.GraphQL.Document = "query Asi($bsn: BSN!) { ingeschrevenPersoon(bsn: $bsn) { ...Persoon } } fragment Persoon on IngeschrevenPersoon { ...Selected }"
+		}, "fragment definition"},
+		{"W20 directive on a field of the path", func(c *Capability) {
+			c.GraphQL.Document = "query Asi($bsn: BSN!, $x: Boolean!) { ingeschrevenPersoon(bsn: $bsn) @include(if: $x) { ...Selected } }"
+		}, "directive"},
+		{"W20 directive on Selected", func(c *Capability) {
+			c.GraphQL.Document = "query Asi($bsn: BSN!, $x: Boolean!) { ingeschrevenPersoon(bsn: $bsn) { ...Selected @skip(if: $x) } }"
+		}, "directive"},
+		{"W20 directive on the operation", func(c *Capability) {
+			c.GraphQL.Document = "query Asi($bsn: BSN!) @cached { ingeschrevenPersoon(bsn: $bsn) { ...Selected } }"
+		}, "directive"},
 	}
 
 	for _, test := range cases {

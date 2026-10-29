@@ -430,7 +430,9 @@ documenten met `schema_version` `1.1`.
 ```
 
 - **Eén query.** `document` bevat precies één operatie, een query, met
-  `subject_variable` als variabele en precies één keer `...Selected`. De ASIP
+  `subject_variable` als variabele. De query is één pad van velden dat eindigt
+  in alleen `...Selected`: geen vaste velden ernaast, geen fragmenten en geen
+  directives. Een type kies je met `on`, niet met een fragment. De ASIP
   vervangt `...Selected` per verzoek door de velden die de gevraagde attributen
   nodig hebben: `/woontOp/straatnaam` wordt `woontOp { straatnaam }`, en `on`
   zet het in `... on Ingezetene { … }`. Een verzoek blijft zo één vraag aan de
