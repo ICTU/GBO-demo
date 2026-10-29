@@ -20,15 +20,22 @@ func loadTestCatalogue(t *testing.T) Catalogue {
 
 func brpCapability(t *testing.T) Capability {
 	t.Helper()
-	data, err := os.ReadFile("testdata/brp-asi.json")
+	data, err := os.ReadFile(brpMetadataPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var capability Capability
-	if err := json.Unmarshal(data, &capability); err != nil {
+	var document struct {
+		Capabilities struct {
+			ASI *Capability `json:"asi"`
+		} `json:"capabilities"`
+	}
+	if err := json.Unmarshal(data, &document); err != nil {
 		t.Fatal(err)
 	}
-	return capability
+	if document.Capabilities.ASI == nil {
+		t.Fatalf("%s has no asi capability", brpMetadataPath)
+	}
+	return *document.Capabilities.ASI
 }
 
 func (c Capability) attribute(name string) *Attribute {
