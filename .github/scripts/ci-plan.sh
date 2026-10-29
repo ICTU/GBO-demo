@@ -91,12 +91,20 @@ if matches_any 'services/asi-mapping/*'; then
   go="$(append_unique "${go}" 'eudi-adapter')"
 fi
 
-# The source metadata schemas and GBO's attribute catalogue are read by the
-# tests of the modules that validate source metadata.
-if matches_any 'schemas/gbo-*.schema.json' 'schemas/asi-attributes.json'; then
+# The source metadata schemas, GBO's attribute catalogue and the published
+# source metadata documents are read by the tests of the modules that
+# validate source metadata.
+if matches_any 'schemas/gbo-*.schema.json' 'schemas/asi-attributes.json' \
+  'services/brp-graphql-server/config/*' 'services/graphql-server/config/*'; then
   for service in asi-mapping eudi-adapter; do
     go="$(append_unique "${go}" "${service}")"
   done
+fi
+
+# The BRP mock's tests hold its asi mapping against the rule that grants the
+# ASIP its fields.
+if matches_any 'policies/gbo/rules/asi/*'; then
+  go="$(append_unique "${go}" 'brp-graphql-server')"
 fi
 
 while read -r app; do

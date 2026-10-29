@@ -57,14 +57,10 @@ func readJSON(t *testing.T, path string) map[string]any {
 	return value
 }
 
-// brpDocument is the BRP's published metadata with the asi capability of
-// testdata/brp-asi.json added, at schema version 1.1.
+// brpDocument is the BRP's published metadata: eudi and asi, at 1.1.
 func brpDocument(t *testing.T) map[string]any {
 	t.Helper()
-	document := readJSON(t, brpMetadataPath)
-	document["schema_version"] = "1.1"
-	document["capabilities"].(map[string]any)["asi"] = readJSON(t, "testdata/brp-asi.json")
-	return document
+	return readJSON(t, brpMetadataPath)
 }
 
 func asiOf(document map[string]any) map[string]any {
@@ -104,14 +100,17 @@ func TestMetadataSchemaAccepts(t *testing.T) {
 	schema := compileMetadataSchema(t)
 
 	t.Run("A1 eudi and asi at 1.1", func(t *testing.T) {
-		if err := validateDocument(schema, brpDocument(t)); err != nil {
+		document := brpDocument(t)
+		if document["schema_version"] != "1.1" {
+			t.Fatalf("schema_version = %v, want 1.1", document["schema_version"])
+		}
+		if err := validateDocument(schema, document); err != nil {
 			t.Fatal(err)
 		}
 	})
 
 	t.Run("A2 published 1.0 documents", func(t *testing.T) {
 		paths := []string{
-			brpMetadataPath,
 			"../graphql-server/config/gbo-source-metadata.json",
 			"../graphql-server/config/gbo-source-metadata-unsecured.json",
 		}

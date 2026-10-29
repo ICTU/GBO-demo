@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Added
+- **The BRP mock publishes the `asi` capability** (#592, step 2): its source
+  metadata, now version 2.6.0 at schema 1.1, maps its own fields onto the five
+  demo attributes the ASIP verifies. Its API, its policy rule and its EUDI
+  products do not change. Tests hold the mapping against the mock's GraphQL
+  schema and against the fields policy rule ASI0001 grants the ASIP. The
+  ASIP still uses its BRP adapter until step 4.
 - **Onboarding accepts source metadata 1.1 with `asi`** (#592, step 3a): the
   reconciler validates the `asi` capability against GBO's attribute catalogue
   and stores it in the source's release snapshot, at snapshot version 4.0 so

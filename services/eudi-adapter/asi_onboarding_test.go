@@ -47,17 +47,13 @@ func readDocument(t *testing.T, path string) map[string]any {
 	return document
 }
 
-// withASI raises the document to 1.1 and adds the BRP's asi capability.
+const brpMetadataPath = "../brp-graphql-server/config/gbo-source-metadata.json"
+
+// withASI raises the document to 1.1 and adds the BRP's published asi
+// capability.
 func withASI(t *testing.T, document map[string]any) map[string]any {
 	t.Helper()
-	raw, err := os.ReadFile("../asi-mapping/testdata/brp-asi.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var asi map[string]any
-	if err := json.Unmarshal(raw, &asi); err != nil {
-		t.Fatal(err)
-	}
+	asi := asiOf(readDocument(t, brpMetadataPath))
 	delete(asi["graphql"].(map[string]any), "service_reference")
 	asi["graphql"].(map[string]any)["endpoint"] = sourceURLPlaceholder + "/graphql"
 	document["schema_version"] = "1.1"
@@ -191,7 +187,7 @@ func TestASIOnboarding(t *testing.T) {
 	})
 
 	t.Run("O7a asi on another data service than eudi", func(t *testing.T) {
-		document := withASI(t, readDocument(t, "../brp-graphql-server/config/gbo-source-metadata.json"))
+		document := readDocument(t, brpMetadataPath)
 		asiOf(document)["graphql"].(map[string]any)["service_reference"] = "brp-asi"
 		payload, err := json.Marshal(document)
 		if err != nil {
@@ -319,4 +315,42 @@ func TestASIReleaseSnapshot(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+}
+
+// B1 and B4: the BRP's published document is valid with its asi, and the asi
+// leaves its EUDI products as they were without it.
+func TestBRPPublishesASI(t *testing.T) {
+	registration := sourceRegistration{
+		SourceID: "brp", SourceOIN: "99999999900000000200", Name: "BRP",
+		MetadataEndpoint: sourceMetadataEndpoint{Transport: sourceTransportFSC, ServiceReference: "brp-metadata"},
+		DataAccess:       sourceDataAccess{Transport: sourceTransportFSC, ServiceReference: "brp"},
+	}
+	validate := func(document map[string]any) *validatedSourceRegistration {
+		t.Helper()
+		payload, err := json.Marshal(document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		validated, err := validateSourcePayload(registration, payload, "https://brp.example/.well-known/gbo", testSchemaPath, "https://issuer.example", time.Now().UTC())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return validated
+	}
+
+	published := readDocument(t, brpMetadataPath)
+	if published["schema_version"] != "1.1" {
+		t.Fatalf("schema_version = %v, want 1.1", published["schema_version"])
+	}
+	withASI := validate(published)
+	if withASI.Document.Capabilities.ASI == nil {
+		t.Fatal("B1: the BRP publishes no asi")
+	}
+
+	withoutASI := readDocument(t, brpMetadataPath)
+	withoutASI["schema_version"] = "1.0"
+	delete(withoutASI["capabilities"].(map[string]any), "asi")
+	if got, want := publicationsOf(withASI), publicationsOf(validate(withoutASI)); !reflect.DeepEqual(got, want) {
+		t.Fatalf("B4: publications with asi = %+v, want those without %+v", got, want)
+	}
 }

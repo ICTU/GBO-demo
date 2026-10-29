@@ -1,7 +1,7 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "source_oin": "99999999900000000200",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "issued_at": "2026-08-12T00:00:00Z",
   "expires_at": "2099-01-01T00:00:00Z",
   "capabilities": {
@@ -196,6 +196,85 @@
               "label": {
                 "nl-NL": "Verklaring"
               }
+            }
+          }
+        }
+      ]
+    },
+    "asi": {
+      "version": "1.0",
+      "authentic_source": {
+        "legal_name": "Basisregistratie Personen (mock)",
+        "country": "NL"
+      },
+      "graphql": {
+        "service_reference": "brp",
+        "endpoint": "/graphql",
+        "document": "query Asi($bsn: BSN!) { ingeschrevenPersoon(bsn: $bsn) { ...Selected } }",
+        "subject_variable": "bsn",
+        "result_pointer": "/data/ingeschrevenPersoon"
+      },
+      "attributes": [
+        {
+          "identifier": "https://gbo.example/attributes/family_name/1",
+          "fields": {
+            "family_name": {
+              "join": [
+                "/voorvoegsel",
+                "/geslachtsnaam"
+              ],
+              "separator": " "
+            }
+          }
+        },
+        {
+          "identifier": "https://gbo.example/attributes/given_name/1",
+          "fields": {
+            "given_name": {
+              "pointer": "/voornamen"
+            }
+          }
+        },
+        {
+          "identifier": "https://gbo.example/attributes/birth_date/1",
+          "fields": {
+            "birth_date": {
+              "pointer": "/geboortedatum"
+            }
+          }
+        },
+        {
+          "identifier": "https://gbo.example/attributes/nationality/1",
+          "fields": {
+            "nationalities": {
+              "each": "/heeftNationaliteit",
+              "pointer": "/nationaliteit"
+            }
+          }
+        },
+        {
+          "identifier": "https://gbo.example/attributes/address/1",
+          "on": "Ingezetene",
+          "fields": {
+            "street": {
+              "pointer": "/woontOp/straatnaam"
+            },
+            "house_number": {
+              "join": [
+                "/woontOp/huisnummer",
+                "/woontOp/huisletter",
+                "/woontOp/huisnummertoevoeging"
+              ],
+              "separator": " "
+            },
+            "postal_code": {
+              "pointer": "/woontOp/postcode"
+            },
+            "city": {
+              "pointer": "/woontOp/woonplaatsnaam"
+            },
+            "country": {
+              "const": "NL"
             }
           }
         }
