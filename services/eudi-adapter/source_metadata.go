@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	asimapping "gbo-demo/asi-mapping"
 	"gbo-demo/eudi-adapter/internal/gbosimplev1"
 
 	"github.com/graphql-go/graphql/language/ast"
@@ -27,7 +28,15 @@ type sourceMetadataDocument struct {
 
 type sourceMetadataCapabilities struct {
 	EUDI *sourceEUDICapability `json:"eudi,omitempty"`
+	// ASI is validated here and kept in the release with the payload; the
+	// ASIP does not read it yet.
+	ASI *asimapping.Capability `json:"asi,omitempty"`
 }
+
+// errASIOnly rejects a document without EUDI attestations that offers asi:
+// a source that only offers attributes for verification issues nothing, and
+// what it needs instead of the issuer certificates is not settled yet.
+var errASIOnly = fmt.Errorf("source metadata with asi only is not supported yet")
 
 type sourceEUDICapability struct {
 	Version      string                        `json:"version"`

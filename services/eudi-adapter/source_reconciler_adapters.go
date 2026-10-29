@@ -115,6 +115,9 @@ func (a metadataCompilerAdapter) Describe(payload []byte) (onboarding.MetadataDe
 		return onboarding.MetadataDescription{}, err
 	}
 	attestations := document.eudiAttestations()
+	if len(attestations) == 0 && document.Capabilities.ASI != nil {
+		return onboarding.MetadataDescription{}, errASIOnly
+	}
 	if len(attestations) == 0 {
 		return onboarding.MetadataDescription{}, fmt.Errorf("source metadata has no EUDI attestations")
 	}
@@ -123,6 +126,9 @@ func (a metadataCompilerAdapter) Describe(payload []byte) (onboarding.MetadataDe
 		if definition.GraphQL.ServiceReference != dataService {
 			return onboarding.MetadataDescription{}, fmt.Errorf("one metadata document currently must use one FSC data service")
 		}
+	}
+	if asi := document.Capabilities.ASI; asi != nil && asi.GraphQL.ServiceReference != dataService {
+		return onboarding.MetadataDescription{}, fmt.Errorf("one metadata document currently must use one FSC data service; asi uses another")
 	}
 	return onboarding.MetadataDescription{SourceOIN: document.SourceOIN, DataServiceReference: dataService}, nil
 }
