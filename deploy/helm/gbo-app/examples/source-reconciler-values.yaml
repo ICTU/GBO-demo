@@ -63,6 +63,8 @@ volumes:
     configMap:
       name: gbo-source-metadata-documents
       optional: true
+  # gbo-source-metadata-v1.schema.json, gbo-simple-v1.schema.json and the
+  # attribute catalogue asi-attributes.json, all from schemas/.
   - name: metadata-schemas
     configMap:
       name: gbo-source-metadata-schemas

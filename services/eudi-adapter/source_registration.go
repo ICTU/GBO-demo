@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	asimapping "gbo-demo/asi-mapping"
+
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -242,8 +244,11 @@ func validateSourcePayload(registration sourceRegistration, payload []byte, meta
 	if document.SourceOIN != registration.SourceOIN {
 		return nil, fmt.Errorf("source metadata OIN %q does not match registered OIN %q", document.SourceOIN, registration.SourceOIN)
 	}
-	if document.SchemaVersion != "1.0" {
+	if document.SchemaVersion != "1.0" && document.SchemaVersion != "1.1" {
 		return nil, fmt.Errorf("unsupported source metadata schema_version %q", document.SchemaVersion)
+	}
+	if document.Capabilities.EUDI == nil && document.Capabilities.ASI != nil {
+		return nil, errASIOnly
 	}
 	if document.Capabilities.EUDI == nil || document.Capabilities.EUDI.Version != "1.0" {
 		return nil, fmt.Errorf("source metadata has no supported EUDI capability")
@@ -254,6 +259,15 @@ func validateSourcePayload(registration sourceRegistration, payload []byte, meta
 	}
 	if _, err := compareNumericVersion(document.Version, "0"); err != nil {
 		return nil, fmt.Errorf("source metadata version: %w", err)
+	}
+	if asi := document.Capabilities.ASI; asi != nil {
+		endpoint := sourceGraphQL{ServiceReference: asi.GraphQL.ServiceReference, Endpoint: asi.GraphQL.Endpoint}
+		if err := validateGraphQLEndpoint(endpoint, registration.DataAccess.Transport); err != nil {
+			return nil, fmt.Errorf("asi capability: graphql.endpoint: %w", err)
+		}
+		if err := validateASICapability(*asi, schemaPath); err != nil {
+			return nil, fmt.Errorf("asi capability: %w", err)
+		}
 	}
 	seenTypes := make(map[string]bool, len(attestations))
 	publications := make([]*typeMetadataPublication, 0, len(attestations))
@@ -377,6 +391,18 @@ func decodeSourceMetadataDocument(payload []byte) (sourceMetadataDocument, error
 		return sourceMetadataDocument{}, fmt.Errorf("parse source metadata payload: trailing JSON data")
 	}
 	return document, nil
+}
+
+// validateASICapability checks the asi capability against GBO's attribute
+// catalogue, which sits next to the metadata schema. The catalogue is read
+// per document, so a catalogue GBO cannot read blocks only the sources that
+// offer asi.
+func validateASICapability(capability asimapping.Capability, schemaPath string) error {
+	catalogue, err := asimapping.LoadCatalogue(filepath.Join(filepath.Dir(schemaPath), "asi-attributes.json"))
+	if err != nil {
+		return err
+	}
+	return capability.Validate(catalogue)
 }
 
 func validateSourceMetadataSchema(payload []byte, schemaPath string) error {

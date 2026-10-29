@@ -1,9 +1,10 @@
 FROM golang:1.27-alpine@sha256:b8c9b82affbbb82a020bbcf998dad2ba9516944ac7e883524642a481a9505e9c AS builder
 WORKDIR /src/services/eudi-adapter
-# The adapter depends on the sibling ldv-client module; the `replace
-# ../ldv-client` in go.mod resolves because the two are laid out here the way
-# they are in the tree.
+# The adapter depends on the sibling ldv-client and asi-mapping modules; the
+# `replace ../...` directives in go.mod resolve because they are laid out here
+# the way they are in the tree.
 COPY services/ldv-client/ /src/services/ldv-client/
+COPY services/asi-mapping/ /src/services/asi-mapping/
 COPY services/eudi-adapter/go.mod services/eudi-adapter/go.sum ./
 RUN go mod download
 COPY services/eudi-adapter/ .

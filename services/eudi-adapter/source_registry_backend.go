@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	asimapping "gbo-demo/asi-mapping"
 	"gbo-demo/eudi-adapter/internal/onboarding"
 )
 
@@ -22,6 +23,20 @@ import (
 // longer be decoded into a valid activation. 3.0 stores each definition in
 // the claims-once shape (issue #462) as an order-preserving string.
 const registrySnapshotSchemaVersion = "3.0"
+
+// registrySnapshotASISchemaVersion is the version of a snapshot that holds an
+// asi capability. An adapter without asi reads 3.0 only; were a snapshot with
+// asi 3.0, such an adapter would rewrite it on a not-modified fetch and drop
+// asi. At 4.0 it treats the candidate as absent and fetches the source again.
+// Snapshots without asi stay 3.0, so a rollback leaves those sources alone.
+const registrySnapshotASISchemaVersion = "4.0"
+
+func registrySnapshotVersionFor(asi *asimapping.Capability) string {
+	if asi != nil {
+		return registrySnapshotASISchemaVersion
+	}
+	return registrySnapshotSchemaVersion
+}
 
 // errIncompatibleRegistrySnapshot marks a candidate written by an older
 // adapter. The reconciler treats it as absent and activates the source from
@@ -67,6 +82,9 @@ type registryActivationSnapshot struct {
 	TransportAuthenticated     bool                    `json:"transport_authenticated"`
 	DataTransportAuthenticated bool                    `json:"data_transport_authenticated"`
 	Types                      []registryActivatedType `json:"types"`
+	// ASI is the validated asi capability. Its order carries no meaning, so
+	// it is stored as an object.
+	ASI *asimapping.Capability `json:"asi,omitempty"`
 }
 
 type registryActivatedType struct {
@@ -251,7 +269,7 @@ func activationFromValidatedSource(validated *validatedSourceRegistration) *sour
 	}
 	payloadDigest := sha256.Sum256(validated.Payload)
 	return &sourceActivation{
-		SchemaVersion: registrySnapshotSchemaVersion, Source: validated.Registration, MetadataURL: validated.MetadataURL,
+		SchemaVersion: registrySnapshotVersionFor(validated.Document.Capabilities.ASI), Source: validated.Registration, MetadataURL: validated.MetadataURL,
 		MetadataVersion: validated.Document.Version, MetadataPayloadDigest: hex.EncodeToString(payloadDigest[:]),
 		MetadataETag: validated.MetadataETag, ExpiresAt: validated.ExpiresAt,
 		CheckedAt:                  validated.ValidatedAt.UTC(),
@@ -260,6 +278,7 @@ func activationFromValidatedSource(validated *validatedSourceRegistration) *sour
 		TransportAuthenticated:     validated.Registration.MetadataEndpoint.Transport == sourceTransportFSC,
 		DataTransportAuthenticated: validated.Registration.DataAccess.Transport == sourceTransportFSC,
 		Types:                      types,
+		ASI:                        validated.Document.Capabilities.ASI,
 	}
 }
 
@@ -325,13 +344,13 @@ func registrySnapshotFromActivation(activation *sourceActivation) (registryActiv
 		}
 	}
 	return registryActivationSnapshot{
-		SchemaVersion: registrySnapshotSchemaVersion, Source: activation.Source, MetadataURL: activation.MetadataURL,
+		SchemaVersion: registrySnapshotVersionFor(activation.ASI), Source: activation.Source, MetadataURL: activation.MetadataURL,
 		MetadataVersion: activation.MetadataVersion, MetadataPayloadDigest: activation.MetadataPayloadDigest,
 		MetadataETag: activation.MetadataETag, ExpiresAt: activation.ExpiresAt,
 		CheckedAt:  activation.CheckedAt,
 		FreshUntil: activation.FreshUntil, StaleUntil: activation.StaleUntil,
 		TransportAuthenticated: activation.TransportAuthenticated, DataTransportAuthenticated: activation.DataTransportAuthenticated,
-		Types: types,
+		Types: types, ASI: activation.ASI,
 	}, nil
 }
 
@@ -342,7 +361,7 @@ func activationFromRegistryCandidate(candidate onboarding.SourceCandidate) (*sou
 	if err := json.Unmarshal(candidate.Snapshot, &version); err != nil {
 		return nil, fmt.Errorf("decode registry source snapshot: %w", err)
 	}
-	if version.SchemaVersion != registrySnapshotSchemaVersion {
+	if version.SchemaVersion != registrySnapshotSchemaVersion && version.SchemaVersion != registrySnapshotASISchemaVersion {
 		return nil, fmt.Errorf("%w: %q", errIncompatibleRegistrySnapshot, version.SchemaVersion)
 	}
 	var snapshot registryActivationSnapshot
@@ -376,6 +395,7 @@ func activationFromRegistryCandidate(candidate onboarding.SourceCandidate) (*sou
 		FreshUntil: snapshot.FreshUntil, StaleUntil: snapshot.StaleUntil,
 		TransportAuthenticated: snapshot.TransportAuthenticated, DataTransportAuthenticated: snapshot.DataTransportAuthenticated,
 		Types:                    types,
+		ASI:                      snapshot.ASI,
 		RegistryDeploymentDigest: candidate.DeploymentDigest, PublicCertificates: candidate.CertificateSet,
 	}, nil
 }

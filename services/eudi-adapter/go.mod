@@ -25,6 +25,7 @@ require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
+	github.com/vektah/gqlparser/v2 v2.5.34 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.45.0 // indirect
 	go.opentelemetry.io/otel/metric v1.45.0 // indirect
@@ -39,9 +40,16 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 )
 
-require gbo-demo/ldv-client v0.0.0
+require (
+	gbo-demo/asi-mapping v0.0.0
+	gbo-demo/ldv-client v0.0.0
+)
 
 // The LDV client is a sibling module in this repository rather than a
 // published one: a change to it has to be usable by the services in the same
 // commit, without a tag in between.
 replace gbo-demo/ldv-client => ../ldv-client
+
+// The asi capability is validated with the same sibling module the ASIP uses
+// to read it.
+replace gbo-demo/asi-mapping => ../asi-mapping

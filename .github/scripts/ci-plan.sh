@@ -87,6 +87,10 @@ if matches_any 'services/ftv-graphql-mapper/*'; then
   go="$(append_unique "${go}" 'bron-sidecar')"
 fi
 
+if matches_any 'services/asi-mapping/*'; then
+  go="$(append_unique "${go}" 'eudi-adapter')"
+fi
+
 # The source metadata schemas and GBO's attribute catalogue are read by the
 # tests of the modules that validate source metadata.
 if matches_any 'schemas/gbo-*.schema.json' 'schemas/asi-attributes.json'; then
@@ -135,6 +139,10 @@ if matches_any 'services/ldv-client/*'; then
     lvg-graphql-server; do
     docker="$(append_unique "${docker}" "${service}")"
   done
+fi
+
+if matches_any 'services/asi-mapping/*'; then
+  docker="$(append_unique "${docker}" 'eudi-adapter')"
 fi
 
 if matches_any 'services/ftv-graphql-mapper/*'; then

@@ -7,6 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Added
+- **Onboarding accepts source metadata 1.1 with `asi`** (#592, step 3a): the
+  reconciler validates the `asi` capability against GBO's attribute catalogue
+  and stores it in the source's release snapshot, at snapshot version 4.0 so
+  an adapter without asi does not rewrite it; snapshots without asi stay 3.0.
+  The ASIP does not read it yet. An invalid `asi` rejects the whole source, a document with only
+  `asi` is still rejected, and a catalogue the reconciler cannot read blocks
+  only the sources that offer `asi`. The `asi` query follows the transport
+  rules of the attestations and uses the same FSC data service. The EUDI
+  products of a source are the same at 1.0 and 1.1.
 - **Source metadata 1.1: the `asi` capability** (#592, step 1): a source can
   describe the attributes it offers for verification and map its own fields
   onto each attribute's value with `pointer`, `join`, `const` and `each`.

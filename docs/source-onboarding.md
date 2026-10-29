@@ -375,7 +375,7 @@ Vastgelegde keuzes:
   nog geen externe bronnen waren; `mapping`, `attribute_schema` en
   `type_metadata` worden niet meer geaccepteerd.
   Een registry die nog kandidaten van een oudere adapter bevat (snapshot
-  `schema_version` ongelijk aan `3.0`), behandelt die als afwezig: de
+  `schema_version` anders dan `3.0` of `4.0`), behandelt die als afwezig: de
   reconciler haalt de metadata volledig opnieuw op en activeert de bron
   opnieuw. Een kandidaat die daarna nog steeds niet laadbaar is, wordt niet
   gepromoveerd. Tot de nieuwe release actief is, weigert de issuance-runtime
@@ -392,9 +392,29 @@ verwijzen.
 
 Vanaf `schema_version` `1.1` kan een bron naast `eudi` de capability `asi`
 publiceren: de attributen die ze aanbiedt voor verificatie via de ASIP (ETSI TS
-119 478). Een document met alleen `asi` mag ook. In `1.0` is `asi` niet
-toegestaan. De reconciler activeert `asi` nog niet; tot dat er is, weigert hij
-documenten met `schema_version` `1.1`.
+119 478). In `1.0` is `asi` niet toegestaan.
+
+De reconciler controleert `asi` met de regels hieronder en neemt het mee in de
+release; de ASIP leest het nog niet.
+
+- **Een fout in `asi` weigert de hele bron**, ook als `eudi` klopt. Zo werkt een
+  foute attestation ook; de actieve release blijft staan.
+- **De query van `asi` volgt dezelfde transportregels als die van `eudi`.**
+  Het endpoint past bij het datatransport (een pad bij FSC, een absolute URL
+  bij unsecured), en `service_reference` is dezelfde FSC-dataservice als die
+  van de attestations: één document gebruikt één dataservice.
+- **Een document met alleen `asi` wordt nog geweigerd.** Het schema staat het
+  toe, maar onboarding eist per bron issuer-, reader- en statuscertificaten, en
+  welke certificaten een bron nodig heeft die alleen verificatie aanbiedt, is
+  nog niet uitgewerkt.
+- **Een bron met `asi` krijgt snapshotversie `4.0`** in de Source Registry;
+  zonder `asi` blijft het `3.0`. Een adapter van vóór `asi` leest alleen
+  `3.0`. Na een rollback haalt hij een bron met `asi` dus opnieuw op en
+  weigert hij het 1.1-document, in plaats van de kandidaat zonder `asi` te
+  herschrijven. Bronnen zonder `asi` merken niets van de rollback.
+- **De attribuutcatalogus staat naast het schema** (`asi-attributes.json` in de
+  map van `--schema`). Kan de reconciler hem niet lezen, dan worden alleen de
+  bronnen met `asi` geweigerd; bronnen zonder `asi` gaan door.
 
 ```json
 "asi": {
