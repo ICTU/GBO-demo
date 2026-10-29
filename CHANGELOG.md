@@ -9,8 +9,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ### Added
 - **Onboarding accepts source metadata 1.1 with `asi`** (#592, step 3a): the
   reconciler validates the `asi` capability against GBO's attribute catalogue
-  and keeps it in the release with the rest of the document; the ASIP does not
-  read it yet. An invalid `asi` rejects the whole source, a document with only
+  and stores it in the source's release snapshot; the ASIP does not read it
+  yet. An invalid `asi` rejects the whole source, a document with only
   `asi` is still rejected, and a catalogue the reconciler cannot read blocks
   only the sources that offer `asi`. The `asi` query follows the transport
   rules of the attestations and uses the same FSC data service. The EUDI

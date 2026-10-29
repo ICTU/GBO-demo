@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	asimapping "gbo-demo/asi-mapping"
 	onboardingcore "gbo-demo/eudi-adapter/internal/onboarding"
 )
 
@@ -32,6 +33,7 @@ type sourceActivation struct {
 	DataTransportAuthenticated bool                                `json:"data_transport_authenticated"`
 	TypeMetadataStoreReference string                              `json:"type_metadata_store_reference"`
 	Types                      []activatedType                     `json:"types"`
+	ASI                        *asimapping.Capability              `json:"asi,omitempty"`
 	Certificates               certificateArtifacts                `json:"certificates"`
 	RegistryDeploymentDigest   string                              `json:"-"`
 	PublicCertificates         onboardingcore.PublicCertificateSet `json:"-"`

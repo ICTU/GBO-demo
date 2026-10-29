@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"gbo-demo/eudi-adapter/internal/onboarding"
 )
 
 const testSchemaPath = "../../schemas/gbo-source-metadata-v1.schema.json"
@@ -227,4 +229,36 @@ func TestASIOnboarding(t *testing.T) {
 		result.activated(t, "demo")
 		result.rejected(t, "demoasi", "attribute catalogue")
 	})
+}
+
+// O8: the release keeps asi. The capturing backend sees the validated
+// document; this goes through the snapshot the registry stores.
+func TestASISurvivesTheReleaseSnapshot(t *testing.T) {
+	result := reconcileDocuments(t, testSchemaPath, map[string]map[string]any{"demo": withASI(t, unsecuredDocument(t))})
+	validated := result.activated(t, "demo")
+	want := validated.Document.Capabilities.ASI
+	if want == nil {
+		t.Fatal("validated document has no asi")
+	}
+
+	candidate, err := registryCandidateFromActivation(activationFromValidatedSource(validated), onboarding.PublicCertificateSet{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The registry stores the snapshot as jsonb; decode it the way a read
+	// back from the registry does.
+	var stored map[string]any
+	if err := json.Unmarshal(candidate.Snapshot, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if candidate.Snapshot, err = json.Marshal(stored); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := activationFromRegistryCandidate(candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(restored.ASI, want) {
+		t.Fatalf("asi after the release snapshot = %+v, want %+v", restored.ASI, want)
+	}
 }

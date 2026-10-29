@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	asimapping "gbo-demo/asi-mapping"
 	"gbo-demo/eudi-adapter/internal/onboarding"
 )
 
@@ -67,6 +68,9 @@ type registryActivationSnapshot struct {
 	TransportAuthenticated     bool                    `json:"transport_authenticated"`
 	DataTransportAuthenticated bool                    `json:"data_transport_authenticated"`
 	Types                      []registryActivatedType `json:"types"`
+	// ASI is the validated asi capability. Its order carries no meaning, so
+	// it is stored as an object.
+	ASI *asimapping.Capability `json:"asi,omitempty"`
 }
 
 type registryActivatedType struct {
@@ -260,6 +264,7 @@ func activationFromValidatedSource(validated *validatedSourceRegistration) *sour
 		TransportAuthenticated:     validated.Registration.MetadataEndpoint.Transport == sourceTransportFSC,
 		DataTransportAuthenticated: validated.Registration.DataAccess.Transport == sourceTransportFSC,
 		Types:                      types,
+		ASI:                        validated.Document.Capabilities.ASI,
 	}
 }
 
@@ -331,7 +336,7 @@ func registrySnapshotFromActivation(activation *sourceActivation) (registryActiv
 		CheckedAt:  activation.CheckedAt,
 		FreshUntil: activation.FreshUntil, StaleUntil: activation.StaleUntil,
 		TransportAuthenticated: activation.TransportAuthenticated, DataTransportAuthenticated: activation.DataTransportAuthenticated,
-		Types: types,
+		Types: types, ASI: activation.ASI,
 	}, nil
 }
 
@@ -376,6 +381,7 @@ func activationFromRegistryCandidate(candidate onboarding.SourceCandidate) (*sou
 		FreshUntil: snapshot.FreshUntil, StaleUntil: snapshot.StaleUntil,
 		TransportAuthenticated: snapshot.TransportAuthenticated, DataTransportAuthenticated: snapshot.DataTransportAuthenticated,
 		Types:                    types,
+		ASI:                      snapshot.ASI,
 		RegistryDeploymentDigest: candidate.DeploymentDigest, PublicCertificates: candidate.CertificateSet,
 	}, nil
 }
