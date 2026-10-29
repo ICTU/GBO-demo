@@ -7,6 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Added
+- **Source metadata 1.1: the `asi` capability** (#592, step 1): a source can
+  describe the attributes it offers for verification and map its own fields
+  onto each attribute's value with `pointer`, `join`, `const` and `each`.
+  GBO keeps the shape of each value per attribute identifier in
+  `schemas/asi-attributes.json` until the EU catalogue of attributes provides
+  it. The new module `services/asi-mapping` checks the GraphQL document and
+  the mapping against that catalogue. The reconciler does not activate `asi`
+  yet and still rejects 1.1 documents; 1.0 documents are unchanged.
 - **Complete OpenFTV PDP Helm example** (#492): mount a ConfigMap for the
   DvTP admission-register pull and a TLS Secret for the Inway connection, set
   the consent-register addresses and token identifiers, and document which
