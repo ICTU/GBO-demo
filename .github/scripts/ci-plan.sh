@@ -54,6 +54,7 @@ while read -r service; do
 done <<'SERVICES'
 asi-authorization-server
 asi-discovery-stub
+asi-mapping
 asi-provider
 bron-sidecar
 brp-graphql-server
@@ -84,6 +85,14 @@ fi
 
 if matches_any 'services/ftv-graphql-mapper/*'; then
   go="$(append_unique "${go}" 'bron-sidecar')"
+fi
+
+# The source metadata schemas and GBO's attribute catalogue are read by the
+# tests of the modules that validate source metadata.
+if matches_any 'schemas/gbo-*.schema.json' 'schemas/asi-attributes.json'; then
+  for service in asi-mapping eudi-adapter; do
+    go="$(append_unique "${go}" "${service}")"
+  done
 fi
 
 while read -r app; do

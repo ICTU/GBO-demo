@@ -15,7 +15,11 @@
   ],
   "properties": {
     "schema_version": {
-      "const": "1.0"
+      "enum": [
+        "1.0",
+        "1.1"
+      ],
+      "description": "1.1 adds the asi capability."
     },
     "source_oin": {
       "type": "string",
@@ -36,6 +40,24 @@
       "$ref": "#/$defs/capabilities"
     }
   },
+  "if": {
+    "properties": {
+      "schema_version": {
+        "const": "1.0"
+      }
+    }
+  },
+  "then": {
+    "properties": {
+      "capabilities": {
+        "not": {
+          "required": [
+            "asi"
+          ]
+        }
+      }
+    }
+  },
   "$defs": {
     "capabilities": {
       "type": "object",
@@ -44,6 +66,9 @@
       "properties": {
         "eudi": {
           "$ref": "#/$defs/eudiCapability"
+        },
+        "asi": {
+          "$ref": "#/$defs/asiCapability"
         }
       }
     },
@@ -66,6 +91,190 @@
           }
         }
       }
+    },
+    "asiCapability": {
+      "description": "Attributes the source offers for verification by GBO's attribute source interface provider (ETSI TS 119 478). GBO validates each mapping against the value_schema it keeps per attribute identifier.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "authentic_source",
+        "graphql",
+        "attributes"
+      ],
+      "properties": {
+        "version": {
+          "const": "1.0"
+        },
+        "authentic_source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "legal_name",
+            "country"
+          ],
+          "properties": {
+            "legal_name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "country": {
+              "type": "string",
+              "pattern": "^[A-Z]{2}$"
+            }
+          }
+        },
+        "graphql": {
+          "$ref": "#/$defs/asiGraphql"
+        },
+        "attributes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/asiAttribute"
+          }
+        }
+      }
+    },
+    "asiGraphql": {
+      "description": "One query for the source. The document holds ...Selected exactly once; the ASIP replaces it with the fields the requested attributes need.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "endpoint",
+        "document",
+        "subject_variable",
+        "result_pointer"
+      ],
+      "properties": {
+        "service_reference": {
+          "$ref": "#/$defs/graphql/properties/service_reference"
+        },
+        "endpoint": {
+          "type": "string",
+          "minLength": 1
+        },
+        "document": {
+          "type": "string",
+          "minLength": 1
+        },
+        "subject_variable": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+        },
+        "result_pointer": {
+          "type": "string",
+          "pattern": "^/"
+        }
+      }
+    },
+    "asiAttribute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "identifier",
+        "fields"
+      ],
+      "properties": {
+        "identifier": {
+          "type": "string",
+          "format": "uri"
+        },
+        "on": {
+          "description": "GraphQL type the pointers apply to, when the result is an interface or union.",
+          "$ref": "#/$defs/graphqlName"
+        },
+        "fields": {
+          "description": "Per member of the attribute's value_schema, how the source's fields make it up.",
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/graphqlName"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/asiField"
+          }
+        }
+      }
+    },
+    "asiField": {
+      "description": "Exactly one operation: copy a field, join fields, a fixed value, or per element of a list.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "pointer"
+          ],
+          "properties": {
+            "pointer": {
+              "$ref": "#/$defs/fieldPointer"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "join",
+            "separator"
+          ],
+          "properties": {
+            "join": {
+              "type": "array",
+              "minItems": 2,
+              "items": {
+                "$ref": "#/$defs/fieldPointer"
+              }
+            },
+            "separator": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "const"
+          ],
+          "properties": {
+            "const": {
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "each",
+            "pointer"
+          ],
+          "properties": {
+            "each": {
+              "$ref": "#/$defs/fieldPointer"
+            },
+            "pointer": {
+              "$ref": "#/$defs/fieldPointer"
+            }
+          }
+        }
+      ]
+    },
+    "fieldPointer": {
+      "description": "JSON Pointer (RFC 6901) whose segments are GraphQL field names; the ASIP derives the selection from it.",
+      "type": "string",
+      "pattern": "^(/[_A-Za-z][_0-9A-Za-z]*)+$"
+    },
+    "graphqlName": {
+      "type": "string",
+      "pattern": "^[_A-Za-z][_0-9A-Za-z]*$"
     },
     "version": {
       "type": "string",

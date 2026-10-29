@@ -388,6 +388,84 @@ en dus de integriteitswaarde. Verhoog daarom `type_version` (een nieuwe VCT),
 zodat eerder uitgegeven credentials naar hun eigen, ongewijzigde bytes blijven
 verwijzen.
 
+## Attributen voor verificatie (`asi`)
+
+Vanaf `schema_version` `1.1` kan een bron naast `eudi` de capability `asi`
+publiceren: de attributen die ze aanbiedt voor verificatie via de ASIP (ETSI TS
+119 478). Een document met alleen `asi` mag ook. In `1.0` is `asi` niet
+toegestaan. De reconciler activeert `asi` nog niet; tot dat er is, weigert hij
+documenten met `schema_version` `1.1`.
+
+```json
+"asi": {
+  "version": "1.0",
+  "authentic_source": { "legal_name": "Basisregistratie Personen", "country": "NL" },
+  "graphql": {
+    "service_reference": "brp",
+    "endpoint": "/graphql",
+    "document": "query Asi($bsn: BSN!) { ingeschrevenPersoon(bsn: $bsn) { ...Selected } }",
+    "subject_variable": "bsn",
+    "result_pointer": "/data/ingeschrevenPersoon"
+  },
+  "attributes": [
+    {
+      "identifier": "https://gbo.example/attributes/address/1",
+      "on": "Ingezetene",
+      "fields": {
+        "street":       { "pointer": "/woontOp/straatnaam" },
+        "house_number": { "join": ["/woontOp/huisnummer", "/woontOp/huisletter", "/woontOp/huisnummertoevoeging"], "separator": " " },
+        "postal_code":  { "pointer": "/woontOp/postcode" },
+        "city":         { "pointer": "/woontOp/woonplaatsnaam" },
+        "country":      { "const": "NL" }
+      }
+    },
+    {
+      "identifier": "https://gbo.example/attributes/nationality/1",
+      "fields": {
+        "nationalities": { "each": "/heeftNationaliteit", "pointer": "/nationaliteit" }
+      }
+    }
+  ]
+}
+```
+
+- **Eén query.** `document` bevat precies één operatie, een query, met
+  `subject_variable` als variabele. De query is één pad van velden dat eindigt
+  in alleen `...Selected`: geen vaste velden ernaast, geen fragmenten en geen
+  directives. Een type kies je met `on`, niet met een fragment. De ASIP
+  vervangt `...Selected` per verzoek door de velden die de gevraagde attributen
+  nodig hebben: `/woontOp/straatnaam` wordt `woontOp { straatnaam }`, en `on`
+  zet het in `... on Ingezetene { … }`. Een verzoek blijft zo één vraag aan de
+  bron, met alleen de nodige velden.
+- **De vorm van de waarde is van GBO.** `identifier` moet voorkomen in GBO's
+  attribuutcatalogus [`schemas/asi-attributes.json`](../schemas/asi-attributes.json),
+  die per identifier een `value_schema` geeft. Dat is een voorlopige plek tot
+  de EU-catalogus van attributen de schema's levert; de identifiers zijn tot
+  dan placeholders. De schema's gebruiken alleen `type`, `properties`,
+  `required`, `items` en `format`.
+- **De bron koppelt haar eigen velden.** `fields` heeft per lid van het
+  `value_schema` precies één bewerking:
+
+  | Bewerking | Betekenis |
+  | --- | --- |
+  | `pointer` | kopieer het veld |
+  | `join` + `separator` | voeg minstens twee velden samen; lege delen vallen weg, getallen worden tekst |
+  | `const` | een vaste waarde, van het type van het lid |
+  | `each` + `pointer` | per element van de lijst bij `each` het veld bij `pointer`; alleen voor een lijst-lid, en een lijst-lid heeft het altijd |
+
+  Pointers zijn JSON Pointers (RFC 6901) met alleen GraphQL-veldnamen als
+  segment, relatief aan `result_pointer` (en binnen `each` aan het element).
+  Ieder verplicht lid heeft een koppeling; een veld dat geen lid is, wordt
+  geweigerd.
+- **Wat niet gecontroleerd wordt.** Onboarding controleert de vorm, niet het
+  GraphQL-schema van de bron en niet of de policy van de bron de selectie
+  toestaat. Een verschil blijkt bij het eerste testverzoek.
+
+De vorm van adres en naam in de demo is voorlopig: `house_number` bevat
+huisletter en toevoeging, `family_name` het voorvoegsel. De PID splitst een
+adres sinds Uitvoeringsverordening (EU) 2026/1731 anders, en de vorm in de
+EU-catalogus is nog niet bekend.
+
 ## Wat staat waar?
 
 | Gegeven | Eigenaar/bron |
@@ -401,6 +479,8 @@ verwijzen.
 | GraphQL-endpoint, query, parameters, offers en mapping | `/.well-known/gbo` van de bron |
 | Kaartnaam, kleur, kaartlogo, summary en claimlabels | `display` en `claims` in het brondocument |
 | Claimschema, `required`, `svg_id` en `vct` | Door GBO gegenereerde Type Metadata |
+| Attributen voor verificatie en hun koppeling op de eigen velden | `asi` in `/.well-known/gbo` van de bron |
+| Vorm van een attribuutwaarde (`value_schema`) per identifier | GBO's attribuutcatalogus `schemas/asi-attributes.json` |
 | Getoonde issuernaam en issuerlogo | vooraf beheerde issuer-/readercertificaten |
 | Kandidaten, statussen, immutable releases, Type Metadata en publieke offercatalogus | PostgreSQL Source Release Registry |
 | Actieve release | transactionele singleton `active_release_id` |
