@@ -16,10 +16,6 @@ import (
 	"gbo-demo/eudi-credential-issuer/internal/issuance"
 )
 
-// SubjectID is the id under which the subject is sent, in the place where
-// the attestation server contract has the DCQL credential query id.
-const SubjectID = "subject"
-
 // Client is a bronpoort client.
 type Client struct {
 	HTTP *http.Client
@@ -28,14 +24,11 @@ type Client struct {
 	Endpoints map[string]string
 }
 
-type disclosedAttestations struct {
-	ID           string        `json:"id"`
-	Attestations []attestation `json:"attestations"`
-}
-
-type attestation struct {
-	AttestationType string         `json:"attestation_type"`
-	Attributes      map[string]any `json:"attributes"`
+// subjectRequest is what a pre-authorized offer sends: the subject the
+// offer caller named. It is an object, so a backend cannot mistake it for a
+// wallet disclosure, which is an array.
+type subjectRequest struct {
+	Subject map[string]any `json:"subject"`
 }
 
 type issuableDocument struct {
@@ -45,11 +38,11 @@ type issuableDocument struct {
 	Attributes      map[string]any `json:"attributes"`
 }
 
-// Fetch posts the subject to endpoint, with parameters in the query.
-// Demo shortcut: the request body carries the subject as attributes of one
-// attestation, as a disclosure would; the backend cannot tell whether a
-// wallet disclosed them or the offer caller supplied them. A real
-// deployment needs an authenticated caller and a statement of origin.
+// Fetch posts {"subject": ...} to the configuration's endpoint, with the
+// parameters in the query. The response is the IssuableDocument list the
+// attestation server of nl-wallet's issuance_server returns. Backends that
+// accept only a PID disclosure (the QTSP callback) do not serve this
+// request; they get one with disclosure-based issuance.
 func (c *Client) Fetch(ctx context.Context, configurationID string, subject map[string]any, parameters map[string]string) ([]issuance.SourceDocument, error) {
 	endpoint, ok := c.Endpoints[configurationID]
 	if !ok {
@@ -64,10 +57,7 @@ func (c *Client) Fetch(ctx context.Context, configurationID string, subject map[
 		q.Set(k, v)
 	}
 	u.RawQuery = q.Encode()
-	body, err := json.Marshal([]disclosedAttestations{{
-		ID:           SubjectID,
-		Attestations: []attestation{{AttestationType: SubjectID, Attributes: subject}},
-	}})
+	body, err := json.Marshal(subjectRequest{Subject: subject})
 	if err != nil {
 		return nil, err
 	}

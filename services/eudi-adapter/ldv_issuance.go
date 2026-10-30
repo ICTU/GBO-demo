@@ -19,6 +19,7 @@ import (
 // and its processings are the two steps of an issuance it actually performs.
 const (
 	pidExtractionActivity    = "https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-pid-bsn-extractie/v1"
+	subjectReceiptActivity   = "https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-bsn-ontvangst-aanvrager/v1"
 	attestationBuildActivity = "https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-attestatie-samenstellen/v1"
 )
 
@@ -107,12 +108,25 @@ func sourceCallFrom(ctx context.Context) (ldv.TraceContext, bool) {
 // (REQ-60/72). That it has nothing better to use is the gap this makes
 // visible.
 func (l *issuanceLogbook) logPIDExtraction(ctx context.Context, r *http.Request, bsn string, start time.Time, sourceID, typeID string) (issuanceRecording, error) {
+	return l.logSubject(ctx, r, bsn, start, sourceID, typeID, pidExtractionActivity, "dataverwerking.pid-bsn-extractie")
+}
+
+// logSubjectReceipt records receiving the BSN from the caller of a
+// pre-authorized offer: no PID was presented, the caller named the subject.
+// It takes the place of the PID extraction in the trace.
+func (l *issuanceLogbook) logSubjectReceipt(ctx context.Context, r *http.Request, bsn string, start time.Time, sourceID, typeID string) (issuanceRecording, error) {
+	return l.logSubject(ctx, r, bsn, start, sourceID, typeID, subjectReceiptActivity, "dataverwerking.bsn-ontvangst-aanvrager")
+}
+
+// logSubject writes the first record of an issuance: the step that
+// establishes whose attestation this is.
+func (l *issuanceLogbook) logSubject(ctx context.Context, r *http.Request, bsn string, start time.Time, sourceID, typeID, activity, name string) (issuanceRecording, error) {
 	if l == nil {
 		return issuanceRecording{}, nil
 	}
 	subjectID, subjectType, err := l.Subject(r.Header, bsn)
 	if err != nil {
-		ldv.LogFailure("dataverwerking.pid-bsn-extractie", err)
+		ldv.LogFailure(name, err)
 		return issuanceRecording{}, err
 	}
 	recording := issuanceRecording{
@@ -129,11 +143,11 @@ func (l *issuanceLogbook) logPIDExtraction(ctx context.Context, r *http.Request,
 		TraceID:      recording.traceID,
 		SpanID:       recording.extractSpan,
 		ParentSpanID: ldv.ParentSpanFor(r.Header, recording.traceID),
-		Name:         "dataverwerking.pid-bsn-extractie",
+		Name:         name,
 		Status:       "OK",
 		StartTime:    start,
 		EndTime:      time.Now().UTC(),
-		Attributes: ldv.Attributes(pidExtractionActivity, subjectID, subjectType, recording.processor, map[string]any{
+		Attributes: ldv.Attributes(activity, subjectID, subjectType, recording.processor, map[string]any{
 			"dpl.gbo.sourceId": sourceID,
 			"dpl.gbo.typeId":   typeID,
 		}),

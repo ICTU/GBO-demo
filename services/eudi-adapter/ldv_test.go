@@ -109,7 +109,7 @@ func issue(t *testing.T, url string) *http.Response {
 }
 
 func allGBOActivities() []string {
-	return []string{pidExtractionActivity, attestationBuildActivity}
+	return []string{pidExtractionActivity, subjectReceiptActivity, attestationBuildActivity}
 }
 
 // One issuance is two Dataverwerkingen of the voorziening: reading the BSN
@@ -414,6 +414,57 @@ func TestADisclosureWithoutABSNLogsNothing(t *testing.T) {
 	}
 	if records := logbook.Written(); len(records) != 0 {
 		t.Fatalf("wrote %d records for a disclosure that names nobody: %+v", len(records), records)
+	}
+}
+
+// A credential issuer that makes a pre-authorized offer sends the subject
+// its caller named, not a PID. The adapter serves it, and logs receiving
+// the BSN from the offer caller instead of reading it from a PID.
+func TestAnOfferRequestLogsTheBSNReceipt(t *testing.T) {
+	logbook := ldvtest.New(t, allGBOActivities()...)
+	url := issuanceUnderTest(t, logbook)
+
+	response, err := http.Post(url+"/attestations/belastingdienst/inkomensverklaring?jaar=2025",
+		"application/json", strings.NewReader(`{"subject": {"bsn": "`+walletBSN+`"}}`))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(response.Body)
+		t.Fatalf("status = %d, body = %s", response.StatusCode, raw)
+	}
+	records := logbook.Written()
+	receipt := ldvtest.ByName(records, "dataverwerking.bsn-ontvangst-aanvrager")
+	assembly := ldvtest.ByName(records, "dataverwerking.attestatie-samenstellen")
+	if len(receipt) != 1 || len(assembly) != 1 || len(ldvtest.ByName(records, "dataverwerking.pid-bsn-extractie")) != 0 {
+		t.Fatalf("want one receipt and one assembly record and no PID extraction, got %+v", records)
+	}
+	if got := receipt[0].Attributes[ldv.AttrProcessingActivityID]; got != subjectReceiptActivity {
+		t.Errorf("receipt processing_activity_id = %v, want %s", got, subjectReceiptActivity)
+	}
+	if assembly[0].ParentSpanID != receipt[0].SpanID {
+		t.Error("the assembly record should hang under the BSN receipt")
+	}
+}
+
+// An offer request without a BSN names nobody; nothing is logged and the
+// source is not asked.
+func TestAnOfferRequestWithoutABSNLogsNothing(t *testing.T) {
+	logbook := ldvtest.New(t, allGBOActivities()...)
+	url := issuanceUnderTest(t, logbook)
+	for _, body := range []string{`{"subject": {}}`, `{}`, `{"subject": {"bsn": 1}}`} {
+		response, err := http.Post(url+"/attestations/belastingdienst/inkomensverklaring?jaar=2025", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatalf("post: %v", err)
+		}
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("%s: status = %d, want 400", body, response.StatusCode)
+		}
+	}
+	if records := logbook.Written(); len(records) != 0 {
+		t.Fatalf("wrote %d records for requests that name nobody", len(records))
 	}
 }
 

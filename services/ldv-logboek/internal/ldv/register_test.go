@@ -123,6 +123,7 @@ func TestShippedRegistersLoad(t *testing.T) {
 			verantwoordelijke: "GBO",
 			references: []string{
 				"https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-pid-bsn-extractie/v1",
+				"https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-bsn-ontvangst-aanvrager/v1",
 				"https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-attestatie-samenstellen/v1",
 			},
 		},

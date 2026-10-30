@@ -140,6 +140,49 @@ type issuanceServerRequest []struct {
 	ID string `json:"id"`
 }
 
+// subjectOrigin says where the BSN of an issuance request came from.
+type subjectOrigin int
+
+const (
+	// subjectFromPID: a wallet disclosed its PID to the issuance server.
+	subjectFromPID subjectOrigin = iota
+	// subjectFromOfferCaller: the caller that made a pre-authorized offer
+	// named the subject; no PID was presented.
+	subjectFromOfferCaller
+)
+
+// offerSubjectRequest is the request of a credential issuer that makes a
+// pre-authorized offer: {"subject": {"bsn": "..."}}. It is an object, so it
+// cannot be mistaken for a disclosure, which is an array.
+type offerSubjectRequest struct {
+	Subject map[string]any `json:"subject"`
+}
+
+// decodeIssuanceSubject reads the BSN from either request shape.
+func decodeIssuanceSubject(body []byte) (string, subjectOrigin, error) {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) > 0 && trimmed[0] == '{' {
+		var request offerSubjectRequest
+		if err := json.Unmarshal(trimmed, &request); err != nil || request.Subject == nil {
+			return "", 0, fmt.Errorf("the offer request has no subject")
+		}
+		bsn, _ := request.Subject["bsn"].(string)
+		if bsn == "" {
+			return "", 0, fmt.Errorf("the offer subject has no BSN")
+		}
+		return bsn, subjectFromOfferCaller, nil
+	}
+	var request issuanceServerRequest
+	if err := json.Unmarshal(trimmed, &request); err != nil || len(request) == 0 || len(request[0].Attestations) == 0 {
+		return "", 0, fmt.Errorf("the request contains no disclosed attestation")
+	}
+	bsn := extractBSN(request[0].Attestations[0].Attributes)
+	if bsn == "" {
+		return "", 0, fmt.Errorf("the disclosed PID contains no BSN")
+	}
+	return bsn, subjectFromPID, nil
+}
+
 // extractBSN scans the attributes map for a BSN: first nested under the PID
 // namespace, then flat.
 func extractBSN(attrs map[string]any) string {
@@ -236,27 +279,23 @@ func handleSourceAttestation(cfg config, client *http.Client, runtime sourceMeta
 			http.Error(w, "invalid issuance request", http.StatusBadRequest)
 			return
 		}
-		var request issuanceServerRequest
-		if err := json.Unmarshal(body, &request); err != nil || len(request) == 0 || len(request[0].Attestations) == 0 {
-			if err == nil {
-				err = fmt.Errorf("issuance request contains no disclosed attestation")
-			}
+		bsn, origin, err := decodeIssuanceSubject(body)
+		if err != nil {
 			logSourceAttestationError(r, "decode_request", err)
-			http.Error(w, "invalid PID disclosure", http.StatusBadRequest)
-			return
-		}
-		bsn := extractBSN(request[0].Attestations[0].Attributes)
-		if bsn == "" {
-			logSourceAttestationError(r, "extract_subject", fmt.Errorf("disclosed PID contains no BSN"))
-			http.Error(w, "no BSN in disclosed PID", http.StatusBadRequest)
+			http.Error(w, "invalid issuance request: "+err.Error(), http.StatusBadRequest)
 			return
 		}
 		// Logged before the source is called: a request that cannot be logged
-		// must not reach the bronhouder at all.
+		// must not reach the bronhouder at all. Which Dataverwerking it is
+		// depends on where the BSN came from.
 		if logbook != nil {
-			recording, err = logbook.logPIDExtraction(r.Context(), r, bsn, extractionStart, metadata.SourceID, metadata.TypeID)
+			if origin == subjectFromOfferCaller {
+				recording, err = logbook.logSubjectReceipt(r.Context(), r, bsn, extractionStart, metadata.SourceID, metadata.TypeID)
+			} else {
+				recording, err = logbook.logPIDExtraction(r.Context(), r, bsn, extractionStart, metadata.SourceID, metadata.TypeID)
+			}
 			if err != nil {
-				http.Error(w, "the PID disclosure could not be logged; refusing the request", http.StatusInternalServerError)
+				http.Error(w, "the issuance request could not be logged; refusing it", http.StatusInternalServerError)
 				return
 			}
 		}

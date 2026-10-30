@@ -229,6 +229,7 @@ And for `logboek-eudi-adapter` ([`verwerkingsactiviteiten-eudi-adapter.json`](co
 | reference | Dataverwerking | logged by |
 | --- | --- | --- |
 | `gbo-pid-bsn-extractie@v1` | reading the BSN out of a disclosed PID | `eudi-adapter` |
+| `gbo-bsn-ontvangst-aanvrager@v1` | receiving the BSN from the caller of a pre-authorized offer (no PID presented) | `eudi-adapter` |
 | `gbo-attestatie-samenstellen@v1` | assembling an attestation from source data | `eudi-adapter` |
 
 A component names the activity it performs; the logbook refuses a reference

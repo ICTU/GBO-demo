@@ -17,6 +17,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   data from the bronpoort with the contract `eudi-adapter` already serves.
   The protocol building blocks live in the new library `services/oid4vc-kit`.
   The issuer is not deployed; `eudi-issuance-server` stays in place.
+- **`eudi-adapter` serves pre-authorized offers** (#614): besides a wallet's
+  PID disclosure it accepts `{"subject": {"bsn": ...}}` from a credential
+  issuer whose offer caller named the subject. It logs that as a separate
+  Dataverwerking, `gbo-bsn-ontvangst-aanvrager`, added to the register of
+  `logboek-eudi-adapter`, before it asks the source.
 - **The BRP mock publishes the `asi` capability** (#592, step 2): its source
   metadata, now version 2.6.0 at schema 1.1, maps its own fields onto the five
   demo attributes the ASIP verifies. Its API, its policy rule and its EUDI

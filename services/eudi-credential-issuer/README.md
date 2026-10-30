@@ -43,7 +43,7 @@ A Wallet Instance Attestation is accepted only from the wallet providers configu
 **Demo shortcuts**
 
 - The internal API (offers, revocations) has no authentication. It must only be reachable from the internal network. A real deployment authenticates every caller.
-- The bronpoort request carries the subject the offer caller supplied in the shape of a disclosure. The backend cannot tell it from attributes a wallet disclosed. A real deployment needs an authenticated caller and a statement of origin.
+- The bronpoort trusts the subject the offer caller names; the internal API does not authenticate that caller. A real deployment authenticates it, so the backend knows who vouches for the subject.
 - `ISSUER_STORE=memory` keeps all state in memory, for a local run only.
 
 ## Endpoints
@@ -72,17 +72,21 @@ Internal port (`ISSUER_INTERNAL_ADDR`, default `:8081`):
 
 ## Bronpoort
 
-For each credential configuration the issuer posts to its `source_url` (query: the offer parameters). Which URL serves which configuration is configuration of the source adapter; the core only names the configuration. The body is what the attestation server of nl-wallet's `issuance_server` receives, with the subject as the attributes of one attestation:
+For each credential configuration the issuer posts to its `source_url`, with the offer parameters in the query. Which URL serves which configuration is configuration of the source adapter; the core only names the configuration. The body is the subject the offer caller named:
 
 ```json
-[{"id": "subject", "attestations": [{"attestation_type": "subject", "attributes": {"bsn": "999990019"}}]}]
+{"subject": {"bsn": "999990019"}}
 ```
 
-It expects `[{"id", "format": "dc+sd-jwt", "attestation_type": "<vct>", "attributes": {...}}]`. `eudi-adapter` and `qtsp-reference` implement this contract already. The offer is refused with `bad_source_data` when what the source returns cannot be issued:
+It is an object on purpose: the disclosure that nl-wallet's `issuance_server` sends is an array, so a backend can tell that no wallet presented a PID here. `eudi-adapter` accepts both and logs the matching Dataverwerking (`gbo-bsn-ontvangst-aanvrager` for this request, `gbo-pid-bsn-extractie` for a disclosure).
+
+The response is the IssuableDocument list: `[{"id", "format": "dc+sd-jwt", "attestation_type": "<vct>", "attributes": {...}}]`. The offer is refused with `bad_source_data` when what the source returns cannot be issued:
 
 - an attribute is not described by a claim of the credential configuration, or a mandatory claim is missing (the NL Wallet refuses undescribed attributes);
 - a top-level attribute uses a name SD-JWT VC reserves (`iss`, `vct`, `exp`, `status`, ...);
 - for `nl`: a number is not a whole number (the NL Wallet knows no others).
+
+**The QTSP route does not run through pre-authorized offers.** The callback of `qtsp-reference` checks a PID the wallet disclosed against the pending ASI result; a subject named by an offer caller would make that check meaningless. It comes with disclosure-based issuance, where the issuer passes on the PID its own verifier checked.
 
 ## Run
 
