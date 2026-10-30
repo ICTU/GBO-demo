@@ -1,0 +1,187 @@
+// Package memstore keeps the issuer's state in memory. It is for tests and
+// for a local run without a database; state is lost on restart and not
+// shared between replicas.
+package memstore
+
+import (
+	"context"
+	"crypto/rand"
+	"errors"
+	"math/big"
+	"sort"
+	"sync"
+	"time"
+
+	"gbo-demo/eudi-credential-issuer/internal/issuance"
+)
+
+// Store implements issuance.Sessions, issuance.OneTime and
+// issuance.StatusLists.
+type Store struct {
+	mu       sync.Mutex
+	sessions map[string]issuance.Session
+	byCode   map[string]string
+	used     map[string]bool
+	tokens   map[string]issuance.AccessToken
+	issued   map[string]bool
+	values   map[string]time.Time
+	status   map[string]map[int]*entry
+}
+
+type entry struct {
+	revoked   bool
+	reference string
+}
+
+// New returns an empty store.
+func New() *Store {
+	return &Store{
+		sessions: map[string]issuance.Session{}, byCode: map[string]string{}, used: map[string]bool{},
+		tokens: map[string]issuance.AccessToken{}, issued: map[string]bool{}, values: map[string]time.Time{},
+		status: map[string]map[int]*entry{},
+	}
+}
+
+func (s *Store) CreateSession(_ context.Context, sess issuance.Session) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, dup := s.byCode[sess.CodeHash]; dup {
+		return errors.New("memstore: duplicate code")
+	}
+	s.sessions[sess.ID] = sess
+	s.byCode[sess.CodeHash] = sess.ID
+	return nil
+}
+
+func (s *Store) RedeemCode(_ context.Context, profile, codeHash string, now time.Time) (issuance.Session, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id, ok := s.byCode[codeHash]
+	if !ok || s.used[codeHash] {
+		return issuance.Session{}, issuance.ErrNotFound
+	}
+	sess := s.sessions[id]
+	if sess.Profile != profile || !now.Before(sess.ExpiresAt) {
+		return issuance.Session{}, issuance.ErrNotFound
+	}
+	s.used[codeHash] = true
+	return sess, nil
+}
+
+func (s *Store) SaveToken(_ context.Context, t issuance.AccessToken) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tokens[t.Hash] = t
+	return nil
+}
+
+func (s *Store) Token(_ context.Context, tokenHash string, now time.Time) (issuance.AccessToken, issuance.Session, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t, ok := s.tokens[tokenHash]
+	if !ok || !now.Before(t.ExpiresAt) {
+		return issuance.AccessToken{}, issuance.Session{}, issuance.ErrNotFound
+	}
+	return t, s.sessions[t.SessionID], nil
+}
+
+func (s *Store) MarkIssued(_ context.Context, sessionID, credentialID string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := sessionID + "/" + credentialID
+	if s.issued[key] {
+		return false, nil
+	}
+	s.issued[key] = true
+	return true, nil
+}
+
+func (s *Store) Put(_ context.Context, kind, value string, expiry time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.values[kind+"/"+value] = expiry
+	return nil
+}
+
+func (s *Store) Take(_ context.Context, kind, value string, now time.Time) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := kind + "/" + value
+	exp, ok := s.values[key]
+	delete(s.values, key)
+	return ok && now.Before(exp), nil
+}
+
+func (s *Store) FirstUse(_ context.Context, kind, id string, expiry, now time.Time) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := "seen/" + kind + "/" + id
+	if exp, ok := s.values[key]; ok && now.Before(exp) {
+		return false, nil
+	}
+	s.values[key] = expiry
+	return true, nil
+}
+
+func (s *Store) Allocate(_ context.Context, list string, size int, reference string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entries := s.status[list]
+	if entries == nil {
+		entries = map[int]*entry{}
+		s.status[list] = entries
+	}
+	if len(entries) >= size {
+		return 0, errors.New("memstore: status list is full")
+	}
+	for {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(size)))
+		if err != nil {
+			return 0, err
+		}
+		idx := int(n.Int64())
+		if _, taken := entries[idx]; !taken {
+			entries[idx] = &entry{reference: reference}
+			return idx, nil
+		}
+	}
+}
+
+func (s *Store) Revoke(_ context.Context, list string, index int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.status[list][index]
+	if !ok {
+		return issuance.ErrNotFound
+	}
+	e.revoked = true
+	return nil
+}
+
+func (s *Store) RevokeReference(_ context.Context, reference string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, entries := range s.status {
+		for _, e := range entries {
+			if reference != "" && e.reference == reference && !e.revoked {
+				e.revoked = true
+				n++
+			}
+		}
+	}
+	return n, nil
+}
+
+func (s *Store) Revoked(_ context.Context, list string) ([]int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []int
+	for idx, e := range s.status[list] {
+		if e.revoked {
+			out = append(out, idx)
+		}
+	}
+	sort.Ints(out)
+	return out, nil
+}

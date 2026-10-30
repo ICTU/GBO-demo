@@ -1,0 +1,293 @@
+package issuance
+
+import (
+	"context"
+	"crypto"
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/go-jose/go-jose/v4"
+
+	"gbo-demo/oid4vc-kit/dpop"
+	"gbo-demo/oid4vc-kit/keyattest"
+	"gbo-demo/oid4vc-kit/oid4vci"
+	"gbo-demo/oid4vc-kit/sdjwtvc"
+)
+
+// Nonce returns a fresh c_nonce (section 7); it is accepted once.
+func (s *Service) Nonce(ctx context.Context, profile string) (string, error) {
+	if _, ok := s.profiles[profile]; !ok {
+		return "", ErrUnknownProfile
+	}
+	n, err := randomToken()
+	if err != nil {
+		return "", err
+	}
+	if err := s.onetime.Put(ctx, kindNonce, n, s.now().Add(s.cfg.NonceTTL)); err != nil {
+		return "", err
+	}
+	return n, nil
+}
+
+// CredentialCall is a credential request with its authorization.
+type CredentialCall struct {
+	Profile string
+	// Authorization is the Authorization header: "DPoP <access token>".
+	Authorization string
+	DPoP          []string
+	Request       oid4vci.CredentialRequest
+}
+
+// Credential issues the credentials of one credential identifier, one per
+// holder key, in the order of the keys (section 8). The keys come from the
+// proofs; for KindEUDI from the key attestation they carry, as HAIP and ARF
+// ISSU_30 require.
+func (s *Service) Credential(ctx context.Context, call CredentialCall) (oid4vci.CredentialResponse, error) {
+	p, ok := s.profiles[call.Profile]
+	if !ok {
+		return oid4vci.CredentialResponse{}, ErrUnknownProfile
+	}
+	now := s.now()
+	id := s.Identifier(p.Name)
+
+	token, session, err := s.authorize(ctx, p, call.Authorization, "DPoP")
+	if err != nil {
+		return oid4vci.CredentialResponse{}, err
+	}
+	accessToken := strings.TrimSpace(call.Authorization[len("DPoP"):])
+	proof, err := dpop.Verify(call.DPoP, dpop.Expected{Method: "POST", URL: id + "/credential", AccessToken: accessToken}, now)
+	if err != nil {
+		return oid4vci.CredentialResponse{}, refuse(oid4vci.ErrInvalidDPoPProof, err.Error())
+	}
+	if proof.JKT != token.JKT {
+		return oid4vci.CredentialResponse{}, refuse(oid4vci.ErrInvalidDPoPProof, "the DPoP key is not the key the access token is bound to")
+	}
+	if ok, err := s.onetime.FirstUse(ctx, kindDPoP, proof.JTI, proof.IAT.Add(dpop.Window), now); err != nil {
+		return oid4vci.CredentialResponse{}, err
+	} else if !ok {
+		return oid4vci.CredentialResponse{}, refuse(oid4vci.ErrInvalidDPoPProof, "the DPoP proof has been used before")
+	}
+
+	req := call.Request
+	if req.CredentialConfigurationID != "" || req.CredentialIdentifier == "" {
+		return oid4vci.CredentialResponse{}, refuse(oid4vci.ErrInvalidCredentialRequest, "ask for a credential_identifier from the token response")
+	}
+	doc, ok := findDocument(session, req.CredentialIdentifier)
+	if !ok {
+		return oid4vci.CredentialResponse{}, refuse(oid4vci.ErrUnknownCredentialID, "unknown credential_identifier")
+	}
+	keys, err := s.holderKeys(ctx, p, req.Proofs)
+	if err != nil {
+		return oid4vci.CredentialResponse{}, err
+	}
+
+	c, ok := s.configs[doc.ConfigurationID]
+	if !ok {
+		return oid4vci.CredentialResponse{}, refuse(oid4vci.ErrUnknownCredentialID, "the credential configuration is no longer offered")
+	}
+	// iat is rounded to the day, so the copies of a batch cannot be linked
+	// by it (RFC 9901 section 10.1).
+	issuedAt := now.UTC().Truncate(24 * time.Hour)
+	out := oid4vci.CredentialResponse{}
+	for _, k := range keys {
+		idx, err := s.status.Allocate(ctx, c.StatusList, s.cfg.StatusListSize, session.Reference)
+		if err != nil {
+			return oid4vci.CredentialResponse{}, err
+		}
+		cred, err := s.signer.Issue(sdjwtvc.Credential{
+			VCT:       c.VCT,
+			IssuedAt:  issuedAt,
+			NotBefore: doc.NotBefore,
+			Expires:   doc.Expires,
+			HolderKey: &k,
+			Status:    &sdjwtvc.StatusReference{Index: idx, URI: s.StatusListURI(c.StatusList)},
+			Claims:    doc.Claims,
+		})
+		if err != nil {
+			return oid4vci.CredentialResponse{}, err
+		}
+		out.Credentials = append(out.Credentials, oid4vci.IssuedCredential{Credential: cred})
+	}
+	// Marked only after everything that can fail, so a failure leaves the
+	// credential issuable. Of two concurrent requests one gets the
+	// credentials; the status entries of the other stay allocated, unused.
+	if first, err := s.sessions.MarkIssued(ctx, session.ID, doc.CredentialID); err != nil {
+		return oid4vci.CredentialResponse{}, err
+	} else if !first {
+		return oid4vci.CredentialResponse{}, refuse(oid4vci.ErrInvalidCredentialRequest, "this credential has been issued already")
+	}
+	return out, nil
+}
+
+// authorize resolves the access token of an Authorization header with the
+// given scheme to an unexpired token and its session of this profile.
+func (s *Service) authorize(ctx context.Context, p Profile, header, scheme string) (AccessToken, Session, error) {
+	parts := strings.SplitN(header, " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], scheme) || strings.TrimSpace(parts[1]) == "" {
+		return AccessToken{}, Session{}, refuse(oid4vci.ErrInvalidToken, "a "+scheme+" access token is required")
+	}
+	token, session, err := s.sessions.Token(ctx, hash(strings.TrimSpace(parts[1])), s.now())
+	if errors.Is(err, ErrNotFound) || (err == nil && session.Profile != p.Name) {
+		return AccessToken{}, Session{}, refuse(oid4vci.ErrInvalidToken, "the access token is unknown or expired")
+	}
+	return token, session, err
+}
+
+// holderKeys verifies the key proofs and returns the keys to bind the
+// credentials to. All proofs must carry the same c_nonce, which is used up.
+func (s *Service) holderKeys(ctx context.Context, p Profile, proofs *oid4vci.Proofs) ([]jose.JSONWebKey, error) {
+	if proofs == nil || (len(proofs.JWT) == 0) == (len(proofs.Attestation) == 0) {
+		return nil, refuse(oid4vci.ErrInvalidProof, "proofs must contain jwt or attestation proofs")
+	}
+	now := s.now()
+	id := s.Identifier(p.Name)
+	var keys []jose.JSONWebKey
+	var nonces []string
+
+	switch {
+	case len(proofs.Attestation) > 0:
+		if p.Kind != KindEUDI {
+			return nil, refuse(oid4vci.ErrInvalidProof, "the attestation proof type is not supported for this profile")
+		}
+		if len(proofs.Attestation) != 1 {
+			return nil, refuse(oid4vci.ErrInvalidProof, "exactly one attestation proof is expected")
+		}
+		ka, err := keyattest.Verify(proofs.Attestation[0], p.KeyAttestationProviders, now, false)
+		if err != nil {
+			return nil, refuse(oid4vci.ErrInvalidProof, err.Error())
+		}
+		if err := checkLevels(p, ka); err != nil {
+			return nil, err
+		}
+		keys = ka.Keys
+		nonces = append(nonces, ka.Nonce)
+	default:
+		for _, raw := range proofs.JWT {
+			jp, err := oid4vci.VerifyJWTProof(raw, id, now)
+			if err != nil {
+				return nil, refuse(oid4vci.ErrInvalidProof, err.Error())
+			}
+			nonces = append(nonces, jp.Nonce)
+			if p.Kind != KindEUDI {
+				// One credential per proof: two proofs with one key would
+				// silently yield fewer credentials than proofs.
+				if containsKey(keys, jp.Key) {
+					return nil, refuse(oid4vci.ErrInvalidProof, "two proofs use the same key")
+				}
+				keys = append(keys, jp.Key)
+				continue
+			}
+			// HAIP and the ARF: the proof key must be attested, and every
+			// attested key gets a credential.
+			if jp.KeyAttestation == "" {
+				return nil, refuse(oid4vci.ErrInvalidProof, "a key attestation is required")
+			}
+			ka, err := keyattest.Verify(jp.KeyAttestation, p.KeyAttestationProviders, now, true)
+			if err != nil {
+				return nil, refuse(oid4vci.ErrInvalidProof, err.Error())
+			}
+			if err := checkLevels(p, ka); err != nil {
+				return nil, err
+			}
+			if !containsKey(ka.Keys, jp.Key) {
+				return nil, refuse(oid4vci.ErrInvalidProof, "the proof is not signed by an attested key")
+			}
+			if ka.Nonce != jp.Nonce {
+				return nil, refuse(oid4vci.ErrInvalidProof, "the key attestation carries another nonce than the proof")
+			}
+			keys = append(keys, ka.Keys...)
+		}
+	}
+
+	keys, err := distinct(keys)
+	if err != nil {
+		return nil, err
+	}
+	if len(keys) > s.cfg.BatchSize {
+		return nil, refuse(oid4vci.ErrInvalidProof, fmt.Sprintf("at most %d keys per request", s.cfg.BatchSize))
+	}
+	for _, n := range nonces {
+		// A proof without c_nonce is an invalid proof (section 8.3.1.2).
+		if n == "" || n != nonces[0] {
+			return nil, refuse(oid4vci.ErrInvalidProof, "every proof must carry the same c_nonce")
+		}
+	}
+	if ok, err := s.onetime.Take(ctx, kindNonce, nonces[0], now); err != nil {
+		return nil, err
+	} else if !ok {
+		return nil, refuse(oid4vci.ErrInvalidNonce, "the c_nonce is unknown, expired or used")
+	}
+	return keys, nil
+}
+
+// distinct removes repeated keys: a key attested in more than one key
+// attestation of a request gets one credential.
+func distinct(keys []jose.JSONWebKey) ([]jose.JSONWebKey, error) {
+	seen := map[string]bool{}
+	var out []jose.JSONWebKey
+	for _, k := range keys {
+		tp, err := thumbprint(k)
+		if err != nil {
+			return nil, refuse(oid4vci.ErrInvalidProof, "a proof key has no thumbprint")
+		}
+		if seen[tp] {
+			continue
+		}
+		seen[tp] = true
+		out = append(out, k)
+	}
+	return out, nil
+}
+
+// checkLevels requires the key attestation to assert at least one of the
+// key storage and one of the user authentication levels of the profile
+// (ARF ISSU_27d).
+func checkLevels(p Profile, ka keyattest.Verified) error {
+	if !anyOf(ka.KeyStorage, p.KeyStorage) || !anyOf(ka.UserAuthentication, p.UserAuthentication) {
+		return refuse(oid4vci.ErrInvalidProof, "the key attestation does not assert the required key storage and user authentication levels")
+	}
+	return nil
+}
+
+func anyOf(have, want []string) bool {
+	for _, h := range have {
+		if slices.Contains(want, h) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsKey(keys []jose.JSONWebKey, k jose.JSONWebKey) bool {
+	want, err := thumbprint(k)
+	if err != nil {
+		return false
+	}
+	for _, c := range keys {
+		if tp, err := thumbprint(c); err == nil && tp == want {
+			return true
+		}
+	}
+	return false
+}
+
+func thumbprint(k jose.JSONWebKey) (string, error) {
+	tp, err := k.Thumbprint(crypto.SHA256)
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(tp), nil
+}
+
+func findDocument(s Session, credentialID string) (Document, bool) {
+	for _, d := range s.Documents {
+		if d.CredentialID == credentialID {
+			return d, true
+		}
+	}
+	return Document{}, false
+}
