@@ -216,6 +216,13 @@ func (s *Store) MarkIssued(ctx context.Context, sessionID, credentialID string) 
 	return tag.RowsAffected() == 1, nil
 }
 
+func (s *Store) IsIssued(ctx context.Context, sessionID, credentialID string) (bool, error) {
+	var issued bool
+	err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM issued_credentials WHERE session_id = $1 AND credential_id = $2)`,
+		sessionID, credentialID).Scan(&issued)
+	return issued, err
+}
+
 func (s *Store) Put(ctx context.Context, kind, value string, expiry time.Time) error {
 	_, err := s.pool.Exec(ctx, `INSERT INTO one_time_values (kind, value, expires_at) VALUES ($1, $2, $3)`, kind, value, expiry)
 	return err
@@ -249,8 +256,9 @@ func (s *Store) Allocate(ctx context.Context, list string, size int, reference s
 		if err != nil {
 			return 0, err
 		}
-		tag, err := s.pool.Exec(ctx, `INSERT INTO status_entries (list, idx, reference) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
-			list, n.Int64(), reference)
+		tag, err := s.pool.Exec(ctx, `INSERT INTO status_entries (list, idx, reference, revoked)
+			VALUES ($1, $2, $3, $3 <> '' AND EXISTS (SELECT 1 FROM revoked_references WHERE reference = $3))
+			ON CONFLICT DO NOTHING`, list, n.Int64(), reference)
 		if err != nil {
 			return 0, err
 		}
@@ -270,8 +278,9 @@ func (s *Store) Allocate(ctx context.Context, list string, size int, reference s
 			return 0, fmt.Errorf("status list %q is full", list)
 		}
 		var idx int
-		err := s.pool.QueryRow(ctx, `INSERT INTO status_entries (list, idx, reference)
-			SELECT $1, g, $3 FROM generate_series(0, $2 - 1) g
+		err := s.pool.QueryRow(ctx, `INSERT INTO status_entries (list, idx, reference, revoked)
+			SELECT $1, g, $3, $3 <> '' AND EXISTS (SELECT 1 FROM revoked_references WHERE reference = $3)
+			FROM generate_series(0, $2 - 1) g
 			WHERE NOT EXISTS (SELECT 1 FROM status_entries e WHERE e.list = $1 AND e.idx = g)
 			ORDER BY random() LIMIT 1
 			ON CONFLICT DO NOTHING
@@ -298,11 +307,23 @@ func (s *Store) RevokeReference(ctx context.Context, reference string) (int, err
 	if reference == "" {
 		return 0, nil
 	}
+	// The reference is recorded first. An entry allocated for it from then
+	// on is born revoked (see Allocate); one allocated earlier is caught by
+	// the update below.
+	if _, err := s.pool.Exec(ctx, `INSERT INTO revoked_references (reference) VALUES ($1) ON CONFLICT DO NOTHING`, reference); err != nil {
+		return 0, err
+	}
 	tag, err := s.pool.Exec(ctx, `UPDATE status_entries SET revoked = true WHERE reference = $1 AND NOT revoked`, reference)
 	if err != nil {
 		return 0, err
 	}
 	return int(tag.RowsAffected()), nil
+}
+
+func (s *Store) ReferenceRevoked(ctx context.Context, reference string) (bool, error) {
+	var revoked bool
+	err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM revoked_references WHERE reference = $1)`, reference).Scan(&revoked)
+	return revoked, err
 }
 
 func (s *Store) Revoked(ctx context.Context, list string) ([]int, error) {

@@ -51,7 +51,9 @@ func (s *Service) Revoke(ctx context.Context, list string, index int) error {
 }
 
 // RevokeReference revokes every credential issued for offers with the
-// given caller reference, and returns how many.
+// given caller reference, and returns how many. Offers with the reference
+// that have not been redeemed, and tokens that have not been used, issue
+// nothing anymore.
 func (s *Service) RevokeReference(ctx context.Context, reference string) (int, error) {
 	if reference == "" {
 		return 0, ErrNotFound

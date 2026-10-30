@@ -61,8 +61,6 @@ type CredentialConfiguration struct {
 	Claims  []Claim
 	// ValidDays is the validity of an issued credential.
 	ValidDays int
-	// SourceURL is the bronpoort endpoint for this configuration.
-	SourceURL string
 	// StatusList names the status list its credentials are listed in.
 	StatusList string
 }

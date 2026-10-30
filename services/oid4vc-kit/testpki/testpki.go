@@ -112,3 +112,28 @@ func serial(t testing.TB) *big.Int {
 	}
 	return n
 }
+
+// NewSelfSignedLeaf returns a self-signed certificate that is not a CA, as
+// an end-entity certificate posing as its own trust anchor would be.
+func NewSelfSignedLeaf(t testing.TB, cn string) Cert {
+	t.Helper()
+	key := newKey(t)
+	tmpl := &x509.Certificate{
+		SerialNumber:          serial(t),
+		Subject:               pkix.Name{CommonName: cn},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		BasicConstraintsValid: true,
+		IsCA:                  false,
+		KeyUsage:              x509.KeyUsageDigitalSignature,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Cert{Cert: cert, Key: key, Chain: []*x509.Certificate{cert}}
+}

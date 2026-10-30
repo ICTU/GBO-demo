@@ -80,6 +80,18 @@ func (s *Service) Credential(ctx context.Context, call CredentialCall) (oid4vci.
 	if !ok {
 		return oid4vci.CredentialResponse{}, refuse(oid4vci.ErrUnknownCredentialID, "unknown credential_identifier")
 	}
+	if revoked, err := s.referenceRevoked(ctx, session); err != nil {
+		return oid4vci.CredentialResponse{}, err
+	} else if revoked {
+		return oid4vci.CredentialResponse{}, refuse(oid4vci.ErrCredentialRequestDenied, "the offer has been revoked")
+	}
+	// Checked before anything is allocated, so a repeated request does not
+	// use up status list entries.
+	if issued, err := s.sessions.IsIssued(ctx, session.ID, doc.CredentialID); err != nil {
+		return oid4vci.CredentialResponse{}, err
+	} else if issued {
+		return oid4vci.CredentialResponse{}, refuse(oid4vci.ErrInvalidCredentialRequest, "this credential has been issued already")
+	}
 	keys, err := s.holderKeys(ctx, p, req.Proofs)
 	if err != nil {
 		return oid4vci.CredentialResponse{}, err
@@ -121,6 +133,15 @@ func (s *Service) Credential(ctx context.Context, call CredentialCall) (oid4vci.
 		return oid4vci.CredentialResponse{}, refuse(oid4vci.ErrInvalidCredentialRequest, "this credential has been issued already")
 	}
 	return out, nil
+}
+
+// referenceRevoked reports whether the session's offer reference has been
+// revoked: then nothing more is issued for it.
+func (s *Service) referenceRevoked(ctx context.Context, session Session) (bool, error) {
+	if session.Reference == "" {
+		return false, nil
+	}
+	return s.status.ReferenceRevoked(ctx, session.Reference)
 }
 
 // authorize resolves the access token of an Authorization header with the

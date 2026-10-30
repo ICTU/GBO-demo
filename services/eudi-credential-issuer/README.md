@@ -18,7 +18,7 @@ A Wallet Instance Attestation is accepted only from the wallet providers configu
 | Pre-Authorized Code Flow, issuer-initiated, with a Credential Offer by value (OpenID4VCI 1.0 sections 3.5, 4.1) | implemented |
 | Credential Issuer Metadata, signed with the access certificate in `x5c` (section 12.2.3; ARF ISSU_32) when `application/jwt` is asked for, unsigned JSON otherwise (section 12.2.2) | implemented; `scope` for every configuration (HAIP section 4.1) |
 | OAuth 2.0 Authorization Server Metadata (RFC 8414), path-inserted well-known URLs | implemented |
-| Client authentication with a Wallet Instance Attestation and PoP over a server challenge (draft-ietf-oauth-attestation-based-client-auth; HAIP section 4.4) | implemented; the challenge is required |
+| Client authentication with a Wallet Instance Attestation and PoP over a server challenge (draft-ietf-oauth-attestation-based-client-auth -07, as OpenID4VCI 1.0 references it; HAIP section 4.4) | implemented; the challenge is required, and a missing or unknown one is answered with `use_attestation_challenge` (400) and a fresh challenge in `OAuth-Client-Attestation-Challenge`. `iss` and `iat` are not required in the attestation, so attestations made after -07 and after -12 are both accepted |
 | DPoP-bound access tokens (RFC 9449) | implemented; server DPoP nonces are not used |
 | Nonce endpoint, single-use `c_nonce` (section 7) | implemented |
 | Credential endpoint with `credential_identifier`, batch issuance (section 8) | implemented; one request per credential identifier |
@@ -52,7 +52,7 @@ Public port (`ISSUER_LISTEN_ADDR`, default `:8080`), per profile `p`:
 
 | Endpoint | |
 |---|---|
-| `GET /.well-known/openid-credential-issuer/{p}` | signed issuer metadata; requires `Accept: application/jwt`, otherwise 406 |
+| `GET /.well-known/openid-credential-issuer/{p}` | issuer metadata: signed (`application/jwt`) when asked for, unsigned JSON otherwise (`Vary: Accept`) |
 | `GET /.well-known/oauth-authorization-server/{p}` | authorization server metadata |
 | `POST /{p}/challenge` | `{"attestation_challenge"}` for the attestation PoP |
 | `POST /{p}/token` | pre-authorized code grant; headers `OAuth-Client-Attestation`, `OAuth-Client-Attestation-PoP`, `DPoP` |
@@ -67,12 +67,12 @@ Internal port (`ISSUER_INTERNAL_ADDR`, default `:8081`):
 | Endpoint | |
 |---|---|
 | `POST /offers` | `{profile, credential_configuration_ids, subject, parameters, reference?}` → `201 {credential_offer, links}`. The issuer fetches the data from the bronpoort now; `404 no_data`, `503 source_unavailable` or `502 bad_source_data` when that fails, and nothing is stored. `reference` is the caller's own reference for revocation |
-| `POST /revocations` | `{reference}` revokes every credential issued for offers with that reference → `200 {revoked}`; `{list, index}` revokes one entry → 204. Anything else is a 400: a revocation cannot be undone, so nothing is guessed |
+| `POST /revocations` | `{reference}` revokes every credential issued for offers with that reference → `200 {revoked}`, and from then on nothing more is issued for it: an offer not yet redeemed gets `invalid_grant`, a token not yet used gets `credential_request_denied`. `{list, index}` revokes one entry → 204. Anything else is a 400: a revocation cannot be undone, so nothing is guessed |
 | `GET /healthz` | health |
 
 ## Bronpoort
 
-For each credential configuration the issuer posts to `source_url` (query: the offer parameters) the body the attestation server of nl-wallet's `issuance_server` receives, with the subject as the attributes of one attestation:
+For each credential configuration the issuer posts to its `source_url` (query: the offer parameters). Which URL serves which configuration is configuration of the source adapter; the core only names the configuration. The body is what the attestation server of nl-wallet's `issuance_server` receives, with the subject as the attributes of one attestation:
 
 ```json
 [{"id": "subject", "attestations": [{"attestation_type": "subject", "attributes": {"bsn": "999990019"}}]}]
@@ -136,7 +136,7 @@ Configuration file (paths relative to the file):
 }
 ```
 
-The issuer refuses to start with a configuration a wallet would refuse: no `scope`, `display` or claims, an empty claim path, an `nl` profile without registration certificate, an `eudi` profile without key levels, duplicate names, a public URL with a path, or a chain file with a self-signed certificate (HAIP: no trust anchor in `x5c`). The status certificate must have the subject of the issuer certificate. The NL Wallet also expects the issuer certificate to carry EKU `1.0.18013.5.1.2` and the status certificate EKU `1.3.6.1.5.5.7.3.127`; the issuer does not check its own certificates.
+The issuer refuses to start with a configuration a wallet would refuse: no `scope`, `display` or claims, a scope used twice (HAIP section 4.3), an empty claim path, a mandatory claim that is an object (wallets check mandatory claims on leaves), an `nl` profile without registration certificate, an `eudi` profile without key levels, duplicate names, a public URL with a path, negative sizes or durations, a signing key that is not P-256, or a chain file with a self-signed certificate (HAIP: no trust anchor in `x5c`). Whitespace around the registration certificate in its file is trimmed. The status certificate must have the subject of the issuer certificate. The NL Wallet also expects the issuer certificate to carry EKU `1.0.18013.5.1.2` and the status certificate EKU `1.3.6.1.5.5.7.3.127`; the issuer does not check its own certificates.
 
 ## Layout
 
@@ -156,7 +156,7 @@ The issuer refuses to start with a configuration a wallet would refuse: no `scop
 - Credential `nbf` is the start of the day (UTC) the offer was made, `exp` is `nbf` plus `valid_days`. Both are fixed when the offer is made, so the NL preview equals the issued credential. `iat` is the start of the day of issuance, so the copies of a batch cannot be linked by it (RFC 9901 section 10.1).
 - All proofs of one request must carry the same `c_nonce`, which is used up by the request. A proof without `c_nonce` is `invalid_proof`; an unknown or used one is `invalid_nonce`.
 - For `nl`, two proofs with the same key are refused: one credential per proof.
-- A credential is marked as issued only after it is signed, so a failed request leaves it issuable.
+- A credential is marked as issued only after it is signed, so a failed request leaves it issuable. A request for a credential that has been issued is refused before anything else happens, so it uses up no status list entries.
 - A `client_id` in the token request must equal the `sub` of the Wallet Instance Attestation.
 - The signing certificate of an incoming Wallet Instance Attestation or key attestation must not be self-signed (HAIP).
 - For the `eudi` profile every key in a key attestation gets a credential (Appendix F.1: "SHOULD issue a Credential for each cryptographic public key specified in the attested_keys"); the number of keys is bounded by `batch_size`.

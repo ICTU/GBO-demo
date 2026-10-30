@@ -4,6 +4,7 @@
 package x5c
 
 import (
+	"bytes"
 	"crypto/x509"
 	"encoding/asn1"
 	"encoding/base64"
@@ -61,7 +62,10 @@ func Verify(h jose.Header, anchors []Anchors, now time.Time, eku asn1.ObjectIden
 // HAIP 1.0 forbids self-signed signing certificates and trust anchors in
 // x5c.
 func SelfSigned(cert *x509.Certificate) bool {
-	return cert.Subject.String() == cert.Issuer.String() && cert.CheckSignatureFrom(cert) == nil
+	// CheckSignatureFrom would refuse a non-CA certificate as its own
+	// parent; check the signature with the certificate's own key instead.
+	return bytes.Equal(cert.RawSubject, cert.RawIssuer) &&
+		cert.CheckSignature(cert.SignatureAlgorithm, cert.RawTBSCertificate, cert.Signature) == nil
 }
 
 func hasEKU(cert *x509.Certificate, oid asn1.ObjectIdentifier) bool {

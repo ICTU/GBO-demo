@@ -209,8 +209,8 @@ func tryIssuer(t *testing.T, opts ...func(*issuance.Config)) (*issuer, error) {
 		},
 		Configurations: []issuance.CredentialConfiguration{{
 			ID: incomeConfig, VCT: incomeVCT, Scope: "income", ValidDays: 365,
-			SourceURL: src.URL + "/attestations/tax/income", StatusList: "income",
-			Display: []issuance.Display{{Name: "Income statement", Locale: "en"}},
+			StatusList: "income",
+			Display:    []issuance.Display{{Name: "Income statement", Locale: "en"}},
 			Claims: []issuance.Claim{
 				{Path: []string{"year"}, Mandatory: true}, {Path: []string{"income"}}, {Path: []string{"address", "city"}},
 			},
@@ -223,7 +223,7 @@ func tryIssuer(t *testing.T, opts ...func(*issuance.Config)) (*issuer, error) {
 		o(&cfg)
 	}
 	store := memstore.New()
-	svc, err := issuance.New(cfg, &source.Client{HTTP: src.Client()}, store, store, store, time.Now)
+	svc, err := issuance.New(cfg, &source.Client{HTTP: src.Client(), Endpoints: map[string]string{incomeConfig: src.URL + "/attestations/tax/income"}}, store, store, store, time.Now)
 	if err != nil {
 		return nil, err
 	}

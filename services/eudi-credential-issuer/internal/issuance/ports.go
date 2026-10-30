@@ -10,10 +10,11 @@ import (
 // Its contract is the IssuableDocument contract of the attestation server
 // that nl-wallet's issuance_server calls, so existing backends work as is.
 type Source interface {
-	// Fetch returns the documents a backend issues for subject. url is the
-	// configured endpoint of the credential configuration; parameters are
-	// the offer parameters (for example a tax year).
-	Fetch(ctx context.Context, url string, subject map[string]any, parameters map[string]string) ([]SourceDocument, error)
+	// Fetch returns the documents a backend issues for subject for one
+	// credential configuration; parameters are the offer parameters (for
+	// example a tax year). Which backend serves a configuration is the
+	// adapter's concern.
+	Fetch(ctx context.Context, configurationID string, subject map[string]any, parameters map[string]string) ([]SourceDocument, error)
 }
 
 // SourceDocument is one IssuableDocument as the backend returns it.
@@ -46,6 +47,8 @@ type Sessions interface {
 	// MarkIssued records that a credential of the session was issued and
 	// reports whether this was the first time.
 	MarkIssued(ctx context.Context, sessionID, credentialID string) (bool, error)
+	// IsIssued reports whether MarkIssued was called for the credential.
+	IsIssued(ctx context.Context, sessionID, credentialID string) (bool, error)
 }
 
 // OneTime holds single-use values: nonces, attestation challenges and the
@@ -66,9 +69,12 @@ type StatusLists interface {
 	// when it is not empty.
 	Allocate(ctx context.Context, list string, size int, reference string) (int, error)
 	Revoke(ctx context.Context, list string, index int) error
-	// RevokeReference revokes every entry linked to reference and returns
-	// how many it revoked.
+	// RevokeReference revokes every entry linked to reference, records the
+	// reference as revoked for good, and returns how many entries it
+	// revoked.
 	RevokeReference(ctx context.Context, reference string) (int, error)
+	// ReferenceRevoked reports whether RevokeReference was called for it.
+	ReferenceRevoked(ctx context.Context, reference string) (bool, error)
 	// Revoked returns the revoked indices of list.
 	Revoked(ctx context.Context, list string) ([]int, error)
 }

@@ -71,13 +71,16 @@ func (s *Service) Token(ctx context.Context, req TokenRequest) (oid4vci.TokenRes
 	if req.ClientID != "" && req.ClientID != att.ClientID {
 		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidClientAttestation, "client_id does not match the client attestation")
 	}
+	// Without a valid challenge the client gets a fresh one with
+	// use_attestation_challenge (draft-ietf-oauth-attestation-based-client-auth
+	// -07 section 6.2, -12 section 6.1).
 	if att.Challenge == "" {
-		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidClientAttestation, "the attestation PoP must carry a challenge from the challenge endpoint")
+		return oid4vci.TokenResponse{}, s.useChallenge(ctx, p.Name, "the attestation PoP must carry a challenge")
 	}
 	if ok, err := s.onetime.Take(ctx, kindChallenge, att.Challenge, now); err != nil {
 		return oid4vci.TokenResponse{}, err
 	} else if !ok {
-		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidClientAttestation, "the attestation challenge is unknown, expired or used")
+		return oid4vci.TokenResponse{}, s.useChallenge(ctx, p.Name, "the attestation challenge is unknown, expired or used")
 	}
 	if ok, err := s.onetime.FirstUse(ctx, kindPoP, att.PoPID, att.PoPExpiry, now); err != nil {
 		return oid4vci.TokenResponse{}, err
@@ -104,6 +107,11 @@ func (s *Service) Token(ctx context.Context, req TokenRequest) (oid4vci.TokenRes
 	if err != nil {
 		return oid4vci.TokenResponse{}, err
 	}
+	if revoked, err := s.referenceRevoked(ctx, session); err != nil {
+		return oid4vci.TokenResponse{}, err
+	} else if revoked {
+		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "the offer has been revoked")
+	}
 
 	token, err := randomToken()
 	if err != nil {
@@ -121,6 +129,16 @@ func (s *Service) Token(ctx context.Context, req TokenRequest) (oid4vci.TokenRes
 		ExpiresIn:            int64(s.cfg.TokenTTL.Seconds()),
 		AuthorizationDetails: authorizationDetails(session),
 	}, nil
+}
+
+// useChallenge returns the use_attestation_challenge refusal with a fresh
+// challenge.
+func (s *Service) useChallenge(ctx context.Context, profile, description string) error {
+	c, err := s.Challenge(ctx, profile)
+	if err != nil {
+		return err
+	}
+	return &Error{Code: oid4vci.ErrUseAttestationChallenge, Description: description, Challenge: c}
 }
 
 // authorizationDetails lists, per credential configuration, the

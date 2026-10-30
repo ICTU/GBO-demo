@@ -83,6 +83,9 @@ func (s *Service) Profile(name string) (Profile, bool) {
 type Error struct {
 	Code        string
 	Description string
+	// Challenge is a fresh attestation challenge, sent with
+	// use_attestation_challenge.
+	Challenge string
 }
 
 func (e *Error) Error() string { return e.Code + ": " + e.Description }

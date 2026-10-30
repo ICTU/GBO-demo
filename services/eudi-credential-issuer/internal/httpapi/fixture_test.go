@@ -114,8 +114,8 @@ func newFixture(t *testing.T) *fixture {
 		},
 		Configurations: []issuance.CredentialConfiguration{{
 			ID: incomeConfig, VCT: incomeVCT, Scope: "income", ValidDays: 365,
-			SourceURL: src.URL + "/attestations/tax/income", StatusList: "income",
-			Display: []issuance.Display{{Name: "Income statement", Locale: "en"}},
+			StatusList: "income",
+			Display:    []issuance.Display{{Name: "Income statement", Locale: "en"}},
 			Claims: []issuance.Claim{
 				{Path: []string{"year"}, Mandatory: true}, {Path: []string{"income"}}, {Path: []string{"address", "city"}},
 			},
@@ -125,7 +125,8 @@ func newFixture(t *testing.T) *fixture {
 		StatusListSize: 1024,
 	}
 	store := memstore.New()
-	svc, err := issuance.New(cfg, &source.Client{HTTP: src.Client()}, store, store, store, f.clock.Now)
+	svc, err := issuance.New(cfg, &source.Client{HTTP: src.Client(),
+		Endpoints: map[string]string{incomeConfig: src.URL + "/attestations/tax/income"}}, store, store, store, f.clock.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,6 +208,8 @@ type wallet struct {
 	wiaKey   *ecdsa.PrivateKey
 	dpopKey  *ecdsa.PrivateKey
 	wia      string
+	// header is the response header of the last request.
+	header http.Header
 }
 
 func (f *fixture) wallet(profile string) *wallet {
@@ -308,6 +311,7 @@ func (w *wallet) post(path string, body io.Reader, headers map[string]string, ex
 	if err != nil {
 		w.f.t.Fatal(err)
 	}
+	w.header = resp.Header
 	return decode(w.f.t, resp)
 }
 

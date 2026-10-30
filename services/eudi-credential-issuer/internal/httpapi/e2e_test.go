@@ -191,7 +191,7 @@ func TestToken(t *testing.T) {
 	})
 	t.Run("W3 expired attestation", func(t *testing.T) {
 		status, body := nl.tokenRequest(f.preAuthCode("nl"), map[string]string{"OAuth-Client-Attestation": f.nlWallet.WIA(t, nlClient, nl.wiaKey, time.Now().Add(-time.Second))})
-		refused(t, status, body, http.StatusUnauthorized, oid4vci.ErrUseFreshAttestation)
+		refused(t, status, body, http.StatusBadRequest, oid4vci.ErrUseFreshAttestation)
 	})
 	t.Run("W4 reused challenge", func(t *testing.T) {
 		c := nl.challenge()
@@ -200,8 +200,24 @@ func TestToken(t *testing.T) {
 		if status, body := nl.tokenRequest(code, map[string]string{"OAuth-Client-Attestation-PoP": pop()}); status != http.StatusOK {
 			t.Fatalf("first use: %d %v", status, body)
 		}
-		status, body := nl.tokenRequest(f.preAuthCode("nl"), map[string]string{"OAuth-Client-Attestation-PoP": pop()})
-		refused(t, status, body, http.StatusUnauthorized, oid4vci.ErrInvalidClientAttestation)
+		code = f.preAuthCode("nl")
+		status, body := nl.tokenRequest(code, map[string]string{"OAuth-Client-Attestation-PoP": pop()})
+		refused(t, status, body, http.StatusBadRequest, oid4vci.ErrUseAttestationChallenge)
+		// The refusal carries a fresh challenge, which works.
+		fresh := nl.header.Get("OAuth-Client-Attestation-Challenge")
+		if fresh == "" || fresh == c {
+			t.Fatalf("want a fresh challenge in the header, got %q", fresh)
+		}
+		if status, body := nl.tokenRequest(code, map[string]string{"OAuth-Client-Attestation-PoP": testwallet.PoP(t, nl.wiaKey, nlClient, f.id("nl"), fresh)}); status != http.StatusOK {
+			t.Fatalf("with the fresh challenge: %d %v", status, body)
+		}
+	})
+	t.Run("W4 PoP without challenge", func(t *testing.T) {
+		status, body := nl.tokenRequest(f.preAuthCode("nl"), map[string]string{"OAuth-Client-Attestation-PoP": testwallet.PoP(t, nl.wiaKey, nlClient, f.id("nl"), "")})
+		refused(t, status, body, http.StatusBadRequest, oid4vci.ErrUseAttestationChallenge)
+		if nl.header.Get("OAuth-Client-Attestation-Challenge") == "" {
+			t.Fatal("want a fresh challenge in the header")
+		}
 	})
 	t.Run("W5 attestation of another profile", func(t *testing.T) {
 		eudi := f.wallet("eudi")
@@ -251,23 +267,7 @@ func TestIssueNL(t *testing.T) {
 	tok := nl.token(f.preAuthCode("nl"))
 	credID := tok.AuthorizationDetails[0].CredentialIdentifiers[0]
 
-	// P1: the preview, called with Bearer and without DPoP.
-	status, preview := nl.post("/credential_preview", nil, map[string]string{"Authorization": "Bearer " + tok.AccessToken})
-	if status != http.StatusOK {
-		t.Fatalf("preview: %d %v", status, preview)
-	}
-	previews := preview["credential_previews"].([]any)
-	p := previews[0].(map[string]any)
-	payload := p["credential_payload"].(map[string]any)
-	if p["credential_id"] != credID || p["config_id"] != incomeConfig || p["format"] != "dc+sd-jwt" ||
-		payload["year"].(map[string]any)["type"] != "text" || payload["address"].(map[string]any)["type"] != "object" ||
-		payload["income"].(map[string]any)["type"] != "number" {
-		t.Fatalf("preview: %v", p)
-	}
-	// The preview answers once per token.
-	if status, body := nl.post("/credential_preview", nil, map[string]string{"Authorization": "Bearer " + tok.AccessToken}); status != http.StatusBadRequest {
-		t.Fatalf("second preview: %d %v", status, body)
-	}
+	payload := checkPreview(t, nl, tok.AccessToken, credID)
 	// Two proofs with one key are refused: one credential per proof.
 	dup := testpki.NewKey(t)
 	dupNonce := nl.nonce()
@@ -326,13 +326,23 @@ func TestIssueNL(t *testing.T) {
 		}
 	}
 
-	// C2: the nonce and the credential identifier are used up.
+	// C2: the credential identifier is used up.
 	status, body = nl.credentialRequest(tok.AccessToken, nl.dpopKey, oid4vci.CredentialRequest{
 		CredentialIdentifier: credID,
-		Proofs:               &oid4vci.Proofs{JWT: []string{testwallet.JWTProof(t, keys[0], f.id("nl"), nonce, "")}},
+		Proofs:               &oid4vci.Proofs{JWT: []string{testwallet.JWTProof(t, keys[0], f.id("nl"), nl.nonce(), "")}},
+	})
+	if status != http.StatusBadRequest || body["error"] != oid4vci.ErrInvalidCredentialRequest {
+		t.Fatalf("C2: %d %v", status, body)
+	}
+
+	// C2: the nonce is used up, also for another credential.
+	tok2 := nl.token(f.preAuthCode("nl"))
+	status, body = nl.credentialRequest(tok2.AccessToken, nl.dpopKey, oid4vci.CredentialRequest{
+		CredentialIdentifier: tok2.AuthorizationDetails[0].CredentialIdentifiers[0],
+		Proofs:               &oid4vci.Proofs{JWT: []string{testwallet.JWTProof(t, testpki.NewKey(t), f.id("nl"), nonce, "")}},
 	})
 	if status != http.StatusBadRequest || body["error"] != oid4vci.ErrInvalidNonce {
-		t.Fatalf("C2: %d %v", status, body)
+		t.Fatalf("C2 nonce: %d %v", status, body)
 	}
 
 	// S2: the status list lists the credential as valid, until revoked.
@@ -541,4 +551,26 @@ func TestRevocation(t *testing.T) {
 			t.Fatal("every credential of the offer must be revoked")
 		}
 	}
+}
+
+// checkPreview fetches the NL preview (P1), with Bearer and without DPoP,
+// checks its shape and that it answers once per token, and returns the
+// payload.
+func checkPreview(t *testing.T, nl *wallet, accessToken, credID string) map[string]any {
+	t.Helper()
+	status, preview := nl.post("/credential_preview", nil, map[string]string{"Authorization": "Bearer " + accessToken})
+	if status != http.StatusOK {
+		t.Fatalf("preview: %d %v", status, preview)
+	}
+	p := preview["credential_previews"].([]any)[0].(map[string]any)
+	payload := p["credential_payload"].(map[string]any)
+	if p["credential_id"] != credID || p["config_id"] != incomeConfig || p["format"] != "dc+sd-jwt" ||
+		payload["year"].(map[string]any)["type"] != "text" || payload["address"].(map[string]any)["type"] != "object" ||
+		payload["income"].(map[string]any)["type"] != "number" {
+		t.Fatalf("preview: %v", p)
+	}
+	if status, body := nl.post("/credential_preview", nil, map[string]string{"Authorization": "Bearer " + accessToken}); status != http.StatusBadRequest {
+		t.Fatalf("second preview: %d %v", status, body)
+	}
+	return payload
 }

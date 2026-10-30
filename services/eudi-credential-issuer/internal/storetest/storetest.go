@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -123,8 +124,14 @@ func markIssued(t *testing.T, s Store) {
 	if err := s.CreateSession(ctx, issuance.Session{ID: "s1", Profile: "nl", CodeHash: "c1", ExpiresAt: now.Add(time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
+	if issued, err := s.IsIssued(ctx, "s1", "d1"); err != nil || issued {
+		t.Fatalf("before: %v %v", issued, err)
+	}
 	if first, err := s.MarkIssued(ctx, "s1", "d1"); err != nil || !first {
 		t.Fatalf("first: %v %v", first, err)
+	}
+	if issued, err := s.IsIssued(ctx, "s1", "d1"); err != nil || !issued {
+		t.Fatalf("after: %v %v", issued, err)
 	}
 	if first, err := s.MarkIssued(ctx, "s1", "d1"); err != nil || first {
 		t.Fatalf("second: %v %v", first, err)
@@ -202,5 +209,23 @@ func revokeByReference(t *testing.T, s Store) {
 	}
 	if n, _ := s.RevokeReference(ctx, ""); n != 0 {
 		t.Fatal("the empty reference revokes nothing")
+	}
+	if revoked, err := s.ReferenceRevoked(ctx, "case-1"); err != nil || !revoked {
+		t.Fatalf("case-1 is revoked: %v %v", revoked, err)
+	}
+	if revoked, _ := s.ReferenceRevoked(ctx, "case-3"); revoked {
+		t.Fatal("case-3 is not revoked")
+	}
+	// An entry allocated after the revocation is born revoked.
+	late, _ := s.Allocate(ctx, "income", 1024, "case-1")
+	if income, _ := s.Revoked(ctx, "income"); !slices.Contains(income, late) {
+		t.Fatal("an entry allocated for a revoked reference must be revoked")
+	}
+	// A reference revoked before anything was issued is still recorded.
+	if n, err := s.RevokeReference(ctx, "case-4"); err != nil || n != 0 {
+		t.Fatalf("revoke unused reference: %d %v", n, err)
+	}
+	if revoked, _ := s.ReferenceRevoked(ctx, "case-4"); !revoked {
+		t.Fatal("an unused reference is recorded as revoked")
 	}
 }

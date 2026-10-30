@@ -62,6 +62,7 @@ func healthz(w http.ResponseWriter, _ *http.Request) {
 func (h *handler) issuerMetadata(w http.ResponseWriter, r *http.Request) {
 	// Signed when asked for (section 12.2.3; ARF ISSU_32; the NL Wallet
 	// asks for it), unsigned JSON otherwise (section 12.2.2 requires both).
+	w.Header().Set("Vary", "Accept")
 	if !accepts(r, "application/jwt") {
 		md, err := h.svc.IssuerMetadataJSON(r.PathValue("profile"))
 		if err != nil {
@@ -287,12 +288,19 @@ func (h *handler) fail(w http.ResponseWriter, err error) {
 	var pe *issuance.Error
 	switch {
 	case errors.As(err, &pe):
+		// 400 by default, also for use_attestation_challenge and
+		// use_fresh_attestation (attestation-based client auth draft -12
+		// sections 6.1 and 7.4).
 		status := http.StatusBadRequest
 		switch pe.Code {
-		case oid4vci.ErrInvalidClientAttestation, oid4vci.ErrUseFreshAttestation, oid4vci.ErrInvalidToken:
+		case oid4vci.ErrInvalidClientAttestation, oid4vci.ErrInvalidToken:
 			status = http.StatusUnauthorized
 		case oid4vci.ErrServerError:
 			status = http.StatusInternalServerError
+		}
+		if pe.Challenge != "" {
+			w.Header().Set(clientattest.ChallengeHeader, pe.Challenge)
+			w.Header().Set("Cache-Control", "no-store")
 		}
 		h.log.Info("request refused", "error", pe.Code, "error_description", pe.Description)
 		writeJSON(w, status, oid4vci.ErrorResponse{Error: pe.Code, Description: description(pe.Description)})

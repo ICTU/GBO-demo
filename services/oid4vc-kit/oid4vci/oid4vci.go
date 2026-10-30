@@ -21,11 +21,13 @@ const (
 	ErrInvalidDPoPProof         = "invalid_dpop_proof"
 	ErrInvalidClientAttestation = "invalid_client_attestation"
 	ErrUseFreshAttestation      = "use_fresh_attestation"
+	ErrUseAttestationChallenge  = "use_attestation_challenge"
 	ErrInvalidToken             = "invalid_token"
 	ErrInvalidCredentialRequest = "invalid_credential_request"
 	ErrUnknownCredentialID      = "unknown_credential_identifier"
 	ErrInvalidProof             = "invalid_proof"
 	ErrInvalidNonce             = "invalid_nonce"
+	ErrCredentialRequestDenied  = "credential_request_denied"
 	ErrServerError              = "server_error"
 )
 

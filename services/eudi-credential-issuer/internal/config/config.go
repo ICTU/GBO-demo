@@ -5,6 +5,7 @@
 package config
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/x509"
 	"encoding/json"
@@ -31,6 +32,9 @@ type File struct {
 	NonceTTL                 Duration                           `json:"nonce_ttl"`
 	Profiles                 []ProfileFile                      `json:"profiles"`
 	CredentialConfigurations []issuance.CredentialConfiguration `json:"-"`
+	// SourceEndpoints maps each credential configuration to the bronpoort
+	// URL that serves it (source_url in the file).
+	SourceEndpoints map[string]string `json:"-"`
 }
 
 // KeyFiles names a PEM private key and a PEM certificate chain, leaf first.
@@ -72,7 +76,7 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 }
 
 // credentialConfigurationFile is issuance.CredentialConfiguration with
-// JSON names; the field order must stay the same for the conversion.
+// JSON names, plus the bronpoort URL that belongs to the source adapter.
 type credentialConfigurationFile struct {
 	ID         string             `json:"id"`
 	VCT        string             `json:"vct"`
@@ -80,8 +84,8 @@ type credentialConfigurationFile struct {
 	Display    []issuance.Display `json:"display"`
 	Claims     []issuance.Claim   `json:"claims"`
 	ValidDays  int                `json:"valid_days"`
-	SourceURL  string             `json:"source_url"`
 	StatusList string             `json:"status_list"`
+	SourceURL  string             `json:"source_url"`
 }
 
 // UnmarshalJSON reads credential configurations in their file shape.
@@ -95,24 +99,49 @@ func (f *File) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	*f = File(aux.plain)
+	f.SourceEndpoints = map[string]string{}
 	for _, c := range aux.CredentialConfigurations {
-		f.CredentialConfigurations = append(f.CredentialConfigurations, issuance.CredentialConfiguration(c))
+		f.CredentialConfigurations = append(f.CredentialConfigurations, issuance.CredentialConfiguration{
+			ID: c.ID, VCT: c.VCT, Scope: c.Scope, Display: c.Display, Claims: c.Claims,
+			ValidDays: c.ValidDays, StatusList: c.StatusList,
+		})
+		f.SourceEndpoints[c.ID] = c.SourceURL
 	}
 	return nil
 }
 
-// Load reads the file at path and returns the issuer configuration for
-// publicURL.
-func Load(path, publicURL string) (issuance.Config, error) {
+// Loaded is the configuration of the issuer core and of the source
+// adapter.
+type Loaded struct {
+	Issuer issuance.Config
+	// SourceEndpoints maps credential configuration ids to bronpoort URLs.
+	SourceEndpoints map[string]string
+}
+
+// Load reads the file at path and returns the configuration for publicURL.
+func Load(path, publicURL string) (Loaded, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return issuance.Config{}, err
+		return Loaded{}, err
 	}
 	var f File
 	if err := json.Unmarshal(raw, &f); err != nil {
-		return issuance.Config{}, fmt.Errorf("parse %s: %w", path, err)
+		return Loaded{}, fmt.Errorf("parse %s: %w", path, err)
 	}
-	dir := filepath.Dir(path)
+	for id, u := range f.SourceEndpoints {
+		if u == "" {
+			return Loaded{}, fmt.Errorf("credential configuration %q: source_url is required", id)
+		}
+	}
+	cfg, err := load(f, filepath.Dir(path), publicURL)
+	if err != nil {
+		return Loaded{}, err
+	}
+	return Loaded{Issuer: cfg, SourceEndpoints: f.SourceEndpoints}, nil
+}
+
+func load(f File, dir, publicURL string) (issuance.Config, error) {
+	var err error
 	cfg := issuance.Config{
 		PublicURL: publicURL, Configurations: f.CredentialConfigurations,
 		StatusListSize: f.StatusListSize, BatchSize: f.BatchSize,
@@ -139,9 +168,12 @@ func Load(path, publicURL string) (issuance.Config, error) {
 			}
 		}
 		if pf.RegistrationCertificateFile != "" {
-			if p.RegistrationCertificate, err = os.ReadFile(resolve(dir, pf.RegistrationCertificateFile)); err != nil {
+			raw, err := os.ReadFile(resolve(dir, pf.RegistrationCertificateFile))
+			if err != nil {
 				return issuance.Config{}, fmt.Errorf("profile %s registration certificate: %w", pf.Name, err)
 			}
+			// A file usually ends with a newline; the certificate does not.
+			p.RegistrationCertificate = bytes.TrimSpace(raw)
 		}
 		cfg.Profiles = append(cfg.Profiles, p)
 	}

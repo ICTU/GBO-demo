@@ -34,7 +34,7 @@ func TestLoad(t *testing.T) {
 	write("chain.pem", &pem.Block{Type: "CERTIFICATE", Bytes: issuer.Cert.Raw})
 	write("roots.pem", &pem.Block{Type: "CERTIFICATE", Bytes: root.Cert.Raw})
 	write("other-chain.pem", &pem.Block{Type: "CERTIFICATE", Bytes: root.Cert.Raw})
-	if err := os.WriteFile(filepath.Join(dir, "wrprc.jwt"), []byte("wrprc"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "wrprc.jwt"), []byte("wrprc\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	file := `{
@@ -45,7 +45,7 @@ func TestLoad(t *testing.T) {
 	    "key_attestation_roots_file": "roots.pem", "registration_certificate_file": "wrprc.jwt",
 	    "key_storage": ["iso_18045_high"], "user_authentication": ["iso_18045_high"],
 	    "access": {"key_file": "key.pem", "chain_file": "chain.pem"}}],
-	  "credential_configurations": [{"id": "income", "vct": "https://x.test/income", "valid_days": 365,
+	  "credential_configurations": [{"id": "income", "scope": "income", "vct": "https://x.test/income", "valid_days": 365,
 	    "source_url": "https://src.test/a", "status_list": "income",
 	    "claims": [{"path": ["year"], "mandatory": true}], "display": [{"name": "Income", "locale": "en"}]}]
 	}`
@@ -54,15 +54,19 @@ func TestLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg, err := config.Load(path, "https://issuer.test")
+	loaded, err := config.Load(path, "https://issuer.test")
 	if err != nil {
 		t.Fatal(err)
+	}
+	cfg := loaded.Issuer
+	if loaded.SourceEndpoints["income"] != "https://src.test/a" {
+		t.Fatalf("source endpoints %v", loaded.SourceEndpoints)
 	}
 	if len(cfg.Profiles) != 1 || cfg.Profiles[0].Kind != issuance.KindEUDI || len(cfg.Profiles[0].KeyAttestationProviders) != 1 || cfg.Profiles[0].KeyStorage[0] != "iso_18045_high" ||
 		string(cfg.Profiles[0].RegistrationCertificate) != "wrprc" {
 		t.Fatalf("profiles %+v", cfg.Profiles)
 	}
-	if len(cfg.Configurations) != 1 || cfg.Configurations[0].SourceURL != "https://src.test/a" || !cfg.Configurations[0].Claims[0].Mandatory {
+	if len(cfg.Configurations) != 1 || cfg.Configurations[0].Scope != "income" || !cfg.Configurations[0].Claims[0].Mandatory {
 		t.Fatalf("configurations %+v", cfg.Configurations)
 	}
 	if cfg.OfferTTL.String() != "15m0s" || cfg.BatchSize != 4 {

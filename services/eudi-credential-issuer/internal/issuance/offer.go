@@ -59,18 +59,19 @@ func (s *Service) CreateOffer(ctx context.Context, req OfferRequest) (Offer, err
 		// comes in a later phase.
 		return Offer{}, ErrTxCodeUnsupported
 	}
-	if len(req.ConfigurationIDs) == 0 {
+	ids := uniq(req.ConfigurationIDs)
+	if len(ids) == 0 {
 		return Offer{}, ErrUnknownConfiguration
 	}
 	now := s.now()
 	notBefore := now.UTC().Truncate(24 * time.Hour)
 	var docs []Document
-	for _, id := range req.ConfigurationIDs {
+	for _, id := range ids {
 		c, ok := s.configs[id]
 		if !ok {
 			return Offer{}, fmt.Errorf("%w: %q", ErrUnknownConfiguration, id)
 		}
-		fetched, err := s.source.Fetch(ctx, c.SourceURL, req.Subject, req.Parameters)
+		fetched, err := s.source.Fetch(ctx, id, req.Subject, req.Parameters)
 		if err != nil {
 			return Offer{}, err
 		}
@@ -110,7 +111,7 @@ func (s *Service) CreateOffer(ctx context.Context, req OfferRequest) (Offer, err
 	}
 	offer := oid4vci.CredentialOffer{
 		CredentialIssuer:           s.Identifier(p.Name),
-		CredentialConfigurationIDs: uniq(req.ConfigurationIDs),
+		CredentialConfigurationIDs: ids,
 		Grants: map[string]any{
 			oid4vci.GrantPreAuthorizedCode: oid4vci.PreAuthorizedCodeGrant{PreAuthorizedCode: code},
 		},
@@ -166,16 +167,16 @@ func checkSourceDocument(p Profile, c CredentialConfiguration, d SourceDocument)
 }
 
 // wholeNumbers refuses any number with a fraction or beyond int64, at any
-// depth.
+// depth. The error does not repeat the value: it may reach logs.
 func wholeNumbers(v any) error {
 	switch t := v.(type) {
 	case json.Number:
 		if _, err := strconv.ParseInt(t.String(), 10, 64); err != nil {
-			return fmt.Errorf("%s is not a whole number", t)
+			return errors.New("a number is not a whole number")
 		}
 	case float64:
 		if t != math.Trunc(t) || math.Abs(t) > 1<<53 {
-			return fmt.Errorf("%v is not a whole number", t)
+			return errors.New("a number is not a whole number")
 		}
 	case map[string]any:
 		for _, e := range t {

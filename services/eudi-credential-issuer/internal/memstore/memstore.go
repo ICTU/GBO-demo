@@ -26,6 +26,7 @@ type Store struct {
 	issued   map[string]bool
 	values   map[string]time.Time
 	status   map[string]map[int]*entry
+	revoked  map[string]bool
 }
 
 type entry struct {
@@ -38,7 +39,7 @@ func New() *Store {
 	return &Store{
 		sessions: map[string]issuance.Session{}, byCode: map[string]string{}, used: map[string]bool{},
 		tokens: map[string]issuance.AccessToken{}, issued: map[string]bool{}, values: map[string]time.Time{},
-		status: map[string]map[int]*entry{},
+		status: map[string]map[int]*entry{}, revoked: map[string]bool{},
 	}
 }
 
@@ -96,6 +97,12 @@ func (s *Store) MarkIssued(_ context.Context, sessionID, credentialID string) (b
 	return true, nil
 }
 
+func (s *Store) IsIssued(_ context.Context, sessionID, credentialID string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.issued[sessionID+"/"+credentialID], nil
+}
+
 func (s *Store) Put(_ context.Context, kind, value string, expiry time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -141,7 +148,7 @@ func (s *Store) Allocate(_ context.Context, list string, size int, reference str
 		}
 		idx := int(n.Int64())
 		if _, taken := entries[idx]; !taken {
-			entries[idx] = &entry{reference: reference}
+			entries[idx] = &entry{reference: reference, revoked: reference != "" && s.revoked[reference]}
 			return idx, nil
 		}
 	}
@@ -161,6 +168,10 @@ func (s *Store) Revoke(_ context.Context, list string, index int) error {
 func (s *Store) RevokeReference(_ context.Context, reference string) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if reference == "" {
+		return 0, nil
+	}
+	s.revoked[reference] = true
 	n := 0
 	for _, entries := range s.status {
 		for _, e := range entries {
@@ -171,6 +182,12 @@ func (s *Store) RevokeReference(_ context.Context, reference string) (int, error
 		}
 	}
 	return n, nil
+}
+
+func (s *Store) ReferenceRevoked(_ context.Context, reference string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.revoked[reference], nil
 }
 
 func (s *Store) Revoked(_ context.Context, list string) ([]int, error) {

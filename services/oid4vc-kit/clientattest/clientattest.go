@@ -20,6 +20,9 @@ import (
 const (
 	AttestationHeader = "OAuth-Client-Attestation"
 	PoPHeader         = "OAuth-Client-Attestation-PoP"
+	// ChallengeHeader carries a fresh challenge with the error
+	// use_attestation_challenge.
+	ChallengeHeader = "OAuth-Client-Attestation-Challenge"
 	// Method is the token_endpoint_auth_methods_supported value.
 	Method = "attest_jwt_client_auth"
 )

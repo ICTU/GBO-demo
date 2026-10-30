@@ -23,6 +23,9 @@ const SubjectID = "subject"
 // Client is a bronpoort client.
 type Client struct {
 	HTTP *http.Client
+	// Endpoints maps a credential configuration id to the backend URL that
+	// serves it.
+	Endpoints map[string]string
 }
 
 type disclosedAttestations struct {
@@ -47,7 +50,11 @@ type issuableDocument struct {
 // attestation, as a disclosure would; the backend cannot tell whether a
 // wallet disclosed them or the offer caller supplied them. A real
 // deployment needs an authenticated caller and a statement of origin.
-func (c *Client) Fetch(ctx context.Context, endpoint string, subject map[string]any, parameters map[string]string) ([]issuance.SourceDocument, error) {
+func (c *Client) Fetch(ctx context.Context, configurationID string, subject map[string]any, parameters map[string]string) ([]issuance.SourceDocument, error) {
+	endpoint, ok := c.Endpoints[configurationID]
+	if !ok {
+		return nil, fmt.Errorf("%w: no endpoint for %s", issuance.ErrSourceUnavailable, configurationID)
+	}
 	u, err := url.Parse(endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("%w: bad endpoint", issuance.ErrSourceUnavailable)

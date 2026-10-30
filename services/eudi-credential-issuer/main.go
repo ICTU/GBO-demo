@@ -75,10 +75,11 @@ type store interface {
 }
 
 func serve(ctx context.Context, log *slog.Logger) error {
-	cfg, err := config.Load(os.Getenv("ISSUER_CONFIG_FILE"), os.Getenv("ISSUER_PUBLIC_URL"))
+	loaded, err := config.Load(os.Getenv("ISSUER_CONFIG_FILE"), os.Getenv("ISSUER_PUBLIC_URL"))
 	if err != nil {
 		return fmt.Errorf("configuration: %w", err)
 	}
+	cfg := loaded.Issuer
 	var st store
 	if os.Getenv("ISSUER_STORE") == "memory" {
 		// Demo shortcut for a local run: state is lost on restart and not
@@ -94,7 +95,7 @@ func serve(ctx context.Context, log *slog.Logger) error {
 		go purge(ctx, log, pg, cfg.TokenTTL)
 		st = pg
 	}
-	src := &source.Client{HTTP: &http.Client{Timeout: 10 * time.Second}}
+	src := &source.Client{HTTP: &http.Client{Timeout: 10 * time.Second}, Endpoints: loaded.SourceEndpoints}
 	svc, err := issuance.New(cfg, src, st, st, st, time.Now)
 	if err != nil {
 		return err
