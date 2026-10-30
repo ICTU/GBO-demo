@@ -35,11 +35,12 @@ var (
 // Sessions stores issuance sessions and the access tokens bound to them.
 type Sessions interface {
 	CreateSession(ctx context.Context, s Session) error
-	// RedeemCode marks the pre-authorized code of a session of profile as
-	// used and returns the session, atomically: a code works once. It
-	// returns ErrNotFound for an unknown, used or expired code, or a code of
-	// another profile, and then leaves the code as it was.
-	RedeemCode(ctx context.Context, profile, codeHash string, now time.Time) (Session, error)
+	// RedeemCode marks the pre-authorized code of a session of the provider
+	// and profile as used and returns the session, atomically: a code works
+	// once. It returns ErrNotFound for an unknown, used or expired code, or
+	// a code of another provider or profile, and then leaves the code as it
+	// was.
+	RedeemCode(ctx context.Context, provider, profile, codeHash string, now time.Time) (Session, error)
 	SaveToken(ctx context.Context, t AccessToken) error
 	// Token returns an unexpired access token and its session, or
 	// ErrNotFound.
@@ -92,6 +93,7 @@ var ErrNotFound = errors.New("not found")
 // code, to be issued to the wallet that redeems it.
 type Session struct {
 	ID        string
+	Provider  string
 	Profile   string
 	CodeHash  string
 	ExpiresAt time.Time

@@ -130,3 +130,16 @@ func random(t testing.TB) string {
 	}
 	return base64.RawURLEncoding.EncodeToString(b)
 }
+
+// RegistrationCertificate returns a WRPRC (ETSI TS 119 475) in JWT form for
+// subject sub that provides the given vcts, signed by registrar.
+func RegistrationCertificate(t testing.TB, registrar testpki.Cert, sub string, vcts ...string) []byte {
+	t.Helper()
+	provides := make([]map[string]any, 0, len(vcts))
+	for _, v := range vcts {
+		provides = append(provides, map[string]any{"format": "dc+sd-jwt", "meta": map[string]any{"vct_values": []string{v}}})
+	}
+	return []byte(Sign(t, registrar.Key, "rc-wrp+jwt", map[jose.HeaderKey]any{"x5c": x5c.Header(registrar.Chain)}, false, map[string]any{
+		"sub": sub, "sub_ln": sub, "country": "NL", "iat": time.Now().Unix(), "provides_attestations": provides,
+	}))
+}

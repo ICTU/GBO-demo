@@ -26,12 +26,15 @@ type CredentialPreview struct {
 
 // CredentialPreview returns the previews for a Bearer access token. Only
 // KindNL profiles have this endpoint; the NL Wallet calls it without DPoP.
-func (s *Service) CredentialPreview(ctx context.Context, profile, authorization string) (Preview, error) {
-	p, ok := s.profiles[profile]
-	if !ok || p.Kind != KindNL {
+func (s *Service) CredentialPreview(ctx context.Context, t Target, authorization string) (Preview, error) {
+	_, p, err := s.resolve(t)
+	if err != nil {
+		return Preview{}, err
+	}
+	if p.Kind != KindNL {
 		return Preview{}, ErrUnknownProfile
 	}
-	token, session, err := s.authorize(ctx, p, authorization, "Bearer")
+	token, session, err := s.authorize(ctx, t, authorization, "Bearer")
 	if err != nil {
 		return Preview{}, err
 	}

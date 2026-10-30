@@ -21,37 +21,39 @@ const metadataType = "openidvci-issuer-metadata+jwt"
 const metadataLifetime = time.Hour
 
 // IssuerMetadataJSON returns the unsigned Credential Issuer Metadata of a
-// profile, which section 12.2.2 requires next to the signed form.
-func (s *Service) IssuerMetadataJSON(profile string) (map[string]any, error) {
-	p, ok := s.profiles[profile]
-	if !ok {
-		return nil, ErrUnknownProfile
+// target, which section 12.2.2 requires next to the signed form.
+func (s *Service) IssuerMetadataJSON(t Target) (map[string]any, error) {
+	prov, p, err := s.resolve(t)
+	if err != nil {
+		return nil, err
 	}
-	return s.issuerMetadata(p), nil
+	return s.issuerMetadata(t, prov, p), nil
 }
 
-// IssuerMetadata returns the Credential Issuer Metadata of a profile as a
-// JWT signed with its access certificate (section 12.2.3; ARF ISSU_32).
-func (s *Service) IssuerMetadata(profile string) (string, error) {
-	p, ok := s.profiles[profile]
-	if !ok {
-		return "", ErrUnknownProfile
+// IssuerMetadata returns the Credential Issuer Metadata of a target as a
+// JWT signed with its provider's access certificate (section 12.2.3; ARF
+// ISSU_32).
+func (s *Service) IssuerMetadata(t Target) (string, error) {
+	prov, p, err := s.resolve(t)
+	if err != nil {
+		return "", err
 	}
-	md := s.issuerMetadata(p)
+	md := s.issuerMetadata(t, prov, p)
 	now := s.now()
-	md["sub"] = s.Identifier(p.Name)
+	md["sub"] = s.Identifier(t)
 	md["iat"] = now.Unix()
 	md["exp"] = now.Add(metadataLifetime).Unix()
-	opts := (&jose.SignerOptions{}).WithType(metadataType).WithHeader("x5c", x5c.Header(p.AccessChain))
-	signer, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.ES256, Key: p.AccessKey}, opts)
+	opts := (&jose.SignerOptions{}).WithType(metadataType).WithHeader("x5c", x5c.Header(prov.AccessChain))
+	signer, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.ES256, Key: prov.AccessKey}, opts)
 	if err != nil {
 		return "", err
 	}
 	return jwt.Signed(signer).Claims(md).Serialize()
 }
 
-func (s *Service) issuerMetadata(p Profile) map[string]any {
-	id := s.Identifier(p.Name)
+// issuerMetadata lists only the provider's own credential configurations.
+func (s *Service) issuerMetadata(t Target, prov *provider, p Profile) map[string]any {
+	id := s.Identifier(t)
 	md := map[string]any{
 		"credential_issuer":   id,
 		"credential_endpoint": id + "/credential",
@@ -65,15 +67,17 @@ func (s *Service) issuerMetadata(p Profile) map[string]any {
 		// credentials before it asks for them.
 		md["credential_preview_endpoint"] = id + "/credential_preview"
 	}
-	if len(p.RegistrationCertificate) > 0 {
+	if len(prov.RegistrationCertificate) > 0 {
 		md["issuer_info"] = []map[string]string{{
 			"format": "registration_cert",
-			"data":   base64.RawURLEncoding.EncodeToString(p.RegistrationCertificate),
+			"data":   base64.RawURLEncoding.EncodeToString(prov.RegistrationCertificate),
 		}}
 	}
 	configs := map[string]any{}
 	for _, c := range s.cfg.Configurations {
-		configs[c.ID] = s.configurationMetadata(p, c)
+		if c.Provider == prov.Name {
+			configs[c.ID] = s.configurationMetadata(p, c)
+		}
 	}
 	md["credential_configurations_supported"] = configs
 	return md
@@ -103,14 +107,13 @@ func (s *Service) configurationMetadata(p Profile, c CredentialConfiguration) ma
 }
 
 // AuthorizationServerMetadata returns the OAuth 2.0 Authorization Server
-// Metadata (RFC 8414) of a profile. Phase 1 offers only the Pre-Authorized
+// Metadata (RFC 8414) of a target. Phase 1 offers only the Pre-Authorized
 // Code Flow; the Authorization Code Flow follows in phase 3.
-func (s *Service) AuthorizationServerMetadata(profile string) (map[string]any, error) {
-	p, ok := s.profiles[profile]
-	if !ok {
-		return nil, ErrUnknownProfile
+func (s *Service) AuthorizationServerMetadata(t Target) (map[string]any, error) {
+	if _, _, err := s.resolve(t); err != nil {
+		return nil, err
 	}
-	id := s.Identifier(p.Name)
+	id := s.Identifier(t)
 	return map[string]any{
 		"issuer":                                              id,
 		"token_endpoint":                                      id + "/token",

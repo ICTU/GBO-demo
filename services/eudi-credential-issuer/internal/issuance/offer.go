@@ -41,9 +41,11 @@ type Offer struct {
 // Offer errors that are not protocol refusals.
 var (
 	ErrUnknownProfile       = errors.New("unknown profile")
+	ErrUnknownProvider      = errors.New("unknown provider")
 	ErrUnknownConfiguration = errors.New("unknown credential configuration")
 	ErrTxCodeUnsupported    = errors.New("a transaction code is not supported for this profile")
 	ErrBadSourceData        = errors.New("the source returned data that does not fit the credential configuration")
+	ErrMixedProviders       = errors.New("an offer holds credential configurations of one provider only")
 )
 
 // CreateOffer fetches the data for the subject from the source and stores
@@ -63,14 +65,25 @@ func (s *Service) CreateOffer(ctx context.Context, req OfferRequest) (Offer, err
 	if len(ids) == 0 {
 		return Offer{}, ErrUnknownConfiguration
 	}
-	now := s.now()
-	notBefore := now.UTC().Truncate(24 * time.Hour)
-	var docs []Document
+	// The provider follows from the configurations; one offer is from one
+	// provider, under one issuer identifier.
+	var providerName string
 	for _, id := range ids {
 		c, ok := s.configs[id]
 		if !ok {
 			return Offer{}, fmt.Errorf("%w: %q", ErrUnknownConfiguration, id)
 		}
+		if providerName != "" && c.Provider != providerName {
+			return Offer{}, ErrMixedProviders
+		}
+		providerName = c.Provider
+	}
+	t := Target{Provider: providerName, Profile: p.Name}
+	now := s.now()
+	notBefore := now.UTC().Truncate(24 * time.Hour)
+	var docs []Document
+	for _, id := range ids {
+		c := s.configs[id]
 		fetched, err := s.source.Fetch(ctx, id, req.Subject, req.Parameters)
 		if err != nil {
 			return Offer{}, err
@@ -104,13 +117,13 @@ func (s *Service) CreateOffer(ctx context.Context, req OfferRequest) (Offer, err
 		return Offer{}, err
 	}
 	if err := s.sessions.CreateSession(ctx, Session{
-		ID: sessionID, Profile: p.Name, CodeHash: hash(code),
+		ID: sessionID, Provider: t.Provider, Profile: p.Name, CodeHash: hash(code),
 		ExpiresAt: now.Add(s.cfg.OfferTTL), Reference: req.Reference, Documents: docs,
 	}); err != nil {
 		return Offer{}, err
 	}
 	offer := oid4vci.CredentialOffer{
-		CredentialIssuer:           s.Identifier(p.Name),
+		CredentialIssuer:           s.Identifier(t),
 		CredentialConfigurationIDs: ids,
 		Grants: map[string]any{
 			oid4vci.GrantPreAuthorizedCode: oid4vci.PreAuthorizedCodeGrant{PreAuthorizedCode: code},

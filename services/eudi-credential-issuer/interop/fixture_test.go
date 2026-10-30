@@ -36,6 +36,7 @@ import (
 	"gbo-demo/eudi-credential-issuer/internal/memstore"
 	"gbo-demo/eudi-credential-issuer/internal/source"
 	"gbo-demo/oid4vc-kit/testpki"
+	"gbo-demo/oid4vc-kit/testwallet"
 	"gbo-demo/oid4vc-kit/x5c"
 )
 
@@ -186,7 +187,8 @@ func tryIssuer(t *testing.T, opts ...func(*issuance.Config)) (*issuer, error) {
 	issuerCert := issuerCA.Issue(t, testpki.Options{Subject: subject, EKU: []asn1.ObjectIdentifier{mdlIssuerEKU}})
 	statusCert := issuerCA.Issue(t, testpki.Options{Subject: subject, EKU: []asn1.ObjectIdentifier{statusListEKU}})
 	is.accessRoot = testpki.NewRoot(t, "access root")
-	access := is.accessRoot.Issue(t, testpki.Options{Subject: pkix.Name{CommonName: "access", Organization: []string{"GBO Demo"}}})
+	access := is.accessRoot.Issue(t, testpki.Options{Subject: testpki.OrganizationSubject("access", "GBO Demo", "NTRNL-tax")})
+	registrar := testpki.NewRoot(t, "registrar root").Issue(t, testpki.Options{Subject: pkix.Name{CommonName: "registrar"}})
 
 	var handlers struct{ public, internal http.Handler }
 	// The public port over TLS: walletflow's Development mode allows
@@ -199,24 +201,24 @@ func tryIssuer(t *testing.T, opts ...func(*issuance.Config)) (*issuer, error) {
 	providers := []x5c.Anchors{x5c.NewAnchors("oid4vcgo", is.provider.root.Cert)}
 	cfg := issuance.Config{
 		PublicURL: is.public.URL,
+		Providers: []issuance.Provider{{
+			Name: "tax", AccessKey: access.Key, AccessChain: access.Chain, RegistrationCertificate: testwallet.RegistrationCertificate(t, registrar, "NTRNL-tax", incomeVCT),
+			IssuerKey: issuerCert.Key, IssuerChain: issuerCert.Chain, StatusKey: statusCert.Key, StatusChain: statusCert.Chain,
+		}},
 		Profiles: []issuance.Profile{
 			{Name: "nl", Kind: issuance.KindNL, WalletProviders: providers,
-				AccessKey: access.Key, AccessChain: access.Chain, RegistrationCertificate: []byte("wrprc"),
 				UniversalLinkBase: "https://app.example.test/deeplink"},
 			{Name: "eudi", Kind: issuance.KindEUDI, WalletProviders: providers, KeyAttestationProviders: providers,
-				KeyStorage: []string{"iso_18045_high"}, UserAuthentication: []string{"iso_18045_high"},
-				AccessKey: access.Key, AccessChain: access.Chain},
+				KeyStorage: []string{"iso_18045_high"}, UserAuthentication: []string{"iso_18045_high"}},
 		},
 		Configurations: []issuance.CredentialConfiguration{{
-			ID: incomeConfig, VCT: incomeVCT, Scope: "income", ValidDays: 365,
+			ID: incomeConfig, Provider: "tax", VCT: incomeVCT, Scope: "income", ValidDays: 365,
 			StatusList: "income",
 			Display:    []issuance.Display{{Name: "Income statement", Locale: "en"}},
 			Claims: []issuance.Claim{
 				{Path: []string{"year"}, Mandatory: true}, {Path: []string{"income"}}, {Path: []string{"address", "city"}},
 			},
 		}},
-		IssuerKey: issuerCert.Key, IssuerChain: issuerCert.Chain,
-		StatusKey: statusCert.Key, StatusChain: statusCert.Chain,
 		StatusListSize: 1024,
 	}
 	for _, o := range opts {
@@ -234,7 +236,7 @@ func tryIssuer(t *testing.T, opts ...func(*issuance.Config)) (*issuer, error) {
 }
 
 // id is the credential issuer identifier of a profile.
-func (is *issuer) id(profile string) string { return is.public.URL + "/" + profile }
+func (is *issuer) id(profile string) string { return is.public.URL + "/tax/" + profile }
 
 // offer creates an offer for the income configuration on the internal API
 // and returns the offer links by kind.

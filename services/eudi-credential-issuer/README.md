@@ -2,14 +2,16 @@
 
 Our own credential issuer, meant to replace nl-wallet's `issuance_server` (`services/eudi-issuance-server`) once it covers what the demo needs (#614). It runs next to the current issuance server and is not deployed yet.
 
-It serves two wallet profiles, each under its own credential issuer identifier, so that the metadata of each is consistent on its own:
+It hosts several **providers**: each source (bronhouder) is its own Attestation Provider, with its own access certificate (WRPAC), registration certificate (WRPRC), signing and status keys, credential configurations and status lists. A wallet sees the provider, not the issuer service.
 
-| Profile | Identifier | For | Rules |
+Each provider is published under two wallet **profiles**, each its own credential issuer identifier `<public URL>/<provider>/<profile>`, so that the metadata of each is consistent on its own:
+
+| Profile | Identifier (provider `belastingdienst`) | For | Rules |
 |---|---|---|---|
-| `nl` | `<public URL>/nl` | NL Wallet (contract of nl-wallet v0.6.0) | `jwt` key proofs without key attestation; the NL credential preview endpoint; no `tx_code` |
-| `eudi` | `<public URL>/eudi` | wallets that follow HAIP and the ARF, such as the EUDI reference wallet | key attestation required (`jwt` proof with `key_attestation`, or the `attestation` proof type) at the configured key storage and user authentication levels (demo: `iso_18045_high`); one credential per attested key |
+| `nl` | `<public URL>/belastingdienst/nl` | NL Wallet (contract of nl-wallet v0.6.0) | `jwt` key proofs without key attestation; the NL credential preview endpoint; no `tx_code` |
+| `eudi` | `<public URL>/belastingdienst/eudi` | wallets that follow HAIP and the ARF, such as the EUDI reference wallet | key attestation required (`jwt` proof with `key_attestation`, or the `attestation` proof type) at the configured key storage and user authentication levels (demo: `iso_18045_high`); one credential per attested key |
 
-A Wallet Instance Attestation is accepted only from the wallet providers configured for the profile it is presented to.
+A Wallet Instance Attestation is accepted only from the wallet providers configured for the profile it is presented to. A pre-authorized code or access token works only at the provider and profile of its offer, and a `c_nonce` or attestation challenge only at the provider and profile that handed it out.
 
 ## What is real and what is not
 
@@ -39,35 +41,37 @@ A Wallet Instance Attestation is accepted only from the wallet providers configu
 - **A leaked offer can be redeemed by anyone with a trusted wallet.** The pre-authorized code is the only secret (OpenID4VCI section 13.6.1). A transaction code would help, but the NL Wallet refuses offers with one. Offers therefore live 5 minutes. For `nl`, prefer the universal link on the same device to a QR code.
 - **The status list is signed with a separate status certificate, and credentials carry no `iss`.** This follows the NL Wallet and Token Status List section 11.3 (a Status Issuer certificate from the same CA). The NL Wallet also wants that certificate to have the issuer's subject and EKU `1.3.6.1.5.5.7.3.127`, its placeholder for `id-kp-oauthStatusSigning`, whose OID the draft still has as TBD. Wallets that find the status signer through `iss`, such as OID4VCgo, cannot check these status lists. The spec leaves key resolution to the ecosystem.
 - **`/challenge` and `/nonce` take unauthenticated requests and store a row each.** Rate limiting belongs at the ingress.
+- **Each provider has its own status lists.** A list holds only the credentials of one provider and configuration, so with few credentials the crowd that hides a lookup (Token Status List section 12) is small. The issuer pads nothing; a list is as large as configured.
 
 **Demo shortcuts**
 
 - The internal API (offers, revocations) has no authentication. It must only be reachable from the internal network. A real deployment authenticates every caller.
 - The bronpoort trusts the subject the offer caller names; the internal API does not authenticate that caller. A real deployment authenticates it, so the backend knows who vouches for the subject.
+- Revocation by reference spans providers: a reference is the caller's, not a provider's, so `{reference}` revokes what every provider issued for it. A real deployment lets each provider revoke only its own credentials.
 - `ISSUER_STORE=memory` keeps all state in memory, for a local run only.
 
 ## Endpoints
 
-Public port (`ISSUER_LISTEN_ADDR`, default `:8080`), per profile `p`:
+Public port (`ISSUER_LISTEN_ADDR`, default `:8080`), per provider `v` and profile `p`:
 
 | Endpoint | |
 |---|---|
-| `GET /.well-known/openid-credential-issuer/{p}` | issuer metadata: signed (`application/jwt`) when asked for, unsigned JSON otherwise (`Vary: Accept`) |
-| `GET /.well-known/oauth-authorization-server/{p}` | authorization server metadata |
-| `POST /{p}/challenge` | `{"attestation_challenge"}` for the attestation PoP |
-| `POST /{p}/token` | pre-authorized code grant; headers `OAuth-Client-Attestation`, `OAuth-Client-Attestation-PoP`, `DPoP` |
-| `POST /{p}/nonce` | `{"c_nonce"}` |
-| `POST /{p}/credential` | `Authorization: DPoP <token>`, `DPoP`; body with `credential_identifier` and `proofs` |
-| `POST /nl/credential_preview` | `Authorization: Bearer <token>`, no DPoP (as the NL Wallet calls it) |
-| `GET /status/{list}` | Status List Token (`application/statuslist+jwt`) |
+| `GET /.well-known/openid-credential-issuer/{v}/{p}` | issuer metadata with the provider's own configurations: signed with its access certificate (`application/jwt`) when asked for, unsigned JSON otherwise (`Vary: Accept`) |
+| `GET /.well-known/oauth-authorization-server/{v}/{p}` | authorization server metadata |
+| `POST /{v}/{p}/challenge` | `{"attestation_challenge"}` for the attestation PoP |
+| `POST /{v}/{p}/token` | pre-authorized code grant; headers `OAuth-Client-Attestation`, `OAuth-Client-Attestation-PoP`, `DPoP` |
+| `POST /{v}/{p}/nonce` | `{"c_nonce"}` |
+| `POST /{v}/{p}/credential` | `Authorization: DPoP <token>`, `DPoP`; body with `credential_identifier` and `proofs` |
+| `POST /{v}/nl/credential_preview` | `Authorization: Bearer <token>`, no DPoP (as the NL Wallet calls it) |
+| `GET /status/{v}/{list}` | the provider's Status List Token (`application/statuslist+jwt`), signed with its status certificate |
 | `GET /healthz` | health |
 
 Internal port (`ISSUER_INTERNAL_ADDR`, default `:8081`):
 
 | Endpoint | |
 |---|---|
-| `POST /offers` | `{profile, credential_configuration_ids, subject, parameters, reference?}` → `201 {credential_offer, links}`. The issuer fetches the data from the bronpoort now; `404 no_data`, `503 source_unavailable` or `502 bad_source_data` when that fails, and nothing is stored. `reference` is the caller's own reference for revocation |
-| `POST /revocations` | `{reference}` revokes every credential issued for offers with that reference → `200 {revoked}`, and from then on nothing more is issued for it: an offer not yet redeemed gets `invalid_grant`, a token not yet used gets `credential_request_denied`. `{list, index}` revokes one entry → 204. Anything else is a 400: a revocation cannot be undone, so nothing is guessed |
+| `POST /offers` | `{profile, credential_configuration_ids, subject, parameters, reference?}` → `201 {credential_offer, links}`. The issuer fetches the data from the bronpoort now; `404 no_data`, `503 source_unavailable` or `502 bad_source_data` when that fails, and nothing is stored. `reference` is the caller's own reference for revocation. The provider follows from the configurations: an offer with configurations of two providers is a `400 mixed_providers` |
+| `POST /revocations` | `{reference}` revokes every credential issued for offers with that reference → `200 {revoked}`, and from then on nothing more is issued for it: an offer not yet redeemed gets `invalid_grant`, a token not yet used gets `credential_request_denied`. `{provider, list, index}` revokes one entry → 204. Anything else is a 400: a revocation cannot be undone, so nothing is guessed |
 | `GET /healthz` | health |
 
 ## Bronpoort
@@ -99,7 +103,7 @@ ISSUER_TEST_DATABASE_URL=postgres://... go test ./internal/postgres/
 
 | Environment | |
 |---|---|
-| `ISSUER_PUBLIC_URL` | external base URL, without trailing slash; issuer identifiers are `<public URL>/<profile>` |
+| `ISSUER_PUBLIC_URL` | external base URL, without trailing slash; issuer identifiers are `<public URL>/<provider>/<profile>` |
 | `ISSUER_CONFIG_FILE` | JSON configuration (below) |
 | `ISSUER_DATABASE_URL`, `ISSUER_DATABASE_SCHEMA` | PostgreSQL; schema default `eudi_credential_issuer` |
 | `ISSUER_STORE=memory` | demo shortcut: in-memory state |
@@ -117,30 +121,32 @@ Configuration file (paths relative to the file):
 
 ```json
 {
-  "issuer": {"key_file": "issuer-key.pem", "chain_file": "issuer-chain.pem"},
-  "status": {"key_file": "status-key.pem", "chain_file": "status-chain.pem"},
   "batch_size": 4, "offer_ttl": "5m", "token_ttl": "10m", "nonce_ttl": "5m", "status_list_size": 65536,
+  "providers": [
+    {"name": "belastingdienst",
+     "access": {"key_file": "belastingdienst/access-key.pem", "chain_file": "belastingdienst/access-chain.pem"},
+     "issuer": {"key_file": "belastingdienst/issuer-key.pem", "chain_file": "belastingdienst/issuer-chain.pem"},
+     "status": {"key_file": "belastingdienst/status-key.pem", "chain_file": "belastingdienst/status-chain.pem"},
+     "registration_certificate_file": "belastingdienst/wrprc.jwt",
+     "credential_configurations": [
+       {"id": "inkomensverklaring", "scope": "inkomensverklaring", "vct": "https://.../types/belastingdienst/inkomensverklaring/v2.4",
+        "valid_days": 365, "source_url": "https://eudi-adapter/attestations/belastingdienst/inkomensverklaring",
+        "status_list": "inkomensverklaring",
+        "display": [{"name": "Inkomensverklaring", "locale": "nl"}],
+        "claims": [{"path": ["belastingjaar"], "mandatory": true}]}
+     ]}
+  ],
   "profiles": [
     {"name": "nl", "kind": "nl", "wallet_provider_roots_file": "nl-wallet-providers.pem",
-     "access": {"key_file": "access-key.pem", "chain_file": "access-chain.pem"},
-     "registration_certificate_file": "wrprc.jwt",
      "universal_link_base": "https://app.preproductie.wallet.edi.bzk.nl/deeplink"},
     {"name": "eudi", "kind": "eudi", "wallet_provider_roots_file": "eudi-wallet-providers.pem",
      "key_attestation_roots_file": "eudi-wallet-providers.pem",
-     "key_storage": ["iso_18045_high"], "user_authentication": ["iso_18045_high"],
-     "access": {"key_file": "access-key.pem", "chain_file": "access-chain.pem"}}
-  ],
-  "credential_configurations": [
-    {"id": "inkomensverklaring", "scope": "inkomensverklaring", "vct": "https://.../types/belastingdienst/inkomensverklaring/v2.4",
-     "valid_days": 365, "source_url": "https://eudi-adapter/attestations/belastingdienst/inkomensverklaring",
-     "status_list": "inkomensverklaring",
-     "display": [{"name": "Inkomensverklaring", "locale": "nl"}],
-     "claims": [{"path": ["belastingjaar"], "mandatory": true}]}
+     "key_storage": ["iso_18045_high"], "user_authentication": ["iso_18045_high"]}
   ]
 }
 ```
 
-The issuer refuses to start with a configuration a wallet would refuse: no `scope`, `display` or claims, a scope used twice (HAIP section 4.3), an empty claim path, a mandatory claim that is an object (wallets check mandatory claims on leaves), an `nl` profile without registration certificate, an `eudi` profile without key levels, duplicate names, a public URL with a path, negative sizes or durations, a signing key that is not P-256, or a chain file with a self-signed certificate (HAIP: no trust anchor in `x5c`). Whitespace around the registration certificate in its file is trimmed. The status certificate must have the subject of the issuer certificate. The NL Wallet also expects the issuer certificate to carry EKU `1.0.18013.5.1.2` and the status certificate EKU `1.3.6.1.5.5.7.3.127`; the issuer does not check its own certificates.
+The issuer refuses to start with a configuration a wallet would refuse: no `scope`, `display` or claims, a scope used twice (HAIP section 4.3), an empty claim path, a mandatory claim that is an object (wallets check mandatory claims on leaves), a provider without its own access, issuer and status keys, a provider without credential configurations, a configuration of an unknown provider, a provider without registration certificate when an `nl` profile exists, a registration certificate that is not a JWT, whose `sub` is not the `organizationIdentifier` (2.5.4.97) of the provider's access certificate or that does not list each of the provider's `vct`s in `provides_attestations` (the NL Wallet checks the same; the issuer does not verify its signature), an `eudi` profile without key levels, provider, profile or status list names that are not unique lower-case letters, digits and hyphens, or the reserved name `status`, a public URL with a path, negative sizes or durations, a signing key that is not P-256, or a chain file with a self-signed certificate (HAIP: no trust anchor in `x5c`). Whitespace around the registration certificate in its file is trimmed. The status certificate must have the subject of the issuer certificate. The NL Wallet also expects the issuer certificate to carry EKU `1.0.18013.5.1.2` and the status certificate EKU `1.3.6.1.5.5.7.3.127`; the issuer does not check its own certificates.
 
 ## Layout
 

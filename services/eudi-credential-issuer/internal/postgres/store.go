@@ -148,18 +148,19 @@ func (s *Store) CreateSession(ctx context.Context, sess issuance.Session) error 
 	if err != nil {
 		return err
 	}
-	_, err = s.pool.Exec(ctx, `INSERT INTO sessions (id, profile, code_hash, expires_at, reference, documents) VALUES ($1, $2, $3, $4, $5, $6)`,
-		sess.ID, sess.Profile, sess.CodeHash, sess.ExpiresAt, sess.Reference, docs)
+	_, err = s.pool.Exec(ctx, `INSERT INTO sessions (id, provider, profile, code_hash, expires_at, reference, documents)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		sess.ID, sess.Provider, sess.Profile, sess.CodeHash, sess.ExpiresAt, sess.Reference, docs)
 	return err
 }
 
-func (s *Store) RedeemCode(ctx context.Context, profile, codeHash string, now time.Time) (issuance.Session, error) {
+func (s *Store) RedeemCode(ctx context.Context, provider, profile, codeHash string, now time.Time) (issuance.Session, error) {
 	var sess issuance.Session
 	var docs []byte
 	err := s.pool.QueryRow(ctx, `UPDATE sessions SET code_used = true
-		WHERE code_hash = $1 AND profile = $2 AND NOT code_used AND expires_at > $3
-		RETURNING id, profile, code_hash, expires_at, reference, documents`, codeHash, profile, now).
-		Scan(&sess.ID, &sess.Profile, &sess.CodeHash, &sess.ExpiresAt, &sess.Reference, &docs)
+		WHERE code_hash = $1 AND provider = $2 AND profile = $3 AND NOT code_used AND expires_at > $4
+		RETURNING id, provider, profile, code_hash, expires_at, reference, documents`, codeHash, provider, profile, now).
+		Scan(&sess.ID, &sess.Provider, &sess.Profile, &sess.CodeHash, &sess.ExpiresAt, &sess.Reference, &docs)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return issuance.Session{}, issuance.ErrNotFound
 	}
@@ -191,10 +192,10 @@ func (s *Store) Token(ctx context.Context, tokenHash string, now time.Time) (iss
 	var sess issuance.Session
 	var docs []byte
 	err := s.pool.QueryRow(ctx, `SELECT t.session_id, t.jkt, t.client_id, t.expires_at,
-			s.id, s.profile, s.code_hash, s.expires_at, s.reference, s.documents
+			s.id, s.provider, s.profile, s.code_hash, s.expires_at, s.reference, s.documents
 		FROM access_tokens t JOIN sessions s ON s.id = t.session_id
 		WHERE t.hash = $1 AND t.expires_at > $2`, tokenHash, now).
-		Scan(&t.SessionID, &t.JKT, &t.ClientID, &t.ExpiresAt, &sess.ID, &sess.Profile, &sess.CodeHash, &sess.ExpiresAt, &sess.Reference, &docs)
+		Scan(&t.SessionID, &t.JKT, &t.ClientID, &t.ExpiresAt, &sess.ID, &sess.Provider, &sess.Profile, &sess.CodeHash, &sess.ExpiresAt, &sess.Reference, &docs)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return issuance.AccessToken{}, issuance.Session{}, issuance.ErrNotFound
 	}

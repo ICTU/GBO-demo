@@ -19,15 +19,15 @@ import (
 )
 
 // Nonce returns a fresh c_nonce (section 7); it is accepted once.
-func (s *Service) Nonce(ctx context.Context, profile string) (string, error) {
-	if _, ok := s.profiles[profile]; !ok {
-		return "", ErrUnknownProfile
+func (s *Service) Nonce(ctx context.Context, t Target) (string, error) {
+	if _, _, err := s.resolve(t); err != nil {
+		return "", err
 	}
 	n, err := randomToken()
 	if err != nil {
 		return "", err
 	}
-	if err := s.onetime.Put(ctx, kindNonce, n, s.now().Add(s.cfg.NonceTTL)); err != nil {
+	if err := s.onetime.Put(ctx, scoped(kindNonce, s.Identifier(t)), n, s.now().Add(s.cfg.NonceTTL)); err != nil {
 		return "", err
 	}
 	return n, nil
@@ -35,7 +35,7 @@ func (s *Service) Nonce(ctx context.Context, profile string) (string, error) {
 
 // CredentialCall is a credential request with its authorization.
 type CredentialCall struct {
-	Profile string
+	Target Target
 	// Authorization is the Authorization header: "DPoP <access token>".
 	Authorization string
 	DPoP          []string
@@ -47,14 +47,14 @@ type CredentialCall struct {
 // proofs; for KindEUDI from the key attestation they carry, as HAIP and ARF
 // ISSU_30 require.
 func (s *Service) Credential(ctx context.Context, call CredentialCall) (oid4vci.CredentialResponse, error) {
-	p, ok := s.profiles[call.Profile]
-	if !ok {
-		return oid4vci.CredentialResponse{}, ErrUnknownProfile
+	prov, p, err := s.resolve(call.Target)
+	if err != nil {
+		return oid4vci.CredentialResponse{}, err
 	}
 	now := s.now()
-	id := s.Identifier(p.Name)
+	id := s.Identifier(call.Target)
 
-	token, session, err := s.authorize(ctx, p, call.Authorization, "DPoP")
+	token, session, err := s.authorize(ctx, call.Target, call.Authorization, "DPoP")
 	if err != nil {
 		return oid4vci.CredentialResponse{}, err
 	}
@@ -85,12 +85,14 @@ func (s *Service) Credential(ctx context.Context, call CredentialCall) (oid4vci.
 	} else if revoked {
 		return oid4vci.CredentialResponse{}, refuse(oid4vci.ErrCredentialRequestDenied, "the offer has been revoked")
 	}
-	keys, err := s.holderKeys(ctx, p, req.Proofs)
+	keys, err := s.holderKeys(ctx, p, id, req.Proofs)
 	if err != nil {
 		return oid4vci.CredentialResponse{}, err
 	}
+	// After a configuration change the configuration may belong to another
+	// provider; this provider then no longer offers it.
 	c, ok := s.configs[doc.ConfigurationID]
-	if !ok {
+	if !ok || c.Provider != prov.Name {
 		return oid4vci.CredentialResponse{}, refuse(oid4vci.ErrUnknownCredentialID, "the credential configuration is no longer offered")
 	}
 
@@ -107,7 +109,7 @@ func (s *Service) Credential(ctx context.Context, call CredentialCall) (oid4vci.
 	} else if !reserved {
 		return oid4vci.CredentialResponse{}, refuse(oid4vci.ErrInvalidCredentialRequest, "this credential has been issued already or is being issued")
 	}
-	out, err := s.issue(ctx, c, doc, session.Reference, keys, now)
+	out, err := s.issue(ctx, prov, c, doc, session.Reference, keys, now)
 	if err != nil {
 		if rerr := s.sessions.ReleaseIssue(ctx, session.ID, doc.CredentialID, owner); rerr != nil {
 			return oid4vci.CredentialResponse{}, errors.Join(err, rerr)
@@ -130,23 +132,23 @@ const issueReservation = time.Minute
 
 // issue signs one credential per holder key, each with its own status list
 // entry.
-func (s *Service) issue(ctx context.Context, c CredentialConfiguration, doc Document, reference string, keys []jose.JSONWebKey, now time.Time) (oid4vci.CredentialResponse, error) {
+func (s *Service) issue(ctx context.Context, prov *provider, c CredentialConfiguration, doc Document, reference string, keys []jose.JSONWebKey, now time.Time) (oid4vci.CredentialResponse, error) {
 	// iat is rounded to the day, so the copies of a batch cannot be linked
 	// by it (RFC 9901 section 10.1).
 	issuedAt := now.UTC().Truncate(24 * time.Hour)
 	out := oid4vci.CredentialResponse{}
 	for _, k := range keys {
-		idx, err := s.status.Allocate(ctx, c.StatusList, s.cfg.StatusListSize, reference)
+		idx, err := s.status.Allocate(ctx, statusKey(prov.Name, c.StatusList), s.cfg.StatusListSize, reference)
 		if err != nil {
 			return oid4vci.CredentialResponse{}, err
 		}
-		cred, err := s.signer.Issue(sdjwtvc.Credential{
+		cred, err := prov.signer.Issue(sdjwtvc.Credential{
 			VCT:       c.VCT,
 			IssuedAt:  issuedAt,
 			NotBefore: doc.NotBefore,
 			Expires:   doc.Expires,
 			HolderKey: &k,
-			Status:    &sdjwtvc.StatusReference{Index: idx, URI: s.StatusListURI(c.StatusList)},
+			Status:    &sdjwtvc.StatusReference{Index: idx, URI: s.StatusListURI(prov.Name, c.StatusList)},
 			Claims:    doc.Claims,
 		})
 		if err != nil {
@@ -168,13 +170,13 @@ func (s *Service) referenceRevoked(ctx context.Context, session Session) (bool, 
 
 // authorize resolves the access token of an Authorization header with the
 // given scheme to an unexpired token and its session of this profile.
-func (s *Service) authorize(ctx context.Context, p Profile, header, scheme string) (AccessToken, Session, error) {
+func (s *Service) authorize(ctx context.Context, t Target, header, scheme string) (AccessToken, Session, error) {
 	parts := strings.SplitN(header, " ", 2)
 	if len(parts) != 2 || !strings.EqualFold(parts[0], scheme) || strings.TrimSpace(parts[1]) == "" {
 		return AccessToken{}, Session{}, refuse(oid4vci.ErrInvalidToken, "a "+scheme+" access token is required")
 	}
 	token, session, err := s.sessions.Token(ctx, hash(strings.TrimSpace(parts[1])), s.now())
-	if errors.Is(err, ErrNotFound) || (err == nil && session.Profile != p.Name) {
+	if errors.Is(err, ErrNotFound) || (err == nil && (session.Provider != t.Provider || session.Profile != t.Profile)) {
 		return AccessToken{}, Session{}, refuse(oid4vci.ErrInvalidToken, "the access token is unknown or expired")
 	}
 	return token, session, err
@@ -182,12 +184,11 @@ func (s *Service) authorize(ctx context.Context, p Profile, header, scheme strin
 
 // holderKeys verifies the key proofs and returns the keys to bind the
 // credentials to. All proofs must carry the same c_nonce, which is used up.
-func (s *Service) holderKeys(ctx context.Context, p Profile, proofs *oid4vci.Proofs) ([]jose.JSONWebKey, error) {
+func (s *Service) holderKeys(ctx context.Context, p Profile, id string, proofs *oid4vci.Proofs) ([]jose.JSONWebKey, error) {
 	if proofs == nil || (len(proofs.JWT) == 0) == (len(proofs.Attestation) == 0) {
 		return nil, refuse(oid4vci.ErrInvalidProof, "proofs must contain jwt or attestation proofs")
 	}
 	now := s.now()
-	id := s.Identifier(p.Name)
 	var keys []jose.JSONWebKey
 	var nonces []string
 
@@ -259,7 +260,7 @@ func (s *Service) holderKeys(ctx context.Context, p Profile, proofs *oid4vci.Pro
 			return nil, refuse(oid4vci.ErrInvalidProof, "every proof must carry the same c_nonce")
 		}
 	}
-	if ok, err := s.onetime.Take(ctx, kindNonce, nonces[0], now); err != nil {
+	if ok, err := s.onetime.Take(ctx, scoped(kindNonce, id), nonces[0], now); err != nil {
 		return nil, err
 	} else if !ok {
 		return nil, refuse(oid4vci.ErrInvalidNonce, "the c_nonce is unknown, expired or used")

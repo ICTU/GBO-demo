@@ -34,6 +34,8 @@ var (
 const (
 	incomeConfig = "income"
 	incomeVCT    = "https://source.example.test/types/income/v1"
+	deathConfig  = "death"
+	deathVCT     = "https://source.example.test/types/death/v1"
 	nlClient     = "https://wallet.edi.rijksoverheid.nl"
 	eudiClient   = "eudiw-abca"
 )
@@ -41,14 +43,20 @@ const (
 // fixture is a running issuer with two profiles, a fake source and a
 // controllable clock.
 type fixture struct {
-	t          *testing.T
-	public     *httptest.Server
-	internal   *httptest.Server
-	issuerRoot testpki.Cert
-	accessRoot testpki.Cert
-	nlWallet   testwallet.Provider
-	eudiWallet testwallet.Provider
-	clock      *clock
+	t        *testing.T
+	public   *httptest.Server
+	internal *httptest.Server
+	// issuerRoot and accessRoot are the roots of the tax provider;
+	// civilIssuerRoot and civilAccessRoot those of the civil provider.
+	issuerRoot      testpki.Cert
+	accessRoot      testpki.Cert
+	civilIssuerRoot testpki.Cert
+	civilAccessRoot testpki.Cert
+	// civilRegistration is the civil provider's registration certificate.
+	civilRegistration []byte
+	nlWallet          testwallet.Provider
+	eudiWallet        testwallet.Provider
+	clock             *clock
 	// sourceStatus and sourceDocs drive the fake source.
 	sourceMu     sync.Mutex
 	sourceStatus int
@@ -85,13 +93,10 @@ func newFixture(t *testing.T) *fixture {
 	src := httptest.NewServer(http.HandlerFunc(f.serveSource))
 	t.Cleanup(src.Close)
 
-	subject := pkix.Name{CommonName: "Issuer", Organization: []string{"GBO Demo"}}
-	f.issuerRoot = testpki.NewRoot(t, "issuer root")
-	issuerCA := f.issuerRoot.IssueCA(t, "issuer CA")
-	issuerCert := issuerCA.Issue(t, testpki.Options{Subject: subject, EKU: []asn1.ObjectIdentifier{mdlIssuerEKU}})
-	statusCert := issuerCA.Issue(t, testpki.Options{Subject: subject, EKU: []asn1.ObjectIdentifier{statusListEKU}})
-	f.accessRoot = testpki.NewRoot(t, "access root")
-	access := f.accessRoot.Issue(t, testpki.Options{Subject: pkix.Name{CommonName: "access", Organization: []string{"GBO Demo"}}})
+	var taxProvider, civilProvider issuance.Provider
+	taxProvider, f.issuerRoot, f.accessRoot = newProvider(t, "tax", incomeVCT)
+	civilProvider, f.civilIssuerRoot, f.civilAccessRoot = newProvider(t, "civil", deathVCT)
+	f.civilRegistration = civilProvider.RegistrationCertificate
 	f.nlWallet = testwallet.NewProvider(t, "nl wallet provider")
 	f.eudiWallet = testwallet.NewProvider(t, "eudi wallet provider")
 
@@ -103,30 +108,37 @@ func newFixture(t *testing.T) *fixture {
 
 	cfg := issuance.Config{
 		PublicURL: f.public.URL,
+		Providers: []issuance.Provider{taxProvider, civilProvider},
 		Profiles: []issuance.Profile{
 			{Name: "nl", Kind: issuance.KindNL, WalletProviders: []x5c.Anchors{f.nlWallet.Anchors("nl")},
-				AccessKey: access.Key, AccessChain: access.Chain, RegistrationCertificate: []byte("wrprc"),
 				UniversalLinkBase: "https://app.example.test/deeplink"},
 			{Name: "eudi", Kind: issuance.KindEUDI, WalletProviders: []x5c.Anchors{f.eudiWallet.Anchors("eudi")},
 				KeyAttestationProviders: []x5c.Anchors{f.eudiWallet.Anchors("eudi")},
-				KeyStorage:              []string{"iso_18045_high"}, UserAuthentication: []string{"iso_18045_high"},
-				AccessKey: access.Key, AccessChain: access.Chain},
+				KeyStorage:              []string{"iso_18045_high"}, UserAuthentication: []string{"iso_18045_high"}},
 		},
-		Configurations: []issuance.CredentialConfiguration{{
-			ID: incomeConfig, VCT: incomeVCT, Scope: "income", ValidDays: 365,
-			StatusList: "income",
-			Display:    []issuance.Display{{Name: "Income statement", Locale: "en"}},
-			Claims: []issuance.Claim{
-				{Path: []string{"year"}, Mandatory: true}, {Path: []string{"income"}}, {Path: []string{"address", "city"}},
+		Configurations: []issuance.CredentialConfiguration{
+			{
+				ID: incomeConfig, Provider: "tax", VCT: incomeVCT, Scope: "income", ValidDays: 365,
+				StatusList: "income",
+				Display:    []issuance.Display{{Name: "Income statement", Locale: "en"}},
+				Claims: []issuance.Claim{
+					{Path: []string{"year"}, Mandatory: true}, {Path: []string{"income"}}, {Path: []string{"address", "city"}},
+				},
 			},
-		}},
-		IssuerKey: issuerCert.Key, IssuerChain: issuerCert.Chain,
-		StatusKey: statusCert.Key, StatusChain: statusCert.Chain,
+			{
+				ID: deathConfig, Provider: "civil", VCT: deathVCT, Scope: "death", ValidDays: 365,
+				StatusList: "death",
+				Display:    []issuance.Display{{Name: "Death certificate", Locale: "en"}},
+				Claims:     []issuance.Claim{{Path: []string{"name"}, Mandatory: true}},
+			},
+		},
 		StatusListSize: 1024,
 	}
 	store := memstore.New()
-	svc, err := issuance.New(cfg, &source.Client{HTTP: src.Client(),
-		Endpoints: map[string]string{incomeConfig: src.URL + "/attestations/tax/income"}}, store, store, store, f.clock.Now)
+	svc, err := issuance.New(cfg, &source.Client{HTTP: src.Client(), Endpoints: map[string]string{
+		incomeConfig: src.URL + "/attestations/tax/income",
+		deathConfig:  src.URL + "/attestations/civil/death",
+	}}, store, store, store, f.clock.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,12 +148,37 @@ func newFixture(t *testing.T) *fixture {
 	return f
 }
 
+// newProvider returns a provider with its own issuer and access roots and a
+// registration certificate for vct; the issuer and status certificates come
+// from an intermediate.
+func newProvider(t *testing.T, name, vct string) (issuance.Provider, testpki.Cert, testpki.Cert) {
+	t.Helper()
+	subject := pkix.Name{CommonName: name, Organization: []string{name}}
+	issuerRoot := testpki.NewRoot(t, name+" issuer root")
+	issuerCA := issuerRoot.IssueCA(t, name+" issuer CA")
+	issuerCert := issuerCA.Issue(t, testpki.Options{Subject: subject, EKU: []asn1.ObjectIdentifier{mdlIssuerEKU}})
+	statusCert := issuerCA.Issue(t, testpki.Options{Subject: subject, EKU: []asn1.ObjectIdentifier{statusListEKU}})
+	accessRoot := testpki.NewRoot(t, name+" access root")
+	access := accessRoot.Issue(t, testpki.Options{Subject: testpki.OrganizationSubject(name+" access", name, "NTRNL-"+name)})
+	registrar := testpki.NewRoot(t, "registrar root").Issue(t, testpki.Options{Subject: pkix.Name{CommonName: "registrar"}})
+	return issuance.Provider{
+		Name: name, AccessKey: access.Key, AccessChain: access.Chain,
+		RegistrationCertificate: testwallet.RegistrationCertificate(t, registrar, "NTRNL-"+name, vct),
+		IssuerKey:               issuerCert.Key, IssuerChain: issuerCert.Chain, StatusKey: statusCert.Key, StatusChain: statusCert.Chain,
+	}, issuerRoot, accessRoot
+}
+
 func (f *fixture) serveSource(w http.ResponseWriter, r *http.Request) {
 	f.sourceMu.Lock()
 	defer f.sourceMu.Unlock()
 	f.sourceCalls = append(f.sourceCalls, r.URL.Query())
 	if f.sourceStatus != http.StatusOK {
 		w.WriteHeader(f.sourceStatus)
+		return
+	}
+	if strings.Contains(r.URL.Path, "/civil/") {
+		_ = json.NewEncoder(w).Encode([]map[string]any{{"format": "dc+sd-jwt", "attestation_type": deathVCT,
+			"attributes": map[string]any{"name": "A. Example"}}})
 		return
 	}
 	_ = json.NewEncoder(w).Encode(f.sourceDocs)
@@ -163,7 +200,13 @@ func (f *fixture) lastSourceCall() url.Values {
 	return f.sourceCalls[len(f.sourceCalls)-1]
 }
 
-func (f *fixture) id(profile string) string { return f.public.URL + "/" + profile }
+// id is the issuer identifier of the tax provider under profile; idOf that
+// of any provider.
+func (f *fixture) id(profile string) string { return f.idOf("tax", profile) }
+
+func (f *fixture) idOf(provider, profile string) string {
+	return f.public.URL + "/" + provider + "/" + profile
+}
 
 // offer creates an offer on the internal API and returns the status and
 // the decoded body.
@@ -201,7 +244,9 @@ func (f *fixture) preAuthCodeRef(profile, reference string) string {
 
 // wallet is one wallet instance: its WIA key and DPoP key.
 type wallet struct {
-	f        *fixture
+	f *fixture
+	// issuer is the provider the wallet talks to; "tax" unless changed.
+	issuer   string
 	profile  string
 	clientID string
 	provider testwallet.Provider
@@ -213,7 +258,7 @@ type wallet struct {
 }
 
 func (f *fixture) wallet(profile string) *wallet {
-	w := &wallet{f: f, profile: profile, wiaKey: testpki.NewKey(f.t), dpopKey: testpki.NewKey(f.t)}
+	w := &wallet{f: f, issuer: "tax", profile: profile, wiaKey: testpki.NewKey(f.t), dpopKey: testpki.NewKey(f.t)}
 	w.clientID, w.provider = nlClient, f.nlWallet
 	if profile == "eudi" {
 		w.clientID, w.provider = eudiClient, f.eudiWallet
@@ -256,8 +301,8 @@ func (w *wallet) tokenRequestWith(code string, headers map[string]string, extra 
 	w.f.t.Helper()
 	h := map[string]string{
 		"OAuth-Client-Attestation":     w.wia,
-		"OAuth-Client-Attestation-PoP": testwallet.PoP(w.f.t, w.wiaKey, w.clientID, w.f.id(w.profile), w.challenge()),
-		"DPoP":                         testwallet.DPoP(w.f.t, w.dpopKey, "POST", w.f.id(w.profile)+"/token", ""),
+		"OAuth-Client-Attestation-PoP": testwallet.PoP(w.f.t, w.wiaKey, w.clientID, w.f.idOf(w.issuer, w.profile), w.challenge()),
+		"DPoP":                         testwallet.DPoP(w.f.t, w.dpopKey, "POST", w.f.idOf(w.issuer, w.profile)+"/token", ""),
 	}
 	for k, v := range headers {
 		if v == "" {
@@ -291,13 +336,13 @@ func (w *wallet) credentialRequest(accessToken string, dpopKey *ecdsa.PrivateKey
 	raw, _ := json.Marshal(req)
 	return w.post("/credential", bytes.NewReader(raw), map[string]string{
 		"Authorization": "DPoP " + accessToken,
-		"DPoP":          testwallet.DPoP(w.f.t, dpopKey, "POST", w.f.id(w.profile)+"/credential", accessToken),
+		"DPoP":          testwallet.DPoP(w.f.t, dpopKey, "POST", w.f.idOf(w.issuer, w.profile)+"/credential", accessToken),
 	}, "Content-Type", "application/json")
 }
 
 func (w *wallet) post(path string, body io.Reader, headers map[string]string, extra ...string) (int, map[string]any) {
 	w.f.t.Helper()
-	req, err := http.NewRequest(http.MethodPost, w.f.id(w.profile)+path, body)
+	req, err := http.NewRequest(http.MethodPost, w.f.idOf(w.issuer, w.profile)+path, body)
 	if err != nil {
 		w.f.t.Fatal(err)
 	}

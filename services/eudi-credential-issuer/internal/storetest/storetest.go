@@ -50,38 +50,41 @@ var ctx = context.Background()
 var now = time.Now().UTC().Truncate(time.Millisecond)
 
 func redeemOnce(t *testing.T, s Store) {
-	sess := issuance.Session{ID: "s1", Profile: "nl", CodeHash: "c1", ExpiresAt: now.Add(time.Minute), Reference: "case-1",
+	sess := issuance.Session{ID: "s1", Provider: "tax", Profile: "nl", CodeHash: "c1", ExpiresAt: now.Add(time.Minute), Reference: "case-1",
 		Documents: []issuance.Document{{CredentialID: "d1", ConfigurationID: "income",
 			Claims: map[string]any{"year": "2025", "big": json.Number("9007199254740993")}, NotBefore: now, Expires: now.Add(time.Hour)}}}
 	if err := s.CreateSession(ctx, sess); err != nil {
 		t.Fatal(err)
 	}
 	// A code of another profile is refused and stays usable.
-	if _, err := s.RedeemCode(ctx, "eudi", "c1", now); !errors.Is(err, issuance.ErrNotFound) {
+	if _, err := s.RedeemCode(ctx, "tax", "eudi", "c1", now); !errors.Is(err, issuance.ErrNotFound) {
 		t.Fatalf("redemption on another profile: %v", err)
 	}
-	got, err := s.RedeemCode(ctx, "nl", "c1", now)
+	if _, err := s.RedeemCode(ctx, "civil", "nl", "c1", now); !errors.Is(err, issuance.ErrNotFound) {
+		t.Fatalf("redemption at another provider: %v", err)
+	}
+	got, err := s.RedeemCode(ctx, "tax", "nl", "c1", now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ID != "s1" || got.Profile != "nl" || got.Reference != "case-1" || len(got.Documents) != 1 ||
+	if got.ID != "s1" || got.Provider != "tax" || got.Profile != "nl" || got.Reference != "case-1" || len(got.Documents) != 1 ||
 		got.Documents[0].Claims["year"] != "2025" || fmt.Sprint(got.Documents[0].Claims["big"]) != "9007199254740993" ||
 		!got.Documents[0].Expires.Equal(now.Add(time.Hour)) {
 		t.Fatalf("session not restored: %+v", got)
 	}
-	if _, err := s.RedeemCode(ctx, "nl", "c1", now); !errors.Is(err, issuance.ErrNotFound) {
+	if _, err := s.RedeemCode(ctx, "tax", "nl", "c1", now); !errors.Is(err, issuance.ErrNotFound) {
 		t.Fatalf("second redemption: %v", err)
 	}
-	if err := s.CreateSession(ctx, issuance.Session{ID: "s2", Profile: "nl", CodeHash: "c2", ExpiresAt: now}); err != nil {
+	if err := s.CreateSession(ctx, issuance.Session{ID: "s2", Provider: "tax", Profile: "nl", CodeHash: "c2", ExpiresAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.RedeemCode(ctx, "nl", "c2", now); !errors.Is(err, issuance.ErrNotFound) {
+	if _, err := s.RedeemCode(ctx, "tax", "nl", "c2", now); !errors.Is(err, issuance.ErrNotFound) {
 		t.Fatalf("expired code: %v", err)
 	}
 }
 
 func redeemConcurrently(t *testing.T, s Store) {
-	if err := s.CreateSession(ctx, issuance.Session{ID: "s1", Profile: "nl", CodeHash: "c1", ExpiresAt: now.Add(time.Minute)}); err != nil {
+	if err := s.CreateSession(ctx, issuance.Session{ID: "s1", Provider: "tax", Profile: "nl", CodeHash: "c1", ExpiresAt: now.Add(time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup
@@ -91,7 +94,7 @@ func redeemConcurrently(t *testing.T, s Store) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := s.RedeemCode(ctx, "nl", "c1", now); err == nil {
+			if _, err := s.RedeemCode(ctx, "tax", "nl", "c1", now); err == nil {
 				mu.Lock()
 				wins++
 				mu.Unlock()
@@ -105,14 +108,14 @@ func redeemConcurrently(t *testing.T, s Store) {
 }
 
 func tokens(t *testing.T, s Store) {
-	if err := s.CreateSession(ctx, issuance.Session{ID: "s1", Profile: "eudi", CodeHash: "c1", ExpiresAt: now.Add(time.Minute)}); err != nil {
+	if err := s.CreateSession(ctx, issuance.Session{ID: "s1", Provider: "tax", Profile: "eudi", CodeHash: "c1", ExpiresAt: now.Add(time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SaveToken(ctx, issuance.AccessToken{Hash: "t1", SessionID: "s1", JKT: "k", ClientID: "w", ExpiresAt: now.Add(time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
 	tok, sess, err := s.Token(ctx, "t1", now)
-	if err != nil || tok.JKT != "k" || tok.ClientID != "w" || sess.Profile != "eudi" {
+	if err != nil || tok.JKT != "k" || tok.ClientID != "w" || sess.Provider != "tax" || sess.Profile != "eudi" {
 		t.Fatalf("%+v %+v %v", tok, sess, err)
 	}
 	if _, _, err := s.Token(ctx, "t1", now.Add(time.Minute)); !errors.Is(err, issuance.ErrNotFound) {
@@ -124,7 +127,7 @@ func tokens(t *testing.T, s Store) {
 }
 
 func reserveIssue(t *testing.T, s Store) {
-	if err := s.CreateSession(ctx, issuance.Session{ID: "s1", Profile: "nl", CodeHash: "c1", ExpiresAt: now.Add(time.Minute)}); err != nil {
+	if err := s.CreateSession(ctx, issuance.Session{ID: "s1", Provider: "tax", Profile: "nl", CodeHash: "c1", ExpiresAt: now.Add(time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
 	reserve := func(owner string, at time.Time) bool {
@@ -173,7 +176,7 @@ func reserveIssue(t *testing.T, s Store) {
 // takeOver: request A takes longer than its reservation, B takes it over.
 // A may then neither complete nor release B's reservation.
 func takeOver(t *testing.T, s Store) {
-	if err := s.CreateSession(ctx, issuance.Session{ID: "s1", Profile: "nl", CodeHash: "c1", ExpiresAt: now.Add(time.Minute)}); err != nil {
+	if err := s.CreateSession(ctx, issuance.Session{ID: "s1", Provider: "tax", Profile: "nl", CodeHash: "c1", ExpiresAt: now.Add(time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
 	if ok, _ := s.ReserveIssue(ctx, "s1", "d1", "a", now, now.Add(time.Minute)); !ok {
@@ -204,7 +207,7 @@ func takeOver(t *testing.T, s Store) {
 }
 
 func reserveConcurrently(t *testing.T, s Store) {
-	if err := s.CreateSession(ctx, issuance.Session{ID: "s1", Profile: "nl", CodeHash: "c1", ExpiresAt: now.Add(time.Minute)}); err != nil {
+	if err := s.CreateSession(ctx, issuance.Session{ID: "s1", Provider: "tax", Profile: "nl", CodeHash: "c1", ExpiresAt: now.Add(time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup

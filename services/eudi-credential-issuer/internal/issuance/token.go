@@ -11,15 +11,15 @@ import (
 
 // Challenge returns a fresh attestation challenge for the client
 // attestation PoP; it is accepted once, within the nonce lifetime.
-func (s *Service) Challenge(ctx context.Context, profile string) (string, error) {
-	if _, ok := s.profiles[profile]; !ok {
-		return "", ErrUnknownProfile
+func (s *Service) Challenge(ctx context.Context, t Target) (string, error) {
+	if _, _, err := s.resolve(t); err != nil {
+		return "", err
 	}
 	c, err := randomToken()
 	if err != nil {
 		return "", err
 	}
-	if err := s.onetime.Put(ctx, kindChallenge, c, s.now().Add(s.cfg.NonceTTL)); err != nil {
+	if err := s.onetime.Put(ctx, scoped(kindChallenge, s.Identifier(t)), c, s.now().Add(s.cfg.NonceTTL)); err != nil {
 		return "", err
 	}
 	return c, nil
@@ -27,7 +27,7 @@ func (s *Service) Challenge(ctx context.Context, profile string) (string, error)
 
 // TokenRequest is a token request with the headers that authenticate it.
 type TokenRequest struct {
-	Profile           string
+	Target            Target
 	GrantType         string
 	PreAuthorizedCode string
 	TxCode            string
@@ -45,9 +45,9 @@ type TokenRequest struct {
 // and DPoP are checked before the code is used, so a failed request does
 // not burn the code.
 func (s *Service) Token(ctx context.Context, req TokenRequest) (oid4vci.TokenResponse, error) {
-	p, ok := s.profiles[req.Profile]
-	if !ok {
-		return oid4vci.TokenResponse{}, ErrUnknownProfile
+	_, p, err := s.resolve(req.Target)
+	if err != nil {
+		return oid4vci.TokenResponse{}, err
 	}
 	if req.GrantType != oid4vci.GrantPreAuthorizedCode {
 		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrUnsupportedGrantType, "only the pre-authorized code grant is supported")
@@ -56,7 +56,7 @@ func (s *Service) Token(ctx context.Context, req TokenRequest) (oid4vci.TokenRes
 		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidRequest, "pre-authorized_code is required and tx_code is not expected")
 	}
 	now := s.now()
-	id := s.Identifier(p.Name)
+	id := s.Identifier(req.Target)
 
 	if req.ClientAttestation == "" || req.ClientAttestationPoP == "" {
 		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidClientAttestation, "client attestation and PoP are required")
@@ -75,12 +75,12 @@ func (s *Service) Token(ctx context.Context, req TokenRequest) (oid4vci.TokenRes
 	// use_attestation_challenge (draft-ietf-oauth-attestation-based-client-auth
 	// -07 section 6.2, -12 section 6.1).
 	if att.Challenge == "" {
-		return oid4vci.TokenResponse{}, s.useChallenge(ctx, p.Name, "the attestation PoP must carry a challenge")
+		return oid4vci.TokenResponse{}, s.useChallenge(ctx, req.Target, "the attestation PoP must carry a challenge")
 	}
-	if ok, err := s.onetime.Take(ctx, kindChallenge, att.Challenge, now); err != nil {
+	if ok, err := s.onetime.Take(ctx, scoped(kindChallenge, id), att.Challenge, now); err != nil {
 		return oid4vci.TokenResponse{}, err
 	} else if !ok {
-		return oid4vci.TokenResponse{}, s.useChallenge(ctx, p.Name, "the attestation challenge is unknown, expired or used")
+		return oid4vci.TokenResponse{}, s.useChallenge(ctx, req.Target, "the attestation challenge is unknown, expired or used")
 	}
 	if ok, err := s.onetime.FirstUse(ctx, kindPoP, att.PoPID, att.PoPExpiry, now); err != nil {
 		return oid4vci.TokenResponse{}, err
@@ -100,7 +100,7 @@ func (s *Service) Token(ctx context.Context, req TokenRequest) (oid4vci.TokenRes
 		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidDPoPProof, "the DPoP proof has been used before")
 	}
 
-	session, err := s.sessions.RedeemCode(ctx, p.Name, hash(req.PreAuthorizedCode), now)
+	session, err := s.sessions.RedeemCode(ctx, req.Target.Provider, p.Name, hash(req.PreAuthorizedCode), now)
 	if errors.Is(err, ErrNotFound) {
 		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "the pre-authorized code is unknown, used or expired")
 	}
@@ -133,8 +133,8 @@ func (s *Service) Token(ctx context.Context, req TokenRequest) (oid4vci.TokenRes
 
 // useChallenge returns the use_attestation_challenge refusal with a fresh
 // challenge.
-func (s *Service) useChallenge(ctx context.Context, profile, description string) error {
-	c, err := s.Challenge(ctx, profile)
+func (s *Service) useChallenge(ctx context.Context, t Target, description string) error {
+	c, err := s.Challenge(ctx, t)
 	if err != nil {
 		return err
 	}

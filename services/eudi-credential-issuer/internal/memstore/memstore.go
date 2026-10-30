@@ -55,7 +55,7 @@ func (s *Store) CreateSession(_ context.Context, sess issuance.Session) error {
 	return nil
 }
 
-func (s *Store) RedeemCode(_ context.Context, profile, codeHash string, now time.Time) (issuance.Session, error) {
+func (s *Store) RedeemCode(_ context.Context, provider, profile, codeHash string, now time.Time) (issuance.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	id, ok := s.byCode[codeHash]
@@ -63,7 +63,7 @@ func (s *Store) RedeemCode(_ context.Context, profile, codeHash string, now time
 		return issuance.Session{}, issuance.ErrNotFound
 	}
 	sess := s.sessions[id]
-	if sess.Profile != profile || !now.Before(sess.ExpiresAt) {
+	if sess.Provider != provider || sess.Profile != profile || !now.Before(sess.ExpiresAt) {
 		return issuance.Session{}, issuance.ErrNotFound
 	}
 	s.used[codeHash] = true

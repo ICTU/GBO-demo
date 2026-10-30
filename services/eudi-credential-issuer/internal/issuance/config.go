@@ -8,9 +8,9 @@ import (
 	"gbo-demo/oid4vc-kit/x5c"
 )
 
-// Kind selects the rules of a wallet profile. Each profile is published
-// under its own credential issuer identifier, so the metadata of each is
-// conformant on its own (see the design choice on proof types).
+// Kind selects the rules of a wallet profile. Each provider is published
+// under one credential issuer identifier per profile, so the metadata of
+// each is conformant on its own (see the design choice on proof types).
 type Kind string
 
 const (
@@ -22,9 +22,34 @@ const (
 	KindEUDI Kind = "eudi"
 )
 
-// Profile is one credential issuer identifier with its wallet rules.
+// Provider is an Attestation Provider: the party a wallet sees as the
+// issuer, with its own access and registration certificates, its own
+// signing keys and its own credential configurations. The issuer service
+// hosts several.
+type Provider struct {
+	// Name is the first path segment of its issuer identifiers.
+	Name string
+	// AccessKey and AccessChain are the access certificate (WRPAC) that
+	// signs the issuer metadata.
+	AccessKey   crypto.Signer
+	AccessChain []*x509.Certificate
+	// RegistrationCertificate is the WRPRC published in issuer_info;
+	// required when a KindNL profile exists, as the NL Wallet refuses
+	// metadata without it.
+	RegistrationCertificate []byte
+	// IssuerKey and IssuerChain sign the credentials.
+	IssuerKey   crypto.Signer
+	IssuerChain []*x509.Certificate
+	// StatusKey and StatusChain sign the status lists; the certificate has
+	// the same subject as the issuer certificate.
+	StatusKey   crypto.Signer
+	StatusChain []*x509.Certificate
+}
+
+// Profile is a set of wallet rules; every provider is published once per
+// profile.
 type Profile struct {
-	// Name is the path segment of the issuer identifier.
+	// Name is the second path segment of the issuer identifiers.
 	Name string
 	Kind Kind
 	// WalletProviders are the trust anchors for Wallet Instance
@@ -33,13 +58,6 @@ type Profile struct {
 	// KeyAttestationProviders are the trust anchors for key attestations;
 	// required for KindEUDI.
 	KeyAttestationProviders []x5c.Anchors
-	// AccessKey and AccessChain are the access certificate (WRPAC) that
-	// signs the issuer metadata.
-	AccessKey   crypto.Signer
-	AccessChain []*x509.Certificate
-	// RegistrationCertificate is the WRPRC published in issuer_info;
-	// required for KindNL, which refuses metadata without it.
-	RegistrationCertificate []byte
 	// KeyStorage and UserAuthentication are the attack potential
 	// resistance values (OpenID4VCI Appendix D.2) a key attestation must
 	// assert; published in key_attestations_required (ARF ISSU_27d).
@@ -50,11 +68,13 @@ type Profile struct {
 	UniversalLinkBase string
 }
 
-// CredentialConfiguration is one credential the issuer offers.
+// CredentialConfiguration is one credential a provider offers.
 type CredentialConfiguration struct {
-	ID    string
-	VCT   string
-	Scope string
+	ID string
+	// Provider is the name of the provider that issues it.
+	Provider string
+	VCT      string
+	Scope    string
 	// Display and Claims become credential_metadata. Every attribute a
 	// source returns must have a claim here.
 	Display []Display
@@ -81,17 +101,11 @@ type Claim struct {
 // Config is everything the issuer needs besides its ports.
 type Config struct {
 	// PublicURL is the external base URL; issuer identifiers are
-	// PublicURL + "/" + profile name.
+	// PublicURL + "/" + provider + "/" + profile.
 	PublicURL      string
+	Providers      []Provider
 	Profiles       []Profile
 	Configurations []CredentialConfiguration
-	// IssuerKey and IssuerChain sign the credentials.
-	IssuerKey   crypto.Signer
-	IssuerChain []*x509.Certificate
-	// StatusKey and StatusChain sign the status lists; the certificate has
-	// the same subject as the issuer certificate.
-	StatusKey      crypto.Signer
-	StatusChain    []*x509.Certificate
 	StatusListSize int
 	BatchSize      int
 	OfferTTL       time.Duration

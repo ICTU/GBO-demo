@@ -11,9 +11,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   issues SD-JWT VCs with the Pre-Authorized Code Flow of OpenID4VCI 1.0 and
   HAIP 1.0, for two wallet profiles: the NL Wallet (v0.6.0 contract, with its
   preview endpoint) and wallets that require key attestation, such as the EUDI
-  reference wallet. It authenticates wallets with a Wallet Instance
-  Attestation, binds tokens with DPoP, signs its metadata and publishes Token
-  Status Lists. Offers are created through an internal API that fetches the
+  reference wallet. Each source is its own Attestation Provider with its own
+  issuer identifier, certificates and status lists. It authenticates wallets
+  with a Wallet Instance Attestation, binds tokens with DPoP, signs its
+  metadata and publishes Token Status Lists. Offers are created through an internal API that fetches the
   data from the bronpoort with the contract `eudi-adapter` already serves.
   The protocol building blocks live in the new library `services/oid4vc-kit`.
   The issuer is not deployed; `eudi-issuance-server` stays in place.

@@ -38,16 +38,18 @@ func TestLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	file := `{
-	  "issuer": {"key_file": "key.pem", "chain_file": "chain.pem"},
-	  "status": {"key_file": "key.pem", "chain_file": "chain.pem"},
 	  "batch_size": 4, "offer_ttl": "15m",
+	  "providers": [{"name": "tax",
+	    "access": {"key_file": "key.pem", "chain_file": "chain.pem"},
+	    "issuer": {"key_file": "key.pem", "chain_file": "chain.pem"},
+	    "status": {"key_file": "key.pem", "chain_file": "chain.pem"},
+	    "registration_certificate_file": "wrprc.jwt",
+	    "credential_configurations": [{"id": "income", "scope": "income", "vct": "https://x.test/income", "valid_days": 365,
+	      "source_url": "https://src.test/a", "status_list": "income",
+	      "claims": [{"path": ["year"], "mandatory": true}], "display": [{"name": "Income", "locale": "en"}]}]}],
 	  "profiles": [{"name": "eudi", "kind": "eudi", "wallet_provider_roots_file": "roots.pem",
-	    "key_attestation_roots_file": "roots.pem", "registration_certificate_file": "wrprc.jwt",
-	    "key_storage": ["iso_18045_high"], "user_authentication": ["iso_18045_high"],
-	    "access": {"key_file": "key.pem", "chain_file": "chain.pem"}}],
-	  "credential_configurations": [{"id": "income", "scope": "income", "vct": "https://x.test/income", "valid_days": 365,
-	    "source_url": "https://src.test/a", "status_list": "income",
-	    "claims": [{"path": ["year"], "mandatory": true}], "display": [{"name": "Income", "locale": "en"}]}]
+	    "key_attestation_roots_file": "roots.pem",
+	    "key_storage": ["iso_18045_high"], "user_authentication": ["iso_18045_high"]}]
 	}`
 	path := filepath.Join(dir, "issuer.json")
 	if err := os.WriteFile(path, []byte(file), 0o600); err != nil {
@@ -62,11 +64,14 @@ func TestLoad(t *testing.T) {
 	if loaded.SourceEndpoints["income"] != "https://src.test/a" {
 		t.Fatalf("source endpoints %v", loaded.SourceEndpoints)
 	}
-	if len(cfg.Profiles) != 1 || cfg.Profiles[0].Kind != issuance.KindEUDI || len(cfg.Profiles[0].KeyAttestationProviders) != 1 || cfg.Profiles[0].KeyStorage[0] != "iso_18045_high" ||
-		string(cfg.Profiles[0].RegistrationCertificate) != "wrprc" {
+	if len(cfg.Profiles) != 1 || cfg.Profiles[0].Kind != issuance.KindEUDI || len(cfg.Profiles[0].KeyAttestationProviders) != 1 || cfg.Profiles[0].KeyStorage[0] != "iso_18045_high" {
 		t.Fatalf("profiles %+v", cfg.Profiles)
 	}
-	if len(cfg.Configurations) != 1 || cfg.Configurations[0].Scope != "income" || !cfg.Configurations[0].Claims[0].Mandatory {
+	if len(cfg.Providers) != 1 || cfg.Providers[0].Name != "tax" || string(cfg.Providers[0].RegistrationCertificate) != "wrprc" ||
+		cfg.Providers[0].IssuerKey == nil || cfg.Providers[0].StatusKey == nil || cfg.Providers[0].AccessKey == nil {
+		t.Fatalf("providers %+v", cfg.Providers)
+	}
+	if len(cfg.Configurations) != 1 || cfg.Configurations[0].Provider != "tax" || cfg.Configurations[0].Scope != "income" || !cfg.Configurations[0].Claims[0].Mandatory {
 		t.Fatalf("configurations %+v", cfg.Configurations)
 	}
 	if cfg.OfferTTL.String() != "15m0s" || cfg.BatchSize != 4 {
@@ -76,6 +81,9 @@ func TestLoad(t *testing.T) {
 	// A key that does not belong to its certificate is refused.
 	bad := strings.Replace(file, `"issuer": {"key_file": "key.pem", "chain_file": "chain.pem"}`,
 		`"issuer": {"key_file": "key.pem", "chain_file": "other-chain.pem"}`, 1)
+	if bad == file {
+		t.Fatal("the test did not change the issuer chain")
+	}
 	if err := os.WriteFile(path, []byte(bad), 0o600); err != nil {
 		t.Fatal(err)
 	}

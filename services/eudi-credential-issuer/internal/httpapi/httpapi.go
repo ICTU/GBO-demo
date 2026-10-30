@@ -26,14 +26,17 @@ func Public(svc *issuance.Service, log *slog.Logger) http.Handler {
 	h := &handler{svc: svc, log: log}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthz)
-	mux.HandleFunc("GET /.well-known/openid-credential-issuer/{profile}", h.issuerMetadata)
-	mux.HandleFunc("GET /.well-known/oauth-authorization-server/{profile}", h.asMetadata)
-	mux.HandleFunc("POST /{profile}/challenge", h.challenge)
-	mux.HandleFunc("POST /{profile}/token", h.token)
-	mux.HandleFunc("POST /{profile}/nonce", h.nonce)
-	mux.HandleFunc("POST /{profile}/credential", h.credential)
-	mux.HandleFunc("POST /{profile}/credential_preview", h.preview)
-	mux.HandleFunc("GET /status/{list}", h.statusList)
+	// Issuer identifiers are <public URL>/{provider}/{profile}; their
+	// well-known URLs insert the well-known path before them (RFC 8414
+	// section 3, OpenID4VCI 1.0 section 12.2.2).
+	mux.HandleFunc("GET /.well-known/openid-credential-issuer/{provider}/{profile}", h.issuerMetadata)
+	mux.HandleFunc("GET /.well-known/oauth-authorization-server/{provider}/{profile}", h.asMetadata)
+	mux.HandleFunc("POST /{provider}/{profile}/challenge", h.challenge)
+	mux.HandleFunc("POST /{provider}/{profile}/token", h.token)
+	mux.HandleFunc("POST /{provider}/{profile}/nonce", h.nonce)
+	mux.HandleFunc("POST /{provider}/{profile}/credential", h.credential)
+	mux.HandleFunc("POST /{provider}/{profile}/credential_preview", h.preview)
+	mux.HandleFunc("GET /status/{provider}/{list}", h.statusList)
 	return mux
 }
 
@@ -55,6 +58,11 @@ type handler struct {
 	log *slog.Logger
 }
 
+// target is the provider and profile of a request path.
+func target(r *http.Request) issuance.Target {
+	return issuance.Target{Provider: r.PathValue("provider"), Profile: r.PathValue("profile")}
+}
+
 func healthz(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
@@ -64,7 +72,7 @@ func (h *handler) issuerMetadata(w http.ResponseWriter, r *http.Request) {
 	// asks for it), unsigned JSON otherwise (section 12.2.2 requires both).
 	w.Header().Set("Vary", "Accept")
 	if !accepts(r, "application/jwt") {
-		md, err := h.svc.IssuerMetadataJSON(r.PathValue("profile"))
+		md, err := h.svc.IssuerMetadataJSON(target(r))
 		if err != nil {
 			h.fail(w, err)
 			return
@@ -72,7 +80,7 @@ func (h *handler) issuerMetadata(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, md)
 		return
 	}
-	md, err := h.svc.IssuerMetadata(r.PathValue("profile"))
+	md, err := h.svc.IssuerMetadata(target(r))
 	if err != nil {
 		h.fail(w, err)
 		return
@@ -82,7 +90,7 @@ func (h *handler) issuerMetadata(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) asMetadata(w http.ResponseWriter, r *http.Request) {
-	md, err := h.svc.AuthorizationServerMetadata(r.PathValue("profile"))
+	md, err := h.svc.AuthorizationServerMetadata(target(r))
 	if err != nil {
 		h.fail(w, err)
 		return
@@ -91,7 +99,7 @@ func (h *handler) asMetadata(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) challenge(w http.ResponseWriter, r *http.Request) {
-	c, err := h.svc.Challenge(r.Context(), r.PathValue("profile"))
+	c, err := h.svc.Challenge(r.Context(), target(r))
 	if err != nil {
 		h.fail(w, err)
 		return
@@ -107,7 +115,7 @@ func (h *handler) token(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp, err := h.svc.Token(r.Context(), issuance.TokenRequest{
-		Profile:              r.PathValue("profile"),
+		Target:               target(r),
 		GrantType:            r.PostForm.Get("grant_type"),
 		PreAuthorizedCode:    r.PostForm.Get("pre-authorized_code"),
 		TxCode:               r.PostForm.Get("tx_code"),
@@ -125,7 +133,7 @@ func (h *handler) token(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) nonce(w http.ResponseWriter, r *http.Request) {
-	n, err := h.svc.Nonce(r.Context(), r.PathValue("profile"))
+	n, err := h.svc.Nonce(r.Context(), target(r))
 	if err != nil {
 		h.fail(w, err)
 		return
@@ -141,7 +149,7 @@ func (h *handler) credential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp, err := h.svc.Credential(r.Context(), issuance.CredentialCall{
-		Profile:       r.PathValue("profile"),
+		Target:        target(r),
 		Authorization: r.Header.Get("Authorization"),
 		DPoP:          r.Header.Values("DPoP"),
 		Request:       req,
@@ -155,7 +163,7 @@ func (h *handler) credential(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) preview(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.svc.CredentialPreview(r.Context(), r.PathValue("profile"), r.Header.Get("Authorization"))
+	resp, err := h.svc.CredentialPreview(r.Context(), target(r), r.Header.Get("Authorization"))
 	if err != nil {
 		h.failResource(w, err, "Bearer")
 		return
@@ -165,7 +173,7 @@ func (h *handler) preview(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) statusList(w http.ResponseWriter, r *http.Request) {
-	tok, err := h.svc.StatusList(r.Context(), r.PathValue("list"))
+	tok, err := h.svc.StatusList(r.Context(), r.PathValue("provider"), r.PathValue("list"))
 	if err != nil {
 		h.fail(w, err)
 		return
@@ -213,6 +221,8 @@ func (h *handler) failOffer(w http.ResponseWriter, err error) {
 		status, code = http.StatusBadRequest, "unknown_profile"
 	case errors.Is(err, issuance.ErrUnknownConfiguration):
 		status, code = http.StatusBadRequest, "unknown_configuration"
+	case errors.Is(err, issuance.ErrMixedProviders):
+		status, code = http.StatusBadRequest, "mixed_providers"
 	case errors.Is(err, issuance.ErrTxCodeUnsupported):
 		status, code = http.StatusBadRequest, "tx_code_unsupported"
 	case errors.Is(err, issuance.ErrNoData):
@@ -233,6 +243,7 @@ func (h *handler) failOffer(w http.ResponseWriter, err error) {
 // credentials issued for it, or one status list entry.
 type revocationRequest struct {
 	Reference string `json:"reference"`
+	Provider  string `json:"provider"`
 	List      string `json:"list"`
 	Index     *int   `json:"index"`
 }
@@ -240,12 +251,12 @@ type revocationRequest struct {
 func (h *handler) revoke(w http.ResponseWriter, r *http.Request) {
 	var req revocationRequest
 	err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody)).Decode(&req)
-	byReference := req.Reference != "" && req.List == "" && req.Index == nil
-	byEntry := req.Reference == "" && req.List != "" && req.Index != nil
+	byReference := req.Reference != "" && req.Provider == "" && req.List == "" && req.Index == nil
+	byEntry := req.Reference == "" && req.Provider != "" && req.List != "" && req.Index != nil
 	if err != nil || byReference == byEntry {
 		// A revocation cannot be undone, so nothing is guessed.
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_request",
-			"error_description": "give either reference, or list and index"})
+			"error_description": "give either reference, or provider, list and index"})
 		return
 	}
 	if byReference {
@@ -258,7 +269,7 @@ func (h *handler) revoke(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]int{"revoked": n})
 		return
 	}
-	switch err := h.svc.Revoke(r.Context(), req.List, *req.Index); {
+	switch err := h.svc.Revoke(r.Context(), req.Provider, req.List, *req.Index); {
 	case errors.Is(err, issuance.ErrUnknownStatusList), errors.Is(err, issuance.ErrNotFound):
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown_entry"})
 	case err != nil:
@@ -304,7 +315,8 @@ func (h *handler) fail(w http.ResponseWriter, err error) {
 		}
 		h.log.Info("request refused", "error", pe.Code, "error_description", pe.Description)
 		writeJSON(w, status, oid4vci.ErrorResponse{Error: pe.Code, Description: description(pe.Description)})
-	case errors.Is(err, issuance.ErrUnknownProfile), errors.Is(err, issuance.ErrUnknownStatusList):
+	case errors.Is(err, issuance.ErrUnknownProvider), errors.Is(err, issuance.ErrUnknownProfile),
+		errors.Is(err, issuance.ErrUnknownStatusList):
 		http.NotFound(w, nil)
 	default:
 		h.log.Error("request failed", "error", err)

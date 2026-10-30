@@ -23,24 +23,44 @@ import (
 // File is the JSON configuration file. Relative paths are resolved against
 // the directory of the file.
 type File struct {
-	Issuer                   KeyFiles                           `json:"issuer"`
-	Status                   KeyFiles                           `json:"status"`
-	StatusListSize           int                                `json:"status_list_size"`
-	BatchSize                int                                `json:"batch_size"`
-	OfferTTL                 Duration                           `json:"offer_ttl"`
-	TokenTTL                 Duration                           `json:"token_ttl"`
-	NonceTTL                 Duration                           `json:"nonce_ttl"`
-	Profiles                 []ProfileFile                      `json:"profiles"`
-	CredentialConfigurations []issuance.CredentialConfiguration `json:"-"`
-	// SourceEndpoints maps each credential configuration to the bronpoort
-	// URL that serves it (source_url in the file).
-	SourceEndpoints map[string]string `json:"-"`
+	StatusListSize int            `json:"status_list_size"`
+	BatchSize      int            `json:"batch_size"`
+	OfferTTL       Duration       `json:"offer_ttl"`
+	TokenTTL       Duration       `json:"token_ttl"`
+	NonceTTL       Duration       `json:"nonce_ttl"`
+	Providers      []ProviderFile `json:"providers"`
+	Profiles       []ProfileFile  `json:"profiles"`
 }
 
 // KeyFiles names a PEM private key and a PEM certificate chain, leaf first.
 type KeyFiles struct {
 	KeyFile   string `json:"key_file"`
 	ChainFile string `json:"chain_file"`
+}
+
+// ProviderFile configures one Attestation Provider and the credentials it
+// issues.
+type ProviderFile struct {
+	Name   string   `json:"name"`
+	Access KeyFiles `json:"access"`
+	Issuer KeyFiles `json:"issuer"`
+	Status KeyFiles `json:"status"`
+	// RegistrationCertificateFile holds the WRPRC as raw bytes.
+	RegistrationCertificateFile string                        `json:"registration_certificate_file"`
+	CredentialConfigurations    []CredentialConfigurationFile `json:"credential_configurations"`
+}
+
+// CredentialConfigurationFile is issuance.CredentialConfiguration with JSON
+// names, plus the bronpoort URL that belongs to the source adapter.
+type CredentialConfigurationFile struct {
+	ID         string             `json:"id"`
+	VCT        string             `json:"vct"`
+	Scope      string             `json:"scope"`
+	Display    []issuance.Display `json:"display"`
+	Claims     []issuance.Claim   `json:"claims"`
+	ValidDays  int                `json:"valid_days"`
+	StatusList string             `json:"status_list"`
+	SourceURL  string             `json:"source_url"`
 }
 
 // ProfileFile configures one profile.
@@ -51,11 +71,8 @@ type ProfileFile struct {
 	// providers (Wallet Instance Attestations).
 	WalletProviderRootsFile string `json:"wallet_provider_roots_file"`
 	// KeyAttestationRootsFile holds the PEM roots for key attestations.
-	KeyAttestationRootsFile string   `json:"key_attestation_roots_file"`
-	Access                  KeyFiles `json:"access"`
-	// RegistrationCertificateFile holds the WRPRC as raw bytes.
-	RegistrationCertificateFile string `json:"registration_certificate_file"`
-	UniversalLinkBase           string `json:"universal_link_base"`
+	KeyAttestationRootsFile string `json:"key_attestation_roots_file"`
+	UniversalLinkBase       string `json:"universal_link_base"`
 	// KeyStorage and UserAuthentication are the levels a key attestation
 	// must assert (OpenID4VCI Appendix D.2), for example "iso_18045_high".
 	KeyStorage         []string `json:"key_storage"`
@@ -73,41 +90,6 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 	v, err := time.ParseDuration(s)
 	*d = Duration(v)
 	return err
-}
-
-// credentialConfigurationFile is issuance.CredentialConfiguration with
-// JSON names, plus the bronpoort URL that belongs to the source adapter.
-type credentialConfigurationFile struct {
-	ID         string             `json:"id"`
-	VCT        string             `json:"vct"`
-	Scope      string             `json:"scope"`
-	Display    []issuance.Display `json:"display"`
-	Claims     []issuance.Claim   `json:"claims"`
-	ValidDays  int                `json:"valid_days"`
-	StatusList string             `json:"status_list"`
-	SourceURL  string             `json:"source_url"`
-}
-
-// UnmarshalJSON reads credential configurations in their file shape.
-func (f *File) UnmarshalJSON(b []byte) error {
-	type plain File
-	var aux struct {
-		plain
-		CredentialConfigurations []credentialConfigurationFile `json:"credential_configurations"`
-	}
-	if err := json.Unmarshal(b, &aux); err != nil {
-		return err
-	}
-	*f = File(aux.plain)
-	f.SourceEndpoints = map[string]string{}
-	for _, c := range aux.CredentialConfigurations {
-		f.CredentialConfigurations = append(f.CredentialConfigurations, issuance.CredentialConfiguration{
-			ID: c.ID, VCT: c.VCT, Scope: c.Scope, Display: c.Display, Claims: c.Claims,
-			ValidDays: c.ValidDays, StatusList: c.StatusList,
-		})
-		f.SourceEndpoints[c.ID] = c.SourceURL
-	}
-	return nil
 }
 
 // Loaded is the configuration of the issuer core and of the source
@@ -128,56 +110,77 @@ func Load(path, publicURL string) (Loaded, error) {
 	if err := json.Unmarshal(raw, &f); err != nil {
 		return Loaded{}, fmt.Errorf("parse %s: %w", path, err)
 	}
-	for id, u := range f.SourceEndpoints {
-		if u == "" {
-			return Loaded{}, fmt.Errorf("credential configuration %q: source_url is required", id)
+	dir := filepath.Dir(path)
+	out := Loaded{
+		Issuer: issuance.Config{
+			PublicURL: publicURL, StatusListSize: f.StatusListSize, BatchSize: f.BatchSize,
+			OfferTTL: time.Duration(f.OfferTTL), TokenTTL: time.Duration(f.TokenTTL), NonceTTL: time.Duration(f.NonceTTL),
+		},
+		SourceEndpoints: map[string]string{},
+	}
+	for _, pf := range f.Providers {
+		p, err := loadProvider(dir, pf)
+		if err != nil {
+			return Loaded{}, fmt.Errorf("provider %s: %w", pf.Name, err)
 		}
-	}
-	cfg, err := load(f, filepath.Dir(path), publicURL)
-	if err != nil {
-		return Loaded{}, err
-	}
-	return Loaded{Issuer: cfg, SourceEndpoints: f.SourceEndpoints}, nil
-}
-
-func load(f File, dir, publicURL string) (issuance.Config, error) {
-	var err error
-	cfg := issuance.Config{
-		PublicURL: publicURL, Configurations: f.CredentialConfigurations,
-		StatusListSize: f.StatusListSize, BatchSize: f.BatchSize,
-		OfferTTL: time.Duration(f.OfferTTL), TokenTTL: time.Duration(f.TokenTTL), NonceTTL: time.Duration(f.NonceTTL),
-	}
-	if cfg.IssuerKey, cfg.IssuerChain, err = loadKeyFiles(dir, f.Issuer); err != nil {
-		return issuance.Config{}, fmt.Errorf("issuer: %w", err)
-	}
-	if cfg.StatusKey, cfg.StatusChain, err = loadKeyFiles(dir, f.Status); err != nil {
-		return issuance.Config{}, fmt.Errorf("status: %w", err)
+		out.Issuer.Providers = append(out.Issuer.Providers, p)
+		for _, c := range pf.CredentialConfigurations {
+			if c.SourceURL == "" {
+				return Loaded{}, fmt.Errorf("credential configuration %q: source_url is required", c.ID)
+			}
+			out.Issuer.Configurations = append(out.Issuer.Configurations, issuance.CredentialConfiguration{
+				ID: c.ID, Provider: pf.Name, VCT: c.VCT, Scope: c.Scope, Display: c.Display, Claims: c.Claims,
+				ValidDays: c.ValidDays, StatusList: c.StatusList,
+			})
+			out.SourceEndpoints[c.ID] = c.SourceURL
+		}
 	}
 	for _, pf := range f.Profiles {
-		p := issuance.Profile{Name: pf.Name, Kind: pf.Kind, UniversalLinkBase: pf.UniversalLinkBase,
-			KeyStorage: pf.KeyStorage, UserAuthentication: pf.UserAuthentication}
-		if p.AccessKey, p.AccessChain, err = loadKeyFiles(dir, pf.Access); err != nil {
-			return issuance.Config{}, fmt.Errorf("profile %s access certificate: %w", pf.Name, err)
+		p, err := loadProfile(dir, pf)
+		if err != nil {
+			return Loaded{}, fmt.Errorf("profile %s: %w", pf.Name, err)
 		}
-		if p.WalletProviders, err = loadAnchors(dir, pf.WalletProviderRootsFile, pf.Name+" wallet providers"); err != nil {
-			return issuance.Config{}, fmt.Errorf("profile %s: %w", pf.Name, err)
-		}
-		if pf.KeyAttestationRootsFile != "" {
-			if p.KeyAttestationProviders, err = loadAnchors(dir, pf.KeyAttestationRootsFile, pf.Name+" key attestation"); err != nil {
-				return issuance.Config{}, fmt.Errorf("profile %s: %w", pf.Name, err)
-			}
-		}
-		if pf.RegistrationCertificateFile != "" {
-			raw, err := os.ReadFile(resolve(dir, pf.RegistrationCertificateFile))
-			if err != nil {
-				return issuance.Config{}, fmt.Errorf("profile %s registration certificate: %w", pf.Name, err)
-			}
-			// A file usually ends with a newline; the certificate does not.
-			p.RegistrationCertificate = bytes.TrimSpace(raw)
-		}
-		cfg.Profiles = append(cfg.Profiles, p)
+		out.Issuer.Profiles = append(out.Issuer.Profiles, p)
 	}
-	return cfg, nil
+	return out, nil
+}
+
+func loadProvider(dir string, pf ProviderFile) (issuance.Provider, error) {
+	p := issuance.Provider{Name: pf.Name}
+	var err error
+	if p.AccessKey, p.AccessChain, err = loadKeyFiles(dir, pf.Access); err != nil {
+		return p, fmt.Errorf("access certificate: %w", err)
+	}
+	if p.IssuerKey, p.IssuerChain, err = loadKeyFiles(dir, pf.Issuer); err != nil {
+		return p, fmt.Errorf("issuer certificate: %w", err)
+	}
+	if p.StatusKey, p.StatusChain, err = loadKeyFiles(dir, pf.Status); err != nil {
+		return p, fmt.Errorf("status certificate: %w", err)
+	}
+	if pf.RegistrationCertificateFile != "" {
+		raw, err := os.ReadFile(resolve(dir, pf.RegistrationCertificateFile))
+		if err != nil {
+			return p, fmt.Errorf("registration certificate: %w", err)
+		}
+		// A file usually ends with a newline; the certificate does not.
+		p.RegistrationCertificate = bytes.TrimSpace(raw)
+	}
+	return p, nil
+}
+
+func loadProfile(dir string, pf ProfileFile) (issuance.Profile, error) {
+	p := issuance.Profile{Name: pf.Name, Kind: pf.Kind, UniversalLinkBase: pf.UniversalLinkBase,
+		KeyStorage: pf.KeyStorage, UserAuthentication: pf.UserAuthentication}
+	var err error
+	if p.WalletProviders, err = loadAnchors(dir, pf.WalletProviderRootsFile, pf.Name+" wallet providers"); err != nil {
+		return p, err
+	}
+	if pf.KeyAttestationRootsFile != "" {
+		if p.KeyAttestationProviders, err = loadAnchors(dir, pf.KeyAttestationRootsFile, pf.Name+" key attestation"); err != nil {
+			return p, err
+		}
+	}
+	return p, nil
 }
 
 func resolve(dir, path string) string {

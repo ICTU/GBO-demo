@@ -19,17 +19,36 @@ func validate(cfg Config) error {
 	if err := validateProcess(cfg); err != nil {
 		return err
 	}
-	if len(cfg.Profiles) == 0 || len(cfg.Configurations) == 0 {
-		return errors.New("at least one profile and one credential configuration are required")
+	if len(cfg.Providers) == 0 || len(cfg.Profiles) == 0 || len(cfg.Configurations) == 0 {
+		return errors.New("at least one provider, one profile and one credential configuration are required")
 	}
+	nl := false
 	names := map[string]bool{}
 	for _, p := range cfg.Profiles {
-		if p.Name == "" || names[p.Name] || p.Name == "status" || p.Name == ".well-known" {
-			return fmt.Errorf("profile name %q is empty, reserved or used twice", p.Name)
+		if !validName(p.Name) || names[p.Name] {
+			return fmt.Errorf("profile name %q must be unique and only lower-case letters, digits and hyphens", p.Name)
 		}
 		names[p.Name] = true
+		nl = nl || p.Kind == KindNL
 		if err := validateProfile(p); err != nil {
 			return fmt.Errorf("profile %q: %w", p.Name, err)
+		}
+	}
+	vcts := map[string][]string{}
+	for _, c := range cfg.Configurations {
+		vcts[c.Provider] = append(vcts[c.Provider], c.VCT)
+	}
+	providers := map[string]bool{}
+	for _, p := range cfg.Providers {
+		if !validName(p.Name) || providers[p.Name] {
+			return fmt.Errorf("provider name %q must be unique and only lower-case letters, digits and hyphens", p.Name)
+		}
+		providers[p.Name] = true
+		if len(vcts[p.Name]) == 0 {
+			return fmt.Errorf("provider %q has no credential configurations", p.Name)
+		}
+		if err := validateProvider(p, nl, vcts[p.Name]); err != nil {
+			return fmt.Errorf("provider %q: %w", p.Name, err)
 		}
 	}
 	ids := map[string]bool{}
@@ -39,6 +58,9 @@ func validate(cfg Config) error {
 			return fmt.Errorf("credential configuration id %q is empty or used twice", c.ID)
 		}
 		ids[c.ID] = true
+		if !providers[c.Provider] {
+			return fmt.Errorf("credential configuration %q: unknown provider %q", c.ID, c.Provider)
+		}
 		// HAIP 1.0 section 4.3: a scope maps to one credential type.
 		if scopes[c.Scope] {
 			return fmt.Errorf("credential configuration %q: scope %q is used twice", c.ID, c.Scope)
@@ -51,8 +73,22 @@ func validate(cfg Config) error {
 	return nil
 }
 
-// validateProcess checks the public URL, the sizes and durations and the
-// issuer and status signing material.
+// validName allows lower-case letters, digits and hyphens, so that a name is
+// one path segment, cannot collide with the fixed routes and keeps the
+// status list key "provider/list" unambiguous.
+func validName(name string) bool {
+	if name == "" || name == "status" {
+		return false
+	}
+	for _, r := range name {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+// validateProcess checks the public URL and the sizes and durations.
 func validateProcess(cfg Config) error {
 	u, err := url.Parse(cfg.PublicURL)
 	if err != nil || u.Scheme == "" || u.Host == "" || (u.Path != "" && u.Path != "/") || u.RawQuery != "" {
@@ -66,32 +102,40 @@ func validateProcess(cfg Config) error {
 	if cfg.BatchSize < 0 || cfg.StatusListSize < 0 || cfg.OfferTTL < 0 || cfg.TokenTTL < 0 || cfg.NonceTTL < 0 {
 		return errors.New("sizes and durations must not be negative")
 	}
-	for name, key := range map[string]crypto.Signer{"issuer": cfg.IssuerKey, "status": cfg.StatusKey} {
+	return nil
+}
+
+// validateProvider checks a provider's signing material and its
+// registration certificate, which a KindNL profile requires.
+func validateProvider(p Provider, nl bool, vcts []string) error {
+	for name, key := range map[string]crypto.Signer{"access": p.AccessKey, "issuer": p.IssuerKey, "status": p.StatusKey} {
 		if err := checkKey(name, key); err != nil {
 			return err
 		}
 	}
-	if err := checkChain("issuer", cfg.IssuerChain); err != nil {
-		return err
+	for name, chain := range map[string][]*x509.Certificate{"access": p.AccessChain, "issuer": p.IssuerChain, "status": p.StatusChain} {
+		if err := checkChain(name, chain); err != nil {
+			return err
+		}
 	}
-	if err := checkChain("status", cfg.StatusChain); err != nil {
-		return err
-	}
-	if cfg.IssuerChain[0].Subject.String() != cfg.StatusChain[0].Subject.String() {
+	if p.IssuerChain[0].Subject.String() != p.StatusChain[0].Subject.String() {
 		return errors.New("the status list certificate must have the subject of the issuer certificate")
 	}
-	return nil
+	if nl && len(p.RegistrationCertificate) == 0 {
+		return errors.New("the NL Wallet refuses metadata without a registration certificate")
+	}
+	if len(p.RegistrationCertificate) == 0 {
+		return nil
+	}
+	if bytes.ContainsFunc(p.RegistrationCertificate, unicode.IsSpace) {
+		return errors.New("the registration certificate must not contain whitespace")
+	}
+	return checkRegistrationCertificate(p.RegistrationCertificate, p.AccessChain[0], vcts)
 }
 
 func validateProfile(p Profile) error {
 	switch p.Kind {
 	case KindNL:
-		if len(p.RegistrationCertificate) == 0 {
-			return errors.New("the NL Wallet refuses metadata without a registration certificate")
-		}
-		if bytes.ContainsFunc(p.RegistrationCertificate, unicode.IsSpace) {
-			return errors.New("the registration certificate must not contain whitespace")
-		}
 	case KindEUDI:
 		if len(p.KeyAttestationProviders) == 0 {
 			return errors.New("key attestation providers are required")
@@ -105,15 +149,15 @@ func validateProfile(p Profile) error {
 	if len(p.WalletProviders) == 0 {
 		return errors.New("wallet providers are required")
 	}
-	if err := checkKey("access", p.AccessKey); err != nil {
-		return err
-	}
-	return checkChain("access", p.AccessChain)
+	return nil
 }
 
 func validateConfiguration(c CredentialConfiguration) error {
-	if c.VCT == "" || c.StatusList == "" || c.ValidDays <= 0 {
-		return errors.New("vct, status list and valid days are required")
+	if c.VCT == "" || c.ValidDays <= 0 {
+		return errors.New("vct and valid days are required")
+	}
+	if !validName(c.StatusList) {
+		return fmt.Errorf("status list name %q is empty or not lower-case letters, digits and hyphens", c.StatusList)
 	}
 	// HAIP 1.0 section 4.1: a scope for every credential configuration.
 	if c.Scope == "" {

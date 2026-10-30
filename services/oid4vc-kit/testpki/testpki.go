@@ -137,3 +137,12 @@ func NewSelfSignedLeaf(t testing.TB, cn string) Cert {
 	}
 	return Cert{Cert: cert, Key: key, Chain: []*x509.Certificate{cert}}
 }
+
+// OrganizationSubject returns the subject of a legal person's access
+// certificate: a common name, an organization and the organizationIdentifier
+// (2.5.4.97) that a registration certificate binds to.
+func OrganizationSubject(cn, org, organizationIdentifier string) pkix.Name {
+	return pkix.Name{CommonName: cn, Organization: []string{org}, ExtraNames: []pkix.AttributeTypeAndValue{
+		{Type: asn1.ObjectIdentifier{2, 5, 4, 97}, Value: organizationIdentifier},
+	}}
+}

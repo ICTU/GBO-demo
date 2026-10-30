@@ -15,15 +15,15 @@ import (
 
 // Service implements the issuer's use cases.
 type Service struct {
-	cfg      Config
-	profiles map[string]Profile
-	configs  map[string]CredentialConfiguration
-	signer   *sdjwtvc.Signer
-	source   Source
-	sessions Sessions
-	onetime  OneTime
-	status   StatusLists
-	now      func() time.Time
+	cfg       Config
+	providers map[string]*provider
+	profiles  map[string]Profile
+	configs   map[string]CredentialConfiguration
+	source    Source
+	sessions  Sessions
+	onetime   OneTime
+	status    StatusLists
+	now       func() time.Time
 }
 
 // New validates cfg and returns the service. A configuration the wallets of
@@ -33,20 +33,49 @@ func New(cfg Config, source Source, sessions Sessions, onetime OneTime, status S
 		return nil, err
 	}
 	setDefaults(&cfg)
-	s := &Service{cfg: cfg, profiles: map[string]Profile{}, configs: map[string]CredentialConfiguration{},
-		source: source, sessions: sessions, onetime: onetime, status: status, now: now}
+	s := &Service{cfg: cfg, providers: map[string]*provider{}, profiles: map[string]Profile{},
+		configs: map[string]CredentialConfiguration{}, source: source, sessions: sessions,
+		onetime: onetime, status: status, now: now}
+	for _, p := range cfg.Providers {
+		signer, err := sdjwtvc.NewSigner(p.IssuerKey, x5c.Header(p.IssuerChain))
+		if err != nil {
+			return nil, err
+		}
+		s.providers[p.Name] = &provider{Provider: p, signer: signer}
+	}
 	for _, p := range cfg.Profiles {
 		s.profiles[p.Name] = p
 	}
 	for _, c := range cfg.Configurations {
 		s.configs[c.ID] = c
 	}
-	signer, err := sdjwtvc.NewSigner(cfg.IssuerKey, x5c.Header(cfg.IssuerChain))
-	if err != nil {
-		return nil, err
-	}
-	s.signer = signer
 	return s, nil
+}
+
+// provider is a configured provider with its credential signer.
+type provider struct {
+	Provider
+	signer *sdjwtvc.Signer
+}
+
+// Target names a credential issuer identifier: a provider under a profile.
+type Target struct {
+	Provider string
+	Profile  string
+}
+
+// resolve returns the provider and profile of t, or ErrUnknownProvider or
+// ErrUnknownProfile.
+func (s *Service) resolve(t Target) (*provider, Profile, error) {
+	prov, ok := s.providers[t.Provider]
+	if !ok {
+		return nil, Profile{}, ErrUnknownProvider
+	}
+	p, ok := s.profiles[t.Profile]
+	if !ok {
+		return nil, Profile{}, ErrUnknownProfile
+	}
+	return prov, p, nil
 }
 
 func setDefaults(cfg *Config) {
@@ -67,16 +96,10 @@ func setDefaults(cfg *Config) {
 	}
 }
 
-// Identifier is the credential issuer identifier of a profile; it is also
+// Identifier is the credential issuer identifier of a target; it is also
 // the authorization server's issuer identifier.
-func (s *Service) Identifier(profile string) string {
-	return s.cfg.PublicURL + "/" + profile
-}
-
-// Profile returns a known profile.
-func (s *Service) Profile(name string) (Profile, bool) {
-	p, ok := s.profiles[name]
-	return p, ok
+func (s *Service) Identifier(t Target) string {
+	return s.cfg.PublicURL + "/" + t.Provider + "/" + t.Profile
 }
 
 // Error is a refusal with an OAuth/OpenID4VCI error code.
@@ -102,6 +125,11 @@ const (
 	kindPoP       = "attestation_pop_jti"
 	kindPreview   = "preview"
 )
+
+// scoped binds a single-use kind to one issuer identifier, so that a
+// c_nonce or attestation challenge handed out by one provider and profile
+// is not accepted by another.
+func scoped(kind, issuer string) string { return kind + " " + issuer }
 
 func randomToken() (string, error) {
 	b := make([]byte, 32)

@@ -2,6 +2,7 @@ package httpapi_test
 
 import (
 	"crypto/ecdsa"
+	"encoding/base64"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -111,7 +112,7 @@ func TestMetadata(t *testing.T) {
 	anchors := []x5c.Anchors{x5c.NewAnchors("access", f.accessRoot.Cert)}
 	for _, profile := range []string{"nl", "eudi"} {
 		t.Run(profile, func(t *testing.T) {
-			status, body, hdr := get(t, f.public.URL+"/.well-known/openid-credential-issuer/"+profile, "application/jwt")
+			status, body, hdr := get(t, f.public.URL+"/.well-known/openid-credential-issuer/tax/"+profile, "application/jwt")
 			if status != http.StatusOK || hdr.Get("Content-Type") != "application/jwt" {
 				t.Fatalf("M1: status %d", status)
 			}
@@ -148,7 +149,7 @@ func TestMetadata(t *testing.T) {
 
 			// M2 (changed after review): OpenID4VCI section 12.2.2 requires the
 			// unsigned form too.
-			status, plain, hdr := get(t, f.public.URL+"/.well-known/openid-credential-issuer/"+profile, "application/json")
+			status, plain, hdr := get(t, f.public.URL+"/.well-known/openid-credential-issuer/tax/"+profile, "application/json")
 			if status != http.StatusOK || hdr.Get("Content-Type") != "application/json" || !strings.Contains(plain, `"credential_issuer":"`+f.id(profile)+`"`) ||
 				strings.Contains(plain, `"sub"`) {
 				t.Fatalf("M2: unsigned metadata: %d %s", status, plain)
@@ -157,7 +158,7 @@ func TestMetadata(t *testing.T) {
 				t.Fatalf("HAIP 4.1: every configuration has a scope: %s", plain)
 			}
 
-			status, body, _ = get(t, f.public.URL+"/.well-known/oauth-authorization-server/"+profile, "")
+			status, body, _ = get(t, f.public.URL+"/.well-known/oauth-authorization-server/tax/"+profile, "")
 			if status != http.StatusOK || !strings.Contains(body, `"attest_jwt_client_auth"`) || !strings.Contains(body, `"challenge_endpoint":"`+f.id(profile)+`/challenge"`) {
 				t.Fatalf("M4: %d %s", status, body)
 			}
@@ -353,7 +354,7 @@ func TestIssueNL(t *testing.T) {
 	if bits := fetchStatus(t, f, uri); statuslist.Revoked(bits, idx) {
 		t.Fatal("S2: a fresh credential must be valid")
 	}
-	raw := `{"list":"income","index":` + strconv.Itoa(idx) + `}`
+	raw := `{"provider":"tax","list":"income","index":` + strconv.Itoa(idx) + `}`
 	resp, err := http.Post(f.internal.URL+"/revocations", "application/json", strings.NewReader(raw))
 	if err != nil || resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("S2: revoke: %v %v", err, resp)
@@ -473,6 +474,13 @@ func TestIssueEUDI(t *testing.T) {
 
 func fetchStatus(t *testing.T, f *fixture, uri string) []byte {
 	t.Helper()
+	return fetchStatusFrom(t, f.issuerRoot, uri)
+}
+
+// fetchStatusFrom fetches a status list and verifies it against a
+// provider's issuer root.
+func fetchStatusFrom(t *testing.T, issuerRoot testpki.Cert, uri string) []byte {
+	t.Helper()
 	status, body, _ := get(t, uri, "application/statuslist+jwt")
 	if status != http.StatusOK {
 		t.Fatalf("status list: %d", status)
@@ -484,7 +492,7 @@ func fetchStatus(t *testing.T, f *fixture, uri string) []byte {
 	if tok.Headers[0].ExtraHeaders[jose.HeaderType] != statuslist.Type {
 		t.Fatal("status list typ")
 	}
-	leaf, _, err := x5c.Verify(tok.Headers[0], []x5c.Anchors{x5c.NewAnchors("issuer", f.issuerRoot.Cert)}, time.Now(), statusListEKU)
+	leaf, _, err := x5c.Verify(tok.Headers[0], []x5c.Anchors{x5c.NewAnchors("issuer", issuerRoot.Cert)}, time.Now(), statusListEKU)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -532,7 +540,7 @@ func TestRevocation(t *testing.T) {
 		}
 		return decode(t, resp)
 	}
-	for _, bad := range []string{`{"list":"income"}`, `{}`, `{"reference":"case-42","list":"income","index":1}`} {
+	for _, bad := range []string{`{"provider":"tax","list":"income"}`, `{"list":"income","index":1}`, `{}`, `{"reference":"case-42","provider":"tax","list":"income","index":1}`} {
 		if status, _ := revoke(bad); status != http.StatusBadRequest {
 			t.Fatalf("%s: status %d, want 400: a revocation is never guessed", bad, status)
 		}
@@ -573,4 +581,134 @@ func checkPreview(t *testing.T, nl *wallet, accessToken, credID string) map[stri
 		t.Fatalf("second preview: %d %v", status, body)
 	}
 	return payload
+}
+
+// P-1, P-2, P-4, P-6: each provider is its own Attestation Provider under
+// the same issuer service.
+func TestProviders(t *testing.T) {
+	f := newFixture(t)
+
+	t.Run("P-1 metadata of a provider", func(t *testing.T) {
+		status, body, _ := get(t, f.public.URL+"/.well-known/openid-credential-issuer/civil/nl", "application/jwt")
+		if status != http.StatusOK {
+			t.Fatalf("status %d", status)
+		}
+		tok, err := jwt.ParseSigned(body, []jose.SignatureAlgorithm{jose.ES256})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Signed with the civil provider's own access certificate.
+		if _, _, err := x5c.Verify(tok.Headers[0], []x5c.Anchors{x5c.NewAnchors("tax", f.accessRoot.Cert)}, time.Now(), nil); err == nil {
+			t.Fatal("the civil metadata must not verify against the tax access root")
+		}
+		leaf, _, err := x5c.Verify(tok.Headers[0], []x5c.Anchors{x5c.NewAnchors("civil", f.civilAccessRoot.Cert)}, time.Now(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var md map[string]any
+		if err := tok.Claims(leaf.PublicKey, &md); err != nil {
+			t.Fatal(err)
+		}
+		configs := md["credential_configurations_supported"].(map[string]any)
+		if _, ok := configs[deathConfig]; !ok || len(configs) != 1 || md["credential_issuer"] != f.idOf("civil", "nl") {
+			t.Fatalf("civil metadata: %v", md)
+		}
+		info := md["issuer_info"].([]any)[0].(map[string]any)
+		if info["data"] != base64.RawURLEncoding.EncodeToString(f.civilRegistration) {
+			t.Fatalf("issuer_info must carry the civil registration certificate: %v", info)
+		}
+	})
+
+	civilToken := func(t *testing.T, reference string) (*wallet, oid4vci.TokenResponse) {
+		t.Helper()
+		status, body := f.offer(map[string]any{"profile": "nl", "credential_configuration_ids": []string{deathConfig},
+			"subject": map[string]any{"bsn": "1"}, "reference": reference})
+		if status != http.StatusCreated || body["credential_offer"].(map[string]any)["credential_issuer"] != f.idOf("civil", "nl") {
+			t.Fatalf("civil offer: %d %v", status, body)
+		}
+		code := body["credential_offer"].(map[string]any)["grants"].(map[string]any)[oid4vci.GrantPreAuthorizedCode].(map[string]any)["pre-authorized_code"].(string)
+		w := f.wallet("nl")
+		w.issuer = "civil"
+		return w, w.token(code)
+	}
+	issue := func(t *testing.T, w *wallet, tok oid4vci.TokenResponse) string {
+		t.Helper()
+		status, body := w.credentialRequest(tok.AccessToken, w.dpopKey, oid4vci.CredentialRequest{
+			CredentialIdentifier: tok.AuthorizationDetails[0].CredentialIdentifiers[0],
+			Proofs:               &oid4vci.Proofs{JWT: []string{testwallet.JWTProof(t, testpki.NewKey(t), f.idOf(w.issuer, w.profile), w.nonce(), "")}},
+		})
+		if status != http.StatusOK {
+			t.Fatalf("credential: %d %v", status, body)
+		}
+		return body["credentials"].([]any)[0].(map[string]any)["credential"].(string)
+	}
+
+	t.Run("P-2 credential signed by its provider", func(t *testing.T) {
+		w, tok := civilToken(t, "")
+		cred := issue(t, w, tok)
+		if _, err := sdjwtvc.Parse(cred, []x5c.Anchors{x5c.NewAnchors("tax", f.issuerRoot.Cert)}, nil, time.Now()); err == nil {
+			t.Fatal("a civil credential must not verify against the tax issuer root")
+		}
+		parsed, err := sdjwtvc.Parse(cred, []x5c.Anchors{x5c.NewAnchors("civil", f.civilIssuerRoot.Cert)}, mdlIssuerEKU, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		uri := parsed.Claims["status"].(map[string]any)["status_list"].(map[string]any)["uri"].(string)
+		if uri != f.public.URL+"/status/civil/death" {
+			t.Fatalf("status uri %s", uri)
+		}
+		fetchStatusFrom(t, f.civilIssuerRoot, uri)
+	})
+
+	t.Run("P-4 a code of one provider does not work at another", func(t *testing.T) {
+		status, body := f.offer(map[string]any{"profile": "nl", "credential_configuration_ids": []string{deathConfig}, "subject": map[string]any{"bsn": "1"}})
+		if status != http.StatusCreated {
+			t.Fatal(body)
+		}
+		code := body["credential_offer"].(map[string]any)["grants"].(map[string]any)[oid4vci.GrantPreAuthorizedCode].(map[string]any)["pre-authorized_code"].(string)
+		tax := f.wallet("nl") // talks to the tax provider
+		if status, body := tax.tokenRequest(code, nil); status != http.StatusBadRequest || body["error"] != oid4vci.ErrInvalidGrant {
+			t.Fatalf("civil code at tax: %d %v", status, body)
+		}
+		civil := f.wallet("nl")
+		civil.issuer = "civil"
+		civil.token(code) // the refusal did not burn it
+	})
+
+	t.Run("P-4 a token of one provider does not work at another", func(t *testing.T) {
+		w, tok := civilToken(t, "")
+		w.issuer = "tax"
+		status, body := w.credentialRequest(tok.AccessToken, w.dpopKey, oid4vci.CredentialRequest{
+			CredentialIdentifier: tok.AuthorizationDetails[0].CredentialIdentifiers[0],
+			Proofs:               &oid4vci.Proofs{JWT: []string{testwallet.JWTProof(t, testpki.NewKey(t), f.id("nl"), w.nonce(), "")}},
+		})
+		if status != http.StatusUnauthorized || body["error"] != oid4vci.ErrInvalidToken {
+			t.Fatalf("civil token at tax: %d %v", status, body)
+		}
+	})
+
+	t.Run("P-6 revocation by reference spans providers", func(t *testing.T) {
+		w, tok := civilToken(t, "case-77")
+		civilCred := issue(t, w, tok)
+		taxWallet := f.wallet("nl")
+		taxTok := taxWallet.token(f.preAuthCodeRef("nl", "case-77"))
+		taxCred := issue(t, taxWallet, taxTok)
+		resp, err := http.Post(f.internal.URL+"/revocations", "application/json", strings.NewReader(`{"reference":"case-77"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if status, body := decode(t, resp); status != http.StatusOK || body["revoked"] != float64(2) {
+			t.Fatalf("revoke: %d %v", status, body)
+		}
+		for root, cred := range map[*testpki.Cert]string{&f.civilIssuerRoot: civilCred, &f.issuerRoot: taxCred} {
+			parsed, err := sdjwtvc.Parse(cred, []x5c.Anchors{x5c.NewAnchors("p", root.Cert)}, nil, time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			ref := parsed.Claims["status"].(map[string]any)["status_list"].(map[string]any)
+			if bits := fetchStatusFrom(t, *root, ref["uri"].(string)); !statuslist.Revoked(bits, int(ref["idx"].(float64))) {
+				t.Fatalf("credential at %s is not revoked", ref["uri"])
+			}
+		}
+	})
 }
