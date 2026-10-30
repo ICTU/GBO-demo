@@ -7,6 +7,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Added
+- **Own credential issuer, first phase** (#614): `services/eudi-credential-issuer`
+  issues SD-JWT VCs with the Pre-Authorized Code Flow of OpenID4VCI 1.0 and
+  HAIP 1.0, for two wallet profiles: the NL Wallet (v0.6.0 contract, with its
+  preview endpoint) and wallets that require key attestation, such as the EUDI
+  reference wallet. It authenticates wallets with a Wallet Instance
+  Attestation, binds tokens with DPoP, signs its metadata and publishes Token
+  Status Lists. Offers are created through an internal API that fetches the
+  data from the bronpoort with the contract `eudi-adapter` already serves.
+  The protocol building blocks live in the new library `services/oid4vc-kit`.
+  The issuer is not deployed; `eudi-issuance-server` stays in place.
 - **The BRP mock publishes the `asi` capability** (#592, step 2): its source
   metadata, now version 2.6.0 at schema 1.1, maps its own fields onto the five
   demo attributes the ASIP verifies. Its API, its policy rule and its EUDI

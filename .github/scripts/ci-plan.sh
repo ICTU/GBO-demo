@@ -65,11 +65,13 @@ dev-portal-backend
 dienstverlener-backend
 dvtp-onboarding-register
 eudi-adapter
+eudi-credential-issuer
 ftv-graphql-mapper
 graphql-server
 ldv-client
 ldv-logboek
 lvg-graphql-server
+oid4vc-kit
 qtsp-reference
 SERVICES
 
@@ -89,6 +91,10 @@ fi
 
 if matches_any 'services/asi-mapping/*'; then
   go="$(append_unique "${go}" 'eudi-adapter')"
+fi
+
+if matches_any 'services/oid4vc-kit/*'; then
+  go="$(append_unique "${go}" 'eudi-credential-issuer')"
 fi
 
 # The source metadata schemas, GBO's attribute catalogue and the published
