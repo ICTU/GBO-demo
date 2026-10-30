@@ -207,20 +207,31 @@ func (s *Store) Token(ctx context.Context, tokenHash string, now time.Time) (iss
 	return t, sess, nil
 }
 
-func (s *Store) MarkIssued(ctx context.Context, sessionID, credentialID string) (bool, error) {
-	tag, err := s.pool.Exec(ctx, `INSERT INTO issued_credentials (session_id, credential_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-		sessionID, credentialID)
-	if err != nil {
-		return false, err
+func (s *Store) ReserveIssue(ctx context.Context, sessionID, credentialID string, now, until time.Time) (bool, error) {
+	// One statement: a new row is a reservation; an existing one is taken
+	// over only when it is a reservation that has expired.
+	var reserved bool
+	err := s.pool.QueryRow(ctx, `INSERT INTO issued_credentials (session_id, credential_id, state, reserved_until)
+		VALUES ($1, $2, 'reserved', $4)
+		ON CONFLICT (session_id, credential_id) DO UPDATE SET reserved_until = EXCLUDED.reserved_until
+		WHERE issued_credentials.state = 'reserved' AND issued_credentials.reserved_until <= $3
+		RETURNING true`, sessionID, credentialID, now, until).Scan(&reserved)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
 	}
-	return tag.RowsAffected() == 1, nil
+	return reserved, err
 }
 
-func (s *Store) IsIssued(ctx context.Context, sessionID, credentialID string) (bool, error) {
-	var issued bool
-	err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM issued_credentials WHERE session_id = $1 AND credential_id = $2)`,
-		sessionID, credentialID).Scan(&issued)
-	return issued, err
+func (s *Store) CompleteIssue(ctx context.Context, sessionID, credentialID string) error {
+	_, err := s.pool.Exec(ctx, `UPDATE issued_credentials SET state = 'issued', reserved_until = NULL
+		WHERE session_id = $1 AND credential_id = $2`, sessionID, credentialID)
+	return err
+}
+
+func (s *Store) ReleaseIssue(ctx context.Context, sessionID, credentialID string) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM issued_credentials WHERE session_id = $1 AND credential_id = $2 AND state = 'reserved'`,
+		sessionID, credentialID)
+	return err
 }
 
 func (s *Store) Put(ctx context.Context, kind, value string, expiry time.Time) error {
@@ -251,12 +262,40 @@ func (s *Store) FirstUse(ctx context.Context, kind, id string, expiry, now time.
 }
 
 func (s *Store) Allocate(ctx context.Context, list string, size int, reference string) (int, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockReference(ctx, tx, reference); err != nil {
+		return 0, err
+	}
+	idx, err := allocate(ctx, tx, list, size, reference)
+	if err != nil {
+		return 0, err
+	}
+	return idx, tx.Commit(ctx)
+}
+
+// lockReference serialises allocation and revocation for one reference,
+// until the transaction ends. Without it an allocation that read "not
+// revoked" could commit after a revocation had already updated the
+// entries.
+func lockReference(ctx context.Context, tx pgx.Tx, reference string) error {
+	if reference == "" {
+		return nil
+	}
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('gbo_issuer_reference:' || $1))`, reference)
+	return err
+}
+
+func allocate(ctx context.Context, tx pgx.Tx, list string, size int, reference string) (int, error) {
 	for range allocateAttempts {
 		n, err := rand.Int(rand.Reader, big.NewInt(int64(size)))
 		if err != nil {
 			return 0, err
 		}
-		tag, err := s.pool.Exec(ctx, `INSERT INTO status_entries (list, idx, reference, revoked)
+		tag, err := tx.Exec(ctx, `INSERT INTO status_entries (list, idx, reference, revoked)
 			VALUES ($1, $2, $3, $3 <> '' AND EXISTS (SELECT 1 FROM revoked_references WHERE reference = $3))
 			ON CONFLICT DO NOTHING`, list, n.Int64(), reference)
 		if err != nil {
@@ -271,14 +310,14 @@ func (s *Store) Allocate(ctx context.Context, list string, size int, reference s
 	// none is free.
 	for {
 		var free bool
-		if err := s.pool.QueryRow(ctx, `SELECT count(*) < $2 FROM status_entries WHERE list = $1`, list, size).Scan(&free); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT count(*) < $2 FROM status_entries WHERE list = $1`, list, size).Scan(&free); err != nil {
 			return 0, err
 		}
 		if !free {
 			return 0, fmt.Errorf("status list %q is full", list)
 		}
 		var idx int
-		err := s.pool.QueryRow(ctx, `INSERT INTO status_entries (list, idx, reference, revoked)
+		err := tx.QueryRow(ctx, `INSERT INTO status_entries (list, idx, reference, revoked)
 			SELECT $1, g, $3, $3 <> '' AND EXISTS (SELECT 1 FROM revoked_references WHERE reference = $3)
 			FROM generate_series(0, $2 - 1) g
 			WHERE NOT EXISTS (SELECT 1 FROM status_entries e WHERE e.list = $1 AND e.idx = g)
@@ -307,17 +346,25 @@ func (s *Store) RevokeReference(ctx context.Context, reference string) (int, err
 	if reference == "" {
 		return 0, nil
 	}
-	// The reference is recorded first. An entry allocated for it from then
-	// on is born revoked (see Allocate); one allocated earlier is caught by
-	// the update below.
-	if _, err := s.pool.Exec(ctx, `INSERT INTO revoked_references (reference) VALUES ($1) ON CONFLICT DO NOTHING`, reference); err != nil {
-		return 0, err
-	}
-	tag, err := s.pool.Exec(ctx, `UPDATE status_entries SET revoked = true WHERE reference = $1 AND NOT revoked`, reference)
+	// Under the reference lock: entries allocated before are revoked by the
+	// update, entries allocated after see the recorded reference and are
+	// born revoked (see Allocate).
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return 0, err
 	}
-	return int(tag.RowsAffected()), nil
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockReference(ctx, tx, reference); err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO revoked_references (reference) VALUES ($1) ON CONFLICT DO NOTHING`, reference); err != nil {
+		return 0, err
+	}
+	tag, err := tx.Exec(ctx, `UPDATE status_entries SET revoked = true WHERE reference = $1 AND NOT revoked`, reference)
+	if err != nil {
+		return 0, err
+	}
+	return int(tag.RowsAffected()), tx.Commit(ctx)
 }
 
 func (s *Store) ReferenceRevoked(ctx context.Context, reference string) (bool, error) {

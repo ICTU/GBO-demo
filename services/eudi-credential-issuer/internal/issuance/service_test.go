@@ -9,6 +9,7 @@ import (
 	"encoding/asn1"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -38,12 +39,21 @@ func (s *fakeSource) Fetch(context.Context, string, map[string]any, map[string]s
 // countingStore counts status list allocations.
 type countingStore struct {
 	*memstore.Store
+	mu          sync.Mutex
 	allocations int
 }
 
 func (s *countingStore) Allocate(ctx context.Context, list string, size int, reference string) (int, error) {
+	s.mu.Lock()
 	s.allocations++
+	s.mu.Unlock()
 	return s.Store.Allocate(ctx, list, size, reference)
+}
+
+func (s *countingStore) count() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.allocations
 }
 
 type env struct {
@@ -228,13 +238,44 @@ func TestRepeatedRequestAllocatesNothing(t *testing.T) {
 	if _, err := credential(t, e, tok, dpopKey, jwtProof(t, e)); err != nil {
 		t.Fatal(err)
 	}
-	before := e.store.allocations
+	before := e.store.count()
 	for range 3 {
 		_, err := credential(t, e, tok, dpopKey, jwtProof(t, e))
 		refusedWith(t, err, oid4vci.ErrInvalidCredentialRequest)
 	}
-	if e.store.allocations != before {
-		t.Fatalf("repeated requests allocated %d status entries", e.store.allocations-before)
+	if e.store.count() != before {
+		t.Fatalf("repeated requests allocated %d status entries", e.store.count()-before)
+	}
+}
+
+func TestConcurrentRequestsAllocateOnce(t *testing.T) {
+	e := newEnv(t)
+	_, c := code(t, e, "nl", "")
+	tok, dpopKey, err := token(t, e, "nl", c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proofs := make([]*oid4vci.Proofs, 8)
+	for i := range proofs {
+		proofs[i] = jwtProof(t, e)
+	}
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	issued := 0
+	for _, p := range proofs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := credential(t, e, tok, dpopKey, p); err == nil {
+				mu.Lock()
+				issued++
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	if issued != 1 || e.store.count() != 1 {
+		t.Fatalf("%d requests issued, %d status entries allocated; want 1 and 1", issued, e.store.count())
 	}
 }
 

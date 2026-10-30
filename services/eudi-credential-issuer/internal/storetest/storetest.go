@@ -31,10 +31,12 @@ func Run(t *testing.T, newStore func(t *testing.T) Store) {
 		{"a code is redeemed once and only before it expires", redeemOnce},
 		{"concurrent redemptions: exactly one wins", redeemConcurrently},
 		{"tokens resolve to their session until they expire", tokens},
-		{"a credential is marked issued once", markIssued},
+		{"a credential is reserved and issued once", reserveIssue},
+		{"concurrent reservations: exactly one wins", reserveConcurrently},
 		{"single-use values", singleUse},
 		{"status entries", statusEntries},
 		{"revocation by reference", revokeByReference},
+		{"revocation and concurrent allocation", revokeWhileAllocating},
 	} {
 		t.Run(c.name, func(t *testing.T) { c.test(t, newStore(t)) })
 	}
@@ -120,21 +122,69 @@ func tokens(t *testing.T, s Store) {
 	}
 }
 
-func markIssued(t *testing.T, s Store) {
+func reserveIssue(t *testing.T, s Store) {
 	if err := s.CreateSession(ctx, issuance.Session{ID: "s1", Profile: "nl", CodeHash: "c1", ExpiresAt: now.Add(time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
-	if issued, err := s.IsIssued(ctx, "s1", "d1"); err != nil || issued {
-		t.Fatalf("before: %v %v", issued, err)
+	reserve := func(at time.Time) bool {
+		t.Helper()
+		ok, err := s.ReserveIssue(ctx, "s1", "d1", at, at.Add(time.Minute))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ok
 	}
-	if first, err := s.MarkIssued(ctx, "s1", "d1"); err != nil || !first {
-		t.Fatalf("first: %v %v", first, err)
+	if !reserve(now) {
+		t.Fatal("the first reservation succeeds")
 	}
-	if issued, err := s.IsIssued(ctx, "s1", "d1"); err != nil || !issued {
-		t.Fatalf("after: %v %v", issued, err)
+	if reserve(now) {
+		t.Fatal("a live reservation blocks another")
 	}
-	if first, err := s.MarkIssued(ctx, "s1", "d1"); err != nil || first {
-		t.Fatalf("second: %v %v", first, err)
+	if !reserve(now.Add(2 * time.Minute)) {
+		t.Fatal("an expired reservation can be taken over")
+	}
+	if err := s.ReleaseIssue(ctx, "s1", "d1"); err != nil {
+		t.Fatal(err)
+	}
+	if !reserve(now) {
+		t.Fatal("a released reservation can be made again")
+	}
+	if err := s.CompleteIssue(ctx, "s1", "d1"); err != nil {
+		t.Fatal(err)
+	}
+	if reserve(now.Add(time.Hour)) {
+		t.Fatal("an issued credential cannot be reserved again")
+	}
+	// Releasing an issued credential leaves it issued.
+	if err := s.ReleaseIssue(ctx, "s1", "d1"); err != nil {
+		t.Fatal(err)
+	}
+	if reserve(now.Add(time.Hour)) {
+		t.Fatal("release must not undo issuance")
+	}
+}
+
+func reserveConcurrently(t *testing.T, s Store) {
+	if err := s.CreateSession(ctx, issuance.Session{ID: "s1", Profile: "nl", CodeHash: "c1", ExpiresAt: now.Add(time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	wins := 0
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if ok, err := s.ReserveIssue(ctx, "s1", "d1", now, now.Add(time.Minute)); err == nil && ok {
+				mu.Lock()
+				wins++
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	if wins != 1 {
+		t.Fatalf("%d reservations succeeded", wins)
 	}
 }
 
@@ -227,5 +277,39 @@ func revokeByReference(t *testing.T, s Store) {
 	}
 	if revoked, _ := s.ReferenceRevoked(ctx, "case-4"); !revoked {
 		t.Fatal("an unused reference is recorded as revoked")
+	}
+}
+
+// revokeWhileAllocating revokes a reference while entries for it are being
+// allocated: afterwards no entry for the reference may be valid.
+func revokeWhileAllocating(t *testing.T, s Store) {
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := s.Allocate(ctx, "income", 4096, "case-r"); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if _, err := s.RevokeReference(ctx, "case-r"); err != nil {
+			t.Error(err)
+		}
+	}()
+	wg.Wait()
+	// Allocate once more for the reference: born revoked.
+	if _, err := s.Allocate(ctx, "income", 4096, "case-r"); err != nil {
+		t.Fatal(err)
+	}
+	revoked, err := s.Revoked(ctx, "income")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(revoked) != 17 {
+		t.Fatalf("%d of 17 entries for the revoked reference are revoked", len(revoked))
 	}
 }

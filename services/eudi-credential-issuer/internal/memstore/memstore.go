@@ -24,6 +24,7 @@ type Store struct {
 	used     map[string]bool
 	tokens   map[string]issuance.AccessToken
 	issued   map[string]bool
+	reserved map[string]time.Time
 	values   map[string]time.Time
 	status   map[string]map[int]*entry
 	revoked  map[string]bool
@@ -38,7 +39,7 @@ type entry struct {
 func New() *Store {
 	return &Store{
 		sessions: map[string]issuance.Session{}, byCode: map[string]string{}, used: map[string]bool{},
-		tokens: map[string]issuance.AccessToken{}, issued: map[string]bool{}, values: map[string]time.Time{},
+		tokens: map[string]issuance.AccessToken{}, issued: map[string]bool{}, reserved: map[string]time.Time{}, values: map[string]time.Time{},
 		status: map[string]map[int]*entry{}, revoked: map[string]bool{},
 	}
 }
@@ -86,21 +87,34 @@ func (s *Store) Token(_ context.Context, tokenHash string, now time.Time) (issua
 	return t, s.sessions[t.SessionID], nil
 }
 
-func (s *Store) MarkIssued(_ context.Context, sessionID, credentialID string) (bool, error) {
+func (s *Store) ReserveIssue(_ context.Context, sessionID, credentialID string, now, until time.Time) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := sessionID + "/" + credentialID
 	if s.issued[key] {
 		return false, nil
 	}
-	s.issued[key] = true
+	if exp, ok := s.reserved[key]; ok && now.Before(exp) {
+		return false, nil
+	}
+	s.reserved[key] = until
 	return true, nil
 }
 
-func (s *Store) IsIssued(_ context.Context, sessionID, credentialID string) (bool, error) {
+func (s *Store) CompleteIssue(_ context.Context, sessionID, credentialID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.issued[sessionID+"/"+credentialID], nil
+	key := sessionID + "/" + credentialID
+	delete(s.reserved, key)
+	s.issued[key] = true
+	return nil
+}
+
+func (s *Store) ReleaseIssue(_ context.Context, sessionID, credentialID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.reserved, sessionID+"/"+credentialID)
+	return nil
 }
 
 func (s *Store) Put(_ context.Context, kind, value string, expiry time.Time) error {

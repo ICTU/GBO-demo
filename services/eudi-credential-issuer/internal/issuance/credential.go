@@ -85,28 +85,50 @@ func (s *Service) Credential(ctx context.Context, call CredentialCall) (oid4vci.
 	} else if revoked {
 		return oid4vci.CredentialResponse{}, refuse(oid4vci.ErrCredentialRequestDenied, "the offer has been revoked")
 	}
-	// Checked before anything is allocated, so a repeated request does not
-	// use up status list entries.
-	if issued, err := s.sessions.IsIssued(ctx, session.ID, doc.CredentialID); err != nil {
-		return oid4vci.CredentialResponse{}, err
-	} else if issued {
-		return oid4vci.CredentialResponse{}, refuse(oid4vci.ErrInvalidCredentialRequest, "this credential has been issued already")
-	}
 	keys, err := s.holderKeys(ctx, p, req.Proofs)
 	if err != nil {
 		return oid4vci.CredentialResponse{}, err
 	}
-
 	c, ok := s.configs[doc.ConfigurationID]
 	if !ok {
 		return oid4vci.CredentialResponse{}, refuse(oid4vci.ErrUnknownCredentialID, "the credential configuration is no longer offered")
 	}
+
+	// The credential is reserved before anything is allocated for it, so a
+	// repeated or concurrent request uses up no status list entries. The
+	// reservation is released when issuing fails, and expires if the
+	// process dies in between.
+	if reserved, err := s.sessions.ReserveIssue(ctx, session.ID, doc.CredentialID, now, now.Add(issueReservation)); err != nil {
+		return oid4vci.CredentialResponse{}, err
+	} else if !reserved {
+		return oid4vci.CredentialResponse{}, refuse(oid4vci.ErrInvalidCredentialRequest, "this credential has been issued already or is being issued")
+	}
+	out, err := s.issue(ctx, c, doc, session.Reference, keys, now)
+	if err != nil {
+		if rerr := s.sessions.ReleaseIssue(ctx, session.ID, doc.CredentialID); rerr != nil {
+			return oid4vci.CredentialResponse{}, errors.Join(err, rerr)
+		}
+		return oid4vci.CredentialResponse{}, err
+	}
+	if err := s.sessions.CompleteIssue(ctx, session.ID, doc.CredentialID); err != nil {
+		return oid4vci.CredentialResponse{}, err
+	}
+	return out, nil
+}
+
+// issueReservation is how long a credential stays reserved for the request
+// that issues it.
+const issueReservation = time.Minute
+
+// issue signs one credential per holder key, each with its own status list
+// entry.
+func (s *Service) issue(ctx context.Context, c CredentialConfiguration, doc Document, reference string, keys []jose.JSONWebKey, now time.Time) (oid4vci.CredentialResponse, error) {
 	// iat is rounded to the day, so the copies of a batch cannot be linked
 	// by it (RFC 9901 section 10.1).
 	issuedAt := now.UTC().Truncate(24 * time.Hour)
 	out := oid4vci.CredentialResponse{}
 	for _, k := range keys {
-		idx, err := s.status.Allocate(ctx, c.StatusList, s.cfg.StatusListSize, session.Reference)
+		idx, err := s.status.Allocate(ctx, c.StatusList, s.cfg.StatusListSize, reference)
 		if err != nil {
 			return oid4vci.CredentialResponse{}, err
 		}
@@ -123,14 +145,6 @@ func (s *Service) Credential(ctx context.Context, call CredentialCall) (oid4vci.
 			return oid4vci.CredentialResponse{}, err
 		}
 		out.Credentials = append(out.Credentials, oid4vci.IssuedCredential{Credential: cred})
-	}
-	// Marked only after everything that can fail, so a failure leaves the
-	// credential issuable. Of two concurrent requests one gets the
-	// credentials; the status entries of the other stay allocated, unused.
-	if first, err := s.sessions.MarkIssued(ctx, session.ID, doc.CredentialID); err != nil {
-		return oid4vci.CredentialResponse{}, err
-	} else if !first {
-		return oid4vci.CredentialResponse{}, refuse(oid4vci.ErrInvalidCredentialRequest, "this credential has been issued already")
 	}
 	return out, nil
 }
