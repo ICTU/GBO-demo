@@ -24,7 +24,7 @@ type Store struct {
 	used     map[string]bool
 	tokens   map[string]issuance.AccessToken
 	issued   map[string]bool
-	reserved map[string]time.Time
+	reserved map[string]reservation
 	values   map[string]time.Time
 	status   map[string]map[int]*entry
 	revoked  map[string]bool
@@ -39,7 +39,7 @@ type entry struct {
 func New() *Store {
 	return &Store{
 		sessions: map[string]issuance.Session{}, byCode: map[string]string{}, used: map[string]bool{},
-		tokens: map[string]issuance.AccessToken{}, issued: map[string]bool{}, reserved: map[string]time.Time{}, values: map[string]time.Time{},
+		tokens: map[string]issuance.AccessToken{}, issued: map[string]bool{}, reserved: map[string]reservation{}, values: map[string]time.Time{},
 		status: map[string]map[int]*entry{}, revoked: map[string]bool{},
 	}
 }
@@ -87,33 +87,45 @@ func (s *Store) Token(_ context.Context, tokenHash string, now time.Time) (issua
 	return t, s.sessions[t.SessionID], nil
 }
 
-func (s *Store) ReserveIssue(_ context.Context, sessionID, credentialID string, now, until time.Time) (bool, error) {
+// reservation is who reserved a credential, until when.
+type reservation struct {
+	owner string
+	until time.Time
+}
+
+func (s *Store) ReserveIssue(_ context.Context, sessionID, credentialID, owner string, now, until time.Time) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := sessionID + "/" + credentialID
 	if s.issued[key] {
 		return false, nil
 	}
-	if exp, ok := s.reserved[key]; ok && now.Before(exp) {
+	if r, ok := s.reserved[key]; ok && now.Before(r.until) {
 		return false, nil
 	}
-	s.reserved[key] = until
+	s.reserved[key] = reservation{owner: owner, until: until}
 	return true, nil
 }
 
-func (s *Store) CompleteIssue(_ context.Context, sessionID, credentialID string) error {
+func (s *Store) CompleteIssue(_ context.Context, sessionID, credentialID, owner string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := sessionID + "/" + credentialID
+	if r, ok := s.reserved[key]; !ok || r.owner != owner || s.issued[key] {
+		return false, nil
+	}
 	delete(s.reserved, key)
 	s.issued[key] = true
-	return nil
+	return true, nil
 }
 
-func (s *Store) ReleaseIssue(_ context.Context, sessionID, credentialID string) error {
+func (s *Store) ReleaseIssue(_ context.Context, sessionID, credentialID, owner string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.reserved, sessionID+"/"+credentialID)
+	key := sessionID + "/" + credentialID
+	if r, ok := s.reserved[key]; ok && r.owner == owner {
+		delete(s.reserved, key)
+	}
 	return nil
 }
 

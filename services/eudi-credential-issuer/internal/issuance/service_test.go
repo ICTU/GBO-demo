@@ -332,3 +332,31 @@ func TestChallengeRefusalCarriesFreshChallenge(t *testing.T) {
 		t.Fatalf("want a fresh challenge, got %+v", pe)
 	}
 }
+
+// lossyStore hands every reservation to another request before the issuing
+// request completes, as when a request outlives its reservation.
+type lossyStore struct{ *countingStore }
+
+func (s lossyStore) CompleteIssue(context.Context, string, string, string) (bool, error) {
+	return false, nil
+}
+
+func TestARequestThatLostItsReservationReturnsNothing(t *testing.T) {
+	cfg, provider := validConfig(t)
+	store := lossyStore{&countingStore{Store: memstore.New()}}
+	svc, err := issuance.New(cfg, &fakeSource{}, store, store, store, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := env{svc: svc, store: store.countingStore, provider: provider}
+	_, c := code(t, e, "nl", "")
+	tok, dpopKey, err := token(t, e, "nl", c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := credential(t, e, tok, dpopKey, jwtProof(t, e))
+	refusedWith(t, err, oid4vci.ErrInvalidCredentialRequest)
+	if len(resp.Credentials) != 0 {
+		t.Fatal("a request that lost its reservation must not return credentials")
+	}
+}

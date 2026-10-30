@@ -98,20 +98,28 @@ func (s *Service) Credential(ctx context.Context, call CredentialCall) (oid4vci.
 	// repeated or concurrent request uses up no status list entries. The
 	// reservation is released when issuing fails, and expires if the
 	// process dies in between.
-	if reserved, err := s.sessions.ReserveIssue(ctx, session.ID, doc.CredentialID, now, now.Add(issueReservation)); err != nil {
+	owner, err := randomToken()
+	if err != nil {
+		return oid4vci.CredentialResponse{}, err
+	}
+	if reserved, err := s.sessions.ReserveIssue(ctx, session.ID, doc.CredentialID, owner, now, now.Add(issueReservation)); err != nil {
 		return oid4vci.CredentialResponse{}, err
 	} else if !reserved {
 		return oid4vci.CredentialResponse{}, refuse(oid4vci.ErrInvalidCredentialRequest, "this credential has been issued already or is being issued")
 	}
 	out, err := s.issue(ctx, c, doc, session.Reference, keys, now)
 	if err != nil {
-		if rerr := s.sessions.ReleaseIssue(ctx, session.ID, doc.CredentialID); rerr != nil {
+		if rerr := s.sessions.ReleaseIssue(ctx, session.ID, doc.CredentialID, owner); rerr != nil {
 			return oid4vci.CredentialResponse{}, errors.Join(err, rerr)
 		}
 		return oid4vci.CredentialResponse{}, err
 	}
-	if err := s.sessions.CompleteIssue(ctx, session.ID, doc.CredentialID); err != nil {
+	// A request that took longer than its reservation may have lost it to
+	// another; then the other issues, and this one returns nothing.
+	if completed, err := s.sessions.CompleteIssue(ctx, session.ID, doc.CredentialID, owner); err != nil {
 		return oid4vci.CredentialResponse{}, err
+	} else if !completed {
+		return oid4vci.CredentialResponse{}, refuse(oid4vci.ErrInvalidCredentialRequest, "the reservation for this credential was lost to another request")
 	}
 	return out, nil
 }

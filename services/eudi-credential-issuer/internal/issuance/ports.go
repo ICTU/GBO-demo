@@ -44,15 +44,17 @@ type Sessions interface {
 	// Token returns an unexpired access token and its session, or
 	// ErrNotFound.
 	Token(ctx context.Context, tokenHash string, now time.Time) (AccessToken, Session, error)
-	// ReserveIssue reserves a credential of the session for issuance until
-	// the given time, atomically, and reports whether it got the
-	// reservation. It does not when the credential has been issued, or is
-	// reserved by another request whose reservation has not expired.
-	ReserveIssue(ctx context.Context, sessionID, credentialID string, now, until time.Time) (bool, error)
-	// CompleteIssue marks a reserved credential as issued, for good.
-	CompleteIssue(ctx context.Context, sessionID, credentialID string) error
-	// ReleaseIssue removes a reservation that did not lead to issuance.
-	ReleaseIssue(ctx context.Context, sessionID, credentialID string) error
+	// ReserveIssue reserves a credential of the session for owner until the
+	// given time, atomically, and reports whether it got the reservation.
+	// It does not when the credential has been issued, or is reserved by
+	// another owner whose reservation has not expired.
+	ReserveIssue(ctx context.Context, sessionID, credentialID, owner string, now, until time.Time) (bool, error)
+	// CompleteIssue marks the credential as issued, for good, if owner still
+	// holds the reservation, and reports whether it did. An owner whose
+	// reservation was taken over has lost it, also after it expired.
+	CompleteIssue(ctx context.Context, sessionID, credentialID, owner string) (bool, error)
+	// ReleaseIssue removes the reservation if owner holds it.
+	ReleaseIssue(ctx context.Context, sessionID, credentialID, owner string) error
 }
 
 // OneTime holds single-use values: nonces, attestation challenges and the

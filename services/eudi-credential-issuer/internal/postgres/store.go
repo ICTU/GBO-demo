@@ -207,30 +207,33 @@ func (s *Store) Token(ctx context.Context, tokenHash string, now time.Time) (iss
 	return t, sess, nil
 }
 
-func (s *Store) ReserveIssue(ctx context.Context, sessionID, credentialID string, now, until time.Time) (bool, error) {
+func (s *Store) ReserveIssue(ctx context.Context, sessionID, credentialID, owner string, now, until time.Time) (bool, error) {
 	// One statement: a new row is a reservation; an existing one is taken
 	// over only when it is a reservation that has expired.
 	var reserved bool
-	err := s.pool.QueryRow(ctx, `INSERT INTO issued_credentials (session_id, credential_id, state, reserved_until)
-		VALUES ($1, $2, 'reserved', $4)
-		ON CONFLICT (session_id, credential_id) DO UPDATE SET reserved_until = EXCLUDED.reserved_until
+	err := s.pool.QueryRow(ctx, `INSERT INTO issued_credentials (session_id, credential_id, state, reserved_until, owner)
+		VALUES ($1, $2, 'reserved', $4, $5)
+		ON CONFLICT (session_id, credential_id) DO UPDATE SET reserved_until = EXCLUDED.reserved_until, owner = EXCLUDED.owner
 		WHERE issued_credentials.state = 'reserved' AND issued_credentials.reserved_until <= $3
-		RETURNING true`, sessionID, credentialID, now, until).Scan(&reserved)
+		RETURNING true`, sessionID, credentialID, now, until, owner).Scan(&reserved)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
 	return reserved, err
 }
 
-func (s *Store) CompleteIssue(ctx context.Context, sessionID, credentialID string) error {
-	_, err := s.pool.Exec(ctx, `UPDATE issued_credentials SET state = 'issued', reserved_until = NULL
-		WHERE session_id = $1 AND credential_id = $2`, sessionID, credentialID)
-	return err
+func (s *Store) CompleteIssue(ctx context.Context, sessionID, credentialID, owner string) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `UPDATE issued_credentials SET state = 'issued', reserved_until = NULL
+		WHERE session_id = $1 AND credential_id = $2 AND state = 'reserved' AND owner = $3`, sessionID, credentialID, owner)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
-func (s *Store) ReleaseIssue(ctx context.Context, sessionID, credentialID string) error {
-	_, err := s.pool.Exec(ctx, `DELETE FROM issued_credentials WHERE session_id = $1 AND credential_id = $2 AND state = 'reserved'`,
-		sessionID, credentialID)
+func (s *Store) ReleaseIssue(ctx context.Context, sessionID, credentialID, owner string) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM issued_credentials
+		WHERE session_id = $1 AND credential_id = $2 AND state = 'reserved' AND owner = $3`, sessionID, credentialID, owner)
 	return err
 }
 

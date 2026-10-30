@@ -33,6 +33,7 @@ func Run(t *testing.T, newStore func(t *testing.T) Store) {
 		{"tokens resolve to their session until they expire", tokens},
 		{"a credential is reserved and issued once", reserveIssue},
 		{"concurrent reservations: exactly one wins", reserveConcurrently},
+		{"a taken-over reservation is lost to its first owner", takeOver},
 		{"single-use values", singleUse},
 		{"status entries", statusEntries},
 		{"revocation by reference", revokeByReference},
@@ -126,41 +127,79 @@ func reserveIssue(t *testing.T, s Store) {
 	if err := s.CreateSession(ctx, issuance.Session{ID: "s1", Profile: "nl", CodeHash: "c1", ExpiresAt: now.Add(time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
-	reserve := func(at time.Time) bool {
+	reserve := func(owner string, at time.Time) bool {
 		t.Helper()
-		ok, err := s.ReserveIssue(ctx, "s1", "d1", at, at.Add(time.Minute))
+		ok, err := s.ReserveIssue(ctx, "s1", "d1", owner, at, at.Add(time.Minute))
 		if err != nil {
 			t.Fatal(err)
 		}
 		return ok
 	}
-	if !reserve(now) {
+	complete := func(owner string) bool {
+		t.Helper()
+		ok, err := s.CompleteIssue(ctx, "s1", "d1", owner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ok
+	}
+	if !reserve("a", now) {
 		t.Fatal("the first reservation succeeds")
 	}
-	if reserve(now) {
+	if reserve("b", now) {
 		t.Fatal("a live reservation blocks another")
 	}
-	if !reserve(now.Add(2 * time.Minute)) {
-		t.Fatal("an expired reservation can be taken over")
-	}
-	if err := s.ReleaseIssue(ctx, "s1", "d1"); err != nil {
+	if err := s.ReleaseIssue(ctx, "s1", "d1", "a"); err != nil {
 		t.Fatal(err)
 	}
-	if !reserve(now) {
+	if !reserve("b", now) {
 		t.Fatal("a released reservation can be made again")
 	}
-	if err := s.CompleteIssue(ctx, "s1", "d1"); err != nil {
-		t.Fatal(err)
+	if !complete("b") {
+		t.Fatal("the owner completes its reservation")
 	}
-	if reserve(now.Add(time.Hour)) {
-		t.Fatal("an issued credential cannot be reserved again")
+	if reserve("c", now.Add(time.Hour)) || complete("b") {
+		t.Fatal("an issued credential is reserved and completed once")
 	}
 	// Releasing an issued credential leaves it issued.
-	if err := s.ReleaseIssue(ctx, "s1", "d1"); err != nil {
+	if err := s.ReleaseIssue(ctx, "s1", "d1", "b"); err != nil {
 		t.Fatal(err)
 	}
-	if reserve(now.Add(time.Hour)) {
+	if reserve("c", now.Add(time.Hour)) {
 		t.Fatal("release must not undo issuance")
+	}
+}
+
+// takeOver: request A takes longer than its reservation, B takes it over.
+// A may then neither complete nor release B's reservation.
+func takeOver(t *testing.T, s Store) {
+	if err := s.CreateSession(ctx, issuance.Session{ID: "s1", Profile: "nl", CodeHash: "c1", ExpiresAt: now.Add(time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := s.ReserveIssue(ctx, "s1", "d1", "a", now, now.Add(time.Minute)); !ok {
+		t.Fatal("A reserves")
+	}
+	later := now.Add(2 * time.Minute)
+	if ok, _ := s.ReserveIssue(ctx, "s1", "d1", "b", later, later.Add(time.Minute)); !ok {
+		t.Fatal("B takes over the expired reservation")
+	}
+	// A fails afterwards: its release must leave B's reservation alone.
+	if err := s.ReleaseIssue(ctx, "s1", "d1", "a"); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := s.ReserveIssue(ctx, "s1", "d1", "c", later, later.Add(time.Minute)); ok {
+		t.Fatal("A released B's reservation")
+	}
+	// A completes afterwards: refused, it no longer holds the reservation.
+	if ok, err := s.CompleteIssue(ctx, "s1", "d1", "a"); err != nil || ok {
+		t.Fatalf("A completed B's reservation: %v %v", ok, err)
+	}
+	if ok, err := s.CompleteIssue(ctx, "s1", "d1", "b"); err != nil || !ok {
+		t.Fatalf("B completes: %v %v", ok, err)
+	}
+	// And after B completed, A still cannot.
+	if ok, _ := s.CompleteIssue(ctx, "s1", "d1", "a"); ok {
+		t.Fatal("A completed an issued credential")
 	}
 }
 
@@ -171,11 +210,11 @@ func reserveConcurrently(t *testing.T, s Store) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	wins := 0
-	for range 8 {
+	for i := range 8 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if ok, err := s.ReserveIssue(ctx, "s1", "d1", now, now.Add(time.Minute)); err == nil && ok {
+			if ok, err := s.ReserveIssue(ctx, "s1", "d1", fmt.Sprint(i), now, now.Add(time.Minute)); err == nil && ok {
 				mu.Lock()
 				wins++
 				mu.Unlock()
