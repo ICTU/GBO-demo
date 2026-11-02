@@ -369,7 +369,9 @@ create-development-registrar-root:
 provision-wallet-registration: require-development-cas
 	@test -n "$(SOURCE_ID)" || { echo "ERROR: SOURCE_ID=<source_id> is required"; exit 1; }
 	@mkdir -p "$(EUDI_TRUST_PUBLISH_DIR)"
-	@docker compose --profile eudi --profile wallet-registration run --build --rm -T wallet-registration-source --source-id "$(SOURCE_ID)" \
+	@# Built apart: run --build prints the build progress on stdout, into the JSON.
+	@docker compose --profile eudi --profile wallet-registration build --with-dependencies wallet-registration-source >&2
+	@docker compose --profile eudi --profile wallet-registration run --rm -T wallet-registration-source --source-id "$(SOURCE_ID)" \
 		| (cd services/eudi-adapter && go run . provision-wallet-registration --source-file - \
 			--secrets-dir "$(ONBOARDING_SECRETS_DIR)" --publish-dir "$(EUDI_TRUST_PUBLISH_DIR)" --kvk-number "$(KVK_NUMBER)")
 
