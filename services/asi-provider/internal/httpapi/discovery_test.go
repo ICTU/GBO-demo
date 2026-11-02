@@ -13,7 +13,9 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
+	asimapping "gbo-demo/asi-mapping"
 	"gbo-demo/asi-provider/internal/accesstoken"
+	"gbo-demo/asi-provider/internal/verification"
 )
 
 // Discovery records of slice 6a (#533): one dataService per attribute and
@@ -59,14 +61,16 @@ func dataServicesSchema(t *testing.T) *jsonschema.Schema {
 	return s
 }
 
-func TestDataServiceRecords(t *testing.T) { // D1, D2, D8
+// The records list the attributes of the source's current description, and
+// its country (E1).
+func TestDataServiceRecords(t *testing.T) { // D1, D2, D8, E1
 	env := newTestServer(t)
 	schema := dataServicesSchema(t)
 	for _, tc := range []struct {
 		ds, provider string
 		ids          []string
 	}{
-		{"brp", "GBO demo ASIP (test)", []string{idAddress, idFamilyName, idGivenName}},
+		{"brp", "GBO demo ASIP (test)", []string{idAddress, idBirthDate, idFamilyName, idGivenName, idNationality}},
 		{"duo", "DUO (test)", []string{idDiploma}},
 	} {
 		rec := get(t, env, "/"+tc.ds+"/dataservices")
@@ -139,9 +143,14 @@ func TestRecordsFollowThePublicURL(t *testing.T) {
 	}
 	authz := newTestAuthorizationServer(t)
 	public := "http://192.168.1.20:9424"
+	belgian := described(func(asi *asimapping.Capability) {
+		asi.AuthenticSource.Country = "BE"
+		asi.Attributes = asi.Attributes[:1]
+	})
 	h, err := NewHandler(Config{PublicURL: public, Issuer: testIssuer, DataServices: []DataService{{
-		ID: "brp", Provider: Provider{LegalName: "x"}, Attributes: []string{idFamilyName}, Country: "BE",
-		Tokens: accesstoken.NewValidator(testIssuer, public+"/brp"+BasePath, public, accesstoken.StaticKeys(authz.jwks)),
+		ID: "brp", Provider: Provider{LegalName: "x"},
+		Verification: verification.NewService(fakeSource{asi: belgian}, testCatalogue),
+		Tokens:       accesstoken.NewValidator(testIssuer, public+"/brp"+BasePath, public, accesstoken.StaticKeys(authz.jwks)),
 	}}})
 	if err != nil {
 		t.Fatal(err)
@@ -152,5 +161,34 @@ func TestRecordsFollowThePublicURL(t *testing.T) {
 	decode(t, rec, &got)
 	if len(got.DataServices) != 1 || got.DataServices[0].EndpointURI != public+"/brp/authsrc-api" || got.DataServices[0].Country != "BE" {
 		t.Errorf("records = %+v", got.DataServices)
+	}
+}
+
+// A new release with an attribute fewer or more changes the records of the
+// next request, without a restart (E2).
+func TestANewReleaseChangesTheRecords(t *testing.T) {
+	source := &releases{fakeSource: testPersons}
+	authz, qtsp := newTestAuthorizationServer(t), newTestQTSP(t)
+	env := newTestServerWithSource(t, authz, qtsp, accesstoken.StaticKeys(authz.jwks), source)
+	for _, tc := range []struct {
+		name string
+		asi  *asimapping.Capability
+		want []string
+	}{
+		{"an attribute fewer", described(func(asi *asimapping.Capability) {
+			asi.Attributes = slices.DeleteFunc(asi.Attributes, func(a asimapping.Attribute) bool { return a.Identifier == idNationality })
+		}), []string{idAddress, idBirthDate, idFamilyName, idGivenName}},
+		{"the attribute back", brpASI, []string{idAddress, idBirthDate, idFamilyName, idGivenName, idNationality}},
+	} {
+		source.asi = tc.asi
+		var got records
+		decode(t, get(t, env, "/brp/dataservices"), &got)
+		var ids []string
+		for _, r := range got.DataServices {
+			ids = append(ids, r.AttributeIdentifier)
+		}
+		if !slices.Equal(ids, tc.want) {
+			t.Errorf("%s: records for %v, want %v", tc.name, ids, tc.want)
+		}
 	}
 }

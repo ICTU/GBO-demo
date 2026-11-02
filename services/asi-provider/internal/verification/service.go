@@ -89,10 +89,20 @@ type Result struct {
 }
 
 // VerifyResult holds a result per requested attribute and fragment, in the
-// order of the request.
+// order of the request, and the legal name of the authentic source in the
+// description the source was asked by.
 type VerifyResult struct {
-	Attributes []Result
-	Fragments  []Result
+	Attributes      []Result
+	Fragments       []Result
+	AuthenticSource string
+}
+
+// RetrieveResult holds the stored values of the requested attributes, and
+// the legal name of the authentic source in the description the source was
+// asked by.
+type RetrieveResult struct {
+	Attributes      []Attribute
+	AuthenticSource string
 }
 
 // Service verifies and retrieves attributes against a source. catalogue
@@ -105,6 +115,12 @@ type Service struct {
 
 func NewService(source Source, catalogue asimapping.Catalogue) *Service {
 	return &Service{source: source, catalogue: catalogue}
+}
+
+// Description returns the source's current description: ErrSourceUnavailable
+// when there is none.
+func (s *Service) Description() (*asimapping.Capability, error) {
+	return s.source.Description()
 }
 
 // Verify compares the claimed values with the source for the person with
@@ -147,7 +163,7 @@ func (s *Service) Verify(ctx context.Context, bsn string, req VerifyRequest) (Ve
 	if err != nil {
 		return VerifyResult{}, err
 	}
-	var res VerifyResult
+	res := VerifyResult{AuthenticSource: asi.AuthenticSource.LegalName}
 	for _, a := range req.Attributes {
 		value, held, err := s.build(asi, result, a.Identifier, nil)
 		if err != nil {
@@ -182,16 +198,16 @@ func (s *Service) Verify(ctx context.Context, bsn string, req VerifyRequest) (Ve
 // Retrieve returns the stored values of the requested attributes for the
 // person with bsn. If the source holds no value for one of them, the request
 // is not found as a whole: there is no partial result.
-func (s *Service) Retrieve(ctx context.Context, bsn string, identifiers []string, mandate bool) ([]Attribute, error) {
+func (s *Service) Retrieve(ctx context.Context, bsn string, identifiers []string, mandate bool) (RetrieveResult, error) {
 	if len(identifiers) == 0 {
-		return nil, &MalformedError{Reason: "attributeIdentifiers must contain at least one attribute"}
+		return RetrieveResult{}, &MalformedError{Reason: "attributeIdentifiers must contain at least one attribute"}
 	}
 	if mandate {
-		return nil, ErrMandate
+		return RetrieveResult{}, ErrMandate
 	}
 	asi, err := s.describe(identifiers)
 	if err != nil {
-		return nil, err
+		return RetrieveResult{}, err
 	}
 	requests := make([]asimapping.Request, len(identifiers))
 	for i, id := range identifiers {
@@ -199,22 +215,22 @@ func (s *Service) Retrieve(ctx context.Context, bsn string, identifiers []string
 	}
 	result, err := s.ask(ctx, bsn, asi, requests)
 	if err != nil {
-		return nil, err
+		return RetrieveResult{}, err
 	}
-	out := make([]Attribute, 0, len(identifiers))
+	out := RetrieveResult{Attributes: make([]Attribute, 0, len(identifiers)), AuthenticSource: asi.AuthenticSource.LegalName}
 	for _, id := range identifiers {
 		value, held, err := s.build(asi, result, id, nil)
 		if err != nil {
-			return nil, err
+			return RetrieveResult{}, err
 		}
 		if !held {
-			return nil, &NotHeldError{Identifier: id}
+			return RetrieveResult{}, &NotHeldError{Identifier: id}
 		}
 		raw, err := json.Marshal(value)
 		if err != nil {
-			return nil, err
+			return RetrieveResult{}, err
 		}
-		out = append(out, Attribute{Identifier: id, Value: raw})
+		out.Attributes = append(out.Attributes, Attribute{Identifier: id, Value: raw})
 	}
 	return out, nil
 }

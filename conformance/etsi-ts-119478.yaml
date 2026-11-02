@@ -217,7 +217,7 @@ requirements:
     status: passed
     tests:
       - "services/asi-provider/internal/httpapi:TestVerifyResponseNamesProviderAndAuthenticSource"
-      - "services/asi-provider/internal/httpapi:TestADataServiceWithoutAuthenticSourceNamesNone"
+      - "services/asi-provider/internal/httpapi:TestTheResponsesNameTheDescribedSource"
   REQ-ASIP-6.1.1.2-09:
     status: passed
     tests:
@@ -284,7 +284,7 @@ requirements:
     status: passed
     tests:
       - "services/asi-provider/internal/httpapi:TestRetrieveReturnsValue"
-      - "services/asi-provider/internal/httpapi:TestADataServiceWithoutAuthenticSourceNamesNone"
+      - "services/asi-provider/internal/httpapi:TestTheResponsesNameTheDescribedSource"
   REQ-ASIP-6.1.2.2-05:
     status: not-applicable
     reason: Mandate handling is not offered, so there is never a mandate result.

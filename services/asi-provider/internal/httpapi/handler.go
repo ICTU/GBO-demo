@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
+	"strings"
 
 	"github.com/getkin/kin-openapi/routers"
 	otelattribute "go.opentelemetry.io/otel/attribute"
@@ -41,15 +42,11 @@ type DataService struct {
 	Verification *verification.Service
 	// Tokens validates the access tokens of the authorization server for
 	// this data service: its base URL is their audience.
-	Tokens   *accesstoken.Validator
+	Tokens *accesstoken.Validator
+	// Provider is the ASIP. The authentic source, its country and the
+	// attributes of its discovery records come from the source's
+	// description, per request.
 	Provider Provider
-	// AuthenticSource is nil when the ASIP is the authentic source: the
-	// responses then name none (REQ-ASIP-6.1.1.2-08, REQ-ASIP-6.1.2.2-04).
-	AuthenticSource *Provider
-	// Attributes are the identifiers of the attributes the data service
-	// provides, and Country its Member State: its discovery records.
-	Attributes []string
-	Country    string
 }
 
 type Config struct {
@@ -104,11 +101,7 @@ func NewHandler(cfg Config) (http.Handler, error) {
 		// The endpointDescription of the data service (REQ-DIP-5.3.3-03-02),
 		// with the schema it references next to it.
 		mux.HandleFunc("GET /"+ds.ID+"/openapi.json", serveJSON(published))
-		records, err := json.MarshalIndent(dataServiceRecords(cfg.PublicURL, ds), "", "  ")
-		if err != nil {
-			return nil, err
-		}
-		mux.HandleFunc("GET /"+ds.ID+"/dataservices", serveJSON(records))
+		mux.HandleFunc("GET /"+ds.ID+"/dataservices", h.records(cfg.PublicURL))
 		mux.HandleFunc("GET /"+ds.ID+"/"+dataserviceFileName, serveJSON(mustReadOpenAPIFile(dataserviceFile)))
 	}
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
@@ -135,24 +128,40 @@ type dataServiceRecord struct {
 	Country             string   `json:"country"`
 }
 
-// dataServiceRecords are the records of a data service, one per attribute:
-// what the ASIP hands to the Data Service Directory. The endpoint is the
-// data service's base URL, for verify and retrieve; its description is its
+// records serves the records of the data service, one per attribute of the
+// source's current description, with its country: what the ASIP hands to
+// the Data Service Directory. Without a current description it serves 503:
+// the ASIP cannot say what the source holds. The endpoint is the data
+// service's base URL, for verify and retrieve; its description is its
 // contract. The provider carries no identifiers or legal basis yet: there is
 // no EU identifier type for an OIN, and the demo ASIP has none other
 // (REQ-DIP-5.3.3-03-04-04 is a should).
-func dataServiceRecords(publicURL string, ds DataService) map[string][]dataServiceRecord {
-	records := []dataServiceRecord{}
-	for _, id := range ds.Attributes {
-		records = append(records, dataServiceRecord{
-			AttributeIdentifier: id,
-			EndpointDescription: publicURL + "/" + ds.ID + "/openapi.json",
-			EndpointURI:         publicURL + BasePathOf(ds.ID),
-			Provider:            ds.Provider,
-			Country:             ds.Country,
-		})
+func (h *handler) records(publicURL string) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		asi, err := h.ds.Verification.Description()
+		if err != nil {
+			writeUseCaseError(w, err)
+			return
+		}
+		records := []dataServiceRecord{}
+		for _, a := range asi.Attributes {
+			records = append(records, dataServiceRecord{
+				AttributeIdentifier: a.Identifier,
+				EndpointDescription: publicURL + "/" + h.ds.ID + "/openapi.json",
+				EndpointURI:         publicURL + BasePathOf(h.ds.ID),
+				Provider:            h.ds.Provider,
+				Country:             asi.AuthenticSource.Country,
+			})
+		}
+		slices.SortFunc(records, func(a, b dataServiceRecord) int { return strings.Compare(a.AttributeIdentifier, b.AttributeIdentifier) })
+		body, err := json.MarshalIndent(map[string][]dataServiceRecord{"dataServices": records}, "", "  ")
+		if err != nil {
+			writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "could not encode the records")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
 	}
-	return map[string][]dataServiceRecord{"dataServices": records}
 }
 
 // --- request and response shapes (ETSI TS 119 478 Annex B) ------------------
@@ -292,7 +301,7 @@ func (h *handler) verify(w http.ResponseWriter, r *http.Request, subject accesst
 		writeUseCaseError(w, err)
 		return
 	}
-	resp := verifyResponse{Provider: h.ds.Provider, AuthenticSource: h.ds.AuthenticSource}
+	resp := verifyResponse{Provider: h.ds.Provider, AuthenticSource: &Provider{LegalName: result.AuthenticSource}}
 	for _, a := range result.Attributes {
 		resp.AttributeVerificationResults = append(resp.AttributeVerificationResults, attributeVerificationResult{
 			AttributeIdentifier: a.Identifier, AttributeVerificationResult: a.Result,
@@ -322,13 +331,13 @@ func (h *handler) retrieve(w http.ResponseWriter, r *http.Request, subject acces
 		writeAuthFailure(w, failure)
 		return
 	}
-	attrs, err := h.ds.Verification.Retrieve(r.Context(), subject.BSN, ids, hasMandate(req.Mandate))
+	result, err := h.ds.Verification.Retrieve(r.Context(), subject.BSN, ids, hasMandate(req.Mandate))
 	if err != nil {
 		writeUseCaseError(w, err)
 		return
 	}
-	resp := retrieveResponse{Attributes: []attribute{}, Provider: h.ds.Provider, AuthenticSource: h.ds.AuthenticSource}
-	for _, a := range attrs {
+	resp := retrieveResponse{Attributes: []attribute{}, Provider: h.ds.Provider, AuthenticSource: &Provider{LegalName: result.AuthenticSource}}
+	for _, a := range result.Attributes {
 		resp.Attributes = append(resp.Attributes, attribute{AttributeIdentifier: a.Identifier, AttributeValue: a.Value})
 	}
 	h.writeSealed(w, resp)

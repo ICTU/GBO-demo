@@ -284,15 +284,15 @@ func TestAnAttributeTheSourceDoesNotDescribe(t *testing.T) {
 func TestRetrieve(t *testing.T) {
 	s := NewService(brp(t, nil), testCatalogue(t))
 	ids := []string{idFamilyName, idGivenName, idBirthDate, idNationality, idAddress}
-	attrs, err := s.Retrieve(context.Background(), bsn, ids, false)
-	if err != nil || len(attrs) != len(ids) {
-		t.Fatalf("Retrieve = %+v, %v", attrs, err)
+	res, err := s.Retrieve(context.Background(), bsn, ids, false)
+	if err != nil || len(res.Attributes) != len(ids) {
+		t.Fatalf("Retrieve = %+v, %v", res, err)
 	}
 	want := []string{
 		`{"family_name":"Jansen"}`, `{"given_name":"Frouke"}`, `{"birth_date":"2000-03-24"}`, `{"nationalities":["NL","BE"]}`,
 		`{"city":"Rotterdam","country":"NL","house_number":"12 B","postal_code":"3011 AD","street":"Coolsingel"}`,
 	}
-	for i, a := range attrs {
+	for i, a := range res.Attributes {
 		if a.Identifier != ids[i] || string(a.Value) != want[i] {
 			t.Errorf("attribute %d = %s %s, want %s %s", i, a.Identifier, a.Value, ids[i], want[i])
 		}
@@ -301,7 +301,7 @@ func TestRetrieve(t *testing.T) {
 	// (REQ-ASIP-6.1.2.2-06).
 	var notHeld *NotHeldError
 	s = NewService(brp(t, func(p map[string]any) { p["voornamen"] = nil }), testCatalogue(t))
-	if attrs, err := s.Retrieve(context.Background(), bsn, []string{idFamilyName, idGivenName}, false); !errors.As(err, &notHeld) || notHeld.Identifier != idGivenName || attrs != nil {
+	if attrs, err := s.Retrieve(context.Background(), bsn, []string{idFamilyName, idGivenName}, false); !errors.As(err, &notHeld) || notHeld.Identifier != idGivenName || attrs.Attributes != nil {
 		t.Fatalf("Retrieve with a missing value = %+v, %v; want NotHeldError for %s", attrs, err, idGivenName)
 	}
 }
