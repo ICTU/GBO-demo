@@ -312,6 +312,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- **The ASIP names the source and lists its attributes from the source's
+  description** (#592, step 5): the discovery records list the attributes of
+  the source's current description, with its country, and verify and retrieve
+  name the authentic source by the legal name in it: the one of the
+  description the source was asked by. A new release changes them without a
+  restart. Without a current description the discovery records are 503, as
+  verify and retrieve are, and the Data Service Directory leaves them out.
+  `authentic_source`, `country` and `attributes` are gone from
+  `config/dataservices.json`, and the ASIP refuses a file that still has
+  them. A data service whose source is the ASIP itself, naming no authentic
+  source, is no longer possible.
 - **The ASIP verifies from the source's description** (#592, step 4c): per
   request it derives one query from the source's `asi` capability, with only
   the fields of the requested attributes and fragments, and builds the

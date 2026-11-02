@@ -1,20 +1,11 @@
 {
-  "_comment": "The data services of the ASIP, one per authentic source, each under /<id>/authsrc-api. source is the authentic source's id in the Source Registry: its description in the active release says what the ASIP verifies and how it asks the source. attributes lists the identifiers in the discovery records. The authorization server must know each base URL as a resource (AZSP_RESOURCES). Identifiers are provisional: there is no Dutch catalogue of attributes yet.",
+  "_comment": "The data services of the ASIP, one per authentic source, each under /<id>/authsrc-api. source is the authentic source's id in the Source Registry: its description in the active release says what the ASIP verifies, how it asks the source, the source's legal name and its country. The authorization server must know each base URL as a resource (AZSP_RESOURCES).",
   "data_services": [
     {
       "id": "brp",
       "provider": "GBO demo ASIP",
-      "authentic_source": "Basisregistratie Personen (mock)",
-      "country": "NL",
       "source": "rvig",
-      "grant_path": "/brp/graphql",
-      "attributes": [
-        "https://gbo.example/attributes/family_name/1",
-        "https://gbo.example/attributes/given_name/1",
-        "https://gbo.example/attributes/birth_date/1",
-        "https://gbo.example/attributes/nationality/1",
-        "https://gbo.example/attributes/address/1"
-      ]
+      "grant_path": "/brp/graphql"
     }
   ]
 }

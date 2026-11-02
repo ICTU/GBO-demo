@@ -52,19 +52,16 @@ ETSI TS 119 478 lets a response name one authentic source (REQ-ASIP-6.1.1.2-08),
 |---|---|
 | `id` | the path segment |
 | `provider` | the legal name of the ASIP in the responses |
-| `authentic_source` | the legal name of the authentic source; empty when the ASIP is the authentic source, and then the responses name none |
-| `country` | the Member State of the data service (ISO 3166-1 alpha-2), in its discovery records |
-| `source` | the source's id in the Source Registry, whose description says what the data service verifies and how the ASIP asks the source |
+| `source` | the source's id in the Source Registry, whose description says what the data service verifies, how the ASIP asks the source, the source's legal name and its country |
 | `grant_path` | the grant-link of the ASIP's FSC contract with the source, on its Outway |
-| `attributes` | the attribute identifiers in the discovery records |
 
-The ASIP does not start with a data service named twice, one without a source, an identifier that is not a URI, or a field it does not know (a misspelt `authentic_source` would otherwise drop the source from the responses). The authorization server must know the base URL of each data service as a resource (`AZSP_RESOURCES`); a token is for one data service. An attribute the source does not describe, such as one of another data service, is 404. All data services share one seal for now; who holds it is open (#225).
+The responses name the authentic source by the legal name in its description, and the discovery records list the attributes of the description with its country. The ASIP is never the authentic source itself, so every response names one. The ASIP does not start with a data service named twice, one without a source, or a field it does not know: `authentic_source`, `country` and `attributes` come from the description now, and the ASIP refuses them rather than ignore them. The authorization server must know the base URL of each data service as a resource (`AZSP_RESOURCES`); a token is for one data service. An attribute the source does not describe, such as one of another data service, is 404. All data services share one seal for now; who holds it is open (#225).
 
 ### Source descriptions
 
 A source describes in its source metadata how its fields make up the attributes (the `asi` capability, `docs/source-onboarding.md`). The eudi-adapter onboards it into the Source Registry; the ASIP reads the active release with the registry's reader role, which may read releases and the active pointer only, every `ASIP_SOURCE_REGISTRY_REFRESH`.
 
-A data service answers `/verify` and `/retrieve` only while its source has a current description: the source is in the active release, describes `asi`, and its `stale_until` has not passed. Otherwise it answers 503, as for an unreachable source; a 404 would tell the QTSP that the attribute does not verify. The ASIP starts without the registry. When the registry cannot be read, or a new release cannot (an unknown snapshot version, an `asi` of another shape, a digest that does not match), the ASIP keeps the descriptions it read before until they go stale. The contract and discovery endpoints do not depend on it.
+A data service answers `/verify` and `/retrieve` only while its source has a current description: the source is in the active release, describes `asi`, and its `stale_until` has not passed. Otherwise it answers 503, as for an unreachable source; a 404 would tell the QTSP that the attribute does not verify. Its discovery records (`/<data service>/dataservices`) are then 503 too: the ASIP cannot say which attributes the source holds, and the Data Service Directory leaves them out. The ASIP starts without the registry. When the registry cannot be read, or a new release cannot (an unknown snapshot version, an `asi` of another shape, a digest that does not match), the ASIP keeps the descriptions it read before until they go stale. The contract does not depend on it. A response names the source of the description the source was asked by, also when a new release arrives meanwhile.
 
 Where there is no registry, as in the end-to-end tests of the reference QTSP and the authorization server, the ASIP reads a release file instead (`ASIP_SOURCE_REGISTRY_RELEASE_FILE`). `asi-provider write-release-file --source rvig --metadata <source metadata> --catalogue schemas/asi-attributes.json --out <file>` writes one from a source's published metadata, with the `asi` capability checked against the catalogue. It is not a release the eudi-adapter onboarded: its certificates and Type Metadata are placeholders.
 
@@ -75,7 +72,7 @@ From the description the ASIP derives, per request, one query with only the fiel
 
 ### Discovery records
 
-`GET /<data service>/dataservices` serves the data service's `dataService` records (ETSI TS 119 478 clause 5.3.3, `19478-dataservice-schema.json`), one per attribute: what the ASIP hands to the Data Service Directory. `endpointURI` is the data service's base URL (for verify and retrieve), `endpointDescription` its contract, `provider` the ASIP's legal name and `country` the data service's country. The provider carries no `identifiers` or `establishedByLaw`: there is no EU identifier type for an OIN, and the demo ASIP has no EUID, LEI or legal basis, so the "should" of REQ-DIP-5.3.3-03-04-04 is not met. [`asi-discovery-stub`](../asi-discovery-stub) answers the Discover Interface's `retrieve` query from these records.
+`GET /<data service>/dataservices` serves the data service's `dataService` records (ETSI TS 119 478 clause 5.3.3, `19478-dataservice-schema.json`), one per attribute of the source's current description: what the ASIP hands to the Data Service Directory. `endpointURI` is the data service's base URL (for verify and retrieve), `endpointDescription` its contract, `provider` the ASIP's legal name and `country` the country in the source's description. The provider carries no `identifiers` or `establishedByLaw`: there is no EU identifier type for an OIN, and the demo ASIP has no EUID, LEI or legal basis, so the "should" of REQ-DIP-5.3.3-03-04-04 is not met. [`asi-discovery-stub`](../asi-discovery-stub) answers the Discover Interface's `retrieve` query from these records.
 
 ## Layout
 

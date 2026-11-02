@@ -34,7 +34,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -115,19 +114,12 @@ func serve() error {
 	keys := asmetadata.New(issuer, issuerInternal)
 	var dataServices []httpapi.DataService
 	for _, ds := range services {
-		var authenticSource *httpapi.Provider
-		if ds.AuthenticSource != "" {
-			authenticSource = &httpapi.Provider{LegalName: ds.AuthenticSource}
-		}
 		source := graphqlsource.New(ds.Source, outway, ds.GrantPath, descriptions.Current)
 		dataServices = append(dataServices, httpapi.DataService{
-			ID:              ds.ID,
-			Attributes:      slices.Sorted(slices.Values(ds.Attributes)),
-			Country:         ds.Country,
-			Verification:    verification.NewService(source, catalogue),
-			Tokens:          accesstoken.NewValidator(issuer, publicURL+httpapi.BasePathOf(ds.ID), publicURL, keys),
-			Provider:        httpapi.Provider{LegalName: ds.Provider},
-			AuthenticSource: authenticSource,
+			ID:           ds.ID,
+			Verification: verification.NewService(source, catalogue),
+			Tokens:       accesstoken.NewValidator(issuer, publicURL+httpapi.BasePathOf(ds.ID), publicURL, keys),
+			Provider:     httpapi.Provider{LegalName: ds.Provider},
 		})
 	}
 	handler, err := httpapi.NewHandler(httpapi.Config{PublicURL: publicURL, Issuer: issuer, Sealer: seal.New(key, chain), DataServices: dataServices})
