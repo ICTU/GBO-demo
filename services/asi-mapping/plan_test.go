@@ -80,6 +80,9 @@ func TestPlan(t *testing.T) {
 			query("__typename ... on Ingezetene { woontOp { woonplaatsnaam } }")},
 		{"Q5 attribute and fragment ask each field once", []Request{{Identifier: address}, {Identifier: address, Members: []string{"city"}}},
 			query("__typename ... on Ingezetene { woontOp { straatnaam huisnummer huisletter huisnummertoevoeging postcode woonplaatsnaam } }")},
+		{"Q6 a fragment on a const member beside another attribute asks neither its field nor the type",
+			[]Request{{Identifier: givenName}, {Identifier: address, Members: []string{"country"}}},
+			query("voornamen")},
 		{"Q7 the type is asked once, beside attributes without a type", []Request{{Identifier: givenName}, {Identifier: address, Members: []string{"city"}}},
 			query("__typename voornamen ... on Ingezetene { woontOp { woonplaatsnaam } }")},
 	}

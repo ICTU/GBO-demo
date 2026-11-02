@@ -106,6 +106,8 @@ func TestBuild(t *testing.T) {
 		{"M11 a null on the way", address, nil,
 			result(t, func(r map[string]any) { r["woontOp"] = nil })},
 		{"Q6 a fragment on a const member", address, []string{"country"}, result(t, nil)},
+		{"Q6 a fragment on a const member, answered beside an attribute without a type", address, []string{"country"},
+			map[string]any{"voornamen": "Frouke"}},
 	}
 	for _, test := range notHeld {
 		t.Run(test.name, func(t *testing.T) {

@@ -38,6 +38,13 @@ func (a Attribute) Build(result any, schema *ValueSchema, members []string) (val
 	if err != nil {
 		return nil, false, err
 	}
+	// A fragment on a const asks the source nothing, so the answer need not
+	// carry the type either.
+	for _, member := range members {
+		if a.Fields[member].Const != nil {
+			return nil, false, nil
+		}
+	}
 	if a.On != "" {
 		typename, found, err := lookup(result, "/"+typenameField)
 		if err != nil {
@@ -53,9 +60,6 @@ func (a Attribute) Build(result any, schema *ValueSchema, members []string) (val
 	value = map[string]any{}
 	for _, member := range requested {
 		field := a.Fields[member]
-		if len(members) > 0 && field.Const != nil {
-			return nil, false, nil
-		}
 		v, ok, err := field.build(result)
 		if err != nil {
 			return nil, false, fmt.Errorf("attribute %q member %q: %w", a.Identifier, member, err)
