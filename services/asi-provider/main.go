@@ -9,17 +9,25 @@
 // authorization server (services/asi-authorization-server, clause 6.1.3);
 // the user's BSN comes from that token.
 //
+// The ASIP reads the sources' descriptions from the active Source Registry
+// release (ASIP_SOURCE_REGISTRY_DATABASE_URL, the registry's reader role), or
+// from a release file where there is no registry
+// (ASIP_SOURCE_REGISTRY_RELEASE_FILE). A data service whose source has no
+// current description answers 503.
+//
 // This file is the composition root: configuration, construction, lifecycle.
 //
 // Usage:
 //
 //	asi-provider                              serve (configuration from the environment)
 //	asi-provider provision-seal-certificate   issue a development seal certificate
+//	asi-provider write-release-file           write a release file from a source's metadata
 package main
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -36,8 +44,10 @@ import (
 	"gbo-demo/asi-provider/internal/httpapi"
 	"gbo-demo/asi-provider/internal/seal"
 	"gbo-demo/asi-provider/internal/sealcert"
+	"gbo-demo/asi-provider/internal/sourcedescription"
 	"gbo-demo/asi-provider/internal/tracing"
 	"gbo-demo/asi-provider/internal/verification"
+	"gbo-demo/source-registry/postgresregistry"
 )
 
 const (
@@ -50,6 +60,13 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "provision-seal-certificate" {
 		if err := sealcert.Provision(os.Args[2:]); err != nil {
 			slog.Error("provisioning seal certificate", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "write-release-file" {
+		if err := sourcedescription.WriteReleaseFile(os.Args[2:]); err != nil {
+			slog.Error("writing release file", "err", err)
 			os.Exit(1)
 		}
 		return
@@ -68,6 +85,14 @@ func serve() error {
 	services, err := dataservice.Load(env("ASIP_DATASERVICES_FILE", "config/dataservices.json"), adapterAttributes)
 	if err != nil {
 		return err
+	}
+	descriptions, err := newDescriptions()
+	if err != nil {
+		return err
+	}
+	refresh, err := time.ParseDuration(env("ASIP_SOURCE_REGISTRY_REFRESH", "5s"))
+	if err != nil || refresh <= 0 {
+		return fmt.Errorf("ASIP_SOURCE_REGISTRY_REFRESH must be a positive duration, got %q", os.Getenv("ASIP_SOURCE_REGISTRY_REFRESH"))
 	}
 	key, chain, err := seal.LoadMaterial(os.Getenv("ASIP_SEAL_KEY_FILE"), os.Getenv("ASIP_SEAL_CERT_FILE"))
 	if err != nil {
@@ -98,7 +123,7 @@ func serve() error {
 			ID:              ds.ID,
 			Attributes:      identifiers,
 			Country:         ds.Country,
-			Verification:    verification.NewService(newAdapter(ds.Source, outway, ds.GrantPath), catalogue),
+			Verification:    verification.NewService(descriptions.Require(ds.Source, newAdapter(ds.Source, outway, ds.GrantPath)), catalogue),
 			Tokens:          accesstoken.NewValidator(issuer, publicURL+httpapi.BasePathOf(ds.ID), publicURL, keys),
 			Provider:        httpapi.Provider{LegalName: ds.Provider},
 			AuthenticSource: authenticSource,
@@ -113,6 +138,9 @@ func serve() error {
 		return err
 	}
 	defer func() { _ = shutdownTracing(context.Background()) }()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go descriptions.Run(ctx, refresh)
 	srv := &http.Server{Addr: env("ASIP_ADDR", ":4020"), Handler: tracing.Middleware(handler, "asi-provider"), ReadHeaderTimeout: readHeaderTimeout}
 	errc := make(chan error, 1)
 	go func() {
@@ -122,8 +150,6 @@ func serve() error {
 		}
 	}()
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	select {
 	case err := <-errc:
 		return err
@@ -137,18 +163,43 @@ func serve() error {
 	return nil
 }
 
-// adapterAttributes lists per source adapter the attributes it can ask for;
-// the data services file may name only these.
-var adapterAttributes = map[string][]string{"brp": brpsource.Attributes()}
+// newDescriptions reads the sources' descriptions from the Source Registry,
+// or from a release file: exactly one of the two.
+func newDescriptions() (*sourcedescription.Descriptions, error) {
+	databaseURL, releaseFile := os.Getenv("ASIP_SOURCE_REGISTRY_DATABASE_URL"), os.Getenv("ASIP_SOURCE_REGISTRY_RELEASE_FILE")
+	switch {
+	case databaseURL != "" && releaseFile != "":
+		return nil, errors.New("set ASIP_SOURCE_REGISTRY_DATABASE_URL or ASIP_SOURCE_REGISTRY_RELEASE_FILE, not both")
+	case releaseFile != "":
+		return sourcedescription.New(func(context.Context) (sourcedescription.Registry, error) {
+			return sourcedescription.ReadReleaseFile(releaseFile)
+		}), nil
+	case databaseURL != "":
+		options := postgresregistry.Options{DatabaseURL: databaseURL, Schema: env("ASIP_SOURCE_REGISTRY_SCHEMA", "source_registry")}
+		return sourcedescription.New(func(ctx context.Context) (sourcedescription.Registry, error) {
+			store, err := postgresregistry.Open(ctx, options)
+			if err != nil {
+				return nil, err
+			}
+			return store, nil
+		}), nil
+	}
+	return nil, errors.New("ASIP_SOURCE_REGISTRY_DATABASE_URL is required: the Source Registry, read with its reader role, describes the sources (or ASIP_SOURCE_REGISTRY_RELEASE_FILE without a registry)")
+}
+
+// adapterAttributes lists per source, by its id in the Source Registry, the
+// attributes its adapter can ask for; the data services file may name only
+// these.
+var adapterAttributes = map[string][]string{"rvig": brpsource.Attributes()}
 
 // newAdapter returns the adapter that asks an authentic source through the
-// Outway. dataservice.Load has checked the name.
-func newAdapter(name, outway, grantPath string) verification.Source {
-	switch name {
-	case "brp":
+// Outway. dataservice.Load has checked the source.
+func newAdapter(source, outway, grantPath string) verification.Source {
+	switch source {
+	case "rvig":
 		return brpsource.New(outway, grantPath)
 	}
-	panic("no adapter " + name)
+	panic("no adapter for source " + source)
 }
 
 func env(name, fallback string) string {

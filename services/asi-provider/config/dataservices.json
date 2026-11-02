@@ -6,7 +6,7 @@
       "provider": "GBO demo ASIP",
       "authentic_source": "Basisregistratie Personen (mock)",
       "country": "NL",
-      "source": "brp",
+      "source": "rvig",
       "grant_path": "/brp/graphql",
       "attributes": {
         "https://gbo.example/attributes/family_name/1": "family_name",

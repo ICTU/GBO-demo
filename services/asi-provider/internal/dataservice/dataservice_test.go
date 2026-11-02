@@ -25,7 +25,7 @@ const brp = `{"id":"brp","provider":"GBO demo ASIP","authentic_source":"BRP","co
 
 // The file in config/ loads with the adapters of the ASIP's composition root.
 func TestTheShippedFileLoads(t *testing.T) {
-	ds, err := Load(filepath.Join("..", "..", "config", "dataservices.json"), map[string][]string{"brp": brpsource.Attributes()})
+	ds, err := Load(filepath.Join("..", "..", "config", "dataservices.json"), map[string][]string{"rvig": brpsource.Attributes()})
 	if err != nil || len(ds) != 1 || ds[0].ID != "brp" || len(ds[0].Attributes) != 5 || ds[0].AuthenticSource == "" {
 		t.Fatalf("Load = %+v, %v", ds, err)
 	}

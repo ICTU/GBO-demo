@@ -43,6 +43,15 @@ func TestEndToEndVerify(t *testing.T) { // case 24 (through /verify), case 37, c
 		t.Fatalf("build asi-provider: %v\n%s", err, out)
 	}
 	keyFile, certFile := writeSealMaterial(t, dir)
+	// There is no Source Registry: the ASIP reads the BRP's description from
+	// a release file, written from the BRP's published source metadata.
+	releaseFile := filepath.Join(dir, "release.json")
+	write := exec.Command(bin, "write-release-file", "--source", "rvig",
+		"--metadata", filepath.Join("..", "..", "..", "brp-graphql-server", "config", "gbo-source-metadata.json"),
+		"--catalogue", filepath.Join("..", "..", "..", "..", "schemas", "asi-attributes.json"), "--out", releaseFile)
+	if out, err := write.CombinedOutput(); err != nil {
+		t.Fatalf("write release file: %v\n%s", err, out)
+	}
 
 	asipURL := "http://" + freeAddr(t)
 	var asLogs syncBuffer
@@ -64,6 +73,7 @@ func TestEndToEndVerify(t *testing.T) { // case 24 (through /verify), case 37, c
 		"ASIP_SEAL_KEY_FILE="+keyFile,
 		"ASIP_SEAL_CERT_FILE="+certFile,
 		"ASIP_OUTWAY_URL="+outway.URL,
+		"ASIP_SOURCE_REGISTRY_RELEASE_FILE="+releaseFile,
 	)
 	asip.Stdout, asip.Stderr = &asipLogs, &asipLogs
 	if err := asip.Start(); err != nil {

@@ -18,12 +18,15 @@ A mock Authentic Source Interface Provider. A qualified trust service provider (
 In the demo stack, after `make demo-eudi` or `make demo-full`:
 
 ```bash
+make demo-eudi
 make demo-asi
 ```
 
+The ASIP reads the sources' descriptions from the active Source Registry release, which `make demo-eudi` onboards; see [Source descriptions](#source-descriptions).
+
 This adds the ASIP's FSC peer (OIN `99999999900000001200`, compose profile `asi`), lists it in the onboarding register with source peer `…0200`, seeds its connection contract for the BRP source (`brp`) with the grant link `/brp` on its Outway, issues the development seal certificate when missing, and starts both services: the authorization server on `GBO_PORT_ASI_AUTHORIZATION_SERVER` (default 9425) and the ASIP on `GBO_PORT_ASI_PROVIDER` (default 9424). Both are reached from the host: the issuer and the ASIP's public URL are host addresses (`http://<GBO_PUBLIC_HOST>:<port>`, or `ASI_AUTHORIZATION_SERVER_PUBLIC_URL` and `ASI_PROVIDER_PUBLIC_URL`; set `GBO_PUBLIC_HOST` to the LAN address when the QTSP or the browser runs on another machine), and the ASIP fetches the authorization server's keys on its internal address (`ASIP_AUTHORIZATION_SERVER_INTERNAL_URL`).
 
-On its own, it needs an Outway with a contract for `brp`; outside the stack every query then answers 503:
+On its own, it needs an Outway with a contract for `brp` and the Source Registry; outside the stack every query then answers 503:
 
 ```bash
 make provision-asip-seal-certificate
@@ -31,12 +34,13 @@ cd services/asi-provider
 ASIP_SEAL_KEY_FILE=../../.local/secrets/asi-provider/seal-key.pem \
 ASIP_SEAL_CERT_FILE=../../.local/secrets/asi-provider/seal-cert.pem \
 ASIP_OUTWAY_URL=http://localhost:8080 \
+ASIP_SOURCE_REGISTRY_DATABASE_URL=postgres://source_registry_reader:<password>@localhost:5432/source_registry \
 go run .
 ```
 
 A request needs an access token from the authorization server, obtained through the authorization code flow; see [`asi-authorization-server`](../asi-authorization-server). The reference QTSP ([`qtsp-reference`](../qtsp-reference)) runs the whole flow; the end-to-end test of the authorization server does so against this service.
 
-Configuration: `ASIP_ADDR` (default `:4020`), `ASIP_PUBLIC_URL` (the scheme and host QTSPs use, default `http://localhost:4020`; the token audience of a data service is this URL plus `/<data service>/authsrc-api`), `ASIP_AUTHORIZATION_SERVER` (the issuer, default `http://localhost:4021`), `ASIP_AUTHORIZATION_SERVER_INTERNAL_URL` (where the ASIP reaches the authorization server when that differs from the issuer), `ASIP_OUTWAY_URL` (required: the ASIP's Outway), `ASIP_DATASERVICES_FILE` (default `config/dataservices.json`), `ASIP_SEAL_KEY_FILE`, `ASIP_SEAL_CERT_FILE` (chain, leaf first).
+Configuration: `ASIP_ADDR` (default `:4020`), `ASIP_PUBLIC_URL` (the scheme and host QTSPs use, default `http://localhost:4020`; the token audience of a data service is this URL plus `/<data service>/authsrc-api`), `ASIP_AUTHORIZATION_SERVER` (the issuer, default `http://localhost:4021`), `ASIP_AUTHORIZATION_SERVER_INTERNAL_URL` (where the ASIP reaches the authorization server when that differs from the issuer), `ASIP_OUTWAY_URL` (required: the ASIP's Outway), `ASIP_DATASERVICES_FILE` (default `config/dataservices.json`), `ASIP_SEAL_KEY_FILE`, `ASIP_SEAL_CERT_FILE` (chain, leaf first), `ASIP_SOURCE_REGISTRY_DATABASE_URL` (the Source Registry with its reader role) or `ASIP_SOURCE_REGISTRY_RELEASE_FILE` (a release file, without a registry; one of the two is required), `ASIP_SOURCE_REGISTRY_SCHEMA` (default `source_registry`), `ASIP_SOURCE_REGISTRY_REFRESH` (default `5s`).
 
 ## Data services
 
@@ -50,11 +54,21 @@ ETSI TS 119 478 lets a response name one authentic source (REQ-ASIP-6.1.1.2-08),
 | `provider` | the legal name of the ASIP in the responses |
 | `authentic_source` | the legal name of the authentic source; empty when the ASIP is the authentic source, and then the responses name none |
 | `country` | the Member State of the data service (ISO 3166-1 alpha-2), in its discovery records |
-| `source` | the adapter that asks the source; it is code (`brp`: `internal/brpsource`) |
+| `source` | the source's id in the Source Registry; it also names the adapter that asks the source, which is code (`rvig`: `internal/brpsource`) |
 | `grant_path` | the grant-link of the ASIP's FSC contract with the source, on its Outway |
 | `attributes` | per attribute identifier, the name the adapter knows it by |
 
 The ASIP does not start with a data service named twice, an unknown adapter, an attribute the adapter cannot ask for, or a field it does not know (a misspelt `authentic_source` would otherwise drop the source from the responses). The authorization server must know the base URL of each data service as a resource (`AZSP_RESOURCES`); a token is for one data service. An attribute of another data service is not in the catalogue: 404. All data services share one seal for now; who holds it is open (#225).
+
+### Source descriptions
+
+A source describes in its source metadata how its fields make up the attributes (the `asi` capability, `docs/source-onboarding.md`). The eudi-adapter onboards it into the Source Registry; the ASIP reads the active release with the registry's reader role, which may read releases and the active pointer only, every `ASIP_SOURCE_REGISTRY_REFRESH`.
+
+A data service answers `/verify` and `/retrieve` only while its source has a current description: the source is in the active release, describes `asi`, and its `stale_until` has not passed. Otherwise it answers 503, as for an unreachable source; a 404 would tell the QTSP that the attribute does not verify. The ASIP starts without the registry. When the registry cannot be read, or a new release cannot (an unknown snapshot version, an `asi` of another shape, a digest that does not match), the ASIP keeps the descriptions it read before until they go stale. The contract and discovery endpoints do not depend on it.
+
+Where there is no registry, as in the end-to-end tests of the reference QTSP and the authorization server, the ASIP reads a release file instead (`ASIP_SOURCE_REGISTRY_RELEASE_FILE`). `asi-provider write-release-file --source rvig --metadata <source metadata> --catalogue schemas/asi-attributes.json --out <file>` writes one from a source's published metadata, with the `asi` capability checked against the catalogue. It is not a release the eudi-adapter onboarded: its certificates and Type Metadata are placeholders.
+
+The ASIP still asks the BRP through its adapter; it does not yet build the query from the description.
 
 ### Discovery records
 

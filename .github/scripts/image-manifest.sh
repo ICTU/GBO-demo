@@ -83,7 +83,7 @@ while IFS='|' read -r service context dockerfile paths platforms \
   )"
 done <<'IMAGES'
 asi-authorization-server|./services/asi-authorization-server|./services/asi-authorization-server/Dockerfile|services/asi-authorization-server|linux/amd64|false|asi-authorization-server
-asi-provider|./services/asi-provider|./services/asi-provider/Dockerfile|services/asi-provider|linux/amd64|false|asi-provider
+asi-provider|.|./services/asi-provider/Dockerfile|.dockerignore services/asi-provider services/asi-mapping services/source-registry|linux/amd64|false|asi-provider
 asi-discovery-stub|./services/asi-discovery-stub|./services/asi-discovery-stub/Dockerfile|services/asi-discovery-stub|linux/amd64|false|asi-discovery-stub
 bron-sidecar|.|./services/bron-sidecar/Dockerfile|.dockerignore services/bron-sidecar services/ldv-client services/ftv-graphql-mapper|linux/amd64|false|bron-sidecar
 brp-graphql-server|.|./services/brp-graphql-server/Dockerfile|.dockerignore services/brp-graphql-server services/ldv-client|linux/amd64|false|brp-graphql-server
@@ -96,7 +96,7 @@ dienstverlener-backend|.|./services/dienstverlener-backend/Dockerfile|.dockerign
 dienstverlener-mock|./dienstverlener-mock|./dienstverlener-mock/Dockerfile|dienstverlener-mock|linux/amd64|false|dienstverlener-mock
 keyper-mock|./keyper-mock|./keyper-mock/Dockerfile|keyper-mock|linux/amd64|false|keyper-mock
 dvtp-onboarding-register|./services/dvtp-onboarding-register|./services/dvtp-onboarding-register/Dockerfile|services/dvtp-onboarding-register|linux/amd64|false|dvtp-onboarding-register
-eudi-adapter|.|./services/eudi-adapter/Dockerfile|.dockerignore services/eudi-adapter services/ldv-client|linux/amd64|false|eudi-adapter
+eudi-adapter|.|./services/eudi-adapter/Dockerfile|.dockerignore services/eudi-adapter services/ldv-client services/asi-mapping services/source-registry|linux/amd64|false|eudi-adapter
 graphql-server|.|./services/graphql-server/Dockerfile|.dockerignore services/graphql-server services/ldv-client|linux/amd64|false|graphql-server
 lvg-graphql-server|.|./services/lvg-graphql-server/Dockerfile|.dockerignore services/lvg-graphql-server services/ldv-client|linux/amd64|false|lvg-graphql-server
 ldv-logboek|.|./services/ldv-logboek/Dockerfile|.dockerignore services/ldv-logboek services/ldv-client|linux/amd64|false|ldv-logboek
