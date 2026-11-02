@@ -104,14 +104,17 @@ if matches_any 'schemas/gbo-*.schema.json' 'schemas/asi-attributes.json' \
   done
 fi
 
-# The reference QTSP's end-to-end test builds and runs the authorization
-# server, the ASIP and the DIP stub; the ASIP reads the BRP's published
-# metadata, checked against the attribute catalogue.
+# The end-to-end tests of the reference QTSP and the authorization server
+# build and run the ASIP (the QTSP's also the authorization server and the
+# DIP stub); the ASIP reads the BRP's published metadata, checked against the
+# attribute catalogue.
 if matches_any 'services/asi-authorization-server/*' 'services/asi-provider/*' \
   'services/asi-discovery-stub/*' 'services/asi-mapping/*' \
   'services/source-registry/*' 'services/brp-graphql-server/config/*' \
   'schemas/asi-attributes.json'; then
-  go="$(append_unique "${go}" 'qtsp-reference')"
+  for service in qtsp-reference asi-authorization-server; do
+    go="$(append_unique "${go}" "${service}")"
+  done
 fi
 
 # The BRP mock's tests hold its asi mapping against the rule that grants the

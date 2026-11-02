@@ -322,8 +322,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   registry. Without a registry it reads a release file instead
   (`ASIP_SOURCE_REGISTRY_RELEASE_FILE`), which `asi-provider
   write-release-file` writes from a source's published metadata; the
-  reference QTSP's end-to-end test uses one, and now also runs when the ASI
-  services or the modules they use change. In `config/dataservices.json` `source` is now the source's
+  end-to-end tests of the reference QTSP and the authorization server use
+  one, and now also run when the ASI services or the modules they use change. In `config/dataservices.json` `source` is now the source's
   registry id (`rvig`). The ASIP still asks the BRP through its adapter. The
   ASIP image builds from the repository root; the eudi-adapter's image tag now
   also covers `asi-mapping` and `source-registry`, so a change to either
