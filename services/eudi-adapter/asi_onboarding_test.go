@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"gbo-demo/eudi-adapter/internal/onboarding"
+	"gbo-demo/source-registry/onboarding"
 )
 
 const testSchemaPath = "../../schemas/gbo-source-metadata-v1.schema.json"
