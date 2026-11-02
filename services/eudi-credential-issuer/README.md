@@ -146,6 +146,29 @@ Configuration file (paths relative to the file):
 }
 ```
 
+In the demo stack this file is not written by hand: `eudi-adapter
+materialize-credential-issuer` derives it from the active Source Release. Each
+source becomes a provider with its provisioned issuer and status
+certificates, its access certificate and its registration certificate (`make
+provision-wallet-registration`); each activated type becomes a credential
+configuration `<source>-<type>` with the display and claims of the source
+definition (a claim is mandatory unless the source marks it optional), 365
+days of validity and the adapter's `/attestations/<source>/<type>` as
+bronpoort. A profile is configured only when its wallet providers are mounted
+(`nl-wallet-providers.pem`, `eudi-wallet-providers.pem`, optionally
+`eudi-key-attestation-roots.pem`); `eudi` also needs the key attestation
+levels. Type Metadata (`type_metadata_uri`, `vct#integrity`) is not served
+yet: wallets take the display from `credential_metadata`, which carries the
+card name and claim labels but not the card description, logo or colours the
+Type Metadata has. The command refuses a wallet registration that has expired
+or no longer names every activated type, and replaces its output directory
+(default `/runtime-issuer`) only when the new configuration is complete.
+
+The offer parameters (`POST /offers`, `parameters`) are passed to the bronpoort
+as they are; the adapter accepts only the parameter sets of the offers the
+source publishes (see the adapter's `/eudi-offers.json`), and a refusal there
+reaches the offer caller as `503 source_unavailable`.
+
 The issuer refuses to start with a configuration a wallet would refuse: no `scope`, `display` or claims, a scope used twice (HAIP section 4.3), an empty claim path, a mandatory claim that is an object (wallets check mandatory claims on leaves), a provider without its own access, issuer and status keys, a provider without credential configurations, a configuration of an unknown provider, a provider without registration certificate when an `nl` profile exists, a registration certificate that is not a JWT, whose `sub` is not the `organizationIdentifier` (2.5.4.97) of the provider's access certificate or that does not list each of the provider's `vct`s in `provides_attestations` (the NL Wallet v0.6 checks the binding to the access certificate, not yet the `vct`s; the issuer does not verify the signature), an `eudi` profile without key levels, provider, profile or status list names that are not unique lower-case letters, digits and hyphens, or the reserved name `status`, a public URL with a path, negative sizes or durations, a signing key that is not P-256, or a chain file with a self-signed certificate (HAIP: no trust anchor in `x5c`). Whitespace around the registration certificate in its file is trimmed. The status certificate must have the subject of the issuer certificate. The NL Wallet also expects the issuer certificate to carry EKU `1.0.18013.5.1.2` and the status certificate EKU `1.3.6.1.5.5.7.3.127`; the issuer does not check its own certificates.
 
 ## Layout

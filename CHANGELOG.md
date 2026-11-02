@@ -25,6 +25,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   reader root and a registration certificate (WRPRC, entitlement
   `PUB_EAA_Provider`) signed under a separate development registrar root,
   with the reader-root CRL and the WRPRC status list for a trust host.
+- **Configuration of the own credential issuer from the Source Release**
+  (#614): `eudi-adapter materialize-credential-issuer` writes the issuer's
+  configuration: per source an Attestation Provider with its certificates and
+  wallet registration, per activated type a credential configuration, and the
+  wallet profiles whose trusted wallet providers are mounted.
 - **`eudi-adapter` serves pre-authorized offers** (#614): besides a wallet's
   PID disclosure it accepts `{"subject": {"bsn": ...}}` from a credential
   issuer whose offer caller named the subject. It logs that as a separate

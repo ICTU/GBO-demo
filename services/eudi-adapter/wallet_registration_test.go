@@ -463,7 +463,7 @@ func TestRegistrarRootIsNeverReplaced(t *testing.T) {
 
 func TestWalletRegistrationSourceFromRelease(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
-	release := testReleaseWithTypes(t, now, []string{testIncome})
+	release := testReleaseWithTypes(t, t.TempDir(), now, []string{testIncome})
 	t.Run("the activated types of the source", func(t *testing.T) {
 		source, err := walletRegistrationSourceFromRelease(release, "belastingdienst")
 		if err != nil {
@@ -482,10 +482,11 @@ func TestWalletRegistrationSourceFromRelease(t *testing.T) {
 }
 
 // testReleaseWithTypes is an active Source Release with one source,
-// belastingdienst, that has the given types activated.
-func testReleaseWithTypes(t *testing.T, now time.Time, vcts []string) onboarding.SourceRelease {
+// belastingdienst, that has the given types activated, with its
+// certificates provisioned in secrets. Each type has a required claim value
+// and an optional claim note.
+func testReleaseWithTypes(t *testing.T, secrets string, now time.Time, vcts []string) onboarding.SourceRelease {
 	t.Helper()
-	secrets := t.TempDir()
 	writeTestDevelopmentCAs(t, secrets, now)
 	registration := sourceRegistration{
 		SourceID: "belastingdienst", SourceOIN: "99999999900000000200", Name: "Belastingdienst",
@@ -517,7 +518,8 @@ func testReleaseWithTypes(t *testing.T, now time.Time, vcts []string) onboarding
 			TypeID: "type" + string(rune('a'+i)), TypeVersion: "1.0", Offers: []sourceOffer{offer},
 			GraphQL:        sourceGraphQL{Endpoint: "/graphql", Document: "query Income($bsn: String!) { income(bsn: $bsn) { value } }", SubjectVariable: "bsn", ResultPointer: "/data/income"},
 			MappingProfile: "gbo-simple-v1", Display: testDisplay("Example"),
-			Claims: testClaims(map[string]mappingRule{"value": {Pointer: "/value", Datatype: "string"}}),
+			Claims: testClaims(map[string]mappingRule{"value": {Pointer: "/value", Datatype: "string"},
+				"note": {Pointer: "/note", Datatype: "string", Optional: true}}),
 		}
 		activation.Types = append(activation.Types, activatedType{TypeID: definition.TypeID, TypeVersion: "1.0", VCT: vct,
 			VCTIntegrity: integrity, Offers: []sourceOffer{offer}, Definition: definition})

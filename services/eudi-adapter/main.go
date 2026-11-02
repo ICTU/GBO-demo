@@ -641,6 +641,12 @@ func main() {
 		}
 		return
 	}
+	if handled, err := runCredentialIssuerConfigCommand(ctx, os.Args[1:], os.Stdout, os.Stderr); handled {
+		if err != nil {
+			fatal("credential issuer materialization failed", err)
+		}
+		return
+	}
 	if handled, err := runWalletRegistrationCommand(ctx, os.Args[1:], os.Stdout, os.Stderr); handled {
 		if err != nil {
 			fatal("wallet registration provisioning failed", err)
