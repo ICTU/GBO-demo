@@ -83,7 +83,7 @@ while IFS='|' read -r service context dockerfile paths platforms \
   )"
 done <<'IMAGES'
 asi-authorization-server|./services/asi-authorization-server|./services/asi-authorization-server/Dockerfile|services/asi-authorization-server|linux/amd64|false|asi-authorization-server
-asi-provider|.|./services/asi-provider/Dockerfile|.dockerignore services/asi-provider services/asi-mapping services/source-registry|linux/amd64|false|asi-provider
+asi-provider|.|./services/asi-provider/Dockerfile|.dockerignore services/asi-provider services/asi-mapping services/source-registry schemas/asi-attributes.json|linux/amd64|false|asi-provider
 asi-discovery-stub|./services/asi-discovery-stub|./services/asi-discovery-stub/Dockerfile|services/asi-discovery-stub|linux/amd64|false|asi-discovery-stub
 bron-sidecar|.|./services/bron-sidecar/Dockerfile|.dockerignore services/bron-sidecar services/ldv-client services/ftv-graphql-mapper|linux/amd64|false|bron-sidecar
 brp-graphql-server|.|./services/brp-graphql-server/Dockerfile|.dockerignore services/brp-graphql-server services/ldv-client|linux/amd64|false|brp-graphql-server

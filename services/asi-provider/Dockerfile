@@ -15,5 +15,8 @@ RUN apk add --no-cache ca-certificates wget
 WORKDIR /app
 COPY --from=builder /asi-provider .
 COPY services/asi-provider/config/dataservices.json ./config/dataservices.json
+# GBO's attribute catalogue: the shape the ASIP builds each attribute into.
+COPY schemas/asi-attributes.json ./config/asi-attributes.json
+ENV ASIP_ATTRIBUTE_CATALOGUE_FILE=config/asi-attributes.json
 EXPOSE 4020
 CMD ["./asi-provider"]

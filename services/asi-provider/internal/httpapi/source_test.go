@@ -6,30 +6,38 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
+	asimapping "gbo-demo/asi-mapping"
 	"gbo-demo/asi-provider/internal/accesstoken"
 	"gbo-demo/asi-provider/internal/verification"
 )
 
-// fakeSource stands in for the BRP behind FSC: per BSN the attribute values
-// as the source adapter maps them. With err set it fails every call.
+// fakeSource stands in for an authentic source behind FSC, known by its
+// description: per BSN the answer at result_pointer, as the source gives it.
+// With err set it fails every question.
 type fakeSource struct {
-	persons map[string]map[string]string
+	asi     *asimapping.Capability
+	persons map[string]string
 	err     error
 }
 
-func (f fakeSource) Values(_ context.Context, bsn string, names []string) (map[string]json.RawMessage, error) {
+func (f fakeSource) Description() (*asimapping.Capability, error) { return f.asi, nil }
+
+func (f fakeSource) Ask(_ context.Context, bsn string, _ *asimapping.Capability, _ string, _ []string) (any, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
-	out := map[string]json.RawMessage{}
-	for _, name := range names {
-		if v, ok := f.persons[bsn][name]; ok {
-			out[name] = json.RawMessage(v)
-		}
+	raw, ok := f.persons[bsn]
+	if !ok {
+		return nil, nil
 	}
-	return out, nil
+	var answer any
+	if err := json.Unmarshal([]byte(raw), &answer); err != nil {
+		return nil, err
+	}
+	return answer, nil
 }
 
 const (
@@ -38,38 +46,60 @@ const (
 	duoBase  = "/duo" + BasePath
 )
 
-// brpCatalogue is the BRP data service's; the diploma is DUO's.
-var brpCatalogue = verification.Catalogue{
-	idFamilyName: {Name: "family_name"},
-	idGivenName:  {Name: "given_name"},
-	idAddress:    {Name: "address"},
+// brpASI is the description the BRP mock publishes.
+var brpASI = func() *asimapping.Capability {
+	raw, err := os.ReadFile("../../../brp-graphql-server/config/gbo-source-metadata.json")
+	if err != nil {
+		panic(err)
+	}
+	var document struct {
+		Capabilities struct {
+			ASI *asimapping.Capability `json:"asi"`
+		} `json:"capabilities"`
+	}
+	if err := json.Unmarshal(raw, &document); err != nil {
+		panic(err)
+	}
+	return document.Capabilities.ASI
+}()
+
+// duoASI describes a diploma register: another authentic source, with its
+// own data service.
+var duoASI = &asimapping.Capability{
+	GraphQL: asimapping.GraphQL{
+		Document:        "query Asi($bsn: BSN!) { diploma(bsn: $bsn) { ...Selected } }",
+		SubjectVariable: "bsn", ResultPointer: "/data/diploma",
+	},
+	Attributes: []asimapping.Attribute{{
+		Identifier: idDiploma,
+		Fields:     map[string]asimapping.Field{"qualification": {Pointer: "/kwalificatie"}},
+	}},
 }
 
-var duoCatalogue = verification.Catalogue{idDiploma: {Name: "education_qualification"}}
+// testCatalogue is GBO's attribute catalogue, with the diploma.
+var testCatalogue = func() asimapping.Catalogue {
+	catalogue, err := asimapping.LoadCatalogue("../../../../schemas/asi-attributes.json")
+	if err != nil {
+		panic(err)
+	}
+	catalogue[idDiploma] = &asimapping.ValueSchema{
+		Type: "object", Required: []string{"qualification"},
+		Properties: map[string]*asimapping.ValueSchema{"qualification": {Type: "string"}},
+	}
+	return catalogue
+}()
 
-var diplomas = fakeSource{persons: map[string]map[string]string{
-	bsnFrouke: {"education_qualification": `{"qualification":"MSc"}`},
-}}
+var diplomas = fakeSource{asi: duoASI, persons: map[string]string{bsnFrouke: `{"kwalificatie":"MSc"}`}}
 
-// The persons of the BRP mock the tests use. Tom is not resident: he has no
-// address in the attribute's shape.
-var testPersons = fakeSource{persons: map[string]map[string]string{
-	bsnFrouke: {
-		"family_name": `{"family_name":"Jansen"}`,
-		"given_name":  `{"given_name":"Frouke"}`,
-		"birth_date":  `{"birth_date":"2000-03-24"}`,
-		"nationality": `{"nationalities":["NL","BE"]}`,
-		"address":     `{"street":"Coolsingel","house_number":"12 B","postal_code":"3011 AD","city":"Rotterdam","country":"NL"}`,
-	},
-	bsnSanne: {
-		"family_name": `{"family_name":"Meijer"}`,
-		"given_name":  `{"given_name":"Sanne"}`,
-	},
-	bsnTom: {
-		"family_name": `{"family_name":"Willems"}`,
-		"given_name":  `{"given_name":"Tom"}`,
-		"nationality": `{"nationalities":["BE"]}`,
-	},
+// The persons of the BRP mock the tests use, as the BRP answers. Tom is not
+// resident: he has no address in the attribute's shape.
+var testPersons = fakeSource{asi: brpASI, persons: map[string]string{
+	bsnFrouke: `{"__typename":"Ingezetene","voorvoegsel":null,"geslachtsnaam":"Jansen","voornamen":"Frouke",
+		"geboortedatum":"2000-03-24","heeftNationaliteit":[{"nationaliteit":"NL"},{"nationaliteit":"BE"}],
+		"woontOp":{"straatnaam":"Coolsingel","huisnummer":12,"huisletter":"B","huisnummertoevoeging":null,
+			"postcode":"3011 AD","woonplaatsnaam":"Rotterdam"}}`,
+	bsnSanne: `{"__typename":"Ingezetene","voorvoegsel":null,"geslachtsnaam":"Meijer","voornamen":"Sanne"}`,
+	bsnTom:   `{"__typename":"NietIngezetene","voorvoegsel":null,"geslachtsnaam":"Willems","voornamen":"Tom","heeftNationaliteit":[{"nationaliteit":"BE"}]}`,
 }}
 
 // A source that cannot be reached is 503, one that refuses 500: neither is
@@ -85,7 +115,7 @@ func TestSourceFailureIsNotUnknown(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			authz, qtsp := newTestAuthorizationServer(t), newTestQTSP(t)
-			env := newTestServerWithSource(t, authz, qtsp, accesstoken.StaticKeys(authz.jwks), fakeSource{err: tc.err})
+			env := newTestServerWithSource(t, authz, qtsp, accesstoken.StaticKeys(authz.jwks), fakeSource{asi: brpASI, err: tc.err})
 			for _, op := range []struct{ path, body string }{
 				{"/verify", verifyBody(idFamilyName, `{"family_name":"Jansen"}`)},
 				{"/retrieve", `{"attributeIdentifiers":[{"attributeIdentifier":"` + idFamilyName + `"}]}`},
@@ -102,7 +132,7 @@ func TestSourceFailureIsNotUnknown(t *testing.T) {
 // discovery endpoints: only /verify and /retrieve ask the source.
 func TestAnUnavailableSourceLeavesThePublishedEndpoints(t *testing.T) {
 	authz, qtsp := newTestAuthorizationServer(t), newTestQTSP(t)
-	env := newTestServerWithSource(t, authz, qtsp, accesstoken.StaticKeys(authz.jwks), fakeSource{err: verification.ErrSourceUnavailable})
+	env := newTestServerWithSource(t, authz, qtsp, accesstoken.StaticKeys(authz.jwks), fakeSource{asi: brpASI, err: verification.ErrSourceUnavailable})
 	for _, path := range []string{"/brp/openapi.json", "/brp/dataservices", "/brp/" + dataserviceFileName, "/healthz"} {
 		rec := httptest.NewRecorder()
 		env.handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))

@@ -103,7 +103,7 @@ function collectMatches(nodeId: string): Match[] {
   if (nodeId === 'asi-provider') {
     return [
       { service: 'asi-provider', pathPrefix: '/' },
-      { service: 'asi-provider', operation: 'BRP query' },
+      { service: 'asi-provider', operation: 'source query' },
     ]
   }
   const primary = NODE_SPAN_MATCH[nodeId]

@@ -4,8 +4,10 @@
 // response (REQ-ASIP-6.1.1.2-08), and the Data Service Directory lists a data
 // service per attribute (REQ-DIP-5.3.3-03).
 //
-// The adapter that asks a source stays code; the file names it per data
-// service, with the attributes it provides.
+// The file names per data service its source in the Source Registry. What
+// the source holds, and how the ASIP asks it, comes from the source's
+// description in the active release; the file lists the attributes only for
+// the discovery records.
 package dataservice
 
 import (
@@ -31,15 +33,15 @@ type DataService struct {
 	// in its discovery records.
 	Country string `json:"country"`
 	// Source is the authentic source's id in the Source Registry, whose
-	// active release describes it. It also names the adapter that asks the
-	// source.
+	// active release describes it.
 	Source string `json:"source"`
 	// GrantPath is the grant-link of the ASIP's FSC contract with the source,
 	// on its Outway.
 	GrantPath string `json:"grant_path"`
-	// Attributes maps each attribute identifier to the name the adapter
-	// knows it by.
-	Attributes map[string]string `json:"attributes"`
+	// Attributes lists the identifiers of the attributes in the data
+	// service's discovery records. Which attributes it verifies comes from
+	// the source's description.
+	Attributes []string `json:"attributes"`
 }
 
 var (
@@ -47,11 +49,10 @@ var (
 	countryPattern = regexp.MustCompile(`^[A-Z]{2}$`)
 )
 
-// Load reads the data services from path. adapters lists per adapter the
-// attribute names it can ask for. A file that names an unknown adapter, an
-// attribute the adapter cannot ask for, or a data service twice stops the
-// ASIP at start, before any request.
-func Load(path string, adapters map[string][]string) ([]DataService, error) {
+// Load reads the data services from path. A file without a source, with an
+// identifier that is not a URI, or with a data service twice stops the ASIP
+// at start, before any request.
+func Load(path string) ([]DataService, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read data services: %w", err)
@@ -85,9 +86,8 @@ func Load(path string, adapters map[string][]string) ([]DataService, error) {
 		if !countryPattern.MatchString(ds.Country) {
 			return nil, fmt.Errorf("data service %q: country must be an ISO 3166-1 alpha-2 code", ds.ID)
 		}
-		names, ok := adapters[ds.Source]
-		if !ok {
-			return nil, fmt.Errorf("data service %q: no adapter %q", ds.ID, ds.Source)
+		if ds.Source == "" {
+			return nil, fmt.Errorf("data service %q: source is required", ds.ID)
 		}
 		if len(ds.GrantPath) < 2 || ds.GrantPath[0] != '/' {
 			return nil, fmt.Errorf("data service %q: grant_path must be a path on the Outway", ds.ID)
@@ -95,12 +95,12 @@ func Load(path string, adapters map[string][]string) ([]DataService, error) {
 		if len(ds.Attributes) == 0 {
 			return nil, fmt.Errorf("data service %q: names no attributes", ds.ID)
 		}
-		for id, name := range ds.Attributes {
+		for i, id := range ds.Attributes {
 			if u, err := url.Parse(id); err != nil || !u.IsAbs() {
 				return nil, fmt.Errorf("data service %q: attribute identifier %q is not an absolute URI", ds.ID, id)
 			}
-			if !slices.Contains(names, name) {
-				return nil, fmt.Errorf("data service %q: adapter %q cannot ask for attribute %q", ds.ID, ds.Source, name)
+			if slices.Contains(ds.Attributes[:i], id) {
+				return nil, fmt.Errorf("data service %q: attribute %q is listed twice", ds.ID, id)
 			}
 		}
 	}

@@ -54,11 +54,11 @@ ETSI TS 119 478 lets a response name one authentic source (REQ-ASIP-6.1.1.2-08),
 | `provider` | the legal name of the ASIP in the responses |
 | `authentic_source` | the legal name of the authentic source; empty when the ASIP is the authentic source, and then the responses name none |
 | `country` | the Member State of the data service (ISO 3166-1 alpha-2), in its discovery records |
-| `source` | the source's id in the Source Registry; it also names the adapter that asks the source, which is code (`rvig`: `internal/brpsource`) |
+| `source` | the source's id in the Source Registry, whose description says what the data service verifies and how the ASIP asks the source |
 | `grant_path` | the grant-link of the ASIP's FSC contract with the source, on its Outway |
-| `attributes` | per attribute identifier, the name the adapter knows it by |
+| `attributes` | the attribute identifiers in the discovery records |
 
-The ASIP does not start with a data service named twice, an unknown adapter, an attribute the adapter cannot ask for, or a field it does not know (a misspelt `authentic_source` would otherwise drop the source from the responses). The authorization server must know the base URL of each data service as a resource (`AZSP_RESOURCES`); a token is for one data service. An attribute of another data service is not in the catalogue: 404. All data services share one seal for now; who holds it is open (#225).
+The ASIP does not start with a data service named twice, one without a source, an identifier that is not a URI, or a field it does not know (a misspelt `authentic_source` would otherwise drop the source from the responses). The authorization server must know the base URL of each data service as a resource (`AZSP_RESOURCES`); a token is for one data service. An attribute the source does not describe, such as one of another data service, is 404. All data services share one seal for now; who holds it is open (#225).
 
 ### Source descriptions
 
@@ -68,7 +68,10 @@ A data service answers `/verify` and `/retrieve` only while its source has a cur
 
 Where there is no registry, as in the end-to-end tests of the reference QTSP and the authorization server, the ASIP reads a release file instead (`ASIP_SOURCE_REGISTRY_RELEASE_FILE`). `asi-provider write-release-file --source rvig --metadata <source metadata> --catalogue schemas/asi-attributes.json --out <file>` writes one from a source's published metadata, with the `asi` capability checked against the catalogue. It is not a release the eudi-adapter onboarded: its certificates and Type Metadata are placeholders.
 
-The ASIP still asks the BRP through its adapter; it does not yet build the query from the description.
+From the description the ASIP derives, per request, one query with only the fields of the requested attributes and fragments (`asi-mapping`), and builds each attribute from the answer in the shape of GBO's attribute catalogue (`ASIP_ATTRIBUTE_CATALOGUE_FILE`, default `../../schemas/asi-attributes.json`; the image carries it). The catalogue is provisional, until an EU or national catalogue of attributes provides the schemas; the ASIP also checks each description in a new release against it, and a release with a description that does not fit is one it cannot read.
+
+- A fragment asks only its own member: the city of an address the source holds without a postcode is `Match`. A fragment on a member the source does not provide (a `const`, such as the address's country) or the attribute does not have is `Unknown`, and the source is not asked.
+- An answer of another shape than the description and the value schema expect, such as a birth date that is not a date, is 500, not `Unknown`.
 
 ### Discovery records
 
@@ -80,10 +83,11 @@ Ports and adapters, as `AGENTS.md` asks for a service with an authorization boun
 
 | Package | |
 |---|---|
-| `internal/verification` | the core: Verify and Retrieve, the catalogue, matching and JSONPath fragments. Port `Source` |
+| `internal/verification` | the core: Verify and Retrieve, from the source's description, matching and JSONPath fragments. Port `Source` |
 | `internal/accesstoken` | the ASIP as resource server: access token, DPoP proof and scope. Port `KeySource` |
 | `internal/asmetadata` | `KeySource`: the keys from the metadata of the authorization server |
-| `internal/brpsource` | `Source`: the BRP over FSC, one GraphQL query per request |
+| `internal/graphqlsource` | `Source`: an authentic source over FSC, one GraphQL query per request, derived from its description |
+| `internal/sourcedescription` | the sources' descriptions from the active Source Registry release, or a release file |
 | `internal/dataservice` | the data services file |
 | `internal/tracing` | the `Fsc-Transaction-Id` of a request, its trace, and the OTLP exporter |
 | `internal/seal` | the seal on every result |
@@ -109,7 +113,7 @@ The access token is checked first (401). Then the request is validated against t
 
 ## The authentic source
 
-The ASIP is an FSC consumer peer of its own (`99999999900000001200`) with a connection contract for the BRP service `brp`. Per request it posts one GraphQL query of its own to the grant-link `/brp/graphql` on its Outway, with only the fields of the requested attributes and the BSN from the access token as the variable `bsn`: one FSC transaction and one PDP decision per request. If the chain refuses a field, the whole request fails (500): in this chain that is a fault in the deployment. ETSI TS 119 478 does not prescribe how an ASIP asks its source. Every request gets one `Fsc-Transaction-Id` (UUID v7) for its query. Without a `traceparent` from the QTSP, the trace id is that UUID, so the FSC transaction log, the PDP's decision log and the trace share one value; with one, the request joins the QTSP's trace. The ASIP exports spans over OTLP when `OTEL_EXPORTER_OTLP_ENDPOINT` is set (`OTEL_SERVICE_NAME`, default `asi-provider`): the request, with the data service as `gbo.asi.data_service`, and the BRP query, with `gbo.fsc.transaction_id` and the attribute names as `gbo.asi.attributes`. No span holds the BSN or a value. The developer portal's ASI tab lays a request down at the reference QTSP, which starts the verify or retrieve at the ASIP once the citizen approves; the tab shows the outcome the QTSP reports and the chain, the transaction log of the ASIP's peer (`asip`) and BD, and the PDP decision, all found from that transaction id.
+The ASIP is an FSC consumer peer of its own (`99999999900000001200`) with a connection contract for the BRP service `brp`. Per request it posts one GraphQL query, derived from the BRP's description, to the grant-link `/brp/graphql` on its Outway, with only the fields of the requested attributes and the BSN from the access token as the description's subject variable (`bsn`): one FSC transaction and one PDP decision per request. If the chain refuses a field, the whole request fails (500): in this chain that is a fault in the deployment. ETSI TS 119 478 does not prescribe how an ASIP asks its source. Every request gets one `Fsc-Transaction-Id` (UUID v7) for its query. Without a `traceparent` from the QTSP, the trace id is that UUID, so the FSC transaction log, the PDP's decision log and the trace share one value; with one, the request joins the QTSP's trace. The ASIP exports spans over OTLP when `OTEL_EXPORTER_OTLP_ENDPOINT` is set (`OTEL_SERVICE_NAME`, default `asi-provider`): the request, with the data service as `gbo.asi.data_service`, and the source query, with the source as `gbo.asi.source`, `gbo.fsc.transaction_id` and the attribute identifiers as `gbo.asi.attributes`. No span holds the BSN or a value. The developer portal's ASI tab lays a request down at the reference QTSP, which starts the verify or retrieve at the ASIP once the citizen approves; the tab shows the outcome the QTSP reports and the chain, the transaction log of the ASIP's peer (`asip`) and BD, and the PDP decision, all found from that transaction id.
 
 | Attribute | BRP fields | Value |
 |---|---|---|
@@ -154,7 +158,7 @@ Where ETSI TS 119 478 leaves room, this mock chooses as follows (D10 in #336):
 - **`Unknown`** means "no authentic source data was available to determine a match for the attribute for the user" (REQ-ASIP-6.1.1.2-04): the source holds no value for this person. The ARF (QTSPAS_02) answers `NoMatch` in the second case; ETSI clause 6.1.1 is the legally designated text, so it prevails.
 - **404** is returned for an attribute identifier that is not in the catalogue of the data service, also when it is another data service's; and on `/retrieve`, when the source holds no value for one of the requested attributes. Retrieve gives no partial result, so a 200 always carries every requested attribute (REQ-ASIP-6.1.2.2-06, -02-01). On `/verify` a missing value is `Unknown`.
 - **No value is returned.** `Match` and `MatchWithVariation` carry no `attributeValue`, although Implementing Regulation (EU) 2026/1735 Annex IV allows it.
-- **`MatchWithVariation`** is returned when the values are equal after transliterating Latin letters that do not decompose as in ICAO Doc 9303 (ß → ss, æ → ae, ø → oe, ĳ → ij, …), removing diacritics, treating hyphens as spaces, collapsing white space and folding case. Transliteration between scripts (Cyrillic, Greek, …) is not supported.
+- **`MatchWithVariation`** is returned when the values are equal after, in every string without a `format` in the value schema, transliterating Latin letters that do not decompose as in ICAO Doc 9303 (ß → ss, æ → ae, ø → oe, ĳ → ij, …), removing diacritics, treating hyphens as spaces, collapsing white space and folding case. Transliteration between scripts (Cyrillic, Greek, …) is not supported. A string with a `format`, such as the birth date, has one way of writing: it matches exactly or not.
 - **Arrays** (such as nationalities) are compared as sets: order does not matter.
 - **Fragments** support the JSONPath subset `$`, `.name`, `['name']` and `[n]`. The schema requires a fragment `value` to be an object; this mock reads it as `{"<last member name>": value}`, for example location `$.city` with value `{"city": "Rotterdam"}`.
 - **`mandate`** is not supported and returns 501, also on `/retrieve`.

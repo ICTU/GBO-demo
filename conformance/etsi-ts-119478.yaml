@@ -58,7 +58,7 @@ requirements:
     status: passed
     tests:
       - "services/asi-provider/internal/httpapi:TestVerifyMatch"
-      - "services/asi-provider/internal/verification:TestOneQuestionToTheSourcePerRequest"
+      - "services/asi-provider/internal/verification:TestVerifyFromTheDescription"
   REQ-ASIP-6.1.1.1-04:
     status: passed
     tests:
@@ -67,7 +67,7 @@ requirements:
     status: passed
     tests:
       - "services/asi-provider/internal/httpapi:TestVerifyFragment"
-      - "services/asi-provider/internal/verification:TestVerifyFragment"
+      - "services/asi-provider/internal/verification:TestVerifyFromTheDescription"
   REQ-ASIP-6.1.1.1-05:
     status: passed
     tests:
@@ -106,7 +106,7 @@ requirements:
     status: passed
     tests:
       - "services/asi-provider/internal/httpapi:TestVerifyFragment"
-      - "services/asi-provider/internal/verification:TestVerifyFragment"
+      - "services/asi-provider/internal/verification:TestVerifyFromTheDescription"
   REQ-ASIP-6.1.1.1-07-03:
     status: passed
     tests:
@@ -116,7 +116,7 @@ requirements:
     tests:
       - "services/asi-provider/internal/httpapi:TestVerifyMatch"
       - "services/asi-provider/internal/httpapi:TestVerifyNoMatch"
-      - "services/asi-provider/internal/verification:TestVerifyResults"
+      - "services/asi-provider/internal/verification:TestVariation"
   REQ-ASIP-6.1.1.1-08-01:
     status: passed
     tests:
@@ -128,7 +128,7 @@ requirements:
     status: passed
     tests:
       - "services/asi-provider/internal/httpapi:TestVerifyMatchWithVariation"
-      - "services/asi-provider/internal/verification:TestVerifyResults"
+      - "services/asi-provider/internal/verification:TestVariation"
   REQ-ASIP-6.1.1.1-10-01:
     status: failing
     reason: The ASIP supports fuzzy matching but returns no stored value. Annex IV of Implementing Regulation (EU) 2026/1735 makes the value optional in 6.1.1.2-04 but does not adapt this requirement, so read literally it is not met.
@@ -156,7 +156,7 @@ requirements:
   REQ-ASIP-6.1.1.2-02-01:
     status: passed
     tests:
-      - "services/asi-provider/internal/verification:TestOneQuestionToTheSourcePerRequest"
+      - "services/asi-provider/internal/verification:TestVerifyFromTheDescription"
       - "services/asi-provider/internal/httpapi:TestVerifyMatch"
   REQ-ASIP-6.1.1.2-03:
     status: passed
@@ -183,7 +183,7 @@ requirements:
     status: passed
     tests:
       - "services/asi-provider/internal/httpapi:TestVerifyFragment"
-      - "services/asi-provider/internal/verification:TestOneQuestionToTheSourcePerRequest"
+      - "services/asi-provider/internal/verification:TestVerifyFromTheDescription"
   REQ-ASIP-6.1.1.2-06:
     status: passed
     tests:
@@ -196,7 +196,7 @@ requirements:
     status: passed
     tests:
       - "services/asi-provider/internal/httpapi:TestVerifyFragment"
-      - "services/asi-provider/internal/verification:TestVerifyFragment"
+      - "services/asi-provider/internal/verification:TestVerifyFromTheDescription"
   REQ-ASIP-6.1.1.2-06-03:
     status: not-applicable
     reason: The structure of fragmentValue; the ASIP returns none (optional under Implementing Regulation (EU) 2026/1735 Annex IV).
