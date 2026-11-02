@@ -318,3 +318,25 @@ func assertNoStaging(t *testing.T, dir string) {
 		}
 	}
 }
+
+func TestMaterializeCredentialIssuerHandsOutputToOwner(t *testing.T) {
+	f := newCredentialIssuerFixture(t)
+	// A test cannot become another user; handing to itself exercises the walk.
+	uid, gid := os.Getuid(), os.Getgid()
+	f.options.owner = &fileOwner{uid: uid, gid: gid}
+	f.materialized(t)
+	if _, err := os.Stat(filepath.Join(f.options.outputDir, "belastingdienst", "issuer-key.pem")); err != nil {
+		t.Fatal(err)
+	}
+	for value, want := range map[string]*fileOwner{"": nil, "1000": {1000, 1000}, "1000:2000": {1000, 2000}} {
+		got, err := parseFileOwner(value)
+		if err != nil || (got == nil) != (want == nil) || (got != nil && *got != *want) {
+			t.Fatalf("%q: %+v, %v", value, got, err)
+		}
+	}
+	for _, bad := range []string{"x", "1000:", "-1", "1000:y"} {
+		if _, err := parseFileOwner(bad); err == nil {
+			t.Fatalf("%q must be refused", bad)
+		}
+	}
+}

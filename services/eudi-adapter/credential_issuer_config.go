@@ -18,6 +18,7 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -54,6 +55,30 @@ type credentialIssuerOptions struct {
 	// levels the eudi profile requires (ARF ISSU_27d).
 	eudiKeyStorage, eudiUserAuthentication []string
 	now                                    func() time.Time
+	// owner, when set, becomes the owner of everything written: the issuer
+	// runs as another user than this command.
+	owner *fileOwner
+}
+
+type fileOwner struct{ uid, gid int }
+
+// parseFileOwner reads "uid" or "uid:gid".
+func parseFileOwner(value string) (*fileOwner, error) {
+	if value == "" {
+		return nil, nil
+	}
+	uidText, gidText, hasGID := strings.Cut(value, ":")
+	uid, err := strconv.Atoi(uidText)
+	if err != nil || uid < 0 {
+		return nil, fmt.Errorf("--owner %q: want uid or uid:gid", value)
+	}
+	gid := uid
+	if hasGID {
+		if gid, err = strconv.Atoi(gidText); err != nil || gid < 0 {
+			return nil, fmt.Errorf("--owner %q: want uid or uid:gid", value)
+		}
+	}
+	return &fileOwner{uid: uid, gid: gid}, nil
 }
 
 type issuerFile struct {
@@ -121,6 +146,7 @@ func runCredentialIssuerConfigCommand(ctx context.Context, arguments []string, s
 	set.StringVar(&options.adapterBaseURL, "adapter-base-url", os.Getenv("EUDI_BRI_URL"), "public GBO adapter base URL")
 	set.StringVar(&options.rootsDir, "wallet-roots-dir", "/wallet-roots", "directory with the trusted wallet providers per profile")
 	set.StringVar(&options.universalLinkBase, "universal-link-base", getEnv("ISSUER_NL_UNIVERSAL_LINK_BASE", "walletdebuginteraction://wallet.edi.rijksoverheid.nl/"), "base of the NL Wallet universal link")
+	owner := set.String("owner", os.Getenv("ISSUER_RUNTIME_OWNER"), "uid or uid:gid that becomes the owner of the output, for an issuer running as another user")
 	keyStorage := set.String("eudi-key-storage", os.Getenv("ISSUER_EUDI_KEY_STORAGE"), "comma-separated key storage levels the eudi profile requires")
 	userAuthentication := set.String("eudi-user-authentication", os.Getenv("ISSUER_EUDI_USER_AUTHENTICATION"), "comma-separated user authentication levels the eudi profile requires")
 	if err := set.Parse(arguments[1:]); err != nil {
@@ -131,6 +157,10 @@ func runCredentialIssuerConfigCommand(ctx context.Context, arguments []string, s
 	}
 	options.eudiKeyStorage, options.eudiUserAuthentication = splitList(*keyStorage), splitList(*userAuthentication)
 	options.now = time.Now
+	var err error
+	if options.owner, err = parseFileOwner(*owner); err != nil {
+		return true, err
+	}
 	store, err := postgresregistry.Open(ctx, postgresregistry.Options{DatabaseURL: *databaseURL, Schema: *databaseSchema})
 	if err != nil {
 		return true, err
@@ -183,6 +213,11 @@ func materializeCredentialIssuer(options credentialIssuerOptions, release onboar
 	options.outputDir = staging
 	if err := writeCredentialIssuer(options, release, adapterBaseURL); err != nil {
 		return err
+	}
+	if options.owner != nil {
+		if err := chownTree(staging, *options.owner); err != nil {
+			return fmt.Errorf("hand the output to %d:%d: %w", options.owner.uid, options.owner.gid, err)
+		}
 	}
 	return replaceDirectoryContents(outputDir, staging)
 }
@@ -239,6 +274,16 @@ func replaceDirectoryContents(dir, staging string) error {
 		}
 	}
 	return nil
+}
+
+// chownTree gives everything under root, root excluded, to owner.
+func chownTree(root string, owner fileOwner) error {
+	return filepath.WalkDir(root, func(path string, _ fs.DirEntry, err error) error {
+		if err != nil || path == root {
+			return err
+		}
+		return os.Lchown(path, owner.uid, owner.gid)
+	})
 }
 
 // derivedNames remembers which source, type and version gave each

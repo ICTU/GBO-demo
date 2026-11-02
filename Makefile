@@ -1,7 +1,7 @@
 .PHONY: up down logs clean certs require-ftv-postgres demo-manager manager-seed fsc-local-env fsc-ca fsc-up fsc-all-up fsc-brp-certs fsc-consent-register-certs fsc-gbo-pdp-certs fsc-ir-certs fsc-int-certs fsc-asip-certs fsc-databases fsc-down fsc-test fsc-clean \
         fsc-seed-bri fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-lvg fsc-seed-int fsc-seed-asip fsc-seed-brp fsc-seed-rvig-source fsc-seed-metadata fsc-pdp-cert pdp-up \
         eudi-images asi-wallet-verifier-image source-metadata-up \
-        require-development-cas create-development-registrar-root provision-wallet-registration provision-development-certificates provision-qtsp-issuance-certificates provision-asip-seal-certificate provision-asip-qtsp-certificate provision-asi-wallet-verifier reconcile-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
+        require-development-cas create-development-registrar-root provision-wallet-registration credential-issuer-up provision-development-certificates provision-qtsp-issuance-certificates provision-asip-seal-certificate provision-asip-qtsp-certificate provision-asi-wallet-verifier reconcile-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
         demo-full demo-integrator demo-asi demo-down eudi-config policy-check policy-test
 
 -include .env
@@ -372,6 +372,18 @@ provision-wallet-registration: require-development-cas
 	@docker compose --profile eudi --profile wallet-registration run --build --rm -T wallet-registration-source --source-id "$(SOURCE_ID)" \
 		| (cd services/eudi-adapter && go run . provision-wallet-registration --source-file - \
 			--secrets-dir "$(ONBOARDING_SECRETS_DIR)" --publish-dir "$(EUDI_TRUST_PUBLISH_DIR)" --kvk-number "$(KVK_NUMBER)")
+
+# Own credential issuer beside eudi-issuance-server (profile
+# credential-issuer). Checks the settings the issuer and the trust host
+# cannot start without, rematerializes the configuration and recreates the
+# issuer so it reads it.
+credential-issuer-up:
+	@test -n "$(ISSUER_PUBLIC_URL)" || { echo "ERROR: set ISSUER_PUBLIC_URL (public host of the issuer)"; exit 1; }
+	@test -n "$(EUDI_TRUST_PUBLIC_URL)" || { echo "ERROR: set EUDI_TRUST_PUBLIC_URL (public host of the trust host)"; exit 1; }
+	@test -n "$(CREDENTIAL_ISSUER_DB_PASSWORD)" || { echo "ERROR: set CREDENTIAL_ISSUER_DB_PASSWORD"; exit 1; }
+	@test -f "$(EUDI_TRUST_PUBLISH_DIR)/reader-root.crl" || { echo "ERROR: run make provision-wallet-registration first"; exit 1; }
+	docker compose --profile eudi --profile credential-issuer up -d --build --force-recreate \
+		credential-issuer-materialize eudi-credential-issuer trust-host
 
 reconcile-sources:
 	docker compose --profile onboarding run --build --rm source-reconciler

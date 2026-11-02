@@ -25,6 +25,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   reader root and a registration certificate (WRPRC, entitlement
   `PUB_EAA_Provider`) signed under a separate development registrar root,
   with the reader-root CRL and the WRPRC status list for a trust host.
+- **Own credential issuer in Docker Compose** (#614): opt-in profile
+  `credential-issuer` runs the issuer beside `eudi-issuance-server`, with its
+  own database in `postgres-eudi`, a materialization job and a static
+  `trust-host` for the reader-root CRL and the WRPRC status list. The internal
+  API is published on 127.0.0.1 only; tunnel routes for both public hosts are
+  documented.
 - **Configuration of the own credential issuer from the Source Release**
   (#614): `eudi-adapter materialize-credential-issuer` writes the issuer's
   configuration: per source an Attestation Provider with its certificates and

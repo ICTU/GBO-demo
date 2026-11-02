@@ -164,6 +164,22 @@ Type Metadata has. The command refuses a wallet registration that has expired
 or no longer names every activated type, and replaces its output directory
 (default `/runtime-issuer`) only when the new configuration is complete.
 
+In Docker Compose the issuer runs with `--profile eudi --profile
+credential-issuer`, beside `eudi-issuance-server`: a bootstrap job creates its
+database in `postgres-eudi`, `credential-issuer-migrations` its tables,
+`credential-issuer-materialize` its configuration (handed to the issuer's
+user 1000), and `trust-host` serves the reader-root CRL, the WRPRC status list
+and the pages a registration certificate names. The public port is
+`GBO_PORT_CREDENTIAL_ISSUER` (9429); the internal API is published on
+`127.0.0.1:9431` only, and is reachable without authentication from every
+container in the `eudi` network. The tunnel routes are listed in
+`docker-compose.cloudflare-tunnel.yml`. Start it with `make
+credential-issuer-up`: it checks `ISSUER_PUBLIC_URL`, `EUDI_TRUST_PUBLIC_URL`
+and `CREDENTIAL_ISSUER_DB_PASSWORD`, rematerializes the configuration and
+recreates the issuer, which reads its configuration only at start. Run `make
+provision-wallet-registration` first: it creates `.local/public-trust` as your
+user, where Docker would otherwise create it as root.
+
 The offer parameters (`POST /offers`, `parameters`) are passed to the bronpoort
 as they are; the adapter accepts only the parameter sets of the offers the
 source publishes (see the adapter's `/eudi-offers.json`), and a refusal there

@@ -1747,6 +1747,138 @@ services:
     restart: "no"
     networks: [eudi]
 
+  # ══════════════════════════════════════════════════════════════════════
+  # Own credential issuer (#614), opt in with --profile credential-issuer
+  # next to --profile eudi. It runs beside eudi-issuance-server, which stays
+  # the issuer of the demo. Before `up`:
+  #   - make create-development-registrar-root (once)
+  #   - make provision-wallet-registration SOURCE_ID=<id> KVK_NUMBER=<n>
+  #     for every source in the active release
+  #   - the trusted wallet providers in WALLET_ROOTS_DIR
+  #     (nl-wallet-providers.pem and/or eudi-wallet-providers.pem; eudi also
+  #     needs ISSUER_EUDI_KEY_STORAGE and ISSUER_EUDI_USER_AUTHENTICATION)
+  #   - ISSUER_PUBLIC_URL and EUDI_TRUST_PUBLIC_URL: the public hosts of the
+  #     issuer and the trust host (tunnel routes in
+  #     docker-compose.cloudflare-tunnel.yml)
+  #   - CREDENTIAL_ISSUER_DB_PASSWORD
+  # ══════════════════════════════════════════════════════════════════════
+
+  credential-issuer-db-bootstrap:
+    image: postgres:16-alpine
+    profiles: [credential-issuer]
+    environment:
+      PGHOST: postgres-eudi
+      PGPORT: "5432"
+      PGUSER: wallet
+      PGPASSWORD: ${EUDI_POSTGRES_PASSWORD}
+      CREDENTIAL_ISSUER_DB_PASSWORD: ${CREDENTIAL_ISSUER_DB_PASSWORD:-}
+    command: ["/scripts/bootstrap-credential-issuer.sh"]
+    volumes:
+      - ./scripts/bootstrap-credential-issuer.sh:/scripts/bootstrap-credential-issuer.sh:ro
+    depends_on:
+      postgres-eudi:
+        condition: service_healthy
+    restart: "no"
+    networks: [eudi]
+
+  credential-issuer-migrations:
+    build:
+      context: .
+      dockerfile: services/eudi-credential-issuer/Dockerfile
+    image: gbo/eudi-credential-issuer:dev
+    profiles: [credential-issuer]
+    command: ["./eudi-credential-issuer", "migrate"]
+    environment:
+      ISSUER_DATABASE_URL: postgres://credential_issuer:${CREDENTIAL_ISSUER_DB_PASSWORD:-}@postgres-eudi:5432/credential_issuer
+    depends_on:
+      credential-issuer-db-bootstrap:
+        condition: service_completed_successfully
+    restart: "no"
+    networks: [eudi]
+
+  # The configuration of the issuer from the active Source Release. Mounts
+  # the source certificates read-only and hands its output to the issuer's
+  # user (1000).
+  credential-issuer-materialize:
+    build:
+      context: .
+      dockerfile: services/eudi-adapter/Dockerfile
+    profiles: [credential-issuer]
+    command:
+      - ./eudi-adapter
+      - materialize-credential-issuer
+      - --database-schema=source_registry
+      - --secrets-dir=/source-certificates
+      - --wallet-roots-dir=/wallet-roots
+      - --output-dir=/runtime-issuer
+      - --owner=1000
+    environment:
+      SOURCE_REGISTRY_DATABASE_URL: postgres://source_registry_reader:${SOURCE_REGISTRY_READER_PASSWORD}@postgres-eudi:5432/source_registry
+      EUDI_BRI_URL: ${EUDI_BRI_URL:-}
+      ISSUER_EUDI_KEY_STORAGE: ${ISSUER_EUDI_KEY_STORAGE:-}
+      ISSUER_EUDI_USER_AUTHENTICATION: ${ISSUER_EUDI_USER_AUTHENTICATION:-}
+    volumes:
+      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}:/source-certificates:ro
+      - ${WALLET_ROOTS_DIR:-./.local/wallet-roots}:/wallet-roots:ro
+      - credential-issuer-runtime:/runtime-issuer
+    depends_on:
+      source-registry-migrations:
+        condition: service_completed_successfully
+    restart: "no"
+    networks: [eudi]
+
+  # Reads its configuration at start: after a new materialization run
+  # `make credential-issuer-up`, which recreates it.
+  eudi-credential-issuer:
+    build:
+      context: .
+      dockerfile: services/eudi-credential-issuer/Dockerfile
+    image: gbo/eudi-credential-issuer:dev
+    profiles: [credential-issuer]
+    ports:
+      - "${GBO_PORT_CREDENTIAL_ISSUER:-9429}:8080"
+      # The internal API (offers, revocations) has no authentication: only
+      # from this machine, never through the tunnel.
+      - "127.0.0.1:${GBO_PORT_CREDENTIAL_ISSUER_INTERNAL:-9431}:8081"
+    environment:
+      ISSUER_PUBLIC_URL: ${ISSUER_PUBLIC_URL:-}
+      ISSUER_CONFIG_FILE: /config/issuer.json
+      ISSUER_DATABASE_URL: postgres://credential_issuer:${CREDENTIAL_ISSUER_DB_PASSWORD:-}@postgres-eudi:5432/credential_issuer
+      ISSUER_LISTEN_ADDR: ":8080"
+      ISSUER_INTERNAL_ADDR: ":8081"
+    volumes:
+      - credential-issuer-runtime:/config:ro
+    depends_on:
+      credential-issuer-migrations:
+        condition: service_completed_successfully
+      credential-issuer-materialize:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks: [eudi]
+
+  # What a wallet fetches to check the access and registration certificates
+  # of a source: the reader-root CRL and the WRPRC status list (make
+  # provision-wallet-registration), and the pages a registration names.
+  trust-host:
+    image: nginx:1.27-alpine
+    profiles: [credential-issuer]
+    ports:
+      - "${GBO_PORT_TRUST_HOST:-9430}:8080"
+    volumes:
+      - ./trust-host/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./trust-host/pages:/usr/share/trust-pages:ro
+      - ${EUDI_TRUST_PUBLISH_DIR:-./.local/public-trust}:/usr/share/trust:ro
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks: [eudi]
+
   eudi-issuance-server:
     image: gbo/eudi-issuance-server:dev
     profiles: [eudi, full]
@@ -1945,3 +2077,4 @@ volumes:
   postgres-ftv-data:
   eudi-tsl-publish:
   eudi-issuance-runtime:
+  credential-issuer-runtime:
