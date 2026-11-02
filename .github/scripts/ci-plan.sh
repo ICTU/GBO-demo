@@ -94,7 +94,9 @@ if matches_any 'services/asi-mapping/*'; then
 fi
 
 if matches_any 'services/oid4vc-kit/*'; then
-  go="$(append_unique "${go}" 'eudi-credential-issuer')"
+  for service in eudi-adapter eudi-credential-issuer; do
+    go="$(append_unique "${go}" "${service}")"
+  done
 fi
 
 # The source metadata schemas, GBO's attribute catalogue and the published
@@ -155,7 +157,7 @@ if matches_any 'services/ldv-client/*'; then
   done
 fi
 
-if matches_any 'services/asi-mapping/*'; then
+if matches_any 'services/asi-mapping/*' 'services/oid4vc-kit/*'; then
   docker="$(append_unique "${docker}" 'eudi-adapter')"
 fi
 

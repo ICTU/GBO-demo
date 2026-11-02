@@ -1728,6 +1728,25 @@ services:
     restart: "no"
     networks: [eudi]
 
+  # One-shot export of one source from the active Source Release for the
+  # wallet registration of the own credential issuer (make
+  # provision-wallet-registration, which signs on the host). It needs no
+  # secrets, and only runs on demand, never with `up`.
+  wallet-registration-source:
+    build:
+      context: .
+      dockerfile: services/eudi-adapter/Dockerfile
+    profiles: [wallet-registration]
+    entrypoint: ["./eudi-adapter", "export-wallet-registration-source"]
+    environment:
+      SOURCE_REGISTRY_DATABASE_URL: postgres://source_registry_reader:${SOURCE_REGISTRY_READER_PASSWORD}@postgres-eudi:5432/source_registry
+      SOURCE_REGISTRY_SCHEMA: source_registry
+    depends_on:
+      source-registry-migrations:
+        condition: service_completed_successfully
+    restart: "no"
+    networks: [eudi]
+
   eudi-issuance-server:
     image: gbo/eudi-issuance-server:dev
     profiles: [eudi, full]

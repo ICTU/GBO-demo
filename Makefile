@@ -1,7 +1,7 @@
 .PHONY: up down logs clean certs require-ftv-postgres demo-manager manager-seed fsc-local-env fsc-ca fsc-up fsc-all-up fsc-brp-certs fsc-consent-register-certs fsc-gbo-pdp-certs fsc-ir-certs fsc-int-certs fsc-asip-certs fsc-databases fsc-down fsc-test fsc-clean \
         fsc-seed-bri fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-lvg fsc-seed-int fsc-seed-asip fsc-seed-brp fsc-seed-rvig-source fsc-seed-metadata fsc-pdp-cert pdp-up \
         eudi-images asi-wallet-verifier-image source-metadata-up \
-        require-development-cas provision-development-certificates provision-qtsp-issuance-certificates provision-asip-seal-certificate provision-asip-qtsp-certificate provision-asi-wallet-verifier reconcile-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
+        require-development-cas create-development-registrar-root provision-wallet-registration provision-development-certificates provision-qtsp-issuance-certificates provision-asip-seal-certificate provision-asip-qtsp-certificate provision-asi-wallet-verifier reconcile-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
         demo-full demo-integrator demo-asi demo-down eudi-config policy-check policy-test
 
 -include .env
@@ -31,6 +31,7 @@ DEVELOPMENT_QTSP_NAME ?= GBO demo test QTSP
 ONBOARDING_OUTWAY_URL ?= http://localhost:$(or $(FSC_PORT_EDI_OUTWAY),8087)
 ONBOARDING_SECRETS_DIR ?= $(PWD)/.local/secrets
 ONBOARDING_PUBLIC_CERTIFICATES_DIR ?= $(PWD)/.local/public-certificates
+EUDI_TRUST_PUBLISH_DIR ?= $(PWD)/.local/public-trust
 DEVELOPMENT_CA_DIR ?= $(ONBOARDING_SECRETS_DIR)/development-ca
 ONBOARDING_TYPE_METADATA_URL ?= $(or $(EUDI_BRI_URL),http://localhost:$(or $(GBO_PORT_EUDI_ADAPTER),9409))
 ONBOARDING_STORAGE_BACKEND ?= postgres
@@ -345,6 +346,31 @@ provision-qtsp-issuance-certificates: require-development-cas
 		--reader-public-url "$${EUDI_PUBLIC_URL:?set EUDI_PUBLIC_URL before provisioning QTSP issuance}" \
 		--secrets-dir "$(ONBOARDING_SECRETS_DIR)" \
 		--tls-host qtsp-reference
+
+# Registrar root for the Registration Certificates (WRPRC) of the own
+# credential issuer. The one trust anchor this setup creates: only on
+# request, once, next to the pre-provisioned CAs, and never replaced, since
+# wallets trust it by its key. It is a root of its own because a wallet
+# recognises a WRPRC signer only by the trust list it chains to. Its
+# certificate is copied to the public certificate projection.
+create-development-registrar-root:
+	@cd services/eudi-adapter && go run . create-development-registrar-root \
+		--secrets-dir "$(ONBOARDING_SECRETS_DIR)" --public-certificates-dir "$(ONBOARDING_PUBLIC_CERTIFICATES_DIR)"
+
+# Wallet registration of one source for the own credential issuer: its
+# access certificate (WRPAC) under the reader root and its registration
+# certificate (WRPRC) for the types activated in the active Source Release,
+# plus the reader-root CRL and the WRPRC status list in
+# EUDI_TRUST_PUBLISH_DIR for the trust host. A container in the eudi network
+# exports the source from the Source Registry; the signing runs here, so the
+# CA keys never enter a container. Needs EUDI_TRUST_PUBLIC_URL and
+# ORGANIZATION_IDENTIFIER_TYPE (ETSI EN 319 412-1 identity type).
+provision-wallet-registration: require-development-cas
+	@test -n "$(SOURCE_ID)" || { echo "ERROR: SOURCE_ID=<source_id> is required"; exit 1; }
+	@mkdir -p "$(EUDI_TRUST_PUBLISH_DIR)"
+	@docker compose --profile eudi --profile wallet-registration run --build --rm -T wallet-registration-source --source-id "$(SOURCE_ID)" \
+		| (cd services/eudi-adapter && go run . provision-wallet-registration --source-file - \
+			--secrets-dir "$(ONBOARDING_SECRETS_DIR)" --publish-dir "$(EUDI_TRUST_PUBLISH_DIR)")
 
 reconcile-sources:
 	docker compose --profile onboarding run --build --rm source-reconciler

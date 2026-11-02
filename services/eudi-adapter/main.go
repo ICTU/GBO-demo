@@ -641,6 +641,12 @@ func main() {
 		}
 		return
 	}
+	if handled, err := runWalletRegistrationCommand(ctx, os.Args[1:], os.Stdout, os.Stderr); handled {
+		if err != nil {
+			fatal("wallet registration provisioning failed", err)
+		}
+		return
+	}
 	if handled, err := runIssuanceReleaseCommand(ctx, os.Args[1:], os.Stdout, os.Stderr); handled {
 		if err != nil {
 			fatal("issuance Source Release materialization failed", err)

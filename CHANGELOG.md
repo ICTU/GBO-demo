@@ -18,6 +18,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   data from the bronpoort with the contract `eudi-adapter` already serves.
   The protocol building blocks live in the new library `services/oid4vc-kit`.
   The issuer is not deployed; `eudi-issuance-server` stays in place.
+- **Wallet registration material for the own credential issuer** (#614):
+  `make create-development-registrar-root` and `make
+  provision-wallet-registration` issue per source an access certificate
+  (WRPAC) under the development reader root and a registration certificate
+  (WRPRC, entitlement `PUB_EAA_Provider`) signed under a separate development
+  registrar root, with the reader-root CRL and the WRPRC status list for a
+  trust host.
 - **`eudi-adapter` serves pre-authorized offers** (#614): besides a wallet's
   PID disclosure it accepts `{"subject": {"bsn": ...}}` from a credential
   issuer whose offer caller named the subject. It logs that as a separate

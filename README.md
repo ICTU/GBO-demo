@@ -69,7 +69,8 @@ SOURCE_REGISTRY_READER_PASSWORD=<local-random-reader-password>
 
 Before starting an EUDI demo, provide the issuer and reader CA material that
 the test wallet already trusts. The setup deliberately never generates trust
-anchors. By default it loads these four files from
+anchors, apart from the registrar root described below, which it creates only
+on request. By default it loads these four files from
 `.local/secrets/development-ca/`:
 
 ```text
@@ -90,6 +91,28 @@ the source reconciler receives only their public certificates and the two
 public CA certificates. Leaf private keys are mounted exclusively into the
 issuance materializer. A Kubernetes runtime Secret must not contain
 `issuer-ca-key.pem` or `reader-ca-key.pem`.
+
+The own credential issuer (`services/eudi-credential-issuer`, not yet in the
+stack) also needs per source an access certificate (WRPAC) and a registration
+certificate (WRPRC). `make create-development-registrar-root` creates the
+registrar root that signs the registration certificates, once, in
+`development-ca/` (`registrar-ca-key.pem`, `registrar-ca-cert.pem`); it is a
+trust anchor of its own and is never replaced. Its certificate is copied to
+`.local/public-certificates/development-ca/` for the wallets' trust lists.
+`make provision-wallet-registration SOURCE_ID=<source_id>` then issues the
+WRPAC under the reader root and the WRPRC for the types of the active Source
+Release, and writes the reader-root CRL and the WRPRC status list to
+`.local/public-trust/` for the trust host. A container reads the source from
+the Source Registry; the signing runs on the host, so the CA keys never enter
+a container. It needs `EUDI_TRUST_PUBLIC_URL`
+(the public root URL of that host, which goes into the certificates) and
+`ORGANIZATION_IDENTIFIER_TYPE` (the identity type in front of the OIN in the
+organizationIdentifier). The CRL and the status list are valid for a year
+at most and never outlive the reader root (the pre-provisioned one expires on
+2027-04-30); nothing renews them, and revocation is not supported: every run
+publishes both afresh. The trust URL is recorded in
+`development-ca/wallet-registration.json`; to change it, remove that file and
+provision every source again.
 
 `EUDI_PUBLIC_URL` must route to the issuance server and its hostname must be in
 the reader-certificate DNS SAN. `EUDI_BRI_URL` must route to the EUDI adapter.
