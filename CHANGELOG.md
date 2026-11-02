@@ -7,6 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Added
+- **`asi-mapping` builds attributes from a source's answer** (#592, step 4a):
+  from the requested attributes and fragments it derives one query with only
+  the fields they need, builds each value with `pointer`, `join`, `const` and
+  `each`, and checks it against the attribute's `value_schema`. A missing
+  required member, an empty list or an unknown person is no value; a fragment
+  needs only its own member; a fragment on a `const` member is no value, since
+  a `const` is not source data. Nothing in the chain uses it yet.
 - **The BRP mock publishes the `asi` capability** (#592, step 2): its source
   metadata, now version 2.6.0 at schema 1.1, maps its own fields onto the five
   demo attributes the ASIP verifies. Its API, its policy rule and its EUDI
