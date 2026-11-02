@@ -6,19 +6,20 @@
 // releases and the active pointer only. Without a current description of its
 // source a data service answers 503: the ASIP cannot say what the source
 // holds. A release the ASIP cannot read leaves the previous description in
-// place until it goes stale, and an unreachable registry does the same.
+// place until it goes stale, and an unreachable registry does the same. A
+// description that does not fit GBO's attribute catalogue makes the release
+// one the ASIP cannot read: onboarding checked it against a catalogue too,
+// but the two may differ.
 package sourcedescription
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
 	asimapping "gbo-demo/asi-mapping"
-	"gbo-demo/asi-provider/internal/verification"
 	"gbo-demo/source-registry/asisnapshot"
 	"gbo-demo/source-registry/onboarding"
 )
@@ -31,9 +32,10 @@ type Registry interface {
 
 // Descriptions holds the descriptions of the active release.
 type Descriptions struct {
-	open     func(context.Context) (Registry, error)
-	registry Registry
-	now      func() time.Time
+	open      func(context.Context) (Registry, error)
+	catalogue asimapping.Catalogue
+	registry  Registry
+	now       func() time.Time
 
 	mu        sync.RWMutex
 	releaseID string
@@ -46,9 +48,10 @@ type description struct {
 }
 
 // New returns Descriptions that open the registry with open on the first
-// Refresh, and again after a failed open: the ASIP starts without it.
-func New(open func(context.Context) (Registry, error)) *Descriptions {
-	return &Descriptions{open: open, now: time.Now}
+// Refresh, and again after a failed open: the ASIP starts without it. Each
+// description must fit catalogue.
+func New(open func(context.Context) (Registry, error), catalogue asimapping.Catalogue) *Descriptions {
+	return &Descriptions{open: open, catalogue: catalogue, now: time.Now}
 }
 
 // Run refreshes every interval until ctx ends.
@@ -114,6 +117,11 @@ func (d *Descriptions) Refresh(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("release %s: %w", release.ID, err)
 		}
+		if asi != nil {
+			if err := asi.Validate(d.catalogue); err != nil {
+				return fmt.Errorf("release %s: source %q: asi capability: %w", release.ID, source.SourceID, err)
+			}
+		}
 		sources[source.SourceID] = description{asi: asi, staleUntil: source.StaleUntil}
 	}
 	d.mu.Lock()
@@ -133,23 +141,4 @@ func (d *Descriptions) Current(sourceID string) (*asimapping.Capability, bool) {
 		return nil, false
 	}
 	return source.asi, true
-}
-
-// Require returns a source that asks source only while the source with
-// sourceID has a current description; otherwise the source is unavailable.
-func (d *Descriptions) Require(sourceID string, source verification.Source) verification.Source {
-	return required{descriptions: d, sourceID: sourceID, source: source}
-}
-
-type required struct {
-	descriptions *Descriptions
-	sourceID     string
-	source       verification.Source
-}
-
-func (r required) Values(ctx context.Context, bsn string, names []string) (map[string]json.RawMessage, error) {
-	if _, ok := r.descriptions.Current(r.sourceID); !ok {
-		return nil, fmt.Errorf("%w: no current description of source %q in the Source Registry", verification.ErrSourceUnavailable, r.sourceID)
-	}
-	return r.source.Values(ctx, bsn, names)
 }

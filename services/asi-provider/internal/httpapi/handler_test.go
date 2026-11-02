@@ -84,7 +84,7 @@ func newTestServerWithSource(t *testing.T, authz *testAuthorizationServer, qtsp 
 		Sealer:    seal.New(sealKey, []*x509.Certificate{sealCert, caCert}),
 		DataServices: []DataService{{
 			ID:              "brp",
-			Verification:    verification.NewService(source, brpCatalogue),
+			Verification:    verification.NewService(source, testCatalogue),
 			Tokens:          accesstoken.NewValidator(testIssuer, testPublicURL+testBase, testPublicURL, keys),
 			Provider:        Provider{LegalName: "GBO demo ASIP (test)"},
 			AuthenticSource: &Provider{LegalName: "Basisregistratie Personen (mock)"},
@@ -94,7 +94,7 @@ func newTestServerWithSource(t *testing.T, authz *testAuthorizationServer, qtsp 
 			// A second data service whose source is the ASIP itself: its
 			// responses name no authentic source.
 			ID:           "duo",
-			Verification: verification.NewService(diplomas, duoCatalogue),
+			Verification: verification.NewService(diplomas, testCatalogue),
 			Tokens:       accesstoken.NewValidator(testIssuer, testPublicURL+duoBase, testPublicURL, keys),
 			Provider:     Provider{LegalName: "DUO (test)"},
 			Attributes:   []string{idDiploma},

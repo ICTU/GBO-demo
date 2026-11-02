@@ -173,9 +173,9 @@ func fakeBRP(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	switch req.Variables.BSN {
 	case bsnFrouke:
-		_, _ = io.WriteString(w, `{"data":{"ingeschrevenPersoon":{"geslachtsnaam":"Jansen","voorvoegsel":null,"voornamen":"Frouke","geboortedatum":"2000-03-24","heeftNationaliteit":[{"nationaliteit":"NL"},{"nationaliteit":"BE"}],"woontOp":{"straatnaam":"Coolsingel","huisnummer":12,"huisletter":"B","huisnummertoevoeging":null,"postcode":"3011 AD","woonplaatsnaam":"Rotterdam"}}}}`)
+		_, _ = io.WriteString(w, `{"data":{"ingeschrevenPersoon":{"__typename":"Ingezetene","geslachtsnaam":"Jansen","voorvoegsel":null,"voornamen":"Frouke","geboortedatum":"2000-03-24","heeftNationaliteit":[{"nationaliteit":"NL"},{"nationaliteit":"BE"}],"woontOp":{"straatnaam":"Coolsingel","huisnummer":12,"huisletter":"B","huisnummertoevoeging":null,"postcode":"3011 AD","woonplaatsnaam":"Rotterdam"}}}}`)
 	case bsnTom:
-		_, _ = io.WriteString(w, `{"data":{"ingeschrevenPersoon":{"geslachtsnaam":"Willems","voorvoegsel":null,"voornamen":"Tom"}}}`)
+		_, _ = io.WriteString(w, `{"data":{"ingeschrevenPersoon":{"__typename":"NietIngezetene","geslachtsnaam":"Willems","voorvoegsel":null,"voornamen":"Tom"}}}`)
 	default:
 		_, _ = io.WriteString(w, `{"data":{"ingeschrevenPersoon":null}}`)
 	}

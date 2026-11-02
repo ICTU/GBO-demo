@@ -12,8 +12,10 @@
 // The ASIP reads the sources' descriptions from the active Source Registry
 // release (ASIP_SOURCE_REGISTRY_DATABASE_URL, the registry's reader role), or
 // from a release file where there is no registry
-// (ASIP_SOURCE_REGISTRY_RELEASE_FILE). A data service whose source has no
-// current description answers 503.
+// (ASIP_SOURCE_REGISTRY_RELEASE_FILE). From a source's description it derives
+// the query per request and builds the attributes from the answer, in the
+// shape of GBO's attribute catalogue (ASIP_ATTRIBUTE_CATALOGUE_FILE). A data
+// service whose source has no current description answers 503.
 //
 // This file is the composition root: configuration, construction, lifecycle.
 //
@@ -37,10 +39,11 @@ import (
 	"syscall"
 	"time"
 
+	asimapping "gbo-demo/asi-mapping"
 	"gbo-demo/asi-provider/internal/accesstoken"
 	"gbo-demo/asi-provider/internal/asmetadata"
-	"gbo-demo/asi-provider/internal/brpsource"
 	"gbo-demo/asi-provider/internal/dataservice"
+	"gbo-demo/asi-provider/internal/graphqlsource"
 	"gbo-demo/asi-provider/internal/httpapi"
 	"gbo-demo/asi-provider/internal/seal"
 	"gbo-demo/asi-provider/internal/sealcert"
@@ -82,11 +85,17 @@ func serve() error {
 	if outway == "" {
 		return errors.New("ASIP_OUTWAY_URL is required: the ASIP's FSC Outway, through which it asks the authentic sources")
 	}
-	services, err := dataservice.Load(env("ASIP_DATASERVICES_FILE", "config/dataservices.json"), adapterAttributes)
+	services, err := dataservice.Load(env("ASIP_DATASERVICES_FILE", "config/dataservices.json"))
 	if err != nil {
 		return err
 	}
-	descriptions, err := newDescriptions()
+	// GBO's attribute catalogue: the shape of each attribute's value, into
+	// which the ASIP builds a source's answer.
+	catalogue, err := asimapping.LoadCatalogue(env("ASIP_ATTRIBUTE_CATALOGUE_FILE", "../../schemas/asi-attributes.json"))
+	if err != nil {
+		return err
+	}
+	descriptions, err := newDescriptions(catalogue)
 	if err != nil {
 		return err
 	}
@@ -106,24 +115,16 @@ func serve() error {
 	keys := asmetadata.New(issuer, issuerInternal)
 	var dataServices []httpapi.DataService
 	for _, ds := range services {
-		catalogue := verification.Catalogue{}
-		for id, name := range ds.Attributes {
-			catalogue[id] = verification.Entry{Name: name}
-		}
 		var authenticSource *httpapi.Provider
 		if ds.AuthenticSource != "" {
 			authenticSource = &httpapi.Provider{LegalName: ds.AuthenticSource}
 		}
-		identifiers := make([]string, 0, len(ds.Attributes))
-		for id := range ds.Attributes {
-			identifiers = append(identifiers, id)
-		}
-		slices.Sort(identifiers)
+		source := graphqlsource.New(ds.Source, outway, ds.GrantPath, descriptions.Current)
 		dataServices = append(dataServices, httpapi.DataService{
 			ID:              ds.ID,
-			Attributes:      identifiers,
+			Attributes:      slices.Sorted(slices.Values(ds.Attributes)),
 			Country:         ds.Country,
-			Verification:    verification.NewService(descriptions.Require(ds.Source, newAdapter(ds.Source, outway, ds.GrantPath)), catalogue),
+			Verification:    verification.NewService(source, catalogue),
 			Tokens:          accesstoken.NewValidator(issuer, publicURL+httpapi.BasePathOf(ds.ID), publicURL, keys),
 			Provider:        httpapi.Provider{LegalName: ds.Provider},
 			AuthenticSource: authenticSource,
@@ -165,7 +166,7 @@ func serve() error {
 
 // newDescriptions reads the sources' descriptions from the Source Registry,
 // or from a release file: exactly one of the two.
-func newDescriptions() (*sourcedescription.Descriptions, error) {
+func newDescriptions(catalogue asimapping.Catalogue) (*sourcedescription.Descriptions, error) {
 	databaseURL, releaseFile := os.Getenv("ASIP_SOURCE_REGISTRY_DATABASE_URL"), os.Getenv("ASIP_SOURCE_REGISTRY_RELEASE_FILE")
 	switch {
 	case databaseURL != "" && releaseFile != "":
@@ -173,7 +174,7 @@ func newDescriptions() (*sourcedescription.Descriptions, error) {
 	case releaseFile != "":
 		return sourcedescription.New(func(context.Context) (sourcedescription.Registry, error) {
 			return sourcedescription.ReadReleaseFile(releaseFile)
-		}), nil
+		}, catalogue), nil
 	case databaseURL != "":
 		options := postgresregistry.Options{DatabaseURL: databaseURL, Schema: env("ASIP_SOURCE_REGISTRY_SCHEMA", "source_registry")}
 		return sourcedescription.New(func(ctx context.Context) (sourcedescription.Registry, error) {
@@ -182,24 +183,9 @@ func newDescriptions() (*sourcedescription.Descriptions, error) {
 				return nil, err
 			}
 			return store, nil
-		}), nil
+		}, catalogue), nil
 	}
 	return nil, errors.New("ASIP_SOURCE_REGISTRY_DATABASE_URL is required: the Source Registry, read with its reader role, describes the sources (or ASIP_SOURCE_REGISTRY_RELEASE_FILE without a registry)")
-}
-
-// adapterAttributes lists per source, by its id in the Source Registry, the
-// attributes its adapter can ask for; the data services file may name only
-// these.
-var adapterAttributes = map[string][]string{"rvig": brpsource.Attributes()}
-
-// newAdapter returns the adapter that asks an authentic source through the
-// Outway. dataservice.Load has checked the source.
-func newAdapter(source, outway, grantPath string) verification.Source {
-	switch source {
-	case "rvig":
-		return brpsource.New(outway, grantPath)
-	}
-	panic("no adapter for source " + source)
 }
 
 func env(name, fallback string) string {

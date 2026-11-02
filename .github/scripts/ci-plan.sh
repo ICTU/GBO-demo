@@ -171,6 +171,11 @@ if matches_any 'services/asi-mapping/*' 'services/source-registry/*'; then
   done
 fi
 
+# The ASIP's image carries GBO's attribute catalogue.
+if matches_any 'schemas/asi-attributes.json'; then
+  docker="$(append_unique "${docker}" 'asi-provider')"
+fi
+
 if matches_any 'services/ftv-graphql-mapper/*'; then
   docker="$(append_unique "${docker}" 'bron-sidecar')"
   docker="$(append_unique "${docker}" 'openftv-pdp')"

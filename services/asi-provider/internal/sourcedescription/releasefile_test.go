@@ -45,8 +45,8 @@ func TestReleaseFile(t *testing.T) {
 		if err := os.WriteFile(path, raw, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		f := &fixture{now: start.Add(23 * time.Hour), source: &asking{}}
-		f.descriptions = New(func(context.Context) (Registry, error) { return ReadReleaseFile(path) })
+		f := &fixture{now: start.Add(23 * time.Hour)}
+		f.descriptions = New(func(context.Context) (Registry, error) { return ReadReleaseFile(path) }, testCatalogue(t))
 		f.descriptions.now = func() time.Time { return f.now }
 		f.refresh(t, false)
 		if asi, ok := f.descriptions.Current("rvig"); !ok || len(asi.Attributes) != 5 {
@@ -58,10 +58,10 @@ func TestReleaseFile(t *testing.T) {
 	})
 
 	t.Run("F2 a release file that is missing", func(t *testing.T) {
-		f := &fixture{now: start, source: &asking{}}
+		f := &fixture{now: start}
 		f.descriptions = New(func(context.Context) (Registry, error) {
 			return ReadReleaseFile(filepath.Join(t.TempDir(), "missing.json"))
-		})
+		}, testCatalogue(t))
 		f.refresh(t, true)
 		if f.available(t) {
 			t.Fatal("available without a release file")

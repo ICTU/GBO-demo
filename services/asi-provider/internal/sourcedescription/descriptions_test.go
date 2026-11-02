@@ -6,12 +6,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
-	"gbo-demo/asi-provider/internal/verification"
 	"gbo-demo/source-registry/onboarding"
 )
 
@@ -126,44 +126,25 @@ func withBRP(t *testing.T) *onboarding.SourceRelease {
 		candidate("belastingdienst", snapshot(t, "belastingdienst", "3.0", nil)))
 }
 
-// asking is the source behind the description: it counts the questions.
-type asking struct{ asked int }
-
-func (a *asking) Values(context.Context, string, []string) (map[string]json.RawMessage, error) {
-	a.asked++
-	return map[string]json.RawMessage{"given_name": json.RawMessage(`{"given_name":"Frouke"}`)}, nil
-}
-
 type fixture struct {
 	registry     *fakeRegistry
 	descriptions *Descriptions
 	now          time.Time
-	source       *asking
 }
 
-func newFixture(registry *fakeRegistry) *fixture {
-	f := &fixture{registry: registry, now: start, source: &asking{}}
-	f.descriptions = New(func(context.Context) (Registry, error) { return f.registry, nil })
+func newFixture(t *testing.T, registry *fakeRegistry) *fixture {
+	f := &fixture{registry: registry, now: start}
+	f.descriptions = New(func(context.Context) (Registry, error) { return f.registry, nil }, testCatalogue(t))
 	f.descriptions.now = func() time.Time { return f.now }
 	return f
 }
 
-// available reports whether a request for the BRP data service reaches its
-// source, and checks that otherwise it is 503 without asking the source.
+// available reports whether the BRP, rvig, has a current description: the
+// data service answers then, and 503 otherwise.
 func (f *fixture) available(t *testing.T) bool {
 	t.Helper()
-	asked := f.source.asked
-	_, err := f.descriptions.Require("rvig", f.source).Values(context.Background(), "999991772", []string{"given_name"})
-	if err == nil {
-		return true
-	}
-	if !errors.Is(err, verification.ErrSourceUnavailable) {
-		t.Fatalf("Values() error = %v, want ErrSourceUnavailable", err)
-	}
-	if f.source.asked != asked {
-		t.Fatal("the source was asked without a description")
-	}
-	return false
+	_, ok := f.descriptions.Current("rvig")
+	return ok
 }
 
 func (f *fixture) refresh(t *testing.T, wantErr bool) {
@@ -175,7 +156,7 @@ func (f *fixture) refresh(t *testing.T, wantErr bool) {
 
 func TestDescriptions(t *testing.T) {
 	t.Run("R1 no active release", func(t *testing.T) {
-		f := newFixture(&fakeRegistry{})
+		f := newFixture(t, &fakeRegistry{})
 		f.refresh(t, true)
 		if f.available(t) {
 			t.Fatal("available without a release")
@@ -183,7 +164,7 @@ func TestDescriptions(t *testing.T) {
 	})
 
 	t.Run("R2 the registry is unreachable at start, then reachable", func(t *testing.T) {
-		f := newFixture(&fakeRegistry{release: withBRP(t)})
+		f := newFixture(t, &fakeRegistry{release: withBRP(t)})
 		reachable := false
 		f.descriptions.open = func(context.Context) (Registry, error) {
 			if !reachable {
@@ -203,19 +184,17 @@ func TestDescriptions(t *testing.T) {
 	})
 
 	t.Run("R3 a release in which the source describes asi", func(t *testing.T) {
-		f := newFixture(&fakeRegistry{release: withBRP(t)})
+		f := newFixture(t, &fakeRegistry{release: withBRP(t)})
 		f.refresh(t, false)
 		asi, ok := f.descriptions.Current("rvig")
 		if !ok || asi.AuthenticSource.LegalName != "Basisregistratie Personen (mock)" || len(asi.Attributes) != 5 {
 			t.Fatalf("Current(rvig) = %+v, %v", asi, ok)
 		}
-		if !f.available(t) || f.source.asked != 1 {
-			t.Fatal("the source was not asked")
-		}
+
 	})
 
 	t.Run("R4 the source without asi", func(t *testing.T) {
-		f := newFixture(&fakeRegistry{release: release(t, candidate("rvig", snapshot(t, "rvig", "3.0", nil)))})
+		f := newFixture(t, &fakeRegistry{release: release(t, candidate("rvig", snapshot(t, "rvig", "3.0", nil)))})
 		f.refresh(t, false)
 		if f.available(t) {
 			t.Fatal("available without asi")
@@ -223,7 +202,7 @@ func TestDescriptions(t *testing.T) {
 	})
 
 	t.Run("R5 a release without the source", func(t *testing.T) {
-		f := newFixture(&fakeRegistry{release: release(t, candidate("belastingdienst", snapshot(t, "belastingdienst", "3.0", nil)))})
+		f := newFixture(t, &fakeRegistry{release: release(t, candidate("belastingdienst", snapshot(t, "belastingdienst", "3.0", nil)))})
 		f.refresh(t, false)
 		if f.available(t) {
 			t.Fatal("available without the source in the release")
@@ -231,7 +210,7 @@ func TestDescriptions(t *testing.T) {
 	})
 
 	t.Run("R6 the description is stale", func(t *testing.T) {
-		f := newFixture(&fakeRegistry{release: withBRP(t)})
+		f := newFixture(t, &fakeRegistry{release: withBRP(t)})
 		f.refresh(t, false)
 		f.now = start.Add(time.Hour + time.Second)
 		if f.available(t) {
@@ -240,7 +219,7 @@ func TestDescriptions(t *testing.T) {
 	})
 
 	t.Run("R7 the registry goes away after a read", func(t *testing.T) {
-		f := newFixture(&fakeRegistry{release: withBRP(t)})
+		f := newFixture(t, &fakeRegistry{release: withBRP(t)})
 		f.refresh(t, false)
 		f.registry.err = errors.New("connection refused")
 		f.now = start.Add(30 * time.Minute)
@@ -271,7 +250,7 @@ func TestDescriptions(t *testing.T) {
 		}
 		for name, next := range unreadable {
 			t.Run(name, func(t *testing.T) {
-				f := newFixture(&fakeRegistry{release: withBRP(t)})
+				f := newFixture(t, &fakeRegistry{release: withBRP(t)})
 				f.refresh(t, false)
 				f.registry.release = next(t)
 				f.refresh(t, true)
@@ -286,8 +265,19 @@ func TestDescriptions(t *testing.T) {
 		}
 	})
 
+	t.Run("R11 a new release whose asi the catalogue refuses keeps the previous one", func(t *testing.T) {
+		f := newFixture(t, &fakeRegistry{release: withBRP(t)})
+		f.refresh(t, false)
+		refused := strings.Replace(string(brpASI(t)), "https://gbo.example/attributes/given_name/1", "https://gbo.example/attributes/shoe_size/1", 1)
+		f.registry.release = release(t, candidate("rvig", snapshot(t, "rvig", "4.0", json.RawMessage(refused))))
+		f.refresh(t, true)
+		if asi, ok := f.descriptions.Current("rvig"); !ok || strings.Contains(fmt.Sprint(asi.Attributes), "shoe_size") {
+			t.Fatal("the previous description was dropped")
+		}
+	})
+
 	t.Run("R9 the same release with a later stale_until", func(t *testing.T) {
-		f := newFixture(&fakeRegistry{release: withBRP(t)})
+		f := newFixture(t, &fakeRegistry{release: withBRP(t)})
 		f.refresh(t, false)
 		f.registry.staleUntil = map[string]time.Time{"rvig": start.Add(3 * time.Hour)}
 		f.refresh(t, false)

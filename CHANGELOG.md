@@ -312,6 +312,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- **The ASIP verifies from the source's description** (#592, step 4c): per
+  request it derives one query from the source's `asi` capability, with only
+  the fields of the requested attributes and fragments, and builds the
+  attributes from the answer in the shape of GBO's attribute catalogue, which
+  its image now carries (`ASIP_ATTRIBUTE_CATALOGUE_FILE`). The BRP adapter is
+  gone. Which attributes a data service verifies comes from the description:
+  one it does not describe is 404; `attributes` in `config/dataservices.json`
+  is now a list of identifiers, for the discovery records only. A fragment
+  asks only its own member, so the city of an address without a postcode is
+  `Match`; a fragment on a `const` member, such as the address's country, is
+  `Unknown` without asking the source. An answer of another shape than the
+  description and the value schema expect, such as a birth date that is not a
+  date, is 500. `MatchWithVariation` applies only to strings without a
+  `format`: a birth date matches exactly. A release whose description does not
+  fit the catalogue is one the ASIP cannot read. The query span is now
+  `source query`, with the source as `gbo.asi.source`.
 - **The ASIP reads the sources' descriptions from the Source Registry**
   (#592, step 4b-2): it reads the active release with the registry's reader
   role, every `ASIP_SOURCE_REGISTRY_REFRESH` (default 5s). A data service
