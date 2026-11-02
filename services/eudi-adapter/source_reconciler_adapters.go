@@ -8,7 +8,7 @@ import (
 	"os"
 	"time"
 
-	"gbo-demo/eudi-adapter/internal/onboarding"
+	"gbo-demo/source-registry/onboarding"
 )
 
 // Reconcile is the package-main composition seam for the onboarding use case.

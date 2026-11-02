@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"gbo-demo/eudi-adapter/internal/onboarding"
+	"gbo-demo/source-registry/onboarding"
 )
 
 func TestMaterializeIssuanceReleaseUsesMountedSecretsWithoutPersistingThem(t *testing.T) {

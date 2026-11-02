@@ -16,7 +16,7 @@ import (
 	"time"
 
 	asimapping "gbo-demo/asi-mapping"
-	"gbo-demo/eudi-adapter/internal/onboarding"
+	"gbo-demo/source-registry/onboarding"
 )
 
 // registrySnapshotSchemaVersion changes whenever a stored snapshot can no

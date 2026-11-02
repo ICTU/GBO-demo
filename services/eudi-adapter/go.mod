@@ -43,6 +43,7 @@ require (
 require (
 	gbo-demo/asi-mapping v0.0.0
 	gbo-demo/ldv-client v0.0.0
+	gbo-demo/source-registry v0.0.0
 )
 
 // The LDV client is a sibling module in this repository rather than a
@@ -53,3 +54,7 @@ replace gbo-demo/ldv-client => ../ldv-client
 // The asi capability is validated with the same sibling module the ASIP uses
 // to read it.
 replace gbo-demo/asi-mapping => ../asi-mapping
+
+// The Source Registry model and its Postgres store are a sibling module, so
+// the ASIP can read the active release with the same code.
+replace gbo-demo/source-registry => ../source-registry

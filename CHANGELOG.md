@@ -312,6 +312,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- **The Source Registry is a module of its own** (#592, step 4b-1): its model
+  and its Postgres store moved unchanged from the eudi-adapter to
+  `services/source-registry`, so the ASIP can read the active release with the
+  same code. The eudi-adapter still onboards sources and writes the registry;
+  its behaviour does not change.
 - **The ASI authorization server's pages get a government look** (#336): the
   coat of arms, the ribbon and Rijksblauw of the demo's consent portal,
   without an organisation's name, replace NL Design System's Voorbeeld theme,

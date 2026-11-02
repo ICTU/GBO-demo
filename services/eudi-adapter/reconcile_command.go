@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	onboardingcore "gbo-demo/eudi-adapter/internal/onboarding"
-	"gbo-demo/eudi-adapter/internal/postgresregistry"
+	onboardingcore "gbo-demo/source-registry/onboarding"
+	"gbo-demo/source-registry/postgresregistry"
 )
 
 type reconcileOptions struct {

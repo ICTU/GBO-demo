@@ -71,6 +71,7 @@ ldv-client
 ldv-logboek
 lvg-graphql-server
 qtsp-reference
+source-registry
 SERVICES
 
 # These services use local replace directives. A change to a sibling module
@@ -87,7 +88,7 @@ if matches_any 'services/ftv-graphql-mapper/*'; then
   go="$(append_unique "${go}" 'bron-sidecar')"
 fi
 
-if matches_any 'services/asi-mapping/*'; then
+if matches_any 'services/asi-mapping/*' 'services/source-registry/*'; then
   go="$(append_unique "${go}" 'eudi-adapter')"
 fi
 
@@ -149,7 +150,7 @@ if matches_any 'services/ldv-client/*'; then
   done
 fi
 
-if matches_any 'services/asi-mapping/*'; then
+if matches_any 'services/asi-mapping/*' 'services/source-registry/*'; then
   docker="$(append_unique "${docker}" 'eudi-adapter')"
 fi
 
@@ -177,7 +178,7 @@ if matches_any '.dockerignore'; then
 fi
 
 source_registry=false
-if [[ "${ci_changed}" == true ]] || matches_any 'services/eudi-adapter/*'; then
+if [[ "${ci_changed}" == true ]] || matches_any 'services/eudi-adapter/*' 'services/source-registry/*'; then
   source_registry=true
 fi
 

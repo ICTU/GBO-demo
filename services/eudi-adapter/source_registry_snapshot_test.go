@@ -11,8 +11,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"gbo-demo/eudi-adapter/internal/onboarding"
-	"gbo-demo/eudi-adapter/internal/postgresregistry"
+	"gbo-demo/source-registry/onboarding"
+	"gbo-demo/source-registry/postgresregistry"
 )
 
 // candidateOnlyRegistry serves stored candidates; every other registry call
