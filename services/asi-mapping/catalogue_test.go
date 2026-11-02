@@ -31,6 +31,9 @@ func TestParseCatalogueRejects(t *testing.T) {
 				"type": "object", "properties": {"given_name": {"type": "string"}}, "required": ["given_name"]}},
 			{"identifier": "https://gbo.example/attributes/given_name/1", "value_schema": {
 				"type": "object", "properties": {"given_names": {"type": "string"}}, "required": ["given_names"]}}]}`, "duplicate"},
+		{"C3 a format the ASIP does not check", `{"attributes": [
+			{"identifier": "https://gbo.example/attributes/email/1", "value_schema": {
+				"type": "object", "properties": {"email": {"type": "string", "format": "email"}}, "required": ["email"]}}]}`, "email"},
 	}
 
 	for _, test := range cases {
