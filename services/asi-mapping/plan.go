@@ -46,6 +46,15 @@ func (c Capability) Plan(requests []Request) (string, error) {
 	if root.empty() {
 		return "", nil
 	}
+	// An attribute on a type holds only for an answer of that type, and a
+	// field outside the type's fragment can bring the same member along; so
+	// the query asks which type the answer is.
+	for _, fragment := range root.fragments {
+		if !fragment.empty() {
+			root.add("/" + typenameField)
+			break
+		}
+	}
 	return c.GraphQL.replaceSelected(root.render())
 }
 

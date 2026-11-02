@@ -10,6 +10,7 @@ import (
 // resident is the result of the BRP query for a resident with every field
 // the mapping uses.
 const resident = `{
+	"__typename": "Ingezetene",
 	"voorvoegsel": "de", "geslachtsnaam": "Vries", "voornamen": "Frouke", "geboortedatum": "2000-03-24",
 	"heeftNationaliteit": [{"nationaliteit": "NL"}, {"nationaliteit": "BE"}],
 	"woontOp": {"straatnaam": "Coolsingel", "huisnummer": 12, "huisletter": "B", "huisnummertoevoeging": null,
@@ -63,6 +64,13 @@ func TestBuild(t *testing.T) {
 		{"M9 a fragment needs only its member", address, []string{"city"},
 			result(t, func(r map[string]any) { woontOp(r)["postcode"] = nil }),
 			`{"city": "Rotterdam"}`},
+		{"M12 an answer of the type on", address, []string{"city"}, result(t, nil),
+			`{"city": "Rotterdam"}`},
+		{"M17 a list element without a value is left out", nationality, nil,
+			result(t, func(r map[string]any) {
+				r["heeftNationaliteit"] = []any{map[string]any{"nationaliteit": "NL"}, map[string]any{"nationaliteit": nil}, nil}
+			}),
+			`{"nationalities": ["NL"]}`},
 	}
 	for _, test := range held {
 		t.Run(test.name, func(t *testing.T) {
@@ -93,8 +101,8 @@ func TestBuild(t *testing.T) {
 		{"M7 a required member missing", address, nil,
 			result(t, func(r map[string]any) { woontOp(r)["postcode"] = nil })},
 		{"M8 an unknown person", givenName, nil, nil},
-		{"M10 a result of another type than on", address, nil,
-			result(t, func(r map[string]any) { delete(r, "woontOp") })},
+		{"M10 an answer of another type than on, with the same field", address, nil,
+			result(t, func(r map[string]any) { r["__typename"] = "NietIngezetene" })},
 		{"M11 a null on the way", address, nil,
 			result(t, func(r map[string]any) { r["woontOp"] = nil })},
 		{"Q6 a fragment on a const member", address, []string{"country"}, result(t, nil)},
@@ -118,6 +126,18 @@ func TestBuild(t *testing.T) {
 			result(t, func(r map[string]any) { r["voornamen"] = 42.0 }), "given_name"},
 		{"V3 a list element that is not text", nationality,
 			result(t, func(r map[string]any) { r["heeftNationaliteit"] = []any{map[string]any{"nationaliteit": 528.0}} }), "nationalities"},
+		{"V4 a date that is not in the calendar", birthDate,
+			result(t, func(r map[string]any) { r["geboortedatum"] = "2000-02-30" }), "birth_date"},
+		{"V5 a date in another form", birthDate,
+			result(t, func(r map[string]any) { r["geboortedatum"] = "24-03-2000" }), "birth_date"},
+		{"M13 an attribute on a type, the answer without its type", address,
+			result(t, func(r map[string]any) { delete(r, "__typename") }), "__typename"},
+		{"M14 a list element that is not an object", nationality,
+			result(t, func(r map[string]any) { r["heeftNationaliteit"] = []any{42.0} }), "heeftNationaliteit"},
+		{"M15 a list with one element that is not an object", nationality,
+			result(t, func(r map[string]any) { r["heeftNationaliteit"] = []any{map[string]any{"nationaliteit": "NL"}, 42.0} }), "heeftNationaliteit"},
+		{"M16 a value where an object belongs", address,
+			result(t, func(r map[string]any) { r["woontOp"] = "Coolsingel" }), "woontOp"},
 	}
 	for _, test := range invalid {
 		t.Run(test.name, func(t *testing.T) {
@@ -128,9 +148,11 @@ func TestBuild(t *testing.T) {
 		})
 	}
 
-	t.Run("V1 the whole address conforms", func(t *testing.T) {
-		if _, ok, err := build(t, address, nil, result(t, nil)); err != nil || !ok {
-			t.Fatalf("Build() = %v, %v; want a conforming value", ok, err)
+	t.Run("V1 the whole address and a date conform", func(t *testing.T) {
+		for _, identifier := range []string{address, birthDate} {
+			if _, ok, err := build(t, identifier, nil, result(t, nil)); err != nil || !ok {
+				t.Fatalf("Build(%s) = %v, %v; want a conforming value", identifier, ok, err)
+			}
 		}
 	})
 }
@@ -141,13 +163,19 @@ func TestResult(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"data": {"ingeschrevenPersoon": {"voornamen": "Frouke"}}}`), &response); err != nil {
 		t.Fatal(err)
 	}
-	if got := capability.Result(response); !reflect.DeepEqual(got, map[string]any{"voornamen": "Frouke"}) {
-		t.Fatalf("Result() = %v", got)
+	if got, err := capability.Result(response); err != nil || !reflect.DeepEqual(got, map[string]any{"voornamen": "Frouke"}) {
+		t.Fatalf("Result() = %v, %v", got, err)
 	}
 	if err := json.Unmarshal([]byte(`{"data": {"ingeschrevenPersoon": null}}`), &response); err != nil {
 		t.Fatal(err)
 	}
-	if got := capability.Result(response); got != nil {
-		t.Fatalf("Result() for an unknown person = %v, want nil", got)
+	if got, err := capability.Result(response); err != nil || got != nil {
+		t.Fatalf("Result() for an unknown person = %v, %v; want nil", got, err)
+	}
+	if err := json.Unmarshal([]byte(`{"data": "unexpected"}`), &response); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := capability.Result(response); err == nil {
+		t.Fatal("Result() accepted a response of another shape")
 	}
 }

@@ -52,6 +52,7 @@ func sortSelections(set ast.SelectionSet) {
 const (
 	familyName  = "https://gbo.example/attributes/family_name/1"
 	givenName   = "https://gbo.example/attributes/given_name/1"
+	birthDate   = "https://gbo.example/attributes/birth_date/1"
 	nationality = "https://gbo.example/attributes/nationality/1"
 	address     = "https://gbo.example/attributes/address/1"
 )
@@ -71,14 +72,16 @@ func TestPlan(t *testing.T) {
 	}{
 		{"Q1 one attribute", []Request{{Identifier: givenName}},
 			query("voornamen")},
-		{"Q2 an attribute on a type", []Request{{Identifier: address}},
-			query("... on Ingezetene { woontOp { straatnaam huisnummer huisletter huisnummertoevoeging postcode woonplaatsnaam } }")},
+		{"Q2 an attribute on a type, and the answer's type", []Request{{Identifier: address}},
+			query("__typename ... on Ingezetene { woontOp { straatnaam huisnummer huisletter huisnummertoevoeging postcode woonplaatsnaam } }")},
 		{"Q3 two attributes in one query", []Request{{Identifier: familyName}, {Identifier: nationality}},
 			query("voorvoegsel geslachtsnaam heeftNationaliteit { nationaliteit }")},
 		{"Q4 a fragment asks only its member", []Request{{Identifier: address, Members: []string{"city"}}},
-			query("... on Ingezetene { woontOp { woonplaatsnaam } }")},
+			query("__typename ... on Ingezetene { woontOp { woonplaatsnaam } }")},
 		{"Q5 attribute and fragment ask each field once", []Request{{Identifier: address}, {Identifier: address, Members: []string{"city"}}},
-			query("... on Ingezetene { woontOp { straatnaam huisnummer huisletter huisnummertoevoeging postcode woonplaatsnaam } }")},
+			query("__typename ... on Ingezetene { woontOp { straatnaam huisnummer huisletter huisnummertoevoeging postcode woonplaatsnaam } }")},
+		{"Q7 the type is asked once, beside attributes without a type", []Request{{Identifier: givenName}, {Identifier: address, Members: []string{"city"}}},
+			query("__typename voornamen ... on Ingezetene { woontOp { woonplaatsnaam } }")},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
