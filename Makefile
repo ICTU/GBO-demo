@@ -363,14 +363,15 @@ create-development-registrar-root:
 # plus the reader-root CRL and the WRPRC status list in
 # EUDI_TRUST_PUBLISH_DIR for the trust host. A container in the eudi network
 # exports the source from the Source Registry; the signing runs here, so the
-# CA keys never enter a container. Needs EUDI_TRUST_PUBLIC_URL and
-# ORGANIZATION_IDENTIFIER_TYPE (ETSI EN 319 412-1 identity type).
+# CA keys never enter a container. Needs EUDI_TRUST_PUBLIC_URL, and the
+# first time KVK_NUMBER: the organizationIdentifier is NTRNL-<KvK number>
+# (ETSI EN 319 412-1 has no identity type for an OIN).
 provision-wallet-registration: require-development-cas
 	@test -n "$(SOURCE_ID)" || { echo "ERROR: SOURCE_ID=<source_id> is required"; exit 1; }
 	@mkdir -p "$(EUDI_TRUST_PUBLISH_DIR)"
 	@docker compose --profile eudi --profile wallet-registration run --build --rm -T wallet-registration-source --source-id "$(SOURCE_ID)" \
 		| (cd services/eudi-adapter && go run . provision-wallet-registration --source-file - \
-			--secrets-dir "$(ONBOARDING_SECRETS_DIR)" --publish-dir "$(EUDI_TRUST_PUBLISH_DIR)")
+			--secrets-dir "$(ONBOARDING_SECRETS_DIR)" --publish-dir "$(EUDI_TRUST_PUBLISH_DIR)" --kvk-number "$(KVK_NUMBER)")
 
 reconcile-sources:
 	docker compose --profile onboarding run --build --rm source-reconciler

@@ -55,18 +55,19 @@ const (
 )
 
 var (
-	organizationIdentifierOID     = asn1.ObjectIdentifier{2, 5, 4, 97}
-	organizationIdentifierPattern = regexp.MustCompile(`^[A-Z]{3}$`)
-	registrarSubject              = pkix.Name{CommonName: "GBO development registrar", Organization: []string{"GBO Demo"}, Country: []string{"NL"}}
+	organizationIdentifierOID = asn1.ObjectIdentifier{2, 5, 4, 97}
+	kvkNumberPattern          = regexp.MustCompile(`^[0-9]{8}$`)
+	registrarSubject          = pkix.Name{CommonName: "GBO development registrar", Organization: []string{"GBO Demo"}, Country: []string{"NL"}}
 )
 
 type walletRegistrationOptions struct {
 	secretsDir, publishDir, trustPublicURL string
-	// organizationIdentifierType is the three-letter identity type of
-	// ETSI EN 319 412-1 section 5.1.4 in front of the country code and OIN.
-	organizationIdentifierType string
-	now                        func() time.Time
-	random                     io.Reader
+	// kvkNumber is the source's number in the Dutch trade register. It
+	// becomes the organizationIdentifier NTRNL-<number> (ETSI EN 319 412-1
+	// section 5.1.4): no identity type there fits an OIN.
+	kvkNumber string
+	now       func() time.Time
+	random    io.Reader
 }
 
 // walletRegistrationSource is what the active Source Release says about one
@@ -142,7 +143,7 @@ func parseWalletRegistrationOptions(command string, arguments []string, stderr i
 	set.StringVar(&options.secretsDir, "secrets-dir", getEnv("ONBOARDING_SECRETS_DIR", ".local/secrets"), "filesystem secret directory")
 	set.StringVar(&options.publishDir, "publish-dir", getEnv("EUDI_TRUST_PUBLISH_DIR", ".local/public-trust"), "directory the trust host serves")
 	set.StringVar(&options.trustPublicURL, "trust-public-url", os.Getenv("EUDI_TRUST_PUBLIC_URL"), "public root URL of the trust host")
-	set.StringVar(&options.organizationIdentifierType, "organization-identifier-type", os.Getenv("ORGANIZATION_IDENTIFIER_TYPE"), "three-letter identity type of the organizationIdentifier (ETSI EN 319 412-1)")
+	set.StringVar(&options.kvkNumber, "kvk-number", "", "the source's KvK number; required the first time, recorded afterwards")
 	if err := set.Parse(arguments); err != nil {
 		return options, "", err
 	}
@@ -270,9 +271,6 @@ func provisionWalletRegistration(options walletRegistrationOptions, source walle
 		return fmt.Errorf("trust public URL: %w", err)
 	}
 	trustBase := strings.TrimSuffix(trustURL.String(), "/")
-	if !organizationIdentifierPattern.MatchString(options.organizationIdentifierType) {
-		return errors.New("the organizationIdentifier type must be three upper-case letters (ETSI EN 319 412-1 section 5.1.4)")
-	}
 	if !sourceIDPattern.MatchString(source.SourceID) || !sourceIDPattern.MatchString(source.CertificateSet) {
 		return errors.New("the source needs a valid source id and certificate set")
 	}
@@ -305,8 +303,12 @@ func provisionWalletRegistration(options walletRegistrationOptions, source walle
 			state.TrustPublicURL, trustBase, filepath.Join(caDir, walletRegistrationState))
 	}
 	state.TrustPublicURL = trustBase
+	kvk, err := state.kvkNumber(source.SourceID, options.kvkNumber)
+	if err != nil {
+		return err
+	}
 
-	orgID := options.organizationIdentifierType + "NL-" + source.OIN
+	orgID := "NTRNL-" + kvk
 	wrpac, err := ensureCertificate(options, sourceDir, "wrpac", reader, wrpacTemplate(source.Name, orgID, trustBase+"/"+wrpacCRLName, now))
 	if err != nil {
 		return err
@@ -472,12 +474,13 @@ func certificateMatches(cert, parent, template *x509.Certificate, now time.Time)
 // walletRegistrationRecord is what earlier runs decided: the trust URL in
 // the certificates and each source's index in the WRPRC status list.
 type walletRegistrationRecord struct {
-	TrustPublicURL string         `json:"trust_public_url"`
-	StatusIndices  map[string]int `json:"status_indices"`
+	TrustPublicURL string            `json:"trust_public_url"`
+	StatusIndices  map[string]int    `json:"status_indices"`
+	KvKNumbers     map[string]string `json:"kvk_numbers"`
 }
 
 func readWalletRegistrationState(caDir string) (walletRegistrationRecord, error) {
-	state := walletRegistrationRecord{StatusIndices: map[string]int{}}
+	state := walletRegistrationRecord{StatusIndices: map[string]int{}, KvKNumbers: map[string]string{}}
 	raw, err := os.ReadFile(filepath.Join(caDir, walletRegistrationState))
 	if errors.Is(err, os.ErrNotExist) {
 		return state, nil
@@ -491,7 +494,30 @@ func readWalletRegistrationState(caDir string) (walletRegistrationRecord, error)
 	if state.StatusIndices == nil {
 		state.StatusIndices = map[string]int{}
 	}
+	if state.KvKNumbers == nil {
+		state.KvKNumbers = map[string]string{}
+	}
 	return state, nil
+}
+
+// kvkNumber returns the source's KvK number: the one given, recorded the
+// first time, or the recorded one. A different number for a registered
+// source is refused: it would make the source another organisation.
+func (s *walletRegistrationRecord) kvkNumber(sourceID, given string) (string, error) {
+	recorded := s.KvKNumbers[sourceID]
+	switch {
+	case given == "" && recorded == "":
+		return "", fmt.Errorf("source %s has no KvK number yet; pass it (KVK_NUMBER=<8 digits>)", sourceID)
+	case given == "":
+		return recorded, nil
+	case !kvkNumberPattern.MatchString(given):
+		return "", errors.New("a KvK number has eight digits")
+	case recorded != "" && recorded != given:
+		return "", fmt.Errorf("source %s is registered with KvK number %s; remove it from %s to register it as %s",
+			sourceID, recorded, walletRegistrationState, given)
+	}
+	s.KvKNumbers[sourceID] = given
+	return given, nil
 }
 
 func writeWalletRegistrationState(caDir string, state walletRegistrationRecord) error {

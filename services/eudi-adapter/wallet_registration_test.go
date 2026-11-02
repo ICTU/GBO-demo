@@ -58,7 +58,7 @@ func newWalletRegistrationFixture(t *testing.T) walletRegistrationFixture {
 	return walletRegistrationFixture{
 		options: walletRegistrationOptions{
 			secretsDir: secrets, publishDir: t.TempDir(), trustPublicURL: testTrustURL,
-			organizationIdentifierType: "XYZ", now: func() time.Time { return now }, random: rand.Reader,
+			kvkNumber: "12345678", now: func() time.Time { return now }, random: rand.Reader,
 		},
 		source: walletRegistrationSource{SourceID: "belastingdienst", OIN: "99999999900000000200", Name: "Belastingdienst",
 			CertificateSet: "belastingdienst", VCTs: []string{testIncome}},
@@ -149,7 +149,7 @@ func TestProvisionWalletRegistration(t *testing.T) {
 		if len(wrpac) != 1 || wrpac[0].CheckSignatureFrom(reader) != nil {
 			t.Fatal("the WRPAC must be issued directly by the reader root, which allows no intermediate")
 		}
-		if got := organizationIdentifier(wrpac[0]); got != "XYZNL-99999999900000000200" {
+		if got := organizationIdentifier(wrpac[0]); got != "NTRNL-12345678" {
 			t.Fatalf("organizationIdentifier %q", got)
 		}
 		if !slices.Equal(wrpac[0].Subject.Country, []string{"NL"}) || !slices.Equal(wrpac[0].Subject.Organization, []string{"Belastingdienst"}) {
@@ -244,6 +244,23 @@ func TestProvisionWalletRegistrationAgain(t *testing.T) {
 		}
 		if state, err := readWalletRegistrationState(caDir); err != nil || state.StatusIndices["belastingdienst"] != 0 {
 			t.Fatalf("state %+v, %v", state, err)
+		}
+	})
+	t.Run("a later run takes the recorded KvK number", func(t *testing.T) {
+		options := f.options
+		options.kvkNumber = ""
+		if err := provisionWalletRegistration(options, f.source); err != nil {
+			t.Fatal(err)
+		}
+		if got := organizationIdentifier(f.wrpac(t).chain[0]); got != "NTRNL-12345678" {
+			t.Fatalf("organizationIdentifier %q", got)
+		}
+	})
+	t.Run("another KvK number for a registered source is refused", func(t *testing.T) {
+		options := f.options
+		options.kvkNumber = "87654321"
+		if err := provisionWalletRegistration(options, f.source); err == nil || !strings.Contains(err.Error(), "registered with KvK number 12345678") {
+			t.Fatalf("got %v", err)
 		}
 	})
 	t.Run("another source gets one past the highest status index", func(t *testing.T) {
@@ -376,11 +393,9 @@ func TestProvisionWalletRegistrationRefuses(t *testing.T) {
 	for name, mutate := range map[string]func(t *testing.T, f *walletRegistrationFixture){
 		"no trust URL":          func(_ *testing.T, f *walletRegistrationFixture) { f.options.trustPublicURL = "" },
 		"trust URL with a path": func(_ *testing.T, f *walletRegistrationFixture) { f.options.trustPublicURL = testTrustURL + "/trust" },
-		"no organizationIdentifier type": func(_ *testing.T, f *walletRegistrationFixture) {
-			f.options.organizationIdentifierType = ""
-		},
-		"organizationIdentifier type that is not three letters": func(_ *testing.T, f *walletRegistrationFixture) {
-			f.options.organizationIdentifierType = "XY"
+		"no KvK number":         func(_ *testing.T, f *walletRegistrationFixture) { f.options.kvkNumber = "" },
+		"a KvK number that is not eight digits": func(_ *testing.T, f *walletRegistrationFixture) {
+			f.options.kvkNumber = "1234567"
 		},
 		"no activated types": func(_ *testing.T, f *walletRegistrationFixture) { f.source.VCTs = nil },
 		"an OIN other than the issuer certificate's": func(_ *testing.T, f *walletRegistrationFixture) {

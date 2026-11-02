@@ -105,9 +105,13 @@ Release, and writes the reader-root CRL and the WRPRC status list to
 `.local/public-trust/` for the trust host. A container reads the source from
 the Source Registry; the signing runs on the host, so the CA keys never enter
 a container. It needs `EUDI_TRUST_PUBLIC_URL`
-(the public root URL of that host, which goes into the certificates) and
-`ORGANIZATION_IDENTIFIER_TYPE` (the identity type in front of the OIN in the
-organizationIdentifier). The CRL and the status list are valid for a year
+(the public root URL of that host, which goes into the certificates) and, the
+first time for a source, `KVK_NUMBER`: the organizationIdentifier in the WRPAC
+and the WRPRC is `NTRNL-<KvK number>`, because ETSI EN 319 412-1 section 5.1.4
+defines no identity type for an OIN. The number is recorded per source; a
+different one for a registered source is refused. The demo sources use
+fictional numbers: `99990200` for `belastingdienst`, `99990300` for `rvig` and
+`99990900` for `demo-unsecured`. The CRL and the status list are valid for a year
 at most and never outlive the reader root (the pre-provisioned one expires on
 2027-04-30); nothing renews them, and revocation is not supported: every run
 publishes both afresh. The trust URL is recorded in
