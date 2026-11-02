@@ -89,7 +89,9 @@ if matches_any 'services/ftv-graphql-mapper/*'; then
 fi
 
 if matches_any 'services/asi-mapping/*' 'services/source-registry/*'; then
-  go="$(append_unique "${go}" 'eudi-adapter')"
+  for service in eudi-adapter asi-provider; do
+    go="$(append_unique "${go}" "${service}")"
+  done
 fi
 
 # The source metadata schemas, GBO's attribute catalogue and the published
@@ -97,9 +99,19 @@ fi
 # validate source metadata.
 if matches_any 'schemas/gbo-*.schema.json' 'schemas/asi-attributes.json' \
   'services/brp-graphql-server/config/*' 'services/graphql-server/config/*'; then
-  for service in asi-mapping eudi-adapter; do
+  for service in asi-mapping eudi-adapter asi-provider; do
     go="$(append_unique "${go}" "${service}")"
   done
+fi
+
+# The reference QTSP's end-to-end test builds and runs the authorization
+# server, the ASIP and the DIP stub; the ASIP reads the BRP's published
+# metadata, checked against the attribute catalogue.
+if matches_any 'services/asi-authorization-server/*' 'services/asi-provider/*' \
+  'services/asi-discovery-stub/*' 'services/asi-mapping/*' \
+  'services/source-registry/*' 'services/brp-graphql-server/config/*' \
+  'schemas/asi-attributes.json'; then
+  go="$(append_unique "${go}" 'qtsp-reference')"
 fi
 
 # The BRP mock's tests hold its asi mapping against the rule that grants the
@@ -151,7 +163,9 @@ if matches_any 'services/ldv-client/*'; then
 fi
 
 if matches_any 'services/asi-mapping/*' 'services/source-registry/*'; then
-  docker="$(append_unique "${docker}" 'eudi-adapter')"
+  for service in eudi-adapter asi-provider; do
+    docker="$(append_unique "${docker}" "${service}")"
+  done
 fi
 
 if matches_any 'services/ftv-graphql-mapper/*'; then
@@ -171,8 +185,8 @@ fi
 # A root .dockerignore change affects each image built with the repository as
 # its context. Service-specific contexts do not read this file.
 if matches_any '.dockerignore'; then
-  for service in eudi-adapter bron-sidecar graphql-server ldv-logboek \
-    lvg-graphql-server openftv-pdp; do
+  for service in eudi-adapter asi-provider bron-sidecar graphql-server \
+    ldv-logboek lvg-graphql-server openftv-pdp; do
     docker="$(append_unique "${docker}" "${service}")"
   done
 fi

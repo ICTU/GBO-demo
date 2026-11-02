@@ -110,6 +110,16 @@ func buildStack() (*stack, error) {
 	writeKey(sealKeyFile, sealKey)
 	writeCerts(sealCertFile, sealCert, sealCA)
 
+	// There is no Source Registry: the ASIP reads the BRP's description from
+	// a release file, written from the BRP's published source metadata.
+	releaseFile := filepath.Join(dir, "release.json")
+	write := exec.Command(bins["asi-provider"], "write-release-file", "--source", "rvig",
+		"--metadata", filepath.Join("..", "brp-graphql-server", "config", "gbo-source-metadata.json"),
+		"--catalogue", filepath.Join("..", "..", "schemas", "asi-attributes.json"), "--out", releaseFile)
+	if out, err := write.CombinedOutput(); err != nil {
+		return nil, fmt.Errorf("write release file: %v\n%s", err, out)
+	}
+
 	outway := httptest.NewServer(http.HandlerFunc(fakeBRP))
 	asURL, asipURL, dipURL := "http://"+freeAddr(), "http://"+freeAddr(), "http://"+freeAddr()
 	s := &stack{dip: dipURL, qtspKey: qtspKey, qtspChain: []*x509.Certificate{qtspCert, readerCA}, logs: map[string]*syncBuffer{}}
@@ -128,6 +138,7 @@ func buildStack() (*stack, error) {
 			"ASIP_ADDR=" + strings.TrimPrefix(asipURL, "http://"), "ASIP_PUBLIC_URL=" + asipURL,
 			"ASIP_AUTHORIZATION_SERVER=" + asURL, "ASIP_OUTWAY_URL=" + outway.URL,
 			"ASIP_SEAL_KEY_FILE=" + sealKeyFile, "ASIP_SEAL_CERT_FILE=" + sealCertFile,
+			"ASIP_SOURCE_REGISTRY_RELEASE_FILE=" + releaseFile,
 		}},
 		{"asi-discovery-stub", dipURL, []string{
 			"DIP_ADDR=" + strings.TrimPrefix(dipURL, "http://"), "DIP_SOURCES=" + asipURL + "/brp/dataservices",

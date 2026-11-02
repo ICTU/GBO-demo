@@ -2,7 +2,8 @@
 # have one, because they reach outside their own service directory:
 # eudi-adapter, dev-portal-backend and openftv-pdp bake in ./policies, and the
 # services that write Logboek Dataverwerkingen records depend on the sibling
-# services/ldv-client module.
+# services/ldv-client module; eudi-adapter and asi-provider on asi-mapping and
+# source-registry.
 #
 # Deliberately conservative: it lists only what no root-context Dockerfile
 # copies and what is large or secret. The nl-wallet submodule is the reason it

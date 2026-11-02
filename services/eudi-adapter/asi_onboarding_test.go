@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"gbo-demo/source-registry/asisnapshot"
 	"gbo-demo/source-registry/onboarding"
 )
 
@@ -313,6 +314,30 @@ func TestASIReleaseSnapshot(t *testing.T) {
 		}
 		if _, err := activationFromRegistryCandidate(onboarding.SourceCandidate{SourceID: source.SourceID, Snapshot: source.Snapshot}); err != nil {
 			t.Fatal(err)
+		}
+	})
+}
+
+// C1 and C2: the ASIP reads the asi of a release with the reader the Source
+// Registry module provides; it reads what this adapter writes.
+func TestTheASIPReadsTheReleaseSnapshot(t *testing.T) {
+	t.Run("C1 a snapshot with asi", func(t *testing.T) {
+		result := reconcileDocuments(t, testSchemaPath, map[string]map[string]any{"demo": withASI(t, unsecuredDocument(t))})
+		validated := result.activated(t, "demo")
+		asi, err := asisnapshot.Read(onboarding.ReleaseSource{SourceID: "demo", Snapshot: storedSnapshot(t, validated).Snapshot})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := validated.Document.Capabilities.ASI; want == nil || !reflect.DeepEqual(asi, want) {
+			t.Fatalf("asi read by the ASIP = %+v, want %+v", asi, want)
+		}
+	})
+
+	t.Run("C2 a snapshot without asi", func(t *testing.T) {
+		result := reconcileDocuments(t, testSchemaPath, map[string]map[string]any{"demo": unsecuredDocument(t)})
+		asi, err := asisnapshot.Read(onboarding.ReleaseSource{SourceID: "demo", Snapshot: storedSnapshot(t, result.activated(t, "demo")).Snapshot})
+		if err != nil || asi != nil {
+			t.Fatalf("Read() = %+v, %v; want no asi", asi, err)
 		}
 	})
 }

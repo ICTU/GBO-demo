@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"gbo-demo/asi-provider/internal/accesstoken"
@@ -93,5 +94,20 @@ func TestSourceFailureIsNotUnknown(t *testing.T) {
 				assertProblem(t, rec, tc.want)
 			}
 		})
+	}
+}
+
+// A data service whose source is unavailable, also for want of a current
+// description in the Source Registry, still publishes its description and
+// discovery endpoints: only /verify and /retrieve ask the source.
+func TestAnUnavailableSourceLeavesThePublishedEndpoints(t *testing.T) {
+	authz, qtsp := newTestAuthorizationServer(t), newTestQTSP(t)
+	env := newTestServerWithSource(t, authz, qtsp, accesstoken.StaticKeys(authz.jwks), fakeSource{err: verification.ErrSourceUnavailable})
+	for _, path := range []string{"/brp/openapi.json", "/brp/dataservices", "/brp/" + dataserviceFileName, "/healthz"} {
+		rec := httptest.NewRecorder()
+		env.handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusOK {
+			t.Errorf("GET %s = %d, want 200", path, rec.Code)
+		}
 	}
 }

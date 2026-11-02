@@ -1226,7 +1226,9 @@ services:
       - backend
 
   asi-provider:
-    build: ./services/asi-provider
+    build:
+      context: .
+      dockerfile: services/asi-provider/Dockerfile
     profiles: [asi]
     ports:
       - "${GBO_PORT_ASI_PROVIDER:-9424}:4020"
@@ -1237,6 +1239,10 @@ services:
       # The ASIP's own Outway; the grant-link per data service is in
       # config/dataservices.json (/brp is the one make fsc-seed-asip sets).
       - ASIP_OUTWAY_URL=http://asip-outway:8080
+      # The sources' descriptions come from the active Source Registry
+      # release, read with the reader role. Without it (make demo-eudi first)
+      # the ASIP starts, but its data services answer 503.
+      - ASIP_SOURCE_REGISTRY_DATABASE_URL=postgres://source_registry_reader:${SOURCE_REGISTRY_READER_PASSWORD}@postgres-eudi:5432/source_registry
       - OTEL_SERVICE_NAME=asi-provider
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
       - ASIP_SEAL_KEY_FILE=/seal/seal-key.pem
@@ -1249,6 +1255,7 @@ services:
     networks:
       - backend
       - fsc-infra
+      - eudi
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4020/healthz"]
       interval: 5s

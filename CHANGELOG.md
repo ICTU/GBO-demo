@@ -312,6 +312,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- **The ASIP reads the sources' descriptions from the Source Registry**
+  (#592, step 4b-2): it reads the active release with the registry's reader
+  role, every `ASIP_SOURCE_REGISTRY_REFRESH` (default 5s). A data service
+  answers `/verify` and `/retrieve` with 503 while its source has no current
+  description: absent from the release, without `asi`, or past its
+  `stale_until`. A release it cannot read, or an unreachable registry, leaves
+  the previous description until it goes stale; the ASIP starts without the
+  registry. Without a registry it reads a release file instead
+  (`ASIP_SOURCE_REGISTRY_RELEASE_FILE`), which `asi-provider
+  write-release-file` writes from a source's published metadata; the
+  reference QTSP's end-to-end test uses one, and now also runs when the ASI
+  services or the modules they use change. In `config/dataservices.json` `source` is now the source's
+  registry id (`rvig`). The ASIP still asks the BRP through its adapter. The
+  ASIP image builds from the repository root; the eudi-adapter's image tag now
+  also covers `asi-mapping` and `source-registry`, so a change to either
+  rebuilds it.
 - **The Source Registry is a module of its own** (#592, step 4b-1): its model
   and its Postgres store moved unchanged from the eudi-adapter to
   `services/source-registry`, so the ASIP can read the active release with the

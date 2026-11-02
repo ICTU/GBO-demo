@@ -30,7 +30,9 @@ type DataService struct {
 	// Country is the Member State of the data service (ISO 3166-1 alpha-2),
 	// in its discovery records.
 	Country string `json:"country"`
-	// Source names the adapter that asks the authentic source.
+	// Source is the authentic source's id in the Source Registry, whose
+	// active release describes it. It also names the adapter that asks the
+	// source.
 	Source string `json:"source"`
 	// GrantPath is the grant-link of the ASIP's FSC contract with the source,
 	// on its Outway.
