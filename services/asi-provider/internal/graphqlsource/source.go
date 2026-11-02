@@ -125,8 +125,16 @@ func (s *Source) Ask(ctx context.Context, bsn string, asi *asimapping.Capability
 	if err := json.Unmarshal(raw, &response); err != nil {
 		return nil, fmt.Errorf("decode the answer of source %q (Fsc-Transaction-Id %s): %w", s.sourceID, txID, err)
 	}
-	if errs, _ := response["errors"].([]any); len(errs) > 0 {
-		return nil, fmt.Errorf("source %q answered %d GraphQL errors (Fsc-Transaction-Id %s)", s.sourceID, len(errs), txID)
+	// errors absent, null or empty reports no error; any value other than a
+	// list is an answer the ASIP cannot read.
+	switch errs := response["errors"].(type) {
+	case nil:
+	case []any:
+		if len(errs) > 0 {
+			return nil, fmt.Errorf("source %q answered %d GraphQL errors (Fsc-Transaction-Id %s)", s.sourceID, len(errs), txID)
+		}
+	default:
+		return nil, fmt.Errorf("the answer of source %q (Fsc-Transaction-Id %s): errors is not a list", s.sourceID, txID)
 	}
 	result, err := asi.Result(response)
 	if err != nil {

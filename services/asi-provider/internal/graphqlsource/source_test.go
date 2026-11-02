@@ -126,12 +126,21 @@ func TestTheQueryThroughTheChain(t *testing.T) {
 	}
 }
 
-// A person the source does not know: one request, no answer.
+// A person the source does not know: one request, no answer. An errors
+// member that is null or an empty list reports no error.
 func TestAnUnknownPerson(t *testing.T) {
-	o, s := newOutway(t, http.StatusOK, `{"data":{"ingeschrevenPersoon":null}}`)
-	result, err := ask(t, s, idFamilyName)
-	if err != nil || result != nil || o.requests != 1 {
-		t.Fatalf("Ask = %v, %v; %d requests", result, err, o.requests)
+	for name, body := range map[string]string{
+		"no errors":         `{"data":{"ingeschrevenPersoon":null}}`,
+		"G11g empty errors": `{"data":{"ingeschrevenPersoon":null},"errors":[]}`,
+		"G11h null errors":  `{"data":{"ingeschrevenPersoon":null},"errors":null}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			o, s := newOutway(t, http.StatusOK, body)
+			result, err := ask(t, s, idFamilyName)
+			if err != nil || result != nil || o.requests != 1 {
+				t.Fatalf("Ask = %v, %v; %d requests", result, err, o.requests)
+			}
+		})
 	}
 }
 
@@ -157,6 +166,8 @@ func TestFailures(t *testing.T) {
 		{"outway 502", outwaySource(http.StatusBadGateway, `{"code":"ERROR_CODE_SERVICE_UNREACHABLE"}`), true},
 		{"PDP denies", outwaySource(http.StatusUnauthorized, `{"message":"authorization server denied request: ","source":"inway","code":"UNAUTHORIZED"}`), false},
 		{"GraphQL errors", outwaySource(http.StatusOK, `{"errors":[{"message":"bsn 999991772 unknown"}]}`), false},
+		{"G11e errors of another shape: an object", outwaySource(http.StatusOK, `{"data":{"ingeschrevenPersoon":null},"errors":{"message":"failed"}}`), false},
+		{"G11f errors of another shape: a string", outwaySource(http.StatusOK, `{"data":{"ingeschrevenPersoon":null},"errors":"failed"}`), false},
 		{"not JSON", outwaySource(http.StatusOK, `<html>`), false},
 		{"data of another shape", outwaySource(http.StatusOK, `{"data":"unexpected"}`), false},
 	} {
