@@ -31,13 +31,8 @@ export default function Streams() {
               te vragen. De afnemer werkt alleen met een toestemming-ID. De bronhouder bepaalt zelf,
               binnen de eigen vertrouwensgrens, om welke persoon het gaat.
             </p>
-            <p className="stream-body stream-body--muted">
+            <p className="stream-body stream-body--muted stream-body--last">
               Afnemer vraagt → Burger stemt toe → Afnemer bevraagt Bron
-            </p>
-            <p className="stream-body stream-body--muted stream-body--scenario stream-body--last">
-              Dezelfde stroom draagt ook het scenario Installatie Register: een installateur krijgt
-              inzage in de installaties van een pand, nadat de Landelijke Voorziening Gebouwen heeft
-              bevestigd dat de burger eigenaar is.
             </p>
             <div className="stream-links">
               {/* Eén startpunt voor alle acties: de sectie "Zelf

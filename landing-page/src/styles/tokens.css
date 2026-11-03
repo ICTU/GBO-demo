@@ -614,11 +614,6 @@ a:hover {
   margin-bottom: 16px;
 }
 
-.stream-body--scenario {
-  border-top: 1px solid var(--grey-border);
-  padding-top: 12px;
-}
-
 .stream-links {
   display: flex;
   flex-direction: column;
