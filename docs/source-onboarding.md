@@ -255,7 +255,7 @@ sequenceDiagram
     else Productie met expliciete promotie
         O->>P: Keur een complete kandidaatset goed en promoveer die
     end
-    A->>P: Poll active release en lifecycle; laad gewijzigd materiaal read-only
+    A->>P: Poll active release en lifecycle, laad gewijzigd materiaal read-only
     A->>A: Vervang de in-memory snapshot atomair
     M->>P: Laad de actieve release read-only
     M->>M: Combineer release en certificate Secret in emptyDir
