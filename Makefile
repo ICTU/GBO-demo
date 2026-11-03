@@ -1,7 +1,7 @@
 .PHONY: up down logs clean certs require-ftv-postgres demo-manager manager-seed fsc-local-env fsc-ca fsc-up fsc-all-up fsc-brp-certs fsc-consent-register-certs fsc-gbo-pdp-certs fsc-ir-certs fsc-int-certs fsc-asip-certs fsc-databases fsc-down fsc-test fsc-clean \
         fsc-seed-bri fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-lvg fsc-seed-int fsc-seed-asip fsc-seed-brp fsc-seed-rvig-source fsc-seed-metadata fsc-pdp-cert pdp-up \
         eudi-images asi-wallet-verifier-image source-metadata-up \
-        require-development-cas create-development-registrar-root provision-wallet-registration credential-issuer-up provision-development-certificates provision-qtsp-issuance-certificates provision-asip-seal-certificate provision-asip-qtsp-certificate provision-asi-wallet-verifier reconcile-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
+        require-development-cas create-development-registrar-root provision-wallet-registration provision-test-pid credential-issuer-up provision-development-certificates provision-qtsp-issuance-certificates provision-asip-seal-certificate provision-asip-qtsp-certificate provision-asi-wallet-verifier reconcile-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
         demo-full demo-integrator demo-asi demo-down eudi-config policy-check policy-test
 
 -include .env
@@ -385,7 +385,22 @@ credential-issuer-up:
 	@test -n "$(CREDENTIAL_ISSUER_DB_PASSWORD)" || { echo "ERROR: set CREDENTIAL_ISSUER_DB_PASSWORD"; exit 1; }
 	@test -f "$(EUDI_TRUST_PUBLISH_DIR)/reader-root.crl" || { echo "ERROR: run make provision-wallet-registration first"; exit 1; }
 	docker compose --profile eudi --profile credential-issuer up -d --build --force-recreate \
-		credential-issuer-materialize eudi-credential-issuer trust-host
+		credential-issuer-materialize eudi-credential-issuer trust-host test-pid-source
+
+# Test PID provider of the own credential issuer: a PID of the NL type
+# (urn:eudi:pid:nl:1) for wallets without a real one, under a development
+# root of its own that only the demo's wallet builds and verifier trust. It
+# is registered like a source (WRPAC, WRPRC with the PID_Provider
+# entitlement, fictitious KvK number 99990100) and fed by test-pid-source.
+# Signs on the host; the root key stays in TEST_PID_ROOT_DIR, outside every
+# container mount. A second run keeps the root and every key. Then run
+# make credential-issuer-up.
+TEST_PID_ROOT_DIR ?= $(PWD)/.local/test-pid-root
+provision-test-pid: require-development-cas
+	@mkdir -p "$(EUDI_TRUST_PUBLISH_DIR)"
+	@cd services/eudi-adapter && go run . provision-test-pid \
+		--secrets-dir "$(ONBOARDING_SECRETS_DIR)" --publish-dir "$(EUDI_TRUST_PUBLISH_DIR)" \
+		--public-certificates-dir "$(ONBOARDING_PUBLIC_CERTIFICATES_DIR)" --root-dir "$(TEST_PID_ROOT_DIR)"
 
 reconcile-sources:
 	docker compose --profile onboarding run --build --rm source-reconciler

@@ -119,6 +119,17 @@ publishes both afresh. The trust URL is recorded in
 `development-ca/wallet-registration.json`; to change it, remove that file and
 provision every source again.
 
+`make provision-test-pid` adds a test PID provider to the own issuer: a PID
+of the NL type (`urn:eudi:pid:nl:1`) for wallets without a real one, such as
+the EUDI reference wallet, so the disclosure-based route can be shown with
+them. Its credentials chain to a development root of its own
+(`.local/test-pid-root/`, outside every container mount, created once, its
+certificate copied to `.local/public-certificates/development-ca/`), which only the demo's wallet
+builds and verifier trust. It is registered like a source, with the
+`PID_Provider` entitlement and the fictional KvK number `99990100`, and fed by
+`test-pid-source` from the BRP mock persons. It is a test fixture, not a PID
+Provider.
+
 `EUDI_PUBLIC_URL` must route to the issuance server and its hostname must be in
 the reader-certificate DNS SAN. `EUDI_BRI_URL` must route to the EUDI adapter.
 See [source onboarding](docs/source-onboarding.md) for the local certificate

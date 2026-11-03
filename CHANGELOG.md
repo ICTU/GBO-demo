@@ -46,6 +46,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   that asks for an encrypted response must encrypt its request. `make
   provision-wallet-registration` creates each source's request key once; run
   it again for sources provisioned before.
+- **Test PID for the own credential issuer** (#614): `make
+  provision-test-pid` adds a test PID provider (`urn:eudi:pid:nl:1`) under a
+  development root of its own, registered with the `PID_Provider`
+  entitlement, and the new `test-pid-source` stub serves its data from the
+  BRP mock persons. Wallets without a real PID, such as the EUDI reference
+  wallet, get one through a pre-authorized offer. A test fixture, not a PID
+  Provider.
 - **`eudi-adapter` serves pre-authorized offers** (#614): besides a wallet's
   PID disclosure it accepts `{"subject": {"bsn": ...}}` from a credential
   issuer whose offer caller named the subject. It logs that as a separate

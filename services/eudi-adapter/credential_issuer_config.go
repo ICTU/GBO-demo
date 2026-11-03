@@ -55,7 +55,9 @@ type credentialIssuerOptions struct {
 	// eudiKeyStorage and eudiUserAuthentication are the key attestation
 	// levels the eudi profile requires (ARF ISSU_27d).
 	eudiKeyStorage, eudiUserAuthentication []string
-	now                                    func() time.Time
+	// testPIDSourceURL is the bronpoort of the test PID (test-pid-source).
+	testPIDSourceURL string
+	now              func() time.Time
 	// owner, when set, becomes the owner of everything written: the issuer
 	// runs as another user than this command.
 	owner *fileOwner
@@ -147,6 +149,7 @@ func runCredentialIssuerConfigCommand(ctx context.Context, arguments []string, s
 	set.StringVar(&options.outputDir, "output-dir", "/runtime-issuer", "pod-local directory for the issuer configuration, owned by this command")
 	set.StringVar(&options.adapterBaseURL, "adapter-base-url", os.Getenv("EUDI_BRI_URL"), "public GBO adapter base URL")
 	set.StringVar(&options.rootsDir, "wallet-roots-dir", "/wallet-roots", "directory with the trusted wallet providers per profile")
+	set.StringVar(&options.testPIDSourceURL, "test-pid-source-url", getEnv("TEST_PID_SOURCE_URL", "http://test-pid-source:8080/attestations"), "bronpoort of the test PID, used when the test PID is provisioned")
 	set.StringVar(&options.universalLinkBase, "universal-link-base", getEnv("ISSUER_NL_UNIVERSAL_LINK_BASE", "walletdebuginteraction://wallet.edi.rijksoverheid.nl/"), "base of the NL Wallet universal link")
 	owner := set.String("owner", os.Getenv("ISSUER_RUNTIME_OWNER"), "uid or uid:gid that becomes the owner of the output, for an issuer running as another user")
 	keyStorage := set.String("eudi-key-storage", os.Getenv("ISSUER_EUDI_KEY_STORAGE"), "comma-separated key storage levels the eudi profile requires")
@@ -242,6 +245,11 @@ func writeCredentialIssuer(options credentialIssuerOptions, release onboarding.S
 	}
 	if len(out.Providers) == 0 {
 		return errors.New("active Source Release has no source with activated types")
+	}
+	if testPID, ok, err := testPIDProvider(options, seen); err != nil {
+		return fmt.Errorf("test PID: %w", err)
+	} else if ok {
+		out.Providers = append(out.Providers, testPID)
 	}
 	body, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {
@@ -382,6 +390,9 @@ func credentialIssuerProvider(options credentialIssuerOptions, source onboarding
 	if !issuerName(source.SourceID) {
 		return issuerProviderFile{}, errors.New("the issuer takes only lower-case letters, digits and hyphens, and not \"status\", as a provider name")
 	}
+	if source.SourceID == testPIDID {
+		return issuerProviderFile{}, fmt.Errorf("%q is reserved for the test PID provider", testPIDID)
+	}
 	activation, err := activationFromRegistryCandidate(onboarding.SourceCandidate{
 		SourceID: source.SourceID, Snapshot: source.Snapshot,
 		CertificateSet: source.CertificateSet, TypeMetadata: source.TypeMetadata,
@@ -405,7 +416,8 @@ func credentialIssuerProvider(options credentialIssuerOptions, source onboarding
 	for _, t := range activation.Types {
 		vcts = append(vcts, t.VCT)
 	}
-	if err := copyWalletRegistration(options, source, vcts, &provider); err != nil {
+	if err := copyWalletRegistration(options, source.SourceID, source.CertificateSet.ID, vcts, &provider,
+		"make provision-wallet-registration SOURCE_ID="+source.SourceID); err != nil {
 		return provider, err
 	}
 	if provider.Issuer, err = writeLeafAsPEM(options, source.SourceID, "issuer", artifacts.IssuerKeyReference, artifacts.IssuerCertReference); err != nil {
@@ -439,10 +451,10 @@ func credentialIssuerProvider(options credentialIssuerOptions, source onboarding
 }
 
 // copyWalletRegistration copies the WRPAC, the WRPRC and the request
-// encryption key that make provision-wallet-registration made for the
-// source, and names them in provider.
-func copyWalletRegistration(options credentialIssuerOptions, source onboarding.ReleaseSource, vcts []string, provider *issuerProviderFile) error {
-	from := filepath.Join(options.secretsDir, source.CertificateSet.ID)
+// encryption key that provisioning made for a provider, and names them in
+// provider; provision is the command that makes them.
+func copyWalletRegistration(options credentialIssuerOptions, name, certificateSet string, vcts []string, provider *issuerProviderFile, provision string) error {
+	from := filepath.Join(options.secretsDir, certificateSet)
 	// Provisioned name to runtime name; keys stay private.
 	files := []struct {
 		from, to string
@@ -455,13 +467,13 @@ func copyWalletRegistration(options credentialIssuerOptions, source onboarding.R
 	}
 	for _, f := range files {
 		if !fileExists(filepath.Join(from, f.from)) {
-			return fmt.Errorf("no wallet registration (%s); run make provision-wallet-registration SOURCE_ID=%s", f.from, source.SourceID)
+			return fmt.Errorf("no wallet registration (%s); run %s", f.from, provision)
 		}
 	}
 	if err := checkWalletRegistration(from, vcts, options.now()); err != nil {
-		return fmt.Errorf("%w; run make provision-wallet-registration SOURCE_ID=%s again", err, source.SourceID)
+		return fmt.Errorf("%w; run %s again", err, provision)
 	}
-	dir := filepath.Join(options.outputDir, source.SourceID)
+	dir := filepath.Join(options.outputDir, name)
 	if err := ensurePrivateDirectory(dir); err != nil {
 		return err
 	}
@@ -474,9 +486,9 @@ func copyWalletRegistration(options credentialIssuerOptions, source onboarding.R
 			return err
 		}
 	}
-	provider.Access = issuerKeyFiles{KeyFile: source.SourceID + "/access-key.pem", ChainFile: source.SourceID + "/access-chain.pem"}
-	provider.RegistrationCertificateFile = source.SourceID + "/registration-certificate.jwt"
-	provider.RequestEncryptionKeyFile = source.SourceID + "/request-encryption-key.pem"
+	provider.Access = issuerKeyFiles{KeyFile: name + "/access-key.pem", ChainFile: name + "/access-chain.pem"}
+	provider.RegistrationCertificateFile = name + "/registration-certificate.jwt"
+	provider.RequestEncryptionKeyFile = name + "/request-encryption-key.pem"
 	return nil
 }
 

@@ -1817,6 +1817,7 @@ services:
       EUDI_BRI_URL: ${EUDI_BRI_URL:-}
       ISSUER_EUDI_KEY_STORAGE: ${ISSUER_EUDI_KEY_STORAGE:-}
       ISSUER_EUDI_USER_AUTHENTICATION: ${ISSUER_EUDI_USER_AUTHENTICATION:-}
+      TEST_PID_SOURCE_URL: ${TEST_PID_SOURCE_URL:-http://test-pid-source:8080/attestations}
     volumes:
       - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}:/source-certificates:ro
       - ${WALLET_ROOTS_DIR:-./.local/wallet-roots}:/wallet-roots:ro
@@ -1872,6 +1873,24 @@ services:
       - ./trust-host/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - ./trust-host/pages:/usr/share/trust-pages:ro
       - ${EUDI_TRUST_PUBLISH_DIR:-./.local/public-trust}:/usr/share/trust:ro
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks: [eudi]
+
+  # Bronpoort of the test PID (urn:eudi:pid:nl:1) the own credential issuer
+  # gives to wallets without a real PID, built from the BRP mock persons
+  # (make provision-test-pid, #614). A test fixture: no published port, only
+  # the issuer calls it.
+  test-pid-source:
+    build: ./services/test-pid-source
+    profiles: [credential-issuer]
+    environment:
+      - PERSONS_FILE=/persons/personen.json
+    volumes:
+      - ./services/brp-graphql-server/mockdata/personen.json:/persons/personen.json:ro
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8080/healthz"]
       interval: 5s

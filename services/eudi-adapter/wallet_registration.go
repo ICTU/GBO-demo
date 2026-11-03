@@ -133,6 +133,16 @@ func runWalletRegistrationCommand(ctx context.Context, arguments []string, stdou
 		}
 		_, _ = fmt.Fprintf(stdout, "wallet registration provisioned for source %s; this command is for local development only\n", source.SourceID)
 		return true, nil
+	case "provision-test-pid":
+		options, dirs, err := parseTestPIDOptions(arguments[0], arguments[1:], stderr)
+		if err != nil {
+			return true, err
+		}
+		if err := provisionTestPID(options, dirs); err != nil {
+			return true, fmt.Errorf("provision test PID: %w", err)
+		}
+		_, _ = fmt.Fprintln(stdout, "test PID provider provisioned; this command is for local development only")
+		return true, nil
 	}
 	return false, nil
 }
@@ -222,10 +232,17 @@ func walletRegistrationSourceFromRelease(release onboarding.SourceRelease, sourc
 // createDevelopmentRegistrarRoot creates the registrar trust anchor once. It
 // never replaces one: wallets trust it by its key.
 func createDevelopmentRegistrarRoot(caDir string, now time.Time, random io.Reader) error {
-	keyPath, certPath := caFiles(caDir, registrarRootRole)
+	return createDevelopmentRoot(caDir, registrarRootRole,
+		pkix.Name{CommonName: "GBO development registrar root", Organization: []string{"GBO Demo"}, Country: []string{"NL"}}, now, random)
+}
+
+// createDevelopmentRoot creates a development trust anchor for role once
+// and never replaces it.
+func createDevelopmentRoot(caDir, role string, subject pkix.Name, now time.Time, random io.Reader) error {
+	keyPath, certPath := caFiles(caDir, role)
 	for _, p := range []string{keyPath, certPath} {
 		if fileExists(p) {
-			return fmt.Errorf("development registrar root file %q already exists; the root is never replaced", p)
+			return fmt.Errorf("development %s root file %q already exists; the root is never replaced", role, p)
 		}
 	}
 	if err := ensurePrivateDirectory(caDir); err != nil {
@@ -241,7 +258,7 @@ func createDevelopmentRegistrarRoot(caDir string, now time.Time, random io.Reade
 	}
 	template := &x509.Certificate{
 		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: "GBO development registrar root", Organization: []string{"GBO Demo"}, Country: []string{"NL"}},
+		Subject:      subject,
 		NotBefore:    now.Add(-5 * time.Minute), NotAfter: now.AddDate(10, 0, 0),
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
 		BasicConstraintsValid: true, IsCA: true, MaxPathLen: 0, MaxPathLenZero: true,
@@ -256,7 +273,11 @@ func createDevelopmentRegistrarRoot(caDir string, now time.Time, random io.Reade
 // projectRegistrarRoot copies the registrar root certificate next to the
 // public CA certificates, for the wallets' trust lists.
 func projectRegistrarRoot(caDir, publicDir string) error {
-	_, certPath := caFiles(caDir, registrarRootRole)
+	return projectRoot(caDir, registrarRootRole, publicDir)
+}
+
+func projectRoot(caDir, role, publicDir string) error {
+	_, certPath := caFiles(caDir, role)
 	body, err := os.ReadFile(certPath)
 	if err != nil {
 		return err
@@ -268,17 +289,30 @@ func projectRegistrarRoot(caDir, publicDir string) error {
 }
 
 func provisionWalletRegistration(options walletRegistrationOptions, source walletRegistrationSource) error {
+	if !sourceIDPattern.MatchString(source.SourceID) || !sourceIDPattern.MatchString(source.CertificateSet) {
+		return errors.New("the source needs a valid source id and certificate set")
+	}
+	if source.SourceID == testPIDID || source.CertificateSet == testPIDID {
+		return fmt.Errorf("%q is reserved for the test PID provider", testPIDID)
+	}
+	if !sourceOINPattern.MatchString(source.OIN) || source.Name == "" || len(source.VCTs) == 0 {
+		return errors.New("the source needs an OIN, a name and activated types")
+	}
+	if err := checkSourceIdentity(filepath.Join(options.secretsDir, source.CertificateSet), source); err != nil {
+		return err
+	}
+	return registerWallet(options, source, wrprcPubEAAEntitlement)
+}
+
+// registerWallet issues the WRPAC and WRPRC of a party that provides
+// attestations with the given entitlement, and publishes the trust host's
+// files.
+func registerWallet(options walletRegistrationOptions, source walletRegistrationSource, entitlement string) error {
 	trustURL, err := parseDevelopmentRootURL(options.trustPublicURL, false)
 	if err != nil {
 		return fmt.Errorf("trust public URL: %w", err)
 	}
 	trustBase := strings.TrimSuffix(trustURL.String(), "/")
-	if !sourceIDPattern.MatchString(source.SourceID) || !sourceIDPattern.MatchString(source.CertificateSet) {
-		return errors.New("the source needs a valid source id and certificate set")
-	}
-	if !sourceOINPattern.MatchString(source.OIN) || source.Name == "" || len(source.VCTs) == 0 {
-		return errors.New("the source needs an OIN, a name and activated types")
-	}
 	now := options.now().UTC()
 	caDir := filepath.Join(options.secretsDir, "development-ca")
 	reader, err := loadRole(caDir, "reader", "pre-provisioned development reader CA")
@@ -290,9 +324,6 @@ func provisionWalletRegistration(options walletRegistrationOptions, source walle
 		return err
 	}
 	sourceDir := filepath.Join(options.secretsDir, source.CertificateSet)
-	if err := checkSourceIdentity(sourceDir, source); err != nil {
-		return err
-	}
 
 	state, err := readWalletRegistrationState(caDir)
 	if err != nil {
@@ -335,7 +366,7 @@ func provisionWalletRegistration(options walletRegistrationOptions, source walle
 	}
 	// The registration lasts as long as the certificates it rests on.
 	expires := earliest(now.AddDate(1, 0, -1), wrpac.chain[0].NotAfter, signer.chain[0].NotAfter)
-	rc, err := signRegistrationCertificate(signer, registrationPayload(source, orgID, trustBase, idx, now, expires), now)
+	rc, err := signRegistrationCertificate(signer, registrationPayload(source, entitlement, orgID, trustBase, idx, now, expires), now)
 	if err != nil {
 		return err
 	}
@@ -521,6 +552,13 @@ func (s *walletRegistrationRecord) kvkNumber(sourceID, given string) (string, er
 		return "", fmt.Errorf("source %s is registered with KvK number %s; remove it from %s to register it as %s",
 			sourceID, recorded, walletRegistrationState, given)
 	}
+	// One number is one organisation: two parties with the same number would
+	// share an organizationIdentifier.
+	for other, number := range s.KvKNumbers {
+		if number == given && other != sourceID {
+			return "", fmt.Errorf("KvK number %s is registered for %s", given, other)
+		}
+	}
 	s.KvKNumbers[sourceID] = given
 	return given, nil
 }
@@ -563,7 +601,7 @@ func earliest(first time.Time, others ...time.Time) time.Time {
 
 // registrationPayload is a WRPRC (ETSI TS 119 475) for a public body that
 // provides attestations, with the fields the NL Wallet v0.6 requires.
-func registrationPayload(source walletRegistrationSource, orgID, trustBase string, idx int, now, expires time.Time) map[string]any {
+func registrationPayload(source walletRegistrationSource, entitlement, orgID, trustBase string, idx int, now, expires time.Time) map[string]any {
 	provides := make([]map[string]any, 0, len(source.VCTs))
 	for _, vct := range source.VCTs {
 		provides = append(provides, map[string]any{"format": "dc+sd-jwt", "meta": map[string]any{"vct_values": []string{vct}}})
@@ -578,7 +616,7 @@ func registrationPayload(source walletRegistrationSource, orgID, trustBase strin
 		"registry_uri": trustBase + "/registry", "support_uri": trustBase + "/support",
 		"srv_description":       []any{description},
 		"supervisory_authority": map[string]any{},
-		"entitlements":          []string{wrprcPubEAAEntitlement},
+		"entitlements":          []string{entitlement},
 		"provides_attestations": provides,
 		"public_body":           true,
 		"iat":                   now.Unix(),

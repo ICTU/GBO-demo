@@ -156,7 +156,9 @@ request encryption key (`make provision-wallet-registration`); each activated ty
 configuration `<source>-<type>` with the display and claims of the source
 definition (a claim is mandatory unless the source marks it optional), 365
 days of validity and the adapter's `/attestations/<source>/<type>` as
-bronpoort. A profile is configured only when its wallet providers are mounted
+bronpoort. When `make provision-test-pid` has run, a test PID provider
+`test-pid` follows, with one configuration `test-pid-pid` (`urn:eudi:pid:nl:1`)
+fed by `test-pid-source` (`TEST_PID_SOURCE_URL`). A profile is configured only when its wallet providers are mounted
 (`nl-wallet-providers.pem`, `eudi-wallet-providers.pem`, optionally
 `eudi-key-attestation-roots.pem`); `eudi` also needs the key attestation
 levels. Type Metadata (`type_metadata_uri`, `vct#integrity`) is not served
