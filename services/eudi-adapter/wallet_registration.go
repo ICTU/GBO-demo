@@ -52,6 +52,9 @@ const (
 	wrprcPubEAAEntitlement  = "https://uri.etsi.org/19475/Entitlement/PUB_EAA_Provider"
 	wrprcJWTType            = "rc-wrp+jwt"
 	walletRegistrationValid = 365 * 24 * time.Hour
+	// requestEncryptionKeyFile is the per-source key of encrypted credential
+	// requests, next to the WRPAC.
+	requestEncryptionKeyFile = "request-encryption-key.pem"
 )
 
 var (
@@ -311,6 +314,9 @@ func provisionWalletRegistration(options walletRegistrationOptions, source walle
 	orgID := "NTRNL-" + kvk
 	wrpac, err := ensureCertificate(options, sourceDir, "wrpac", reader, wrpacTemplate(source.Name, orgID, trustBase+"/"+wrpacCRLName, now))
 	if err != nil {
+		return err
+	}
+	if err := ensureRequestEncryptionKey(options, sourceDir); err != nil {
 		return err
 	}
 	signer, err := ensureCertificate(options, caDir, "wrprc-signer", registrar, registrarLeafTemplate(false, now))
@@ -669,22 +675,57 @@ func writeKeyAndCertificate(dir, keyPath, certPath string, key *ecdsa.PrivateKey
 	return writeFileAtomically(dir, filepath.Base(certPath), certs, 0o644)
 }
 
-func readKeyAndChain(keyPath, certPath string) (issuedCertificate, error) {
-	keyPEM, err := os.ReadFile(keyPath)
+// ensureRequestEncryptionKey keeps the source's request encryption key or
+// creates one. Wallets encrypt their credential requests to it on the own
+// issuer's eudi profile (OpenID4VCI 1.0 section 10); it needs no
+// certificate, as it is published in the signed issuer metadata.
+func ensureRequestEncryptionKey(options walletRegistrationOptions, dir string) error {
+	path := filepath.Join(dir, requestEncryptionKeyFile)
+	if fileExists(path) {
+		key, err := readECKey(path)
+		if err != nil {
+			return fmt.Errorf("load the request encryption key: %w", err)
+		}
+		if key.Curve != elliptic.P256() {
+			return fmt.Errorf("the request encryption key %s is not a P-256 key; remove it to create a new one", path)
+		}
+		return nil
+	}
+	key, err := ecdsa.GenerateKey(elliptic.P256(), options.random)
 	if err != nil {
-		return issuedCertificate{}, err
+		return err
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		return err
+	}
+	return writeFileAtomically(dir, requestEncryptionKeyFile, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), 0o600)
+}
+
+func readECKey(path string) (*ecdsa.PrivateKey, error) {
+	keyPEM, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
 	}
 	block, _ := pem.Decode(keyPEM)
 	if block == nil {
-		return issuedCertificate{}, errors.New("key is not PEM")
+		return nil, errors.New("key is not PEM")
 	}
 	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err != nil {
-		return issuedCertificate{}, err
+		return nil, err
 	}
 	key, ok := parsed.(*ecdsa.PrivateKey)
 	if !ok {
-		return issuedCertificate{}, errors.New("key is not ECDSA")
+		return nil, errors.New("key is not ECDSA")
+	}
+	return key, nil
+}
+
+func readKeyAndChain(keyPath, certPath string) (issuedCertificate, error) {
+	key, err := readECKey(keyPath)
+	if err != nil {
+		return issuedCertificate{}, err
 	}
 	raw, err := os.ReadFile(certPath)
 	if err != nil {
@@ -692,6 +733,7 @@ func readKeyAndChain(keyPath, certPath string) (issuedCertificate, error) {
 	}
 	var chain []*x509.Certificate
 	for {
+		var block *pem.Block
 		block, raw = pem.Decode(raw)
 		if block == nil {
 			break

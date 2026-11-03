@@ -44,6 +44,7 @@ func TestLoad(t *testing.T) {
 	    "issuer": {"key_file": "key.pem", "chain_file": "chain.pem"},
 	    "status": {"key_file": "key.pem", "chain_file": "chain.pem"},
 	    "registration_certificate_file": "wrprc.jwt",
+	    "request_encryption_key_file": "key.pem",
 	    "credential_configurations": [{"id": "income", "scope": "income", "vct": "https://x.test/income", "valid_days": 365,
 	      "source_url": "https://src.test/a", "status_list": "income",
 	      "claims": [{"path": ["year"], "mandatory": true}], "display": [{"name": "Income", "locale": "en"}]}]}],
@@ -68,7 +69,8 @@ func TestLoad(t *testing.T) {
 		t.Fatalf("profiles %+v", cfg.Profiles)
 	}
 	if len(cfg.Providers) != 1 || cfg.Providers[0].Name != "tax" || string(cfg.Providers[0].RegistrationCertificate) != "wrprc" ||
-		cfg.Providers[0].IssuerKey == nil || cfg.Providers[0].StatusKey == nil || cfg.Providers[0].AccessKey == nil {
+		cfg.Providers[0].IssuerKey == nil || cfg.Providers[0].StatusKey == nil || cfg.Providers[0].AccessKey == nil ||
+		cfg.Providers[0].RequestEncryptionKey == nil {
 		t.Fatalf("providers %+v", cfg.Providers)
 	}
 	if len(cfg.Configurations) != 1 || cfg.Configurations[0].Provider != "tax" || cfg.Configurations[0].Scope != "income" || !cfg.Configurations[0].Claims[0].Mandatory {

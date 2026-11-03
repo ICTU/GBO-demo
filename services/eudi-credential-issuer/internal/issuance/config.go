@@ -2,6 +2,7 @@ package issuance
 
 import (
 	"crypto"
+	"crypto/ecdsa"
 	"crypto/x509"
 	"time"
 
@@ -18,7 +19,8 @@ const (
 	// NL credential preview endpoint, no tx_code.
 	KindNL Kind = "nl"
 	// KindEUDI serves wallets that follow HAIP and the ARF: key attestation
-	// is required, no preview endpoint.
+	// is required, no preview endpoint, encrypted requests and responses
+	// are supported.
 	KindEUDI Kind = "eudi"
 )
 
@@ -44,6 +46,10 @@ type Provider struct {
 	// the same subject as the issuer certificate.
 	StatusKey   crypto.Signer
 	StatusChain []*x509.Certificate
+	// RequestEncryptionKey is the P-256 key wallets encrypt their credential
+	// requests to (OpenID4VCI 1.0 section 10); required when a KindEUDI
+	// profile exists, and published only there.
+	RequestEncryptionKey *ecdsa.PrivateKey
 }
 
 // Profile is a set of wallet rules; every provider is published once per

@@ -176,6 +176,11 @@ func TestMaterializeCredentialIssuerRefuses(t *testing.T) {
 				t.Fatal(err)
 			}
 		}, "make provision-wallet-registration SOURCE_ID=belastingdienst"},
+		"a registration from before request encryption": {func(t *testing.T, f *credentialIssuerFixture) {
+			if err := os.Remove(filepath.Join(f.options.secretsDir, "belastingdienst", requestEncryptionKeyFile)); err != nil {
+				t.Fatal(err)
+			}
+		}, requestEncryptionKeyFile},
 		"mounted certificates of another release": {func(t *testing.T, f *credentialIssuerFixture) {
 			dir := filepath.Join(f.options.secretsDir, "belastingdienst")
 			copyTestFile(t, filepath.Join(dir, "reader-cert.der.b64"), filepath.Join(dir, "issuer-cert.der.b64"))
@@ -262,6 +267,14 @@ func assertProviderCertificates(t *testing.T, f credentialIssuerFixture, p issue
 	info, err := os.Stat(filepath.Join(f.options.outputDir, p.Issuer.KeyFile))
 	if err != nil || info.Mode().Perm() != 0o600 {
 		t.Fatalf("issuer key mode %v, %v", info.Mode(), err)
+	}
+	requestKey, err := readECKey(filepath.Join(f.options.outputDir, p.RequestEncryptionKeyFile))
+	provisioned, _ := readECKey(filepath.Join(sourceDir, requestEncryptionKeyFile))
+	if err != nil || provisioned == nil || !requestKey.Equal(provisioned) {
+		t.Fatalf("the request encryption key must be the provisioned one: %v", err)
+	}
+	if info, err := os.Stat(filepath.Join(f.options.outputDir, p.RequestEncryptionKeyFile)); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("request encryption key mode %v, %v", info.Mode(), err)
 	}
 }
 

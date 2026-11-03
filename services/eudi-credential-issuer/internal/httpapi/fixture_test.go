@@ -165,6 +165,7 @@ func newProvider(t *testing.T, name, vct string) (issuance.Provider, testpki.Cer
 		Name: name, AccessKey: access.Key, AccessChain: access.Chain,
 		RegistrationCertificate: testwallet.RegistrationCertificate(t, registrar, "NTRNL-"+name, vct),
 		IssuerKey:               issuerCert.Key, IssuerChain: issuerCert.Chain, StatusKey: statusCert.Key, StatusChain: statusCert.Chain,
+		RequestEncryptionKey: testpki.NewKey(t),
 	}, issuerRoot, accessRoot
 }
 

@@ -143,23 +143,36 @@ func (h *handler) nonce(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) credential(w http.ResponseWriter, r *http.Request) {
-	var req oid4vci.CredentialRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody)).Decode(&req); err != nil {
-		h.fail(w, &issuance.Error{Code: oid4vci.ErrInvalidCredentialRequest, Description: "the body must be a JSON credential request"})
-		return
-	}
-	resp, err := h.svc.Credential(r.Context(), issuance.CredentialCall{
+	call := issuance.CredentialCall{
 		Target:        target(r),
 		Authorization: r.Header.Get("Authorization"),
 		DPoP:          r.Header.Values("DPoP"),
-		Request:       req,
-	})
+	}
+	body := http.MaxBytesReader(w, r.Body, maxBody)
+	// An encrypted request is a JWE served as application/jwt (section 10).
+	if mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mt == "application/jwt" {
+		raw, err := io.ReadAll(body)
+		if err != nil {
+			h.fail(w, &issuance.Error{Code: oid4vci.ErrInvalidCredentialRequest, Description: "the body could not be read"})
+			return
+		}
+		call.Encrypted, call.EncryptedRequest = true, strings.TrimSpace(string(raw))
+	} else if err := json.NewDecoder(body).Decode(&call.Request); err != nil {
+		h.fail(w, &issuance.Error{Code: oid4vci.ErrInvalidCredentialRequest, Description: "the body must be a JSON credential request"})
+		return
+	}
+	res, err := h.svc.Credential(r.Context(), call)
 	if err != nil {
 		h.failResource(w, err, "DPoP")
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, resp)
+	if res.Encrypted != "" {
+		w.Header().Set("Content-Type", "application/jwt")
+		_, _ = io.WriteString(w, res.Encrypted)
+		return
+	}
+	writeJSON(w, http.StatusOK, res.Response)
 }
 
 func (h *handler) preview(w http.ResponseWriter, r *http.Request) {

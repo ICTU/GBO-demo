@@ -222,6 +222,23 @@ func TestProvisionWalletRegistration(t *testing.T) {
 	})
 }
 
+// The source also gets the private P-256 key wallets encrypt their
+// credential requests to.
+func TestProvisionWalletRegistrationRequestKey(t *testing.T) {
+	f := newWalletRegistrationFixture(t)
+	if err := provisionWalletRegistration(f.options, f.source); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(f.options.secretsDir, "belastingdienst", requestEncryptionKeyFile)
+	key, err := readECKey(path)
+	if err != nil || key.Curve != elliptic.P256() {
+		t.Fatalf("key %v, %v", key, err)
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %v, %v", info.Mode(), err)
+	}
+}
+
 func TestProvisionWalletRegistrationAgain(t *testing.T) {
 	f := newWalletRegistrationFixture(t)
 	if err := provisionWalletRegistration(f.options, f.source); err != nil {
@@ -230,6 +247,11 @@ func TestProvisionWalletRegistrationAgain(t *testing.T) {
 	caDir := filepath.Join(f.options.secretsDir, "development-ca")
 	first := f.wrpac(t)
 	signer := readTestRole(t, caDir, "wrprc-signer")
+	requestKeyPath := filepath.Join(f.options.secretsDir, "belastingdienst", requestEncryptionKeyFile)
+	requestKey, err := readECKey(requestKeyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	t.Run("a second run keeps keys, certificates and status index", func(t *testing.T) {
 		if err := provisionWalletRegistration(f.options, f.source); err != nil {
@@ -238,6 +260,9 @@ func TestProvisionWalletRegistrationAgain(t *testing.T) {
 		again := f.wrpac(t)
 		if !again.key.Equal(first.key) || !again.chain[0].Equal(first.chain[0]) {
 			t.Fatal("an unchanged WRPAC must be kept")
+		}
+		if key, err := readECKey(requestKeyPath); err != nil || !key.Equal(requestKey) {
+			t.Fatal("the request encryption key must be kept")
 		}
 		if !readTestRole(t, caDir, "wrprc-signer").chain[0].Equal(signer.chain[0]) {
 			t.Fatal("the WRPRC signer must be kept")

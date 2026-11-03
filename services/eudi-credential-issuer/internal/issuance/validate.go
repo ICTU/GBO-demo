@@ -22,14 +22,14 @@ func validate(cfg Config) error {
 	if len(cfg.Providers) == 0 || len(cfg.Profiles) == 0 || len(cfg.Configurations) == 0 {
 		return errors.New("at least one provider, one profile and one credential configuration are required")
 	}
-	nl := false
+	kinds := map[Kind]bool{}
 	names := map[string]bool{}
 	for _, p := range cfg.Profiles {
 		if !validName(p.Name) || names[p.Name] {
 			return fmt.Errorf("profile name %q must be unique and only lower-case letters, digits and hyphens", p.Name)
 		}
 		names[p.Name] = true
-		nl = nl || p.Kind == KindNL
+		kinds[p.Kind] = true
 		if err := validateProfile(p); err != nil {
 			return fmt.Errorf("profile %q: %w", p.Name, err)
 		}
@@ -47,7 +47,7 @@ func validate(cfg Config) error {
 		if len(vcts[p.Name]) == 0 {
 			return fmt.Errorf("provider %q has no credential configurations", p.Name)
 		}
-		if err := validateProvider(p, nl, vcts[p.Name]); err != nil {
+		if err := validateProvider(p, kinds, vcts[p.Name]); err != nil {
 			return fmt.Errorf("provider %q: %w", p.Name, err)
 		}
 	}
@@ -105,9 +105,10 @@ func validateProcess(cfg Config) error {
 	return nil
 }
 
-// validateProvider checks a provider's signing material and its
-// registration certificate, which a KindNL profile requires.
-func validateProvider(p Provider, nl bool, vcts []string) error {
+// validateProvider checks a provider's signing material, its request
+// encryption key, which a KindEUDI profile requires, and its registration
+// certificate, which a KindNL profile requires.
+func validateProvider(p Provider, kinds map[Kind]bool, vcts []string) error {
 	for name, key := range map[string]crypto.Signer{"access": p.AccessKey, "issuer": p.IssuerKey, "status": p.StatusKey} {
 		if err := checkKey(name, key); err != nil {
 			return err
@@ -121,7 +122,13 @@ func validateProvider(p Provider, nl bool, vcts []string) error {
 	if p.IssuerChain[0].Subject.String() != p.StatusChain[0].Subject.String() {
 		return errors.New("the status list certificate must have the subject of the issuer certificate")
 	}
-	if nl && len(p.RegistrationCertificate) == 0 {
+	if kinds[KindEUDI] && p.RequestEncryptionKey == nil {
+		return errors.New("a request encryption key is required for the eudi profile")
+	}
+	if p.RequestEncryptionKey != nil && p.RequestEncryptionKey.Curve != elliptic.P256() {
+		return errors.New("the request encryption key must be a P-256 key (ECDH-ES)")
+	}
+	if kinds[KindNL] && len(p.RegistrationCertificate) == 0 {
 		return errors.New("the NL Wallet refuses metadata without a registration certificate")
 	}
 	if len(p.RegistrationCertificate) == 0 {

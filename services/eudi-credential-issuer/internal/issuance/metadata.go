@@ -67,6 +67,21 @@ func (s *Service) issuerMetadata(t Target, prov *provider, p Profile) map[string
 		// credentials before it asks for them.
 		md["credential_preview_endpoint"] = id + "/credential_preview"
 	}
+	if p.Kind == KindEUDI {
+		// Supported, not required (section 12.2.4). A wallet that asks for
+		// an encrypted response must encrypt its request (section 8.2).
+		methods := encNames(oid4vci.EncryptionMethods)
+		md["credential_request_encryption"] = map[string]any{
+			"jwks":                 map[string]any{"keys": []jose.JSONWebKey{prov.requestKey.PublicJWK()}},
+			"enc_values_supported": methods,
+			"encryption_required":  false,
+		}
+		md["credential_response_encryption"] = map[string]any{
+			"alg_values_supported": []string{string(oid4vci.EncryptionAlgorithm)},
+			"enc_values_supported": methods,
+			"encryption_required":  false,
+		}
+	}
 	if len(prov.RegistrationCertificate) > 0 {
 		md["issuer_info"] = []map[string]string{{
 			"format": "registration_cert",
@@ -126,6 +141,14 @@ func (s *Service) AuthorizationServerMetadata(t Target) (map[string]any, error) 
 		"dpop_signing_alg_values_supported":                   algNames(dpop.Algorithms),
 		"pre-authorized_grant_anonymous_access_supported":     false,
 	}, nil
+}
+
+func encNames(encs []jose.ContentEncryption) []string {
+	out := make([]string, len(encs))
+	for i, e := range encs {
+		out[i] = string(e)
+	}
+	return out
 }
 
 func algNames(algs []jose.SignatureAlgorithm) []string {

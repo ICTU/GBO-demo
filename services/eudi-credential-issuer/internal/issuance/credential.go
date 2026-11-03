@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -40,60 +41,75 @@ type CredentialCall struct {
 	Authorization string
 	DPoP          []string
 	Request       oid4vci.CredentialRequest
+	// Encrypted tells that the wallet sent the request as a JWE
+	// (application/jwt, section 10), held in EncryptedRequest; Request is
+	// then ignored.
+	Encrypted        bool
+	EncryptedRequest string
+}
+
+// CredentialResult is a credential response: Encrypted holds it as a JWE
+// when the wallet asked for an encrypted response, Response otherwise.
+type CredentialResult struct {
+	Response  oid4vci.CredentialResponse
+	Encrypted string
 }
 
 // Credential issues the credentials of one credential identifier, one per
 // holder key, in the order of the keys (section 8). The keys come from the
 // proofs; for KindEUDI from the key attestation they carry, as HAIP and ARF
 // ISSU_30 require.
-func (s *Service) Credential(ctx context.Context, call CredentialCall) (oid4vci.CredentialResponse, error) {
+func (s *Service) Credential(ctx context.Context, call CredentialCall) (CredentialResult, error) {
 	prov, p, err := s.resolve(call.Target)
 	if err != nil {
-		return oid4vci.CredentialResponse{}, err
+		return CredentialResult{}, err
 	}
 	now := s.now()
 	id := s.Identifier(call.Target)
 
 	token, session, err := s.authorize(ctx, call.Target, call.Authorization, "DPoP")
 	if err != nil {
-		return oid4vci.CredentialResponse{}, err
+		return CredentialResult{}, err
 	}
 	accessToken := strings.TrimSpace(call.Authorization[len("DPoP"):])
 	proof, err := dpop.Verify(call.DPoP, dpop.Expected{Method: "POST", URL: id + "/credential", AccessToken: accessToken}, now)
 	if err != nil {
-		return oid4vci.CredentialResponse{}, refuse(oid4vci.ErrInvalidDPoPProof, err.Error())
+		return CredentialResult{}, refuse(oid4vci.ErrInvalidDPoPProof, err.Error())
 	}
 	if proof.JKT != token.JKT {
-		return oid4vci.CredentialResponse{}, refuse(oid4vci.ErrInvalidDPoPProof, "the DPoP key is not the key the access token is bound to")
+		return CredentialResult{}, refuse(oid4vci.ErrInvalidDPoPProof, "the DPoP key is not the key the access token is bound to")
 	}
 	if ok, err := s.onetime.FirstUse(ctx, kindDPoP, proof.JTI, proof.IAT.Add(dpop.Window), now); err != nil {
-		return oid4vci.CredentialResponse{}, err
+		return CredentialResult{}, err
 	} else if !ok {
-		return oid4vci.CredentialResponse{}, refuse(oid4vci.ErrInvalidDPoPProof, "the DPoP proof has been used before")
+		return CredentialResult{}, refuse(oid4vci.ErrInvalidDPoPProof, "the DPoP proof has been used before")
 	}
 
-	req := call.Request
+	req, encrypter, err := s.openRequest(prov, p, call)
+	if err != nil {
+		return CredentialResult{}, err
+	}
 	if req.CredentialConfigurationID != "" || req.CredentialIdentifier == "" {
-		return oid4vci.CredentialResponse{}, refuse(oid4vci.ErrInvalidCredentialRequest, "ask for a credential_identifier from the token response")
+		return CredentialResult{}, refuse(oid4vci.ErrInvalidCredentialRequest, "ask for a credential_identifier from the token response")
 	}
 	doc, ok := findDocument(session, req.CredentialIdentifier)
 	if !ok {
-		return oid4vci.CredentialResponse{}, refuse(oid4vci.ErrUnknownCredentialID, "unknown credential_identifier")
+		return CredentialResult{}, refuse(oid4vci.ErrUnknownCredentialID, "unknown credential_identifier")
 	}
 	if revoked, err := s.referenceRevoked(ctx, session); err != nil {
-		return oid4vci.CredentialResponse{}, err
+		return CredentialResult{}, err
 	} else if revoked {
-		return oid4vci.CredentialResponse{}, refuse(oid4vci.ErrCredentialRequestDenied, "the offer has been revoked")
+		return CredentialResult{}, refuse(oid4vci.ErrCredentialRequestDenied, "the offer has been revoked")
 	}
 	keys, err := s.holderKeys(ctx, p, id, req.Proofs)
 	if err != nil {
-		return oid4vci.CredentialResponse{}, err
+		return CredentialResult{}, err
 	}
 	// After a configuration change the configuration may belong to another
 	// provider; this provider then no longer offers it.
 	c, ok := s.configs[doc.ConfigurationID]
 	if !ok || c.Provider != prov.Name {
-		return oid4vci.CredentialResponse{}, refuse(oid4vci.ErrUnknownCredentialID, "the credential configuration is no longer offered")
+		return CredentialResult{}, refuse(oid4vci.ErrUnknownCredentialID, "the credential configuration is no longer offered")
 	}
 
 	// The credential is reserved before anything is allocated for it, so a
@@ -102,28 +118,82 @@ func (s *Service) Credential(ctx context.Context, call CredentialCall) (oid4vci.
 	// process dies in between.
 	owner, err := randomToken()
 	if err != nil {
-		return oid4vci.CredentialResponse{}, err
+		return CredentialResult{}, err
 	}
 	if reserved, err := s.sessions.ReserveIssue(ctx, session.ID, doc.CredentialID, owner, now, now.Add(issueReservation)); err != nil {
-		return oid4vci.CredentialResponse{}, err
+		return CredentialResult{}, err
 	} else if !reserved {
-		return oid4vci.CredentialResponse{}, refuse(oid4vci.ErrInvalidCredentialRequest, "this credential has been issued already or is being issued")
+		return CredentialResult{}, refuse(oid4vci.ErrInvalidCredentialRequest, "this credential has been issued already or is being issued")
 	}
-	out, err := s.issue(ctx, prov, c, doc, session.Reference, keys, now)
+	resp, err := s.issue(ctx, prov, c, doc, session.Reference, keys, now)
+	out := CredentialResult{Response: resp}
+	// The wallet's key was checked before issuing, so encrypting fails only
+	// on an internal error; like a failed issue, that leaves the allocated
+	// status entries unused.
+	if err == nil && encrypter != nil {
+		out, err = encryptResult(encrypter, resp)
+	}
 	if err != nil {
 		if rerr := s.sessions.ReleaseIssue(ctx, session.ID, doc.CredentialID, owner); rerr != nil {
-			return oid4vci.CredentialResponse{}, errors.Join(err, rerr)
+			return CredentialResult{}, errors.Join(err, rerr)
 		}
-		return oid4vci.CredentialResponse{}, err
+		return CredentialResult{}, err
 	}
 	// A request that took longer than its reservation may have lost it to
 	// another; then the other issues, and this one returns nothing.
 	if completed, err := s.sessions.CompleteIssue(ctx, session.ID, doc.CredentialID, owner); err != nil {
-		return oid4vci.CredentialResponse{}, err
+		return CredentialResult{}, err
 	} else if !completed {
-		return oid4vci.CredentialResponse{}, refuse(oid4vci.ErrInvalidCredentialRequest, "the reservation for this credential was lost to another request")
+		return CredentialResult{}, refuse(oid4vci.ErrInvalidCredentialRequest, "the reservation for this credential was lost to another request")
 	}
 	return out, nil
+}
+
+// openRequest returns the credential request of a call, decrypted when the
+// wallet encrypted it, and the encrypter for the response when the wallet
+// asked for an encrypted one. Only KindEUDI publishes encryption.
+func (s *Service) openRequest(prov *provider, p Profile, call CredentialCall) (oid4vci.CredentialRequest, jose.Encrypter, error) {
+	req := call.Request
+	encrypted := call.Encrypted
+	if p.Kind != KindEUDI && (encrypted || req.ResponseEncryption != nil) {
+		return req, nil, refuse(oid4vci.ErrInvalidCredentialRequest, "encryption is not supported for this profile")
+	}
+	if encrypted {
+		body, err := oid4vci.DecryptRequest(call.EncryptedRequest, []oid4vci.RequestKey{prov.requestKey})
+		if err != nil {
+			return req, nil, refuse(oid4vci.ErrInvalidCredentialRequest, err.Error())
+		}
+		req = oid4vci.CredentialRequest{}
+		if err := json.Unmarshal(body, &req); err != nil {
+			return req, nil, refuse(oid4vci.ErrInvalidCredentialRequest, "the decrypted request is not a JSON credential request")
+		}
+	}
+	if req.ResponseEncryption == nil {
+		return req, nil, nil
+	}
+	// Section 8.2: otherwise an attacker could substitute the key.
+	if !encrypted {
+		return req, nil, refuse(oid4vci.ErrInvalidEncryptionParameters, "an encrypted response must be asked for in an encrypted request")
+	}
+	e, err := oid4vci.NewResponseEncrypter(*req.ResponseEncryption)
+	if err != nil {
+		return req, nil, refuse(oid4vci.ErrInvalidEncryptionParameters, err.Error())
+	}
+	return req, e, nil
+}
+
+// encryptResult encrypts the credential response (section 10); errors are
+// not encrypted.
+func encryptResult(e jose.Encrypter, resp oid4vci.CredentialResponse) (CredentialResult, error) {
+	body, err := json.Marshal(resp)
+	if err != nil {
+		return CredentialResult{}, err
+	}
+	jwe, err := oid4vci.EncryptResponse(e, body)
+	if err != nil {
+		return CredentialResult{}, err
+	}
+	return CredentialResult{Encrypted: jwe}, nil
 }
 
 // issueReservation is how long a credential stays reserved for the request

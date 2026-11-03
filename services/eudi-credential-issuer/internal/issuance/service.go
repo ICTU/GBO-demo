@@ -9,6 +9,9 @@ import (
 	"encoding/base64"
 	"time"
 
+	"github.com/go-jose/go-jose/v4"
+
+	"gbo-demo/oid4vc-kit/oid4vci"
 	"gbo-demo/oid4vc-kit/sdjwtvc"
 	"gbo-demo/oid4vc-kit/x5c"
 )
@@ -41,7 +44,16 @@ func New(cfg Config, source Source, sessions Sessions, onetime OneTime, status S
 		if err != nil {
 			return nil, err
 		}
-		s.providers[p.Name] = &provider{Provider: p, signer: signer}
+		prov := &provider{Provider: p, signer: signer}
+		if p.RequestEncryptionKey != nil {
+			// The kid is the key's JWK thumbprint, so it changes with the key.
+			kid, err := thumbprint(jose.JSONWebKey{Key: p.RequestEncryptionKey.Public()})
+			if err != nil {
+				return nil, err
+			}
+			prov.requestKey = oid4vci.RequestKey{KeyID: kid, Key: p.RequestEncryptionKey}
+		}
+		s.providers[p.Name] = prov
 	}
 	for _, p := range cfg.Profiles {
 		s.profiles[p.Name] = p
@@ -52,10 +64,12 @@ func New(cfg Config, source Source, sessions Sessions, onetime OneTime, status S
 	return s, nil
 }
 
-// provider is a configured provider with its credential signer.
+// provider is a configured provider with its credential signer and its
+// request encryption key, if any.
 type provider struct {
 	Provider
-	signer *sdjwtvc.Signer
+	signer     *sdjwtvc.Signer
+	requestKey oid4vci.RequestKey
 }
 
 // Target names a credential issuer identifier: a provider under a profile.

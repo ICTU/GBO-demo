@@ -28,7 +28,10 @@ const (
 	ErrInvalidProof             = "invalid_proof"
 	ErrInvalidNonce             = "invalid_nonce"
 	ErrCredentialRequestDenied  = "credential_request_denied"
-	ErrServerError              = "server_error"
+	// ErrInvalidEncryptionParameters: encryption parameters that are
+	// invalid, or missing where encryption is required.
+	ErrInvalidEncryptionParameters = "invalid_encryption_parameters"
+	ErrServerError                 = "server_error"
 )
 
 // CredentialOffer is sent to the wallet by value or by reference
@@ -84,6 +87,8 @@ type CredentialRequest struct {
 	CredentialIdentifier      string  `json:"credential_identifier,omitempty"`
 	CredentialConfigurationID string  `json:"credential_configuration_id,omitempty"`
 	Proofs                    *Proofs `json:"proofs,omitempty"`
+	// ResponseEncryption asks for an encrypted response (section 8.2).
+	ResponseEncryption *ResponseEncryption `json:"credential_response_encryption,omitempty"`
 }
 
 // IssuedCredential is one entry of a credential response.

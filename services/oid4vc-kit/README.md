@@ -8,7 +8,7 @@ Protocol building blocks for services that issue or verify credentials for EUDI 
 | `dpop` | verify DPoP proofs (RFC 9449), including `ath` |
 | `clientattest` | verify a client attestation and its PoP (draft-ietf-oauth-attestation-based-client-auth) |
 | `keyattest` | verify key attestations in JWT format (OpenID4VCI 1.0 Appendix D.1) |
-| `oid4vci` | OpenID4VCI 1.0 messages and `jwt` key proof verification (Appendix F.1) |
+| `oid4vci` | OpenID4VCI 1.0 messages, `jwt` key proof verification (Appendix F.1) and encrypted credential requests and responses (section 10; ECDH-ES, A128GCM/A256GCM) |
 | `sdjwtvc` | issue and parse SD-JWT VC (`dc+sd-jwt`) |
 | `statuslist` | encode, decode and sign Token Status Lists (one bit per entry) |
 | `testpki`, `testwallet` | for tests only: throwaway certificate chains and the messages a wallet and its provider send |

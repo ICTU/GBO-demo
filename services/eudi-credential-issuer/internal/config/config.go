@@ -7,6 +7,7 @@ package config
 import (
 	"bytes"
 	"crypto"
+	"crypto/ecdsa"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
@@ -46,8 +47,11 @@ type ProviderFile struct {
 	Issuer KeyFiles `json:"issuer"`
 	Status KeyFiles `json:"status"`
 	// RegistrationCertificateFile holds the WRPRC as raw bytes.
-	RegistrationCertificateFile string                        `json:"registration_certificate_file"`
-	CredentialConfigurations    []CredentialConfigurationFile `json:"credential_configurations"`
+	RegistrationCertificateFile string `json:"registration_certificate_file"`
+	// RequestEncryptionKeyFile holds the PEM P-256 key wallets encrypt
+	// their credential requests to; required for an eudi profile.
+	RequestEncryptionKeyFile string                        `json:"request_encryption_key_file"`
+	CredentialConfigurations []CredentialConfigurationFile `json:"credential_configurations"`
 }
 
 // CredentialConfigurationFile is issuance.CredentialConfiguration with JSON
@@ -164,6 +168,17 @@ func loadProvider(dir string, pf ProviderFile) (issuance.Provider, error) {
 		}
 		// A file usually ends with a newline; the certificate does not.
 		p.RegistrationCertificate = bytes.TrimSpace(raw)
+	}
+	if pf.RequestEncryptionKeyFile != "" {
+		key, err := readKey(resolve(dir, pf.RequestEncryptionKeyFile))
+		if err != nil {
+			return p, fmt.Errorf("request encryption key: %w", err)
+		}
+		ec, ok := key.(*ecdsa.PrivateKey)
+		if !ok {
+			return p, errors.New("request encryption key: not an EC key")
+		}
+		p.RequestEncryptionKey = ec
 	}
 	return p, nil
 }

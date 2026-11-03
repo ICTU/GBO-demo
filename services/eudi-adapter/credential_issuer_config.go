@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/elliptic"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -97,6 +98,7 @@ type issuerProviderFile struct {
 	Issuer                      issuerKeyFiles            `json:"issuer"`
 	Status                      issuerKeyFiles            `json:"status"`
 	RegistrationCertificateFile string                    `json:"registration_certificate_file"`
+	RequestEncryptionKeyFile    string                    `json:"request_encryption_key_file"`
 	CredentialConfigurations    []issuerConfigurationFile `json:"credential_configurations"`
 }
 
@@ -403,7 +405,7 @@ func credentialIssuerProvider(options credentialIssuerOptions, source onboarding
 	for _, t := range activation.Types {
 		vcts = append(vcts, t.VCT)
 	}
-	if provider.Access, provider.RegistrationCertificateFile, err = copyWalletRegistration(options, source, vcts); err != nil {
+	if err := copyWalletRegistration(options, source, vcts, &provider); err != nil {
 		return provider, err
 	}
 	if provider.Issuer, err = writeLeafAsPEM(options, source.SourceID, "issuer", artifacts.IssuerKeyReference, artifacts.IssuerCertReference); err != nil {
@@ -436,9 +438,10 @@ func credentialIssuerProvider(options credentialIssuerOptions, source onboarding
 	return provider, nil
 }
 
-// copyWalletRegistration copies the WRPAC and WRPRC that make
-// provision-wallet-registration issued for the source.
-func copyWalletRegistration(options credentialIssuerOptions, source onboarding.ReleaseSource, vcts []string) (issuerKeyFiles, string, error) {
+// copyWalletRegistration copies the WRPAC, the WRPRC and the request
+// encryption key that make provision-wallet-registration made for the
+// source, and names them in provider.
+func copyWalletRegistration(options credentialIssuerOptions, source onboarding.ReleaseSource, vcts []string, provider *issuerProviderFile) error {
 	from := filepath.Join(options.secretsDir, source.CertificateSet.ID)
 	// Provisioned name to runtime name; keys stay private.
 	files := []struct {
@@ -448,30 +451,33 @@ func copyWalletRegistration(options credentialIssuerOptions, source onboarding.R
 		{"wrpac-key.pem", "access-key.pem", 0o600},
 		{"wrpac-chain.pem", "access-chain.pem", 0o644},
 		{"wrprc.jwt", "registration-certificate.jwt", 0o644},
+		{requestEncryptionKeyFile, "request-encryption-key.pem", 0o600},
 	}
 	for _, f := range files {
 		if !fileExists(filepath.Join(from, f.from)) {
-			return issuerKeyFiles{}, "", fmt.Errorf("no wallet registration; run make provision-wallet-registration SOURCE_ID=%s first", source.SourceID)
+			return fmt.Errorf("no wallet registration (%s); run make provision-wallet-registration SOURCE_ID=%s", f.from, source.SourceID)
 		}
 	}
 	if err := checkWalletRegistration(from, vcts, options.now()); err != nil {
-		return issuerKeyFiles{}, "", fmt.Errorf("%w; run make provision-wallet-registration SOURCE_ID=%s again", err, source.SourceID)
+		return fmt.Errorf("%w; run make provision-wallet-registration SOURCE_ID=%s again", err, source.SourceID)
 	}
 	dir := filepath.Join(options.outputDir, source.SourceID)
 	if err := ensurePrivateDirectory(dir); err != nil {
-		return issuerKeyFiles{}, "", err
+		return err
 	}
 	for _, f := range files {
 		body, err := os.ReadFile(filepath.Join(from, f.from))
 		if err != nil {
-			return issuerKeyFiles{}, "", err
+			return err
 		}
 		if err := writeFileAtomically(dir, f.to, body, f.mode); err != nil {
-			return issuerKeyFiles{}, "", err
+			return err
 		}
 	}
-	return issuerKeyFiles{KeyFile: source.SourceID + "/access-key.pem", ChainFile: source.SourceID + "/access-chain.pem"},
-		source.SourceID + "/registration-certificate.jwt", nil
+	provider.Access = issuerKeyFiles{KeyFile: source.SourceID + "/access-key.pem", ChainFile: source.SourceID + "/access-chain.pem"}
+	provider.RegistrationCertificateFile = source.SourceID + "/registration-certificate.jwt"
+	provider.RequestEncryptionKeyFile = source.SourceID + "/request-encryption-key.pem"
+	return nil
 }
 
 // checkWalletRegistration refuses a WRPAC or WRPRC the issuer or a wallet
@@ -484,6 +490,9 @@ func checkWalletRegistration(dir string, vcts []string, now time.Time) error {
 	}
 	if !now.Before(wrpac.chain[0].NotAfter) {
 		return errors.New("the access certificate has expired")
+	}
+	if key, err := readECKey(filepath.Join(dir, requestEncryptionKeyFile)); err != nil || key.Curve != elliptic.P256() {
+		return errors.New("the request encryption key is not a P-256 key")
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, "wrprc.jwt"))
 	if err != nil {

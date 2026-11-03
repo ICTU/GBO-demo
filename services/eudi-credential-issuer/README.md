@@ -9,7 +9,7 @@ Each provider is published under two wallet **profiles**, each its own credentia
 | Profile | Identifier (provider `belastingdienst`) | For | Rules |
 |---|---|---|---|
 | `nl` | `<public URL>/belastingdienst/nl` | NL Wallet (contract of nl-wallet v0.6.0) | `jwt` key proofs without key attestation; the NL credential preview endpoint; no `tx_code` |
-| `eudi` | `<public URL>/belastingdienst/eudi` | wallets that follow HAIP and the ARF, such as the EUDI reference wallet | key attestation required (`jwt` proof with `key_attestation`, or the `attestation` proof type) at the configured key storage and user authentication levels (demo: `iso_18045_high`); one credential per attested key |
+| `eudi` | `<public URL>/belastingdienst/eudi` | wallets that follow HAIP and the ARF, such as the EUDI reference wallet | key attestation required (`jwt` proof with `key_attestation`, or the `attestation` proof type) at the configured key storage and user authentication levels (demo: `iso_18045_high`); one credential per attested key; encrypted credential requests and responses supported, not required |
 
 A Wallet Instance Attestation is accepted only from the wallet providers configured for the profile it is presented to. A pre-authorized code or access token works only at the provider and profile of its offer, and a `c_nonce` or attestation challenge only at the provider and profile that handed it out.
 
@@ -24,12 +24,13 @@ A Wallet Instance Attestation is accepted only from the wallet providers configu
 | DPoP-bound access tokens (RFC 9449) | implemented; server DPoP nonces are not used |
 | Nonce endpoint, single-use `c_nonce` (section 7) | implemented |
 | Credential endpoint with `credential_identifier`, batch issuance (section 8) | implemented; one request per credential identifier |
+| Encrypted credential requests and responses (sections 8.2 and 10) | implemented for the `eudi` profile, not required: ECDH-ES on P-256 with A128GCM or A256GCM, no compression. A wallet that asks for an encrypted response must encrypt its request (section 8.2), otherwise `invalid_encryption_parameters`. Each provider has its own request key; its `kid` is the JWK thumbprint, so a wallet holding metadata from before a new key gets `invalid_credential_request` until it fetches the metadata again. Errors are not encrypted. On `nl`, an encrypted request or a `credential_response_encryption` parameter is an `invalid_credential_request` |
 | Key attestation in JWT format (Appendix D.1), `attestation` proof type (Appendix F.3), required levels in `key_attestations_required` (ARF ISSU_27d) | implemented for the `eudi` profile |
 | SD-JWT VC, `dc+sd-jwt` (HAIP section 6.1) | implemented; every attribute selectively disclosable, `iss` omitted |
 | Token Status List, JWT (draft-ietf-oauth-status-list) | implemented; random indices (ARF VCR_17); revocation through the internal API, per entry or per offer reference |
 | NL credential preview endpoint | implemented for `nl`; not part of OpenID4VCI; once per access token |
 | Authorization Code Flow, PAR | not yet; `response_types_supported` is empty |
-| Deferred issuance, notification endpoint, re-issuance with refresh tokens, credential request/response encryption, `tx_code` | not yet |
+| Deferred issuance, notification endpoint, re-issuance with refresh tokens, `tx_code` | not yet |
 | ISO mdoc | not yet |
 | `credential_reuse_policy` (ETSI TS 119 472-3; ARF ISSU_39) | not yet |
 | Wallet provider and key attestation revocation (`client_status`, `status` in the key attestation) | not checked |
@@ -61,7 +62,7 @@ Public port (`ISSUER_LISTEN_ADDR`, default `:8080`), per provider `v` and profil
 | `POST /{v}/{p}/challenge` | `{"attestation_challenge"}` for the attestation PoP |
 | `POST /{v}/{p}/token` | pre-authorized code grant; headers `OAuth-Client-Attestation`, `OAuth-Client-Attestation-PoP`, `DPoP` |
 | `POST /{v}/{p}/nonce` | `{"c_nonce"}` |
-| `POST /{v}/{p}/credential` | `Authorization: DPoP <token>`, `DPoP`; body with `credential_identifier` and `proofs` |
+| `POST /{v}/{p}/credential` | `Authorization: DPoP <token>`, `DPoP`; body with `credential_identifier` and `proofs`, as JSON or, on `eudi`, as a JWE (`application/jwt`); the response is a JWE when the request carries `credential_response_encryption` |
 | `POST /{v}/nl/credential_preview` | `Authorization: Bearer <token>`, no DPoP (as the NL Wallet calls it) |
 | `GET /status/{v}/{list}` | the provider's Status List Token (`application/statuslist+jwt`), signed with its status certificate |
 | `GET /healthz` | health |
@@ -128,6 +129,7 @@ Configuration file (paths relative to the file):
      "issuer": {"key_file": "belastingdienst/issuer-key.pem", "chain_file": "belastingdienst/issuer-chain.pem"},
      "status": {"key_file": "belastingdienst/status-key.pem", "chain_file": "belastingdienst/status-chain.pem"},
      "registration_certificate_file": "belastingdienst/wrprc.jwt",
+     "request_encryption_key_file": "belastingdienst/request-encryption-key.pem",
      "credential_configurations": [
        {"id": "inkomensverklaring", "scope": "inkomensverklaring", "vct": "https://.../types/belastingdienst/inkomensverklaring/v2.4",
         "valid_days": 365, "source_url": "https://eudi-adapter/attestations/belastingdienst/inkomensverklaring",
@@ -149,8 +151,8 @@ Configuration file (paths relative to the file):
 In the demo stack this file is not written by hand: `eudi-adapter
 materialize-credential-issuer` derives it from the active Source Release. Each
 source becomes a provider with its provisioned issuer and status
-certificates, its access certificate and its registration certificate (`make
-provision-wallet-registration`); each activated type becomes a credential
+certificates, its access certificate, its registration certificate and its
+request encryption key (`make provision-wallet-registration`); each activated type becomes a credential
 configuration `<source>-<type>` with the display and claims of the source
 definition (a claim is mandatory unless the source marks it optional), 365
 days of validity and the adapter's `/attestations/<source>/<type>` as
@@ -185,7 +187,7 @@ as they are; the adapter accepts only the parameter sets of the offers the
 source publishes (see the adapter's `/eudi-offers.json`), and a refusal there
 reaches the offer caller as `503 source_unavailable`.
 
-The issuer refuses to start with a configuration a wallet would refuse: no `scope`, `display` or claims, a scope used twice (HAIP section 4.3), an empty claim path, a mandatory claim that is an object (wallets check mandatory claims on leaves), a provider without its own access, issuer and status keys, a provider without credential configurations, a configuration of an unknown provider, a provider without registration certificate when an `nl` profile exists, a registration certificate that is not a JWT, whose `sub` is not the `organizationIdentifier` (2.5.4.97) of the provider's access certificate or that does not list each of the provider's `vct`s in `provides_attestations` (the NL Wallet v0.6 checks the binding to the access certificate, not yet the `vct`s; the issuer does not verify the signature), an `eudi` profile without key levels, provider, profile or status list names that are not unique lower-case letters, digits and hyphens, or the reserved name `status`, a public URL with a path, negative sizes or durations, a signing key that is not P-256, or a chain file with a self-signed certificate (HAIP: no trust anchor in `x5c`). Whitespace around the registration certificate in its file is trimmed. The status certificate must have the subject of the issuer certificate. The NL Wallet also expects the issuer certificate to carry EKU `1.0.18013.5.1.2` and the status certificate EKU `1.3.6.1.5.5.7.3.127`; the issuer does not check its own certificates.
+The issuer refuses to start with a configuration a wallet would refuse: no `scope`, `display` or claims, a scope used twice (HAIP section 4.3), an empty claim path, a mandatory claim that is an object (wallets check mandatory claims on leaves), a provider without its own access, issuer and status keys, a provider without credential configurations, a configuration of an unknown provider, a provider without registration certificate when an `nl` profile exists, a provider without a P-256 request encryption key when an `eudi` profile exists, a registration certificate that is not a JWT, whose `sub` is not the `organizationIdentifier` (2.5.4.97) of the provider's access certificate or that does not list each of the provider's `vct`s in `provides_attestations` (the NL Wallet v0.6 checks the binding to the access certificate, not yet the `vct`s; the issuer does not verify the signature), an `eudi` profile without key levels, provider, profile or status list names that are not unique lower-case letters, digits and hyphens, or the reserved name `status`, a public URL with a path, negative sizes or durations, a signing key that is not P-256, or a chain file with a self-signed certificate (HAIP: no trust anchor in `x5c`). Whitespace around the registration certificate in its file is trimmed. The status certificate must have the subject of the issuer certificate. The NL Wallet also expects the issuer certificate to carry EKU `1.0.18013.5.1.2` and the status certificate EKU `1.3.6.1.5.5.7.3.127`; the issuer does not check its own certificates.
 
 ## Layout
 

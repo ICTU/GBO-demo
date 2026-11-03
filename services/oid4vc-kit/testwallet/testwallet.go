@@ -6,6 +6,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/go-jose/go-jose/v4/jwt"
 
 	"gbo-demo/oid4vc-kit/dpop"
+	"gbo-demo/oid4vc-kit/oid4vci"
 	"gbo-demo/oid4vc-kit/testpki"
 	"gbo-demo/oid4vc-kit/x5c"
 )
@@ -121,6 +123,52 @@ func Sign(t testing.TB, key *ecdsa.PrivateKey, typ string, extra map[jose.Header
 		t.Fatal(err)
 	}
 	return s
+}
+
+// ResponseEncryption returns a wallet key for an encrypted credential
+// response and the credential_response_encryption object that asks for it.
+func ResponseEncryption(t testing.TB, enc string) (*ecdsa.PrivateKey, oid4vci.ResponseEncryption) {
+	t.Helper()
+	key := testpki.NewKey(t)
+	raw, err := json.Marshal(jose.JSONWebKey{Key: &key.PublicKey, KeyID: "wallet-enc", Algorithm: string(oid4vci.EncryptionAlgorithm), Use: "enc"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return key, oid4vci.ResponseEncryption{JWK: raw, Enc: enc}
+}
+
+// EncryptRequest encrypts a credential request body to the issuer's key,
+// as the wallet does (OpenID4VCI 1.0 section 10).
+func EncryptRequest(t testing.TB, body []byte, issuerKey jose.JSONWebKey, enc jose.ContentEncryption, opts *jose.EncrypterOptions) string {
+	t.Helper()
+	e, err := jose.NewEncrypter(enc, jose.Recipient{Algorithm: oid4vci.EncryptionAlgorithm, Key: issuerKey.Key, KeyID: issuerKey.KeyID}, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	obj, err := e.Encrypt(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := obj.CompactSerialize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+// DecryptResponse decrypts an encrypted credential response with the
+// wallet's key and returns its header and body.
+func DecryptResponse(t testing.TB, compact string, key *ecdsa.PrivateKey) (jose.Header, []byte) {
+	t.Helper()
+	obj, err := jose.ParseEncryptedCompact(compact, []jose.KeyAlgorithm{oid4vci.EncryptionAlgorithm}, oid4vci.EncryptionMethods)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := obj.Decrypt(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return obj.Header, body
 }
 
 func random(t testing.TB) string {

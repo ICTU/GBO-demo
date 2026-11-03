@@ -36,6 +36,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   configuration: per source an Attestation Provider with its certificates and
   wallet registration, per activated type a credential configuration, and the
   wallet profiles whose trusted wallet providers are mounted.
+- **Encrypted credential requests and responses in the own credential
+  issuer** (#614): the `eudi` profile publishes `credential_request_encryption`
+  and `credential_response_encryption` (ECDH-ES on P-256, A128GCM or A256GCM,
+  not required), as the EUDI reference wallet for Android requires. A wallet
+  that asks for an encrypted response must encrypt its request. `make
+  provision-wallet-registration` creates each source's request key once; run
+  it again for sources provisioned before.
 - **`eudi-adapter` serves pre-authorized offers** (#614): besides a wallet's
   PID disclosure it accepts `{"subject": {"bsn": ...}}` from a credential
   issuer whose offer caller named the subject. It logs that as a separate

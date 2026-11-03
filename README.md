@@ -101,7 +101,8 @@ trust anchor of its own and is never replaced. Its certificate is copied to
 `.local/public-certificates/development-ca/` for the wallets' trust lists.
 `make provision-wallet-registration SOURCE_ID=<source_id>` then issues the
 WRPAC under the reader root and the WRPRC for the types of the active Source
-Release, and writes the reader-root CRL and the WRPRC status list to
+Release, creates the source's key for encrypted credential requests once
+(`request-encryption-key.pem`, kept on later runs), and writes the reader-root CRL and the WRPRC status list to
 `.local/public-trust/` for the trust host. A container reads the source from
 the Source Registry; the signing runs on the host, so the CA keys never enter
 a container. It needs `EUDI_TRUST_PUBLIC_URL`

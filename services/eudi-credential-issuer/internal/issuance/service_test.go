@@ -104,7 +104,8 @@ func testProvider(t *testing.T, name string, vcts ...string) issuance.Provider {
 	access := testpki.NewRoot(t, name+" access root").Issue(t, testpki.Options{Subject: testpki.OrganizationSubject(name, name, orgID(name))})
 	return issuance.Provider{Name: name, AccessKey: access.Key, AccessChain: access.Chain,
 		RegistrationCertificate: testwallet.RegistrationCertificate(t, registrar(t), orgID(name), vcts...),
-		IssuerKey:               issuer.Key, IssuerChain: issuer.Chain, StatusKey: status.Key, StatusChain: status.Chain}
+		IssuerKey:               issuer.Key, IssuerChain: issuer.Chain, StatusKey: status.Key, StatusChain: status.Chain,
+		RequestEncryptionKey: testpki.NewKey(t)}
 }
 
 // orgID is the organizationIdentifier of a test provider.
@@ -180,12 +181,13 @@ func credential(t *testing.T, e env, tok oid4vci.TokenResponse, dpopKey *ecdsa.P
 func credentialAt(t *testing.T, e env, target issuance.Target, tok oid4vci.TokenResponse, dpopKey *ecdsa.PrivateKey, proofs *oid4vci.Proofs) (oid4vci.CredentialResponse, error) {
 	t.Helper()
 	id := e.svc.Identifier(target)
-	return e.svc.Credential(context.Background(), issuance.CredentialCall{
+	res, err := e.svc.Credential(context.Background(), issuance.CredentialCall{
 		Target:        target,
 		Authorization: "DPoP " + tok.AccessToken,
 		DPoP:          []string{testwallet.DPoP(t, dpopKey, "POST", id+"/credential", tok.AccessToken)},
 		Request:       oid4vci.CredentialRequest{CredentialIdentifier: tok.AuthorizationDetails[0].CredentialIdentifiers[0], Proofs: proofs},
 	})
+	return res.Response, err
 }
 
 func jwtProof(t *testing.T, e env) *oid4vci.Proofs {
@@ -250,18 +252,20 @@ func TestNewRefusesConfigurations(t *testing.T) {
 		"P-5 provider without configurations": func(c *issuance.Config) {
 			c.Providers = append(c.Providers, testProvider(t, "idle"))
 		},
-		"provider name with upper case":     func(c *issuance.Config) { c.Providers[1].Name = "Civil" },
-		"status list name with a slash":     func(c *issuance.Config) { c.Configurations[0].StatusList = "a/b" },
-		"eudi without key levels":           func(c *issuance.Config) { c.Profiles[1].KeyStorage = nil },
-		"P-5 provider without issuer key":   func(c *issuance.Config) { c.Providers[0].IssuerKey = nil },
-		"P-5 provider without access chain": func(c *issuance.Config) { c.Providers[1].AccessChain = nil },
-		"P-5 configuration of no provider":  func(c *issuance.Config) { c.Configurations[1].Provider = "nobody" },
-		"P-5 duplicate provider names":      func(c *issuance.Config) { c.Providers[1].Name = "tax" },
-		"P-5 provider named status":         func(c *issuance.Config) { c.Providers[1].Name = "status" },
-		"duplicate profile names":           func(c *issuance.Config) { c.Profiles[1].Name = "nl" },
-		"negative batch size":               func(c *issuance.Config) { c.BatchSize = -1 },
-		"negative status list size":         func(c *issuance.Config) { c.StatusListSize = -1 },
-		"P-384 issuer key":                  func(c *issuance.Config) { c.Providers[0].IssuerKey = p384 },
+		"provider name with upper case":       func(c *issuance.Config) { c.Providers[1].Name = "Civil" },
+		"status list name with a slash":       func(c *issuance.Config) { c.Configurations[0].StatusList = "a/b" },
+		"eudi without key levels":             func(c *issuance.Config) { c.Profiles[1].KeyStorage = nil },
+		"P-5 provider without issuer key":     func(c *issuance.Config) { c.Providers[0].IssuerKey = nil },
+		"P-5 provider without access chain":   func(c *issuance.Config) { c.Providers[1].AccessChain = nil },
+		"P-5 configuration of no provider":    func(c *issuance.Config) { c.Configurations[1].Provider = "nobody" },
+		"P-5 duplicate provider names":        func(c *issuance.Config) { c.Providers[1].Name = "tax" },
+		"P-5 provider named status":           func(c *issuance.Config) { c.Providers[1].Name = "status" },
+		"duplicate profile names":             func(c *issuance.Config) { c.Profiles[1].Name = "nl" },
+		"negative batch size":                 func(c *issuance.Config) { c.BatchSize = -1 },
+		"negative status list size":           func(c *issuance.Config) { c.StatusListSize = -1 },
+		"P-384 issuer key":                    func(c *issuance.Config) { c.Providers[0].IssuerKey = p384 },
+		"eudi without request encryption key": func(c *issuance.Config) { c.Providers[1].RequestEncryptionKey = nil },
+		"P-384 request encryption key":        func(c *issuance.Config) { c.Providers[0].RequestEncryptionKey = p384 },
 		"self-signed non-CA access cert": func(c *issuance.Config) {
 			c.Providers[0].AccessKey, c.Providers[0].AccessChain = selfSigned.Key, selfSigned.Chain
 		},
