@@ -1,22 +1,69 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import ExternalLink from './ExternalLink'
 import { links } from '../config'
 import { loadWalletUsecases, walletUniversalLink, type WalletUsecase } from '../eudi'
 
-const DVTP_STEPS = [
-  <>HypotheekBV vraagt je inkomensgegevens op voor een hypotheekaanvraag.</>,
-  <>
-    Je beoordeelt dat verzoek als burger in het{' '}
-    <ExternalLink href={links.toestemmingsportaal} describes="het toestemmingsportaal">
-      toestemmingsportaal
-    </ExternalLink>
-    , dat de flow zelf in een nieuw tabblad opent.
-  </>,
-  <>HypotheekBV bevraagt de bron en toont wat er terugkomt.</>,
+/* Twee scenario's over dezelfde DvTP-stroom: een andere afnemer en bron,
+   hetzelfde toestemmingspatroon. Daarom één kaart met een keuze, geen
+   tweede stroom. */
+type DvtpScenario = {
+  key: string
+  label: string
+  desc: string
+  steps: ReactNode[]
+  hint?: string
+  start: { href: string; describes: string; label: string }
+}
+
+const toestemmingsportaal = (
+  <ExternalLink href={links.toestemmingsportaal} describes="het toestemmingsportaal">
+    toestemmingsportaal
+  </ExternalLink>
+)
+
+const DVTP_SCENARIOS: DvtpScenario[] = [
+  {
+    key: 'hypotheek',
+    label: 'Hypotheek (HypotheekBV)',
+    desc: 'Je speelt om de beurt de afnemer die gegevens nodig heeft en de burger die daar toestemming voor geeft. Aan het eind zie je wat de bron vrijgeeft.',
+    steps: [
+      <>HypotheekBV vraagt je inkomensgegevens op voor een hypotheekaanvraag.</>,
+      <>
+        Je beoordeelt dat verzoek als burger in het {toestemmingsportaal}, dat de flow zelf in een
+        nieuw tabblad opent.
+      </>,
+      <>HypotheekBV bevraagt de bron en toont wat er terugkomt.</>,
+    ],
+    start: {
+      href: links.dienstverlener,
+      describes: 'de aanvraagpagina van HypotheekBV',
+      label: 'Start bij HypotheekBV ↗',
+    },
+  },
+  {
+    key: 'installaties',
+    label: 'Installaties (Installatie Register)',
+    desc: 'Een installateur wil de installaties in je pand zien, zoals een warmtepomp. Het Installatie Register geeft pas toegang als de Landelijke Voorziening Gebouwen heeft bevestigd dat jij de eigenaar bent. Je geeft daarom twee keer toestemming.',
+    steps: [
+      <>Als installateur dien je een toestemmingsaanvraag in voor een pand.</>,
+      <>
+        Als eigenaar open je het verzoek, log je in bij het {toestemmingsportaal} en geef je
+        akkoord. Daarna geef je in het Installatie Register de installateur toegang.
+      </>,
+      <>Als installateur bekijk je de installatiegegevens.</>,
+    ],
+    hint: 'Log in met BSN 123456789, eigenaar van Meidoornhof 12. Met BSN 987654321 zie je de uitkomst “geen eigenaar”. Trek je de toestemming later in, dan krijgt de installateur bij de volgende opvraging niets meer.',
+    start: {
+      href: links.installatieRegister,
+      describes: 'het Installatie Register',
+      label: 'Start bij het Installatie Register ↗',
+    },
+  },
 ]
 
 export default function TryItOut() {
+  const [scenario, setScenario] = useState(DVTP_SCENARIOS[0].key)
   const [usecases, setUsecases] = useState<WalletUsecase[]>([])
   const [usecase, setUsecase] = useState<WalletUsecase | null>(null)
   const [offersError, setOffersError] = useState('')
@@ -47,30 +94,48 @@ export default function TryItOut() {
               <span className="tryout-num">01</span>
               <div>
                 <h3 className="tryout-title">Deel gegevens met toestemming</h3>
-                <p className="tryout-meta">DvTP · een paar minuten · alleen een browser nodig</p>
+                <p className="tryout-meta">DvTP · twee scenario’s · alleen een browser nodig</p>
               </div>
             </div>
-            <p className="tryout-desc">
-              Je speelt om de beurt de afnemer die gegevens nodig heeft en de burger die daar
-              toestemming voor geeft. Aan het eind zie je wat de bron vrijgeeft.
-            </p>
-            <ol className="tryout-steps">
-              {DVTP_STEPS.map((step, i) => (
-                <li key={i}>
-                  <span className="tryout-step-num" aria-hidden="true">
-                    {i + 1}
-                  </span>
-                  <span>{step}</span>
-                </li>
+            <div className="tryout-choice" role="group" aria-label="Kies een scenario">
+              {DVTP_SCENARIOS.map((s) => (
+                <button
+                  key={s.key}
+                  type="button"
+                  aria-pressed={s.key === scenario}
+                  onClick={() => setScenario(s.key)}
+                >
+                  {s.label}
+                </button>
               ))}
-            </ol>
-            <ExternalLink
-              href={links.dienstverlener}
-              describes="de aanvraagpagina van HypotheekBV"
-              className="btn-primary"
-            >
-              Start bij HypotheekBV ↗
-            </ExternalLink>
+            </div>
+            {/* Zelfde stapeling als de verklaringen in kaart 02: de kaart
+                wordt zo hoog als het langste scenario. */}
+            <div className="tryout-stack tryout-stack--fill">
+              {DVTP_SCENARIOS.map((s) => (
+                <div
+                  key={s.key}
+                  className="tryout-scenario"
+                  aria-hidden={s.key === scenario ? undefined : true}
+                >
+                  <p className="tryout-desc">{s.desc}</p>
+                  <ol className="tryout-steps">
+                    {s.steps.map((step, i) => (
+                      <li key={i}>
+                        <span className="tryout-step-num" aria-hidden="true">
+                          {i + 1}
+                        </span>
+                        <span>{step}</span>
+                      </li>
+                    ))}
+                  </ol>
+                  {s.hint && <p className="tryout-hint">{s.hint}</p>}
+                  <ExternalLink href={s.start.href} describes={s.start.describes} className="btn-primary">
+                    {s.start.label}
+                  </ExternalLink>
+                </div>
+              ))}
+            </div>
           </article>
 
           <article className="tryout">
