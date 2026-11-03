@@ -1354,6 +1354,7 @@ services:
       # demonstreert, anders wijst de landingspagina naar de localhost van
       # de bezoeker.
       - VITE_DIENSTVERLENER_URL=${DIENSTVERLENER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_DV_MOCK:-9001}}
+      - VITE_INSTALLATIE_REGISTER_URL=${KEYPER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_KEYPER_MOCK:-9004}}
       - VITE_TOESTEMMINGSPORTAAL_URL=${TOESTEMMINGSPORTAAL_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_TOESTEMMINGSPORTAAL:-9002}}
       - VITE_DEVELOPER_PORTAL_URL=${DEVELOPER_PORTAL_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_DEVELOPER_PORTAL:-9003}}
       # De wallet-QR wordt client-side samengesteld, net als in de

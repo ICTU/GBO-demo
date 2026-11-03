@@ -35,6 +35,11 @@ export const links = {
     import.meta.env.VITE_DIENSTVERLENER_URL,
     'http://localhost:9001',
   ),
+  installatieRegister: resolve(
+    rc?.installatieRegisterUrl,
+    import.meta.env.VITE_INSTALLATIE_REGISTER_URL,
+    'http://localhost:9004',
+  ),
   /* De GraphQL-playground (GraphiQL 5 + explorer + Voyager) hangt onder de
      developer-portal en bedient elke bron via een bron-keuze — vandaar geen
      eigen env-var meer, maar het pad achter de portal-URL. */

@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Added
+- **The landing page offers the Installatie Register scenario**: the DvTP
+  card under "Zelf uitproberen" lets the visitor choose between HypotheekBV
+  and the Installatie Register, with its own steps, test BSNs and start
+  button. The start URL comes from `INSTALLATIE_REGISTER_URL` at runtime, or
+  from `KEYPER_PUBLIC_URL` in compose, and falls back to
+  `http://localhost:9004`.
 - **`asi-mapping` builds attributes from a source's answer** (#592, step 4a):
   from the requested attributes and fragments it derives one query with only
   the fields they need, builds each value with `pointer`, `join`, `const` and
