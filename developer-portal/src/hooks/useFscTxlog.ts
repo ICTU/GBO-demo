@@ -4,6 +4,7 @@ import { fetchDecisions, fetchFscTxlog, type FscTxlogResponse } from '../api/dev
 import { viaFsc, type Tab } from '../types'
 import type { NodeStatus } from '../util/spanMapping'
 import { CONSUMERS } from '../util/consumer'
+import { isFscSourcePeer } from '../util/fscSourcePeer'
 
 // Bridge between our adapter-trace and the rest of the FSC chain. Broken
 // traceparent propagation (FSC without OTel + AuthZen-plugin using
@@ -131,7 +132,7 @@ function computeOverrides(
       } else if (peer.peer === 'asip') {
         out['asip-outway'] = 'green'
         out['asip-manager'] = 'green'
-      } else if (peer.peer === 'bd') {
+      } else if (isFscSourcePeer(peer.peer)) {
         out['bd-inway'] = 'green'
       }
     }

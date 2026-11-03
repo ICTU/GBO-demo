@@ -345,7 +345,7 @@ func TestLoadConfigReadsTheASIPPeer(t *testing.T) {
 	t.Fatal("no txlog source asip")
 }
 
-func TestLoadConfigSupportsProviderLogsForBothConsumerPeers(t *testing.T) {
+func TestLoadConfigSupportsProviderLogsForConsumerPeers(t *testing.T) {
 	t.Setenv("FSC_TXLOG_BD_HV_URL", "https://manager.example.test")
 	t.Setenv("FSC_TXLOG_BD_HV_CERT", "/certs/hv/tls.crt")
 	t.Setenv("FSC_TXLOG_BD_HV_KEY", "/certs/hv/tls.key")
@@ -354,19 +354,26 @@ func TestLoadConfigSupportsProviderLogsForBothConsumerPeers(t *testing.T) {
 	t.Setenv("FSC_TXLOG_BD_EDI_CERT", "/certs/edi/tls.crt")
 	t.Setenv("FSC_TXLOG_BD_EDI_KEY", "/certs/edi/tls.key")
 	t.Setenv("FSC_TXLOG_BD_EDI_CA", "/certs/edi/ca.crt")
+	t.Setenv("FSC_TXLOG_BD_ASIP_URL", "https://manager.example.test")
+	t.Setenv("FSC_TXLOG_BD_ASIP_CERT", "/certs/asip/tls.crt")
+	t.Setenv("FSC_TXLOG_BD_ASIP_KEY", "/certs/asip/tls.key")
+	t.Setenv("FSC_TXLOG_BD_ASIP_CA", "/certs/asip/ca.crt")
 
 	cfg := loadConfig()
 	found := map[string]fscTxlogPeer{}
 	for _, peer := range cfg.FscTxlogPeers {
 		found[peer.Name] = peer
 	}
-	for _, name := range []string{"bd-via-hv", "bd-via-edi"} {
+	for _, name := range []string{"bd-via-hv", "bd-via-edi", "bd-via-asip"} {
 		peer, ok := found[name]
 		if !ok {
 			t.Fatalf("missing FSC txlog source %q in %+v", name, cfg.FscTxlogPeers)
 		}
 		if peer.SendGroupID {
 			t.Fatalf("provider Manager source %q must not send group_id", name)
+		}
+		if name == "bd-via-asip" && (peer.Cert != "/certs/asip/tls.crt" || peer.Key != "/certs/asip/tls.key" || peer.CA != "/certs/asip/ca.crt") {
+			t.Fatalf("ASIP provider log source uses the wrong certificate: %+v", peer)
 		}
 	}
 }
