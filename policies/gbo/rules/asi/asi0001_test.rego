@@ -24,6 +24,10 @@ test_allow_the_asip_with_a_bsn if {
 	_reasons(_request(fx.asip, "999991772")) == set()
 }
 
+test_allow_the_simulation_asip_with_a_bsn if {
+	_reasons(_request("0000009969GBOASIP000", "999991772")) == set()
+}
+
 # ── Actor ───────────────────────────────────────────────────────────────
 
 test_deny_other_actors if {
@@ -36,6 +40,11 @@ test_deny_other_actors if {
 
 test_deny_with_a_consent_token if {
 	r := _reasons(_request(fx.asip, "999991772")) with data.gbo.consent.resolved as {"id": "c-1"}
+	r == {"PID_NOT_PRESENT"}
+}
+
+test_simulation_asip_cannot_use_a_consent_token if {
+	r := _reasons(_request("0000009969GBOASIP000", "999991772")) with data.gbo.consent.resolved as {"id": "c-1"}
 	r == {"PID_NOT_PRESENT"}
 }
 

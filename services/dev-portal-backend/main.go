@@ -96,6 +96,7 @@ func loadConfig() config {
 		{Prefix: "BD", Name: "bd", SendGroupID: true},
 		{Prefix: "BD_HV", Name: "bd-via-hv"},
 		{Prefix: "BD_EDI", Name: "bd-via-edi"},
+		{Prefix: "BD_ASIP", Name: "bd-via-asip"},
 	} {
 		url := os.Getenv("FSC_TXLOG_" + source.Prefix + "_URL")
 		if url == "" {
