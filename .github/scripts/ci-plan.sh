@@ -73,6 +73,7 @@ ldv-logboek
 lvg-graphql-server
 oid4vc-kit
 qtsp-reference
+test-pid-source
 SERVICES
 
 # These services use local replace directives. A change to a sibling module
@@ -91,6 +92,11 @@ fi
 
 if matches_any 'services/asi-mapping/*'; then
   go="$(append_unique "${go}" 'eudi-adapter')"
+fi
+
+# The test PID stub's tests read the BRP mock persons.
+if matches_any 'services/brp-graphql-server/mockdata/*'; then
+  go="$(append_unique "${go}" 'test-pid-source')"
 fi
 
 if matches_any 'services/oid4vc-kit/*'; then

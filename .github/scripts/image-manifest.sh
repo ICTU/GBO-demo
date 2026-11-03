@@ -111,11 +111,13 @@ IMAGES
 # Every image the tree can build is either published above or listed here
 # as deliberately unpublished. Without this a new service would be left
 # out of every release, silently and permanently. The own credential issuer
-# is built and tested locally until it replaces eudi-issuance-server (#614).
+# is built and tested locally until it replaces eudi-issuance-server (#614);
+# test-pid-source is its local test fixture.
 while read -r unpublished; do
   covered_paths+=("${unpublished}")
 done <<'UNPUBLISHED'
 services/eudi-credential-issuer
+services/test-pid-source
 UNPUBLISHED
 
 for dockerfile in */Dockerfile services/*/Dockerfile; do
