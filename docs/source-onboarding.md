@@ -395,7 +395,18 @@ publiceren: de attributen die ze aanbiedt voor verificatie via de ASIP (ETSI TS
 119 478). In `1.0` is `asi` niet toegestaan.
 
 De reconciler controleert `asi` met de regels hieronder en neemt het mee in de
-release; de ASIP leest het nog niet.
+release. De ASIP leest de actieve release (standaard elke 5 seconden, zonder
+herstart) en gebruikt de beschrijving voor drie dingen:
+
+- de vraag aan de bron, per verzoek;
+- de naam van de bron in elk verify- en retrieve-antwoord
+  (`authentic_source.legal_name`);
+- de discovery-records: één per attribuut, met het land uit
+  `authentic_source.country`.
+
+Zonder actuele beschrijving, omdat de bron er geen heeft of omdat haar
+metadata verlopen is, antwoordt de ASIP met 503 op verify, retrieve en
+discovery.
 
 - **Een fout in `asi` weigert de hele bron**, ook als `eudi` klopt. Zo werkt een
   foute attestation ook; de actieve release blijft staan.
