@@ -21,7 +21,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -584,8 +583,10 @@ func registrationPayload(source walletRegistrationSource, orgID, trustBase strin
 		"public_body":           true,
 		"iat":                   now.Unix(),
 		// The NL Wallet refuses a WRPRC valid for more than twelve months.
-		"exp":                expires.Unix(),
-		"status":             map[string]any{"idx": strconv.Itoa(idx), "uri": trustBase + "/" + wrprcStatusListPath},
+		"exp": expires.Unix(),
+		// The form of ETSI TS 119 475 Annex C, which both the NL Wallet and the
+		// EUDI wallet read.
+		"status":             map[string]any{"status_list": map[string]any{"idx": idx, "uri": trustBase + "/" + wrprcStatusListPath}},
 		"policy_id":          []string{wrprcPolicyIdentifier},
 		"certificate_policy": trustBase + "/certificate-policy",
 	}

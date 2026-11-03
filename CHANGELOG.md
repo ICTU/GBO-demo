@@ -24,7 +24,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   (WRPAC, organizationIdentifier `NTRNL-<KvK number>`) under the development
   reader root and a registration certificate (WRPRC, entitlement
   `PUB_EAA_Provider`) signed under a separate development registrar root,
-  with the reader-root CRL and the WRPRC status list for a trust host.
+  with the reader-root CRL and the WRPRC status list for a trust host. The
+  WRPRC carries its status as `status.status_list` with a numeric index, the
+  form of ETSI TS 119 475 Annex C that both the NL Wallet and the EUDI
+  reference wallet read.
 - **Own credential issuer in Docker Compose** (#614): opt-in profile
   `credential-issuer` runs the issuer beside `eudi-issuance-server`, with its
   own database in `postgres-eudi`, a materialization job and a static

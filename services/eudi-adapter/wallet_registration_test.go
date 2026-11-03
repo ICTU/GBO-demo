@@ -316,7 +316,7 @@ func TestProvisionWalletRegistrationAgain(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, _, claims := verifiedJWT(t, string(rc), f.caCert(t, registrarRootRole))
-		if claims["status"].(map[string]any)["uri"] != "https://other-trust.example/wrprc/1" {
+		if claims["status"].(map[string]any)["status_list"].(map[string]any)["uri"] != "https://other-trust.example/wrprc/1" {
 			t.Fatalf("status %v", claims["status"])
 		}
 	})
@@ -593,8 +593,8 @@ func assertRegistrationCertificate(t *testing.T, f walletRegistrationFixture, re
 	if claims["entitlements"].([]any)[0] != wrprcPubEAAEntitlement || claims["public_body"] != true {
 		t.Fatalf("entitlements %v, public_body %v", claims["entitlements"], claims["public_body"])
 	}
-	status := claims["status"].(map[string]any)
-	if status["idx"] != "0" || status["uri"] != testTrustURL+"/wrprc/1" {
+	status, _ := claims["status"].(map[string]any)["status_list"].(map[string]any)
+	if status["idx"] != float64(0) || status["uri"] != testTrustURL+"/wrprc/1" {
 		t.Fatalf("status %v", status)
 	}
 	iat, exp := time.Unix(int64(claims["iat"].(float64)), 0), time.Unix(int64(claims["exp"].(float64)), 0)
