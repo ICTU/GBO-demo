@@ -161,7 +161,7 @@ func browse(t *testing.T, u string) (int, string, string) {
 func (w *acfWallet) authorize(requestURI string) string {
 	w.f.t.Helper()
 	status, location, body := browse(w.f.t, w.f.idOf(w.issuer, w.profile)+"/authorize?"+url.Values{"client_id": {w.clientID}, "request_uri": {requestURI}}.Encode())
-	if status != http.StatusFound || !strings.HasPrefix(location, loginServer) {
+	if status != http.StatusFound || !strings.HasPrefix(location, w.f.loginBase) {
 		w.f.t.Fatalf("authorize: %d %q %s", status, location, body)
 	}
 	return location

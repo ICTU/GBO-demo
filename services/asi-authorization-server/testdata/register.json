@@ -2,15 +2,53 @@
   "entries": [
     {
       "registryURI": "https://register.gbo.example/wrp/test-qtsp",
-      "identifiers": ["NTRNL-90000001"],
+      "identifiers": [
+        "NTRNL-90000001"
+      ],
       "legalName": "GBO demo test QTSP",
-      "entitlements": ["https://uri.etsi.org/19475/Entitlement/QEAA_Provider"]
+      "entitlements": [
+        "https://uri.etsi.org/19475/Entitlement/QEAA_Provider"
+      ]
     },
     {
       "registryURI": "https://register.gbo.example/wrp/test-service-provider",
-      "identifiers": ["NTRNL-90000002"],
+      "identifiers": [
+        "NTRNL-90000002"
+      ],
       "legalName": "GBO demo test service provider",
-      "entitlements": ["https://uri.etsi.org/19475/Entitlement/Service_Provider"]
+      "entitlements": [
+        "https://uri.etsi.org/19475/Entitlement/Service_Provider"
+      ]
+    },
+    {
+      "registryURI": "https://register.gbo.example/wrp/belastingdienst",
+      "identifiers": [
+        "NTRNL-99990200"
+      ],
+      "legalName": "Belastingdienst",
+      "entitlements": [
+        "https://uri.etsi.org/19475/Entitlement/PUB_EAA_Provider"
+      ]
+    },
+    {
+      "registryURI": "https://register.gbo.example/wrp/rvig",
+      "identifiers": [
+        "NTRNL-99990300"
+      ],
+      "legalName": "RvIG",
+      "entitlements": [
+        "https://uri.etsi.org/19475/Entitlement/PUB_EAA_Provider"
+      ]
+    },
+    {
+      "registryURI": "https://register.gbo.example/wrp/demo-unsecured",
+      "identifiers": [
+        "NTRNL-99990900"
+      ],
+      "legalName": "Demo unsecured source",
+      "entitlements": [
+        "https://uri.etsi.org/19475/Entitlement/PUB_EAA_Provider"
+      ]
     }
   ]
 }

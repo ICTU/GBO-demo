@@ -85,9 +85,8 @@ func (h *handler) callback(w http.ResponseWriter, r *http.Request) {
 		h.authorizationFailed(w, err)
 		return
 	}
-	if ret.Page != issuance.ReturnRedirect {
-		h.log.Info("login ended without a code", "page", ret.Page)
-	}
+	// Neither the code nor the BSN is logged: only how the login ended.
+	h.log.Info("login returned", "error", description(q.Get("error")), "page", ret.Page, "code_for_wallet", ret.Page == issuance.ReturnRedirect && q.Get("error") == "")
 	h.walletReturn(w, r, ret)
 }
 

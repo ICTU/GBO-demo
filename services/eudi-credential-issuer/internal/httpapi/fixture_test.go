@@ -72,8 +72,10 @@ type fixture struct {
 	pidStatusDown bool
 	// logs holds what the issuer logged.
 	logs *syncBuffer
-	// login stands in for GBO's authorization server.
-	login *fakeLogin
+	// login stands in for GBO's authorization server; loginBase is where
+	// the issuer sends the browser to log in.
+	login     *fakeLogin
+	loginBase string
 }
 
 // syncBuffer is a bytes.Buffer safe for the concurrent writes of handlers.
@@ -115,7 +117,14 @@ func (c *clock) Advance(d time.Duration) {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	f := &fixture{t: t, clock: &clock{}, sourceStatus: http.StatusOK, logs: &syncBuffer{}, login: newFakeLogin()}
+	return newFixtureWith(t, nil)
+}
+
+// newFixtureWith lets configure change the configuration once the servers
+// run, before the service starts.
+func newFixtureWith(t *testing.T, configure func(f *fixture, cfg *issuance.Config)) *fixture {
+	t.Helper()
+	f := &fixture{t: t, clock: &clock{}, sourceStatus: http.StatusOK, logs: &syncBuffer{}, login: newFakeLogin(), loginBase: loginServer}
 	f.sourceDocs = []map[string]any{{
 		"id": "doc-1", "format": "dc+sd-jwt", "attestation_type": incomeVCT,
 		"attributes": map[string]any{"year": "2025", "income": 41000, "address": map[string]any{"city": "Utrecht"}},
@@ -184,6 +193,9 @@ func newFixture(t *testing.T) *fixture {
 		FetchPIDStatus: f.fetchPIDStatus,
 		DisclosureTTL:  disclosureTTL,
 		Login:          f.login,
+	}
+	if configure != nil {
+		configure(f, &cfg)
 	}
 	store := memstore.New()
 	svc, err := issuance.New(cfg, &source.Client{HTTP: src.Client(), Endpoints: map[string]string{

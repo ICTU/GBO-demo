@@ -114,6 +114,8 @@ On the `eudi` profile the citizen can identify by logging in instead of disclosi
 
 Each provider registers itself with GBO's authorization server on its first login, with a software statement signed with its access certificate and its entry `ISSUER_LOGIN_REGISTER_BASE/<provider>` in the register (entitlement `PUB_EAA_Provider`). That server keeps clients in memory and makes a new signing key when it starts: when its keys changed, or a token request gets `invalid_client`, the provider registers again. The issuer logs neither the BSN nor the token.
 
+In the demo stack (`docker-compose.yml`) the flow is on: `ISSUER_LOGIN_SERVER` is the authorization server's public address (`ASI_AUTHORIZATION_SERVER_PUBLIC_URL`, default `http://localhost:9425`; set `ISSUER_LOGIN_SERVER=` to turn it off), and the authorization server lists the issuance resources of the demo sources (`ASI_ISSUANCE_RESOURCES`), whose register entries are in its `testdata/register.json`. Start it with `make demo-asi`. The wallet's browser must reach that address: on the iOS simulator `localhost` works, on the Android emulator `adb reverse tcp:9425 tcp:9425`; a phone needs a public address for the authorization server, like the issuer's tunnel hostname. The issuer logs how each login returned (`login returned`: the error, if any, and whether the wallet got a code), never the code or the BSN.
+
 ## Bronpoort
 
 For each credential configuration the issuer posts to its `source_url`, with the offer parameters in the query. Which URL serves which configuration is configuration of the source adapter; the core only names the configuration. The body is the subject the offer caller named:
