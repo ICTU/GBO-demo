@@ -170,10 +170,65 @@ func (s *Service) DisclosureResponse(ctx context.Context, t Target, sessionID st
 	offer, err := s.createOffer(ctx, t, p, o.ConfigurationIDs, "", s.cfg.DisclosureTTL, func(id string) ([]SourceDocument, error) {
 		return s.source.FetchDisclosed(ctx, id, pid, o.Parameters)
 	})
+	if errors.Is(err, ErrNoData) && p.Kind == KindEUDI {
+		return "", &NoDataError{Page: s.noDataPage(t, o.Key)}
+	}
 	if err != nil {
 		return "", err
 	}
 	return offer.Links["openid-credential-offer"], nil
+}
+
+// NoDataError refuses a disclosure on a KindEUDI profile whose source has
+// no data. The EUDI wallets show a refusal as a generic error, so the
+// wallet is sent to Page, which says so; the NL Wallet has its own screen
+// for no_issuable_attestations.
+type NoDataError struct {
+	Page string
+}
+
+func (e *NoDataError) Error() string { return ErrNoData.Error() }
+
+func (e *NoDataError) Unwrap() error { return ErrNoData }
+
+// noDataPage is the page a wallet is sent to after a disclosure the source
+// has no data for. It names the offer only, not the citizen.
+func (s *Service) noDataPage(t Target, offerKey string) string {
+	return s.Identifier(t) + "/vp/" + offerKey + "/no-data"
+}
+
+// NoData is what the no-data page of an offer shows: the organization of
+// the provider and the name of the attestation.
+type NoData struct {
+	Organization string
+	Attestation  string
+}
+
+// NoDataPage describes the no-data page of an offer on a KindEUDI
+// profile, or returns ErrUnknownOffer.
+func (s *Service) NoDataPage(t Target, offerKey string) (NoData, error) {
+	prov, p, err := s.resolve(t)
+	if err != nil {
+		return NoData{}, err
+	}
+	o, ok := s.disclosureOffers[t.Provider+"/"+offerKey]
+	if !ok || p.Kind != KindEUDI {
+		return NoData{}, ErrUnknownOffer
+	}
+	return NoData{Organization: issuerName(prov.AccessChain[0]), Attestation: displayName(s.configs[o.ConfigurationIDs[0]].Display)}, nil
+}
+
+// displayName prefers the Dutch name of a credential.
+func displayName(display []Display) string {
+	for _, d := range display {
+		if d.Locale == "nl" {
+			return d.Name
+		}
+	}
+	if len(display) > 0 {
+		return display[0].Name
+	}
+	return ""
 }
 
 // claimTime reads a NumericDate claim; zero when it is absent.

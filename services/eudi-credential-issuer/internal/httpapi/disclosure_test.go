@@ -286,9 +286,11 @@ func TestDisclosureRefusals(t *testing.T) {
 			t.Errorf("%s: %d %v, want %d %s", name, status, body, wantStatus, wantError)
 		}
 	}
+	// R2: the NL Wallet shows no_issuable_attestations as "nothing to add";
+	// the eudi profile redirects to a page instead (TestDisclosureNoDataPage).
 	t.Run("D4 no data", func(t *testing.T) {
 		f := newFixture(t)
-		for _, profile := range []string{"nl", "eudi"} {
+		for _, profile := range []string{"nl"} {
 			f.setSource(http.StatusNotFound, nil)
 			status, body := f.disclose(t, profile, "bsn")
 			expect(t, profile+" 404", status, body, http.StatusNotFound, "no_issuable_attestations")
@@ -409,4 +411,70 @@ func TestDisclosureOffers(t *testing.T) {
 			t.Errorf("%s: link %s", profile, l.Link)
 		}
 	}
+}
+
+// R1 and R3 to R5: the EUDI wallets show a refusal as a generic error,
+// so the eudi profile sends the citizen to a page that says the source has
+// no data.
+func TestDisclosureNoDataPage(t *testing.T) {
+	page := func(f *fixture) string { return f.id("eudi") + "/vp/" + incomeOffer + "/no-data" }
+	t.Run("R1 eudi redirects to the page", func(t *testing.T) {
+		f := newFixture(t)
+		for name, docs := range map[string][]map[string]any{"404": nil, "empty list": {}} {
+			if docs == nil {
+				f.setSource(http.StatusNotFound, nil)
+			} else {
+				f.setSource(http.StatusOK, docs)
+			}
+			_, r := f.fetchRequest(t, "tax", "eudi", incomeOffer)
+			form := f.presentation(t, r, f.pidIssuer, "bsn")
+			status, body := f.respond(t, r, form)
+			if status != http.StatusOK || body["redirect_uri"] != page(f) || len(body) != 1 {
+				t.Errorf("%s: %d %v, want 200 with redirect_uri %s", name, status, body, page(f))
+			}
+			if status, body := f.respond(t, r, form); status != http.StatusBadRequest || body["error"] != "invalid_request" {
+				t.Errorf("%s: second response %d %v, want the session ended", name, status, body)
+			}
+		}
+	})
+	t.Run("R3 the page", func(t *testing.T) {
+		f := newFixture(t)
+		status, body, header := get(t, page(f), "")
+		if status != http.StatusOK || !strings.HasPrefix(header.Get("Content-Type"), "text/html") || header.Get("Cache-Control") != "no-store" {
+			t.Fatalf("page: %d %v", status, header)
+		}
+		for _, text := range []string{"Geen gegevens gevonden", "tax", "Income statement", "Er is niets aan uw wallet toegevoegd"} {
+			if !strings.Contains(body, text) {
+				t.Errorf("page does not contain %q", text)
+			}
+		}
+		if strings.Contains(body, pidBSN) {
+			t.Error("the page must not show the BSN")
+		}
+	})
+	t.Run("R4 no page for an unknown offer", func(t *testing.T) {
+		f := newFixture(t)
+		for name, url := range map[string]string{
+			"unknown offer":           f.id("eudi") + "/vp/other/no-data",
+			"unknown provider":        f.idOf("nope", "eudi") + "/vp/" + incomeOffer + "/no-data",
+			"unknown profile":         f.idOf("tax", "nope") + "/vp/" + incomeOffer + "/no-data",
+			"nl profile":              f.id("nl") + "/vp/" + incomeOffer + "/no-data",
+			"offer of other provider": f.idOf("civil", "eudi") + "/vp/" + incomeOffer + "/no-data",
+		} {
+			if status, _, _ := get(t, url, ""); status != http.StatusNotFound {
+				t.Errorf("%s: %d, want 404", name, status)
+			}
+		}
+	})
+	t.Run("R5 other failures stay a server error", func(t *testing.T) {
+		f := newFixture(t)
+		f.setSource(http.StatusBadGateway, nil)
+		if status, body := f.disclose(t, "eudi", "bsn"); status != http.StatusInternalServerError || body["error"] != "server_error" {
+			t.Errorf("unavailable: %d %v", status, body)
+		}
+		f.setSource(http.StatusOK, []map[string]any{{"format": "dc+sd-jwt", "attestation_type": "other", "attributes": map[string]any{"year": "2025"}}})
+		if status, body := f.disclose(t, "eudi", "bsn"); status != http.StatusInternalServerError || body["error"] != "server_error" {
+			t.Errorf("unusable data: %d %v", status, body)
+		}
+	})
 }

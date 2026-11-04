@@ -86,6 +86,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   sources provisioned before, and `make provision-test-pid` too. The materializer writes a disclosure offer per
   source offer and the trusted PID issuers: the NL pre-production CA and the
   test PID.
+- **The own issuer explains a source without data to EUDI wallets** (#614):
+  after a disclosure on the `eudi` profile for which the source has no data,
+  the issuer answers with a `redirect_uri` to its page
+  `…/vp/<offer>/no-data` ("Geen gegevens gevonden"), which names the
+  organization and the attestation. The EUDI reference wallets showed the
+  refusal as a generic error ("Houston we have a problem!" with "Try again"
+  on iOS). The NL Wallet keeps `no_issuable_attestations`.
 - **Test PID for the own credential issuer** (#614): `make
   provision-test-pid` adds a test PID provider (`urn:eudi:pid:nl:1`) under a
   development root of its own, registered with the `PID_Provider`

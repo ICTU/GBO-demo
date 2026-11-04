@@ -6,6 +6,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"html/template"
 	"io"
 	"log/slog"
 	"mime"
@@ -40,6 +41,7 @@ func Public(svc *issuance.Service, log *slog.Logger) http.Handler {
 	// Disclosure-based issuance: the wallet fetches the OpenID4VP request
 	// of an offer by reference and posts its response (direct_post.jwt).
 	mux.HandleFunc("GET /{provider}/{profile}/vp/{offer}/request", h.disclosureRequest)
+	mux.HandleFunc("GET /{provider}/{profile}/vp/{offer}/no-data", h.noDataPage)
 	mux.HandleFunc("POST /{provider}/{profile}"+issuance.DisclosureResponsePath+"{session}", h.disclosureResponse)
 	mux.HandleFunc("GET /disclosure-offers", h.disclosureOffers)
 	return mux
@@ -367,9 +369,9 @@ func (h *handler) disclosureOffers(w http.ResponseWriter, _ *http.Request) {
 }
 
 // disclosureResponse answers the wallet's direct_post.jwt: the
-// redirect_uri with the Credential Offer, {} after a wallet error, or an
-// error object the wallet shows (no_issuable_attestations as the NL
-// Wallet expects it).
+// redirect_uri with the Credential Offer, {} after a wallet error, the
+// redirect_uri of the no-data page on the eudi profile, or an error object
+// the wallet shows (no_issuable_attestations as the NL Wallet expects it).
 func (h *handler) disclosureResponse(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
 	if err := r.ParseForm(); err != nil {
@@ -380,6 +382,7 @@ func (h *handler) disclosureResponse(w http.ResponseWriter, r *http.Request) {
 	redirect, err := h.svc.DisclosureResponse(r.Context(), target(r), r.PathValue("session"), form)
 	w.Header().Set("Cache-Control", "no-store")
 	var pe *issuance.Error
+	var noData *issuance.NoDataError
 	switch {
 	case err == nil && redirect == "":
 		h.log.Info("disclosure ended by the wallet", "error", description(form.Error))
@@ -389,6 +392,9 @@ func (h *handler) disclosureResponse(w http.ResponseWriter, r *http.Request) {
 	case errors.As(err, &pe):
 		h.log.Info("disclosure refused", "error", pe.Code, "error_description", pe.Description)
 		writeJSON(w, http.StatusBadRequest, oid4vci.ErrorResponse{Error: pe.Code, Description: description(pe.Description)})
+	case errors.As(err, &noData):
+		h.log.Info("disclosure refused", "error", "no_data", "page", noData.Page)
+		writeJSON(w, http.StatusOK, map[string]string{"redirect_uri": noData.Page})
 	case errors.Is(err, issuance.ErrNoData):
 		h.log.Info("disclosure refused", "error", errNoIssuableAttestations)
 		writeJSON(w, http.StatusNotFound, oid4vci.ErrorResponse{Error: errNoIssuableAttestations})
@@ -402,6 +408,44 @@ func (h *handler) disclosureResponse(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, oid4vci.ErrorResponse{Error: oid4vci.ErrServerError})
 	}
 }
+
+// noDataPage tells the citizen, in the browser an EUDI wallet opens, that
+// the source has no data for them. It shows no personal data: the URL
+// names the offer only.
+func (h *handler) noDataPage(w http.ResponseWriter, r *http.Request) {
+	page, err := h.svc.NoDataPage(target(r), r.PathValue("offer"))
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	if err := noDataTemplate.Execute(w, page); err != nil {
+		h.log.Error("no-data page failed", "error", err)
+	}
+}
+
+var noDataTemplate = template.Must(template.New("no-data").Parse(`<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Geen gegevens gevonden</title>
+<style>
+body { font-family: system-ui, sans-serif; margin: 0; padding: 2rem 1rem; background: #f5f7fa; color: #1a1a1a; }
+main { max-width: 32rem; margin: 0 auto; background: #fff; border-radius: 8px; padding: 1.5rem; }
+h1 { font-size: 1.4rem; margin-top: 0; }
+</style>
+</head>
+<body>
+<main>
+<h1>Geen gegevens gevonden</h1>
+<p>{{.Organization}} heeft geen gegevens voor u voor: <strong>{{.Attestation}}</strong>.</p>
+<p>Er is niets aan uw wallet toegevoegd. U kunt dit venster sluiten.</p>
+</main>
+</body>
+</html>
+`))
 
 // errNoIssuableAttestations is the error the NL Wallet reads as "nothing
 // to issue" after a disclosure.

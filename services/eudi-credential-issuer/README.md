@@ -95,7 +95,8 @@ The response is checked with `oid4vc-kit/oid4vp`: the PID must chain to `pid_tru
 | offer made | `200 {"redirect_uri": "openid-credential-offer://?credential_offer=…"}`: one use, the disclosure lifetime, no `tx_code` |
 | the wallet declined (`error`) | `200 {}`; the session has ended and the source is not called |
 | unknown, expired or used session; a response the verifier refuses | `400 invalid_request` |
-| the source has no data | `404 no_issuable_attestations`, which the NL Wallet shows as "nothing to add" |
+| the source has no data, on `nl` | `404 no_issuable_attestations`, which the NL Wallet shows as "nothing to add" |
+| the source has no data, on `eudi` | `200 {"redirect_uri": "<issuer>/vp/<offer>/no-data"}`: the EUDI wallets show any refusal as a generic error, so the wallet opens a page in the browser that names the organization (O of the access certificate) and the attestation, and says nothing was added. The page shows no personal data |
 | the source or the PID status list is unreachable, or the source data cannot be issued | `500 server_error`; scanning again may work |
 
 ## Bronpoort
