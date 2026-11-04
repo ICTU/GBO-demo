@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/url"
 	"slices"
+	"strings"
 	"time"
 
 	"gbo-demo/oid4vc-kit/dpop"
@@ -159,17 +160,73 @@ func (s *Service) PushAuthorization(ctx context.Context, req PushedAuthorization
 	return PushedAuthorizationResponse{RequestURI: RequestURIPrefix + token, ExpiresIn: int64(PushedRequestLifetime.Seconds())}, nil
 }
 
+// ErrInvalidScope refuses a wallet-initiated request whose credential type
+// names no single offer of this issuer (RFC 6749 section 4.1.2.1).
+const ErrInvalidScope = "invalid_scope"
+
 // requestedOffer returns the source offer a pushed request is for: the one
-// its issuer_state names.
+// its issuer_state names (F4), or, when the wallet started at the issuer
+// (F5), the only offer of the one credential configuration its scope or
+// authorization_details name (HAIP 1.0 section 4.3).
 func (s *Service) requestedOffer(t Target, req PushedAuthorizationRequest) (DisclosureOffer, error) {
-	if req.IssuerState == "" {
-		return DisclosureOffer{}, refuse(oid4vci.ErrInvalidRequest, "issuer_state is required")
+	if req.IssuerState != "" {
+		o, ok := s.disclosureOffers[t.Provider+"/"+req.IssuerState]
+		if !ok {
+			return DisclosureOffer{}, refuse(oid4vci.ErrInvalidRequest, "issuer_state names no offer of this issuer")
+		}
+		return o, nil
 	}
-	o, ok := s.disclosureOffers[t.Provider+"/"+req.IssuerState]
-	if !ok {
-		return DisclosureOffer{}, refuse(oid4vci.ErrInvalidRequest, "issuer_state names no offer of this issuer")
+	id, err := s.requestedConfiguration(t, req)
+	if err != nil {
+		return DisclosureOffer{}, err
 	}
-	return o, nil
+	var found []DisclosureOffer
+	for _, o := range s.disclosureOffers {
+		if o.Provider == t.Provider && len(o.ConfigurationIDs) == 1 && o.ConfigurationIDs[0] == id {
+			found = append(found, o)
+		}
+	}
+	if len(found) != 1 {
+		return DisclosureOffer{}, refuse(ErrInvalidScope, "the credential type does not name a single offer of this issuer; start from its credential offer")
+	}
+	return found[0], nil
+}
+
+// requestedConfiguration returns the one credential configuration of this
+// provider that scope, or else authorization_details, names.
+func (s *Service) requestedConfiguration(t Target, req PushedAuthorizationRequest) (string, error) {
+	var ids []string
+	switch {
+	case req.Scope != "":
+		for _, sc := range strings.Fields(req.Scope) {
+			found := ""
+			for _, c := range s.cfg.Configurations {
+				if c.Provider == t.Provider && c.Scope == sc {
+					found = c.ID
+				}
+			}
+			if found == "" {
+				return "", refuse(ErrInvalidScope, "scope "+sc+" is not a credential type of this issuer")
+			}
+			ids = append(ids, found)
+		}
+	case req.AuthorizationDetails != "":
+		var details []oid4vci.AuthorizationDetail
+		if err := json.Unmarshal([]byte(req.AuthorizationDetails), &details); err != nil {
+			return "", refuse(ErrInvalidScope, "authorization_details is not a JSON array")
+		}
+		for _, d := range details {
+			c, ok := s.configs[d.CredentialConfigurationID]
+			if d.Type != oid4vci.AuthorizationDetailsType || !ok || c.Provider != t.Provider {
+				return "", refuse(ErrInvalidScope, "authorization_details names no credential type of this issuer")
+			}
+			ids = append(ids, c.ID)
+		}
+	}
+	if len(uniq(ids)) != 1 {
+		return "", refuse(ErrInvalidScope, "the request must name exactly one credential type")
+	}
+	return ids[0], nil
 }
 
 // Authorize handles the authorization request the wallet opens in the

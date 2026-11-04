@@ -624,3 +624,77 @@ func TestTheBSNIsNotLogged(t *testing.T) { // C11
 		t.Fatalf("the log holds the BSN:\n%s", f.logs.String())
 	}
 }
+
+// --- W1-W3: wallet-initiated (F5) ------------------------------------------------------
+
+// The wallet starts at the issuer itself: no issuer_state, the credential
+// type in scope or authorization_details (HAIP 1.0 section 4.3).
+func TestWalletInitiatedRequests(t *testing.T) { // W1, W2, W3
+	f := newFixture(t)
+	w := f.acfWallet()
+	walletInitiated := func(edit func(url.Values)) (int, map[string]any) {
+		form := w.parForm()
+		form.Del("issuer_state")
+		edit(form)
+		return w.par(form, nil)
+	}
+	t.Run("W1: scope of a configuration with one offer", func(t *testing.T) {
+		status, body := walletInitiated(func(q url.Values) { q.Set("scope", "income") })
+		if status != http.StatusCreated {
+			t.Fatalf("PAR = %d %v", status, body)
+		}
+		_, location, _ := w.login(w.authorize(body["request_uri"].(string)))
+		u, _ := url.Parse(location)
+		status, tok := w.tokenForCode(u.Query().Get("code"), nil, nil)
+		if status != http.StatusOK {
+			t.Fatalf("token = %d %v", status, tok)
+		}
+		if f.lastSourceCall().Get("jaar") != "2025" {
+			t.Errorf("source parameters = %v, want the offer's jaar 2025", f.lastSourceCall())
+		}
+	})
+	t.Run("W2: authorization_details instead of scope", func(t *testing.T) {
+		details := `[{"type":"openid_credential","credential_configuration_id":"` + incomeConfig + `"}]`
+		status, body := walletInitiated(func(q url.Values) { q.Del("scope"); q.Set("authorization_details", details) })
+		if status != http.StatusCreated {
+			t.Fatalf("PAR = %d %v", status, body)
+		}
+	})
+	for name, edit := range map[string]func(url.Values){
+		"W3: unknown scope":             func(q url.Values) { q.Set("scope", "nope") },
+		"W3: scope of another provider": func(q url.Values) { q.Set("scope", "death") },
+		"W3: no scope and no details":   func(q url.Values) { q.Del("scope") },
+		"W3: two credential types":      func(q url.Values) { q.Set("scope", "income death") },
+		"W3: details of an unknown type": func(q url.Values) {
+			q.Del("scope")
+			q.Set("authorization_details", `[{"type":"openid_credential","credential_configuration_id":"nope"}]`)
+		},
+		"W3: details that are not JSON": func(q url.Values) { q.Del("scope"); q.Set("authorization_details", `{`) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			if status, body := walletInitiated(edit); status != http.StatusBadRequest || body["error"] != "invalid_scope" {
+				t.Fatalf("PAR = %d %v, want invalid_scope", status, body)
+			}
+		})
+	}
+}
+
+// A configuration with more than one offer (for example one per tax year)
+// does not say which offer the wallet wants.
+func TestWalletInitiatedRequestForAnAmbiguousConfiguration(t *testing.T) { // W3
+	f := newFixtureWith(t, func(_ *fixture, cfg *issuance.Config) {
+		cfg.DisclosureOffers = append(cfg.DisclosureOffers, issuance.DisclosureOffer{
+			Key: "inkomensverklaring_2024", Provider: "tax", ConfigurationIDs: []string{incomeConfig}, Parameters: map[string]string{"jaar": "2024"},
+		})
+	})
+	w := f.acfWallet()
+	form := w.parForm()
+	form.Del("issuer_state")
+	if status, body := w.par(form, nil); status != http.StatusBadRequest || body["error"] != "invalid_scope" {
+		t.Fatalf("PAR = %d %v, want invalid_scope", status, body)
+	}
+	// With issuer_state the offer is named, and F4 still works.
+	if status, body := w.par(w.parForm(), nil); status != http.StatusCreated {
+		t.Fatalf("PAR with issuer_state = %d %v", status, body)
+	}
+}

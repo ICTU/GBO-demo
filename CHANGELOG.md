@@ -115,7 +115,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   redirect URI, PKCE challenge and, with a DPoP proof at PAR, its DPoP key.
   When the source has no data or is unavailable, the citizen sees a page
   with a button back to the wallet. Every source offer gets a login link
-  (`login_link` in `GET /disclosure-offers`). Configured with
+  (`login_link` in `GET /disclosure-offers`). A wallet may also start at
+  the issuer itself, naming the credential type in `scope` or
+  `authorization_details`; that works for a configuration with one source
+  offer and is `invalid_scope` otherwise. Configured with
   `ISSUER_LOGIN_SERVER`; without it nothing changes.
 - **The ASI authorization server serves credential issuers** (#614): a
   client registered with the `PUB_EAA_Provider` entitlement and scope
