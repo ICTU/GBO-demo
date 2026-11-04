@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -19,10 +20,15 @@ import (
 // Parsed is a verified SD-JWT VC with its disclosures applied.
 type Parsed struct {
 	Issuer *x509.Certificate
+	// Anchor names the anchor set that accepted the issuer's chain.
+	Anchor string
 	Header jose.Header
 	// Claims hold the issuer-signed claims with every disclosed claim put
 	// back in place; _sd and _sd_alg are removed.
 	Claims map[string]any
+	// Disclosed holds the claim path of every disclosure, so a verifier
+	// can tell what the holder chose to reveal.
+	Disclosed [][]string
 }
 
 // Parse verifies an SD-JWT VC in combined format without key binding: the
@@ -41,7 +47,7 @@ func Parse(combined string, anchors []x5c.Anchors, eku asn1.ObjectIdentifier, no
 	if typ, _ := h.ExtraHeaders[jose.HeaderType].(string); typ != Type {
 		return Parsed{}, fmt.Errorf("sdjwtvc: typ must be %q", Type)
 	}
-	leaf, _, err := x5c.Verify(h, anchors, now, eku)
+	leaf, anchor, err := x5c.Verify(h, anchors, now, eku)
 	if err != nil {
 		return Parsed{}, err
 	}
@@ -70,18 +76,21 @@ func Parse(combined string, anchors []x5c.Anchors, eku asn1.ObjectIdentifier, no
 		}
 		byDigest[digest] = arr
 	}
-	if err := reveal(payload, byDigest); err != nil {
+	var disclosed [][]string
+	if err := reveal(payload, byDigest, map[string]bool{}, nil, &disclosed); err != nil {
 		return Parsed{}, err
 	}
 	if len(byDigest) > 0 {
 		return Parsed{}, errors.New("sdjwtvc: disclosure not referenced by any digest")
 	}
-	return Parsed{Issuer: leaf, Header: h, Claims: payload}, nil
+	return Parsed{Issuer: leaf, Anchor: anchor, Header: h, Claims: payload, Disclosed: disclosed}, nil
 }
 
 // reveal replaces the _sd digests in obj, recursively, by the disclosed
-// claims and removes each used disclosure from byDigest.
-func reveal(obj map[string]any, byDigest map[string][]any) error {
+// claims, removes each used disclosure from byDigest and records its path
+// below path in disclosed. A digest that occurs twice is refused (RFC 9901
+// section 7.1).
+func reveal(obj map[string]any, byDigest map[string][]any, seen map[string]bool, path []string, disclosed *[][]string) error {
 	if raw, ok := obj["_sd"]; ok {
 		list, ok := raw.([]any)
 		if !ok {
@@ -90,21 +99,29 @@ func reveal(obj map[string]any, byDigest map[string][]any) error {
 		delete(obj, "_sd")
 		for _, item := range list {
 			digest, _ := item.(string)
+			if seen[digest] {
+				return errors.New("sdjwtvc: a digest occurs more than once")
+			}
+			seen[digest] = true
 			arr, ok := byDigest[digest]
 			if !ok {
 				continue // a decoy or an undisclosed claim
 			}
 			delete(byDigest, digest)
-			name, _ := arr[1].(string)
+			name, ok := arr[1].(string)
+			if !ok {
+				return errors.New("sdjwtvc: a disclosure's claim name must be a string")
+			}
 			if _, exists := obj[name]; exists || name == "_sd" || name == "..." {
 				return fmt.Errorf("sdjwtvc: disclosure for %q conflicts with an existing claim", name)
 			}
 			obj[name] = arr[2]
+			*disclosed = append(*disclosed, append(slices.Clone(path), name))
 		}
 	}
-	for _, v := range obj {
+	for name, v := range obj {
 		if nested, ok := v.(map[string]any); ok {
-			if err := reveal(nested, byDigest); err != nil {
+			if err := reveal(nested, byDigest, seen, append(slices.Clone(path), name), disclosed); err != nil {
 				return err
 			}
 		}

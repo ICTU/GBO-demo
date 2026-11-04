@@ -2,6 +2,8 @@ package sdjwtvc_test
 
 import (
 	"encoding/asn1"
+	"encoding/base64"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +12,7 @@ import (
 
 	"gbo-demo/oid4vc-kit/sdjwtvc"
 	"gbo-demo/oid4vc-kit/testpki"
+	"gbo-demo/oid4vc-kit/testwallet"
 	"gbo-demo/oid4vc-kit/x5c"
 )
 
@@ -101,5 +104,31 @@ func TestReservedClaimsAreNotConcealed(t *testing.T) {
 	if _, err := signer.Issue(sdjwtvc.Credential{VCT: "x", HolderKey: &jose.JSONWebKey{Key: &holder.PublicKey},
 		Claims: map[string]any{"employment": map[string]any{"status": "employed"}}}); err != nil {
 		t.Fatalf("a nested claim named status must be allowed: %v", err)
+	}
+}
+
+// RFC 9901 section 7.1: a digest that occurs twice, and a disclosure whose
+// claim name is not a string, are refused.
+func TestParseRefusesMalformedDigests(t *testing.T) {
+	root := testpki.NewRoot(t, "issuer root")
+	issuer := root.Issue(t, testpki.Options{})
+	anchors := []x5c.Anchors{x5c.NewAnchors("issuers", root.Cert)}
+	disclose := func(name any) string {
+		raw, _ := json.Marshal([]any{"salt", name, "v"})
+		return base64.RawURLEncoding.EncodeToString(raw)
+	}
+	sign := func(payload map[string]any) string {
+		payload["_sd_alg"], payload["vct"] = "sha-256", "https://example.test/t"
+		return testwallet.Sign(t, issuer.Key, sdjwtvc.Type, map[jose.HeaderKey]any{"x5c": x5c.Header(issuer.Chain)}, false, payload)
+	}
+	d := disclose("a")
+	for name, tc := range map[string]struct{ combined, want string }{
+		"a digest twice":         {sign(map[string]any{"_sd": []string{sdjwtvc.Digest(d), sdjwtvc.Digest(d)}}) + "~" + d + "~", "more than once"},
+		"a digest in two places": {sign(map[string]any{"_sd": []string{sdjwtvc.Digest(d)}, "o": map[string]any{"_sd": []string{sdjwtvc.Digest(d)}}}) + "~" + d + "~", "more than once"},
+		"a numeric claim name":   {sign(map[string]any{"_sd": []string{sdjwtvc.Digest(disclose(5))}}) + "~" + disclose(5) + "~", "must be a string"},
+	} {
+		if _, err := sdjwtvc.Parse(tc.combined, anchors, nil, time.Now()); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: %v", name, err)
+		}
 	}
 }
