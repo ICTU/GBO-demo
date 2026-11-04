@@ -57,7 +57,10 @@ type credentialIssuerOptions struct {
 	eudiKeyStorage, eudiUserAuthentication []string
 	// testPIDSourceURL is the bronpoort of the test PID (test-pid-source).
 	testPIDSourceURL string
-	now              func() time.Time
+	// pidTrustAnchorsFile holds the NL PID issuer CAs whose PIDs the issuer
+	// accepts (base64 DER per line, # comments), next to the test PID.
+	pidTrustAnchorsFile string
+	now                 func() time.Time
 	// owner, when set, becomes the owner of everything written: the issuer
 	// runs as another user than this command.
 	owner *fileOwner
@@ -85,8 +88,24 @@ func parseFileOwner(value string) (*fileOwner, error) {
 }
 
 type issuerFile struct {
-	Providers []issuerProviderFile `json:"providers"`
-	Profiles  []issuerProfileFile  `json:"profiles"`
+	Providers        []issuerProviderFile    `json:"providers"`
+	Profiles         []issuerProfileFile     `json:"profiles"`
+	DisclosureOffers []issuerDisclosureOffer `json:"disclosure_offers,omitempty"`
+	PIDTrustAnchors  []issuerAnchors         `json:"pid_trust_anchors,omitempty"`
+}
+
+// issuerDisclosureOffer is a source offer the wallet starts by disclosing
+// the BSN from its PID.
+type issuerDisclosureOffer struct {
+	Key                        string            `json:"key"`
+	Provider                   string            `json:"provider"`
+	CredentialConfigurationIDs []string          `json:"credential_configuration_ids"`
+	Parameters                 map[string]string `json:"parameters,omitempty"`
+}
+
+type issuerAnchors struct {
+	Name      string `json:"name"`
+	RootsFile string `json:"roots_file"`
 }
 
 type issuerKeyFiles struct {
@@ -95,13 +114,16 @@ type issuerKeyFiles struct {
 }
 
 type issuerProviderFile struct {
-	Name                        string                    `json:"name"`
-	Access                      issuerKeyFiles            `json:"access"`
-	Issuer                      issuerKeyFiles            `json:"issuer"`
-	Status                      issuerKeyFiles            `json:"status"`
-	RegistrationCertificateFile string                    `json:"registration_certificate_file"`
-	RequestEncryptionKeyFile    string                    `json:"request_encryption_key_file"`
-	CredentialConfigurations    []issuerConfigurationFile `json:"credential_configurations"`
+	Name                        string         `json:"name"`
+	Access                      issuerKeyFiles `json:"access"`
+	Issuer                      issuerKeyFiles `json:"issuer"`
+	Status                      issuerKeyFiles `json:"status"`
+	RegistrationCertificateFile string         `json:"registration_certificate_file"`
+	// VerifierRegistrationCertificateFile is the WRPRC of the provider as a
+	// relying party that asks for the PID; the test PID has none.
+	VerifierRegistrationCertificateFile string                    `json:"verifier_registration_certificate_file,omitempty"`
+	RequestEncryptionKeyFile            string                    `json:"request_encryption_key_file"`
+	CredentialConfigurations            []issuerConfigurationFile `json:"credential_configurations"`
 }
 
 type issuerDisplay struct {
@@ -149,6 +171,7 @@ func runCredentialIssuerConfigCommand(ctx context.Context, arguments []string, s
 	set.StringVar(&options.outputDir, "output-dir", "/runtime-issuer", "pod-local directory for the issuer configuration, owned by this command")
 	set.StringVar(&options.adapterBaseURL, "adapter-base-url", os.Getenv("EUDI_BRI_URL"), "public GBO adapter base URL")
 	set.StringVar(&options.rootsDir, "wallet-roots-dir", "/wallet-roots", "directory with the trusted wallet providers per profile")
+	set.StringVar(&options.pidTrustAnchorsFile, "pid-trust-anchors-file", getEnv("PID_TRUST_ANCHORS_FILE", "/pid-trust-anchors.txt"), "NL PID issuer CAs the issuer trusts for disclosure-based issuance, base64 DER per line")
 	set.StringVar(&options.testPIDSourceURL, "test-pid-source-url", getEnv("TEST_PID_SOURCE_URL", "http://test-pid-source:8080/attestations"), "bronpoort of the test PID, used when the test PID is provisioned")
 	set.StringVar(&options.universalLinkBase, "universal-link-base", getEnv("ISSUER_NL_UNIVERSAL_LINK_BASE", "walletdebuginteraction://wallet.edi.rijksoverheid.nl/"), "base of the NL Wallet universal link")
 	owner := set.String("owner", os.Getenv("ISSUER_RUNTIME_OWNER"), "uid or uid:gid that becomes the owner of the output, for an issuer running as another user")
@@ -235,12 +258,13 @@ func writeCredentialIssuer(options credentialIssuerOptions, release onboarding.S
 	out := issuerFile{Profiles: profiles}
 	seen := derivedNames{ids: map[string]string{}, vcts: map[string]string{}}
 	for _, source := range release.Sources {
-		provider, err := credentialIssuerProvider(options, source, adapterBaseURL, seen)
+		provider, offers, err := credentialIssuerProvider(options, source, adapterBaseURL, seen)
 		if err != nil {
 			return fmt.Errorf("source %s: %w", source.SourceID, err)
 		}
 		if len(provider.CredentialConfigurations) > 0 {
 			out.Providers = append(out.Providers, provider)
+			out.DisclosureOffers = append(out.DisclosureOffers, offers...)
 		}
 	}
 	if len(out.Providers) == 0 {
@@ -250,6 +274,9 @@ func writeCredentialIssuer(options credentialIssuerOptions, release onboarding.S
 		return fmt.Errorf("test PID: %w", err)
 	} else if ok {
 		out.Providers = append(out.Providers, testPID)
+	}
+	if out.PIDTrustAnchors, err = pidTrustAnchors(options); err != nil {
+		return fmt.Errorf("PID trust anchors: %w", err)
 	}
 	body, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {
@@ -386,58 +413,62 @@ func copyRoots(options credentialIssuerOptions, name string) (string, error) {
 // credentialIssuerProvider is one source as an Attestation Provider: its
 // mounted certificates, checked against the release, its wallet
 // registration and a credential configuration per activated type.
-func credentialIssuerProvider(options credentialIssuerOptions, source onboarding.ReleaseSource, adapterBaseURL *url.URL, seen derivedNames) (issuerProviderFile, error) {
+func credentialIssuerProvider(options credentialIssuerOptions, source onboarding.ReleaseSource, adapterBaseURL *url.URL, seen derivedNames) (issuerProviderFile, []issuerDisclosureOffer, error) {
 	if !issuerName(source.SourceID) {
-		return issuerProviderFile{}, errors.New("the issuer takes only lower-case letters, digits and hyphens, and not \"status\", as a provider name")
+		return issuerProviderFile{}, nil, errors.New("the issuer takes only lower-case letters, digits and hyphens, and not \"status\", as a provider name")
 	}
 	if source.SourceID == testPIDID {
-		return issuerProviderFile{}, fmt.Errorf("%q is reserved for the test PID provider", testPIDID)
+		return issuerProviderFile{}, nil, fmt.Errorf("%q is reserved for the test PID provider", testPIDID)
 	}
 	activation, err := activationFromRegistryCandidate(onboarding.SourceCandidate{
 		SourceID: source.SourceID, Snapshot: source.Snapshot,
 		CertificateSet: source.CertificateSet, TypeMetadata: source.TypeMetadata,
 	})
 	if err != nil {
-		return issuerProviderFile{}, fmt.Errorf("activation: %w", err)
+		return issuerProviderFile{}, nil, fmt.Errorf("activation: %w", err)
 	}
 	provider := issuerProviderFile{Name: source.SourceID}
+	var offers []issuerDisclosureOffer
 	if len(activation.Types) == 0 {
-		return provider, nil
+		return provider, nil, nil
 	}
 	artifacts := certificateArtifactsForMountedSecret(options.secretsDir, source.CertificateSet.ID)
 	mountedPublic, err := publicCertificateSet(source.CertificateSet.ID, artifacts)
 	if err != nil {
-		return provider, fmt.Errorf("public certificates: %w", err)
+		return provider, nil, fmt.Errorf("public certificates: %w", err)
 	}
 	if !reflect.DeepEqual(mountedPublic, source.CertificateSet) {
-		return provider, errors.New("mounted certificate material does not match the active release")
+		return provider, nil, errors.New("mounted certificate material does not match the active release")
 	}
 	vcts := make([]string, 0, len(activation.Types))
 	for _, t := range activation.Types {
 		vcts = append(vcts, t.VCT)
 	}
-	if err := copyWalletRegistration(options, source.SourceID, source.CertificateSet.ID, vcts, &provider,
-		"make provision-wallet-registration SOURCE_ID="+source.SourceID); err != nil {
-		return provider, err
+	provision := "make provision-wallet-registration SOURCE_ID=" + source.SourceID
+	if err := copyWalletRegistration(options, source.SourceID, source.CertificateSet.ID, vcts, &provider, provision); err != nil {
+		return provider, nil, err
+	}
+	if err := copyVerifierRegistration(options, source.SourceID, source.CertificateSet.ID, &provider, provision); err != nil {
+		return provider, nil, err
 	}
 	if provider.Issuer, err = writeLeafAsPEM(options, source.SourceID, "issuer", artifacts.IssuerKeyReference, artifacts.IssuerCertReference); err != nil {
-		return provider, err
+		return provider, nil, err
 	}
 	if provider.Status, err = writeLeafAsPEM(options, source.SourceID, "status", artifacts.StatusKeyReference, artifacts.StatusCertReference); err != nil {
-		return provider, err
+		return provider, nil, err
 	}
 	for _, t := range activation.Types {
 		if !issuerName(t.TypeID) {
-			return provider, fmt.Errorf("type %s: the issuer takes only lower-case letters, digits and hyphens, and not \"status\", as a status list name", t.TypeID)
+			return provider, nil, fmt.Errorf("type %s: the issuer takes only lower-case letters, digits and hyphens, and not \"status\", as a status list name", t.TypeID)
 		}
 		origin := source.SourceID + "/" + t.TypeID + " version " + t.TypeVersion
 		id := source.SourceID + "-" + t.TypeID
 		if earlier, ok := seen.ids[id]; ok {
-			return provider, fmt.Errorf("credential configuration %s is derived from both %s and %s", id, earlier, origin)
+			return provider, nil, fmt.Errorf("credential configuration %s is derived from both %s and %s", id, earlier, origin)
 		}
 		seen.ids[id] = origin
 		if earlier, ok := seen.vcts[t.VCT]; ok {
-			return provider, fmt.Errorf("vct %s is activated for both %s and %s", t.VCT, earlier, origin)
+			return provider, nil, fmt.Errorf("vct %s is activated for both %s and %s", t.VCT, earlier, origin)
 		}
 		seen.vcts[t.VCT] = origin
 		endpoint := *adapterBaseURL
@@ -446,8 +477,15 @@ func credentialIssuerProvider(options credentialIssuerOptions, source onboarding
 			ID: id, VCT: t.VCT, Scope: id, Display: issuerDisplays(t.Definition.Display), Claims: issuerClaims(t.Definition.Claims),
 			ValidDays: credentialValidDays, StatusList: t.TypeID, SourceURL: endpoint.String(),
 		})
+		for _, o := range t.Offers {
+			offer, err := disclosureOffer(source.SourceID, id, o)
+			if err != nil {
+				return provider, nil, fmt.Errorf("type %s: %w", t.TypeID, err)
+			}
+			offers = append(offers, offer)
+		}
 	}
-	return provider, nil
+	return provider, offers, nil
 }
 
 // copyWalletRegistration copies the WRPAC, the WRPRC and the request

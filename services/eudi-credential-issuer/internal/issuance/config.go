@@ -113,7 +113,8 @@ type Claim struct {
 // DisclosureOffer is an offer a wallet starts by disclosing the BSN from
 // its PID (disclosure-based issuance), reached by a fixed link per offer.
 type DisclosureOffer struct {
-	// Key is the last path segment of its request_uri.
+	// Key is the last path segment of its request_uri, unique per
+	// provider: the offer id of the source.
 	Key              string
 	Provider         string
 	ConfigurationIDs []string

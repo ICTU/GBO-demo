@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -49,6 +50,13 @@ const (
 	wrprcStatusListSize     = 1024
 	wrprcPolicyIdentifier   = "0.4.0.19475.3.1"
 	wrprcPubEAAEntitlement  = "https://uri.etsi.org/19475/Entitlement/PUB_EAA_Provider"
+	// wrprcServiceProviderEntitlement is the role of a source as a relying
+	// party that asks for the BSN from the PID (disclosure-based issuance).
+	wrprcServiceProviderEntitlement = "https://uri.etsi.org/19475/Entitlement/Service_Provider"
+	// verifierRegistrationFile is the WRPRC of that role, next to wrprc.jwt.
+	verifierRegistrationFile = "wrprc-verifier.jwt"
+	// nlPIDType is the PID a source asks for: the NL PID.
+	nlPIDType               = "urn:eudi:pid:nl:1"
 	wrprcJWTType            = "rc-wrp+jwt"
 	walletRegistrationValid = 365 * 24 * time.Hour
 	// requestEncryptionKeyFile is the per-source key of encrypted credential
@@ -278,14 +286,20 @@ func projectRegistrarRoot(caDir, publicDir string) error {
 
 func projectRoot(caDir, role, publicDir string) error {
 	_, certPath := caFiles(caDir, role)
+	return projectRootAs(caDir, role, publicDir, filepath.Base(certPath))
+}
+
+// projectRootAs copies the root certificate of role to dir as name.
+func projectRootAs(caDir, role, dir, name string) error {
+	_, certPath := caFiles(caDir, role)
 	body, err := os.ReadFile(certPath)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(publicDir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	return writeFileAtomically(publicDir, filepath.Base(certPath), body, 0o644)
+	return writeFileAtomically(dir, name, body, 0o644)
 }
 
 func provisionWalletRegistration(options walletRegistrationOptions, source walletRegistrationSource) error {
@@ -301,13 +315,14 @@ func provisionWalletRegistration(options walletRegistrationOptions, source walle
 	if err := checkSourceIdentity(filepath.Join(options.secretsDir, source.CertificateSet), source); err != nil {
 		return err
 	}
-	return registerWallet(options, source, wrprcPubEAAEntitlement)
+	return registerWallet(options, source, wrprcPubEAAEntitlement, true)
 }
 
 // registerWallet issues the WRPAC and WRPRC of a party that provides
 // attestations with the given entitlement, and publishes the trust host's
-// files.
-func registerWallet(options walletRegistrationOptions, source walletRegistrationSource, entitlement string) error {
+// files. A party that asksPID also gets a WRPRC as a relying party that
+// asks for the BSN from the PID.
+func registerWallet(options walletRegistrationOptions, source walletRegistrationSource, entitlement string, asksPID bool) error {
 	trustURL, err := parseDevelopmentRootURL(options.trustPublicURL, false)
 	if err != nil {
 		return fmt.Errorf("trust public URL: %w", err)
@@ -361,6 +376,14 @@ func registerWallet(options walletRegistrationOptions, source walletRegistration
 	if err != nil {
 		return err
 	}
+	verifierIdx := -1
+	if asksPID {
+		// The verifier role has its own status entry: it can be revoked on
+		// its own.
+		if verifierIdx, err = state.statusIndex(source.SourceID + "/verifier"); err != nil {
+			return err
+		}
+	}
 	if err := writeWalletRegistrationState(caDir, state); err != nil {
 		return err
 	}
@@ -372,6 +395,15 @@ func registerWallet(options walletRegistrationOptions, source walletRegistration
 	}
 	if err := writeFileAtomically(sourceDir, "wrprc.jwt", []byte(rc), 0o644); err != nil {
 		return err
+	}
+	if asksPID {
+		vrc, err := signRegistrationCertificate(signer, verifierRegistrationPayload(source, orgID, trustBase, verifierIdx, now, expires), now)
+		if err != nil {
+			return err
+		}
+		if err := writeFileAtomically(sourceDir, verifierRegistrationFile, []byte(vrc), 0o644); err != nil {
+			return err
+		}
 	}
 	return publishTrust(options, reader, status, trustBase, now)
 }
@@ -621,12 +653,42 @@ func registrationPayload(source walletRegistrationSource, entitlement, orgID, tr
 		"public_body":           true,
 		"iat":                   now.Unix(),
 		// The NL Wallet refuses a WRPRC valid for more than twelve months.
-		"exp": expires.Unix(),
-		// The form of ETSI TS 119 475 Annex C, which both the NL Wallet and the
-		// EUDI wallet read.
-		"status":             map[string]any{"status_list": map[string]any{"idx": idx, "uri": trustBase + "/" + wrprcStatusListPath}},
+		"exp":                expires.Unix(),
+		"status":             registrationStatus(idx, trustBase+"/"+wrprcStatusListPath),
 		"policy_id":          []string{wrprcPolicyIdentifier},
 		"certificate_policy": trustBase + "/certificate-policy",
+	}
+}
+
+// verifierRegistrationPayload is the WRPRC of a source as a relying party
+// (entitlement Service_Provider) that asks for the BSN from the PID, with
+// the purpose the wallet shows the user.
+func verifierRegistrationPayload(source walletRegistrationSource, orgID, trustBase string, idx int, now, expires time.Time) map[string]any {
+	payload := registrationPayload(source, wrprcServiceProviderEntitlement, orgID, trustBase, idx, now, expires)
+	delete(payload, "provides_attestations")
+	payload["id"] = "gbo-" + source.SourceID + "-verifier"
+	// NL Wallet v0.6 names the claims of a credential "claim".
+	payload["credentials"] = []map[string]any{{
+		"format": "dc+sd-jwt", "meta": map[string]any{"vct_values": []string{nlPIDType}},
+		"claim": []map[string]any{{"path": []string{"bsn"}}},
+	}}
+	payload["purpose"] = []map[string]string{
+		{"lang": "nl", "value": "Uw BSN uit uw PID vaststellen, zodat " + source.Name + " uw gegevens kan ophalen voor de attestatie die u aanvraagt."},
+		{"lang": "en", "value": "Establishing your BSN from your PID, so that " + source.Name + " can retrieve your data for the attestation you request."},
+	}
+	return payload
+}
+
+// registrationStatus carries the status entry in two forms at once. NL
+// Wallet v0.6 accepts only the normative form of ETSI TS 119 475 clause
+// 6.2.6.1, idx as a numeric string next to uri; the extra status_list key
+// keeps it from reading the object as the Annex C form, which it refuses.
+// The EUDI wallets read only that Annex C form, status_list with a numeric
+// idx, and ignore the rest.
+func registrationStatus(idx int, uri string) map[string]any {
+	return map[string]any{
+		"idx": strconv.Itoa(idx), "uri": uri,
+		"status_list": map[string]any{"idx": idx, "uri": uri},
 	}
 }
 

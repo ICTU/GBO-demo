@@ -119,6 +119,20 @@ publishes both afresh. The trust URL is recorded in
 `development-ca/wallet-registration.json`; to change it, remove that file and
 provision every source again.
 
+For disclosure-based issuance (the wallet discloses the BSN from its PID,
+then gets the offer), the same command also issues a WRPRC for the source as
+a relying party (`wrprc-verifier.jwt`): entitlement `Service_Provider`,
+authorizing the `bsn` of `urn:eudi:pid:nl:1`, with the purpose the wallet
+shows and a status entry of its own. Run it again for sources provisioned
+before, and `make provision-test-pid` too (it now also puts the test PID
+root next to its registration); the materializer refuses a source without
+them. It turns every offer
+of the source's activated types into a disclosure offer under the same id,
+and trusts the PIDs of the NL PID issuer CAs in `PID_TRUST_ANCHORS_FILE`
+(default: the pre-production CA in
+`services/asi-wallet-verifier/pid-issuer-anchors.txt`) and, once
+provisioned, of the test PID.
+
 `make provision-test-pid` adds a test PID provider to the own issuer: a PID
 of the NL type (`urn:eudi:pid:nl:1`) for wallets without a real one, such as
 the EUDI reference wallet, so the disclosure-based route can be shown with

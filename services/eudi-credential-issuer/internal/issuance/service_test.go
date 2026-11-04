@@ -570,7 +570,8 @@ func TestNewRefusesDisclosureConfigurations(t *testing.T) {
 		mutate func(*issuance.Config)
 		want   string
 	}{
-		"offer key with upper case": {func(c *issuance.Config) { c.DisclosureOffers[0].Key = "Income" }, "disclosure offer key"},
+		"offer key with a slash": {func(c *issuance.Config) { c.DisclosureOffers[0].Key = "income/2025" }, "disclosure offer key"},
+		"offer key ..":           {func(c *issuance.Config) { c.DisclosureOffers[0].Key = ".." }, "disclosure offer key"},
 		"duplicate offer key": {func(c *issuance.Config) {
 			c.DisclosureOffers = append(c.DisclosureOffers, c.DisclosureOffers[0])
 		}, "disclosure offer key"},
@@ -641,5 +642,31 @@ func TestDisclosureSessionOfAnotherConfiguration(t *testing.T) {
 	var pe *issuance.Error
 	if _, err := without.DisclosureResponse(context.Background(), tax("nl"), session, issuance.DisclosureForm{}); err == nil || errors.As(err, &pe) {
 		t.Fatalf("want a server error, got %v", err)
+	}
+}
+
+// I1: offer keys are the sources' offer ids: unique per provider, with
+// underscores.
+func TestDisclosureOfferKeysPerProvider(t *testing.T) {
+	cfg := disclosureConfig(t)
+	cfg.Providers[1].VerifierRegistrationCertificate = testwallet.VerifierRegistrationCertificate(t, registrar(t), orgID("civil"), issuance.PIDType, []string{"bsn"})
+	cfg.DisclosureOffers = []issuance.DisclosureOffer{
+		{Key: "inkomen_2025", Provider: "tax", ConfigurationIDs: []string{"income"}},
+		{Key: "inkomen_2025", Provider: "civil", ConfigurationIDs: []string{"death"}},
+		{Key: "inkomen.2024", Provider: "tax", ConfigurationIDs: []string{"income"}},
+	}
+	store := memstore.New()
+	svc, err := issuance.New(cfg, &fakeSource{}, store, store, store, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, provider := range []string{"tax", "civil"} {
+		if _, err := svc.DisclosureRequest(context.Background(), issuance.Target{Provider: provider, Profile: "nl"}, "inkomen_2025"); err != nil {
+			t.Errorf("%s: %v", provider, err)
+		}
+	}
+	cfg.DisclosureOffers = append(cfg.DisclosureOffers, cfg.DisclosureOffers[0])
+	if _, err := issuance.New(cfg, &fakeSource{}, store, store, store, time.Now); err == nil {
+		t.Error("a key twice at one provider must be refused")
 	}
 }

@@ -23,7 +23,7 @@ type Service struct {
 	providers map[string]*provider
 	profiles  map[string]Profile
 	configs   map[string]CredentialConfiguration
-	// disclosureOffers are keyed by their key; verifier checks the
+	// disclosureOffers are keyed by provider and key; verifier checks the
 	// responses to their requests.
 	disclosureOffers map[string]DisclosureOffer
 	verifier         oid4vp.Verifier
@@ -75,7 +75,7 @@ func New(cfg Config, source Source, sessions Sessions, onetime OneTime, status S
 		s.configs[c.ID] = c
 	}
 	for _, o := range cfg.DisclosureOffers {
-		s.disclosureOffers[o.Key] = o
+		s.disclosureOffers[o.Provider+"/"+o.Key] = o
 	}
 	return s, nil
 }

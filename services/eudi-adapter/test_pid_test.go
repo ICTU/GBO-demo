@@ -282,7 +282,7 @@ func TestMaterializeTestPIDRefusesExpired(t *testing.T) {
 				current := f.registration
 				current.kvkNumber = testPIDKvKNumber
 				if err := registerWallet(current, walletRegistrationSource{SourceID: testPIDID, Name: testPIDName,
-					CertificateSet: testPIDID, VCTs: []string{testPIDType}}, wrprcPIDEntitlement); err != nil {
+					CertificateSet: testPIDID, VCTs: []string{testPIDType}}, wrprcPIDEntitlement, false); err != nil {
 					t.Fatal(err)
 				}
 				if role == "status" {

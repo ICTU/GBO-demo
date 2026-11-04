@@ -47,8 +47,8 @@ func (s *Service) DisclosureRequest(ctx context.Context, t Target, offerKey stri
 	if err != nil {
 		return "", err
 	}
-	o, ok := s.disclosureOffers[offerKey]
-	if !ok || o.Provider != t.Provider || prov.requestSigner == nil {
+	o, ok := s.disclosureOffers[t.Provider+"/"+offerKey]
+	if !ok || prov.requestSigner == nil {
 		return "", ErrUnknownOffer
 	}
 	key, err := oid4vp.NewResponseKey()
@@ -123,8 +123,8 @@ func (s *Service) DisclosureResponse(ctx context.Context, t Target, sessionID st
 		return "", err
 	}
 	// The session may come from a replica with another configuration.
-	o, ok := s.disclosureOffers[d.Offer]
-	if !ok || o.Provider != d.Provider || prov.requestSigner == nil {
+	o, ok := s.disclosureOffers[d.Provider+"/"+d.Offer]
+	if !ok || prov.requestSigner == nil {
 		return "", fmt.Errorf("disclosure offer %q of the session is not configured here", d.Offer)
 	}
 	if f.Error != "" {

@@ -2,7 +2,9 @@ package main
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"os"
 	"path/filepath"
 	"slices"
@@ -46,7 +48,8 @@ func newCredentialIssuerFixture(t *testing.T) credentialIssuerFixture {
 	copyTestFile(t, filepath.Join(caDir, "issuer-ca-cert.pem"), filepath.Join(roots, nlWalletProvidersFile))
 	return credentialIssuerFixture{
 		options: credentialIssuerOptions{secretsDir: secrets, outputDir: t.TempDir(), adapterBaseURL: "https://adapter.example",
-			rootsDir: roots, universalLinkBase: "walletdebuginteraction://wallet.edi.rijksoverheid.nl/"},
+			rootsDir: roots, universalLinkBase: "walletdebuginteraction://wallet.edi.rijksoverheid.nl/",
+			pidTrustAnchorsFile: writePIDAnchorsFile(t, filepath.Join(caDir, "issuer-ca-cert.pem"))},
 		release:      release,
 		registration: registration,
 	}
@@ -352,4 +355,21 @@ func TestMaterializeCredentialIssuerHandsOutputToOwner(t *testing.T) {
 			t.Fatalf("%q must be refused", bad)
 		}
 	}
+}
+
+// writePIDAnchorsFile writes the certificate in pemFile as a PID trust
+// anchors file: base64 DER per line, with a comment.
+func writePIDAnchorsFile(t *testing.T, pemFile string) string {
+	t.Helper()
+	raw, err := os.ReadFile(pemFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, _ := pem.Decode(raw)
+	path := filepath.Join(t.TempDir(), "pid-anchors.txt")
+	body := "# test PID issuer CA\n\n" + base64.StdEncoding.EncodeToString(block.Bytes) + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

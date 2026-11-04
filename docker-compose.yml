@@ -1821,6 +1821,10 @@ services:
     volumes:
       - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}:/source-certificates:ro
       - ${WALLET_ROOTS_DIR:-./.local/wallet-roots}:/wallet-roots:ro
+      # The NL PID issuer CAs whose PIDs the issuer accepts for
+      # disclosure-based issuance: the pre-production CA, as the ASI wallet
+      # verifier trusts it.
+      - ${PID_TRUST_ANCHORS_FILE:-./services/asi-wallet-verifier/pid-issuer-anchors.txt}:/pid-trust-anchors.txt:ro
       - credential-issuer-runtime:/runtime-issuer
     depends_on:
       source-registry-migrations:

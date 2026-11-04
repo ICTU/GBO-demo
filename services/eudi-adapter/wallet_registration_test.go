@@ -593,9 +593,12 @@ func assertRegistrationCertificate(t *testing.T, f walletRegistrationFixture, re
 	if claims["entitlements"].([]any)[0] != wrprcPubEAAEntitlement || claims["public_body"] != true {
 		t.Fatalf("entitlements %v, public_body %v", claims["entitlements"], claims["public_body"])
 	}
-	status, _ := claims["status"].(map[string]any)["status_list"].(map[string]any)
-	if status["idx"] != float64(0) || status["uri"] != testTrustURL+"/wrprc/1" {
-		t.Fatalf("status %v", status)
+	// Both forms: idx as a numeric string (normative, NL Wallet v0.6) and
+	// status_list with a number (Annex C, EUDI wallets).
+	outer := claims["status"].(map[string]any)
+	status, _ := outer["status_list"].(map[string]any)
+	if outer["idx"] != "0" || outer["uri"] != testTrustURL+"/wrprc/1" || status["idx"] != float64(0) || status["uri"] != testTrustURL+"/wrprc/1" {
+		t.Fatalf("status %v", outer)
 	}
 	iat, exp := time.Unix(int64(claims["iat"].(float64)), 0), time.Unix(int64(claims["exp"].(float64)), 0)
 	if exp.After(iat.AddDate(0, 12, 0)) {

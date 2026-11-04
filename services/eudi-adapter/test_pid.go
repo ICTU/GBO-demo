@@ -25,9 +25,11 @@ const (
 	testPIDID           = "test-pid"
 	testPIDRootRole     = "test-pid"
 	testPIDName         = "GBO test-PID"
-	testPIDType         = "urn:eudi:pid:nl:1"
+	testPIDType         = nlPIDType
 	testPIDKvKNumber    = "99990100"
 	wrprcPIDEntitlement = "https://uri.etsi.org/19475/Entitlement/PID_Provider"
+	// testPIDRootFile is the public test PID root next to its registration.
+	testPIDRootFile = "root-cert.pem"
 )
 
 var testPIDSubject = pkix.Name{CommonName: testPIDName, Organization: []string{"GBO Demo"}, Country: []string{"NL"}}
@@ -96,6 +98,11 @@ func provisionTestPID(options walletRegistrationOptions, dirs testPIDDirs) error
 		return err
 	}
 	dir := filepath.Join(options.secretsDir, testPIDID)
+	// The materializer reads the public root here: the issuer trusts PIDs
+	// under it.
+	if err := projectRootAs(dirs.rootDir, testPIDRootRole, dir, testPIDRootFile); err != nil {
+		return err
+	}
 	now := options.now()
 	if _, err := ensureCertificate(options, dir, "issuer", root, testPIDLeafTemplate(issuerEKUOID, now)); err != nil {
 		return err
@@ -105,7 +112,7 @@ func provisionTestPID(options walletRegistrationOptions, dirs testPIDDirs) error
 	}
 	return registerWallet(options, walletRegistrationSource{
 		SourceID: testPIDID, Name: testPIDName, CertificateSet: testPIDID, VCTs: []string{testPIDType},
-	}, wrprcPIDEntitlement)
+	}, wrprcPIDEntitlement, false)
 }
 
 // testPIDLeafTemplate is the issuer or the status certificate; both carry

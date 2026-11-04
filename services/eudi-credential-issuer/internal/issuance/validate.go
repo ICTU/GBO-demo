@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
 	"slices"
 
 	"gbo-demo/oid4vc-kit/x5c"
@@ -70,6 +71,10 @@ func validate(cfg Config) error {
 	}
 	return validateDisclosure(cfg)
 }
+
+// offerKey is a disclosure offer key: one path segment, as the offer ids
+// of the sources are (dots inside only, so never "." or "..").
+var offerKey = regexp.MustCompile(`^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$`)
 
 // validName allows lower-case letters, digits and hyphens, so that a name is
 // one path segment, cannot collide with the fixed routes and keeps the
@@ -154,10 +159,10 @@ func validateDisclosure(cfg Config) error {
 	}
 	keys := map[string]bool{}
 	for _, o := range cfg.DisclosureOffers {
-		if !validName(o.Key) || keys[o.Key] {
-			return fmt.Errorf("disclosure offer key %q must be unique and only lower-case letters, digits and hyphens", o.Key)
+		if !offerKey.MatchString(o.Key) || keys[o.Provider+"/"+o.Key] {
+			return fmt.Errorf("disclosure offer key %q must be unique per provider and only letters, digits, hyphens, underscores and inner dots", o.Key)
 		}
-		keys[o.Key] = true
+		keys[o.Provider+"/"+o.Key] = true
 		p, ok := providers[o.Provider]
 		if !ok || len(p.VerifierRegistrationCertificate) == 0 {
 			return fmt.Errorf("disclosure offer %q: provider %q is unknown or has no verifier registration certificate", o.Key, o.Provider)

@@ -25,9 +25,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   reader root and a registration certificate (WRPRC, entitlement
   `PUB_EAA_Provider`) signed under a separate development registrar root,
   with the reader-root CRL and the WRPRC status list for a trust host. The
-  WRPRC carries its status as `status.status_list` with a numeric index, the
-  form of ETSI TS 119 475 Annex C that both the NL Wallet and the EUDI
-  reference wallet read.
+  WRPRC carries its status in two forms at once: the normative form of ETSI
+  TS 119 475 (`idx` as a numeric string), which NL Wallet v0.6 requires, and
+  `status_list` with a numeric index (Annex C), which the EUDI reference
+  wallet reads.
 - **Own credential issuer in Docker Compose** (#614): opt-in profile
   `credential-issuer` runs the issuer beside `eudi-issuance-server`, with its
   own database in `postgres-eudi`, a materialization job and a static
@@ -46,6 +47,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   that asks for an encrypted response must encrypt its request. `make
   provision-wallet-registration` creates each source's request key once; run
   it again for sources provisioned before.
+- **Disclosure-based issuance in the own credential issuer** (#614): a
+  wallet discloses the BSN from its PID (OpenID4VP 1.0) and gets a
+  pre-authorized offer through `redirect_uri`, with a fixed link per offer
+  and wallet. The issuer verifies the PID itself (`oid4vc-kit/oid4vp`) and
+  passes the BSN to the source as a disclosure. `make
+  provision-wallet-registration` also issues a WRPRC per source for its
+  verifier role (`Service_Provider`, the `bsn` of the PID); run it again for
+  sources provisioned before, and `make provision-test-pid` too. The materializer writes a disclosure offer per
+  source offer and the trusted PID issuers: the NL pre-production CA and the
+  test PID. The QTSP route stays on `eudi-issuance-server` for now.
 - **Test PID for the own credential issuer** (#614): `make
   provision-test-pid` adds a test PID provider (`urn:eudi:pid:nl:1`) under a
   development root of its own, registered with the `PID_Provider`
