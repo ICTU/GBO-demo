@@ -182,7 +182,27 @@ func sameIdentity(left, right login.Identity) bool {
 	if left.FamilyName != right.FamilyName || left.GivenName != right.GivenName || left.Birthdate != right.Birthdate {
 		return false
 	}
-	return slices.Equal(sortedUnique(left.Nationalities), sortedUnique(right.Nationalities))
+	return slices.Equal(sortedUnique(nationalityCodes(left.Nationalities)), sortedUnique(nationalityCodes(right.Nationalities)))
+}
+
+// nationalityCodesByDescription maps the descriptions that a PID carries
+// (the NL PID takes the BRP description, "Nederlandse") to the ISO 3166-1
+// alpha-2 codes of the mock login, so the two forms compare equal. The demo's
+// test persons need no more.
+var nationalityCodesByDescription = map[string]string{"nederlandse": "NL", "belgische": "BE", "duitse": "DE"}
+
+// nationalityCodes turns each description it knows into its code and keeps
+// any other value as is, upper-cased, so it only matches the same value.
+func nationalityCodes(values []string) []string {
+	out := make([]string, len(values))
+	for i, v := range values {
+		v = strings.TrimSpace(v)
+		if code, ok := nationalityCodesByDescription[strings.ToLower(v)]; ok {
+			v = code
+		}
+		out[i] = strings.ToUpper(v)
+	}
+	return out
 }
 
 func sortedUnique(values []string) []string {

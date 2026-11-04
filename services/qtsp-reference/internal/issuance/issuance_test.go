@@ -125,3 +125,26 @@ func TestOnlySuccessfulResultsBecomePending(t *testing.T) {
 		t.Error("incomplete evidence was accepted")
 	}
 }
+
+// Q8: the mock login names nationalities by code, a PID by description; they
+// compare on code. An unknown description only matches itself.
+func TestNationalitiesCompareOnCode(t *testing.T) {
+	mock := frouke
+	mock.Nationalities = []string{"NL", "BE"}
+	for name, tc := range map[string]struct {
+		pid  []string
+		want bool
+	}{
+		"descriptions":        {[]string{"Nederlandse", "Belgische"}, true},
+		"mixed, other order":  {[]string{"BE", "nederlandse"}, true},
+		"one missing":         {[]string{"Nederlandse"}, false},
+		"another nationality": {[]string{"Nederlandse", "Duitse"}, false},
+		"unknown description": {[]string{"Nederlandse", "Belgisch"}, false},
+	} {
+		pid := frouke
+		pid.Nationalities = tc.pid
+		if got := sameIdentity(mock, pid); got != tc.want {
+			t.Errorf("%s: %v, want %v", name, got, tc.want)
+		}
+	}
+}
