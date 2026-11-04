@@ -339,8 +339,11 @@ type fakeRegister struct {
 
 func newFakeRegister() *fakeRegister {
 	return &fakeRegister{entries: map[string]authorization.RegisterEntry{
-		qtspRegistryURI:     {Identifiers: []string{qtspOrganizationID}, LegalName: "Test QTSP", Entitlements: []string{authorization.QEAAProviderEntitlement}},
-		providerRegistryURI: {Identifiers: []string{qtspOrganizationID}, LegalName: "Test service provider", Entitlements: []string{serviceProvider}},
+		qtspRegistryURI:        {Identifiers: []string{qtspOrganizationID}, LegalName: "Test QTSP", Entitlements: []string{authorization.QEAAProviderEntitlement}},
+		providerRegistryURI:    {Identifiers: []string{qtspOrganizationID}, LegalName: "Test service provider", Entitlements: []string{serviceProvider}},
+		issuerRegistryURI:      {Identifiers: []string{issuerOrganizationID}, LegalName: "Belastingdienst", Entitlements: []string{pubEAAProvider}},
+		otherIssuerRegistryURI: {Identifiers: []string{otherIssuerOrgID}, LegalName: "RvIG", Entitlements: []string{pubEAAProvider}},
+		bothRegistryURI:        {Identifiers: []string{bothOrganizationID}, LegalName: "Both", Entitlements: []string{authorization.QEAAProviderEntitlement, pubEAAProvider}},
 	}}
 }
 

@@ -106,6 +106,11 @@ func serve() error {
 	if err != nil {
 		return err
 	}
+	issuanceResources, err := parseIssuanceResources(os.Getenv("AZSP_ISSUANCE_RESOURCES"))
+	if err != nil {
+		return err
+	}
+	resources = append(resources, issuanceResources...)
 	requireAuthorizationDetails, err := boolEnv("AZSP_REQUIRE_AUTHORIZATION_DETAILS", false)
 	if err != nil {
 		return err
@@ -205,6 +210,27 @@ func parseResources(value string) ([]authorization.Resource, error) {
 	}
 	if len(resources) == 0 {
 		return nil, errors.New("AZSP_RESOURCES names no data service of the ASIP")
+	}
+	return resources, nil
+}
+
+// parseIssuanceResources reads the issuance resources of credential issuers:
+// the issuer identifier, the organizationIdentifier of the only client that
+// may obtain tokens for it, and the name of its source, as
+// url=organizationIdentifier=name, separated by commas. There may be none.
+func parseIssuanceResources(value string) ([]authorization.Resource, error) {
+	var resources []authorization.Resource
+	for _, entry := range strings.Split(value, ",") {
+		if strings.TrimSpace(entry) == "" {
+			continue
+		}
+		url, rest, _ := strings.Cut(entry, "=")
+		organization, name, _ := strings.Cut(rest, "=")
+		url, organization, name = strings.TrimRight(strings.TrimSpace(url), "/"), strings.TrimSpace(organization), strings.TrimSpace(name)
+		if url == "" || organization == "" || name == "" {
+			return nil, fmt.Errorf("AZSP_ISSUANCE_RESOURCES: %q is not url=organizationIdentifier=name", strings.TrimSpace(entry))
+		}
+		resources = append(resources, authorization.Resource{URL: url, Name: name, Kind: authorization.ResourceIssuance, Organization: organization})
 	}
 	return resources, nil
 }

@@ -132,8 +132,12 @@ func newTestASWithIssuer(t *testing.T, resource string, register authorization.R
 		identifiers[walletverifier.Means] = as.wallet
 	}
 	as.service = authorization.NewService(authorization.Config{
-		Issuer:       issuer,
-		Resources:    []authorization.Resource{{URL: resource, Name: "Basisregistratie Personen (test)"}, {URL: testResource2, Name: "DUO (test)"}},
+		Issuer: issuer,
+		Resources: []authorization.Resource{
+			{URL: resource, Name: "Basisregistratie Personen (test)"}, {URL: testResource2, Name: "DUO (test)"},
+			{URL: issuanceResource, Name: "Belastingdienst", Kind: authorization.ResourceIssuance, Organization: issuerOrganizationID},
+			{URL: otherIssuanceResource, Name: "RvIG", Kind: authorization.ResourceIssuance, Organization: otherIssuerOrgID},
+		},
 		Clients:      clientconfig.New(clients...),
 		Identifiers:  identifiers,
 		Tokens:       tokens,

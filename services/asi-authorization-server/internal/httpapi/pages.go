@@ -101,7 +101,12 @@ var requestPage = page("request", "Toestemming geven", "", `{{if .Message}}<div 
 {{end}}<form method="post" action="{{.Action}}" class="as-card">
 <input type="hidden" name="transaction" value="{{.TransactionID}}">
 <h1>Toestemming voor {{.ClientName}}</h1>
-<p class="as-lead">U vraagt bij {{.ClientName}} een verklaring aan. Daarvoor wil {{.ClientName}} bij {{.Source}} {{.Operation}}.</p>
+{{if .Issuance}}<p class="as-lead">U vraagt bij {{.ClientName}} een attestatie aan voor uw wallet. {{.ClientName}} haalt daarvoor uw gegevens op.</p>
+<dl class="as-dl">
+<dt>Wie vraagt het</dt><dd>{{.ClientName}}</dd>
+<dt>Wat</dt><dd>Een attestatie voor uw wallet</dd>
+</dl>
+{{else}}<p class="as-lead">U vraagt bij {{.ClientName}} een verklaring aan. Daarvoor wil {{.ClientName}} bij {{.Source}} {{.Operation}}.</p>
 <dl class="as-dl">
 <dt>Wie vraagt het</dt><dd>{{.ClientName}}, een vertrouwensdienst</dd>
 <dt>Wat</dt><dd>{{.Request}}</dd>
@@ -109,6 +114,7 @@ var requestPage = page("request", "Toestemming geven", "", `{{if .Message}}<div 
 {{if .Attributes}}<dt>Welke gegevens</dt><dd><ul>{{range .Attributes}}<li>{{.}}</li>{{end}}</ul></dd>{{end}}
 </dl>
 {{if .Attributes}}<p class="as-note">{{if .Retrieve}}{{.ClientName}} krijgt deze gegevens te zien.{{else}}{{.ClientName}} hoort alleen of uw gegevens kloppen. Uw gegevens uit {{.Source}} krijgt {{.ClientName}} niet te zien.{{end}}</p>{{end}}
+{{end}}
 <div class="as-sec">
 <h2>Bevestig wie u bent</h2>
 <p>Log in om te bevestigen dat het om uw gegevens gaat. Daarmee geeft u {{.ClientName}} toestemming voor alleen dit verzoek. U logt in bij deze inlogvoorziening, niet bij {{.ClientName}}. Daarna gaat u terug naar {{.ClientName}}.</p>
@@ -235,6 +241,7 @@ func writeRequestPage(w http.ResponseWriter, tx *authorization.Transaction, secu
 		"Source":        tx.Source,
 		"Attributes":    requestedAttributes(tx.Attributes),
 		"Retrieve":      slices.Contains(strings.Fields(tx.Scope), "retrieve"),
+		"Issuance":      tx.Scope == authorization.IssuanceScope,
 		"Action":        DecisionPath,
 		"TransactionID": tx.ID,
 		"Wallet":        wallet,

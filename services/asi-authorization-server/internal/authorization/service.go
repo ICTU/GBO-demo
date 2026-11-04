@@ -39,6 +39,15 @@ const (
 // operation of the ASIP.
 var OperationScopes = []string{"verify", "retrieve"}
 
+// IssuanceScope is the scope of a credential issuer that logs the citizen in
+// here before it issues a source's attestation to a wallet (PuB-EAA). It is
+// not part of ETSI TS 119 478, and it is never combined with the operation
+// scopes: a client is either a QTSP or an issuer.
+const IssuanceScope = "issuance"
+
+// supportedScopes are all scopes, in canonical order.
+var supportedScopes = append(slices.Clone(OperationScopes), IssuanceScope)
+
 // Client is a registered client.
 type Client struct {
 	ID string
@@ -48,6 +57,10 @@ type Client struct {
 	RedirectURIs []string
 	Scopes       map[string]bool
 	Keys         jose.JSONWebKeySet
+	// OrganizationID is the organizationIdentifier of the certificate of a
+	// registered client; an issuer gets tokens only for the issuance
+	// resource of its organisation.
+	OrganizationID string
 }
 
 // Clients is the client registry.
@@ -61,11 +74,28 @@ type Error struct{ Code, Description string }
 
 func (e *Error) Error() string { return e.Code + ": " + e.Description }
 
-// Resource is a data service of the ASIP. Name is what the user is shown:
-// the authentic source the authorization is for.
+// ResourceKind tells a data service of the ASIP from the issuance resource
+// of a credential issuer.
+type ResourceKind int
+
+const (
+	// ResourceDataService is a data service of the ASIP: scopes verify and
+	// retrieve, for a QTSP.
+	ResourceDataService ResourceKind = iota
+	// ResourceIssuance is a credential issuer of one source: scope issuance,
+	// for the client of that source's organisation only.
+	ResourceIssuance
+)
+
+// Resource is a data service of the ASIP, or the issuance resource of a
+// credential issuer. Name is what the user is shown: the authentic source the
+// authorization is for. Organization is, for an issuance resource, the
+// organizationIdentifier of the only client that may obtain tokens for it.
 type Resource struct {
-	URL  string
-	Name string
+	URL          string
+	Name         string
+	Kind         ResourceKind
+	Organization string
 }
 
 // NotRedirectableError is an authorization request that cannot be answered
@@ -132,7 +162,7 @@ func (s *Service) Metadata() map[string]any {
 		"registration_endpoint":                            s.cfg.Issuer + RegisterPath,
 		"response_types_supported":                         []string{"code"},
 		"grant_types_supported":                            []string{"authorization_code"},
-		"scopes_supported":                                 OperationScopes,
+		"scopes_supported":                                 supportedScopes,
 		"authorization_details_types_supported":            []string{AuthorizationDetailsType},
 		"code_challenge_methods_supported":                 []string{"S256"},
 		"token_endpoint_auth_methods_supported":            []string{"private_key_jwt"},
@@ -198,14 +228,28 @@ func (s *Service) Authorize(req AuthorizationRequest) (AuthorizationResponse, er
 	if req.CodeChallengeMethod != "S256" || !codeChallengePattern.MatchString(req.CodeChallenge) {
 		return fail("invalid_request", "PKCE is required: code_challenge_method S256 with a SHA-256 code_challenge")
 	}
+	issuance := scope == IssuanceScope
 	audience, ok := s.resource(req.Resources, "")
+	if ok {
+		ok = s.permits(c, audience, issuance)
+	}
+	if !ok && issuance {
+		return fail("invalid_target", "resource must be the issuance resource of this client's organisation")
+	}
 	if !ok {
-		return fail("invalid_target", "resource must be one data service of the ASIP: "+strings.Join(s.resourceURLs(), ", "))
+		return fail("invalid_target", "resource must be one data service of the ASIP: "+strings.Join(s.dataServiceURLs(), ", "))
 	}
 	detailsPresent := req.AuthorizationDetailsPresent || req.AuthorizationDetails != ""
-	detail, err := parseOptionalAuthorizationDetails(req.AuthorizationDetails, audience, scope, detailsPresent, s.cfg.RequireAuthorizationDetails)
-	if err != nil {
-		return fail("invalid_request", err.Error())
+	var detail *AuthorizationDetail
+	if issuance && detailsPresent {
+		return fail("invalid_request", "authorization_details are not used for issuance")
+	}
+	if !issuance {
+		var err error
+		detail, err = parseOptionalAuthorizationDetails(req.AuthorizationDetails, audience, scope, detailsPresent, s.cfg.RequireAuthorizationDetails)
+		if err != nil {
+			return fail("invalid_request", err.Error())
+		}
 	}
 	binding := RandomID()
 	id := s.transactions.put(pendingAuthorization{
@@ -231,7 +275,8 @@ func (s *Service) Authorize(req AuthorizationRequest) (AuthorizationResponse, er
 }
 
 // grantScope returns the requested scope in canonical order, or the reason it
-// cannot be granted.
+// cannot be granted. A client has either the operation scopes or issuance,
+// so a granted scope never mixes them.
 func (c *Client) grantScope(requested string) (string, string) {
 	want := map[string]bool{}
 	for _, sc := range strings.Fields(requested) {
@@ -241,15 +286,31 @@ func (c *Client) grantScope(requested string) (string, string) {
 		want[sc] = true
 	}
 	var granted []string
-	for _, sc := range OperationScopes {
+	for _, sc := range supportedScopes {
 		if want[sc] {
 			granted = append(granted, sc)
 		}
 	}
 	if len(granted) == 0 {
-		return "", "scope must contain verify, retrieve or both"
+		return "", "scope must contain verify, retrieve or both, or issuance"
 	}
 	return strings.Join(granted, " "), ""
+}
+
+// permits says whether client c may obtain a token for the resource at url:
+// a data service for the operation scopes, the issuance resource of its own
+// organisation for issuance.
+func (s *Service) permits(c *Client, url string, issuance bool) bool {
+	for _, r := range s.cfg.Resources {
+		if r.URL != url {
+			continue
+		}
+		if issuance {
+			return r.Kind == ResourceIssuance && r.Organization != "" && r.Organization == c.OrganizationID
+		}
+		return r.Kind == ResourceDataService
+	}
+	return false
 }
 
 // resource resolves the resource indicators of a request (RFC 8707). bound
@@ -279,6 +340,16 @@ func (s *Service) resourceURLs() []string {
 	urls := make([]string, 0, len(s.cfg.Resources))
 	for _, r := range s.cfg.Resources {
 		urls = append(urls, r.URL)
+	}
+	return urls
+}
+
+func (s *Service) dataServiceURLs() []string {
+	var urls []string
+	for _, r := range s.cfg.Resources {
+		if r.Kind == ResourceDataService {
+			urls = append(urls, r.URL)
+		}
 	}
 	return urls
 }

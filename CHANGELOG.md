@@ -105,6 +105,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   issuer whose offer caller named the subject. It logs that as a separate
   Dataverwerking, `gbo-bsn-ontvangst-aanvrager`, added to the register of
   `logboek-eudi-adapter`, before it asks the source.
+- **The ASI authorization server serves credential issuers** (#614): a
+  client registered with the `PUB_EAA_Provider` entitlement and scope
+  `issuance` obtains tokens for the issuance resource of its own
+  organisation (`AZSP_ISSUANCE_RESOURCES`), so the citizen logs in at the
+  same service before a source's attestation is issued to a wallet. The
+  request page then asks consent for an attestation instead of a
+  verification. The ASI part is unchanged: a token for a data service of the
+  ASIP still goes only to a `QEAA_Provider`, and the two roles never share a
+  client. This use is outside ETSI TS 119 478.
 - **`eudi-adapter` knows a BSN from a login** (#614): a credential issuer
   whose citizen logged in at GBO's authorization server sends
   `{"subject": {"bsn": ...}, "origin": "login"}`. The adapter logs that as
