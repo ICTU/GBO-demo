@@ -64,6 +64,34 @@ func TestCallbackRejectsMalformedInputAndOtherRoutes(t *testing.T) {
 	}
 }
 
+// The own credential issuer fetches the result the QTSP named in its offer:
+// once, and an unknown or used reference is 404 (no data).
+func TestCallbackExchangesOfferReferenceForOneDocument(t *testing.T) {
+	store := issuance.NewStore(time.Now)
+	ref := store.Add(issuance.Request{
+		Identity:  login.Identity{FamilyName: "Jansen", GivenName: "Frouke", Birthdate: "2000-03-24", Nationalities: []string{"NL"}},
+		Operation: "verify", Source: "RvIG",
+		Evidence: []issuance.Evidence{{Name: "Familienaam", Outcome: "Match", Value: json.RawMessage(`"Jansen"`)}}, ExpectedAttributes: 1,
+	})
+	body := `{"subject":{"qtsp_request":"` + ref + `"}}`
+	response := post(t, store, body)
+	var documents []issuance.Document
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &documents) != nil ||
+		len(documents) != 1 || documents[0].AttestationType != issuance.AttestationType {
+		t.Fatalf("response = %d %s, want one document", response.Code, response.Body.String())
+	}
+	for _, again := range []string{body, `{"subject":{"qtsp_request":"unknown"}}`} {
+		if response := post(t, store, again); response.Code != http.StatusNotFound {
+			t.Fatalf("%s: status = %d, want 404", again, response.Code)
+		}
+	}
+	for _, bad := range []string{`{"subject":{"bsn":"999990019"}}`, `{"subject":{"qtsp_request":1}}`} {
+		if response := post(t, store, bad); response.Code != http.StatusBadRequest {
+			t.Fatalf("%s: status = %d, want 400", bad, response.Code)
+		}
+	}
+}
+
 func pidDisclosure(attributes string) string {
 	return `[{"id":"pid","attestations":[{"attestation_type":"urn:eudi:pid:nl:1","attributes":{"urn:eudi:pid:nl:1":` + attributes + `}}]}]`
 }

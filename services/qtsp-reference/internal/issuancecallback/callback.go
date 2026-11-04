@@ -3,6 +3,7 @@
 package issuancecallback
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -25,15 +26,40 @@ func Handler(store *issuance.Store, callbackToken string) http.Handler {
 // Path is the unguessable callback path shared through the mounted secret.
 func Path(callbackToken string) string { return attestationPath + callbackToken }
 
+// attestations serves both issuers. eudi-issuance-server posts the PID the
+// wallet disclosed, an array: the result of the same citizen is issued. The
+// own credential issuer posts {"subject": {"qtsp_request": ref}} when the
+// QTSP asked it for an offer: the result with that reference is issued, and
+// an unknown, used or expired one is 404, which the issuer reports as no
+// data.
 func attestations(store *issuance.Store, w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
-	var disclosed disclosureRequest
+	var raw json.RawMessage
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
-	if err := decoder.Decode(&disclosed); err != nil {
+	if err := decoder.Decode(&raw); err != nil {
 		http.Error(w, "invalid disclosure", http.StatusBadRequest)
 		return
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		http.Error(w, "invalid disclosure", http.StatusBadRequest)
+		return
+	}
+	if trimmed := bytes.TrimSpace(raw); len(trimmed) > 0 && trimmed[0] == '{' {
+		var offered offerRequest
+		if err := json.Unmarshal(raw, &offered); err != nil || offered.Subject.QTSPRequest == "" {
+			http.Error(w, "invalid offer request", http.StatusBadRequest)
+			return
+		}
+		document := store.TakeRef(offered.Subject.QTSPRequest)
+		if document == nil {
+			http.Error(w, "no pending result", http.StatusNotFound)
+			return
+		}
+		writeDocuments(w, []issuance.Document{*document})
+		return
+	}
+	var disclosed disclosureRequest
+	if err := json.Unmarshal(raw, &disclosed); err != nil {
 		http.Error(w, "invalid disclosure", http.StatusBadRequest)
 		return
 	}
@@ -42,14 +68,28 @@ func attestations(store *issuance.Store, w http.ResponseWriter, r *http.Request)
 		http.Error(w, "invalid PID disclosure", http.StatusBadRequest)
 		return
 	}
-	document := store.Take(identity)
+	var documents []issuance.Document
+	if document := store.Take(identity); document != nil {
+		documents = append(documents, *document)
+	}
+	writeDocuments(w, documents)
+}
+
+func writeDocuments(w http.ResponseWriter, documents []issuance.Document) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	if document == nil {
-		_, _ = w.Write([]byte("[]\n"))
-		return
+	if documents == nil {
+		documents = []issuance.Document{}
 	}
-	_ = json.NewEncoder(w).Encode([]issuance.Document{*document})
+	_ = json.NewEncoder(w).Encode(documents)
+}
+
+// offerRequest is what the own credential issuer posts for an offer the
+// QTSP made: the subject the QTSP named, its reference to the result.
+type offerRequest struct {
+	Subject struct {
+		QTSPRequest string `json:"qtsp_request"`
+	} `json:"subject"`
 }
 
 type disclosureRequest []struct {

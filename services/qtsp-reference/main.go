@@ -92,11 +92,15 @@ func serve() error {
 	if err != nil {
 		return err
 	}
-	issuanceSrv, link, err := optionalIssuanceServer(store, link)
+	issuer, err := issuerOffers()
 	if err != nil {
 		return err
 	}
-	handler := web.NewHandlerWithIssuance(client, web.DemoAttributes, env("QTSP_PUBLIC_URL", "http://localhost:4023"), wallet, store, link)
+	issuanceSrv, link, issuer, err := optionalIssuanceServer(store, link, issuer)
+	if err != nil {
+		return err
+	}
+	handler := web.NewHandlerWithIssuance(client, web.DemoAttributes, env("QTSP_PUBLIC_URL", "http://localhost:4023"), wallet, store, link, issuer)
 	srv := &http.Server{Addr: env("QTSP_ADDR", ":4023"), Handler: handler, ReadHeaderTimeout: readHeaderTimeout}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -135,16 +139,38 @@ func serve() error {
 	return srv.Shutdown(drainCtx)
 }
 
-func optionalIssuanceServer(store *issuance.Store, link string) (*http.Server, string, error) {
-	if link == "" {
-		return nil, "", nil
+// optionalIssuanceServer starts the callback both issuers fetch the
+// statement from, when either is configured. Without its certificate
+// material neither is offered.
+func optionalIssuanceServer(store *issuance.Store, link string, issuer *web.Issuer) (*http.Server, string, *web.Issuer, error) {
+	if link == "" && issuer == nil {
+		return nil, "", nil, nil
 	}
 	server, err := newIssuanceServer(store)
 	if errors.Is(err, errIssuanceUnavailable) || (err == nil && server == nil) {
 		slog.Warn("wallet issuance disabled because callback certificate material is absent")
-		return nil, "", nil
+		return nil, "", nil, nil
 	}
-	return server, link, err
+	return server, link, issuer, err
+}
+
+// issuerOffers is the own credential issuer, when QTSP_ISSUER_OFFERS_URL
+// names its internal offer endpoint: the QTSP then offers one QR for both
+// wallets under QTSP_ISSUER_PROFILE with QTSP_ISSUER_CONFIGURATION.
+func issuerOffers() (*web.Issuer, error) {
+	offersURL := strings.TrimSpace(os.Getenv("QTSP_ISSUER_OFFERS_URL"))
+	if offersURL == "" {
+		return nil, nil
+	}
+	u, err := url.Parse(offersURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
+		return nil, errors.New("QTSP_ISSUER_OFFERS_URL must be an absolute HTTP(S) URL without credentials")
+	}
+	return &web.Issuer{
+		OffersURL: offersURL, Profile: env("QTSP_ISSUER_PROFILE", "wallet"),
+		Configuration: env("QTSP_ISSUER_CONFIGURATION", "qtsp-reference-attestation"),
+		HTTP:          &http.Client{Timeout: 20 * time.Second},
+	}, nil
 }
 
 func walletIssuanceLink(publicURL, universalLinkBase string) (string, error) {

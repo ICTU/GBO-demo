@@ -57,6 +57,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   registers the reference QTSP as a provider of the issuer (`QEAA_Provider`),
   whose callback the issuer reaches over its own TLS certificate. The QTSP
   compares nationalities on their code, so a mock login matches a PID.
+- **One QR code for the QTSP statement** (#614): after an accepted result
+  the reference QTSP asks the own credential issuer for a pre-authorized
+  offer (`QTSP_ISSUER_OFFERS_URL` in `.env`, off by default; profile
+  `wallet`) and shows its QR code;
+  the citizen logged in at the QTSP already, so the wallet discloses nothing
+  more. The issuer fetches the statement from the QTSP callback by the
+  reference the offer names, which uses the result. The NL Wallet's static
+  link stays available under "NL Wallet (huidige app)" until the NL Wallet
+  reads the combined profile.
 - **Wallet choice in the developer portal** (#614): the wallet QR panel
   offers "NL Wallet" (as before, through `eudi-issuance-server`) or
   "EU-wallet" when the own credential issuer has a link for the offer. The
@@ -72,7 +81,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   verifier role (`Service_Provider`, the `bsn` of the PID); run it again for
   sources provisioned before, and `make provision-test-pid` too. The materializer writes a disclosure offer per
   source offer and the trusted PID issuers: the NL pre-production CA and the
-  test PID. The QTSP route stays on `eudi-issuance-server` for now.
+  test PID.
 - **Test PID for the own credential issuer** (#614): `make
   provision-test-pid` adds a test PID provider (`urn:eudi:pid:nl:1`) under a
   development root of its own, registered with the `PID_Provider`

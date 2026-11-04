@@ -6,6 +6,8 @@ package issuance
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -45,7 +47,10 @@ type Request struct {
 
 type pending struct {
 	Request
-	id      uint64
+	id uint64
+	// ref names the result in an offer the QTSP makes at the credential
+	// issuer; the issuer hands it back when it fetches the attestation.
+	ref     string
 	expires time.Time
 	timer   *time.Timer
 }
@@ -72,11 +77,13 @@ func NewStore(now func() time.Time) *Store {
 	return &Store{now: now}
 }
 
-// Add records only a complete successful result. It deliberately returns a
-// boolean so the result page shows a wallet action only when issuance exists.
-func (s *Store) Add(request Request) bool {
+// Add records only a complete successful result and returns its reference,
+// or "" when it is not issuable, so the result page shows a wallet action
+// only when issuance exists. The reference is unguessable: whoever holds it
+// can have the attestation issued.
+func (s *Store) Add(request Request) string {
 	if !issuable(request) {
-		return false
+		return ""
 	}
 	now := s.now().UTC()
 	if request.VerifiedAt.IsZero() {
@@ -96,11 +103,11 @@ func (s *Store) Add(request Request) bool {
 		return replaced
 	})
 	s.nextID++
-	candidate := pending{Request: request, id: s.nextID, expires: now.Add(Lifetime)}
+	candidate := pending{Request: request, id: s.nextID, ref: randomRef(), expires: now.Add(Lifetime)}
 	id := candidate.id
 	candidate.timer = time.AfterFunc(Lifetime, func() { s.remove(id) })
 	s.pending = append(s.pending, candidate)
-	return true
+	return candidate.ref
 }
 
 func issuable(request Request) bool {
@@ -156,6 +163,25 @@ func (s *Store) Take(identity login.Identity) *Document {
 		return nil
 	}
 	index := matches[0]
+	candidate := s.pending[index]
+	candidate.timer.Stop()
+	s.pending = slices.Delete(s.pending, index, index+1)
+	return document(candidate.Request)
+}
+
+// TakeRef atomically exchanges the unexpired result with the reference for
+// an issuable document, so it is issued once; nil when there is none.
+func (s *Store) TakeRef(ref string) *Document {
+	now := s.now().UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.prune(now)
+	index := slices.IndexFunc(s.pending, func(candidate pending) bool {
+		return ref != "" && subtle.ConstantTimeCompare([]byte(candidate.ref), []byte(ref)) == 1
+	})
+	if index < 0 {
+		return nil
+	}
 	candidate := s.pending[index]
 	candidate.timer.Stop()
 	s.pending = slices.Delete(s.pending, index, index+1)
@@ -236,6 +262,12 @@ func document(request Request) *Document {
 			"qualification":       Qualification,
 		},
 	}
+}
+
+func randomRef() string {
+	value := make([]byte, 24)
+	_, _ = rand.Read(value)
+	return base64.RawURLEncoding.EncodeToString(value)
 }
 
 func randomID() string {

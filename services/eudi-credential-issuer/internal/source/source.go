@@ -85,8 +85,7 @@ type issuanceValidity struct {
 }
 
 // FetchDisclosed posts the disclosed PID in the form of nl-wallet's
-// issuance_server v0.5.0, so that a backend sees a wallet disclosure (and the
-// QTSP callback, which accepts nothing else, serves it). The PID was
+// issuance_server v0.5.0, so that a backend sees a wallet disclosure. The PID was
 // verified, its status list included: revocation_status is Valid.
 func (c *Client) FetchDisclosed(ctx context.Context, configurationID string, pid issuance.DisclosedPID, parameters map[string]string) ([]issuance.SourceDocument, error) {
 	var validity issuanceValidity
@@ -107,9 +106,9 @@ func (c *Client) FetchDisclosed(ctx context.Context, configurationID string, pid
 
 // Fetch posts {"subject": ...} to the configuration's endpoint, with the
 // parameters in the query. The response is the IssuableDocument list the
-// attestation server of nl-wallet's issuance_server returns. Backends that
-// accept only a PID disclosure (the QTSP callback) do not serve this
-// request; they get one with disclosure-based issuance.
+// attestation server of nl-wallet's issuance_server returns. The QTSP
+// callback serves it for the offers the QTSP makes, with its reference to
+// the result as subject ({"qtsp_request": ref}).
 func (c *Client) Fetch(ctx context.Context, configurationID string, subject map[string]any, parameters map[string]string) ([]issuance.SourceDocument, error) {
 	return c.post(ctx, configurationID, subjectRequest{Subject: subject}, parameters)
 }

@@ -96,11 +96,14 @@ type Handler struct {
 	// issuanceLink is the static cross-device universal link for the QTSP
 	// usecase. The issuance server creates the actual session when scanned.
 	issuanceLink string
-	mu           sync.Mutex
-	sessions     map[string]*session
-	requests     map[string]*request
-	logins       map[string]*loginState
-	now          func() time.Time
+	// issuer makes the one-QR offer for both wallets; nil when it is not
+	// configured, and then only the static link is offered.
+	issuer   *Issuer
+	mu       sync.Mutex
+	sessions map[string]*session
+	requests map[string]*request
+	logins   map[string]*loginState
+	now      func() time.Time
 }
 
 // NewHandler serves the web side. publicURL is where the user reaches it;
@@ -112,10 +115,12 @@ func NewHandler(client *qtsp.Client, attributes []Attribute, publicURL string, w
 }
 
 // NewHandlerWithIssuance adds the test-attestation action to accepted result
-// pages. The store is shared with the internal HTTPS callback listener.
-func NewHandlerWithIssuance(client *qtsp.Client, attributes []Attribute, publicURL string, wallet login.Wallet, store *issuance.Store, link string) http.Handler {
+// pages. The store is shared with the internal HTTPS callback listener. link
+// is the NL Wallet's static link and issuer the own credential issuer;
+// either may be absent.
+func NewHandlerWithIssuance(client *qtsp.Client, attributes []Attribute, publicURL string, wallet login.Wallet, store *issuance.Store, link string, issuer *Issuer) http.Handler {
 	handler := newHandler(client, attributes, publicURL, wallet)
-	handler.issuance, handler.issuanceLink = store, link
+	handler.issuance, handler.issuanceLink, handler.issuer = store, link, issuer
 	return handler.routes()
 }
 
@@ -139,6 +144,7 @@ func (h *Handler) routes() http.Handler {
 	mux.HandleFunc("POST /login/wallet", h.walletStart)
 	mux.HandleFunc("GET /login/wallet", h.walletPage)
 	mux.HandleFunc("POST /logout", h.logout)
+	mux.HandleFunc("POST /wallet-offer", h.walletOffer)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	return mux
 }
@@ -282,7 +288,7 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	o := h.result(s.prepared, resp)
 	h.finish(s.request, o)
 	view := resultView{outcome: o, Who: h.loggedIn(r)}
-	view.WalletQR = h.offerIssuance(s.identity, s.attributes, o)
+	view.WalletQR, view.OfferRef = h.offerIssuance(s.identity, s.attributes, o)
 	render(w, http.StatusOK, resultPage, view)
 }
 
@@ -342,31 +348,44 @@ type outcome struct {
 	ErrorDescription string `json:"error_description,omitempty"`
 }
 
-// resultView is the result page: the outcome, and who is logged in.
+// resultView is the result page: the outcome, and who is logged in. With
+// an accepted result it offers the statement for a wallet: OfferRef for
+// the one-QR offer at the own credential issuer, WalletQR for the NL
+// Wallet's static link.
 type resultView struct {
 	outcome
 	Who      *login.Identity
 	WalletQR template.URL
+	OfferRef string
 }
 
 // offerIssuance stores no result unless every requested verification
-// succeeded (or every retrieval returned a value). It returns the QR only
-// after the pending result exists, so the page never offers a dead action.
-func (h *Handler) offerIssuance(identity login.Identity, requested []qtsp.Attribute, out outcome) template.URL {
-	if h.issuance == nil || h.issuanceLink == "" || out.Status != statusDone || out.Seal == nil || !out.Seal.Valid || !completeEvidence(requested, out.Results) {
-		return ""
+// succeeded (or every retrieval returned a value). It returns the static QR
+// and the offer reference only after the pending result exists, so the
+// page never offers a dead action.
+func (h *Handler) offerIssuance(identity login.Identity, requested []qtsp.Attribute, out outcome) (template.URL, string) {
+	if h.issuance == nil || (h.issuanceLink == "" && h.issuer == nil) || out.Status != statusDone || out.Seal == nil || !out.Seal.Valid || !completeEvidence(requested, out.Results) {
+		return "", ""
 	}
-	code, err := qr.Encode(h.issuanceLink, qr.M)
-	if err != nil {
-		return ""
+	var image template.URL
+	if h.issuanceLink != "" {
+		code, err := qr.Encode(h.issuanceLink, qr.M)
+		if err != nil {
+			return "", ""
+		}
+		image = template.URL("data:image/png;base64," + base64.StdEncoding.EncodeToString(code.PNG()))
 	}
-	if !h.issuance.Add(issuance.Request{
+	ref := h.issuance.Add(issuance.Request{
 		Identity: identity, Operation: out.Operation, Source: out.Source,
 		VerifiedAt: h.now().UTC(), Evidence: out.Evidence, ExpectedAttributes: len(requested),
-	}) {
-		return ""
+	})
+	if ref == "" {
+		return "", ""
 	}
-	return template.URL("data:image/png;base64," + base64.StdEncoding.EncodeToString(code.PNG()))
+	if h.issuer == nil {
+		return image, ""
+	}
+	return image, ref
 }
 
 func completeEvidence(requested []qtsp.Attribute, results []row) bool {

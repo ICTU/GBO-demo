@@ -28,8 +28,8 @@ func TestResultOffersWalletIssuanceOnlyForSuccessfulEvidence(t *testing.T) {
 		Results:  []row{{Identifier: DemoAttributes[0].Identifier, Label: "Familienaam", Result: "Match"}},
 		Evidence: []issuance.Evidence{{Name: "Familienaam", Outcome: "Match", Value: []byte(`{"family_name":"Jansen"}`)}},
 	}
-	if image := h.offerIssuance(identity, requested, success); !strings.HasPrefix(string(image), "data:image/png;base64,") {
-		t.Fatalf("successful result image = %q, want PNG data URL", image)
+	if image, ref := h.offerIssuance(identity, requested, success); !strings.HasPrefix(string(image), "data:image/png;base64,") || ref != "" {
+		t.Fatalf("successful result image = %q ref %q, want PNG data URL and no offer without issuer", image, ref)
 	}
 
 	for _, failed := range []outcome{
@@ -38,8 +38,8 @@ func TestResultOffersWalletIssuanceOnlyForSuccessfulEvidence(t *testing.T) {
 		{Status: statusFailed, Operation: "verify", Source: "RvIG", Seal: &sealView{Valid: true}, Results: []row{{Identifier: DemoAttributes[0].Identifier, Label: "Familienaam", Result: "Match", Value: []byte(`"Jansen"`)}}},
 		{Status: statusDone, Operation: "verify", Source: "RvIG", Seal: &sealView{Valid: true}},
 	} {
-		if image := h.offerIssuance(identity, requested, failed); image != "" {
-			t.Errorf("failed result image = %q, want empty", image)
+		if image, ref := h.offerIssuance(identity, requested, failed); image != "" || ref != "" {
+			t.Errorf("failed result image = %q ref %q, want empty", image, ref)
 		}
 	}
 }
@@ -69,7 +69,7 @@ func TestAcceptedResultFlowsFromResultPageToIssuanceCallback(t *testing.T) {
 	if strings.Contains(string(apiJSON), `"value"`) {
 		t.Fatalf("verify API leaked QTSP evidence value: %s", apiJSON)
 	}
-	image := h.offerIssuance(identity, requested, result)
+	image, _ := h.offerIssuance(identity, requested, result)
 	if !strings.HasPrefix(string(image), "data:image/png;base64,") {
 		t.Fatalf("wallet image = %q", image)
 	}
