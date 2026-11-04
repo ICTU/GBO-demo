@@ -23,8 +23,8 @@ import (
 	"strings"
 	"time"
 
-	"gbo-demo/eudi-adapter/internal/onboarding"
-	"gbo-demo/eudi-adapter/internal/postgresregistry"
+	"gbo-demo/source-registry/onboarding"
+	"gbo-demo/source-registry/postgresregistry"
 )
 
 // Configuration of the own credential issuer (services/eudi-credential-issuer)

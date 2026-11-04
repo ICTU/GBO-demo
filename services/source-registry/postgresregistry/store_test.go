@@ -16,7 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"gbo-demo/eudi-adapter/internal/onboarding"
+	"gbo-demo/source-registry/onboarding"
 )
 
 func TestMigrationAndCandidatePersistence(t *testing.T) {

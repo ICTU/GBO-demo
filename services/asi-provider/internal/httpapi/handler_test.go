@@ -29,11 +29,13 @@ import (
 )
 
 const (
-	idFamilyName = "https://gbo.example/attributes/family_name/1"
-	idGivenName  = "https://gbo.example/attributes/given_name/1"
-	idAddress    = "https://gbo.example/attributes/address/1"
-	idDiploma    = "https://gbo.example/attributes/education_qualification/1"
-	idNotInCat   = "https://gbo.example/attributes/shoe_size/1"
+	idFamilyName  = "https://gbo.example/attributes/family_name/1"
+	idGivenName   = "https://gbo.example/attributes/given_name/1"
+	idAddress     = "https://gbo.example/attributes/address/1"
+	idBirthDate   = "https://gbo.example/attributes/birth_date/1"
+	idNationality = "https://gbo.example/attributes/nationality/1"
+	idDiploma     = "https://gbo.example/attributes/education_qualification/1"
+	idNotInCat    = "https://gbo.example/attributes/shoe_size/1"
 
 	resultMatch     = "http://uri.etsi.org/19478/VerificationResult/Match"
 	resultNoMatch   = "http://uri.etsi.org/19478/VerificationResult/NoMatch"
@@ -83,22 +85,16 @@ func newTestServerWithSource(t *testing.T, authz *testAuthorizationServer, qtsp 
 		Issuer:    testIssuer,
 		Sealer:    seal.New(sealKey, []*x509.Certificate{sealCert, caCert}),
 		DataServices: []DataService{{
-			ID:              "brp",
-			Verification:    verification.NewService(source, brpCatalogue),
-			Tokens:          accesstoken.NewValidator(testIssuer, testPublicURL+testBase, testPublicURL, keys),
-			Provider:        Provider{LegalName: "GBO demo ASIP (test)"},
-			AuthenticSource: &Provider{LegalName: "Basisregistratie Personen (mock)"},
-			Attributes:      []string{idAddress, idFamilyName, idGivenName},
-			Country:         "NL",
+			ID:           "brp",
+			Verification: verification.NewService(source, testCatalogue),
+			Tokens:       accesstoken.NewValidator(testIssuer, testPublicURL+testBase, testPublicURL, keys),
+			Provider:     Provider{LegalName: "GBO demo ASIP (test)"},
 		}, {
-			// A second data service whose source is the ASIP itself: its
-			// responses name no authentic source.
+			// A second data service, of another authentic source.
 			ID:           "duo",
-			Verification: verification.NewService(diplomas, duoCatalogue),
+			Verification: verification.NewService(diplomas, testCatalogue),
 			Tokens:       accesstoken.NewValidator(testIssuer, testPublicURL+duoBase, testPublicURL, keys),
 			Provider:     Provider{LegalName: "DUO (test)"},
-			Attributes:   []string{idDiploma},
-			Country:      "NL",
 		}},
 	})
 	if err != nil {

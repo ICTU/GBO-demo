@@ -98,6 +98,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   issuer whose offer caller named the subject. It logs that as a separate
   Dataverwerking, `gbo-bsn-ontvangst-aanvrager`, added to the register of
   `logboek-eudi-adapter`, before it asks the source.
+- **The landing page offers the Installatie Register scenario**: the DvTP
+  card under "Zelf uitproberen" lets the visitor choose between HypotheekBV
+  and the Installatie Register, with its own steps, test BSNs and start
+  button. The start URL comes from `INSTALLATIE_REGISTER_URL` at runtime, or
+  from `KEYPER_PUBLIC_URL` in compose, and falls back to
+  `http://localhost:9004`.
+- **`asi-mapping` builds attributes from a source's answer** (#592, step 4a):
+  from the requested attributes and fragments it derives one query with only
+  the fields they need, builds each value with `pointer`, `join`, `const` and
+  `each`, and checks it against the attribute's `value_schema`, `format: date`
+  included. A missing required member, an empty list, an unknown person or an
+  answer of another type than `on` is no value; a fragment needs only its own
+  member; a fragment on a `const` member is no value, since a `const` is not
+  source data. An answer of the wrong shape is an error. Nothing in the chain
+  uses it yet.
 - **The BRP mock publishes the `asi` capability** (#592, step 2): its source
   metadata, now version 2.6.0 at schema 1.1, maps its own fields onto the five
   demo attributes the ASIP verifies. Its API, its policy rule and its EUDI
@@ -394,6 +409,63 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- **The README's quick start starts the DvTP demo, and the walkthrough
+  matches the demo**: the quick start lists the five passwords every mode
+  needs, `FTV_POSTGRES_PASSWORD` and `FTV_ADL_READER_PASSWORD` included, and
+  starts with `make demo`, which needs no public URLs, trust anchors or
+  wallet; the EUDI preparation moved to its own section before
+  `make demo-full`. The DvTP walkthrough starts at the consumer mock, explains
+  the DigiD mock sign-in, and repeats the query after revocation with
+  **↻ Verversen**. TROUBLESHOOTING explains the FSC password failure in a
+  second checkout on the same machine.
+- **The ASIP names the source and lists its attributes from the source's
+  description** (#592, step 5): the discovery records list the attributes of
+  the source's current description, with its country, and verify and retrieve
+  name the authentic source by the legal name in it: the one of the
+  description the source was asked by. A new release changes them without a
+  restart. Without a current description the discovery records are 503, as
+  verify and retrieve are, and the Data Service Directory leaves them out.
+  `authentic_source`, `country` and `attributes` are gone from
+  `config/dataservices.json`, and the ASIP refuses a file that still has
+  them. A data service whose source is the ASIP itself, naming no authentic
+  source, is no longer possible.
+- **The ASIP verifies from the source's description** (#592, step 4c): per
+  request it derives one query from the source's `asi` capability, with only
+  the fields of the requested attributes and fragments, and builds the
+  attributes from the answer in the shape of GBO's attribute catalogue, which
+  its image now carries (`ASIP_ATTRIBUTE_CATALOGUE_FILE`). The BRP adapter is
+  gone. Which attributes a data service verifies comes from the description:
+  one it does not describe is 404; `attributes` in `config/dataservices.json`
+  is now a list of identifiers, for the discovery records only. A fragment
+  asks only its own member, so the city of an address without a postcode is
+  `Match`; a fragment on a `const` member, such as the address's country, is
+  `Unknown` without asking the source. An answer of another shape than the
+  description and the value schema expect, such as a birth date that is not a
+  date, is 500. `MatchWithVariation` applies only to strings without a
+  `format`: a birth date matches exactly. A release whose description does not
+  fit the catalogue is one the ASIP cannot read. The query span is now
+  `source query`, with the source as `gbo.asi.source`.
+- **The ASIP reads the sources' descriptions from the Source Registry**
+  (#592, step 4b-2): it reads the active release with the registry's reader
+  role, every `ASIP_SOURCE_REGISTRY_REFRESH` (default 5s). A data service
+  answers `/verify` and `/retrieve` with 503 while its source has no current
+  description: absent from the release, without `asi`, or past its
+  `stale_until`. A release it cannot read, or an unreachable registry, leaves
+  the previous description until it goes stale; the ASIP starts without the
+  registry. Without a registry it reads a release file instead
+  (`ASIP_SOURCE_REGISTRY_RELEASE_FILE`), which `asi-provider
+  write-release-file` writes from a source's published metadata; the
+  end-to-end tests of the reference QTSP and the authorization server use
+  one, and now also run when the ASI services or the modules they use change. In `config/dataservices.json` `source` is now the source's
+  registry id (`rvig`). The ASIP still asks the BRP through its adapter. The
+  ASIP image builds from the repository root; the eudi-adapter's image tag now
+  also covers `asi-mapping` and `source-registry`, so a change to either
+  rebuilds it.
+- **The Source Registry is a module of its own** (#592, step 4b-1): its model
+  and its Postgres store moved unchanged from the eudi-adapter to
+  `services/source-registry`, so the ASIP can read the active release with the
+  same code. The eudi-adapter still onboards sources and writes the registry;
+  its behaviour does not change.
 - **The ASI authorization server's pages get a government look** (#336): the
   coat of arms, the ribbon and Rijksblauw of the demo's consent portal,
   without an organisation's name, replace NL Design System's Voorbeeld theme,

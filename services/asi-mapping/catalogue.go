@@ -45,8 +45,9 @@ func LoadCatalogue(path string) (Catalogue, error) {
 	return ParseCatalogue(data)
 }
 
-// ParseCatalogue reads a catalogue. A keyword outside the subset, or an
-// identifier listed twice, rejects the whole catalogue.
+// ParseCatalogue reads a catalogue. A keyword outside the subset, a format
+// other than "date", or an identifier listed twice, rejects the whole
+// catalogue.
 func ParseCatalogue(data []byte) (Catalogue, error) {
 	var file catalogueFile
 	decoder := json.NewDecoder(bytes.NewReader(data))
@@ -62,10 +63,30 @@ func ParseCatalogue(data []byte) (Catalogue, error) {
 		if attribute.Identifier == "" || attribute.ValueSchema == nil {
 			return nil, fmt.Errorf("attribute catalogue: every attribute needs an identifier and a value_schema")
 		}
+		if err := attribute.ValueSchema.checkFormats(); err != nil {
+			return nil, fmt.Errorf("attribute catalogue: %s: %w", attribute.Identifier, err)
+		}
 		if _, duplicate := catalogue[attribute.Identifier]; duplicate {
 			return nil, fmt.Errorf("attribute catalogue: duplicate identifier %q", attribute.Identifier)
 		}
 		catalogue[attribute.Identifier] = attribute.ValueSchema
 	}
 	return catalogue, nil
+}
+
+// checkFormats rejects a format the ASIP does not check, so no value passes
+// unchecked.
+func (s *ValueSchema) checkFormats() error {
+	if s.Format != "" && s.Format != "date" {
+		return fmt.Errorf("format %q is not supported", s.Format)
+	}
+	for _, property := range s.Properties {
+		if err := property.checkFormats(); err != nil {
+			return err
+		}
+	}
+	if s.Items != nil {
+		return s.Items.checkFormats()
+	}
+	return nil
 }

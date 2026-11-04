@@ -22,8 +22,12 @@ regime := "pid"
 # Query.ingeschrevenPersoon is also the root of bri; this rule judges brp only.
 services := {"brp"}
 
-# The ASIP's FSC peer.
-asip := "99999999900000001200"
+# The ASIP's FSC peers in the local demo and the simulation. These are
+# transport identities, not the authentic source's legal OIN.
+asips := {
+	"99999999900000001200", # local demo
+	"0000009969GBOASIP000", # simulation ASIP
+}
 
 # Every field is listed: other BRP fields (heeftHuwelijk, gezag, a
 # non-resident's address) fall to the engine's closed world. Interface fields
@@ -52,7 +56,7 @@ covers_fields := {
 
 deny contains "PID_NOT_PRESENT" if data.gbo.consent.resolved
 
-deny contains "ACTOR_NOT_ALLOWED" if lib.acting_party != asip
+deny contains "ACTOR_NOT_ALLOWED" if not lib.acting_party in asips
 
 # ── The question ─────────────────────────────────────────────────────────────
 

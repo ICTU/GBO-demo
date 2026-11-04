@@ -27,9 +27,9 @@ import (
 
 	"github.com/go-jose/go-jose/v4"
 
-	"gbo-demo/eudi-adapter/internal/onboarding"
-	"gbo-demo/eudi-adapter/internal/postgresregistry"
 	"gbo-demo/oid4vc-kit/statuslist"
+	"gbo-demo/source-registry/onboarding"
+	"gbo-demo/source-registry/postgresregistry"
 )
 
 // Wallet registration material for the own credential issuer: per source a

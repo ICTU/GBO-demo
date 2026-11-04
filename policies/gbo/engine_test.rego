@@ -372,7 +372,7 @@ test_pid_rule_actors_are_disjoint_from_consent_consumers if {
 	issuers := data.gbo.rules.eudi.helper.designated_issuers
 	count(issuers) > 0
 	count(issuers & _dvtp_consumer_oins) == 0
-	not data.gbo.rules.asi.asi0001.asip in _dvtp_consumer_oins
+	count(data.gbo.rules.asi.asi0001.asips & _dvtp_consumer_oins) == 0
 }
 
 # ── The service decides which rules apply ────────────────────────────────
@@ -440,6 +440,28 @@ test_asip_personal_data_is_granted_by_asi0001 if {
 	every g in result.context.granted {
 		g.rule == "ASI0001"
 	}
+}
+
+test_simulation_asip_personal_data_is_granted_by_asi0001 if {
+	result := gbo.response with input as fx.request("0000009969GBOASIP000", "brp", fx.personal_fields("999991772"), {})
+	result.decision == true
+
+	every g in result.context.granted {
+		g.rule == "ASI0001"
+	}
+}
+
+test_simulation_asip_cannot_read_income if {
+	result := gbo.response with input as fx.income("0000009969GBOASIP000", "999991772", [2025], {})
+	result.decision == false
+	fx.field_codes(result) == {"ACTOR_NOT_ALLOWED"}
+}
+
+test_simulation_asip_cannot_read_other_brp_fields if {
+	marriage := fx.brp_field("IngeschrevenPersoon", "heeftHuwelijk", ["ingeschrevenPersoon", "heeftHuwelijk"])
+	result := gbo.response with input as fx.request("0000009969GBOASIP000", "brp", [fx.person("999991772"), marriage], {})
+	result.decision == false
+	[[d.index, d.code] | some d in fx.denied(result)] == [[1, "NO_APPLICABLE_RULE"]]
 }
 
 # On brp ASI0001 alone covers these fields, and it grants the ASIP only.

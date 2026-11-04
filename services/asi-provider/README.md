@@ -18,12 +18,15 @@ A mock Authentic Source Interface Provider. A qualified trust service provider (
 In the demo stack, after `make demo-eudi` or `make demo-full`:
 
 ```bash
+make demo-eudi
 make demo-asi
 ```
 
+The ASIP reads the sources' descriptions from the active Source Registry release, which `make demo-eudi` onboards; see [Source descriptions](#source-descriptions).
+
 This adds the ASIP's FSC peer (OIN `99999999900000001200`, compose profile `asi`), lists it in the onboarding register with source peer `…0200`, seeds its connection contract for the BRP source (`brp`) with the grant link `/brp` on its Outway, issues the development seal certificate when missing, and starts both services: the authorization server on `GBO_PORT_ASI_AUTHORIZATION_SERVER` (default 9425) and the ASIP on `GBO_PORT_ASI_PROVIDER` (default 9424). Both are reached from the host: the issuer and the ASIP's public URL are host addresses (`http://<GBO_PUBLIC_HOST>:<port>`, or `ASI_AUTHORIZATION_SERVER_PUBLIC_URL` and `ASI_PROVIDER_PUBLIC_URL`; set `GBO_PUBLIC_HOST` to the LAN address when the QTSP or the browser runs on another machine), and the ASIP fetches the authorization server's keys on its internal address (`ASIP_AUTHORIZATION_SERVER_INTERNAL_URL`).
 
-On its own, it needs an Outway with a contract for `brp`; outside the stack every query then answers 503:
+On its own, it needs an Outway with a contract for `brp` and the Source Registry; outside the stack every query then answers 503:
 
 ```bash
 make provision-asip-seal-certificate
@@ -31,12 +34,13 @@ cd services/asi-provider
 ASIP_SEAL_KEY_FILE=../../.local/secrets/asi-provider/seal-key.pem \
 ASIP_SEAL_CERT_FILE=../../.local/secrets/asi-provider/seal-cert.pem \
 ASIP_OUTWAY_URL=http://localhost:8080 \
+ASIP_SOURCE_REGISTRY_DATABASE_URL=postgres://source_registry_reader:<password>@localhost:5432/source_registry \
 go run .
 ```
 
 A request needs an access token from the authorization server, obtained through the authorization code flow; see [`asi-authorization-server`](../asi-authorization-server). The reference QTSP ([`qtsp-reference`](../qtsp-reference)) runs the whole flow; the end-to-end test of the authorization server does so against this service.
 
-Configuration: `ASIP_ADDR` (default `:4020`), `ASIP_PUBLIC_URL` (the scheme and host QTSPs use, default `http://localhost:4020`; the token audience of a data service is this URL plus `/<data service>/authsrc-api`), `ASIP_AUTHORIZATION_SERVER` (the issuer, default `http://localhost:4021`), `ASIP_AUTHORIZATION_SERVER_INTERNAL_URL` (where the ASIP reaches the authorization server when that differs from the issuer), `ASIP_OUTWAY_URL` (required: the ASIP's Outway), `ASIP_DATASERVICES_FILE` (default `config/dataservices.json`), `ASIP_SEAL_KEY_FILE`, `ASIP_SEAL_CERT_FILE` (chain, leaf first).
+Configuration: `ASIP_ADDR` (default `:4020`), `ASIP_PUBLIC_URL` (the scheme and host QTSPs use, default `http://localhost:4020`; the token audience of a data service is this URL plus `/<data service>/authsrc-api`), `ASIP_AUTHORIZATION_SERVER` (the issuer, default `http://localhost:4021`), `ASIP_AUTHORIZATION_SERVER_INTERNAL_URL` (where the ASIP reaches the authorization server when that differs from the issuer), `ASIP_OUTWAY_URL` (required: the ASIP's Outway), `ASIP_DATASERVICES_FILE` (default `config/dataservices.json`), `ASIP_SEAL_KEY_FILE`, `ASIP_SEAL_CERT_FILE` (chain, leaf first), `ASIP_SOURCE_REGISTRY_DATABASE_URL` (the Source Registry with its reader role) or `ASIP_SOURCE_REGISTRY_RELEASE_FILE` (a release file, without a registry; one of the two is required), `ASIP_SOURCE_REGISTRY_SCHEMA` (default `source_registry`), `ASIP_SOURCE_REGISTRY_REFRESH` (default `5s`).
 
 ## Data services
 
@@ -48,17 +52,27 @@ ETSI TS 119 478 lets a response name one authentic source (REQ-ASIP-6.1.1.2-08),
 |---|---|
 | `id` | the path segment |
 | `provider` | the legal name of the ASIP in the responses |
-| `authentic_source` | the legal name of the authentic source; empty when the ASIP is the authentic source, and then the responses name none |
-| `country` | the Member State of the data service (ISO 3166-1 alpha-2), in its discovery records |
-| `source` | the adapter that asks the source; it is code (`brp`: `internal/brpsource`) |
+| `source` | the source's id in the Source Registry, whose description says what the data service verifies, how the ASIP asks the source, the source's legal name and its country |
 | `grant_path` | the grant-link of the ASIP's FSC contract with the source, on its Outway |
-| `attributes` | per attribute identifier, the name the adapter knows it by |
 
-The ASIP does not start with a data service named twice, an unknown adapter, an attribute the adapter cannot ask for, or a field it does not know (a misspelt `authentic_source` would otherwise drop the source from the responses). The authorization server must know the base URL of each data service as a resource (`AZSP_RESOURCES`); a token is for one data service. An attribute of another data service is not in the catalogue: 404. All data services share one seal for now; who holds it is open (#225).
+The responses name the authentic source by the legal name in its description, and the discovery records list the attributes of the description with its country. The ASIP is never the authentic source itself, so every response names one. The ASIP does not start with a data service named twice, one without a source, or a field it does not know: `authentic_source`, `country` and `attributes` come from the description now, and the ASIP refuses them rather than ignore them. The authorization server must know the base URL of each data service as a resource (`AZSP_RESOURCES`); a token is for one data service. An attribute the source does not describe, such as one of another data service, is 404. All data services share one seal for now; who holds it is open (#225).
+
+### Source descriptions
+
+A source describes in its source metadata how its fields make up the attributes (the `asi` capability, `docs/source-onboarding.md`). The eudi-adapter onboards it into the Source Registry; the ASIP reads the active release with the registry's reader role, which may read releases and the active pointer only, every `ASIP_SOURCE_REGISTRY_REFRESH`.
+
+A data service answers `/verify` and `/retrieve` only while its source has a current description: the source is in the active release, describes `asi`, and its `stale_until` has not passed. Otherwise it answers 503, as for an unreachable source; a 404 would tell the QTSP that the attribute does not verify. Its discovery records (`/<data service>/dataservices`) are then 503 too: the ASIP cannot say which attributes the source holds, and the Data Service Directory leaves them out. The ASIP starts without the registry. When the registry cannot be read, or a new release cannot (an unknown snapshot version, an `asi` of another shape, a digest that does not match), the ASIP keeps the descriptions it read before until they go stale. The contract does not depend on it. A response names the source of the description the source was asked by, also when a new release arrives meanwhile.
+
+Where there is no registry, as in the end-to-end tests of the reference QTSP and the authorization server, the ASIP reads a release file instead (`ASIP_SOURCE_REGISTRY_RELEASE_FILE`). `asi-provider write-release-file --source rvig --metadata <source metadata> --catalogue schemas/asi-attributes.json --out <file>` writes one from a source's published metadata, with the `asi` capability checked against the catalogue. It is not a release the eudi-adapter onboarded: its certificates and Type Metadata are placeholders.
+
+From the description the ASIP derives, per request, one query with only the fields of the requested attributes and fragments (`asi-mapping`), and builds each attribute from the answer in the shape of GBO's attribute catalogue (`ASIP_ATTRIBUTE_CATALOGUE_FILE`, default `../../schemas/asi-attributes.json`; the image carries it). The catalogue is provisional, until an EU or national catalogue of attributes provides the schemas; the ASIP also checks each description in a new release against it, and a release with a description that does not fit is one it cannot read.
+
+- A fragment asks only its own member: the city of an address the source holds without a postcode is `Match`. A fragment on a member the source does not provide (a `const`, such as the address's country) or the attribute does not have is `Unknown`, and the source is not asked.
+- An answer of another shape than the description and the value schema expect, such as a birth date that is not a date, is 500, not `Unknown`.
 
 ### Discovery records
 
-`GET /<data service>/dataservices` serves the data service's `dataService` records (ETSI TS 119 478 clause 5.3.3, `19478-dataservice-schema.json`), one per attribute: what the ASIP hands to the Data Service Directory. `endpointURI` is the data service's base URL (for verify and retrieve), `endpointDescription` its contract, `provider` the ASIP's legal name and `country` the data service's country. The provider carries no `identifiers` or `establishedByLaw`: there is no EU identifier type for an OIN, and the demo ASIP has no EUID, LEI or legal basis, so the "should" of REQ-DIP-5.3.3-03-04-04 is not met. [`asi-discovery-stub`](../asi-discovery-stub) answers the Discover Interface's `retrieve` query from these records.
+`GET /<data service>/dataservices` serves the data service's `dataService` records (ETSI TS 119 478 clause 5.3.3, `19478-dataservice-schema.json`), one per attribute of the source's current description: what the ASIP hands to the Data Service Directory. `endpointURI` is the data service's base URL (for verify and retrieve), `endpointDescription` its contract, `provider` the ASIP's legal name and `country` the country in the source's description. The provider carries no `identifiers` or `establishedByLaw`: there is no EU identifier type for an OIN, and the demo ASIP has no EUID, LEI or legal basis, so the "should" of REQ-DIP-5.3.3-03-04-04 is not met. [`asi-discovery-stub`](../asi-discovery-stub) answers the Discover Interface's `retrieve` query from these records.
 
 ## Layout
 
@@ -66,10 +80,11 @@ Ports and adapters, as `AGENTS.md` asks for a service with an authorization boun
 
 | Package | |
 |---|---|
-| `internal/verification` | the core: Verify and Retrieve, the catalogue, matching and JSONPath fragments. Port `Source` |
+| `internal/verification` | the core: Verify and Retrieve, from the source's description, matching and JSONPath fragments. Port `Source` |
 | `internal/accesstoken` | the ASIP as resource server: access token, DPoP proof and scope. Port `KeySource` |
 | `internal/asmetadata` | `KeySource`: the keys from the metadata of the authorization server |
-| `internal/brpsource` | `Source`: the BRP over FSC, one GraphQL query per request |
+| `internal/graphqlsource` | `Source`: an authentic source over FSC, one GraphQL query per request, derived from its description |
+| `internal/sourcedescription` | the sources' descriptions from the active Source Registry release, or a release file |
 | `internal/dataservice` | the data services file |
 | `internal/tracing` | the `Fsc-Transaction-Id` of a request, its trace, and the OTLP exporter |
 | `internal/seal` | the seal on every result |
@@ -95,7 +110,7 @@ The access token is checked first (401). Then the request is validated against t
 
 ## The authentic source
 
-The ASIP is an FSC consumer peer of its own (`99999999900000001200`) with a connection contract for the BRP service `brp`. Per request it posts one GraphQL query of its own to the grant-link `/brp/graphql` on its Outway, with only the fields of the requested attributes and the BSN from the access token as the variable `bsn`: one FSC transaction and one PDP decision per request. If the chain refuses a field, the whole request fails (500): in this chain that is a fault in the deployment. ETSI TS 119 478 does not prescribe how an ASIP asks its source. Every request gets one `Fsc-Transaction-Id` (UUID v7) for its query. Without a `traceparent` from the QTSP, the trace id is that UUID, so the FSC transaction log, the PDP's decision log and the trace share one value; with one, the request joins the QTSP's trace. The ASIP exports spans over OTLP when `OTEL_EXPORTER_OTLP_ENDPOINT` is set (`OTEL_SERVICE_NAME`, default `asi-provider`): the request, with the data service as `gbo.asi.data_service`, and the BRP query, with `gbo.fsc.transaction_id` and the attribute names as `gbo.asi.attributes`. No span holds the BSN or a value. The developer portal's ASI tab lays a request down at the reference QTSP, which starts the verify or retrieve at the ASIP once the citizen approves; the tab shows the outcome the QTSP reports and the chain, the transaction log of the ASIP's peer (`asip`) and BD, and the PDP decision, all found from that transaction id.
+The ASIP is an FSC consumer peer of its own (`99999999900000001200`) with a connection contract for the BRP service `brp`. Per request it posts one GraphQL query, derived from the BRP's description, to the grant-link `/brp/graphql` on its Outway, with only the fields of the requested attributes and the BSN from the access token as the description's subject variable (`bsn`): one FSC transaction and one PDP decision per request. If the chain refuses a field, the whole request fails (500): in this chain that is a fault in the deployment. ETSI TS 119 478 does not prescribe how an ASIP asks its source. Every request gets one `Fsc-Transaction-Id` (UUID v7) for its query. Without a `traceparent` from the QTSP, the trace id is that UUID, so the FSC transaction log, the PDP's decision log and the trace share one value; with one, the request joins the QTSP's trace. The ASIP exports spans over OTLP when `OTEL_EXPORTER_OTLP_ENDPOINT` is set (`OTEL_SERVICE_NAME`, default `asi-provider`): the request, with the data service as `gbo.asi.data_service`, and the source query, with the source as `gbo.asi.source`, `gbo.fsc.transaction_id` and the attribute identifiers as `gbo.asi.attributes`. No span holds the BSN or a value. The developer portal's ASI tab lays a request down at the reference QTSP, which starts the verify or retrieve at the ASIP once the citizen approves; the tab shows the outcome the QTSP reports and the chain, the transaction log of the ASIP's peer (`asip`) and BD, and the PDP decision, all found from that transaction id.
 
 | Attribute | BRP fields | Value |
 |---|---|---|
@@ -140,7 +155,7 @@ Where ETSI TS 119 478 leaves room, this mock chooses as follows (D10 in #336):
 - **`Unknown`** means "no authentic source data was available to determine a match for the attribute for the user" (REQ-ASIP-6.1.1.2-04): the source holds no value for this person. The ARF (QTSPAS_02) answers `NoMatch` in the second case; ETSI clause 6.1.1 is the legally designated text, so it prevails.
 - **404** is returned for an attribute identifier that is not in the catalogue of the data service, also when it is another data service's; and on `/retrieve`, when the source holds no value for one of the requested attributes. Retrieve gives no partial result, so a 200 always carries every requested attribute (REQ-ASIP-6.1.2.2-06, -02-01). On `/verify` a missing value is `Unknown`.
 - **No value is returned.** `Match` and `MatchWithVariation` carry no `attributeValue`, although Implementing Regulation (EU) 2026/1735 Annex IV allows it.
-- **`MatchWithVariation`** is returned when the values are equal after transliterating Latin letters that do not decompose as in ICAO Doc 9303 (ß → ss, æ → ae, ø → oe, ĳ → ij, …), removing diacritics, treating hyphens as spaces, collapsing white space and folding case. Transliteration between scripts (Cyrillic, Greek, …) is not supported.
+- **`MatchWithVariation`** is returned when the values are equal after, in every string without a `format` in the value schema, transliterating Latin letters that do not decompose as in ICAO Doc 9303 (ß → ss, æ → ae, ø → oe, ĳ → ij, …), removing diacritics, treating hyphens as spaces, collapsing white space and folding case. Transliteration between scripts (Cyrillic, Greek, …) is not supported. A string with a `format`, such as the birth date, has one way of writing: it matches exactly or not.
 - **Arrays** (such as nationalities) are compared as sets: order does not matter.
 - **Fragments** support the JSONPath subset `$`, `.name`, `['name']` and `[n]`. The schema requires a fragment `value` to be an object; this mock reads it as `{"<last member name>": value}`, for example location `$.city` with value `{"city": "Rotterdam"}`.
 - **`mandate`** is not supported and returns 501, also on `/retrieve`.

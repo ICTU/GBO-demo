@@ -12,6 +12,8 @@ import (
 	"golang.org/x/text/runes"
 	"golang.org/x/text/transform"
 	"golang.org/x/text/unicode/norm"
+
+	asimapping "gbo-demo/asi-mapping"
 )
 
 // Verification results, ETSI TS 119 478 REQ-ASIP-6.1.1.2-04.
@@ -23,17 +25,18 @@ const (
 )
 
 // compareValues compares the value a QTSP claims with the value the source
-// holds, both decoded JSON.
+// holds, both decoded JSON, of the shape schema describes.
 //
 //   - Match: equal; arrays are compared as sets, so order does not matter.
 //   - MatchWithVariation: equal after the documented normalisation of every
-//     string (see normaliseString).
+//     string without a format (see normaliseString). A string with a format,
+//     such as a date, has one way of writing and matches exactly or not.
 //   - NoMatch: otherwise.
-func compareValues(claimed, held any) string {
-	if equalValues(claimed, held, identity) {
+func compareValues(claimed, held any, schema *asimapping.ValueSchema) string {
+	if equalValues(claimed, held, schema, identity) {
 		return ResultMatch
 	}
-	if equalValues(claimed, held, normaliseString) {
+	if equalValues(claimed, held, schema, normaliseString) {
 		return ResultVariation
 	}
 	return ResultNoMatch
@@ -41,11 +44,35 @@ func compareValues(claimed, held any) string {
 
 func identity(s string) string { return s }
 
-func equalValues(a, b any, norm func(string) string) bool {
+// normaliser is the normalisation of a string of schema: none for a string
+// with a format.
+func normaliser(schema *asimapping.ValueSchema, norm func(string) string) func(string) string {
+	if schema != nil && schema.Format != "" {
+		return identity
+	}
+	return norm
+}
+
+func property(schema *asimapping.ValueSchema, name string) *asimapping.ValueSchema {
+	if schema == nil {
+		return nil
+	}
+	return schema.Properties[name]
+}
+
+func items(schema *asimapping.ValueSchema) *asimapping.ValueSchema {
+	if schema == nil {
+		return nil
+	}
+	return schema.Items
+}
+
+func equalValues(a, b any, schema *asimapping.ValueSchema, norm func(string) string) bool {
 	switch av := a.(type) {
 	case string:
 		bv, ok := b.(string)
-		return ok && norm(av) == norm(bv)
+		n := normaliser(schema, norm)
+		return ok && n(av) == n(bv)
 	case map[string]any:
 		bv, ok := b.(map[string]any)
 		if !ok || len(av) != len(bv) {
@@ -53,7 +80,7 @@ func equalValues(a, b any, norm func(string) string) bool {
 		}
 		for k, x := range av {
 			y, ok := bv[k]
-			if !ok || !equalValues(x, y, norm) {
+			if !ok || !equalValues(x, y, property(schema, k), norm) {
 				return false
 			}
 		}
@@ -63,16 +90,16 @@ func equalValues(a, b any, norm func(string) string) bool {
 		if !ok || len(av) != len(bv) {
 			return false
 		}
-		return equalAsSets(av, bv, norm)
+		return equalAsSets(av, bv, items(schema), norm)
 	default:
 		return reflect.DeepEqual(a, b)
 	}
 }
 
 // equalAsSets compares two arrays regardless of order.
-func equalAsSets(a, b []any, norm func(string) string) bool {
+func equalAsSets(a, b []any, schema *asimapping.ValueSchema, norm func(string) string) bool {
 	key := func(v any) string {
-		out, _ := json.Marshal(normaliseTree(v, norm))
+		out, _ := json.Marshal(normaliseTree(v, schema, norm))
 		return string(out)
 	}
 	ka := make([]string, len(a))
@@ -86,20 +113,20 @@ func equalAsSets(a, b []any, norm func(string) string) bool {
 	return reflect.DeepEqual(ka, kb)
 }
 
-func normaliseTree(v any, norm func(string) string) any {
+func normaliseTree(v any, schema *asimapping.ValueSchema, norm func(string) string) any {
 	switch t := v.(type) {
 	case string:
-		return norm(t)
+		return normaliser(schema, norm)(t)
 	case map[string]any:
 		out := make(map[string]any, len(t))
 		for k, x := range t {
-			out[k] = normaliseTree(x, norm)
+			out[k] = normaliseTree(x, property(schema, k), norm)
 		}
 		return out
 	case []any:
 		out := make([]any, len(t))
 		for i, x := range t {
-			out[i] = normaliseTree(x, norm)
+			out[i] = normaliseTree(x, items(schema), norm)
 		}
 		return out
 	default:
@@ -146,44 +173,41 @@ var latinTransliteration = strings.NewReplacer(
 	"ı", "i",
 )
 
-// jsonPath resolves the subset of RFC 9535 JSONPath this mock supports:
+// path is a location in the subset of RFC 9535 JSONPath this mock supports:
 // a root "$" followed by member names (".name" or "['name']") and array
-// indexes ("[n]"). It returns the selected value and the last member name,
-// which is used as the key of a fragment value.
-func jsonPath(doc any, path string) (any, string, error) {
-	if !strings.HasPrefix(path, "$") {
-		return nil, "", fmt.Errorf("JSONPath must start with $")
+// indexes ("[n]").
+type path []step
+
+type step struct {
+	member string
+	index  bool
+	n      int
+}
+
+func parsePath(location string) (path, error) {
+	if !strings.HasPrefix(location, "$") {
+		return nil, fmt.Errorf("JSONPath must start with $")
 	}
-	rest := path[1:]
-	cur := doc
-	last := ""
+	rest := location[1:]
+	var p path
 	for rest != "" {
 		switch {
 		case strings.HasPrefix(rest, "['"):
 			end := strings.Index(rest, "']")
 			if end < 0 {
-				return nil, "", fmt.Errorf("unterminated member name in %q", path)
+				return nil, fmt.Errorf("unterminated member name in %q", location)
 			}
-			name := rest[2:end]
-			obj, ok := cur.(map[string]any)
-			if !ok {
-				return nil, "", fmt.Errorf("%q does not select an object member", path)
-			}
-			cur, last, rest = obj[name], name, rest[end+2:]
+			p, rest = append(p, step{member: rest[2:end]}), rest[end+2:]
 		case strings.HasPrefix(rest, "["):
 			end := strings.Index(rest, "]")
 			if end < 0 {
-				return nil, "", fmt.Errorf("unterminated index in %q", path)
+				return nil, fmt.Errorf("unterminated index in %q", location)
 			}
-			idx, err := strconv.Atoi(rest[1:end])
+			n, err := strconv.Atoi(rest[1:end])
 			if err != nil {
-				return nil, "", fmt.Errorf("unsupported selector in %q", path)
+				return nil, fmt.Errorf("unsupported selector in %q", location)
 			}
-			arr, ok := cur.([]any)
-			if !ok || idx < 0 || idx >= len(arr) {
-				return nil, "", fmt.Errorf("%q selects nothing", path)
-			}
-			cur, rest = arr[idx], rest[end+1:]
+			p, rest = append(p, step{index: true, n: n}), rest[end+1:]
 		case strings.HasPrefix(rest, "."):
 			rest = rest[1:]
 			n := strings.IndexAny(rest, ".[")
@@ -192,21 +216,64 @@ func jsonPath(doc any, path string) (any, string, error) {
 			}
 			name := rest[:n]
 			if name == "" || name == "*" {
-				return nil, "", fmt.Errorf("unsupported selector in %q", path)
+				return nil, fmt.Errorf("unsupported selector in %q", location)
 			}
-			obj, ok := cur.(map[string]any)
-			if !ok {
-				return nil, "", fmt.Errorf("%q does not select an object member", path)
-			}
-			cur, last, rest = obj[name], name, rest[n:]
+			p, rest = append(p, step{member: name}), rest[n:]
 		default:
-			return nil, "", fmt.Errorf("unsupported selector in %q", path)
-		}
-		if cur == nil {
-			return nil, last, errPathEmpty
+			return nil, fmt.Errorf("unsupported selector in %q", location)
 		}
 	}
-	return cur, last, nil
+	if len(p) == 0 {
+		return nil, fmt.Errorf("a fragment location must select a member, not the whole attribute")
+	}
+	return p, nil
+}
+
+// selectIn returns the value at the path in doc.
+func (p path) selectIn(doc any) (any, error) {
+	cur := doc
+	for _, s := range p {
+		if s.index {
+			arr, ok := cur.([]any)
+			if !ok || s.n < 0 || s.n >= len(arr) {
+				return nil, fmt.Errorf("index %d selects nothing", s.n)
+			}
+			cur = arr[s.n]
+		} else {
+			obj, ok := cur.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("%q is not an object member", s.member)
+			}
+			cur = obj[s.member]
+		}
+		if cur == nil {
+			return nil, errPathEmpty
+		}
+	}
+	return cur, nil
+}
+
+// schemaIn returns the schema of the value at the path.
+func (p path) schemaIn(schema *asimapping.ValueSchema) *asimapping.ValueSchema {
+	for _, s := range p {
+		if s.index {
+			schema = items(schema)
+		} else {
+			schema = property(schema, s.member)
+		}
+	}
+	return schema
+}
+
+// lastMember is the last member name on the path, the key of a fragment
+// value.
+func (p path) lastMember() string {
+	for i := len(p) - 1; i >= 0; i-- {
+		if !p[i].index {
+			return p[i].member
+		}
+	}
+	return ""
 }
 
 // errPathEmpty means the path is well formed but selects no value in the

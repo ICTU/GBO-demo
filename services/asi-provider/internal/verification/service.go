@@ -9,17 +9,25 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"slices"
+	"fmt"
+
+	asimapping "gbo-demo/asi-mapping"
 )
 
-// Source is the authentic source. Values asks it once for the attributes
-// with names for a person, and returns per name the stored value as the JSON
-// object the catalogue describes; a name the source holds no value for is
-// absent. An error means the source gave no answer: ErrSourceUnavailable
-// when it could not be reached, any other error when it refused or answered
-// in a way the ASIP cannot read.
+// Source is the authentic source of a data service, known by its
+// description: the asi capability it publishes in its source metadata.
+//
+// Description returns the current description, ErrSourceUnavailable when
+// there is none. Ask asks the source once, with document, a query derived
+// from that description, for the person with bsn, and returns its answer at
+// the description's result_pointer: nil for a person the source does not
+// know. identifiers name the attributes asked, for tracing. An error means
+// the source gave no answer: ErrSourceUnavailable when it could not be
+// reached, any other error when it refused or answered in a way the ASIP
+// cannot read.
 type Source interface {
-	Values(ctx context.Context, bsn string, names []string) (map[string]json.RawMessage, error)
+	Description() (*asimapping.Capability, error)
+	Ask(ctx context.Context, bsn string, asi *asimapping.Capability, document string, identifiers []string) (any, error)
 }
 
 var (
@@ -37,8 +45,8 @@ type MalformedError struct{ Reason string }
 
 func (e *MalformedError) Error() string { return e.Reason }
 
-// UnknownAttributeError is an attribute identifier that is not in the
-// catalogue: 404.
+// UnknownAttributeError is an attribute identifier the source does not
+// describe: 404.
 type UnknownAttributeError struct{ Identifier string }
 
 func (e *UnknownAttributeError) Error() string {
@@ -81,20 +89,38 @@ type Result struct {
 }
 
 // VerifyResult holds a result per requested attribute and fragment, in the
-// order of the request.
+// order of the request, and the legal name of the authentic source in the
+// description the source was asked by.
 type VerifyResult struct {
-	Attributes []Result
-	Fragments  []Result
+	Attributes      []Result
+	Fragments       []Result
+	AuthenticSource string
 }
 
-// Service verifies and retrieves attributes against a source.
+// RetrieveResult holds the stored values of the requested attributes, and
+// the legal name of the authentic source in the description the source was
+// asked by.
+type RetrieveResult struct {
+	Attributes      []Attribute
+	AuthenticSource string
+}
+
+// Service verifies and retrieves attributes against a source. catalogue
+// holds GBO's value schema per attribute identifier: the shape the source's
+// answer is built into, and which strings compare with variation.
 type Service struct {
 	source    Source
-	catalogue Catalogue
+	catalogue asimapping.Catalogue
 }
 
-func NewService(source Source, catalogue Catalogue) *Service {
+func NewService(source Source, catalogue asimapping.Catalogue) *Service {
 	return &Service{source: source, catalogue: catalogue}
+}
+
+// Description returns the source's current description: ErrSourceUnavailable
+// when there is none.
+func (s *Service) Description() (*asimapping.Capability, error) {
+	return s.source.Description()
 }
 
 // Verify compares the claimed values with the source for the person with
@@ -107,25 +133,64 @@ func (s *Service) Verify(ctx context.Context, bsn string, req VerifyRequest) (Ve
 	if req.Mandate {
 		return VerifyResult{}, ErrMandate
 	}
-	for _, id := range requestedIdentifiers(req) {
-		if _, ok := s.catalogue.lookup(id); !ok {
-			return VerifyResult{}, &UnknownAttributeError{Identifier: id}
-		}
-	}
-	held, err := s.held(ctx, bsn, requestedIdentifiers(req))
+	asi, err := s.describe(requestedIdentifiers(req))
 	if err != nil {
 		return VerifyResult{}, err
 	}
-	var res VerifyResult
+	// A fragment asks only its own member. A member the attribute does not
+	// have, or a const, is no source data: Unknown, and nothing to ask.
+	var requests []asimapping.Request
 	for _, a := range req.Attributes {
-		res.Attributes = append(res.Attributes, Result{Identifier: a.Identifier, Result: verifyAttribute(held, a)})
+		requests = append(requests, asimapping.Request{Identifier: a.Identifier})
 	}
-	for _, f := range req.Fragments {
-		result, err := verifyFragment(held, f)
+	members := make([]string, len(req.Fragments))
+	for i, f := range req.Fragments {
+		path, err := parsePath(f.Location)
+		if err != nil {
+			return VerifyResult{}, &MalformedError{Reason: err.Error()}
+		}
+		if path[0].index {
+			return VerifyResult{}, &MalformedError{Reason: "a fragment location must start with a member name"}
+		}
+		field, ok := attributeOf(asi, f.Identifier).Fields[path[0].member]
+		if !ok || field.Const != nil {
+			continue
+		}
+		members[i] = path[0].member
+		requests = append(requests, asimapping.Request{Identifier: f.Identifier, Members: []string{members[i]}})
+	}
+	result, err := s.ask(ctx, bsn, asi, requests)
+	if err != nil {
+		return VerifyResult{}, err
+	}
+	res := VerifyResult{AuthenticSource: asi.AuthenticSource.LegalName}
+	for _, a := range req.Attributes {
+		value, held, err := s.build(asi, result, a.Identifier, nil)
 		if err != nil {
 			return VerifyResult{}, err
 		}
-		res.Fragments = append(res.Fragments, Result{Identifier: f.Identifier, Result: result})
+		outcome := ResultUnknown
+		if held {
+			var claimed any
+			_ = json.Unmarshal(a.Value, &claimed)
+			outcome = compareValues(claimed, value, s.catalogue[a.Identifier])
+		}
+		res.Attributes = append(res.Attributes, Result{Identifier: a.Identifier, Result: outcome})
+	}
+	for i, f := range req.Fragments {
+		outcome := ResultUnknown
+		if members[i] != "" {
+			value, held, err := s.build(asi, result, f.Identifier, []string{members[i]})
+			if err != nil {
+				return VerifyResult{}, err
+			}
+			if held {
+				if outcome, err = verifyFragment(value, s.catalogue[f.Identifier], f); err != nil {
+					return VerifyResult{}, err
+				}
+			}
+		}
+		res.Fragments = append(res.Fragments, Result{Identifier: f.Identifier, Result: outcome})
 	}
 	return res, nil
 }
@@ -133,103 +198,122 @@ func (s *Service) Verify(ctx context.Context, bsn string, req VerifyRequest) (Ve
 // Retrieve returns the stored values of the requested attributes for the
 // person with bsn. If the source holds no value for one of them, the request
 // is not found as a whole: there is no partial result.
-func (s *Service) Retrieve(ctx context.Context, bsn string, identifiers []string, mandate bool) ([]Attribute, error) {
+func (s *Service) Retrieve(ctx context.Context, bsn string, identifiers []string, mandate bool) (RetrieveResult, error) {
 	if len(identifiers) == 0 {
-		return nil, &MalformedError{Reason: "attributeIdentifiers must contain at least one attribute"}
+		return RetrieveResult{}, &MalformedError{Reason: "attributeIdentifiers must contain at least one attribute"}
 	}
 	if mandate {
-		return nil, ErrMandate
+		return RetrieveResult{}, ErrMandate
 	}
-	for _, id := range identifiers {
-		if _, ok := s.catalogue.lookup(id); !ok {
-			return nil, &UnknownAttributeError{Identifier: id}
-		}
-	}
-	held, err := s.held(ctx, bsn, identifiers)
+	asi, err := s.describe(identifiers)
 	if err != nil {
-		return nil, err
+		return RetrieveResult{}, err
 	}
-	out := make([]Attribute, 0, len(identifiers))
+	requests := make([]asimapping.Request, len(identifiers))
+	for i, id := range identifiers {
+		requests[i] = asimapping.Request{Identifier: id}
+	}
+	result, err := s.ask(ctx, bsn, asi, requests)
+	if err != nil {
+		return RetrieveResult{}, err
+	}
+	out := RetrieveResult{Attributes: make([]Attribute, 0, len(identifiers)), AuthenticSource: asi.AuthenticSource.LegalName}
 	for _, id := range identifiers {
-		v, ok := held[id]
-		if !ok {
-			return nil, &NotHeldError{Identifier: id}
+		value, held, err := s.build(asi, result, id, nil)
+		if err != nil {
+			return RetrieveResult{}, err
 		}
-		out = append(out, Attribute{Identifier: id, Value: v.raw})
+		if !held {
+			return RetrieveResult{}, &NotHeldError{Identifier: id}
+		}
+		raw, err := json.Marshal(value)
+		if err != nil {
+			return RetrieveResult{}, err
+		}
+		out.Attributes = append(out.Attributes, Attribute{Identifier: id, Value: raw})
 	}
 	return out, nil
 }
 
-// heldValue is a value the source holds, as it came and decoded.
-type heldValue struct {
-	raw     json.RawMessage
-	decoded any
-}
-
-// held asks the source once for the attributes with identifiers ids, which
-// are in the catalogue, and returns the values it holds by identifier. An
-// attribute without a value is absent: Unknown (ETSI TS 119 478
-// REQ-ASIP-6.1.1.2-04).
-func (s *Service) held(ctx context.Context, bsn string, ids []string) (map[string]heldValue, error) {
-	var names []string
-	for _, id := range ids {
-		entry, _ := s.catalogue.lookup(id)
-		if !slices.Contains(names, entry.Name) {
-			names = append(names, entry.Name)
-		}
-	}
-	values, err := s.source.Values(ctx, bsn, names)
+// describe returns the source's current description, after checking that it
+// describes every attribute in ids.
+func (s *Service) describe(ids []string) (*asimapping.Capability, error) {
+	asi, err := s.source.Description()
 	if err != nil {
 		return nil, err
 	}
-	held := map[string]heldValue{}
 	for _, id := range ids {
-		entry, _ := s.catalogue.lookup(id)
-		raw, ok := values[entry.Name]
-		var v any
-		if !ok || json.Unmarshal(raw, &v) != nil {
-			continue
+		if attributeOf(asi, id).Identifier == "" {
+			return nil, &UnknownAttributeError{Identifier: id}
 		}
-		held[id] = heldValue{raw: raw, decoded: v}
 	}
-	return held, nil
+	return asi, nil
 }
 
-func verifyAttribute(held map[string]heldValue, a Attribute) string {
-	v, ok := held[a.Identifier]
-	if !ok {
-		return ResultUnknown
+// ask asks the source once for requests and returns its answer; without a
+// field to ask there is no question, and no answer.
+func (s *Service) ask(ctx context.Context, bsn string, asi *asimapping.Capability, requests []asimapping.Request) (any, error) {
+	document, err := asi.Plan(requests)
+	if err != nil {
+		return nil, err
 	}
-	var claimed any
-	_ = json.Unmarshal(a.Value, &claimed)
-	return compareValues(claimed, v.decoded)
+	if document == "" {
+		return nil, nil
+	}
+	var identifiers []string
+	for _, r := range requests {
+		identifiers = append(identifiers, r.Identifier)
+	}
+	return s.source.Ask(ctx, bsn, asi, document, identifiers)
 }
 
-// verifyFragment compares a fragment. The ETSI schema requires the fragment
-// value to be an object; this mock reads it as {"<last member name>": value},
-// for example location "$.city" with value {"city": "Rotterdam"}.
-func verifyFragment(held map[string]heldValue, f Fragment) (string, error) {
-	v, ok := held[f.Identifier]
+// build makes the value of the attribute with id from the source's answer,
+// or of its members only. An error is an answer of another shape than the
+// description and the value schema expect (500), not a missing value.
+func (s *Service) build(asi *asimapping.Capability, result any, id string, members []string) (map[string]any, bool, error) {
+	schema, ok := s.catalogue[id]
 	if !ok {
-		return ResultUnknown, nil
+		return nil, false, fmt.Errorf("attribute %q is not in GBO's attribute catalogue", id)
 	}
-	selected, member, err := jsonPath(v.decoded, f.Location)
+	return attributeOf(asi, id).Build(result, schema, members)
+}
+
+func attributeOf(asi *asimapping.Capability, id string) asimapping.Attribute {
+	for _, attribute := range asi.Attributes {
+		if attribute.Identifier == id {
+			return attribute
+		}
+	}
+	return asimapping.Attribute{}
+}
+
+// verifyFragment compares a fragment with value, the attribute built with
+// the fragment's member. The ETSI schema requires the fragment value to be
+// an object; this mock reads it as {"<last member name>": value}, for
+// example location "$.city" with value {"city": "Rotterdam"}.
+func verifyFragment(value map[string]any, schema *asimapping.ValueSchema, f Fragment) (string, error) {
+	path, err := parsePath(f.Location)
+	if err != nil {
+		return "", &MalformedError{Reason: err.Error()}
+	}
+	selected, err := path.selectIn(value)
 	if errors.Is(err, errPathEmpty) {
 		return ResultUnknown, nil
 	}
 	if err != nil {
 		return "", &MalformedError{Reason: err.Error()}
 	}
+	member := path.lastMember()
 	var claimed map[string]any
 	_ = json.Unmarshal(f.Value, &claimed)
 	if member == "" {
 		return "", &MalformedError{Reason: "a fragment location must end in a member name"}
 	}
-	value, ok := claimed[member]
+	claimedValue, ok := claimed[member]
 	if !ok || len(claimed) != 1 {
 		return "", &MalformedError{Reason: `fragment value must be an object with the single member "` + member + `"`}
 	}
-	return compareValues(value, selected), nil
+	return compareValues(claimedValue, selected, path.schemaIn(schema)), nil
 }
 
 // validateVerifyRequest enforces the required members of the ETSI schema and

@@ -22,8 +22,8 @@ import (
 
 	"github.com/go-jose/go-jose/v4"
 
-	"gbo-demo/eudi-adapter/internal/onboarding"
 	"gbo-demo/oid4vc-kit/statuslist"
+	"gbo-demo/source-registry/onboarding"
 )
 
 const (

@@ -47,6 +47,17 @@ Restart the migration container with `docker compose … restart edi-migrations-
 
 Check the `make fsc-seed-bri` output. Common causes:
 
+- **HTTP 500 `password authentication failed for user "postgres"`**: the FSC
+  database volume was initialized with a different password than the one in
+  `fsc-infra/.env`. This happens with a second clone or worktree on the same
+  machine: the FSC stack's Compose project is `fsc-infra` in every checkout
+  unless `FSC_PROJECT_NAME` is set in `fsc-infra/.env`, so the new checkout
+  reuses the old checkout's volume while `make` generates a new password.
+  Either give the new checkout its own FSC project by setting
+  `FSC_PROJECT_NAME` in its `fsc-infra/.env` before the first `make demo`, or,
+  when the old FSC state is disposable, run `make fsc-clean` and start again.
+  `make fsc-clean` removes the shared `fsc-infra` volumes, including those of
+  the other checkout.
 - **HTTP 500 `unknown protocol`**: manager v2.4.0 versus script mismatch. Verify that `services/dev-portal-backend/fsctxlog.go` and this script use the same FSC version.
 - **HTTP 401**: inspect the responding Manager's logs and the client
   certificate used by the seed. Auto-sign configuration is separate:
@@ -186,10 +197,9 @@ curl -s "${EUDI_PUBLIC_URL%/}/.well-known/openid-credential-issuer" \
 Expect `DYNAMIC` or `BYPASS`, no increasing `Age`, and the same VCT version as
 the active source record.
 
-**FSC seed reports PostgreSQL password authentication failed**: an existing
-FSC volume was initialized with a different password than `fsc-infra/.env`.
-For disposable local state, run `make fsc-clean` and restart. Do not wipe a
-non-disposable environment.
+**FSC seed reports PostgreSQL password authentication failed**: see
+[Contract seed fails](#contract-seed-fails). Do not wipe a non-disposable
+environment.
 
 **Check**: `curl -X POST 'http://localhost:9409/attestations/99999999900000000200/inkomensverklaring?jaar=2024' …`. A `UNKNOWN_GRANT_HASH_IN_HEADER` response means the data-service grant-link is missing.
 

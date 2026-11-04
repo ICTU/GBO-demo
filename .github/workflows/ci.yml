@@ -118,14 +118,14 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.25'
-          cache-dependency-path: services/eudi-adapter/go.*
+          cache-dependency-path: services/source-registry/go.*
       - name: migration, persistence, promotion and rollback tests
-        working-directory: services/eudi-adapter
+        working-directory: services/source-registry
         env:
           SOURCE_REGISTRY_TEST_PASSWORD: registrytest
         run: >-
           SOURCE_REGISTRY_TEST_DATABASE_URL="postgres://postgres:${SOURCE_REGISTRY_TEST_PASSWORD}@127.0.0.1:5432/registrytest?sslmode=disable"
-          go test -count=1 -timeout 60s ./internal/postgresregistry
+          go test -count=1 -timeout 60s ./postgresregistry
 
   rego:
     name: Rego — fmt + check + test
@@ -336,11 +336,12 @@ jobs:
         run: |
           context="services/${{ matrix.service }}"
           # These reach outside their own service directory: dev-portal-backend
-          # and openftv-pdp bake in ./policies, and the services that write
-          # LDV records depend on the sibling services/ldv-client module.
+          # and openftv-pdp bake in ./policies, the services that write LDV
+          # records depend on the sibling services/ldv-client module, and
+          # eudi-adapter and asi-provider on asi-mapping and source-registry.
           # Same context compose uses.
           case "${{ matrix.service }}" in
-            bron-sidecar|brp-graphql-server|consent-portal-backend|consent-register|dev-portal-backend|dienstverlener-backend|eudi-adapter|graphql-server|ldv-logboek|lvg-graphql-server|openftv-pdp) context=. ;;
+            asi-provider|bron-sidecar|brp-graphql-server|consent-portal-backend|consent-register|dev-portal-backend|dienstverlener-backend|eudi-adapter|graphql-server|ldv-logboek|lvg-graphql-server|openftv-pdp) context=. ;;
           esac
           docker build \
             --file "services/${{ matrix.service }}/Dockerfile" \

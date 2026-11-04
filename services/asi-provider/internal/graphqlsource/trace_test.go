@@ -1,4 +1,4 @@
-package brpsource
+package graphqlsource
 
 import (
 	"net/http"
@@ -12,6 +12,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
+	asimapping "gbo-demo/asi-mapping"
 	"gbo-demo/asi-provider/internal/tracing"
 )
 
@@ -26,13 +27,22 @@ func recordSpans(t *testing.T) *tracetest.SpanRecorder {
 	return rec
 }
 
-// serve runs one request to the ASIP that asks the BRP for names, as the
-// handler does, inside the tracing middleware.
-func serve(t *testing.T, s *Source, traceparent string, names ...string) {
+// serve runs one request to the ASIP that asks the BRP for the attributes
+// with ids, as the handler does, inside the tracing middleware.
+func serve(t *testing.T, s *Source, traceparent string, ids ...string) {
 	t.Helper()
+	asi := brpASI(t)
+	var requests []asimapping.Request
+	for _, id := range ids {
+		requests = append(requests, asimapping.Request{Identifier: id})
+	}
+	document, err := asi.Plan(requests)
+	if err != nil {
+		t.Fatal(err)
+	}
 	handler := tracing.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, err := s.Values(r.Context(), bsn, names); err != nil {
-			t.Errorf("Values: %v", err)
+		if _, err := s.Ask(r.Context(), bsn, asi, document, ids); err != nil {
+			t.Errorf("Ask: %v", err)
 		}
 	}), "asi-provider")
 	req := httptest.NewRequest(http.MethodPost, "/brp/authsrc-api/verify", strings.NewReader(`{}`))
@@ -48,8 +58,8 @@ func serve(t *testing.T, s *Source, traceparent string, names ...string) {
 // is the transaction id (C3).
 func TestOneTraceAndOneTransactionPerRequest(t *testing.T) {
 	rec := recordSpans(t)
-	o, s := newOutway(t, http.StatusOK, brpPerson(frouke))
-	serve(t, s, "", "family_name", "address")
+	o, s := newOutway(t, http.StatusOK, frouke)
+	serve(t, s, "", idFamilyName, idAddress)
 
 	if o.requests != 1 {
 		t.Fatalf("%d requests to the Outway, want one", o.requests)
@@ -64,19 +74,20 @@ func TestOneTraceAndOneTransactionPerRequest(t *testing.T) {
 		if span.SpanContext().TraceID().String() != traceID {
 			t.Errorf("span %q is in trace %s, want %s", span.Name(), span.SpanContext().TraceID(), traceID)
 		}
-		if span.Name() == "BRP query" {
+		if span.Name() == "source query" {
 			query = span
 		}
 	}
 	if query == nil {
-		t.Fatalf("no BRP query span among %d spans", len(rec.Ended()))
+		t.Fatalf("no source query span among %d spans", len(rec.Ended()))
 	}
 	attrs := map[string]string{}
 	for _, kv := range query.Attributes() {
 		attrs[string(kv.Key)] = kv.Value.String()
 	}
-	if attrs[tracing.TransactionIDAttribute] != tx || attrs["gbo.asi.attributes"] != `["family_name","address"]` {
-		t.Errorf("BRP query attributes = %v, want transaction %s and the two attribute names", attrs, tx)
+	if attrs[tracing.TransactionIDAttribute] != tx || attrs["gbo.asi.source"] != "rvig" ||
+		attrs["gbo.asi.attributes"] != `["`+idFamilyName+`","`+idAddress+`"]` {
+		t.Errorf("source query attributes = %v, want the source, transaction %s and the two attributes", attrs, tx)
 	}
 }
 
@@ -84,9 +95,9 @@ func TestOneTraceAndOneTransactionPerRequest(t *testing.T) {
 // the transaction id is still the ASIP's own.
 func TestACallersTraceIsKept(t *testing.T) {
 	recordSpans(t)
-	o, s := newOutway(t, http.StatusOK, brpPerson(frouke))
+	o, s := newOutway(t, http.StatusOK, frouke)
 	callerTrace := "4bf92f3577b34da6a3ce929d0e0e4736"
-	serve(t, s, "00-"+callerTrace+"-00f067aa0ba902b7-01", "family_name")
+	serve(t, s, "00-"+callerTrace+"-00f067aa0ba902b7-01", idFamilyName)
 	if parts := strings.Split(o.got.Header.Get("Traceparent"), "-"); len(parts) != 4 || parts[1] != callerTrace {
 		t.Errorf("traceparent to the Outway = %q, want the caller's trace", o.got.Header.Get("Traceparent"))
 	}
@@ -98,8 +109,10 @@ func TestACallersTraceIsKept(t *testing.T) {
 // No span name or attribute holds the BSN or a value the BRP returned (C4).
 func TestSpansHoldNoPersonalData(t *testing.T) {
 	rec := recordSpans(t)
-	_, s := newOutway(t, http.StatusOK, brpPerson(frouke))
-	serve(t, s, "", "family_name", "given_name", "birth_date", "nationality", "address")
+	_, s := newOutway(t, http.StatusOK, `{"data":{"ingeschrevenPersoon":{"__typename":"Ingezetene","geslachtsnaam":"Jansen",`+
+		`"voornamen":"Frouke","geboortedatum":"2000-03-24","woontOp":{"straatnaam":"Coolsingel","postcode":"3011 AD","woonplaatsnaam":"Rotterdam"}}}}`)
+	serve(t, s, "", idFamilyName, "https://gbo.example/attributes/given_name/1", "https://gbo.example/attributes/birth_date/1",
+		"https://gbo.example/attributes/nationality/1", idAddress)
 	personal := []string{bsn, "Jansen", "Frouke", "2000-03-24", "Coolsingel", "3011 AD", "Rotterdam"}
 	for _, span := range rec.Ended() {
 		texts := []string{span.Name(), span.Status().Description}

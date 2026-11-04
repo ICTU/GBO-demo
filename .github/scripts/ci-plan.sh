@@ -73,6 +73,7 @@ ldv-logboek
 lvg-graphql-server
 oid4vc-kit
 qtsp-reference
+source-registry
 test-pid-source
 SERVICES
 
@@ -90,8 +91,10 @@ if matches_any 'services/ftv-graphql-mapper/*'; then
   go="$(append_unique "${go}" 'bron-sidecar')"
 fi
 
-if matches_any 'services/asi-mapping/*'; then
-  go="$(append_unique "${go}" 'eudi-adapter')"
+if matches_any 'services/asi-mapping/*' 'services/source-registry/*'; then
+  for service in eudi-adapter asi-provider; do
+    go="$(append_unique "${go}" "${service}")"
+  done
 fi
 
 # The test PID stub's tests read the BRP mock persons.
@@ -110,7 +113,20 @@ fi
 # validate source metadata.
 if matches_any 'schemas/gbo-*.schema.json' 'schemas/asi-attributes.json' \
   'services/brp-graphql-server/config/*' 'services/graphql-server/config/*'; then
-  for service in asi-mapping eudi-adapter; do
+  for service in asi-mapping eudi-adapter asi-provider; do
+    go="$(append_unique "${go}" "${service}")"
+  done
+fi
+
+# The end-to-end tests of the reference QTSP and the authorization server
+# build and run the ASIP (the QTSP's also the authorization server and the
+# DIP stub); the ASIP reads the BRP's published metadata, checked against the
+# attribute catalogue.
+if matches_any 'services/asi-authorization-server/*' 'services/asi-provider/*' \
+  'services/asi-discovery-stub/*' 'services/asi-mapping/*' \
+  'services/source-registry/*' 'services/brp-graphql-server/config/*' \
+  'schemas/asi-attributes.json'; then
+  for service in qtsp-reference asi-authorization-server; do
     go="$(append_unique "${go}" "${service}")"
   done
 fi
@@ -163,7 +179,18 @@ if matches_any 'services/ldv-client/*'; then
   done
 fi
 
-if matches_any 'services/asi-mapping/*' 'services/oid4vc-kit/*'; then
+if matches_any 'services/asi-mapping/*' 'services/source-registry/*'; then
+  for service in eudi-adapter asi-provider; do
+    docker="$(append_unique "${docker}" "${service}")"
+  done
+fi
+
+# The ASIP's image carries GBO's attribute catalogue.
+if matches_any 'schemas/asi-attributes.json'; then
+  docker="$(append_unique "${docker}" 'asi-provider')"
+fi
+
+if matches_any 'services/oid4vc-kit/*'; then
   docker="$(append_unique "${docker}" 'eudi-adapter')"
 fi
 
@@ -184,14 +211,14 @@ fi
 # A root .dockerignore change affects each image built with the repository as
 # its context. Service-specific contexts do not read this file.
 if matches_any '.dockerignore'; then
-  for service in eudi-adapter bron-sidecar graphql-server ldv-logboek \
-    lvg-graphql-server openftv-pdp; do
+  for service in eudi-adapter asi-provider bron-sidecar graphql-server \
+    ldv-logboek lvg-graphql-server openftv-pdp; do
     docker="$(append_unique "${docker}" "${service}")"
   done
 fi
 
 source_registry=false
-if [[ "${ci_changed}" == true ]] || matches_any 'services/eudi-adapter/*'; then
+if [[ "${ci_changed}" == true ]] || matches_any 'services/eudi-adapter/*' 'services/source-registry/*'; then
   source_registry=true
 fi
 

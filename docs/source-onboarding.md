@@ -255,7 +255,7 @@ sequenceDiagram
     else Productie met expliciete promotie
         O->>P: Keur een complete kandidaatset goed en promoveer die
     end
-    A->>P: Poll active release en lifecycle; laad gewijzigd materiaal read-only
+    A->>P: Poll active release en lifecycle, laad gewijzigd materiaal read-only
     A->>A: Vervang de in-memory snapshot atomair
     M->>P: Laad de actieve release read-only
     M->>M: Combineer release en certificate Secret in emptyDir
@@ -395,7 +395,18 @@ publiceren: de attributen die ze aanbiedt voor verificatie via de ASIP (ETSI TS
 119 478). In `1.0` is `asi` niet toegestaan.
 
 De reconciler controleert `asi` met de regels hieronder en neemt het mee in de
-release; de ASIP leest het nog niet.
+release. De ASIP leest de actieve release (standaard elke 5 seconden, zonder
+herstart) en gebruikt de beschrijving voor drie dingen:
+
+- de vraag aan de bron, per verzoek;
+- de naam van de bron in elk verify- en retrieve-antwoord
+  (`authentic_source.legal_name`);
+- de discovery-records: één per attribuut, met het land uit
+  `authentic_source.country`.
+
+Zonder actuele beschrijving, omdat de bron er geen heeft of omdat haar
+metadata verlopen is, antwoordt de ASIP met 503 op verify, retrieve en
+discovery.
 
 - **Een fout in `asi` weigert de hele bron**, ook als `eudi` klopt. Zo werkt een
   foute attestation ook; de actieve release blijft staan.
@@ -517,9 +528,10 @@ broncode en moeten fail-closed regressietests hebben.
 Plaats voor een echte testwallet eerst de reeds vertrouwde ontwikkel-CA's in
 `.local/secrets/development-ca/`, of zet `ONBOARDING_SECRETS_DIR` op een
 beheerde secrets-root met de submap `development-ca/`; zie de
-[Quick start](../README.md#quick-start). Onboarding genereert uitsluitend
-brongebonden leafcertificaten. De issuer- en reader-CA worden nooit gegenereerd
-en ontbrekende CA-bestanden laten de setup direct stoppen.
+[volledige demo met EUDI](../README.md#the-complete-demo-with-eudi).
+Onboarding genereert uitsluitend brongebonden leafcertificaten. De issuer- en
+reader-CA worden nooit gegenereerd en ontbrekende CA-bestanden laten de setup
+direct stoppen.
 Daarna voert dit target de volledige onboarding uit:
 
 ```sh

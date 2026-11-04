@@ -15,7 +15,7 @@ import (
 	"time"
 
 	asimapping "gbo-demo/asi-mapping"
-	onboardingcore "gbo-demo/eudi-adapter/internal/onboarding"
+	onboardingcore "gbo-demo/source-registry/onboarding"
 )
 
 type sourceActivation struct {

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"gbo-demo/eudi-adapter/internal/onboarding"
-	"gbo-demo/eudi-adapter/internal/postgresregistry"
+	"gbo-demo/source-registry/onboarding"
+	"gbo-demo/source-registry/postgresregistry"
 )
 
 type sourceReleaseOperations interface {

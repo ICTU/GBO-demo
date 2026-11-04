@@ -827,6 +827,25 @@ a:hover {
   visibility: hidden;
 }
 
+/* Een stapel die zelf de startknop draagt, vult de rest van de kaart, zodat
+   die knop net als in de buurkaart onderaan staat. */
+.tryout-stack--fill {
+  flex: 1;
+}
+
+.tryout-scenario {
+  display: flex;
+  flex-direction: column;
+}
+
+.tryout-hint {
+  margin: 0 0 24px;
+  padding: 12px 14px;
+  background: var(--grey-bg);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
 .tryout-desc {
   margin: 0 0 18px;
   font-size: 15px;

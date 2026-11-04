@@ -57,14 +57,44 @@ cd GBO-demo
 cp .env.example .env
 ```
 
-Set the required values in `.env`:
+Every mode needs these five values in `.env`. Any non-empty random value works
+on the local demo network, for example from `openssl rand -hex 16`; use a
+different value for each:
+
+```dotenv
+FTV_POSTGRES_PASSWORD=<local-random-password>
+FTV_ADL_READER_PASSWORD=<local-random-reader-password>
+EUDI_POSTGRES_PASSWORD=<local-random-password>
+SOURCE_REGISTRY_PASSWORD=<local-random-writer-password>
+SOURCE_REGISTRY_READER_PASSWORD=<local-random-reader-password>
+```
+
+Start the DvTP demo. It needs no public URLs, trust anchors or wallet:
+
+```bash
+make demo
+```
+
+The first run builds every image and takes a few minutes. Open the demo at:
+
+| Entry point | URL |
+| --- | --- |
+| Demo landing page | <http://localhost:9000> |
+| Consumer mock | <http://localhost:9001> |
+| Consent portal | <http://localhost:9002> |
+| Developer portal | <http://localhost:9003> |
+| Jaeger (traces) | <http://localhost:9686> |
+
+Then follow the [DvTP consent walkthrough](#dvtp-consent).
+
+### The complete demo, with EUDI
+
+`make demo-full` adds the EUDI wallet flow to DvTP. It additionally needs the
+public URLs in `.env`:
 
 ```dotenv
 EUDI_PUBLIC_URL=https://eudi-is.example.org/
 EUDI_BRI_URL=https://eudi-bri.example.org/
-EUDI_POSTGRES_PASSWORD=<local-random-password>
-SOURCE_REGISTRY_PASSWORD=<local-random-writer-password>
-SOURCE_REGISTRY_READER_PASSWORD=<local-random-reader-password>
 ```
 
 Before starting an EUDI demo, provide the issuer and reader CA material that
@@ -189,15 +219,6 @@ The first EUDI build can take several minutes. `make demo-full` performs the
 complete idempotent bootstrap: FSC setup, contracts, source onboarding,
 development certificates, EUDI configuration and application startup.
 
-Open the demo at:
-
-| Entry point | URL |
-| --- | --- |
-| Demo landing page | <http://localhost:9000> |
-| Consumer mock | <http://localhost:9001> |
-| Consent portal | <http://localhost:9002> |
-| Developer portal | <http://localhost:9003> |
-
 ## Other modes
 
 | Command | Starts |
@@ -218,17 +239,32 @@ contracts and generated configuration in the required order.
 
 ### DvTP consent
 
-1. Open the [consent portal](http://localhost:9002) and sign in with a mock
-   citizen from `services/graphql-server/mockdata/citizens.json`.
-2. Grant a consumer consent for a scope such as `bd:ib:2025`.
-3. The portal returns a signed consent token to the
-   [consumer mock](http://localhost:9001), which immediately runs the query.
-4. Open the [developer portal](http://localhost:9003) to inspect the policy
-   decision, trace and FSC transaction.
-5. Revoke the consent and repeat the query. The PDP now denies it. The
-   consumer is told only `FIELD_NOT_PERMITTED`, so the consumer mock offers to
-   consent again without naming a cause; the developer portal shows the
-   field's own reason, `CONSENT_WITHDRAWN`.
+The flow starts at the consumer, not at the consent portal: the portal only
+shows consents that already exist.
+
+1. Open the [consumer mock](http://localhost:9001) and click
+   **Inloggen met DigiD**. The consumer sends you to the consent portal with
+   its request: service, purpose and the scopes `bd:ib:2025` and `bd:ib:2024`.
+2. Pick any sign-in method. The DigiD mock takes any username and a mock BSN
+   as the password, for example `123456789`; the mock citizens are in
+   `services/graphql-server/mockdata/citizens.json`.
+3. Choose the data sets to share and click **Geef toestemming**. The portal
+   returns a signed consent token to the consumer mock, which immediately runs
+   the query and shows the income data.
+4. Open the [developer portal](http://localhost:9003). **History · Replay**
+   lists the issuance and the query with their outcome and trace id.
+5. In another tab, open the [consent portal](http://localhost:9002), sign in
+   as the same citizen, open the consent and click **Toestemming intrekken**.
+   Back in the consumer mock, expand **Inkomensgegevens** and click
+   **↻ Verversen** to repeat the query with the same token. The PDP now denies
+   it. The consumer is told only `FIELD_NOT_PERMITTED`, so the consumer mock
+   offers to consent again without naming a cause. The developer portal's
+   history lists the request as `DENY`; the field's own reason,
+   `CONSENT_WITHDRAWN`, is in the PDP decision log
+   (`docker compose logs openftv-pdp`).
+
+Starting again from the consumer mock's home page begins a new consent; it
+does not repeat the query, because the token only lives in that result page.
 
 The developer portal injects `DVTP_CONSUMER_PEER_ID` into the
 `dienstverlener_oin` field of its predefined DvTP issuance scenarios. It uses
