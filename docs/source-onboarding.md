@@ -528,9 +528,10 @@ broncode en moeten fail-closed regressietests hebben.
 Plaats voor een echte testwallet eerst de reeds vertrouwde ontwikkel-CA's in
 `.local/secrets/development-ca/`, of zet `ONBOARDING_SECRETS_DIR` op een
 beheerde secrets-root met de submap `development-ca/`; zie de
-[Quick start](../README.md#quick-start). Onboarding genereert uitsluitend
-brongebonden leafcertificaten. De issuer- en reader-CA worden nooit gegenereerd
-en ontbrekende CA-bestanden laten de setup direct stoppen.
+[volledige demo met EUDI](../README.md#the-complete-demo-with-eudi).
+Onboarding genereert uitsluitend brongebonden leafcertificaten. De issuer- en
+reader-CA worden nooit gegenereerd en ontbrekende CA-bestanden laten de setup
+direct stoppen.
 Daarna voert dit target de volledige onboarding uit:
 
 ```sh

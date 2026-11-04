@@ -318,6 +318,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- **The README's quick start starts the DvTP demo, and the walkthrough
+  matches the demo**: the quick start lists the five passwords every mode
+  needs, `FTV_POSTGRES_PASSWORD` and `FTV_ADL_READER_PASSWORD` included, and
+  starts with `make demo`, which needs no public URLs, trust anchors or
+  wallet; the EUDI preparation moved to its own section before
+  `make demo-full`. The DvTP walkthrough starts at the consumer mock, explains
+  the DigiD mock sign-in, and repeats the query after revocation with
+  **↻ Verversen**. TROUBLESHOOTING explains the FSC password failure in a
+  second checkout on the same machine.
 - **The ASIP names the source and lists its attributes from the source's
   description** (#592, step 5): the discovery records list the attributes of
   the source's current description, with its country, and verify and retrieve
