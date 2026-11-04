@@ -6,6 +6,9 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"net/url"
+	"sort"
+	"strings"
 	"time"
 
 	"gbo-demo/oid4vc-kit/oid4vci"
@@ -177,4 +180,54 @@ func claimTime(claims map[string]any, name string) time.Time {
 		return time.Unix(int64(f), 0).UTC()
 	}
 	return time.Time{}
+}
+
+// DisclosureLink is how a wallet of one profile starts a disclosure offer:
+// its client_id, its request_uri and the link that carries both.
+type DisclosureLink struct {
+	ClientID   string `json:"client_id"`
+	RequestURI string `json:"request_uri"`
+	Link       string `json:"link"`
+}
+
+// DisclosureOfferLinks are the fixed links of one disclosure offer, per
+// profile.
+type DisclosureOfferLinks struct {
+	Provider string                    `json:"provider"`
+	Key      string                    `json:"key"`
+	Profiles map[string]DisclosureLink `json:"profiles"`
+}
+
+// DisclosureOfferLinks lists every disclosure offer with its fixed link per
+// profile, sorted by provider and key: openid4vp:// for KindEUDI, the
+// wallet's universal link for KindNL when its base is configured. The
+// links are public; a frontend shows them as QR codes.
+func (s *Service) DisclosureOfferLinks() []DisclosureOfferLinks {
+	out := make([]DisclosureOfferLinks, 0, len(s.disclosureOffers))
+	for _, o := range s.disclosureOffers {
+		prov := s.providers[o.Provider]
+		entry := DisclosureOfferLinks{Provider: o.Provider, Key: o.Key, Profiles: map[string]DisclosureLink{}}
+		for _, p := range s.profiles {
+			requestURI := s.Identifier(Target{Provider: o.Provider, Profile: p.Name}) + "/vp/" + o.Key + "/request"
+			query := url.Values{"client_id": {prov.requestSigner.ClientID()}, "request_uri": {requestURI}}.Encode()
+			var link string
+			switch {
+			case p.Kind == KindEUDI:
+				link = "openid4vp://?" + query
+			case p.Kind == KindNL && p.UniversalLinkBase != "":
+				link = strings.TrimRight(p.UniversalLinkBase, "/") + "/disclosure_based_issuance?" + query
+			default:
+				continue
+			}
+			entry.Profiles[p.Name] = DisclosureLink{ClientID: prov.requestSigner.ClientID(), RequestURI: requestURI, Link: link}
+		}
+		out = append(out, entry)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Provider != out[j].Provider {
+			return out[i].Provider < out[j].Provider
+		}
+		return out[i].Key < out[j].Key
+	})
+	return out
 }

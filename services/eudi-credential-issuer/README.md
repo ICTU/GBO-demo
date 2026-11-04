@@ -66,6 +66,7 @@ Public port (`ISSUER_LISTEN_ADDR`, default `:8080`), per provider `v` and profil
 | `POST /{v}/nl/credential_preview` | `Authorization: Bearer <token>`, no DPoP (as the NL Wallet calls it) |
 | `GET /status/{v}/{list}` | the provider's Status List Token (`application/statuslist+jwt`), signed with its status certificate |
 | `GET /{v}/{p}/vp/{offer}/request` | disclosure-based issuance: the `request_uri` of a disclosure offer. Each fetch starts a disclosure session (`disclosure_ttl`, default 5 minutes) and returns its OpenID4VP request object (`application/oauth-authz-req+jwt`), signed with the provider's access certificate, asking for the `bsn` of the PID |
+| `GET /disclosure-offers` | the fixed links of every disclosure offer: per profile `client_id`, `request_uri` and the link (`openid4vp://` on `eudi`, the NL Wallet's universal link on `nl`). Public and readable from any origin; the developer portal shows them as QR codes |
 | `POST /{v}/{p}/vp/response/{session}` | the `response_uri` (`direct_post.jwt`, form field `response`, or `error` when the wallet declines). See [Disclosure-based issuance](#disclosure-based-issuance) |
 | `GET /healthz` | health |
 

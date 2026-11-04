@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"gbo-demo/oid4vc-kit/oid4vci"
@@ -259,7 +260,7 @@ func offerLinks(p Profile, offer oid4vci.CredentialOffer) (map[string]string, er
 	switch p.Kind {
 	case KindNL:
 		if p.UniversalLinkBase != "" {
-			links["universal_link"] = p.UniversalLinkBase + "/credential-offer?" + query
+			links["universal_link"] = strings.TrimRight(p.UniversalLinkBase, "/") + "/credential-offer?" + query
 		}
 	case KindEUDI:
 		links["haip-vci"] = "haip-vci://?" + query

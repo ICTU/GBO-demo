@@ -380,3 +380,33 @@ func TestDisclosureRefusals(t *testing.T) {
 		}
 	})
 }
+
+// F1: the fixed links of the disclosure offers, public and per profile.
+func TestDisclosureOffers(t *testing.T) {
+	f := newFixture(t)
+	status, body, header := get(t, f.public.URL+"/disclosure-offers", "")
+	if status != http.StatusOK || header.Get("Access-Control-Allow-Origin") != "*" {
+		t.Fatalf("%d %v", status, header)
+	}
+	var offers []issuance.DisclosureOfferLinks
+	if err := json.Unmarshal([]byte(body), &offers); err != nil {
+		t.Fatal(err)
+	}
+	if len(offers) != 1 || offers[0].Provider != "tax" || offers[0].Key != incomeOffer || len(offers[0].Profiles) != 2 {
+		t.Fatalf("offers %+v", offers)
+	}
+	for profile, prefix := range map[string]string{
+		"nl":   "https://app.example.test/deeplink/disclosure_based_issuance?",
+		"eudi": "openid4vp://?",
+	} {
+		l := offers[0].Profiles[profile]
+		_, r := f.fetchRequest(t, "tax", profile, incomeOffer)
+		if l.ClientID != r.str("client_id") || l.RequestURI != f.id(profile)+"/vp/"+incomeOffer+"/request" || !strings.HasPrefix(l.Link, prefix) {
+			t.Errorf("%s: %+v", profile, l)
+		}
+		u, err := url.Parse(l.Link)
+		if err != nil || u.Query().Get("client_id") != l.ClientID || u.Query().Get("request_uri") != l.RequestURI {
+			t.Errorf("%s: link %s", profile, l.Link)
+		}
+	}
+}

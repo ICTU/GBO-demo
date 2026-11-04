@@ -1,6 +1,15 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
-import { adapterPathFor, walletUniversalLinkFor, type IssuanceOffer } from '../eudi'
+import {
+  adapterPathFor,
+  euWalletLinkFor,
+  loadEuWalletLinks,
+  walletUniversalLinkFor,
+  type EuWalletLinks,
+  type IssuanceOffer,
+} from '../eudi'
+
+type Wallet = 'nl' | 'eu'
 
 type Props = {
   usecaseKey: string
@@ -26,11 +35,29 @@ export default function EudiQrPanel({ usecaseKey, offers, onCancel, onPlayground
   const [busy, setBusy] = useState(false)
   const [response, setResponse] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [euLinks, setEuLinks] = useState<EuWalletLinks>(new Map())
+  const [chosenWallet, setChosenWallet] = useState<Wallet>('nl')
+
+  useEffect(() => {
+    let active = true
+    void loadEuWalletLinks().then((links) => {
+      if (active) setEuLinks(links)
+    })
+    return () => {
+      active = false
+    }
+  }, [])
 
   if (!offer) return null
 
-  const crossDeviceUl = walletUniversalLinkFor(offer, 'cross_device')
-  const sameDeviceUl = walletUniversalLinkFor(offer, 'same_device')
+  // The EU-wallet link comes from the own credential issuer; an offer it
+  // does not serve has the NL Wallet only, and then there is no choice.
+  const euLink = euWalletLinkFor(offer, euLinks)
+  // Without the NL Wallet's issuance server only the EU-wallet has a link.
+  const nlAvailable = Boolean(walletUniversalLinkFor(offer, 'cross_device'))
+  const wallet: Wallet = euLink && (chosenWallet === 'eu' || !nlAvailable) ? 'eu' : 'nl'
+  const crossDeviceUl = wallet === 'eu' ? euLink : walletUniversalLinkFor(offer, 'cross_device')
+  const sameDeviceUl = wallet === 'eu' ? euLink : walletUniversalLinkFor(offer, 'same_device')
   const missingConfig = !crossDeviceUl
 
   const runCurl = async () => {
@@ -77,6 +104,23 @@ export default function EudiQrPanel({ usecaseKey, offers, onCancel, onPlayground
         </button>
       </div>
       <div className="panel-b" style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center' }}>
+        {euLink && (
+          <>
+            <div className="seg" role="group" aria-label="Kies met welke wallet je scant">
+              {(['nl', 'eu'] as const).map((w) => (
+                <button
+                  key={w}
+                  type="button"
+                  className={`seg-btn${wallet === w ? ' on' : ''}`}
+                  aria-pressed={wallet === w}
+                  onClick={() => setChosenWallet(w)}
+                >
+                  {w === 'nl' ? 'NL Wallet' : 'EU-wallet'}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
         {missingConfig ? (
           <div className="empty" style={{ padding: 20, textAlign: 'center' }}>
             <b>VITE_EUDI_PUBLIC_URL</b> is niet gezet — kan QR niet samenstellen.
@@ -85,9 +129,10 @@ export default function EudiQrPanel({ usecaseKey, offers, onCancel, onPlayground
         ) : (
           <>
             <QRCodeSVG value={crossDeviceUl} size={220} bgColor="#ffffff" fgColor="#000000" includeMargin />
-            <div style={{ fontSize: 12, color: 'var(--mute)', textAlign: 'center' }}>
-              Scan met TestFlight-wallet (cross-device). PID-disclosure met een BSN
-              die de bron kent — anders 404 aan het eind.
+            <div style={{ fontSize: 12, color: 'var(--mute)', textAlign: 'center' }} aria-live="polite">
+              {wallet === 'eu'
+                ? 'Scan met de GBO-testbuild van de EUDI-referentiewallet van de Europese Commissie; alleen die build vertrouwt de GBO-ontwikkelcertificaten. Deel de BSN uit je test-PID; kent de bron die niet, dan eindigt de uitgifte met een foutmelding in de wallet.'
+                : 'Scan met TestFlight-wallet (cross-device). PID-disclosure met een BSN die de bron kent — anders 404 aan het eind.'}
             </div>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
               <a className="btn mini" href={sameDeviceUl} target="_blank" rel="noopener noreferrer">

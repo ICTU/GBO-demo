@@ -47,6 +47,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   that asks for an encrypted response must encrypt its request. `make
   provision-wallet-registration` creates each source's request key once; run
   it again for sources provisioned before.
+- **Wallet choice in the developer portal** (#614): the wallet QR panel
+  offers "NL Wallet" (as before, through `eudi-issuance-server`) or
+  "EU-wallet" when the own credential issuer has a link for the offer. The
+  links come from its new public `GET /disclosure-offers`; the EU route works
+  only with the GBO test build of the EUDI reference wallet, which trusts the
+  GBO development certificates. Without the issuer the choice is hidden.
 - **Disclosure-based issuance in the own credential issuer** (#614): a
   wallet discloses the BSN from its PID (OpenID4VP 1.0) and gets a
   pre-authorized offer through `redirect_uri`, with a fixed link per offer

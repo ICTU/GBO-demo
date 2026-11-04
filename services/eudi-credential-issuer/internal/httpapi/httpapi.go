@@ -41,6 +41,7 @@ func Public(svc *issuance.Service, log *slog.Logger) http.Handler {
 	// of an offer by reference and posts its response (direct_post.jwt).
 	mux.HandleFunc("GET /{provider}/{profile}/vp/{offer}/request", h.disclosureRequest)
 	mux.HandleFunc("POST /{provider}/{profile}"+issuance.DisclosureResponsePath+"{session}", h.disclosureResponse)
+	mux.HandleFunc("GET /disclosure-offers", h.disclosureOffers)
 	return mux
 }
 
@@ -355,6 +356,14 @@ func (h *handler) disclosureRequest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/oauth-authz-req+jwt")
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = io.WriteString(w, request)
+}
+
+// disclosureOffers lists the fixed links of the disclosure offers. They are
+// public, so any page may read them (a frontend that shows the QR codes).
+func (h *handler) disclosureOffers(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, h.svc.DisclosureOfferLinks())
 }
 
 // disclosureResponse answers the wallet's direct_post.jwt: the

@@ -670,3 +670,27 @@ func TestDisclosureOfferKeysPerProvider(t *testing.T) {
 		t.Error("a key twice at one provider must be refused")
 	}
 }
+
+// F1: links per profile; a universal link base with a trailing slash gives
+// no double slash, and an nl profile without a base has no link.
+func TestDisclosureOfferLinks(t *testing.T) {
+	cfg := disclosureConfig(t)
+	cfg.Profiles[0].UniversalLinkBase = "https://app.example.test/deeplink/"
+	store := memstore.New()
+	svc, err := issuance.New(cfg, &fakeSource{}, store, store, store, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	links := svc.DisclosureOfferLinks()
+	if len(links) != 1 || !strings.HasPrefix(links[0].Profiles["nl"].Link, "https://app.example.test/deeplink/disclosure_based_issuance?") ||
+		!strings.HasPrefix(links[0].Profiles["eudi"].Link, "openid4vp://?") {
+		t.Fatalf("%+v", links)
+	}
+	cfg.Profiles[0].UniversalLinkBase = ""
+	if svc, err = issuance.New(cfg, &fakeSource{}, store, store, store, time.Now); err != nil {
+		t.Fatal(err)
+	}
+	if p := svc.DisclosureOfferLinks()[0].Profiles; len(p) != 1 || p["eudi"].Link == "" {
+		t.Fatalf("an nl profile without a universal link base has no link: %+v", p)
+	}
+}
