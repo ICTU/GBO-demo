@@ -131,7 +131,7 @@ export default function EudiQrPanel({ usecaseKey, offers, onCancel, onPlayground
             <QRCodeSVG value={crossDeviceUl} size={220} bgColor="#ffffff" fgColor="#000000" includeMargin />
             <div style={{ fontSize: 12, color: 'var(--mute)', textAlign: 'center' }} aria-live="polite">
               {wallet === 'eu'
-                ? 'Scan met de GBO-testbuild van de EUDI-referentiewallet van de Europese Commissie; alleen die build vertrouwt de GBO-ontwikkelcertificaten. Deel de BSN uit je test-PID; kent de bron die niet, dan eindigt de uitgifte met een foutmelding in de wallet.'
+                ? 'Scan met de GBO-testbuild van de EUDI-referentiewallet van de Europese Commissie; alleen die build vertrouwt de GBO-ontwikkelcertificaten. Deel de BSN uit je test-PID; kent de bron die niet, dan opent de wallet een pagina "Geen gegevens gevonden".'
                 : 'Scan met TestFlight-wallet (cross-device). PID-disclosure met een BSN die de bron kent — anders 404 aan het eind.'}
             </div>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>

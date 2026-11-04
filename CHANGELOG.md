@@ -416,6 +416,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- **The developer portal's EUDI chain names both routes** (#614): the
+  first links read "Wallet" (NL Wallet / EUDI-wallet) and "Uitgever"
+  (`eudi-issuance-server` / `eudi-credential-issuer`), as a watched trace
+  does not say which route ran. The hint at the EU-wallet QR says the
+  wallet opens "Geen gegevens gevonden" when the source does not know the
+  BSN.
 - **The bronpoort answers an unknown source or type with 503** (#614):
   `eudi-adapter` answered `404` both when the source had no data for the
   person and when it did not know the source or type in the path. An issuer

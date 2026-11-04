@@ -46,7 +46,7 @@ export default function RequestBuilder({
       ? 'POST dienstverlener-backend /api/dvtp/query'
     : tab === 'asi-verify'
       ? `referentie-QTSP → POST asi-provider /<dataservice>/authsrc-api/${asiPayload.operation}`
-      : 'QR-scan → wallet → eudi-issuance-server → eudi-adapter'
+      : 'QR-scan → wallet → eudi-issuance-server of eudi-credential-issuer → eudi-adapter'
 
   const canSubmit =
     tab === 'issuance'
