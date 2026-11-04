@@ -134,6 +134,11 @@ func TestMetadata(t *testing.T) {
 			if md["sub"] != f.id(profile) || md["credential_issuer"] != f.id(profile) || md["nonce_endpoint"] != f.id(profile)+"/nonce" {
 				t.Fatalf("M1: %v", md)
 			}
+			// D1: the wallets show the issuer by the display name, the
+			// organization name of the access certificate.
+			if display, _ := md["display"].([]any); len(display) != 1 || display[0].(map[string]any)["name"] != leaf.Subject.Organization[0] {
+				t.Fatalf("D1: display %v, want the access certificate's organization %q", md["display"], leaf.Subject.Organization)
+			}
 			cfg := md["credential_configurations_supported"].(map[string]any)[incomeConfig].(map[string]any)
 			jwtProof := cfg["proof_types_supported"].(map[string]any)["jwt"].(map[string]any)
 			_, requiresKA := jwtProof["key_attestations_required"]

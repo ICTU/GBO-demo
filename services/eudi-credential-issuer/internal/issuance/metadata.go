@@ -1,7 +1,9 @@
 package issuance
 
 import (
+	"crypto/x509"
 	"encoding/base64"
+	"strings"
 	"time"
 
 	"github.com/go-jose/go-jose/v4"
@@ -59,6 +61,9 @@ func (s *Service) issuerMetadata(t Target, prov *provider, p Profile) map[string
 		"credential_endpoint": id + "/credential",
 		"nonce_endpoint":      id + "/nonce",
 	}
+	// Wallets show the issuer by this name (section 12.2.4). An
+	// organization name needs no translation, so it has no locale.
+	md["display"] = []map[string]string{{"name": issuerName(prov.AccessChain[0])}}
 	if s.cfg.BatchSize >= 2 {
 		md["batch_credential_issuance"] = map[string]any{"batch_size": s.cfg.BatchSize}
 	}
@@ -123,6 +128,15 @@ func (s *Service) configurationMetadata(p Profile, c CredentialConfiguration) ma
 		"scope":                                   c.Scope,
 	}
 	return md
+}
+
+// issuerName is the organization name of the provider's access
+// certificate.
+func issuerName(access *x509.Certificate) string {
+	if len(access.Subject.Organization) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(access.Subject.Organization[0])
 }
 
 // AuthorizationServerMetadata returns the OAuth 2.0 Authorization Server

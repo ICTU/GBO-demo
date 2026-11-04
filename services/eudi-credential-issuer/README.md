@@ -19,7 +19,7 @@ A Wallet Instance Attestation is accepted only from the wallet providers configu
 | Part | Status |
 |---|---|
 | Pre-Authorized Code Flow, issuer-initiated, with a Credential Offer by value (OpenID4VCI 1.0 sections 3.5, 4.1) | implemented |
-| Credential Issuer Metadata, signed with the access certificate in `x5c` (section 12.2.3; ARF ISSU_32) when `application/jwt` is asked for, unsigned JSON otherwise (section 12.2.2) | implemented; `scope` for every configuration (HAIP section 4.1) |
+| Credential Issuer Metadata, signed with the access certificate in `x5c` (section 12.2.3; ARF ISSU_32) when `application/jwt` is asked for, unsigned JSON otherwise (section 12.2.2) | implemented; `scope` for every configuration (HAIP section 4.1); `display` names the issuer by the organization name (O) of the access certificate, without a locale, as wallets show it (section 12.2.4); an access certificate without one is refused at start |
 | OAuth 2.0 Authorization Server Metadata (RFC 8414), path-inserted well-known URLs | implemented |
 | Client authentication with a Wallet Instance Attestation and PoP over a server challenge (draft-ietf-oauth-attestation-based-client-auth -07, as OpenID4VCI 1.0 references it; HAIP section 4.4) | implemented; the challenge is required, and a missing or unknown one is answered with `use_attestation_challenge` (400) and a fresh challenge in `OAuth-Client-Attestation-Challenge`. `iss` and `iat` are not required in the attestation, so attestations made after -07 and after -12 are both accepted |
 | DPoP-bound access tokens (RFC 9449) | implemented; server DPoP nonces are not used |

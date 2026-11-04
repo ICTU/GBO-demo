@@ -122,6 +122,9 @@ func validateProvider(p Provider, kinds map[Kind]bool, vcts []string) error {
 			return err
 		}
 	}
+	if issuerName(p.AccessChain[0]) == "" {
+		return errors.New("the access certificate has no organization name (O), which wallets show as the issuer")
+	}
 	if p.IssuerChain[0].Subject.String() != p.StatusChain[0].Subject.String() {
 		return errors.New("the status list certificate must have the subject of the issuer certificate")
 	}

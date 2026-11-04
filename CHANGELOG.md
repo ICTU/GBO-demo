@@ -57,6 +57,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   registers the reference QTSP as a provider of the issuer (`QEAA_Provider`),
   whose callback the issuer reaches over its own TLS certificate. The QTSP
   compares nationalities on their code, so a mock login matches a PID.
+- **Issuer name in the wallets** (#614): the own credential issuer's
+  metadata names each provider in `display` by the organization name of its
+  access certificate, so the EUDI wallets show it instead of "Unknown". The
+  issuer refuses to start with an access certificate without one.
 - **One QR code for the QTSP statement** (#614): after an accepted result
   the reference QTSP asks the own credential issuer for a pre-authorized
   offer (`QTSP_ISSUER_OFFERS_URL` in `.env`, off by default; profile

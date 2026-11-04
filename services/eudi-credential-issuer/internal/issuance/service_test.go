@@ -256,6 +256,10 @@ func TestNewRefusesConfigurations(t *testing.T) {
 			access := testpki.NewRoot(t, "plain access root").Issue(t, testpki.Options{Subject: pkix.Name{CommonName: "tax"}})
 			c.Providers[0].AccessKey, c.Providers[0].AccessChain = access.Key, access.Chain
 		},
+		"D2 access cert without organization name": func(c *issuance.Config) {
+			access := testpki.NewRoot(t, "nameless access root").Issue(t, testpki.Options{Subject: testpki.OrganizationSubject("tax", " ", orgID("tax"))})
+			c.Providers[0].AccessKey, c.Providers[0].AccessChain = access.Key, access.Chain
+		},
 		"P-5 provider without configurations": func(c *issuance.Config) {
 			c.Providers = append(c.Providers, testProvider(t, "idle"))
 		},
