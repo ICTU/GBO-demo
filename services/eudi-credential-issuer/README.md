@@ -107,7 +107,7 @@ For each credential configuration the issuer posts to its `source_url`, with the
 {"subject": {"bsn": "999990019"}}
 ```
 
-It is an object on purpose: the disclosure that nl-wallet's `issuance_server` sends is an array, so a backend can tell that no wallet presented a PID here. `eudi-adapter` accepts both and logs the matching Dataverwerking (`gbo-bsn-ontvangst-aanvrager` for this request, `gbo-pid-bsn-extractie` for a disclosure).
+It is an object on purpose: the disclosure that nl-wallet's `issuance_server` sends is an array, so a backend can tell that no wallet presented a PID here. `eudi-adapter` accepts both and logs the matching Dataverwerking (`gbo-bsn-ontvangst-aanvrager` for this request, `gbo-pid-bsn-extractie` for a disclosure). With `"origin": "login"` the BSN comes from the citizen's login at GBO's authorization server, logged as `gbo-bsn-uit-inloggen`.
 
 After a disclosure the issuer sends that array itself, in the form of nl-wallet's `issuance_server` v0.5.0 (plain attribute values; v0.6.0 tags each value as `{"type", "value"}`, which the backends do not read yet), with only the verified `bsn`:
 

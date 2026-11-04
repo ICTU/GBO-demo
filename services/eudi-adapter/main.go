@@ -149,13 +149,22 @@ const (
 	// subjectFromOfferCaller: the caller that made a pre-authorized offer
 	// named the subject; no PID was presented.
 	subjectFromOfferCaller
+	// subjectFromLogin: the citizen logged in at GBO's authorization server
+	// and the credential issuer took the BSN from that login.
+	subjectFromLogin
 )
 
-// offerSubjectRequest is the request of a credential issuer that makes a
-// pre-authorized offer: {"subject": {"bsn": "..."}}. It is an object, so it
-// cannot be mistaken for a disclosure, which is an array.
+// originLogin is the origin a credential issuer sends with the BSN from a
+// login; without an origin the subject came from the offer caller.
+const originLogin = "login"
+
+// offerSubjectRequest is the request of a credential issuer that names the
+// subject: {"subject": {"bsn": "..."}} for a pre-authorized offer, with
+// "origin": "login" when the BSN comes from the citizen's login. It is an
+// object, so it cannot be mistaken for a disclosure, which is an array.
 type offerSubjectRequest struct {
-	Subject map[string]any `json:"subject"`
+	Subject map[string]any  `json:"subject"`
+	Origin  json.RawMessage `json:"origin"`
 }
 
 // decodeIssuanceSubject reads the BSN from either request shape.
@@ -170,7 +179,16 @@ func decodeIssuanceSubject(body []byte) (string, subjectOrigin, error) {
 		if bsn == "" {
 			return "", 0, fmt.Errorf("the offer subject has no BSN")
 		}
-		return bsn, subjectFromOfferCaller, nil
+		if request.Origin == nil {
+			return bsn, subjectFromOfferCaller, nil
+		}
+		// An origin the adapter does not know is refused: logging it under
+		// another Dataverwerking would be wrong.
+		var origin string
+		if err := json.Unmarshal(request.Origin, &origin); err != nil || origin != originLogin {
+			return "", 0, fmt.Errorf("the subject has an unknown origin")
+		}
+		return bsn, subjectFromLogin, nil
 	}
 	var request issuanceServerRequest
 	if err := json.Unmarshal(trimmed, &request); err != nil || len(request) == 0 || len(request[0].Attestations) == 0 {
@@ -290,9 +308,12 @@ func handleSourceAttestation(cfg config, client *http.Client, runtime sourceMeta
 		// must not reach the bronhouder at all. Which Dataverwerking it is
 		// depends on where the BSN came from.
 		if logbook != nil {
-			if origin == subjectFromOfferCaller {
+			switch origin {
+			case subjectFromOfferCaller:
 				recording, err = logbook.logSubjectReceipt(r.Context(), r, bsn, extractionStart, metadata.SourceID, metadata.TypeID)
-			} else {
+			case subjectFromLogin:
+				recording, err = logbook.logLoginSubject(r.Context(), r, bsn, extractionStart, metadata.SourceID, metadata.TypeID)
+			default:
 				recording, err = logbook.logPIDExtraction(r.Context(), r, bsn, extractionStart, metadata.SourceID, metadata.TypeID)
 			}
 			if err != nil {

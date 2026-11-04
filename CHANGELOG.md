@@ -105,6 +105,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   issuer whose offer caller named the subject. It logs that as a separate
   Dataverwerking, `gbo-bsn-ontvangst-aanvrager`, added to the register of
   `logboek-eudi-adapter`, before it asks the source.
+- **`eudi-adapter` knows a BSN from a login** (#614): a credential issuer
+  whose citizen logged in at GBO's authorization server sends
+  `{"subject": {"bsn": ...}, "origin": "login"}`. The adapter logs that as
+  the Dataverwerking `gbo-bsn-uit-inloggen`, added to the register of
+  `logboek-eudi-adapter`; without `origin` the request stays a pre-authorized
+  offer, and an unknown origin is refused before anything is logged or the
+  source is asked.
 - **The landing page offers the Installatie Register scenario**: the DvTP
   card under "Zelf uitproberen" lets the visitor choose between HypotheekBV
   and the Installatie Register, with its own steps, test BSNs and start
