@@ -4,14 +4,15 @@ Our own credential issuer, meant to replace nl-wallet's `issuance_server` (`serv
 
 It hosts several **providers**: each source (bronhouder) is its own Attestation Provider, with its own access certificate (WRPAC), registration certificate (WRPRC), signing and status keys, credential configurations and status lists. A wallet sees the provider, not the issuer service.
 
-Each provider is published under two wallet **profiles**, each its own credential issuer identifier `<public URL>/<provider>/<profile>`, so that the metadata of each is consistent on its own:
+Each provider is published under two wallet **profiles** (three with a combined one), each its own credential issuer identifier `<public URL>/<provider>/<profile>`, so that the metadata of each is consistent on its own:
 
 | Profile | Identifier (provider `belastingdienst`) | For | Rules |
 |---|---|---|---|
 | `nl` | `<public URL>/belastingdienst/nl` | NL Wallet (contract of nl-wallet v0.6.0) | `jwt` key proofs without key attestation; the NL credential preview endpoint; no `tx_code` |
 | `eudi` | `<public URL>/belastingdienst/eudi` | wallets that follow HAIP and the ARF, such as the EUDI reference wallet | key attestation required (`jwt` proof with `key_attestation`, or the `attestation` proof type) at the configured key storage and user authentication levels (demo: `iso_18045_high`); one credential per attested key; encrypted credential requests and responses supported, not required |
+| kind `combined` (optional, e.g. `wallet`) | `<public URL>/belastingdienst/wallet` | both, so one offer (one QR code, `openid-credential-offer://`) reaches either wallet | the metadata offers the `jwt` proof type without key attestation and the `attestation` proof type with it; a wallet whose WIA comes from a provider in `plain_jwt_wallet_providers_file` (the NL Wallet's) may send plain `jwt` proofs, any other wallet must attest its keys as on `eudi`. The access token remembers the wallet provider. Encryption and the NL preview endpoint are offered too. No disclosure offers. **NL Wallet v0.6.0 cannot read it yet**: it expects `credential_request_encryption.jwks` as a bare array of keys instead of a JWK Set (`{"keys": [...]}`, which OpenID4VCI and the EUDI wallets use, and which the EUDI wallet for Android needs). nl-wallet fixed this after v0.6.0 (`df80f99c3`); until a release carries it, the NL Wallet uses the `nl` profile or `eudi-issuance-server` |
 
-A Wallet Instance Attestation is accepted only from the wallet providers configured for the profile it is presented to. A pre-authorized code or access token works only at the provider and profile of its offer, and a `c_nonce` or attestation challenge only at the provider and profile that handed it out.
+A Wallet Instance Attestation is accepted only from the wallet providers configured for the profile it is presented to. The combined profile is a documented exception to its own metadata: the NL Wallet cannot attest keys yet (nl-wallet v0.6.0, PVW-6238), so its wallets skip the key attestation that EUDI wallets must give. A pre-authorized code or access token works only at the provider and profile of its offer, and a `c_nonce` or attestation challenge only at the provider and profile that handed it out.
 
 ## What is real and what is not
 

@@ -694,3 +694,53 @@ func TestDisclosureOfferLinks(t *testing.T) {
 		t.Fatalf("an nl profile without a universal link base has no link: %+v", p)
 	}
 }
+
+// combinedProfile is a combined profile on validConfig's wallet providers.
+func combinedProfile(t *testing.T, cfg issuance.Config) issuance.Profile {
+	t.Helper()
+	nl := testwallet.NewProvider(t, "nl provider").Anchors("nl")
+	return issuance.Profile{Name: "wallet", Kind: issuance.KindCombined,
+		WalletProviders:         append(append([]x5c.Anchors{}, cfg.Profiles[1].WalletProviders...), nl),
+		PlainJWTWalletProviders: []string{"nl"}, KeyAttestationProviders: cfg.Profiles[1].KeyAttestationProviders,
+		KeyStorage: []string{"iso_18045_high"}, UserAuthentication: []string{"iso_18045_high"}}
+}
+
+// A7: what a combined profile needs, and that only it names wallets that may
+// skip key attestation.
+func TestNewRefusesCombinedProfiles(t *testing.T) {
+	store := memstore.New()
+	cfg, _ := validConfig(t)
+	cfg.Profiles = append(cfg.Profiles, combinedProfile(t, cfg))
+	if _, err := issuance.New(cfg, &fakeSource{}, store, store, store, time.Now); err != nil {
+		t.Fatalf("the base configuration: %v", err)
+	}
+	for name, tc := range map[string]struct {
+		mutate func(*issuance.Config)
+		want   string
+	}{
+		"combined without plain-jwt providers": {func(c *issuance.Config) { c.Profiles[2].PlainJWTWalletProviders = nil }, "only there"},
+		"plain-jwt provider not trusted":       {func(c *issuance.Config) { c.Profiles[2].PlainJWTWalletProviders = []string{"other"} }, "not a trusted wallet provider"},
+		"plain-jwt providers on nl":            {func(c *issuance.Config) { c.Profiles[0].PlainJWTWalletProviders = []string{"provider"} }, "only there"},
+		"no key attestation levels":            {func(c *issuance.Config) { c.Profiles[2].KeyStorage = nil }, "ISSU_27d"},
+		"no key attestation providers":         {func(c *issuance.Config) { c.Profiles[2].KeyAttestationProviders = nil }, "key attestation providers"},
+		"wallet provider without a name":       {func(c *issuance.Config) { c.Profiles[2].WalletProviders[0].Name = "" }, "needs a name"},
+		"duplicate wallet provider names": {func(c *issuance.Config) {
+			c.Profiles[2].WalletProviders = append(c.Profiles[2].WalletProviders, c.Profiles[2].WalletProviders[0])
+		}, "occurs twice"},
+		"no registration certificate": {func(c *issuance.Config) {
+			c.Profiles = []issuance.Profile{c.Profiles[1], c.Profiles[2]}
+			c.Providers[0].RegistrationCertificate = nil
+		}, "registration certificate"},
+		"no request encryption key": {func(c *issuance.Config) {
+			c.Profiles = []issuance.Profile{c.Profiles[0], c.Profiles[2]}
+			c.Providers[0].RequestEncryptionKey = nil
+		}, "request encryption key"},
+	} {
+		cfg, _ := validConfig(t)
+		cfg.Profiles = append(cfg.Profiles, combinedProfile(t, cfg))
+		tc.mutate(&cfg)
+		if _, err := issuance.New(cfg, &fakeSource{}, store, store, store, time.Now); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: %v, want a refusal with %q", name, err, tc.want)
+		}
+	}
+}

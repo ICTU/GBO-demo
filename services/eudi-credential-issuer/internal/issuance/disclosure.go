@@ -51,7 +51,9 @@ func (s *Service) DisclosureRequest(ctx context.Context, t Target, offerKey stri
 		return "", err
 	}
 	o, ok := s.disclosureOffers[t.Provider+"/"+offerKey]
-	if !ok || prov.requestSigner == nil {
+	// Disclosure-based issuance runs on the nl and eudi profiles only: the
+	// wallets read the registration certificate in verifier_info differently.
+	if !ok || prov.requestSigner == nil || p.Kind == KindCombined {
 		return "", ErrUnknownOffer
 	}
 	key, err := oid4vp.NewResponseKey()

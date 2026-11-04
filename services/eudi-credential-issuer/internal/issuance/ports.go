@@ -157,7 +157,9 @@ type AccessToken struct {
 	Hash      string
 	SessionID string
 	// JKT is the DPoP key thumbprint the token is bound to.
-	JKT       string
-	ClientID  string
-	ExpiresAt time.Time
+	JKT      string
+	ClientID string
+	// WalletProvider names the anchor set that accepted the client's WIA.
+	WalletProvider string
+	ExpiresAt      time.Time
 }

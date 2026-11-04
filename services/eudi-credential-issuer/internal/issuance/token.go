@@ -119,7 +119,7 @@ func (s *Service) Token(ctx context.Context, req TokenRequest) (oid4vci.TokenRes
 	}
 	if err := s.sessions.SaveToken(ctx, AccessToken{
 		Hash: hash(token), SessionID: session.ID, JKT: proof.JKT, ClientID: att.ClientID,
-		ExpiresAt: now.Add(s.cfg.TokenTTL),
+		WalletProvider: att.Anchor, ExpiresAt: now.Add(s.cfg.TokenTTL),
 	}); err != nil {
 		return oid4vci.TokenResponse{}, err
 	}

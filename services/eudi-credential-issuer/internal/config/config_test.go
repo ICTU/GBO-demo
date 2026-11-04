@@ -115,3 +115,51 @@ func checkDisclosureLoaded(t *testing.T, cfg issuance.Config) {
 		t.Fatalf("PID anchors %+v", cfg.PIDAnchors)
 	}
 }
+
+// A combined profile trusts a second set of wallet providers whose wallets
+// may skip key attestation; a root in both files is refused.
+func TestLoadCombinedProfile(t *testing.T) {
+	dir := t.TempDir()
+	root := testpki.NewRoot(t, "root")
+	nlRoot := testpki.NewRoot(t, "nl wallet provider")
+	key := root.Issue(t, testpki.Options{})
+	der, err := x509.MarshalPKCS8PrivateKey(key.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, blk := range map[string]*pem.Block{
+		"key.pem": {Type: "PRIVATE KEY", Bytes: der}, "chain.pem": {Type: "CERTIFICATE", Bytes: key.Cert.Raw},
+		"roots.pem": {Type: "CERTIFICATE", Bytes: root.Cert.Raw}, "nl-roots.pem": {Type: "CERTIFICATE", Bytes: nlRoot.Cert.Raw},
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), pem.EncodeToMemory(blk), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	file := func(plain string) string {
+		return `{"providers": [{"name": "tax",
+		    "access": {"key_file": "key.pem", "chain_file": "chain.pem"}, "issuer": {"key_file": "key.pem", "chain_file": "chain.pem"},
+		    "status": {"key_file": "key.pem", "chain_file": "chain.pem"},
+		    "credential_configurations": [{"id": "income", "scope": "income", "vct": "https://x.test/income", "valid_days": 1,
+		      "source_url": "https://src.test/a", "status_list": "income"}]}],
+		  "profiles": [{"name": "wallet", "kind": "combined", "wallet_provider_roots_file": "roots.pem",
+		    "plain_jwt_wallet_providers_file": "` + plain + `", "key_attestation_roots_file": "roots.pem"}]}`
+	}
+	path := filepath.Join(dir, "issuer.json")
+	if err := os.WriteFile(path, []byte(file("nl-roots.pem")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := config.Load(path, "https://issuer.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := loaded.Issuer.Profiles[0]
+	if len(p.WalletProviders) != 2 || len(p.PlainJWTWalletProviders) != 1 || p.PlainJWTWalletProviders[0] != p.WalletProviders[1].Name {
+		t.Fatalf("profile %+v", p)
+	}
+	if err := os.WriteFile(path, []byte(file("roots.pem")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.Load(path, "https://issuer.test"); err == nil || !strings.Contains(err.Error(), "also a wallet provider that must attest") {
+		t.Fatalf("a root in both files: %v", err)
+	}
+}

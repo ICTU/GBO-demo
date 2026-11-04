@@ -25,18 +25,23 @@ type CredentialPreview struct {
 }
 
 // CredentialPreview returns the previews for a Bearer access token. Only
-// KindNL profiles have this endpoint; the NL Wallet calls it without DPoP.
+// KindNL and KindCombined profiles have this endpoint; the NL Wallet calls it without DPoP.
 func (s *Service) CredentialPreview(ctx context.Context, t Target, authorization string) (Preview, error) {
 	_, p, err := s.resolve(t)
 	if err != nil {
 		return Preview{}, err
 	}
-	if p.Kind != KindNL {
+	if !p.servesNL() {
 		return Preview{}, ErrUnknownProfile
 	}
 	token, session, err := s.authorize(ctx, t, authorization, "Bearer")
 	if err != nil {
 		return Preview{}, err
+	}
+	// On a combined profile only the NL Wallet asks for a preview; another
+	// wallet's token stays bound to DPoP.
+	if p.Kind == KindCombined && p.requiresKeyAttestation(token.WalletProvider) {
+		return Preview{}, refuse(oid4vci.ErrInvalidToken, "the preview is for the NL Wallet")
 	}
 	// The preview accepts the DPoP-bound token without DPoP, because the NL
 	// Wallet calls it so; that makes the token a bearer token here (RFC

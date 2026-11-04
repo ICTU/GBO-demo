@@ -4,6 +4,7 @@ import (
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/x509"
+	"slices"
 	"time"
 
 	"gbo-demo/oid4vc-kit/oid4vp"
@@ -23,6 +24,15 @@ const (
 	// is required, no preview endpoint, encrypted requests and responses
 	// are supported.
 	KindEUDI Kind = "eudi"
+	// KindCombined serves both under one credential issuer identifier, so
+	// one offer (one QR code) reaches either wallet: the metadata offers the
+	// jwt proof type without key attestation, which the NL Wallet uses, and
+	// the attestation proof type with it, which the EUDI wallets prefer. A
+	// wallet whose WIA comes from a provider in PlainJWTWalletProviders may
+	// prove possession without key attestation; any other wallet must
+	// attest its keys, as on KindEUDI. Encryption and the NL preview
+	// endpoint are offered too.
+	KindCombined Kind = "combined"
 )
 
 // Provider is an Attestation Provider: the party a wallet sees as the
@@ -76,7 +86,12 @@ type Profile struct {
 	// Required for KindEUDI.
 	KeyStorage         []string
 	UserAuthentication []string
-	// UniversalLinkBase is the wallet's universal link base (KindNL).
+	// PlainJWTWalletProviders names the WalletProviders anchor sets whose
+	// wallets may send jwt proofs without key attestation (KindCombined):
+	// the NL Wallet's provider, as long as the NL Wallet cannot attest keys.
+	PlainJWTWalletProviders []string
+	// UniversalLinkBase is the wallet's universal link base (KindNL,
+	// KindCombined).
 	UniversalLinkBase string
 }
 
@@ -154,3 +169,24 @@ const (
 	DefaultStatusListSize = 1 << 16
 	DefaultDisclosureTTL  = 5 * time.Minute
 )
+
+// servesNL reports whether the NL Wallet is served: its preview endpoint,
+// its universal link and its rule of whole numbers.
+func (p Profile) servesNL() bool { return p.Kind == KindNL || p.Kind == KindCombined }
+
+// servesEUDI reports whether the EUDI wallets are served: key attestation,
+// the attestation proof type and encryption.
+func (p Profile) servesEUDI() bool { return p.Kind == KindEUDI || p.Kind == KindCombined }
+
+// requiresKeyAttestation reports whether a wallet attested by the wallet
+// provider anchor set walletProvider must attest its keys.
+func (p Profile) requiresKeyAttestation(walletProvider string) bool {
+	switch p.Kind {
+	case KindEUDI:
+		return true
+	case KindCombined:
+		return !slices.Contains(p.PlainJWTWalletProviders, walletProvider)
+	default:
+		return false
+	}
+}

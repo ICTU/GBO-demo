@@ -183,8 +183,8 @@ func decodeDocuments(raw []byte, sess *issuance.Session) error {
 }
 
 func (s *Store) SaveToken(ctx context.Context, t issuance.AccessToken) error {
-	_, err := s.pool.Exec(ctx, `INSERT INTO access_tokens (hash, session_id, jkt, client_id, expires_at) VALUES ($1, $2, $3, $4, $5)`,
-		t.Hash, t.SessionID, t.JKT, t.ClientID, t.ExpiresAt)
+	_, err := s.pool.Exec(ctx, `INSERT INTO access_tokens (hash, session_id, jkt, client_id, wallet_provider, expires_at) VALUES ($1, $2, $3, $4, $5, $6)`,
+		t.Hash, t.SessionID, t.JKT, t.ClientID, t.WalletProvider, t.ExpiresAt)
 	return err
 }
 
@@ -192,11 +192,11 @@ func (s *Store) Token(ctx context.Context, tokenHash string, now time.Time) (iss
 	t := issuance.AccessToken{Hash: tokenHash}
 	var sess issuance.Session
 	var docs []byte
-	err := s.pool.QueryRow(ctx, `SELECT t.session_id, t.jkt, t.client_id, t.expires_at,
+	err := s.pool.QueryRow(ctx, `SELECT t.session_id, t.jkt, t.client_id, t.wallet_provider, t.expires_at,
 			s.id, s.provider, s.profile, s.code_hash, s.expires_at, s.reference, s.documents
 		FROM access_tokens t JOIN sessions s ON s.id = t.session_id
 		WHERE t.hash = $1 AND t.expires_at > $2`, tokenHash, now).
-		Scan(&t.SessionID, &t.JKT, &t.ClientID, &t.ExpiresAt, &sess.ID, &sess.Provider, &sess.Profile, &sess.CodeHash, &sess.ExpiresAt, &sess.Reference, &docs)
+		Scan(&t.SessionID, &t.JKT, &t.ClientID, &t.WalletProvider, &t.ExpiresAt, &sess.ID, &sess.Provider, &sess.Profile, &sess.CodeHash, &sess.ExpiresAt, &sess.Reference, &docs)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return issuance.AccessToken{}, issuance.Session{}, issuance.ErrNotFound
 	}

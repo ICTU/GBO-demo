@@ -148,6 +148,14 @@ func newFixture(t *testing.T) *fixture {
 			{Name: "eudi", Kind: issuance.KindEUDI, WalletProviders: []x5c.Anchors{f.eudiWallet.Anchors("eudi")},
 				KeyAttestationProviders: []x5c.Anchors{f.eudiWallet.Anchors("eudi")},
 				KeyStorage:              []string{"iso_18045_high"}, UserAuthentication: []string{"iso_18045_high"}},
+			// One identifier for both wallets: NL Wallets may skip key
+			// attestation, EUDI wallets may not.
+			{Name: "wallet", Kind: issuance.KindCombined,
+				WalletProviders:         []x5c.Anchors{f.eudiWallet.Anchors("eudi"), f.nlWallet.Anchors("nl")},
+				PlainJWTWalletProviders: []string{"nl"},
+				KeyAttestationProviders: []x5c.Anchors{f.eudiWallet.Anchors("eudi")},
+				KeyStorage:              []string{"iso_18045_high"}, UserAuthentication: []string{"iso_18045_high"},
+				UniversalLinkBase: "https://app.example.test/deeplink"},
 		},
 		Configurations: []issuance.CredentialConfiguration{
 			{
@@ -318,6 +326,13 @@ func (f *fixture) wallet(profile string) *wallet {
 		w.clientID, w.provider = eudiClient, f.eudiWallet
 	}
 	w.wia = w.provider.WIA(f.t, w.clientID, w.wiaKey, time.Now().Add(time.Hour))
+	return w
+}
+
+// walletOn is the wallet of kind as ("nl" or "eudi") talking to profile.
+func (f *fixture) walletOn(profile, as string) *wallet {
+	w := f.wallet(as)
+	w.profile = profile
 	return w
 }
 

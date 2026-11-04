@@ -101,7 +101,7 @@ func (s *Service) Credential(ctx context.Context, call CredentialCall) (Credenti
 	} else if revoked {
 		return CredentialResult{}, refuse(oid4vci.ErrCredentialRequestDenied, "the offer has been revoked")
 	}
-	keys, err := s.holderKeys(ctx, p, id, req.Proofs)
+	keys, err := s.holderKeys(ctx, p, p.requiresKeyAttestation(token.WalletProvider), id, req.Proofs)
 	if err != nil {
 		return CredentialResult{}, err
 	}
@@ -151,11 +151,12 @@ func (s *Service) Credential(ctx context.Context, call CredentialCall) (Credenti
 
 // openRequest returns the credential request of a call, decrypted when the
 // wallet encrypted it, and the encrypter for the response when the wallet
-// asked for an encrypted one. Only KindEUDI publishes encryption.
+// asked for an encrypted one. Only KindEUDI and KindCombined publish
+// encryption.
 func (s *Service) openRequest(prov *provider, p Profile, call CredentialCall) (oid4vci.CredentialRequest, jose.Encrypter, error) {
 	req := call.Request
 	encrypted := call.Encrypted
-	if p.Kind != KindEUDI && (encrypted || req.ResponseEncryption != nil) {
+	if !p.servesEUDI() && (encrypted || req.ResponseEncryption != nil) {
 		return req, nil, refuse(oid4vci.ErrInvalidCredentialRequest, "encryption is not supported for this profile")
 	}
 	if encrypted {
@@ -254,7 +255,7 @@ func (s *Service) authorize(ctx context.Context, t Target, header, scheme string
 
 // holderKeys verifies the key proofs and returns the keys to bind the
 // credentials to. All proofs must carry the same c_nonce, which is used up.
-func (s *Service) holderKeys(ctx context.Context, p Profile, id string, proofs *oid4vci.Proofs) ([]jose.JSONWebKey, error) {
+func (s *Service) holderKeys(ctx context.Context, p Profile, mustAttest bool, id string, proofs *oid4vci.Proofs) ([]jose.JSONWebKey, error) {
 	if proofs == nil || (len(proofs.JWT) == 0) == (len(proofs.Attestation) == 0) {
 		return nil, refuse(oid4vci.ErrInvalidProof, "proofs must contain jwt or attestation proofs")
 	}
@@ -264,7 +265,7 @@ func (s *Service) holderKeys(ctx context.Context, p Profile, id string, proofs *
 
 	switch {
 	case len(proofs.Attestation) > 0:
-		if p.Kind != KindEUDI {
+		if !p.servesEUDI() {
 			return nil, refuse(oid4vci.ErrInvalidProof, "the attestation proof type is not supported for this profile")
 		}
 		if len(proofs.Attestation) != 1 {
@@ -286,7 +287,9 @@ func (s *Service) holderKeys(ctx context.Context, p Profile, id string, proofs *
 				return nil, refuse(oid4vci.ErrInvalidProof, err.Error())
 			}
 			nonces = append(nonces, jp.Nonce)
-			if p.Kind != KindEUDI {
+			// A wallet that need not attest its keys may still do so where
+			// the profile knows key attestation.
+			if !mustAttest && (jp.KeyAttestation == "" || !p.servesEUDI()) {
 				// One credential per proof: two proofs with one key would
 				// silently yield fewer credentials than proofs.
 				if containsKey(keys, jp.Key) {

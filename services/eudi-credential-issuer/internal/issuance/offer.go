@@ -168,7 +168,7 @@ func checkSourceDocument(p Profile, c CredentialConfiguration, d SourceDocument)
 			return fmt.Errorf("%w: attribute name %q is reserved", ErrBadSourceData, name)
 		}
 	}
-	if p.Kind == KindNL {
+	if p.servesNL() {
 		if err := wholeNumbers(d.Attributes); err != nil {
 			return fmt.Errorf("%w: %v", ErrBadSourceData, err)
 		}
@@ -257,12 +257,10 @@ func offerLinks(p Profile, offer oid4vci.CredentialOffer) (map[string]string, er
 	}
 	query := url.Values{"credential_offer": {string(raw)}}.Encode()
 	links := map[string]string{"openid-credential-offer": "openid-credential-offer://?" + query}
-	switch p.Kind {
-	case KindNL:
-		if p.UniversalLinkBase != "" {
-			links["universal_link"] = strings.TrimRight(p.UniversalLinkBase, "/") + "/credential-offer?" + query
-		}
-	case KindEUDI:
+	if p.servesNL() && p.UniversalLinkBase != "" {
+		links["universal_link"] = strings.TrimRight(p.UniversalLinkBase, "/") + "/credential-offer?" + query
+	}
+	if p.servesEUDI() {
 		links["haip-vci"] = "haip-vci://?" + query
 	}
 	return links, nil

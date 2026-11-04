@@ -125,13 +125,13 @@ func validateProvider(p Provider, kinds map[Kind]bool, vcts []string) error {
 	if p.IssuerChain[0].Subject.String() != p.StatusChain[0].Subject.String() {
 		return errors.New("the status list certificate must have the subject of the issuer certificate")
 	}
-	if kinds[KindEUDI] && p.RequestEncryptionKey == nil {
+	if (kinds[KindEUDI] || kinds[KindCombined]) && p.RequestEncryptionKey == nil {
 		return errors.New("a request encryption key is required for the eudi profile")
 	}
 	if p.RequestEncryptionKey != nil && p.RequestEncryptionKey.Curve != elliptic.P256() {
 		return errors.New("the request encryption key must be a P-256 key (ECDH-ES)")
 	}
-	if kinds[KindNL] && len(p.RegistrationCertificate) == 0 {
+	if (kinds[KindNL] || kinds[KindCombined]) && len(p.RegistrationCertificate) == 0 {
 		return errors.New("the NL Wallet refuses metadata without a registration certificate")
 	}
 	if len(p.VerifierRegistrationCertificate) > 0 {
@@ -194,19 +194,39 @@ func validateDisclosure(cfg Config) error {
 
 func validateProfile(p Profile) error {
 	switch p.Kind {
-	case KindNL:
-	case KindEUDI:
+	case KindNL, KindEUDI, KindCombined:
+	default:
+		return fmt.Errorf("unknown kind %q", p.Kind)
+	}
+	if p.servesEUDI() {
 		if len(p.KeyAttestationProviders) == 0 {
 			return errors.New("key attestation providers are required")
 		}
 		if len(p.KeyStorage) == 0 || len(p.UserAuthentication) == 0 {
 			return errors.New("the required key storage and user authentication levels must be set (ARF ISSU_27d)")
 		}
-	default:
-		return fmt.Errorf("unknown kind %q", p.Kind)
 	}
 	if len(p.WalletProviders) == 0 {
 		return errors.New("wallet providers are required")
+	}
+	if (p.Kind == KindCombined) != (len(p.PlainJWTWalletProviders) > 0) {
+		return errors.New("the wallet providers whose wallets may skip key attestation are set on a combined profile, and only there")
+	}
+	for _, name := range p.PlainJWTWalletProviders {
+		if !slices.ContainsFunc(p.WalletProviders, func(a x5c.Anchors) bool { return a.Name == name }) {
+			return fmt.Errorf("wallet provider %q may skip key attestation but is not a trusted wallet provider", name)
+		}
+	}
+	names := map[string]bool{}
+	for _, a := range p.WalletProviders {
+		if a.Name == "" {
+			return errors.New("every wallet provider anchor set needs a name")
+		}
+		if names[a.Name] {
+			// The name tells which wallets may skip key attestation.
+			return fmt.Errorf("wallet provider anchor set %q occurs twice", a.Name)
+		}
+		names[a.Name] = true
 	}
 	return nil
 }

@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"gbo-demo/eudi-credential-issuer/internal/issuance"
@@ -98,6 +99,10 @@ type ProfileFile struct {
 	// KeyAttestationRootsFile holds the PEM roots for key attestations.
 	KeyAttestationRootsFile string `json:"key_attestation_roots_file"`
 	UniversalLinkBase       string `json:"universal_link_base"`
+	// PlainJWTWalletProvidersFile is a second roots file on a combined
+	// profile: wallets attested by these providers (the NL Wallet's) may
+	// skip key attestation.
+	PlainJWTWalletProvidersFile string `json:"plain_jwt_wallet_providers_file"`
 	// KeyStorage and UserAuthentication are the levels a key attestation
 	// must assert (OpenID4VCI Appendix D.2), for example "iso_18045_high".
 	KeyStorage         []string `json:"key_storage"`
@@ -235,6 +240,30 @@ func loadProfile(dir string, pf ProfileFile) (issuance.Profile, error) {
 		if p.KeyAttestationProviders, err = loadAnchors(dir, pf.KeyAttestationRootsFile, pf.Name+" key attestation"); err != nil {
 			return p, err
 		}
+	}
+	if pf.PlainJWTWalletProvidersFile != "" {
+		name := pf.Name + " plain-jwt wallet providers"
+		plain, err := loadAnchors(dir, pf.PlainJWTWalletProvidersFile, name)
+		if err != nil {
+			return p, err
+		}
+		// A root in both files would make its wallets attest or not,
+		// depending on which set happens to match first.
+		attesting, err := readCertificates(resolve(dir, pf.WalletProviderRootsFile))
+		if err != nil {
+			return p, err
+		}
+		plainRoots, err := readCertificates(resolve(dir, pf.PlainJWTWalletProvidersFile))
+		if err != nil {
+			return p, err
+		}
+		for _, root := range plainRoots {
+			if slices.ContainsFunc(attesting, func(c *x509.Certificate) bool { return c.Equal(root) }) {
+				return p, fmt.Errorf("%s: root %q is also a wallet provider that must attest", name, root.Subject)
+			}
+		}
+		p.WalletProviders = append(p.WalletProviders, plain...)
+		p.PlainJWTWalletProviders = []string{name}
 	}
 	return p, nil
 }

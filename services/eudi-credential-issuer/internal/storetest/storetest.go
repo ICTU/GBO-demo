@@ -113,11 +113,11 @@ func tokens(t *testing.T, s Store) {
 	if err := s.CreateSession(ctx, issuance.Session{ID: "s1", Provider: "tax", Profile: "eudi", CodeHash: "c1", ExpiresAt: now.Add(time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SaveToken(ctx, issuance.AccessToken{Hash: "t1", SessionID: "s1", JKT: "k", ClientID: "w", ExpiresAt: now.Add(time.Minute)}); err != nil {
+	if err := s.SaveToken(ctx, issuance.AccessToken{Hash: "t1", SessionID: "s1", JKT: "k", ClientID: "w", WalletProvider: "nl", ExpiresAt: now.Add(time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
 	tok, sess, err := s.Token(ctx, "t1", now)
-	if err != nil || tok.JKT != "k" || tok.ClientID != "w" || sess.Provider != "tax" || sess.Profile != "eudi" {
+	if err != nil || tok.JKT != "k" || tok.ClientID != "w" || tok.WalletProvider != "nl" || sess.Provider != "tax" || sess.Profile != "eudi" {
 		t.Fatalf("%+v %+v %v", tok, sess, err)
 	}
 	if _, _, err := s.Token(ctx, "t1", now.Add(time.Minute)); !errors.Is(err, issuance.ErrNotFound) {

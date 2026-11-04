@@ -62,12 +62,12 @@ func (s *Service) issuerMetadata(t Target, prov *provider, p Profile) map[string
 	if s.cfg.BatchSize >= 2 {
 		md["batch_credential_issuance"] = map[string]any{"batch_size": s.cfg.BatchSize}
 	}
-	if p.Kind == KindNL {
+	if p.servesNL() {
 		// Not part of OpenID4VCI: the NL Wallet requires a preview of the
 		// credentials before it asks for them.
 		md["credential_preview_endpoint"] = id + "/credential_preview"
 	}
-	if p.Kind == KindEUDI {
+	if p.servesEUDI() {
 		// Supported, not required (section 12.2.4). A wallet that asks for
 		// an encrypted response must encrypt its request (section 8.2).
 		methods := encNames(oid4vci.EncryptionMethods)
@@ -101,9 +101,13 @@ func (s *Service) issuerMetadata(t Target, prov *provider, p Profile) map[string
 func (s *Service) configurationMetadata(p Profile, c CredentialConfiguration) map[string]any {
 	proofType := map[string]any{"proof_signing_alg_values_supported": algNames(oid4vci.ProofAlgorithms)}
 	proofs := map[string]any{"jwt": proofType}
-	if p.Kind == KindEUDI {
+	if p.servesEUDI() {
 		required := map[string]any{"key_storage": p.KeyStorage, "user_authentication": p.UserAuthentication}
-		proofType["key_attestations_required"] = required
+		// On KindCombined the jwt proof type is the NL Wallet's, without key
+		// attestation; whether a wallet must attest follows from its WIA.
+		if p.Kind == KindEUDI {
+			proofType["key_attestations_required"] = required
+		}
 		proofs["attestation"] = map[string]any{
 			"proof_signing_alg_values_supported": algNames(oid4vci.ProofAlgorithms),
 			"key_attestations_required":          required,
