@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import {
   adapterPathFor,
+  euLoginLinkFor,
   euWalletLinkFor,
   loadEuWalletLinks,
   walletUniversalLinkFor,
@@ -53,6 +54,9 @@ export default function EudiQrPanel({ usecaseKey, offers, onCancel, onPlayground
   // The EU-wallet link comes from the own credential issuer; an offer it
   // does not serve has the NL Wallet only, and then there is no choice.
   const euLink = euWalletLinkFor(offer, euLinks)
+  // The same offer with a login instead of PID disclosure (authorization
+  // code flow), when the issuer offers it.
+  const euLoginLink = euLoginLinkFor(offer, euLinks)
   // Without the NL Wallet's issuance server only the EU-wallet has a link.
   const nlAvailable = Boolean(walletUniversalLinkFor(offer, 'cross_device'))
   const wallet: Wallet = euLink && (chosenWallet === 'eu' || !nlAvailable) ? 'eu' : 'nl'
@@ -139,6 +143,21 @@ export default function EudiQrPanel({ usecaseKey, offers, onCancel, onPlayground
                 same-device link
               </a>
             </div>
+            {wallet === 'eu' && euLoginLink && (
+              <div style={{
+                width: '100%', marginTop: 8, paddingTop: 12, borderTop: '1px solid var(--border)',
+                display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center',
+              }}>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>Met inloggen in plaats van PID delen</div>
+                <QRCodeSVG value={euLoginLink} size={220} bgColor="#ffffff" fgColor="#000000" includeMargin />
+                <div style={{ fontSize: 12, color: 'var(--mute)', textAlign: 'center' }}>
+                  De wallet opent een inlogpagina van GBO (DigiD-mock of NL Wallet); daarna haalt de bron de gegevens op.
+                </div>
+                <a className="btn mini" href={euLoginLink} target="_blank" rel="noopener noreferrer">
+                  same-device link
+                </a>
+              </div>
+            )}
 
             {/* Mini-playground: bypass the wallet, curl the adapter
                 directly — shows the raw attestation-response that would

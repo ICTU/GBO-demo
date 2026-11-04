@@ -1,3 +1,5 @@
+import { euWalletLinksFrom, type EuWalletLinks } from './lib/euWalletLinks'
+
 export type IssuanceOffer = {
   key: string
   label: string
@@ -67,35 +69,28 @@ const OWN_ISSUER_PUBLIC_URL = (
   ''
 ).replace(/\/$/, '')
 
-type DisclosureOfferLinks = {
-  provider: string
-  key: string
-  profiles: Record<string, { client_id: string; request_uri: string; link: string }>
-}
-
-/** EU-wallet links (openid4vp://) by source and offer key. */
-export type EuWalletLinks = Map<string, string>
+export type { EuWalletLinks }
 
 export async function loadEuWalletLinks(): Promise<EuWalletLinks> {
-  const links: EuWalletLinks = new Map()
-  if (!OWN_ISSUER_PUBLIC_URL) return links
+  if (!OWN_ISSUER_PUBLIC_URL) return new Map()
   try {
     const response = await fetch(`${OWN_ISSUER_PUBLIC_URL}/disclosure-offers`, {
       cache: 'no-store',
       signal: AbortSignal.timeout(5000),
     })
-    if (!response.ok) return links
-    const offers = (await response.json()) as DisclosureOfferLinks[]
-    for (const offer of Array.isArray(offers) ? offers : []) {
-      const link = offer.profiles?.eudi?.link
-      if (link) links.set(`${offer.provider}/${offer.key}`, link)
-    }
+    if (!response.ok) return new Map()
+    return euWalletLinksFrom(await response.json())
   } catch {
     // The issuer is optional; without it the panel offers the NL Wallet only.
+    return new Map()
   }
-  return links
 }
 
 export function euWalletLinkFor(offer: IssuanceOffer, links: EuWalletLinks): string {
-  return links.get(`${offer.source_id}/${offer.key}`) ?? ''
+  return links.get(`${offer.source_id}/${offer.key}`)?.link ?? ''
+}
+
+/** The login link of an offer: the citizen logs in instead of sharing the PID. */
+export function euLoginLinkFor(offer: IssuanceOffer, links: EuWalletLinks): string {
+  return links.get(`${offer.source_id}/${offer.key}`)?.loginLink ?? ''
 }

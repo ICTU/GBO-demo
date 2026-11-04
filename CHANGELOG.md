@@ -105,6 +105,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   issuer whose offer caller named the subject. It logs that as a separate
   Dataverwerking, `gbo-bsn-ontvangst-aanvrager`, added to the register of
   `logboek-eudi-adapter`, before it asks the source.
+- **The developer portal shows the login QR** (#614): on the EU-wallet tab
+  of an offer the own credential issuer serves, a second QR, "Met inloggen
+  in plaats van PID delen", starts the authorization code flow; the citizen
+  logs in at GBO's authorization server instead of sharing the PID.
 - **Authorization code flow at the own credential issuer** (#614): on the
   `eudi` profile a citizen identifies by logging in at GBO's authorization
   server instead of disclosing the PID. The wallet pushes its authorization
