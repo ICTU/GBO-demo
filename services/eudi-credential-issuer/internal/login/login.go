@@ -30,6 +30,8 @@ import (
 
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
+
+	"gbo-demo/eudi-credential-issuer/internal/issuance"
 )
 
 // Scope is the scope of a credential issuer at the authorization server.
@@ -45,8 +47,9 @@ const (
 )
 
 // ErrUnavailable means the authorization server could not be reached, failed,
-// or no longer knows the client: the citizen can try again later.
-var ErrUnavailable = errors.New("the authorization server is unavailable")
+// or no longer knows the client: the citizen can try again later. It is the
+// core's ErrLoginUnavailable, so the core tells it from a refused login.
+var ErrUnavailable = issuance.ErrLoginUnavailable
 
 // Provider is a provider as client: its access certificate, its entry in the
 // register of wallet-relying parties and its callback.

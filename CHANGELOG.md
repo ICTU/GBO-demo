@@ -105,6 +105,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   issuer whose offer caller named the subject. It logs that as a separate
   Dataverwerking, `gbo-bsn-ontvangst-aanvrager`, added to the register of
   `logboek-eudi-adapter`, before it asks the source.
+- **Authorization code flow at the own credential issuer** (#614): on the
+  `eudi` profile a citizen identifies by logging in at GBO's authorization
+  server instead of disclosing the PID. The wallet pushes its authorization
+  request (PAR, required), the issuer sends the browser to the login as the
+  source's client, redeems the code there with `private_key_jwt`, DPoP and
+  PKCE, checks the token itself and asks the source with
+  `"origin": "login"`. The wallet gets a code bound to its client,
+  redirect URI, PKCE challenge and, with a DPoP proof at PAR, its DPoP key.
+  When the source has no data or is unavailable, the citizen sees a page
+  with a button back to the wallet. Every source offer gets a login link
+  (`login_link` in `GET /disclosure-offers`). Configured with
+  `ISSUER_LOGIN_SERVER`; without it nothing changes.
 - **The ASI authorization server serves credential issuers** (#614): a
   client registered with the `PUB_EAA_Provider` entitlement and scope
   `issuance` obtains tokens for the issuance resource of its own

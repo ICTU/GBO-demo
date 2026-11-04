@@ -30,7 +30,7 @@ A Wallet Instance Attestation is accepted only from the wallet providers configu
 | SD-JWT VC, `dc+sd-jwt` (HAIP section 6.1) | implemented; every attribute selectively disclosable, `iss` omitted |
 | Token Status List, JWT (draft-ietf-oauth-status-list) | implemented; random indices (ARF VCR_17); revocation through the internal API, per entry or per offer reference |
 | NL credential preview endpoint | implemented for `nl`; not part of OpenID4VCI; once per access token |
-| Authorization Code Flow, PAR | not yet; `response_types_supported` is empty |
+| Authorization Code Flow with required PAR (OpenID4VCI 1.0 section 5, RFC 9126; HAIP section 4 via FAPI 2.0), PKCE S256, `iss` in the authorization response (RFC 9207), DPoP binding of the code (RFC 9449 section 10) | implemented on the `eudi` profile when `ISSUER_LOGIN_SERVER` is set: issuer-initiated with `issuer_state`. The citizen logs in at GBO's authorization server; see [Authorization code flow](#authorization-code-flow). Without it `response_types_supported` is empty |
 | Deferred issuance, notification endpoint, re-issuance with refresh tokens, `tx_code` | not yet |
 | ISO mdoc | not yet |
 | `credential_reuse_policy` (ETSI TS 119 472-3; ARF ISSU_39) | not yet |
@@ -69,6 +69,9 @@ Public port (`ISSUER_LISTEN_ADDR`, default `:8080`), per provider `v` and profil
 | `GET /{v}/{p}/vp/{offer}/request` | disclosure-based issuance: the `request_uri` of a disclosure offer. Each fetch starts a disclosure session (`disclosure_ttl`, default 5 minutes) and returns its OpenID4VP request object (`application/oauth-authz-req+jwt`), signed with the provider's access certificate, asking for the `bsn` of the PID |
 | `GET /disclosure-offers` | the fixed links of every disclosure offer: per profile `client_id`, `request_uri` and the link (`openid4vp://` on `eudi`, the NL Wallet's universal link on `nl`). Public and readable from any origin; the developer portal shows them as QR codes |
 | `POST /{v}/{p}/vp/response/{session}` | the `response_uri` (`direct_post.jwt`, form field `response`, or `error` when the wallet declines). See [Disclosure-based issuance](#disclosure-based-issuance) |
+| `POST /{v}/eudi/par` | pushed authorization request: `response_type=code`, `client_id`, `redirect_uri` (a wallet redirect URI from `ISSUER_WALLET_REDIRECT_URIS`), `code_challenge` (S256), `state`, `issuer_state` (the key of a source offer); headers `OAuth-Client-Attestation`, `OAuth-Client-Attestation-PoP` and optionally `DPoP`, which binds the code to its key → `201 {request_uri, expires_in: 60}` |
+| `GET /{v}/eudi/authorize` | `client_id` and `request_uri` only: the request must be pushed. Sends the browser to GBO's authorization server, or shows "Bron niet beschikbaar" with a button back to the wallet. An unknown, used or expired `request_uri`, or another client's, gets an error page (400), never a redirect |
+| `GET /{v}/eudi/callback` | the browser's return from the login (`code` and `state`, or `error`): redirects to the wallet with `code`, its `state` and `iss`, or shows a page with a button back to the wallet ("Geen gegevens gevonden" → `access_denied`; "Bron niet beschikbaar" → `temporarily_unavailable`). A denied login goes back with `access_denied` at once |
 | `GET /healthz` | health |
 
 Internal port (`ISSUER_INTERNAL_ADDR`, default `:8081`):
@@ -98,6 +101,18 @@ The response is checked with `oid4vc-kit/oid4vp`: the PID must chain to `pid_tru
 | the source has no data, on `nl` | `404 no_issuable_attestations`, which the NL Wallet shows as "nothing to add" |
 | the source has no data, on `eudi` | `200 {"redirect_uri": "<issuer>/vp/<offer>/no-data"}`: the EUDI wallets show any refusal as a generic error, so the wallet opens a page in the browser that names the organization (O of the access certificate) and the attestation, and says nothing was added. The page shows no personal data |
 | the source or the PID status list is unreachable, or the source data cannot be issued | `500 server_error`; scanning again may work |
+
+## Authorization code flow
+
+On the `eudi` profile the citizen can identify by logging in instead of disclosing the PID (#614, phase 3). The issuer is the wallet's authorization server, and itself a client of GBO's authorization server ([`asi-authorization-server`](../asi-authorization-server)), the same service where a citizen consents to a QTSP's verification:
+
+1. The wallet scans the login link of a source offer (`login_link` in `GET /disclosure-offers`): a Credential Offer with `grants.authorization_code.issuer_state` = the offer's key.
+2. It pushes its authorization request (PAR) and opens `/authorize` in the browser.
+3. The issuer sends the browser to GBO's authorization server, as the source's client: the citizen sees "Toestemming voor <source>", logs in (DigiD mock or NL Wallet) and comes back to `/callback`.
+4. The issuer redeems the code there (`private_key_jwt` with the source's access certificate, DPoP, PKCE), checks the token as its resource server (issuer, its own identifier as audience, expiry, client, scope `issuance`, DPoP binding) and takes the BSN.
+5. It asks the bronpoort with `{"subject": {"bsn": ...}, "origin": "login"}`, which `eudi-adapter` logs as the Dataverwerking `gbo-bsn-uit-inloggen`, and sends the browser back to the wallet with a code (60 seconds, once). The token request with that code then works as with a pre-authorized code.
+
+Each provider registers itself with GBO's authorization server on its first login, with a software statement signed with its access certificate and its entry `ISSUER_LOGIN_REGISTER_BASE/<provider>` in the register (entitlement `PUB_EAA_Provider`). That server keeps clients in memory and makes a new signing key when it starts: when its keys changed, or a token request gets `invalid_client`, the provider registers again. The issuer logs neither the BSN nor the token.
 
 ## Bronpoort
 
@@ -141,6 +156,10 @@ ISSUER_TEST_DATABASE_URL=postgres://... go test ./internal/postgres/
 | `ISSUER_DATABASE_URL`, `ISSUER_DATABASE_SCHEMA` | PostgreSQL; schema default `eudi_credential_issuer` |
 | `ISSUER_STORE=memory` | demo shortcut: in-memory state |
 | `ISSUER_LISTEN_ADDR`, `ISSUER_INTERNAL_ADDR` | ports |
+| `ISSUER_LOGIN_SERVER` | issuer identifier of GBO's authorization server; set, the `eudi` profiles offer the authorization code flow |
+| `ISSUER_LOGIN_URL_MAP` | `public=internal` pairs: where this container reaches that server, for example `http://localhost:9425=http://asi-authorization-server:4021` |
+| `ISSUER_LOGIN_REGISTER_BASE` | base of the providers' entries in the register, default `https://register.gbo.example/wrp` |
+| `ISSUER_WALLET_REDIRECT_URIS` | the wallet redirect URIs accepted at PAR, comma-separated, default `eu.europa.ec.euidi://authorization` (the EUDI reference wallet) |
 
 Interoperability with an independent wallet: `interop/` is a separate module that drives the issuer with OID4VCgo (OpenID Certified wallet). It needs Go 1.26.10 (`GOTOOLCHAIN=auto` fetches it) and does not run in CI.
 
@@ -231,6 +250,7 @@ The issuer refuses to start with a configuration a wallet would refuse: no `scop
 | `internal/issuance` | core: offers, metadata, token, nonce, credential, preview, status lists, configuration checks; ports for source and stores |
 | `internal/httpapi` | HTTP adapter, public and internal; the end-to-end tests of all cases |
 | `internal/source` | bronpoort client |
+| `internal/login` | client of GBO's authorization server: registration, authorization request, code exchange, token checks |
 | `internal/postgres`, `internal/memstore` | stores; `internal/storetest` is the contract both pass |
 | `internal/config` | configuration file |
 | `interop/` | separate module: the issuer driven by the OID4VCgo wallet |

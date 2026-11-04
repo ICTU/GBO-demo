@@ -19,7 +19,28 @@ type Source interface {
 	// its PID; the backend receives the disclosure, not an offer caller's
 	// subject, so it can tell the two apart.
 	FetchDisclosed(ctx context.Context, configurationID string, pid DisclosedPID, parameters map[string]string) ([]SourceDocument, error)
+	// FetchLogin is Fetch for a citizen who logged in at GBO's
+	// authorization server: the backend learns that the BSN comes from that
+	// login, so it logs the right Dataverwerking.
+	FetchLogin(ctx context.Context, configurationID, bsn string, parameters map[string]string) ([]SourceDocument, error)
 }
+
+// Login is GBO's authorization server, where the citizen logs in during the
+// authorization code flow (B15). The issuer is its client per provider and
+// the resource server of its tokens.
+type Login interface {
+	// AuthorizationURL returns where the browser goes to log in for
+	// provider: an authorization request for resource with state and the
+	// S256 challenge.
+	AuthorizationURL(ctx context.Context, provider, resource, state, challenge string) (string, error)
+	// Exchange redeems the code for a token for resource, checks it and
+	// returns the BSN it carries.
+	Exchange(ctx context.Context, provider, resource, code, verifier string) (string, error)
+}
+
+// ErrLoginUnavailable means the authorization server could not be reached
+// or failed: the citizen can try again later.
+var ErrLoginUnavailable = errors.New("the login is unavailable")
 
 // DisclosedPID is what a wallet disclosed of its PID, verified: the
 // requested attributes and where the PID came from.
@@ -74,11 +95,28 @@ type Sessions interface {
 	CompleteIssue(ctx context.Context, sessionID, credentialID, owner string) (bool, error)
 	// ReleaseIssue removes the reservation if owner holds it.
 	ReleaseIssue(ctx context.Context, sessionID, credentialID, owner string) error
+	// PutPending stores a pending authorization: a pushed authorization
+	// request, or a login in progress.
+	PutPending(ctx context.Context, p PendingAuthorization) error
+	// TakePending removes an unexpired pending authorization of kind and
+	// returns it, atomically: it is used once. It returns ErrNotFound for an
+	// unknown, used or expired one.
+	TakePending(ctx context.Context, kind, id string, now time.Time) (PendingAuthorization, error)
 	CreateDisclosure(ctx context.Context, d DisclosureSession) error
 	// TakeDisclosure removes an unexpired disclosure session and returns
 	// it, atomically: a session answers one response. It returns
 	// ErrNotFound for an unknown, used or expired session.
 	TakeDisclosure(ctx context.Context, id string, now time.Time) (DisclosureSession, error)
+}
+
+// PendingAuthorization is a step of the authorization code flow that waits
+// for the next: its Payload is the core's, the store keeps it until it is
+// taken or expires.
+type PendingAuthorization struct {
+	Kind      string
+	ID        string
+	Payload   []byte
+	ExpiresAt time.Time
 }
 
 // DisclosureSession is one OpenID4VP request for a PID, from the moment a
@@ -140,6 +178,20 @@ type Session struct {
 	// Reference is the offer caller's reference for revocation, if any.
 	Reference string
 	Documents []Document
+	// Binding is set for an authorization code: what the token request
+	// must match. A session without it has a pre-authorized code.
+	Binding *CodeBinding
+}
+
+// CodeBinding binds an authorization code to the pushed authorization
+// request it was issued for.
+type CodeBinding struct {
+	ClientID      string `json:"client_id"`
+	RedirectURI   string `json:"redirect_uri"`
+	CodeChallenge string `json:"code_challenge"`
+	// DPoPJKT is the thumbprint of the DPoP key of the pushed request, if
+	// it had one (RFC 9449 section 10).
+	DPoPJKT string `json:"dpop_jkt,omitempty"`
 }
 
 // Document is a credential to issue within a session.

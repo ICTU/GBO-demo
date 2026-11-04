@@ -40,6 +40,8 @@ func Run(t *testing.T, newStore func(t *testing.T) Store) {
 		{"revocation and concurrent allocation", revokeWhileAllocating},
 		{"a disclosure session is taken once and only before it expires", takeDisclosureOnce},
 		{"concurrent takes of a disclosure session: exactly one wins", takeDisclosureConcurrently},
+		{"a pending authorization is taken once and only before it expires", takePendingOnce},
+		{"an authorization code keeps its binding", codeBinding},
 	} {
 		t.Run(c.name, func(t *testing.T) { c.test(t, newStore(t)) })
 	}
@@ -419,5 +421,52 @@ func takeDisclosureConcurrently(t *testing.T, s Store) {
 	wg.Wait()
 	if wins != 1 {
 		t.Fatalf("%d takes won, want 1", wins)
+	}
+}
+
+func takePendingOnce(t *testing.T, s Store) {
+	for _, p := range []issuance.PendingAuthorization{
+		{Kind: "par", ID: "p1", Payload: []byte(`{"a":1}`), ExpiresAt: now.Add(time.Minute)},
+		{Kind: "login", ID: "p1", Payload: []byte(`{"b":2}`), ExpiresAt: now.Add(time.Minute)},
+		{Kind: "par", ID: "p2", Payload: []byte(`{}`), ExpiresAt: now.Add(-time.Second)},
+	} {
+		if err := s.PutPending(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.PutPending(ctx, issuance.PendingAuthorization{Kind: "par", ID: "p1", Payload: []byte(`{}`), ExpiresAt: now.Add(time.Minute)}); err == nil {
+		t.Fatal("a second pending authorization with the same kind and id was stored")
+	}
+	got, err := s.TakePending(ctx, "par", "p1", now)
+	if err != nil || string(got.Payload) != `{"a":1}` || !got.ExpiresAt.Equal(now.Add(time.Minute)) {
+		t.Fatalf("take = %+v, %v", got, err)
+	}
+	if _, err := s.TakePending(ctx, "par", "p1", now); !errors.Is(err, issuance.ErrNotFound) {
+		t.Fatalf("second take: %v, want ErrNotFound", err)
+	}
+	if got, err := s.TakePending(ctx, "login", "p1", now); err != nil || string(got.Payload) != `{"b":2}` {
+		t.Fatalf("take of the other kind = %+v, %v", got, err)
+	}
+	if _, err := s.TakePending(ctx, "par", "p2", now); !errors.Is(err, issuance.ErrNotFound) {
+		t.Fatalf("take of an expired one: %v, want ErrNotFound", err)
+	}
+}
+
+func codeBinding(t *testing.T, s Store) {
+	binding := &issuance.CodeBinding{ClientID: "w", RedirectURI: "eu.europa.ec.euidi://authorization", CodeChallenge: "ch", DPoPJKT: "jkt"}
+	for _, sess := range []issuance.Session{
+		{ID: "acf", Provider: "tax", Profile: "eudi", CodeHash: "c-acf", ExpiresAt: now.Add(time.Minute), Binding: binding},
+		{ID: "pre", Provider: "tax", Profile: "eudi", CodeHash: "c-pre", ExpiresAt: now.Add(time.Minute)},
+	} {
+		if err := s.CreateSession(ctx, sess); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.RedeemCode(ctx, "tax", "eudi", "c-acf", now)
+	if err != nil || got.Binding == nil || *got.Binding != *binding {
+		t.Fatalf("binding = %+v, %v; want %+v", got.Binding, err, binding)
+	}
+	if got, err := s.RedeemCode(ctx, "tax", "eudi", "c-pre", now); err != nil || got.Binding != nil {
+		t.Fatalf("pre-authorized session binding = %+v, %v; want none", got.Binding, err)
 	}
 }

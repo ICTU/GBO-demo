@@ -72,6 +72,8 @@ type fixture struct {
 	pidStatusDown bool
 	// logs holds what the issuer logged.
 	logs *syncBuffer
+	// login stands in for GBO's authorization server.
+	login *fakeLogin
 }
 
 // syncBuffer is a bytes.Buffer safe for the concurrent writes of handlers.
@@ -113,7 +115,7 @@ func (c *clock) Advance(d time.Duration) {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	f := &fixture{t: t, clock: &clock{}, sourceStatus: http.StatusOK, logs: &syncBuffer{}}
+	f := &fixture{t: t, clock: &clock{}, sourceStatus: http.StatusOK, logs: &syncBuffer{}, login: newFakeLogin()}
 	f.sourceDocs = []map[string]any{{
 		"id": "doc-1", "format": "dc+sd-jwt", "attestation_type": incomeVCT,
 		"attributes": map[string]any{"year": "2025", "income": 41000, "address": map[string]any{"city": "Utrecht"}},
@@ -147,7 +149,8 @@ func newFixture(t *testing.T) *fixture {
 				UniversalLinkBase: "https://app.example.test/deeplink"},
 			{Name: "eudi", Kind: issuance.KindEUDI, WalletProviders: []x5c.Anchors{f.eudiWallet.Anchors("eudi")},
 				KeyAttestationProviders: []x5c.Anchors{f.eudiWallet.Anchors("eudi")},
-				KeyStorage:              []string{"iso_18045_high"}, UserAuthentication: []string{"iso_18045_high"}},
+				KeyStorage:              []string{"iso_18045_high"}, UserAuthentication: []string{"iso_18045_high"},
+				WalletRedirectURIs: []string{walletRedirect}},
 			// One identifier for both wallets: NL Wallets may skip key
 			// attestation, EUDI wallets may not.
 			{Name: "wallet", Kind: issuance.KindCombined,
@@ -180,6 +183,7 @@ func newFixture(t *testing.T) *fixture {
 		PIDAnchors:     []x5c.Anchors{x5c.NewAnchors("test-pid", f.pidRoot.Cert)},
 		FetchPIDStatus: f.fetchPIDStatus,
 		DisclosureTTL:  disclosureTTL,
+		Login:          f.login,
 	}
 	store := memstore.New()
 	svc, err := issuance.New(cfg, &source.Client{HTTP: src.Client(), Endpoints: map[string]string{

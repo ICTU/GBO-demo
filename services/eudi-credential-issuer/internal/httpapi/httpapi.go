@@ -44,6 +44,12 @@ func Public(svc *issuance.Service, log *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /{provider}/{profile}/vp/{offer}/no-data", h.noDataPage)
 	mux.HandleFunc("POST /{provider}/{profile}"+issuance.DisclosureResponsePath+"{session}", h.disclosureResponse)
 	mux.HandleFunc("GET /disclosure-offers", h.disclosureOffers)
+	// The authorization code flow with a login at GBO's authorization
+	// server (eudi profile).
+	mux.HandleFunc("POST /{provider}/{profile}/par", h.par)
+	// One pattern for both browser endpoints: two would conflict with
+	// GET /status/{provider}/{list}, this one is less specific than it.
+	mux.HandleFunc("GET /{provider}/{profile}/{endpoint}", h.browser)
 	return mux
 }
 
@@ -126,6 +132,9 @@ func (h *handler) token(w http.ResponseWriter, r *http.Request) {
 		GrantType:            r.PostForm.Get("grant_type"),
 		PreAuthorizedCode:    r.PostForm.Get("pre-authorized_code"),
 		TxCode:               r.PostForm.Get("tx_code"),
+		Code:                 r.PostForm.Get("code"),
+		CodeVerifier:         r.PostForm.Get("code_verifier"),
+		RedirectURI:          r.PostForm.Get("redirect_uri"),
 		ClientID:             r.PostForm.Get("client_id"),
 		ClientAttestation:    r.Header.Get(clientattest.AttestationHeader),
 		ClientAttestationPoP: r.Header.Get(clientattest.PoPHeader),

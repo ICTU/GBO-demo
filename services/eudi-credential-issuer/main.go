@@ -16,12 +16,14 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"gbo-demo/eudi-credential-issuer/internal/config"
 	"gbo-demo/eudi-credential-issuer/internal/httpapi"
 	"gbo-demo/eudi-credential-issuer/internal/issuance"
+	"gbo-demo/eudi-credential-issuer/internal/login"
 	"gbo-demo/eudi-credential-issuer/internal/memstore"
 	"gbo-demo/eudi-credential-issuer/internal/postgres"
 	"gbo-demo/eudi-credential-issuer/internal/source"
@@ -103,6 +105,9 @@ func serve(ctx context.Context, log *slog.Logger) error {
 		src.Clients[id] = source.WithRoots(src.HTTP, roots)
 	}
 	cfg.FetchPIDStatus = pidStatusFetcher(&http.Client{Timeout: 10 * time.Second})
+	if err := configureLogin(&cfg); err != nil {
+		return fmt.Errorf("login: %w", err)
+	}
 	svc, err := issuance.New(cfg, src, st, st, st, time.Now)
 	if err != nil {
 		return err
@@ -127,6 +132,59 @@ func serve(ctx context.Context, log *slog.Logger) error {
 	shutdown, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	return errors.Join(public.Shutdown(shutdown), internal.Shutdown(shutdown))
+}
+
+// configureLogin sets up the authorization code flow when
+// ISSUER_LOGIN_SERVER names GBO's authorization server: each provider becomes
+// its client, with its access certificate and its entry
+// ISSUER_LOGIN_REGISTER_BASE/<provider> in the register of wallet-relying
+// parties, and the eudi profiles accept the wallet redirect URIs of
+// ISSUER_WALLET_REDIRECT_URIS. ISSUER_LOGIN_URL_MAP maps the server's public
+// address to one this container reaches ("public=internal").
+func configureLogin(cfg *issuance.Config) error {
+	server := os.Getenv("ISSUER_LOGIN_SERVER")
+	if server == "" {
+		return nil
+	}
+	var eudi string
+	for i, p := range cfg.Profiles {
+		if p.Kind != issuance.KindEUDI {
+			continue
+		}
+		cfg.Profiles[i].WalletRedirectURIs = splitList(env("ISSUER_WALLET_REDIRECT_URIS", "eu.europa.ec.euidi://authorization"))
+		if eudi == "" {
+			eudi = p.Name
+		}
+	}
+	if eudi == "" {
+		return errors.New("ISSUER_LOGIN_SERVER is set, but there is no eudi profile")
+	}
+	transport, err := login.NewURLMap(os.Getenv("ISSUER_LOGIN_URL_MAP"), http.DefaultTransport)
+	if err != nil {
+		return err
+	}
+	base := strings.TrimRight(env("ISSUER_LOGIN_REGISTER_BASE", "https://register.gbo.example/wrp"), "/")
+	var providers []login.Provider
+	for _, p := range cfg.Providers {
+		providers = append(providers, login.Provider{Name: p.Name, Key: p.AccessKey, Chain: p.AccessChain,
+			RegistryURI: base + "/" + p.Name, RedirectURI: strings.TrimRight(cfg.PublicURL, "/") + "/" + p.Name + "/" + eudi + "/callback"})
+	}
+	client, err := login.New(server, &http.Client{Timeout: 10 * time.Second, Transport: transport}, providers)
+	if err != nil {
+		return err
+	}
+	cfg.Login = client
+	return nil
+}
+
+func splitList(value string) []string {
+	var out []string
+	for _, v := range strings.Split(value, ",") {
+		if v = strings.TrimSpace(v); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // pidStatusFetcher fetches the status lists of disclosed PIDs. The URI

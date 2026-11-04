@@ -140,14 +140,16 @@ func issuerName(access *x509.Certificate) string {
 }
 
 // AuthorizationServerMetadata returns the OAuth 2.0 Authorization Server
-// Metadata (RFC 8414) of a target. Phase 1 offers only the Pre-Authorized
-// Code Flow; the Authorization Code Flow follows in phase 3.
+// Metadata (RFC 8414) of a target: the Pre-Authorized Code Flow, and on a
+// profile that offers it the Authorization Code Flow with required PAR
+// (RFC 9126) and iss in the authorization response (RFC 9207).
 func (s *Service) AuthorizationServerMetadata(t Target) (map[string]any, error) {
-	if _, _, err := s.resolve(t); err != nil {
+	_, p, err := s.resolve(t)
+	if err != nil {
 		return nil, err
 	}
 	id := s.Identifier(t)
-	return map[string]any{
+	md := map[string]any{
 		"issuer":                                              id,
 		"token_endpoint":                                      id + "/token",
 		"response_types_supported":                            []string{},
@@ -158,7 +160,17 @@ func (s *Service) AuthorizationServerMetadata(t Target) (map[string]any, error) 
 		"challenge_endpoint":                                  id + "/challenge",
 		"dpop_signing_alg_values_supported":                   algNames(dpop.Algorithms),
 		"pre-authorized_grant_anonymous_access_supported":     false,
-	}, nil
+	}
+	if s.offersLogin(p) {
+		md["authorization_endpoint"] = id + "/authorize"
+		md["pushed_authorization_request_endpoint"] = id + "/par"
+		md["require_pushed_authorization_requests"] = true
+		md["response_types_supported"] = []string{"code"}
+		md["grant_types_supported"] = []string{oid4vci.GrantPreAuthorizedCode, GrantAuthorizationCode}
+		md["code_challenge_methods_supported"] = []string{"S256"}
+		md["authorization_response_iss_parameter_supported"] = true
+	}
+	return md, nil
 }
 
 func encNames(encs []jose.ContentEncryption) []string {

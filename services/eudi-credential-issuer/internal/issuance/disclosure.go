@@ -245,6 +245,10 @@ type DisclosureLink struct {
 	ClientID   string `json:"client_id"`
 	RequestURI string `json:"request_uri"`
 	Link       string `json:"link"`
+	// LoginLink is the credential offer of the same offer for the
+	// authorization code flow, where the citizen logs in instead of
+	// disclosing the PID; empty when the profile does not offer it.
+	LoginLink string `json:"login_link,omitempty"`
 }
 
 // DisclosureOfferLinks are the fixed links of one disclosure offer, per
@@ -276,7 +280,8 @@ func (s *Service) DisclosureOfferLinks() []DisclosureOfferLinks {
 			default:
 				continue
 			}
-			entry.Profiles[p.Name] = DisclosureLink{ClientID: prov.requestSigner.ClientID(), RequestURI: requestURI, Link: link}
+			entry.Profiles[p.Name] = DisclosureLink{ClientID: prov.requestSigner.ClientID(), RequestURI: requestURI, Link: link,
+				LoginLink: s.LoginLink(Target{Provider: o.Provider, Profile: p.Name}, o.Key)}
 		}
 		out = append(out, entry)
 	}

@@ -113,6 +113,20 @@ func (c *Client) Fetch(ctx context.Context, configurationID string, subject map[
 	return c.post(ctx, configurationID, subjectRequest{Subject: subject}, parameters)
 }
 
+// loginRequest is what an authorization code flow sends: the BSN from the
+// citizen's login at GBO's authorization server, marked with its origin so
+// the backend logs the right Dataverwerking.
+type loginRequest struct {
+	Subject map[string]any `json:"subject"`
+	Origin  string         `json:"origin"`
+}
+
+// FetchLogin posts {"subject": {"bsn": ...}, "origin": "login"} to the
+// configuration's endpoint, with the parameters in the query.
+func (c *Client) FetchLogin(ctx context.Context, configurationID, bsn string, parameters map[string]string) ([]issuance.SourceDocument, error) {
+	return c.post(ctx, configurationID, loginRequest{Subject: map[string]any{"bsn": bsn}, Origin: "login"}, parameters)
+}
+
 // post sends request to the configuration's endpoint and reads the
 // IssuableDocument list.
 func (c *Client) post(ctx context.Context, configurationID string, request any, parameters map[string]string) ([]issuance.SourceDocument, error) {

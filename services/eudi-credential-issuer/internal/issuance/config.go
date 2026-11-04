@@ -94,6 +94,10 @@ type Profile struct {
 	// UniversalLinkBase is the wallet's universal link base (KindNL,
 	// KindCombined).
 	UniversalLinkBase string
+	// WalletRedirectURIs are the redirect URIs of the wallets this profile
+	// trusts, for the authorization code flow. The flow is offered on a
+	// KindEUDI profile with these and a Login (K1, K5).
+	WalletRedirectURIs []string
 }
 
 // CredentialConfiguration is one credential a provider offers.
@@ -159,6 +163,9 @@ type Config struct {
 	// DisclosureTTL bounds a disclosure session and the offer that follows
 	// it.
 	DisclosureTTL time.Duration
+	// Login is GBO's authorization server for the authorization code flow;
+	// without it the flow is not offered.
+	Login Login
 }
 
 // Defaults for the durations and sizes a deployment does not set.

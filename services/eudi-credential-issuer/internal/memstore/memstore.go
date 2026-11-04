@@ -29,6 +29,7 @@ type Store struct {
 	status   map[string]map[int]*entry
 	revoked  map[string]bool
 	disclose map[string]issuance.DisclosureSession
+	pending  map[string]issuance.PendingAuthorization
 }
 
 type entry struct {
@@ -42,6 +43,7 @@ func New() *Store {
 		sessions: map[string]issuance.Session{}, byCode: map[string]string{}, used: map[string]bool{},
 		tokens: map[string]issuance.AccessToken{}, issued: map[string]bool{}, reserved: map[string]reservation{}, values: map[string]time.Time{},
 		status: map[string]map[int]*entry{}, revoked: map[string]bool{}, disclose: map[string]issuance.DisclosureSession{},
+		pending: map[string]issuance.PendingAuthorization{},
 	}
 }
 
@@ -252,4 +254,28 @@ func (s *Store) TakeDisclosure(_ context.Context, id string, now time.Time) (iss
 		return issuance.DisclosureSession{}, issuance.ErrNotFound
 	}
 	return d, nil
+}
+
+func (s *Store) PutPending(_ context.Context, p issuance.PendingAuthorization) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := p.Kind + " " + p.ID
+	if _, dup := s.pending[key]; dup {
+		return errors.New("memstore: duplicate pending authorization")
+	}
+	p.Payload = append([]byte(nil), p.Payload...)
+	s.pending[key] = p
+	return nil
+}
+
+func (s *Store) TakePending(_ context.Context, kind, id string, now time.Time) (issuance.PendingAuthorization, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := kind + " " + id
+	p, ok := s.pending[key]
+	delete(s.pending, key)
+	if !ok || !now.Before(p.ExpiresAt) {
+		return issuance.PendingAuthorization{}, issuance.ErrNotFound
+	}
+	return p, nil
 }

@@ -3,6 +3,7 @@ package issuance
 import (
 	"context"
 	"errors"
+	"time"
 
 	"gbo-demo/oid4vc-kit/clientattest"
 	"gbo-demo/oid4vc-kit/dpop"
@@ -31,6 +32,10 @@ type TokenRequest struct {
 	GrantType         string
 	PreAuthorizedCode string
 	TxCode            string
+	// Code, CodeVerifier and RedirectURI are the authorization code grant.
+	Code         string
+	CodeVerifier string
+	RedirectURI  string
 	// ClientID is the client_id form parameter, if sent.
 	ClientID string
 	// ClientAttestation and ClientAttestationPoP are the WIA headers.
@@ -39,53 +44,40 @@ type TokenRequest struct {
 	DPoP                 []string
 }
 
-// Token redeems a pre-authorized code for a DPoP-bound access token. The
-// wallet must authenticate with a Wallet Instance Attestation of a provider
-// trusted for this profile (HAIP 1.0 section 4.4). Client authentication
-// and DPoP are checked before the code is used, so a failed request does
-// not burn the code.
+// Token redeems a pre-authorized code, or an authorization code on a
+// profile that offers the authorization code flow, for a DPoP-bound access
+// token. The wallet must authenticate with a Wallet Instance Attestation of
+// a provider trusted for this profile (HAIP 1.0 section 4.4). Client
+// authentication and DPoP are checked before the code is used, so a failed
+// request does not burn the code.
 func (s *Service) Token(ctx context.Context, req TokenRequest) (oid4vci.TokenResponse, error) {
 	_, p, err := s.resolve(req.Target)
 	if err != nil {
 		return oid4vci.TokenResponse{}, err
 	}
-	if req.GrantType != oid4vci.GrantPreAuthorizedCode {
-		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrUnsupportedGrantType, "only the pre-authorized code grant is supported")
-	}
-	if req.PreAuthorizedCode == "" || req.TxCode != "" {
-		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidRequest, "pre-authorized_code is required and tx_code is not expected")
+	var code string
+	switch req.GrantType {
+	case oid4vci.GrantPreAuthorizedCode:
+		if req.PreAuthorizedCode == "" || req.TxCode != "" {
+			return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidRequest, "pre-authorized_code is required and tx_code is not expected")
+		}
+		code = req.PreAuthorizedCode
+	case GrantAuthorizationCode:
+		if !s.offersLogin(p) {
+			return oid4vci.TokenResponse{}, refuse(oid4vci.ErrUnsupportedGrantType, "only the pre-authorized code grant is supported")
+		}
+		if req.Code == "" {
+			return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidRequest, "code is required")
+		}
+		code = req.Code
+	default:
+		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrUnsupportedGrantType, "only the pre-authorized code and authorization code grants are supported")
 	}
 	now := s.now()
 	id := s.Identifier(req.Target)
-
-	if req.ClientAttestation == "" || req.ClientAttestationPoP == "" {
-		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidClientAttestation, "client attestation and PoP are required")
-	}
-	att, err := clientattest.Verify(req.ClientAttestation, req.ClientAttestationPoP, p.WalletProviders, id, now)
-	if errors.Is(err, clientattest.ErrExpired) {
-		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrUseFreshAttestation, err.Error())
-	}
+	att, err := s.authenticateWallet(ctx, req.Target, p, req.ClientAttestation, req.ClientAttestationPoP, req.ClientID, now)
 	if err != nil {
-		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidClientAttestation, err.Error())
-	}
-	if req.ClientID != "" && req.ClientID != att.ClientID {
-		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidClientAttestation, "client_id does not match the client attestation")
-	}
-	// Without a valid challenge the client gets a fresh one with
-	// use_attestation_challenge (draft-ietf-oauth-attestation-based-client-auth
-	// -07 section 6.2, -12 section 6.1).
-	if att.Challenge == "" {
-		return oid4vci.TokenResponse{}, s.useChallenge(ctx, req.Target, "the attestation PoP must carry a challenge")
-	}
-	if ok, err := s.onetime.Take(ctx, scoped(kindChallenge, id), att.Challenge, now); err != nil {
 		return oid4vci.TokenResponse{}, err
-	} else if !ok {
-		return oid4vci.TokenResponse{}, s.useChallenge(ctx, req.Target, "the attestation challenge is unknown, expired or used")
-	}
-	if ok, err := s.onetime.FirstUse(ctx, kindPoP, att.PoPID, att.PoPExpiry, now); err != nil {
-		return oid4vci.TokenResponse{}, err
-	} else if !ok {
-		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidClientAttestation, "the attestation PoP has been used before")
 	}
 
 	// htu is checked against the public URL: the issuer runs behind a
@@ -100,12 +92,28 @@ func (s *Service) Token(ctx context.Context, req TokenRequest) (oid4vci.TokenRes
 		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidDPoPProof, "the DPoP proof has been used before")
 	}
 
-	session, err := s.sessions.RedeemCode(ctx, req.Target.Provider, p.Name, hash(req.PreAuthorizedCode), now)
+	session, err := s.sessions.RedeemCode(ctx, req.Target.Provider, p.Name, hash(code), now)
 	if errors.Is(err, ErrNotFound) {
-		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "the pre-authorized code is unknown, used or expired")
+		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "the code is unknown, used or expired")
 	}
 	if err != nil {
 		return oid4vci.TokenResponse{}, err
+	}
+	// A code is redeemed with its own grant only, and an authorization code
+	// only as its pushed request allows.
+	b := session.Binding
+	switch {
+	case req.GrantType == oid4vci.GrantPreAuthorizedCode && b != nil,
+		req.GrantType == GrantAuthorizationCode && b == nil:
+		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "the code is unknown, used or expired")
+	case b != nil && b.ClientID != att.ClientID:
+		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "the code was issued to another client")
+	case b != nil && b.RedirectURI != req.RedirectURI:
+		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "redirect_uri does not match the authorization request")
+	case b != nil && !pkceMatches(b.CodeChallenge, req.CodeVerifier):
+		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "code_verifier does not match the code_challenge")
+	case b != nil && b.DPoPJKT != "" && b.DPoPJKT != proof.JKT:
+		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "the code is bound to another DPoP key")
 	}
 	if revoked, err := s.referenceRevoked(ctx, session); err != nil {
 		return oid4vci.TokenResponse{}, err
@@ -129,6 +137,43 @@ func (s *Service) Token(ctx context.Context, req TokenRequest) (oid4vci.TokenRes
 		ExpiresIn:            int64(s.cfg.TokenTTL.Seconds()),
 		AuthorizationDetails: authorizationDetails(session),
 	}, nil
+}
+
+// authenticateWallet checks the Wallet Instance Attestation and its PoP,
+// with a fresh attestation challenge, for the token and PAR endpoints.
+// clientID, when sent, must be the attested one.
+func (s *Service) authenticateWallet(ctx context.Context, t Target, p Profile, attestation, pop, clientID string, now time.Time) (clientattest.Verified, error) {
+	id := s.Identifier(t)
+	if attestation == "" || pop == "" {
+		return clientattest.Verified{}, refuse(oid4vci.ErrInvalidClientAttestation, "client attestation and PoP are required")
+	}
+	att, err := clientattest.Verify(attestation, pop, p.WalletProviders, id, now)
+	if errors.Is(err, clientattest.ErrExpired) {
+		return clientattest.Verified{}, refuse(oid4vci.ErrUseFreshAttestation, err.Error())
+	}
+	if err != nil {
+		return clientattest.Verified{}, refuse(oid4vci.ErrInvalidClientAttestation, err.Error())
+	}
+	if clientID != "" && clientID != att.ClientID {
+		return clientattest.Verified{}, refuse(oid4vci.ErrInvalidClientAttestation, "client_id does not match the client attestation")
+	}
+	// Without a valid challenge the client gets a fresh one with
+	// use_attestation_challenge (draft-ietf-oauth-attestation-based-client-auth
+	// -07 section 6.2, -12 section 6.1).
+	if att.Challenge == "" {
+		return clientattest.Verified{}, s.useChallenge(ctx, t, "the attestation PoP must carry a challenge")
+	}
+	if ok, err := s.onetime.Take(ctx, scoped(kindChallenge, id), att.Challenge, now); err != nil {
+		return clientattest.Verified{}, err
+	} else if !ok {
+		return clientattest.Verified{}, s.useChallenge(ctx, t, "the attestation challenge is unknown, expired or used")
+	}
+	if ok, err := s.onetime.FirstUse(ctx, kindPoP, att.PoPID, att.PoPExpiry, now); err != nil {
+		return clientattest.Verified{}, err
+	} else if !ok {
+		return clientattest.Verified{}, refuse(oid4vci.ErrInvalidClientAttestation, "the attestation PoP has been used before")
+	}
+	return att, nil
 }
 
 // useChallenge returns the use_attestation_challenge refusal with a fresh

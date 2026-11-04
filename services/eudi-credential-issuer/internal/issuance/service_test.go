@@ -44,6 +44,10 @@ func (s *fakeSource) Fetch(_ context.Context, configurationID string, _ map[stri
 		Attributes: map[string]any{"year": "2025", "address": map[string]any{"city": "Utrecht"}}}}, nil
 }
 
+func (s *fakeSource) FetchLogin(ctx context.Context, configurationID, _ string, parameters map[string]string) ([]issuance.SourceDocument, error) {
+	return s.Fetch(ctx, configurationID, nil, parameters)
+}
+
 func (s *fakeSource) FetchDisclosed(ctx context.Context, configurationID string, _ issuance.DisclosedPID, parameters map[string]string) ([]issuance.SourceDocument, error) {
 	return s.Fetch(ctx, configurationID, nil, parameters)
 }

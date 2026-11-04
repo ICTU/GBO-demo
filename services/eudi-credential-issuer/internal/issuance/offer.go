@@ -90,47 +90,8 @@ func (s *Service) CreateOffer(ctx context.Context, req OfferRequest) (Offer, err
 // expires after ttl.
 func (s *Service) createOffer(ctx context.Context, t Target, p Profile, ids []string, reference string, ttl time.Duration,
 	fetch func(configurationID string) ([]SourceDocument, error)) (Offer, error) {
-	now := s.now()
-	notBefore := now.UTC().Truncate(24 * time.Hour)
-	var docs []Document
-	for _, id := range ids {
-		c := s.configs[id]
-		fetched, err := fetch(id)
-		if err != nil {
-			return Offer{}, err
-		}
-		if len(fetched) == 0 {
-			return Offer{}, ErrNoData
-		}
-		for _, f := range fetched {
-			if err := checkSourceDocument(p, c, f); err != nil {
-				return Offer{}, err
-			}
-			credentialID, err := randomToken()
-			if err != nil {
-				return Offer{}, err
-			}
-			docs = append(docs, Document{
-				CredentialID:    credentialID,
-				ConfigurationID: id,
-				Claims:          f.Attributes,
-				NotBefore:       notBefore,
-				Expires:         notBefore.AddDate(0, 0, c.ValidDays),
-			})
-		}
-	}
-	code, err := randomToken()
+	code, err := s.createSession(ctx, t, p, ids, reference, ttl, nil, fetch)
 	if err != nil {
-		return Offer{}, err
-	}
-	sessionID, err := randomToken()
-	if err != nil {
-		return Offer{}, err
-	}
-	if err := s.sessions.CreateSession(ctx, Session{
-		ID: sessionID, Provider: t.Provider, Profile: p.Name, CodeHash: hash(code),
-		ExpiresAt: now.Add(ttl), Reference: reference, Documents: docs,
-	}); err != nil {
 		return Offer{}, err
 	}
 	offer := oid4vci.CredentialOffer{
@@ -145,6 +106,57 @@ func (s *Service) createOffer(ctx context.Context, t Target, p Profile, ids []st
 		return Offer{}, err
 	}
 	return Offer{CredentialOffer: offer, Links: links}, nil
+}
+
+// createSession fetches the documents of the configurations ids and stores
+// them as a session under a fresh code, valid for ttl, and returns the code.
+// binding is set for an authorization code.
+func (s *Service) createSession(ctx context.Context, t Target, p Profile, ids []string, reference string, ttl time.Duration,
+	binding *CodeBinding, fetch func(configurationID string) ([]SourceDocument, error)) (string, error) {
+	now := s.now()
+	notBefore := now.UTC().Truncate(24 * time.Hour)
+	var docs []Document
+	for _, id := range ids {
+		c := s.configs[id]
+		fetched, err := fetch(id)
+		if err != nil {
+			return "", err
+		}
+		if len(fetched) == 0 {
+			return "", ErrNoData
+		}
+		for _, f := range fetched {
+			if err := checkSourceDocument(p, c, f); err != nil {
+				return "", err
+			}
+			credentialID, err := randomToken()
+			if err != nil {
+				return "", err
+			}
+			docs = append(docs, Document{
+				CredentialID:    credentialID,
+				ConfigurationID: id,
+				Claims:          f.Attributes,
+				NotBefore:       notBefore,
+				Expires:         notBefore.AddDate(0, 0, c.ValidDays),
+			})
+		}
+	}
+	code, err := randomToken()
+	if err != nil {
+		return "", err
+	}
+	sessionID, err := randomToken()
+	if err != nil {
+		return "", err
+	}
+	if err := s.sessions.CreateSession(ctx, Session{
+		ID: sessionID, Provider: t.Provider, Profile: p.Name, CodeHash: hash(code),
+		ExpiresAt: now.Add(ttl), Reference: reference, Documents: docs, Binding: binding,
+	}); err != nil {
+		return "", err
+	}
+	return code, nil
 }
 
 // checkSourceDocument holds a document against its configuration, so that

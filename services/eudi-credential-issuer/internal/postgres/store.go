@@ -134,6 +134,7 @@ func (s *Store) Purge(ctx context.Context, now time.Time, tokenTTL time.Duration
 		`DELETE FROM seen_identifiers WHERE expires_at <= $1`,
 		`DELETE FROM access_tokens WHERE expires_at <= $1`,
 		`DELETE FROM disclosure_sessions WHERE expires_at <= $1`,
+		`DELETE FROM pending_authorizations WHERE expires_at <= $1`,
 	} {
 		if _, err := s.pool.Exec(ctx, q, now); err != nil {
 			return err
@@ -149,24 +150,36 @@ func (s *Store) CreateSession(ctx context.Context, sess issuance.Session) error 
 	if err != nil {
 		return err
 	}
-	_, err = s.pool.Exec(ctx, `INSERT INTO sessions (id, provider, profile, code_hash, expires_at, reference, documents)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		sess.ID, sess.Provider, sess.Profile, sess.CodeHash, sess.ExpiresAt, sess.Reference, docs)
+	var binding []byte
+	if sess.Binding != nil {
+		if binding, err = json.Marshal(sess.Binding); err != nil {
+			return err
+		}
+	}
+	_, err = s.pool.Exec(ctx, `INSERT INTO sessions (id, provider, profile, code_hash, expires_at, reference, documents, code_binding)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		sess.ID, sess.Provider, sess.Profile, sess.CodeHash, sess.ExpiresAt, sess.Reference, docs, binding)
 	return err
 }
 
 func (s *Store) RedeemCode(ctx context.Context, provider, profile, codeHash string, now time.Time) (issuance.Session, error) {
 	var sess issuance.Session
-	var docs []byte
+	var docs, binding []byte
 	err := s.pool.QueryRow(ctx, `UPDATE sessions SET code_used = true
 		WHERE code_hash = $1 AND provider = $2 AND profile = $3 AND NOT code_used AND expires_at > $4
-		RETURNING id, provider, profile, code_hash, expires_at, reference, documents`, codeHash, provider, profile, now).
-		Scan(&sess.ID, &sess.Provider, &sess.Profile, &sess.CodeHash, &sess.ExpiresAt, &sess.Reference, &docs)
+		RETURNING id, provider, profile, code_hash, expires_at, reference, documents, code_binding`, codeHash, provider, profile, now).
+		Scan(&sess.ID, &sess.Provider, &sess.Profile, &sess.CodeHash, &sess.ExpiresAt, &sess.Reference, &docs, &binding)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return issuance.Session{}, issuance.ErrNotFound
 	}
 	if err != nil {
 		return issuance.Session{}, err
+	}
+	if binding != nil {
+		sess.Binding = &issuance.CodeBinding{}
+		if err := json.Unmarshal(binding, sess.Binding); err != nil {
+			return issuance.Session{}, fmt.Errorf("decode code binding: %w", err)
+		}
 	}
 	return sess, decodeDocuments(docs, &sess)
 }
@@ -409,4 +422,26 @@ func (s *Store) TakeDisclosure(ctx context.Context, id string, now time.Time) (i
 		return issuance.DisclosureSession{}, issuance.ErrNotFound
 	}
 	return d, nil
+}
+
+func (s *Store) PutPending(ctx context.Context, p issuance.PendingAuthorization) error {
+	_, err := s.pool.Exec(ctx, `INSERT INTO pending_authorizations (kind, id, payload, expires_at) VALUES ($1, $2, $3, $4)`,
+		p.Kind, p.ID, p.Payload, p.ExpiresAt)
+	return err
+}
+
+func (s *Store) TakePending(ctx context.Context, kind, id string, now time.Time) (issuance.PendingAuthorization, error) {
+	p := issuance.PendingAuthorization{Kind: kind, ID: id}
+	err := s.pool.QueryRow(ctx, `DELETE FROM pending_authorizations WHERE kind = $1 AND id = $2
+		RETURNING payload, expires_at`, kind, id).Scan(&p.Payload, &p.ExpiresAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return issuance.PendingAuthorization{}, issuance.ErrNotFound
+	}
+	if err != nil {
+		return issuance.PendingAuthorization{}, err
+	}
+	if !now.Before(p.ExpiresAt) {
+		return issuance.PendingAuthorization{}, issuance.ErrNotFound
+	}
+	return p, nil
 }
