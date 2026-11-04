@@ -267,7 +267,8 @@ func handleSourceAttestation(cfg config, client *http.Client, runtime sourceMeta
 			return
 		}
 		if r.PathValue("sourceID") != metadata.SourceID || r.PathValue("typeID") != metadata.TypeID {
-			http.NotFound(w, r)
+			// A configuration out of step, not a person without data.
+			http.Error(w, "unknown source or type", http.StatusServiceUnavailable)
 			return
 		}
 		if metadata.CacheState != "" {

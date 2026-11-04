@@ -409,6 +409,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- **The bronpoort answers an unknown source or type with 503** (#614):
+  `eudi-adapter` answered `404` both when the source had no data for the
+  person and when it did not know the source or type in the path. An issuer
+  reads 404 as "no data", so a configuration out of step with the active
+  Source Release told the citizen there was nothing. An unknown source or
+  type is now `503`; no data stays `404`.
 - **The README's quick start starts the DvTP demo, and the walkthrough
   matches the demo**: the quick start lists the five passwords every mode
   needs, `FTV_POSTGRES_PASSWORD` and `FTV_ADL_READER_PASSWORD` included, and

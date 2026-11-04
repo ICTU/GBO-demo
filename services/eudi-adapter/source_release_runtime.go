@@ -74,7 +74,10 @@ func newSourceReleaseRuntimeMux(ctx context.Context, cfg config, client *http.Cl
 		}
 		binding := snapshot.bindings[request.PathValue("sourceID")+"\x00"+request.PathValue("typeID")]
 		if binding.runtime == nil {
-			http.NotFound(w, request)
+			// Not a person without data (404) but a caller configured for
+			// another release: the issuer must not tell the citizen there is
+			// nothing.
+			http.Error(w, "unknown source or type", http.StatusServiceUnavailable)
 			return
 		}
 		handleSourceAttestation(binding.config, client, binding.runtime, logbook).ServeHTTP(w, request)
