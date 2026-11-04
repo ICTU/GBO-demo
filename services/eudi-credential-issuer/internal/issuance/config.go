@@ -89,6 +89,7 @@ type Profile struct {
 	// PlainJWTWalletProviders names the WalletProviders anchor sets whose
 	// wallets may send jwt proofs without key attestation (KindCombined):
 	// the NL Wallet's provider, as long as the NL Wallet cannot attest keys.
+	// Without it a combined profile serves the EUDI wallets only.
 	PlainJWTWalletProviders []string
 	// UniversalLinkBase is the wallet's universal link base (KindNL,
 	// KindCombined).

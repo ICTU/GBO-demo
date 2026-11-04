@@ -7,7 +7,10 @@ package source
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -23,6 +26,23 @@ type Client struct {
 	// Endpoints maps a credential configuration id to the backend URL that
 	// serves it.
 	Endpoints map[string]string
+	// Clients maps a credential configuration id to the HTTP client for a
+	// backend with TLS roots of its own; HTTP serves the others.
+	Clients map[string]*http.Client
+}
+
+// WithRoots returns a client like base that trusts only roots, for a
+// backend whose TLS certificate is signed by a CA of its own.
+func WithRoots(base *http.Client, roots *x509.CertPool) *http.Client {
+	transport, ok := base.Transport.(*http.Transport)
+	if !ok {
+		transport, _ = http.DefaultTransport.(*http.Transport)
+	}
+	transport = transport.Clone()
+	transport.TLSClientConfig = &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}
+	client := *base
+	client.Transport = transport
+	return &client
 }
 
 // subjectRequest is what a pre-authorized offer sends: the subject the
@@ -120,8 +140,18 @@ func (c *Client) post(ctx context.Context, configurationID string, request any, 
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	resp, err := c.HTTP.Do(req)
+	client := c.HTTP
+	if own, ok := c.Clients[configurationID]; ok {
+		client = own
+	}
+	resp, err := client.Do(req)
 	if err != nil {
+		// The URL may carry a secret path (the QTSP callback): report the
+		// cause only, as it may reach a log or an API answer.
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			err = urlErr.Err
+		}
 		return nil, fmt.Errorf("%w: %v", issuance.ErrSourceUnavailable, err)
 	}
 	defer resp.Body.Close()

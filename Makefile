@@ -1,7 +1,7 @@
 .PHONY: up down logs clean certs require-ftv-postgres demo-manager manager-seed fsc-local-env fsc-ca fsc-up fsc-all-up fsc-brp-certs fsc-consent-register-certs fsc-gbo-pdp-certs fsc-ir-certs fsc-int-certs fsc-asip-certs fsc-databases fsc-down fsc-test fsc-clean \
         fsc-seed-bri fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-lvg fsc-seed-int fsc-seed-asip fsc-seed-brp fsc-seed-rvig-source fsc-seed-metadata fsc-pdp-cert pdp-up \
         eudi-images asi-wallet-verifier-image source-metadata-up \
-        require-development-cas create-development-registrar-root provision-wallet-registration provision-test-pid credential-issuer-up provision-development-certificates provision-qtsp-issuance-certificates provision-asip-seal-certificate provision-asip-qtsp-certificate provision-asi-wallet-verifier reconcile-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
+        require-development-cas create-development-registrar-root provision-wallet-registration provision-test-pid provision-qtsp-wallet-registration credential-issuer-up provision-development-certificates provision-qtsp-issuance-certificates provision-asip-seal-certificate provision-asip-qtsp-certificate provision-asi-wallet-verifier reconcile-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
         demo-full demo-integrator demo-asi demo-down eudi-config policy-check policy-test
 
 -include .env
@@ -401,6 +401,15 @@ provision-test-pid: require-development-cas
 	@cd services/eudi-adapter && go run . provision-test-pid \
 		--secrets-dir "$(ONBOARDING_SECRETS_DIR)" --publish-dir "$(EUDI_TRUST_PUBLISH_DIR)" \
 		--public-certificates-dir "$(ONBOARDING_PUBLIC_CERTIFICATES_DIR)" --root-dir "$(TEST_PID_ROOT_DIR)"
+
+# The reference QTSP as a provider of the own credential issuer: a WRPAC and
+# a WRPRC (QEAA_Provider, fictional KvK number 99991300) next to the
+# certificates of make provision-qtsp-issuance-certificates. Then run
+# make credential-issuer-up.
+provision-qtsp-wallet-registration: require-development-cas
+	@mkdir -p "$(EUDI_TRUST_PUBLISH_DIR)"
+	@cd services/eudi-adapter && go run . provision-qtsp-wallet-registration \
+		--secrets-dir "$(ONBOARDING_SECRETS_DIR)" --publish-dir "$(EUDI_TRUST_PUBLISH_DIR)"
 
 reconcile-sources:
 	docker compose --profile onboarding run --build --rm source-reconciler

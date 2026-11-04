@@ -98,7 +98,10 @@ func serve(ctx context.Context, log *slog.Logger) error {
 		go purge(ctx, log, pg, cfg.TokenTTL)
 		st = pg
 	}
-	src := &source.Client{HTTP: &http.Client{Timeout: 10 * time.Second}, Endpoints: loaded.SourceEndpoints}
+	src := &source.Client{HTTP: &http.Client{Timeout: 10 * time.Second}, Endpoints: loaded.SourceEndpoints, Clients: map[string]*http.Client{}}
+	for id, roots := range loaded.SourceRoots {
+		src.Clients[id] = source.WithRoots(src.HTTP, roots)
+	}
 	cfg.FetchPIDStatus = pidStatusFetcher(&http.Client{Timeout: 10 * time.Second})
 	svc, err := issuance.New(cfg, src, st, st, st, time.Now)
 	if err != nil {

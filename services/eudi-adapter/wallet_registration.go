@@ -141,6 +141,16 @@ func runWalletRegistrationCommand(ctx context.Context, arguments []string, stdou
 		}
 		_, _ = fmt.Fprintf(stdout, "wallet registration provisioned for source %s; this command is for local development only\n", source.SourceID)
 		return true, nil
+	case "provision-qtsp-wallet-registration":
+		options, err := parseQTSPWalletRegistrationOptions(arguments[0], arguments[1:], stderr)
+		if err != nil {
+			return true, err
+		}
+		if err := provisionQTSPWalletRegistration(options); err != nil {
+			return true, fmt.Errorf("provision QTSP wallet registration: %w", err)
+		}
+		_, _ = fmt.Fprintln(stdout, "wallet registration provisioned for the reference QTSP; this command is for local development only")
+		return true, nil
 	case "provision-test-pid":
 		options, dirs, err := parseTestPIDOptions(arguments[0], arguments[1:], stderr)
 		if err != nil {
@@ -306,8 +316,10 @@ func provisionWalletRegistration(options walletRegistrationOptions, source walle
 	if !sourceIDPattern.MatchString(source.SourceID) || !sourceIDPattern.MatchString(source.CertificateSet) {
 		return errors.New("the source needs a valid source id and certificate set")
 	}
-	if source.SourceID == testPIDID || source.CertificateSet == testPIDID {
-		return fmt.Errorf("%q is reserved for the test PID provider", testPIDID)
+	for _, reserved := range []string{testPIDID, qtspCertificateSetID} {
+		if source.SourceID == reserved || source.CertificateSet == reserved {
+			return fmt.Errorf("%q is reserved for the test PID provider and the reference QTSP", reserved)
+		}
 	}
 	if !sourceOINPattern.MatchString(source.OIN) || source.Name == "" || len(source.VCTs) == 0 {
 		return errors.New("the source needs an OIN, a name and activated types")
@@ -650,8 +662,9 @@ func registrationPayload(source walletRegistrationSource, entitlement, orgID, tr
 		"supervisory_authority": map[string]any{},
 		"entitlements":          []string{entitlement},
 		"provides_attestations": provides,
-		"public_body":           true,
-		"iat":                   now.Unix(),
+		// A QTSP is a private party; the sources and the test PID are public.
+		"public_body": entitlement != wrprcQEAAEntitlement,
+		"iat":         now.Unix(),
 		// The NL Wallet refuses a WRPRC valid for more than twelve months.
 		"exp":                expires.Unix(),
 		"status":             registrationStatus(idx, trustBase+"/"+wrprcStatusListPath),

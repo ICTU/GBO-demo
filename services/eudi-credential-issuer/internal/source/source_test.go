@@ -2,15 +2,18 @@ package source_test
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"gbo-demo/eudi-credential-issuer/internal/issuance"
 	"gbo-demo/eudi-credential-issuer/internal/source"
+	"gbo-demo/oid4vc-kit/testpki"
 )
 
 func TestFetch(t *testing.T) {
@@ -55,5 +58,42 @@ func TestFetchStatuses(t *testing.T) {
 			t.Errorf("status %d: got %v, want %v", status, err, want)
 		}
 		srv.Close()
+	}
+}
+
+// P3: a bronpoort with a TLS certificate of its own is reached with its
+// roots, and refused with others.
+func TestFetchWithOwnRoots(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `[{"id":"1","format":"dc+sd-jwt","attestation_type":"t","attributes":{"a":"b"}}]`)
+	}))
+	defer srv.Close()
+	own := x509.NewCertPool()
+	own.AddCert(srv.Certificate())
+	foreign := x509.NewCertPool()
+	foreign.AddCert(testpki.NewRoot(t, "another CA").Cert)
+
+	base := &http.Client{}
+	c := &source.Client{HTTP: base, Endpoints: map[string]string{"qtsp": srv.URL, "plain": srv.URL},
+		Clients: map[string]*http.Client{"qtsp": source.WithRoots(base, own)}}
+	if docs, err := c.Fetch(context.Background(), "qtsp", map[string]any{"x": "1"}, nil); err != nil || len(docs) != 1 {
+		t.Fatalf("own roots: %v %v", docs, err)
+	}
+	if _, err := c.Fetch(context.Background(), "plain", map[string]any{"x": "1"}, nil); !errors.Is(err, issuance.ErrSourceUnavailable) {
+		t.Fatalf("without the roots: %v", err)
+	}
+	c.Clients["qtsp"] = source.WithRoots(base, foreign)
+	if _, err := c.Fetch(context.Background(), "qtsp", map[string]any{"x": "1"}, nil); !errors.Is(err, issuance.ErrSourceUnavailable) {
+		t.Fatalf("other roots: %v", err)
+	}
+}
+
+// A secret in the bronpoort URL (the QTSP callback path) stays out of the
+// error, which may be logged or answered.
+func TestFetchErrorHidesURL(t *testing.T) {
+	c := &source.Client{HTTP: &http.Client{}, Endpoints: map[string]string{"qtsp": "https://127.0.0.1:1/attestations/s3cret-token"}}
+	_, err := c.Fetch(context.Background(), "qtsp", map[string]any{"x": "1"}, nil)
+	if !errors.Is(err, issuance.ErrSourceUnavailable) || strings.Contains(err.Error(), "s3cret-token") {
+		t.Fatalf("%v", err)
 	}
 }

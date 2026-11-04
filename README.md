@@ -133,6 +133,18 @@ and trusts the PIDs of the NL PID issuer CAs in `PID_TRUST_ANCHORS_FILE`
 `services/asi-wallet-verifier/pid-issuer-anchors.txt`) and, once
 provisioned, of the test PID.
 
+`make provision-qtsp-wallet-registration` registers the reference QTSP as
+a provider of the own issuer, after `make
+provision-qtsp-issuance-certificates`: a WRPAC and a WRPRC with the
+`QEAA_Provider` entitlement for its test statement (fictional KvK number
+`99991300`, not a public body). The materializer then adds the QTSP, with
+its statement valid for 30 days and its internal HTTPS callback as
+bronpoort, trusted through the development issuer CA that signs the
+callback's certificate; without the registration it leaves the QTSP out.
+Next to `nl` and `eudi` the issuer then also has the combined profile
+`wallet`, under which one offer serves both wallets; the NL Wallet joins it
+once its wallet providers are mounted.
+
 `make provision-test-pid` adds a test PID provider to the own issuer: a PID
 of the NL type (`urn:eudi:pid:nl:1`) for wallets without a real one, such as
 the EUDI reference wallet, so the disclosure-based route can be shown with

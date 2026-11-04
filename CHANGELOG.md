@@ -47,6 +47,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   that asks for an encrypted response must encrypt its request. `make
   provision-wallet-registration` creates each source's request key once; run
   it again for sources provisioned before.
+- **One issuer identifier for both wallets** (#614): the own credential
+  issuer gets a combined profile (`wallet`). Its metadata offers the `jwt`
+  proof type without key attestation, which the NL Wallet sends, and the
+  `attestation` proof type with it; only wallets of the NL wallet provider
+  may skip key attestation. One offer, one QR code, then reaches either
+  wallet. NL Wallet v0.6.0 cannot read this metadata yet (fixed in
+  nl-wallet after v0.6.0). `make provision-qtsp-wallet-registration`
+  registers the reference QTSP as a provider of the issuer (`QEAA_Provider`),
+  whose callback the issuer reaches over its own TLS certificate. The QTSP
+  compares nationalities on their code, so a mock login matches a PID.
 - **Wallet choice in the developer portal** (#614): the wallet QR panel
   offers "NL Wallet" (as before, through `eudi-issuance-server`) or
   "EU-wallet" when the own credential issuer has a link for the offer. The

@@ -209,8 +209,10 @@ func validateProfile(p Profile) error {
 	if len(p.WalletProviders) == 0 {
 		return errors.New("wallet providers are required")
 	}
-	if (p.Kind == KindCombined) != (len(p.PlainJWTWalletProviders) > 0) {
-		return errors.New("the wallet providers whose wallets may skip key attestation are set on a combined profile, and only there")
+	// Without them a combined profile serves the EUDI wallets only, until
+	// the NL Wallet's provider is trusted.
+	if p.Kind != KindCombined && len(p.PlainJWTWalletProviders) > 0 {
+		return errors.New("the wallet providers whose wallets may skip key attestation are set on a combined profile only")
 	}
 	for _, name := range p.PlainJWTWalletProviders {
 		if !slices.ContainsFunc(p.WalletProviders, func(a x5c.Anchors) bool { return a.Name == name }) {

@@ -41,6 +41,8 @@ const (
 	nlWalletProvidersFile   = "nl-wallet-providers.pem"
 	eudiWalletProvidersFile = "eudi-wallet-providers.pem"
 	eudiKeyAttestationFile  = "eudi-key-attestation-roots.pem"
+	// combinedProfileName is the profile both wallets share.
+	combinedProfileName = "wallet"
 )
 
 // issuerNamePattern is what the issuer accepts as a provider, profile or
@@ -57,6 +59,9 @@ type credentialIssuerOptions struct {
 	eudiKeyStorage, eudiUserAuthentication []string
 	// testPIDSourceURL is the bronpoort of the test PID (test-pid-source).
 	testPIDSourceURL string
+	// qtspAttestationURL is the reference QTSP's internal callback base and
+	// qtspMetadataPath its statement's Type Metadata, for the QTSP provider.
+	qtspAttestationURL, qtspMetadataPath string
 	// pidTrustAnchorsFile holds the NL PID issuer CAs whose PIDs the issuer
 	// accepts (base64 DER per line, # comments), next to the test PID.
 	pidTrustAnchorsFile string
@@ -146,6 +151,9 @@ type issuerConfigurationFile struct {
 	ValidDays  int             `json:"valid_days"`
 	StatusList string          `json:"status_list"`
 	SourceURL  string          `json:"source_url"`
+	// SourceCAFile is the TLS trust anchor of a bronpoort with a
+	// certificate of its own (the reference QTSP's callback).
+	SourceCAFile string `json:"source_ca_file,omitempty"`
 }
 
 type issuerProfileFile struct {
@@ -156,6 +164,9 @@ type issuerProfileFile struct {
 	UniversalLinkBase       string   `json:"universal_link_base,omitempty"`
 	KeyStorage              []string `json:"key_storage,omitempty"`
 	UserAuthentication      []string `json:"user_authentication,omitempty"`
+	// PlainJWTWalletProvidersFile, on the combined profile, holds the NL
+	// wallet providers: their wallets may skip key attestation.
+	PlainJWTWalletProvidersFile string `json:"plain_jwt_wallet_providers_file,omitempty"`
 }
 
 func runCredentialIssuerConfigCommand(ctx context.Context, arguments []string, stdout, stderr io.Writer) (bool, error) {
@@ -171,6 +182,8 @@ func runCredentialIssuerConfigCommand(ctx context.Context, arguments []string, s
 	set.StringVar(&options.outputDir, "output-dir", "/runtime-issuer", "pod-local directory for the issuer configuration, owned by this command")
 	set.StringVar(&options.adapterBaseURL, "adapter-base-url", os.Getenv("EUDI_BRI_URL"), "public GBO adapter base URL")
 	set.StringVar(&options.rootsDir, "wallet-roots-dir", "/wallet-roots", "directory with the trusted wallet providers per profile")
+	set.StringVar(&options.qtspAttestationURL, "qtsp-attestation-url", getEnv("QTSP_ATTESTATION_URL", "https://qtsp-reference:4443/attestations"), "internal HTTPS callback of the reference QTSP")
+	set.StringVar(&options.qtspMetadataPath, "qtsp-type-metadata", "/app/qtsp_attestation_metadata.json", "reference QTSP Type Metadata JSON")
 	set.StringVar(&options.pidTrustAnchorsFile, "pid-trust-anchors-file", getEnv("PID_TRUST_ANCHORS_FILE", "/pid-trust-anchors.txt"), "NL PID issuer CAs the issuer trusts for disclosure-based issuance, base64 DER per line")
 	set.StringVar(&options.testPIDSourceURL, "test-pid-source-url", getEnv("TEST_PID_SOURCE_URL", "http://test-pid-source:8080/attestations"), "bronpoort of the test PID, used when the test PID is provisioned")
 	set.StringVar(&options.universalLinkBase, "universal-link-base", getEnv("ISSUER_NL_UNIVERSAL_LINK_BASE", "walletdebuginteraction://wallet.edi.rijksoverheid.nl/"), "base of the NL Wallet universal link")
@@ -274,6 +287,11 @@ func writeCredentialIssuer(options credentialIssuerOptions, release onboarding.S
 		return fmt.Errorf("test PID: %w", err)
 	} else if ok {
 		out.Providers = append(out.Providers, testPID)
+	}
+	if qtsp, ok, err := qtspProvider(options, seen); err != nil {
+		return fmt.Errorf("reference QTSP: %w", err)
+	} else if ok {
+		out.Providers = append(out.Providers, qtsp)
 	}
 	if out.PIDTrustAnchors, err = pidTrustAnchors(options); err != nil {
 		return fmt.Errorf("PID trust anchors: %w", err)
@@ -380,11 +398,61 @@ func credentialIssuerProfiles(options credentialIssuerOptions) ([]issuerProfileF
 		}
 		profiles = append(profiles, issuerProfileFile{Name: "eudi", Kind: "eudi", WalletProviderRootsFile: roots,
 			KeyAttestationRootsFile: attestationRoots, KeyStorage: options.eudiKeyStorage, UserAuthentication: options.eudiUserAuthentication})
+		// One identifier for both wallets, for an offer behind one QR code
+		// (the reference QTSP's). The NL Wallet joins once its providers
+		// are mounted.
+		combined := issuerProfileFile{Name: combinedProfileName, Kind: "combined", WalletProviderRootsFile: roots,
+			KeyAttestationRootsFile: attestationRoots, KeyStorage: options.eudiKeyStorage, UserAuthentication: options.eudiUserAuthentication}
+		if mounted[nlWalletProvidersFile] {
+			if err := disjointRoots(options, nlWalletProvidersFile, eudiWalletProvidersFile); err != nil {
+				return nil, err
+			}
+			combined.PlainJWTWalletProvidersFile = nlWalletProvidersFile
+			combined.UniversalLinkBase = options.universalLinkBase
+		}
+		profiles = append(profiles, combined)
 	}
 	if len(profiles) == 0 {
 		return nil, fmt.Errorf("no wallet profile: mount %s or %s in %s", nlWalletProvidersFile, eudiWalletProvidersFile, options.rootsDir)
 	}
 	return profiles, nil
+}
+
+// disjointRoots refuses a root in both files: on the combined profile its
+// wallets would have to attest their keys or not.
+func disjointRoots(options credentialIssuerOptions, a, b string) error {
+	read := func(name string) ([]*x509.Certificate, error) {
+		body, err := os.ReadFile(filepath.Join(options.rootsDir, name))
+		if err != nil {
+			return nil, err
+		}
+		var out []*x509.Certificate
+		for rest := body; ; {
+			var block *pem.Block
+			if block, rest = pem.Decode(rest); block == nil {
+				return out, nil
+			}
+			c, err := x509.ParseCertificate(block.Bytes)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", name, err)
+			}
+			out = append(out, c)
+		}
+	}
+	left, err := read(a)
+	if err != nil {
+		return err
+	}
+	right, err := read(b)
+	if err != nil {
+		return err
+	}
+	for _, c := range left {
+		if slices.ContainsFunc(right, c.Equal) {
+			return fmt.Errorf("root %q is in both %s and %s; the combined profile cannot tell whether its wallets must attest their keys", c.Subject, a, b)
+		}
+	}
+	return nil
 }
 
 func copyRoots(options credentialIssuerOptions, name string) (string, error) {
@@ -417,8 +485,9 @@ func credentialIssuerProvider(options credentialIssuerOptions, source onboarding
 	if !issuerName(source.SourceID) {
 		return issuerProviderFile{}, nil, errors.New("the issuer takes only lower-case letters, digits and hyphens, and not \"status\", as a provider name")
 	}
-	if source.SourceID == testPIDID {
-		return issuerProviderFile{}, nil, fmt.Errorf("%q is reserved for the test PID provider", testPIDID)
+	if source.SourceID == testPIDID || source.SourceID == qtspCertificateSetID ||
+		source.CertificateSet.ID == testPIDID || source.CertificateSet.ID == qtspCertificateSetID {
+		return issuerProviderFile{}, nil, fmt.Errorf("%q is reserved for the test PID provider and the reference QTSP", source.SourceID)
 	}
 	activation, err := activationFromRegistryCandidate(onboarding.SourceCandidate{
 		SourceID: source.SourceID, Snapshot: source.Snapshot,

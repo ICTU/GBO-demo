@@ -87,6 +87,10 @@ type CredentialConfigurationFile struct {
 	ValidDays  int                `json:"valid_days"`
 	StatusList string             `json:"status_list"`
 	SourceURL  string             `json:"source_url"`
+	// SourceCAFile holds the roots that sign the TLS certificate of
+	// source_url, for a bronpoort with a certificate of its own (the
+	// reference QTSP's callback).
+	SourceCAFile string `json:"source_ca_file,omitempty"`
 }
 
 // ProfileFile configures one profile.
@@ -128,6 +132,9 @@ type Loaded struct {
 	Issuer issuance.Config
 	// SourceEndpoints maps credential configuration ids to bronpoort URLs.
 	SourceEndpoints map[string]string
+	// SourceRoots maps a credential configuration id to the TLS roots of
+	// its bronpoort, when it has roots of its own.
+	SourceRoots map[string]*x509.CertPool
 }
 
 // Load reads the file at path and returns the configuration for publicURL.
@@ -148,6 +155,7 @@ func Load(path, publicURL string) (Loaded, error) {
 			DisclosureTTL: time.Duration(f.DisclosureTTL),
 		},
 		SourceEndpoints: map[string]string{},
+		SourceRoots:     map[string]*x509.CertPool{},
 	}
 	for _, pf := range f.Providers {
 		p, err := loadProvider(dir, pf)
@@ -164,6 +172,17 @@ func Load(path, publicURL string) (Loaded, error) {
 				ValidDays: c.ValidDays, StatusList: c.StatusList,
 			})
 			out.SourceEndpoints[c.ID] = c.SourceURL
+			if c.SourceCAFile != "" {
+				roots, err := readCertificates(resolve(dir, c.SourceCAFile))
+				if err != nil {
+					return Loaded{}, fmt.Errorf("credential configuration %q: source CA: %w", c.ID, err)
+				}
+				pool := x509.NewCertPool()
+				for _, r := range roots {
+					pool.AddCert(r)
+				}
+				out.SourceRoots[c.ID] = pool
+			}
 		}
 	}
 	for _, pf := range f.Profiles {

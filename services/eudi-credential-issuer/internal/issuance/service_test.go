@@ -714,16 +714,20 @@ func TestNewRefusesCombinedProfiles(t *testing.T) {
 	if _, err := issuance.New(cfg, &fakeSource{}, store, store, store, time.Now); err != nil {
 		t.Fatalf("the base configuration: %v", err)
 	}
+	// Without the NL Wallet's providers it serves the EUDI wallets only.
+	cfg.Profiles[2].PlainJWTWalletProviders = nil
+	if _, err := issuance.New(cfg, &fakeSource{}, store, store, store, time.Now); err != nil {
+		t.Fatalf("a combined profile without plain-jwt providers: %v", err)
+	}
 	for name, tc := range map[string]struct {
 		mutate func(*issuance.Config)
 		want   string
 	}{
-		"combined without plain-jwt providers": {func(c *issuance.Config) { c.Profiles[2].PlainJWTWalletProviders = nil }, "only there"},
-		"plain-jwt provider not trusted":       {func(c *issuance.Config) { c.Profiles[2].PlainJWTWalletProviders = []string{"other"} }, "not a trusted wallet provider"},
-		"plain-jwt providers on nl":            {func(c *issuance.Config) { c.Profiles[0].PlainJWTWalletProviders = []string{"provider"} }, "only there"},
-		"no key attestation levels":            {func(c *issuance.Config) { c.Profiles[2].KeyStorage = nil }, "ISSU_27d"},
-		"no key attestation providers":         {func(c *issuance.Config) { c.Profiles[2].KeyAttestationProviders = nil }, "key attestation providers"},
-		"wallet provider without a name":       {func(c *issuance.Config) { c.Profiles[2].WalletProviders[0].Name = "" }, "needs a name"},
+		"plain-jwt provider not trusted": {func(c *issuance.Config) { c.Profiles[2].PlainJWTWalletProviders = []string{"other"} }, "not a trusted wallet provider"},
+		"plain-jwt providers on nl":      {func(c *issuance.Config) { c.Profiles[0].PlainJWTWalletProviders = []string{"provider"} }, "combined profile only"},
+		"no key attestation levels":      {func(c *issuance.Config) { c.Profiles[2].KeyStorage = nil }, "ISSU_27d"},
+		"no key attestation providers":   {func(c *issuance.Config) { c.Profiles[2].KeyAttestationProviders = nil }, "key attestation providers"},
+		"wallet provider without a name": {func(c *issuance.Config) { c.Profiles[2].WalletProviders[0].Name = "" }, "needs a name"},
 		"duplicate wallet provider names": {func(c *issuance.Config) {
 			c.Profiles[2].WalletProviders = append(c.Profiles[2].WalletProviders, c.Profiles[2].WalletProviders[0])
 		}, "occurs twice"},

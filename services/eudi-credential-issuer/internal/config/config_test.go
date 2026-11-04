@@ -140,7 +140,7 @@ func TestLoadCombinedProfile(t *testing.T) {
 		    "access": {"key_file": "key.pem", "chain_file": "chain.pem"}, "issuer": {"key_file": "key.pem", "chain_file": "chain.pem"},
 		    "status": {"key_file": "key.pem", "chain_file": "chain.pem"},
 		    "credential_configurations": [{"id": "income", "scope": "income", "vct": "https://x.test/income", "valid_days": 1,
-		      "source_url": "https://src.test/a", "status_list": "income"}]}],
+		      "source_url": "https://src.test/a", "status_list": "income", "source_ca_file": "roots.pem"}]}],
 		  "profiles": [{"name": "wallet", "kind": "combined", "wallet_provider_roots_file": "roots.pem",
 		    "plain_jwt_wallet_providers_file": "` + plain + `", "key_attestation_roots_file": "roots.pem"}]}`
 	}
@@ -155,6 +155,9 @@ func TestLoadCombinedProfile(t *testing.T) {
 	p := loaded.Issuer.Profiles[0]
 	if len(p.WalletProviders) != 2 || len(p.PlainJWTWalletProviders) != 1 || p.PlainJWTWalletProviders[0] != p.WalletProviders[1].Name {
 		t.Fatalf("profile %+v", p)
+	}
+	if loaded.SourceRoots["income"] == nil {
+		t.Fatal("the source CA of the configuration is not loaded")
 	}
 	if err := os.WriteFile(path, []byte(file("roots.pem")), 0o600); err != nil {
 		t.Fatal(err)
