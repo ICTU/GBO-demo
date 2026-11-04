@@ -62,6 +62,34 @@ type fixture struct {
 	sourceStatus int
 	sourceDocs   []map[string]any
 	sourceCalls  []url.Values
+	sourceBodies [][]byte
+	// pidRoot, pidIssuer and pidStatus are a test PID provider the issuer
+	// trusts; pidRevoked and pidStatusDown drive its status list.
+	pidRoot       testpki.Cert
+	pidIssuer     testpki.Cert
+	pidStatus     testpki.Cert
+	pidRevoked    []int
+	pidStatusDown bool
+	// logs holds what the issuer logged.
+	logs *syncBuffer
+}
+
+// syncBuffer is a bytes.Buffer safe for the concurrent writes of handlers.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 // clock runs with real time plus an offset, so proofs the test wallet
@@ -85,7 +113,7 @@ func (c *clock) Advance(d time.Duration) {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	f := &fixture{t: t, clock: &clock{}, sourceStatus: http.StatusOK}
+	f := &fixture{t: t, clock: &clock{}, sourceStatus: http.StatusOK, logs: &syncBuffer{}}
 	f.sourceDocs = []map[string]any{{
 		"id": "doc-1", "format": "dc+sd-jwt", "attestation_type": incomeVCT,
 		"attributes": map[string]any{"year": "2025", "income": 41000, "address": map[string]any{"city": "Utrecht"}},
@@ -97,6 +125,11 @@ func newFixture(t *testing.T) *fixture {
 	taxProvider, f.issuerRoot, f.accessRoot = newProvider(t, "tax", incomeVCT)
 	civilProvider, f.civilIssuerRoot, f.civilAccessRoot = newProvider(t, "civil", deathVCT)
 	f.civilRegistration = civilProvider.RegistrationCertificate
+	taxProvider.VerifierRegistrationCertificate = verifierRegistration(t, "NTRNL-tax")
+	f.pidRoot = testpki.NewRoot(t, "pid root")
+	pidName := pkix.Name{CommonName: "pid issuer", Organization: []string{"PID provider"}}
+	f.pidIssuer = f.pidRoot.Issue(t, testpki.Options{Subject: pidName, EKU: []asn1.ObjectIdentifier{mdlIssuerEKU}})
+	f.pidStatus = f.pidRoot.Issue(t, testpki.Options{Subject: pidName, EKU: []asn1.ObjectIdentifier{statusListEKU}})
 	f.nlWallet = testwallet.NewProvider(t, "nl wallet provider")
 	f.eudiWallet = testwallet.NewProvider(t, "eudi wallet provider")
 
@@ -133,6 +166,12 @@ func newFixture(t *testing.T) *fixture {
 			},
 		},
 		StatusListSize: 1024,
+		DisclosureOffers: []issuance.DisclosureOffer{{
+			Key: incomeOffer, Provider: "tax", ConfigurationIDs: []string{incomeConfig}, Parameters: map[string]string{"jaar": "2025"},
+		}},
+		PIDAnchors:     []x5c.Anchors{x5c.NewAnchors("test-pid", f.pidRoot.Cert)},
+		FetchPIDStatus: f.fetchPIDStatus,
+		DisclosureTTL:  disclosureTTL,
 	}
 	store := memstore.New()
 	svc, err := issuance.New(cfg, &source.Client{HTTP: src.Client(), Endpoints: map[string]string{
@@ -142,7 +181,7 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	log := slog.New(slog.NewTextHandler(f.logs, nil))
 	handlers.public = httpapi.Public(svc, log)
 	handlers.internal = httpapi.Internal(svc, log)
 	return f
@@ -173,6 +212,8 @@ func (f *fixture) serveSource(w http.ResponseWriter, r *http.Request) {
 	f.sourceMu.Lock()
 	defer f.sourceMu.Unlock()
 	f.sourceCalls = append(f.sourceCalls, r.URL.Query())
+	body, _ := io.ReadAll(r.Body)
+	f.sourceBodies = append(f.sourceBodies, body)
 	if f.sourceStatus != http.StatusOK {
 		w.WriteHeader(f.sourceStatus)
 		return
@@ -193,6 +234,18 @@ func (f *fixture) setSource(status int, docs []map[string]any) {
 	if docs != nil {
 		f.sourceDocs = docs
 	}
+}
+
+func (f *fixture) sourceCallCount() int {
+	f.sourceMu.Lock()
+	defer f.sourceMu.Unlock()
+	return len(f.sourceCalls)
+}
+
+func (f *fixture) lastSourceBody() []byte {
+	f.sourceMu.Lock()
+	defer f.sourceMu.Unlock()
+	return f.sourceBodies[len(f.sourceBodies)-1]
 }
 
 func (f *fixture) lastSourceCall() url.Values {

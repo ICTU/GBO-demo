@@ -1,7 +1,6 @@
 package issuance
 
 import (
-	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -10,7 +9,6 @@ import (
 	"fmt"
 	"net/url"
 	"slices"
-	"unicode"
 
 	"gbo-demo/oid4vc-kit/x5c"
 )
@@ -70,7 +68,7 @@ func validate(cfg Config) error {
 			return fmt.Errorf("credential configuration %q: %w", c.ID, err)
 		}
 	}
-	return nil
+	return validateDisclosure(cfg)
 }
 
 // validName allows lower-case letters, digits and hyphens, so that a name is
@@ -99,7 +97,7 @@ func validateProcess(cfg Config) error {
 	if u.Path == "/" {
 		return errors.New("public URL must not end with a slash")
 	}
-	if cfg.BatchSize < 0 || cfg.StatusListSize < 0 || cfg.OfferTTL < 0 || cfg.TokenTTL < 0 || cfg.NonceTTL < 0 {
+	if cfg.BatchSize < 0 || cfg.StatusListSize < 0 || cfg.OfferTTL < 0 || cfg.TokenTTL < 0 || cfg.NonceTTL < 0 || cfg.DisclosureTTL < 0 {
 		return errors.New("sizes and durations must not be negative")
 	}
 	return nil
@@ -131,13 +129,62 @@ func validateProvider(p Provider, kinds map[Kind]bool, vcts []string) error {
 	if kinds[KindNL] && len(p.RegistrationCertificate) == 0 {
 		return errors.New("the NL Wallet refuses metadata without a registration certificate")
 	}
+	if len(p.VerifierRegistrationCertificate) > 0 {
+		if err := checkVerifierRegistrationCertificate(p.VerifierRegistrationCertificate, p.AccessChain[0]); err != nil {
+			return err
+		}
+	}
 	if len(p.RegistrationCertificate) == 0 {
 		return nil
 	}
-	if bytes.ContainsFunc(p.RegistrationCertificate, unicode.IsSpace) {
-		return errors.New("the registration certificate must not contain whitespace")
-	}
 	return checkRegistrationCertificate(p.RegistrationCertificate, p.AccessChain[0], vcts)
+}
+
+// validateDisclosure checks the disclosure offers: unique keys, a provider
+// that can ask for the PID, and configurations of that provider. With any
+// offer, PIDs need trust anchors with unique names and a status fetcher.
+func validateDisclosure(cfg Config) error {
+	providers := map[string]Provider{}
+	for _, p := range cfg.Providers {
+		providers[p.Name] = p
+	}
+	configs := map[string]string{}
+	for _, c := range cfg.Configurations {
+		configs[c.ID] = c.Provider
+	}
+	keys := map[string]bool{}
+	for _, o := range cfg.DisclosureOffers {
+		if !validName(o.Key) || keys[o.Key] {
+			return fmt.Errorf("disclosure offer key %q must be unique and only lower-case letters, digits and hyphens", o.Key)
+		}
+		keys[o.Key] = true
+		p, ok := providers[o.Provider]
+		if !ok || len(p.VerifierRegistrationCertificate) == 0 {
+			return fmt.Errorf("disclosure offer %q: provider %q is unknown or has no verifier registration certificate", o.Key, o.Provider)
+		}
+		if len(o.ConfigurationIDs) == 0 || len(uniq(o.ConfigurationIDs)) != len(o.ConfigurationIDs) {
+			return fmt.Errorf("disclosure offer %q needs credential configurations, each once", o.Key)
+		}
+		for _, id := range o.ConfigurationIDs {
+			if configs[id] != o.Provider {
+				return fmt.Errorf("disclosure offer %q: credential configuration %q is not one of provider %q", o.Key, id, o.Provider)
+			}
+		}
+	}
+	if len(cfg.DisclosureOffers) == 0 {
+		return nil
+	}
+	if len(cfg.PIDAnchors) == 0 || cfg.FetchPIDStatus == nil {
+		return errors.New("disclosure offers need PID trust anchors and a status list fetcher")
+	}
+	names := map[string]bool{}
+	for _, a := range cfg.PIDAnchors {
+		if a.Name == "" || names[a.Name] || a.Roots == nil {
+			return fmt.Errorf("PID trust anchor set %q must have a unique name and roots", a.Name)
+		}
+		names[a.Name] = true
+	}
+	return nil
 }
 
 func validateProfile(p Profile) error {

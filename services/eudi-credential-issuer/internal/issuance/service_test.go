@@ -13,6 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-jose/go-jose/v4"
+	"github.com/go-jose/go-jose/v4/jwt"
+
 	"gbo-demo/eudi-credential-issuer/internal/issuance"
 	"gbo-demo/eudi-credential-issuer/internal/memstore"
 	"gbo-demo/oid4vc-kit/oid4vci"
@@ -39,6 +42,10 @@ func (s *fakeSource) Fetch(_ context.Context, configurationID string, _ map[stri
 	}
 	return []issuance.SourceDocument{{AttestationType: typ, Format: "dc+sd-jwt",
 		Attributes: map[string]any{"year": "2025", "address": map[string]any{"city": "Utrecht"}}}}, nil
+}
+
+func (s *fakeSource) FetchDisclosed(ctx context.Context, configurationID string, _ issuance.DisclosedPID, parameters map[string]string) ([]issuance.SourceDocument, error) {
+	return s.Fetch(ctx, configurationID, nil, parameters)
 }
 
 // countingStore counts status list allocations.
@@ -539,5 +546,100 @@ func TestRevocationByReferenceSpansProviders(t *testing.T) {
 		if revoked, err := e.store.Revoked(ctx, list); err != nil || len(revoked) != 1 {
 			t.Fatalf("%s: revoked %v, %v", list, revoked, err)
 		}
+	}
+}
+
+// disclosureConfig is validConfig with a disclosure offer of the tax
+// provider.
+func disclosureConfig(t *testing.T) issuance.Config {
+	t.Helper()
+	cfg, _ := validConfig(t)
+	cfg.Providers[0].VerifierRegistrationCertificate = testwallet.VerifierRegistrationCertificate(t, registrar(t), orgID("tax"), issuance.PIDType, []string{"bsn"})
+	cfg.DisclosureOffers = []issuance.DisclosureOffer{{Key: "income-2025", Provider: "tax", ConfigurationIDs: []string{"income"}}}
+	cfg.PIDAnchors = []x5c.Anchors{x5c.NewAnchors("test-pid", testpki.NewRoot(t, "pid root").Cert)}
+	cfg.FetchPIDStatus = func(context.Context, string) (string, error) { return "", errors.New("unused") }
+	return cfg
+}
+
+func TestNewRefusesDisclosureConfigurations(t *testing.T) {
+	store := memstore.New()
+	if _, err := issuance.New(disclosureConfig(t), &fakeSource{}, store, store, store, time.Now); err != nil {
+		t.Fatalf("the base configuration: %v", err)
+	}
+	for name, tc := range map[string]struct {
+		mutate func(*issuance.Config)
+		want   string
+	}{
+		"offer key with upper case": {func(c *issuance.Config) { c.DisclosureOffers[0].Key = "Income" }, "disclosure offer key"},
+		"duplicate offer key": {func(c *issuance.Config) {
+			c.DisclosureOffers = append(c.DisclosureOffers, c.DisclosureOffers[0])
+		}, "disclosure offer key"},
+		"offer of an unknown provider":      {func(c *issuance.Config) { c.DisclosureOffers[0].Provider = "nobody" }, "has no verifier registration certificate"},
+		"provider without verifier WRPRC":   {func(c *issuance.Config) { c.Providers[0].VerifierRegistrationCertificate = nil }, "has no verifier registration certificate"},
+		"offer without configurations":      {func(c *issuance.Config) { c.DisclosureOffers[0].ConfigurationIDs = nil }, "each once"},
+		"offer with a configuration twice":  {func(c *issuance.Config) { c.DisclosureOffers[0].ConfigurationIDs = []string{"income", "income"} }, "each once"},
+		"configuration of another provider": {func(c *issuance.Config) { c.DisclosureOffers[0].ConfigurationIDs = []string{"death"} }, "is not one of provider"},
+		"no PID anchors":                    {func(c *issuance.Config) { c.PIDAnchors = nil }, "need PID trust anchors"},
+		"no status fetcher":                 {func(c *issuance.Config) { c.FetchPIDStatus = nil }, "need PID trust anchors"},
+		"duplicate anchor names": {func(c *issuance.Config) {
+			c.PIDAnchors = append(c.PIDAnchors, c.PIDAnchors[0])
+		}, "must have a unique name"},
+		"verifier WRPRC of another organization": {func(c *issuance.Config) {
+			c.Providers[0].VerifierRegistrationCertificate = testwallet.VerifierRegistrationCertificate(t, registrar(t), orgID("civil"), issuance.PIDType, []string{"bsn"})
+		}, "is not the access certificate organizationIdentifier"},
+		"verifier WRPRC without the bsn": {func(c *issuance.Config) {
+			c.Providers[0].VerifierRegistrationCertificate = testwallet.VerifierRegistrationCertificate(t, registrar(t), orgID("tax"), issuance.PIDType, []string{"given_name"})
+		}, "does not authorize the bsn"},
+		"verifier WRPRC for another type": {func(c *issuance.Config) {
+			c.Providers[0].VerifierRegistrationCertificate = testwallet.VerifierRegistrationCertificate(t, registrar(t), orgID("tax"), "urn:eudi:pid:1", []string{"bsn"})
+		}, "does not authorize the bsn"},
+		"verifier WRPRC restricting the bsn to values": {func(c *issuance.Config) {
+			c.Providers[0].VerifierRegistrationCertificate = []byte(testwallet.Sign(t, registrar(t).Key, "rc-wrp+jwt", nil, false, map[string]any{
+				"sub": orgID("tax"), "credentials": []map[string]any{{"format": "dc+sd-jwt", "meta": map[string]any{"vct_values": []string{issuance.PIDType}},
+					"claim": []map[string]any{{"path": []any{"bsn"}, "values": []string{"999991772"}}}}},
+			}))
+		}, "does not authorize the bsn"},
+		"negative disclosure lifetime": {func(c *issuance.Config) { c.DisclosureTTL = -time.Minute }, "must not be negative"},
+	} {
+		cfg := disclosureConfig(t)
+		tc.mutate(&cfg)
+		if _, err := issuance.New(cfg, &fakeSource{}, store, store, store, time.Now); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: %v, want a refusal with %q", name, err, tc.want)
+		}
+	}
+}
+
+// A session made under a configuration with the offer, answered by a
+// replica without it, is a server error, not an empty offer.
+func TestDisclosureSessionOfAnotherConfiguration(t *testing.T) {
+	store := memstore.New()
+	cfg := disclosureConfig(t)
+	with, err := issuance.New(cfg, &fakeSource{}, store, store, store, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := with.DisclosureRequest(context.Background(), tax("nl"), "income-2025")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok, err := jwt.ParseSigned(request, []jose.SignatureAlgorithm{jose.ES256})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var claims struct {
+		ResponseURI string `json:"response_uri"`
+	}
+	if err := tok.UnsafeClaimsWithoutVerification(&claims); err != nil {
+		t.Fatal(err)
+	}
+	session := claims.ResponseURI[strings.LastIndex(claims.ResponseURI, "/")+1:]
+	cfg.DisclosureOffers = nil
+	without, err := issuance.New(cfg, &fakeSource{}, store, store, store, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pe *issuance.Error
+	if _, err := without.DisclosureResponse(context.Background(), tax("nl"), session, issuance.DisclosureForm{}); err == nil || errors.As(err, &pe) {
+		t.Fatalf("want a server error, got %v", err)
 	}
 }

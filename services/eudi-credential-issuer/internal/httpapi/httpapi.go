@@ -37,6 +37,10 @@ func Public(svc *issuance.Service, log *slog.Logger) http.Handler {
 	mux.HandleFunc("POST /{provider}/{profile}/credential", h.credential)
 	mux.HandleFunc("POST /{provider}/{profile}/credential_preview", h.preview)
 	mux.HandleFunc("GET /status/{provider}/{list}", h.statusList)
+	// Disclosure-based issuance: the wallet fetches the OpenID4VP request
+	// of an offer by reference and posts its response (direct_post.jwt).
+	mux.HandleFunc("GET /{provider}/{profile}/vp/{offer}/request", h.disclosureRequest)
+	mux.HandleFunc("POST /{provider}/{profile}"+issuance.DisclosureResponsePath+"{session}", h.disclosureResponse)
 	return mux
 }
 
@@ -336,6 +340,63 @@ func (h *handler) fail(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusInternalServerError, oid4vci.ErrorResponse{Error: oid4vci.ErrServerError})
 	}
 }
+
+func (h *handler) disclosureRequest(w http.ResponseWriter, r *http.Request) {
+	request, err := h.svc.DisclosureRequest(r.Context(), target(r), r.PathValue("offer"))
+	switch {
+	case errors.Is(err, issuance.ErrUnknownProvider), errors.Is(err, issuance.ErrUnknownProfile), errors.Is(err, issuance.ErrUnknownOffer):
+		http.NotFound(w, r)
+		return
+	case err != nil:
+		h.log.Error("disclosure request failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, oid4vci.ErrorResponse{Error: oid4vci.ErrServerError})
+		return
+	}
+	w.Header().Set("Content-Type", "application/oauth-authz-req+jwt")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = io.WriteString(w, request)
+}
+
+// disclosureResponse answers the wallet's direct_post.jwt: the
+// redirect_uri with the Credential Offer, {} after a wallet error, or an
+// error object the wallet shows (no_issuable_attestations as the NL
+// Wallet expects it).
+func (h *handler) disclosureResponse(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
+	if err := r.ParseForm(); err != nil {
+		writeJSON(w, http.StatusBadRequest, oid4vci.ErrorResponse{Error: oid4vci.ErrInvalidRequest})
+		return
+	}
+	form := issuance.DisclosureForm{Response: r.PostForm.Get("response"), Error: r.PostForm.Get("error"), State: r.PostForm.Get("state")}
+	redirect, err := h.svc.DisclosureResponse(r.Context(), target(r), r.PathValue("session"), form)
+	w.Header().Set("Cache-Control", "no-store")
+	var pe *issuance.Error
+	switch {
+	case err == nil && redirect == "":
+		h.log.Info("disclosure ended by the wallet", "error", description(form.Error))
+		writeJSON(w, http.StatusOK, struct{}{})
+	case err == nil:
+		writeJSON(w, http.StatusOK, map[string]string{"redirect_uri": redirect})
+	case errors.As(err, &pe):
+		h.log.Info("disclosure refused", "error", pe.Code, "error_description", pe.Description)
+		writeJSON(w, http.StatusBadRequest, oid4vci.ErrorResponse{Error: pe.Code, Description: description(pe.Description)})
+	case errors.Is(err, issuance.ErrNoData):
+		h.log.Info("disclosure refused", "error", errNoIssuableAttestations)
+		writeJSON(w, http.StatusNotFound, oid4vci.ErrorResponse{Error: errNoIssuableAttestations})
+	case errors.Is(err, issuance.ErrUnknownProvider), errors.Is(err, issuance.ErrUnknownProfile):
+		// The NL Wallet reads a JSON error body from every refusal.
+		writeJSON(w, http.StatusNotFound, oid4vci.ErrorResponse{Error: oid4vci.ErrInvalidRequest})
+	default:
+		// An unreachable source or PID status list, or unusable source
+		// data: the wallet may try again with a new scan.
+		h.log.Error("disclosure failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, oid4vci.ErrorResponse{Error: oid4vci.ErrServerError})
+	}
+}
+
+// errNoIssuableAttestations is the error the NL Wallet reads as "nothing
+// to issue" after a disclosure.
+const errNoIssuableAttestations = "no_issuable_attestations"
 
 // description keeps only the characters RFC 6749 section 5.2 allows in
 // error_description: printable ASCII without the double quote and the

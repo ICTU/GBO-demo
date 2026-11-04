@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -24,6 +25,8 @@ import (
 	"gbo-demo/eudi-credential-issuer/internal/memstore"
 	"gbo-demo/eudi-credential-issuer/internal/postgres"
 	"gbo-demo/eudi-credential-issuer/internal/source"
+	"gbo-demo/oid4vc-kit/oid4vp"
+	"gbo-demo/oid4vc-kit/statuslist"
 )
 
 const defaultSchema = "eudi_credential_issuer"
@@ -96,6 +99,7 @@ func serve(ctx context.Context, log *slog.Logger) error {
 		st = pg
 	}
 	src := &source.Client{HTTP: &http.Client{Timeout: 10 * time.Second}, Endpoints: loaded.SourceEndpoints}
+	cfg.FetchPIDStatus = pidStatusFetcher(&http.Client{Timeout: 10 * time.Second})
 	svc, err := issuance.New(cfg, src, st, st, st, time.Now)
 	if err != nil {
 		return err
@@ -120,6 +124,20 @@ func serve(ctx context.Context, log *slog.Logger) error {
 	shutdown, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	return errors.Join(public.Shutdown(shutdown), internal.Shutdown(shutdown))
+}
+
+// pidStatusFetcher fetches the status lists of disclosed PIDs. The URI
+// comes from a PID whose issuer was verified; still, only https is
+// fetched and redirects are not followed.
+func pidStatusFetcher(base *http.Client) oid4vp.StatusFetcher {
+	client := *base
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return func(ctx context.Context, uri string) (string, error) {
+		if u, err := url.Parse(uri); err != nil || u.Scheme != "https" {
+			return "", fmt.Errorf("status list %q is not an https URL", uri)
+		}
+		return statuslist.Fetch(ctx, &client, uri)
+	}
 }
 
 // purge removes expired state every minute. Every replica may run it; the

@@ -38,6 +38,8 @@ func Run(t *testing.T, newStore func(t *testing.T) Store) {
 		{"status entries", statusEntries},
 		{"revocation by reference", revokeByReference},
 		{"revocation and concurrent allocation", revokeWhileAllocating},
+		{"a disclosure session is taken once and only before it expires", takeDisclosureOnce},
+		{"concurrent takes of a disclosure session: exactly one wins", takeDisclosureConcurrently},
 	} {
 		t.Run(c.name, func(t *testing.T) { c.test(t, newStore(t)) })
 	}
@@ -353,5 +355,69 @@ func revokeWhileAllocating(t *testing.T, s Store) {
 	}
 	if len(revoked) != 17 {
 		t.Fatalf("%d of 17 entries for the revoked reference are revoked", len(revoked))
+	}
+}
+
+func takeDisclosureOnce(t *testing.T, s Store) {
+	d := issuance.DisclosureSession{ID: "d1", Provider: "tax", Profile: "nl", Offer: "income-2025", Nonce: "n", State: "st",
+		ResponseKeyID: "k", ResponseKey: []byte{1, 2, 3}, ExpiresAt: now.Add(time.Minute)}
+	if err := s.CreateDisclosure(ctx, d); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateDisclosure(ctx, d); err == nil {
+		t.Fatal("a duplicate session id must be refused")
+	}
+	got, err := s.TakeDisclosure(ctx, "d1", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.ExpiresAt.Equal(d.ExpiresAt) || string(got.ResponseKey) != string(d.ResponseKey) {
+		t.Fatalf("got %+v, want %+v", got, d)
+	}
+	got.ExpiresAt = d.ExpiresAt
+	if fmt.Sprint(got) != fmt.Sprint(d) {
+		t.Fatalf("got %+v, want %+v", got, d)
+	}
+	if _, err := s.TakeDisclosure(ctx, "d1", now); !errors.Is(err, issuance.ErrNotFound) {
+		t.Fatalf("a used session: %v", err)
+	}
+	if _, err := s.TakeDisclosure(ctx, "unknown", now); !errors.Is(err, issuance.ErrNotFound) {
+		t.Fatalf("an unknown session: %v", err)
+	}
+	expired := d
+	expired.ID = "d2"
+	if err := s.CreateDisclosure(ctx, expired); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.TakeDisclosure(ctx, "d2", d.ExpiresAt); !errors.Is(err, issuance.ErrNotFound) {
+		t.Fatalf("an expired session: %v", err)
+	}
+	if _, err := s.TakeDisclosure(ctx, "d2", now); !errors.Is(err, issuance.ErrNotFound) {
+		t.Fatalf("an expired session is gone after its take: %v", err)
+	}
+}
+
+func takeDisclosureConcurrently(t *testing.T, s Store) {
+	if err := s.CreateDisclosure(ctx, issuance.DisclosureSession{ID: "d1", Provider: "tax", Profile: "nl", Offer: "o",
+		Nonce: "n", State: "st", ResponseKeyID: "k", ResponseKey: []byte{1}, ExpiresAt: now.Add(time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	wins := 0
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := s.TakeDisclosure(ctx, "d1", now); err == nil {
+				mu.Lock()
+				wins++
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	if wins != 1 {
+		t.Fatalf("%d takes won, want 1", wins)
 	}
 }

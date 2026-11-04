@@ -133,6 +133,7 @@ func (s *Store) Purge(ctx context.Context, now time.Time, tokenTTL time.Duration
 		`DELETE FROM one_time_values WHERE expires_at <= $1`,
 		`DELETE FROM seen_identifiers WHERE expires_at <= $1`,
 		`DELETE FROM access_tokens WHERE expires_at <= $1`,
+		`DELETE FROM disclosure_sessions WHERE expires_at <= $1`,
 	} {
 		if _, err := s.pool.Exec(ctx, q, now); err != nil {
 			return err
@@ -383,4 +384,29 @@ func (s *Store) Revoked(ctx context.Context, list string) ([]int, error) {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, pgx.RowTo[int])
+}
+
+func (s *Store) CreateDisclosure(ctx context.Context, d issuance.DisclosureSession) error {
+	_, err := s.pool.Exec(ctx, `INSERT INTO disclosure_sessions
+		(id, provider, profile, offer, nonce, state, response_key_id, response_key, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		d.ID, d.Provider, d.Profile, d.Offer, d.Nonce, d.State, d.ResponseKeyID, d.ResponseKey, d.ExpiresAt)
+	return err
+}
+
+func (s *Store) TakeDisclosure(ctx context.Context, id string, now time.Time) (issuance.DisclosureSession, error) {
+	var d issuance.DisclosureSession
+	err := s.pool.QueryRow(ctx, `DELETE FROM disclosure_sessions WHERE id = $1
+		RETURNING id, provider, profile, offer, nonce, state, response_key_id, response_key, expires_at`, id).
+		Scan(&d.ID, &d.Provider, &d.Profile, &d.Offer, &d.Nonce, &d.State, &d.ResponseKeyID, &d.ResponseKey, &d.ExpiresAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return issuance.DisclosureSession{}, issuance.ErrNotFound
+	}
+	if err != nil {
+		return issuance.DisclosureSession{}, err
+	}
+	if !now.Before(d.ExpiresAt) {
+		return issuance.DisclosureSession{}, issuance.ErrNotFound
+	}
+	return d, nil
 }

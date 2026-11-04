@@ -15,6 +15,24 @@ type Source interface {
 	// example a tax year). Which backend serves a configuration is the
 	// adapter's concern.
 	Fetch(ctx context.Context, configurationID string, subject map[string]any, parameters map[string]string) ([]SourceDocument, error)
+	// FetchDisclosed is Fetch for a subject that a wallet disclosed with
+	// its PID; the backend receives the disclosure, not an offer caller's
+	// subject, so it can tell the two apart.
+	FetchDisclosed(ctx context.Context, configurationID string, pid DisclosedPID, parameters map[string]string) ([]SourceDocument, error)
+}
+
+// DisclosedPID is what a wallet disclosed of its PID, verified: the
+// requested attributes and where the PID came from.
+type DisclosedPID struct {
+	// QueryID is the id of the DCQL credential query it answers.
+	QueryID         string
+	AttestationType string
+	Attributes      map[string]any
+	// CA is the common name of the CA that issued the PID signer.
+	CA         string
+	Signed     time.Time
+	ValidFrom  time.Time
+	ValidUntil time.Time
 }
 
 // SourceDocument is one IssuableDocument as the backend returns it.
@@ -56,6 +74,28 @@ type Sessions interface {
 	CompleteIssue(ctx context.Context, sessionID, credentialID, owner string) (bool, error)
 	// ReleaseIssue removes the reservation if owner holds it.
 	ReleaseIssue(ctx context.Context, sessionID, credentialID, owner string) error
+	CreateDisclosure(ctx context.Context, d DisclosureSession) error
+	// TakeDisclosure removes an unexpired disclosure session and returns
+	// it, atomically: a session answers one response. It returns
+	// ErrNotFound for an unknown, used or expired session.
+	TakeDisclosure(ctx context.Context, id string, now time.Time) (DisclosureSession, error)
+}
+
+// DisclosureSession is one OpenID4VP request for a PID, from the moment a
+// wallet fetches it until its response arrives.
+type DisclosureSession struct {
+	ID       string
+	Provider string
+	Profile  string
+	// Offer is the key of the disclosure offer the wallet started.
+	Offer string
+	Nonce string
+	State string
+	// ResponseKeyID and ResponseKey (PKCS #8 DER) are the session's
+	// ephemeral key the wallet encrypts its response to.
+	ResponseKeyID string
+	ResponseKey   []byte
+	ExpiresAt     time.Time
 }
 
 // OneTime holds single-use values: nonces, attestation challenges and the

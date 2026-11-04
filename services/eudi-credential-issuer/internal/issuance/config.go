@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"time"
 
+	"gbo-demo/oid4vc-kit/oid4vp"
 	"gbo-demo/oid4vc-kit/x5c"
 )
 
@@ -46,6 +47,11 @@ type Provider struct {
 	// the same subject as the issuer certificate.
 	StatusKey   crypto.Signer
 	StatusChain []*x509.Certificate
+	// VerifierRegistrationCertificate is the WRPRC of the provider as a
+	// relying party that asks for the PID (ETSI TS 119 475, entitlement
+	// Service_Provider), carried in the verifier_info of its OpenID4VP
+	// requests; required when it has disclosure offers.
+	VerifierRegistrationCertificate []byte
 	// RequestEncryptionKey is the P-256 key wallets encrypt their credential
 	// requests to (OpenID4VCI 1.0 section 10); required when a KindEUDI
 	// profile exists, and published only there.
@@ -104,6 +110,16 @@ type Claim struct {
 	Display   []Display `json:"display,omitempty"`
 }
 
+// DisclosureOffer is an offer a wallet starts by disclosing the BSN from
+// its PID (disclosure-based issuance), reached by a fixed link per offer.
+type DisclosureOffer struct {
+	// Key is the last path segment of its request_uri.
+	Key              string
+	Provider         string
+	ConfigurationIDs []string
+	Parameters       map[string]string
+}
+
 // Config is everything the issuer needs besides its ports.
 type Config struct {
 	// PublicURL is the external base URL; issuer identifiers are
@@ -117,6 +133,15 @@ type Config struct {
 	OfferTTL       time.Duration
 	TokenTTL       time.Duration
 	NonceTTL       time.Duration
+	// DisclosureOffers, PIDAnchors and FetchPIDStatus serve
+	// disclosure-based issuance: the PID issuers whose PIDs are accepted
+	// and how their status lists are fetched.
+	DisclosureOffers []DisclosureOffer
+	PIDAnchors       []x5c.Anchors
+	FetchPIDStatus   oid4vp.StatusFetcher
+	// DisclosureTTL bounds a disclosure session and the offer that follows
+	// it.
+	DisclosureTTL time.Duration
 }
 
 // Defaults for the durations and sizes a deployment does not set.
@@ -126,4 +151,5 @@ const (
 	DefaultTokenTTL       = 10 * time.Minute
 	DefaultNonceTTL       = 5 * time.Minute
 	DefaultStatusListSize = 1 << 16
+	DefaultDisclosureTTL  = 5 * time.Minute
 )

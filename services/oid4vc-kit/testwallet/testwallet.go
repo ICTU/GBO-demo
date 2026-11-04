@@ -251,3 +251,20 @@ func Present(t testing.TB, sdjwt string, key *ecdsa.PrivateKey, aud, nonce strin
 		"aud": aud, "nonce": nonce, "iat": iat.Unix(), "sd_hash": SDHash(sdjwt),
 	})
 }
+
+// VerifierRegistrationCertificate returns a WRPRC in JWT form for a
+// relying party sub that may ask for the claims at paths of an SD-JWT VC
+// of type vct, signed by registrar. The claims are listed under "claim", as
+// NL Wallet v0.6 reads them.
+func VerifierRegistrationCertificate(t testing.TB, registrar testpki.Cert, sub, vct string, paths ...[]string) []byte {
+	t.Helper()
+	claims := make([]map[string]any, len(paths))
+	for i, p := range paths {
+		claims[i] = map[string]any{"path": p}
+	}
+	return []byte(Sign(t, registrar.Key, "rc-wrp+jwt", map[jose.HeaderKey]any{"x5c": x5c.Header(registrar.Chain)}, false, map[string]any{
+		"sub": sub, "sub_ln": sub, "country": "NL", "iat": time.Now().Unix(),
+		"purpose":     []map[string]string{{"lang": "en", "value": "test"}},
+		"credentials": []map[string]any{{"format": "dc+sd-jwt", "meta": map[string]any{"vct_values": []string{vct}}, "claim": claims}},
+	}))
+}

@@ -65,6 +65,8 @@ Public port (`ISSUER_LISTEN_ADDR`, default `:8080`), per provider `v` and profil
 | `POST /{v}/{p}/credential` | `Authorization: DPoP <token>`, `DPoP`; body with `credential_identifier` and `proofs`, as JSON or, on `eudi`, as a JWE (`application/jwt`); the response is a JWE when the request carries `credential_response_encryption` |
 | `POST /{v}/nl/credential_preview` | `Authorization: Bearer <token>`, no DPoP (as the NL Wallet calls it) |
 | `GET /status/{v}/{list}` | the provider's Status List Token (`application/statuslist+jwt`), signed with its status certificate |
+| `GET /{v}/{p}/vp/{offer}/request` | disclosure-based issuance: the `request_uri` of a disclosure offer. Each fetch starts a disclosure session (`disclosure_ttl`, default 5 minutes) and returns its OpenID4VP request object (`application/oauth-authz-req+jwt`), signed with the provider's access certificate, asking for the `bsn` of the PID |
+| `POST /{v}/{p}/vp/response/{session}` | the `response_uri` (`direct_post.jwt`, form field `response`, or `error` when the wallet declines). See [Disclosure-based issuance](#disclosure-based-issuance) |
 | `GET /healthz` | health |
 
 Internal port (`ISSUER_INTERNAL_ADDR`, default `:8081`):
@@ -74,6 +76,25 @@ Internal port (`ISSUER_INTERNAL_ADDR`, default `:8081`):
 | `POST /offers` | `{profile, credential_configuration_ids, subject, parameters, reference?}` → `201 {credential_offer, links}`. The issuer fetches the data from the bronpoort now; `404 no_data`, `503 source_unavailable` or `502 bad_source_data` when that fails, and nothing is stored. `reference` is the caller's own reference for revocation. The provider follows from the configurations: an offer with configurations of two providers is a `400 mixed_providers` |
 | `POST /revocations` | `{reference}` revokes every credential issued for offers with that reference → `200 {revoked}`, and from then on nothing more is issued for it: an offer not yet redeemed gets `invalid_grant`, a token not yet used gets `credential_request_denied`. `{provider, list, index}` revokes one entry → 204. Anything else is a 400: a revocation cannot be undone, so nothing is guessed |
 | `GET /healthz` | health |
+
+## Disclosure-based issuance
+
+The wallet discloses the BSN from its PID, and gets a Credential Offer for it in return, which it redeems with the pre-authorized code as above. Each disclosure offer (`disclosure_offers` in the configuration: a key, a provider, its credential configurations and the parameters) has a fixed link per wallet, which points at `request_uri` with the provider's `client_id` (`x509_hash:` of its access certificate):
+
+- NL Wallet: `<universal link base>/disclosure_based_issuance?client_id=…&request_uri=…`;
+- EUDI wallets: `openid4vp://?client_id=…&request_uri=…`.
+
+The request carries the provider's registration certificate for the verifier role (`verifier_registration_certificate_file`, entitlement Service_Provider, authorizing the `bsn` of `urn:eudi:pid:nl:1`) in `verifier_info`: base64url-encoded on `nl`, the JWT itself on `eudi`, as each wallet reads it. The wallet fetches it with GET; `request_uri_method=post` is not offered.
+
+The response is checked with `oid4vc-kit/oid4vp`: the PID must chain to `pid_trust_anchors` with the mDL signer EKU and an `exp`, be bound to the session by its key binding, disclose the `bsn` and nothing else, and be valid on its status list (signed under the PID signer's name; fetched over https without redirects). A session answers one response. The wallet gets:
+
+| Outcome | Response |
+|---|---|
+| offer made | `200 {"redirect_uri": "openid-credential-offer://?credential_offer=…"}`: one use, the disclosure lifetime, no `tx_code` |
+| the wallet declined (`error`) | `200 {}`; the session has ended and the source is not called |
+| unknown, expired or used session; a response the verifier refuses | `400 invalid_request` |
+| the source has no data | `404 no_issuable_attestations`, which the NL Wallet shows as "nothing to add" |
+| the source or the PID status list is unreachable, or the source data cannot be issued | `500 server_error`; scanning again may work |
 
 ## Bronpoort
 
@@ -85,13 +106,21 @@ For each credential configuration the issuer posts to its `source_url`, with the
 
 It is an object on purpose: the disclosure that nl-wallet's `issuance_server` sends is an array, so a backend can tell that no wallet presented a PID here. `eudi-adapter` accepts both and logs the matching Dataverwerking (`gbo-bsn-ontvangst-aanvrager` for this request, `gbo-pid-bsn-extractie` for a disclosure).
 
+After a disclosure the issuer sends that array itself, in the form of nl-wallet's `issuance_server` v0.5.0 (plain attribute values; v0.6.0 tags each value as `{"type", "value"}`, which the backends do not read yet), with only the verified `bsn`:
+
+```json
+[{"id": "pid", "attestations": [{"attestation_type": "urn:eudi:pid:nl:1", "format": "dc+sd-jwt",
+  "attributes": {"bsn": "999991772"}, "ca": "<CA of the PID signer>",
+  "issuance_validity": {"signed": "…", "validFrom": "…", "validUntil": "…"}, "revocation_status": "Valid"}]}]
+```
+
 The response is the IssuableDocument list: `[{"id", "format": "dc+sd-jwt", "attestation_type": "<vct>", "attributes": {...}}]`. The offer is refused with `bad_source_data` when what the source returns cannot be issued:
 
 - an attribute is not described by a claim of the credential configuration, or a mandatory claim is missing (the NL Wallet refuses undescribed attributes);
 - a top-level attribute uses a name SD-JWT VC reserves (`iss`, `vct`, `exp`, `status`, ...);
 - for `nl`: a number is not a whole number (the NL Wallet knows no others).
 
-**The QTSP route does not run through pre-authorized offers.** The callback of `qtsp-reference` checks a PID the wallet disclosed against the pending ASI result; a subject named by an offer caller would make that check meaningless. It comes with disclosure-based issuance, where the issuer passes on the PID its own verifier checked.
+**The QTSP route does not run through pre-authorized offers.** The callback of `qtsp-reference` checks a PID the wallet disclosed against the pending ASI result; a subject named by an offer caller would make that check meaningless. It belongs with disclosure-based issuance, where the issuer passes on the PID its own verifier checked, but does not run there yet: the issuer asks only for the `bsn`, while the QTSP needs the name, birth date and nationalities and no BSN. Until disclosure offers name their own PID claims, the QTSP route stays on `eudi-issuance-server`.
 
 ## Run
 

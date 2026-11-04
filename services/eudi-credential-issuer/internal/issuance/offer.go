@@ -79,12 +79,22 @@ func (s *Service) CreateOffer(ctx context.Context, req OfferRequest) (Offer, err
 		providerName = c.Provider
 	}
 	t := Target{Provider: providerName, Profile: p.Name}
+	return s.createOffer(ctx, t, p, ids, req.Reference, s.cfg.OfferTTL, func(id string) ([]SourceDocument, error) {
+		return s.source.Fetch(ctx, id, req.Subject, req.Parameters)
+	})
+}
+
+// createOffer fetches the documents of each configuration with fetch and
+// stores them in a new session behind a fresh pre-authorized code that
+// expires after ttl.
+func (s *Service) createOffer(ctx context.Context, t Target, p Profile, ids []string, reference string, ttl time.Duration,
+	fetch func(configurationID string) ([]SourceDocument, error)) (Offer, error) {
 	now := s.now()
 	notBefore := now.UTC().Truncate(24 * time.Hour)
 	var docs []Document
 	for _, id := range ids {
 		c := s.configs[id]
-		fetched, err := s.source.Fetch(ctx, id, req.Subject, req.Parameters)
+		fetched, err := fetch(id)
 		if err != nil {
 			return Offer{}, err
 		}
@@ -118,7 +128,7 @@ func (s *Service) CreateOffer(ctx context.Context, req OfferRequest) (Offer, err
 	}
 	if err := s.sessions.CreateSession(ctx, Session{
 		ID: sessionID, Provider: t.Provider, Profile: p.Name, CodeHash: hash(code),
-		ExpiresAt: now.Add(s.cfg.OfferTTL), Reference: req.Reference, Documents: docs,
+		ExpiresAt: now.Add(ttl), Reference: reference, Documents: docs,
 	}); err != nil {
 		return Offer{}, err
 	}

@@ -31,6 +31,26 @@ type File struct {
 	NonceTTL       Duration       `json:"nonce_ttl"`
 	Providers      []ProviderFile `json:"providers"`
 	Profiles       []ProfileFile  `json:"profiles"`
+	// DisclosureOffers, PIDTrustAnchors and DisclosureTTL serve
+	// disclosure-based issuance.
+	DisclosureOffers []DisclosureOfferFile `json:"disclosure_offers"`
+	PIDTrustAnchors  []AnchorsFile         `json:"pid_trust_anchors"`
+	DisclosureTTL    Duration              `json:"disclosure_ttl"`
+}
+
+// DisclosureOfferFile is an offer reached by a fixed link, started with a
+// PID disclosure.
+type DisclosureOfferFile struct {
+	Key                        string            `json:"key"`
+	Provider                   string            `json:"provider"`
+	CredentialConfigurationIDs []string          `json:"credential_configuration_ids"`
+	Parameters                 map[string]string `json:"parameters"`
+}
+
+// AnchorsFile is a named set of trust anchors in one PEM file.
+type AnchorsFile struct {
+	Name      string `json:"name"`
+	RootsFile string `json:"roots_file"`
 }
 
 // KeyFiles names a PEM private key and a PEM certificate chain, leaf first.
@@ -47,7 +67,8 @@ type ProviderFile struct {
 	Issuer KeyFiles `json:"issuer"`
 	Status KeyFiles `json:"status"`
 	// RegistrationCertificateFile holds the WRPRC as raw bytes.
-	RegistrationCertificateFile string `json:"registration_certificate_file"`
+	RegistrationCertificateFile         string `json:"registration_certificate_file"`
+	VerifierRegistrationCertificateFile string `json:"verifier_registration_certificate_file"`
 	// RequestEncryptionKeyFile holds the PEM P-256 key wallets encrypt
 	// their credential requests to; required for an eudi profile.
 	RequestEncryptionKeyFile string                        `json:"request_encryption_key_file"`
@@ -119,6 +140,7 @@ func Load(path, publicURL string) (Loaded, error) {
 		Issuer: issuance.Config{
 			PublicURL: publicURL, StatusListSize: f.StatusListSize, BatchSize: f.BatchSize,
 			OfferTTL: time.Duration(f.OfferTTL), TokenTTL: time.Duration(f.TokenTTL), NonceTTL: time.Duration(f.NonceTTL),
+			DisclosureTTL: time.Duration(f.DisclosureTTL),
 		},
 		SourceEndpoints: map[string]string{},
 	}
@@ -146,6 +168,18 @@ func Load(path, publicURL string) (Loaded, error) {
 		}
 		out.Issuer.Profiles = append(out.Issuer.Profiles, p)
 	}
+	for _, o := range f.DisclosureOffers {
+		out.Issuer.DisclosureOffers = append(out.Issuer.DisclosureOffers, issuance.DisclosureOffer{
+			Key: o.Key, Provider: o.Provider, ConfigurationIDs: o.CredentialConfigurationIDs, Parameters: o.Parameters,
+		})
+	}
+	for _, a := range f.PIDTrustAnchors {
+		anchors, err := loadAnchors(dir, a.RootsFile, a.Name)
+		if err != nil {
+			return Loaded{}, fmt.Errorf("PID trust anchors %s: %w", a.Name, err)
+		}
+		out.Issuer.PIDAnchors = append(out.Issuer.PIDAnchors, anchors...)
+	}
 	return out, nil
 }
 
@@ -168,6 +202,13 @@ func loadProvider(dir string, pf ProviderFile) (issuance.Provider, error) {
 		}
 		// A file usually ends with a newline; the certificate does not.
 		p.RegistrationCertificate = bytes.TrimSpace(raw)
+	}
+	if pf.VerifierRegistrationCertificateFile != "" {
+		raw, err := os.ReadFile(resolve(dir, pf.VerifierRegistrationCertificateFile))
+		if err != nil {
+			return p, fmt.Errorf("verifier registration certificate: %w", err)
+		}
+		p.VerifierRegistrationCertificate = bytes.TrimSpace(raw)
 	}
 	if pf.RequestEncryptionKeyFile != "" {
 		key, err := readKey(resolve(dir, pf.RequestEncryptionKeyFile))

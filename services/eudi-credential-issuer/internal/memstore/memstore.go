@@ -28,6 +28,7 @@ type Store struct {
 	values   map[string]time.Time
 	status   map[string]map[int]*entry
 	revoked  map[string]bool
+	disclose map[string]issuance.DisclosureSession
 }
 
 type entry struct {
@@ -40,7 +41,7 @@ func New() *Store {
 	return &Store{
 		sessions: map[string]issuance.Session{}, byCode: map[string]string{}, used: map[string]bool{},
 		tokens: map[string]issuance.AccessToken{}, issued: map[string]bool{}, reserved: map[string]reservation{}, values: map[string]time.Time{},
-		status: map[string]map[int]*entry{}, revoked: map[string]bool{},
+		status: map[string]map[int]*entry{}, revoked: map[string]bool{}, disclose: map[string]issuance.DisclosureSession{},
 	}
 }
 
@@ -227,4 +228,28 @@ func (s *Store) Revoked(_ context.Context, list string) ([]int, error) {
 	}
 	sort.Ints(out)
 	return out, nil
+}
+
+func (s *Store) CreateDisclosure(_ context.Context, d issuance.DisclosureSession) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, dup := s.disclose[d.ID]; dup {
+		return errors.New("memstore: duplicate disclosure session")
+	}
+	s.disclose[d.ID] = d
+	return nil
+}
+
+func (s *Store) TakeDisclosure(_ context.Context, id string, now time.Time) (issuance.DisclosureSession, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d, ok := s.disclose[id]
+	if !ok {
+		return issuance.DisclosureSession{}, issuance.ErrNotFound
+	}
+	delete(s.disclose, id)
+	if !now.Before(d.ExpiresAt) {
+		return issuance.DisclosureSession{}, issuance.ErrNotFound
+	}
+	return d, nil
 }

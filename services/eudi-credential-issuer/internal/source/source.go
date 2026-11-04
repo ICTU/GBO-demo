@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"time"
 
 	"gbo-demo/eudi-credential-issuer/internal/issuance"
 )
@@ -38,12 +39,64 @@ type issuableDocument struct {
 	Attributes      map[string]any `json:"attributes"`
 }
 
+// disclosedAttestations is the request of nl-wallet's issuance_server after
+// a disclosure (attestation_data::disclosure::DisclosedAttestations): the
+// disclosed attestations per DCQL credential query. Attributes are plain
+// JSON values, as v0.5.0 (which eudi-issuance-server runs) sends them and
+// the backends read them; v0.6.0 tags each value ({"type", "value"}).
+type disclosedAttestations struct {
+	ID           string                 `json:"id"`
+	Attestations []disclosedAttestation `json:"attestations"`
+}
+
+type disclosedAttestation struct {
+	AttestationType  string           `json:"attestation_type"`
+	Format           string           `json:"format"`
+	Attributes       map[string]any   `json:"attributes"`
+	CA               string           `json:"ca"`
+	IssuanceValidity issuanceValidity `json:"issuance_validity"`
+	RevocationStatus string           `json:"revocation_status"`
+}
+
+type issuanceValidity struct {
+	Signed     *time.Time `json:"signed,omitempty"`
+	ValidFrom  *time.Time `json:"validFrom,omitempty"`
+	ValidUntil *time.Time `json:"validUntil,omitempty"`
+}
+
+// FetchDisclosed posts the disclosed PID in the form of nl-wallet's
+// issuance_server v0.5.0, so that a backend sees a wallet disclosure (and the
+// QTSP callback, which accepts nothing else, serves it). The PID was
+// verified, its status list included: revocation_status is Valid.
+func (c *Client) FetchDisclosed(ctx context.Context, configurationID string, pid issuance.DisclosedPID, parameters map[string]string) ([]issuance.SourceDocument, error) {
+	var validity issuanceValidity
+	if !pid.Signed.IsZero() {
+		validity.Signed = &pid.Signed
+	}
+	if !pid.ValidFrom.IsZero() {
+		validity.ValidFrom = &pid.ValidFrom
+	}
+	if !pid.ValidUntil.IsZero() {
+		validity.ValidUntil = &pid.ValidUntil
+	}
+	return c.post(ctx, configurationID, []disclosedAttestations{{ID: pid.QueryID, Attestations: []disclosedAttestation{{
+		AttestationType: pid.AttestationType, Format: "dc+sd-jwt", Attributes: pid.Attributes,
+		CA: pid.CA, IssuanceValidity: validity, RevocationStatus: "Valid",
+	}}}}, parameters)
+}
+
 // Fetch posts {"subject": ...} to the configuration's endpoint, with the
 // parameters in the query. The response is the IssuableDocument list the
 // attestation server of nl-wallet's issuance_server returns. Backends that
 // accept only a PID disclosure (the QTSP callback) do not serve this
 // request; they get one with disclosure-based issuance.
 func (c *Client) Fetch(ctx context.Context, configurationID string, subject map[string]any, parameters map[string]string) ([]issuance.SourceDocument, error) {
+	return c.post(ctx, configurationID, subjectRequest{Subject: subject}, parameters)
+}
+
+// post sends request to the configuration's endpoint and reads the
+// IssuableDocument list.
+func (c *Client) post(ctx context.Context, configurationID string, request any, parameters map[string]string) ([]issuance.SourceDocument, error) {
 	endpoint, ok := c.Endpoints[configurationID]
 	if !ok {
 		return nil, fmt.Errorf("%w: no endpoint for %s", issuance.ErrSourceUnavailable, configurationID)
@@ -57,7 +110,7 @@ func (c *Client) Fetch(ctx context.Context, configurationID string, subject map[
 		q.Set(k, v)
 	}
 	u.RawQuery = q.Encode()
-	body, err := json.Marshal(subjectRequest{Subject: subject})
+	body, err := json.Marshal(request)
 	if err != nil {
 		return nil, err
 	}
