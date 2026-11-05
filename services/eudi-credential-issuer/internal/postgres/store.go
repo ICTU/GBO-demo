@@ -489,6 +489,19 @@ func (s *Store) TakePending(ctx context.Context, kind, id string, now time.Time)
 	return p, nil
 }
 
+func (s *Store) Pending(ctx context.Context, kind, id string, now time.Time) (issuance.PendingAuthorization, error) {
+	p := issuance.PendingAuthorization{Kind: kind, ID: id}
+	err := s.pool.QueryRow(ctx, `SELECT payload, expires_at FROM pending_authorizations
+		WHERE kind = $1 AND id = $2 AND expires_at > $3`, kind, id, now).Scan(&p.Payload, &p.ExpiresAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return issuance.PendingAuthorization{}, issuance.ErrNotFound
+	}
+	if err != nil {
+		return issuance.PendingAuthorization{}, err
+	}
+	return p, nil
+}
+
 func (s *Store) Session(ctx context.Context, id string) (issuance.Session, error) {
 	var sess issuance.Session
 	var docs, binding, pending []byte

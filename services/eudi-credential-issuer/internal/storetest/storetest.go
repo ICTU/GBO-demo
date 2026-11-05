@@ -45,6 +45,7 @@ func Run(t *testing.T, newStore func(t *testing.T) Store) {
 		{"a transaction code: right, wrong, used up, unexpected", txCode},
 		{"a session is read back and kept longer", sessionExtend},
 		{"a pending session is completed per document", pendingSession},
+		{"a pending authorization is read without taking it", readPending},
 	} {
 		t.Run(c.name, func(t *testing.T) { c.test(t, newStore(t)) })
 	}
@@ -571,5 +572,26 @@ func pendingSession(t *testing.T, s Store) {
 	}
 	if err := s.CompleteDocument(ctx, "nope", full("d1")); !errors.Is(err, issuance.ErrNotFound) {
 		t.Fatalf("unknown session: %v", err)
+	}
+}
+
+func readPending(t *testing.T, s Store) {
+	p := issuance.PendingAuthorization{Kind: "refresh", ID: "r1", Payload: []byte(`{"a":1}`), ExpiresAt: now.Add(time.Minute)}
+	if err := s.PutPending(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if got, err := s.Pending(ctx, "refresh", "r1", now); err != nil || string(got.Payload) != `{"a":1}` || !got.ExpiresAt.Equal(p.ExpiresAt) {
+			t.Fatalf("read %d: %+v, %v", i+1, got, err)
+		}
+	}
+	if _, err := s.Pending(ctx, "par", "r1", now); !errors.Is(err, issuance.ErrNotFound) {
+		t.Fatalf("another kind: %v, want ErrNotFound", err)
+	}
+	if _, err := s.Pending(ctx, "refresh", "r1", now.Add(time.Minute)); !errors.Is(err, issuance.ErrNotFound) {
+		t.Fatalf("expired: %v, want ErrNotFound", err)
+	}
+	if got, err := s.TakePending(ctx, "refresh", "r1", now); err != nil || string(got.Payload) != `{"a":1}` {
+		t.Fatalf("take after reading: %+v, %v", got, err)
 	}
 }

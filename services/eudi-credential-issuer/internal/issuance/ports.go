@@ -116,6 +116,10 @@ type Sessions interface {
 	// returns it, atomically: it is used once. It returns ErrNotFound for an
 	// unknown, used or expired one.
 	TakePending(ctx context.Context, kind, id string, now time.Time) (PendingAuthorization, error)
+	// Pending returns an unexpired pending authorization of kind without
+	// taking it, or ErrNotFound: for one that is used more than once, such
+	// as a refresh token.
+	Pending(ctx context.Context, kind, id string, now time.Time) (PendingAuthorization, error)
 	CreateDisclosure(ctx context.Context, d DisclosureSession) error
 	// TakeDisclosure removes an unexpired disclosure session and returns
 	// it, atomically: a session answers one response. It returns

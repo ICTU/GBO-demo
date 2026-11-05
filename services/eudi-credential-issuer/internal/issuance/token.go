@@ -2,6 +2,7 @@ package issuance
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -141,11 +142,11 @@ func (s *Service) Token(ctx context.Context, req TokenRequest) (oid4vci.TokenRes
 		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "the offer has been revoked")
 	}
 
-	return s.grant(ctx, req.Target, p, session, att, proof.JKT, now)
+	return s.grant(ctx, req.Target, p, session, att, proof.JKT, now, nil, "")
 }
 
-// refreshGrant is what the issuer keeps of a refresh token (R3): the session
-// whose claims it re-issues, the wallet it was issued to and its DPoP key.
+// refreshGrant is what the issuer keeps of a refresh token: the session whose
+// claims it re-issues, the wallet it was issued to and its DPoP key.
 type refreshGrant struct {
 	SessionID string `json:"session_id"`
 	Provider  string `json:"provider"`
@@ -158,8 +159,9 @@ const pendingRefresh = "refresh"
 
 // grant issues an access token for session, and on the eudi profile a
 // refresh token; the session's claims are then kept until the refresh token
-// expires.
-func (s *Service) grant(ctx context.Context, t Target, p Profile, session Session, att clientattest.Verified, jkt string, now time.Time) (oid4vci.TokenResponse, error) {
+// expires. A refresh passes its refresh token and its expiry: it is not
+// rotated (FAPI 2.0 section 5.3.2.1).
+func (s *Service) grant(ctx context.Context, t Target, p Profile, session Session, att clientattest.Verified, jkt string, now time.Time, refreshing *PendingAuthorization, refreshToken string) (oid4vci.TokenResponse, error) {
 	token, err := randomToken()
 	if err != nil {
 		return oid4vci.TokenResponse{}, err
@@ -179,6 +181,10 @@ func (s *Service) grant(ctx context.Context, t Target, p Profile, session Sessio
 	if p.Kind != KindEUDI {
 		return resp, nil
 	}
+	if refreshing != nil {
+		resp.RefreshToken = refreshToken
+		return resp, s.sessions.ExtendSession(ctx, session.ID, refreshing.ExpiresAt)
+	}
 	if resp.RefreshToken, err = randomToken(); err != nil {
 		return oid4vci.TokenResponse{}, err
 	}
@@ -194,7 +200,7 @@ func (s *Service) grant(ctx context.Context, t Target, p Profile, session Sessio
 	return resp, nil
 }
 
-// refresh redeems a refresh token: once (rotation), by the wallet and DPoP
+// refresh redeems a refresh token: until it expires, by the wallet and DPoP
 // key it was issued to, for an offer not revoked. The new session holds the
 // claims of the first issuance under new credential identifiers (R2): the
 // source is not asked again.
@@ -203,15 +209,20 @@ func (s *Service) refresh(ctx context.Context, req TokenRequest, att clientattes
 	if err != nil {
 		return oid4vci.TokenResponse{}, err
 	}
+	rec, err := s.sessions.Pending(ctx, pendingRefresh, hash(req.RefreshToken), now)
+	if errors.Is(err, ErrNotFound) {
+		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "the refresh token is unknown or expired")
+	}
+	if err != nil {
+		return oid4vci.TokenResponse{}, err
+	}
 	var g refreshGrant
-	if err := s.takePending(ctx, pendingRefresh, req.RefreshToken, now, &g); errors.Is(err, ErrInvalidAuthorization) {
-		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "the refresh token is unknown, used or expired")
-	} else if err != nil {
+	if err := json.Unmarshal(rec.Payload, &g); err != nil {
 		return oid4vci.TokenResponse{}, err
 	}
 	switch {
 	case g.Provider != req.Target.Provider || g.Profile != p.Name:
-		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "the refresh token is unknown, used or expired")
+		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "the refresh token is unknown or expired")
 	case g.ClientID != att.ClientID:
 		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "the refresh token was issued to another wallet")
 	case g.JKT != jkt:
@@ -219,7 +230,7 @@ func (s *Service) refresh(ctx context.Context, req TokenRequest, att clientattes
 	}
 	old, err := s.sessions.Session(ctx, g.SessionID)
 	if errors.Is(err, ErrNotFound) {
-		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "the refresh token is unknown, used or expired")
+		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "the refresh token is unknown or expired")
 	}
 	if err != nil {
 		return oid4vci.TokenResponse{}, err
@@ -236,7 +247,7 @@ func (s *Service) refresh(ctx context.Context, req TokenRequest, att clientattes
 	}
 	// A session of its own: the credentials of the first issuance stay
 	// issued, these are new. Its code is random and handed to nobody.
-	next := Session{Provider: old.Provider, Profile: old.Profile, Reference: old.Reference, ExpiresAt: now.Add(s.cfg.RefreshTTL)}
+	next := Session{Provider: old.Provider, Profile: old.Profile, Reference: old.Reference, ExpiresAt: rec.ExpiresAt}
 	var code string
 	if next.ID, err = randomToken(); err != nil {
 		return oid4vci.TokenResponse{}, err
@@ -254,7 +265,7 @@ func (s *Service) refresh(ctx context.Context, req TokenRequest, att clientattes
 	if err := s.sessions.CreateSession(ctx, next); err != nil {
 		return oid4vci.TokenResponse{}, err
 	}
-	return s.grant(ctx, req.Target, p, next, att, jkt, now)
+	return s.grant(ctx, req.Target, p, next, att, jkt, now, &rec, req.RefreshToken)
 }
 
 // authenticateWallet checks the Wallet Instance Attestation and its PoP,

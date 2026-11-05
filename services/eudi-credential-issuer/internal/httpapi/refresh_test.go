@@ -3,7 +3,9 @@ package httpapi_test
 // Re-issuance with a refresh token (RFC 6749 section 6, OpenID4VCI 1.0
 // section 6; HAIP 1.0 section 4.4 recommends it), #614 phase 4, F8. The
 // re-issued credential has the claims of the first issuance (R2): the issuer
-// keeps no BSN and does not ask the source again. Cases F-1 to F-7.
+// keeps no BSN and does not ask the source again. The refresh token is not
+// rotated (FAPI 2.0 section 5.3.2.1): it works until it expires. Cases F-1
+// to F-7, R-1 to R-3.
 
 import (
 	"bytes"
@@ -73,9 +75,8 @@ func TestRefreshTokens(t *testing.T) { // F-1, F-2
 	calls := f.sourceCallCount()
 
 	status, body = w.refresh(rt, nil)
-	next, _ := body["refresh_token"].(string)
-	if status != http.StatusOK || body["access_token"] == nil || next == "" || next == rt {
-		t.Fatalf("F-2: refresh = %d %v, want a new access and refresh token", status, body)
+	if status != http.StatusOK || body["access_token"] == nil || body["refresh_token"] != rt {
+		t.Fatalf("R-1: refresh = %d %v, want a new access token and the same refresh token", status, body)
 	}
 	var again oid4vci.TokenResponse
 	remarshal(t, body, &again)
@@ -86,11 +87,15 @@ func TestRefreshTokens(t *testing.T) { // F-1, F-2
 	if f.sourceCallCount() != calls {
 		t.Error("F-2: the source was asked again; a re-issuance keeps the claims")
 	}
-	if status, body := w.refresh(rt, nil); status != http.StatusBadRequest || body["error"] != "invalid_grant" {
-		t.Errorf("F-4: the used refresh token = %d %v, want invalid_grant", status, body)
+	// R-2: the refresh token works again, with new credential identifiers.
+	status, body = w.refresh(rt, nil)
+	var third oid4vci.TokenResponse
+	remarshal(t, body, &third)
+	if status != http.StatusOK || third.AuthorizationDetails[0].CredentialIdentifiers[0] == again.AuthorizationDetails[0].CredentialIdentifiers[0] {
+		t.Fatalf("R-2: second refresh = %d %v, want new credential identifiers", status, body)
 	}
-	if status, _ := w.refresh(next, nil); status != http.StatusOK {
-		t.Errorf("the rotated refresh token works: %d", status)
+	if status, cred := w.issueWith(t, third); status != http.StatusOK || cred["credentials"] == nil {
+		t.Errorf("R-2: credential after the second refresh = %d %v", status, cred)
 	}
 }
 

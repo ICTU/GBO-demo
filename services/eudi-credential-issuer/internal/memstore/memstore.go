@@ -293,6 +293,16 @@ func (s *Store) TakePending(_ context.Context, kind, id string, now time.Time) (
 	return p, nil
 }
 
+func (s *Store) Pending(_ context.Context, kind, id string, now time.Time) (issuance.PendingAuthorization, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p, ok := s.pending[kind+" "+id]
+	if !ok || !now.Before(p.ExpiresAt) {
+		return issuance.PendingAuthorization{}, issuance.ErrNotFound
+	}
+	return p, nil
+}
+
 func (s *Store) Session(_ context.Context, id string) (issuance.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
