@@ -1180,10 +1180,10 @@ services:
     ports:
       - "${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}:4021"
     environment:
-      - AZSP_ISSUER=${ASI_AUTHORIZATION_SERVER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}}
+      - AZSP_ISSUER=${ASI_AUTHORIZATION_SERVER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}}
       # Per data service of the ASIP its base URL and the name the user sees
       # when approving, as url=name, separated by commas.
-      - AZSP_RESOURCES=${ASI_PROVIDER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_PROVIDER:-9424}}/brp/authsrc-api=Basisregistratie Personen (mock)
+      - AZSP_RESOURCES=${ASI_PROVIDER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_PROVIDER:-9424}}/brp/authsrc-api=Basisregistratie Personen (mock)
       # The own credential issuer logs citizens in here (authorization code
       # flow, #614): per source its eudi issuer identifier, the
       # organizationIdentifier of its access certificate (fictional KvK
@@ -1294,8 +1294,8 @@ services:
     ports:
       - "${GBO_PORT_ASI_PROVIDER:-9424}:4020"
     environment:
-      - ASIP_PUBLIC_URL=${ASI_PROVIDER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_PROVIDER:-9424}}
-      - ASIP_AUTHORIZATION_SERVER=${ASI_AUTHORIZATION_SERVER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}}
+      - ASIP_PUBLIC_URL=${ASI_PROVIDER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_PROVIDER:-9424}}
+      - ASIP_AUTHORIZATION_SERVER=${ASI_AUTHORIZATION_SERVER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}}
       - ASIP_AUTHORIZATION_SERVER_INTERNAL_URL=http://asi-authorization-server:4021
       # The ASIP's own Outway; the grant-link per data service is in
       # config/dataservices.json (/brp is the one make fsc-seed-asip sets).
@@ -1349,17 +1349,17 @@ services:
   # DIP stub and registers with its authorization server at start. Records and
   # contracts name public URLs; QTSP_URL_MAP maps them to the containers for
   # transport only. The authorization server allows an http redirect URI on
-  # loopback only, so the web side works from this machine (localhost).
-  # With another GBO_PUBLIC_HOST on plain http, set QTSP_PUBLIC_URL to localhost.
+  # loopback only: with another GBO_PUBLIC_HOST, use GBO_PUBLIC_SCHEME=https
+  # or set QTSP_PUBLIC_URL to localhost.
   qtsp-reference:
     build: ./services/qtsp-reference
     profiles: [asi]
     ports:
       - "${GBO_PORT_QTSP:-9427}:4023"
     environment:
-      - QTSP_PUBLIC_URL=${QTSP_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_QTSP:-9427}}
+      - QTSP_PUBLIC_URL=${QTSP_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_QTSP:-9427}}
       - QTSP_DIP_URL=http://asi-discovery-stub:4022
-      - QTSP_URL_MAP=${ASI_PROVIDER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_PROVIDER:-9424}}=http://asi-provider:4020,${ASI_AUTHORIZATION_SERVER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}}=http://asi-authorization-server:4021
+      - QTSP_URL_MAP=${ASI_PROVIDER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_PROVIDER:-9424}}=http://asi-provider:4020,${ASI_AUTHORIZATION_SERVER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}}=http://asi-authorization-server:4021
       - QTSP_KEY_FILE=/qtsp/qtsp-key.pem
       - QTSP_CERT_FILE=/qtsp/qtsp-cert.pem
       - QTSP_SEAL_TRUST_ANCHORS=/anchors/issuer-ca-cert.pem
@@ -1431,10 +1431,10 @@ services:
       # GBO_PUBLIC_HOST op het LAN-adres zodra je vanaf een andere machine
       # demonstreert, anders wijst de landingspagina naar de localhost van
       # de bezoeker.
-      - VITE_DIENSTVERLENER_URL=${DIENSTVERLENER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_DV_MOCK:-9001}}
-      - VITE_INSTALLATIE_REGISTER_URL=${KEYPER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_KEYPER_MOCK:-9004}}
-      - VITE_TOESTEMMINGSPORTAAL_URL=${TOESTEMMINGSPORTAAL_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_TOESTEMMINGSPORTAAL:-9002}}
-      - VITE_DEVELOPER_PORTAL_URL=${DEVELOPER_PORTAL_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_DEVELOPER_PORTAL:-9003}}
+      - VITE_DIENSTVERLENER_URL=${DIENSTVERLENER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_DV_MOCK:-9001}}
+      - VITE_INSTALLATIE_REGISTER_URL=${KEYPER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_KEYPER_MOCK:-9004}}
+      - VITE_TOESTEMMINGSPORTAAL_URL=${TOESTEMMINGSPORTAAL_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_TOESTEMMINGSPORTAAL:-9002}}
+      - VITE_DEVELOPER_PORTAL_URL=${DEVELOPER_PORTAL_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_DEVELOPER_PORTAL:-9003}}
       # De wallet-QR wordt client-side samengesteld, net als in de
       # dev-portal. Zonder EUDI_PUBLIC_URL (de wallet op een telefoon moet
       # de issuance-server publiek kunnen bereiken) valt de QR weg en legt
@@ -1442,15 +1442,15 @@ services:
       - VITE_EUDI_PUBLIC_URL=${EUDI_PUBLIC_URL:-}
       - VITE_EUDI_UL_BASE=${EUDI_UL_BASE:-https://app.preproductie.wallet.edi.bzk.nl/deeplink/disclosure_based_issuance}
       - EUDI_API_TARGET=http://eudi-adapter:4009
-      - VITE_JAEGER_PUBLIC_URL=${JAEGER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_JAEGER:-9686}}
-      - VITE_GRAFANA_PUBLIC_URL=${GRAFANA_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_GRAFANA:-9300}}
+      - VITE_JAEGER_PUBLIC_URL=${JAEGER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_JAEGER:-9686}}
+      - VITE_GRAFANA_PUBLIC_URL=${GRAFANA_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_GRAFANA:-9300}}
       # De FSC-controllers draaien in de fsc-infra-stack, met eigen
       # FSC_PORT_*-poorten; die volgen we hier, met dezelfde defaults als
       # fsc-infra/docker-compose.yml. De bronhouder is de BD-peer, niet de
       # directory-peer.
-      - VITE_FSC_CONTROLLER_BRON_URL=${FSC_CONTROLLER_BRON_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${FSC_PORT_BD_CONTROLLER:-8095}}
-      - VITE_FSC_CONTROLLER_DVTP_URL=${FSC_CONTROLLER_DVTP_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${FSC_PORT_HV_CONTROLLER:-8096}}
-      - VITE_FSC_CONTROLLER_EUDI_URL=${FSC_CONTROLLER_EUDI_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${FSC_PORT_EDI_CONTROLLER:-8094}}
+      - VITE_FSC_CONTROLLER_BRON_URL=${FSC_CONTROLLER_BRON_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${FSC_PORT_BD_CONTROLLER:-8095}}
+      - VITE_FSC_CONTROLLER_DVTP_URL=${FSC_CONTROLLER_DVTP_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${FSC_PORT_HV_CONTROLLER:-8096}}
+      - VITE_FSC_CONTROLLER_EUDI_URL=${FSC_CONTROLLER_EUDI_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${FSC_PORT_EDI_CONTROLLER:-8094}}
       - VITE_VERSION_STRING=${VERSION_STRING:-}
     volumes:
       - ./landing-page/src:/app/src
@@ -1510,7 +1510,7 @@ services:
       - IR_API_TARGET=http://ir-backend:4010
       - VITE_CONSUMER_PEER_ID=${IR_PEER_ID:-99999999900000001000}
       # Not one port up from this app, unlike the dienstverlener-mock.
-      - VITE_CONSENT_PORTAL_URL=${TOESTEMMINGSPORTAAL_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_TOESTEMMINGSPORTAAL:-9002}}
+      - VITE_CONSENT_PORTAL_URL=${TOESTEMMINGSPORTAAL_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_TOESTEMMINGSPORTAAL:-9002}}
     volumes:
       - ./keyper-mock/src:/app/src
       - ./keyper-mock/public:/app/public
@@ -1538,7 +1538,7 @@ services:
       - PORTAL_API_TARGET=http://consent-portal-backend:4005
       # The bearer consent token may only return to explicitly trusted
       # consumer origins. Multiple origins can be supplied comma-separated.
-      - VITE_ALLOWED_RETURN_ORIGINS=${DIENSTVERLENER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_DV_MOCK:-9001}},${KEYPER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_KEYPER_MOCK:-9004}}
+      - VITE_ALLOWED_RETURN_ORIGINS=${DIENSTVERLENER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_DV_MOCK:-9001}},${KEYPER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_KEYPER_MOCK:-9004}}
     volumes:
       - ./toestemmingsportaal-frontend/src:/app/src
       - ./toestemmingsportaal-frontend/public:/app/public
@@ -1679,8 +1679,8 @@ services:
       # The own credential issuer (profile credential-issuer): the EU-wallet
       # links of its disclosure offers. Without it the wallet choice is hidden.
       - VITE_OWN_ISSUER_PUBLIC_URL=${ISSUER_PUBLIC_URL:-}
-      - VITE_JAEGER_PUBLIC_URL=${JAEGER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_JAEGER:-9686}}
-      - VITE_GRAFANA_PUBLIC_URL=${GRAFANA_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_GRAFANA:-9300}}
+      - VITE_JAEGER_PUBLIC_URL=${JAEGER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_JAEGER:-9686}}
+      - VITE_GRAFANA_PUBLIC_URL=${GRAFANA_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_GRAFANA:-9300}}
       - EUDI_API_TARGET=http://eudi-adapter:4009
       # The EUDI QR is built client-side; these env vars drive the universal-link.
       # VITE_* is public — ends up in the built bundle (no secrets here).
@@ -1965,8 +1965,8 @@ services:
       # at the ASI authorization server (profile asi), which the browser
       # reaches at its public address and this container on the eudi
       # network. Empty ISSUER_LOGIN_SERVER turns the flow off.
-      ISSUER_LOGIN_SERVER: ${ISSUER_LOGIN_SERVER-${ASI_AUTHORIZATION_SERVER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}}}
-      ISSUER_LOGIN_URL_MAP: ${ASI_AUTHORIZATION_SERVER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}}=http://asi-authorization-server:4021
+      ISSUER_LOGIN_SERVER: ${ISSUER_LOGIN_SERVER-${ASI_AUTHORIZATION_SERVER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}}}
+      ISSUER_LOGIN_URL_MAP: ${ASI_AUTHORIZATION_SERVER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}}=http://asi-authorization-server:4021
     volumes:
       - credential-issuer-runtime:/config:ro
       - ./services/brp-graphql-server/mockdata:/test-pid-persons:ro

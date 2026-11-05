@@ -91,9 +91,10 @@ PORT_EUDI_ADAPTER := $(or $(GBO_PORT_EUDI_ADAPTER),9409)
 PORT_DVTP_ONBOARDING_REGISTER := $(or $(GBO_PORT_DVTP_ONBOARDING_REGISTER),9415)
 
 PUBLIC_HOST := $(or $(GBO_PUBLIC_HOST),localhost)
+PUBLIC_SCHEME := $(or $(GBO_PUBLIC_SCHEME),http)
 
 # banner <label> <port> [scheme] — one "  Label:  <scheme>://<host>:<port>" line.
-banner = @printf "  %-21s %s://%s:%s\n" "$(1)" "$(or $(3),http)" "$(PUBLIC_HOST)" "$(2)"
+banner = @printf "  %-21s %s://%s:%s\n" "$(1)" "$(or $(3),$(PUBLIC_SCHEME))" "$(PUBLIC_HOST)" "$(2)"
 
 # The OpenFTV PDP writes its Authorization Decision Log to postgres-ftv and
 # refuses to start without it, so every profile needs this password — not
@@ -335,8 +336,8 @@ provision-asi-wallet-verifier: require-development-cas
 		--pid-issuer-anchors "$(ASI_WALLET_VERIFIER_DIR)/pid-issuer-anchors.txt" \
 		--public-url "$(ASI_WALLET_VERIFIER_PUBLIC_URL)" \
 		--universal-link-base "$(ASI_WALLET_UL_BASE)" \
-		--request-origin "$(or $(ASI_AUTHORIZATION_SERVER_PUBLIC_URL),http://$(or $(GBO_PUBLIC_HOST),localhost):$(PORT_ASI_AUTHORIZATION_SERVER))" \
-		--qtsp-request-origin "$(or $(QTSP_PUBLIC_URL),http://$(PUBLIC_HOST):$(PORT_QTSP))" \
+		--request-origin "$(or $(ASI_AUTHORIZATION_SERVER_PUBLIC_URL),$(PUBLIC_SCHEME)://$(PUBLIC_HOST):$(PORT_ASI_AUTHORIZATION_SERVER))" \
+		--qtsp-request-origin "$(or $(QTSP_PUBLIC_URL),$(PUBLIC_SCHEME)://$(PUBLIC_HOST):$(PORT_QTSP))" \
 		--out-dir "$(ASI_WALLET_VERIFIER_DIR)" \
 		--api-key-file "$(ASI_WALLET_VERIFIER_CLIENT_DIR)/api-key"
 	@touch "$(ASI_WALLET_VERIFIER_DIR)/.provisioned"
@@ -365,7 +366,7 @@ provision-asi-eudi-wallet-verifier: require-development-cas
 		--secrets-dir "$(ONBOARDING_SECRETS_DIR)" --publish-dir "$(EUDI_TRUST_PUBLISH_DIR)" \
 		--pid-trust-list-url "$(GBO_PID_TRUST_LIST_URL)" --lote-signer-root "$(GBO_LOTE_SIGNER_ROOT_FILE)" \
 		--public-url "$(ASI_EUDI_WALLET_VERIFIER_PUBLIC_URL)" \
-		--authorization-server-url "$(or $(ASI_AUTHORIZATION_SERVER_PUBLIC_URL),http://$(or $(GBO_PUBLIC_HOST),localhost):$(PORT_ASI_AUTHORIZATION_SERVER))"
+		--authorization-server-url "$(or $(ASI_AUTHORIZATION_SERVER_PUBLIC_URL),$(PUBLIC_SCHEME)://$(PUBLIC_HOST):$(PORT_ASI_AUTHORIZATION_SERVER))"
 	@touch "$(ASI_EUDI_WALLET_VERIFIER_DIR)/.provisioned"
 
 # Test QTSP certificate for the ASIP authorization server
@@ -531,7 +532,7 @@ demo-asi: fsc-asip-certs
 	@if [ -f "$$NLWALLET_PATH/wallet_core/Cargo.toml" ]; then $(MAKE) asi-wallet-verifier-image; \
 	else echo "-> no nl-wallet sources at $$NLWALLET_PATH: the ASI wallet verifier is not started (DigiD (mock) only)"; fi
 	@desired_return_mode=neither; \
-	case "$(or $(ASI_AUTHORIZATION_SERVER_PUBLIC_URL),http://$(or $(GBO_PUBLIC_HOST),localhost):$(PORT_ASI_AUTHORIZATION_SERVER))" in https://*) desired_return_mode=same_device ;; esac; \
+	case "$(or $(ASI_AUTHORIZATION_SERVER_PUBLIC_URL),$(PUBLIC_SCHEME)://$(PUBLIC_HOST):$(PORT_ASI_AUTHORIZATION_SERVER))" in https://*) desired_return_mode=same_device ;; esac; \
 	current_return_mode=$$(awk '/^\[usecases\.asi-login\]$$/ { in_login=1; next } /^\[/ { in_login=0 } in_login && /^session_type_return_url = / { gsub(/"/, "", $$3); print $$3; exit }' "$(ASI_WALLET_VERIFIER_DIR)/verification_server.toml" 2>/dev/null); \
 	if [ -f "$$NLWALLET_PATH/wallet_core/Cargo.toml" ] && { [ ! -f "$(ASI_WALLET_VERIFIER_CLIENT_DIR)/api-key" ] || ! grep -q '^\[usecases.qtsp-login\]' "$(ASI_WALLET_VERIFIER_DIR)/verification_server.toml" 2>/dev/null || [ "$$current_return_mode" != "$$desired_return_mode" ]; }; then \
 	  $(MAKE) provision-asi-wallet-verifier; fi
