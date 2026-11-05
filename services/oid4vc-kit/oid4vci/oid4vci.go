@@ -23,11 +23,14 @@ const (
 	ErrUseFreshAttestation      = "use_fresh_attestation"
 	ErrUseAttestationChallenge  = "use_attestation_challenge"
 	ErrInvalidToken             = "invalid_token"
-	ErrInvalidCredentialRequest = "invalid_credential_request"
-	ErrUnknownCredentialID      = "unknown_credential_identifier"
-	ErrInvalidProof             = "invalid_proof"
-	ErrInvalidNonce             = "invalid_nonce"
-	ErrCredentialRequestDenied  = "credential_request_denied"
+	// Notification errors (section 11.3).
+	ErrInvalidNotificationID      = "invalid_notification_id"
+	ErrInvalidNotificationRequest = "invalid_notification_request"
+	ErrInvalidCredentialRequest   = "invalid_credential_request"
+	ErrUnknownCredentialID        = "unknown_credential_identifier"
+	ErrInvalidProof               = "invalid_proof"
+	ErrInvalidNonce               = "invalid_nonce"
+	ErrCredentialRequestDenied    = "credential_request_denied"
 	// ErrInvalidEncryptionParameters: encryption parameters that are
 	// invalid, or missing where encryption is required.
 	ErrInvalidEncryptionParameters = "invalid_encryption_parameters"
@@ -98,8 +101,29 @@ type IssuedCredential struct {
 
 // CredentialResponse is an immediate credential response (section 8.3).
 type CredentialResponse struct {
-	Credentials []IssuedCredential `json:"credentials"`
+	Credentials []IssuedCredential `json:"credentials,omitempty"`
+	// NotificationID identifies the issuance in a later notification
+	// (section 8.3).
+	NotificationID string `json:"notification_id,omitempty"`
+	// TransactionID and Interval answer a deferred issuance (section
+	// 8.3): the credential follows at the deferred credential endpoint.
+	TransactionID string `json:"transaction_id,omitempty"`
+	Interval      int64  `json:"interval,omitempty"`
 }
+
+// Notification is a notification request (section 11.1).
+type Notification struct {
+	NotificationID   string `json:"notification_id"`
+	Event            string `json:"event"`
+	EventDescription string `json:"event_description,omitempty"`
+}
+
+// The notification events (section 11.1).
+const (
+	EventCredentialAccepted = "credential_accepted"
+	EventCredentialFailure  = "credential_failure"
+	EventCredentialDeleted  = "credential_deleted"
+)
 
 // ErrorResponse is the error body of the token and credential endpoints.
 type ErrorResponse struct {

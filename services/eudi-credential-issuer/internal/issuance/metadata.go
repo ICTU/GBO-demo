@@ -67,6 +67,9 @@ func (s *Service) issuerMetadata(t Target, prov *provider, p Profile) map[string
 	if s.cfg.BatchSize >= 2 {
 		md["batch_credential_issuance"] = map[string]any{"batch_size": s.cfg.BatchSize}
 	}
+	if p.Kind == KindEUDI {
+		md["notification_endpoint"] = id + "/notification"
+	}
 	if p.servesNL() {
 		// Not part of OpenID4VCI: the NL Wallet requires a preview of the
 		// credentials before it asks for them.

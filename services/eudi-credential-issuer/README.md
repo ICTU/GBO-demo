@@ -31,7 +31,8 @@ A Wallet Instance Attestation is accepted only from the wallet providers configu
 | Token Status List, JWT (draft-ietf-oauth-status-list) | implemented; random indices (ARF VCR_17); revocation through the internal API, per entry or per offer reference |
 | NL credential preview endpoint | implemented for `nl`; not part of OpenID4VCI; once per access token |
 | Authorization Code Flow with required PAR (OpenID4VCI 1.0 section 5, RFC 9126; HAIP section 4 via FAPI 2.0), PKCE S256, `iss` in the authorization response (RFC 9207), DPoP binding of the code (RFC 9449 section 10) | implemented on the `eudi` profile when `ISSUER_LOGIN_SERVER` is set: issuer-initiated with `issuer_state`, and wallet-initiated with `scope` or `authorization_details` for a configuration with one source offer. The citizen logs in at GBO's authorization server; see [Authorization code flow](#authorization-code-flow). Without it `response_types_supported` is empty |
-| Deferred issuance, notification endpoint, re-issuance with refresh tokens, `tx_code` | not yet |
+| Notification endpoint (section 11) | implemented on `eudi`: every credential response carries a `notification_id`, good for one notification; the issuer logs the event and acts on none |
+| Deferred issuance, re-issuance with refresh tokens, `tx_code` | not yet |
 | ISO mdoc | not yet |
 | `credential_reuse_policy` (ETSI TS 119 472-3; ARF ISSU_39) | not yet |
 | Wallet provider and key attestation revocation (`client_status`, `status` in the key attestation) | not checked |
@@ -64,6 +65,7 @@ Public port (`ISSUER_LISTEN_ADDR`, default `:8080`), per provider `v` and profil
 | `POST /{v}/{p}/token` | pre-authorized code grant; headers `OAuth-Client-Attestation`, `OAuth-Client-Attestation-PoP`, `DPoP` |
 | `POST /{v}/{p}/nonce` | `{"c_nonce"}` |
 | `POST /{v}/{p}/credential` | `Authorization: DPoP <token>`, `DPoP`; body with `credential_identifier` and `proofs`, as JSON or, on `eudi`, as a JWE (`application/jwt`); the response is a JWE when the request carries `credential_response_encryption` |
+| `POST /{v}/eudi/notification` | `Authorization: DPoP <token>`, `DPoP`; body `{notification_id, event, event_description?}` → 204; `invalid_notification_id` for an unknown, used or other session's id, `invalid_notification_request` for a missing id or unknown event |
 | `POST /{v}/nl/credential_preview` | `Authorization: Bearer <token>`, no DPoP (as the NL Wallet calls it) |
 | `GET /status/{v}/{list}` | the provider's Status List Token (`application/statuslist+jwt`), signed with its status certificate |
 | `GET /{v}/{p}/vp/{offer}/request` | disclosure-based issuance: the `request_uri` of a disclosure offer. Each fetch starts a disclosure session (`disclosure_ttl`, default 5 minutes) and returns its OpenID4VP request object (`application/oauth-authz-req+jwt`), signed with the provider's access certificate, asking for the `bsn` of the PID |

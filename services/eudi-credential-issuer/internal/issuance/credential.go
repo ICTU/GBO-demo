@@ -126,6 +126,14 @@ func (s *Service) Credential(ctx context.Context, call CredentialCall) (Credenti
 		return CredentialResult{}, refuse(oid4vci.ErrInvalidCredentialRequest, "this credential has been issued already or is being issued")
 	}
 	resp, err := s.issue(ctx, prov, c, doc, session.Reference, keys, now)
+	// The eudi profile tells the wallet where to notify (section 11); the
+	// id is good for one notification about this session.
+	if err == nil && p.Kind == KindEUDI {
+		resp.NotificationID, err = randomToken()
+		if err == nil {
+			err = s.onetime.Put(ctx, scoped(kindNotification, session.ID), resp.NotificationID, now.Add(s.cfg.TokenTTL))
+		}
+	}
 	out := CredentialResult{Response: resp}
 	// The wallet's key was checked before issuing, so encrypting fails only
 	// on an internal error; like a failed issue, that leaves the allocated

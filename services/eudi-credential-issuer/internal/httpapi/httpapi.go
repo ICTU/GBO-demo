@@ -37,6 +37,7 @@ func Public(svc *issuance.Service, log *slog.Logger) http.Handler {
 	mux.HandleFunc("POST /{provider}/{profile}/nonce", h.nonce)
 	mux.HandleFunc("POST /{provider}/{profile}/credential", h.credential)
 	mux.HandleFunc("POST /{provider}/{profile}/credential_preview", h.preview)
+	mux.HandleFunc("POST /{provider}/{profile}/notification", h.notification)
 	mux.HandleFunc("GET /status/{provider}/{list}", h.statusList)
 	// Disclosure-based issuance: the wallet fetches the OpenID4VP request
 	// of an offer by reference and posts its response (direct_post.jwt).
@@ -189,6 +190,23 @@ func (h *handler) credential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, res.Response)
+}
+
+// notification takes the wallet's notification (section 11); the issuer
+// logs the event and the id, nothing about the person.
+func (h *handler) notification(w http.ResponseWriter, r *http.Request) {
+	call := issuance.NotificationCall{Target: target(r), Authorization: r.Header.Get("Authorization"), DPoP: r.Header.Values("DPoP")}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody)).Decode(&call.Notification); err != nil {
+		h.fail(w, &issuance.Error{Code: oid4vci.ErrInvalidNotificationRequest, Description: "the body must be a JSON notification"})
+		return
+	}
+	if err := h.svc.Notify(r.Context(), call); err != nil {
+		h.failResource(w, err, "DPoP")
+		return
+	}
+	h.log.Info("notification", "event", call.Notification.Event, "notification_id", call.Notification.NotificationID,
+		"event_description", description(call.Notification.EventDescription))
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *handler) preview(w http.ResponseWriter, r *http.Request) {

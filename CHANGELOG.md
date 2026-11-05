@@ -105,6 +105,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   issuer whose offer caller named the subject. It logs that as a separate
   Dataverwerking, `gbo-bsn-ontvangst-aanvrager`, added to the register of
   `logboek-eudi-adapter`, before it asks the source.
+- **Notifications at the own credential issuer** (#614): on the `eudi`
+  profile each credential response carries a `notification_id`, and
+  `POST /{provider}/eudi/notification` takes the wallet's
+  `credential_accepted`, `credential_failure` or `credential_deleted`
+  (OpenID4VCI 1.0 section 11). The issuer logs the event; it revokes nothing.
 - **One credential configuration per source offer** (#614): the own
   credential issuer's configuration now has a credential configuration per
   offer of an activated type, `<source>-<offer>` with that scope and the

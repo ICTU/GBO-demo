@@ -158,6 +158,8 @@ const (
 	kindDPoP      = "dpop_jti"
 	kindPoP       = "attestation_pop_jti"
 	kindPreview   = "preview"
+	// kindNotification holds the notification ids handed out per session.
+	kindNotification = "notification"
 )
 
 // scoped binds a single-use kind to one issuer identifier, so that a
