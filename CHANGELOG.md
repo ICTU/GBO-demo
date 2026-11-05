@@ -12,6 +12,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   `GBO_PUBLIC_HOST` (`QTSP_PUBLIC_URL` overrides it), and
   `GBO_INTERNAL_BIND_ADDRESS` (default `127.0.0.1`) binds the ports without a
   login.
+- **The demo runs behind an https reverse proxy**: `GBO_PUBLIC_SCHEME`
+  (default `http`) sets the scheme of the browser-facing URLs, including
+  the OpenFTV Manager UI's API and OIDC authority, which now follow
+  `GBO_PUBLIC_HOST` too. `GBO_PUBLIC_BIND_ADDRESS` (default every interface)
+  binds the other published ports, so a proxy can serve them on the same
+  port numbers.
 - **Own credential issuer, first phase** (#614): `services/eudi-credential-issuer`
   issues SD-JWT VCs with the Pre-Authorized Code Flow of OpenID4VCI 1.0 and
   HAIP 1.0, for two wallet profiles: the NL Wallet (v0.6.0 contract, with its

@@ -90,6 +90,24 @@ Then follow the [DvTP consent walkthrough](#dvtp-consent).
 To open the demo from another machine, set `GBO_PUBLIC_HOST` in `.env` to
 the IP address or DNS name that browser uses and run `make demo` again.
 
+### HTTPS behind a reverse proxy
+
+Off localhost, some pages need https: the OpenFTV Manager login and the
+reference QTSP. Put a TLS-terminating reverse proxy (for example
+`tailscale serve` or Caddy) in front of each port the browser opens, on the
+same port number, forwarding to `http://127.0.0.1:<port>`. It must pass
+WebSocket upgrades and `X-Forwarded-*` headers. Then set in `.env` and run
+`make demo` again:
+
+```dotenv
+GBO_PUBLIC_HOST=demo.example.org
+GBO_PUBLIC_SCHEME=https
+GBO_PUBLIC_BIND_ADDRESS=127.0.0.1
+```
+
+`GBO_PUBLIC_BIND_ADDRESS` keeps the plain http ports on the loopback
+interface, so only the proxy reaches them.
+
 ### The complete demo, with EUDI
 
 `make demo-full` adds the EUDI wallet flow to DvTP. It additionally needs the
