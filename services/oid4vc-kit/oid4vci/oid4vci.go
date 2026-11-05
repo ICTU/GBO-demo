@@ -7,6 +7,9 @@ package oid4vci
 // (section 4.1.1).
 const GrantPreAuthorizedCode = "urn:ietf:params:oauth:grant-type:pre-authorized_code"
 
+// GrantRefreshToken is the refresh token grant (RFC 6749 section 6).
+const GrantRefreshToken = "refresh_token"
+
 // AuthorizationDetailsType is the authorization_details type of OpenID4VCI
 // (section 5.1.1).
 const AuthorizationDetailsType = "openid_credential"
@@ -72,6 +75,8 @@ type TokenResponse struct {
 	TokenType            string                `json:"token_type"`
 	ExpiresIn            int64                 `json:"expires_in"`
 	AuthorizationDetails []AuthorizationDetail `json:"authorization_details,omitempty"`
+	// RefreshToken re-issues the credentials later (RFC 6749 section 6).
+	RefreshToken string `json:"refresh_token,omitempty"`
 }
 
 // NonceResponse is the nonce endpoint response (section 7.2).

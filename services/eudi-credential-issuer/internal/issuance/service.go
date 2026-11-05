@@ -128,6 +128,9 @@ func setDefaults(cfg *Config) {
 	if cfg.DisclosureTTL == 0 {
 		cfg.DisclosureTTL = DefaultDisclosureTTL
 	}
+	if cfg.RefreshTTL == 0 {
+		cfg.RefreshTTL = DefaultRefreshTTL
+	}
 }
 
 // Identifier is the credential issuer identifier of a target; it is also

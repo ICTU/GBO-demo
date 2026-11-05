@@ -290,3 +290,27 @@ func (s *Store) TakePending(_ context.Context, kind, id string, now time.Time) (
 	}
 	return p, nil
 }
+
+func (s *Store) Session(_ context.Context, id string) (issuance.Session, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.sessions[id]
+	if !ok {
+		return issuance.Session{}, issuance.ErrNotFound
+	}
+	return sess, nil
+}
+
+func (s *Store) ExtendSession(_ context.Context, id string, until time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.sessions[id]
+	if !ok {
+		return issuance.ErrNotFound
+	}
+	if until.After(sess.ExpiresAt) {
+		sess.ExpiresAt = until
+		s.sessions[id] = sess
+	}
+	return nil
+}

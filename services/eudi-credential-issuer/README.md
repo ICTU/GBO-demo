@@ -33,7 +33,8 @@ A Wallet Instance Attestation is accepted only from the wallet providers configu
 | Authorization Code Flow with required PAR (OpenID4VCI 1.0 section 5, RFC 9126; HAIP section 4 via FAPI 2.0), PKCE S256, `iss` in the authorization response (RFC 9207), DPoP binding of the code (RFC 9449 section 10) | implemented on the `eudi` profile when `ISSUER_LOGIN_SERVER` is set: issuer-initiated with `issuer_state`, and wallet-initiated with `scope` or `authorization_details` for a configuration with one source offer. The citizen logs in at GBO's authorization server; see [Authorization code flow](#authorization-code-flow). Without it `response_types_supported` is empty |
 | Notification endpoint (section 11) | implemented on `eudi`: every credential response carries a `notification_id`, good for one notification; the issuer logs the event and acts on none |
 | Transaction code (`tx_code`, section 4.1.1) | implemented on `eudi`: `POST /offers` with `tx_code: true` gives an offer that asks for six digits, and returns the code apart (`tx_code_value`) for the caller to deliver through another channel. Only a hash bound to the offer is kept; a missing or wrong code is `invalid_grant`, and the third failure uses the offer up. On `nl` and the combined profile `tx_code_unsupported`: the NL Wallet refuses a whole offer with a `tx_code` |
-| Deferred issuance, re-issuance with refresh tokens | not yet |
+| Re-issuance with refresh tokens (RFC 6749 section 6; HAIP section 4.4) | implemented on `eudi`: every token response carries a `refresh_token`, valid 30 days, used once (each refresh gives a new one), bound to the wallet (`client_id` of its attestation) and its DPoP key. A refresh issues the claims of the first issuance again under new credential identifiers; the source is not asked and no BSN is kept, but the claims are kept until the refresh token expires. A revoked offer reference stops it |
+| Deferred issuance | not yet |
 | ISO mdoc | not yet |
 | `credential_reuse_policy` (ETSI TS 119 472-3; ARF ISSU_39) | not yet |
 | Wallet provider and key attestation revocation (`client_status`, `status` in the key attestation) | not checked |
@@ -63,7 +64,7 @@ Public port (`ISSUER_LISTEN_ADDR`, default `:8080`), per provider `v` and profil
 | `GET /.well-known/openid-credential-issuer/{v}/{p}` | issuer metadata with the provider's own configurations: signed with its access certificate (`application/jwt`) when asked for, unsigned JSON otherwise (`Vary: Accept`) |
 | `GET /.well-known/oauth-authorization-server/{v}/{p}` | authorization server metadata |
 | `POST /{v}/{p}/challenge` | `{"attestation_challenge"}` for the attestation PoP |
-| `POST /{v}/{p}/token` | pre-authorized code grant; headers `OAuth-Client-Attestation`, `OAuth-Client-Attestation-PoP`, `DPoP` |
+| `POST /{v}/{p}/token` | pre-authorized code grant (with `tx_code` when the offer asks for one), authorization code grant on `eudi` with the login, refresh token grant on `eudi`; headers `OAuth-Client-Attestation`, `OAuth-Client-Attestation-PoP`, `DPoP` |
 | `POST /{v}/{p}/nonce` | `{"c_nonce"}` |
 | `POST /{v}/{p}/credential` | `Authorization: DPoP <token>`, `DPoP`; body with `credential_identifier` and `proofs`, as JSON or, on `eudi`, as a JWE (`application/jwt`); the response is a JWE when the request carries `credential_response_encryption` |
 | `POST /{v}/eudi/notification` | `Authorization: DPoP <token>`, `DPoP`; body `{notification_id, event, event_description?}` → 204; `invalid_notification_id` for an unknown, used or other session's id, `invalid_notification_request` for a missing id or unknown event |

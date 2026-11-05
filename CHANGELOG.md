@@ -105,6 +105,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   issuer whose offer caller named the subject. It logs that as a separate
   Dataverwerking, `gbo-bsn-ontvangst-aanvrager`, added to the register of
   `logboek-eudi-adapter`, before it asks the source.
+- **Refresh tokens at the own credential issuer** (#614): on the `eudi`
+  profile each token response carries a refresh token, valid 30 days, used
+  once, bound to the wallet and its DPoP key. A refresh re-issues the claims
+  of the first issuance; the source is not asked again and no BSN is kept,
+  but the claims are kept until the refresh token expires. A revoked offer
+  reference stops it.
 - **Transaction codes at the own credential issuer** (#614): on the `eudi`
   profile a pre-authorized offer may ask for a six-digit transaction code
   (`tx_code: true` in `POST /offers`). The issuer returns the code apart

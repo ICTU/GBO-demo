@@ -469,3 +469,35 @@ func (s *Store) TakePending(ctx context.Context, kind, id string, now time.Time)
 	}
 	return p, nil
 }
+
+func (s *Store) Session(ctx context.Context, id string) (issuance.Session, error) {
+	var sess issuance.Session
+	var docs, binding []byte
+	err := s.pool.QueryRow(ctx, `SELECT id, provider, profile, code_hash, expires_at, reference, documents, code_binding, tx_code_hash
+		FROM sessions WHERE id = $1`, id).
+		Scan(&sess.ID, &sess.Provider, &sess.Profile, &sess.CodeHash, &sess.ExpiresAt, &sess.Reference, &docs, &binding, &sess.TxCodeHash)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return issuance.Session{}, issuance.ErrNotFound
+	}
+	if err != nil {
+		return issuance.Session{}, err
+	}
+	if binding != nil {
+		sess.Binding = &issuance.CodeBinding{}
+		if err := json.Unmarshal(binding, sess.Binding); err != nil {
+			return issuance.Session{}, fmt.Errorf("decode code binding: %w", err)
+		}
+	}
+	return sess, decodeDocuments(docs, &sess)
+}
+
+func (s *Store) ExtendSession(ctx context.Context, id string, until time.Time) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE sessions SET expires_at = greatest(expires_at, $2) WHERE id = $1`, id, until)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return issuance.ErrNotFound
+	}
+	return nil
+}

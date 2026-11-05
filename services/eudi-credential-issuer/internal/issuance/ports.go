@@ -86,6 +86,10 @@ type Sessions interface {
 	// it was.
 	RedeemCode(ctx context.Context, provider, profile, codeHash, txCodeHash string, now time.Time) (Session, error)
 	SaveToken(ctx context.Context, t AccessToken) error
+	// Session returns a session by id, or ErrNotFound.
+	Session(ctx context.Context, id string) (Session, error)
+	// ExtendSession keeps a session, and its claims, at least until until.
+	ExtendSession(ctx context.Context, id string, until time.Time) error
 	// Token returns an unexpired access token and its session, or
 	// ErrNotFound.
 	Token(ctx context.Context, tokenHash string, now time.Time) (AccessToken, Session, error)

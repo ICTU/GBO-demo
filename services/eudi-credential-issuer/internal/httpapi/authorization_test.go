@@ -227,7 +227,7 @@ func TestAuthorizationCodeMetadata(t *testing.T) { // P1
 		"authorization_response_iss_parameter_supported": true,
 		"code_challenge_methods_supported":               []any{"S256"},
 		"response_types_supported":                       []any{"code"},
-		"grant_types_supported":                          []any{oid4vci.GrantPreAuthorizedCode, "authorization_code"},
+		"grant_types_supported":                          []any{oid4vci.GrantPreAuthorizedCode, "authorization_code", "refresh_token"},
 	} {
 		got, _ := json.Marshal(md[field])
 		w, _ := json.Marshal(want)

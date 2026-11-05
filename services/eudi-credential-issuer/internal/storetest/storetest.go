@@ -43,6 +43,7 @@ func Run(t *testing.T, newStore func(t *testing.T) Store) {
 		{"a pending authorization is taken once and only before it expires", takePendingOnce},
 		{"an authorization code keeps its binding", codeBinding},
 		{"a transaction code: right, wrong, used up, unexpected", txCode},
+		{"a session is read back and kept longer", sessionExtend},
 	} {
 		t.Run(c.name, func(t *testing.T) { c.test(t, newStore(t)) })
 	}
@@ -503,5 +504,30 @@ func txCode(t *testing.T, s Store) {
 	}
 	if _, err := s.RedeemCode(ctx, "tax", "eudi", "c-plain", "", now); err != nil {
 		t.Fatalf("the offer without a code stays usable: %v", err)
+	}
+}
+
+func sessionExtend(t *testing.T, s Store) {
+	sess := issuance.Session{ID: "ext", Provider: "tax", Profile: "eudi", CodeHash: "c-ext", ExpiresAt: now.Add(time.Minute), Reference: "r",
+		Documents: []issuance.Document{{CredentialID: "d1", ConfigurationID: "income", Claims: map[string]any{"year": "2025"}, NotBefore: now, Expires: now.Add(time.Hour)}}}
+	if err := s.CreateSession(ctx, sess); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ExtendSession(ctx, "ext", now.Add(30*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	// A shorter extension does not shorten it.
+	if err := s.ExtendSession(ctx, "ext", now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Session(ctx, "ext")
+	if err != nil || !got.ExpiresAt.Equal(now.Add(30*24*time.Hour)) || got.Reference != "r" || len(got.Documents) != 1 || got.Documents[0].Claims["year"] != "2025" {
+		t.Fatalf("session = %+v, %v", got, err)
+	}
+	if _, err := s.Session(ctx, "nope"); !errors.Is(err, issuance.ErrNotFound) {
+		t.Fatalf("unknown session: %v", err)
+	}
+	if err := s.ExtendSession(ctx, "nope", now); !errors.Is(err, issuance.ErrNotFound) {
+		t.Fatalf("extend an unknown session: %v", err)
 	}
 }

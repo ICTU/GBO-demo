@@ -164,12 +164,15 @@ func (s *Service) AuthorizationServerMetadata(t Target) (map[string]any, error) 
 		"dpop_signing_alg_values_supported":                   algNames(dpop.Algorithms),
 		"pre-authorized_grant_anonymous_access_supported":     false,
 	}
+	if p.Kind == KindEUDI {
+		md["grant_types_supported"] = []string{oid4vci.GrantPreAuthorizedCode, oid4vci.GrantRefreshToken}
+	}
 	if s.offersLogin(p) {
 		md["authorization_endpoint"] = id + "/authorize"
 		md["pushed_authorization_request_endpoint"] = id + "/par"
 		md["require_pushed_authorization_requests"] = true
 		md["response_types_supported"] = []string{"code"}
-		md["grant_types_supported"] = []string{oid4vci.GrantPreAuthorizedCode, GrantAuthorizationCode}
+		md["grant_types_supported"] = []string{oid4vci.GrantPreAuthorizedCode, GrantAuthorizationCode, oid4vci.GrantRefreshToken}
 		md["code_challenge_methods_supported"] = []string{"S256"}
 		md["authorization_response_iss_parameter_supported"] = true
 	}

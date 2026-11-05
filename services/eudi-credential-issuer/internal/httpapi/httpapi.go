@@ -136,6 +136,7 @@ func (h *handler) token(w http.ResponseWriter, r *http.Request) {
 		Code:                 r.PostForm.Get("code"),
 		CodeVerifier:         r.PostForm.Get("code_verifier"),
 		RedirectURI:          r.PostForm.Get("redirect_uri"),
+		RefreshToken:         r.PostForm.Get("refresh_token"),
 		ClientID:             r.PostForm.Get("client_id"),
 		ClientAttestation:    r.Header.Get(clientattest.AttestationHeader),
 		ClientAttestationPoP: r.Header.Get(clientattest.PoPHeader),
