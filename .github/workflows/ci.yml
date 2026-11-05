@@ -90,10 +90,15 @@ jobs:
         working-directory: conformance/check
         run: go test -timeout 60s ./...
       # Every requirement ID has a status and every test it names exists;
-      # the tests themselves run in the go job.
-      - name: check the matrix
+      # the tests themselves run in the go job. One matrix per
+      # specification: ETSI TS 119 478 (ASI route), HAIP 1.0 and
+      # OpenID4VCI 1.0 (own credential issuer).
+      - name: check the matrices
         working-directory: conformance/check
-        run: go run . -matrix ../etsi-ts-119478.yaml -root ../..
+        run: |
+          for m in ../etsi-ts-119478.yaml ../haip-1.0.yaml ../oid4vci-1.0.yaml; do
+            go run . -matrix "$m" -root ../..
+          done
 
   source-registry:
     name: Source Registry — PostgreSQL migrations + atomicity

@@ -1,0 +1,564 @@
+# The conformance claim of the own credential issuer (services/eudi-credential-issuer, #614) against
+# OpenID4VC High Assurance Interoperability Profile 1.0: a status per normative statement (see README.md).
+# The issuer is Credential Issuer, its own Authorization Server, and Verifier for disclosure-based issuance.
+# The default status is the eudi profile's; nl (NL Wallet v0.6.0) and wallet (both wallets on one identifier,
+# QTSP route) differ where they say so. Requirements on wallets and on ecosystems are outside the claim.
+spec: OpenID4VC High Assurance Interoperability Profile 1.0
+ids: haip-1.0-ids.txt
+profiles: [nl, eudi, wallet]
+
+groups:
+  - role: wallet
+    status: not-applicable
+    reason: "Requirements on the Wallet, a role outside the issuer; the demo uses the NL Wallet and the EUDI reference wallets."
+  - role: ecosystem
+    status: not-applicable
+    reason: "Requirements on ecosystems and trust frameworks, not on an implementation."
+
+requirements:
+  HAIP-3-01:
+    status: failing
+    reason: "Met when every entry of this matrix for the flows the issuer implements (issuance, and presentation via redirects for disclosure-based issuance) is met; see the failing entries."
+    slice: "#614"
+  HAIP-3-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueEUDI"
+      - "services/oid4vc-kit/oid4vp:TestValidResponse"
+  HAIP-4-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestTheCodeBuysATokenAndACredential"
+      - "services/eudi-credential-issuer/internal/httpapi:TestAuthorizationCodeMetadata"
+      - "services/eudi-credential-issuer/internal/httpapi:TestWalletInitiatedRequests"
+    profiles:
+      nl:
+        status: deviation
+        tests:
+          - "services/eudi-credential-issuer/internal/httpapi:TestAuthorizationCodeMetadata"
+        reason: "The NL Wallet (v0.6.0) supports the pre-authorized code flow only; the authorization code flow is offered on the eudi profile."
+      wallet:
+        status: deviation
+        tests:
+          - "services/eudi-credential-issuer/internal/httpapi:TestAuthorizationCodeMetadata"
+        reason: "The combined profile carries pre-authorized offers that both wallets can read (QTSP route); the NL Wallet (v0.6.0) has no authorization code flow, so EUDI wallets use the eudi profile for it."
+  HAIP-4-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueEUDI"
+      - "services/eudi-credential-issuer/internal/httpapi:TestCombinedNLPlainJWT"
+  HAIP-4-04:
+    status: failing
+    reason: "PKCE with S256, required PAR, iss in the authorization response, DPoP-bound tokens and codes, and codes of at most 60 seconds are met; refresh tokens are rotated (each is used once), which FAPI 2.0 section 5.3.2.1 does not allow outside extraordinary circumstances."
+    slice: "#614"
+    profiles:
+      nl:
+        status: deviation
+        tests:
+          - "services/eudi-credential-issuer/internal/httpapi:TestToken"
+        reason: "The NL Wallet (v0.6.0) supports the pre-authorized code flow only; the authorization code flow is offered on the eudi profile. At the token endpoint client authentication and DPoP are required."
+      wallet:
+        status: deviation
+        tests:
+          - "services/eudi-credential-issuer/internal/httpapi:TestCombinedToken"
+        reason: "The combined profile carries pre-authorized offers that both wallets can read (QTSP route); the NL Wallet (v0.6.0) has no authorization code flow, so EUDI wallets use the eudi profile for it. At the token endpoint client authentication and DPoP are required."
+  HAIP-4-05:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueEUDI/C5 DPoP key of another wallet"
+      - "services/eudi-credential-issuer/internal/httpapi:TestACodeBoundToADPoPKey"
+      - "services/eudi-credential-issuer/internal/httpapi:TestRefreshTokenRefusals/F-3: another DPoP key"
+      - "services/oid4vc-kit/dpop:TestVerify"
+    profiles:
+      nl:
+        status: deviation
+        tests:
+          - "services/eudi-credential-issuer/internal/httpapi:TestToken/T3 no DPoP proof"
+          - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
+        reason: "Access tokens are DPoP-bound, but the NL credential preview endpoint takes the token as a bearer token, once per token, because the NL Wallet (v0.6.0) calls it without DPoP."
+      wallet:
+        status: deviation
+        tests:
+          - "services/eudi-credential-issuer/internal/httpapi:TestCombinedPreviewOnlyForNL"
+          - "services/eudi-credential-issuer/internal/httpapi:TestCombinedNLPlainJWT"
+        reason: "Access tokens are DPoP-bound, but for a wallet of the NL Wallet provider the NL credential preview endpoint takes the token as a bearer token, once per token, because the NL Wallet (v0.6.0) calls it without DPoP; an EUDI wallet's token is refused there."
+  HAIP-4-07:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestOffers/O1 links per profile"
+      - "services/eudi-credential-issuer/internal/httpapi:TestTheLoginLinkOfAnOffer"
+      - "services/eudi-credential-issuer/internal/httpapi:TestCombinedOfferLinks"
+  HAIP-4-09:
+    status: failing
+    reason: "Implemented: the metadata carries batch_credential_issuance when the batch size is 2 or more; only the interop tests, which do not run in CI, depend on it, and no test asserts the parameter."
+    slice: "#614"
+  HAIP-4.1-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
+      - "services/eudi-credential-issuer/internal/httpapi:TestAuthorizationCodeMetadata"
+  HAIP-4.1-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
+  HAIP-4.1-03:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/no scope (HAIP 4.1)"
+      - "services/eudi-credential-issuer/internal/httpapi:TestOneConfigurationPerOfferAtTheIssuer"
+  HAIP-4.1-04:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptionMetadata/E1 signed metadata"
+  HAIP-4.1-05:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
+  HAIP-4.1-06:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/self-signed non-CA access cert"
+      - "services/oid4vc-kit/x5c:TestSelfSigned"
+      - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
+  HAIP-4.1-07:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/self-signed non-CA access cert"
+      - "services/oid4vc-kit/x5c:TestSelfSigned"
+  HAIP-4.1-10:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
+  HAIP-4.2-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestTheLoginLinkOfAnOffer"
+      - "services/eudi-credential-issuer/internal/httpapi:TestTheCodeBuysATokenAndACredential"
+    profiles:
+      nl:
+        status: deviation
+        reason: "The NL Wallet (v0.6.0) supports the pre-authorized code flow only; the authorization code flow is offered on the eudi profile."
+      wallet:
+        status: deviation
+        reason: "The combined profile carries pre-authorized offers that both wallets can read (QTSP route); the NL Wallet (v0.6.0) has no authorization code flow, so EUDI wallets use the eudi profile for it."
+  HAIP-4.2-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
+      - "services/eudi-credential-issuer/internal/httpapi:TestOneConfigurationPerOfferAtTheIssuer"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No authorization code grant on this profile; every configuration has a scope nonetheless (HAIP-4.1-03)."
+      wallet:
+        status: not-applicable
+        reason: "No authorization code grant on this profile; every configuration has a scope nonetheless (HAIP-4.1-03)."
+  HAIP-4.2-04:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestOffers/O1 links per profile"
+      - "services/eudi-credential-issuer/internal/httpapi:TestCombinedOfferLinks"
+      - "services/eudi-credential-issuer/internal/httpapi:TestDisclosureIssuance"
+  HAIP-4.3-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestPushedAuthorizationRefusals/P5: no client attestation"
+      - "services/eudi-credential-issuer/internal/httpapi:TestPushedAuthorizationRefusals/P5: attestation of an untrusted wallet"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No authorization code flow and no PAR endpoint on this profile (see HAIP-4-01)."
+      wallet:
+        status: not-applicable
+        reason: "No authorization code flow and no PAR endpoint on this profile (see HAIP-4-01)."
+  HAIP-4.3-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestWalletInitiatedRequests/W1: scope of a configuration with one offer"
+      - "services/eudi-credential-issuer/internal/httpapi:TestOneConfigurationPerOfferAtTheIssuer"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No authorization code flow and no PAR endpoint on this profile (see HAIP-4-01)."
+      wallet:
+        status: not-applicable
+        reason: "No authorization code flow and no PAR endpoint on this profile (see HAIP-4-01)."
+  HAIP-4.3-03:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestWalletInitiatedRequests/W3: two credential types"
+      - "services/eudi-credential-issuer/internal/httpapi:TestWalletInitiatedRequestForAnAmbiguousConfiguration"
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/duplicate scope"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No authorization code flow and no PAR endpoint on this profile (see HAIP-4-01)."
+      wallet:
+        status: not-applicable
+        reason: "No authorization code flow and no PAR endpoint on this profile (see HAIP-4-01)."
+  HAIP-4.4-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestRefreshTokens"
+    profiles:
+      nl:
+        status: deviation
+        tests:
+          - "services/eudi-credential-issuer/internal/httpapi:TestRefreshTokenRefusals/F-6: no refresh token on nl"
+        reason: "No refresh tokens on this profile: the NL Wallet (v0.6.0) does not re-issue credentials with a refresh token."
+      wallet:
+        status: deviation
+        reason: "No refresh tokens on this profile: the combined profile serves one-off pre-authorized offers (QTSP route) to both wallets, and the NL Wallet (v0.6.0) does not use refresh tokens; re-issuance is offered on the eudi profile."
+  HAIP-4.4-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestAnExpiredRefreshToken"
+      - "services/eudi-credential-issuer/internal/httpapi:TestRefreshTokenRefusals/F-5: the offer was revoked"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No refresh tokens on this profile (see HAIP-4.4-01)."
+      wallet:
+        status: not-applicable
+        reason: "No refresh tokens on this profile (see HAIP-4.4-01)."
+  HAIP-4.4-03:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestAnExpiredRefreshToken"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No refresh tokens on this profile (see HAIP-4.4-01)."
+      wallet:
+        status: not-applicable
+        reason: "No refresh tokens on this profile (see HAIP-4.4-01)."
+  HAIP-4.4.1-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestToken/W2 unknown wallet provider"
+      - "services/eudi-credential-issuer/internal/httpapi:TestToken/W4 PoP without challenge"
+      - "services/eudi-credential-issuer/internal/httpapi:TestPushedAuthorizationRefusals/P5: no client attestation"
+      - "services/eudi-credential-issuer/internal/httpapi:TestCombinedToken"
+  HAIP-4.4.1-03:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/clientattest:TestVerify"
+      - "services/oid4vc-kit/x5c:TestVerify"
+      - "services/eudi-credential-issuer/internal/httpapi:TestToken/W2 unknown wallet provider"
+  HAIP-4.4.1-07:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestPushedAuthorizationRefusals/P5: client_id of another wallet"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No authorization code flow and no PAR endpoint on this profile (see HAIP-4-01). The token endpoint makes the same check."
+      wallet:
+        status: not-applicable
+        reason: "No authorization code flow and no PAR endpoint on this profile (see HAIP-4-01). The token endpoint makes the same check."
+  HAIP-4.5.1-03:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/keyattest:TestVerify"
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueEUDI/C1 attestation proof"
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueEUDI/C1 jwt proof with key attestation"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "The nl profile takes no key attestations: the NL Wallet (v0.6.0) cannot attest its keys."
+      wallet:
+        status: passed
+        tests:
+          - "services/oid4vc-kit/keyattest:TestVerify"
+          - "services/eudi-credential-issuer/internal/httpapi:TestCombinedEUDIMustAttest"
+  HAIP-4.5.1-05:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/x5c:TestVerify"
+      - "services/oid4vc-kit/keyattest:TestVerify"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "The nl profile takes no key attestations: the NL Wallet (v0.6.0) cannot attest its keys."
+  HAIP-5-01:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vp:TestValidResponse"
+      - "services/eudi-credential-issuer/internal/httpapi:TestDisclosureIssuance"
+    profiles:
+      wallet:
+        status: not-applicable
+        reason: "No disclosure-based issuance on the combined profile: the issuer acts as Verifier on the nl and eudi profiles only."
+  HAIP-5-03:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vp:TestRequestObject"
+      - "services/eudi-credential-issuer/internal/httpapi:TestDisclosureRequest"
+    profiles:
+      wallet:
+        status: not-applicable
+        reason: "No disclosure-based issuance on the combined profile: the issuer acts as Verifier on the nl and eudi profiles only."
+  HAIP-5-04:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vp:TestRequestObject"
+      - "services/eudi-credential-issuer/internal/httpapi:TestDisclosureRequest"
+      - "services/eudi-credential-issuer/internal/httpapi:TestDisclosureOffers"
+    profiles:
+      wallet:
+        status: not-applicable
+        reason: "No disclosure-based issuance on the combined profile: the issuer acts as Verifier on the nl and eudi profiles only."
+  HAIP-5-05:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vp:TestRequestObject"
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/self-signed non-CA access cert"
+    profiles:
+      wallet:
+        status: not-applicable
+        reason: "No disclosure-based issuance on the combined profile: the issuer acts as Verifier on the nl and eudi profiles only."
+  HAIP-5-06:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/self-signed non-CA access cert"
+      - "services/oid4vc-kit/x5c:TestSelfSigned"
+    profiles:
+      wallet:
+        status: not-applicable
+        reason: "No disclosure-based issuance on the combined profile: the issuer acts as Verifier on the nl and eudi profiles only."
+  HAIP-5-07:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vp:TestRequestObject"
+      - "services/oid4vc-kit/oid4vp:TestResponseShape"
+      - "services/eudi-credential-issuer/internal/httpapi:TestDisclosureRequest"
+    profiles:
+      wallet:
+        status: not-applicable
+        reason: "No disclosure-based issuance on the combined profile: the issuer acts as Verifier on the nl and eudi profiles only."
+  HAIP-5-08:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vp:TestValidResponse"
+      - "services/oid4vc-kit/oid4vp:TestResponseDoesNotDecrypt"
+    profiles:
+      wallet:
+        status: not-applicable
+        reason: "No disclosure-based issuance on the combined profile: the issuer acts as Verifier on the nl and eudi profiles only."
+  HAIP-5-09:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vp:TestRequestObject"
+      - "services/oid4vc-kit/oid4vp:TestResponseDoesNotDecrypt"
+    profiles:
+      wallet:
+        status: not-applicable
+        reason: "No disclosure-based issuance on the combined profile: the issuer acts as Verifier on the nl and eudi profiles only."
+  HAIP-5-10:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vp:TestValidResponse"
+    profiles:
+      wallet:
+        status: not-applicable
+        reason: "No disclosure-based issuance on the combined profile: the issuer acts as Verifier on the nl and eudi profiles only."
+  HAIP-5-13:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vp:TestRequestObject"
+    profiles:
+      wallet:
+        status: not-applicable
+        reason: "No disclosure-based issuance on the combined profile: the issuer acts as Verifier on the nl and eudi profiles only."
+  HAIP-5-14:
+    status: failing
+    reason: "Implemented: each request object gets a fresh P-256 key in client_metadata; no test asserts that two requests carry different keys."
+    slice: "#614"
+    profiles:
+      wallet:
+        status: not-applicable
+        reason: "No disclosure-based issuance on the combined profile: the issuer acts as Verifier on the nl and eudi profiles only."
+  HAIP-5-15:
+    status: failing
+    reason: "The DCQL query carries no trusted_authorities; the Verifier checks the PID chain against its own trust anchors after the response."
+    slice: "#614"
+    profiles:
+      wallet:
+        status: not-applicable
+        reason: "No disclosure-based issuance on the combined profile: the issuer acts as Verifier on the nl and eudi profiles only."
+  HAIP-5.1-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestDisclosureRequest"
+      - "services/eudi-credential-issuer/internal/httpapi:TestDisclosureOffers"
+      - "services/oid4vc-kit/oid4vp:TestRequestObject"
+    profiles:
+      wallet:
+        status: not-applicable
+        reason: "No disclosure-based issuance on the combined profile: the issuer acts as Verifier on the nl and eudi profiles only."
+  HAIP-5.1-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestDisclosureRequest"
+      - "services/oid4vc-kit/oid4vp:TestValidResponse"
+    profiles:
+      wallet:
+        status: not-applicable
+        reason: "No disclosure-based issuance on the combined profile: the issuer acts as Verifier on the nl and eudi profiles only."
+  HAIP-5.1-03:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vp:TestResponseShape"
+      - "services/eudi-credential-issuer/internal/httpapi:TestDisclosureRefusals/D8 unknown, expired or used session"
+    profiles:
+      wallet:
+        status: not-applicable
+        reason: "No disclosure-based issuance on the combined profile: the issuer acts as Verifier on the nl and eudi profiles only."
+  HAIP-5.1-04:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestDisclosureIssuance"
+      - "services/eudi-credential-issuer/internal/httpapi:TestDisclosureNoDataPage/R1 eudi redirects to the page"
+    profiles:
+      nl:
+        status: deviation
+        tests:
+          - "services/eudi-credential-issuer/internal/httpapi:TestDisclosureRefusals/D4 no data"
+        reason: "When the source has no data the response is 404 no_issuable_attestations without redirect_uri, which the NL Wallet (v0.6.0) shows as nothing to add."
+      wallet:
+        status: not-applicable
+        reason: "No disclosure-based issuance on the combined profile: the issuer acts as Verifier on the nl and eudi profiles only."
+  HAIP-5.1-06:
+    status: not-applicable
+    reason: "The result of a presentation is a one-time Credential Offer, returned only to the presenting Wallet in redirect_uri; no browser session at the Verifier receives it, so there is no session to bind."
+  HAIP-5.2-02:
+    status: not-applicable
+    reason: "The Verifier uses OpenID4VP via redirects (section 5.1), not the W3C Digital Credentials API."
+  HAIP-5.2-04:
+    status: not-applicable
+    reason: "The Verifier uses OpenID4VP via redirects (section 5.1), not the W3C Digital Credentials API."
+  HAIP-5.2-05:
+    status: not-applicable
+    reason: "The Verifier uses OpenID4VP via redirects (section 5.1), not the W3C Digital Credentials API."
+  HAIP-5.2-07:
+    status: not-applicable
+    reason: "The Verifier uses OpenID4VP via redirects (section 5.1), not the W3C Digital Credentials API."
+  HAIP-5.3.1-01:
+    status: not-applicable
+    reason: "The Verifier asks for SD-JWT VC only; the issuer issues SD-JWT VC only."
+  HAIP-5.3.1-03:
+    status: not-applicable
+    reason: "The issuer issues SD-JWT VC only."
+  HAIP-5.3.2-01:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vp:TestRequestObject"
+    profiles:
+      wallet:
+        status: not-applicable
+        reason: "No disclosure-based issuance on the combined profile: the issuer acts as Verifier on the nl and eudi profiles only."
+  HAIP-6.1-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
+      - "services/oid4vc-kit/sdjwtvc:TestIssueAndParseRoundTrip"
+  HAIP-6.1-02:
+    status: failing
+    reason: "Implemented: credentials get exp (valid_days after the day of the offer) and a status claim; no test asserts exp in an issued credential."
+    slice: "#614"
+  HAIP-6.1-03:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
+      - "services/eudi-credential-issuer/internal/httpapi:TestRevocation"
+  HAIP-6.1-04:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
+  HAIP-6.1-05:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
+  HAIP-6.1-06:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
+      - "services/eudi-credential-issuer/internal/httpapi:TestRevocation"
+  HAIP-6.1-07:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
+      - "services/eudi-credential-issuer/internal/httpapi:TestRevocation"
+  HAIP-6.1-08:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/self-signed non-CA access cert"
+      - "services/oid4vc-kit/x5c:TestSelfSigned"
+  HAIP-6.1-09:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/self-signed non-CA access cert"
+      - "services/oid4vc-kit/x5c:TestSelfSigned"
+  HAIP-6.1-10:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/memstore:TestContract"
+      - "services/eudi-credential-issuer/internal/postgres:TestContract"
+  HAIP-6.1-11:
+    status: not-applicable
+    reason: "The credentials carry no verification status or identity assurance data of their claims."
+  HAIP-6.1.1-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
+      - "services/eudi-credential-issuer/internal/httpapi:TestProviders/P-2 credential signed by its provider"
+  HAIP-6.1.1-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
+      - "services/eudi-credential-issuer/internal/httpapi:TestProviders/P-2 credential signed by its provider"
+      - "services/oid4vc-kit/sdjwtvc:TestIssueAndParseRoundTrip"
+  HAIP-6.1.1-03:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/self-signed non-CA access cert"
+      - "services/oid4vc-kit/x5c:TestSelfSigned"
+  HAIP-6.1.1-04:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/self-signed non-CA access cert"
+      - "services/oid4vc-kit/x5c:TestSelfSigned"
+      - "services/oid4vc-kit/x5c:TestVerify"
+  HAIP-6.1.1.1-01:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vp:TestResponseKeyBinding"
+    profiles:
+      wallet:
+        status: not-applicable
+        reason: "No disclosure-based issuance on the combined profile: the issuer acts as Verifier on the nl and eudi profiles only."
+  HAIP-7-01:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/clientattest:TestVerify"
+      - "services/oid4vc-kit/keyattest:TestVerify"
+      - "services/oid4vc-kit/oid4vci:TestVerifyJWTProof"
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueEUDI"
+      - "services/oid4vc-kit/oid4vp:TestResponseKeyBinding"
+      - "services/oid4vc-kit/oid4vp:TestResponseStatus"
+  HAIP-7-02:
+    status: not-applicable
+    reason: "Only ES256 is used for signatures, and the metadata names it wherever it lists signing algorithms."
+  HAIP-8-01:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/sdjwtvc:TestIssueAndParseRoundTrip"
+      - "services/oid4vc-kit/sdjwtvc:TestParseRefusesMalformedDigests"
+      - "services/oid4vc-kit/oid4vp:TestResponseDisclosures"
+  HAIP-8-02:
+    status: not-applicable
+    reason: "Only SHA-256 is used for SD-JWT VC digests."

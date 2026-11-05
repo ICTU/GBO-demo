@@ -228,6 +228,8 @@ if [[ "${ci_changed}" == true ]] || matches_any \
   'services/asi-authorization-server/*' \
   'services/asi-provider/*' \
   'services/qtsp-reference/*' \
+  'services/eudi-credential-issuer/*' \
+  'services/oid4vc-kit/*' \
   '.golangci.yml'; then
   conformance=true
 fi

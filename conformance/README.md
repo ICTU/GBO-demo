@@ -1,12 +1,19 @@
-# Conformance — ETSI TS 119 478
+# Conformance
 
-The conformance claim of the ASI route (epic #336, slice 6): for every requirement of ETSI TS 119 478 V1.1.1, how the demo meets it.
+Conformance claims: for every requirement of a specification, how the demo meets it.
+
+- **ASI route** (epic #336, slice 6) against ETSI TS 119 478 V1.1.1.
+- **Own credential issuer** (`services/eudi-credential-issuer`, #614) against OpenID4VCI 1.0 and HAIP 1.0, per wallet profile (`nl`, `eudi`, `wallet`). The default status is the `eudi` profile's; `nl` and `wallet` differ where they say so. The issuer is Credential Issuer, its own Authorization Server, and Verifier for disclosure-based issuance. It issues SD-JWT VC only.
 
 | File | |
 |---|---|
-| `etsi-ts-119478-ids.txt` | the requirement IDs of the specification, in document order: identifiers only, no requirement text |
-| `etsi-ts-119478.yaml` | the matrix: a status per ID, or per group of IDs with a common prefix; an entry overrides its group |
+| `etsi-ts-119478-ids.txt`, `etsi-ts-119478.yaml` | ETSI TS 119 478: the requirement IDs in document order (identifiers only, no requirement text), and the matrix |
+| `oid4vci-1.0-ids.txt`, `oid4vci-1.0.yaml` | OpenID4VCI 1.0: the normative statements as IDs with their role, and the matrix |
+| `haip-1.0-ids.txt`, `haip-1.0.yaml` | HAIP 1.0: idem |
 | `check/` | the check that runs in CI |
+| `check/extract/` | makes the ID list of an OpenID specification: one ID per sentence with MUST, SHALL, SHOULD, REQUIRED or RECOMMENDED (not MAY), numbered per section (`OID4VCI-8.2-03`); `-roles` keeps the roles of an earlier list |
+
+The roles of the OpenID lists are `issuer`, `as` (authorization server), `verifier`, `wallet`, `ecosystem` and `other` (another party, such as a wallet provider). A statement worded for the wallet but enforced by the issuer has the issuer's role. Requirements on wallets, ecosystems and other parties are outside the claim.
 
 A status is one of:
 
@@ -24,6 +31,14 @@ The check fails when an ID of the list has no entry and no group, when an entry 
 
 ```bash
 cd conformance/check && go run . -matrix ../etsi-ts-119478.yaml -root ../..
+cd conformance/check && go run . -matrix ../oid4vci-1.0.yaml -root ../..
+cd conformance/check && go run . -matrix ../haip-1.0.yaml -root ../..
+```
+
+To make an OpenID ID list again, from the specification's HTML:
+
+```bash
+cd conformance/check && go run ./extract -spec <spec.html> -prefix OID4VCI -title "OpenID for Verifiable Credential Issuance 1.0" -roles ../oid4vci-1.0-ids.txt > /tmp/ids.txt
 ```
 
 The roles DIP (the Discover Interface Provider) and TSP (the trust service provider that asks) are outside the ASIP's claim; the demo plays them with `services/asi-discovery-stub` and `services/qtsp-reference`.

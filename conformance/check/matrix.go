@@ -188,14 +188,21 @@ func Check(m *Matrix, root string) (string, []string) {
 	if len(m.Profiles) > 0 {
 		column = fmt.Sprintf("%-8s ", "profile")
 	}
-	fmt.Fprintf(&b, "%s%-6s %7s %5s %15s %8s %10s\n", column, "role", "passed", "stub", "not-applicable", "failing", "deviation")
+	// The role column is at least six wide, as it always was.
+	width := 6
+	for _, roles := range count {
+		for role := range roles {
+			width = max(width, len(role))
+		}
+	}
+	fmt.Fprintf(&b, "%s%-*s %7s %5s %15s %8s %10s\n", column, width, "role", "passed", "stub", "not-applicable", "failing", "deviation")
 	for _, p := range profiles {
 		if p != "" {
 			column = fmt.Sprintf("%-8s ", p)
 		}
 		for _, role := range sortedKeys(count[p]) {
 			c := count[p][role]
-			fmt.Fprintf(&b, "%s%-6s %7d %5d %15d %8d %10d\n", column, role, c[statusPassed], c[statusStub], c[statusNotApplicable], c[statusFailing], c[statusDeviation])
+			fmt.Fprintf(&b, "%s%-*s %7d %5d %15d %8d %10d\n", column, width, role, c[statusPassed], c[statusStub], c[statusNotApplicable], c[statusFailing], c[statusDeviation])
 		}
 	}
 	return b.String(), nil
@@ -246,7 +253,7 @@ func (m *Matrix) statusOf(id string) (Status, bool) {
 
 // problems checks a status and its status per profile.
 func (m *Matrix) problems(name string, s Status, tests *testIndex) []string {
-	out := s.ProfileStatus.problems(name, tests)
+	out := s.problems(name, tests)
 	if len(s.Profiles) > 0 && len(m.Profiles) == 0 {
 		return append(out, name+": a status per profile, but the matrix names no profiles")
 	}
