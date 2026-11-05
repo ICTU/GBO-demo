@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/base64"
 	"encoding/json"
+	"gbo-demo/eudi-credential-issuer/internal/issuance"
 	"io"
 	"net/http"
 	"strings"
@@ -305,4 +306,22 @@ func (w *wallet) postJWTAs(t *testing.T, accessToken, mediaType, body string) (i
 	defer resp.Body.Close()
 	out, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, resp.Header.Get("Content-Type"), string(out)
+}
+
+// M-4 (OpenID4VCI 1.0 section 12.2.4): a display without a locale is
+// published without one, not with an empty language tag.
+func TestADisplayWithoutLocale(t *testing.T) {
+	f := newFixtureWith(t, func(_ *fixture, cfg *issuance.Config) {
+		cfg.Configurations[0].Display = []issuance.Display{{Name: "Income statement"}}
+	})
+	configs, _ := f.metadata(t, "tax", "eudi")["credential_configurations_supported"].(map[string]any)
+	c, _ := configs[incomeConfig].(map[string]any)
+	cm, _ := c["credential_metadata"].(map[string]any)
+	display, _ := cm["display"].([]any)
+	if len(display) != 1 {
+		t.Fatalf("credential_metadata = %v, want one display", cm)
+	}
+	if d, _ := display[0].(map[string]any); d["name"] != "Income statement" || d["locale"] != nil {
+		t.Errorf("display = %v, want a name and no locale", d)
+	}
 }

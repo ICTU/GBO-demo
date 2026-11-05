@@ -120,7 +120,7 @@ type CredentialConfiguration struct {
 // Display is a localised name.
 type Display struct {
 	Name   string `json:"name"`
-	Locale string `json:"locale"`
+	Locale string `json:"locale,omitempty"`
 }
 
 // Claim describes one attribute (credential_metadata.claims).

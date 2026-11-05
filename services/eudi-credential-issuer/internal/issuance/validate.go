@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"strings"
 
 	"gbo-demo/oid4vc-kit/x5c"
 )
@@ -250,9 +251,22 @@ func validateConfiguration(c CredentialConfiguration) error {
 	if len(c.Display) == 0 || len(c.Claims) == 0 {
 		return errors.New("display and claims are required")
 	}
+	if err := validateDisplays(c.Display); err != nil {
+		return err
+	}
+	// Appendix B.3: a repeated claim description aborts processing.
+	paths := map[string]bool{}
 	for _, cl := range c.Claims {
 		if len(cl.Path) == 0 {
 			return errors.New("a claim path must not be empty")
+		}
+		key := strings.Join(cl.Path, "\x00")
+		if paths[key] {
+			return fmt.Errorf("claim %v is described twice", cl.Path)
+		}
+		paths[key] = true
+		if err := validateDisplays(cl.Display); err != nil {
+			return fmt.Errorf("claim %v: %w", cl.Path, err)
 		}
 		for _, seg := range cl.Path {
 			if seg == "" {
@@ -269,6 +283,22 @@ func validateConfiguration(c CredentialConfiguration) error {
 				}
 			}
 		}
+	}
+	return nil
+}
+
+// validateDisplays holds displays to OpenID4VCI 1.0 section 12.2.4 and
+// Appendix B.2: each has a name, and one object per language.
+func validateDisplays(ds []Display) error {
+	locales := map[string]bool{}
+	for _, d := range ds {
+		if d.Name == "" {
+			return errors.New("a display needs a name")
+		}
+		if locales[d.Locale] {
+			return fmt.Errorf("two displays for locale %q", d.Locale)
+		}
+		locales[d.Locale] = true
 	}
 	return nil
 }

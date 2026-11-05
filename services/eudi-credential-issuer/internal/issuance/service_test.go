@@ -8,6 +8,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/asn1"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -237,6 +238,26 @@ func TestNewRefusesConfigurations(t *testing.T) {
 		"no scope (HAIP 4.1)":    func(c *issuance.Config) { c.Configurations[0].Scope = "" },
 		"no display":             func(c *issuance.Config) { c.Configurations[0].Display = nil },
 		"empty claim path":       func(c *issuance.Config) { c.Configurations[0].Claims[1].Path = nil },
+		// M-1 to M-3: OpenID4VCI 1.0 section 12.2.4 and Appendix B.
+		"M-1: two displays with one locale": func(c *issuance.Config) {
+			c.Configurations[0].Display = []issuance.Display{{Name: "Income", Locale: "en"}, {Name: "Inkomen", Locale: "en"}}
+		},
+		"M-1: two claim displays with one locale": func(c *issuance.Config) {
+			claims := slices.Clone(c.Configurations[0].Claims)
+			claims[0].Display = []issuance.Display{{Name: "Year", Locale: "nl"}, {Name: "Jaar", Locale: "nl"}}
+			c.Configurations[0].Claims = claims
+		},
+		"M-2: a display without a name": func(c *issuance.Config) {
+			c.Configurations[0].Display = []issuance.Display{{Locale: "en"}}
+		},
+		"M-2: a claim display without a name": func(c *issuance.Config) {
+			claims := slices.Clone(c.Configurations[0].Claims)
+			claims[0].Display = []issuance.Display{{Locale: "en"}}
+			c.Configurations[0].Claims = claims
+		},
+		"M-3: a repeated claim path": func(c *issuance.Config) {
+			c.Configurations[0].Claims = append(slices.Clone(c.Configurations[0].Claims), c.Configurations[0].Claims[0])
+		},
 		"mandatory object claim": func(c *issuance.Config) {
 			c.Configurations[0].Claims = append(c.Configurations[0].Claims, issuance.Claim{Path: []string{"address"}, Mandatory: true})
 		},
