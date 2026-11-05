@@ -38,12 +38,12 @@ A Wallet Instance Attestation is accepted only from the wallet providers configu
 | ISO mdoc | not yet |
 | `credential_reuse_policy` (ETSI TS 119 472-3; ARF ISSU_39) | not yet |
 | Wallet provider and key attestation revocation (`client_status`, `status` in the key attestation) | not checked |
-| Disclosure-based issuance (presentation before the offer) | not yet; the current issuance server keeps doing this |
+| Disclosure-based issuance (presentation before the offer) | implemented on `eudi` and `nl`; see [Disclosure-based issuance](#disclosure-based-issuance). Not yet tested with the NL Wallet, so the developer portal keeps the current issuance server for it |
 
 **Deviations and accepted risks**
 
 - **The NL preview takes the DPoP-bound token as a bearer token.** RFC 9449 section 7.2 forbids this; the NL Wallet calls the preview without DPoP. The preview answers once per token, so a leaked token discloses the data at most once, and only within the token lifetime.
-- **A leaked offer can be redeemed by anyone with a trusted wallet.** The pre-authorized code is the only secret (OpenID4VCI section 13.6.1). A transaction code would help, but the NL Wallet refuses offers with one. Offers therefore live 5 minutes. For `nl`, prefer the universal link on the same device to a QR code.
+- **A leaked offer can be redeemed by anyone with a trusted wallet.** The pre-authorized code is the only secret (OpenID4VCI section 13.6.1). A transaction code helps when it reaches the citizen through another channel: on `eudi` an offer can ask for one (`tx_code: true`). The NL Wallet refuses offers with one, so `nl` and the combined profile have none. Offers live 5 minutes. For `nl`, prefer the universal link on the same device to a QR code.
 - **The status list is signed with a separate status certificate, and credentials carry no `iss`.** This follows the NL Wallet and Token Status List section 11.3 (a Status Issuer certificate from the same CA). The NL Wallet also wants that certificate to have the issuer's subject and EKU `1.3.6.1.5.5.7.3.127`, its placeholder for `id-kp-oauthStatusSigning`, whose OID the draft still has as TBD. Wallets that find the status signer through `iss`, such as OID4VCgo, cannot check these status lists. The spec leaves key resolution to the ecosystem.
 - **`/challenge` and `/nonce` take unauthenticated requests and store a row each.** Rate limiting belongs at the ingress.
 - **Each provider has its own status lists.** A list holds only the credentials of one provider and configuration, so with few credentials the crowd that hides a lookup (Token Status List section 12) is small. The issuer pads nothing; a list is as large as configured.
@@ -155,7 +155,7 @@ The response is the IssuableDocument list: `[{"id", "format": "dc+sd-jwt", "atte
 - a top-level attribute uses a name SD-JWT VC reserves (`iss`, `vct`, `exp`, `status`, ...);
 - for `nl`: a number is not a whole number (the NL Wallet knows no others).
 
-**The QTSP route does not run through pre-authorized offers.** The callback of `qtsp-reference` checks a PID the wallet disclosed against the pending ASI result; a subject named by an offer caller would make that check meaningless. It belongs with disclosure-based issuance, where the issuer passes on the PID its own verifier checked, but does not run there yet: the issuer asks only for the `bsn`, while the QTSP needs the name, birth date and nationalities and no BSN. Until disclosure offers name their own PID claims, the QTSP route stays on `eudi-issuance-server`.
+**The QTSP route uses a pre-authorized offer without a BSN.** With `QTSP_ISSUER_OFFERS_URL` set, `qtsp-reference` asks for an offer under the combined profile `wallet` after an accepted result and shows one QR code. The subject is an unguessable reference to the pending result, not a BSN; the issuer fetches the statement from the QTSP callback by that reference, which uses the result. The offer has no transaction code, because the combined profile refuses one. Without `QTSP_ISSUER_OFFERS_URL` (the default) the QTSP route stays on `eudi-issuance-server`.
 
 ## Run
 
