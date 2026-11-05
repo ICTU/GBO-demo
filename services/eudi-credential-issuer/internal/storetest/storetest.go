@@ -42,6 +42,7 @@ func Run(t *testing.T, newStore func(t *testing.T) Store) {
 		{"concurrent takes of a disclosure session: exactly one wins", takeDisclosureConcurrently},
 		{"a pending authorization is taken once and only before it expires", takePendingOnce},
 		{"an authorization code keeps its binding", codeBinding},
+		{"a transaction code: right, wrong, used up, unexpected", txCode},
 	} {
 		t.Run(c.name, func(t *testing.T) { c.test(t, newStore(t)) })
 	}
@@ -61,13 +62,13 @@ func redeemOnce(t *testing.T, s Store) {
 		t.Fatal(err)
 	}
 	// A code of another profile is refused and stays usable.
-	if _, err := s.RedeemCode(ctx, "tax", "eudi", "c1", now); !errors.Is(err, issuance.ErrNotFound) {
+	if _, err := s.RedeemCode(ctx, "tax", "eudi", "c1", "", now); !errors.Is(err, issuance.ErrNotFound) {
 		t.Fatalf("redemption on another profile: %v", err)
 	}
-	if _, err := s.RedeemCode(ctx, "civil", "nl", "c1", now); !errors.Is(err, issuance.ErrNotFound) {
+	if _, err := s.RedeemCode(ctx, "civil", "nl", "c1", "", now); !errors.Is(err, issuance.ErrNotFound) {
 		t.Fatalf("redemption at another provider: %v", err)
 	}
-	got, err := s.RedeemCode(ctx, "tax", "nl", "c1", now)
+	got, err := s.RedeemCode(ctx, "tax", "nl", "c1", "", now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,13 +77,13 @@ func redeemOnce(t *testing.T, s Store) {
 		!got.Documents[0].Expires.Equal(now.Add(time.Hour)) {
 		t.Fatalf("session not restored: %+v", got)
 	}
-	if _, err := s.RedeemCode(ctx, "tax", "nl", "c1", now); !errors.Is(err, issuance.ErrNotFound) {
+	if _, err := s.RedeemCode(ctx, "tax", "nl", "c1", "", now); !errors.Is(err, issuance.ErrNotFound) {
 		t.Fatalf("second redemption: %v", err)
 	}
 	if err := s.CreateSession(ctx, issuance.Session{ID: "s2", Provider: "tax", Profile: "nl", CodeHash: "c2", ExpiresAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.RedeemCode(ctx, "tax", "nl", "c2", now); !errors.Is(err, issuance.ErrNotFound) {
+	if _, err := s.RedeemCode(ctx, "tax", "nl", "c2", "", now); !errors.Is(err, issuance.ErrNotFound) {
 		t.Fatalf("expired code: %v", err)
 	}
 }
@@ -98,7 +99,7 @@ func redeemConcurrently(t *testing.T, s Store) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := s.RedeemCode(ctx, "tax", "nl", "c1", now); err == nil {
+			if _, err := s.RedeemCode(ctx, "tax", "nl", "c1", "", now); err == nil {
 				mu.Lock()
 				wins++
 				mu.Unlock()
@@ -462,11 +463,45 @@ func codeBinding(t *testing.T, s Store) {
 			t.Fatal(err)
 		}
 	}
-	got, err := s.RedeemCode(ctx, "tax", "eudi", "c-acf", now)
+	got, err := s.RedeemCode(ctx, "tax", "eudi", "c-acf", "", now)
 	if err != nil || got.Binding == nil || *got.Binding != *binding {
 		t.Fatalf("binding = %+v, %v; want %+v", got.Binding, err, binding)
 	}
-	if got, err := s.RedeemCode(ctx, "tax", "eudi", "c-pre", now); err != nil || got.Binding != nil {
+	if got, err := s.RedeemCode(ctx, "tax", "eudi", "c-pre", "", now); err != nil || got.Binding != nil {
 		t.Fatalf("pre-authorized session binding = %+v, %v; want none", got.Binding, err)
+	}
+}
+
+func txCode(t *testing.T, s Store) {
+	for _, sess := range []issuance.Session{
+		{ID: "tx", Provider: "tax", Profile: "eudi", CodeHash: "c-tx", ExpiresAt: now.Add(time.Minute), TxCodeHash: "right"},
+		{ID: "tx2", Provider: "tax", Profile: "eudi", CodeHash: "c-tx2", ExpiresAt: now.Add(time.Minute), TxCodeHash: "right"},
+		{ID: "plain", Provider: "tax", Profile: "eudi", CodeHash: "c-plain", ExpiresAt: now.Add(time.Minute)},
+	} {
+		if err := s.CreateSession(ctx, sess); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tx := range []string{"", "wrong"} {
+		if _, err := s.RedeemCode(ctx, "tax", "eudi", "c-tx", tx, now); !errors.Is(err, issuance.ErrTxCodeMismatch) {
+			t.Fatalf("redeem with %q: %v, want ErrTxCodeMismatch", tx, err)
+		}
+	}
+	if got, err := s.RedeemCode(ctx, "tax", "eudi", "c-tx", "right", now); err != nil || got.ID != "tx" || got.TxCodeHash != "right" {
+		t.Fatalf("redeem with the right code after two failures: %+v, %v", got, err)
+	}
+	for i := 0; i < issuance.MaxTxCodeAttempts; i++ {
+		if _, err := s.RedeemCode(ctx, "tax", "eudi", "c-tx2", "wrong", now); !errors.Is(err, issuance.ErrTxCodeMismatch) {
+			t.Fatalf("failure %d: %v", i+1, err)
+		}
+	}
+	if _, err := s.RedeemCode(ctx, "tax", "eudi", "c-tx2", "right", now); !errors.Is(err, issuance.ErrNotFound) {
+		t.Fatalf("redeem after the last failure: %v, want ErrNotFound", err)
+	}
+	if _, err := s.RedeemCode(ctx, "tax", "eudi", "c-plain", "any", now); !errors.Is(err, issuance.ErrTxCodeUnexpected) {
+		t.Fatalf("a code for an offer without one: %v, want ErrTxCodeUnexpected", err)
+	}
+	if _, err := s.RedeemCode(ctx, "tax", "eudi", "c-plain", "", now); err != nil {
+		t.Fatalf("the offer without a code stays usable: %v", err)
 	}
 }

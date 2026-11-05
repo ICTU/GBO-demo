@@ -156,23 +156,47 @@ func (s *Store) CreateSession(ctx context.Context, sess issuance.Session) error 
 			return err
 		}
 	}
-	_, err = s.pool.Exec(ctx, `INSERT INTO sessions (id, provider, profile, code_hash, expires_at, reference, documents, code_binding)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		sess.ID, sess.Provider, sess.Profile, sess.CodeHash, sess.ExpiresAt, sess.Reference, docs, binding)
+	_, err = s.pool.Exec(ctx, `INSERT INTO sessions (id, provider, profile, code_hash, expires_at, reference, documents, code_binding, tx_code_hash)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		sess.ID, sess.Provider, sess.Profile, sess.CodeHash, sess.ExpiresAt, sess.Reference, docs, binding, sess.TxCodeHash)
 	return err
 }
 
-func (s *Store) RedeemCode(ctx context.Context, provider, profile, codeHash string, now time.Time) (issuance.Session, error) {
+func (s *Store) RedeemCode(ctx context.Context, provider, profile, codeHash, txCodeHash string, now time.Time) (issuance.Session, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return issuance.Session{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
 	var sess issuance.Session
 	var docs, binding []byte
-	err := s.pool.QueryRow(ctx, `UPDATE sessions SET code_used = true
-		WHERE code_hash = $1 AND provider = $2 AND profile = $3 AND NOT code_used AND expires_at > $4
-		RETURNING id, provider, profile, code_hash, expires_at, reference, documents, code_binding`, codeHash, provider, profile, now).
-		Scan(&sess.ID, &sess.Provider, &sess.Profile, &sess.CodeHash, &sess.ExpiresAt, &sess.Reference, &docs, &binding)
+	err = tx.QueryRow(ctx, `SELECT id, provider, profile, code_hash, expires_at, reference, documents, code_binding, tx_code_hash
+		FROM sessions WHERE code_hash = $1 AND provider = $2 AND profile = $3 AND NOT code_used AND expires_at > $4
+		FOR UPDATE`, codeHash, provider, profile, now).
+		Scan(&sess.ID, &sess.Provider, &sess.Profile, &sess.CodeHash, &sess.ExpiresAt, &sess.Reference, &docs, &binding, &sess.TxCodeHash)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return issuance.Session{}, issuance.ErrNotFound
 	}
 	if err != nil {
+		return issuance.Session{}, err
+	}
+	switch {
+	case sess.TxCodeHash == "" && txCodeHash != "":
+		return issuance.Session{}, issuance.ErrTxCodeUnexpected
+	case sess.TxCodeHash != "" && sess.TxCodeHash != txCodeHash:
+		if _, err := tx.Exec(ctx, `UPDATE sessions SET tx_code_attempts = tx_code_attempts + 1,
+			code_used = tx_code_attempts + 1 >= $2 WHERE id = $1`, sess.ID, issuance.MaxTxCodeAttempts); err != nil {
+			return issuance.Session{}, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return issuance.Session{}, err
+		}
+		return issuance.Session{}, issuance.ErrTxCodeMismatch
+	}
+	if _, err := tx.Exec(ctx, `UPDATE sessions SET code_used = true WHERE id = $1`, sess.ID); err != nil {
+		return issuance.Session{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return issuance.Session{}, err
 	}
 	if binding != nil {

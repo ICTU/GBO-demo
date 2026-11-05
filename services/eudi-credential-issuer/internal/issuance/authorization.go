@@ -337,7 +337,7 @@ func (s *Service) Callback(ctx context.Context, t Target, ret LoginReturn) (*Wal
 		return nil, fmt.Errorf("offer %q of the request is not configured here", pushed.Offer)
 	}
 	binding := &CodeBinding{ClientID: pushed.ClientID, RedirectURI: pushed.RedirectURI, CodeChallenge: pushed.CodeChallenge, DPoPJKT: pushed.DPoPJKT}
-	code, err := s.createSession(ctx, t, p, o.ConfigurationIDs, "", CodeLifetime, binding, func(id string) ([]SourceDocument, error) {
+	code, err := s.createSession(ctx, t, p, o.ConfigurationIDs, "", CodeLifetime, sessionOptions{binding: binding}, func(id string) ([]SourceDocument, error) {
 		return s.source.FetchLogin(ctx, id, bsn, o.Parameters)
 	})
 	switch {

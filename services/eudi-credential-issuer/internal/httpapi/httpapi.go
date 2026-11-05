@@ -241,6 +241,8 @@ type offerRequest struct {
 type offerResponse struct {
 	CredentialOffer oid4vci.CredentialOffer `json:"credential_offer"`
 	Links           map[string]string       `json:"links"`
+	// TxCodeValue is for the caller to deliver through another channel.
+	TxCodeValue string `json:"tx_code_value,omitempty"`
 }
 
 func (h *handler) createOffer(w http.ResponseWriter, r *http.Request) {
@@ -257,7 +259,7 @@ func (h *handler) createOffer(w http.ResponseWriter, r *http.Request) {
 		h.failOffer(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, offerResponse{CredentialOffer: offer.CredentialOffer, Links: offer.Links})
+	writeJSON(w, http.StatusCreated, offerResponse{CredentialOffer: offer.CredentialOffer, Links: offer.Links, TxCodeValue: offer.TxCodeValue})
 }
 
 func (h *handler) failOffer(w http.ResponseWriter, err error) {

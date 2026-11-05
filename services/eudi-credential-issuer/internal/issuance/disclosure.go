@@ -167,7 +167,7 @@ func (s *Service) DisclosureResponse(ctx context.Context, t Target, sessionID st
 		CA: disclosure.Issuer.Issuer.CommonName, Signed: claimTime(disclosure.Claims, "iat"),
 		ValidFrom: claimTime(disclosure.Claims, "nbf"), ValidUntil: claimTime(disclosure.Claims, "exp"),
 	}
-	offer, err := s.createOffer(ctx, t, p, o.ConfigurationIDs, "", s.cfg.DisclosureTTL, func(id string) ([]SourceDocument, error) {
+	offer, err := s.createOffer(ctx, t, p, o.ConfigurationIDs, "", s.cfg.DisclosureTTL, "", func(id string) ([]SourceDocument, error) {
 		return s.source.FetchDisclosed(ctx, id, pid, o.Parameters)
 	})
 	if errors.Is(err, ErrNoData) && p.Kind == KindEUDI {

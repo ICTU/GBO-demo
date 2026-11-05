@@ -58,16 +58,16 @@ func (s *Service) Token(ctx context.Context, req TokenRequest) (oid4vci.TokenRes
 	var code string
 	switch req.GrantType {
 	case oid4vci.GrantPreAuthorizedCode:
-		if req.PreAuthorizedCode == "" || req.TxCode != "" {
-			return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidRequest, "pre-authorized_code is required and tx_code is not expected")
+		if req.PreAuthorizedCode == "" {
+			return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidRequest, "pre-authorized_code is required")
 		}
 		code = req.PreAuthorizedCode
 	case GrantAuthorizationCode:
 		if !s.offersLogin(p) {
 			return oid4vci.TokenResponse{}, refuse(oid4vci.ErrUnsupportedGrantType, "only the pre-authorized code grant is supported")
 		}
-		if req.Code == "" {
-			return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidRequest, "code is required")
+		if req.Code == "" || req.TxCode != "" {
+			return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidRequest, "code is required and tx_code is not expected")
 		}
 		code = req.Code
 	default:
@@ -92,9 +92,14 @@ func (s *Service) Token(ctx context.Context, req TokenRequest) (oid4vci.TokenRes
 		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidDPoPProof, "the DPoP proof has been used before")
 	}
 
-	session, err := s.sessions.RedeemCode(ctx, req.Target.Provider, p.Name, hash(code), now)
-	if errors.Is(err, ErrNotFound) {
+	session, err := s.sessions.RedeemCode(ctx, req.Target.Provider, p.Name, hash(code), txCodeHash(code, req.TxCode), now)
+	switch {
+	case errors.Is(err, ErrNotFound):
 		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "the code is unknown, used or expired")
+	case errors.Is(err, ErrTxCodeMismatch):
+		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "the transaction code is missing or wrong")
+	case errors.Is(err, ErrTxCodeUnexpected):
+		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidRequest, "tx_code is not expected for this offer")
 	}
 	if err != nil {
 		return oid4vci.TokenResponse{}, err

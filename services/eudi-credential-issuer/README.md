@@ -32,7 +32,8 @@ A Wallet Instance Attestation is accepted only from the wallet providers configu
 | NL credential preview endpoint | implemented for `nl`; not part of OpenID4VCI; once per access token |
 | Authorization Code Flow with required PAR (OpenID4VCI 1.0 section 5, RFC 9126; HAIP section 4 via FAPI 2.0), PKCE S256, `iss` in the authorization response (RFC 9207), DPoP binding of the code (RFC 9449 section 10) | implemented on the `eudi` profile when `ISSUER_LOGIN_SERVER` is set: issuer-initiated with `issuer_state`, and wallet-initiated with `scope` or `authorization_details` for a configuration with one source offer. The citizen logs in at GBO's authorization server; see [Authorization code flow](#authorization-code-flow). Without it `response_types_supported` is empty |
 | Notification endpoint (section 11) | implemented on `eudi`: every credential response carries a `notification_id`, good for one notification; the issuer logs the event and acts on none |
-| Deferred issuance, re-issuance with refresh tokens, `tx_code` | not yet |
+| Transaction code (`tx_code`, section 4.1.1) | implemented on `eudi`: `POST /offers` with `tx_code: true` gives an offer that asks for six digits, and returns the code apart (`tx_code_value`) for the caller to deliver through another channel. Only a hash bound to the offer is kept; a missing or wrong code is `invalid_grant`, and the third failure uses the offer up. On `nl` and the combined profile `tx_code_unsupported`: the NL Wallet refuses a whole offer with a `tx_code` |
+| Deferred issuance, re-issuance with refresh tokens | not yet |
 | ISO mdoc | not yet |
 | `credential_reuse_policy` (ETSI TS 119 472-3; ARF ISSU_39) | not yet |
 | Wallet provider and key attestation revocation (`client_status`, `status` in the key attestation) | not checked |

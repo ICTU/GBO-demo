@@ -105,6 +105,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   issuer whose offer caller named the subject. It logs that as a separate
   Dataverwerking, `gbo-bsn-ontvangst-aanvrager`, added to the register of
   `logboek-eudi-adapter`, before it asks the source.
+- **Transaction codes at the own credential issuer** (#614): on the `eudi`
+  profile a pre-authorized offer may ask for a six-digit transaction code
+  (`tx_code: true` in `POST /offers`). The issuer returns the code apart
+  (`tx_code_value`) for the caller to deliver through another channel, keeps
+  only a hash bound to the offer, and uses the offer up after three wrong
+  codes. The NL Wallet profiles still refuse it.
 - **Notifications at the own credential issuer** (#614): on the `eudi`
   profile each credential response carries a `notification_id`, and
   `POST /{provider}/eudi/notification` takes the wallet's

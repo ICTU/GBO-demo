@@ -30,6 +30,7 @@ type Store struct {
 	revoked  map[string]bool
 	disclose map[string]issuance.DisclosureSession
 	pending  map[string]issuance.PendingAuthorization
+	attempts map[string]int
 }
 
 type entry struct {
@@ -43,7 +44,7 @@ func New() *Store {
 		sessions: map[string]issuance.Session{}, byCode: map[string]string{}, used: map[string]bool{},
 		tokens: map[string]issuance.AccessToken{}, issued: map[string]bool{}, reserved: map[string]reservation{}, values: map[string]time.Time{},
 		status: map[string]map[int]*entry{}, revoked: map[string]bool{}, disclose: map[string]issuance.DisclosureSession{},
-		pending: map[string]issuance.PendingAuthorization{},
+		pending: map[string]issuance.PendingAuthorization{}, attempts: map[string]int{},
 	}
 }
 
@@ -58,7 +59,7 @@ func (s *Store) CreateSession(_ context.Context, sess issuance.Session) error {
 	return nil
 }
 
-func (s *Store) RedeemCode(_ context.Context, provider, profile, codeHash string, now time.Time) (issuance.Session, error) {
+func (s *Store) RedeemCode(_ context.Context, provider, profile, codeHash, txCodeHash string, now time.Time) (issuance.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	id, ok := s.byCode[codeHash]
@@ -68,6 +69,16 @@ func (s *Store) RedeemCode(_ context.Context, provider, profile, codeHash string
 	sess := s.sessions[id]
 	if sess.Provider != provider || sess.Profile != profile || !now.Before(sess.ExpiresAt) {
 		return issuance.Session{}, issuance.ErrNotFound
+	}
+	switch {
+	case sess.TxCodeHash == "" && txCodeHash != "":
+		return issuance.Session{}, issuance.ErrTxCodeUnexpected
+	case sess.TxCodeHash != "" && sess.TxCodeHash != txCodeHash:
+		s.attempts[codeHash]++
+		if s.attempts[codeHash] >= issuance.MaxTxCodeAttempts {
+			s.used[codeHash] = true
+		}
+		return issuance.Session{}, issuance.ErrTxCodeMismatch
 	}
 	s.used[codeHash] = true
 	return sess, nil

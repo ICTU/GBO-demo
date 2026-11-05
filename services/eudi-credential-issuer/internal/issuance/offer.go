@@ -2,10 +2,12 @@ package issuance
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
+	"math/big"
 	"net/url"
 	"strconv"
 	"strings"
@@ -34,6 +36,9 @@ type OfferRequest struct {
 // Offer is a created Credential Offer with the links that carry it.
 type Offer struct {
 	CredentialOffer oid4vci.CredentialOffer
+	// TxCodeValue is the transaction code, for the caller to deliver
+	// through another channel; it is not in the offer.
+	TxCodeValue string
 	// Links are the ways to hand the offer to a wallet of the profile,
 	// keyed by kind ("universal_link", "openid-credential-offer", "haip-vci").
 	Links map[string]string
@@ -57,10 +62,17 @@ func (s *Service) CreateOffer(ctx context.Context, req OfferRequest) (Offer, err
 	if !ok {
 		return Offer{}, ErrUnknownProfile
 	}
+	var txCode string
 	if req.TxCode {
-		// The NL Wallet refuses offers with a tx_code; for other wallets it
-		// comes in a later phase.
-		return Offer{}, ErrTxCodeUnsupported
+		// The NL Wallet refuses a whole offer with a tx_code, so only the
+		// eudi profile offers one (T1).
+		if p.Kind != KindEUDI {
+			return Offer{}, ErrTxCodeUnsupported
+		}
+		var err error
+		if txCode, err = newTxCode(); err != nil {
+			return Offer{}, err
+		}
 	}
 	ids := uniq(req.ConfigurationIDs)
 	if len(ids) == 0 {
@@ -80,39 +92,72 @@ func (s *Service) CreateOffer(ctx context.Context, req OfferRequest) (Offer, err
 		providerName = c.Provider
 	}
 	t := Target{Provider: providerName, Profile: p.Name}
-	return s.createOffer(ctx, t, p, ids, req.Reference, s.cfg.OfferTTL, func(id string) ([]SourceDocument, error) {
+	return s.createOffer(ctx, t, p, ids, req.Reference, s.cfg.OfferTTL, txCode, func(id string) ([]SourceDocument, error) {
 		return s.source.Fetch(ctx, id, req.Subject, req.Parameters)
 	})
+}
+
+// The transaction code a wallet asks for (T2): six digits, typed in.
+const (
+	txCodeLength      = 6
+	txCodeDescription = "Vul de code in die u apart hebt ontvangen."
+)
+
+// newTxCode returns a random transaction code of txCodeLength digits.
+func newTxCode() (string, error) {
+	n, err := rand.Int(rand.Reader, big.NewInt(1_000_000))
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%0*d", txCodeLength, n.Int64()), nil
+}
+
+// txCodeHash is what is kept of a transaction code: its hash bound to the
+// offer's code, so equal codes of two offers do not look alike.
+func txCodeHash(code, txCode string) string {
+	if txCode == "" {
+		return ""
+	}
+	return hash(code + "|" + txCode)
 }
 
 // createOffer fetches the documents of each configuration with fetch and
 // stores them in a new session behind a fresh pre-authorized code that
 // expires after ttl.
-func (s *Service) createOffer(ctx context.Context, t Target, p Profile, ids []string, reference string, ttl time.Duration,
+func (s *Service) createOffer(ctx context.Context, t Target, p Profile, ids []string, reference string, ttl time.Duration, txCode string,
 	fetch func(configurationID string) ([]SourceDocument, error)) (Offer, error) {
-	code, err := s.createSession(ctx, t, p, ids, reference, ttl, nil, fetch)
+	code, err := s.createSession(ctx, t, p, ids, reference, ttl, sessionOptions{txCode: txCode}, fetch)
 	if err != nil {
 		return Offer{}, err
+	}
+	grant := oid4vci.PreAuthorizedCodeGrant{PreAuthorizedCode: code}
+	if txCode != "" {
+		grant.TxCode = &oid4vci.TxCode{InputMode: "numeric", Length: txCodeLength, Description: txCodeDescription}
 	}
 	offer := oid4vci.CredentialOffer{
 		CredentialIssuer:           s.Identifier(t),
 		CredentialConfigurationIDs: ids,
-		Grants: map[string]any{
-			oid4vci.GrantPreAuthorizedCode: oid4vci.PreAuthorizedCodeGrant{PreAuthorizedCode: code},
-		},
+		Grants:                     map[string]any{oid4vci.GrantPreAuthorizedCode: grant},
 	}
 	links, err := offerLinks(p, offer)
 	if err != nil {
 		return Offer{}, err
 	}
-	return Offer{CredentialOffer: offer, Links: links}, nil
+	return Offer{CredentialOffer: offer, Links: links, TxCodeValue: txCode}, nil
+}
+
+// sessionOptions are what a session holds besides its documents: the
+// binding of an authorization code, or the transaction code of an offer.
+type sessionOptions struct {
+	binding *CodeBinding
+	txCode  string
 }
 
 // createSession fetches the documents of the configurations ids and stores
 // them as a session under a fresh code, valid for ttl, and returns the code.
 // binding is set for an authorization code.
 func (s *Service) createSession(ctx context.Context, t Target, p Profile, ids []string, reference string, ttl time.Duration,
-	binding *CodeBinding, fetch func(configurationID string) ([]SourceDocument, error)) (string, error) {
+	opts sessionOptions, fetch func(configurationID string) ([]SourceDocument, error)) (string, error) {
 	now := s.now()
 	notBefore := now.UTC().Truncate(24 * time.Hour)
 	var docs []Document
@@ -152,7 +197,8 @@ func (s *Service) createSession(ctx context.Context, t Target, p Profile, ids []
 	}
 	if err := s.sessions.CreateSession(ctx, Session{
 		ID: sessionID, Provider: t.Provider, Profile: p.Name, CodeHash: hash(code),
-		ExpiresAt: now.Add(ttl), Reference: reference, Documents: docs, Binding: binding,
+		ExpiresAt: now.Add(ttl), Reference: reference, Documents: docs, Binding: opts.binding,
+		TxCodeHash: txCodeHash(code, opts.txCode),
 	}); err != nil {
 		return "", err
 	}

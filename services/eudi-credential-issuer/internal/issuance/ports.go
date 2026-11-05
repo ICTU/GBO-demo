@@ -74,12 +74,17 @@ var (
 // Sessions stores issuance sessions and the access tokens bound to them.
 type Sessions interface {
 	CreateSession(ctx context.Context, s Session) error
-	// RedeemCode marks the pre-authorized code of a session of the provider
-	// and profile as used and returns the session, atomically: a code works
-	// once. It returns ErrNotFound for an unknown, used or expired code, or
-	// a code of another provider or profile, and then leaves the code as it
-	// was.
-	RedeemCode(ctx context.Context, provider, profile, codeHash string, now time.Time) (Session, error)
+	// RedeemCode marks the code of a session of the provider and profile
+	// as used and returns the session, atomically: a code works once. It
+	// returns ErrNotFound for an unknown, used or expired code, or a code of
+	// another provider or profile, and then leaves the code as it was.
+	// txCodeHash is the hash of the transaction code the wallet sent, empty
+	// for none. For a session with a transaction code, a missing or wrong
+	// one returns ErrTxCodeMismatch and counts as a failed attempt; the
+	// MaxTxCodeAttempts-th failure uses the code up. For a session without
+	// one, a code sent returns ErrTxCodeUnexpected and leaves the code as
+	// it was.
+	RedeemCode(ctx context.Context, provider, profile, codeHash, txCodeHash string, now time.Time) (Session, error)
 	SaveToken(ctx context.Context, t AccessToken) error
 	// Token returns an unexpired access token and its session, or
 	// ErrNotFound.
@@ -167,6 +172,16 @@ type StatusLists interface {
 // ErrNotFound is returned by stores for an unknown or expired item.
 var ErrNotFound = errors.New("not found")
 
+// Errors RedeemCode returns for a transaction code.
+var (
+	ErrTxCodeMismatch   = errors.New("the transaction code is missing or wrong")
+	ErrTxCodeUnexpected = errors.New("the offer has no transaction code")
+)
+
+// MaxTxCodeAttempts is how many wrong transaction codes an offer takes; the
+// last one uses it up.
+const MaxTxCodeAttempts = 3
+
 // Session is one issuance: the documents fetched for a pre-authorized
 // code, to be issued to the wallet that redeems it.
 type Session struct {
@@ -181,6 +196,8 @@ type Session struct {
 	// Binding is set for an authorization code: what the token request
 	// must match. A session without it has a pre-authorized code.
 	Binding *CodeBinding
+	// TxCodeHash is the hash of the offer's transaction code, if it has one.
+	TxCodeHash string
 }
 
 // CodeBinding binds an authorization code to the pushed authorization
