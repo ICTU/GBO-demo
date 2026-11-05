@@ -129,6 +129,10 @@ func TestDeferredRefusals(t *testing.T) { // D-5, D-7
 		if status, body := w.deferred(tok.AccessToken, nil, map[string]any{"transaction_id": "nope"}); status != http.StatusBadRequest || body["error"] != "invalid_transaction_id" {
 			t.Errorf("unknown id = %d %v, want invalid_transaction_id", status, body)
 		}
+		// D-10 (OpenID4VCI 1.0 section 9.1): transaction_id is required.
+		if status, body := w.deferred(tok.AccessToken, nil, map[string]any{}); status != http.StatusBadRequest || body["error"] != "invalid_credential_request" {
+			t.Errorf("no transaction_id = %d %v, want invalid_credential_request", status, body)
+		}
 		// The refusals did not use the transaction up.
 		if status, body := w.deferred(tok.AccessToken, nil, map[string]any{"transaction_id": cred["transaction_id"]}); status != http.StatusOK {
 			t.Errorf("the transaction after the refusals = %d %v, want the credential", status, body)

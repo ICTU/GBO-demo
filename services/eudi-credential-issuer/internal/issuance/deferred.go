@@ -182,7 +182,7 @@ func (s *Service) Deferred(ctx context.Context, call DeferredCall) (CredentialRe
 	}
 	unknown := refuse(oid4vci.ErrInvalidTransactionID, "the transaction_id is unknown, finished or expired")
 	if req.TransactionID == "" {
-		return CredentialResult{}, unknown
+		return CredentialResult{}, refuse(oid4vci.ErrInvalidCredentialRequest, "transaction_id is required")
 	}
 	pending, err := s.sessions.TakePending(ctx, pendingDeferral, hash(req.TransactionID), now)
 	if errors.Is(err, ErrNotFound) {
