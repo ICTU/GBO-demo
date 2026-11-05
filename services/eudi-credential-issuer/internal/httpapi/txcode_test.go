@@ -77,14 +77,18 @@ func TestRedeemingWithATransactionCode(t *testing.T) { // X-3 .. X-7
 	})
 	t.Run("X-4: no or a wrong code, then the right one", func(t *testing.T) {
 		c, code := offer()
-		if status, body := w.tokenRequestForm(c, nil); status != http.StatusBadRequest || body["error"] != "invalid_grant" {
-			t.Fatalf("token without code = %d %v, want invalid_grant", status, body)
+		// T-1 (OpenID4VCI 1.0 section 6.3): a missing code is invalid_request
+		// and no failed attempt.
+		for i := 0; i < 3; i++ {
+			if status, body := w.tokenRequestForm(c, nil); status != http.StatusBadRequest || body["error"] != "invalid_request" {
+				t.Fatalf("token without code = %d %v, want invalid_request", status, body)
+			}
 		}
 		if status, body := w.tokenRequestForm(c, url.Values{"tx_code": {wrong(code)}}); status != http.StatusBadRequest || body["error"] != "invalid_grant" {
-			t.Fatalf("token with a wrong code = %d %v, want invalid_grant", status, body)
+			t.Fatalf("T-2: token with a wrong code = %d %v, want invalid_grant", status, body)
 		}
 		if status, body := w.tokenRequestForm(c, url.Values{"tx_code": {code}}); status != http.StatusOK {
-			t.Fatalf("token with the right code after two failures = %d %v", status, body)
+			t.Fatalf("token with the right code after missing codes and a failure = %d %v", status, body)
 		}
 	})
 	t.Run("X-5: three failures use the offer up", func(t *testing.T) {

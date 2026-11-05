@@ -76,8 +76,8 @@ func (s *Service) Token(ctx context.Context, req TokenRequest) (oid4vci.TokenRes
 		if p.Kind != KindEUDI {
 			return oid4vci.TokenResponse{}, refuse(oid4vci.ErrUnsupportedGrantType, "refresh tokens are not offered on this profile")
 		}
-		if req.RefreshToken == "" {
-			return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidRequest, "refresh_token is required")
+		if req.RefreshToken == "" || req.TxCode != "" {
+			return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidRequest, "refresh_token is required and tx_code is not expected")
 		}
 	default:
 		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrUnsupportedGrantType, "only the pre-authorized code, authorization code and refresh token grants are supported")
@@ -108,8 +108,11 @@ func (s *Service) Token(ctx context.Context, req TokenRequest) (oid4vci.TokenRes
 	switch {
 	case errors.Is(err, ErrNotFound):
 		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "the code is unknown, used or expired")
+	case errors.Is(err, ErrTxCodeMissing):
+		// OpenID4VCI 1.0 section 6.3: a malformed request, no failed attempt.
+		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidRequest, "the offer asks for a transaction code")
 	case errors.Is(err, ErrTxCodeMismatch):
-		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "the transaction code is missing or wrong")
+		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "the transaction code is wrong")
 	case errors.Is(err, ErrTxCodeUnexpected):
 		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidRequest, "tx_code is not expected for this offer")
 	}

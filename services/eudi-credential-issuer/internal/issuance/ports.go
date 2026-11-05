@@ -79,8 +79,9 @@ type Sessions interface {
 	// returns ErrNotFound for an unknown, used or expired code, or a code of
 	// another provider or profile, and then leaves the code as it was.
 	// txCodeHash is the hash of the transaction code the wallet sent, empty
-	// for none. For a session with a transaction code, a missing or wrong
-	// one returns ErrTxCodeMismatch and counts as a failed attempt; the
+	// for none. For a session with a transaction code, a missing one returns
+	// ErrTxCodeMissing and leaves the code as it was; a wrong one returns
+	// ErrTxCodeMismatch and counts as a failed attempt; the
 	// MaxTxCodeAttempts-th failure uses the code up. For a session without
 	// one, a code sent returns ErrTxCodeUnexpected and leaves the code as
 	// it was.
@@ -182,7 +183,8 @@ var ErrNotFound = errors.New("not found")
 
 // Errors RedeemCode returns for a transaction code.
 var (
-	ErrTxCodeMismatch   = errors.New("the transaction code is missing or wrong")
+	ErrTxCodeMissing    = errors.New("the transaction code is missing")
+	ErrTxCodeMismatch   = errors.New("the transaction code is wrong")
 	ErrTxCodeUnexpected = errors.New("the offer has no transaction code")
 )
 

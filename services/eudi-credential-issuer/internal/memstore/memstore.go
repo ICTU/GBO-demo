@@ -73,6 +73,8 @@ func (s *Store) RedeemCode(_ context.Context, provider, profile, codeHash, txCod
 	switch {
 	case sess.TxCodeHash == "" && txCodeHash != "":
 		return issuance.Session{}, issuance.ErrTxCodeUnexpected
+	case sess.TxCodeHash != "" && txCodeHash == "":
+		return issuance.Session{}, issuance.ErrTxCodeMissing
 	case sess.TxCodeHash != "" && sess.TxCodeHash != txCodeHash:
 		s.attempts[codeHash]++
 		if s.attempts[codeHash] >= issuance.MaxTxCodeAttempts {

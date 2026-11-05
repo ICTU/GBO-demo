@@ -188,6 +188,8 @@ func (s *Store) RedeemCode(ctx context.Context, provider, profile, codeHash, txC
 	switch {
 	case sess.TxCodeHash == "" && txCodeHash != "":
 		return issuance.Session{}, issuance.ErrTxCodeUnexpected
+	case sess.TxCodeHash != "" && txCodeHash == "":
+		return issuance.Session{}, issuance.ErrTxCodeMissing
 	case sess.TxCodeHash != "" && sess.TxCodeHash != txCodeHash:
 		if _, err := tx.Exec(ctx, `UPDATE sessions SET tx_code_attempts = tx_code_attempts + 1,
 			code_used = tx_code_attempts + 1 >= $2 WHERE id = $1`, sess.ID, issuance.MaxTxCodeAttempts); err != nil {

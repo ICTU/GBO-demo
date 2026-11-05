@@ -484,13 +484,19 @@ func txCode(t *testing.T, s Store) {
 			t.Fatal(err)
 		}
 	}
-	for _, tx := range []string{"", "wrong"} {
-		if _, err := s.RedeemCode(ctx, "tax", "eudi", "c-tx", tx, now); !errors.Is(err, issuance.ErrTxCodeMismatch) {
-			t.Fatalf("redeem with %q: %v, want ErrTxCodeMismatch", tx, err)
+	// A missing code is a malformed request, not a failed attempt.
+	for i := 0; i < issuance.MaxTxCodeAttempts; i++ {
+		if _, err := s.RedeemCode(ctx, "tax", "eudi", "c-tx", "", now); !errors.Is(err, issuance.ErrTxCodeMissing) {
+			t.Fatalf("redeem without a code: %v, want ErrTxCodeMissing", err)
+		}
+	}
+	for i := 0; i < issuance.MaxTxCodeAttempts-1; i++ {
+		if _, err := s.RedeemCode(ctx, "tax", "eudi", "c-tx", "wrong", now); !errors.Is(err, issuance.ErrTxCodeMismatch) {
+			t.Fatalf("redeem with a wrong code: %v, want ErrTxCodeMismatch", err)
 		}
 	}
 	if got, err := s.RedeemCode(ctx, "tax", "eudi", "c-tx", "right", now); err != nil || got.ID != "tx" || got.TxCodeHash != "right" {
-		t.Fatalf("redeem with the right code after two failures: %+v, %v", got, err)
+		t.Fatalf("redeem with the right code after missing codes and two failures: %+v, %v", got, err)
 	}
 	for i := 0; i < issuance.MaxTxCodeAttempts; i++ {
 		if _, err := s.RedeemCode(ctx, "tax", "eudi", "c-tx2", "wrong", now); !errors.Is(err, issuance.ErrTxCodeMismatch) {

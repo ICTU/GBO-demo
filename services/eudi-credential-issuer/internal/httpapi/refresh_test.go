@@ -24,11 +24,20 @@ import (
 // refresh redeems refreshToken with the wallet's attestation and dpopKey.
 func (w *wallet) refresh(refreshToken string, dpopKey *ecdsa.PrivateKey) (int, map[string]any) {
 	w.f.t.Helper()
+	return w.refreshWith(refreshToken, dpopKey, nil)
+}
+
+// refreshWith is refresh with extra form parameters.
+func (w *wallet) refreshWith(refreshToken string, dpopKey *ecdsa.PrivateKey, extra url.Values) (int, map[string]any) {
+	w.f.t.Helper()
 	if dpopKey == nil {
 		dpopKey = w.dpopKey
 	}
 	id := w.f.idOf(w.issuer, w.profile)
 	form := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refreshToken}}
+	for k, v := range extra {
+		form[k] = v
+	}
 	return w.post("/token", strings.NewReader(form.Encode()), map[string]string{
 		"OAuth-Client-Attestation":     w.wia,
 		"OAuth-Client-Attestation-PoP": testwallet.PoP(w.f.t, w.wiaKey, w.clientID, id, w.challenge()),
@@ -181,4 +190,20 @@ func containsAny(list []any, want string) bool {
 		}
 	}
 	return false
+}
+
+// T-3 (OpenID4VCI 1.0 section 6.1): tx_code belongs to the pre-authorized
+// code grant only.
+func TestATransactionCodeWithAnotherGrant(t *testing.T) {
+	f := newFixture(t)
+	w := f.wallet("eudi")
+	_, body := w.tokenRequest(f.preAuthCode("eudi"), nil)
+	rt, _ := body["refresh_token"].(string)
+	if status, body := w.refreshWith(rt, nil, url.Values{"tx_code": {"123456"}}); status != http.StatusBadRequest || body["error"] != "invalid_request" {
+		t.Errorf("refresh with tx_code = %d %v, want invalid_request", status, body)
+	}
+	a := f.acfWallet()
+	if status, body := a.tokenForCode(a.code(nil), url.Values{"tx_code": {"123456"}}, nil); status != http.StatusBadRequest || body["error"] != "invalid_request" {
+		t.Errorf("authorization code with tx_code = %d %v, want invalid_request", status, body)
+	}
 }
