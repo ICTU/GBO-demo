@@ -116,6 +116,16 @@ type CredentialResponse struct {
 	Interval      int64  `json:"interval,omitempty"`
 }
 
+// DeferredRequest is a deferred credential request (section 9.1).
+type DeferredRequest struct {
+	TransactionID      string              `json:"transaction_id"`
+	ResponseEncryption *ResponseEncryption `json:"credential_response_encryption,omitempty"`
+}
+
+// ErrInvalidTransactionID refuses a deferred request for a transaction the
+// issuer does not know or has finished (section 9.3).
+const ErrInvalidTransactionID = "invalid_transaction_id"
+
 // Notification is a notification request (section 11.1).
 type Notification struct {
 	NotificationID   string `json:"notification_id"`

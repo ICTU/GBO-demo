@@ -38,6 +38,7 @@ func Public(svc *issuance.Service, log *slog.Logger) http.Handler {
 	mux.HandleFunc("POST /{provider}/{profile}/credential", h.credential)
 	mux.HandleFunc("POST /{provider}/{profile}/credential_preview", h.preview)
 	mux.HandleFunc("POST /{provider}/{profile}/notification", h.notification)
+	mux.HandleFunc("POST /{provider}/{profile}/deferred_credential", h.deferredCredential)
 	mux.HandleFunc("GET /status/{provider}/{list}", h.statusList)
 	// Disclosure-based issuance: the wallet fetches the OpenID4VP request
 	// of an offer by reference and posts its response (direct_post.jwt).
@@ -184,13 +185,51 @@ func (h *handler) credential(w http.ResponseWriter, r *http.Request) {
 		h.failResource(w, err, "DPoP")
 		return
 	}
+	writeCredentialResult(w, res)
+}
+
+// writeCredentialResult writes a credential response: 202 when it defers
+// the issuance, as a JWE when the wallet asked for encryption.
+func writeCredentialResult(w http.ResponseWriter, res issuance.CredentialResult) {
 	w.Header().Set("Cache-Control", "no-store")
+	status := http.StatusOK
+	if res.Deferred {
+		status = http.StatusAccepted
+	}
 	if res.Encrypted != "" {
 		w.Header().Set("Content-Type", "application/jwt")
+		w.WriteHeader(status)
 		_, _ = io.WriteString(w, res.Encrypted)
 		return
 	}
-	writeJSON(w, http.StatusOK, res.Response)
+	writeJSON(w, status, res.Response)
+}
+
+// deferredCredential handles a deferred credential request (section 9), as
+// JSON or as a JWE.
+func (h *handler) deferredCredential(w http.ResponseWriter, r *http.Request) {
+	call := issuance.DeferredCall{Target: target(r), Authorization: r.Header.Get("Authorization"), DPoP: r.Header.Values("DPoP")}
+	body := http.MaxBytesReader(w, r.Body, maxBody)
+	if mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mt == "application/jwt" {
+		raw, err := io.ReadAll(body)
+		if err != nil {
+			h.fail(w, &issuance.Error{Code: oid4vci.ErrInvalidCredentialRequest, Description: "the body could not be read"})
+			return
+		}
+		call.Encrypted, call.EncryptedRequest = true, strings.TrimSpace(string(raw))
+	} else if err := json.NewDecoder(body).Decode(&call.Request); err != nil {
+		h.fail(w, &issuance.Error{Code: oid4vci.ErrInvalidCredentialRequest, Description: "the body must be a JSON deferred credential request"})
+		return
+	}
+	res, err := h.svc.Deferred(r.Context(), call)
+	if err != nil {
+		h.failResource(w, err, "DPoP")
+		return
+	}
+	if res.Deferred {
+		h.log.Info("issuance still deferred")
+	}
+	writeCredentialResult(w, res)
 }
 
 // notification takes the wallet's notification (section 11); the issuer

@@ -111,6 +111,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   of the first issuance; the source is not asked again and no BSN is kept,
   but the claims are kept until the refresh token expires. A revoked offer
   reference stops it.
+- **Deferred issuance at the own credential issuer** (#614): when the source
+  is unavailable just after a citizen logged in, the wallet gets its code
+  anyway, the credential request answers `202` with a `transaction_id`, and
+  `POST /{provider}/eudi/deferred_credential` asks the source again on every
+  request (OpenID4VCI 1.0 section 9). The BSN from the login is kept sealed,
+  apart from the session, for at most 24 hours. Replaces the "Bron niet
+  beschikbaar" page after the login. Migration `011_pending_source.sql`.
 - **Transaction codes at the own credential issuer** (#614): on the `eudi`
   profile a pre-authorized offer may ask for a six-digit transaction code
   (`tx_code: true` in `POST /offers`). The issuer returns the code apart

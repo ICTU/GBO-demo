@@ -226,6 +226,11 @@ func (s *Service) refresh(ctx context.Context, req TokenRequest, att clientattes
 	} else if revoked {
 		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "the offer has been revoked")
 	}
+	// A re-issuance has the claims of the first issuance (R2); a session
+	// whose source has not answered yet has none.
+	if old.Pending != nil {
+		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "the first issuance has not finished")
+	}
 	// A session of its own: the credentials of the first issuance stay
 	// issued, these are new. Its code is random and handed to nobody.
 	next := Session{Provider: old.Provider, Profile: old.Profile, Reference: old.Reference, ExpiresAt: now.Add(s.cfg.RefreshTTL)}

@@ -150,15 +150,20 @@ func (s *Store) CreateSession(ctx context.Context, sess issuance.Session) error 
 	if err != nil {
 		return err
 	}
-	var binding []byte
+	var binding, pending []byte
 	if sess.Binding != nil {
 		if binding, err = json.Marshal(sess.Binding); err != nil {
 			return err
 		}
 	}
-	_, err = s.pool.Exec(ctx, `INSERT INTO sessions (id, provider, profile, code_hash, expires_at, reference, documents, code_binding, tx_code_hash)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-		sess.ID, sess.Provider, sess.Profile, sess.CodeHash, sess.ExpiresAt, sess.Reference, docs, binding, sess.TxCodeHash)
+	if sess.Pending != nil {
+		if pending, err = json.Marshal(sess.Pending); err != nil {
+			return err
+		}
+	}
+	_, err = s.pool.Exec(ctx, `INSERT INTO sessions (id, provider, profile, code_hash, expires_at, reference, documents, code_binding, tx_code_hash, pending_source)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		sess.ID, sess.Provider, sess.Profile, sess.CodeHash, sess.ExpiresAt, sess.Reference, docs, binding, sess.TxCodeHash, pending)
 	return err
 }
 
@@ -169,11 +174,11 @@ func (s *Store) RedeemCode(ctx context.Context, provider, profile, codeHash, txC
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	var sess issuance.Session
-	var docs, binding []byte
-	err = tx.QueryRow(ctx, `SELECT id, provider, profile, code_hash, expires_at, reference, documents, code_binding, tx_code_hash
+	var docs, binding, pending []byte
+	err = tx.QueryRow(ctx, `SELECT id, provider, profile, code_hash, expires_at, reference, documents, code_binding, tx_code_hash, pending_source
 		FROM sessions WHERE code_hash = $1 AND provider = $2 AND profile = $3 AND NOT code_used AND expires_at > $4
 		FOR UPDATE`, codeHash, provider, profile, now).
-		Scan(&sess.ID, &sess.Provider, &sess.Profile, &sess.CodeHash, &sess.ExpiresAt, &sess.Reference, &docs, &binding, &sess.TxCodeHash)
+		Scan(&sess.ID, &sess.Provider, &sess.Profile, &sess.CodeHash, &sess.ExpiresAt, &sess.Reference, &docs, &binding, &sess.TxCodeHash, &pending)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return issuance.Session{}, issuance.ErrNotFound
 	}
@@ -199,13 +204,24 @@ func (s *Store) RedeemCode(ctx context.Context, provider, profile, codeHash, txC
 	if err := tx.Commit(ctx); err != nil {
 		return issuance.Session{}, err
 	}
+	return sess, decodeSession(&sess, docs, binding, pending)
+}
+
+// decodeSession decodes the JSON columns of a session.
+func decodeSession(sess *issuance.Session, docs, binding, pending []byte) error {
 	if binding != nil {
 		sess.Binding = &issuance.CodeBinding{}
 		if err := json.Unmarshal(binding, sess.Binding); err != nil {
-			return issuance.Session{}, fmt.Errorf("decode code binding: %w", err)
+			return fmt.Errorf("decode code binding: %w", err)
 		}
 	}
-	return sess, decodeDocuments(docs, &sess)
+	if pending != nil {
+		sess.Pending = &issuance.PendingSource{}
+		if err := json.Unmarshal(pending, sess.Pending); err != nil {
+			return fmt.Errorf("decode pending source: %w", err)
+		}
+	}
+	return decodeDocuments(docs, sess)
 }
 
 // decodeDocuments keeps numbers as json.Number, so whole numbers beyond
@@ -229,18 +245,19 @@ func (s *Store) Token(ctx context.Context, tokenHash string, now time.Time) (iss
 	t := issuance.AccessToken{Hash: tokenHash}
 	var sess issuance.Session
 	var docs []byte
+	var pending []byte
 	err := s.pool.QueryRow(ctx, `SELECT t.session_id, t.jkt, t.client_id, t.wallet_provider, t.expires_at,
-			s.id, s.provider, s.profile, s.code_hash, s.expires_at, s.reference, s.documents
+			s.id, s.provider, s.profile, s.code_hash, s.expires_at, s.reference, s.documents, s.pending_source
 		FROM access_tokens t JOIN sessions s ON s.id = t.session_id
 		WHERE t.hash = $1 AND t.expires_at > $2`, tokenHash, now).
-		Scan(&t.SessionID, &t.JKT, &t.ClientID, &t.WalletProvider, &t.ExpiresAt, &sess.ID, &sess.Provider, &sess.Profile, &sess.CodeHash, &sess.ExpiresAt, &sess.Reference, &docs)
+		Scan(&t.SessionID, &t.JKT, &t.ClientID, &t.WalletProvider, &t.ExpiresAt, &sess.ID, &sess.Provider, &sess.Profile, &sess.CodeHash, &sess.ExpiresAt, &sess.Reference, &docs, &pending)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return issuance.AccessToken{}, issuance.Session{}, issuance.ErrNotFound
 	}
 	if err != nil {
 		return issuance.AccessToken{}, issuance.Session{}, err
 	}
-	if err := decodeDocuments(docs, &sess); err != nil {
+	if err := decodeSession(&sess, docs, nil, pending); err != nil {
 		return issuance.AccessToken{}, issuance.Session{}, err
 	}
 	return t, sess, nil
@@ -472,23 +489,17 @@ func (s *Store) TakePending(ctx context.Context, kind, id string, now time.Time)
 
 func (s *Store) Session(ctx context.Context, id string) (issuance.Session, error) {
 	var sess issuance.Session
-	var docs, binding []byte
-	err := s.pool.QueryRow(ctx, `SELECT id, provider, profile, code_hash, expires_at, reference, documents, code_binding, tx_code_hash
+	var docs, binding, pending []byte
+	err := s.pool.QueryRow(ctx, `SELECT id, provider, profile, code_hash, expires_at, reference, documents, code_binding, tx_code_hash, pending_source
 		FROM sessions WHERE id = $1`, id).
-		Scan(&sess.ID, &sess.Provider, &sess.Profile, &sess.CodeHash, &sess.ExpiresAt, &sess.Reference, &docs, &binding, &sess.TxCodeHash)
+		Scan(&sess.ID, &sess.Provider, &sess.Profile, &sess.CodeHash, &sess.ExpiresAt, &sess.Reference, &docs, &binding, &sess.TxCodeHash, &pending)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return issuance.Session{}, issuance.ErrNotFound
 	}
 	if err != nil {
 		return issuance.Session{}, err
 	}
-	if binding != nil {
-		sess.Binding = &issuance.CodeBinding{}
-		if err := json.Unmarshal(binding, sess.Binding); err != nil {
-			return issuance.Session{}, fmt.Errorf("decode code binding: %w", err)
-		}
-	}
-	return sess, decodeDocuments(docs, &sess)
+	return sess, decodeSession(&sess, docs, binding, pending)
 }
 
 func (s *Store) ExtendSession(ctx context.Context, id string, until time.Time) error {
@@ -500,4 +511,36 @@ func (s *Store) ExtendSession(ctx context.Context, id string, until time.Time) e
 		return issuance.ErrNotFound
 	}
 	return nil
+}
+
+func (s *Store) CompleteDocument(ctx context.Context, id string, doc issuance.Document) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var raw []byte
+	err = tx.QueryRow(ctx, `SELECT documents FROM sessions WHERE id = $1 FOR UPDATE`, id).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return issuance.ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	var sess issuance.Session
+	if err := decodeDocuments(raw, &sess); err != nil {
+		return err
+	}
+	docs, err := issuance.CompleteDocuments(sess.Documents, doc)
+	if err != nil {
+		return err
+	}
+	if raw, err = json.Marshal(docs); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE sessions SET documents = $2,
+		pending_source = CASE WHEN $3 THEN NULL ELSE pending_source END WHERE id = $1`, id, raw, issuance.AllComplete(docs)); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }

@@ -346,7 +346,11 @@ func (s *Service) Callback(ctx context.Context, t Target, ret LoginReturn) (*Wal
 		r.Organization, r.Attestation = s.offerNames(t, o)
 		return r, nil
 	case errors.Is(err, ErrSourceUnavailable):
-		return s.walletReturn(t, pushed, ReturnUnavailable, "temporarily_unavailable"), nil
+		// Deferred issuance (V2): the wallet gets its code; the credential
+		// follows when the source answers.
+		if code, err = s.createPendingSession(ctx, t, p, o, binding, bsn); err != nil {
+			return nil, err
+		}
 	case err != nil:
 		return nil, err
 	}

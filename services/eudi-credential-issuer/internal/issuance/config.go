@@ -169,6 +169,9 @@ type Config struct {
 	// RefreshTTL is the lifetime of a refresh token on the eudi profile; the
 	// session's claims are kept that long (R3, R5).
 	RefreshTTL time.Duration
+	// DeferralTTL bounds a deferred issuance, and how long the BSN from the
+	// login is kept for it (V3).
+	DeferralTTL time.Duration
 }
 
 // Defaults for the durations and sizes a deployment does not set.
@@ -180,6 +183,7 @@ const (
 	DefaultStatusListSize = 1 << 16
 	DefaultDisclosureTTL  = 5 * time.Minute
 	DefaultRefreshTTL     = 30 * 24 * time.Hour
+	DefaultDeferralTTL    = 24 * time.Hour
 )
 
 // servesNL reports whether the NL Wallet is served: its preview endpoint,

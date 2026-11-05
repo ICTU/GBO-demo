@@ -92,7 +92,9 @@ func (f *fixture) acfWallet() *acfWallet {
 	for i := range b {
 		b[i] = byte(i * 7)
 	}
-	w.verifier = base64.RawURLEncoding.EncodeToString(append(b, []byte(f.t.Name())...))
+	// Per test, and within the 128 characters of RFC 7636 section 4.1.
+	name := sha256.Sum256([]byte(f.t.Name()))
+	w.verifier = base64.RawURLEncoding.EncodeToString(append(b, name[:]...))
 	sum := sha256.Sum256([]byte(w.verifier))
 	w.challenge = base64.RawURLEncoding.EncodeToString(sum[:])
 	return w
@@ -481,8 +483,9 @@ func TestPagesWithAWayBackToTheWallet(t *testing.T) { // P14, C10
 		heading string
 		code    string
 	}{
-		"P14: the source has no data":   {func(f *fixture) { f.setSource(http.StatusNotFound, nil) }, "Geen gegevens gevonden", "access_denied"},
-		"K7: the source is unavailable": {func(f *fixture) { f.setSource(http.StatusServiceUnavailable, nil) }, "Bron niet beschikbaar", "temporarily_unavailable"},
+		"P14: the source has no data": {func(f *fixture) { f.setSource(http.StatusNotFound, nil) }, "Geen gegevens gevonden", "access_denied"},
+		// A source that is unavailable after the login defers the issuance
+		// (V2, deferred_test.go) instead of showing this page.
 		"C10: the login is unavailable": {func(f *fixture) { f.login.err = issuance.ErrLoginUnavailable }, "Bron niet beschikbaar", "temporarily_unavailable"},
 	} {
 		t.Run(name, func(t *testing.T) {

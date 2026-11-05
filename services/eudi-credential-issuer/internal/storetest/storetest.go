@@ -44,6 +44,7 @@ func Run(t *testing.T, newStore func(t *testing.T) Store) {
 		{"an authorization code keeps its binding", codeBinding},
 		{"a transaction code: right, wrong, used up, unexpected", txCode},
 		{"a session is read back and kept longer", sessionExtend},
+		{"a pending session is completed per document", pendingSession},
 	} {
 		t.Run(c.name, func(t *testing.T) { c.test(t, newStore(t)) })
 	}
@@ -529,5 +530,40 @@ func sessionExtend(t *testing.T, s Store) {
 	}
 	if err := s.ExtendSession(ctx, "nope", now); !errors.Is(err, issuance.ErrNotFound) {
 		t.Fatalf("extend an unknown session: %v", err)
+	}
+}
+
+func pendingSession(t *testing.T, s Store) {
+	sess := issuance.Session{ID: "pend", Provider: "tax", Profile: "eudi", CodeHash: "c-pend", ExpiresAt: now.Add(time.Minute),
+		Pending:   &issuance.PendingSource{Offer: "income-2025"},
+		Documents: []issuance.Document{{CredentialID: "d1", ConfigurationID: "income"}, {CredentialID: "d2", ConfigurationID: "income"}}}
+	if err := s.CreateSession(ctx, sess); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Session(ctx, "pend")
+	if err != nil || got.Pending == nil || got.Pending.Offer != "income-2025" || got.Documents[0].Claims != nil {
+		t.Fatalf("pending session = %+v, %v", got, err)
+	}
+	full := func(id string) issuance.Document {
+		return issuance.Document{CredentialID: id, ConfigurationID: "income", Claims: map[string]any{"year": "2025"}, NotBefore: now, Expires: now.Add(time.Hour)}
+	}
+	if err := s.CompleteDocument(ctx, "pend", full("d1")); err != nil {
+		t.Fatal(err)
+	}
+	// One of two: still pending.
+	if got, err := s.Session(ctx, "pend"); err != nil || got.Pending == nil || got.Documents[0].Claims["year"] != "2025" || got.Documents[1].Claims != nil {
+		t.Fatalf("after one document = %+v, %v", got, err)
+	}
+	if err := s.CompleteDocument(ctx, "pend", full("d2")); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.Session(ctx, "pend"); err != nil || got.Pending != nil || !got.Documents[1].Expires.Equal(now.Add(time.Hour)) {
+		t.Fatalf("after both documents = %+v, %v", got, err)
+	}
+	if err := s.CompleteDocument(ctx, "pend", full("nope")); !errors.Is(err, issuance.ErrNotFound) {
+		t.Fatalf("unknown document: %v", err)
+	}
+	if err := s.CompleteDocument(ctx, "nope", full("d1")); !errors.Is(err, issuance.ErrNotFound) {
+		t.Fatalf("unknown session: %v", err)
 	}
 }

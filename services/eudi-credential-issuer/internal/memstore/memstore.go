@@ -314,3 +314,22 @@ func (s *Store) ExtendSession(_ context.Context, id string, until time.Time) err
 	}
 	return nil
 }
+
+func (s *Store) CompleteDocument(_ context.Context, id string, doc issuance.Document) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.sessions[id]
+	if !ok {
+		return issuance.ErrNotFound
+	}
+	docs, err := issuance.CompleteDocuments(sess.Documents, doc)
+	if err != nil {
+		return err
+	}
+	sess.Documents = docs
+	if issuance.AllComplete(docs) {
+		sess.Pending = nil
+	}
+	s.sessions[id] = sess
+	return nil
+}

@@ -90,6 +90,10 @@ type Sessions interface {
 	Session(ctx context.Context, id string) (Session, error)
 	// ExtendSession keeps a session, and its claims, at least until until.
 	ExtendSession(ctx context.Context, id string, until time.Time) error
+	// CompleteDocument replaces the document of a pending session that has
+	// doc's credential id; once every document has its claims, the session
+	// is no longer pending. ErrNotFound for an unknown session or document.
+	CompleteDocument(ctx context.Context, id string, doc Document) error
 	// Token returns an unexpired access token and its session, or
 	// ErrNotFound.
 	Token(ctx context.Context, tokenHash string, now time.Time) (AccessToken, Session, error)
@@ -202,6 +206,15 @@ type Session struct {
 	Binding *CodeBinding
 	// TxCodeHash is the hash of the offer's transaction code, if it has one.
 	TxCodeHash string
+	// Pending is set while the source has not answered yet: the documents
+	// then have no claims, and the credential request is deferred.
+	Pending *PendingSource
+}
+
+// PendingSource is the source offer a pending session waits for. It holds
+// no personal data: the BSN is kept apart, sealed, for at most DeferralTTL.
+type PendingSource struct {
+	Offer string `json:"offer"`
 }
 
 // CodeBinding binds an authorization code to the pushed authorization

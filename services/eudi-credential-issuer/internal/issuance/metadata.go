@@ -70,6 +70,9 @@ func (s *Service) issuerMetadata(t Target, prov *provider, p Profile) map[string
 	if p.Kind == KindEUDI {
 		md["notification_endpoint"] = id + "/notification"
 	}
+	if s.offersLogin(p) {
+		md["deferred_credential_endpoint"] = id + "/deferred_credential"
+	}
 	if p.servesNL() {
 		// Not part of OpenID4VCI: the NL Wallet requires a preview of the
 		// credentials before it asks for them.

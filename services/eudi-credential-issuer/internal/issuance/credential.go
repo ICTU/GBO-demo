@@ -53,6 +53,8 @@ type CredentialCall struct {
 type CredentialResult struct {
 	Response  oid4vci.CredentialResponse
 	Encrypted string
+	// Deferred tells that the response defers the issuance: HTTP 202.
+	Deferred bool
 }
 
 // Credential issues the credentials of one credential identifier, one per
@@ -112,6 +114,17 @@ func (s *Service) Credential(ctx context.Context, call CredentialCall) (Credenti
 		return CredentialResult{}, refuse(oid4vci.ErrUnknownCredentialID, "the credential configuration is no longer offered")
 	}
 
+	if session.Pending != nil && doc.Claims == nil {
+		return s.deferCredential(ctx, prov, session, doc, keys, encrypter, now)
+	}
+	return s.issueOnce(ctx, prov, p, c, session, doc, keys, encrypter, now)
+}
+
+// issueOnce issues the credentials of one document to keys, once: the
+// credential is reserved first, and the response carries a notification id
+// on the eudi profile.
+func (s *Service) issueOnce(ctx context.Context, prov *provider, p Profile, c CredentialConfiguration, session Session, doc Document,
+	keys []jose.JSONWebKey, encrypter jose.Encrypter, now time.Time) (CredentialResult, error) {
 	// The credential is reserved before anything is allocated for it, so a
 	// repeated or concurrent request uses up no status list entries. The
 	// reservation is released when issuing fails, and expires if the
