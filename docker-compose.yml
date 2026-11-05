@@ -380,10 +380,6 @@ services:
     build: ./services/dvtp-onboarding-register
     ports:
       # The admin UI is intentionally not exposed on every host interface.
-      # GBO_INTERNAL_BIND_ADDRESS (default 127.0.0.1) sets the host address
-      # of this port, the logboek ports below and the EDI Outway (8087).
-      # The admin UI and the Outway have no login of their own: widen it
-      # only on a trusted network.
       - "${GBO_INTERNAL_BIND_ADDRESS:-127.0.0.1}:${GBO_PORT_DVTP_ONBOARDING_REGISTER:-9415}:4015"
     environment:
       - DATABASE_PATH=/data/onboarding.db
@@ -1353,11 +1349,8 @@ services:
   # DIP stub and registers with its authorization server at start. Records and
   # contracts name public URLs; QTSP_URL_MAP maps them to the containers for
   # transport only. The authorization server allows an http redirect URI on
-  # loopback only: with plain http the web side works from this machine
-  # (localhost). The redirect URI follows QTSP_PUBLIC_URL, by default
-  # http://<GBO_PUBLIC_HOST>:<GBO_PORT_QTSP>; with another host on plain
-  # http the authorization server refuses the registration and the QTSP
-  # stops. Set QTSP_PUBLIC_URL=http://localhost:<port> to keep it local.
+  # loopback only, so the web side works from this machine (localhost).
+  # With another GBO_PUBLIC_HOST on plain http, set QTSP_PUBLIC_URL to localhost.
   qtsp-reference:
     build: ./services/qtsp-reference
     profiles: [asi]
@@ -1429,10 +1422,7 @@ services:
       target: build
     command: npm run dev -- --host 0.0.0.0 --port 9000
     environment:
-      # Vite's dev server answers 403 to a Host header it does not know
-      # (its DNS-rebinding guard); localhost and IP addresses always pass.
-      # This lets GBO_PUBLIC_HOST, and the comma-separated
-      # GBO_EXTRA_ALLOWED_HOSTS, be a DNS name. Same in every Vite frontend.
+      # Vite answers 403 to unknown host names; localhost and IPs always pass.
       - __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=${GBO_PUBLIC_HOST:-localhost},${GBO_EXTRA_ALLOWED_HOSTS:-}
       - CHOKIDAR_USEPOLLING=true
       # Browser-side URL's, dus ze moeten de gepubliceerde host-poorten
@@ -1485,7 +1475,6 @@ services:
     profiles: [dvtp, full]
     command: npm run dev -- --host 0.0.0.0 --port 9001
     environment:
-      # Host names the Vite dev server accepts: see landing-page.
       - __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=${GBO_PUBLIC_HOST:-localhost},${GBO_EXTRA_ALLOWED_HOSTS:-}
       - CHOKIDAR_USEPOLLING=true
       - DV_API_TARGET=http://dienstverlener-backend:4006
@@ -1516,7 +1505,6 @@ services:
     profiles: [dvtp, full]
     command: npm run dev -- --host 0.0.0.0 --port 9004
     environment:
-      # Host names the Vite dev server accepts: see landing-page.
       - __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=${GBO_PUBLIC_HOST:-localhost},${GBO_EXTRA_ALLOWED_HOSTS:-}
       - CHOKIDAR_USEPOLLING=true
       - IR_API_TARGET=http://ir-backend:4010
@@ -1545,7 +1533,6 @@ services:
     profiles: [dvtp, full]
     command: npm run dev -- --host 0.0.0.0 --port 9002
     environment:
-      # Host names the Vite dev server accepts: see landing-page.
       - __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=${GBO_PUBLIC_HOST:-localhost},${GBO_EXTRA_ALLOWED_HOSTS:-}
       - CHOKIDAR_USEPOLLING=true
       - PORTAL_API_TARGET=http://consent-portal-backend:4005
@@ -1675,7 +1662,6 @@ services:
       target: build
     command: npm run dev -- --host 0.0.0.0 --port 9003
     environment:
-      # Host names the Vite dev server accepts: see landing-page.
       - __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=${GBO_PUBLIC_HOST:-localhost},${GBO_EXTRA_ALLOWED_HOSTS:-}
       - CHOKIDAR_USEPOLLING=true
       - DEV_API_TARGET=http://dev-portal-backend:4007
