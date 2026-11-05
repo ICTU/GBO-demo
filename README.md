@@ -87,6 +87,18 @@ The first run builds every image and takes a few minutes. Open the demo at:
 
 Then follow the [DvTP consent walkthrough](#dvtp-consent).
 
+To open the demo from another machine, set the address that browser uses in
+`.env`, as an IP address or a DNS name; the links between the frontends and
+the URLs `make` prints follow it:
+
+```dotenv
+GBO_PUBLIC_HOST=demo-host.example.org
+```
+
+Run `make demo` again after changing it. The admin and logboek ports
+(9415-9422) and the EDI Outway (8087) stay on `127.0.0.1`
+(`GBO_INTERNAL_BIND_ADDRESS`). See `.env.example` for the related settings.
+
 ### The complete demo, with EUDI
 
 `make demo-full` adds the EUDI wallet flow to DvTP. It additionally needs the

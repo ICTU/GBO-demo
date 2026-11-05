@@ -7,6 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Added
+- **The demo runs on any host name**: `GBO_PUBLIC_HOST` may be a DNS name.
+  The Vite frontends accept it (and the comma-separated
+  `GBO_EXTRA_ALLOWED_HOSTS`) instead of answering 403, and the reference
+  QTSP's public URL follows it like the other ASI URLs (`QTSP_PUBLIC_URL`
+  overrides it). `GBO_INTERNAL_BIND_ADDRESS` sets the host address of the
+  admission register, logboek and EDI Outway ports; it stays `127.0.0.1` by
+  default.
 - **Own credential issuer, first phase** (#614): `services/eudi-credential-issuer`
   issues SD-JWT VCs with the Pre-Authorized Code Flow of OpenID4VCI 1.0 and
   HAIP 1.0, for two wallet profiles: the NL Wallet (v0.6.0 contract, with its
@@ -501,6 +508,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- **`make` prints the demo URLs on `GBO_PUBLIC_HOST`** (default
+  `localhost`), instead of localhost and the first `hostname -I` address,
+  which does not exist on macOS.
 - **The developer portal's EUDI chain names both routes** (#614): the
   first links read "Wallet" (NL Wallet / EUDI-wallet) and "Uitgever"
   (`eudi-issuance-server` / `eudi-credential-issuer`), as a watched trace

@@ -12,6 +12,26 @@ lsof -i -P -n | grep LISTEN | grep -E ":9[0-9]{3}"
 
 Fix by running `make demo-down` (or `docker compose down` for the relevant compose file), or stop the conflicting service.
 
+## "Blocked request" or 403 from another machine
+
+The frontends run Vite's dev server, which answers 403 ("Blocked request.
+This host is not allowed") to a host name it does not know. `localhost` and
+IP addresses always pass. Set the name in `.env` and recreate the
+frontends:
+
+```dotenv
+GBO_PUBLIC_HOST=demo-host.example.org
+# more names, comma-separated, if the browser uses several
+GBO_EXTRA_ALLOWED_HOSTS=other-name.example.org
+```
+
+```bash
+make demo
+```
+
+If the pages load but their links point at `localhost`, the same setting is
+missing: the links are built from `GBO_PUBLIC_HOST`.
+
 ## Docker resource limits
 
 `make demo-eudi` and `make demo-full` start ~25 containers. Minimum:

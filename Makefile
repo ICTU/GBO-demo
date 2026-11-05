@@ -90,9 +90,12 @@ PORT_PDP := $(or $(GBO_PORT_OPA),9181)
 PORT_EUDI_ADAPTER := $(or $(GBO_PORT_EUDI_ADAPTER),9409)
 PORT_DVTP_ONBOARDING_REGISTER := $(or $(GBO_PORT_DVTP_ONBOARDING_REGISTER),9415)
 
-# banner <label> <port> [scheme] — one "  Label:  <local>  |  <lan>" line.
-# hostname -I lists every address; the first is the LAN one.
-banner = @printf "  %-21s %s://localhost:%s  |  %s://%s:%s\n" "$(1)" "$(or $(3),http)" "$(2)" "$(or $(3),http)" "$$(hostname -I | awk '{print $$1}')" "$(2)"
+# The host name the browser uses, as in docker-compose.yml.
+PUBLIC_HOST := $(or $(GBO_PUBLIC_HOST),localhost)
+
+# banner <label> <port> [scheme] — one "  Label:  <scheme>://<host>:<port>"
+# line, on GBO_PUBLIC_HOST: the address the frontends link to as well.
+banner = @printf "  %-21s %s://%s:%s\n" "$(1)" "$(or $(3),http)" "$(PUBLIC_HOST)" "$(2)"
 
 # The OpenFTV PDP writes its Authorization Decision Log to postgres-ftv and
 # refuses to start without it, so every profile needs this password — not
@@ -335,7 +338,7 @@ provision-asi-wallet-verifier: require-development-cas
 		--public-url "$(ASI_WALLET_VERIFIER_PUBLIC_URL)" \
 		--universal-link-base "$(ASI_WALLET_UL_BASE)" \
 		--request-origin "$(or $(ASI_AUTHORIZATION_SERVER_PUBLIC_URL),http://$(or $(GBO_PUBLIC_HOST),localhost):$(PORT_ASI_AUTHORIZATION_SERVER))" \
-		--qtsp-request-origin "http://localhost:$(PORT_QTSP)" \
+		--qtsp-request-origin "$(or $(QTSP_PUBLIC_URL),http://$(PUBLIC_HOST):$(PORT_QTSP))" \
 		--out-dir "$(ASI_WALLET_VERIFIER_DIR)" \
 		--api-key-file "$(ASI_WALLET_VERIFIER_CLIENT_DIR)/api-key"
 	@touch "$(ASI_WALLET_VERIFIER_DIR)/.provisioned"
