@@ -235,6 +235,9 @@ func TestNewRefusesConfigurations(t *testing.T) {
 	selfSigned := testpki.NewSelfSignedLeaf(t, "self")
 	for name, mutate := range map[string]func(*issuance.Config){
 		"public URL with a path": func(c *issuance.Config) { c.PublicURL = publicURL + "/issuer" },
+		// H-1: OpenID4VCI 1.0 sections 8, 9, 11 and 12 require TLS.
+		"H-1: public URL without https": func(c *issuance.Config) { c.PublicURL = "http://issuer.test" },
+		"H-1: another scheme":           func(c *issuance.Config) { c.PublicURL = "ftp://issuer.test" },
 		"no scope (HAIP 4.1)":    func(c *issuance.Config) { c.Configurations[0].Scope = "" },
 		"no display":             func(c *issuance.Config) { c.Configurations[0].Display = nil },
 		"empty claim path":       func(c *issuance.Config) { c.Configurations[0].Claims[1].Path = nil },
@@ -774,6 +777,18 @@ func TestNewRefusesCombinedProfiles(t *testing.T) {
 		tc.mutate(&cfg)
 		if _, err := issuance.New(cfg, &fakeSource{}, store, store, store, time.Now); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: %v, want a refusal with %q", name, err, tc.want)
+		}
+	}
+}
+
+// H-2, H-3: https always; http only on the local machine, for development.
+func TestNewAcceptsPublicURLs(t *testing.T) {
+	for _, u := range []string{"https://issuer.test", "https://issuer.test:8443", "http://localhost:9429", "http://127.0.0.1:9429", "http://[::1]:9429", "http://localhost"} {
+		cfg, _ := validConfig(t)
+		cfg.PublicURL = u
+		store := memstore.New()
+		if _, err := issuance.New(cfg, &fakeSource{}, store, store, store, time.Now); err != nil {
+			t.Errorf("public URL %s: %v", u, err)
 		}
 	}
 }

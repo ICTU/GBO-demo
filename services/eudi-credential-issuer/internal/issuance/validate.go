@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"regexp"
 	"slices"
@@ -102,6 +103,11 @@ func validateProcess(cfg Config) error {
 	}
 	if u.Path == "/" {
 		return errors.New("public URL must not end with a slash")
+	}
+	// OpenID4VCI 1.0 requires TLS for every endpoint; http only on the local
+	// machine, for development. TLS itself ends at the proxy in front.
+	if u.Scheme != "https" && (u.Scheme != "http" || !localHost(u.Hostname())) {
+		return errors.New("public URL must use https (http only for localhost)")
 	}
 	if cfg.BatchSize < 0 || cfg.StatusListSize < 0 || cfg.OfferTTL < 0 || cfg.TokenTTL < 0 || cfg.NonceTTL < 0 || cfg.DisclosureTTL < 0 {
 		return errors.New("sizes and durations must not be negative")
@@ -328,4 +334,13 @@ func checkChain(name string, chain []*x509.Certificate) error {
 		}
 	}
 	return nil
+}
+
+// localHost tells whether host is the local machine.
+func localHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
