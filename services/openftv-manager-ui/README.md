@@ -45,4 +45,7 @@ and is only intended for `scripts/seed-openftv-manager.py`.
 `VITE_OIDC_AUTHORITY`, `VITE_PAP_BASE_URL` and `VITE_PIP_BASE_URL` are read by
 the **browser**, not from inside the compose network. Set `GBO_PUBLIC_HOST` to
 the host's LAN address before `docker compose up`, or the page will try to
-reach `localhost` on the machine you are browsing from.
+reach `localhost` on the machine you are browsing from. The login needs a
+secure context, so off localhost serve the demo over https with
+`GBO_PUBLIC_SCHEME=https` (see "HTTPS behind a reverse proxy" in the main
+README).

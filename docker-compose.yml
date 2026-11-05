@@ -274,7 +274,7 @@ services:
       # Validate the management interface's tokens. The issuer must be the
       # URL the BROWSER used, since that is what Keycloak puts in the token;
       # the JWKS is fetched server-side over the compose network.
-      - MANAGER_OIDC_ISSUER=${GBO_FTV_OIDC_AUTHORITY:-http://localhost:9284/realms/gbo}
+      - MANAGER_OIDC_ISSUER=${GBO_FTV_OIDC_AUTHORITY:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_KEYCLOAK:-9284}/realms/gbo}
       - MANAGER_OIDC_JWKS_URL=http://keycloak:8080/realms/gbo/protocol/openid-connect/certs
       - MANAGER_OIDC_AUDIENCE=openftv-manager-api
       - MANAGER_OIDC_ROLES_CLAIM=roles
@@ -328,9 +328,9 @@ services:
       # Crypto.subtle, and browsers only expose that in a secure context —
       # so http://<lan-ip>:9283 fails with "Crypto.subtle is available only
       # in secure contexts". localhost counts as secure; a LAN IP does not.
-      - VITE_PAP_BASE_URL=${GBO_FTV_MANAGER_URL:-http://localhost:9280}
-      - VITE_PIP_BASE_URL=${GBO_FTV_MANAGER_URL:-http://localhost:9280}
-      - VITE_OIDC_AUTHORITY=${GBO_FTV_OIDC_AUTHORITY:-http://localhost:9284/realms/gbo}
+      - VITE_PAP_BASE_URL=${GBO_FTV_MANAGER_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_FTV_MANAGER:-9280}}
+      - VITE_PIP_BASE_URL=${GBO_FTV_MANAGER_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_FTV_MANAGER:-9280}}
+      - VITE_OIDC_AUTHORITY=${GBO_FTV_OIDC_AUTHORITY:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_KEYCLOAK:-9284}/realms/gbo}
       - VITE_OIDC_CLIENT_ID=openftv-manager-ui
       # Not optional: the image's nginx template interpolates this one, and
       # nginx refuses to start when it is unset. 102400 is the value the UI
