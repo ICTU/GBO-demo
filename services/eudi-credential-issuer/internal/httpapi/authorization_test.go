@@ -663,22 +663,76 @@ func TestWalletInitiatedRequests(t *testing.T) { // W1, W2, W3
 			t.Fatalf("PAR = %d %v", status, body)
 		}
 	})
+	// W-1 (OpenID4VCI 1.0 section 5.1.2): unknown scope values are ignored;
+	// another provider's scope is unknown here.
+	for _, scope := range []string{"openid income", "income death"} {
+		t.Run("W-1: unknown scope values are ignored", func(t *testing.T) {
+			if status, body := walletInitiated(func(q url.Values) { q.Set("scope", scope) }); status != http.StatusCreated {
+				t.Fatalf("PAR with scope %q = %d %v", scope, status, body)
+			}
+		})
+	}
+	// W-2: nothing this issuer knows is asked for.
 	for name, edit := range map[string]func(url.Values){
-		"W3: unknown scope":             func(q url.Values) { q.Set("scope", "nope") },
-		"W3: scope of another provider": func(q url.Values) { q.Set("scope", "death") },
-		"W3: no scope and no details":   func(q url.Values) { q.Del("scope") },
-		"W3: two credential types":      func(q url.Values) { q.Set("scope", "income death") },
-		"W3: details of an unknown type": func(q url.Values) {
-			q.Del("scope")
-			q.Set("authorization_details", `[{"type":"openid_credential","credential_configuration_id":"nope"}]`)
-		},
-		"W3: details that are not JSON": func(q url.Values) { q.Del("scope"); q.Set("authorization_details", `{`) },
+		"W-2: unknown scope":             func(q url.Values) { q.Set("scope", "nope") },
+		"W-2: scope of another provider": func(q url.Values) { q.Set("scope", "death") },
+		"W-2: no scope and no details":   func(q url.Values) { q.Del("scope") },
 	} {
 		t.Run(name, func(t *testing.T) {
 			if status, body := walletInitiated(edit); status != http.StatusBadRequest || body["error"] != "invalid_scope" {
 				t.Fatalf("PAR = %d %v, want invalid_scope", status, body)
 			}
 		})
+	}
+	// W-6 (RFC 9396 section 5): authorization details that do not conform.
+	for name, details := range map[string]string{
+		"W-6: details that are not JSON":        `{`,
+		"W-6: details of an unknown type":       `[{"type":"payment","credential_configuration_id":"` + incomeConfig + `"}]`,
+		"W-6: an unknown configuration":         `[{"type":"openid_credential","credential_configuration_id":"nope"}]`,
+		"W-6: another provider's configuration": `[{"type":"openid_credential","credential_configuration_id":"` + deathConfig + `"}]`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if status, body := walletInitiated(func(q url.Values) { q.Set("authorization_details", details) }); status != http.StatusBadRequest || body["error"] != "invalid_authorization_details" {
+				t.Fatalf("PAR = %d %v, want invalid_authorization_details", status, body)
+			}
+		})
+	}
+}
+
+// W-3 to W-5 (OpenID4VCI 1.0 section 5.1.2): scope and authorization_details
+// together are read each on their own; for the same credential type the
+// details govern. One credential type per login.
+func TestScopeAndAuthorizationDetailsTogether(t *testing.T) {
+	f := newFixtureWith(t, func(_ *fixture, cfg *issuance.Config) {
+		year := cfg.Configurations[0]
+		year.ID, year.Scope = "income_2024", "income_2024"
+		year.Display = []issuance.Display{{Name: "Income statement 2024", Locale: "nl"}}
+		cfg.Configurations = append(cfg.Configurations, year)
+		cfg.DisclosureOffers = append(cfg.DisclosureOffers, issuance.DisclosureOffer{
+			Key: "income_offer_2024", Provider: "tax", ConfigurationIDs: []string{"income_2024"}, Parameters: map[string]string{"jaar": "2024"},
+		})
+	})
+	w := f.acfWallet()
+	par := func(scope, configuration string) (int, map[string]any) {
+		form := w.parForm()
+		form.Del("issuer_state")
+		form.Set("scope", scope)
+		form.Set("authorization_details", `[{"type":"openid_credential","credential_configuration_id":"`+configuration+`"}]`)
+		return w.par(form, nil)
+	}
+	if status, body := par("income", incomeConfig); status != http.StatusCreated {
+		t.Errorf("W-3: scope and details for the same type = %d %v", status, body)
+	}
+	if status, body := par("income", "income_2024"); status != http.StatusBadRequest || body["error"] != "invalid_scope" {
+		t.Errorf("W-4: two credential types = %d %v, want invalid_scope", status, body)
+	}
+	if status, body := par("nope", "income_2024"); status != http.StatusCreated {
+		t.Fatalf("W-5: an unknown scope and details = %d %v", status, body)
+	} else {
+		w.login(w.authorize(body["request_uri"].(string)))
+		if f.lastSourceCall().Get("jaar") != "2024" {
+			t.Errorf("W-5: source parameters = %v, want the details' jaar 2024", f.lastSourceCall())
+		}
 	}
 }
 

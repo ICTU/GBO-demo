@@ -193,40 +193,42 @@ func (s *Service) requestedOffer(t Target, req PushedAuthorizationRequest) (Disc
 }
 
 // requestedConfiguration returns the one credential configuration of this
-// provider that scope, or else authorization_details, names.
+// provider that scope and authorization_details name (OpenID4VCI 1.0 section
+// 5.1.2): unknown scope values are ignored, the two are read each on their
+// own, and details that do not conform are refused (RFC 9396 section 5).
+// One login fetches one source offer, so they must name one configuration.
 func (s *Service) requestedConfiguration(t Target, req PushedAuthorizationRequest) (string, error) {
 	var ids []string
-	switch {
-	case req.Scope != "":
-		for _, sc := range strings.Fields(req.Scope) {
-			found := ""
-			for _, c := range s.cfg.Configurations {
-				if c.Provider == t.Provider && c.Scope == sc {
-					found = c.ID
-				}
+	for _, sc := range strings.Fields(req.Scope) {
+		for _, c := range s.cfg.Configurations {
+			if c.Provider == t.Provider && c.Scope == sc {
+				ids = append(ids, c.ID)
 			}
-			if found == "" {
-				return "", refuse(ErrInvalidScope, "scope "+sc+" is not a credential type of this issuer")
-			}
-			ids = append(ids, found)
 		}
-	case req.AuthorizationDetails != "":
+	}
+	if req.AuthorizationDetails != "" {
 		var details []oid4vci.AuthorizationDetail
 		if err := json.Unmarshal([]byte(req.AuthorizationDetails), &details); err != nil {
-			return "", refuse(ErrInvalidScope, "authorization_details is not a JSON array")
+			return "", refuse(oid4vci.ErrInvalidAuthorizationDetails, "authorization_details is not a JSON array of authorization details")
 		}
 		for _, d := range details {
+			if d.Type != oid4vci.AuthorizationDetailsType {
+				return "", refuse(oid4vci.ErrInvalidAuthorizationDetails, "authorization details of type "+d.Type+" are not supported")
+			}
 			c, ok := s.configs[d.CredentialConfigurationID]
-			if d.Type != oid4vci.AuthorizationDetailsType || !ok || c.Provider != t.Provider {
-				return "", refuse(ErrInvalidScope, "authorization_details names no credential type of this issuer")
+			if !ok || c.Provider != t.Provider {
+				return "", refuse(oid4vci.ErrInvalidAuthorizationDetails, "authorization_details names a credential configuration this issuer does not have")
 			}
 			ids = append(ids, c.ID)
 		}
 	}
-	if len(uniq(ids)) != 1 {
-		return "", refuse(ErrInvalidScope, "the request must name exactly one credential type")
+	switch ids = uniq(ids); len(ids) {
+	case 0:
+		return "", refuse(ErrInvalidScope, "the request names no credential type of this issuer")
+	case 1:
+		return ids[0], nil
 	}
-	return ids[0], nil
+	return "", refuse(ErrInvalidScope, "the request must name exactly one credential type")
 }
 
 // Authorize handles the authorization request the wallet opens in the

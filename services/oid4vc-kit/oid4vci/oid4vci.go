@@ -18,14 +18,16 @@ const AuthorizationDetailsType = "openid_credential"
 // draft-ietf-oauth-attestation-based-client-auth) and the credential
 // endpoint (section 8.3.1.2).
 const (
-	ErrInvalidRequest           = "invalid_request"
-	ErrInvalidGrant             = "invalid_grant"
-	ErrUnsupportedGrantType     = "unsupported_grant_type"
-	ErrInvalidDPoPProof         = "invalid_dpop_proof"
-	ErrInvalidClientAttestation = "invalid_client_attestation"
-	ErrUseFreshAttestation      = "use_fresh_attestation"
-	ErrUseAttestationChallenge  = "use_attestation_challenge"
-	ErrInvalidToken             = "invalid_token"
+	ErrInvalidRequest = "invalid_request"
+	ErrInvalidGrant   = "invalid_grant"
+	// ErrInvalidAuthorizationDetails is RFC 9396 section 5.
+	ErrInvalidAuthorizationDetails = "invalid_authorization_details"
+	ErrUnsupportedGrantType        = "unsupported_grant_type"
+	ErrInvalidDPoPProof            = "invalid_dpop_proof"
+	ErrInvalidClientAttestation    = "invalid_client_attestation"
+	ErrUseFreshAttestation         = "use_fresh_attestation"
+	ErrUseAttestationChallenge     = "use_attestation_challenge"
+	ErrInvalidToken                = "invalid_token"
 	// Notification errors (section 11.3).
 	ErrInvalidNotificationID      = "invalid_notification_id"
 	ErrInvalidNotificationRequest = "invalid_notification_request"
