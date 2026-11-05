@@ -85,7 +85,7 @@ docker compose exec qtsp-reference ./qtsp-reference verify --attr 'https://gbo.e
 
 Configuration:
 - `QTSP_ADDR` (default `:4023`);
-- `QTSP_PUBLIC_URL` (the base of the redirect URI, default `http://localhost:4023`);
+- `QTSP_PUBLIC_URL` (the base of the redirect URI, default `http://localhost:4023`; compose sets `http://<GBO_PUBLIC_HOST>:<GBO_PORT_QTSP>`, overridden by `QTSP_PUBLIC_URL` in `.env`). The authorization server accepts a plain-http redirect URI on localhost only, so with another host the URL needs https;
 - `QTSP_DIP_URL` (required);
 - `QTSP_KEY_FILE` and `QTSP_CERT_FILE` (required: the certificate key and chain, leaf first);
 - `QTSP_REGISTRY_URI` (default the test QTSP's entry);
