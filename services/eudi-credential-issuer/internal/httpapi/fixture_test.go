@@ -198,10 +198,18 @@ func newFixtureWith(t *testing.T, configure func(f *fixture, cfg *issuance.Confi
 		configure(f, &cfg)
 	}
 	store := memstore.New()
-	svc, err := issuance.New(cfg, &source.Client{HTTP: src.Client(), Endpoints: map[string]string{
-		incomeConfig: src.URL + "/attestations/tax/income",
-		deathConfig:  src.URL + "/attestations/civil/death",
-	}}, store, store, store, f.clock.Now)
+	// Every configuration of a type is served by that type's endpoint, as
+	// the materializer configures one per source offer.
+	endpoints := map[string]string{}
+	for _, c := range cfg.Configurations {
+		switch c.VCT {
+		case incomeVCT:
+			endpoints[c.ID] = src.URL + "/attestations/tax/income"
+		case deathVCT:
+			endpoints[c.ID] = src.URL + "/attestations/civil/death"
+		}
+	}
+	svc, err := issuance.New(cfg, &source.Client{HTTP: src.Client(), Endpoints: endpoints}, store, store, store, f.clock.Now)
 	if err != nil {
 		t.Fatal(err)
 	}

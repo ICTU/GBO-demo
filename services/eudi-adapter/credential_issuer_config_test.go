@@ -96,19 +96,19 @@ func TestMaterializeCredentialIssuer(t *testing.T) {
 		assertProviderCertificates(t, f, p)
 	})
 
-	t.Run("one credential configuration per activated type", func(t *testing.T) {
+	t.Run("one credential configuration per offer of an activated type", func(t *testing.T) {
 		if len(p.CredentialConfigurations) != 1 {
 			t.Fatalf("configurations %+v", p.CredentialConfigurations)
 		}
 		c := p.CredentialConfigurations[0]
-		if c.ID != "belastingdienst-typea" || c.Scope != c.ID || c.VCT != testIncome || c.StatusList != "typea" || c.ValidDays != 365 {
+		if c.ID != "belastingdienst-offera" || c.Scope != c.ID || c.VCT != testIncome || c.StatusList != "typea" || c.ValidDays != 365 {
 			t.Fatalf("configuration %+v", c)
 		}
 		if c.SourceURL != "https://adapter.example/attestations/belastingdienst/typea" {
 			t.Fatalf("source URL %s: offer parameters come from the caller", c.SourceURL)
 		}
-		if !slices.Equal(c.Display, []issuerDisplay{{Name: "Example", Locale: "nl-NL"}}) {
-			t.Fatalf("display %+v", c.Display)
+		if !slices.Equal(c.Display, []issuerDisplay{{Name: "Offer", Locale: "nl"}}) {
+			t.Fatalf("display %+v: the offer's label", c.Display)
 		}
 		mandatory := map[string]bool{}
 		for _, claim := range c.Claims {

@@ -542,12 +542,21 @@ func credentialIssuerProvider(options credentialIssuerOptions, source onboarding
 		seen.vcts[t.VCT] = origin
 		endpoint := *adapterBaseURL
 		endpoint.Path = strings.TrimRight(endpoint.Path, "/") + "/attestations/" + source.SourceID + "/" + t.TypeID
-		provider.CredentialConfigurations = append(provider.CredentialConfigurations, issuerConfigurationFile{
-			ID: id, VCT: t.VCT, Scope: id, Display: issuerDisplays(t.Definition.Display), Claims: issuerClaims(t.Definition.Claims),
-			ValidDays: credentialValidDays, StatusList: t.TypeID, SourceURL: endpoint.String(),
-		})
+		// One configuration per offer (B26): a wallet that starts at the
+		// issuer names what it wants by scope alone (HAIP 1.0 sections 4.1
+		// and 4.3), so each offer is a credential type of its own, named
+		// by the offer's label. The type's status list is shared.
 		for _, o := range t.Offers {
-			offer, err := disclosureOffer(source.SourceID, id, o)
+			offerID := source.SourceID + "-" + o.ID
+			if earlier, ok := seen.ids[offerID]; ok {
+				return provider, nil, fmt.Errorf("credential configuration %s is derived from both %s and %s", offerID, earlier, origin)
+			}
+			seen.ids[offerID] = origin
+			provider.CredentialConfigurations = append(provider.CredentialConfigurations, issuerConfigurationFile{
+				ID: offerID, VCT: t.VCT, Scope: offerID, Display: []issuerDisplay{{Name: o.Label, Locale: "nl"}},
+				Claims: issuerClaims(t.Definition.Claims), ValidDays: credentialValidDays, StatusList: t.TypeID, SourceURL: endpoint.String(),
+			})
+			offer, err := disclosureOffer(source.SourceID, offerID, o)
 			if err != nil {
 				return provider, nil, fmt.Errorf("type %s: %w", t.TypeID, err)
 			}

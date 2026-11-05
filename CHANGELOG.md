@@ -105,6 +105,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   issuer whose offer caller named the subject. It logs that as a separate
   Dataverwerking, `gbo-bsn-ontvangst-aanvrager`, added to the register of
   `logboek-eudi-adapter`, before it asks the source.
+- **One credential configuration per source offer** (#614): the own
+  credential issuer's configuration now has a credential configuration per
+  offer of an activated type, `<source>-<offer>` with that scope and the
+  offer's label as name ("Inkomensverklaring 2025"), instead of one per type.
+  A wallet that starts at the issuer can so ask for one year; before, a
+  type with two offers gave `invalid_scope`. The type's vct, claims and
+  status list are shared.
 - **The developer portal shows the login QR** (#614): on the EU-wallet tab
   of an offer the own credential issuer serves, a second QR, "Met inloggen
   in plaats van PID delen", starts the authorization code flow; the citizen

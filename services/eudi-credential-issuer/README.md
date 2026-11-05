@@ -205,11 +205,14 @@ In the demo stack this file is not written by hand: `eudi-adapter
 materialize-credential-issuer` derives it from the active Source Release. Each
 source becomes a provider with its provisioned issuer and status
 certificates, its access certificate, its registration certificate and its
-request encryption key (`make provision-wallet-registration`); each activated type becomes a credential
-configuration `<source>-<type>` with the display and claims of the source
-definition (a claim is mandatory unless the source marks it optional), 365
-days of validity and the adapter's `/attestations/<source>/<type>` as
-bronpoort. When `make provision-test-pid` has run, a test PID provider
+request encryption key (`make provision-wallet-registration`); each offer of an activated type becomes a credential
+configuration `<source>-<offer>` (also its scope), named by the offer's label
+in Dutch, with the type's vct and claims (a claim is mandatory unless the
+source marks it optional), the type's status list, 365 days of validity and
+the adapter's `/attestations/<source>/<type>` as bronpoort. One configuration
+per offer lets a wallet that starts at the issuer name the offer by scope
+alone, and shows the offer, for example "Inkomensverklaring 2025", in the
+wallet. When `make provision-test-pid` has run, a test PID provider
 `test-pid` follows, with one configuration `test-pid-pid` (`urn:eudi:pid:nl:1`)
 fed by `test-pid-source` (`TEST_PID_SOURCE_URL`). A profile is configured only when its wallet providers are mounted
 (`nl-wallet-providers.pem`, `eudi-wallet-providers.pem`, optionally

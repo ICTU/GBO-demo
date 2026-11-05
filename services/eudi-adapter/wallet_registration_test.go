@@ -512,6 +512,13 @@ func TestWalletRegistrationSourceFromRelease(t *testing.T) {
 // and an optional claim note.
 func testReleaseWithTypes(t *testing.T, secrets string, now time.Time, vcts []string) onboarding.SourceRelease {
 	t.Helper()
+	return testReleaseWithOffers(t, secrets, now, vcts, nil)
+}
+
+// testReleaseWithOffers is testReleaseWithTypes with the offers of each
+// type given; a type without an entry in offers gets one offer, "Offer".
+func testReleaseWithOffers(t *testing.T, secrets string, now time.Time, vcts []string, offers map[string][]sourceOffer) onboarding.SourceRelease {
+	t.Helper()
 	writeTestDevelopmentCAs(t, secrets, now)
 	registration := sourceRegistration{
 		SourceID: "belastingdienst", SourceOIN: "99999999900000000200", Name: "Belastingdienst",
@@ -538,16 +545,19 @@ func testReleaseWithTypes(t *testing.T, secrets string, now time.Time, vcts []st
 		body := []byte(`{"display":[],"schema":{"type":"object","properties":{},"required":[]}}`)
 		digest := sha256.Sum256(body)
 		integrity := "sha256-" + base64.StdEncoding.EncodeToString(digest[:])
-		offer := sourceOffer{ID: "offer" + string(rune('a'+i)), Label: "Offer", Parameters: map[string]any{}}
+		typeOffers := []sourceOffer{{ID: "offer" + string(rune('a'+i)), Label: "Offer", Parameters: map[string]any{}}}
+		if given, ok := offers[vct]; ok {
+			typeOffers = given
+		}
 		definition := sourceAttestationDefinition{
-			TypeID: "type" + string(rune('a'+i)), TypeVersion: "1.0", Offers: []sourceOffer{offer},
+			TypeID: "type" + string(rune('a'+i)), TypeVersion: "1.0", Offers: typeOffers,
 			GraphQL:        sourceGraphQL{Endpoint: "/graphql", Document: "query Income($bsn: String!) { income(bsn: $bsn) { value } }", SubjectVariable: "bsn", ResultPointer: "/data/income"},
 			MappingProfile: "gbo-simple-v1", Display: testDisplay("Example"),
 			Claims: testClaims(map[string]mappingRule{"value": {Pointer: "/value", Datatype: "string"},
 				"note": {Pointer: "/note", Datatype: "string", Optional: true}}),
 		}
 		activation.Types = append(activation.Types, activatedType{TypeID: definition.TypeID, TypeVersion: "1.0", VCT: vct,
-			VCTIntegrity: integrity, Offers: []sourceOffer{offer}, Definition: definition})
+			VCTIntegrity: integrity, Offers: typeOffers, Definition: definition})
 		typeMetadata = append(typeMetadata, onboarding.TypeMetadata{VCT: vct, Version: "1.0", Integrity: integrity, MediaType: "application/json", Bytes: body})
 	}
 	candidate, err := registryCandidateFromActivation(activation, certificateSet, typeMetadata)

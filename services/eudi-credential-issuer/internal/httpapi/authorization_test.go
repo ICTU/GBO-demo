@@ -698,3 +698,46 @@ func TestWalletInitiatedRequestForAnAmbiguousConfiguration(t *testing.T) { // W3
 		t.Fatalf("PAR with issuer_state = %d %v", status, body)
 	}
 }
+
+// B26: with one configuration per source offer, two offers of one type
+// (one per year) each have a scope, and a wallet that starts at the issuer
+// gets the year it named. U1-U3.
+func TestOneConfigurationPerOfferAtTheIssuer(t *testing.T) { // U1, U2, U3
+	f := newFixtureWith(t, func(_ *fixture, cfg *issuance.Config) {
+		year := cfg.Configurations[0]
+		year.ID, year.Scope = "income_2024", "income_2024"
+		year.Display = []issuance.Display{{Name: "Income statement 2024", Locale: "nl"}}
+		cfg.Configurations = append(cfg.Configurations, year)
+		cfg.DisclosureOffers = append(cfg.DisclosureOffers, issuance.DisclosureOffer{
+			Key: "income_offer_2024", Provider: "tax", ConfigurationIDs: []string{"income_2024"}, Parameters: map[string]string{"jaar": "2024"},
+		})
+	})
+	md := f.metadata(t, "tax", "eudi")
+	configs, _ := md["credential_configurations_supported"].(map[string]any)
+	for _, id := range []string{incomeConfig, "income_2024"} {
+		c, _ := configs[id].(map[string]any)
+		if c["scope"] != map[string]string{incomeConfig: "income", "income_2024": "income_2024"}[id] || c["vct"] != incomeVCT {
+			t.Errorf("U1: configuration %s = %v, want its own scope and the shared vct", id, c)
+		}
+	}
+	w := f.acfWallet()
+	for scope, year := range map[string]string{"income_2024": "2024", "income": "2025"} {
+		form := w.parForm()
+		form.Del("issuer_state")
+		form.Set("scope", scope)
+		status, body := w.par(form, nil)
+		if status != http.StatusCreated {
+			t.Fatalf("U2: PAR with scope %s = %d %v", scope, status, body)
+		}
+		w.login(w.authorize(body["request_uri"].(string)))
+		if got := f.lastSourceCall().Get("jaar"); got != year {
+			t.Errorf("U2: scope %s asked the source for jaar %s, want %s", scope, got, year)
+		}
+	}
+	// U3: F4 still names the offer by issuer_state.
+	form := w.parForm()
+	form.Set("issuer_state", "income_offer_2024")
+	if status, body := w.par(form, nil); status != http.StatusCreated {
+		t.Fatalf("U3: PAR with issuer_state = %d %v", status, body)
+	}
+}
