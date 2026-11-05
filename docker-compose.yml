@@ -3,8 +3,8 @@ services:
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.96.0
     ports:
-      - "${GBO_PORT_OTEL_GRPC:-9317}:4317"   # gRPC
-      - "${GBO_PORT_OTEL_HTTP:-9318}:4318"   # HTTP
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_OTEL_GRPC:-9317}:4317"   # gRPC
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_OTEL_HTTP:-9318}:4318"   # HTTP
     volumes:
       - ./otel/collector-config.yaml:/etc/otelcol-contrib/config.yaml
     networks:
@@ -19,7 +19,7 @@ services:
     # root in the demo, an init container `chown -R 10001` in production.
     user: "0"
     ports:
-      - "${GBO_PORT_JAEGER:-9686}:16686"  # Jaeger UI + Query API
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_JAEGER:-9686}:16686"  # Jaeger UI + Query API
     environment:
       - COLLECTOR_OTLP_ENABLED=true
       # On-disk span storage. The default memory store is unbounded and grew
@@ -47,7 +47,7 @@ services:
     image: grafana/loki:2.9.6
     command: -config.file=/etc/loki/local-config.yaml
     ports:
-      - "${GBO_PORT_LOKI:-9310}:3100"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_LOKI:-9310}:3100"
     volumes:
       - ./observability/loki-config.yaml:/etc/loki/local-config.yaml:ro
     networks:
@@ -78,7 +78,7 @@ services:
   grafana:
     image: grafana/grafana:11.1.0
     ports:
-      - "${GBO_PORT_GRAFANA:-9300}:3000"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_GRAFANA:-9300}:3000"
     environment:
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Editor
@@ -151,8 +151,8 @@ services:
       - PDP_TLS_CERT=/certs/pdp-service.pem
       - PDP_TLS_KEY=/certs/pdp-service-key.pem
     ports:
-      - "${GBO_PORT_OPA:-9181}:8443"
-      - "${GBO_PORT_OPA_HEALTH:-9180}:8080"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_OPA:-9181}:8443"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_OPA_HEALTH:-9180}:8080"
     volumes:
       - ./policies:/policies:ro
       # The bundled GraphQL schemas, read once at the first request: a
@@ -291,10 +291,10 @@ services:
       - ./services/openftv-manager/tags:/tags:ro
     ports:
       # Management API (what the seed script and a UI talk to).
-      - "${GBO_PORT_FTV_MANAGER:-9280}:8443"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_FTV_MANAGER:-9280}:8443"
       # Internal API: where the PDP pulls its bundle from.
-      - "${GBO_PORT_FTV_MANAGER_INTERNAL:-9281}:9443"
-      - "${GBO_PORT_FTV_MANAGER_HEALTH:-9282}:8080"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_FTV_MANAGER_INTERNAL:-9281}:9443"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_FTV_MANAGER_HEALTH:-9282}:8080"
     networks: [backend]
     depends_on:
       postgres-ftv:
@@ -337,7 +337,7 @@ services:
       # itself falls back to (src/config/env.ts).
       - MANAGER_MAX_LOGO_SIZE=102400
     ports:
-      - "${GBO_PORT_FTV_MANAGER_UI:-9283}:8080"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_FTV_MANAGER_UI:-9283}:8080"
     networks: [backend]
     depends_on:
       openftv-manager:
@@ -366,7 +366,7 @@ services:
     volumes:
       - ./services/openftv-manager-ui/keycloak/realm-gbo.json:/opt/keycloak/data/import/realm-gbo.json:ro
     ports:
-      - "${GBO_PORT_KEYCLOAK:-9284}:8080"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_KEYCLOAK:-9284}:8080"
     networks: [backend]
     healthcheck:
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080 && echo -e 'GET /realms/gbo HTTP/1.1\\nHost: localhost\\nConnection: close\\n\\n' >&3 && cat <&3 | head -1 | grep -q 200"]
@@ -611,7 +611,7 @@ services:
       context: .
       dockerfile: services/graphql-server/Dockerfile
     ports:
-      - "${GBO_PORT_GRAPHQL:-9400}:4000"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_GRAPHQL:-9400}:4000"
     environment:
       - OTEL_SERVICE_NAME=graphql-server
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -654,7 +654,7 @@ services:
       context: .
       dockerfile: services/brp-graphql-server/Dockerfile
     ports:
-      - "${GBO_PORT_BRP_GRAPHQL:-9401}:4001"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_BRP_GRAPHQL:-9401}:4001"
     environment:
       - OTEL_SERVICE_NAME=brp-graphql-server
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -691,7 +691,7 @@ services:
       context: .
       dockerfile: services/graphql-server/Dockerfile
     ports:
-      - "${GBO_PORT_UNSECURED_GRAPHQL:-9414}:4000"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_UNSECURED_GRAPHQL:-9414}:4000"
     environment:
       - OTEL_SERVICE_NAME=unsecured-graphql-server
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -716,7 +716,7 @@ services:
       context: .
       dockerfile: services/consent-register/Dockerfile
     ports:
-      - "${GBO_PORT_CONSENT_REGISTER:-9402}:4002"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_CONSENT_REGISTER:-9402}:4002"
     environment:
       - OTEL_SERVICE_NAME=consent-register
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -752,7 +752,7 @@ services:
   bsnk-mock:
     build: ./services/bsnk-mock
     ports:
-      - "${GBO_PORT_BSNK:-9403}:4003"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_BSNK:-9403}:4003"
     environment:
       - OTEL_SERVICE_NAME=bsnk-mock
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -912,7 +912,7 @@ services:
       dockerfile: services/lvg-graphql-server/Dockerfile
     profiles: [dvtp, full]
     ports:
-      - "${GBO_PORT_LVG_GRAPHQL:-9408}:4008"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_LVG_GRAPHQL:-9408}:4008"
     environment:
       - OTEL_SERVICE_NAME=lvg-graphql-server
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -991,7 +991,7 @@ services:
       dockerfile: services/consent-portal-backend/Dockerfile
     profiles: [dvtp, full]
     ports:
-      - "${GBO_PORT_CONSENT_PORTAL_BACKEND:-9405}:4005"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_CONSENT_PORTAL_BACKEND:-9405}:4005"
     environment:
       - OTEL_SERVICE_NAME=consent-portal-backend
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -1048,7 +1048,7 @@ services:
       dockerfile: services/dienstverlener-backend/Dockerfile
     profiles: [dvtp, full]
     ports:
-      - "${GBO_PORT_DV_BACKEND:-9406}:4006"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_DV_BACKEND:-9406}:4006"
     environment:
       - OTEL_SERVICE_NAME=dienstverlener-backend
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -1096,7 +1096,7 @@ services:
       dockerfile: services/dienstverlener-backend/Dockerfile
     profiles: [dvtp, full]
     ports:
-      - "${GBO_PORT_IR_BACKEND:-9410}:4010"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_IR_BACKEND:-9410}:4010"
     environment:
       - PORT=4010
       - QUERY_KIND=lvg
@@ -1141,7 +1141,7 @@ services:
       dockerfile: services/dienstverlener-backend/Dockerfile
     profiles: [integrator]
     ports:
-      - "${GBO_PORT_INTEGRATOR_BACKEND:-9423}:4023"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_INTEGRATOR_BACKEND:-9423}:4023"
     environment:
       - PORT=4023
       - OTEL_SERVICE_NAME=integrator-backend
@@ -1178,7 +1178,7 @@ services:
     build: ./services/asi-authorization-server
     profiles: [asi]
     ports:
-      - "${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}:4021"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}:4021"
     environment:
       - AZSP_ISSUER=${ASI_AUTHORIZATION_SERVER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}}
       # Per data service of the ASIP its base URL and the name the user sees
@@ -1234,7 +1234,7 @@ services:
     image: gbo/asi-wallet-verifier:dev
     profiles: [asi]
     ports:
-      - "${GBO_PORT_ASI_WALLET_VERIFIER:-9428}:8001"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_ASI_WALLET_VERIFIER:-9428}:8001"
     volumes:
       - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/asi-wallet-verifier/verification_server.toml:/verification_server.toml:ro
     networks:
@@ -1275,7 +1275,7 @@ services:
       dockerfile: services/eudi-wallet-verifier/Dockerfile
     profiles: [asi]
     ports:
-      - "${GBO_PORT_ASI_EUDI_WALLET_VERIFIER:-9432}:8001"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_ASI_EUDI_WALLET_VERIFIER:-9432}:8001"
     environment:
       - EUDI_WALLET_VERIFIER_CONFIG=/config/config.json
     volumes:
@@ -1292,7 +1292,7 @@ services:
       dockerfile: services/asi-provider/Dockerfile
     profiles: [asi]
     ports:
-      - "${GBO_PORT_ASI_PROVIDER:-9424}:4020"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_ASI_PROVIDER:-9424}:4020"
     environment:
       - ASIP_PUBLIC_URL=${ASI_PROVIDER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_PROVIDER:-9424}}
       - ASIP_AUTHORIZATION_SERVER=${ASI_AUTHORIZATION_SERVER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}}
@@ -1330,7 +1330,7 @@ services:
     build: ./services/asi-discovery-stub
     profiles: [asi]
     ports:
-      - "${GBO_PORT_ASI_DISCOVERY:-9426}:4022"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_ASI_DISCOVERY:-9426}:4022"
     environment:
       - DIP_SOURCES=http://asi-provider:4020/brp/dataservices
     depends_on:
@@ -1355,7 +1355,7 @@ services:
     build: ./services/qtsp-reference
     profiles: [asi]
     ports:
-      - "${GBO_PORT_QTSP:-9427}:4023"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_QTSP:-9427}:4023"
     environment:
       - QTSP_PUBLIC_URL=${QTSP_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_QTSP:-9427}}
       - QTSP_DIP_URL=http://asi-discovery-stub:4022
@@ -1459,7 +1459,7 @@ services:
       - ./landing-page/vite.config.ts:/app/vite.config.ts
       - ./landing-page/tsconfig.json:/app/tsconfig.json
     ports:
-      - "${GBO_PORT_LANDING:-9000}:9000"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_LANDING:-9000}:9000"
     networks:
       - frontend
       - backend
@@ -1486,7 +1486,7 @@ services:
       - ./dienstverlener-mock/vite.config.ts:/app/vite.config.ts
       - ./dienstverlener-mock/tsconfig.json:/app/tsconfig.json
     ports:
-      - "${GBO_PORT_DV_MOCK:-9001}:9001"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_DV_MOCK:-9001}:9001"
     networks:
       - frontend
       - backend
@@ -1518,7 +1518,7 @@ services:
       - ./keyper-mock/vite.config.ts:/app/vite.config.ts
       - ./keyper-mock/tsconfig.json:/app/tsconfig.json
     ports:
-      - "${GBO_PORT_KEYPER_MOCK:-9004}:9004"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_KEYPER_MOCK:-9004}:9004"
     networks:
       - frontend
       - backend
@@ -1546,7 +1546,7 @@ services:
       - ./toestemmingsportaal-frontend/vite.config.ts:/app/vite.config.ts
       - ./toestemmingsportaal-frontend/tsconfig.json:/app/tsconfig.json
     ports:
-      - "${GBO_PORT_TOESTEMMINGSPORTAAL:-9002}:9002"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_TOESTEMMINGSPORTAAL:-9002}:9002"
     networks:
       - frontend
       - backend
@@ -1559,7 +1559,7 @@ services:
       context: .
       dockerfile: services/dev-portal-backend/Dockerfile
     ports:
-      - "${GBO_PORT_DEV_PORTAL_BACKEND:-9407}:4007"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_DEV_PORTAL_BACKEND:-9407}:4007"
     environment:
       - OTEL_SERVICE_NAME=dev-portal-backend
       - CITIZENS_FILE=/citizens/citizens.json
@@ -1692,7 +1692,7 @@ services:
       - ./developer-portal/vite.config.ts:/app/vite.config.ts
       - ./developer-portal/tsconfig.json:/app/tsconfig.json
     ports:
-      - "${GBO_PORT_DEVELOPER_PORTAL:-9003}:9003"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_DEVELOPER_PORTAL:-9003}:9003"
     networks:
       - frontend
       - backend
@@ -1951,7 +1951,7 @@ services:
     image: gbo/eudi-credential-issuer:dev
     profiles: [credential-issuer]
     ports:
-      - "${GBO_PORT_CREDENTIAL_ISSUER:-9429}:8080"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_CREDENTIAL_ISSUER:-9429}:8080"
       # The internal API (offers, revocations) has no authentication: only
       # from this machine, never through the tunnel.
       - "127.0.0.1:${GBO_PORT_CREDENTIAL_ISSUER_INTERNAL:-9431}:8081"
@@ -1989,7 +1989,7 @@ services:
     image: nginx:1.27-alpine
     profiles: [credential-issuer]
     ports:
-      - "${GBO_PORT_TRUST_HOST:-9430}:8080"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_TRUST_HOST:-9430}:8080"
     volumes:
       - ./trust-host/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - ./trust-host/pages:/usr/share/trust-pages:ro
@@ -2027,7 +2027,7 @@ services:
     # would use an init container `chown -R 1000` so USER 1000 stays.
     user: "0"
     ports:
-      - "${GBO_PORT_EUDI_ISSUANCE:-18001}:18001"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_EUDI_ISSUANCE:-18001}:18001"
     environment:
       - ISSUANCE_SERVER__STORAGE__URL=postgres://wallet:${EUDI_POSTGRES_PASSWORD}@postgres-eudi:5432/issuance_server
       # Concrete source products plus the reference QTSP usecase, endpoints
@@ -2085,7 +2085,7 @@ services:
       dockerfile: services/eudi-adapter/Dockerfile
     profiles: [eudi, full]
     ports:
-      - "${GBO_PORT_EUDI_ADAPTER:-9409}:4009"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_EUDI_ADAPTER:-9409}:4009"
     environment:
       - OTEL_SERVICE_NAME=eudi-adapter
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
