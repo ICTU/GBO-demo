@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Added
+- **The demo runs on any host name**: the Vite frontends accept
+  `GBO_PUBLIC_HOST` and `GBO_EXTRA_ALLOWED_HOSTS`, the reference QTSP follows
+  `GBO_PUBLIC_HOST` (`QTSP_PUBLIC_URL` overrides it), and
+  `GBO_INTERNAL_BIND_ADDRESS` (default `127.0.0.1`) binds the ports without a
+  login.
+
 - **The landing page offers the Installatie Register scenario**: the DvTP
   card under "Zelf uitproberen" lets the visitor choose between HypotheekBV
   and the Installatie Register, with its own steps, test BSNs and start
@@ -318,6 +324,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- **`make` prints the demo URLs on `GBO_PUBLIC_HOST`** (default
+  `localhost`), instead of localhost and the first `hostname -I` address,
+  which does not exist on macOS.
 - **The README's quick start starts the DvTP demo, and the walkthrough
   matches the demo**: the quick start lists the five passwords every mode
   needs, `FTV_POSTGRES_PASSWORD` and `FTV_ADL_READER_PASSWORD` included, and

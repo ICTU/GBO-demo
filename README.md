@@ -87,6 +87,9 @@ The first run builds every image and takes a few minutes. Open the demo at:
 
 Then follow the [DvTP consent walkthrough](#dvtp-consent).
 
+To open the demo from another machine, set `GBO_PUBLIC_HOST` in `.env` to
+the IP address or DNS name that browser uses and run `make demo` again.
+
 ### The complete demo, with EUDI
 
 `make demo-full` adds the EUDI wallet flow to DvTP. It additionally needs the
