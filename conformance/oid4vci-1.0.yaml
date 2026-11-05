@@ -148,7 +148,7 @@ requirements:
     status: passed
     tests:
       - "services/eudi-credential-issuer/internal/httpapi:TestWalletInitiatedRequests/W2: authorization_details instead of scope"
-      - "services/eudi-credential-issuer/internal/httpapi:TestWalletInitiatedRequests/W3: details that are not JSON"
+      - "services/eudi-credential-issuer/internal/httpapi:TestWalletInitiatedRequests/W-6: details that are not JSON"
     profiles:
       nl:
         status: not-applicable
@@ -182,7 +182,7 @@ requirements:
     status: passed
     tests:
       - "services/eudi-credential-issuer/internal/httpapi:TestWalletInitiatedRequests/W2: authorization_details instead of scope"
-      - "services/eudi-credential-issuer/internal/httpapi:TestWalletInitiatedRequests/W3: details of an unknown type"
+      - "services/eudi-credential-issuer/internal/httpapi:TestWalletInitiatedRequests/W-6: an unknown configuration"
     profiles:
       nl:
         status: not-applicable
@@ -218,7 +218,7 @@ requirements:
   OID4VCI-5.1.2-03:
     status: deviation
     tests:
-      - "services/eudi-credential-issuer/internal/httpapi:TestWalletInitiatedRequests/W3: two credential types"
+      - "services/eudi-credential-issuer/internal/httpapi:TestScopeAndAuthorizationDetailsTogether"
     reason: "A wallet-initiated request must name exactly one credential type, because the login fetches the data of one source offer; scope values of two types are refused with invalid_scope. Applies to every wallet on this profile."
     profiles:
       nl:
@@ -228,9 +228,9 @@ requirements:
         status: not-applicable
         reason: "No authorization code flow on this profile: it carries pre-authorized offers only (QTSP route)."
   OID4VCI-5.1.2-04:
-    status: failing
-    reason: "An unknown scope value is refused with invalid_scope instead of ignored (internal/issuance/authorization.go; the refusal is tested in TestWalletInitiatedRequests)."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestWalletInitiatedRequests/W-1: unknown scope values are ignored"
     profiles:
       nl:
         status: not-applicable
@@ -239,9 +239,9 @@ requirements:
         status: not-applicable
         reason: "No authorization code flow on this profile: it carries pre-authorized offers only (QTSP route)."
   OID4VCI-5.1.2-06:
-    status: failing
-    reason: "When scope and authorization_details are both present, only scope is read and authorization_details is ignored; no test sends both."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestScopeAndAuthorizationDetailsTogether"
     profiles:
       nl:
         status: not-applicable
@@ -250,9 +250,9 @@ requirements:
         status: not-applicable
         reason: "No authorization code flow on this profile: it carries pre-authorized offers only (QTSP route)."
   OID4VCI-5.1.2-07:
-    status: failing
-    reason: "When scope and authorization_details are both present, only scope is read; for one type the outcome is the same, as the issuer acts on no other field of an authorization detail, but no test sends both."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestScopeAndAuthorizationDetailsTogether"
     profiles:
       nl:
         status: not-applicable
@@ -348,9 +348,9 @@ requirements:
         status: not-applicable
         reason: "No transaction code on this profile: the NL Wallet (v0.6.0), which the combined profile serves, refuses an offer with a tx_code."
   OID4VCI-6.1-03:
-    status: failing
-    reason: "Implemented: tx_code with the authorization code grant is refused with invalid_request (internal/issuance/token.go), but no test sends it; with the refresh token grant it is ignored, not refused."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestATransactionCodeWithAnotherGrant"
     profiles:
       nl:
         status: not-applicable
@@ -408,9 +408,10 @@ requirements:
       - "services/eudi-credential-issuer/internal/httpapi:TestIssueEUDI"
       - "services/eudi-credential-issuer/internal/httpapi:TestCombinedNLPlainJWT"
   OID4VCI-8-02:
-    status: failing
-    reason: "The issuer serves plain HTTP behind a TLS-terminating proxy (tunnel or ingress); it does not refuse a public URL without https, and no test covers TLS."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/H-1: public URL without https"
+      - "services/eudi-credential-issuer/internal/issuance:TestNewAcceptsPublicURLs"
   OID4VCI-8.1-01:
     status: passed
     tests:
@@ -641,9 +642,10 @@ requirements:
         status: not-applicable
         reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
   OID4VCI-9-02:
-    status: failing
-    reason: "The issuer serves plain HTTP behind a TLS-terminating proxy (tunnel or ingress); it does not refuse a public URL without https, and no test covers TLS."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/H-1: public URL without https"
+      - "services/eudi-credential-issuer/internal/issuance:TestNewAcceptsPublicURLs"
     profiles:
       nl:
         status: not-applicable
@@ -652,9 +654,9 @@ requirements:
         status: not-applicable
         reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
   OID4VCI-9.1-01:
-    status: failing
-    reason: "Implemented: a request without transaction_id is refused with invalid_transaction_id; no test sends one without it."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestDeferredRefusals/D-7: another session's token, another DPoP key, unknown id"
     profiles:
       nl:
         status: not-applicable
@@ -859,9 +861,10 @@ requirements:
         status: not-applicable
         reason: "No notification endpoint on this profile; credential responses carry no notification_id."
   OID4VCI-11-03:
-    status: failing
-    reason: "The issuer serves plain HTTP behind a TLS-terminating proxy (tunnel or ingress); it does not refuse a public URL without https, and no test covers TLS."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/H-1: public URL without https"
+      - "services/eudi-credential-issuer/internal/issuance:TestNewAcceptsPublicURLs"
     profiles:
       nl:
         status: not-applicable
@@ -956,9 +959,10 @@ requirements:
       - "services/eudi-credential-issuer/internal/httpapi:TestProviders/P-1 metadata of a provider"
       - "services/eudi-credential-issuer/internal/httpapi:TestCombinedMetadata"
   OID4VCI-12.2.2-02:
-    status: failing
-    reason: "TLS is terminated in front of the issuer (tunnel or ingress); the issuer accepts a public URL without https, and no test covers it."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/H-1: public URL without https"
+      - "services/eudi-credential-issuer/internal/issuance:TestNewAcceptsPublicURLs"
   OID4VCI-12.2.2-05:
     status: passed
     tests:
@@ -1029,17 +1033,20 @@ requirements:
     reason: "Implemented: the metadata carries credential_endpoint (<identifier>/credential); no test asserts it."
     slice: "#614"
   OID4VCI-12.2.4-06:
-    status: failing
-    reason: "credential_endpoint is derived from the public URL, which the issuer does not require to use https; no test covers the scheme."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/H-1: public URL without https"
+      - "services/eudi-credential-issuer/internal/issuance:TestNewAcceptsPublicURLs"
   OID4VCI-12.2.4-07:
-    status: failing
-    reason: "nonce_endpoint is derived from the public URL, which the issuer does not require to use https; no test covers the scheme."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/H-1: public URL without https"
+      - "services/eudi-credential-issuer/internal/issuance:TestNewAcceptsPublicURLs"
   OID4VCI-12.2.4-08:
-    status: failing
-    reason: "deferred_credential_endpoint is derived from the public URL, which the issuer does not require to use https; no test covers the scheme."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/H-1: public URL without https"
+      - "services/eudi-credential-issuer/internal/issuance:TestNewAcceptsPublicURLs"
     profiles:
       nl:
         status: not-applicable
@@ -1048,9 +1055,10 @@ requirements:
         status: not-applicable
         reason: "No deferred_credential_endpoint on this profile: there is no authorization code flow, the only route that defers."
   OID4VCI-12.2.4-09:
-    status: failing
-    reason: "notification_endpoint is derived from the public URL, which the issuer does not require to use https; no test covers the scheme."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/H-1: public URL without https"
+      - "services/eudi-credential-issuer/internal/issuance:TestNewAcceptsPublicURLs"
     profiles:
       nl:
         status: not-applicable
@@ -1157,13 +1165,14 @@ requirements:
     reason: "Implemented: each proof type lists proof_signing_alg_values_supported; no test asserts it in the metadata."
     slice: "#614"
   OID4VCI-12.2.4-26:
-    status: failing
-    reason: "credential_metadata.display carries the configured names and eudi-adapter writes a name for each configuration, but the issuer does not refuse a display object without a name, and no test asserts the published credential_metadata."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/M-2: a display without a name"
+      - "services/eudi-credential-issuer/internal/httpapi:TestADisplayWithoutLocale"
   OID4VCI-12.2.4-27:
-    status: failing
-    reason: "eudi-adapter writes one display object per locale, but the issuer does not refuse two display objects with the same locale, and no test asserts the published credential_metadata."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/M-1: two displays with one locale"
   OID4VCI-12.2.4-28:
     status: not-applicable
     reason: "A credential display carries a name and locale only, no logo."
@@ -1204,9 +1213,15 @@ requirements:
           - "services/eudi-credential-issuer/internal/httpapi:TestCombinedNLPlainJWT"
         reason: "Access tokens are DPoP-bound, but for a wallet of the NL Wallet provider the NL credential preview endpoint takes the token as a bearer token, once per token, because the NL Wallet (v0.6.0) calls it without DPoP; an EUDI wallet's token is refused there."
   OID4VCI-13.2-02:
-    status: failing
-    reason: "PKCE with S256, required PAR, iss in the authorization response, DPoP-bound tokens and codes, and codes of at most 60 seconds are met; refresh tokens are rotated (each is used once), which FAPI 2.0 section 5.3.2.1 does not allow outside extraordinary circumstances."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestPushedAuthorizationRequest"
+      - "services/eudi-credential-issuer/internal/httpapi:TestPushedAuthorizationRefusals"
+      - "services/eudi-credential-issuer/internal/httpapi:TestTheAuthorizationRequestNeedsAPushedRequest"
+      - "services/eudi-credential-issuer/internal/httpapi:TestALoginReturnsACodeToTheWallet"
+      - "services/eudi-credential-issuer/internal/httpapi:TestACodeBoundToADPoPKey"
+      - "services/eudi-credential-issuer/internal/httpapi:TestTheCodeIsBoundToThePushedRequest"
+      - "services/eudi-credential-issuer/internal/httpapi:TestRefreshTokens"
     profiles:
       nl:
         status: deviation
@@ -1276,9 +1291,8 @@ requirements:
           - "services/eudi-credential-issuer/internal/httpapi:TestCombinedNLPlainJWT"
         reason: "A wallet of the NL Wallet provider, recognised by its Wallet Instance Attestation, may prove possession without key attestation, because the NL Wallet (v0.6.0) cannot attest its keys; any other wallet must attest them."
   OID4VCI-13.9-01:
-    status: failing
-    reason: "Incoming TLS is terminated at the ingress in front of the issuer, outside this service; outgoing calls use Go's TLS defaults (TLS 1.2 or higher), and a bronpoort with roots of its own requires TLS 1.2. No test checks TLS versions or cipher suites."
-    slice: "#614"
+    status: not-applicable
+    reason: "Incoming TLS ends at the proxy in front of the issuer, where BCP 195 applies; the issuer requires an https public URL. Outgoing calls use Go's TLS defaults (TLS 1.2 or higher)."
   OID4VCI-13.9-02:
     status: passed
     tests:
@@ -1439,13 +1453,14 @@ requirements:
       - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/empty claim path"
       - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
   OID4VCI-B.2-03:
-    status: failing
-    reason: "The configuration is not checked for two display objects of one claim with the same locale."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/M-1: two claim displays with one locale"
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/M-2: a claim display without a name"
   OID4VCI-B.3-01:
-    status: failing
-    reason: "The issuer ignores claims in authorization_details; its configuration is checked for empty claim paths but not for repeated or contradictory claim descriptions, which it would publish in its metadata."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/M-3: a repeated claim path"
   OID4VCI-C-01:
     status: passed
     tests:

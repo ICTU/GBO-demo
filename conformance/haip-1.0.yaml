@@ -50,9 +50,15 @@ requirements:
       - "services/eudi-credential-issuer/internal/httpapi:TestIssueEUDI"
       - "services/eudi-credential-issuer/internal/httpapi:TestCombinedNLPlainJWT"
   HAIP-4-04:
-    status: failing
-    reason: "PKCE with S256, required PAR, iss in the authorization response, DPoP-bound tokens and codes, and codes of at most 60 seconds are met; refresh tokens are rotated (each is used once), which FAPI 2.0 section 5.3.2.1 does not allow outside extraordinary circumstances."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestPushedAuthorizationRequest"
+      - "services/eudi-credential-issuer/internal/httpapi:TestPushedAuthorizationRefusals"
+      - "services/eudi-credential-issuer/internal/httpapi:TestTheAuthorizationRequestNeedsAPushedRequest"
+      - "services/eudi-credential-issuer/internal/httpapi:TestALoginReturnsACodeToTheWallet"
+      - "services/eudi-credential-issuer/internal/httpapi:TestACodeBoundToADPoPKey"
+      - "services/eudi-credential-issuer/internal/httpapi:TestTheCodeIsBoundToThePushedRequest"
+      - "services/eudi-credential-issuer/internal/httpapi:TestRefreshTokens"
     profiles:
       nl:
         status: deviation
@@ -190,7 +196,7 @@ requirements:
   HAIP-4.3-03:
     status: passed
     tests:
-      - "services/eudi-credential-issuer/internal/httpapi:TestWalletInitiatedRequests/W3: two credential types"
+      - "services/eudi-credential-issuer/internal/httpapi:TestScopeAndAuthorizationDetailsTogether"
       - "services/eudi-credential-issuer/internal/httpapi:TestWalletInitiatedRequestForAnAmbiguousConfiguration"
       - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/duplicate scope"
     profiles:
