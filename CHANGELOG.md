@@ -7,13 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Added
-- **The demo runs on any host name**: `GBO_PUBLIC_HOST` may be a DNS name.
-  The Vite frontends accept it (and the comma-separated
-  `GBO_EXTRA_ALLOWED_HOSTS`) instead of answering 403, and the reference
-  QTSP's public URL follows it like the other ASI URLs (`QTSP_PUBLIC_URL`
-  overrides it). `GBO_INTERNAL_BIND_ADDRESS` sets the host address of the
-  admission register, logboek and EDI Outway ports; it stays `127.0.0.1` by
-  default.
+- **The demo runs on any host name**: the Vite frontends accept
+  `GBO_PUBLIC_HOST` and `GBO_EXTRA_ALLOWED_HOSTS`, the reference QTSP follows
+  `GBO_PUBLIC_HOST` (`QTSP_PUBLIC_URL` overrides it), and
+  `GBO_INTERNAL_BIND_ADDRESS` (default `127.0.0.1`) binds the ports without a
+  login.
 
 - **The landing page offers the Installatie Register scenario**: the DvTP
   card under "Zelf uitproberen" lets the visitor choose between HypotheekBV

@@ -381,8 +381,7 @@ services:
     image: federatedserviceconnectivity/outway:v2.4.0
     restart: unless-stopped
     ports:
-      # No login of its own: loopback unless GBO_INTERNAL_BIND_ADDRESS says
-      # otherwise (see .env.example).
+      # No login of its own: see GBO_INTERNAL_BIND_ADDRESS in .env.example.
       - "${GBO_INTERNAL_BIND_ADDRESS:-127.0.0.1}:${FSC_PORT_EDI_OUTWAY:-8087}:8080"
     volumes:
       - ./orgs/edi-issuer/pki:/certs:ro

@@ -64,11 +64,9 @@ PORT_PDP := $(or $(GBO_PORT_OPA),9181)
 PORT_EUDI_ADAPTER := $(or $(GBO_PORT_EUDI_ADAPTER),9409)
 PORT_DVTP_ONBOARDING_REGISTER := $(or $(GBO_PORT_DVTP_ONBOARDING_REGISTER),9415)
 
-# The host name the browser uses, as in docker-compose.yml.
 PUBLIC_HOST := $(or $(GBO_PUBLIC_HOST),localhost)
 
-# banner <label> <port> [scheme] — one "  Label:  <scheme>://<host>:<port>"
-# line, on GBO_PUBLIC_HOST: the address the frontends link to as well.
+# banner <label> <port> [scheme] — one "  Label:  <scheme>://<host>:<port>" line.
 banner = @printf "  %-21s %s://%s:%s\n" "$(1)" "$(or $(3),http)" "$(PUBLIC_HOST)" "$(2)"
 
 # The OpenFTV PDP writes its Authorization Decision Log to postgres-ftv and
