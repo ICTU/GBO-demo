@@ -19,24 +19,37 @@ import (
 
 // Matrix is the conformance matrix: an entry per requirement ID, and groups
 // that cover every ID with a prefix (for example a clause that does not
-// apply). An entry overrides a group.
+// apply) or a role (for example the wallet's requirements). An entry
+// overrides a group. A matrix that names profiles may give a requirement
+// another status per profile.
 type Matrix struct {
 	Spec         string            `yaml:"spec"`
 	IDs          string            `yaml:"ids"`
+	Profiles     []string          `yaml:"profiles,omitempty"`
 	Groups       []Group           `yaml:"groups"`
 	Requirements map[string]Status `yaml:"requirements"`
 
-	// ids is the list of requirement IDs, read from IDs.
-	ids []string
+	// ids is the list of requirement IDs, read from IDs, and roles the role
+	// the list gives an ID.
+	ids   []string
+	roles map[string]string
 }
 
 type Group struct {
-	Prefix string `yaml:"prefix"`
+	Prefix string `yaml:"prefix,omitempty"`
+	Role   string `yaml:"role,omitempty"`
 	Status `yaml:",inline"`
 }
 
-// Status is how the ASI route meets a requirement.
+// Status is how a requirement is met, for every profile unless Profiles
+// says otherwise for one.
 type Status struct {
+	ProfileStatus `yaml:",inline"`
+	Profiles      map[string]ProfileStatus `yaml:"profiles,omitempty"`
+}
+
+// ProfileStatus is how a requirement is met.
+type ProfileStatus struct {
 	Status string   `yaml:"status"`
 	Tests  []string `yaml:"tests,omitempty"`
 	Reason string   `yaml:"reason,omitempty"`
@@ -49,9 +62,12 @@ const (
 	statusStub          = "stub"
 	statusNotApplicable = "not-applicable"
 	statusFailing       = "failing"
+	// statusDeviation is a requirement not met on purpose; the reason says
+	// why and for which wallet.
+	statusDeviation = "deviation"
 )
 
-var statuses = []string{statusPassed, statusStub, statusNotApplicable, statusFailing}
+var statuses = []string{statusPassed, statusStub, statusNotApplicable, statusFailing, statusDeviation}
 
 // Load reads the matrix and the ID list it names, relative to the matrix.
 // Unknown fields and duplicate IDs are errors.
@@ -74,17 +90,32 @@ func Load(path string) (*Matrix, error) {
 		return nil, err
 	}
 	defer f.Close()
+	m.roles = map[string]string{}
 	s := bufio.NewScanner(f)
 	for s.Scan() {
-		if line := strings.TrimSpace(s.Text()); line != "" && !strings.HasPrefix(line, "#") {
-			m.ids = append(m.ids, line)
+		line := strings.TrimSpace(s.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		switch fields := strings.Fields(line); len(fields) {
+		case 1:
+			m.ids = append(m.ids, fields[0])
+		case 2:
+			m.ids = append(m.ids, fields[0])
+			m.roles[fields[0]] = fields[1]
+		default:
+			return nil, fmt.Errorf("%s: %s: more than an ID and a role", m.IDs, line)
 		}
 	}
 	return &m, s.Err()
 }
 
-// roleOf is the role of a requirement ID: REQ-<role>-<clause>-<n>.
-func roleOf(id string) string {
+// roleOf is the role the ID list gives id, or else the role in the ID:
+// REQ-<role>-<clause>-<n>.
+func (m *Matrix) roleOf(id string) string {
+	if role, ok := m.roles[id]; ok {
+		return role
+	}
 	parts := strings.SplitN(id, "-", 3)
 	if len(parts) < 3 {
 		return "?"
@@ -108,29 +139,44 @@ func Check(m *Matrix, root string) (string, []string) {
 		if !known[id] {
 			problems = append(problems, fmt.Sprintf("%s: not a requirement ID of the list", id))
 		}
-		problems = append(problems, m.Requirements[id].problems(id, &tests)...)
+		problems = append(problems, m.problems(id, m.Requirements[id], &tests)...)
 	}
 	for _, g := range m.Groups {
-		name := "group " + g.Prefix
-		matched := slices.ContainsFunc(m.ids, func(id string) bool { return strings.HasPrefix(id, g.Prefix) })
-		if g.Prefix == "" || !matched {
+		name := g.name()
+		if g.Prefix == "" && g.Role == "" {
+			problems = append(problems, name+": a group needs a prefix or a role")
+		} else if !slices.ContainsFunc(m.ids, func(id string) bool { return m.covers(g, id) }) {
 			problems = append(problems, fmt.Sprintf("%s: covers no requirement ID of the list", name))
 		}
-		problems = append(problems, g.problems(name, &tests)...)
+		problems = append(problems, m.problems(name, g.Status, &tests)...)
 	}
 
-	count := map[string]map[string]int{}
+	// count is per profile ("" without profiles), role and status.
+	profiles := m.Profiles
+	if len(profiles) == 0 {
+		profiles = []string{""}
+	}
+	count := map[string]map[string]map[string]int{}
 	for _, id := range m.ids {
 		st, ok := m.statusOf(id)
 		if !ok {
 			problems = append(problems, fmt.Sprintf("%s: no entry and no group", id))
 			continue
 		}
-		role := roleOf(id)
-		if count[role] == nil {
-			count[role] = map[string]int{}
+		role := m.roleOf(id)
+		for _, p := range profiles {
+			ps := st.ProfileStatus
+			if o, ok := st.Profiles[p]; ok {
+				ps = o
+			}
+			if count[p] == nil {
+				count[p] = map[string]map[string]int{}
+			}
+			if count[p][role] == nil {
+				count[p][role] = map[string]int{}
+			}
+			count[p][role][ps.Status]++
 		}
-		count[role][st.Status]++
 	}
 	if len(problems) > 0 {
 		return "", problems
@@ -138,22 +184,57 @@ func Check(m *Matrix, root string) (string, []string) {
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s: %d requirements\n", m.Spec, len(m.ids))
-	fmt.Fprintf(&b, "%-6s %7s %5s %15s %8s\n", "role", "passed", "stub", "not-applicable", "failing")
-	for _, role := range sortedKeys(count) {
-		c := count[role]
-		fmt.Fprintf(&b, "%-6s %7d %5d %15d %8d\n", role, c[statusPassed], c[statusStub], c[statusNotApplicable], c[statusFailing])
+	column := ""
+	if len(m.Profiles) > 0 {
+		column = fmt.Sprintf("%-8s ", "profile")
+	}
+	fmt.Fprintf(&b, "%s%-6s %7s %5s %15s %8s %10s\n", column, "role", "passed", "stub", "not-applicable", "failing", "deviation")
+	for _, p := range profiles {
+		if p != "" {
+			column = fmt.Sprintf("%-8s ", p)
+		}
+		for _, role := range sortedKeys(count[p]) {
+			c := count[p][role]
+			fmt.Fprintf(&b, "%s%-6s %7d %5d %15d %8d %10d\n", column, role, c[statusPassed], c[statusStub], c[statusNotApplicable], c[statusFailing], c[statusDeviation])
+		}
 	}
 	return b.String(), nil
 }
 
-// statusOf is the entry of id, or else the group with the longest prefix.
+func (g Group) name() string {
+	switch {
+	case g.Prefix != "" && g.Role != "":
+		return "group " + g.Prefix + " role " + g.Role
+	case g.Role != "":
+		return "group role " + g.Role
+	}
+	return "group " + g.Prefix
+}
+
+// covers tells whether group g covers id: its prefix, its role, or both.
+func (m *Matrix) covers(g Group, id string) bool {
+	if g.Prefix == "" && g.Role == "" {
+		return false
+	}
+	return (g.Prefix == "" || strings.HasPrefix(id, g.Prefix)) && (g.Role == "" || m.roleOf(id) == g.Role)
+}
+
+// statusOf is the entry of id, or else the most specific group that covers
+// it: the longest prefix, and of equal prefixes the one with a role.
 func (m *Matrix) statusOf(id string) (Status, bool) {
 	if st, ok := m.Requirements[id]; ok {
 		return st, true
 	}
+	specificity := func(g Group) int {
+		n := 2 * len(g.Prefix)
+		if g.Role != "" {
+			n++
+		}
+		return n
+	}
 	var best *Group
 	for i, g := range m.Groups {
-		if g.Prefix != "" && strings.HasPrefix(id, g.Prefix) && (best == nil || len(g.Prefix) > len(best.Prefix)) {
+		if m.covers(g, id) && (best == nil || specificity(g) > specificity(*best)) {
 			best = &m.Groups[i]
 		}
 	}
@@ -163,7 +244,24 @@ func (m *Matrix) statusOf(id string) (Status, bool) {
 	return best.Status, true
 }
 
-func (s Status) problems(name string, tests *testIndex) []string {
+// problems checks a status and its status per profile.
+func (m *Matrix) problems(name string, s Status, tests *testIndex) []string {
+	out := s.ProfileStatus.problems(name, tests)
+	if len(s.Profiles) > 0 && len(m.Profiles) == 0 {
+		return append(out, name+": a status per profile, but the matrix names no profiles")
+	}
+	for _, p := range sortedKeys(s.Profiles) {
+		pname := name + " profile " + p
+		if !slices.Contains(m.Profiles, p) {
+			out = append(out, pname+": not a profile of the matrix")
+			continue
+		}
+		out = append(out, s.Profiles[p].problems(pname, tests)...)
+	}
+	return out
+}
+
+func (s ProfileStatus) problems(name string, tests *testIndex) []string {
 	var out []string
 	add := func(format string, args ...any) { out = append(out, name+": "+fmt.Sprintf(format, args...)) }
 	if !slices.Contains(statuses, s.Status) {

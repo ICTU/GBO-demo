@@ -13,7 +13,10 @@ A status is one of:
 - `passed`: the tests named prove it;
 - `stub`: the tests named prove it against a stub that is not conformant; `reason` says which;
 - `not-applicable`: it does not apply to this ASIP; `reason` says why;
-- `failing`: not met; `reason` says why and `slice` where it will be met.
+- `failing`: not met; `reason` says why and `slice` where it will be met;
+- `deviation`: not met on purpose; `reason` says why and for which wallet. Tests may show the behaviour instead.
+
+The check serves other specifications too, with the same rules. An ID list may give each ID a role after it (`OID4VCI-8.2-03 issuer`); without one the role comes from the ID, as for ETSI (`REQ-<role>-…`). A group covers IDs by `prefix`, by `role`, or both; an entry overrides it, and of two groups the one with the longer prefix wins, then the one with a role. A matrix that lists `profiles` (for example `[nl, eudi, wallet]`) may give an entry or a group another status per profile under `profiles:`, with the same rules; the summary is then per profile and role.
 
 A test is `<dir>:<TestName>`, or `<dir>:<TestName>/<subtest>`, with the directory relative to the repository root. A subtest cannot be listed without running the tests, so the check requires its name (each part of a nested one) to be a string literal in a test file of that directory: a removed or misspelt subtest is caught, a renamed literal that still exists elsewhere is not.
 
