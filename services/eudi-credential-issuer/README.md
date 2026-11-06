@@ -178,7 +178,7 @@ ISSUER_TEST_DATABASE_URL=postgres://... go test ./internal/postgres/
 | `ISSUER_LOGIN_REGISTER_BASE` | base of the providers' entries in the register, default `https://register.gbo.example/wrp` |
 | `ISSUER_WALLET_REDIRECT_URIS` | the wallet redirect URIs accepted at PAR, comma-separated, default `eu.europa.ec.euidi://authorization` (the EUDI reference wallet) |
 
-Interoperability with an independent wallet: `interop/` is a separate module that drives the issuer with OID4VCgo (OpenID Certified wallet). It needs Go 1.26.10 (`GOTOOLCHAIN=auto` fetches it) and does not run in CI.
+Interoperability with an independent wallet: `interop/` is a separate module that drives the issuer with OID4VCgo (OpenID Certified wallet). It needs Go 1.26.10 (`GOTOOLCHAIN=auto` fetches it) and runs in CI as a job of its own.
 
 ```bash
 cd services/eudi-credential-issuer/interop && go test ./...

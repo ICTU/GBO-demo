@@ -24,6 +24,7 @@ jobs:
       conformance: ${{ steps.plan.outputs.conformance }}
       source_registry: ${{ steps.plan.outputs.source_registry }}
       credential_issuer_db: ${{ steps.plan.outputs.credential_issuer_db }}
+      credential_issuer_interop: ${{ steps.plan.outputs.credential_issuer_interop }}
       rego: ${{ steps.plan.outputs.rego }}
       schema_drift: ${{ steps.plan.outputs.schema_drift }}
       image_manifest: ${{ steps.plan.outputs.image_manifest }}
@@ -166,6 +167,22 @@ jobs:
         run: >-
           ISSUER_TEST_DATABASE_URL="postgres://postgres:${ISSUER_TEST_PASSWORD}@127.0.0.1:5432/issuertest?sslmode=disable"
           go test -count=1 -timeout 120s ./internal/postgres
+
+  credential-issuer-interop:
+    name: Credential issuer — interop with OID4VCgo
+    needs: changes
+    if: needs.changes.outputs.credential_issuer_interop == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # A separate module: OID4VCgo needs a newer Go than the services.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: services/eudi-credential-issuer/interop/go.mod
+          cache-dependency-path: services/eudi-credential-issuer/interop/go.*
+      - name: the issuer driven by an independent wallet
+        working-directory: services/eudi-credential-issuer/interop
+        run: go test -count=1 -timeout 180s ./...
 
   rego:
     name: Rego — fmt + check + test
@@ -422,7 +439,7 @@ jobs:
   result:
     name: CI result
     runs-on: ubuntu-latest
-    needs: [changes, go, conformance, source-registry, credential-issuer-db, rego, schema-drift, image-manifest, chart, frontend, scripts, docker]
+    needs: [changes, go, conformance, source-registry, credential-issuer-db, credential-issuer-interop, rego, schema-drift, image-manifest, chart, frontend, scripts, docker]
     if: always()
     steps:
       - name: Evaluate job results

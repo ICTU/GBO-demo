@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-jose/go-jose/v4"
 	oid4vci "github.com/idfoundry/oid4vcgo"
 	"github.com/idfoundry/oid4vcgo/attestation"
 
@@ -35,6 +36,7 @@ import (
 	"gbo-demo/eudi-credential-issuer/internal/issuance"
 	"gbo-demo/eudi-credential-issuer/internal/memstore"
 	"gbo-demo/eudi-credential-issuer/internal/source"
+	kitoid4vci "gbo-demo/oid4vc-kit/oid4vci"
 	"gbo-demo/oid4vc-kit/testpki"
 	"gbo-demo/oid4vc-kit/testwallet"
 	"gbo-demo/oid4vc-kit/x5c"
@@ -62,6 +64,9 @@ type issuer struct {
 	issuerRoot testpki.Cert
 	accessRoot testpki.Cert
 	provider   *provider
+	// requestKey is the provider's request encryption key, to read an
+	// encrypted credential request.
+	requestKey *ecdsa.PrivateKey
 
 	mu   sync.Mutex
 	seen []exchange
@@ -86,6 +91,8 @@ type exchange struct {
 	JWTProofs         int
 	JWTKeyAttestation bool
 	Accept            string
+	// Encrypted: the credential request was a JWE.
+	Encrypted bool
 }
 
 // record wraps the public handler and keeps an exchange per request.
@@ -99,6 +106,14 @@ func (is *issuer) record(next http.Handler) http.Handler {
 			e.PoPChallenge = ok
 		}
 		if strings.HasSuffix(r.URL.Path, "/credential") {
+			if r.Header.Get("Content-Type") == "application/jwt" {
+				e.Encrypted = true
+				if obj, err := jose.ParseEncryptedCompact(string(body), []jose.KeyAlgorithm{kitoid4vci.EncryptionAlgorithm}, kitoid4vci.EncryptionMethods); err == nil {
+					if plain, err := kitoid4vci.DecryptRequest(string(body), []kitoid4vci.RequestKey{{KeyID: obj.Header.KeyID, Key: is.requestKey}}); err == nil {
+						body = plain
+					}
+				}
+			}
 			var req struct {
 				Proofs map[string][]string `json:"proofs"`
 			}
@@ -180,7 +195,7 @@ func tryIssuer(t *testing.T, opts ...func(*issuance.Config)) (*issuer, error) {
 	}))
 	t.Cleanup(src.Close)
 
-	is := &issuer{t: t, provider: newProvider(t)}
+	is := &issuer{t: t, provider: newProvider(t), requestKey: testpki.NewKey(t)}
 	subject := pkix.Name{CommonName: "Issuer", Organization: []string{"GBO Demo"}}
 	is.issuerRoot = testpki.NewRoot(t, "issuer root")
 	issuerCA := is.issuerRoot.IssueCA(t, "issuer CA")
@@ -204,6 +219,7 @@ func tryIssuer(t *testing.T, opts ...func(*issuance.Config)) (*issuer, error) {
 		Providers: []issuance.Provider{{
 			Name: "tax", AccessKey: access.Key, AccessChain: access.Chain, RegistrationCertificate: testwallet.RegistrationCertificate(t, registrar, "NTRNL-tax", incomeVCT),
 			IssuerKey: issuerCert.Key, IssuerChain: issuerCert.Chain, StatusKey: statusCert.Key, StatusChain: statusCert.Chain,
+			RequestEncryptionKey: is.requestKey,
 		}},
 		Profiles: []issuance.Profile{
 			{Name: "nl", Kind: issuance.KindNL, WalletProviders: providers,

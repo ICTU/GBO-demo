@@ -215,7 +215,7 @@ requirements:
         status: deviation
         tests:
           - "services/eudi-credential-issuer/internal/httpapi:TestRefreshTokenRefusals/F-6: no refresh token on nl"
-        reason: "No refresh tokens on this profile: the NL Wallet (v0.6.0) does not re-issue credentials with a refresh token."
+        reason: "No refresh tokens on this profile: the NL Wallet (v0.6.0) does not re-issue credentials with a refresh token; its token request knows only the authorization code and pre-authorized code grants."
       wallet:
         status: deviation
         reason: "No refresh tokens on this profile: the combined profile serves one-off pre-authorized offers (QTSP route) to both wallets, and the NL Wallet (v0.6.0) does not use refresh tokens; re-issuance is offered on the eudi profile."

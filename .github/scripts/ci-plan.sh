@@ -273,6 +273,11 @@ if [[ "${ci_changed}" == true ]] || matches_any 'services/eudi-credential-issuer
   credential_issuer_db=true
 fi
 
+credential_issuer_interop=false
+if [[ "${ci_changed}" == true ]] || matches_any 'services/eudi-credential-issuer/*' 'services/oid4vc-kit/*'; then
+  credential_issuer_interop=true
+fi
+
 scripts=false
 if [[ "${ci_changed}" == true ]] || matches_any \
   'scripts/seed-openftv-manager.py' \
@@ -287,6 +292,7 @@ result="$({
   printf 'conformance=%s\n' "${conformance}"
   printf 'source_registry=%s\n' "${source_registry}"
   printf 'credential_issuer_db=%s\n' "${credential_issuer_db}"
+  printf 'credential_issuer_interop=%s\n' "${credential_issuer_interop}"
   printf 'rego=%s\n' "${rego}"
   printf 'schema_drift=%s\n' "${schema_drift}"
   printf 'image_manifest=%s\n' "${image_manifest}"
