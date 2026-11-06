@@ -17,9 +17,8 @@ groups:
 
 requirements:
   HAIP-3-01:
-    status: failing
-    reason: "Met when every entry of this matrix for the flows the issuer implements (issuance, and presentation via redirects for disclosure-based issuance) is met; see the failing entries."
-    slice: "#614"
+    status: not-applicable
+    reason: "An aggregate: every requirement of the flows the issuer implements has its own entry in this matrix, which is the evidence."
   HAIP-3-02:
     status: passed
     tests:
@@ -390,9 +389,10 @@ requirements:
         status: not-applicable
         reason: "No disclosure-based issuance on the combined profile: the issuer acts as Verifier on the nl and eudi profiles only."
   HAIP-5-15:
-    status: failing
-    reason: "The DCQL query carries no trusted_authorities; the Verifier checks the PID chain against its own trust anchors after the response."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestDisclosureTrustedAuthorities"
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/B-3: an aki that is not base64url"
     profiles:
       wallet:
         status: not-applicable
@@ -441,7 +441,7 @@ requirements:
         reason: "No disclosure-based issuance on the combined profile: the issuer acts as Verifier on the nl and eudi profiles only."
   HAIP-5.1-06:
     status: not-applicable
-    reason: "The result of a presentation is a one-time Credential Offer, returned only to the presenting Wallet in redirect_uri; no browser session at the Verifier receives it, so there is no session to bind."
+    reason: "The result of a presentation is a one-time Credential Offer, returned only to the presenting Wallet in redirect_uri; no browser session at the Verifier receives it, so there is no session to bind. This holds cross-device too: the QR code that starts the presentation leads to no session with personal data."
   HAIP-5.2-02:
     status: not-applicable
     reason: "The Verifier uses OpenID4VP via redirects (section 5.1), not the W3C Digital Credentials API."

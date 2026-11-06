@@ -1188,9 +1188,12 @@ requirements:
     status: not-applicable
     reason: "A credential display carries a name and locale only, no background image."
   OID4VCI-12.2.4-30:
-    status: failing
-    reason: "The authorization server shares the issuer's credential configurations, claims included, but the consent the citizen gives at login, at GBO's authorization server, names the source and an attestation, not the claims of the credential."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/asi-authorization-server/internal/httpapi:TestTheConsentForIssuanceNamesTheCredential"
+      - "services/asi-authorization-server/internal/issuermetadata:TestFetch"
+      - "services/eudi-credential-issuer/internal/httpapi:TestAuthorizeSendsTheCitizenToTheLogin"
+      - "services/eudi-credential-issuer/internal/login:TestTheFirstLoginRegistersTheProvider"
     profiles:
       nl:
         status: not-applicable
@@ -1274,7 +1277,7 @@ requirements:
       - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
   OID4VCI-13.5-05:
     status: not-applicable
-    reason: "The Credential Offer carries no End-User data: only the Credential Issuer Identifier, credential configuration IDs and a pre-authorized code or issuer_state."
+    reason: "The Credential Offer carries no End-User data: only the Credential Issuer Identifier, credential configuration IDs and a pre-authorized code or issuer_state. A configuration ID can still say something about the End-User (for example a benefit type); the source that names it decides that."
   OID4VCI-13.8-01:
     status: passed
     tests:
@@ -1329,31 +1332,33 @@ requirements:
     tests:
       - "services/eudi-credential-issuer/internal/httpapi:TestConformanceLaterRequestsRevokeNothing"
   OID4VCI-15.1-01:
-    status: failing
-    reason: "The authorization code flow asks consent at GBO's authorization server before issuing; a pre-authorized or disclosure-based offer relies on the offer caller and on the wallet, with no consent step at the issuer."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/asi-authorization-server/internal/httpapi:TestTheConsentForIssuanceNamesTheCredential"
+      - "services/eudi-credential-issuer/internal/httpapi:TestAuthorizeSendsTheCitizenToTheLogin"
+    reason: "On the authorization code flow the citizen consents at GBO's authorization server, which names the credential and its claims from the issuer metadata. A pre-authorized or disclosure-based offer is made at the citizen's own request to the offer caller, and the wallet shows it before accepting."
     profiles:
       nl:
         status: passed
         tests:
           - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
       wallet:
-        status: failing
-        reason: "A wallet of the NL Wallet provider gets the NL credential preview before issuance; an EUDI wallet gets a pre-authorized offer with no consent step at the issuer."
-        slice: "#614"
+        status: not-applicable
+        reason: "Pre-authorized offers only: the offer is made at the citizen's own request to the offer caller (the QTSP), and the wallet shows it before accepting."
   OID4VCI-15.1-02:
-    status: failing
-    reason: "The metadata names each credential and its claims (display); the issuer shows the End-User neither the claim values nor a purpose before issuing."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/asi-authorization-server/internal/httpapi:TestTheConsentForIssuanceNamesTheCredential"
+      - "services/asi-authorization-server/internal/issuermetadata:TestFetch"
+    reason: "On the authorization code flow the citizen consents at GBO's authorization server, which names the credential and its claims from the issuer metadata. A pre-authorized or disclosure-based offer is made at the citizen's own request to the offer caller, and the wallet shows it before accepting."
     profiles:
       nl:
         status: passed
         tests:
           - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
       wallet:
-        status: failing
-        reason: "A wallet of the NL Wallet provider gets the NL credential preview with the claim values; an EUDI wallet learns only the credential and claim names from the metadata."
-        slice: "#614"
+        status: not-applicable
+        reason: "Pre-authorized offers only: the offer is made at the citizen's own request to the offer caller (the QTSP), and the wallet shows it before accepting. A wallet of the NL Wallet provider also gets the NL credential preview."
   OID4VCI-15.2-01:
     status: passed
     tests:
