@@ -94,6 +94,11 @@ type Profile struct {
 	// UniversalLinkBase is the wallet's universal link base (KindNL,
 	// KindCombined).
 	UniversalLinkBase string
+	// PIDTrustedAuthorities are base64url KeyIdentifiers the PID query of
+	// disclosure-based issuance names as an aki trusted_authorities query
+	// (HAIP 1.0 section 5): a wallet then offers only a PID whose chain has
+	// one of them as AuthorityKeyIdentifier. Empty, the query names none.
+	PIDTrustedAuthorities []string
 	// WalletRedirectURIs are the redirect URIs of the wallets this profile
 	// trusts, for the authorization code flow. The flow is offered on a
 	// KindEUDI profile with these and a Login (K1, K5).

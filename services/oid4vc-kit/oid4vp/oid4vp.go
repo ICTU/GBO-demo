@@ -73,7 +73,21 @@ type CredentialQuery struct {
 	Format string       `json:"format"`
 	Meta   Meta         `json:"meta"`
 	Claims []ClaimQuery `json:"claims"`
+	// TrustedAuthorities restricts the issuers of the credential
+	// (OpenID4VP 1.0 section 6.1.1; HAIP 1.0 section 5 asks for aki).
+	TrustedAuthorities []TrustedAuthority `json:"trusted_authorities,omitempty"`
 }
+
+// TrustedAuthority is a trusted authorities query: of type "aki", Values
+// are base64url KeyIdentifiers that must occur as an AuthorityKeyIdentifier
+// in the credential's certificate chain (OpenID4VP 1.0 section 6.1.1.1).
+type TrustedAuthority struct {
+	Type   string   `json:"type"`
+	Values []string `json:"values"`
+}
+
+// TrustedAuthorityAKI is the aki type of trusted authorities query.
+const TrustedAuthorityAKI = "aki"
 
 // Meta holds the type constraint of an SD-JWT VC query.
 type Meta struct {

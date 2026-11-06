@@ -107,6 +107,9 @@ type ProfileFile struct {
 	// profile: wallets attested by these providers (the NL Wallet's) may
 	// skip key attestation.
 	PlainJWTWalletProvidersFile string `json:"plain_jwt_wallet_providers_file"`
+	// PIDTrustedAuthorities are base64url KeyIdentifiers for an aki
+	// trusted_authorities query on the PID (HAIP 1.0 section 5).
+	PIDTrustedAuthorities []string `json:"pid_trusted_authorities"`
 	// KeyStorage and UserAuthentication are the levels a key attestation
 	// must assert (OpenID4VCI Appendix D.2), for example "iso_18045_high".
 	KeyStorage         []string `json:"key_storage"`
@@ -249,7 +252,7 @@ func loadProvider(dir string, pf ProviderFile) (issuance.Provider, error) {
 }
 
 func loadProfile(dir string, pf ProfileFile) (issuance.Profile, error) {
-	p := issuance.Profile{Name: pf.Name, Kind: pf.Kind, UniversalLinkBase: pf.UniversalLinkBase,
+	p := issuance.Profile{Name: pf.Name, Kind: pf.Kind, UniversalLinkBase: pf.UniversalLinkBase, PIDTrustedAuthorities: pf.PIDTrustedAuthorities,
 		KeyStorage: pf.KeyStorage, UserAuthentication: pf.UserAuthentication}
 	var err error
 	if p.WalletProviders, err = loadAnchors(dir, pf.WalletProviderRootsFile, pf.Name+" wallet providers"); err != nil {

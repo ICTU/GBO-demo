@@ -157,6 +157,16 @@ func TestMaterializeCredentialIssuerEUDIProfile(t *testing.T) {
 			t.Fatalf("profile %+v", eudi)
 		}
 	})
+	t.Run("trusted authorities for the PID query on eudi only", func(t *testing.T) {
+		f.options.eudiPIDTrustedAuthorities = []string{"AAEC"}
+		out := f.materialized(t)
+		for _, p := range out.Profiles {
+			if want := p.Name == "eudi"; (len(p.PIDTrustedAuthorities) == 1 && p.PIDTrustedAuthorities[0] == "AAEC") != want {
+				t.Errorf("profile %s: pid_trusted_authorities %v", p.Name, p.PIDTrustedAuthorities)
+			}
+		}
+		f.options.eudiPIDTrustedAuthorities = nil
+	})
 	t.Run("key attestation roots mounted separately", func(t *testing.T) {
 		copyTestFile(t, filepath.Join(caDir, "issuer-ca-cert.pem"), filepath.Join(f.options.rootsDir, eudiKeyAttestationFile))
 		if eudi := f.materialized(t).Profiles[1]; eudi.KeyAttestationRootsFile != eudiKeyAttestationFile {

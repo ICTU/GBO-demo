@@ -258,6 +258,9 @@ func TestNewRefusesConfigurations(t *testing.T) {
 			claims[0].Display = []issuance.Display{{Locale: "en"}}
 			c.Configurations[0].Claims = claims
 		},
+		"B-3: an aki that is not base64url": func(c *issuance.Config) {
+			c.Profiles[0].PIDTrustedAuthorities = []string{"not base64url!"}
+		},
 		"M-3: a repeated claim path": func(c *issuance.Config) {
 			c.Configurations[0].Claims = append(slices.Clone(c.Configurations[0].Claims), c.Configurations[0].Claims[0])
 		},

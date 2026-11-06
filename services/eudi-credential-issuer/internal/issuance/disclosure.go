@@ -28,12 +28,19 @@ const PIDType = "urn:eudi:pid:nl:1"
 // pidQueryID is the id of the DCQL credential query for the PID.
 const pidQueryID = "pid"
 
-// pidQuery asks for the BSN of the PID, and nothing else.
-var pidQuery = oid4vp.Query{Credentials: []oid4vp.CredentialQuery{{
-	ID: pidQueryID, Format: sdjwtvc.Type,
-	Meta:   oid4vp.Meta{VCTValues: []string{PIDType}},
-	Claims: []oid4vp.ClaimQuery{{Path: []string{"bsn"}}},
-}}}
+// pidQuery asks for the BSN of the PID, and nothing else, of an issuer the
+// profile's trusted authorities name, if it names any.
+func pidQuery(p Profile) oid4vp.Query {
+	q := oid4vp.CredentialQuery{
+		ID: pidQueryID, Format: sdjwtvc.Type,
+		Meta:   oid4vp.Meta{VCTValues: []string{PIDType}},
+		Claims: []oid4vp.ClaimQuery{{Path: []string{"bsn"}}},
+	}
+	if len(p.PIDTrustedAuthorities) > 0 {
+		q.TrustedAuthorities = []oid4vp.TrustedAuthority{{Type: oid4vp.TrustedAuthorityAKI, Values: p.PIDTrustedAuthorities}}
+	}
+	return oid4vp.Query{Credentials: []oid4vp.CredentialQuery{q}}
+}
 
 // ErrUnknownOffer means no disclosure offer has the key.
 var ErrUnknownOffer = errors.New("unknown disclosure offer")
@@ -86,7 +93,7 @@ func (s *Service) DisclosureRequest(ctx context.Context, t Target, offerKey stri
 	}
 	return prov.requestSigner.Sign(oid4vp.Request{
 		Session: oid4vp.Session{
-			ClientID: prov.requestSigner.ClientID(), Nonce: nonce, State: state, Query: pidQuery, Key: key,
+			ClientID: prov.requestSigner.ClientID(), Nonce: nonce, State: state, Query: pidQuery(p), Key: key,
 		},
 		ResponseURI:             s.Identifier(t) + DisclosureResponsePath + id,
 		RegistrationCertificate: string(prov.VerifierRegistrationCertificate),
@@ -149,7 +156,7 @@ func (s *Service) DisclosureResponse(ctx context.Context, t Target, sessionID st
 		return "", errors.New("the session's response key is not an EC key")
 	}
 	disclosure, err := s.verifier.VerifyResponse(ctx, f.Response, oid4vp.Session{
-		ClientID: prov.requestSigner.ClientID(), Nonce: d.Nonce, State: d.State, Query: pidQuery,
+		ClientID: prov.requestSigner.ClientID(), Nonce: d.Nonce, State: d.State, Query: pidQuery(p),
 		Key: oid4vp.ResponseKey{KeyID: d.ResponseKeyID, Key: ecKey},
 	}, now)
 	if errors.Is(err, oid4vp.ErrStatusUnavailable) {

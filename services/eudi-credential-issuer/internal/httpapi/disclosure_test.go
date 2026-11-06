@@ -478,3 +478,31 @@ func TestDisclosureNoDataPage(t *testing.T) {
 		}
 	})
 }
+
+// B-1, B-2 (HAIP 1.0 section 5): the PID query carries an aki-based
+// trusted_authorities query when the profile configures one, and none
+// otherwise.
+func TestDisclosureTrustedAuthorities(t *testing.T) {
+	aki := base64.RawURLEncoding.EncodeToString([]byte("0123456789abcdefghij"))
+	f := newFixtureWith(t, func(_ *fixture, cfg *issuance.Config) {
+		for i := range cfg.Profiles {
+			if cfg.Profiles[i].Name == "eudi" {
+				cfg.Profiles[i].PIDTrustedAuthorities = []string{aki}
+			}
+		}
+	})
+	query := func(profile string) map[string]any {
+		_, r := f.fetchRequest(t, "tax", profile, incomeOffer)
+		return r.claims["dcql_query"].(map[string]any)["credentials"].([]any)[0].(map[string]any)
+	}
+	ta, _ := query("eudi")["trusted_authorities"].([]any)
+	if len(ta) != 1 {
+		t.Fatalf("B-1: eudi trusted_authorities = %v, want one aki query", query("eudi")["trusted_authorities"])
+	}
+	if q := ta[0].(map[string]any); q["type"] != "aki" || len(q["values"].([]any)) != 1 || q["values"].([]any)[0] != aki {
+		t.Errorf("B-1: trusted_authorities = %v", q)
+	}
+	if _, ok := query("nl")["trusted_authorities"]; ok {
+		t.Errorf("B-2: nl, without configuration, has trusted_authorities")
+	}
+}

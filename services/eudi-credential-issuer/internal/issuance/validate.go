@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/x509"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net"
@@ -207,6 +208,11 @@ func validateProfile(p Profile) error {
 	case KindNL, KindEUDI, KindCombined:
 	default:
 		return fmt.Errorf("unknown kind %q", p.Kind)
+	}
+	for _, aki := range p.PIDTrustedAuthorities {
+		if raw, err := base64.RawURLEncoding.DecodeString(aki); err != nil || len(raw) == 0 {
+			return fmt.Errorf("PID trusted authority %q is not a base64url KeyIdentifier", aki)
+		}
 	}
 	if p.servesEUDI() {
 		if len(p.KeyAttestationProviders) == 0 {

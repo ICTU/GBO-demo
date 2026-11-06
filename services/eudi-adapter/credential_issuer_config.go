@@ -57,6 +57,10 @@ type credentialIssuerOptions struct {
 	// eudiKeyStorage and eudiUserAuthentication are the key attestation
 	// levels the eudi profile requires (ARF ISSU_27d).
 	eudiKeyStorage, eudiUserAuthentication []string
+	// eudiPIDTrustedAuthorities are base64url KeyIdentifiers for an aki
+	// trusted_authorities query on the PID of the eudi profile (HAIP 1.0
+	// section 5); empty, the query names none.
+	eudiPIDTrustedAuthorities []string
 	// testPIDSourceURL is the bronpoort of the test PID (test-pid-source).
 	testPIDSourceURL string
 	// qtspAttestationURL is the reference QTSP's internal callback base and
@@ -166,7 +170,8 @@ type issuerProfileFile struct {
 	UserAuthentication      []string `json:"user_authentication,omitempty"`
 	// PlainJWTWalletProvidersFile, on the combined profile, holds the NL
 	// wallet providers: their wallets may skip key attestation.
-	PlainJWTWalletProvidersFile string `json:"plain_jwt_wallet_providers_file,omitempty"`
+	PlainJWTWalletProvidersFile string   `json:"plain_jwt_wallet_providers_file,omitempty"`
+	PIDTrustedAuthorities       []string `json:"pid_trusted_authorities,omitempty"`
 }
 
 func runCredentialIssuerConfigCommand(ctx context.Context, arguments []string, stdout, stderr io.Writer) (bool, error) {
@@ -190,6 +195,7 @@ func runCredentialIssuerConfigCommand(ctx context.Context, arguments []string, s
 	owner := set.String("owner", os.Getenv("ISSUER_RUNTIME_OWNER"), "uid or uid:gid that becomes the owner of the output, for an issuer running as another user")
 	keyStorage := set.String("eudi-key-storage", os.Getenv("ISSUER_EUDI_KEY_STORAGE"), "comma-separated key storage levels the eudi profile requires")
 	userAuthentication := set.String("eudi-user-authentication", os.Getenv("ISSUER_EUDI_USER_AUTHENTICATION"), "comma-separated user authentication levels the eudi profile requires")
+	pidTrustedAuthorities := set.String("eudi-pid-trusted-authorities", os.Getenv("ISSUER_EUDI_PID_TRUSTED_AUTHORITIES"), "comma-separated base64url KeyIdentifiers the eudi profile's PID query names as aki trusted authorities")
 	if err := set.Parse(arguments[1:]); err != nil {
 		return true, err
 	}
@@ -197,6 +203,7 @@ func runCredentialIssuerConfigCommand(ctx context.Context, arguments []string, s
 		return true, fmt.Errorf("unexpected positional arguments: %s", strings.Join(set.Args(), " "))
 	}
 	options.eudiKeyStorage, options.eudiUserAuthentication = splitList(*keyStorage), splitList(*userAuthentication)
+	options.eudiPIDTrustedAuthorities = splitList(*pidTrustedAuthorities)
 	options.now = time.Now
 	var err error
 	if options.owner, err = parseFileOwner(*owner); err != nil {
@@ -397,7 +404,8 @@ func credentialIssuerProfiles(options credentialIssuerOptions) ([]issuerProfileF
 			}
 		}
 		profiles = append(profiles, issuerProfileFile{Name: "eudi", Kind: "eudi", WalletProviderRootsFile: roots,
-			KeyAttestationRootsFile: attestationRoots, KeyStorage: options.eudiKeyStorage, UserAuthentication: options.eudiUserAuthentication})
+			KeyAttestationRootsFile: attestationRoots, KeyStorage: options.eudiKeyStorage, UserAuthentication: options.eudiUserAuthentication,
+			PIDTrustedAuthorities: options.eudiPIDTrustedAuthorities})
 		// One identifier for both wallets, for an offer behind one QR code
 		// (the reference QTSP's). The NL Wallet joins once its providers
 		// are mounted.
@@ -692,14 +700,6 @@ func writeLeafAsPEM(options credentialIssuerOptions, sourceID, role, keyPath, ce
 		return issuerKeyFiles{}, err
 	}
 	return issuerKeyFiles{KeyFile: sourceID + "/" + keyFile, ChainFile: sourceID + "/" + chainFile}, nil
-}
-
-func issuerDisplays(displays sourceDisplays) []issuerDisplay {
-	out := make([]issuerDisplay, 0, len(displays))
-	for _, d := range displays {
-		out = append(out, issuerDisplay{Name: d.Name, Locale: d.Lang})
-	}
-	return out
 }
 
 // issuerClaims describes each claim as the Type Metadata does: required
