@@ -58,30 +58,9 @@ func (s *Service) Token(ctx context.Context, req TokenRequest) (oid4vci.TokenRes
 	if err != nil {
 		return oid4vci.TokenResponse{}, err
 	}
-	var code string
-	switch req.GrantType {
-	case oid4vci.GrantPreAuthorizedCode:
-		if req.PreAuthorizedCode == "" {
-			return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidRequest, "pre-authorized_code is required")
-		}
-		code = req.PreAuthorizedCode
-	case GrantAuthorizationCode:
-		if !s.offersLogin(p) {
-			return oid4vci.TokenResponse{}, refuse(oid4vci.ErrUnsupportedGrantType, "only the pre-authorized code grant is supported")
-		}
-		if req.Code == "" || req.TxCode != "" {
-			return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidRequest, "code is required and tx_code is not expected")
-		}
-		code = req.Code
-	case oid4vci.GrantRefreshToken:
-		if p.Kind != KindEUDI {
-			return oid4vci.TokenResponse{}, refuse(oid4vci.ErrUnsupportedGrantType, "refresh tokens are not offered on this profile")
-		}
-		if req.RefreshToken == "" || req.TxCode != "" {
-			return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidRequest, "refresh_token is required and tx_code is not expected")
-		}
-	default:
-		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrUnsupportedGrantType, "only the pre-authorized code, authorization code and refresh token grants are supported")
+	code, err := s.grantCode(p, req)
+	if err != nil {
+		return oid4vci.TokenResponse{}, err
 	}
 	now := s.now()
 	id := s.Identifier(req.Target)
@@ -143,6 +122,37 @@ func (s *Service) Token(ctx context.Context, req TokenRequest) (oid4vci.TokenRes
 	}
 
 	return s.grant(ctx, req.Target, p, session, att, proof.JKT, now, nil, "")
+}
+
+// grantCode checks the parameters of the request's grant on profile p and
+// returns the code it redeems: the pre-authorized or authorization code, or
+// none for a refresh token.
+func (s *Service) grantCode(p Profile, req TokenRequest) (string, error) {
+	switch req.GrantType {
+	case oid4vci.GrantPreAuthorizedCode:
+		if req.PreAuthorizedCode == "" {
+			return "", refuse(oid4vci.ErrInvalidRequest, "pre-authorized_code is required")
+		}
+		return req.PreAuthorizedCode, nil
+	case GrantAuthorizationCode:
+		if !s.offersLogin(p) {
+			return "", refuse(oid4vci.ErrUnsupportedGrantType, "only the pre-authorized code grant is supported")
+		}
+		if req.Code == "" || req.TxCode != "" {
+			return "", refuse(oid4vci.ErrInvalidRequest, "code is required and tx_code is not expected")
+		}
+		return req.Code, nil
+	case oid4vci.GrantRefreshToken:
+		if p.Kind != KindEUDI {
+			return "", refuse(oid4vci.ErrUnsupportedGrantType, "refresh tokens are not offered on this profile")
+		}
+		if req.RefreshToken == "" || req.TxCode != "" {
+			return "", refuse(oid4vci.ErrInvalidRequest, "refresh_token is required and tx_code is not expected")
+		}
+		return "", nil
+	default:
+		return "", refuse(oid4vci.ErrUnsupportedGrantType, "only the pre-authorized code, authorization code and refresh token grants are supported")
+	}
 }
 
 // refreshGrant is what the issuer keeps of a refresh token: the session whose

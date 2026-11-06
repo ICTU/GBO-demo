@@ -23,6 +23,7 @@ jobs:
       docker: ${{ steps.plan.outputs.docker }}
       conformance: ${{ steps.plan.outputs.conformance }}
       source_registry: ${{ steps.plan.outputs.source_registry }}
+      credential_issuer_db: ${{ steps.plan.outputs.credential_issuer_db }}
       rego: ${{ steps.plan.outputs.rego }}
       schema_drift: ${{ steps.plan.outputs.schema_drift }}
       image_manifest: ${{ steps.plan.outputs.image_manifest }}
@@ -131,6 +132,40 @@ jobs:
         run: >-
           SOURCE_REGISTRY_TEST_DATABASE_URL="postgres://postgres:${SOURCE_REGISTRY_TEST_PASSWORD}@127.0.0.1:5432/registrytest?sslmode=disable"
           go test -count=1 -timeout 60s ./postgresregistry
+
+  credential-issuer-db:
+    name: Credential issuer — PostgreSQL store contract + purge
+    needs: changes
+    if: needs.changes.outputs.credential_issuer_db == 'true'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:a5074487380d4e686036ce61ed6f2d363939ae9a0c40123d1a9e3bb3a5f344b4
+        env:
+          POSTGRES_PASSWORD: issuertest
+          POSTGRES_DB: issuertest
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d issuertest"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.25'
+          cache-dependency-path: services/eudi-credential-issuer/go.*
+      # The store contract runs against memstore in the go job; here against
+      # PostgreSQL, the store the issuer runs on.
+      - name: store contract and purge against PostgreSQL
+        working-directory: services/eudi-credential-issuer
+        env:
+          ISSUER_TEST_PASSWORD: issuertest
+        run: >-
+          ISSUER_TEST_DATABASE_URL="postgres://postgres:${ISSUER_TEST_PASSWORD}@127.0.0.1:5432/issuertest?sslmode=disable"
+          go test -count=1 -timeout 120s ./internal/postgres
 
   rego:
     name: Rego — fmt + check + test
@@ -387,7 +422,7 @@ jobs:
   result:
     name: CI result
     runs-on: ubuntu-latest
-    needs: [changes, go, conformance, source-registry, rego, schema-drift, image-manifest, chart, frontend, scripts, docker]
+    needs: [changes, go, conformance, source-registry, credential-issuer-db, rego, schema-drift, image-manifest, chart, frontend, scripts, docker]
     if: always()
     steps:
       - name: Evaluate job results

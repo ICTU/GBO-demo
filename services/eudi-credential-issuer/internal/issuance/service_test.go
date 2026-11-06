@@ -238,9 +238,9 @@ func TestNewRefusesConfigurations(t *testing.T) {
 		// H-1: OpenID4VCI 1.0 sections 8, 9, 11 and 12 require TLS.
 		"H-1: public URL without https": func(c *issuance.Config) { c.PublicURL = "http://issuer.test" },
 		"H-1: another scheme":           func(c *issuance.Config) { c.PublicURL = "ftp://issuer.test" },
-		"no scope (HAIP 4.1)":    func(c *issuance.Config) { c.Configurations[0].Scope = "" },
-		"no display":             func(c *issuance.Config) { c.Configurations[0].Display = nil },
-		"empty claim path":       func(c *issuance.Config) { c.Configurations[0].Claims[1].Path = nil },
+		"no scope (HAIP 4.1)":           func(c *issuance.Config) { c.Configurations[0].Scope = "" },
+		"no display":                    func(c *issuance.Config) { c.Configurations[0].Display = nil },
+		"empty claim path":              func(c *issuance.Config) { c.Configurations[0].Claims[1].Path = nil },
 		// M-1 to M-3: OpenID4VCI 1.0 section 12.2.4 and Appendix B.
 		"M-1: two displays with one locale": func(c *issuance.Config) {
 			c.Configurations[0].Display = []issuance.Display{{Name: "Income", Locale: "en"}, {Name: "Inkomen", Locale: "en"}}

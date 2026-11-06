@@ -268,6 +268,11 @@ if [[ "${ci_changed}" == true ]] || matches_any 'deploy/helm/gbo-app/*'; then
   chart=true
 fi
 
+credential_issuer_db=false
+if [[ "${ci_changed}" == true ]] || matches_any 'services/eudi-credential-issuer/*'; then
+  credential_issuer_db=true
+fi
+
 scripts=false
 if [[ "${ci_changed}" == true ]] || matches_any \
   'scripts/seed-openftv-manager.py' \
@@ -281,6 +286,7 @@ result="$({
   printf 'docker=%s\n' "${docker}"
   printf 'conformance=%s\n' "${conformance}"
   printf 'source_registry=%s\n' "${source_registry}"
+  printf 'credential_issuer_db=%s\n' "${credential_issuer_db}"
   printf 'rego=%s\n' "${rego}"
   printf 'schema_drift=%s\n' "${schema_drift}"
   printf 'image_manifest=%s\n' "${image_manifest}"
