@@ -138,8 +138,8 @@ GBO's credential issuer issues a source's attestation (a PuB-EAA) to a wallet. W
 
 - It registers like a QTSP, with a register entry that carries `PUB_EAA_Provider` and scope `issuance`.
 - An issuance resource (`AZSP_ISSUANCE_RESOURCES`) is the issuer identifier of one source. Only the client whose certificate has the `organizationIdentifier` configured for it obtains tokens for it; any other client gets `invalid_target`. A credential issuer never obtains a token for a data service of the ASIP, and a QTSP never one for an issuance resource.
-- An issuance request carries no `authorization_details` (`invalid_request`).
-- The request page says: "Toestemming voor <source>", "U vraagt bij <source> een attestatie aan voor uw wallet. <source> haalt daarvoor uw gegevens op."
+- An issuance request may name its credential configurations in `authorization_details` of type `openid_credential` (RFC 9396, OpenID4VCI 1.0 section 5.1.1). The server reads their names and the names of their claims from the issuer's unsigned metadata at its well-known URL (OpenID4VCI 1.0 section 12.2.4), in Dutch where the metadata has it, and the request page shows them. A configuration the issuer does not have, or details that are not a JSON array of `openid_credential` details, is `invalid_authorization_details`; the ASI type is `invalid_request`. When the metadata cannot be read within 3 seconds, the page names no credential.
+- The request page says: "Toestemming voor <source>", "U vraagt bij <source> een attestatie aan voor uw wallet. <source> haalt daarvoor uw gegevens op.", and then the credential and the data it holds, or "Een attestatie voor uw wallet" when the request or the metadata does not say.
 - The token has the issuer identifier as `aud` and scope `issuance`, and carries the BSN like any other token. The issuer validates it itself; the ASIP refuses it.
 
 ETSI TS 119 478 covers verification and retrieval by a (Q)TSP at the ASIP; it says nothing of other clients or resources of the same server. This use lies outside it. The ASI part is unchanged: a token for a data service still goes only to a client with `QEAA_Provider`.

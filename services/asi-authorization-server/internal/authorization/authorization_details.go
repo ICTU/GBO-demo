@@ -1,6 +1,7 @@
 package authorization
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -77,4 +78,46 @@ func parseAuthorizationDetails(raw, audience, scope string) (AuthorizationDetail
 		seen[id] = true
 	}
 	return detail, nil
+}
+
+// CredentialDetailsType is the authorization details type of OpenID4VCI 1.0
+// section 5.1.1: a credential configuration of the issuer.
+const CredentialDetailsType = "openid_credential"
+
+// credentialDetails reads the credential configurations an issuance request
+// names in authorization_details (RFC 9396) and what the issuer's metadata
+// says of them. It returns an error code and reason for details that do not
+// conform or name a configuration the issuer does not have. When the
+// metadata cannot be read the consent names no credential.
+func (s *Service) credentialDetails(raw, issuer string) ([]CredentialDisplay, string, string) {
+	var details []struct {
+		Type                      string `json:"type"`
+		CredentialConfigurationID string `json:"credential_configuration_id"`
+	}
+	if err := json.Unmarshal([]byte(raw), &details); err != nil || len(details) == 0 {
+		return nil, "invalid_authorization_details", "authorization_details must be a JSON array of openid_credential details"
+	}
+	var out []CredentialDisplay
+	for _, d := range details {
+		switch {
+		case d.Type == AuthorizationDetailsType:
+			return nil, "invalid_request", "ASI authorization_details are not used for issuance"
+		case d.Type != CredentialDetailsType || d.CredentialConfigurationID == "":
+			return nil, "invalid_authorization_details", "authorization_details for issuance must be openid_credential details with a credential_configuration_id"
+		}
+		if s.cfg.CredentialMetadata == nil {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), credentialMetadataTimeout)
+		display, err := s.cfg.CredentialMetadata(ctx, issuer, d.CredentialConfigurationID)
+		cancel()
+		switch {
+		case errors.Is(err, ErrUnknownCredentialConfiguration):
+			return nil, "invalid_authorization_details", "the issuer has no credential configuration " + d.CredentialConfigurationID
+		case err != nil:
+			return nil, "", ""
+		}
+		out = append(out, display)
+	}
+	return out, "", ""
 }

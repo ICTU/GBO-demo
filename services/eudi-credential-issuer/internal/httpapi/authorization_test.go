@@ -46,14 +46,14 @@ type fakeLogin struct {
 
 func newFakeLogin() *fakeLogin { return &fakeLogin{bsn: loginBSN, challenges: map[string]string{}} }
 
-func (l *fakeLogin) AuthorizationURL(_ context.Context, provider, resource, state, challenge string) (string, error) {
+func (l *fakeLogin) AuthorizationURL(_ context.Context, provider, resource string, configurations []string, state, challenge string) (string, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.urlErr != nil {
 		return "", l.urlErr
 	}
 	l.challenges[state] = challenge
-	return loginServer + "?" + url.Values{"provider": {provider}, "resource": {resource}, "state": {state}}.Encode(), nil
+	return loginServer + "?" + url.Values{"provider": {provider}, "resource": {resource}, "state": {state}, "configuration": configurations}.Encode(), nil
 }
 
 // Exchange accepts the code "login-code" when the verifier matches the
@@ -388,6 +388,11 @@ func TestAuthorizeSendsTheCitizenToTheLogin(t *testing.T) { // P12, C3
 	u, _ := url.Parse(w.authorize(w.requestURI(nil)))
 	if q := u.Query(); q.Get("provider") != "tax" || q.Get("resource") != f.id("eudi") || q.Get("state") == "" {
 		t.Fatalf("login URL = %s, want provider tax, the eudi issuer as resource and a state", u)
+	}
+	// A-1: the login names the offer's credential configuration, for the
+	// consent at the authorization server.
+	if c := u.Query()["configuration"]; len(c) != 1 || c[0] != incomeConfig {
+		t.Errorf("login configurations = %v, want %s", c, incomeConfig)
 	}
 }
 

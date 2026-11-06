@@ -117,6 +117,10 @@ type Transaction struct {
 	// Source is the name of the data service the authorization is for.
 	Source     string
 	Attributes []string
+	// Credentials are the credentials an issuance asks for, as the issuer's
+	// metadata names them; empty when the request or the metadata does not
+	// say.
+	Credentials []CredentialDisplay
 }
 
 // Login is the user logging in with a means, which approves the request

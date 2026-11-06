@@ -265,7 +265,10 @@ func (s *Service) Authorize(ctx context.Context, t Target, clientID, requestURI 
 	if err := s.putPending(ctx, pendingLogin, state, login{Request: pushed, Verifier: verifier}, now.Add(LoginLifetime)); err != nil {
 		return "", nil, err
 	}
-	target, err := s.cfg.Login.AuthorizationURL(ctx, t.Provider, s.Identifier(t), state, challenge)
+	// The authorization server shows the citizen which credential this is
+	// (OpenID4VCI 1.0 sections 12.2.4 and 15.1).
+	configurations := s.disclosureOffers[t.Provider+"/"+pushed.Offer].ConfigurationIDs
+	target, err := s.cfg.Login.AuthorizationURL(ctx, t.Provider, s.Identifier(t), configurations, state, challenge)
 	if errors.Is(err, ErrLoginUnavailable) {
 		return "", s.walletReturn(t, pushed, ReturnUnavailable, "temporarily_unavailable"), nil
 	}

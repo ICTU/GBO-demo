@@ -104,8 +104,10 @@ var requestPage = page("request", "Toestemming geven", "", `{{if .Message}}<div 
 {{if .Issuance}}<p class="as-lead">U vraagt bij {{.ClientName}} een attestatie aan voor uw wallet. {{.ClientName}} haalt daarvoor uw gegevens op.</p>
 <dl class="as-dl">
 <dt>Wie vraagt het</dt><dd>{{.ClientName}}</dd>
-<dt>Wat</dt><dd>Een attestatie voor uw wallet</dd>
-</dl>
+{{if .Credentials}}{{range .Credentials}}<dt>Wat</dt><dd>{{.Name}}</dd>
+{{if .Claims}}<dt>Welke gegevens</dt><dd><ul>{{range .Claims}}<li>{{.}}</li>{{end}}</ul></dd>{{end}}
+{{end}}{{else}}<dt>Wat</dt><dd>Een attestatie voor uw wallet</dd>
+{{end}}</dl>
 {{else}}<p class="as-lead">U vraagt bij {{.ClientName}} een verklaring aan. Daarvoor wil {{.ClientName}} bij {{.Source}} {{.Operation}}.</p>
 <dl class="as-dl">
 <dt>Wie vraagt het</dt><dd>{{.ClientName}}, een vertrouwensdienst</dd>
@@ -242,6 +244,7 @@ func writeRequestPage(w http.ResponseWriter, tx *authorization.Transaction, secu
 		"Attributes":    requestedAttributes(tx.Attributes),
 		"Retrieve":      slices.Contains(strings.Fields(tx.Scope), "retrieve"),
 		"Issuance":      tx.Scope == authorization.IssuanceScope,
+		"Credentials":   tx.Credentials,
 		"Action":        DecisionPath,
 		"TransactionID": tx.ID,
 		"Wallet":        wallet,

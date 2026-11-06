@@ -60,6 +60,10 @@ type testAS struct {
 	ca       *testCA
 	// wallet stands in for the NL Wallet verifier.
 	wallet *fakeWallet
+	// credentials stands in for the issuers' metadata: issuer identifier
+	// and credential configuration ID to what the consent page shows; a nil
+	// map means the metadata is unreachable.
+	credentials map[string]authorization.CredentialDisplay
 }
 
 func newTestAS(t *testing.T) *testAS {
@@ -144,6 +148,16 @@ func newTestASWithIssuer(t *testing.T, resource string, register authorization.R
 		Register:     reg,
 		TrustAnchors: as.ca.pool(),
 		Now:          as.now,
+		CredentialMetadata: func(_ context.Context, issuer, configuration string) (authorization.CredentialDisplay, error) {
+			if as.credentials == nil {
+				return authorization.CredentialDisplay{}, errors.New("unreachable")
+			}
+			d, ok := as.credentials[issuer+" "+configuration]
+			if !ok {
+				return d, authorization.ErrUnknownCredentialConfiguration
+			}
+			return d, nil
+		},
 	})
 	handler = NewHandler(as.service)
 	return as

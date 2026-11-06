@@ -111,10 +111,10 @@ type serverMetadata struct {
 }
 
 // AuthorizationURL returns where the browser goes to log in for provider:
-// the authorization request for resource, with state and the S256 PKCE
-// challenge. It registers the provider first when the server does not know
+// the authorization request for resource and the credential configurations,
+// with state and the S256 PKCE challenge. It registers the provider first when the server does not know
 // it yet.
-func (c *Client) AuthorizationURL(ctx context.Context, provider, resource, state, challenge string) (string, error) {
+func (c *Client) AuthorizationURL(ctx context.Context, provider, resource string, configurations []string, state, challenge string) (string, error) {
 	p, ok := c.providers[provider]
 	if !ok {
 		return "", fmt.Errorf("provider %q is not a client of the authorization server", provider)
@@ -140,6 +140,23 @@ func (c *Client) AuthorizationURL(ctx context.Context, provider, resource, state
 		"code_challenge":        {challenge},
 		"code_challenge_method": {"S256"},
 		"resource":              {resource},
+	}
+	// authorization_details name the credential configurations (RFC 9396,
+	// OpenID4VCI 1.0 section 5.1.1), so the consent can name them.
+	if len(configurations) > 0 {
+		type detail struct {
+			Type                      string `json:"type"`
+			CredentialConfigurationID string `json:"credential_configuration_id"`
+		}
+		details := make([]detail, 0, len(configurations))
+		for _, id := range configurations {
+			details = append(details, detail{Type: "openid_credential", CredentialConfigurationID: id})
+		}
+		raw, err := json.Marshal(details)
+		if err != nil {
+			return "", err
+		}
+		q.Set("authorization_details", string(raw))
 	}
 	return meta.AuthorizationEndpoint + "?" + q.Encode(), nil
 }

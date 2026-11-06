@@ -287,7 +287,7 @@ func (s *deferredSource) FetchLogin(ctx context.Context, configurationID, bsn st
 // every code and returns one BSN.
 type conformanceLogin struct{ bsn string }
 
-func (l conformanceLogin) AuthorizationURL(_ context.Context, _, _, state, _ string) (string, error) {
+func (l conformanceLogin) AuthorizationURL(_ context.Context, _, _ string, _ []string, state, _ string) (string, error) {
 	return "https://login.test/authorize?" + url.Values{"state": {state}}.Encode(), nil
 }
 

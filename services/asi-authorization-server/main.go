@@ -44,6 +44,7 @@ import (
 	"gbo-demo/asi-authorization-server/internal/clientconfig"
 	"gbo-demo/asi-authorization-server/internal/digidmock"
 	"gbo-demo/asi-authorization-server/internal/httpapi"
+	"gbo-demo/asi-authorization-server/internal/issuermetadata"
 	"gbo-demo/asi-authorization-server/internal/qtspcert"
 	"gbo-demo/asi-authorization-server/internal/stubregister"
 	"gbo-demo/asi-authorization-server/internal/walletverifier"
@@ -130,6 +131,9 @@ func serve() error {
 		RequireAuthorizationDetails: requireAuthorizationDetails,
 		Register:                    register,
 		TrustAnchors:                anchors,
+		// The consent for issuance names the credential and its claims,
+		// read from the issuer's metadata.
+		CredentialMetadata: issuermetadata.Fetcher(&http.Client{Timeout: 3 * time.Second}),
 	})
 	srv := &http.Server{Addr: env("AZSP_ADDR", ":4021"), Handler: httpapi.NewHandler(service), ReadHeaderTimeout: readHeaderTimeout}
 	errc := make(chan error, 1)

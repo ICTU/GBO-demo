@@ -111,6 +111,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   of the first issuance; the source is not asked again and no BSN is kept,
   but the claims are kept until the refresh token expires. A revoked offer
   reference stops it.
+- **Consent that names the credential** (#614): the own credential issuer
+  names the credential configurations in `authorization_details` when it
+  sends the citizen to GBO's authorization server, and the server's request
+  page shows the credential and its claims, read from the issuer's
+  metadata (OpenID4VCI 1.0 sections 12.2.4 and 15.1).
 - **Deferred issuance at the own credential issuer** (#614): when the source
   is unavailable just after a citizen logged in, the wallet gets its code
   anyway, the credential request answers `202` with a `transaction_id`, and

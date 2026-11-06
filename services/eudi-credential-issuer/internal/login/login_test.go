@@ -197,12 +197,17 @@ func newClient(t *testing.T, as *fakeAS) (*Client, *ecdsa.PrivateKey) {
 func TestTheFirstLoginRegistersTheProvider(t *testing.T) { // C1, C3
 	as := newFakeAS(t)
 	c, key := newClient(t, as)
-	target, err := c.AuthorizationURL(context.Background(), testProvider, testResource, "state-1", "challenge-1")
+	target, err := c.AuthorizationURL(context.Background(), testProvider, testResource, []string{"tax-income"}, "state-1", "challenge-1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(as.registrations) != 1 {
 		t.Fatalf("registrations = %d, want 1", len(as.registrations))
+	}
+	// A-1: the request names the credential configuration in
+	// authorization_details (RFC 9396, OpenID4VCI 1.0 section 5.1.1).
+	if u, err := url.Parse(target); err != nil || u.Query().Get("authorization_details") != `[{"type":"openid_credential","credential_configuration_id":"tax-income"}]` {
+		t.Errorf("authorization request %s, want authorization_details for tax-income", target)
 	}
 	reg := as.registrations[0]
 	if reg["scope"] != "issuance" || reg["token_endpoint_auth_method"] != "private_key_jwt" {
@@ -239,12 +244,9 @@ func TestTheFirstLoginRegistersTheProvider(t *testing.T) { // C1, C3
 			t.Errorf("%s = %q, want %q", name, q.Get(name), want)
 		}
 	}
-	if q.Has("authorization_details") {
-		t.Error("an issuance request carries authorization_details")
-	}
 
 	// The registration is kept.
-	if _, err := c.AuthorizationURL(context.Background(), testProvider, testResource, "state-2", "challenge-2"); err != nil {
+	if _, err := c.AuthorizationURL(context.Background(), testProvider, testResource, []string{"tax-income"}, "state-2", "challenge-2"); err != nil {
 		t.Fatal(err)
 	}
 	if len(as.registrations) != 1 {
@@ -258,11 +260,11 @@ func TestTheFirstLoginRegistersTheProvider(t *testing.T) { // C1, C3
 func TestARestartedServerGetsANewRegistration(t *testing.T) { // C2
 	as := newFakeAS(t)
 	c, _ := newClient(t, as)
-	if _, err := c.AuthorizationURL(context.Background(), testProvider, testResource, "s", "c"); err != nil {
+	if _, err := c.AuthorizationURL(context.Background(), testProvider, testResource, []string{"tax-income"}, "s", "c"); err != nil {
 		t.Fatal(err)
 	}
 	as.restart()
-	target, err := c.AuthorizationURL(context.Background(), testProvider, testResource, "s", "c")
+	target, err := c.AuthorizationURL(context.Background(), testProvider, testResource, []string{"tax-income"}, "s", "c")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,14 +278,14 @@ func TestARestartedServerGetsANewRegistration(t *testing.T) { // C2
 func TestInvalidClientAtTheTokenEndpointDropsTheRegistration(t *testing.T) { // C2
 	as := newFakeAS(t)
 	c, _ := newClient(t, as)
-	if _, err := c.AuthorizationURL(context.Background(), testProvider, testResource, "s", "c"); err != nil {
+	if _, err := c.AuthorizationURL(context.Background(), testProvider, testResource, []string{"tax-income"}, "s", "c"); err != nil {
 		t.Fatal(err)
 	}
 	as.tokenStatus, as.tokenError = http.StatusUnauthorized, "invalid_client"
 	if _, err := c.Exchange(context.Background(), testProvider, testResource, "code", "verifier"); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("Exchange = %v, want ErrUnavailable", err)
 	}
-	if _, err := c.AuthorizationURL(context.Background(), testProvider, testResource, "s", "c"); err != nil {
+	if _, err := c.AuthorizationURL(context.Background(), testProvider, testResource, []string{"tax-income"}, "s", "c"); err != nil {
 		t.Fatal(err)
 	}
 	if len(as.registrations) != 2 {
@@ -296,7 +298,7 @@ func TestInvalidClientAtTheTokenEndpointDropsTheRegistration(t *testing.T) { // 
 func TestTheCodeIsExchangedWithAssertionDPoPAndVerifier(t *testing.T) { // C4, C6
 	as := newFakeAS(t)
 	c, key := newClient(t, as)
-	if _, err := c.AuthorizationURL(context.Background(), testProvider, testResource, "s", "c"); err != nil {
+	if _, err := c.AuthorizationURL(context.Background(), testProvider, testResource, []string{"tax-income"}, "s", "c"); err != nil {
 		t.Fatal(err)
 	}
 	bsn, err := c.Exchange(context.Background(), testProvider, testResource, "the-code", "the-verifier")
@@ -347,7 +349,7 @@ func TestATokenThatFailsACheckIsRefused(t *testing.T) { // C6, C7
 		t.Run(name, func(t *testing.T) {
 			as := newFakeAS(t)
 			c, _ := newClient(t, as)
-			if _, err := c.AuthorizationURL(context.Background(), testProvider, testResource, "s", "c"); err != nil {
+			if _, err := c.AuthorizationURL(context.Background(), testProvider, testResource, []string{"tax-income"}, "s", "c"); err != nil {
 				t.Fatal(err)
 			}
 			as.editClaims = edit
@@ -361,7 +363,7 @@ func TestATokenThatFailsACheckIsRefused(t *testing.T) { // C6, C7
 func TestATokenSignedWithAnotherKeyIsRefused(t *testing.T) { // C6
 	as := newFakeAS(t)
 	c, _ := newClient(t, as)
-	if _, err := c.AuthorizationURL(context.Background(), testProvider, testResource, "s", "c"); err != nil {
+	if _, err := c.AuthorizationURL(context.Background(), testProvider, testResource, []string{"tax-income"}, "s", "c"); err != nil {
 		t.Fatal(err)
 	}
 	as.signWith = newKey(t) // not the key the JWKS publishes under this kid
@@ -375,7 +377,7 @@ func TestATokenSignedWithAnotherKeyIsRefused(t *testing.T) { // C6
 func TestAnUnreachableServerIsUnavailable(t *testing.T) { // C10
 	as := newFakeAS(t)
 	c, _ := newClient(t, as)
-	if _, err := c.AuthorizationURL(context.Background(), testProvider, testResource, "s", "c"); err != nil {
+	if _, err := c.AuthorizationURL(context.Background(), testProvider, testResource, []string{"tax-income"}, "s", "c"); err != nil {
 		t.Fatal(err)
 	}
 	as.tokenStatus, as.tokenError = http.StatusServiceUnavailable, "temporarily_unavailable"
@@ -383,7 +385,7 @@ func TestAnUnreachableServerIsUnavailable(t *testing.T) { // C10
 		t.Fatalf("Exchange with the server failing = %v, want ErrUnavailable", err)
 	}
 	as.srv.Close()
-	if _, err := c.AuthorizationURL(context.Background(), testProvider, testResource, "s", "c"); !errors.Is(err, ErrUnavailable) {
+	if _, err := c.AuthorizationURL(context.Background(), testProvider, testResource, []string{"tax-income"}, "s", "c"); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("AuthorizationURL with the server down = %v, want ErrUnavailable", err)
 	}
 }
@@ -391,7 +393,7 @@ func TestAnUnreachableServerIsUnavailable(t *testing.T) { // C10
 func TestAnUnknownProviderIsRefused(t *testing.T) {
 	as := newFakeAS(t)
 	c, _ := newClient(t, as)
-	if _, err := c.AuthorizationURL(context.Background(), "rvig", testResource, "s", "c"); err == nil {
+	if _, err := c.AuthorizationURL(context.Background(), "rvig", testResource, nil, "s", "c"); err == nil {
 		t.Fatal("an unknown provider got an authorization URL")
 	}
 }

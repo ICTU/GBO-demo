@@ -113,7 +113,7 @@ On the `eudi` profile the citizen can identify by logging in instead of disclosi
 
 1. The wallet scans the login link of a source offer (`login_link` in `GET /disclosure-offers`): a Credential Offer with `grants.authorization_code.issuer_state` = the offer's key.
 2. It pushes its authorization request (PAR) and opens `/authorize` in the browser.
-3. The issuer sends the browser to GBO's authorization server, as the source's client: the citizen sees "Toestemming voor <source>", logs in (DigiD mock or NL Wallet) and comes back to `/callback`.
+3. The issuer sends the browser to GBO's authorization server, as the source's client, naming the offer's credential configurations in `authorization_details`: the citizen sees "Toestemming voor <source>" with the credential and its claims (read from this issuer's metadata), logs in (DigiD mock or NL Wallet) and comes back to `/callback`.
 4. The issuer redeems the code there (`private_key_jwt` with the source's access certificate, DPoP, PKCE), checks the token as its resource server (issuer, its own identifier as audience, expiry, client, scope `issuance`, DPoP binding) and takes the BSN.
 5. It asks the bronpoort with `{"subject": {"bsn": ...}, "origin": "login"}`, which `eudi-adapter` logs as the Dataverwerking `gbo-bsn-uit-inloggen`, and sends the browser back to the wallet with a code (60 seconds, once). The token request with that code then works as with a pre-authorized code.
 

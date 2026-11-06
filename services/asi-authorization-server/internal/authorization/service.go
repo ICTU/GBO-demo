@@ -7,10 +7,12 @@
 package authorization
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"crypto/x509"
 	"encoding/base64"
+	"errors"
 	"regexp"
 	"slices"
 	"strings"
@@ -126,7 +128,28 @@ type Config struct {
 	Register     Register
 	TrustAnchors *x509.CertPool
 	Now          func() time.Time
+	// CredentialMetadata reads from an issuer's metadata what the consent
+	// for issuance shows of a credential configuration (OpenID4VCI 1.0
+	// section 12.2.4). Without it, or when it fails other than with
+	// ErrUnknownCredentialConfiguration, the consent page names no
+	// credential.
+	CredentialMetadata func(ctx context.Context, issuer, configuration string) (CredentialDisplay, error)
 }
+
+// CredentialDisplay is what the consent page shows of a credential: its
+// name and the names of its claims, from the issuer's metadata.
+type CredentialDisplay struct {
+	Name   string
+	Claims []string
+}
+
+// ErrUnknownCredentialConfiguration means the issuer's metadata has no such
+// credential configuration.
+var ErrUnknownCredentialConfiguration = errors.New("the issuer has no such credential configuration")
+
+// credentialMetadataTimeout bounds the read of an issuer's metadata while
+// the browser waits for the consent page.
+const credentialMetadataTimeout = 3 * time.Second
 
 type Service struct {
 	cfg          Config
@@ -241,8 +264,12 @@ func (s *Service) Authorize(req AuthorizationRequest) (AuthorizationResponse, er
 	}
 	detailsPresent := req.AuthorizationDetailsPresent || req.AuthorizationDetails != ""
 	var detail *AuthorizationDetail
+	var credentials []CredentialDisplay
 	if issuance && detailsPresent {
-		return fail("invalid_request", "authorization_details are not used for issuance")
+		var code, reason string
+		if credentials, code, reason = s.credentialDetails(req.AuthorizationDetails, audience); code != "" {
+			return fail(code, reason)
+		}
 	}
 	if !issuance {
 		var err error
@@ -270,7 +297,8 @@ func (s *Service) Authorize(req AuthorizationRequest) (AuthorizationResponse, er
 	if name == "" {
 		name = c.ID
 	}
-	resp.Pending = &Transaction{ID: id, Binding: binding, ClientID: c.ID, ClientName: name, Scope: scope, Source: s.resourceName(audience), Attributes: authorizationDetailAttributes(detail)}
+	resp.Pending = &Transaction{ID: id, Binding: binding, ClientID: c.ID, ClientName: name, Scope: scope, Source: s.resourceName(audience),
+		Attributes: authorizationDetailAttributes(detail), Credentials: credentials}
 	return resp, nil
 }
 

@@ -30,9 +30,9 @@ type Source interface {
 // the resource server of its tokens.
 type Login interface {
 	// AuthorizationURL returns where the browser goes to log in for
-	// provider: an authorization request for resource with state and the
-	// S256 challenge.
-	AuthorizationURL(ctx context.Context, provider, resource, state, challenge string) (string, error)
+	// provider: an authorization request for resource and the credential
+	// configurations, with state and the S256 challenge.
+	AuthorizationURL(ctx context.Context, provider, resource string, configurations []string, state, challenge string) (string, error)
 	// Exchange redeems the code for a token for resource, checks it and
 	// returns the BSN it carries.
 	Exchange(ctx context.Context, provider, resource, code, verifier string) (string, error)

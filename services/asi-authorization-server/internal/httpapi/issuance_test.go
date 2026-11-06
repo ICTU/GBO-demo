@@ -291,3 +291,55 @@ func (as *testAS) codeForIssuer(t *testing.T, params url.Values, bsn string) str
 	}
 	return loc.Query().Get("code")
 }
+
+// setCredentialDetails names credential configurations in authorization_details
+// (RFC 9396, type openid_credential of OpenID4VCI 1.0).
+func setCredentialDetails(q url.Values, configurations ...string) {
+	var details []map[string]any
+	for _, c := range configurations {
+		details = append(details, map[string]any{"type": "openid_credential", "credential_configuration_id": c})
+	}
+	raw, _ := json.Marshal(details)
+	q.Set(authorization.AuthorizationDetailsClaim, string(raw))
+}
+
+// A-1 to A-3 (OpenID4VCI 1.0 sections 12.2.4 and 15.1): the consent for
+// issuance names the credential and its claims, from the issuer's metadata.
+func TestTheConsentForIssuanceNamesTheCredential(t *testing.T) {
+	as := newTestAS(t)
+	as.credentials = map[string]authorization.CredentialDisplay{
+		issuanceResource + " belastingdienst-inkomensverklaring_2025": {Name: "Inkomensverklaring 2025", Claims: []string{"Jaar", "Verzamelinkomen"}},
+	}
+	issuer := as.registerIssuer(t, issuerRegistryURI, issuerOrganizationID)
+	params := issuanceParams(newPKCE(), issuer, issuanceResource)
+	setCredentialDetails(params, "belastingdienst-inkomensverklaring_2025")
+	tx := as.startAuthorization(t, params)
+	for _, want := range []string{"Inkomensverklaring 2025", "<li>Jaar</li>", "<li>Verzamelinkomen</li>"} {
+		if !strings.Contains(tx.page, want) {
+			t.Errorf("A-1: request page lacks %q:\n%s", want, tx.page)
+		}
+	}
+	if strings.Contains(tx.page, "Een attestatie voor uw wallet") {
+		t.Error("A-1: the page shows the generic text next to the credential")
+	}
+
+	t.Run("A-2: a configuration the issuer does not have", func(t *testing.T) {
+		params := issuanceParams(newPKCE(), issuer, issuanceResource)
+		setCredentialDetails(params, "belastingdienst-nope")
+		assertIssuerAuthorizeError(t, as.authorize(t, params), "invalid_authorization_details")
+	})
+	t.Run("A-2: not a JSON array of details", func(t *testing.T) {
+		params := issuanceParams(newPKCE(), issuer, issuanceResource)
+		params.Set(authorization.AuthorizationDetailsClaim, `{"type":"openid_credential"}`)
+		assertIssuerAuthorizeError(t, as.authorize(t, params), "invalid_authorization_details")
+	})
+	t.Run("A-3: the metadata is unreachable", func(t *testing.T) {
+		as.credentials = nil
+		params := issuanceParams(newPKCE(), issuer, issuanceResource)
+		setCredentialDetails(params, "belastingdienst-inkomensverklaring_2025")
+		tx := as.startAuthorization(t, params)
+		if !strings.Contains(tx.page, "Een attestatie voor uw wallet") {
+			t.Errorf("request page without metadata lacks the generic text:\n%s", tx.page)
+		}
+	})
+}
