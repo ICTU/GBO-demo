@@ -97,9 +97,10 @@ requirements:
       - "services/eudi-credential-issuer/internal/httpapi:TestTheLoginLinkOfAnOffer"
       - "services/eudi-credential-issuer/internal/httpapi:TestCombinedOfferLinks"
   HAIP-4-09:
-    status: failing
-    reason: "Implemented: the metadata carries batch_credential_issuance when the batch size is 2 or more; only the interop tests, which do not run in CI, depend on it, and no test asserts the parameter."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceIssuerMetadata"
+      - "services/eudi-credential-issuer/internal/issuance:TestConformanceBatchSizeInMetadata"
   HAIP-4.1-01:
     status: passed
     tests:
@@ -381,9 +382,9 @@ requirements:
         status: not-applicable
         reason: "No disclosure-based issuance on the combined profile: the issuer acts as Verifier on the nl and eudi profiles only."
   HAIP-5-14:
-    status: failing
-    reason: "Implemented: each request object gets a fresh P-256 key in client_metadata; no test asserts that two requests carry different keys."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceEphemeralResponseKeys"
     profiles:
       wallet:
         status: not-applicable
@@ -473,9 +474,9 @@ requirements:
       - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
       - "services/oid4vc-kit/sdjwtvc:TestIssueAndParseRoundTrip"
   HAIP-6.1-02:
-    status: failing
-    reason: "Implemented: credentials get exp (valid_days after the day of the offer) and a status claim; no test asserts exp in an issued credential."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssuedCredentialValidity"
   HAIP-6.1-03:
     status: passed
     tests:

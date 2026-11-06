@@ -157,9 +157,9 @@ requirements:
         status: not-applicable
         reason: "No authorization code flow on this profile: it carries pre-authorized offers only (QTSP route)."
   OID4VCI-5.1.1-02:
-    status: failing
-    reason: "Implemented: an authorization detail whose type is missing or not openid_credential is refused with invalid_scope (internal/issuance/authorization.go); no test sends one."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceAuthorizationDetailsType"
     profiles:
       nl:
         status: not-applicable
@@ -168,9 +168,9 @@ requirements:
         status: not-applicable
         reason: "No authorization code flow on this profile: it carries pre-authorized offers only (QTSP route)."
   OID4VCI-5.1.1-03:
-    status: failing
-    reason: "Implemented: an authorization detail whose type is not openid_credential is refused with invalid_scope (internal/issuance/authorization.go); no test sends one."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceAuthorizationDetailsType"
     profiles:
       nl:
         status: not-applicable
@@ -273,9 +273,9 @@ requirements:
         status: not-applicable
         reason: "No authorization code flow on this profile: it carries pre-authorized offers only (QTSP route)."
   OID4VCI-5.1.3-02:
-    status: failing
-    reason: "Implemented: the PAR and authorization endpoints read only the parameters they know (internal/httpapi/authorization.go); no test sends an unknown parameter."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceAuthorizationIgnoresUnknownParameters"
     profiles:
       nl:
         status: not-applicable
@@ -332,9 +332,9 @@ requirements:
       - "services/eudi-credential-issuer/internal/httpapi:TestRefreshTokenRefusals/F-3: another DPoP key"
       - "services/eudi-credential-issuer/internal/httpapi:TestCombinedToken"
   OID4VCI-6.1-01:
-    status: failing
-    reason: "Implemented: a pre-authorized code grant without pre-authorized_code is refused with invalid_request (internal/issuance/token.go); no test sends one."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceTokenParameters"
   OID4VCI-6.1-02:
     status: passed
     tests:
@@ -371,9 +371,9 @@ requirements:
       - "services/eudi-credential-issuer/internal/httpapi:TestToken/W1 T1 valid attestation and code"
       - "services/eudi-credential-issuer/internal/httpapi:TestTheCodeBuysATokenAndACredential"
   OID4VCI-6.1-09:
-    status: failing
-    reason: "Implemented: the token endpoint reads only the parameters it knows (internal/httpapi/httpapi.go); no test sends an unknown parameter."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceTokenParameters"
   OID4VCI-6.1.1-01:
     status: not-applicable
     reason: "The token endpoint does not take authorization_details (optional, section 6.1.1): a token covers every credential of its offer or authorization request, which names one credential type."
@@ -394,13 +394,13 @@ requirements:
       - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
       - "services/eudi-credential-issuer/internal/httpapi:TestIssueEUDI"
   OID4VCI-7.2-02:
-    status: failing
-    reason: "Implemented: a c_nonce is 32 bytes from crypto/rand (internal/issuance/service.go); no test asserts that two nonces differ."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceNonceEndpoint"
   OID4VCI-7.2-03:
-    status: failing
-    reason: "Implemented: the nonce response carries Cache-Control no-store (internal/httpapi/httpapi.go); no test asserts the header."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceNonceEndpoint"
   OID4VCI-8-01:
     status: passed
     tests:
@@ -419,30 +419,30 @@ requirements:
       - "services/eudi-credential-issuer/internal/httpapi:TestIssueEUDI/C1 jwt proof with key attestation"
       - "services/eudi-credential-issuer/internal/httpapi:TestIssueEUDI/C1 attestation proof"
   OID4VCI-8.2-01:
-    status: failing
-    reason: "Implemented: every token response carries credential_identifiers, and a request without credential_identifier is refused with invalid_credential_request; no test sends one without it."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialRequestIdentifiers"
   OID4VCI-8.2-02:
     status: not-applicable
     reason: "Every token response carries authorization_details with credential_identifiers, so the case of a token response without them does not arise."
   OID4VCI-8.2-03:
-    status: failing
-    reason: "Implemented: a request with credential_configuration_id is refused with invalid_credential_request; no test sends one."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialRequestIdentifiers"
   OID4VCI-8.2-04:
     status: not-applicable
     reason: "Every token response carries authorization_details with credential_identifiers, so the case of a token response without them does not arise."
   OID4VCI-8.2-05:
-    status: failing
-    reason: "Implemented: a request with credential_configuration_id is refused with invalid_credential_request; no test sends one."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialRequestIdentifiers"
   OID4VCI-8.2-06:
     status: not-applicable
     reason: "Every token response carries authorization_details with credential_identifiers, so the case of a token response without them does not arise."
   OID4VCI-8.2-07:
-    status: failing
-    reason: "Implemented: a request with credential_configuration_id is refused with invalid_credential_request; no test sends one."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialRequestIdentifiers"
   OID4VCI-8.2-08:
     status: passed
     tests:
@@ -462,9 +462,11 @@ requirements:
         status: not-applicable
         reason: "No encryption on this profile: the metadata publishes neither credential_request_encryption nor credential_response_encryption, and an encrypted request or a credential_response_encryption parameter is refused (NL Wallet v0.6.0)."
   OID4VCI-8.2-10:
-    status: failing
-    reason: "Implemented: responses are encrypted without compression and a zip parameter is refused; no test asserts that an encrypted response is not compressed."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptedResponseIsNotCompressed/eudi"
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptedResponseIsNotCompressed/wallet as nl"
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptedResponseIsNotCompressed/wallet as eudi"
     profiles:
       nl:
         status: not-applicable
@@ -477,13 +479,13 @@ requirements:
       - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
       - "services/eudi-credential-issuer/internal/issuance:TestProvidersAreIsolated/a c_nonce of one profile is unknown at another"
   OID4VCI-8.2-12:
-    status: failing
-    reason: "Implemented: every configuration publishes proof_types_supported, and a request without proofs is refused with invalid_proof; no test sends one without proofs."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialRequestProofs"
   OID4VCI-8.2-13:
-    status: failing
-    reason: "Implemented: unknown members of a (decrypted) JSON request are ignored; no test sends one."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialRequestUnknownParameters"
   OID4VCI-8.2-15:
     status: passed
     tests:
@@ -553,9 +555,9 @@ requirements:
     status: not-applicable
     reason: "An SD-JWT VC is a string, not binary data; the issuer issues SD-JWT VC only."
   OID4VCI-8.3-08:
-    status: failing
-    reason: "Implemented: transaction_id is set only in a deferred (202) response; no test asserts that a response with credentials carries none."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialResponseMembers"
     profiles:
       nl:
         status: not-applicable
@@ -586,9 +588,9 @@ requirements:
         status: not-applicable
         reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
   OID4VCI-8.3-12:
-    status: failing
-    reason: "Implemented: interval is set only in a deferred (202) response; no test asserts that a response with credentials carries none."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialResponseMembers"
     profiles:
       nl:
         status: not-applicable
@@ -597,9 +599,12 @@ requirements:
         status: not-applicable
         reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
   OID4VCI-8.3-14:
-    status: failing
-    reason: "Implemented: notification_id is set only in a response with credentials; no test asserts that a deferred (202) response carries none."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialResponseMembers/eudi deferred"
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialResponseMembers/nl"
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialResponseMembers/wallet as nl"
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialResponseMembers/wallet as eudi"
     profiles:
       nl:
         status: not-applicable
@@ -677,9 +682,9 @@ requirements:
         status: not-applicable
         reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
   OID4VCI-9.1-03:
-    status: failing
-    reason: "Implemented: unknown members of a (decrypted) JSON deferred request are ignored; no test sends one."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceDeferredRequestIgnoresUnknownMembers"
     profiles:
       nl:
         status: not-applicable
@@ -907,9 +912,9 @@ requirements:
         status: not-applicable
         reason: "No notification endpoint on this profile; credential responses carry no notification_id."
   OID4VCI-11.1-06:
-    status: failing
-    reason: "Implemented: unknown members of a notification request are ignored; no test sends one."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceNotificationIgnoresUnknownMembers"
     profiles:
       nl:
         status: not-applicable
@@ -1009,9 +1014,9 @@ requirements:
     tests:
       - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
   OID4VCI-12.2.3-07:
-    status: failing
-    reason: "Implemented: signed metadata carries iat (and exp, one hour later); no test asserts iat."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceSignedMetadataIssuedAt"
   OID4VCI-12.2.3-08:
     status: passed
     tests:
@@ -1029,9 +1034,9 @@ requirements:
       - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
       - "services/eudi-credential-issuer/internal/httpapi:TestProviders/P-1 metadata of a provider"
   OID4VCI-12.2.4-05:
-    status: failing
-    reason: "Implemented: the metadata carries credential_endpoint (<identifier>/credential); no test asserts it."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceIssuerMetadata"
   OID4VCI-12.2.4-06:
     status: passed
     tests:
@@ -1125,13 +1130,15 @@ requirements:
         status: not-applicable
         reason: "No credential_response_encryption on this profile: the NL Wallet (v0.6.0) does not ask for encrypted responses."
   OID4VCI-12.2.4-18:
-    status: failing
-    reason: "Implemented: batch_credential_issuance with batch_size is published only when the configured batch size is 2 or more; no test asserts it."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceIssuerMetadata"
+      - "services/eudi-credential-issuer/internal/issuance:TestConformanceBatchSizeInMetadata"
   OID4VCI-12.2.4-19:
-    status: failing
-    reason: "Implemented: batch_credential_issuance is left out when the configured batch size is below 2; no test asserts it."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceIssuerMetadata"
+      - "services/eudi-credential-issuer/internal/issuance:TestConformanceBatchSizeInMetadata"
   OID4VCI-12.2.4-20:
     status: passed
     tests:
@@ -1140,9 +1147,9 @@ requirements:
     status: not-applicable
     reason: "The issuer display carries no logo."
   OID4VCI-12.2.4-22:
-    status: failing
-    reason: "Implemented: every credential configuration has format dc+sd-jwt; no test asserts it in the metadata."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceIssuerMetadata"
   OID4VCI-12.2.4-23:
     status: passed
     tests:
@@ -1157,13 +1164,14 @@ requirements:
         status: not-applicable
         reason: "No authorization code flow on this profile, so the authorization server receives no scope; every configuration has a unique scope nonetheless."
   OID4VCI-12.2.4-24:
-    status: failing
-    reason: "Implemented: every credential is key-bound and every configuration lists cryptographic_binding_methods_supported [jwk]; no test asserts it in the metadata."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceIssuerMetadata"
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceCredentialsAreKeyBound"
   OID4VCI-12.2.4-25:
-    status: failing
-    reason: "Implemented: each proof type lists proof_signing_alg_values_supported; no test asserts it in the metadata."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceIssuerMetadata"
   OID4VCI-12.2.4-26:
     status: passed
     tests:
@@ -1317,9 +1325,9 @@ requirements:
           - "services/eudi-credential-issuer/internal/httpapi:TestCombinedNLPlainJWT"
         reason: "Access tokens are DPoP-bound, but for a wallet of the NL Wallet provider the NL credential preview endpoint takes the token as a bearer token, once per token, because the NL Wallet (v0.6.0) calls it without DPoP; an EUDI wallet's token is refused there."
   OID4VCI-14.3-01:
-    status: failing
-    reason: "Implemented: a later credential request, or a re-issuance with a refresh token, revokes nothing issued before; no test checks the status of earlier credentials after it."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceLaterRequestsRevokeNothing"
   OID4VCI-15.1-01:
     status: failing
     reason: "The authorization code flow asks consent at GBO's authorization server before issuing; a pre-authorized or disclosure-based offer relies on the offer caller and on the wallet, with no consent step at the issuer."
@@ -1353,17 +1361,19 @@ requirements:
       - "services/oid4vc-kit/sdjwtvc:TestReservedClaimsAreNotConcealed"
       - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
   OID4VCI-15.3-01:
-    status: failing
-    reason: "Implemented: codes and access tokens are kept as hashes, the claims stay in the session only while a token or refresh token can use them, the BSN is kept only sealed while a deferred issuance waits, and expired state is purged every minute; no test covers the purge."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/postgres:TestPurge"
   OID4VCI-15.3-02:
-    status: failing
-    reason: "Implemented: issued credentials are neither stored nor logged; tests show that the BSN and the transaction code are not logged, none that credentials or claims are not."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceCredentialsAreNotLogged"
+      - "services/eudi-credential-issuer/internal/issuance:TestConformanceIssuedCredentialsAreNotStored"
   OID4VCI-15.3-03:
-    status: failing
-    reason: "Implemented: the store keeps which credential identifiers were issued, not the credentials; no test asserts it."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestConformanceIssuedCredentialsAreNotStored"
+      - "services/eudi-credential-issuer/internal/issuance:TestConformanceDeferredIssuanceDiscardsTheHolderKey"
   OID4VCI-15.4.1-01:
     status: passed
     tests:
@@ -1371,13 +1381,14 @@ requirements:
       - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
       - "services/eudi-credential-issuer/internal/httpapi:TestCombinedNLPlainJWT"
   OID4VCI-15.4.1-02:
-    status: failing
-    reason: "iat is rounded to the start of the day (tested); nbf is the start of the day of the offer and exp nbf plus valid_days, but no test asserts that they are rounded."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceTimeClaimsAreRounded"
   OID4VCI-15.4.1-03:
-    status: failing
-    reason: "Implemented: issued credentials are not stored, and holder keys are kept only while a deferred issuance waits for its source; no test asserts it."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestConformanceIssuedCredentialsAreNotStored"
+      - "services/eudi-credential-issuer/internal/issuance:TestConformanceDeferredIssuanceDiscardsTheHolderKey"
   OID4VCI-A.1.1.1-01:
     status: not-applicable
     reason: "The issuer issues SD-JWT VC only; W3C VCDM formats are not issued."
@@ -1424,9 +1435,9 @@ requirements:
     status: not-applicable
     reason: "The issuer issues SD-JWT VC only."
   OID4VCI-A.3.2-01:
-    status: failing
-    reason: "Implemented: credential_signing_alg_values_supported lists ES256 only; no test asserts it."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialAlgorithmMetadata"
   OID4VCI-A.3.2-02:
     status: passed
     tests:
@@ -1495,41 +1506,50 @@ requirements:
           - "services/eudi-credential-issuer/internal/httpapi:TestCombinedEUDIMustAttest"
         reason: "The jwt proof type in the metadata has no key_attestations_required, for the NL Wallet (v0.6.0), which cannot attest its keys; wallets of other providers must attest their keys all the same, which the metadata does not say. The attestation proof type carries key_attestations_required."
   OID4VCI-D.1-01:
-    status: failing
-    reason: "Implemented: only ES256 key attestations are accepted; no test offers another algorithm, none or a MAC."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/oid4vc-kit/keyattest:TestKeyAttestationConformance/F.3-04 ES384 with a chain that verifies"
+      - "services/oid4vc-kit/keyattest:TestKeyAttestationConformance/D.1-02 MAC"
+      - "services/oid4vc-kit/keyattest:TestKeyAttestationConformance/D.1-02 none"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyAttestationRefusals"
     profiles:
       nl:
         status: not-applicable
         reason: "The nl profile takes no key attestations: the NL Wallet (v0.6.0) cannot attest its keys."
   OID4VCI-D.1-02:
-    status: failing
-    reason: "Implemented: only ES256 key attestations are accepted; no test offers another algorithm, none or a MAC."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/oid4vc-kit/keyattest:TestKeyAttestationConformance/D.1-02 MAC"
+      - "services/oid4vc-kit/keyattest:TestKeyAttestationConformance/D.1-02 none"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyAttestationRefusals"
     profiles:
       nl:
         status: not-applicable
         reason: "The nl profile takes no key attestations: the NL Wallet (v0.6.0) cannot attest its keys."
   OID4VCI-D.1-03:
-    status: failing
-    reason: "Implemented: typ key-attestation+jwt is required; the refusal case in the key attestation tests also lacks x5c, so it does not show the typ check on its own."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/oid4vc-kit/keyattest:TestKeyAttestationConformance/D.1-03 no typ"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyAttestationRefusals"
     profiles:
       nl:
         status: not-applicable
         reason: "The nl profile takes no key attestations: the NL Wallet (v0.6.0) cannot attest its keys."
   OID4VCI-D.1-04:
-    status: failing
-    reason: "Implemented: typ key-attestation+jwt is required; the refusal case in the key attestation tests also lacks x5c, so it does not show the typ check on its own."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/oid4vc-kit/keyattest:TestKeyAttestationConformance/D.1-04 typ jwt"
+      - "services/oid4vc-kit/keyattest:TestKeyAttestationConformance/D.1-04 typ of a proof"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyAttestationRefusals"
     profiles:
       nl:
         status: not-applicable
         reason: "The nl profile takes no key attestations: the NL Wallet (v0.6.0) cannot attest its keys."
   OID4VCI-D.1-05:
-    status: failing
-    reason: "Implemented: iat is required; no test offers a key attestation without iat."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/oid4vc-kit/keyattest:TestKeyAttestationConformance/D.1-05 no iat"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyAttestationRefusals"
     profiles:
       nl:
         status: not-applicable
@@ -1552,9 +1572,9 @@ requirements:
         status: not-applicable
         reason: "The nl profile takes no key attestations: the NL Wallet (v0.6.0) cannot attest its keys."
   OID4VCI-D.1-08:
-    status: failing
-    reason: "Implemented: the proof key must be one of the attested keys; no test sends a proof signed by another key."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyAttestationRefusals"
     profiles:
       nl:
         status: not-applicable
@@ -1573,56 +1593,72 @@ requirements:
       - "services/eudi-credential-issuer/internal/httpapi:TestToken/W4 PoP without challenge"
       - "services/eudi-credential-issuer/internal/httpapi:TestPushedAuthorizationRefusals/P5: no client attestation"
   OID4VCI-F-01:
-    status: failing
-    reason: "Implemented: proofs must hold jwt or attestation proofs, not both and not neither; no test sends an empty jwt array."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialRequestProofs"
   OID4VCI-F-02:
     status: not-applicable
     reason: "The issuer does not support the di_vp proof type: it issues SD-JWT VC only, and its metadata offers the jwt and attestation proof types."
   OID4VCI-F-03:
-    status: failing
-    reason: "Implemented: exactly one attestation proof is accepted; no test sends two."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialRequestProofs/eudi"
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialRequestProofs/wallet as eudi"
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialRequestProofs/wallet as nl"
     profiles:
       nl:
         status: not-applicable
         reason: "The nl profile offers the jwt proof type only: the NL Wallet (v0.6.0) cannot attest its keys."
   OID4VCI-F.1-01:
-    status: failing
-    reason: "The required elements are checked: typ, alg (ES256), jwk, aud, iat and nonce; tests cover aud, the iat window, the nonce and jwk with x5c, not typ, alg or a missing iat (see F.1-02 to F.1-18)."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyProofRefusals"
   OID4VCI-F.1-02:
-    status: failing
-    reason: "Implemented: only ES256 key proofs are accepted; no test sends another algorithm, none or a MAC."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-22 ES384"
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-03 MAC"
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-03 none"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyProofRefusals"
   OID4VCI-F.1-03:
-    status: failing
-    reason: "Implemented: only ES256 key proofs are accepted; no test sends another algorithm, none or a MAC."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-03 MAC"
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-03 none"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyProofRefusals"
   OID4VCI-F.1-04:
-    status: failing
-    reason: "Implemented: typ openid4vci-proof+jwt is required; no test sends another typ."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-04 no typ"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyProofRefusals"
   OID4VCI-F.1-05:
-    status: failing
-    reason: "Implemented: typ openid4vci-proof+jwt is required; no test sends another typ."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-05 typ jwt"
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-05 typ key-attestation"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyProofRefusals"
   OID4VCI-F.1-06:
-    status: failing
-    reason: "Implemented: a key proof with kid is refused (the key must be in jwk); no test sends one."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-06 F.1-07 jwk and kid"
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-06 kid alone"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyProofRefusals"
   OID4VCI-F.1-07:
-    status: failing
-    reason: "Implemented: jwk is required, and kid and x5c are refused; jwk with x5c is tested, jwk with kid is not."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-06 F.1-07 jwk and kid"
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-07 F.1-08 jwk and a valid x5c"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyProofRefusals"
   OID4VCI-F.1-08:
-    status: failing
-    reason: "Implemented: x5c is refused; x5c with jwk is tested, x5c with kid is not."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-08 x5c and kid"
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-07 F.1-08 jwk and a valid x5c"
   OID4VCI-F.1-09:
-    status: failing
-    reason: "Implemented: the key attestation must carry the nonce of the proof, a server-provided c_nonce; no test sends a key attestation with another nonce."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyAttestationRefusals"
     profiles:
       nl:
         status: not-applicable
@@ -1636,9 +1672,10 @@ requirements:
     tests:
       - "services/oid4vc-kit/oid4vci:TestVerifyJWTProof"
   OID4VCI-F.1-15:
-    status: failing
-    reason: "Implemented: iat is required; no test sends a key proof without iat."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-15 no iat"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyProofRefusals"
   OID4VCI-F.1-16:
     status: passed
     tests:
@@ -1653,9 +1690,10 @@ requirements:
     tests:
       - "services/eudi-credential-issuer/internal/issuance:TestProofWithoutNonceIsInvalidProof"
   OID4VCI-F.1-19:
-    status: failing
-    reason: "Implemented: the signature must verify with the jwk header; no test sends a proof signed by another key."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-19 signed by another key than the jwk"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyProofRefusals"
   OID4VCI-F.1-20:
     status: passed
     tests:
@@ -1665,13 +1703,18 @@ requirements:
         status: not-applicable
         reason: "The nl profile takes no key attestations: the NL Wallet (v0.6.0) cannot attest its keys."
   OID4VCI-F.1-21:
-    status: failing
-    reason: "Implemented: proof_signing_alg_values_supported lists ES256 only; no test asserts it."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialAlgorithmMetadata"
   OID4VCI-F.1-22:
-    status: failing
-    reason: "Implemented: key proofs and key attestations are accepted with ES256 only, the one value of proof_signing_alg_values_supported; no test sends another algorithm."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-22 ES384"
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-03 MAC"
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-03 none"
+      - "services/oid4vc-kit/keyattest:TestKeyAttestationConformance/F.3-04 ES384 with a chain that verifies"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyProofRefusals"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyAttestationRefusals"
   OID4VCI-F.2-01:
     status: not-applicable
     reason: "The issuer does not support the di_vp proof type: it issues SD-JWT VC only, and its metadata offers the jwt and attestation proof types."
@@ -1715,17 +1758,17 @@ requirements:
     status: not-applicable
     reason: "The issuer does not support the di_vp proof type: it issues SD-JWT VC only, and its metadata offers the jwt and attestation proof types."
   OID4VCI-F.3-01:
-    status: failing
-    reason: "Implemented: the key attestation's nonce must be an unused server-provided c_nonce; no test sends an attestation proof without a nonce or with an unknown one."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyAttestationRefusals"
     profiles:
       nl:
         status: not-applicable
         reason: "The nl profile offers the jwt proof type only: the NL Wallet (v0.6.0) cannot attest its keys."
   OID4VCI-F.3-02:
-    status: failing
-    reason: "Implemented: proof_signing_alg_values_supported of the attestation proof type lists ES256 only; no test asserts it."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialAlgorithmMetadata"
     profiles:
       nl:
         status: not-applicable
@@ -1739,14 +1782,19 @@ requirements:
         status: not-applicable
         reason: "The nl profile offers the jwt proof type only: the NL Wallet (v0.6.0) cannot attest its keys."
   OID4VCI-F.3-04:
-    status: failing
-    reason: "Implemented: key attestations are accepted with ES256 only, the one value of proof_signing_alg_values_supported; no test sends another algorithm."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/oid4vc-kit/keyattest:TestKeyAttestationConformance/F.3-04 ES384 with a chain that verifies"
+      - "services/oid4vc-kit/keyattest:TestKeyAttestationConformance/D.1-02 MAC"
+      - "services/oid4vc-kit/keyattest:TestKeyAttestationConformance/D.1-02 none"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyAttestationRefusals"
     profiles:
       nl:
         status: not-applicable
         reason: "The nl profile offers the jwt proof type only: the NL Wallet (v0.6.0) cannot attest its keys."
   OID4VCI-F.4-01:
-    status: failing
-    reason: "Checked: required claims, typ, ES256 only, the signature with the jwk header (a public key), the nonce and the iat window. Tested: aud, the nonce and the iat window; not tested: typ, another algorithm, a signature by another key, a private key in jwk, a missing iat."
-    slice: "#614"
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance"
+      - "services/oid4vc-kit/oid4vci:TestJWTProofWithAPrivateJWK"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyProofRefusals"
