@@ -21,6 +21,7 @@ import (
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 
+	"gbo-demo/oid4vc-kit/jwttyp"
 	"gbo-demo/oid4vc-kit/x5c"
 )
 
@@ -174,7 +175,7 @@ func Verify(token, uri string, anchors []x5c.Anchors, now time.Time) (List, erro
 		return List{}, fmt.Errorf("statuslist: %w", err)
 	}
 	h := tok.Headers[0]
-	if typ, _ := h.ExtraHeaders[jose.HeaderType].(string); typ != Type {
+	if !jwttyp.Is(h, Type) {
 		return List{}, fmt.Errorf("statuslist: typ must be %q", Type)
 	}
 	leaf, _, err := x5c.Verify(h, anchors, now, SignerEKU)

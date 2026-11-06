@@ -7,6 +7,8 @@ import (
 
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
+
+	"gbo-demo/oid4vc-kit/jwttyp"
 )
 
 // ProofType is the typ header of a jwt key proof (Appendix F.1).
@@ -45,7 +47,7 @@ func VerifyJWTProof(proof, audience string, now time.Time) (JWTProof, error) {
 		return JWTProof{}, errors.New("the key proof is not a JWT signed with ES256")
 	}
 	h := tok.Headers[0]
-	if typ, _ := h.ExtraHeaders[jose.HeaderType].(string); typ != ProofType {
+	if !jwttyp.Is(h, ProofType) {
 		return JWTProof{}, errors.New("the key proof must have typ openid4vci-proof+jwt")
 	}
 	if _, err := h.Certificates(x509.VerifyOptions{}); h.KeyID != "" || !errors.Is(err, jose.ErrMissingX5cHeader) {

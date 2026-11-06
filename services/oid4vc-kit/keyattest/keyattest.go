@@ -10,6 +10,7 @@ import (
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 
+	"gbo-demo/oid4vc-kit/jwttyp"
 	"gbo-demo/oid4vc-kit/x5c"
 )
 
@@ -46,7 +47,7 @@ func Verify(attestation string, anchors []x5c.Anchors, now time.Time, requireExp
 		return Verified{}, errors.New("the key attestation is not a JWT signed with ES256")
 	}
 	h := tok.Headers[0]
-	if typ, _ := h.ExtraHeaders[jose.HeaderType].(string); typ != Type {
+	if !jwttyp.Is(h, Type) {
 		return Verified{}, errors.New("the key attestation must have typ key-attestation+jwt")
 	}
 	leaf, anchor, err := x5c.Verify(h, anchors, now, nil)

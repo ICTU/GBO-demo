@@ -4,6 +4,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-jose/go-jose/v4"
+	"github.com/go-jose/go-jose/v4/jwt"
+
 	"gbo-demo/oid4vc-kit/dpop"
 	"gbo-demo/oid4vc-kit/testpki"
 	"gbo-demo/oid4vc-kit/testwallet"
@@ -39,5 +42,31 @@ func TestVerify(t *testing.T) {
 				t.Fatal("expected refusal")
 			}
 		})
+	}
+}
+
+// C-4 (RFC 7515 section 4.1.9): typ in another case, or with the
+// application/ prefix, is accepted; another typ is not.
+func TestVerifyTyp(t *testing.T) {
+	key := testpki.NewKey(t)
+	url := "https://issuer.example.test/nl/token"
+	now := time.Now()
+	proof := func(typ string) string {
+		signer, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.ES256, Key: key}, &jose.SignerOptions{ExtraHeaders: map[jose.HeaderKey]any{
+			jose.HeaderType: typ, "jwk": jose.JSONWebKey{Key: &key.PublicKey},
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := jwt.Signed(signer).Claims(map[string]any{"htm": "POST", "htu": url, "iat": now.Unix(), "jti": typ}).Serialize()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	for typ, ok := range map[string]bool{"DPoP+JWT": true, "application/dpop+jwt": true, "jwt": false} {
+		if _, err := dpop.Verify([]string{proof(typ)}, dpop.Expected{Method: "POST", URL: url}, now); (err == nil) != ok {
+			t.Errorf("typ %s: %v, want accepted %v", typ, err, ok)
+		}
 	}
 }

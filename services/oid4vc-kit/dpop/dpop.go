@@ -14,6 +14,8 @@ import (
 
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
+
+	"gbo-demo/oid4vc-kit/jwttyp"
 )
 
 // Window is how far the iat of a proof may lie from now.
@@ -60,7 +62,7 @@ func Verify(headers []string, want Expected, now time.Time) (Proof, error) {
 		return Proof{}, errors.New("the DPoP proof is not a JWT signed with ES256")
 	}
 	h := tok.Headers[0]
-	if typ, _ := h.ExtraHeaders[jose.HeaderType].(string); typ != "dpop+jwt" {
+	if !jwttyp.Is(h, "dpop+jwt") {
 		return Proof{}, errors.New("the DPoP proof must have typ dpop+jwt")
 	}
 	if h.JSONWebKey == nil || !h.JSONWebKey.Valid() || !h.JSONWebKey.IsPublic() {

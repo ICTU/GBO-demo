@@ -13,6 +13,7 @@ import (
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 
+	"gbo-demo/oid4vc-kit/jwttyp"
 	"gbo-demo/oid4vc-kit/x5c"
 )
 
@@ -82,7 +83,7 @@ func Verify(attestation, pop string, anchors []x5c.Anchors, audience string, now
 		return Verified{}, errors.New("the client attestation is not a JWT signed with ES256")
 	}
 	h := tok.Headers[0]
-	if typ, _ := h.ExtraHeaders[jose.HeaderType].(string); typ != attestationType {
+	if !jwttyp.Is(h, attestationType) {
 		return Verified{}, errors.New("the client attestation has the wrong typ")
 	}
 	leaf, anchor, err := x5c.Verify(h, anchors, now, nil)
@@ -107,7 +108,7 @@ func Verify(attestation, pop string, anchors []x5c.Anchors, audience string, now
 	if err != nil {
 		return Verified{}, errors.New("the attestation PoP is not a JWT signed with ES256")
 	}
-	if typ, _ := ptok.Headers[0].ExtraHeaders[jose.HeaderType].(string); typ != popType {
+	if !jwttyp.Is(ptok.Headers[0], popType) {
 		return Verified{}, errors.New("the attestation PoP has the wrong typ")
 	}
 	var p popClaims

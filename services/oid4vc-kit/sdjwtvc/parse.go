@@ -14,6 +14,7 @@ import (
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 
+	"gbo-demo/oid4vc-kit/jwttyp"
 	"gbo-demo/oid4vc-kit/x5c"
 )
 
@@ -44,7 +45,7 @@ func Parse(combined string, anchors []x5c.Anchors, eku asn1.ObjectIdentifier, no
 		return Parsed{}, fmt.Errorf("sdjwtvc: %w", err)
 	}
 	h := tok.Headers[0]
-	if typ, _ := h.ExtraHeaders[jose.HeaderType].(string); typ != Type {
+	if !jwttyp.Is(h, Type) {
 		return Parsed{}, fmt.Errorf("sdjwtvc: typ must be %q", Type)
 	}
 	leaf, anchor, err := x5c.Verify(h, anchors, now, eku)

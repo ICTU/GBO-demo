@@ -89,6 +89,14 @@ func TestJWTProofConformance(t *testing.T) {
 		t.Fatalf("the valid proof the cases start from: %+v %v", p, err)
 	}
 
+	// C-1, C-2 (RFC 7515 section 4.1.9): typ in another case, or with the
+	// application/ prefix, is the same media type.
+	for _, typ := range []string{"OpenID4VCI-Proof+JWT", "application/openid4vci-proof+jwt"} {
+		if _, err := oid4vci.VerifyJWTProof(signedWith(t, jose.ES256, key, header(map[jose.HeaderKey]any{jose.HeaderType: typ}), claims("")), issuer, now); err != nil {
+			t.Errorf("typ %s: %v", typ, err)
+		}
+	}
+
 	for name, tc := range map[string]struct {
 		proof string
 		want  string // in the error

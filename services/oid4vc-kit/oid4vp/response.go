@@ -18,6 +18,7 @@ import (
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 
+	"gbo-demo/oid4vc-kit/jwttyp"
 	"gbo-demo/oid4vc-kit/sdjwtvc"
 	"gbo-demo/oid4vc-kit/statuslist"
 	"gbo-demo/oid4vc-kit/x5c"
@@ -213,7 +214,7 @@ func checkKeyBinding(kb, sdjwt string, claims map[string]any, s Session, now tim
 	if err != nil {
 		return errors.New("oid4vp: the key binding is not an ES256 JWT")
 	}
-	if typ, _ := tok.Headers[0].ExtraHeaders[jose.HeaderType].(string); typ != KeyBindingType {
+	if !jwttyp.Is(tok.Headers[0], KeyBindingType) {
 		return fmt.Errorf("oid4vp: the key binding typ must be %q", KeyBindingType)
 	}
 	var c struct {
