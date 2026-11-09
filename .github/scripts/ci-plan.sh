@@ -66,6 +66,7 @@ dienstverlener-backend
 dvtp-onboarding-register
 eudi-adapter
 eudi-credential-issuer
+eudi-wallet-verifier
 ftv-graphql-mapper
 graphql-server
 ldv-client
@@ -103,7 +104,7 @@ if matches_any 'services/brp-graphql-server/mockdata/*'; then
 fi
 
 if matches_any 'services/oid4vc-kit/*'; then
-  for service in eudi-adapter eudi-credential-issuer; do
+  for service in eudi-adapter eudi-credential-issuer eudi-wallet-verifier; do
     go="$(append_unique "${go}" "${service}")"
   done
 fi

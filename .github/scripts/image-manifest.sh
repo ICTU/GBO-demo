@@ -112,11 +112,13 @@ IMAGES
 # as deliberately unpublished. Without this a new service would be left
 # out of every release, silently and permanently. The own credential issuer
 # is built and tested locally until it replaces eudi-issuance-server (#614);
-# test-pid-source is its local test fixture.
+# test-pid-source is its local test fixture; eudi-wallet-verifier is the
+# EUDI-wallet login of the authorization server, local until #639 is live.
 while read -r unpublished; do
   covered_paths+=("${unpublished}")
 done <<'UNPUBLISHED'
 services/eudi-credential-issuer
+services/eudi-wallet-verifier
 services/test-pid-source
 UNPUBLISHED
 
