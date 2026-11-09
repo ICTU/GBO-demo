@@ -29,6 +29,12 @@ const WalletPath = authorization.AuthorizePath + "/wallet"
 // WalletReturnPath receives the browser after a same-device wallet session.
 const WalletReturnPath = WalletPath + "/return"
 
+// EUDIWalletPath and EUDIWalletReturnPath are the same for an EUDI wallet.
+const (
+	EUDIWalletPath       = authorization.AuthorizePath + "/eudi-wallet"
+	EUDIWalletReturnPath = EUDIWalletPath + "/return"
+)
+
 // DecisionPath receives the user's choice on the request page: deny, or a
 // means to log in with.
 const DecisionPath = authorization.AuthorizePath + "/decision"
@@ -83,7 +89,7 @@ func page(name, title, head, body string) *template.Template {
 <body>
 <header class="as-hd"><div class="as-hd-in"><img class="as-wapen" src="` + StaticPath + `rijkswapen.png" alt="Rijkswapen"><p class="as-title">Inloggen en toestemming geven<small>Testomgeving</small></p></div><div class="as-lint"></div></header>
 <main class="as-main">
-<div class="as-demo" role="note"><span aria-hidden="true">!</span><p><strong>Testomgeving — geen echte identificatie.</strong> Inloggen gaat met een mock van DigiD, waar niets wordt gecontroleerd, of met de NL Wallet uit de testomgeving.</p></div>
+<div class="as-demo" role="note"><span aria-hidden="true">!</span><p><strong>Testomgeving — geen echte identificatie.</strong> Inloggen gaat met een mock van DigiD, waar niets wordt gecontroleerd, of met een wallet uit de testomgeving.</p></div>
 ` + body + `
 </main>
 <footer class="as-ft">Testomgeving · inlogvoorziening</footer>
@@ -95,8 +101,9 @@ func page(name, title, head, body string) *template.Template {
 // the login succeeds, or to deny it. It says who asks what at which source,
 // and that the user logs in at this service, not at the QTSP: the NL Wallet
 // names the authorization server, not the QTSP. Message says why an earlier
-// login did not succeed. The wallet button works when the NL Wallet verifier
-// is configured.
+// login did not succeed. A wallet button works when its verifier is
+// configured; the NL Wallet's shows disabled when it is not, the EU-wallet's
+// not at all.
 var requestPage = page("request", "Toestemming geven", "", `{{if .Message}}<div class="as-alert" role="alert"><span aria-hidden="true">!</span><p><strong>{{.Message}}</strong></p></div>
 {{end}}<form method="post" action="{{.Action}}" class="as-card">
 <input type="hidden" name="transaction" value="{{.TransactionID}}">
@@ -121,34 +128,34 @@ var requestPage = page("request", "Toestemming geven", "", `{{if .Message}}<div 
 <h2>Bevestig wie u bent</h2>
 <p>Log in om te bevestigen dat het om uw gegevens gaat. Daarmee geeft u {{.ClientName}} toestemming voor alleen dit verzoek. U logt in bij deze inlogvoorziening, niet bij {{.ClientName}}. Daarna gaat u terug naar {{.ClientName}}.</p>
 <div class="as-choice">
-{{if .Wallet}}<button type="submit" class="as-btn" name="decision" value="wallet">Inloggen met NL Wallet</button>{{else}}<button type="submit" class="as-btn" name="decision" value="wallet" disabled>Inloggen met NL Wallet</button>{{end}}
-<button type="submit" class="as-btn" name="decision" value="digid"><img src="`+StaticPath+`Logo_of_DigiD.png" alt="">Inloggen met DigiD (mock)</button>
+{{range .Wallets}}{{if .Available}}<button type="submit" class="as-btn" name="decision" value="{{.Decision}}">Inloggen met {{.Label}}</button>{{else}}<button type="submit" class="as-btn" name="decision" value="{{.Decision}}" disabled>Inloggen met {{.Label}}</button>{{end}}
+{{end}}<button type="submit" class="as-btn" name="decision" value="digid"><img src="`+StaticPath+`Logo_of_DigiD.png" alt="">Inloggen met DigiD (mock)</button>
 </div>
-{{if not .Wallet}}<p class="as-hint">De NL Wallet is nu niet beschikbaar.</p>
-{{end}}<button type="submit" class="as-deny" name="decision" value="deny">Geen toestemming geven</button>
+{{range .Wallets}}{{if not .Available}}<p class="as-hint">De {{.Name}} is nu niet beschikbaar.</p>
+{{end}}{{end}}<button type="submit" class="as-deny" name="decision" value="deny">Geen toestemming geven</button>
 <p class="as-hint">Er wordt dan niets bij {{.Source}} gevraagd en u gaat terug naar {{.ClientName}}.</p>
 </div>
 </form>`)
 
 // walletPage shows the QR code of the disclosure session and follows the
 // session by refreshing itself; it needs no script.
-var walletPage = page("wallet", "Inloggen met NL Wallet", `<meta http-equiv="refresh" content="2">
+var walletPage = page("wallet", "Inloggen met een wallet", `<meta http-equiv="refresh" content="2">
 `, `<div class="as-card">
-<h1>Inloggen met NL Wallet</h1>
+<h1>Inloggen met {{.Name}}</h1>
 {{if .QR}}<div class="as-qr">
 <section aria-labelledby="wallet-other-device">
 <h2 id="wallet-other-device">Met een ander apparaat</h2>
-<p>Scan deze code met de NL Wallet op uw telefoon.</p>
-<div class="as-qr-box"><img src="{{.QR}}" alt="QR-code voor de NL Wallet" width="280" height="280"></div>
+<p>Scan deze code met de {{.Name}} op uw telefoon.</p>
+<div class="as-qr-box"><img src="{{.QR}}" alt="QR-code voor de {{.Name}}" width="280" height="280"></div>
 </section>
 <section aria-labelledby="wallet-same-device">
 <h2 id="wallet-same-device">Op dit apparaat</h2>
-{{if .SameDeviceEnabled}}<a class="as-btn" href="{{.SameDeviceLink}}">Open NL Wallet</a>
-{{else}}<button type="button" class="as-btn sec" disabled>Open NL Wallet</button>
+{{if .SameDeviceEnabled}}<a class="as-btn" href="{{.SameDeviceLink}}">Open {{.Name}}</a>
+{{else}}<button type="button" class="as-btn sec" disabled>Open {{.Name}}</button>
 <p class="as-hint">Inloggen op hetzelfde apparaat vereist HTTPS.</p>{{end}}
 </section>
 </div>
-{{else}}<p>Ga verder in de NL Wallet op uw telefoon.</p>{{end}}
+{{else}}<p>Ga verder in de {{.Name}} op uw telefoon.</p>{{end}}
 <form method="post" action="{{.Action}}">
 <input type="hidden" name="transaction" value="{{.TransactionID}}">
 <button type="submit" class="as-deny" name="decision" value="deny">Weigeren</button>
@@ -225,7 +232,7 @@ func writePage(w http.ResponseWriter, status int, page *template.Template, data 
 
 // writeRequestPage shows the request, with message when an earlier login
 // did not succeed, and binds the transaction to this browser with a cookie.
-func writeRequestPage(w http.ResponseWriter, tx *authorization.Transaction, secure, wallet bool, message string) {
+func writeRequestPage(w http.ResponseWriter, tx *authorization.Transaction, secure bool, wallets []walletChoice, message string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     transactionCookiePrefix + tx.ID,
 		Value:    tx.Binding,
@@ -247,7 +254,7 @@ func writeRequestPage(w http.ResponseWriter, tx *authorization.Transaction, secu
 		"Credentials":   tx.Credentials,
 		"Action":        DecisionPath,
 		"TransactionID": tx.ID,
-		"Wallet":        wallet,
+		"Wallets":       wallets,
 		"Message":       message,
 	})
 }
@@ -256,7 +263,7 @@ func writeRequestPage(w http.ResponseWriter, tx *authorization.Transaction, secu
 // wallet has the request, that the user continues in the wallet. Same-device
 // login needs an HTTPS issuer; local HTTP keeps the choice visible but
 // disabled.
-func writeWalletPage(w http.ResponseWriter, tx string, progress authorization.Progress, sameDeviceEnabled bool) {
+func writeWalletPage(w http.ResponseWriter, wm walletMeans, tx string, progress authorization.Progress, sameDeviceEnabled bool) {
 	var image template.URL
 	if progress.Link != "" {
 		if code, err := qr.Encode(progress.Link, qr.M); err == nil {
@@ -265,11 +272,23 @@ func writeWalletPage(w http.ResponseWriter, tx string, progress authorization.Pr
 	}
 	writePage(w, http.StatusOK, walletPage, map[string]any{
 		"QR":                image,
-		"SameDeviceLink":    progress.SameDeviceLink,
-		"SameDeviceEnabled": sameDeviceEnabled && progress.SameDeviceLink != "",
+		"Name":              wm.Name,
+		"SameDeviceLink":    walletLink(progress.SameDeviceLink),
+		"SameDeviceEnabled": sameDeviceEnabled && walletLink(progress.SameDeviceLink) != "",
 		"Action":            DecisionPath,
 		"TransactionID":     tx,
 	})
+}
+
+// walletLink is a link that opens a wallet, as the verifier gave it: an
+// https universal link (NL Wallet) or openid4vp:// (EUDI wallets).
+// html/template would neutralise the custom scheme, so the link is marked
+// safe here, and only for these two schemes.
+func walletLink(link string) template.URL {
+	if strings.HasPrefix(link, "https://") || strings.HasPrefix(link, "openid4vp://") {
+		return template.URL(link)
+	}
+	return ""
 }
 
 // writeDigiDPage shows the login page of the DigiD mock for transaction tx,

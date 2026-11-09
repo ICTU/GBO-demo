@@ -117,10 +117,15 @@ func serve() error {
 		return err
 	}
 	identifiers := map[string]authorization.Identifier{digidmock.Means: digidmock.Identifier{}}
-	if wallet, err := walletVerifier(); err != nil {
-		return err
-	} else if wallet != nil {
-		identifiers[walletverifier.Means] = wallet
+	for _, v := range []struct{ means, prefix, keyFile, name string }{
+		{walletverifier.Means, "AZSP_WALLET_VERIFIER", "/wallet-verifier/api-key", "NL Wallet"},
+		{walletverifier.EUDIMeans, "AZSP_EUDI_WALLET_VERIFIER", "/eudi-wallet-verifier/api-key", "EU-wallet"},
+	} {
+		if wallet, err := walletVerifier(v.prefix, v.keyFile, v.name); err != nil {
+			return err
+		} else if wallet != nil {
+			identifiers[v.means] = wallet
+		}
 	}
 	service := authorization.NewService(authorization.Config{
 		Issuer:                      issuer,
@@ -285,25 +290,27 @@ func loadSigningKey(path string) (*ecdsa.PrivateKey, error) {
 	return key, nil
 }
 
-// walletVerifier is the NL Wallet as identification means, when the
-// verifier is configured: AZSP_WALLET_VERIFIER_URL (its internal API),
-// AZSP_WALLET_VERIFIER_STATUS_URL (its wallet API, where the session status
-// is) and the API key in AZSP_WALLET_VERIFIER_API_KEY_FILE. Without the key
-// file the wallet is not offered and DigiD (mock) is the only means.
-func walletVerifier() (*walletverifier.Client, error) {
-	internal := os.Getenv("AZSP_WALLET_VERIFIER_URL")
+// walletVerifier is a wallet as identification means, when its verifier is
+// configured: <prefix>_URL (its internal API), <prefix>_STATUS_URL (its
+// wallet API, where the session status is) and the API key in
+// <prefix>_API_KEY_FILE. The NL Wallet's prefix is AZSP_WALLET_VERIFIER
+// (asi-wallet-verifier), the EUDI wallets' AZSP_EUDI_WALLET_VERIFIER
+// (eudi-wallet-verifier, #639). Without the key file the wallet is not
+// offered.
+func walletVerifier(prefix, defaultKeyFile, name string) (*walletverifier.Client, error) {
+	internal := os.Getenv(prefix + "_URL")
 	if internal == "" {
 		return nil, nil
 	}
-	keyFile := env("AZSP_WALLET_VERIFIER_API_KEY_FILE", "/wallet-verifier/api-key")
+	keyFile := env(prefix+"_API_KEY_FILE", defaultKeyFile)
 	key, err := os.ReadFile(keyFile)
 	if errors.Is(err, os.ErrNotExist) {
-		slog.Warn("NL Wallet verifier not configured: no API key; logging in with the NL Wallet is not offered", "file", keyFile)
+		slog.Warn(name+" verifier not configured: no API key; logging in with the "+name+" is not offered", "file", keyFile)
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	status := env("AZSP_WALLET_VERIFIER_STATUS_URL", internal)
+	status := env(prefix+"_STATUS_URL", internal)
 	return walletverifier.New(internal, status, strings.TrimSpace(string(key))), nil
 }

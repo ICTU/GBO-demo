@@ -132,6 +132,17 @@ With the NL Wallet the authorization server has the citizen disclose the PID thr
 
 Configuration: `AZSP_WALLET_VERIFIER_URL` (internal API), `AZSP_WALLET_VERIFIER_STATUS_URL` (wallet API, for the session status) and `AZSP_WALLET_VERIFIER_API_KEY_FILE`, read at startup; without the key file the wallet is not offered. Compose mounts only the directory with the key, not the verifier's configuration. `make demo-asi` reprovisions when the return mode required by `ASI_AUTHORIZATION_SERVER_PUBLIC_URL` differs from the current configuration. Run `make provision-asi-wallet-verifier` again after changing that URL's host: the reader certificate also binds the origin.
 
+## The EUDI wallets
+
+With an EUDI wallet the citizen logs in the same way, through `services/eudi-wallet-verifier` (#639): OpenID4VP 1.0 as HAIP 1.0 profiles it, on the verifier of `oid4vc-kit`, behind the same API and the same client (`internal/walletverifier`) as the NL Wallet. The core names it `eudi-wallet`, in the token's `acr` and `amr`.
+
+- The request page shows “Inloggen met EU-wallet (test)” only when its verifier is configured; the NL Wallet's button does not depend on it.
+- The wallet page and its return have their own paths, `/authorize/eudi-wallet` and `/authorize/eudi-wallet/return`. The links are `openid4vp://`; the page passes them through only for that scheme and `https`.
+- The usecase `asi-login` asks the same claims of `urn:eudi:pid:nl:1`. The verifier adds its trusted authorities, refuses a PID that is revoked or whose status cannot be determined, and releases the PID of a same-device session only with the return's nonce.
+- For both wallets, a same-device session that is done does not log in through the waiting page, which has no nonce: the page keeps waiting for the return (HAIP 1.0 section 5.1).
+
+Configuration: `AZSP_EUDI_WALLET_VERIFIER_URL`, `AZSP_EUDI_WALLET_VERIFIER_STATUS_URL` and `AZSP_EUDI_WALLET_VERIFIER_API_KEY_FILE` (default `/eudi-wallet-verifier/api-key`), as for the NL Wallet.
+
 ## Credential issuers as clients
 
 GBO's credential issuer issues a source's attestation (a PuB-EAA) to a wallet. With the authorization code flow, the citizen identifies here, at the same service and with the same means as for the ASI, instead of disclosing a PID. The issuer is a client of this server per source, with the source's access certificate:

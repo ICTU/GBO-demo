@@ -19,9 +19,15 @@ import (
 // the token's acr and amr.
 const Means = "nl-wallet"
 
-// Client is the adapter of the core's SessionIdentifier port for the NL
-// Wallet: it opens a disclosure session at the verifier, follows it, and
-// takes the disclosed PID as the identity of the user.
+// EUDIMeans is the name the core gives an EUDI wallet, logged in through
+// eudi-wallet-verifier, which offers the same API (#639).
+const EUDIMeans = "eudi-wallet"
+
+// Client is the adapter of the core's SessionIdentifier port for a wallet
+// verifier with the API of nl-wallet's verification_server: the NL
+// Wallet's, or eudi-wallet-verifier for the EUDI wallets. It opens a
+// disclosure session at the verifier, follows it, and takes the disclosed
+// PID as the identity of the user.
 type Client struct {
 	// Internal is the verifier's internal API (sessions, disclosed
 	// attributes); Public its wallet API, where the session status is.
@@ -118,7 +124,8 @@ func progress(out statusResponse) (authorization.Progress, error) {
 // Identify fetches the disclosed attributes of the finished session and
 // takes the PID: a disclosure of PIDType with a BSN. Anything else does not
 // identify the user; a verifier that cannot be reached, fails or refuses the
-// API key is ErrMeansUnavailable.
+// API key is ErrMeansUnavailable. A same-device session the verifier
+// releases only with its return nonce is ErrAwaitingReturn.
 func (c *Client) Identify(ctx context.Context, session string) (authorization.Identity, error) {
 	return c.identify(ctx, session, "")
 }
@@ -149,7 +156,11 @@ func (c *Client) identify(ctx context.Context, session, nonce string) (authoriza
 	}
 	if err := c.do(ctx, http.MethodGet, target, nil, true, &out); err != nil {
 		var responseErr *verifierResponseError
-		if nonce != "" && errors.As(err, &responseErr) && responseErr.Status == http.StatusUnauthorized && responseErr.errorType() == "nonce" {
+		if errors.As(err, &responseErr) && responseErr.Status == http.StatusUnauthorized && responseErr.errorType() == "nonce" {
+			if nonce == "" {
+				// A same-device session: only its return releases the PID.
+				return authorization.Identity{}, authorization.ErrAwaitingReturn
+			}
 			return authorization.Identity{}, errors.New("the verifier rejected the return nonce")
 		}
 		return authorization.Identity{}, err

@@ -210,6 +210,23 @@ func TestIdentifyReturn(t *testing.T) {
 	}
 }
 
+// T13 at the verifier boundary: a same-device session releases the PID only
+// with its return nonce, so following it without one awaits the return; it
+// is neither a failed login nor an unavailable verifier.
+func TestIdentifyAwaitsTheReturn(t *testing.T) {
+	f := &fakeVerifier{disclosedStatus: http.StatusUnauthorized, disclosedError: `{"type":"nonce","status":401}`}
+	srv := f.server(t)
+	_, err := New(srv.URL, srv.URL, "secret").Identify(context.Background(), "s1")
+	if !errors.Is(err, authorization.ErrAwaitingReturn) || errors.Is(err, authorization.ErrMeansUnavailable) {
+		t.Fatalf("Identify of a session that awaits its return = %v, want ErrAwaitingReturn", err)
+	}
+	// Another 401, such as a refused API key, is still an unavailable verifier.
+	f.disclosedError = `{"type":"unauthorized","status":401}`
+	if _, err := New(srv.URL, srv.URL, "secret").Identify(context.Background(), "s1"); !errors.Is(err, authorization.ErrMeansUnavailable) {
+		t.Fatalf("Identify with the API key refused = %v, want unavailable", err)
+	}
+}
+
 // X5 after the session is done: a verifier that cannot be reached, fails or
 // refuses the API key is unavailable; an unknown session does not identify
 // the user.

@@ -104,6 +104,12 @@ const (
 // stays, so the user can choose another means.
 var ErrMeansUnavailable = errors.New("the identification means is unavailable")
 
+// ErrAwaitingReturn: the session ended on the user's device, which returns
+// the browser with a nonce, and only that return identifies the user (HAIP
+// 1.0 section 5.1). Following the session without the nonce does not log
+// in; the transaction stays for the return.
+var ErrAwaitingReturn = errors.New("the wallet returns the browser to complete the login")
+
 // Transaction is a valid authorization request waiting for the user. Binding
 // is a secret the browser keeps (a cookie); the decision must present it.
 type Transaction struct {
@@ -311,7 +317,7 @@ func (s *Service) LogIn(ctx context.Context, l Login) (AuthorizationResponse, er
 		credential = p.session
 	}
 	identity, err := identifier.Identify(ctx, credential)
-	if errors.Is(err, ErrMeansUnavailable) {
+	if errors.Is(err, ErrMeansUnavailable) || errors.Is(err, ErrAwaitingReturn) {
 		return AuthorizationResponse{}, err // the transaction stays
 	}
 	if err != nil {
