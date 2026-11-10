@@ -151,6 +151,16 @@ func runWalletRegistrationCommand(ctx context.Context, arguments []string, stdou
 		}
 		_, _ = fmt.Fprintln(stdout, "wallet registration provisioned for the reference QTSP; this command is for local development only")
 		return true, nil
+	case "provision-asi-eudi-wallet-verifier":
+		options, err := parseASIVerifierOptions(arguments[0], arguments[1:], stderr)
+		if err != nil {
+			return true, err
+		}
+		if err := provisionASIWalletVerifier(options); err != nil {
+			return true, fmt.Errorf("provision ASI EUDI wallet verifier: %w", err)
+		}
+		_, _ = fmt.Fprintf(stdout, "-> eudi-wallet-verifier configuration in %s\n", filepath.Join(options.secretsDir, asiVerifierDir))
+		return true, nil
 	case "provision-test-pid":
 		options, dirs, err := parseTestPIDOptions(arguments[0], arguments[1:], stderr)
 		if err != nil {
@@ -335,56 +345,14 @@ func provisionWalletRegistration(options walletRegistrationOptions, source walle
 // files. A party that asksPID also gets a WRPRC as a relying party that
 // asks for the BSN from the PID.
 func registerWallet(options walletRegistrationOptions, source walletRegistrationSource, entitlement string, asksPID bool) error {
-	trustURL, err := parseDevelopmentRootURL(options.trustPublicURL, false)
-	if err != nil {
-		return fmt.Errorf("trust public URL: %w", err)
-	}
-	trustBase := strings.TrimSuffix(trustURL.String(), "/")
-	now := options.now().UTC()
-	caDir := filepath.Join(options.secretsDir, "development-ca")
-	reader, err := loadRole(caDir, "reader", "pre-provisioned development reader CA")
+	r, err := beginRegistration(options, source)
 	if err != nil {
 		return err
 	}
-	registrar, err := loadRole(caDir, registrarRootRole, "development registrar root (make create-development-registrar-root)")
-	if err != nil {
+	if err := ensureRequestEncryptionKey(options, r.dir); err != nil {
 		return err
 	}
-	sourceDir := filepath.Join(options.secretsDir, source.CertificateSet)
-
-	state, err := readWalletRegistrationState(caDir)
-	if err != nil {
-		return err
-	}
-	// Every WRPAC and WRPRC carries the trust URL, so a new one has to reach
-	// all sources together.
-	if state.TrustPublicURL != "" && state.TrustPublicURL != trustBase {
-		return fmt.Errorf("the trust URL was %s; to move to %s, remove %s and provision every source again",
-			state.TrustPublicURL, trustBase, filepath.Join(caDir, walletRegistrationState))
-	}
-	state.TrustPublicURL = trustBase
-	kvk, err := state.kvkNumber(source.SourceID, options.kvkNumber)
-	if err != nil {
-		return err
-	}
-
-	orgID := "NTRNL-" + kvk
-	wrpac, err := ensureCertificate(options, sourceDir, "wrpac", reader, wrpacTemplate(source.Name, orgID, trustBase+"/"+wrpacCRLName, now))
-	if err != nil {
-		return err
-	}
-	if err := ensureRequestEncryptionKey(options, sourceDir); err != nil {
-		return err
-	}
-	signer, err := ensureCertificate(options, caDir, "wrprc-signer", registrar, registrarLeafTemplate(false, now))
-	if err != nil {
-		return err
-	}
-	status, err := ensureCertificate(options, caDir, "wrprc-status", registrar, registrarLeafTemplate(true, now))
-	if err != nil {
-		return err
-	}
-	idx, err := state.statusIndex(source.SourceID)
+	idx, err := r.state.statusIndex(source.SourceID)
 	if err != nil {
 		return err
 	}
@@ -392,32 +360,88 @@ func registerWallet(options walletRegistrationOptions, source walletRegistration
 	if asksPID {
 		// The verifier role has its own status entry: it can be revoked on
 		// its own.
-		if verifierIdx, err = state.statusIndex(source.SourceID + "/verifier"); err != nil {
+		if verifierIdx, err = r.state.statusIndex(source.SourceID + "/verifier"); err != nil {
 			return err
 		}
 	}
-	if err := writeWalletRegistrationState(caDir, state); err != nil {
+	if err := writeWalletRegistrationState(r.caDir, r.state); err != nil {
 		return err
 	}
-	// The registration lasts as long as the certificates it rests on.
-	expires := earliest(now.AddDate(1, 0, -1), wrpac.chain[0].NotAfter, signer.chain[0].NotAfter)
-	rc, err := signRegistrationCertificate(signer, registrationPayload(source, entitlement, orgID, trustBase, idx, now, expires), now)
+	rc, err := signRegistrationCertificate(r.signer, registrationPayload(source, entitlement, r.orgID, r.trustBase, idx, r.now, r.expires), r.now)
 	if err != nil {
 		return err
 	}
-	if err := writeFileAtomically(sourceDir, "wrprc.jwt", []byte(rc), 0o644); err != nil {
+	if err := writeFileAtomically(r.dir, "wrprc.jwt", []byte(rc), 0o644); err != nil {
 		return err
 	}
 	if asksPID {
-		vrc, err := signRegistrationCertificate(signer, verifierRegistrationPayload(source, orgID, trustBase, verifierIdx, now, expires), now)
+		payload := verifierRegistrationPayload(source, r.orgID, r.trustBase, verifierIdx, r.now, r.expires, []string{"bsn"}, sourceVerifierPurpose(source.Name))
+		vrc, err := signRegistrationCertificate(r.signer, payload, r.now)
 		if err != nil {
 			return err
 		}
-		if err := writeFileAtomically(sourceDir, verifierRegistrationFile, []byte(vrc), 0o644); err != nil {
+		if err := writeFileAtomically(r.dir, verifierRegistrationFile, []byte(vrc), 0o644); err != nil {
 			return err
 		}
 	}
-	return publishTrust(options, reader, status, trustBase, now)
+	return publishTrust(options, r.reader, r.status, r.trustBase, r.now)
+}
+
+// registration is what every wallet registration rests on: the party's
+// WRPAC in its directory, the registrar's WRPRC and status list signers,
+// and the state of earlier runs, with the party's KvK number recorded.
+type registration struct {
+	trustBase, orgID, caDir, dir string
+	now, expires                 time.Time
+	reader, signer, status       issuedCertificate
+	wrpac                        issuedCertificate
+	state                        walletRegistrationRecord
+}
+
+func beginRegistration(options walletRegistrationOptions, source walletRegistrationSource) (registration, error) {
+	trustURL, err := parseDevelopmentRootURL(options.trustPublicURL, false)
+	if err != nil {
+		return registration{}, fmt.Errorf("trust public URL: %w", err)
+	}
+	r := registration{trustBase: strings.TrimSuffix(trustURL.String(), "/"), now: options.now().UTC()}
+	r.caDir = filepath.Join(options.secretsDir, "development-ca")
+	if r.reader, err = loadRole(r.caDir, "reader", "pre-provisioned development reader CA"); err != nil {
+		return registration{}, err
+	}
+	registrar, err := loadRole(r.caDir, registrarRootRole, "development registrar root (make create-development-registrar-root)")
+	if err != nil {
+		return registration{}, err
+	}
+	r.dir = filepath.Join(options.secretsDir, source.CertificateSet)
+
+	if r.state, err = readWalletRegistrationState(r.caDir); err != nil {
+		return registration{}, err
+	}
+	// Every WRPAC and WRPRC carries the trust URL, so a new one has to reach
+	// all sources together.
+	if r.state.TrustPublicURL != "" && r.state.TrustPublicURL != r.trustBase {
+		return registration{}, fmt.Errorf("the trust URL was %s; to move to %s, remove %s and provision every source again",
+			r.state.TrustPublicURL, r.trustBase, filepath.Join(r.caDir, walletRegistrationState))
+	}
+	r.state.TrustPublicURL = r.trustBase
+	kvk, err := r.state.kvkNumber(source.SourceID, options.kvkNumber)
+	if err != nil {
+		return registration{}, err
+	}
+
+	r.orgID = "NTRNL-" + kvk
+	if r.wrpac, err = ensureCertificate(options, r.dir, "wrpac", r.reader, wrpacTemplate(source.Name, r.orgID, r.trustBase+"/"+wrpacCRLName, r.now)); err != nil {
+		return registration{}, err
+	}
+	if r.signer, err = ensureCertificate(options, r.caDir, "wrprc-signer", registrar, registrarLeafTemplate(false, r.now)); err != nil {
+		return registration{}, err
+	}
+	if r.status, err = ensureCertificate(options, r.caDir, "wrprc-status", registrar, registrarLeafTemplate(true, r.now)); err != nil {
+		return registration{}, err
+	}
+	// The registration lasts as long as the certificates it rests on.
+	r.expires = earliest(r.now.AddDate(1, 0, -1), r.wrpac.chain[0].NotAfter, r.signer.chain[0].NotAfter)
+	return r, nil
 }
 
 // issuedCertificate is a key with its certificate, leaf first, without the
@@ -673,23 +697,33 @@ func registrationPayload(source walletRegistrationSource, entitlement, orgID, tr
 	}
 }
 
-// verifierRegistrationPayload is the WRPRC of a source as a relying party
-// (entitlement Service_Provider) that asks for the BSN from the PID, with
-// the purpose the wallet shows the user.
-func verifierRegistrationPayload(source walletRegistrationSource, orgID, trustBase string, idx int, now, expires time.Time) map[string]any {
+// verifierRegistrationPayload is the WRPRC of a party as a relying party
+// (entitlement Service_Provider) that asks for claims of the PID, with the
+// purpose the wallet shows the user.
+func verifierRegistrationPayload(source walletRegistrationSource, orgID, trustBase string, idx int, now, expires time.Time, claims []string, purpose []map[string]string) map[string]any {
 	payload := registrationPayload(source, wrprcServiceProviderEntitlement, orgID, trustBase, idx, now, expires)
 	delete(payload, "provides_attestations")
 	payload["id"] = "gbo-" + source.SourceID + "-verifier"
+	paths := make([]map[string]any, len(claims))
+	for i, c := range claims {
+		paths[i] = map[string]any{"path": []string{c}}
+	}
 	// NL Wallet v0.6 names the claims of a credential "claim".
 	payload["credentials"] = []map[string]any{{
 		"format": "dc+sd-jwt", "meta": map[string]any{"vct_values": []string{nlPIDType}},
-		"claim": []map[string]any{{"path": []string{"bsn"}}},
+		"claim": paths,
 	}}
-	payload["purpose"] = []map[string]string{
-		{"lang": "nl", "value": "Uw BSN uit uw PID vaststellen, zodat " + source.Name + " uw gegevens kan ophalen voor de attestatie die u aanvraagt."},
-		{"lang": "en", "value": "Establishing your BSN from your PID, so that " + source.Name + " can retrieve your data for the attestation you request."},
-	}
+	payload["purpose"] = purpose
 	return payload
+}
+
+// sourceVerifierPurpose is the purpose of a source that asks for the BSN
+// from the PID for disclosure-based issuance.
+func sourceVerifierPurpose(name string) []map[string]string {
+	return []map[string]string{
+		{"lang": "nl", "value": "Uw BSN uit uw PID vaststellen, zodat " + name + " uw gegevens kan ophalen voor de attestatie die u aanvraagt."},
+		{"lang": "en", "value": "Establishing your BSN from your PID, so that " + name + " can retrieve your data for the attestation you request."},
+	}
 }
 
 // registrationStatus carries the status entry in two forms at once. NL

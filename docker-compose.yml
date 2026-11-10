@@ -1202,9 +1202,15 @@ services:
       - AZSP_WALLET_VERIFIER_URL=http://asi-wallet-verifier:8002
       - AZSP_WALLET_VERIFIER_STATUS_URL=http://asi-wallet-verifier:8001
       - AZSP_WALLET_VERIFIER_API_KEY_FILE=/wallet-verifier/api-key
+      # The EUDI wallets' verifier (eudi-wallet-verifier, #639), the same
+      # way; make provision-asi-eudi-wallet-verifier writes its API key.
+      - AZSP_EUDI_WALLET_VERIFIER_URL=http://eudi-wallet-verifier:8002
+      - AZSP_EUDI_WALLET_VERIFIER_STATUS_URL=http://eudi-wallet-verifier:8001
+      - AZSP_EUDI_WALLET_VERIFIER_API_KEY_FILE=/eudi-wallet-verifier/api-key
     volumes:
       - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/development-ca/reader-ca-cert.pem:/trust/reader-ca-cert.pem:ro
       - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/asi-authorization-server-wallet:/wallet-verifier:ro
+      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/asi-authorization-server-eudi-wallet:/eudi-wallet-verifier:ro
     networks:
       - backend
       # The own credential issuer reaches it here.
@@ -1231,6 +1237,28 @@ services:
       - "${GBO_PORT_ASI_WALLET_VERIFIER:-9428}:8001"
     volumes:
       - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/asi-wallet-verifier/verification_server.toml:/verification_server.toml:ro
+    networks:
+      - backend
+
+  # The EUDI wallets' verifier of the ASI authorization server (#639): the
+  # verifier of oid4vc-kit behind the part of verification_server's API the
+  # authorization server uses. The wallet reaches its public port (8001) at
+  # ASI_EUDI_WALLET_VERIFIER_PUBLIC_URL, which must be HTTPS for a real
+  # wallet (a tunnel); the authorization server uses the internal port
+  # (8002) with the API key. make provision-asi-eudi-wallet-verifier writes
+  # its configuration: a WRPAC under the development reader CA and a WRPRC
+  # for the PID claims of the login.
+  eudi-wallet-verifier:
+    build:
+      context: .
+      dockerfile: services/eudi-wallet-verifier/Dockerfile
+    profiles: [asi]
+    ports:
+      - "${GBO_PORT_ASI_EUDI_WALLET_VERIFIER:-9432}:8001"
+    environment:
+      - EUDI_WALLET_VERIFIER_CONFIG=/config/config.json
+    volumes:
+      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/asi-eudi-wallet-verifier:/config:ro
     networks:
       - backend
 
