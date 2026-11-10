@@ -30,8 +30,12 @@ const PIDType = "urn:eudi:pid:nl:1"
 // NL PID has, not the BSN, which a QTSP may not process.
 var Claims = []string{"family_name", "given_name", "birthdate", "nationalities"}
 
-// Client is the adapter of the login.Wallet port.
+// Client is the adapter of the login.Wallet port, for a verifier with the
+// API of nl-wallet's verification_server: the NL Wallet's, or
+// eudi-wallet-verifier for the EUDI wallets (#639).
 type Client struct {
+	// Means names the wallet in the identity.
+	Means string
 	// Internal is the verifier's internal API (sessions, disclosed
 	// attributes); Public its wallet API, where the session status is.
 	Internal, Public string
@@ -41,8 +45,16 @@ type Client struct {
 
 // New returns a client for the verifier at internal and public.
 func New(internal, public, apiKey string) *Client {
-	return &Client{Internal: strings.TrimRight(internal, "/"), Public: strings.TrimRight(public, "/"), APIKey: apiKey,
+	return &Client{Means: login.MeansWallet, Internal: strings.TrimRight(internal, "/"), Public: strings.TrimRight(public, "/"), APIKey: apiKey,
 		HTTP: &http.Client{Timeout: 10 * time.Second}}
+}
+
+// NewEUDI returns a client for eudi-wallet-verifier at internal and public:
+// the same API and usecase, with the EUDI wallets as means.
+func NewEUDI(internal, public, apiKey string) *Client {
+	c := New(internal, public, apiKey)
+	c.Means = login.MeansEUDIWallet
+	return c
 }
 
 // query asks the wallet for Claims of PIDType.
@@ -123,7 +135,7 @@ func (c *Client) Identify(ctx context.Context, session string) (login.Identity, 
 				return login.Identity{}, errors.New("the PID lacks a requested attribute")
 			}
 			return login.Identity{FamilyName: pid.FamilyName, GivenName: pid.GivenName, Birthdate: pid.Birthdate,
-				Nationalities: pid.Nationalities, Means: login.MeansWallet}, nil
+				Nationalities: pid.Nationalities, Means: c.Means}, nil
 		}
 	}
 	return login.Identity{}, fmt.Errorf("no disclosure of %s", PIDType)

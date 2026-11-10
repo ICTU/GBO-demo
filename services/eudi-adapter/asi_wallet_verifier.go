@@ -46,6 +46,25 @@ const (
 // and the mandatory PID attributes the NL PID has, as for the NL Wallet.
 var asiLoginClaims = []string{"bsn", "family_name", "given_name", "birthdate", "nationalities"}
 
+// qtspLoginUsecase is the reference QTSP's login through the same verifier
+// (a demo shortcut, as with the NL Wallet's verifier): with the QTSP's own
+// WRPAC, which the iOS test build already pins, and a WRPRC of its own.
+const (
+	qtspLoginUsecase = "qtsp-login"
+	qtspLoginDir     = "qtsp-login"
+)
+
+// qtspLoginClaims are the PID claims the QTSP asks: not the BSN, which a
+// QTSP may not process.
+var qtspLoginClaims = []string{"family_name", "given_name", "birthdate", "nationalities"}
+
+// qtspLoginPurpose is the purpose of the QTSP's NL Wallet login, also for
+// the EUDI wallets (decided 2026-11-10).
+var qtspLoginPurpose = []map[string]string{
+	{"lang": "nl", "value": "Inloggen bij de vertrouwensdienst om een verklaring aan te vragen"},
+	{"lang": "en", "value": "Log in at the trust service provider to request an attestation"},
+}
+
 // asiVerifierPurpose is the purpose the wallet shows (decided 2026-11-09).
 var asiVerifierPurpose = []map[string]string{
 	{"lang": "nl", "value": "Uw identiteit vaststellen, zodat u toestemming kunt geven voor het opvragen van uw gegevens bij de bron."},
@@ -128,15 +147,25 @@ func provisionASIWalletVerifier(options asiVerifierOptions) error {
 	if as.Scheme == "https" {
 		returnURL = "same_device"
 	}
+	usecases := map[string]any{asiVerifierUsecase: map[string]any{
+		"key_file": "wrpac-key.pem", "chain_file": "wrpac-chain.pem", "registration_certificate_file": verifierRegistrationFile,
+		"pid_type": nlPIDType, "claims": asiLoginClaims, "return_url": returnURL,
+	}}
+	if registered, err := provisionQTSPLogin(options, r.dir); err != nil {
+		return err
+	} else if registered {
+		usecases[qtspLoginUsecase] = map[string]any{
+			"key_file": qtspLoginDir + "/wrpac-key.pem", "chain_file": qtspLoginDir + "/wrpac-chain.pem",
+			"registration_certificate_file": qtspLoginDir + "/" + verifierRegistrationFile,
+			"pid_type":                      nlPIDType, "claims": qtspLoginClaims, "return_url": "neither",
+		}
+	}
 	config := map[string]any{
 		"public_url":              strings.TrimRight(options.publicURL, "/"),
 		"api_key_file":            asiVerifierAPIKey,
 		"pid_anchors":             anchors,
 		"pid_trusted_authorities": akis,
-		"usecases": map[string]any{asiVerifierUsecase: map[string]any{
-			"key_file": "wrpac-key.pem", "chain_file": "wrpac-chain.pem", "registration_certificate_file": verifierRegistrationFile,
-			"pid_type": nlPIDType, "claims": asiLoginClaims, "return_url": returnURL,
-		}},
+		"usecases":                usecases,
 	}
 	raw, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
@@ -221,4 +250,55 @@ func writeASIVerifierAPIKey(options asiVerifierOptions) error {
 		}
 	}
 	return nil
+}
+
+// provisionQTSPLogin gives the reference QTSP's login a usecase of the
+// verifier when the QTSP is registered (make
+// provision-qtsp-wallet-registration): its WRPAC, kept as it is, copied
+// into the verifier's directory, and a WRPRC as Service_Provider for the
+// claims of its login, as a private party. The WRPRC stays out of the
+// QTSP's own directory, which the issuer's materializer reads.
+func provisionQTSPLogin(options asiVerifierOptions, verifierDir string) (bool, error) {
+	if !fileExists(filepath.Join(options.secretsDir, qtspCertificateSetID, "wrpac-chain.pem")) {
+		return false, nil
+	}
+	qtsp := options.walletRegistrationOptions
+	// The QTSP keeps the KvK number it was registered with.
+	qtsp.kvkNumber = ""
+	source := walletRegistrationSource{SourceID: qtspCertificateSetID, Name: qtspName, CertificateSet: qtspCertificateSetID}
+	r, err := beginRegistration(qtsp, source)
+	if err != nil {
+		return false, fmt.Errorf("reference QTSP: %w", err)
+	}
+	idx, err := r.state.statusIndex(qtspCertificateSetID + "/verifier")
+	if err != nil {
+		return false, err
+	}
+	if err := writeWalletRegistrationState(r.caDir, r.state); err != nil {
+		return false, err
+	}
+	payload := verifierRegistrationPayload(source, r.orgID, r.trustBase, idx, r.now, r.expires, qtspLoginClaims, qtspLoginPurpose)
+	payload["public_body"] = false
+	payload["srv_description"] = []any{
+		map[string]string{"lang": "nl", "value": "Inloggen bij de vertrouwensdienst om een verklaring aan te vragen"},
+		map[string]string{"lang": "en", "value": "Logging in at the trust service provider to request an attestation"},
+	}
+	vrc, err := signRegistrationCertificate(r.signer, payload, r.now)
+	if err != nil {
+		return false, err
+	}
+	dir := filepath.Join(verifierDir, qtspLoginDir)
+	if err := ensurePrivateDirectory(dir); err != nil {
+		return false, err
+	}
+	for _, name := range []string{"wrpac-key.pem", "wrpac-chain.pem"} {
+		body, err := os.ReadFile(filepath.Join(r.dir, name))
+		if err != nil {
+			return false, err
+		}
+		if err := writeFileAtomically(dir, name, body, 0o600); err != nil {
+			return false, err
+		}
+	}
+	return true, writeFileAtomically(dir, verifierRegistrationFile, []byte(vrc), 0o644)
 }

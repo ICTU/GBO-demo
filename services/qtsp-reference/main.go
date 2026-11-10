@@ -87,6 +87,12 @@ func serve() error {
 	if err != nil {
 		return err
 	}
+	var opts []web.Option
+	if eudi, err := eudiWalletLogin(); err != nil {
+		return err
+	} else if eudi != nil {
+		opts = append(opts, web.WithEUDIWallet(eudi))
+	}
 	store := issuance.NewStore(time.Now)
 	link, err := walletIssuanceLink(os.Getenv("EUDI_PUBLIC_URL"), env("EUDI_UL_BASE", "https://app.preproductie.wallet.edi.bzk.nl/deeplink/disclosure_based_issuance"))
 	if err != nil {
@@ -100,7 +106,7 @@ func serve() error {
 	if err != nil {
 		return err
 	}
-	handler := web.NewHandlerWithIssuance(client, web.DemoAttributes, env("QTSP_PUBLIC_URL", "http://localhost:4023"), wallet, store, link, issuer)
+	handler := web.NewHandlerWithIssuance(client, web.DemoAttributes, env("QTSP_PUBLIC_URL", "http://localhost:4023"), wallet, store, link, issuer, opts...)
 	srv := &http.Server{Addr: env("QTSP_ADDR", ":4023"), Handler: handler, ReadHeaderTimeout: readHeaderTimeout}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -423,4 +429,27 @@ func walletLogin() (loginport.Wallet, error) {
 	}
 	status := env("QTSP_WALLET_VERIFIER_STATUS_URL", internal)
 	return walletlogin.New(internal, status, strings.TrimSpace(string(key))), nil
+}
+
+// eudiWalletLogin is an EUDI wallet as the citizen's login means (#639),
+// when eudi-wallet-verifier is configured: QTSP_EUDI_WALLET_VERIFIER_URL,
+// QTSP_EUDI_WALLET_VERIFIER_STATUS_URL and the API key in
+// QTSP_EUDI_WALLET_VERIFIER_API_KEY_FILE, as for the NL Wallet. Without the
+// key file the EU-wallet is not offered.
+func eudiWalletLogin() (loginport.Wallet, error) {
+	internal := os.Getenv("QTSP_EUDI_WALLET_VERIFIER_URL")
+	if internal == "" {
+		return nil, nil
+	}
+	keyFile := env("QTSP_EUDI_WALLET_VERIFIER_API_KEY_FILE", "/eudi-wallet-verifier/api-key")
+	key, err := os.ReadFile(keyFile)
+	if errors.Is(err, os.ErrNotExist) {
+		slog.Warn("EU-wallet verifier not configured: no API key; logging in with the EU-wallet is not offered", "file", keyFile)
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	status := env("QTSP_EUDI_WALLET_VERIFIER_STATUS_URL", internal)
+	return walletlogin.NewEUDI(internal, status, strings.TrimSpace(string(key))), nil
 }

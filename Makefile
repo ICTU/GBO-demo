@@ -320,6 +320,9 @@ provision-asi-wallet-verifier: require-development-cas
 # entitlement for the PID claims of its login, fictional KvK number
 # 99991400), the PID issuers it trusts (the NL PID issuer CAs and the test
 # PID root when provisioned), and the API key the authorization server uses.
+# When the reference QTSP is registered (provision-qtsp-wallet-registration),
+# its login gets usecase qtsp-login with the QTSP's own WRPAC and a WRPRC for
+# the four claims of its login; it shares the API key, a demo shortcut.
 # Needs the registrar root and EUDI_TRUST_PUBLIC_URL, as
 # provision-wallet-registration does. Run again when
 # ASI_EUDI_WALLET_VERIFIER_PUBLIC_URL or ASI_AUTHORIZATION_SERVER_PUBLIC_URL

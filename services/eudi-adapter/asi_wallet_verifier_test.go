@@ -113,3 +113,63 @@ func TestASIWalletVerifierLocalHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// QT8 of #639: with the reference QTSP registered, the verifier gets usecase
+// qtsp-login with exactly the QTSP's WRPAC (the leaf the iOS build pins), a
+// WRPRC as Service_Provider and private party for the four claims of its
+// login, and no same-device return; a second run keeps the QTSP's WRPAC.
+// Without the QTSP's registration there is no such usecase.
+func TestASIWalletVerifierQTSPLogin(t *testing.T) {
+	f, options := asiVerifierFixture(t, "https://as.example")
+	if err := provisionASIWalletVerifier(options); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(options.secretsDir, asiVerifierDir)
+	if strings.Contains(string(readFile(t, filepath.Join(dir, asiVerifierConfig))), qtspLoginUsecase) {
+		t.Fatal("qtsp-login without a registered QTSP")
+	}
+
+	provisionQTSPMaterial(t, f)
+	registerQTSP(t, f)
+	qtspChain := readFile(t, filepath.Join(options.secretsDir, qtspCertificateSetID, "wrpac-chain.pem"))
+	for range 2 {
+		if err := provisionASIWalletVerifier(options); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if string(readFile(t, filepath.Join(options.secretsDir, qtspCertificateSetID, "wrpac-chain.pem"))) != string(qtspChain) ||
+		string(readFile(t, filepath.Join(dir, qtspLoginDir, "wrpac-chain.pem"))) != string(qtspChain) {
+		t.Fatal("the QTSP's WRPAC was replaced, or the verifier has another one")
+	}
+	if fileExists(filepath.Join(options.secretsDir, qtspCertificateSetID, verifierRegistrationFile)) {
+		t.Error("the QTSP's own directory got a verifier WRPRC, which the materializer would read")
+	}
+	rc := jwtPayload(t, readFile(t, filepath.Join(dir, qtspLoginDir, verifierRegistrationFile)))
+	creds, _ := json.Marshal(rc["credentials"])
+	purpose, _ := json.Marshal(rc["purpose"])
+	if rc["sub"] != "NTRNL-"+qtspKvKNumber || rc["entitlements"].([]any)[0] != wrprcServiceProviderEntitlement || rc["public_body"] != false ||
+		strings.Contains(string(creds), "bsn") || !strings.Contains(string(creds), `{"path":["nationalities"]}`) ||
+		!strings.Contains(string(purpose), "Inloggen bij de vertrouwensdienst om een verklaring aan te vragen") {
+		t.Fatalf("QTSP verifier WRPRC %v", rc)
+	}
+	var config struct {
+		Usecases map[string]struct {
+			KeyFile   string   `json:"key_file"`
+			ChainFile string   `json:"chain_file"`
+			RCFile    string   `json:"registration_certificate_file"`
+			Claims    []string `json:"claims"`
+			ReturnURL string   `json:"return_url"`
+		} `json:"usecases"`
+	}
+	if err := json.Unmarshal(readFile(t, filepath.Join(dir, asiVerifierConfig)), &config); err != nil {
+		t.Fatal(err)
+	}
+	q, ok := config.Usecases[qtspLoginUsecase]
+	if !ok || q.ReturnURL != "neither" || !slices.Equal(q.Claims, qtspLoginClaims) ||
+		!fileExists(filepath.Join(dir, q.KeyFile)) || !fileExists(filepath.Join(dir, q.ChainFile)) || !fileExists(filepath.Join(dir, q.RCFile)) {
+		t.Fatalf("usecase qtsp-login %+v", q)
+	}
+	if config.Usecases[asiVerifierUsecase].ReturnURL != "same_device" {
+		t.Error("the authorization server's usecase changed")
+	}
+}

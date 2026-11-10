@@ -172,10 +172,10 @@ func TestWalletNotLoggedIn(t *testing.T) {
 		edit func(*fakeWallet)
 		want string
 	}{
-		"T3 declined or expired": {func(f *fakeWallet) { f.progress = login.Progress{State: login.Failed} }, msgWalletFailed},
+		"T3 declined or expired": {func(f *fakeWallet) { f.progress = login.Progress{State: login.Failed} }, "Niet ingelogd met de NL Wallet: geweigerd in de wallet, of de tijd is verstreken."},
 		"T5 unusable": {func(f *fakeWallet) {
 			f.progress, f.identifyErr = login.Progress{State: login.Done}, errors.New("the PID lacks a requested attribute")
-		}, msgWalletNotUsable},
+		}, "Niet ingelogd met de NL Wallet: de wallet gaf geen bruikbaar persoonsidentificatiebewijs."},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := newLoginEnv(t, &fakeWallet{})
@@ -213,7 +213,7 @@ func TestWalletUnavailable(t *testing.T) {
 				e.wallet.set(edit)
 				resp, page = e.do(t, c, http.MethodGet, "/login/wallet", nil)
 			}
-			if resp.StatusCode != http.StatusServiceUnavailable || !strings.Contains(page, msgWalletUnavailable) {
+			if resp.StatusCode != http.StatusServiceUnavailable || !strings.Contains(page, "De NL Wallet is nu niet beschikbaar. Log in met testgegevens (mock).") {
 				t.Fatalf("%d:\n%s", resp.StatusCode, page)
 			}
 			e.do(t, c, http.MethodPost, "/login/mock", mockForm())

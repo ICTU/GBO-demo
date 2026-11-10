@@ -89,9 +89,11 @@ type Handler struct {
 	secure bool
 	// publicURL is where the user reaches the QTSP: the base of start URLs.
 	publicURL string
-	// wallet is the NL Wallet as login means; nil when it is not
-	// configured, and then only the mock login is offered.
+	// wallet is the NL Wallet as login means, eudi an EUDI wallet (#639);
+	// each nil when it is not configured. Without either only the mock
+	// login is offered.
 	wallet   login.Wallet
+	eudi     login.Wallet
 	issuance *issuance.Store
 	// issuanceLink is the static cross-device universal link for the QTSP
 	// usecase. The issuance server creates the actual session when scanned.
@@ -118,10 +120,22 @@ func NewHandler(client *qtsp.Client, attributes []Attribute, publicURL string, w
 // pages. The store is shared with the internal HTTPS callback listener. link
 // is the NL Wallet's static link and issuer the own credential issuer;
 // either may be absent.
-func NewHandlerWithIssuance(client *qtsp.Client, attributes []Attribute, publicURL string, wallet login.Wallet, store *issuance.Store, link string, issuer *Issuer) http.Handler {
+func NewHandlerWithIssuance(client *qtsp.Client, attributes []Attribute, publicURL string, wallet login.Wallet, store *issuance.Store, link string, issuer *Issuer, opts ...Option) http.Handler {
 	handler := newHandler(client, attributes, publicURL, wallet)
 	handler.issuance, handler.issuanceLink, handler.issuer = store, link, issuer
+	for _, o := range opts {
+		o(handler)
+	}
 	return handler.routes()
+}
+
+// Option sets an optional part of the web side.
+type Option func(*Handler)
+
+// WithEUDIWallet offers an EUDI wallet as login means next to the NL Wallet
+// (#639).
+func WithEUDIWallet(w login.Wallet) Option {
+	return func(h *Handler) { h.eudi = w }
 }
 
 func newHandler(client *qtsp.Client, attributes []Attribute, publicURL string, wallet login.Wallet) *Handler {
@@ -141,8 +155,10 @@ func (h *Handler) routes() http.Handler {
 	mux.HandleFunc("GET /api/requests/{id}", h.getRequest)
 	mux.HandleFunc("GET /requests/{id}/start", h.startRequest)
 	mux.HandleFunc("POST /login/mock", h.mockLogin)
-	mux.HandleFunc("POST /login/wallet", h.walletStart)
-	mux.HandleFunc("GET /login/wallet", h.walletPage)
+	for _, wm := range wallets {
+		mux.HandleFunc("POST "+wm.path, h.walletStart(wm))
+		mux.HandleFunc("GET "+wm.path, h.walletPage(wm))
+	}
 	mux.HandleFunc("POST /logout", h.logout)
 	mux.HandleFunc("POST /wallet-offer", h.walletOffer)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })

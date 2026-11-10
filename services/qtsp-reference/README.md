@@ -19,6 +19,7 @@ It discovers its way rather than being configured with URLs:
 The QTSP identifies the citizen itself before a request starts (eIDAS Article 24(1)). It asks the name, the date of birth and the nationalities, never the BSN: a QTSP may not process it. Two means:
 
 - **NL Wallet**: a disclosure of the NL PID (`urn:eudi:pid:nl:1`: `family_name`, `given_name`, `birthdate`, `nationalities`) through usecase `qtsp-login` of the wallet verifier (`services/asi-wallet-verifier`), with the QTSP's own reader certificate. `POST /login/wallet` starts the session and keeps it with this browser's login; `GET /login/wallet` shows the QR code and refreshes itself until the wallet has disclosed. Declined or expired, or a disclosure without all four attributes: the login page with the reason. The verifier unreachable: a 503 page, and the mock still works. Without a configured verifier the wallet button is disabled.
+- **EU-wallet** (#639): the same disclosure through usecase `qtsp-login` of `services/eudi-wallet-verifier`, with the QTSP's own access certificate (WRPAC) and a registration certificate (WRPRC) for these four claims. `POST /login/eudi-wallet` and `GET /login/eudi-wallet`, as for the NL Wallet; the identity names means `eudi-wallet`. Cross-device only. The button shows only when the verifier is configured. A session of one wallet does not log in through the other wallet's page.
 - **Test data (mock)**: prefilled with test person Frouke Jansen, or with the request's `login_hint`. `POST /login/mock` with the four attributes (date of birth as YYYY-MM-DD, nationalities as country codes separated by commas). It checks nothing else; it exists for demos and CI.
 
 A login is kept in memory behind an HttpOnly, SameSite=Lax cookie for 30 minutes and serves several requests; `POST /logout` ends it. The pages name the citizen ("Ingelogd als …"). The QTSP logs no name, date of birth or nationality.
@@ -93,6 +94,7 @@ Configuration:
 - `QTSP_REGISTRY_URI` (default the test QTSP's entry);
 - `QTSP_SEAL_TRUST_ANCHORS` (required: the roots of seal certificates);
 - `QTSP_WALLET_VERIFIER_URL` (the verifier's internal API), `QTSP_WALLET_VERIFIER_STATUS_URL` (its wallet API, for the session status) and `QTSP_WALLET_VERIFIER_API_KEY_FILE`; without the key file only the mock login is offered;
+- `QTSP_EUDI_WALLET_VERIFIER_URL`, `QTSP_EUDI_WALLET_VERIFIER_STATUS_URL` and `QTSP_EUDI_WALLET_VERIFIER_API_KEY_FILE` (default `/eudi-wallet-verifier/api-key`), the same for the EU-wallet;
 - `EUDI_PUBLIC_URL` and `EUDI_UL_BASE`, used to construct the static wallet issuance link; without it and without `QTSP_ISSUER_OFFERS_URL` no issuance action is shown;
 - `QTSP_ISSUER_OFFERS_URL` (the own credential issuer's internal offer endpoint, `http://eudi-credential-issuer:8081/offers` in Compose; empty, the default, turns the one-QR offer off), `QTSP_ISSUER_PROFILE` (default `wallet`) and `QTSP_ISSUER_CONFIGURATION` (default `qtsp-reference-attestation`);
 - `QTSP_ISSUANCE_ADDR` (default `:4443`), `QTSP_ISSUANCE_TLS_KEY_FILE`, `QTSP_ISSUANCE_TLS_CERT_FILE` and `QTSP_ISSUANCE_CALLBACK_PATH_FILE`, for the internal HTTPS callback;
@@ -109,7 +111,7 @@ If the authorization server refuses the registration (for example, no `QEAA_Prov
 | `internal/harness` | the test harness at the authorization server (request page and DigiD mock) |
 | `internal/cli` | the CLI: options, one run, the report |
 | `internal/login` | who the citizen is: the identity, the wallet port, the mock's checks |
-| `internal/walletlogin` | the NL Wallet as login means, through the wallet verifier |
+| `internal/walletlogin` | the NL Wallet and the EU-wallet as login means, through their verifiers |
 | `internal/issuance` | transport-independent short-lived identity binding and one-time statement creation |
 | `internal/issuancecallback` | the issuance-server HTTPS callback adapter |
 | `internal/web` | the web side, the login and the request API |

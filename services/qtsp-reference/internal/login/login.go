@@ -17,7 +17,9 @@ import (
 // The means, as the QTSP names them.
 const (
 	MeansWallet = "nl-wallet"
-	MeansMock   = "test-data-mock"
+	// MeansEUDIWallet is an EUDI wallet, through eudi-wallet-verifier (#639).
+	MeansEUDIWallet = "eudi-wallet"
+	MeansMock       = "test-data-mock"
 )
 
 // Identity is the citizen as a login means gives them.
@@ -56,8 +58,9 @@ type Progress struct {
 // with the mock instead.
 var ErrUnavailable = errors.New("the login means is unavailable")
 
-// Wallet is the NL Wallet as login means: a disclosure session on the
-// citizen's phone, its progress, and the identity it disclosed.
+// Wallet is a wallet as login means, the NL Wallet or an EUDI wallet: a
+// disclosure session on the citizen's phone, its progress, and the identity
+// it disclosed.
 type Wallet interface {
 	Start(ctx context.Context) (session string, err error)
 	Progress(ctx context.Context, session string) (Progress, error)
