@@ -62,11 +62,11 @@ on the local demo network, for example from `openssl rand -hex 16`; use a
 different value for each:
 
 ```dotenv
-FTV_POSTGRES_PASSWORD=<local-random-password>
-FTV_ADL_READER_PASSWORD=<local-random-reader-password>
-EUDI_POSTGRES_PASSWORD=<local-random-password>
-SOURCE_REGISTRY_PASSWORD=<local-random-writer-password>
-SOURCE_REGISTRY_READER_PASSWORD=<local-random-reader-password>
+FTV_POSTGRES_PASSWORD=
+FTV_ADL_READER_PASSWORD=
+EUDI_POSTGRES_PASSWORD=
+SOURCE_REGISTRY_PASSWORD=
+SOURCE_REGISTRY_READER_PASSWORD=
 ```
 
 Start the DvTP demo. It needs no public URLs, trust anchors or wallet:
