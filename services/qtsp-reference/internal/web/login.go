@@ -282,7 +282,7 @@ var loginTemplate = template.Must(template.New("login").Parse(head + `
 <input type="hidden" name="request" value="{{.Request}}">
 {{if .Wallet}}<button class="qp-btn block" type="submit">Inloggen met NL Wallet</button>{{else}}<button class="qp-btn block" type="submit" disabled>Inloggen met NL Wallet</button> <small class="sec">niet beschikbaar</small>{{end}}
 </form>
-{{if .EUDI}}<form method="post" action="/login/eudi-wallet">
+{{if .EUDI}}<form method="post" action="/login/eudi-wallet" class="qp-next">
 <input type="hidden" name="request" value="{{.Request}}">
 <button class="qp-btn block" type="submit">Inloggen met EU-wallet (test)</button>
 </form>
