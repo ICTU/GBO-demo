@@ -5,6 +5,7 @@ import RequestBuilder from './components/RequestBuilder'
 import ResultPanel, { type ResultData } from './components/ResultPanel'
 import ArchStrip from './components/ArchStrip'
 import EudiQrPanel from './components/EudiQrPanel'
+import TestPidPanel from './components/TestPidPanel'
 import FscTxlogPanel from './components/FscTxlogPanel'
 import LdvPanel from './components/LdvPanel'
 import { useScenarios } from './hooks/useScenarios'
@@ -638,6 +639,8 @@ export default function App() {
             )}
           </div>
         </div>
+
+        {tab === 'eudi-issuance' && <TestPidPanel />}
 
         <div className="panel">
           <div className="panel-h">

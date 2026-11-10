@@ -100,6 +100,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   BRP mock persons. Wallets without a real PID, such as the EUDI reference
   wallet, get one through a pre-authorized offer. A test fixture, not a PID
   Provider.
+- **Test PID block in the developer portal**: in the EUDI tab a tester picks
+  a BRP mock person and scans a QR code (or opens the same-device link) with
+  the EUDI reference wallet to get the test PID, without shell access to the
+  issuer's internal API. `dev-portal-backend` makes the offer on the
+  issuer's `eudi` profile and accepts only the mock persons. On by default in
+  the local Compose setup; an empty `TEST_PID_OFFERS_URL` removes the block
+  and its endpoints, since anyone who reaches the portal could otherwise get
+  a test PID. EU wallets only: the NL Wallet takes its PID from its own
+  pre-production issuer.
 - **`eudi-adapter` serves pre-authorized offers** (#614): besides a wallet's
   PID disclosure it accepts `{"subject": {"bsn": ...}}` from a credential
   issuer whose offer caller named the subject. It logs that as a separate

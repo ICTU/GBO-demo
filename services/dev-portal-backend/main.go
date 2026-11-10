@@ -31,6 +31,8 @@ import (
 	"time"
 
 	"errors"
+	"gbo-demo/dev-portal-backend/internal/testpid"
+	"gbo-demo/dev-portal-backend/internal/testpid/issuerhttp"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"net"
@@ -62,6 +64,14 @@ type config struct {
 	// QtspURL reaches the reference QTSP's request API (asi.go). Empty
 	// leaves the ASI tab without its form.
 	QtspURL string
+	// TestPIDOffersURL is the own credential issuer's internal offer
+	// endpoint (testpid.go). Empty, the default, leaves the portal without
+	// its test PID block: anyone who reaches the portal could otherwise get
+	// a test PID for any test person.
+	TestPIDOffersURL string
+	// TestPIDPersonsFile holds the BRP mock persons the issuer's
+	// test-pid-source maps to PIDs.
+	TestPIDPersonsFile string
 }
 
 const defaultDvtpConsumerPeerID = "99999999900000000300"
@@ -129,6 +139,8 @@ func loadConfig() config {
 		LdvReadToken:       os.Getenv("LDV_READ_TOKEN"),
 		ADLDatabaseURL:     os.Getenv("ADL_DATABASE_URL"),
 		QtspURL:            strings.TrimRight(os.Getenv("QTSP_URL"), "/"),
+		TestPIDOffersURL:   os.Getenv("TEST_PID_OFFERS_URL"),
+		TestPIDPersonsFile: getEnv("TEST_PID_PERSONS_FILE", "/test-pid-persons/personen.json"),
 	}
 }
 
@@ -1079,6 +1091,7 @@ func main() {
 		adl = store
 	}
 	mux := newMux(cfg, hub, adl)
+	registerTestPID(mux, newTestPIDService(cfg))
 
 	// BaseContext gives every request a context this process can cancel, which
 	// is how the long-lived SSE streams are told to wind up at shutdown.
@@ -1092,6 +1105,24 @@ func main() {
 	slog.Info("dev-portal-backend starting", "addr", srv.Addr, "var_dir", cfg.VarDir, "predefined_dir", cfg.PredefinedDir,
 		"dvtp_consumer_peer_id", cfg.DvtpConsumerPeerID)
 	serve(srv, endStreams)
+}
+
+// newTestPIDService is nil without TEST_PID_OFFERS_URL. With it, a persons
+// file that cannot be read stops the backend, as it stops test-pid-source.
+func newTestPIDService(cfg config) *testpid.Service {
+	if cfg.TestPIDOffersURL == "" {
+		return nil
+	}
+	data, err := os.ReadFile(cfg.TestPIDPersonsFile)
+	if err != nil {
+		fatal("test PID persons", err)
+	}
+	persons, err := testpid.ParsePersons(data)
+	if err != nil {
+		fatal("test PID persons", err)
+	}
+	slog.Info("test PID offers on", "issuer", cfg.TestPIDOffersURL, "persons", len(persons))
+	return testpid.New(persons, issuerhttp.New(cfg.TestPIDOffersURL, 10*time.Second))
 }
 
 // fatal logs and ends the process. main is the only place in this service
