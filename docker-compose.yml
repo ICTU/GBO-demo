@@ -1562,6 +1562,13 @@ services:
       # tab lays a request down; without make demo-asi the tab says the QTSP
       # is unreachable.
       - QTSP_URL=http://qtsp-reference:4023
+      # The test PID block: the backend asks the own credential issuer
+      # (profile credential-issuer) for an offer of the test PID for a BRP
+      # mock person. On by default here; set TEST_PID_OFFERS_URL= (empty) in
+      # .env to turn it off. Never on where others reach the portal: anyone
+      # who does gets a test PID for any test person.
+      - TEST_PID_OFFERS_URL=${TEST_PID_OFFERS_URL-http://eudi-credential-issuer:8081/offers}
+      - TEST_PID_PERSONS_FILE=/test-pid-persons/personen.json
       - FSC_TXLOG_BD_URL=https://bd-txlog-api:9443
       - FSC_TXLOG_BD_CERT=/certs/bd/internal-cert.pem
       - FSC_TXLOG_BD_KEY=/certs/bd/internal-cert-key.pem
@@ -1580,6 +1587,9 @@ services:
     volumes:
       - dev-portal-var:/var
       - ./services/graphql-server/mockdata:/citizens:ro
+      # The persons test-pid-source maps to PIDs. A directory, not the file:
+      # a single-file bind mount goes stale on git checkout.
+      - ./services/brp-graphql-server/mockdata:/test-pid-persons:ro
       - ./services/dev-portal-backend/organizations.json:/organizations.json:ro
       - ./policies:/policies:ro
       - ./services/dev-portal-backend/rules.json:/rules.json:ro
@@ -1593,6 +1603,8 @@ services:
       # Join fsc-infra_default so {edi,bd,hv}-txlog-api:9443 can be
       # reached directly over their internal DNS names.
       - fsc-infra
+      # The own credential issuer's internal offer API (test PID block).
+      - eudi
     depends_on:
       # /decisions reads the ADL and, for the engine detail, the console
       # decision log via Loki; cold-start without these dependencies causes
