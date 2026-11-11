@@ -321,3 +321,28 @@ func TestDeferredOfferWithTwoConfigurations(t *testing.T) {
 		}
 	}
 }
+
+// Review finding 7: a deferred credential is one source document. When the
+// source answers with more, the deferred request is refused, not cut short;
+// immediate issuance keeps issuing every document.
+func TestDeferredWithSeveralDocuments(t *testing.T) {
+	f := newFixture(t)
+	two := []map[string]any{f.sourceDocs[0], {}}
+	for k, v := range f.sourceDocs[0] {
+		two[1][k] = v
+	}
+	two[1]["id"] = "doc-2"
+	w, tok, _, cred := deferredStart(t, f)
+	f.setSource(http.StatusOK, two)
+	if status, body := w.deferred(tok.AccessToken, nil, map[string]any{"transaction_id": cred["transaction_id"]}); status != http.StatusBadRequest || body["error"] != "credential_request_denied" ||
+		!strings.Contains(body["error_description"].(string), "more than one document") {
+		t.Fatalf("deferred with two documents = %d %v, want credential_request_denied", status, body)
+	}
+	other := f.acfWallet()
+	status, body := other.tokenForCode(other.code(nil), nil, nil)
+	var now oid4vci.TokenResponse
+	remarshal(t, body, &now)
+	if status != http.StatusOK || len(now.AuthorizationDetails) != 1 || len(now.AuthorizationDetails[0].CredentialIdentifiers) != 2 {
+		t.Fatalf("immediate issuance with two documents = %d %v, want two credential identifiers", status, body)
+	}
+}

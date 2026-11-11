@@ -226,6 +226,11 @@ func (s *Service) Deferred(ctx context.Context, call DeferredCall) (CredentialRe
 		return CredentialResult{}, refuse(oid4vci.ErrCredentialRequestDenied, "the source has no data for this person")
 	case err != nil:
 		return CredentialResult{}, errors.Join(err, keep())
+	case len(fetched) > 1:
+		// A deferred credential is one document: its credential identifier
+		// was handed out before the source answered, so further documents
+		// have no identifier the wallet knows. Refused, not cut short.
+		return CredentialResult{}, refuse(oid4vci.ErrCredentialRequestDenied, "the source answered with more than one document; a deferred credential is one document")
 	}
 	if err := checkSourceDocument(p, c, fetched[0]); err != nil {
 		return CredentialResult{}, err

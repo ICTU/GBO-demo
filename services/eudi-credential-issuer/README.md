@@ -125,11 +125,11 @@ In the demo stack (`docker-compose.yml`) the flow is on: `ISSUER_LOGIN_SERVER` i
 
 When the source is unavailable just after the citizen logged in, the issuer defers the issuance (OpenID4VCI 1.0 section 9; #614 phase 4) instead of sending the wallet back with an error:
 
-1. The callback stores a pending session with the offer's configurations but no claims, and sends the wallet back with its code as usual. The BSN from the login is not stored in the session: it is sealed (AES-GCM, key derived with HKDF from the provider's request encryption key) in a record of its own that lasts 24 hours.
+1. The callback stores a pending session with the offer's configurations but no claims, and sends the wallet back with its code as usual. The BSN from the login is not stored in the session: it is sealed (AES-GCM, key derived with HKDF from the provider's request encryption key) in a record of its own per credential, each lasting 24 hours.
 2. The credential request for a pending credential answers `202 {"transaction_id", "interval": 5}`, once per credential; the transaction takes over the sealed BSN and its expiry, with the keys from the proofs.
-3. Each deferred credential request asks the bronpoort again, with `origin: login`, so `eudi-adapter` logs every attempt as `gbo-bsn-uit-inloggen`. Still unavailable: `202` with the same `transaction_id`. No data: `credential_request_denied`, and the transaction ends. Data: the credential, bound to the keys of step 2, and the session keeps its claims for a refresh.
+3. Each deferred credential request asks the bronpoort again, with `origin: login`, so `eudi-adapter` logs every attempt as `gbo-bsn-uit-inloggen`. Still unavailable: `202` with the same `transaction_id`. No data: `credential_request_denied`, and the transaction ends. More than one document for the configuration: `credential_request_denied` as well, because a deferred credential is one document. Data: the credential, bound to the keys of step 2, and the session keeps its claims for a refresh.
 
-After 24 hours the transaction and the BSN are gone and the id is `invalid_transaction_id`. The access token must be the session's and its DPoP key the token's. Only the login route defers: a pre-authorized or disclosure-based offer fetches the data when the offer is made, so the source is never asked after the code is out.
+The access token expires before the deferral does: a refresh while the source has not answered gives a new access token for the same session and its transactions, until the deferral ends (then `invalid_grant`). After 24 hours the transaction and the BSN are gone and the id is `invalid_transaction_id`. The access token must be the session's and its DPoP key the token's. Only the login route defers: a pre-authorized or disclosure-based offer fetches the data when the offer is made, so the source is never asked after the code is out.
 
 ## Bronpoort
 
