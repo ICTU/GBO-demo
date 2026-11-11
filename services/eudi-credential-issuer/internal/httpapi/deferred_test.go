@@ -216,3 +216,67 @@ func (w *wallet) postJWTTo(t *testing.T, path, accessToken, body string) (int, s
 	out, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, resp.Header.Get("Content-Type"), string(out)
 }
+
+// issueFor asks for the credential with identifier id.
+func (w *wallet) issueFor(t *testing.T, accessToken, id string) (int, map[string]any) {
+	t.Helper()
+	ka := w.f.eudiWallet.KeyAttestation(t, []*ecdsa.PrivateKey{testpki.NewKey(t)}, w.nonce(), time.Now().Add(time.Hour))
+	return w.credentialRequest(accessToken, w.dpopKey, oid4vci.CredentialRequest{
+		CredentialIdentifier: id, Proofs: &oid4vci.Proofs{Attestation: []string{ka}},
+	})
+}
+
+// Review finding 4: an offer with two configurations defers both
+// credentials, each with the citizen of the login.
+func TestDeferredOfferWithTwoConfigurations(t *testing.T) {
+	f := newFixtureWith(t, func(_ *fixture, cfg *issuance.Config) {
+		second := cfg.Configurations[0]
+		second.ID, second.Scope = "income-copy", "income-copy"
+		cfg.Configurations = append(cfg.Configurations, second)
+		cfg.DisclosureOffers = append(cfg.DisclosureOffers, issuance.DisclosureOffer{
+			Key: "both", Provider: "tax", ConfigurationIDs: []string{incomeConfig, "income-copy"}, Parameters: map[string]string{"jaar": "2025"},
+		})
+	})
+	f.setSource(http.StatusServiceUnavailable, nil)
+	w := f.acfWallet()
+	form := w.parForm()
+	form.Set("issuer_state", "both")
+	form.Del("scope")
+	status, body := w.par(form, nil)
+	if status != http.StatusCreated {
+		t.Fatalf("PAR = %d %v", status, body)
+	}
+	_, location, page := w.login(w.authorize(body["request_uri"].(string)))
+	u, err := url.Parse(location)
+	if err != nil || u.Query().Get("code") == "" {
+		t.Fatalf("callback %q %s", location, page)
+	}
+	status, body = w.tokenForCode(u.Query().Get("code"), nil, nil)
+	if status != http.StatusOK {
+		t.Fatalf("token = %d %v", status, body)
+	}
+	var tok oid4vci.TokenResponse
+	remarshal(t, body, &tok)
+	if len(tok.AuthorizationDetails) != 2 {
+		t.Fatalf("authorization_details = %v, want two configurations", tok.AuthorizationDetails)
+	}
+	var txIDs []string
+	for _, d := range tok.AuthorizationDetails {
+		status, cred := w.issueFor(t, tok.AccessToken, d.CredentialIdentifiers[0])
+		txID, _ := cred["transaction_id"].(string)
+		if status != http.StatusAccepted || txID == "" {
+			t.Fatalf("credential %s = %d %v, want 202 with a transaction_id", d.CredentialConfigurationID, status, cred)
+		}
+		txIDs = append(txIDs, txID)
+	}
+	if txIDs[0] == txIDs[1] {
+		t.Fatal("each credential needs its own transaction")
+	}
+	f.setSource(http.StatusOK, f.sourceDocs)
+	for _, txID := range txIDs {
+		if status, body := w.deferred(tok.AccessToken, nil, map[string]any{"transaction_id": txID}); status != http.StatusOK || body["credentials"] == nil {
+			t.Errorf("deferred %s = %d %v, want the credential", txID, status, body)
+		}
+	}
+}
+

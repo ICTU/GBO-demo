@@ -30,7 +30,7 @@ import (
 const DeferralInterval = 5 * time.Second
 
 const (
-	// pendingSubject holds the sealed BSN of a pending session until its
+	// pendingSubject holds the sealed BSN of a pending document until its
 	// credential request; pendingDeferral a transaction until it ends.
 	pendingSubject  = "subject"
 	pendingDeferral = "deferral"
@@ -51,7 +51,8 @@ type deferral struct {
 
 // createPendingSession stores a session for offer o whose source has not
 // answered: one document without claims per configuration, and the sealed
-// BSN apart. It returns the code.
+// BSN apart, once per document, so each credential request can start its own
+// deferral. It returns the code.
 func (s *Service) createPendingSession(ctx context.Context, t Target, p Profile, o DisclosureOffer, binding *CodeBinding, bsn string) (string, error) {
 	prov := s.providers[t.Provider]
 	now := s.now()
@@ -78,8 +79,10 @@ func (s *Service) createPendingSession(ctx context.Context, t Target, p Profile,
 	if err := s.sessions.CreateSession(ctx, sess); err != nil {
 		return "", err
 	}
-	if err := s.putPending(ctx, pendingSubject, sess.ID, sealed, now.Add(s.cfg.DeferralTTL)); err != nil {
-		return "", err
+	for _, d := range sess.Documents {
+		if err := s.putPending(ctx, pendingSubject, subjectID(sess.ID, d.CredentialID), sealed, now.Add(s.cfg.DeferralTTL)); err != nil {
+			return "", err
+		}
 	}
 	return code, nil
 }
@@ -94,7 +97,7 @@ func (s *Service) deferCredential(ctx context.Context, prov *provider, session S
 		return CredentialResult{}, refuse(oid4vci.ErrInvalidCredentialRequest, "this credential is deferred already")
 	}
 	var sealed string
-	subject, err := s.sessions.TakePending(ctx, pendingSubject, hash(session.ID), now)
+	subject, err := s.sessions.TakePending(ctx, pendingSubject, hash(subjectID(session.ID, doc.CredentialID)), now)
 	if errors.Is(err, ErrNotFound) {
 		return CredentialResult{}, refuse(oid4vci.ErrCredentialRequestDenied, "the deferral has expired")
 	}
@@ -122,6 +125,9 @@ func (s *Service) deferCredential(ctx context.Context, prov *provider, session S
 	}
 	return deferredResult(encrypter, txID)
 }
+
+// subjectID names the sealed BSN of one pending document.
+func subjectID(sessionID, credentialID string) string { return sessionID + "/" + credentialID }
 
 func deferredResult(encrypter jose.Encrypter, txID string) (CredentialResult, error) {
 	resp := oid4vci.CredentialResponse{TransactionID: txID, Interval: int64(DeferralInterval.Seconds())}
