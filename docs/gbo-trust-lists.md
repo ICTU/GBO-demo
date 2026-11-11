@@ -180,17 +180,14 @@ supplied LoTE signer root, NL PID classification and configurable endpoints.
 They carry no static credential, reader or registrar roots and no pinned
 access certificates.
 
-See [wallet source patches and build commands](../wallet-patches/README.md) for
-exact SDK revisions, the PubEAA mapping, signer checks, cache behavior and the
-additional iOS shared-metadata-cache fix. SDK alpha.4 supplies CA path validation
+The wallet test builds, and the patches they need on the EUDI reference wallet
+SDKs, are maintained outside this repository. They use CA path validation
 without the full EU end-certificate profiles or PKIX revocation fetching; this
-is an explicit demo shortcut. The default SDK anchor cache lasts one hour and
-has weaker expiry/rollback semantics than the internal Go adapter.
+is an explicit demo shortcut. Their anchor cache lasts one hour and has weaker
+expiry and rollback semantics than the internal Go adapter.
 
-The reproducible SDK preparation builds iOS ARM64 device and simulator artifacts
-and runs the patched Android cache tests. Both app verifier implementations
-pass signed positive and negative fixtures. Manual wallet acceptance tests are
-not complete, and the renewal timer is an example that is not enabled.
+Manual wallet acceptance tests are not complete, and the renewal timer is an
+example that is not enabled.
 
 No fixture signing key substitutes for the real NL pre-production public key;
 the official-HTTPS shortcut for the NL source stays explicit in the published

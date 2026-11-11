@@ -1,2 +1,0 @@
-# Patch context carries intentional leading spaces and upstream line endings.
-wallet-patches/*.patch -whitespace

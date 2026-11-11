@@ -129,8 +129,8 @@ enables mandatory JWT signature verification. Internal PID consumers verify
 our signed list against the independently provisioned LoTE root; the Go
 services refresh on use hourly, and the upstream NL verifier uses a verified
 provisioning snapshot plus restart.
-See the [trust-host runbook](trust-host/README.md) for host-only signing,
-publication and the review boundary before wallet changes.
+See the [trust-host runbook](trust-host/README.md) for host-only signing and
+publication.
 
 The own credential issuer (`services/eudi-credential-issuer`, not yet in the
 stack) also needs per source an access certificate (WRPAC) and a registration
