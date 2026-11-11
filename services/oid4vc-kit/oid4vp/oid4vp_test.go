@@ -219,6 +219,9 @@ func TestResponsePID(t *testing.T) {
 		}
 	}
 	f.mustRefuse(t, "no exp", "has no exp", f.respond(t, f.body(f.present(t, f.pidWithoutExp(t), "bsn"))))
+	if _, err := f.verify(f.respond(t, f.body(f.present(t, f.pidWithoutSdAlg(t), "bsn")))); err != nil {
+		t.Errorf("a PID without _sd_alg (SHA-256 by default): %v", err)
+	}
 
 	// Replace a character of the issuer's signature by another valid one.
 	tampered := []byte(f.present(t, f.pid(t, pidOptions{}), "bsn"))

@@ -132,3 +132,35 @@ func TestParseRefusesMalformedDigests(t *testing.T) {
 		}
 	}
 }
+
+// RFC 9901 section 4.1.1: without _sd_alg the digests are SHA-256; another
+// or a non-string value is refused.
+func TestParseSdAlg(t *testing.T) {
+	root := testpki.NewRoot(t, "issuer root")
+	issuer := root.Issue(t, testpki.Options{})
+	anchors := []x5c.Anchors{x5c.NewAnchors("issuers", root.Cert)}
+	raw, _ := json.Marshal([]any{"salt", "a", "v"})
+	d := base64.RawURLEncoding.EncodeToString(raw)
+	sign := func(alg any, set bool) string {
+		payload := map[string]any{"vct": "https://example.test/t", "_sd": []string{sdjwtvc.Digest(d)}}
+		if set {
+			payload["_sd_alg"] = alg
+		}
+		return testwallet.Sign(t, issuer.Key, sdjwtvc.Type, map[jose.HeaderKey]any{"x5c": x5c.Header(issuer.Chain)}, false, payload) + "~" + d + "~"
+	}
+	parsed, err := sdjwtvc.Parse(sign(nil, false), anchors, nil, time.Now())
+	if err != nil {
+		t.Fatalf("without _sd_alg: %v", err)
+	}
+	if parsed.Claims["a"] != "v" {
+		t.Errorf("without _sd_alg the disclosure is not in place: %v", parsed.Claims)
+	}
+	if _, ok := parsed.Claims["_sd_alg"]; ok {
+		t.Error("_sd_alg must not be among the claims")
+	}
+	for name, alg := range map[string]any{"sha-512": "sha-512", "a number": 123, "an empty string": ""} {
+		if _, err := sdjwtvc.Parse(sign(alg, true), anchors, nil, time.Now()); err == nil || !strings.Contains(err.Error(), "_sd_alg") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}

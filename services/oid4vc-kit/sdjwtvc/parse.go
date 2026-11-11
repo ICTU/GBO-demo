@@ -56,7 +56,8 @@ func Parse(combined string, anchors []x5c.Anchors, eku asn1.ObjectIdentifier, no
 	if err := tok.Claims(leaf.PublicKey, &payload); err != nil {
 		return Parsed{}, errors.New("sdjwtvc: signature does not verify")
 	}
-	if alg, _ := payload["_sd_alg"].(string); alg != "sha-256" {
+	// Without _sd_alg the digests are SHA-256 (RFC 9901 section 4.1.1).
+	if alg, set := payload["_sd_alg"]; set && alg != "sha-256" {
 		return Parsed{}, errors.New("sdjwtvc: _sd_alg must be sha-256")
 	}
 	delete(payload, "_sd_alg")

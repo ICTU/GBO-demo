@@ -212,3 +212,19 @@ func (f *fixture) pidWithoutExp(t *testing.T) string {
 		"status": map[string]any{"status_list": map[string]any{"idx": pidIndex, "uri": statusURI}},
 	}) + "~" + d + "~"
 }
+
+// pidWithoutSdAlg signs, by hand, a valid PID with a disclosable bsn and no
+// _sd_alg, which the issuing signer always writes.
+func (f *fixture) pidWithoutSdAlg(t *testing.T) string {
+	t.Helper()
+	raw, err := json.Marshal([]any{"salt", "bsn", "999991772"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := base64.RawURLEncoding.EncodeToString(raw)
+	return testwallet.Sign(t, f.issuer.Key, sdjwtvc.Type, map[jose.HeaderKey]any{"x5c": x5c.Header(f.issuer.Chain)}, false, map[string]any{
+		"_sd": []string{sdjwtvc.Digest(d)}, "vct": pidType, "iat": f.now.Unix(), "exp": f.now.Add(time.Hour).Unix(),
+		"cnf":    map[string]any{"jwk": jose.JSONWebKey{Key: &f.holder.PublicKey}},
+		"status": map[string]any{"status_list": map[string]any{"idx": pidIndex, "uri": statusURI}},
+	}) + "~" + d + "~"
+}
