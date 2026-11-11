@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh GBO simulation trust lists
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+# Set both values for this simulation deployment before installing.
+User=gbo-demo
+WorkingDirectory=/opt/gbo-demo
+ExecStart=/usr/bin/make publish-trust-lists

@@ -43,7 +43,9 @@ require (
 require (
 	gbo-demo/asi-mapping v0.0.0
 	gbo-demo/ldv-client v0.0.0
+	gbo-demo/oid4vc-kit v0.0.0
 	gbo-demo/source-registry v0.0.0
+	github.com/go-jose/go-jose/v4 v4.1.5
 )
 
 // The LDV client is a sibling module in this repository rather than a
@@ -54,6 +56,10 @@ replace gbo-demo/ldv-client => ../ldv-client
 // The asi capability is validated with the same sibling module the ASIP uses
 // to read it.
 replace gbo-demo/asi-mapping => ../asi-mapping
+
+// Status List Tokens for the wallet registration material are signed with the
+// same sibling module the credential issuer uses.
+replace gbo-demo/oid4vc-kit => ../oid4vc-kit
 
 // The Source Registry model and its Postgres store are a sibling module, so
 // the ASIP can read the active release with the same code.

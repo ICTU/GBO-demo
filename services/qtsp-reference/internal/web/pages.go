@@ -37,6 +37,7 @@ p{margin:0 0 14px}.lead{font-size:15.5px}.sec{color:var(--mu);font-size:13.5px}
 .qp-btn:hover{background:var(--pri-dd);border-color:var(--pri-dd);color:#fff}
 .qp-btn.sec{background:#fff;color:var(--pri-d)}.qp-btn.sec:hover{background:#EEF7F5;color:var(--pri-d)}
 .qp-btn.block{width:100%}
+.qp-next{margin-top:12px}
 .qp-btn:disabled{background:#E5E7EB;border-color:#D1D5DB;color:var(--mu);cursor:not-allowed}
 .qp-actions{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-top:20px}
 .qp-note{display:flex;gap:10px;border-radius:8px;padding:11px 14px;font-size:14px;line-height:1.5;margin:0 0 16px}
@@ -162,7 +163,20 @@ var resultPage = template.Must(template.New("result").Funcs(template.FuncMap{"ba
 <h2>Zegelcontrole</h2>
 <div class="qp-seal bad"><div><strong>Zegel ongeldig</strong>: het resultaat is niet geaccepteerd. {{.Seal.Error}}</div></div>
 </section>{{end}}{{end}}
-{{if .WalletQR}}<section class="qp-card">
+{{if .OfferRef}}<section class="qp-card">
+<h2>Zet de verklaring in uw wallet</h2>
+<p>U krijgt één QR-code die u met uw wallet-app scant. Dat werkt nu met de EU-referentiewallet in de GBO-testversie; de NL Wallet volgt met haar volgende versie.</p>
+<form method="post" action="/wallet-offer"><input type="hidden" name="ref" value="{{.OfferRef}}"><button class="qp-btn" type="submit">Toon de QR-code</button></form>
+<div class="qp-note warn"><span aria-hidden="true">!</span><div>Deze verklaring is een test en geen gekwalificeerde elektronische attestatie van attributen.</div></div>
+{{if .WalletQR}}<details class="qp-details">
+<summary>NL Wallet (huidige app)</summary>
+<div class="qp-qrwrap">
+<div class="qp-qr"><img src="{{.WalletQR}}" alt="QR-code om de testverklaring in de huidige NL Wallet-app te zetten" width="280" height="280"></div>
+<div><p>Scan deze code met de huidige NL Wallet-app.</p><p class="sec">De verklaring gaat één keer naar een wallet: via deze code of via de QR-code hierboven.</p></div>
+</div>
+</details>{{end}}
+</section>
+{{else if .WalletQR}}<section class="qp-card">
 <h2>Zet de verklaring in uw NL Wallet</h2>
 <div class="qp-qrwrap">
 <div class="qp-qr"><img src="{{.WalletQR}}" alt="QR-code om de testverklaring in de NL Wallet te zetten" width="280" height="280"></div>
@@ -172,6 +186,26 @@ var resultPage = template.Must(template.New("result").Funcs(template.FuncMap{"ba
 </section>{{end}}
 <div class="qp-actions"><a class="qp-btn sec" href="/">Nieuwe aanvraag</a></div>
 </main>
+` + foot))
+
+var walletOfferPage = template.Must(template.New("wallet-offer").Parse(head + `
+<title>Verklaring in uw wallet</title><style>` + style + `</style></head><body>
+` + top + `
+<main class="qp-main">{{if .QR}}<section class="qp-card">
+<h1>Scan met uw wallet</h1>
+<div class="qp-qrwrap">
+<div class="qp-qr"><img src="{{.QR}}" alt="QR-code om de testverklaring in uw wallet te zetten" width="280" height="280"></div>
+<div><p>Scan deze code met uw wallet-app. De code is enkele minuten geldig en werkt één keer.</p>
+<p class="sec">Dit werkt nu met de EU-referentiewallet in de GBO-testversie. De huidige NL Wallet-app kan deze code nog niet lezen.</p>
+<div class="qp-note warn"><span aria-hidden="true">!</span><div>Deze verklaring is een test en geen gekwalificeerde elektronische attestatie van attributen.</div></div></div>
+</div>
+<div class="qp-actions"><a class="qp-btn sec" href="/">Nieuwe aanvraag</a></div>
+</section>
+{{else}}<div class="qp-card qp-narrow"><div class="qp-err"><div class="ic wa" aria-hidden="true">!</div><div>
+<h1>Niet gelukt</h1>
+<p>{{.Message}}</p>
+<div class="qp-actions">{{if .Ref}}<form method="post" action="/wallet-offer"><input type="hidden" name="ref" value="{{.Ref}}"><button class="qp-btn" type="submit">Opnieuw proberen</button></form>{{else}}<a class="qp-btn" href="/">Nieuwe aanvraag</a>{{end}}</div>
+</div></div></div>{{end}}</main>
 ` + foot))
 
 var deniedPage = template.Must(template.New("denied").Parse(head + `

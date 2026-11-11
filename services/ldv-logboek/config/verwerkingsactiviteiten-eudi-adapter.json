@@ -17,6 +17,32 @@
       ]
     },
     {
+      "id": "gbo-bsn-ontvangst-aanvrager",
+      "version": "v1",
+      "name": "Ontvangen van het BSN van de aanvrager van een aanbod",
+      "doel": "Het vaststellen voor wie de attestatie is, aan de hand van het BSN dat de partij meegeeft die het aanbod (pre-authorized offer) voor de burger aanmaakt, zodat de juiste bron bevraagd kan worden.",
+      "grondslag": "De burger vraagt de attestatie aan bij de partij die het aanbod aanmaakt; die partij heeft de burger al geïdentificeerd.",
+      "categorieen_betrokkenen": [
+        "Burgers voor wie een attestatie wordt aangeboden"
+      ],
+      "categorieen_persoonsgegevens": [
+        "Burgerservicenummer, aangeleverd door de aanvrager van het aanbod"
+      ]
+    },
+    {
+      "id": "gbo-bsn-uit-inloggen",
+      "version": "v1",
+      "name": "Vaststellen van het BSN uit het inloggen bij het loket van GBO",
+      "doel": "Het vaststellen voor wie de attestatie is, aan de hand van het BSN waarmee de burger bij het loket van GBO is ingelogd, zodat de juiste bron bevraagd kan worden.",
+      "grondslag": "De burger geeft zelf de opdracht tot uitgifte en logt daarvoor in bij het loket van GBO.",
+      "categorieen_betrokkenen": [
+        "Burgers die een attestatie aanvragen"
+      ],
+      "categorieen_persoonsgegevens": [
+        "Burgerservicenummer uit het inloggen bij het loket van GBO"
+      ]
+    },
+    {
       "id": "gbo-attestatie-samenstellen",
       "version": "v1",
       "name": "Samenstellen van een attestatie uit brongegevens",

@@ -1,0 +1,217 @@
+package issuance
+
+import (
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/x509"
+	"slices"
+	"time"
+
+	"gbo-demo/oid4vc-kit/oid4vp"
+	"gbo-demo/oid4vc-kit/x5c"
+)
+
+// Kind selects the rules of a wallet profile. Each provider is published
+// under one credential issuer identifier per profile, so the metadata of
+// each is conformant on its own (see the design choice on proof types).
+type Kind string
+
+const (
+	// KindNL serves the NL Wallet: jwt proofs without key attestation, the
+	// NL credential preview endpoint, no tx_code.
+	KindNL Kind = "nl"
+	// KindEUDI serves wallets that follow HAIP and the ARF: key attestation
+	// is required, no preview endpoint, encrypted requests and responses
+	// are supported.
+	KindEUDI Kind = "eudi"
+	// KindCombined serves both under one credential issuer identifier, so
+	// one offer (one QR code) reaches either wallet: the metadata offers the
+	// jwt proof type without key attestation, which the NL Wallet uses, and
+	// the attestation proof type with it, which the EUDI wallets prefer. A
+	// wallet whose WIA comes from a provider in PlainJWTWalletProviders may
+	// prove possession without key attestation; any other wallet must
+	// attest its keys, as on KindEUDI. Encryption and the NL preview
+	// endpoint are offered too.
+	KindCombined Kind = "combined"
+)
+
+// Provider is an Attestation Provider: the party a wallet sees as the
+// issuer, with its own access and registration certificates, its own
+// signing keys and its own credential configurations. The issuer service
+// hosts several.
+type Provider struct {
+	// Name is the first path segment of its issuer identifiers.
+	Name string
+	// Login overrides the default login for this provider only (demo test PID).
+	Login Login
+	// AccessKey and AccessChain are the access certificate (WRPAC) that
+	// signs the issuer metadata.
+	AccessKey   crypto.Signer
+	AccessChain []*x509.Certificate
+	// RegistrationCertificate is the WRPRC published in issuer_info;
+	// required when a KindNL profile exists, as the NL Wallet refuses
+	// metadata without it.
+	RegistrationCertificate []byte
+	// IssuerKey and IssuerChain sign the credentials.
+	IssuerKey   crypto.Signer
+	IssuerChain []*x509.Certificate
+	// StatusKey and StatusChain sign the status lists; the certificate has
+	// the same subject as the issuer certificate.
+	StatusKey   crypto.Signer
+	StatusChain []*x509.Certificate
+	// VerifierRegistrationCertificate is the WRPRC of the provider as a
+	// relying party that asks for the PID (ETSI TS 119 475, entitlement
+	// Service_Provider), carried in the verifier_info of its OpenID4VP
+	// requests; required when it has disclosure offers.
+	VerifierRegistrationCertificate []byte
+	// RequestEncryptionKey is the P-256 key wallets encrypt their credential
+	// requests to (OpenID4VCI 1.0 section 10); required when a KindEUDI
+	// profile exists, and published only there.
+	RequestEncryptionKey *ecdsa.PrivateKey
+}
+
+// Profile is a set of wallet rules; every provider is published once per
+// profile.
+type Profile struct {
+	// Name is the second path segment of the issuer identifiers.
+	Name string
+	Kind Kind
+	// WalletProviders are the trust anchors for Wallet Instance
+	// Attestations. A WIA from another provider is refused on this profile.
+	WalletProviders []x5c.Anchors
+	// KeyAttestationProviders are the trust anchors for key attestations;
+	// required for KindEUDI.
+	KeyAttestationProviders []x5c.Anchors
+	// KeyStorage and UserAuthentication are the attack potential
+	// resistance values (OpenID4VCI Appendix D.2) a key attestation must
+	// assert; published in key_attestations_required (ARF ISSU_27d).
+	// Required for KindEUDI.
+	KeyStorage         []string
+	UserAuthentication []string
+	// PlainJWTWalletProviders names the WalletProviders anchor sets whose
+	// wallets may send jwt proofs without key attestation (KindCombined):
+	// the NL Wallet's provider, as long as the NL Wallet cannot attest keys.
+	// Without it a combined profile serves the EUDI wallets only.
+	PlainJWTWalletProviders []string
+	// UniversalLinkBase is the wallet's universal link base (KindNL,
+	// KindCombined).
+	UniversalLinkBase string
+	// PIDTrustedAuthorities are base64url KeyIdentifiers the PID query of
+	// disclosure-based issuance names as an aki trusted_authorities query
+	// (HAIP 1.0 section 5): a wallet then offers only a PID whose chain has
+	// one of them as AuthorityKeyIdentifier. Empty, the query names none.
+	PIDTrustedAuthorities []string
+	// WalletRedirectURIs are the redirect URIs of the wallets this profile
+	// trusts, for the authorization code flow. The flow is offered on a
+	// KindEUDI profile with these and a Login (K1, K5).
+	WalletRedirectURIs []string
+}
+
+// CredentialConfiguration is one credential a provider offers.
+type CredentialConfiguration struct {
+	ID string
+	// Provider is the name of the provider that issues it.
+	Provider string
+	VCT      string
+	Scope    string
+	// Display and Claims become credential_metadata. Every attribute a
+	// source returns must have a claim here.
+	Display []Display
+	Claims  []Claim
+	// ValidDays is the validity of an issued credential.
+	ValidDays int
+	// StatusList names the status list its credentials are listed in.
+	StatusList string
+}
+
+// Display is a localised name.
+type Display struct {
+	Name   string `json:"name"`
+	Locale string `json:"locale,omitempty"`
+}
+
+// Claim describes one attribute (credential_metadata.claims).
+type Claim struct {
+	Path      []string  `json:"path"`
+	Mandatory bool      `json:"mandatory,omitempty"`
+	Display   []Display `json:"display,omitempty"`
+}
+
+// DisclosureOffer is an offer a wallet starts by disclosing the BSN from
+// its PID (disclosure-based issuance), reached by a fixed link per offer.
+type DisclosureOffer struct {
+	// Key is the last path segment of its request_uri, unique per
+	// provider: the offer id of the source.
+	Key              string
+	Provider         string
+	ConfigurationIDs []string
+	Parameters       map[string]string
+}
+
+// Config is everything the issuer needs besides its ports.
+type Config struct {
+	// PublicURL is the external base URL; issuer identifiers are
+	// PublicURL + "/" + provider + "/" + profile.
+	PublicURL      string
+	Providers      []Provider
+	Profiles       []Profile
+	Configurations []CredentialConfiguration
+	StatusListSize int
+	BatchSize      int
+	OfferTTL       time.Duration
+	TokenTTL       time.Duration
+	NonceTTL       time.Duration
+	// DisclosureOffers, PIDAnchors and FetchPIDStatus serve
+	// disclosure-based issuance: the PID issuers whose PIDs are accepted
+	// and how their status lists are fetched.
+	LoginOffers      []DisclosureOffer
+	DisclosureOffers []DisclosureOffer
+	PIDAnchors       []x5c.Anchors
+	PIDTrust         PIDTrust
+	FetchPIDStatus   oid4vp.StatusFetcher
+	// DisclosureTTL bounds a disclosure session and the offer that follows
+	// it.
+	DisclosureTTL time.Duration
+	// Login is GBO's authorization server for the authorization code flow;
+	// without it the flow is not offered.
+	Login Login
+	// RefreshTTL is the lifetime of a refresh token on the eudi profile; the
+	// session's claims are kept that long (R3, R5).
+	RefreshTTL time.Duration
+	// DeferralTTL bounds a deferred issuance, and how long the BSN from the
+	// login is kept for it (V3).
+	DeferralTTL time.Duration
+}
+
+// Defaults for the durations and sizes a deployment does not set.
+const (
+	DefaultBatchSize      = 4
+	DefaultOfferTTL       = 5 * time.Minute
+	DefaultTokenTTL       = 10 * time.Minute
+	DefaultNonceTTL       = 5 * time.Minute
+	DefaultStatusListSize = 1 << 16
+	DefaultDisclosureTTL  = 5 * time.Minute
+	DefaultRefreshTTL     = 30 * 24 * time.Hour
+	DefaultDeferralTTL    = 24 * time.Hour
+)
+
+// servesNL reports whether the NL Wallet is served: its preview endpoint,
+// its universal link and its rule of whole numbers.
+func (p Profile) servesNL() bool { return p.Kind == KindNL || p.Kind == KindCombined }
+
+// servesEUDI reports whether the EUDI wallets are served: key attestation,
+// the attestation proof type and encryption.
+func (p Profile) servesEUDI() bool { return p.Kind == KindEUDI || p.Kind == KindCombined }
+
+// requiresKeyAttestation reports whether a wallet attested by the wallet
+// provider anchor set walletProvider must attest its keys.
+func (p Profile) requiresKeyAttestation(walletProvider string) bool {
+	switch p.Kind {
+	case KindEUDI:
+		return true
+	case KindCombined:
+		return !slices.Contains(p.PlainJWTWalletProviders, walletProvider)
+	default:
+		return false
+	}
+}

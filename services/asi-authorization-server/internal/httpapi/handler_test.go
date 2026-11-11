@@ -40,7 +40,7 @@ func TestMetadata(t *testing.T) { // case 23
 		"code_challenge_methods_supported":      []any{"S256"},
 		"token_endpoint_auth_methods_supported": []any{"private_key_jwt"},
 		"dpop_signing_alg_values_supported":     []any{"ES256"},
-		"scopes_supported":                      []any{"verify", "retrieve"},
+		"scopes_supported":                      []any{"verify", "retrieve", "issuance"},
 		"response_types_supported":              []any{"code"},
 		"grant_types_supported":                 []any{"authorization_code"},
 		"authorization_details_types_supported": []any{authorization.AuthorizationDetailsType},

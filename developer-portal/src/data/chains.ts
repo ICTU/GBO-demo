@@ -71,13 +71,16 @@ export function useBranches(consumer: Consumer = HYPOTHEEK_BV): NodeDef[] {
 // usecases and the whole DvTP-flow use.
 export function eudiIssuanceChain(bron: BronProfile = BD_BRON): NodeDef[] {
   return [
-    { id: 'wallet', role: 'Actor', name: 'NL-Wallet', svc: 'wallet (TestFlight)' },
+    // Two routes share this chain: the NL Wallet through the issuance-server
+    // and the EUDI wallets through the own credential issuer (#614). Neither
+    // emits traces, so a watched trace does not say which one ran.
+    { id: 'wallet', role: 'Actor', name: 'Wallet', svc: 'NL Wallet / EUDI-wallet' },
     // De QR-stap zit architectuurgewijs bij de issuer, maar wordt in deze
     // demo door het portal zelf gerenderd (EudiQrPanel bouwt de
     // universal-link client-side). De nl-wallet demo_issuer draaide hier
     // ooit voor; die is verwijderd omdat hij niet in compose stond.
     { id: 'demo-issuer', role: 'QR', name: 'QR / universal-link', svc: 'developer-portal' },
-    { id: 'issuance-server', role: 'IS', name: 'Issuance-server', svc: 'eudi-issuance-server' },
+    { id: 'issuance-server', role: 'IS', name: 'Uitgever', svc: 'eudi-issuance-server / eudi-credential-issuer' },
     { id: 'eudi-adapter', role: 'Adapter', name: 'EUDI-adapter', svc: 'eudi-adapter' },
     { id: 'edi-outway', role: 'FSC', name: 'EDI-Outway', svc: 'edi-outway' },
     { id: 'bd-inway', role: 'FSC', name: 'BD-Inway', svc: 'bd-inway' },

@@ -834,3 +834,16 @@ func postDisclosure(t *testing.T, srv *httptest.Server, path, bsn string) *http.
 	}
 	return resp
 }
+
+// A2: a handler for one source and type that gets a path for another is a
+// configuration out of step, not a person without data: 503.
+func TestSourceAttestationForAnotherSourceOrTypeIsUnavailable(t *testing.T) {
+	srv := newIncomeSourceAdapter(t, phase1IncomeMapping(), completeIncomeResponse)
+	for _, path := range []string{"/attestations/rvig/inkomensverklaring", "/attestations/belastingdienst/other"} {
+		resp := postDisclosure(t, srv, path, "123456789")
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusServiceUnavailable {
+			t.Errorf("%s: status = %d, want 503", path, resp.StatusCode)
+		}
+	}
+}

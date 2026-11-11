@@ -88,8 +88,8 @@ func Provision(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *caKeyPath == "" || *caCertPath == "" || *issuerCA == "" || *publicURL == "" || *origin == "" || *outDir == "" {
-		return errors.New("--ca-key, --ca-cert, --issuer-ca, --public-url, --request-origin and --out-dir are required")
+	if *caKeyPath == "" || *caCertPath == "" || (*issuerCA == "" && *pidAnchors == "") || *publicURL == "" || *origin == "" || *outDir == "" {
+		return errors.New("--ca-key, --ca-cert, --public-url, --request-origin, --out-dir and either --issuer-ca or --pid-issuer-anchors are required")
 	}
 	pub, err := url.Parse(*publicURL)
 	if err != nil || pub.Hostname() == "" {
@@ -136,17 +136,9 @@ func Provision(args []string) error {
 			SessionTypeReturnURL: returnMode,
 		})
 	}
-	issuerDER, err := pemCertificate(*issuerCA)
+	issuers, err := pidIssuerAnchors(*issuerCA, *pidAnchors)
 	if err != nil {
 		return err
-	}
-	issuers := []string{base64.StdEncoding.EncodeToString(issuerDER)}
-	if *pidAnchors != "" {
-		more, err := base64Lines(*pidAnchors)
-		if err != nil {
-			return err
-		}
-		issuers = append(issuers, more...)
 	}
 	secret := make([]byte, 32)
 	apiKey := make([]byte, 32)
@@ -165,25 +157,56 @@ func Provision(args []string) error {
 		APIKey:            hex.EncodeToString(apiKey),
 		Usecases:          usecases,
 	}
-	if err := os.MkdirAll(*outDir, 0o700); err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(*outDir, "verification_server.toml"), []byte(config.TOML()), 0o600); err != nil {
-		return err
-	}
-	if inOutDir := filepath.Join(*outDir, "api-key"); *apiKeyFile == "" {
-		*apiKeyFile = inOutDir
-	} else if err := os.Remove(inOutDir); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err // an API key of an earlier layout, next to the configuration
-	}
-	if err := os.MkdirAll(filepath.Dir(*apiKeyFile), 0o700); err != nil {
-		return err
-	}
-	if err := os.WriteFile(*apiKeyFile, []byte(config.APIKey), 0o600); err != nil {
+	if err := writeVerifierFiles(*outDir, *apiKeyFile, config); err != nil {
 		return err
 	}
 	fmt.Printf("-> wallet verifier configuration written to %s (verification_server.toml), and its API key; reader certificates for %s (%s)\n", *outDir, pub.Hostname(), strings.Join(names, ", "))
 	return nil
+}
+
+// pidIssuerAnchors collects the PID issuer anchors as base64 DER: the
+// development issuer CA and the further anchors file, each when given.
+func pidIssuerAnchors(issuerCA, pidAnchors string) ([]string, error) {
+	var issuers []string
+	if issuerCA != "" {
+		issuerDER, err := pemCertificate(issuerCA)
+		if err != nil {
+			return nil, err
+		}
+		issuers = append(issuers, base64.StdEncoding.EncodeToString(issuerDER))
+	}
+	if pidAnchors != "" {
+		more, err := base64Lines(pidAnchors)
+		if err != nil {
+			return nil, err
+		}
+		issuers = append(issuers, more...)
+	}
+	if len(issuers) == 0 {
+		return nil, errors.New("PID issuer anchors are empty")
+	}
+	return issuers, nil
+}
+
+// writeVerifierFiles writes verification_server.toml to outDir and the API
+// key to apiKeyFile (default: api-key in outDir), removing an API key of an
+// earlier layout next to the configuration.
+func writeVerifierFiles(outDir, apiKeyFile string, config Config) error {
+	if err := os.MkdirAll(outDir, 0o700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(outDir, "verification_server.toml"), []byte(config.TOML()), 0o600); err != nil {
+		return err
+	}
+	if inOutDir := filepath.Join(outDir, "api-key"); apiKeyFile == "" {
+		apiKeyFile = inOutDir
+	} else if err := os.Remove(inOutDir); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err // an API key of an earlier layout, next to the configuration
+	}
+	if err := os.MkdirAll(filepath.Dir(apiKeyFile), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(apiKeyFile, []byte(config.APIKey), 0o600)
 }
 
 // readerPayload is the reader authorisation metadata the wallet shows and

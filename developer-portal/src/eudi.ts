@@ -1,3 +1,5 @@
+import { euWalletLinksFrom, type EuWalletLinks } from './lib/euWalletLinks'
+
 export type IssuanceOffer = {
   key: string
   label: string
@@ -55,4 +57,40 @@ export function adapterPathFor(offer: IssuanceOffer): string {
   for (const [name, value] of Object.entries(offer.parameters)) query.set(name, String(value))
   const suffix = query.size > 0 ? `?${query.toString()}` : ''
   return `/eudi-api/attestations/${encodeURIComponent(offer.source_id)}/${encodeURIComponent(offer.type_id)}${suffix}`
+}
+
+/* The own credential issuer (#614) lists the fixed links of its disclosure
+   offers; this portal shows its EU-wallet link next to the NL Wallet link.
+   Without the URL, or when the issuer does not answer, there is no
+   EU-wallet link and the panel shows the NL Wallet only. */
+const OWN_ISSUER_PUBLIC_URL = (
+  window.__GBO_RUNTIME_CONFIG__?.ownIssuerPublicUrl ||
+  import.meta.env.VITE_OWN_ISSUER_PUBLIC_URL ||
+  ''
+).replace(/\/$/, '')
+
+export type { EuWalletLinks }
+
+export async function loadEuWalletLinks(): Promise<EuWalletLinks> {
+  if (!OWN_ISSUER_PUBLIC_URL) return new Map()
+  try {
+    const response = await fetch(`${OWN_ISSUER_PUBLIC_URL}/disclosure-offers`, {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(5000),
+    })
+    if (!response.ok) return new Map()
+    return euWalletLinksFrom(await response.json())
+  } catch {
+    // The issuer is optional; without it the panel offers the NL Wallet only.
+    return new Map()
+  }
+}
+
+export function euWalletLinkFor(offer: IssuanceOffer, links: EuWalletLinks): string {
+  return links.get(`${offer.source_id}/${offer.key}`)?.link ?? ''
+}
+
+/** The login link of an offer: the citizen logs in instead of sharing the PID. */
+export function euLoginLinkFor(offer: IssuanceOffer, links: EuWalletLinks): string {
+  return links.get(`${offer.source_id}/${offer.key}`)?.loginLink ?? ''
 }

@@ -96,7 +96,10 @@ dienstverlener-backend|.|./services/dienstverlener-backend/Dockerfile|.dockerign
 dienstverlener-mock|./dienstverlener-mock|./dienstverlener-mock/Dockerfile|dienstverlener-mock|linux/amd64|false|dienstverlener-mock
 keyper-mock|./keyper-mock|./keyper-mock/Dockerfile|keyper-mock|linux/amd64|false|keyper-mock
 dvtp-onboarding-register|./services/dvtp-onboarding-register|./services/dvtp-onboarding-register/Dockerfile|services/dvtp-onboarding-register|linux/amd64|false|dvtp-onboarding-register
-eudi-adapter|.|./services/eudi-adapter/Dockerfile|.dockerignore services/eudi-adapter services/ldv-client services/asi-mapping services/source-registry|linux/amd64|false|eudi-adapter
+eudi-adapter|.|./services/eudi-adapter/Dockerfile|.dockerignore services/eudi-adapter services/ldv-client services/asi-mapping services/source-registry services/oid4vc-kit|linux/amd64|false|eudi-adapter
+eudi-credential-issuer|.|./services/eudi-credential-issuer/Dockerfile|.dockerignore services/eudi-credential-issuer services/oid4vc-kit|linux/amd64|false|eudi-credential-issuer
+eudi-wallet-verifier|.|./services/eudi-wallet-verifier/Dockerfile|.dockerignore services/eudi-wallet-verifier services/oid4vc-kit|linux/amd64|false|eudi-wallet-verifier
+test-pid-source|./services/test-pid-source|./services/test-pid-source/Dockerfile|services/test-pid-source|linux/amd64|false|test-pid-source
 graphql-server|.|./services/graphql-server/Dockerfile|.dockerignore services/graphql-server services/ldv-client|linux/amd64|false|graphql-server
 lvg-graphql-server|.|./services/lvg-graphql-server/Dockerfile|.dockerignore services/lvg-graphql-server services/ldv-client|linux/amd64|false|lvg-graphql-server
 ldv-logboek|.|./services/ldv-logboek/Dockerfile|.dockerignore services/ldv-logboek services/ldv-client|linux/amd64|false|ldv-logboek
@@ -110,11 +113,16 @@ IMAGES
 
 # Every image the tree can build is either published above or listed here
 # as deliberately unpublished. Without this a new service would be left
-# out of every release, silently and permanently. The list is empty: every
-# Dockerfile in the tree is currently published.
+# out of every release, silently and permanently. The own credential issuer
+# is built and tested locally until it replaces eudi-issuance-server (#614);
+# test-pid-source is its local test fixture; eudi-wallet-verifier is the
+# EUDI-wallet login of the authorization server, local until #639 is live.
 while read -r unpublished; do
   covered_paths+=("${unpublished}")
 done <<'UNPUBLISHED'
+services/eudi-credential-issuer
+services/eudi-wallet-verifier
+services/test-pid-source
 UNPUBLISHED
 
 for dockerfile in */Dockerfile services/*/Dockerfile; do

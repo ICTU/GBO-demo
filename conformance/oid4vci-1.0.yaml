@@ -1,0 +1,1809 @@
+# The conformance claim of the own credential issuer (services/eudi-credential-issuer, #614) against
+# OpenID for Verifiable Credential Issuance 1.0: a status per normative statement (see README.md).
+# The issuer is Credential Issuer and its own Authorization Server. The default status is the eudi
+# profile's; nl (NL Wallet v0.6.0) and wallet (both wallets on one identifier, QTSP route) differ
+# where they say so. Requirements on wallets, ecosystems and other parties are outside the claim.
+spec: OpenID for Verifiable Credential Issuance 1.0
+ids: oid4vci-1.0-ids.txt
+profiles: [nl, eudi, wallet]
+
+groups:
+  - role: wallet
+    status: not-applicable
+    reason: A requirement on the wallet.
+  - role: ecosystem
+    status: not-applicable
+    reason: A requirement on the ecosystem or trust framework, not on an implementation.
+  - role: other
+    status: not-applicable
+    reason: A requirement on another party, such as a wallet provider or key attestation issuer.
+
+requirements:
+  OID4VCI-3.3.2-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueEUDI"
+      - "services/eudi-credential-issuer/internal/httpapi:TestCombinedNLPlainJWT"
+  OID4VCI-3.3.2-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
+      - "services/eudi-credential-issuer/internal/httpapi:TestTheCodeBuysATokenAndACredential"
+  OID4VCI-3.5-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestRedeemingWithATransactionCode"
+      - "services/eudi-credential-issuer/internal/httpapi:TestToken/T2 expired code"
+      - "services/eudi-credential-issuer/internal/httpapi:TestToken/T2 code used twice"
+      - "services/eudi-credential-issuer/internal/httpapi:TestToken/W2 unknown wallet provider"
+    profiles:
+      nl:
+        status: deviation
+        tests:
+          - "services/eudi-credential-issuer/internal/httpapi:TestOffers/O3 tx_code refused for nl"
+          - "services/eudi-credential-issuer/internal/httpapi:TestToken/T2 expired code"
+          - "services/eudi-credential-issuer/internal/httpapi:TestToken/W2 unknown wallet provider"
+        reason: "No transaction code: the NL Wallet (v0.6.0) refuses an offer with one. Offers live 5 minutes, are used once and are redeemed only by a wallet of a trusted provider with DPoP; a leaked offer can still be redeemed by another trusted wallet."
+      wallet:
+        status: deviation
+        tests:
+          - "services/eudi-credential-issuer/internal/httpapi:TestAnOfferWithATransactionCode"
+          - "services/eudi-credential-issuer/internal/httpapi:TestCombinedToken"
+        reason: "No transaction code: the combined profile serves the NL Wallet (v0.6.0), which refuses an offer with one. Offers live 5 minutes, are used once and are redeemed only by a wallet of a trusted provider with DPoP; a leaked offer can still be redeemed by another trusted wallet."
+  OID4VCI-4.1-01:
+    status: not-applicable
+    reason: "The issuer sends Credential Offers by value only (credential_offer); it never uses credential_offer_uri."
+  OID4VCI-4.1-02:
+    status: not-applicable
+    reason: "The issuer sends Credential Offers by value only (credential_offer); it never uses credential_offer_uri."
+  OID4VCI-4.1.1-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestOffers/O1 links per profile"
+      - "services/eudi-credential-issuer/internal/httpapi:TestTheLoginLinkOfAnOffer"
+      - "services/eudi-credential-issuer/internal/httpapi:TestDisclosureIssuance"
+  OID4VCI-4.1.1-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestTheLoginLinkOfAnOffer"
+      - "services/eudi-credential-issuer/internal/httpapi:TestDisclosureIssuance"
+      - "services/eudi-credential-issuer/internal/httpapi:TestOffers/O2 unknown configuration"
+  OID4VCI-4.1.1-07:
+    status: not-applicable
+    reason: "The issuer is its own Authorization Server: the metadata carries no authorization_servers and the offers no authorization_server."
+  OID4VCI-4.1.1-08:
+    status: not-applicable
+    reason: "The issuer is its own Authorization Server: the metadata carries no authorization_servers and the offers no authorization_server."
+  OID4VCI-4.1.1-09:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestToken/W1 T1 valid attestation and code"
+      - "services/eudi-credential-issuer/internal/httpapi:TestDisclosureIssuance"
+      - "services/eudi-credential-issuer/internal/httpapi:TestAnOfferWithATransactionCode"
+  OID4VCI-4.1.1-10:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestToken/T2 code used twice"
+      - "services/eudi-credential-issuer/internal/httpapi:TestToken/T2 expired code"
+  OID4VCI-4.1.1-13:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestAnOfferWithATransactionCode"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No transaction code on this profile: the NL Wallet (v0.6.0) refuses an offer with a tx_code."
+      wallet:
+        status: not-applicable
+        reason: "No transaction code on this profile: the NL Wallet (v0.6.0), which the combined profile serves, refuses an offer with a tx_code."
+  OID4VCI-4.1.1-14:
+    status: not-applicable
+    reason: "The issuer is its own Authorization Server: the metadata carries no authorization_servers and the offers no authorization_server."
+  OID4VCI-4.1.1-15:
+    status: not-applicable
+    reason: "The issuer is its own Authorization Server: the metadata carries no authorization_servers and the offers no authorization_server."
+  OID4VCI-4.1.3-02:
+    status: not-applicable
+    reason: "The issuer sends Credential Offers by value only (credential_offer); it never uses credential_offer_uri."
+  OID4VCI-4.1.3-03:
+    status: not-applicable
+    reason: "The issuer sends Credential Offers by value only (credential_offer); it never uses credential_offer_uri."
+  OID4VCI-4.1.3-04:
+    status: not-applicable
+    reason: "The issuer sends Credential Offers by value only (credential_offer); it never uses credential_offer_uri."
+  OID4VCI-4.1.3-05:
+    status: not-applicable
+    reason: "The issuer sends Credential Offers by value only (credential_offer); it never uses credential_offer_uri."
+  OID4VCI-5-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestPushedAuthorizationRefusals/P6: no PKCE"
+      - "services/eudi-credential-issuer/internal/httpapi:TestPushedAuthorizationRefusals/P7: redirect_uri of another wallet"
+      - "services/eudi-credential-issuer/internal/httpapi:TestALoginReturnsACodeToTheWallet"
+      - "services/eudi-credential-issuer/internal/httpapi:TestACodeBoundToADPoPKey"
+      - "services/eudi-credential-issuer/internal/httpapi:TestDPoPJKTInThePushedRequest"
+      - "services/eudi-credential-issuer/internal/httpapi:TestTheCodeIsBoundToThePushedRequest/P17: used twice"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No authorization code flow on this profile: the NL Wallet (v0.6.0) supports the pre-authorized code flow only."
+      wallet:
+        status: not-applicable
+        reason: "No authorization code flow on this profile: it carries pre-authorized offers only (QTSP route)."
+  OID4VCI-5-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestPushedAuthorizationRefusals/P6: no PKCE"
+      - "services/eudi-credential-issuer/internal/httpapi:TestPushedAuthorizationRefusals/P6: plain PKCE"
+      - "services/eudi-credential-issuer/internal/httpapi:TestTheAuthorizationRequestNeedsAPushedRequest/P10: loose parameters"
+      - "services/eudi-credential-issuer/internal/httpapi:TestAuthorizationCodeMetadata"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No authorization code flow on this profile: the NL Wallet (v0.6.0) supports the pre-authorized code flow only."
+      wallet:
+        status: not-applicable
+        reason: "No authorization code flow on this profile: it carries pre-authorized offers only (QTSP route)."
+  OID4VCI-5.1.1-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestWalletInitiatedRequests/W2: authorization_details instead of scope"
+      - "services/eudi-credential-issuer/internal/httpapi:TestWalletInitiatedRequests/W-6: details that are not JSON"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No authorization code flow on this profile: the NL Wallet (v0.6.0) supports the pre-authorized code flow only."
+      wallet:
+        status: not-applicable
+        reason: "No authorization code flow on this profile: it carries pre-authorized offers only (QTSP route)."
+  OID4VCI-5.1.1-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceAuthorizationDetailsType"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No authorization code flow on this profile: the NL Wallet (v0.6.0) supports the pre-authorized code flow only."
+      wallet:
+        status: not-applicable
+        reason: "No authorization code flow on this profile: it carries pre-authorized offers only (QTSP route)."
+  OID4VCI-5.1.1-03:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceAuthorizationDetailsType"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No authorization code flow on this profile: the NL Wallet (v0.6.0) supports the pre-authorized code flow only."
+      wallet:
+        status: not-applicable
+        reason: "No authorization code flow on this profile: it carries pre-authorized offers only (QTSP route)."
+  OID4VCI-5.1.1-04:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestWalletInitiatedRequests/W2: authorization_details instead of scope"
+      - "services/eudi-credential-issuer/internal/httpapi:TestWalletInitiatedRequests/W-6: an unknown configuration"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No authorization code flow on this profile: the NL Wallet (v0.6.0) supports the pre-authorized code flow only."
+      wallet:
+        status: not-applicable
+        reason: "No authorization code flow on this profile: it carries pre-authorized offers only (QTSP route)."
+  OID4VCI-5.1.2-01:
+    status: passed
+    tests:
+      - "services/eudi-adapter:TestOneConfigurationPerOffer"
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/duplicate scope"
+      - "services/eudi-credential-issuer/internal/httpapi:TestOneConfigurationPerOfferAtTheIssuer"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No authorization code flow on this profile: the NL Wallet (v0.6.0) supports the pre-authorized code flow only."
+      wallet:
+        status: not-applicable
+        reason: "No authorization code flow on this profile: it carries pre-authorized offers only (QTSP route)."
+  OID4VCI-5.1.2-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestWalletInitiatedRequests/W1: scope of a configuration with one offer"
+      - "services/eudi-credential-issuer/internal/httpapi:TestOneConfigurationPerOfferAtTheIssuer"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No authorization code flow on this profile: the NL Wallet (v0.6.0) supports the pre-authorized code flow only."
+      wallet:
+        status: not-applicable
+        reason: "No authorization code flow on this profile: it carries pre-authorized offers only (QTSP route)."
+  OID4VCI-5.1.2-03:
+    status: deviation
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestScopeAndAuthorizationDetailsTogether"
+    reason: "A wallet-initiated request must name exactly one credential type, because the login fetches the data of one source offer; scope values of two types are refused with invalid_scope. Applies to every wallet on this profile."
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No authorization code flow on this profile: the NL Wallet (v0.6.0) supports the pre-authorized code flow only."
+      wallet:
+        status: not-applicable
+        reason: "No authorization code flow on this profile: it carries pre-authorized offers only (QTSP route)."
+  OID4VCI-5.1.2-04:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestWalletInitiatedRequests/W-1: unknown scope values are ignored"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No authorization code flow on this profile: the NL Wallet (v0.6.0) supports the pre-authorized code flow only."
+      wallet:
+        status: not-applicable
+        reason: "No authorization code flow on this profile: it carries pre-authorized offers only (QTSP route)."
+  OID4VCI-5.1.2-06:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestScopeAndAuthorizationDetailsTogether"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No authorization code flow on this profile: the NL Wallet (v0.6.0) supports the pre-authorized code flow only."
+      wallet:
+        status: not-applicable
+        reason: "No authorization code flow on this profile: it carries pre-authorized offers only (QTSP route)."
+  OID4VCI-5.1.2-07:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestScopeAndAuthorizationDetailsTogether"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No authorization code flow on this profile: the NL Wallet (v0.6.0) supports the pre-authorized code flow only."
+      wallet:
+        status: not-applicable
+        reason: "No authorization code flow on this profile: it carries pre-authorized offers only (QTSP route)."
+  OID4VCI-5.1.3-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestPushedAuthorizationRefusals/P8: unknown issuer_state"
+      - "services/eudi-credential-issuer/internal/httpapi:TestAuthorizeSendsTheCitizenToTheLogin"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No authorization code flow on this profile: the NL Wallet (v0.6.0) supports the pre-authorized code flow only."
+      wallet:
+        status: not-applicable
+        reason: "No authorization code flow on this profile: it carries pre-authorized offers only (QTSP route)."
+  OID4VCI-5.1.3-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceAuthorizationIgnoresUnknownParameters"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No authorization code flow on this profile: the NL Wallet (v0.6.0) supports the pre-authorized code flow only."
+      wallet:
+        status: not-applicable
+        reason: "No authorization code flow on this profile: it carries pre-authorized offers only (QTSP route)."
+  OID4VCI-5.1.4-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestTheAuthorizationRequestNeedsAPushedRequest/P10: loose parameters"
+      - "services/eudi-credential-issuer/internal/httpapi:TestPushedAuthorizationRequest"
+      - "services/eudi-credential-issuer/internal/httpapi:TestAuthorizationCodeMetadata"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No authorization code flow on this profile: the NL Wallet (v0.6.0) supports the pre-authorized code flow only."
+      wallet:
+        status: not-applicable
+        reason: "No authorization code flow on this profile: it carries pre-authorized offers only (QTSP route)."
+  OID4VCI-5.2-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestALoginReturnsACodeToTheWallet"
+      - "services/eudi-credential-issuer/internal/httpapi:TestTheCodeBuysATokenAndACredential"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No authorization code flow on this profile: the NL Wallet (v0.6.0) supports the pre-authorized code flow only."
+      wallet:
+        status: not-applicable
+        reason: "No authorization code flow on this profile: it carries pre-authorized offers only (QTSP route)."
+  OID4VCI-5.3-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestDenyingTheLoginTellsTheWallet"
+      - "services/eudi-credential-issuer/internal/httpapi:TestPagesWithAWayBackToTheWallet"
+      - "services/eudi-credential-issuer/internal/httpapi:TestTheAuthorizationRequestNeedsAPushedRequest"
+      - "services/eudi-credential-issuer/internal/httpapi:TestAnUnknownLoginStateGetsAnErrorPage"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No authorization code flow on this profile: the NL Wallet (v0.6.0) supports the pre-authorized code flow only."
+      wallet:
+        status: not-applicable
+        reason: "No authorization code flow on this profile: it carries pre-authorized offers only (QTSP route)."
+  OID4VCI-6-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestToken/T3 no DPoP proof"
+      - "services/eudi-credential-issuer/internal/httpapi:TestToken/T2 code used twice"
+      - "services/eudi-credential-issuer/internal/httpapi:TestToken/W2 unknown wallet provider"
+      - "services/eudi-credential-issuer/internal/httpapi:TestTheCodeIsBoundToThePushedRequest/P16: another code_verifier"
+      - "services/eudi-credential-issuer/internal/httpapi:TestRefreshTokenRefusals/F-3: another DPoP key"
+      - "services/eudi-credential-issuer/internal/httpapi:TestCombinedToken"
+  OID4VCI-6.1-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceTokenParameters"
+  OID4VCI-6.1-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestRedeemingWithATransactionCode/X-4: no or a wrong code, then the right one"
+      - "services/eudi-credential-issuer/internal/httpapi:TestRedeemingWithATransactionCode/X-3: the right code"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No transaction code on this profile: the NL Wallet (v0.6.0) refuses an offer with a tx_code."
+      wallet:
+        status: not-applicable
+        reason: "No transaction code on this profile: the NL Wallet (v0.6.0), which the combined profile serves, refuses an offer with a tx_code."
+  OID4VCI-6.1-03:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestATransactionCodeWithAnotherGrant"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "The pre-authorized code grant is the only grant on this profile."
+      wallet:
+        status: not-applicable
+        reason: "The pre-authorized code grant is the only grant on this profile."
+  OID4VCI-6.1-04:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestToken"
+      - "services/eudi-credential-issuer/internal/httpapi:TestTheCodeIsBoundToThePushedRequest/P16: another redirect_uri"
+      - "services/eudi-credential-issuer/internal/httpapi:TestTheCodeIsBoundToThePushedRequest/P16: another wallet"
+      - "services/eudi-credential-issuer/internal/httpapi:TestCombinedToken"
+  OID4VCI-6.1-07:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestToken/W1 T1 valid attestation and code"
+      - "services/eudi-credential-issuer/internal/httpapi:TestTheCodeBuysATokenAndACredential"
+  OID4VCI-6.1-09:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceTokenParameters"
+  OID4VCI-6.1.1-01:
+    status: not-applicable
+    reason: "The token endpoint does not take authorization_details (optional, section 6.1.1): a token covers every credential of its offer or authorization request, which names one credential type."
+  OID4VCI-6.2-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestToken/W1 T1 valid attestation and code"
+      - "services/eudi-credential-issuer/internal/httpapi:TestTheCodeBuysATokenAndACredential"
+  OID4VCI-7-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
+      - "services/eudi-credential-issuer/internal/issuance:TestProofWithoutNonceIsInvalidProof"
+  OID4VCI-7.2-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueEUDI"
+  OID4VCI-7.2-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceNonceEndpoint"
+  OID4VCI-7.2-03:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceNonceEndpoint"
+  OID4VCI-8-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueEUDI"
+      - "services/eudi-credential-issuer/internal/httpapi:TestCombinedNLPlainJWT"
+  OID4VCI-8-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/H-1: public URL without https"
+      - "services/eudi-credential-issuer/internal/issuance:TestNewAcceptsPublicURLs"
+  OID4VCI-8.1-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueEUDI/C1 jwt proof with key attestation"
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueEUDI/C1 attestation proof"
+  OID4VCI-8.2-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialRequestIdentifiers"
+  OID4VCI-8.2-02:
+    status: not-applicable
+    reason: "Every token response carries authorization_details with credential_identifiers, so the case of a token response without them does not arise."
+  OID4VCI-8.2-03:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialRequestIdentifiers"
+  OID4VCI-8.2-04:
+    status: not-applicable
+    reason: "Every token response carries authorization_details with credential_identifiers, so the case of a token response without them does not arise."
+  OID4VCI-8.2-05:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialRequestIdentifiers"
+  OID4VCI-8.2-06:
+    status: not-applicable
+    reason: "Every token response carries authorization_details with credential_identifiers, so the case of a token response without them does not arise."
+  OID4VCI-8.2-07:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialRequestIdentifiers"
+  OID4VCI-8.2-08:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vci:TestResponseEncryption"
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptionRefusals/E6 unsupported response parameters"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No encryption on this profile: the metadata publishes neither credential_request_encryption nor credential_response_encryption, and an encrypted request or a credential_response_encryption parameter is refused (NL Wallet v0.6.0)."
+  OID4VCI-8.2-09:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vci:TestResponseEncryption"
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptionRefusals/E6 unsupported response parameters"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No encryption on this profile: the metadata publishes neither credential_request_encryption nor credential_response_encryption, and an encrypted request or a credential_response_encryption parameter is refused (NL Wallet v0.6.0)."
+  OID4VCI-8.2-10:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptedResponseIsNotCompressed/eudi"
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptedResponseIsNotCompressed/wallet as nl"
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptedResponseIsNotCompressed/wallet as eudi"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No encryption on this profile: the metadata publishes neither credential_request_encryption nor credential_response_encryption, and an encrypted request or a credential_response_encryption parameter is refused (NL Wallet v0.6.0)."
+  OID4VCI-8.2-11:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vci:TestVerifyJWTProof"
+      - "services/eudi-credential-issuer/internal/issuance:TestProofWithoutNonceIsInvalidProof"
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
+      - "services/eudi-credential-issuer/internal/issuance:TestProvidersAreIsolated/a c_nonce of one profile is unknown at another"
+  OID4VCI-8.2-12:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialRequestProofs"
+  OID4VCI-8.2-13:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialRequestUnknownParameters"
+  OID4VCI-8.2-15:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptedIssuance"
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptionRefusals/E7 undecryptable request"
+      - "services/oid4vc-kit/oid4vci:TestDecryptRequest"
+      - "services/eudi-credential-issuer/internal/httpapi:TestCombinedEncryption"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No encryption on this profile: the metadata publishes neither credential_request_encryption nor credential_response_encryption, and an encrypted request or a credential_response_encryption parameter is refused (NL Wallet v0.6.0)."
+  OID4VCI-8.2-18:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptionRefusals/E5 response key in a plain request"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No encryption on this profile: the metadata publishes neither credential_request_encryption nor credential_response_encryption, and an encrypted request or a credential_response_encryption parameter is refused (NL Wallet v0.6.0)."
+  OID4VCI-8.3-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueEUDI"
+      - "services/eudi-credential-issuer/internal/httpapi:TestCombinedNLPlainJWT"
+  OID4VCI-8.3-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestDeferredIssuance"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+      wallet:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+  OID4VCI-8.3-03:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestDeferredIssuance"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+      wallet:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+  OID4VCI-8.3-04:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptedIssuance"
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptedIssuance/E2 wallet key without kid, media type with parameter"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No encryption on this profile: the metadata publishes neither credential_request_encryption nor credential_response_encryption, and an encrypted request or a credential_response_encryption parameter is refused (NL Wallet v0.6.0)."
+  OID4VCI-8.3-05:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptedIssuance/E4 encrypted request, plain response"
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptionRefusals/E8 errors are not encrypted"
+  OID4VCI-8.3-06:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
+  OID4VCI-8.3-07:
+    status: not-applicable
+    reason: "An SD-JWT VC is a string, not binary data; the issuer issues SD-JWT VC only."
+  OID4VCI-8.3-08:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialResponseMembers"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+      wallet:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+  OID4VCI-8.3-09:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestDeferredIssuance"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+      wallet:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+  OID4VCI-8.3-10:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestDeferredIssuance"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+      wallet:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+  OID4VCI-8.3-12:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialResponseMembers"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+      wallet:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+  OID4VCI-8.3-14:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialResponseMembers/eudi deferred"
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialResponseMembers/nl"
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialResponseMembers/wallet as nl"
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialResponseMembers/wallet as eudi"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No notification endpoint on this profile; credential responses carry no notification_id."
+      wallet:
+        status: not-applicable
+        reason: "No notification endpoint on this profile; credential responses carry no notification_id."
+  OID4VCI-8.3.1.2-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueEUDI/C3 no key attestation"
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptionRefusals/E5 response key in a plain request"
+      - "services/eudi-credential-issuer/internal/httpapi:TestDeferredRefusals/D-5: the source has no data"
+      - "services/eudi-credential-issuer/internal/issuance:TestRevokedReferenceIssuesNothing/after the token, before the credential"
+  OID4VCI-8.3.1.2-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestProvidersAreIsolated/a configuration moved to another provider is no longer offered"
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptionRefusals/E8 errors are not encrypted"
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
+  OID4VCI-8.3.1.2-04:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestDescriptionKeepsAllowedCharacters"
+      - "services/eudi-credential-issuer/internal/httpapi:TestCombinedEUDIMustAttest"
+  OID4VCI-8.3.1.2-05:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestDescriptionKeepsAllowedCharacters"
+  OID4VCI-9-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestDeferredRefusals/D-7: another session's token, another DPoP key, unknown id"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+      wallet:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+  OID4VCI-9-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/H-1: public URL without https"
+      - "services/eudi-credential-issuer/internal/issuance:TestNewAcceptsPublicURLs"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+      wallet:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+  OID4VCI-9.1-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestDeferredRefusals/D-7: another session's token, another DPoP key, unknown id"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+      wallet:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+  OID4VCI-9.1-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestDeferredIssuance"
+      - "services/eudi-credential-issuer/internal/httpapi:TestDeferredRefusals/D-5: the source has no data"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+      wallet:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+  OID4VCI-9.1-03:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceDeferredRequestIgnoresUnknownMembers"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+      wallet:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+  OID4VCI-9.1-05:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptedDeferredRequest"
+      - "services/oid4vc-kit/oid4vci:TestDecryptRequest"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+      wallet:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+  OID4VCI-9.1-08:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptedDeferredRequest"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+      wallet:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+  OID4VCI-9.2-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestDeferredIssuance"
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptedDeferredRequest"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+      wallet:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+  OID4VCI-9.2-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestDeferredIssuance"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+      wallet:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+  OID4VCI-9.2-03:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestDeferredIssuance"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+      wallet:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+  OID4VCI-9.2-05:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptedDeferredRequest"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+      wallet:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+  OID4VCI-9.2-06:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptedDeferredRequest"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+      wallet:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+  OID4VCI-9.2-07:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestDeferredIssuance"
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptedIssuance/E4 encrypted request, plain response"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+      wallet:
+        status: not-applicable
+        reason: "No deferred credential endpoint on this profile: the data is fetched when the offer is made, so every credential is issued at once."
+  OID4VCI-10-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptedIssuance"
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptionRefusals/E7 undecryptable request"
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptedDeferredRequest"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No encryption on this profile: the metadata publishes neither credential_request_encryption nor credential_response_encryption, and an encrypted request or a credential_response_encryption parameter is refused (NL Wallet v0.6.0)."
+  OID4VCI-10-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptedIssuance"
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptedIssuance/E2 wallet key without kid, media type with parameter"
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptedDeferredRequest"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No encryption on this profile: the metadata publishes neither credential_request_encryption nor credential_response_encryption, and an encrypted request or a credential_response_encryption parameter is refused (NL Wallet v0.6.0)."
+  OID4VCI-10-03:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptionMetadata/E1 metadata"
+      - "services/oid4vc-kit/oid4vci:TestResponseEncryption"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No encryption on this profile: the metadata publishes neither credential_request_encryption nor credential_response_encryption, and an encrypted request or a credential_response_encryption parameter is refused (NL Wallet v0.6.0)."
+  OID4VCI-10-04:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vci:TestResponseEncryption"
+      - "services/oid4vc-kit/oid4vci:TestDecryptRequest"
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptedIssuance"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No encryption on this profile: the metadata publishes neither credential_request_encryption nor credential_response_encryption, and an encrypted request or a credential_response_encryption parameter is refused (NL Wallet v0.6.0)."
+  OID4VCI-10-05:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptedIssuance"
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptedIssuance/E2 wallet key without kid, media type with parameter"
+      - "services/oid4vc-kit/oid4vci:TestResponseEncryption"
+      - "services/oid4vc-kit/oid4vci:TestDecryptRequest"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No encryption on this profile: the metadata publishes neither credential_request_encryption nor credential_response_encryption, and an encrypted request or a credential_response_encryption parameter is refused (NL Wallet v0.6.0)."
+  OID4VCI-10-06:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptionRefusals/E5 response key in a plain request"
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptedDeferredRequest"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No encryption on this profile: the metadata publishes neither credential_request_encryption nor credential_response_encryption, and an encrypted request or a credential_response_encryption parameter is refused (NL Wallet v0.6.0)."
+  OID4VCI-11-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestNotifications/N-5: unknown access token"
+      - "services/eudi-credential-issuer/internal/httpapi:TestNotifications"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No notification endpoint on this profile; credential responses carry no notification_id."
+      wallet:
+        status: not-applicable
+        reason: "No notification endpoint on this profile; credential responses carry no notification_id."
+  OID4VCI-11-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestNotifications"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No notification endpoint on this profile; credential responses carry no notification_id."
+      wallet:
+        status: not-applicable
+        reason: "No notification endpoint on this profile; credential responses carry no notification_id."
+  OID4VCI-11-03:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/H-1: public URL without https"
+      - "services/eudi-credential-issuer/internal/issuance:TestNewAcceptsPublicURLs"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No notification endpoint on this profile; credential responses carry no notification_id."
+      wallet:
+        status: not-applicable
+        reason: "No notification endpoint on this profile; credential responses carry no notification_id."
+  OID4VCI-11.1-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestNotifications/N-4: no id"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No notification endpoint on this profile; credential responses carry no notification_id."
+      wallet:
+        status: not-applicable
+        reason: "No notification endpoint on this profile; credential responses carry no notification_id."
+  OID4VCI-11.1-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestNotifications/N-4: unknown event"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No notification endpoint on this profile; credential responses carry no notification_id."
+      wallet:
+        status: not-applicable
+        reason: "No notification endpoint on this profile; credential responses carry no notification_id."
+  OID4VCI-11.1-03:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestNotifications"
+      - "services/eudi-credential-issuer/internal/httpapi:TestNotifications/N-4: unknown event"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No notification endpoint on this profile; credential responses carry no notification_id."
+      wallet:
+        status: not-applicable
+        reason: "No notification endpoint on this profile; credential responses carry no notification_id."
+  OID4VCI-11.1-06:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceNotificationIgnoresUnknownMembers"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No notification endpoint on this profile; credential responses carry no notification_id."
+      wallet:
+        status: not-applicable
+        reason: "No notification endpoint on this profile; credential responses carry no notification_id."
+  OID4VCI-11.2-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestNotifications"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No notification endpoint on this profile; credential responses carry no notification_id."
+      wallet:
+        status: not-applicable
+        reason: "No notification endpoint on this profile; credential responses carry no notification_id."
+  OID4VCI-11.2-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestNotifications"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No notification endpoint on this profile; credential responses carry no notification_id."
+      wallet:
+        status: not-applicable
+        reason: "No notification endpoint on this profile; credential responses carry no notification_id."
+  OID4VCI-11.3-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestNotifications/N-3: unknown id"
+      - "services/eudi-credential-issuer/internal/httpapi:TestNotifications/N-3: id of another session"
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptionRefusals/E8 errors are not encrypted"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No notification endpoint on this profile; credential responses carry no notification_id."
+      wallet:
+        status: not-applicable
+        reason: "No notification endpoint on this profile; credential responses carry no notification_id."
+  OID4VCI-12.2.2-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
+      - "services/eudi-credential-issuer/internal/httpapi:TestProviders/P-1 metadata of a provider"
+      - "services/eudi-credential-issuer/internal/httpapi:TestCombinedMetadata"
+  OID4VCI-12.2.2-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/H-1: public URL without https"
+      - "services/eudi-credential-issuer/internal/issuance:TestNewAcceptsPublicURLs"
+  OID4VCI-12.2.2-05:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
+      - "services/eudi-credential-issuer/internal/httpapi:TestProviders/P-1 metadata of a provider"
+  OID4VCI-12.2.2-06:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
+  OID4VCI-12.2.2-07:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
+  OID4VCI-12.2.2-08:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
+  OID4VCI-12.2.2-10:
+    status: not-applicable
+    reason: "The issuer ignores Accept-Language, sends all display data it has and sends no Content-Language header."
+  OID4VCI-12.2.3-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
+      - "services/eudi-credential-issuer/internal/httpapi:TestProviders/P-1 metadata of a provider"
+  OID4VCI-12.2.3-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
+  OID4VCI-12.2.3-03:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
+  OID4VCI-12.2.3-04:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
+  OID4VCI-12.2.3-05:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
+  OID4VCI-12.2.3-06:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
+  OID4VCI-12.2.3-07:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceSignedMetadataIssuedAt"
+  OID4VCI-12.2.3-08:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptionMetadata/E1 signed metadata"
+      - "services/eudi-credential-issuer/internal/httpapi:TestProviders/P-1 metadata of a provider"
+  OID4VCI-12.2.4-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
+      - "services/eudi-credential-issuer/internal/httpapi:TestProviders/P-1 metadata of a provider"
+  OID4VCI-12.2.4-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
+      - "services/eudi-credential-issuer/internal/httpapi:TestProviders/P-1 metadata of a provider"
+  OID4VCI-12.2.4-05:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceIssuerMetadata"
+  OID4VCI-12.2.4-06:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/H-1: public URL without https"
+      - "services/eudi-credential-issuer/internal/issuance:TestNewAcceptsPublicURLs"
+  OID4VCI-12.2.4-07:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/H-1: public URL without https"
+      - "services/eudi-credential-issuer/internal/issuance:TestNewAcceptsPublicURLs"
+  OID4VCI-12.2.4-08:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/H-1: public URL without https"
+      - "services/eudi-credential-issuer/internal/issuance:TestNewAcceptsPublicURLs"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No deferred_credential_endpoint on this profile: there is no authorization code flow, the only route that defers."
+      wallet:
+        status: not-applicable
+        reason: "No deferred_credential_endpoint on this profile: there is no authorization code flow, the only route that defers."
+  OID4VCI-12.2.4-09:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/H-1: public URL without https"
+      - "services/eudi-credential-issuer/internal/issuance:TestNewAcceptsPublicURLs"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No notification_endpoint on this profile."
+      wallet:
+        status: not-applicable
+        reason: "No notification_endpoint on this profile."
+  OID4VCI-12.2.4-10:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptionMetadata/E1 signed metadata"
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptedIssuance"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No credential_request_encryption on this profile: the NL Wallet (v0.6.0) does not encrypt credential requests."
+  OID4VCI-12.2.4-11:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptionMetadata/E1 metadata"
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptionMetadata/E1 signed metadata"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No credential_request_encryption on this profile: the NL Wallet (v0.6.0) does not encrypt credential requests."
+  OID4VCI-12.2.4-12:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptionMetadata/E1 metadata"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No credential_request_encryption on this profile: the NL Wallet (v0.6.0) does not encrypt credential requests."
+  OID4VCI-12.2.4-13:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptionMetadata/E1 metadata"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No credential_request_encryption on this profile: the NL Wallet (v0.6.0) does not encrypt credential requests."
+  OID4VCI-12.2.4-14:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptionMetadata/E1 metadata"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No credential_response_encryption on this profile: the NL Wallet (v0.6.0) does not ask for encrypted responses."
+  OID4VCI-12.2.4-15:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptionMetadata/E1 metadata"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No credential_response_encryption on this profile: the NL Wallet (v0.6.0) does not ask for encrypted responses."
+  OID4VCI-12.2.4-16:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestEncryptionMetadata/E1 metadata"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No credential_response_encryption on this profile: the NL Wallet (v0.6.0) does not ask for encrypted responses."
+  OID4VCI-12.2.4-18:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceIssuerMetadata"
+      - "services/eudi-credential-issuer/internal/issuance:TestConformanceBatchSizeInMetadata"
+  OID4VCI-12.2.4-19:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceIssuerMetadata"
+      - "services/eudi-credential-issuer/internal/issuance:TestConformanceBatchSizeInMetadata"
+  OID4VCI-12.2.4-20:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
+  OID4VCI-12.2.4-21:
+    status: not-applicable
+    reason: "The issuer display carries no logo."
+  OID4VCI-12.2.4-22:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceIssuerMetadata"
+  OID4VCI-12.2.4-23:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestWalletInitiatedRequests/W1: scope of a configuration with one offer"
+      - "services/eudi-credential-issuer/internal/httpapi:TestOneConfigurationPerOfferAtTheIssuer"
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/duplicate scope"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No authorization code flow on this profile, so the authorization server receives no scope; every configuration has a unique scope nonetheless."
+      wallet:
+        status: not-applicable
+        reason: "No authorization code flow on this profile, so the authorization server receives no scope; every configuration has a unique scope nonetheless."
+  OID4VCI-12.2.4-24:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceIssuerMetadata"
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceCredentialsAreKeyBound"
+  OID4VCI-12.2.4-25:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceIssuerMetadata"
+  OID4VCI-12.2.4-26:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/M-2: a display without a name"
+      - "services/eudi-credential-issuer/internal/httpapi:TestADisplayWithoutLocale"
+  OID4VCI-12.2.4-27:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/M-1: two displays with one locale"
+  OID4VCI-12.2.4-28:
+    status: not-applicable
+    reason: "A credential display carries a name and locale only, no logo."
+  OID4VCI-12.2.4-29:
+    status: not-applicable
+    reason: "A credential display carries a name and locale only, no background image."
+  OID4VCI-12.2.4-30:
+    status: passed
+    tests:
+      - "services/asi-authorization-server/internal/httpapi:TestTheConsentForIssuanceNamesTheCredential"
+      - "services/asi-authorization-server/internal/issuermetadata:TestFetch"
+      - "services/eudi-credential-issuer/internal/httpapi:TestAuthorizeSendsTheCitizenToTheLogin"
+      - "services/eudi-credential-issuer/internal/login:TestTheFirstLoginRegistersTheProvider"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "No authorization code flow on this profile, so the authorization server renders no consent; the offer is made for the citizen in advance."
+      wallet:
+        status: not-applicable
+        reason: "No authorization code flow on this profile, so the authorization server renders no consent; the offer is made for the citizen in advance."
+  OID4VCI-13.2-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestPushedAuthorizationRefusals/P6: plain PKCE"
+      - "services/eudi-credential-issuer/internal/httpapi:TestPushedAuthorizationRefusals/P7: redirect_uri of another wallet"
+      - "services/eudi-credential-issuer/internal/httpapi:TestTheCodeIsBoundToThePushedRequest/P17: used twice"
+      - "services/eudi-credential-issuer/internal/httpapi:TestACodeBoundToADPoPKey"
+      - "services/eudi-credential-issuer/internal/httpapi:TestDPoPJKTInThePushedRequest"
+      - "services/eudi-credential-issuer/internal/httpapi:TestRefreshTokenRefusals/F-3: another DPoP key"
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueEUDI/C5 DPoP key of another wallet"
+    profiles:
+      nl:
+        status: deviation
+        tests:
+          - "services/eudi-credential-issuer/internal/httpapi:TestToken/T3 no DPoP proof"
+          - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
+        reason: "Access tokens are DPoP-bound, but the NL credential preview endpoint takes the token as a bearer token, once per token, because the NL Wallet (v0.6.0) calls it without DPoP."
+      wallet:
+        status: deviation
+        tests:
+          - "services/eudi-credential-issuer/internal/httpapi:TestCombinedPreviewOnlyForNL"
+          - "services/eudi-credential-issuer/internal/httpapi:TestCombinedNLPlainJWT"
+        reason: "Access tokens are DPoP-bound, but for a wallet of the NL Wallet provider the NL credential preview endpoint takes the token as a bearer token, once per token, because the NL Wallet (v0.6.0) calls it without DPoP; an EUDI wallet's token is refused there."
+  OID4VCI-13.2-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestPushedAuthorizationRequest"
+      - "services/eudi-credential-issuer/internal/httpapi:TestPushedAuthorizationRefusals"
+      - "services/eudi-credential-issuer/internal/httpapi:TestTheAuthorizationRequestNeedsAPushedRequest"
+      - "services/eudi-credential-issuer/internal/httpapi:TestALoginReturnsACodeToTheWallet"
+      - "services/eudi-credential-issuer/internal/httpapi:TestACodeBoundToADPoPKey"
+      - "services/eudi-credential-issuer/internal/httpapi:TestDPoPJKTInThePushedRequest"
+      - "services/eudi-credential-issuer/internal/httpapi:TestTheCodeIsBoundToThePushedRequest"
+      - "services/eudi-credential-issuer/internal/httpapi:TestRefreshTokens"
+    profiles:
+      nl:
+        status: deviation
+        tests:
+          - "services/eudi-credential-issuer/internal/httpapi:TestToken"
+        reason: "This issuer offers the NL Wallet (v0.6.0) the pre-authorized code flow only; whether the NL Wallet completes the authorization code flow at an external issuer is not tested. The authorization code flow is offered on the eudi profile. At the token endpoint client authentication and DPoP are required."
+      wallet:
+        status: deviation
+        tests:
+          - "services/eudi-credential-issuer/internal/httpapi:TestCombinedToken"
+        reason: "The combined profile carries pre-authorized offers that both wallets can read (QTSP route); this issuer offers the NL Wallet (v0.6.0) the pre-authorized code flow only, so EUDI wallets use the eudi profile for the authorization code flow. At the token endpoint client authentication and DPoP are required."
+  OID4VCI-13.2-03:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
+      - "services/eudi-credential-issuer/internal/httpapi:TestToken/W2 unknown wallet provider"
+      - "services/eudi-credential-issuer/internal/httpapi:TestPushedAuthorizationRefusals/P5: no client attestation"
+      - "services/eudi-credential-issuer/internal/httpapi:TestCombinedToken"
+  OID4VCI-13.2-04:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestToken/T3 no DPoP proof"
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueEUDI/C5 DPoP key of another wallet"
+      - "services/eudi-credential-issuer/internal/httpapi:TestACodeBoundToADPoPKey"
+      - "services/eudi-credential-issuer/internal/httpapi:TestDPoPJKTInThePushedRequest"
+      - "services/oid4vc-kit/dpop:TestVerify"
+    profiles:
+      nl:
+        status: deviation
+        tests:
+          - "services/eudi-credential-issuer/internal/httpapi:TestToken/T3 no DPoP proof"
+          - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
+        reason: "Access tokens are DPoP-bound, but the NL credential preview endpoint takes the token as a bearer token, once per token, because the NL Wallet (v0.6.0) calls it without DPoP."
+      wallet:
+        status: deviation
+        tests:
+          - "services/eudi-credential-issuer/internal/httpapi:TestCombinedPreviewOnlyForNL"
+          - "services/eudi-credential-issuer/internal/httpapi:TestCombinedNLPlainJWT"
+        reason: "Access tokens are DPoP-bound, but for a wallet of the NL Wallet provider the NL credential preview endpoint takes the token as a bearer token, once per token, because the NL Wallet (v0.6.0) calls it without DPoP; an EUDI wallet's token is refused there."
+  OID4VCI-13.3-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
+  OID4VCI-13.5-05:
+    status: not-applicable
+    reason: "The Credential Offer carries no End-User data: only the Credential Issuer Identifier, credential configuration IDs and a pre-authorized code or issuer_state. A configuration ID can still say something about the End-User (for example a benefit type); the source that names it decides that."
+  OID4VCI-13.8-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
+      - "services/eudi-credential-issuer/internal/issuance:TestProofWithoutNonceIsInvalidProof"
+      - "services/eudi-credential-issuer/internal/httpapi:TestCombinedNLPlainJWT"
+  OID4VCI-13.8-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueEUDI/key attestation below the required level"
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueEUDI/C3 no key attestation"
+      - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
+    profiles:
+      nl:
+        status: deviation
+        reason: "The nl profile does not check how the wallet protects its keys: the NL Wallet (v0.6.0) cannot attest its keys."
+      wallet:
+        status: deviation
+        tests:
+          - "services/eudi-credential-issuer/internal/httpapi:TestCombinedEUDIMustAttest"
+          - "services/eudi-credential-issuer/internal/httpapi:TestCombinedNLPlainJWT"
+        reason: "A wallet of the NL Wallet provider, recognised by its Wallet Instance Attestation, may prove possession without key attestation, because the NL Wallet (v0.6.0) cannot attest its keys; any other wallet must attest them."
+  OID4VCI-13.9-01:
+    status: not-applicable
+    reason: "Incoming TLS ends at the proxy in front of the issuer, where BCP 195 applies; the issuer requires an https public URL. Outgoing calls use Go's TLS defaults (TLS 1.2 or higher)."
+  OID4VCI-13.9-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/source:TestFetchWithOwnRoots"
+  OID4VCI-13.10-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueEUDI/C5 DPoP key of another wallet"
+      - "services/eudi-credential-issuer/internal/httpapi:TestRefreshTokenRefusals/F-3: another DPoP key"
+      - "services/oid4vc-kit/dpop:TestVerify"
+    profiles:
+      nl:
+        status: deviation
+        tests:
+          - "services/eudi-credential-issuer/internal/httpapi:TestToken/T3 no DPoP proof"
+          - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
+        reason: "Access tokens are DPoP-bound, but the NL credential preview endpoint takes the token as a bearer token, once per token, because the NL Wallet (v0.6.0) calls it without DPoP."
+      wallet:
+        status: deviation
+        tests:
+          - "services/eudi-credential-issuer/internal/httpapi:TestCombinedPreviewOnlyForNL"
+          - "services/eudi-credential-issuer/internal/httpapi:TestCombinedNLPlainJWT"
+        reason: "Access tokens are DPoP-bound, but for a wallet of the NL Wallet provider the NL credential preview endpoint takes the token as a bearer token, once per token, because the NL Wallet (v0.6.0) calls it without DPoP; an EUDI wallet's token is refused there."
+  OID4VCI-14.3-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceLaterRequestsRevokeNothing"
+  OID4VCI-15.1-01:
+    status: passed
+    tests:
+      - "services/asi-authorization-server/internal/httpapi:TestTheConsentForIssuanceNamesTheCredential"
+      - "services/eudi-credential-issuer/internal/httpapi:TestAuthorizeSendsTheCitizenToTheLogin"
+    reason: "On the authorization code flow the citizen consents at GBO's authorization server, which names the credential and its claims from the issuer metadata. A pre-authorized or disclosure-based offer is made at the citizen's own request to the offer caller, and the wallet shows it before accepting."
+    profiles:
+      nl:
+        status: passed
+        tests:
+          - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
+      wallet:
+        status: not-applicable
+        reason: "Pre-authorized offers only: the offer is made at the citizen's own request to the offer caller (the QTSP), and the wallet shows it before accepting."
+  OID4VCI-15.1-02:
+    status: passed
+    tests:
+      - "services/asi-authorization-server/internal/httpapi:TestTheConsentForIssuanceNamesTheCredential"
+      - "services/asi-authorization-server/internal/issuermetadata:TestFetch"
+    reason: "On the authorization code flow the citizen consents at GBO's authorization server, which names the credential and its claims from the issuer metadata. A pre-authorized or disclosure-based offer is made at the citizen's own request to the offer caller, and the wallet shows it before accepting."
+    profiles:
+      nl:
+        status: passed
+        tests:
+          - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
+      wallet:
+        status: not-applicable
+        reason: "Pre-authorized offers only: the offer is made at the citizen's own request to the offer caller (the QTSP), and the wallet shows it before accepting. A wallet of the NL Wallet provider also gets the NL credential preview."
+  OID4VCI-15.2-01:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/sdjwtvc:TestIssueAndParseRoundTrip"
+      - "services/oid4vc-kit/sdjwtvc:TestReservedClaimsAreNotConcealed"
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
+  OID4VCI-15.3-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/postgres:TestPurge"
+  OID4VCI-15.3-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceCredentialsAreNotLogged"
+      - "services/eudi-credential-issuer/internal/issuance:TestConformanceIssuedCredentialsAreNotStored"
+  OID4VCI-15.3-03:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestConformanceIssuedCredentialsAreNotStored"
+      - "services/eudi-credential-issuer/internal/issuance:TestConformanceDeferredIssuanceDiscardsTheHolderKey"
+  OID4VCI-15.4.1-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueEUDI/C1 jwt proof with key attestation"
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
+      - "services/eudi-credential-issuer/internal/httpapi:TestCombinedNLPlainJWT"
+  OID4VCI-15.4.1-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestConformanceTimeClaimsAreRounded"
+  OID4VCI-15.4.1-03:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestConformanceIssuedCredentialsAreNotStored"
+      - "services/eudi-credential-issuer/internal/issuance:TestConformanceDeferredIssuanceDiscardsTheHolderKey"
+  OID4VCI-A.1.1.1-01:
+    status: not-applicable
+    reason: "The issuer issues SD-JWT VC only; W3C VCDM formats are not issued."
+  OID4VCI-A.1.1.2-01:
+    status: not-applicable
+    reason: "The issuer issues SD-JWT VC only; W3C VCDM formats are not issued."
+  OID4VCI-A.1.1.2-02:
+    status: not-applicable
+    reason: "The issuer issues SD-JWT VC only; W3C VCDM formats are not issued."
+  OID4VCI-A.1.1.4-01:
+    status: not-applicable
+    reason: "The issuer issues SD-JWT VC only; W3C VCDM formats are not issued."
+  OID4VCI-A.1.1.4-02:
+    status: not-applicable
+    reason: "The issuer issues SD-JWT VC only; W3C VCDM formats are not issued."
+  OID4VCI-A.1.2.1-01:
+    status: not-applicable
+    reason: "The issuer issues SD-JWT VC only; W3C VCDM formats are not issued."
+  OID4VCI-A.1.2.2-01:
+    status: not-applicable
+    reason: "The issuer issues SD-JWT VC only; W3C VCDM formats are not issued."
+  OID4VCI-A.1.2.2-02:
+    status: not-applicable
+    reason: "The issuer issues SD-JWT VC only; W3C VCDM formats are not issued."
+  OID4VCI-A.1.2.2-03:
+    status: not-applicable
+    reason: "The issuer issues SD-JWT VC only; W3C VCDM formats are not issued."
+  OID4VCI-A.1.2.4-01:
+    status: not-applicable
+    reason: "The issuer issues SD-JWT VC only; W3C VCDM formats are not issued."
+  OID4VCI-A.1.2.4-02:
+    status: not-applicable
+    reason: "The issuer issues SD-JWT VC only; W3C VCDM formats are not issued."
+  OID4VCI-A.1.3.1-01:
+    status: not-applicable
+    reason: "The issuer issues SD-JWT VC only; W3C VCDM formats are not issued."
+  OID4VCI-A.2.2-01:
+    status: not-applicable
+    reason: "The issuer issues SD-JWT VC only."
+  OID4VCI-A.2.2-02:
+    status: not-applicable
+    reason: "The issuer issues SD-JWT VC only."
+  OID4VCI-A.2.4-01:
+    status: not-applicable
+    reason: "The issuer issues SD-JWT VC only."
+  OID4VCI-A.3.2-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialAlgorithmMetadata"
+  OID4VCI-A.3.2-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestOneConfigurationPerOfferAtTheIssuer"
+  OID4VCI-A.3.4-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
+      - "services/eudi-credential-issuer/internal/httpapi:TestRevocation"
+      - "services/oid4vc-kit/sdjwtvc:TestIssueAndParseRoundTrip"
+  OID4VCI-A.3.4-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
+      - "services/eudi-credential-issuer/internal/httpapi:TestRevocation"
+  OID4VCI-B.2-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/empty claim path"
+      - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
+  OID4VCI-B.2-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/empty claim path"
+      - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
+  OID4VCI-B.2-03:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/M-1: two claim displays with one locale"
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/M-2: a claim display without a name"
+  OID4VCI-B.3-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/M-3: a repeated claim path"
+  OID4VCI-C-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestNewRefusesConfigurations/empty claim path"
+  OID4VCI-D-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueEUDI/key attestation below the required level"
+      - "services/oid4vc-kit/keyattest:TestVerify"
+      - "services/oid4vc-kit/oid4vci:TestProofWithKeyAttestation"
+    profiles:
+      nl:
+        status: deviation
+        reason: "The nl profile ignores a key_attestation header and refuses the attestation proof type: the NL Wallet (v0.6.0) cannot attest its keys, so its metadata asks for no key attestation."
+      wallet:
+        status: passed
+        tests:
+          - "services/eudi-credential-issuer/internal/httpapi:TestCombinedEUDIMustAttest"
+          - "services/eudi-credential-issuer/internal/httpapi:TestCombinedNLWithKeyAttestation"
+  OID4VCI-D-03:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestMetadata"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "The nl profile evaluates no key attestations, and its metadata asks for none."
+      wallet:
+        status: deviation
+        tests:
+          - "services/eudi-credential-issuer/internal/httpapi:TestCombinedMetadata"
+          - "services/eudi-credential-issuer/internal/httpapi:TestCombinedEUDIMustAttest"
+        reason: "The jwt proof type in the metadata has no key_attestations_required, for the NL Wallet (v0.6.0), which cannot attest its keys; wallets of other providers must attest their keys all the same, which the metadata does not say. The attestation proof type carries key_attestations_required."
+  OID4VCI-D.1-01:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/keyattest:TestKeyAttestationConformance/F.3-04 ES384 with a chain that verifies"
+      - "services/oid4vc-kit/keyattest:TestKeyAttestationConformance/D.1-02 MAC"
+      - "services/oid4vc-kit/keyattest:TestKeyAttestationConformance/D.1-02 none"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyAttestationRefusals"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "The nl profile takes no key attestations: the NL Wallet (v0.6.0) cannot attest its keys."
+  OID4VCI-D.1-02:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/keyattest:TestKeyAttestationConformance/D.1-02 MAC"
+      - "services/oid4vc-kit/keyattest:TestKeyAttestationConformance/D.1-02 none"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyAttestationRefusals"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "The nl profile takes no key attestations: the NL Wallet (v0.6.0) cannot attest its keys."
+  OID4VCI-D.1-03:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/keyattest:TestKeyAttestationConformance/D.1-03 no typ"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyAttestationRefusals"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "The nl profile takes no key attestations: the NL Wallet (v0.6.0) cannot attest its keys."
+  OID4VCI-D.1-04:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/keyattest:TestKeyAttestationConformance/D.1-04 typ jwt"
+      - "services/oid4vc-kit/keyattest:TestKeyAttestationConformance/D.1-04 typ of a proof"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyAttestationRefusals"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "The nl profile takes no key attestations: the NL Wallet (v0.6.0) cannot attest its keys."
+  OID4VCI-D.1-05:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/keyattest:TestKeyAttestationConformance/D.1-05 no iat"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyAttestationRefusals"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "The nl profile takes no key attestations: the NL Wallet (v0.6.0) cannot attest its keys."
+  OID4VCI-D.1-06:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vci:TestProofWithKeyAttestation"
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueEUDI/C1 attestation proof without exp"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "The nl profile takes no key attestations: the NL Wallet (v0.6.0) cannot attest its keys."
+  OID4VCI-D.1-07:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/keyattest:TestVerify"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "The nl profile takes no key attestations: the NL Wallet (v0.6.0) cannot attest its keys."
+  OID4VCI-D.1-08:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyAttestationRefusals"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "The nl profile takes no key attestations: the NL Wallet (v0.6.0) cannot attest its keys."
+  OID4VCI-E-01:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/clientattest:TestVerify"
+      - "services/eudi-credential-issuer/internal/httpapi:TestToken/W2 unknown wallet provider"
+      - "services/eudi-credential-issuer/internal/httpapi:TestPushedAuthorizationRefusals/P5: attestation of an untrusted wallet"
+      - "services/eudi-credential-issuer/internal/httpapi:TestCombinedToken"
+  OID4VCI-E-02:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/clientattest:TestVerify"
+      - "services/eudi-credential-issuer/internal/httpapi:TestToken/W4 PoP without challenge"
+      - "services/eudi-credential-issuer/internal/httpapi:TestPushedAuthorizationRefusals/P5: no client attestation"
+  OID4VCI-F-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialRequestProofs"
+  OID4VCI-F-02:
+    status: not-applicable
+    reason: "The issuer does not support the di_vp proof type: it issues SD-JWT VC only, and its metadata offers the jwt and attestation proof types."
+  OID4VCI-F-03:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialRequestProofs/eudi"
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialRequestProofs/wallet as eudi"
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialRequestProofs/wallet as nl"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "The nl profile offers the jwt proof type only: the NL Wallet (v0.6.0) cannot attest its keys."
+  OID4VCI-F.1-01:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyProofRefusals"
+  OID4VCI-F.1-02:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-22 ES384"
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-03 MAC"
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-03 none"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyProofRefusals"
+  OID4VCI-F.1-03:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-03 MAC"
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-03 none"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyProofRefusals"
+  OID4VCI-F.1-04:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-04 no typ"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyProofRefusals"
+  OID4VCI-F.1-05:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-05 typ jwt"
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-05 typ key-attestation"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyProofRefusals"
+  OID4VCI-F.1-06:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-06 F.1-07 jwk and kid"
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-06 kid alone"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyProofRefusals"
+  OID4VCI-F.1-07:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-06 F.1-07 jwk and kid"
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-07 F.1-08 jwk and a valid x5c"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyProofRefusals"
+  OID4VCI-F.1-08:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-08 x5c and kid"
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-07 F.1-08 jwk and a valid x5c"
+  OID4VCI-F.1-09:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyAttestationRefusals"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "The nl profile takes no key attestations: the NL Wallet (v0.6.0) cannot attest its keys."
+  OID4VCI-F.1-13:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vci:TestVerifyJWTProof"
+  OID4VCI-F.1-14:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vci:TestVerifyJWTProof"
+  OID4VCI-F.1-15:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-15 no iat"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyProofRefusals"
+  OID4VCI-F.1-16:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vci:TestVerifyJWTProof"
+  OID4VCI-F.1-17:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueNL"
+      - "services/eudi-credential-issuer/internal/issuance:TestProofWithoutNonceIsInvalidProof"
+  OID4VCI-F.1-18:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/issuance:TestProofWithoutNonceIsInvalidProof"
+  OID4VCI-F.1-19:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-19 signed by another key than the jwk"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyProofRefusals"
+  OID4VCI-F.1-20:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueEUDI/C1 jwt proof with key attestation"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "The nl profile takes no key attestations: the NL Wallet (v0.6.0) cannot attest its keys."
+  OID4VCI-F.1-21:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialAlgorithmMetadata"
+  OID4VCI-F.1-22:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-22 ES384"
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-03 MAC"
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance/F.1-03 none"
+      - "services/oid4vc-kit/keyattest:TestKeyAttestationConformance/F.3-04 ES384 with a chain that verifies"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyProofRefusals"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyAttestationRefusals"
+  OID4VCI-F.2-01:
+    status: not-applicable
+    reason: "The issuer does not support the di_vp proof type: it issues SD-JWT VC only, and its metadata offers the jwt and attestation proof types."
+  OID4VCI-F.2-02:
+    status: not-applicable
+    reason: "The issuer does not support the di_vp proof type: it issues SD-JWT VC only, and its metadata offers the jwt and attestation proof types."
+  OID4VCI-F.2-03:
+    status: not-applicable
+    reason: "The issuer does not support the di_vp proof type: it issues SD-JWT VC only, and its metadata offers the jwt and attestation proof types."
+  OID4VCI-F.2-04:
+    status: not-applicable
+    reason: "The issuer does not support the di_vp proof type: it issues SD-JWT VC only, and its metadata offers the jwt and attestation proof types."
+  OID4VCI-F.2-05:
+    status: not-applicable
+    reason: "The issuer does not support the di_vp proof type: it issues SD-JWT VC only, and its metadata offers the jwt and attestation proof types."
+  OID4VCI-F.2-06:
+    status: not-applicable
+    reason: "The issuer does not support the di_vp proof type: it issues SD-JWT VC only, and its metadata offers the jwt and attestation proof types."
+  OID4VCI-F.2-07:
+    status: not-applicable
+    reason: "The issuer does not support the di_vp proof type: it issues SD-JWT VC only, and its metadata offers the jwt and attestation proof types."
+  OID4VCI-F.2-08:
+    status: not-applicable
+    reason: "The issuer does not support the di_vp proof type: it issues SD-JWT VC only, and its metadata offers the jwt and attestation proof types."
+  OID4VCI-F.2-09:
+    status: not-applicable
+    reason: "The issuer does not support the di_vp proof type: it issues SD-JWT VC only, and its metadata offers the jwt and attestation proof types."
+  OID4VCI-F.2-10:
+    status: not-applicable
+    reason: "The issuer does not support the di_vp proof type: it issues SD-JWT VC only, and its metadata offers the jwt and attestation proof types."
+  OID4VCI-F.2-11:
+    status: not-applicable
+    reason: "The issuer does not support the di_vp proof type: it issues SD-JWT VC only, and its metadata offers the jwt and attestation proof types."
+  OID4VCI-F.2-12:
+    status: not-applicable
+    reason: "The issuer does not support the di_vp proof type: it issues SD-JWT VC only, and its metadata offers the jwt and attestation proof types."
+  OID4VCI-F.2-13:
+    status: not-applicable
+    reason: "The issuer does not support the di_vp proof type: it issues SD-JWT VC only, and its metadata offers the jwt and attestation proof types."
+  OID4VCI-F.2-14:
+    status: not-applicable
+    reason: "The issuer does not support the di_vp proof type: it issues SD-JWT VC only, and its metadata offers the jwt and attestation proof types."
+  OID4VCI-F.3-01:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyAttestationRefusals"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "The nl profile offers the jwt proof type only: the NL Wallet (v0.6.0) cannot attest its keys."
+  OID4VCI-F.3-02:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestCredentialAlgorithmMetadata"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "The nl profile offers the jwt proof type only: the NL Wallet (v0.6.0) cannot attest its keys."
+  OID4VCI-F.3-03:
+    status: passed
+    tests:
+      - "services/eudi-credential-issuer/internal/httpapi:TestIssueEUDI/C1 attestation proof"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "The nl profile offers the jwt proof type only: the NL Wallet (v0.6.0) cannot attest its keys."
+  OID4VCI-F.3-04:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/keyattest:TestKeyAttestationConformance/F.3-04 ES384 with a chain that verifies"
+      - "services/oid4vc-kit/keyattest:TestKeyAttestationConformance/D.1-02 MAC"
+      - "services/oid4vc-kit/keyattest:TestKeyAttestationConformance/D.1-02 none"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyAttestationRefusals"
+    profiles:
+      nl:
+        status: not-applicable
+        reason: "The nl profile offers the jwt proof type only: the NL Wallet (v0.6.0) cannot attest its keys."
+  OID4VCI-F.4-01:
+    status: passed
+    tests:
+      - "services/oid4vc-kit/oid4vci:TestJWTProofConformance"
+      - "services/oid4vc-kit/oid4vci:TestJWTProofWithAPrivateJWK"
+      - "services/eudi-credential-issuer/internal/httpapi:TestKeyProofRefusals"

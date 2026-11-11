@@ -7,6 +7,189 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Added
+- **Own credential issuer, first phase** (#614): `services/eudi-credential-issuer`
+  issues SD-JWT VCs with the Pre-Authorized Code Flow of OpenID4VCI 1.0 and
+  HAIP 1.0, for two wallet profiles: the NL Wallet (v0.6.0 contract, with its
+  preview endpoint) and wallets that require key attestation, such as the EUDI
+  reference wallet. Each source is its own Attestation Provider with its own
+  issuer identifier, certificates and status lists. It authenticates wallets
+  with a Wallet Instance Attestation, binds tokens with DPoP, signs its
+  metadata and publishes Token Status Lists. Offers are created through an internal API that fetches the
+  data from the bronpoort with the contract `eudi-adapter` already serves.
+  The protocol building blocks live in the new library `services/oid4vc-kit`.
+  The issuer is not deployed; `eudi-issuance-server` stays in place.
+- **Images for the new EUDI services** (#614, #639, #642): the image manifest
+  publishes `eudi-credential-issuer`, `eudi-wallet-verifier` and
+  `test-pid-source` to `ghcr.io/ictu/gbo-demo`, so an environment can deploy
+  them. The materialization and runtime projection run on the existing
+  `eudi-adapter` image.
+- **Wallet registration material for the own credential issuer** (#614):
+  `make create-development-registrar-root` and `make
+  provision-wallet-registration` issue per source an access certificate
+  (WRPAC, organizationIdentifier `NTRNL-<KvK number>`) under the development
+  reader root and a registration certificate (WRPRC, entitlement
+  `PUB_EAA_Provider`) signed under a separate development registrar root,
+  with the reader-root CRL and the WRPRC status list for a trust host. The
+  WRPRC carries its status in two forms at once: the normative form of ETSI
+  TS 119 475 (`idx` as a numeric string), which NL Wallet v0.6 requires, and
+  `status_list` with a numeric index (Annex C), which the EUDI reference
+  wallet reads.
+- **Own credential issuer in Docker Compose** (#614): opt-in profile
+  `credential-issuer` runs the issuer beside `eudi-issuance-server`, with its
+  own database in `postgres-eudi`, a materialization job and a static
+  `trust-host` for the reader-root CRL and the WRPRC status list. The internal
+  API is published on 127.0.0.1 only; tunnel routes for both public hosts are
+  documented.
+- **Configuration of the own credential issuer from the Source Release**
+  (#614): `eudi-adapter materialize-credential-issuer` writes the issuer's
+  configuration: per source an Attestation Provider with its certificates and
+  wallet registration, per activated type a credential configuration, and the
+  wallet profiles whose trusted wallet providers are mounted.
+- **Encrypted credential requests and responses in the own credential
+  issuer** (#614): the `eudi` profile publishes `credential_request_encryption`
+  and `credential_response_encryption` (ECDH-ES on P-256, A128GCM or A256GCM,
+  not required), as the EUDI reference wallet for Android requires. A wallet
+  that asks for an encrypted response must encrypt its request. `make
+  provision-wallet-registration` creates each source's request key once; run
+  it again for sources provisioned before.
+- **One issuer identifier for both wallets** (#614): the own credential
+  issuer gets a combined profile (`wallet`). Its metadata offers the `jwt`
+  proof type without key attestation, which the NL Wallet sends, and the
+  `attestation` proof type with it; only wallets of the NL wallet provider
+  may skip key attestation. One offer, one QR code, then reaches either
+  wallet. NL Wallet v0.6.0 cannot read this metadata yet (fixed in
+  nl-wallet after v0.6.0). `make provision-qtsp-wallet-registration`
+  registers the reference QTSP as a provider of the issuer (`QEAA_Provider`),
+  whose callback the issuer reaches over its own TLS certificate. The QTSP
+  compares nationalities on their code, so a mock login matches a PID.
+- **Issuer name in the wallets** (#614): the own credential issuer's
+  metadata names each provider in `display` by the organization name of its
+  access certificate, so the EUDI wallets show it instead of "Unknown". The
+  issuer refuses to start with an access certificate without one.
+- **One QR code for the QTSP statement** (#614): after an accepted result
+  the reference QTSP asks the own credential issuer for a pre-authorized
+  offer (`QTSP_ISSUER_OFFERS_URL` in `.env`, off by default; profile
+  `wallet`) and shows its QR code;
+  the citizen logged in at the QTSP already, so the wallet discloses nothing
+  more. The issuer fetches the statement from the QTSP callback by the
+  reference the offer names, which uses the result. The NL Wallet's static
+  link stays available under "NL Wallet (huidige app)" until the NL Wallet
+  reads the combined profile.
+- **Wallet choice in the developer portal** (#614): the wallet QR panel
+  offers "NL Wallet" (as before, through `eudi-issuance-server`) or
+  "EU-wallet" when the own credential issuer has a link for the offer. The
+  links come from its new public `GET /disclosure-offers`; the EU route works
+  only with the GBO test build of the EUDI reference wallet, which trusts the
+  GBO development certificates. Without the issuer the choice is hidden.
+- **Disclosure-based issuance in the own credential issuer** (#614): a
+  wallet discloses the BSN from its PID (OpenID4VP 1.0) and gets a
+  pre-authorized offer through `redirect_uri`, with a fixed link per offer
+  and wallet. The issuer verifies the PID itself (`oid4vc-kit/oid4vp`) and
+  passes the BSN to the source as a disclosure. `make
+  provision-wallet-registration` also issues a WRPRC per source for its
+  verifier role (`Service_Provider`, the `bsn` of the PID); run it again for
+  sources provisioned before, and `make provision-test-pid` too. The materializer writes a disclosure offer per
+  source offer and the trusted PID issuers: the NL pre-production CA and the
+  test PID.
+- **The own issuer explains a source without data to EUDI wallets** (#614):
+  after a disclosure on the `eudi` profile for which the source has no data,
+  the issuer answers with a `redirect_uri` to its page
+  `…/vp/<offer>/no-data` ("Geen gegevens gevonden"), which names the
+  organization and the attestation. The EUDI reference wallets showed the
+  refusal as a generic error ("Houston we have a problem!" with "Try again"
+  on iOS). The NL Wallet keeps `no_issuable_attestations`.
+- **Test PID for the own credential issuer** (#614): `make
+  provision-test-pid` adds a test PID provider (`urn:eudi:pid:nl:1`) under a
+  development root of its own, registered with the `PID_Provider`
+  entitlement, and the new `test-pid-source` stub serves its data from the
+  BRP mock persons. Wallets without a real PID, such as the EUDI reference
+  wallet, get one through a pre-authorized offer. A test fixture, not a PID
+  Provider.
+- **Test PID block in the developer portal**: in the EUDI tab a tester picks
+  a BRP mock person and scans a QR code (or opens the same-device link) with
+  the EUDI reference wallet to get the test PID, without shell access to the
+  issuer's internal API. `dev-portal-backend` makes the offer on the
+  issuer's `eudi` profile and accepts only the mock persons. On by default in
+  the local Compose setup; an empty `TEST_PID_OFFERS_URL` removes the block
+  and its endpoints, since anyone who reaches the portal could otherwise get
+  a test PID. EU wallets only: the NL Wallet takes its PID from its own
+  pre-production issuer.
+- **`eudi-adapter` serves pre-authorized offers** (#614): besides a wallet's
+  PID disclosure it accepts `{"subject": {"bsn": ...}}` from a credential
+  issuer whose offer caller named the subject. It logs that as a separate
+  Dataverwerking, `gbo-bsn-ontvangst-aanvrager`, added to the register of
+  `logboek-eudi-adapter`, before it asks the source.
+- **Refresh tokens at the own credential issuer** (#614): on the `eudi`
+  profile each token response carries a refresh token, valid 30 days, not
+  rotated (FAPI 2.0), bound to the wallet and its DPoP key. A refresh re-issues the claims
+  of the first issuance; the source is not asked again and no BSN is kept,
+  but the claims are kept until the refresh token expires. A revoked offer
+  reference stops it.
+- **Consent that names the credential** (#614): the own credential issuer
+  names the credential configurations in `authorization_details` when it
+  sends the citizen to GBO's authorization server, and the server's request
+  page shows the credential and its claims, read from the issuer's
+  metadata (OpenID4VCI 1.0 sections 12.2.4 and 15.1).
+- **Deferred issuance at the own credential issuer** (#614): when the source
+  is unavailable just after a citizen logged in, the wallet gets its code
+  anyway, the credential request answers `202` with a `transaction_id`, and
+  `POST /{provider}/eudi/deferred_credential` asks the source again on every
+  request (OpenID4VCI 1.0 section 9). The BSN from the login is kept sealed,
+  apart from the session, for at most 24 hours. Replaces the "Bron niet
+  beschikbaar" page after the login. Migration `011_pending_source.sql`.
+- **Transaction codes at the own credential issuer** (#614): on the `eudi`
+  profile a pre-authorized offer may ask for a six-digit transaction code
+  (`tx_code: true` in `POST /offers`). The issuer returns the code apart
+  (`tx_code_value`) for the caller to deliver through another channel, keeps
+  only a hash bound to the offer, and uses the offer up after three wrong
+  codes. The NL Wallet profiles still refuse it.
+- **Notifications at the own credential issuer** (#614): on the `eudi`
+  profile each credential response carries a `notification_id`, and
+  `POST /{provider}/eudi/notification` takes the wallet's
+  `credential_accepted`, `credential_failure` or `credential_deleted`
+  (OpenID4VCI 1.0 section 11). The issuer logs the event; it revokes nothing.
+- **One credential configuration per source offer** (#614): the own
+  credential issuer's configuration now has a credential configuration per
+  offer of an activated type, `<source>-<offer>` with that scope and the
+  offer's label as name ("Inkomensverklaring 2025"), instead of one per type.
+  A wallet that starts at the issuer can so ask for one year; before, a
+  type with two offers gave `invalid_scope`. The type's vct, claims and
+  status list are shared.
+- **The developer portal shows the login QR** (#614): on the EU-wallet tab
+  of an offer the own credential issuer serves, a second QR, "Met inloggen
+  in plaats van PID delen", starts the authorization code flow; the citizen
+  logs in at GBO's authorization server instead of sharing the PID.
+- **Authorization code flow at the own credential issuer** (#614): on the
+  `eudi` profile a citizen identifies by logging in at GBO's authorization
+  server instead of disclosing the PID. The wallet pushes its authorization
+  request (PAR, required), the issuer sends the browser to the login as the
+  source's client, redeems the code there with `private_key_jwt`, DPoP and
+  PKCE, checks the token itself and asks the source with
+  `"origin": "login"`. The wallet gets a code bound to its client,
+  redirect URI, PKCE challenge and, with a DPoP proof at PAR, its DPoP key.
+  When the source has no data or is unavailable, the citizen sees a page
+  with a button back to the wallet. Every source offer gets a login link
+  (`login_link` in `GET /disclosure-offers`). A wallet may also start at
+  the issuer itself, naming the credential type in `scope` or
+  `authorization_details`; that works for a configuration with one source
+  offer and is `invalid_scope` otherwise. Configured with
+  `ISSUER_LOGIN_SERVER`; without it nothing changes.
+- **The ASI authorization server serves credential issuers** (#614): a
+  client registered with the `PUB_EAA_Provider` entitlement and scope
+  `issuance` obtains tokens for the issuance resource of its own
+  organisation (`AZSP_ISSUANCE_RESOURCES`), so the citizen logs in at the
+  same service before a source's attestation is issued to a wallet. The
+  request page then asks consent for an attestation instead of a
+  verification. The ASI part is unchanged: a token for a data service of the
+  ASIP still goes only to a `QEAA_Provider`, and the two roles never share a
+  client. This use is outside ETSI TS 119 478.
+- **`eudi-adapter` knows a BSN from a login** (#614): a credential issuer
+  whose citizen logged in at GBO's authorization server sends
+  `{"subject": {"bsn": ...}, "origin": "login"}`. The adapter logs that as
+  the Dataverwerking `gbo-bsn-uit-inloggen`, added to the register of
+  `logboek-eudi-adapter`; without `origin` the request stays a pre-authorized
+  offer, and an unknown origin is refused before anything is logged or the
+  source is asked.
 - **The landing page offers the Installatie Register scenario**: the DvTP
   card under "Zelf uitproberen" lets the visitor choose between HypotheekBV
   and the Installatie Register, with its own steps, test BSNs and start
@@ -318,6 +501,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- **The developer portal's EUDI chain names both routes** (#614): the
+  first links read "Wallet" (NL Wallet / EUDI-wallet) and "Uitgever"
+  (`eudi-issuance-server` / `eudi-credential-issuer`), as a watched trace
+  does not say which route ran. The hint at the EU-wallet QR says the
+  wallet opens "Geen gegevens gevonden" when the source does not know the
+  BSN.
+- **The bronpoort answers an unknown source or type with 503** (#614):
+  `eudi-adapter` answered `404` both when the source had no data for the
+  person and when it did not know the source or type in the path. An issuer
+  reads 404 as "no data", so a configuration out of step with the active
+  Source Release told the citizen there was nothing. An unknown source or
+  type is now `503`; no data stays `404`.
 - **The README's quick start starts the DvTP demo, and the walkthrough
   matches the demo**: the quick start lists the five passwords every mode
   needs, `FTV_POSTGRES_PASSWORD` and `FTV_ADL_READER_PASSWORD` included, and

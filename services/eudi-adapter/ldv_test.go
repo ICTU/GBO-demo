@@ -109,7 +109,7 @@ func issue(t *testing.T, url string) *http.Response {
 }
 
 func allGBOActivities() []string {
-	return []string{pidExtractionActivity, attestationBuildActivity}
+	return []string{pidExtractionActivity, subjectReceiptActivity, loginSubjectActivity, attestationBuildActivity}
 }
 
 // One issuance is two Dataverwerkingen of the voorziening: reading the BSN
@@ -414,6 +414,121 @@ func TestADisclosureWithoutABSNLogsNothing(t *testing.T) {
 	}
 	if records := logbook.Written(); len(records) != 0 {
 		t.Fatalf("wrote %d records for a disclosure that names nobody: %+v", len(records), records)
+	}
+}
+
+// A credential issuer that makes a pre-authorized offer sends the subject
+// its caller named, not a PID. The adapter serves it, and logs receiving
+// the BSN from the offer caller instead of reading it from a PID.
+func TestAnOfferRequestLogsTheBSNReceipt(t *testing.T) {
+	logbook := ldvtest.New(t, allGBOActivities()...)
+	url := issuanceUnderTest(t, logbook)
+
+	response, err := http.Post(url+"/attestations/belastingdienst/inkomensverklaring?jaar=2025",
+		"application/json", strings.NewReader(`{"subject": {"bsn": "`+walletBSN+`"}}`))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(response.Body)
+		t.Fatalf("status = %d, body = %s", response.StatusCode, raw)
+	}
+	records := logbook.Written()
+	receipt := ldvtest.ByName(records, "dataverwerking.bsn-ontvangst-aanvrager")
+	assembly := ldvtest.ByName(records, "dataverwerking.attestatie-samenstellen")
+	if len(receipt) != 1 || len(assembly) != 1 || len(ldvtest.ByName(records, "dataverwerking.pid-bsn-extractie")) != 0 {
+		t.Fatalf("want one receipt and one assembly record and no PID extraction, got %+v", records)
+	}
+	if got := receipt[0].Attributes[ldv.AttrProcessingActivityID]; got != subjectReceiptActivity {
+		t.Errorf("receipt processing_activity_id = %v, want %s", got, subjectReceiptActivity)
+	}
+	if assembly[0].ParentSpanID != receipt[0].SpanID {
+		t.Error("the assembly record should hang under the BSN receipt")
+	}
+}
+
+// A credential issuer whose citizen logged in at GBO's authorization server
+// sends the BSN from that login, marked with its origin. The adapter logs
+// establishing the BSN from the login, not receiving it from an offer caller.
+func TestALoginRequestLogsTheBSNFromTheLogin(t *testing.T) {
+	logbook := ldvtest.New(t, allGBOActivities()...)
+	url := issuanceUnderTest(t, logbook)
+
+	response, err := http.Post(url+"/attestations/belastingdienst/inkomensverklaring?jaar=2025",
+		"application/json", strings.NewReader(`{"subject": {"bsn": "`+walletBSN+`"}, "origin": "login"}`))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(response.Body)
+		t.Fatalf("status = %d, body = %s", response.StatusCode, raw)
+	}
+	records := logbook.Written()
+	login := ldvtest.ByName(records, "dataverwerking.bsn-uit-inloggen")
+	assembly := ldvtest.ByName(records, "dataverwerking.attestatie-samenstellen")
+	if len(login) != 1 || len(assembly) != 1 ||
+		len(ldvtest.ByName(records, "dataverwerking.bsn-ontvangst-aanvrager")) != 0 ||
+		len(ldvtest.ByName(records, "dataverwerking.pid-bsn-extractie")) != 0 {
+		t.Fatalf("want one login and one assembly record and nothing else, got %+v", records)
+	}
+	if got := login[0].Attributes[ldv.AttrProcessingActivityID]; got != loginSubjectActivity {
+		t.Errorf("login processing_activity_id = %v, want %s", got, loginSubjectActivity)
+	}
+	if assembly[0].ParentSpanID != login[0].SpanID {
+		t.Error("the assembly record should hang under the BSN from the login")
+	}
+}
+
+// An origin the adapter does not know is refused before anything is logged
+// or the source is asked: logging it under another Dataverwerking would be
+// wrong.
+func TestAnUnknownOriginIsRefused(t *testing.T) {
+	logbook := ldvtest.New(t, allGBOActivities()...)
+	asked := false
+	var discarded http.Header
+	outway := capturingOutway(&discarded)
+	url := issuanceUnderTestWithOutway(t, logbook, func(w http.ResponseWriter, r *http.Request) {
+		asked = true
+		outway(w, r)
+	})
+	for _, origin := range []string{`"pid"`, `""`, `"LOGIN"`, `1`, `null`} {
+		body := `{"subject": {"bsn": "` + walletBSN + `"}, "origin": ` + origin + `}`
+		response, err := http.Post(url+"/attestations/belastingdienst/inkomensverklaring?jaar=2025", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatalf("post: %v", err)
+		}
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusBadRequest {
+			t.Errorf("origin %s: status = %d, want 400", origin, response.StatusCode)
+		}
+	}
+	if records := logbook.Written(); len(records) != 0 {
+		t.Fatalf("wrote %d records for requests with an unknown origin", len(records))
+	}
+	if asked {
+		t.Fatal("the source was asked for a request with an unknown origin")
+	}
+}
+
+// An offer request without a BSN names nobody; nothing is logged and the
+// source is not asked.
+func TestAnOfferRequestWithoutABSNLogsNothing(t *testing.T) {
+	logbook := ldvtest.New(t, allGBOActivities()...)
+	url := issuanceUnderTest(t, logbook)
+	for _, body := range []string{`{"subject": {}}`, `{}`, `{"subject": {"bsn": 1}}`} {
+		response, err := http.Post(url+"/attestations/belastingdienst/inkomensverklaring?jaar=2025", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatalf("post: %v", err)
+		}
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("%s: status = %d, want 400", body, response.StatusCode)
+		}
+	}
+	if records := logbook.Written(); len(records) != 0 {
+		t.Fatalf("wrote %d records for requests that name nobody", len(records))
 	}
 }
 

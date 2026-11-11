@@ -149,3 +149,14 @@ func TestIdentifyWhenTheVerifierFails(t *testing.T) {
 		t.Errorf("verifier unreachable: Identify = %v, want unavailable", err)
 	}
 }
+
+// QT2 at the verifier boundary: the EUDI wallets' verifier has the same API
+// and usecase; its identity names the EU-wallet as means.
+func TestIdentifyEUDI(t *testing.T) {
+	f := &fakeVerifier{disclosed: pidDisclosure}
+	srv := f.server(t)
+	id, err := NewEUDI(srv.URL, srv.URL, "secret").Identify(context.Background(), "s1")
+	if err != nil || id.FamilyName != "Jansen" || id.Means != login.MeansEUDIWallet {
+		t.Fatalf("Identify = %+v, %v; want Frouke Jansen with means eudi-wallet", id, err)
+	}
+}

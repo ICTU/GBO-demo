@@ -62,11 +62,11 @@ on the local demo network, for example from `openssl rand -hex 16`; use a
 different value for each:
 
 ```dotenv
-FTV_POSTGRES_PASSWORD=<local-random-password>
-FTV_ADL_READER_PASSWORD=<local-random-reader-password>
-EUDI_POSTGRES_PASSWORD=<local-random-password>
-SOURCE_REGISTRY_PASSWORD=<local-random-writer-password>
-SOURCE_REGISTRY_READER_PASSWORD=<local-random-reader-password>
+FTV_POSTGRES_PASSWORD=
+FTV_ADL_READER_PASSWORD=
+EUDI_POSTGRES_PASSWORD=
+SOURCE_REGISTRY_PASSWORD=
+SOURCE_REGISTRY_READER_PASSWORD=
 ```
 
 Start the DvTP demo. It needs no public URLs, trust anchors or wallet:
@@ -99,7 +99,8 @@ EUDI_BRI_URL=https://eudi-bri.example.org/
 
 Before starting an EUDI demo, provide the issuer and reader CA material that
 the test wallet already trusts. The setup deliberately never generates trust
-anchors. By default it loads these four files from
+anchors, apart from the registrar root described below, which it creates only
+on request. By default it loads these four files from
 `.local/secrets/development-ca/`:
 
 ```text
@@ -120,6 +121,80 @@ the source reconciler receives only their public certificates and the two
 public CA certificates. Leaf private keys are mounted exclusively into the
 issuance materializer. A Kubernetes runtime Secret must not contain
 `issuer-ca-key.pem` or `reader-ca-key.pem`.
+
+The [GBO trust lists](docs/gbo-trust-lists.md) combine NL pre-production
+anchors with the GBO roots in four role-specific LoTE files. The temporary
+demo mode trusts the fixed official HTTPS source; configuring its public key
+enables mandatory JWT signature verification. Internal PID consumers verify
+our signed list against the independently provisioned LoTE root; the Go
+services refresh on use hourly, and the upstream NL verifier uses a verified
+provisioning snapshot plus restart.
+See the [trust-host runbook](trust-host/README.md) for host-only signing and
+publication.
+
+The own credential issuer (`services/eudi-credential-issuer`, not yet in the
+stack) also needs per source an access certificate (WRPAC) and a registration
+certificate (WRPRC). `make create-development-registrar-root` creates the
+registrar root that signs the registration certificates, once, in
+`development-ca/` (`registrar-ca-key.pem`, `registrar-ca-cert.pem`); it is a
+trust anchor of its own and is never replaced. Its certificate is copied to
+`.local/public-certificates/development-ca/` for the wallets' trust lists.
+`make provision-wallet-registration SOURCE_ID=<source_id>` then issues the
+WRPAC under the reader root and the WRPRC for the types of the active Source
+Release, creates the source's key for encrypted credential requests once
+(`request-encryption-key.pem`, kept on later runs), and writes the reader-root CRL and the WRPRC status list to
+`.local/public-trust/` for the trust host. A container reads the source from
+the Source Registry; the signing runs on the host, so the CA keys never enter
+a container. It needs `EUDI_TRUST_PUBLIC_URL`
+(the public root URL of that host, which goes into the certificates) and, the
+first time for a source, `KVK_NUMBER`: the organizationIdentifier in the WRPAC
+and the WRPRC is `NTRNL-<KvK number>`, because ETSI EN 319 412-1 section 5.1.4
+defines no identity type for an OIN. The number is recorded per source; a
+different one for a registered source is refused. The demo sources use
+fictional numbers: `99990200` for `belastingdienst`, `99990300` for `rvig` and
+`99990900` for `demo-unsecured`. The CRL and the status list are valid for a year
+at most and never outlive the reader root (the pre-provisioned one expires on
+2027-04-30); nothing renews them, and revocation is not supported: every run
+publishes both afresh. The trust URL is recorded in
+`development-ca/wallet-registration.json`; to change it, remove that file and
+provision every source again.
+
+For disclosure-based issuance (the wallet discloses the BSN from its PID,
+then gets the offer), the same command also issues a WRPRC for the source as
+a relying party (`wrprc-verifier.jwt`): entitlement `Service_Provider`,
+authorizing the `bsn` of `urn:eudi:pid:nl:1`, with the purpose the wallet
+shows and a status entry of its own. Run it again for sources provisioned
+before, and `make provision-test-pid` too (it now also puts the test PID
+root next to its registration); the materializer refuses a source without
+them. It turns every offer
+of the source's activated types into a disclosure offer under the same id,
+and trusts the PIDs of the NL PID issuer CAs in `PID_TRUST_ANCHORS_FILE`
+(default: the pre-production CA in
+`services/asi-wallet-verifier/pid-issuer-anchors.txt`) and, once
+provisioned, of the test PID.
+
+`make provision-qtsp-wallet-registration` registers the reference QTSP as
+a provider of the own issuer, after `make
+provision-qtsp-issuance-certificates`: a WRPAC and a WRPRC with the
+`QEAA_Provider` entitlement for its test statement (fictional KvK number
+`99991300`, not a public body). The materializer then adds the QTSP, with
+its statement valid for 30 days and its internal HTTPS callback as
+bronpoort, trusted through the development issuer CA that signs the
+callback's certificate; without the registration it leaves the QTSP out.
+Next to `nl` and `eudi` the issuer then also has the combined profile
+`wallet`, under which one offer serves both wallets; the NL Wallet joins it
+once its wallet providers are mounted.
+
+`make provision-test-pid` adds a test PID provider to the own issuer: a PID
+of the NL type (`urn:eudi:pid:nl:1`) for wallets without a real one, such as
+the EUDI reference wallet, so the disclosure-based route can be shown with
+them. Its credentials chain to a development root of its own
+(`.local/test-pid-root/`, outside every container mount, created once, its
+certificate copied to `.local/public-certificates/development-ca/`), which only the demo's wallet
+builds and verifier trust. It is registered like a source, with the
+`PID_Provider` entitlement and the fictional KvK number `99990100`, and fed by
+`test-pid-source` from the BRP mock persons. It is a test fixture, not a PID
+Provider.
 
 `EUDI_PUBLIC_URL` must route to the issuance server and its hostname must be in
 the reader-certificate DNS SAN. `EUDI_BRI_URL` must route to the EUDI adapter.

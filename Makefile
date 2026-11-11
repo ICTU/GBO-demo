@@ -1,7 +1,7 @@
 .PHONY: up down logs clean certs require-ftv-postgres demo-manager manager-seed fsc-local-env fsc-ca fsc-up fsc-all-up fsc-brp-certs fsc-consent-register-certs fsc-gbo-pdp-certs fsc-ir-certs fsc-int-certs fsc-asip-certs fsc-databases fsc-down fsc-test fsc-clean \
         fsc-seed-bri fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-lvg fsc-seed-int fsc-seed-asip fsc-seed-brp fsc-seed-rvig-source fsc-seed-metadata fsc-pdp-cert pdp-up \
         eudi-images asi-wallet-verifier-image source-metadata-up \
-        require-development-cas provision-development-certificates provision-qtsp-issuance-certificates provision-asip-seal-certificate provision-asip-qtsp-certificate provision-asi-wallet-verifier reconcile-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
+        require-development-cas create-development-registrar-root provision-wallet-registration provision-test-pid provision-qtsp-wallet-registration credential-issuer-up provision-development-certificates provision-qtsp-issuance-certificates provision-asip-seal-certificate provision-asip-qtsp-certificate provision-asi-wallet-verifier provision-asi-eudi-wallet-verifier reconcile-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
         demo-full demo-integrator demo-asi demo-down eudi-config policy-check policy-test
 
 -include .env
@@ -31,10 +31,35 @@ DEVELOPMENT_QTSP_NAME ?= GBO demo test QTSP
 ONBOARDING_OUTWAY_URL ?= http://localhost:$(or $(FSC_PORT_EDI_OUTWAY),8087)
 ONBOARDING_SECRETS_DIR ?= $(PWD)/.local/secrets
 ONBOARDING_PUBLIC_CERTIFICATES_DIR ?= $(PWD)/.local/public-certificates
+EUDI_TRUST_PUBLISH_DIR ?= $(PWD)/.local/public-trust
+GBO_LOTE_SIGNER_DIR ?= $(PWD)/.local/lote-signer
+GBO_LOTE_SIGNER_ROOT_FILE ?= $(ONBOARDING_PUBLIC_CERTIFICATES_DIR)/development-ca/lote-ca-cert.pem
+GBO_PID_TRUST_LIST_URL ?= $(if $(EUDI_TRUST_PUBLIC_URL),$(patsubst %/,%,$(EUDI_TRUST_PUBLIC_URL))/lote/PIDProviders.jwt)
+# Agreed temporary demo shortcut: only the fixed official NL HTTPS endpoint.
+# A configured key always enables JWT verification; verification never falls back.
+GBO_LOTE_TRUST_NL_HTTPS ?= true
 DEVELOPMENT_CA_DIR ?= $(ONBOARDING_SECRETS_DIR)/development-ca
 ONBOARDING_TYPE_METADATA_URL ?= $(or $(EUDI_BRI_URL),http://localhost:$(or $(GBO_PORT_EUDI_ADAPTER),9409))
 ONBOARDING_STORAGE_BACKEND ?= postgres
 ONBOARDING_CERTIFICATE_STORE ?= public-filesystem
+
+.PHONY: provision-trust-list-signer publish-trust-lists
+
+# Sign only on the host. Neither the scheme root nor the list signing key
+# belongs in ONBOARDING_SECRETS_DIR or in either public projection.
+provision-trust-list-signer:
+	@cd services/eudi-adapter && go run . provision-trust-list-signer \
+		--root-dir "$(GBO_LOTE_SIGNER_DIR)" --secrets-dir "$(ONBOARDING_SECRETS_DIR)" \
+		--public-certificates-dir "$(ONBOARDING_PUBLIC_CERTIFICATES_DIR)" --publish-dir "$(EUDI_TRUST_PUBLISH_DIR)"
+
+# A failed fetch or signature check keeps all four previous lists intact.
+publish-trust-lists:
+	@test -n "$(EUDI_TRUST_PUBLIC_URL)" || { echo "ERROR: set EUDI_TRUST_PUBLIC_URL" >&2; exit 1; }
+	@cd services/eudi-adapter && go run . publish-trust-lists \
+		--root-dir "$(GBO_LOTE_SIGNER_DIR)" --secrets-dir "$(ONBOARDING_SECRETS_DIR)" \
+		--public-certificates-dir "$(ONBOARDING_PUBLIC_CERTIFICATES_DIR)" --publish-dir "$(EUDI_TRUST_PUBLISH_DIR)" \
+		--trust-public-url "$(EUDI_TRUST_PUBLIC_URL)" --nl-config-key-file "$(GBO_LOTE_NL_CONFIG_KEY_FILE)" \
+		--trust-nl-https="$(GBO_LOTE_TRUST_NL_HTTPS)" $(GBO_LOTE_PUBLISH_FLAGS)
 
 # Docker network of the fsc-infra instance this checkout uses. Equals
 # <FSC_PROJECT_NAME>_default; override in fsc-infra/.env to run a
@@ -59,6 +84,7 @@ PORT_ASI_AUTHORIZATION_SERVER := $(or $(GBO_PORT_ASI_AUTHORIZATION_SERVER),9425)
 PORT_ASI_DISCOVERY := $(or $(GBO_PORT_ASI_DISCOVERY),9426)
 PORT_QTSP := $(or $(GBO_PORT_QTSP),9427)
 PORT_ASI_WALLET_VERIFIER := $(or $(GBO_PORT_ASI_WALLET_VERIFIER),9428)
+PORT_ASI_EUDI_WALLET_VERIFIER := $(or $(GBO_PORT_ASI_EUDI_WALLET_VERIFIER),9432)
 PORT_JAEGER := $(or $(GBO_PORT_JAEGER),9686)
 PORT_PDP := $(or $(GBO_PORT_OPA),9181)
 PORT_EUDI_ADAPTER := $(or $(GBO_PORT_EUDI_ADAPTER),9409)
@@ -286,8 +312,8 @@ provision-asip-seal-certificate: require-development-cas
 # authorization server) and qtsp-login (the reference QTSP, slice 14; a demo
 # shortcut, as the two share this verifier) from the development reader CA,
 # which the test wallet trusts, with the verifier's public host as DNS SAN;
-# trust in the development issuer CA and the
-# pre-production PID issuer; and the API key of its internal API. Run again
+# PID roots from the verified central LoTE; and the API key of its internal
+# API. Publish the central HTTPS list before provisioning. Run again
 # when ASI_WALLET_VERIFIER_PUBLIC_URL changes; the next make demo-asi then
 # recreates the ASI services (marker .provisioned).
 ASI_WALLET_VERIFIER_DIR ?= $(ONBOARDING_SECRETS_DIR)/asi-wallet-verifier
@@ -299,11 +325,13 @@ ASI_WALLET_VERIFIER_PUBLIC_URL ?= http://localhost:$(PORT_ASI_WALLET_VERIFIER)
 # "disclosure". The default is the pre-production NL Wallet (TestFlight).
 ASI_WALLET_UL_BASE ?= https://app.preproductie.wallet.edi.bzk.nl/deeplink/
 provision-asi-wallet-verifier: require-development-cas
+	@cd services/eudi-adapter && go run . export-pid-trust \
+		--url "$(GBO_PID_TRUST_LIST_URL)" --signer-root "$(GBO_LOTE_SIGNER_ROOT_FILE)" \
+		--out-file "$(ASI_WALLET_VERIFIER_DIR)/pid-issuer-anchors.txt"
 	@cd services/asi-authorization-server && go run . provision-wallet-verifier \
 		--ca-key "$(DEVELOPMENT_CA_DIR)/reader-ca-key.pem" \
 		--ca-cert "$(DEVELOPMENT_CA_DIR)/reader-ca-cert.pem" \
-		--issuer-ca "$(DEVELOPMENT_CA_DIR)/issuer-ca-cert.pem" \
-		--pid-issuer-anchors ../asi-wallet-verifier/pid-issuer-anchors.txt \
+		--pid-issuer-anchors "$(ASI_WALLET_VERIFIER_DIR)/pid-issuer-anchors.txt" \
 		--public-url "$(ASI_WALLET_VERIFIER_PUBLIC_URL)" \
 		--universal-link-base "$(ASI_WALLET_UL_BASE)" \
 		--request-origin "$(or $(ASI_AUTHORIZATION_SERVER_PUBLIC_URL),http://$(or $(GBO_PUBLIC_HOST),localhost):$(PORT_ASI_AUTHORIZATION_SERVER))" \
@@ -311,6 +339,33 @@ provision-asi-wallet-verifier: require-development-cas
 		--out-dir "$(ASI_WALLET_VERIFIER_DIR)" \
 		--api-key-file "$(ASI_WALLET_VERIFIER_CLIENT_DIR)/api-key"
 	@touch "$(ASI_WALLET_VERIFIER_DIR)/.provisioned"
+
+# Configuration of the ASI's EUDI wallet verifier (eudi-wallet-verifier,
+# #639): the authorization server registered as relying party like a source
+# (a WRPAC under the reader root and a WRPRC with the Service_Provider
+# entitlement for the PID claims of its login, fictional KvK number
+# 99991400), the PID issuers it trusts (the NL PID issuer CAs and the test
+# PID root when provisioned), and the API key the authorization server uses.
+# When the reference QTSP is registered (provision-qtsp-wallet-registration),
+# its login gets usecase qtsp-login with the QTSP's own WRPAC and a WRPRC for
+# the four claims of its login; it shares the API key, a demo shortcut.
+# Needs the registrar root and EUDI_TRUST_PUBLIC_URL, as
+# provision-wallet-registration does. Run again when
+# ASI_EUDI_WALLET_VERIFIER_PUBLIC_URL or ASI_AUTHORIZATION_SERVER_PUBLIC_URL
+# changes; the next make demo-asi then recreates the ASI services. The files
+# stay private to the user who ran this; the one-shot service
+# eudi-wallet-verifier-runtime copies them for the verifier's user (1000).
+ASI_EUDI_WALLET_VERIFIER_DIR ?= $(ONBOARDING_SECRETS_DIR)/asi-eudi-wallet-verifier
+ASI_EUDI_WALLET_VERIFIER_PUBLIC_URL ?= http://localhost:$(PORT_ASI_EUDI_WALLET_VERIFIER)
+provision-asi-eudi-wallet-verifier: require-development-cas
+	@test -n "$(EUDI_TRUST_PUBLIC_URL)" || { echo "ERROR: set EUDI_TRUST_PUBLIC_URL (public host of the trust host)"; exit 1; }
+	@mkdir -p "$(EUDI_TRUST_PUBLISH_DIR)"
+	@cd services/eudi-adapter && go run . provision-asi-eudi-wallet-verifier \
+		--secrets-dir "$(ONBOARDING_SECRETS_DIR)" --publish-dir "$(EUDI_TRUST_PUBLISH_DIR)" \
+		--pid-trust-list-url "$(GBO_PID_TRUST_LIST_URL)" --lote-signer-root "$(GBO_LOTE_SIGNER_ROOT_FILE)" \
+		--public-url "$(ASI_EUDI_WALLET_VERIFIER_PUBLIC_URL)" \
+		--authorization-server-url "$(or $(ASI_AUTHORIZATION_SERVER_PUBLIC_URL),http://$(or $(GBO_PUBLIC_HOST),localhost):$(PORT_ASI_AUTHORIZATION_SERVER))"
+	@touch "$(ASI_EUDI_WALLET_VERIFIER_DIR)/.provisioned"
 
 # Test QTSP certificate for the ASIP authorization server
 # (services/asi-authorization-server), issued by the development reader CA.
@@ -345,6 +400,70 @@ provision-qtsp-issuance-certificates: require-development-cas
 		--reader-public-url "$${EUDI_PUBLIC_URL:?set EUDI_PUBLIC_URL before provisioning QTSP issuance}" \
 		--secrets-dir "$(ONBOARDING_SECRETS_DIR)" \
 		--tls-host qtsp-reference
+
+# Registrar root for the Registration Certificates (WRPRC) of the own
+# credential issuer. The one trust anchor this setup creates: only on
+# request, once, next to the pre-provisioned CAs, and never replaced, since
+# wallets trust it by its key. It is a root of its own because a wallet
+# recognises a WRPRC signer only by the trust list it chains to. Its
+# certificate is copied to the public certificate projection.
+create-development-registrar-root:
+	@cd services/eudi-adapter && go run . create-development-registrar-root \
+		--secrets-dir "$(ONBOARDING_SECRETS_DIR)" --public-certificates-dir "$(ONBOARDING_PUBLIC_CERTIFICATES_DIR)"
+
+# Wallet registration of one source for the own credential issuer: its
+# access certificate (WRPAC) under the reader root and its registration
+# certificate (WRPRC) for the types activated in the active Source Release,
+# plus the reader-root CRL and the WRPRC status list in
+# EUDI_TRUST_PUBLISH_DIR for the trust host. A container in the eudi network
+# exports the source from the Source Registry; the signing runs here, so the
+# CA keys never enter a container. Needs EUDI_TRUST_PUBLIC_URL, and the
+# first time KVK_NUMBER: the organizationIdentifier is NTRNL-<KvK number>
+# (ETSI EN 319 412-1 has no identity type for an OIN).
+provision-wallet-registration: require-development-cas
+	@test -n "$(SOURCE_ID)" || { echo "ERROR: SOURCE_ID=<source_id> is required"; exit 1; }
+	@mkdir -p "$(EUDI_TRUST_PUBLISH_DIR)"
+	@# Built apart: run --build prints the build progress on stdout, into the JSON.
+	@docker compose --profile eudi --profile wallet-registration build --with-dependencies wallet-registration-source >&2
+	@docker compose --profile eudi --profile wallet-registration run --rm -T wallet-registration-source --source-id "$(SOURCE_ID)" \
+		| (cd services/eudi-adapter && go run . provision-wallet-registration --source-file - \
+			--secrets-dir "$(ONBOARDING_SECRETS_DIR)" --publish-dir "$(EUDI_TRUST_PUBLISH_DIR)" --kvk-number "$(KVK_NUMBER)")
+
+# Own credential issuer beside eudi-issuance-server (profile
+# credential-issuer). Checks the settings the issuer and the trust host
+# cannot start without, rematerializes the configuration and recreates the
+# issuer so it reads it.
+credential-issuer-up:
+	@test -n "$(ISSUER_PUBLIC_URL)" || { echo "ERROR: set ISSUER_PUBLIC_URL (public host of the issuer)"; exit 1; }
+	@test -n "$(EUDI_TRUST_PUBLIC_URL)" || { echo "ERROR: set EUDI_TRUST_PUBLIC_URL (public host of the trust host)"; exit 1; }
+	@test -n "$(CREDENTIAL_ISSUER_DB_PASSWORD)" || { echo "ERROR: set CREDENTIAL_ISSUER_DB_PASSWORD"; exit 1; }
+	@test -f "$(EUDI_TRUST_PUBLISH_DIR)/reader-root.crl" || { echo "ERROR: run make provision-wallet-registration first"; exit 1; }
+	docker compose --profile eudi --profile credential-issuer up -d --build --force-recreate \
+		credential-issuer-materialize eudi-credential-issuer trust-host test-pid-source
+
+# Test PID provider of the own credential issuer: a PID of the NL type
+# (urn:eudi:pid:nl:1) for wallets without a real one, under a development
+# root of its own that only the demo's wallet builds and verifier trust. It
+# is registered like a source (WRPAC, WRPRC with the PID_Provider
+# entitlement, fictitious KvK number 99990100) and fed by test-pid-source.
+# Signs on the host; the root key stays in TEST_PID_ROOT_DIR, outside every
+# container mount. A second run keeps the root and every key. Then run
+# make credential-issuer-up.
+TEST_PID_ROOT_DIR ?= $(PWD)/.local/test-pid-root
+provision-test-pid: require-development-cas
+	@mkdir -p "$(EUDI_TRUST_PUBLISH_DIR)"
+	@cd services/eudi-adapter && go run . provision-test-pid \
+		--secrets-dir "$(ONBOARDING_SECRETS_DIR)" --publish-dir "$(EUDI_TRUST_PUBLISH_DIR)" \
+		--public-certificates-dir "$(ONBOARDING_PUBLIC_CERTIFICATES_DIR)" --root-dir "$(TEST_PID_ROOT_DIR)"
+
+# The reference QTSP as a provider of the own credential issuer: a WRPAC and
+# a WRPRC (QEAA_Provider, fictional KvK number 99991300) next to the
+# certificates of make provision-qtsp-issuance-certificates. Then run
+# make credential-issuer-up.
+provision-qtsp-wallet-registration: require-development-cas
+	@mkdir -p "$(EUDI_TRUST_PUBLISH_DIR)"
+	@cd services/eudi-adapter && go run . provision-qtsp-wallet-registration \
+		--secrets-dir "$(ONBOARDING_SECRETS_DIR)" --publish-dir "$(EUDI_TRUST_PUBLISH_DIR)"
 
 reconcile-sources:
 	docker compose --profile onboarding run --build --rm source-reconciler
@@ -418,10 +537,15 @@ demo-asi: fsc-asip-certs
 	@# After a new provisioning (its marker) the services are recreated:
 	@# compose does not see the new files, and the QTSP registers again, as
 	@# the authorization server keeps registrations in memory.
-	@recreate=; if [ -f "$(ASI_WALLET_VERIFIER_DIR)/.provisioned" ]; then recreate=--force-recreate; fi; \
+	@# The EUDI wallet verifier runs when it is provisioned
+	@# (make provision-asi-eudi-wallet-verifier); without it the
+	@# authorization server does not offer the EU-wallet.
+	@recreate=; if [ -f "$(ASI_WALLET_VERIFIER_DIR)/.provisioned" ] || [ -f "$(ASI_EUDI_WALLET_VERIFIER_DIR)/.provisioned" ]; then recreate=--force-recreate; fi; \
+	if [ -f "$(ASI_EUDI_WALLET_VERIFIER_DIR)/config.json" ]; then docker compose --profile asi up --build -d $$recreate eudi-wallet-verifier; \
+	else echo "-> eudi-wallet-verifier not provisioned: the EU-wallet is not offered (make provision-asi-eudi-wallet-verifier)"; fi && \
 	docker compose --profile asi up --build -d $$recreate asi-authorization-server asi-provider asi-discovery-stub qtsp-reference && \
 	if [ -f "$$NLWALLET_PATH/wallet_core/Cargo.toml" ]; then docker compose --profile asi up -d $$recreate asi-wallet-verifier; fi && \
-	rm -f "$(ASI_WALLET_VERIFIER_DIR)/.provisioned"
+	rm -f "$(ASI_WALLET_VERIFIER_DIR)/.provisioned" "$(ASI_EUDI_WALLET_VERIFIER_DIR)/.provisioned"
 	@# With the Cloudflare tunnel overlay (COMPOSE_FILE), the wallet reaches the
 	@# verifier through the tunnel: start it, or recreate it so it joins the
 	@# backend network. --no-deps leaves the EUDI services alone.
@@ -433,6 +557,7 @@ demo-asi: fsc-asip-certs
 	$(call banner,ASI discovery (stub):,$(PORT_ASI_DISCOVERY))
 	$(call banner,Reference QTSP:,$(PORT_QTSP))
 	$(call banner,ASI wallet verifier:,$(PORT_ASI_WALLET_VERIFIER))
+	$(call banner,ASI EUDI wallet verifier:,$(PORT_ASI_EUDI_WALLET_VERIFIER))
 
 demo-down:
 	docker compose --profile full --profile manager --profile integrator --profile asi down

@@ -6,6 +6,8 @@ package issuance
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -45,7 +47,10 @@ type Request struct {
 
 type pending struct {
 	Request
-	id      uint64
+	id uint64
+	// ref names the result in an offer the QTSP makes at the credential
+	// issuer; the issuer hands it back when it fetches the attestation.
+	ref     string
 	expires time.Time
 	timer   *time.Timer
 }
@@ -72,11 +77,13 @@ func NewStore(now func() time.Time) *Store {
 	return &Store{now: now}
 }
 
-// Add records only a complete successful result. It deliberately returns a
-// boolean so the result page shows a wallet action only when issuance exists.
-func (s *Store) Add(request Request) bool {
+// Add records only a complete successful result and returns its reference,
+// or "" when it is not issuable, so the result page shows a wallet action
+// only when issuance exists. The reference is unguessable: whoever holds it
+// can have the attestation issued.
+func (s *Store) Add(request Request) string {
 	if !issuable(request) {
-		return false
+		return ""
 	}
 	now := s.now().UTC()
 	if request.VerifiedAt.IsZero() {
@@ -96,11 +103,11 @@ func (s *Store) Add(request Request) bool {
 		return replaced
 	})
 	s.nextID++
-	candidate := pending{Request: request, id: s.nextID, expires: now.Add(Lifetime)}
+	candidate := pending{Request: request, id: s.nextID, ref: randomRef(), expires: now.Add(Lifetime)}
 	id := candidate.id
 	candidate.timer = time.AfterFunc(Lifetime, func() { s.remove(id) })
 	s.pending = append(s.pending, candidate)
-	return true
+	return candidate.ref
 }
 
 func issuable(request Request) bool {
@@ -162,6 +169,25 @@ func (s *Store) Take(identity login.Identity) *Document {
 	return document(candidate.Request)
 }
 
+// TakeRef atomically exchanges the unexpired result with the reference for
+// an issuable document, so it is issued once; nil when there is none.
+func (s *Store) TakeRef(ref string) *Document {
+	now := s.now().UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.prune(now)
+	index := slices.IndexFunc(s.pending, func(candidate pending) bool {
+		return ref != "" && subtle.ConstantTimeCompare([]byte(candidate.ref), []byte(ref)) == 1
+	})
+	if index < 0 {
+		return nil
+	}
+	candidate := s.pending[index]
+	candidate.timer.Stop()
+	s.pending = slices.Delete(s.pending, index, index+1)
+	return document(candidate.Request)
+}
+
 func (s *Store) prune(now time.Time) {
 	s.pending = slices.DeleteFunc(s.pending, func(candidate pending) bool {
 		expired := !now.Before(candidate.expires)
@@ -182,7 +208,27 @@ func sameIdentity(left, right login.Identity) bool {
 	if left.FamilyName != right.FamilyName || left.GivenName != right.GivenName || left.Birthdate != right.Birthdate {
 		return false
 	}
-	return slices.Equal(sortedUnique(left.Nationalities), sortedUnique(right.Nationalities))
+	return slices.Equal(sortedUnique(nationalityCodes(left.Nationalities)), sortedUnique(nationalityCodes(right.Nationalities)))
+}
+
+// nationalityCodesByDescription maps the descriptions that a PID carries
+// (the NL PID takes the BRP description, "Nederlandse") to the ISO 3166-1
+// alpha-2 codes of the mock login, so the two forms compare equal. The demo's
+// test persons need no more.
+var nationalityCodesByDescription = map[string]string{"nederlandse": "NL", "belgische": "BE", "duitse": "DE"}
+
+// nationalityCodes turns each description it knows into its code and keeps
+// any other value as is, upper-cased, so it only matches the same value.
+func nationalityCodes(values []string) []string {
+	out := make([]string, len(values))
+	for i, v := range values {
+		v = strings.TrimSpace(v)
+		if code, ok := nationalityCodesByDescription[strings.ToLower(v)]; ok {
+			v = code
+		}
+		out[i] = strings.ToUpper(v)
+	}
+	return out
 }
 
 func sortedUnique(values []string) []string {
@@ -216,6 +262,12 @@ func document(request Request) *Document {
 			"qualification":       Qualification,
 		},
 	}
+}
+
+func randomRef() string {
+	value := make([]byte, 24)
+	_, _ = rand.Read(value)
+	return base64.RawURLEncoding.EncodeToString(value)
 }
 
 func randomID() string {

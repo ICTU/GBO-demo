@@ -1,0 +1,149 @@
+// Package oid4vci holds the messages of OpenID for Verifiable Credential
+// Issuance 1.0 that both sides of the protocol need, and the verification
+// of key proofs.
+package oid4vci
+
+// GrantPreAuthorizedCode is the grant type of the Pre-Authorized Code Flow
+// (section 4.1.1).
+const GrantPreAuthorizedCode = "urn:ietf:params:oauth:grant-type:pre-authorized_code"
+
+// GrantRefreshToken is the refresh token grant (RFC 6749 section 6).
+const GrantRefreshToken = "refresh_token"
+
+// AuthorizationDetailsType is the authorization_details type of OpenID4VCI
+// (section 5.1.1).
+const AuthorizationDetailsType = "openid_credential"
+
+// Error codes of the token endpoint (RFC 6749, RFC 9449,
+// draft-ietf-oauth-attestation-based-client-auth) and the credential
+// endpoint (section 8.3.1.2).
+const (
+	ErrInvalidRequest = "invalid_request"
+	ErrInvalidGrant   = "invalid_grant"
+	// ErrInvalidAuthorizationDetails is RFC 9396 section 5.
+	ErrInvalidAuthorizationDetails = "invalid_authorization_details"
+	ErrUnsupportedGrantType        = "unsupported_grant_type"
+	ErrInvalidDPoPProof            = "invalid_dpop_proof"
+	ErrInvalidClientAttestation    = "invalid_client_attestation"
+	ErrUseFreshAttestation         = "use_fresh_attestation"
+	ErrUseAttestationChallenge     = "use_attestation_challenge"
+	ErrInvalidToken                = "invalid_token"
+	// Notification errors (section 11.3).
+	ErrInvalidNotificationID      = "invalid_notification_id"
+	ErrInvalidNotificationRequest = "invalid_notification_request"
+	ErrInvalidCredentialRequest   = "invalid_credential_request"
+	ErrUnknownCredentialID        = "unknown_credential_identifier"
+	ErrInvalidProof               = "invalid_proof"
+	ErrInvalidNonce               = "invalid_nonce"
+	ErrCredentialRequestDenied    = "credential_request_denied"
+	// ErrInvalidEncryptionParameters: encryption parameters that are
+	// invalid, or missing where encryption is required.
+	ErrInvalidEncryptionParameters = "invalid_encryption_parameters"
+	ErrServerError                 = "server_error"
+)
+
+// CredentialOffer is sent to the wallet by value or by reference
+// (section 4.1.1).
+type CredentialOffer struct {
+	CredentialIssuer           string         `json:"credential_issuer"`
+	CredentialConfigurationIDs []string       `json:"credential_configuration_ids"`
+	Grants                     map[string]any `json:"grants,omitempty"`
+}
+
+// PreAuthorizedCodeGrant is the grant object for GrantPreAuthorizedCode.
+type PreAuthorizedCodeGrant struct {
+	PreAuthorizedCode string  `json:"pre-authorized_code"`
+	TxCode            *TxCode `json:"tx_code,omitempty"`
+}
+
+// TxCode tells the wallet that a transaction code is needed.
+type TxCode struct {
+	InputMode   string `json:"input_mode,omitempty"`
+	Length      int    `json:"length,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+// AuthorizationDetail is one authorization_details entry in the token
+// response (section 6.2).
+type AuthorizationDetail struct {
+	Type                      string   `json:"type"`
+	CredentialConfigurationID string   `json:"credential_configuration_id"`
+	CredentialIdentifiers     []string `json:"credential_identifiers"`
+}
+
+// TokenResponse is the successful token response (section 6.2).
+type TokenResponse struct {
+	AccessToken          string                `json:"access_token"`
+	TokenType            string                `json:"token_type"`
+	ExpiresIn            int64                 `json:"expires_in"`
+	AuthorizationDetails []AuthorizationDetail `json:"authorization_details,omitempty"`
+	// RefreshToken re-issues the credentials later (RFC 6749 section 6).
+	RefreshToken string `json:"refresh_token,omitempty"`
+}
+
+// NonceResponse is the nonce endpoint response (section 7.2).
+type NonceResponse struct {
+	CNonce string `json:"c_nonce"`
+}
+
+// Proofs carries the key proofs of a credential request (section 8.2).
+type Proofs struct {
+	JWT         []string `json:"jwt,omitempty"`
+	Attestation []string `json:"attestation,omitempty"`
+}
+
+// CredentialRequest is a credential request (section 8.2).
+type CredentialRequest struct {
+	CredentialIdentifier      string  `json:"credential_identifier,omitempty"`
+	CredentialConfigurationID string  `json:"credential_configuration_id,omitempty"`
+	Proofs                    *Proofs `json:"proofs,omitempty"`
+	// ResponseEncryption asks for an encrypted response (section 8.2).
+	ResponseEncryption *ResponseEncryption `json:"credential_response_encryption,omitempty"`
+}
+
+// IssuedCredential is one entry of a credential response.
+type IssuedCredential struct {
+	Credential string `json:"credential"`
+}
+
+// CredentialResponse is an immediate credential response (section 8.3).
+type CredentialResponse struct {
+	Credentials []IssuedCredential `json:"credentials,omitempty"`
+	// NotificationID identifies the issuance in a later notification
+	// (section 8.3).
+	NotificationID string `json:"notification_id,omitempty"`
+	// TransactionID and Interval answer a deferred issuance (section
+	// 8.3): the credential follows at the deferred credential endpoint.
+	TransactionID string `json:"transaction_id,omitempty"`
+	Interval      int64  `json:"interval,omitempty"`
+}
+
+// DeferredRequest is a deferred credential request (section 9.1).
+type DeferredRequest struct {
+	TransactionID      string              `json:"transaction_id"`
+	ResponseEncryption *ResponseEncryption `json:"credential_response_encryption,omitempty"`
+}
+
+// ErrInvalidTransactionID refuses a deferred request for a transaction the
+// issuer does not know or has finished (section 9.3).
+const ErrInvalidTransactionID = "invalid_transaction_id"
+
+// Notification is a notification request (section 11.1).
+type Notification struct {
+	NotificationID   string `json:"notification_id"`
+	Event            string `json:"event"`
+	EventDescription string `json:"event_description,omitempty"`
+}
+
+// The notification events (section 11.1).
+const (
+	EventCredentialAccepted = "credential_accepted"
+	EventCredentialFailure  = "credential_failure"
+	EventCredentialDeleted  = "credential_deleted"
+)
+
+// ErrorResponse is the error body of the token and credential endpoints.
+type ErrorResponse struct {
+	Error       string `json:"error"`
+	Description string `json:"error_description,omitempty"`
+}

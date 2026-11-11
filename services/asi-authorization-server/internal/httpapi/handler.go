@@ -26,8 +26,10 @@ func NewHandler(service *authorization.Service) http.Handler {
 	mux.HandleFunc("POST "+DecisionPath, h.decision)
 	mux.HandleFunc("GET "+digidmock.Path, h.digidPage)
 	mux.HandleFunc("POST "+digidmock.Path, h.digidLogin)
-	mux.HandleFunc("GET "+WalletPath, h.walletPage)
-	mux.HandleFunc("GET "+WalletReturnPath, h.walletReturn)
+	for _, wm := range wallets {
+		mux.HandleFunc("GET "+wm.Path, h.walletPage(wm))
+		mux.HandleFunc("GET "+wm.ReturnPath, h.walletReturn(wm))
+	}
 	mux.HandleFunc("POST "+authorization.TokenPath, h.token)
 	mux.HandleFunc("POST "+authorization.RegisterPath, h.register)
 	mux.Handle("GET "+StaticPath, staticHandler())
@@ -69,7 +71,7 @@ func (h *handler) authorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if resp.Pending != nil {
-		writeRequestPage(w, resp.Pending, h.secureCookies, h.service.Offers(walletverifier.Means), "")
+		writeRequestPage(w, resp.Pending, h.secureCookies, h.walletChoices(), "")
 		return
 	}
 	redirectAuthorization(w, r, resp)
@@ -93,25 +95,30 @@ func (h *handler) decision(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		http.Redirect(w, r, digidmock.Path+"?"+url.Values{"transaction": {tx}}.Encode(), http.StatusSeeOther)
-	case choice == "wallet" && h.service.Offers(walletverifier.Means):
+	default:
+		wm, ok := walletByDecision(choice)
+		if !ok {
+			authorizeErrorPage(w, "the decision must be deny, digid, wallet or eudi-wallet")
+			return
+		}
+		if !h.service.Offers(wm.Means) {
+			authorizeErrorPage(w, "logging in with the "+wm.Name+" is not available")
+			return
+		}
 		returnURLTemplate := ""
 		if h.secureCookies {
-			returnURLTemplate = h.service.Issuer() + WalletReturnPath + "?transaction=" + url.QueryEscape(tx) + "&session_token={session_token}"
+			returnURLTemplate = h.service.Issuer() + wm.ReturnPath + "?transaction=" + url.QueryEscape(tx) + "&session_token={session_token}"
 		}
-		err := h.service.StartSession(r.Context(), tx, binding, walletverifier.Means, returnURLTemplate)
+		err := h.service.StartSession(r.Context(), tx, binding, wm.Means, returnURLTemplate)
 		switch {
 		case errors.Is(err, authorization.ErrMeansUnavailable):
-			slog.Warn("NL Wallet verifier unavailable", "err", err)
-			unavailablePage(w, walletUnavailable)
+			slog.Warn("wallet verifier unavailable", "means", wm.Means, "err", err)
+			unavailablePage(w, wm.unavailable())
 		case err != nil:
 			authorizeErrorPage(w, err.Error())
 		default:
-			http.Redirect(w, r, WalletPath+"?"+url.Values{"transaction": {tx}}.Encode(), http.StatusSeeOther)
+			http.Redirect(w, r, wm.Path+"?"+url.Values{"transaction": {tx}}.Encode(), http.StatusSeeOther)
 		}
-	case choice == "wallet":
-		authorizeErrorPage(w, "logging in with the NL Wallet is not available")
-	default:
-		authorizeErrorPage(w, "the decision must be deny, digid or wallet")
 	}
 }
 
@@ -154,75 +161,136 @@ func (h *handler) digidLogin(w http.ResponseWriter, r *http.Request) {
 // walletPage follows the wallet session of the transaction: the QR code
 // while the user has not finished; the login once the wallet disclosed the
 // PID; the request page again when the user declined in the wallet, the
-// session expired, or the disclosure did not identify the user.
-func (h *handler) walletPage(w http.ResponseWriter, r *http.Request) {
-	tx := r.URL.Query().Get("transaction")
-	binding := h.binding(r, tx)
-	progress, err := h.service.SessionProgress(r.Context(), tx, binding)
-	switch {
-	case errors.Is(err, authorization.ErrMeansUnavailable):
-		slog.Warn("NL Wallet verifier unavailable", "err", err)
-		unavailablePage(w, walletUnavailable)
-		return
-	case err != nil:
-		authorizeErrorPage(w, err.Error())
-		return
-	}
-	switch progress.State {
-	case authorization.SessionWaiting:
-		writeWalletPage(w, tx, progress, h.secureCookies)
-	case authorization.SessionFailed:
-		h.requestAgain(w, tx, binding, "Niet ingelogd met de NL Wallet: geweigerd in de wallet, of de tijd is verstreken.")
-	case authorization.SessionDone:
-		resp, err := h.service.LogIn(r.Context(), authorization.Login{TransactionID: tx, Binding: binding, Means: walletverifier.Means})
-		if errors.Is(err, authorization.ErrMeansUnavailable) {
-			slog.Warn("NL Wallet verifier unavailable", "err", err)
-			unavailablePage(w, walletUnavailable)
+// session expired, or the disclosure did not identify the user. A
+// same-device session logs in only through its return, so this page keeps
+// waiting for it.
+func (h *handler) walletPage(wm walletMeans) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		tx := r.URL.Query().Get("transaction")
+		binding := h.binding(r, tx)
+		progress, err := h.service.SessionProgress(r.Context(), tx, binding)
+		switch {
+		case errors.Is(err, authorization.ErrMeansUnavailable):
+			slog.Warn("wallet verifier unavailable", "means", wm.Means, "err", err)
+			unavailablePage(w, wm.unavailable())
+			return
+		case err != nil:
+			authorizeErrorPage(w, err.Error())
 			return
 		}
-		if errors.Is(err, authorization.ErrNotIdentified) {
-			slog.Info("NL Wallet disclosure did not identify the user", "err", err)
-			h.requestAgain(w, tx, binding, "Niet ingelogd met de NL Wallet: de wallet gaf geen bruikbaar persoonsidentificatiebewijs.")
-			return
+		switch progress.State {
+		case authorization.SessionWaiting:
+			writeWalletPage(w, wm, tx, progress, h.secureCookies)
+		case authorization.SessionFailed:
+			h.requestAgain(w, tx, binding, wm.declined())
+		case authorization.SessionDone:
+			resp, err := h.service.LogIn(r.Context(), authorization.Login{TransactionID: tx, Binding: binding, Means: wm.Means})
+			switch {
+			case errors.Is(err, authorization.ErrAwaitingReturn):
+				writeWalletPage(w, wm, tx, authorization.Progress{State: authorization.SessionWaiting}, h.secureCookies)
+				return
+			case errors.Is(err, authorization.ErrMeansUnavailable):
+				slog.Warn("wallet verifier unavailable", "means", wm.Means, "err", err)
+				unavailablePage(w, wm.unavailable())
+				return
+			case errors.Is(err, authorization.ErrNotIdentified):
+				slog.Info("wallet disclosure did not identify the user", "means", wm.Means, "err", err)
+				h.requestAgain(w, tx, binding, "Niet ingelogd met de "+wm.Name+": de wallet gaf geen bruikbaar persoonsidentificatiebewijs.")
+				return
+			}
+			h.complete(w, r, tx, resp, err)
 		}
-		h.complete(w, r, tx, resp, err)
 	}
 }
 
 // walletReturn completes a same-device wallet login. The core checks that
 // the returned session belongs to this transaction and browser before using
 // the verifier's return nonce to obtain the disclosed PID.
-func (h *handler) walletReturn(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	tx := q.Get("transaction")
-	binding := h.binding(r, tx)
-	result, err := h.service.ReturnSession(r.Context(), tx, binding, walletverifier.Means, q.Get("session_token"), q.Get("nonce"))
-	if errors.Is(err, authorization.ErrMeansUnavailable) {
-		slog.Warn("NL Wallet verifier unavailable", "err", err)
-		unavailablePage(w, walletUnavailable)
-		return
-	}
-	if errors.Is(err, authorization.ErrNotIdentified) {
-		h.requestAgain(w, tx, binding, "Niet ingelogd met de NL Wallet: de terugkeer uit de wallet was niet geldig.")
-		return
-	}
-	if err != nil {
-		h.complete(w, r, tx, authorization.AuthorizationResponse{}, err)
-		return
-	}
-	switch result.Progress.State {
-	case authorization.SessionWaiting:
-		writeWalletPage(w, tx, result.Progress, h.secureCookies)
-	case authorization.SessionFailed:
-		h.requestAgain(w, tx, binding, "Niet ingelogd met de NL Wallet: geweigerd in de wallet, of de tijd is verstreken.")
-	case authorization.SessionDone:
-		h.complete(w, r, tx, result.Response, nil)
+func (h *handler) walletReturn(wm walletMeans) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		tx := q.Get("transaction")
+		binding := h.binding(r, tx)
+		result, err := h.service.ReturnSession(r.Context(), tx, binding, wm.Means, q.Get("session_token"), q.Get("nonce"))
+		if errors.Is(err, authorization.ErrMeansUnavailable) {
+			slog.Warn("wallet verifier unavailable", "means", wm.Means, "err", err)
+			unavailablePage(w, wm.unavailable())
+			return
+		}
+		if errors.Is(err, authorization.ErrNotIdentified) {
+			h.requestAgain(w, tx, binding, "Niet ingelogd met de "+wm.Name+": de terugkeer uit de wallet was niet geldig.")
+			return
+		}
+		if err != nil {
+			h.complete(w, r, tx, authorization.AuthorizationResponse{}, err)
+			return
+		}
+		switch result.Progress.State {
+		case authorization.SessionWaiting:
+			writeWalletPage(w, wm, tx, result.Progress, h.secureCookies)
+		case authorization.SessionFailed:
+			h.requestAgain(w, tx, binding, wm.declined())
+		case authorization.SessionDone:
+			h.complete(w, r, tx, result.Response, nil)
+		}
 	}
 }
 
-// walletUnavailable says the NL Wallet cannot be used now; the transaction
-// stays.
-const walletUnavailable = "De NL Wallet is nu niet beschikbaar. Ga terug en log in met DigiD (mock), of weiger het verzoek."
+// walletMeans is a wallet the user can log in with: the core's means, the
+// decision on the request page, its name on the pages, and its pages.
+type walletMeans struct {
+	Means, Decision string
+	// Name is how the pages name the wallet; Label the request page's button.
+	Name, Label      string
+	Path, ReturnPath string
+	// Optional wallets are on the request page only when configured; the
+	// others show disabled when they are not.
+	Optional bool
+}
+
+// wallets are the NL Wallet (asi-wallet-verifier) and the EUDI wallets
+// (eudi-wallet-verifier, #639).
+var wallets = []walletMeans{
+	{Means: walletverifier.Means, Decision: "wallet", Name: "NL Wallet", Label: "NL Wallet", Path: WalletPath, ReturnPath: WalletReturnPath},
+	{Means: walletverifier.EUDIMeans, Decision: "eudi-wallet", Name: "EU-wallet", Label: "EU-wallet (test)", Path: EUDIWalletPath, ReturnPath: EUDIWalletReturnPath, Optional: true},
+}
+
+func walletByDecision(decision string) (walletMeans, bool) {
+	for _, wm := range wallets {
+		if wm.Decision == decision {
+			return wm, true
+		}
+	}
+	return walletMeans{}, false
+}
+
+// unavailable says the wallet cannot be used now; the transaction stays.
+func (wm walletMeans) unavailable() string {
+	return "De " + wm.Name + " is nu niet beschikbaar. Ga terug en log in met DigiD (mock), of weiger het verzoek."
+}
+
+func (wm walletMeans) declined() string {
+	return "Niet ingelogd met de " + wm.Name + ": geweigerd in de wallet, of de tijd is verstreken."
+}
+
+// walletChoice is a wallet button on the request page.
+type walletChoice struct {
+	Decision, Label, Name string
+	Available             bool
+}
+
+// walletChoices are the wallet buttons of the request page: every wallet
+// that is configured, and the others that are not optional, disabled.
+func (h *handler) walletChoices() []walletChoice {
+	var out []walletChoice
+	for _, wm := range wallets {
+		available := h.service.Offers(wm.Means)
+		if available || !wm.Optional {
+			out = append(out, walletChoice{Decision: wm.Decision, Label: wm.Label, Name: wm.Name, Available: available})
+		}
+	}
+	return out
+}
 
 // requestAgain shows the request page of a pending transaction with why the
 // login did not succeed; the user chooses again.
@@ -232,7 +300,7 @@ func (h *handler) requestAgain(w http.ResponseWriter, tx, binding, message strin
 		authorizeErrorPage(w, "the authorization request is unknown, used, expired or was started in another browser")
 		return
 	}
-	writeRequestPage(w, pending, h.secureCookies, h.service.Offers(walletverifier.Means), message)
+	writeRequestPage(w, pending, h.secureCookies, h.walletChoices(), message)
 }
 
 // transactionForm reads a posted form with a transaction, and the binding

@@ -1,5 +1,6 @@
 import { demoSessionId } from '../util/demoSession'
 import type { Scenario, HistoryRun, Citizen, Organization } from '../types'
+import { testPersonsFrom, testPidOfferFrom, type TestPersons, type TestPidOffer } from '../lib/testPid'
 
 const BASE = '/api/dev'
 
@@ -16,6 +17,36 @@ export async function listOrganizations(): Promise<Organization[]> { return json
 // no session to get the whole timeline, everybody's runs included.
 export async function listHistory(session?: string): Promise<HistoryRun[]> {
   return jsonGet(session ? `/history?session=${encodeURIComponent(session)}` : '/history')
+}
+
+async function readJson(res: Response): Promise<unknown> {
+  try {
+    return await res.json()
+  } catch {
+    return undefined
+  }
+}
+
+export async function loadTestPersons(): Promise<TestPersons> {
+  try {
+    const res = await fetch(`${BASE}/test-pid/persons`, { cache: 'no-store' })
+    return testPersonsFrom(res.status, await readJson(res))
+  } catch {
+    return testPersonsFrom(null, undefined)
+  }
+}
+
+export async function createTestPidOffer(bsn: string): Promise<TestPidOffer> {
+  try {
+    const res = await fetch(`${BASE}/test-pid/offers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bsn }),
+    })
+    return testPidOfferFrom(res.status, await readJson(res))
+  } catch {
+    return { error: 'De portal-backend is niet bereikbaar.' }
+  }
 }
 
 export async function saveScenario(s: Omit<Scenario, 'user_saved'>): Promise<Scenario> {

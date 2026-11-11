@@ -1,0 +1,412 @@
+// Package config reads the issuer's configuration file: profiles,
+// credential configurations and the files holding keys and certificates.
+// Process settings (URLs, ports, database) come from the environment; see
+// main.
+package config
+
+import (
+	"bytes"
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/x509"
+	"encoding/json"
+	"encoding/pem"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"time"
+
+	"gbo-demo/eudi-credential-issuer/internal/issuance"
+	"gbo-demo/oid4vc-kit/lote"
+	"gbo-demo/oid4vc-kit/x5c"
+)
+
+// File is the JSON configuration file. Relative paths are resolved against
+// the directory of the file.
+type File struct {
+	StatusListSize int            `json:"status_list_size"`
+	BatchSize      int            `json:"batch_size"`
+	OfferTTL       Duration       `json:"offer_ttl"`
+	TokenTTL       Duration       `json:"token_ttl"`
+	NonceTTL       Duration       `json:"nonce_ttl"`
+	Providers      []ProviderFile `json:"providers"`
+	Profiles       []ProfileFile  `json:"profiles"`
+	// DisclosureOffers, PIDTrustAnchors and DisclosureTTL serve
+	// disclosure-based issuance.
+	LoginOffers      []DisclosureOfferFile `json:"login_offers"`
+	DisclosureOffers []DisclosureOfferFile `json:"disclosure_offers"`
+	PIDTrustAnchors  []AnchorsFile         `json:"pid_trust_anchors"`
+	PIDTrustList     *lote.File            `json:"pid_trust_list"`
+	DisclosureTTL    Duration              `json:"disclosure_ttl"`
+}
+
+// DisclosureOfferFile is an offer reached by a fixed link, started with a
+// PID disclosure.
+type DisclosureOfferFile struct {
+	Key                        string            `json:"key"`
+	Provider                   string            `json:"provider"`
+	CredentialConfigurationIDs []string          `json:"credential_configuration_ids"`
+	Parameters                 map[string]string `json:"parameters"`
+}
+
+// AnchorsFile is a named set of trust anchors in one PEM file.
+type AnchorsFile struct {
+	Name      string `json:"name"`
+	RootsFile string `json:"roots_file"`
+}
+
+// KeyFiles names a PEM private key and a PEM certificate chain, leaf first.
+type KeyFiles struct {
+	KeyFile   string `json:"key_file"`
+	ChainFile string `json:"chain_file"`
+}
+
+// ProviderFile configures one Attestation Provider and the credentials it
+// issues.
+type ProviderFile struct {
+	Name            string   `json:"name"`
+	TestPersonsFile string   `json:"test_persons_file"`
+	Access          KeyFiles `json:"access"`
+	Issuer          KeyFiles `json:"issuer"`
+	Status          KeyFiles `json:"status"`
+	// RegistrationCertificateFile holds the WRPRC as raw bytes.
+	RegistrationCertificateFile         string `json:"registration_certificate_file"`
+	VerifierRegistrationCertificateFile string `json:"verifier_registration_certificate_file"`
+	// RequestEncryptionKeyFile holds the PEM P-256 key wallets encrypt
+	// their credential requests to; required for an eudi profile.
+	RequestEncryptionKeyFile string                        `json:"request_encryption_key_file"`
+	CredentialConfigurations []CredentialConfigurationFile `json:"credential_configurations"`
+}
+
+// CredentialConfigurationFile is issuance.CredentialConfiguration with JSON
+// names, plus the bronpoort URL that belongs to the source adapter.
+type CredentialConfigurationFile struct {
+	ID         string             `json:"id"`
+	VCT        string             `json:"vct"`
+	Scope      string             `json:"scope"`
+	Display    []issuance.Display `json:"display"`
+	Claims     []issuance.Claim   `json:"claims"`
+	ValidDays  int                `json:"valid_days"`
+	StatusList string             `json:"status_list"`
+	SourceURL  string             `json:"source_url"`
+	// SourceCAFile holds the roots that sign the TLS certificate of
+	// source_url, for a bronpoort with a certificate of its own (the
+	// reference QTSP's callback).
+	SourceCAFile string `json:"source_ca_file,omitempty"`
+}
+
+// ProfileFile configures one profile.
+type ProfileFile struct {
+	Name string        `json:"name"`
+	Kind issuance.Kind `json:"kind"`
+	// WalletProviderRootsFile holds the PEM roots of trusted wallet
+	// providers (Wallet Instance Attestations).
+	WalletProviderRootsFile string `json:"wallet_provider_roots_file"`
+	// KeyAttestationRootsFile holds the PEM roots for key attestations.
+	KeyAttestationRootsFile string `json:"key_attestation_roots_file"`
+	UniversalLinkBase       string `json:"universal_link_base"`
+	// PlainJWTWalletProvidersFile is a second roots file on a combined
+	// profile: wallets attested by these providers (the NL Wallet's) may
+	// skip key attestation.
+	PlainJWTWalletProvidersFile string `json:"plain_jwt_wallet_providers_file"`
+	// PIDTrustedAuthorities are base64url KeyIdentifiers for an aki
+	// trusted_authorities query on the PID (HAIP 1.0 section 5).
+	PIDTrustedAuthorities []string `json:"pid_trusted_authorities"`
+	// KeyStorage and UserAuthentication are the levels a key attestation
+	// must assert (OpenID4VCI Appendix D.2), for example "iso_18045_high".
+	KeyStorage         []string `json:"key_storage"`
+	UserAuthentication []string `json:"user_authentication"`
+}
+
+// Duration reads a Go duration string such as "15m".
+type Duration time.Duration
+
+func (d *Duration) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	v, err := time.ParseDuration(s)
+	*d = Duration(v)
+	return err
+}
+
+// Loaded is the configuration of the issuer core and of the source
+// adapter.
+type Loaded struct {
+	Issuer           issuance.Config
+	TestPersonLogins map[string]string
+	// SourceEndpoints maps credential configuration ids to bronpoort URLs.
+	SourceEndpoints map[string]string
+	// SourceRoots maps a credential configuration id to the TLS roots of
+	// its bronpoort, when it has roots of its own.
+	SourceRoots map[string]*x509.CertPool
+}
+
+// Load reads the file at path and returns the configuration for publicURL.
+func Load(path, publicURL string) (Loaded, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return Loaded{}, err
+	}
+	var f File
+	if err := json.Unmarshal(raw, &f); err != nil {
+		return Loaded{}, fmt.Errorf("parse %s: %w", path, err)
+	}
+	dir := filepath.Dir(path)
+	out := Loaded{
+		Issuer: issuance.Config{
+			PublicURL: publicURL, StatusListSize: f.StatusListSize, BatchSize: f.BatchSize,
+			OfferTTL: time.Duration(f.OfferTTL), TokenTTL: time.Duration(f.TokenTTL), NonceTTL: time.Duration(f.NonceTTL),
+			DisclosureTTL: time.Duration(f.DisclosureTTL),
+		},
+		SourceEndpoints: map[string]string{},
+		SourceRoots:     map[string]*x509.CertPool{}, TestPersonLogins: map[string]string{},
+	}
+	for _, pf := range f.Providers {
+		if pf.TestPersonsFile != "" {
+			if pf.Name != "test-pid" {
+				return Loaded{}, errors.New("test_persons_file is only allowed on test-pid")
+			}
+			out.TestPersonLogins[pf.Name] = resolve(dir, pf.TestPersonsFile)
+		}
+		p, err := loadProvider(dir, pf)
+		if err != nil {
+			return Loaded{}, fmt.Errorf("provider %s: %w", pf.Name, err)
+		}
+		out.Issuer.Providers = append(out.Issuer.Providers, p)
+		for _, c := range pf.CredentialConfigurations {
+			if c.SourceURL == "" {
+				return Loaded{}, fmt.Errorf("credential configuration %q: source_url is required", c.ID)
+			}
+			out.Issuer.Configurations = append(out.Issuer.Configurations, issuance.CredentialConfiguration{
+				ID: c.ID, Provider: pf.Name, VCT: c.VCT, Scope: c.Scope, Display: c.Display, Claims: c.Claims,
+				ValidDays: c.ValidDays, StatusList: c.StatusList,
+			})
+			out.SourceEndpoints[c.ID] = c.SourceURL
+			if c.SourceCAFile != "" {
+				roots, err := readCertificates(resolve(dir, c.SourceCAFile))
+				if err != nil {
+					return Loaded{}, fmt.Errorf("credential configuration %q: source CA: %w", c.ID, err)
+				}
+				pool := x509.NewCertPool()
+				for _, r := range roots {
+					pool.AddCert(r)
+				}
+				out.SourceRoots[c.ID] = pool
+			}
+		}
+	}
+	for _, pf := range f.Profiles {
+		p, err := loadProfile(dir, pf)
+		if err != nil {
+			return Loaded{}, fmt.Errorf("profile %s: %w", pf.Name, err)
+		}
+		out.Issuer.Profiles = append(out.Issuer.Profiles, p)
+	}
+	for _, o := range f.DisclosureOffers {
+		out.Issuer.DisclosureOffers = append(out.Issuer.DisclosureOffers, issuance.DisclosureOffer{
+			Key: o.Key, Provider: o.Provider, ConfigurationIDs: o.CredentialConfigurationIDs, Parameters: o.Parameters,
+		})
+	}
+	for _, o := range f.LoginOffers {
+		out.Issuer.LoginOffers = append(out.Issuer.LoginOffers, issuance.DisclosureOffer{Key: o.Key, Provider: o.Provider, ConfigurationIDs: o.CredentialConfigurationIDs, Parameters: o.Parameters})
+	}
+	if f.PIDTrustList != nil {
+		if len(f.PIDTrustAnchors) > 0 {
+			return Loaded{}, errors.New("pid_trust_list and pid_trust_anchors are mutually exclusive")
+		}
+		client, err := f.PIDTrustList.Open(func(p string) string { return resolve(dir, p) })
+		if err != nil {
+			return Loaded{}, err
+		}
+		out.Issuer.PIDTrust = client
+	}
+	for _, a := range f.PIDTrustAnchors {
+		anchors, err := loadAnchors(dir, a.RootsFile, a.Name)
+		if err != nil {
+			return Loaded{}, fmt.Errorf("PID trust anchors %s: %w", a.Name, err)
+		}
+		out.Issuer.PIDAnchors = append(out.Issuer.PIDAnchors, anchors...)
+	}
+	return out, nil
+}
+
+func loadProvider(dir string, pf ProviderFile) (issuance.Provider, error) {
+	p := issuance.Provider{Name: pf.Name}
+	var err error
+	if p.AccessKey, p.AccessChain, err = loadKeyFiles(dir, pf.Access); err != nil {
+		return p, fmt.Errorf("access certificate: %w", err)
+	}
+	if p.IssuerKey, p.IssuerChain, err = loadKeyFiles(dir, pf.Issuer); err != nil {
+		return p, fmt.Errorf("issuer certificate: %w", err)
+	}
+	if p.StatusKey, p.StatusChain, err = loadKeyFiles(dir, pf.Status); err != nil {
+		return p, fmt.Errorf("status certificate: %w", err)
+	}
+	if pf.RegistrationCertificateFile != "" {
+		raw, err := os.ReadFile(resolve(dir, pf.RegistrationCertificateFile))
+		if err != nil {
+			return p, fmt.Errorf("registration certificate: %w", err)
+		}
+		// A file usually ends with a newline; the certificate does not.
+		p.RegistrationCertificate = bytes.TrimSpace(raw)
+	}
+	if pf.VerifierRegistrationCertificateFile != "" {
+		raw, err := os.ReadFile(resolve(dir, pf.VerifierRegistrationCertificateFile))
+		if err != nil {
+			return p, fmt.Errorf("verifier registration certificate: %w", err)
+		}
+		p.VerifierRegistrationCertificate = bytes.TrimSpace(raw)
+	}
+	if pf.RequestEncryptionKeyFile != "" {
+		key, err := readKey(resolve(dir, pf.RequestEncryptionKeyFile))
+		if err != nil {
+			return p, fmt.Errorf("request encryption key: %w", err)
+		}
+		ec, ok := key.(*ecdsa.PrivateKey)
+		if !ok {
+			return p, errors.New("request encryption key: not an EC key")
+		}
+		p.RequestEncryptionKey = ec
+	}
+	return p, nil
+}
+
+func loadProfile(dir string, pf ProfileFile) (issuance.Profile, error) {
+	p := issuance.Profile{Name: pf.Name, Kind: pf.Kind, UniversalLinkBase: pf.UniversalLinkBase, PIDTrustedAuthorities: pf.PIDTrustedAuthorities,
+		KeyStorage: pf.KeyStorage, UserAuthentication: pf.UserAuthentication}
+	var err error
+	if p.WalletProviders, err = loadAnchors(dir, pf.WalletProviderRootsFile, pf.Name+" wallet providers"); err != nil {
+		return p, err
+	}
+	if pf.KeyAttestationRootsFile != "" {
+		if p.KeyAttestationProviders, err = loadAnchors(dir, pf.KeyAttestationRootsFile, pf.Name+" key attestation"); err != nil {
+			return p, err
+		}
+	}
+	if pf.PlainJWTWalletProvidersFile != "" {
+		name := pf.Name + " plain-jwt wallet providers"
+		plain, err := loadAnchors(dir, pf.PlainJWTWalletProvidersFile, name)
+		if err != nil {
+			return p, err
+		}
+		// A root in both files would make its wallets attest or not,
+		// depending on which set happens to match first.
+		attesting, err := readCertificates(resolve(dir, pf.WalletProviderRootsFile))
+		if err != nil {
+			return p, err
+		}
+		plainRoots, err := readCertificates(resolve(dir, pf.PlainJWTWalletProvidersFile))
+		if err != nil {
+			return p, err
+		}
+		for _, root := range plainRoots {
+			if slices.ContainsFunc(attesting, func(c *x509.Certificate) bool { return c.Equal(root) }) {
+				return p, fmt.Errorf("%s: root %q is also a wallet provider that must attest", name, root.Subject)
+			}
+		}
+		p.WalletProviders = append(p.WalletProviders, plain...)
+		p.PlainJWTWalletProviders = []string{name}
+	}
+	return p, nil
+}
+
+func resolve(dir, path string) string {
+	if filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(dir, path)
+}
+
+func loadKeyFiles(dir string, k KeyFiles) (crypto.Signer, []*x509.Certificate, error) {
+	if k.KeyFile == "" || k.ChainFile == "" {
+		return nil, nil, errors.New("key_file and chain_file are required")
+	}
+	key, err := readKey(resolve(dir, k.KeyFile))
+	if err != nil {
+		return nil, nil, err
+	}
+	chain, err := readCertificates(resolve(dir, k.ChainFile))
+	if err != nil {
+		return nil, nil, err
+	}
+	if !publicKeysEqual(key.Public(), chain[0].PublicKey) {
+		return nil, nil, errors.New("the key does not belong to the first certificate of the chain")
+	}
+	return key, chain, nil
+}
+
+func loadAnchors(dir, path, name string) ([]x5c.Anchors, error) {
+	if path == "" {
+		return nil, fmt.Errorf("%s: a roots file is required", name)
+	}
+	roots, err := readCertificates(resolve(dir, path))
+	if err != nil {
+		return nil, err
+	}
+	return []x5c.Anchors{x5c.NewAnchors(name, roots...)}, nil
+}
+
+func readKey(path string) (crypto.Signer, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	block, _ := pem.Decode(raw)
+	if block == nil {
+		return nil, fmt.Errorf("%s: no PEM block", path)
+	}
+	var key any
+	switch block.Type {
+	case "EC PRIVATE KEY":
+		key, err = x509.ParseECPrivateKey(block.Bytes)
+	case "PRIVATE KEY":
+		key, err = x509.ParsePKCS8PrivateKey(block.Bytes)
+	default:
+		return nil, fmt.Errorf("%s: unsupported PEM block %q", path, block.Type)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	signer, ok := key.(crypto.Signer)
+	if !ok {
+		return nil, fmt.Errorf("%s: not a signing key", path)
+	}
+	return signer, nil
+}
+
+func readCertificates(path string) ([]*x509.Certificate, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var out []*x509.Certificate
+	for {
+		var block *pem.Block
+		block, raw = pem.Decode(raw)
+		if block == nil {
+			break
+		}
+		if block.Type != "CERTIFICATE" {
+			continue
+		}
+		c, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		out = append(out, c)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("%s: no certificates", path)
+	}
+	return out, nil
+}
+
+func publicKeysEqual(a, b crypto.PublicKey) bool {
+	type equaler interface{ Equal(crypto.PublicKey) bool }
+	e, ok := a.(equaler)
+	return ok && e.Equal(b)
+}

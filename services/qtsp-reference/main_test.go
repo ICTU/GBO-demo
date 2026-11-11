@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"gbo-demo/qtsp-reference/internal/issuance"
+	"gbo-demo/qtsp-reference/internal/web"
 )
 
 func TestWalletIssuanceLink(t *testing.T) {
@@ -34,9 +35,9 @@ func TestMissingIssuanceCertificatesDisableOnlyWalletIssuance(t *testing.T) {
 	t.Setenv("QTSP_ISSUANCE_TLS_KEY_FILE", filepath.Join(missing, "tls-key.der.b64"))
 	t.Setenv("QTSP_ISSUANCE_TLS_CERT_FILE", filepath.Join(missing, "tls-cert.der.b64"))
 	t.Setenv("QTSP_ISSUANCE_CALLBACK_PATH_FILE", filepath.Join(missing, "callback-path"))
-	server, link, err := optionalIssuanceServer(issuance.NewStore(nil), "https://wallet.example/issue")
-	if err != nil || server != nil || link != "" {
-		t.Fatalf("optional issuance = server %v link %q err %v, want disabled without error", server, link, err)
+	server, link, issuer, err := optionalIssuanceServer(issuance.NewStore(nil), "https://wallet.example/issue", &web.Issuer{OffersURL: "http://issuer.example/offers"})
+	if err != nil || server != nil || link != "" || issuer != nil {
+		t.Fatalf("optional issuance = server %v link %q issuer %v err %v, want disabled without error", server, link, issuer, err)
 	}
 }
 

@@ -58,8 +58,14 @@ type testAS struct {
 	offset   time.Duration
 	register *fakeRegister
 	ca       *testCA
-	// wallet stands in for the NL Wallet verifier.
+	// wallet stands in for the NL Wallet verifier, eudi for
+	// eudi-wallet-verifier; eudi is a means only in tests that ask for it.
 	wallet *fakeWallet
+	eudi   *fakeWallet
+	// credentials stands in for the issuers' metadata: issuer identifier
+	// and credential configuration ID to what the consent page shows; a nil
+	// map means the metadata is unreachable.
+	credentials map[string]authorization.CredentialDisplay
 }
 
 func newTestAS(t *testing.T) *testAS {
@@ -90,7 +96,19 @@ func newTestASWith(t *testing.T, resource string, register authorization.Registe
 
 func newTestASWithIssuer(t *testing.T, resource string, register authorization.Register, withWallet bool, issuer string) *testAS {
 	t.Helper()
-	as := &testAS{wallet: newFakeWallet(), keys: map[string]*ecdsa.PrivateKey{}, kids: map[string]string{}, dpopKey: newECKey(t), register: newFakeRegister(), ca: newTestCA(t)}
+	return newTestASWithWallets(t, resource, register, withWallet, false, issuer)
+}
+
+// newTestASWithEUDI runs the server with the EU-wallet as means, next to
+// the NL Wallet when withNL.
+func newTestASWithEUDI(t *testing.T, withNL bool, issuer string) *testAS {
+	t.Helper()
+	return newTestASWithWallets(t, testResource, nil, withNL, true, issuer)
+}
+
+func newTestASWithWallets(t *testing.T, resource string, register authorization.Register, withWallet, withEUDI bool, issuer string) *testAS {
+	t.Helper()
+	as := &testAS{wallet: newFakeWallet(), eudi: newFakeEUDIWallet(), keys: map[string]*ecdsa.PrivateKey{}, kids: map[string]string{}, dpopKey: newECKey(t), register: newFakeRegister(), ca: newTestCA(t)}
 	var reg authorization.Register = as.register
 	if register != nil {
 		reg = register
@@ -131,15 +149,32 @@ func newTestASWithIssuer(t *testing.T, resource string, register authorization.R
 	if withWallet {
 		identifiers[walletverifier.Means] = as.wallet
 	}
+	if withEUDI {
+		identifiers[walletverifier.EUDIMeans] = as.eudi
+	}
 	as.service = authorization.NewService(authorization.Config{
-		Issuer:       issuer,
-		Resources:    []authorization.Resource{{URL: resource, Name: "Basisregistratie Personen (test)"}, {URL: testResource2, Name: "DUO (test)"}},
+		Issuer: issuer,
+		Resources: []authorization.Resource{
+			{URL: resource, Name: "Basisregistratie Personen (test)"}, {URL: testResource2, Name: "DUO (test)"},
+			{URL: issuanceResource, Name: "Belastingdienst", Kind: authorization.ResourceIssuance, Organization: issuerOrganizationID},
+			{URL: otherIssuanceResource, Name: "RvIG", Kind: authorization.ResourceIssuance, Organization: otherIssuerOrgID},
+		},
 		Clients:      clientconfig.New(clients...),
 		Identifiers:  identifiers,
 		Tokens:       tokens,
 		Register:     reg,
 		TrustAnchors: as.ca.pool(),
 		Now:          as.now,
+		CredentialMetadata: func(_ context.Context, issuer, configuration string) (authorization.CredentialDisplay, error) {
+			if as.credentials == nil {
+				return authorization.CredentialDisplay{}, errors.New("unreachable")
+			}
+			d, ok := as.credentials[issuer+" "+configuration]
+			if !ok {
+				return d, authorization.ErrUnknownCredentialConfiguration
+			}
+			return d, nil
+		},
 	})
 	handler = NewHandler(as.service)
 	return as
@@ -457,10 +492,13 @@ func newECKey(t *testing.T) *ecdsa.PrivateKey {
 	return key
 }
 
-// fakeWallet is the NL Wallet verifier as SessionIdentifier, in memory: a
-// test sets how each session goes.
+// fakeWallet is a wallet verifier as SessionIdentifier, in memory: a test
+// sets how each session goes. Like the real verifiers, it releases the PID
+// of a session with a return nonce only with that nonce.
 type fakeWallet struct {
-	mu                sync.Mutex
+	mu sync.Mutex
+	// links are the cross-device and same-device links of a session.
+	links             func(id string) (cross, same string)
 	next              int
 	startErr          error
 	returnURLTemplate string
@@ -475,7 +513,22 @@ type fakeWalletSession struct {
 	returnNonce string
 }
 
-func newFakeWallet() *fakeWallet { return &fakeWallet{sessions: map[string]*fakeWalletSession{}} }
+// newFakeWallet is the NL Wallet's verifier: universal links.
+func newFakeWallet() *fakeWallet {
+	return &fakeWallet{sessions: map[string]*fakeWalletSession{}, links: func(id string) (string, string) {
+		return "https://app.example/deeplink/cross/" + id, "https://app.example/deeplink/same/" + id
+	}}
+}
+
+// newFakeEUDIWallet is eudi-wallet-verifier: openid4vp:// links.
+func newFakeEUDIWallet() *fakeWallet {
+	return &fakeWallet{sessions: map[string]*fakeWalletSession{}, links: func(id string) (string, string) {
+		link := func(st string) string {
+			return "openid4vp://?" + url.Values{"client_id": {"x509_hash:abc"}, "request_uri": {"https://verifier.test/disclosure/sessions/" + id + "/request?session_type=" + st}}.Encode()
+		}
+		return link("cross_device"), link("same_device")
+	}}
+}
 
 func (f *fakeWallet) Start(_ context.Context, returnURLTemplate string) (string, error) {
 	f.mu.Lock()
@@ -486,10 +539,11 @@ func (f *fakeWallet) Start(_ context.Context, returnURLTemplate string) (string,
 	f.returnURLTemplate = returnURLTemplate
 	f.next++
 	id := fmt.Sprintf("session-%d", f.next)
+	cross, same := f.links(id)
 	f.sessions[id] = &fakeWalletSession{progress: authorization.Progress{
 		State:          authorization.SessionWaiting,
-		Link:           "https://app.example/deeplink/cross/" + id,
-		SameDeviceLink: "https://app.example/deeplink/same/" + id,
+		Link:           cross,
+		SameDeviceLink: same,
 	}}
 	return id, nil
 }
@@ -505,6 +559,9 @@ func (f *fakeWallet) Identify(_ context.Context, session string) (authorization.
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	s := f.sessions[session]
+	if s.returnNonce != "" {
+		return authorization.Identity{}, authorization.ErrAwaitingReturn
+	}
 	return s.identity, s.identifyErr
 }
 

@@ -28,9 +28,14 @@ import (
 // QEAAProviderEntitlement is the entitlement of a qualified trust service
 // provider issuing qualified electronic attestations of attributes
 // (CIR (EU) 2025/848 Annex I point 12, in the URI form of ETSI/EUDI TS5).
-// It is the only entitlement that grants registration: Article 45e
-// concerns these providers.
+// It grants the operation scopes: Article 45e concerns these providers.
 const QEAAProviderEntitlement = "https://uri.etsi.org/19475/Entitlement/QEAA_Provider"
+
+// PubEAAProviderEntitlement is the entitlement of a provider of electronic
+// attestations of attributes issued by or on behalf of a public sector body
+// (PuB-EAA). It grants the issuance scope only: the credential issuer of a
+// source logs the citizen in here. ETSI TS 119 478 does not cover this use.
+const PubEAAProviderEntitlement = "https://uri.etsi.org/19475/Entitlement/PUB_EAA_Provider"
 
 // softwareStatementLeeway allows for clock skew on iat and exp.
 const softwareStatementLeeway = 30 * time.Second
@@ -82,7 +87,9 @@ type registeredClient struct {
 	client         *Client
 	registryURI    string
 	organizationID string
-	active         bool
+	// entitlement is the one its scope needs; empty means QEAA_Provider.
+	entitlement string
+	active      bool
 }
 
 type registeredClients struct {
@@ -176,14 +183,21 @@ func (s *Service) Register(ctx context.Context, req RegistrationRequest) (Regist
 	if oauthErr != nil {
 		return RegisteredClient{}, oauthErr
 	}
+	entitlement := QEAAProviderEntitlement
+	if m.scopes[IssuanceScope] {
+		entitlement = PubEAAProviderEntitlement
+	}
+	if !slices.Contains(entry.Entitlements, entitlement) {
+		return RegisteredClient{}, &Error{Code: "invalid_client_metadata", Description: "scope " + m.scope + " needs the entitlement " + entitlement}
+	}
 	key := jose.JSONWebKey{Key: leaf.PublicKey, Use: "sig"}
 	thumbprint, err := key.Thumbprint(crypto.SHA256)
 	if err != nil {
 		return RegisteredClient{}, &Error{Code: "invalid_software_statement", Description: "the certificate key is not usable"}
 	}
 	key.KeyID = base64.RawURLEncoding.EncodeToString(thumbprint)
-	c := &Client{ID: RandomID(), Name: entry.LegalName, RedirectURIs: m.redirectURIs, Scopes: m.scopes, Keys: jose.JSONWebKeySet{Keys: []jose.JSONWebKey{key}}}
-	s.registered.add(&registeredClient{client: c, registryURI: statement.RegistryURI, organizationID: organizationID, active: true})
+	c := &Client{ID: RandomID(), Name: entry.LegalName, RedirectURIs: m.redirectURIs, Scopes: m.scopes, Keys: jose.JSONWebKeySet{Keys: []jose.JSONWebKey{key}}, OrganizationID: organizationID}
+	s.registered.add(&registeredClient{client: c, registryURI: statement.RegistryURI, organizationID: organizationID, entitlement: entitlement, active: true})
 	return RegisteredClient{
 		ClientID:                c.ID,
 		ClientIDIssuedAt:        now,
@@ -195,7 +209,9 @@ func (s *Service) Register(ctx context.Context, req RegistrationRequest) (Regist
 }
 
 // approve looks up the entry in the register: it must exist, carry the
-// QEAA_Provider entitlement, and name the organisation of the certificate.
+// QEAA_Provider or the PUB_EAA_Provider entitlement, and name the
+// organisation of the certificate. Which of the two the client needs follows
+// from its scope.
 func (s *Service) approve(ctx context.Context, registryURI, organizationID string) (RegisterEntry, *Error) {
 	if s.cfg.Register == nil {
 		return RegisterEntry{}, &Error{Code: "temporarily_unavailable", Description: "no register is configured"}
@@ -206,8 +222,8 @@ func (s *Service) approve(ctx context.Context, registryURI, organizationID strin
 		return RegisterEntry{}, &Error{Code: "temporarily_unavailable", Description: "the register cannot be consulted"}
 	case err != nil:
 		return RegisterEntry{}, &Error{Code: "unapproved_software_statement", Description: "registryURI is not in the register"}
-	case !slices.Contains(entry.Entitlements, QEAAProviderEntitlement):
-		return RegisterEntry{}, &Error{Code: "unapproved_software_statement", Description: "the register entry has no QEAA_Provider entitlement"}
+	case !slices.Contains(entry.Entitlements, QEAAProviderEntitlement) && !slices.Contains(entry.Entitlements, PubEAAProviderEntitlement):
+		return RegisterEntry{}, &Error{Code: "unapproved_software_statement", Description: "the register entry has no QEAA_Provider or PUB_EAA_Provider entitlement"}
 	case !slices.Contains(entry.Identifiers, organizationID):
 		return RegisterEntry{}, &Error{Code: "unapproved_software_statement", Description: "the organizationIdentifier of the certificate is not an identifier of the register entry"}
 	}
@@ -230,6 +246,13 @@ func (s *Service) RecheckEntitlements(ctx context.Context) RecheckResult {
 	for _, c := range s.registered.snapshot() {
 		res.Checked++
 		entry, oauthErr := s.approve(ctx, c.registryURI, c.organizationID)
+		entitlement := c.entitlement
+		if entitlement == "" {
+			entitlement = QEAAProviderEntitlement
+		}
+		if oauthErr == nil && !slices.Contains(entry.Entitlements, entitlement) {
+			oauthErr = &Error{Code: "unapproved_software_statement", Description: "the register entry no longer has " + entitlement}
+		}
 		switch {
 		case oauthErr == nil:
 			s.registered.rename(c.client.ID, entry.LegalName)
@@ -366,19 +389,22 @@ func parseClientMetadata(m map[string]json.RawMessage) (clientMetadata, *Error) 
 	}
 	scopes := map[string]bool{}
 	for _, sc := range strings.Fields(scope) {
-		if !slices.Contains(OperationScopes, sc) {
-			return invalid("scope " + sc + " is not verify or retrieve")
+		if !slices.Contains(supportedScopes, sc) {
+			return invalid("scope " + sc + " is not verify, retrieve or issuance")
 		}
 		scopes[sc] = true
 	}
 	var granted []string
-	for _, sc := range OperationScopes {
+	for _, sc := range supportedScopes {
 		if scopes[sc] {
 			granted = append(granted, sc)
 		}
 	}
 	if len(granted) == 0 {
-		return invalid("scope must contain verify, retrieve or both")
+		return invalid("scope must contain verify, retrieve or both, or issuance")
+	}
+	if scopes[IssuanceScope] && len(granted) > 1 {
+		return invalid("scope issuance cannot be combined with verify or retrieve")
 	}
 	var redirectURIs []string
 	if raw, ok := m["redirect_uris"]; ok && json.Unmarshal(raw, &redirectURIs) != nil {

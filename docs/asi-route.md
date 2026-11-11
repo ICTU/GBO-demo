@@ -57,7 +57,7 @@ Behind the ASIP the request goes through the demo's generic chain: the ASIP's ow
 | Scopes `verify` and `retrieve` | **real** |
 | Binding of the token to the selected attributes with RFC 9396 `authorization_details`, optional, and required with `AZSP_REQUIRE_AUTHORIZATION_DETAILS=true` | **GBO interpretation**: an extension with a provisional type; ETSI binds per operation only. Whether a member state imposes it is a policy choice under Article 9(5) of Implementing Regulation (EU) 2025/1569 |
 | One request page: the QTSP by its legal name in the register, the operation, the source, the attributes when supplied; log in or deny | **real**; the wording is the demo's own |
-| Login with the NL Wallet (OpenID4VP PID disclosure), cross-device and on the same device | **real**, through nl-wallet's verifier. Run with the real wallet cross-device; on the same device only in tests until the route runs over HTTPS in the simulation environment |
+| Login with the NL Wallet (OpenID4VP PID disclosure), cross-device and on the same device | **real**, through nl-wallet's verifier. Run with the real wallet cross-device; on the same device only in tests so far: a run with the real wallet on one phone in the simulation environment is still to be done |
 | Login with DigiD (mock) | **stub**: checks nothing and provides the BSN only; not real DigiD |
 | The identification data in the token: with the NL Wallet the BSN, names, birth date and nationalities; with DigiD (mock) the BSN only | **GBO interpretation** of what the token carries. The NL PID has no place of birth, one of the mandatory PID attributes |
 | The BSN in plain text in the token | **demo shortcut**: the QTSP can read it; slice 9 protects it |
@@ -98,4 +98,3 @@ It is not a real QTSP and holds no qualified status.
 - Clause 6.2 (ISO 15000, eDelivery).
 - A production register, access certificates, real DigiD, or production key management, including the qualified seal certificate.
 - Protection of the BSN in the token (slice 9 of #336).
-- A deployment of the route in the simulation environment; it runs in the local stack (`make demo-asi`).

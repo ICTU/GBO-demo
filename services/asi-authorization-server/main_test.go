@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"gbo-demo/asi-authorization-server/internal/authorization"
+)
 
 func TestParseResources(t *testing.T) {
 	got, err := parseResources(" http://asip/brp/authsrc-api/ = Basisregistratie Personen (mock) ,http://asip/duo/authsrc-api=DUO")
@@ -12,6 +16,25 @@ func TestParseResources(t *testing.T) {
 	for _, value := range []string{"http://asip/brp/authsrc-api", "=BRP", "", " , "} {
 		if _, err := parseResources(value); err == nil {
 			t.Errorf("parseResources(%q): err = nil", value)
+		}
+	}
+}
+
+func TestParseIssuanceResources(t *testing.T) {
+	got, err := parseIssuanceResources(" https://issuer/belastingdienst/eudi/ = NTRNL-99990001 = Belastingdienst ,https://issuer/rvig/eudi=NTRNL-99990002=RvIG")
+	want := []authorization.Resource{
+		{URL: "https://issuer/belastingdienst/eudi", Name: "Belastingdienst", Kind: authorization.ResourceIssuance, Organization: "NTRNL-99990001"},
+		{URL: "https://issuer/rvig/eudi", Name: "RvIG", Kind: authorization.ResourceIssuance, Organization: "NTRNL-99990002"},
+	}
+	if err != nil || len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("parseIssuanceResources = %+v, %v", got, err)
+	}
+	if got, err := parseIssuanceResources(""); err != nil || len(got) != 0 {
+		t.Fatalf("parseIssuanceResources of nothing = %+v, %v; want none", got, err)
+	}
+	for _, value := range []string{"https://issuer/x=NTRNL-1", "https://issuer/x==name", "=NTRNL-1=name"} {
+		if _, err := parseIssuanceResources(value); err == nil {
+			t.Errorf("parseIssuanceResources(%q) accepted", value)
 		}
 	}
 }

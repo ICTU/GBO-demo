@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily GBO simulation trust-list refresh
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+Unit=gbo-trust-lists.service
+
+[Install]
+WantedBy=timers.target

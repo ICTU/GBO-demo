@@ -65,13 +65,17 @@ dev-portal-backend
 dienstverlener-backend
 dvtp-onboarding-register
 eudi-adapter
+eudi-credential-issuer
+eudi-wallet-verifier
 ftv-graphql-mapper
 graphql-server
 ldv-client
 ldv-logboek
 lvg-graphql-server
+oid4vc-kit
 qtsp-reference
 source-registry
+test-pid-source
 SERVICES
 
 # These services use local replace directives. A change to a sibling module
@@ -90,6 +94,17 @@ fi
 
 if matches_any 'services/asi-mapping/*' 'services/source-registry/*'; then
   for service in eudi-adapter asi-provider; do
+    go="$(append_unique "${go}" "${service}")"
+  done
+fi
+
+# The test PID stub's tests read the BRP mock persons.
+if matches_any 'services/brp-graphql-server/mockdata/*'; then
+  go="$(append_unique "${go}" 'test-pid-source')"
+fi
+
+if matches_any 'services/oid4vc-kit/*'; then
+  for service in eudi-adapter eudi-credential-issuer eudi-wallet-verifier; do
     go="$(append_unique "${go}" "${service}")"
   done
 fi
@@ -176,6 +191,10 @@ if matches_any 'schemas/asi-attributes.json'; then
   docker="$(append_unique "${docker}" 'asi-provider')"
 fi
 
+if matches_any 'services/oid4vc-kit/*'; then
+  docker="$(append_unique "${docker}" 'eudi-adapter')"
+fi
+
 if matches_any 'services/ftv-graphql-mapper/*'; then
   docker="$(append_unique "${docker}" 'bron-sidecar')"
   docker="$(append_unique "${docker}" 'openftv-pdp')"
@@ -210,6 +229,8 @@ if [[ "${ci_changed}" == true ]] || matches_any \
   'services/asi-authorization-server/*' \
   'services/asi-provider/*' \
   'services/qtsp-reference/*' \
+  'services/eudi-credential-issuer/*' \
+  'services/oid4vc-kit/*' \
   '.golangci.yml'; then
   conformance=true
 fi
@@ -248,6 +269,16 @@ if [[ "${ci_changed}" == true ]] || matches_any 'deploy/helm/gbo-app/*'; then
   chart=true
 fi
 
+credential_issuer_db=false
+if [[ "${ci_changed}" == true ]] || matches_any 'services/eudi-credential-issuer/*'; then
+  credential_issuer_db=true
+fi
+
+credential_issuer_interop=false
+if [[ "${ci_changed}" == true ]] || matches_any 'services/eudi-credential-issuer/*' 'services/oid4vc-kit/*'; then
+  credential_issuer_interop=true
+fi
+
 scripts=false
 if [[ "${ci_changed}" == true ]] || matches_any \
   'scripts/seed-openftv-manager.py' \
@@ -261,6 +292,8 @@ result="$({
   printf 'docker=%s\n' "${docker}"
   printf 'conformance=%s\n' "${conformance}"
   printf 'source_registry=%s\n' "${source_registry}"
+  printf 'credential_issuer_db=%s\n' "${credential_issuer_db}"
+  printf 'credential_issuer_interop=%s\n' "${credential_issuer_interop}"
   printf 'rego=%s\n' "${rego}"
   printf 'schema_drift=%s\n' "${schema_drift}"
   printf 'image_manifest=%s\n' "${image_manifest}"

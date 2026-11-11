@@ -140,6 +140,67 @@ type issuanceServerRequest []struct {
 	ID string `json:"id"`
 }
 
+// subjectOrigin says where the BSN of an issuance request came from.
+type subjectOrigin int
+
+const (
+	// subjectFromPID: a wallet disclosed its PID to the issuance server.
+	subjectFromPID subjectOrigin = iota
+	// subjectFromOfferCaller: the caller that made a pre-authorized offer
+	// named the subject; no PID was presented.
+	subjectFromOfferCaller
+	// subjectFromLogin: the citizen logged in at GBO's authorization server
+	// and the credential issuer took the BSN from that login.
+	subjectFromLogin
+)
+
+// originLogin is the origin a credential issuer sends with the BSN from a
+// login; without an origin the subject came from the offer caller.
+const originLogin = "login"
+
+// offerSubjectRequest is the request of a credential issuer that names the
+// subject: {"subject": {"bsn": "..."}} for a pre-authorized offer, with
+// "origin": "login" when the BSN comes from the citizen's login. It is an
+// object, so it cannot be mistaken for a disclosure, which is an array.
+type offerSubjectRequest struct {
+	Subject map[string]any  `json:"subject"`
+	Origin  json.RawMessage `json:"origin"`
+}
+
+// decodeIssuanceSubject reads the BSN from either request shape.
+func decodeIssuanceSubject(body []byte) (string, subjectOrigin, error) {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) > 0 && trimmed[0] == '{' {
+		var request offerSubjectRequest
+		if err := json.Unmarshal(trimmed, &request); err != nil || request.Subject == nil {
+			return "", 0, fmt.Errorf("the offer request has no subject")
+		}
+		bsn, _ := request.Subject["bsn"].(string)
+		if bsn == "" {
+			return "", 0, fmt.Errorf("the offer subject has no BSN")
+		}
+		if request.Origin == nil {
+			return bsn, subjectFromOfferCaller, nil
+		}
+		// An origin the adapter does not know is refused: logging it under
+		// another Dataverwerking would be wrong.
+		var origin string
+		if err := json.Unmarshal(request.Origin, &origin); err != nil || origin != originLogin {
+			return "", 0, fmt.Errorf("the subject has an unknown origin")
+		}
+		return bsn, subjectFromLogin, nil
+	}
+	var request issuanceServerRequest
+	if err := json.Unmarshal(trimmed, &request); err != nil || len(request) == 0 || len(request[0].Attestations) == 0 {
+		return "", 0, fmt.Errorf("the request contains no disclosed attestation")
+	}
+	bsn := extractBSN(request[0].Attestations[0].Attributes)
+	if bsn == "" {
+		return "", 0, fmt.Errorf("the disclosed PID contains no BSN")
+	}
+	return bsn, subjectFromPID, nil
+}
+
 // extractBSN scans the attributes map for a BSN: first nested under the PID
 // namespace, then flat.
 func extractBSN(attrs map[string]any) string {
@@ -224,7 +285,8 @@ func handleSourceAttestation(cfg config, client *http.Client, runtime sourceMeta
 			return
 		}
 		if r.PathValue("sourceID") != metadata.SourceID || r.PathValue("typeID") != metadata.TypeID {
-			http.NotFound(w, r)
+			// A configuration out of step, not a person without data.
+			http.Error(w, "unknown source or type", http.StatusServiceUnavailable)
 			return
 		}
 		if metadata.CacheState != "" {
@@ -236,27 +298,26 @@ func handleSourceAttestation(cfg config, client *http.Client, runtime sourceMeta
 			http.Error(w, "invalid issuance request", http.StatusBadRequest)
 			return
 		}
-		var request issuanceServerRequest
-		if err := json.Unmarshal(body, &request); err != nil || len(request) == 0 || len(request[0].Attestations) == 0 {
-			if err == nil {
-				err = fmt.Errorf("issuance request contains no disclosed attestation")
-			}
+		bsn, origin, err := decodeIssuanceSubject(body)
+		if err != nil {
 			logSourceAttestationError(r, "decode_request", err)
-			http.Error(w, "invalid PID disclosure", http.StatusBadRequest)
-			return
-		}
-		bsn := extractBSN(request[0].Attestations[0].Attributes)
-		if bsn == "" {
-			logSourceAttestationError(r, "extract_subject", fmt.Errorf("disclosed PID contains no BSN"))
-			http.Error(w, "no BSN in disclosed PID", http.StatusBadRequest)
+			http.Error(w, "invalid issuance request: "+err.Error(), http.StatusBadRequest)
 			return
 		}
 		// Logged before the source is called: a request that cannot be logged
-		// must not reach the bronhouder at all.
+		// must not reach the bronhouder at all. Which Dataverwerking it is
+		// depends on where the BSN came from.
 		if logbook != nil {
-			recording, err = logbook.logPIDExtraction(r.Context(), r, bsn, extractionStart, metadata.SourceID, metadata.TypeID)
+			switch origin {
+			case subjectFromOfferCaller:
+				recording, err = logbook.logSubjectReceipt(r.Context(), r, bsn, extractionStart, metadata.SourceID, metadata.TypeID)
+			case subjectFromLogin:
+				recording, err = logbook.logLoginSubject(r.Context(), r, bsn, extractionStart, metadata.SourceID, metadata.TypeID)
+			default:
+				recording, err = logbook.logPIDExtraction(r.Context(), r, bsn, extractionStart, metadata.SourceID, metadata.TypeID)
+			}
 			if err != nil {
-				http.Error(w, "the PID disclosure could not be logged; refusing the request", http.StatusInternalServerError)
+				http.Error(w, "the issuance request could not be logged; refusing it", http.StatusInternalServerError)
 				return
 			}
 		}
@@ -599,6 +660,36 @@ func main() {
 	if handled, err := runQTSPIssuanceProvisionCommand(os.Args[1:], os.Stdout, os.Stderr); handled {
 		if err != nil {
 			fatal("QTSP issuance certificate provisioning failed", err)
+		}
+		return
+	}
+	if handled, err := runRuntimeProjectionCommand(os.Args[1:], os.Stderr); handled {
+		if err != nil {
+			fatal("runtime projection failed", err)
+		}
+		return
+	}
+	if handled, err := runCredentialIssuerConfigCommand(ctx, os.Args[1:], os.Stdout, os.Stderr); handled {
+		if err != nil {
+			fatal("credential issuer materialization failed", err)
+		}
+		return
+	}
+	if handled, err := runExportPIDTrust(ctx, os.Args[1:], os.Stderr); handled {
+		if err != nil {
+			fatal("PID trust export failed", err)
+		}
+		return
+	}
+	if handled, err := runTrustListCommand(ctx, os.Args[1:], os.Stdout, os.Stderr); handled {
+		if err != nil {
+			fatal("trust list command failed", err)
+		}
+		return
+	}
+	if handled, err := runWalletRegistrationCommand(ctx, os.Args[1:], os.Stdout, os.Stderr); handled {
+		if err != nil {
+			fatal("wallet registration provisioning failed", err)
 		}
 		return
 	}

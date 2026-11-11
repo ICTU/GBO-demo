@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -373,5 +375,25 @@ func runtimeTestRelease(t *testing.T, releaseID, sourceID, offerID string, now t
 				MediaType: "application/json", Bytes: metadataBody,
 			}},
 		}},
+	}
+}
+
+// A1: a source or type the active release does not know is a configuration
+// out of step with the issuer, not a person without data: 503, and the
+// source is not asked.
+func TestSourceReleaseRuntimeAnswersUnknownSourceOrTypeAsUnavailable(t *testing.T) {
+	release := runtimeTestRelease(t, "release-one", "belastingdienst", "offer-one", time.Now())
+	registry := &runtimeRegistryFake{active: release.ID, releases: map[string]onboarding.SourceRelease{release.ID: release}}
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		t.Errorf("the source was asked: %s", r.URL)
+		return nil, errors.New("unexpected source call")
+	})}
+	mux := newSourceReleaseRuntimeMux(context.Background(), config{}, client, registry, nil)
+	for _, path := range []string{"/attestations/rvig/example", "/attestations/belastingdienst/unknown"} {
+		recorder := httptest.NewRecorder()
+		mux.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"subject":{"bsn":"123456789"}}`)))
+		if recorder.Code != http.StatusServiceUnavailable {
+			t.Errorf("%s: status = %d, want 503", path, recorder.Code)
+		}
 	}
 }

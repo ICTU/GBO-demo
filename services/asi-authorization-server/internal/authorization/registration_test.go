@@ -24,7 +24,7 @@ func (f *fakeRegister) Lookup(_ context.Context, uri string) (RegisterEntry, err
 	return e, nil
 }
 
-// The approval of a registry entry: present, QEAA_Provider, and naming the
+// The approval of a registry entry: present, QEAA_Provider or PUB_EAA_Provider, and naming the
 // organisation of the certificate.
 func TestApprove(t *testing.T) {
 	reg := &fakeRegister{entries: map[string]RegisterEntry{
@@ -40,9 +40,9 @@ func TestApprove(t *testing.T) {
 	}
 	for _, tc := range []struct{ name, uri, reason string }{
 		{"unknown registryURI", "unknown", "not in the register"},
-		{"no QEAA_Provider", "provider", "no QEAA_Provider entitlement"},
+		{"no QEAA_Provider or PUB_EAA_Provider", "provider", "no QEAA_Provider or PUB_EAA_Provider entitlement"},
 		{"another organisation", "other", "organizationIdentifier"},
-		{"entitlement in the other URI form of TS5", "data-eu", "no QEAA_Provider entitlement"},
+		{"entitlement in the other URI form of TS5", "data-eu", "no QEAA_Provider or PUB_EAA_Provider entitlement"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := s.approve(context.Background(), tc.uri, "NTRNL-1")
