@@ -1248,6 +1248,27 @@ services:
   # (8002) with the API key. make provision-asi-eudi-wallet-verifier writes
   # its configuration: a WRPAC under the development reader CA and a WRPRC
   # for the PID claims of the login.
+  #
+  # The provisioning writes those files private (0600) to the user who ran
+  # it on the host; the verifier runs as UID 1000. This one-shot step copies
+  # them into the verifier's runtime volume, owned by 1000 with mode 0400,
+  # as credential-issuer-materialize does for the credential issuer.
+  eudi-wallet-verifier-runtime:
+    build:
+      context: .
+      dockerfile: services/eudi-adapter/Dockerfile
+    profiles: [asi]
+    command:
+      - ./eudi-adapter
+      - project-runtime
+      - --from=/provisioned
+      - --to=/runtime
+      - --owner=1000
+    volumes:
+      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/asi-eudi-wallet-verifier:/provisioned:ro
+      - eudi-wallet-verifier-runtime:/runtime
+    network_mode: none
+
   eudi-wallet-verifier:
     build:
       context: .
@@ -1258,7 +1279,10 @@ services:
     environment:
       - EUDI_WALLET_VERIFIER_CONFIG=/config/config.json
     volumes:
-      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/asi-eudi-wallet-verifier:/config:ro
+      - eudi-wallet-verifier-runtime:/config:ro
+    depends_on:
+      eudi-wallet-verifier-runtime:
+        condition: service_completed_successfully
     networks:
       - backend
 
@@ -2156,6 +2180,7 @@ networks:
     external: true
 
 volumes:
+  eudi-wallet-verifier-runtime:
   jaeger-badger:
   ldv-outbox-bron-sidecar:
   ldv-outbox-brp-sidecar:

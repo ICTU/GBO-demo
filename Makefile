@@ -326,7 +326,9 @@ provision-asi-wallet-verifier: require-development-cas
 # Needs the registrar root and EUDI_TRUST_PUBLIC_URL, as
 # provision-wallet-registration does. Run again when
 # ASI_EUDI_WALLET_VERIFIER_PUBLIC_URL or ASI_AUTHORIZATION_SERVER_PUBLIC_URL
-# changes; the next make demo-asi then recreates the ASI services.
+# changes; the next make demo-asi then recreates the ASI services. The files
+# stay private to the user who ran this; the one-shot service
+# eudi-wallet-verifier-runtime copies them for the verifier's user (1000).
 ASI_EUDI_WALLET_VERIFIER_DIR ?= $(ONBOARDING_SECRETS_DIR)/asi-eudi-wallet-verifier
 ASI_EUDI_WALLET_VERIFIER_PUBLIC_URL ?= http://localhost:$(PORT_ASI_EUDI_WALLET_VERIFIER)
 provision-asi-eudi-wallet-verifier: require-development-cas

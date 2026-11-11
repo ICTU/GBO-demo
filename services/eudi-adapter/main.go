@@ -663,6 +663,12 @@ func main() {
 		}
 		return
 	}
+	if handled, err := runRuntimeProjectionCommand(os.Args[1:], os.Stderr); handled {
+		if err != nil {
+			fatal("runtime projection failed", err)
+		}
+		return
+	}
 	if handled, err := runCredentialIssuerConfigCommand(ctx, os.Args[1:], os.Stdout, os.Stderr); handled {
 		if err != nil {
 			fatal("credential issuer materialization failed", err)
