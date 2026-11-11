@@ -36,12 +36,12 @@ requirements:
         status: deviation
         tests:
           - "services/eudi-credential-issuer/internal/httpapi:TestAuthorizationCodeMetadata"
-        reason: "The NL Wallet (v0.6.0) supports the pre-authorized code flow only; the authorization code flow is offered on the eudi profile."
+        reason: "This issuer offers the NL Wallet (v0.6.0) the pre-authorized code flow only; whether the NL Wallet completes the authorization code flow at an external issuer is not tested. The authorization code flow is offered on the eudi profile."
       wallet:
         status: deviation
         tests:
           - "services/eudi-credential-issuer/internal/httpapi:TestAuthorizationCodeMetadata"
-        reason: "The combined profile carries pre-authorized offers that both wallets can read (QTSP route); the NL Wallet (v0.6.0) has no authorization code flow, so EUDI wallets use the eudi profile for it."
+        reason: "The combined profile carries pre-authorized offers that both wallets can read (QTSP route); this issuer offers the NL Wallet (v0.6.0) the pre-authorized code flow only, so EUDI wallets use the eudi profile for the authorization code flow."
   HAIP-4-02:
     status: passed
     tests:
@@ -63,12 +63,12 @@ requirements:
         status: deviation
         tests:
           - "services/eudi-credential-issuer/internal/httpapi:TestToken"
-        reason: "The NL Wallet (v0.6.0) supports the pre-authorized code flow only; the authorization code flow is offered on the eudi profile. At the token endpoint client authentication and DPoP are required."
+        reason: "This issuer offers the NL Wallet (v0.6.0) the pre-authorized code flow only; whether the NL Wallet completes the authorization code flow at an external issuer is not tested. The authorization code flow is offered on the eudi profile. At the token endpoint client authentication and DPoP are required."
       wallet:
         status: deviation
         tests:
           - "services/eudi-credential-issuer/internal/httpapi:TestCombinedToken"
-        reason: "The combined profile carries pre-authorized offers that both wallets can read (QTSP route); the NL Wallet (v0.6.0) has no authorization code flow, so EUDI wallets use the eudi profile for it. At the token endpoint client authentication and DPoP are required."
+        reason: "The combined profile carries pre-authorized offers that both wallets can read (QTSP route); this issuer offers the NL Wallet (v0.6.0) the pre-authorized code flow only, so EUDI wallets use the eudi profile for the authorization code flow. At the token endpoint client authentication and DPoP are required."
   HAIP-4-05:
     status: passed
     tests:
@@ -147,10 +147,10 @@ requirements:
     profiles:
       nl:
         status: deviation
-        reason: "The NL Wallet (v0.6.0) supports the pre-authorized code flow only; the authorization code flow is offered on the eudi profile."
+        reason: "This issuer offers the NL Wallet (v0.6.0) the pre-authorized code flow only; whether the NL Wallet completes the authorization code flow at an external issuer is not tested. The authorization code flow is offered on the eudi profile."
       wallet:
         status: deviation
-        reason: "The combined profile carries pre-authorized offers that both wallets can read (QTSP route); the NL Wallet (v0.6.0) has no authorization code flow, so EUDI wallets use the eudi profile for it."
+        reason: "The combined profile carries pre-authorized offers that both wallets can read (QTSP route); this issuer offers the NL Wallet (v0.6.0) the pre-authorized code flow only, so EUDI wallets use the eudi profile for the authorization code flow."
   HAIP-4.2-02:
     status: passed
     tests:
