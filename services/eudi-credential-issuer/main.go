@@ -105,7 +105,7 @@ func serve(ctx context.Context, log *slog.Logger) error {
 		src.Clients[id] = source.WithRoots(src.HTTP, roots)
 	}
 	cfg.FetchPIDStatus = pidStatusFetcher(&http.Client{Timeout: 10 * time.Second})
-	if err := configureLogin(&cfg); err != nil {
+	if err := configureLogin(&cfg, log); err != nil {
 		return fmt.Errorf("login: %w", err)
 	}
 	svc, err := issuance.New(cfg, src, st, st, st, time.Now)
@@ -140,8 +140,10 @@ func serve(ctx context.Context, log *slog.Logger) error {
 // ISSUER_LOGIN_REGISTER_BASE/<provider> in the register of wallet-relying
 // parties, and the eudi profiles accept the wallet redirect URIs of
 // ISSUER_WALLET_REDIRECT_URIS. ISSUER_LOGIN_URL_MAP maps the server's public
-// address to one this container reaches ("public=internal").
-func configureLogin(cfg *issuance.Config) error {
+// address to one this container reaches ("public=internal"). Without an eudi
+// profile there is nothing to log in for: the login is off, and the nl
+// profile still issues.
+func configureLogin(cfg *issuance.Config, log *slog.Logger) error {
 	server := os.Getenv("ISSUER_LOGIN_SERVER")
 	if server == "" {
 		return nil
@@ -157,7 +159,8 @@ func configureLogin(cfg *issuance.Config) error {
 		}
 	}
 	if eudi == "" {
-		return errors.New("ISSUER_LOGIN_SERVER is set, but there is no eudi profile")
+		log.Warn("login is off: ISSUER_LOGIN_SERVER is set, but there is no eudi profile")
+		return nil
 	}
 	transport, err := login.NewURLMap(os.Getenv("ISSUER_LOGIN_URL_MAP"), http.DefaultTransport)
 	if err != nil {

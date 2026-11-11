@@ -173,7 +173,7 @@ ISSUER_TEST_DATABASE_URL=postgres://... go test ./internal/postgres/
 | `ISSUER_DATABASE_URL`, `ISSUER_DATABASE_SCHEMA` | PostgreSQL; schema default `eudi_credential_issuer` |
 | `ISSUER_STORE=memory` | demo shortcut: in-memory state |
 | `ISSUER_LISTEN_ADDR`, `ISSUER_INTERNAL_ADDR` | ports |
-| `ISSUER_LOGIN_SERVER` | issuer identifier of GBO's authorization server; set, the `eudi` profiles offer the authorization code flow |
+| `ISSUER_LOGIN_SERVER` | issuer identifier of GBO's authorization server; set, the `eudi` profiles offer the authorization code flow. Without an `eudi` profile the login stays off (a warning in the log) and the other profiles still issue |
 | `ISSUER_LOGIN_URL_MAP` | `public=internal` pairs: where this container reaches that server, for example `http://localhost:9425=http://asi-authorization-server:4021` |
 | `ISSUER_LOGIN_REGISTER_BASE` | base of the providers' entries in the register, default `https://register.gbo.example/wrp` |
 | `ISSUER_WALLET_REDIRECT_URIS` | the wallet redirect URIs accepted at PAR, comma-separated, default `eu.europa.ec.euidi://authorization` (the EUDI reference wallet) |
