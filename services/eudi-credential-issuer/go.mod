@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	gbo-demo/oid4vc-kit v0.0.0
-	github.com/go-jose/go-jose/v4 v4.1.5
+	github.com/go-jose/go-jose/v4 v4.1.6
 	github.com/jackc/pgx/v5 v5.10.0
 )
 
