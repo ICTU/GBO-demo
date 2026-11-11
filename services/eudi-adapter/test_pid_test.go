@@ -201,6 +201,26 @@ func TestTestPIDIsReserved(t *testing.T) {
 	}
 }
 
+// checkTestPIDConfigurations checks the one credential configuration of the
+// materialized test PID provider.
+func checkTestPIDConfigurations(t *testing.T, configurations []issuerConfigurationFile) {
+	t.Helper()
+	if len(configurations) != 1 {
+		t.Fatalf("configurations %+v", configurations)
+	}
+	c := configurations[0]
+	if c.ID != "test-pid-pid" || c.Scope != c.ID || c.VCT != testPIDType || c.StatusList != "pid" ||
+		c.SourceURL != "http://test-pid-source:8080/attestations" || c.ValidDays != 365 {
+		t.Fatalf("configuration %+v", c)
+	}
+	if len(c.Claims) != 12 || !c.Claims[0].Mandatory || c.Claims[6].Mandatory || c.Claims[7].Mandatory {
+		t.Fatalf("claims %+v", c.Claims)
+	}
+	if !slices.Equal(c.Display, []issuerDisplay{{Name: "GBO test-PID", Locale: "nl"}, {Name: "GBO test PID", Locale: "en"}}) {
+		t.Fatalf("display %+v", c.Display)
+	}
+}
+
 func TestMaterializeTestPID(t *testing.T) {
 	t.Run("M2 without test PID material, no test PID provider", func(t *testing.T) {
 		f := newCredentialIssuerFixture(t)
@@ -234,20 +254,7 @@ func TestMaterializeTestPID(t *testing.T) {
 			t.Fatal("source provider received the demo login")
 		}
 
-		if len(p.CredentialConfigurations) != 1 {
-			t.Fatalf("configurations %+v", p.CredentialConfigurations)
-		}
-		c := p.CredentialConfigurations[0]
-		if c.ID != "test-pid-pid" || c.Scope != c.ID || c.VCT != testPIDType || c.StatusList != "pid" ||
-			c.SourceURL != "http://test-pid-source:8080/attestations" || c.ValidDays != 365 {
-			t.Fatalf("configuration %+v", c)
-		}
-		if len(c.Claims) != 12 || !c.Claims[0].Mandatory || c.Claims[6].Mandatory || c.Claims[7].Mandatory {
-			t.Fatalf("claims %+v", c.Claims)
-		}
-		if !slices.Equal(c.Display, []issuerDisplay{{Name: "GBO test-PID", Locale: "nl"}, {Name: "GBO test PID", Locale: "en"}}) {
-			t.Fatalf("display %+v", c.Display)
-		}
+		checkTestPIDConfigurations(t, p.CredentialConfigurations)
 		root, err := loadRole(dirs.rootDir, testPIDRootRole, "test PID root")
 		if err != nil {
 			t.Fatal(err)

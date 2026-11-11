@@ -83,7 +83,8 @@ func (s Publications) Update(ctx context.Context, update func(*trustlists.Public
 		case <-time.After(25 * time.Millisecond):
 		}
 	}
-	defer unix.Flock(int(lock.Fd()), unix.LOCK_UN)
+	// Closing the lock file releases the lock as well.
+	defer func() { _ = unix.Flock(int(lock.Fd()), unix.LOCK_UN) }()
 	previous, err := s.current()
 	if err != nil {
 		return err
@@ -202,7 +203,8 @@ func (s Publications) publish(p *trustlists.Publication) error {
 	if err := os.Symlink(filepath.Join(".lote-generations", filepath.Base(generation)), link); err != nil {
 		return err
 	}
-	defer os.Remove(link)
+	// After a successful rename the link no longer exists under this name.
+	defer func() { _ = os.Remove(link) }()
 	if err := os.Rename(link, filepath.Join(s.Directory, "lote")); err != nil {
 		return err
 	}

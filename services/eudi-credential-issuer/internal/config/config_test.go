@@ -13,7 +13,11 @@ import (
 	"gbo-demo/oid4vc-kit/testpki"
 )
 
-func TestLoad(t *testing.T) {
+// writeLoadFixture writes the keys, certificates, registration certificates
+// and a complete issuer configuration to a temporary directory, and returns
+// the configuration's path and text.
+func writeLoadFixture(t *testing.T) (string, string) {
+	t.Helper()
 	dir := t.TempDir()
 	root := testpki.NewRoot(t, "root")
 	issuer := root.Issue(t, testpki.Options{})
@@ -62,11 +66,12 @@ func TestLoad(t *testing.T) {
 	if err := os.WriteFile(path, []byte(file), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	return path, file
+}
 
-	loaded, err := config.Load(path, "https://issuer.test")
-	if err != nil {
-		t.Fatal(err)
-	}
+// checkLoaded checks what Load made of the fixture of writeLoadFixture.
+func checkLoaded(t *testing.T, loaded config.Loaded) {
+	t.Helper()
 	cfg := loaded.Issuer
 	if loaded.SourceEndpoints["income"] != "https://src.test/a" {
 		t.Fatalf("source endpoints %v", loaded.SourceEndpoints)
@@ -86,6 +91,15 @@ func TestLoad(t *testing.T) {
 		t.Fatalf("durations %v %v %d", cfg.OfferTTL, cfg.DisclosureTTL, cfg.BatchSize)
 	}
 	checkDisclosureLoaded(t, cfg)
+}
+
+func TestLoad(t *testing.T) {
+	path, file := writeLoadFixture(t)
+	loaded, err := config.Load(path, "https://issuer.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkLoaded(t, loaded)
 
 	t.Run("central PID LoTE is exclusive and loaded without a fetch", func(t *testing.T) {
 		central := strings.Replace(file, `"pid_trust_anchors": [{"name": "test-pid", "roots_file": "roots.pem"}]`, `"pid_trust_list": {"url":"https://trust.test/lote/PIDProviders.jwt","signer_root_file":"roots.pem"}`, 1)

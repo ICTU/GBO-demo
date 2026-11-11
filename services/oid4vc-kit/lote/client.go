@@ -158,74 +158,15 @@ func (c *Client) load(ctx context.Context) (snapshot, error) {
 }
 
 func (c *Client) fetch(ctx context.Context, now time.Time) (snapshot, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.url, nil)
+	raw, err := c.download(ctx)
 	if err != nil {
 		return snapshot{}, err
 	}
-	// Revalidate intermediary caches so their TTL cannot add another hour.
-	req.Header.Set("Cache-Control", "no-cache")
-	resp, err := c.http.Do(req)
+	payload, chain, err := c.verifySignature(raw, now)
 	if err != nil {
 		return snapshot{}, err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return snapshot{}, fmt.Errorf("LoTE HTTP status %d", resp.StatusCode)
-	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, (4<<20)+1))
-	if err != nil {
-		return snapshot{}, err
-	}
-	if len(raw) > 4<<20 {
-		return snapshot{}, errors.New("LoTE exceeds 4 MiB")
-	}
-	jws, err := jose.ParseSigned(string(raw), []jose.SignatureAlgorithm{jose.ES256})
-	if err != nil {
-		return snapshot{}, err
-	}
-	if len(jws.Signatures) != 1 {
-		return snapshot{}, errors.New("LoTE requires one signature")
-	}
-	chains, err := jws.Signatures[0].Header.Certificates(x509.VerifyOptions{
-		Roots: c.roots[0].Roots, CurrentTime: now, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
-	})
-	if err != nil {
-		return snapshot{}, err
-	}
-	if len(chains) == 0 || len(chains[0]) == 0 {
-		return snapshot{}, errors.New("LoTE signer has no chain to the independent pin")
-	}
-	leaf := chains[0][0]
-	if leaf.IsCA || x5c.SelfSigned(leaf) || leaf.KeyUsage&x509.KeyUsageDigitalSignature == 0 {
-		return snapshot{}, errors.New("invalid LoTE signing certificate")
-	}
-	payload, err := jws.Verify(leaf.PublicKey)
-	if err != nil {
-		return snapshot{}, err
-	}
-	var doc struct {
-		LoTE struct {
-			Info struct {
-				Type     string    `json:"LoTEType"`
-				Version  int       `json:"LoTEVersionIdentifier"`
-				Sequence uint64    `json:"LoTESequenceNumber"`
-				Issue    time.Time `json:"ListIssueDateTime"`
-				Next     time.Time `json:"NextUpdate"`
-			} `json:"ListAndSchemeInformation"`
-			Entities []struct {
-				Services []struct {
-					Info struct {
-						Type     string `json:"ServiceTypeIdentifier"`
-						Identity struct {
-							Certificates []struct {
-								Value string `json:"val"`
-							} `json:"X509Certificates"`
-						} `json:"ServiceDigitalIdentity"`
-					} `json:"ServiceInformation"`
-				} `json:"TrustedEntityServices"`
-			} `json:"TrustedEntitiesList"`
-		}
-	}
+	var doc loteDocument
 	if err = json.Unmarshal(payload, &doc); err != nil {
 		return snapshot{}, err
 	}
@@ -238,11 +179,105 @@ func (c *Client) fetch(ctx context.Context, now time.Time) (snapshot, error) {
 	}
 	s := snapshot{sequence: info.Sequence, next: info.Next, digest: sha256.Sum256(payload)}
 	// A cached list cannot outlive any certificate in its verified chain.
-	for _, cert := range chains[0] {
+	for _, cert := range chain {
 		if cert.NotAfter.Before(s.next) {
 			s.next = cert.NotAfter
 		}
 	}
+	if err := c.addAnchors(&s, doc); err != nil {
+		return snapshot{}, err
+	}
+	if len(s.certs) == 0 {
+		return snapshot{}, errors.New("LoTE has no issuance anchors for the required role")
+	}
+	return s, nil
+}
+
+// loteDocument is the part of an ETSI JSON list the client reads.
+type loteDocument struct {
+	LoTE struct {
+		Info struct {
+			Type     string    `json:"LoTEType"`
+			Version  int       `json:"LoTEVersionIdentifier"`
+			Sequence uint64    `json:"LoTESequenceNumber"`
+			Issue    time.Time `json:"ListIssueDateTime"`
+			Next     time.Time `json:"NextUpdate"`
+		} `json:"ListAndSchemeInformation"`
+		Entities []struct {
+			Services []struct {
+				Info struct {
+					Type     string `json:"ServiceTypeIdentifier"`
+					Identity struct {
+						Certificates []struct {
+							Value string `json:"val"`
+						} `json:"X509Certificates"`
+					} `json:"ServiceDigitalIdentity"`
+				} `json:"ServiceInformation"`
+			} `json:"TrustedEntityServices"`
+		} `json:"TrustedEntitiesList"`
+	}
+}
+
+// download fetches the list, revalidating caches and capped at 4 MiB.
+func (c *Client) download(ctx context.Context) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.url, nil)
+	if err != nil {
+		return nil, err
+	}
+	// Revalidate intermediary caches so their TTL cannot add another hour.
+	req.Header.Set("Cache-Control", "no-cache")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("LoTE HTTP status %d", resp.StatusCode)
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, (4<<20)+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > 4<<20 {
+		return nil, errors.New("LoTE exceeds 4 MiB")
+	}
+	return raw, nil
+}
+
+// verifySignature checks the single ES256 signature with a signer that
+// chains to the independently provisioned root, and returns the payload
+// and that chain.
+func (c *Client) verifySignature(raw []byte, now time.Time) ([]byte, []*x509.Certificate, error) {
+	jws, err := jose.ParseSigned(string(raw), []jose.SignatureAlgorithm{jose.ES256})
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(jws.Signatures) != 1 {
+		return nil, nil, errors.New("LoTE requires one signature")
+	}
+	chains, err := jws.Signatures[0].Header.Certificates(x509.VerifyOptions{
+		Roots: c.roots[0].Roots, CurrentTime: now, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(chains) == 0 || len(chains[0]) == 0 {
+		return nil, nil, errors.New("LoTE signer has no chain to the independent pin")
+	}
+	leaf := chains[0][0]
+	if leaf.IsCA || x5c.SelfSigned(leaf) || leaf.KeyUsage&x509.KeyUsageDigitalSignature == 0 {
+		return nil, nil, errors.New("invalid LoTE signing certificate")
+	}
+	payload, err := jws.Verify(leaf.PublicKey)
+	if err != nil {
+		return nil, nil, err
+	}
+	return payload, chains[0], nil
+}
+
+// addAnchors adds the CA certificates of the role's issuance services to s,
+// each once.
+func (c *Client) addAnchors(s *snapshot, doc loteDocument) error {
 	seen := map[[32]byte]bool{}
 	for _, entity := range doc.LoTE.Entities {
 		for _, service := range entity.Services {
@@ -250,23 +285,9 @@ func (c *Client) fetch(ctx context.Context, now time.Time) (snapshot, error) {
 				continue
 			}
 			for _, id := range service.Info.Identity.Certificates {
-				der, err := base64.StdEncoding.DecodeString(id.Value)
+				der, cert, err := issuanceAnchor(id.Value)
 				if err != nil {
-					return snapshot{}, err
-				}
-				cert, err := x509.ParseCertificate(der)
-				if err != nil {
-					return snapshot{}, err
-				}
-				if !cert.IsCA || !cert.BasicConstraintsValid {
-					return snapshot{}, errors.New("LoTE issuance anchor is not a CA")
-				}
-				// KeyUsage is optional (the NL pre-production CA omits it).
-				// If present, it must permit certificate signing (RFC 5280 4.2.1.3).
-				for _, ext := range cert.Extensions {
-					if ext.Id.String() == "2.5.29.15" && cert.KeyUsage&x509.KeyUsageCertSign == 0 {
-						return snapshot{}, errors.New("LoTE issuance CA key usage forbids certificate signing")
-					}
+					return err
 				}
 				fp := sha256.Sum256(der)
 				if seen[fp] {
@@ -281,8 +302,28 @@ func (c *Client) fetch(ctx context.Context, now time.Time) (snapshot, error) {
 			}
 		}
 	}
-	if len(s.certs) == 0 {
-		return snapshot{}, errors.New("LoTE has no issuance anchors for the required role")
+	return nil
+}
+
+// issuanceAnchor decodes one listed certificate and requires a CA.
+func issuanceAnchor(value string) ([]byte, *x509.Certificate, error) {
+	der, err := base64.StdEncoding.DecodeString(value)
+	if err != nil {
+		return nil, nil, err
 	}
-	return s, nil
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !cert.IsCA || !cert.BasicConstraintsValid {
+		return nil, nil, errors.New("LoTE issuance anchor is not a CA")
+	}
+	// KeyUsage is optional (the NL pre-production CA omits it).
+	// If present, it must permit certificate signing (RFC 5280 4.2.1.3).
+	for _, ext := range cert.Extensions {
+		if ext.Id.String() == "2.5.29.15" && cert.KeyUsage&x509.KeyUsageCertSign == 0 {
+			return nil, nil, errors.New("LoTE issuance CA key usage forbids certificate signing")
+		}
+	}
+	return der, cert, nil
 }

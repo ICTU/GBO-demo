@@ -26,7 +26,7 @@ func TestInternalPIDLoTEProvisioning(t *testing.T) {
 		t.Fatal(err)
 	}
 	files := f.files(t)
-	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(files["PIDProviders.jwt"])) }))
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(files["PIDProviders.jwt"])) }))
 	defer srv.Close()
 	saved := http.DefaultTransport
 	http.DefaultTransport = srv.Client().Transport

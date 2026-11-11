@@ -13,7 +13,6 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"math/big"
@@ -216,6 +215,49 @@ func decodeLoTE(t *testing.T, raw string, signer lotesigning.Signer) loteDocumen
 	return doc
 }
 
+// checkLoTERole checks the first publication of role: its times, its
+// anchors (GBO and NL, with provenance) and the role separation.
+func checkLoTERole(t *testing.T, f *loteFixture, role trustlists.Role) {
+	t.Helper()
+	doc := decodeLoTE(t, f.files(t)[role.Filename()], f.signer)
+	info := doc.LoTE.Information
+	if info.Sequence != 1 || !info.Issue.Equal(f.now) || !info.Next.Equal(f.now.Add(30*24*time.Hour)) {
+		t.Fatalf("T6 times: %+v", info)
+	}
+	expected := map[string]bool{trustlists.Fingerprint(f.snapshot.GBO[role]): true}
+	for _, anchor := range f.snapshot.NL[role] {
+		expected[trustlists.Fingerprint(anchor.DER)] = true
+	}
+	actual := map[string]bool{}
+	for _, entity := range doc.LoTE.Entities {
+		if len(entity.Information.Origins) == 0 {
+			t.Fatal("T2f missing provenance")
+		}
+		if len(entity.Services) != 2 {
+			t.Fatal("issuance and revocation services required")
+		}
+		for _, service := range entity.Services {
+			if !strings.HasPrefix(service.Info.Type, "http://uri.etsi.org/19602/SvcType/"+string(role)+"/") {
+				t.Fatal("service role")
+			}
+			if len(service.Info.Identity.Certificates) != 1 {
+				t.Fatal("one certificate per service")
+			}
+			der, err := base64.StdEncoding.DecodeString(service.Info.Identity.Certificates[0].Value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			actual[trustlists.Fingerprint(der)] = true
+		}
+	}
+	if len(doc.LoTE.Entities) != len(expected) || !reflect.DeepEqual(actual, expected) {
+		t.Fatalf("T2 role %s: %v != %v", role, actual, expected)
+	}
+	if role == trustlists.PubEAA && actual[trustlists.Fingerprint(f.nlPID)] {
+		t.Fatal("T2b PID CA in PubEAA list")
+	}
+}
+
 func TestLoTEPublication(t *testing.T) {
 	f := newLoTEFixture(t)
 	result, err := f.publish(nil, false, f.now)
@@ -226,43 +268,7 @@ func TestLoTEPublication(t *testing.T) {
 		t.Fatalf("T1 result: %+v", result)
 	}
 	for _, role := range trustlists.Roles {
-		doc := decodeLoTE(t, f.files(t)[role.Filename()], f.signer)
-		info := doc.LoTE.Information
-		if info.Sequence != 1 || !info.Issue.Equal(f.now) || !info.Next.Equal(f.now.Add(30*24*time.Hour)) {
-			t.Fatalf("T6 times: %+v", info)
-		}
-		expected := map[string]bool{trustlists.Fingerprint(f.snapshot.GBO[role]): true}
-		for _, anchor := range f.snapshot.NL[role] {
-			expected[trustlists.Fingerprint(anchor.DER)] = true
-		}
-		actual := map[string]bool{}
-		for _, entity := range doc.LoTE.Entities {
-			if len(entity.Information.Origins) == 0 {
-				t.Fatal("T2f missing provenance")
-			}
-			if len(entity.Services) != 2 {
-				t.Fatal("issuance and revocation services required")
-			}
-			for _, service := range entity.Services {
-				if !strings.HasPrefix(service.Info.Type, "http://uri.etsi.org/19602/SvcType/"+string(role)+"/") {
-					t.Fatal("service role")
-				}
-				if len(service.Info.Identity.Certificates) != 1 {
-					t.Fatal("one certificate per service")
-				}
-				der, err := base64.StdEncoding.DecodeString(service.Info.Identity.Certificates[0].Value)
-				if err != nil {
-					t.Fatal(err)
-				}
-				actual[trustlists.Fingerprint(der)] = true
-			}
-		}
-		if len(doc.LoTE.Entities) != len(expected) || !reflect.DeepEqual(actual, expected) {
-			t.Fatalf("T2 role %s: %v != %v", role, actual, expected)
-		}
-		if role == trustlists.PubEAA && actual[trustlists.Fingerprint(f.nlPID)] {
-			t.Fatal("T2b PID CA in PubEAA list")
-		}
+		checkLoTERole(t, f, role)
 	}
 	before := f.files(t)
 	result, err = f.publish(nil, false, f.now.Add(time.Hour))
@@ -716,7 +722,7 @@ func TestLoTETrustHost(t *testing.T) {
 		}
 		_ = response.Body.Close()
 		if response.StatusCode != 404 {
-			t.Fatal(fmt.Sprintf("internal publication exposed: %s %d", path, response.StatusCode))
+			t.Fatalf("internal publication exposed: %s %d", path, response.StatusCode)
 		}
 	}
 }

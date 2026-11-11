@@ -77,7 +77,7 @@ func TestAuthenticationAndRole(t *testing.T) {
 		{"no issuance roots", signed(t, signer, "PID", 1, now.Add(-time.Minute), now.Add(time.Hour)), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(tc.raw)) }))
+			srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(tc.raw)) }))
 			defer srv.Close()
 			c, err := lote.New(srv.URL, "PID", []*x509.Certificate{root.Cert}, srv.Client(), func() time.Time { return now })
 			if err != nil {
@@ -113,7 +113,7 @@ func TestRefreshAndExpiry(t *testing.T) {
 			w.WriteHeader(503)
 			return
 		}
-		w.Write([]byte(raw))
+		_, _ = w.Write([]byte(raw))
 	}))
 	defer srv.Close()
 	c, err := lote.New(srv.URL, "PID", []*x509.Certificate{root.Cert}, srv.Client(), func() time.Time { return now })
@@ -165,7 +165,10 @@ func TestSequenceRollbackAndConcurrentRefresh(t *testing.T) {
 	var raw atomic.Value
 	raw.Store(signed(t, signer, "PID", 2, now.Add(-time.Minute), now.Add(4*time.Hour), pid.Cert))
 	var calls atomic.Int32
-	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1); w.Write([]byte(raw.Load().(string))) }))
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		_, _ = w.Write([]byte(raw.Load().(string)))
+	}))
 	defer srv.Close()
 	c, _ := lote.New(srv.URL, "PID", []*x509.Certificate{root.Cert}, srv.Client(), func() time.Time { return now })
 	var wg sync.WaitGroup
