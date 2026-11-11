@@ -250,10 +250,15 @@ func (s *Service) refresh(ctx context.Context, req TokenRequest, att clientattes
 	} else if revoked {
 		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "the offer has been revoked")
 	}
-	// A re-issuance has the claims of the first issuance (R2); a session
-	// whose source has not answered yet has none.
+	// A session whose source has not answered yet has no claims to re-issue.
+	// Its refresh gives a new access token for the same session, so the
+	// wallet can go on with its deferred transactions after the first token
+	// expired; after the deferral the BSN is gone and there is nothing left.
 	if old.Pending != nil {
-		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "the first issuance has not finished")
+		if !old.Pending.Until.IsZero() && !now.Before(old.Pending.Until) {
+			return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "the deferral has expired")
+		}
+		return s.grant(ctx, req.Target, p, old, att, jkt, now, &rec, req.RefreshToken)
 	}
 	// A session of its own: the credentials of the first issuance stay
 	// issued, these are new. Its code is random and handed to nobody.

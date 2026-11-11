@@ -138,13 +138,6 @@ func TestDeferredRefusals(t *testing.T) { // D-5, D-7
 			t.Errorf("the transaction after the refusals = %d %v, want the credential", status, body)
 		}
 	})
-	t.Run("no refresh while the source has not answered", func(t *testing.T) {
-		f := newFixture(t)
-		w, tok, _, _ := deferredStart(t, f)
-		if status, body := w.refresh(tok.RefreshToken, nil); status != http.StatusBadRequest || body["error"] != "invalid_grant" {
-			t.Errorf("refresh = %d %v, want invalid_grant", status, body)
-		}
-	})
 	t.Run("a pending credential is deferred once", func(t *testing.T) {
 		f := newFixture(t)
 		w, tok, _, _ := deferredStart(t, f)
@@ -226,6 +219,55 @@ func (w *wallet) issueFor(t *testing.T, accessToken, id string) (int, map[string
 	})
 }
 
+// Review finding 3: the access token lives shorter than the deferral. A
+// refresh while the source has not answered gives a new access token for the
+// same session and transaction; after the deferral it is refused. The
+// login runs 45 seconds in the past, within the proof skew, so that the
+// refresh comes after the token or the deferral has expired.
+func TestDeferredAfterTheAccessTokenExpires(t *testing.T) {
+	short := func(deferral time.Duration) func(*fixture, *issuance.Config) {
+		return func(_ *fixture, cfg *issuance.Config) {
+			cfg.TokenTTL = 20 * time.Second
+			cfg.DeferralTTL = deferral
+		}
+	}
+	t.Run("a refresh continues the transaction", func(t *testing.T) {
+		f := newFixtureWith(t, short(10*time.Minute))
+		f.clock.Advance(-45 * time.Second)
+		w, tok, status, cred := deferredStart(t, f)
+		txID, _ := cred["transaction_id"].(string)
+		if status != http.StatusAccepted || txID == "" {
+			t.Fatalf("credential = %d %v, want 202", status, cred)
+		}
+		f.clock.Advance(45 * time.Second)
+		if status, body := w.deferred(tok.AccessToken, nil, map[string]any{"transaction_id": txID}); status != http.StatusUnauthorized || body["error"] != "invalid_token" {
+			t.Fatalf("expired token = %d %v, want 401 invalid_token", status, body)
+		}
+		status, body := w.refresh(tok.RefreshToken, nil)
+		if status != http.StatusOK || body["access_token"] == nil || body["refresh_token"] != tok.RefreshToken {
+			t.Fatalf("refresh while pending = %d %v, want a new access token and the same refresh token", status, body)
+		}
+		var again oid4vci.TokenResponse
+		remarshal(t, body, &again)
+		if len(again.AuthorizationDetails) != 1 || again.AuthorizationDetails[0].CredentialIdentifiers[0] != tok.AuthorizationDetails[0].CredentialIdentifiers[0] {
+			t.Fatalf("the refresh must keep the session and its credential identifiers: %v", again.AuthorizationDetails)
+		}
+		f.setSource(http.StatusOK, f.sourceDocs)
+		if status, body := w.deferred(again.AccessToken, nil, map[string]any{"transaction_id": txID}); status != http.StatusOK || body["credentials"] == nil {
+			t.Fatalf("deferred with the new token = %d %v, want the credential", status, body)
+		}
+	})
+	t.Run("no refresh after the deferral", func(t *testing.T) {
+		f := newFixtureWith(t, short(30*time.Second))
+		f.clock.Advance(-45 * time.Second)
+		w, tok, _, _ := deferredStart(t, f)
+		f.clock.Advance(45 * time.Second)
+		if status, body := w.refresh(tok.RefreshToken, nil); status != http.StatusBadRequest || body["error"] != "invalid_grant" {
+			t.Errorf("refresh after the deferral = %d %v, want invalid_grant", status, body)
+		}
+	})
+}
+
 // Review finding 4: an offer with two configurations defers both
 // credentials, each with the citizen of the login.
 func TestDeferredOfferWithTwoConfigurations(t *testing.T) {
@@ -279,4 +321,3 @@ func TestDeferredOfferWithTwoConfigurations(t *testing.T) {
 		}
 	}
 }
-

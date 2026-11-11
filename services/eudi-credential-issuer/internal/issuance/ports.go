@@ -221,6 +221,8 @@ type Session struct {
 // no personal data: the BSN is kept apart, sealed, for at most DeferralTTL.
 type PendingSource struct {
 	Offer string `json:"offer"`
+	// Until is the end of the deferral: after it the sealed BSN is gone.
+	Until time.Time `json:"until"`
 }
 
 // CodeBinding binds an authorization code to the pushed authorization

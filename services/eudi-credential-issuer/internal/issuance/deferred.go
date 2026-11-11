@@ -60,7 +60,7 @@ func (s *Service) createPendingSession(ctx context.Context, t Target, p Profile,
 	if err != nil {
 		return "", err
 	}
-	sess := Session{Provider: t.Provider, Profile: p.Name, ExpiresAt: now.Add(CodeLifetime), Binding: binding, Pending: &PendingSource{Offer: o.Key}}
+	sess := Session{Provider: t.Provider, Profile: p.Name, ExpiresAt: now.Add(CodeLifetime), Binding: binding, Pending: &PendingSource{Offer: o.Key, Until: now.Add(s.cfg.DeferralTTL)}}
 	for _, id := range o.ConfigurationIDs {
 		credentialID, err := randomToken()
 		if err != nil {
