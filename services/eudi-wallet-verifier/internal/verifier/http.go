@@ -27,7 +27,7 @@ func PublicHandler(s *Service, log *slog.Logger) http.Handler {
 		writeJSON(w, http.StatusOK, out)
 	})
 	mux.HandleFunc("GET /disclosure/sessions/{token}/request", func(w http.ResponseWriter, r *http.Request) {
-		request, err := s.Request(r.PathValue("token"), r.URL.Query().Get("session_type"))
+		request, err := s.RequestContext(r.Context(), r.PathValue("token"), r.URL.Query().Get("session_type"))
 		if err != nil {
 			writeError(w, log, err)
 			return
@@ -59,7 +59,11 @@ func PublicHandler(s *Service, log *slog.Logger) http.Handler {
 		case errors.As(err, &e):
 			// The reason goes to the log only, never to the relying party.
 			log.Info("disclosure refused", "type", e.Type, "detail", e.Detail)
-			writeJSON(w, e.Status, map[string]string{"error": "invalid_request"})
+			code := "invalid_request"
+			if e.Status == http.StatusServiceUnavailable {
+				code = "server_error"
+			}
+			writeJSON(w, e.Status, map[string]string{"error": code})
 		default:
 			log.Error("disclosure failed", "err", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "server_error"})

@@ -169,13 +169,14 @@ func validateDisclosure(cfg Config) error {
 		configs[c.ID] = c.Provider
 	}
 	keys := map[string]bool{}
-	for _, o := range cfg.DisclosureOffers {
+	allOffers := append(append([]DisclosureOffer(nil), cfg.DisclosureOffers...), cfg.LoginOffers...)
+	for i, o := range allOffers {
 		if !offerKey.MatchString(o.Key) || keys[o.Provider+"/"+o.Key] {
 			return fmt.Errorf("disclosure offer key %q must be unique per provider and only letters, digits, hyphens, underscores and inner dots", o.Key)
 		}
 		keys[o.Provider+"/"+o.Key] = true
 		p, ok := providers[o.Provider]
-		if !ok || len(p.VerifierRegistrationCertificate) == 0 {
+		if !ok || (i < len(cfg.DisclosureOffers) && len(p.VerifierRegistrationCertificate) == 0) {
 			return fmt.Errorf("disclosure offer %q: provider %q is unknown or has no verifier registration certificate", o.Key, o.Provider)
 		}
 		if len(o.ConfigurationIDs) == 0 || len(uniq(o.ConfigurationIDs)) != len(o.ConfigurationIDs) {
@@ -190,7 +191,10 @@ func validateDisclosure(cfg Config) error {
 	if len(cfg.DisclosureOffers) == 0 {
 		return nil
 	}
-	if len(cfg.PIDAnchors) == 0 || cfg.FetchPIDStatus == nil {
+	if cfg.PIDTrust != nil && len(cfg.PIDAnchors) > 0 {
+		return errors.New("configure either dynamic PID trust or static anchors, never both")
+	}
+	if (len(cfg.PIDAnchors) == 0 && cfg.PIDTrust == nil) || cfg.FetchPIDStatus == nil {
 		return errors.New("disclosure offers need PID trust anchors and a status list fetcher")
 	}
 	names := map[string]bool{}

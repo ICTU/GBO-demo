@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"gbo-demo/eudi-credential-issuer/internal/issuance"
+	"gbo-demo/oid4vc-kit/lote"
 	"gbo-demo/oid4vc-kit/x5c"
 )
 
@@ -34,8 +35,10 @@ type File struct {
 	Profiles       []ProfileFile  `json:"profiles"`
 	// DisclosureOffers, PIDTrustAnchors and DisclosureTTL serve
 	// disclosure-based issuance.
+	LoginOffers      []DisclosureOfferFile `json:"login_offers"`
 	DisclosureOffers []DisclosureOfferFile `json:"disclosure_offers"`
 	PIDTrustAnchors  []AnchorsFile         `json:"pid_trust_anchors"`
+	PIDTrustList     *lote.File            `json:"pid_trust_list"`
 	DisclosureTTL    Duration              `json:"disclosure_ttl"`
 }
 
@@ -63,10 +66,11 @@ type KeyFiles struct {
 // ProviderFile configures one Attestation Provider and the credentials it
 // issues.
 type ProviderFile struct {
-	Name   string   `json:"name"`
-	Access KeyFiles `json:"access"`
-	Issuer KeyFiles `json:"issuer"`
-	Status KeyFiles `json:"status"`
+	Name            string   `json:"name"`
+	TestPersonsFile string   `json:"test_persons_file"`
+	Access          KeyFiles `json:"access"`
+	Issuer          KeyFiles `json:"issuer"`
+	Status          KeyFiles `json:"status"`
 	// RegistrationCertificateFile holds the WRPRC as raw bytes.
 	RegistrationCertificateFile         string `json:"registration_certificate_file"`
 	VerifierRegistrationCertificateFile string `json:"verifier_registration_certificate_file"`
@@ -132,7 +136,8 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 // Loaded is the configuration of the issuer core and of the source
 // adapter.
 type Loaded struct {
-	Issuer issuance.Config
+	Issuer           issuance.Config
+	TestPersonLogins map[string]string
 	// SourceEndpoints maps credential configuration ids to bronpoort URLs.
 	SourceEndpoints map[string]string
 	// SourceRoots maps a credential configuration id to the TLS roots of
@@ -158,9 +163,15 @@ func Load(path, publicURL string) (Loaded, error) {
 			DisclosureTTL: time.Duration(f.DisclosureTTL),
 		},
 		SourceEndpoints: map[string]string{},
-		SourceRoots:     map[string]*x509.CertPool{},
+		SourceRoots:     map[string]*x509.CertPool{}, TestPersonLogins: map[string]string{},
 	}
 	for _, pf := range f.Providers {
+		if pf.TestPersonsFile != "" {
+			if pf.Name != "test-pid" {
+				return Loaded{}, errors.New("test_persons_file is only allowed on test-pid")
+			}
+			out.TestPersonLogins[pf.Name] = resolve(dir, pf.TestPersonsFile)
+		}
 		p, err := loadProvider(dir, pf)
 		if err != nil {
 			return Loaded{}, fmt.Errorf("provider %s: %w", pf.Name, err)
@@ -199,6 +210,19 @@ func Load(path, publicURL string) (Loaded, error) {
 		out.Issuer.DisclosureOffers = append(out.Issuer.DisclosureOffers, issuance.DisclosureOffer{
 			Key: o.Key, Provider: o.Provider, ConfigurationIDs: o.CredentialConfigurationIDs, Parameters: o.Parameters,
 		})
+	}
+	for _, o := range f.LoginOffers {
+		out.Issuer.LoginOffers = append(out.Issuer.LoginOffers, issuance.DisclosureOffer{Key: o.Key, Provider: o.Provider, ConfigurationIDs: o.CredentialConfigurationIDs, Parameters: o.Parameters})
+	}
+	if f.PIDTrustList != nil {
+		if len(f.PIDTrustAnchors) > 0 {
+			return Loaded{}, errors.New("pid_trust_list and pid_trust_anchors are mutually exclusive")
+		}
+		client, err := f.PIDTrustList.Open(func(p string) string { return resolve(dir, p) })
+		if err != nil {
+			return Loaded{}, err
+		}
+		out.Issuer.PIDTrust = client
 	}
 	for _, a := range f.PIDTrustAnchors {
 		anchors, err := loadAnchors(dir, a.RootsFile, a.Name)

@@ -3,8 +3,17 @@ package issuance
 import (
 	"context"
 	"errors"
+	"gbo-demo/oid4vc-kit/x5c"
 	"time"
 )
+
+// PIDTrust supplies the current PID issuer roots. An unavailable source
+// blocks only PID disclosure checks and never falls back to static roots.
+type PIDTrust interface {
+	Load(context.Context) (x5c.Trust, error)
+}
+
+var ErrPIDTrustUnavailable = errors.New("PID trust is temporarily unavailable")
 
 // Source is the bronpoort: the backend that knows the data for a subject.
 // Its contract is the IssuableDocument contract of the attestation server

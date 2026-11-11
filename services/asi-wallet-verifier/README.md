@@ -10,7 +10,7 @@ The nl-wallet issuance server cannot take this role: it exposes only the wallet-
 - `make provision-asi-wallet-verifier` writes `verification_server.toml` to `$(ONBOARDING_SECRETS_DIR)/asi-wallet-verifier`, and the API key of the internal API to `$(ONBOARDING_SECRETS_DIR)/asi-authorization-server-wallet/api-key`: the authorization server mounts only that directory, not the configuration with the reader's private key (command `provision-wallet-verifier` of the authorization server):
   - the reader certificate of usecase `asi-login`, issued by the development reader CA (`ca.gbo-reader`, which the test wallet trusts). The verifier's public host is its DNS SAN, and its reader authorisation allows `bsn`, `family_name`, `given_name`, `birthdate` and `nationalities` of `urn:eudi:pid:nl:1`;
   - the reader certificate of usecase `qtsp-login`, for the reference QTSP's login (slice 14 of #336), from the same CA: organisation "GBO demo test QTSP", and `family_name`, `given_name`, `birthdate` and `nationalities`, not the BSN. A demo shortcut: the QTSP shares this verifier and its API key with the authorization server; in production each relying party has its own verifier and keys;
-  - trust in the development issuer CA and in the pre-production PID issuer CA (`pid-issuer-anchors.txt`);
+  - exact PID roots from the central signed `PIDProviders.jwt`, verified by `eudi-adapter export-pid-trust` against our independently provisioned LoTE signing root; no general issuer CA is added;
   - sessions in memory, and the internal API behind a generated API key.
 - `make demo-asi` builds and provisions it when the nl-wallet sources are present (again when the configuration lacks usecase `qtsp-login`), before it starts the authorization server and the reference QTSP, which read the API key at startup; after a new provisioning it recreates the ASI services. Without the sources, the ASI route runs with DigiD (mock) only.
 
@@ -26,3 +26,13 @@ A real wallet reaches the verifier only over HTTPS. Point a tunnel at the public
 ## Known gaps
 
 - The NL PID of nl-wallet v0.5.0 has no place of birth, although CIR (EU) 2024/2977 makes `birth_place` mandatory.
+
+Provisioning requires the central HTTPS list to be published first. Set
+`EUDI_TRUST_PUBLIC_URL` (or `GBO_PID_TRUST_LIST_URL`) and independently provide
+the public signer root (`GBO_LOTE_SIGNER_ROOT_FILE`). A failed fetch or
+verification aborts provisioning. See the [shared trust runbook](../../docs/gbo-trust-lists.md#internal-pid-consumers).
+
+Demo shortcut agreed on 11 November 2026: this upstream verifier loads a
+snapshot at startup. It does not refresh or enforce LoTE `NextUpdate` while
+running. Re-provision and recreate it to apply removals or renew the snapshot;
+the own Go verifiers refresh and enforce expiry during use.

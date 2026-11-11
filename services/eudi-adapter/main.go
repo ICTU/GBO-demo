@@ -675,6 +675,18 @@ func main() {
 		}
 		return
 	}
+	if handled, err := runExportPIDTrust(ctx, os.Args[1:], os.Stderr); handled {
+		if err != nil {
+			fatal("PID trust export failed", err)
+		}
+		return
+	}
+	if handled, err := runTrustListCommand(ctx, os.Args[1:], os.Stdout, os.Stderr); handled {
+		if err != nil {
+			fatal("trust list command failed", err)
+		}
+		return
+	}
 	if handled, err := runWalletRegistrationCommand(ctx, os.Args[1:], os.Stdout, os.Stderr); handled {
 		if err != nil {
 			fatal("wallet registration provisioning failed", err)

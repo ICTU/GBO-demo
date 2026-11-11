@@ -1,9 +1,10 @@
 # oid4vc-kit — OpenID4VC building blocks (Go library)
 
-Protocol building blocks for services that issue or verify credentials for EUDI wallets. It holds no state and does no I/O; callers keep replay state, nonces and keys. Used by `eudi-credential-issuer`.
+Protocol building blocks for services that issue or verify credentials for EUDI wallets. The protocol packages hold no state and do no I/O; callers keep replay state, nonces and keys. The separate `lote` adapter fetches and caches signed GBO PID trust lists. Used by `eudi-credential-issuer`, `eudi-wallet-verifier` and host provisioning.
 
 | Package | |
 |---|---|
+| `lote` | HTTPS adapter for the GBO role-specific LoTE lists; independently pinned signer, hourly in-use refresh and cache bounded by signed expiry |
 | `x5c` | verify an `x5c` chain against named trust anchor sets, with an optional required EKU |
 | `dpop` | verify DPoP proofs (RFC 9449), including `ath` |
 | `clientattest` | verify a client attestation and its PoP (draft-ietf-oauth-attestation-based-client-auth) |

@@ -88,8 +88,8 @@ func Provision(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *caKeyPath == "" || *caCertPath == "" || *issuerCA == "" || *publicURL == "" || *origin == "" || *outDir == "" {
-		return errors.New("--ca-key, --ca-cert, --issuer-ca, --public-url, --request-origin and --out-dir are required")
+	if *caKeyPath == "" || *caCertPath == "" || (*issuerCA == "" && *pidAnchors == "") || *publicURL == "" || *origin == "" || *outDir == "" {
+		return errors.New("--ca-key, --ca-cert, --public-url, --request-origin, --out-dir and either --issuer-ca or --pid-issuer-anchors are required")
 	}
 	pub, err := url.Parse(*publicURL)
 	if err != nil || pub.Hostname() == "" {
@@ -136,17 +136,23 @@ func Provision(args []string) error {
 			SessionTypeReturnURL: returnMode,
 		})
 	}
-	issuerDER, err := pemCertificate(*issuerCA)
-	if err != nil {
-		return err
+	var issuers []string
+	if *issuerCA != "" {
+		issuerDER, err := pemCertificate(*issuerCA)
+		if err != nil {
+			return err
+		}
+		issuers = append(issuers, base64.StdEncoding.EncodeToString(issuerDER))
 	}
-	issuers := []string{base64.StdEncoding.EncodeToString(issuerDER)}
 	if *pidAnchors != "" {
 		more, err := base64Lines(*pidAnchors)
 		if err != nil {
 			return err
 		}
 		issuers = append(issuers, more...)
+	}
+	if len(issuers) == 0 {
+		return errors.New("PID issuer anchors are empty")
 	}
 	secret := make([]byte, 32)
 	apiKey := make([]byte, 32)

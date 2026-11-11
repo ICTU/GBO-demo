@@ -48,8 +48,14 @@ const (
 var ErrInvalidAuthorization = errors.New("the authorization request is unknown, used or expired")
 
 // offersLogin says whether profile p offers the authorization code flow.
-func (s *Service) offersLogin(p Profile) bool {
-	return s.cfg.Login != nil && p.Kind == KindEUDI && len(p.WalletRedirectURIs) > 0
+func (s *Service) loginFor(provider string) Login {
+	if p := s.providers[provider]; p != nil && p.Login != nil {
+		return p.Login
+	}
+	return s.cfg.Login
+}
+func (s *Service) offersLogin(provider string, p Profile) bool {
+	return s.loginFor(provider) != nil && p.Kind == KindEUDI && len(p.WalletRedirectURIs) > 0
 }
 
 // resolveLogin resolves t for the authorization code flow: a target whose
@@ -59,7 +65,7 @@ func (s *Service) resolveLogin(t Target) (*provider, Profile, error) {
 	if err != nil {
 		return nil, Profile{}, err
 	}
-	if !s.offersLogin(p) {
+	if !s.offersLogin(t.Provider, p) {
 		return nil, Profile{}, ErrUnknownProfile
 	}
 	return prov, p, nil
@@ -185,7 +191,7 @@ const ErrInvalidScope = "invalid_scope"
 // authorization_details name (HAIP 1.0 section 4.3).
 func (s *Service) requestedOffer(t Target, req PushedAuthorizationRequest) (DisclosureOffer, error) {
 	if req.IssuerState != "" {
-		o, ok := s.disclosureOffers[t.Provider+"/"+req.IssuerState]
+		o, ok := s.loginOffers[t.Provider+"/"+req.IssuerState]
 		if !ok {
 			return DisclosureOffer{}, refuse(oid4vci.ErrInvalidRequest, "issuer_state names no offer of this issuer")
 		}
@@ -196,7 +202,7 @@ func (s *Service) requestedOffer(t Target, req PushedAuthorizationRequest) (Disc
 		return DisclosureOffer{}, err
 	}
 	var found []DisclosureOffer
-	for _, o := range s.disclosureOffers {
+	for _, o := range s.loginOffers {
 		if o.Provider == t.Provider && len(o.ConfigurationIDs) == 1 && o.ConfigurationIDs[0] == id {
 			found = append(found, o)
 		}
@@ -282,10 +288,12 @@ func (s *Service) Authorize(ctx context.Context, t Target, clientID, requestURI 
 	}
 	// The authorization server shows the citizen which credential this is
 	// (OpenID4VCI 1.0 sections 12.2.4 and 15.1).
-	configurations := s.disclosureOffers[t.Provider+"/"+pushed.Offer].ConfigurationIDs
-	target, err := s.cfg.Login.AuthorizationURL(ctx, t.Provider, s.Identifier(t), configurations, state, challenge)
+	configurations := s.loginOffers[t.Provider+"/"+pushed.Offer].ConfigurationIDs
+	target, err := s.loginFor(t.Provider).AuthorizationURL(ctx, t.Provider, s.Identifier(t), configurations, state, challenge)
 	if errors.Is(err, ErrLoginUnavailable) {
-		return "", s.walletReturn(t, pushed, ReturnUnavailable, "temporarily_unavailable"), nil
+		ret := s.walletReturn(t, pushed, ReturnUnavailable, "temporarily_unavailable")
+		ret.LoginUnavailable = s.providers[t.Provider].Login != nil
+		return "", ret, nil
 	}
 	if err != nil {
 		return "", nil, err
@@ -319,6 +327,8 @@ type WalletReturn struct {
 	Page         string
 	Organization string
 	Attestation  string
+	// LoginUnavailable distinguishes a missing demo persons file from a source outage.
+	LoginUnavailable bool
 }
 
 // Callback handles the browser's return from the login: it redeems the code
@@ -345,14 +355,14 @@ func (s *Service) Callback(ctx context.Context, t Target, ret LoginReturn) (*Wal
 	case ret.Error != "":
 		return s.walletReturn(t, pushed, ReturnUnavailable, "temporarily_unavailable"), nil
 	}
-	bsn, err := s.cfg.Login.Exchange(ctx, t.Provider, s.Identifier(t), ret.Code, l.Verifier)
+	bsn, err := s.loginFor(t.Provider).Exchange(ctx, t.Provider, s.Identifier(t), ret.Code, l.Verifier)
 	if errors.Is(err, ErrLoginUnavailable) {
 		return s.walletReturn(t, pushed, ReturnUnavailable, "temporarily_unavailable"), nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidAuthorization, err)
 	}
-	o, ok := s.disclosureOffers[t.Provider+"/"+pushed.Offer]
+	o, ok := s.loginOffers[t.Provider+"/"+pushed.Offer]
 	if !ok {
 		return nil, fmt.Errorf("offer %q of the request is not configured here", pushed.Offer)
 	}
@@ -473,7 +483,7 @@ func (s *Service) LoginLink(t Target, offerKey string) string {
 	if _, _, err := s.resolveLogin(t); err != nil {
 		return ""
 	}
-	o, ok := s.disclosureOffers[t.Provider+"/"+offerKey]
+	o, ok := s.loginOffers[t.Provider+"/"+offerKey]
 	if !ok {
 		return ""
 	}

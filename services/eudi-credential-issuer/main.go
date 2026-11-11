@@ -27,6 +27,9 @@ import (
 	"gbo-demo/eudi-credential-issuer/internal/memstore"
 	"gbo-demo/eudi-credential-issuer/internal/postgres"
 	"gbo-demo/eudi-credential-issuer/internal/source"
+	"gbo-demo/eudi-credential-issuer/internal/testlogin"
+	"gbo-demo/eudi-credential-issuer/internal/testloginhttp"
+	"gbo-demo/eudi-credential-issuer/internal/testpersons"
 	"gbo-demo/oid4vc-kit/oid4vp"
 	"gbo-demo/oid4vc-kit/statuslist"
 )
@@ -108,12 +111,18 @@ func serve(ctx context.Context, log *slog.Logger) error {
 	if err := configureLogin(&cfg, log); err != nil {
 		return fmt.Errorf("login: %w", err)
 	}
+	selectors := configureTestPersonLogins(&cfg, loaded.TestPersonLogins, st, time.Now)
 	svc, err := issuance.New(cfg, src, st, st, st, time.Now)
 	if err != nil {
 		return err
 	}
 
-	public := &http.Server{Addr: env("ISSUER_LISTEN_ADDR", ":8080"), Handler: httpapi.Public(svc, log), ReadHeaderTimeout: 10 * time.Second}
+	mux := http.NewServeMux()
+	mux.Handle("/", httpapi.Public(svc, log))
+	for _, selector := range selectors {
+		mux.Handle(selector.Path(), testloginhttp.Handler(selector, splitList(env("ISSUER_WALLET_REDIRECT_URIS", "eu.europa.ec.euidi://authorization"))...))
+	}
+	public := &http.Server{Addr: env("ISSUER_LISTEN_ADDR", ":8080"), Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	internal := &http.Server{Addr: env("ISSUER_INTERNAL_ADDR", ":8081"), Handler: httpapi.Internal(svc, log), ReadHeaderTimeout: 10 * time.Second}
 	errs := make(chan error, 2)
 	for _, srv := range []*http.Server{public, internal} {
@@ -222,4 +231,29 @@ func purge(ctx context.Context, log *slog.Logger, pg *postgres.Store, tokenTTL t
 			}
 		}
 	}
+}
+
+// configureTestPersonLogins overrides only the explicitly marked demo provider.
+// The file is read at login time, so its absence does not stop pre-auth issuance.
+func configureTestPersonLogins(cfg *issuance.Config, files map[string]string, st testlogin.Pending, now func() time.Time) []*testlogin.Service {
+	var selectors []*testlogin.Service
+	for i := range cfg.Providers {
+		p := &cfg.Providers[i]
+		path, ok := files[p.Name]
+		if !ok {
+			continue
+		}
+		for j := range cfg.Profiles {
+			profile := &cfg.Profiles[j]
+			if profile.Kind != issuance.KindEUDI {
+				continue
+			}
+			profile.WalletRedirectURIs = splitList(env("ISSUER_WALLET_REDIRECT_URIS", "eu.europa.ec.euidi://authorization"))
+			selector := testlogin.New(p.Name, strings.TrimRight(cfg.PublicURL, "/")+"/"+p.Name+"/"+profile.Name, testpersons.File(path), st, now)
+			p.Login = selector
+			selectors = append(selectors, selector)
+			break
+		}
+	}
+	return selectors
 }

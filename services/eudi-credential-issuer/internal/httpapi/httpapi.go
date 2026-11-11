@@ -419,6 +419,9 @@ func (h *handler) disclosureRequest(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, issuance.ErrUnknownProvider), errors.Is(err, issuance.ErrUnknownProfile), errors.Is(err, issuance.ErrUnknownOffer):
 		http.NotFound(w, r)
 		return
+	case errors.Is(err, issuance.ErrPIDTrustUnavailable):
+		writeJSON(w, http.StatusServiceUnavailable, oid4vci.ErrorResponse{Error: oid4vci.ErrServerError})
+		return
 	case err != nil:
 		h.log.Error("disclosure request failed", "error", err)
 		writeJSON(w, http.StatusInternalServerError, oid4vci.ErrorResponse{Error: oid4vci.ErrServerError})
@@ -458,6 +461,8 @@ func (h *handler) disclosureResponse(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, struct{}{})
 	case err == nil:
 		writeJSON(w, http.StatusOK, map[string]string{"redirect_uri": redirect})
+	case errors.Is(err, issuance.ErrPIDTrustUnavailable):
+		writeJSON(w, http.StatusServiceUnavailable, oid4vci.ErrorResponse{Error: oid4vci.ErrServerError})
 	case errors.As(err, &pe):
 		h.log.Info("disclosure refused", "error", pe.Code, "error_description", pe.Description)
 		writeJSON(w, http.StatusBadRequest, oid4vci.ErrorResponse{Error: pe.Code, Description: description(pe.Description)})

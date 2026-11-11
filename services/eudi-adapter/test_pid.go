@@ -164,7 +164,10 @@ func testPIDProvider(options credentialIssuerOptions, seen derivedNames) (issuer
 	if options.testPIDSourceURL == "" {
 		return issuerProviderFile{}, false, errors.New("the test PID is provisioned, but its bronpoort URL is not set (TEST_PID_SOURCE_URL)")
 	}
-	provider := issuerProviderFile{Name: testPIDID}
+	provider := issuerProviderFile{Name: testPIDID, TestPersonsFile: options.testPIDPersonsFile}
+	if provider.TestPersonsFile == "" {
+		provider.TestPersonsFile = "/test-pid-persons/personen.json"
+	}
 	if err := copyWalletRegistration(options, testPIDID, testPIDID, []string{testPIDType}, &provider, "make provision-test-pid"); err != nil {
 		return provider, false, err
 	}
@@ -177,7 +180,7 @@ func testPIDProvider(options credentialIssuerOptions, seen derivedNames) (issuer
 	}
 	provider.CredentialConfigurations = []issuerConfigurationFile{{
 		ID: testPIDID + "-pid", VCT: testPIDType, Scope: testPIDID + "-pid",
-		Display:   []issuerDisplay{{Name: "Test-PID", Locale: "nl"}, {Name: "Test PID", Locale: "en"}},
+		Display:   []issuerDisplay{{Name: "GBO test-PID", Locale: "nl"}, {Name: "GBO test PID", Locale: "en"}},
 		Claims:    testPIDClaims,
 		ValidDays: credentialValidDays, StatusList: "pid", SourceURL: options.testPIDSourceURL,
 	}}

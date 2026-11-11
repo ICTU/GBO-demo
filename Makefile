@@ -32,10 +32,34 @@ ONBOARDING_OUTWAY_URL ?= http://localhost:$(or $(FSC_PORT_EDI_OUTWAY),8087)
 ONBOARDING_SECRETS_DIR ?= $(PWD)/.local/secrets
 ONBOARDING_PUBLIC_CERTIFICATES_DIR ?= $(PWD)/.local/public-certificates
 EUDI_TRUST_PUBLISH_DIR ?= $(PWD)/.local/public-trust
+GBO_LOTE_SIGNER_DIR ?= $(PWD)/.local/lote-signer
+GBO_LOTE_SIGNER_ROOT_FILE ?= $(ONBOARDING_PUBLIC_CERTIFICATES_DIR)/development-ca/lote-ca-cert.pem
+GBO_PID_TRUST_LIST_URL ?= $(if $(EUDI_TRUST_PUBLIC_URL),$(patsubst %/,%,$(EUDI_TRUST_PUBLIC_URL))/lote/PIDProviders.jwt)
+# Agreed temporary demo shortcut: only the fixed official NL HTTPS endpoint.
+# A configured key always enables JWT verification; verification never falls back.
+GBO_LOTE_TRUST_NL_HTTPS ?= true
 DEVELOPMENT_CA_DIR ?= $(ONBOARDING_SECRETS_DIR)/development-ca
 ONBOARDING_TYPE_METADATA_URL ?= $(or $(EUDI_BRI_URL),http://localhost:$(or $(GBO_PORT_EUDI_ADAPTER),9409))
 ONBOARDING_STORAGE_BACKEND ?= postgres
 ONBOARDING_CERTIFICATE_STORE ?= public-filesystem
+
+.PHONY: provision-trust-list-signer publish-trust-lists
+
+# Sign only on the host. Neither the scheme root nor the list signing key
+# belongs in ONBOARDING_SECRETS_DIR or in either public projection.
+provision-trust-list-signer:
+	@cd services/eudi-adapter && go run . provision-trust-list-signer \
+		--root-dir "$(GBO_LOTE_SIGNER_DIR)" --secrets-dir "$(ONBOARDING_SECRETS_DIR)" \
+		--public-certificates-dir "$(ONBOARDING_PUBLIC_CERTIFICATES_DIR)" --publish-dir "$(EUDI_TRUST_PUBLISH_DIR)"
+
+# A failed fetch or signature check keeps all four previous lists intact.
+publish-trust-lists:
+	@test -n "$(EUDI_TRUST_PUBLIC_URL)" || { echo "ERROR: set EUDI_TRUST_PUBLIC_URL" >&2; exit 1; }
+	@cd services/eudi-adapter && go run . publish-trust-lists \
+		--root-dir "$(GBO_LOTE_SIGNER_DIR)" --secrets-dir "$(ONBOARDING_SECRETS_DIR)" \
+		--public-certificates-dir "$(ONBOARDING_PUBLIC_CERTIFICATES_DIR)" --publish-dir "$(EUDI_TRUST_PUBLISH_DIR)" \
+		--trust-public-url "$(EUDI_TRUST_PUBLIC_URL)" --nl-config-key-file "$(GBO_LOTE_NL_CONFIG_KEY_FILE)" \
+		--trust-nl-https="$(GBO_LOTE_TRUST_NL_HTTPS)" $(GBO_LOTE_PUBLISH_FLAGS)
 
 # Docker network of the fsc-infra instance this checkout uses. Equals
 # <FSC_PROJECT_NAME>_default; override in fsc-infra/.env to run a
@@ -288,8 +312,8 @@ provision-asip-seal-certificate: require-development-cas
 # authorization server) and qtsp-login (the reference QTSP, slice 14; a demo
 # shortcut, as the two share this verifier) from the development reader CA,
 # which the test wallet trusts, with the verifier's public host as DNS SAN;
-# trust in the development issuer CA and the
-# pre-production PID issuer; and the API key of its internal API. Run again
+# PID roots from the verified central LoTE; and the API key of its internal
+# API. Publish the central HTTPS list before provisioning. Run again
 # when ASI_WALLET_VERIFIER_PUBLIC_URL changes; the next make demo-asi then
 # recreates the ASI services (marker .provisioned).
 ASI_WALLET_VERIFIER_DIR ?= $(ONBOARDING_SECRETS_DIR)/asi-wallet-verifier
@@ -301,11 +325,13 @@ ASI_WALLET_VERIFIER_PUBLIC_URL ?= http://localhost:$(PORT_ASI_WALLET_VERIFIER)
 # "disclosure". The default is the pre-production NL Wallet (TestFlight).
 ASI_WALLET_UL_BASE ?= https://app.preproductie.wallet.edi.bzk.nl/deeplink/
 provision-asi-wallet-verifier: require-development-cas
+	@cd services/eudi-adapter && go run . export-pid-trust \
+		--url "$(GBO_PID_TRUST_LIST_URL)" --signer-root "$(GBO_LOTE_SIGNER_ROOT_FILE)" \
+		--out-file "$(ASI_WALLET_VERIFIER_DIR)/pid-issuer-anchors.txt"
 	@cd services/asi-authorization-server && go run . provision-wallet-verifier \
 		--ca-key "$(DEVELOPMENT_CA_DIR)/reader-ca-key.pem" \
 		--ca-cert "$(DEVELOPMENT_CA_DIR)/reader-ca-cert.pem" \
-		--issuer-ca "$(DEVELOPMENT_CA_DIR)/issuer-ca-cert.pem" \
-		--pid-issuer-anchors ../asi-wallet-verifier/pid-issuer-anchors.txt \
+		--pid-issuer-anchors "$(ASI_WALLET_VERIFIER_DIR)/pid-issuer-anchors.txt" \
 		--public-url "$(ASI_WALLET_VERIFIER_PUBLIC_URL)" \
 		--universal-link-base "$(ASI_WALLET_UL_BASE)" \
 		--request-origin "$(or $(ASI_AUTHORIZATION_SERVER_PUBLIC_URL),http://$(or $(GBO_PUBLIC_HOST),localhost):$(PORT_ASI_AUTHORIZATION_SERVER))" \
@@ -336,7 +362,7 @@ provision-asi-eudi-wallet-verifier: require-development-cas
 	@mkdir -p "$(EUDI_TRUST_PUBLISH_DIR)"
 	@cd services/eudi-adapter && go run . provision-asi-eudi-wallet-verifier \
 		--secrets-dir "$(ONBOARDING_SECRETS_DIR)" --publish-dir "$(EUDI_TRUST_PUBLISH_DIR)" \
-		--pid-trust-anchors ../asi-wallet-verifier/pid-issuer-anchors.txt \
+		--pid-trust-list-url "$(GBO_PID_TRUST_LIST_URL)" --lote-signer-root "$(GBO_LOTE_SIGNER_ROOT_FILE)" \
 		--public-url "$(ASI_EUDI_WALLET_VERIFIER_PUBLIC_URL)" \
 		--authorization-server-url "$(or $(ASI_AUTHORIZATION_SERVER_PUBLIC_URL),http://$(or $(GBO_PUBLIC_HOST),localhost):$(PORT_ASI_AUTHORIZATION_SERVER))"
 	@touch "$(ASI_EUDI_WALLET_VERIFIER_DIR)/.provisioned"

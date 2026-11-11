@@ -1,0 +1,61 @@
+diff --git a/Sources/EudiWalletKit/Models/OpenId4VciConfiguration.swift b/Sources/EudiWalletKit/Models/OpenId4VciConfiguration.swift
+index f865f6b6..6b3e2dda 100644
+--- a/Sources/EudiWalletKit/Models/OpenId4VciConfiguration.swift
++++ b/Sources/EudiWalletKit/Models/OpenId4VciConfiguration.swift
+@@ -56,6 +56,7 @@ public struct OpenId4VciConfiguration: Sendable {
+ 	/// wallet trust configuration. Requires `issuerMetadataPolicy` to be `.requireSigned`, since WRPRC
+ 	/// enforcement needs a cryptographically bound issuer metadata signer to supply the WRPAC.
+ 	public let validateRegistrationCertificate: Bool
++	public let cacheIssuerMetadata: Bool
+ 	/// Whether user authentication is required for credential issuance
+ 	public let userAuthenticationRequired: Bool
+ 	/// Key options for generating DPoP keys, if DPoP is used
+@@ -85,6 +86,7 @@ public struct OpenId4VciConfiguration: Sendable {
+ 		self.parUsage = parUsage
+ 		self.allowPlainJwtProof = allowPlainJwtProof
+ 		self.requireDpop = requireDpop
++		self.cacheIssuerMetadata = cacheIssuerMetadata
+ 		self.issuerMetadataPolicy = issuerMetadataPolicy
+ 		self.validateRegistrationCertificate = validateRegistrationCertificate
+ 		self.userAuthenticationRequired = userAuthenticationRequired
+diff --git a/Sources/EudiWalletKit/Services/OpenId4VciService.swift b/Sources/EudiWalletKit/Services/OpenId4VciService.swift
+index 4256761b..eebc1277 100644
+--- a/Sources/EudiWalletKit/Services/OpenId4VciService.swift
++++ b/Sources/EudiWalletKit/Services/OpenId4VciService.swift
+@@ -45,6 +45,7 @@ public actor OpenId4VciService {
+ 	let logger: Logger
+ 	var config: OpenId4VciConfiguration
+ 	static nonisolated(unsafe) var credentialOfferCache = [String: CredentialOffer]()
++	static let issuerMetadataCacheLock = NSLock()
+ 	static nonisolated(unsafe) var issuerMetadataCache = [String: (CredentialIssuerId, CredentialIssuerMetadata)]()
+ 	var networking: Networking
+ 	var authRequested: AuthorizationRequested?
+@@ -191,7 +192,7 @@ public actor OpenId4VciService {
+ 
+ 	/// Clear the issuer metadata cache
+ 	static func clearIssuerMetadataCache() {
+-		Self.issuerMetadataCache.removeAll()
++		Self.issuerMetadataCacheLock.withLock { Self.issuerMetadataCache.removeAll() }
+ 	}
+ 
+ 	public nonisolated func beginIssueDocument(id: String, credentialOptions: CredentialOptions, keyOptions: KeyOptions?, bDeferred: Bool = false) throws -> IssueRequest {
+@@ -472,7 +473,7 @@ public actor OpenId4VciService {
+ 
+ 	func resolveIssuerMetadata() async throws -> (CredentialIssuerId, CredentialIssuerMetadata) {
+ 		// Check cache first
+-		if let cachedResult = Self.issuerMetadataCache[config.credentialIssuerURL!] {
++		if config.cacheIssuerMetadata, let cachedResult = Self.issuerMetadataCacheLock.withLock({ Self.issuerMetadataCache[config.credentialIssuerURL!] }) {
+ 			return cachedResult
+ 		}
+ 		let credentialIssuerIdentifier = try CredentialIssuerId(config.credentialIssuerURL!)
+@@ -480,7 +481,9 @@ public actor OpenId4VciService {
+ 		switch issuerMetadata {
+ 		case .success(let metaData):
+ 			let result = (credentialIssuerIdentifier, metaData)
+-			Self.issuerMetadataCache[config.credentialIssuerURL!] = result
++			if config.cacheIssuerMetadata {
++				Self.issuerMetadataCacheLock.withLock { Self.issuerMetadataCache[config.credentialIssuerURL!] = result }
++			}
+ 			return result
+ 		case .failure(let error):
+ 			let errorDescription = error.localizedDescription

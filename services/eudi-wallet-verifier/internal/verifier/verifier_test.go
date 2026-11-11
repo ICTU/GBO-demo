@@ -57,7 +57,7 @@ type fixture struct {
 
 var pidName = pkix.Name{CommonName: "Test PID issuer", Organization: []string{"GBO demo"}}
 
-func newFixture(t *testing.T) *fixture {
+func newFixture(t *testing.T, configure ...func(*fixture, *verifier.Config)) *fixture {
 	t.Helper()
 	f := &fixture{now: time.Now().Truncate(time.Second), holder: testpki.NewKey(t), tokens: map[string]string{}}
 	root := testpki.NewRoot(t, "test pid root")
@@ -107,6 +107,9 @@ func newFixture(t *testing.T) *fixture {
 	}))
 	t.Cleanup(f.public.Close)
 	cfg.PublicURL = f.public.URL
+	for _, fn := range configure {
+		fn(f, &cfg)
+	}
 	svc = verifier.New(cfg, fetch, func() time.Time { return f.now })
 	f.internal = httptest.NewServer(verifier.InternalHandler(svc, log))
 	t.Cleanup(f.internal.Close)

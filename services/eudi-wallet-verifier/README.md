@@ -31,8 +31,10 @@ Port 8001 must be reachable by the wallet over HTTPS: its public URL is in the c
   "public_url": "https://eudi-verifier.example",
   "api_key_file": "api-key",
   "session_ttl": "5m",
-  "pid_anchors": [{"name": "test-pid", "roots_file": "test-pid-root.pem"}],
-  "pid_trusted_authorities": ["<base64url SubjectKeyIdentifier of a PID root>"],
+  "pid_trust_list": {
+    "url": "https://trust.sim.example/lote/PIDProviders.jwt",
+    "signer_root_file": "lote-signer-root.pem"
+  },
   "usecases": {
     "asi-login": {
       "key_file": "asi-login.key.pem",
@@ -47,3 +49,12 @@ Port 8001 must be reachable by the wallet over HTTPS: its public URL is in the c
 ```
 
 A usecase with `"return_url": "same_device"` requires a return URL template when a session starts; one with `"neither"` refuses it, as `verification_server` does.
+
+The [central PID trust runbook](../../docs/gbo-trust-lists.md#internal-pid-consumers)
+describes provisioning and the public signer pin. Trust refreshes on use at
+most hourly; responses, including those of ongoing sessions, use current
+roots. A refresh failure uses only an unexpired verified cache. With none,
+the PID check returns `503 server_error` and leaves the session retryable.
+An explicit `pid_trusted_authorities` filter overrides the derived AKI hints.
+Legacy `pid_anchors` is an alternative configuration mode, mutually exclusive
+with `pid_trust_list`, never an automatic fallback.

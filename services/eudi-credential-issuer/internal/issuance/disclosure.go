@@ -63,6 +63,9 @@ func (s *Service) DisclosureRequest(ctx context.Context, t Target, offerKey stri
 	if !ok || prov.requestSigner == nil || p.Kind == KindCombined {
 		return "", ErrUnknownOffer
 	}
+	if _, err := s.pidVerifier(ctx); err != nil {
+		return "", err
+	}
 	key, err := oid4vp.NewResponseKey()
 	if err != nil {
 		return "", err
@@ -126,6 +129,13 @@ func (s *Service) DisclosureResponse(ctx context.Context, t Target, sessionID st
 	if err != nil {
 		return "", err
 	}
+	v := s.verifier
+	if f.Error == "" {
+		v, err = s.pidVerifier(ctx)
+		if err != nil {
+			return "", err
+		}
+	}
 	now := s.now()
 	d, err := s.sessions.TakeDisclosure(ctx, sessionID, now)
 	if errors.Is(err, ErrNotFound) || (err == nil && (d.Provider != t.Provider || d.Profile != p.Name)) {
@@ -155,7 +165,7 @@ func (s *Service) DisclosureResponse(ctx context.Context, t Target, sessionID st
 	if !ok {
 		return "", errors.New("the session's response key is not an EC key")
 	}
-	disclosure, err := s.verifier.VerifyResponse(ctx, f.Response, oid4vp.Session{
+	disclosure, err := v.VerifyResponse(ctx, f.Response, oid4vp.Session{
 		ClientID: prov.requestSigner.ClientID(), Nonce: d.Nonce, State: d.State, Query: pidQuery(p),
 		Key: oid4vp.ResponseKey{KeyID: d.ResponseKeyID, Key: ecKey},
 	}, now)
@@ -184,6 +194,18 @@ func (s *Service) DisclosureResponse(ctx context.Context, t Target, sessionID st
 		return "", err
 	}
 	return offer.Links["openid-credential-offer"], nil
+}
+
+func (s *Service) pidVerifier(ctx context.Context) (oid4vp.Verifier, error) {
+	v := s.verifier
+	if s.cfg.PIDTrust != nil {
+		trust, err := s.cfg.PIDTrust.Load(ctx)
+		if err != nil || len(trust.Anchors) == 0 {
+			return v, fmt.Errorf("%w: %v", ErrPIDTrustUnavailable, err)
+		}
+		v.Anchors = trust.Anchors
+	}
+	return v, nil
 }
 
 // NoDataError refuses a disclosure on a KindEUDI profile whose source has

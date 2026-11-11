@@ -43,9 +43,10 @@ const (
 // fixture is a running issuer with two profiles, a fake source and a
 // controllable clock.
 type fixture struct {
-	t        *testing.T
-	public   *httptest.Server
-	internal *httptest.Server
+	t             *testing.T
+	browserRoutes map[string]http.Handler
+	public        *httptest.Server
+	internal      *httptest.Server
 	// issuerRoot and accessRoot are the roots of the tax provider;
 	// civilIssuerRoot and civilAccessRoot those of the civil provider.
 	issuerRoot      testpki.Cert
@@ -207,6 +208,8 @@ func newFixtureWith(t *testing.T, configure func(f *fixture, cfg *issuance.Confi
 			endpoints[c.ID] = src.URL + "/attestations/tax/income"
 		case deathVCT:
 			endpoints[c.ID] = src.URL + "/attestations/civil/death"
+		default:
+			endpoints[c.ID] = src.URL + "/attestations/test"
 		}
 	}
 	svc, err := issuance.New(cfg, &source.Client{HTTP: src.Client(), Endpoints: endpoints}, store, store, store, f.clock.Now)
@@ -214,7 +217,12 @@ func newFixtureWith(t *testing.T, configure func(f *fixture, cfg *issuance.Confi
 		t.Fatal(err)
 	}
 	log := slog.New(slog.NewTextHandler(f.logs, nil))
-	handlers.public = httpapi.Public(svc, log)
+	publicMux := http.NewServeMux()
+	publicMux.Handle("/", httpapi.Public(svc, log))
+	for route, handler := range f.browserRoutes {
+		publicMux.Handle(route, handler)
+	}
+	handlers.public = publicMux
 	handlers.internal = httpapi.Internal(svc, log)
 	return f
 }

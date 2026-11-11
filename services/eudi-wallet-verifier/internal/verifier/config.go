@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"gbo-demo/oid4vc-kit/lote"
 	"gbo-demo/oid4vc-kit/oid4vp"
 	"gbo-demo/oid4vc-kit/x5c"
 )
@@ -29,7 +30,8 @@ type File struct {
 	SessionTTL string `json:"session_ttl"`
 	// PIDAnchors are the roots of the PID issuers the verifier trusts, one
 	// anchor set per entry.
-	PIDAnchors []AnchorFile `json:"pid_anchors"`
+	PIDAnchors   []AnchorFile `json:"pid_anchors"`
+	PIDTrustList *lote.File   `json:"pid_trust_list"`
 	// PIDTrustedAuthorities are base64url KeyIdentifiers the verifier puts
 	// in every query as an aki trusted_authorities query (HAIP 1.0 section
 	// 5).
@@ -63,6 +65,7 @@ type Config struct {
 	APIKey                string
 	SessionTTL            time.Duration
 	PIDAnchors            []x5c.Anchors
+	PIDTrust              PIDTrust
 	PIDTrustedAuthorities []string
 	Usecases              map[string]Usecase
 }
@@ -117,7 +120,15 @@ func Load(path string) (Config, error) {
 	if cfg.APIKey = strings.TrimSpace(string(key)); cfg.APIKey == "" {
 		return Config{}, errors.New("api_key_file: the API key is empty")
 	}
-	if len(f.PIDAnchors) == 0 {
+	if f.PIDTrustList != nil {
+		if len(f.PIDAnchors) > 0 {
+			return Config{}, errors.New("pid_trust_list and pid_anchors are mutually exclusive")
+		}
+		if cfg.PIDTrust, err = f.PIDTrustList.Open(resolve); err != nil {
+			return Config{}, err
+		}
+	}
+	if len(f.PIDAnchors) == 0 && cfg.PIDTrust == nil {
 		return Config{}, errors.New("pid_anchors: at least one anchor set is required")
 	}
 	for _, a := range f.PIDAnchors {

@@ -135,7 +135,7 @@ func (s *Service) grantCode(p Profile, req TokenRequest) (string, error) {
 		}
 		return req.PreAuthorizedCode, nil
 	case GrantAuthorizationCode:
-		if !s.offersLogin(p) {
+		if !s.offersLogin(req.Target.Provider, p) {
 			return "", refuse(oid4vci.ErrUnsupportedGrantType, "only the pre-authorized code grant is supported")
 		}
 		if req.Code == "" || req.TxCode != "" {

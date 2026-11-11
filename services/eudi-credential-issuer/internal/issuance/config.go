@@ -42,6 +42,8 @@ const (
 type Provider struct {
 	// Name is the first path segment of its issuer identifiers.
 	Name string
+	// Login overrides the default login for this provider only (demo test PID).
+	Login Login
 	// AccessKey and AccessChain are the access certificate (WRPAC) that
 	// signs the issuer metadata.
 	AccessKey   crypto.Signer
@@ -162,8 +164,10 @@ type Config struct {
 	// DisclosureOffers, PIDAnchors and FetchPIDStatus serve
 	// disclosure-based issuance: the PID issuers whose PIDs are accepted
 	// and how their status lists are fetched.
+	LoginOffers      []DisclosureOffer
 	DisclosureOffers []DisclosureOffer
 	PIDAnchors       []x5c.Anchors
+	PIDTrust         PIDTrust
 	FetchPIDStatus   oid4vp.StatusFetcher
 	// DisclosureTTL bounds a disclosure session and the offer that follows
 	// it.

@@ -227,6 +227,13 @@ func TestMaterializeTestPID(t *testing.T) {
 			t.Fatalf("providers %+v", out.Providers)
 		}
 		p := out.Providers[1]
+		if p.TestPersonsFile != "/test-pid-persons/personen.json" || len(out.LoginOffers) != 1 || out.LoginOffers[0].Provider != testPIDID || out.LoginOffers[0].CredentialConfigurationIDs[0] != "test-pid-pid" {
+			t.Fatal("test-person login not materialized")
+		}
+		if out.Providers[0].TestPersonsFile != "" {
+			t.Fatal("source provider received the demo login")
+		}
+
 		if len(p.CredentialConfigurations) != 1 {
 			t.Fatalf("configurations %+v", p.CredentialConfigurations)
 		}
@@ -238,7 +245,7 @@ func TestMaterializeTestPID(t *testing.T) {
 		if len(c.Claims) != 12 || !c.Claims[0].Mandatory || c.Claims[6].Mandatory || c.Claims[7].Mandatory {
 			t.Fatalf("claims %+v", c.Claims)
 		}
-		if !slices.Equal(c.Display, []issuerDisplay{{Name: "Test-PID", Locale: "nl"}, {Name: "Test PID", Locale: "en"}}) {
+		if !slices.Equal(c.Display, []issuerDisplay{{Name: "GBO test-PID", Locale: "nl"}, {Name: "GBO test PID", Locale: "en"}}) {
 			t.Fatalf("display %+v", c.Display)
 		}
 		root, err := loadRole(dirs.rootDir, testPIDRootRole, "test PID root")

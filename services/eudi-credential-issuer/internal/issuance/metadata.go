@@ -70,7 +70,7 @@ func (s *Service) issuerMetadata(t Target, prov *provider, p Profile) map[string
 	if p.Kind == KindEUDI {
 		md["notification_endpoint"] = id + "/notification"
 	}
-	if s.offersLogin(p) {
+	if s.offersLogin(t.Provider, p) {
 		md["deferred_credential_endpoint"] = id + "/deferred_credential"
 	}
 	if p.servesNL() {
@@ -170,7 +170,7 @@ func (s *Service) AuthorizationServerMetadata(t Target) (map[string]any, error) 
 	if p.Kind == KindEUDI {
 		md["grant_types_supported"] = []string{oid4vci.GrantPreAuthorizedCode, oid4vci.GrantRefreshToken}
 	}
-	if s.offersLogin(p) {
+	if s.offersLogin(t.Provider, p) {
 		md["authorization_endpoint"] = id + "/authorize"
 		md["pushed_authorization_request_endpoint"] = id + "/par"
 		md["require_pushed_authorization_requests"] = true

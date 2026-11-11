@@ -96,7 +96,7 @@ The wallet discloses the BSN from its PID, and gets a Credential Offer for it in
 
 The request carries the provider's registration certificate for the verifier role (`verifier_registration_certificate_file`, entitlement Service_Provider, authorizing the `bsn` of `urn:eudi:pid:nl:1`) in `verifier_info`: base64url-encoded on `nl`, the JWT itself on `eudi`, as each wallet reads it. The wallet fetches it with GET; `request_uri_method=post` is not offered.
 
-The response is checked with `oid4vc-kit/oid4vp`: the PID must chain to `pid_trust_anchors` with the mDL signer EKU and an `exp`, be bound to the session by its key binding, disclose the `bsn` and nothing else, and be valid on its status list (signed under the PID signer's name; fetched over https without redirects). A session answers one response. The wallet gets:
+The response is checked with `oid4vc-kit/oid4vp`: the PID must chain to the current PID roots from `pid_trust_list` (or explicitly configured legacy `pid_trust_anchors`) with the mDL signer EKU and an `exp`, be bound to the session by its key binding, disclose the `bsn` and nothing else, and be valid on its status list (signed under the PID signer's name; fetched over https without redirects). A session answers one response. The wallet gets:
 
 | Outcome | Response |
 |---|---|
@@ -105,6 +105,7 @@ The response is checked with `oid4vc-kit/oid4vp`: the PID must chain to `pid_tru
 | unknown, expired or used session; a response the verifier refuses | `400 invalid_request` |
 | the source has no data, on `nl` | `404 no_issuable_attestations`, which the NL Wallet shows as "nothing to add" |
 | the source has no data, on `eudi` | `200 {"redirect_uri": "<issuer>/vp/<offer>/no-data"}`: the EUDI wallets show any refusal as a generic error, so the wallet opens a page in the browser that names the organization (O of the access certificate) and the attestation, and says nothing was added. The page shows no personal data |
+| no valid verified PID trust list is available | `503 server_error`; the response stays available for retry |
 | the source or the PID status list is unreachable, or the source data cannot be issued | `500 server_error`; scanning again may work |
 
 ## Authorization code flow
@@ -293,3 +294,45 @@ The issuer refuses to start with a configuration a wallet would refuse: no `scop
 - DPoP `htu` is compared with the public URL, not the request URL, because the issuer runs behind a proxy.
 - Server-provided DPoP nonces are not used: the NL Wallet does not retry on `use_dpop_nonce`. Replay of a DPoP proof is blocked by its `jti` within the 60-second `iat` window.
 - The `iss` claim of a key proof is not checked against the client.
+
+The [central PID trust runbook](../../docs/gbo-trust-lists.md#internal-pid-consumers)
+describes the shared list URL, independently provisioned public signer pin,
+hourly in-use refresh and cache expiry. Current roots apply to ongoing PID
+sessions. A configured LoTE source never falls back to static roots; other
+issuance flows stay available during a PID trust outage.
+
+## Demo test-person login for the test PID
+
+The generated `test-pid` provider has `test_persons_file` set to the same
+BRP mock-person file used by the developer portal and `test-pid-source`.
+Its `login_offers` entry (`test-pid`, configuration `test-pid-pid`) enables
+wallet-initiated authorization without making the PID provider a verifier.
+PAR and `/test-pid/eudi/authorize` lead to the issuer's own person picker,
+then the usual callback, token and credential endpoints. A provider-specific
+Login port overrides the authorization-server login for this provider only.
+Source providers keep their existing login.
+
+This is a **demo shortcut, not identity verification**: anyone who reaches
+the authorized test-person page can choose a fixture. The page clearly labels
+its people as fictitious. A real PID provider must authenticate the citizen
+through its approved identification process instead.
+
+Compose mounts `services/brp-graphql-server/mockdata` read-only at
+`/test-pid-persons`. Host materialization may override its runtime path with
+`--test-pid-persons-file` / `TEST_PID_PERSONS_FILE`. The reader accepts BRP
+mock fields or `{bsn, name}` entries, and refuses invalid or duplicate BSNs.
+A missing, empty or malformed file makes this login temporarily unavailable;
+it does not stop pre-authorized offers through the portal. No automatic
+fallback changes the chosen identity.
+
+Selections expire after the existing ten-minute login limit. The local login
+code and the wallet authorization code each last at most 60 seconds and are
+single-use. The login code is bound to the issuer resource and S256 PKCE;
+the normal issuer state, wallet authentication, DPoP and PKCE checks remain.
+Only a BSN in the shared persons file can be selected. No chosen BSN or code
+is written to application logs. Temporary selection/code state uses the
+existing pending store; no new runtime database or browser storage is added.
+
+The tests cover the picker, both selected fixture identities through credential
+issuance, invalid choices, expired/replayed codes, state and PKCE refusals,
+normal source login, and unavailable-file/pre-authorized-offer behavior.

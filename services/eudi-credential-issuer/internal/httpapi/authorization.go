@@ -124,6 +124,9 @@ func (h *handler) walletReturn(w http.ResponseWriter, r *http.Request, ret *issu
 	// trusts by configuration, so its scheme may be the wallet's.
 	data := map[string]any{"Back": template.URL(ret.Location), "Organization": ret.Organization, "Attestation": ret.Attestation}
 	tmpl := unavailableTemplate
+	if ret.LoginUnavailable {
+		tmpl = loginUnavailableTemplate
+	}
 	if ret.Page == issuance.ReturnNoData {
 		tmpl = noDataReturnTemplate
 	}
@@ -169,3 +172,5 @@ var unavailableTemplate = template.Must(template.New("unavailable").Parse(`{{def
 var invalidAuthorizationTemplate = template.Must(template.New("invalid").Parse(`{{define "title"}}Aanvraag niet geldig{{end}}` + pageHead + `<h1>Aanvraag niet geldig</h1>
 <p>Deze aanvraag is niet (meer) geldig. Start de aanvraag opnieuw vanuit uw wallet.</p>
 ` + pageFoot))
+
+var loginUnavailableTemplate = template.Must(template.New("login-unavailable").Parse(`{{define "title"}}Inloggen niet beschikbaar{{end}}` + pageHead + `<h1>Inloggen niet beschikbaar</h1><p>De testpersonen kunnen nu niet worden geladen. Probeer het later opnieuw.</p><p>Er is niets aan uw wallet toegevoegd.</p><a class="button" href="{{.Back}}">Terug naar de wallet</a>` + pageFoot))

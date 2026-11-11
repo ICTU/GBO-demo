@@ -161,7 +161,7 @@ func (s *Service) Deferred(ctx context.Context, call DeferredCall) (CredentialRe
 	if err != nil {
 		return CredentialResult{}, err
 	}
-	if !s.offersLogin(p) {
+	if !s.offersLogin(call.Target.Provider, p) {
 		return CredentialResult{}, ErrUnknownProfile
 	}
 	now := s.now()
@@ -210,7 +210,7 @@ func (s *Service) Deferred(ctx context.Context, call DeferredCall) (CredentialRe
 	if err != nil {
 		return CredentialResult{}, err
 	}
-	o, ok := s.disclosureOffers[call.Target.Provider+"/"+d.Offer]
+	o, ok := s.loginOffers[call.Target.Provider+"/"+d.Offer]
 	c, okc := s.configs[d.ConfigurationID]
 	if !ok || !okc || c.Provider != prov.Name {
 		return CredentialResult{}, refuse(oid4vci.ErrCredentialRequestDenied, "the offer is no longer configured")

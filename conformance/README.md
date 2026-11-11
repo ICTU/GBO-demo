@@ -44,3 +44,9 @@ cd conformance/check && go run ./extract -spec <spec.html> -prefix OID4VCI -titl
 The roles DIP (the Discover Interface Provider) and TSP (the trust service provider that asks) are outside the ASIP's claim; the demo plays them with `services/asi-discovery-stub` and `services/qtsp-reference`.
 
 The security considerations the authorization server must take into account (REQ-AZSP-6.1.3.4-01) are weighed in [`security-considerations.md`](security-considerations.md).
+
+PID certificate trust is supplied by the centrally signed GBO PID LoTE in
+configured internal consumers; see [trust boundaries and demo shortcuts](../docs/gbo-trust-lists.md#internal-pid-consumers).
+This changes trust-source configuration, not the claimed HAIP or OpenID4VCI
+requirements. The partial ETSI JSON support does not add a TS 119 602 or JAdES
+conformance claim.

@@ -23,7 +23,29 @@ import (
 
 	"gbo-demo/oid4vc-kit/oid4vp"
 	"gbo-demo/oid4vc-kit/sdjwtvc"
+	"gbo-demo/oid4vc-kit/x5c"
 )
+
+// PIDTrust is the verifier's port for current PID trust, independent of HTTP.
+type PIDTrust interface {
+	Load(context.Context) (x5c.Trust, error)
+}
+
+func (s *Service) pidVerifier(ctx context.Context) (oid4vp.Verifier, []string, error) {
+	v := s.verifier
+	akis := s.cfg.PIDTrustedAuthorities
+	if s.cfg.PIDTrust != nil {
+		trust, err := s.cfg.PIDTrust.Load(ctx)
+		if err != nil || len(trust.Anchors) == 0 {
+			return v, nil, refuse(http.StatusServiceUnavailable, "server_error", "PID trust temporarily unavailable")
+		}
+		v.Anchors = trust.Anchors
+		if len(akis) == 0 {
+			akis = trust.Authorities
+		}
+	}
+	return v, akis, nil
+}
 
 // Status is the state of a session, as verification_server names it.
 type Status string
@@ -268,8 +290,17 @@ func (s *Service) responseURI(token string) string {
 // Request hands the wallet the signed request object, once: the session
 // then waits for the response, and its type is fixed.
 func (s *Service) Request(token, sessionType string) (string, error) {
+	return s.RequestContext(context.Background(), token, sessionType)
+}
+
+// RequestContext refreshes PID trust with the wallet request's deadline.
+func (s *Service) RequestContext(ctx context.Context, token, sessionType string) (string, error) {
 	if sessionType != CrossDevice && sessionType != SameDevice {
 		return "", refuse(http.StatusBadRequest, "session_type", "session_type must be %s or %s", CrossDevice, SameDevice)
+	}
+	_, akis, err := s.pidVerifier(ctx)
+	if err != nil {
+		return "", err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -279,6 +310,9 @@ func (s *Service) Request(token, sessionType string) (string, error) {
 	}
 	if ses.status != StatusCreated {
 		return "", refuse(http.StatusBadRequest, "session_state", "the session is %s", ses.status)
+	}
+	if len(akis) > 0 {
+		ses.query.Credentials[0].TrustedAuthorities = []oid4vp.TrustedAuthority{{Type: oid4vp.TrustedAuthorityAKI, Values: akis}}
 	}
 	key, err := oid4vp.NewResponseKey()
 	if err != nil {
@@ -314,6 +348,14 @@ func (s *Service) Request(token, sessionType string) (string, error) {
 // error ends the session as CANCELLED (access_denied) or FAILED, with no
 // redirect_uri. A presentation the kit refuses fails the session.
 func (s *Service) Respond(ctx context.Context, token string, f ResponseForm) (string, error) {
+	v := s.verifier
+	if f.Error == "" {
+		var err error
+		v, _, err = s.pidVerifier(ctx)
+		if err != nil {
+			return "", err
+		}
+	}
 	s.mu.Lock()
 	ses, err := s.get(token)
 	if err == nil && (ses.status != StatusWaiting || ses.verifying) {
@@ -340,7 +382,7 @@ func (s *Service) Respond(ctx context.Context, token string, f ResponseForm) (st
 	uc := s.cfg.Usecases[ses.usecase]
 	s.mu.Unlock()
 
-	disclosure, verr := s.verifier.VerifyResponse(ctx, f.Response, oid4vp.Session{
+	disclosure, verr := v.VerifyResponse(ctx, f.Response, oid4vp.Session{
 		ClientID: uc.Signer.ClientID(), Nonce: snapshot.nonce, State: snapshot.state, Query: snapshot.query, Key: snapshot.key,
 	}, s.now())
 

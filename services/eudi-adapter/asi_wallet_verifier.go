@@ -76,8 +76,9 @@ type asiVerifierOptions struct {
 	// publicURL is where wallets reach the verifier; authorizationServerURL
 	// the authorization server's public URL: an https one gets same-device
 	// returns.
-	publicURL, authorizationServerURL string
-	pidTrustAnchorsFile               string
+	publicURL, authorizationServerURL   string
+	pidTrustAnchorsFile                 string
+	pidTrustListURL, loteSignerRootFile string
 }
 
 func parseASIVerifierOptions(command string, arguments []string, stderr io.Writer) (asiVerifierOptions, error) {
@@ -90,6 +91,8 @@ func parseASIVerifierOptions(command string, arguments []string, stderr io.Write
 	set.StringVar(&options.kvkNumber, "kvk-number", asiVerifierKvKNumber, "fictional KvK number of the authorization server as relying party")
 	set.StringVar(&options.publicURL, "public-url", "", "public URL of eudi-wallet-verifier")
 	set.StringVar(&options.authorizationServerURL, "authorization-server-url", "", "public URL of the authorization server")
+	set.StringVar(&options.pidTrustListURL, "pid-trust-list-url", defaultPIDTrustListURL(), "central PID LoTE HTTPS URL")
+	set.StringVar(&options.loteSignerRootFile, "lote-signer-root", os.Getenv("GBO_LOTE_SIGNER_ROOT_FILE"), "independently provisioned public LoTE signer root PEM")
 	set.StringVar(&options.pidTrustAnchorsFile, "pid-trust-anchors", getEnv("PID_TRUST_ANCHORS_FILE", ""), "NL PID issuer CAs, base64 DER, one per line")
 	if err := set.Parse(arguments); err != nil {
 		return options, err
@@ -136,9 +139,13 @@ func provisionASIWalletVerifier(options asiVerifierOptions) error {
 	if err := writeFileAtomically(r.dir, verifierRegistrationFile, []byte(vrc), 0o644); err != nil {
 		return err
 	}
-	anchors, akis, err := writeASIVerifierPIDTrust(options, r.dir)
-	if err != nil {
-		return err
+	var anchors []map[string]string
+	var akis []string
+	if options.pidTrustListURL == "" {
+		anchors, akis, err = writeASIVerifierPIDTrust(options, r.dir)
+		if err != nil {
+			return err
+		}
 	}
 	if err := writeASIVerifierAPIKey(options); err != nil {
 		return err
@@ -166,6 +173,15 @@ func provisionASIWalletVerifier(options asiVerifierOptions) error {
 		"pid_anchors":             anchors,
 		"pid_trusted_authorities": akis,
 		"usecases":                usecases,
+	}
+	if options.pidTrustListURL != "" {
+		trust, err := copyPIDTrustList(options.pidTrustListURL, options.loteSignerRootFile, r.dir)
+		if err != nil {
+			return err
+		}
+		delete(config, "pid_anchors")
+		delete(config, "pid_trusted_authorities")
+		config["pid_trust_list"] = trust
 	}
 	raw, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {

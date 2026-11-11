@@ -26,6 +26,7 @@ type Service struct {
 	// disclosureOffers are keyed by provider and key; verifier checks the
 	// responses to their requests.
 	disclosureOffers map[string]DisclosureOffer
+	loginOffers      map[string]DisclosureOffer
 	verifier         oid4vp.Verifier
 	source           Source
 	sessions         Sessions
@@ -42,7 +43,7 @@ func New(cfg Config, source Source, sessions Sessions, onetime OneTime, status S
 	}
 	setDefaults(&cfg)
 	s := &Service{cfg: cfg, providers: map[string]*provider{}, profiles: map[string]Profile{},
-		configs: map[string]CredentialConfiguration{}, disclosureOffers: map[string]DisclosureOffer{},
+		configs: map[string]CredentialConfiguration{}, disclosureOffers: map[string]DisclosureOffer{}, loginOffers: map[string]DisclosureOffer{},
 		verifier: oid4vp.Verifier{Anchors: cfg.PIDAnchors, FetchStatus: cfg.FetchPIDStatus},
 		source:   source, sessions: sessions, onetime: onetime, status: status, now: now}
 	for _, p := range cfg.Providers {
@@ -76,6 +77,10 @@ func New(cfg Config, source Source, sessions Sessions, onetime OneTime, status S
 	}
 	for _, o := range cfg.DisclosureOffers {
 		s.disclosureOffers[o.Provider+"/"+o.Key] = o
+		s.loginOffers[o.Provider+"/"+o.Key] = o
+	}
+	for _, o := range cfg.LoginOffers {
+		s.loginOffers[o.Provider+"/"+o.Key] = o
 	}
 	return s, nil
 }

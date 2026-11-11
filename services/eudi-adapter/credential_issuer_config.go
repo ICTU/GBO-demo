@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"gbo-demo/oid4vc-kit/lote"
 	"gbo-demo/source-registry/onboarding"
 	"gbo-demo/source-registry/postgresregistry"
 )
@@ -62,14 +63,16 @@ type credentialIssuerOptions struct {
 	// section 5); empty, the query names none.
 	eudiPIDTrustedAuthorities []string
 	// testPIDSourceURL is the bronpoort of the test PID (test-pid-source).
-	testPIDSourceURL string
+	testPIDSourceURL   string
+	testPIDPersonsFile string
 	// qtspAttestationURL is the reference QTSP's internal callback base and
 	// qtspMetadataPath its statement's Type Metadata, for the QTSP provider.
 	qtspAttestationURL, qtspMetadataPath string
 	// pidTrustAnchorsFile holds the NL PID issuer CAs whose PIDs the issuer
 	// accepts (base64 DER per line, # comments), next to the test PID.
-	pidTrustAnchorsFile string
-	now                 func() time.Time
+	pidTrustAnchorsFile                 string
+	pidTrustListURL, loteSignerRootFile string
+	now                                 func() time.Time
 	// owner, when set, becomes the owner of everything written: the issuer
 	// runs as another user than this command.
 	owner *fileOwner
@@ -99,8 +102,10 @@ func parseFileOwner(value string) (*fileOwner, error) {
 type issuerFile struct {
 	Providers        []issuerProviderFile    `json:"providers"`
 	Profiles         []issuerProfileFile     `json:"profiles"`
+	LoginOffers      []issuerDisclosureOffer `json:"login_offers,omitempty"`
 	DisclosureOffers []issuerDisclosureOffer `json:"disclosure_offers,omitempty"`
 	PIDTrustAnchors  []issuerAnchors         `json:"pid_trust_anchors,omitempty"`
+	PIDTrustList     *lote.File              `json:"pid_trust_list,omitempty"`
 }
 
 // issuerDisclosureOffer is a source offer the wallet starts by disclosing
@@ -124,6 +129,7 @@ type issuerKeyFiles struct {
 
 type issuerProviderFile struct {
 	Name                        string         `json:"name"`
+	TestPersonsFile             string         `json:"test_persons_file,omitempty"`
 	Access                      issuerKeyFiles `json:"access"`
 	Issuer                      issuerKeyFiles `json:"issuer"`
 	Status                      issuerKeyFiles `json:"status"`
@@ -189,7 +195,10 @@ func runCredentialIssuerConfigCommand(ctx context.Context, arguments []string, s
 	set.StringVar(&options.rootsDir, "wallet-roots-dir", "/wallet-roots", "directory with the trusted wallet providers per profile")
 	set.StringVar(&options.qtspAttestationURL, "qtsp-attestation-url", getEnv("QTSP_ATTESTATION_URL", "https://qtsp-reference:4443/attestations"), "internal HTTPS callback of the reference QTSP")
 	set.StringVar(&options.qtspMetadataPath, "qtsp-type-metadata", "/app/qtsp_attestation_metadata.json", "reference QTSP Type Metadata JSON")
+	set.StringVar(&options.pidTrustListURL, "pid-trust-list-url", defaultPIDTrustListURL(), "central PID LoTE HTTPS URL (exclusive trust source when set)")
+	set.StringVar(&options.loteSignerRootFile, "lote-signer-root", os.Getenv("GBO_LOTE_SIGNER_ROOT_FILE"), "independently provisioned public LoTE signer root PEM")
 	set.StringVar(&options.pidTrustAnchorsFile, "pid-trust-anchors-file", getEnv("PID_TRUST_ANCHORS_FILE", "/pid-trust-anchors.txt"), "NL PID issuer CAs the issuer trusts for disclosure-based issuance, base64 DER per line")
+	set.StringVar(&options.testPIDPersonsFile, "test-pid-persons-file", getEnv("TEST_PID_PERSONS_FILE", "/test-pid-persons/personen.json"), "shared demo persons file read by the test-PID login")
 	set.StringVar(&options.testPIDSourceURL, "test-pid-source-url", getEnv("TEST_PID_SOURCE_URL", "http://test-pid-source:8080/attestations"), "bronpoort of the test PID, used when the test PID is provisioned")
 	set.StringVar(&options.universalLinkBase, "universal-link-base", getEnv("ISSUER_NL_UNIVERSAL_LINK_BASE", "walletdebuginteraction://wallet.edi.rijksoverheid.nl/"), "base of the NL Wallet universal link")
 	owner := set.String("owner", os.Getenv("ISSUER_RUNTIME_OWNER"), "uid or uid:gid that becomes the owner of the output, for an issuer running as another user")
@@ -294,14 +303,20 @@ func writeCredentialIssuer(options credentialIssuerOptions, release onboarding.S
 		return fmt.Errorf("test PID: %w", err)
 	} else if ok {
 		out.Providers = append(out.Providers, testPID)
+		out.LoginOffers = append(out.LoginOffers, issuerDisclosureOffer{Key: testPIDID, Provider: testPIDID, CredentialConfigurationIDs: []string{testPIDID + "-pid"}})
 	}
 	if qtsp, ok, err := qtspProvider(options, seen); err != nil {
 		return fmt.Errorf("reference QTSP: %w", err)
 	} else if ok {
 		out.Providers = append(out.Providers, qtsp)
 	}
-	if out.PIDTrustAnchors, err = pidTrustAnchors(options); err != nil {
-		return fmt.Errorf("PID trust anchors: %w", err)
+	if options.pidTrustListURL != "" {
+		out.PIDTrustList, err = copyPIDTrustList(options.pidTrustListURL, options.loteSignerRootFile, options.outputDir)
+	} else {
+		out.PIDTrustAnchors, err = pidTrustAnchors(options)
+	}
+	if err != nil {
+		return fmt.Errorf("PID trust: %w", err)
 	}
 	body, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {

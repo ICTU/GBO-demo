@@ -199,3 +199,38 @@ func TestProvisionRequiresItsInputs(t *testing.T) {
 		t.Fatal("provisioning without CAs succeeded")
 	}
 }
+
+// I8: the complete verified PID snapshot replaces the former mixed-in
+// issuer CA. No implicit trust anchor is added by the NL provisioner.
+func TestProvisionSnapshotOnly(t *testing.T) {
+	dir := t.TempDir()
+	key, reader := writeCA(t, dir, "reader")
+	_, pid := writeCA(t, dir, "central-pid")
+	der, err := pemCertificate(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	anchors := filepath.Join(dir, "anchors.txt")
+	line := base64.StdEncoding.EncodeToString(der)
+	if err = os.WriteFile(anchors, []byte(line+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "output")
+	args := []string{"--ca-key", key, "--ca-cert", reader, "--pid-issuer-anchors", anchors, "--public-url", "https://verifier.test", "--request-origin", "https://as.test", "--out-dir", out}
+	if err := Provision(args); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(out, "verification_server.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `issuer_trust_anchors = ["`+line+`"]`) {
+		t.Fatal("NL verifier did not use exactly the PID snapshot")
+	}
+	if err = os.WriteFile(anchors, []byte("# empty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Provision(args); err == nil {
+		t.Fatal("empty PID snapshot accepted")
+	}
+}

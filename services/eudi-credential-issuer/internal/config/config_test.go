@@ -87,6 +87,30 @@ func TestLoad(t *testing.T) {
 	}
 	checkDisclosureLoaded(t, cfg)
 
+	t.Run("central PID LoTE is exclusive and loaded without a fetch", func(t *testing.T) {
+		central := strings.Replace(file, `"pid_trust_anchors": [{"name": "test-pid", "roots_file": "roots.pem"}]`, `"pid_trust_list": {"url":"https://trust.test/lote/PIDProviders.jwt","signer_root_file":"roots.pem"}`, 1)
+		if central == file {
+			t.Fatal("test did not replace static trust")
+		}
+		if err := os.WriteFile(path, []byte(central), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		loaded, err := config.Load(path, "https://issuer.test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if loaded.Issuer.PIDTrust == nil || len(loaded.Issuer.PIDAnchors) != 0 {
+			t.Fatal("central trust not wired exclusively")
+		}
+		both := strings.Replace(central, `"pid_trust_list":`, `"pid_trust_anchors":[{"name":"old","roots_file":"roots.pem"}],"pid_trust_list":`, 1)
+		if err := os.WriteFile(path, []byte(both), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := config.Load(path, "https://issuer.test"); err == nil {
+			t.Fatal("static and central trust accepted together")
+		}
+	})
+
 	// A key that does not belong to its certificate is refused.
 	bad := strings.Replace(file, `"issuer": {"key_file": "key.pem", "chain_file": "chain.pem"}`,
 		`"issuer": {"key_file": "key.pem", "chain_file": "other-chain.pem"}`, 1)

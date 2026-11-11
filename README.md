@@ -122,6 +122,16 @@ public CA certificates. Leaf private keys are mounted exclusively into the
 issuance materializer. A Kubernetes runtime Secret must not contain
 `issuer-ca-key.pem` or `reader-ca-key.pem`.
 
+The [GBO trust lists](docs/gbo-trust-lists.md) combine NL pre-production
+anchors with the GBO roots in four role-specific LoTE files. The temporary
+demo mode trusts the fixed official HTTPS source; configuring its public key
+enables mandatory JWT signature verification. Internal PID consumers verify
+our signed list against the independently provisioned LoTE root; the Go
+services refresh on use hourly, and the upstream NL verifier uses a verified
+provisioning snapshot plus restart.
+See the [trust-host runbook](trust-host/README.md) for host-only signing,
+publication and the review boundary before wallet changes.
+
 The own credential issuer (`services/eudi-credential-issuer`, not yet in the
 stack) also needs per source an access certificate (WRPAC) and a registration
 certificate (WRPRC). `make create-development-registrar-root` creates the
