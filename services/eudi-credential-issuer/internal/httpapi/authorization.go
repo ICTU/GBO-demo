@@ -40,6 +40,8 @@ func (h *handler) par(w http.ResponseWriter, r *http.Request) {
 		ClientAttestation:    r.Header.Get(clientattest.AttestationHeader),
 		ClientAttestationPoP: r.Header.Get(clientattest.PoPHeader),
 		DPoP:                 r.Header.Values("DPoP"),
+		DPoPJKT:              f.Get("dpop_jkt"),
+		HasDPoPJKT:           f.Has("dpop_jkt"),
 	})
 	if err != nil {
 		h.fail(w, err)

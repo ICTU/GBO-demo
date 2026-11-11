@@ -80,6 +80,10 @@ type PushedAuthorizationRequest struct {
 	ClientAttestation    string
 	ClientAttestationPoP string
 	DPoP                 []string
+	// DPoPJKT is the dpop_jkt of the body; HasDPoPJKT tells an empty one from
+	// none (RFC 9449 section 10.1).
+	DPoPJKT    string
+	HasDPoPJKT bool
 }
 
 // PushedAuthorizationResponse is the answer to a pushed request.
@@ -149,6 +153,17 @@ func (s *Service) PushAuthorization(ctx context.Context, req PushedAuthorization
 			return PushedAuthorizationResponse{}, refuse(oid4vci.ErrInvalidDPoPProof, "the DPoP proof has been used before")
 		}
 		pushed.DPoPJKT = proof.JKT
+	}
+	// RFC 9449 section 10.1: the key may also come as dpop_jkt in the body;
+	// with a DPoP header as well, both must name the same key.
+	if req.HasDPoPJKT {
+		if !validJKT(req.DPoPJKT) {
+			return PushedAuthorizationResponse{}, refuse(oid4vci.ErrInvalidRequest, "dpop_jkt must be a base64url SHA-256 JWK thumbprint")
+		}
+		if pushed.DPoPJKT != "" && pushed.DPoPJKT != req.DPoPJKT {
+			return PushedAuthorizationResponse{}, refuse(oid4vci.ErrInvalidRequest, "dpop_jkt does not match the key of the DPoP proof")
+		}
+		pushed.DPoPJKT = req.DPoPJKT
 	}
 	token, err := randomToken()
 	if err != nil {
@@ -471,4 +486,10 @@ func (s *Service) LoginLink(t Target, offerKey string) string {
 		return ""
 	}
 	return "openid-credential-offer://?" + url.Values{"credential_offer": {string(raw)}}.Encode()
+}
+
+// validJKT reports whether v is a base64url SHA-256 thumbprint (RFC 7638).
+func validJKT(v string) bool {
+	raw, err := base64.RawURLEncoding.DecodeString(v)
+	return err == nil && len(raw) == sha256.Size
 }

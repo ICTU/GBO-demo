@@ -7,6 +7,7 @@ package httpapi_test
 
 import (
 	"context"
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/sha256"
 	"encoding/base64"
@@ -19,6 +20,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/go-jose/go-jose/v4"
 
 	"gbo-demo/eudi-credential-issuer/internal/issuance"
 	"gbo-demo/oid4vc-kit/oid4vci"
@@ -350,6 +353,74 @@ func TestACodeBoundToADPoPKey(t *testing.T) { // P9
 	if status, body := w.tokenForCode(code, nil, nil); status != http.StatusOK {
 		t.Fatalf("token with the bound key = %d %v, want 200", status, body)
 	}
+}
+
+// Review finding 5, RFC 9449 section 10.1: the PAR endpoint accepts the
+// key as dpop_jkt in the body as well as a DPoP header, and refuses the two
+// when they name different keys.
+func TestDPoPJKTInThePushedRequest(t *testing.T) {
+	f := newFixture(t)
+	w := f.acfWallet()
+	id := f.id("eudi")
+	jkt := func(k *ecdsa.PrivateKey) string {
+		tp, err := (&jose.JSONWebKey{Key: &k.PublicKey}).Thumbprint(crypto.SHA256)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return base64.RawURLEncoding.EncodeToString(tp)
+	}
+	other := testpki.NewKey(t)
+	codeFor := func(form url.Values, headers map[string]string) string {
+		t.Helper()
+		status, body := w.par(form, headers)
+		if status != http.StatusCreated {
+			t.Fatalf("PAR: %d %v", status, body)
+		}
+		status, location, page := w.login(w.authorize(body["request_uri"].(string)))
+		if status != http.StatusFound || !strings.HasPrefix(location, walletRedirect+"?") {
+			t.Fatalf("callback: %d %q %s", status, location, page)
+		}
+		u, _ := url.Parse(location)
+		return u.Query().Get("code")
+	}
+	withJKT := func(v string) url.Values {
+		form := w.parForm()
+		form.Set("dpop_jkt", v)
+		return form
+	}
+	header := func() map[string]string {
+		return map[string]string{"DPoP": testwallet.DPoP(t, w.dpopKey, "POST", id+"/par", "")}
+	}
+
+	t.Run("dpop_jkt in the body only binds the code", func(t *testing.T) {
+		if status, body := w.tokenForCode(codeFor(withJKT(jkt(w.dpopKey)), nil), nil, other); status != http.StatusBadRequest || body["error"] != "invalid_grant" {
+			t.Fatalf("token with another DPoP key = %d %v, want invalid_grant", status, body)
+		}
+		if status, body := w.tokenForCode(codeFor(withJKT(jkt(w.dpopKey)), nil), nil, nil); status != http.StatusOK {
+			t.Fatalf("token with the bound key = %d %v, want 200", status, body)
+		}
+	})
+	t.Run("dpop_jkt and a DPoP header for the same key", func(t *testing.T) {
+		if status, body := w.tokenForCode(codeFor(withJKT(jkt(w.dpopKey)), header()), nil, nil); status != http.StatusOK {
+			t.Fatalf("token = %d %v, want 200", status, body)
+		}
+	})
+	t.Run("dpop_jkt and a DPoP header for different keys", func(t *testing.T) {
+		if status, body := w.par(withJKT(jkt(other)), header()); status != http.StatusBadRequest || body["error"] != "invalid_request" {
+			t.Fatalf("PAR = %d %v, want 400 invalid_request", status, body)
+		}
+	})
+	t.Run("a malformed dpop_jkt", func(t *testing.T) {
+		for _, v := range []string{"", "not a thumbprint", strings.Repeat("A", 42)} {
+			form := withJKT(v)
+			if v == "" {
+				form.Set("dpop_jkt", "")
+			}
+			if status, body := w.par(form, nil); status != http.StatusBadRequest || body["error"] != "invalid_request" {
+				t.Errorf("dpop_jkt %q: PAR = %d %v, want 400 invalid_request", v, status, body)
+			}
+		}
+	})
 }
 
 // --- P10-P14, C5, C8-C10: authorization request and login -----------------------------

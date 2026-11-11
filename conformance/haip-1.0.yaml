@@ -56,6 +56,7 @@ requirements:
       - "services/eudi-credential-issuer/internal/httpapi:TestTheAuthorizationRequestNeedsAPushedRequest"
       - "services/eudi-credential-issuer/internal/httpapi:TestALoginReturnsACodeToTheWallet"
       - "services/eudi-credential-issuer/internal/httpapi:TestACodeBoundToADPoPKey"
+      - "services/eudi-credential-issuer/internal/httpapi:TestDPoPJKTInThePushedRequest"
       - "services/eudi-credential-issuer/internal/httpapi:TestTheCodeIsBoundToThePushedRequest"
       - "services/eudi-credential-issuer/internal/httpapi:TestRefreshTokens"
     profiles:
@@ -74,6 +75,7 @@ requirements:
     tests:
       - "services/eudi-credential-issuer/internal/httpapi:TestIssueEUDI/C5 DPoP key of another wallet"
       - "services/eudi-credential-issuer/internal/httpapi:TestACodeBoundToADPoPKey"
+      - "services/eudi-credential-issuer/internal/httpapi:TestDPoPJKTInThePushedRequest"
       - "services/eudi-credential-issuer/internal/httpapi:TestRefreshTokenRefusals/F-3: another DPoP key"
       - "services/oid4vc-kit/dpop:TestVerify"
     profiles:
