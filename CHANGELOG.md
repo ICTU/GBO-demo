@@ -18,6 +18,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   data from the bronpoort with the contract `eudi-adapter` already serves.
   The protocol building blocks live in the new library `services/oid4vc-kit`.
   The issuer is not deployed; `eudi-issuance-server` stays in place.
+- **Images for the new EUDI services** (#614, #639, #642): the image manifest
+  publishes `eudi-credential-issuer`, `eudi-wallet-verifier` and
+  `test-pid-source` to `ghcr.io/ictu/gbo-demo`, so an environment can deploy
+  them. The materialization and runtime projection run on the existing
+  `eudi-adapter` image.
 - **Wallet registration material for the own credential issuer** (#614):
   `make create-development-registrar-root` and `make
   provision-wallet-registration` issue per source an access certificate
