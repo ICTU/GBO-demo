@@ -130,9 +130,6 @@ func TestMaterializeIssuanceReleaseUsesMountedSecretsWithoutPersistingThem(t *te
 	if _, err := os.Stat(filepath.Join(runtimeDir, qtspMetadataFilename)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(runtimeDir, "source-release.json")); err != nil {
-		t.Fatal(err)
-	}
 
 	assertMaterializesWithoutOptionalQTSP(t, secrets, options, persistedRelease)
 

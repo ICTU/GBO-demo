@@ -505,10 +505,8 @@ export default function App() {
           trace_id: res.trace_id ?? ctx.traceId,
           outcome,
         })
-        // On deny: enrich with the OPA reason-code (YEAR_NOT_COVERED,
-        // SCOPE_NOT_ALLOWED, …). The FSC-inway only returns a bare
-        // 401; the real reason lives in the OPA decision log, shipped
-        // via Loki — hence a short retry loop while promtail catches up.
+        // On deny: enrich with the reason code (YEAR_NOT_COVERED,
+        // SCOPE_NOT_ALLOWED, …) from the Authorization Decision Log.
         // Look the decision up by the identifier that actually reached
         // OPA: the FSC transaction-id when the backend reports one.
         const decisionId = res.fsc_transaction_id ?? res.trace_id
