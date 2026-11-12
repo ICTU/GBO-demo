@@ -381,12 +381,13 @@ func TestConsentParticipantWithoutRegistrationHasNoServices(t *testing.T) {
 func TestNewServiceRejectsInvalidServiceProviders(t *testing.T) {
 	valid := ProviderService{Service: "aangiftegegevens", Purpose: "Hypotheek-aanvraag"}
 	tests := map[string][]ServiceProvider{
-		"missing peer_id":   {{Services: []ProviderService{valid}}},
-		"invalid peer_id":   {{PeerID: "123", Services: []ProviderService{valid}}},
-		"no services":       {{PeerID: testPrivatePeerID}},
-		"missing service":   {{PeerID: testPrivatePeerID, Services: []ProviderService{{Purpose: "Hypotheek-aanvraag"}}}},
-		"missing purpose":   {{PeerID: testPrivatePeerID, Services: []ProviderService{{Service: "aangiftegegevens", Purpose: " "}}}},
-		"duplicate service": {{PeerID: testPrivatePeerID, Services: []ProviderService{valid, valid}}},
+		"missing peer_id":       {{Services: []ProviderService{valid}}},
+		"invalid peer_id":       {{PeerID: "123", Services: []ProviderService{valid}}},
+		"no services":           {{PeerID: testPrivatePeerID}},
+		"missing service":       {{PeerID: testPrivatePeerID, Services: []ProviderService{{Purpose: "Hypotheek-aanvraag"}}}},
+		"missing purpose":       {{PeerID: testPrivatePeerID, Services: []ProviderService{{Service: "aangiftegegevens", Purpose: " "}}}},
+		"duplicate service":     {{PeerID: testPrivatePeerID, Services: []ProviderService{valid, valid}}},
+		"empty return location": {{PeerID: testPrivatePeerID, ReturnLocations: []string{"https://hypotheek.example/return", " "}, Services: []ProviderService{valid}}},
 		"duplicate peer_id": {
 			{PeerID: testPrivatePeerID, Services: []ProviderService{valid}},
 			{PeerID: testPrivatePeerID, Services: []ProviderService{valid}},

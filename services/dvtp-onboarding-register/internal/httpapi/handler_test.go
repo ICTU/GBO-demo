@@ -20,6 +20,7 @@ type memoryRepository struct {
 	participants map[string]onboarding.Participant
 	toggleErr    error
 	updateErr    error
+	listErr      error
 }
 
 func newTestService(t *testing.T) (*onboarding.Service, *memoryRepository) {
@@ -46,6 +47,9 @@ func newTestService(t *testing.T) (*onboarding.Service, *memoryRepository) {
 }
 
 func (r *memoryRepository) List(context.Context) ([]onboarding.Participant, error) {
+	if r.listErr != nil {
+		return nil, r.listErr
+	}
 	participants := make([]onboarding.Participant, 0, len(r.participants))
 	for _, participant := range r.participants {
 		participants = append(participants, participant)
@@ -272,6 +276,19 @@ func TestToggleStorageFailureReturnsUnavailable(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	request := formRequest(http.MethodPost, "/participants/00000001234567890000/toggle", url.Values{})
 	testHandler(service).ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusInternalServerError)
+	}
+	if !strings.Contains(recorder.Body.String(), "register unavailable") {
+		t.Fatalf("body = %q", recorder.Body.String())
+	}
+}
+
+func TestConsentPortalParticipantStorageFailureReturnsUnavailable(t *testing.T) {
+	service, repository := newTestService(t)
+	repository.listErr = errors.New("database locked")
+	recorder := httptest.NewRecorder()
+	testHandler(service).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/internal/consent-portal/participants/99999999900000000300", nil))
 	if recorder.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusInternalServerError)
 	}

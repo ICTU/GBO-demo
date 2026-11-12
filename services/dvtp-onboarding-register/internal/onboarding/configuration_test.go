@@ -89,6 +89,18 @@ func TestLoadConfigurationExpandsReturnLocations(t *testing.T) {
 	}
 }
 
+func TestLoadConfigurationDropsTrailingSlashFromVariable(t *testing.T) {
+	t.Setenv("TEST_PROVIDER_URL", "https://hypotheek.example/")
+	t.Setenv("TEST_PROVIDER_PATH", "terug")
+	configuration, err := LoadConfiguration(writeConfiguration(t, serviceProviderConfigurationJSON))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := configuration.ServiceProviders[0].ReturnLocations[0]; got != "https://hypotheek.example/return" {
+		t.Fatalf("return location = %q", got)
+	}
+}
+
 func TestLoadConfigurationRejectsUnsetVariable(t *testing.T) {
 	t.Setenv("TEST_PROVIDER_URL", "https://hypotheek.example")
 	t.Setenv("TEST_PROVIDER_PATH", "")

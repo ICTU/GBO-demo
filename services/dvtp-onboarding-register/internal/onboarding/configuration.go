@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"strings"
 )
 
 const maximumConfigurationSize = 1 << 20
@@ -42,7 +43,8 @@ func LoadConfiguration(path string) (Configuration, error) {
 }
 
 // expandReturnLocations replaces ${VAR} in return locations, so that a
-// deployment sets its own host names. An unset or empty variable is an error.
+// deployment sets its own host names. The variables hold base URLs, so a
+// trailing slash is dropped. An unset or empty variable is an error.
 func expandReturnLocations(providers []ServiceProvider, lookup func(string) (string, bool)) error {
 	for _, provider := range providers {
 		for index, location := range provider.ReturnLocations {
@@ -50,6 +52,7 @@ func expandReturnLocations(providers []ServiceProvider, lookup func(string) (str
 			expanded := environmentReference.ReplaceAllStringFunc(location, func(reference string) string {
 				name := environmentReference.FindStringSubmatch(reference)[1]
 				value, ok := lookup(name)
+				value = strings.TrimRight(value, "/")
 				if (!ok || value == "") && missing == "" {
 					missing = name
 				}
