@@ -16,6 +16,7 @@
 //	ldv/         driven adapter — the Logboek Dataverwerkingen
 //	upstream/    the shared JSON caller those adapters use
 //	portalhttp/  driving adapters — handlers, JWT, SSE, routing
+//	fschttp/     driving adapter — the endpoints providers reach over FSC
 //	logctx/      trace-correlated logging
 //	main.go      wiring, and nothing else
 package main
@@ -44,6 +45,7 @@ import (
 	"gbo-demo/consent-portal-backend/bsnk"
 	"gbo-demo/consent-portal-backend/consent"
 	"gbo-demo/consent-portal-backend/devportal"
+	"gbo-demo/consent-portal-backend/fschttp"
 	"gbo-demo/consent-portal-backend/ldv"
 	"gbo-demo/consent-portal-backend/logctx"
 	"gbo-demo/consent-portal-backend/onboarding"
@@ -93,7 +95,9 @@ const streamGrace = 2 * time.Second
 // ── Config ────────────────────────────────────────────────────────────────
 
 type config struct {
-	Port             string
+	Port string
+	// FSCPort is the listener for the endpoints providers reach over FSC.
+	FSCPort          string
 	BSNkURL          string
 	ConsentURL       string
 	DevPortalBackend string
@@ -119,6 +123,8 @@ type config struct {
 	OnboardingRegisterURL string
 	// KnownScopes are the data sets the portal can describe to a citizen.
 	KnownScopes []string
+	// RequestLifetime is how long a pushed request waits for the citizen.
+	RequestLifetime time.Duration
 }
 
 // defaultKnownScopes are the data sets the portal frontend describes
@@ -147,12 +153,17 @@ func loadConfig() (config, error) {
 	if err != nil {
 		return config{}, fmt.Errorf("CONSENT_KNOWN_SCOPES: %w", err)
 	}
+	requestLifetime, err := time.ParseDuration(getEnv("PAR_REQUEST_LIFETIME", "10m"))
+	if err != nil || requestLifetime < time.Second {
+		return config{}, fmt.Errorf("PAR_REQUEST_LIFETIME: %q is not a duration of at least 1s, such as 10m", os.Getenv("PAR_REQUEST_LIFETIME"))
+	}
 	listMaxAge, err := time.ParseDuration(getEnv("BSN_AUTHORISATION_LIST_MAX_AGE", "1h"))
 	if err != nil || listMaxAge < 0 {
 		return config{}, fmt.Errorf("BSN_AUTHORISATION_LIST_MAX_AGE: %q is not a duration such as 1h", os.Getenv("BSN_AUTHORISATION_LIST_MAX_AGE"))
 	}
 	return config{
 		Port:              getEnv("PORT", "4005"),
+		FSCPort:           getEnv("FSC_PORT", "4013"),
 		BSNkURL:           getEnv("BSNK_URL", "http://bsnk-mock:4003"),
 		ConsentURL:        getEnv("CONSENT_URL", "http://consent-register:4002"),
 		DevPortalBackend:  getEnv("DEV_PORTAL_BACKEND_URL", ""),
@@ -168,6 +179,7 @@ func loadConfig() (config, error) {
 
 		OnboardingRegisterURL: getEnv("ONBOARDING_REGISTER_URL", "http://dvtp-onboarding-register:4015"),
 		KnownScopes:           knownScopes,
+		RequestLifetime:       requestLifetime,
 	}, nil
 }
 
@@ -267,6 +279,7 @@ func newPortal(cfg config, hub *portalhttp.Hub, logbook consent.Logbook) *consen
 		PseudonymsLogbook: cfg.PseudonymsLogbook,
 		Registrations:     onboarding.Client{Base: cfg.OnboardingRegisterURL, Caller: caller},
 		KnownScopes:       cfg.KnownScopes,
+		Requests:          consent.NewRequestStore(cfg.RequestLifetime),
 
 		AuthorisationListMaxAge: cfg.AuthorisationListMaxAge,
 	}
@@ -284,11 +297,11 @@ func newLogbook(cfg config, serviceName string) (consent.Logbook, *ldvclient.Cli
 	return writer, client, nil
 }
 
-// newMux wires the core to its production adapters and builds the routing
-// tree. Extracted from main so integration tests can drive the real handlers
-// through an httptest.Server without starting the listener.
-func newMux(cfg config, hub *portalhttp.Hub, logbook consent.Logbook) *http.ServeMux {
-	return portalhttp.NewMux(newPortal(cfg, hub, logbook), hub)
+// newMux builds the routing tree of the citizen's listener. Extracted from
+// main so integration tests can drive the real handlers through an
+// httptest.Server without starting the listener.
+func newMux(portal *consent.Portal, hub *portalhttp.Hub) *http.ServeMux {
+	return portalhttp.NewMux(portal, hub)
 }
 
 // ── OTel setup ────────────────────────────────────────────────────────────
@@ -364,14 +377,22 @@ func main() {
 	// BaseContext gives every request a context this process can cancel, which
 	// is how the long-lived SSE streams are told to wind up at shutdown.
 	baseCtx, endStreams := context.WithCancel(context.Background())
+	// One portal behind both listeners: a request pushed over FSC is resolved
+	// by the citizen's browser.
+	portal := newPortal(cfg, hub, logbook)
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           otelhttp.NewHandler(portalhttp.WithDemoSession(logctx.WithAccessLog(newMux(cfg, hub, logbook))), serviceName),
+		Handler:           otelhttp.NewHandler(portalhttp.WithDemoSession(logctx.WithAccessLog(newMux(portal, hub))), serviceName),
 		ReadHeaderTimeout: readHeaderTimeout,
 		BaseContext:       func(net.Listener) context.Context { return baseCtx },
 	}
-	slog.Info("listening", "addr", srv.Addr)
-	serve(srv, endStreams)
+	fscSrv := &http.Server{
+		Addr:              ":" + cfg.FSCPort,
+		Handler:           logctx.WithAccessLog(fschttp.NewMux(portal)),
+		ReadHeaderTimeout: readHeaderTimeout,
+	}
+	slog.Info("listening", "addr", srv.Addr, "fsc_addr", fscSrv.Addr)
+	serve(srv, fscSrv, endStreams)
 }
 
 // fatal logs and ends the process. main is the only place in this service
@@ -385,12 +406,14 @@ func fatal(msg string, err error) {
 // Without this a SIGTERM (docker compose down, a Kubernetes rollout) killed
 // in-flight consent writes outright. Previously a failed ListenAndServe was
 // only logged, so a service that could not bind its port exited 0.
-func serve(srv *http.Server, endStreams context.CancelFunc) {
-	go func() {
-		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
-			fatal("listen and serve", err)
-		}
-	}()
+func serve(srv, fscSrv *http.Server, endStreams context.CancelFunc) {
+	for _, s := range []*http.Server{srv, fscSrv} {
+		go func() {
+			if err := s.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+				fatal("listen and serve", err)
+			}
+		}()
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -402,6 +425,9 @@ func serve(srv *http.Server, endStreams context.CancelFunc) {
 	time.AfterFunc(streamGrace, endStreams)
 	drainCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
+	if err := fscSrv.Shutdown(drainCtx); err != nil {
+		_ = fscSrv.Close()
+	}
 	if err := srv.Shutdown(drainCtx); err != nil {
 		slog.Warn("drain did not finish; closing remaining connections", "err", err.Error())
 		_ = srv.Close()

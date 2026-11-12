@@ -1038,6 +1038,21 @@ services:
       # The data sets the portal can describe to a citizen; a request for any
       # other is refused. Demo shortcut until a service catalogue holds them.
       - CONSENT_KNOWN_SCOPES=${CONSENT_KNOWN_SCOPES:-bd:ib:2025,bd:ib:2024,lvg:vbo:eigendom}
+      # Providers push their request to start a consent flow (POST /par) to
+      # this listener, published as the FSC service consent-authorization of
+      # the consent register's peer through cr-inway
+      # (make fsc-seed-consent-authorization). It trusts the
+      # Fsc-Authorization header the Inway forwards. Demo shortcut: like
+      # consent-status it listens on all interfaces, so it is reachable on
+      # fsc-infra and on backend, where the provider backends run; any of
+      # them can call it directly and claim another peer. A separate network
+      # alone does not fix that while one process listens everywhere: a real
+      # deployment binds this listener to an address only the Inway reaches,
+      # or runs it as a separate process.
+      - FSC_PORT=4013
+      # How long a pushed request waits for the citizen (expires_in).
+      # Demo shortcut: open requests live in memory and are lost on a restart.
+      - PAR_REQUEST_LIFETIME=${PAR_REQUEST_LIFETIME:-10m}
     volumes:
       # The LDV spool must survive a restart; that is what makes a record
       # durable before it reaches the logbook.
@@ -1045,6 +1060,8 @@ services:
     networks:
       - backend
       - dvtp-onboarding
+      # cr-inway forwards consent-authorization here (FSC_PORT).
+      - fsc-infra
     depends_on:
       bsnk-mock:
         condition: service_healthy
