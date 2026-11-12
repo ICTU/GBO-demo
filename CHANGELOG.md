@@ -1017,10 +1017,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   `SubjectTypePI`.
 
 ### Fixed
-- **`make fsc-clean` works without sudo under rootful Docker**: the
-  certificates the containers write as root or uid 1001 could not be deleted
-  by the host user, so the target stopped with "Permission denied". It now
-  deletes them from a `gbo-demo/pki-tools` container when the host cannot.
+- **`make fsc-clean` works without sudo**: the certificates the containers
+  write as root or uid 1001 could not be deleted by the host user under
+  rootful Docker, nor under rootless Docker or Podman (where uid 1001 maps to
+  a subuid), so the target stopped with "Permission denied". It now deletes
+  them from a local `gbo-demo/pki-tools` container when the host cannot,
+  before `compose down` removes that image.
 - **The LDV logbook sorts and filters by time, not by text.** Times were
   stored as RFC 3339 with trimmed fraction digits, so `…05.5Z` sorted before
   `…05Z` and the `startTime`/`endTime` read filters wrongly included or

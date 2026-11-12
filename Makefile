@@ -713,8 +713,9 @@ fsc-down:
 fsc-test: fsc-up
 	bash fsc-infra/test/request-org-cert.sh
 
-# Files fsc-clean removes. Containers write them as root or uid 1001, which a
-# host user under rootful Docker cannot delete without sudo; fsc-clean then
+# Files fsc-clean removes. Containers write them as root or uid 1001. Under
+# rootful Docker, and under rootless Docker or Podman (where uid 1001 maps to a
+# subuid), the host user cannot delete them without sudo; fsc-clean then
 # deletes them from a container of the pki-tools image that wrote them.
 FSC_CLEAN_FILES = \
 	fsc-infra/pki/ca/*.pem \
@@ -742,11 +743,16 @@ FSC_CLEAN_FILES = \
 	fsc-infra/orgs/asip/pki/internal/*.pem \
 	services/openftv-pdp/certs/*.pem
 
+# The files go first: `down --rmi local` removes the compose-built pki-tools
+# image that the container fallback needs. --pull=never because the image is
+# local only and must never come from a registry.
 fsc-clean:
+	rm -f $(FSC_CLEAN_FILES) 2>/dev/null || { \
+		echo "-> Host rm failed (files owned by container users); removing them from a pki-tools container"; \
+		docker run --rm --pull=never -v "$(CURDIR):/work" -w /work gbo-demo/pki-tools:local \
+			sh -c 'rm -f $(FSC_CLEAN_FILES)'; \
+	}
 	$(FSC_COMPOSE) --profile integrator --profile asi down -v --rmi local
-	rm -f $(FSC_CLEAN_FILES) 2>/dev/null || \
-		docker run --rm -v "$(CURDIR):/work" -w /work gbo-demo/pki-tools:local \
-		sh -c 'rm -f $(FSC_CLEAN_FILES)'
 
 # Contract-seed: register bri-service + publication + connection contract
 # via mTLS to the FSC Manager/Controller APIs. Requires that fsc-all-up
