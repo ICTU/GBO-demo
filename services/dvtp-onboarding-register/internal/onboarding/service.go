@@ -170,6 +170,11 @@ func (s *Service) addServiceProviders(providers []ServiceProvider) error {
 		if len(provider.Services) == 0 {
 			return fmt.Errorf("service provider %q requires at least one service", peerID)
 		}
+		for _, location := range provider.ReturnLocations {
+			if strings.TrimSpace(location) == "" {
+				return fmt.Errorf("service provider %q: return locations must not be empty", peerID)
+			}
+		}
 		services := make([]ProviderService, 0, len(provider.Services))
 		seen := make(map[string]bool, len(provider.Services))
 		for _, service := range provider.Services {
