@@ -64,11 +64,13 @@ wait_for_url() {
 }
 
 # mtls_curl <cert> <key> <ca> <url> [extra curl args...] — curl with mTLS
-# using the given cert/key against a CA-signed endpoint.
+# using the given cert/key against a CA-signed endpoint. Fails on an HTTP
+# error status, so an error body is never mistaken for a result. Callers
+# that check the status themselves (-w "%{http_code}") pass --no-fail.
 mtls_curl() {
   local cert="$1" key="$2" ca="$3" url="$4"
   shift 4
-  curl -s --cert "$cert" --key "$key" --cacert "$ca" "$url" "$@"
+  curl -sS --fail --cert "$cert" --key "$key" --cacert "$ca" "$url" "$@"
 }
 
 # fail_unsigned <what> <observed-state> — abort when a contract did not

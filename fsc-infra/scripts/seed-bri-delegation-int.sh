@@ -90,7 +90,9 @@ delegated_contracts() {
 
 echo "[1/3] Create delegated connection INT → BD for '$SERVICE_NAME' on behalf of HV..."
 
-if delegated_contracts | jq -e 'any(.[]; .state == "CONTRACT_STATE_VALID")' >/dev/null; then
+existing=$(delegated_contracts) ||
+  { echo "  ✗ could not list the integrator's delegated contracts" >&2; exit 1; }
+if echo "$existing" | jq -e 'any(.[]; .state == "CONTRACT_STATE_VALID")' >/dev/null; then
   echo "  → delegated connection contract already Valid, skipping"
 else
   outway_thumbprint=$(pubkey_thumbprint_hex "$INT_ORG_CERT")
@@ -135,7 +137,7 @@ else
   http_status=$(mtls_curl "$INT_CERT" "$INT_KEY" "$INT_CA" \
     "$INT_MANAGER_URL/v1/contracts" \
     -X POST -H "Content-Type: application/json" \
-    -d "$body" -o /tmp/int-conn-out.txt -w "%{http_code}")
+    -d "$body" -o /tmp/int-conn-out.txt -w "%{http_code}" --no-fail)
   if [ "$http_status" != "201" ]; then
     echo "  ✗ delegated connection contract creation failed (HTTP $http_status)"
     cat /tmp/int-conn-out.txt
@@ -150,7 +152,7 @@ else
   for _ in $(seq 30); do
     status=$(mtls_curl "$HV_CERT" "$HV_KEY" "$HV_CA" \
       "$HV_MANAGER_URL/v1/contracts/$content_hash/accept" \
-      -X PUT -o /tmp/hv-accept-out.txt -w "%{http_code}" || echo "000")
+      -X PUT -o /tmp/hv-accept-out.txt -w "%{http_code}" --no-fail || echo "000")
     if [ "$status" = "204" ]; then
       accepted=true
       break
@@ -166,9 +168,11 @@ else
   fi
   echo "  ✓ accepted by HV; waiting for BD's autosign..."
 
+  # A failed poll counts as "not signed yet": retry, and let fail_unsigned
+  # report it once the 30s are up.
   for _ in $(seq 30); do
     sleep 1
-    st=$(delegated_contracts | jq -r --arg hash "$content_hash" 'first(.[] | select(.hash == $hash) | .state) // ""')
+    st=$(delegated_contracts 2>/dev/null | jq -r --arg hash "$content_hash" 'first(.[] | select(.hash == $hash) | .state) // ""' 2>/dev/null || echo "")
     if [ "$st" = "CONTRACT_STATE_VALID" ]; then
       echo "  ✓ delegated connection contract Valid"
       break

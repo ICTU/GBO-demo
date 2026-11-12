@@ -3,10 +3,12 @@ package ldvclient
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -130,6 +132,58 @@ func TestOutboxDoesNotRedeliver(t *testing.T) {
 	}
 	if logbook.count() != 1 {
 		t.Fatalf("logbook received %d copies, want 1", logbook.count())
+	}
+}
+
+// A cursor that cannot be read stops delivery instead of counting as "nothing
+// delivered yet", which would replay the whole spool.
+func TestOutboxDoesNotReplayOnAnUnreadableCursor(t *testing.T) {
+	for name, breakCursor := range map[string]func(cursor string) error{
+		"unreadable": func(cursor string) error {
+			if err := os.Remove(cursor); err != nil {
+				return err
+			}
+			return os.Mkdir(cursor, 0o700)
+		},
+		"garbled": func(cursor string) error {
+			return os.WriteFile(cursor, []byte("not an offset"), 0o600)
+		},
+		// What a power loss between write and rename can leave behind.
+		"empty": func(cursor string) error {
+			return os.WriteFile(cursor, nil, 0o600)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			logbook := newCollectingLogbook(t)
+			outbox, path := outboxUnderTest(t, logbook)
+
+			if err := outbox.Append(testRecord("b7ad6b7169203331")); err != nil {
+				t.Fatalf("append: %v", err)
+			}
+			if err := outbox.Deliver(context.Background()); err != nil {
+				t.Fatalf("deliver: %v", err)
+			}
+			if err := breakCursor(path + ".cursor"); err != nil {
+				t.Fatalf("break cursor: %v", err)
+			}
+
+			err := outbox.Deliver(context.Background())
+			if err == nil {
+				t.Fatal("deliver succeeded with a broken cursor, want an error")
+			}
+			if !errors.Is(err, errBadCursor) {
+				t.Fatalf("deliver error %q is not a cursor error", err)
+			}
+			if !strings.Contains(err.Error(), "removing the cursor file replays the outbox") {
+				t.Fatalf("deliver error %q does not say how to recover", err)
+			}
+			if _, err := outbox.Pending(context.Background()); err == nil {
+				t.Fatal("pending succeeded with a broken cursor, want an error")
+			}
+			if logbook.count() != 1 {
+				t.Fatalf("logbook received %d records, want 1 (no replay)", logbook.count())
+			}
+		})
 	}
 }
 

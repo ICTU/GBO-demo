@@ -1017,6 +1017,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   `SubjectTypePI`.
 
 ### Fixed
+- **Seed and delivery steps stop on errors instead of guessing.** The FSC
+  seed scripts treated an HTTP error from a Manager or Controller as "nothing
+  registered yet" and went on to create the service or contract again; they
+  now stop with the error. The loops that wait for a contract to be signed
+  still retry a failed poll until their timeout. `make demo-manager` stops when the OpenFTV Manager
+  does not become healthy instead of seeding anyway. `make manager-seed` no
+  longer writes a retired policy back without its source when it cannot read
+  the policy. The LDV outbox treats only a missing cursor file as "nothing
+  delivered yet"; an unreadable or empty cursor now stops delivery instead of
+  replaying the whole spool, and is logged as an error that says removing the
+  cursor file replays the outbox (the logbook drops the duplicates).
 - **The LDV logbook sorts and filters by time, not by text.** Times were
   stored as RFC 3339 with trimmed fraction digits, so `…05.5Z` sorted before
   `…05Z` and the `startTime`/`endTime` read filters wrongly included or
