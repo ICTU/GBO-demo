@@ -5,10 +5,15 @@
 // reachable over FSC too.
 //
 // The provider is the peer in the Fsc-Authorization token the Inway
-// forwards, never a field of the request. This listener trusts that header,
-// so it must be reachable only through the Inway. Demo shortcut: in the
-// demo it is also reachable on the compose network; a real deployment
-// gives it a network of its own.
+// forwards, never a field of the request. This listener trusts that header
+// without verifying the token, so it must be reachable only through the
+// Inway. Demo shortcut: it listens on all interfaces of a container that is
+// on both the fsc-infra and the backend compose network, so anything on
+// those networks, the service provider backends included, can call it
+// directly and claim any peer. A network of its own is not enough while one
+// process listens on every interface: a real deployment binds this listener
+// to an address only the Inway can reach, runs it as a separate process, or
+// verifies the token's signature (or authenticates the Inway with mTLS).
 package fschttp
 
 import (
@@ -17,6 +22,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -79,15 +85,29 @@ func handlePAR(portal *consent.Portal) http.HandlerFunc {
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, maxFormBytes)
 		if err := r.ParseForm(); err != nil || !isForm(r) {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
+			status, description := http.StatusBadRequest, "the request body must be application/x-www-form-urlencoded"
+			var tooLarge *http.MaxBytesError
+			if errors.As(err, &tooLarge) {
+				// RFC 9126 §2.3 names 413 for a request beyond the server's bound.
+				status, description = http.StatusRequestEntityTooLarge, "the request body is larger than 64 KiB"
+			}
+			writeJSON(w, status, errorResponse{
 				Error:       "invalid_request",
-				Description: "the request body must be application/x-www-form-urlencoded",
+				Description: description,
 				Reason:      string(consent.ReasonInitiationIncomplete),
 			})
 			return
 		}
 
 		form := r.PostForm
+		if problem := unusableForm(form); problem != "" {
+			writeJSON(w, http.StatusBadRequest, errorResponse{
+				Error:       "invalid_request",
+				Description: problem,
+				Reason:      string(consent.ReasonInitiationIncomplete),
+			})
+			return
+		}
 		ref, err := portal.PushRequest(r.Context(), provider, consent.PushedRequest{
 			ResponseType:        form.Get("response_type"),
 			ClientID:            form.Get("client_id"),
@@ -111,6 +131,21 @@ func handlePAR(portal *consent.Portal) http.HandlerFunc {
 			ExpiresIn:  int(math.Ceil(ref.ExpiresIn.Seconds())),
 		})
 	}
+}
+
+// unusableForm names what makes a form unusable as a pushed request, or "":
+// a parameter sent more than once (RFC 6749 §3.1) or a request_uri, which a
+// pushed request must not carry (RFC 9126 §2.1).
+func unusableForm(form url.Values) string {
+	if _, found := form["request_uri"]; found {
+		return "a pushed request must not contain request_uri"
+	}
+	for _, values := range form {
+		if len(values) > 1 {
+			return "a parameter is sent more than once"
+		}
+	}
+	return ""
 }
 
 func isForm(r *http.Request) bool {

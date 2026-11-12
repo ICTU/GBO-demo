@@ -58,17 +58,22 @@ type PushedReference struct {
 
 // PushRequest checks a pushed request from provider, the authenticated
 // peer, and keeps it under a new request URI. A refusal is a *Refusal: a
-// missing or unusable OAuth parameter is ReasonInitiationIncomplete, checked
-// before anything else; the rest are VerifyRequest's checks.
+// missing or unusable OAuth parameter, or a valid_until that is malformed or
+// not in the future, is ReasonInitiationIncomplete, checked before anything
+// else; the rest are VerifyRequest's checks.
 func (p *Portal) PushRequest(ctx context.Context, provider PeerID, pushed PushedRequest) (PushedReference, error) {
 	if problem := pushed.incomplete(); problem != "" {
 		return PushedReference{}, refuse(ReasonInitiationIncomplete, "%s", problem)
 	}
+	now := p.now()
 	var validUntil time.Time
 	if pushed.ValidUntil != "" {
 		parsed, err := time.Parse(time.RFC3339, pushed.ValidUntil)
 		if err != nil {
 			return PushedReference{}, refuse(ReasonInitiationIncomplete, "valid_until is not an RFC 3339 time")
+		}
+		if !parsed.After(now) {
+			return PushedReference{}, refuse(ReasonInitiationIncomplete, "valid_until is not in the future")
 		}
 		validUntil = parsed
 	}
@@ -88,7 +93,6 @@ func (p *Portal) PushRequest(ctx context.Context, provider PeerID, pushed Pushed
 	if p.Requests == nil {
 		return PushedReference{}, errors.New("no request store is configured")
 	}
-	now := p.now()
 	uri, expiresAt, err := p.Requests.Put(PendingRequest{
 		Request:       verified,
 		State:         pushed.State,
