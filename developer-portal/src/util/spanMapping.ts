@@ -212,10 +212,9 @@ export function nodeStatesFromSpans(
       }
     }
   }
-  // OPA-color now comes from the `pep.opa_authorize` child span (see
-  // nodesForSpan above): present → OPA was reached, status follows. If the
-  // span is absent (PEP early-failed before the OPA call) the OPA node
-  // stays grey, reflecting reality.
+  // No span maps to the PDP or OPA nodes (the PDP exports no spans), so
+  // they stay grey here. ArchStrip colors both from the recorded ADL
+  // decision once the animation is done.
   return result
 }
 
@@ -263,7 +262,7 @@ export function computeRevealOrder(
   // Insert PDP + OPA right after the PEP-equivalent so the reveal-order is
   // causal even if the spans race in the collector.
   //   - For every flow through FSC (use, EUDI, ASI): PEP-equivalent is
-  //     FSC-Inway (id 'bd-inway') which calls pdp-service via the AuthZen
+  //     FSC-Inway (id 'bd-inway') which calls openftv-pdp via the AuthZen
   //     plugin.
   if (viaFsc(mode)) {
     const pepEquivId = 'bd-inway'
