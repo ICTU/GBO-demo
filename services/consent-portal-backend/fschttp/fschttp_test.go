@@ -140,6 +140,11 @@ func TestPARRefusesWithTheReasonCode(t *testing.T) {
 		{"no code_challenge", hypotheekPeer, func(f url.Values) { f.Del("code_challenge") }, nil, 400, "invalid_request", consent.ReasonInitiationIncomplete},
 		{"plain challenge method", hypotheekPeer, func(f url.Values) { f.Set("code_challenge_method", "plain") }, nil, 400, "invalid_request", consent.ReasonInitiationIncomplete},
 		{"no service", hypotheekPeer, func(f url.Values) { f.Del("service") }, nil, 400, "invalid_request", consent.ReasonInitiationIncomplete},
+		{"valid_until in the past", hypotheekPeer, func(f url.Values) { f.Set("valid_until", "2020-01-01T00:00:00Z") }, nil, 400, "invalid_request", consent.ReasonInitiationIncomplete},
+		{"repeated state", hypotheekPeer, func(f url.Values) { f.Add("state", "other") }, nil, 400, "invalid_request", consent.ReasonInitiationIncomplete},
+		{"repeated scope", hypotheekPeer, func(f url.Values) { f.Add("scope", "bd:ib:2025") }, nil, 400, "invalid_request", consent.ReasonInitiationIncomplete},
+		{"repeated unknown parameter", hypotheekPeer, func(f url.Values) { f["extra"] = []string{"a", "b"} }, nil, 400, "invalid_request", consent.ReasonInitiationIncomplete},
+		{"request_uri in the body", hypotheekPeer, func(f url.Values) { f.Set("request_uri", "urn:ietf:params:oauth:request_uri:abc") }, nil, 400, "invalid_request", consent.ReasonInitiationIncomplete},
 		{"inactive provider", incassoPeer, func(f url.Values) { f.Set("client_id", incassoPeer) }, nil, 400, "unauthorized_client", consent.ReasonPartyNotActive},
 		{"unknown provider", "99999999900000009999", func(f url.Values) { f.Set("client_id", "99999999900000009999") }, nil, 400, "unauthorized_client", consent.ReasonPartyNotActive},
 		{"client_id is another peer", hypotheekPeer, func(f url.Values) { f.Set("client_id", incassoPeer) }, nil, 400, "invalid_request", consent.ReasonInitiationMismatch},
@@ -155,7 +160,7 @@ func TestPARRefusesWithTheReasonCode(t *testing.T) {
 			if registrations == nil {
 				registrations = fakeRegistrations{}
 			}
-			server, _ := newServer(t, registrations, time.Now())
+			server, _ := newServer(t, registrations, time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC))
 			form := validForm()
 			tc.change(form)
 
@@ -207,9 +212,11 @@ func TestPARReadsTheFormBodyOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var body map[string]any
+	err = json.NewDecoder(resp.Body).Decode(&body)
 	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("parameters in the query: status = %d, want 400", resp.StatusCode)
+	if err != nil || resp.StatusCode != http.StatusBadRequest || body["reason"] != string(consent.ReasonInitiationIncomplete) {
+		t.Errorf("parameters in the query: got %d %v (%v), want 400 with reason %s", resp.StatusCode, body, err, consent.ReasonInitiationIncomplete)
 	}
 
 	req, _ = http.NewRequest(http.MethodPost, server.URL+"/par", strings.NewReader(fmt.Sprintf(`{"client_id":%q}`, hypotheekPeer)))
@@ -222,6 +229,34 @@ func TestPARReadsTheFormBodyOnly(t *testing.T) {
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("a JSON body: status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestPARRefusesAnOversizedBody(t *testing.T) {
+	server, _ := newServer(t, fakeRegistrations{}, time.Now())
+	form := validForm()
+	form.Set("state", strings.Repeat("x", maxFormBytes))
+
+	resp, body := push(t, server, hypotheekPeer, form)
+	if resp.StatusCode != http.StatusRequestEntityTooLarge || body["error"] != "invalid_request" {
+		t.Errorf("got %d %v, want 413 invalid_request", resp.StatusCode, body)
+	}
+}
+
+func TestPARWithoutARequestStoreIsAServerError(t *testing.T) {
+	portal := &consent.Portal{
+		Registrations: fakeRegistrations{},
+		KnownScopes:   []string{"bd:ib:2025", "bd:ib:2024"},
+	}
+	server := httptest.NewServer(NewMux(portal))
+	t.Cleanup(server.Close)
+
+	resp, body := push(t, server, hypotheekPeer, validForm())
+	if resp.StatusCode != http.StatusInternalServerError || body["error"] != "server_error" {
+		t.Errorf("got %d %v, want 500 server_error", resp.StatusCode, body)
+	}
+	if _, leaked := body["reason"]; leaked {
+		t.Errorf("a server error carries a reason: %v", body)
 	}
 }
 
