@@ -298,3 +298,107 @@ func TestNewServiceRejectsInvalidIntegrations(t *testing.T) {
 		})
 	}
 }
+
+const testUnseededPeerID = "0000009950ADMINUI000"
+
+func serviceProviderConfiguration() Configuration {
+	configuration := testConfiguration()
+	configuration.ServiceProviders = []ServiceProvider{
+		{
+			PeerID:          testPrivatePeerID,
+			ReturnLocations: []string{"https://hypotheek.example/return"},
+			Services:        []ProviderService{{Service: " aangiftegegevens ", Purpose: " Hypotheek-aanvraag "}},
+		},
+		{
+			PeerID:          testUnseededPeerID,
+			ReturnLocations: []string{"https://admin-added.example/return"},
+			Services:        []ProviderService{{Service: "installatieregister", Purpose: "Goedkeuring installatiegegevens"}},
+		},
+	}
+	return configuration
+}
+
+func TestConsentParticipantCombinesAdmissionAndRegistration(t *testing.T) {
+	service, err := NewService(newMemoryRepository(), serviceProviderConfiguration())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.SeedDemo(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	participant, found, err := service.ConsentParticipant(t.Context(), testPrivatePeerID)
+	if err != nil || !found {
+		t.Fatalf("ConsentParticipant = %+v, %v, %v", participant, found, err)
+	}
+	want := ConsentParticipant{
+		PeerID:          testPrivatePeerID,
+		Name:            "Hypotheek BV",
+		Active:          true,
+		Services:        []ProviderService{{Service: "aangiftegegevens", Purpose: "Hypotheek-aanvraag"}},
+		ReturnLocations: []string{"https://hypotheek.example/return"},
+	}
+	if !reflect.DeepEqual(participant, want) {
+		t.Fatalf("ConsentParticipant = %+v, want %+v", participant, want)
+	}
+}
+
+func TestConsentParticipantForUnseededPeer(t *testing.T) {
+	service, err := NewService(newMemoryRepository(), serviceProviderConfiguration())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := service.ConsentParticipant(t.Context(), testUnseededPeerID); err != nil || found {
+		t.Fatalf("registration without admission: found = %v, err = %v", found, err)
+	}
+	if err := service.Save(t.Context(), Participant{PeerID: testUnseededPeerID, Name: "Added via UI", AllowedSourcePeerIDs: []string{testBDPeerID}}); err != nil {
+		t.Fatal(err)
+	}
+	participant, found, err := service.ConsentParticipant(t.Context(), testUnseededPeerID)
+	if err != nil || !found {
+		t.Fatalf("ConsentParticipant = %+v, %v, %v", participant, found, err)
+	}
+	if participant.Name != "Added via UI" || participant.Active || len(participant.Services) != 1 || participant.ReturnLocations[0] != "https://admin-added.example/return" {
+		t.Fatalf("ConsentParticipant = %+v", participant)
+	}
+}
+
+func TestConsentParticipantWithoutRegistrationHasNoServices(t *testing.T) {
+	service := mustTestService(t, newMemoryRepository())
+	participant, found, err := service.ConsentParticipant(t.Context(), testEUDIPeerID)
+	if err != nil || !found {
+		t.Fatalf("ConsentParticipant = %+v, %v, %v", participant, found, err)
+	}
+	if participant.Services == nil || len(participant.Services) != 0 || participant.ReturnLocations == nil || len(participant.ReturnLocations) != 0 {
+		t.Fatalf("ConsentParticipant = %+v, want empty services and return locations", participant)
+	}
+	for _, peerID := range []string{"99999999999999999999", "not-a-peer-id"} {
+		if _, found, err := service.ConsentParticipant(t.Context(), peerID); err != nil || found {
+			t.Fatalf("ConsentParticipant(%q): found = %v, err = %v", peerID, found, err)
+		}
+	}
+}
+
+func TestNewServiceRejectsInvalidServiceProviders(t *testing.T) {
+	valid := ProviderService{Service: "aangiftegegevens", Purpose: "Hypotheek-aanvraag"}
+	tests := map[string][]ServiceProvider{
+		"missing peer_id":   {{Services: []ProviderService{valid}}},
+		"invalid peer_id":   {{PeerID: "123", Services: []ProviderService{valid}}},
+		"no services":       {{PeerID: testPrivatePeerID}},
+		"missing service":   {{PeerID: testPrivatePeerID, Services: []ProviderService{{Purpose: "Hypotheek-aanvraag"}}}},
+		"missing purpose":   {{PeerID: testPrivatePeerID, Services: []ProviderService{{Service: "aangiftegegevens", Purpose: " "}}}},
+		"duplicate service": {{PeerID: testPrivatePeerID, Services: []ProviderService{valid, valid}}},
+		"duplicate peer_id": {
+			{PeerID: testPrivatePeerID, Services: []ProviderService{valid}},
+			{PeerID: testPrivatePeerID, Services: []ProviderService{valid}},
+		},
+	}
+	for name, providers := range tests {
+		t.Run(name, func(t *testing.T) {
+			configuration := testConfiguration()
+			configuration.ServiceProviders = providers
+			if _, err := NewService(newMemoryRepository(), configuration); err == nil {
+				t.Fatal("NewService accepted an invalid service provider")
+			}
+		})
+	}
+}

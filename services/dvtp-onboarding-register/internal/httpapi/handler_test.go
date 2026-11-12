@@ -279,3 +279,43 @@ func TestToggleStorageFailureReturnsUnavailable(t *testing.T) {
 		t.Fatalf("body = %q", recorder.Body.String())
 	}
 }
+
+func TestConsentPortalParticipantEndpoint(t *testing.T) {
+	repository := &memoryRepository{participants: make(map[string]onboarding.Participant)}
+	service, err := onboarding.NewService(repository, onboarding.Configuration{
+		SourceHolders: []onboarding.Source{{PeerID: "99999999900000000200", Name: "Belastingdienst"}},
+		SeedParticipants: []onboarding.Participant{
+			{PeerID: "99999999900000000300", Name: "Demo Hypotheekverlener BV", Active: true, AllowedSourcePeerIDs: []string{"99999999900000000200"}},
+		},
+		ServiceProviders: []onboarding.ServiceProvider{{
+			PeerID:          "99999999900000000300",
+			ReturnLocations: []string{"http://localhost:9001/return"},
+			Services:        []onboarding.ProviderService{{Service: "aangiftegegevens", Purpose: "Hypotheek-aanvraag"}},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.SeedDemo(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+	testHandler(service).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/internal/consent-portal/participants/99999999900000000300", nil))
+	if recorder.Code != http.StatusOK || recorder.Header().Get("Content-Type") != "application/json" {
+		t.Fatalf("status = %d, Content-Type = %q", recorder.Code, recorder.Header().Get("Content-Type"))
+	}
+	want := `{"peer_id":"99999999900000000300","name":"Demo Hypotheekverlener BV","active":true,` +
+		`"services":[{"service":"aangiftegegevens","purpose":"Hypotheek-aanvraag"}],"return_locations":["http://localhost:9001/return"]}`
+	if got := strings.TrimSpace(recorder.Body.String()); got != want {
+		t.Fatalf("body = %s, want %s", got, want)
+	}
+
+	for _, peerID := range []string{"99999999900000009999", "unknown"} {
+		recorder = httptest.NewRecorder()
+		testHandler(service).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/internal/consent-portal/participants/"+peerID, nil))
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("%s: status = %d, want 404", peerID, recorder.Code)
+		}
+	}
+}

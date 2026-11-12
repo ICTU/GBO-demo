@@ -384,6 +384,9 @@ services:
     environment:
       - DATABASE_PATH=/data/onboarding.db
       - SEED_DEMO_DATA=true
+      # Expanded in the registered return locations of the demo providers.
+      - DIENSTVERLENER_PUBLIC_URL=${DIENSTVERLENER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_DV_MOCK:-9001}}
+      - KEYPER_PUBLIC_URL=${KEYPER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_KEYPER_MOCK:-9004}}
     volumes:
       - dvtp-onboarding-data:/data
     networks:

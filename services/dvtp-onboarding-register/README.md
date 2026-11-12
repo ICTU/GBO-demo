@@ -29,6 +29,24 @@ each still need an active participant entry. Every entry carries `acts_for`,
 empty when it acts for nobody, so a withdrawn integration replaces the pulled
 entity instead of leaving the old mandate behind.
 
+Service providers are deployment configuration too (`service_providers`),
+keyed by Peer ID and separate from the seeds, so a party added through the UI
+can be registered as well. Each entry lists the services the provider asks
+consent for, each with the purpose the citizen is shown, and the return
+locations the consent portal may send the citizen back to. `${VAR}` in a
+return location is replaced by that environment variable, so a deployment sets
+its own host names; startup fails when the variable is unset or empty, or
+when a provider lacks a Peer ID, a service or a purpose. Like an integration,
+a registration admits no one by itself.
+
+The consent portal reads `GET /internal/consent-portal/participants/{peer_id}`:
+the participant's name, whether it is active, its services and its return
+locations, which are empty for a participant without a registration. An
+unknown Peer ID returns 404. Demo shortcut: the register keeps these
+registrations in configuration rather than in its database, and does not
+check the shape of a return location; a real deployment would manage them
+through the onboarding process.
+
 Kubernetes examples are provided in
 [`deploy/helm/gbo-app/examples/dvtp-onboarding-configmap.yaml`](../../deploy/helm/gbo-app/examples/dvtp-onboarding-configmap.yaml)
 and
