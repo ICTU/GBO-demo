@@ -390,8 +390,9 @@ services:
     volumes:
       - dvtp-onboarding-data:/data
     networks:
-      # Only the PDP shares this dedicated network. The published admin port
-      # remains reachable from host loopback, not from other backend services.
+      # Only the PDP and the consent portal backend share this dedicated
+      # network. The published admin port remains reachable from host
+      # loopback, not from other backend services.
       - dvtp-onboarding
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4015/health"]
@@ -1027,14 +1028,27 @@ services:
       # The pseudonymisation calls BSNk; its record points at the page
       # describing the mock, which has no read API.
       - LDV_BSNK_NEXT_LOGBOOK_ID=https://github.com/ICTU/GBO-demo/tree/main/services/bsnk-mock
+      # A request to start a consent flow is checked against the provider's
+      # registration in the DvTP admission register; when the register cannot
+      # be read, the request is refused. Demo shortcut: the backend reads the
+      # register directly over its network, like the PDP, and could therefore
+      # also reach its admin forms; a real deployment would give it a
+      # read-only listener or mutual TLS.
+      - ONBOARDING_REGISTER_URL=http://dvtp-onboarding-register:4015
+      # The data sets the portal can describe to a citizen; a request for any
+      # other is refused. Demo shortcut until a service catalogue holds them.
+      - CONSENT_KNOWN_SCOPES=${CONSENT_KNOWN_SCOPES:-bd:ib:2025,bd:ib:2024,lvg:vbo:eigendom}
     volumes:
       # The LDV spool must survive a restart; that is what makes a record
       # durable before it reaches the logbook.
       - ldv-outbox-consent-portal-backend:/data
     networks:
       - backend
+      - dvtp-onboarding
     depends_on:
       bsnk-mock:
+        condition: service_healthy
+      dvtp-onboarding-register:
         condition: service_healthy
       consent-register:
         condition: service_healthy
