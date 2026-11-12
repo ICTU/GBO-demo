@@ -8,10 +8,22 @@ export type RedirectContext = {
   return_url: string
 }
 
+declare global {
+  interface Window {
+    __GBO_CONFIG__?: {
+      allowedReturnOrigins?: string
+    }
+  }
+}
+
+// Demo shortcut: without configuration the portal only accepts the local
+// dienstverlener-mock. A deployment must set ALLOWED_RETURN_ORIGINS.
+export const DEFAULT_ALLOWED_RETURN_ORIGINS = 'http://localhost:9001'
+
 // envsubst leaves a variable it cannot fill as a literal ${VAR}: treat that as unset.
 export function runtimeConfigValue(value?: string): string {
   const trimmed = value?.trim() ?? ''
-  return trimmed.startsWith('${') ? '' : trimmed
+  return /^\$\{.*\}$/.test(trimmed) ? '' : trimmed
 }
 
 export function parseAllowedReturnOrigins(configured: string): Set<string> {
@@ -27,6 +39,18 @@ export function parseAllowedReturnOrigins(configured: string): Set<string> {
     }
   }
   return origins
+}
+
+// The parameters default to the browser's configuration; tests pass their own.
+export function configuredReturnOrigins(
+  config: Window['__GBO_CONFIG__'] = window.__GBO_CONFIG__,
+  env: ImportMetaEnv = import.meta.env,
+): Set<string> {
+  return parseAllowedReturnOrigins(
+    runtimeConfigValue(config?.allowedReturnOrigins)
+      || env.VITE_ALLOWED_RETURN_ORIGINS
+      || DEFAULT_ALLOWED_RETURN_ORIGINS,
+  )
 }
 
 function validatedReturnURL(value: unknown, allowedOrigins: Set<string>): string | null {
