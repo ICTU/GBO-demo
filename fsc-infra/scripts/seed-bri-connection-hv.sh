@@ -62,8 +62,8 @@ done
 echo "[1/2] Create connection contract HV → BD for '$SERVICE_NAME'..."
 
 existing=$(mtls_curl "$HV_CERT" "$HV_KEY" "$HV_CA" \
-  "${HV_MANAGER_URL}/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=${SERVICE_NAME}" \
-  || echo '{}')
+  "${HV_MANAGER_URL}/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=${SERVICE_NAME}") ||
+  { echo "  ✗ could not list HV's connection contracts" >&2; exit 1; }
 
 # The Manager's ?service_name= filter is not honoured (see
 # seed-bri-contract.sh) — match the service name client-side. Matching the
@@ -113,7 +113,7 @@ else
   http_status=$(mtls_curl "$HV_CERT" "$HV_KEY" "$HV_CA" \
     "$HV_MANAGER_URL/v1/contracts" \
     -X POST -H "Content-Type: application/json" \
-    -d "$conn_body" -o /tmp/hv-conn-out.txt -w "%{http_code}")
+    -d "$conn_body" -o /tmp/hv-conn-out.txt -w "%{http_code}" --no-fail)
   if [ "$http_status" != "201" ]; then
     echo "  ✗ connection contract creation failed (HTTP $http_status)"
     cat /tmp/hv-conn-out.txt

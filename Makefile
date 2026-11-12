@@ -185,9 +185,11 @@ demo-manager: policy-check certs require-ftv-postgres
 	  docker compose --profile manager up --build -d
 	@echo "-> Waiting for the Manager to accept policies..."
 	@for i in $$(seq 1 30); do \
-	  curl -fsS -m 2 http://localhost:$${GBO_PORT_FTV_MANAGER_HEALTH:-9282}/healthz >/dev/null 2>&1 && break; \
+	  curl -fsS -m 2 http://localhost:$${GBO_PORT_FTV_MANAGER_HEALTH:-9282}/healthz >/dev/null 2>&1 && exit 0; \
 	  sleep 2; \
-	done
+	done; \
+	echo "The Manager did not become healthy within 60s; not seeding. Check: docker compose logs openftv-manager" >&2; \
+	exit 1
 	./scripts/seed-openftv-manager.py --url http://localhost:$${GBO_PORT_FTV_MANAGER:-9280}
 	@echo "-> Restarting the PDP so it pulls the freshly seeded bundle"
 	docker compose --profile manager restart openftv-pdp
