@@ -8,6 +8,12 @@ export type RedirectContext = {
   return_url: string
 }
 
+// envsubst leaves a variable it cannot fill as a literal ${VAR}: treat that as unset.
+export function runtimeConfigValue(value?: string): string {
+  const trimmed = value?.trim() ?? ''
+  return trimmed.startsWith('${') ? '' : trimmed
+}
+
 export function parseAllowedReturnOrigins(configured: string): Set<string> {
   const origins = new Set<string>()
   for (const value of configured.split(',')) {

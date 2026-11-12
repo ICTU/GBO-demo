@@ -1017,6 +1017,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   `SubjectTypePI`.
 
 ### Fixed
+- **The dienstverlener-mock, keyper-mock and toestemmingsportaal-frontend
+  images no longer serve a literal `${VAR}` in `runtime-config.js`.** nginx's
+  envsubst only fills variables that are set, so a container started without
+  `CONSENT_PORTAL_URL`, `CONSUMER_PEER_ID` or `ALLOWED_RETURN_ORIGINS` kept
+  the placeholder, which the apps took as a value: the dienstverlener-mock
+  sent citizens to a broken portal URL instead of deriving it, and the
+  consent portal accepted no return origin. The Dockerfiles now declare the
+  variables empty, as the landing page already did, and the apps treat a
+  value that still starts with `${` as unset.
 - **The LDV logbook sorts and filters by time, not by text.** Times were
   stored as RFC 3339 with trimmed fraction digits, so `…05.5Z` sorted before
   `…05Z` and the `startTime`/`endTime` read filters wrongly included or

@@ -19,6 +19,12 @@ declare global {
 
 export const DEFAULT_CONSUMER_PEER_ID = '99999999900000000300'
 
+// envsubst leaves a variable it cannot fill as a literal ${VAR}: treat that as unset.
+export function runtimeConfigValue(value?: string): string {
+  const trimmed = value?.trim() ?? ''
+  return trimmed.startsWith('${') ? '' : trimmed
+}
+
 export function resolveConsumerPeerID(configured?: string): string {
   return configured?.trim() || DEFAULT_CONSUMER_PEER_ID
 }
@@ -26,7 +32,7 @@ export function resolveConsumerPeerID(configured?: string): string {
 export function configuredConsumerPeerID(): string {
   if (typeof window === 'undefined') return DEFAULT_CONSUMER_PEER_ID
   return resolveConsumerPeerID(
-    window.__GBO_CONFIG__?.consumerPeerId?.trim()
+    runtimeConfigValue(window.__GBO_CONFIG__?.consumerPeerId)
       || import.meta.env.VITE_CONSUMER_PEER_ID,
   )
 }
@@ -58,7 +64,7 @@ export function resolvePortalBase(location: Pick<Location, 'hostname' | 'port' |
 const configuredPortalBase =
   typeof window === 'undefined'
     ? ''
-    : window.__GBO_CONFIG__?.consentPortalUrl?.trim() ?? ''
+    : runtimeConfigValue(window.__GBO_CONFIG__?.consentPortalUrl)
 
 const DEFAULT_PORTAL_BASE =
   configuredPortalBase ||

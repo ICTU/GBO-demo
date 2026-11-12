@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router'
 import {
   parseAllowedReturnOrigins,
+  runtimeConfigValue,
   validatedRedirectContext,
   type RedirectContext,
 } from './redirectValidation'
@@ -20,7 +21,7 @@ declare global {
 }
 
 function configuredReturnOrigins() {
-  const configured = window.__GBO_CONFIG__?.allowedReturnOrigins?.trim()
+  const configured = runtimeConfigValue(window.__GBO_CONFIG__?.allowedReturnOrigins)
     || import.meta.env.VITE_ALLOWED_RETURN_ORIGINS
     || DEFAULT_ALLOWED_RETURN_ORIGINS
   return parseAllowedReturnOrigins(configured)

@@ -17,15 +17,21 @@ export const DEFAULT_IR_PEER_ID = '99999999900000001000'
 
 export const LVG_SCOPE = 'lvg:vbo:eigendom'
 
+// envsubst leaves a variable it cannot fill as a literal ${VAR}: treat that as unset.
+export function runtimeConfigValue(value?: string): string {
+  const trimmed = value?.trim() ?? ''
+  return trimmed.startsWith('${') ? '' : trimmed
+}
+
 export function consumerPeerId(): string {
-  return window.__GBO_CONFIG__?.consumerPeerId?.trim() || import.meta.env.VITE_CONSUMER_PEER_ID || DEFAULT_IR_PEER_ID
+  return runtimeConfigValue(window.__GBO_CONFIG__?.consumerPeerId) || import.meta.env.VITE_CONSUMER_PEER_ID || DEFAULT_IR_PEER_ID
 }
 
 // Configured explicitly: unlike the dienstverlener-mock, the portal is not
 // one port up from this app.
 export function portalBase(): string {
   return (
-    window.__GBO_CONFIG__?.consentPortalUrl?.trim() ||
+    runtimeConfigValue(window.__GBO_CONFIG__?.consentPortalUrl) ||
     import.meta.env.VITE_CONSENT_PORTAL_URL ||
     'http://localhost:9002'
   ).replace(/\/$/, '')
