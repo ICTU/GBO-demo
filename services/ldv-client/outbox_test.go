@@ -3,10 +3,12 @@ package ldvclient
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -146,6 +148,10 @@ func TestOutboxDoesNotReplayOnAnUnreadableCursor(t *testing.T) {
 		"garbled": func(cursor string) error {
 			return os.WriteFile(cursor, []byte("not an offset"), 0o600)
 		},
+		// What a power loss between write and rename can leave behind.
+		"empty": func(cursor string) error {
+			return os.WriteFile(cursor, nil, 0o600)
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			logbook := newCollectingLogbook(t)
@@ -161,8 +167,15 @@ func TestOutboxDoesNotReplayOnAnUnreadableCursor(t *testing.T) {
 				t.Fatalf("break cursor: %v", err)
 			}
 
-			if err := outbox.Deliver(context.Background()); err == nil {
+			err := outbox.Deliver(context.Background())
+			if err == nil {
 				t.Fatal("deliver succeeded with a broken cursor, want an error")
+			}
+			if !errors.Is(err, errBadCursor) {
+				t.Fatalf("deliver error %q is not a cursor error", err)
+			}
+			if !strings.Contains(err.Error(), "removing the cursor file replays the outbox") {
+				t.Fatalf("deliver error %q does not say how to recover", err)
 			}
 			if _, err := outbox.Pending(context.Background()); err == nil {
 				t.Fatal("pending succeeded with a broken cursor, want an error")
