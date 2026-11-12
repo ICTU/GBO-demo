@@ -50,12 +50,38 @@ type PolicyParticipant struct {
 	ActsFor []Mandate `json:"acts_for"`
 }
 
+// ProviderService is a service a provider asks citizens consent for, with
+// the purpose the citizen is shown.
+type ProviderService struct {
+	Service string `json:"service"`
+	Purpose string `json:"purpose"`
+}
+
+// ServiceProvider registers, by peer ID, what a provider may ask consent for
+// and where the consent portal may send the citizen back to. It admits no
+// one: the provider still needs an active participant entry.
+type ServiceProvider struct {
+	PeerID          string            `json:"peer_id"`
+	ReturnLocations []string          `json:"return_locations"`
+	Services        []ProviderService `json:"services"`
+}
+
+// ConsentParticipant is a participant as the consent portal reads it.
+type ConsentParticipant struct {
+	PeerID          string            `json:"peer_id"`
+	Name            string            `json:"name"`
+	Active          bool              `json:"active"`
+	Services        []ProviderService `json:"services"`
+	ReturnLocations []string          `json:"return_locations"`
+}
+
 // Configuration contains deployment-specific FSC identities.
 type Configuration struct {
-	SourceHolders      []Source      `json:"source_holders"`
-	SystemParticipants []Participant `json:"system_participants,omitempty"`
-	SeedParticipants   []Participant `json:"seed_participants,omitempty"`
-	Integrations       []Integration `json:"integrations,omitempty"`
+	SourceHolders      []Source          `json:"source_holders"`
+	SystemParticipants []Participant     `json:"system_participants,omitempty"`
+	SeedParticipants   []Participant     `json:"seed_participants,omitempty"`
+	Integrations       []Integration     `json:"integrations,omitempty"`
+	ServiceProviders   []ServiceProvider `json:"service_providers,omitempty"`
 }
 
 type Repository interface {
@@ -74,13 +100,14 @@ type Service struct {
 	mandates           map[string][]Mandate
 	reservedPeerIDs    map[string]bool
 	allowedSources     map[string]bool
+	serviceProviders   map[string]ServiceProvider
 }
 
 func NewService(repository Repository, configuration Configuration) (*Service, error) {
 	if repository == nil {
 		return nil, errors.New("repository is required")
 	}
-	service := &Service{repository: repository, mandates: make(map[string][]Mandate), reservedPeerIDs: make(map[string]bool), allowedSources: make(map[string]bool)}
+	service := &Service{repository: repository, mandates: make(map[string][]Mandate), reservedPeerIDs: make(map[string]bool), allowedSources: make(map[string]bool), serviceProviders: make(map[string]ServiceProvider)}
 	for _, source := range configuration.SourceHolders {
 		source.PeerID = strings.TrimSpace(source.PeerID)
 		source.Name = strings.TrimSpace(source.Name)
@@ -125,7 +152,48 @@ func NewService(repository Repository, configuration Configuration) (*Service, e
 	if err := service.addIntegrations(configuration.Integrations); err != nil {
 		return nil, err
 	}
+	if err := service.addServiceProviders(configuration.ServiceProviders); err != nil {
+		return nil, err
+	}
 	return service, nil
+}
+
+func (s *Service) addServiceProviders(providers []ServiceProvider) error {
+	for _, provider := range providers {
+		peerID := strings.TrimSpace(provider.PeerID)
+		if !validPeerID.MatchString(peerID) {
+			return fmt.Errorf("service provider peer_id %q must contain exactly 20 alphanumeric characters", peerID)
+		}
+		if _, exists := s.serviceProviders[peerID]; exists {
+			return fmt.Errorf("duplicate service provider peer_id %q", peerID)
+		}
+		if len(provider.Services) == 0 {
+			return fmt.Errorf("service provider %q requires at least one service", peerID)
+		}
+		services := make([]ProviderService, 0, len(provider.Services))
+		seen := make(map[string]bool, len(provider.Services))
+		for _, service := range provider.Services {
+			service.Service = strings.TrimSpace(service.Service)
+			service.Purpose = strings.TrimSpace(service.Purpose)
+			if service.Service == "" {
+				return fmt.Errorf("service provider %q: every service requires a name", peerID)
+			}
+			if service.Purpose == "" {
+				return fmt.Errorf("service provider %q: service %q requires a purpose", peerID, service.Service)
+			}
+			if seen[service.Service] {
+				return fmt.Errorf("service provider %q: duplicate service %q", peerID, service.Service)
+			}
+			seen[service.Service] = true
+			services = append(services, service)
+		}
+		s.serviceProviders[peerID] = ServiceProvider{
+			PeerID:          peerID,
+			ReturnLocations: append([]string{}, provider.ReturnLocations...),
+			Services:        services,
+		}
+	}
+	return nil
 }
 
 // addIntegrations validates the configured integrations. An integration does
@@ -200,6 +268,33 @@ func (s *Service) ListForPolicy(ctx context.Context) ([]PolicyParticipant, error
 		result = append(result, PolicyParticipant{Participant: participant, ActsFor: actsFor})
 	}
 	return result, nil
+}
+
+// ConsentParticipant returns a participant's admission together with its
+// registered services and return locations. A participant without a service
+// provider registration has none. found is false for an unknown peer ID.
+func (s *Service) ConsentParticipant(ctx context.Context, peerID string) (participant ConsentParticipant, found bool, err error) {
+	if !validPeerID.MatchString(peerID) {
+		return ConsentParticipant{}, false, nil
+	}
+	participants, err := s.ListForPolicy(ctx)
+	if err != nil {
+		return ConsentParticipant{}, false, err
+	}
+	for _, candidate := range participants {
+		if candidate.PeerID != peerID {
+			continue
+		}
+		provider := s.serviceProviders[peerID]
+		return ConsentParticipant{
+			PeerID:          candidate.PeerID,
+			Name:            candidate.Name,
+			Active:          candidate.Active,
+			Services:        append([]ProviderService{}, provider.Services...),
+			ReturnLocations: append([]string{}, provider.ReturnLocations...),
+		}, true, nil
+	}
+	return ConsentParticipant{}, false, nil
 }
 
 func (s *Service) Save(ctx context.Context, participant Participant) error {
