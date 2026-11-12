@@ -68,6 +68,18 @@ func NewHandler(service *onboarding.Service, csrfToken string) http.Handler {
 		}
 		writeJSON(w, http.StatusOK, participants)
 	})
+	mux.HandleFunc("GET /internal/consent-portal/participants/{peer_id}", func(w http.ResponseWriter, r *http.Request) {
+		participant, found, err := service.ConsentParticipant(r.Context(), r.PathValue("peer_id"))
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "register unavailable"})
+			return
+		}
+		if !found {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "participant not found"})
+			return
+		}
+		writeJSON(w, http.StatusOK, participant)
+	})
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		participants, err := service.List(r.Context())
 		if err != nil {

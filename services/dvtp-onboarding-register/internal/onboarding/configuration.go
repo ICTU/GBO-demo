@@ -6,9 +6,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
+	"strings"
 )
 
 const maximumConfigurationSize = 1 << 20
+
+var environmentReference = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 
 func LoadConfiguration(path string) (Configuration, error) {
 	file, err := os.Open(path)
@@ -32,5 +36,33 @@ func LoadConfiguration(path string) (Configuration, error) {
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
 		return Configuration{}, fmt.Errorf("decode onboarding configuration: trailing JSON data")
 	}
+	if err := expandReturnLocations(configuration.ServiceProviders, os.LookupEnv); err != nil {
+		return Configuration{}, err
+	}
 	return configuration, nil
+}
+
+// expandReturnLocations replaces ${VAR} in return locations, so that a
+// deployment sets its own host names. The variables hold base URLs, so a
+// trailing slash is dropped. An unset or empty variable is an error.
+func expandReturnLocations(providers []ServiceProvider, lookup func(string) (string, bool)) error {
+	for _, provider := range providers {
+		for index, location := range provider.ReturnLocations {
+			var missing string
+			expanded := environmentReference.ReplaceAllStringFunc(location, func(reference string) string {
+				name := environmentReference.FindStringSubmatch(reference)[1]
+				value, ok := lookup(name)
+				value = strings.TrimRight(value, "/")
+				if (!ok || value == "") && missing == "" {
+					missing = name
+				}
+				return value
+			})
+			if missing != "" {
+				return fmt.Errorf("service provider %q: return location %q uses unset environment variable %s", provider.PeerID, location, missing)
+			}
+			provider.ReturnLocations[index] = expanded
+		}
+	}
+	return nil
 }

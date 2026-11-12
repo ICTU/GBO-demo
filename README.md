@@ -353,6 +353,9 @@ Because the token returns through the browser, the consent portal only accepts
 `VITE_ALLOWED_RETURN_ORIGINS` (comma-separated). Compose derives the demo value
 from `DIENSTVERLENER_PUBLIC_URL`; production images must supply the same value
 as a build argument.
+The DvTP onboarding register also reads `DIENSTVERLENER_PUBLIC_URL` and
+`KEYPER_PUBLIC_URL` to build the registered return locations of both demo
+providers, so set both when you run on your own host.
 
 ### EUDI wallet issuance
 
