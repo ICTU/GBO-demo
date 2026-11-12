@@ -16,6 +16,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   configuration registers both demo providers; Compose passes
   `DIENSTVERLENER_PUBLIC_URL` and `KEYPER_PUBLIC_URL` to the register. A
   deployment that uses the image's built-in demo configuration must set both.
+- **Consent initiation checks in the consent portal backend** (#427, #648):
+  a request to start a consent flow can be checked against the requesting
+  provider's registration in the DvTP admission register. A refusal carries
+  its own reason code, checked in this order: `INITIATION_INCOMPLETE` (no
+  client ID, service, data sets or return URL), `PARTY_NOT_ACTIVE` (unknown
+  or inactive provider), `INITIATION_MISMATCH` (client ID other than the
+  requesting peer, unregistered service, or a name or purpose that differs
+  from the registration), `UNKNOWN_SCOPE` and `RETURN_URL_NOT_REGISTERED`
+  (exact match against the registered return locations). When the register
+  cannot be read the request is refused with
+  `ADMISSION_REGISTER_UNAVAILABLE`. The checks are not yet reachable from any
+  endpoint. The backend joins the `dvtp-onboarding` network and reads the
+  register at `ONBOARDING_REGISTER_URL`; `CONSENT_KNOWN_SCOPES` lists the data
+  sets it knows (default: the three the portal describes).
 - **The demo runs on any host name**: the Vite frontends accept
   `GBO_PUBLIC_HOST` and `GBO_EXTRA_ALLOWED_HOSTS`, the reference QTSP follows
   `GBO_PUBLIC_HOST` (`QTSP_PUBLIC_URL` overrides it), and

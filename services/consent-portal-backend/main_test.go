@@ -509,3 +509,34 @@ func TestLoadConfigNeedsASubjectReferenceKey(t *testing.T) {
 		t.Error("a key version with a dash was accepted; it would break the reference format")
 	}
 }
+
+func TestLoadConfigKnownScopes(t *testing.T) {
+	t.Setenv("CONSENT_SOURCES", testSource+"@20260101")
+	t.Setenv("SUBJECT_REF_KEY", testSubjectRefKey)
+
+	t.Setenv("CONSENT_KNOWN_SCOPES", "")
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	if strings.Join(cfg.KnownScopes, ",") != "bd:ib:2025,bd:ib:2024,lvg:vbo:eigendom" {
+		t.Errorf("default known scopes = %v", cfg.KnownScopes)
+	}
+	if cfg.OnboardingRegisterURL != "http://dvtp-onboarding-register:4015" {
+		t.Errorf("default admission register = %q", cfg.OnboardingRegisterURL)
+	}
+
+	t.Setenv("CONSENT_KNOWN_SCOPES", " bd:ib:2025 , ,bd:ib:2025,x:y ")
+	cfg, err = loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	if strings.Join(cfg.KnownScopes, ",") != "bd:ib:2025,x:y" {
+		t.Errorf("known scopes = %v", cfg.KnownScopes)
+	}
+
+	t.Setenv("CONSENT_KNOWN_SCOPES", " , ")
+	if _, err := loadConfig(); err == nil {
+		t.Error("the portal started without a known data set")
+	}
+}
