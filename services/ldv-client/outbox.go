@@ -91,7 +91,10 @@ func (o *Outbox) Pending(ctx context.Context) (int, error) {
 // undelivered reads the records after the cursor, with the offset each one
 // ends at, so the cursor can advance per record rather than per batch.
 func (o *Outbox) undelivered() ([]Record, []int64, error) {
-	offset := o.readCursor()
+	offset, err := o.readCursor()
+	if err != nil {
+		return nil, nil, err
+	}
 	file, err := os.Open(o.path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -179,16 +182,21 @@ func (o *Outbox) Run(ctx context.Context, interval time.Duration) {
 	}
 }
 
-func (o *Outbox) readCursor() int64 {
+// readCursor returns 0 only when nothing was delivered yet. Any other failure
+// is an error: falling back to 0 would replay the whole spool.
+func (o *Outbox) readCursor() (int64, error) {
 	raw, err := os.ReadFile(o.cursor)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
 	if err != nil {
-		return 0
+		return 0, fmt.Errorf("read outbox cursor: %w", err)
 	}
 	var offset int64
 	if _, err := fmt.Sscanf(string(raw), "%d", &offset); err != nil {
-		return 0
+		return 0, fmt.Errorf("parse outbox cursor %q: %w", raw, err)
 	}
-	return offset
+	return offset, nil
 }
 
 // writeCursor advances the delivered mark. Written through a temporary file

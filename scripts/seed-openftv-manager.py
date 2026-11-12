@@ -147,7 +147,12 @@ def retire_stale(base: str, keep: set[str], dry_run: bool, token: str) -> int:
 
         # Read the full record: the list view omits `data`, and PUT needs it.
         st, body = request("GET", f"{base}/v1/policy/{pid}", token)
-        data = json.loads(body).get("data", "") if st == 200 else ""
+        data = json.loads(body).get("data") if st == 200 else None
+        if not data:
+            # Never PUT it back without its source.
+            print(f"  FAIL retiring {title}: could not read its source (HTTP {st})", file=sys.stderr)
+            failures += 1
+            continue
         payload = {
             "id": pid,
             "language": pol.get("language", "rego"),
