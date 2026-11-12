@@ -1024,6 +1024,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   nine fraction digits; older rows still read, but keep the old order. A
   demo with existing logbooks needs a reset of the `logboek-*-data` volumes
   (`make clean`) to get the new order for those rows.
+- **Regenerating the internal FSC certificates covers every peer.**
+  `fsc-infra/pki/regenerate-internal-certs.sh` skipped hypotheekverlener-mock
+  and left the new key files owned by root, so the OpenFSC containers (uid
+  1001) could not read them. It now regenerates all ten peers, hands the files
+  to uid 1001 as the bootstrap scripts do, and stops before it changes
+  anything when a `*-internal-cert.json` in `fsc-infra/pki` has no entry in
+  its peer list.
 - **A restarted consent register kept its key ID.** Without a stable key it
   generates a new signing key at every start, but the key ID stayed
   `gbo-consent-demo-1`, so the PDP could verify new consent tokens with the
