@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router'
 import {
-  parseAllowedReturnOrigins,
+  configuredReturnOrigins,
   validatedRedirectContext,
   type RedirectContext,
 } from './redirectValidation'
@@ -9,22 +9,6 @@ import {
 export type { RedirectContext } from './redirectValidation'
 
 const STORAGE_KEY = 'gbo.redirect_context'
-const DEFAULT_ALLOWED_RETURN_ORIGINS = 'http://localhost:9001'
-
-declare global {
-  interface Window {
-    __GBO_CONFIG__?: {
-      allowedReturnOrigins?: string
-    }
-  }
-}
-
-function configuredReturnOrigins() {
-  const configured = window.__GBO_CONFIG__?.allowedReturnOrigins?.trim()
-    || import.meta.env.VITE_ALLOWED_RETURN_ORIGINS
-    || DEFAULT_ALLOWED_RETURN_ORIGINS
-  return parseAllowedReturnOrigins(configured)
-}
 
 function parseFromParams(p: URLSearchParams): RedirectContext | null {
   const required = ['service', 'purpose', 'scope', 'client_oin', 'client_name', 'return_url']

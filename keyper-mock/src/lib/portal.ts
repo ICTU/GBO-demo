@@ -17,16 +17,31 @@ export const DEFAULT_IR_PEER_ID = '99999999900000001000'
 
 export const LVG_SCOPE = 'lvg:vbo:eigendom'
 
-export function consumerPeerId(): string {
-  return window.__GBO_CONFIG__?.consumerPeerId?.trim() || import.meta.env.VITE_CONSUMER_PEER_ID || DEFAULT_IR_PEER_ID
+// envsubst leaves a variable it cannot fill as a literal ${VAR}: treat that as unset.
+export function runtimeConfigValue(value?: string): string {
+  const trimmed = value?.trim() ?? ''
+  return /^\$\{.*\}$/.test(trimmed) ? '' : trimmed
+}
+
+type RuntimeConfig = Window['__GBO_CONFIG__']
+
+// The parameters default to the browser's configuration; tests pass their own.
+export function consumerPeerId(
+  config: RuntimeConfig = window.__GBO_CONFIG__,
+  env: ImportMetaEnv = import.meta.env,
+): string {
+  return runtimeConfigValue(config?.consumerPeerId) || env.VITE_CONSUMER_PEER_ID || DEFAULT_IR_PEER_ID
 }
 
 // Configured explicitly: unlike the dienstverlener-mock, the portal is not
 // one port up from this app.
-export function portalBase(): string {
+export function portalBase(
+  config: RuntimeConfig = window.__GBO_CONFIG__,
+  env: ImportMetaEnv = import.meta.env,
+): string {
   return (
-    window.__GBO_CONFIG__?.consentPortalUrl?.trim() ||
-    import.meta.env.VITE_CONSENT_PORTAL_URL ||
+    runtimeConfigValue(config?.consentPortalUrl) ||
+    env.VITE_CONSENT_PORTAL_URL ||
     'http://localhost:9002'
   ).replace(/\/$/, '')
 }
