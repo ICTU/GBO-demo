@@ -1017,6 +1017,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   `SubjectTypePI`.
 
 ### Fixed
+- **The LDV logbook sorts and filters by time, not by text.** Times were
+  stored as RFC 3339 with trimmed fraction digits, so `…05.5Z` sorted before
+  `…05Z` and the `startTime`/`endTime` read filters wrongly included or
+  dropped records in the boundary second. Times are now stored with always
+  nine fraction digits; older rows still read, but keep the old order. A
+  demo with existing logbooks needs a reset of the `logboek-*-data` volumes
+  (`make clean`) to get the new order for those rows.
 - **A restarted consent register kept its key ID.** Without a stable key it
   generates a new signing key at every start, but the key ID stayed
   `gbo-consent-demo-1`, so the PDP could verify new consent tokens with the

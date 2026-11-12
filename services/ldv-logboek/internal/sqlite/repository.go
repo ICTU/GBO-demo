@@ -228,6 +228,8 @@ func (r *Repository) Query(ctx context.Context, query ldv.Query) ([]ldv.Stored, 
 	return records, nil
 }
 
+// parseTime also reads rows written before storedTimeLayout, with trimmed
+// fractions.
 func parseTime(text string) (time.Time, error) {
 	parsed, err := time.Parse(time.RFC3339Nano, text)
 	if err != nil {
@@ -243,12 +245,16 @@ func orEmptyMap(resource map[string]any) map[string]any {
 	return resource
 }
 
-// formatTime stores times as RFC 3339 with nanoseconds in UTC, so the text
-// ordering of the column equals the chronological ordering. The wire format is
-// epoch milliseconds; this is storage, where a sortable, readable column is
-// worth more than matching the transport.
+// storedTimeLayout is RFC 3339 in UTC with always nine fraction digits.
+// RFC3339Nano trims trailing zeros, so its text order is not time order
+// ("05.5Z" sorts before "05Z"); a fixed width makes the ORDER BY and the
+// range filters, which compare text, compare times. The wire format is epoch
+// milliseconds; this is storage, where a readable column is worth more than
+// matching the transport.
+const storedTimeLayout = "2006-01-02T15:04:05.000000000Z07:00"
+
 func formatTime(value time.Time) string {
-	return value.UTC().Format(time.RFC3339Nano)
+	return value.UTC().Format(storedTimeLayout)
 }
 
 // isUniqueViolation recognises the driver's constraint error. modernc's
