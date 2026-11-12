@@ -66,7 +66,7 @@ services:
       - --ca-host=http://cfssl:8888
       - --include-issuer-cert=true
     ports:
-      - "${FSC_PORT_CERTPORTAL:-8091}:8080"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${FSC_PORT_CERTPORTAL:-8091}:8080"
     depends_on:
       cfssl:
         condition: service_healthy
@@ -124,7 +124,7 @@ services:
     image: federatedserviceconnectivity/controller:v2.4.0
     restart: unless-stopped
     ports:
-      - "${FSC_PORT_DIRECTORY_CONTROLLER:-8092}:3001"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${FSC_PORT_DIRECTORY_CONTROLLER:-8092}:3001"
     volumes:
       - ./directory-peer/pki:/certs:ro
     environment:
@@ -236,7 +236,7 @@ services:
     image: federatedserviceconnectivity/directory-ui:v2.4.0
     restart: unless-stopped
     ports:
-      - "${FSC_PORT_DIRECTORY_UI:-8093}:3001"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${FSC_PORT_DIRECTORY_UI:-8093}:3001"
     volumes:
       - ./directory-ui/pki:/certs:ro
     environment:
@@ -316,7 +316,7 @@ services:
     image: federatedserviceconnectivity/controller:v2.4.0
     restart: unless-stopped
     ports:
-      - "${FSC_PORT_EDI_CONTROLLER:-8094}:3001"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${FSC_PORT_EDI_CONTROLLER:-8094}:3001"
     volumes:
       - ./orgs/edi-issuer/pki:/certs:ro
     environment:
@@ -481,7 +481,7 @@ services:
     image: federatedserviceconnectivity/controller:v2.4.0
     restart: unless-stopped
     ports:
-      - "${FSC_PORT_HV_CONTROLLER:-8096}:3001"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${FSC_PORT_HV_CONTROLLER:-8096}:3001"
     volumes:
       - ./orgs/hypotheekverlener-mock/pki:/certs:ro
     environment:
@@ -652,7 +652,7 @@ services:
     image: federatedserviceconnectivity/controller:v2.4.0
     restart: unless-stopped
     ports:
-      - "${FSC_PORT_BD_CONTROLLER:-8095}:3001"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${FSC_PORT_BD_CONTROLLER:-8095}:3001"
     volumes:
       - ./orgs/belastingdienst-mock/pki:/certs:ro
     environment:
@@ -856,7 +856,7 @@ services:
     image: federatedserviceconnectivity/controller:v2.4.0
     restart: unless-stopped
     ports:
-      - "${FSC_PORT_BRP_CONTROLLER:-8097}:3001"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${FSC_PORT_BRP_CONTROLLER:-8097}:3001"
     volumes:
       - ./orgs/brp-mock/pki:/certs:ro
     environment:
@@ -1042,7 +1042,7 @@ services:
     image: federatedserviceconnectivity/controller:v2.4.0
     restart: unless-stopped
     ports:
-      - "${FSC_PORT_CR_CONTROLLER:-8098}:3001"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${FSC_PORT_CR_CONTROLLER:-8098}:3001"
     volumes:
       - ./orgs/consent-register/pki:/certs:ro
     environment:
@@ -1222,7 +1222,7 @@ services:
     image: federatedserviceconnectivity/controller:v2.4.0
     restart: unless-stopped
     ports:
-      - "${FSC_PORT_PDP_CONTROLLER:-8099}:3001"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${FSC_PORT_PDP_CONTROLLER:-8099}:3001"
     volumes:
       - ./orgs/gbo-pdp/pki:/certs:ro
     environment:
@@ -1386,7 +1386,7 @@ services:
     image: federatedserviceconnectivity/controller:v2.4.0
     restart: unless-stopped
     ports:
-      - "${FSC_PORT_IR_CONTROLLER:-8100}:3001"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${FSC_PORT_IR_CONTROLLER:-8100}:3001"
     volumes:
       - ./orgs/installatieregister/pki:/certs:ro
     environment:
@@ -1554,7 +1554,7 @@ services:
     profiles: [integrator]
     restart: unless-stopped
     ports:
-      - "${FSC_PORT_INT_CONTROLLER:-8101}:3001"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${FSC_PORT_INT_CONTROLLER:-8101}:3001"
     volumes:
       - ./orgs/integrator/pki:/certs:ro
     environment:
@@ -1727,7 +1727,7 @@ services:
     profiles: [asi]
     restart: unless-stopped
     ports:
-      - "${FSC_PORT_ASIP_CONTROLLER:-8102}:3001"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${FSC_PORT_ASIP_CONTROLLER:-8102}:3001"
     volumes:
       - ./orgs/asip/pki:/certs:ro
     environment:

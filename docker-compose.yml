@@ -3,8 +3,8 @@ services:
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.96.0
     ports:
-      - "${GBO_PORT_OTEL_GRPC:-9317}:4317"   # gRPC
-      - "${GBO_PORT_OTEL_HTTP:-9318}:4318"   # HTTP
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_OTEL_GRPC:-9317}:4317"   # gRPC
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_OTEL_HTTP:-9318}:4318"   # HTTP
     volumes:
       - ./otel/collector-config.yaml:/etc/otelcol-contrib/config.yaml
     networks:
@@ -19,7 +19,7 @@ services:
     # root in the demo, an init container `chown -R 10001` in production.
     user: "0"
     ports:
-      - "${GBO_PORT_JAEGER:-9686}:16686"  # Jaeger UI + Query API
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_JAEGER:-9686}:16686"  # Jaeger UI + Query API
     environment:
       - COLLECTOR_OTLP_ENABLED=true
       # On-disk span storage. The default memory store is unbounded and grew
@@ -47,7 +47,7 @@ services:
     image: grafana/loki:2.9.6
     command: -config.file=/etc/loki/local-config.yaml
     ports:
-      - "${GBO_PORT_LOKI:-9310}:3100"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_LOKI:-9310}:3100"
     volumes:
       - ./observability/loki-config.yaml:/etc/loki/local-config.yaml:ro
     networks:
@@ -78,7 +78,7 @@ services:
   grafana:
     image: grafana/grafana:11.1.0
     ports:
-      - "${GBO_PORT_GRAFANA:-9300}:3000"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_GRAFANA:-9300}:3000"
     environment:
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Editor
@@ -151,8 +151,8 @@ services:
       - PDP_TLS_CERT=/certs/pdp-service.pem
       - PDP_TLS_KEY=/certs/pdp-service-key.pem
     ports:
-      - "${GBO_PORT_OPA:-9181}:8443"
-      - "${GBO_PORT_OPA_HEALTH:-9180}:8080"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_OPA:-9181}:8443"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_OPA_HEALTH:-9180}:8080"
     volumes:
       - ./policies:/policies:ro
       # The bundled GraphQL schemas, read once at the first request: a
@@ -274,7 +274,7 @@ services:
       # Validate the management interface's tokens. The issuer must be the
       # URL the BROWSER used, since that is what Keycloak puts in the token;
       # the JWKS is fetched server-side over the compose network.
-      - MANAGER_OIDC_ISSUER=${GBO_FTV_OIDC_AUTHORITY:-http://localhost:9284/realms/gbo}
+      - MANAGER_OIDC_ISSUER=${GBO_FTV_OIDC_AUTHORITY:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_KEYCLOAK:-9284}/realms/gbo}
       - MANAGER_OIDC_JWKS_URL=http://keycloak:8080/realms/gbo/protocol/openid-connect/certs
       - MANAGER_OIDC_AUDIENCE=openftv-manager-api
       - MANAGER_OIDC_ROLES_CLAIM=roles
@@ -291,10 +291,10 @@ services:
       - ./services/openftv-manager/tags:/tags:ro
     ports:
       # Management API (what the seed script and a UI talk to).
-      - "${GBO_PORT_FTV_MANAGER:-9280}:8443"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_FTV_MANAGER:-9280}:8443"
       # Internal API: where the PDP pulls its bundle from.
-      - "${GBO_PORT_FTV_MANAGER_INTERNAL:-9281}:9443"
-      - "${GBO_PORT_FTV_MANAGER_HEALTH:-9282}:8080"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_FTV_MANAGER_INTERNAL:-9281}:9443"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_FTV_MANAGER_HEALTH:-9282}:8080"
     networks: [backend]
     depends_on:
       postgres-ftv:
@@ -328,16 +328,16 @@ services:
       # Crypto.subtle, and browsers only expose that in a secure context —
       # so http://<lan-ip>:9283 fails with "Crypto.subtle is available only
       # in secure contexts". localhost counts as secure; a LAN IP does not.
-      - VITE_PAP_BASE_URL=${GBO_FTV_MANAGER_URL:-http://localhost:9280}
-      - VITE_PIP_BASE_URL=${GBO_FTV_MANAGER_URL:-http://localhost:9280}
-      - VITE_OIDC_AUTHORITY=${GBO_FTV_OIDC_AUTHORITY:-http://localhost:9284/realms/gbo}
+      - VITE_PAP_BASE_URL=${GBO_FTV_MANAGER_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_FTV_MANAGER:-9280}}
+      - VITE_PIP_BASE_URL=${GBO_FTV_MANAGER_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_FTV_MANAGER:-9280}}
+      - VITE_OIDC_AUTHORITY=${GBO_FTV_OIDC_AUTHORITY:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_KEYCLOAK:-9284}/realms/gbo}
       - VITE_OIDC_CLIENT_ID=openftv-manager-ui
       # Not optional: the image's nginx template interpolates this one, and
       # nginx refuses to start when it is unset. 102400 is the value the UI
       # itself falls back to (src/config/env.ts).
       - MANAGER_MAX_LOGO_SIZE=102400
     ports:
-      - "${GBO_PORT_FTV_MANAGER_UI:-9283}:8080"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_FTV_MANAGER_UI:-9283}:8080"
     networks: [backend]
     depends_on:
       openftv-manager:
@@ -366,7 +366,7 @@ services:
     volumes:
       - ./services/openftv-manager-ui/keycloak/realm-gbo.json:/opt/keycloak/data/import/realm-gbo.json:ro
     ports:
-      - "${GBO_PORT_KEYCLOAK:-9284}:8080"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_KEYCLOAK:-9284}:8080"
     networks: [backend]
     healthcheck:
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080 && echo -e 'GET /realms/gbo HTTP/1.1\\nHost: localhost\\nConnection: close\\n\\n' >&3 && cat <&3 | head -1 | grep -q 200"]
@@ -611,7 +611,7 @@ services:
       context: .
       dockerfile: services/graphql-server/Dockerfile
     ports:
-      - "${GBO_PORT_GRAPHQL:-9400}:4000"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_GRAPHQL:-9400}:4000"
     environment:
       - OTEL_SERVICE_NAME=graphql-server
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -654,7 +654,7 @@ services:
       context: .
       dockerfile: services/brp-graphql-server/Dockerfile
     ports:
-      - "${GBO_PORT_BRP_GRAPHQL:-9401}:4001"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_BRP_GRAPHQL:-9401}:4001"
     environment:
       - OTEL_SERVICE_NAME=brp-graphql-server
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -691,7 +691,7 @@ services:
       context: .
       dockerfile: services/graphql-server/Dockerfile
     ports:
-      - "${GBO_PORT_UNSECURED_GRAPHQL:-9414}:4000"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_UNSECURED_GRAPHQL:-9414}:4000"
     environment:
       - OTEL_SERVICE_NAME=unsecured-graphql-server
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -716,7 +716,7 @@ services:
       context: .
       dockerfile: services/consent-register/Dockerfile
     ports:
-      - "${GBO_PORT_CONSENT_REGISTER:-9402}:4002"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_CONSENT_REGISTER:-9402}:4002"
     environment:
       - OTEL_SERVICE_NAME=consent-register
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -752,7 +752,7 @@ services:
   bsnk-mock:
     build: ./services/bsnk-mock
     ports:
-      - "${GBO_PORT_BSNK:-9403}:4003"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_BSNK:-9403}:4003"
     environment:
       - OTEL_SERVICE_NAME=bsnk-mock
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -912,7 +912,7 @@ services:
       dockerfile: services/lvg-graphql-server/Dockerfile
     profiles: [dvtp, full]
     ports:
-      - "${GBO_PORT_LVG_GRAPHQL:-9408}:4008"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_LVG_GRAPHQL:-9408}:4008"
     environment:
       - OTEL_SERVICE_NAME=lvg-graphql-server
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -991,7 +991,7 @@ services:
       dockerfile: services/consent-portal-backend/Dockerfile
     profiles: [dvtp, full]
     ports:
-      - "${GBO_PORT_CONSENT_PORTAL_BACKEND:-9405}:4005"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_CONSENT_PORTAL_BACKEND:-9405}:4005"
     environment:
       - OTEL_SERVICE_NAME=consent-portal-backend
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -1048,7 +1048,7 @@ services:
       dockerfile: services/dienstverlener-backend/Dockerfile
     profiles: [dvtp, full]
     ports:
-      - "${GBO_PORT_DV_BACKEND:-9406}:4006"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_DV_BACKEND:-9406}:4006"
     environment:
       - OTEL_SERVICE_NAME=dienstverlener-backend
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
@@ -1096,7 +1096,7 @@ services:
       dockerfile: services/dienstverlener-backend/Dockerfile
     profiles: [dvtp, full]
     ports:
-      - "${GBO_PORT_IR_BACKEND:-9410}:4010"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_IR_BACKEND:-9410}:4010"
     environment:
       - PORT=4010
       - QUERY_KIND=lvg
@@ -1141,7 +1141,7 @@ services:
       dockerfile: services/dienstverlener-backend/Dockerfile
     profiles: [integrator]
     ports:
-      - "${GBO_PORT_INTEGRATOR_BACKEND:-9423}:4023"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_INTEGRATOR_BACKEND:-9423}:4023"
     environment:
       - PORT=4023
       - OTEL_SERVICE_NAME=integrator-backend
@@ -1178,12 +1178,12 @@ services:
     build: ./services/asi-authorization-server
     profiles: [asi]
     ports:
-      - "${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}:4021"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}:4021"
     environment:
-      - AZSP_ISSUER=${ASI_AUTHORIZATION_SERVER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}}
+      - AZSP_ISSUER=${ASI_AUTHORIZATION_SERVER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}}
       # Per data service of the ASIP its base URL and the name the user sees
       # when approving, as url=name, separated by commas.
-      - AZSP_RESOURCES=${ASI_PROVIDER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_PROVIDER:-9424}}/brp/authsrc-api=Basisregistratie Personen (mock)
+      - AZSP_RESOURCES=${ASI_PROVIDER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_PROVIDER:-9424}}/brp/authsrc-api=Basisregistratie Personen (mock)
       # The own credential issuer logs citizens in here (authorization code
       # flow, #614): per source its eudi issuer identifier, the
       # organizationIdentifier of its access certificate (fictional KvK
@@ -1234,7 +1234,7 @@ services:
     image: gbo/asi-wallet-verifier:dev
     profiles: [asi]
     ports:
-      - "${GBO_PORT_ASI_WALLET_VERIFIER:-9428}:8001"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_ASI_WALLET_VERIFIER:-9428}:8001"
     volumes:
       - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/asi-wallet-verifier/verification_server.toml:/verification_server.toml:ro
     networks:
@@ -1275,7 +1275,7 @@ services:
       dockerfile: services/eudi-wallet-verifier/Dockerfile
     profiles: [asi]
     ports:
-      - "${GBO_PORT_ASI_EUDI_WALLET_VERIFIER:-9432}:8001"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_ASI_EUDI_WALLET_VERIFIER:-9432}:8001"
     environment:
       - EUDI_WALLET_VERIFIER_CONFIG=/config/config.json
     volumes:
@@ -1292,10 +1292,10 @@ services:
       dockerfile: services/asi-provider/Dockerfile
     profiles: [asi]
     ports:
-      - "${GBO_PORT_ASI_PROVIDER:-9424}:4020"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_ASI_PROVIDER:-9424}:4020"
     environment:
-      - ASIP_PUBLIC_URL=${ASI_PROVIDER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_PROVIDER:-9424}}
-      - ASIP_AUTHORIZATION_SERVER=${ASI_AUTHORIZATION_SERVER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}}
+      - ASIP_PUBLIC_URL=${ASI_PROVIDER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_PROVIDER:-9424}}
+      - ASIP_AUTHORIZATION_SERVER=${ASI_AUTHORIZATION_SERVER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}}
       - ASIP_AUTHORIZATION_SERVER_INTERNAL_URL=http://asi-authorization-server:4021
       # The ASIP's own Outway; the grant-link per data service is in
       # config/dataservices.json (/brp is the one make fsc-seed-asip sets).
@@ -1330,7 +1330,7 @@ services:
     build: ./services/asi-discovery-stub
     profiles: [asi]
     ports:
-      - "${GBO_PORT_ASI_DISCOVERY:-9426}:4022"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_ASI_DISCOVERY:-9426}:4022"
     environment:
       - DIP_SOURCES=http://asi-provider:4020/brp/dataservices
     depends_on:
@@ -1349,17 +1349,17 @@ services:
   # DIP stub and registers with its authorization server at start. Records and
   # contracts name public URLs; QTSP_URL_MAP maps them to the containers for
   # transport only. The authorization server allows an http redirect URI on
-  # loopback only, so the web side works from this machine (localhost).
-  # With another GBO_PUBLIC_HOST on plain http, set QTSP_PUBLIC_URL to localhost.
+  # loopback only: with another GBO_PUBLIC_HOST, use GBO_PUBLIC_SCHEME=https
+  # or set QTSP_PUBLIC_URL to localhost.
   qtsp-reference:
     build: ./services/qtsp-reference
     profiles: [asi]
     ports:
-      - "${GBO_PORT_QTSP:-9427}:4023"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_QTSP:-9427}:4023"
     environment:
-      - QTSP_PUBLIC_URL=${QTSP_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_QTSP:-9427}}
+      - QTSP_PUBLIC_URL=${QTSP_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_QTSP:-9427}}
       - QTSP_DIP_URL=http://asi-discovery-stub:4022
-      - QTSP_URL_MAP=${ASI_PROVIDER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_PROVIDER:-9424}}=http://asi-provider:4020,${ASI_AUTHORIZATION_SERVER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}}=http://asi-authorization-server:4021
+      - QTSP_URL_MAP=${ASI_PROVIDER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_PROVIDER:-9424}}=http://asi-provider:4020,${ASI_AUTHORIZATION_SERVER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}}=http://asi-authorization-server:4021
       - QTSP_KEY_FILE=/qtsp/qtsp-key.pem
       - QTSP_CERT_FILE=/qtsp/qtsp-cert.pem
       - QTSP_SEAL_TRUST_ANCHORS=/anchors/issuer-ca-cert.pem
@@ -1431,10 +1431,10 @@ services:
       # GBO_PUBLIC_HOST op het LAN-adres zodra je vanaf een andere machine
       # demonstreert, anders wijst de landingspagina naar de localhost van
       # de bezoeker.
-      - VITE_DIENSTVERLENER_URL=${DIENSTVERLENER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_DV_MOCK:-9001}}
-      - VITE_INSTALLATIE_REGISTER_URL=${KEYPER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_KEYPER_MOCK:-9004}}
-      - VITE_TOESTEMMINGSPORTAAL_URL=${TOESTEMMINGSPORTAAL_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_TOESTEMMINGSPORTAAL:-9002}}
-      - VITE_DEVELOPER_PORTAL_URL=${DEVELOPER_PORTAL_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_DEVELOPER_PORTAL:-9003}}
+      - VITE_DIENSTVERLENER_URL=${DIENSTVERLENER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_DV_MOCK:-9001}}
+      - VITE_INSTALLATIE_REGISTER_URL=${KEYPER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_KEYPER_MOCK:-9004}}
+      - VITE_TOESTEMMINGSPORTAAL_URL=${TOESTEMMINGSPORTAAL_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_TOESTEMMINGSPORTAAL:-9002}}
+      - VITE_DEVELOPER_PORTAL_URL=${DEVELOPER_PORTAL_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_DEVELOPER_PORTAL:-9003}}
       # De wallet-QR wordt client-side samengesteld, net als in de
       # dev-portal. Zonder EUDI_PUBLIC_URL (de wallet op een telefoon moet
       # de issuance-server publiek kunnen bereiken) valt de QR weg en legt
@@ -1442,15 +1442,15 @@ services:
       - VITE_EUDI_PUBLIC_URL=${EUDI_PUBLIC_URL:-}
       - VITE_EUDI_UL_BASE=${EUDI_UL_BASE:-https://app.preproductie.wallet.edi.bzk.nl/deeplink/disclosure_based_issuance}
       - EUDI_API_TARGET=http://eudi-adapter:4009
-      - VITE_JAEGER_PUBLIC_URL=${JAEGER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_JAEGER:-9686}}
-      - VITE_GRAFANA_PUBLIC_URL=${GRAFANA_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_GRAFANA:-9300}}
+      - VITE_JAEGER_PUBLIC_URL=${JAEGER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_JAEGER:-9686}}
+      - VITE_GRAFANA_PUBLIC_URL=${GRAFANA_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_GRAFANA:-9300}}
       # De FSC-controllers draaien in de fsc-infra-stack, met eigen
       # FSC_PORT_*-poorten; die volgen we hier, met dezelfde defaults als
       # fsc-infra/docker-compose.yml. De bronhouder is de BD-peer, niet de
       # directory-peer.
-      - VITE_FSC_CONTROLLER_BRON_URL=${FSC_CONTROLLER_BRON_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${FSC_PORT_BD_CONTROLLER:-8095}}
-      - VITE_FSC_CONTROLLER_DVTP_URL=${FSC_CONTROLLER_DVTP_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${FSC_PORT_HV_CONTROLLER:-8096}}
-      - VITE_FSC_CONTROLLER_EUDI_URL=${FSC_CONTROLLER_EUDI_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${FSC_PORT_EDI_CONTROLLER:-8094}}
+      - VITE_FSC_CONTROLLER_BRON_URL=${FSC_CONTROLLER_BRON_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${FSC_PORT_BD_CONTROLLER:-8095}}
+      - VITE_FSC_CONTROLLER_DVTP_URL=${FSC_CONTROLLER_DVTP_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${FSC_PORT_HV_CONTROLLER:-8096}}
+      - VITE_FSC_CONTROLLER_EUDI_URL=${FSC_CONTROLLER_EUDI_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${FSC_PORT_EDI_CONTROLLER:-8094}}
       - VITE_VERSION_STRING=${VERSION_STRING:-}
     volumes:
       - ./landing-page/src:/app/src
@@ -1459,7 +1459,7 @@ services:
       - ./landing-page/vite.config.ts:/app/vite.config.ts
       - ./landing-page/tsconfig.json:/app/tsconfig.json
     ports:
-      - "${GBO_PORT_LANDING:-9000}:9000"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_LANDING:-9000}:9000"
     networks:
       - frontend
       - backend
@@ -1486,7 +1486,7 @@ services:
       - ./dienstverlener-mock/vite.config.ts:/app/vite.config.ts
       - ./dienstverlener-mock/tsconfig.json:/app/tsconfig.json
     ports:
-      - "${GBO_PORT_DV_MOCK:-9001}:9001"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_DV_MOCK:-9001}:9001"
     networks:
       - frontend
       - backend
@@ -1510,7 +1510,7 @@ services:
       - IR_API_TARGET=http://ir-backend:4010
       - VITE_CONSUMER_PEER_ID=${IR_PEER_ID:-99999999900000001000}
       # Not one port up from this app, unlike the dienstverlener-mock.
-      - VITE_CONSENT_PORTAL_URL=${TOESTEMMINGSPORTAAL_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_TOESTEMMINGSPORTAAL:-9002}}
+      - VITE_CONSENT_PORTAL_URL=${TOESTEMMINGSPORTAAL_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_TOESTEMMINGSPORTAAL:-9002}}
     volumes:
       - ./keyper-mock/src:/app/src
       - ./keyper-mock/public:/app/public
@@ -1518,7 +1518,7 @@ services:
       - ./keyper-mock/vite.config.ts:/app/vite.config.ts
       - ./keyper-mock/tsconfig.json:/app/tsconfig.json
     ports:
-      - "${GBO_PORT_KEYPER_MOCK:-9004}:9004"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_KEYPER_MOCK:-9004}:9004"
     networks:
       - frontend
       - backend
@@ -1538,7 +1538,7 @@ services:
       - PORTAL_API_TARGET=http://consent-portal-backend:4005
       # The bearer consent token may only return to explicitly trusted
       # consumer origins. Multiple origins can be supplied comma-separated.
-      - VITE_ALLOWED_RETURN_ORIGINS=${DIENSTVERLENER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_DV_MOCK:-9001}},${KEYPER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_KEYPER_MOCK:-9004}}
+      - VITE_ALLOWED_RETURN_ORIGINS=${DIENSTVERLENER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_DV_MOCK:-9001}},${KEYPER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_KEYPER_MOCK:-9004}}
     volumes:
       - ./toestemmingsportaal-frontend/src:/app/src
       - ./toestemmingsportaal-frontend/public:/app/public
@@ -1546,7 +1546,7 @@ services:
       - ./toestemmingsportaal-frontend/vite.config.ts:/app/vite.config.ts
       - ./toestemmingsportaal-frontend/tsconfig.json:/app/tsconfig.json
     ports:
-      - "${GBO_PORT_TOESTEMMINGSPORTAAL:-9002}:9002"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_TOESTEMMINGSPORTAAL:-9002}:9002"
     networks:
       - frontend
       - backend
@@ -1559,7 +1559,7 @@ services:
       context: .
       dockerfile: services/dev-portal-backend/Dockerfile
     ports:
-      - "${GBO_PORT_DEV_PORTAL_BACKEND:-9407}:4007"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_DEV_PORTAL_BACKEND:-9407}:4007"
     environment:
       - OTEL_SERVICE_NAME=dev-portal-backend
       - CITIZENS_FILE=/citizens/citizens.json
@@ -1679,8 +1679,8 @@ services:
       # The own credential issuer (profile credential-issuer): the EU-wallet
       # links of its disclosure offers. Without it the wallet choice is hidden.
       - VITE_OWN_ISSUER_PUBLIC_URL=${ISSUER_PUBLIC_URL:-}
-      - VITE_JAEGER_PUBLIC_URL=${JAEGER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_JAEGER:-9686}}
-      - VITE_GRAFANA_PUBLIC_URL=${GRAFANA_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_GRAFANA:-9300}}
+      - VITE_JAEGER_PUBLIC_URL=${JAEGER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_JAEGER:-9686}}
+      - VITE_GRAFANA_PUBLIC_URL=${GRAFANA_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_GRAFANA:-9300}}
       - EUDI_API_TARGET=http://eudi-adapter:4009
       # The EUDI QR is built client-side; these env vars drive the universal-link.
       # VITE_* is public — ends up in the built bundle (no secrets here).
@@ -1692,7 +1692,7 @@ services:
       - ./developer-portal/vite.config.ts:/app/vite.config.ts
       - ./developer-portal/tsconfig.json:/app/tsconfig.json
     ports:
-      - "${GBO_PORT_DEVELOPER_PORTAL:-9003}:9003"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_DEVELOPER_PORTAL:-9003}:9003"
     networks:
       - frontend
       - backend
@@ -1951,7 +1951,7 @@ services:
     image: gbo/eudi-credential-issuer:dev
     profiles: [credential-issuer]
     ports:
-      - "${GBO_PORT_CREDENTIAL_ISSUER:-9429}:8080"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_CREDENTIAL_ISSUER:-9429}:8080"
       # The internal API (offers, revocations) has no authentication: only
       # from this machine, never through the tunnel.
       - "127.0.0.1:${GBO_PORT_CREDENTIAL_ISSUER_INTERNAL:-9431}:8081"
@@ -1965,8 +1965,8 @@ services:
       # at the ASI authorization server (profile asi), which the browser
       # reaches at its public address and this container on the eudi
       # network. Empty ISSUER_LOGIN_SERVER turns the flow off.
-      ISSUER_LOGIN_SERVER: ${ISSUER_LOGIN_SERVER-${ASI_AUTHORIZATION_SERVER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}}}
-      ISSUER_LOGIN_URL_MAP: ${ASI_AUTHORIZATION_SERVER_PUBLIC_URL:-http://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}}=http://asi-authorization-server:4021
+      ISSUER_LOGIN_SERVER: ${ISSUER_LOGIN_SERVER-${ASI_AUTHORIZATION_SERVER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}}}
+      ISSUER_LOGIN_URL_MAP: ${ASI_AUTHORIZATION_SERVER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_ASI_AUTHORIZATION_SERVER:-9425}}=http://asi-authorization-server:4021
     volumes:
       - credential-issuer-runtime:/config:ro
       - ./services/brp-graphql-server/mockdata:/test-pid-persons:ro
@@ -1989,7 +1989,7 @@ services:
     image: nginx:1.27-alpine
     profiles: [credential-issuer]
     ports:
-      - "${GBO_PORT_TRUST_HOST:-9430}:8080"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_TRUST_HOST:-9430}:8080"
     volumes:
       - ./trust-host/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - ./trust-host/pages:/usr/share/trust-pages:ro
@@ -2027,7 +2027,7 @@ services:
     # would use an init container `chown -R 1000` so USER 1000 stays.
     user: "0"
     ports:
-      - "${GBO_PORT_EUDI_ISSUANCE:-18001}:18001"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_EUDI_ISSUANCE:-18001}:18001"
     environment:
       - ISSUANCE_SERVER__STORAGE__URL=postgres://wallet:${EUDI_POSTGRES_PASSWORD}@postgres-eudi:5432/issuance_server
       # Concrete source products plus the reference QTSP usecase, endpoints
@@ -2085,7 +2085,7 @@ services:
       dockerfile: services/eudi-adapter/Dockerfile
     profiles: [eudi, full]
     ports:
-      - "${GBO_PORT_EUDI_ADAPTER:-9409}:4009"
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_EUDI_ADAPTER:-9409}:4009"
     environment:
       - OTEL_SERVICE_NAME=eudi-adapter
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
