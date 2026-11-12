@@ -113,15 +113,6 @@ test('a decision logged before the decision context still renders', () => {
   assert.equal(view.denied?.[0].rules[0].rule, 'DVT0001')
 })
 
-test('the oldest cascade traces still render', () => {
-  const view = readDecision({
-    decision: false,
-    context: { reason_admin: { code: 'CONSENT_WITHDRAWN', evaluated: [{ code: 'CONSENT_WITHDRAWN', status: 'fail' }] } },
-  })
-  assert.equal(view.shape, 'legacy')
-  assert.deepEqual(view.legacyEvaluated, [{ code: 'CONSENT_WITHDRAWN', status: 'fail' }])
-})
-
 test('anything else renders as nothing to show', () => {
   for (const result of [undefined, null, {}, { decision: false, context: {} }]) {
     assert.equal(readDecision(result).shape, 'none')

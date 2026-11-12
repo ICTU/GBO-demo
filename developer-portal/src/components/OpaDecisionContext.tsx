@@ -48,10 +48,6 @@ export default function OpaDecisionContext({ decision }: Props) {
     )
   }
 
-  if (view.shape === 'legacy') {
-    return <LegacyEvaluatedList evaluated={view.legacyEvaluated ?? []} reasonCode={view.adminCode} path={path} />
-  }
-
   const grantedCount = view.granted?.length ?? 0
   const deniedCount = view.denied?.length ?? 0
   return (
@@ -211,49 +207,6 @@ function FieldList({
           )
         })}
       </div>
-    </div>
-  )
-}
-
-function LegacyEvaluatedList({
-  evaluated, reasonCode, path,
-}: { evaluated: NonNullable<DecisionView['legacyEvaluated']>; reasonCode?: string; path: string }) {
-  const [snippetOpen, setSnippetOpen] = useState(false)
-  const glyph = { pass: '✓', fail: '✗', skipped: '○' } as const
-  const color = { pass: ALLOW_COLOR, fail: DENY_COLOR, skipped: MUTE_COLOR } as const
-  return (
-    <div style={{ marginTop: 10 }}>
-      <div style={{ fontSize: 11, color: MUTE_COLOR, fontWeight: 700, marginBottom: 6 }}>
-        Geëvalueerde axes (legacy)
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {evaluated.map((e) => {
-          const isCause = e.code === reasonCode
-          return (
-            <div
-              key={e.code}
-              onClick={isCause ? () => setSnippetOpen(true) : undefined}
-              style={{
-                display: 'grid', gridTemplateColumns: '18px 1fr', gap: 8, alignItems: 'baseline',
-                background: isCause ? 'rgba(255, 80, 100, 0.10)' : 'transparent',
-                borderLeft: isCause ? `3px solid ${DENY_COLOR}` : '3px solid transparent',
-                paddingLeft: 6, paddingTop: 2, paddingBottom: 2, borderRadius: 4,
-                cursor: isCause ? 'pointer' : 'default',
-              }}
-            >
-              <span style={{ color: color[e.status], fontWeight: 800, textAlign: 'center' }}>
-                {glyph[e.status]}
-              </span>
-              <div style={{ fontSize: 12 }}>
-                <span style={{ color: e.status === 'fail' ? 'var(--text)' : MUTE_COLOR }}>{e.code}</span>
-              </div>
-            </div>
-          )
-        })}
-      </div>
-      {snippetOpen && reasonCode && path && (
-        <PolicySnippetModal path={path} code={reasonCode} onClose={() => setSnippetOpen(false)} />
-      )}
     </div>
   )
 }
