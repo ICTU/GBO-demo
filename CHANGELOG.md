@@ -1002,14 +1002,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ### Removed
 - **Unused code paths are gone.** The `eudi-adapter` no longer writes
   `source-release.json` next to a materialized configuration; nothing read
-  it, and activating a release still logs its id and digest. The developer
-  portal drops the oldest decision-log shape (one `reason_admin.evaluated`
-  cascade, which no policy emits any more; such a record now shows its raw
-  log only), the unused `fetchTracesByTag`, and span mappings for service
-  names no container reports (`pdp-service`, `opa`, `edi-outway`,
-  `edi-manager`, `bd-inway`). The policy-snippet lookup no longer searches
-  for `deny_reason(`, which only a test file contains, and
-  `fsc-infra/scripts/lib.sh` drops the uncalled `wait_for_url`.
+  it. Materializing still prints the release id, and the adapter still logs
+  the release id and materialization digest when it activates a release. The
+  developer portal drops the oldest decision-log shape (one
+  `reason_admin.evaluated` cascade, which no policy emits any more; such a
+  record now shows its raw log only), the unused `fetchTracesByTag`, and
+  span mappings for service names no container reports (`pdp-service`,
+  `opa`, `edi-outway`, `edi-manager`, `bd-inway`). The policy-snippet lookup
+  no longer searches for `deny_reason(`, which only a test file contains,
+  and `fsc-infra/scripts/lib.sh` drops the uncalled `wait_for_url`.
 - The consent detail page no longer shows an "Integrator" field. The DvTP
   requirements no longer ask to tell the citizen about the integrator.
 - **`sector-pip` is gone (#378).** It served sector membership to the old
