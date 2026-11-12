@@ -34,9 +34,10 @@ keyed by Peer ID and separate from the seeds, so a party added through the UI
 can be registered as well. Each entry lists the services the provider asks
 consent for, each with the purpose the citizen is shown, and the return
 locations the consent portal may send the citizen back to. `${VAR}` in a
-return location is replaced by that environment variable, so a deployment sets
-its own host names; startup fails when the variable is unset or empty, or
-when a provider lacks a Peer ID, a service or a purpose. Like an integration,
+return location is replaced by that environment variable, without a trailing
+slash, so a deployment sets its own host names; startup fails when the
+variable is unset or empty, when a return location is empty, or when a
+provider lacks a Peer ID, a service or a purpose. Like an integration,
 a registration admits no one by itself.
 
 The consent portal reads `GET /internal/consent-portal/participants/{peer_id}`:
