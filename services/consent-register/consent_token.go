@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
@@ -92,11 +93,17 @@ func NewConsentIssuer(cfg config) (*ConsentIssuer, error) {
 	if err != nil {
 		return nil, err
 	}
-	if cfg.SigningKeyID == "" || cfg.TokenIssuer == "" || cfg.TokenAudience == "" {
-		return nil, fmt.Errorf("signing key id, issuer and audience are required")
+	if cfg.TokenIssuer == "" || cfg.TokenAudience == "" {
+		return nil, fmt.Errorf("issuer and audience are required")
+	}
+	kid := cfg.SigningKeyID
+	if kid == "" {
+		// A new key gets a new kid, so a verifier that caches keys by kid
+		// fetches the JWKS again instead of using the previous key.
+		kid = jwkThumbprint(&key.PublicKey)
 	}
 	return &ConsentIssuer{
-		key: key, kid: cfg.SigningKeyID, issuer: cfg.TokenIssuer,
+		key: key, kid: kid, issuer: cfg.TokenIssuer,
 		audience: cfg.TokenAudience, now: time.Now,
 	}, nil
 }
@@ -152,16 +159,28 @@ func (i *ConsentIssuer) Sign(consent Consent, subject map[string]EncryptedSubjec
 }
 
 func (i *ConsentIssuer) JWKS() map[string]any {
-	pub := i.key.PublicKey
-	x := pub.X.FillBytes(make([]byte, 32))
-	y := pub.Y.FillBytes(make([]byte, 32))
+	x, y := jwkCoordinates(&i.key.PublicKey)
 	return map[string]any{"keys": []map[string]string{{
 		"kty": "EC",
 		"crv": "P-256",
 		"use": "sig",
 		"alg": "ES256",
 		"kid": i.kid,
-		"x":   base64.RawURLEncoding.EncodeToString(x),
-		"y":   base64.RawURLEncoding.EncodeToString(y),
+		"x":   x,
+		"y":   y,
 	}}}
+}
+
+func jwkCoordinates(pub *ecdsa.PublicKey) (x, y string) {
+	return base64.RawURLEncoding.EncodeToString(pub.X.FillBytes(make([]byte, 32))),
+		base64.RawURLEncoding.EncodeToString(pub.Y.FillBytes(make([]byte, 32)))
+}
+
+// jwkThumbprint is the RFC 7638 thumbprint of a P-256 public key: SHA-256
+// over the required members in lexicographic order, base64url-encoded.
+func jwkThumbprint(pub *ecdsa.PublicKey) string {
+	x, y := jwkCoordinates(pub)
+	canonical := `{"crv":"P-256","kty":"EC","x":"` + x + `","y":"` + y + `"}`
+	sum := sha256.Sum256([]byte(canonical))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
 }

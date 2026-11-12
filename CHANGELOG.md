@@ -1017,6 +1017,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   `SubjectTypePI`.
 
 ### Fixed
+- **A restarted consent register kept its key ID.** Without a stable key it
+  generates a new signing key at every start, but the key ID stayed
+  `gbo-consent-demo-1`, so the PDP could verify new consent tokens with the
+  old key it had cached and refuse them. Without `CONSENT_SIGNING_KEY_ID`
+  the key ID is now the key's RFC 7638 JWK thumbprint; an explicit value is
+  kept. The new `CONSENT_STORE` (`memory` or `postgres`) names the store;
+  unset, it is `postgres` when `DATABASE_URL` is set and `memory` otherwise,
+  as before. Compose sets `CONSENT_STORE=memory`.
 - **Contract auto-sign distinguishes an unavailable admission register**
   (#491): a missing OpenFTV PIP document now refuses with
   `ADMISSION_REGISTER_UNAVAILABLE`, while an empty or incomplete register
