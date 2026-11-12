@@ -11,6 +11,7 @@
 //	             Imports no transport library; the compiler enforces it.
 //	bsnk/        driven adapter — BSNk pseudonymisation
 //	register/    driven adapter — the consent register
+//	onboarding/  driven adapter — the DvTP admission register
 //	devportal/   driven adapter — best-effort history, shaped as an Observer
 //	ldv/         driven adapter — the Logboek Dataverwerkingen
 //	upstream/    the shared JSON caller those adapters use
@@ -26,6 +27,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -44,6 +46,7 @@ import (
 	"gbo-demo/consent-portal-backend/devportal"
 	"gbo-demo/consent-portal-backend/ldv"
 	"gbo-demo/consent-portal-backend/logctx"
+	"gbo-demo/consent-portal-backend/onboarding"
 	"gbo-demo/consent-portal-backend/portalhttp"
 	"gbo-demo/consent-portal-backend/register"
 	"gbo-demo/consent-portal-backend/upstream"
@@ -60,7 +63,8 @@ const portalOIN = "00000000000000000002" // mock-portal OIN
 // portalKeySetVersion is the version of the portal's own keys at BSNk.
 const portalKeySetVersion = 1
 
-// upstreamTimeout bounds every call to BSNk and the consent register. The
+// upstreamTimeout bounds every call to BSNk, the consent register and the
+// admission register. The
 // previous implementation used the package-global http.DefaultClient, which
 // has no timeout at all, so an unresponsive upstream would hang a citizen's
 // request indefinitely.
@@ -110,7 +114,17 @@ type config struct {
 	// citizen with, and SubjectRefKeyVersion names it.
 	SubjectRefKey        []byte
 	SubjectRefKeyVersion string
+	// OnboardingRegisterURL is the DvTP admission register, which a request
+	// to start a consent flow is checked against.
+	OnboardingRegisterURL string
+	// KnownScopes are the data sets the portal can describe to a citizen.
+	KnownScopes []string
 }
+
+// defaultKnownScopes are the data sets the portal frontend describes
+// (toestemmingsportaal-frontend/src/lib/scopeGroups.ts). Demo shortcut: the
+// list is configuration until a service catalogue holds the data sets.
+const defaultKnownScopes = "bd:ib:2025,bd:ib:2024,lvg:vbo:eigendom"
 
 var subjectRefKeyVersion = regexp.MustCompile(`^[0-9A-Za-z]{1,16}$`)
 
@@ -128,6 +142,10 @@ func loadConfig() (config, error) {
 	version := getEnv("SUBJECT_REF_KEY_VERSION", "1")
 	if !subjectRefKeyVersion.MatchString(version) {
 		return config{}, fmt.Errorf("SUBJECT_REF_KEY_VERSION: %q is not 1 to 16 letters and digits", version)
+	}
+	knownScopes, err := parseKnownScopes(getEnv("CONSENT_KNOWN_SCOPES", defaultKnownScopes))
+	if err != nil {
+		return config{}, fmt.Errorf("CONSENT_KNOWN_SCOPES: %w", err)
 	}
 	listMaxAge, err := time.ParseDuration(getEnv("BSN_AUTHORISATION_LIST_MAX_AGE", "1h"))
 	if err != nil || listMaxAge < 0 {
@@ -147,7 +165,27 @@ func loadConfig() (config, error) {
 
 		SubjectRefKey:        []byte(key),
 		SubjectRefKeyVersion: version,
+
+		OnboardingRegisterURL: getEnv("ONBOARDING_REGISTER_URL", "http://dvtp-onboarding-register:4015"),
+		KnownScopes:           knownScopes,
 	}, nil
+}
+
+// parseKnownScopes reads the known data sets as a comma-separated list of
+// codes. At least one is required: with none, every request would be
+// refused.
+func parseKnownScopes(value string) ([]string, error) {
+	var scopes []string
+	for _, scope := range strings.Split(value, ",") {
+		scope = strings.TrimSpace(scope)
+		if scope != "" && !slices.Contains(scopes, scope) {
+			scopes = append(scopes, scope)
+		}
+	}
+	if len(scopes) == 0 {
+		return nil, errors.New("name at least one data set code")
+	}
+	return scopes, nil
 }
 
 var sourceOIN = regexp.MustCompile(`^[0-9]{20}$`)
@@ -227,6 +265,8 @@ func newPortal(cfg config, hub *portalhttp.Hub, logbook consent.Logbook) *consen
 		Logbook:           logbook,
 		Sources:           cfg.Sources,
 		PseudonymsLogbook: cfg.PseudonymsLogbook,
+		Registrations:     onboarding.Client{Base: cfg.OnboardingRegisterURL, Caller: caller},
+		KnownScopes:       cfg.KnownScopes,
 
 		AuthorisationListMaxAge: cfg.AuthorisationListMaxAge,
 	}

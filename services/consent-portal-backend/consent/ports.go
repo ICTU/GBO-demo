@@ -6,7 +6,7 @@ import (
 )
 
 // The driven ports, declared here at their consumer. Each is implemented by
-// exactly one adapter package (bsnk, register) and by in-memory fakes in the
+// exactly one adapter package (bsnk, register, onboarding) and by in-memory fakes in the
 // tests. "Accept interfaces, return structs": the adapters are plain structs.
 
 // Identities is BSNk seen from the core, in BSNk's own steps.
@@ -44,6 +44,14 @@ type Store interface {
 	Revoke(ctx context.Context, consentID string) error
 	PolymorphicFor(ctx context.Context, subject SubjectRef) (Polymorphic, error)
 	KeepPolymorphic(ctx context.Context, subject SubjectRef, values Polymorphic) error
+}
+
+// Registrations is the DvTP admission register seen from the core.
+// Registration returns an error wrapping ErrUnknownParty for a peer the
+// register does not know, and any other error when the register could not
+// be read.
+type Registrations interface {
+	Registration(ctx context.Context, peer PeerID) (Registration, error)
 }
 
 // Processing is one Dataverwerking of this Verantwoordelijke, as the core
