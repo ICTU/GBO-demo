@@ -12,9 +12,21 @@ register_peer="99999999900000000700"
 providers=("99999999900000000300" "99999999900000001000")
 admin_port="${GBO_PORT_DVTP_ONBOARDING_REGISTER:-9415}"
 
+if ! command -v jq >/dev/null 2>&1; then
+  echo "ERROR: jq is not installed; it is needed to read the DvTP onboarding register (see README.md)" >&2
+  exit 1
+fi
+
 if ! feed=$(docker compose exec -T dvtp-onboarding-register \
   wget -qO- http://localhost:4015/internal/openftv/participants 2>/dev/null); then
   echo "ERROR: cannot read the DvTP onboarding register; is it running? (make pdp-up starts it)" >&2
+  exit 1
+fi
+
+if ! jq -e 'type == "array"' >/dev/null 2>&1 <<<"$feed"; then
+  echo "ERROR: the DvTP onboarding register's participant list is not a JSON list:" >&2
+  head -c 300 <<<"$feed" >&2
+  echo >&2
   exit 1
 fi
 

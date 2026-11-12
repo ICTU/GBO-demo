@@ -20,7 +20,10 @@ type PeerID string
 type ReasonCode string
 
 const (
-	// ReasonInitiationIncomplete: a required field is missing.
+	// ReasonInitiationIncomplete: a required field is missing, or a field
+	// is unusable: malformed (such as a time that is not RFC 3339), not a
+	// value the portal supports (such as a code challenge method other than
+	// S256), or expired (a valid_until that is not in the future).
 	ReasonInitiationIncomplete ReasonCode = "INITIATION_INCOMPLETE"
 	// ReasonPartyNotActive: the provider is not an admitted, active
 	// participant of the admission register.
