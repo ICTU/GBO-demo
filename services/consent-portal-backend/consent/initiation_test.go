@@ -216,6 +216,28 @@ func TestVerifyRequestIncompleteNeedsNoRegister(t *testing.T) {
 	}
 }
 
+func TestVerifyRequestRefusesAPeerIDThatNamesNoParticipant(t *testing.T) {
+	// In the register's URL these would not reach the participant endpoint,
+	// and the failure would read as a register outage.
+	for _, provider := range []PeerID{"", ".", ".."} {
+		t.Run(fmt.Sprintf("%q", provider), func(t *testing.T) {
+			registrations := &fakeRegistrations{err: errors.New("the answer does not decode")}
+			claim := validClaim()
+			claim.ClientID = string(provider)
+			if provider == "" {
+				claim.ClientID = string(hypotheekPeer)
+			}
+			_, err := checksPortal(registrations).VerifyRequest(context.Background(), provider, claim)
+			if got := refusalCode(t, err); got != ReasonPartyNotActive {
+				t.Fatalf("code = %s, want %s (%v)", got, ReasonPartyNotActive, err)
+			}
+			if registrations.reads != 0 {
+				t.Fatalf("the register was read %d times", registrations.reads)
+			}
+		})
+	}
+}
+
 func TestVerifyRequestFailsClosedWithoutTheRegister(t *testing.T) {
 	cause := errors.New("dial tcp: connection refused")
 	for name, portal := range map[string]*Portal{

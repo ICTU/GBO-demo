@@ -24,6 +24,7 @@ type Client struct {
 }
 
 type participant struct {
+	PeerID   string `json:"peer_id"`
 	Name     string `json:"name"`
 	Active   bool   `json:"active"`
 	Services []struct {
@@ -34,8 +35,9 @@ type participant struct {
 }
 
 // Registration reads one participant. A 404 is a peer the register does not
-// know; every other failure, including an answer that does not decode, means
-// the register could not be read.
+// know; every other failure, including an answer that does not decode or is
+// not about the requested peer (such as `null` or `{}`), means the register
+// could not be read.
 func (c Client) Registration(ctx context.Context, peer consent.PeerID) (consent.Registration, error) {
 	var out participant
 	status, err := c.Caller.Do(ctx, "Read Registration", http.MethodGet,
@@ -45,6 +47,9 @@ func (c Client) Registration(ctx context.Context, peer consent.PeerID) (consent.
 			return consent.Registration{}, fmt.Errorf("%s: %w", peer, consent.ErrUnknownParty)
 		}
 		return consent.Registration{}, err
+	}
+	if out.PeerID != string(peer) {
+		return consent.Registration{}, fmt.Errorf("the register answered for peer %q, not for %s", out.PeerID, peer)
 	}
 	registration := consent.Registration{
 		Name:            out.Name,

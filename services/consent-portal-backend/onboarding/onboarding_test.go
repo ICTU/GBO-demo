@@ -85,6 +85,15 @@ func TestRegistrationWhenTheRegisterFails(t *testing.T) {
 		"not JSON": func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = fmt.Fprint(w, `<html>`)
 		},
+		"null": func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = fmt.Fprint(w, `null`)
+		},
+		"empty object": func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = fmt.Fprint(w, `{}`)
+		},
+		"another participant": func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = fmt.Fprint(w, `{"peer_id": "99999999900000000500", "name": "Demo Incassobureau BV", "active": false}`)
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := client(t, handler).Registration(context.Background(), "99999999900000000300")
