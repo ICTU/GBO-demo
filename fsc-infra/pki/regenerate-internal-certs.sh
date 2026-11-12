@@ -76,4 +76,4 @@ for p in "${PEERS[@]}"; do
 done
 
 echo
-echo ">>> Done. Restart all FSC containers to load the new internal certs."
+echo ">>> Done. Restart all FSC containers and dev-portal-backend to load the new internal certs."
