@@ -39,18 +39,41 @@ _regen () {
             mv internal-cert.pem        /work/${ORG_DIR}/pki/internal/
             mv internal-cert-key.pem    /work/${ORG_DIR}/pki/internal/
             chmod 600 /work/${ORG_DIR}/pki/internal/*-key.pem
+            # OpenFSC containers run as appuser (uid/gid 1001), as in the bootstrap scripts.
+            chown -R 1001:1001 /work/${ORG_DIR}/pki/internal
         "
 }
 
-_regen directory-peer  internal-ca.json               directory-internal-cert.json  directory-peer
-_regen edi-issuer      edi-issuer-internal-ca.json    edi-issuer-internal-cert.json orgs/edi-issuer
-_regen bd-mock         bd-mock-internal-ca.json       bd-mock-internal-cert.json    orgs/belastingdienst-mock
-_regen brp-mock        brp-mock-internal-ca.json      brp-mock-internal-cert.json   orgs/brp-mock
-_regen consent-register consent-register-internal-ca.json consent-register-internal-cert.json orgs/consent-register
-_regen gbo-pdp         gbo-pdp-internal-ca.json       gbo-pdp-internal-cert.json    orgs/gbo-pdp
-_regen installatieregister installatieregister-internal-ca.json installatieregister-internal-cert.json orgs/installatieregister
-_regen integrator      integrator-internal-ca.json    integrator-internal-cert.json orgs/integrator
-_regen asip            asip-internal-ca.json          asip-internal-cert.json       orgs/asip
+# name, internal CA config, internal cert config, peer directory
+PEERS=(
+    "directory-peer      internal-ca.json                     directory-internal-cert.json           directory-peer"
+    "edi-issuer          edi-issuer-internal-ca.json          edi-issuer-internal-cert.json          orgs/edi-issuer"
+    "bd-mock             bd-mock-internal-ca.json             bd-mock-internal-cert.json             orgs/belastingdienst-mock"
+    "brp-mock            brp-mock-internal-ca.json            brp-mock-internal-cert.json            orgs/brp-mock"
+    "hypotheekverlener   hypotheekverlener-internal-ca.json   hypotheekverlener-internal-cert.json   orgs/hypotheekverlener-mock"
+    "consent-register    consent-register-internal-ca.json    consent-register-internal-cert.json    orgs/consent-register"
+    "gbo-pdp             gbo-pdp-internal-ca.json             gbo-pdp-internal-cert.json             orgs/gbo-pdp"
+    "installatieregister installatieregister-internal-ca.json installatieregister-internal-cert.json orgs/installatieregister"
+    "integrator          integrator-internal-ca.json          integrator-internal-cert.json          orgs/integrator"
+    "asip                asip-internal-ca.json                asip-internal-cert.json                orgs/asip"
+)
+
+# Every internal cert config the bootstrap scripts use must be listed above,
+# so a new peer cannot be left out of a regeneration.
+LISTED=" $(for p in "${PEERS[@]}"; do read -r _ _ cert _ <<<"$p"; printf '%s ' "$cert"; done)"
+MISSING=0
+for cert in *internal-cert.json; do
+    if [[ "$LISTED" != *" ${cert} "* ]]; then
+        echo "ERROR: ${cert} has no entry in PEERS in $(basename "$0")" >&2
+        MISSING=1
+    fi
+done
+[[ "$MISSING" == 0 ]] || exit 1
+
+for p in "${PEERS[@]}"; do
+    # shellcheck disable=SC2086
+    _regen $p
+done
 
 echo
-echo ">>> Done. Restart all FSC containers to load the new internal certs."
+echo ">>> Done. Restart all FSC containers and dev-portal-backend to load the new internal certs."
