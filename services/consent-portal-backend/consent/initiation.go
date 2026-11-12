@@ -125,6 +125,13 @@ func (p *Portal) VerifyRequest(ctx context.Context, provider PeerID, claimed Cla
 		return VerifiedRequest{}, refuse(ReasonInitiationIncomplete, "the request has no %s", missing)
 	}
 
+	// An empty peer ID, "." or ".." names no participant, and in a URL path
+	// it would not reach the participant endpoint, so the register is not
+	// asked about it.
+	if provider == "" || provider == "." || provider == ".." {
+		return VerifiedRequest{}, refuse(ReasonPartyNotActive, "the requesting peer ID %q names no participant", provider)
+	}
+
 	if p.Registrations == nil {
 		return VerifiedRequest{}, refuse(ReasonAdmissionRegisterUnavailable, "no admission register is configured")
 	}

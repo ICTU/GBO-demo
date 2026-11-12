@@ -122,7 +122,7 @@ type config struct {
 }
 
 // defaultKnownScopes are the data sets the portal frontend describes
-// (toestemmingsportaal-frontend/src/lib/scopeGroups.ts). Demo shortcut: the
+// (toestemmingsportaal-frontend/src/data/scopeGroups.ts). Demo shortcut: the
 // list is configuration until a service catalogue holds the data sets.
 const defaultKnownScopes = "bd:ib:2025,bd:ib:2024,lvg:vbo:eigendom"
 
