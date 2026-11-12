@@ -271,12 +271,15 @@ else
     exit 1
   fi
   echo "  ✓ connection contract created; waiting for auto-sign..."
+  # A failed poll counts as "not signed yet": retry, and let fail_unsigned
+  # report it once the 30s are up.
   for _ in $(seq 30); do
     sleep 1
     contracts_json=$(mtls_curl "$CONSUMER_CERT" "$CONSUMER_KEY" "$CONSUMER_CA" \
-      "$CONSUMER_MANAGER_URL/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=$SERVICE_NAME")
+      "$CONSUMER_MANAGER_URL/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=$SERVICE_NAME" \
+      2>/dev/null || echo "")
     st=$(printf '%s' "$contracts_json" | jq -r --arg svc "$SERVICE_NAME" --arg provider "$PROVIDER_PEER_ID" --argjson properties "$GRANT_PROPERTIES" \
-      'first(.contracts[]? | select(.content.grants[0].service.name == $svc and .content.grants[0].service.peer_id == $provider) | select((.content.grants[0].properties // {}) == $properties) | .state) // ""' 2>/dev/null)
+      'first(.contracts[]? | select(.content.grants[0].service.name == $svc and .content.grants[0].service.peer_id == $provider) | select((.content.grants[0].properties // {}) == $properties) | .state) // ""' 2>/dev/null || echo "")
     if [ "$st" = "CONTRACT_STATE_VALID" ]; then
       echo "  ✓ connection contract Valid"
       break

@@ -171,15 +171,37 @@ func (o *Outbox) Run(ctx context.Context, interval time.Duration) {
 			drainCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			if err := o.Deliver(drainCtx); err != nil {
-				slog.Warn("outbox not empty at shutdown; records will be delivered on restart", "err", err.Error())
+				logDeliveryFailure(err, "outbox not empty at shutdown; records will be delivered on restart")
 			}
 			return
 		case <-ticker.C:
 			if err := o.Deliver(ctx); err != nil {
-				slog.Warn("outbox delivery failed; will retry", "err", err.Error())
+				logDeliveryFailure(err, "outbox delivery failed; will retry")
 			}
 		}
 	}
+}
+
+// logDeliveryFailure logs a failed delivery. A logbook that is unreachable
+// clears by itself, so that is a warning; a broken cursor does not, so that is
+// an error, and its message says how to recover.
+func logDeliveryFailure(err error, transient string) {
+	if errors.Is(err, errBadCursor) {
+		slog.Error("outbox delivery stopped until the cursor is fixed", "err", err.Error())
+		return
+	}
+	slog.Warn(transient, "err", err.Error())
+}
+
+// errBadCursor marks a cursor file that exists but cannot be used.
+var errBadCursor = errors.New("outbox cursor unusable")
+
+// badCursor wraps a cursor failure with the way out. Replaying is safe because
+// the logbook drops records it already has; it is left to an operator rather
+// than done automatically, so a broken cursor is noticed.
+func (o *Outbox) badCursor(problem string, err error) error {
+	return fmt.Errorf("%w: %s %s: %w; removing the cursor file replays the outbox, and the logbook drops the duplicates",
+		errBadCursor, problem, o.cursor, err)
 }
 
 // readCursor returns 0 only when nothing was delivered yet. Any other failure
@@ -190,11 +212,11 @@ func (o *Outbox) readCursor() (int64, error) {
 		return 0, nil
 	}
 	if err != nil {
-		return 0, fmt.Errorf("read outbox cursor: %w", err)
+		return 0, o.badCursor("cannot read", err)
 	}
 	var offset int64
 	if _, err := fmt.Sscanf(string(raw), "%d", &offset); err != nil {
-		return 0, fmt.Errorf("parse outbox cursor %q: %w", raw, err)
+		return 0, o.badCursor(fmt.Sprintf("cannot parse %q in", raw), err)
 	}
 	return offset, nil
 }

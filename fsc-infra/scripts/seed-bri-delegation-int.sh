@@ -168,9 +168,11 @@ else
   fi
   echo "  ✓ accepted by HV; waiting for BD's autosign..."
 
+  # A failed poll counts as "not signed yet": retry, and let fail_unsigned
+  # report it once the 30s are up.
   for _ in $(seq 30); do
     sleep 1
-    st=$(delegated_contracts | jq -r --arg hash "$content_hash" 'first(.[] | select(.hash == $hash) | .state) // ""')
+    st=$(delegated_contracts 2>/dev/null | jq -r --arg hash "$content_hash" 'first(.[] | select(.hash == $hash) | .state) // ""' 2>/dev/null || echo "")
     if [ "$st" = "CONTRACT_STATE_VALID" ]; then
       echo "  ✓ delegated connection contract Valid"
       break
