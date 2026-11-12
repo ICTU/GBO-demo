@@ -933,9 +933,7 @@ func handlePolicySnippet(cfg config) http.HandlerFunc {
 		// EMITS this code as a deny reason, not on a lookup table:
 		//   1. the refusing rule's own file, then its regime's helper
 		//   2. file declaring the request's package AND containing the literal
-		//   3. line containing BOTH <needle> AND `deny_reason(` (older
-		//      reason-cascade style)
-		//   4. fall-through: any line containing the literal
+		//   3. fall-through: any line containing the literal
 		needle := fmt.Sprintf("%q", code)
 		var picked struct {
 			id, raw string
@@ -959,14 +957,6 @@ func handlePolicySnippet(cfg config) http.HandlerFunc {
 					continue
 				}
 				if line := findLineWith(p.Raw, needle); line > 0 {
-					picked.id, picked.raw, picked.line = p.ID, p.Raw, line
-					break
-				}
-			}
-		}
-		if picked.id == "" {
-			for _, p := range policies {
-				if line := findLineWithAll(p.Raw, needle, "deny_reason("); line > 0 {
 					picked.id, picked.raw, picked.line = p.ID, p.Raw, line
 					break
 				}
@@ -1012,26 +1002,6 @@ func rulePackages(rulesFile, ruleID string) []string {
 		return pkgs
 	}
 	return nil
-}
-
-// findLineWithAll returns the 1-based line number of the first line in raw
-// that contains ALL given needles. Used to match e.g. `deny_reason(` next to
-// the code, where both live on the same line but in different positions.
-func findLineWithAll(raw string, needles ...string) int {
-	lines := strings.Split(raw, "\n")
-	for i, l := range lines {
-		matched := true
-		for _, n := range needles {
-			if !strings.Contains(l, n) {
-				matched = false
-				break
-			}
-		}
-		if matched {
-			return i + 1
-		}
-	}
-	return 0
 }
 
 func findLineWith(raw, needle string) int {

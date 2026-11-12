@@ -69,8 +69,8 @@ type config struct {
 	MockDataPath       string
 	SourceMetadataPath string
 	// LDVQuery describes how this bron names its verwerkingsactiviteiten.
-	// The same image serves BD, BRP and the deliberately unsecured demo
-	// source, so nothing about a register may be baked in.
+	// The same image serves BD and the deliberately unsecured demo source,
+	// so nothing about a register may be baked in.
 	LDVQuery ldvQueryConfig
 }
 

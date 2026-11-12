@@ -47,22 +47,6 @@ pubkey_thumbprint_hex() {
     | awk '{print $2}'
 }
 
-# wait_for_url <url> [max_seconds] — poll until URL returns any HTTP status
-# under 500. Used to wait for manager/controller to be ready.
-wait_for_url() {
-  local url="$1"
-  local max="${2:-60}"
-  local i=0
-  while ! curl -s -f -m 2 -o /dev/null "$url" 2>/dev/null; do
-    i=$((i + 1))
-    if [ "$i" -ge "$max" ]; then
-      echo "timeout waiting for $url" >&2
-      return 1
-    fi
-    sleep 1
-  done
-}
-
 # mtls_curl <cert> <key> <ca> <url> [extra curl args...] — curl with mTLS
 # using the given cert/key against a CA-signed endpoint.
 mtls_curl() {

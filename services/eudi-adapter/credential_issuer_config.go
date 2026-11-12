@@ -325,7 +325,7 @@ func writeCredentialIssuer(options credentialIssuerOptions, release onboarding.S
 	if err := writeFileAtomically(options.outputDir, credentialIssuerConfigFile, append(body, '\n'), 0o600); err != nil {
 		return fmt.Errorf("write credential issuer configuration: %w", err)
 	}
-	return writeReleaseMarker(options.outputDir, release)
+	return nil
 }
 
 // replaceDirectoryContents makes dir hold exactly what staging holds.

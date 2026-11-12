@@ -1,5 +1,5 @@
 // Reads the policy's response document from the OPA console decision log
-// into what the decision view renders. Three shapes occur:
+// into what the decision view renders. Two shapes occur:
 //
 //   profile — a deny carries the FTV GraphQL profile's decision context:
 //             graphql.client (what the consumer was told) and graphql.admin
@@ -8,7 +8,6 @@
 //             logged before the rules gave reasons carry steps instead).
 //   gbo     — decisions logged before that: context.denied_fields and
 //             reason_admin.code.
-//   legacy  — the oldest traces: reason_admin.evaluated as one cascade.
 //
 // An allow has context.granted in every shape.
 
@@ -30,7 +29,7 @@ export type FieldOutcome = {
 }
 
 export type DecisionView = {
-  shape: 'profile' | 'gbo' | 'legacy' | 'none'
+  shape: 'profile' | 'gbo' | 'none'
   allowed: boolean
   granted?: FieldOutcome[]
   denied?: FieldOutcome[]
@@ -40,7 +39,6 @@ export type DecisionView = {
   adminCode?: string
   mapperMessage?: string
   schemaDigest?: string
-  legacyEvaluated?: { code: string; status: Step['status'] }[]
 }
 
 type Obj = Record<string, unknown>
@@ -121,19 +119,6 @@ export function readDecision(result: unknown): DecisionView {
         rules: rules(d.evaluated),
       })),
       adminCode: str(reasonAdmin.code),
-    }
-  }
-
-  const evaluated = list(reasonAdmin.evaluated)
-  if (evaluated) {
-    return {
-      shape: 'legacy',
-      allowed,
-      adminCode: str(reasonAdmin.code),
-      legacyEvaluated: evaluated.filter(isObj).map((e) => ({
-        code: str(e.code) ?? '',
-        status: (str(e.status) ?? 'skipped') as Step['status'],
-      })),
     }
   }
 
