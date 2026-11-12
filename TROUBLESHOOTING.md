@@ -12,6 +12,12 @@ lsof -i -P -n | grep LISTEN | grep -E ":9[0-9]{3}"
 
 Fix by running `make demo-down` (or `docker compose down` for the relevant compose file), or stop the conflicting service.
 
+## "Blocked request" or 403 from another machine
+
+Vite's dev server refuses host names it does not know. Set `GBO_PUBLIC_HOST`
+in `.env` (more names in `GBO_EXTRA_ALLOWED_HOSTS`, comma-separated) and run
+`make demo`. The same setting fixes links that point at `localhost`.
+
 ## Docker resource limits
 
 `make demo-eudi` and `make demo-full` start ~25 containers. Minimum:
