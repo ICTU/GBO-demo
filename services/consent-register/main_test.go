@@ -175,7 +175,8 @@ func assertPublicJWKS(t *testing.T, baseURL string) {
 func TestConsentIssuerRejectsInvalidConfiguration(t *testing.T) {
 	tests := []config{
 		{SigningKeyPath: "/definitely/missing/consent-key.pem", SigningKeyID: "key", TokenIssuer: "issuer", TokenAudience: "audience"},
-		{SigningKeyID: "", TokenIssuer: "issuer", TokenAudience: "audience"},
+		{SigningKeyID: "key", TokenIssuer: "", TokenAudience: "audience"},
+		{SigningKeyID: "key", TokenIssuer: "issuer", TokenAudience: ""},
 	}
 	for _, cfg := range tests {
 		if _, err := NewConsentIssuer(cfg); err == nil {

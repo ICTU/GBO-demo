@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	ldv "gbo-demo/ldv-client"
 	"log/slog"
 	"net/http"
@@ -65,23 +66,51 @@ type config struct {
 	Port string
 	// StatusPort is the listener published as an FSC service; it serves
 	// only the status lookup (status.go).
-	StatusPort     string
+	StatusPort string
+	// Store is storeMemory or storePostgres.
+	Store          string
+	DatabaseURL    string
 	SigningKeyPath string
-	SigningKeyID   string
-	TokenIssuer    string
-	TokenAudience  string
+	// SigningKeyID, when empty, is derived from the signing key.
+	SigningKeyID  string
+	TokenIssuer   string
+	TokenAudience string
 }
+
+const (
+	storeMemory   = "memory"
+	storePostgres = "postgres"
+)
 
 func loadConfig() (config, error) {
 	cfg := config{
 		Port:           getEnv("PORT", "4002"),
 		StatusPort:     getEnv("STATUS_PORT", "4012"),
+		Store:          os.Getenv("CONSENT_STORE"),
+		DatabaseURL:    os.Getenv("DATABASE_URL"),
 		SigningKeyPath: os.Getenv("CONSENT_SIGNING_KEY_PATH"),
-		SigningKeyID:   getEnv("CONSENT_SIGNING_KEY_ID", "gbo-consent-demo-1"),
+		SigningKeyID:   os.Getenv("CONSENT_SIGNING_KEY_ID"),
 		TokenIssuer:    getEnv("CONSENT_TOKEN_ISSUER", "https://consent-register.gbo.test"),
 		TokenAudience:  getEnv("CONSENT_TOKEN_AUDIENCE", "gbo:dvtp:pdp"),
 	}
-	if os.Getenv("DATABASE_URL") != "" && cfg.SigningKeyPath == "" {
+	switch cfg.Store {
+	case "":
+		cfg.Store = storeMemory
+		if cfg.DatabaseURL != "" {
+			cfg.Store = storePostgres
+		}
+	case storeMemory:
+		if cfg.DatabaseURL != "" {
+			return config{}, errors.New("DATABASE_URL is set but CONSENT_STORE is memory")
+		}
+	case storePostgres:
+		if cfg.DatabaseURL == "" {
+			return config{}, errors.New("DATABASE_URL is required with CONSENT_STORE=postgres")
+		}
+	default:
+		return config{}, fmt.Errorf("CONSENT_STORE must be %s or %s, not %q", storeMemory, storePostgres, cfg.Store)
+	}
+	if cfg.Store == storePostgres && cfg.SigningKeyPath == "" {
 		return config{}, errors.New("CONSENT_SIGNING_KEY_PATH is required with a persistent consent store")
 	}
 	return cfg, nil
@@ -634,7 +663,7 @@ func main() {
 	shutdown := initTracer()
 	defer func() { _ = shutdown(context.Background()) }()
 
-	store, closeStore, err := openConsentStore(context.Background())
+	store, closeStore, err := openConsentStore(context.Background(), cfg)
 	if err != nil {
 		fatal("initialising consent store", err)
 	}

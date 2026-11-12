@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -68,13 +67,12 @@ type rowScanner interface {
 	Scan(dest ...any) error
 }
 
-func openConsentStore(ctx context.Context) (ConsentStore, func(), error) {
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
+func openConsentStore(ctx context.Context, cfg config) (ConsentStore, func(), error) {
+	if cfg.Store == storeMemory {
 		return NewStore(), func() {}, nil
 	}
 
-	store, err := NewPostgreSQLStore(ctx, databaseURL)
+	store, err := NewPostgreSQLStore(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return nil, nil, err
 	}

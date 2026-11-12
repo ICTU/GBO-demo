@@ -720,6 +720,10 @@ services:
     environment:
       - OTEL_SERVICE_NAME=consent-register
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      # Demo shortcut: consents live in memory and the signing key is new at
+      # every start, its kid derived from the key. A real deployment sets
+      # CONSENT_STORE=postgres, DATABASE_URL and CONSENT_SIGNING_KEY_PATH.
+      - CONSENT_STORE=memory
       - CONSENT_TOKEN_ISSUER=https://consent-register.gbo.test
       - CONSENT_TOKEN_AUDIENCE=gbo:dvtp:pdp
       # The status lookup's own listener, published as the FSC service

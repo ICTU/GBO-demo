@@ -332,10 +332,15 @@ stubbed or a GBO interpretation.
 
 `S01` is the architecture role identifier used in the demo diagrams for the
 consent-register; it is not a separate service. The demo consent token is a
-bearer JWT. The consent-register generates an ephemeral P-256 key
-when `CONSENT_SIGNING_KEY_PATH` is empty, matching its default in-memory
-consent store. A persistent deployment must provide a stable PKCS#8 or SEC1
-P-256 private key and set an explicit `CONSENT_SIGNING_KEY_ID`. The demo JWKS
+bearer JWT. The consent-register keeps consents in memory with
+`CONSENT_STORE=memory` (the compose demo) and in PostgreSQL with
+`CONSENT_STORE=postgres` and `DATABASE_URL`; without `CONSENT_STORE` it
+uses PostgreSQL when `DATABASE_URL` is set. It generates an ephemeral P-256
+key when `CONSENT_SIGNING_KEY_PATH` is empty, which only the in-memory store
+allows. A persistent deployment must provide a stable PKCS#8 or SEC1 P-256
+private key. The key ID is `CONSENT_SIGNING_KEY_ID` when set, else the key's
+RFC 7638 JWK thumbprint, so a new key always gets a new key ID and the PDP
+fetches the JWKS again instead of verifying with a cached old key. The demo JWKS
 exposes only the current key; production rotation must retain old public keys
 until their tokens expire. Production hardening should also shorten the token
 lifetime and bind proof of possession
