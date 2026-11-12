@@ -984,8 +984,10 @@ services:
         condition: service_started
 
   # === Consent register (GBO, provider of consent-status) ================
-  # The register's own peer. Its Inway publishes only the status lookup,
-  # which the PDP of a source asks per evaluation (#383).
+  # The register's own peer. Its Inway publishes the status lookup, which the
+  # PDP of a source asks per evaluation (#383), and consent-authorization, the
+  # consent portal's endpoint where service providers push their request to
+  # start a consent flow (#427, #648).
 
   cr-migrations-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
@@ -1069,10 +1071,12 @@ services:
   cr-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
     restart: unless-stopped
-    # Counter-signs a connection to consent-status only when the OpenFTV PDP
-    # allows it (policies/fsc/autosign.rego), as the source Managers do. The
-    # PDP's own peer is admitted to this peer in the onboarding register's
-    # configuration; no other peer is.
+    # Counter-signs a connection only when the OpenFTV PDP allows it
+    # (policies/fsc/autosign.rego), as the source Managers do. The onboarding
+    # register's demo configuration admits the PDP's peer and the two demo
+    # service providers (...0300, ...1000) to this peer. The policy does not
+    # see which service a contract is for, so either may also connect to
+    # consent-status, which answers only for a consent id it already holds.
     command:
       [
         "/usr/local/bin/manager",
@@ -1135,8 +1139,9 @@ services:
       TX_LOG_API_ADDRESS: https://cr-txlog-api:9443
       MANAGER_INTERNAL_UNAUTHENTICATED_ADDRESS: https://cr-manager:9444
       # No AuthZEN hook: the connection contract is the authorization for
-      # consent-status, and the register reads the calling peer from the
-      # Fsc-Authorization token this Inway forwards (#383).
+      # consent-status and consent-authorization; the register and the consent
+      # portal read the calling peer from the Fsc-Authorization token this
+      # Inway forwards.
     depends_on:
       - cr-controller
       - cr-manager

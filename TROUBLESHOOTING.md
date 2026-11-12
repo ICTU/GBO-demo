@@ -95,6 +95,23 @@ Check the `make fsc-seed-bri` output. Common causes:
   but does not contain the peer: admit that peer in the register. The source
   Manager does not counter-sign in either case.
 
+## `fsc-seed-consent-authorization` stops: not admitted to the consent register
+
+The consent register's Manager (peer `99999999900000000700`) signs a
+connection to `consent-authorization` only for a participant the DvTP
+onboarding register admits to that peer. The demo configuration admits
+Hypotheek-BV (`99999999900000000300`) and the Installatie Register
+(`99999999900000001000`), but the register writes its seed participants into
+a new volume only. A volume from before that admission keeps the old sources,
+and the seed target stops with an error that names the missing participants.
+Fix it in one of two ways, then run `make demo` again:
+
+- In the register's admin UI (`http://localhost:9415`), add
+  `99999999900000000700` to the sources of each named participant. The PDP
+  pulls the register every 5 seconds.
+- Reset the register with all other demo data of the main stack:
+  `make demo-down`, then `docker compose down -v`.
+
 ## Every request denies with `NO_APPLICABLE_RULE`
 
 `NO_APPLICABLE_RULE` is the engine's closed-world default: no rule declares
@@ -132,7 +149,7 @@ once — the order matters, `fsc-seed-bri-hv` needs the `bri` publication the
 first target creates:
 
 ```bash
-make fsc-seed-bri fsc-seed-rvig-source fsc-seed-metadata fsc-seed-bri-hv fsc-seed-consent-status
+make fsc-seed-bri fsc-seed-rvig-source fsc-seed-metadata fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-consent-authorization
 ```
 
 The `svc` claim in the decoded token names the failing service. To repair just
@@ -145,6 +162,7 @@ that one:
 | `brp` | EDI-issuer → Belastingdienst (RvIG source) | `make fsc-seed-rvig-source` |
 | `gbo-metadata-bd`, `gbo-metadata-rvig` | EDI-issuer → Belastingdienst | `make fsc-seed-metadata` |
 | `consent-status` | PDP → Toestemmingsregister | `make fsc-seed-consent-status` |
+| `consent-authorization` | Hypotheekverlener, Installatie Register → Toestemmingsregister | `make fsc-seed-consent-authorization` |
 
 The `sub` claim tells the two `bri` rows apart: `99999999900000000100` is the
 EDI-issuer, `99999999900000000300` the Hypotheekverlener.

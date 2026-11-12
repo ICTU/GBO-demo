@@ -357,6 +357,20 @@ The DvTP onboarding register also reads `DIENSTVERLENER_PUBLIC_URL` and
 `KEYPER_PUBLIC_URL` to build the registered return locations of both demo
 providers, so set both when you run on your own host.
 
+A service provider can push its request to start a consent flow to the consent
+portal over FSC, as a pushed authorization request (RFC 9126): `POST /par` on
+the FSC service `consent-authorization` of the consent register's peer, which
+both demo providers reach through their Outway at `/consent-authorization`
+(`make fsc-seed-consent-authorization`, part of `make demo`). The request
+carries `response_type=code`, `client_id` (the provider's own Peer ID),
+`service`, `scope` (space-separated data sets), `redirect_uri`, `state` and an
+S256 `code_challenge`; `valid_until`, `client_name` and `purpose` are
+optional. The portal checks it against the provider's registration in the
+DvTP onboarding register and answers `201` with a `request_uri` and
+`expires_in` (`PAR_REQUEST_LIFETIME`, default 10 minutes), or refuses it with
+an OAuth error and the reason code in `reason`. The demo providers do not use
+it yet: their flow still starts with the redirect described above.
+
 ### EUDI wallet issuance
 
 1. Start `make demo-full` or `make demo-eudi` and open the
