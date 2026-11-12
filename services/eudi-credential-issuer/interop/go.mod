@@ -5,7 +5,7 @@ go 1.26.10
 require (
 	gbo-demo/eudi-credential-issuer v0.0.0
 	gbo-demo/oid4vc-kit v0.0.0
-	github.com/go-jose/go-jose/v4 v4.1.5
+	github.com/go-jose/go-jose/v4 v4.1.6
 	github.com/idfoundry/fapigo v0.65.1
 	github.com/idfoundry/oid4vcgo v0.56.0
 )
