@@ -713,31 +713,46 @@ fsc-down:
 fsc-test: fsc-up
 	bash fsc-infra/test/request-org-cert.sh
 
+# Files fsc-clean removes. Containers write them as root or uid 1001. Under
+# rootful Docker, and under rootless Docker or Podman (where uid 1001 maps to a
+# subuid), the host user cannot delete them without sudo; fsc-clean then
+# deletes them from a container of the pki-tools image that wrote them.
+FSC_CLEAN_FILES = \
+	fsc-infra/pki/ca/*.pem \
+	fsc-infra/pki/ca/*.csr \
+	fsc-infra/directory-peer/pki/org/*.pem \
+	fsc-infra/directory-peer/pki/internal/*.pem \
+	fsc-infra/directory-ui/pki/org/*.pem \
+	fsc-infra/orgs/edi-issuer/pki/org/*.pem \
+	fsc-infra/orgs/edi-issuer/pki/internal/*.pem \
+	fsc-infra/orgs/belastingdienst-mock/pki/org/*.pem \
+	fsc-infra/orgs/belastingdienst-mock/pki/internal/*.pem \
+	fsc-infra/orgs/brp-mock/pki/org/*.pem \
+	fsc-infra/orgs/brp-mock/pki/internal/*.pem \
+	fsc-infra/orgs/hypotheekverlener-mock/pki/org/*.pem \
+	fsc-infra/orgs/hypotheekverlener-mock/pki/internal/*.pem \
+	fsc-infra/orgs/consent-register/pki/org/*.pem \
+	fsc-infra/orgs/consent-register/pki/internal/*.pem \
+	fsc-infra/orgs/gbo-pdp/pki/org/*.pem \
+	fsc-infra/orgs/gbo-pdp/pki/internal/*.pem \
+	fsc-infra/orgs/installatieregister/pki/org/*.pem \
+	fsc-infra/orgs/installatieregister/pki/internal/*.pem \
+	fsc-infra/orgs/integrator/pki/org/*.pem \
+	fsc-infra/orgs/integrator/pki/internal/*.pem \
+	fsc-infra/orgs/asip/pki/org/*.pem \
+	fsc-infra/orgs/asip/pki/internal/*.pem \
+	services/openftv-pdp/certs/*.pem
+
+# The files go first: `down --rmi local` removes the compose-built pki-tools
+# image that the container fallback needs. --pull=never because the image is
+# local only and must never come from a registry.
 fsc-clean:
+	rm -f $(FSC_CLEAN_FILES) 2>/dev/null || { \
+		echo "-> Host rm failed (files owned by container users); removing them from a pki-tools container"; \
+		docker run --rm --pull=never -v "$(CURDIR):/work" -w /work gbo-demo/pki-tools:local \
+			sh -c 'rm -f $(FSC_CLEAN_FILES)'; \
+	}
 	$(FSC_COMPOSE) --profile integrator --profile asi down -v --rmi local
-	rm -f fsc-infra/pki/ca/*.pem fsc-infra/pki/ca/*.csr
-	rm -f fsc-infra/directory-peer/pki/org/*.pem
-	rm -f fsc-infra/directory-peer/pki/internal/*.pem
-	rm -f fsc-infra/directory-ui/pki/org/*.pem
-	rm -f fsc-infra/orgs/edi-issuer/pki/org/*.pem
-	rm -f fsc-infra/orgs/edi-issuer/pki/internal/*.pem
-	rm -f fsc-infra/orgs/belastingdienst-mock/pki/org/*.pem
-	rm -f fsc-infra/orgs/belastingdienst-mock/pki/internal/*.pem
-	rm -f fsc-infra/orgs/brp-mock/pki/org/*.pem
-	rm -f fsc-infra/orgs/brp-mock/pki/internal/*.pem
-	rm -f fsc-infra/orgs/hypotheekverlener-mock/pki/org/*.pem
-	rm -f fsc-infra/orgs/hypotheekverlener-mock/pki/internal/*.pem
-	rm -f fsc-infra/orgs/consent-register/pki/org/*.pem
-	rm -f fsc-infra/orgs/consent-register/pki/internal/*.pem
-	rm -f fsc-infra/orgs/gbo-pdp/pki/org/*.pem
-	rm -f fsc-infra/orgs/gbo-pdp/pki/internal/*.pem
-	rm -f fsc-infra/orgs/installatieregister/pki/org/*.pem
-	rm -f fsc-infra/orgs/installatieregister/pki/internal/*.pem
-	rm -f fsc-infra/orgs/integrator/pki/org/*.pem
-	rm -f fsc-infra/orgs/integrator/pki/internal/*.pem
-	rm -f fsc-infra/orgs/asip/pki/org/*.pem
-	rm -f fsc-infra/orgs/asip/pki/internal/*.pem
-	rm -f services/openftv-pdp/certs/*.pem
 
 # Contract-seed: register bri-service + publication + connection contract
 # via mTLS to the FSC Manager/Controller APIs. Requires that fsc-all-up
