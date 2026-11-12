@@ -100,3 +100,86 @@ func TestOpenCreatesTheDatabaseDirectory(t *testing.T) {
 	}
 	_ = repository.Close()
 }
+
+// Records whose start times differ only in trailing fraction zeros: as
+// RFC3339Nano text "05.5Z" sorts before "05Z" and ".12Z" before ".1Z".
+func TestQueryOrdersAndFiltersByTimeNotText(t *testing.T) {
+	repository, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer func() { _ = repository.Close() }()
+
+	ctx := context.Background()
+	second := time.Date(2026, 9, 2, 10, 0, 5, 0, time.UTC)
+	starts := map[string]time.Duration{
+		"0000000000000001": 500 * time.Millisecond, // 05.5Z
+		"0000000000000002": 0,                      // 05Z
+		"0000000000000003": 120 * time.Millisecond, // 05.12Z
+		"0000000000000004": 100 * time.Millisecond, // 05.1Z
+	}
+	for spanID, offset := range starts {
+		record := sampleRecord(spanID)
+		record.StartTime = second.Add(offset)
+		record.EndTime = record.StartTime
+		if err := repository.Append(ctx, record); err != nil {
+			t.Fatalf("append %s: %v", spanID, err)
+		}
+	}
+
+	spanIDs := func(query ldv.Query) []string {
+		t.Helper()
+		query.TraceID = sampleRecord("").TraceID
+		query.Limit = ldv.MaxReadLimit
+		records, err := repository.Query(ctx, query)
+		if err != nil {
+			t.Fatalf("query: %v", err)
+		}
+		ids := make([]string, 0, len(records))
+		for _, record := range records {
+			ids = append(ids, record.SpanID[len(record.SpanID)-1:])
+		}
+		return ids
+	}
+	at := func(offset time.Duration) *time.Time {
+		value := second.Add(offset)
+		return &value
+	}
+
+	for _, tc := range []struct {
+		name  string
+		query ldv.Query
+		want  string
+	}{
+		{"order", ldv.Query{}, "2431"},
+		{"start at the whole second includes all", ldv.Query{StartTime: at(0)}, "2431"},
+		{"start at .1 excludes 05Z", ldv.Query{StartTime: at(100 * time.Millisecond)}, "431"},
+		{"start at .12 excludes .1", ldv.Query{StartTime: at(120 * time.Millisecond)}, "31"},
+		{"end at the whole second keeps only 05Z", ldv.Query{EndTime: at(0)}, "2"},
+		{"end at .1 excludes .12 and .5", ldv.Query{EndTime: at(100 * time.Millisecond)}, "24"},
+		{"end at .12 excludes .5", ldv.Query{EndTime: at(120 * time.Millisecond)}, "243"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ""
+			for _, id := range spanIDs(tc.query) {
+				got += id
+			}
+			if got != tc.want {
+				t.Fatalf("span order = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseTimeReadsTrimmedFractions(t *testing.T) {
+	want := time.Date(2026, 9, 2, 10, 0, 5, 500_000_000, time.UTC)
+	for _, text := range []string{"2026-09-02T10:00:05.5Z", formatTime(want)} {
+		got, err := parseTime(text)
+		if err != nil || !got.Equal(want) {
+			t.Fatalf("parseTime(%q) = %v, %v; want %v", text, got, err, want)
+		}
+	}
+	if got := formatTime(want); got != "2026-09-02T10:00:05.500000000Z" {
+		t.Fatalf("formatTime = %q", got)
+	}
+}
