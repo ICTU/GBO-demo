@@ -84,7 +84,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${FSC_POSTGRES_PASSWORD}
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U postgres -d postgres" ]
+      test: [ "CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d postgres" ]
       interval: 10s
       retries: 5
       start_period: 10s

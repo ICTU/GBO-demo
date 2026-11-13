@@ -28,6 +28,19 @@ in `.env` (more names in `GBO_EXTRA_ALLOWED_HOSTS`, comma-separated) and run
 
 Symptoms of insufficient RAM: containers crash at random, `docker compose logs` shows OOM kills.
 
+## `healthcheck.start_interval` requires Docker Engine v25
+
+`make demo` stops with:
+
+```text
+can't set healthcheck.start_interval as feature require Docker Engine v25 or later
+```
+
+Docker Compose v2.24 to v5.0.2 refuse `start_interval` when the engine reports
+a Docker API below 1.44: Docker Engine before 25 and Podman before 5.8.
+Check with `docker version --format '{{.Server.APIVersion}}'` and upgrade the
+engine.
+
 ## Missing certificates
 
 The `demo-*` targets generate the local FSC certificates in the correct order.

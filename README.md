@@ -26,7 +26,8 @@ consumer → FSC Outway → FSC Inway → OpenFTV PDP → source sidecar → Gra
 
 For every mode:
 
-- Docker with the Compose plugin;
+- Docker Engine 25 or newer with the Compose plugin, or Podman 5.8 or newer
+  (Docker API 1.44; see [TROUBLESHOOTING.md](TROUBLESHOOTING.md#healthcheckstart_interval-requires-docker-engine-v25));
 - Git, Make, Bash, `curl`, `jq`, OpenSSL and Python 3.9 or newer;
 - a local `.env` copied from `.env.example`;
 - non-empty `FTV_POSTGRES_PASSWORD`, `FTV_ADL_READER_PASSWORD`,
