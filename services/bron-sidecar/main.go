@@ -561,7 +561,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           otelhttp.NewHandler(mux, serviceName),
+		Handler:           otelhttp.NewHandler(mux, serviceName, otelhttp.WithFilter(traceRequest)),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 	slog.Info("sidecar starting",
@@ -597,3 +597,6 @@ func serve(srv *http.Server) {
 		_ = srv.Close()
 	}
 }
+
+// traceRequest keeps the container healthcheck out of the traces.
+func traceRequest(r *http.Request) bool { return r.URL.Path != "/health" }

@@ -1098,7 +1098,7 @@ func main() {
 	baseCtx, endStreams := context.WithCancel(context.Background())
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           otelhttp.NewHandler(withAccessLog(mux), "dev-portal-backend"),
+		Handler:           otelhttp.NewHandler(withAccessLog(mux), "dev-portal-backend", otelhttp.WithFilter(traceRequest)),
 		ReadHeaderTimeout: readHeaderTimeout,
 		BaseContext:       func(net.Listener) context.Context { return baseCtx },
 	}
@@ -1158,3 +1158,6 @@ func serve(srv *http.Server, endStreams context.CancelFunc) {
 		_ = srv.Close()
 	}
 }
+
+// traceRequest keeps the container healthcheck out of the traces.
+func traceRequest(r *http.Request) bool { return r.URL.Path != "/health" }

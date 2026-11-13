@@ -694,12 +694,12 @@ func main() {
 	serve(
 		&http.Server{
 			Addr:              ":" + cfg.Port,
-			Handler:           otelhttp.NewHandler(withAccessLog(newMux(store, issuer, logbook)), serviceName),
+			Handler:           otelhttp.NewHandler(withAccessLog(newMux(store, issuer, logbook)), serviceName, otelhttp.WithFilter(traceRequest)),
 			ReadHeaderTimeout: readHeaderTimeout,
 		},
 		&http.Server{
 			Addr:              ":" + cfg.StatusPort,
-			Handler:           otelhttp.NewHandler(withAccessLog(newStatusMux(store, logbook)), serviceName),
+			Handler:           otelhttp.NewHandler(withAccessLog(newStatusMux(store, logbook)), serviceName, otelhttp.WithFilter(traceRequest)),
 			ReadHeaderTimeout: readHeaderTimeout,
 		},
 	)
@@ -733,3 +733,6 @@ func serve(servers ...*http.Server) {
 		}
 	}
 }
+
+// traceRequest keeps the container healthcheck out of the traces.
+func traceRequest(r *http.Request) bool { return r.URL.Path != "/health" }
