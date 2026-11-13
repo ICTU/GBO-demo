@@ -204,7 +204,7 @@ services:
       - ./services/openftv-manager/initdb:/docker-entrypoint-initdb.d:ro
     networks: [backend]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ftv -d ftv_manager"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ftv -d ftv_manager"]
       <<: *healthcheck-timing
       timeout: 3s
       retries: 10
@@ -1764,7 +1764,7 @@ services:
       - postgres-eudi-data:/var/lib/postgresql/data
     networks: [eudi]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U wallet -d issuance_server"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U wallet -d issuance_server"]
       <<: *healthcheck-timing
       timeout: 3s
       retries: 10
