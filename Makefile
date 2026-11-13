@@ -15,6 +15,13 @@ export
 # .env if needed.
 NLWALLET_PATH ?= $(PWD)/vendor/nl-wallet
 
+# Healthchecks probe a starting container every 2 s (start_interval) and a
+# healthy one every HEALTHCHECK_INTERVAL. Podman ignores start_interval, so it
+# keeps probing every 5 s there to keep startup quick. Override in .env.
+ifeq ($(origin HEALTHCHECK_INTERVAL),undefined)
+HEALTHCHECK_INTERVAL := $(if $(findstring Podman,$(shell docker version 2>/dev/null)),5s,30s)
+endif
+
 # Local Source Registry onboarding. Development certificates are provisioned
 # only by the explicit provision-development-certificates target.
 DEVELOPMENT_SOURCE_OIN ?= 99999999900000000200
