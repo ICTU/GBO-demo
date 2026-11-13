@@ -29,7 +29,7 @@ import (
 // NewHandler is the whole HTTP stack. withFscTraceContext wraps otelhttp: the
 // header it sets must be in place before otelhttp extracts the parent context.
 func NewHandler(c *consumer.Consumer, serviceName string) http.Handler {
-	return withFscTraceContext(otelhttp.NewHandler(withDemoSession(withAccessLog(NewMux(c))), serviceName))
+	return withFscTraceContext(otelhttp.NewHandler(withDemoSession(withAccessLog(NewMux(c))), serviceName, otelhttp.WithFilter(traceRequest)))
 }
 
 // NewMux is the routing tree without the middleware, for tests.
@@ -204,3 +204,6 @@ func randomSpanIDHex() string {
 	}
 	return hex.EncodeToString(b[:])
 }
+
+// traceRequest keeps the container healthcheck out of the traces.
+func traceRequest(r *http.Request) bool { return r.URL.Path != "/health" }

@@ -774,7 +774,7 @@ func main() {
 	// mutation must happen before otelhttp extracts the parent context.
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           withFscTraceContext(otelhttp.NewHandler(runtimeHandler, "eudi-adapter")),
+		Handler:           withFscTraceContext(otelhttp.NewHandler(runtimeHandler, "eudi-adapter", otelhttp.WithFilter(traceRequest))),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 	slog.Info("eudi-adapter starting", "addr", srv.Addr, "outway", cfg.OutwayURL)
@@ -807,3 +807,6 @@ func serve(srv *http.Server) {
 		_ = srv.Close()
 	}
 }
+
+// traceRequest keeps the container healthcheck out of the traces.
+func traceRequest(r *http.Request) bool { return r.URL.Path != "/health" }

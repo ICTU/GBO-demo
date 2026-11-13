@@ -505,7 +505,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           otelhttp.NewHandler(withAccessLog(mux), "graphql-server"),
+		Handler:           otelhttp.NewHandler(withAccessLog(mux), "graphql-server", otelhttp.WithFilter(traceRequest)),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 	serve(srv)
@@ -535,3 +535,6 @@ func serve(srv *http.Server) {
 		_ = srv.Close()
 	}
 }
+
+// traceRequest keeps the container healthcheck out of the traces.
+func traceRequest(r *http.Request) bool { return r.URL.Path != "/health" }

@@ -157,7 +157,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           otelhttp.NewHandler(withAccessLog(mux), "bsnk-mock"),
+		Handler:           otelhttp.NewHandler(withAccessLog(mux), "bsnk-mock", otelhttp.WithFilter(traceRequest)),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 	serve(srv)
@@ -187,3 +187,6 @@ func serve(srv *http.Server) {
 		_ = srv.Close()
 	}
 }
+
+// traceRequest keeps the container healthcheck out of the traces.
+func traceRequest(r *http.Request) bool { return r.URL.Path != "/health" }
