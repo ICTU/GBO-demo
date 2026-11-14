@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp/filters"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
@@ -157,7 +158,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           otelhttp.NewHandler(withAccessLog(mux), "bsnk-mock"),
+		Handler:           otelhttp.NewHandler(withAccessLog(mux), "bsnk-mock", otelhttp.WithFilter(filters.Not(filters.Path("/health")))),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 	serve(srv)

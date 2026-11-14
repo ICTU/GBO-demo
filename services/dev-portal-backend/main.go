@@ -35,6 +35,7 @@ import (
 	"gbo-demo/dev-portal-backend/internal/testpid/issuerhttp"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp/filters"
 	"net"
 	"os/signal"
 	"syscall"
@@ -1098,7 +1099,7 @@ func main() {
 	baseCtx, endStreams := context.WithCancel(context.Background())
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           otelhttp.NewHandler(withAccessLog(mux), "dev-portal-backend"),
+		Handler:           otelhttp.NewHandler(withAccessLog(mux), "dev-portal-backend", otelhttp.WithFilter(filters.Not(filters.Path("/health")))),
 		ReadHeaderTimeout: readHeaderTimeout,
 		BaseContext:       func(net.Listener) context.Context { return baseCtx },
 	}

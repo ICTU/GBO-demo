@@ -50,6 +50,7 @@ import (
 
 	"github.com/google/uuid"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp/filters"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
@@ -774,7 +775,7 @@ func main() {
 	// mutation must happen before otelhttp extracts the parent context.
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           withFscTraceContext(otelhttp.NewHandler(runtimeHandler, "eudi-adapter")),
+		Handler:           withFscTraceContext(otelhttp.NewHandler(runtimeHandler, "eudi-adapter", otelhttp.WithFilter(filters.Not(filters.Path("/health"))))),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 	slog.Info("eudi-adapter starting", "addr", srv.Addr, "outway", cfg.OutwayURL)
