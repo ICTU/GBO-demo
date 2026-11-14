@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp/filters"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
@@ -326,7 +327,7 @@ func main() {
 	baseCtx, endStreams := context.WithCancel(context.Background())
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           otelhttp.NewHandler(portalhttp.WithDemoSession(logctx.WithAccessLog(newMux(cfg, hub, logbook))), serviceName, otelhttp.WithFilter(traceRequest)),
+		Handler:           otelhttp.NewHandler(portalhttp.WithDemoSession(logctx.WithAccessLog(newMux(cfg, hub, logbook))), serviceName, otelhttp.WithFilter(filters.Not(filters.Path("/health")))),
 		ReadHeaderTimeout: readHeaderTimeout,
 		BaseContext:       func(net.Listener) context.Context { return baseCtx },
 	}
@@ -367,6 +368,3 @@ func serve(srv *http.Server, endStreams context.CancelFunc) {
 		_ = srv.Close()
 	}
 }
-
-// traceRequest keeps the container healthcheck out of the traces.
-func traceRequest(r *http.Request) bool { return r.URL.Path != "/health" }

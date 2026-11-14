@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp/filters"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
@@ -694,12 +695,12 @@ func main() {
 	serve(
 		&http.Server{
 			Addr:              ":" + cfg.Port,
-			Handler:           otelhttp.NewHandler(withAccessLog(newMux(store, issuer, logbook)), serviceName, otelhttp.WithFilter(traceRequest)),
+			Handler:           otelhttp.NewHandler(withAccessLog(newMux(store, issuer, logbook)), serviceName, otelhttp.WithFilter(filters.Not(filters.Path("/health")))),
 			ReadHeaderTimeout: readHeaderTimeout,
 		},
 		&http.Server{
 			Addr:              ":" + cfg.StatusPort,
-			Handler:           otelhttp.NewHandler(withAccessLog(newStatusMux(store, logbook)), serviceName, otelhttp.WithFilter(traceRequest)),
+			Handler:           otelhttp.NewHandler(withAccessLog(newStatusMux(store, logbook)), serviceName, otelhttp.WithFilter(filters.Not(filters.Path("/health")))),
 			ReadHeaderTimeout: readHeaderTimeout,
 		},
 	)
@@ -733,6 +734,3 @@ func serve(servers ...*http.Server) {
 		}
 	}
 }
-
-// traceRequest keeps the container healthcheck out of the traces.
-func traceRequest(r *http.Request) bool { return r.URL.Path != "/health" }
