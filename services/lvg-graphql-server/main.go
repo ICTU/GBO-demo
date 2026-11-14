@@ -26,6 +26,7 @@ import (
 	"github.com/graphql-go/graphql/language/ast"
 	"github.com/graphql-go/handler"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp/filters"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
@@ -288,7 +289,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           otelhttp.NewHandler(withAccessLog(newMux(&schema, tracer, newSourceLogbook(client, cfg.LDVQuery))), serviceName, otelhttp.WithFilter(traceRequest)),
+		Handler:           otelhttp.NewHandler(withAccessLog(newMux(&schema, tracer, newSourceLogbook(client, cfg.LDVQuery))), serviceName, otelhttp.WithFilter(filters.Not(filters.Path("/health")))),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 	serve(srv)
@@ -316,6 +317,3 @@ func serve(srv *http.Server) {
 		_ = srv.Close()
 	}
 }
-
-// traceRequest keeps the container healthcheck out of the traces.
-func traceRequest(r *http.Request) bool { return r.URL.Path != "/health" }

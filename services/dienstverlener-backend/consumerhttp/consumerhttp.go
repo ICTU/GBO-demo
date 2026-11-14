@@ -21,6 +21,7 @@ import (
 	"gbo-demo/dienstverlener-backend/consumer"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp/filters"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -29,7 +30,7 @@ import (
 // NewHandler is the whole HTTP stack. withFscTraceContext wraps otelhttp: the
 // header it sets must be in place before otelhttp extracts the parent context.
 func NewHandler(c *consumer.Consumer, serviceName string) http.Handler {
-	return withFscTraceContext(otelhttp.NewHandler(withDemoSession(withAccessLog(NewMux(c))), serviceName, otelhttp.WithFilter(traceRequest)))
+	return withFscTraceContext(otelhttp.NewHandler(withDemoSession(withAccessLog(NewMux(c))), serviceName, otelhttp.WithFilter(filters.Not(filters.Path("/health")))))
 }
 
 // NewMux is the routing tree without the middleware, for tests.
@@ -204,6 +205,3 @@ func randomSpanIDHex() string {
 	}
 	return hex.EncodeToString(b[:])
 }
-
-// traceRequest keeps the container healthcheck out of the traces.
-func traceRequest(r *http.Request) bool { return r.URL.Path != "/health" }
