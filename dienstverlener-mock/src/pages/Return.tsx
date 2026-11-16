@@ -231,8 +231,9 @@ export default function Return() {
   const completedRef = useRef(false)
 
   useEffect(() => {
+    // Keep the router's own history state; only the query goes.
     if (window.location.search) {
-      window.history.replaceState(null, '', window.location.pathname)
+      window.history.replaceState(window.history.state, '', window.location.pathname)
     }
     if (!back || completedRef.current) return
     completedRef.current = true

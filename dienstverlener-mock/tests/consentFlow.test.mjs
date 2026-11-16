@@ -86,7 +86,7 @@ test('the app keeps no consent token or code in browser storage and never sends 
 
 test('the return page takes the code out of the address bar and completes once', async () => {
   const source = await readFile(new URL('../src/pages/Return.tsx', import.meta.url), 'utf8')
-  assert.match(source, /history\.replaceState\(null, '', window\.location\.pathname\)/)
+  assert.match(source, /history\.replaceState\(window\.history\.state, '', window\.location\.pathname\)/)
   assert.match(source, /completeConsent\(back\)/)
   assert.equal([...source.matchAll(/completeConsent\(/g)].length, 1)
   assert.match(source, /completedRef\.current = true/)

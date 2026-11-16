@@ -229,8 +229,11 @@ export function PortalTerug() {
   const started = useRef(false)
 
   useEffect(() => {
-    // The code is for the backend, not the address bar or the history.
-    if (window.location.search) window.history.replaceState(null, '', window.location.pathname)
+    // The code is for the backend, not the address bar or the history. The
+    // router's own history state stays.
+    if (window.location.search) {
+      window.history.replaceState(window.history.state, '', window.location.pathname)
+    }
     if (started.current || !aanvraag) return
     started.current = true
     if (!back) {

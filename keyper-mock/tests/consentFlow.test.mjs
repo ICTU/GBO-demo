@@ -103,7 +103,7 @@ test('the browser keeps no consent token or code, and the ownership check sends 
 
 test('the return page takes the code out of the address bar and completes once', async () => {
   const source = await readFile(new URL('../src/screens/eigenaar.tsx', import.meta.url), 'utf8')
-  assert.match(source, /history\.replaceState\(null, '', window\.location\.pathname\)/)
+  assert.match(source, /history\.replaceState\(window\.history\.state, '', window\.location\.pathname\)/)
   assert.equal([...source.matchAll(/completeConsent\(/g)].length, 1)
   assert.match(source, /started\.current = true/)
 })
