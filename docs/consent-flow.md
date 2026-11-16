@@ -207,7 +207,16 @@ return location:
   elke provider een eigen origin.
 - De directe `POST /portal/consents` blijft bestaan als developer-API (token
   in het antwoord, doel uit het verzoek); het developer portal en de
-  integrator gebruiken die.
+  integrator gebruiken die. Die API slaat de toelatingscontroles van het
+  pushed request over: ook een inactieve of niet-geregistreerde
+  dienstverlener krijgt er een consent mee, en wie een portal-login heeft,
+  kan er via de `/portal-api`-proxy van het portaal een token voor elke
+  `dienstverlener_oin` mee laten maken. Het developer portal bewaart de
+  tokens die het zo krijgt in `sessionStorage`. De belofte hierboven dat het
+  token nooit in een URL of in browser storage staat, geldt dus voor de
+  stroom van de dienstverlener, niet voor deze API. Een echte uitrol heeft
+  zo'n endpoint niet voor tokens van burgers, of beperkt het tot de
+  ontwikkelomgeving.
 
 Het token bevat de bindings waarop de PDP later beslist:
 
