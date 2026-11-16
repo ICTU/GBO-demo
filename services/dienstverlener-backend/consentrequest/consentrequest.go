@@ -64,11 +64,13 @@ const (
 )
 
 // Completed is the end of a request. It names the consent but never holds
-// its token.
+// its token. SessionID is set when the consent went into a new session: the
+// browser's session id from then on.
 type Completed struct {
 	Outcome   Outcome
 	ConsentID string
 	Scopes    []string
+	SessionID string
 	// Error is the error the portal returned, for logs.
 	Error string
 }
@@ -130,9 +132,11 @@ func (r *Requester) Start(ctx context.Context, sessionID string, req Request) (S
 }
 
 // Complete ends the pending request of the session with what the browser
-// brought back. A code is exchanged for the consent token, which the session
-// keeps. A return whose state does not match leaves the pending request as it
-// is.
+// brought back. A code is exchanged for the consent token. The token goes into
+// a new session, whose id Completed carries, and the old session is deleted:
+// an id someone else knew before the grant (a session fixation, for example a
+// cookie planted by another page on the same host) never gets the token. A
+// return whose state does not match leaves the pending request as it is.
 func (r *Requester) Complete(ctx context.Context, sessionID string, ret Return) (Completed, error) {
 	if ret.State == "" || (ret.Code == "") == (ret.Error == "") {
 		return Completed{}, ErrInvalidReturn
@@ -173,14 +177,17 @@ func (r *Requester) Complete(ctx context.Context, sessionID string, ret Return) 
 	if err != nil {
 		return Completed{}, err
 	}
-	err = r.Sessions.Update(ctx, sessionID, func(s *Session) error {
-		s.Consent = &consent
-		return nil
-	})
+	// The old session holds nothing more than the new one: its pending
+	// request is gone and its consent, if any, is replaced. A new session
+	// also keeps the token when the old one expired during the exchange.
+	newID, err := r.Sessions.New(ctx, Session{Consent: &consent})
 	if err != nil {
 		return Completed{}, err
 	}
-	return Completed{Outcome: Granted, ConsentID: consent.ConsentID, Scopes: consent.Scopes}, nil
+	if err := r.Sessions.Delete(ctx, sessionID); err != nil {
+		return Completed{}, err
+	}
+	return Completed{Outcome: Granted, ConsentID: consent.ConsentID, Scopes: consent.Scopes, SessionID: newID}, nil
 }
 
 // ConsentToken is the consent token the session holds, if any.

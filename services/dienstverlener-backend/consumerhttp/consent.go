@@ -3,6 +3,7 @@ package consumerhttp
 import (
 	"encoding/json"
 	"errors"
+	"mime"
 	"net/http"
 	"time"
 
@@ -12,7 +13,20 @@ import (
 // ConsentFlow serves the provider's side of a consent request: start and
 // complete. The browser reaches it through its frontend's /api proxy, so the
 // session cookie belongs to the frontend's origin. It is HttpOnly and
-// SameSite=Lax, and Secure when the frontend is served over https.
+// SameSite=Lax, and Secure when the frontend is served over https. A granted
+// consent gets a new session id.
+//
+// SameSite=Lax does not stop requests from other ports on the same host or
+// from sibling subdomains: those are same-site. So every request that acts
+// with the session cookie must be JSON (another origin cannot send that
+// without a CORS preflight, which these routes do not pass) and, when the
+// browser says where it comes from (Sec-Fetch-Site), come from the same
+// origin.
+//
+// Demo shortcut: the demo serves every frontend on one host, so the browser
+// sends each provider's session cookie to every frontend's /api proxy, and a
+// co-hosted provider could replay it against another provider's backend. A
+// real deployment gives each provider its own origin.
 type ConsentFlow struct {
 	Requester *consentrequest.Requester
 	// CookieName must differ per provider: browsers do not tell cookies of
@@ -41,6 +55,9 @@ type completeResponse struct {
 	Scopes    []string               `json:"scopes,omitempty"`
 }
 
+// maxFlowBody bounds the body of a start or complete request.
+const maxFlowBody = 64 << 10
+
 type flowError struct {
 	Error       string `json:"error"`
 	Reason      string `json:"reason,omitempty"`
@@ -51,8 +68,12 @@ type flowError struct {
 // to: the portal, with only the client_id and the request_uri.
 func (f *ConsentFlow) handleStart(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
+	if status, description := crossOrigin(r); status != 0 {
+		writeJSON(w, status, flowError{Error: "invalid_request", Description: description})
+		return
+	}
 	var body startRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxFlowBody)).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, flowError{Error: "invalid_request", Description: "invalid request body"})
 		return
 	}
@@ -69,11 +90,7 @@ func (f *ConsentFlow) handleStart(w http.ResponseWriter, r *http.Request) {
 		return
 	case errors.As(err, &refusal):
 		log.Warn("consent request refused", "consent_service", body.Service, "error", refusal.Code, "reason", refusal.Reason)
-		status := http.StatusBadRequest
-		if refusal.Code == "temporarily_unavailable" {
-			status = http.StatusServiceUnavailable
-		}
-		writeJSON(w, status, flowError{Error: refusal.Code, Reason: refusal.Reason, Description: refusal.Description})
+		writeJSON(w, refusalStatus(refusal), flowError{Error: refusal.Code, Reason: refusal.Reason, Description: refusal.Description})
 		return
 	case err != nil:
 		log.Error("consent request failed", "consent_service", body.Service, "err", err.Error())
@@ -89,8 +106,12 @@ func (f *ConsentFlow) handleStart(w http.ResponseWriter, r *http.Request) {
 // granted, denied or failed decision is a 200 with its outcome.
 func (f *ConsentFlow) handleComplete(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
+	if status, description := crossOrigin(r); status != 0 {
+		writeJSON(w, status, flowError{Error: "invalid_request", Description: description})
+		return
+	}
 	var body completeRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxFlowBody)).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, flowError{Error: "invalid_request", Description: "invalid request body"})
 		return
 	}
@@ -122,7 +143,51 @@ func (f *ConsentFlow) handleComplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Info("consent request completed", "outcome", string(done.Outcome), "consent_id", done.ConsentID, "error", done.Error)
+	if done.SessionID != "" {
+		f.setCookie(w, done.SessionID)
+	}
 	writeJSON(w, http.StatusOK, completeResponse{Outcome: done.Outcome, ConsentID: done.ConsentID, Scopes: done.Scopes})
+}
+
+// refusalStatus is 400 for a refusal the caller's request caused, such as an
+// unknown data set or an unregistered service, 503 when the portal could not
+// check the request, and 502 when the provider's own registration or
+// configuration is at fault (an inactive or unknown client, an unregistered
+// return location): the browser cannot fix those.
+func refusalStatus(refusal *consentrequest.Refusal) int {
+	switch {
+	case refusal.Code == "temporarily_unavailable":
+		return http.StatusServiceUnavailable
+	case refusal.Code == "unauthorized_client", refusal.Code == "invalid_client",
+		refusal.Reason == "RETURN_URL_NOT_REGISTERED":
+		return http.StatusBadGateway
+	default:
+		return http.StatusBadRequest
+	}
+}
+
+// crossOrigin refuses a request that a page on another origin could have
+// sent with the session cookie and no CORS preflight: a body that is not
+// application/json (415), or a Sec-Fetch-Site other than same-origin (403).
+// A request without Sec-Fetch-Site (an older browser, curl) is let through on
+// the content type alone. It returns 0 for a request that may use the
+// session.
+func crossOrigin(r *http.Request) (int, string) {
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/json" {
+		return http.StatusUnsupportedMediaType, "the body must be application/json"
+	}
+	if site := r.Header.Get("Sec-Fetch-Site"); site != "" && site != "same-origin" {
+		return http.StatusForbidden, "the session is only used from the same origin"
+	}
+	return 0, ""
+}
+
+// hasSession reports whether the request carries this provider's session
+// cookie.
+func (f *ConsentFlow) hasSession(r *http.Request) bool {
+	_, err := r.Cookie(f.CookieName)
+	return err == nil
 }
 
 // consentToken is the consent token of the request's session, if any.

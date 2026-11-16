@@ -3,6 +3,7 @@ package consentrequest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"strings"
 	"sync"
@@ -15,6 +16,8 @@ type fakePortal struct {
 	pushErr   error
 	consent   Consent
 	exchErr   error
+	// onExchange runs during the exchange, if set.
+	onExchange func()
 }
 
 func (p *fakePortal) Push(_ context.Context, req PushedRequest) (string, error) {
@@ -27,12 +30,16 @@ func (p *fakePortal) Push(_ context.Context, req PushedRequest) (string, error) 
 
 func (p *fakePortal) Exchange(_ context.Context, req CodeExchange) (Consent, error) {
 	p.exchanged = append(p.exchanged, req)
+	if p.onExchange != nil {
+		p.onExchange()
+	}
 	return p.consent, p.exchErr
 }
 
 type fakeSessions struct {
 	mu       sync.Mutex
 	sessions map[string]Session
+	created  int
 }
 
 func (f *fakeSessions) New(_ context.Context, s Session) (string, error) {
@@ -41,7 +48,8 @@ func (f *fakeSessions) New(_ context.Context, s Session) (string, error) {
 	if f.sessions == nil {
 		f.sessions = map[string]Session{}
 	}
-	id := "session-" + string(rune('a'+len(f.sessions)))
+	f.created++
+	id := fmt.Sprintf("session-%d", f.created)
 	f.sessions[id] = s
 	return id, nil
 }
@@ -67,6 +75,13 @@ func (f *fakeSessions) Update(_ context.Context, id string, change func(*Session
 		return err
 	}
 	f.sessions[id] = s
+	return nil
+}
+
+func (f *fakeSessions) Delete(_ context.Context, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.sessions, id)
 	return nil
 }
 
@@ -164,8 +179,8 @@ func TestADataSetWithWhiteSpaceIsNotPushed(t *testing.T) {
 	}
 }
 
-// A code is exchanged with the session's verifier; the session keeps the
-// token, the result only names the consent.
+// A code is exchanged with the session's verifier; a new session keeps the
+// token, the result only names the consent and the new session.
 func TestAGrantedReturnPutsTheTokenInTheSession(t *testing.T) {
 	portal := &fakePortal{consent: Consent{Token: "a.b.c", ConsentID: "c-1", Scopes: []string{"bd:ib:2025"}}}
 	r, sessions := newRequester(portal)
@@ -183,11 +198,56 @@ func TestAGrantedReturnPutsTheTokenInTheSession(t *testing.T) {
 	if portal.exchanged[0] != want {
 		t.Errorf("exchanged %+v, want %+v", portal.exchanged[0], want)
 	}
-	if token, ok := r.ConsentToken(context.Background(), started.SessionID); !ok || token != "a.b.c" {
+	if done.SessionID == "" || done.SessionID == started.SessionID {
+		t.Fatalf("the consent stayed in session %q", done.SessionID)
+	}
+	if token, ok := r.ConsentToken(context.Background(), done.SessionID); !ok || token != "a.b.c" {
 		t.Errorf("session token = %q, %v", token, ok)
 	}
-	if _, err := r.Complete(context.Background(), started.SessionID, Return{Code: "code-1", State: portal.pushed[0].State}); !errors.Is(err, ErrNoPendingRequest) {
-		t.Errorf("second return: %v, want ErrNoPendingRequest", err)
+	for _, id := range []string{started.SessionID, done.SessionID} {
+		if _, err := r.Complete(context.Background(), id, Return{Code: "code-1", State: portal.pushed[0].State}); !errors.Is(err, ErrNoPendingRequest) {
+			t.Errorf("second return in %s: %v, want ErrNoPendingRequest", id, err)
+		}
+	}
+}
+
+// Session fixation: someone who knows the session id before the grant (they
+// started it themselves and planted the cookie in the citizen's browser)
+// cannot use it to get the citizen's consent.
+func TestAPlantedSessionIDDoesNotGetTheConsent(t *testing.T) {
+	portal := &fakePortal{consent: Consent{Token: "citizen.token.x", ConsentID: "c-1"}}
+	r, sessions := newRequester(portal)
+	planted := start(t, r, "").SessionID
+
+	started := start(t, r, planted) // the citizen's browser sends the planted cookie
+	done, err := r.Complete(context.Background(), started.SessionID, Return{Code: "code-1", State: portal.pushed[1].State})
+	if err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if done.SessionID == planted {
+		t.Fatal("the consent went into the planted session")
+	}
+	if token, ok := r.ConsentToken(context.Background(), planted); ok {
+		t.Errorf("the planted session id gives the token %q", token)
+	}
+	if _, err := sessions.Get(context.Background(), planted); !errors.Is(err, ErrUnknownSession) {
+		t.Errorf("the planted session still exists: %v", err)
+	}
+}
+
+// The token is kept when the session expires while the code is exchanged.
+func TestAnExpiryDuringTheExchangeKeepsTheToken(t *testing.T) {
+	portal := &fakePortal{consent: Consent{Token: "a.b.c", ConsentID: "c-1"}}
+	r, sessions := newRequester(portal)
+	started := start(t, r, "")
+	portal.onExchange = func() { _ = sessions.Delete(context.Background(), started.SessionID) }
+
+	done, err := r.Complete(context.Background(), started.SessionID, Return{Code: "code-1", State: portal.pushed[0].State})
+	if err != nil || done.Outcome != Granted {
+		t.Fatalf("complete: %+v, %v", done, err)
+	}
+	if token, ok := r.ConsentToken(context.Background(), done.SessionID); !ok || token != "a.b.c" {
+		t.Errorf("session token = %q, %v", token, ok)
 	}
 }
 
@@ -262,19 +322,25 @@ func TestAReturnWithoutAPendingRequestIsRefused(t *testing.T) {
 }
 
 // A new start in a session that holds a consent replaces the pending request
-// and keeps the consent until a new one is granted.
+// and keeps the consent until a new one is granted; a denied request does not
+// clear it.
 func TestANewStartKeepsTheConsent(t *testing.T) {
 	portal := &fakePortal{consent: Consent{Token: "a.b.c", ConsentID: "c-1"}}
 	r, _ := newRequester(portal)
 	first := start(t, r, "")
-	if _, err := r.Complete(context.Background(), first.SessionID, Return{Code: "code-1", State: portal.pushed[0].State}); err != nil {
+	done, err := r.Complete(context.Background(), first.SessionID, Return{Code: "code-1", State: portal.pushed[0].State})
+	if err != nil {
 		t.Fatal(err)
 	}
-	second := start(t, r, first.SessionID)
-	if second.SessionID != first.SessionID {
-		t.Fatalf("session %q, want %q", second.SessionID, first.SessionID)
+	second := start(t, r, done.SessionID)
+	if second.SessionID != done.SessionID {
+		t.Fatalf("session %q, want %q", second.SessionID, done.SessionID)
 	}
-	if token, ok := r.ConsentToken(context.Background(), first.SessionID); !ok || token != "a.b.c" {
+	denied, err := r.Complete(context.Background(), second.SessionID, Return{Error: "access_denied", State: portal.pushed[1].State})
+	if err != nil || denied.Outcome != Denied || denied.SessionID != "" {
+		t.Fatalf("denied: %+v, %v", denied, err)
+	}
+	if token, ok := r.ConsentToken(context.Background(), second.SessionID); !ok || token != "a.b.c" {
 		t.Errorf("token %q, %v", token, ok)
 	}
 	if third := start(t, r, "expired"); third.SessionID == "expired" {
