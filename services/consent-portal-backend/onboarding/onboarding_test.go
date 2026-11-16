@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"syscall"
 	"testing"
 	"time"
 
@@ -105,10 +107,13 @@ func TestRegistrationWhenTheRegisterFails(t *testing.T) {
 }
 
 func TestRegistrationWhenTheRegisterIsUnreachable(t *testing.T) {
-	server := httptest.NewServer(http.NotFoundHandler())
-	base := server.URL
-	server.Close()
-	c := Client{Base: base, Caller: upstream.Caller{Client: &http.Client{Timeout: time.Second}}}
+	// Fail the dial itself instead of calling a closed test server: another
+	// process may bind the freed port and answer 404, which reads as an
+	// unknown peer.
+	unreachable := &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) {
+		return nil, syscall.ECONNREFUSED
+	}}
+	c := Client{Base: "http://register.test", Caller: upstream.Caller{Client: &http.Client{Transport: unreachable}}}
 	_, err := c.Registration(context.Background(), "99999999900000000300")
 	if err == nil || errors.Is(err, consent.ErrUnknownParty) {
 		t.Fatalf("err = %v, want a failure that is not ErrUnknownParty", err)
