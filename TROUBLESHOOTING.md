@@ -37,7 +37,7 @@ can't set healthcheck.start_interval as feature require Docker Engine v25 or lat
 ```
 
 Docker Compose v2.24 to v5.0.2 refuse `start_interval` when the engine reports
-a Docker API below 1.44: Docker Engine before 25 and Podman before 5.8.
+a Docker API below 1.44, that is Docker Engine before 25.
 Check with `docker version --format '{{.Server.APIVersion}}'` and upgrade the
 engine.
 

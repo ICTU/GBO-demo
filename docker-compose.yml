@@ -1,6 +1,5 @@
 # Healthchecks probe every 2 s while a container starts, so dependants come up
-# quickly, and every 30 s once it is healthy. Podman ignores start_interval;
-# the Makefile sets HEALTHCHECK_INTERVAL=5s there to keep startup quick.
+# quickly, and every 30 s once it is healthy.
 x-healthcheck-timing: &healthcheck-timing
   interval: ${HEALTHCHECK_INTERVAL:-30s}
   start_period: 60s
