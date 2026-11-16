@@ -158,22 +158,29 @@ bereikt de burger niet.
 | PAR | 413 | `invalid_request` | `INITIATION_INCOMPLETE` | De body is groter dan 64 KiB |
 | PAR | 400 | `invalid_request` | `INITIATION_INCOMPLETE` | De body is niet `application/x-www-form-urlencoded`, een parameter komt meer dan eens voor, of de body bevat een `request_uri` |
 | PAR | 400 | `invalid_request` | `INITIATION_INCOMPLETE` | Verplicht veld ontbreekt (`response_type=code`, `client_id`, `service`, `scope`, `redirect_uri`, `state`, `code_challenge` met `S256`), of `valid_until` is ongeldig |
+| PAR | 503 | `temporarily_unavailable` | `ADMISSION_REGISTER_UNAVAILABLE` | Het toelatingsregister is niet bereikbaar (fail closed) |
 | PAR | 400 | `unauthorized_client` | `PARTY_NOT_ACTIVE` | De peer is niet toegelaten of niet actief |
 | PAR | 400 | `invalid_request` | `INITIATION_MISMATCH` | `client_id` is niet de FSC peer die pusht, de service is niet bij de provider geregistreerd, of `client_name` of `purpose` wijkt af van de registratie |
 | PAR | 400 | `invalid_scope` | `UNKNOWN_SCOPE` | Een onbekende data set |
 | PAR | 400 | `invalid_request` | `RETURN_URL_NOT_REGISTERED` | `redirect_uri` is geen geregistreerde return location (exacte vergelijking) |
-| PAR | 503 | `temporarily_unavailable` | `ADMISSION_REGISTER_UNAVAILABLE` | Het toelatingsregister is niet bereikbaar (fail closed) |
-| Resolve | 404 | | `REQUEST_URI_UNKNOWN` | Onbekende referentie |
-| Resolve | 410 | | `REQUEST_URI_EXPIRED` | Verlopen referentie (`PAR_REQUEST_LIFETIME`, standaard 10 minuten) |
-| Resolve | 410 | | `REQUEST_URI_SPENT` | Referentie al gebruikt voor een beslissing |
+| PAR | 500 | `server_error` | | Interne fout: het verzoek kan niet worden bewaard |
+| Resolve, beslissing | 401 | | | Geen of ongeldig portaaltoken van de burger |
+| Beslissing | 400 | | | De body is geen `{"decision": "grant" of "deny", "scopes": [...]}` |
+| Beslissing | 400 | | | Een `grant` zonder data sets, met een lege data set of met een data set die dubbel genoemd wordt; de referentie blijft bruikbaar |
+| Resolve, beslissing | 404 | | `REQUEST_URI_UNKNOWN` | Onbekende referentie |
+| Resolve, beslissing | 410 | | `REQUEST_URI_EXPIRED` | Verlopen referentie (`PAR_REQUEST_LIFETIME`, standaard 10 minuten) |
+| Resolve, beslissing | 410 | | `REQUEST_URI_SPENT` | Referentie al gebruikt voor een beslissing |
 | Resolve | 400 | | `CLIENT_ID_MISMATCH` | `client_id` in de URL is niet de provider die de referentie pushte |
-| Resolve | 403 | | `REQUEST_URI_OTHER_CITIZEN` | Referentie is al aan een andere burger gebonden |
+| Resolve, beslissing | 403 | | `REQUEST_URI_OTHER_CITIZEN` | Referentie is al aan een andere burger gebonden |
 | Beslissing | 403 | | `REQUEST_URI_NOT_RESOLVED` | Beslissing zonder voorafgaande resolve |
+| Beslissing | 400 | | | Een `grant` met een data set die niet gevraagd is; de referentie blijft bruikbaar |
+| Resolve, beslissing | 502 | | | Interne fout, zoals een ontbrekende opslag van verzoeken of een subject reference die niet af te leiden is |
 | `/token` | 401 | `invalid_client` | | Geen `Fsc-Authorization` |
 | `/token` | 413 | `invalid_request` | | De body is groter dan 64 KiB |
 | `/token` | 400 | `invalid_request` | | De body is niet `application/x-www-form-urlencoded`, een parameter komt meer dan eens voor, `grant_type`, `code` of `redirect_uri` ontbreekt, of `client_id` is niet de FSC peer die aanroept |
 | `/token` | 400 | `unsupported_grant_type` | | Een andere `grant_type` dan `authorization_code` |
 | `/token` | 400 | `invalid_grant` | | Code onbekend, al ingewisseld, ouder dan 60 seconden, van een andere provider, met een andere `redirect_uri` dan in het verzoek, of met een verkeerde `code_verifier` |
+| `/token` | 500 | `server_error` | | Interne fout, zoals een ontbrekende opslag van codes |
 
 Bij een geweigerde referentie toont het portaal één foutpagina, zonder link
 en zonder redirect. Na een beslissing gaat de burger naar de geregistreerde
