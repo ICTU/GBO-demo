@@ -383,8 +383,16 @@ answers with the return URL the browser goes to: with `code` and `state`, or
 with `error=access_denied` or `error=server_error` and `state`. The provider
 exchanges the code over FSC at `POST /token` on the same FSC service, with the
 PKCE `code_verifier`, for the consent token (`access_token`). A code works once
-and for 60 seconds. The demo providers do not use these endpoints yet: their
-flow still starts with the redirect described above.
+and for 60 seconds.
+
+The provider backends (`dienstverlener-backend`, `ir-backend`) do this on the
+provider's side: `POST /api/consent/start` pushes the request and answers with
+the portal URL for the browser, and `POST /api/consent/complete` exchanges the
+code and keeps the consent token in a server-side session behind an HttpOnly
+cookie, which `POST /api/dvtp/query` uses when the body has no token (see
+[the service README](services/dienstverlener-backend/README.md)). The demo
+frontends do not use these routes yet: their flow still starts with the
+redirect described above.
 
 ### EUDI wallet issuance
 
