@@ -250,7 +250,7 @@ func (m *Mock) Transform(t Transformation, randomize bool) ([]Encrypted, error) 
 				EncryptedPseudonym: EncryptedPseudonym{
 					NotationIdentifier: oidEncryptedPseudonym, SchemeVersion: SchemeVersion, SchemeKeySetVersion: SchemeKeySetVersion,
 					Creator: Creator, Recipient: rp.EntityID, RecipientKeySetVersion: version,
-					Type: pseudonymTypeBSN, PseudonymValue: hash("pseudonym", *seed, rp.EntityID, version),
+					Type: pseudonymTypeBSN, PseudonymValue: hash("pseudonym", *seed, rp.EntityID),
 				},
 				AuditElement: audit, IssuanceDate: date, ExtraElements: extra,
 			}

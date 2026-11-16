@@ -333,10 +333,13 @@ does.
   party, or of another date, do not read it.
 - **The key for a BSN only for a party that may have it.** Without it a party
   cannot read a VI, whoever handed it one.
-- **A pseudonym is stable per party and key set, and differs otherwise.** The
-  same citizen always has the same pseudonym at one party with one key set.
+- **A pseudonym is stable per party, also across key sets, and differs
+  otherwise.** The same citizen always has the same pseudonym at one party,
+  whatever its key set version and whichever activation the PP came from.
   Two parties cannot match their pseudonyms, and neither can get the BSN from
-  its own. A party that gets new keys gets new pseudonyms.
+  its own. Only the encrypted value is bound to a key set: a party that gets
+  new keys keeps its pseudonyms, but VPs made for its old keys have to be made
+  again.
 - **A nonce is 8 to 128 letters and digits.** A UUID needs its hyphens
   removed.
 - **A PI or PP cannot be read** by anyone.

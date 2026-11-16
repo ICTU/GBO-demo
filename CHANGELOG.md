@@ -512,6 +512,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- **A party's pseudonym is the same across its key sets** (#597): the
+  BSNk mock derives a pseudonym from the citizen and the party's OIN only,
+  as BSNk-PP does. A VP is still bound to its key set version: after new keys
+  the VPs have to be made again, but they decrypt to the same pseudonym.
 - **The test PID carries PID metadata and, for EUDI wallets, `iss`** (#682):
   the own credential issuer adds `issuing_authority` (`GBO Demo`) and
   `issuing_country` (`NL`), the mandatory PID metadata of CIR 2024/2977 as
