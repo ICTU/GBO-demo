@@ -47,6 +47,11 @@ type PendingRequest struct {
 	CodeChallenge string
 	ValidUntil    time.Time // zero when the provider asked for no end date
 	ExpiresAt     time.Time
+	// Citizen is the citizen the request is bound to: the first one to
+	// resolve its reference. Empty until then.
+	Citizen SubjectRef
+	// Spent is set once the citizen's decision used the reference.
+	Spent bool
 }
 
 // PushedReference is what the provider gets back for an accepted request:
@@ -125,6 +130,9 @@ func (r PushedRequest) incomplete() string {
 }
 
 // RequestStore keeps pending requests by request URI until they expire.
+// An expired or spent request is remembered for one more lifetime, so that
+// a citizen who comes back with its reference is told it expired or was
+// used; after that its reference is unknown.
 //
 // Demo shortcut: the store is in memory, so a restart of the backend drops
 // every open request and the backend runs as a single replica. A real
@@ -142,7 +150,8 @@ func NewRequestStore(lifetime time.Duration) *RequestStore {
 }
 
 // Put keeps a request under a new, unguessable request URI and returns the
-// URI and when the request expires. Expired requests are dropped on the way.
+// URI and when the request expires. Requests past their retention are
+// dropped on the way.
 func (s *RequestStore) Put(request PendingRequest, now time.Time) (string, time.Time, error) {
 	random := make([]byte, 32)
 	if _, err := rand.Read(random); err != nil {
@@ -154,7 +163,7 @@ func (s *RequestStore) Put(request PendingRequest, now time.Time) (string, time.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for key, pending := range s.requests {
-		if !now.Before(pending.ExpiresAt) {
+		if !now.Before(pending.ExpiresAt.Add(s.lifetime)) {
 			delete(s.requests, key)
 		}
 	}
@@ -172,4 +181,64 @@ func (s *RequestStore) Get(uri string, now time.Time) (request PendingRequest, f
 		return PendingRequest{}, false
 	}
 	return request, true
+}
+
+// Bind returns the request under uri for citizen, after checking that its
+// reference is usable, that clientID is the provider that pushed it and
+// that no other citizen has it. The first citizen to resolve the reference
+// is bound to it; the same citizen may resolve it again.
+func (s *RequestStore) Bind(uri, clientID string, citizen SubjectRef, now time.Time) (PendingRequest, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	request, err := s.usable(uri, now)
+	if err != nil {
+		return PendingRequest{}, err
+	}
+	if clientID != string(request.Request.Provider) {
+		return PendingRequest{}, refuse(ReasonClientIDMismatch, "the reference was not pushed by client_id %q", clientID)
+	}
+	if request.Citizen != "" && request.Citizen != citizen {
+		return PendingRequest{}, refuse(ReasonRequestURIOtherCitizen, "the reference belongs to another citizen")
+	}
+	request.Citizen = citizen
+	s.requests[uri] = request
+	return request, nil
+}
+
+// Spend uses the reference under uri for citizen's decision: the same
+// checks as Bind, without the client ID, then accept on the request. When
+// accept returns nil the reference is spent and bound to citizen; when it
+// returns an error nothing changes. Only one decision can spend a
+// reference.
+func (s *RequestStore) Spend(uri string, citizen SubjectRef, now time.Time, accept func(PendingRequest) error) (PendingRequest, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	request, err := s.usable(uri, now)
+	if err != nil {
+		return PendingRequest{}, err
+	}
+	if request.Citizen != "" && request.Citizen != citizen {
+		return PendingRequest{}, refuse(ReasonRequestURIOtherCitizen, "the reference belongs to another citizen")
+	}
+	if err := accept(request); err != nil {
+		return PendingRequest{}, err
+	}
+	request.Citizen, request.Spent = citizen, true
+	s.requests[uri] = request
+	return request, nil
+}
+
+// usable returns the request under uri, or a refusal when its reference is
+// unknown, expired or spent. The caller holds s.mu.
+func (s *RequestStore) usable(uri string, now time.Time) (PendingRequest, error) {
+	request, found := s.requests[uri]
+	switch {
+	case !found || !now.Before(request.ExpiresAt.Add(s.lifetime)):
+		return PendingRequest{}, refuse(ReasonRequestURIUnknown, "the reference is unknown")
+	case !now.Before(request.ExpiresAt):
+		return PendingRequest{}, refuse(ReasonRequestURIExpired, "the reference has expired")
+	case request.Spent:
+		return PendingRequest{}, refuse(ReasonRequestURISpent, "the reference has been used")
+	}
+	return request, nil
 }
