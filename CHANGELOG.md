@@ -524,6 +524,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   rematerialize the issuer configuration (`make credential-issuer-up`, or
   the deployment's materializer) and deploy the new `eudi-credential-issuer`
   image. The test PID root and the trust lists stay the same.
+- **The idle demo uses less CPU**: container healthchecks probe every 2 s
+  while a container starts and every 30 s once it is healthy, instead of
+  every 5 s throughout (`HEALTHCHECK_INTERVAL`). The Go services no longer
+  trace `/health`, so healthchecks stop filling Jaeger with spans. The demo
+  now needs Docker Engine 25 or newer. The Postgres healthchecks probe
+  over TCP, so they no longer report ready while the init scripts run.
 - **`make` prints the demo URLs on `GBO_PUBLIC_HOST`** (default
   `localhost`), instead of localhost and the first `hostname -I` address,
   which does not exist on macOS.

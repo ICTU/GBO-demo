@@ -15,6 +15,9 @@ export
 # .env if needed.
 NLWALLET_PATH ?= $(PWD)/vendor/nl-wallet
 
+# How often a healthy container is probed. Override in .env.
+HEALTHCHECK_INTERVAL ?= 30s
+
 # Local Source Registry onboarding. Development certificates are provisioned
 # only by the explicit provision-development-certificates target.
 DEVELOPMENT_SOURCE_OIN ?= 99999999900000000200
