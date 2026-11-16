@@ -27,8 +27,11 @@ provider's own Peer ID), `service`, `scope`, `redirect_uri`
 It sends no `client_name` or `purpose`: the consent screen shows those from
 the provider's registration. The answer is `{"redirect_to": "<portal>/toestemming/start?client_id=…&request_uri=…"}`,
 and the response sets the session cookie. A refusal by the portal keeps its
-OAuth `error` and `reason` (`400`, or `503` for `temporarily_unavailable`); an
-unreachable portal is `502`.
+OAuth `error` and `reason`: `400` when the request is at fault (an unknown
+data set, an unregistered service, a missing field), `502` when the
+provider's own registration or configuration is (`unauthorized_client`,
+`invalid_client`, `RETURN_URL_NOT_REGISTERED`), `503` for
+`temporarily_unavailable`. An unreachable portal is `502`.
 
 `POST /api/consent/complete` with `{"code": "…", "state": "…"}` or
 `{"error": "…", "state": "…"}` ends the request pending in the session. The
@@ -38,7 +41,10 @@ consent token goes into the session. The answer is
 `{"outcome": "granted", "consent_id": "…", "scopes": [...]}`,
 `{"outcome": "denied"}` (`access_denied`) or `{"outcome": "failed"}`
 (`server_error` or any other error), each with `200`. A failed exchange is
-`502 code_exchange_failed`. No answer carries the consent token.
+`502 code_exchange_failed`. No answer carries the consent token. A granted
+consent goes into a new session with a new cookie, and the old session is
+deleted, so an id known before the grant (a planted cookie, for example)
+never gets the token.
 
 The session is an HttpOnly cookie `consent_session_<CONSENT_CLIENT_ID>` with
 `SameSite=Lax` and `Path=/api`, `Secure` when `CONSENT_REDIRECT_URI` is https.
@@ -46,9 +52,29 @@ The name includes the peer because a browser does not tell cookies of two
 ports on one host apart. Calls to the Outway carry the trace context
 (`traceparent`).
 
-Demo shortcut: sessions, with their consent tokens, live in memory for 12
-hours; a restart drops them and the backend runs as one replica. A real
-deployment keeps sessions in a shared store.
+`SameSite=Lax` does not stop pages on other ports of the same host, or on
+sibling subdomains: they are the same site, and the browser sends the cookie
+along. So start, complete and a query that uses the session's token must have
+`Content-Type: application/json` (otherwise `415`), which another origin
+cannot send without a CORS preflight that these routes do not pass; and when
+the browser sends `Sec-Fetch-Site`, it must be `same-origin` (otherwise
+`403`). A query with its own `consent_token` in the body is not affected.
+Start and complete bodies are limited to 64 KiB.
+
+Demo shortcuts:
+
+- Sessions, with their consent tokens, live in memory for 12 hours from
+  their creation; a restart drops them and the backend runs as one replica.
+  A start does not extend a session, although it sets the cookie for 12
+  hours again, so a request started late in a session's life can find the
+  session gone at its return (`no_pending_request`). Anyone can create
+  sessions and nothing caps their number; expired ones are swept at most
+  once a minute. A real deployment keeps sessions in a shared store, with a
+  limit per client.
+- The demo serves every provider's frontend on one host, so the browser sends
+  each provider's session cookie to every frontend's `/api` proxy, and a
+  co-hosted provider could replay another's cookie against that provider's
+  backend. A real deployment gives each provider its own origin.
 
 ## Configuration
 
@@ -57,7 +83,7 @@ deployment keeps sessions in a shared store.
 | `PORT` | `4006` | Listen port |
 | `QUERY_KIND` | `bd` | Which question the source gets: `bd` or `lvg` |
 | `OUTWAY_URL`, `OUTWAY_PATH` | `http://hv-outway:8080`, `/bri/graphql` | The source, through the Outway |
-| `CONSENT_CLIENT_ID` | unset | The provider's Peer ID; unset turns the consent routes off |
+| `CONSENT_CLIENT_ID` | unset | The provider's Peer ID (digits only: it is part of the cookie name); unset turns the consent routes off |
 | `CONSENT_REDIRECT_URI` | | A return location registered for the peer in the onboarding register (exact match) |
 | `CONSENT_PORTAL_URL` | | Public address of the consent portal |
 | `CONSENT_AUTHORIZATION_URL` | | `consent-authorization` through the Outway, e.g. `http://hv-outway:8080/consent-authorization` |

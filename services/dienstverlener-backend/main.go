@@ -108,6 +108,11 @@ func loadConfig() (config, error) {
 	if cfg.ConsentClientID == "" {
 		return cfg, nil
 	}
+	// The client id is part of the session cookie's name; a character a
+	// cookie name cannot hold would make the browser never get the cookie.
+	if !isPeerID(cfg.ConsentClientID) {
+		return config{}, fmt.Errorf("CONSENT_CLIENT_ID: %q is not a Peer ID (digits only)", cfg.ConsentClientID)
+	}
 	for name, value := range map[string]string{
 		"CONSENT_REDIRECT_URI":      cfg.ConsentRedirectURI,
 		"CONSENT_PORTAL_URL":        cfg.ConsentPortalURL,
@@ -118,6 +123,19 @@ func loadConfig() (config, error) {
 		}
 	}
 	return cfg, nil
+}
+
+// isPeerID reports whether s is an FSC Peer ID: an OIN, all digits.
+func isPeerID(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // consentFlow wires the consent request, or returns nil when it is not

@@ -54,3 +54,39 @@ func TestSessionIDsDiffer(t *testing.T) {
 		t.Error("two sessions share an id")
 	}
 }
+
+func TestDeleteRemovesTheSession(t *testing.T) {
+	m := &Memory{Lifetime: time.Hour}
+	ctx := context.Background()
+	id, _ := m.New(ctx, consentrequest.Session{})
+	if err := m.Delete(ctx, id); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, err := m.Get(ctx, id); !errors.Is(err, consentrequest.ErrUnknownSession) {
+		t.Errorf("get after delete: %v", err)
+	}
+	if err := m.Delete(ctx, id); err != nil {
+		t.Errorf("delete of an unknown session: %v", err)
+	}
+}
+
+// New sweeps expired sessions at most once per sweepInterval, not on every
+// call.
+func TestExpiredSessionsAreSweptAtMostOnceAMinute(t *testing.T) {
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	m := &Memory{Lifetime: time.Minute, Now: func() time.Time { return now }}
+	ctx := context.Background()
+	_, _ = m.New(ctx, consentrequest.Session{}) // sweeps the empty store
+	now = now.Add(30 * time.Second)
+	_, _ = m.New(ctx, consentrequest.Session{})
+	now = now.Add(45 * time.Second) // the first session has expired
+	_, _ = m.New(ctx, consentrequest.Session{})
+	if got := m.Len(); got != 2 {
+		t.Errorf("after 75 s: %d sessions, want 2 (one expired, swept)", got)
+	}
+	now = now.Add(20 * time.Second) // the second session has expired too
+	_, _ = m.New(ctx, consentrequest.Session{})
+	if got := m.Len(); got != 3 {
+		t.Errorf("20 s after a sweep: %d sessions, want 3 (one expired, not yet swept)", got)
+	}
+}

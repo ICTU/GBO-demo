@@ -83,7 +83,13 @@ func handleQuery(c *consumer.Consumer, flow *ConsentFlow) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 			return
 		}
-		if body.ConsentToken == "" && flow != nil {
+		if body.ConsentToken == "" && flow != nil && flow.hasSession(r) {
+			// The session's token only for a request another origin could
+			// not have sent (see ConsentFlow).
+			if status, description := crossOrigin(r); status != 0 {
+				writeJSON(w, status, map[string]string{"error": description})
+				return
+			}
 			body.ConsentToken = flow.consentToken(r)
 		}
 

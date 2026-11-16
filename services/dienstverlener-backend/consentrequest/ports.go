@@ -71,8 +71,10 @@ var ErrUnknownSession = errors.New("unknown session")
 
 // Sessions keeps sessions by an id that is hard to guess. Update applies
 // change atomically and keeps nothing of it when change returns an error.
+// Delete of an unknown session is no error.
 type Sessions interface {
 	New(ctx context.Context, s Session) (string, error)
 	Get(ctx context.Context, id string) (Session, error)
 	Update(ctx context.Context, id string, change func(*Session) error) error
+	Delete(ctx context.Context, id string) error
 }
