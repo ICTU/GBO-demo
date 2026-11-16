@@ -7,6 +7,7 @@
 // logs in, and the rest lives in React state.
 
 import { requestedScopeGroups } from '../data/scopeGroups.ts'
+import { PortalApiError } from '../api/portalClient.ts'
 
 export const START_ROUTE = '/toestemming/start'
 
@@ -89,6 +90,34 @@ export function readStartCookie(cookieHeader: string): string | null {
  */
 export function resumeAfterLogin(cookieHeader: string): string {
   return readStartCookie(cookieHeader) ?? START_ROUTE
+}
+
+/**
+ * What the start page does first: the error page for a URL without a usable
+ * client_id and request_uri, without a portal login the login (the start
+ * URL waits in the cookie), and otherwise the resolve at the backend.
+ */
+export function startAction(start: StartParams | null, token: string | null | undefined): 'error' | 'login' | 'resolve' {
+  if (!start) return 'error'
+  if (!token) return 'login'
+  return 'resolve'
+}
+
+/**
+ * What follows a failed resolve or decision: when the backend no longer
+ * accepts the portal login (401), the citizen logs in again and resumes;
+ * any other failure is the error page.
+ */
+export function afterFailure(err: unknown): 'relogin' | 'failed' {
+  return err instanceof PortalApiError && err.status === 401 ? 'relogin' : 'failed'
+}
+
+/**
+ * The data sets a grant consents to: those of the request the citizen left
+ * checked (all are checked at first), in the order the screen shows them.
+ */
+export function chosenScopes(requested: string[], picked: Record<string, boolean>): string[] {
+  return requestedScopeGroups(requested).groups.filter((s) => picked[s.code] ?? true).map((s) => s.code)
 }
 
 /** A resolved reference, as GET /portal/requests/{request_uri} returns it. */
