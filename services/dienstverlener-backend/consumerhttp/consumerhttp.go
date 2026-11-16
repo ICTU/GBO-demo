@@ -2,8 +2,9 @@
 // for consumer.Consumer. It owns the request and response shapes, the status
 // codes and the correlation between the OTel trace and the FSC transaction id.
 //
-// Endpoint: POST /api/dvtp/query  {consent_token, scope_id?, belastingjaren?, fields?, vbo_id?}
+// Endpoint: POST /api/dvtp/query  {consent_token?, scope_id?, belastingjaren?, fields?, vbo_id?}
 //
+//	consent_token defaults to the consent of the caller's session (consent.go)
 //	→ FSC Outway: pick contract by grant-link, sign token, open mTLS to Inway
 //	→ FSC Inway proxy: forward GraphQL query (with the placeholder as bsn variable)
 //	   ↳ PEP → OpenFTV → sidecar (placeholder → BSN) → source
@@ -29,17 +30,22 @@ import (
 
 // NewHandler is the whole HTTP stack. withFscTraceContext wraps otelhttp: the
 // header it sets must be in place before otelhttp extracts the parent context.
-func NewHandler(c *consumer.Consumer, serviceName string) http.Handler {
-	return withFscTraceContext(otelhttp.NewHandler(withDemoSession(withAccessLog(NewMux(c))), serviceName, otelhttp.WithFilter(filters.Not(filters.Path("/health")))))
+// flow may be nil: then the consent routes are not served.
+func NewHandler(c *consumer.Consumer, flow *ConsentFlow, serviceName string) http.Handler {
+	return withFscTraceContext(otelhttp.NewHandler(withDemoSession(withAccessLog(NewMux(c, flow))), serviceName, otelhttp.WithFilter(filters.Not(filters.Path("/health")))))
 }
 
 // NewMux is the routing tree without the middleware, for tests.
-func NewMux(c *consumer.Consumer) *http.ServeMux {
+func NewMux(c *consumer.Consumer, flow *ConsentFlow) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
-	mux.HandleFunc("/api/dvtp/query", handleQuery(c))
+	mux.HandleFunc("/api/dvtp/query", handleQuery(c, flow))
+	if flow != nil {
+		mux.HandleFunc("POST /api/consent/start", flow.handleStart)
+		mux.HandleFunc("POST /api/consent/complete", flow.handleComplete)
+	}
 	return mux
 }
 
@@ -61,7 +67,7 @@ var statusFor = map[consumer.Outcome]int{
 	consumer.Unreachable:  http.StatusBadGateway,
 }
 
-func handleQuery(c *consumer.Consumer) http.HandlerFunc {
+func handleQuery(c *consumer.Consumer, flow *ConsentFlow) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		corsHeaders(w)
 		if r.Method == http.MethodOptions {
@@ -76,6 +82,9 @@ func handleQuery(c *consumer.Consumer) http.HandlerFunc {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 			return
+		}
+		if body.ConsentToken == "" && flow != nil {
+			body.ConsentToken = flow.consentToken(r)
 		}
 
 		ctx, span := otel.Tracer("dienstverlener-backend").Start(r.Context(), "dvtp.query")
