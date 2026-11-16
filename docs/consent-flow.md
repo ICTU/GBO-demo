@@ -129,7 +129,11 @@ default `99999999900000000300`. Handmatig ingevoerde en opgeslagen payloads
 worden niet door deze configuratie overschreven.
 
 Het portaal accepteert alleen `http`- en `https`-return-URL's waarvan de
-exacte origin in `VITE_ALLOWED_RETURN_ORIGINS` staat. De token wordt in het
+exacte origin in de geconfigureerde allow-list staat. De image leest die bij
+het starten van de container uit `ALLOWED_RETURN_ORIGINS`;
+`VITE_ALLOWED_RETURN_ORIGINS` geldt alleen voor de Vite-devserver. Zonder
+beide accepteert het portaal alleen `http://localhost:9001` (demo-shortcut),
+dus een uitrol moet `ALLOWED_RETURN_ORIGINS` zetten. De token wordt in het
 URL-fragment teruggegeven en direct uit de zichtbare URL verwijderd.
 
 ## 2. Toestemming gebruiken

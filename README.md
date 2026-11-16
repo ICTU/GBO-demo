@@ -349,10 +349,13 @@ explicit `dienstverlener_oin` check prevents cross-consumer use but does not
 make a stolen bearer token non-replayable by that same consumer.
 
 Because the token returns through the browser, the consent portal only accepts
-`http` or `https` return URLs whose exact origin occurs in
-`VITE_ALLOWED_RETURN_ORIGINS` (comma-separated). Compose derives the demo value
-from `DIENSTVERLENER_PUBLIC_URL`; production images must supply the same value
-as a build argument.
+`http` or `https` return URLs whose exact origin occurs in the configured
+allow-list (comma-separated). The image reads it from `ALLOWED_RETURN_ORIGINS`
+when the container starts; `VITE_ALLOWED_RETURN_ORIGINS` only applies to the
+Vite dev server, where Compose derives it from `DIENSTVERLENER_PUBLIC_URL` and
+`KEYPER_PUBLIC_URL`.
+Without either, the portal only accepts `http://localhost:9001` (a demo
+shortcut), so a deployment must set `ALLOWED_RETURN_ORIGINS`.
 
 ### EUDI wallet issuance
 

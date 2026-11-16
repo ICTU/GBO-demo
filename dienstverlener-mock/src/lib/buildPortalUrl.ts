@@ -19,15 +19,26 @@ declare global {
 
 export const DEFAULT_CONSUMER_PEER_ID = '99999999900000000300'
 
+// envsubst leaves a variable it cannot fill as a literal ${VAR}: treat that as unset.
+export function runtimeConfigValue(value?: string): string {
+  const trimmed = value?.trim() ?? ''
+  return /^\$\{.*\}$/.test(trimmed) ? '' : trimmed
+}
+
 export function resolveConsumerPeerID(configured?: string): string {
   return configured?.trim() || DEFAULT_CONSUMER_PEER_ID
 }
 
-export function configuredConsumerPeerID(): string {
-  if (typeof window === 'undefined') return DEFAULT_CONSUMER_PEER_ID
+type RuntimeConfig = Window['__GBO_CONFIG__']
+
+// The parameters default to the browser's configuration; tests pass their own.
+export function configuredConsumerPeerID(
+  config: RuntimeConfig = window.__GBO_CONFIG__,
+  env: ImportMetaEnv = import.meta.env,
+): string {
   return resolveConsumerPeerID(
-    window.__GBO_CONFIG__?.consumerPeerId?.trim()
-      || import.meta.env.VITE_CONSUMER_PEER_ID,
+    runtimeConfigValue(config?.consumerPeerId)
+      || env.VITE_CONSUMER_PEER_ID,
   )
 }
 
@@ -55,16 +66,15 @@ export function resolvePortalBase(location: Pick<Location, 'hostname' | 'port' |
   return `${protocol}//${hostname}:9002`
 }
 
-const configuredPortalBase =
-  typeof window === 'undefined'
-    ? ''
-    : window.__GBO_CONFIG__?.consentPortalUrl?.trim() ?? ''
+export function configuredPortalBase(
+  config: RuntimeConfig = window.__GBO_CONFIG__,
+  location: Pick<Location, 'hostname' | 'port' | 'protocol'> = window.location,
+): string {
+  return runtimeConfigValue(config?.consentPortalUrl) || resolvePortalBase(location)
+}
 
 const DEFAULT_PORTAL_BASE =
-  configuredPortalBase ||
-  (typeof window === 'undefined'
-    ? 'http://localhost:9002'
-    : resolvePortalBase(window.location))
+  typeof window === 'undefined' ? 'http://localhost:9002' : configuredPortalBase()
 
 export function buildPortalUrl(ctx: RedirectContext, portalBase: string = DEFAULT_PORTAL_BASE): string {
   const params = new URLSearchParams({
