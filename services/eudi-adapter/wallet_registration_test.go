@@ -27,8 +27,9 @@ import (
 )
 
 const (
-	testTrustURL = "https://trust.example"
-	testIncome   = "https://adapter.example/types/belastingdienst/inkomensverklaring/v1.0"
+	testTrustURL  = "https://trust.example"
+	testIssuerURL = "https://issuer.example"
+	testIncome    = "https://adapter.example/types/belastingdienst/inkomensverklaring/v1.0"
 )
 
 type walletRegistrationFixture struct {

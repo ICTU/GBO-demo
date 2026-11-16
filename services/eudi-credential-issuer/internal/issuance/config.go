@@ -122,6 +122,27 @@ type CredentialConfiguration struct {
 	ValidDays int
 	// StatusList names the status list its credentials are listed in.
 	StatusList string
+	// PIDMetadata, when set, makes the issuer add the mandatory PID
+	// metadata to every credential (CIR 2024/2977 annex, SD-JWT VC
+	// encoding); the source does not return it.
+	PIDMetadata *PIDMetadata
+}
+
+// PIDMetadata is the PID metadata the issuer adds: issuing_authority and
+// issuing_country as configured, date_of_expiry from the credential's exp.
+type PIDMetadata struct {
+	IssuingAuthority string `json:"issuing_authority"`
+	// IssuingCountry is an ISO 3166-1 alpha-2 code.
+	IssuingCountry string `json:"issuing_country"`
+}
+
+// pidMetadataClaims are the claims PIDMetadata adds.
+var pidMetadataClaims = []string{"issuing_authority", "issuing_country", "date_of_expiry"}
+
+// claims returns the PID metadata of a credential that expires at exp.
+func (m *PIDMetadata) claims(exp time.Time) map[string]any {
+	return map[string]any{"issuing_authority": m.IssuingAuthority, "issuing_country": m.IssuingCountry,
+		"date_of_expiry": exp.UTC().Format(time.DateOnly)}
 }
 
 // Display is a localised name.

@@ -42,7 +42,10 @@ type StatusReference struct {
 
 // Credential describes one SD-JWT VC to issue.
 type Credential struct {
-	VCT       string
+	VCT string
+	// Issuer is the iss claim; empty, the credential has none and its
+	// issuer is the subject of the x5c leaf.
+	Issuer    string
 	IssuedAt  time.Time
 	NotBefore time.Time
 	Expires   time.Time
@@ -83,6 +86,9 @@ func (s *Signer) Issue(c Credential) (string, error) {
 	}
 	payload["_sd_alg"] = "sha-256"
 	payload["vct"] = c.VCT
+	if c.Issuer != "" {
+		payload["iss"] = c.Issuer
+	}
 	payload["iat"] = c.IssuedAt.Unix()
 	payload["nbf"] = c.NotBefore.Unix()
 	payload["exp"] = c.Expires.Unix()

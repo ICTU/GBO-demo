@@ -95,6 +95,8 @@ type CredentialConfigurationFile struct {
 	// source_url, for a bronpoort with a certificate of its own (the
 	// reference QTSP's callback).
 	SourceCAFile string `json:"source_ca_file,omitempty"`
+	// PIDMetadata is the PID metadata the issuer adds (the test PID).
+	PIDMetadata *issuance.PIDMetadata `json:"pid_metadata,omitempty"`
 }
 
 // ProfileFile configures one profile.
@@ -183,7 +185,7 @@ func Load(path, publicURL string) (Loaded, error) {
 			}
 			out.Issuer.Configurations = append(out.Issuer.Configurations, issuance.CredentialConfiguration{
 				ID: c.ID, Provider: pf.Name, VCT: c.VCT, Scope: c.Scope, Display: c.Display, Claims: c.Claims,
-				ValidDays: c.ValidDays, StatusList: c.StatusList,
+				ValidDays: c.ValidDays, StatusList: c.StatusList, PIDMetadata: c.PIDMetadata,
 			})
 			out.SourceEndpoints[c.ID] = c.SourceURL
 			if c.SourceCAFile != "" {

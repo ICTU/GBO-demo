@@ -49,10 +49,12 @@ type fixture struct {
 	signer    testpki.Cert
 	untrusted testpki.Cert
 	holder    *ecdsa.PrivateKey
-	tokens    map[string]string
-	aki       string
-	public    *httptest.Server
-	internal  *httptest.Server
+	// iss is the iss claim of the PIDs f.pid issues; empty, none.
+	iss      string
+	tokens   map[string]string
+	aki      string
+	public   *httptest.Server
+	internal *httptest.Server
 }
 
 var pidName = pkix.Name{CommonName: "Test PID issuer", Organization: []string{"GBO demo"}}
@@ -139,7 +141,7 @@ func (f *fixture) pid(t *testing.T, issuer testpki.Cert, claims map[string]any) 
 		t.Fatal(err)
 	}
 	cred, err := s.Issue(sdjwtvc.Credential{
-		VCT: pidType, IssuedAt: f.now, NotBefore: f.now.Add(-time.Hour), Expires: f.now.Add(24 * time.Hour),
+		VCT: pidType, Issuer: f.iss, IssuedAt: f.now, NotBefore: f.now.Add(-time.Hour), Expires: f.now.Add(24 * time.Hour),
 		HolderKey: &jose.JSONWebKey{Key: &f.holder.PublicKey}, Status: &sdjwtvc.StatusReference{Index: pidIndex, URI: statusURI},
 		Claims: claims,
 	})
@@ -283,6 +285,7 @@ type disclosedResponse []struct {
 		Type       string         `json:"attestation_type"`
 		Format     string         `json:"format"`
 		Attributes map[string]any `json:"attributes"`
+		IssuerURI  string         `json:"issuer_uri"`
 	} `json:"attestations"`
 }
 
@@ -619,5 +622,29 @@ func TestOnceAndExpiry(t *testing.T) {
 	// A finished session stays readable for the relying party.
 	if code, _ := f.disclosed(t, token, ""); code != http.StatusOK {
 		t.Errorf("disclosed after the lifetime: %d, want 200", code)
+	}
+}
+
+// T6 (test PID): the relying party gets the PID's iss as issuer_uri, and
+// none when the PID has no iss.
+func TestIssuerURI(t *testing.T) {
+	for name, iss := range map[string]string{"with iss": "https://issuer.example/test-pid/eudi", "without iss": ""} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			f.iss = iss
+			token := f.mustStart(t, "asi-login", returnURL)
+			r := f.fetch(t, token, verifier.CrossDevice)
+			if code, out := f.post(t, r, f.present(t, r, f.pid(t, f.issuer, nil), loginClaims...)); code != http.StatusOK {
+				t.Fatalf("response: %d %v", code, out)
+			}
+			code, raw := f.disclosed(t, token, "")
+			var d disclosedResponse
+			if code != http.StatusOK || json.Unmarshal([]byte(raw), &d) != nil || len(d) != 1 || len(d[0].Attestations) != 1 {
+				t.Fatalf("disclosed: %d %s", code, raw)
+			}
+			if got := d[0].Attestations[0].IssuerURI; got != iss {
+				t.Fatalf("issuer_uri %q, want %q", got, iss)
+			}
+		})
 	}
 }

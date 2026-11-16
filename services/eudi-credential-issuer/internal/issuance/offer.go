@@ -9,6 +9,7 @@ import (
 	"math"
 	"math/big"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -225,6 +226,9 @@ func checkSourceDocument(p Profile, c CredentialConfiguration, d SourceDocument)
 		if sdjwtvc.Reserved(name) {
 			return fmt.Errorf("%w: attribute name %q is reserved", ErrBadSourceData, name)
 		}
+		if c.PIDMetadata != nil && slices.Contains(pidMetadataClaims, name) {
+			return fmt.Errorf("%w: attribute %q is PID metadata, which the issuer sets", ErrBadSourceData, name)
+		}
 	}
 	if p.servesNL() {
 		if err := wholeNumbers(d.Attributes); err != nil {
@@ -241,6 +245,9 @@ func checkSourceDocument(p Profile, c CredentialConfiguration, d SourceDocument)
 		}
 	}
 	for _, cl := range c.Claims {
+		if c.PIDMetadata != nil && len(cl.Path) == 1 && slices.Contains(pidMetadataClaims, cl.Path[0]) {
+			continue
+		}
 		if cl.Mandatory && !hasPath(d.Attributes, cl.Path) {
 			return fmt.Errorf("%w: mandatory attribute %v is missing", ErrBadSourceData, cl.Path)
 		}

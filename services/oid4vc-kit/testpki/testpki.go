@@ -10,6 +10,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/asn1"
 	"math/big"
+	"net/url"
 	"testing"
 	"time"
 )
@@ -26,6 +27,7 @@ type Cert struct {
 type Options struct {
 	Subject pkix.Name
 	DNS     []string
+	URIs    []*url.URL
 	EKU     []asn1.ObjectIdentifier
 }
 
@@ -59,6 +61,7 @@ func (parent Cert) Issue(t testing.TB, opts Options) Cert {
 	return parent.issue(t, &x509.Certificate{
 		Subject:            opts.Subject,
 		DNSNames:           opts.DNS,
+		URIs:               opts.URIs,
 		KeyUsage:           x509.KeyUsageDigitalSignature,
 		UnknownExtKeyUsage: opts.EKU,
 	})

@@ -164,6 +164,13 @@ type issuerConfigurationFile struct {
 	// SourceCAFile is the TLS trust anchor of a bronpoort with a
 	// certificate of its own (the reference QTSP's callback).
 	SourceCAFile string `json:"source_ca_file,omitempty"`
+	// PIDMetadata makes the issuer add the PID metadata (the test PID).
+	PIDMetadata *issuerPIDMetadata `json:"pid_metadata,omitempty"`
+}
+
+type issuerPIDMetadata struct {
+	IssuingAuthority string `json:"issuing_authority"`
+	IssuingCountry   string `json:"issuing_country"`
 }
 
 type issuerProfileFile struct {

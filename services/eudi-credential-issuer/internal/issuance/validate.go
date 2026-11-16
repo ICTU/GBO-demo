@@ -300,6 +300,27 @@ func validateConfiguration(c CredentialConfiguration) error {
 			}
 		}
 	}
+	return validatePIDMetadata(c, paths)
+}
+
+var alpha2 = regexp.MustCompile(`^[A-Z]{2}$`)
+
+// validatePIDMetadata holds PID metadata to the encoding of CIR 2024/2977:
+// an issuing authority, an alpha-2 issuing country, and a claim describing
+// each added attribute (the NL Wallet refuses undescribed attributes).
+func validatePIDMetadata(c CredentialConfiguration, paths map[string]bool) error {
+	m := c.PIDMetadata
+	if m == nil {
+		return nil
+	}
+	if m.IssuingAuthority == "" || !alpha2.MatchString(m.IssuingCountry) {
+		return errors.New("PID metadata needs an issuing authority and an ISO 3166-1 alpha-2 issuing country")
+	}
+	for _, name := range pidMetadataClaims {
+		if !paths[name] {
+			return fmt.Errorf("PID metadata needs a claim for %s", name)
+		}
+	}
 	return nil
 }
 

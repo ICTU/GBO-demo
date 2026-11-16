@@ -107,6 +107,34 @@ func TestReservedClaimsAreNotConcealed(t *testing.T) {
 	}
 }
 
+// An issuer given to Issue is the iss claim, in the clear: SD-JWT VC lists
+// iss among the claims that are not selectively disclosed.
+func TestIssuerIsAPlainClaim(t *testing.T) {
+	root := testpki.NewRoot(t, "issuer root")
+	issuer := root.Issue(t, testpki.Options{})
+	signer, _ := sdjwtvc.NewSigner(issuer.Key, x5c.Header(issuer.Chain))
+	holder := testpki.NewKey(t)
+	now := time.Now().Truncate(time.Second)
+	cred, err := signer.Issue(sdjwtvc.Credential{VCT: "x", Issuer: "https://issuer.example/test-pid/eudi",
+		IssuedAt: now, NotBefore: now, Expires: now.Add(time.Hour),
+		HolderKey: &jose.JSONWebKey{Key: &holder.PublicKey}, Claims: map[string]any{"bsn": "999991772"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := sdjwtvc.Parse(cred, []x5c.Anchors{x5c.NewAnchors("issuers", root.Cert)}, nil, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Claims["iss"] != "https://issuer.example/test-pid/eudi" {
+		t.Fatalf("iss %v", parsed.Claims["iss"])
+	}
+	for _, path := range parsed.Disclosed {
+		if path[0] == "iss" {
+			t.Fatal("iss must not be a disclosure")
+		}
+	}
+}
+
 // RFC 9901 section 7.1: a digest that occurs twice, and a disclosure whose
 // claim name is not a string, are refused.
 func TestParseRefusesMalformedDigests(t *testing.T) {

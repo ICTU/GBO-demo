@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -76,8 +77,11 @@ type walletRegistrationOptions struct {
 	// becomes the organizationIdentifier NTRNL-<number> (ETSI EN 319 412-1
 	// section 5.1.4): no identity type there fits an OIN.
 	kvkNumber string
-	now       func() time.Time
-	random    io.Reader
+	// issuerPublicURL is the public root URL of the credential issuer; the
+	// test PID issuer certificate names its identifiers under it.
+	issuerPublicURL string
+	now             func() time.Time
+	random          io.Reader
 }
 
 // walletRegistrationSource is what the active Source Release says about one
@@ -572,6 +576,7 @@ func certificateMatches(cert, parent, template *x509.Certificate, now time.Time)
 		bytes.Equal(cert.RawSubject, subject) &&
 		slices.Equal(cert.CRLDistributionPoints, template.CRLDistributionPoints) &&
 		slices.EqualFunc(cert.UnknownExtKeyUsage, template.UnknownExtKeyUsage, asn1.ObjectIdentifier.Equal) &&
+		slices.EqualFunc(cert.URIs, template.URIs, func(a, b *url.URL) bool { return a.String() == b.String() }) &&
 		now.AddDate(0, 1, 0).Before(cert.NotAfter)
 }
 

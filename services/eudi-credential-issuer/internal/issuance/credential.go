@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -138,7 +140,7 @@ func (s *Service) issueOnce(ctx context.Context, prov *provider, p Profile, c Cr
 	} else if !reserved {
 		return CredentialResult{}, refuse(oid4vci.ErrInvalidCredentialRequest, "this credential has been issued already or is being issued")
 	}
-	resp, err := s.issue(ctx, prov, c, doc, session.Reference, keys, now)
+	resp, err := s.issue(ctx, prov, s.Identifier(Target{Provider: session.Provider, Profile: session.Profile}), c, doc, session.Reference, keys, now)
 	// The eudi profile tells the wallet where to notify (section 11); the
 	// id is good for one notification about this session.
 	if err == nil && p.Kind == KindEUDI {
@@ -223,11 +225,22 @@ func encryptResult(e jose.Encrypter, resp oid4vci.CredentialResponse) (Credentia
 const issueReservation = time.Minute
 
 // issue signs one credential per holder key, each with its own status list
-// entry.
-func (s *Service) issue(ctx context.Context, prov *provider, c CredentialConfiguration, doc Document, reference string, keys []jose.JSONWebKey, now time.Time) (oid4vci.CredentialResponse, error) {
+// entry. The credential carries iss only when the issuer certificate names
+// the credential issuer identifier id as a SAN URI: the NL Wallet refuses
+// an iss its issuer's certificate does not name.
+func (s *Service) issue(ctx context.Context, prov *provider, id string, c CredentialConfiguration, doc Document, reference string, keys []jose.JSONWebKey, now time.Time) (oid4vci.CredentialResponse, error) {
 	// iat is rounded to the day, so the copies of a batch cannot be linked
 	// by it (RFC 9901 section 10.1).
 	issuedAt := now.UTC().Truncate(24 * time.Hour)
+	iss := ""
+	if slices.ContainsFunc(prov.IssuerChain[0].URIs, func(u *url.URL) bool { return u.String() == id }) {
+		iss = id
+	}
+	claims := doc.Claims
+	if c.PIDMetadata != nil {
+		claims = maps.Clone(doc.Claims)
+		maps.Copy(claims, c.PIDMetadata.claims(doc.Expires))
+	}
 	out := oid4vci.CredentialResponse{}
 	for _, k := range keys {
 		idx, err := s.status.Allocate(ctx, statusKey(prov.Name, c.StatusList), s.cfg.StatusListSize, reference)
@@ -236,12 +249,13 @@ func (s *Service) issue(ctx context.Context, prov *provider, c CredentialConfigu
 		}
 		cred, err := prov.signer.Issue(sdjwtvc.Credential{
 			VCT:       c.VCT,
+			Issuer:    iss,
 			IssuedAt:  issuedAt,
 			NotBefore: doc.NotBefore,
 			Expires:   doc.Expires,
 			HolderKey: &k,
 			Status:    &sdjwtvc.StatusReference{Index: idx, URI: s.StatusListURI(prov.Name, c.StatusList)},
-			Claims:    doc.Claims,
+			Claims:    claims,
 		})
 		if err != nil {
 			return oid4vci.CredentialResponse{}, err
