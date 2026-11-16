@@ -100,6 +100,34 @@ func TestLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	checkLoaded(t, loaded)
+	if loaded.Issuer.Configurations[0].PIDMetadata != nil {
+		t.Fatal("PID metadata without pid_metadata")
+	}
+
+	t.Run("pid_metadata is loaded", func(t *testing.T) {
+		with := strings.Replace(file, `"status_list": "income",`,
+			`"status_list": "income", "pid_metadata": {"issuing_authority": "GBO Demo", "issuing_country": "NL"},`, 1)
+		dir := t.TempDir()
+		for _, name := range []string{"key.pem", "chain.pem", "roots.pem", "wrprc.jwt", "verifier-wrprc.jwt"} {
+			raw, err := os.ReadFile(filepath.Join(filepath.Dir(path), name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, name), raw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.WriteFile(filepath.Join(dir, "issuer.json"), []byte(with), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		loaded, err := config.Load(filepath.Join(dir, "issuer.json"), "https://issuer.test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if m := loaded.Issuer.Configurations[0].PIDMetadata; m == nil || *m != (issuance.PIDMetadata{IssuingAuthority: "GBO Demo", IssuingCountry: "NL"}) {
+			t.Fatalf("PID metadata %+v", m)
+		}
+	})
 
 	t.Run("central PID LoTE is exclusive and loaded without a fetch", func(t *testing.T) {
 		central := strings.Replace(file, `"pid_trust_anchors": [{"name": "test-pid", "roots_file": "roots.pem"}]`, `"pid_trust_list": {"url":"https://trust.test/lote/PIDProviders.jwt","signer_root_file":"roots.pem"}`, 1)

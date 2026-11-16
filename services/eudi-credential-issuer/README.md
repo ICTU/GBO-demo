@@ -27,7 +27,7 @@ A Wallet Instance Attestation is accepted only from the wallet providers configu
 | Credential endpoint with `credential_identifier`, batch issuance (section 8) | implemented; one request per credential identifier |
 | Encrypted credential requests and responses (sections 8.2 and 10) | implemented for the `eudi` profile, not required: ECDH-ES on P-256 with A128GCM or A256GCM, no compression. A wallet that asks for an encrypted response must encrypt its request (section 8.2), otherwise `invalid_encryption_parameters`. Each provider has its own request key; its `kid` is the JWK thumbprint, so a wallet holding metadata from before a new key gets `invalid_credential_request` until it fetches the metadata again. Errors are not encrypted. On `nl`, an encrypted request or a `credential_response_encryption` parameter is an `invalid_credential_request` |
 | Key attestation in JWT format (Appendix D.1), `attestation` proof type (Appendix F.3), required levels in `key_attestations_required` (ARF ISSU_27d) | implemented for the `eudi` profile |
-| SD-JWT VC, `dc+sd-jwt` (HAIP section 6.1) | implemented; every attribute selectively disclosable, `iss` omitted |
+| SD-JWT VC, `dc+sd-jwt` (HAIP section 6.1) | implemented; every attribute selectively disclosable. `iss` is the credential issuer identifier only when the issuer certificate names it as a SAN URI (the test PID) and the wallet is not the NL Wallet; otherwise it is omitted |
 | Token Status List, JWT (draft-ietf-oauth-status-list) | implemented; random indices (ARF VCR_17); revocation through the internal API, per entry or per offer reference |
 | NL credential preview endpoint | implemented for `nl`; not part of OpenID4VCI; once per access token |
 | Authorization Code Flow with required PAR (OpenID4VCI 1.0 section 5, RFC 9126; HAIP section 4 via FAPI 2.0), PKCE S256, `iss` in the authorization response (RFC 9207), DPoP binding of the code (RFC 9449 section 10) | implemented on the `eudi` profile when `ISSUER_LOGIN_SERVER` is set: issuer-initiated with `issuer_state`, and wallet-initiated with `scope` or `authorization_details` for a configuration with one source offer. The citizen logs in at GBO's authorization server; see [Authorization code flow](#authorization-code-flow). Without it `response_types_supported` is empty |
@@ -44,7 +44,7 @@ A Wallet Instance Attestation is accepted only from the wallet providers configu
 
 - **The NL preview takes the DPoP-bound token as a bearer token.** RFC 9449 section 7.2 forbids this; the NL Wallet calls the preview without DPoP. The preview answers once per token, so a leaked token discloses the data at most once, and only within the token lifetime.
 - **A leaked offer can be redeemed by anyone with a trusted wallet.** The pre-authorized code is the only secret (OpenID4VCI section 13.6.1). A transaction code helps when it reaches the citizen through another channel: on `eudi` an offer can ask for one (`tx_code: true`). The NL Wallet refuses offers with one, so `nl` and the combined profile have none. Offers live 5 minutes. For `nl`, prefer the universal link on the same device to a QR code.
-- **The status list is signed with a separate status certificate, and credentials carry no `iss`.** This follows the NL Wallet and Token Status List section 11.3 (a Status Issuer certificate from the same CA). The NL Wallet also wants that certificate to have the issuer's subject and EKU `1.3.6.1.5.5.7.3.127`, its placeholder for `id-kp-oauthStatusSigning`, whose OID the draft still has as TBD. Wallets that find the status signer through `iss`, such as OID4VCgo, cannot check these status lists. The spec leaves key resolution to the ecosystem.
+- **The status list is signed with a separate status certificate, and credentials carry no `iss` unless the issuer certificate names the identifier.** The NL Wallet gets no `iss`: v0.6.0 reads `iss` as an attribute, which its preview and the claim metadata do not have. Only the test PID certificate names its identifiers now. This follows the NL Wallet and Token Status List section 11.3 (a Status Issuer certificate from the same CA). The NL Wallet also wants that certificate to have the issuer's subject and EKU `1.3.6.1.5.5.7.3.127`, its placeholder for `id-kp-oauthStatusSigning`, whose OID the draft still has as TBD. Wallets that find the status signer through `iss`, such as OID4VCgo, cannot check these status lists. The spec leaves key resolution to the ecosystem.
 - **`/challenge` and `/nonce` take unauthenticated requests and store a row each.** Rate limiting belongs at the ingress.
 - **Each provider has its own status lists.** A list holds only the credentials of one provider and configuration, so with few credentials the crowd that hides a lookup (Token Status List section 12) is small. The issuer pads nothing; a list is as large as configured.
 
@@ -153,7 +153,7 @@ After a disclosure the issuer sends that array itself, in the form of nl-wallet'
 The response is the IssuableDocument list: `[{"id", "format": "dc+sd-jwt", "attestation_type": "<vct>", "attributes": {...}}]`. The offer is refused with `bad_source_data` when what the source returns cannot be issued:
 
 - an attribute is not described by a claim of the credential configuration, or a mandatory claim is missing (the NL Wallet refuses undescribed attributes);
-- a top-level attribute uses a name SD-JWT VC reserves (`iss`, `vct`, `exp`, `status`, ...);
+- a top-level attribute uses a name SD-JWT VC reserves (`iss`, `vct`, `exp`, `status`, ...), or PID metadata the issuer sets (`pid_metadata`);
 - for `nl`: a number is not a whole number (the NL Wallet knows no others).
 
 **The QTSP route uses a pre-authorized offer without a BSN.** With `QTSP_ISSUER_OFFERS_URL` set, `qtsp-reference` asks for an offer under the combined profile `wallet` after an accepted result and shows one QR code. The subject is an unguessable reference to the pending result, not a BSN; the issuer fetches the statement from the QTSP callback by that reference, which uses the result. The offer has no transaction code, because the combined profile refuses one. Without `QTSP_ISSUER_OFFERS_URL` (the default) the QTSP route stays on `eudi-issuance-server`.
@@ -230,7 +230,12 @@ per offer lets a wallet that starts at the issuer name the offer by scope
 alone, and shows the offer, for example "Inkomensverklaring 2025", in the
 wallet. When `make provision-test-pid` has run, a test PID provider
 `test-pid` follows, with one configuration `test-pid-pid` (`urn:eudi:pid:nl:1`)
-fed by `test-pid-source` (`TEST_PID_SOURCE_URL`). A profile is configured only when its wallet providers are mounted
+fed by `test-pid-source` (`TEST_PID_SOURCE_URL`). Its configuration has
+`pid_metadata`: the issuer adds `issuing_authority` (`GBO Demo`),
+`issuing_country` (`NL`), both mandatory PID metadata in CIR 2024/2977
+as amended, and the optional `date_of_expiry` (the date of `exp`), each
+selectively disclosable. The NL Wallet's preview carries them too. A
+source that returns one of them is refused. A profile is configured only when its wallet providers are mounted
 (`nl-wallet-providers.pem`, `eudi-wallet-providers.pem`, optionally
 `eudi-key-attestation-roots.pem`); `eudi` also needs the key attestation
 levels. Type Metadata (`type_metadata_uri`, `vct#integrity`) is not served

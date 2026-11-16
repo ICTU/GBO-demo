@@ -244,7 +244,7 @@ func (s *Service) Deferred(ctx context.Context, call DeferredCall) (CredentialRe
 			return CredentialResult{}, err
 		}
 	}
-	out, err := s.issueOnce(ctx, prov, p, c, session, doc, keys, encrypter, now)
+	out, err := s.issueOnce(ctx, prov, p, c, session, doc, p.toNLWallet(token.WalletProvider), keys, encrypter, now)
 	if err != nil {
 		return CredentialResult{}, err
 	}

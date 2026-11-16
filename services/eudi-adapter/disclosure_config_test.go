@@ -92,6 +92,7 @@ func TestTestPIDHasNoVerifierRegistration(t *testing.T) {
 	f := newCredentialIssuerFixture(t)
 	registration := f.registration
 	registration.kvkNumber = testPIDKvKNumber
+	registration.issuerPublicURL = testIssuerURL
 	if err := provisionTestPID(registration, testPIDDirs{publicDir: t.TempDir(), rootDir: t.TempDir()}); err != nil {
 		t.Fatal(err)
 	}
@@ -133,6 +134,7 @@ func TestMaterializeDisclosure(t *testing.T) {
 		g.options.testPIDSourceURL = "http://test-pid-source:8080/attestations"
 		registration := g.registration
 		registration.kvkNumber = testPIDKvKNumber
+		registration.issuerPublicURL = testIssuerURL
 		if err := provisionTestPID(registration, testPIDDirs{publicDir: t.TempDir(), rootDir: t.TempDir()}); err != nil {
 			t.Fatal(err)
 		}

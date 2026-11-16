@@ -27,6 +27,11 @@ unknown nationality) stops it at startup.
 
 `recovery_code`, which the NL Wallet's own PID carries, is left out.
 
+The stub returns no PID metadata. The credential issuer adds
+`issuing_authority` (`GBO Demo`), `issuing_country` (`NL`) and
+`date_of_expiry`, and for an EUDI wallet `iss` (the test PID's credential
+issuer identifier, named in its issuer certificate).
+
 | Variable | |
 |---|---|
 | `PERSONS_FILE` | the BRP mock persons file (required) |

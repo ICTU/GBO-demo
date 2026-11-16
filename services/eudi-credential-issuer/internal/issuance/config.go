@@ -122,6 +122,28 @@ type CredentialConfiguration struct {
 	ValidDays int
 	// StatusList names the status list its credentials are listed in.
 	StatusList string
+	// PIDMetadata, when set, makes the issuer add PID metadata to every
+	// credential (CIR 2024/2977 annex as amended, SD-JWT VC encoding): the
+	// mandatory issuing_authority and issuing_country, and the optional
+	// date_of_expiry. The source does not return it.
+	PIDMetadata *PIDMetadata
+}
+
+// PIDMetadata is the PID metadata the issuer adds: issuing_authority and
+// issuing_country as configured, date_of_expiry from the credential's exp.
+type PIDMetadata struct {
+	IssuingAuthority string `json:"issuing_authority"`
+	// IssuingCountry is an ISO 3166-1 alpha-2 code.
+	IssuingCountry string `json:"issuing_country"`
+}
+
+// pidMetadataClaims are the claims PIDMetadata adds.
+var pidMetadataClaims = []string{"issuing_authority", "issuing_country", "date_of_expiry"}
+
+// claims returns the PID metadata of a credential that expires at exp.
+func (m *PIDMetadata) claims(exp time.Time) map[string]any {
+	return map[string]any{"issuing_authority": m.IssuingAuthority, "issuing_country": m.IssuingCountry,
+		"date_of_expiry": exp.UTC().Format(time.DateOnly)}
 }
 
 // Display is a localised name.
@@ -202,6 +224,13 @@ func (p Profile) servesNL() bool { return p.Kind == KindNL || p.Kind == KindComb
 // servesEUDI reports whether the EUDI wallets are served: key attestation,
 // the attestation proof type and encryption.
 func (p Profile) servesEUDI() bool { return p.Kind == KindEUDI || p.Kind == KindCombined }
+
+// toNLWallet reports whether a wallet attested by the wallet provider anchor
+// set walletProvider is the NL Wallet: always on KindNL, and on
+// KindCombined the wallet that does not attest its keys.
+func (p Profile) toNLWallet(walletProvider string) bool {
+	return p.Kind == KindNL || (p.Kind == KindCombined && !p.requiresKeyAttestation(walletProvider))
+}
 
 // requiresKeyAttestation reports whether a wallet attested by the wallet
 // provider anchor set walletProvider must attest its keys.

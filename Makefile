@@ -449,14 +449,18 @@ credential-issuer-up:
 # is registered like a source (WRPAC, WRPRC with the PID_Provider
 # entitlement, fictitious KvK number 99990100) and fed by test-pid-source.
 # Signs on the host; the root key stays in TEST_PID_ROOT_DIR, outside every
-# container mount. A second run keeps the root and every key. Then run
+# container mount. The issuer certificate names the test PID's credential
+# issuer identifiers under ISSUER_PUBLIC_URL; another URL renews it for the
+# same key. A second run keeps the root and every key. Then run
 # make credential-issuer-up.
 TEST_PID_ROOT_DIR ?= $(PWD)/.local/test-pid-root
 provision-test-pid: require-development-cas
+	@test -n "$(ISSUER_PUBLIC_URL)" || { echo "ERROR: set ISSUER_PUBLIC_URL (public host of the issuer)"; exit 1; }
 	@mkdir -p "$(EUDI_TRUST_PUBLISH_DIR)"
 	@cd services/eudi-adapter && go run . provision-test-pid \
 		--secrets-dir "$(ONBOARDING_SECRETS_DIR)" --publish-dir "$(EUDI_TRUST_PUBLISH_DIR)" \
-		--public-certificates-dir "$(ONBOARDING_PUBLIC_CERTIFICATES_DIR)" --root-dir "$(TEST_PID_ROOT_DIR)"
+		--public-certificates-dir "$(ONBOARDING_PUBLIC_CERTIFICATES_DIR)" --root-dir "$(TEST_PID_ROOT_DIR)" \
+		--issuer-public-url "$(ISSUER_PUBLIC_URL)"
 
 # The reference QTSP as a provider of the own credential issuer: a WRPAC and
 # a WRPRC (QEAA_Provider, fictional KvK number 99991300) next to the

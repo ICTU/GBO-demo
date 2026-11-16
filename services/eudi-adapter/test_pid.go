@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,6 +48,7 @@ func parseTestPIDOptions(command string, arguments []string, stderr io.Writer) (
 	set.StringVar(&options.secretsDir, "secrets-dir", getEnv("ONBOARDING_SECRETS_DIR", ".local/secrets"), "filesystem secret directory")
 	set.StringVar(&options.publishDir, "publish-dir", getEnv("EUDI_TRUST_PUBLISH_DIR", ".local/public-trust"), "directory the trust host serves")
 	set.StringVar(&options.trustPublicURL, "trust-public-url", os.Getenv("EUDI_TRUST_PUBLIC_URL"), "public root URL of the trust host")
+	set.StringVar(&options.issuerPublicURL, "issuer-public-url", os.Getenv("ISSUER_PUBLIC_URL"), "public root URL of the credential issuer")
 	set.StringVar(&dirs.publicDir, "public-certificates-dir", getEnv("ONBOARDING_PUBLIC_CERTIFICATES_DIR", ".local/public-certificates"), "public-only certificate projection directory")
 	set.StringVar(&dirs.rootDir, "root-dir", getEnv("TEST_PID_ROOT_DIR", ".local/test-pid-root"), "directory of the test PID root key, outside every container mount")
 	if err := set.Parse(arguments); err != nil {
@@ -74,6 +76,10 @@ func provisionTestPID(options walletRegistrationOptions, dirs testPIDDirs) error
 	}
 	if _, err := parseDevelopmentRootURL(options.trustPublicURL, false); err != nil {
 		return fmt.Errorf("trust public URL: %w", err)
+	}
+	identifiers, err := testPIDIdentifiers(options.issuerPublicURL)
+	if err != nil {
+		return err
 	}
 	state, err := readWalletRegistrationState(caDir)
 	if err != nil {
@@ -104,10 +110,10 @@ func provisionTestPID(options walletRegistrationOptions, dirs testPIDDirs) error
 		return err
 	}
 	now := options.now()
-	if _, err := ensureCertificate(options, dir, "issuer", root, testPIDLeafTemplate(issuerEKUOID, now)); err != nil {
+	if _, err := ensureCertificate(options, dir, "issuer", root, testPIDLeafTemplate(issuerEKUOID, now, identifiers)); err != nil {
 		return err
 	}
-	if _, err := ensureCertificate(options, dir, "status", root, testPIDLeafTemplate(statusEKUOID, now)); err != nil {
+	if _, err := ensureCertificate(options, dir, "status", root, testPIDLeafTemplate(statusEKUOID, now, nil)); err != nil {
 		return err
 	}
 	return registerWallet(options, walletRegistrationSource{
@@ -116,14 +122,31 @@ func provisionTestPID(options walletRegistrationOptions, dirs testPIDDirs) error
 }
 
 // testPIDLeafTemplate is the issuer or the status certificate; both carry
-// the same subject, as the status list signer must.
-func testPIDLeafTemplate(eku asn1.ObjectIdentifier, now time.Time) *x509.Certificate {
+// the same subject, as the status list signer must. The issuer certificate
+// names the credential issuer identifiers as SAN URIs: the issuer puts the
+// identifier in iss only then.
+func testPIDLeafTemplate(eku asn1.ObjectIdentifier, now time.Time, uris []*url.URL) *x509.Certificate {
 	return &x509.Certificate{
 		Subject:   testPIDSubject,
 		NotBefore: now.Add(-5 * time.Minute), NotAfter: now.AddDate(1, 0, 0),
 		KeyUsage:           x509.KeyUsageDigitalSignature,
 		UnknownExtKeyUsage: []asn1.ObjectIdentifier{eku},
+		URIs:               uris,
 	}
+}
+
+// testPIDIdentifiers are the credential issuer identifiers of the test PID
+// provider, one per profile, under the issuer's public root URL.
+func testPIDIdentifiers(issuerPublicURL string) ([]*url.URL, error) {
+	root, err := parseDevelopmentRootURL(issuerPublicURL, false)
+	if err != nil {
+		return nil, fmt.Errorf("issuer public URL (ISSUER_PUBLIC_URL): %w", err)
+	}
+	var out []*url.URL
+	for _, profile := range []string{"nl", "eudi", combinedProfileName} {
+		out = append(out, root.JoinPath(testPIDID, profile))
+	}
+	return out, nil
 }
 
 // testPIDClaims describes the claims of the NL PID type as the stub fills
@@ -142,7 +165,16 @@ var testPIDClaims = []issuerClaim{
 	testPIDClaim([]string{"address", "postal_code"}, false, "Postcode", "Postal code"),
 	testPIDClaim([]string{"address", "locality"}, false, "Stad", "City"),
 	testPIDClaim([]string{"address", "country"}, false, "Land", "Country"),
+	// PID metadata (CIR 2024/2977 annex as amended; date_of_expiry is
+	// optional there): the issuer adds it, not the stub.
+	testPIDClaim([]string{"issuing_authority"}, true, "Uitgevende instantie", "Issuing authority"),
+	testPIDClaim([]string{"issuing_country"}, true, "Land van uitgifte", "Issuing country"),
+	testPIDClaim([]string{"date_of_expiry"}, true, "Vervaldatum", "Expiry date"),
 }
+
+// testPIDMetadata is the PID metadata of the test PID: issued by the GBO
+// demo, in the Netherlands.
+var testPIDMetadata = issuerPIDMetadata{IssuingAuthority: "GBO Demo", IssuingCountry: "NL"}
 
 func testPIDClaim(path []string, mandatory bool, nl, en string) issuerClaim {
 	return issuerClaim{Path: path, Mandatory: mandatory,
@@ -183,6 +215,7 @@ func testPIDProvider(options credentialIssuerOptions, seen derivedNames) (issuer
 		Display:   []issuerDisplay{{Name: "GBO test-PID", Locale: "nl"}, {Name: "GBO test PID", Locale: "en"}},
 		Claims:    testPIDClaims,
 		ValidDays: credentialValidDays, StatusList: "pid", SourceURL: options.testPIDSourceURL,
+		PIDMetadata: &testPIDMetadata,
 	}}
 	return provider, true, nil
 }

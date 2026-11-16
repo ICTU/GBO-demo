@@ -21,6 +21,7 @@ func newTestPIDFixture(t *testing.T) testPIDFixture {
 	t.Helper()
 	f := newWalletRegistrationFixture(t)
 	f.options.kvkNumber = testPIDKvKNumber
+	f.options.issuerPublicURL = testIssuerURL
 	return testPIDFixture{walletRegistrationFixture: f, dirs: testPIDDirs{publicDir: t.TempDir(), rootDir: t.TempDir()}}
 }
 
@@ -68,6 +69,19 @@ func TestProvisionTestPID(t *testing.T) {
 		}
 		if root.Subject.CommonName != "GBO test-PID root" || !root.IsCA {
 			t.Fatalf("root %s", root.Subject)
+		}
+	})
+	t.Run("T2 the issuer certificate names the test PID's credential issuer identifiers", func(t *testing.T) {
+		var got []string
+		for _, u := range f.leaf(t, "issuer").chain[0].URIs {
+			got = append(got, u.String())
+		}
+		want := []string{testIssuerURL + "/test-pid/nl", testIssuerURL + "/test-pid/eudi", testIssuerURL + "/test-pid/wallet"}
+		if !slices.Equal(got, want) {
+			t.Fatalf("SAN URIs %v, want %v", got, want)
+		}
+		if status := f.leaf(t, "status").chain[0]; len(status.URIs) != 0 || len(status.DNSNames) != 0 {
+			t.Fatal("the status certificate needs no SAN")
 		}
 	})
 	t.Run("P1 the root is its own and outside the secrets directory", func(t *testing.T) {
@@ -125,6 +139,17 @@ func TestProvisionTestPIDAgain(t *testing.T) {
 			t.Fatal("the WRPAC key must be kept")
 		}
 	})
+	t.Run("T2 another issuer URL renews the issuer certificate for the same key", func(t *testing.T) {
+		issuer := f.leaf(t, "issuer")
+		moved := f
+		moved.options.issuerPublicURL = "https://issuer.moved.example"
+		moved.provision(t)
+		again := f.leaf(t, "issuer")
+		if !again.key.Equal(issuer.key) || again.chain[0].URIs[0].String() != "https://issuer.moved.example/test-pid/nl" {
+			t.Fatalf("SAN URIs %v", again.chain[0].URIs)
+		}
+		f.provision(t)
+	})
 	t.Run("P2 near expiry the certificates are renewed for the same keys", func(t *testing.T) {
 		issuer := f.leaf(t, "issuer")
 		// The fixture's reader root lives a year; one that outlives the
@@ -152,7 +177,9 @@ func TestProvisionTestPIDRefusesBeforeCreating(t *testing.T) {
 		"no registrar root": func(t *testing.T, f *testPIDFixture) {
 			removeRole(t, filepath.Join(f.options.secretsDir, "development-ca"), registrarRootRole)
 		},
-		"no trust URL": func(_ *testing.T, f *testPIDFixture) { f.options.trustPublicURL = "" },
+		"no trust URL":              func(_ *testing.T, f *testPIDFixture) { f.options.trustPublicURL = "" },
+		"no issuer URL":             func(_ *testing.T, f *testPIDFixture) { f.options.issuerPublicURL = "" },
+		"an issuer URL with a path": func(_ *testing.T, f *testPIDFixture) { f.options.issuerPublicURL = testIssuerURL + "/test-pid" },
 		"a KvK number of a source": func(t *testing.T, f *testPIDFixture) {
 			registration := f.options
 			registration.kvkNumber = "12345678"
@@ -213,8 +240,16 @@ func checkTestPIDConfigurations(t *testing.T, configurations []issuerConfigurati
 		c.SourceURL != "http://test-pid-source:8080/attestations" || c.ValidDays != 365 {
 		t.Fatalf("configuration %+v", c)
 	}
-	if len(c.Claims) != 12 || !c.Claims[0].Mandatory || c.Claims[6].Mandatory || c.Claims[7].Mandatory {
+	if len(c.Claims) != 15 || !c.Claims[0].Mandatory || c.Claims[6].Mandatory || c.Claims[7].Mandatory {
 		t.Fatalf("claims %+v", c.Claims)
+	}
+	for i, name := range []string{"issuing_authority", "issuing_country", "date_of_expiry"} {
+		if cl := c.Claims[12+i]; !slices.Equal(cl.Path, []string{name}) || !cl.Mandatory {
+			t.Fatalf("claim %d %+v, want mandatory %s", 12+i, cl, name)
+		}
+	}
+	if c.PIDMetadata == nil || *c.PIDMetadata != (issuerPIDMetadata{IssuingAuthority: "GBO Demo", IssuingCountry: "NL"}) {
+		t.Fatalf("PID metadata %+v", c.PIDMetadata)
 	}
 	if !slices.Equal(c.Display, []issuerDisplay{{Name: "GBO test-PID", Locale: "nl"}, {Name: "GBO test PID", Locale: "en"}}) {
 		t.Fatalf("display %+v", c.Display)
@@ -236,6 +271,7 @@ func TestMaterializeTestPID(t *testing.T) {
 	f.options.testPIDSourceURL = "http://test-pid-source:8080/attestations"
 	registration := f.registration
 	registration.kvkNumber = testPIDKvKNumber
+	registration.issuerPublicURL = testIssuerURL
 	dirs := testPIDDirs{publicDir: t.TempDir(), rootDir: t.TempDir()}
 	if err := provisionTestPID(registration, dirs); err != nil {
 		t.Fatal(err)
@@ -287,6 +323,7 @@ func TestMaterializeTestPIDRefusesExpired(t *testing.T) {
 			now := f.registration.now()
 			early := f.registration
 			early.kvkNumber = testPIDKvKNumber
+			early.issuerPublicURL = testIssuerURL
 			early.now = func() time.Time { return now.AddDate(0, -11, 0) }
 			if err := provisionTestPID(early, testPIDDirs{publicDir: t.TempDir(), rootDir: t.TempDir()}); err != nil {
 				t.Fatal(err)
@@ -334,7 +371,7 @@ func writeFreshTestPIDLeaf(t *testing.T, f credentialIssuerFixture, options wall
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ensureCertificate(options, dir, role, root, testPIDLeafTemplate(issuerEKUOID, options.now())); err != nil {
+	if _, err := ensureCertificate(options, dir, role, root, testPIDLeafTemplate(issuerEKUOID, options.now(), nil)); err != nil {
 		t.Fatal(err)
 	}
 }
