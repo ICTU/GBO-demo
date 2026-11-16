@@ -112,10 +112,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   kept in an in-memory session behind an HttpOnly, `SameSite=Lax` cookie
   (`Secure` when the redirect URI is https), and `POST /api/dvtp/query` uses
   it when the body has no `consent_token`; a token in the body still works.
-  Calls to the Outway carry the trace context. Configured with
-  `CONSENT_CLIENT_ID`, `CONSENT_REDIRECT_URI`, `CONSENT_PORTAL_URL` and
-  `CONSENT_AUTHORIZATION_URL`; without `CONSENT_CLIENT_ID` the routes are off.
-  Demo shortcut: sessions live in memory for 12 hours. The demo frontends do
+  A granted consent gets a new session id, so an id known before the grant
+  never gets the token. Start, complete and a query that uses the session
+  must be `application/json` (`415`) and, when the browser sends
+  `Sec-Fetch-Site`, `same-origin` (`403`): other ports and sibling
+  subdomains are the same site for `SameSite=Lax`. A refusal caused by the
+  provider's own registration or configuration is `502`, one caused by the
+  request `400`. Calls to the Outway carry the trace context. Configured with
+  `CONSENT_CLIENT_ID` (a Peer ID, digits only), `CONSENT_REDIRECT_URI`,
+  `CONSENT_PORTAL_URL` and `CONSENT_AUTHORIZATION_URL`; without
+  `CONSENT_CLIENT_ID` the routes are off. Demo shortcuts: sessions live in
+  memory for 12 hours from their creation, a start does not extend them, and
+  their number is not capped; the browser sends each co-hosted provider's
+  session cookie to every demo frontend on the host. The demo frontends do
   not use the routes yet.
 - **The demo runs on any host name**: the Vite frontends accept
   `GBO_PUBLIC_HOST` and `GBO_EXTRA_ALLOWED_HOSTS`, the reference QTSP follows
