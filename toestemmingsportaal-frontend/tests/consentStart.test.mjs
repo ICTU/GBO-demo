@@ -4,10 +4,12 @@ import test from 'node:test'
 import {
   INITIAL_PHASE,
   START_COOKIE,
+  START_ROUTE,
   clearedStartCookie,
   confirmation,
   nextPhase,
   readStartCookie,
+  resumeAfterLogin,
   startCookie,
   startParams,
   startPath,
@@ -206,12 +208,17 @@ test('resolve and decision call the backend with the request_uri as one path seg
   })
 })
 
-test('the login resumes the start URL from the cookie and cancels to the overview', async () => {
-  const source = await read('pages/DigiDAuth.tsx')
-  assert.match(source, /const startFlow = params\.get\('flow'\) === 'start'/)
-  assert.match(source, /const ctx = startFlow \? null : redirectCtx/)
-  const cancel = source.slice(source.indexOf('const onCancel'), source.indexOf('} else if (ctx)'))
-  assert.match(cancel, /clearedStartCookie\(secure\(\)\)[\s\S]*navigate\('\/mijnoverheid\/toestemmingen'\)/)
-  assert.doesNotMatch(cancel, /return_url|location/)
-  assert.match(source, /readStartCookie\(document\.cookie\)[\s\S]*clearedStartCookie\(secure\(\)\)/)
+test('after the login the cookie leads back to the start URL', () => {
+  const start = { clientId: '99999999900000000300', requestUri }
+  const cookie = startCookie(start, false).split(';')[0]
+  assert.equal(resumeAfterLogin(`other=1; ${cookie}`), startPath(start))
+})
+
+test('an expired start cookie after the login leads to the error page, not the overview', () => {
+  for (const cookieHeader of ['', 'other=1', `${START_COOKIE}=${encodeURIComponent('/mijnoverheid/toestemmingen')}`]) {
+    const resume = resumeAfterLogin(cookieHeader)
+    assert.equal(resume, START_ROUTE)
+    // The start route without its parameters is the error page.
+    assert.equal(startParams(new URL(resume, 'http://portal.invalid').searchParams), null)
+  }
 })

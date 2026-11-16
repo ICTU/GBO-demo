@@ -4,7 +4,7 @@ import DigiDLayout from '../components/DigiDLayout'
 import { useRedirectContext, clearRedirectContext } from '../hooks/useRedirectContext'
 import { usePortalToken } from '../hooks/usePortalToken'
 import { login } from '../api/portalClient'
-import { clearedStartCookie, readStartCookie } from '../consentStart/startFlow'
+import { clearedStartCookie, resumeAfterLogin } from '../consentStart/startFlow'
 
 type Method = 'app' | 'sms' | 'rijbewijs' | 'id-kaart'
 
@@ -108,9 +108,11 @@ export default function DigiDAuth() {
       const { token } = await login(password.trim())
       set(token)
       if (startFlow) {
-        const resume = readStartCookie(document.cookie)
+        // Back to the start URL; when its cookie has expired, to the start
+        // flow's error page rather than silently to the overview.
+        const resume = resumeAfterLogin(document.cookie)
         document.cookie = clearedStartCookie(secure())
-        navigate(resume ?? '/mijnoverheid/toestemmingen', { replace: true })
+        navigate(resume, { replace: true })
         return
       }
       // Destination choice: ctx (issuance flow) > next (standalone) > default
