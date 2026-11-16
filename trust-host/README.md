@@ -1,12 +1,15 @@
 # GBO demo trust host
 
 The nginx service publishes the reader CRL, wallet-registration status lists,
-support pages and four role-specific Lists of Trusted Entities (LoTE).
+support pages, four role-specific Lists of Trusted Entities (LoTE) and the
+root that signs them, with an overview page at `/`.
 It has no signing keys. Configure `EUDI_TRUST_PUBLIC_URL` for the simulation
 deployment and `EUDI_TRUST_PUBLISH_DIR` for the public host directory.
 
 | URL | Media type | Cache policy |
 | --- | --- | --- |
+| `/` | `text/html` | none |
+| `/lote-ca-cert.pem` | `application/x-pem-file` | `no-cache` |
 | `/lote/PIDProviders.jwt` | `application/octet-stream` | `public, max-age=3600` |
 | `/lote/PubEAAProviders.jwt` | `application/octet-stream` | `public, max-age=3600` |
 | `/lote/WRPACProviders.jwt` | `application/octet-stream` | `public, max-age=3600` |
@@ -18,6 +21,25 @@ The LoTE media type matches the EU reference host observed on 11 November
 2026. The signed response is a compact JWS. These are demo trust lists:
 ETSI role identifiers permit reference-wallet parsing; they do not assert EU
 notification, public-sector status or legal approval.
+
+## Verifying the lists
+
+Fetch `/lote-ca-cert.pem` and compare its SHA-256 fingerprint (over the
+certificate DER) with the one below before you trust it. The root comes from
+the same host as the lists, so on its own it proves only that host, through
+TLS; this README is the second source.
+
+| Deployment | Root | SHA-256 fingerprint |
+| --- | --- | --- |
+| Simulation, `https://gbo-trust-minezk.simulatie.datastelsel.nl` | `CN=GBO LoTE scheme operator root, O=GBO Demo, C=NL`, valid until 2036-11-11 | `A9:75:9C:4B:37:53:33:F2:ED:DB:9D:97:9A:CD:40:FE:E1:B1:2C:CC:BD:4C:37:16:BE:4F:97:EB:2C:1A:37:AE` |
+
+```sh
+curl -s https://gbo-trust-minezk.simulatie.datastelsel.nl/lote-ca-cert.pem | openssl x509 -noout -fingerprint -sha256
+```
+
+A local deployment has its own root, created by
+`make provision-trust-list-signer`. When the simulation root is replaced,
+update this table.
 
 ## Provision and publish on the host
 
@@ -57,7 +79,8 @@ make publish-trust-lists
 
 The first command creates the dedicated scheme root once and keeps it on
 later runs. It renews the signer when needed, keeping its key. Only
-`lote-ca-cert.pem` is projected publicly. The root and signer keys stay under
+`lote-ca-cert.pem` is projected publicly; the second command also copies it
+into the publication directory, where the trust host serves it. The root and signer keys stay under
 `GBO_LOTE_SIGNER_DIR` (default `.local/lote-signer`), mode `0600` in a `0700`
 directory. This directory is not mounted by this repository's compose file.
 The command rejects placement inside the secrets or either public directory,

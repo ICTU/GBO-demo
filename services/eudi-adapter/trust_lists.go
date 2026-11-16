@@ -114,6 +114,11 @@ func runTrustListCommand(ctx context.Context, args []string, stdout, stderr io.W
 	if err != nil {
 		return true, err
 	}
+	// The trust host serves the root next to the lists, so that parties can
+	// fetch what verifies them.
+	if err := projectRoot(options.rootDir, "lote", options.publishDir); err != nil {
+		return true, err
+	}
 	_, _ = fmt.Fprintf(stdout, "LoTE changed=%t sequence=%d NL-config=%d NL-authentication=%s next-update=%s\n", result.Changed, result.Sequence, result.NLVersion, result.NLAuthentication, result.NextUpdate.Format(time.RFC3339))
 	for _, role := range trustlists.Roles {
 		_, _ = fmt.Fprintf(stdout, "%s: %d distinct anchors\n", role.Filename(), result.Counts[role])
