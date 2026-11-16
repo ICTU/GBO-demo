@@ -64,11 +64,15 @@ type PushedReference struct {
 // PushRequest checks a pushed request from provider, the authenticated
 // peer, and keeps it under a new request URI. A refusal is a *Refusal: a
 // missing or unusable OAuth parameter, or a valid_until that is malformed or
-// not in the future, is ReasonInitiationIncomplete, checked before anything
-// else; the rest are VerifyRequest's checks.
+// not later than the expiry of the new request URI, is
+// ReasonInitiationIncomplete, checked before anything else; the rest are
+// VerifyRequest's checks.
 func (p *Portal) PushRequest(ctx context.Context, provider PeerID, pushed PushedRequest) (PushedReference, error) {
 	if problem := pushed.incomplete(); problem != "" {
 		return PushedReference{}, refuse(ReasonInitiationIncomplete, "%s", problem)
+	}
+	if p.Requests == nil {
+		return PushedReference{}, errors.New("no request store is configured")
 	}
 	now := p.now()
 	var validUntil time.Time
@@ -77,8 +81,11 @@ func (p *Portal) PushRequest(ctx context.Context, provider PeerID, pushed Pushed
 		if err != nil {
 			return PushedReference{}, refuse(ReasonInitiationIncomplete, "valid_until is not an RFC 3339 time")
 		}
-		if !parsed.After(now) {
-			return PushedReference{}, refuse(ReasonInitiationIncomplete, "valid_until is not in the future")
+		// A consent that ends before the citizen can decide is no consent:
+		// valid_until has to outlast the request URI, so that it is still
+		// in the future whenever the decision is made.
+		if !parsed.After(p.Requests.expiry(now)) {
+			return PushedReference{}, refuse(ReasonInitiationIncomplete, "valid_until is not later than the expiry of the request_uri")
 		}
 		validUntil = parsed
 	}
@@ -95,9 +102,6 @@ func (p *Portal) PushRequest(ctx context.Context, provider PeerID, pushed Pushed
 		return PushedReference{}, err
 	}
 
-	if p.Requests == nil {
-		return PushedReference{}, errors.New("no request store is configured")
-	}
 	uri, expiresAt, err := p.Requests.Put(PendingRequest{
 		Request:       verified,
 		State:         pushed.State,
@@ -158,7 +162,7 @@ func (s *RequestStore) Put(request PendingRequest, now time.Time) (string, time.
 		return "", time.Time{}, err
 	}
 	uri := requestURIPrefix + base64.RawURLEncoding.EncodeToString(random)
-	request.ExpiresAt = now.Add(s.lifetime)
+	request.ExpiresAt = s.expiry(now)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -169,6 +173,11 @@ func (s *RequestStore) Put(request PendingRequest, now time.Time) (string, time.
 	}
 	s.requests[uri] = request
 	return uri, request.ExpiresAt, nil
+}
+
+// expiry is when a request put at now expires.
+func (s *RequestStore) expiry(now time.Time) time.Time {
+	return now.Add(s.lifetime)
 }
 
 // Get returns the request kept under uri. found is false for an unknown

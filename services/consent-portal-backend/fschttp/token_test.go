@@ -2,6 +2,7 @@ package fschttp
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -158,5 +159,38 @@ func TestTokenWithoutACodeStoreIsAServerError(t *testing.T) {
 	resp, body := exchange(t, server, hypotheekPeer, tokenForm("any"))
 	if resp.StatusCode != http.StatusInternalServerError || body["error"] != "server_error" {
 		t.Errorf("got %d %v, want 500 server_error", resp.StatusCode, body)
+	}
+}
+
+func TestTokenReadsAFormBodyOfAtMost64KiB(t *testing.T) {
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	server, code := tokenServer(t, now, now)
+
+	oversized := tokenForm(code)
+	oversized.Set("padding", strings.Repeat("x", maxFormBytes))
+	resp, body := exchange(t, server, hypotheekPeer, oversized)
+	if resp.StatusCode != http.StatusRequestEntityTooLarge || body["error"] != "invalid_request" {
+		t.Errorf("oversized body: got %d %v, want 413 invalid_request", resp.StatusCode, body)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/token", strings.NewReader(fmt.Sprintf(`{"code":%q}`, code)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Fsc-Authorization", fscToken(hypotheekPeer))
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = json.NewDecoder(resp.Body).Decode(&body)
+	_ = resp.Body.Close()
+	if err != nil || resp.StatusCode != http.StatusBadRequest || body["error"] != "invalid_request" {
+		t.Errorf("a JSON body: got %d %v (%v), want 400 invalid_request", resp.StatusCode, body, err)
+	}
+
+	// Neither refusal used the code.
+	if resp, body := exchange(t, server, hypotheekPeer, tokenForm(code)); resp.StatusCode != http.StatusOK {
+		t.Errorf("the exchange afterwards: %d %v", resp.StatusCode, body)
 	}
 }

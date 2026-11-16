@@ -63,18 +63,20 @@ func TestPushRequestKeepsAVerifiedRequest(t *testing.T) {
 
 func TestPushRequestRefusesAnIncompleteOAuthRequest(t *testing.T) {
 	for name, change := range map[string]func(*PushedRequest){
-		"no response_type":        func(r *PushedRequest) { r.ResponseType = "" },
-		"response_type token":     func(r *PushedRequest) { r.ResponseType = "token" },
-		"no state":                func(r *PushedRequest) { r.State = "" },
-		"no code_challenge":       func(r *PushedRequest) { r.CodeChallenge = "" },
-		"no challenge method":     func(r *PushedRequest) { r.CodeChallengeMethod = "" },
-		"plain challenge method":  func(r *PushedRequest) { r.CodeChallengeMethod = "plain" },
-		"not an S256 challenge":   func(r *PushedRequest) { r.CodeChallenge = "too-short" },
-		"no client_id":            func(r *PushedRequest) { r.ClientID = "" },
-		"no redirect_uri":         func(r *PushedRequest) { r.RedirectURI = "" },
-		"valid_until not a time":  func(r *PushedRequest) { r.ValidUntil = "in 90 days" },
-		"valid_until in the past": func(r *PushedRequest) { r.ValidUntil = "2020-01-01T00:00:00Z" },
-		"valid_until now":         func(r *PushedRequest) { r.ValidUntil = "2026-11-10T12:00:00Z" },
+		"no response_type":          func(r *PushedRequest) { r.ResponseType = "" },
+		"response_type token":       func(r *PushedRequest) { r.ResponseType = "token" },
+		"no state":                  func(r *PushedRequest) { r.State = "" },
+		"no code_challenge":         func(r *PushedRequest) { r.CodeChallenge = "" },
+		"no challenge method":       func(r *PushedRequest) { r.CodeChallengeMethod = "" },
+		"plain challenge method":    func(r *PushedRequest) { r.CodeChallengeMethod = "plain" },
+		"not an S256 challenge":     func(r *PushedRequest) { r.CodeChallenge = "too-short" },
+		"no client_id":              func(r *PushedRequest) { r.ClientID = "" },
+		"no redirect_uri":           func(r *PushedRequest) { r.RedirectURI = "" },
+		"valid_until not a time":    func(r *PushedRequest) { r.ValidUntil = "in 90 days" },
+		"valid_until in the past":   func(r *PushedRequest) { r.ValidUntil = "2020-01-01T00:00:00Z" },
+		"valid_until now":           func(r *PushedRequest) { r.ValidUntil = "2026-11-10T12:00:00Z" },
+		"valid_until before expiry": func(r *PushedRequest) { r.ValidUntil = "2026-11-10T12:00:30Z" },
+		"valid_until at expiry":     func(r *PushedRequest) { r.ValidUntil = "2026-11-10T12:01:00Z" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			registrations := demoRegistrations()
@@ -154,5 +156,16 @@ func TestRequestStoreExpiresRequests(t *testing.T) {
 	}
 	if _, kept := store.requests[first]; kept {
 		t.Error("the expired request was not dropped after its retention")
+	}
+}
+
+func TestPushRequestAcceptsAValidUntilJustAfterTheRequestURIExpires(t *testing.T) {
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	p := parPortal(now)
+	push := validPush()
+	push.ValidUntil = "2026-11-10T12:10:01Z"
+
+	if _, err := p.PushRequest(context.Background(), hypotheekPeer, push); err != nil {
+		t.Errorf("PushRequest: %v", err)
 	}
 }

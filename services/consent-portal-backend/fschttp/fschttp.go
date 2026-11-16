@@ -84,14 +84,7 @@ func handlePAR(portal *consent.Portal) http.HandlerFunc {
 			})
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, maxFormBytes)
-		if err := r.ParseForm(); err != nil || !isForm(r) {
-			status, description := http.StatusBadRequest, "the request body must be application/x-www-form-urlencoded"
-			var tooLarge *http.MaxBytesError
-			if errors.As(err, &tooLarge) {
-				// RFC 9126 §2.3 names 413 for a request beyond the server's bound.
-				status, description = http.StatusRequestEntityTooLarge, "the request body is larger than 64 KiB"
-			}
+		if status, description := readForm(w, r); status != 0 {
 			writeJSON(w, status, errorResponse{
 				Error:       "invalid_request",
 				Description: description,
@@ -153,6 +146,24 @@ func repeatedParameter(form url.Values) string {
 		}
 	}
 	return ""
+}
+
+// readForm parses the form-encoded body of r, of at most maxFormBytes. When
+// it cannot, it returns the status and description to refuse the request
+// with: 413 for a body beyond the bound (RFC 9126 §2.3 names it for PAR, and
+// /token answers the same), 400 for anything else. A status of 0 means the
+// form is in r.PostForm.
+func readForm(w http.ResponseWriter, r *http.Request) (status int, description string) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxFormBytes)
+	err := r.ParseForm()
+	var tooLarge *http.MaxBytesError
+	switch {
+	case errors.As(err, &tooLarge):
+		return http.StatusRequestEntityTooLarge, "the request body is larger than 64 KiB"
+	case err != nil || !isForm(r):
+		return http.StatusBadRequest, "the request body must be application/x-www-form-urlencoded"
+	}
+	return 0, ""
 }
 
 func isForm(r *http.Request) bool {
@@ -217,12 +228,8 @@ func handleToken(portal *consent.Portal) http.HandlerFunc {
 			})
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, maxFormBytes)
-		if err := r.ParseForm(); err != nil || !isForm(r) {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:       "invalid_request",
-				Description: "the request body must be application/x-www-form-urlencoded",
-			})
+		if status, description := readForm(w, r); status != 0 {
+			writeJSON(w, status, errorResponse{Error: "invalid_request", Description: description})
 			return
 		}
 		form := r.PostForm

@@ -38,10 +38,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   FSC service `consent-authorization` of the consent register's peer through
   `cr-inway`. The provider is the `sub` of the forwarded `Fsc-Authorization`
   token (none: `401`). Without `response_type=code`, `client_id`, `state` or
-  an S256 `code_challenge`, with a `valid_until` that is malformed or not in
-  the future, a repeated parameter or a `request_uri` in the body, the request
-  is refused with `INITIATION_INCOMPLETE` (a body over 64 KiB: `413`); then
-  the admission register checks run. A refusal is an OAuth error with the
+  an S256 `code_challenge`, with a `valid_until` that is malformed or not
+  later than the expiry of the new `request_uri`, a repeated parameter or a
+  `request_uri` in the body, the request is refused with
+  `INITIATION_INCOMPLETE` (a body over 64 KiB: `413`); then the admission
+  register checks run. A refusal is an OAuth error with the
   reason code in `reason` (`invalid_request`, `unauthorized_client` for
   `PARTY_NOT_ACTIVE`, `invalid_scope` for `UNKNOWN_SCOPE`,
   `503 temporarily_unavailable` for `ADMISSION_REGISTER_UNAVAILABLE`); an
@@ -76,15 +77,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   goes to: the return URL with `code` and `state`, with
   `error=access_denied` and `state` (no consent), or with
   `error=server_error` and `state` when the consent could not be given. It
-  never carries the consent token. Data sets outside the request, or none,
-  answer `400` and leave the reference usable. Without `valid_until` a
-  consent holds 90 days, as on the current consent screen. On the FSC
+  never carries the consent token. Data sets outside the request, a data
+  set named twice, or none, answer `400` and leave the reference usable.
+  Without `valid_until` a consent holds 90 days, as on the current consent
+  screen. On the FSC
   listener, `POST /token` (`grant_type=authorization_code`, `code`,
   `redirect_uri`, `code_verifier`) gives the calling provider the consent
   token as `access_token`, with `scope` and `consent_id`. A code works once,
   for 60 seconds, for its own provider and redirect URI and with the PKCE
   verifier of the pushed challenge; otherwise `invalid_grant`. Another
-  `grant_type` gives `unsupported_grant_type`. Expired and used references
+  `grant_type` gives `unsupported_grant_type`, and a body over 64 KiB `413`.
+  Two choices the standards leave open: a code presented again after its
+  exchange is refused, but the consent it gave is not revoked (RFC 6749
+  §4.1.2 says SHOULD), and a failed exchange does not burn the code, so that
+  someone who sees it cannot block the provider. Portal and `/token`
+  answers carry `Cache-Control: no-store`. Expired and used references
   are remembered for one more request lifetime, then they are unknown. Demo
   shortcut: codes live in memory, like pushed requests. The demo providers do
   not use these endpoints yet.

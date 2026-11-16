@@ -105,6 +105,7 @@ type harness struct {
 	portal   *consent.Portal
 	register *fakeRegister
 	now      time.Time
+	header   http.Header // of the last answer
 }
 
 func newHarness(t *testing.T, registeredReturnURL string) *harness {
@@ -171,6 +172,7 @@ func (h *harness) call(t *testing.T, method, path, citizen string, body any) (in
 		t.Fatal(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	h.header = resp.Header
 	raw, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, raw
 }
@@ -367,11 +369,12 @@ func TestDecisionKeepsTheReturnURLQuery(t *testing.T) {
 
 func TestDecisionRefusesABadBodyAndKeepsTheReference(t *testing.T) {
 	for name, body := range map[string]any{
-		"no body":                  nil,
-		"other decision":           map[string]any{"decision": "maybe"},
-		"grant without data sets":  map[string]any{"decision": "grant"},
-		"grant of empty data sets": map[string]any{"decision": "grant", "scopes": []string{}},
-		"grant beyond the request": map[string]any{"decision": "grant", "scopes": []string{"bd:ib:2025", "lvg:vbo:eigendom"}},
+		"no body":                   nil,
+		"other decision":            map[string]any{"decision": "maybe"},
+		"grant without data sets":   map[string]any{"decision": "grant"},
+		"grant of empty data sets":  map[string]any{"decision": "grant", "scopes": []string{}},
+		"grant beyond the request":  map[string]any{"decision": "grant", "scopes": []string{"bd:ib:2025", "lvg:vbo:eigendom"}},
+		"grant of a data set twice": map[string]any{"decision": "grant", "scopes": []string{"bd:ib:2025", "bd:ib:2025"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(t, returnURL)
@@ -408,5 +411,38 @@ func TestDecisionNeedsALogin(t *testing.T) {
 	h := newHarness(t, returnURL)
 	if status, _ := h.decide(t, h.push(t, returnURL), "", grantBoth); status != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", status)
+	}
+}
+
+func TestDecisionOnAnExpiredReferenceIsGone(t *testing.T) {
+	h := newHarness(t, returnURL)
+	uri := h.push(t, returnURL)
+	h.resolve(t, uri, hypotheekPeer, citizenA)
+	h.now = h.now.Add(10 * time.Minute)
+
+	status, raw := h.decide(t, uri, citizenA, grantBoth)
+	if status != http.StatusGone || decode(t, raw)["reason"] != string(consent.ReasonRequestURIExpired) {
+		t.Errorf("got %d %s, want 410 %s", status, raw, consent.ReasonRequestURIExpired)
+	}
+	if h.register.consents() != 0 {
+		t.Error("a decision on an expired reference gave a consent")
+	}
+}
+
+func TestRequestAnswersAreNotCached(t *testing.T) {
+	h := newHarness(t, returnURL)
+	uri := h.push(t, returnURL)
+
+	h.resolve(t, uri, hypotheekPeer, citizenA)
+	if got := h.header.Get("Cache-Control"); got != "no-store" {
+		t.Errorf("resolve: Cache-Control = %q, want no-store", got)
+	}
+	h.decide(t, uri, citizenA, grantBoth)
+	if got := h.header.Get("Cache-Control"); got != "no-store" {
+		t.Errorf("decision: Cache-Control = %q, want no-store", got)
+	}
+	h.decide(t, uri, citizenA, grantBoth)
+	if got := h.header.Get("Cache-Control"); got != "no-store" {
+		t.Errorf("refusal: Cache-Control = %q, want no-store", got)
 	}
 }
