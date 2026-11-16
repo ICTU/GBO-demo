@@ -5,11 +5,13 @@ import ToestemmingConsent from './ToestemmingConsent'
 import ToestemmingBevestiging from './ToestemmingBevestiging'
 import ToestemmingFout from './ToestemmingFout'
 import { usePortalToken } from '../hooks/usePortalToken'
-import { decideRequest, PortalApiError, resolveRequest, type DecisionBody } from '../api/portalClient'
+import { decideRequest, resolveRequest, type DecisionBody } from '../api/portalClient'
 import {
   INITIAL_PHASE,
   START_LOGIN_ROUTE,
+  afterFailure,
   nextPhase,
+  startAction,
   startCookie,
   startParams,
 } from '../consentStart/startFlow'
@@ -36,14 +38,16 @@ export default function ToestemmingStart() {
 
   useEffect(() => {
     if (phase.kind !== 'resolving') return
-    if (!start) {
+    const action = startAction(start, token)
+    if (action === 'error') {
       dispatch({ type: 'failed' })
       return
     }
-    if (!token) {
+    if (action === 'login') {
       toLogin()
       return
     }
+    if (!start || !token) return
     let cancelled = false
     resolveRequest(token, start.requestUri, start.clientId).then(
       (request) => {
@@ -51,7 +55,7 @@ export default function ToestemmingStart() {
       },
       (err) => {
         if (cancelled) return
-        if (err instanceof PortalApiError && err.status === 401) {
+        if (afterFailure(err) === 'relogin') {
           clear()
           toLogin()
         } else {
@@ -73,7 +77,7 @@ export default function ToestemmingStart() {
       const answer = await decideRequest(token, start.requestUri, body)
       dispatch({ type: 'decided', answer })
     } catch (err) {
-      if (err instanceof PortalApiError && err.status === 401) {
+      if (afterFailure(err) === 'relogin') {
         clear()
         toLogin()
       } else {

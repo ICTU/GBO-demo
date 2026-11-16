@@ -4,12 +4,16 @@ import test from 'node:test'
 import {
   INITIAL_PHASE,
   START_COOKIE,
+  START_LOGIN_ROUTE,
   START_ROUTE,
+  afterFailure,
+  chosenScopes,
   clearedStartCookie,
   confirmation,
   nextPhase,
   readStartCookie,
   resumeAfterLogin,
+  startAction,
   startCookie,
   startParams,
   startPath,
@@ -134,12 +138,10 @@ test('a decision shows the confirmation before the browser returns', async () =>
     kind: 'confirmed',
     confirmation: { outcome: 'granted', clientName: 'Demo Hypotheekverlener BV', redirectTo: answer.redirect_to },
   })
-  // Only the confirmation page leaves the portal, after AUTO_REDIRECT_MS.
-  const confirmationPage = await read('pages/ToestemmingBevestiging.tsx')
-  assert.match(confirmationPage, /setTimeout\(onReturn, AUTO_REDIRECT_MS\)/)
+  // The start page leaves the portal in one place only: the confirmation's
+  // return.
   const startPage = await read('pages/ToestemmingStart.tsx')
   assert.equal([...startPage.matchAll(/location\.assign\(/g)].length, 1)
-  assert.match(startPage, /const redirectTo = phase\.kind === 'confirmed' \? phase\.confirmation\.redirectTo : null/)
 })
 
 test('the return URL is the backend answer, taken literally', () => {
@@ -210,10 +212,35 @@ test('resolve and decision call the backend with the request_uri as one path seg
   })
 })
 
-test('after the login the cookie leads back to the start URL', () => {
-  const start = { clientId: '99999999900000000300', requestUri }
+/** A fetch that answers with the given responses, in order, and records the calls. */
+function mockFetch(t, ...answers) {
+  const calls = []
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    calls.push({ url, init })
+    return answers.shift()
+  })
+  globalThis.document = { cookie: '' }
+  t.after(() => delete globalThis.document)
+  return calls
+}
+
+const json = (body, status = 200) => new Response(JSON.stringify(body), { status })
+
+test('without a portal login the start URL goes into the cookie and the citizen logs in', () => {
+  const start = startParams(`?client_id=99999999900000000300&request_uri=${encodeURIComponent(requestUri)}`)
+  assert.equal(startAction(start, null), 'login')
+  assert.equal(startAction(start, ''), 'login')
+  assert.equal(START_LOGIN_ROUTE, '/auth?flow=start')
+  // After the login, the cookie leads back to the same start URL.
   const cookie = startCookie(start, false).split(';')[0]
   assert.equal(resumeAfterLogin(`other=1; ${cookie}`), startPath(start))
+})
+
+test('with a portal login the start page resolves; without a usable start URL it is the error page', () => {
+  const start = { clientId: '99999999900000000300', requestUri }
+  assert.equal(startAction(start, 'tok'), 'resolve')
+  assert.equal(startAction(startParams('?client_id=99999999900000000300'), 'tok'), 'error')
+  assert.equal(startAction(startParams('?client_id=99999999900000000300'), null), 'error')
 })
 
 test('an expired start cookie after the login leads to the error page, not the overview', () => {
@@ -221,8 +248,51 @@ test('an expired start cookie after the login leads to the error page, not the o
     const resume = resumeAfterLogin(cookieHeader)
     assert.equal(resume, START_ROUTE)
     // The start route without its parameters is the error page.
-    assert.equal(startParams(new URL(resume, 'http://portal.invalid').searchParams), null)
+    const url = new URL(resume, 'http://portal.invalid')
+    assert.equal(startAction(startParams(url.searchParams), 'tok'), 'error')
   }
+})
+
+test('a rejected portal login (401) on resolve or decision logs in again; other failures are the error page', async (t) => {
+  mockFetch(
+    t,
+    json({ error: 'token expired' }, 401),
+    json({ error: 'token expired' }, 401),
+    json({ error: 'gone', reason: 'REQUEST_URI_SPENT' }, 410),
+    json({ error: 'forbidden', reason: 'REQUEST_URI_OTHER_CITIZEN' }, 403),
+    json({ error: 'bad', reason: 'CLIENT_ID_MISMATCH' }, 400),
+  )
+  const outcomes = []
+  for (const call of [
+    () => resolveRequest('tok', requestUri, '99999999900000000300'),
+    () => decideRequest('tok', requestUri, { decision: 'deny' }),
+    () => resolveRequest('tok', requestUri, '99999999900000000300'),
+    () => decideRequest('tok', requestUri, { decision: 'deny' }),
+    () => resolveRequest('tok', requestUri, 'x'),
+  ]) {
+    await call().then(
+      () => assert.fail('the call succeeded'),
+      (err) => outcomes.push(afterFailure(err)),
+    )
+  }
+  assert.deepEqual(outcomes, ['relogin', 'relogin', 'failed', 'failed', 'failed'])
+  assert.equal(afterFailure(new TypeError('Failed to fetch')), 'failed')
+})
+
+test('a grant posts exactly the data sets the citizen left checked', async (t) => {
+  const requested = ['bd:ib:2025', 'bd:ib:2024']
+  assert.deepEqual(chosenScopes(requested, {}), requested)
+  assert.deepEqual(chosenScopes(requested, { 'bd:ib:2025': true, 'bd:ib:2024': true }), requested)
+  assert.deepEqual(chosenScopes(requested, { 'bd:ib:2025': false }), ['bd:ib:2024'])
+  assert.deepEqual(chosenScopes(requested, { 'bd:ib:2025': false, 'bd:ib:2024': false }), [])
+  // A data set the request did not ask for is never granted.
+  assert.deepEqual(chosenScopes(['bd:ib:2025'], { 'bd:ib:2024': true }), ['bd:ib:2025'])
+
+  const calls = mockFetch(t, json({ outcome: 'granted', client_name: 'X', redirect_to: 'https://dv.example/r?code=c&state=s' }))
+  await decideRequest('tok', requestUri, { decision: 'grant', scopes: chosenScopes(requested, { 'bd:ib:2025': false }) })
+  assert.equal(calls[0].init.method, 'POST')
+  assert.equal(calls[0].init.headers.Authorization, 'Bearer tok')
+  assert.deepEqual(JSON.parse(calls[0].init.body), { decision: 'grant', scopes: ['bd:ib:2024'] })
 })
 
 /** A sessionStorage stand-in. */

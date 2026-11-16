@@ -3,7 +3,7 @@ import MijnOverheidLayout from '../components/MijnOverheidLayout'
 import ScopeToggle from '../components/consent/ScopeToggle'
 import PartialConsentWarning from '../components/consent/PartialConsentWarning'
 import { requestedScopeGroups } from '../data/scopeGroups'
-import type { ConsentRequest } from '../consentStart/startFlow'
+import { chosenScopes, type ConsentRequest } from '../consentStart/startFlow'
 
 function formatValidUntil(iso?: string): string {
   if (!iso) return '3 maanden na toestemming'
@@ -28,7 +28,7 @@ export default function ToestemmingConsent({ request, deciding, onGrant, onDeny 
   const [picked, setPicked] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(scopeGroups.map((s) => [s.code, true])),
   )
-  const chosen = scopeGroups.filter((s) => picked[s.code]).map((s) => s.code)
+  const chosen = chosenScopes(request.scopes, picked)
   const partial = chosen.length > 0 && chosen.length < scopeGroups.length
 
   return (
