@@ -57,6 +57,19 @@ type Token struct {
 // the redirect URI of the request, before it expires and with the code
 // verifier of the pushed challenge; otherwise the error wraps
 // ErrInvalidGrant. A failed attempt leaves the code as it was.
+//
+// Two deliberate choices, both open in the standards:
+//   - A code presented again after its exchange is refused, but the consent
+//     it gave is not revoked. RFC 6749 §4.1.2 says the server SHOULD revoke
+//     the tokens of a reused code. Risk: whoever has both the code and the
+//     verifier (in practice the provider's backend) keeps a token that holds
+//     until the citizen revokes the consent. Revoking would mean keeping
+//     exchanged codes for a lifetime and calling the register; the demo does
+//     not.
+//   - A failed attempt does not burn the code. A verifier has at least 43
+//     characters and the code lives a minute, so guessing is out of reach,
+//     while burning would let anyone who sees the code (in the browser's
+//     address bar) stop the provider from exchanging it.
 func (p *Portal) ExchangeCode(_ context.Context, provider PeerID, request TokenRequest) (Token, error) {
 	if p.Codes == nil {
 		return Token{}, errors.New("no code store is configured")

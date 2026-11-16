@@ -134,6 +134,7 @@ func TestDecideRefusesAnInvalidDecisionAndKeepsTheReference(t *testing.T) {
 		"grant with an empty set":      grant("bd:ib:2025", ""),
 		"grant beyond the request":     grant("bd:ib:2025", "lvg:vbo:eigendom"),
 		"grant of an unknown data set": grant("brp:alles"),
+		"grant of a data set twice":    grant("bd:ib:2025", "bd:ib:2025"),
 	} {
 		t.Run(name, func(t *testing.T) {
 			p, _, store, _ := flowPortal(t)
@@ -256,6 +257,39 @@ func TestDecideReportsAFailedGrant(t *testing.T) {
 	}
 }
 
+func TestDecideRefusesAnExpiredReference(t *testing.T) {
+	p, clock, store, _ := flowPortal(t)
+	uri := pushed(t, p)
+	if _, err := p.ResolveRequest(context.Background(), citizenA, uri, string(hypotheekPeer)); err != nil {
+		t.Fatalf("ResolveRequest: %v", err)
+	}
+	clock.pass(10 * time.Minute)
+
+	_, err := p.Decide(context.Background(), citizenA, uri, grant("bd:ib:2025"))
+	if code := refusalCode(t, err); code != ReasonRequestURIExpired {
+		t.Errorf("code = %s, want %s", code, ReasonRequestURIExpired)
+	}
+	if len(store.created) != 0 {
+		t.Error("a decision on an expired reference gave a consent")
+	}
+}
+
+func TestDecideWithoutACodeStoreSpendsNothing(t *testing.T) {
+	p, _, store, _ := flowPortal(t)
+	uri := pushed(t, p)
+	p.Codes = nil
+
+	if _, err := p.Decide(context.Background(), citizenA, uri, grant("bd:ib:2025")); err == nil {
+		t.Fatal("decided without a code store")
+	}
+	if len(store.created) != 0 {
+		t.Error("a consent was given without a code store")
+	}
+	if _, err := p.ResolveRequest(context.Background(), citizenA, uri, string(hypotheekPeer)); err != nil {
+		t.Errorf("the reference is no longer usable: %v", err)
+	}
+}
+
 func TestDecideByAnotherCitizenLeavesTheReference(t *testing.T) {
 	p, _, store, _ := flowPortal(t)
 	uri := pushed(t, p)
@@ -370,6 +404,34 @@ func TestExchangeCodeRefusesAnInvalidGrant(t *testing.T) {
 				t.Errorf("the right exchange afterwards: %v", err)
 			}
 		})
+	}
+}
+
+func TestOnlyOneExchangeRedeemsACode(t *testing.T) {
+	p, _, _, _ := flowPortal(t)
+	code := codeFor(t, p)
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	exchanged, refused := 0, 0
+	for range 8 {
+		wg.Go(func() {
+			token, err := p.ExchangeCode(context.Background(), hypotheekPeer, validExchange(code))
+			mu.Lock()
+			defer mu.Unlock()
+			switch {
+			case err == nil && token.ConsentToken == "signed-consent-token":
+				exchanged++
+			case errors.Is(err, ErrInvalidGrant):
+				refused++
+			default:
+				t.Errorf("exchange = %+v, %v", token, err)
+			}
+		})
+	}
+	wg.Wait()
+	if exchanged != 1 || refused != 7 {
+		t.Errorf("exchanged %d, refused %d; want 1, 7", exchanged, refused)
 	}
 }
 

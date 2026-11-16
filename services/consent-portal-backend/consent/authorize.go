@@ -126,8 +126,18 @@ func (p *Portal) Decide(ctx context.Context, citizen BSN, requestURI string, dec
 	if p.Requests == nil {
 		return Decided{}, errors.New("no request store is configured")
 	}
-	if decision.Grant && (len(decision.Scopes) == 0 || slices.Contains(decision.Scopes, "")) {
-		return Decided{}, fmt.Errorf("%w: a grant names the data sets it consents to", ErrInvalidDecision)
+	// Checked here, before the reference is spent and the consent given, so
+	// that issuing the code below cannot fail for want of a store.
+	if p.Codes == nil {
+		return Decided{}, errors.New("no code store is configured")
+	}
+	if decision.Grant {
+		if len(decision.Scopes) == 0 || slices.Contains(decision.Scopes, "") {
+			return Decided{}, fmt.Errorf("%w: a grant names the data sets it consents to", ErrInvalidDecision)
+		}
+		if repeated := firstRepeated(decision.Scopes); repeated != "" {
+			return Decided{}, fmt.Errorf("%w: data set %q is named more than once", ErrInvalidDecision, repeated)
+		}
 	}
 	subject, err := p.SubjectRefs.For(citizen)
 	if err != nil {
@@ -168,6 +178,11 @@ func (p *Portal) Decide(ctx context.Context, citizen BSN, requestURI string, dec
 		UseCase:           verified.Purpose,
 	})
 	if err == nil {
+		// Once the consent is given, issuing its code cannot fail: the store
+		// is checked above and crypto/rand does not return errors (Go 1.24
+		// and later). So no rollback of the consent is built; were Issue to
+		// fail, the citizen would see an active consent the provider never
+		// got a token for, and could revoke it in the portal.
 		decided.Code, err = p.issueCode(IssuedCode{
 			Provider:      verified.Provider,
 			RedirectURI:   verified.ReturnURL,
@@ -182,4 +197,17 @@ func (p *Portal) Decide(ctx context.Context, citizen BSN, requestURI string, dec
 	}
 	decided.Outcome = OutcomeGranted
 	return decided, nil
+}
+
+// firstRepeated returns the first data set that occurs more than once in
+// scopes, or "".
+func firstRepeated(scopes []string) string {
+	seen := make(map[string]bool, len(scopes))
+	for _, scope := range scopes {
+		if seen[scope] {
+			return scope
+		}
+		seen[scope] = true
+	}
+	return ""
 }
