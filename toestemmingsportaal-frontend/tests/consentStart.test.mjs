@@ -15,6 +15,8 @@ import {
   startPath,
 } from '../src/consentStart/startFlow.ts'
 import { decideRequest, PortalApiError, resolveRequest } from '../src/api/portalClient.ts'
+import { REDIRECT_CONTEXT_KEY, loadRedirectContext } from '../src/hooks/useRedirectContext.ts'
+import { parseAllowedReturnOrigins } from '../src/hooks/redirectValidation.ts'
 
 const src = new URL('../src/', import.meta.url)
 const read = (path) => readFile(new URL(path, src), 'utf8')
@@ -221,6 +223,40 @@ test('an expired start cookie after the login leads to the error page, not the o
     // The start route without its parameters is the error page.
     assert.equal(startParams(new URL(resume, 'http://portal.invalid').searchParams), null)
   }
+})
+
+/** A sessionStorage stand-in. */
+function memoryStorage(entries = {}) {
+  const items = new Map(Object.entries(entries))
+  return {
+    items,
+    getItem: (key) => items.get(key) ?? null,
+    setItem: (key, value) => items.set(key, String(value)),
+    removeItem: (key) => items.delete(key),
+  }
+}
+
+test('the login of the start flow keeps no redirect context of the URL-based flow', () => {
+  const origins = parseAllowedReturnOrigins('http://localhost:9001')
+  const urlFlow = new URLSearchParams({
+    flow: 'start',
+    service: 'hypotheek',
+    purpose: 'Aanvraag',
+    scope: 'bd:ib:2025',
+    client_oin: '99999999900000000300',
+    client_name: 'Demo',
+    return_url: 'http://localhost:9001/return',
+  })
+
+  // The URL-based flow would keep these parameters...
+  const plain = memoryStorage()
+  assert.equal(loadRedirectContext(urlFlow, plain, origins)?.return_url, 'http://localhost:9001/return')
+  assert.ok(plain.items.has(REDIRECT_CONTEXT_KEY))
+
+  // ...the start flow neither reads nor keeps them, and drops an earlier one.
+  const storage = memoryStorage({ [REDIRECT_CONTEXT_KEY]: plain.items.get(REDIRECT_CONTEXT_KEY) })
+  assert.equal(loadRedirectContext(urlFlow, storage, origins, true), null)
+  assert.equal(storage.items.size, 0)
 })
 
 test('no other site may frame the portal, in development and in the built image', async () => {

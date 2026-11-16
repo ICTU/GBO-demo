@@ -57,15 +57,16 @@ const METHODS: { id: Method; title: string; subtitle?: string; icon: React.React
 const secure = () => window.location.protocol === 'https:'
 
 export default function DigiDAuth() {
-  const redirectCtx = useRedirectContext()
   const { set } = usePortalToken()
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const nextParam = params.get('next')
   // The start of a consent flow from a pushed request (/toestemming/start)
   // waits in a cookie while the citizen logs in. In that flow the redirect
-  // context of the URL-based flow plays no part.
+  // context of the URL-based flow plays no part: it is neither read nor
+  // kept, and an earlier one is removed.
   const startFlow = params.get('flow') === 'start'
+  const redirectCtx = useRedirectContext({ ignore: startFlow })
   const ctx = startFlow ? null : redirectCtx
 
   const [method, setMethod] = useState<Method>('app')
@@ -81,6 +82,7 @@ export default function DigiDAuth() {
   const onCancel = () => {
     if (startFlow) {
       // The portal does not know the provider's return URL in this flow.
+      clearRedirectContext()
       document.cookie = clearedStartCookie(secure())
       navigate('/mijnoverheid/toestemmingen')
     } else if (ctx) {
@@ -110,6 +112,7 @@ export default function DigiDAuth() {
       if (startFlow) {
         // Back to the start URL; when its cookie has expired, to the start
         // flow's error page rather than silently to the overview.
+        clearRedirectContext()
         const resume = resumeAfterLogin(document.cookie)
         document.cookie = clearedStartCookie(secure())
         navigate(resume, { replace: true })
