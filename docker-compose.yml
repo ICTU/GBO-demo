@@ -1596,9 +1596,6 @@ services:
       - __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=${GBO_PUBLIC_HOST:-localhost},${GBO_EXTRA_ALLOWED_HOSTS:-}
       - CHOKIDAR_USEPOLLING=true
       - PORTAL_API_TARGET=http://consent-portal-backend:4005
-      # The bearer consent token may only return to explicitly trusted
-      # consumer origins. Multiple origins can be supplied comma-separated.
-      - VITE_ALLOWED_RETURN_ORIGINS=${DIENSTVERLENER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_DV_MOCK:-9001}},${KEYPER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_KEYPER_MOCK:-9004}}
     volumes:
       - ./toestemmingsportaal-frontend/src:/app/src
       - ./toestemmingsportaal-frontend/public:/app/public
