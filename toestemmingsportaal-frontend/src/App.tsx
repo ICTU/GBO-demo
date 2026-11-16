@@ -5,6 +5,7 @@ import PortaalBevestiging from './pages/PortaalBevestiging'
 import MijnToestemmingenOverview from './pages/MijnToestemmingenOverview'
 import MijnToestemmingenDetail from './pages/MijnToestemmingenDetail'
 import MijnToestemmingenIngetrokken from './pages/MijnToestemmingenIngetrokken'
+import ToestemmingStart from './pages/ToestemmingStart'
 
 export default function App() {
   return (
@@ -13,6 +14,7 @@ export default function App() {
       <Route path="/auth" element={<DigiDAuth />} />
       <Route path="/consent" element={<PortaalConsent />} />
       <Route path="/bevestiging" element={<PortaalBevestiging />} />
+      <Route path="/toestemming/start" element={<ToestemmingStart />} />
       <Route path="/mijnoverheid/toestemmingen" element={<MijnToestemmingenOverview />} />
       <Route
         path="/mijnoverheid/toestemmingen/:id"
