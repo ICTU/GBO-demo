@@ -145,7 +145,14 @@ func TestRequestStoreExpiresRequests(t *testing.T) {
 	if second == first {
 		t.Error("two requests got the same request URI")
 	}
+	if _, kept := store.requests[first]; !kept {
+		t.Error("the expired request was forgotten within its retention")
+	}
+
+	if _, _, err := store.Put(PendingRequest{State: "third"}, now.Add(20*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
 	if _, kept := store.requests[first]; kept {
-		t.Error("the expired request was not dropped")
+		t.Error("the expired request was not dropped after its retention")
 	}
 }
