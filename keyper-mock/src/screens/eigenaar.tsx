@@ -36,10 +36,13 @@ function usePortalStart() {
   return { busy: state === 'busy', failed: state === 'failed', start }
 }
 
+// StartFailed covers every failed start: an unreachable portal, but also a
+// request the portal refused (for instance an inactive provider), so it does
+// not claim MijnOverheid is unreachable.
 function StartFailed() {
   return (
     <p role="alert" style={{ fontSize: '13px', color: 'var(--g-red-tx)', marginTop: '10px', textAlign: 'center' }}>
-      MijnOverheid kan nu niet worden bereikt. Probeer het later opnieuw.
+      De controle via MijnOverheid kan nu niet worden gestart. Probeer het later opnieuw.
     </p>
   )
 }
