@@ -4,6 +4,7 @@ import DigiDLayout from '../components/DigiDLayout'
 import { useRedirectContext, clearRedirectContext } from '../hooks/useRedirectContext'
 import { usePortalToken } from '../hooks/usePortalToken'
 import { login } from '../api/portalClient'
+import { clearedStartCookie, readStartCookie } from '../consentStart/startFlow'
 
 type Method = 'app' | 'sms' | 'rijbewijs' | 'id-kaart'
 
@@ -53,12 +54,19 @@ const METHODS: { id: Method; title: string; subtitle?: string; icon: React.React
   { id: 'id-kaart', title: 'Met mijn identiteitskaart', icon: <CardIcon /> },
 ]
 
+const secure = () => window.location.protocol === 'https:'
+
 export default function DigiDAuth() {
-  const ctx = useRedirectContext()
+  const redirectCtx = useRedirectContext()
   const { set } = usePortalToken()
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const nextParam = params.get('next')
+  // The start of a consent flow from a pushed request (/toestemming/start)
+  // waits in a cookie while the citizen logs in. In that flow the redirect
+  // context of the URL-based flow plays no part.
+  const startFlow = params.get('flow') === 'start'
+  const ctx = startFlow ? null : redirectCtx
 
   const [method, setMethod] = useState<Method>('app')
   const [showForm, setShowForm] = useState(false)
@@ -71,7 +79,11 @@ export default function DigiDAuth() {
   // directly. Default destination: consents overview.
 
   const onCancel = () => {
-    if (ctx) {
+    if (startFlow) {
+      // The portal does not know the provider's return URL in this flow.
+      document.cookie = clearedStartCookie(secure())
+      navigate('/mijnoverheid/toestemmingen')
+    } else if (ctx) {
       const url = new URL(ctx.return_url)
       url.searchParams.set('status', 'denied')
       clearRedirectContext()
@@ -95,6 +107,12 @@ export default function DigiDAuth() {
       // Username is cosmetic; password field carries the BSN we send to the mock backend.
       const { token } = await login(password.trim())
       set(token)
+      if (startFlow) {
+        const resume = readStartCookie(document.cookie)
+        document.cookie = clearedStartCookie(secure())
+        navigate(resume ?? '/mijnoverheid/toestemmingen', { replace: true })
+        return
+      }
       // Destination choice: ctx (issuance flow) > next (standalone) > default
       const dest = ctx ? '/consent' : (nextParam ?? '/mijnoverheid/toestemmingen')
       navigate(dest)
