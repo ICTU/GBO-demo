@@ -43,6 +43,7 @@ func NewMux(portal *consent.Portal) *http.ServeMux {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 	mux.HandleFunc("POST /par", handlePAR(portal))
+	mux.HandleFunc("POST /token", handleToken(portal))
 	return mux
 }
 
@@ -140,6 +141,12 @@ func unusableForm(form url.Values) string {
 	if _, found := form["request_uri"]; found {
 		return "a pushed request must not contain request_uri"
 	}
+	return repeatedParameter(form)
+}
+
+// repeatedParameter names the problem when a parameter is sent more than
+// once (RFC 6749 §3.1, §3.2), or "".
+func repeatedParameter(form url.Values) string {
 	for _, values := range form {
 		if len(values) > 1 {
 			return "a parameter is sent more than once"
@@ -183,5 +190,86 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		slog.Error("json encode failed", "err", err.Error())
+	}
+}
+
+// tokenResponse is the success response of RFC 6749 §5.1: the consent
+// token as the access token, with the consent's ID and the data sets the
+// citizen consented to.
+type tokenResponse struct {
+	AccessToken string `json:"access_token"`
+	TokenType   string `json:"token_type"`
+	Scope       string `json:"scope"`
+	ConsentID   string `json:"consent_id"`
+}
+
+// handleToken serves POST /token, where a provider exchanges the code of a
+// granted decision for the consent token (RFC 6749 §4.1.3, with the PKCE
+// verifier of RFC 7636 §4.5). The provider is the calling peer; a
+// client_id, when sent, must be that peer.
+func handleToken(portal *consent.Portal) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		provider := callingPeer(r)
+		if provider == "" {
+			writeJSON(w, http.StatusUnauthorized, errorResponse{
+				Error:       "invalid_client",
+				Description: "codes are only exchanged over FSC",
+			})
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, maxFormBytes)
+		if err := r.ParseForm(); err != nil || !isForm(r) {
+			writeJSON(w, http.StatusBadRequest, errorResponse{
+				Error:       "invalid_request",
+				Description: "the request body must be application/x-www-form-urlencoded",
+			})
+			return
+		}
+		form := r.PostForm
+		problem := repeatedParameter(form)
+		switch {
+		case problem != "":
+		case form.Get("grant_type") == "":
+			problem = "the request has no grant_type"
+		case form.Get("grant_type") != "authorization_code":
+			writeJSON(w, http.StatusBadRequest, errorResponse{
+				Error:       "unsupported_grant_type",
+				Description: "only grant_type=authorization_code is supported",
+			})
+			return
+		case form.Get("code") == "":
+			problem = "the request has no code"
+		case form.Get("redirect_uri") == "":
+			problem = "the request has no redirect_uri"
+		case form.Has("client_id") && form.Get("client_id") != string(provider):
+			problem = "client_id is not the calling peer"
+		}
+		if problem != "" {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid_request", Description: problem})
+			return
+		}
+
+		token, err := portal.ExchangeCode(r.Context(), provider, consent.TokenRequest{
+			Code:         form.Get("code"),
+			RedirectURI:  form.Get("redirect_uri"),
+			CodeVerifier: form.Get("code_verifier"),
+		})
+		switch {
+		case errors.Is(err, consent.ErrInvalidGrant):
+			slog.WarnContext(r.Context(), "code exchange refused", "provider", string(provider), "err", err.Error())
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid_grant", Description: err.Error()})
+			return
+		case err != nil:
+			slog.ErrorContext(r.Context(), "code exchange failed", "provider", string(provider), "err", err.Error())
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "server_error"})
+			return
+		}
+		slog.InfoContext(r.Context(), "code exchanged", "provider", string(provider), "consent_id", token.ConsentID)
+		writeJSON(w, http.StatusOK, tokenResponse{
+			AccessToken: token.ConsentToken,
+			TokenType:   "Bearer",
+			Scope:       strings.Join(token.Scopes, " "),
+			ConsentID:   token.ConsentID,
+		})
 	}
 }

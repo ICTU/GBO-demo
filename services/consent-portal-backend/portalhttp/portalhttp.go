@@ -351,6 +351,9 @@ func NewMux(p *consent.Portal, hub *Hub) *http.ServeMux {
 		}
 	})
 	mux.HandleFunc("/portal/consents/", handleRevoke(p))
+	// A pushed request, by its reference: resolve it, then decide on it.
+	mux.HandleFunc("/portal/requests/{ref}", handleResolveRequest(p))
+	mux.HandleFunc("/portal/requests/{ref}/decision", handleDecision(p))
 	mux.HandleFunc("/portal/events", handleSSE(hub))
 
 	return mux
