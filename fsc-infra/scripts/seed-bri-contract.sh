@@ -114,7 +114,8 @@ done
 echo "[1/4] Register service '$SERVICE_NAME' in provider Controller..."
 
 existing_services=$(mtls_curl "$PROVIDER_CERT" "$PROVIDER_KEY" "$PROVIDER_CA" \
-  "$PROVIDER_CONTROLLER_URL/v1/services" || echo '{}')
+  "$PROVIDER_CONTROLLER_URL/v1/services") ||
+  { echo "  ✗ could not list the provider's services" >&2; exit 1; }
 
 if echo "$existing_services" | jq -e --arg n "$SERVICE_NAME" \
    '.services[]? | select(.name == $n)' >/dev/null 2>&1; then
@@ -128,7 +129,7 @@ else
   http_status=$(mtls_curl "$PROVIDER_CERT" "$PROVIDER_KEY" "$PROVIDER_CA" \
     "$PROVIDER_CONTROLLER_URL/v1/services" \
     -X POST -H "Content-Type: application/json" \
-    -d "$create_body" -o /tmp/seed-svc-out.txt -w "%{http_code}")
+    -d "$create_body" -o /tmp/seed-svc-out.txt -w "%{http_code}" --no-fail)
   if [ "$http_status" != "201" ]; then
     echo "  ✗ service creation failed (HTTP $http_status)"
     cat /tmp/seed-svc-out.txt
@@ -142,8 +143,8 @@ fi
 echo "[2/4] Create publication contract for '$SERVICE_NAME' at provider Manager..."
 
 existing_pub=$(mtls_curl "$PROVIDER_CERT" "$PROVIDER_KEY" "$PROVIDER_CA" \
-  "$PROVIDER_MANAGER_URL/v1/contracts?grant_type=GRANT_TYPE_SERVICE_PUBLICATION&service_name=$SERVICE_NAME" \
-  || echo '{}')
+  "$PROVIDER_MANAGER_URL/v1/contracts?grant_type=GRANT_TYPE_SERVICE_PUBLICATION&service_name=$SERVICE_NAME") ||
+  { echo "  ✗ could not list the provider's publication contracts" >&2; exit 1; }
 
 # NOTE: the Manager's ?service_name= filter is NOT honoured (v2.4.0
 # returns every contract regardless), so the service name has to be
@@ -179,7 +180,7 @@ else
   http_status=$(mtls_curl "$PROVIDER_CERT" "$PROVIDER_KEY" "$PROVIDER_CA" \
     "$PROVIDER_MANAGER_URL/v1/contracts" \
     -X POST -H "Content-Type: application/json" \
-    -d "$pub_body" -o /tmp/seed-pub-out.txt -w "%{http_code}")
+    -d "$pub_body" -o /tmp/seed-pub-out.txt -w "%{http_code}" --no-fail)
   if [ "$http_status" != "201" ]; then
     echo "  ✗ publication contract creation failed (HTTP $http_status)"
     cat /tmp/seed-pub-out.txt
@@ -207,8 +208,8 @@ fi
 echo "[3/4] Create connection contract for '$SERVICE_NAME' at consumer Manager..."
 
 existing_conn=$(mtls_curl "$CONSUMER_CERT" "$CONSUMER_KEY" "$CONSUMER_CA" \
-  "$CONSUMER_MANAGER_URL/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=$SERVICE_NAME" \
-  || echo '{}')
+  "$CONSUMER_MANAGER_URL/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=$SERVICE_NAME") ||
+  { echo "  ✗ could not list the consumer's connection contracts" >&2; exit 1; }
 
 # Contracts are immutable, so changed properties mean a NEW contract (new iv),
 # not an update. Matching on the properties as well as on the service
@@ -263,19 +264,22 @@ else
   http_status=$(mtls_curl "$CONSUMER_CERT" "$CONSUMER_KEY" "$CONSUMER_CA" \
     "$CONSUMER_MANAGER_URL/v1/contracts" \
     -X POST -H "Content-Type: application/json" \
-    -d "$conn_body" -o /tmp/seed-conn-out.txt -w "%{http_code}")
+    -d "$conn_body" -o /tmp/seed-conn-out.txt -w "%{http_code}" --no-fail)
   if [ "$http_status" != "201" ]; then
     echo "  ✗ connection contract creation failed (HTTP $http_status)"
     cat /tmp/seed-conn-out.txt
     exit 1
   fi
   echo "  ✓ connection contract created; waiting for auto-sign..."
+  # A failed poll counts as "not signed yet": retry, and let fail_unsigned
+  # report it once the 30s are up.
   for _ in $(seq 30); do
     sleep 1
     contracts_json=$(mtls_curl "$CONSUMER_CERT" "$CONSUMER_KEY" "$CONSUMER_CA" \
-      "$CONSUMER_MANAGER_URL/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=$SERVICE_NAME")
+      "$CONSUMER_MANAGER_URL/v1/contracts?grant_type=GRANT_TYPE_SERVICE_CONNECTION&service_name=$SERVICE_NAME" \
+      2>/dev/null || echo "")
     st=$(printf '%s' "$contracts_json" | jq -r --arg svc "$SERVICE_NAME" --arg provider "$PROVIDER_PEER_ID" --argjson properties "$GRANT_PROPERTIES" \
-      'first(.contracts[]? | select(.content.grants[0].service.name == $svc and .content.grants[0].service.peer_id == $provider) | select((.content.grants[0].properties // {}) == $properties) | .state) // ""' 2>/dev/null)
+      'first(.contracts[]? | select(.content.grants[0].service.name == $svc and .content.grants[0].service.peer_id == $provider) | select((.content.grants[0].properties // {}) == $properties) | .state) // ""' 2>/dev/null || echo "")
     if [ "$st" = "CONTRACT_STATE_VALID" ]; then
       echo "  ✓ connection contract Valid"
       break
