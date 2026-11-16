@@ -92,18 +92,21 @@ func (c Component) Identity(ctx context.Context, value string) (substitution.Ide
 
 // Pseudonym has the component read an encrypted pseudonym, with the same
 // checks as for an identity. What comes back is the source's own pseudonym of
-// the citizen in the form the source stores it.
+// the citizen in the form the source stores it: the pseudonym value alone.
+// The component's whole decoded structure also names the key set version the
+// value was made for, and that changes when the source gets new keys; the
+// pseudonym value does not.
 func (c Component) Pseudonym(ctx context.Context, value string) (substitution.Pseudonym, error) {
 	var out struct {
-		Pseudonym        string `json:"pseudonym"`
 		DecodedPseudonym struct {
-			Recipient string `json:"recipient"`
+			Recipient      string `json:"recipient"`
+			PseudonymValue string `json:"pseudonymValue"`
 		} `json:"decodedPseudonym"`
 	}
 	if err := c.read(ctx, "/signed-encrypted-pseudonym", "signedEncryptedPseudonym", value, &out); err != nil {
 		return substitution.Pseudonym{}, err
 	}
-	return substitution.Pseudonym{Value: out.Pseudonym, Recipient: out.DecodedPseudonym.Recipient}, nil
+	return substitution.Pseudonym{Value: out.DecodedPseudonym.PseudonymValue, Recipient: out.DecodedPseudonym.Recipient}, nil
 }
 
 // read hands the component one value with this source's keys, at path and
