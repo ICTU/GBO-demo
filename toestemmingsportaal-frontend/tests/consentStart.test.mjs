@@ -222,3 +222,21 @@ test('an expired start cookie after the login leads to the error page, not the o
     assert.equal(startParams(new URL(resume, 'http://portal.invalid').searchParams), null)
   }
 })
+
+test('no other site may frame the portal, in development and in the built image', async () => {
+  const { default: config, FRAME_HEADERS } = await import('../vite.config.ts')
+  assert.deepEqual(FRAME_HEADERS, {
+    'Content-Security-Policy': "frame-ancestors 'none'",
+    'X-Frame-Options': 'DENY',
+  })
+  assert.equal(config.server.headers, FRAME_HEADERS)
+  assert.equal(config.preview.headers, FRAME_HEADERS)
+
+  const nginx = await readFile(new URL('../nginx.conf', import.meta.url), 'utf8')
+  // At server level, and no location adds headers of its own (which would
+  // drop the inherited ones).
+  const server = nginx.slice(0, nginx.indexOf('location'))
+  assert.match(server, /add_header Content-Security-Policy "frame-ancestors 'none'" always;/)
+  assert.match(server, /add_header X-Frame-Options DENY always;/)
+  assert.equal([...nginx.matchAll(/add_header/g)].length, 2)
+})
