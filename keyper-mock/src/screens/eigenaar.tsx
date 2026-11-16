@@ -4,14 +4,45 @@
 // installer. Only once both are given does IR ask LVG; it registers the
 // installer's access only when LVG confirms the ownership.
 import { useEffect, useRef, useState } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router'
+import { Link, useNavigate } from 'react-router'
 import { formatDay, loadAanvraag, updateAanvraag, type Aanvraag } from '../lib/aanvraag'
 import { checkOwnership, type Outcome } from '../lib/ownership'
-import { consentRequestUrl, readPortalReturn } from '../lib/portal'
+import { completeConsent, readPortalReturn, startConsent } from '../lib/consentFlow'
+import { ownershipConsentRequest } from '../lib/portal'
 import { ApprovalShell } from '../components/gir'
 import { ArrowRight, CheckIcon, HouseMark, InfoIcon, ShieldIcon } from '../components/icons'
 
-const returnUrl = () => `${window.location.origin}/verzoek/terug`
+// usePortalStart has IR's backend push the consent request and sends the
+// browser to the portal address it gets back.
+function usePortalStart() {
+  const [state, setState] = useState<'idle' | 'busy' | 'failed'>('idle')
+  // Back from the portal with the browser's back button, the page may come
+  // from the back-forward cache, still busy.
+  useEffect(() => {
+    const reset = (e: PageTransitionEvent) => {
+      if (e.persisted) setState('idle')
+    }
+    window.addEventListener('pageshow', reset)
+    return () => window.removeEventListener('pageshow', reset)
+  }, [])
+  const start = async () => {
+    setState('busy')
+    try {
+      window.location.assign(await startConsent(ownershipConsentRequest()))
+    } catch {
+      setState('failed')
+    }
+  }
+  return { busy: state === 'busy', failed: state === 'failed', start }
+}
+
+function StartFailed() {
+  return (
+    <p role="alert" style={{ fontSize: '13px', color: 'var(--g-red-tx)', marginTop: '10px', textAlign: 'center' }}>
+      MijnOverheid kan nu niet worden bereikt. Probeer het later opnieuw.
+    </p>
+  )
+}
 
 function NoRequest() {
   return (
@@ -107,6 +138,7 @@ export function Mail() {
 
 export function Verzoek() {
   const navigate = useNavigate()
+  const portal = usePortalStart()
   const aanvraag = loadAanvraag()
   if (!aanvraag) return <NoRequest />
   const { installateur: i, gebouw: g } = aanvraag
@@ -154,11 +186,13 @@ export function Verzoek() {
           <button
             className="digid-btn"
             style={{ width: '100%', justifyContent: 'center' }}
-            onClick={() => window.location.assign(consentRequestUrl(returnUrl()))}
+            onClick={portal.start}
+            disabled={portal.busy}
           >
             <img src="/Logo_of_DigiD.png" alt="" />
-            <span>Bevestig eigendom via MijnOverheid</span>
+            <span>{portal.busy ? 'Bezig…' : 'Bevestig eigendom via MijnOverheid'}</span>
           </button>
+          {portal.failed && <StartFailed />}
           <div style={{ textAlign: 'center', marginTop: '13px' }}>
             <button
               onClick={reject}
@@ -181,29 +215,39 @@ export function Verzoek() {
 }
 
 // ── terug uit MijnOverheid ────────────────────────────────────────────────
-// IR keeps the consent token and moves straight on to its own consent (10):
-// the ownership check waits until both consents are given.
+// The portal sends the owner back with a one-time code (or an error) and the
+// state. IR's backend exchanges the code and keeps the consent token; IR
+// moves straight on to its own consent (10): the ownership check waits until
+// both consents are given.
 
 export function PortalTerug() {
   const navigate = useNavigate()
-  const location = useLocation()
+  const portal = usePortalStart()
   const [failed, setFailed] = useState<'denied' | 'invalid' | null>(null)
+  const [back] = useState(() => readPortalReturn(window.location.search))
   const aanvraag = loadAanvraag()
   const started = useRef(false)
 
   useEffect(() => {
+    // The code is for the backend, not the address bar or the history.
+    if (window.location.search) window.history.replaceState(null, '', window.location.pathname)
     if (started.current || !aanvraag) return
     started.current = true
-    const back = readPortalReturn(location.search, location.hash)
-    if (back.status !== 'ok') {
-      window.history.replaceState(null, '', location.pathname)
-      setFailed(back.status)
+    if (!back) {
+      setFailed('invalid')
       return
     }
-    // The token is IR's to keep, not the address bar's.
-    updateAanvraag({ consentToken: back.consentToken })
-    navigate('/verzoek/goedkeuren', { replace: true })
-  }, [aanvraag, location, navigate])
+    completeConsent(back)
+      .then((done) => {
+        if (done.outcome !== 'granted') {
+          setFailed(done.outcome === 'denied' ? 'denied' : 'invalid')
+          return
+        }
+        updateAanvraag({ consentId: done.consent_id ?? 'granted' })
+        navigate('/verzoek/goedkeuren', { replace: true })
+      })
+      .catch(() => setFailed('invalid'))
+  }, [aanvraag, back, navigate])
 
   if (!aanvraag) return <NoRequest />
   if (!failed) return null
@@ -217,10 +261,12 @@ export function PortalTerug() {
         <button
           className="g-btn g-o"
           style={{ width: '100%', marginTop: '16px' }}
-          onClick={() => window.location.assign(consentRequestUrl(returnUrl()))}
+          onClick={portal.start}
+          disabled={portal.busy}
         >
           Opnieuw via MijnOverheid
         </button>
+        {portal.failed && <StartFailed />}
       </OutcomeCard>
     </ApprovalShell>
   )
@@ -253,7 +299,8 @@ export function Goedkeuren() {
   const navigate = useNavigate()
   const aanvraag = loadAanvraag()
   const [check, setCheck] = useState<'idle' | 'checking' | Exclude<Outcome, 'owner'>>('idle')
-  if (!aanvraag?.consentToken) return <NoRequest />
+  const portal = usePortalStart()
+  if (!aanvraag?.consentId) return <NoRequest />
   const { installateur: i, gebouw: g } = aanvraag
   const onderhoud = aanvraag.useCase === 'onderhoudsboekje'
 
@@ -261,7 +308,7 @@ export function Goedkeuren() {
   // access only when the ownership is confirmed.
   const approve = async () => {
     setCheck('checking')
-    const result = await checkOwnership(aanvraag.consentToken!, g.vboId)
+    const result = await checkOwnership(g.vboId)
     if (result.outcome !== 'owner') {
       setCheck(result.outcome)
       return
@@ -289,10 +336,12 @@ export function Goedkeuren() {
             <button
               className="g-btn g-o"
               style={{ width: '100%', marginTop: '16px' }}
-              onClick={() => window.location.assign(consentRequestUrl(returnUrl()))}
+              onClick={portal.start}
+              disabled={portal.busy}
             >
               Opnieuw via MijnOverheid
             </button>
+            {portal.failed && <StartFailed />}
           </OutcomeCard>
         )}
       </ApprovalShell>

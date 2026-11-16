@@ -1,19 +1,18 @@
-// The redirect to MijnOverheid (the GBO toestemmingsportaal) and back. The
+// The way to MijnOverheid (the GBO toestemmingsportaal) and back. The
 // citizen gives the Installatie Register consent to ask LVG whether the
-// building is theirs; the portal returns the signed consent token in the URL
-// fragment, which IR keeps.
+// building is theirs. IR's backend pushes the request and keeps the consent
+// token; the browser only follows the portal's address and brings back a
+// one-time code (lib/consentFlow.ts).
+
+import type { ConsentRequest } from './consentFlow'
 
 declare global {
   interface Window {
     __GBO_CONFIG__?: {
       consentPortalUrl?: string
-      consumerPeerId?: string
     }
   }
 }
-
-// The Installatie Register's own FSC peer: the PDP binds the consent to it.
-export const DEFAULT_IR_PEER_ID = '99999999900000001000'
 
 export const LVG_SCOPE = 'lvg:vbo:eigendom'
 
@@ -25,16 +24,9 @@ export function runtimeConfigValue(value?: string): string {
 
 type RuntimeConfig = Window['__GBO_CONFIG__']
 
-// The parameters default to the browser's configuration; tests pass their own.
-export function consumerPeerId(
-  config: RuntimeConfig = window.__GBO_CONFIG__,
-  env: ImportMetaEnv = import.meta.env,
-): string {
-  return runtimeConfigValue(config?.consumerPeerId) || env.VITE_CONSUMER_PEER_ID || DEFAULT_IR_PEER_ID
-}
-
 // Configured explicitly: unlike the dienstverlener-mock, the portal is not
-// one port up from this app.
+// one port up from this app. Only the link to "Mijn toestemmingen" needs it:
+// the consent request gets the portal's address from the backend.
 export function portalBase(
   config: RuntimeConfig = window.__GBO_CONFIG__,
   env: ImportMetaEnv = import.meta.env,
@@ -46,37 +38,14 @@ export function portalBase(
   ).replace(/\/$/, '')
 }
 
-export function consentRequestUrl(returnUrl: string, now = new Date()): string {
+// The consent IR asks for: the ownership check at LVG, for a year. The name
+// and purpose the citizen sees come from IR's registration.
+export function ownershipConsentRequest(now = new Date()): ConsentRequest {
   const validUntil = new Date(now)
   validUntil.setFullYear(now.getFullYear() + 1)
-  const params = new URLSearchParams({
-    service: 'installatieregister',
-    purpose: 'Goedkeuring installatiegegevens',
-    scope: LVG_SCOPE,
-    client_oin: consumerPeerId(),
-    client_name: 'Installatie Register',
-    valid_until: validUntil.toISOString(),
-    return_url: returnUrl,
-  })
-  return `${portalBase()}/auth?${params.toString()}`
+  return { service: 'installatieregister', scopes: [LVG_SCOPE], valid_until: validUntil.toISOString() }
 }
 
 export function myConsentsUrl(): string {
   return `${portalBase()}/mijnoverheid/toestemmingen`
-}
-
-export type PortalReturn =
-  | { status: 'ok'; consentId: string; consentToken: string }
-  | { status: 'denied' }
-  | { status: 'invalid' }
-
-// readPortalReturn parses what the portal appended to the return URL: the
-// status and consent id in the query, the token in the fragment.
-export function readPortalReturn(search: string, hash: string): PortalReturn {
-  const query = new URLSearchParams(search)
-  if (query.get('status') === 'denied') return { status: 'denied' }
-  const consentId = query.get('consent_id') ?? ''
-  const consentToken = new URLSearchParams(hash.replace(/^#/, '')).get('consent_token') ?? ''
-  if (query.get('status') !== 'ok' || !consentId || !consentToken) return { status: 'invalid' }
-  return { status: 'ok', consentId, consentToken }
 }
