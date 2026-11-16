@@ -718,8 +718,8 @@ fsc-test: fsc-up
 	bash fsc-infra/test/request-org-cert.sh
 
 # Files fsc-clean removes. Containers write them as root or uid 1001. Under
-# rootful Docker, and under rootless Docker or Podman (where uid 1001 maps to a
-# subuid), the host user cannot delete them without sudo; fsc-clean then
+# rootful Docker, and under rootless Docker (where uid 1001 maps to a subuid),
+# the host user cannot delete them without sudo; fsc-clean then
 # deletes them from a container of the pki-tools image that wrote them.
 FSC_CLEAN_FILES = \
 	fsc-infra/pki/ca/*.pem \
