@@ -1,7 +1,7 @@
 # Built from the repository root, like the other LDV components: the portal
 # shares the wire DTO and the spool with them through the sibling ldv-client
 # module, which a build context scoped to this directory cannot see.
-FROM golang:1.27-alpine@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb AS build
+FROM golang:1.27-alpine@sha256:eb61c3873c97416fff0116553fff65d67a3549f72e11d9758849a689cdd8b523 AS build
 WORKDIR /src/services/consent-portal-backend
 COPY services/ldv-client/ /src/services/ldv-client/
 COPY services/consent-portal-backend/go.mod services/consent-portal-backend/go.sum ./

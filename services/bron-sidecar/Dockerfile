@@ -3,7 +3,7 @@
 # modules, which a build context scoped to this directory cannot see. The
 # `replace ../…` lines in go.mod resolve because the modules are laid out here
 # the way they are in the tree.
-FROM golang:1.27-alpine@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb AS builder
+FROM golang:1.27-alpine@sha256:eb61c3873c97416fff0116553fff65d67a3549f72e11d9758849a689cdd8b523 AS builder
 WORKDIR /src/services/bron-sidecar
 COPY services/ldv-client/ /src/services/ldv-client/
 COPY services/ftv-graphql-mapper/ /src/services/ftv-graphql-mapper/
