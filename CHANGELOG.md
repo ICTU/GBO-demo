@@ -130,16 +130,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   toestemmingsportaal has a route `/toestemming/start` that reads only
   `client_id` and `request_uri`. Without a portal login the start URL waits in
   a cookie for five minutes (`SameSite=Lax`, `Secure` behind https) while the
-  citizen logs in; "Annuleren" at that login goes to the consents overview.
-  The consent screen shows what `GET /portal/requests/{request_uri}` resolves
+  citizen logs in; "Annuleren" at that login goes to the consents overview,
+  and a citizen whose cookie expired during the login (a pushed request
+  lives ten minutes by default) gets the error page. That login neither
+  reads nor keeps the URL-based flow's redirect context, and removes an
+  earlier one. The consent screen shows what `GET /portal/requests/{request_uri}` resolves
   (name and purpose from the provider's registration) and has only "Geef
   toestemming" and "Weiger". The decision goes to the backend; a short
   confirmation follows, then the browser goes to the `redirect_to` of the
   backend's answer as it is. Every refused reference, and a decision that
   failed without a return URL, shows one error page without a link or a
   redirect. Nothing of the request is kept in web storage. Demo shortcut: the
-  portal login itself stays a bearer token in `sessionStorage`. The demo
-  providers do not send citizens to the route yet; the URL-based flow
+  portal login itself stays a bearer token in `sessionStorage`. No other
+  site may frame the portal: the Vite dev server and the nginx image send
+  `Content-Security-Policy: frame-ancestors 'none'` and
+  `X-Frame-Options: DENY`, because the consent screen grants with one
+  click. The demo providers do not send citizens to the route yet; the URL-based flow
   (`/auth`, `/consent`, `/bevestiging`) is unchanged.
 - **The demo runs on any host name**: the Vite frontends accept
   `GBO_PUBLIC_HOST` and `GBO_EXTRA_ALLOWED_HOSTS`, the reference QTSP follows
