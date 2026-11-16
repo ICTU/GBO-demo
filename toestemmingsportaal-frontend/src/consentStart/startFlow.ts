@@ -81,6 +81,16 @@ export function readStartCookie(cookieHeader: string): string | null {
   return null
 }
 
+/**
+ * Where the login sends the citizen in the start flow: back to the start URL
+ * kept in the cookie or, when the cookie has expired (it lives five
+ * minutes, the pushed request may live longer) or holds no start URL, to
+ * the start route without parameters, which is the flow's error page.
+ */
+export function resumeAfterLogin(cookieHeader: string): string {
+  return readStartCookie(cookieHeader) ?? START_ROUTE
+}
+
 /** A resolved reference, as GET /portal/requests/{request_uri} returns it. */
 export type ConsentRequest = {
   client_id: string
