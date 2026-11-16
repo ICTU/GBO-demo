@@ -1045,9 +1045,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - **`make fsc-clean` works without sudo**: the certificates the containers
   write as root or uid 1001 could not be deleted by the host user under
   rootful Docker, nor under rootless Docker (where uid 1001 maps to a
-  subuid), so the target stopped with "Permission denied". It now deletes
-  them from a local `gbo-demo/pki-tools` container when the host cannot,
-  before `compose down` removes that image.
+  subuid), so the target stopped with "Permission denied". It now always
+  deletes them from a local `gbo-demo/pki-tools` container, before
+  `compose down` removes that image. If certificates are left but the image
+  is gone, it stops with a hint to rebuild the image with `make fsc-up`.
 - **The LDV logbook sorts and filters by time, not by text.** Times were
   stored as RFC 3339 with trimmed fraction digits, so `…05.5Z` sorted before
   `…05Z` and the `startTime`/`endTime` read filters wrongly included or
