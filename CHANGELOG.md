@@ -126,6 +126,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   their number is not capped; the browser sends each co-hosted provider's
   session cookie to every demo frontend on the host. The demo frontends do
   not use the routes yet.
+- **The consent portal starts a flow from a pushed request** (#427, #648): the
+  toestemmingsportaal has a route `/toestemming/start` that reads only
+  `client_id` and `request_uri`. Without a portal login the start URL waits in
+  a cookie for five minutes (`SameSite=Lax`, `Secure` behind https) while the
+  citizen logs in; "Annuleren" at that login goes to the consents overview.
+  The consent screen shows what `GET /portal/requests/{request_uri}` resolves
+  (name and purpose from the provider's registration) and has only "Geef
+  toestemming" and "Weiger". The decision goes to the backend; a short
+  confirmation follows, then the browser goes to the `redirect_to` of the
+  backend's answer as it is. Every refused reference, and a decision that
+  failed without a return URL, shows one error page without a link or a
+  redirect. Nothing of the request is kept in web storage. Demo shortcut: the
+  portal login itself stays a bearer token in `sessionStorage`. The demo
+  providers do not send citizens to the route yet; the URL-based flow
+  (`/auth`, `/consent`, `/bevestiging`) is unchanged.
 - **The demo runs on any host name**: the Vite frontends accept
   `GBO_PUBLIC_HOST` and `GBO_EXTRA_ALLOWED_HOSTS`, the reference QTSP follows
   `GBO_PUBLIC_HOST` (`QTSP_PUBLIC_URL` overrides it), and
