@@ -34,13 +34,17 @@ flowchart LR
 
     Source["Bron-sidecar en GraphQL-bron"]
 
+    Onboarding["Toelatingsregister"]
+
     Citizen --> ConsumerUI
-    ConsumerUI --> Portal
+    ConsumerUI --> ConsumerBE
+    ConsumerBE -- "PAR en code via FSC" --> Portal
+    ConsumerUI -- "client_id en request_uri" --> Portal
+    Portal --> Onboarding
     Portal --> BSNk
     Portal --> Register
     Register --> ConsentDB
-    Portal --> ConsumerUI
-    ConsumerUI --> ConsumerBE
+    Portal -- "code en state" --> ConsumerUI
     ConsumerBE --> Outway
     Outway --> Inway
     Inway --> Mapper
@@ -70,44 +74,140 @@ waarden alleen nog transformeren. Bekijken en intrekken roepen BSNk niet aan.
 
 ## 1. Toestemming verlenen
 
+De dienstverlener stuurt zijn verzoek niet via de browser maar server-side,
+als pushed authorization request (PAR, RFC 9126) via FSC. De browser
+draagt alleen het `client_id` en een kortlevende referentie (`request_uri`)
+naar het portaal, en daarna een eenmalige code terug. De dienstverlener
+wisselt die code via FSC in voor het consent-token, met zijn PKCE-verifier
+(RFC 7636). Het token staat nooit in een URL of in browser storage.
+
 ```mermaid
 sequenceDiagram
     autonumber
     actor Citizen as "Burger"
     participant UI as "Dienstverlener frontend"
+    participant BE as "Dienstverlener backend"
     participant Portal as "Toestemmingsportaal"
+    participant TLR as "Toelatingsregister"
     participant BSNk as "BSNk-mock"
     participant Register as "Consent-register S01"
-    participant DB as "Consent-database"
 
     Citizen->>UI: Start aanvraag
-    UI->>Portal: Vraag toestemming voor OIN en scopes
-    Citizen->>Portal: Log in en bevestig toestemming
-
-    Portal->>Portal: subject_ref = HMAC van het BSN
-    Portal->>Register: Zoek polymorfe waarden onder subject_ref
-    alt Eerste toestemming van deze burger
-        Register-->>Portal: Niet gevonden
-        Portal->>BSNk: Activeer BSN
-        BSNk-->>Portal: Polymorfe identiteit en pseudoniem, alleen bruikbaar voor het portaal
-        Portal->>Register: Bewaar ze onder subject_ref
-    else Volgende toestemming
-        Register-->>Portal: Polymorfe waarden
+    UI->>BE: POST /api/consent/start (service, scopes)
+    BE->>BE: Maak state en PKCE-verifier, bewaar ze in de sessie
+    BE->>Portal: POST /par via FSC (client_id, service, scope, redirect_uri, state, code_challenge)
+    Portal->>Portal: Provider = FSC peer ID uit Fsc-Authorization
+    Portal->>TLR: Registratie van de provider
+    TLR-->>Portal: Naam, actief, services met doel, return locations
+    alt Verzoek klopt niet met de registratie
+        Portal-->>BE: OAuth-fout met reason code
+        BE-->>UI: Weigering, de burger gaat niet naar het portaal
+    else Verzoek klopt
+        Portal-->>BE: request_uri en expires_in
+        BE-->>UI: Redirect-URL met alleen client_id en request_uri
     end
-    Portal->>BSNk: Lees de Autorisatielijst BSN (hooguit eens per BSN_AUTHORISATION_LIST_MAX_AGE)
-    Portal->>BSNk: Transformeer naar pseudoniemen voor alle bronnen
-    BSNk-->>Portal: Versleuteld pseudoniem per bron
-    Portal->>BSNk: Transformeer naar identiteiten voor de bronnen op de lijst
-    BSNk-->>Portal: Versleutelde identiteit per bron op de lijst
 
-    Portal->>Register: Maak consent met waarde per bron, subject_ref, OIN en scopes
-    Register->>DB: Bewaar consent zonder de waarden per bron
-    Register->>Register: Onderteken ES256 consent-token
-    Register-->>Portal: Consent-id en consent-token
+    UI->>Portal: /toestemming/start?client_id=…&request_uri=…
+    Citizen->>Portal: Log in (start-URL vijf minuten in een cookie)
+    Portal->>Portal: Resolve: bind de referentie aan de burger
+    Portal-->>Citizen: Naam en doel uit de registratie, data sets, valid_until
+    Citizen->>Portal: Geef toestemming of weiger
 
-    Portal-->>UI: Redirect met consent-id en tokenfragment
-    UI->>UI: Lees token en verwijder fragment uit URL
+    opt Toestemming
+        Portal->>Portal: subject_ref = HMAC van het BSN
+        Portal->>BSNk: Activeer (eerste keer) en transformeer per bron
+        BSNk-->>Portal: Versleutelde waarden per bron
+        Portal->>Register: Maak consent met waarde per bron, subject_ref, OIN en scopes
+        Register-->>Portal: Consent-id en consent-token
+        Portal->>Portal: Leg het token onder een eenmalige code (60 s)
+    end
+    Portal-->>Citizen: Bevestiging, daarna redirect_uri met code en state (of error en state)
+
+    Citizen->>UI: Volgt de redirect
+    UI->>UI: Lees code en state, haal ze uit de adresbalk
+    UI->>BE: POST /api/consent/complete (code, state)
+    BE->>BE: Controleer state
+    BE->>Portal: POST /token via FSC (code, code_verifier)
+    Portal-->>BE: access_token (het consent-token)
+    BE->>BE: Bewaar het token in de sessie (HttpOnly-cookie)
+    BE-->>UI: Uitkomst, zonder token
 ```
+
+De pseudonimisering is ongewijzigd: bij de eerste toestemming van een burger
+activeert het portaal het BSN bij BSNk en bewaart het register de polymorfe
+waarden onder `subject_ref`; bij elke toestemming leest het portaal de
+Autorisatielijst BSN (hooguit eens per `BSN_AUTHORISATION_LIST_MAX_AGE`) en
+laat het de waarden per bron transformeren. Het register bewaart het consent
+zonder die waarden en ondertekent het token met ES256.
+
+Dit wijkt af van figuur 4 van het Globaal Ontwerp, waar de dienstverlener
+scope en doelbinding in de redirect meegeeft en de toestemmingsvoorziening
+het consent-id en de versleutelde waarden via een redirect terugstuurt: in de
+demo gaat het verzoek server-side via FSC en gaat alleen een eenmalige code
+door de browser.
+
+### Weigeringen en uitkomsten
+
+Het portaal controleert het verzoek bij PAR tegen de registratie van de
+provider in het toelatingsregister, in deze volgorde. Een geweigerd verzoek
+bereikt de burger niet.
+
+| Moment | HTTP | `error` | `reason` | Wanneer |
+| --- | --- | --- | --- | --- |
+| PAR | 401 | `invalid_client` | | Geen `Fsc-Authorization` |
+| PAR | 400 | `invalid_request` | `INITIATION_INCOMPLETE` | Verplicht veld ontbreekt (`response_type=code`, `client_id`, `service`, `scope`, `redirect_uri`, `state`, `code_challenge` met `S256`), of `valid_until` is ongeldig |
+| PAR | 400 | `unauthorized_client` | `PARTY_NOT_ACTIVE` | De peer is niet toegelaten of niet actief |
+| PAR | 400 | `invalid_request` | `INITIATION_MISMATCH` | `client_id` is niet de FSC peer die pusht, de service is niet bij de provider geregistreerd, of `client_name` of `purpose` wijkt af van de registratie |
+| PAR | 400 | `invalid_scope` | `UNKNOWN_SCOPE` | Een onbekende data set |
+| PAR | 400 | `invalid_request` | `RETURN_URL_NOT_REGISTERED` | `redirect_uri` is geen geregistreerde return location (exacte vergelijking) |
+| PAR | 503 | `temporarily_unavailable` | `ADMISSION_REGISTER_UNAVAILABLE` | Het toelatingsregister is niet bereikbaar (fail closed) |
+| Resolve | 404 | | `REQUEST_URI_UNKNOWN` | Onbekende referentie |
+| Resolve | 410 | | `REQUEST_URI_EXPIRED` | Verlopen referentie (`PAR_REQUEST_LIFETIME`, standaard 10 minuten) |
+| Resolve | 410 | | `REQUEST_URI_SPENT` | Referentie al gebruikt voor een beslissing |
+| Resolve | 400 | | `CLIENT_ID_MISMATCH` | `client_id` in de URL is niet de provider die de referentie pushte |
+| Resolve | 403 | | `REQUEST_URI_OTHER_CITIZEN` | Referentie is al aan een andere burger gebonden |
+| Beslissing | 403 | | `REQUEST_URI_NOT_RESOLVED` | Beslissing zonder voorafgaande resolve |
+| `/token` | 400 | `invalid_grant` | | Code onbekend, al ingewisseld, ouder dan 60 seconden, van een andere provider of met een verkeerde `code_verifier` |
+| `/token` | 400 | `unsupported_grant_type` | | Een andere `grant_type` dan `authorization_code` |
+
+Bij een geweigerde referentie toont het portaal één foutpagina, zonder link
+en zonder redirect. Na een beslissing gaat de burger naar de geregistreerde
+return location:
+
+| Beslissing | Return-URL | Uitkomst bij de provider |
+| --- | --- | --- |
+| Toestemming | `?code=…&state=…` | `granted`; het token staat in de sessie van de provider-backend |
+| Geweigerd | `?error=access_denied&state=…` | `denied`; geen consent |
+| Consent maken mislukt | `?error=server_error&state=…` | `failed` |
+
+### Demo shortcuts
+
+- De registratie van providers (services, doel, return locations) staat in de
+  config van het toelatingsregister, niet in zijn database. Een echte
+  uitrol beheert die in het register of een dienstencatalogus.
+- consent-portal-backend leest het toelatingsregister rechtstreeks over het
+  Docker-netwerk `dvtp-onboarding`, zonder eigen read-listener of mTLS.
+- Request store en code store zijn in-memory, met één replica: een herstart
+  laat open verzoeken en codes vervallen.
+- De FSC-listener van het portaal (`/par`, `/token`) vertrouwt
+  `Fsc-Authorization` zonder de handtekening te verifiëren, en is net als
+  `consent-status` ook zonder `cr-inway` bereikbaar op de netwerken
+  `fsc-infra` en `backend`. Een echte uitrol verifieert het token of zet
+  mTLS tussen Inway en service.
+- De bekende data sets zijn backend-config naast de teksten van de portal.
+- De portal-login (mock-DigiD) is een bearer-token in `sessionStorage`; een
+  echte uitrol houdt de sessie van de burger server-side achter een
+  HttpOnly-cookie.
+- `valid_until` wordt niet tegen de registratie gecontroleerd, en een provider
+  die tussen PAR en beslissing wordt gedeactiveerd, krijgt binnen de looptijd
+  van het verzoek nog een consent.
+- De sessies van de provider-backends zijn in-memory. In de demo draaien alle
+  frontends op één host, dus de browser stuurt de sessiecookie van elke
+  provider naar de `/api`-proxy van elke frontend; een echte uitrol geeft
+  elke provider een eigen origin.
+- De directe `POST /portal/consents` blijft bestaan als developer-API (token
+  in het antwoord, doel uit het verzoek); het developer portal en de
+  integrator gebruiken die.
 
 Het token bevat de bindings waarop de PDP later beslist:
 
@@ -128,14 +228,6 @@ issuance-scenario's van het developer portal vullen dit veld vanuit
 default `99999999900000000300`. Handmatig ingevoerde en opgeslagen payloads
 worden niet door deze configuratie overschreven.
 
-Het portaal accepteert alleen `http`- en `https`-return-URL's waarvan de
-exacte origin in de geconfigureerde allow-list staat. De image leest die bij
-het starten van de container uit `ALLOWED_RETURN_ORIGINS`;
-`VITE_ALLOWED_RETURN_ORIGINS` geldt alleen voor de Vite-devserver. Zonder
-beide accepteert het portaal alleen `http://localhost:9001` (demo-shortcut),
-dus een uitrol moet `ALLOWED_RETURN_ORIGINS` zetten. De token wordt in het
-URL-fragment teruggegeven en direct uit de zichtbare URL verwijderd.
-
 ## 2. Toestemming gebruiken
 
 ```mermaid
@@ -152,7 +244,7 @@ sequenceDiagram
     participant DEC as "Decryptiecomponent van de bron"
     participant SRC as "Gegevensbron"
 
-    UI->>BE: Verstuur consent-token en gegevensvraag
+    UI->>BE: Verstuur gegevensvraag (token uit de sessie)
     BE->>BE: Lees scopes, zet de plaatshouder als subject
     Note right of BE: Dit is geen verificatie
 
