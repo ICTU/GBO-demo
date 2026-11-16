@@ -7,146 +7,117 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Added
-- **Service providers in the DvTP onboarding register** (#427, #648): an
-  optional `service_providers` block registers, per Peer ID, the services a
-  provider asks consent for (each with its purpose) and its return locations,
-  with `${VAR}` expansion in the return locations. The new endpoint
-  `GET /internal/consent-portal/participants/{peer_id}` returns a
-  participant's name, active state, services and return locations. The demo
-  configuration registers both demo providers; Compose passes
-  `DIENSTVERLENER_PUBLIC_URL` and `KEYPER_PUBLIC_URL` to the register. A
-  deployment that uses the image's built-in demo configuration must set both.
-- **Consent initiation checks in the consent portal backend** (#427, #648): a
-  request to start a consent flow can be checked against the requesting
-  provider's registration in the DvTP admission register. A refusal carries
-  its own reason code, checked in this order: `INITIATION_INCOMPLETE` (no
-  client ID, service, data sets or return URL), `PARTY_NOT_ACTIVE` (unknown or
-  inactive provider, or a peer ID that names no participant),
-  `INITIATION_MISMATCH` (client ID other than the requesting peer,
-  unregistered service, or a name or purpose that differs from the
-  registration), `UNKNOWN_SCOPE` and `RETURN_URL_NOT_REGISTERED` (exact match
-  against the registered return locations). When the register cannot be read,
-  or answers about another participant than the requesting provider, the
-  request is refused with `ADMISSION_REGISTER_UNAVAILABLE`. The checks are not
-  yet reachable from any endpoint. The backend joins the `dvtp-onboarding`
-  network and reads the register at `ONBOARDING_REGISTER_URL`;
-  `CONSENT_KNOWN_SCOPES` lists the data sets it knows (default: the three the
-  portal describes).
-- **Pushed authorization requests over FSC** (#427, #648): a service provider
-  can push its request to start a consent flow (RFC 9126) to `POST /par` on a
-  new listener of the consent portal backend (`FSC_PORT`), published as the
-  FSC service `consent-authorization` of the consent register's peer through
-  `cr-inway`. The provider is the `sub` of the forwarded `Fsc-Authorization`
-  token (none: `401`). Without `response_type=code`, `client_id`, `state` or
-  an S256 `code_challenge`, with a `valid_until` that is malformed or not
-  later than the expiry of the new `request_uri`, a repeated parameter or a
-  `request_uri` in the body, the request is refused with
-  `INITIATION_INCOMPLETE` (a body over 64 KiB: `413`); then the admission
-  register checks run. A refusal is an OAuth error with the
-  reason code in `reason` (`invalid_request`, `unauthorized_client` for
-  `PARTY_NOT_ACTIVE`, `invalid_scope` for `UNKNOWN_SCOPE`,
-  `503 temporarily_unavailable` for `ADMISSION_REGISTER_UNAVAILABLE`); an
-  accepted request is kept in memory under a `request_uri` for
-  `PAR_REQUEST_LIFETIME` (default 10 minutes).
-  `make fsc-seed-consent-authorization`, part of `make demo` and
-  `make demo-full`, connects Hypotheek-BV and the Installatie Register; the
-  demo configuration of the onboarding register admits both to the consent
-  register's peer. An existing register volume lacks that admission: the seed
-  target says so, see TROUBLESHOOTING.md. With that admission the two demo
-  providers (`…0300`, `…1000`) can also connect to the FSC service
-  `consent-status`: the consent register's Manager signs per peer, not per
-  service. Consent ids are random, so a provider finds only a consent whose id
-  it already has, and a lookup that finds one is logged with the provider as
-  the processor. The demo providers do not use the endpoint yet. Demo
-  shortcut: the new listener is also reachable on the compose networks
-  `fsc-infra` and `backend`, so a provider backend can call it directly with
-  another peer in the token.
-- **Resolve, decision and code exchange for pushed requests** (#427, #648):
-  the consent portal backend takes a pushed request to its end. On the
-  citizen's listener, behind the portal login,
-  `GET /portal/requests/{request_uri}?client_id=…` binds the reference to the
-  first citizen that resolves it and returns the provider's name, service and
-  purpose from its registration, the data sets and `valid_until`. A reference
-  that is unknown (`404 REQUEST_URI_UNKNOWN`), expired
-  (`410 REQUEST_URI_EXPIRED`), already used (`410 REQUEST_URI_SPENT`), brought
-  with another `client_id` (`400 CLIENT_ID_MISMATCH`) or resolved by another
-  citizen (`403 REQUEST_URI_OTHER_CITIZEN`) is refused with the code in
-  `reason`. `POST /portal/requests/{request_uri}/decision` with
-  `{"decision": "grant", "scopes": [...]}` or `{"decision": "deny"}` uses the
-  reference once, only after the same citizen resolved it (and so after its
-  `client_id` was checked; otherwise `403 REQUEST_URI_NOT_RESOLVED`), and
-  answers with `outcome` and the `redirect_to` the browser
-  goes to: the return URL with `code` and `state`, with
-  `error=access_denied` and `state` (no consent), or with
-  `error=server_error` and `state` when the consent could not be given. It
-  never carries the consent token. Data sets outside the request, a data
-  set named twice, or none, answer `400` and leave the reference usable.
-  Without `valid_until` a consent holds 90 days, as on the current consent
-  screen. On the FSC
-  listener, `POST /token` (`grant_type=authorization_code`, `code`,
-  `redirect_uri`, `code_verifier`) gives the calling provider the consent
-  token as `access_token`, with `scope` and `consent_id`. A code works once,
-  for 60 seconds, for its own provider and redirect URI and with the PKCE
-  verifier of the pushed challenge; otherwise `invalid_grant`. Another
-  `grant_type` gives `unsupported_grant_type`, and a body over 64 KiB `413`.
-  Two choices the standards leave open: a code presented again after its
-  exchange is refused, but the consent it gave is not revoked (RFC 6749
-  §4.1.2 says SHOULD), and a failed exchange does not burn the code, so that
-  someone who sees it cannot block the provider. Portal and `/token`
-  answers carry `Cache-Control: no-store`. Expired and used references
-  are remembered for one more request lifetime, then they are unknown. Demo
-  shortcut: codes live in memory, like pushed requests. The demo providers do
-  not use these endpoints yet.
-- **Consent requests from the provider backends** (#427, #648):
-  `dienstverlener-backend` and `ir-backend` push a consent request to the
-  consent portal over FSC and exchange the code for the consent token, which
-  stays server-side. `POST /api/consent/start` (`service`, `scopes`, optional
-  `valid_until`) sends `POST /par` through the provider's Outway with the
-  configured `client_id` and `redirect_uri`, a random `state` and an S256 PKCE
-  challenge, but no `client_name` or `purpose` (the consent screen shows the
-  registered ones); it answers with `redirect_to`, the portal's start route
-  with only `client_id` and `request_uri`. `POST /api/consent/complete`
-  (`code` or `error`, with `state`) checks the state, exchanges a code at
-  `POST /token` with the PKCE verifier and answers with `outcome` `granted`,
-  `denied` (`access_denied`) or `failed`, never with the token. The token is
-  kept in an in-memory session behind an HttpOnly, `SameSite=Lax` cookie
-  (`Secure` when the redirect URI is https), and `POST /api/dvtp/query` uses
-  it when the body has no `consent_token`; a token in the body still works.
-  A granted consent gets a new session id, so an id known before the grant
-  never gets the token. Start, complete and a query that uses the session
-  must be `application/json` (`415`) and, when the browser sends
-  `Sec-Fetch-Site`, `same-origin` (`403`): other ports and sibling
-  subdomains are the same site for `SameSite=Lax`. A refusal caused by the
-  provider's own registration or configuration is `502`, one caused by the
-  request `400`. Calls to the Outway carry the trace context. Configured with
-  `CONSENT_CLIENT_ID` (a Peer ID, digits only), `CONSENT_REDIRECT_URI`,
-  `CONSENT_PORTAL_URL` and `CONSENT_AUTHORIZATION_URL`; without
-  `CONSENT_CLIENT_ID` the routes are off. Demo shortcuts: sessions live in
-  memory for 12 hours from their creation, a start does not extend them, and
-  their number is not capped; the browser sends each co-hosted provider's
-  session cookie to every demo frontend on the host. The demo frontends do
-  not use the routes yet.
-- **The consent portal starts a flow from a pushed request** (#427, #648): the
-  toestemmingsportaal has a route `/toestemming/start` that reads only
-  `client_id` and `request_uri`. Without a portal login the start URL waits in
-  a cookie for five minutes (`SameSite=Lax`, `Secure` behind https) while the
-  citizen logs in; "Annuleren" at that login goes to the consents overview,
-  and a citizen whose cookie expired during the login (a pushed request
-  lives ten minutes by default) gets the error page. That login neither
-  reads nor keeps the URL-based flow's redirect context, and removes an
-  earlier one. The consent screen shows what `GET /portal/requests/{request_uri}` resolves
-  (name and purpose from the provider's registration) and has only "Geef
-  toestemming" and "Weiger". The decision goes to the backend; a short
-  confirmation follows, then the browser goes to the `redirect_to` of the
-  backend's answer as it is. Every refused reference, and a decision that
-  failed without a return URL, shows one error page without a link or a
-  redirect. Nothing of the request is kept in web storage. Demo shortcut: the
-  portal login itself stays a bearer token in `sessionStorage`. No other
-  site may frame the portal: the Vite dev server and the nginx image send
-  `Content-Security-Policy: frame-ancestors 'none'` and
-  `X-Frame-Options: DENY`, because the consent screen grants with one
-  click. Both demo providers use the route (see Changed), and the URL-based
-  flow is gone (see Removed).
+- **Consent flow with a pushed authorization request** (#427, #648): a
+  service provider pushes its consent request to the consent portal over FSC
+  (RFC 9126), the citizen decides in the toestemmingsportaal, and the
+  provider exchanges the code it gets back for the consent token.
+  `docs/consent-flow.md` describes the flow, its reason codes and its demo
+  shortcuts.
+  - **Registration.** An optional `service_providers` block in the DvTP
+    onboarding register lists per Peer ID the services a provider asks
+    consent for (each with its purpose) and its return locations (with
+    `${VAR}` expansion). `GET /internal/consent-portal/participants/{peer_id}`
+    returns a participant's name, active state, services and return
+    locations. The demo configuration registers both demo providers.
+  - **`POST /par`** on a new listener of the consent portal backend
+    (`FSC_PORT`, default 4013), published as the FSC service
+    `consent-authorization` of the consent register's peer through
+    `cr-inway`. The provider is the `sub` of the forwarded
+    `Fsc-Authorization` token (none: `401 invalid_client`). A request without
+    `response_type=code`, `state` or an S256 `code_challenge`, with a
+    `valid_until` that is malformed or not later than the expiry of the new
+    `request_uri`, with a repeated parameter or a `request_uri` in the body,
+    is refused with `INITIATION_INCOMPLETE` (a body over 64 KiB: `413`).
+    Then the request is checked against the provider's registration, in
+    this order: `INITIATION_INCOMPLETE` (no client ID, service, data sets or
+    return URL), `PARTY_NOT_ACTIVE` (unknown or inactive provider, or a peer
+    ID that names no participant), `INITIATION_MISMATCH` (client ID other
+    than the calling peer, unregistered service, or a `client_name` or
+    `purpose` that differs from the registration), `UNKNOWN_SCOPE` and
+    `RETURN_URL_NOT_REGISTERED` (exact match). A register that cannot be
+    read, or answers about another participant, gives
+    `ADMISSION_REGISTER_UNAVAILABLE`. A refusal is an OAuth error with the
+    reason code in `reason`: `invalid_request`, `unauthorized_client` for
+    `PARTY_NOT_ACTIVE`, `invalid_scope` for `UNKNOWN_SCOPE`,
+    `503 temporarily_unavailable` for `ADMISSION_REGISTER_UNAVAILABLE`. An
+    accepted request lives under its `request_uri` for
+    `PAR_REQUEST_LIFETIME` (default 10 minutes). The backend reads the
+    register at `ONBOARDING_REGISTER_URL` on the `dvtp-onboarding` network;
+    `CONSENT_KNOWN_SCOPES` lists the data sets it knows (default: the three
+    the portal describes).
+  - **Resolve and decide**, on the citizen's listener behind the portal
+    login. `GET /portal/requests/{request_uri}?client_id=…` binds the
+    reference to the first citizen that resolves it and returns the
+    provider's name, service and purpose from its registration, the data
+    sets and `valid_until`. Refused, with the code in `reason`: unknown
+    (`404 REQUEST_URI_UNKNOWN`), expired (`410 REQUEST_URI_EXPIRED`), used
+    (`410 REQUEST_URI_SPENT`), another `client_id` (`400 CLIENT_ID_MISMATCH`)
+    or another citizen (`403 REQUEST_URI_OTHER_CITIZEN`). Expired and used
+    references are remembered for one more request lifetime, then they are
+    unknown. `POST /portal/requests/{request_uri}/decision` with
+    `{"decision": "grant", "scopes": [...]}` or `{"decision": "deny"}` uses
+    the reference once, only after the same citizen resolved it (otherwise
+    `403 REQUEST_URI_NOT_RESOLVED`), and answers with `outcome` and a
+    `redirect_to`: the return URL with `code` and `state`, with
+    `error=access_denied` (no consent) or with `error=server_error` (the
+    consent could not be given), never with the consent token. Data sets
+    outside the request, one named twice, or none answer `400` and leave the
+    reference usable. Without `valid_until` a consent holds 90 days.
+  - **`POST /token`** on the FSC listener (`grant_type=authorization_code`,
+    `code`, `redirect_uri`, `code_verifier`) gives the calling provider the
+    consent token as `access_token`, with `scope` and `consent_id`. A code
+    works once, for 60 seconds, for its own provider and redirect URI and
+    with the PKCE verifier of the pushed challenge; otherwise
+    `invalid_grant`. Another `grant_type` gives `unsupported_grant_type`, a
+    body over 64 KiB `413`. Two choices the standards leave open: a code
+    presented again after its exchange is refused, but the consent it gave is
+    not revoked (RFC 6749 §4.1.2 says SHOULD), and a failed exchange does not
+    burn the code, so that someone who sees it cannot block the provider.
+    Portal and `/token` answers carry `Cache-Control: no-store`.
+  - **Provider backends.** `dienstverlener-backend` and `ir-backend` get
+    `POST /api/consent/start` (`service`, `scopes`, optional `valid_until`):
+    it pushes the request through the provider's Outway with the configured
+    `client_id` and `redirect_uri`, a random `state` and an S256 PKCE
+    challenge, without `client_name` or `purpose`, and answers with a
+    `redirect_to` to the portal that carries only `client_id` and
+    `request_uri`. `POST /api/consent/complete` (`code` or `error`, with
+    `state`) checks the state, exchanges a code at `POST /token` and answers
+    with `outcome` `granted`, `denied` (`access_denied`) or `failed`, never
+    with the token. The token stays in a server-side session behind an
+    HttpOnly, `SameSite=Lax` cookie (`Secure` when the redirect URI is
+    https), with a new session id on a grant. Start, complete and a query
+    that uses the session must be `application/json` (`415`) and, when the
+    browser sends `Sec-Fetch-Site`, `same-origin` (`403`). A refusal caused
+    by the provider's own registration or configuration is `502`, one caused
+    by the request `400`. Calls to the Outway carry the trace context.
+    Configured with
+    `CONSENT_CLIENT_ID` (a Peer ID, digits only), `CONSENT_REDIRECT_URI`,
+    `CONSENT_PORTAL_URL` and `CONSENT_AUTHORIZATION_URL`; without
+    `CONSENT_CLIENT_ID` the routes are off.
+  - **Portal start route.** The toestemmingsportaal's `/toestemming/start`
+    reads only `client_id` and `request_uri`. Without a portal login the
+    start URL waits in a cookie for five minutes (`SameSite=Lax`, `Secure`
+    behind https) while the citizen logs in; a cookie that expired during
+    the login gives the error page. The consent screen shows what the backend
+    resolves and has only "Geef toestemming" and "Weiger"; after a short
+    confirmation the browser goes to the backend's `redirect_to` as it is.
+    Every refused reference, and a failed decision without a return URL,
+    shows one error page without a link or a redirect. Nothing of the
+    request is kept in web storage.
+  - **Demo setup.** `make fsc-seed-consent-authorization`, part of
+    `make demo` and `make demo-full`, connects Hypotheek-BV and the
+    Installatie Register to `consent-authorization`; the onboarding
+    register's demo configuration admits both to the consent register's
+    peer. An existing register volume lacks that admission: the seed target
+    says so, see TROUBLESHOOTING.md.
+  - **Demo shortcuts.** Pushed requests, codes and provider sessions live in
+    memory. A provider session lasts 12 hours from its creation, a start
+    does not extend it, and the number of sessions is not capped; the
+    browser sends each co-hosted provider's session cookie to every demo
+    frontend on the host. The FSC listener is also reachable on the compose
+    networks `fsc-infra` and `backend`, so a provider backend can call it
+    directly with another peer in the token. The portal login stays a bearer
+    token in `sessionStorage`.
 - **The demo runs on any host name**: the Vite frontends accept
   `GBO_PUBLIC_HOST` and `GBO_EXTRA_ALLOWED_HOSTS`, the reference QTSP follows
   `GBO_PUBLIC_HOST` (`QTSP_PUBLIC_URL` overrides it), and
@@ -681,16 +652,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   the dienstverlener-mock (Hypotheek-BV) and the keyper-mock (Installatie
   Register) no longer build a portal URL with the whole request. Their start
   buttons call their backend's `POST /api/consent/start` and follow the
-  portal address it answers with, which carries only `client_id` and
-  `request_uri`. Their return pages read the code (or error) and the state
-  once, take them out of the address bar and hand them to
-  `POST /api/consent/complete`; the backend exchanges the code over FSC and
-  keeps the consent token in its session. The queries use that session, so
-  neither mock keeps a consent token or code in the browser; the
-  keyper-mock's demo state in `sessionStorage` holds only the consent's id.
-  The name and purpose on the consent screen come from each provider's
-  registration. `docs/consent-flow.md` shows the new flow, the reason codes
-  and outcomes, and the flow's demo shortcuts.
+  portal address it answers with; their return pages read the code (or
+  error) and the state once, take them out of the address bar and hand them
+  to `POST /api/consent/complete`. Neither mock keeps a consent token or
+  code in the browser; the keyper-mock's demo state in `sessionStorage`
+  holds only the consent's id. The name and purpose on the consent screen
+  come from each provider's registration.
+  - `POST /api/dvtp/query` of `dienstverlener-backend` and `ir-backend` uses
+    the session's consent token when the body has no `consent_token`; a
+    token in the body still works.
+  - The DvTP onboarding register's built-in demo configuration needs
+    `DIENSTVERLENER_PUBLIC_URL` and `KEYPER_PUBLIC_URL` for the providers'
+    return locations; Compose passes both, a deployment that uses that
+    configuration must set them.
+  - With their admission to the consent register's peer, the two demo
+    providers (`…0300`, `…1000`) can also connect to the FSC service
+    `consent-status`: the consent register's Manager signs per peer, not per
+    service. Consent ids are random, so a provider finds only a consent whose
+    id it already has, and a lookup that finds one is logged with the
+    provider as the processor.
+  - No other site may frame the toestemmingsportaal: the Vite dev server and
+    the nginx image send `Content-Security-Policy: frame-ancestors 'none'`
+    and `X-Frame-Options: DENY`, because the consent screen grants with one
+    click.
 - **The test PID carries PID metadata and, for EUDI wallets, `iss`** (#682):
   the own credential issuer adds `issuing_authority` (`GBO Demo`) and
   `issuing_country` (`NL`), the mandatory PID metadata of CIR 2024/2977 as
