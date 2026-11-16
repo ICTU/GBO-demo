@@ -512,6 +512,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- **The test PID carries PID metadata and, for EUDI wallets, `iss`** (#682):
+  the own credential issuer adds `issuing_authority` (`GBO Demo`) and
+  `issuing_country` (`NL`), the mandatory PID metadata of CIR 2024/2977 as
+  amended, and the optional `date_of_expiry`. The NL Wallet's preview
+  carries them too. For EUDI wallets the test PID also carries `iss`, its
+  credential issuer identifier, which its issuer certificate now names as a
+  SAN URI; the NL Wallet gets no `iss`. **Upgrade:** `make
+  provision-test-pid` now requires `ISSUER_PUBLIC_URL`. Run it again for an
+  environment provisioned before, with that environment's issuer URL, then
+  rematerialize the issuer configuration (`make credential-issuer-up`, or
+  the deployment's materializer) and deploy the new `eudi-credential-issuer`
+  image. The test PID root and the trust lists stay the same.
 - **`make` prints the demo URLs on `GBO_PUBLIC_HOST`** (default
   `localhost`), instead of localhost and the first `hostname -I` address,
   which does not exist on macOS.
