@@ -145,8 +145,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   site may frame the portal: the Vite dev server and the nginx image send
   `Content-Security-Policy: frame-ancestors 'none'` and
   `X-Frame-Options: DENY`, because the consent screen grants with one
-  click. The demo providers do not send citizens to the route yet; the URL-based flow
-  (`/auth`, `/consent`, `/bevestiging`) is unchanged.
+  click. Both demo providers use the route (see Changed), and the URL-based
+  flow is gone (see Removed).
 - **The demo runs on any host name**: the Vite frontends accept
   `GBO_PUBLIC_HOST` and `GBO_EXTRA_ALLOWED_HOSTS`, the reference QTSP follows
   `GBO_PUBLIC_HOST` (`QTSP_PUBLIC_URL` overrides it), and
@@ -1249,19 +1249,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   placeholder `EUDI_PUBLIC_URL` in `make source-metadata-up` now uses the
   issuance server's port 18001 instead of 8001, with a comment that the
   services it starts do not read it.
-- **The dienstverlener-mock, keyper-mock and toestemmingsportaal-frontend
-  images no longer serve a literal `${VAR}` in `runtime-config.js`.** nginx's
-  envsubst only fills variables that are set, so a container started without
-  `CONSENT_PORTAL_URL`, `CONSUMER_PEER_ID` or `ALLOWED_RETURN_ORIGINS` kept
-  the placeholder, which the apps took as a value: the dienstverlener-mock
-  sent citizens to a broken portal URL instead of deriving it. The
-  Dockerfiles now declare the variables empty, as the landing page already
-  did, and the apps treat a value that is still a whole `${VAR}` placeholder
-  as unset. An image started without `ALLOWED_RETURN_ORIGINS` still rejects
-  every deployed return URL: the consent portal then falls back to the local
-  demo default and only accepts `http://localhost:9001` (a demo shortcut), so
-  a deployment must set `ALLOWED_RETURN_ORIGINS` when the container starts.
-  The keyper-mock likewise needs `CONSENT_PORTAL_URL` outside the local demo.
+- **The keyper-mock image no longer serves a literal `${VAR}` in
+  `runtime-config.js`.** nginx's envsubst only fills variables that are set,
+  so a container started without `CONSENT_PORTAL_URL` kept the placeholder,
+  which the app took as a value. The Dockerfile now declares the variable
+  empty, as the landing page already did, and the app treats a value that is
+  still a whole `${VAR}` placeholder as unset. The keyper-mock still needs
+  `CONSENT_PORTAL_URL` outside the local demo, for its link to the portal.
+  The dienstverlener-mock and the toestemmingsportaal-frontend no longer
+  have a runtime configuration (see Removed).
 - **`make fsc-clean` works without sudo**: the certificates the containers
   write as root or uid 1001 could not be deleted by the host user under
   rootful Docker, nor under rootless Docker (where uid 1001 maps to a
