@@ -214,11 +214,11 @@ func (s *RequestStore) Bind(uri, clientID string, citizen SubjectRef, now time.T
 	return request, nil
 }
 
-// Spend uses the reference under uri for citizen's decision: the same
-// checks as Bind, without the client ID, then accept on the request. When
-// accept returns nil the reference is spent and bound to citizen; when it
-// returns an error nothing changes. Only one decision can spend a
-// reference.
+// Spend uses the reference under uri for citizen's decision: the reference
+// must be usable and already bound to citizen by Bind, which checked the
+// client ID; then accept runs on the request. When accept returns nil the
+// reference is spent; when it returns an error nothing changes. Only one
+// decision can spend a reference.
 func (s *RequestStore) Spend(uri string, citizen SubjectRef, now time.Time, accept func(PendingRequest) error) (PendingRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -226,13 +226,17 @@ func (s *RequestStore) Spend(uri string, citizen SubjectRef, now time.Time, acce
 	if err != nil {
 		return PendingRequest{}, err
 	}
-	if request.Citizen != "" && request.Citizen != citizen {
+	switch request.Citizen {
+	case citizen:
+	case "":
+		return PendingRequest{}, refuse(ReasonRequestURINotResolved, "the reference was not resolved before the decision")
+	default:
 		return PendingRequest{}, refuse(ReasonRequestURIOtherCitizen, "the reference belongs to another citizen")
 	}
 	if err := accept(request); err != nil {
 		return PendingRequest{}, err
 	}
-	request.Citizen, request.Spent = citizen, true
+	request.Spent = true
 	s.requests[uri] = request
 	return request, nil
 }

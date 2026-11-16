@@ -51,6 +51,23 @@ func pushed(t *testing.T, p *Portal) string {
 	return ref.RequestURI
 }
 
+// resolved pushes the valid test request and resolves it for citizenA, as
+// the consent screen does before a decision, and returns its request URI.
+func resolved(t *testing.T, p *Portal) string {
+	t.Helper()
+	uri := pushed(t, p)
+	resolve(t, p, uri)
+	return uri
+}
+
+// resolve resolves uri for citizenA with the right client ID.
+func resolve(t *testing.T, p *Portal, uri string) {
+	t.Helper()
+	if _, err := p.ResolveRequest(context.Background(), citizenA, uri, string(hypotheekPeer)); err != nil {
+		t.Fatalf("ResolveRequest: %v", err)
+	}
+}
+
 func grant(scopes ...string) Decision { return Decision{Grant: true, Scopes: scopes} }
 
 func TestResolveRequestShowsTheRegistration(t *testing.T) {
@@ -96,6 +113,7 @@ func TestResolveRequestRefusesAnUnusableReference(t *testing.T) {
 			return citizenA, uri, string(hypotheekPeer)
 		}, ReasonRequestURIUnknown},
 		{"spent reference", func(t *testing.T, p *Portal, _ *testClock, uri string) (BSN, string, string) {
+			resolve(t, p, uri)
 			if _, err := p.Decide(context.Background(), citizenA, uri, Decision{}); err != nil {
 				t.Fatalf("Decide: %v", err)
 			}
@@ -208,6 +226,7 @@ func TestDecideWithoutValidUntilUsesTheDefaultValidity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PushRequest: %v", err)
 	}
+	resolve(t, p, ref.RequestURI)
 	if _, err := p.Decide(context.Background(), citizenA, ref.RequestURI, grant("bd:ib:2024")); err != nil {
 		t.Fatalf("Decide: %v", err)
 	}
@@ -218,7 +237,7 @@ func TestDecideWithoutValidUntilUsesTheDefaultValidity(t *testing.T) {
 
 func TestDecideDenyGivesNoConsent(t *testing.T) {
 	p, _, store, bsnk := flowPortal(t)
-	uri := pushed(t, p)
+	uri := resolved(t, p)
 
 	decided, err := p.Decide(context.Background(), citizenA, uri, Decision{Grant: false, Scopes: []string{"brp:alles"}})
 	if err != nil {
@@ -239,7 +258,7 @@ func TestDecideDenyGivesNoConsent(t *testing.T) {
 func TestDecideReportsAFailedGrant(t *testing.T) {
 	p, _, store, bsnk := flowPortal(t)
 	bsnk.err = errors.New("bsnk down")
-	uri := pushed(t, p)
+	uri := resolved(t, p)
 
 	decided, err := p.Decide(context.Background(), citizenA, uri, grant("bd:ib:2025"))
 	if err != nil {
@@ -277,6 +296,7 @@ func TestDecideRefusesAnExpiredReference(t *testing.T) {
 func TestDecideWithoutACodeStoreSpendsNothing(t *testing.T) {
 	p, _, store, _ := flowPortal(t)
 	uri := pushed(t, p)
+	resolve(t, p, uri)
 	p.Codes = nil
 
 	if _, err := p.Decide(context.Background(), citizenA, uri, grant("bd:ib:2025")); err == nil {
@@ -311,7 +331,7 @@ func TestDecideByAnotherCitizenLeavesTheReference(t *testing.T) {
 
 func TestOnlyOneDecisionSpendsAReference(t *testing.T) {
 	p, _, store, _ := flowPortal(t)
-	uri := pushed(t, p)
+	uri := resolved(t, p)
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -338,11 +358,36 @@ func TestOnlyOneDecisionSpendsAReference(t *testing.T) {
 	}
 }
 
+// TestDecideRefusesAReferenceThatWasNotResolved: a decision is accepted
+// only on a reference the citizen resolved, which checked the client ID.
+// Without that resolve it is refused, gives no consent and leaves the
+// reference usable.
+func TestDecideRefusesAReferenceThatWasNotResolved(t *testing.T) {
+	for name, decision := range map[string]Decision{"grant": grant("bd:ib:2025"), "deny": {}} {
+		t.Run(name, func(t *testing.T) {
+			p, _, store, bsnk := flowPortal(t)
+			uri := pushed(t, p)
+
+			_, err := p.Decide(context.Background(), citizenA, uri, decision)
+			if code := refusalCode(t, err); code != ReasonRequestURINotResolved {
+				t.Fatalf("code = %s, want %s", code, ReasonRequestURINotResolved)
+			}
+			if activated, transformed := bsnk.calls(); len(store.created) != 0 || activated != 0 || transformed != 0 {
+				t.Error("a decision without a resolve reached BSNk or the register")
+			}
+			resolve(t, p, uri)
+			if decided, err := p.Decide(context.Background(), citizenA, uri, decision); err != nil {
+				t.Errorf("the decision after the resolve = %+v, %v", decided, err)
+			}
+		})
+	}
+}
+
 // codeFor takes a pushed request through a granted decision and returns
 // the code.
 func codeFor(t *testing.T, p *Portal) string {
 	t.Helper()
-	decided, err := p.Decide(context.Background(), citizenA, pushed(t, p), grant("bd:ib:2025"))
+	decided, err := p.Decide(context.Background(), citizenA, resolved(t, p), grant("bd:ib:2025"))
 	if err != nil || decided.Outcome != OutcomeGranted {
 		t.Fatalf("Decide = %+v, %v", decided, err)
 	}

@@ -31,6 +31,9 @@ const (
 	// ReasonRequestURIOtherCitizen: another citizen resolved the reference
 	// first.
 	ReasonRequestURIOtherCitizen ReasonCode = "REQUEST_URI_OTHER_CITIZEN"
+	// ReasonRequestURINotResolved: a decision on a reference the citizen
+	// has not resolved, so whose client ID was never checked.
+	ReasonRequestURINotResolved ReasonCode = "REQUEST_URI_NOT_RESOLVED"
 )
 
 // DefaultConsentValidity is how long a consent holds when the provider
@@ -117,8 +120,10 @@ type Decided struct {
 // Decide records citizen's decision on the request behind requestURI. A
 // decision that is not valid for the request returns an error wrapping
 // ErrInvalidDecision and leaves the reference as it was; a reference that
-// cannot be used is refused as by ResolveRequest, except that no client ID
-// is checked (the citizen resolved the reference before deciding). Any
+// cannot be used is refused as by ResolveRequest. No client ID is checked
+// here: a decision is accepted only on a reference this citizen resolved
+// first, which checked it, and is refused with ReasonRequestURINotResolved
+// otherwise. Any
 // other decision spends the reference, and only one can: a refusal gives
 // OutcomeDenied, a grant gives the consent and a code (OutcomeGranted) or,
 // when the consent could not be given, OutcomeFailed.

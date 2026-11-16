@@ -135,7 +135,8 @@ func withQuery(returnURL string, params url.Values) (string, error) {
 }
 
 // referenceError maps a refused reference to its status: unknown 404,
-// expired or spent 410, another client ID 400, another citizen 403. The
+// expired or spent 410, another client ID 400, another citizen or a
+// decision without a resolve 403. The
 // body names the reason code.
 func referenceError(ctx context.Context, err error) error {
 	var refusal *consent.Refusal
@@ -148,7 +149,7 @@ func referenceError(ctx context.Context, err error) error {
 		status = http.StatusNotFound
 	case consent.ReasonRequestURIExpired, consent.ReasonRequestURISpent:
 		status = http.StatusGone
-	case consent.ReasonRequestURIOtherCitizen:
+	case consent.ReasonRequestURIOtherCitizen, consent.ReasonRequestURINotResolved:
 		status = http.StatusForbidden
 	}
 	logctx.From(ctx).Warn("consent request refused", "reason", string(refusal.Code), "err", refusal.Error())

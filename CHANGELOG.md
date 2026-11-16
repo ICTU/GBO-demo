@@ -73,7 +73,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   citizen (`403 REQUEST_URI_OTHER_CITIZEN`) is refused with the code in
   `reason`. `POST /portal/requests/{request_uri}/decision` with
   `{"decision": "grant", "scopes": [...]}` or `{"decision": "deny"}` uses the
-  reference once and answers with `outcome` and the `redirect_to` the browser
+  reference once, only after the same citizen resolved it (and so after its
+  `client_id` was checked; otherwise `403 REQUEST_URI_NOT_RESOLVED`), and
+  answers with `outcome` and the `redirect_to` the browser
   goes to: the return URL with `code` and `state`, with
   `error=access_denied` and `state` (no consent), or with
   `error=server_error` and `state` when the consent could not be given. It
