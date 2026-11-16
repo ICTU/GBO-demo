@@ -122,9 +122,10 @@ type CredentialConfiguration struct {
 	ValidDays int
 	// StatusList names the status list its credentials are listed in.
 	StatusList string
-	// PIDMetadata, when set, makes the issuer add the mandatory PID
-	// metadata to every credential (CIR 2024/2977 annex, SD-JWT VC
-	// encoding); the source does not return it.
+	// PIDMetadata, when set, makes the issuer add PID metadata to every
+	// credential (CIR 2024/2977 annex as amended, SD-JWT VC encoding): the
+	// mandatory issuing_authority and issuing_country, and the optional
+	// date_of_expiry. The source does not return it.
 	PIDMetadata *PIDMetadata
 }
 
@@ -223,6 +224,13 @@ func (p Profile) servesNL() bool { return p.Kind == KindNL || p.Kind == KindComb
 // servesEUDI reports whether the EUDI wallets are served: key attestation,
 // the attestation proof type and encryption.
 func (p Profile) servesEUDI() bool { return p.Kind == KindEUDI || p.Kind == KindCombined }
+
+// toNLWallet reports whether a wallet attested by the wallet provider anchor
+// set walletProvider is the NL Wallet: always on KindNL, and on
+// KindCombined the wallet that does not attest its keys.
+func (p Profile) toNLWallet(walletProvider string) bool {
+	return p.Kind == KindNL || (p.Kind == KindCombined && !p.requiresKeyAttestation(walletProvider))
+}
 
 // requiresKeyAttestation reports whether a wallet attested by the wallet
 // provider anchor set walletProvider must attest its keys.

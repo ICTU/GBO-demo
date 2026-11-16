@@ -27,7 +27,7 @@ type CredentialPreview struct {
 // CredentialPreview returns the previews for a Bearer access token. Only
 // KindNL and KindCombined profiles have this endpoint; the NL Wallet calls it without DPoP.
 func (s *Service) CredentialPreview(ctx context.Context, t Target, authorization string) (Preview, error) {
-	_, p, err := s.resolve(t)
+	prov, p, err := s.resolve(t)
 	if err != nil {
 		return Preview{}, err
 	}
@@ -60,7 +60,9 @@ func (s *Service) CredentialPreview(ctx context.Context, t Target, authorization
 			"nbf": d.NotBefore.Unix(),
 			"exp": d.Expires.Unix(),
 		}
-		for k, v := range d.Claims {
+		// Only the NL Wallet gets here, so iss is always empty.
+		_, claims := credentialContent(prov, s.Identifier(t), c, d, true)
+		for k, v := range claims {
 			tagged, err := tagAttribute(v)
 			if err != nil {
 				return Preview{}, refuse(oid4vci.ErrServerError, err.Error())

@@ -165,7 +165,8 @@ var testPIDClaims = []issuerClaim{
 	testPIDClaim([]string{"address", "postal_code"}, false, "Postcode", "Postal code"),
 	testPIDClaim([]string{"address", "locality"}, false, "Stad", "City"),
 	testPIDClaim([]string{"address", "country"}, false, "Land", "Country"),
-	// PID metadata (CIR 2024/2977 annex): the issuer adds it, not the stub.
+	// PID metadata (CIR 2024/2977 annex as amended; date_of_expiry is
+	// optional there): the issuer adds it, not the stub.
 	testPIDClaim([]string{"issuing_authority"}, true, "Uitgevende instantie", "Issuing authority"),
 	testPIDClaim([]string{"issuing_country"}, true, "Land van uitgifte", "Issuing country"),
 	testPIDClaim([]string{"date_of_expiry"}, true, "Vervaldatum", "Expiry date"),
