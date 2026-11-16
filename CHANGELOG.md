@@ -677,6 +677,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   source sidecar now takes `decodedPseudonym.pseudonymValue` as the source's
   pseudonym instead of the whole decoded structure, which names the key set
   version too, so a source keeps its pseudonym of a citizen across new keys.
+- **Both demo providers ask consent through a pushed request** (#427, #648):
+  the dienstverlener-mock (Hypotheek-BV) and the keyper-mock (Installatie
+  Register) no longer build a portal URL with the whole request. Their start
+  buttons call their backend's `POST /api/consent/start` and follow the
+  portal address it answers with, which carries only `client_id` and
+  `request_uri`. Their return pages read the code (or error) and the state
+  once, take them out of the address bar and hand them to
+  `POST /api/consent/complete`; the backend exchanges the code over FSC and
+  keeps the consent token in its session. The queries use that session, so
+  neither mock keeps a consent token or code in the browser; the
+  keyper-mock's demo state in `sessionStorage` holds only the consent's id.
+  The name and purpose on the consent screen come from each provider's
+  registration. `docs/consent-flow.md` shows the new flow, the reason codes
+  and outcomes, and the flow's demo shortcuts.
 - **The test PID carries PID metadata and, for EUDI wallets, `iss`** (#682):
   the own credential issuer adds `issuing_authority` (`GBO Demo`) and
   `issuing_country` (`NL`), the mandatory PID metadata of CIR 2024/2977 as
@@ -1194,6 +1208,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   `opa`, `edi-outway`, `edi-manager`, `bd-inway`). The policy-snippet lookup
   no longer searches for `deny_reason(`, which only a test file contains,
   and `fsc-infra/scripts/lib.sh` drops the uncalled `wait_for_url`.
+- **The URL-based consent flow** (#427, #648): the toestemmingsportaal no
+  longer accepts a consent request in the URL. The request context on
+  `/auth`, the routes `/consent` and `/bevestiging`, the redirect context in
+  `sessionStorage`, the allow-list of return origins
+  (`ALLOWED_RETURN_ORIGINS`, `VITE_ALLOWED_RETURN_ORIGINS`) and the portal's
+  runtime configuration (`runtime-config.js`) are gone; the consent token no
+  longer comes back in a URL fragment. A provider starts a consent flow with
+  a pushed request and `/toestemming/start`. "Annuleren" at the login always
+  goes to the consents overview. The dienstverlener-mock no longer has a
+  runtime configuration (`CONSENT_PORTAL_URL`, `CONSUMER_PEER_ID`), and the
+  keyper-mock no longer reads `CONSUMER_PEER_ID`.
 - The consent detail page no longer shows an "Integrator" field. The DvTP
   requirements no longer ask to tell the citizen about the integrator.
 - **`sector-pip` is gone (#378).** It served sector membership to the old
