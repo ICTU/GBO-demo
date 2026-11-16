@@ -247,6 +247,7 @@ func TestResolveRefusesWithTheReasonCode(t *testing.T) {
 			return uri, hypotheekPeer, citizenA
 		}, 410, consent.ReasonRequestURIExpired, true},
 		{"spent reference", func(t *testing.T, h *harness, uri string) (string, string, string) {
+			h.resolve(t, uri, hypotheekPeer, citizenA)
 			if status, raw := h.decide(t, uri, citizenA, map[string]any{"decision": "deny"}); status != http.StatusOK {
 				t.Fatalf("deny: %d %s", status, raw)
 			}
@@ -321,6 +322,7 @@ func TestDecisionGrantReturnsACodeAndNoToken(t *testing.T) {
 func TestDecisionDenyReturnsAccessDenied(t *testing.T) {
 	h := newHarness(t, returnURL)
 	uri := h.push(t, returnURL)
+	h.resolve(t, uri, hypotheekPeer, citizenA)
 
 	status, raw := h.decide(t, uri, citizenA, map[string]any{"decision": "deny"})
 	if status != http.StatusOK {
@@ -339,6 +341,7 @@ func TestDecisionFailureReturnsServerError(t *testing.T) {
 	h := newHarness(t, returnURL)
 	h.register.err = errors.New("register down")
 	uri := h.push(t, returnURL)
+	h.resolve(t, uri, hypotheekPeer, citizenA)
 
 	status, raw := h.decide(t, uri, citizenA, grantBoth)
 	if status != http.StatusOK {
@@ -360,6 +363,7 @@ func TestDecisionKeepsTheReturnURLQuery(t *testing.T) {
 	registered := "https://hypotheek.example/return?flow=consent"
 	h := newHarness(t, registered)
 	uri := h.push(t, registered)
+	h.resolve(t, uri, hypotheekPeer, citizenA)
 
 	_, raw := h.decide(t, uri, citizenA, map[string]any{"decision": "deny"})
 	if got := decode(t, raw)["redirect_to"]; got != registered+"&error=access_denied&state=af0ifjsldkj" {
@@ -379,6 +383,7 @@ func TestDecisionRefusesABadBodyAndKeepsTheReference(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(t, returnURL)
 			uri := h.push(t, returnURL)
+			h.resolve(t, uri, hypotheekPeer, citizenA)
 
 			if status, raw := h.decide(t, uri, citizenA, body); status != http.StatusBadRequest {
 				t.Fatalf("status = %d, want 400 (%s)", status, raw)
@@ -404,6 +409,22 @@ func TestDecisionByAnotherCitizenIsForbidden(t *testing.T) {
 	}
 	if status, raw := h.decide(t, uri, citizenA, grantBoth); status != http.StatusOK {
 		t.Errorf("the owner's decision afterwards: %d %s", status, raw)
+	}
+}
+
+func TestDecisionWithoutAResolveIsForbidden(t *testing.T) {
+	h := newHarness(t, returnURL)
+	uri := h.push(t, returnURL)
+
+	status, raw := h.decide(t, uri, citizenA, grantBoth)
+	if status != http.StatusForbidden || decode(t, raw)["reason"] != string(consent.ReasonRequestURINotResolved) {
+		t.Errorf("got %d %s, want 403 %s", status, raw, consent.ReasonRequestURINotResolved)
+	}
+	if h.register.consents() != 0 {
+		t.Error("a decision without a resolve gave a consent")
+	}
+	if status, body := h.resolve(t, uri, hypotheekPeer, citizenA); status != http.StatusOK {
+		t.Errorf("the reference is no longer usable: %d %v", status, body)
 	}
 }
 
