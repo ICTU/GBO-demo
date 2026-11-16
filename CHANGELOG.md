@@ -60,6 +60,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   shortcut: the new listener is also reachable on the compose networks
   `fsc-infra` and `backend`, so a provider backend can call it directly with
   another peer in the token.
+- **Resolve, decision and code exchange for pushed requests** (#427, #648):
+  the consent portal backend takes a pushed request to its end. On the
+  citizen's listener, behind the portal login,
+  `GET /portal/requests/{request_uri}?client_id=…` binds the reference to the
+  first citizen that resolves it and returns the provider's name, service and
+  purpose from its registration, the data sets and `valid_until`. A reference
+  that is unknown (`404 REQUEST_URI_UNKNOWN`), expired
+  (`410 REQUEST_URI_EXPIRED`), already used (`410 REQUEST_URI_SPENT`), brought
+  with another `client_id` (`400 CLIENT_ID_MISMATCH`) or resolved by another
+  citizen (`403 REQUEST_URI_OTHER_CITIZEN`) is refused with the code in
+  `reason`. `POST /portal/requests/{request_uri}/decision` with
+  `{"decision": "grant", "scopes": [...]}` or `{"decision": "deny"}` uses the
+  reference once and answers with `outcome` and the `redirect_to` the browser
+  goes to: the return URL with `code` and `state`, with
+  `error=access_denied` and `state` (no consent), or with
+  `error=server_error` and `state` when the consent could not be given. It
+  never carries the consent token. Data sets outside the request, or none,
+  answer `400` and leave the reference usable. Without `valid_until` a
+  consent holds 90 days, as on the current consent screen. On the FSC
+  listener, `POST /token` (`grant_type=authorization_code`, `code`,
+  `redirect_uri`, `code_verifier`) gives the calling provider the consent
+  token as `access_token`, with `scope` and `consent_id`. A code works once,
+  for 60 seconds, for its own provider and redirect URI and with the PKCE
+  verifier of the pushed challenge; otherwise `invalid_grant`. Another
+  `grant_type` gives `unsupported_grant_type`. Expired and used references
+  are remembered for one more request lifetime, then they are unknown. Demo
+  shortcut: codes live in memory, like pushed requests. The demo providers do
+  not use these endpoints yet.
 - **The demo runs on any host name**: the Vite frontends accept
   `GBO_PUBLIC_HOST` and `GBO_EXTRA_ALLOWED_HOSTS`, the reference QTSP follows
   `GBO_PUBLIC_HOST` (`QTSP_PUBLIC_URL` overrides it), and

@@ -372,8 +372,19 @@ S256 `code_challenge`; `valid_until`, `client_name` and `purpose` are
 optional. The portal checks it against the provider's registration in the
 DvTP onboarding register and answers `201` with a `request_uri` and
 `expires_in` (`PAR_REQUEST_LIFETIME`, default 10 minutes), or refuses it with
-an OAuth error and the reason code in `reason`. The demo providers do not use
-it yet: their flow still starts with the redirect described above.
+an OAuth error and the reason code in `reason`.
+
+The provider then sends the citizen's browser to the portal with only its
+`client_id` and the `request_uri`. Behind the portal login,
+`GET /portal/requests/{request_uri}?client_id=…` shows the request (name and
+purpose from the registration) and binds it to the citizen;
+`POST /portal/requests/{request_uri}/decision` records the decision once and
+answers with the return URL the browser goes to: with `code` and `state`, or
+with `error=access_denied` or `error=server_error` and `state`. The provider
+exchanges the code over FSC at `POST /token` on the same FSC service, with the
+PKCE `code_verifier`, for the consent token (`access_token`). A code works once
+and for 60 seconds. The demo providers do not use these endpoints yet: their
+flow still starts with the redirect described above.
 
 ### EUDI wallet issuance
 
