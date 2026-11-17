@@ -327,3 +327,36 @@ func TestDeferredTestPersonLoginHasAReference(t *testing.T) {
 		t.Fatalf("revoke = %d %v, want 1 entry", status, body)
 	}
 }
+
+// T12: a deferred test PID whose reference is revoked while it waits for
+// the source is refused once the source answers: nothing is issued for a
+// revoked reference, and no status list entry is spent on it.
+func TestRevokedDeferredTestPersonLoginIsRefused(t *testing.T) {
+	f, w, _, _ := personFixture(t)
+	f.setSource(http.StatusServiceUnavailable, nil)
+	status, tokens := w.tokenForCode(personCode(t, w, loginBSN), nil, nil)
+	if status != 200 {
+		t.Fatalf("token: %d %v", status, tokens)
+	}
+	var token oid4vci.TokenResponse
+	remarshal(t, tokens, &token)
+	status, cred := w.issueWith(t, token)
+	if status != http.StatusAccepted {
+		t.Fatalf("credential = %d %v, want deferred", status, cred)
+	}
+	refs := loginReferences(f)
+	if len(refs) != 1 {
+		t.Fatalf("logged references = %v, want one", refs)
+	}
+	if status, body := f.revoke(map[string]any{"reference": refs[0]}); status != http.StatusOK || body["revoked"] != float64(0) {
+		t.Fatalf("revoke = %d %v, want 0 entries yet", status, body)
+	}
+	f.setSource(200, []map[string]any{{"format": "dc+sd-jwt", "attestation_type": issuance.PIDType, "attributes": map[string]any{"bsn": loginBSN}}})
+	status, body := w.deferred(token.AccessToken, nil, map[string]any{"transaction_id": cred["transaction_id"]})
+	if status != http.StatusBadRequest || body["error"] != "credential_request_denied" {
+		t.Fatalf("deferred after revocation = %d %v, want credential_request_denied", status, body)
+	}
+	if status, body := f.revoke(map[string]any{"reference": refs[0]}); status != http.StatusOK || body["revoked"] != float64(0) {
+		t.Errorf("revoke again = %d %v: an entry was allocated after all", status, body)
+	}
+}

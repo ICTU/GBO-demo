@@ -153,6 +153,36 @@ type DeferredCall struct {
 	EncryptedRequest string
 }
 
+// takeDeferral takes the deferred transaction of session, with keep to put
+// it back for a later request. A transaction of another session is unknown.
+// One whose offer reference was revoked while the source was away ends with
+// credential_request_denied: nothing more is issued for it, and the source
+// is not asked.
+func (s *Service) takeDeferral(ctx context.Context, session Session, transactionID string, now time.Time) (deferral, func() error, error) {
+	unknown := refuse(oid4vci.ErrInvalidTransactionID, "the transaction_id is unknown, finished or expired")
+	pending, err := s.sessions.TakePending(ctx, pendingDeferral, hash(transactionID), now)
+	if errors.Is(err, ErrNotFound) {
+		return deferral{}, nil, unknown
+	}
+	if err != nil {
+		return deferral{}, nil, err
+	}
+	keep := func() error { return s.sessions.PutPending(ctx, pending) }
+	var d deferral
+	if err := json.Unmarshal(pending.Payload, &d); err != nil {
+		return deferral{}, nil, err
+	}
+	if d.SessionID != session.ID {
+		return deferral{}, nil, errors.Join(unknown, keep())
+	}
+	if revoked, err := s.referenceRevoked(ctx, session); err != nil {
+		return deferral{}, nil, errors.Join(err, keep())
+	} else if revoked {
+		return deferral{}, nil, refuse(oid4vci.ErrCredentialRequestDenied, "the offer has been revoked")
+	}
+	return d, keep, nil
+}
+
 // Deferred handles a deferred credential request: it asks the source again.
 // Unavailable: 202 with the same transaction_id. No data: the transaction
 // ends with credential_request_denied (V5). Data: the credential.
@@ -186,25 +216,12 @@ func (s *Service) Deferred(ctx context.Context, call DeferredCall) (CredentialRe
 	if err != nil {
 		return CredentialResult{}, err
 	}
-	unknown := refuse(oid4vci.ErrInvalidTransactionID, "the transaction_id is unknown, finished or expired")
 	if req.TransactionID == "" {
 		return CredentialResult{}, refuse(oid4vci.ErrInvalidCredentialRequest, "transaction_id is required")
 	}
-	pending, err := s.sessions.TakePending(ctx, pendingDeferral, hash(req.TransactionID), now)
-	if errors.Is(err, ErrNotFound) {
-		return CredentialResult{}, unknown
-	}
+	d, keep, err := s.takeDeferral(ctx, session, req.TransactionID, now)
 	if err != nil {
 		return CredentialResult{}, err
-	}
-	// keep puts the transaction back for a later request.
-	keep := func() error { return s.sessions.PutPending(ctx, pending) }
-	var d deferral
-	if err := json.Unmarshal(pending.Payload, &d); err != nil {
-		return CredentialResult{}, err
-	}
-	if d.SessionID != session.ID {
-		return CredentialResult{}, errors.Join(unknown, keep())
 	}
 	bsn, err := openSubject(prov, d.Subject)
 	if err != nil {
