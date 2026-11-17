@@ -1,6 +1,10 @@
 import { demoSessionId } from '../util/demoSession'
 import type { Scenario, HistoryRun, Citizen, Organization } from '../types'
 import { testPersonsFrom, testPidOfferFrom, type TestPersons, type TestPidOffer } from '../lib/testPid'
+import {
+  attestationOfferFrom, revocationOffersFrom, revokeEntryErrorFrom, revokeOutcomeFrom,
+  type AttestationOffer, type RevocationOffers, type RevokeOutcome, type StatusListView,
+} from '../lib/revocation'
 
 const BASE = '/api/dev'
 
@@ -44,6 +48,56 @@ export async function createTestPidOffer(bsn: string): Promise<TestPidOffer> {
       body: JSON.stringify({ bsn }),
     })
     return testPidOfferFrom(res.status, await readJson(res))
+  } catch {
+    return { error: 'De portal-backend is niet bereikbaar.' }
+  }
+}
+
+async function postJson(path: string, body: unknown): Promise<{ status: number | null; body: unknown }> {
+  try {
+    const res = await fetch(BASE + path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    return { status: res.status, body: await readJson(res) }
+  } catch {
+    return { status: null, body: undefined }
+  }
+}
+
+export async function loadRevocationOffers(): Promise<RevocationOffers> {
+  try {
+    const res = await fetch(`${BASE}/revocation/offers`, { cache: 'no-store' })
+    return revocationOffersFrom(res.status, await readJson(res))
+  } catch {
+    return revocationOffersFrom(null, undefined)
+  }
+}
+
+/** An offer of a source's attestation with a reference, for revocation. */
+export async function createAttestationOffer(sourceId: string, key: string, bsn: string): Promise<AttestationOffer> {
+  const answer = await postJson('/revocation/offers', { source_id: sourceId, key, bsn })
+  return attestationOfferFrom(answer.status, answer.body)
+}
+
+export async function revokeOffer(reference: string): Promise<RevokeOutcome> {
+  const answer = await postJson('/revocation/revoke', { reference })
+  return revokeOutcomeFrom(answer.status, answer.body)
+}
+
+/** Revokes one status list entry; '' when it worked, else the message. */
+export async function revokeEntry(provider: string, list: string, index: number): Promise<string> {
+  const answer = await postJson('/revocation/revoke-entry', { provider, list, index })
+  return revokeEntryErrorFrom(answer.status, answer.body)
+}
+
+export async function loadStatusLists(): Promise<StatusListView[] | { error: string }> {
+  try {
+    const res = await fetch(`${BASE}/revocation/status-lists`, { cache: 'no-store' })
+    const body = await readJson(res)
+    if (res.ok && Array.isArray(body)) return body as StatusListView[]
+    return { error: `Status lists niet beschikbaar (HTTP ${res.status}).` }
   } catch {
     return { error: 'De portal-backend is niet bereikbaar.' }
   }

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import { createTestPidOffer, loadTestPersons } from '../api/devClient'
 import { personLabel, type TestPersons, type TestPidOffer } from '../lib/testPid'
+import { OFFERS_CHANGED } from '../lib/revocation'
 
 // A test PID for the EUDI reference wallet, which has no PID the demo
 // trusts. EU-wallet only: the NL Wallet takes its PID from its own
@@ -29,8 +30,10 @@ export default function TestPidPanel() {
   const makeOffer = async () => {
     setBusy(true)
     setOffer(null)
-    setOffer(await createTestPidOffer(bsn))
+    const made = await createTestPidOffer(bsn)
+    setOffer(made)
     setBusy(false)
+    if ('reference' in made) window.dispatchEvent(new Event(OFFERS_CHANGED))
   }
 
   return (
@@ -78,6 +81,11 @@ export default function TestPidPanel() {
                 Scan met de EUDI-referentiewallet. De QR is 5 minuten geldig en eenmalig te gebruiken.
               </div>
               <a className="btn mini" href={offer.link}>same-device link</a>
+              {offer.reference && (
+                <div style={{ fontSize: 12, color: 'var(--mute)', textAlign: 'center' }}>
+                  Kenmerk <code className="mono">{offer.reference}</code>: hierop trekt de issuer deze uitgifte in.
+                </div>
+              )}
             </div>
           )}
         </div>

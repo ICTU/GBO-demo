@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"gbo-demo/dev-portal-backend/internal/revocation"
 	"gbo-demo/dev-portal-backend/internal/testpid"
 )
 
@@ -28,7 +29,10 @@ var testPIDStatus = map[testpid.Error]int{
 	testpid.ErrIssuer:            http.StatusBadGateway,
 }
 
-func registerTestPID(mux *http.ServeMux, svc *testpid.Service) {
+// Each offer carries a reference, which the answer returns: the issuer
+// keeps a test PID with a reference valid for its configured days. With
+// revocation on, the offer is also listed among the portal's offers.
+func registerTestPID(mux *http.ServeMux, svc *testpid.Service, revocations *revocation.Service) {
 	if svc == nil {
 		return
 	}
@@ -52,7 +56,11 @@ func registerTestPID(mux *http.ServeMux, svc *testpid.Service) {
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
-		link, err := svc.Offer(r.Context(), req.BSN)
+		reference := revocation.NewReference()
+		if revocations != nil {
+			reference = revocations.NewReference()
+		}
+		link, err := svc.Offer(r.Context(), req.BSN, reference)
 		if err != nil {
 			var why testpid.Error
 			if !errors.As(err, &why) {
@@ -62,6 +70,9 @@ func registerTestPID(mux *http.ServeMux, svc *testpid.Service) {
 			writeJSON(w, testPIDStatus[why], map[string]string{"error": string(why)})
 			return
 		}
-		writeJSON(w, http.StatusCreated, map[string]string{"link": link})
+		if revocations != nil {
+			revocations.RecordTestPID(reference, req.BSN)
+		}
+		writeJSON(w, http.StatusCreated, map[string]string{"link": link, "reference": reference})
 	})
 }

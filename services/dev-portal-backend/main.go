@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"errors"
+	"gbo-demo/dev-portal-backend/internal/revocation"
 	"gbo-demo/dev-portal-backend/internal/testpid"
 	"gbo-demo/dev-portal-backend/internal/testpid/issuerhttp"
 	"github.com/google/uuid"
@@ -73,6 +74,17 @@ type config struct {
 	// TestPIDPersonsFile holds the BRP mock persons the issuer's
 	// test-pid-source maps to PIDs.
 	TestPIDPersonsFile string
+	// CredentialIssuerInternalURL is the own credential issuer's internal
+	// API (revocation.go), where the portal makes offers with a reference
+	// and revokes them. Empty, the default, leaves the portal without its
+	// revocation panel: the API lets anyone revoke anything.
+	CredentialIssuerInternalURL string
+	// CredentialIssuerStatusURL is where that issuer serves its status
+	// lists (/status/{provider}/{list}).
+	CredentialIssuerStatusURL string
+	// EudiOffersURL lists the offers the sources publish (the
+	// eudi-adapter's /eudi-offers.json).
+	EudiOffersURL string
 }
 
 const defaultDvtpConsumerPeerID = "99999999900000000300"
@@ -142,6 +154,10 @@ func loadConfig() config {
 		QtspURL:            strings.TrimRight(os.Getenv("QTSP_URL"), "/"),
 		TestPIDOffersURL:   os.Getenv("TEST_PID_OFFERS_URL"),
 		TestPIDPersonsFile: getEnv("TEST_PID_PERSONS_FILE", "/test-pid-persons/personen.json"),
+
+		CredentialIssuerInternalURL: strings.TrimRight(os.Getenv("CREDENTIAL_ISSUER_INTERNAL_URL"), "/"),
+		CredentialIssuerStatusURL:   strings.TrimRight(os.Getenv("CREDENTIAL_ISSUER_STATUS_URL"), "/"),
+		EudiOffersURL:               os.Getenv("EUDI_OFFERS_URL"),
 	}
 }
 
@@ -1062,7 +1078,9 @@ func main() {
 		adl = store
 	}
 	mux := newMux(cfg, hub, adl)
-	registerTestPID(mux, newTestPIDService(cfg))
+	revocations := newRevocationService(cfg)
+	registerTestPID(mux, newTestPIDService(cfg), revocations)
+	registerRevocation(mux, revocations)
 
 	// BaseContext gives every request a context this process can cancel, which
 	// is how the long-lived SSE streams are told to wind up at shutdown.
@@ -1094,6 +1112,26 @@ func newTestPIDService(cfg config) *testpid.Service {
 	}
 	slog.Info("test PID offers on", "issuer", cfg.TestPIDOffersURL, "persons", len(persons))
 	return testpid.New(persons, issuerhttp.New(cfg.TestPIDOffersURL, 10*time.Second))
+}
+
+// newRevocationService is nil without CREDENTIAL_ISSUER_INTERNAL_URL. With
+// it, the status list and offer addresses are required.
+func newRevocationService(cfg config) *revocation.Service {
+	if cfg.CredentialIssuerInternalURL == "" {
+		return nil
+	}
+	if cfg.CredentialIssuerStatusURL == "" || cfg.EudiOffersURL == "" {
+		fatal("revocation", errors.New("CREDENTIAL_ISSUER_INTERNAL_URL needs CREDENTIAL_ISSUER_STATUS_URL and EUDI_OFFERS_URL"))
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	slog.Info("revocation on", "issuer", cfg.CredentialIssuerInternalURL, "status", cfg.CredentialIssuerStatusURL, "offers", cfg.EudiOffersURL)
+	return revocation.New(revocation.Config{
+		Issuer:        issuerhttp.New(cfg.CredentialIssuerInternalURL+"/offers", 10*time.Second),
+		Revoker:       issuerhttp.NewRevocations(cfg.CredentialIssuerInternalURL+"/revocations", 10*time.Second),
+		Catalog:       revocation.HTTPCatalog{URL: cfg.EudiOffersURL, Client: client},
+		Fetch:         revocation.HTTPStatusFetcher(client),
+		StatusBaseURL: cfg.CredentialIssuerStatusURL,
+	})
 }
 
 // fatal logs and ends the process. main is the only place in this service

@@ -9,6 +9,8 @@ import {
   type EuWalletLinks,
   type IssuanceOffer,
 } from '../eudi'
+import { createAttestationOffer, loadRevocationOffers } from '../api/devClient'
+import { OFFERS_CHANGED, type AttestationOffer } from '../lib/revocation'
 
 type Wallet = 'nl' | 'eu'
 
@@ -38,11 +40,20 @@ export default function EudiQrPanel({ usecaseKey, offers, onCancel, onPlayground
   const [error, setError] = useState<string | null>(null)
   const [euLinks, setEuLinks] = useState<EuWalletLinks>(new Map())
   const [chosenWallet, setChosenWallet] = useState<Wallet>('nl')
+  // An offer with a reference, which the revocation block can revoke; only
+  // when the backend makes revocable offers.
+  const [revocable, setRevocable] = useState(false)
+  const [referenceBsn, setReferenceBsn] = useState('999991772')
+  const [referenceBusy, setReferenceBusy] = useState(false)
+  const [referenceOffer, setReferenceOffer] = useState<AttestationOffer | null>(null)
 
   useEffect(() => {
     let active = true
     void loadEuWalletLinks().then((links) => {
       if (active) setEuLinks(links)
+    })
+    void loadRevocationOffers().then((loaded) => {
+      if (active) setRevocable(loaded.enabled)
     })
     return () => {
       active = false
@@ -63,6 +74,19 @@ export default function EudiQrPanel({ usecaseKey, offers, onCancel, onPlayground
   const crossDeviceUl = wallet === 'eu' ? euLink : walletUniversalLinkFor(offer, 'cross_device')
   const sameDeviceUl = wallet === 'eu' ? euLink : walletUniversalLinkFor(offer, 'same_device')
   const missingConfig = !crossDeviceUl
+
+  const makeReferenceOffer = async () => {
+    // The issuer asks the source while it makes the offer; that run must not
+    // swap this panel for the result panel, or the QR is gone before the
+    // wallet scans it. The same flag keeps the panel for the playground.
+    onPlaygroundToggle?.(true)
+    setReferenceBusy(true)
+    setReferenceOffer(null)
+    const made = await createAttestationOffer(offer.source_id, offer.key, referenceBsn)
+    setReferenceOffer(made)
+    setReferenceBusy(false)
+    if ('reference' in made) window.dispatchEvent(new Event(OFFERS_CHANGED))
+  }
 
   const runCurl = async () => {
     setBusy(true); setError(null); setResponse(null)
@@ -156,6 +180,49 @@ export default function EudiQrPanel({ usecaseKey, offers, onCancel, onPlayground
                 <a className="btn mini" href={euLoginLink} target="_blank" rel="noopener noreferrer">
                   same-device link
                 </a>
+              </div>
+            )}
+
+            {wallet === 'eu' && revocable && (
+              <div style={{
+                width: '100%', marginTop: 8, paddingTop: 12, borderTop: '1px solid var(--border)',
+                display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center',
+              }}>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>Aanbod met kenmerk (om in te trekken)</div>
+                <div style={{ fontSize: 12, color: 'var(--mute)', textAlign: 'center' }}>
+                  Een aanbod voor een BSN dat je hier kiest, zonder PID te delen of in te loggen. Het krijgt een kenmerk,
+                  zodat je de uitgifte in het blok Intrekken kunt intrekken.
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <label htmlFor="reference-bsn" style={{ fontSize: 12 }}>BSN</label>
+                  <input
+                    id="reference-bsn"
+                    className="input mono"
+                    style={{
+                      maxWidth: 140, color: 'var(--fg)', background: 'var(--bg-alt)',
+                      border: '1px solid var(--border)', borderRadius: 4, padding: '4px 8px', fontFamily: 'monospace',
+                    }}
+                    value={referenceBsn}
+                    onChange={(e) => { setReferenceBsn(e.target.value); setReferenceOffer(null) }}
+                  />
+                  <button className="btn mini" onClick={() => void makeReferenceOffer()} disabled={referenceBusy || !referenceBsn}>
+                    {referenceBusy ? 'bezig…' : 'Maak QR met kenmerk'}
+                  </button>
+                </div>
+                <div aria-live="polite" style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' }}>
+                  {referenceOffer && 'error' in referenceOffer && (
+                    <div style={{ color: 'var(--danger, #d33)', fontSize: 12 }}>{referenceOffer.error}</div>
+                  )}
+                  {referenceOffer && 'link' in referenceOffer && (
+                    <>
+                      <QRCodeSVG value={referenceOffer.link} size={220} bgColor="#ffffff" fgColor="#000000" includeMargin />
+                      <div style={{ fontSize: 12, color: 'var(--mute)', textAlign: 'center' }}>
+                        5 minuten geldig, eenmalig. Kenmerk <code className="mono">{referenceOffer.reference}</code>.
+                      </div>
+                      <a className="btn mini" href={referenceOffer.link}>same-device link</a>
+                    </>
+                  )}
+                </div>
               </div>
             )}
 

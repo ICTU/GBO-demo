@@ -64,6 +64,11 @@ type OfferRequest struct {
 	Profile          string
 	ConfigurationIDs []string
 	BSN              string
+	// Parameters go to the source as they are; the test PID has none.
+	Parameters map[string]string
+	// Reference is the caller's reference, by which the issuer revokes the
+	// credentials of the offer; empty, the offer has none.
+	Reference string
 }
 
 // Issuer makes pre-authorized offers at the own credential issuer. It
@@ -76,15 +81,15 @@ type Issuer interface {
 // ErrUnreachable is the issuer not answering.
 var ErrUnreachable = errors.New("issuer unreachable")
 
-// Refusal is the issuer's error answer. Code is its error code, empty when
-// the answer carried none.
+// Refusal is the issuer's error answer, to an offer or a revocation. Code
+// is its error code, empty when the answer carried none.
 type Refusal struct {
 	Status int
 	Code   string
 }
 
 func (r *Refusal) Error() string {
-	return fmt.Sprintf("issuer refused the offer: %d %s", r.Status, r.Code)
+	return fmt.Sprintf("issuer refused: %d %s", r.Status, r.Code)
 }
 
 // Error is why no offer was made. Its value is the code the portal shows a
@@ -123,15 +128,22 @@ func (s *Service) Persons() []Person { return s.persons }
 
 // Offer returns the link of a pre-authorized offer of the test PID for the
 // person with this BSN. Only test persons get one: any other BSN is refused
-// before the issuer is asked.
-func (s *Service) Offer(ctx context.Context, bsn string) (string, error) {
+// before the issuer is asked. A reference, when given, lets the credentials
+// of the offer be revoked.
+func (s *Service) Offer(ctx context.Context, bsn, reference string) (string, error) {
 	if !s.known[bsn] {
 		return "", ErrUnknownPerson
 	}
-	links, err := s.issuer.Offer(ctx, OfferRequest{Profile: Profile, ConfigurationIDs: []string{ConfigurationID}, BSN: bsn})
+	links, err := s.issuer.Offer(ctx, OfferRequest{Profile: Profile, ConfigurationIDs: []string{ConfigurationID}, BSN: bsn, Reference: reference})
 	if err != nil {
-		return "", reason(err)
+		return "", Reason(err)
 	}
+	return OfferLink(links)
+}
+
+// OfferLink is the link of an offer the issuer made, by which a wallet
+// takes it.
+func OfferLink(links map[string]string) (string, error) {
 	link := links[offerLinkKind]
 	if link == "" {
 		return "", fmt.Errorf("%w: the offer has no %s link", ErrIssuer, offerLinkKind)
@@ -139,9 +151,9 @@ func (s *Service) Offer(ctx context.Context, bsn string) (string, error) {
 	return link, nil
 }
 
-// reason translates the issuer's failure into why no offer was made, and
+// Reason translates the issuer's failure into why no offer was made, and
 // keeps the issuer's own error for the log.
-func reason(err error) error {
+func Reason(err error) error {
 	if errors.Is(err, ErrUnreachable) {
 		return fmt.Errorf("%w: %w", ErrIssuerUnavailable, err)
 	}

@@ -125,6 +125,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   and its endpoints, since anyone who reaches the portal could otherwise get
   a test PID. EU wallets only: the NL Wallet takes its PID from its own
   pre-production issuer.
+- **Revocation block in the developer portal** (#696): in the EUDI tab the
+  offers the portal makes carry a reference, the test PID's and a new offer
+  of a source attestation for a chosen BSN next to the fixed EU-wallet links.
+  The block lists these offers and revokes all credentials the issuer issued
+  for one, revokes a single status list entry, and shows the public status
+  lists of the offers, decoded but not verified. The offers are kept in
+  memory. On by default in the local Compose setup; an empty
+  `CREDENTIAL_ISSUER_INTERNAL_URL` removes the block and its endpoints,
+  since anyone who reaches the portal could otherwise revoke anything. The
+  test PID offer carries a reference even then, so the issuer keeps it valid
+  for its configured days.
 - **`eudi-adapter` serves pre-authorized offers** (#614): besides a wallet's
   PID disclosure it accepts `{"subject": {"bsn": ...}}` from a credential
   issuer whose offer caller named the subject. It logs that as a separate

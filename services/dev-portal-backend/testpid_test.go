@@ -20,12 +20,23 @@ func (s stubIssuer) Offer(context.Context, testpid.OfferRequest) (map[string]str
 	return s.links, s.err
 }
 
+// recordingIssuer keeps the reference of the last offer.
+type recordingIssuer struct {
+	links     map[string]string
+	reference string
+}
+
+func (s *recordingIssuer) Offer(_ context.Context, req testpid.OfferRequest) (map[string]string, error) {
+	s.reference = req.Reference
+	return s.links, nil
+}
+
 var testPersons = []testpid.Person{{BSN: "999991772", Name: "Frouke Jansen"}}
 
 func testPIDMux(issuer testpid.Issuer) *http.ServeMux {
 	mux := newMux(config{}, newTraceHub(0), nil)
 	if issuer != nil {
-		registerTestPID(mux, testpid.New(testPersons, issuer))
+		registerTestPID(mux, testpid.New(testPersons, issuer), nil)
 	}
 	return mux
 }
@@ -58,11 +69,17 @@ func TestTestPIDPersons(t *testing.T) {
 }
 
 // H3: an offer for a test person gives its link, never from a cache.
+// B12: it carries a reference even without revocation, so the issuer
+// treats the test PID as revocable and keeps its validity.
 func TestTestPIDOffer(t *testing.T) {
-	mux := testPIDMux(stubIssuer{links: map[string]string{"openid-credential-offer": "openid-credential-offer://?x"}})
+	issuer := &recordingIssuer{links: map[string]string{"openid-credential-offer": "openid-credential-offer://?x"}}
+	mux := testPIDMux(issuer)
 	rec := testPIDRequest(mux, http.MethodPost, "/test-pid/offers", `{"bsn":"999991772"}`)
-	if rec.Code != http.StatusCreated || strings.TrimSpace(rec.Body.String()) != `{"link":"openid-credential-offer://?x"}` {
-		t.Errorf("offer = %d %s", rec.Code, rec.Body.String())
+	var body map[string]string
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if rec.Code != http.StatusCreated || body["link"] != "openid-credential-offer://?x" ||
+		!strings.HasPrefix(body["reference"], "devportal-") || issuer.reference != body["reference"] {
+		t.Errorf("offer = %d %s, issuer got reference %q", rec.Code, rec.Body.String(), issuer.reference)
 	}
 	if rec.Header().Get("Cache-Control") != "no-store" {
 		t.Errorf("Cache-Control = %q, want no-store", rec.Header().Get("Cache-Control"))
