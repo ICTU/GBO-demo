@@ -190,7 +190,7 @@ export default function EudiQrPanel({ usecaseKey, offers, onCancel, onPlayground
               }}>
                 <div style={{ fontSize: 13, fontWeight: 600 }}>Aanbod met kenmerk (om in te trekken)</div>
                 <div style={{ fontSize: 12, color: 'var(--mute)', textAlign: 'center' }}>
-                  Een aanbod voor een BSN dat je hier kiest, zonder PID te delen of in te loggen. Het krijgt een kenmerk,
+                  Een aanbod voor het BSN van een testpersoon, zonder PID te delen of in te loggen. Het krijgt een kenmerk,
                   zodat je de uitgifte in het blok Intrekken kunt intrekken.
                 </div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>

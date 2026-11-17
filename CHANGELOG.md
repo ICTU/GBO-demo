@@ -131,9 +131,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   The block lists these offers and revokes all credentials the issuer issued
   for one, revokes a single status list entry, and shows the public status
   lists of the offers, decoded but not verified. The offers are kept in
-  memory. On by default in the local Compose setup; an empty
-  `CREDENTIAL_ISSUER_INTERNAL_URL` removes the block and its endpoints,
-  since anyone who reaches the portal could otherwise revoke anything. The
+  memory. Off by default: `CREDENTIAL_ISSUER_INTERNAL_URL` in `.env` turns
+  on the block and its endpoints, since anyone who reaches the portal
+  backend could otherwise revoke any credential of the issuer. An offer of
+  a source attestation is only made for a test person's BSN. The
   test PID offer carries a reference even then, so the issuer keeps it valid
   for its configured days.
 - **`eudi-adapter` serves pre-authorized offers** (#614): besides a wallet's

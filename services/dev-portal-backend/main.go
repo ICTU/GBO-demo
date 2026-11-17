@@ -1102,16 +1102,22 @@ func newTestPIDService(cfg config) *testpid.Service {
 	if cfg.TestPIDOffersURL == "" {
 		return nil
 	}
+	persons := loadTestPersons(cfg)
+	slog.Info("test PID offers on", "issuer", cfg.TestPIDOffersURL, "persons", len(persons))
+	return testpid.New(persons, issuerhttp.New(cfg.TestPIDOffersURL, 10*time.Second))
+}
+
+// loadTestPersons reads the BRP mock persons of TEST_PID_PERSONS_FILE.
+func loadTestPersons(cfg config) []testpid.Person {
 	data, err := os.ReadFile(cfg.TestPIDPersonsFile)
 	if err != nil {
-		fatal("test PID persons", err)
+		fatal("test persons", err)
 	}
 	persons, err := testpid.ParsePersons(data)
 	if err != nil {
-		fatal("test PID persons", err)
+		fatal("test persons", err)
 	}
-	slog.Info("test PID offers on", "issuer", cfg.TestPIDOffersURL, "persons", len(persons))
-	return testpid.New(persons, issuerhttp.New(cfg.TestPIDOffersURL, 10*time.Second))
+	return persons
 }
 
 // newRevocationService is nil without CREDENTIAL_ISSUER_INTERNAL_URL. With
@@ -1131,6 +1137,7 @@ func newRevocationService(cfg config) *revocation.Service {
 		Catalog:       revocation.HTTPCatalog{URL: cfg.EudiOffersURL, Client: client},
 		Fetch:         revocation.HTTPStatusFetcher(client),
 		StatusBaseURL: cfg.CredentialIssuerStatusURL,
+		Persons:       loadTestPersons(cfg),
 	})
 }
 

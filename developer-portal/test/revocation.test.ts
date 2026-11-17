@@ -65,3 +65,8 @@ test('B7/U4: the entry form takes a provider, a list and an index of 0 or more',
   assert.equal(revokeEntryErrorFrom(404, { error: 'unknown_entry' }), revocationMessage('unknown_entry'))
   assert.equal(revokeEntryErrorFrom(502, { error: 'issuer_unavailable' }), revocationMessage('issuer_unavailable'))
 })
+
+test('B15: an offer for a BSN outside the test persons says so', () => {
+  const answer = attestationOfferFrom(400, { error: 'unknown_person' })
+  assert.ok('error' in answer && answer.error.includes('testpersoon'), JSON.stringify(answer))
+})

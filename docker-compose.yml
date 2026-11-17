@@ -1620,10 +1620,11 @@ services:
       # The revocation block: the portal's offers carry a reference, which
       # the block revokes at the issuer's internal API, next to a single
       # status list entry, and it shows the public status lists of those
-      # offers. On by default here; set CREDENTIAL_ISSUER_INTERNAL_URL=
-      # (empty) in .env to turn it off. Never on where others reach the
-      # portal: anyone who does can revoke anything.
-      - CREDENTIAL_ISSUER_INTERNAL_URL=${CREDENTIAL_ISSUER_INTERNAL_URL-http://eudi-credential-issuer:8081}
+      # offers. Off unless CREDENTIAL_ISSUER_INTERNAL_URL is set in .env:
+      # this backend is published on every interface, and anyone who reaches
+      # it could revoke any credential of the issuer, whose internal API is
+      # otherwise published on 127.0.0.1 only.
+      - CREDENTIAL_ISSUER_INTERNAL_URL=${CREDENTIAL_ISSUER_INTERNAL_URL:-}
       - CREDENTIAL_ISSUER_STATUS_URL=http://eudi-credential-issuer:8080
       - EUDI_OFFERS_URL=http://eudi-adapter:4009/eudi-offers.json
       - FSC_TXLOG_BD_URL=https://bd-txlog-api:9443

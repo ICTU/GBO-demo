@@ -109,14 +109,18 @@ type Config struct {
 	// StatusBaseURL is where the issuer serves its status lists, followed
 	// by /status/{provider}/{list}.
 	StatusBaseURL string
-	Now           func() time.Time
-	NewReference  func() string
+	// Persons are the test persons: an attestation offer is made for their
+	// BSN only, as a test PID offer is.
+	Persons      []testpid.Person
+	Now          func() time.Time
+	NewReference func() string
 }
 
 // Service makes offers with a reference, revokes them and shows their
 // status lists.
 type Service struct {
 	cfg    Config
+	known  map[string]bool
 	mu     sync.Mutex
 	offers []Offer
 }
@@ -128,7 +132,11 @@ func New(cfg Config) *Service {
 	if cfg.NewReference == nil {
 		cfg.NewReference = NewReference
 	}
-	return &Service{cfg: cfg}
+	known := make(map[string]bool, len(cfg.Persons))
+	for _, p := range cfg.Persons {
+		known[p.BSN] = true
+	}
+	return &Service{cfg: cfg, known: known}
 }
 
 // NewReference returns a fresh reference for an offer of the portal. The
@@ -153,6 +161,9 @@ func (s *Service) RecordTestPID(reference, bsn string) {
 func (s *Service) OfferAttestation(ctx context.Context, sourceID, key, bsn string) (Offer, string, error) {
 	if sourceID == "" || key == "" || bsn == "" {
 		return Offer{}, "", ErrInvalidRequest
+	}
+	if !s.known[bsn] {
+		return Offer{}, "", testpid.ErrUnknownPerson
 	}
 	published, err := s.cfg.Catalog.Offers(ctx)
 	if err != nil {

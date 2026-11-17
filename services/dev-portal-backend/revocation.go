@@ -28,6 +28,7 @@ var revocationStatus = map[string]int{
 	string(revocation.ErrUnknownEntry):       http.StatusNotFound,
 	string(revocation.ErrNotConfigured):      http.StatusServiceUnavailable,
 	string(revocation.ErrCatalogUnavailable): http.StatusBadGateway,
+	string(testpid.ErrUnknownPerson):         http.StatusBadRequest,
 	string(testpid.ErrNoData):                http.StatusNotFound,
 	string(testpid.ErrSourceUnavailable):     http.StatusServiceUnavailable,
 	string(testpid.ErrIssuerUnavailable):     http.StatusBadGateway,

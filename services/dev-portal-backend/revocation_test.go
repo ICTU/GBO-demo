@@ -30,7 +30,7 @@ func (stubCatalog) Offers(context.Context) ([]revocation.AttestationOffer, error
 
 func revocationMux(issuer stubIssuer, revoker stubRevoker) (*http.ServeMux, *revocation.Service) {
 	svc := revocation.New(revocation.Config{
-		Issuer: issuer, Revoker: revoker, Catalog: stubCatalog{}, StatusBaseURL: "http://issuer:8080",
+		Issuer: issuer, Revoker: revoker, Catalog: stubCatalog{}, StatusBaseURL: "http://issuer:8080", Persons: testPersons,
 		Fetch:        func(context.Context, string) (string, error) { return "", context.DeadlineExceeded },
 		Now:          func() time.Time { return time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC) },
 		NewReference: func() string { return "devportal-1" },
@@ -93,6 +93,8 @@ func TestRevocationAnswers(t *testing.T) {
 			`{"source_id":"belastingdienst","key":"inkomensverklaring_2024","bsn":"999991772"}`, http.StatusCreated, `"reference":"devportal-1"`},
 		{"unknown offer", stubIssuer{links: offerLinks}, stubRevoker{}, http.MethodPost, "/revocation/offers",
 			`{"source_id":"belastingdienst","key":"x","bsn":"999991772"}`, http.StatusBadRequest, `"unknown_offer"`},
+		{"unknown person", stubIssuer{links: offerLinks}, stubRevoker{}, http.MethodPost, "/revocation/offers",
+			`{"source_id":"belastingdienst","key":"inkomensverklaring_2024","bsn":"123456782"}`, http.StatusBadRequest, `"unknown_person"`},
 		{"no data", stubIssuer{err: &testpid.Refusal{Status: 404, Code: "no_data"}}, stubRevoker{}, http.MethodPost, "/revocation/offers",
 			`{"source_id":"belastingdienst","key":"inkomensverklaring_2024","bsn":"999991772"}`, http.StatusNotFound, `"no_data"`},
 		{"not json", stubIssuer{}, stubRevoker{}, http.MethodPost, "/revocation/revoke", `{`, http.StatusBadRequest, `"invalid_request"`},

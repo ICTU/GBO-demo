@@ -42,6 +42,7 @@ export type RevokeOutcome = { offer: RevocationOffer } | { error: string }
 const MESSAGES: Record<string, string> = {
   invalid_request: 'Het verzoek is onvolledig: vul aanbieder, lijst en een plek van 0 of hoger in.',
   unknown_offer: 'Dit aanbod publiceert de bron niet (meer).',
+  unknown_person: 'Dit BSN is geen testpersoon. Kies een BSN uit de testpersonen, zoals bij de test-PID.',
   unknown_reference: 'Dit kenmerk komt niet van dit portal, of het portal is sindsdien herstart.',
   unknown_entry: 'De issuer kent deze plek niet: de lijst bestaat niet, of de plek is nooit uitgegeven.',
   offer_not_configured: 'De credential issuer biedt dit aanbod niet aan op het eudi-profiel.',

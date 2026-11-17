@@ -61,6 +61,7 @@ func newService(issuer *fakeIssuer, revoker *fakeRevoker, fetch StatusFetcher) *
 	n := 0
 	return New(Config{
 		Issuer: issuer, Revoker: revoker, Catalog: fakeCatalog{offers: []AttestationOffer{inkomen}}, Fetch: fetch,
+		Persons:       []testpid.Person{{BSN: "999991772", Name: "Frouke Jansen"}},
 		StatusBaseURL: "http://issuer:8080/", Now: func() time.Time { return now },
 		NewReference: func() string { n++; return "devportal-" + strconv.Itoa(n) },
 	})
@@ -113,6 +114,8 @@ func TestAnUnknownOfferIsRefused(t *testing.T) {
 		{"belastingdienst", "onbekend", "999991772", ErrUnknownOffer},
 		{"rvig", "inkomensverklaring_2024", "999991772", ErrUnknownOffer},
 		{"belastingdienst", "inkomensverklaring_2024", "", ErrInvalidRequest},
+		// B14: only a test person's BSN, as for the test PID.
+		{"belastingdienst", "inkomensverklaring_2024", "123456782", testpid.ErrUnknownPerson},
 		{"", "inkomensverklaring_2024", "999991772", ErrInvalidRequest},
 	} {
 		if _, _, err := s.OfferAttestation(context.Background(), tc.source, tc.key, tc.bsn); !errors.Is(err, tc.want) {
@@ -122,7 +125,7 @@ func TestAnUnknownOfferIsRefused(t *testing.T) {
 	if len(issuer.calls) != 0 || len(s.Offers()) != 0 {
 		t.Errorf("issuer asked %v, offers %v; want neither", issuer.calls, s.Offers())
 	}
-	broken := New(Config{Issuer: issuer, Catalog: fakeCatalog{err: errors.New("down")}})
+	broken := New(Config{Issuer: issuer, Catalog: fakeCatalog{err: errors.New("down")}, Persons: []testpid.Person{{BSN: "999991772"}}})
 	if _, _, err := broken.OfferAttestation(context.Background(), "belastingdienst", "inkomensverklaring_2024", "999991772"); !errors.Is(err, ErrCatalogUnavailable) {
 		t.Errorf("without the catalog: %v", err)
 	}
