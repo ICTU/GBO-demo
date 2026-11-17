@@ -329,6 +329,10 @@ type WalletReturn struct {
 	Attestation  string
 	// LoginUnavailable distinguishes a missing demo persons file from a source outage.
 	LoginUnavailable bool
+	// Reference is the revocation reference of the issuance, for a provider
+	// that gives each login one; the HTTP layer logs it, as nothing else
+	// records it.
+	Reference string
 }
 
 // Callback handles the browser's return from the login: it redeems the code
@@ -367,7 +371,15 @@ func (s *Service) Callback(ctx context.Context, t Target, ret LoginReturn) (*Wal
 		return nil, fmt.Errorf("offer %q of the request is not configured here", pushed.Offer)
 	}
 	binding := &CodeBinding{ClientID: pushed.ClientID, RedirectURI: pushed.RedirectURI, CodeChallenge: pushed.CodeChallenge, DPoPJKT: pushed.DPoPJKT}
-	code, err := s.createSession(ctx, t, p, o.ConfigurationIDs, "", CodeLifetime, sessionOptions{binding: binding}, func(id string) ([]SourceDocument, error) {
+	reference := ""
+	if prov := s.providers[t.Provider]; prov != nil && prov.ReferencePerLogin {
+		token, err := randomToken()
+		if err != nil {
+			return nil, err
+		}
+		reference = "testperson-" + token
+	}
+	code, err := s.createSession(ctx, t, p, o.ConfigurationIDs, reference, CodeLifetime, sessionOptions{binding: binding}, func(id string) ([]SourceDocument, error) {
 		return s.source.FetchLogin(ctx, id, bsn, o.Parameters)
 	})
 	switch {
@@ -378,7 +390,7 @@ func (s *Service) Callback(ctx context.Context, t Target, ret LoginReturn) (*Wal
 	case errors.Is(err, ErrSourceUnavailable):
 		// Deferred issuance (V2): the wallet gets its code; the credential
 		// follows when the source answers.
-		if code, err = s.createPendingSession(ctx, t, p, o, binding, bsn); err != nil {
+		if code, err = s.createPendingSession(ctx, t, p, o, binding, bsn, reference); err != nil {
 			return nil, err
 		}
 	case err != nil:
@@ -388,7 +400,7 @@ func (s *Service) Callback(ctx context.Context, t Target, ret LoginReturn) (*Wal
 	if pushed.State != "" {
 		q.Set("state", pushed.State)
 	}
-	return &WalletReturn{Location: walletLocation(pushed.RedirectURI, q)}, nil
+	return &WalletReturn{Location: walletLocation(pushed.RedirectURI, q), Reference: reference}, nil
 }
 
 // walletReturn is an error response to the wallet, shown first on page.

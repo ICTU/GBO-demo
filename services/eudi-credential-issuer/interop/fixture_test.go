@@ -255,12 +255,17 @@ func tryIssuer(t *testing.T, opts ...func(*issuance.Config)) (*issuer, error) {
 func (is *issuer) id(profile string) string { return is.public.URL + "/tax/" + profile }
 
 // offer creates an offer for the income configuration on the internal API
-// and returns the offer links by kind.
+// and returns the offer links by kind. The offer has a revocation
+// reference, so its credentials are valid for valid_days from the start of
+// the day: rounded as the batch privacy check wants. A credential without a
+// reference is short-lived, rounded to the hour, and its copies are linkable
+// within that hour by design.
 func (is *issuer) offer(profile string) map[string]string {
 	is.t.Helper()
 	raw, _ := json.Marshal(map[string]any{
 		"profile": profile, "credential_configuration_ids": []string{incomeConfig},
 		"subject": map[string]any{"bsn": "999990019"}, "parameters": map[string]string{"jaar": "2025"},
+		"reference": "interop",
 	})
 	resp, err := http.Post(is.internal.URL+"/offers", "application/json", bytes.NewReader(raw))
 	if err != nil {

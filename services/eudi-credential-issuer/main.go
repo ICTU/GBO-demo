@@ -251,6 +251,7 @@ func configureTestPersonLogins(cfg *issuance.Config, files map[string]string, st
 			profile.WalletRedirectURIs = splitList(env("ISSUER_WALLET_REDIRECT_URIS", "eu.europa.ec.euidi://authorization"))
 			selector := testlogin.New(p.Name, strings.TrimRight(cfg.PublicURL, "/")+"/"+p.Name+"/"+profile.Name, testpersons.File(path), st, now)
 			p.Login = selector
+			p.ReferencePerLogin = true
 			selectors = append(selectors, selector)
 			break
 		}
