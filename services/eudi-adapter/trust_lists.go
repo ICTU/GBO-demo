@@ -109,8 +109,7 @@ func runTrustListCommand(ctx context.Context, args []string, stdout, stderr io.W
 	}}
 	source := lotefiles.Source{Roots: roots, NL: nlconfig.Source{URL: options.nlURL, Key: key,
 		PIDFingerprints: strings.Split(options.nlPIDFingerprints, ","), Client: client, TrustOfficialHTTPS: options.trustNLHTTPS}}
-	result, err := trustlists.Publish(ctx, trustlists.Options{PublicURL: options.publicURL,
-		Validity: time.Duration(options.validDays) * 24 * time.Hour, Renew: options.renew, Now: now}, source, signer, lotefiles.Publications{Directory: options.publishDir})
+	result, err := publishTrustLists(ctx, options, source, signer, now)
 	if err != nil {
 		return true, err
 	}
@@ -119,6 +118,18 @@ func runTrustListCommand(ctx context.Context, args []string, stdout, stderr io.W
 		_, _ = fmt.Fprintf(stdout, "%s: %d distinct anchors\n", role.Filename(), result.Counts[role])
 	}
 	return true, nil
+}
+
+// publishTrustLists publishes the four lists, and puts the root that signs
+// them next to them, so that parties can fetch from the trust host what
+// verifies the lists.
+func publishTrustLists(ctx context.Context, options trustListOptions, source trustlists.Source, signer lotesigning.Signer, now time.Time) (trustlists.Result, error) {
+	result, err := trustlists.Publish(ctx, trustlists.Options{PublicURL: options.publicURL,
+		Validity: time.Duration(options.validDays) * 24 * time.Hour, Renew: options.renew, Now: now}, source, signer, lotefiles.Publications{Directory: options.publishDir})
+	if err != nil {
+		return result, err
+	}
+	return result, projectRoot(options.rootDir, "lote", options.publishDir)
 }
 
 func provisionTrustListSigner(options trustListOptions, now time.Time) error {

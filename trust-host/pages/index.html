@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="nl"><head><meta charset="utf-8"><title>GBO-demo trust-host</title></head>
+<body>
+<h1>GBO-demo trust-host</h1>
+<p>Dit is een demonstratieomgeving. De lijsten en certificaten op deze host zijn testmateriaal: ze zijn niet bij de EU aangemeld en hebben geen rechtsgevolg.</p>
+<p lang="en">This is a demonstration environment. The lists and certificates on this host are test material: they are not notified to the EU and have no legal effect.</p>
+
+<h2>Lists of Trusted Entities (LoTE)</h2>
+<ul>
+<li><a href="/lote/PIDProviders.jwt">PIDProviders.jwt</a>: PID-aanbieders / PID providers</li>
+<li><a href="/lote/PubEAAProviders.jwt">PubEAAProviders.jwt</a>: PuB-EAA-aanbieders / PuB-EAA providers</li>
+<li><a href="/lote/WRPACProviders.jwt">WRPACProviders.jwt</a>: uitgevers van toegangscertificaten / access certificate providers</li>
+<li><a href="/lote/WRPRCProviders.jwt">WRPRCProviders.jwt</a>: uitgevers van registratiecertificaten / registration certificate providers</li>
+</ul>
+
+<h2>Root van de lijsten / List signing root</h2>
+<ul>
+<li><a href="/lote-ca-cert.pem">lote-ca-cert.pem</a>: controleer de SHA-256-fingerprint tegen de <a href="https://github.com/ICTU/GBO-demo/blob/main/trust-host/README.md">README van de trust-host</a> voordat u de root vertrouwt.</li>
+</ul>
+<p lang="en">Check the root's SHA-256 fingerprint against the <a href="https://github.com/ICTU/GBO-demo/blob/main/trust-host/README.md">trust host README</a> before you trust it.</p>
+
+<h2>Status en intrekking / Status and revocation</h2>
+<ul>
+<li><a href="/reader-root.crl">reader-root.crl</a>: ingetrokken toegangscertificaten / revoked access certificates</li>
+<li><a href="/wrprc/1">wrprc/1</a>: statuslijst van registratiecertificaten / registration certificate status list</li>
+</ul>
+
+<h2>Pagina's / Pages</h2>
+<ul>
+<li><a href="/registry">registry</a></li>
+<li><a href="/support">support</a></li>
+<li><a href="/certificate-policy">certificate-policy</a></li>
+</ul>
+</body></html>
