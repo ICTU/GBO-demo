@@ -675,11 +675,8 @@ func TestLoTETrustHost(t *testing.T) {
 		t.Skip("set GBO_TEST_NGINX=1 for the real nginx HTTP test (Docker required)")
 	}
 	f := newLoTEFixture(t)
-	if _, err := f.publish(nil, false, f.now); err != nil {
-		t.Fatal(err)
-	}
-	// As publish-trust-lists does after publishing.
-	if err := projectRoot(f.options.rootDir, "lote", f.options.publishDir); err != nil {
+	source := loteSourceFunc(func(context.Context) (trustlists.Snapshot, error) { return f.snapshot, nil })
+	if _, err := publishTrustLists(context.Background(), f.options, source, f.signer, f.now); err != nil {
 		t.Fatal(err)
 	}
 	config, err := filepath.Abs("../../trust-host/nginx.conf")
