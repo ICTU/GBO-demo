@@ -524,6 +524,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   rematerialize the issuer configuration (`make credential-issuer-up`, or
   the deployment's materializer) and deploy the new `eudi-credential-issuer`
   image. The test PID root and the trust lists stay the same.
+- **The idle demo uses less CPU**: container healthchecks probe every 2 s
+  while a container starts and every 30 s once it is healthy, instead of
+  every 5 s throughout (`HEALTHCHECK_INTERVAL`). The Go services no longer
+  trace `/health`, so healthchecks stop filling Jaeger with spans. The demo
+  now needs Docker Engine 25 or newer. The Postgres healthchecks probe
+  over TCP, so they no longer report ready while the init scripts run.
 - **`make` prints the demo URLs on `GBO_PUBLIC_HOST`** (default
   `localhost`), instead of localhost and the first `hostname -I` address,
   which does not exist on macOS.
@@ -1049,6 +1055,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   deletes them from a local `gbo-demo/pki-tools` container, before
   `compose down` removes that image. If certificates are left but the image
   is gone, it stops with a hint to rebuild the image with `make fsc-up`.
+- **Seed and delivery steps stop on errors instead of guessing.** The FSC
+  seed scripts treated an HTTP error from a Manager or Controller as "nothing
+  registered yet" and went on to create the service or contract again; they
+  now stop with the error. The loops that wait for a contract to be signed
+  still retry a failed poll until their timeout. `make demo-manager` stops when the OpenFTV Manager
+  does not become healthy instead of seeding anyway. `make manager-seed` no
+  longer writes a retired policy back without its source when it cannot read
+  the policy. The LDV outbox treats only a missing cursor file as "nothing
+  delivered yet"; an unreadable or empty cursor now stops delivery instead of
+  replaying the whole spool, and is logged as an error that says removing the
+  cursor file replays the outbox (the logbook drops the duplicates).
 - **The LDV logbook sorts and filters by time, not by text.** Times were
   stored as RFC 3339 with trimmed fraction digits, so `…05.5Z` sorted before
   `…05Z` and the `startTime`/`endTime` read filters wrongly included or

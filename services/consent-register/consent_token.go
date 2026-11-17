@@ -171,9 +171,16 @@ func (i *ConsentIssuer) JWKS() map[string]any {
 	}}}
 }
 
+// jwkCoordinates splits the uncompressed SEC 1 point (0x04 || X || Y) into
+// the base64url JWK coordinates. loadConsentSigningKey only admits P-256
+// keys, so Bytes cannot fail here.
 func jwkCoordinates(pub *ecdsa.PublicKey) (x, y string) {
-	return base64.RawURLEncoding.EncodeToString(pub.X.FillBytes(make([]byte, 32))),
-		base64.RawURLEncoding.EncodeToString(pub.Y.FillBytes(make([]byte, 32)))
+	point, err := pub.Bytes()
+	if err != nil || len(point) != 65 {
+		panic(fmt.Sprintf("consent signing key is not a valid P-256 key: %v", err))
+	}
+	return base64.RawURLEncoding.EncodeToString(point[1:33]),
+		base64.RawURLEncoding.EncodeToString(point[33:])
 }
 
 // jwkThumbprint is the RFC 7638 thumbprint of a P-256 public key: SHA-256
