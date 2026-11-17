@@ -401,8 +401,10 @@ func TestConformanceCredentialsAreNotLogged(t *testing.T) {
 	}
 }
 
-// OID4VCI-15.4.1-02: nbf and exp are rounded to the start of a day, as iat
-// is, for issuance at once and deferred issuance.
+// OID4VCI-15.4.1-02: the time claims are rounded, for issuance at once and
+// deferred issuance. iat is the start of the day. nbf and exp are the start
+// of a day for a credential with a revocation reference, the start of an
+// hour for one without, which is short-lived.
 func TestConformanceTimeClaimsAreRounded(t *testing.T) {
 	f := newFixture(t)
 	creds := map[string]string{}
@@ -416,20 +418,21 @@ func TestConformanceTimeClaimsAreRounded(t *testing.T) {
 		t.Fatalf("deferred = %d %v", status, body)
 	}
 	creds["eudi deferred"] = body["credentials"].([]any)[0].(map[string]any)["credential"].(string)
+	ww := f.wallet("eudi")
+	referenced, _ := issueFor(t, ww, ww.token(f.preAuthCodeRef("eudi", "case-rounded")))
 
 	for name, c := range creds {
 		claims := parseCredential(t, f, c)
-		for _, claim := range []string{"iat", "nbf", "exp"} {
-			v, ok := claims[claim].(float64)
-			if !ok || int64(v)%86400 != 0 {
-				t.Errorf("%s: %s = %v, want the start of a day", name, claim, claims[claim])
-			}
+		if v, ok := claims["iat"].(float64); !ok || int64(v)%86400 != 0 {
+			t.Errorf("%s: iat = %v, want the start of a day", name, claims["iat"])
 		}
-		// exp is nbf plus the configured 365 days.
-		if nbf, exp := claims["nbf"].(float64), claims["exp"].(float64); exp-nbf != 365*86400 {
-			t.Errorf("%s: exp - nbf = %v s, want 365 days", name, exp-nbf)
-		}
+		wantShortLived(t, name, claims)
 	}
+	claims := parseCredential(t, f, referenced)
+	if v, ok := claims["iat"].(float64); !ok || int64(v)%86400 != 0 {
+		t.Errorf("referenced: iat = %v, want the start of a day", claims["iat"])
+	}
+	wantLongLived(t, "referenced", claims)
 }
 
 // HAIP-5-14: every request object of disclosure-based issuance carries its

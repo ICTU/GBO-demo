@@ -89,6 +89,9 @@ func (h *handler) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	// Neither the code nor the BSN is logged: only how the login ended.
 	h.log.Info("login returned", "error", description(q.Get("error")), "page", ret.Page, "code_for_wallet", ret.Page == issuance.ReturnRedirect && q.Get("error") == "")
+	if ret.Reference != "" {
+		h.log.Info("revocation reference for a test-person login", "provider", target(r).Provider, "reference", ret.Reference)
+	}
 	h.walletReturn(w, r, ret)
 }
 

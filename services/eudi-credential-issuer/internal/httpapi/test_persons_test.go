@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -36,6 +37,7 @@ func personFixture(t *testing.T) (*fixture, *acfWallet, string, testpki.Cert) {
 		root = r
 		selector := testlogin.New(p.Name, f.idOf(p.Name, "eudi"), testpersons.File(file), memstore.New(), f.clock.Now)
 		p.Login = selector
+		p.ReferencePerLogin = true
 		cfg.Providers = append(cfg.Providers, p)
 		cfg.Configurations = append(cfg.Configurations, issuance.CredentialConfiguration{ID: testPIDConfig, Provider: p.Name, Scope: testPIDConfig, VCT: issuance.PIDType, ValidDays: 365, StatusList: "pid", Display: []issuance.Display{{Name: "GBO test-PID", Locale: "nl"}}, Claims: []issuance.Claim{{Path: []string{"bsn"}, Mandatory: true}, {Path: []string{"given_name"}}}})
 		cfg.LoginOffers = []issuance.DisclosureOffer{{Key: "test-pid", Provider: p.Name, ConfigurationIDs: []string{testPIDConfig}}}
@@ -229,4 +231,99 @@ func TestTestPersonRefusals(t *testing.T) {
 			t.Fatalf("pre-auth blocked: %d", resp.StatusCode)
 		}
 	})
+}
+
+// loginReferences are the revocation references the issuer logged for
+// test-person logins, in order.
+var loginReference = regexp.MustCompile(`reference=(testperson-[A-Za-z0-9_-]+)`)
+
+func loginReferences(f *fixture) []string {
+	var refs []string
+	for _, m := range loginReference.FindAllStringSubmatch(f.logs.String(), -1) {
+		refs = append(refs, m[1])
+	}
+	return refs
+}
+
+// personCredential logs in as bsn on w and returns the claims of the test
+// PID, checked against root.
+func personCredential(t *testing.T, f *fixture, w *acfWallet, root testpki.Cert, bsn string) map[string]any {
+	t.Helper()
+	status, tokens := w.tokenForCode(personCode(t, w, bsn), nil, nil)
+	if status != 200 {
+		t.Fatalf("token: %d %v", status, tokens)
+	}
+	var token oid4vci.TokenResponse
+	remarshal(t, tokens, &token)
+	status, cred := w.issueWith(t, token)
+	return personClaims(t, root, firstCredential(t, "test PID", status, cred))
+}
+
+func personClaims(t *testing.T, root testpki.Cert, raw string) map[string]any {
+	t.Helper()
+	parsed, err := sdjwtvc.Parse(raw, []x5c.Anchors{x5c.NewAnchors("pid", root.Cert)}, mdlIssuerEKU, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return parsed.Claims
+}
+
+// T9: each issuance through the test-person login gets its own random
+// revocation reference, which the issuer logs, so the test PID keeps its
+// configured validity and can be revoked one issuance at a time. The same
+// person twice gives two references.
+func TestTestPersonLoginHasAReference(t *testing.T) {
+	f, w, _, root := personFixture(t)
+	incomeDocs := f.sourceDocs
+	f.setSource(200, []map[string]any{{"format": "dc+sd-jwt", "attestation_type": issuance.PIDType, "attributes": map[string]any{"bsn": loginBSN}}})
+	first := personCredential(t, f, w, root, loginBSN)
+	again := f.acfWallet()
+	again.issuer = "test-pid"
+	second := personCredential(t, f, again, root, loginBSN)
+	wantLongLived(t, "first", first)
+	wantLongLived(t, "second", second)
+
+	refs := loginReferences(f)
+	if len(refs) != 2 || refs[0] == refs[1] {
+		t.Fatalf("logged references = %v, want two different ones", refs)
+	}
+	if status, body := f.revoke(map[string]any{"reference": refs[0]}); status != http.StatusOK || body["revoked"] != float64(1) {
+		t.Fatalf("revoke %s = %d %v, want 1 entry", refs[0], status, body)
+	}
+	// A source provider's login has no reference.
+	f.setSource(http.StatusOK, incomeDocs)
+	normal := f.acfWallet()
+	if status, body := normal.tokenForCode(normal.code(nil), nil, nil); status != 200 {
+		t.Fatalf("token: %d %v", status, body)
+	}
+	if got := loginReferences(f); len(got) != 2 {
+		t.Errorf("logged references after a source login = %v, want still two", got)
+	}
+}
+
+// T11: a deferred test PID through the test-person login gets a reference
+// too, and so its configured validity.
+func TestDeferredTestPersonLoginHasAReference(t *testing.T) {
+	f, w, _, root := personFixture(t)
+	f.setSource(http.StatusServiceUnavailable, nil)
+	status, tokens := w.tokenForCode(personCode(t, w, loginBSN), nil, nil)
+	if status != 200 {
+		t.Fatalf("token: %d %v", status, tokens)
+	}
+	var token oid4vci.TokenResponse
+	remarshal(t, tokens, &token)
+	status, cred := w.issueWith(t, token)
+	if status != http.StatusAccepted {
+		t.Fatalf("credential = %d %v, want deferred", status, cred)
+	}
+	f.setSource(200, []map[string]any{{"format": "dc+sd-jwt", "attestation_type": issuance.PIDType, "attributes": map[string]any{"bsn": loginBSN}}})
+	status, body := w.deferred(token.AccessToken, nil, map[string]any{"transaction_id": cred["transaction_id"]})
+	wantLongLived(t, "deferred test PID", personClaims(t, root, firstCredential(t, "deferred test PID", status, body)))
+	refs := loginReferences(f)
+	if len(refs) != 1 {
+		t.Fatalf("logged references = %v, want one", refs)
+	}
+	if status, body := f.revoke(map[string]any{"reference": refs[0]}); status != http.StatusOK || body["revoked"] != float64(1) {
+		t.Fatalf("revoke = %d %v, want 1 entry", status, body)
+	}
 }

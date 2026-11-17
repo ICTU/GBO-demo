@@ -53,14 +53,14 @@ type deferral struct {
 // answered: one document without claims per configuration, and the sealed
 // BSN apart, once per document, so each credential request can start its own
 // deferral. It returns the code.
-func (s *Service) createPendingSession(ctx context.Context, t Target, p Profile, o DisclosureOffer, binding *CodeBinding, bsn string) (string, error) {
+func (s *Service) createPendingSession(ctx context.Context, t Target, p Profile, o DisclosureOffer, binding *CodeBinding, bsn, reference string) (string, error) {
 	prov := s.providers[t.Provider]
 	now := s.now()
 	sealed, err := sealSubject(prov, bsn)
 	if err != nil {
 		return "", err
 	}
-	sess := Session{Provider: t.Provider, Profile: p.Name, ExpiresAt: now.Add(CodeLifetime), Binding: binding, Pending: &PendingSource{Offer: o.Key, Until: now.Add(s.cfg.DeferralTTL)}}
+	sess := Session{Provider: t.Provider, Profile: p.Name, Reference: reference, ExpiresAt: now.Add(CodeLifetime), Binding: binding, Pending: &PendingSource{Offer: o.Key, Until: now.Add(s.cfg.DeferralTTL)}}
 	for _, id := range o.ConfigurationIDs {
 		credentialID, err := randomToken()
 		if err != nil {
@@ -235,9 +235,9 @@ func (s *Service) Deferred(ctx context.Context, call DeferredCall) (CredentialRe
 	if err := checkSourceDocument(p, c, fetched[0]); err != nil {
 		return CredentialResult{}, err
 	}
-	notBefore := now.UTC().Truncate(24 * time.Hour)
+	notBefore, expires := validity(now, c.ValidDays, session.Reference)
 	doc := Document{CredentialID: d.CredentialID, ConfigurationID: d.ConfigurationID, Claims: fetched[0].Attributes,
-		NotBefore: notBefore, Expires: notBefore.AddDate(0, 0, c.ValidDays)}
+		NotBefore: notBefore, Expires: expires}
 	keys := make([]jose.JSONWebKey, len(d.Keys))
 	for i, raw := range d.Keys {
 		if err := keys[i].UnmarshalJSON(raw); err != nil {

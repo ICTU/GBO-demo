@@ -512,6 +512,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- **Credentials without a revocation reference are valid for 24 hours**
+  (#697): the own credential issuer cannot revoke what it issued through
+  login, disclosure-based issuance or an offer without `reference`, so those
+  credentials are short-lived (ARF VCR_01b). The test PID through the
+  test-person login gets a random reference per issuance and keeps its
+  validity.
 - **The test PID carries PID metadata and, for EUDI wallets, `iss`** (#682):
   the own credential issuer adds `issuing_authority` (`GBO Demo`) and
   `issuing_country` (`NL`), the mandatory PID metadata of CIR 2024/2977 as
