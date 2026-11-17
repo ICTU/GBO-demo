@@ -1061,6 +1061,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   demo default and only accepts `http://localhost:9001` (a demo shortcut), so
   a deployment must set `ALLOWED_RETURN_ORIGINS` when the container starts.
   The keyper-mock likewise needs `CONSENT_PORTAL_URL` outside the local demo.
+- **`make fsc-clean` works without sudo**: the certificates the containers
+  write as root or uid 1001 could not be deleted by the host user under
+  rootful Docker, nor under rootless Docker (where uid 1001 maps to a
+  subuid), so the target stopped with "Permission denied". It now always
+  deletes them from a local `gbo-demo/pki-tools` container, before
+  `compose down` removes that image. If certificates are left but the image
+  is gone, it stops with a hint to rebuild the image with `make fsc-up`.
 - **Seed and delivery steps stop on errors instead of guessing.** The FSC
   seed scripts treated an HTTP error from a Manager or Controller as "nothing
   registered yet" and went on to create the service or contract again; they
