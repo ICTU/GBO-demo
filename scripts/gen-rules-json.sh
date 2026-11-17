@@ -7,7 +7,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-OPA_IMAGE="${OPA_IMAGE:-openpolicyagent/opa:1.9.0-static}"
+# Same pinned image as OPA_IMAGE in the Makefile and CI.
+OPA_IMAGE="${OPA_IMAGE:-openpolicyagent/opa:1.9.0-static@sha256:60b6af32b58377718546ac7d4634eecbfe50ec36f7d3ca3f8ebf515f9826c2ac}"
 OUT=services/dev-portal-backend/rules.json
 
 # services is a second object: a rule that names none has no entry, and

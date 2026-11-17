@@ -40,29 +40,6 @@ export async function fetchTrace(traceId: string): Promise<JaegerTrace | null> {
   }
 }
 
-// Cross-trace lookup on tag equality. Jaeger accepts a `tags`
-// query-parameter with URL-encoded JSON. Indispensable for the EUDI-flow:
-// the traceparent context breaks at FSC-Inway (FSC without OTel), so the
-// adapter-trace and pdp-trace end up with different traceIDs. We correlate
-// them via gbo.fsc.transaction_id.
-export async function fetchTracesByTag(
-  service: string,
-  tagKey: string,
-  tagValue: string,
-  lookbackMinutes = 60,
-): Promise<JaegerTrace[]> {
-  try {
-    const tags = encodeURIComponent(JSON.stringify({ [tagKey]: tagValue }))
-    const url = `${BASE}/api/traces?service=${encodeURIComponent(service)}&tags=${tags}&limit=5&lookback=${lookbackMinutes}m`
-    const res = await fetch(url)
-    if (!res.ok) return []
-    const body = (await res.json()) as JaegerTraceResponse
-    return body.data ?? []
-  } catch {
-    return []
-  }
-}
-
 export function isSpanError(span: JaegerSpan): boolean {
   if (!span.tags) return false
   for (const t of span.tags) {

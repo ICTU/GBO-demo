@@ -69,18 +69,12 @@ function nodesForSpan(span: SpanInfo, mode: Tab): string[] {
   }
 
   if (mode === 'eudi-issuance') {
-    // The EUDI-flow uses real OpenFSC (edi-outway → bd-inway), not
-    // fsc-mock/pep-service. pdp-service exposes /evaluation (the AuthZen
-    // endpoint) which FSC-Inway calls directly. wallet / demo-issuer /
-    // issuance-server are Rust services without OTel (downstream fallback
-    // marks them 'no-otel').
+    // Only the adapter and the bron export spans here. wallet / demo-issuer /
+    // issuance-server are Rust services without OTel, and neither the OpenFSC
+    // containers nor the PDP export spans (the downstream fallback marks the
+    // first two groups 'no-otel').
     switch (svc) {
       case 'eudi-adapter': return ['eudi-adapter']
-      case 'edi-outway': return ['edi-outway']
-      case 'edi-manager': return ['edi-manager']
-      case 'bd-inway': return ['bd-inway']
-      case 'pdp-service': return ['pdp']
-      case 'opa': return ['opa']
       default: {
         // The last two hops are bron-dependent: an akte-van-overlijden run
         // ends at brp-sidecar/brp-graphql-server instead of the BD pair.
@@ -97,8 +91,6 @@ function nodesForSpan(span: SpanInfo, mode: Tab): string[] {
     // authorization server and the OpenFSC containers have no spans.
     switch (svc) {
       case 'asi-provider': return ['asi-provider']
-      case 'pdp-service': return ['pdp']
-      case 'opa': return ['opa']
       default: {
         const bronNode = bronNodeForService(svc)
         return bronNode ? [bronNode] : []
@@ -109,8 +101,6 @@ function nodesForSpan(span: SpanInfo, mode: Tab): string[] {
   // USE-flow (DvTP) — runs on real FSC. The sidecar puts the BSN in the
   // placeholder's place, read by the source's decryption component.
   switch (svc) {
-    case 'pdp-service': return ['pdp']
-    case 'opa': return ['opa']
     case 'consent-register': return ['consent-pip']
     case 'decryption-component': return ['decryption']
   }
@@ -222,10 +212,9 @@ export function nodeStatesFromSpans(
       }
     }
   }
-  // OPA-color now comes from the `pep.opa_authorize` child span (see
-  // nodesForSpan above): present → OPA was reached, status follows. If the
-  // span is absent (PEP early-failed before the OPA call) the OPA node
-  // stays grey, reflecting reality.
+  // No span maps to the PDP or OPA nodes (the PDP exports no spans), so
+  // they stay grey here. ArchStrip colors both from the recorded ADL
+  // decision once the animation is done.
   return result
 }
 
@@ -273,7 +262,7 @@ export function computeRevealOrder(
   // Insert PDP + OPA right after the PEP-equivalent so the reveal-order is
   // causal even if the spans race in the collector.
   //   - For every flow through FSC (use, EUDI, ASI): PEP-equivalent is
-  //     FSC-Inway (id 'bd-inway') which calls pdp-service via the AuthZen
+  //     FSC-Inway (id 'bd-inway') which calls openftv-pdp via the AuthZen
   //     plugin.
   if (viaFsc(mode)) {
     const pepEquivId = 'bd-inway'

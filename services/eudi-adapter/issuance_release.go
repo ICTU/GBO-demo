@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -190,9 +189,6 @@ func materializeIssuanceRelease(options issuanceReleaseOptions, release onboardi
 	if err := writeFileAtomically(filepath.Dir(options.outputPath), filepath.Base(options.outputPath), []byte(rendered), 0o600); err != nil {
 		return fmt.Errorf("write issuance config: %w", err)
 	}
-	if err := writeReleaseMarker(filepath.Dir(options.outputPath), release); err != nil {
-		return fmt.Errorf("write Source Release marker: %w", err)
-	}
 	return nil
 }
 
@@ -276,18 +272,4 @@ func certificateArtifactsForMountedSecret(root, certificateSet string) certifica
 		IssuerCACertReference: filepath.Join(ca, "issuer-ca-cert.pem"),
 		ReaderCACertReference: filepath.Join(ca, "reader-ca-cert.pem"),
 	}
-}
-
-// writeReleaseMarker records which Source Release a materialized
-// configuration came from.
-func writeReleaseMarker(dir string, release onboarding.SourceRelease) error {
-	marker, err := json.MarshalIndent(struct {
-		ReleaseID             string `json:"release_id"`
-		ReleaseDigest         string `json:"release_digest"`
-		MaterializationDigest string `json:"materialization_digest"`
-	}{release.ID, release.Digest, release.MaterializationDigest}, "", "  ")
-	if err != nil {
-		return err
-	}
-	return writeFileAtomically(dir, "source-release.json", append(marker, '\n'), 0o644)
 }
