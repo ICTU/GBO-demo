@@ -6,6 +6,7 @@ import ResultPanel, { type ResultData } from './components/ResultPanel'
 import ArchStrip from './components/ArchStrip'
 import EudiQrPanel from './components/EudiQrPanel'
 import TestPidPanel from './components/TestPidPanel'
+import RevocationPanel from './components/RevocationPanel'
 import FscTxlogPanel from './components/FscTxlogPanel'
 import LdvPanel from './components/LdvPanel'
 import { useScenarios } from './hooks/useScenarios'
@@ -639,6 +640,7 @@ export default function App() {
         </div>
 
         {tab === 'eudi-issuance' && <TestPidPanel />}
+        {tab === 'eudi-issuance' && <RevocationPanel />}
 
         <div className="panel">
           <div className="panel-h">

@@ -94,3 +94,74 @@ func TestAnIssuerThatDoesNotAnswerIsUnreachable(t *testing.T) {
 		}
 	}
 }
+
+// B1 and B2: the reference and the parameters go in the offer request.
+func TestTheOfferRequestCarriesReferenceAndParameters(t *testing.T) {
+	var gotBody map[string]any
+	issuer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"links":{"openid-credential-offer":"openid-credential-offer://?x"}}`)
+	}))
+	defer issuer.Close()
+	req := request
+	req.Parameters, req.Reference = map[string]string{"belastingjaar": "2024"}, "devportal-1"
+	if _, err := New(issuer.URL+"/offers", time.Second).Offer(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if gotBody["reference"] != "devportal-1" || !reflect.DeepEqual(gotBody["parameters"], map[string]any{"belastingjaar": "2024"}) {
+		t.Errorf("body = %v", gotBody)
+	}
+}
+
+// B5 and B7: a revocation by reference returns the count; one by entry
+// names provider, list and index.
+func TestRevocations(t *testing.T) {
+	var bodies []map[string]any
+	issuer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method+" "+r.URL.Path != "POST /revocations" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		var body map[string]any
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &body)
+		bodies = append(bodies, body)
+		if _, ok := body["reference"]; ok {
+			_, _ = io.WriteString(w, `{"revoked":4}`)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer issuer.Close()
+	c := NewRevocations(issuer.URL+"/revocations", time.Second)
+	n, err := c.RevokeReference(context.Background(), "devportal-1")
+	if err != nil || n != 4 {
+		t.Fatalf("revoked %d, %v; want 4", n, err)
+	}
+	if err := c.RevokeEntry(context.Background(), "test-pid", "pid", 7); err != nil {
+		t.Fatal(err)
+	}
+	want := []map[string]any{{"reference": "devportal-1"}, {"provider": "test-pid", "list": "pid", "index": float64(7)}}
+	if !reflect.DeepEqual(bodies, want) {
+		t.Errorf("bodies = %v, want %v", bodies, want)
+	}
+}
+
+// B7 and B8: a refusal carries the issuer's code; no answer is
+// ErrUnreachable.
+func TestARevocationRefusal(t *testing.T) {
+	issuer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, `{"error":"unknown_entry"}`)
+	}))
+	err := NewRevocations(issuer.URL, time.Second).RevokeEntry(context.Background(), "test-pid", "pid", 7)
+	var refusal *testpid.Refusal
+	if !errors.As(err, &refusal) || *refusal != (testpid.Refusal{Status: 404, Code: "unknown_entry"}) {
+		t.Errorf("err = %v, want a refusal unknown_entry", err)
+	}
+	issuer.Close()
+	if _, err := NewRevocations(issuer.URL, time.Second).RevokeReference(context.Background(), "x"); !errors.Is(err, testpid.ErrUnreachable) {
+		t.Errorf("err = %v, want ErrUnreachable", err)
+	}
+}
