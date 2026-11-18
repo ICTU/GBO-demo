@@ -599,7 +599,7 @@ fsc-up: fsc-local-env fsc-ca
 
 fsc-directory-certs: fsc-up
 	@if [ ! -f fsc-infra/directory-peer/pki/org/directory-peer.pem ]; then \
-		bash fsc-infra/pki/bootstrap-directory-peer.sh; \
+		bash fsc-infra/pki/bootstrap-peer.sh directory-peer directory-ui; \
 	fi
 
 fsc-directory-up: fsc-directory-certs
@@ -607,7 +607,7 @@ fsc-directory-up: fsc-directory-certs
 
 fsc-edi-certs: fsc-up
 	@if [ ! -f fsc-infra/orgs/edi-issuer/pki/org/edi-issuer.pem ]; then \
-		bash fsc-infra/pki/bootstrap-edi-issuer.sh; \
+		bash fsc-infra/pki/bootstrap-peer.sh edi-issuer; \
 	fi
 
 fsc-edi-up: fsc-directory-up fsc-edi-certs
@@ -615,42 +615,42 @@ fsc-edi-up: fsc-directory-up fsc-edi-certs
 
 fsc-bd-certs: fsc-up
 	@if [ ! -f fsc-infra/orgs/belastingdienst-mock/pki/org/bd-mock.pem ]; then \
-		bash fsc-infra/pki/bootstrap-bd-mock.sh; \
+		bash fsc-infra/pki/bootstrap-peer.sh bd-mock; \
 	fi
 
 fsc-brp-certs: fsc-up
 	@if [ ! -f fsc-infra/orgs/brp-mock/pki/org/brp-mock.pem ]; then \
-		bash fsc-infra/pki/bootstrap-brp-mock.sh; \
+		bash fsc-infra/pki/bootstrap-peer.sh brp-mock; \
 	fi
 
 fsc-hv-certs: fsc-up
 	@if [ ! -f fsc-infra/orgs/hypotheekverlener-mock/pki/org/hypotheekverlener.pem ]; then \
-		bash fsc-infra/pki/bootstrap-hypotheekverlener.sh; \
+		bash fsc-infra/pki/bootstrap-peer.sh hypotheekverlener; \
 	fi
 
 fsc-consent-register-certs: fsc-up
 	@if [ ! -f fsc-infra/orgs/consent-register/pki/org/consent-register.pem ]; then \
-		bash fsc-infra/pki/bootstrap-consent-register.sh; \
+		bash fsc-infra/pki/bootstrap-peer.sh consent-register; \
 	fi
 
 fsc-gbo-pdp-certs: fsc-up
 	@if [ ! -f fsc-infra/orgs/gbo-pdp/pki/org/gbo-pdp.pem ]; then \
-		bash fsc-infra/pki/bootstrap-gbo-pdp.sh; \
+		bash fsc-infra/pki/bootstrap-peer.sh gbo-pdp; \
 	fi
 
 fsc-ir-certs: fsc-up
 	@if [ ! -f fsc-infra/orgs/installatieregister/pki/org/installatieregister.pem ]; then \
-		bash fsc-infra/pki/bootstrap-installatieregister.sh; \
+		bash fsc-infra/pki/bootstrap-peer.sh installatieregister; \
 	fi
 
 fsc-int-certs: fsc-up
 	@if [ ! -f fsc-infra/orgs/integrator/pki/org/integrator.pem ]; then \
-		bash fsc-infra/pki/bootstrap-integrator.sh; \
+		bash fsc-infra/pki/bootstrap-peer.sh integrator; \
 	fi
 
 fsc-asip-certs: fsc-up
 	@if [ ! -f fsc-infra/orgs/asip/pki/org/asip.pem ]; then \
-		bash fsc-infra/pki/bootstrap-asip.sh; \
+		bash fsc-infra/pki/bootstrap-peer.sh asip; \
 	fi
 
 fsc-bd-up: fsc-directory-up fsc-bd-certs fsc-pdp-cert
@@ -687,30 +687,17 @@ fsc-test: fsc-up
 # rootful Docker, and under rootless Docker (where uid 1001 maps to a subuid),
 # the host user cannot delete them without sudo, so fsc-clean always
 # deletes them from a container of the pki-tools image that wrote them.
+# The certificate directories of every party in the party table: pki/org,
+# and pki/internal unless the party has no internal certificates.
+FSC_PEER_PKI_DIRS := $(shell awk -F'|' '{ \
+	for (i = 1; i <= NF; i++) gsub(/^[[:space:]]+|[[:space:]]+$$/, "", $$i); \
+	if ($$1 !~ /^[[:alnum:]]/) next; \
+	print $$2 "/pki/org"; if ($$6 != "-") print $$2 "/pki/internal" }' fsc-infra/peers.txt)
+
 FSC_CLEAN_FILES = \
 	fsc-infra/pki/ca/*.pem \
 	fsc-infra/pki/ca/*.csr \
-	fsc-infra/directory-peer/pki/org/*.pem \
-	fsc-infra/directory-peer/pki/internal/*.pem \
-	fsc-infra/directory-ui/pki/org/*.pem \
-	fsc-infra/orgs/edi-issuer/pki/org/*.pem \
-	fsc-infra/orgs/edi-issuer/pki/internal/*.pem \
-	fsc-infra/orgs/belastingdienst-mock/pki/org/*.pem \
-	fsc-infra/orgs/belastingdienst-mock/pki/internal/*.pem \
-	fsc-infra/orgs/brp-mock/pki/org/*.pem \
-	fsc-infra/orgs/brp-mock/pki/internal/*.pem \
-	fsc-infra/orgs/hypotheekverlener-mock/pki/org/*.pem \
-	fsc-infra/orgs/hypotheekverlener-mock/pki/internal/*.pem \
-	fsc-infra/orgs/consent-register/pki/org/*.pem \
-	fsc-infra/orgs/consent-register/pki/internal/*.pem \
-	fsc-infra/orgs/gbo-pdp/pki/org/*.pem \
-	fsc-infra/orgs/gbo-pdp/pki/internal/*.pem \
-	fsc-infra/orgs/installatieregister/pki/org/*.pem \
-	fsc-infra/orgs/installatieregister/pki/internal/*.pem \
-	fsc-infra/orgs/integrator/pki/org/*.pem \
-	fsc-infra/orgs/integrator/pki/internal/*.pem \
-	fsc-infra/orgs/asip/pki/org/*.pem \
-	fsc-infra/orgs/asip/pki/internal/*.pem \
+	$(patsubst %,fsc-infra/%/*.pem,$(FSC_PEER_PKI_DIRS)) \
 	services/openftv-pdp/certs/*.pem
 
 # The files go first: `down --rmi local` removes the compose-built pki-tools
