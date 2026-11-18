@@ -1,6 +1,7 @@
 #:package Aspire.Hosting.AppHost@17.0.0
 #:package Aspire.Hosting.Dotnet@17.0.0
 #:package Aspire.Hosting.JavaScript@17.0.0
+#:package Aspire.Hosting.Docker@17.0.0
 
 // GBO-demo AppHost. Run it from this directory with `aspire run`; see
 // README.md for the profiles and settings, and PLAN.md for the migration.
@@ -15,6 +16,10 @@ using System.Security.Cryptography;
 using Aspire.Hosting.JavaScript;
 
 var builder = DistributedApplication.CreateBuilder(args);
+
+// `aspire publish` writes a docker-compose.yaml for running the same model
+// without Aspire. It is generated output (aspire-output/), never edited.
+builder.AddDockerComposeEnvironment("compose");
 
 var repoRoot = Path.GetFullPath(Path.Combine(builder.AppHostDirectory, ".."));
 string Repo(string relative) => Path.Combine(repoRoot, relative);
@@ -36,7 +41,7 @@ var profiles = new HashSet<string>(
         .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
     StringComparer.OrdinalIgnoreCase);
 if (profiles.Contains("full")) { profiles.Add("dvtp"); profiles.Add("eudi"); }
-if (profiles.Contains("eudi") || profiles.Contains("credential-issuer") || profiles.Contains("wallet-registration")) { profiles.Add("onboarding"); }
+if (profiles.Contains("eudi") || profiles.Contains("credential-issuer") || profiles.Contains("wallet-registration") || profiles.Contains("asi")) { profiles.Add("onboarding"); }
 bool On(string profile) => profiles.Contains(profile);
 var fscOn = On("dvtp") || On("eudi") || On("onboarding") || On("integrator") || On("asi");
 
@@ -73,11 +78,18 @@ if (string.IsNullOrEmpty(builder.Configuration["AppHost:OtlpApiKey"]))
 {
     builder.Configuration["AppHost:OtlpApiKey"] = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
 }
-var dashboardOtlp = new Uri(builder.Configuration["ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL"]
-    ?? throw new InvalidOperationException("ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL is not set; start the AppHost with `aspire run`."));
-if (dashboardOtlp.Scheme != "http")
+// Under `aspire run` the dashboard listens on the host; in a published
+// compose file it is the compose environment's dashboard container.
+var dashboardOtlpGrpc = "compose-dashboard:18889";
+if (builder.ExecutionContext.IsRunMode)
 {
-    throw new InvalidOperationException("The collector forwards to the dashboard over plaintext gRPC; use an http launch profile.");
+    var dashboardOtlp = new Uri(builder.Configuration["ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL"]
+        ?? throw new InvalidOperationException("ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL is not set; start the AppHost with `aspire run`."));
+    if (dashboardOtlp.Scheme != "http")
+    {
+        throw new InvalidOperationException("The collector forwards to the dashboard over plaintext gRPC; use an http launch profile.");
+    }
+    dashboardOtlpGrpc = "host.docker.internal:" + dashboardOtlp.Port;
 }
 
 var jaeger = builder.AddContainer("jaeger", "jaegertracing/all-in-one", "1.54")
@@ -100,15 +112,15 @@ var otelCollector = builder.AddContainer("otel-collector", "otel/opentelemetry-c
     .WithHttpEndpoint(targetPort: 13133, name: "health")
     .WithHttpHealthCheck("/", endpointName: "health")
     .WithContainerRuntimeArgs("--add-host", "host.docker.internal:host-gateway")
-    .WithEnvironment("ASPIRE_DASHBOARD_OTLP_GRPC", "host.docker.internal:" + dashboardOtlp.Port)
+    .WithEnvironment("ASPIRE_DASHBOARD_OTLP_GRPC", dashboardOtlpGrpc)
     .WithEnvironment("ASPIRE_DASHBOARD_OTLP_API_KEY", builder.Configuration["AppHost:OtlpApiKey"]!)
     .WaitFor(jaeger);
 
 // A service built from its Dockerfile, exporting spans to the collector.
-IResourceBuilder<ContainerResource> GoService(string name, string dockerfile, int port, string? context = null)
+IResourceBuilder<ContainerResource> GoService(string name, string dockerfile, int port, string? context = null, int? hostPort = null)
 {
     return builder.AddDockerfile(name, context ?? "..", dockerfile)
-        .WithHttpEndpoint(targetPort: port, name: "http")
+        .WithHttpEndpoint(port: hostPort, targetPort: port, name: "http")
         .WithHttpHealthCheck("/health")
         .WithEnvironment("OTEL_SERVICE_NAME", name)
         .WithEnvironment("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317")
@@ -762,6 +774,528 @@ if (On("dvtp"))
     }
 }
 
+// ── EUDI: source registry, onboarding, issuance (onboarding, eudi) ──────
+// Host-only material lives outside the repository's tracked files, as with
+// the Makefile: the pre-provisioned development CAs and every leaf signed
+// from them stay in .local/secrets and are signed on the host with go run,
+// so the CA keys never enter a container.
+var secretsDir = builder.Configuration["Gbo:SecretsDir"] ?? Repo(".local/secrets");
+var publicCertificatesDir = builder.Configuration["Gbo:PublicCertificatesDir"] ?? Repo(".local/public-certificates");
+var developmentCaDir = Path.Combine(secretsDir, "development-ca");
+var trustPublishDir = builder.Configuration["Gbo:TrustPublishDir"] ?? Repo(".local/public-trust");
+var eudiUlBase = builder.Configuration["Gbo:EudiUlBase"] ?? "https://app.preproductie.wallet.edi.bzk.nl/deeplink/disclosure_based_issuance";
+
+void RequireDevelopmentCas()
+{
+    foreach (var file in new[] { "issuer-ca-key.pem", "issuer-ca-cert.pem", "reader-ca-key.pem", "reader-ca-cert.pem" })
+    {
+        if (!File.Exists(Path.Combine(developmentCaDir, file)))
+        {
+            throw new InvalidOperationException(
+                $"The {string.Join(",", profiles)} profile needs the pre-provisioned EUDI CA file {Path.Combine(developmentCaDir, file)}. " +
+                "Put the CAs the test wallet trusts there, or point Gbo:SecretsDir at their directory (see README).");
+        }
+    }
+}
+
+// A host step: `go run .` in a Go module, skipped when its output exists.
+IResourceBuilder<ExecutableResource> HostGoStep(string name, string module, string? skipWhenExists, params object[] args)
+{
+    if (skipWhenExists is not null && File.Exists(skipWhenExists))
+    {
+        return builder.AddExecutable(name, "true", repoRoot);
+    }
+    return builder.AddExecutable(name, "go", Repo($"services/{module}"), ["run", ".", .. args]);
+}
+
+IResourceBuilder<ContainerResource>? postgresEudi = null;
+IResourceBuilder<ContainerResource>? sourceRegistryMigrations = null;
+IResourceBuilder<ContainerResource>? sourceReconciler = null;
+IResourceBuilder<ContainerResource>? eudiAdapter = null;
+IResourceBuilder<ParameterResource>? sourceRegistryReaderPassword = null;
+IResourceBuilder<ParameterResource>? eudiPostgresPassword = null;
+IResourceBuilder<ParameterResource>? eudiPublicUrl = null;
+IResourceBuilder<ParameterResource>? eudiBriUrl = null;
+ReferenceExpression? SourceRegistryReaderUrl = null;
+
+if (On("onboarding"))
+{
+    RequireDevelopmentCas();
+    eudiPostgresPassword = Generated("eudi-postgres-password");
+    var sourceRegistryPassword = Generated("source-registry-password");
+    sourceRegistryReaderPassword = Generated("source-registry-reader-password");
+    // Public HTTPS URLs: where the wallet reaches the issuance server, and
+    // where the issuance server reaches the EUDI adapter. The issuance
+    // server's host is the OpenID4VP client_id and a DNS SAN of every reader
+    // certificate.
+    eudiPublicUrl = builder.AddParameter("eudi-public-url")
+        .WithDescription("Public HTTPS URL where the wallet reaches the issuance server, e.g. https://eudi-is.example.org/");
+    eudiBriUrl = builder.AddParameter("eudi-bri-url")
+        .WithDescription("Public HTTPS URL where the issuance server reaches the EUDI adapter, e.g. https://eudi-bri.example.org/");
+
+    postgresEudi = builder.AddContainer("postgres-eudi", "postgres", "16-alpine")
+        .WithEndpoint(targetPort: 5432, name: "tcp", scheme: "tcp")
+        .WithEnvironment("POSTGRES_USER", "wallet")
+        .WithEnvironment("POSTGRES_DB", "issuance_server")
+        .WithEnvironment("POSTGRES_PASSWORD", eudiPostgresPassword)
+        .WithVolume("gbo-postgres-eudi-data", "/var/lib/postgresql/data");
+
+    var sourceRegistryBootstrap = builder.AddContainer("source-registry-bootstrap", "postgres", "16-alpine")
+        .WithEnvironment("PGHOST", "postgres-eudi")
+        .WithEnvironment("PGPORT", "5432")
+        .WithEnvironment("PGUSER", "wallet")
+        .WithEnvironment("PGPASSWORD", eudiPostgresPassword)
+        .WithEnvironment("SOURCE_REGISTRY_PASSWORD", sourceRegistryPassword)
+        .WithEnvironment("SOURCE_REGISTRY_READER_PASSWORD", sourceRegistryReaderPassword)
+        .WithBindMount(Repo("scripts/bootstrap-source-registry.sh"), "/scripts/bootstrap-source-registry.sh", isReadOnly: true)
+        .WithEntrypoint("sh")
+        .WithArgs("-c", "for i in $(seq 1 60); do pg_isready -q && break; sleep 1; done; /scripts/bootstrap-source-registry.sh")
+        .WaitFor(postgresEudi);
+
+    SourceRegistryReaderUrl = ReferenceExpression.Create($"postgres://source_registry_reader:{sourceRegistryReaderPassword}@postgres-eudi:5432/source_registry");
+
+    // The eudi-adapter image doubles as the CLI for migrations,
+    // materialisation, reconciliation and exports.
+    IResourceBuilder<ContainerResource> EudiAdapterCli(string name, params object[] args) =>
+        builder.AddDockerfile(name, "..", "services/eudi-adapter/Dockerfile")
+            .WithArgs(args)
+            .WithEnvironment("SOURCE_REGISTRY_SCHEMA", "source_registry");
+
+    sourceRegistryMigrations = EudiAdapterCli("source-registry-migrations", "./eudi-adapter", "migrate-source-registry")
+        .WithEnvironment("SOURCE_REGISTRY_DATABASE_URL", ReferenceExpression.Create($"postgres://source_registry:{sourceRegistryPassword}@postgres-eudi:5432/source_registry"))
+        .WithEnvironment("SOURCE_REGISTRY_READER_ROLE", "source_registry_reader")
+        .WaitForCompletion(sourceRegistryBootstrap);
+
+    // Development leaves for the three demo sources, issued on the host by
+    // the pre-provisioned development CAs (make onboard-demo-sources).
+    var provisionSteps = new List<IResourceBuilder<ExecutableResource>>();
+    foreach (var (id, oin, sourceName, logo) in new[]
+    {
+        ("belastingdienst", "99999999900000000200", "Belastingdienst", "assets/issuer-logos/belastingdienst.svg"),
+        ("rvig", "99999999900000000200", "RvIG", "assets/issuer-logos/rvig.svg"),
+        ("demo-unsecured", "99999999900000000900", "Demo unsecured source", "assets/issuer-logos/belastingdienst.svg"),
+    })
+    {
+        provisionSteps.Add(HostGoStep($"provision-{id}-certificates", "eudi-adapter", null,
+            "provision-development-certificates",
+            $"--source-id={id}", $"--source-oin={oin}", $"--source-name={sourceName}",
+            "--source-description=", $"--source-logo={Repo(logo)}",
+            ReferenceExpression.Create($"--reader-public-url={eudiPublicUrl}"),
+            $"--secrets-dir={secretsDir}", $"--public-certificates-dir={publicCertificatesDir}"));
+    }
+
+    // Publishes, transports through FSC, verifies and activates the source
+    // metadata (make reconcile-sources).
+    sourceReconciler = EudiAdapterCli("source-reconciler",
+            "./eudi-adapter", "reconcile-sources", "--once",
+            "--manager-url=https://edi-manager:9443",
+            "--manager-ca=/fsc-certs/intermediate_ca.pem",
+            "--manager-cert=/fsc-certs/internal-cert.pem",
+            "--manager-key=/fsc-certs/internal-cert-key.pem",
+            "--consumer-peer-id=99999999900000000100",
+            "--outway-url=http://edi-outway:8080",
+            "--schema=/config/schemas/gbo-source-metadata-v1.schema.json",
+            ReferenceExpression.Create($"--type-metadata-base-url={eudiBriUrl}"),
+            "--storage-backend=postgres",
+            "--certificate-store=public-filesystem",
+            "--database-schema=source_registry",
+            "--secrets-dir=/public-certificates",
+            ReferenceExpression.Create($"--reader-public-url={eudiPublicUrl}"),
+            "--sources-dir=/config/sources",
+            "--metadata-dir=/config/source-metadata",
+            "--auto-promote")
+        .WithEnvironment("EUDI_PUBLIC_URL", eudiPublicUrl)
+        .WithEnvironment("SOURCE_REGISTRY_DATABASE_URL", ReferenceExpression.Create($"postgres://source_registry:{sourceRegistryPassword}@postgres-eudi:5432/source_registry"))
+        .WithBindMount(Repo("schemas"), "/config/schemas", isReadOnly: true)
+        .WithBindMount(Repo("sources"), "/config/sources", isReadOnly: true)
+        .WithBindMount(Repo("source-metadata"), "/config/source-metadata", isReadOnly: true)
+        .WithBindMount(Repo("fsc-infra/orgs/edi-issuer/pki/internal"), "/fsc-certs", isReadOnly: true)
+        .WithBindMount(publicCertificatesDir, "/public-certificates", isReadOnly: true)
+        .WaitForCompletion(sourceRegistryMigrations)
+        .WaitFor(graphqlServer)
+        .WaitFor(brpGraphqlServer);
+    AfterFsc(sourceReconciler);
+    foreach (var step in provisionSteps)
+    {
+        sourceReconciler.WaitForCompletion(step);
+    }
+
+    if (On("eudi"))
+    {
+        // Reader, issuer, status-list and internal callback TLS certificates
+        // of the reference QTSP.
+        var qtspIssuanceCertificates = HostGoStep("provision-qtsp-issuance-certificates", "eudi-adapter", null,
+            "provision-qtsp-issuance-certificates",
+            "--qtsp-oin=99999999900000001300", "--qtsp-name=GBO demo test QTSP",
+            ReferenceExpression.Create($"--reader-public-url={eudiPublicUrl}"),
+            $"--secrets-dir={secretsDir}", "--tls-host=qtsp-reference");
+
+        // No published image: built from the pinned nl-wallet submodule.
+        var issuanceServerImage = builder.AddExecutable("eudi-issuance-server-image", "bash", repoRoot,
+            "aspire/scripts/nlwallet-image.sh", "gbo/eudi-issuance-server:dev", "services/eudi-issuance-server/Dockerfile");
+
+        var eudiMigrations = builder.AddContainer("eudi-migrations", "gbo/eudi-issuance-server", "dev")
+            .WithImagePullPolicy(ImagePullPolicy.Never)
+            .WithEntrypoint("/issuance_server_migrations")
+            .WithArgs("up")
+            .WithEnvironment("DATABASE_URL", ReferenceExpression.Create($"postgres://wallet:{eudiPostgresPassword}@postgres-eudi:5432/issuance_server"))
+            .WaitForCompletion(issuanceServerImage)
+            .WaitForCompletion(sourceRegistryBootstrap);
+
+        // Renders the issuance server's configuration from the active Source
+        // Release, into a host directory the server then mounts.
+        var issuanceRuntime = Repo(".aspire-data/eudi-issuance-runtime");
+        Directory.CreateDirectory(issuanceRuntime);
+        var eudiIssuanceMaterialize = EudiAdapterCli("eudi-issuance-materialize",
+                "./eudi-adapter", "materialize-issuance-release",
+                "--database-schema=source_registry",
+                "--secrets-dir=/source-certificates",
+                "--template=/app/issuance_server.toml.example",
+                ReferenceExpression.Create($"--adapter-base-url={eudiBriUrl}"),
+                "--qtsp-attestation-url=https://qtsp-reference:4443/attestations",
+                "--qtsp-type-metadata=/app/qtsp_attestation_metadata.json",
+                "--output=/runtime/issuance_server.toml")
+            .WithEnvironment("SOURCE_REGISTRY_DATABASE_URL", SourceRegistryReaderUrl)
+            .WithEnvironment("EUDI_PUBLIC_URL", eudiPublicUrl)
+            .WithBindMount(secretsDir, "/source-certificates", isReadOnly: true)
+            .WithBindMount(issuanceRuntime, "/runtime")
+            .WaitForCompletion(sourceReconciler)
+            .WaitForCompletion(qtspIssuanceCertificates);
+
+        builder.AddContainer("eudi-issuance-server", "gbo/eudi-issuance-server", "dev")
+            .WithImagePullPolicy(ImagePullPolicy.Never)
+            .WithContainerRuntimeArgs("--user", "0")
+            .WithHttpEndpoint(port: 18001, targetPort: 18001, name: "http")
+            .WithEnvironment("ISSUANCE_SERVER__STORAGE__URL", ReferenceExpression.Create($"postgres://wallet:{eudiPostgresPassword}@postgres-eudi:5432/issuance_server"))
+            .WithEnvironment("ISSUANCE_SERVER__UNIVERSAL_LINK_BASE_URL", "walletdebuginteraction://wallet.edi.rijksoverheid.nl/")
+            .WithEnvironment("ISSUANCE_SERVER__WALLET_SERVER__IP", "0.0.0.0")
+            .WithEnvironment("ISSUANCE_SERVER__WALLET_SERVER__PORT", "18001")
+            .WithEnvironment("ISSUANCE_SERVER__INTERNAL_SERVER__IP", "0.0.0.0")
+            .WithEnvironment("ISSUANCE_SERVER__INTERNAL_SERVER__PORT", "18002")
+            .WithEnvironment("ISSUANCE_SERVER__PUBLIC_URL", eudiPublicUrl)
+            .WithBindMount(Path.Combine(issuanceRuntime, "issuance_server.toml"), "/issuance_server.toml", isReadOnly: true)
+            .WithBindMount(issuanceRuntime, "/config", isReadOnly: true)
+            .WithVolume("gbo-eudi-tsl-publish", "/tsl-publish")
+            .WaitForCompletion(eudiMigrations)
+            .WaitForCompletion(eudiIssuanceMaterialize);
+
+        eudiAdapter = GoService("eudi-adapter", "services/eudi-adapter/Dockerfile", 4009, hostPort: 9409)
+            .WithEnvironment("FSC_OUTWAY_URL", "http://edi-outway:8080")
+            .WithEnvironment("SOURCE_REGISTRY_DATABASE_URL", SourceRegistryReaderUrl)
+            .WithEnvironment("SOURCE_REGISTRY_SCHEMA", "source_registry")
+            .WithEnvironment("SOURCE_REGISTRY_REFRESH_INTERVAL", "2s")
+            .WithEnvironment("LDV_LOGBOOK_URL", "http://logboek-eudi-adapter:4016")
+            .WithEnvironment("LDV_WRITE_TOKEN", ldvWriteToken)
+            .WithEnvironment("LDV_SUBJECT_PSEUDONYM_KEY", pseudonymKeyGbo)
+            .WithEnvironment("LDV_NEXT_LOGBOOK_IDS", "belastingdienst=https://logboek.belastingdienst.nl/data-processing-operations,rvig=https://logboek.rvig.nl/data-processing-operations")
+            .WithVolume("gbo-ldv-outbox-eudi-adapter", "/data")
+            .WaitForCompletion(sourceReconciler)
+            .WaitFor(logboeken["logboek-eudi-adapter"]);
+    }
+
+    if (On("wallet-registration"))
+    {
+        // Exports one source from the Source Registry for host-side signing;
+        // run by hand (see README): it is started explicitly.
+        EudiAdapterCli("wallet-registration-source", "./eudi-adapter", "export-wallet-registration-source")
+            .WithEnvironment("SOURCE_REGISTRY_DATABASE_URL", SourceRegistryReaderUrl)
+            .WaitForCompletion(sourceRegistryMigrations)
+            .WithExplicitStart();
+    }
+
+    if (On("credential-issuer"))
+    {
+        // Own credential issuer beside the issuance server (make credential-issuer-up).
+        var issuerPublicUrl = builder.AddParameter("issuer-public-url")
+            .WithDescription("Public URL of the own credential issuer, e.g. https://eudi-issuer.example.org");
+        var trustPublicUrl = builder.AddParameter("eudi-trust-public-url")
+            .WithDescription("Public URL of the trust host, e.g. https://eudi-trust.example.org");
+        var credentialIssuerDbPassword = Generated("credential-issuer-db-password");
+        if (!File.Exists(Path.Combine(trustPublishDir, "reader-root.crl")))
+        {
+            throw new InvalidOperationException("The credential-issuer profile needs the wallet registration first: run the provision-wallet-registration step (README).");
+        }
+
+        var credentialIssuerDbBootstrap = builder.AddContainer("credential-issuer-db-bootstrap", "postgres", "16-alpine")
+            .WithEnvironment("PGHOST", "postgres-eudi")
+            .WithEnvironment("PGPORT", "5432")
+            .WithEnvironment("PGUSER", "wallet")
+            .WithEnvironment("PGPASSWORD", eudiPostgresPassword)
+            .WithEnvironment("CREDENTIAL_ISSUER_DB_PASSWORD", credentialIssuerDbPassword)
+            .WithBindMount(Repo("scripts/bootstrap-credential-issuer.sh"), "/scripts/bootstrap-credential-issuer.sh", isReadOnly: true)
+            .WithEntrypoint("sh")
+            .WithArgs("-c", "for i in $(seq 1 60); do pg_isready -q && break; sleep 1; done; /scripts/bootstrap-credential-issuer.sh")
+            .WaitFor(postgresEudi);
+        var issuerDbUrl = ReferenceExpression.Create($"postgres://credential_issuer:{credentialIssuerDbPassword}@postgres-eudi:5432/credential_issuer");
+        var credentialIssuerMigrations = builder.AddDockerfile("credential-issuer-migrations", "..", "services/eudi-credential-issuer/Dockerfile")
+            .WithArgs("./eudi-credential-issuer", "migrate")
+            .WithEnvironment("ISSUER_DATABASE_URL", issuerDbUrl)
+            .WaitForCompletion(credentialIssuerDbBootstrap);
+        var credentialIssuerMaterialize = EudiAdapterCli("credential-issuer-materialize",
+                "./eudi-adapter", "materialize-credential-issuer",
+                "--database-schema=source_registry", "--secrets-dir=/source-certificates",
+                "--wallet-roots-dir=/wallet-roots", "--output-dir=/runtime-issuer", "--owner=1000")
+            .WithEnvironment("SOURCE_REGISTRY_DATABASE_URL", SourceRegistryReaderUrl)
+            .WithEnvironment("EUDI_BRI_URL", eudiBriUrl)
+            .WithEnvironment("ISSUER_EUDI_KEY_STORAGE", builder.Configuration["Gbo:IssuerEudiKeyStorage"] ?? "")
+            .WithEnvironment("ISSUER_EUDI_USER_AUTHENTICATION", builder.Configuration["Gbo:IssuerEudiUserAuthentication"] ?? "")
+            .WithEnvironment("ISSUER_EUDI_PID_TRUSTED_AUTHORITIES", builder.Configuration["Gbo:IssuerEudiPidTrustedAuthorities"] ?? "")
+            .WithEnvironment("TEST_PID_SOURCE_URL", "http://test-pid-source:8080/attestations")
+            .WithEnvironment("EUDI_TRUST_PUBLIC_URL", trustPublicUrl)
+            .WithEnvironment("GBO_PID_TRUST_LIST_URL", builder.Configuration["Gbo:PidTrustListUrl"] ?? "")
+            .WithEnvironment("GBO_LOTE_SIGNER_ROOT_FILE", "/lote-root/lote-ca-cert.pem")
+            .WithBindMount(secretsDir, "/source-certificates", isReadOnly: true)
+            .WithBindMount(builder.Configuration["Gbo:WalletRootsDir"] ?? Repo(".local/wallet-roots"), "/wallet-roots", isReadOnly: true)
+            .WithBindMount(Path.Combine(publicCertificatesDir, "development-ca"), "/lote-root", isReadOnly: true)
+            .WithBindMount(builder.Configuration["Gbo:PidTrustAnchorsFile"] ?? Repo("services/asi-wallet-verifier/pid-issuer-anchors.txt"), "/pid-trust-anchors.txt", isReadOnly: true)
+            .WithVolume("gbo-credential-issuer-runtime", "/runtime-issuer")
+            .WaitForCompletion(sourceRegistryMigrations);
+
+        GoService("test-pid-source", "Dockerfile", 8080, context: "../services/test-pid-source")
+            .WithHttpHealthCheck("/healthz")
+            .WithEnvironment("PERSONS_FILE", "/persons/personen.json")
+            .WithBindMount(Repo("services/brp-graphql-server/mockdata/personen.json"), "/persons/personen.json", isReadOnly: true);
+
+        builder.AddDockerfile("eudi-credential-issuer", "..", "services/eudi-credential-issuer/Dockerfile")
+            .WithHttpEndpoint(port: 9429, targetPort: 8080, name: "http")
+            .WithHttpEndpoint(port: 9431, targetPort: 8081, name: "internal")
+            .WithHttpHealthCheck("/healthz")
+            .WithEnvironment("ISSUER_PUBLIC_URL", issuerPublicUrl)
+            .WithEnvironment("ISSUER_CONFIG_FILE", "/config/issuer.json")
+            .WithEnvironment("ISSUER_DATABASE_URL", issuerDbUrl)
+            .WithEnvironment("ISSUER_LISTEN_ADDR", ":8080")
+            .WithEnvironment("ISSUER_INTERNAL_ADDR", ":8081")
+            .WithEnvironment("ISSUER_LOGIN_SERVER", PublicUrl(9425))
+            .WithEnvironment("ISSUER_LOGIN_URL_MAP", $"{PublicUrl(9425)}=http://asi-authorization-server:4021")
+            .WithVolume("gbo-credential-issuer-runtime", "/config", isReadOnly: true)
+            .WithBindMount(Repo("services/brp-graphql-server/mockdata"), "/test-pid-persons", isReadOnly: true)
+            .WaitForCompletion(credentialIssuerMigrations)
+            .WaitForCompletion(credentialIssuerMaterialize);
+
+        builder.AddContainer("trust-host", "nginx", "1.27-alpine")
+            .WithHttpEndpoint(port: 9430, targetPort: 8080, name: "http")
+            .WithHttpHealthCheck("/healthz")
+            .WithBindMount(Repo("trust-host/nginx.conf"), "/etc/nginx/conf.d/default.conf", isReadOnly: true)
+            .WithBindMount(Repo("trust-host/pages"), "/usr/share/trust-pages", isReadOnly: true)
+            .WithBindMount(trustPublishDir, "/usr/share/trust", isReadOnly: true);
+    }
+}
+
+// ── ASI route: ASIP, authorization server, discovery, QTSP (asi) ────────
+if (On("asi"))
+{
+    var asiAuthorizationServerUrl = builder.Configuration["Gbo:AsiAuthorizationServerPublicUrl"] ?? PublicUrl(9425);
+    var asiProviderUrl = builder.Configuration["Gbo:AsiProviderPublicUrl"] ?? PublicUrl(9424);
+    var qtspUrl = builder.Configuration["Gbo:QtspPublicUrl"] ?? PublicUrl(9427);
+    var issuerUrl = builder.Configuration["Gbo:IssuerPublicUrl"] ?? "http://localhost:9429";
+
+    // The development seal certificate of the ASIP mock and the test QTSP
+    // certificate, issued on the host when missing (make demo-asi).
+    var sealCertificate = HostGoStep("provision-asip-seal-certificate", "asi-provider",
+        Path.Combine(secretsDir, "asi-provider/seal-cert.pem"),
+        "provision-seal-certificate",
+        $"--ca-key={Path.Combine(developmentCaDir, "issuer-ca-key.pem")}",
+        $"--ca-cert={Path.Combine(developmentCaDir, "issuer-ca-cert.pem")}",
+        $"--out-dir={Path.Combine(secretsDir, "asi-provider")}");
+    var qtspCertificate = HostGoStep("provision-asip-qtsp-certificate", "asi-authorization-server",
+        Path.Combine(secretsDir, "asi-qtsp/qtsp-cert.pem"),
+        "provision-qtsp-certificate",
+        $"--ca-key={Path.Combine(developmentCaDir, "reader-ca-key.pem")}",
+        $"--ca-cert={Path.Combine(developmentCaDir, "reader-ca-cert.pem")}",
+        $"--out-dir={Path.Combine(secretsDir, "asi-qtsp")}");
+    foreach (var dir in new[] { "asi-authorization-server-wallet", "asi-authorization-server-eudi-wallet", "qtsp-reference" })
+    {
+        Directory.CreateDirectory(Path.Combine(secretsDir, dir));
+    }
+
+    var asiAuthorizationServer = builder.AddDockerfile("asi-authorization-server", "../services/asi-authorization-server")
+        .WithHttpEndpoint(port: 9425, targetPort: 4021, name: "http")
+        .WithHttpHealthCheck("/healthz")
+        .WithEnvironment("AZSP_ISSUER", asiAuthorizationServerUrl)
+        .WithEnvironment("AZSP_RESOURCES", $"{asiProviderUrl}/brp/authsrc-api=Basisregistratie Personen (mock)")
+        .WithEnvironment("AZSP_ISSUANCE_RESOURCES", builder.Configuration["Gbo:AsiIssuanceResources"]
+            ?? $"{issuerUrl}/belastingdienst/eudi=NTRNL-99990200=Belastingdienst,{issuerUrl}/rvig/eudi=NTRNL-99990300=RvIG,{issuerUrl}/demo-unsecured/eudi=NTRNL-99990900=Demo unsecured source")
+        .WithEnvironment("AZSP_TRUST_ANCHORS_FILE", "/trust/reader-ca-cert.pem")
+        .WithEnvironment("AZSP_ENTITLEMENT_RECHECK_INTERVAL", "1h")
+        .WithEnvironment("AZSP_REQUIRE_AUTHORIZATION_DETAILS", builder.Configuration["Gbo:AsiRequireAuthorizationDetails"] ?? "false")
+        .WithEnvironment("AZSP_WALLET_VERIFIER_URL", "http://asi-wallet-verifier:8002")
+        .WithEnvironment("AZSP_WALLET_VERIFIER_STATUS_URL", "http://asi-wallet-verifier:8001")
+        .WithEnvironment("AZSP_WALLET_VERIFIER_API_KEY_FILE", "/wallet-verifier/api-key")
+        .WithEnvironment("AZSP_EUDI_WALLET_VERIFIER_URL", "http://eudi-wallet-verifier:8002")
+        .WithEnvironment("AZSP_EUDI_WALLET_VERIFIER_STATUS_URL", "http://eudi-wallet-verifier:8001")
+        .WithEnvironment("AZSP_EUDI_WALLET_VERIFIER_API_KEY_FILE", "/eudi-wallet-verifier/api-key")
+        .WithBindMount(Path.Combine(developmentCaDir, "reader-ca-cert.pem"), "/trust/reader-ca-cert.pem", isReadOnly: true)
+        .WithBindMount(Path.Combine(secretsDir, "asi-authorization-server-wallet"), "/wallet-verifier", isReadOnly: true)
+        .WithBindMount(Path.Combine(secretsDir, "asi-authorization-server-eudi-wallet"), "/eudi-wallet-verifier", isReadOnly: true);
+
+    var asiProvider = GoService("asi-provider", "services/asi-provider/Dockerfile", 4020, hostPort: 9424)
+        .WithHttpHealthCheck("/healthz")
+        .WithEnvironment("ASIP_PUBLIC_URL", asiProviderUrl)
+        .WithEnvironment("ASIP_AUTHORIZATION_SERVER", asiAuthorizationServerUrl)
+        .WithEnvironment("ASIP_AUTHORIZATION_SERVER_INTERNAL_URL", "http://asi-authorization-server:4021")
+        .WithEnvironment("ASIP_OUTWAY_URL", "http://asip-outway:8080")
+        .WithEnvironment("ASIP_SOURCE_REGISTRY_DATABASE_URL", SourceRegistryReaderUrl!)
+        .WithEnvironment("ASIP_SEAL_KEY_FILE", "/seal/seal-key.pem")
+        .WithEnvironment("ASIP_SEAL_CERT_FILE", "/seal/seal-cert.pem")
+        .WithBindMount(Path.Combine(secretsDir, "asi-provider"), "/seal", isReadOnly: true)
+        .WaitForCompletion(sealCertificate)
+        .WaitForCompletion(sourceRegistryMigrations!)
+        .WaitFor(asiAuthorizationServer);
+    AfterFsc(asiProvider);
+
+    var asiDiscovery = builder.AddDockerfile("asi-discovery-stub", "../services/asi-discovery-stub")
+        .WithHttpEndpoint(port: 9426, targetPort: 4022, name: "http")
+        .WithHttpHealthCheck("/healthz")
+        .WithEnvironment("DIP_SOURCES", "http://asi-provider:4020/brp/dataservices")
+        .WaitFor(asiProvider);
+
+    builder.AddDockerfile("qtsp-reference", "../services/qtsp-reference")
+        .WithHttpEndpoint(port: 9427, targetPort: 4023, name: "http")
+        .WithHttpHealthCheck("/healthz")
+        .WithEnvironment("QTSP_PUBLIC_URL", qtspUrl)
+        .WithEnvironment("QTSP_DIP_URL", "http://asi-discovery-stub:4022")
+        .WithEnvironment("QTSP_URL_MAP", $"{asiProviderUrl}=http://asi-provider:4020,{asiAuthorizationServerUrl}=http://asi-authorization-server:4021")
+        .WithEnvironment("QTSP_KEY_FILE", "/qtsp/qtsp-key.pem")
+        .WithEnvironment("QTSP_CERT_FILE", "/qtsp/qtsp-cert.pem")
+        .WithEnvironment("QTSP_SEAL_TRUST_ANCHORS", "/anchors/issuer-ca-cert.pem")
+        .WithEnvironment("QTSP_WALLET_VERIFIER_URL", "http://asi-wallet-verifier:8002")
+        .WithEnvironment("QTSP_WALLET_VERIFIER_STATUS_URL", "http://asi-wallet-verifier:8001")
+        .WithEnvironment("QTSP_WALLET_VERIFIER_API_KEY_FILE", "/wallet-verifier/api-key")
+        .WithEnvironment("QTSP_EUDI_WALLET_VERIFIER_URL", "http://eudi-wallet-verifier:8002")
+        .WithEnvironment("QTSP_EUDI_WALLET_VERIFIER_STATUS_URL", "http://eudi-wallet-verifier:8001")
+        .WithEnvironment("QTSP_EUDI_WALLET_VERIFIER_API_KEY_FILE", "/eudi-wallet-verifier/api-key")
+        .WithEnvironment("EUDI_PUBLIC_URL", eudiPublicUrl!)
+        .WithEnvironment("EUDI_UL_BASE", eudiUlBase)
+        .WithEnvironment("QTSP_ISSUANCE_ADDR", ":4443")
+        .WithEnvironment("QTSP_ISSUANCE_TLS_KEY_FILE", "/issuance/tls-key.der.b64")
+        .WithEnvironment("QTSP_ISSUANCE_TLS_CERT_FILE", "/issuance/tls-cert.der.b64")
+        .WithEnvironment("QTSP_ISSUANCE_CALLBACK_PATH_FILE", "/issuance/callback-path")
+        .WithEnvironment("QTSP_ISSUER_OFFERS_URL", builder.Configuration["Gbo:QtspIssuerOffersUrl"] ?? "")
+        .WithEnvironment("QTSP_ISSUER_PROFILE", "wallet")
+        .WithEnvironment("QTSP_ISSUER_CONFIGURATION", "qtsp-reference-attestation")
+        .WithBindMount(Path.Combine(secretsDir, "asi-qtsp"), "/qtsp", isReadOnly: true)
+        .WithBindMount(developmentCaDir, "/anchors", isReadOnly: true)
+        .WithBindMount(Path.Combine(secretsDir, "asi-authorization-server-wallet"), "/wallet-verifier", isReadOnly: true)
+        .WithBindMount(Path.Combine(secretsDir, "asi-authorization-server-eudi-wallet"), "/eudi-wallet-verifier", isReadOnly: true)
+        .WithBindMount(Path.Combine(secretsDir, "qtsp-reference"), "/issuance", isReadOnly: true)
+        .WaitForCompletion(qtspCertificate)
+        .WaitFor(asiDiscovery);
+
+    // The wallet verifiers run once they are provisioned (README, ASI
+    // section); without them the authorization server offers DigiD (mock) only.
+    var nlWalletVerifierConfig = Path.Combine(secretsDir, "asi-wallet-verifier/verification_server.toml");
+    if (File.Exists(nlWalletVerifierConfig))
+    {
+        var verifierImage = builder.AddExecutable("asi-wallet-verifier-image", "bash", repoRoot,
+            "aspire/scripts/nlwallet-image.sh", "gbo/asi-wallet-verifier:dev", "services/asi-wallet-verifier/Dockerfile");
+        builder.AddContainer("asi-wallet-verifier", "gbo/asi-wallet-verifier", "dev")
+            .WithImagePullPolicy(ImagePullPolicy.Never)
+            .WithHttpEndpoint(port: 9428, targetPort: 8001, name: "http")
+            .WithBindMount(nlWalletVerifierConfig, "/verification_server.toml", isReadOnly: true)
+            .WaitForCompletion(verifierImage);
+    }
+    var eudiWalletVerifierDir = Path.Combine(secretsDir, "asi-eudi-wallet-verifier");
+    if (File.Exists(Path.Combine(eudiWalletVerifierDir, "config.json")))
+    {
+        // Copies the provisioned files for the verifier's user (1000).
+        var verifierRuntime = builder.AddDockerfile("eudi-wallet-verifier-runtime", "..", "services/eudi-adapter/Dockerfile")
+            .WithArgs("./eudi-adapter", "project-runtime", "--from=/provisioned", "--to=/runtime", "--owner=1000")
+            .WithContainerRuntimeArgs("--network", "none")
+            .WithBindMount(eudiWalletVerifierDir, "/provisioned", isReadOnly: true)
+            .WithVolume("gbo-eudi-wallet-verifier-runtime", "/runtime");
+        builder.AddDockerfile("eudi-wallet-verifier", "..", "services/eudi-wallet-verifier/Dockerfile")
+            .WithHttpEndpoint(port: 9432, targetPort: 8001, name: "http")
+            .WithEnvironment("EUDI_WALLET_VERIFIER_CONFIG", "/config/config.json")
+            .WithVolume("gbo-eudi-wallet-verifier-runtime", "/config", isReadOnly: true)
+            .WaitForCompletion(verifierRuntime);
+    }
+}
+
+// ── OpenFTV Manager owning policy distribution (manager) ─────────────────
+if (On("manager"))
+{
+    var keycloakAdminPassword = Generated("keycloak-admin-password");
+    var auditorPassword = Generated("ftv-manager-auditor-password");
+    var deployPassword = Generated("ftv-manager-deploy-password");
+    var oidcAuthority = builder.Configuration["Gbo:FtvOidcAuthority"] ?? $"{PublicUrl(9284)}/realms/gbo";
+    var managerUrl = builder.Configuration["Gbo:FtvManagerUrl"] ?? PublicUrl(9280);
+
+    var keycloak = builder.AddContainer("keycloak", "quay.io/keycloak/keycloak", "26.0.7")
+        .WithHttpEndpoint(port: 9284, targetPort: 8080, name: "http")
+        .WithHttpHealthCheck("/realms/gbo")
+        .WithArgs("start-dev", "--import-realm", "--http-port=8080")
+        .WithEnvironment("KC_BOOTSTRAP_ADMIN_USERNAME", "admin")
+        .WithEnvironment("KC_BOOTSTRAP_ADMIN_PASSWORD", keycloakAdminPassword)
+        .WithEnvironment("FTV_MANAGER_AUDITOR_PASSWORD", auditorPassword)
+        .WithEnvironment("FTV_MANAGER_DEPLOY_PASSWORD", deployPassword)
+        .WithEnvironment("KC_HOSTNAME_STRICT", "false")
+        .WithEnvironment("KC_HTTP_ENABLED", "true")
+        .WithEnvironment("KC_PROXY_HEADERS", "xforwarded")
+        .WithBindMount(Repo("services/openftv-manager-ui/keycloak/realm-gbo.json"), "/opt/keycloak/data/import/realm-gbo.json", isReadOnly: true);
+
+    var openftvManager = builder.AddContainer("openftv-manager", "registry.gitlab.com/digilab.overheid.nl/ecosystem/ftv/open-ftv/manager", "v0.1.0")
+        .WithHttpEndpoint(port: 9280, targetPort: 8443, name: "http")
+        .WithHttpEndpoint(port: 9281, targetPort: 9443, name: "internal")
+        .WithHttpEndpoint(port: 9282, targetPort: 8080, name: "health")
+        .WithHttpHealthCheck("/healthz", endpointName: "health")
+        .WithEnvironment("MANAGER_DATABASE_URL", ReferenceExpression.Create($"postgres://ftv:{ftvPostgresPassword}@postgres-ftv:5432/ftv_manager?sslmode=disable"))
+        .WithEnvironment("MANAGER_POLICIES_STORE", "/authz")
+        .WithEnvironment("MANAGER_POLICIES_STORE_RECURSE", "true")
+        .WithEnvironment("MANAGER_AUTHORIZATION_AUTHENTICATE", "true")
+        .WithEnvironment("MANAGER_AUTHORIZATION_FAIL_CLOSED_ON_EMPTY", "true")
+        .WithEnvironment("MANAGER_TAGS_PATH", "/tags")
+        .WithEnvironment("MANAGER_BUNDLE_CONFIGS", "/bundles")
+        .WithEnvironment("MANAGER_INTERNAL_PORT", "9443")
+        .WithEnvironment("MANAGER_LOG_LEVEL", "info")
+        .WithEnvironment("MANAGER_OIDC_ISSUER", oidcAuthority)
+        .WithEnvironment("MANAGER_OIDC_JWKS_URL", "http://keycloak:8080/realms/gbo/protocol/openid-connect/certs")
+        .WithEnvironment("MANAGER_OIDC_AUDIENCE", "openftv-manager-api")
+        .WithEnvironment("MANAGER_OIDC_ROLES_CLAIM", "roles")
+        .WithEnvironment("MANAGER_ADL_PG_URL", ReferenceExpression.Create($"postgres://ftv:{ftvPostgresPassword}@postgres-ftv:5432/ftv_adl?sslmode=disable"))
+        .WithBindMount(Repo("services/openftv-manager/authz"), "/authz", isReadOnly: true)
+        .WithBindMount(Repo("services/openftv-manager/bundles"), "/bundles", isReadOnly: true)
+        .WithBindMount(Repo("services/openftv-manager/tags"), "/tags", isReadOnly: true)
+        .WaitForCompletion(postgresFtvInit)
+        .WaitFor(keycloak);
+
+    builder.AddContainer("openftv-manager-ui", "registry.gitlab.com/digilab.overheid.nl/ecosystem/ftv/open-ftv/management-interface", "v0.1.0")
+        .WithHttpEndpoint(port: 9283, targetPort: 8080, name: "http")
+        .WithEnvironment("VITE_PAP_BASE_URL", managerUrl)
+        .WithEnvironment("VITE_PIP_BASE_URL", managerUrl)
+        .WithEnvironment("VITE_OIDC_AUTHORITY", oidcAuthority)
+        .WithEnvironment("VITE_OIDC_CLIENT_ID", "openftv-manager-ui")
+        .WithEnvironment("MANAGER_MAX_LOGO_SIZE", "102400")
+        .WaitFor(openftvManager);
+
+    // Pushes policies/ into the Manager; the PDP then starts and pulls the
+    // bundle (make demo-manager / manager-seed). Rerun from the dashboard
+    // after editing policies, then restart openftv-pdp.
+    var managerSeed = builder.AddExecutable("manager-seed", "python3", repoRoot,
+            "scripts/seed-openftv-manager.py", "--url", "http://localhost:9280")
+        .WithEnvironment("FTV_MANAGER_DEPLOY_PASSWORD", deployPassword)
+        .WaitForCompletion(policyCheck)
+        .WaitFor(openftvManager);
+    openftvPdp.WaitForCompletion(managerSeed);
+}
+
+// ── Public tunnel for the wallet (Gbo:CloudflareTunnel) ─────────────────
+// The overlay docker-compose.cloudflare-tunnel.yml was: cloudflared with a
+// tunnel token, routing the public EUDI, ASI and issuer hostnames here.
+if (string.Equals(builder.Configuration["Gbo:CloudflareTunnel"], "true", StringComparison.OrdinalIgnoreCase))
+{
+    var tunnelToken = builder.AddParameter("cloudflare-tunnel-token", secret: true);
+    var tunnel = builder.AddContainer("eudi-tunnel", "cloudflare/cloudflared", "latest")
+        .WithArgs("tunnel", "--no-autoupdate", "run", "--token")
+        .WithArgs(context => context.Args.Add(tunnelToken.Resource));
+    foreach (var name in new[] { "eudi-issuance-server", "eudi-adapter", "asi-wallet-verifier", "eudi-wallet-verifier", "asi-authorization-server", "eudi-credential-issuer", "trust-host" })
+    {
+        if (builder.Resources.FirstOrDefault(r => r.Name == name) is { } resource)
+        {
+            tunnel.WaitFor(builder.CreateResourceBuilder(resource));
+        }
+    }
+}
+
 // ── Frontends: Vite dev servers on the host ──────────────────────────────
 // Fixed host ports: the frontends link to each other, the consent redirect
 // derives the portal's port as the consumer mock's port + 1, and the
@@ -801,7 +1335,7 @@ foreach (var (variable, target) in new[]
     }
 }
 
-Frontend("landing-page", LandingPort)
+var landingPage = Frontend("landing-page", LandingPort)
     .WithEnvironment("VITE_DIENSTVERLENER_URL", PublicUrl(DvMockPort))
     .WithEnvironment("VITE_INSTALLATIE_REGISTER_URL", PublicUrl(KeyperPort))
     .WithEnvironment("VITE_TOESTEMMINGSPORTAAL_URL", PublicUrl(ConsentPortalPort))
@@ -828,6 +1362,22 @@ if (On("dvtp"))
         .WithEnvironment("VITE_CONSUMER_PEER_ID", "99999999900000001000")
         .WithEnvironment("VITE_CONSENT_PORTAL_URL", PublicUrl(ConsentPortalPort))
         .WaitFor(irBackend);
+}
+
+// The EUDI adapter and the public EUDI URL, when the eudi profile runs.
+if (eudiAdapter is not null)
+{
+    developerPortal
+        .WithEnvironment("EUDI_API_TARGET", eudiAdapter.GetEndpoint("http"))
+        .WithEnvironment("VITE_EUDI_PUBLIC_URL", eudiPublicUrl!);
+    landingPage
+        .WithEnvironment("EUDI_API_TARGET", eudiAdapter.GetEndpoint("http"))
+        .WithEnvironment("VITE_EUDI_PUBLIC_URL", eudiPublicUrl!)
+        .WaitFor(eudiAdapter);
+}
+if (builder.Configuration["Gbo:IssuerPublicUrl"] is { Length: > 0 } ownIssuer)
+{
+    developerPortal.WithEnvironment("VITE_OWN_ISSUER_PUBLIC_URL", ownIssuer);
 }
 
 // ── Grouping in Docker Desktop and OrbStack ──────────────────────────────
