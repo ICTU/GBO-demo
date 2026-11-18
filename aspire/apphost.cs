@@ -778,21 +778,28 @@ IResourceBuilder<ViteAppResource> Frontend(string name, int port)
         .WithEnvironment("__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS", allowedHosts);
 }
 
-Frontend("developer-portal", DevPortalPort)
+var developerPortal = Frontend("developer-portal", DevPortalPort)
     .WithEnvironment("DEV_API_TARGET", devPortalBackend.GetEndpoint("http"))
     .WithEnvironment("JAEGER_API_TARGET", jaeger.GetEndpoint("http"))
     .WithEnvironment("BD_GRAPHQL_TARGET", graphqlServer.GetEndpoint("http"))
     .WithEnvironment("BRP_GRAPHQL_TARGET", brpGraphqlServer.GetEndpoint("http"))
     .WithEnvironment("VITE_JAEGER_PUBLIC_URL", jaeger.GetEndpoint("http"))
     .WithEnvironment("VITE_EUDI_UL_BASE", "https://app.preproductie.wallet.edi.bzk.nl/deeplink/disclosure_based_issuance")
-    .WithEnvironment(ctx =>
-    {
-        if (consentPortalBackend is not null) ctx.EnvironmentVariables["PORTAL_API_TARGET"] = consentPortalBackend.GetEndpoint("http");
-        if (dienstverlenerBackend is not null) ctx.EnvironmentVariables["DVTP_API_TARGET"] = dienstverlenerBackend.GetEndpoint("http");
-        if (irBackend is not null) ctx.EnvironmentVariables["IR_API_TARGET"] = irBackend.GetEndpoint("http");
-        if (lvgGraphqlServer is not null) ctx.EnvironmentVariables["LVG_GRAPHQL_TARGET"] = lvgGraphqlServer.GetEndpoint("http");
-    })
     .WaitFor(devPortalBackend);
+// The portal proxies to whichever backends the profiles start.
+foreach (var (variable, target) in new[]
+{
+    ("PORTAL_API_TARGET", consentPortalBackend),
+    ("DVTP_API_TARGET", dienstverlenerBackend),
+    ("IR_API_TARGET", irBackend),
+    ("LVG_GRAPHQL_TARGET", lvgGraphqlServer),
+})
+{
+    if (target is not null)
+    {
+        developerPortal.WithEnvironment(variable, target.GetEndpoint("http"));
+    }
+}
 
 Frontend("landing-page", LandingPort)
     .WithEnvironment("VITE_DIENSTVERLENER_URL", PublicUrl(DvMockPort))
