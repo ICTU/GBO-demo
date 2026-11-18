@@ -8,4 +8,4 @@ Type=oneshot
 # Set both values for this simulation deployment before installing.
 User=gbo-demo
 WorkingDirectory=/opt/gbo-demo
-ExecStart=/usr/bin/make publish-trust-lists
+ExecStart=/usr/bin/env bash aspire/scripts/provision.sh publish-trust-lists

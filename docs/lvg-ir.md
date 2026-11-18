@@ -100,7 +100,7 @@ De scope bepaalt de afnemer: `lvg:*` gaat naar het Installatie Register
 ## Demo
 
 ```bash
-make demo-dvtp
+aspire run --launch-profile dvtp   # in aspire/
 ```
 
 Open het Installatie Register op <http://localhost:9004> en log in het portaal

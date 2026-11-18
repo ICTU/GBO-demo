@@ -92,7 +92,7 @@ The issuance-server persists every disclosure session. Its final state is the
 single most discriminating signal available, and it is cheap to read:
 
 ```bash
-docker compose exec -T postgres-eudi psql -U wallet -d issuance_server \
+docker exec -i "$(docker ps -q --filter label=com.docker.compose.service=postgres-eudi)" psql -U wallet -d issuance_server \
   -A -F'|' -c "select last_active_date_time, data::text from session_state order by last_active_date_time desc limit 5;"
 ```
 
@@ -155,16 +155,12 @@ curl -sS -o /dev/null -w "%{http_code}\n" "$EUDI_PUBLIC_URL"
 `530` is Cloudflare for "tunnel not connected". `404` is healthy — the
 issuance-server serves no `/`.
 
-The tunnel is **not** started by `make demo-full`; it lives in a separate
-compose file. Use:
+The tunnel is **not** started by default. Turn it on (in `aspire/`, with the
+token in the AppHost secrets as `Parameters:cloudflare-tunnel-token`):
 
 ```bash
-COMPOSE_FILE=docker-compose.yml:docker-compose.cloudflare-tunnel.yml make demo-full
+aspire run --launch-profile full -- --Gbo:CloudflareTunnel=true
 ```
-
-Do not put `COMPOSE_FILE` in `.env` — without a profile the overlay fails to
-parse (`eudi-tunnel depends on undefined service eudi-issuance-server`),
-breaking `make demo-minimal`.
 
 ## 4. The silent failure: trust anchors
 
@@ -270,68 +266,36 @@ pinned submodule commit and which trust list it is using.
 
 ## 7. Traps that cost real time
 
-**Stale issuance-server image.** `make eudi-images` used to skip whenever any
+**Stale issuance-server image.** The image build used to skip whenever any
 image existed, silently running the previous pin against the new config.
-It now stamps the nl-wallet revision as a label and compares. If the build
-says a version you did not expect, check `NLWALLET_PATH` in `.env` — an
-override there wins over the submodule via `?=`.
+`aspire/scripts/nlwallet-image.sh` stamps the nl-wallet revision as a label
+and compares. If the build says a version you did not expect, check
+`NLWALLET_PATH` in your environment: it wins over the submodule.
 
 **Submodule not updated on branch switch.** `git submodule status` showing a
 leading `+` means the checkout differs from what the branch pins. Switching
 branches does not move submodules.
 
-**`restart` versus `up -d`.** Certificates arrive through a *bind-mounted*
-file, so compose cannot see the change: `up -d` alone will not restart the
-issuance-server. Frontend env vars are the opposite: `restart` does not re-read
-`.env`. After a change touching both, you need all three:
-
-```bash
-make eudi-config && docker compose --profile eudi up -d && \
-  docker compose --profile eudi restart eudi-issuance-server
-```
+**Restarting a resource versus restarting the AppHost.** Certificates and the
+rendered configuration arrive through *bind-mounted* files, so a running
+resource does not see the change: restart `eudi-issuance-materialize` and
+then `eudi-issuance-server` from the dashboard. Parameters and settings are
+the opposite: the AppHost reads them when it starts, so a changed
+`aspire secret set` value or `Gbo:*` setting needs the AppHost restarted.
 
 **Database migration history.** Upgrading across an nl-wallet version that
 renames a migration fails with *"migration has been applied but its file is
 missing"* — v0.5.0 renamed `m20250925_000003_create_status_lists` to
 `…_create_status_list` (content identical). Either rename the row in
-`seaql_migrations` or wipe the volume with `down -v`.
-
-**Hand-editing `.env`.** Appending leaves the previous assignment of a slot
-above the new one; last-wins hides it. Use `scripts/update-env.py`, which
-replaces in place, removes later duplicates and backs up first.
-
-**Single-file bind mounts break on `git checkout`.** The frontends mount
-individual files (`vite.config.ts`, `index.html`, `tsconfig.json`), and a bind
-mount of a *file* binds the inode. `git checkout` unlinks and recreates rather
-than editing in place, so after a branch switch the container sees
-`No such file or directory` while `docker inspect` still lists the mount.
-Vite then restarts without any proxy configuration and every `/api/dev/*`
-request falls through to the SPA fallback — the browser reports
-*"Unexpected token '<', "<!doctype "... is not valid JSON"*, which reads like
-a backend failure but is a stale mount. Confirm and fix:
-
-```bash
-docker compose exec -T developer-portal ls -l /app/vite.config.ts   # missing?
-docker compose --profile eudi up -d --force-recreate developer-portal
-```
-
-Plain `up -d` will not do it: nothing in the service definition changed, so
-compose sees no reason to recreate. The same applies to any frontend after a
-branch switch.
-
-**`docker compose logs --since` is unreliable here.** Filter on the container
-timestamp yourself:
-
-```bash
-docker compose logs --timestamps --no-log-prefix <svc> | awk '$1 >= "2026-08-03T09:00:00"'
-```
+`seaql_migrations` or remove the `gbo-postgres-eudi-data` volume.
 
 **Services log in different timezones.** Compare on the Docker timestamp, not
 the application's own.
 
-**`make eudi-config` overwrites the rendered config.** When testing a change
-to `issuance_server.toml` directly, do not run it until you are done — and it
-is also the easiest way to revert.
+**`eudi-issuance-materialize` overwrites the rendered config.** When testing
+a change to `.aspire-data/eudi-issuance-runtime/issuance_server.toml`
+directly, do not restart it until you are done — and restarting it is also
+the easiest way to revert.
 
 ## 8. What changed in v0.5.0
 

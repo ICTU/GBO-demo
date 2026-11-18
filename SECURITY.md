@@ -21,7 +21,7 @@ Please do **not** open a public issue for suspected security problems. We aim to
 
 ## What is intentionally exposed
 
-- **Self-signed certificates** under `fsc-infra/**/pki/` and `certs/` — used only by the demo containers on localhost. Private-key files (`*-key.pem`) are git-ignored and regenerated per-user via the `make fsc-*-certs` targets.
+- **Self-signed certificates** under `fsc-infra/**/pki/` and `services/openftv-pdp/certs/` — used only by the demo containers on localhost. Private-key files (`*-key.pem`) are git-ignored and regenerated per-user via the `make fsc-*-certs` targets.
 - **Synthetic OIN's** (mostly `9999...` and `0000...` prefixes) — reserved for demo, do not correspond to real Dutch organizations.
 - **Mock BSN's** in `services/graphql-server/mockdata/citizens.json` — checksum-valid demo numbers, not linked to real citizens.
 - **JWT signing secrets** for mock DigiD — hardcoded in the portal, single-purpose demo.
@@ -36,6 +36,6 @@ The EUDI issuance-server runtime config carries inline mdoc/SD-JWT signing keys 
 - `services/eudi-issuance-server/config/type-*.json`
 - `services/eudi-issuance-server/config/eudi-offers.json`
 
-Run `make onboard-demo-sources` and then `make eudi-config`; the latter validates every configured source, generates artifacts from the complete candidate set and promotes that set to active. Local development certificates are created only by the explicit `provision-development-certificates` step. Production must supply pre-managed certificate references.
+Start the AppHost with the `eudi` profile; its `eudi-issuance-materialize` step validates every configured source, generates artifacts from the complete candidate set and promotes that set to active. Local development certificates are created only by the AppHost's explicit `provision-<source>-certificates` steps. Production must supply pre-managed certificate references.
 
 The safety-audit script (`scripts/check-safety.sh`) refuses inline `private_key = "…"` / `certificate = "…"` patterns in any committed file, so this stays enforced.

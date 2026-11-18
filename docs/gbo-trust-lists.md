@@ -143,7 +143,7 @@ is rejected. A configured LoTE source never falls back to a PEM roots file.
 
 The upstream **NL-wallet verifier** loads static roots at startup. The agreed
 demo shortcut is to use `export-pid-trust` during
-`make provision-asi-wallet-verifier`: it verifies the same central PID LoTE
+`aspire/scripts/provision.sh asi-wallet-verifier`: it verifies the same central PID LoTE
 and writes its exact PID roots as a provisioning snapshot. The provisioner
 adds no general issuer CA. A failed fetch or verification aborts provisioning
 without replacing the previous snapshot. Re-provision and recreate/restart the
@@ -155,7 +155,7 @@ the two Go consumers.
 
 Publish and serve the signed lists at the configured HTTPS sim host before
 provisioning the NL verifier or using the Go PID flows. Then run the existing
-verifier provisioning targets and `make credential-issuer-up` for the own
+verifier provisioning targets and `Gbo__Profiles=eudi,credential-issuer aspire run` for the own
 issuer. The normal `demo-asi` recreation path applies changed verifier config;
 a manual recreation must account for the NL verifier's single-file bind mount.
 No URL is tied to the local review hostname.

@@ -26,14 +26,16 @@ consumer → FSC Outway → FSC Inway → OpenFTV PDP → source sidecar → Gra
 
 For every mode:
 
-- Docker Engine 25 or newer with the Compose plugin
-  (Docker API 1.44; see [TROUBLESHOOTING.md](TROUBLESHOOTING.md#healthcheckstart_interval-requires-docker-engine-v25));
-- Git, Make, Bash, `curl`, `jq`, OpenSSL and Python 3.9 or newer;
-- a local `.env` copied from `.env.example`;
-- non-empty `FTV_POSTGRES_PASSWORD`, `FTV_ADL_READER_PASSWORD`,
-  `EUDI_POSTGRES_PASSWORD`,
-  `SOURCE_REGISTRY_PASSWORD` and `SOURCE_REGISTRY_READER_PASSWORD` values in
-  `.env`.
+- the [Aspire CLI](https://aspire.dev) 17 and the .NET 10 SDK;
+- Docker (Docker Desktop, OrbStack or Docker Engine);
+- Node.js 24 or newer with npm 11, for the Vite frontends (`npm ci` with
+  an older npm reads the lockfiles as out of sync);
+- Go 1.26 or newer, for the host-side certificate steps;
+- Git, Bash, `curl`, `jq` and OpenSSL; Python 3.9 or newer for the OpenFTV
+  Manager seed.
+
+The demo's database passwords are generated on the first run and kept in
+the AppHost's user secrets (`aspire secret list` in `aspire/`).
 
 The complete EUDI flow additionally requires:
 
@@ -49,34 +51,26 @@ the wallet app or issue its PID.
 
 ## Quick start
 
-Clone the repository with its nl-wallet submodule and create the local
-configuration:
+Clone the repository with its nl-wallet submodule:
 
 ```bash
 git clone --recurse-submodules https://github.com/ICTU/GBO-demo.git
 cd GBO-demo
-cp .env.example .env
 ```
 
-Every mode needs these five values in `.env`. Any non-empty random value works
-on the local demo network, for example from `openssl rand -hex 16`; use a
-different value for each:
-
-```dotenv
-FTV_POSTGRES_PASSWORD=
-FTV_ADL_READER_PASSWORD=
-EUDI_POSTGRES_PASSWORD=
-SOURCE_REGISTRY_PASSWORD=
-SOURCE_REGISTRY_READER_PASSWORD=
-```
-
-Start the DvTP demo. It needs no public URLs, trust anchors or wallet:
+Start the DvTP demo from the AppHost directory. It needs no public URLs,
+trust anchors or wallet:
 
 ```bash
-make demo
+cd aspire
+aspire run --launch-profile dvtp
 ```
 
-The first run builds every image and takes a few minutes. Open the demo at:
+The [AppHost](aspire/apphost.cs) builds every image, creates the FSC
+certificates and contracts and starts the demo in dependency order. The
+first run takes a few minutes. The Aspire dashboard
+(<http://localhost:15126>) lists every resource with its state, logs and
+URLs, and holds the traces, logs and metrics. Open the demo at:
 
 | Entry point | URL |
 | --- | --- |
@@ -84,12 +78,20 @@ The first run builds every image and takes a few minutes. Open the demo at:
 | Consumer mock | <http://localhost:9001> |
 | Consent portal | <http://localhost:9002> |
 | Developer portal | <http://localhost:9003> |
-| Jaeger (traces) | <http://localhost:9686> |
+| Aspire dashboard (traces, logs, resources) | <http://localhost:15126> |
 
 Then follow the [DvTP consent walkthrough](#dvtp-consent).
 
-To open the demo from another machine, set `GBO_PUBLIC_HOST` in `.env` to
-the IP address or DNS name that browser uses and run `make demo` again.
+Stop it with Ctrl+C. See [aspire/README.md](aspire/README.md) for the
+profiles, settings and secrets.
+
+The AppHost publishes its ports on localhost. To open the demo from another
+machine, put a reverse proxy in front (next section) and set the host name
+that browser uses, then start again:
+
+```bash
+aspire run --launch-profile dvtp -- --Gbo:PublicHost=demo.example.org
+```
 
 ### HTTPS behind a reverse proxy
 
@@ -97,26 +99,24 @@ Off localhost, some pages need https: the OpenFTV Manager login and the
 reference QTSP. Put a TLS-terminating reverse proxy (for example
 `tailscale serve` or Caddy) in front of each port the browser opens, on the
 same port number, forwarding to `http://127.0.0.1:<port>`. It must pass
-WebSocket upgrades and `X-Forwarded-*` headers. Then set in `.env` and run
-`make demo` again:
+WebSocket upgrades and `X-Forwarded-*` headers. Then start again with the
+public host and scheme:
 
-```dotenv
-GBO_PUBLIC_HOST=demo.example.org
-GBO_PUBLIC_SCHEME=https
-GBO_PUBLIC_BIND_ADDRESS=127.0.0.1
+```bash
+aspire run --launch-profile dvtp -- --Gbo:PublicHost=demo.example.org --Gbo:PublicScheme=https
 ```
 
-`GBO_PUBLIC_BIND_ADDRESS` keeps the plain http ports on the loopback
-interface, so only the proxy reaches them.
+The plain http ports stay on the loopback interface, so only the proxy
+reaches them.
 
 ### The complete demo, with EUDI
 
-`make demo-full` adds the EUDI wallet flow to DvTP. It additionally needs the
-public URLs in `.env`:
+The `full` profile adds the EUDI wallet flow to DvTP. It additionally needs
+two public URLs, which the AppHost asks for as parameters. Set them once:
 
-```dotenv
-EUDI_PUBLIC_URL=https://eudi-is.example.org/
-EUDI_BRI_URL=https://eudi-bri.example.org/
+```bash
+aspire secret set Parameters:eudi-public-url https://eudi-is.example.org/
+aspire secret set Parameters:eudi-bri-url https://eudi-bri.example.org/
 ```
 
 Before starting an EUDI demo, provide the issuer and reader CA material that
@@ -133,9 +133,10 @@ reader-ca-cert.pem
 ```
 
 Keep the private keys outside version control. To load the same managed CA
-material from another location, set `ONBOARDING_SECRETS_DIR` to the absolute
-path of that secrets root; both the provisioning command and Compose use it.
-Setup fails before onboarding when any required CA file is absent.
+material from another location, set `Gbo:SecretsDir` to the absolute path of
+that secrets root (`aspire run -- --Gbo:SecretsDir=/path`); the AppHost and
+`aspire/scripts/provision.sh` (`ONBOARDING_SECRETS_DIR`) both use it. The
+AppHost stops before it starts anything when a required CA file is absent.
 
 Those CA private keys are provisioning input, not application runtime input.
 After the issuer, reader and status leaf certificates have been provisioned,
@@ -154,20 +155,20 @@ provisioning snapshot plus restart.
 See the [trust-host runbook](trust-host/README.md) for host-only signing and
 publication.
 
-The own credential issuer (`services/eudi-credential-issuer`, not yet in the
-stack) also needs per source an access certificate (WRPAC) and a registration
-certificate (WRPRC). `make create-development-registrar-root` creates the
+The own credential issuer (`services/eudi-credential-issuer`, profile
+`credential-issuer`) also needs per source an access certificate (WRPAC) and a registration
+certificate (WRPRC). `aspire/scripts/provision.sh development-registrar-root` creates the
 registrar root that signs the registration certificates, once, in
 `development-ca/` (`registrar-ca-key.pem`, `registrar-ca-cert.pem`); it is a
 trust anchor of its own and is never replaced. Its certificate is copied to
 `.local/public-certificates/development-ca/` for the wallets' trust lists.
-`make provision-wallet-registration SOURCE_ID=<source_id>` then issues the
+`aspire/scripts/provision.sh wallet-registration SOURCE_ID=<source_id>` then issues the
 WRPAC under the reader root and the WRPRC for the types of the active Source
 Release, creates the source's key for encrypted credential requests once
 (`request-encryption-key.pem`, kept on later runs), and writes the reader-root CRL and the WRPRC status list to
-`.local/public-trust/` for the trust host. A container reads the source from
-the Source Registry; the signing runs on the host, so the CA keys never enter
-a container. It needs `EUDI_TRUST_PUBLIC_URL`
+`.local/public-trust/` for the trust host. It reads the source from the
+running Source Registry (start the AppHost with an EUDI profile first); the
+signing runs on the host, so the CA keys never enter a container. It needs `EUDI_TRUST_PUBLIC_URL`
 (the public root URL of that host, which goes into the certificates) and, the
 first time for a source, `KVK_NUMBER`: the organizationIdentifier in the WRPAC
 and the WRPRC is `NTRNL-<KvK number>`, because ETSI EN 319 412-1 section 5.1.4
@@ -186,7 +187,7 @@ then gets the offer), the same command also issues a WRPRC for the source as
 a relying party (`wrprc-verifier.jwt`): entitlement `Service_Provider`,
 authorizing the `bsn` of `urn:eudi:pid:nl:1`, with the purpose the wallet
 shows and a status entry of its own. Run it again for sources provisioned
-before, and `make provision-test-pid` too (it now also puts the test PID
+before, and `aspire/scripts/provision.sh test-pid` too (it now also puts the test PID
 root next to its registration); the materializer refuses a source without
 them. It turns every offer
 of the source's activated types into a disclosure offer under the same id,
@@ -195,9 +196,9 @@ and trusts the PIDs of the NL PID issuer CAs in `PID_TRUST_ANCHORS_FILE`
 `services/asi-wallet-verifier/pid-issuer-anchors.txt`) and, once
 provisioned, of the test PID.
 
-`make provision-qtsp-wallet-registration` registers the reference QTSP as
-a provider of the own issuer, after `make
-provision-qtsp-issuance-certificates`: a WRPAC and a WRPRC with the
+`aspire/scripts/provision.sh qtsp-wallet-registration` registers the
+reference QTSP as a provider of the own issuer, after the AppHost's
+`provision-qtsp-issuance-certificates` step has run: a WRPAC and a WRPRC with the
 `QEAA_Provider` entitlement for its test statement (fictional KvK number
 `99991300`, not a public body). The materializer then adds the QTSP, with
 its statement valid for 30 days and its internal HTTPS callback as
@@ -207,7 +208,7 @@ Next to `nl` and `eudi` the issuer then also has the combined profile
 `wallet`, under which one offer serves both wallets; the NL Wallet joins it
 once its wallet providers are mounted.
 
-`make provision-test-pid` adds a test PID provider to the own issuer: a PID
+`aspire/scripts/provision.sh test-pid` adds a test PID provider to the own issuer: a PID
 of the NL type (`urn:eudi:pid:nl:1`) for wallets without a real one, such as
 the EUDI reference wallet, so the disclosure-based route can be shown with
 them. Its credentials chain to a development root of its own
@@ -227,14 +228,15 @@ With an existing reverse proxy or externally managed tunnel, start everything
 with:
 
 ```bash
-make demo-full
+aspire run --launch-profile full
 ```
 
-To use the bundled Cloudflare connector, also set
-`CLOUDFLARE_TUNNEL_TOKEN` and run:
+To use the bundled Cloudflare connector, set its token once and start with
+the tunnel on:
 
 ```bash
-COMPOSE_FILE=docker-compose.yml:docker-compose.cloudflare-tunnel.yml make demo-full
+aspire secret set Parameters:cloudflare-tunnel-token <token>
+aspire run --launch-profile full -- --Gbo:CloudflareTunnel=true
 ```
 
 Configure these Cloudflare Public Hostnames:
@@ -247,25 +249,30 @@ Configure these Cloudflare Public Hostnames:
 Add a final hostname-wide **Bypass cache** rule for `EUDI_PUBLIC_URL` and purge
 that hostname once. Issuer metadata and QR sessions must not be cached.
 
-The first EUDI build can take several minutes. `make demo-full` performs the
-complete idempotent bootstrap: FSC setup, contracts, source onboarding,
-development certificates, EUDI configuration and application startup.
+The first EUDI build can take several minutes: the issuance server is built
+from the nl-wallet sources. The AppHost performs the complete idempotent
+bootstrap: FSC setup, contracts, source onboarding, development
+certificates, EUDI configuration and application startup.
 
 ## Other modes
 
-| Command | Starts |
-| --- | --- |
-| `make demo-minimal` | Core services and observability only |
-| `make demo` | DvTP consent flow over OpenFSC |
-| `make demo-eudi` | EUDI wallet flow over OpenFSC |
-| `make demo-full` | DvTP and EUDI flows together |
-| `make demo-manager` | Core services with OpenFTV Manager policy distribution |
-| `make demo-down` | Stops the application and FSC stacks |
+A profile picks which parts run, as the compose profiles did. Pick one with
+a launch profile or with `Gbo__Profiles`, comma-separated:
 
-`make demo-manager` needs the additional variables documented in
-[its component README](services/openftv-manager-ui/README.md). Prefer the
-`demo-*` targets over starting Compose directly; they create certificates,
-contracts and generated configuration in the required order.
+| Command (in `aspire/`) | Starts |
+| --- | --- |
+| `aspire run` | Core services only: sources, PDP, logbooks, developer portal |
+| `aspire run --launch-profile dvtp` | DvTP consent flow over OpenFSC |
+| `Gbo__Profiles=eudi aspire run` | EUDI wallet flow over OpenFSC |
+| `aspire run --launch-profile full` | DvTP and EUDI flows together |
+| `Gbo__Profiles=dvtp,integrator aspire run` | DvTP plus the integrator path |
+| `Gbo__Profiles=full,asi aspire run` | Everything plus the ASI route |
+| `Gbo__Profiles=manager aspire run` | Core services with OpenFTV Manager policy distribution |
+
+Stop with Ctrl+C. `aspire/scripts/fsc-clean.sh` wipes the FSC certificates
+and contracts for a fresh bootstrap. One-off host provisioning (wallet
+registration, trust lists, test PID, wallet verifiers) is
+`aspire/scripts/provision.sh`; see [aspire/README.md](aspire/README.md).
 
 ## Walkthroughs
 
@@ -292,8 +299,8 @@ shows consents that already exist.
    it. The consumer is told only `FIELD_NOT_PERMITTED`, so the consumer mock
    offers to consent again without naming a cause. The developer portal's
    history lists the request as `DENY`; the field's own reason,
-   `CONSENT_WITHDRAWN`, is in the PDP decision log
-   (`docker compose logs openftv-pdp`).
+   `CONSENT_WITHDRAWN`, is in the PDP decision log: the developer portal's
+   decision view, or the `openftv-pdp` logs in the Aspire dashboard.
 
 Starting again from the consumer mock's home page begins a new consent; it
 does not repeat the query, because the token only lives in that result page.
@@ -311,14 +318,14 @@ A service provider can also query through an integrator: a processor with an
 FSC peer of its own that connects on the provider's behalf over a delegated
 connection. The consent then binds the provider, the FSC delegator, and the
 integrator needs a mandate in the DvTP onboarding register. The demo uses the
-direct path by default; `make demo-integrator` adds the integrator to a running
-demo. See [docs/integrator.md](docs/integrator.md).
+direct path by default; the `integrator` profile adds the integrator
+(`Gbo__Profiles=dvtp,integrator aspire run`). See [docs/integrator.md](docs/integrator.md).
 
 A qualified trust service provider (QTSP) can verify attributes of a citizen
 against the BRP through the ASIP mock of the ETSI TS 119 478 route
 (`services/asi-provider`, `services/asi-authorization-server`). The ASIP is an
-FSC consumer peer of its own (...1200). `make demo-asi` adds it to a running
-`demo-eudi` or `demo-full`; a stub of the Discover Interface
+FSC consumer peer of its own (...1200). The `asi` profile adds it, next to
+`eudi` or `full` (`Gbo__Profiles=full,asi aspire run`); a stub of the Discover Interface
 (`services/asi-discovery-stub`) finds its data services per attribute, and a
 reference QTSP (`services/qtsp-reference`, http://localhost:9427) is where a
 user starts. The developer portal's ASI tab lays a request down at that QTSP,
@@ -360,7 +367,7 @@ shortcut), so a deployment must set `ALLOWED_RETURN_ORIGINS`.
 
 ### EUDI wallet issuance
 
-1. Start `make demo-full` or `make demo-eudi` and open the
+1. Start the `full` or `eudi` profile and open the
    [landing page](http://localhost:9000).
 2. Select income 2024, income 2025, the BRP/RvIG death certificate or the
    explicitly labelled unsecured demo credential.
@@ -389,7 +396,7 @@ The demo combines production-grade components with deliberate test doubles:
 | Transport | OpenFSC managers, controllers, Inways and Outways |
 | Authorization | OpenFTV v0.1.0 PDP with OPA/Rego policies |
 | Source access | Go GraphQL services behind source-side sidecars |
-| Observability | OpenTelemetry, Jaeger, Loki and Grafana |
+| Observability | OpenTelemetry and the Aspire dashboard locally; Jaeger and Loki in the simulation deployment |
 | Processing logs | `ldv-logboek` per Verantwoordelijke — Belastingdienst, RvIG and GBO (LDV v1.0.0), alongside the PDP's ADL and FSC-Logging |
 | Identity and data | Synthetic citizens, deterministic BSNk and mock DigiD |
 | Consent | In-memory demo register |
@@ -438,47 +445,50 @@ check in the affected component, for example:
 ```bash
 (cd services/eudi-adapter && go test -timeout 60s ./...)
 
-make policy-test   # opa check, format diff and Rego unit tests, same image as CI
+scripts/policy-check.sh --test   # opa check, format diff and Rego unit tests, same image as CI
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the pull-request checklist.
 
 ### Editing policies
 
-The PDP in the default stack loads `policies/` from disk and hot-reloads on
+The PDP under the AppHost loads `policies/` from disk and hot-reloads on
 save. A module that does not compile is not rejected loudly: OpenFTV still
 logs `policy added/replaced`, stays healthy and keeps answering with the
 previous rules ([#151](https://github.com/ICTU/GBO-demo/issues/151)). A rule
 whose change has no effect is therefore often a rule that never compiled. Run
 
 ```bash
-make policy-check
+scripts/policy-check.sh
 ```
 
 after every edit. It reports a syntax error with file and line in a second or
-two, without the stack running. Every `make` target that starts the PDP runs
-it first.
+two, without the stack running. The AppHost runs it before it starts the PDP
+(the `policy-check` resource), so a broken module stops the start.
 
 ## Troubleshooting
 
-Start by checking container state and logs:
+Start in the Aspire dashboard (<http://localhost:15126>): it shows every
+resource's state, the run-once steps' exit codes and each resource's console
+logs. From a terminal in `aspire/`:
 
 ```bash
-docker compose ps
-docker compose logs --tail=200
+aspire describe                       # resources and their state
+aspire logs <resource>                # one resource's console log
 ```
 
 Common fixes:
 
-- use `make demo-full` or the matching `demo-*` target instead of starting
-  individual containers;
-- after changing source metadata, rerun `make onboard-demo-sources`; the
-  adapter observes the promoted release live. Run `make eudi-config` to
-  rematerialize and restart the issuance-server;
+- start the demo with a profile rather than individual containers: the
+  AppHost orders certificates, contracts and configuration;
+- after changing source metadata, restart `source-reconciler` from the
+  dashboard; the adapter observes the promoted release live. Restart
+  `eudi-issuance-materialize` and then `eudi-issuance-server` to
+  rematerialize the issuance server's configuration;
 - scan a fresh QR after a restart or metadata change;
 - if Cloudflare reports `HIT` or an increasing `Age` for issuer metadata,
   correct the cache-bypass rule and purge the issuance hostname;
-- use `make demo-down` to stop both stacks, or `make fsc-clean` only when you
+- stop with Ctrl+C; run `aspire/scripts/fsc-clean.sh` only when you
   intentionally want to remove disposable local FSC state.
 
 The detailed diagnosis for port conflicts, certificates, FSC contracts,
