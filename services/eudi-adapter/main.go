@@ -625,10 +625,7 @@ func newSourceClient() *http.Client {
 func initTracer(ctx context.Context) (func(context.Context) error, error) {
 	endpoint := getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "otel-collector:4317")
 	serviceName := getEnv("OTEL_SERVICE_NAME", "eudi-adapter")
-	exp, err := otlptracegrpc.New(ctx,
-		otlptracegrpc.WithEndpoint(endpoint),
-		otlptracegrpc.WithInsecure(),
-	)
+	exp, err := otlptracegrpc.New(ctx, otlpTraceOptions(endpoint)...)
 	if err != nil {
 		return nil, err
 	}
@@ -807,4 +804,17 @@ func serve(srv *http.Server) {
 		slog.Warn("drain did not finish; closing remaining connections", "err", err.Error())
 		_ = srv.Close()
 	}
+}
+
+// otlpTraceOptions picks how the OTLP exporter reaches the collector. A bare
+// host:port, as docker-compose.yml and older deployments set it, keeps the
+// plaintext gRPC connection this service always made. A URL, as Aspire sets
+// it, is left to the SDK: it reads the scheme (http means plaintext), the
+// headers and the certificate settings from the OTEL_EXPORTER_OTLP_*
+// variables itself, which WithEndpoint and WithInsecure would override.
+func otlpTraceOptions(endpoint string) []otlptracegrpc.Option {
+	if endpoint == "" || strings.Contains(endpoint, "://") {
+		return nil
+	}
+	return []otlptracegrpc.Option{otlptracegrpc.WithEndpoint(endpoint), otlptracegrpc.WithInsecure()}
 }

@@ -621,7 +621,7 @@ services:
       - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_GRAPHQL:-9400}:4000"
     environment:
       - OTEL_SERVICE_NAME=graphql-server
-      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - GBO_SOURCE_METADATA_PATH=/config/gbo-source-metadata.json
       # LDV: this bron is part of the Belastingdienst's logboek. Setting
       # LDV_LOGBOOK_URL is what puts it in the chain — and makes it
@@ -664,7 +664,7 @@ services:
       - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_BRP_GRAPHQL:-9401}:4001"
     environment:
       - OTEL_SERVICE_NAME=brp-graphql-server
-      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - GBO_SOURCE_METADATA_PATH=/config/gbo-source-metadata.json
       # LDV: this bron is part of RvIG's logboek.
       - LDV_LOGBOOK_URL=http://logboek-brp:4016
@@ -701,7 +701,7 @@ services:
       - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_UNSECURED_GRAPHQL:-9414}:4000"
     environment:
       - OTEL_SERVICE_NAME=unsecured-graphql-server
-      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - GBO_SOURCE_METADATA_PATH=/config/gbo-source-metadata-unsecured.json
     volumes:
       - ./services/graphql-server/config:/config:ro
@@ -726,7 +726,7 @@ services:
       - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_CONSENT_REGISTER:-9402}:4002"
     environment:
       - OTEL_SERVICE_NAME=consent-register
-      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       # Demo shortcut: consents live in memory and the signing key is new at
       # every start, its kid derived from the key. A real deployment sets
       # CONSENT_STORE=postgres, DATABASE_URL and CONSENT_SIGNING_KEY_PATH.
@@ -766,7 +766,7 @@ services:
       - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_BSNK:-9403}:4003"
     environment:
       - OTEL_SERVICE_NAME=bsnk-mock
-      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       # The parties that may receive the BSN: the demo's source peer. Any
       # other party can only get a pseudonym.
       - BSN_AUTHORISED_OINS=${BSN_AUTHORISED_OINS:-99999999900000000200}
@@ -790,7 +790,7 @@ services:
     build: ./services/bsnk-mock
     environment:
       - OTEL_SERVICE_NAME=decryption-component
-      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - DECRYPTION_COMPONENT_ONLY=true
     networks:
       - sources
@@ -818,7 +818,7 @@ services:
       dockerfile: services/bron-sidecar/Dockerfile
     environment:
       - OTEL_SERVICE_NAME=bron-sidecar
-      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - UPSTREAM_URL=http://graphql-server:4000
       - DECRYPTION_URL=http://decryption-component:4003
       # The source's decryption keys and BSNk's scheme keys. Demo keys for the
@@ -870,7 +870,7 @@ services:
       dockerfile: services/bron-sidecar/Dockerfile
     environment:
       - OTEL_SERVICE_NAME=brp-sidecar
-      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - UPSTREAM_URL=http://brp-graphql-server:4001
       - DECRYPTION_URL=http://decryption-component:4003
       # The source's decryption keys and BSNk's scheme keys. Demo keys for the
@@ -926,7 +926,7 @@ services:
       - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_LVG_GRAPHQL:-9408}:4008"
     environment:
       - OTEL_SERVICE_NAME=lvg-graphql-server
-      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - LDV_LOGBOOK_URL=http://logboek-lvg:4016
       - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
       - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY_LVG:-local-demo-pseudonym-key-lvg}
@@ -959,7 +959,7 @@ services:
     profiles: [dvtp, full]
     environment:
       - OTEL_SERVICE_NAME=lvg-sidecar
-      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - UPSTREAM_URL=http://lvg-graphql-server:4008
       - DECRYPTION_URL=http://decryption-component:4003
       # The source's decryption keys and BSNk's scheme keys. Demo keys for the
@@ -1005,7 +1005,7 @@ services:
       - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_CONSENT_PORTAL_BACKEND:-9405}:4005"
     environment:
       - OTEL_SERVICE_NAME=consent-portal-backend
-      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - BSNK_URL=http://bsnk-mock:4003
       - CONSENT_URL=http://consent-register:4002
       - DEV_PORTAL_BACKEND_URL=http://dev-portal-backend:4007
@@ -1062,7 +1062,7 @@ services:
       - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_DV_BACKEND:-9406}:4006"
     environment:
       - OTEL_SERVICE_NAME=dienstverlener-backend
-      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       # Talks to the real FSC-Outway (Hypotheekverlener-mock) instead
       # of fsc-mock. OutwayPath = grant-link /bri + backend-path /graphql.
       # The signed consent token supplies the PI and scopes; the PDP verifies
@@ -1112,7 +1112,7 @@ services:
       - PORT=4010
       - QUERY_KIND=lvg
       - OTEL_SERVICE_NAME=ir-backend
-      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       # Grant-link /lvg on the IR Outway (make fsc-seed-lvg) + backend path.
       - OUTWAY_URL=http://ir-outway:8080
       - OUTWAY_PATH=/lvg/graphql
@@ -1156,7 +1156,7 @@ services:
     environment:
       - PORT=4023
       - OTEL_SERVICE_NAME=integrator-backend
-      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       # Grant-link /bri on the integrator's Outway, bound to the delegated grant.
       - OUTWAY_URL=http://int-outway:8080
       - OUTWAY_PATH=/bri/graphql
@@ -1316,7 +1316,7 @@ services:
       # the ASIP starts, but its data services answer 503.
       - ASIP_SOURCE_REGISTRY_DATABASE_URL=postgres://source_registry_reader:${SOURCE_REGISTRY_READER_PASSWORD}@postgres-eudi:5432/source_registry
       - OTEL_SERVICE_NAME=asi-provider
-      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - ASIP_SEAL_KEY_FILE=/seal/seal-key.pem
       - ASIP_SEAL_CERT_FILE=/seal/seal-cert.pem
     volumes:
@@ -2109,7 +2109,7 @@ services:
       - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_EUDI_ADAPTER:-9409}:4009"
     environment:
       - OTEL_SERVICE_NAME=eudi-adapter
-      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - FSC_OUTWAY_URL=http://edi-outway:8080
       - SOURCE_REGISTRY_DATABASE_URL=postgres://source_registry_reader:${SOURCE_REGISTRY_READER_PASSWORD}@postgres-eudi:5432/source_registry
       - SOURCE_REGISTRY_SCHEMA=source_registry
