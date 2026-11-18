@@ -53,6 +53,9 @@ README).
 The Manager accepts only tokens whose issuer is that browser-facing authority
 (`GBO_FTV_OIDC_AUTHORITY`, or derived from `GBO_PUBLIC_SCHEME`,
 `GBO_PUBLIC_HOST` and `GBO_PORT_KEYCLOAK`), and Keycloak puts the URL a client
-used in the issuer. The seed script therefore fetches its token from that same
-URL, so the Docker host must reach it too, for example through the reverse
-proxy.
+used in the issuer. The seed script therefore asks the local Keycloak on its
+published port with `X-Forwarded-Proto`, `-Host` and `-Port` set to that
+authority (Keycloak runs with `KC_PROXY_HEADERS=xforwarded`), so the token
+carries the issuer the Manager expects even when the Docker host cannot reach
+its own public URL. With `GBO_FTV_OIDC_AUTHORITY` set, it fetches the token
+from that URL directly, so the Docker host must reach it.
