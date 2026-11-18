@@ -81,3 +81,6 @@ services/openftv-pdp/certs/
 # Preserve the input JSON templates + scripts that generate the above.
 !fsc-infra/pki/*.json
 !fsc-infra/pki/*.sh
+
+# Aspire spike: local state of AppHost-run services
+.aspire-data/
