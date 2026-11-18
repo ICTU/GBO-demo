@@ -95,7 +95,7 @@ services:
 
   directory-migrations-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
-    restart: on-failure
+    restart: "no"
     command:
       - /usr/local/bin/controller
       - migrate
@@ -109,7 +109,7 @@ services:
 
   directory-migrations-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
-    restart: on-failure
+    restart: "no"
     command:
       - /usr/local/bin/manager
       - migrate
@@ -143,7 +143,7 @@ services:
       directory-manager:
         condition: service_started
       directory-migrations-controller:
-        condition: service_started
+        condition: service_completed_successfully
 
   directory-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
@@ -179,7 +179,7 @@ services:
       postgres:
         condition: service_healthy
       directory-migrations-manager:
-        condition: service_started
+        condition: service_completed_successfully
       directory-txlog-api:
         condition: service_started
 
@@ -205,7 +205,7 @@ services:
 
   directory-migrations-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
-    restart: on-failure
+    restart: "no"
     command:
       - /usr/local/bin/txlog-api
       - migrate
@@ -231,7 +231,7 @@ services:
       postgres:
         condition: service_healthy
       directory-migrations-txlog-api:
-        condition: service_started
+        condition: service_completed_successfully
 
   directory-ui:
     image: federatedserviceconnectivity/directory-ui:v2.4.0
@@ -255,7 +255,7 @@ services:
 
   edi-migrations-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
-    restart: on-failure
+    restart: "no"
     command:
       - /usr/local/bin/controller
       - migrate
@@ -275,7 +275,7 @@ services:
 
   edi-migrations-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
-    restart: on-failure
+    restart: "no"
     command:
       - /usr/local/bin/manager
       - migrate
@@ -295,7 +295,7 @@ services:
 
   edi-migrations-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
-    restart: on-failure
+    restart: "no"
     command:
       - /usr/local/bin/txlog-api
       - migrate
@@ -339,7 +339,7 @@ services:
       edi-manager:
         condition: service_started
       edi-migrations-controller:
-        condition: service_started
+        condition: service_completed_successfully
 
   edi-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
@@ -374,7 +374,7 @@ services:
       postgres:
         condition: service_healthy
       edi-migrations-manager:
-        condition: service_started
+        condition: service_completed_successfully
       edi-txlog-api:
         condition: service_started
 
@@ -423,13 +423,13 @@ services:
       postgres:
         condition: service_healthy
       edi-migrations-txlog-api:
-        condition: service_started
+        condition: service_completed_successfully
 
   # === Hypotheekverlener-mock (DvTP consumer) ============================
 
   hv-migrations-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/controller, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -446,7 +446,7 @@ services:
 
   hv-migrations-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/manager, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -463,7 +463,7 @@ services:
 
   hv-migrations-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/txlog-api, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -504,7 +504,7 @@ services:
       hv-manager:
         condition: service_started
       hv-migrations-controller:
-        condition: service_started
+        condition: service_completed_successfully
 
   hv-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
@@ -539,7 +539,7 @@ services:
       postgres:
         condition: service_healthy
       hv-migrations-manager:
-        condition: service_started
+        condition: service_completed_successfully
       hv-txlog-api:
         condition: service_started
 
@@ -585,13 +585,13 @@ services:
       postgres:
         condition: service_healthy
       hv-migrations-txlog-api:
-        condition: service_started
+        condition: service_completed_successfully
 
   # === Belastingdienst-mock (provider) ===================================
 
   bd-migrations-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
-    restart: on-failure
+    restart: "no"
     command:
       - /usr/local/bin/controller
       - migrate
@@ -611,7 +611,7 @@ services:
 
   bd-migrations-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
-    restart: on-failure
+    restart: "no"
     command:
       - /usr/local/bin/manager
       - migrate
@@ -631,7 +631,7 @@ services:
 
   bd-migrations-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
-    restart: on-failure
+    restart: "no"
     command:
       - /usr/local/bin/txlog-api
       - migrate
@@ -675,7 +675,7 @@ services:
       bd-manager:
         condition: service_started
       bd-migrations-controller:
-        condition: service_started
+        condition: service_completed_successfully
 
   bd-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
@@ -736,7 +736,7 @@ services:
       postgres:
         condition: service_healthy
       bd-migrations-manager:
-        condition: service_started
+        condition: service_completed_successfully
       bd-txlog-api:
         condition: service_started
 
@@ -829,13 +829,13 @@ services:
       postgres:
         condition: service_healthy
       bd-migrations-txlog-api:
-        condition: service_started
+        condition: service_completed_successfully
 
   # === BRP/RvIG-mock (provider) =========================================
 
   brp-migrations-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/controller, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -852,7 +852,7 @@ services:
 
   brp-migrations-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/manager, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -869,7 +869,7 @@ services:
 
   brp-migrations-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/txlog-api, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -910,7 +910,7 @@ services:
       brp-manager:
         condition: service_started
       brp-migrations-controller:
-        condition: service_started
+        condition: service_completed_successfully
 
   brp-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
@@ -958,7 +958,7 @@ services:
       postgres:
         condition: service_healthy
       brp-migrations-manager:
-        condition: service_started
+        condition: service_completed_successfully
       brp-txlog-api:
         condition: service_started
 
@@ -1044,7 +1044,7 @@ services:
       postgres:
         condition: service_healthy
       brp-migrations-txlog-api:
-        condition: service_started
+        condition: service_completed_successfully
 
   # === Consent register (GBO, provider of consent-status) ================
   # The register's own peer. Its Inway publishes the status lookup, which the
@@ -1054,7 +1054,7 @@ services:
 
   cr-migrations-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/controller, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -1071,7 +1071,7 @@ services:
 
   cr-migrations-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/manager, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -1088,7 +1088,7 @@ services:
 
   cr-migrations-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/txlog-api, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -1129,7 +1129,7 @@ services:
       cr-manager:
         condition: service_started
       cr-migrations-controller:
-        condition: service_started
+        condition: service_completed_successfully
 
   cr-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
@@ -1178,7 +1178,7 @@ services:
       postgres:
         condition: service_healthy
       cr-migrations-manager:
-        condition: service_started
+        condition: service_completed_successfully
       cr-txlog-api:
         condition: service_started
 
@@ -1256,7 +1256,7 @@ services:
       postgres:
         condition: service_healthy
       cr-migrations-txlog-api:
-        condition: service_started
+        condition: service_completed_successfully
 
   # === Shared PDP (consumer of consent-status) ===========================
   # The demo runs one PDP for every source (#137), so it gets a peer of its
@@ -1265,7 +1265,7 @@ services:
 
   pdp-migrations-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/controller, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -1282,7 +1282,7 @@ services:
 
   pdp-migrations-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/manager, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -1299,7 +1299,7 @@ services:
 
   pdp-migrations-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/txlog-api, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -1340,7 +1340,7 @@ services:
       pdp-manager:
         condition: service_started
       pdp-migrations-controller:
-        condition: service_started
+        condition: service_completed_successfully
 
   pdp-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
@@ -1375,7 +1375,7 @@ services:
       postgres:
         condition: service_healthy
       pdp-migrations-manager:
-        condition: service_started
+        condition: service_completed_successfully
       pdp-txlog-api:
         condition: service_started
 
@@ -1421,7 +1421,7 @@ services:
       postgres:
         condition: service_healthy
       pdp-migrations-txlog-api:
-        condition: service_started
+        condition: service_completed_successfully
 
 
   # Installatie Register (Peer ID ...1000): the DvTP consumer that asks LVG
@@ -1429,7 +1429,7 @@ services:
   # binding tells it apart from Hypotheek-BV.
   ir-migrations-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/controller, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -1446,7 +1446,7 @@ services:
 
   ir-migrations-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/manager, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -1463,7 +1463,7 @@ services:
 
   ir-migrations-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/txlog-api, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -1504,7 +1504,7 @@ services:
       ir-manager:
         condition: service_started
       ir-migrations-controller:
-        condition: service_started
+        condition: service_completed_successfully
 
   ir-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
@@ -1539,7 +1539,7 @@ services:
       postgres:
         condition: service_healthy
       ir-migrations-manager:
-        condition: service_started
+        condition: service_completed_successfully
       ir-txlog-api:
         condition: service_started
 
@@ -1585,7 +1585,7 @@ services:
       postgres:
         condition: service_healthy
       ir-migrations-txlog-api:
-        condition: service_started
+        condition: service_completed_successfully
 
   # Integrator (Peer ID ...1100): a processor that connects to BD on behalf of
   # Hypotheek-BV, over a DelegatedServiceConnection grant naming Hypotheek-BV
@@ -1594,7 +1594,7 @@ services:
   int-migrations-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
     profiles: [integrator]
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/controller, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -1612,7 +1612,7 @@ services:
   int-migrations-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
     profiles: [integrator]
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/manager, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -1630,7 +1630,7 @@ services:
   int-migrations-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
     profiles: [integrator]
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/txlog-api, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -1672,7 +1672,7 @@ services:
       int-manager:
         condition: service_started
       int-migrations-controller:
-        condition: service_started
+        condition: service_completed_successfully
 
   int-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
@@ -1708,7 +1708,7 @@ services:
       postgres:
         condition: service_healthy
       int-migrations-manager:
-        condition: service_started
+        condition: service_completed_successfully
       int-txlog-api:
         condition: service_started
 
@@ -1756,7 +1756,7 @@ services:
       postgres:
         condition: service_healthy
       int-migrations-txlog-api:
-        condition: service_started
+        condition: service_completed_successfully
 
   # ASIP (Peer ID ...1200): the Authentic Source Interface Provider of the
   # ETSI TS 119 478 route (services/asi-provider). It queries the BRP source
@@ -1767,7 +1767,7 @@ services:
   asip-migrations-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
     profiles: [asi]
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/controller, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -1785,7 +1785,7 @@ services:
   asip-migrations-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
     profiles: [asi]
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/manager, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -1803,7 +1803,7 @@ services:
   asip-migrations-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
     profiles: [asi]
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/txlog-api, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -1845,7 +1845,7 @@ services:
       asip-manager:
         condition: service_started
       asip-migrations-controller:
-        condition: service_started
+        condition: service_completed_successfully
 
   asip-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
@@ -1881,7 +1881,7 @@ services:
       postgres:
         condition: service_healthy
       asip-migrations-manager:
-        condition: service_started
+        condition: service_completed_successfully
       asip-txlog-api:
         condition: service_started
 
@@ -1929,7 +1929,7 @@ services:
       postgres:
         condition: service_healthy
       asip-migrations-txlog-api:
-        condition: service_started
+        condition: service_completed_successfully
 
 volumes:
   postgres-data:
