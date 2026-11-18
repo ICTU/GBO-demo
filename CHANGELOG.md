@@ -1273,6 +1273,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   start while either is missing, as right after `make demo-down`. These
   targets now create the missing ones, labelled as the fsc-infra project's,
   so a later FSC start uses them and `make demo-down` removes them.
+- **The OpenFTV Manager seed works with a public host.** Since the Manager
+  takes its token issuer from `GBO_PUBLIC_SCHEME` and `GBO_PUBLIC_HOST`, the
+  seed script still fetched its token from `http://localhost:9284`, and
+  Keycloak issued it under that URL, so every policy write got 403 (`token
+  has invalid issuer`). The script now derives its OIDC authority the same
+  way as the Manager's issuer.
 - **The reference QTSP's end-to-end tests clean up after themselves.** They
   left the service processes they started running and a `qtsp-e2e-*`
   directory of about 30 MB (built binaries and generated keys) in the temp

@@ -49,3 +49,10 @@ reach `localhost` on the machine you are browsing from. The login needs a
 secure context, so off localhost serve the demo over https with
 `GBO_PUBLIC_SCHEME=https` (see "HTTPS behind a reverse proxy" in the main
 README).
+
+The Manager accepts only tokens whose issuer is that browser-facing authority
+(`GBO_FTV_OIDC_AUTHORITY`, or derived from `GBO_PUBLIC_SCHEME`,
+`GBO_PUBLIC_HOST` and `GBO_PORT_KEYCLOAK`), and Keycloak puts the URL a client
+used in the issuer. The seed script therefore fetches its token from that same
+URL, so the Docker host must reach it too, for example through the reverse
+proxy.

@@ -80,6 +80,22 @@ def request(
         return exc.code, exc.read()
 
 
+def default_authority() -> str:
+    """The issuer the Manager accepts (MANAGER_OIDC_ISSUER in docker-compose.yml).
+
+    Keycloak puts the URL the client used in the token's issuer, so the token
+    must come from that same URL, not from localhost when the demo has a
+    public host. Empty variables count as unset, as in Compose.
+    """
+    explicit = os.environ.get("GBO_FTV_OIDC_AUTHORITY")
+    if explicit:
+        return explicit
+    scheme = os.environ.get("GBO_PUBLIC_SCHEME") or "http"
+    host = os.environ.get("GBO_PUBLIC_HOST") or "localhost"
+    port = os.environ.get("GBO_PORT_KEYCLOAK") or "9284"
+    return f"{scheme}://{host}:{port}/realms/gbo"
+
+
 def deployment_token(
     authority: str, client_id: str, username: str, password: str
 ) -> str:
@@ -225,10 +241,9 @@ def main() -> int:
     )
     ap.add_argument(
         "--oidc-authority",
-        default=os.environ.get(
-            "GBO_FTV_OIDC_AUTHORITY", "http://localhost:9284/realms/gbo"
-        ),
-        help="OIDC realm used for the deployment identity",
+        default=default_authority(),
+        help="OIDC realm used for the deployment identity (default: the "
+        "issuer the Manager accepts, as docker-compose.yml derives it)",
     )
     ap.add_argument("--oidc-client-id", default="openftv-manager-ui")
     ap.add_argument("--username", default="deployment")
