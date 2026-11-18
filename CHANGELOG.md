@@ -1080,6 +1080,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   start while either is missing, as right after `make demo-down`. These
   targets now create the missing ones, labelled as the fsc-infra project's,
   so a later FSC start uses them and `make demo-down` removes them.
+- **The OpenFTV Manager seed works with a public host.** Since the Manager
+  takes its token issuer from `GBO_PUBLIC_SCHEME` and `GBO_PUBLIC_HOST`, the
+  seed script still fetched its token from `http://localhost:9284`, and
+  Keycloak issued it under that URL, so every policy write got 403 (`token
+  has invalid issuer`). The script now derives its OIDC authority the same
+  way as the Manager's issuer.
 - **The dienstverlener-mock, keyper-mock and toestemmingsportaal-frontend
   images no longer serve a literal `${VAR}` in `runtime-config.js`.** nginx's
   envsubst only fills variables that are set, so a container started without
