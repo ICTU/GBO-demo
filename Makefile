@@ -179,23 +179,18 @@ demo-minimal: policy-check certs require-ftv-postgres
 # PDP as a bundle, instead of the PDP loading ./policies from disk. Opt-in,
 # because it trades the edit-and-save hot-reload loop for a deliberate
 # deploy step — which is the point, but not what you want while writing Rego.
+# The PDP pulls its bundle once, at boot, so the Manager is seeded first.
+MANAGER_COMPOSE = GBO_BUNDLE_MANAGER=http://openftv-manager:9443/v1/bundle/gbo-pdp docker compose --profile manager
+
 demo-manager: policy-check certs require-ftv-postgres
 	@test -n "$(KEYCLOAK_ADMIN_PASSWORD)" || (echo "KEYCLOAK_ADMIN_PASSWORD is required" >&2; exit 1)
 	@test -n "$(FTV_MANAGER_AUDITOR_PASSWORD)" || (echo "FTV_MANAGER_AUDITOR_PASSWORD is required" >&2; exit 1)
 	@test -n "$(FTV_MANAGER_DEPLOY_PASSWORD)" || (echo "FTV_MANAGER_DEPLOY_PASSWORD is required" >&2; exit 1)
-	@echo "-> Base stack + OpenFTV Manager (PAP/PIP, bundle distribution)"
-	GBO_BUNDLE_MANAGER=http://openftv-manager:9443/v1/bundle/gbo-pdp \
-	  docker compose --profile manager up --build -d
-	@echo "-> Waiting for the Manager to accept policies..."
-	@for i in $$(seq 1 30); do \
-	  curl -fsS -m 2 http://localhost:$${GBO_PORT_FTV_MANAGER_HEALTH:-9282}/healthz >/dev/null 2>&1 && exit 0; \
-	  sleep 2; \
-	done; \
-	echo "The Manager did not become healthy within 60s; not seeding. Check: docker compose logs openftv-manager" >&2; \
-	exit 1
+	@echo "-> OpenFTV Manager (PAP/PIP, bundle distribution), seeded before the PDP starts"
+	$(MANAGER_COMPOSE) up --build -d --wait openftv-manager
 	./scripts/seed-openftv-manager.py --url http://localhost:$${GBO_PORT_FTV_MANAGER:-9280}
-	@echo "-> Restarting the PDP so it pulls the freshly seeded bundle"
-	docker compose --profile manager restart openftv-pdp
+	@echo "-> Base stack; the PDP pulls the seeded bundle at boot"
+	$(MANAGER_COMPOSE) up --build -d
 	@echo ""
 	@echo "  Manager API:   http://localhost:$${GBO_PORT_FTV_MANAGER:-9280}/v1/policies"
 	@echo "  Bundle (PDP):  http://localhost:$${GBO_PORT_FTV_MANAGER_INTERNAL:-9281}/v1/bundle/gbo-pdp"
@@ -667,12 +662,11 @@ fsc-pdp-cert:
 # first contract is submitted — otherwise every fsc-seed-* leaves its
 # connection contract pending and the seed times out after 30s with no
 # useful error. The PDP lives in the main compose project, which normally
-# starts *after* fsc-infra; this pulls it forward. --wait only covers the
-# process healthcheck, so the explicit AuthZen probe also waits for the native
-# PIP pull to make the seeded Hypotheek-BV admission effective.
+# starts *after* fsc-infra; this pulls it forward. The PDP turns healthy only
+# once the native PIP pull has made the seeded Hypotheek-BV admission
+# effective, so --wait covers that as well.
 pdp-up: policy-check certs require-ftv-postgres fsc-pdp-cert
 	docker compose up --build -d --wait --force-recreate openftv-pdp
-	./scripts/wait-openftv-admission.sh
 
 fsc-all-up: fsc-directory-certs fsc-edi-certs fsc-bd-certs fsc-brp-certs fsc-hv-certs fsc-consent-register-certs fsc-gbo-pdp-certs fsc-ir-certs fsc-pdp-cert
 	$(MAKE) pdp-up

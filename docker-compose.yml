@@ -180,8 +180,26 @@ services:
         condition: service_healthy
       dvtp-onboarding-register:
         condition: service_healthy
+    # Healthy once the FSC auto-sign decision allows the seeded Hypotheek-BV
+    # admission for the Belastingdienst source, so the PIP data is loaded
+    # before the source Managers get their first contract. Revoking that
+    # admission in the onboarding register makes the PDP unhealthy.
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS --max-time 2 --noproxy '*'
+          --resolve openftv-pdp:8443:127.0.0.1 --cacert /certs/pdp-service.pem
+          -H 'Content-Type: application/json'
+          -d '{"subject": {"type": "peer_id", "id": "99999999900000000200",
+          "properties": {"self_peer_id": "99999999900000000200",
+          "peer_ids": ["99999999900000000200", "99999999900000000300"]}},
+          "action": {"name": "autosign_contract"},
+          "resource": {"type": "contract", "id": "pdp-admission-readiness",
+          "properties": {"grant_types": [2]}},
+          "context": {"doelbinding": "auto_sign_contract"}}'
+          https://openftv-pdp:8443/authzen/v1/evaluation
+          | grep -Eq '"decision": *true'
       <<: *healthcheck-timing
       timeout: 3s
       retries: 5
