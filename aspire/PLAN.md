@@ -69,9 +69,9 @@ Decisions already taken:
 
 ## Docs
 
-- [ ] Run sections of README, TROUBLESHOOTING, AGENTS.md, OBSERVABILITY.md and `docs/*.md`.
-- [ ] Script comments that say `make …`, and the `.github` PR and bug templates.
-- [ ] CHANGELOG entry.
+- [x] Run sections of README, TROUBLESHOOTING, AGENTS.md, OBSERVABILITY.md and `docs/*.md`.
+- [x] Script comments that say `make …`, and the `.github` PR and bug templates.
+- [x] CHANGELOG entry.
 
 ## Follow-ups, after review
 
