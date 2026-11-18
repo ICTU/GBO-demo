@@ -549,6 +549,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   the PDP went on deciding on the last copy it had pulled. The OpenFSC
   Manager does not ask again after a refusal, so a contract submitted while
   the register is down stays pending until it is submitted again.
+- **One table holds the FSC parties' certificate data**: `fsc-infra/peers.txt`
+  lists per party its directory, OIN, subject, host names and internal-CA
+  names. One script, `fsc-infra/pki/bootstrap-peer.sh NAME...`, generates
+  the certificates from it and replaces the ten `bootstrap-<party>.sh`
+  scripts and their `*-internal-ca.json` and `*-internal-cert.json` files;
+  `regenerate-internal-certs.sh` and `make fsc-clean` read the same table,
+  so the certificates of a new party take one row. The generated files, subjects and ownership
+  are unchanged.
 - **Credentials without a revocation reference are valid for 24 hours**
   (#697): the own credential issuer cannot revoke what it issued through
   login, disclosure-based issuance or an offer without `reference`, so those

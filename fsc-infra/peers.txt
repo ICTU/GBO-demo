@@ -1,0 +1,30 @@
+# FSC parties of the demo: one row per party that holds a group certificate.
+#
+# Read by pki/bootstrap-peer.sh (group and internal certificates) and by
+# pki/regenerate-internal-certs.sh (internal certificates only). Fields are
+# separated by "|"; spaces around a field are ignored. Lines starting with
+# "#" are comments.
+#
+#   name           key of the party; also the file name of its group
+#                  certificate: <dir>/pki/org/<name>.pem and <name>-key.pem
+#   dir            directory under fsc-infra/ that holds <dir>/pki/
+#   oin            OIN, the subject serialNumber of the group certificate
+#   org            subject O of the group certificate
+#   hosts          DNS SANs of the group certificate; the first is its CN
+#   internal_ca    the internal CA's CN is "GBO-DEMO Internal CA (<internal_ca>)";
+#                  "-" means the party has no internal certificates
+#   internal_org   subject O of the internal CA and the internal certificate
+#   internal_hosts DNS SANs of the internal certificate (CN <name>-internal)
+#
+# name              | dir                         | oin                  | org                              | hosts                               | internal_ca            | internal_org                             | internal_hosts
+directory-peer      | directory-peer              | 99999999900000000000 | GBO-DEMO Directory Peer          | directory-manager,directory-inway   | directory-peer         | GBO-DEMO Directory Peer Internal         | directory-controller,directory-manager,directory-inway,directory-txlog-api
+directory-ui        | directory-ui                | 99999999900000000010 | GBO-DEMO Directory UI            | directory-ui                        | -                      | -                                        | -
+edi-issuer          | orgs/edi-issuer             | 99999999900000000100 | GBO-DEMO EDI-issuer-org          | edi-manager,edi-outway              | edi-issuer-org         | GBO-DEMO EDI-issuer-org Internal         | edi-controller,edi-manager,edi-outway,edi-txlog-api
+bd-mock             | orgs/belastingdienst-mock   | 99999999900000000200 | Belastingdienst                  | bd-manager,bd-inway                 | belastingdienst-mock   | GBO-DEMO Belastingdienst-mock Internal   | bd-controller,bd-manager,bd-inway,bd-txlog-api
+hypotheekverlener   | orgs/hypotheekverlener-mock | 99999999900000000300 | GBO-DEMO Hypotheekverlener-mock  | hv-manager,hv-outway                | hypotheekverlener-mock | GBO-DEMO Hypotheekverlener-mock Internal | hv-controller,hv-manager,hv-outway,hv-txlog-api
+brp-mock            | orgs/brp-mock               | 99999999900000000400 | RvIG                             | brp-manager,brp-inway               | brp-mock               | GBO-DEMO BRP-mock Internal               | brp-controller,brp-manager,brp-inway,brp-txlog-api
+consent-register    | orgs/consent-register       | 99999999900000000700 | GBO-DEMO Toestemmingsregister    | cr-manager,cr-inway                 | consent-register       | GBO-DEMO Toestemmingsregister Internal   | cr-controller,cr-manager,cr-inway,cr-txlog-api
+gbo-pdp             | orgs/gbo-pdp                | 99999999900000000800 | GBO-DEMO PDP                     | pdp-manager,pdp-outway              | gbo-pdp                | GBO-DEMO PDP Internal                    | pdp-controller,pdp-manager,pdp-outway,pdp-txlog-api
+installatieregister | orgs/installatieregister    | 99999999900000001000 | GBO-DEMO Installatie Register    | ir-manager,ir-outway                | installatieregister    | GBO-DEMO Installatie Register Internal   | ir-controller,ir-manager,ir-outway,ir-txlog-api
+integrator          | orgs/integrator             | 99999999900000001100 | GBO-DEMO Integrator              | int-manager,int-outway              | integrator             | GBO-DEMO Integrator Internal             | int-controller,int-manager,int-outway,int-txlog-api
+asip                | orgs/asip                   | 99999999900000001200 | GBO-DEMO ASIP                    | asip-manager,asip-outway            | asip                   | GBO-DEMO ASIP Internal                   | asip-controller,asip-manager,asip-outway,asip-txlog-api
