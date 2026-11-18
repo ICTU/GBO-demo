@@ -1383,6 +1383,76 @@ if (builder.Configuration["Gbo:IssuerPublicUrl"] is { Length: > 0 } ownIssuer)
     developerPortal.WithEnvironment("VITE_OWN_ISSUER_PUBLIC_URL", ownIssuer);
 }
 
+// ── Node.js for the frontends ────────────────────────────────────────────
+// The installers run `npm ci`, which needs npm 11 (Node.js 24 or newer, as
+// in CI and the frontend images): npm 10 reads the lockfiles as out of sync.
+// The first `node` on PATH may be older, so the AppHost looks for a new
+// enough one (Gbo:NodeDir, PATH, Homebrew, nvm, Volta, fnm) and runs npm
+// and its node from there, whatever PATH says.
+const int MinimumNodeMajor = 24;
+var nodeDir = FindNodeDir(MinimumNodeMajor) ?? throw new InvalidOperationException(
+    $"The frontends need Node.js {MinimumNodeMajor} or newer (npm 11), and none was found on PATH, in Homebrew, nvm, Volta or fnm. " +
+    "Install one (for example `brew install node`) or point Gbo:NodeDir at its bin directory.");
+var nodePath = nodeDir + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH");
+// Everything the AppHost starts inherits this PATH, so `npm` and the node its
+// shebang names resolve to that Node.js.
+Environment.SetEnvironmentVariable("PATH", nodePath);
+// The npm installers only exist once the app model is complete, so the
+// commands are pinned just before the resources start.
+builder.Eventing.Subscribe<BeforeStartEvent>((@event, _) =>
+{
+    foreach (var app in @event.Model.Resources.OfType<ExecutableResource>().Where(r => r.Command == "npm").ToList())
+    {
+        builder.CreateResourceBuilder(app)
+            .WithCommand(Path.Combine(nodeDir, "npm"))
+            .WithEnvironment("PATH", nodePath);
+    }
+    return Task.CompletedTask;
+});
+
+string? FindNodeDir(int minimumMajor)
+{
+    var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    IEnumerable<string> Versions(string root, string suffix) =>
+        Directory.Exists(root)
+            ? Directory.GetDirectories(root).OrderByDescending(d => d, StringComparer.Ordinal).Select(d => Path.Combine(d, suffix))
+            : [];
+    var candidates = new List<string?> { builder.Configuration["Gbo:NodeDir"] };
+    candidates.AddRange((Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator));
+    candidates.AddRange(["/opt/homebrew/opt/node/bin", "/opt/homebrew/bin", "/usr/local/opt/node/bin", "/usr/local/bin"]);
+    candidates.AddRange(Directory.Exists("/opt/homebrew/opt") ? Directory.GetDirectories("/opt/homebrew/opt", "node@*").Select(d => Path.Combine(d, "bin")) : []);
+    candidates.AddRange(Versions(Path.Combine(home, ".nvm/versions/node"), "bin"));
+    candidates.AddRange(Versions(Path.Combine(home, ".volta/tools/image/node"), "bin"));
+    candidates.AddRange(Versions(Path.Combine(home, ".local/share/fnm/node-versions"), "installation/bin"));
+    foreach (var dir in candidates.Where(d => !string.IsNullOrEmpty(d)).Distinct())
+    {
+        var node = Path.Combine(dir!, "node");
+        if (!File.Exists(node) || !File.Exists(Path.Combine(dir!, "npm")))
+        {
+            continue;
+        }
+        try
+        {
+            using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(node, "--version")
+            {
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+            })!;
+            var version = process.StandardOutput.ReadToEnd().Trim().TrimStart('v');
+            process.WaitForExit(5000);
+            if (int.TryParse(version.Split('.')[0], out var major) && major >= minimumMajor)
+            {
+                return dir;
+            }
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            // Not executable; try the next one.
+        }
+    }
+    return null;
+}
+
 // ── Grouping in Docker Desktop and OrbStack ──────────────────────────────
 // Both group containers by the compose project label. Every container the
 // AppHost starts carries it, with its resource name as the service. The
