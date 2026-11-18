@@ -315,4 +315,17 @@ builder.AddViteApp("developer-portal", "../developer-portal")
     .WithEnvironment("VITE_EUDI_UL_BASE", "https://app.preproductie.wallet.edi.bzk.nl/deeplink/disclosure_based_issuance")
     .WaitFor(devPortalBackend);
 
+// ── Grouping in Docker Desktop and OrbStack ──────────────────────────────
+// Both group containers by the compose project label. Every container the
+// AppHost starts carries it, with its resource name as the service. The
+// project name is its own, so `docker compose -p gbo-demo down` cannot touch
+// these containers.
+const string ComposeProject = "gbo-demo-aspire";
+foreach (var container in builder.Resources.OfType<ContainerResource>().ToList())
+{
+    builder.CreateResourceBuilder(container).WithContainerRuntimeArgs(
+        "--label", $"com.docker.compose.project={ComposeProject}",
+        "--label", $"com.docker.compose.service={container.Name}");
+}
+
 builder.Build().Run();
