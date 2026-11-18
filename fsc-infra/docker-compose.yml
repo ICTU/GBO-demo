@@ -52,10 +52,11 @@ services:
         - sh
         - -c
         - "curl -fsS -X POST -H 'Content-Type: application/json' -d '{}' http://localhost:8888/api/v1/cfssl/info || exit 1"
-      interval: 5s
+      interval: ${HEALTHCHECK_INTERVAL:-30s}
       timeout: 3s
       retries: 10
-      start_period: 3s
+      start_period: 60s
+      start_interval: 2s
 
   certportal:
     image: federatedserviceconnectivity/ca-certportal:v2.4.0
@@ -83,7 +84,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${FSC_POSTGRES_PASSWORD}
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U postgres -d postgres" ]
+      test: [ "CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d postgres" ]
       interval: 10s
       retries: 5
       start_period: 10s

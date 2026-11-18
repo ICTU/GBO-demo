@@ -68,7 +68,7 @@ func TestAPersonWithoutOrWithADuplicateBSNIsRefused(t *testing.T) {
 // K2: a test person gets the offer link of the test PID on the eudi profile.
 func TestATestPersonGetsTheOfferLink(t *testing.T) {
 	issuer := &fakeIssuer{links: map[string]string{"openid-credential-offer": "openid-credential-offer://?x", "haip-vci": "haip-vci://?x"}}
-	link, err := New([]Person{frouke}, issuer).Offer(context.Background(), frouke.BSN)
+	link, err := New([]Person{frouke}, issuer).Offer(context.Background(), frouke.BSN, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestATestPersonGetsTheOfferLink(t *testing.T) {
 // K3: any other BSN is refused before the issuer is asked.
 func TestAnUnknownBSNIsRefusedWithoutAskingTheIssuer(t *testing.T) {
 	issuer := &fakeIssuer{links: map[string]string{"openid-credential-offer": "openid-credential-offer://?x"}}
-	_, err := New([]Person{frouke}, issuer).Offer(context.Background(), "123456782")
+	_, err := New([]Person{frouke}, issuer).Offer(context.Background(), "123456782", "")
 	if !errors.Is(err, ErrUnknownPerson) {
 		t.Errorf("err = %v, want unknown_person", err)
 	}
@@ -109,7 +109,7 @@ func TestIssuerFailuresHaveTheirReason(t *testing.T) {
 		{fmt.Errorf("dial: %w", ErrUnreachable), ErrIssuerUnavailable},
 		{errors.New("unreadable answer"), ErrIssuer},
 	} {
-		_, err := New([]Person{frouke}, &fakeIssuer{err: tc.err}).Offer(context.Background(), frouke.BSN)
+		_, err := New([]Person{frouke}, &fakeIssuer{err: tc.err}).Offer(context.Background(), frouke.BSN, "")
 		var got Error
 		if !errors.As(err, &got) || got != tc.want {
 			t.Errorf("issuer %v: err = %v, want %s", tc.err, err, tc.want)
@@ -120,8 +120,19 @@ func TestIssuerFailuresHaveTheirReason(t *testing.T) {
 // K5: an offer without the link a wallet scans is no offer.
 func TestAnOfferWithoutTheLinkIsAnIssuerError(t *testing.T) {
 	issuer := &fakeIssuer{links: map[string]string{"haip-vci": "haip-vci://?x"}}
-	_, err := New([]Person{frouke}, issuer).Offer(context.Background(), frouke.BSN)
+	_, err := New([]Person{frouke}, issuer).Offer(context.Background(), frouke.BSN, "")
 	if !errors.Is(err, ErrIssuer) {
 		t.Errorf("err = %v, want issuer_error", err)
+	}
+}
+
+// B1: a reference goes to the issuer with the offer.
+func TestTheReferenceGoesWithTheOffer(t *testing.T) {
+	issuer := &fakeIssuer{links: map[string]string{"openid-credential-offer": "openid-credential-offer://?x"}}
+	if _, err := New([]Person{frouke}, issuer).Offer(context.Background(), frouke.BSN, "devportal-1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(issuer.calls) != 1 || issuer.calls[0].Reference != "devportal-1" {
+		t.Errorf("issuer asked %v, want the reference devportal-1", issuer.calls)
 	}
 }

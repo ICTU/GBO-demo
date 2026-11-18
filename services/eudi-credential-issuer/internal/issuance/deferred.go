@@ -53,14 +53,14 @@ type deferral struct {
 // answered: one document without claims per configuration, and the sealed
 // BSN apart, once per document, so each credential request can start its own
 // deferral. It returns the code.
-func (s *Service) createPendingSession(ctx context.Context, t Target, p Profile, o DisclosureOffer, binding *CodeBinding, bsn string) (string, error) {
+func (s *Service) createPendingSession(ctx context.Context, t Target, p Profile, o DisclosureOffer, binding *CodeBinding, bsn, reference string) (string, error) {
 	prov := s.providers[t.Provider]
 	now := s.now()
 	sealed, err := sealSubject(prov, bsn)
 	if err != nil {
 		return "", err
 	}
-	sess := Session{Provider: t.Provider, Profile: p.Name, ExpiresAt: now.Add(CodeLifetime), Binding: binding, Pending: &PendingSource{Offer: o.Key, Until: now.Add(s.cfg.DeferralTTL)}}
+	sess := Session{Provider: t.Provider, Profile: p.Name, Reference: reference, ExpiresAt: now.Add(CodeLifetime), Binding: binding, Pending: &PendingSource{Offer: o.Key, Until: now.Add(s.cfg.DeferralTTL)}}
 	for _, id := range o.ConfigurationIDs {
 		credentialID, err := randomToken()
 		if err != nil {
@@ -153,6 +153,36 @@ type DeferredCall struct {
 	EncryptedRequest string
 }
 
+// takeDeferral takes the deferred transaction of session, with keep to put
+// it back for a later request. A transaction of another session is unknown.
+// One whose offer reference was revoked while the source was away ends with
+// credential_request_denied: nothing more is issued for it, and the source
+// is not asked.
+func (s *Service) takeDeferral(ctx context.Context, session Session, transactionID string, now time.Time) (deferral, func() error, error) {
+	unknown := refuse(oid4vci.ErrInvalidTransactionID, "the transaction_id is unknown, finished or expired")
+	pending, err := s.sessions.TakePending(ctx, pendingDeferral, hash(transactionID), now)
+	if errors.Is(err, ErrNotFound) {
+		return deferral{}, nil, unknown
+	}
+	if err != nil {
+		return deferral{}, nil, err
+	}
+	keep := func() error { return s.sessions.PutPending(ctx, pending) }
+	var d deferral
+	if err := json.Unmarshal(pending.Payload, &d); err != nil {
+		return deferral{}, nil, err
+	}
+	if d.SessionID != session.ID {
+		return deferral{}, nil, errors.Join(unknown, keep())
+	}
+	if revoked, err := s.referenceRevoked(ctx, session); err != nil {
+		return deferral{}, nil, errors.Join(err, keep())
+	} else if revoked {
+		return deferral{}, nil, refuse(oid4vci.ErrCredentialRequestDenied, "the offer has been revoked")
+	}
+	return d, keep, nil
+}
+
 // Deferred handles a deferred credential request: it asks the source again.
 // Unavailable: 202 with the same transaction_id. No data: the transaction
 // ends with credential_request_denied (V5). Data: the credential.
@@ -186,25 +216,12 @@ func (s *Service) Deferred(ctx context.Context, call DeferredCall) (CredentialRe
 	if err != nil {
 		return CredentialResult{}, err
 	}
-	unknown := refuse(oid4vci.ErrInvalidTransactionID, "the transaction_id is unknown, finished or expired")
 	if req.TransactionID == "" {
 		return CredentialResult{}, refuse(oid4vci.ErrInvalidCredentialRequest, "transaction_id is required")
 	}
-	pending, err := s.sessions.TakePending(ctx, pendingDeferral, hash(req.TransactionID), now)
-	if errors.Is(err, ErrNotFound) {
-		return CredentialResult{}, unknown
-	}
+	d, keep, err := s.takeDeferral(ctx, session, req.TransactionID, now)
 	if err != nil {
 		return CredentialResult{}, err
-	}
-	// keep puts the transaction back for a later request.
-	keep := func() error { return s.sessions.PutPending(ctx, pending) }
-	var d deferral
-	if err := json.Unmarshal(pending.Payload, &d); err != nil {
-		return CredentialResult{}, err
-	}
-	if d.SessionID != session.ID {
-		return CredentialResult{}, errors.Join(unknown, keep())
 	}
 	bsn, err := openSubject(prov, d.Subject)
 	if err != nil {
@@ -235,9 +252,9 @@ func (s *Service) Deferred(ctx context.Context, call DeferredCall) (CredentialRe
 	if err := checkSourceDocument(p, c, fetched[0]); err != nil {
 		return CredentialResult{}, err
 	}
-	notBefore := now.UTC().Truncate(24 * time.Hour)
+	notBefore, expires := validity(now, c.ValidDays, session.Reference)
 	doc := Document{CredentialID: d.CredentialID, ConfigurationID: d.ConfigurationID, Claims: fetched[0].Attributes,
-		NotBefore: notBefore, Expires: notBefore.AddDate(0, 0, c.ValidDays)}
+		NotBefore: notBefore, Expires: expires}
 	keys := make([]jose.JSONWebKey, len(d.Keys))
 	for i, raw := range d.Keys {
 		if err := keys[i].UnmarshalJSON(raw); err != nil {

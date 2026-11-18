@@ -44,6 +44,11 @@ type Provider struct {
 	Name string
 	// Login overrides the default login for this provider only (demo test PID).
 	Login Login
+	// ReferencePerLogin gives each issuance through the login its own random
+	// revocation reference, logged by the HTTP layer, so its credentials keep
+	// their configured validity (demo test PID). A fixed reference per person
+	// would not do: a revoked reference stays revoked for good (VCR_04).
+	ReferencePerLogin bool
 	// AccessKey and AccessChain are the access certificate (WRPAC) that
 	// signs the issuer metadata.
 	AccessKey   crypto.Signer

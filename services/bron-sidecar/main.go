@@ -50,6 +50,7 @@ import (
 
 	"errors"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp/filters"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
@@ -561,7 +562,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           otelhttp.NewHandler(mux, serviceName),
+		Handler:           otelhttp.NewHandler(mux, serviceName, otelhttp.WithFilter(filters.Not(filters.Path("/health")))),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 	slog.Info("sidecar starting",

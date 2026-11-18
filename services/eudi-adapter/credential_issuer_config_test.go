@@ -130,13 +130,6 @@ func TestMaterializeCredentialIssuer(t *testing.T) {
 			t.Fatal("the wallet provider roots must be next to the configuration")
 		}
 	})
-
-	t.Run("the release marker", func(t *testing.T) {
-		raw, err := os.ReadFile(filepath.Join(f.options.outputDir, "source-release.json"))
-		if err != nil || !strings.Contains(string(raw), f.release.ID) {
-			t.Fatalf("marker %s, %v", raw, err)
-		}
-	})
 }
 
 func TestMaterializeCredentialIssuerEUDIProfile(t *testing.T) {

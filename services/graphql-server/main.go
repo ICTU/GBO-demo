@@ -15,6 +15,7 @@ import (
 	"github.com/graphql-go/graphql/language/ast"
 	"github.com/graphql-go/handler"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp/filters"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
@@ -69,8 +70,8 @@ type config struct {
 	MockDataPath       string
 	SourceMetadataPath string
 	// LDVQuery describes how this bron names its verwerkingsactiviteiten.
-	// The same image serves BD, BRP and the deliberately unsecured demo
-	// source, so nothing about a register may be baked in.
+	// The same image serves BD and the deliberately unsecured demo source,
+	// so nothing about a register may be baked in.
 	LDVQuery ldvQueryConfig
 }
 
@@ -505,7 +506,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           otelhttp.NewHandler(withAccessLog(mux), "graphql-server"),
+		Handler:           otelhttp.NewHandler(withAccessLog(mux), "graphql-server", otelhttp.WithFilter(filters.Not(filters.Path("/health")))),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 	serve(srv)

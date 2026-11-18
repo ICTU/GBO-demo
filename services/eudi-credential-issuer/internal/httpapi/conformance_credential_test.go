@@ -150,9 +150,9 @@ func credentialJWS(t *testing.T, alg jose.SignatureAlgorithm, key any, header ma
 	return s
 }
 
-// HAIP-6.1-02: an issued SD-JWT VC has a limited validity: exp is nbf, the
-// start of the day of the offer, plus the configuration's valid_days (365
-// in the fixture).
+// HAIP-6.1-02: an issued SD-JWT VC has a limited validity. T1: an offer
+// without a revocation reference is valid for 24 hours from the start of
+// the hour (ARF VCR_01b). T7: it still has a status list entry.
 func TestIssuedCredentialValidity(t *testing.T) {
 	f := newFixture(t)
 	anchors := []x5c.Anchors{x5c.NewAnchors("issuer", f.issuerRoot.Cert)}
@@ -164,14 +164,7 @@ func TestIssuedCredentialValidity(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				exp, okExp := parsed.Claims["exp"].(float64)
-				nbf, okNbf := parsed.Claims["nbf"].(float64)
-				if !okExp || !okNbf {
-					t.Fatalf("exp and nbf are required: %v", parsed.Claims)
-				}
-				if int64(nbf)%86400 != 0 || int64(exp-nbf) != 365*86400 || time.Unix(int64(exp), 0).Before(time.Now()) {
-					t.Fatalf("nbf %v, exp %v: want exp 365 days after the start of the day", nbf, exp)
-				}
+				wantShortLived(t, p.name, parsed.Claims)
 				if parsed.Claims["status"] == nil {
 					t.Fatal("a status claim is required")
 				}

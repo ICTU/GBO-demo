@@ -1,3 +1,10 @@
+# Healthchecks probe every 2 s while a container starts, so dependants come up
+# quickly, and every 30 s once it is healthy.
+x-healthcheck-timing: &healthcheck-timing
+  interval: ${HEALTHCHECK_INTERVAL:-30s}
+  start_period: 60s
+  start_interval: 2s
+
 services:
   # --- Infrastructure ---
   otel-collector:
@@ -39,7 +46,7 @@ services:
       - backend
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:16686/"]
-      interval: 5s
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 5
 
@@ -54,7 +61,7 @@ services:
       - backend
     healthcheck:
       test: ["CMD-SHELL", "wget --spider -q http://localhost:3100/ready || exit 1"]
-      interval: 5s
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 10
 
@@ -175,7 +182,7 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
-      interval: 5s
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 5
 
@@ -196,8 +203,8 @@ services:
       - ./services/openftv-manager/initdb:/docker-entrypoint-initdb.d:ro
     networks: [backend]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ftv -d ftv_manager"]
-      interval: 5s
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ftv -d ftv_manager"]
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 10
 
@@ -303,7 +310,7 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
-      interval: 5s
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 10
 
@@ -392,7 +399,7 @@ services:
       - dvtp-onboarding
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4015/health"]
-      interval: 5s
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 5
 
@@ -436,7 +443,7 @@ services:
       - sources
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4016/health"]
-      interval: 5s
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 5
 
@@ -466,7 +473,7 @@ services:
       - sources
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4016/health"]
-      interval: 5s
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 5
 
@@ -500,7 +507,7 @@ services:
       - backend
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4016/health"]
-      interval: 5s
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 5
 
@@ -523,7 +530,7 @@ services:
       - backend
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4016/health"]
-      interval: 5s
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 5
 
@@ -550,7 +557,7 @@ services:
       - backend
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4016/health"]
-      interval: 5s
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 5
 
@@ -577,7 +584,7 @@ services:
       - sources
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4016/health"]
-      interval: 5s
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 5
 
@@ -600,7 +607,7 @@ services:
       - backend
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4016/health"]
-      interval: 5s
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 5
 
@@ -641,7 +648,7 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4000/health"]
-      interval: 5s
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 5
 
@@ -679,7 +686,7 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4001/health"]
-      interval: 5s
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 5
 
@@ -705,7 +712,7 @@ services:
         condition: service_started
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4000/health"]
-      interval: 5s
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 5
 
@@ -749,7 +756,7 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4002/health"]
-      interval: 5s
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 5
 
@@ -770,7 +777,7 @@ services:
         condition: service_started
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4003/health"]
-      interval: 5s
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 5
 
@@ -792,7 +799,7 @@ services:
         condition: service_started
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4003/health"]
-      interval: 5s
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 5
 
@@ -847,7 +854,7 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4011/health"]
-      interval: 5s
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 5
 
@@ -899,7 +906,7 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4011/health"]
-      interval: 5s
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 5
 
@@ -938,7 +945,7 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4008/health"]
-      interval: 5s
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 5
 
@@ -984,7 +991,7 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4011/health"]
-      interval: 5s
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 5
 
@@ -1039,7 +1046,7 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4005/health"]
-      interval: 5s
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 5
 
@@ -1086,7 +1093,7 @@ services:
       - fsc-infra
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4006/health"]
-      interval: 5s
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 5
 
@@ -1123,7 +1130,7 @@ services:
       - fsc-infra
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4010/health"]
-      interval: 5s
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 5
 
@@ -1167,7 +1174,7 @@ services:
       - fsc-infra
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4023/health"]
-      interval: 5s
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 5
 
@@ -1221,7 +1228,7 @@ services:
       - eudi
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4021/healthz"]
-      interval: 5s
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 5
 
@@ -1323,7 +1330,7 @@ services:
       - eudi
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4020/healthz"]
-      interval: 5s
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 5
 
@@ -1344,7 +1351,7 @@ services:
       - backend
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4022/healthz"]
-      interval: 5s
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 5
 
@@ -1408,7 +1415,7 @@ services:
       - eudi
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4023/healthz"]
-      interval: 5s
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 5
 
@@ -1610,6 +1617,16 @@ services:
       # who does gets a test PID for any test person.
       - TEST_PID_OFFERS_URL=${TEST_PID_OFFERS_URL-http://eudi-credential-issuer:8081/offers}
       - TEST_PID_PERSONS_FILE=/test-pid-persons/personen.json
+      # The revocation block: the portal's offers carry a reference, which
+      # the block revokes at the issuer's internal API, next to a single
+      # status list entry, and it shows the public status lists of those
+      # offers. Off unless CREDENTIAL_ISSUER_INTERNAL_URL is set in .env:
+      # this backend is published on every interface, and anyone who reaches
+      # it could revoke any credential of the issuer, whose internal API is
+      # otherwise published on 127.0.0.1 only.
+      - CREDENTIAL_ISSUER_INTERNAL_URL=${CREDENTIAL_ISSUER_INTERNAL_URL:-}
+      - CREDENTIAL_ISSUER_STATUS_URL=http://eudi-credential-issuer:8080
+      - EUDI_OFFERS_URL=http://eudi-adapter:4009/eudi-offers.json
       - FSC_TXLOG_BD_URL=https://bd-txlog-api:9443
       - FSC_TXLOG_BD_CERT=/certs/bd/internal-cert.pem
       - FSC_TXLOG_BD_KEY=/certs/bd/internal-cert-key.pem
@@ -1656,7 +1673,7 @@ services:
         condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4007/health"]
-      interval: 5s
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 5
 
@@ -1756,8 +1773,8 @@ services:
       - postgres-eudi-data:/var/lib/postgresql/data
     networks: [eudi]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U wallet -d issuance_server"]
-      interval: 5s
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U wallet -d issuance_server"]
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 10
 
@@ -1981,7 +1998,7 @@ services:
         condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/healthz"]
-      interval: 5s
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 5
     networks: [eudi]
@@ -2000,7 +2017,7 @@ services:
       - ${EUDI_TRUST_PUBLISH_DIR:-./.local/public-trust}:/usr/share/trust:ro
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8080/healthz"]
-      interval: 5s
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 5
     networks: [eudi]
@@ -2018,7 +2035,7 @@ services:
       - ./services/brp-graphql-server/mockdata/personen.json:/persons/personen.json:ro
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8080/healthz"]
-      interval: 5s
+      <<: *healthcheck-timing
       timeout: 3s
       retries: 5
     networks: [eudi]

@@ -15,6 +15,9 @@ export
 # .env if needed.
 NLWALLET_PATH ?= $(PWD)/vendor/nl-wallet
 
+# How often a healthy container is probed. Override in .env.
+HEALTHCHECK_INTERVAL ?= 30s
+
 # Local Source Registry onboarding. Development certificates are provisioned
 # only by the explicit provision-development-certificates target.
 DEVELOPMENT_SOURCE_OIN ?= 99999999900000000200
@@ -185,9 +188,11 @@ demo-manager: policy-check certs require-ftv-postgres
 	  docker compose --profile manager up --build -d
 	@echo "-> Waiting for the Manager to accept policies..."
 	@for i in $$(seq 1 30); do \
-	  curl -fsS -m 2 http://localhost:$${GBO_PORT_FTV_MANAGER_HEALTH:-9282}/healthz >/dev/null 2>&1 && break; \
+	  curl -fsS -m 2 http://localhost:$${GBO_PORT_FTV_MANAGER_HEALTH:-9282}/healthz >/dev/null 2>&1 && exit 0; \
 	  sleep 2; \
-	done
+	done; \
+	echo "The Manager did not become healthy within 60s; not seeding. Check: docker compose logs openftv-manager" >&2; \
+	exit 1
 	./scripts/seed-openftv-manager.py --url http://localhost:$${GBO_PORT_FTV_MANAGER:-9280}
 	@echo "-> Restarting the PDP so it pulls the freshly seeded bundle"
 	docker compose --profile manager restart openftv-pdp
@@ -717,31 +722,47 @@ fsc-down:
 fsc-test: fsc-up
 	bash fsc-infra/test/request-org-cert.sh
 
+# Files fsc-clean removes. Containers write them as root or uid 1001. Under
+# rootful Docker, and under rootless Docker (where uid 1001 maps to a subuid),
+# the host user cannot delete them without sudo, so fsc-clean always
+# deletes them from a container of the pki-tools image that wrote them.
+FSC_CLEAN_FILES = \
+	fsc-infra/pki/ca/*.pem \
+	fsc-infra/pki/ca/*.csr \
+	fsc-infra/directory-peer/pki/org/*.pem \
+	fsc-infra/directory-peer/pki/internal/*.pem \
+	fsc-infra/directory-ui/pki/org/*.pem \
+	fsc-infra/orgs/edi-issuer/pki/org/*.pem \
+	fsc-infra/orgs/edi-issuer/pki/internal/*.pem \
+	fsc-infra/orgs/belastingdienst-mock/pki/org/*.pem \
+	fsc-infra/orgs/belastingdienst-mock/pki/internal/*.pem \
+	fsc-infra/orgs/brp-mock/pki/org/*.pem \
+	fsc-infra/orgs/brp-mock/pki/internal/*.pem \
+	fsc-infra/orgs/hypotheekverlener-mock/pki/org/*.pem \
+	fsc-infra/orgs/hypotheekverlener-mock/pki/internal/*.pem \
+	fsc-infra/orgs/consent-register/pki/org/*.pem \
+	fsc-infra/orgs/consent-register/pki/internal/*.pem \
+	fsc-infra/orgs/gbo-pdp/pki/org/*.pem \
+	fsc-infra/orgs/gbo-pdp/pki/internal/*.pem \
+	fsc-infra/orgs/installatieregister/pki/org/*.pem \
+	fsc-infra/orgs/installatieregister/pki/internal/*.pem \
+	fsc-infra/orgs/integrator/pki/org/*.pem \
+	fsc-infra/orgs/integrator/pki/internal/*.pem \
+	fsc-infra/orgs/asip/pki/org/*.pem \
+	fsc-infra/orgs/asip/pki/internal/*.pem \
+	services/openftv-pdp/certs/*.pem
+
+# The files go first: `down --rmi local` removes the compose-built pki-tools
+# image that deletes them. --pull=never because the image is local only and
+# must never come from a registry. Without files the image is not needed.
 fsc-clean:
+	$(if $(wildcard $(FSC_CLEAN_FILES)),@docker image inspect gbo-demo/pki-tools:local >/dev/null 2>&1 || { \
+		echo "fsc-clean: image gbo-demo/pki-tools:local not found; it is needed to delete the FSC certificates." >&2; \
+		echo "Build it with 'make fsc-up' and run 'make fsc-clean' again." >&2; \
+		exit 1; })
+	$(if $(wildcard $(FSC_CLEAN_FILES)),docker run --rm --pull=never -v "$(CURDIR):/work" -w /work gbo-demo/pki-tools:local \
+		sh -c 'rm -f $(FSC_CLEAN_FILES)')
 	$(FSC_COMPOSE) --profile integrator --profile asi down -v --rmi local
-	rm -f fsc-infra/pki/ca/*.pem fsc-infra/pki/ca/*.csr
-	rm -f fsc-infra/directory-peer/pki/org/*.pem
-	rm -f fsc-infra/directory-peer/pki/internal/*.pem
-	rm -f fsc-infra/directory-ui/pki/org/*.pem
-	rm -f fsc-infra/orgs/edi-issuer/pki/org/*.pem
-	rm -f fsc-infra/orgs/edi-issuer/pki/internal/*.pem
-	rm -f fsc-infra/orgs/belastingdienst-mock/pki/org/*.pem
-	rm -f fsc-infra/orgs/belastingdienst-mock/pki/internal/*.pem
-	rm -f fsc-infra/orgs/brp-mock/pki/org/*.pem
-	rm -f fsc-infra/orgs/brp-mock/pki/internal/*.pem
-	rm -f fsc-infra/orgs/hypotheekverlener-mock/pki/org/*.pem
-	rm -f fsc-infra/orgs/hypotheekverlener-mock/pki/internal/*.pem
-	rm -f fsc-infra/orgs/consent-register/pki/org/*.pem
-	rm -f fsc-infra/orgs/consent-register/pki/internal/*.pem
-	rm -f fsc-infra/orgs/gbo-pdp/pki/org/*.pem
-	rm -f fsc-infra/orgs/gbo-pdp/pki/internal/*.pem
-	rm -f fsc-infra/orgs/installatieregister/pki/org/*.pem
-	rm -f fsc-infra/orgs/installatieregister/pki/internal/*.pem
-	rm -f fsc-infra/orgs/integrator/pki/org/*.pem
-	rm -f fsc-infra/orgs/integrator/pki/internal/*.pem
-	rm -f fsc-infra/orgs/asip/pki/org/*.pem
-	rm -f fsc-infra/orgs/asip/pki/internal/*.pem
-	rm -f services/openftv-pdp/certs/*.pem
 
 # Contract-seed: register bri-service + publication + connection contract
 # via mTLS to the FSC Manager/Controller APIs. Requires that fsc-all-up

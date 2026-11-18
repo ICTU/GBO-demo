@@ -31,10 +31,12 @@ import (
 	"time"
 
 	"errors"
+	"gbo-demo/dev-portal-backend/internal/revocation"
 	"gbo-demo/dev-portal-backend/internal/testpid"
 	"gbo-demo/dev-portal-backend/internal/testpid/issuerhttp"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp/filters"
 	"net"
 	"os/signal"
 	"syscall"
@@ -72,6 +74,17 @@ type config struct {
 	// TestPIDPersonsFile holds the BRP mock persons the issuer's
 	// test-pid-source maps to PIDs.
 	TestPIDPersonsFile string
+	// CredentialIssuerInternalURL is the own credential issuer's internal
+	// API (revocation.go), where the portal makes offers with a reference
+	// and revokes them. Empty, the default, leaves the portal without its
+	// revocation panel: the API lets anyone revoke anything.
+	CredentialIssuerInternalURL string
+	// CredentialIssuerStatusURL is where that issuer serves its status
+	// lists (/status/{provider}/{list}).
+	CredentialIssuerStatusURL string
+	// EudiOffersURL lists the offers the sources publish (the
+	// eudi-adapter's /eudi-offers.json).
+	EudiOffersURL string
 }
 
 const defaultDvtpConsumerPeerID = "99999999900000000300"
@@ -141,6 +154,10 @@ func loadConfig() config {
 		QtspURL:            strings.TrimRight(os.Getenv("QTSP_URL"), "/"),
 		TestPIDOffersURL:   os.Getenv("TEST_PID_OFFERS_URL"),
 		TestPIDPersonsFile: getEnv("TEST_PID_PERSONS_FILE", "/test-pid-persons/personen.json"),
+
+		CredentialIssuerInternalURL: strings.TrimRight(os.Getenv("CREDENTIAL_ISSUER_INTERNAL_URL"), "/"),
+		CredentialIssuerStatusURL:   strings.TrimRight(os.Getenv("CREDENTIAL_ISSUER_STATUS_URL"), "/"),
+		EudiOffersURL:               os.Getenv("EUDI_OFFERS_URL"),
 	}
 }
 
@@ -933,9 +950,7 @@ func handlePolicySnippet(cfg config) http.HandlerFunc {
 		// EMITS this code as a deny reason, not on a lookup table:
 		//   1. the refusing rule's own file, then its regime's helper
 		//   2. file declaring the request's package AND containing the literal
-		//   3. line containing BOTH <needle> AND `deny_reason(` (older
-		//      reason-cascade style)
-		//   4. fall-through: any line containing the literal
+		//   3. fall-through: any line containing the literal
 		needle := fmt.Sprintf("%q", code)
 		var picked struct {
 			id, raw string
@@ -959,14 +974,6 @@ func handlePolicySnippet(cfg config) http.HandlerFunc {
 					continue
 				}
 				if line := findLineWith(p.Raw, needle); line > 0 {
-					picked.id, picked.raw, picked.line = p.ID, p.Raw, line
-					break
-				}
-			}
-		}
-		if picked.id == "" {
-			for _, p := range policies {
-				if line := findLineWithAll(p.Raw, needle, "deny_reason("); line > 0 {
 					picked.id, picked.raw, picked.line = p.ID, p.Raw, line
 					break
 				}
@@ -1012,26 +1019,6 @@ func rulePackages(rulesFile, ruleID string) []string {
 		return pkgs
 	}
 	return nil
-}
-
-// findLineWithAll returns the 1-based line number of the first line in raw
-// that contains ALL given needles. Used to match e.g. `deny_reason(` next to
-// the code, where both live on the same line but in different positions.
-func findLineWithAll(raw string, needles ...string) int {
-	lines := strings.Split(raw, "\n")
-	for i, l := range lines {
-		matched := true
-		for _, n := range needles {
-			if !strings.Contains(l, n) {
-				matched = false
-				break
-			}
-		}
-		if matched {
-			return i + 1
-		}
-	}
-	return 0
 }
 
 func findLineWith(raw, needle string) int {
@@ -1091,14 +1078,16 @@ func main() {
 		adl = store
 	}
 	mux := newMux(cfg, hub, adl)
-	registerTestPID(mux, newTestPIDService(cfg))
+	revocations := newRevocationService(cfg)
+	registerTestPID(mux, newTestPIDService(cfg), revocations)
+	registerRevocation(mux, revocations)
 
 	// BaseContext gives every request a context this process can cancel, which
 	// is how the long-lived SSE streams are told to wind up at shutdown.
 	baseCtx, endStreams := context.WithCancel(context.Background())
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           otelhttp.NewHandler(withAccessLog(mux), "dev-portal-backend"),
+		Handler:           otelhttp.NewHandler(withAccessLog(mux), "dev-portal-backend", otelhttp.WithFilter(filters.Not(filters.Path("/health")))),
 		ReadHeaderTimeout: readHeaderTimeout,
 		BaseContext:       func(net.Listener) context.Context { return baseCtx },
 	}
@@ -1113,16 +1102,43 @@ func newTestPIDService(cfg config) *testpid.Service {
 	if cfg.TestPIDOffersURL == "" {
 		return nil
 	}
+	persons := loadTestPersons(cfg)
+	slog.Info("test PID offers on", "issuer", cfg.TestPIDOffersURL, "persons", len(persons))
+	return testpid.New(persons, issuerhttp.New(cfg.TestPIDOffersURL, 10*time.Second))
+}
+
+// loadTestPersons reads the BRP mock persons of TEST_PID_PERSONS_FILE.
+func loadTestPersons(cfg config) []testpid.Person {
 	data, err := os.ReadFile(cfg.TestPIDPersonsFile)
 	if err != nil {
-		fatal("test PID persons", err)
+		fatal("test persons", err)
 	}
 	persons, err := testpid.ParsePersons(data)
 	if err != nil {
-		fatal("test PID persons", err)
+		fatal("test persons", err)
 	}
-	slog.Info("test PID offers on", "issuer", cfg.TestPIDOffersURL, "persons", len(persons))
-	return testpid.New(persons, issuerhttp.New(cfg.TestPIDOffersURL, 10*time.Second))
+	return persons
+}
+
+// newRevocationService is nil without CREDENTIAL_ISSUER_INTERNAL_URL. With
+// it, the status list and offer addresses are required.
+func newRevocationService(cfg config) *revocation.Service {
+	if cfg.CredentialIssuerInternalURL == "" {
+		return nil
+	}
+	if cfg.CredentialIssuerStatusURL == "" || cfg.EudiOffersURL == "" {
+		fatal("revocation", errors.New("CREDENTIAL_ISSUER_INTERNAL_URL needs CREDENTIAL_ISSUER_STATUS_URL and EUDI_OFFERS_URL"))
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	slog.Info("revocation on", "issuer", cfg.CredentialIssuerInternalURL, "status", cfg.CredentialIssuerStatusURL, "offers", cfg.EudiOffersURL)
+	return revocation.New(revocation.Config{
+		Issuer:        issuerhttp.New(cfg.CredentialIssuerInternalURL+"/offers", 10*time.Second),
+		Revoker:       issuerhttp.NewRevocations(cfg.CredentialIssuerInternalURL+"/revocations", 10*time.Second),
+		Catalog:       revocation.HTTPCatalog{URL: cfg.EudiOffersURL, Client: client},
+		Fetch:         revocation.HTTPStatusFetcher(client),
+		StatusBaseURL: cfg.CredentialIssuerStatusURL,
+		Persons:       loadTestPersons(cfg),
+	})
 }
 
 // fatal logs and ends the process. main is the only place in this service

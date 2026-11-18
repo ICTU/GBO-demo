@@ -40,6 +40,11 @@ test('F4: an offer gives its link', () => {
   assert.deepEqual(testPidOfferFrom(201, { link: 'openid-credential-offer://?x' }), { link: 'openid-credential-offer://?x' })
 })
 
+test('B1: an offer with a reference keeps it', () => {
+  assert.deepEqual(testPidOfferFrom(201, { link: 'openid-credential-offer://?x', reference: 'devportal-1' }),
+    { link: 'openid-credential-offer://?x', reference: 'devportal-1' })
+})
+
 test('F4: an offer without a link is an issuer error, not an empty QR code', () => {
   assert.deepEqual(testPidOfferFrom(201, {}), { error: testPidMessage('issuer_error') })
 })

@@ -160,7 +160,6 @@ type sessionOptions struct {
 func (s *Service) createSession(ctx context.Context, t Target, p Profile, ids []string, reference string, ttl time.Duration,
 	opts sessionOptions, fetch func(configurationID string) ([]SourceDocument, error)) (string, error) {
 	now := s.now()
-	notBefore := now.UTC().Truncate(24 * time.Hour)
 	var docs []Document
 	for _, id := range ids {
 		c := s.configs[id]
@@ -179,12 +178,13 @@ func (s *Service) createSession(ctx context.Context, t Target, p Profile, ids []
 			if err != nil {
 				return "", err
 			}
+			notBefore, expires := validity(now, c.ValidDays, reference)
 			docs = append(docs, Document{
 				CredentialID:    credentialID,
 				ConfigurationID: id,
 				Claims:          f.Attributes,
 				NotBefore:       notBefore,
-				Expires:         notBefore.AddDate(0, 0, c.ValidDays),
+				Expires:         expires,
 			})
 		}
 	}

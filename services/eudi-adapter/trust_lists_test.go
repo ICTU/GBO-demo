@@ -675,14 +675,19 @@ func TestLoTETrustHost(t *testing.T) {
 		t.Skip("set GBO_TEST_NGINX=1 for the real nginx HTTP test (Docker required)")
 	}
 	f := newLoTEFixture(t)
-	if _, err := f.publish(nil, false, f.now); err != nil {
+	source := loteSourceFunc(func(context.Context) (trustlists.Snapshot, error) { return f.snapshot, nil })
+	if _, err := publishTrustLists(context.Background(), f.options, source, f.signer, f.now); err != nil {
 		t.Fatal(err)
 	}
 	config, err := filepath.Abs("../../trust-host/nginx.conf")
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := exec.Command("docker", "run", "-d", "--rm", "--pull=never", "-p", "127.0.0.1::8080", "-v", config+":/etc/nginx/conf.d/default.conf:ro", "-v", f.options.publishDir+":/usr/share/trust:ro", "nginx:1.27-alpine").CombinedOutput()
+	pages, err := filepath.Abs("../../trust-host/pages")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("docker", "run", "-d", "--rm", "--pull=never", "-p", "127.0.0.1::8080", "-v", config+":/etc/nginx/conf.d/default.conf:ro", "-v", f.options.publishDir+":/usr/share/trust:ro", "-v", pages+":/usr/share/trust-pages:ro", "nginx:1.27-alpine").CombinedOutput()
 	if err != nil {
 		t.Fatalf("nginx: %s %v", out, err)
 	}
@@ -713,6 +718,24 @@ func TestLoTETrustHost(t *testing.T) {
 		}
 		if string(body) != f.files(t)[role.Filename()] {
 			t.Fatal("T9 wrong publication")
+		}
+	}
+	root, err := os.ReadFile(filepath.Join(f.options.rootDir, "lote-ca-cert.pem"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ path, contentType, cache, body string }{
+		{"/lote-ca-cert.pem", "application/x-pem-file", "no-cache", string(root)},
+		{"/", "text/html", "", `href="/lote/PIDProviders.jwt"`},
+	} {
+		response, err := client.Get(base + c.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(response.Body)
+		_ = response.Body.Close()
+		if err != nil || response.StatusCode != 200 || response.Header.Get("Content-Type") != c.contentType || response.Header.Get("Cache-Control") != c.cache || !strings.Contains(string(body), c.body) {
+			t.Fatalf("%s: %v %v", c.path, response, err)
 		}
 	}
 	for _, path := range []string{"/lote/manifest.json", "/.lote-generations/", "/lote/Other.jwt"} {

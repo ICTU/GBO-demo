@@ -125,6 +125,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   and its endpoints, since anyone who reaches the portal could otherwise get
   a test PID. EU wallets only: the NL Wallet takes its PID from its own
   pre-production issuer.
+- **Revocation block in the developer portal** (#696): in the EUDI tab the
+  offers the portal makes carry a reference, the test PID's and a new offer
+  of a source attestation for a chosen BSN next to the fixed EU-wallet links.
+  The block lists these offers and revokes all credentials the issuer issued
+  for one, revokes a single status list entry, and shows the public status
+  lists of the offers, decoded but not verified. The offers are kept in
+  memory. Off by default: `CREDENTIAL_ISSUER_INTERNAL_URL` in `.env` turns
+  on the block and its endpoints, since anyone who reaches the portal
+  backend could otherwise revoke any credential of the issuer. An offer of
+  a source attestation is only made for a test person's BSN. The
+  test PID offer carries a reference even then, so the issuer keeps it valid
+  for its configured days.
 - **`eudi-adapter` serves pre-authorized offers** (#614): besides a wallet's
   PID disclosure it accepts `{"subject": {"bsn": ...}}` from a credential
   issuer whose offer caller named the subject. It logs that as a separate
@@ -512,6 +524,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- **Credentials without a revocation reference are valid for 24 hours**
+  (#697): the own credential issuer cannot revoke what it issued through
+  login, disclosure-based issuance or an offer without `reference`, so those
+  credentials are short-lived (ARF VCR_01b). The test PID through the
+  test-person login gets a random reference per issuance and keeps its
+  validity.
 - **A party's pseudonym is the same across its key sets** (#597): the
   BSNk mock derives a pseudonym from the citizen and the party's OIN only,
   as BSNk-PP does. A VP is still bound to its key set version: after new keys
@@ -531,6 +549,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   rematerialize the issuer configuration (`make credential-issuer-up`, or
   the deployment's materializer) and deploy the new `eudi-credential-issuer`
   image. The test PID root and the trust lists stay the same.
+- **The idle demo uses less CPU**: container healthchecks probe every 2 s
+  while a container starts and every 30 s once it is healthy, instead of
+  every 5 s throughout (`HEALTHCHECK_INTERVAL`). The Go services no longer
+  trace `/health`, so healthchecks stop filling Jaeger with spans. The demo
+  now needs Docker Engine 25 or newer. The Postgres healthchecks probe
+  over TCP, so they no longer report ready while the init scripts run.
+- **`scripts/gen-rules-json.sh` uses the pinned OPA image** (by digest), the
+  same one as `make policy-test` and CI.
 - **`make` prints the demo URLs on `GBO_PUBLIC_HOST`** (default
   `localhost`), instead of localhost and the first `hostname -I` address,
   which does not exist on macOS.
@@ -1017,6 +1043,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   the ICTU GitHub policy.
 
 ### Removed
+- **Unused code paths are gone.** The `eudi-adapter` no longer writes
+  `source-release.json` next to a materialized configuration; nothing read
+  it. Materializing still prints the release id, and the adapter still logs
+  the release id and materialization digest when it activates a release. The
+  developer portal drops the oldest decision-log shape (one
+  `reason_admin.evaluated` cascade, which no policy emits any more; such a
+  record now shows its raw log only), the unused `fetchTracesByTag`, and
+  span mappings for service names no container reports (`pdp-service`,
+  `opa`, `edi-outway`, `edi-manager`, `bd-inway`). The policy-snippet lookup
+  no longer searches for `deny_reason(`, which only a test file contains,
+  and `fsc-infra/scripts/lib.sh` drops the uncalled `wait_for_url`.
 - The consent detail page no longer shows an "Integrator" field. The DvTP
   requirements no longer ask to tell the citizen about the integrator.
 - **`sector-pip` is gone (#378).** It served sector membership to the old
@@ -1049,6 +1086,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   demo default and only accepts `http://localhost:9001` (a demo shortcut), so
   a deployment must set `ALLOWED_RETURN_ORIGINS` when the container starts.
   The keyper-mock likewise needs `CONSENT_PORTAL_URL` outside the local demo.
+- **`make fsc-clean` works without sudo**: the certificates the containers
+  write as root or uid 1001 could not be deleted by the host user under
+  rootful Docker, nor under rootless Docker (where uid 1001 maps to a
+  subuid), so the target stopped with "Permission denied". It now always
+  deletes them from a local `gbo-demo/pki-tools` container, before
+  `compose down` removes that image. If certificates are left but the image
+  is gone, it stops with a hint to rebuild the image with `make fsc-up`.
+- **Seed and delivery steps stop on errors instead of guessing.** The FSC
+  seed scripts treated an HTTP error from a Manager or Controller as "nothing
+  registered yet" and went on to create the service or contract again; they
+  now stop with the error. The loops that wait for a contract to be signed
+  still retry a failed poll until their timeout. `make demo-manager` stops when the OpenFTV Manager
+  does not become healthy instead of seeding anyway. `make manager-seed` no
+  longer writes a retired policy back without its source when it cannot read
+  the policy. The LDV outbox treats only a missing cursor file as "nothing
+  delivered yet"; an unreadable or empty cursor now stops delivery instead of
+  replaying the whole spool, and is logged as an error that says removing the
+  cursor file replays the outbox (the logbook drops the duplicates).
 - **The LDV logbook sorts and filters by time, not by text.** Times were
   stored as RFC 3339 with trimmed fraction digits, so `…05.5Z` sorted before
   `…05Z` and the `startTime`/`endTime` read filters wrongly included or

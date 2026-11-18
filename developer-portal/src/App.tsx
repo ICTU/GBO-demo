@@ -6,6 +6,7 @@ import ResultPanel, { type ResultData } from './components/ResultPanel'
 import ArchStrip from './components/ArchStrip'
 import EudiQrPanel from './components/EudiQrPanel'
 import TestPidPanel from './components/TestPidPanel'
+import RevocationPanel from './components/RevocationPanel'
 import FscTxlogPanel from './components/FscTxlogPanel'
 import LdvPanel from './components/LdvPanel'
 import { useScenarios } from './hooks/useScenarios'
@@ -505,10 +506,8 @@ export default function App() {
           trace_id: res.trace_id ?? ctx.traceId,
           outcome,
         })
-        // On deny: enrich with the OPA reason-code (YEAR_NOT_COVERED,
-        // SCOPE_NOT_ALLOWED, …). The FSC-inway only returns a bare
-        // 401; the real reason lives in the OPA decision log, shipped
-        // via Loki — hence a short retry loop while promtail catches up.
+        // On deny: enrich with the reason code (YEAR_NOT_COVERED,
+        // SCOPE_NOT_ALLOWED, …) from the Authorization Decision Log.
         // Look the decision up by the identifier that actually reached
         // OPA: the FSC transaction-id when the backend reports one.
         const decisionId = res.fsc_transaction_id ?? res.trace_id
@@ -641,6 +640,7 @@ export default function App() {
         </div>
 
         {tab === 'eudi-issuance' && <TestPidPanel />}
+        {tab === 'eudi-issuance' && <RevocationPanel />}
 
         <div className="panel">
           <div className="panel-h">

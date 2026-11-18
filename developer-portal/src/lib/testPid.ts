@@ -10,7 +10,8 @@ export type TestPersons =
   | { enabled: false }
   | { enabled: true; persons: TestPerson[]; error: string }
 
-export type TestPidOffer = { link: string } | { error: string }
+// reference is there when the backend makes offers revocable.
+export type TestPidOffer = { link: string; reference?: string } | { error: string }
 
 const MESSAGES: Record<string, string> = {
   unknown_person: 'Deze persoon staat niet in de lijst met testpersonen.',
@@ -39,11 +40,12 @@ export function testPersonsFrom(status: number | null, body: unknown): TestPerso
 }
 
 export function testPidOfferFrom(status: number, body: unknown): TestPidOffer {
-  const answer = (body ?? {}) as { link?: unknown; error?: unknown }
+  const answer = (body ?? {}) as { link?: unknown; reference?: unknown; error?: unknown }
   if (status === 201) {
-    return typeof answer.link === 'string' && answer.link
-      ? { link: answer.link }
-      : { error: testPidMessage('issuer_error') }
+    if (typeof answer.link !== 'string' || !answer.link) return { error: testPidMessage('issuer_error') }
+    return typeof answer.reference === 'string' && answer.reference
+      ? { link: answer.link, reference: answer.reference }
+      : { link: answer.link }
   }
   return { error: testPidMessage(typeof answer.error === 'string' ? answer.error : `HTTP ${status}`) }
 }
