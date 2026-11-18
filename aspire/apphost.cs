@@ -70,17 +70,27 @@ var subjectRefKey = builder.AddParameter("subject-ref-key", "local-demo-subject-
 var bsnAuthorisedOins = builder.AddParameter("bsn-authorised-oins", "99999999900000000200");
 
 // ── Telemetry ────────────────────────────────────────────────────────────
-// The services export to the collector; the collector forwards to the
-// dashboard with the dashboard's OTLP API key. The key is fixed here so the
-// collector can be given it: AppHost:OtlpApiKey from configuration, or a
-// fresh random one per run.
-if (string.IsNullOrEmpty(builder.Configuration["AppHost:OtlpApiKey"]))
+// The Aspire dashboard is the local observability store: traces, logs and
+// metrics, kept across restarts (Resume persistence, apphost.run.json). The
+// services export to the collector; the collector forwards to the dashboard
+// and to dev-portal-backend's live strip. The developer portal reads traces
+// and the PDP's decision log back through the dashboard's telemetry API.
+//
+// Both dashboard keys are fixed here so the collector and dev-portal-backend
+// can be given them: AppHost:OtlpApiKey and AppHost:DashboardApiKey from
+// configuration (aspire secret set), or fresh random ones per run.
+foreach (var key in new[] { "AppHost:OtlpApiKey", "AppHost:DashboardApiKey" })
 {
-    builder.Configuration["AppHost:OtlpApiKey"] = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
+    if (string.IsNullOrEmpty(builder.Configuration[key]))
+    {
+        builder.Configuration[key] = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
+    }
 }
 // Under `aspire run` the dashboard listens on the host; in a published
 // compose file it is the compose environment's dashboard container.
 var dashboardOtlpGrpc = "compose-dashboard:18889";
+var dashboardUrl = "http://compose-dashboard:18888";
+var dashboardPublicUrl = "http://localhost:18888";
 if (builder.ExecutionContext.IsRunMode)
 {
     var dashboardOtlp = new Uri(builder.Configuration["ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL"]
@@ -90,20 +100,10 @@ if (builder.ExecutionContext.IsRunMode)
         throw new InvalidOperationException("The collector forwards to the dashboard over plaintext gRPC; use an http launch profile.");
     }
     dashboardOtlpGrpc = "host.docker.internal:" + dashboardOtlp.Port;
+    var frontend = new Uri((builder.Configuration["ASPNETCORE_URLS"] ?? "http://localhost:15126").Split(';')[0]);
+    dashboardUrl = $"http://host.docker.internal:{frontend.Port}";
+    dashboardPublicUrl = $"{publicScheme}://{publicHost}:{frontend.Port}";
 }
-
-var jaeger = builder.AddContainer("jaeger", "jaegertracing/all-in-one", "1.54")
-    .WithContainerRuntimeArgs("--user", "0")
-    .WithHttpEndpoint(targetPort: 16686, name: "http")
-    .WithEndpoint(targetPort: 4317, name: "otlp-grpc", scheme: "http")
-    .WithHttpHealthCheck("/")
-    .WithEnvironment("COLLECTOR_OTLP_ENABLED", "true")
-    .WithEnvironment("SPAN_STORAGE_TYPE", "badger")
-    .WithEnvironment("BADGER_EPHEMERAL", "false")
-    .WithEnvironment("BADGER_DIRECTORY_KEY", "/badger/keys")
-    .WithEnvironment("BADGER_DIRECTORY_VALUE", "/badger/values")
-    .WithEnvironment("BADGER_SPAN_STORE_TTL", "168h")
-    .WithVolume("gbo-jaeger-badger", "/badger");
 
 var otelCollector = builder.AddContainer("otel-collector", "otel/opentelemetry-collector-contrib", "0.96.0")
     .WithBindMount(Repo("aspire/otel-collector.yaml"), "/etc/otelcol-contrib/config.yaml", isReadOnly: true)
@@ -113,8 +113,7 @@ var otelCollector = builder.AddContainer("otel-collector", "otel/opentelemetry-c
     .WithHttpHealthCheck("/", endpointName: "health")
     .WithContainerRuntimeArgs("--add-host", "host.docker.internal:host-gateway")
     .WithEnvironment("ASPIRE_DASHBOARD_OTLP_GRPC", dashboardOtlpGrpc)
-    .WithEnvironment("ASPIRE_DASHBOARD_OTLP_API_KEY", builder.Configuration["AppHost:OtlpApiKey"]!)
-    .WaitFor(jaeger);
+    .WithEnvironment("ASPIRE_DASHBOARD_OTLP_API_KEY", builder.Configuration["AppHost:OtlpApiKey"]!);
 
 // A service built from its Dockerfile, exporting spans to the collector.
 IResourceBuilder<ContainerResource> GoService(string name, string dockerfile, int port, string? context = null, int? hostPort = null)
@@ -241,6 +240,11 @@ var openftvPdp = builder.AddDockerfile("openftv-pdp", "..", "services/openftv-pd
     .WithEnvironment("PDP_BUNDLE_MANAGER", On("manager") ? "http://openftv-manager:9443/v1/bundle/gbo-pdp" : "")
     .WithEnvironment("PDP_TLS_CERT", "/certs/pdp-service.pem")
     .WithEnvironment("PDP_TLS_KEY", "/certs/pdp-service-key.pem")
+    // The image's logtee exports the PDP's console, the decision log among
+    // it, as OTLP log records of this resource.
+    .WithEnvironment("OTEL_SERVICE_NAME", "openftv-pdp")
+    .WithEnvironment("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317")
+    .WaitFor(otelCollector)
     .WithBindMount(Repo("policies"), "/policies", isReadOnly: true)
     .WithBindMount(Repo("schemas/pdp-mirror"), "/etc/gbo/ftv-graphql", isReadOnly: true)
     .WithBindMount(Repo("services/openftv-pdp/certs"), "/certs", isReadOnly: true)
@@ -683,6 +687,10 @@ var devPortalBackend = builder.AddDockerfile("dev-portal-backend", "..", "servic
     .WithHttpEndpoint(targetPort: 4007, name: "http")
     .WithHttpHealthCheck("/health")
     .WithEnvironment("OTEL_SERVICE_NAME", "dev-portal-backend")
+    // Traces and the PDP's decision log, from the dashboard's telemetry API.
+    .WithContainerRuntimeArgs("--add-host", "host.docker.internal:host-gateway")
+    .WithEnvironment("TELEMETRY_API_URL", dashboardUrl)
+    .WithEnvironment("TELEMETRY_API_KEY", builder.Configuration["AppHost:DashboardApiKey"]!)
     .WithEnvironment("CITIZENS_FILE", "/citizens/citizens.json")
     .WithEnvironment("ORGANIZATIONS_FILE", "/organizations.json")
     .WithEnvironment("LDV_LOGBOOKS", ldvLogbooks)
@@ -1314,10 +1322,12 @@ IResourceBuilder<ViteAppResource> Frontend(string name, int port)
 
 var developerPortal = Frontend("developer-portal", DevPortalPort)
     .WithEnvironment("DEV_API_TARGET", devPortalBackend.GetEndpoint("http"))
-    .WithEnvironment("JAEGER_API_TARGET", jaeger.GetEndpoint("http"))
     .WithEnvironment("BD_GRAPHQL_TARGET", graphqlServer.GetEndpoint("http"))
     .WithEnvironment("BRP_GRAPHQL_TARGET", brpGraphqlServer.GetEndpoint("http"))
-    .WithEnvironment("VITE_JAEGER_PUBLIC_URL", jaeger.GetEndpoint("http"))
+    // Trace links open the dashboard; it has no log search by trace id, so
+    // the Grafana link is left out.
+    .WithEnvironment("VITE_JAEGER_PUBLIC_URL", dashboardPublicUrl + "/traces/detail/{traceId}")
+    .WithEnvironment("VITE_GRAFANA_PUBLIC_URL", "")
     .WithEnvironment("VITE_EUDI_UL_BASE", "https://app.preproductie.wallet.edi.bzk.nl/deeplink/disclosure_based_issuance")
     .WaitFor(devPortalBackend);
 // The portal proxies to whichever backends the profiles start.
@@ -1341,7 +1351,8 @@ var landingPage = Frontend("landing-page", LandingPort)
     .WithEnvironment("VITE_TOESTEMMINGSPORTAAL_URL", PublicUrl(ConsentPortalPort))
     .WithEnvironment("VITE_DEVELOPER_PORTAL_URL", PublicUrl(DevPortalPort))
     .WithEnvironment("VITE_EUDI_UL_BASE", "https://app.preproductie.wallet.edi.bzk.nl/deeplink/disclosure_based_issuance")
-    .WithEnvironment("VITE_JAEGER_PUBLIC_URL", jaeger.GetEndpoint("http"))
+    .WithEnvironment("VITE_JAEGER_PUBLIC_URL", dashboardPublicUrl + "/traces")
+    .WithEnvironment("VITE_GRAFANA_PUBLIC_URL", dashboardPublicUrl + "/structuredlogs")
     .WithEnvironment("VITE_FSC_CONTROLLER_BRON_URL", PublicUrl(8095))
     .WithEnvironment("VITE_FSC_CONTROLLER_DVTP_URL", PublicUrl(8096))
     .WithEnvironment("VITE_FSC_CONTROLLER_EUDI_URL", PublicUrl(8094))

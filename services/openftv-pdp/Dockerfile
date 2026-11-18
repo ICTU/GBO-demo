@@ -52,9 +52,17 @@ RUN go mod edit -require=gbo-demo/ftv-graphql-mapper@v0.0.0 -replace=gbo-demo/ft
   && go test ./eam/mapping \
   && CGO_ENABLED=0 go build -ldflags="-s -w" -o /pdp ./apps/pdp/cmd/
 
+# logtee passes the PDP's console through unchanged and exports each line as
+# an OTLP log record when OTEL_EXPORTER_OTLP_ENDPOINT is set: the embedded
+# OPA's decision log is console output, and the Aspire dashboard serves
+# OTLP logs (services/openftv-pdp/logtee).
+COPY services/openftv-pdp/logtee /logtee-src
+RUN cd /logtee-src && CGO_ENABLED=0 go build -ldflags="-s -w" -o /logtee .
+
 FROM alpine:3.22
 RUN apk add --no-cache curl
 COPY --from=builder /pdp /
+COPY --from=builder /logtee /
 # The bundled GraphQL schemas and their manifest, one per FSC service
 # (GBO_FTV_GRAPHQL_DIR). The policy bundle pins their digests
 # (policies/gbo/graphql_schemas.rego).
@@ -66,4 +74,4 @@ COPY schemas/pdp-mirror /etc/gbo/ftv-graphql
 # this COPY can reach ./policies.
 COPY policies /policies
 EXPOSE 8443
-ENTRYPOINT ["/pdp"]
+ENTRYPOINT ["/logtee", "/pdp"]

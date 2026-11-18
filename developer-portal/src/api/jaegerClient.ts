@@ -1,7 +1,8 @@
-// Jaeger Query API client. Routes through the /jaeger-api proxy
-// (Vite + Nginx forward to jaeger:16686).
+// Trace client. dev-portal-backend serves a trace in Jaeger's query-API
+// shape, read from the Aspire dashboard's telemetry API locally or from
+// Jaeger where TELEMETRY_API_URL is unset (services/dev-portal-backend/telemetry.go).
 
-const BASE = '/jaeger-api'
+const BASE = '/api/dev'
 
 export type JaegerSpan = {
   spanID: string
@@ -31,7 +32,7 @@ type JaegerTraceResponse = {
 
 export async function fetchTrace(traceId: string): Promise<JaegerTrace | null> {
   try {
-    const res = await fetch(`${BASE}/api/traces/${encodeURIComponent(traceId)}`)
+    const res = await fetch(`${BASE}/traces/${encodeURIComponent(traceId)}`)
     if (!res.ok) return null
     const body = (await res.json()) as JaegerTraceResponse
     return body.data?.[0] ?? null

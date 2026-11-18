@@ -73,6 +73,7 @@ ldv-client
 ldv-logboek
 lvg-graphql-server
 oid4vc-kit
+openftv-pdp/logtee
 qtsp-reference
 source-registry
 test-pid-source

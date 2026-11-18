@@ -65,7 +65,7 @@ jobs:
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.12.2
-          args: --config ../../.golangci.yml --timeout 3m
+          args: --config ${{ github.workspace }}/.golangci.yml --timeout 3m
           working-directory: services/${{ matrix.service }}
       - name: go test
         working-directory: services/${{ matrix.service }}
@@ -86,7 +86,7 @@ jobs:
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.12.2
-          args: --config ../../.golangci.yml --timeout 3m
+          args: --config ${{ github.workspace }}/.golangci.yml --timeout 3m
           working-directory: conformance/check
       - name: go test
         working-directory: conformance/check

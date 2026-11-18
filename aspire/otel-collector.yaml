@@ -1,13 +1,12 @@
 # OpenTelemetry Collector for the Aspire AppHost.
 #
-# The services send their spans here, as in docker-compose.yml. The collector
-# fans them out to:
-#   - the Aspire dashboard (OTLP gRPC, with the dashboard's OTLP API key)
-#   - Jaeger, which the developer portal still queries (until phase 3)
+# The services send their spans and logs here. The collector fans them out to:
+#   - the Aspire dashboard (OTLP gRPC, with the dashboard's OTLP API key), the
+#     local observability store the developer portal reads back
 #   - dev-portal-backend's OTLP-JSON receiver, which colours the live
-#     architecture strip
-# otel/collector-config.yaml stays the compose and simulation-deployment
-# configuration.
+#     architecture strip (traces only)
+# otel/collector-config.yaml stays the simulation deployment's configuration,
+# with Jaeger as its trace store.
 
 extensions:
   health_check:
@@ -35,10 +34,6 @@ exporters:
       x-otlp-api-key: ${env:ASPIRE_DASHBOARD_OTLP_API_KEY}
     tls:
       insecure: true
-  otlp/jaeger:
-    endpoint: jaeger:4317
-    tls:
-      insecure: true
   # Demo tooling, not audit-grade: no retry and no queue, so late spans are
   # dropped instead of arriving seconds after the request.
   otlphttp/devportal:
@@ -59,7 +54,7 @@ service:
     traces:
       receivers: [otlp]
       processors: [batch]
-      exporters: [otlp/aspire, otlp/jaeger, otlphttp/devportal]
+      exporters: [otlp/aspire, otlphttp/devportal]
     logs:
       receivers: [otlp]
       processors: [batch]

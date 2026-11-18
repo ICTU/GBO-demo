@@ -58,15 +58,29 @@ Decisions already taken:
 
 ## Phase 3: observability on the dashboard
 
-- [ ] dev-portal-backend and developer-portal read traces from the dashboard
+- [x] dev-portal-backend and developer-portal read traces from the dashboard
   telemetry API. This needs a fixed API key through `AppHost:DashboardApiKey`
   and Resume persistence.
-- [ ] The OPA decision log arrives as OTLP logs instead of being read from
-  Loki. This also adds the slog OTel bridge to the Go services.
-- [ ] Local Jaeger, Loki, Grafana and Promtail are gone from the AppHost.
+- [x] The OPA decision log arrives as OTLP logs instead of being read from
+  Loki: the PDP image runs the PDP under `logtee`, which exports its console
+  as OTLP log records. Not done: an slog OTel bridge in the Go services; their
+  console logs already show in the dashboard (follow-up below).
+- [x] Local Jaeger, Loki, Grafana and Promtail are gone from the AppHost.
 
 ## Docs
 
 - [ ] Run sections of README, TROUBLESHOOTING, AGENTS.md, OBSERVABILITY.md and `docs/*.md`.
 - [ ] Script comments that say `make …`, and the `.github` PR and bug templates.
 - [ ] CHANGELOG entry.
+
+## Follow-ups, after review
+
+- Fewer containers (decided 2026-11-18: not now, revisit after review):
+  - one shared Postgres for FTV, EUDI and FSC
+  - the logboeken and mocks as host processes (`AddGoApp`)
+- An slog OTel bridge in the Go services, so their logs are structured
+  OTLP logs with trace correlation in the dashboard.
+- `aspire publish`: the generated compose refers to images by variable and
+  leaves out the host steps (PKI, provisioning); a push step and a decision
+  on the host steps make it a standalone replacement.
+- Port apphost.cs to a Go AppHost once that is generally available.
