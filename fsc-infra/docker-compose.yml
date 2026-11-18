@@ -22,6 +22,16 @@ name: ${FSC_PROJECT_NAME:-fsc-infra}
 #     directory-peer/pki/{org,internal}/* and directory-ui/pki/org/* exist.
 #   - GROUP_ID = fsc-demo (arbitrary; our own group name).
 
+# OpenFSC v2.4.0. Bump every image here together.
+x-openfsc-images:
+  controller: &controller-image federatedserviceconnectivity/controller:v2.4.0
+  manager: &manager-image federatedserviceconnectivity/manager:v2.4.0
+  inway: &inway-image federatedserviceconnectivity/inway:v2.4.0
+  outway: &outway-image federatedserviceconnectivity/outway:v2.4.0
+  txlog-api: &txlog-api-image federatedserviceconnectivity/txlog-api:v2.4.0
+  ca-certportal: &ca-certportal-image federatedserviceconnectivity/ca-certportal:v2.4.0
+  directory-ui: &directory-ui-image federatedserviceconnectivity/directory-ui:v2.4.0
+
 x-directory-peer-env: &directory-peer-env
   TLS_GROUP_ROOT_CERT: /certs/org/root.pem
   TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
@@ -59,7 +69,7 @@ services:
       start_interval: 2s
 
   certportal:
-    image: federatedserviceconnectivity/ca-certportal:v2.4.0
+    image: *ca-certportal-image
     command:
       - /usr/local/bin/ca-certportal
       - serve
@@ -114,7 +124,7 @@ services:
   # cold start Docker's DNS can take seconds to answer while dozens of
   # containers start together; hence 10 s here, where the services use 2 s.
   directory-migrations-controller:
-    image: federatedserviceconnectivity/controller:v2.4.0
+    image: *controller-image
     restart: "no"
     command:
       - /usr/local/bin/controller
@@ -128,7 +138,7 @@ services:
         condition: service_completed_successfully
 
   directory-migrations-manager:
-    image: federatedserviceconnectivity/manager:v2.4.0
+    image: *manager-image
     restart: "no"
     command:
       - /usr/local/bin/manager
@@ -142,7 +152,7 @@ services:
         condition: service_completed_successfully
 
   directory-controller:
-    image: federatedserviceconnectivity/controller:v2.4.0
+    image: *controller-image
     restart: unless-stopped
     ports:
       - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${FSC_PORT_DIRECTORY_CONTROLLER:-8092}:3001"
@@ -166,7 +176,7 @@ services:
         condition: service_completed_successfully
 
   directory-manager:
-    image: federatedserviceconnectivity/manager:v2.4.0
+    image: *manager-image
     restart: unless-stopped
     # Seed automation: the Directory-peer auto-signs servicePublication
     # so new services appear in the directory without manual review.
@@ -204,7 +214,7 @@ services:
         condition: service_started
 
   directory-inway:
-    image: federatedserviceconnectivity/inway:v2.4.0
+    image: *inway-image
     restart: unless-stopped
     volumes:
       - ./directory-peer/pki:/certs:ro
@@ -224,7 +234,7 @@ services:
       - directory-txlog-api
 
   directory-migrations-txlog-api:
-    image: federatedserviceconnectivity/txlog-api:v2.4.0
+    image: *txlog-api-image
     restart: "no"
     command:
       - /usr/local/bin/txlog-api
@@ -238,7 +248,7 @@ services:
         condition: service_completed_successfully
 
   directory-txlog-api:
-    image: federatedserviceconnectivity/txlog-api:v2.4.0
+    image: *txlog-api-image
     restart: unless-stopped
     volumes:
       - ./directory-peer/pki:/certs:ro
@@ -254,7 +264,7 @@ services:
         condition: service_completed_successfully
 
   directory-ui:
-    image: federatedserviceconnectivity/directory-ui:v2.4.0
+    image: *directory-ui-image
     restart: unless-stopped
     ports:
       - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${FSC_PORT_DIRECTORY_UI:-8093}:3001"
@@ -274,7 +284,7 @@ services:
   # Environment anchor: internal certs are per-org, so no shared x-env.
 
   edi-migrations-controller:
-    image: federatedserviceconnectivity/controller:v2.4.0
+    image: *controller-image
     restart: "no"
     command:
       - /usr/local/bin/controller
@@ -294,7 +304,7 @@ services:
         condition: service_completed_successfully
 
   edi-migrations-manager:
-    image: federatedserviceconnectivity/manager:v2.4.0
+    image: *manager-image
     restart: "no"
     command:
       - /usr/local/bin/manager
@@ -314,7 +324,7 @@ services:
         condition: service_completed_successfully
 
   edi-migrations-txlog-api:
-    image: federatedserviceconnectivity/txlog-api:v2.4.0
+    image: *txlog-api-image
     restart: "no"
     command:
       - /usr/local/bin/txlog-api
@@ -334,7 +344,7 @@ services:
         condition: service_completed_successfully
 
   edi-controller:
-    image: federatedserviceconnectivity/controller:v2.4.0
+    image: *controller-image
     restart: unless-stopped
     ports:
       - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${FSC_PORT_EDI_CONTROLLER:-8094}:3001"
@@ -362,7 +372,7 @@ services:
         condition: service_completed_successfully
 
   edi-manager:
-    image: federatedserviceconnectivity/manager:v2.4.0
+    image: *manager-image
     restart: unless-stopped
     volumes:
       - ./orgs/edi-issuer/pki:/certs:ro
@@ -399,7 +409,7 @@ services:
         condition: service_started
 
   edi-outway:
-    image: federatedserviceconnectivity/outway:v2.4.0
+    image: *outway-image
     restart: unless-stopped
     ports:
       # No login of its own: see GBO_INTERNAL_BIND_ADDRESS in .env.example.
@@ -426,7 +436,7 @@ services:
       - edi-txlog-api
 
   edi-txlog-api:
-    image: federatedserviceconnectivity/txlog-api:v2.4.0
+    image: *txlog-api-image
     restart: unless-stopped
     volumes:
       - ./orgs/edi-issuer/pki:/certs:ro
@@ -448,7 +458,7 @@ services:
   # === Hypotheekverlener-mock (DvTP consumer) ============================
 
   hv-migrations-controller:
-    image: federatedserviceconnectivity/controller:v2.4.0
+    image: *controller-image
     restart: "no"
     command: [/usr/local/bin/controller, migrate, up]
     environment:
@@ -465,7 +475,7 @@ services:
         condition: service_completed_successfully
 
   hv-migrations-manager:
-    image: federatedserviceconnectivity/manager:v2.4.0
+    image: *manager-image
     restart: "no"
     command: [/usr/local/bin/manager, migrate, up]
     environment:
@@ -482,7 +492,7 @@ services:
         condition: service_completed_successfully
 
   hv-migrations-txlog-api:
-    image: federatedserviceconnectivity/txlog-api:v2.4.0
+    image: *txlog-api-image
     restart: "no"
     command: [/usr/local/bin/txlog-api, migrate, up]
     environment:
@@ -499,7 +509,7 @@ services:
         condition: service_completed_successfully
 
   hv-controller:
-    image: federatedserviceconnectivity/controller:v2.4.0
+    image: *controller-image
     restart: unless-stopped
     ports:
       - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${FSC_PORT_HV_CONTROLLER:-8096}:3001"
@@ -527,7 +537,7 @@ services:
         condition: service_completed_successfully
 
   hv-manager:
-    image: federatedserviceconnectivity/manager:v2.4.0
+    image: *manager-image
     restart: unless-stopped
     volumes:
       - ./orgs/hypotheekverlener-mock/pki:/certs:ro
@@ -564,7 +574,7 @@ services:
         condition: service_started
 
   hv-outway:
-    image: federatedserviceconnectivity/outway:v2.4.0
+    image: *outway-image
     restart: unless-stopped
     volumes:
       - ./orgs/hypotheekverlener-mock/pki:/certs:ro
@@ -588,7 +598,7 @@ services:
       - hv-txlog-api
 
   hv-txlog-api:
-    image: federatedserviceconnectivity/txlog-api:v2.4.0
+    image: *txlog-api-image
     restart: unless-stopped
     volumes:
       - ./orgs/hypotheekverlener-mock/pki:/certs:ro
@@ -610,7 +620,7 @@ services:
   # === Belastingdienst-mock (provider) ===================================
 
   bd-migrations-controller:
-    image: federatedserviceconnectivity/controller:v2.4.0
+    image: *controller-image
     restart: "no"
     command:
       - /usr/local/bin/controller
@@ -630,7 +640,7 @@ services:
         condition: service_completed_successfully
 
   bd-migrations-manager:
-    image: federatedserviceconnectivity/manager:v2.4.0
+    image: *manager-image
     restart: "no"
     command:
       - /usr/local/bin/manager
@@ -650,7 +660,7 @@ services:
         condition: service_completed_successfully
 
   bd-migrations-txlog-api:
-    image: federatedserviceconnectivity/txlog-api:v2.4.0
+    image: *txlog-api-image
     restart: "no"
     command:
       - /usr/local/bin/txlog-api
@@ -670,7 +680,7 @@ services:
         condition: service_completed_successfully
 
   bd-controller:
-    image: federatedserviceconnectivity/controller:v2.4.0
+    image: *controller-image
     restart: unless-stopped
     ports:
       - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${FSC_PORT_BD_CONTROLLER:-8095}:3001"
@@ -698,7 +708,7 @@ services:
         condition: service_completed_successfully
 
   bd-manager:
-    image: federatedserviceconnectivity/manager:v2.4.0
+    image: *manager-image
     restart: unless-stopped
     # Belastingdienst-mock as service-provider decides on incoming
     # contracts by POLICY, not by a flag: every contract a peer submits
@@ -761,7 +771,7 @@ services:
         condition: service_started
 
   bd-inway:
-    image: federatedserviceconnectivity/inway:v2.4.0
+    image: *inway-image
     restart: unless-stopped
     # The sidecars behind this Inway are reachable on source-gateways only,
     # so that nothing but an Inway, after its PDP's allow, reaches them.
@@ -801,7 +811,7 @@ services:
       - bd-txlog-api
 
   bd-txlog-api:
-    image: federatedserviceconnectivity/txlog-api:v2.4.0
+    image: *txlog-api-image
     restart: unless-stopped
     volumes:
       - ./orgs/belastingdienst-mock/pki:/certs:ro
@@ -823,7 +833,7 @@ services:
   # === BRP/RvIG-mock (provider) =========================================
 
   brp-migrations-controller:
-    image: federatedserviceconnectivity/controller:v2.4.0
+    image: *controller-image
     restart: "no"
     command: [/usr/local/bin/controller, migrate, up]
     environment:
@@ -840,7 +850,7 @@ services:
         condition: service_completed_successfully
 
   brp-migrations-manager:
-    image: federatedserviceconnectivity/manager:v2.4.0
+    image: *manager-image
     restart: "no"
     command: [/usr/local/bin/manager, migrate, up]
     environment:
@@ -857,7 +867,7 @@ services:
         condition: service_completed_successfully
 
   brp-migrations-txlog-api:
-    image: federatedserviceconnectivity/txlog-api:v2.4.0
+    image: *txlog-api-image
     restart: "no"
     command: [/usr/local/bin/txlog-api, migrate, up]
     environment:
@@ -874,7 +884,7 @@ services:
         condition: service_completed_successfully
 
   brp-controller:
-    image: federatedserviceconnectivity/controller:v2.4.0
+    image: *controller-image
     restart: unless-stopped
     ports:
       - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${FSC_PORT_BRP_CONTROLLER:-8097}:3001"
@@ -902,7 +912,7 @@ services:
         condition: service_completed_successfully
 
   brp-manager:
-    image: federatedserviceconnectivity/manager:v2.4.0
+    image: *manager-image
     restart: unless-stopped
     # Same policy-driven contract acceptance as bd-manager: the PDP
     # decides, the flag does not. See the comment there for why
@@ -952,7 +962,7 @@ services:
         condition: service_started
 
   brp-inway:
-    image: federatedserviceconnectivity/inway:v2.4.0
+    image: *inway-image
     restart: unless-stopped
     # The sidecars behind this Inway are reachable on source-gateways only,
     # so that nothing but an Inway, after its PDP's allow, reaches them.
@@ -985,7 +995,7 @@ services:
       - brp-txlog-api
 
   brp-txlog-api:
-    image: federatedserviceconnectivity/txlog-api:v2.4.0
+    image: *txlog-api-image
     restart: unless-stopped
     volumes:
       - ./orgs/brp-mock/pki:/certs:ro
@@ -1009,7 +1019,7 @@ services:
   # which the PDP of a source asks per evaluation (#383).
 
   cr-migrations-controller:
-    image: federatedserviceconnectivity/controller:v2.4.0
+    image: *controller-image
     restart: "no"
     command: [/usr/local/bin/controller, migrate, up]
     environment:
@@ -1026,7 +1036,7 @@ services:
         condition: service_completed_successfully
 
   cr-migrations-manager:
-    image: federatedserviceconnectivity/manager:v2.4.0
+    image: *manager-image
     restart: "no"
     command: [/usr/local/bin/manager, migrate, up]
     environment:
@@ -1043,7 +1053,7 @@ services:
         condition: service_completed_successfully
 
   cr-migrations-txlog-api:
-    image: federatedserviceconnectivity/txlog-api:v2.4.0
+    image: *txlog-api-image
     restart: "no"
     command: [/usr/local/bin/txlog-api, migrate, up]
     environment:
@@ -1060,7 +1070,7 @@ services:
         condition: service_completed_successfully
 
   cr-controller:
-    image: federatedserviceconnectivity/controller:v2.4.0
+    image: *controller-image
     restart: unless-stopped
     ports:
       - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${FSC_PORT_CR_CONTROLLER:-8098}:3001"
@@ -1088,7 +1098,7 @@ services:
         condition: service_completed_successfully
 
   cr-manager:
-    image: federatedserviceconnectivity/manager:v2.4.0
+    image: *manager-image
     restart: unless-stopped
     # Counter-signs a connection to consent-status only when the OpenFTV PDP
     # allows it (policies/fsc/autosign.rego), as the source Managers do. The
@@ -1137,7 +1147,7 @@ services:
         condition: service_started
 
   cr-inway:
-    image: federatedserviceconnectivity/inway:v2.4.0
+    image: *inway-image
     restart: unless-stopped
     volumes:
       - ./orgs/consent-register/pki:/certs:ro
@@ -1164,7 +1174,7 @@ services:
       - cr-txlog-api
 
   cr-txlog-api:
-    image: federatedserviceconnectivity/txlog-api:v2.4.0
+    image: *txlog-api-image
     restart: unless-stopped
     volumes:
       - ./orgs/consent-register/pki:/certs:ro
@@ -1189,7 +1199,7 @@ services:
   # connect under its source holder's peer instead.
 
   pdp-migrations-controller:
-    image: federatedserviceconnectivity/controller:v2.4.0
+    image: *controller-image
     restart: "no"
     command: [/usr/local/bin/controller, migrate, up]
     environment:
@@ -1206,7 +1216,7 @@ services:
         condition: service_completed_successfully
 
   pdp-migrations-manager:
-    image: federatedserviceconnectivity/manager:v2.4.0
+    image: *manager-image
     restart: "no"
     command: [/usr/local/bin/manager, migrate, up]
     environment:
@@ -1223,7 +1233,7 @@ services:
         condition: service_completed_successfully
 
   pdp-migrations-txlog-api:
-    image: federatedserviceconnectivity/txlog-api:v2.4.0
+    image: *txlog-api-image
     restart: "no"
     command: [/usr/local/bin/txlog-api, migrate, up]
     environment:
@@ -1240,7 +1250,7 @@ services:
         condition: service_completed_successfully
 
   pdp-controller:
-    image: federatedserviceconnectivity/controller:v2.4.0
+    image: *controller-image
     restart: unless-stopped
     ports:
       - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${FSC_PORT_PDP_CONTROLLER:-8099}:3001"
@@ -1268,7 +1278,7 @@ services:
         condition: service_completed_successfully
 
   pdp-manager:
-    image: federatedserviceconnectivity/manager:v2.4.0
+    image: *manager-image
     restart: unless-stopped
     volumes:
       - ./orgs/gbo-pdp/pki:/certs:ro
@@ -1305,7 +1315,7 @@ services:
         condition: service_started
 
   pdp-outway:
-    image: federatedserviceconnectivity/outway:v2.4.0
+    image: *outway-image
     restart: unless-stopped
     volumes:
       - ./orgs/gbo-pdp/pki:/certs:ro
@@ -1329,7 +1339,7 @@ services:
       - pdp-txlog-api
 
   pdp-txlog-api:
-    image: federatedserviceconnectivity/txlog-api:v2.4.0
+    image: *txlog-api-image
     restart: unless-stopped
     volumes:
       - ./orgs/gbo-pdp/pki:/certs:ro
@@ -1353,7 +1363,7 @@ services:
   # whether a citizen owns a building. A peer of its own so the PDP's actor
   # binding tells it apart from Hypotheek-BV.
   ir-migrations-controller:
-    image: federatedserviceconnectivity/controller:v2.4.0
+    image: *controller-image
     restart: "no"
     command: [/usr/local/bin/controller, migrate, up]
     environment:
@@ -1370,7 +1380,7 @@ services:
         condition: service_completed_successfully
 
   ir-migrations-manager:
-    image: federatedserviceconnectivity/manager:v2.4.0
+    image: *manager-image
     restart: "no"
     command: [/usr/local/bin/manager, migrate, up]
     environment:
@@ -1387,7 +1397,7 @@ services:
         condition: service_completed_successfully
 
   ir-migrations-txlog-api:
-    image: federatedserviceconnectivity/txlog-api:v2.4.0
+    image: *txlog-api-image
     restart: "no"
     command: [/usr/local/bin/txlog-api, migrate, up]
     environment:
@@ -1404,7 +1414,7 @@ services:
         condition: service_completed_successfully
 
   ir-controller:
-    image: federatedserviceconnectivity/controller:v2.4.0
+    image: *controller-image
     restart: unless-stopped
     ports:
       - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${FSC_PORT_IR_CONTROLLER:-8100}:3001"
@@ -1432,7 +1442,7 @@ services:
         condition: service_completed_successfully
 
   ir-manager:
-    image: federatedserviceconnectivity/manager:v2.4.0
+    image: *manager-image
     restart: unless-stopped
     volumes:
       - ./orgs/installatieregister/pki:/certs:ro
@@ -1469,7 +1479,7 @@ services:
         condition: service_started
 
   ir-outway:
-    image: federatedserviceconnectivity/outway:v2.4.0
+    image: *outway-image
     restart: unless-stopped
     volumes:
       - ./orgs/installatieregister/pki:/certs:ro
@@ -1493,7 +1503,7 @@ services:
       - ir-txlog-api
 
   ir-txlog-api:
-    image: federatedserviceconnectivity/txlog-api:v2.4.0
+    image: *txlog-api-image
     restart: unless-stopped
     volumes:
       - ./orgs/installatieregister/pki:/certs:ro
@@ -1517,7 +1527,7 @@ services:
   # as delegator. It has no service of its own, only an Outway.
   # Opt-in: profile "integrator", started by `make demo-integrator`.
   int-migrations-controller:
-    image: federatedserviceconnectivity/controller:v2.4.0
+    image: *controller-image
     profiles: [integrator]
     restart: "no"
     command: [/usr/local/bin/controller, migrate, up]
@@ -1535,7 +1545,7 @@ services:
         condition: service_completed_successfully
 
   int-migrations-manager:
-    image: federatedserviceconnectivity/manager:v2.4.0
+    image: *manager-image
     profiles: [integrator]
     restart: "no"
     command: [/usr/local/bin/manager, migrate, up]
@@ -1553,7 +1563,7 @@ services:
         condition: service_completed_successfully
 
   int-migrations-txlog-api:
-    image: federatedserviceconnectivity/txlog-api:v2.4.0
+    image: *txlog-api-image
     profiles: [integrator]
     restart: "no"
     command: [/usr/local/bin/txlog-api, migrate, up]
@@ -1571,7 +1581,7 @@ services:
         condition: service_completed_successfully
 
   int-controller:
-    image: federatedserviceconnectivity/controller:v2.4.0
+    image: *controller-image
     profiles: [integrator]
     restart: unless-stopped
     ports:
@@ -1600,7 +1610,7 @@ services:
         condition: service_completed_successfully
 
   int-manager:
-    image: federatedserviceconnectivity/manager:v2.4.0
+    image: *manager-image
     profiles: [integrator]
     restart: unless-stopped
     volumes:
@@ -1638,7 +1648,7 @@ services:
         condition: service_started
 
   int-outway:
-    image: federatedserviceconnectivity/outway:v2.4.0
+    image: *outway-image
     profiles: [integrator]
     restart: unless-stopped
     volumes:
@@ -1663,7 +1673,7 @@ services:
       - int-txlog-api
 
   int-txlog-api:
-    image: federatedserviceconnectivity/txlog-api:v2.4.0
+    image: *txlog-api-image
     profiles: [integrator]
     restart: unless-stopped
     volumes:
@@ -1690,7 +1700,7 @@ services:
   # It has no service of its own, only an Outway.
   # Opt-in: profile "asi", started by `make demo-asi`.
   asip-migrations-controller:
-    image: federatedserviceconnectivity/controller:v2.4.0
+    image: *controller-image
     profiles: [asi]
     restart: "no"
     command: [/usr/local/bin/controller, migrate, up]
@@ -1708,7 +1718,7 @@ services:
         condition: service_completed_successfully
 
   asip-migrations-manager:
-    image: federatedserviceconnectivity/manager:v2.4.0
+    image: *manager-image
     profiles: [asi]
     restart: "no"
     command: [/usr/local/bin/manager, migrate, up]
@@ -1726,7 +1736,7 @@ services:
         condition: service_completed_successfully
 
   asip-migrations-txlog-api:
-    image: federatedserviceconnectivity/txlog-api:v2.4.0
+    image: *txlog-api-image
     profiles: [asi]
     restart: "no"
     command: [/usr/local/bin/txlog-api, migrate, up]
@@ -1744,7 +1754,7 @@ services:
         condition: service_completed_successfully
 
   asip-controller:
-    image: federatedserviceconnectivity/controller:v2.4.0
+    image: *controller-image
     profiles: [asi]
     restart: unless-stopped
     ports:
@@ -1773,7 +1783,7 @@ services:
         condition: service_completed_successfully
 
   asip-manager:
-    image: federatedserviceconnectivity/manager:v2.4.0
+    image: *manager-image
     profiles: [asi]
     restart: unless-stopped
     volumes:
@@ -1811,7 +1821,7 @@ services:
         condition: service_started
 
   asip-outway:
-    image: federatedserviceconnectivity/outway:v2.4.0
+    image: *outway-image
     profiles: [asi]
     restart: unless-stopped
     volumes:
@@ -1836,7 +1846,7 @@ services:
       - asip-txlog-api
 
   asip-txlog-api:
-    image: federatedserviceconnectivity/txlog-api:v2.4.0
+    image: *txlog-api-image
     profiles: [asi]
     restart: unless-stopped
     volumes:
