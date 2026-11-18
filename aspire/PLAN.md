@@ -19,11 +19,11 @@ Decisions already taken:
 
 ## Phase 1: core demo under Aspire, compose still working
 
-- [ ] OTLP exporter init in the 10 Go modules: drop
+- [x] OTLP exporter init in the 10 Go modules: drop
   `otlptracegrpc.WithEndpoint` and `WithInsecure`, so the SDK reads
   `OTEL_EXPORTER_OTLP_*`. Compose sets `http://otel-collector:4317`.
-- [ ] OpenTelemetry tracing in `ldv-logboek`.
-- [ ] demo-minimal core in `apphost.cs`:
+- [x] OpenTelemetry tracing in `ldv-logboek`.
+- [x] demo-minimal core in `apphost.cs`:
   - postgres-ftv and its init step, with pinned image tags
   - openftv-pdp
   - consent-register and dvtp-onboarding-register
@@ -34,7 +34,7 @@ Decisions already taken:
   - the OTel collector, fanning out to the dashboard and dev-portal-backend
   - Jaeger, for now
   - secrets as parameters
-- [ ] The developer portal's main scenario works under `aspire run`.
+- [x] The developer portal's core works under `aspire run`: the portal, the source proxies, PDP health, and spans in the dashboard, Jaeger and the live strip. The DvTP scenario needs FSC (phase 2).
 
 ## Phase 2: full parity, then remove compose and make
 
