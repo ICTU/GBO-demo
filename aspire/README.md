@@ -11,7 +11,9 @@ migration and the follow-ups.
 - Aspire CLI 17 (`brew install --cask aspire`, or the install script from aspire.dev)
 - .NET 10 SDK
 - Docker (Docker Desktop, OrbStack or Docker Engine)
-- Node.js 24 or newer with npm 11, for the Vite frontends (`npm ci`)
+- Node.js 24 or newer with npm 11, for the Vite frontends (`npm ci`). It need
+  not be first on PATH: the AppHost finds one in PATH, Homebrew, nvm, Volta or
+  fnm, or takes `Gbo:NodeDir`
 - Go 1.26 or newer, for the host-side certificate steps
 - Bash, `curl`, `jq`, OpenSSL; Python 3 for the OpenFTV Manager seed
 
