@@ -38,20 +38,20 @@ Decisions already taken:
 
 ## Phase 2: full parity, then remove compose and make
 
-- [ ] FSC infrastructure through an `AddFscPeer` helper.
-- [ ] PKI bootstrap as run-once resources.
-- [ ] Host `provision-*` steps as `AddExecutable`, so CA keys never enter containers.
-- [ ] Seeds and migrations as run-once resources with `WaitForCompletion`.
-- [ ] policy-check as a gate the PDP waits for.
-- [ ] Compose profiles as parameters: dvtp, eudi, asi, integrator, manager,
+- [x] FSC infrastructure through an `AddFscPeer` helper.
+- [x] PKI bootstrap as run-once resources.
+- [x] Host `provision-*` steps as `AddExecutable`, so CA keys never enter containers.
+- [x] Seeds and migrations as run-once resources with `WaitForCompletion`.
+- [x] policy-check as a gate the PDP waits for.
+- [x] Compose profiles as parameters: dvtp, eudi, asi, integrator, manager,
   onboarding, credential-issuer, wallet-registration.
-- [ ] nl-wallet Rust images through `AddDockerfile`.
-- [ ] cloudflared tunnel behind a parameter.
-- [ ] The remaining frontends through `AddViteApp`.
-- [ ] Fixed ports where public URLs, certificates or the DV mock + 1 rule need them.
-- [ ] `AddDockerComposeEnvironment` for `aspire publish`.
-- [ ] demo-full parity, as far as it can be checked locally.
-- [ ] Delete:
+- [x] nl-wallet Rust images through `AddDockerfile`.
+- [x] cloudflared tunnel behind a parameter.
+- [x] The remaining frontends through `AddViteApp`.
+- [x] Fixed ports where public URLs, certificates or the DV mock + 1 rule need them.
+- [x] `AddDockerComposeEnvironment` for `aspire publish`.
+- [x] demo-full parity, as far as it can be checked locally: dvtp verified end to end; EUDI and ASI modelled and published, not run (no development CAs, public URLs or nl-wallet build here).
+- [x] Delete:
   - `docker-compose*.yml`, the `Makefile` and the `GBO_PORT_*` plumbing
   - `scripts/update-env.py`, `scripts/wait-openftv-admission.sh` and `certs/generate.sh`
   - dead references to any of these
