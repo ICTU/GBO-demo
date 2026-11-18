@@ -305,6 +305,8 @@ foreach (var (org, dir) in new[] { ("edi", "edi-issuer"), ("hv", "hypotheekverle
 // The Vite dev server runs on the host; its proxy targets are the services'
 // host endpoints.
 builder.AddViteApp("developer-portal", "../developer-portal")
+    // npm ci: install exactly the lockfile, never rewrite it.
+    .WithNpm(install: true, installCommand: "ci")
     .WithEnvironment("DEV_API_TARGET", devPortalBackend.GetEndpoint("http"))
     .WithEnvironment("JAEGER_API_TARGET", jaeger.GetEndpoint("http"))
     .WithEnvironment("BD_GRAPHQL_TARGET", graphqlServer.GetEndpoint("http"))
