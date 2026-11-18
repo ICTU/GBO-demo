@@ -96,10 +96,46 @@ def default_authority() -> str:
     return f"{scheme}://{host}:{port}/realms/gbo"
 
 
+def local_realm() -> str | None:
+    """The demo's own Keycloak on its published port, or None for an external one.
+
+    The public URL is not always reachable from the machine the demo runs
+    on (a reverse proxy may serve only the tailnet, or the network may not
+    route a host back to itself). The published port always is.
+    """
+    if os.environ.get("GBO_FTV_OIDC_AUTHORITY"):
+        return None
+    port = os.environ.get("GBO_PORT_KEYCLOAK") or "9284"
+    return f"http://localhost:{port}/realms/gbo"
+
+
+def forwarded_headers(authority: str) -> dict[str, str]:
+    """Headers that make Keycloak issue `authority` as the token's issuer.
+
+    Keycloak runs with KC_PROXY_HEADERS=xforwarded and derives its issuer
+    from these, as it does behind the reverse proxy the browser uses.
+    """
+    url = urllib.parse.urlsplit(authority)
+    port = url.port or (443 if url.scheme == "https" else 80)
+    return {
+        "X-Forwarded-Proto": url.scheme,
+        "X-Forwarded-Host": url.hostname or "localhost",
+        "X-Forwarded-Port": str(port),
+    }
+
+
 def deployment_token(
-    authority: str, client_id: str, username: str, password: str
+    authority: str,
+    client_id: str,
+    username: str,
+    password: str,
+    via: str | None = None,
 ) -> str:
-    """Get a short-lived token for the internal deployment identity."""
+    """Get a short-lived token for the internal deployment identity.
+
+    With `via`, the request goes to that realm URL instead, with forwarded
+    headers so the token still carries `authority` as its issuer.
+    """
     form = urllib.parse.urlencode(
         {
             "grant_type": "password",
@@ -108,11 +144,14 @@ def deployment_token(
             "password": password,
         }
     ).encode()
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    if via:
+        headers.update(forwarded_headers(authority))
     req = urllib.request.Request(
-        f"{authority.rstrip('/')}/protocol/openid-connect/token",
+        f"{(via or authority).rstrip('/')}/protocol/openid-connect/token",
         data=form,
         method="POST",
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        headers=headers,
     )
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
@@ -241,9 +280,9 @@ def main() -> int:
     )
     ap.add_argument(
         "--oidc-authority",
-        default=default_authority(),
         help="OIDC realm used for the deployment identity (default: the "
-        "issuer the Manager accepts, as docker-compose.yml derives it)",
+        "issuer the Manager accepts, as docker-compose.yml derives it, "
+        "requested from the demo's own Keycloak on localhost)",
     )
     ap.add_argument("--oidc-client-id", default="openftv-manager-ui")
     ap.add_argument("--username", default="deployment")
@@ -260,9 +299,16 @@ def main() -> int:
         print("FTV_MANAGER_DEPLOY_PASSWORD is required", file=sys.stderr)
         return 1
 
+    # An explicit realm is asked directly; the derived one goes through
+    # the published port, so the seed does not depend on the public URL
+    # being reachable from this machine.
+    authority, via = args.oidc_authority, None
+    if not authority:
+        authority, via = default_authority(), local_realm()
+
     try:
         token = deployment_token(
-            args.oidc_authority, args.oidc_client_id, args.username, password
+            authority, args.oidc_client_id, args.username, password, via
         )
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
