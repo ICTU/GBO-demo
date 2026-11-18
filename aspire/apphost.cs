@@ -35,13 +35,15 @@ string Repo(string relative) => Path.Combine(repoRoot, relative);
 //   integrator  the integrator peer and backend (with dvtp or full)
 //   asi         the ASI route: ASIP, authorization server, QTSP (with eudi or full)
 //   manager     the OpenFTV Manager owning policy distribution
-//   credential-issuer, wallet-registration   see README.md
+//   credential-issuer   the own credential issuer, trust host and test PID source
+// One-off host provisioning (wallet registration, trust lists, test PID,
+// wallet verifiers) is aspire/scripts/provision.sh.
 var profiles = new HashSet<string>(
     (builder.Configuration["Gbo:Profiles"] ?? "")
         .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
     StringComparer.OrdinalIgnoreCase);
 if (profiles.Contains("full")) { profiles.Add("dvtp"); profiles.Add("eudi"); }
-if (profiles.Contains("eudi") || profiles.Contains("credential-issuer") || profiles.Contains("wallet-registration") || profiles.Contains("asi")) { profiles.Add("onboarding"); }
+if (profiles.Contains("eudi") || profiles.Contains("credential-issuer") || profiles.Contains("asi")) { profiles.Add("onboarding"); }
 bool On(string profile) => profiles.Contains(profile);
 var fscOn = On("dvtp") || On("eudi") || On("onboarding") || On("integrator") || On("asi");
 
@@ -1001,16 +1003,6 @@ if (On("onboarding"))
             .WaitFor(logboeken["logboek-eudi-adapter"]);
     }
 
-    if (On("wallet-registration"))
-    {
-        // Exports one source from the Source Registry for host-side signing;
-        // run by hand (see README): it is started explicitly.
-        EudiAdapterCli("wallet-registration-source", "./eudi-adapter", "export-wallet-registration-source")
-            .WithEnvironment("SOURCE_REGISTRY_DATABASE_URL", SourceRegistryReaderUrl)
-            .WaitForCompletion(sourceRegistryMigrations)
-            .WithExplicitStart();
-    }
-
     if (On("credential-issuer"))
     {
         // Own credential issuer beside the issuance server (make credential-issuer-up).
@@ -1021,7 +1013,7 @@ if (On("onboarding"))
         var credentialIssuerDbPassword = Generated("credential-issuer-db-password");
         if (!File.Exists(Path.Combine(trustPublishDir, "reader-root.crl")))
         {
-            throw new InvalidOperationException("The credential-issuer profile needs the wallet registration first: run the provision-wallet-registration step (README).");
+            throw new InvalidOperationException("The credential-issuer profile needs a wallet registration first: aspire/scripts/provision.sh wallet-registration SOURCE_ID=<id> (README).");
         }
 
         var credentialIssuerDbBootstrap = builder.AddContainer("credential-issuer-db-bootstrap", "postgres", "16-alpine")
