@@ -90,8 +90,24 @@ services:
       start_period: 10s
       timeout: 10s
     volumes:
-      - ./postgres/init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh
       - postgres-data:/var/lib/postgresql/data
+
+  # Holds the only list of FSC databases (postgres/init-databases.sh). Runs on
+  # every `up` and is idempotent, so an existing volume gets new databases too.
+  postgres-init:
+    image: postgres:17.10-alpine
+    environment:
+      PGHOST: postgres
+      PGUSER: postgres
+      PGPASSWORD: ${FSC_POSTGRES_PASSWORD}
+      PGDATABASE: postgres
+    command: ["sh", "/init/init-databases.sh"]
+    volumes:
+      - ./postgres/init-databases.sh:/init/init-databases.sh:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
 
   directory-migrations-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
@@ -104,8 +120,8 @@ services:
       <<: *directory-peer-env
       POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_dir_controller?sslmode=disable&connect_timeout=2"
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   directory-migrations-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
@@ -118,8 +134,8 @@ services:
       <<: *directory-peer-env
       POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_dir_manager?sslmode=disable&connect_timeout=2"
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   directory-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
@@ -214,8 +230,8 @@ services:
       <<: *directory-peer-env
       POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_dir_txlog?sslmode=disable&connect_timeout=2"
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   directory-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
@@ -270,8 +286,8 @@ services:
     volumes:
       - ./orgs/edi-issuer/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   edi-migrations-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
@@ -290,8 +306,8 @@ services:
     volumes:
       - ./orgs/edi-issuer/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   edi-migrations-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
@@ -310,8 +326,8 @@ services:
     volumes:
       - ./orgs/edi-issuer/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   edi-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
@@ -441,8 +457,8 @@ services:
     volumes:
       - ./orgs/hypotheekverlener-mock/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   hv-migrations-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
@@ -458,8 +474,8 @@ services:
     volumes:
       - ./orgs/hypotheekverlener-mock/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   hv-migrations-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
@@ -475,8 +491,8 @@ services:
     volumes:
       - ./orgs/hypotheekverlener-mock/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   hv-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
@@ -606,8 +622,8 @@ services:
     volumes:
       - ./orgs/belastingdienst-mock/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   bd-migrations-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
@@ -626,8 +642,8 @@ services:
     volumes:
       - ./orgs/belastingdienst-mock/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   bd-migrations-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
@@ -646,8 +662,8 @@ services:
     volumes:
       - ./orgs/belastingdienst-mock/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   bd-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
@@ -847,8 +863,8 @@ services:
     volumes:
       - ./orgs/brp-mock/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   brp-migrations-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
@@ -864,8 +880,8 @@ services:
     volumes:
       - ./orgs/brp-mock/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   brp-migrations-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
@@ -881,8 +897,8 @@ services:
     volumes:
       - ./orgs/brp-mock/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   brp-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
@@ -1066,8 +1082,8 @@ services:
     volumes:
       - ./orgs/consent-register/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   cr-migrations-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
@@ -1083,8 +1099,8 @@ services:
     volumes:
       - ./orgs/consent-register/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   cr-migrations-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
@@ -1100,8 +1116,8 @@ services:
     volumes:
       - ./orgs/consent-register/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   cr-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
@@ -1277,8 +1293,8 @@ services:
     volumes:
       - ./orgs/gbo-pdp/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   pdp-migrations-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
@@ -1294,8 +1310,8 @@ services:
     volumes:
       - ./orgs/gbo-pdp/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   pdp-migrations-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
@@ -1311,8 +1327,8 @@ services:
     volumes:
       - ./orgs/gbo-pdp/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   pdp-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
@@ -1441,8 +1457,8 @@ services:
     volumes:
       - ./orgs/installatieregister/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   ir-migrations-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
@@ -1458,8 +1474,8 @@ services:
     volumes:
       - ./orgs/installatieregister/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   ir-migrations-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
@@ -1475,8 +1491,8 @@ services:
     volumes:
       - ./orgs/installatieregister/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   ir-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
@@ -1606,8 +1622,8 @@ services:
     volumes:
       - ./orgs/integrator/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   int-migrations-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
@@ -1624,8 +1640,8 @@ services:
     volumes:
       - ./orgs/integrator/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   int-migrations-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
@@ -1642,8 +1658,8 @@ services:
     volumes:
       - ./orgs/integrator/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   int-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
@@ -1779,8 +1795,8 @@ services:
     volumes:
       - ./orgs/asip/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   asip-migrations-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
@@ -1797,8 +1813,8 @@ services:
     volumes:
       - ./orgs/asip/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   asip-migrations-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
@@ -1815,8 +1831,8 @@ services:
     volumes:
       - ./orgs/asip/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   asip-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
