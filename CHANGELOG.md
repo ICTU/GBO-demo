@@ -1266,6 +1266,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   `SubjectTypePI`.
 
 ### Fixed
+- **`make demo-minimal`, `make demo-manager` and `make up` start without a
+  running FSC stack.** The base stack joins two networks of the
+  fsc-infra project as external networks, its default network and (since the
+  sidecars sit behind the Inways) `source-gateways`, and Compose refuses to
+  start while either is missing, as right after `make demo-down`. These
+  targets now create the missing ones, labelled as the fsc-infra project's,
+  so a later FSC start uses them and `make demo-down` removes them.
 - **The reference QTSP's end-to-end tests clean up after themselves.** They
   left the service processes they started running and a `qtsp-e2e-*`
   directory of about 30 MB (built binaries and generated keys) in the temp
