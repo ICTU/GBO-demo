@@ -340,7 +340,7 @@ func fatal(msg string, err error) {
 }
 
 // serve runs the server until the process is asked to stop, then drains it.
-// Without this a SIGTERM (docker compose down, a Kubernetes rollout) killed
+// Without this a SIGTERM (stopping the AppHost, a Kubernetes rollout) killed
 // in-flight consent writes outright. Previously a failed ListenAndServe was
 // only logged, so a service that could not bind its port exited 0.
 func serve(srv *http.Server, endStreams context.CancelFunc) {
@@ -367,7 +367,7 @@ func serve(srv *http.Server, endStreams context.CancelFunc) {
 }
 
 // otlpTraceOptions picks how the OTLP exporter reaches the collector. A bare
-// host:port, as docker-compose.yml and older deployments set it, keeps the
+// host:port, as older deployments set it, keeps the
 // plaintext gRPC connection this service always made. A URL, as Aspire sets
 // it, is left to the SDK: it reads the scheme (http means plaintext), the
 // headers and the certificate settings from the OTEL_EXPORTER_OTLP_*

@@ -46,7 +46,7 @@ export function resolvePortalBase(location: Pick<Location, 'hostname' | 'port' |
   const { hostname, port, protocol } = location
 
   // The local Docker Compose demo exposes both frontends on the same host,
-  // on consecutive ports (default 9001/9002, overridable via GBO_PORT_*).
+  // on consecutive ports (9001/9002, fixed in aspire/apphost.cs).
   // The portal lives one port up from the dienstverlener frontend.
   if (port !== '') {
     const current = parseInt(port, 10)

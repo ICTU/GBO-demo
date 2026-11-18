@@ -30,7 +30,7 @@ type Props = {
 // would render, but without a tab-switch.
 //
 // There is deliberately no link to the demo-issuer's own QR page: that
-// service is not in docker-compose, and its usecase keys never gained the
+// service is not in the AppHost, and its usecase keys never gained the
 // year suffix (let alone akte_van_overlijden), so the link 404'd.
 export default function EudiQrPanel({ usecaseKey, offers, onCancel, onPlaygroundToggle }: Props) {
   const offer = offers.find((candidate) => candidate.key === usecaseKey)

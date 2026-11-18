@@ -1,5 +1,5 @@
 // Architecture-strip definitions — two chains (issuance/use) + branches.
-// What's here must correspond 1:1 to the real services in docker-compose.yml
+// What's here must correspond 1:1 to the real services in aspire/apphost.cs
 // — not to an imagined ideal.
 
 import { BD_BRON, BRP_BRON, type BronProfile } from './bronnen'

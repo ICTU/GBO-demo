@@ -30,7 +30,7 @@ conformance/check/conformance-check
 # Local compose overrides + secrets
 .env
 .env.local
-# scripts/update-env.py writes a timestamped backup before editing .env. Those
+# The former scripts/update-env.py wrote a timestamped backup of .env. Those
 # backups are full copies, secrets included, and were not ignored — so a
 # `git add -A` swept them into a commit.
 .env.*.bak

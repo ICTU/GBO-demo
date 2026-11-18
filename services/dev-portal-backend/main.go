@@ -1149,7 +1149,7 @@ func fatal(msg string, err error) {
 }
 
 // serve runs the server until the process is asked to stop, then drains it.
-// Without this a SIGTERM (docker compose down, a Kubernetes rollout) killed
+// Without this a SIGTERM (stopping the AppHost, a Kubernetes rollout) killed
 // in-flight requests outright. Previously a failed ListenAndServe was only
 // logged, so a service that could not bind its port exited 0.
 func serve(srv *http.Server, endStreams context.CancelFunc) {

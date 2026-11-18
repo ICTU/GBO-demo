@@ -205,7 +205,7 @@ if matches_any 'policies/*'; then
   docker="$(append_unique "${docker}" 'openftv-pdp')"
 fi
 
-if matches_any 'schemas/pdp-mirror/*' 'docker-compose.yml'; then
+if matches_any 'schemas/pdp-mirror/*' 'aspire/apphost.cs'; then
   docker="$(append_unique "${docker}" 'openftv-pdp')"
 fi
 

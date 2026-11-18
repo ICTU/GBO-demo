@@ -61,7 +61,7 @@ func traced(handler http.Handler) http.Handler {
 }
 
 // otlpTraceOptions picks how the OTLP exporter reaches the collector. A bare
-// host:port, as docker-compose.yml and older deployments set it, uses a
+// host:port, as older deployments set it, uses a
 // plaintext gRPC connection. A URL, as Aspire sets it, is left to the SDK: it
 // reads the scheme (http means plaintext), the headers and the certificate
 // settings from the OTEL_EXPORTER_OTLP_* variables itself, which WithEndpoint

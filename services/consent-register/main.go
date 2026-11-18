@@ -704,7 +704,7 @@ func main() {
 }
 
 // serve runs the servers until the process is asked to stop, then drains
-// them. Without this a SIGTERM (docker compose down, a Kubernetes rollout)
+// them. Without this a SIGTERM (stopping the AppHost, a Kubernetes rollout)
 // killed in-flight requests outright.
 func serve(servers ...*http.Server) {
 	for _, srv := range servers {
@@ -733,7 +733,7 @@ func serve(servers ...*http.Server) {
 }
 
 // otlpTraceOptions picks how the OTLP exporter reaches the collector. A bare
-// host:port, as docker-compose.yml and older deployments set it, keeps the
+// host:port, as older deployments set it, keeps the
 // plaintext gRPC connection this service always made. A URL, as Aspire sets
 // it, is left to the SDK: it reads the scheme (http means plaintext), the
 // headers and the certificate settings from the OTEL_EXPORTER_OTLP_*
