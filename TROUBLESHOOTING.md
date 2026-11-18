@@ -52,15 +52,16 @@ the certificate targets manually:
 make fsc-ca && make fsc-directory-certs && make fsc-edi-certs && make fsc-bd-certs
 ```
 
-## Migrations racing
+## A migration fails
 
-On the first `make demo-eudi`, postgres containers and migration jobs start together. If a migration opens the DB before postgres is healthy, retry:
+Each FSC migration runs once, after `postgres-init` has created the
+databases, and its peer services start only when it has completed. When one
+fails, `up` stops with `service "edi-migrations-manager" didn't complete
+successfully`. Read its log, fix the cause and run the `make` target again:
 
 ```bash
-docker compose -f fsc-infra/docker-compose.yml logs edi-migrations-manager
+docker compose -f fsc-infra/docker-compose.yml logs postgres-init edi-migrations-manager
 ```
-
-Restart the migration container with `docker compose … restart edi-migrations-manager`.
 
 ## Contract seed fails
 
