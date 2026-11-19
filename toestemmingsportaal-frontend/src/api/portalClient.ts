@@ -83,3 +83,36 @@ export async function revokeConsent(token: string, consentId: string): Promise<v
     throw new Error(`revokeConsent failed (${res.status}): ${text}`)
   }
 }
+
+// One moment a consent was used: a source delivered data under it to the
+// service provider it was given to.
+export type ConsentUse = {
+  used_at: string
+  service_provider_oin: string
+  // Ready to show: the register names the service provider and the source.
+  service_provider: string
+  source: string
+}
+
+// What the citizen is told when the uses cannot all be shown. index_unavailable:
+// the consent usage index could not be reached, so the list is not known.
+export type UsageNotice = {
+  kind: string
+  source?: string
+}
+
+export type ConsentUsage = {
+  uses: ConsentUse[]
+  notices: UsageNotice[]
+}
+
+export async function getConsentUses(token: string, consentId: string): Promise<ConsentUsage> {
+  const res = await fetch(`${BASE}/portal/consents/${encodeURIComponent(consentId)}/uses`, {
+    headers: { Authorization: `Bearer ${token}`, ...demoSessionHeader() },
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`getConsentUses failed (${res.status}): ${text}`)
+  }
+  return res.json()
+}

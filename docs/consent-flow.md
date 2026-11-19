@@ -271,6 +271,90 @@ Een ander actief consent voor dezelfde burger kan het ingetrokken consent niet
 vervangen: de PDP controleert altijd uitsluitend het `consent_id` uit het
 ondertekende token.
 
+## 4. Gebruik van een toestemming inzien
+
+Een burger ziet in MijnOverheid wanneer een toestemming is gebruikt: datum,
+dienstverlener en bron (#687). De bron meldt elke levering onder een
+toestemming bij de toestemmingsgebruik-index (`consent-usage-index`), een
+lijst met verwijzingen naast het consent-register. Het register leest die
+lijst wanneer de burger het consent opent.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Citizen as "Burger"
+    participant SC as "Sidecar bij de bron"
+    participant LB as "Logboek van de bron"
+    participant BOUT as "Outway van de bron"
+    participant CRIN as "cr-inway"
+    participant IDX as "Toestemmingsgebruik-index"
+    participant Portal as "Toestemmingsportaal"
+    participant Register as "Consent-register S01"
+
+    Note over SC: Na de ALLOW en een 200 van de bron
+    SC->>LB: Leg de doorgifte vast (trace-id)
+    SC->>BOUT: POST /consent-usage-index/registrations
+    BOUT->>CRIN: FSC-dienst consent-usage-index
+    CRIN->>IDX: logbook_id, trace_id, consent_id
+    IDX-->>SC: 201 (of 200 bij een herhaling)
+    Note over SC: Pas daarna gaan de gegevens terug
+
+    Citizen->>Portal: Open het consent
+    Portal->>Register: GET /consents/{id}/uses (na eigenaarscontrole)
+    Register->>IDX: Verwijzingen onder dit consent (intern)
+    IDX-->>Register: Registraties
+    Register-->>Portal: Gebruik, of de melding "index niet bereikbaar"
+```
+
+### Het contract voor een bron
+
+Een bron die onder een toestemming levert, meldt elke levering via de Outway
+van haar eigen FSC-peer:
+
+```http
+POST /consent-usage-index/registrations
+Content-Type: application/json
+
+{"logbook_id": "99999999900000000200/bd",
+ "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+ "grondslag_type": "consent",
+ "grondslag_ref": "<consent_id uit het token>"}
+```
+
+- `logbook_id` is de Peer ID van de bron, een schuine streep en de naam van
+  het logboek op die peer. De naam is nodig omdat BD en LVG een peer delen.
+  De index weigert (403) een registratie voor het logboek van een andere peer.
+- `trace_id` is de trace van het doorgifterecord in het eigen logboek.
+- De bron meldt alleen na een `200` op een aanvraag met een consent-token.
+- De melding hoort binnen de fail-closed-volgorde: eerst het eigen record,
+  dan de registratie, dan de gegevens. Bevestigt de index niet, dan houdt de
+  bron de gegevens in, zoals bij een record dat het logboek niet bevestigt.
+- Een herhaling is veilig: de index antwoordt dan `200` met de opgeslagen
+  registratie.
+
+In de demo doet de sidecar dit (`CONSENT_USAGE_INDEX_URL` en
+`CONSENT_USAGE_LOGBOOK_ID`). Zonder die instellingen meldt een sidecar niets.
+
+### Een doorgifterecord zonder registratie
+
+Een doorgifterecord in het logboek van de bron zonder registratie in de index
+betekent een van drie dingen:
+
+- de aanvraag droeg geen consent-token (de EUDI-route) en viel dus niet onder
+  een toestemming;
+- de bron antwoordde niet met `200`, en leverde dus niets onder de
+  toestemming;
+- de registratie faalde, en de gegevens zijn daarom niet teruggegaan.
+
+In alle drie gevallen is er onder de toestemming niets geleverd. Andersom kan
+de burger geen gebruik missen dat wel plaatsvond. Op dit pad is een
+registratie het gebruik zelf; de index controleert het consent niet, want de
+PDP deed dat al bij de Inway.
+
+Kan het register de index niet bereiken, dan toont de pagina een melding in
+plaats van een lege lijst (besluit D2): "niet gebruikt" en "nu niet op te
+halen" blijven zo uit elkaar.
+
 ## Beveiligingsgrens
 
 Het demo-token is een bearer-token. De actorbinding voorkomt dat een andere

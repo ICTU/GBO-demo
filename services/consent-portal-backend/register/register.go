@@ -11,6 +11,7 @@ package register
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"time"
@@ -106,6 +107,42 @@ func (c Client) KeepPolymorphic(ctx context.Context, subject consent.SubjectRef,
 	_, err := c.Caller.DoPrivate(ctx, "Keep polymorphic values", http.MethodPut, c.polymorphicURL(subject),
 		map[string]string{"pi": values.PI, "pp": values.PP}, nil)
 	return err
+}
+
+// Uses reads when the consent was used. The register looks the uses up in
+// the consent usage index; this only translates its answer.
+func (c Client) Uses(ctx context.Context, consentID string) (consent.Usage, error) {
+	var out struct {
+		Uses []struct {
+			UsedAt             string `json:"used_at"`
+			ServiceProviderOIN string `json:"service_provider_oin"`
+			ServiceProvider    string `json:"service_provider"`
+			Source             string `json:"source"`
+		} `json:"uses"`
+		Notices []struct {
+			Kind   string `json:"kind"`
+			Source string `json:"source"`
+		} `json:"notices"`
+	}
+	status, err := c.Caller.Do(ctx, "Get Consent Uses", http.MethodGet, c.Base+"/consents/"+url.PathEscape(consentID)+"/uses", nil, &out)
+	if err != nil {
+		if status == http.StatusNotFound {
+			return consent.Usage{}, consent.ErrNotFound
+		}
+		return consent.Usage{}, err
+	}
+	usage := consent.Usage{Uses: []consent.Use{}, Notices: []consent.Notice{}}
+	for _, u := range out.Uses {
+		at, err := time.Parse(time.RFC3339Nano, u.UsedAt)
+		if err != nil {
+			return consent.Usage{}, fmt.Errorf("the register sent used_at %q: %w", u.UsedAt, err)
+		}
+		usage.Uses = append(usage.Uses, consent.Use{UsedAt: at, ServiceProviderOIN: u.ServiceProviderOIN, ServiceProvider: u.ServiceProvider, Source: u.Source})
+	}
+	for _, n := range out.Notices {
+		usage.Notices = append(usage.Notices, consent.Notice{Kind: n.Kind, Source: n.Source})
+	}
+	return usage, nil
 }
 
 func (c Client) polymorphicURL(subject consent.SubjectRef) string {

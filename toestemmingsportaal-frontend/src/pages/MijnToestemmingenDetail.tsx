@@ -6,6 +6,7 @@ import DetailGrid from '../components/consent-detail/DetailGrid'
 import ScopeVeldenList from '../components/consent-detail/ScopeVeldenList'
 import HistoryTimeline, { HistoryEvent } from '../components/consent-detail/HistoryTimeline'
 import RevokeModal from '../components/consent-detail/RevokeModal'
+import UsageSection from '../components/consent-detail/UsageSection'
 import { useConsents } from '../hooks/useConsents'
 import { usePortalToken } from '../hooks/usePortalToken'
 import { revokeConsent } from '../api/portalClient'
@@ -113,6 +114,13 @@ export default function MijnToestemmingenDetail() {
             <h2 className="content-card-h2">Gedeelde gegevens</h2>
             <ScopeVeldenList scopes={consent.scopes} />
           </div>
+
+          {token && (
+            <div className="content-card">
+              <h2 className="content-card-h2">Gebruik</h2>
+              <UsageSection token={token} consentId={consent.consent_id} />
+            </div>
+          )}
 
           <div className="content-card">
             <h2 className="content-card-h2">Geschiedenis</h2>
