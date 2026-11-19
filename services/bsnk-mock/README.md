@@ -313,8 +313,8 @@ sources.
 ```
 
 `pseudonym` names the key set version as well, so it changes when a party
-gets new keys. A party that keeps its pseudonym of a citizen keeps
-`decodedPseudonym.pseudonymValue`, which does not; the source sidecar does.
+gets new keys. `decodedPseudonym.pseudonymValue` does not, so a party that
+keeps its pseudonym of a citizen keeps that value. The source sidecar uses it.
 
 `targetClosingKey` is refused: the mock does not convert a pseudonym to
 another closing key.
