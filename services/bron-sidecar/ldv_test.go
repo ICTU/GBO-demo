@@ -81,13 +81,17 @@ type chain struct {
 	// refuseDecryption makes the component answer as it does for a value it
 	// cannot read.
 	refuseDecryption bool
+	// upstreamStatus, when set, is the status the source answers with.
+	upstreamStatus int
 }
 
 // sidecarUnderTest wires the sidecar against a stub source and a stub
 // decryption component plus a fake logbook. The component reads the test's
 // own values: "identity-for:<oin>" is the demo BSN and "pseudonym-for:<oin>"
 // the source's pseudonym, made for that OIN.
-func sidecarUnderTest(t *testing.T, logbook *ldvtest.Logbook) *chain {
+//
+// configure, when given, adjusts the configuration before the sidecar starts.
+func sidecarUnderTest(t *testing.T, logbook *ldvtest.Logbook, configure ...func(*config)) *chain {
 	t.Helper()
 	c := &chain{}
 
@@ -96,8 +100,12 @@ func sidecarUnderTest(t *testing.T, logbook *ldvtest.Logbook) *chain {
 		c.mu.Lock()
 		c.upstreamBodies = append(c.upstreamBodies, string(body))
 		c.upstreamHeaders = append(c.upstreamHeaders, r.Header.Clone())
+		status := c.upstreamStatus
 		c.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
+		if status != 0 {
+			w.WriteHeader(status)
+		}
 		_, _ = w.Write([]byte(`{"data":{"ingeschrevenPersoon":{"bsn":"` + demoBSN + `"}}}`))
 	}))
 	t.Cleanup(upstream.Close)
@@ -147,6 +155,9 @@ func sidecarUnderTest(t *testing.T, logbook *ldvtest.Logbook) *chain {
 		PseudonymVars:         "bsn",
 		LDVDecryptionActivity: decryptionActivity,
 		LDVForwardActivity:    forwardActivity,
+	}
+	for _, apply := range configure {
+		apply(&cfg)
 	}
 	var client *ldv.Client
 	if logbook != nil {
