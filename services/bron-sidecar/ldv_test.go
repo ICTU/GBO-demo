@@ -122,7 +122,7 @@ func sidecarUnderTest(t *testing.T, logbook *ldvtest.Logbook) *chain {
 		case "/signed-encrypted-pseudonym":
 			value, _ := request["signedEncryptedPseudonym"].(string)
 			recipient := strings.TrimPrefix(value, "pseudonym-for:")
-			_, _ = w.Write([]byte(`{"pseudonym":"` + sourcePseudonym + `","decodedPseudonym":{"recipient":"` + recipient + `"}}`))
+			_, _ = w.Write([]byte(`{"pseudonym":"whole-decoded-structure","decodedPseudonym":{"recipient":"` + recipient + `","pseudonymValue":"` + sourcePseudonym + `"}}`))
 		default:
 			http.Error(w, "unknown endpoint", http.StatusNotFound)
 		}

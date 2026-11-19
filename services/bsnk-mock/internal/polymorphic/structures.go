@@ -225,8 +225,8 @@ type DecryptedPseudonym struct {
 	SchemeVersion       string `json:"schemeVersion"`
 	SchemeKeySetVersion string `json:"schemeKeySetVersion"`
 	Recipient           string `json:"recipient"`
-	// RecipientKeySetVersion is the version of the closing key the
-	// pseudonym was formed with.
+	// RecipientKeySetVersion is the key set version the value was encrypted
+	// for. The pseudonym value does not depend on it.
 	RecipientKeySetVersion string `json:"recipientKeySetVersion"`
 	Type                   string `json:"type"`
 	PseudonymValue         string `json:"pseudonymValue"`

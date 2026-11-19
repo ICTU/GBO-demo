@@ -2,6 +2,7 @@ package decryption
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -80,5 +81,44 @@ func TestASourceWithoutKeysDoesNotCallTheComponent(t *testing.T) {
 	}
 	if called {
 		t.Error("the component was called without keys")
+	}
+}
+
+// A source's pseudonym of a citizen is the pseudonym value alone, so it stays
+// the same when the source gets new keys. The component's whole decoded
+// structure names the key set version too and differs between the two.
+func TestAPseudonymIsTheSameAcrossKeySetVersions(t *testing.T) {
+	component := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			SignedEncryptedPseudonym string `json:"signedEncryptedPseudonym"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		version := req.SignedEncryptedPseudonym // the test names the version as the value
+		decoded := map[string]string{
+			"recipient":              "99999999900000000200",
+			"recipientKeySetVersion": version,
+			"pseudonymValue":         "the-same-pseudonym",
+		}
+		whole, _ := json.Marshal(decoded)
+		_ = json.NewEncoder(w).Encode(map[string]any{"pseudonym": string(whole), "decodedPseudonym": decoded})
+	}))
+	defer component.Close()
+
+	c := Component{URL: component.URL, Client: &http.Client{Timeout: 5 * time.Second}, Keys: []string{"key"}}
+	january, err := c.Pseudonym(context.Background(), "20260101")
+	if err != nil {
+		t.Fatalf("Pseudonym 20260101: %v", err)
+	}
+	nextYear, err := c.Pseudonym(context.Background(), "20270101")
+	if err != nil {
+		t.Fatalf("Pseudonym 20270101: %v", err)
+	}
+	if january.Value != "the-same-pseudonym" || nextYear.Value != january.Value {
+		t.Errorf("pseudonyms = %q and %q, want the pseudonym value under both key sets", january.Value, nextYear.Value)
+	}
+	if january.Recipient != "99999999900000000200" {
+		t.Errorf("recipient = %q", january.Recipient)
 	}
 }

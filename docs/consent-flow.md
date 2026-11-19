@@ -222,7 +222,9 @@ plaatshouders die zijn API accepteert; een andere waarde wordt geweigerd met
 Pas na de `ALLOW` zet de sidecar bij de bron het BSN of haar eigen pseudoniem
 op de plek van de plaatshouder. De bron ontsleutelt daarvoor zelf de waarde
 van die vorm die het token voor haar OIN draagt, met sleutels die ze vooraf
-heeft gekregen en zonder BSNk aan te roepen. Een waarde die voor een andere
+heeft gekregen en zonder BSNk aan te roepen. Als pseudoniem gebruikt de
+sidecar de pseudoniemwaarde (`pseudonymValue`): die blijft gelijk als de bron
+nieuwe sleutels krijgt. Een waarde die voor een andere
 partij is gemaakt, accepteert de bron niet. Een bron die niet op de
 Autorisatielijst BSN staat, heeft alleen een pseudoniem: een vraag naar haar
 identiteit faalt bij de sidecar. Een aanvraag zonder consent-token (de EUDI-route) gaat ongewijzigd

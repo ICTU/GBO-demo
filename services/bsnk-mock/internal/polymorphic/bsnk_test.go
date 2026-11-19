@@ -212,11 +212,11 @@ func TestEveryPartyGetsAPseudonymAndAuthorisedPartiesAlsoAnIdentity(t *testing.T
 	wantFault(t, "one party twice", err, SyntaxError)
 }
 
-func TestAPseudonymIsStablePerPartyAndKeySetAndDiffersOtherwise(t *testing.T) {
+func TestAPseudonymIsStablePerPartyAcrossKeySetsAndDiffersOtherwise(t *testing.T) {
 	m := newMock(t)
 	_, pp := activate(t, m)
 
-	pseudonymFor := func(oin string, version int, randomize bool) string {
+	issue := func(oin string, version int, randomize bool) string {
 		t.Helper()
 		issued, err := m.Transform(Transformation{
 			Requester: consentService, PolymorphicPseudonym: pp,
@@ -225,7 +225,11 @@ func TestAPseudonymIsStablePerPartyAndKeySetAndDiffersOtherwise(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Transform: %v", err)
 		}
-		d, err := DecryptPseudonym(issued[0].Value, keysOf(t, m, oin, itoa(version)), SchemeKeys())
+		return issued[0].Value
+	}
+	pseudonymFor := func(oin string, version int, randomize bool) string {
+		t.Helper()
+		d, err := DecryptPseudonym(issue(oin, version, randomize), keysOf(t, m, oin, itoa(version)), SchemeKeys())
 		if err != nil {
 			t.Fatalf("DecryptPseudonym: %v", err)
 		}
@@ -236,11 +240,20 @@ func TestAPseudonymIsStablePerPartyAndKeySetAndDiffersOtherwise(t *testing.T) {
 	if base != pseudonymFor(serviceProvider, keys2026, true) {
 		t.Error("the pseudonym of one citizen at one party changed between requests")
 	}
+	if base != pseudonymFor(serviceProvider, 20270101, false) {
+		t.Error("the pseudonym changed with the party's key set")
+	}
 	if base == pseudonymFor(sourceX, keys2026, false) {
 		t.Error("two parties got the same pseudonym for one citizen")
 	}
-	if base == pseudonymFor(serviceProvider, 20270101, false) {
-		t.Error("the pseudonym did not change with the party's key set")
+
+	// Only the encrypted value is bound to a key set: a VP for one key set
+	// is not read with the keys of another, in either direction.
+	if _, err := DecryptPseudonym(issue(serviceProvider, keys2026, false), keysOf(t, m, serviceProvider, "20270101"), SchemeKeys()); err == nil {
+		t.Error("a VP for the 2026 key set decrypted with the 2027 keys")
+	}
+	if _, err := DecryptPseudonym(issue(serviceProvider, 20270101, false), keysOf(t, m, serviceProvider, keys2026String), SchemeKeys()); err == nil {
+		t.Error("a VP for the 2027 key set decrypted with the 2026 keys")
 	}
 }
 
