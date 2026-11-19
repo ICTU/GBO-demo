@@ -843,7 +843,7 @@ fsc-seed-lvg: fsc-local-env
 		--network $(FSC_INFRA_NETWORK) \
 		--env-file fsc-infra/.env \
 		-e SERVICE_NAME=lvg \
-		-e SERVICE_ENDPOINT_URL=http://lvg-sidecar:4011 \
+		-e SERVICE_ENDPOINT_URL=http://lvg-ldv-component:4017 \
 		-e CONSUMER_PEER_ID=99999999900000001000 \
 		-e CONSUMER_MANAGER_URL=https://ir-manager:9443 \
 		-e CONSUMER_INTERNAL_DIR=/work/orgs/installatieregister/pki/internal \
@@ -880,7 +880,7 @@ fsc-seed-asip: fsc-local-env
 		--network $(FSC_INFRA_NETWORK) \
 		--env-file fsc-infra/.env \
 		-e SERVICE_NAME=brp \
-		-e SERVICE_ENDPOINT_URL=http://brp-sidecar:4011 \
+		-e SERVICE_ENDPOINT_URL=http://brp-ldv-component:4017 \
 		-e CONSUMER_PEER_ID=99999999900000001200 \
 		-e CONSUMER_MANAGER_URL=https://asip-manager:9443 \
 		-e CONSUMER_INTERNAL_DIR=/work/orgs/asip/pki/internal \
@@ -900,7 +900,7 @@ fsc-seed-brp: fsc-local-env
 		--network $(FSC_INFRA_NETWORK) \
 		--env-file fsc-infra/.env \
 		-e SERVICE_NAME=brp \
-		-e SERVICE_ENDPOINT_URL=http://brp-sidecar:4011 \
+		-e SERVICE_ENDPOINT_URL=http://brp-ldv-component:4017 \
 		-e SERVICE_INWAY_ADDRESS=https://brp-inway:443 \
 		-e PROVIDER_PEER_ID=99999999900000000400 \
 		-e PROVIDER_CONTROLLER_URL=https://brp-controller:9444 \
@@ -920,7 +920,7 @@ fsc-seed-rvig-source: fsc-local-env
 		--network $(FSC_INFRA_NETWORK) \
 		--env-file fsc-infra/.env \
 		-e SERVICE_NAME=brp \
-		-e SERVICE_ENDPOINT_URL=http://brp-sidecar:4011 \
+		-e SERVICE_ENDPOINT_URL=http://brp-ldv-component:4017 \
 		-e CREATE_GRANT_LINK=false \
 		-v $(PWD)/fsc-infra:/work:ro \
 		-w /work \

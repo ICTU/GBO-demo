@@ -98,6 +98,10 @@ function collectMatches(nodeId: string): Match[] {
   if (nodeId === 'sidecar') {
     return BRON_PROFILES.map((b) => ({ service: b.gatewaySvc, operation: b.gatewaySvc }))
   }
+  // The LDV component in front of the sidecar, likewise one per bron.
+  if (nodeId === 'ldv-component') {
+    return BRON_PROFILES.map((b) => ({ service: b.componentSvc, operation: b.componentSvc }))
+  }
   // The ASIP: its request span names the data service, its query span the
   // FSC transaction and the attributes asked for.
   if (nodeId === 'asi-provider') {

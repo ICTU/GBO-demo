@@ -84,6 +84,8 @@ func TestShippedRegistersLoad(t *testing.T) {
 			references: []string{
 				"https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-identiteit-ontsleuteling/v1",
 				"https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-bronquery-doorgifte/v1",
+				// Written by the proxy component in front of the sidecar (#689).
+				"https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-levering-onder-toestemming/v1",
 				"https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-ib-2025/v1",
 				"https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-ib-2024/v1",
 			},
@@ -94,6 +96,8 @@ func TestShippedRegistersLoad(t *testing.T) {
 			references: []string{
 				"https://logboek.rvig.nl/verwerkingsactiviteiten/brp-identiteit-ontsleuteling/v1",
 				"https://logboek.rvig.nl/verwerkingsactiviteiten/brp-bronquery-doorgifte/v1",
+				// Written by the proxy component in front of the sidecar (#689).
+				"https://logboek.rvig.nl/verwerkingsactiviteiten/brp-levering-onder-toestemming/v1",
 				"https://logboek.rvig.nl/verwerkingsactiviteiten/brp-akte-overlijden/v1",
 				"https://logboek.rvig.nl/verwerkingsactiviteiten/brp-persoonsgegevens-verstrekking/v1",
 			},

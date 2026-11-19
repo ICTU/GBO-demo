@@ -14,6 +14,10 @@ export type BronProfile = {
   label: string // register name, for the playground's bron-picker
   gatewaySvc: string // OTEL_SERVICE_NAME of the sidecar in front of the bron
   gatewayName: string // node label for the gateway
+  // OTEL_SERVICE_NAME and node label of the LDV component in front of the
+  // sidecar (#689): it records each delivery under a consent.
+  componentSvc: string
+  componentName: string
   bronSvc: string // OTEL_SERVICE_NAME of the GraphQL-server
   bronName: string // node label for the bron itself
   // Same-origin path the playground queries. nginx.conf (image) and
@@ -93,6 +97,8 @@ export const BRON_PROFILES: BronProfile[] = [
     label: 'Belastingdienst',
     gatewaySvc: 'bron-sidecar',
     gatewayName: 'BD-sidecar',
+    componentSvc: 'bd-ldv-component',
+    componentName: 'BD LDV-component',
     bronSvc: 'graphql-server',
     bronName: 'BD GraphQL-server',
     graphqlPath: '/bron-api/bd/graphql',
@@ -104,6 +110,8 @@ export const BRON_PROFILES: BronProfile[] = [
     label: 'BRP',
     gatewaySvc: 'brp-sidecar',
     gatewayName: 'BRP-sidecar',
+    componentSvc: 'brp-ldv-component',
+    componentName: 'BRP LDV-component',
     bronSvc: 'brp-graphql-server',
     bronName: 'BRP GraphQL-server',
     graphqlPath: '/bron-api/brp/graphql',
@@ -119,6 +127,8 @@ export const BRON_PROFILES: BronProfile[] = [
     label: 'LVG',
     gatewaySvc: 'lvg-sidecar',
     gatewayName: 'LVG-sidecar',
+    componentSvc: 'lvg-ldv-component',
+    componentName: 'LVG LDV-component',
     bronSvc: 'lvg-graphql-server',
     bronName: 'LVG GraphQL-server',
     graphqlPath: '/bron-api/lvg/graphql',
@@ -154,10 +164,12 @@ export function bronProfileBySourceOIN(sourceOIN: string | undefined): BronProfi
   return BRON_PROFILES.find((b) => b.sourceOIN === sourceOIN)
 }
 
-// Which bron-node (if any) a service name belongs to. 'sidecar' and 'bron' are
-// the node-ids both the Use- and the EUDI-chain use for the last two hops.
-export function bronNodeForService(svc: string): 'sidecar' | 'bron' | undefined {
+// Which bron-node (if any) a service name belongs to. 'ldv-component',
+// 'sidecar' and 'bron' are the node-ids every chain uses for the last three
+// hops.
+export function bronNodeForService(svc: string): 'ldv-component' | 'sidecar' | 'bron' | undefined {
   for (const b of BRON_PROFILES) {
+    if (svc === b.componentSvc) return 'ldv-component'
     if (svc === b.gatewaySvc) return 'sidecar'
     if (svc === b.bronSvc) return 'bron'
   }

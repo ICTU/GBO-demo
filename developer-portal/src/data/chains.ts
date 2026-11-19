@@ -41,6 +41,9 @@ export function useChain(consumer: Consumer = HYPOTHEEK_BV): NodeDef[] {
     // PDP-node status reflects the DECISION outcome (override in ArchStrip);
     // the OPA branch shows engine-status.
     { id: 'pdp', role: 'PDP', name: 'Policy Decision', svc: 'pdp-service' },
+    // The LDV component (#689) sits between the Inway and the sidecar: it
+    // records each delivery under a consent and registers its trace.
+    { id: 'ldv-component', role: 'Bron · LDV', name: consumer.bron.componentName, svc: consumer.bron.componentSvc },
     { id: 'sidecar', role: 'Bron · Gateway', name: consumer.bron.gatewayName, svc: consumer.bron.gatewaySvc },
     { id: 'bron', role: 'Bron', name: consumer.bron.bronName, svc: consumer.bron.bronSvc },
   ]
@@ -85,6 +88,7 @@ export function eudiIssuanceChain(bron: BronProfile = BD_BRON): NodeDef[] {
     { id: 'edi-outway', role: 'FSC', name: 'EDI-Outway', svc: 'edi-outway' },
     { id: 'bd-inway', role: 'FSC', name: 'BD-Inway', svc: 'bd-inway' },
     { id: 'pdp', role: 'PDP', name: 'Policy Decision', svc: 'pdp-service' },
+    { id: 'ldv-component', role: 'Bron · LDV', name: bron.componentName, svc: bron.componentSvc },
     { id: 'sidecar', role: 'Bron · Gateway', name: bron.gatewayName, svc: bron.gatewaySvc },
     { id: 'bron', role: 'Bron', name: bron.bronName, svc: bron.bronSvc },
   ]
@@ -111,6 +115,7 @@ export function asiChain(bron: BronProfile = BRP_BRON): NodeDef[] {
     { id: 'asip-outway', role: 'FSC', name: 'ASIP-Outway', svc: 'asip-outway' },
     { id: 'bd-inway', role: 'FSC', name: 'BD-Inway', svc: 'bd-inway' },
     { id: 'pdp', role: 'PDP', name: 'Policy Decision', svc: 'pdp-service' },
+    { id: 'ldv-component', role: 'Bron · LDV', name: bron.componentName, svc: bron.componentSvc },
     { id: 'sidecar', role: 'Bron · Gateway', name: bron.gatewayName, svc: bron.gatewaySvc },
     { id: 'bron', role: 'Bron', name: bron.bronName, svc: bron.bronSvc },
   ]

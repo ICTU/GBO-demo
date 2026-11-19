@@ -1,0 +1,71 @@
+# The LDV reference component of #689 for one source: the ldv-logboek image
+# in proxy mode, placed between the source's Inway and its own service (in
+# the demo, the bron-sidecar). It records each delivery under a consent in
+# its own logbook and registers the trace at GBO's consent usage index
+# through the source peer's Outway. One release per source, each with its
+# own volume.
+#
+# Point the source's FSC service endpoint at this release's Service (port
+# 4017), and make the source's own service reachable from this release only:
+# a caller that reaches it past the component skips the record.
+#
+# The chart publishes one port. The logbook's own listener (4016, write and
+# the token-protected read API) and, with phase 5, the read API for the
+# consent register behind the Inway are on other ports; add a Service of
+# your own for each one that something must reach.
+image:
+  repository: ghcr.io/ictu/gbo-demo/ldv-logboek
+  tag: latest
+
+containerPort: 4017
+healthPath: /health
+
+env:
+  - name: DATABASE_PATH
+    value: /data/logboek.db
+  # The source's own Register van Verwerkingsactiviteiten, with the activity
+  # a delivery is recorded under.
+  - name: REGISTER_PATH
+    value: /config/verwerkingsactiviteiten-bd.json
+  - name: LDV_LOGBOOK_ID
+    value: https://logboek.belastingdienst.nl/ldv-lezen-bd/data-processing-operations
+  - name: LDV_PROXY_UPSTREAM
+    value: http://bron-sidecar:4011
+  - name: LDV_PROXY_ACTIVITY
+    value: https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-levering-onder-toestemming/v1
+  # The source peer's Outway, with the grant link for the consent usage
+  # index, and the logbook ID registrations name: peer ID plus the name of
+  # this component's read service.
+  - name: CONSENT_USAGE_INDEX_URL
+    value: http://bd-outway:8080/consent-usage-index
+  - name: CONSENT_USAGE_LOGBOOK_ID
+    value: 99999999900000000200/ldv-lezen-bd
+  - name: LDV_WRITE_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: ldv-component-bd
+        key: write-token
+  - name: LDV_READ_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: ldv-component-bd
+        key: read-token
+  # The SDK reads OTEL_EXPORTER_OTLP_*; set the endpoint of your collector.
+  - name: OTEL_SERVICE_NAME
+    value: bd-ldv-component
+  - name: OTEL_EXPORTER_OTLP_ENDPOINT
+    value: http://otel-collector:4317
+
+volumeMounts:
+  - name: logbook-data
+    mountPath: /data
+
+volumes:
+  - name: logbook-data
+    persistentVolumeClaim:
+      claimName: ldv-component-bd-data
+
+# One replica: the logbook is SQLite on a ReadWriteOnce volume, and Recreate
+# makes sure two pods never open it at once.
+deploymentStrategy:
+  type: Recreate

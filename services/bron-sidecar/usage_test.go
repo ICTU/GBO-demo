@@ -160,3 +160,29 @@ func TestHalfASettingIsRefusedAtStart(t *testing.T) {
 		t.Fatal("a URL without a logbook ID was accepted")
 	}
 }
+
+// D1: for the component in front, the sidecar returns the pseudonym its
+// forward record names the citizen by, and only when configured to.
+func TestTheSidecarReturnsItsNameForTheCitizenOnlyWhenAsked(t *testing.T) {
+	logbook := ldvtest.New(t, decryptionActivity, forwardActivity)
+	c := sidecarUnderTest(t, logbook, func(cfg *config) { cfg.ReturnSubjectID = true })
+	response := postQuery(t, c.url, consentHeaders(t), consentQuery)
+	got := response.Header.Get("Gbo-Ldv-Subject-Id")
+	var forwardSubject string
+	for _, record := range logbook.Written() {
+		if record.Name == "dataverwerking.bronquery-doorgifte" {
+			forwardSubject, _ = record.Attributes["dpl.core.data_subject_id"].(string)
+		}
+	}
+	if got == "" || got != forwardSubject {
+		t.Fatalf("returned %q, the forward record names %q", got, forwardSubject)
+	}
+	if got == demoBSN {
+		t.Fatal("the BSN was returned")
+	}
+
+	plain := sidecarUnderTest(t, ldvtest.New(t, decryptionActivity, forwardActivity))
+	if h := postQuery(t, plain.url, consentHeaders(t), consentQuery).Header.Get("Gbo-Ldv-Subject-Id"); h != "" {
+		t.Fatalf("returned %q without being asked", h)
+	}
+}

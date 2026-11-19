@@ -110,6 +110,7 @@ function nodesForSpan(span: SpanInfo, mode: Tab): string[] {
   // different flow, not this chain.
   for (const c of CONSUMERS) {
     if (svc === c.backendSvc) return ['afnemer']
+    if (svc === c.bron.componentSvc) return ['ldv-component']
     if (svc === c.bron.gatewaySvc) return ['sidecar']
     if (svc === c.bron.bronSvc) return ['bron']
   }
@@ -119,17 +120,17 @@ function nodesForSpan(span: SpanInfo, mode: Tab): string[] {
 export const ISSUANCE_NODE_IDS = ['actor', 's02', 'bsnk', 's01']
 export const USE_NODE_IDS = [
   'afnemer', 'outway', 'outway-manager', 'bd-inway',
-  'pdp', 'opa', 'consent-pip', 'sidecar', 'decryption', 'bron',
+  'pdp', 'opa', 'consent-pip', 'ldv-component', 'sidecar', 'decryption', 'bron',
 ]
 export const ASI_NODE_IDS = [
   'qtsp', 'asi-authorization-server', 'asi-provider',
   'asip-outway', 'asip-manager', 'bd-inway',
-  'pdp', 'opa', 'sidecar', 'bron',
+  'pdp', 'opa', 'ldv-component', 'sidecar', 'bron',
 ]
 export const EUDI_ISSUANCE_NODE_IDS = [
   'wallet', 'demo-issuer', 'issuance-server',
   'eudi-adapter', 'edi-outway', 'bd-inway',
-  'pdp', 'opa', 'sidecar', 'bron',
+  'pdp', 'opa', 'ldv-component', 'sidecar', 'bron',
   'edi-manager',
 ]
 
@@ -169,7 +170,7 @@ export function nodeStatesFromSpans(
     // If the request made it through the chain (eudi-adapter or bron has a
     // span), mark them all 'no-otel' (not 'grey' — which would imply "not
     // seen yet", while these are structurally unmeasurable).
-    const anyDownstream = ['eudi-adapter', 'pdp', 'sidecar', 'bron'].some(
+    const anyDownstream = ['eudi-adapter', 'pdp', 'ldv-component', 'sidecar', 'bron'].some(
       (n) => result[n] === 'green' || result[n] === 'red',
     )
     if (anyDownstream) {
@@ -189,7 +190,7 @@ export function nodeStatesFromSpans(
       }
     }
     // The chain behind the ASIP only when the request went through it.
-    const anyDownstream = ['pdp', 'sidecar', 'bron'].some(
+    const anyDownstream = ['pdp', 'ldv-component', 'sidecar', 'bron'].some(
       (n) => result[n] === 'green' || result[n] === 'red',
     )
     if (anyDownstream) {
@@ -203,7 +204,7 @@ export function nodeStatesFromSpans(
     // Same principle for the DvTP branch: the OpenFSC containers (the
     // consumer's outway and manager, bd-inway) don't export spans; mark
     // 'no-otel' if downstream arrived.
-    const anyDownstream = ['pdp', 'sidecar', 'bron'].some(
+    const anyDownstream = ['pdp', 'ldv-component', 'sidecar', 'bron'].some(
       (n) => result[n] === 'green' || result[n] === 'red',
     )
     if (anyDownstream) {

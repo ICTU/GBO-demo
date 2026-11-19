@@ -106,6 +106,12 @@ type config struct {
 	// registers nothing, like a source without a logbook writes no records.
 	UsageIndexURL  string
 	UsageLogbookID string
+	// ReturnSubjectID makes the sidecar return the pseudonym it names the
+	// Betrokkene by in its response (Gbo-Ldv-Subject-Id), for the LDV
+	// component in front of it (#689, D1). Only for a sidecar that has such
+	// a component: the component strips the header, and without it the
+	// header would reach the caller.
+	ReturnSubjectID bool
 }
 
 func loadConfig() config {
@@ -122,6 +128,7 @@ func loadConfig() config {
 		GraphQLPath:           getEnv("GRAPHQL_PATH", defaultGraphQLPath),
 		UsageIndexURL:         os.Getenv("CONSENT_USAGE_INDEX_URL"),
 		UsageLogbookID:        os.Getenv("CONSENT_USAGE_LOGBOOK_ID"),
+		ReturnSubjectID:       os.Getenv("LDV_RETURN_SUBJECT_ID") == "true",
 	}
 }
 
@@ -336,7 +343,8 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client, substi
 		// instead of data — the strongest ordering available without a
 		// two-phase commit, and the reason this is fail-closed rather than
 		// best-effort.
-		if err := logForward(r.Context(), logbook, cfg, forward, subjects, filled, resp.StatusCode); err != nil {
+		forwardSubject, err := logForward(r.Context(), logbook, cfg, forward, subjects, filled, resp.StatusCode)
+		if err != nil {
 			ldv.LogFailure("dataverwerking.bronquery-doorgifte", err)
 			http.Error(w, "the forward could not be logged; withholding the response", http.StatusInternalServerError)
 			return
@@ -360,13 +368,27 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client, substi
 			span.SetAttributes(attribute.Bool("gbo.sidecar.usage_registered", true))
 		}
 
-		for k, vv := range resp.Header {
-			for _, v := range vv {
-				w.Header().Add(k, v)
-			}
-		}
+		copyResponseHeaders(w.Header(), resp.Header, cfg.ReturnSubjectID, forwardSubject)
 		w.WriteHeader(resp.StatusCode)
 		_, _ = io.Copy(w, resp.Body)
+	}
+}
+
+// copyResponseHeaders passes the source's response headers on. The component
+// in front records the delivery under the same name for the citizen as this
+// forward record (D1), so when asked the sidecar adds that name; the
+// component strips it. A name the source itself sent never passes.
+func copyResponseHeaders(to, from http.Header, returnSubject bool, forwardSubject string) {
+	for k, vv := range from {
+		for _, v := range vv {
+			to.Add(k, v)
+		}
+	}
+	to.Del(ldv.HeaderSubjectID)
+	to.Del(ldv.HeaderSubjectIDType)
+	if returnSubject && forwardSubject != "" {
+		to.Set(ldv.HeaderSubjectID, forwardSubject)
+		to.Set(ldv.HeaderSubjectIDType, ldv.SubjectTypePseudonym)
 	}
 }
 
@@ -430,9 +452,11 @@ func passSubject(header http.Header, logbook *ldv.Client, subjects, filled map[s
 //
 // One forward, one Betrokkene: the demo's queries are single-subject, and a
 // multi-subject body would need child records rather than a reused span id.
-func logForward(ctx context.Context, logbook *ldv.Client, cfg config, forward ldvOperation, subjects, filled map[string]string, statusCode int) error {
+//
+// It returns the pseudonym the record names the Betrokkene by.
+func logForward(ctx context.Context, logbook *ldv.Client, cfg config, forward ldvOperation, subjects, filled map[string]string, statusCode int) (string, error) {
 	if logbook == nil {
-		return nil
+		return "", nil
 	}
 	for _, subject := range subjects {
 		named := subject
@@ -441,9 +465,9 @@ func logForward(ctx context.Context, logbook *ldv.Client, cfg config, forward ld
 		}
 		subjectID, err := logbook.LocalPseudonym(named)
 		if err != nil {
-			return err
+			return "", err
 		}
-		return logbook.Write(ctx, ldv.Record{
+		return subjectID, logbook.Write(ctx, ldv.Record{
 			TraceID:      forward.traceID,
 			SpanID:       forward.spanID,
 			ParentSpanID: forward.parentSpanID,
@@ -454,7 +478,7 @@ func logForward(ctx context.Context, logbook *ldv.Client, cfg config, forward ld
 			Attributes:   ldv.Attributes(cfg.LDVForwardActivity, subjectID, ldv.SubjectTypePseudonym, forward.processor, map[string]any{}),
 		})
 	}
-	return nil
+	return "", nil
 }
 
 // ldvOperation is the identity and timing of one Dataverwerking while it is
