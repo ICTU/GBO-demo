@@ -527,7 +527,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - **The demo starts in order through compose instead of retries and
   waiting scripts**: each FSC migration runs once and its peer services
   wait for it to complete, instead of restarting on failure while the
-  services start anyway. A `postgres-init` one-shot in `fsc-infra` creates
+  services start anyway. The migrations allow 10 s to connect, name lookup
+  included, because Docker's DNS can be that slow while the whole stack
+  starts at once. A `postgres-init` one-shot in `fsc-infra` creates
   the FSC databases on every `up` and holds their only list, which replaces
   the initdb script and `make fsc-databases`. `make demo-manager` now seeds
   the OpenFTV Manager before the rest of the stack starts, so the PDP pulls
