@@ -73,6 +73,23 @@
         "De door de betrokkene aangewezen dienstverlener",
         "EUDI-wallet van de betrokkene"
       ]
+    },
+    {
+      "id": "bd-levering-onder-toestemming",
+      "version": "v1",
+      "name": "Vastleggen van een levering onder toestemming",
+      "doel": "Per levering aan een dienstverlener onder een toestemming vastleggen dat de bron gegevens verstrekte, zodat de betrokkene in MijnOverheid kan zien wanneer de toestemming is gebruikt (#689).",
+      "grondslag": "Toestemming van de betrokkene, vastgelegd in het toestemmingsregister.",
+      "categorieen_betrokkenen": [
+        "Betrokkenen met een toestemming voor deze bron"
+      ],
+      "categorieen_persoonsgegevens": [
+        "Logboek-pseudoniem van de betrokkene",
+        "Tijdstip van de levering"
+      ],
+      "ontvangers": [
+        "Het toestemmingsregister (GBO), via de leesfunctie van dit logboek"
+      ]
     }
   ]
 }

@@ -86,17 +86,3 @@ func place(root map[string]any, path []string, value any) {
 	}
 	current[path[len(path)-1]] = value
 }
-
-// asUUID renders a 32-hex trace id in the hyphenated form the read
-// extension's schema types as a uuid.
-//
-// The two are the same 16 bytes: the extension asks for a uuid where W3C Trace
-// Context uses the hex form, and the value carried through this chain is a
-// UUID to begin with. Translating at the boundary keeps both sides right
-// instead of picking one and deviating from the other.
-func asUUID(traceID string) string {
-	if len(traceID) != 32 {
-		return traceID
-	}
-	return traceID[0:8] + "-" + traceID[8:12] + "-" + traceID[12:16] + "-" + traceID[16:20] + "-" + traceID[20:32]
-}
