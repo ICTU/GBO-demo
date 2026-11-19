@@ -559,6 +559,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   fsc-certs`, generates the certificates of every party in the table and
   replaces the per-party `fsc-<party>-certs` targets. The generated files,
   subjects and ownership are unchanged.
+- **One template per FSC component in `fsc-infra/docker-compose.yml`**: the
+  Controller, Manager, Inway, Outway, txlog API and their migrations each
+  have one template, and every peer's services add only their own names,
+  certificates, databases and ports. The OpenFSC images and their version
+  are named in one place. The file shrinks from about 1,860 to 1,130 lines;
+  the resolved compose configuration is unchanged.
 - **Credentials without a revocation reference are valid for 24 hours**
   (#697): the own credential issuer cannot revoke what it issued through
   login, disclosure-based issuance or an offer without `reference`, so those
