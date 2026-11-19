@@ -165,10 +165,9 @@ reader-ca-key.pem
 reader-ca-cert.pem
 ```
 
-These files are managed material: request them from the
-[repository owner](#repository-owner). Published wallet builds trust only
-these managed CAs; a CA of your own works only with a wallet you build
-yourself against your own trust lists.
+These files are managed material and are not part of the repository.
+Published wallet builds trust only these managed CAs; a CA of your own works
+only with a wallet you build yourself against your own trust lists.
 
 Keep the private keys outside version control. To load the same managed CA
 material from another location, set `ONBOARDING_SECRETS_DIR` to the absolute

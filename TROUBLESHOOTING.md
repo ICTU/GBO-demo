@@ -189,11 +189,11 @@ has data for all three offers. Also verify that the wallet trusts the issuer
 and reader CA certificates installed under `.local/secrets/development-ca`.
 
 **`make publish-trust-lists` fails with `requires its own GBO root`**: the
-issuer or reader CA files are not the managed GBO CAs (CN `ca.gbo-issuer`
-and `ca.gbo-reader`). Do not create a root of your own: wallets do not trust
-it. Request the four files from the repository owner and put them under
-`.local/secrets/development-ca/` (or `ONBOARDING_SECRETS_DIR`), then run the
-provisioning again.
+issuer or reader CA files are not the GBO CAs (CN `ca.gbo-issuer` and
+`ca.gbo-reader`). Put the four CA files under `.local/secrets/development-ca/`
+(or `ONBOARDING_SECRETS_DIR`), then run the provisioning again. Published
+wallet builds trust only the managed CAs; a CA of your own works only with a
+wallet you build yourself.
 
 **`source metadata unavailable`**: reconciliation did not produce a usable
 activation. Rerun the complete idempotent sequence and inspect the reconciler
