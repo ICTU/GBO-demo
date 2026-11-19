@@ -44,6 +44,10 @@ type Store interface {
 	Revoke(ctx context.Context, consentID string) error
 	PolymorphicFor(ctx context.Context, subject SubjectRef) (Polymorphic, error)
 	KeepPolymorphic(ctx context.Context, subject SubjectRef, values Polymorphic) error
+	// Uses returns when the consent was used, as the register answers it:
+	// the uses, and the notices the citizen must see instead of or next to
+	// them. An error means the register itself did not answer.
+	Uses(ctx context.Context, consentID string) (Usage, error)
 }
 
 // Processing is one Dataverwerking of this Verantwoordelijke, as the core

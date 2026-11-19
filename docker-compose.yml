@@ -745,6 +745,19 @@ services:
       - LDV_LOGBOOK_URL=http://logboek-toestemming:4016
       - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
       - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY_GBO:-local-demo-pseudonym-key-gbo}
+      # Consent usage (#687): GET /consents/{id}/uses looks up the consent's
+      # registrations in the data usage index and reads each one back from
+      # the delivery logbook of its source (#686), both over FSC through
+      # cr-outway. A use is a record read back there, at its start time. The
+      # index is the register's own organisation, but the lookup goes over
+      # FSC like any other service: no shared token. When the index cannot be
+      # reached the answer carries a notice instead of an empty list, and a
+      # source that cannot be read gets a notice of its own (D2). A
+      # registration whose logbook ID has no read service here gives no use.
+      - DATA_USAGE_INDEX_URL=http://cr-outway:8080/data-usage-lookup
+      - CONSENT_USAGE_READ_SERVICES=99999999900000000200/ldv-lezen-bd=http://cr-outway:8080/ldv-lezen-bd;99999999900000000200/ldv-lezen-lvg=http://cr-outway:8080/ldv-lezen-lvg;99999999900000000400/ldv-lezen-brp=http://cr-outway:8080/ldv-lezen-brp
+      - CONSENT_USAGE_SOURCES=99999999900000000200/ldv-lezen-bd=Belastingdienst;99999999900000000200/ldv-lezen-lvg=Landelijke Voorziening Gebouwen;99999999900000000400/ldv-lezen-brp=Basisregistratie Personen
+      - CONSENT_USAGE_SERVICE_PROVIDERS=99999999900000000300=Hypotheek-BV;99999999900000001000=Installatie Register
     networks:
       - backend
       # cr-inway forwards consent-status here (STATUS_PORT).

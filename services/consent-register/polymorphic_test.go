@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"consent-register/uses"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -17,7 +18,7 @@ func polymorphicServer(t *testing.T) (*httptest.Server, *Store) {
 		t.Fatal(err)
 	}
 	store := NewStore()
-	srv := httptest.NewServer(newMux(store, issuer, nil))
+	srv := httptest.NewServer(newMux(store, issuer, nil, uses.Service{}))
 	t.Cleanup(srv.Close)
 	return srv, store
 }

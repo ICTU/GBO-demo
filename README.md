@@ -285,8 +285,15 @@ shows consents that already exist.
    the query and shows the income data.
 4. Open the [developer portal](http://localhost:9003). **History · Replay**
    lists the issuance and the query with their outcome and trace id.
-5. In another tab, open the [consent portal](http://localhost:9002), sign in
-   as the same citizen, open the consent and click **Toestemming intrekken**.
+5. In another tab, open the [consent portal](http://localhost:9002) and sign
+   in as the same citizen. Open the consent: **Gebruik** lists one use with
+   today's date, the service provider and Belastingdienst as the source. Each
+   **↻ Verversen** in the consumer mock is a new trace and adds a use. The
+   source's sidecar registers each delivery at the data usage index and
+   records it in a delivery logbook of its own before it returns the data,
+   and the register reads each use back from that logbook over FSC; see
+   [docs/consent-flow.md](docs/consent-flow.md#4-gebruik-van-een-toestemming-inzien).
+6. On the same page click **Toestemming intrekken**.
    Back in the consumer mock, expand **Inkomensgegevens** and click
    **↻ Verversen** to repeat the query with the same token. The PDP now denies
    it. The consumer is told only `FIELD_NOT_PERMITTED`, so the consumer mock

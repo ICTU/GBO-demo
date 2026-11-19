@@ -122,6 +122,29 @@ type Draft struct {
 //
 // Adapters fill ID/SubjectRef/Token/Status/ValidUntil/Raw. Only the core sets
 // Effective — computing it is a judgement, and judgements are core work.
+// Use is one moment a consent was used: a source delivered data under it to
+// the service provider it was given to (#687).
+type Use struct {
+	UsedAt             time.Time
+	ServiceProviderOIN string
+	ServiceProvider    string
+	Source             string
+}
+
+// Notice is what the citizen is told when the uses cannot all be shown: the
+// index could not be reached (Kind "index_unavailable"), so "none" and "not
+// available" stay apart (decision D2).
+type Notice struct {
+	Kind   string
+	Source string
+}
+
+// Usage is the answer to "when was this consent used".
+type Usage struct {
+	Uses    []Use
+	Notices []Notice
+}
+
 type Record struct {
 	ID         string
 	SubjectRef SubjectRef
