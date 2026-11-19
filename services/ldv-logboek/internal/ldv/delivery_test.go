@@ -83,21 +83,26 @@ func TestTheRecordNamesTheCitizenNotTheConsent(t *testing.T) {
 	}
 }
 
-func TestARecordThatCannotBeStoredIsNotRegistered(t *testing.T) {
-	index := &fakeIndex{}
-	err := recorderUnderTest(t, &fakeRepository{failure: errors.New("disk full")}, index).Record(context.Background(), delivery())
+// A record that cannot be stored withholds the data. Its registration may
+// already exist; without a record behind it, it is no use (#687).
+func TestARecordThatCannotBeStoredWithholdsTheDelivery(t *testing.T) {
+	err := recorderUnderTest(t, &fakeRepository{failure: errors.New("disk full")}, &fakeIndex{}).Record(context.Background(), delivery())
 	if !errors.Is(err, ErrDeliveryNotRecorded) {
 		t.Fatalf("err = %v", err)
-	}
-	if len(index.registered) != 0 {
-		t.Error("a trace without a record was registered")
 	}
 }
 
-func TestAFailedRegistrationIsAnError(t *testing.T) {
-	err := recorderUnderTest(t, &fakeRepository{}, &fakeIndex{failure: errors.New("index down")}).Record(context.Background(), delivery())
+// A withheld delivery leaves no record: the register counts every record
+// under a registered trace as a use, so a record left by a failed
+// registration in an already registered trace would show as a use.
+func TestAFailedRegistrationLeavesNoRecord(t *testing.T) {
+	repository := &fakeRepository{}
+	err := recorderUnderTest(t, repository, &fakeIndex{failure: errors.New("index down")}).Record(context.Background(), delivery())
 	if !errors.Is(err, ErrDeliveryNotRecorded) {
 		t.Fatalf("err = %v", err)
+	}
+	if len(repository.stored) != 0 {
+		t.Fatalf("a withheld delivery left %d records", len(repository.stored))
 	}
 }
 

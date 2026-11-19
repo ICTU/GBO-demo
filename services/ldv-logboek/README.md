@@ -48,13 +48,20 @@ The source builds nothing for it. The component forwards each request
 unchanged, in the trace it arrived in, and for a request with a consent token
 that the source answers with 200 it:
 
-1. records the delivery in its own logbook: the trace-id, its own span, the
-   processing activity set per deployment (`LDV_PROXY_ACTIVITY`), status
-   `OK`, start and end time, and the citizen;
-2. registers the trace at GBO's consent usage index through the source
+1. registers the trace at GBO's consent usage index through the source
    peer's Outway (`CONSENT_USAGE_INDEX_URL`, `CONSENT_USAGE_LOGBOOK_ID`),
    with the `consent_id` from the token and no data subject;
+2. records the delivery in its own logbook: the trace-id, its own span, the
+   processing activity set per deployment (`LDV_PROXY_ACTIVITY`), status
+   `OK`, start and end time, and the citizen;
 3. only then returns the response.
+
+The order differs from #689, which registers after the record. The register
+counts every record under a registered trace as a use, so a record left by a
+delivery whose registration then failed would count as a use once the trace
+was registered by an earlier delivery. Registering first means a record
+exists only for a delivery the index confirmed; a registration whose record
+never landed gives no use (#687).
 
 What it needs from the source:
 

@@ -251,9 +251,6 @@ func TestARecordThatCannotBeStoredWithholdsTheData(t *testing.T) {
 	if response.StatusCode != http.StatusBadGateway || len(body) != 0 {
 		t.Fatalf("status %d, body %q", response.StatusCode, body)
 	}
-	if len(c.registrations) != 0 {
-		t.Error("a trace without a record was registered")
-	}
 }
 
 // The trace cannot be registered: an error, not the data.
@@ -264,5 +261,23 @@ func TestAFailedRegistrationWithholdsTheData(t *testing.T) {
 	body, _ := io.ReadAll(response.Body)
 	if response.StatusCode != http.StatusBadGateway || len(body) != 0 {
 		t.Fatalf("status %d, body %q", response.StatusCode, body)
+	}
+}
+
+// A delivery withheld because its registration failed leaves no record, also
+// in a trace an earlier delivery already registered. The register counts
+// every record under a registered trace, so such a record would show as a
+// use of a delivery the consumer never got (review of #706/#708).
+func TestAWithheldDeliveryInARegisteredTraceLeavesNoRecord(t *testing.T) {
+	c := newChain(t)
+	if response := c.post(t, true); response.StatusCode != http.StatusOK {
+		t.Fatalf("first delivery: status %d", response.StatusCode)
+	}
+	c.refuseIndex = true
+	if response := c.post(t, true); response.StatusCode != http.StatusBadGateway {
+		t.Fatalf("second delivery: status %d, want 502", response.StatusCode)
+	}
+	if got := len(c.readBack(t)); got != 1 {
+		t.Fatalf("records under the trace = %d, want the 1 delivery that went out", got)
 	}
 }

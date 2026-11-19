@@ -74,9 +74,21 @@ func NewDeliveryRecorder(logbook *Logbook, index UsageIndex, activity string) (*
 	return &DeliveryRecorder{logbook: logbook, index: index, activity: activity}, nil
 }
 
-// Record commits the record, then registers the trace. The order is the
-// TransparantieApp's push model: the record exists before anything points
-// at it, so a registration always has a record behind it.
+// Record registers the trace, then commits the record, and only a delivery
+// that got both may return its data.
+//
+// The order is the reverse of the TransparantieApp's push model and of #689
+// ("after the record is committed, register"), on purpose. The register
+// counts every record under a registered trace as a use. Record first meant
+// that a delivery whose registration then failed left an OK record behind:
+// harmless for a new trace, but counted as a use when the trace was already
+// registered by an earlier delivery, although this one was withheld. With
+// the registration first, a record exists only for a delivery the index
+// confirmed. The opposite leftover, a registration whose record never landed,
+// gives no use (#687), which is the right answer for a withheld delivery.
+//
+// The record is validated before anything is registered, so a record the
+// logbook would refuse never leaves a registration behind.
 func (d *DeliveryRecorder) Record(ctx context.Context, delivery Delivery) error {
 	if strings.TrimSpace(delivery.ConsentID) == "" {
 		return fmt.Errorf("%w: no consent_id in the consent token", ErrDeliveryNotRecorded)
@@ -100,11 +112,14 @@ func (d *DeliveryRecorder) Record(ctx context.Context, delivery Delivery) error 
 		EndTime:      delivery.End.UTC(),
 		Attributes:   ldvclient.Attributes(d.activity, delivery.SubjectID, subjectType, delivery.Processor, nil),
 	}
-	if _, err := d.logbook.Write(ctx, record); err != nil {
+	if err := Validate(record, d.logbook.resolves); err != nil {
 		return fmt.Errorf("%w: %w", ErrDeliveryNotRecorded, err)
 	}
 	if err := d.index.Register(ctx, delivery.TraceID, delivery.ConsentID); err != nil {
 		return fmt.Errorf("%w: register the trace: %w", ErrDeliveryNotRecorded, err)
+	}
+	if _, err := d.logbook.Write(ctx, record); err != nil {
+		return fmt.Errorf("%w: %w", ErrDeliveryNotRecorded, err)
 	}
 	return nil
 }
