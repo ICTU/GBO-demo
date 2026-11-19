@@ -1225,6 +1225,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   `SubjectTypePI`.
 
 ### Fixed
+- **`make demo-manager` seeds behind a public host**: with
+  `GBO_PUBLIC_HOST` set and `GBO_FTV_OIDC_AUTHORITY` unset, the seed script
+  fetched its token from Keycloak on localhost, so the token's issuer was
+  `http://localhost:9284/realms/gbo` while the Manager expects the
+  browser-facing issuer, and seeding failed with HTTP 403 "token has invalid
+  issuer". The script now derives the expected issuer as
+  `docker-compose.yml` does and asks the local Keycloak for a token with
+  that issuer through forwarded scheme and host headers.
 - **The reference QTSP's end-to-end tests clean up after themselves.** They
   left the service processes they started running and a `qtsp-e2e-*`
   directory of about 30 MB (built binaries and generated keys) in the temp

@@ -80,10 +80,50 @@ def request(
         return exc.code, exc.read()
 
 
+def default_authority() -> str:
+    """The issuer the Manager expects, derived as docker-compose.yml does."""
+    explicit = os.environ.get("GBO_FTV_OIDC_AUTHORITY")
+    if explicit:
+        return explicit
+    scheme = os.environ.get("GBO_PUBLIC_SCHEME") or "http"
+    host = os.environ.get("GBO_PUBLIC_HOST") or "localhost"
+    port = os.environ.get("GBO_PORT_KEYCLOAK") or "9284"
+    return f"{scheme}://{host}:{port}/realms/gbo"
+
+
+def token_endpoint(authority: str) -> tuple[str, dict[str, str]]:
+    """Where to fetch the token, and the headers that set its issuer.
+
+    Keycloak in start-dev derives the token's issuer from the request
+    (KC_HOSTNAME_STRICT=false, KC_PROXY_HEADERS=xforwarded). The Manager
+    only accepts the browser-facing issuer, which behind a reverse proxy is
+    not localhost and may not be reachable from this host. When no explicit
+    GBO_FTV_OIDC_AUTHORITY is set, the authority is the compose Keycloak on
+    the public host: ask it on localhost and forward the public scheme and
+    host, so the token carries the issuer the Manager expects.
+    """
+    path = "/protocol/openid-connect/token"
+    parsed = urllib.parse.urlsplit(authority)
+    compose_keycloak = not os.environ.get("GBO_FTV_OIDC_AUTHORITY") and (
+        authority == default_authority()
+    )
+    if not compose_keycloak or parsed.hostname in ("localhost", "127.0.0.1"):
+        return authority.rstrip("/") + path, {}
+    port = os.environ.get("GBO_PORT_KEYCLOAK") or "9284"
+    local = f"http://localhost:{port}{parsed.path.rstrip('/')}{path}"
+    default_port = "443" if parsed.scheme == "https" else "80"
+    return local, {
+        "X-Forwarded-Proto": parsed.scheme,
+        "X-Forwarded-Host": parsed.netloc,
+        "X-Forwarded-Port": str(parsed.port or default_port),
+    }
+
+
 def deployment_token(
     authority: str, client_id: str, username: str, password: str
 ) -> str:
     """Get a short-lived token for the internal deployment identity."""
+    url, forwarded = token_endpoint(authority)
     form = urllib.parse.urlencode(
         {
             "grant_type": "password",
@@ -93,10 +133,10 @@ def deployment_token(
         }
     ).encode()
     req = urllib.request.Request(
-        f"{authority.rstrip('/')}/protocol/openid-connect/token",
+        url,
         data=form,
         method="POST",
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        headers={"Content-Type": "application/x-www-form-urlencoded", **forwarded},
     )
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
@@ -225,10 +265,9 @@ def main() -> int:
     )
     ap.add_argument(
         "--oidc-authority",
-        default=os.environ.get(
-            "GBO_FTV_OIDC_AUTHORITY", "http://localhost:9284/realms/gbo"
-        ),
-        help="OIDC realm used for the deployment identity",
+        default=default_authority(),
+        help="OIDC realm used for the deployment identity (default: the "
+        "issuer the Manager expects, as docker-compose.yml derives it)",
     )
     ap.add_argument("--oidc-client-id", default="openftv-manager-ui")
     ap.add_argument("--username", default="deployment")
