@@ -109,6 +109,10 @@ services:
         condition: service_healthy
     restart: "no"
 
+  # Each migration runs once and its peer waits for it, so a failed connect
+  # stops the start. connect_timeout covers the name lookup as well, and at a
+  # cold start Docker's DNS can take seconds to answer while dozens of
+  # containers start together; hence 10 s here, where the services use 2 s.
   directory-migrations-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
     restart: "no"
@@ -118,7 +122,7 @@ services:
       - up
     environment:
       <<: *directory-peer-env
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_dir_controller?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_dir_controller?sslmode=disable&connect_timeout=10"
     depends_on:
       postgres-init:
         condition: service_completed_successfully
@@ -132,7 +136,7 @@ services:
       - up
     environment:
       <<: *directory-peer-env
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_dir_manager?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_dir_manager?sslmode=disable&connect_timeout=10"
     depends_on:
       postgres-init:
         condition: service_completed_successfully
@@ -228,7 +232,7 @@ services:
       - up
     environment:
       <<: *directory-peer-env
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_dir_txlog?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_dir_txlog?sslmode=disable&connect_timeout=10"
     depends_on:
       postgres-init:
         condition: service_completed_successfully
@@ -282,7 +286,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_edi_controller?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_edi_controller?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/edi-issuer/pki:/certs:ro
     depends_on:
@@ -302,7 +306,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_edi_manager?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_edi_manager?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/edi-issuer/pki:/certs:ro
     depends_on:
@@ -322,7 +326,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_edi_txlog?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_edi_txlog?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/edi-issuer/pki:/certs:ro
     depends_on:
@@ -453,7 +457,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_hv_controller?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_hv_controller?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/hypotheekverlener-mock/pki:/certs:ro
     depends_on:
@@ -470,7 +474,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_hv_manager?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_hv_manager?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/hypotheekverlener-mock/pki:/certs:ro
     depends_on:
@@ -487,7 +491,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_hv_txlog?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_hv_txlog?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/hypotheekverlener-mock/pki:/certs:ro
     depends_on:
@@ -618,7 +622,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_bd_controller?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_bd_controller?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/belastingdienst-mock/pki:/certs:ro
     depends_on:
@@ -638,7 +642,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_bd_manager?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_bd_manager?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/belastingdienst-mock/pki:/certs:ro
     depends_on:
@@ -658,7 +662,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_bd_txlog?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_bd_txlog?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/belastingdienst-mock/pki:/certs:ro
     depends_on:
@@ -859,7 +863,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_brp_controller?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_brp_controller?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/brp-mock/pki:/certs:ro
     depends_on:
@@ -876,7 +880,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_brp_manager?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_brp_manager?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/brp-mock/pki:/certs:ro
     depends_on:
@@ -893,7 +897,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_brp_txlog?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_brp_txlog?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/brp-mock/pki:/certs:ro
     depends_on:
@@ -1078,7 +1082,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_cr_controller?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_cr_controller?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/consent-register/pki:/certs:ro
     depends_on:
@@ -1095,7 +1099,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_cr_manager?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_cr_manager?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/consent-register/pki:/certs:ro
     depends_on:
@@ -1112,7 +1116,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_cr_txlog?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_cr_txlog?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/consent-register/pki:/certs:ro
     depends_on:
@@ -1289,7 +1293,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_pdp_controller?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_pdp_controller?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/gbo-pdp/pki:/certs:ro
     depends_on:
@@ -1306,7 +1310,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_pdp_manager?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_pdp_manager?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/gbo-pdp/pki:/certs:ro
     depends_on:
@@ -1323,7 +1327,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_pdp_txlog?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_pdp_txlog?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/gbo-pdp/pki:/certs:ro
     depends_on:
@@ -1453,7 +1457,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_ir_controller?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_ir_controller?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/installatieregister/pki:/certs:ro
     depends_on:
@@ -1470,7 +1474,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_ir_manager?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_ir_manager?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/installatieregister/pki:/certs:ro
     depends_on:
@@ -1487,7 +1491,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_ir_txlog?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_ir_txlog?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/installatieregister/pki:/certs:ro
     depends_on:
@@ -1618,7 +1622,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_int_controller?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_int_controller?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/integrator/pki:/certs:ro
     depends_on:
@@ -1636,7 +1640,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_int_manager?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_int_manager?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/integrator/pki:/certs:ro
     depends_on:
@@ -1654,7 +1658,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_int_txlog?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_int_txlog?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/integrator/pki:/certs:ro
     depends_on:
@@ -1791,7 +1795,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_asip_controller?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_asip_controller?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/asip/pki:/certs:ro
     depends_on:
@@ -1809,7 +1813,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_asip_manager?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_asip_manager?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/asip/pki:/certs:ro
     depends_on:
@@ -1827,7 +1831,7 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_asip_txlog?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_asip_txlog?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/asip/pki:/certs:ro
     depends_on:
