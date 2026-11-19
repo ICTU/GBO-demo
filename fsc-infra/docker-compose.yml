@@ -780,6 +780,37 @@ services:
       - bd-manager
       - bd-txlog-api
 
+  # The Belastingdienst peer's Outway, so its sidecars can register each delivery under a
+  # consent at the data usage index (service data-usage-index on the
+  # register's peer ...0700, #687). On source-gateways because that is the
+  # only network the sidecars are on; it publishes no host port.
+  bd-outway:
+    image: federatedserviceconnectivity/outway:v2.4.0
+    restart: unless-stopped
+    networks:
+      - default
+      - source-gateways
+    volumes:
+      - ./orgs/belastingdienst-mock/pki:/certs:ro
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      TLS_GROUP_CERT: /certs/org/bd-mock.pem
+      TLS_GROUP_KEY: /certs/org/bd-mock-key.pem
+      LISTEN_ADDRESS: 0.0.0.0:8080
+      NAME: BdOutway-01
+      CONTROLLER_REGISTRATION_API_ADDRESS: https://bd-controller:9443
+      TX_LOG_API_ADDRESS: https://bd-txlog-api:9443
+      MANAGER_INTERNAL_ADDRESS: https://bd-manager:9443
+      ENABLE_GRANT_HASH_SUGGESTION: "true"
+    depends_on:
+      - bd-controller
+      - bd-manager
+      - bd-txlog-api
+
   bd-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
     restart: unless-stopped
@@ -964,6 +995,37 @@ services:
       - brp-manager
       - brp-txlog-api
 
+  # RvIG's peer's Outway, so its sidecars can register each delivery under a
+  # consent at the data usage index (service data-usage-index on the
+  # register's peer ...0700, #687). On source-gateways because that is the
+  # only network the sidecars are on; it publishes no host port.
+  brp-outway:
+    image: federatedserviceconnectivity/outway:v2.4.0
+    restart: unless-stopped
+    networks:
+      - default
+      - source-gateways
+    volumes:
+      - ./orgs/brp-mock/pki:/certs:ro
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      TLS_GROUP_CERT: /certs/org/brp-mock.pem
+      TLS_GROUP_KEY: /certs/org/brp-mock-key.pem
+      LISTEN_ADDRESS: 0.0.0.0:8080
+      NAME: BrpOutway-01
+      CONTROLLER_REGISTRATION_API_ADDRESS: https://brp-controller:9443
+      TX_LOG_API_ADDRESS: https://brp-txlog-api:9443
+      MANAGER_INTERNAL_ADDRESS: https://brp-manager:9443
+      ENABLE_GRANT_HASH_SUGGESTION: "true"
+    depends_on:
+      - brp-controller
+      - brp-manager
+      - brp-txlog-api
+
   brp-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
     restart: unless-stopped
@@ -1138,6 +1200,34 @@ services:
       # No AuthZEN hook: the connection contract is the authorization for
       # consent-status, and the register reads the calling peer from the
       # Fsc-Authorization token this Inway forwards (#383).
+    depends_on:
+      - cr-controller
+      - cr-manager
+      - cr-txlog-api
+
+  # The consent register's Outway: the register looks up registrations in
+  # the data usage index through it (data-usage-lookup, on its own peer) and
+  # reads each use back from the delivery logbook of its source (#686:
+  # ldv-lezen-bd, ldv-lezen-brp and ldv-lezen-lvg). No host port.
+  cr-outway:
+    image: federatedserviceconnectivity/outway:v2.4.0
+    restart: unless-stopped
+    volumes:
+      - ./orgs/consent-register/pki:/certs:ro
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      TLS_GROUP_CERT: /certs/org/consent-register.pem
+      TLS_GROUP_KEY: /certs/org/consent-register-key.pem
+      LISTEN_ADDRESS: 0.0.0.0:8080
+      NAME: CrOutway-01
+      CONTROLLER_REGISTRATION_API_ADDRESS: https://cr-controller:9443
+      TX_LOG_API_ADDRESS: https://cr-txlog-api:9443
+      MANAGER_INTERNAL_ADDRESS: https://cr-manager:9443
+      ENABLE_GRANT_HASH_SUGGESTION: "true"
     depends_on:
       - cr-controller
       - cr-manager
