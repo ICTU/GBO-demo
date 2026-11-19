@@ -17,6 +17,8 @@ zijn niet gefedereerd; wat ze verbindt is de trace-id.
 | `logboek-brp` | RvIG | `brp-sidecar`, `brp-graphql-server` |
 | `logboek-toestemming` | GBO | `consent-register`, `consent-portal-backend` |
 | `logboek-eudi-adapter` | GBO | `eudi-adapter` |
+| `logboek-lvg` | LVG | `lvg-sidecar`, `lvg-graphql-server` |
+| `logboek-ir` | Installatie Register | `ir-backend` |
 
 Toestemmingsregister en -portaal delen één logboek. De extensie lezen telt elk
 logboek als een aparte applicatie met een eigen lees-API; met één gedeeld
