@@ -663,8 +663,7 @@ fsc-pdp-cert:
 # connection contract pending and the seed times out after 30s with no
 # useful error. The PDP lives in the main compose project, which normally
 # starts *after* fsc-infra; this pulls it forward. The PDP turns healthy only
-# once the native PIP pull has made the seeded Hypotheek-BV admission
-# effective, so --wait covers that as well.
+# once it has pulled the onboarding register, so --wait covers that as well.
 pdp-up: policy-check certs require-ftv-postgres fsc-pdp-cert
 	docker compose up --build -d --wait --force-recreate openftv-pdp
 

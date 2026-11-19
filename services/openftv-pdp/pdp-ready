@@ -1,0 +1,25 @@
+#!/bin/sh
+# Readiness probe of the GBO PDP image, for a container healthcheck.
+#
+# Exits 0 when the readiness policy (policies/readiness.rego) allows: the
+# policies are loaded and the PDP has pulled the onboarding register that
+# contract auto-signing reads. OpenFTV's own /readyz does not cover the
+# PIP pull; the policy explains why.
+#
+# The probe asks its own process over loopback, so it skips certificate
+# verification: the certificate names the PDP for remote callers.
+
+set -eu
+
+if [ -n "${PDP_TLS_CERT:-}" ]; then
+  url="https://127.0.0.1:${PDP_PORT:-8443}" tls=--insecure
+else
+  url="http://127.0.0.1:${PDP_PORT:-8443}" tls=
+fi
+
+curl -fsS --max-time 2 --noproxy '*' $tls \
+  -H 'Content-Type: application/json' \
+  -d '{"subject": {"type": "doelbinding", "id": "readiness"},
+       "action": {"name": "ready"},
+       "resource": {"type": "pdp", "id": "self"}}' \
+  "$url/authzen/v1/evaluation" | grep -q '"decision": *true'

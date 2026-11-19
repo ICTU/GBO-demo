@@ -65,5 +65,7 @@ COPY schemas/pdp-mirror /etc/gbo/ftv-graphql
 # over this directory for hot-reload. Build context is the repo root so
 # this COPY can reach ./policies.
 COPY policies /policies
+# Readiness probe for a container healthcheck: see the script.
+COPY --chmod=755 services/openftv-pdp/pdp-ready /usr/local/bin/pdp-ready
 EXPOSE 8443
 ENTRYPOINT ["/pdp"]
