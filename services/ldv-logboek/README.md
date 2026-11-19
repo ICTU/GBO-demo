@@ -192,6 +192,8 @@ entry carries a disclaimer saying so.
 
 One register per Verantwoordelijke, in [`config/`](config/). GBO's is split
 over its two logbooks, so each accepts only the activities of its own system.
+The references below and in the trees under [Which flow lands where](#which-flow-lands-where) are short for
+the full URI a record carries, `<base_uri>/<id>/<version>`.
 The Belastingdienst's ([`verwerkingsactiviteiten-bd.json`](config/verwerkingsactiviteiten-bd.json)):
 
 | reference | Dataverwerking | logged by |
@@ -240,7 +242,8 @@ and [`verwerkingsactiviteiten-ir.json`](config/verwerkingsactiviteiten-ir.json);
 who logs which activity there is in [`docs/lvg-ir.md`](../../docs/lvg-ir.md).
 
 A component names the activity it performs; the logbook refuses a reference
-its register does not resolve, and that refusal fails the request. So a
+its register does not resolve. The record then stays in the producer's outbox,
+retried and logged, until the register is fixed. So a
 verstrekking whose verwerkingsactiviteit nobody wrote down does not happen —
 which is the register requirement actually biting rather than being described.
 

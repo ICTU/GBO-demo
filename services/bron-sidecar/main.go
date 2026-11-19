@@ -438,10 +438,9 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client, substi
 		defer resp.Body.Close()
 
 		// The forward has happened; log it before the response leaves this
-		// process. If the logbook does not confirm, the caller gets an error
-		// instead of data — the strongest ordering available without a
-		// two-phase commit, and the reason this is fail-closed rather than
-		// best-effort.
+		// process. The record goes to the local outbox, which delivers it to
+		// the logbook later; the caller gets an error instead of data only
+		// when that outbox write fails, not when a logbook does not confirm.
 		if err := logForward(r.Context(), logbook, cfg, forward, subjects, filled, resp.StatusCode); err != nil {
 			ldv.LogFailure("dataverwerking.bronquery-doorgifte", err)
 			http.Error(w, "the forward could not be logged; withholding the response", http.StatusInternalServerError)
