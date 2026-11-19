@@ -1,9 +1,11 @@
 # ldv-logboek — Logboek Dataverwerkingen
 
 One image, one instance per logbook: `logboek-bd` (Belastingdienst),
-`logboek-brp` (RvIG), `logboek-afnemer` (Hypotheek-BV, the demo consumer), and
+`logboek-brp` (RvIG), `logboek-afnemer` (Hypotheek-BV, the demo consumer),
 for the voorziening itself `logboek-toestemming`
-(consent register and portal) and `logboek-eudi-adapter`. A Verantwoordelijke
+(consent register and portal) and `logboek-eudi-adapter`, and for the
+LVG/Installatie Register pilot `logboek-lvg` and `logboek-ir`
+([`docs/lvg-ir.md`](../../docs/lvg-ir.md)). A Verantwoordelijke
 may keep more than one logbook; the read extension then treats each as a
 separate application with its own read API. Nothing in the code knows about a
 particular organisation — an instance is "the Belastingdienst's" because of
@@ -28,7 +30,7 @@ three organisations at once, and each of them needs a logbook to write to.
 the Belastingdienst and RvIG each run their own; GBO neither builds nor
 operates those. GBO runs its own, for its own processing, and ships the *client* —
 the contract about record shape, mandatory attributes, confirmation and no
-sampling — to everyone else in the chain. Five near-identical instances are a
+sampling — to everyone else in the chain. Seven near-identical instances are a
 simulation artefact, not an architecture proposal.
 
 **What you would run instead.** The record is OTel-shaped and the standard
@@ -180,7 +182,7 @@ every write against it:
 
 ```
 GET /verwerkingsactiviteiten              → the index
-GET /verwerkingsactiviteiten/bd-ib-2025@v1 → one entry
+GET /verwerkingsactiviteiten/bd-ib-2025/v1 → one entry
 ```
 
 **This is not an RvVA.** It has no legal status. Whether the real thing extends
@@ -232,6 +234,11 @@ And for `logboek-eudi-adapter` ([`verwerkingsactiviteiten-eudi-adapter.json`](co
 | `gbo-bsn-ontvangst-aanvrager@v1` | receiving the BSN from the caller of a pre-authorized offer (no PID presented) | `eudi-adapter` |
 | `gbo-attestatie-samenstellen@v1` | assembling an attestation from source data | `eudi-adapter` |
 
+The LVG/Installatie Register pilot's registers are
+[`verwerkingsactiviteiten-lvg.json`](config/verwerkingsactiviteiten-lvg.json)
+and [`verwerkingsactiviteiten-ir.json`](config/verwerkingsactiviteiten-ir.json);
+who logs which activity there is in [`docs/lvg-ir.md`](../../docs/lvg-ir.md).
+
 A component names the activity it performs; the logbook refuses a reference
 its register does not resolve, and that refusal fails the request. So a
 verstrekking whose verwerkingsactiviteit nobody wrote down does not happen —
@@ -244,7 +251,7 @@ which is the register requirement actually biting rather than being described.
 | `POST /logboek/records` | write one record. `201` with a confirmation, `200` when the (trace_id, span_id) was already stored, `400` on malformed JSON, `422` on an unlawful record, `401` without the bearer token. |
 | `POST /data-processing-operations` | the read extension, as its OpenAPI defines it. Body carries `traceId` and/or the `dpl.core.*` selectors, optionally narrowed by `startTime`/`endTime`; `400` without a selector, `401` without the read token. Errors are `application/problem+json`. |
 | `GET /verwerkingsactiviteiten` | register index (unauthenticated) |
-| `GET /verwerkingsactiviteiten/{ref}` | one entry (unauthenticated) |
+| `GET /verwerkingsactiviteiten/{id}/{version}` | one entry (unauthenticated) |
 | `GET /health` | liveness |
 
 Transport is plain HTTPS+JSON. The standard leaves the protocol free — OTLP is
@@ -343,7 +350,7 @@ Producer configuration:
 | `LDV_WRITE_TOKEN` | must match the logbook's |
 | `LDV_SUBJECT_PSEUDONYM_KEY` | key for `logboek-pseudoniem` derivation |
 | `LDV_DECRYPTION_ACTIVITY`, `LDV_FORWARD_ACTIVITY` | `bron-sidecar`/`brp-sidecar` only — the same image runs in front of every bron, and each bron's register names its activities in its own terms |
-| `LDV_YEAR_ACTIVITY_TEMPLATE` | `graphql-server` only, e.g. `bd-ib-%d@v1` |
+| `LDV_YEAR_ACTIVITY_TEMPLATE` | `graphql-server` only, the full activity URI with the year as `%d`, e.g. `https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-ib-%d/v1` |
 | `LDV_ACTIVITY_BASE` | `lvg-graphql-server` only; the source appends its fixed `lvg-vbo-eigendom/v1` activity. `LDV_SCOPE_ACTIVITY_BASE` remains a fallback for existing deployments |
 | `LDV_BSNK_NEXT_LOGBOOK_ID` | `consent-portal-backend` only — where BSNk's side of a consent intake can be looked up, set as `dpl.read.nextLogbookId` on that record. Deriving the portal's own reference and a source reading its value call nobody, so their records point nowhere. BSNk has no read API in the demo, so it is a page about the mock, the fallback the read extension allows |
 
