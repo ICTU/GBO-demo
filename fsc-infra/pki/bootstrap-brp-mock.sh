@@ -33,7 +33,7 @@ fi
 echo ">>> Generating BRP-mock cert-tuple"
 
 # ── Group cert via openssl + certportal ────────────────────────────────
-echo "-- group-cert: brp-mock (OIN=99999999900000000400, hosts=brp-manager,brp-inway) --"
+echo "-- group-cert: brp-mock (OIN=99999999900000000400, hosts=brp-manager,brp-inway,brp-outway) --"
 docker run --rm \
     --network "${NETWORK}" \
     -v "$(pwd)/..:/work" -w /work \
@@ -46,7 +46,7 @@ docker run --rm \
 
         openssl req -new -nodes -sha256 -newkey rsa:4096 \
             -subj "/C=NL/O=RvIG/OU=TEST/CN=brp-manager/serialNumber=99999999900000000400" \
-            -addext "subjectAltName=DNS:brp-manager,DNS:brp-inway" \
+            -addext "subjectAltName=DNS:brp-manager,DNS:brp-inway,DNS:brp-outway" \
             -keyout "${OUT}/brp-mock-key.pem" \
             -out "${OUT}/brp-mock.csr" 2>/dev/null
 
