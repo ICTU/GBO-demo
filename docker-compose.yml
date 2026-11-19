@@ -1115,6 +1115,16 @@ services:
       # dpl.read.nextLogbookId. In a deployment it comes from the source's
       # service description.
       - LDV_NEXT_LOGBOOK_IDS=bd=https://logboek.belastingdienst.nl/data-processing-operations
+      # Consent request: POST /api/consent/start pushes the request to the
+      # consent portal over FSC (grant-link /consent-authorization,
+      # make fsc-seed-consent-authorization) and /api/consent/complete
+      # exchanges the code; the consent token stays in a server-side
+      # session. The redirect URI must equal a return location registered
+      # for this peer in the onboarding register.
+      - CONSENT_CLIENT_ID=${HV_PEER_ID:-99999999900000000300}
+      - CONSENT_REDIRECT_URI=${DIENSTVERLENER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_DV_MOCK:-9001}}/return
+      - CONSENT_PORTAL_URL=${TOESTEMMINGSPORTAAL_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_TOESTEMMINGSPORTAAL:-9002}}
+      - CONSENT_AUTHORIZATION_URL=http://hv-outway:8080/consent-authorization
     volumes:
       # The LDV spool must survive a restart; that is what makes a record
       # durable before it reaches the logbook.
@@ -1154,6 +1164,11 @@ services:
       - LDV_LOGBOOK_URL=http://logboek-ir:4016
       - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
       - LDV_NEXT_LOGBOOK_IDS=lvg=https://logboek.lvg.test/data-processing-operations
+      # Consent request, as for dienstverlener-backend.
+      - CONSENT_CLIENT_ID=${IR_PEER_ID:-99999999900000001000}
+      - CONSENT_REDIRECT_URI=${KEYPER_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_KEYPER_MOCK:-9004}}/verzoek/terug
+      - CONSENT_PORTAL_URL=${TOESTEMMINGSPORTAAL_PUBLIC_URL:-${GBO_PUBLIC_SCHEME:-http}://${GBO_PUBLIC_HOST:-localhost}:${GBO_PORT_TOESTEMMINGSPORTAAL:-9002}}
+      - CONSENT_AUTHORIZATION_URL=http://ir-outway:8080/consent-authorization
     volumes:
       - ldv-outbox-ir-backend:/data
     depends_on:
