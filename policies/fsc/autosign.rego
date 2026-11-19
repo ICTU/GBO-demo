@@ -50,10 +50,12 @@ else := null
 
 # An empty register is available data: it admits nobody. Only a missing
 # dvtp_participant document means the PIP pull did not supply a register.
-_register_available := _pulled_participants != null
+# Public, because the PDP's readiness policy (policies/readiness.rego) waits
+# for the same document.
+register_available := _pulled_participants != null
 
 _parties := _pulled_participants if {
-	_register_available
+	register_available
 }
 
 else := {}
@@ -167,7 +169,7 @@ _checks := [
 	{"code": "NOT_AN_AUTOSIGN_REQUEST", "ok": _well_formed},
 	{"code": "GRANT_TYPE_NOT_ALLOWED", "ok": _grant_types_allowed},
 	{"code": "NO_COUNTERPARTY", "ok": _has_counterparty},
-	{"code": "ADMISSION_REGISTER_UNAVAILABLE", "ok": _register_available},
+	{"code": "ADMISSION_REGISTER_UNAVAILABLE", "ok": register_available},
 	{"code": "PARTY_NOT_IN_REGISTRY", "ok": _all_known},
 	{"code": "PARTY_NOT_ACTIVE", "ok": _all_active},
 	{"code": "SOURCE_NOT_ALLOWED", "ok": _source_allowed},
