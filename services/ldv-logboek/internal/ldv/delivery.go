@@ -25,6 +25,19 @@ type UsageIndex interface {
 	Register(ctx context.Context, traceID, consentID string) error
 }
 
+// TraceClaims ties a trace to the consent it carries deliveries under.
+// ClaimTrace returns false when the trace already carries a delivery under
+// another consent.
+//
+// The read-back finds a consent's uses by trace (#687), and the record does
+// not name the consent. Without this, a caller that reused one trace ID under
+// two consents would make each delivery show as a use of both, across
+// citizens. The trace's first consent owns it; a delivery under another is
+// refused like any delivery that cannot be recorded.
+type TraceClaims interface {
+	ClaimTrace(ctx context.Context, traceID, consentID string) (bool, error)
+}
+
 // Delivery is one response under a consent, as the proxy saw it.
 type Delivery struct {
 	// TraceID is the trace the request arrived in (traceparent), and
@@ -50,10 +63,15 @@ type Delivery struct {
 type DeliveryRecorder struct {
 	logbook *Logbook
 	index   UsageIndex
+	claims  TraceClaims
 	// activity is the processing activity this instance logs under, set
 	// per deployment (LDV_PROXY_ACTIVITY): one per source.
 	activity string
 }
+
+// ErrTraceUnderAnotherConsent is a delivery in a trace that already carries
+// one under another consent.
+var ErrTraceUnderAnotherConsent = errors.New("the trace already carries a delivery under another consent")
 
 // ErrDeliveryNotRecorded wraps every reason a delivery is withheld.
 var ErrDeliveryNotRecorded = errors.New("the delivery could not be recorded")
@@ -64,14 +82,14 @@ const RecordName = "dataverwerking.levering-onder-toestemming"
 // NewDeliveryRecorder wires the use case. The activity must resolve in the
 // logbook's register: a component that would refuse every record should not
 // start.
-func NewDeliveryRecorder(logbook *Logbook, index UsageIndex, activity string) (*DeliveryRecorder, error) {
-	if logbook == nil || index == nil {
-		return nil, errors.New("a delivery recorder needs a logbook and a usage index")
+func NewDeliveryRecorder(logbook *Logbook, index UsageIndex, claims TraceClaims, activity string) (*DeliveryRecorder, error) {
+	if logbook == nil || index == nil || claims == nil {
+		return nil, errors.New("a delivery recorder needs a logbook, a usage index and trace claims")
 	}
 	if _, ok := logbook.Register().Resolve(activity); !ok {
 		return nil, fmt.Errorf("processing activity %q is not in this logbook's register", activity)
 	}
-	return &DeliveryRecorder{logbook: logbook, index: index, activity: activity}, nil
+	return &DeliveryRecorder{logbook: logbook, index: index, claims: claims, activity: activity}, nil
 }
 
 // Record registers the trace, then commits the record, and only a delivery
@@ -97,6 +115,13 @@ func (d *DeliveryRecorder) Record(ctx context.Context, delivery Delivery) error 
 		// The record names the citizen (#689). Without the sidecar's name for
 		// them there is no lawful record, so there is no delivery either.
 		return fmt.Errorf("%w: the source named no data subject", ErrDeliveryNotRecorded)
+	}
+	owned, err := d.claims.ClaimTrace(ctx, delivery.TraceID, delivery.ConsentID)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrDeliveryNotRecorded, err)
+	}
+	if !owned {
+		return fmt.Errorf("%w: %w", ErrDeliveryNotRecorded, ErrTraceUnderAnotherConsent)
 	}
 	subjectType := delivery.SubjectIDType
 	if subjectType == "" {

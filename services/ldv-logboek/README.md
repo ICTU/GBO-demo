@@ -63,6 +63,13 @@ was registered by an earlier delivery. Registering first means a record
 exists only for a delivery the index confirmed; a registration whose record
 never landed gives no use (#687).
 
+A trace carries deliveries under one consent only. The component remembers
+which consent each trace was first delivered under (in its own store, not in
+the LDV record) and refuses a delivery under another consent in that trace.
+Without this, a caller that reused one trace ID under two consents would make
+each delivery show as a use of both, because the register finds uses by
+trace and the record does not name the consent.
+
 What it needs from the source:
 
 | | |

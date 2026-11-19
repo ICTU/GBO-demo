@@ -250,7 +250,7 @@ func main() {
 		recorder, err := ldv.NewDeliveryRecorder(logbook, usageindex.Client{
 			URL: cfg.UsageIndexURL, LogbookID: cfg.UsageLogbookID,
 			HTTP: &http.Client{Timeout: 5 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)},
-		}, cfg.ProxyActivity)
+		}, repository, cfg.ProxyActivity)
 		if err != nil {
 			slog.Error("wiring the proxy", "err", err)
 			os.Exit(1)

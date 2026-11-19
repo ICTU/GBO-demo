@@ -31,6 +31,14 @@ type Repository struct {
 // (trace_id, span_id) — the identity of the operation — which is what makes a
 // producer's retry idempotent rather than duplicating a Dataverwerking.
 const schema = `
+-- Proxy mode only (#689): which consent each trace was delivered under, so
+-- one trace cannot carry deliveries under two consents. Kept apart from the
+-- records: the LDV record names the citizen, never the consent.
+CREATE TABLE IF NOT EXISTS consent_traces (
+    trace_id TEXT PRIMARY KEY,
+    consent_id TEXT NOT NULL,
+    claimed_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS records (
     trace_id TEXT NOT NULL,
     span_id TEXT NOT NULL,
@@ -121,6 +129,22 @@ func (r *Repository) Append(ctx context.Context, stored ldv.Stored) error {
 		return fmt.Errorf("insert record: %w", err)
 	}
 	return nil
+}
+
+// ClaimTrace implements ldv.TraceClaims: the first consent to deliver in a
+// trace owns it, and the same consent may deliver in it again.
+func (r *Repository) ClaimTrace(ctx context.Context, traceID, consentID string) (bool, error) {
+	if _, err := r.db.ExecContext(ctx, `
+        INSERT INTO consent_traces (trace_id, consent_id, claimed_at) VALUES (?, ?, ?)
+        ON CONFLICT (trace_id) DO NOTHING`,
+		traceID, consentID, formatTime(time.Now().UTC())); err != nil {
+		return false, fmt.Errorf("claim trace: %w", err)
+	}
+	var owner string
+	if err := r.db.QueryRowContext(ctx, `SELECT consent_id FROM consent_traces WHERE trace_id = ?`, traceID).Scan(&owner); err != nil {
+		return false, fmt.Errorf("read trace claim: %w", err)
+	}
+	return owner == consentID, nil
 }
 
 // Count reports how many records are stored. Used by the health endpoint and

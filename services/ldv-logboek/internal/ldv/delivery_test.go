@@ -20,6 +20,20 @@ func (f *fakeIndex) Register(_ context.Context, traceID, consentID string) error
 	return nil
 }
 
+// fakeClaims is the in-memory TraceClaims.
+type fakeClaims struct{ owners map[string]string }
+
+func (f *fakeClaims) ClaimTrace(_ context.Context, traceID, consentID string) (bool, error) {
+	if f.owners == nil {
+		f.owners = map[string]string{}
+	}
+	if owner, ok := f.owners[traceID]; ok {
+		return owner == consentID, nil
+	}
+	f.owners[traceID] = consentID
+	return true, nil
+}
+
 const deliveryActivity = "https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-ib-2025/v1"
 
 func delivery() Delivery {
@@ -37,7 +51,7 @@ func recorderUnderTest(t *testing.T, repository *fakeRepository, index *fakeInde
 	if err != nil {
 		t.Fatal(err)
 	}
-	recorder, err := NewDeliveryRecorder(logbook, index, deliveryActivity)
+	recorder, err := NewDeliveryRecorder(logbook, index, &fakeClaims{}, deliveryActivity)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +144,32 @@ func TestAnUnknownActivityIsRefusedAtStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := NewDeliveryRecorder(logbook, &fakeIndex{}, "https://example.test/unknown/v1"); err == nil {
+	if _, err := NewDeliveryRecorder(logbook, &fakeIndex{}, &fakeClaims{}, "https://example.test/unknown/v1"); err == nil {
 		t.Fatal("an activity outside the register was accepted")
+	}
+}
+
+// A trace ID reused under another consent would show each delivery as a use
+// of both consents: the second consent is refused, the first may repeat.
+func TestATraceCarriesDeliveriesUnderOneConsentOnly(t *testing.T) {
+	repository, index := &fakeRepository{}, &fakeIndex{}
+	recorder := recorderUnderTest(t, repository, index)
+	first := delivery()
+	if err := recorder.Record(context.Background(), first); err != nil {
+		t.Fatal(err)
+	}
+	again := delivery()
+	again.SpanID = "00f067aa0ba902b8"
+	if err := recorder.Record(context.Background(), again); err != nil {
+		t.Fatalf("the same consent in its own trace: %v", err)
+	}
+	other := delivery()
+	other.SpanID = "00f067aa0ba902b9"
+	other.ConsentID = "c-of-another-citizen"
+	if err := recorder.Record(context.Background(), other); !errors.Is(err, ErrTraceUnderAnotherConsent) {
+		t.Fatalf("err = %v, want ErrTraceUnderAnotherConsent", err)
+	}
+	if len(repository.stored) != 2 || len(index.registered) != 2 {
+		t.Errorf("records %d, registrations %d, want 2 and 2", len(repository.stored), len(index.registered))
 	}
 }

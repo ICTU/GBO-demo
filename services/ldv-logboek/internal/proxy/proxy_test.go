@@ -92,7 +92,7 @@ func newChain(t *testing.T) *chain {
 		t.Fatal(err)
 	}
 	recorder, err := ldv.NewDeliveryRecorder(logbook,
-		usageindex.Client{URL: index.URL, LogbookID: logbookID, HTTP: index.Client()}, activity)
+		usageindex.Client{URL: index.URL, LogbookID: logbookID, HTTP: index.Client()}, c.repository, activity)
 	if err != nil {
 		t.Fatal(err)
 	}
