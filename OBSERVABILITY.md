@@ -28,6 +28,10 @@ shows some spans under a parent it does not have: where a hop carries an LDV
 record, its `traceparent` names the span id of that record, which exists only
 in the logbook (`InjectTraceparent` and `CarryTraceparent` in
 [`services/ldv-client/tracecontext.go`](services/ldv-client/tracecontext.go)).
+The consent register's status span likewise hangs under the PDP's lookup span,
+which exists nowhere: the PDP exports no spans and
+[`policies/gbo/consent.rego`](policies/gbo/consent.rego) sends a fixed, made-up
+span id in its `traceparent`.
 
 The eudi-adapter records the activated `gbo.source_oin` and `gbo.type_id` on
 its request span. These values come from the onboarded source record, not from
