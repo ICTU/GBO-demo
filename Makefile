@@ -1,5 +1,5 @@
 .PHONY: up down logs clean certs require-ftv-postgres demo-manager manager-seed fsc-local-env fsc-ca fsc-up fsc-all-up fsc-brp-certs fsc-consent-register-certs fsc-gbo-pdp-certs fsc-ir-certs fsc-int-certs fsc-asip-certs fsc-databases fsc-down fsc-test fsc-clean \
-        fsc-seed-bri fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-lvg fsc-seed-int fsc-seed-asip fsc-seed-brp fsc-seed-rvig-source fsc-seed-metadata fsc-pdp-cert pdp-up \
+        fsc-seed-bri fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-data-usage-index fsc-seed-lvg fsc-seed-int fsc-seed-asip fsc-seed-brp fsc-seed-rvig-source fsc-seed-metadata fsc-pdp-cert pdp-up \
         eudi-images asi-wallet-verifier-image source-metadata-up \
         require-development-cas create-development-registrar-root provision-wallet-registration provision-test-pid provision-qtsp-wallet-registration credential-issuer-up provision-development-certificates provision-qtsp-issuance-certificates provision-asip-seal-certificate provision-asip-qtsp-certificate provision-asi-wallet-verifier provision-asi-eudi-wallet-verifier reconcile-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
         demo-full demo-integrator demo-asi demo-down eudi-config policy-check policy-test
@@ -209,7 +209,7 @@ manager-seed: policy-check
 	./scripts/seed-openftv-manager.py --url http://localhost:$${GBO_PORT_FTV_MANAGER:-9280}
 	docker compose --profile manager restart openftv-pdp
 
-demo-dvtp: policy-check certs require-ftv-postgres fsc-all-up fsc-seed-bri fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-lvg
+demo-dvtp: policy-check certs require-ftv-postgres fsc-all-up fsc-seed-bri fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-data-usage-index fsc-seed-lvg
 	@echo "-> DvTP stack: base + dienstverlener + toestemmingsportaal (via real FSC)"
 	docker compose --profile dvtp up --build -d
 	@echo ""
@@ -501,7 +501,7 @@ demo-eudi: policy-check require-ftv-postgres onboard-demo-sources provision-qtsp
 	$(call banner,EUDI-adapter:,$(PORT_EUDI_ADAPTER))
 	$(call banner,Jaeger:,$(PORT_JAEGER))
 
-demo-full: policy-check require-ftv-postgres onboard-demo-sources provision-qtsp-issuance-certificates fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-lvg eudi-images
+demo-full: policy-check require-ftv-postgres onboard-demo-sources provision-qtsp-issuance-certificates fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-data-usage-index fsc-seed-lvg eudi-images
 	@echo "-> Full stack: everything on"
 	docker compose --profile full up --build -d
 
@@ -818,6 +818,22 @@ fsc-seed-consent-status: fsc-local-env
 		-w /work \
 		gbo-demo/pki-tools:local \
 		bash scripts/seed-bri-contract.sh
+
+# The data usage index (#687) is published by the register's peer
+# (...0700) as two services: data-usage-index, where the source peers
+# register through bd-outway and brp-outway, and data-usage-lookup, which
+# only the register's own peer connects to, through cr-outway. The register's
+# Manager signs a connection only for peers the onboarding register admits
+# to ...0700. The script holds the parameters, so the same seeding ports to
+# the AppHost as it is.
+fsc-seed-data-usage-index: fsc-local-env
+	docker run --rm \
+		--network $(FSC_INFRA_NETWORK) \
+		--env-file fsc-infra/.env \
+		-v $(PWD)/fsc-infra:/work:ro \
+		-w /work \
+		gbo-demo/pki-tools:local \
+		bash scripts/seed-data-usage-index.sh
 
 # LVG (Landelijke Voorziening Gebouwen) is one more logical source on the
 # shared provider peer (...0200), behind the same Inway, like RvIG next to BD.

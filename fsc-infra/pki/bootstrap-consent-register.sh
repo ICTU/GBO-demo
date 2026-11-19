@@ -33,7 +33,7 @@ fi
 echo ">>> Generating Consent-register cert-tuple"
 
 # ── Group cert via openssl + certportal ────────────────────────────────
-echo "-- group-cert: consent-register (OIN=99999999900000000700, hosts=cr-manager,cr-inway) --"
+echo "-- group-cert: consent-register (OIN=99999999900000000700, hosts=cr-manager,cr-inway,cr-outway) --"
 docker run --rm \
     --network "${NETWORK}" \
     -v "$(pwd)/..:/work" -w /work \
@@ -46,7 +46,7 @@ docker run --rm \
 
         openssl req -new -nodes -sha256 -newkey rsa:4096 \
             -subj "/C=NL/O=GBO-DEMO Toestemmingsregister/OU=TEST/CN=cr-manager/serialNumber=99999999900000000700" \
-            -addext "subjectAltName=DNS:cr-manager,DNS:cr-inway" \
+            -addext "subjectAltName=DNS:cr-manager,DNS:cr-inway,DNS:cr-outway" \
             -keyout "${OUT}/consent-register-key.pem" \
             -out "${OUT}/consent-register.csr" 2>/dev/null
 

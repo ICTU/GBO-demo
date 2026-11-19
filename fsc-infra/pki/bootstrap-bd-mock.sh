@@ -33,7 +33,7 @@ fi
 echo ">>> Generating Belastingdienst-mock cert-tuple"
 
 # ── Group cert via openssl + certportal ────────────────────────────────
-echo "-- group-cert: bd-mock (OIN=99999999900000000200, hosts=bd-manager,bd-inway) --"
+echo "-- group-cert: bd-mock (OIN=99999999900000000200, hosts=bd-manager,bd-inway,bd-outway) --"
 docker run --rm \
     --network "${NETWORK}" \
     -v "$(pwd)/..:/work" -w /work \
@@ -46,7 +46,7 @@ docker run --rm \
 
         openssl req -new -nodes -sha256 -newkey rsa:4096 \
             -subj "/C=NL/O=Belastingdienst/OU=TEST/CN=bd-manager/serialNumber=99999999900000000200" \
-            -addext "subjectAltName=DNS:bd-manager,DNS:bd-inway" \
+            -addext "subjectAltName=DNS:bd-manager,DNS:bd-inway,DNS:bd-outway" \
             -keyout "${OUT}/bd-mock-key.pem" \
             -out "${OUT}/bd-mock.csr" 2>/dev/null
 
