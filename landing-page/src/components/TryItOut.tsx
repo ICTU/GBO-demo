@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import ExternalLink from './ExternalLink'
-import { links } from '../config'
+import { dvtpAvailable, links } from '../config'
 import { loadWalletUsecases, walletUniversalLink, type WalletUsecase } from '../eudi'
 
 /* Twee scenario's over dezelfde DvTP-stroom: een andere afnemer en bron,
@@ -130,9 +130,21 @@ export default function TryItOut() {
                     ))}
                   </ol>
                   {s.hint && <p className="tryout-hint">{s.hint}</p>}
-                  <ExternalLink href={s.start.href} describes={s.start.describes} className="btn-primary">
-                    {s.start.label}
-                  </ExternalLink>
+                  {dvtpAvailable ? (
+                    <ExternalLink href={s.start.href} describes={s.start.describes} className="btn-primary">
+                      {s.start.label}
+                    </ExternalLink>
+                  ) : (
+                    <>
+                      <span className="btn-primary btn-primary--disabled" aria-disabled="true">
+                        {s.start.label}
+                      </span>
+                      <p className="tryout-hint">
+                        Deze stroom draait niet in het gestarte profiel. Start de demo met{" "}
+                        <code>aspire run</code> (profiel <code>dvtp</code> of <code>full</code>).
+                      </p>
+                    </>
+                  )}
                 </div>
               ))}
             </div>

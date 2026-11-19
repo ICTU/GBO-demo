@@ -1,3 +1,4 @@
+import { traceLink } from '../util/traceLink'
 import { hlJSON } from '../util/highlight'
 import type { Outcome } from '../types'
 import { display, summary, type AsiRequestView } from '../lib/asiRequest'
@@ -73,20 +74,22 @@ export default function ResultPanel({ result, pending = false, jaegerUrl = JAEGE
                 </div>
                 <a
                   className="linkbtn"
-                  href={`${jaegerUrl}/trace/${result.trace_id}`}
+                  href={traceLink(jaegerUrl, result.trace_id)}
                   target="_blank"
                   rel="noreferrer"
                 >
-                  Open trace in Jaeger <span className="ext">↗</span>
+                  Open trace <span className="ext">↗</span>
                 </a>
-                <a
-                  className="linkbtn"
-                  href={`${grafanaUrl}/d/request-flow?var-trace_id=${encodeURIComponent(result.trace_id)}`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Open logs in Grafana <span className="ext">↗</span>
-                </a>
+                {grafanaUrl && (
+                  <a
+                    className="linkbtn"
+                    href={`${grafanaUrl}/d/request-flow?var-trace_id=${encodeURIComponent(result.trace_id)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open logs in Grafana <span className="ext">↗</span>
+                  </a>
+                )}
               </>
             )}
 

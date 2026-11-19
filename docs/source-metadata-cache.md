@@ -85,7 +85,7 @@ De gebruikte nl-wallet issuance-server leest TOML alleen bij startup. Een
 init-container leest de actieve release en combineert die met het gemounte
 certificaat-Secret in een pod-lokale `emptyDir`. Een gewijzigde release vereist
 daarom nog steeds een gecontroleerde restart van de issuance-server. Lokaal
-voert `make eudi-config` die materialisatie en restart uit. Automatisch een
+voert a restart of `eudi-issuance-materialize` and then `eudi-issuance-server` in the Aspire dashboard die materialisatie en restart uit. Automatisch een
 rollout triggeren blijft bewust buiten deze implementatie.
 
 Rollback wijzigt uitsluitend `active_release_id` naar een bewaarde vorige

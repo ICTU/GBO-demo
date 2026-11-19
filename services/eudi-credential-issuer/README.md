@@ -120,7 +120,7 @@ On the `eudi` profile the citizen can identify by logging in instead of disclosi
 
 Each provider registers itself with GBO's authorization server on its first login, with a software statement signed with its access certificate and its entry `ISSUER_LOGIN_REGISTER_BASE/<provider>` in the register (entitlement `PUB_EAA_Provider`). That server keeps clients in memory and makes a new signing key when it starts: when its keys changed, or a token request gets `invalid_client`, the provider registers again. The issuer logs neither the BSN nor the token.
 
-In the demo stack (`docker-compose.yml`) the flow is on: `ISSUER_LOGIN_SERVER` is the authorization server's public address (`ASI_AUTHORIZATION_SERVER_PUBLIC_URL`, default `http://localhost:9425`; set `ISSUER_LOGIN_SERVER=` to turn it off), and the authorization server lists the issuance resources of the demo sources (`ASI_ISSUANCE_RESOURCES`), whose register entries are in its `testdata/register.json`. Start it with `make demo-asi`. The wallet's browser must reach that address: on the iOS simulator `localhost` works, on the Android emulator `adb reverse tcp:9425 tcp:9425`; a phone needs a public address for the authorization server, like the issuer's tunnel hostname. The issuer logs how each login returned (`login returned`: the error, if any, and whether the wallet got a code), never the code or the BSN.
+In the demo (`aspire/apphost.cs`) the flow is on: `ISSUER_LOGIN_SERVER` is the authorization server's public address (`ASI_AUTHORIZATION_SERVER_PUBLIC_URL`, default `http://localhost:9425`; set `ISSUER_LOGIN_SERVER=` to turn it off), and the authorization server lists the issuance resources of the demo sources (`ASI_ISSUANCE_RESOURCES`), whose register entries are in its `testdata/register.json`. Start it with `Gbo__Profiles=full,asi aspire run`. The wallet's browser must reach that address: on the iOS simulator `localhost` works, on the Android emulator `adb reverse tcp:9425 tcp:9425`; a phone needs a public address for the authorization server, like the issuer's tunnel hostname. The issuer logs how each login returned (`login returned`: the error, if any, and whether the wallet got a code), never the code or the BSN.
 
 ## Deferred issuance
 
@@ -221,14 +221,14 @@ In the demo stack this file is not written by hand: `eudi-adapter
 materialize-credential-issuer` derives it from the active Source Release. Each
 source becomes a provider with its provisioned issuer and status
 certificates, its access certificate, its registration certificate and its
-request encryption key (`make provision-wallet-registration`); each offer of an activated type becomes a credential
+request encryption key (`aspire/scripts/provision.sh wallet-registration`); each offer of an activated type becomes a credential
 configuration `<source>-<offer>` (also its scope), named by the offer's label
 in Dutch, with the type's vct and claims (a claim is mandatory unless the
 source marks it optional), the type's status list, 365 days of validity and
 the adapter's `/attestations/<source>/<type>` as bronpoort. One configuration
 per offer lets a wallet that starts at the issuer name the offer by scope
 alone, and shows the offer, for example "Inkomensverklaring 2025", in the
-wallet. When `make provision-test-pid` has run, a test PID provider
+wallet. When `aspire/scripts/provision.sh test-pid` has run, a test PID provider
 `test-pid` follows, with one configuration `test-pid-pid` (`urn:eudi:pid:nl:1`)
 fed by `test-pid-source` (`TEST_PID_SOURCE_URL`). Its configuration has
 `pid_metadata`: the issuer adds `issuing_authority` (`GBO Demo`),
@@ -251,17 +251,18 @@ database in `postgres-eudi`, `credential-issuer-migrations` its tables,
 `credential-issuer-materialize` its configuration (handed to the issuer's
 user 1000), and `trust-host` serves the reader-root CRL, the WRPRC status list
 and the pages a registration certificate names. The public port is
-`GBO_PORT_CREDENTIAL_ISSUER` (9429); the internal API is published on
+9429; the internal API is published on
 `127.0.0.1:9431` only, and is reachable without authentication from every
 container in the `eudi` network. `dev-portal-backend` joins that network
 to make test PID offers for the developer portal (`TEST_PID_OFFERS_URL`,
 empty to turn it off), and to revoke the credentials of the portal's offers
-(`CREDENTIAL_ISSUER_INTERNAL_URL`, empty to turn it off). The tunnel routes are listed in
-`docker-compose.cloudflare-tunnel.yml`. Start it with `make
-credential-issuer-up`: it checks `ISSUER_PUBLIC_URL`, `EUDI_TRUST_PUBLIC_URL`
-and `CREDENTIAL_ISSUER_DB_PASSWORD`, rematerializes the configuration and
-recreates the issuer, which reads its configuration only at start. Run `make
-provision-wallet-registration` first: it creates `.local/public-trust` as your
+(`CREDENTIAL_ISSUER_INTERNAL_URL`, empty to turn it off). The tunnel routes are those of the `eudi-tunnel` resource in
+`aspire/apphost.cs`. Start it with the `credential-issuer` profile
+(`Gbo__Profiles=eudi,credential-issuer aspire run`): the AppHost asks for
+`issuer-public-url` and `eudi-trust-public-url`, generates the database
+password, and materializes the configuration before the issuer starts,
+which reads it only at start. Run `aspire/scripts/provision.sh
+wallet-registration` first: it creates `.local/public-trust` as your
 user, where Docker would otherwise create it as root.
 
 The offer parameters (`POST /offers`, `parameters`) are passed to the bronpoort

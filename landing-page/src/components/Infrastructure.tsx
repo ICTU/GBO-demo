@@ -39,11 +39,11 @@ export default function Infrastructure() {
           </div>
           <div>
             <h3>Observability</h3>
-            <ExternalLink href={links.jaeger} describes="traces in Jaeger" className="infra-link">
-              Traces (Jaeger) ↗
+            <ExternalLink href={links.jaeger} describes="de traces" className="infra-link">
+              Traces ↗
             </ExternalLink>
-            <ExternalLink href={links.grafana} describes="metrics in Grafana" className="infra-link">
-              Metrics (Grafana) ↗
+            <ExternalLink href={links.grafana} describes="de logs en metrics" className="infra-link">
+              Logs en metrics ↗
             </ExternalLink>
           </div>
           <div>

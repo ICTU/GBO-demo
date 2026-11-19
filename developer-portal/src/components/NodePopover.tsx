@@ -1,3 +1,4 @@
+import { traceLink } from '../util/traceLink'
 import { useState } from 'react'
 import NodeIO from './NodeIO'
 import OpaDecisionContext from './OpaDecisionContext'
@@ -86,11 +87,11 @@ export default function NodePopover({
       )}
 
       {traceId && (
-        <a className="linkbtn" href={`${jaegerUrl}/trace/${traceId}`} target="_blank" rel="noreferrer">
-          Trace in Jaeger <span className="ext">↗</span>
+        <a className="linkbtn" href={traceLink(jaegerUrl, traceId)} target="_blank" rel="noreferrer">
+          Trace <span className="ext">↗</span>
         </a>
       )}
-      {traceId && (
+      {traceId && grafanaUrl && (
         <a className="linkbtn" href={`${grafanaUrl}/d/request-flow?var-trace_id=${encodeURIComponent(traceId)}`} target="_blank" rel="noreferrer">
           Logs in Grafana <span className="ext">↗</span>
         </a>

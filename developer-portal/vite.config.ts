@@ -53,11 +53,6 @@ export default defineConfig({
         target: process.env.EUDI_API_TARGET ?? 'http://localhost:9409',
         changeOrigin: true,
       },
-      '/jaeger-api': {
-        target: process.env.JAEGER_API_TARGET ?? 'http://localhost:9686',
-        rewrite: (p) => p.replace(/^\/jaeger-api/, ''),
-        changeOrigin: true,
-      },
       // The bron-playground queries these same-origin, so the browser needs
       // no published bron-port and the servers need no CORS. One route per
       // bronprofiel — the paths match `graphqlPath` in src/data/bronnen.ts.

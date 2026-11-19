@@ -1140,3 +1140,11 @@ a:hover {
     transition: none;
   }
 }
+
+/* Een stroom die in het gestarte profiel niet draait. */
+.btn-primary--disabled,
+.btn-primary--disabled:hover {
+  background: var(--grey-border);
+  color: #4a4f57;
+  cursor: not-allowed;
+}

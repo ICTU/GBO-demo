@@ -109,3 +109,9 @@ export const docs = {
 } as const
 
 export const versionString = resolve(rc?.versionString, import.meta.env.VITE_VERSION_STRING, '')
+
+/* Of de DvTP-stroom (HypotheekBV, toestemmingsportaal, Installatie Register)
+   in deze omgeving draait. De AppHost zet dvtpAvailable op "false" als het
+   gestarte profiel die stroom niet bevat; dan wijst de startknop niet naar
+   een poort waar niets luistert. Zonder waarde: beschikbaar. */
+export const dvtpAvailable = resolve(rc?.dvtpAvailable, import.meta.env.VITE_DVTP_AVAILABLE, 'true') !== 'false'

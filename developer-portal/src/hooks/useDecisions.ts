@@ -18,8 +18,9 @@ const cache = new Map<string, PdpDecisions>()
 // transaction: the Authorization Decision Log record (audit) and the
 // engine's console decision-log entry (observability). The two are fetched
 // and retried apart, so an ADL record shows as soon as it is in, whatever
-// Loki does. Both arrive late — OpenFTV batches its ADL writes for up to
-// five seconds, and promtail ships the console line to Loki — so each part
+// the log store does. Both arrive late — OpenFTV batches its ADL writes for up
+// to five seconds, and the console line reaches the log store (the Aspire
+// dashboard, or Loki) a moment after the decision — so each part
 // is asked again while it has nothing yet, for about seven seconds, and
 // stops once it returned data or an error. Only a complete result is cached.
 export function useDecisions(transactionId: string | undefined, enabled: boolean): State {

@@ -535,8 +535,8 @@ direct stoppen.
 Daarna voert dit target de volledige onboarding uit:
 
 ```sh
-make onboard-demo-sources
-make demo-eudi
+Gbo__Profiles=eudi aspire run      # in aspire/; onboards the demo sources
+Gbo__Profiles=eudi aspire run      # in aspire/
 ```
 
 Het eerste target start de drie bronnen, maakt de FSC-contracten, maakt
@@ -544,7 +544,7 @@ expliciet lokale leafcertificaten voor `belastingdienst`, `rvig` en
 `demo-unsecured`, draait één reconciliation en promoveert de complete release
 atomair. `demo-eudi` materialiseert de release in een lokale runtimevolume en
 start daarna de issuance-server. Na een latere metadatawijziging voert
-`make eudi-config` de vereiste rematerialisatie en restart uit.
+a restart of `eudi-issuance-materialize` and then `eudi-issuance-server` in the Aspire dashboard de vereiste rematerialisatie en restart uit.
 
 ### Inspectie en rollback
 
@@ -552,21 +552,27 @@ Inspecteer uitsluitend de niet-geheime identiteit, versies en freshness van
 de actieve release:
 
 ```sh
-docker compose --profile onboarding run --rm source-reconciler \
+docker run --rm --network "$(docker inspect -f '{{range $n, $_ := .NetworkSettings.Networks}}{{$n}}{{end}}' "$(docker ps -q --filter label=com.docker.compose.service=postgres-eudi)")" \
+  -e SOURCE_REGISTRY_DATABASE_URL -e SOURCE_REGISTRY_SCHEMA=source_registry \
+  "$(docker inspect -f '{{.Config.Image}}' "$(docker ps -aq --filter label=com.docker.compose.service=source-reconciler | head -1)")" \
   ./eudi-adapter inspect-source-registry
 ```
+
+met `SOURCE_REGISTRY_DATABASE_URL` het writer-account
+(`postgres://source_registry:<wachtwoord>@postgres-eudi:5432/source_registry`;
+het wachtwoord: `aspire secret get Parameters:source-registry-password` in `aspire/`).
 
 Een eerdere immutable release blijft in PostgreSQL beschikbaar. Activeer die
 atomair met het writer-account door het release-ID uit de inspectie of de
 operationele historie expliciet op te geven:
 
 ```sh
-docker compose --profile onboarding run --rm source-reconciler \
+# zelfde docker run als hierboven, met:
   ./eudi-adapter activate-source-release --release-id=<sha256-release-id>
 ```
 
 De adapter neemt de complete release bij zijn volgende refresh over. Draai
-daarna `make eudi-config` om de issuance-configuratie uit dezelfde release te
+daarna a restart of `eudi-issuance-materialize` and then `eudi-issuance-server` in the Aspire dashboard om de issuance-configuratie uit dezelfde release te
 rematerialiseren en de issuance-server te herstarten. In Kubernetes gebeurt
 dit door de issuance-pod opnieuw aan te maken, zodat de init-container opnieuw
 draait. Een onbekend release-ID wijzigt de actieve pointer niet.

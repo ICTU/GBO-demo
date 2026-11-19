@@ -106,8 +106,8 @@ const JAEGER_PUBLIC_URL =
 
 const GRAFANA_PUBLIC_URL =
   window.__GBO_RUNTIME_CONFIG__?.grafanaPublicUrl ||
-  import.meta.env.VITE_GRAFANA_PUBLIC_URL ||
-  'http://localhost:9300'
+  // Empty hides the logs link: the Aspire dashboard has no log search by trace id.
+  (import.meta.env.VITE_GRAFANA_PUBLIC_URL ?? 'http://localhost:9300')
 
 export default function App() {
   const { scenarios, loading: scLoading, error: scError, remove, save } = useScenarios()
