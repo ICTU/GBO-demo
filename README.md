@@ -353,7 +353,8 @@ shows consents that already exist.
    `services/graphql-server/mockdata/citizens.json`.
 3. Choose the data sets to share and click **Geef toestemming**. The portal
    returns a signed consent token to the consumer mock, which immediately runs
-   the query and shows the income data.
+   the query. Expand **Inkomensgegevens** to see the income data, the
+   **↻ Verversen** button and the trace-id.
 4. Open the [developer portal](http://localhost:9003). **History · Replay**
    lists the issuance and the query with their outcome and trace id.
 5. In another tab, open the [consent portal](http://localhost:9002), sign in
