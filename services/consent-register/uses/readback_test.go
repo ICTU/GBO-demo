@@ -12,20 +12,22 @@ type fakeLogbooks struct {
 	records map[string][]Record // by trace ID
 	down    map[string]bool     // by logbook ID
 	slow    map[string]bool
+	// truncated marks a trace whose answer the logbook cut off.
+	truncated map[string]bool
 }
 
-func (f fakeLogbooks) Read(ctx context.Context, logbookID, traceID string) ([]Record, error) {
+func (f fakeLogbooks) Read(ctx context.Context, logbookID, traceID string) ([]Record, bool, error) {
 	if f.slow[logbookID] {
 		<-ctx.Done()
-		return nil, ctx.Err()
+		return nil, false, ctx.Err()
 	}
 	if f.down[logbookID] {
-		return nil, errors.New("connection refused")
+		return nil, false, errors.New("connection refused")
 	}
 	if logbookID == "99999999900000000200/bd" {
-		return nil, ErrNoReadService
+		return nil, false, ErrNoReadService
 	}
-	return f.records[traceID], nil
+	return f.records[traceID], f.truncated[traceID], nil
 }
 
 const (
@@ -149,7 +151,7 @@ type countingLogbooks struct {
 	duration time.Duration
 }
 
-func (c *countingLogbooks) Read(ctx context.Context, _, _ string) ([]Record, error) {
+func (c *countingLogbooks) Read(ctx context.Context, _, _ string) ([]Record, bool, error) {
 	c.mu.Lock()
 	c.running++
 	if c.running > c.maxSeen {
@@ -159,9 +161,9 @@ func (c *countingLogbooks) Read(ctx context.Context, _, _ string) ([]Record, err
 	defer func() { c.mu.Lock(); c.running--; c.mu.Unlock() }()
 	select {
 	case <-time.After(c.duration):
-		return []Record{{StartTime: time.Now()}}, nil
+		return []Record{{StartTime: time.Now()}}, false, nil
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return nil, false, ctx.Err()
 	}
 }
 
@@ -184,5 +186,28 @@ func TestManyUsesAreReadAFewAtATime(t *testing.T) {
 	}
 	if logbooks.maxSeen > 4 {
 		t.Fatalf("%d reads ran at once at one source, want at most 4", logbooks.maxSeen)
+	}
+}
+
+// A source that cut its answer off gets a notice, next to the uses it did
+// return: the list is not presented as the whole history.
+func TestATruncatedSourceGetsANotice(t *testing.T) {
+	at := time.Date(2026, 11, 19, 9, 0, 0, 0, time.UTC)
+	service := Service{
+		Sources: readSources,
+		Index: fakeIndex{registrations: map[string][]Registration{"c-1": {
+			{LogbookID: bdComponent, TraceID: "t1", RegisteredAt: at},
+		}}},
+		Logbooks: fakeLogbooks{
+			records:   map[string][]Record{"t1": {{StartTime: at}, {StartTime: at}}},
+			truncated: map[string]bool{"t1": true},
+		},
+	}
+	report := service.For(context.Background(), "c-1", "x")
+	if len(report.Uses) != 2 {
+		t.Fatalf("uses = %d, want the 2 returned", len(report.Uses))
+	}
+	if len(report.Notices) != 1 || report.Notices[0] != (Notice{Kind: NoticeSourceIncomplete, Source: "Belastingdienst"}) {
+		t.Fatalf("notices = %+v", report.Notices)
 	}
 }

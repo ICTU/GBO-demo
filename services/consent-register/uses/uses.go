@@ -43,10 +43,12 @@ type Record struct {
 }
 
 // Logbooks reads the logbook of a source's LDV component by trace-id, over
-// FSC. ErrNoReadService means the register has no read service for that
-// logbook ID; any other error means the logbook could not be read.
+// FSC. truncated says the logbook cut the answer off: it holds more records
+// under the trace than it returned. ErrNoReadService means the register has
+// no read service for that logbook ID; any other error means the logbook
+// could not be read.
 type Logbooks interface {
-	Read(ctx context.Context, logbookID, traceID string) ([]Record, error)
+	Read(ctx context.Context, logbookID, traceID string) (records []Record, truncated bool, err error)
 }
 
 // ErrNoReadService is returned for a logbook the register cannot read.
@@ -83,6 +85,10 @@ const NoticeIndexUnavailable = "index_unavailable"
 // its uses are missing from the list (D2); the uses of other sources are
 // still shown.
 const NoticeSourceUnavailable = "source_unavailable"
+
+// NoticeSourceIncomplete says one source returned only part of a trace's
+// records: there are more uses at that source than the list shows.
+const NoticeSourceIncomplete = "source_incomplete"
 
 // Notice is something the citizen must be told instead of, or next to, the
 // uses.
@@ -154,6 +160,7 @@ func (s Service) For(ctx context.Context, consentID, serviceProviderOIN string) 
 	report := Report{Uses: []Use{}, Notices: []Notice{}}
 	failed := map[string]bool{}
 	read := map[string]bool{}
+	incomplete := map[string]bool{}
 	for i, registration := range registrations {
 		result := results[i]
 		source := s.sourceName(registration.LogbookID)
@@ -177,6 +184,10 @@ func (s Service) For(ctx context.Context, consentID, serviceProviderOIN string) 
 			for _, record := range result.records {
 				report.Uses = append(report.Uses, use(registration, record.StartTime))
 			}
+			if result.truncated && !incomplete[source] {
+				incomplete[source] = true
+				report.Notices = append(report.Notices, Notice{Kind: NoticeSourceIncomplete, Source: source})
+			}
 		}
 	}
 	sort.SliceStable(report.Uses, func(a, b int) bool { return report.Uses[a].UsedAt.After(report.Uses[b].UsedAt) })
@@ -185,8 +196,9 @@ func (s Service) For(ctx context.Context, consentID, serviceProviderOIN string) 
 }
 
 type readResult struct {
-	records []Record
-	err     error
+	records   []Record
+	truncated bool
+	err       error
 }
 
 // readBack reads every registration's trace at its source. Sources are read
@@ -236,8 +248,8 @@ func (s Service) readBack(ctx context.Context, registrations []Registration) []r
 						return
 					}
 					defer func() { <-slots }()
-					records, err := s.Logbooks.Read(sourceCtx, registrations[i].LogbookID, registrations[i].TraceID)
-					results[i] = readResult{records: records, err: err}
+					records, truncated, err := s.Logbooks.Read(sourceCtx, registrations[i].LogbookID, registrations[i].TraceID)
+					results[i] = readResult{records: records, truncated: truncated, err: err}
 				}()
 			}
 			reads.Wait()

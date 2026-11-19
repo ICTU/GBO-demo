@@ -28,19 +28,19 @@ type Client struct {
 }
 
 // Read implements uses.Logbooks.
-func (c Client) Read(ctx context.Context, logbookID, traceID string) ([]uses.Record, error) {
+func (c Client) Read(ctx context.Context, logbookID, traceID string) ([]uses.Record, bool, error) {
 	base, ok := c.Services[logbookID]
 	if !ok {
-		return nil, uses.ErrNoReadService
+		return nil, false, uses.ErrNoReadService
 	}
 	body, err := json.Marshal(map[string]string{"traceId": traceID})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		strings.TrimRight(base, "/")+"/data-processing-operations", bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("build read request: %w", err)
+		return nil, false, fmt.Errorf("build read request: %w", err)
 	}
 	request.Header.Set("Content-Type", "application/json")
 	client := c.HTTP
@@ -49,12 +49,12 @@ func (c Client) Read(ctx context.Context, logbookID, traceID string) ([]uses.Rec
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("read the logbook: %w", err)
+		return nil, false, fmt.Errorf("read the logbook: %w", err)
 	}
 	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		detail, _ := io.ReadAll(io.LimitReader(response.Body, 512))
-		return nil, fmt.Errorf("the logbook answered %d: %s", response.StatusCode, strings.TrimSpace(string(detail)))
+		return nil, false, fmt.Errorf("the logbook answered %d: %s", response.StatusCode, strings.TrimSpace(string(detail)))
 	}
 	var answer struct {
 		Operations []struct {
@@ -63,7 +63,7 @@ func (c Client) Read(ctx context.Context, logbookID, traceID string) ([]uses.Rec
 		} `json:"dataProcessingOperations"`
 	}
 	if err := json.NewDecoder(io.LimitReader(response.Body, 4<<20)).Decode(&answer); err != nil {
-		return nil, fmt.Errorf("decode the logbook answer: %w", err)
+		return nil, false, fmt.Errorf("decode the logbook answer: %w", err)
 	}
 	records := make([]uses.Record, 0, len(answer.Operations))
 	for _, operation := range answer.Operations {
@@ -74,9 +74,11 @@ func (c Client) Read(ctx context.Context, logbookID, traceID string) ([]uses.Rec
 		}
 		start, err := time.Parse(time.RFC3339Nano, operation.StartTime)
 		if err != nil {
-			return nil, fmt.Errorf("the logbook sent startTime %q: %w", operation.StartTime, err)
+			return nil, false, fmt.Errorf("the logbook sent startTime %q: %w", operation.StartTime, err)
 		}
 		records = append(records, uses.Record{StartTime: start})
 	}
-	return records, nil
+	// The logbook marks an answer its cap cut off (ldv-logboek's
+	// Gbo-Ldv-Truncated, a local extension: the read API has no paging).
+	return records, response.Header.Get("Gbo-Ldv-Truncated") == "true", nil
 }

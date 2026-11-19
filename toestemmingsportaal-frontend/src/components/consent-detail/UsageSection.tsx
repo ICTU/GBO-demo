@@ -36,6 +36,9 @@ export default function UsageSection({ token, consentId }: Props) {
 
   const indexUnavailable = usage.notices.some((n) => n.kind === 'index_unavailable')
   const sourceNotices = usage.notices.filter((n) => n.kind === 'source_unavailable' && n.source)
+  // A source that returned only part of its records: the list below is
+  // what it returned, and there is more.
+  const incompleteNotices = usage.notices.filter((n) => n.kind === 'source_incomplete' && n.source)
 
   if (indexUnavailable) {
     return (
@@ -58,6 +61,14 @@ export default function UsageSection({ token, consentId }: Props) {
             Het gebruik bij {n.source} kan nu niet worden opgehaald.
             {usage.uses.length > 0 && ' Er kan daar meer gebruik zijn dan hieronder staat.'} Probeer het
             later opnieuw.
+          </span>
+        </div>
+      ))}
+      {incompleteNotices.map((n) => (
+        <div key={`incomplete-${n.source}`} className="partial-warning usage-notice" role="status">
+          <span className="icon" aria-hidden>!</span>
+          <span>
+            Bij {n.source} is niet al het gebruik opgehaald: er is daar meer gebruik dan hieronder staat.
           </span>
         </div>
       ))}

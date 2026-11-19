@@ -26,12 +26,15 @@ func TestReadSendsOneTraceIDToTheGrantLink(t *testing.T) {
 	defer server.Close()
 
 	client := Client{Services: map[string]string{"99999999900000000200/ldv-lezen-bd": server.URL + "/ldv-lezen-bd"}, HTTP: server.Client()}
-	records, err := client.Read(context.Background(), "99999999900000000200/ldv-lezen-bd", trace)
+	records, truncated, err := client.Read(context.Background(), "99999999900000000200/ldv-lezen-bd", trace)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if path != "/ldv-lezen-bd/data-processing-operations" || len(body) != 1 || body["traceId"] != trace {
 		t.Errorf("path %s, body %v", path, body)
+	}
+	if truncated {
+		t.Error("an answer without the mark was read as truncated")
 	}
 	if len(records) != 1 || records[0].StartTime.Nanosecond() != 500000000 {
 		t.Errorf("records = %+v", records)
@@ -39,7 +42,7 @@ func TestReadSendsOneTraceIDToTheGrantLink(t *testing.T) {
 }
 
 func TestAnUnknownLogbookHasNoReadService(t *testing.T) {
-	if _, err := (Client{}).Read(context.Background(), "99999999900000000200/bd", trace); !errors.Is(err, uses.ErrNoReadService) {
+	if _, _, err := (Client{}).Read(context.Background(), "99999999900000000200/bd", trace); !errors.Is(err, uses.ErrNoReadService) {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -52,7 +55,19 @@ func TestARefusalIsAnError(t *testing.T) {
 	}))
 	defer server.Close()
 	client := Client{Services: map[string]string{"p/x": server.URL}, HTTP: server.Client()}
-	if _, err := client.Read(context.Background(), "p/x", trace); err == nil || errors.Is(err, uses.ErrNoReadService) {
+	if _, _, err := client.Read(context.Background(), "p/x", trace); err == nil || errors.Is(err, uses.ErrNoReadService) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestATruncatedAnswerIsReported(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Gbo-Ldv-Truncated", "true")
+		_, _ = w.Write([]byte(`{"dataProcessingOperations":[]}`))
+	}))
+	defer server.Close()
+	client := Client{Services: map[string]string{"p/x": server.URL}, HTTP: server.Client()}
+	if _, truncated, err := client.Read(context.Background(), "p/x", trace); err != nil || !truncated {
+		t.Fatalf("truncated %v, err %v", truncated, err)
 	}
 }
