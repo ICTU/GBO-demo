@@ -1480,6 +1480,52 @@ string? FindNodeDir(int minimumMajor)
     return null;
 }
 
+// ── Grouping in the dashboard ────────────────────────────────────────────
+// Visual only: a child is listed under its parent in the dashboard and keeps
+// its own lifecycle, waits and ports. Each FSC peer folds under its
+// Controller, the run-once helpers under the resource they prepare.
+var resourcesByName = builder.Resources.ToDictionary(r => r.Name);
+void Nest(string child, string parent)
+{
+    if (resourcesByName.TryGetValue(child, out var c) && resourcesByName.TryGetValue(parent, out var p))
+    {
+        builder.CreateResourceBuilder(c).WithParentRelationship(p);
+    }
+}
+foreach (var peer in new[] { "directory", "edi", "bd", "hv", "cr", "pdp", "ir", "brp", "int", "asip" })
+{
+    foreach (var part in new[] { "certs", "migrations-controller", "migrations-manager", "migrations-txlog-api", "manager", "txlog-api", "inway", "outway" })
+    {
+        Nest($"{peer}-{part}", $"{peer}-controller");
+    }
+}
+Nest("directory-ui", "directory-controller");
+foreach (var name in resourcesByName.Keys.Where(n => n.StartsWith("fsc-seed-", StringComparison.Ordinal)).ToList())
+{
+    Nest(name, "directory-controller");
+}
+Nest("fsc-databases", "fsc-postgres");
+foreach (var (child, parent) in new[]
+{
+    ("cfssl", "certportal"), ("fsc-root-ca", "certportal"),
+    ("pki-tools-image", resourcesByName.ContainsKey("certportal") ? "certportal" : "openftv-pdp"),
+    ("postgres-ftv-init", "postgres-ftv"),
+    ("pdp-cert", "openftv-pdp"), ("policy-check", "openftv-pdp"), ("pdp-admission", "openftv-pdp"),
+    ("source-registry-bootstrap", "postgres-eudi"), ("source-registry-migrations", "postgres-eudi"),
+    ("credential-issuer-db-bootstrap", "postgres-eudi"),
+    ("provision-belastingdienst-certificates", "source-reconciler"), ("provision-rvig-certificates", "source-reconciler"),
+    ("provision-demo-unsecured-certificates", "source-reconciler"),
+    ("eudi-issuance-server-image", "eudi-issuance-server"), ("eudi-migrations", "eudi-issuance-server"),
+    ("eudi-issuance-materialize", "eudi-issuance-server"), ("provision-qtsp-issuance-certificates", "eudi-issuance-server"),
+    ("credential-issuer-migrations", "eudi-credential-issuer"), ("credential-issuer-materialize", "eudi-credential-issuer"),
+    ("eudi-wallet-verifier-runtime", "eudi-wallet-verifier"), ("asi-wallet-verifier-image", "asi-wallet-verifier"),
+    ("provision-asip-seal-certificate", "asi-provider"), ("provision-asip-qtsp-certificate", "qtsp-reference"),
+    ("manager-seed", "openftv-manager"), ("openftv-manager-ui", "openftv-manager"),
+})
+{
+    Nest(child, parent);
+}
+
 // ── Grouping in Docker Desktop and OrbStack ──────────────────────────────
 // Both group containers by the compose project label. Every container the
 // AppHost starts carries it, with its resource name as the service. The

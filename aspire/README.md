@@ -110,6 +110,21 @@ Fixed and not proxied:
 | 9280–9284 | the OpenFTV Manager, its UI and Keycloak |
 | 15126 | the dashboard |
 
+## The dashboard
+
+The resource list nests the helpers under the resource they prepare: each
+FSC peer's parts under its Controller, migrations and seeds under their
+database, PDP or directory. That leaves about 40 top-level resources in the
+dvtp run.
+
+In Aspire 17.0 the graph view draws every resource and ignores the list's
+Filters and nesting. To graph a subset, select it in the list (click, and
+⌘-click to add or remove), or open the page with the resources in the URL:
+
+```text
+http://localhost:15126/resources?resource=openftv-pdp&resource=bron-sidecar&resource=graphql-server&resource=bd-controller
+```
+
 ## What runs where
 
 - **Go services:** containers built from their own Dockerfiles, with the
