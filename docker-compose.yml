@@ -872,6 +872,16 @@ services:
       - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY:-local-demo-pseudonym-key}
       - LDV_DECRYPTION_ACTIVITY=https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-identiteit-ontsleuteling/v1
       - LDV_FORWARD_ACTIVITY=https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-bronquery-doorgifte/v1
+      # Deliveries under a consent (#687, #689): after a 200 on a request with
+      # a consent token the sidecar registers the trace at the data usage
+      # index through its peer's Outway, then writes a delivery record in a
+      # logbook of its own (logboek-levering-bd), apart from the source's
+      # logbook. If either fails the data is withheld. The logbook ID is the
+      # peer ID plus the name of that logbook's read service.
+      - DATA_USAGE_INDEX_URL=http://bd-outway:8080/data-usage-index
+      - DATA_USAGE_LOGBOOK_ID=99999999900000000200/ldv-lezen-bd
+      - DELIVERY_LOGBOOK_URL=http://logboek-levering-bd:4016
+      - DELIVERY_ACTIVITY=https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-levering-onder-toestemming/v1
     volumes:
       # The LDV spool must survive a restart; that is what makes a
       # record durable before it reaches the logbook.
@@ -890,6 +900,8 @@ services:
       decryption-component:
         condition: service_healthy
       logboek-bd:
+        condition: service_healthy
+      logboek-levering-bd:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4011/health"]
@@ -924,6 +936,16 @@ services:
       - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY_BRP:-local-demo-pseudonym-key-brp}
       - LDV_DECRYPTION_ACTIVITY=https://logboek.rvig.nl/verwerkingsactiviteiten/brp-identiteit-ontsleuteling/v1
       - LDV_FORWARD_ACTIVITY=https://logboek.rvig.nl/verwerkingsactiviteiten/brp-bronquery-doorgifte/v1
+      # Deliveries under a consent (#687, #689): after a 200 on a request with
+      # a consent token the sidecar registers the trace at the data usage
+      # index through its peer's Outway, then writes a delivery record in a
+      # logbook of its own (logboek-levering-brp), apart from the source's
+      # logbook. If either fails the data is withheld. The logbook ID is the
+      # peer ID plus the name of that logbook's read service.
+      - DATA_USAGE_INDEX_URL=http://brp-outway:8080/data-usage-index
+      - DATA_USAGE_LOGBOOK_ID=99999999900000000400/ldv-lezen-brp
+      - DELIVERY_LOGBOOK_URL=http://logboek-levering-brp:4016
+      - DELIVERY_ACTIVITY=https://logboek.rvig.nl/verwerkingsactiviteiten/brp-levering-onder-toestemming/v1
     volumes:
       # The LDV spool must survive a restart; that is what makes a
       # record durable before it reaches the logbook.
@@ -942,6 +964,8 @@ services:
       decryption-component:
         condition: service_healthy
       logboek-brp:
+        condition: service_healthy
+      logboek-levering-brp:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4011/health"]
@@ -1011,6 +1035,16 @@ services:
       - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY_LVG:-local-demo-pseudonym-key-lvg}
       - LDV_DECRYPTION_ACTIVITY=https://logboek.lvg.test/verwerkingsactiviteiten/lvg-identiteit-ontsleuteling/v1
       - LDV_FORWARD_ACTIVITY=https://logboek.lvg.test/verwerkingsactiviteiten/lvg-bronquery-doorgifte/v1
+      # Deliveries under a consent (#687, #689): after a 200 on a request with
+      # a consent token the sidecar registers the trace at the data usage
+      # index through its peer's Outway, then writes a delivery record in a
+      # logbook of its own (logboek-levering-lvg), apart from the source's
+      # logbook. If either fails the data is withheld. The logbook ID is the
+      # peer ID plus the name of that logbook's read service.
+      - DATA_USAGE_INDEX_URL=http://bd-outway:8080/data-usage-index
+      - DATA_USAGE_LOGBOOK_ID=99999999900000000200/ldv-lezen-lvg
+      - DELIVERY_LOGBOOK_URL=http://logboek-levering-lvg:4016
+      - DELIVERY_ACTIVITY=https://logboek.lvg.test/verwerkingsactiviteiten/lvg-levering-onder-toestemming/v1
     volumes:
       - ldv-outbox-lvg-sidecar:/data
     # Only the Inways of the source reach the sidecar (source-gateways), and
@@ -1027,6 +1061,8 @@ services:
       decryption-component:
         condition: service_healthy
       logboek-lvg:
+        condition: service_healthy
+      logboek-levering-lvg:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4011/health"]
