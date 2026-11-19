@@ -1,4 +1,4 @@
-.PHONY: up down logs clean certs require-ftv-postgres demo-manager manager-seed fsc-local-env fsc-ca fsc-up fsc-all-up fsc-brp-certs fsc-consent-register-certs fsc-gbo-pdp-certs fsc-ir-certs fsc-int-certs fsc-asip-certs fsc-databases fsc-down fsc-test fsc-clean \
+.PHONY: up down logs clean certs require-ftv-postgres demo-manager manager-seed fsc-local-env fsc-ca fsc-up fsc-networks fsc-all-up fsc-brp-certs fsc-consent-register-certs fsc-gbo-pdp-certs fsc-ir-certs fsc-int-certs fsc-asip-certs fsc-databases fsc-down fsc-test fsc-clean \
         fsc-seed-bri fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-lvg fsc-seed-int fsc-seed-asip fsc-seed-brp fsc-seed-rvig-source fsc-seed-metadata fsc-pdp-cert pdp-up \
         eudi-images asi-wallet-verifier-image source-metadata-up \
         require-development-cas create-development-registrar-root provision-wallet-registration provision-test-pid provision-qtsp-wallet-registration credential-issuer-up provision-development-certificates provision-qtsp-issuance-certificates provision-asip-seal-certificate provision-asip-qtsp-certificate provision-asi-wallet-verifier provision-asi-eudi-wallet-verifier reconcile-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
@@ -74,6 +74,20 @@ FSC_INFRA_NETWORK ?= $(FSC_PROJECT_NAME)_default
 FSC_SOURCE_GATEWAY_NETWORK ?= $(FSC_PROJECT_NAME)_source-gateways
 FSC_COMPOSE = docker compose -p $(FSC_PROJECT_NAME) -f fsc-infra/docker-compose.yml
 
+# The base stack joins both networks above as external networks, so Compose
+# refuses to start it while they are missing, as after `make demo-down`.
+# Targets that start the base stack without the FSC stack create them here,
+# labelled as the fsc-infra project's own, so that a later fsc-infra `up`
+# uses them and `make demo-down` removes them.
+fsc-networks:
+	@for pair in default=$(FSC_INFRA_NETWORK) source-gateways=$(FSC_SOURCE_GATEWAY_NETWORK); do \
+	  key="$${pair%%=*}"; name="$${pair#*=}"; \
+	  docker network inspect "$$name" >/dev/null 2>&1 || \
+	    docker network create \
+	      --label com.docker.compose.project=$(FSC_PROJECT_NAME) \
+	      --label com.docker.compose.network="$$key" "$$name" >/dev/null || exit 1; \
+	done
+
 # Published host ports, with the same defaults compose applies. The demo
 # banners must read these too: a checkout that shifts its ports in .env
 # to run beside another worktree was handed URLs that do not resolve.
@@ -147,7 +161,7 @@ policy-test: policy-check
 	$(OPA) fmt --diff policies
 	$(OPA) test policies -v --timeout $(OPA_TEST_TIMEOUT)
 
-up: policy-check certs require-ftv-postgres
+up: policy-check certs require-ftv-postgres fsc-networks
 	docker compose up --build -d
 
 down:
@@ -167,7 +181,7 @@ down:
 
 demo: demo-dvtp
 
-demo-minimal: policy-check certs require-ftv-postgres
+demo-minimal: policy-check certs require-ftv-postgres fsc-networks
 	@echo "-> Base stack (no profile)"
 	docker compose up --build -d
 	@echo ""
@@ -179,7 +193,7 @@ demo-minimal: policy-check certs require-ftv-postgres
 # PDP as a bundle, instead of the PDP loading ./policies from disk. Opt-in,
 # because it trades the edit-and-save hot-reload loop for a deliberate
 # deploy step — which is the point, but not what you want while writing Rego.
-demo-manager: policy-check certs require-ftv-postgres
+demo-manager: policy-check certs require-ftv-postgres fsc-networks
 	@test -n "$(KEYCLOAK_ADMIN_PASSWORD)" || (echo "KEYCLOAK_ADMIN_PASSWORD is required" >&2; exit 1)
 	@test -n "$(FTV_MANAGER_AUDITOR_PASSWORD)" || (echo "FTV_MANAGER_AUDITOR_PASSWORD is required" >&2; exit 1)
 	@test -n "$(FTV_MANAGER_DEPLOY_PASSWORD)" || (echo "FTV_MANAGER_DEPLOY_PASSWORD is required" >&2; exit 1)

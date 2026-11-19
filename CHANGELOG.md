@@ -1073,6 +1073,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   `SubjectTypePI`.
 
 ### Fixed
+- **`make demo-minimal`, `make demo-manager` and `make up` start without a
+  running FSC stack.** The base stack joins two networks of the
+  fsc-infra project as external networks, its default network and (since the
+  sidecars sit behind the Inways) `source-gateways`, and Compose refuses to
+  start while either is missing, as right after `make demo-down`. These
+  targets now create the missing ones, labelled as the fsc-infra project's,
+  so a later FSC start uses them and `make demo-down` removes them.
+- **The OpenFTV Manager seed works with a public host.** Since the Manager
+  takes its token issuer from `GBO_PUBLIC_SCHEME` and `GBO_PUBLIC_HOST`, the
+  seed script still fetched its token from `http://localhost:9284`, and
+  Keycloak issued it under that URL, so every policy write got 403 (`token
+  has invalid issuer`). The script now derives its OIDC authority the same
+  way as the Manager's issuer, and asks the local Keycloak for a token under
+  that issuer with forwarded headers, so the Docker host need not reach its
+  own public URL.
 - **The dienstverlener-mock, keyper-mock and toestemmingsportaal-frontend
   images no longer serve a literal `${VAR}` in `runtime-config.js`.** nginx's
   envsubst only fills variables that are set, so a container started without
