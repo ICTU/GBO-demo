@@ -52,8 +52,11 @@ type Logbooks interface {
 // ErrNoReadService is returned for a logbook the register cannot read.
 var ErrNoReadService = errors.New("no read service for this logbook")
 
-// DefaultReadTimeout bounds the read of one source's logbook.
-const DefaultReadTimeout = 2 * time.Second
+// DefaultReadTimeout bounds all reads of one source's logbook together.
+const DefaultReadTimeout = 5 * time.Second
+
+// DefaultReadsPerSource is how many reads of one source run at once.
+const DefaultReadsPerSource = 8
 
 // Use is one moment the consent was used, as the citizen sees it.
 type Use struct {
@@ -116,8 +119,12 @@ type Service struct {
 	// Logbooks reads a source's logbook back. Nil means no read-back: every
 	// registration is a use, as on the short path.
 	Logbooks Logbooks
-	// ReadTimeout bounds each source's read; DefaultReadTimeout when zero.
+	// ReadTimeout bounds all reads of one source together;
+	// DefaultReadTimeout when zero.
 	ReadTimeout time.Duration
+	// ReadsPerSource caps the reads of one source that run at once;
+	// DefaultReadsPerSource when zero.
+	ReadsPerSource int
 }
 
 // For returns the uses of the consent, newest first.
@@ -182,8 +189,13 @@ type readResult struct {
 	err     error
 }
 
-// readBack reads every registration's trace at its source, in parallel, each
-// within the read timeout, so one slow source cannot hold the page.
+// readBack reads every registration's trace at its source. Sources are read
+// in parallel, each within one deadline (ReadTimeout), so one slow source
+// cannot hold the page. Within a source at most ReadsPerSource reads run at
+// once: the read API takes one traceId per request (#686), and a consent
+// with many uses would otherwise open hundreds of FSC requests at the same
+// Inway at once, which it refuses (TRANSACTION_LOG_WRITE_ERROR). A read the
+// deadline cuts off counts as the source being unavailable.
 func (s Service) readBack(ctx context.Context, registrations []Registration) []readResult {
 	results := make([]readResult, len(registrations))
 	if s.Logbooks == nil {
@@ -196,15 +208,39 @@ func (s Service) readBack(ctx context.Context, registrations []Registration) []r
 	if timeout <= 0 {
 		timeout = DefaultReadTimeout
 	}
-	var wait sync.WaitGroup
+	perSource := s.ReadsPerSource
+	if perSource <= 0 {
+		perSource = DefaultReadsPerSource
+	}
+	bySource := map[string][]int{}
 	for i, registration := range registrations {
+		bySource[registration.LogbookID] = append(bySource[registration.LogbookID], i)
+	}
+	var wait sync.WaitGroup
+	for _, indexes := range bySource {
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
-			readCtx, cancel := context.WithTimeout(ctx, timeout)
+			sourceCtx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
-			records, err := s.Logbooks.Read(readCtx, registration.LogbookID, registration.TraceID)
-			results[i] = readResult{records: records, err: err}
+			slots := make(chan struct{}, perSource)
+			var reads sync.WaitGroup
+			for _, i := range indexes {
+				reads.Add(1)
+				go func() {
+					defer reads.Done()
+					select {
+					case slots <- struct{}{}:
+					case <-sourceCtx.Done():
+						results[i] = readResult{err: sourceCtx.Err()}
+						return
+					}
+					defer func() { <-slots }()
+					records, err := s.Logbooks.Read(sourceCtx, registrations[i].LogbookID, registrations[i].TraceID)
+					results[i] = readResult{records: records, err: err}
+				}()
+			}
+			reads.Wait()
 		}()
 	}
 	wait.Wait()

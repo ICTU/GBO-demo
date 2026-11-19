@@ -3,6 +3,7 @@ package uses
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 )
@@ -138,5 +139,50 @@ func TestALogbookWithoutAReadServiceIsAUseAtRegistration(t *testing.T) {
 	report := service.For(context.Background(), "c-1", "x")
 	if len(report.Uses) != 1 || !report.Uses[0].UsedAt.Equal(at) {
 		t.Fatalf("report = %+v", report)
+	}
+}
+
+type countingLogbooks struct {
+	mu       sync.Mutex
+	running  int
+	maxSeen  int
+	duration time.Duration
+}
+
+func (c *countingLogbooks) Read(ctx context.Context, _, _ string) ([]Record, error) {
+	c.mu.Lock()
+	c.running++
+	if c.running > c.maxSeen {
+		c.maxSeen = c.running
+	}
+	c.mu.Unlock()
+	defer func() { c.mu.Lock(); c.running--; c.mu.Unlock() }()
+	select {
+	case <-time.After(c.duration):
+		return []Record{{StartTime: time.Now()}}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// A consent with many uses opens at most ReadsPerSource reads at one
+// source at once, and still shows every use.
+func TestManyUsesAreReadAFewAtATime(t *testing.T) {
+	var registrations []Registration
+	for i := 0; i < 60; i++ {
+		registrations = append(registrations, Registration{LogbookID: bdComponent, TraceID: string(rune('a' + i)), RegisteredAt: time.Now()})
+	}
+	logbooks := &countingLogbooks{duration: 5 * time.Millisecond}
+	service := Service{
+		Index:          fakeIndex{registrations: map[string][]Registration{"c-1": registrations}},
+		Logbooks:       logbooks,
+		ReadsPerSource: 4,
+	}
+	report := service.For(context.Background(), "c-1", "x")
+	if len(report.Uses) != 60 || len(report.Notices) != 0 {
+		t.Fatalf("uses %d, notices %+v", len(report.Uses), report.Notices)
+	}
+	if logbooks.maxSeen > 4 {
+		t.Fatalf("%d reads ran at once at one source, want at most 4", logbooks.maxSeen)
 	}
 }
