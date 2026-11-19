@@ -40,6 +40,7 @@ import (
 	"encoding/json"
 	"gbo-demo/bron-sidecar/decryption"
 	"gbo-demo/bron-sidecar/substitution"
+	"gbo-demo/bron-sidecar/usageindex"
 	ldv "gbo-demo/ldv-client"
 	"io"
 	"log/slog"
@@ -99,6 +100,12 @@ type config struct {
 	LDVForwardActivity    string
 	// GraphQLPath is the one path GraphQL is served on (transport.go).
 	GraphQLPath string
+	// UsageIndexURL is this source peer's Outway grant link for the consent
+	// usage index, and UsageLogbookID the logbook ID a registration names
+	// (<Peer ID>/<logbook name>). Both or neither: without them this source
+	// registers nothing, like a source without a logbook writes no records.
+	UsageIndexURL  string
+	UsageLogbookID string
 }
 
 func loadConfig() config {
@@ -113,7 +120,29 @@ func loadConfig() config {
 		LDVDecryptionActivity: getEnv("LDV_DECRYPTION_ACTIVITY", ""),
 		LDVForwardActivity:    getEnv("LDV_FORWARD_ACTIVITY", ""),
 		GraphQLPath:           getEnv("GRAPHQL_PATH", defaultGraphQLPath),
+		UsageIndexURL:         os.Getenv("CONSENT_USAGE_INDEX_URL"),
+		UsageLogbookID:        os.Getenv("CONSENT_USAGE_LOGBOOK_ID"),
 	}
+}
+
+// deliveryRegistrar records, at the consent usage index, that this source
+// delivered data under a consent in a trace (#687). The port of the one
+// trust boundary the sidecar crosses after the forward; the adapter is
+// usageindex.
+type deliveryRegistrar interface {
+	Register(ctx context.Context, traceID, consentID string) error
+}
+
+// newRegistrar returns the registrar the configuration asks for, or nil when
+// this source registers nothing.
+func newRegistrar(cfg config, client *http.Client) (deliveryRegistrar, error) {
+	switch {
+	case cfg.UsageIndexURL == "" && cfg.UsageLogbookID == "":
+		return nil, nil
+	case cfg.UsageIndexURL == "" || cfg.UsageLogbookID == "":
+		return nil, errors.New("CONSENT_USAGE_INDEX_URL and CONSENT_USAGE_LOGBOOK_ID must be set together")
+	}
+	return usageindex.Client{URL: cfg.UsageIndexURL, LogbookID: cfg.UsageLogbookID, HTTP: client}, nil
 }
 
 func getEnv(k, fallback string) string {
@@ -173,7 +202,12 @@ func subjectFromBody(body []byte, subjectVars []string) map[string]string {
 // the forward itself. When a logbook is configured, a record that the logbook
 // does not confirm fails the request — the response is withheld rather than
 // returned unlogged.
-func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client, substitute substitution.Substituter) http.HandlerFunc {
+//
+// After a 200 under a consent the delivery is registered at the consent
+// usage index, after the forward record and before the response leaves:
+// a delivery the index does not confirm is withheld like an unlogged one,
+// so the citizen never misses a use that happened (decided 16-18 Nov).
+func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client, substitute substitution.Substituter, registrar deliveryRegistrar) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		span := trace.SpanFromContext(r.Context())
 
@@ -224,6 +258,8 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client, substi
 		// filled maps a subject as it arrived onto what it stands for: the
 		// BSN, or this source's pseudonym of the citizen.
 		filled := map[string]string{}
+		// The consent the token is for, once it has been read.
+		consentID := ""
 		if !underConsent {
 			for _, subject := range subjects {
 				filled[subject] = subject
@@ -244,6 +280,7 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client, substi
 					return
 				}
 			}
+			consentID = result.ConsentID
 			if substituteErr != nil {
 				slog.Error("subject substitution failed", "err", substituteErr.Error())
 				http.Error(w, "the subject of the consent could not be filled in", http.StatusBadRequest)
@@ -303,6 +340,24 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client, substi
 			ldv.LogFailure("dataverwerking.bronquery-doorgifte", err)
 			http.Error(w, "the forward could not be logged; withholding the response", http.StatusInternalServerError)
 			return
+		}
+
+		// A delivery under a consent: the source answered 200 to a request
+		// that carried a consent token. Anything else delivered nothing
+		// under the consent and is not registered.
+		if registrar != nil && underConsent && resp.StatusCode == http.StatusOK {
+			if consentID == "" {
+				slog.Error("a consent token without a consent_id reached the forward")
+				http.Error(w, "the delivery could not be registered; withholding the response", http.StatusInternalServerError)
+				return
+			}
+			if err := registrar.Register(r.Context(), forward.traceID, consentID); err != nil {
+				slog.Error("registering the delivery at the consent usage index failed", "err", err.Error())
+				span.SetAttributes(attribute.Bool("gbo.sidecar.usage_registered", false))
+				http.Error(w, "the delivery could not be registered; withholding the response", http.StatusInternalServerError)
+				return
+			}
+			span.SetAttributes(attribute.Bool("gbo.sidecar.usage_registered", true))
 		}
 
 		for k, vv := range resp.Header {
@@ -469,6 +524,10 @@ func newMux(cfg config, client *http.Client, logbook *ldv.Client) (http.Handler,
 	if err != nil {
 		return nil, err
 	}
+	registrar, err := newRegistrar(cfg, client)
+	if err != nil {
+		return nil, err
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -479,7 +538,7 @@ func newMux(cfg config, client *http.Client, logbook *ldv.Client) (http.Handler,
 	if graphQLPath == "" {
 		graphQLPath = defaultGraphQLPath
 	}
-	forward := transportOnly(graphQLPath, forwardHandler(cfg, client, logbook, substitute))
+	forward := transportOnly(graphQLPath, forwardHandler(cfg, client, logbook, substitute, registrar))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/health" {
 			mux.ServeHTTP(w, r)
@@ -554,7 +613,10 @@ func main() {
 	// keys: it would pass the placeholder on to the source instead.
 	mux, err := newMux(cfg, client, logbook)
 	if err != nil {
-		fatal("reading the decryption keys", err)
+		fatal("configuring the sidecar", err)
+	}
+	if cfg.UsageIndexURL == "" {
+		slog.Warn("no CONSENT_USAGE_INDEX_URL configured; this bron registers no deliveries at the consent usage index")
 	}
 	if cfg.SubjectKeysDir == "" {
 		slog.Warn("no SUBJECT_KEYS_DIR configured; this bron refuses consent-based requests")

@@ -869,6 +869,12 @@ services:
       - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY:-local-demo-pseudonym-key}
       - LDV_DECRYPTION_ACTIVITY=https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-identiteit-ontsleuteling/v1
       - LDV_FORWARD_ACTIVITY=https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-bronquery-doorgifte/v1
+      # Consent usage (#687): after a 200 under a consent, register the
+      # delivery at the consent usage index through the Outway of the
+      # Belastingdienst's peer, and withhold the data when that fails. The
+      # logbook ID is the peer ID plus the name of this source's logbook.
+      - CONSENT_USAGE_INDEX_URL=http://bd-outway:8080/consent-usage-index
+      - CONSENT_USAGE_LOGBOOK_ID=99999999900000000200/bd
     volumes:
       # The LDV spool must survive a restart; that is what makes a
       # record durable before it reaches the logbook.
@@ -921,6 +927,12 @@ services:
       - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY_BRP:-local-demo-pseudonym-key-brp}
       - LDV_DECRYPTION_ACTIVITY=https://logboek.rvig.nl/verwerkingsactiviteiten/brp-identiteit-ontsleuteling/v1
       - LDV_FORWARD_ACTIVITY=https://logboek.rvig.nl/verwerkingsactiviteiten/brp-bronquery-doorgifte/v1
+      # Consent usage (#687): after a 200 under a consent, register the
+      # delivery at the consent usage index through the Outway of RvIG's
+      # peer, and withhold the data when that fails. The logbook ID is the
+      # peer ID plus the name of this source's logbook.
+      - CONSENT_USAGE_INDEX_URL=http://brp-outway:8080/consent-usage-index
+      - CONSENT_USAGE_LOGBOOK_ID=99999999900000000400/brp
     volumes:
       # The LDV spool must survive a restart; that is what makes a
       # record durable before it reaches the logbook.
@@ -1008,6 +1020,11 @@ services:
       - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY_LVG:-local-demo-pseudonym-key-lvg}
       - LDV_DECRYPTION_ACTIVITY=https://logboek.lvg.test/verwerkingsactiviteiten/lvg-identiteit-ontsleuteling/v1
       - LDV_FORWARD_ACTIVITY=https://logboek.lvg.test/verwerkingsactiviteiten/lvg-bronquery-doorgifte/v1
+      # Consent usage (#687): as bron-sidecar, through the Outway of the
+      # peer LVG shares with the Belastingdienst (...0200). The name in the
+      # logbook ID tells the two logbooks on that peer apart.
+      - CONSENT_USAGE_INDEX_URL=http://bd-outway:8080/consent-usage-index
+      - CONSENT_USAGE_LOGBOOK_ID=99999999900000000200/lvg
     volumes:
       - ldv-outbox-lvg-sidecar:/data
     # Only the Inways of the source reach the sidecar (source-gateways), and
