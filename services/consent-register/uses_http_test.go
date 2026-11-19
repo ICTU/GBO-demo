@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"consent-register/logbookreader"
 	"consent-register/usageindex"
 	"consent-register/uses"
 
@@ -153,4 +155,75 @@ func TestParseSources(t *testing.T) {
 	if len(got) != 2 || got["99999999900000000400/brp"] != "BRP (RvIG)" {
 		t.Fatalf("sources = %v", got)
 	}
+}
+
+// #687: viewing the uses produces a record of the register's read activity,
+// naming the sources read and not the trace IDs; a source that cannot be
+// read gives its notice in the answer.
+func TestReadingTheSourcesIsLoggedWithoutTraceIDs(t *testing.T) {
+	at := time.Date(2026, 11, 19, 9, 30, 0, 0, time.UTC)
+	const trace = "4bf92f3577b34da6a3ce929d0e0e4736"
+	var consentID string
+	index := indexUnderTest(t, func(ref string) []map[string]string {
+		if ref != consentID {
+			return []map[string]string{}
+		}
+		return []map[string]string{
+			{"logbook_id": "99999999900000000200/ldv-lezen-bd", "trace_id": trace, "grondslag_type": "consent", "grondslag_ref": ref, "registered_at": at.Format(time.RFC3339Nano)},
+			{"logbook_id": "99999999900000000400/ldv-lezen-brp", "trace_id": trace, "grondslag_type": "consent", "grondslag_ref": ref, "registered_at": at.Format(time.RFC3339Nano)},
+		}
+	})
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"dataProcessingOperations":[{"traceId":"` + trace + `","startTime":"2026-11-19T09:29:59Z"}]}`))
+	}))
+	t.Cleanup(source.Close)
+
+	logbook := ldvtest.New(t, consentGrantActivity, consentListActivity, consentUsageReadActivity)
+	issuer, err := NewConsentIssuer(config{SigningKeyID: "test-key", TokenIssuer: "test-issuer", TokenAudience: "test-audience"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore()
+	client := newRegisterLogbook(logbook.Client(t, "consent-register"))
+	server := httptest.NewServer(newMux(store, issuer, client, uses.Service{
+		Index: usageindex.Client{URL: index, ReadToken: "read-token"},
+		Sources: map[string]string{
+			"99999999900000000200/ldv-lezen-bd":  "Belastingdienst",
+			"99999999900000000400/ldv-lezen-brp": "Basisregistratie Personen",
+		},
+		Logbooks: logbookreader.Client{Services: map[string]string{
+			"99999999900000000200/ldv-lezen-bd":  source.URL,
+			"99999999900000000400/ldv-lezen-brp": "http://127.0.0.1:1",
+		}},
+	}))
+	t.Cleanup(server.Close)
+	url := server.URL
+	consentID = createTestConsent(t, url)
+
+	status, answer := getUses(t, url, consentID)
+	if status != http.StatusOK || len(answer.Uses) != 1 || answer.Uses[0].UsedAt != "2026-11-19T09:29:59Z" {
+		t.Fatalf("status %d, answer %+v", status, answer)
+	}
+	if len(answer.Notices) != 1 || answer.Notices[0].Kind != uses.NoticeSourceUnavailable {
+		t.Fatalf("notices = %+v", answer.Notices)
+	}
+
+	// Records commit with the mutation and are delivered from the outbox.
+	if err := client.deliverOutbox(t.Context(), store); err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range logbook.Written() {
+		if record.Name != "dataverwerking.bronlogboek-lezen" {
+			continue
+		}
+		encoded, _ := json.Marshal(record.Attributes)
+		if strings.Contains(string(encoded), trace) {
+			t.Fatalf("the read record lists a trace ID: %s", encoded)
+		}
+		if !strings.Contains(string(encoded), "Belastingdienst") {
+			t.Fatalf("the read record does not name the source read: %s", encoded)
+		}
+		return
+	}
+	t.Fatal("no record of the register's read of the sources")
 }

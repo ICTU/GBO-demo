@@ -53,6 +53,26 @@ func handleConsentUses(store ConsentStore, logbook *registerLogbook, service use
 		if report.IndexErr != nil {
 			slog.Warn("the consent usage index did not answer; the uses are shown as unavailable", "err", report.IndexErr.Error())
 		}
+		for source, err := range report.SourceErrs {
+			slog.Warn("a source logbook could not be read; its uses are shown as unavailable", "source", source, "err", err.Error())
+		}
+
+		// Reading the sources' logbooks is a processing of its own (#687),
+		// with the citizen as data subject. It names the sources read, not
+		// the trace IDs: a log of which traces a person looked at would
+		// re-create the link the index avoids (TransparantieApp).
+		if len(report.SourcesRead) > 0 {
+			if err := logbook.logConsentOperation(r.Context(), store, r,
+				consentUsageReadActivity, "dataverwerking.bronlogboek-lezen",
+				c.SubjectRef, start, http.StatusOK,
+				map[string]any{
+					"dpl.gbo.consentId":   c.ConsentID,
+					"dpl.gbo.sourcesRead": report.SourcesRead,
+				}); err != nil {
+				refuseUnlogged(w)
+				return
+			}
+		}
 
 		// No trace IDs in the record: a log of which traces a person looked
 		// at would re-create the link the index avoids (TransparantieApp).

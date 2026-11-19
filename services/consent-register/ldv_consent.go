@@ -27,6 +27,9 @@ const (
 	consentRevokeActivity = "https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-toestemming-intrekken/v1"
 	consentStatusActivity = "https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-toestemming-status/v1"
 	consentListActivity   = "https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-toestemming-inzage/v1"
+	// Reading the logbooks of the sources to show a consent's uses (#687):
+	// an activity of its own, apart from viewing the consent.
+	consentUsageReadActivity = "https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-toestemming-gebruik-lezen/v1"
 
 	// The portal-scoped subject reference. The register holds nothing else:
 	// no BSN, and deliberately no encrypted value either — those travel only

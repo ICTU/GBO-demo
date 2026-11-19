@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"consent-register/logbookreader"
 	"consent-register/usageindex"
 	"consent-register/uses"
 
@@ -88,6 +89,10 @@ type config struct {
 	// UsageServiceProviders the party behind each OIN (parseSources).
 	UsageSources          map[string]string
 	UsageServiceProviders map[string]string
+	// UsageReadServices maps a logbook ID to the register Outway's grant
+	// link for that source's read service (#686): logbook ID=URL pairs.
+	// Without it every registration is a use, as on the short path.
+	UsageReadServices map[string]string
 }
 
 const (
@@ -111,6 +116,7 @@ func loadConfig() (config, error) {
 		UsageSources:    parseSources(os.Getenv("CONSENT_USAGE_SOURCES")),
 
 		UsageServiceProviders: parseSources(os.Getenv("CONSENT_USAGE_SERVICE_PROVIDERS")),
+		UsageReadServices:     parseSources(os.Getenv("CONSENT_USAGE_READ_SERVICES")),
 	}
 	if cfg.UsageIndexURL != "" && cfg.UsageIndexToken == "" {
 		return config{}, errors.New("CONSENT_USAGE_INDEX_READ_TOKEN is required with CONSENT_USAGE_INDEX_URL")
@@ -728,6 +734,12 @@ func main() {
 		}
 	} else {
 		slog.Warn("no CONSENT_USAGE_INDEX_URL configured; the uses of a consent cannot be shown")
+	}
+	if len(cfg.UsageReadServices) > 0 {
+		usage.Logbooks = logbookreader.Client{
+			Services: cfg.UsageReadServices,
+			HTTP:     &http.Client{Transport: otelhttp.NewTransport(http.DefaultTransport)},
+		}
 	}
 
 	serve(

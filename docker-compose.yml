@@ -752,7 +752,12 @@ services:
       # instead of an empty list (D2).
       - CONSENT_USAGE_INDEX_URL=http://consent-usage-index:4020
       - CONSENT_USAGE_INDEX_READ_TOKEN=${CONSENT_USAGE_INDEX_READ_TOKEN:-local-demo-consent-usage-index-token}
-      - CONSENT_USAGE_SOURCES=99999999900000000200/bd=Belastingdienst;99999999900000000200/lvg=Landelijke Voorziening Gebouwen;99999999900000000400/brp=Basisregistratie Personen
+      - CONSENT_USAGE_SOURCES=99999999900000000200/bd=Belastingdienst;99999999900000000200/lvg=Landelijke Voorziening Gebouwen;99999999900000000400/brp=Basisregistratie Personen;99999999900000000200/ldv-lezen-bd=Belastingdienst;99999999900000000200/ldv-lezen-lvg=Landelijke Voorziening Gebouwen;99999999900000000400/ldv-lezen-brp=Basisregistratie Personen
+      # Read-back (#687): for each component logbook, the grant link on the
+      # register's Outway for that source's read service (#686). A use is a
+      # record read back there, at its start time; a source that cannot be
+      # read gets a notice of its own (D2).
+      - CONSENT_USAGE_READ_SERVICES=99999999900000000200/ldv-lezen-bd=http://cr-outway:8080/ldv-lezen-bd;99999999900000000200/ldv-lezen-lvg=http://cr-outway:8080/ldv-lezen-lvg;99999999900000000400/ldv-lezen-brp=http://cr-outway:8080/ldv-lezen-brp
       - CONSENT_USAGE_SERVICE_PROVIDERS=99999999900000000300=Hypotheek-BV;99999999900000001000=Installatie Register
     networks:
       - backend

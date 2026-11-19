@@ -274,86 +274,89 @@ ondertekende token.
 ## 4. Gebruik van een toestemming inzien
 
 Een burger ziet in MijnOverheid wanneer een toestemming is gebruikt: datum,
-dienstverlener en bron (#687). De bron meldt elke levering onder een
-toestemming bij de toestemmingsgebruik-index (`consent-usage-index`), een
-lijst met verwijzingen naast het consent-register. Het register leest die
-lijst wanneer de burger het consent opent.
+dienstverlener en bron (#687). Elke bron heeft een LDV-component
+(`ldv-logboek` in proxymodus, #689) tussen haar Inway en haar sidecar. Die
+legt elke levering onder een toestemming vast in een eigen logboek en meldt
+de trace bij de toestemmingsgebruik-index (`consent-usage-index`) naast het
+consent-register. Opent de burger het consent, dan zoekt het register de
+registraties op en leest het elke trace terug bij de bron (#686).
 
 ```mermaid
 sequenceDiagram
     autonumber
     actor Citizen as "Burger"
+    participant IN as "Inway van de bron"
+    participant LC as "LDV-component van de bron"
     participant SC as "Sidecar bij de bron"
-    participant LB as "Logboek van de bron"
     participant BOUT as "Outway van de bron"
-    participant CRIN as "cr-inway"
     participant IDX as "Toestemmingsgebruik-index"
     participant Portal as "Toestemmingsportaal"
     participant Register as "Consent-register S01"
+    participant CROUT as "cr-outway"
 
-    Note over SC: Na de ALLOW en een 200 van de bron
-    SC->>LB: Leg de doorgifte vast (trace-id)
-    SC->>BOUT: POST /consent-usage-index/registrations
-    BOUT->>CRIN: FSC-dienst consent-usage-index
-    CRIN->>IDX: logbook_id, trace_id, consent_id
-    IDX-->>SC: 201 (of 200 bij een herhaling)
-    Note over SC: Pas daarna gaan de gegevens terug
+    IN->>LC: Aanvraag na de ALLOW (met consent-token)
+    LC->>SC: Ongewijzigd doorgestuurd, in dezelfde trace
+    SC-->>LC: 200 + Gbo-Ldv-Subject-Id
+    LC->>LC: Record in eigen logboek (burger, geen consent)
+    LC->>BOUT: POST /consent-usage-index/registrations
+    BOUT->>IDX: logbook_id, trace_id, consent_id (via cr-inway)
+    LC-->>IN: Gegevens, zonder de subjectheader
 
     Citizen->>Portal: Open het consent
     Portal->>Register: GET /consents/{id}/uses (na eigenaarscontrole)
-    Register->>IDX: Verwijzingen onder dit consent (intern)
-    IDX-->>Register: Registraties
-    Register-->>Portal: Gebruik, of de melding "index niet bereikbaar"
+    Register->>IDX: Registraties onder dit consent (intern)
+    par per bron, met een timeout
+        Register->>CROUT: POST /ldv-lezen-bd/data-processing-operations {traceId}
+        CROUT->>IN: FSC; de PDP van de bron toetst LDV_READ_FSC
+        IN->>LC: Leesfunctie (4018), beperkt antwoord
+    end
+    Register-->>Portal: Gebruik, en een melding per bron die niet te lezen is
 ```
 
 ### Het contract voor een bron
 
-Een bron die onder een toestemming levert, meldt elke levering via de Outway
-van haar eigen FSC-peer:
+Een bron die onder een toestemming levert, plaatst de LDV-component voor haar
+eigen dienst en richt haar FSC-dienst op de component. Ze bouwt er zelf
+niets voor, behalve dat haar dienst de burger noemt in `Gbo-Ldv-Subject-Id`
+(in de demo doet de sidecar dat met `LDV_RETURN_SUBJECT_ID=true`) en een
+regel voor de leesfunctie in haar PDP-policy. De component meldt elke
+levering via de Outway van de bron:
 
 ```http
 POST /consent-usage-index/registrations
 Content-Type: application/json
 
-{"logbook_id": "99999999900000000200/bd",
+{"logbook_id": "99999999900000000200/ldv-lezen-bd",
  "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
  "grondslag_type": "consent",
  "grondslag_ref": "<consent_id uit het token>"}
 ```
 
 - `logbook_id` is de Peer ID van de bron, een schuine streep en de naam van
-  het logboek op die peer. De naam is nodig omdat BD en LVG een peer delen.
-  De index weigert (403) een registratie voor het logboek van een andere peer.
-- `trace_id` is de trace van het doorgifterecord in het eigen logboek.
-- De bron meldt alleen na een `200` op een aanvraag met een consent-token.
-- De melding hoort binnen de fail-closed-volgorde: eerst het eigen record,
-  dan de registratie, dan de gegevens. Bevestigt de index niet, dan houdt de
-  bron de gegevens in, zoals bij een record dat het logboek niet bevestigt.
-- Een herhaling is veilig: de index antwoordt dan `200` met de opgeslagen
-  registratie.
+  de leesdienst van de component. De naam is nodig omdat BD en LVG een peer
+  delen. De index weigert (403) een registratie voor een andere peer.
+- `trace_id` is de trace van het record in het logboek van de component.
+- De component meldt alleen na een `200` op een aanvraag met een
+  consent-token, en pas nadat het record is vastgelegd. Lukt een van de twee
+  niet, dan krijgt de afnemer `502` en geen gegevens.
+- Een herhaling is veilig: de index antwoordt dan `200`.
 
-In de demo doet de sidecar dit (`CONSENT_USAGE_INDEX_URL` en
-`CONSENT_USAGE_LOGBOOK_ID`). Zonder die instellingen meldt een sidecar niets.
+Een bron zonder component kan de sidecar zelf laten melden
+(`CONSENT_USAGE_INDEX_URL` en `CONSENT_USAGE_LOGBOOK_ID`); haar registraties
+tellen dan als gebruik zonder terugleesactie, op het tijdstip van registratie.
 
-### Een doorgifterecord zonder registratie
+### Wat telt als gebruik
 
-Een doorgifterecord in het logboek van de bron zonder registratie in de index
-betekent een van drie dingen:
+Elk record dat het register onder de trace terugleest bij de component is
+een gebruik, op de starttijd van dat record. Een registratie zonder record
+geeft geen gebruik. Kan het register de index niet bereiken, dan toont de
+pagina een melding in plaats van een lege lijst; kan het één bron niet
+lezen, dan toont ze een melding voor die bron en het gebruik bij de andere
+bronnen (besluit D2).
 
-- de aanvraag droeg geen consent-token (de EUDI-route) en viel dus niet onder
-  een toestemming;
-- de bron antwoordde niet met `200`, en leverde dus niets onder de
-  toestemming;
-- de registratie faalde, en de gegevens zijn daarom niet teruggegaan.
-
-In alle drie gevallen is er onder de toestemming niets geleverd. Andersom kan
-de burger geen gebruik missen dat wel plaatsvond. Op dit pad is een
-registratie het gebruik zelf; de index controleert het consent niet, want de
-PDP deed dat al bij de Inway.
-
-Kan het register de index niet bereiken, dan toont de pagina een melding in
-plaats van een lege lijst (besluit D2): "niet gebruikt" en "nu niet op te
-halen" blijven zo uit elkaar.
+Het register legt het teruglezen vast als eigen verwerking
+(`gbo-toestemming-gebruik-lezen`), met de burger als betrokkene en de namen
+van de gelezen bronnen, zonder de trace-id's.
 
 ## Beveiligingsgrens
 

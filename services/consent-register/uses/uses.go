@@ -2,10 +2,14 @@
 // GET /consents/{id}/uses (#687).
 //
 // A use is a delivery a source registered at the consent usage index under
-// this consent. On this path a registration is the use: the index holds one
-// per trace per source, and the register shows each as the moment the data
-// went out (the plan's short path; the long path reads each one back from
-// the source's logbook first).
+// this consent, read back from that source's logbook (#687): the register
+// looks up the registrations, reads each trace at the source's LDV
+// component over FSC, and shows one use per record it finds there, at the
+// record's start time. A registration without a record gives no use.
+//
+// A registration whose logbook has no read service (a source that runs only
+// the sidecar) is shown as a use without read-back, at the time of
+// registration: hiding it would hide a real delivery.
 //
 // The package imports no transport. The index is a port; the adapter that
 // reaches it over HTTP is usageindex.
@@ -13,7 +17,9 @@ package uses
 
 import (
 	"context"
+	"errors"
 	"sort"
+	"sync"
 	"time"
 )
 
@@ -30,10 +36,30 @@ type Index interface {
 	Registrations(ctx context.Context, consentID string) ([]Registration, error)
 }
 
+// Record is one record a source's logbook holds under a trace, as far as
+// the register needs it.
+type Record struct {
+	StartTime time.Time
+}
+
+// Logbooks reads the logbook of a source's LDV component by trace-id, over
+// FSC. ErrNoReadService means the register has no read service for that
+// logbook ID; any other error means the logbook could not be read.
+type Logbooks interface {
+	Read(ctx context.Context, logbookID, traceID string) ([]Record, error)
+}
+
+// ErrNoReadService is returned for a logbook the register cannot read.
+var ErrNoReadService = errors.New("no read service for this logbook")
+
+// DefaultReadTimeout bounds the read of one source's logbook.
+const DefaultReadTimeout = 2 * time.Second
+
 // Use is one moment the consent was used, as the citizen sees it.
 type Use struct {
-	// UsedAt is the time of registration: the delivery and its registration
-	// happen in the same request, milliseconds apart.
+	// UsedAt is the start time of the record read back from the source
+	// (#687), or the time of registration for a logbook without a read
+	// service.
 	UsedAt time.Time
 	// ServiceProviderOIN is the party the consent was given to. A
 	// registration does not name it; the consent does.
@@ -50,6 +76,11 @@ type Use struct {
 // uses is not known (decision D2): "none" and "not available" stay apart.
 const NoticeIndexUnavailable = "index_unavailable"
 
+// NoticeSourceUnavailable says one source's logbook could not be read, so
+// its uses are missing from the list (D2); the uses of other sources are
+// still shown.
+const NoticeSourceUnavailable = "source_unavailable"
+
 // Notice is something the citizen must be told instead of, or next to, the
 // uses.
 type Notice struct {
@@ -65,6 +96,11 @@ type Report struct {
 	// IndexErr is why the index did not answer, for the register's own log;
 	// the citizen sees the notice.
 	IndexErr error
+	// SourcesRead names the sources whose logbooks the register read, for
+	// the register's own record of that reading.
+	SourcesRead []string
+	// SourceErrs is why a source's logbook could not be read, by source.
+	SourceErrs map[string]error
 }
 
 // Service lists the uses of a consent.
@@ -77,6 +113,11 @@ type Service struct {
 	Sources map[string]string
 	// ServiceProviders names the party behind each OIN, for the same reason.
 	ServiceProviders map[string]string
+	// Logbooks reads a source's logbook back. Nil means no read-back: every
+	// registration is a use, as on the short path.
+	Logbooks Logbooks
+	// ReadTimeout bounds each source's read; DefaultReadTimeout when zero.
+	ReadTimeout time.Duration
 }
 
 // For returns the uses of the consent, newest first.
@@ -92,18 +133,82 @@ func (s Service) For(ctx context.Context, consentID, serviceProviderOIN string) 
 	if provider == "" {
 		provider = serviceProviderOIN
 	}
-	uses := make([]Use, 0, len(registrations))
-	for _, registration := range registrations {
-		uses = append(uses, Use{
-			UsedAt:             registration.RegisteredAt,
+	use := func(registration Registration, at time.Time) Use {
+		return Use{
+			UsedAt:             at,
 			ServiceProviderOIN: serviceProviderOIN,
 			ServiceProvider:    provider,
 			Source:             s.sourceName(registration.LogbookID),
 			LogbookID:          registration.LogbookID,
-		})
+		}
 	}
-	sort.SliceStable(uses, func(a, b int) bool { return uses[a].UsedAt.After(uses[b].UsedAt) })
-	return Report{Uses: uses, Notices: []Notice{}}
+
+	results := s.readBack(ctx, registrations)
+	report := Report{Uses: []Use{}, Notices: []Notice{}}
+	failed := map[string]bool{}
+	read := map[string]bool{}
+	for i, registration := range registrations {
+		result := results[i]
+		source := s.sourceName(registration.LogbookID)
+		switch {
+		case errors.Is(result.err, ErrNoReadService):
+			report.Uses = append(report.Uses, use(registration, registration.RegisteredAt))
+		case result.err != nil:
+			if !failed[source] {
+				failed[source] = true
+				report.Notices = append(report.Notices, Notice{Kind: NoticeSourceUnavailable, Source: source})
+				if report.SourceErrs == nil {
+					report.SourceErrs = map[string]error{}
+				}
+				report.SourceErrs[source] = result.err
+			}
+		default:
+			if !read[source] {
+				read[source] = true
+				report.SourcesRead = append(report.SourcesRead, source)
+			}
+			for _, record := range result.records {
+				report.Uses = append(report.Uses, use(registration, record.StartTime))
+			}
+		}
+	}
+	sort.SliceStable(report.Uses, func(a, b int) bool { return report.Uses[a].UsedAt.After(report.Uses[b].UsedAt) })
+	sort.Strings(report.SourcesRead)
+	return report
+}
+
+type readResult struct {
+	records []Record
+	err     error
+}
+
+// readBack reads every registration's trace at its source, in parallel, each
+// within the read timeout, so one slow source cannot hold the page.
+func (s Service) readBack(ctx context.Context, registrations []Registration) []readResult {
+	results := make([]readResult, len(registrations))
+	if s.Logbooks == nil {
+		for i := range results {
+			results[i].err = ErrNoReadService
+		}
+		return results
+	}
+	timeout := s.ReadTimeout
+	if timeout <= 0 {
+		timeout = DefaultReadTimeout
+	}
+	var wait sync.WaitGroup
+	for i, registration := range registrations {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			readCtx, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
+			records, err := s.Logbooks.Read(readCtx, registration.LogbookID, registration.TraceID)
+			results[i] = readResult{records: records, err: err}
+		}()
+	}
+	wait.Wait()
+	return results
 }
 
 func (s Service) sourceName(logbookID string) string {

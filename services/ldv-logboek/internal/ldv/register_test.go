@@ -119,6 +119,8 @@ func TestShippedRegistersLoad(t *testing.T) {
 				"https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-toestemming-intrekken/v1",
 				"https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-toestemming-status/v1",
 				"https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-toestemming-inzage/v1",
+				// The register reading the sources' logbooks back (#687).
+				"https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-toestemming-gebruik-lezen/v1",
 				"https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-bsn-pseudonimisering/v1",
 			},
 		},

@@ -80,6 +80,24 @@
         "Versleuteld pseudoniem en versleutelde identiteit per bron",
         "Portaalgebonden subjectverwijzing"
       ]
+    },
+    {
+      "id": "gbo-toestemming-gebruik-lezen",
+      "version": "v1",
+      "name": "Lezen van de logboeken van bronnen om het gebruik van een toestemming te tonen",
+      "doel": "De betrokkene in MijnOverheid laten zien wanneer een toestemming is gebruikt, door bij elke bron het record van een geregistreerde levering terug te lezen (#687).",
+      "grondslag": "Toestemming van de betrokkene, vastgelegd in het toestemmingsregister.",
+      "categorieen_betrokkenen": [
+        "Betrokkenen met een toestemming"
+      ],
+      "categorieen_persoonsgegevens": [
+        "Portaalgebonden verwijzing naar de betrokkene",
+        "Tijdstippen van gebruik",
+        "Namen van de bronnen"
+      ],
+      "ontvangers": [
+        "De betrokkene zelf, via het toestemmingsportaal"
+      ]
     }
   ]
 }
