@@ -198,43 +198,43 @@ The Belastingdienst's ([`verwerkingsactiviteiten-bd.json`](config/verwerkingsact
 
 | reference | Dataverwerking | logged by |
 | --- | --- | --- |
-| `bd-identiteit-ontsleuteling@v1` | reading the encrypted identity from the consent token | `bron-sidecar` |
-| `bd-bronquery-doorgifte@v1` | receiving and forwarding a bronbevraging | `bron-sidecar` |
-| `bd-ib-2025@v1` | verstrekking inkomensgegevens IB 2025 | `graphql-server` |
-| `bd-ib-2024@v1` | verstrekking inkomensgegevens IB 2024 | `graphql-server` |
+| `bd-identiteit-ontsleuteling/v1` | reading the encrypted identity from the consent token | `bron-sidecar` |
+| `bd-bronquery-doorgifte/v1` | receiving and forwarding a bronbevraging | `bron-sidecar` |
+| `bd-ib-2025/v1` | verstrekking inkomensgegevens IB 2025 | `graphql-server` |
+| `bd-ib-2024/v1` | verstrekking inkomensgegevens IB 2024 | `graphql-server` |
 
 RvIG's ([`verwerkingsactiviteiten-brp.json`](config/verwerkingsactiviteiten-brp.json)):
 
 | reference | Dataverwerking | logged by |
 | --- | --- | --- |
-| `brp-identiteit-ontsleuteling@v1` | reading the encrypted identity from the consent token | `brp-sidecar` |
-| `brp-bronquery-doorgifte@v1` | receiving and forwarding a bronbevraging | `brp-sidecar` |
-| `brp-akte-overlijden@v1` | verstrekking akte van overlijden | `brp-graphql-server` |
-| `brp-persoonsgegevens-verstrekking@v1` | verstrekking BRP-persoonsgegevens | `brp-graphql-server` |
+| `brp-identiteit-ontsleuteling/v1` | reading the encrypted identity from the consent token | `brp-sidecar` |
+| `brp-bronquery-doorgifte/v1` | receiving and forwarding a bronbevraging | `brp-sidecar` |
+| `brp-akte-overlijden/v1` | verstrekking akte van overlijden | `brp-graphql-server` |
+| `brp-persoonsgegevens-verstrekking/v1` | verstrekking BRP-persoonsgegevens | `brp-graphql-server` |
 
 Hypotheek-BV's, for `logboek-afnemer` ([`verwerkingsactiviteiten-afnemer.json`](config/verwerkingsactiviteiten-afnemer.json)) — a fictitious consumer's, applied provisionally (see [Scope](#scope)):
 
 | reference | Dataverwerking | logged by |
 | --- | --- | --- |
-| `hbv-inkomensgegevens-opvragen@v1` | asking a source for income data for a mortgage assessment | `dienstverlener-backend` |
+| `hbv-inkomensgegevens-opvragen/v1` | asking a source for income data for a mortgage assessment | `dienstverlener-backend` |
 
 GBO's own, for `logboek-toestemming` ([`verwerkingsactiviteiten-toestemming.json`](config/verwerkingsactiviteiten-toestemming.json)):
 
 | reference | Dataverwerking | logged by |
 | --- | --- | --- |
-| `gbo-bsn-pseudonimisering@v1` | BSN → the portal's own reference (an HMAC), and at consent intake an encrypted pseudonym per source, plus an encrypted identity for a source on the BSN authorisation list | `consent-portal-backend` |
-| `gbo-toestemming-verlenen@v1` | recording a consent | `consent-register` |
-| `gbo-toestemming-intrekken@v1` | revoking a consent | `consent-register` |
-| `gbo-toestemming-status@v1` | confirming a consent's status to the PDP | `consent-register` |
-| `gbo-toestemming-inzage@v1` | showing a citizen their own consents | `consent-register` |
+| `gbo-bsn-pseudonimisering/v1` | BSN → the portal's own reference (an HMAC), and at consent intake an encrypted pseudonym per source, plus an encrypted identity for a source on the BSN authorisation list | `consent-portal-backend` |
+| `gbo-toestemming-verlenen/v1` | recording a consent | `consent-register` |
+| `gbo-toestemming-intrekken/v1` | revoking a consent | `consent-register` |
+| `gbo-toestemming-status/v1` | confirming a consent's status to the PDP | `consent-register` |
+| `gbo-toestemming-inzage/v1` | showing a citizen their own consents | `consent-register` |
 
 And for `logboek-eudi-adapter` ([`verwerkingsactiviteiten-eudi-adapter.json`](config/verwerkingsactiviteiten-eudi-adapter.json)):
 
 | reference | Dataverwerking | logged by |
 | --- | --- | --- |
-| `gbo-pid-bsn-extractie@v1` | reading the BSN out of a disclosed PID | `eudi-adapter` |
-| `gbo-bsn-ontvangst-aanvrager@v1` | receiving the BSN from the caller of a pre-authorized offer (no PID presented) | `eudi-adapter` |
-| `gbo-attestatie-samenstellen@v1` | assembling an attestation from source data | `eudi-adapter` |
+| `gbo-pid-bsn-extractie/v1` | reading the BSN out of a disclosed PID | `eudi-adapter` |
+| `gbo-bsn-ontvangst-aanvrager/v1` | receiving the BSN from the caller of a pre-authorized offer (no PID presented) | `eudi-adapter` |
+| `gbo-attestatie-samenstellen/v1` | assembling an attestation from source data | `eudi-adapter` |
 
 The LVG/Installatie Register pilot's registers are
 [`verwerkingsactiviteiten-lvg.json`](config/verwerkingsactiviteiten-lvg.json)
@@ -551,9 +551,9 @@ the call:
 
 ```
 trace 0af7651916cd43dd8448eb211c80319c
-└── bd-bronquery-doorgifte@v1           bron-sidecar   subject LP-5b1f0e8a… (logboek-pseudoniem)
-    ├── bd-identiteit-ontsleuteling@v1  bron-sidecar   subject LP-5b1f0e8a… (logboek-pseudoniem)
-    └── bd-ib-2025@v1                   graphql-server subject LP-5b1f0e8a… (logboek-pseudoniem)
+└── bd-bronquery-doorgifte/v1           bron-sidecar   subject LP-5b1f0e8a… (logboek-pseudoniem)
+    ├── bd-identiteit-ontsleuteling/v1  bron-sidecar   subject LP-5b1f0e8a… (logboek-pseudoniem)
+    └── bd-ib-2025/v1                   graphql-server subject LP-5b1f0e8a… (logboek-pseudoniem)
 ```
 
 For a request that crosses FSC once, the same value is the transaction id on
@@ -566,10 +566,10 @@ certificate names. The relatives' records hang under the requester's because
 they exist only as part of that one processing.
 
 ```
-└── brp-bronquery-doorgifte@v1  brp-sidecar        LP-4727… (logboek-pseudoniem)
-    └── brp-akte-overlijden@v1  brp-graphql-server LP-4727… (logboek-pseudoniem)   rol=aanvrager
-        ├── brp-akte-overlijden@v1  brp-graphql-server 018f2c4a-…-000a (brp-persoon-id)  rol=ouder-van-overledene
-        └── brp-akte-overlijden@v1  brp-graphql-server 018f2c4a-…-000b (brp-persoon-id)  rol=ouder-van-overledene
+└── brp-bronquery-doorgifte/v1  brp-sidecar        LP-4727… (logboek-pseudoniem)
+    └── brp-akte-overlijden/v1  brp-graphql-server LP-4727… (logboek-pseudoniem)   rol=aanvrager
+        ├── brp-akte-overlijden/v1  brp-graphql-server 018f2c4a-…-000a (brp-persoon-id)  rol=ouder-van-overledene
+        └── brp-akte-overlijden/v1  brp-graphql-server 018f2c4a-…-000b (brp-persoon-id)  rol=ouder-van-overledene
 ```
 
 The deceased is **not** among them. The AVG protects living persons, so the
@@ -582,10 +582,10 @@ A consent lifecycle, in `logboek-toestemming` — each step under the portal-sco
 reference, which is the only identifier this side ever holds:
 
 ```
-gbo-bsn-pseudonimisering@v1  consent-portal-backend  EP-3f9a… (portal-subject)
-gbo-toestemming-verlenen@v1  consent-register        EP-3f9a… (portal-subject)
-gbo-toestemming-status@v1    consent-register        EP-3f9a… (portal-subject)
-gbo-toestemming-intrekken@v1 consent-register        EP-3f9a… (portal-subject)
+gbo-bsn-pseudonimisering/v1  consent-portal-backend  EP-3f9a… (portal-subject)
+gbo-toestemming-verlenen/v1  consent-register        EP-3f9a… (portal-subject)
+gbo-toestemming-status/v1    consent-register        EP-3f9a… (portal-subject)
+gbo-toestemming-intrekken/v1 consent-register        EP-3f9a… (portal-subject)
 ```
 
 The status check is logged like any other processing rather than treated as a
@@ -630,13 +630,13 @@ One DvTP query, as the running demo produces it:
 
 ```
 Hypotheek-BV — 1 record · startpunt
-  inkomensgegevens-opvragen [hbv-inkomensgegevens-opvragen@v1]  c-5d0e2b71… (consent-id)  → Belastingdienst
+  inkomensgegevens-opvragen [hbv-inkomensgegevens-opvragen/v1]  c-5d0e2b71… (consent-id)  → Belastingdienst
 Belastingdienst — 3 records · via nextLogbookId uit Hypotheek-BV
-  bronquery-doorgifte          [bd-bronquery-doorgifte@v1]       LP-5b1f0e8a… (logboek-pseudoniem)
-    identiteit-ontsleuteling   [bd-identiteit-ontsleuteling@v1]  LP-5b1f0e8a… (logboek-pseudoniem)
-    bronbevraging              [bd-ib-2025@v1]                   LP-5b1f0e8a… (logboek-pseudoniem)
+  bronquery-doorgifte          [bd-bronquery-doorgifte/v1]       LP-5b1f0e8a… (logboek-pseudoniem)
+    identiteit-ontsleuteling   [bd-identiteit-ontsleuteling/v1]  LP-5b1f0e8a… (logboek-pseudoniem)
+    bronbevraging              [bd-ib-2025/v1]                   LP-5b1f0e8a… (logboek-pseudoniem)
 GBO, logboek-toestemming — 1 record · geen pointer naartoe
-  toestemming-status    [gbo-toestemming-status@v1]  EP-c44cade3… (portal-subject)
+  toestemming-status    [gbo-toestemming-status/v1]  EP-c44cade3… (portal-subject)
 Zonder records voor deze trace: GBO (logboek-eudi-adapter), RvIG
 ```
 
