@@ -46,10 +46,10 @@ engine.
 The `demo-*` targets generate the local FSC certificates in the correct order.
 Certificate mount failures normally mean the stack was started directly with
 `docker compose` before bootstrap completed. Prefer `make demo-eudi`, or run
-the certificate targets manually:
+the certificate target manually:
 
 ```bash
-make fsc-ca && make fsc-directory-certs && make fsc-edi-certs && make fsc-bd-certs
+make fsc-certs
 ```
 
 ## A migration fails
