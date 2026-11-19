@@ -84,6 +84,8 @@ func TestShippedRegistersLoad(t *testing.T) {
 			references: []string{
 				"https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-identiteit-ontsleuteling/v1",
 				"https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-bronquery-doorgifte/v1",
+				// The delivery record the sidecar writes to its delivery logbook (#689).
+				"https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-levering-onder-toestemming/v1",
 				"https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-ib-2025/v1",
 				"https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-ib-2024/v1",
 			},
@@ -94,6 +96,8 @@ func TestShippedRegistersLoad(t *testing.T) {
 			references: []string{
 				"https://logboek.rvig.nl/verwerkingsactiviteiten/brp-identiteit-ontsleuteling/v1",
 				"https://logboek.rvig.nl/verwerkingsactiviteiten/brp-bronquery-doorgifte/v1",
+				// The delivery record the sidecar writes to its delivery logbook (#689).
+				"https://logboek.rvig.nl/verwerkingsactiviteiten/brp-levering-onder-toestemming/v1",
 				"https://logboek.rvig.nl/verwerkingsactiviteiten/brp-akte-overlijden/v1",
 				"https://logboek.rvig.nl/verwerkingsactiviteiten/brp-persoonsgegevens-verstrekking/v1",
 			},
@@ -115,6 +119,8 @@ func TestShippedRegistersLoad(t *testing.T) {
 				"https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-toestemming-intrekken/v1",
 				"https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-toestemming-status/v1",
 				"https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-toestemming-inzage/v1",
+				// The register reading the sources' logbooks back (#687).
+				"https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-toestemming-gebruik-lezen/v1",
 				"https://logboek.gbo.overheid.nl/verwerkingsactiviteiten/gbo-bsn-pseudonimisering/v1",
 			},
 		},

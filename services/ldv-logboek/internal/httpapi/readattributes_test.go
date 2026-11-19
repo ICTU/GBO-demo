@@ -88,14 +88,3 @@ func TestSelectorsAreReadFromEitherSpelling(t *testing.T) {
 		t.Errorf("absent selector = %q, want empty", got)
 	}
 }
-
-// The schema types traceId as a uuid; the record stores the W3C hex form.
-func TestTraceIDRendersAsAUUID(t *testing.T) {
-	if got := asUUID("0af7651916cd43dd8448eb211c80319c"); got != "0af76519-16cd-43dd-8448-eb211c80319c" {
-		t.Fatalf("asUUID = %q", got)
-	}
-	// Anything that is not the 32-hex form is left alone rather than mangled.
-	if got := asUUID("not-a-trace-id"); got != "not-a-trace-id" {
-		t.Fatalf("asUUID = %q", got)
-	}
-}

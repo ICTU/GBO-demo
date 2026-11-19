@@ -1034,6 +1034,103 @@ services:
       timeout: 3s
       retries: 5
 
+  # The delivery logbook of the Belastingdienst: where its sidecar records each delivery
+  # under a consent (#689), apart from the source's own logbook. The same
+  # ldv-logboek image. Its read API is the FSC service ldv-lezen-bd behind
+  # the source's Inway (4018): no token, one traceId, a reduced answer
+  # (#686). The consent register reads each use back there.
+  logboek-levering-bd:
+    build:
+      context: .
+      dockerfile: services/ldv-logboek/Dockerfile
+    restart: unless-stopped
+    environment:
+      - OTEL_SERVICE_NAME=logboek-levering-bd
+      - DATABASE_PATH=/data/logboek.db
+      - REGISTER_PATH=/config/verwerkingsactiviteiten-bd.json
+      - LDV_LOGBOOK_ID=https://logboek.belastingdienst.nl/ldv-lezen-bd/data-processing-operations
+      - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
+      - LDV_READ_TOKEN=${LDV_READ_TOKEN:-local-demo-logboek-read-token}
+      - LDV_FSC_READ_PORT=4018
+    volumes:
+      - logboek-levering-bd-data:/data
+    # sources: the sidecar writes (4016) and the developer portal reads.
+    # source-gateways: the Inway reaches the read API (4018). Not on
+    # backend, where the service providers are.
+    networks:
+      - sources
+      - source-gateways
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4016/health"]
+      <<: *healthcheck-timing
+      timeout: 3s
+      retries: 5
+
+  # The delivery logbook of RvIG: where its sidecar records each delivery
+  # under a consent (#689), apart from the source's own logbook. The same
+  # ldv-logboek image. Its read API is the FSC service ldv-lezen-brp behind
+  # the source's Inway (4018): no token, one traceId, a reduced answer
+  # (#686). The consent register reads each use back there.
+  logboek-levering-brp:
+    build:
+      context: .
+      dockerfile: services/ldv-logboek/Dockerfile
+    restart: unless-stopped
+    environment:
+      - OTEL_SERVICE_NAME=logboek-levering-brp
+      - DATABASE_PATH=/data/logboek.db
+      - REGISTER_PATH=/config/verwerkingsactiviteiten-brp.json
+      - LDV_LOGBOOK_ID=https://logboek.rvig.nl/ldv-lezen-brp/data-processing-operations
+      - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
+      - LDV_READ_TOKEN=${LDV_READ_TOKEN:-local-demo-logboek-read-token}
+      - LDV_FSC_READ_PORT=4018
+    volumes:
+      - logboek-levering-brp-data:/data
+    # sources: the sidecar writes (4016) and the developer portal reads.
+    # source-gateways: the Inway reaches the read API (4018). Not on
+    # backend, where the service providers are.
+    networks:
+      - sources
+      - source-gateways
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4016/health"]
+      <<: *healthcheck-timing
+      timeout: 3s
+      retries: 5
+
+  # The delivery logbook of LVG: where its sidecar records each delivery
+  # under a consent (#689), apart from the source's own logbook. The same
+  # ldv-logboek image. Its read API is the FSC service ldv-lezen-lvg behind
+  # the source's Inway (4018): no token, one traceId, a reduced answer
+  # (#686). The consent register reads each use back there.
+  logboek-levering-lvg:
+    build:
+      context: .
+      dockerfile: services/ldv-logboek/Dockerfile
+    profiles: [dvtp, full]
+    restart: unless-stopped
+    environment:
+      - OTEL_SERVICE_NAME=logboek-levering-lvg
+      - DATABASE_PATH=/data/logboek.db
+      - REGISTER_PATH=/config/verwerkingsactiviteiten-lvg.json
+      - LDV_LOGBOOK_ID=https://logboek.lvg.test/ldv-lezen-lvg/data-processing-operations
+      - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
+      - LDV_READ_TOKEN=${LDV_READ_TOKEN:-local-demo-logboek-read-token}
+      - LDV_FSC_READ_PORT=4018
+    volumes:
+      - logboek-levering-lvg-data:/data
+    # sources: the sidecar writes (4016) and the developer portal reads.
+    # source-gateways: the Inway reaches the read API (4018). Not on
+    # backend, where the service providers are.
+    networks:
+      - sources
+      - source-gateways
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4016/health"]
+      <<: *healthcheck-timing
+      timeout: 3s
+      retries: 5
+
   consent-portal-backend:
     build:
       # Root context: shares services/ldv-client with the other LDV components.
@@ -1625,7 +1722,7 @@ services:
       # dpl.read.nextLogbookId holds, so the view can follow a pointer to an
       # address; "start" marks the logbooks of applications that start a
       # processing, where a reader begins.
-      - LDV_LOGBOOKS=https://logboek.hypotheek-bv.test/data-processing-operations=Hypotheek-BV=http://logboek-afnemer:4016=start,https://logboek.gbo.overheid.nl/eudi-adapter/data-processing-operations=GBO EUDI-adapter=http://logboek-eudi-adapter:4016=start,https://logboek.belastingdienst.nl/data-processing-operations=Belastingdienst=http://logboek-bd:4016,https://logboek.rvig.nl/data-processing-operations=RvIG=http://logboek-brp:4016,https://logboek.gbo.overheid.nl/toestemming/data-processing-operations=GBO toestemming=http://logboek-toestemming:4016,https://logboek.installatieregister.test/data-processing-operations=Installatie Register=http://logboek-ir:4016=start,https://logboek.lvg.test/data-processing-operations=LVG=http://logboek-lvg:4016
+      - LDV_LOGBOOKS=https://logboek.hypotheek-bv.test/data-processing-operations=Hypotheek-BV=http://logboek-afnemer:4016=start,https://logboek.gbo.overheid.nl/eudi-adapter/data-processing-operations=GBO EUDI-adapter=http://logboek-eudi-adapter:4016=start,https://logboek.belastingdienst.nl/data-processing-operations=Belastingdienst=http://logboek-bd:4016,https://logboek.rvig.nl/data-processing-operations=RvIG=http://logboek-brp:4016,https://logboek.gbo.overheid.nl/toestemming/data-processing-operations=GBO toestemming=http://logboek-toestemming:4016,https://logboek.installatieregister.test/data-processing-operations=Installatie Register=http://logboek-ir:4016=start,https://logboek.lvg.test/data-processing-operations=LVG=http://logboek-lvg:4016,https://logboek.belastingdienst.nl/ldv-lezen-bd/data-processing-operations=BD leveringen=http://logboek-levering-bd:4016=start,https://logboek.rvig.nl/ldv-lezen-brp/data-processing-operations=BRP leveringen=http://logboek-levering-brp:4016=start,https://logboek.lvg.test/ldv-lezen-lvg/data-processing-operations=LVG leveringen=http://logboek-levering-lvg:4016=start
       - LDV_READ_TOKEN=${LDV_READ_TOKEN:-local-demo-logboek-read-token}
       - FSC_TXLOG_EDI_URL=https://edi-txlog-api:9443
       - FSC_TXLOG_EDI_CERT=/certs/edi/internal-cert.pem
@@ -1697,6 +1794,9 @@ services:
       - ./fsc-infra/orgs/belastingdienst-mock/pki/internal:/certs/bd:ro
     networks:
       - backend
+      # The delivery logbooks of the sources (#689) are off backend, where
+      # the service providers are; the chain view reads them here.
+      - sources
       # Join fsc-infra_default so {edi,bd,hv}-txlog-api:9443 can be
       # reached directly over their internal DNS names.
       - fsc-infra
@@ -2238,9 +2338,10 @@ networks:
   # decryption component and the logbooks they write to. No service provider
   # is on it.
   sources:
-  # The network between the Inways of the sources and the sidecars behind
-  # them. The fsc-infra project owns it; a worktree running its own fsc-infra
-  # sets FSC_SOURCE_GATEWAY_NETWORK=<that project>_source-gateways in .env.
+  # The network between the Inways of the sources and what sits behind them:
+  # the sidecars and the read API of the delivery logbooks. The fsc-infra
+  # project owns it; a worktree running its own fsc-infra sets
+  # FSC_SOURCE_GATEWAY_NETWORK=<that project>_source-gateways in .env.
   source-gateways:
     name: ${FSC_SOURCE_GATEWAY_NETWORK:-fsc-infra_source-gateways}
     external: true
@@ -2263,6 +2364,9 @@ volumes:
   dev-portal-var:
   dvtp-onboarding-data:
   data-usage-index-data:
+  logboek-levering-bd-data:
+  logboek-levering-brp-data:
+  logboek-levering-lvg-data:
   logboek-bd-data:
   logboek-brp-data:
   logboek-toestemming-data:

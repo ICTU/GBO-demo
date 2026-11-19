@@ -140,3 +140,65 @@ test_deny_reason_is_a_bare_code if {
 test_allow_carries_no_reason if {
 	not authz.reason with input as metadata_input("GET", "/.well-known/gbo")
 }
+
+# ── LDV_READ_FSC: the register reads a component logbook (#686) ──────────
+
+_trace_id := "4bf92f3577b34da6a3ce929d0e0e4736"
+
+ldv_read_input(peer, service, method, path, body) := {
+	"subject": {"id": peer, "type": "identity", "attributes": {"service_name": service}},
+	"action": {"id": method, "type": "name", "attributes": {"body": body}},
+	"resource": {"id": path, "type": "uri"},
+	"context": {},
+}
+
+ldv_read(body) := ldv_read_input("99999999900000000700", "ldv-lezen-bd", "POST", "/data-processing-operations", body)
+
+test_ldv_read_by_one_trace_id_allowed if {
+	every service in ["ldv-lezen-bd", "ldv-lezen-brp", "ldv-lezen-lvg"] {
+		authz.allow with input as ldv_read_input("99999999900000000700", service, "POST", "/data-processing-operations", json.marshal({"traceId": _trace_id}))
+	}
+}
+
+test_ldv_read_without_a_trace_id_denied if {
+	every body in [
+		json.marshal({}),
+		json.marshal({"dpl": {"core": {"dataSubjectId": "LP-x"}}}),
+		json.marshal({"startTime": "2026-11-19T00:00:00Z"}),
+		json.marshal({"dpl": {"core": {"processingActivityId": "https://x/v1"}}}),
+	] {
+		not authz.allow with input as ldv_read(body)
+	}
+}
+
+test_ldv_read_with_a_trace_id_and_another_selector_denied if {
+	not authz.allow with input as ldv_read(json.marshal({"traceId": _trace_id, "startTime": "2026-11-19T00:00:00Z"}))
+}
+
+test_ldv_read_with_a_uuid_or_malformed_trace_id_denied if {
+	every trace in ["4bf92f35-77b3-4da6-a3ce-929d0e0e4736", "4BF92F3577B34DA6A3CE929D0E0E4736", "abc", ""] {
+		not authz.allow with input as ldv_read(json.marshal({"traceId": trace}))
+	}
+	not authz.allow with input as ldv_read("not json")
+	not authz.allow with input as ldv_read(json.marshal([_trace_id]))
+}
+
+test_ldv_read_by_another_peer_denied if {
+	not authz.allow with input as ldv_read_input("99999999900000000300", "ldv-lezen-bd", "POST", "/data-processing-operations", json.marshal({"traceId": _trace_id}))
+}
+
+test_ldv_read_on_another_path_or_method_denied if {
+	not authz.allow with input as ldv_read_input("99999999900000000700", "ldv-lezen-bd", "POST", "/logboek/records", json.marshal({"traceId": _trace_id}))
+	not authz.allow with input as ldv_read_input("99999999900000000700", "ldv-lezen-bd", "GET", "/data-processing-operations", json.marshal({"traceId": _trace_id}))
+}
+
+# The register's peer has no business on a data service through this rule.
+test_ldv_read_body_on_a_data_service_is_judged_as_graphql if {
+	input_doc := ldv_read_input("99999999900000000700", "bri", "POST", "/data-processing-operations", json.marshal({"traceId": _trace_id}))
+	not authz.allow with input as input_doc
+	authz.reason with input as input_doc != "LDV_READ_NOT_PERMITTED"
+}
+
+test_ldv_read_refusal_has_its_own_code if {
+	authz.reason with input as ldv_read(json.marshal({})) == "LDV_READ_NOT_PERMITTED"
+}

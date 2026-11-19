@@ -1,0 +1,296 @@
+{
+  "openapi": "3.0.2",
+  "info": {
+    "title": "LDV lezen API",
+    "description": "API voor het lezen van Logboek dataverwerkingen",
+    "version": "1.1.0",
+    "license": {
+      "name": "CC4",
+      "url": "https://github.com/Logius-standaarden/API-Design-Rules/blob/develop/LICENSE"
+    },
+    "contact": {
+      "name": "Standaard logboek dataverwerkingen extensie lezen",
+      "email": "api@logius.nl",
+      "url": "https://logius-standaarden.github.io/logboek-extensie-lezen/"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://addyourserverhe.re/lezenapi/v1"
+    }
+  ],
+  "tags": [
+    {
+      "name": "DataProcessingOperations",
+      "description": "Alle API operaties die bij dataProcessingOperations horen."
+    }
+  ],
+  "paths": {
+    "/data-processing-operations": {
+      "post": {
+        "operationId": "listDataProcessingOperationsPost",
+        "description": "Alle dataverwerkingen ophalen",
+        "summary": "Alle dataverwerkingen ophalen",
+        "tags": ["DataProcessingOperations"],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/DataProcessingOperationRequest"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/DataProcessingOperationsResponse"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "requestBodies": {
+      "DataProcessingOperationRequest": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/DataProcessingOperationRequest"
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "DataProcessingOperationsResponse": {
+        "description": "OK",
+        "headers": {
+          "API-Version": {
+            "$ref": "https://static.developer.overheid.nl/adr/components.yaml#/headers/API-Version"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ListDataProcessingOperations"
+            }
+          }
+        }
+      },
+      "BadRequest": {
+        "description": "Bad Request",
+        "headers": {
+          "API-Version": {
+            "$ref": "https://static.developer.overheid.nl/adr/components.yaml#/headers/API-Version"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Nlgovproblem"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Unauthorized",
+        "headers": {
+          "API-Version": {
+            "$ref": "https://static.developer.overheid.nl/adr/components.yaml#/headers/API-Version"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Nlgovproblem"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Nlgovproblem": {
+        "$ref": "./ProblemJson.schema.json"
+      },
+      "Attributes": {
+        "x-comment": "Dit is een verwijzing naar een schema met de attributen die je voor jouw implementatie nodig hebt, indien je enkel LDV core toepast dan volstaat een referentie naar https://schemas.don.projects.digilab.network/logboek-dataverwerkingen/attributes anders wordt aangeraden dit lokale bestand aan te passen",
+        "$ref": "./attributes.schema.json"
+      },
+      "DataProcessingOperationRequest": {
+        "type": "object",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Attributes"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "traceId": {
+                "$ref": "#/components/schemas/TraceID"
+              },
+              "startTime": {
+                "$ref": "#/components/schemas/StartTime"
+              },
+              "endTime": {
+                "$ref": "#/components/schemas/EndTime"
+              }
+            }
+          }
+        ],
+        "minProperties": 1,
+        "description": "Minimaal 1 moet gevuld zijn, zorg voor een zo exact mogelijke zoekopdracht"
+      },
+      "TraceID": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{32}$",
+        "description": "Unieke identificerende code van Trace die Dataverwerking volgt",
+        "example": "ef4e77b9b03b585fb6135fcf8d8555fb",
+        "externalDocs": {
+          "description": "Definitie van Trace in de standaard logboek dataverwerkingen",
+          "url": "https://logius-standaarden.github.io/logboek-dataverwerkingen/#dfn-traces"
+        }
+      },
+      "StartTime": {
+        "type": "string",
+        "format": "date-time",
+        "description": "Tijdstip waarop de Actie gestart is, in RFC 3339 formaat",
+        "example": "2026-01-01T06:30:00.000Z",
+        "externalDocs": {
+          "description": "Definitie van start_time in de standaard logboek dataverwerkingen",
+          "url": "https://logius-standaarden.github.io/logboek-dataverwerkingen/#start_time"
+        }
+      },
+      "EndTime": {
+        "type": "string",
+        "format": "date-time",
+        "description": "Tijdstip waarop de Actie beëindigd is, in RFC 3339 formaat",
+        "example": "2026-01-01T06:30:00.000Z",
+        "externalDocs": {
+          "description": "Definitie van end_time in de standaard logboek dataverwerkingen",
+          "url": "https://logius-standaarden.github.io/logboek-dataverwerkingen/#end_time"
+        }
+      },
+      "ListDataProcessingOperations": {
+        "type": "object",
+        "required": ["dataProcessingOperations"],
+        "properties": {
+          "metadata": {
+            "$ref": "#/components/schemas/Metadata"
+          },
+          "dataProcessingOperations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DataProcessingOperation"
+            }
+          }
+        }
+      },
+      "DataProcessingOperation": {
+        "description": "Dataverwerking",
+        "type": "object",
+        "required": [
+          "traceId",
+          "spanId",
+          "status",
+          "name",
+          "startTime",
+          "endTime"
+        ],
+        "properties": {
+          "traceId": {
+            "$ref": "#/components/schemas/TraceID"
+          },
+          "startTime": {
+            "$ref": "#/components/schemas/StartTime"
+          },
+          "endTime": {
+            "$ref": "#/components/schemas/EndTime"
+          },
+          "spanId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{16}$",
+            "description": "Unieke identificerende code van Actie binnen de Dataverwerking",
+            "example": "beb0291b5162d850",
+            "externalDocs": {
+              "description": "Definitie van Actie in de standaard logboek dataverwerkingen",
+              "url": "http://gitdocumentatie.logius.nl/publicatie/logboek/dataverwerkingen/#span_id"
+            }
+          },
+          "status": {
+            "type": "string",
+            "description": "Status van de Actie",
+            "enum": ["Unset", "Ok", "Error"]
+          },
+          "name": {
+            "type": "string",
+            "description": "Naam van de specifieke Actie binnen de Dataverwerking",
+            "example": "verwerken van gegevens"
+          },
+          "parentSpanId": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{16}$",
+            "description": "Unieke identificerende code aanroepende Actie binnen huidige Trace",
+            "example": "beb0291b5162d850"
+          },
+          "resource": {
+            "description": "Een object met velden dat gebruikt wordt om een systeem, applicatie of component aan te duiden op een manier die binnen de organisatie gebruikelijk is. Denk hierbij aan velden als naam en versienummer van een applicatie, of een verwijzing naar een record in een CMDB",
+            "type": "object",
+            "properties": {
+              "attributes": {}
+            },
+            "externalDocs": {
+              "description": "Uitleg van CMDB volgens ITIL v3",
+              "url": "https://gitdocumentatie.logius.nl/publicatie/logboek/dataverwerkingen/#resource"
+            }
+          },
+          "attributes": {
+            "$ref": "#/components/schemas/Attributes"
+          },
+          "links": {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "type": {
+                "$ref": "#/components/schemas/Link"
+              }
+            }
+          }
+        }
+      },
+      "Link": {
+        "description": "Verwijzing naar gerelateerde endpoints",
+        "type": "object",
+        "required": ["href", "method"],
+        "properties": {
+          "href": {
+            "type": "string",
+            "format": "uri",
+            "description": "URL van de link",
+            "example": "http://boerenkoolstronkerade.el/verwerkingenregister/be00596a-266d-44b2-81f0-169cc2986435"
+          },
+          "method": {
+            "type": "string",
+            "description": "HTTP methode die gebruikt kan worden om de link te benaderen",
+            "enum": ["GET", "POST", "PUT", "DELETE"]
+          }
+        }
+      },
+      "Metadata": {
+        "description": "Metadata van een Logboek",
+        "type": "object",
+        "required": ["logbookId", "organizationName"],
+        "properties": {
+          "logbookId": {
+            "type": "string",
+            "description": "Unieke identificerende code van het Logboek"
+          },
+          "organizationName": {
+            "type": "string",
+            "description": "Organisatie waartoe dit Logboek behoort"
+          }
+        }
+      }
+    }
+  }
+}

@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -22,6 +23,22 @@ import (
 // uses milliseconds since the epoch. Each side follows its own specification.
 //
 // Errors are application/problem+json, per the extension.
+//
+// traceId is 32 lowercase hex in request and response, the W3C form the
+// records store and traceparent carries: OpenAPI 1.1.0 of the extension types
+// it ^[0-9a-f]{32}$ (it was a uuid before). Every answer carries the
+// API-Version header the API design rules ask for.
+
+// HeaderTruncated marks an answer the read cap cut off: there are more
+// records than it holds. A local extension, because the read extension's
+// OpenAPI 1.1.0 has no paging; a header keeps the body schema-valid. A reader
+// that treats an answer as complete must check it.
+const HeaderTruncated = "Gbo-Ldv-Truncated"
+
+// APIVersion is the version of the read extension this API follows.
+const APIVersion = "1.1.0"
+
+var traceIDPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 // readRequest is DataProcessingOperationRequest.
 //
@@ -98,6 +115,7 @@ func readStatus(status string) string {
 
 // listDataProcessingOperations serves the read extension.
 func (h *Handler) listDataProcessingOperations(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("API-Version", APIVersion)
 	if !authorized(r, h.readToken) {
 		writeProblem(w, http.StatusUnauthorized, "unauthorized", "a valid bearer token is required to read this logboek")
 		return
@@ -111,9 +129,13 @@ func (h *Handler) listDataProcessingOperations(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	if request.TraceID != "" && !traceIDPattern.MatchString(request.TraceID) {
+		writeProblem(w, http.StatusBadRequest, "invalid_trace_id", "traceId must be 32 lowercase hex characters")
+		return
+	}
 	selectors := request.selectors()
 	query := ldv.Query{
-		TraceID:              ldv.NormalizeTraceID(request.TraceID),
+		TraceID:              request.TraceID,
 		ProcessingActivityID: fromReadAttributes(selectors, ldv.AttrProcessingActivityID),
 		DataSubjectID:        fromReadAttributes(selectors, ldv.AttrDataSubjectID),
 		DataSubjectIDType:    fromReadAttributes(selectors, ldv.AttrDataSubjectIDType),
@@ -132,12 +154,13 @@ func (h *Handler) listDataProcessingOperations(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	if page.Truncated {
+		w.Header().Set(HeaderTruncated, "true")
+	}
 	operations := make([]dataProcessingOperation, 0, len(page.Records))
 	for _, stored := range page.Records {
 		operation := dataProcessingOperation{
-			// The schema types traceId as a uuid where the record stores the
-			// W3C hex form. Same sixteen bytes, two spellings.
-			TraceID:      asUUID(stored.TraceID),
+			TraceID:      stored.TraceID,
 			SpanID:       stored.SpanID,
 			ParentSpanID: stored.ParentSpanID,
 			Status:       readStatus(stored.Status),
