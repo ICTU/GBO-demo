@@ -531,7 +531,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
-- **The demo runs on .NET Aspire** (`aspire/apphost.cs`, Aspire 17): one
+- **The demo runs on Aspire** (`aspire/apphost.cs`, Aspire 17): one
   C# file-based AppHost replaces `docker-compose.yml`,
   `fsc-infra/docker-compose.yml`, `docker-compose.cloudflare-tunnel.yml` and
   the Makefile. `aspire run --launch-profile dvtp` replaces `make demo`, and

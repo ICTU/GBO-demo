@@ -1,5 +1,9 @@
 # Aspire migration: plan and checklist
 
+Status: the pull request stays a draft until the Go AppHost is generally
+available, or until the Go AppHost issues that matter for this repository
+are solved (see "Go AppHost" under Follow-ups).
+
 Branch `aspire/migration`, local only until reviewed. The full plan, with
 background and risks, is the "GBO-demo: Aspirify migration plan" doc. This
 file is the map for reviewing the commits: each phase lists its steps, and a
@@ -83,4 +87,8 @@ Decisions already taken:
 - `aspire publish`: the generated compose refers to images by variable and
   leaves out the host steps (PKI, provisioning); a push step and a decision
   on the host steps make it a standalone replacement.
-- Port apphost.cs to a Go AppHost once that is generally available.
+- Go AppHost: port apphost.cs to a Go AppHost (`apphost.go`) once that is
+  generally available, or once the Go AppHost issues that matter here are
+  solved: in preview, a brownfield `aspire init` fails next to an existing
+  `go.mod`, and the certificate-trust and OTel Collector APIs this AppHost
+  relies on are C#-first. The pull request stays a draft until then.
