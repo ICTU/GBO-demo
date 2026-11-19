@@ -15,6 +15,10 @@ import (
 	"syscall"
 	"time"
 
+	"consent-register/logbookreader"
+	"consent-register/usageindex"
+	"consent-register/uses"
+
 	"github.com/google/uuid"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp/filters"
@@ -76,6 +80,18 @@ type config struct {
 	SigningKeyID  string
 	TokenIssuer   string
 	TokenAudience string
+	// UsageIndexURL is the register Outway's grant link for the lookup
+	// service of the data usage index. Without it the register answers
+	// every uses request with the index-unavailable notice.
+	UsageIndexURL string
+	// UsageSources names the source behind each logbook ID, and
+	// UsageServiceProviders the party behind each OIN (parseSources).
+	UsageSources          map[string]string
+	UsageServiceProviders map[string]string
+	// UsageReadServices maps a logbook ID to the register Outway's grant
+	// link for that source's read service (#686): logbook ID=URL pairs. A
+	// registration whose logbook ID is not in it gives no use.
+	UsageReadServices map[string]string
 }
 
 const (
@@ -93,6 +109,12 @@ func loadConfig() (config, error) {
 		SigningKeyID:   os.Getenv("CONSENT_SIGNING_KEY_ID"),
 		TokenIssuer:    getEnv("CONSENT_TOKEN_ISSUER", "https://consent-register.gbo.test"),
 		TokenAudience:  getEnv("CONSENT_TOKEN_AUDIENCE", "gbo:dvtp:pdp"),
+
+		UsageIndexURL: os.Getenv("DATA_USAGE_INDEX_URL"),
+		UsageSources:  parseSources(os.Getenv("CONSENT_USAGE_SOURCES")),
+
+		UsageServiceProviders: parseSources(os.Getenv("CONSENT_USAGE_SERVICE_PROVIDERS")),
+		UsageReadServices:     parseSources(os.Getenv("CONSENT_USAGE_READ_SERVICES")),
 	}
 	switch cfg.Store {
 	case "":
@@ -374,7 +396,7 @@ func initTracer() func(context.Context) error {
 // newMux builds the routing tree with the given store. Extracted from main
 // so integration tests can wire the handlers to an httptest.Server without
 // starting the real listener.
-func newMux(store ConsentStore, issuer *ConsentIssuer, logbook *registerLogbook) *http.ServeMux {
+func newMux(store ConsentStore, issuer *ConsentIssuer, logbook *registerLogbook, usage uses.Service) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -401,7 +423,7 @@ func newMux(store ConsentStore, issuer *ConsentIssuer, logbook *registerLogbook)
 
 	mux.HandleFunc("/consents", handleConsents(store, issuer, logbook))
 
-	mux.HandleFunc("/consents/", handleConsentByID(store, logbook))
+	mux.HandleFunc("/consents/", handleConsentByID(store, logbook, handleConsentUses(store, logbook, usage)))
 
 	mux.HandleFunc("/subjects/", handlePolymorphic(store))
 
@@ -564,7 +586,7 @@ func handleConsents(store ConsentStore, issuer *ConsentIssuer, logbook *register
 }
 
 // handleConsentByID serves a single consent: its detail and its revocation.
-func handleConsentByID(store ConsentStore, logbook *registerLogbook) http.HandlerFunc {
+func handleConsentByID(store ConsentStore, logbook *registerLogbook, usesHandler func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now().UTC()
 		corsHeaders(w)
@@ -576,6 +598,12 @@ func handleConsentByID(store ConsentStore, logbook *registerLogbook) http.Handle
 		id := strings.TrimPrefix(r.URL.Path, "/consents/")
 		if id == "" {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing consent_id"})
+			return
+		}
+
+		// GET /consents/{id}/uses: when the consent was used (uses_http.go).
+		if consentID, ok := strings.CutSuffix(id, "/uses"); ok && consentID != "" && !strings.Contains(consentID, "/") {
+			usesHandler(w, r, consentID)
 			return
 		}
 
@@ -692,10 +720,26 @@ func main() {
 		slog.Warn("no LDV_LOGBOOK_URL configured; this register writes no Logboek Dataverwerkingen records")
 	}
 
+	usage := uses.Service{Sources: cfg.UsageSources, ServiceProviders: cfg.UsageServiceProviders}
+	if cfg.UsageIndexURL != "" {
+		usage.Index = usageindex.Client{
+			URL:  cfg.UsageIndexURL,
+			HTTP: &http.Client{Timeout: 3 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)},
+		}
+	} else {
+		slog.Warn("no DATA_USAGE_INDEX_URL configured; the uses of a consent cannot be shown")
+	}
+	if len(cfg.UsageReadServices) > 0 {
+		usage.Logbooks = logbookreader.Client{
+			Services: cfg.UsageReadServices,
+			HTTP:     &http.Client{Transport: otelhttp.NewTransport(http.DefaultTransport)},
+		}
+	}
+
 	serve(
 		&http.Server{
 			Addr:              ":" + cfg.Port,
-			Handler:           otelhttp.NewHandler(withAccessLog(newMux(store, issuer, logbook)), serviceName, otelhttp.WithFilter(filters.Not(filters.Path("/health")))),
+			Handler:           otelhttp.NewHandler(withAccessLog(newMux(store, issuer, logbook, usage)), serviceName, otelhttp.WithFilter(filters.Not(filters.Path("/health")))),
 			ReadHeaderTimeout: readHeaderTimeout,
 		},
 		&http.Server{

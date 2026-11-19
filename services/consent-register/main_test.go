@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"consent-register/uses"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -39,7 +40,7 @@ func TestCreateThenGetConsent(t *testing.T) {
 	}
 	issuer.now = func() time.Time { return time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC) }
 	store := NewStore()
-	srv := httptest.NewServer(newMux(store, issuer, nil))
+	srv := httptest.NewServer(newMux(store, issuer, nil, uses.Service{}))
 	defer srv.Close()
 
 	createBody := bytes.NewBufferString(`{
@@ -202,7 +203,7 @@ func TestCreateRefusesAConsentWithoutAnEncryptedSubject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(newMux(NewStore(), issuer, nil))
+	srv := httptest.NewServer(newMux(NewStore(), issuer, nil, uses.Service{}))
 	defer srv.Close()
 
 	for name, subject := range map[string]string{
