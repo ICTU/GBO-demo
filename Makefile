@@ -662,8 +662,9 @@ fsc-pdp-cert:
 # first contract is submitted — otherwise every fsc-seed-* leaves its
 # connection contract pending and the seed times out after 30s with no
 # useful error. The PDP lives in the main compose project, which normally
-# starts *after* fsc-infra; this pulls it forward. The PDP turns healthy only
-# once it has pulled the onboarding register, so --wait covers that as well.
+# starts *after* fsc-infra; this pulls it forward. The PDP loads its policies
+# before it serves and reads the onboarding register live, so once --wait
+# sees it healthy it decides on contracts.
 pdp-up: policy-check certs require-ftv-postgres fsc-pdp-cert
 	docker compose up --build -d --wait --force-recreate openftv-pdp
 

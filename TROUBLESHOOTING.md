@@ -103,11 +103,11 @@ Check the `make fsc-seed-bri` output. Common causes:
     | grep auto_sign_contract | tail -1 | jq .result.response
   ```
 
-  `ADMISSION_REGISTER_UNAVAILABLE` means the PDP has no
-  `data.entities.dvtp_participant` document: check the onboarding register
-  and OpenFTV PIP pull. `PARTY_NOT_IN_REGISTRY` means the document is present
-  but does not contain the peer: admit that peer in the register. The source
-  Manager does not counter-sign in either case.
+  `ADMISSION_REGISTER_UNAVAILABLE` means the PDP could not read the
+  onboarding register: check that `dvtp-onboarding-register` is running.
+  `PARTY_NOT_IN_REGISTRY` means the register answered but does not contain
+  the peer: admit that peer in the register. The source Manager does not
+  counter-sign in either case, and does not ask again: re-run the seed.
 
 ## Every request denies with `NO_APPLICABLE_RULE`
 

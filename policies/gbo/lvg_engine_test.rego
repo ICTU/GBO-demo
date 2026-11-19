@@ -65,7 +65,7 @@ test_engine_denies_a_delegated_ownership_check_without_mandate if {
 	req := object.union(_lvg_input("99999999900000001100"), {"subject": {"attributes": {"outway_delegator_peer_id": _lvg_ir}}})
 	result := gbo.response with input as req
 		with data.gbo.consent.resolved as _lvg_consent
-		with data.entities.dvtp_participant as {"99999999900000001100": {"active": true, "acts_for": [{"peer_id": _lvg_ir, "rules": ["DVT0001"]}]}}
+		with data.gbo.register.participants as {"99999999900000001100": {"active": true, "acts_for": [{"peer_id": _lvg_ir, "rules": ["DVT0001"]}]}}
 	result.decision == false
 	fx.field_codes(result) == {"INTEGRATOR_NOT_REGISTERED"}
 }

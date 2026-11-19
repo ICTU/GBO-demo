@@ -529,13 +529,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   wait for it to complete, instead of restarting on failure while the
   services start anyway. A `postgres-init` one-shot in `fsc-infra` creates
   the FSC databases on every `up` and holds their only list, which replaces
-  the initdb script and `make fsc-databases`. The OpenFTV PDP is healthy only
-  once its policies are loaded and it has pulled the onboarding register
-  that contract auto-signing reads: a readiness policy
-  (`policies/readiness.rego`), asked by a `pdp-ready` probe in the PDP image,
-  replaces `scripts/wait-openftv-admission.sh`. `make demo-manager` now seeds
+  the initdb script and `make fsc-databases`. `make demo-manager` now seeds
   the OpenFTV Manager before the rest of the stack starts, so the PDP pulls
-  the policy bundle at boot and passes the same check without a restart.
+  the policy bundle at boot without a restart.
+- **The PDP reads the DvTP onboarding register live**: contract auto-signing
+  and the integrator mandate check ask the register with `http.send` on
+  every decision that needs it (`policies/gbo/register.rego`), as the
+  consent status already was, instead of OpenFTV pulling it every five
+  seconds. A freshly started PDP therefore decides on the register from its
+  first request, so its healthcheck is the plain `/healthz` and
+  `scripts/wait-openftv-admission.sh`, which waited for the first pull, is
+  gone; so is the pull configuration (`services/openftv-pdp/pip-pull/` and
+  its Helm ConfigMap example; the Helm values now set `GBO_REGISTER_URL`).
+  A change in the register counts from the next decision. When the register
+  does not answer, auto-signing refuses with `ADMISSION_REGISTER_UNAVAILABLE`
+  and a delegated call with `INTEGRATOR_REGISTER_UNAVAILABLE`, where before
+  the PDP went on deciding on the last copy it had pulled. The OpenFSC
+  Manager does not ask again after a refusal, so a contract submitted while
+  the register is down stays pending until it is submitted again.
 - **Credentials without a revocation reference are valid for 24 hours**
   (#697): the own credential issuer cannot revoke what it issued through
   login, disclosure-based issuance or an offer without `reference`, so those

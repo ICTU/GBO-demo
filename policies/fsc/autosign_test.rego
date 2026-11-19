@@ -58,15 +58,15 @@ connection_for(source, consumer) := contract_input_for(source, sort([source, con
 connection(consumer) := contract_input(sort([bd, consumer]), [2])
 
 is_allowed(request) if {
-	autosign.allow with input as request with data.entities as {"dvtp_participant": participants}
+	autosign.allow with input as request with data.gbo.register.participants as participants
 }
 
 deny_reason(request) := value if {
-	value := autosign.reason with input as request with data.entities as {"dvtp_participant": participants}
+	value := autosign.reason with input as request with data.gbo.register.participants as participants
 }
 
 decision_response(request) := value if {
-	value := autosign.response with input as request with data.entities as {"dvtp_participant": participants}
+	value := autosign.response with input as request with data.gbo.register.participants as participants
 }
 
 # --- allow ------------------------------------------------------------
@@ -79,22 +79,18 @@ test_registered_issuer_allowed if {
 	is_allowed(connection(edi))
 }
 
-test_system_issuer_denied_without_pip_data if {
-	not autosign.allow with input as connection(edi)
+# The register did not answer: nobody is admitted, and the reason says why.
+test_system_issuer_denied_without_register if {
+	not autosign.allow with input as connection(edi) with data.gbo.register.participants as null
 }
 
 test_missing_admission_register_reason if {
-	value := autosign.reason with input as connection(edi) with data.entities as {}
-	value == "ADMISSION_REGISTER_UNAVAILABLE"
-}
-
-test_missing_entities_reason if {
-	value := autosign.reason with input as connection(edi)
+	value := autosign.reason with input as connection(edi) with data.gbo.register.participants as null
 	value == "ADMISSION_REGISTER_UNAVAILABLE"
 }
 
 test_empty_admission_register_is_present if {
-	value := autosign.reason with input as connection(edi) with data.entities as {"dvtp_participant": {}}
+	value := autosign.reason with input as connection(edi) with data.gbo.register.participants as {}
 	value == "PARTY_NOT_IN_REGISTRY"
 }
 
@@ -165,12 +161,12 @@ with_integrator := object.union(participants, {integrator: {
 delegated_for(peer_ids) := contract_input(sort(peer_ids), [3])
 
 deny_reason_with(request, parties) := value if {
-	value := autosign.reason with input as request with data.entities as {"dvtp_participant": parties}
+	value := autosign.reason with input as request with data.gbo.register.participants as parties
 }
 
 test_delegated_connection_for_registered_provider_allowed if {
 	autosign.allow with input as delegated_for([bd, hv, integrator])
-		with data.entities as {"dvtp_participant": with_integrator}
+		with data.gbo.register.participants as with_integrator
 }
 
 test_delegated_connection_for_unregistered_provider_denied if {
