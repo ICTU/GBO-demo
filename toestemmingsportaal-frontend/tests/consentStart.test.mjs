@@ -19,8 +19,6 @@ import {
   startPath,
 } from '../src/consentStart/startFlow.ts'
 import { decideRequest, PortalApiError, resolveRequest } from '../src/api/portalClient.ts'
-import { REDIRECT_CONTEXT_KEY, loadRedirectContext } from '../src/hooks/useRedirectContext.ts'
-import { parseAllowedReturnOrigins } from '../src/hooks/redirectValidation.ts'
 
 const src = new URL('../src/', import.meta.url)
 const read = (path) => readFile(new URL(path, src), 'utf8')
@@ -295,38 +293,31 @@ test('a grant posts exactly the data sets the citizen left checked', async (t) =
   assert.deepEqual(JSON.parse(calls[0].init.body), { decision: 'grant', scopes: ['bd:ib:2024'] })
 })
 
-/** A sessionStorage stand-in. */
-function memoryStorage(entries = {}) {
-  const items = new Map(Object.entries(entries))
-  return {
-    items,
-    getItem: (key) => items.get(key) ?? null,
-    setItem: (key, value) => items.set(key, String(value)),
-    removeItem: (key) => items.delete(key),
+test('the portal has no route that takes a consent request from the URL', async () => {
+  const app = await read('App.tsx')
+  const routes = [...app.matchAll(/<Route\s+path="([^"]+)"/g)].map((m) => m[1])
+  assert.deepEqual(routes.sort(), [
+    '/',
+    '/auth',
+    '/mijnoverheid/toestemmingen',
+    '/mijnoverheid/toestemmingen/:id',
+    '/mijnoverheid/toestemmingen/:id/ingetrokken',
+    '/toestemming/start',
+  ])
+
+  // The login reads only where to go next and whether it is the start flow.
+  const login = await read('pages/DigiDAuth.tsx')
+  const params = [...login.matchAll(/params\.get\('([^']+)'\)/g)].map((m) => m[1])
+  assert.deepEqual(params.sort(), ['flow', 'next'])
+  assert.doesNotMatch(login, /location\.(assign|replace|href)/)
+
+  // Nothing in the portal reads the parameters of the URL-based flow.
+  for (const path of ['App.tsx', 'pages/DigiDAuth.tsx', ...startFlowSources]) {
+    const source = await read(path)
+    for (const name of ['return_url', 'client_oin', 'client_name', 'purpose', 'scope']) {
+      assert.doesNotMatch(source, new RegExp(`get\\('${name}'\\)`), `${path} reads ${name}`)
+    }
   }
-}
-
-test('the login of the start flow keeps no redirect context of the URL-based flow', () => {
-  const origins = parseAllowedReturnOrigins('http://localhost:9001')
-  const urlFlow = new URLSearchParams({
-    flow: 'start',
-    service: 'hypotheek',
-    purpose: 'Aanvraag',
-    scope: 'bd:ib:2025',
-    client_oin: '99999999900000000300',
-    client_name: 'Demo',
-    return_url: 'http://localhost:9001/return',
-  })
-
-  // The URL-based flow would keep these parameters...
-  const plain = memoryStorage()
-  assert.equal(loadRedirectContext(urlFlow, plain, origins)?.return_url, 'http://localhost:9001/return')
-  assert.ok(plain.items.has(REDIRECT_CONTEXT_KEY))
-
-  // ...the start flow neither reads nor keeps them, and drops an earlier one.
-  const storage = memoryStorage({ [REDIRECT_CONTEXT_KEY]: plain.items.get(REDIRECT_CONTEXT_KEY) })
-  assert.equal(loadRedirectContext(urlFlow, storage, origins, true), null)
-  assert.equal(storage.items.size, 0)
 })
 
 test('no other site may frame the portal, in development and in the built image', async () => {

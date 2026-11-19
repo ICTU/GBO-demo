@@ -26,12 +26,14 @@ export function outcomeOf(response: QueryResponse, vboId: string): Outcome {
   return graph.vbo?.vboId === vboId ? 'owner' : 'unconfirmed'
 }
 
-export async function checkOwnership(consentToken: string, vboId: string): Promise<OwnershipResult> {
+// checkOwnership asks under the consent in the backend's session: the
+// browser sends no token.
+export async function checkOwnership(vboId: string): Promise<OwnershipResult> {
   try {
     const res = await fetch('/api/dvtp/query', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ consent_token: consentToken, vbo_id: vboId }),
+      body: JSON.stringify({ vbo_id: vboId }),
     })
     const body = (await res.json()) as QueryResponse
     return { outcome: res.ok ? outcomeOf(body, vboId) : 'unconfirmed', traceId: body.trace_id }

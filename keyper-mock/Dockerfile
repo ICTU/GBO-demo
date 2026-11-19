@@ -12,6 +12,5 @@ COPY runtime-config.js.template /etc/nginx/templates/runtime-config.js.template
 ENV NGINX_ENVSUBST_OUTPUT_DIR=/usr/share/nginx/html
 # envsubst only fills variables that are set; declare them empty so an unset
 # one falls back to the app's default instead of staying a literal ${VAR}.
-ENV CONSENT_PORTAL_URL="" \
-    CONSUMER_PEER_ID=""
+ENV CONSENT_PORTAL_URL=""
 EXPOSE 80
