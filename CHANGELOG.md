@@ -1073,6 +1073,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   `SubjectTypePI`.
 
 ### Fixed
+- **README and TROUBLESHOOTING cover the EUDI setup beyond localhost**: the
+  requirements name Go 1.26 for the host-side provisioning; the CA section
+  says the four CA files are managed material; a port table lists every
+  public URL of the EUDI, own-issuer and ASI routes (and that 9431 stays
+  private); the reverse-proxy section notes that containers call
+  `EUDI_BRI_URL` and `EUDI_TRUST_PUBLIC_URL` themselves; a new section gives
+  the order of the own credential issuer's provisioning steps; and
+  TROUBLESHOOTING explains the `make publish-trust-lists` root error. The
+  placeholder `EUDI_PUBLIC_URL` in `make source-metadata-up` now uses the
+  issuance server's port 18001 instead of 8001, with a comment that the
+  services it starts do not read it.
 - **The dienstverlener-mock, keyper-mock and toestemmingsportaal-frontend
   images no longer serve a literal `${VAR}` in `runtime-config.js`.** nginx's
   envsubst only fills variables that are set, so a container started without

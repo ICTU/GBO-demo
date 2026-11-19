@@ -20,7 +20,8 @@ in `.env` (more names in `GBO_EXTRA_ALLOWED_HOSTS`, comma-separated) and run
 
 ## Docker resource limits
 
-`make demo-eudi` and `make demo-full` start ~25 containers. Minimum:
+`make demo-eudi` and `make demo-full` start many containers, most of them
+FSC infrastructure. Minimum:
 
 - **RAM**: 8 GB allocated to Docker (Preferences → Resources → Memory)
 - **CPU**: no strict requirement, but slow below 4 cores
@@ -186,6 +187,13 @@ onboard the wallet or issue a PID. Use a v0.5.0-compatible test wallet with a
 trusted `urn:eudi:pid:nl:1` credential. Mock BSN `999991772` is the persona that
 has data for all three offers. Also verify that the wallet trusts the issuer
 and reader CA certificates installed under `.local/secrets/development-ca`.
+
+**`make publish-trust-lists` fails with `requires its own GBO root`**: the
+issuer or reader CA files are not the GBO CAs (CN `ca.gbo-issuer` and
+`ca.gbo-reader`). Put the four CA files under `.local/secrets/development-ca/`
+(or `ONBOARDING_SECRETS_DIR`), then run the provisioning again. Published
+wallet builds trust only the managed CAs; a CA of your own works only with a
+wallet you build yourself.
 
 **`source metadata unavailable`**: reconciliation did not produce a usable
 activation. Rerun the complete idempotent sequence and inspect the reconciler
