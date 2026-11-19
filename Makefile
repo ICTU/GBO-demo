@@ -1,4 +1,4 @@
-.PHONY: up down logs clean certs require-ftv-postgres demo-manager manager-seed fsc-local-env fsc-ca fsc-up fsc-all-up fsc-brp-certs fsc-consent-register-certs fsc-gbo-pdp-certs fsc-ir-certs fsc-int-certs fsc-asip-certs fsc-databases fsc-down fsc-test fsc-clean \
+.PHONY: up down logs clean certs require-ftv-postgres demo-manager manager-seed fsc-local-env fsc-ca fsc-up fsc-all-up fsc-brp-certs fsc-consent-register-certs fsc-gbo-pdp-certs fsc-ir-certs fsc-int-certs fsc-asip-certs fsc-down fsc-test fsc-clean \
         fsc-seed-bri fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-lvg fsc-seed-int fsc-seed-asip fsc-seed-brp fsc-seed-rvig-source fsc-seed-metadata fsc-pdp-cert pdp-up \
         eudi-images asi-wallet-verifier-image source-metadata-up \
         require-development-cas create-development-registrar-root provision-wallet-registration provision-test-pid provision-qtsp-wallet-registration credential-issuer-up provision-development-certificates provision-qtsp-issuance-certificates provision-asip-seal-certificate provision-asip-qtsp-certificate provision-asi-wallet-verifier provision-asi-eudi-wallet-verifier reconcile-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
@@ -179,23 +179,18 @@ demo-minimal: policy-check certs require-ftv-postgres
 # PDP as a bundle, instead of the PDP loading ./policies from disk. Opt-in,
 # because it trades the edit-and-save hot-reload loop for a deliberate
 # deploy step — which is the point, but not what you want while writing Rego.
+# The PDP pulls its bundle once, at boot, so the Manager is seeded first.
+MANAGER_COMPOSE = GBO_BUNDLE_MANAGER=http://openftv-manager:9443/v1/bundle/gbo-pdp docker compose --profile manager
+
 demo-manager: policy-check certs require-ftv-postgres
 	@test -n "$(KEYCLOAK_ADMIN_PASSWORD)" || (echo "KEYCLOAK_ADMIN_PASSWORD is required" >&2; exit 1)
 	@test -n "$(FTV_MANAGER_AUDITOR_PASSWORD)" || (echo "FTV_MANAGER_AUDITOR_PASSWORD is required" >&2; exit 1)
 	@test -n "$(FTV_MANAGER_DEPLOY_PASSWORD)" || (echo "FTV_MANAGER_DEPLOY_PASSWORD is required" >&2; exit 1)
-	@echo "-> Base stack + OpenFTV Manager (PAP/PIP, bundle distribution)"
-	GBO_BUNDLE_MANAGER=http://openftv-manager:9443/v1/bundle/gbo-pdp \
-	  docker compose --profile manager up --build -d
-	@echo "-> Waiting for the Manager to accept policies..."
-	@for i in $$(seq 1 30); do \
-	  curl -fsS -m 2 http://localhost:$${GBO_PORT_FTV_MANAGER_HEALTH:-9282}/healthz >/dev/null 2>&1 && exit 0; \
-	  sleep 2; \
-	done; \
-	echo "The Manager did not become healthy within 60s; not seeding. Check: docker compose logs openftv-manager" >&2; \
-	exit 1
+	@echo "-> OpenFTV Manager (PAP/PIP, bundle distribution), seeded before the PDP starts"
+	$(MANAGER_COMPOSE) up --build -d --wait openftv-manager
 	./scripts/seed-openftv-manager.py --url http://localhost:$${GBO_PORT_FTV_MANAGER:-9280}
-	@echo "-> Restarting the PDP so it pulls the freshly seeded bundle"
-	docker compose --profile manager restart openftv-pdp
+	@echo "-> Base stack; the PDP pulls the seeded bundle at boot"
+	$(MANAGER_COMPOSE) up --build -d
 	@echo ""
 	@echo "  Manager API:   http://localhost:$${GBO_PORT_FTV_MANAGER:-9280}/v1/policies"
 	@echo "  Bundle (PDP):  http://localhost:$${GBO_PORT_FTV_MANAGER_INTERNAL:-9281}/v1/bundle/gbo-pdp"
@@ -513,7 +508,6 @@ demo-full: policy-check require-ftv-postgres onboard-demo-sources provision-qtsp
 # and starts integrator-backend. The admission register already lists the
 # integrator; see docs/integrator.md.
 demo-integrator: fsc-int-certs
-	$(MAKE) fsc-databases
 	$(FSC_COMPOSE) --profile integrator up -d int-controller int-manager int-outway int-txlog-api
 	$(MAKE) fsc-seed-int
 	docker compose --profile integrator up --build -d integrator-backend
@@ -529,7 +523,6 @@ demo-integrator: fsc-int-certs
 # overlay, the Cloudflare tunnel. The admission register lists the ASIP as a
 # system participant.
 demo-asi: fsc-asip-certs
-	$(MAKE) fsc-databases
 	$(FSC_COMPOSE) --profile asi up -d asip-controller asip-manager asip-outway asip-txlog-api
 	$(MAKE) fsc-seed-asip
 	@test -f "$(ASIP_SEAL_DIR)/seal-cert.pem" || $(MAKE) provision-asip-seal-certificate
@@ -671,52 +664,15 @@ fsc-pdp-cert:
 # first contract is submitted — otherwise every fsc-seed-* leaves its
 # connection contract pending and the seed times out after 30s with no
 # useful error. The PDP lives in the main compose project, which normally
-# starts *after* fsc-infra; this pulls it forward. --wait only covers the
-# process healthcheck, so the explicit AuthZen probe also waits for the native
-# PIP pull to make the seeded Hypotheek-BV admission effective.
+# starts *after* fsc-infra; this pulls it forward. The PDP loads its policies
+# before it serves and reads the onboarding register live, so once --wait
+# sees it healthy it decides on contracts.
 pdp-up: policy-check certs require-ftv-postgres fsc-pdp-cert
 	docker compose up --build -d --wait --force-recreate openftv-pdp
-	./scripts/wait-openftv-admission.sh
 
 fsc-all-up: fsc-directory-certs fsc-edi-certs fsc-bd-certs fsc-brp-certs fsc-hv-certs fsc-consent-register-certs fsc-gbo-pdp-certs fsc-ir-certs fsc-pdp-cert
-	$(MAKE) fsc-databases
 	$(MAKE) pdp-up
 	$(FSC_COMPOSE) up --build -d
-
-# Also creates databases added after an existing local Postgres volume was
-# initialised; the docker-entrypoint init script only runs for a new volume.
-fsc-databases: fsc-local-env
-	$(FSC_COMPOSE) up -d --wait postgres
-	@container_id="$$($(FSC_COMPOSE) ps -q postgres)"; \
-	ready=false; \
-	for attempt in $$(seq 1 60); do \
-		if docker logs "$$container_id" 2>&1 | grep -Eq \
-			'PostgreSQL init process complete; ready for start up.|Skipping initialization'; then \
-			if $(FSC_COMPOSE) exec -T postgres \
-				psql -U postgres -d postgres -tAc 'SELECT 1' >/dev/null 2>&1; then \
-				ready=true; \
-				break; \
-			fi; \
-		fi; \
-		sleep 1; \
-	done; \
-	if [ "$$ready" != "true" ]; then \
-		echo "ERROR: FSC Postgres did not finish initialization" >&2; \
-		exit 1; \
-	fi
-	@for database in fsc_brp_controller fsc_brp_manager fsc_brp_txlog \
-		fsc_cr_controller fsc_cr_manager fsc_cr_txlog \
-		fsc_pdp_controller fsc_pdp_manager fsc_pdp_txlog \
-		fsc_ir_controller fsc_ir_manager fsc_ir_txlog \
-		fsc_int_controller fsc_int_manager fsc_int_txlog \
-		fsc_asip_controller fsc_asip_manager fsc_asip_txlog; do \
-		exists=$$($(FSC_COMPOSE) exec -T postgres \
-			psql -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$$database'"); \
-		if [ "$$exists" != "1" ]; then \
-			echo "-> Creating missing FSC database $$database"; \
-			$(FSC_COMPOSE) exec -T postgres createdb -U postgres "$$database"; \
-		fi; \
-	done
 
 fsc-down:
 	$(FSC_COMPOSE) --profile integrator --profile asi down

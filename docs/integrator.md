@@ -38,7 +38,7 @@ sequenceDiagram
     M-->>O: sub=…1100, act.sub=…0300
     O->>N: request + token
     N->>P: AuthZEN: subject.id=…1100, outway_delegator_peer_id=…0300
-    R-->>P: acts_for van …1100 (PIP-pull, elke 5 s)
+    R-->>P: acts_for van …1100 (live gelezen, per beslissing)
     P->>P: consent.dienstverlener_oin == …0300?<br/>…1100 actief en gemandateerd voor …0300 in DVT0001?
     P-->>N: ALLOW / DENY
 ```

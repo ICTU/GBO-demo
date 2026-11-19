@@ -118,24 +118,19 @@ replication.
 
 ## Examples
 
-Every file in `examples/` is a values file for one release, except the two
-`*-configmap.yaml` files, which are plain manifests mounted by their
-respective releases. When the chart changes, CI renders the PDP and other
+Every file in `examples/` is a values file for one release, except
+`dvtp-onboarding-configmap.yaml`, a plain manifest mounted by the register's
+release. When the chart changes, CI renders the PDP and other
 selected values examples, so a templating error in those examples fails the
 build.
 
 ### OpenFTV PDP dependencies
 
-Before installing the PDP with
-[`openftv-pdp-values.yaml`](examples/openftv-pdp-values.yaml), apply
-[`openftv-pdp-pip-pull-configmap.yaml`](examples/openftv-pdp-pip-pull-configmap.yaml)
-in the same namespace. Set its `uri` to the DvTP admission register's internal
-address. The PDP reads that file from `/pip-pull/dvtp-onboarding.yaml` and
-refreshes admission entities from the register. This separate ConfigMap is a
-demo shortcut: the chart has no application-specific config generator, and a
-real deployment must manage and roll out changes to this configuration.
+In [`openftv-pdp-values.yaml`](examples/openftv-pdp-values.yaml), set
+`GBO_REGISTER_URL` to the DvTP admission register's internal address. The
+policy reads the register there on every decision that needs it.
 
-Create a Kubernetes TLS Secret named `openftv-pdp-tls` in that namespace with
+Create a Kubernetes TLS Secret named `openftv-pdp-tls` in the PDP namespace with
 keys `tls.crt` and `tls.key`. Its certificate must cover the PDP service DNS
 name and be trusted by the Inway that calls the PDP over HTTPS. The example
 mounts it at `/certs`; never put the private key in values or a ConfigMap.

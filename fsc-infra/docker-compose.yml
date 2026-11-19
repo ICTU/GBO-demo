@@ -90,36 +90,56 @@ services:
       start_period: 10s
       timeout: 10s
     volumes:
-      - ./postgres/init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh
       - postgres-data:/var/lib/postgresql/data
 
+  # Holds the only list of FSC databases (postgres/init-databases.sh). Runs on
+  # every `up` and is idempotent, so an existing volume gets new databases too.
+  postgres-init:
+    image: postgres:17.10-alpine
+    environment:
+      PGHOST: postgres
+      PGUSER: postgres
+      PGPASSWORD: ${FSC_POSTGRES_PASSWORD}
+      PGDATABASE: postgres
+    command: ["sh", "/init/init-databases.sh"]
+    volumes:
+      - ./postgres/init-databases.sh:/init/init-databases.sh:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  # Each migration runs once and its peer waits for it, so a failed connect
+  # stops the start. connect_timeout covers the name lookup as well, and at a
+  # cold start Docker's DNS can take seconds to answer while dozens of
+  # containers start together; hence 10 s here, where the services use 2 s.
   directory-migrations-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
-    restart: on-failure
+    restart: "no"
     command:
       - /usr/local/bin/controller
       - migrate
       - up
     environment:
       <<: *directory-peer-env
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_dir_controller?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_dir_controller?sslmode=disable&connect_timeout=10"
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   directory-migrations-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
-    restart: on-failure
+    restart: "no"
     command:
       - /usr/local/bin/manager
       - migrate
       - up
     environment:
       <<: *directory-peer-env
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_dir_manager?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_dir_manager?sslmode=disable&connect_timeout=10"
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   directory-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
@@ -143,7 +163,7 @@ services:
       directory-manager:
         condition: service_started
       directory-migrations-controller:
-        condition: service_started
+        condition: service_completed_successfully
 
   directory-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
@@ -179,7 +199,7 @@ services:
       postgres:
         condition: service_healthy
       directory-migrations-manager:
-        condition: service_started
+        condition: service_completed_successfully
       directory-txlog-api:
         condition: service_started
 
@@ -205,17 +225,17 @@ services:
 
   directory-migrations-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
-    restart: on-failure
+    restart: "no"
     command:
       - /usr/local/bin/txlog-api
       - migrate
       - up
     environment:
       <<: *directory-peer-env
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_dir_txlog?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_dir_txlog?sslmode=disable&connect_timeout=10"
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   directory-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
@@ -231,7 +251,7 @@ services:
       postgres:
         condition: service_healthy
       directory-migrations-txlog-api:
-        condition: service_started
+        condition: service_completed_successfully
 
   directory-ui:
     image: federatedserviceconnectivity/directory-ui:v2.4.0
@@ -255,7 +275,7 @@ services:
 
   edi-migrations-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
-    restart: on-failure
+    restart: "no"
     command:
       - /usr/local/bin/controller
       - migrate
@@ -266,16 +286,16 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_edi_controller?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_edi_controller?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/edi-issuer/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   edi-migrations-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
-    restart: on-failure
+    restart: "no"
     command:
       - /usr/local/bin/manager
       - migrate
@@ -286,16 +306,16 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_edi_manager?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_edi_manager?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/edi-issuer/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   edi-migrations-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
-    restart: on-failure
+    restart: "no"
     command:
       - /usr/local/bin/txlog-api
       - migrate
@@ -306,12 +326,12 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_edi_txlog?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_edi_txlog?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/edi-issuer/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   edi-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
@@ -339,7 +359,7 @@ services:
       edi-manager:
         condition: service_started
       edi-migrations-controller:
-        condition: service_started
+        condition: service_completed_successfully
 
   edi-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
@@ -374,7 +394,7 @@ services:
       postgres:
         condition: service_healthy
       edi-migrations-manager:
-        condition: service_started
+        condition: service_completed_successfully
       edi-txlog-api:
         condition: service_started
 
@@ -423,13 +443,13 @@ services:
       postgres:
         condition: service_healthy
       edi-migrations-txlog-api:
-        condition: service_started
+        condition: service_completed_successfully
 
   # === Hypotheekverlener-mock (DvTP consumer) ============================
 
   hv-migrations-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/controller, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -437,16 +457,16 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_hv_controller?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_hv_controller?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/hypotheekverlener-mock/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   hv-migrations-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/manager, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -454,16 +474,16 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_hv_manager?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_hv_manager?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/hypotheekverlener-mock/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   hv-migrations-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/txlog-api, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -471,12 +491,12 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_hv_txlog?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_hv_txlog?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/hypotheekverlener-mock/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   hv-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
@@ -504,7 +524,7 @@ services:
       hv-manager:
         condition: service_started
       hv-migrations-controller:
-        condition: service_started
+        condition: service_completed_successfully
 
   hv-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
@@ -539,7 +559,7 @@ services:
       postgres:
         condition: service_healthy
       hv-migrations-manager:
-        condition: service_started
+        condition: service_completed_successfully
       hv-txlog-api:
         condition: service_started
 
@@ -585,13 +605,13 @@ services:
       postgres:
         condition: service_healthy
       hv-migrations-txlog-api:
-        condition: service_started
+        condition: service_completed_successfully
 
   # === Belastingdienst-mock (provider) ===================================
 
   bd-migrations-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
-    restart: on-failure
+    restart: "no"
     command:
       - /usr/local/bin/controller
       - migrate
@@ -602,16 +622,16 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_bd_controller?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_bd_controller?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/belastingdienst-mock/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   bd-migrations-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
-    restart: on-failure
+    restart: "no"
     command:
       - /usr/local/bin/manager
       - migrate
@@ -622,16 +642,16 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_bd_manager?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_bd_manager?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/belastingdienst-mock/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   bd-migrations-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
-    restart: on-failure
+    restart: "no"
     command:
       - /usr/local/bin/txlog-api
       - migrate
@@ -642,12 +662,12 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_bd_txlog?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_bd_txlog?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/belastingdienst-mock/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   bd-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
@@ -675,7 +695,7 @@ services:
       bd-manager:
         condition: service_started
       bd-migrations-controller:
-        condition: service_started
+        condition: service_completed_successfully
 
   bd-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
@@ -736,7 +756,7 @@ services:
       postgres:
         condition: service_healthy
       bd-migrations-manager:
-        condition: service_started
+        condition: service_completed_successfully
       bd-txlog-api:
         condition: service_started
 
@@ -798,13 +818,13 @@ services:
       postgres:
         condition: service_healthy
       bd-migrations-txlog-api:
-        condition: service_started
+        condition: service_completed_successfully
 
   # === BRP/RvIG-mock (provider) =========================================
 
   brp-migrations-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/controller, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -812,16 +832,16 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_brp_controller?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_brp_controller?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/brp-mock/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   brp-migrations-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/manager, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -829,16 +849,16 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_brp_manager?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_brp_manager?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/brp-mock/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   brp-migrations-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/txlog-api, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -846,12 +866,12 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_brp_txlog?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_brp_txlog?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/brp-mock/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   brp-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
@@ -879,7 +899,7 @@ services:
       brp-manager:
         condition: service_started
       brp-migrations-controller:
-        condition: service_started
+        condition: service_completed_successfully
 
   brp-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
@@ -927,7 +947,7 @@ services:
       postgres:
         condition: service_healthy
       brp-migrations-manager:
-        condition: service_started
+        condition: service_completed_successfully
       brp-txlog-api:
         condition: service_started
 
@@ -982,7 +1002,7 @@ services:
       postgres:
         condition: service_healthy
       brp-migrations-txlog-api:
-        condition: service_started
+        condition: service_completed_successfully
 
   # === Consent register (GBO, provider of consent-status) ================
   # The register's own peer. Its Inway publishes only the status lookup,
@@ -990,7 +1010,7 @@ services:
 
   cr-migrations-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/controller, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -998,16 +1018,16 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_cr_controller?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_cr_controller?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/consent-register/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   cr-migrations-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/manager, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -1015,16 +1035,16 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_cr_manager?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_cr_manager?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/consent-register/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   cr-migrations-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/txlog-api, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -1032,12 +1052,12 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_cr_txlog?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_cr_txlog?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/consent-register/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   cr-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
@@ -1065,7 +1085,7 @@ services:
       cr-manager:
         condition: service_started
       cr-migrations-controller:
-        condition: service_started
+        condition: service_completed_successfully
 
   cr-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
@@ -1112,7 +1132,7 @@ services:
       postgres:
         condition: service_healthy
       cr-migrations-manager:
-        condition: service_started
+        condition: service_completed_successfully
       cr-txlog-api:
         condition: service_started
 
@@ -1161,7 +1181,7 @@ services:
       postgres:
         condition: service_healthy
       cr-migrations-txlog-api:
-        condition: service_started
+        condition: service_completed_successfully
 
   # === Shared PDP (consumer of consent-status) ===========================
   # The demo runs one PDP for every source (#137), so it gets a peer of its
@@ -1170,7 +1190,7 @@ services:
 
   pdp-migrations-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/controller, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -1178,16 +1198,16 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_pdp_controller?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_pdp_controller?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/gbo-pdp/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   pdp-migrations-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/manager, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -1195,16 +1215,16 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_pdp_manager?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_pdp_manager?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/gbo-pdp/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   pdp-migrations-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/txlog-api, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -1212,12 +1232,12 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_pdp_txlog?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_pdp_txlog?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/gbo-pdp/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   pdp-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
@@ -1245,7 +1265,7 @@ services:
       pdp-manager:
         condition: service_started
       pdp-migrations-controller:
-        condition: service_started
+        condition: service_completed_successfully
 
   pdp-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
@@ -1280,7 +1300,7 @@ services:
       postgres:
         condition: service_healthy
       pdp-migrations-manager:
-        condition: service_started
+        condition: service_completed_successfully
       pdp-txlog-api:
         condition: service_started
 
@@ -1326,7 +1346,7 @@ services:
       postgres:
         condition: service_healthy
       pdp-migrations-txlog-api:
-        condition: service_started
+        condition: service_completed_successfully
 
 
   # Installatie Register (Peer ID ...1000): the DvTP consumer that asks LVG
@@ -1334,7 +1354,7 @@ services:
   # binding tells it apart from Hypotheek-BV.
   ir-migrations-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/controller, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -1342,16 +1362,16 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_ir_controller?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_ir_controller?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/installatieregister/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   ir-migrations-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/manager, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -1359,16 +1379,16 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_ir_manager?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_ir_manager?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/installatieregister/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   ir-migrations-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/txlog-api, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -1376,12 +1396,12 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_ir_txlog?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_ir_txlog?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/installatieregister/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   ir-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
@@ -1409,7 +1429,7 @@ services:
       ir-manager:
         condition: service_started
       ir-migrations-controller:
-        condition: service_started
+        condition: service_completed_successfully
 
   ir-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
@@ -1444,7 +1464,7 @@ services:
       postgres:
         condition: service_healthy
       ir-migrations-manager:
-        condition: service_started
+        condition: service_completed_successfully
       ir-txlog-api:
         condition: service_started
 
@@ -1490,7 +1510,7 @@ services:
       postgres:
         condition: service_healthy
       ir-migrations-txlog-api:
-        condition: service_started
+        condition: service_completed_successfully
 
   # Integrator (Peer ID ...1100): a processor that connects to BD on behalf of
   # Hypotheek-BV, over a DelegatedServiceConnection grant naming Hypotheek-BV
@@ -1499,7 +1519,7 @@ services:
   int-migrations-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
     profiles: [integrator]
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/controller, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -1507,17 +1527,17 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_int_controller?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_int_controller?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/integrator/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   int-migrations-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
     profiles: [integrator]
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/manager, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -1525,17 +1545,17 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_int_manager?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_int_manager?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/integrator/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   int-migrations-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
     profiles: [integrator]
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/txlog-api, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -1543,12 +1563,12 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_int_txlog?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_int_txlog?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/integrator/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   int-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
@@ -1577,7 +1597,7 @@ services:
       int-manager:
         condition: service_started
       int-migrations-controller:
-        condition: service_started
+        condition: service_completed_successfully
 
   int-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
@@ -1613,7 +1633,7 @@ services:
       postgres:
         condition: service_healthy
       int-migrations-manager:
-        condition: service_started
+        condition: service_completed_successfully
       int-txlog-api:
         condition: service_started
 
@@ -1661,7 +1681,7 @@ services:
       postgres:
         condition: service_healthy
       int-migrations-txlog-api:
-        condition: service_started
+        condition: service_completed_successfully
 
   # ASIP (Peer ID ...1200): the Authentic Source Interface Provider of the
   # ETSI TS 119 478 route (services/asi-provider). It queries the BRP source
@@ -1672,7 +1692,7 @@ services:
   asip-migrations-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
     profiles: [asi]
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/controller, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -1680,17 +1700,17 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_asip_controller?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_asip_controller?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/asip/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   asip-migrations-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
     profiles: [asi]
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/manager, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -1698,17 +1718,17 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_asip_manager?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_asip_manager?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/asip/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   asip-migrations-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
     profiles: [asi]
-    restart: on-failure
+    restart: "no"
     command: [/usr/local/bin/txlog-api, migrate, up]
     environment:
       TLS_GROUP_ROOT_CERT: /certs/org/root.pem
@@ -1716,12 +1736,12 @@ services:
       TLS_CERT: /certs/internal/internal-cert.pem
       TLS_KEY: /certs/internal/internal-cert-key.pem
       GROUP_ID: fsc-demo
-      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_asip_txlog?sslmode=disable&connect_timeout=2"
+      POSTGRES_DSN: "postgresql://postgres:${FSC_POSTGRES_PASSWORD}@postgres:5432/fsc_asip_txlog?sslmode=disable&connect_timeout=10"
     volumes:
       - ./orgs/asip/pki:/certs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   asip-controller:
     image: federatedserviceconnectivity/controller:v2.4.0
@@ -1750,7 +1770,7 @@ services:
       asip-manager:
         condition: service_started
       asip-migrations-controller:
-        condition: service_started
+        condition: service_completed_successfully
 
   asip-manager:
     image: federatedserviceconnectivity/manager:v2.4.0
@@ -1786,7 +1806,7 @@ services:
       postgres:
         condition: service_healthy
       asip-migrations-manager:
-        condition: service_started
+        condition: service_completed_successfully
       asip-txlog-api:
         condition: service_started
 
@@ -1834,7 +1854,7 @@ services:
       postgres:
         condition: service_healthy
       asip-migrations-txlog-api:
-        condition: service_started
+        condition: service_completed_successfully
 
 volumes:
   postgres-data:

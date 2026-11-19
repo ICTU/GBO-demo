@@ -10,6 +10,7 @@ import data.gbo.lib
 # ═══════════════════════════════════════════════════════════════════════════
 
 import data.gbo.consent
+import data.gbo.register
 
 # ── Entrypoint: allowed only when every data field is allowed ──────────────
 
@@ -247,19 +248,19 @@ _data_fields := [df |
 # Every delegated call needs a mandate for the represented provider and the
 # rule that grants, whatever the rule says: it is about who may act for
 # whom, like the FSC delegation itself, so no rule can leave it out. The
-# admission register is data.entities, pulled by OpenFTV; a direct call has
-# no integrator to check.
+# admission register is read live (register.rego); a direct call has no
+# integrator to check, so it never asks the register.
 
 _mandate_reasons(rid) := {"INTEGRATOR_REGISTER_UNAVAILABLE"} if {
 	lib.delegated
-	not data.entities.dvtp_participant
+	register.participants == null
 } else := {"INTEGRATOR_NOT_REGISTERED"} if {
 	lib.delegated
 	not _mandated(rid)
 } else := set()
 
 _mandated(rid) if {
-	integrator := data.entities.dvtp_participant[lib.acting_party]
+	integrator := register.participants[lib.acting_party]
 	integrator.active == true
 	some mandate in object.get(integrator, "acts_for", [])
 	mandate.peer_id == lib.represented_party

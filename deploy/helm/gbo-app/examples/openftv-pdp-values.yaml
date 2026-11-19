@@ -23,10 +23,10 @@ env:
   # the request's field list. Without it the policy denies every request.
   - name: PDP_REQUEST_MAPPINGS
     value: ftvgraphql
-  # Native PIP pull of the DvTP admission register. Apply the companion
-  # openftv-pdp-pip-pull-configmap.yaml in the same namespace first.
-  - name: PDP_PIP_PULL_CONFIGS
-    value: /pip-pull/dvtp-onboarding.yaml
+  # The DvTP admission register, read by the policy on every decision that
+  # needs it. Replace it with the register's internal address here.
+  - name: GBO_REGISTER_URL
+    value: http://dvtp-onboarding-register:4015/internal/openftv/participants
   # The policy fetches verification keys directly from the consent register
   # and checks live status through the PDP Outway. Replace these service URLs
   # with the addresses in this deployment. The issuer and audience must match
@@ -69,21 +69,14 @@ healthPath: /healthz
 health:
   port: 8080
 
-# The PIP configuration is deployment-specific; its register URL lives in
-# the companion ConfigMap. TLS material is supplied by a Secret, never by
-# the example values file or the container image.
+# TLS material is supplied by a Secret, never by the example values file or
+# the container image.
 volumeMounts:
-  - name: pip-pull
-    mountPath: /pip-pull
-    readOnly: true
   - name: pdp-tls
     mountPath: /certs
     readOnly: true
 
 volumes:
-  - name: pip-pull
-    configMap:
-      name: openftv-pdp-pip-pull
   - name: pdp-tls
     secret:
       secretName: openftv-pdp-tls

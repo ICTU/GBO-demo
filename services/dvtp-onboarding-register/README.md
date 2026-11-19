@@ -26,36 +26,33 @@ connection only for a registered pair, and the request policy checks the
 mandate on every delegated call; see [docs/integrator.md](../../docs/integrator.md).
 An integration admits no one by itself: the integrator and the service provider
 each still need an active participant entry. Every entry carries `acts_for`,
-empty when it acts for nobody, so a withdrawn integration replaces the pulled
-entity instead of leaving the old mandate behind.
+empty when it acts for nobody.
 
 Kubernetes examples are provided in
 [`deploy/helm/gbo-app/examples/dvtp-onboarding-configmap.yaml`](../../deploy/helm/gbo-app/examples/dvtp-onboarding-configmap.yaml)
 and
 [`deploy/helm/gbo-app/examples/dvtp-onboarding-register-values.yaml`](../../deploy/helm/gbo-app/examples/dvtp-onboarding-register-values.yaml).
 The ConfigMap is deployment-owned because Peer IDs identify the actual FSC
-organizations in that environment; it must be deployed with the register and
-the matching OpenFTV PIP mapping.
+organizations in that environment; it must be deployed with the register.
 
 The server-rendered UI is available at `http://localhost:9415`. Compose binds
 that port to host loopback only. Mutating forms require a per-process CSRF
-token and a same-origin browser request. OpenFTV reads
-`/internal/openftv/participants` over a dedicated Docker network using its
-native PIP pull configuration; the endpoint is not published as a public
-internet endpoint by this deployment. The register and PDP share a dedicated
+token and a same-origin browser request. The PDP's policy reads
+`/internal/openftv/participants` over a dedicated Docker network on every
+decision that needs the register (`policies/gbo/register.rego`); the endpoint
+is not published as a public internet endpoint by this deployment. The register and PDP share a dedicated
 network that no other backend service joins.
 
 This is intentionally a mock, without user accounts or an onboarding
 workflow: anyone with local access to the UI is an administrator. A production
 deployment should put the administration UI behind its
 normal operator authentication and keep the pull endpoint on a private network
-or protect it with mTLS. OpenFTV pull configurations support `tlsCA`, `tlsCert`
-and `tlsKey`, so that does not require changing the policy or response shape.
+or protect it with mTLS, which the policy's `http.send` call supports without
+a change to the response shape.
 
-Participants are deactivated rather than deleted. OpenFTV's pull currently
-adds or replaces returned entities but does not remove an entity merely because
-it disappeared from a later response; retaining an explicit inactive record
-therefore keeps revocation fail-closed.
+Participants are deactivated rather than deleted, so the register keeps a
+record of each revocation. The policy reads the register on every decision, so
+a deactivation counts from the next one.
 
 ## Structure
 

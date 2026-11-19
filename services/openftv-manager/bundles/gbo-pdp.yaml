@@ -27,6 +27,7 @@ version: true
 # bites exactly when the PDP has policies — i.e. always, in practice.)
 #
 # The PDP therefore pulls: PDP_BUNDLE_MANAGER points at this bundle and it
-# fetches at boot, which is why `make demo-manager` restarts it after
+# fetches at boot, which is why `make demo-manager` seeds the Manager
+# before the PDP starts and `make manager-seed` restarts the PDP after
 # seeding. Reported upstream (ICTU-37).
 targets: []
