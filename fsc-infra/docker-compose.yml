@@ -1205,6 +1205,33 @@ services:
       - cr-manager
       - cr-txlog-api
 
+  # The consent register's Outway (#686): the register reads the logbook of
+  # each source's LDV component through it, over the FSC services
+  # ldv-lezen-bd, ldv-lezen-brp and ldv-lezen-lvg. No host port.
+  cr-outway:
+    image: federatedserviceconnectivity/outway:v2.4.0
+    restart: unless-stopped
+    volumes:
+      - ./orgs/consent-register/pki:/certs:ro
+    environment:
+      TLS_GROUP_ROOT_CERT: /certs/org/root.pem
+      TLS_ROOT_CERT: /certs/internal/intermediate_ca.pem
+      TLS_CERT: /certs/internal/internal-cert.pem
+      TLS_KEY: /certs/internal/internal-cert-key.pem
+      GROUP_ID: fsc-demo
+      TLS_GROUP_CERT: /certs/org/consent-register.pem
+      TLS_GROUP_KEY: /certs/org/consent-register-key.pem
+      LISTEN_ADDRESS: 0.0.0.0:8080
+      NAME: CrOutway-01
+      CONTROLLER_REGISTRATION_API_ADDRESS: https://cr-controller:9443
+      TX_LOG_API_ADDRESS: https://cr-txlog-api:9443
+      MANAGER_INTERNAL_ADDRESS: https://cr-manager:9443
+      ENABLE_GRANT_HASH_SUGGESTION: "true"
+    depends_on:
+      - cr-controller
+      - cr-manager
+      - cr-txlog-api
+
   cr-txlog-api:
     image: federatedserviceconnectivity/txlog-api:v2.4.0
     restart: unless-stopped

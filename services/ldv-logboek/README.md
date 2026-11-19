@@ -323,6 +323,39 @@ milliseconds; the read extension is camelCase with RFC 3339 and a
 side follows its own specification rather than being unified into something
 neither defines.
 
+### The read API for the consent register, over FSC (#686)
+
+A component started with `LDV_FSC_READ_PORT` serves the read extension a
+second time, on a listener of its own that sits behind the source's Inway as
+an FSC service (`ldv-lezen-bd`, `ldv-lezen-brp`, `ldv-lezen-lvg`, each with a
+grant for the consent register's peer `…0700`). It replaces the shared
+bearer token for that reader:
+
+- **No token.** The Inway is the PEP: it checks the contract and asks the
+  source's PDP about each request, body included. The rule `LDV_READ_FSC` in
+  `policies/authz.rego` allows only the register's peer, only
+  `POST /data-processing-operations`, and only a body with exactly one 32-hex
+  `traceId` and nothing else. A read by data subject, activity or time
+  window is refused, although the read extension allows those: narrowing by
+  authorisation is within the specification. The listener checks the same
+  body shape again.
+- **A reduced answer.** `traceId`, `spanId`, `name`, `status`, `startTime`,
+  `endTime` and `dpl.core.processingActivityId`. No data subject, no
+  resource, no other attributes. `name` is not in #686's list but is required
+  by the response schema, so it stays. `fscread_contract_test.go` checks the
+  answer against the response schema of OpenAPI 1.1.0 (`internal/httpapi/testdata`).
+
+`traceId` is 32 lowercase hex in request and response on both listeners, the
+same value as in `traceparent`: OpenAPI 1.1.0 types it `^[0-9a-f]{32}$`. A
+uuid-shaped `traceId` is refused with `400`. Every answer of the read API
+carries `API-Version: 1.1.0`.
+
+**Deviation.** A request the source's PDP refuses is answered by the Inway,
+not by this service: `401` with `Fsc-Error-Code: UNAUTHORIZED` and the
+Inway's own FSC error body, not `application/problem+json` as the read
+extension's OpenAPI describes. The status is the one the OpenAPI uses for
+this case; the body format is FSC's.
+
 ## Configuration
 
 | variable | default | |
@@ -340,6 +373,7 @@ neither defines.
 | `CONSENT_USAGE_INDEX_URL` | — | the source peer's Outway grant link for the consent usage index |
 | `CONSENT_USAGE_LOGBOOK_ID` | — | what a registration names this logbook by: peer ID plus read service name |
 | `OTEL_EXPORTER_OTLP_*` | — | in proxy mode, server and client spans; the SDK reads these itself |
+| `LDV_FSC_READ_PORT` | — | serve the reduced read API for the consent register behind the Inway (#686) |
 
 ## Producers: durable first, delivered after
 

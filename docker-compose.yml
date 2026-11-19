@@ -1080,10 +1080,13 @@ services:
       - LDV_PROXY_ACTIVITY=https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-levering-onder-toestemming/v1
       - CONSENT_USAGE_INDEX_URL=http://bd-outway:8080/consent-usage-index
       - CONSENT_USAGE_LOGBOOK_ID=99999999900000000200/ldv-lezen-bd
+      # The read API for the consent register (#686): the FSC service
+      # ldv-lezen-bd behind the Inway, no token, a reduced answer.
+      - LDV_FSC_READ_PORT=4018
     volumes:
       - bd-ldv-component-data:/data
-    # source-gateways: the Inway reaches the proxy (4017), and the component
-    # reaches its peer's Outway. source-chain: it reaches the sidecar.
+    # source-gateways: the Inway reaches the proxy (4017) and the read API
+    # (4018), and the component reaches its peer's Outway. source-chain: it reaches the sidecar.
     # sources: the developer portal reads the logbook (4016) and spans go
     # to the collector. Not on backend, where the service providers are.
     networks:
@@ -1121,10 +1124,13 @@ services:
       - LDV_PROXY_ACTIVITY=https://logboek.rvig.nl/verwerkingsactiviteiten/brp-levering-onder-toestemming/v1
       - CONSENT_USAGE_INDEX_URL=http://brp-outway:8080/consent-usage-index
       - CONSENT_USAGE_LOGBOOK_ID=99999999900000000400/ldv-lezen-brp
+      # The read API for the consent register (#686): the FSC service
+      # ldv-lezen-brp behind the Inway, no token, a reduced answer.
+      - LDV_FSC_READ_PORT=4018
     volumes:
       - brp-ldv-component-data:/data
-    # source-gateways: the Inway reaches the proxy (4017), and the component
-    # reaches its peer's Outway. source-chain: it reaches the sidecar.
+    # source-gateways: the Inway reaches the proxy (4017) and the read API
+    # (4018), and the component reaches its peer's Outway. source-chain: it reaches the sidecar.
     # sources: the developer portal reads the logbook (4016) and spans go
     # to the collector. Not on backend, where the service providers are.
     networks:
@@ -1163,10 +1169,13 @@ services:
       - LDV_PROXY_ACTIVITY=https://logboek.lvg.test/verwerkingsactiviteiten/lvg-levering-onder-toestemming/v1
       - CONSENT_USAGE_INDEX_URL=http://bd-outway:8080/consent-usage-index
       - CONSENT_USAGE_LOGBOOK_ID=99999999900000000200/ldv-lezen-lvg
+      # The read API for the consent register (#686): the FSC service
+      # ldv-lezen-lvg behind the Inway, no token, a reduced answer.
+      - LDV_FSC_READ_PORT=4018
     volumes:
       - lvg-ldv-component-data:/data
-    # source-gateways: the Inway reaches the proxy (4017), and the component
-    # reaches its peer's Outway. source-chain: it reaches the sidecar.
+    # source-gateways: the Inway reaches the proxy (4017) and the read API
+    # (4018), and the component reaches its peer's Outway. source-chain: it reaches the sidecar.
     # sources: the developer portal reads the logbook (4016) and spans go
     # to the collector. Not on backend, where the service providers are.
     networks:
@@ -1773,7 +1782,7 @@ services:
       # dpl.read.nextLogbookId holds, so the view can follow a pointer to an
       # address; "start" marks the logbooks of applications that start a
       # processing, where a reader begins.
-      - LDV_LOGBOOKS=https://logboek.hypotheek-bv.test/data-processing-operations=Hypotheek-BV=http://logboek-afnemer:4016=start,https://logboek.gbo.overheid.nl/eudi-adapter/data-processing-operations=GBO EUDI-adapter=http://logboek-eudi-adapter:4016=start,https://logboek.belastingdienst.nl/data-processing-operations=Belastingdienst=http://logboek-bd:4016,https://logboek.rvig.nl/data-processing-operations=RvIG=http://logboek-brp:4016,https://logboek.gbo.overheid.nl/toestemming/data-processing-operations=GBO toestemming=http://logboek-toestemming:4016,https://logboek.installatieregister.test/data-processing-operations=Installatie Register=http://logboek-ir:4016=start,https://logboek.lvg.test/data-processing-operations=LVG=http://logboek-lvg:4016,https://logboek.belastingdienst.nl/ldv-lezen-bd/data-processing-operations=BD LDV-component=http://bd-ldv-component:4016,https://logboek.rvig.nl/ldv-lezen-brp/data-processing-operations=BRP LDV-component=http://brp-ldv-component:4016,https://logboek.lvg.test/ldv-lezen-lvg/data-processing-operations=LVG LDV-component=http://lvg-ldv-component:4016
+      - LDV_LOGBOOKS=https://logboek.hypotheek-bv.test/data-processing-operations=Hypotheek-BV=http://logboek-afnemer:4016=start,https://logboek.gbo.overheid.nl/eudi-adapter/data-processing-operations=GBO EUDI-adapter=http://logboek-eudi-adapter:4016=start,https://logboek.belastingdienst.nl/data-processing-operations=Belastingdienst=http://logboek-bd:4016,https://logboek.rvig.nl/data-processing-operations=RvIG=http://logboek-brp:4016,https://logboek.gbo.overheid.nl/toestemming/data-processing-operations=GBO toestemming=http://logboek-toestemming:4016,https://logboek.installatieregister.test/data-processing-operations=Installatie Register=http://logboek-ir:4016=start,https://logboek.lvg.test/data-processing-operations=LVG=http://logboek-lvg:4016,https://logboek.belastingdienst.nl/ldv-lezen-bd/data-processing-operations=BD LDV-component=http://bd-ldv-component:4016=start,https://logboek.rvig.nl/ldv-lezen-brp/data-processing-operations=BRP LDV-component=http://brp-ldv-component:4016=start,https://logboek.lvg.test/ldv-lezen-lvg/data-processing-operations=LVG LDV-component=http://lvg-ldv-component:4016=start
       - LDV_READ_TOKEN=${LDV_READ_TOKEN:-local-demo-logboek-read-token}
       - FSC_TXLOG_EDI_URL=https://edi-txlog-api:9443
       - FSC_TXLOG_EDI_CERT=/certs/edi/internal-cert.pem

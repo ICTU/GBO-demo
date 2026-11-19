@@ -78,6 +78,11 @@ type config struct {
 	// the peer ID plus the name of this component's read service.
 	UsageIndexURL  string
 	UsageLogbookID string
+
+	// FSCReadPort, when set, serves the read extension for the consent
+	// register on a listener of its own, behind the source's Inway: no
+	// bearer token, one traceId, a reduced answer (#686).
+	FSCReadPort string
 }
 
 func loadConfig() config {
@@ -96,6 +101,7 @@ func loadConfig() config {
 		ProxyActivity:  os.Getenv("LDV_PROXY_ACTIVITY"),
 		UsageIndexURL:  os.Getenv("CONSENT_USAGE_INDEX_URL"),
 		UsageLogbookID: os.Getenv("CONSENT_USAGE_LOGBOOK_ID"),
+		FSCReadPort:    os.Getenv("LDV_FSC_READ_PORT"),
 	}
 }
 
@@ -271,6 +277,22 @@ func main() {
 		}()
 	}
 
+	var fscReadServer *http.Server
+	if cfg.FSCReadPort != "" {
+		fscReadServer = &http.Server{
+			Addr:              ":" + cfg.FSCReadPort,
+			Handler:           httpapi.NewFSCReadHandler(logbook, logbookID),
+			ReadHeaderTimeout: readHeaderTimeout,
+		}
+		go func() {
+			slog.Info("FSC read listener", "addr", fscReadServer.Addr)
+			if err := fscReadServer.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+				slog.Error("serving the FSC read listener", "err", err)
+				os.Exit(1)
+			}
+		}()
+	}
+
 	useTLS, err := cfg.tlsEnabled()
 	if err != nil {
 		slog.Error("TLS configuration", "err", err)
@@ -304,6 +326,11 @@ func main() {
 	slog.Info("shutting down")
 	drainCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
+	if fscReadServer != nil {
+		if err := fscReadServer.Shutdown(drainCtx); err != nil {
+			_ = fscReadServer.Close()
+		}
+	}
 	if proxyServer != nil {
 		if err := proxyServer.Shutdown(drainCtx); err != nil {
 			_ = proxyServer.Close()

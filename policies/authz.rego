@@ -28,11 +28,54 @@ _source_metadata_request if {
 	input.resource.id == "/.well-known/gbo"
 }
 
+# LDV_READ_FSC (#686): the consent register reads the logbook of a source's
+# LDV component through the read extension, over FSC. Only the register's
+# peer, only on a read service of a component, only
+# POST /data-processing-operations, and only with a body that holds exactly
+# one 32-hex traceId and nothing else. A read by data subject, activity or
+# time window is refused even though the read extension allows it: the
+# register knows which trace it wants from the consent usage index, and
+# needs nothing else. It sits before the GraphQL checks because the body is
+# not GraphQL.
+_ldv_read_services := {"ldv-lezen-bd", "ldv-lezen-brp", "ldv-lezen-lvg"}
+
+_consent_register_peer := "99999999900000000700"
+
+_ldv_read_service if input.subject.attributes.service_name in _ldv_read_services
+
+_ldv_read_request if {
+	_ldv_read_service
+	input.subject.id == _consent_register_peer
+	input.action.id == "POST"
+	input.resource.id == "/data-processing-operations"
+	body := json.unmarshal(input.action.attributes.body)
+	is_object(body)
+	object.keys(body) == {"traceId"}
+	is_string(body.traceId)
+	regex.match(`^[0-9a-f]{32}$`, body.traceId)
+}
+
 response := {
 	"decision": true,
 	"context": {"granted": [{"rule": "SOURCE_METADATA_FSC"}]},
 } if {
 	_source_metadata_request
+}
+
+else := {
+	"decision": true,
+	"context": {"granted": [{"rule": "LDV_READ_FSC"}]},
+} if {
+	_ldv_read_request
+}
+
+# A read service is never judged as GraphQL: what the rule above does not
+# allow is refused here.
+else := {
+	"decision": false,
+	"context": {"reason_admin": {"code": "LDV_READ_NOT_PERMITTED"}},
+} if {
+	_ldv_read_service
 }
 
 else := gbo.response
@@ -48,4 +91,10 @@ allow if response.decision
 reason := concat(" ", [part | some part in [client.code, object.get(client, "subcode", "")]; part != ""]) if {
 	not response.decision
 	client := response.context.graphql.client
+}
+
+# A refused read of a component logbook carries its own bare code.
+reason := "LDV_READ_NOT_PERMITTED" if {
+	not response.decision
+	_ldv_read_service
 }
