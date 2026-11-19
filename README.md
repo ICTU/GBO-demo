@@ -135,8 +135,11 @@ reader-ca-cert.pem
 Keep the private keys outside version control. To load the same managed CA
 material from another location, set `Gbo:SecretsDir` to the absolute path of
 that secrets root (`aspire run -- --Gbo:SecretsDir=/path`); the AppHost and
-`aspire/scripts/provision.sh` (`ONBOARDING_SECRETS_DIR`) both use it. The
-AppHost stops before it starts anything when a required CA file is absent.
+`aspire/scripts/provision.sh` (`ONBOARDING_SECRETS_DIR`) both use it. When a
+required CA file is absent, the AppHost leaves the EUDI parts out and starts
+everything else; the `eudi-not-configured` step in the dashboard names the
+missing files. The same holds for the `credential-issuer` profile without a
+wallet registration.
 
 Those CA private keys are provisioning input, not application runtime input.
 After the issuer, reader and status leaf certificates have been provisioned,

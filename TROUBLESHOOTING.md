@@ -177,6 +177,10 @@ the contract.
 
 ## EUDI flow doesn't work under the `eudi` or `full` profile
 
+If the dashboard shows `eudi-not-configured` (exit code 1), the EUDI parts
+were left out: its log names the missing development CAs or wallet
+registration. Add them and start the AppHost again.
+
 Start with the activated state and the offers:
 
 ```bash

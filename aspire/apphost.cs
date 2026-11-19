@@ -46,6 +46,42 @@ var profiles = new HashSet<string>(
     StringComparer.OrdinalIgnoreCase);
 if (profiles.Contains("full")) { profiles.Add("dvtp"); profiles.Add("eudi"); }
 if (profiles.Contains("eudi") || profiles.Contains("credential-issuer") || profiles.Contains("asi")) { profiles.Add("onboarding"); }
+
+// Host-only material lives outside the repository's tracked files: the
+// pre-provisioned development CAs and every leaf signed from them stay in
+// .local/secrets and are signed on the host with go run, so the CA keys never
+// enter a container.
+var secretsDir = builder.Configuration["Gbo:SecretsDir"] ?? Repo(".local/secrets");
+var publicCertificatesDir = builder.Configuration["Gbo:PublicCertificatesDir"] ?? Repo(".local/public-certificates");
+var developmentCaDir = Path.Combine(secretsDir, "development-ca");
+var trustPublishDir = builder.Configuration["Gbo:TrustPublishDir"] ?? Repo(".local/public-trust");
+
+// The EUDI parts need material a clone does not have: the development CAs
+// the test wallet trusts (never generated, see README), and for the own
+// credential issuer a wallet registration. Without it the AppHost leaves
+// those parts out and starts everything else, and the eudi-not-configured
+// step in the dashboard says what is missing and how to add it.
+var eudiNotices = new List<string>();
+var missingCas = new[] { "issuer-ca-key.pem", "issuer-ca-cert.pem", "reader-ca-key.pem", "reader-ca-cert.pem" }
+    .Where(file => !File.Exists(Path.Combine(developmentCaDir, file))).ToList();
+if (profiles.Contains("onboarding") && missingCas.Count > 0)
+{
+    var skipped = new[] { "onboarding", "eudi", "asi", "credential-issuer" }.Where(profiles.Contains).ToList();
+    eudiNotices.Add(
+        $"Left out: {string.Join(", ", skipped)}. These need the pre-provisioned development CAs that the test wallet trusts, " +
+        $"and {string.Join(", ", missingCas)} {(missingCas.Count == 1 ? "is" : "are")} missing from {developmentCaDir}. " +
+        "Put them there (or set Gbo:SecretsDir to their directory) and start the AppHost again. They are never generated: " +
+        "a wallet only trusts CAs on its trust list. See \"The complete demo, with EUDI\" in README.md.");
+    profiles.ExceptWith(skipped);
+}
+if (profiles.Contains("credential-issuer") && !File.Exists(Path.Combine(trustPublishDir, "reader-root.crl")))
+{
+    eudiNotices.Add(
+        "Left out: credential-issuer. It needs a wallet registration first: run " +
+        "aspire/scripts/provision.sh development-registrar-root once, then aspire/scripts/provision.sh wallet-registration SOURCE_ID=<id> " +
+        "with the eudi profile running, and start the AppHost again. See README.md.");
+    profiles.Remove("credential-issuer");
+}
 bool On(string profile) => profiles.Contains(profile);
 var fscOn = On("dvtp") || On("eudi") || On("onboarding") || On("integrator") || On("asi");
 
@@ -787,27 +823,14 @@ if (On("dvtp"))
 }
 
 // ── EUDI: source registry, onboarding, issuance (onboarding, eudi) ──────
-// Host-only material lives outside the repository's tracked files, as with
-// the Makefile: the pre-provisioned development CAs and every leaf signed
-// from them stay in .local/secrets and are signed on the host with go run,
-// so the CA keys never enter a container.
-var secretsDir = builder.Configuration["Gbo:SecretsDir"] ?? Repo(".local/secrets");
-var publicCertificatesDir = builder.Configuration["Gbo:PublicCertificatesDir"] ?? Repo(".local/public-certificates");
-var developmentCaDir = Path.Combine(secretsDir, "development-ca");
-var trustPublishDir = builder.Configuration["Gbo:TrustPublishDir"] ?? Repo(".local/public-trust");
 var eudiUlBase = builder.Configuration["Gbo:EudiUlBase"] ?? "https://app.preproductie.wallet.edi.bzk.nl/deeplink/disclosure_based_issuance";
 
-void RequireDevelopmentCas()
+// Says in the dashboard which EUDI parts were left out, and why.
+if (eudiNotices.Count > 0)
 {
-    foreach (var file in new[] { "issuer-ca-key.pem", "issuer-ca-cert.pem", "reader-ca-key.pem", "reader-ca-cert.pem" })
-    {
-        if (!File.Exists(Path.Combine(developmentCaDir, file)))
-        {
-            throw new InvalidOperationException(
-                $"The {string.Join(",", profiles)} profile needs the pre-provisioned EUDI CA file {Path.Combine(developmentCaDir, file)}. " +
-                "Put the CAs the test wallet trusts there, or point Gbo:SecretsDir at their directory (see README).");
-        }
-    }
+    var text = string.Join("\n\n", eudiNotices);
+    builder.AddExecutable("eudi-not-configured", "bash", repoRoot, "-c", "printf '%s\\n' \"$NOTICE\" >&2; exit 1")
+        .WithEnvironment("NOTICE", text);
 }
 
 // A host step: `go run .` in a Go module, skipped when its output exists.
@@ -832,7 +855,6 @@ ReferenceExpression? SourceRegistryReaderUrl = null;
 
 if (On("onboarding"))
 {
-    RequireDevelopmentCas();
     eudiPostgresPassword = Generated("eudi-postgres-password");
     var sourceRegistryPassword = Generated("source-registry-password");
     sourceRegistryReaderPassword = Generated("source-registry-reader-password");
@@ -1013,10 +1035,6 @@ if (On("onboarding"))
         var trustPublicUrl = builder.AddParameter("eudi-trust-public-url")
             .WithDescription("Public URL of the trust host, e.g. https://eudi-trust.example.org");
         var credentialIssuerDbPassword = Generated("credential-issuer-db-password");
-        if (!File.Exists(Path.Combine(trustPublishDir, "reader-root.crl")))
-        {
-            throw new InvalidOperationException("The credential-issuer profile needs a wallet registration first: aspire/scripts/provision.sh wallet-registration SOURCE_ID=<id> (README).");
-        }
 
         var credentialIssuerDbBootstrap = builder.AddContainer("credential-issuer-db-bootstrap", "postgres", "16-alpine")
             .WithEnvironment("PGHOST", "postgres-eudi")

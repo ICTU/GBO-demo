@@ -40,7 +40,7 @@ comma-separated:
 | --- | --- | --- |
 | `core` | sources, PDP, logbooks, developer portal, landing page | `make demo-minimal` |
 | `dvtp` (the default) | the FSC network, consumers, consent portal, LVG and the Installatie Register | `make demo` |
-| `eudi` | the Source Registry, source onboarding, the issuance server and the EUDI adapter | `make demo-eudi` |
+| `eudi` | the Source Registry, source onboarding, the issuance server and the EUDI adapter (left out, with an `eudi-not-configured` notice, while the development CAs are missing) | `make demo-eudi` |
 | `full` | `dvtp` + `eudi`, and the separate BRP FSC peer | `make demo-full` |
 | `onboarding` | the Source Registry and the reconciler only | `--profile onboarding` |
 | `integrator` | the integrator's FSC peer, seed and backend | `make demo-integrator` |
