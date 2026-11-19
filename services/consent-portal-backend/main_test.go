@@ -97,7 +97,8 @@ func TestPortalGiveThenList(t *testing.T) {
 		SubjectRefKey:        []byte(testSubjectRefKey),
 		SubjectRefKeyVersion: "1",
 	}
-	srv := httptest.NewServer(newMux(cfg, portalhttp.NewHub(), nil))
+	hub := portalhttp.NewHub()
+	srv := httptest.NewServer(newMux(newPortal(cfg, hub, nil), hub))
 	defer srv.Close()
 
 	// /health sanity check.
@@ -316,7 +317,7 @@ func assertPrivateAPICalls(t *testing.T, calls []consent.APICall, labels ...stri
 // answered 500 "streaming not supported". Wire it exactly as main does.
 func TestSSEStreamsThroughAccessLog(t *testing.T) {
 	hub := portalhttp.NewHub()
-	srv := httptest.NewServer(logctx.WithAccessLog(newMux(config{Port: "0"}, hub, nil)))
+	srv := httptest.NewServer(logctx.WithAccessLog(newMux(newPortal(config{Port: "0"}, hub, nil), hub)))
 	defer srv.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -443,11 +444,12 @@ func TestASecondConsentOnlyTransforms(t *testing.T) {
 	}))
 	defer register.Close()
 
-	srv := httptest.NewServer(newMux(config{
+	hub := portalhttp.NewHub()
+	srv := httptest.NewServer(newMux(newPortal(config{
 		BSNkURL: counting.URL, ConsentURL: register.URL,
 		Sources:       []consent.Party{{OIN: testSource, KeySetVersion: 20260101}},
 		SubjectRefKey: []byte(testSubjectRefKey), SubjectRefKeyVersion: "1",
-	}, portalhttp.NewHub(), nil))
+	}, hub, nil), hub))
 	defer srv.Close()
 
 	loginResp, err := http.Post(srv.URL+"/portal/login", "application/json", bytes.NewBufferString(`{"citizen_bsn":"123456789"}`))
@@ -538,5 +540,27 @@ func TestLoadConfigKnownScopes(t *testing.T) {
 	t.Setenv("CONSENT_KNOWN_SCOPES", " , ")
 	if _, err := loadConfig(); err == nil {
 		t.Error("the portal started without a known data set")
+	}
+}
+
+func TestLoadConfigPushedRequests(t *testing.T) {
+	t.Setenv("CONSENT_SOURCES", testSource+"@20260101")
+	t.Setenv("SUBJECT_REF_KEY", testSubjectRefKey)
+
+	t.Setenv("PAR_REQUEST_LIFETIME", "")
+	t.Setenv("FSC_PORT", "")
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	if cfg.RequestLifetime != 10*time.Minute || cfg.FSCPort != "4013" {
+		t.Errorf("defaults: lifetime %v, FSC port %q", cfg.RequestLifetime, cfg.FSCPort)
+	}
+
+	for _, lifetime := range []string{"600", "0s", "500ms", "-1m"} {
+		t.Setenv("PAR_REQUEST_LIFETIME", lifetime)
+		if _, err := loadConfig(); err == nil {
+			t.Errorf("PAR_REQUEST_LIFETIME=%s was accepted", lifetime)
+		}
 	}
 }

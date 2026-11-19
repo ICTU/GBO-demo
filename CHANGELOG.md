@@ -32,6 +32,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   network and reads the register at `ONBOARDING_REGISTER_URL`;
   `CONSENT_KNOWN_SCOPES` lists the data sets it knows (default: the three the
   portal describes).
+- **Pushed authorization requests over FSC** (#427, #648): a service provider
+  can push its request to start a consent flow (RFC 9126) to `POST /par` on a
+  new listener of the consent portal backend (`FSC_PORT`), published as the
+  FSC service `consent-authorization` of the consent register's peer through
+  `cr-inway`. The provider is the `sub` of the forwarded `Fsc-Authorization`
+  token (none: `401`). Without `response_type=code`, `client_id`, `state` or
+  an S256 `code_challenge`, with a `valid_until` that is malformed or not in
+  the future, a repeated parameter or a `request_uri` in the body, the request
+  is refused with `INITIATION_INCOMPLETE` (a body over 64 KiB: `413`); then
+  the admission register checks run. A refusal is an OAuth error with the
+  reason code in `reason` (`invalid_request`, `unauthorized_client` for
+  `PARTY_NOT_ACTIVE`, `invalid_scope` for `UNKNOWN_SCOPE`,
+  `503 temporarily_unavailable` for `ADMISSION_REGISTER_UNAVAILABLE`); an
+  accepted request is kept in memory under a `request_uri` for
+  `PAR_REQUEST_LIFETIME` (default 10 minutes).
+  `make fsc-seed-consent-authorization`, part of `make demo` and
+  `make demo-full`, connects Hypotheek-BV and the Installatie Register; the
+  demo configuration of the onboarding register admits both to the consent
+  register's peer. An existing register volume lacks that admission: the seed
+  target says so, see TROUBLESHOOTING.md. With that admission the two demo
+  providers (`…0300`, `…1000`) can also connect to the FSC service
+  `consent-status`: the consent register's Manager signs per peer, not per
+  service. Consent ids are random, so a provider finds only a consent whose id
+  it already has, and a lookup that finds one is logged with the provider as
+  the processor. The demo providers do not use the endpoint yet. Demo
+  shortcut: the new listener is also reachable on the compose networks
+  `fsc-infra` and `backend`, so a provider backend can call it directly with
+  another peer in the token.
 - **The demo runs on any host name**: the Vite frontends accept
   `GBO_PUBLIC_HOST` and `GBO_EXTRA_ALLOWED_HOSTS`, the reference QTSP follows
   `GBO_PUBLIC_HOST` (`QTSP_PUBLIC_URL` overrides it), and

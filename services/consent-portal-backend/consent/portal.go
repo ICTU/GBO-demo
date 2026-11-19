@@ -38,6 +38,9 @@ type Portal struct {
 	// KnownScopes are the data sets the portal can describe to a citizen.
 	// VerifyRequest refuses a request for any other.
 	KnownScopes []string
+	// Requests keeps the pushed requests that passed the checks. Nil
+	// accepts none.
+	Requests *RequestStore
 
 	authorisations authorisationList
 }
