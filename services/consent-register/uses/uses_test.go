@@ -16,19 +16,19 @@ func (f fakeIndex) Registrations(_ context.Context, consentID string) ([]Registr
 	return f.registrations[consentID], f.err
 }
 
-var sources = map[string]string{
-	"99999999900000000200/bd":  "Belastingdienst",
-	"99999999900000000200/lvg": "Landelijke Voorziening Gebouwen",
-}
-
 func TestOneUsePerRegistrationNewestFirst(t *testing.T) {
 	at := time.Date(2026, 11, 19, 9, 0, 0, 0, time.UTC)
-	service := Service{Sources: sources, ServiceProviders: map[string]string{"99999999900000000300": "Hypotheek-BV"}, Index: fakeIndex{registrations: map[string][]Registration{
-		"c-1": {
-			{LogbookID: "99999999900000000200/bd", TraceID: "a", RegisteredAt: at},
-			{LogbookID: "99999999900000000200/lvg", TraceID: "b", RegisteredAt: at.Add(time.Minute)},
-		},
-	}}}
+	service := Service{
+		Sources:          readSources,
+		ServiceProviders: map[string]string{"99999999900000000300": "Hypotheek-BV"},
+		Index: fakeIndex{registrations: map[string][]Registration{
+			"c-1": {
+				{LogbookID: bdComponent, TraceID: "a", RegisteredAt: at},
+				{LogbookID: lvgComponent, TraceID: "b", RegisteredAt: at.Add(time.Minute)},
+			},
+		}},
+		Logbooks: fakeLogbooks{records: map[string][]Record{"a": {{StartTime: at}}, "b": {{StartTime: at.Add(time.Minute)}}}},
+	}
 
 	report := service.For(context.Background(), "c-1", "99999999900000000300")
 	if len(report.Notices) != 0 {
@@ -66,9 +66,12 @@ func TestAnIndexThatDoesNotAnswerGivesTheNoticeNotAnEmptyList(t *testing.T) {
 }
 
 func TestAnUnknownLogbookIsShownAsItself(t *testing.T) {
-	service := Service{Index: fakeIndex{registrations: map[string][]Registration{
-		"c-1": {{LogbookID: "99999999900000000900/x", RegisteredAt: time.Now()}},
-	}}}
+	service := Service{
+		Index: fakeIndex{registrations: map[string][]Registration{
+			"c-1": {{LogbookID: "99999999900000000900/x", TraceID: "a", RegisteredAt: time.Now()}},
+		}},
+		Logbooks: fakeLogbooks{records: map[string][]Record{"a": {{StartTime: time.Now()}}}},
+	}
 	if got := service.For(context.Background(), "c-1", "x").Uses[0].Source; got != "99999999900000000900/x" {
 		t.Fatalf("source = %q", got)
 	}

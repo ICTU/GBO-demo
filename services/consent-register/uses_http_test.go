@@ -23,7 +23,7 @@ const usesTestProvider = "99999999900000000300"
 func indexUnderTest(t *testing.T, registrations func(consentID string) []map[string]string) string {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer read-token" || r.URL.Path != "/registrations" ||
+		if r.URL.Path != "/registrations" ||
 			r.URL.Query().Get("grondslag_type") != "consent" {
 			http.Error(w, "bad lookup", http.StatusBadRequest)
 			return
@@ -97,7 +97,9 @@ func getUses(t *testing.T, url, consentID string) (int, usesAnswer) {
 	return response.StatusCode, answer
 }
 
-func TestTheUsesOfAConsentComeFromTheIndex(t *testing.T) {
+// The index says which traces, the source's logbook says when: a use is a
+// record read back, at its start time.
+func TestTheUsesOfAConsentAreReadBackFromTheSource(t *testing.T) {
 	at := time.Date(2026, 11, 19, 9, 30, 0, 0, time.UTC)
 	var consentID string
 	index := indexUnderTest(t, func(ref string) []map[string]string {
@@ -105,15 +107,20 @@ func TestTheUsesOfAConsentComeFromTheIndex(t *testing.T) {
 			return []map[string]string{}
 		}
 		return []map[string]string{{
-			"logbook_id": "99999999900000000200/bd", "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
-			"grondslag_type": "consent", "grondslag_ref": ref, "registered_at": at.Format(time.RFC3339Nano),
+			"logbook_id": "99999999900000000200/ldv-lezen-bd", "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+			"grondslag_type": "consent", "grondslag_ref": ref, "registered_at": at.Add(time.Second).Format(time.RFC3339Nano),
 		}}
 	})
-	logbook := ldvtest.New(t, consentGrantActivity, consentListActivity)
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"dataProcessingOperations":[{"traceId":"4bf92f3577b34da6a3ce929d0e0e4736","startTime":"` + at.Format(time.RFC3339Nano) + `"}]}`))
+	}))
+	t.Cleanup(source.Close)
+	logbook := ldvtest.New(t, consentGrantActivity, consentListActivity, consentUsageReadActivity)
 	url := registerWithUses(t, logbook, uses.Service{
-		Index:            usageindex.Client{URL: index, ReadToken: "read-token"},
-		Sources:          map[string]string{"99999999900000000200/bd": "Belastingdienst"},
+		Index:            usageindex.Client{URL: index},
+		Sources:          map[string]string{"99999999900000000200/ldv-lezen-bd": "Belastingdienst"},
 		ServiceProviders: map[string]string{usesTestProvider: "Hypotheek-BV"},
+		Logbooks:         logbookreader.Client{Services: map[string]string{"99999999900000000200/ldv-lezen-bd": source.URL}},
 	})
 	consentID = createTestConsent(t, url)
 
@@ -133,7 +140,7 @@ func TestTheUsesOfAConsentComeFromTheIndex(t *testing.T) {
 
 func TestAnUnreachableIndexIsANoticeNotAnEmptyList(t *testing.T) {
 	url := registerWithUses(t, nil, uses.Service{
-		Index: usageindex.Client{URL: "http://127.0.0.1:1", ReadToken: "read-token", HTTP: &http.Client{Timeout: time.Second}},
+		Index: usageindex.Client{URL: "http://127.0.0.1:1", HTTP: &http.Client{Timeout: time.Second}},
 	})
 	consentID := createTestConsent(t, url)
 
@@ -186,7 +193,7 @@ func TestReadingTheSourcesIsLoggedWithoutTraceIDs(t *testing.T) {
 	store := NewStore()
 	client := newRegisterLogbook(logbook.Client(t, "consent-register"))
 	server := httptest.NewServer(newMux(store, issuer, client, uses.Service{
-		Index: usageindex.Client{URL: index, ReadToken: "read-token"},
+		Index: usageindex.Client{URL: index},
 		Sources: map[string]string{
 			"99999999900000000200/ldv-lezen-bd":  "Belastingdienst",
 			"99999999900000000400/ldv-lezen-brp": "Basisregistratie Personen",

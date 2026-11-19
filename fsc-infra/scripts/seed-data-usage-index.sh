@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# seed-consent-usage-index — publish the consent usage index over FSC and
+# seed-data-usage-index — publish the data usage index over FSC and
 # connect the source peers to it (#687).
 #
-# The register's peer (...0700) publishes consent-usage-index, the index's
+# The register's peer (...0700) publishes data-usage-index, the index's
 # FSC listener, through cr-inway. Each source peer that delivers under a
 # consent connects to it, and a grant link on that peer's Outway lets its
-# sidecars address it as /consent-usage-index:
+# sidecars address it as /data-usage-index:
 #
 #   ...0200 (Belastingdienst; also serves LVG)  bd-outway   BdOutway-01
 #   ...0400 (RvIG)                              brp-outway  BrpOutway-01
@@ -13,6 +13,12 @@
 # The register's Manager signs a connection only for a peer the onboarding
 # register admits to ...0700 (policies/fsc/autosign.rego); the source peers
 # are listed there as system participants for that reason.
+#
+# The same peer publishes data-usage-lookup, the index's lookup listener
+# (4020), and connects to it itself through cr-outway: the consent register
+# is the only reader, and it reaches the index over FSC like any other
+# service, at /data-usage-lookup. Provider and consumer of that contract are
+# the same peer (...0700).
 #
 # Parameterised and idempotent like seed-bri-contract.sh, which does the
 # work: the first run registers the service and its publication, every run
@@ -24,9 +30,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FSC_INFRA_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-SERVICE_NAME="${SERVICE_NAME:-consent-usage-index}"
-SERVICE_ENDPOINT_URL="${SERVICE_ENDPOINT_URL:-http://consent-usage-index:4019}"
-GRANT_LINK_PATH="${GRANT_LINK_PATH:-/consent-usage-index}"
+SERVICE_NAME="${SERVICE_NAME:-data-usage-index}"
+SERVICE_ENDPOINT_URL="${SERVICE_ENDPOINT_URL:-http://data-usage-index:4019}"
+GRANT_LINK_PATH="${GRANT_LINK_PATH:-/data-usage-index}"
 CONSUMERS="${CONSUMERS:-bd brp}"
 
 # name | peer ID | Manager | internal certs dir | org cert | Controller DB | Outway
@@ -57,3 +63,20 @@ for name in $CONSUMERS; do
   OUTWAY_NAME="$outway" \
     bash "$SCRIPT_DIR/seed-bri-contract.sh"
 done
+
+echo "── data-usage-lookup for the consent register (99999999900000000700) ──"
+SERVICE_NAME="${LOOKUP_SERVICE_NAME:-data-usage-lookup}" \
+SERVICE_ENDPOINT_URL="${LOOKUP_ENDPOINT_URL:-http://data-usage-index:4020}" \
+SERVICE_INWAY_ADDRESS=https://cr-inway:443 \
+PROVIDER_PEER_ID=99999999900000000700 \
+PROVIDER_CONTROLLER_URL=https://cr-controller:9444 \
+PROVIDER_MANAGER_URL=https://cr-manager:9443 \
+PROVIDER_INTERNAL_DIR="$FSC_INFRA_DIR/orgs/consent-register/pki/internal" \
+CONSUMER_PEER_ID=99999999900000000700 \
+CONSUMER_MANAGER_URL=https://cr-manager:9443 \
+CONSUMER_INTERNAL_DIR="$FSC_INFRA_DIR/orgs/consent-register/pki/internal" \
+CONSUMER_ORG_CERT="$FSC_INFRA_DIR/orgs/consent-register/pki/org/consent-register.pem" \
+CONSUMER_CONTROLLER_DB=fsc_cr_controller \
+GRANT_LINK_PATH=/data-usage-lookup \
+OUTWAY_NAME=CrOutway-01 \
+  bash "$SCRIPT_DIR/seed-bri-contract.sh"

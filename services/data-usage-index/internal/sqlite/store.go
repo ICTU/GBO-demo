@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"consent-usage-index/internal/usage"
+	"data-usage-index/internal/usage"
 
 	_ "modernc.org/sqlite"
 )

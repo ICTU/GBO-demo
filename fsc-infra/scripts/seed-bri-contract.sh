@@ -6,8 +6,8 @@
 # Parameterised by provider, service, endpoint and grant-property settings so
 # the same script seeds every source peer and every service it offers. The
 # demo has:
-#   bri -> bd-ldv-component  -> bron-sidecar -> graphql-server     (BD)
-#   brp -> brp-ldv-component -> brp-sidecar  -> brp-graphql-server (BRP)
+#   bri -> bron-sidecar     -> graphql-server     (BD bronprofiel)
+#   brp -> brp-sidecar      -> brp-graphql-server (BRP bronprofiel)
 # See the Makefile targets fsc-seed-bri / fsc-seed-brp.
 #
 # Background:
@@ -51,16 +51,10 @@ PROVIDER_CONTROLLER_URL="${PROVIDER_CONTROLLER_URL:-https://bd-controller:9444}"
 PROVIDER_MANAGER_URL="${PROVIDER_MANAGER_URL:-https://bd-manager:9443}"
 CONSUMER_MANAGER_URL="${CONSUMER_MANAGER_URL:-https://edi-manager:9443}"          # manager int
 
-# Service endpoint. For the demo always the source's LDV component (#689),
-# which records each delivery under a consent and forwards to the
-# bron-sidecar: with a consent token on the request that puts the citizen in
-# the place of the placeholder, without one it passes the request through to
-# the bron.
-#
-# The endpoint is set when the service is registered. A peer whose service
-# already exists keeps its old endpoint (step 1 skips it): after switching
-# from the sidecar to the component, run `make fsc-clean` once.
-SERVICE_ENDPOINT_URL="${SERVICE_ENDPOINT_URL:-http://bd-ldv-component:4017}"
+# Service endpoint. For the demo always via a bron-sidecar: with a consent
+# token on the request it puts the citizen in the place of the placeholder,
+# without one it passes the request through to the bron.
+SERVICE_ENDPOINT_URL="${SERVICE_ENDPOINT_URL:-http://bron-sidecar:4011}"
 SERVICE_INWAY_ADDRESS="${SERVICE_INWAY_ADDRESS:-https://bd-inway:443}"
 
 # Grant properties (fsc-core §Properties) on the service-connection grant.

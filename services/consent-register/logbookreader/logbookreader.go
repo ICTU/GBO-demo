@@ -1,4 +1,4 @@
-// Package logbookreader reads the logbook of a source's LDV component for
+// Package logbookreader reads the delivery logbook of a source for
 // the register, through the register's Outway (cr-outway) and the FSC read
 // service of that source (#686): POST /data-processing-operations with one
 // traceId. The source's Inway puts the request to the source's PDP.

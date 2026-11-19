@@ -1,4 +1,4 @@
-module consent-usage-index
+module data-usage-index
 
 go 1.26.0
 

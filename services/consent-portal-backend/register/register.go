@@ -110,7 +110,7 @@ func (c Client) KeepPolymorphic(ctx context.Context, subject consent.SubjectRef,
 }
 
 // Uses reads when the consent was used. The register looks the uses up in
-// the consent usage index; this only translates its answer.
+// the data usage index; this only translates its answer.
 func (c Client) Uses(ctx context.Context, consentID string) (consent.Usage, error) {
 	var out struct {
 		Uses []struct {

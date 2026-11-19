@@ -80,18 +80,17 @@ type config struct {
 	SigningKeyID  string
 	TokenIssuer   string
 	TokenAudience string
-	// UsageIndexURL is the consent usage index's internal listener and
-	// UsageIndexToken its read token. Without a URL the register answers
+	// UsageIndexURL is the register Outway's grant link for the lookup
+	// service of the data usage index. Without it the register answers
 	// every uses request with the index-unavailable notice.
-	UsageIndexURL   string
-	UsageIndexToken string
+	UsageIndexURL string
 	// UsageSources names the source behind each logbook ID, and
 	// UsageServiceProviders the party behind each OIN (parseSources).
 	UsageSources          map[string]string
 	UsageServiceProviders map[string]string
 	// UsageReadServices maps a logbook ID to the register Outway's grant
-	// link for that source's read service (#686): logbook ID=URL pairs.
-	// Without it every registration is a use, as on the short path.
+	// link for that source's read service (#686): logbook ID=URL pairs. A
+	// registration whose logbook ID is not in it gives no use.
 	UsageReadServices map[string]string
 }
 
@@ -111,15 +110,11 @@ func loadConfig() (config, error) {
 		TokenIssuer:    getEnv("CONSENT_TOKEN_ISSUER", "https://consent-register.gbo.test"),
 		TokenAudience:  getEnv("CONSENT_TOKEN_AUDIENCE", "gbo:dvtp:pdp"),
 
-		UsageIndexURL:   os.Getenv("CONSENT_USAGE_INDEX_URL"),
-		UsageIndexToken: os.Getenv("CONSENT_USAGE_INDEX_READ_TOKEN"),
-		UsageSources:    parseSources(os.Getenv("CONSENT_USAGE_SOURCES")),
+		UsageIndexURL: os.Getenv("DATA_USAGE_INDEX_URL"),
+		UsageSources:  parseSources(os.Getenv("CONSENT_USAGE_SOURCES")),
 
 		UsageServiceProviders: parseSources(os.Getenv("CONSENT_USAGE_SERVICE_PROVIDERS")),
 		UsageReadServices:     parseSources(os.Getenv("CONSENT_USAGE_READ_SERVICES")),
-	}
-	if cfg.UsageIndexURL != "" && cfg.UsageIndexToken == "" {
-		return config{}, errors.New("CONSENT_USAGE_INDEX_READ_TOKEN is required with CONSENT_USAGE_INDEX_URL")
 	}
 	switch cfg.Store {
 	case "":
@@ -728,12 +723,11 @@ func main() {
 	usage := uses.Service{Sources: cfg.UsageSources, ServiceProviders: cfg.UsageServiceProviders}
 	if cfg.UsageIndexURL != "" {
 		usage.Index = usageindex.Client{
-			URL:       cfg.UsageIndexURL,
-			ReadToken: cfg.UsageIndexToken,
-			HTTP:      &http.Client{Timeout: 3 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)},
+			URL:  cfg.UsageIndexURL,
+			HTTP: &http.Client{Timeout: 3 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)},
 		}
 	} else {
-		slog.Warn("no CONSENT_USAGE_INDEX_URL configured; the uses of a consent cannot be shown")
+		slog.Warn("no DATA_USAGE_INDEX_URL configured; the uses of a consent cannot be shown")
 	}
 	if len(cfg.UsageReadServices) > 0 {
 		usage.Logbooks = logbookreader.Client{

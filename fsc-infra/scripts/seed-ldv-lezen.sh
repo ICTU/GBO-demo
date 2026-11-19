@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# seed-ldv-lezen — publish the read API of each source's LDV component over
-# FSC and connect the consent register to it (#686).
+# seed-ldv-lezen — publish the read API of each source's delivery logbook
+# over FSC and connect the consent register to it (#686).
 #
-# Each source peer publishes its component's read listener (4018) as a
-# service behind its own Inway, and the register's peer (...0700) connects
-# to it; a grant link on cr-outway lets the register address it by name:
+# Each source peer publishes the read listener (4018) of the logbook its
+# sidecar records deliveries in as a service behind its own Inway, and the
+# register's peer (...0700) connects to it; a grant link on cr-outway lets
+# the register address it by name:
 #
-#   ldv-lezen-bd   ...0200  bd-inway   bd-ldv-component:4018
-#   ldv-lezen-lvg  ...0200  bd-inway   lvg-ldv-component:4018
-#   ldv-lezen-brp  ...0400  brp-inway  brp-ldv-component:4018
+#   ldv-lezen-bd   ...0200  bd-inway   logboek-levering-bd:4018
+#   ldv-lezen-lvg  ...0200  bd-inway   logboek-levering-lvg:4018
+#   ldv-lezen-brp  ...0400  brp-inway  logboek-levering-brp:4018
 #
 # The source Managers sign the connection only for a peer the onboarding
 # register admits to them; ...0700 is listed for ...0200 and ...0400. The
@@ -27,9 +28,9 @@ SERVICES="${SERVICES:-ldv-lezen-bd ldv-lezen-lvg ldv-lezen-brp}"
 # service | endpoint | Inway | provider peer | Controller | Manager | internal certs dir
 provider() {
   case "$1" in
-    ldv-lezen-bd) echo "http://bd-ldv-component:4018|https://bd-inway:443|99999999900000000200|https://bd-controller:9444|https://bd-manager:9443|orgs/belastingdienst-mock/pki/internal" ;;
-    ldv-lezen-lvg) echo "http://lvg-ldv-component:4018|https://bd-inway:443|99999999900000000200|https://bd-controller:9444|https://bd-manager:9443|orgs/belastingdienst-mock/pki/internal" ;;
-    ldv-lezen-brp) echo "http://brp-ldv-component:4018|https://brp-inway:443|99999999900000000400|https://brp-controller:9444|https://brp-manager:9443|orgs/brp-mock/pki/internal" ;;
+    ldv-lezen-bd) echo "http://logboek-levering-bd:4018|https://bd-inway:443|99999999900000000200|https://bd-controller:9444|https://bd-manager:9443|orgs/belastingdienst-mock/pki/internal" ;;
+    ldv-lezen-lvg) echo "http://logboek-levering-lvg:4018|https://bd-inway:443|99999999900000000200|https://bd-controller:9444|https://bd-manager:9443|orgs/belastingdienst-mock/pki/internal" ;;
+    ldv-lezen-brp) echo "http://logboek-levering-brp:4018|https://brp-inway:443|99999999900000000400|https://brp-controller:9444|https://brp-manager:9443|orgs/brp-mock/pki/internal" ;;
     *) echo "unknown service: $1" >&2; return 1 ;;
   esac
 }

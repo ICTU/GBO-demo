@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"consent-usage-index/internal/usage"
+	"data-usage-index/internal/usage"
 )
 
 func registration(trace string, at time.Time) usage.Registration {

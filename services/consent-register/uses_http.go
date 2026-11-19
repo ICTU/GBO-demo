@@ -51,7 +51,10 @@ func handleConsentUses(store ConsentStore, logbook *registerLogbook, service use
 
 		report := service.For(r.Context(), c.ConsentID, c.DienstverlenrOIN)
 		if report.IndexErr != nil {
-			slog.Warn("the consent usage index did not answer; the uses are shown as unavailable", "err", report.IndexErr.Error())
+			slog.Warn("the data usage index did not answer; the uses are shown as unavailable", "err", report.IndexErr.Error())
+		}
+		for _, logbookID := range report.Unreadable {
+			slog.Warn("a registration names a logbook without a read service; it gives no use", "logbook_id", logbookID, "consent_id", c.ConsentID)
 		}
 		for source, err := range report.SourceErrs {
 			slog.Warn("a source logbook could not be read; its uses are shown as unavailable", "source", source, "err", err.Error())

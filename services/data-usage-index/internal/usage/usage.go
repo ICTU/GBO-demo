@@ -1,4 +1,4 @@
-// Package usage is the core of the consent usage index: a list of pointers
+// Package usage is the core of the data usage index: a list of pointers
 // that say "under this legal basis, this logbook recorded a delivery under
 // this trace". The index holds no personal data and nothing from the source;
 // what was delivered stays in the source's own logbook (#687, where the index

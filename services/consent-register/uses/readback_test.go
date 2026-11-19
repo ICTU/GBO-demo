@@ -24,7 +24,7 @@ func (f fakeLogbooks) Read(ctx context.Context, logbookID, traceID string) ([]Re
 	if f.down[logbookID] {
 		return nil, false, errors.New("connection refused")
 	}
-	if logbookID == "99999999900000000200/bd" {
+	if logbookID == unreadableLogbook {
 		return nil, false, ErrNoReadService
 	}
 	return f.records[traceID], f.truncated[traceID], nil
@@ -33,12 +33,13 @@ func (f fakeLogbooks) Read(ctx context.Context, logbookID, traceID string) ([]Re
 const (
 	bdComponent  = "99999999900000000200/ldv-lezen-bd"
 	lvgComponent = "99999999900000000200/ldv-lezen-lvg"
+	// unreadableLogbook is a logbook ID the register has no read service for.
+	unreadableLogbook = "99999999900000000200/bd"
 )
 
 var readSources = map[string]string{
-	bdComponent:               "Belastingdienst",
-	lvgComponent:              "Landelijke Voorziening Gebouwen",
-	"99999999900000000200/bd": "Belastingdienst",
+	bdComponent:  "Belastingdienst",
+	lvgComponent: "Landelijke Voorziening Gebouwen",
 }
 
 func TestAUseIsARecordReadBackAtItsStartTime(t *testing.T) {
@@ -128,18 +129,33 @@ func TestASlowSourceIsCutOffByTheTimeout(t *testing.T) {
 	}
 }
 
-// A source with only the sidecar: its registration is a use without
-// read-back, at the time of registration.
-func TestALogbookWithoutAReadServiceIsAUseAtRegistration(t *testing.T) {
+// A registration whose logbook ID has no read service gives no use: the
+// register cannot confirm it. It is reported for the register's own log,
+// and the citizen gets no notice.
+func TestALogbookWithoutAReadServiceGivesNoUse(t *testing.T) {
 	at := time.Date(2026, 11, 19, 9, 0, 0, 0, time.UTC)
 	service := Service{
 		Index: fakeIndex{registrations: map[string][]Registration{"c-1": {
-			{LogbookID: "99999999900000000200/bd", TraceID: "t1", RegisteredAt: at},
+			{LogbookID: unreadableLogbook, TraceID: "t1", RegisteredAt: at},
+			{LogbookID: unreadableLogbook, TraceID: "t2", RegisteredAt: at},
 		}}},
 		Logbooks: fakeLogbooks{},
 	}
 	report := service.For(context.Background(), "c-1", "x")
-	if len(report.Uses) != 1 || !report.Uses[0].UsedAt.Equal(at) {
+	if len(report.Uses) != 0 || len(report.Notices) != 0 {
+		t.Fatalf("report = %+v", report)
+	}
+	if len(report.Unreadable) != 1 || report.Unreadable[0] != unreadableLogbook {
+		t.Fatalf("unreadable = %v", report.Unreadable)
+	}
+}
+
+// Without any read service configured no registration gives a use.
+func TestWithoutReadServicesNothingIsAUse(t *testing.T) {
+	service := Service{Index: fakeIndex{registrations: map[string][]Registration{"c-1": {
+		{LogbookID: bdComponent, TraceID: "t1", RegisteredAt: time.Now()},
+	}}}}
+	if report := service.For(context.Background(), "c-1", "x"); len(report.Uses) != 0 || len(report.Unreadable) != 1 {
 		t.Fatalf("report = %+v", report)
 	}
 }

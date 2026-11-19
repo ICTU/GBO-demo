@@ -126,7 +126,7 @@ export default function ArchStrip({
 
     // Relay soothing: independent of the recorded decision, so it also fires on
     // pre-OPA system errors (sidecar unreachable, …).
-    const downstreamRed = ['pdp', 'opa', 'consent-pip', 'ldv-component', 'sidecar', 'decryption', 'bron']
+    const downstreamRed = ['pdp', 'opa', 'consent-pip', 'sidecar', 'decryption', 'bron']
       .some((id) => out[id] === 'red')
     if (downstreamRed) {
       for (const id of [

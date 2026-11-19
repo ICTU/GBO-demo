@@ -781,7 +781,7 @@ services:
       - bd-txlog-api
 
   # The Belastingdienst peer's Outway, so its sidecars can register each delivery under a
-  # consent at the consent usage index (service consent-usage-index on the
+  # consent at the data usage index (service data-usage-index on the
   # register's peer ...0700, #687). On source-gateways because that is the
   # only network the sidecars are on; it publishes no host port.
   bd-outway:
@@ -996,7 +996,7 @@ services:
       - brp-txlog-api
 
   # RvIG's peer's Outway, so its sidecars can register each delivery under a
-  # consent at the consent usage index (service consent-usage-index on the
+  # consent at the data usage index (service data-usage-index on the
   # register's peer ...0700, #687). On source-gateways because that is the
   # only network the sidecars are on; it publishes no host port.
   brp-outway:
@@ -1205,9 +1205,10 @@ services:
       - cr-manager
       - cr-txlog-api
 
-  # The consent register's Outway (#686): the register reads the logbook of
-  # each source's LDV component through it, over the FSC services
-  # ldv-lezen-bd, ldv-lezen-brp and ldv-lezen-lvg. No host port.
+  # The consent register's Outway: the register looks up registrations in
+  # the data usage index through it (data-usage-lookup, on its own peer) and
+  # reads each use back from the delivery logbook of its source (#686:
+  # ldv-lezen-bd, ldv-lezen-brp and ldv-lezen-lvg). No host port.
   cr-outway:
     image: federatedserviceconnectivity/outway:v2.4.0
     restart: unless-stopped

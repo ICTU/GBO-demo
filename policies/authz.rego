@@ -29,12 +29,12 @@ _source_metadata_request if {
 }
 
 # LDV_READ_FSC (#686): the consent register reads the logbook of a source's
-# LDV component through the read extension, over FSC. Only the register's
+# delivery logbook through the read extension, over FSC. Only the register's
 # peer, only on a read service of a component, only
 # POST /data-processing-operations, and only with a body that holds exactly
 # one 32-hex traceId and nothing else. A read by data subject, activity or
 # time window is refused even though the read extension allows it: the
-# register knows which trace it wants from the consent usage index, and
+# register knows which trace it wants from the data usage index, and
 # needs nothing else. It sits before the GraphQL checks because the body is
 # not GraphQL.
 _ldv_read_services := {"ldv-lezen-bd", "ldv-lezen-brp", "ldv-lezen-lvg"}

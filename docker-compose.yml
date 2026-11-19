@@ -745,19 +745,18 @@ services:
       - LDV_LOGBOOK_URL=http://logboek-toestemming:4016
       - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
       - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY_GBO:-local-demo-pseudonym-key-gbo}
-      # Consent usage (#687): GET /consents/{id}/uses reads the consent usage
-      # index over its internal listener (same organisation, no FSC), and
-      # names the source and the service provider, so the answer is ready to
-      # show. When the index cannot be reached the answer carries a notice
-      # instead of an empty list (D2).
-      - CONSENT_USAGE_INDEX_URL=http://consent-usage-index:4020
-      - CONSENT_USAGE_INDEX_READ_TOKEN=${CONSENT_USAGE_INDEX_READ_TOKEN:-local-demo-consent-usage-index-token}
-      - CONSENT_USAGE_SOURCES=99999999900000000200/bd=Belastingdienst;99999999900000000200/lvg=Landelijke Voorziening Gebouwen;99999999900000000400/brp=Basisregistratie Personen;99999999900000000200/ldv-lezen-bd=Belastingdienst;99999999900000000200/ldv-lezen-lvg=Landelijke Voorziening Gebouwen;99999999900000000400/ldv-lezen-brp=Basisregistratie Personen
-      # Read-back (#687): for each component logbook, the grant link on the
-      # register's Outway for that source's read service (#686). A use is a
-      # record read back there, at its start time; a source that cannot be
-      # read gets a notice of its own (D2).
+      # Consent usage (#687): GET /consents/{id}/uses looks up the consent's
+      # registrations in the data usage index and reads each one back from
+      # the delivery logbook of its source (#686), both over FSC through
+      # cr-outway. A use is a record read back there, at its start time. The
+      # index is the register's own organisation, but the lookup goes over
+      # FSC like any other service: no shared token. When the index cannot be
+      # reached the answer carries a notice instead of an empty list, and a
+      # source that cannot be read gets a notice of its own (D2). A
+      # registration whose logbook ID has no read service here gives no use.
+      - DATA_USAGE_INDEX_URL=http://cr-outway:8080/data-usage-lookup
       - CONSENT_USAGE_READ_SERVICES=99999999900000000200/ldv-lezen-bd=http://cr-outway:8080/ldv-lezen-bd;99999999900000000200/ldv-lezen-lvg=http://cr-outway:8080/ldv-lezen-lvg;99999999900000000400/ldv-lezen-brp=http://cr-outway:8080/ldv-lezen-brp
+      - CONSENT_USAGE_SOURCES=99999999900000000200/ldv-lezen-bd=Belastingdienst;99999999900000000200/ldv-lezen-lvg=Landelijke Voorziening Gebouwen;99999999900000000400/ldv-lezen-brp=Basisregistratie Personen
       - CONSENT_USAGE_SERVICE_PROVIDERS=99999999900000000300=Hypotheek-BV;99999999900000001000=Installatie Register
     networks:
       - backend
@@ -774,32 +773,35 @@ services:
       timeout: 3s
       retries: 5
 
-  # The consent usage index (#687, the "trace index" there): under consent X,
-  # source Y delivered data under trace Z, at time T. Pointers only, no
-  # personal data. GBO runs it next to the register, under the register's
-  # peer (...0700). Two listeners: 4019 is the FSC service
-  # consent-usage-index behind cr-inway, where the sidecars register a
-  # delivery; 4020 is the lookup, for the register alone (INDEX_READ_TOKEN).
+  # The data usage index (#687, the "trace index" there): under legal basis
+  # X (today: a consent), source Y delivered data under trace Z, at time T.
+  # Pointers only, no personal data. GBO runs it next to the register, under
+  # the register's peer (...0700). Two listeners, each an FSC service behind
+  # cr-inway: 4019 is data-usage-index, where the sidecars register a
+  # delivery; 4020 is data-usage-lookup, with a connection for the register
+  # only.
   #
-  # Demo shortcut: like the register's status listener, 4019 trusts the
-  # Fsc-Authorization header the Inway forwards and is also reachable on the
-  # compose networks. A real deployment lets only the Inway reach it.
+  # Demo shortcut: like the register's status listener, both trust the
+  # Fsc-Authorization header the Inway forwards and are also reachable on
+  # the compose networks. A real deployment lets only the Inway reach them.
   #
   # Every delivery under a consent waits for this service (the sidecar
   # withholds the data when the registration fails), hence the restart
   # policy and the health check on the store.
-  consent-usage-index:
-    build: ./services/consent-usage-index
+  data-usage-index:
+    build: ./services/data-usage-index
     restart: unless-stopped
     environment:
-      - OTEL_SERVICE_NAME=consent-usage-index
+      - OTEL_SERVICE_NAME=data-usage-index
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
-      - INDEX_READ_TOKEN=${CONSENT_USAGE_INDEX_READ_TOKEN:-local-demo-consent-usage-index-token}
+      # Next to the FSC contract: only the register's peer may look up.
+      - LOOKUP_PEERS=99999999900000000700
     volumes:
-      - consent-usage-index-data:/data
+      - data-usage-index-data:/data
     networks:
       - backend
-      # cr-inway forwards consent-usage-index here (4019).
+      # cr-inway forwards data-usage-index (4019) and data-usage-lookup
+      # (4020) here.
       - fsc-infra
     depends_on:
       otel-collector:
@@ -883,30 +885,36 @@ services:
       - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY:-local-demo-pseudonym-key}
       - LDV_DECRYPTION_ACTIVITY=https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-identiteit-ontsleuteling/v1
       - LDV_FORWARD_ACTIVITY=https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-bronquery-doorgifte/v1
-      # Consent usage: the LDV component in front of this sidecar records
-      # and registers each delivery (#689), so the sidecar registers nothing
-      # itself (no CONSENT_USAGE_INDEX_URL). It returns the pseudonym its
-      # forward record names the citizen by, which the component records
-      # and strips (D1).
-      - LDV_RETURN_SUBJECT_ID=true
+      # Deliveries under a consent (#687, #689): after a 200 on a request with
+      # a consent token the sidecar registers the trace at the data usage
+      # index through its peer's Outway, then writes a delivery record in a
+      # logbook of its own (logboek-levering-bd), apart from the source's
+      # logbook. If either fails the data is withheld. The logbook ID is the
+      # peer ID plus the name of that logbook's read service.
+      - DATA_USAGE_INDEX_URL=http://bd-outway:8080/data-usage-index
+      - DATA_USAGE_LOGBOOK_ID=99999999900000000200/ldv-lezen-bd
+      - DELIVERY_LOGBOOK_URL=http://logboek-levering-bd:4016
+      - DELIVERY_ACTIVITY=https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-levering-onder-toestemming/v1
     volumes:
       # The LDV spool must survive a restart; that is what makes a
       # record durable before it reaches the logbook.
       - ldv-outbox-bron-sidecar:/data
-    # Only the LDV component in front of the sidecar reaches it
-    # (source-chain), and the sidecar reaches only what serves the source
-    # (sources): it is not on the networks the service providers use, and it
-    # publishes no port. The sidecar acts on a consent token after the PDP's
-    # allow; a caller that could reach it directly would skip that decision.
+    # Only the Inways of the source reach the sidecar (source-gateways), and
+    # the sidecar reaches only what serves the source (sources): it is not on
+    # the networks the service providers use, and it publishes no port. The
+    # sidecar acts on a consent token after the PDP's allow; a caller that
+    # could reach it directly would skip that decision.
     networks:
       - sources
-      - source-chain
+      - source-gateways
     depends_on:
       graphql-server:
         condition: service_healthy
       decryption-component:
         condition: service_healthy
       logboek-bd:
+        condition: service_healthy
+      logboek-levering-bd:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4011/health"]
@@ -941,30 +949,36 @@ services:
       - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY_BRP:-local-demo-pseudonym-key-brp}
       - LDV_DECRYPTION_ACTIVITY=https://logboek.rvig.nl/verwerkingsactiviteiten/brp-identiteit-ontsleuteling/v1
       - LDV_FORWARD_ACTIVITY=https://logboek.rvig.nl/verwerkingsactiviteiten/brp-bronquery-doorgifte/v1
-      # Consent usage: the LDV component in front of this sidecar records
-      # and registers each delivery (#689), so the sidecar registers nothing
-      # itself (no CONSENT_USAGE_INDEX_URL). It returns the pseudonym its
-      # forward record names the citizen by, which the component records
-      # and strips (D1).
-      - LDV_RETURN_SUBJECT_ID=true
+      # Deliveries under a consent (#687, #689): after a 200 on a request with
+      # a consent token the sidecar registers the trace at the data usage
+      # index through its peer's Outway, then writes a delivery record in a
+      # logbook of its own (logboek-levering-brp), apart from the source's
+      # logbook. If either fails the data is withheld. The logbook ID is the
+      # peer ID plus the name of that logbook's read service.
+      - DATA_USAGE_INDEX_URL=http://brp-outway:8080/data-usage-index
+      - DATA_USAGE_LOGBOOK_ID=99999999900000000400/ldv-lezen-brp
+      - DELIVERY_LOGBOOK_URL=http://logboek-levering-brp:4016
+      - DELIVERY_ACTIVITY=https://logboek.rvig.nl/verwerkingsactiviteiten/brp-levering-onder-toestemming/v1
     volumes:
       # The LDV spool must survive a restart; that is what makes a
       # record durable before it reaches the logbook.
       - ldv-outbox-brp-sidecar:/data
-    # Only the LDV component in front of the sidecar reaches it
-    # (source-chain), and the sidecar reaches only what serves the source
-    # (sources): it is not on the networks the service providers use, and it
-    # publishes no port. The sidecar acts on a consent token after the PDP's
-    # allow; a caller that could reach it directly would skip that decision.
+    # Only the Inways of the source reach the sidecar (source-gateways), and
+    # the sidecar reaches only what serves the source (sources): it is not on
+    # the networks the service providers use, and it publishes no port. The
+    # sidecar acts on a consent token after the PDP's allow; a caller that
+    # could reach it directly would skip that decision.
     networks:
       - sources
-      - source-chain
+      - source-gateways
     depends_on:
       brp-graphql-server:
         condition: service_healthy
       decryption-component:
         condition: service_healthy
       logboek-brp:
+        condition: service_healthy
+      logboek-levering-brp:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4011/health"]
@@ -1034,22 +1048,26 @@ services:
       - LDV_SUBJECT_PSEUDONYM_KEY=${LDV_SUBJECT_PSEUDONYM_KEY_LVG:-local-demo-pseudonym-key-lvg}
       - LDV_DECRYPTION_ACTIVITY=https://logboek.lvg.test/verwerkingsactiviteiten/lvg-identiteit-ontsleuteling/v1
       - LDV_FORWARD_ACTIVITY=https://logboek.lvg.test/verwerkingsactiviteiten/lvg-bronquery-doorgifte/v1
-      # Consent usage: the LDV component in front of this sidecar records
-      # and registers each delivery (#689), so the sidecar registers nothing
-      # itself (no CONSENT_USAGE_INDEX_URL). It returns the pseudonym its
-      # forward record names the citizen by, which the component records
-      # and strips (D1).
-      - LDV_RETURN_SUBJECT_ID=true
+      # Deliveries under a consent (#687, #689): after a 200 on a request with
+      # a consent token the sidecar registers the trace at the data usage
+      # index through its peer's Outway, then writes a delivery record in a
+      # logbook of its own (logboek-levering-lvg), apart from the source's
+      # logbook. If either fails the data is withheld. The logbook ID is the
+      # peer ID plus the name of that logbook's read service.
+      - DATA_USAGE_INDEX_URL=http://bd-outway:8080/data-usage-index
+      - DATA_USAGE_LOGBOOK_ID=99999999900000000200/ldv-lezen-lvg
+      - DELIVERY_LOGBOOK_URL=http://logboek-levering-lvg:4016
+      - DELIVERY_ACTIVITY=https://logboek.lvg.test/verwerkingsactiviteiten/lvg-levering-onder-toestemming/v1
     volumes:
       - ldv-outbox-lvg-sidecar:/data
-    # Only the LDV component in front of the sidecar reaches it
-    # (source-chain), and the sidecar reaches only what serves the source
-    # (sources): it is not on the networks the service providers use, and it
-    # publishes no port. The sidecar acts on a consent token after the PDP's
-    # allow; a caller that could reach it directly would skip that decision.
+    # Only the Inways of the source reach the sidecar (source-gateways), and
+    # the sidecar reaches only what serves the source (sources): it is not on
+    # the networks the service providers use, and it publishes no port. The
+    # sidecar acts on a consent token after the PDP's allow; a caller that
+    # could reach it directly would skip that decision.
     networks:
       - sources
-      - source-chain
+      - source-gateways
     depends_on:
       lvg-graphql-server:
         condition: service_healthy
@@ -1057,141 +1075,107 @@ services:
         condition: service_healthy
       logboek-lvg:
         condition: service_healthy
+      logboek-levering-lvg:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4011/health"]
       <<: *healthcheck-timing
       timeout: 3s
       retries: 5
 
-  # Belastingdienst: the LDV reference component of #689 in front of bron-sidecar.
-  # The same ldv-logboek image in proxy mode: Inway → this → sidecar. It
-  # records each delivery under a consent in its own logbook and registers
-  # the trace at the consent usage index through bd-outway, under the logbook
-  # ID of its read service. Fail-closed: no record and registration, no data.
-  bd-ldv-component:
+  # The delivery logbook of the Belastingdienst: where its sidecar records each delivery
+  # under a consent (#689), apart from the source's own logbook. The same
+  # ldv-logboek image. Its read API is the FSC service ldv-lezen-bd behind
+  # the source's Inway (4018): no token, one traceId, a reduced answer
+  # (#686). The consent register reads each use back there.
+  logboek-levering-bd:
     build:
       context: .
       dockerfile: services/ldv-logboek/Dockerfile
     restart: unless-stopped
     environment:
-      - OTEL_SERVICE_NAME=bd-ldv-component
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_SERVICE_NAME=logboek-levering-bd
       - DATABASE_PATH=/data/logboek.db
       - REGISTER_PATH=/config/verwerkingsactiviteiten-bd.json
       - LDV_LOGBOOK_ID=https://logboek.belastingdienst.nl/ldv-lezen-bd/data-processing-operations
       - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
       - LDV_READ_TOKEN=${LDV_READ_TOKEN:-local-demo-logboek-read-token}
-      - LDV_PROXY_UPSTREAM=http://bron-sidecar:4011
-      - LDV_PROXY_ACTIVITY=https://logboek.belastingdienst.nl/verwerkingsactiviteiten/bd-levering-onder-toestemming/v1
-      - CONSENT_USAGE_INDEX_URL=http://bd-outway:8080/consent-usage-index
-      - CONSENT_USAGE_LOGBOOK_ID=99999999900000000200/ldv-lezen-bd
-      # The read API for the consent register (#686): the FSC service
-      # ldv-lezen-bd behind the Inway, no token, a reduced answer.
       - LDV_FSC_READ_PORT=4018
     volumes:
-      - bd-ldv-component-data:/data
-    # source-gateways: the Inway reaches the proxy (4017) and the read API
-    # (4018), and the component reaches its peer's Outway. source-chain: it reaches the sidecar.
-    # sources: the developer portal reads the logbook (4016) and spans go
-    # to the collector. Not on backend, where the service providers are.
+      - logboek-levering-bd-data:/data
+    # sources: the sidecar writes (4016) and the developer portal reads.
+    # source-gateways: the Inway reaches the read API (4018). Not on
+    # backend, where the service providers are.
     networks:
       - sources
-      - source-chain
       - source-gateways
-    depends_on:
-      bron-sidecar:
-        condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4017/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4016/health"]
       <<: *healthcheck-timing
       timeout: 3s
       retries: 5
 
-  # RvIG: the LDV reference component of #689 in front of brp-sidecar.
-  # The same ldv-logboek image in proxy mode: Inway → this → sidecar. It
-  # records each delivery under a consent in its own logbook and registers
-  # the trace at the consent usage index through brp-outway, under the logbook
-  # ID of its read service. Fail-closed: no record and registration, no data.
-  brp-ldv-component:
+  # The delivery logbook of RvIG: where its sidecar records each delivery
+  # under a consent (#689), apart from the source's own logbook. The same
+  # ldv-logboek image. Its read API is the FSC service ldv-lezen-brp behind
+  # the source's Inway (4018): no token, one traceId, a reduced answer
+  # (#686). The consent register reads each use back there.
+  logboek-levering-brp:
     build:
       context: .
       dockerfile: services/ldv-logboek/Dockerfile
     restart: unless-stopped
     environment:
-      - OTEL_SERVICE_NAME=brp-ldv-component
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_SERVICE_NAME=logboek-levering-brp
       - DATABASE_PATH=/data/logboek.db
       - REGISTER_PATH=/config/verwerkingsactiviteiten-brp.json
       - LDV_LOGBOOK_ID=https://logboek.rvig.nl/ldv-lezen-brp/data-processing-operations
       - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
       - LDV_READ_TOKEN=${LDV_READ_TOKEN:-local-demo-logboek-read-token}
-      - LDV_PROXY_UPSTREAM=http://brp-sidecar:4011
-      - LDV_PROXY_ACTIVITY=https://logboek.rvig.nl/verwerkingsactiviteiten/brp-levering-onder-toestemming/v1
-      - CONSENT_USAGE_INDEX_URL=http://brp-outway:8080/consent-usage-index
-      - CONSENT_USAGE_LOGBOOK_ID=99999999900000000400/ldv-lezen-brp
-      # The read API for the consent register (#686): the FSC service
-      # ldv-lezen-brp behind the Inway, no token, a reduced answer.
       - LDV_FSC_READ_PORT=4018
     volumes:
-      - brp-ldv-component-data:/data
-    # source-gateways: the Inway reaches the proxy (4017) and the read API
-    # (4018), and the component reaches its peer's Outway. source-chain: it reaches the sidecar.
-    # sources: the developer portal reads the logbook (4016) and spans go
-    # to the collector. Not on backend, where the service providers are.
+      - logboek-levering-brp-data:/data
+    # sources: the sidecar writes (4016) and the developer portal reads.
+    # source-gateways: the Inway reaches the read API (4018). Not on
+    # backend, where the service providers are.
     networks:
       - sources
-      - source-chain
       - source-gateways
-    depends_on:
-      brp-sidecar:
-        condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4017/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4016/health"]
       <<: *healthcheck-timing
       timeout: 3s
       retries: 5
 
-  # LVG: the LDV reference component of #689 in front of lvg-sidecar.
-  # The same ldv-logboek image in proxy mode: Inway → this → sidecar. It
-  # records each delivery under a consent in its own logbook and registers
-  # the trace at the consent usage index through bd-outway, under the logbook
-  # ID of its read service. Fail-closed: no record and registration, no data.
-  lvg-ldv-component:
+  # The delivery logbook of LVG: where its sidecar records each delivery
+  # under a consent (#689), apart from the source's own logbook. The same
+  # ldv-logboek image. Its read API is the FSC service ldv-lezen-lvg behind
+  # the source's Inway (4018): no token, one traceId, a reduced answer
+  # (#686). The consent register reads each use back there.
+  logboek-levering-lvg:
     build:
       context: .
       dockerfile: services/ldv-logboek/Dockerfile
     profiles: [dvtp, full]
     restart: unless-stopped
     environment:
-      - OTEL_SERVICE_NAME=lvg-ldv-component
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_SERVICE_NAME=logboek-levering-lvg
       - DATABASE_PATH=/data/logboek.db
       - REGISTER_PATH=/config/verwerkingsactiviteiten-lvg.json
       - LDV_LOGBOOK_ID=https://logboek.lvg.test/ldv-lezen-lvg/data-processing-operations
       - LDV_WRITE_TOKEN=${LDV_WRITE_TOKEN:-local-demo-logboek-token}
       - LDV_READ_TOKEN=${LDV_READ_TOKEN:-local-demo-logboek-read-token}
-      - LDV_PROXY_UPSTREAM=http://lvg-sidecar:4011
-      - LDV_PROXY_ACTIVITY=https://logboek.lvg.test/verwerkingsactiviteiten/lvg-levering-onder-toestemming/v1
-      - CONSENT_USAGE_INDEX_URL=http://bd-outway:8080/consent-usage-index
-      - CONSENT_USAGE_LOGBOOK_ID=99999999900000000200/ldv-lezen-lvg
-      # The read API for the consent register (#686): the FSC service
-      # ldv-lezen-lvg behind the Inway, no token, a reduced answer.
       - LDV_FSC_READ_PORT=4018
     volumes:
-      - lvg-ldv-component-data:/data
-    # source-gateways: the Inway reaches the proxy (4017) and the read API
-    # (4018), and the component reaches its peer's Outway. source-chain: it reaches the sidecar.
-    # sources: the developer portal reads the logbook (4016) and spans go
-    # to the collector. Not on backend, where the service providers are.
+      - logboek-levering-lvg-data:/data
+    # sources: the sidecar writes (4016) and the developer portal reads.
+    # source-gateways: the Inway reaches the read API (4018). Not on
+    # backend, where the service providers are.
     networks:
       - sources
-      - source-chain
       - source-gateways
-    depends_on:
-      lvg-sidecar:
-        condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4017/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4016/health"]
       <<: *healthcheck-timing
       timeout: 3s
       retries: 5
@@ -1787,7 +1771,7 @@ services:
       # dpl.read.nextLogbookId holds, so the view can follow a pointer to an
       # address; "start" marks the logbooks of applications that start a
       # processing, where a reader begins.
-      - LDV_LOGBOOKS=https://logboek.hypotheek-bv.test/data-processing-operations=Hypotheek-BV=http://logboek-afnemer:4016=start,https://logboek.gbo.overheid.nl/eudi-adapter/data-processing-operations=GBO EUDI-adapter=http://logboek-eudi-adapter:4016=start,https://logboek.belastingdienst.nl/data-processing-operations=Belastingdienst=http://logboek-bd:4016,https://logboek.rvig.nl/data-processing-operations=RvIG=http://logboek-brp:4016,https://logboek.gbo.overheid.nl/toestemming/data-processing-operations=GBO toestemming=http://logboek-toestemming:4016,https://logboek.installatieregister.test/data-processing-operations=Installatie Register=http://logboek-ir:4016=start,https://logboek.lvg.test/data-processing-operations=LVG=http://logboek-lvg:4016,https://logboek.belastingdienst.nl/ldv-lezen-bd/data-processing-operations=BD LDV-component=http://bd-ldv-component:4016=start,https://logboek.rvig.nl/ldv-lezen-brp/data-processing-operations=BRP LDV-component=http://brp-ldv-component:4016=start,https://logboek.lvg.test/ldv-lezen-lvg/data-processing-operations=LVG LDV-component=http://lvg-ldv-component:4016=start
+      - LDV_LOGBOOKS=https://logboek.hypotheek-bv.test/data-processing-operations=Hypotheek-BV=http://logboek-afnemer:4016=start,https://logboek.gbo.overheid.nl/eudi-adapter/data-processing-operations=GBO EUDI-adapter=http://logboek-eudi-adapter:4016=start,https://logboek.belastingdienst.nl/data-processing-operations=Belastingdienst=http://logboek-bd:4016,https://logboek.rvig.nl/data-processing-operations=RvIG=http://logboek-brp:4016,https://logboek.gbo.overheid.nl/toestemming/data-processing-operations=GBO toestemming=http://logboek-toestemming:4016,https://logboek.installatieregister.test/data-processing-operations=Installatie Register=http://logboek-ir:4016=start,https://logboek.lvg.test/data-processing-operations=LVG=http://logboek-lvg:4016,https://logboek.belastingdienst.nl/ldv-lezen-bd/data-processing-operations=BD leveringen=http://logboek-levering-bd:4016=start,https://logboek.rvig.nl/ldv-lezen-brp/data-processing-operations=BRP leveringen=http://logboek-levering-brp:4016=start,https://logboek.lvg.test/ldv-lezen-lvg/data-processing-operations=LVG leveringen=http://logboek-levering-lvg:4016=start
       - LDV_READ_TOKEN=${LDV_READ_TOKEN:-local-demo-logboek-read-token}
       - FSC_TXLOG_EDI_URL=https://edi-txlog-api:9443
       - FSC_TXLOG_EDI_CERT=/certs/edi/internal-cert.pem
@@ -1859,9 +1843,8 @@ services:
       - ./fsc-infra/orgs/belastingdienst-mock/pki/internal:/certs/bd:ro
     networks:
       - backend
-      # The LDV components of the sources (#689) keep their logbooks off
-      # backend, where the service providers are; the chain view reads them
-      # here.
+      # The delivery logbooks of the sources (#689) are off backend, where
+      # the service providers are; the chain view reads them here.
       - sources
       # Join fsc-infra_default so {edi,bd,hv}-txlog-api:9443 can be
       # reached directly over their internal DNS names.
@@ -2404,12 +2387,10 @@ networks:
   # decryption component and the logbooks they write to. No service provider
   # is on it.
   sources:
-  # Between each source's LDV component and its sidecar (#689): only the
-  # components reach the sidecars.
-  source-chain:
-  # The network between the Inways of the sources and the LDV components
-  # behind them. The fsc-infra project owns it; a worktree running its own fsc-infra
-  # sets FSC_SOURCE_GATEWAY_NETWORK=<that project>_source-gateways in .env.
+  # The network between the Inways of the sources and what sits behind them:
+  # the sidecars and the read API of the delivery logbooks. The fsc-infra
+  # project owns it; a worktree running its own fsc-infra sets
+  # FSC_SOURCE_GATEWAY_NETWORK=<that project>_source-gateways in .env.
   source-gateways:
     name: ${FSC_SOURCE_GATEWAY_NETWORK:-fsc-infra_source-gateways}
     external: true
@@ -2431,10 +2412,10 @@ volumes:
   ldv-outbox-consent-portal-backend:
   dev-portal-var:
   dvtp-onboarding-data:
-  consent-usage-index-data:
-  bd-ldv-component-data:
-  brp-ldv-component-data:
-  lvg-ldv-component-data:
+  data-usage-index-data:
+  logboek-levering-bd-data:
+  logboek-levering-brp-data:
+  logboek-levering-lvg-data:
   logboek-bd-data:
   logboek-brp-data:
   logboek-toestemming-data:

@@ -19,19 +19,19 @@
     },
     {
       "peer_id": "99999999900000000200",
-      "name": "Belastingdienst, registering at the consent usage index",
+      "name": "Belastingdienst, registering at the data usage index",
       "active": true,
       "allowed_source_peer_ids": ["99999999900000000700"]
     },
     {
       "peer_id": "99999999900000000400",
-      "name": "RvIG, registering at the consent usage index",
+      "name": "RvIG, registering at the data usage index",
       "active": true,
       "allowed_source_peer_ids": ["99999999900000000700"]
     },
     {
       "peer_id": "99999999900000000700",
-      "name": "Toestemmingsregister (GBO), reading the LDV components of the sources",
+      "name": "Toestemmingsregister (GBO), reading the delivery logbooks of the sources",
       "active": true,
       "allowed_source_peer_ids": ["99999999900000000200", "99999999900000000400"]
     },

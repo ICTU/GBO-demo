@@ -274,89 +274,114 @@ ondertekende token.
 ## 4. Gebruik van een toestemming inzien
 
 Een burger ziet in MijnOverheid wanneer een toestemming is gebruikt: datum,
-dienstverlener en bron (#687). Elke bron heeft een LDV-component
-(`ldv-logboek` in proxymodus, #689) tussen haar Inway en haar sidecar. Die
-legt elke levering onder een toestemming vast in een eigen logboek en meldt
-de trace bij de toestemmingsgebruik-index (`consent-usage-index`) naast het
-consent-register. Opent de burger het consent, dan zoekt het register de
-registraties op en leest het elke trace terug bij de bron (#686).
+dienstverlener en bron (#687). De sidecar bij de bron meldt elke levering
+onder een toestemming bij de gegevensgebruik-index (`data-usage-index`) naast
+het consent-register, en legt haar daarna vast in een eigen
+leveringslogboek, los van het logboek van de bron (#689). Opent de burger
+het consent, dan zoekt het register de registraties op en leest het elke
+trace terug in het leveringslogboek van de bron (#686). Alles tussen
+organisaties loopt over FSC, ook de opvraging van de index door het register.
 
 ```mermaid
 sequenceDiagram
     autonumber
     actor Citizen as "Burger"
     participant IN as "Inway van de bron"
-    participant LC as "LDV-component van de bron"
     participant SC as "Sidecar bij de bron"
+    participant LL as "Leveringslogboek van de bron"
     participant BOUT as "Outway van de bron"
-    participant IDX as "Toestemmingsgebruik-index"
+    participant CRIN as "cr-inway"
+    participant IDX as "Gegevensgebruik-index"
     participant Portal as "Toestemmingsportaal"
     participant Register as "Consent-register S01"
     participant CROUT as "cr-outway"
 
-    IN->>LC: Aanvraag na de ALLOW (met consent-token)
-    LC->>SC: Ongewijzigd doorgestuurd, in dezelfde trace
-    SC-->>LC: 200 + Gbo-Ldv-Subject-Id
-    LC->>LC: Record in eigen logboek (burger, geen consent)
-    LC->>BOUT: POST /consent-usage-index/registrations
-    BOUT->>IDX: logbook_id, trace_id, consent_id (via cr-inway)
-    LC-->>IN: Gegevens, zonder de subjectheader
+    IN->>SC: Aanvraag na de ALLOW (met consent-token)
+    Note over SC: De bron antwoordt 200; het doorgifterecord gaat naar het logboek van de bron, zoals altijd
+    SC->>BOUT: POST /data-usage-index/registrations
+    BOUT->>CRIN: FSC-dienst data-usage-index
+    CRIN->>IDX: logbook_id, trace_id, consent_id
+    SC->>LL: Leveringsrecord (burger, geen consent)
+    SC-->>IN: Gegevens
 
     Citizen->>Portal: Open het consent
     Portal->>Register: GET /consents/{id}/uses (na eigenaarscontrole)
-    Register->>IDX: Registraties onder dit consent (intern)
-    par per bron, met een timeout
+    Register->>CROUT: GET /data-usage-lookup/registrations
+    CROUT->>CRIN: FSC-dienst data-usage-lookup (alleen het register)
+    CRIN->>IDX: Registraties onder dit consent
+    par per bron, met een tijdslimiet
         Register->>CROUT: POST /ldv-lezen-bd/data-processing-operations {traceId}
         CROUT->>IN: FSC; de PDP van de bron toetst LDV_READ_FSC
-        IN->>LC: Leesfunctie (4018), beperkt antwoord
+        IN->>LL: Leesfunctie (4018), beperkt antwoord
     end
     Register-->>Portal: Gebruik, en een melding per bron die niet te lezen is
 ```
 
 ### Het contract voor een bron
 
-Een bron die onder een toestemming levert, plaatst de LDV-component voor haar
-eigen dienst en richt haar FSC-dienst op de component. Ze bouwt er zelf
-niets voor, behalve dat haar dienst de burger noemt in `Gbo-Ldv-Subject-Id`
-(in de demo doet de sidecar dat met `LDV_RETURN_SUBJECT_ID=true`) en een
-regel voor de leesfunctie in haar PDP-policy. De component meldt elke
-levering via de Outway van de bron:
+Een bron die onder een toestemming levert, doet per levering twee dingen
+voordat de gegevens teruggaan, in deze volgorde:
 
-```http
-POST /consent-usage-index/registrations
-Content-Type: application/json
+1. De trace melden bij de index, via de Outway van haar eigen FSC-peer:
 
-{"logbook_id": "99999999900000000200/ldv-lezen-bd",
- "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
- "grondslag_type": "consent",
- "grondslag_ref": "<consent_id uit het token>"}
-```
+   ```http
+   POST /data-usage-index/registrations
+   Content-Type: application/json
+
+   {"logbook_id": "99999999900000000200/ldv-lezen-bd",
+    "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+    "grondslag_type": "consent",
+    "grondslag_ref": "<consent_id uit het token>"}
+   ```
+
+2. Een leveringsrecord vastleggen in een eigen leveringslogboek, onder
+   dezelfde trace, met de burger als betrokkene en zonder het consent.
+
+Lukt een van de twee niet, dan krijgt de afnemer een fout en geen gegevens.
+De registratie gaat voorop: het register telt elk record onder een
+geregistreerde trace als gebruik, dus een record van een levering die
+daarna alsnog is tegengehouden mag niet achterblijven. Een registratie
+zonder record geeft geen gebruik.
 
 - `logbook_id` is de Peer ID van de bron, een schuine streep en de naam van
-  de leesdienst van de component. De naam is nodig omdat BD en LVG een peer
-  delen. De index weigert (403) een registratie voor een andere peer.
-- `trace_id` is de trace van het record in het logboek van de component.
-- De component meldt alleen na een `200` op een aanvraag met een
-  consent-token, en pas nadat het record is vastgelegd. Lukt een van de twee
-  niet, dan krijgt de afnemer `502` en geen gegevens.
+  de FSC-leesdienst van het leveringslogboek. De naam is nodig omdat BD en
+  LVG een peer delen. De index weigert (403) een registratie voor een andere
+  peer.
+- De bron meldt alleen na een `200` op een aanvraag met een consent-token.
 - Een herhaling is veilig: de index antwoordt dan `200`.
+- De bron publiceert de leesfunctie van het leveringslogboek als FSC-dienst
+  met een grant voor het register, en neemt de regel `LDV_READ_FSC` op in
+  haar PDP-policy.
 
-Een bron zonder component kan de sidecar zelf laten melden
-(`CONSENT_USAGE_INDEX_URL` en `CONSENT_USAGE_LOGBOOK_ID`); haar registraties
-tellen dan als gebruik zonder terugleesactie, op het tijdstip van registratie.
+In de demo doet de sidecar beide stappen (`DATA_USAGE_INDEX_URL`,
+`DATA_USAGE_LOGBOOK_ID`, `DELIVERY_LOGBOOK_URL`, `DELIVERY_ACTIVITY`).
+Zonder die instellingen legt een sidecar geen leveringen vast.
 
 ### Wat telt als gebruik
 
-Elk record dat het register onder de trace terugleest bij de component is
-een gebruik, op de starttijd van dat record. Een registratie zonder record
-geeft geen gebruik. Kan het register de index niet bereiken, dan toont de
-pagina een melding in plaats van een lege lijst; kan het één bron niet
-lezen, dan toont ze een melding voor die bron en het gebruik bij de andere
-bronnen (besluit D2).
+Elk record dat het register onder de trace terugleest in het
+leveringslogboek is een gebruik, op de starttijd van dat record. Een
+registratie zonder record geeft geen gebruik. Een registratie waarvan het
+register het logboek niet kan lezen omdat er geen leesdienst voor is
+ingesteld, geeft ook geen gebruik: het register logt een waarschuwing en de
+burger ziet niets.
+
+Kan het register de index niet bereiken, dan toont de pagina een melding in
+plaats van een lege lijst; kan het één bron niet lezen, dan toont ze een
+melding voor die bron en het gebruik bij de andere bronnen (besluit D2).
+Geeft een bron meer dan 500 records onder één trace, dan toont de pagina dat
+er daar meer gebruik is dan de lijst laat zien.
 
 Het register legt het teruglezen vast als eigen verwerking
 (`gbo-toestemming-gebruik-lezen`), met de burger als betrokkene en de namen
 van de gelezen bronnen, zonder de trace-id's.
+
+### Bekende beperking: één trace onder twee toestemmingen
+
+Het register vindt gebruik per trace, en het leveringsrecord noemt het
+consent niet. Hergebruikt een afnemer één trace-id voor leveringen onder
+twee toestemmingen, dan telt elke levering als gebruik van beide. Een latere
+oplossing kan de span-id aan de registratie toevoegen.
 
 ## Beveiligingsgrens
 

@@ -289,9 +289,9 @@ shows consents that already exist.
    in as the same citizen. Open the consent: **Gebruik** lists one use with
    today's date, the service provider and Belastingdienst as the source. Each
    **↻ Verversen** in the consumer mock is a new trace and adds a use. The
-   source's LDV component records each delivery and registers it at the
-   consent usage index before it returns the data, and the register reads
-   each use back from that component's logbook; see
+   source's sidecar registers each delivery at the data usage index and
+   records it in a delivery logbook of its own before it returns the data,
+   and the register reads each use back from that logbook over FSC; see
    [docs/consent-flow.md](docs/consent-flow.md#4-gebruik-van-een-toestemming-inzien).
 6. On the same page click **Toestemming intrekken**.
    Back in the consumer mock, expand **Inkomensgegevens** and click

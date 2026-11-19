@@ -1,4 +1,4 @@
-// Package usageindex registers a delivery at GBO's consent usage index
+// Package usageindex registers a delivery at GBO's data usage index
 // (#687), through the source peer's own FSC Outway.
 //
 // The index is another organisation's service (the consent register's peer),
@@ -21,7 +21,7 @@ import (
 // Client registers deliveries for one logbook of this source.
 type Client struct {
 	// URL is the Outway's grant link for the index, for example
-	// http://bd-outway:8080/consent-usage-index.
+	// http://bd-outway:8080/data-usage-index.
 	URL string
 	// LogbookID names the logbook that holds this source's records, as the
 	// source's Peer ID, a slash and a name: 99999999900000000200/bd.
@@ -62,7 +62,7 @@ func (c Client) Register(ctx context.Context, traceID, consentID string) error {
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		return fmt.Errorf("register at the consent usage index: %w", err)
+		return fmt.Errorf("register at the data usage index: %w", err)
 	}
 	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode == http.StatusOK || response.StatusCode == http.StatusCreated {
@@ -70,5 +70,5 @@ func (c Client) Register(ctx context.Context, traceID, consentID string) error {
 		return nil
 	}
 	detail, _ := io.ReadAll(io.LimitReader(response.Body, 512))
-	return fmt.Errorf("the consent usage index answered %d: %s", response.StatusCode, strings.TrimSpace(string(detail)))
+	return fmt.Errorf("the data usage index answered %d: %s", response.StatusCode, strings.TrimSpace(string(detail)))
 }

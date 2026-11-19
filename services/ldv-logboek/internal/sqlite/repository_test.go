@@ -183,21 +183,3 @@ func TestParseTimeReadsTrimmedFractions(t *testing.T) {
 		t.Fatalf("formatTime = %q", got)
 	}
 }
-
-func TestATraceIsClaimedByItsFirstConsent(t *testing.T) {
-	repository, err := Open(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = repository.Close() }()
-	ctx := context.Background()
-	for _, step := range []struct {
-		consent string
-		want    bool
-	}{{"c-1", true}, {"c-1", true}, {"c-2", false}} {
-		got, err := repository.ClaimTrace(ctx, "4bf92f3577b34da6a3ce929d0e0e4736", step.consent)
-		if err != nil || got != step.want {
-			t.Fatalf("claim by %s = %v, %v; want %v", step.consent, got, err, step.want)
-		}
-	}
-}

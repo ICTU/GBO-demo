@@ -1,4 +1,4 @@
-// Command consent-usage-index is GBO's consent usage index: under consent X,
+// Command data-usage-index is GBO's data usage index: under consent X,
 // source Y delivered data under trace Z, at time T. Sources register a trace
 // after each delivery under a consent; the consent register looks up the
 // registrations of one consent to show the citizen when it was used (#687,
@@ -16,12 +16,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
-	"consent-usage-index/internal/httpapi"
-	"consent-usage-index/internal/sqlite"
-	"consent-usage-index/internal/usage"
+	"data-usage-index/internal/httpapi"
+	"data-usage-index/internal/sqlite"
+	"data-usage-index/internal/usage"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp/filters"
@@ -37,18 +38,22 @@ const (
 )
 
 type config struct {
+	// FSCPort serves the registrations (FSC service data-usage-index) and
+	// LookupPort the lookup (FSC service data-usage-lookup).
 	FSCPort      string
-	InternalPort string
+	LookupPort   string
 	DatabasePath string
-	ReadToken    string
+	// LookupPeers names the peers that may look up, next to the FSC
+	// contract. Empty: the contract alone decides.
+	LookupPeers []string
 }
 
 func loadConfig() config {
 	return config{
 		FSCPort:      getEnv("FSC_PORT", "4019"),
-		InternalPort: getEnv("INTERNAL_PORT", "4020"),
-		DatabasePath: getEnv("DATABASE_PATH", "/data/consent-usage-index.db"),
-		ReadToken:    os.Getenv("INDEX_READ_TOKEN"),
+		LookupPort:   getEnv("LOOKUP_PORT", "4020"),
+		DatabasePath: getEnv("DATABASE_PATH", "/data/data-usage-index.db"),
+		LookupPeers:  strings.Fields(strings.ReplaceAll(os.Getenv("LOOKUP_PEERS"), ",", " ")),
 	}
 }
 
@@ -77,16 +82,9 @@ func initTracer(ctx context.Context) func(context.Context) error {
 }
 
 func main() {
-	serviceName := getEnv("OTEL_SERVICE_NAME", "consent-usage-index")
+	serviceName := getEnv("OTEL_SERVICE_NAME", "data-usage-index")
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", serviceName))
 	cfg := loadConfig()
-
-	// Without a read token the lookup would be open to every service on the
-	// network; refuse to start rather than serve it that way.
-	if cfg.ReadToken == "" {
-		slog.Error("INDEX_READ_TOKEN is required")
-		os.Exit(1)
-	}
 
 	shutdownTracer := initTracer(context.Background())
 	defer func() {
@@ -111,8 +109,8 @@ func main() {
 			ReadHeaderTimeout: readHeaderTimeout,
 		},
 		{
-			Addr:              ":" + cfg.InternalPort,
-			Handler:           otelhttp.NewHandler(httpapi.NewInternalHandler(index, store, cfg.ReadToken), serviceName, notHealth),
+			Addr:              ":" + cfg.LookupPort,
+			Handler:           otelhttp.NewHandler(httpapi.NewLookupHandler(index, store, cfg.LookupPeers), serviceName, notHealth),
 			ReadHeaderTimeout: readHeaderTimeout,
 		},
 	}

@@ -21,86 +21,37 @@ logging standards this chain follows, alongside the Authorization Decision Log
 
 ## What this would be in production
 
-This service plays two parts, and production treats them differently.
+You would not build this service. It exists here because the demo simulates
+three organisations at once, and each of them needs a logbook to write to.
 
-**As the logbook of each simulated organisation, you would not build it.**
-The demo simulates several organisations at once, and each needs a logbook
-to write to. LDV puts the logbook with the Verantwoordelijke: in production
-the Belastingdienst and RvIG each run their own, GBO runs its own for its own
-processing, and GBO ships the *client* (record shape, mandatory attributes,
-confirmation, no sampling) to everyone else in the chain. The near-identical
-instances are a simulation artefact, not an architecture proposal. The record
-is OTel-shaped and the standard recommends OTLP, so an organisation would
-more likely run a non-sampling OTLP pipeline with an audit store behind it,
-designed so that a producer gets a confirmation per record. An organisation
-that already has a verwerkingenlogging facility should adapt that.
+**Ownership.** LDV puts the logbook with the Verantwoordelijke. In production
+the Belastingdienst and RvIG each run their own; GBO neither builds nor
+operates those. GBO runs its own, for its own processing, and ships the *client* —
+the contract about record shape, mandatory attributes, confirmation and no
+sampling — to everyone else in the chain. Five near-identical instances are a
+simulation artefact, not an architecture proposal.
 
-**As the LDV component in a source's chain (#689), it is offered as a
-reference service.** A source that answers DvTP requests under a consent
-deploys one instance in proxy mode (`LDV_PROXY_UPSTREAM`) between its Inway
-and its own service:
+**What you would run instead.** The record is OTel-shaped and the standard
+recommends OTLP, so the obvious route is an OTLP pipeline with a deliberately
+non-sampling collector configuration and an audit store behind it — not Loki.
+The catch is the requirement that makes LDV different: confirmation per record.
+A default collector batches and queues, so the producer gets an acknowledgement
+that guarantees nothing. That is configurable, but it has to be designed rather
+than assumed, which is why this demo speaks plain HTTP: the confirmation is
+then unmistakable. An organisation that already has a verwerkingenlogging
+facility should adapt to it; the LDV interface is small enough.
 
-```text
-Inway → LDV component (4017) → the source's own service (in the demo: bron-sidecar)
-```
+**One way this design would not survive production.**
 
-The source builds nothing for it. The component forwards each request
-unchanged, in the trace it arrived in, and for a request with a consent token
-that the source answers with 200 it:
+*Nothing here is tamper-evident.* — see below. The logbook is no longer on the
+critical path: every producer spools locally and delivers afterwards, so an
+outage delays records rather than failing requests.
 
-1. registers the trace at GBO's consent usage index through the source
-   peer's Outway (`CONSENT_USAGE_INDEX_URL`, `CONSENT_USAGE_LOGBOOK_ID`),
-   with the `consent_id` from the token and no data subject;
-2. records the delivery in its own logbook: the trace-id, its own span, the
-   processing activity set per deployment (`LDV_PROXY_ACTIVITY`), status
-   `OK`, start and end time, and the citizen;
-3. only then returns the response.
-
-The order differs from #689, which registers after the record. The register
-counts every record under a registered trace as a use, so a record left by a
-delivery whose registration then failed would count as a use once the trace
-was registered by an earlier delivery. Registering first means a record
-exists only for a delivery the index confirmed; a registration whose record
-never landed gives no use (#687).
-
-A trace carries deliveries under one consent only. The component remembers
-which consent each trace was first delivered under (in its own store, not in
-the LDV record) and refuses a delivery under another consent in that trace.
-Without this, a caller that reused one trace ID under two consents would make
-each delivery show as a use of both, because the register finds uses by
-trace and the record does not name the consent.
-
-What it needs from the source:
-
-| | |
-| --- | --- |
-| An image and one instance per source, with its own volume | `ghcr.io/ictu/gbo-demo/ldv-logboek`; Helm values in `deploy/helm/gbo-app/examples/ldv-component-values.yaml` |
-| A processing activity in its register | one per source, for example `bd-levering-onder-toestemming` |
-| An FSC connection to `consent-usage-index` | through its peer's Outway; the register's peer signs it for admitted peers |
-| The citizen's name in the source's pseudonym space | the source's service returns it in `Gbo-Ldv-Subject-Id` (here the sidecar does, with `LDV_RETURN_SUBJECT_ID=true`); the component records it and strips the header before the response leaves |
-| The FSC service endpoint pointing at the component | and the source's own service reachable from the component only |
-
-**Why this component fails closed while the producers spool.** Every other
-producer in the demo writes to a local spool and delivers afterwards, so a
-logbook outage delays records instead of failing requests. The component does
-the opposite on purpose. Its record and its registration are not an account
-of a processing that already happened elsewhere: they are what makes the
-delivery visible to the citizen as a use of their consent. A spooled record
-that never arrives, or a registration that never lands, would be a delivery
-the citizen cannot see. So the component returns the data only after both
-are confirmed, and a component that is down makes the source unreachable.
-
-**Demo shortcut.** The component reads `consent_id` from the token's claims
-without checking the signature: the source's PDP verified the token at the
-Inway, and only the Inway reaches the component. A deployment where that does
-not hold must verify the token against the consent register's JWKS.
-
-**One way this design would not survive production: nothing here is
-tamper-evident.** The store accepts `UPDATE` and `DELETE` like any other
-SQLite database, and a logbook an operator can edit is not evidence.
-Production wants WORM storage, hash chaining or an external notary. That sits
-under the same governance question as retention (Q-08), but it is also a
-storage decision made early rather than late.
+The store accepts `UPDATE` and `DELETE` like any other SQLite database, and a
+logbook an operator can edit is not evidence. Production wants WORM storage,
+hash chaining or an external notary. That sits under the same governance
+question as retention (Q-08), but it is also a storage decision made early
+rather than late.
 
 ## Why this is not the observability pipeline
 
@@ -332,11 +283,13 @@ neither defines.
 
 ### The read API for the consent register, over FSC (#686)
 
-A component started with `LDV_FSC_READ_PORT` serves the read extension a
+A logbook started with `LDV_FSC_READ_PORT` serves the read extension a
 second time, on a listener of its own that sits behind the source's Inway as
 an FSC service (`ldv-lezen-bd`, `ldv-lezen-brp`, `ldv-lezen-lvg`, each with a
 grant for the consent register's peer `…0700`). It replaces the shared
-bearer token for that reader:
+bearer token for that reader. In the demo the three delivery logbooks
+(`logboek-levering-bd`, `-brp`, `-lvg`), where each source's sidecar records
+its deliveries under a consent, run this listener:
 
 - **No token.** The Inway is the PEP: it checks the contract and asks the
   source's PDP about each request, body included. The rule `LDV_READ_FSC` in
@@ -380,12 +333,6 @@ this case; the body format is FSC's.
 | `LDV_READ_TOKEN` | — | the read extension refuses every request without it |
 | `LDV_LOGBOOK_ID` | derived from the register | the URI of this logbook's read API |
 | `LDV_TLS_CERT_PATH`, `LDV_TLS_KEY_PATH` | — | terminate TLS here. Both or neither: one without the other fails startup rather than quietly serving plaintext |
-| `LDV_PROXY_UPSTREAM` | — | proxy mode (#689): what the component sits in front of. With it, the four below are required |
-| `LDV_PROXY_PORT` | `4017` | the proxy listener, behind the source's Inway |
-| `LDV_PROXY_ACTIVITY` | — | the processing activity a delivery is recorded under; must be in the register |
-| `CONSENT_USAGE_INDEX_URL` | — | the source peer's Outway grant link for the consent usage index |
-| `CONSENT_USAGE_LOGBOOK_ID` | — | what a registration names this logbook by: peer ID plus read service name |
-| `OTEL_EXPORTER_OTLP_*` | — | in proxy mode, server and client spans; the SDK reads these itself |
 | `LDV_FSC_READ_PORT` | — | serve the reduced read API for the consent register behind the Inway (#686) |
 
 ## Producers: durable first, delivered after

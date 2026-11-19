@@ -18,11 +18,11 @@ func TestRegisterPostsThePointerToTheOutwaysGrantLink(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := Client{URL: server.URL + "/consent-usage-index", LogbookID: "99999999900000000200/bd", HTTP: server.Client()}
+	client := Client{URL: server.URL + "/data-usage-index", LogbookID: "99999999900000000200/bd", HTTP: server.Client()}
 	if err := client.Register(context.Background(), "4bf92f3577b34da6a3ce929d0e0e4736", "c-7f3a"); err != nil {
 		t.Fatal(err)
 	}
-	if path != "/consent-usage-index/registrations" {
+	if path != "/data-usage-index/registrations" {
 		t.Errorf("path = %q", path)
 	}
 	want := map[string]string{

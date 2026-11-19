@@ -90,7 +90,7 @@ brp-graphql-server|.|./services/brp-graphql-server/Dockerfile|.dockerignore serv
 bsnk-mock|./services/bsnk-mock|./services/bsnk-mock/Dockerfile|services/bsnk-mock|linux/amd64|false|bsnk-mock
 consent-portal-backend|.|./services/consent-portal-backend/Dockerfile|.dockerignore services/consent-portal-backend services/ldv-client|linux/amd64|false|consent-portal-backend
 consent-register|.|./services/consent-register/Dockerfile|.dockerignore services/consent-register services/ldv-client|linux/amd64|false|consent-register
-consent-usage-index|./services/consent-usage-index|./services/consent-usage-index/Dockerfile|services/consent-usage-index|linux/amd64|false|consent-usage-index
+data-usage-index|./services/data-usage-index|./services/data-usage-index/Dockerfile|services/data-usage-index|linux/amd64|false|data-usage-index
 dev-portal-backend|.|./services/dev-portal-backend/Dockerfile|services/dev-portal-backend policies|linux/amd64|false|dev-portal-backend
 developer-portal|./developer-portal|./developer-portal/Dockerfile|developer-portal|linux/amd64|false|developer-portal
 dienstverlener-backend|.|./services/dienstverlener-backend/Dockerfile|.dockerignore services/dienstverlener-backend services/ldv-client|linux/amd64|false|dienstverlener-backend

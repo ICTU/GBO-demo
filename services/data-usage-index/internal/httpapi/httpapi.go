@@ -1,19 +1,19 @@
 // Package httpapi holds the two driving adapters of the index, each on a
 // listener of its own:
 //
-//   - the FSC listener, published as the FSC service consent-usage-index
-//     behind cr-inway: POST /registrations, for the sources;
-//   - the internal listener, for the consent register only:
-//     GET /registrations?grondslag_type=consent&grondslag_ref={consent_id}.
+//   - the registration listener, published as the FSC service
+//     data-usage-index behind cr-inway: POST /registrations, for the sources;
+//   - the lookup listener, published as the FSC service data-usage-lookup
+//     behind the same Inway, with a connection for the consent register
+//     only: GET /registrations?grondslag_type=consent&grondslag_ref={id}.
 //
-// They are separate because an Inway forwards every path under a service's
-// endpoint: on one listener, the lookup would be reachable over FSC by every
-// source with a connection.
+// They are separate services because an Inway forwards every path under a
+// service's endpoint: on one listener, the lookup would be reachable by
+// every source with a connection for registering.
 package httpapi
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -21,10 +21,11 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
-	"consent-usage-index/internal/usage"
+	"data-usage-index/internal/usage"
 )
 
 const maxBodyBytes = 16 << 10
@@ -111,10 +112,13 @@ func NewFSCHandler(index *usage.Index, store Pinger) http.Handler {
 	return mux
 }
 
-// NewInternalHandler serves the lookup to the consent register. The bearer
-// token is what keeps it to the register: the listener sits on a network
-// that other services share.
-func NewInternalHandler(index *usage.Index, store Pinger, readToken string) http.Handler {
+// NewLookupHandler serves the lookup, published as the FSC service
+// data-usage-lookup behind cr-inway. Like the registration listener it
+// trusts the Fsc-Authorization header the Inway forwards. The FSC contract
+// is the authorization: only the consent register's peer has a connection.
+// readers, when not empty, names the peers that may look up besides that:
+// a second check in case a contract is signed that should not have been.
+func NewLookupHandler(index *usage.Index, store Pinger, readers []string) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/health", health(store))
 	mux.HandleFunc("/registrations", func(w http.ResponseWriter, r *http.Request) {
@@ -123,9 +127,13 @@ func NewInternalHandler(index *usage.Index, store Pinger, readToken string) http
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
-		if !validBearer(r, readToken) {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="consent-usage-index"`)
-			writeError(w, http.StatusUnauthorized, "a valid read token is required")
+		peer := CallingPeer(r)
+		if peer == "" {
+			writeError(w, http.StatusUnauthorized, "the lookup is only available over FSC")
+			return
+		}
+		if len(readers) > 0 && !slices.Contains(readers, peer) {
+			writeError(w, http.StatusForbidden, "this peer may not look up registrations")
 			return
 		}
 		query := r.URL.Query()
@@ -146,11 +154,6 @@ func NewInternalHandler(index *usage.Index, store Pinger, readToken string) http
 		writeJSON(w, http.StatusOK, map[string]any{"registrations": out})
 	})
 	return mux
-}
-
-func validBearer(r *http.Request, token string) bool {
-	got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	return ok && token != "" && subtle.ConstantTimeCompare([]byte(got), []byte(token)) == 1
 }
 
 func health(store Pinger) http.Handler {

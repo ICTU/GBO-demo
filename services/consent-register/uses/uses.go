@@ -1,15 +1,15 @@
 // Package uses answers when a consent was used: the core of
 // GET /consents/{id}/uses (#687).
 //
-// A use is a delivery a source registered at the consent usage index under
+// A use is a delivery a source registered at the data usage index under
 // this consent, read back from that source's logbook (#687): the register
-// looks up the registrations, reads each trace at the source's LDV
-// component over FSC, and shows one use per record it finds there, at the
+// looks up the registrations, reads each trace in the source's delivery
+// logbook over FSC, and shows one use per record it finds there, at the
 // record's start time. A registration without a record gives no use.
 //
-// A registration whose logbook has no read service (a source that runs only
-// the sidecar) is shown as a use without read-back, at the time of
-// registration: hiding it would hide a real delivery.
+// A registration whose logbook ID has no read service here gives no use
+// either: the register cannot confirm it, and says so in its own log, not
+// to the citizen.
 //
 // The package imports no transport. The index is a port; the adapter that
 // reaches it over HTTP is usageindex.
@@ -18,6 +18,7 @@ package uses
 import (
 	"context"
 	"errors"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -30,7 +31,7 @@ type Registration struct {
 	RegisteredAt time.Time
 }
 
-// Index is the consent usage index seen from the register. An error means
+// Index is the data usage index seen from the register. An error means
 // the index could not answer, not that there are no registrations.
 type Index interface {
 	Registrations(ctx context.Context, consentID string) ([]Registration, error)
@@ -42,7 +43,7 @@ type Record struct {
 	StartTime time.Time
 }
 
-// Logbooks reads the logbook of a source's LDV component by trace-id, over
+// Logbooks reads the delivery logbook of a source by trace-id, over
 // FSC. truncated says the logbook cut the answer off: it holds more records
 // under the trace than it returned. ErrNoReadService means the register has
 // no read service for that logbook ID; any other error means the logbook
@@ -63,8 +64,7 @@ const DefaultReadsPerSource = 8
 // Use is one moment the consent was used, as the citizen sees it.
 type Use struct {
 	// UsedAt is the start time of the record read back from the source
-	// (#687), or the time of registration for a logbook without a read
-	// service.
+	// (#687).
 	UsedAt time.Time
 	// ServiceProviderOIN is the party the consent was given to. A
 	// registration does not name it; the consent does.
@@ -108,6 +108,9 @@ type Report struct {
 	// SourcesRead names the sources whose logbooks the register read, for
 	// the register's own record of that reading.
 	SourcesRead []string
+	// Unreadable lists the logbook IDs of registrations the register has
+	// no read service for. They give no use; the register logs a warning.
+	Unreadable []string
 	// SourceErrs is why a source's logbook could not be read, by source.
 	SourceErrs map[string]error
 }
@@ -122,8 +125,8 @@ type Service struct {
 	Sources map[string]string
 	// ServiceProviders names the party behind each OIN, for the same reason.
 	ServiceProviders map[string]string
-	// Logbooks reads a source's logbook back. Nil means no read-back: every
-	// registration is a use, as on the short path.
+	// Logbooks reads a source's logbook back. Nil means no logbook can be
+	// read, so no registration gives a use.
 	Logbooks Logbooks
 	// ReadTimeout bounds all reads of one source together;
 	// DefaultReadTimeout when zero.
@@ -166,7 +169,10 @@ func (s Service) For(ctx context.Context, consentID, serviceProviderOIN string) 
 		source := s.sourceName(registration.LogbookID)
 		switch {
 		case errors.Is(result.err, ErrNoReadService):
-			report.Uses = append(report.Uses, use(registration, registration.RegisteredAt))
+			// No read service, no use: the register cannot confirm it.
+			if !slices.Contains(report.Unreadable, registration.LogbookID) {
+				report.Unreadable = append(report.Unreadable, registration.LogbookID)
+			}
 		case result.err != nil:
 			if !failed[source] {
 				failed[source] = true

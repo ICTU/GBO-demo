@@ -10,13 +10,13 @@ import (
 	"strings"
 	"testing"
 
-	"consent-usage-index/internal/sqlite"
-	"consent-usage-index/internal/usage"
+	"data-usage-index/internal/sqlite"
+	"data-usage-index/internal/usage"
 )
 
 const (
-	bdPeer    = "99999999900000000200"
-	readToken = "test-read-token"
+	bdPeer       = "99999999900000000200"
+	registerPeer = "99999999900000000700"
 )
 
 // fscToken builds an unsigned token with the given sub, the way the Inway
@@ -27,7 +27,7 @@ func fscToken(sub string) string {
 	return enc.EncodeToString([]byte(`{"alg":"RS256"}`)) + "." + enc.EncodeToString(claims) + ".sig"
 }
 
-func newServers(t *testing.T) (fsc, internal http.Handler) {
+func newServers(t *testing.T) (fsc, lookup http.Handler) {
 	t.Helper()
 	store, err := sqlite.Open(filepath.Join(t.TempDir(), "index.db"))
 	if err != nil {
@@ -35,7 +35,7 @@ func newServers(t *testing.T) (fsc, internal http.Handler) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	index := usage.New(store, nil)
-	return NewFSCHandler(index, store), NewInternalHandler(index, store, readToken)
+	return NewFSCHandler(index, store), NewLookupHandler(index, store, []string{registerPeer})
 }
 
 func register(t *testing.T, h http.Handler, peer, body string) *httptest.ResponseRecorder {
@@ -52,7 +52,7 @@ func register(t *testing.T, h http.Handler, peer, body string) *httptest.Respons
 const validBody = `{"logbook_id":"99999999900000000200/bd","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","grondslag_type":"consent","grondslag_ref":"c-1"}`
 
 func TestRegisterThenRetryThenLookup(t *testing.T) {
-	fsc, internal := newServers(t)
+	fsc, lookup := newServers(t)
 
 	if rec := register(t, fsc, bdPeer, validBody); rec.Code != http.StatusCreated {
 		t.Fatalf("first: %d %s", rec.Code, rec.Body)
@@ -62,9 +62,9 @@ func TestRegisterThenRetryThenLookup(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/registrations?grondslag_type=consent&grondslag_ref=c-1", nil)
-	req.Header.Set("Authorization", "Bearer "+readToken)
+	req.Header.Set("Fsc-Authorization", fscToken(registerPeer))
 	rec := httptest.NewRecorder()
-	internal.ServeHTTP(rec, req)
+	lookup.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("lookup: %d %s", rec.Code, rec.Body)
 	}
@@ -112,17 +112,19 @@ func TestTheLookupIsNotOnTheFSCListener(t *testing.T) {
 	}
 }
 
-func TestTheLookupNeedsTheReadToken(t *testing.T) {
-	_, internal := newServers(t)
-	for _, header := range []string{"", "Bearer wrong"} {
+// The lookup is for the register: a request that did not come over FSC is
+// refused, and so is a source peer, even with a connection.
+func TestTheLookupIsForTheRegisterOverFSC(t *testing.T) {
+	_, lookup := newServers(t)
+	for peer, want := range map[string]int{"": http.StatusUnauthorized, bdPeer: http.StatusForbidden, registerPeer: http.StatusOK} {
 		req := httptest.NewRequest(http.MethodGet, "/registrations?grondslag_type=consent&grondslag_ref=c-1", nil)
-		if header != "" {
-			req.Header.Set("Authorization", header)
+		if peer != "" {
+			req.Header.Set("Fsc-Authorization", fscToken(peer))
 		}
 		rec := httptest.NewRecorder()
-		internal.ServeHTTP(rec, req)
-		if rec.Code != http.StatusUnauthorized {
-			t.Fatalf("%q: want 401, got %d", header, rec.Code)
+		lookup.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Fatalf("peer %q: status %d, want %d", peer, rec.Code, want)
 		}
 	}
 }

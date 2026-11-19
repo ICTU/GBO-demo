@@ -95,7 +95,7 @@ export type ConsentUse = {
 }
 
 // What the citizen is told when the uses cannot all be shown. index_unavailable:
-// the consent usage index could not be reached, so the list is not known.
+// the data usage index could not be reached, so the list is not known.
 export type UsageNotice = {
   kind: string
   source?: string
