@@ -38,8 +38,12 @@ For every mode:
 The complete EUDI flow additionally requires:
 
 - the pinned nl-wallet v0.5.0 submodule;
+- Go 1.26 or newer on the host: the provisioning targets (`demo-eudi`,
+  `demo-full` and every `provision-*` target) sign with `go run` on the host,
+  so the CA keys never enter a container;
 - two public HTTPS URLs: one for the issuance server and one for the EUDI
-  adapter;
+  adapter (the own credential issuer and the ASI route need more; see
+  [the port table](#public-urls-and-ports));
 - a compatible test wallet with a valid `urn:eudi:pid:nl:1` credential;
 - issuer and reader trust anchors already trusted by that wallet.
 
@@ -109,6 +113,19 @@ GBO_PUBLIC_BIND_ADDRESS=127.0.0.1
 `GBO_PUBLIC_BIND_ADDRESS` keeps the plain http ports on the loopback
 interface, so only the proxy reaches them.
 
+For the EUDI flows some containers call the public URLs themselves:
+`eudi-issuance-server` calls the adapter at `EUDI_BRI_URL`, and the own
+credential issuer, its materializer and the EUDI wallet verifier fetch the
+PID trust list from `EUDI_TRUST_PUBLIC_URL`. With the proxy on the same host,
+make sure that
+
+1. the public hostname resolves inside the containers to an address where
+   they reach the proxy (a resolver that only the host uses does not apply
+   there; `extra_hosts` in a `docker-compose.override.yml` for those services
+   is one way); and
+2. the host firewall accepts connections from the Docker networks to the
+   proxy on the adapter and trust-host ports (default 9409 and 9430).
+
 ### The complete demo, with EUDI
 
 `make demo-full` adds the EUDI wallet flow to DvTP. It additionally needs the
@@ -118,6 +135,30 @@ public URLs in `.env`:
 EUDI_PUBLIC_URL=https://eudi-is.example.org/
 EUDI_BRI_URL=https://eudi-bri.example.org/
 ```
+
+#### Public URLs and ports
+
+Each public URL routes to one published host port. `make demo-full` needs
+the first two; the others serve the
+[own credential issuer](#own-credential-issuer-for-eudi-wallets) and the
+ASI route (`make demo-asi`). Set the ones you use in `.env`.
+
+| Setting | Host port | Needed for |
+| --- | --- | --- |
+| `EUDI_PUBLIC_URL` | 18001 | NL Wallet issuance (issuance server) |
+| `EUDI_BRI_URL` | 9409 | EUDI adapter: the issuance server's data source and type metadata |
+| `ISSUER_PUBLIC_URL` | 9429 | own credential issuer |
+| `EUDI_TRUST_PUBLIC_URL` | 9430 | trust host: LoTE lists, CRL, status lists |
+| `ASI_PROVIDER_PUBLIC_URL` | 9424 | ASI provider |
+| `ASI_AUTHORIZATION_SERVER_PUBLIC_URL` | 9425 | ASI login and consent in the browser |
+| `QTSP_PUBLIC_URL` | 9427 | reference QTSP |
+| `ASI_WALLET_VERIFIER_PUBLIC_URL` | 9428 | NL Wallet PID presentation in the ASI route |
+| `ASI_EUDI_WALLET_VERIFIER_PUBLIC_URL` | 9432 | EUDI wallet PID presentation in the ASI route |
+| `GBO_PUBLIC_HOST` | 9000, 9003 | landing page, developer portal |
+
+Never publish port 9431: it is the own issuer's internal offer API, which
+has no authentication. Compose binds it to `127.0.0.1`; keep it out of the
+proxy too.
 
 Before starting an EUDI demo, provide the issuer and reader CA material that
 the test wallet already trusts. The setup deliberately never generates trust
@@ -131,6 +172,13 @@ issuer-ca-cert.pem
 reader-ca-key.pem
 reader-ca-cert.pem
 ```
+
+These files are managed material: request them from the
+[repository owner](#repository-owner). Substitutes do not work: wallets do
+not trust them, and `make publish-trust-lists` refuses an issuer or reader
+root whose CN is not `ca.gbo-issuer` or `ca.gbo-reader` (`PubEAA requires
+its own GBO root "ca.gbo-issuer"`). The earlier provisioning steps only
+check that the four files exist, so a wrong set surfaces late.
 
 Keep the private keys outside version control. To load the same managed CA
 material from another location, set `ONBOARDING_SECRETS_DIR` to the absolute
@@ -154,8 +202,9 @@ provisioning snapshot plus restart.
 See the [trust-host runbook](trust-host/README.md) for host-only signing and
 publication.
 
-The own credential issuer (`services/eudi-credential-issuer`, not yet in the
-stack) also needs per source an access certificate (WRPAC) and a registration
+The own credential issuer (`services/eudi-credential-issuer`, Compose
+profile `credential-issuer`, started with `make credential-issuer-up`; see
+[below](#own-credential-issuer-for-eudi-wallets)) also needs per source an access certificate (WRPAC) and a registration
 certificate (WRPRC). `make create-development-registrar-root` creates the
 registrar root that signs the registration certificates, once, in
 `development-ca/` (`registrar-ca-key.pem`, `registrar-ca-cert.pem`); it is a
@@ -250,6 +299,39 @@ that hostname once. Issuer metadata and QR sessions must not be cached.
 The first EUDI build can take several minutes. `make demo-full` performs the
 complete idempotent bootstrap: FSC setup, contracts, source onboarding,
 development certificates, EUDI configuration and application startup.
+
+### Own credential issuer for EUDI wallets
+
+The own credential issuer runs beside the issuance server, under the Compose
+profile `credential-issuer`. It needs `ISSUER_PUBLIC_URL`,
+`EUDI_TRUST_PUBLIC_URL` and `CREDENTIAL_ISSUER_DB_PASSWORD` in `.env`, and
+the trusted wallet providers in `WALLET_ROOTS_DIR` (see the
+credential-issuer block in `docker-compose.yml`). After `make demo-full`,
+run in this order:
+
+```bash
+# The registrar root is created once and never replaced; skip it on a rerun.
+test -f "${ONBOARDING_SECRETS_DIR:-.local/secrets}/development-ca/registrar-ca-key.pem" \
+  || make create-development-registrar-root
+make provision-wallet-registration SOURCE_ID=belastingdienst KVK_NUMBER=99990200
+make provision-wallet-registration SOURCE_ID=rvig KVK_NUMBER=99990300
+make provision-wallet-registration SOURCE_ID=demo-unsecured KVK_NUMBER=99990900
+make provision-test-pid
+make provision-qtsp-wallet-registration
+make provision-trust-list-signer
+make publish-trust-lists
+docker compose --profile eudi --profile credential-issuer up -d trust-host
+# Check that the four $EUDI_TRUST_PUBLIC_URL/lote/*.jwt return 200, then:
+make credential-issuer-up
+make provision-asi-eudi-wallet-verifier
+make demo-asi
+```
+
+The trust host must serve the lists before the issuer starts: its
+materializer and the EUDI wallet verifier fetch the PID list from it. The
+LoTE signer keys stay in `.local/lote-signer/` (`GBO_LOTE_SIGNER_DIR`); losing
+them invalidates every wallet build that embeds their root. See the
+[trust-host runbook](trust-host/README.md) for the publication details.
 
 ## Other modes
 

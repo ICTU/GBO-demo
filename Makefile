@@ -289,8 +289,10 @@ asi-wallet-verifier-image:
 	    -f services/asi-wallet-verifier/Dockerfile "$$NLWALLET_PATH"; \
 	fi
 
+# The URL defaults only satisfy Compose's required-variable checks for the
+# whole file; none of the services started here reads them.
 source-metadata-up: policy-check
-	EUDI_PUBLIC_URL="$${EUDI_PUBLIC_URL:-http://localhost:8001}" \
+	EUDI_PUBLIC_URL="$${EUDI_PUBLIC_URL:-http://localhost:18001}" \
 	EUDI_BRI_URL="$${EUDI_BRI_URL:-http://localhost:9409}" \
 	EUDI_POSTGRES_PASSWORD="$${EUDI_POSTGRES_PASSWORD:-local-not-used}" \
 		docker compose up --build --force-recreate -d openftv-pdp graphql-server brp-graphql-server unsecured-graphql-server bron-sidecar brp-sidecar
