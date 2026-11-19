@@ -261,8 +261,8 @@ a launch profile or with `Gbo__Profiles`, comma-separated:
 
 | Command (in `aspire/`) | Starts |
 | --- | --- |
-| `aspire run` | Core services only: sources, PDP, logbooks, developer portal |
-| `aspire run --launch-profile dvtp` | DvTP consent flow over OpenFSC |
+| `aspire run --launch-profile core` | Core services only: sources, PDP, logbooks, developer portal |
+| `aspire run` (or `--launch-profile dvtp`) | DvTP consent flow over OpenFSC |
 | `Gbo__Profiles=eudi aspire run` | EUDI wallet flow over OpenFSC |
 | `aspire run --launch-profile full` | DvTP and EUDI flows together |
 | `Gbo__Profiles=dvtp,integrator aspire run` | DvTP plus the integrator path |

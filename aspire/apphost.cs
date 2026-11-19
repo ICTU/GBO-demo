@@ -26,8 +26,10 @@ string Repo(string relative) => Path.Combine(repoRoot, relative);
 
 // ── Profiles ─────────────────────────────────────────────────────────────
 // Which parts of the demo run, as the compose profiles did. Set them with a
-// launch profile (aspire run --launch-profile dvtp) or Gbo__Profiles, comma
-// separated. Without any, only the core runs.
+// launch profile (aspire run --launch-profile full) or Gbo__Profiles, comma
+// separated. Without any, the dvtp demo runs, as `make demo` did; `core`
+// (aspire run --launch-profile core) runs the core only.
+//   core        sources, PDP, logbooks, developer portal and landing page
 //   dvtp        consent flow over FSC: consumer, consent portal, IR, LVG
 //   eudi        EUDI wallet issuance over FSC (needs public URLs and CAs)
 //   full        dvtp + eudi
@@ -39,7 +41,7 @@ string Repo(string relative) => Path.Combine(repoRoot, relative);
 // One-off host provisioning (wallet registration, trust lists, test PID,
 // wallet verifiers) is aspire/scripts/provision.sh.
 var profiles = new HashSet<string>(
-    (builder.Configuration["Gbo:Profiles"] ?? "")
+    (string.IsNullOrWhiteSpace(builder.Configuration["Gbo:Profiles"]) ? "dvtp" : builder.Configuration["Gbo:Profiles"]!)
         .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
     StringComparer.OrdinalIgnoreCase);
 if (profiles.Contains("full")) { profiles.Add("dvtp"); profiles.Add("eudi"); }
@@ -121,7 +123,7 @@ var otelCollector = builder.AddContainer("otel-collector", "otel/opentelemetry-c
 IResourceBuilder<ContainerResource> GoService(string name, string dockerfile, int port, string? context = null, int? hostPort = null)
 {
     return builder.AddDockerfile(name, context ?? "..", dockerfile)
-        .WithHttpEndpoint(port: hostPort, targetPort: port, name: "http")
+        .WithHttpEndpoint(port: hostPort, targetPort: port, name: "http", isProxied: hostPort is null)
         .WithHttpHealthCheck("/health")
         .WithEnvironment("OTEL_SERVICE_NAME", name)
         .WithEnvironment("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317")
@@ -375,7 +377,7 @@ if (fscOn)
         .WaitForCompletion(fscRootCa);
 
     var certportal = builder.AddContainer("certportal", "federatedserviceconnectivity/ca-certportal", FscVersion)
-        .WithHttpEndpoint(port: 8091, targetPort: 8080, name: "http")
+        .WithHttpEndpoint(port: 8091, targetPort: 8080, name: "http", isProxied: false)
         .WithArgs("/usr/local/bin/ca-certportal", "serve", "--listen-address=0.0.0.0:8080",
             "--ca-host=http://cfssl:8888", "--include-issuer-cert=true")
         .WaitFor(cfssl);
@@ -481,7 +483,7 @@ if (fscOn)
         manager.WithArgs(args.ToArray());
 
         var controller = Fsc($"{prefix}-controller", "controller")
-            .WithHttpEndpoint(port: controllerPort, targetPort: 3001, name: "http")
+            .WithHttpEndpoint(port: controllerPort, targetPort: 3001, name: "http", isProxied: false)
             .WithEnvironment("LISTEN_ADDRESS_UI", "0.0.0.0:3001")
             .WithEnvironment("LISTEN_ADDRESS_REGISTRATION_API", "0.0.0.0:9443")
             .WithEnvironment("LISTEN_ADDRESS_ADMINISTRATION_API", "0.0.0.0:9444")
@@ -528,7 +530,7 @@ if (fscOn)
             if (outwayPort is int port)
             {
                 // The host provisioning steps reach the EDI Outway here.
-                gw.WithHttpEndpoint(port: port, targetPort: 8080, name: "http");
+                gw.WithHttpEndpoint(port: port, targetPort: 8080, name: "http", isProxied: false);
             }
         }
         fscPeers[prefix] = (manager, controller);
@@ -568,7 +570,7 @@ if (fscOn)
 
     // Its certificates come from the directory peer's bootstrap.
     builder.AddContainer("directory-ui", "federatedserviceconnectivity/directory-ui", FscVersion)
-        .WithHttpEndpoint(port: 8093, targetPort: 3001, name: "http")
+        .WithHttpEndpoint(port: 8093, targetPort: 3001, name: "http", isProxied: false)
         .WithBindMount(Repo("fsc-infra/directory-ui/pki"), "/certs", isReadOnly: true)
         .WithEnvironment("TLS_GROUP_ROOT_CERT", "/certs/org/root.pem")
         .WithEnvironment("GROUP_ID", "fsc-demo")
@@ -975,7 +977,7 @@ if (On("onboarding"))
         builder.AddContainer("eudi-issuance-server", "gbo/eudi-issuance-server", "dev")
             .WithImagePullPolicy(ImagePullPolicy.Never)
             .WithContainerRuntimeArgs("--user", "0")
-            .WithHttpEndpoint(port: 18001, targetPort: 18001, name: "http")
+            .WithHttpEndpoint(port: 18001, targetPort: 18001, name: "http", isProxied: false)
             .WithEnvironment("ISSUANCE_SERVER__STORAGE__URL", ReferenceExpression.Create($"postgres://wallet:{eudiPostgresPassword}@postgres-eudi:5432/issuance_server"))
             .WithEnvironment("ISSUANCE_SERVER__UNIVERSAL_LINK_BASE_URL", "walletdebuginteraction://wallet.edi.rijksoverheid.nl/")
             .WithEnvironment("ISSUANCE_SERVER__WALLET_SERVER__IP", "0.0.0.0")
@@ -1057,8 +1059,8 @@ if (On("onboarding"))
             .WithBindMount(Repo("services/brp-graphql-server/mockdata/personen.json"), "/persons/personen.json", isReadOnly: true);
 
         builder.AddDockerfile("eudi-credential-issuer", "..", "services/eudi-credential-issuer/Dockerfile")
-            .WithHttpEndpoint(port: 9429, targetPort: 8080, name: "http")
-            .WithHttpEndpoint(port: 9431, targetPort: 8081, name: "internal")
+            .WithHttpEndpoint(port: 9429, targetPort: 8080, name: "http", isProxied: false)
+            .WithHttpEndpoint(port: 9431, targetPort: 8081, name: "internal", isProxied: false)
             .WithHttpHealthCheck("/healthz")
             .WithEnvironment("ISSUER_PUBLIC_URL", issuerPublicUrl)
             .WithEnvironment("ISSUER_CONFIG_FILE", "/config/issuer.json")
@@ -1073,7 +1075,7 @@ if (On("onboarding"))
             .WaitForCompletion(credentialIssuerMaterialize);
 
         builder.AddContainer("trust-host", "nginx", "1.27-alpine")
-            .WithHttpEndpoint(port: 9430, targetPort: 8080, name: "http")
+            .WithHttpEndpoint(port: 9430, targetPort: 8080, name: "http", isProxied: false)
             .WithHttpHealthCheck("/healthz")
             .WithBindMount(Repo("trust-host/nginx.conf"), "/etc/nginx/conf.d/default.conf", isReadOnly: true)
             .WithBindMount(Repo("trust-host/pages"), "/usr/share/trust-pages", isReadOnly: true)
@@ -1109,7 +1111,7 @@ if (On("asi"))
     }
 
     var asiAuthorizationServer = builder.AddDockerfile("asi-authorization-server", "../services/asi-authorization-server")
-        .WithHttpEndpoint(port: 9425, targetPort: 4021, name: "http")
+        .WithHttpEndpoint(port: 9425, targetPort: 4021, name: "http", isProxied: false)
         .WithHttpHealthCheck("/healthz")
         .WithEnvironment("AZSP_ISSUER", asiAuthorizationServerUrl)
         .WithEnvironment("AZSP_RESOURCES", $"{asiProviderUrl}/brp/authsrc-api=Basisregistratie Personen (mock)")
@@ -1144,13 +1146,13 @@ if (On("asi"))
     AfterFsc(asiProvider);
 
     var asiDiscovery = builder.AddDockerfile("asi-discovery-stub", "../services/asi-discovery-stub")
-        .WithHttpEndpoint(port: 9426, targetPort: 4022, name: "http")
+        .WithHttpEndpoint(port: 9426, targetPort: 4022, name: "http", isProxied: false)
         .WithHttpHealthCheck("/healthz")
         .WithEnvironment("DIP_SOURCES", "http://asi-provider:4020/brp/dataservices")
         .WaitFor(asiProvider);
 
     builder.AddDockerfile("qtsp-reference", "../services/qtsp-reference")
-        .WithHttpEndpoint(port: 9427, targetPort: 4023, name: "http")
+        .WithHttpEndpoint(port: 9427, targetPort: 4023, name: "http", isProxied: false)
         .WithHttpHealthCheck("/healthz")
         .WithEnvironment("QTSP_PUBLIC_URL", qtspUrl)
         .WithEnvironment("QTSP_DIP_URL", "http://asi-discovery-stub:4022")
@@ -1190,7 +1192,7 @@ if (On("asi"))
             "aspire/scripts/nlwallet-image.sh", "gbo/asi-wallet-verifier:dev", "services/asi-wallet-verifier/Dockerfile");
         builder.AddContainer("asi-wallet-verifier", "gbo/asi-wallet-verifier", "dev")
             .WithImagePullPolicy(ImagePullPolicy.Never)
-            .WithHttpEndpoint(port: 9428, targetPort: 8001, name: "http")
+            .WithHttpEndpoint(port: 9428, targetPort: 8001, name: "http", isProxied: false)
             .WithBindMount(nlWalletVerifierConfig, "/verification_server.toml", isReadOnly: true)
             .WaitForCompletion(verifierImage);
     }
@@ -1204,7 +1206,7 @@ if (On("asi"))
             .WithBindMount(eudiWalletVerifierDir, "/provisioned", isReadOnly: true)
             .WithVolume("gbo-eudi-wallet-verifier-runtime", "/runtime");
         builder.AddDockerfile("eudi-wallet-verifier", "..", "services/eudi-wallet-verifier/Dockerfile")
-            .WithHttpEndpoint(port: 9432, targetPort: 8001, name: "http")
+            .WithHttpEndpoint(port: 9432, targetPort: 8001, name: "http", isProxied: false)
             .WithEnvironment("EUDI_WALLET_VERIFIER_CONFIG", "/config/config.json")
             .WithVolume("gbo-eudi-wallet-verifier-runtime", "/config", isReadOnly: true)
             .WaitForCompletion(verifierRuntime);
@@ -1221,7 +1223,7 @@ if (On("manager"))
     var managerUrl = builder.Configuration["Gbo:FtvManagerUrl"] ?? PublicUrl(9280);
 
     var keycloak = builder.AddContainer("keycloak", "quay.io/keycloak/keycloak", "26.0.7")
-        .WithHttpEndpoint(port: 9284, targetPort: 8080, name: "http")
+        .WithHttpEndpoint(port: 9284, targetPort: 8080, name: "http", isProxied: false)
         .WithHttpHealthCheck("/realms/gbo")
         .WithArgs("start-dev", "--import-realm", "--http-port=8080")
         .WithEnvironment("KC_BOOTSTRAP_ADMIN_USERNAME", "admin")
@@ -1234,9 +1236,9 @@ if (On("manager"))
         .WithBindMount(Repo("services/openftv-manager-ui/keycloak/realm-gbo.json"), "/opt/keycloak/data/import/realm-gbo.json", isReadOnly: true);
 
     var openftvManager = builder.AddContainer("openftv-manager", "registry.gitlab.com/digilab.overheid.nl/ecosystem/ftv/open-ftv/manager", "v0.1.0")
-        .WithHttpEndpoint(port: 9280, targetPort: 8443, name: "http")
-        .WithHttpEndpoint(port: 9281, targetPort: 9443, name: "internal")
-        .WithHttpEndpoint(port: 9282, targetPort: 8080, name: "health")
+        .WithHttpEndpoint(port: 9280, targetPort: 8443, name: "http", isProxied: false)
+        .WithHttpEndpoint(port: 9281, targetPort: 9443, name: "internal", isProxied: false)
+        .WithHttpEndpoint(port: 9282, targetPort: 8080, name: "health", isProxied: false)
         .WithHttpHealthCheck("/healthz", endpointName: "health")
         .WithEnvironment("MANAGER_DATABASE_URL", ReferenceExpression.Create($"postgres://ftv:{ftvPostgresPassword}@postgres-ftv:5432/ftv_manager?sslmode=disable"))
         .WithEnvironment("MANAGER_POLICIES_STORE", "/authz")
@@ -1259,7 +1261,7 @@ if (On("manager"))
         .WaitFor(keycloak);
 
     builder.AddContainer("openftv-manager-ui", "registry.gitlab.com/digilab.overheid.nl/ecosystem/ftv/open-ftv/management-interface", "v0.1.0")
-        .WithHttpEndpoint(port: 9283, targetPort: 8080, name: "http")
+        .WithHttpEndpoint(port: 9283, targetPort: 8080, name: "http", isProxied: false)
         .WithEnvironment("VITE_PAP_BASE_URL", managerUrl)
         .WithEnvironment("VITE_PIP_BASE_URL", managerUrl)
         .WithEnvironment("VITE_OIDC_AUTHORITY", oidcAuthority)
@@ -1308,7 +1310,10 @@ IResourceBuilder<ViteAppResource> Frontend(string name, int port)
     return builder.AddViteApp(name, $"../{name}")
         // npm ci: install exactly the lockfile, never rewrite it.
         .WithNpm(install: true, installCommand: "ci")
-        .WithEndpoint("http", e => { e.Port = port; })
+        // Not proxied: the dev server itself listens on the fixed port, so the
+        // links between the frontends (and the consent redirect to the
+        // consumer mock port + 1) hit the app, not a proxy in front of it.
+        .WithEndpoint("http", e => { e.Port = port; e.TargetPort = port; e.IsProxied = false; })
         .WithEnvironment("__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS", allowedHosts);
 }
 
@@ -1348,7 +1353,11 @@ var landingPage = Frontend("landing-page", LandingPort)
     .WithEnvironment("VITE_FSC_CONTROLLER_BRON_URL", PublicUrl(8095))
     .WithEnvironment("VITE_FSC_CONTROLLER_DVTP_URL", PublicUrl(8096))
     .WithEnvironment("VITE_FSC_CONTROLLER_EUDI_URL", PublicUrl(8094))
-    .WithEnvironment("VITE_VERSION_STRING", builder.Configuration["Gbo:VersionString"] ?? "");
+    .WithEnvironment("VITE_VERSION_STRING", builder.Configuration["Gbo:VersionString"] ?? "")
+    // Without the dvtp profile the consumer mock, consent portal and
+    // Installatie Register do not run; the page then shows their start
+    // buttons as unavailable instead of linking to a dead port.
+    .WithEnvironment("VITE_DVTP_AVAILABLE", On("dvtp") ? "true" : "false");
 
 if (On("dvtp"))
 {

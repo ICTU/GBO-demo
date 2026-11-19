@@ -22,8 +22,8 @@ migration and the follow-ups.
 From this directory:
 
 ```bash
-aspire run                          # core only
-aspire run --launch-profile dvtp    # the DvTP consent demo (was: make demo)
+aspire run                          # the DvTP consent demo (was: make demo)
+aspire run --launch-profile core    # core only (was: make demo-minimal)
 aspire run --launch-profile full    # DvTP and EUDI (was: make demo-full)
 ```
 
@@ -38,8 +38,8 @@ comma-separated:
 
 | Profile | Adds | Was |
 | --- | --- | --- |
-| (none) | sources, PDP, logbooks, developer portal, landing page | `make demo-minimal` |
-| `dvtp` | the FSC network, consumers, consent portal, LVG and the Installatie Register | `make demo` |
+| `core` | sources, PDP, logbooks, developer portal, landing page | `make demo-minimal` |
+| `dvtp` (the default) | the FSC network, consumers, consent portal, LVG and the Installatie Register | `make demo` |
 | `eudi` | the Source Registry, source onboarding, the issuance server and the EUDI adapter | `make demo-eudi` |
 | `full` | `dvtp` + `eudi`, and the separate BRP FSC peer | `make demo-full` |
 | `onboarding` | the Source Registry and the reconciler only | `--profile onboarding` |
@@ -92,9 +92,15 @@ user secrets (`aspire secret list`, `aspire secret set <key> <value>`):
 
 ### Fixed ports
 
-Most ports are assigned per run and listed in the dashboard. Fixed are the
-ones a URL, a certificate or the consent redirect (consumer mock port + 1)
-depends on:
+The rule: an endpoint whose port a person, a URL, a certificate, a wallet
+or another frontend relies on has a fixed port and is **not proxied**: the
+app, or Docker's port mapping, binds that port itself, with no Aspire
+proxy in front. Every other endpoint (service to service, reached by
+hostname on the container network) gets a port per run and is proxied, and
+the dashboard lists it. The landing page shows the DvTP start buttons as
+unavailable when the profile does not run them.
+
+Fixed and not proxied:
 
 | Ports | What |
 | --- | --- |
