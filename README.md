@@ -113,18 +113,10 @@ GBO_PUBLIC_BIND_ADDRESS=127.0.0.1
 `GBO_PUBLIC_BIND_ADDRESS` keeps the plain http ports on the loopback
 interface, so only the proxy reaches them.
 
-For the EUDI flows some containers call the public URLs themselves:
-`eudi-issuance-server` calls the adapter at `EUDI_BRI_URL`, and the own
-credential issuer, its materializer and the EUDI wallet verifier fetch the
-PID trust list from `EUDI_TRUST_PUBLIC_URL`. With the proxy on the same host,
-make sure that
-
-1. the public hostname resolves inside the containers to an address where
-   they reach the proxy (a resolver that only the host uses does not apply
-   there; `extra_hosts` in a `docker-compose.override.yml` for those services
-   is one way); and
-2. the host firewall accepts connections from the Docker networks to the
-   proxy on the adapter and trust-host ports (default 9409 and 9430).
+For the EUDI flows some containers call the public URLs themselves
+(`EUDI_BRI_URL` and `EUDI_TRUST_PUBLIC_URL`), so those hostnames must also
+resolve to the proxy, and the proxy must be reachable, from inside the
+containers.
 
 ### The complete demo, with EUDI
 
@@ -174,11 +166,8 @@ reader-ca-cert.pem
 ```
 
 These files are managed material: request them from the
-[repository owner](#repository-owner). Substitutes do not work: wallets do
-not trust them, and `make publish-trust-lists` refuses an issuer or reader
-root whose CN is not `ca.gbo-issuer` or `ca.gbo-reader` (`PubEAA requires
-its own GBO root "ca.gbo-issuer"`). The earlier provisioning steps only
-check that the four files exist, so a wrong set surfaces late.
+[repository owner](#repository-owner). A CA of your own does not work, as
+wallets do not trust it.
 
 Keep the private keys outside version control. To load the same managed CA
 material from another location, set `ONBOARDING_SECRETS_DIR` to the absolute

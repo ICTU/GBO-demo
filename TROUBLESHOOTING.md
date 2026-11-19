@@ -20,11 +20,8 @@ in `.env` (more names in `GBO_EXTRA_ALLOWED_HOSTS`, comma-separated) and run
 
 ## Docker resource limits
 
-`make demo-eudi` and `make demo-full` define about 100 services, 60 of them
-the FSC infrastructure; about 70 keep running once the one-shot setup
-containers have finished (`make demo-full` with the own credential issuer).
-Measured, they use about 4 GB of memory together, so 8 GB leaves headroom.
-Minimum:
+`make demo-eudi` and `make demo-full` start many containers, most of them
+FSC infrastructure. Minimum:
 
 - **RAM**: 8 GB allocated to Docker (Preferences → Resources → Memory)
 - **CPU**: no strict requirement, but slow below 4 cores
