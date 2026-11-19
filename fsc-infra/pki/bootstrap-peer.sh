@@ -4,6 +4,12 @@
 #
 #   bash bootstrap-peer.sh NAME...                  group + internal certs
 #   bash bootstrap-peer.sh --internal-only NAME...  internal certs only
+#   bash bootstrap-peer.sh --list                   print the table
+#
+# --list prints every row of the table as eight tab-separated fields, in
+# table order, and fails on a row that does not have eight fields. It is the
+# one reader of peers.txt: regenerate-internal-certs.sh and the Makefile use
+# it too.
 #
 # Per party, under fsc-infra/<dir>/pki/:
 #   org/<name>.pem, org/<name>-key.pem, org/root.pem
@@ -37,10 +43,29 @@ NETWORK="${FSC_INFRA_NETWORK:-fsc-infra_default}"
 PEERS_FILE="../peers.txt"
 
 usage () {
-    echo "Usage: $(basename "$0") [--internal-only] NAME..." >&2
+    echo "Usage: $(basename "$0") [--internal-only] NAME... | --list" >&2
     echo "NAME is a party from fsc-infra/peers.txt." >&2
     exit 2
 }
+
+# Prints every row as eight tab-separated fields. A row is a line whose first
+# field starts with a letter or digit; other lines are comments or empty.
+list_peers () {
+    awk -F'|' '
+        {
+            for (i = 1; i <= NF; i++) gsub(/^[[:space:]]+|[[:space:]]+$/, "", $i)
+            if ($1 !~ /^[[:alnum:]]/) next
+            if (NF != 8) { printf "ERROR: %s: row %s has %d fields, not 8\n", FILENAME, $1, NF > "/dev/stderr"; exit 1 }
+            OFS = "\t"; $1 = $1; print
+        }
+    ' "${PEERS_FILE}"
+}
+
+if [[ "${1:-}" == "--list" ]]; then
+    [[ $# -eq 1 ]] || usage
+    list_peers
+    exit 0
+fi
 
 INTERNAL_ONLY=0
 if [[ "${1:-}" == "--internal-only" ]]; then
@@ -49,105 +74,19 @@ if [[ "${1:-}" == "--internal-only" ]]; then
 fi
 [[ $# -gt 0 ]] || usage
 
-# Prints the row of party $1 as eight tab-separated fields; fails if the
-# party is not in the table or its row does not have eight fields. A row is
-# a line whose first field starts with a letter or digit.
+ROWS=$(list_peers)
+
+# Prints the row of party $1; fails if the party is not in the table.
 peer_row () {
-    awk -F'|' -v name="$1" '
-        {
-            for (i = 1; i <= NF; i++) gsub(/^[[:space:]]+|[[:space:]]+$/, "", $i)
-            if ($1 !~ /^[[:alnum:]]/) next  # comment or empty line
-            if ($1 != name) next
-            if (NF != 8) { printf "ERROR: %s: row %s has %d fields, not 8\n", FILENAME, name, NF > "/dev/stderr"; exit 1 }
-            OFS = "\t"; $1 = $1; print; found = 1
-        }
-        END { exit !found }
-    ' "${PEERS_FILE}"
+    local row
+    while IFS= read -r row; do
+        if [[ "${row%%$'\t'*}" == "$1" ]]; then
+            printf '%s\n' "${row}"
+            return 0
+        fi
+    done <<<"${ROWS}"
+    return 1
 }
-
-# Run inside the pki-tools container, with the fields of one row in the
-# environment and fsc-infra mounted on /work.
-# shellcheck disable=SC2016 # expanded by the container's bash
-CONTAINER_SCRIPT='
-set -euo pipefail
-cd /work
-PKI="/work/${DIR}/pki"
-
-if [[ "${DO_GROUP}" == 1 ]]; then
-    echo "-- group-cert: ${NAME} (OIN=${OIN}, hosts=${HOSTS}) --"
-    OUT=$(mktemp -d)
-
-    # openssl requires an adjusted config to declare serialNumber as a DN
-    # attribute.
-    echo -e "[req_distinguished_name]\nserialNumber=OIN" >> /etc/ssl/openssl.cnf
-
-    SAN_LIST=""
-    for H in ${HOSTS//,/ }; do
-        SAN_LIST="${SAN_LIST}DNS:${H},"
-    done
-
-    openssl req -new -nodes -sha256 -newkey rsa:4096 \
-        -subj "/C=NL/O=${ORG}/OU=TEST/CN=${HOSTS%%,*}/serialNumber=${OIN}" \
-        -addext "subjectAltName=${SAN_LIST%,}" \
-        -keyout "${OUT}/${NAME}-key.pem" \
-        -out "${OUT}/${NAME}.csr" 2>/dev/null
-
-    CSR_JSON=$(jq -sR . < "${OUT}/${NAME}.csr")
-    curl -fsS -X POST http://certportal:8080/api/request_certificate \
-        -H "Content-Type: application/json" \
-        -d "{\"csr\":${CSR_JSON}}" \
-    | jq -r ".certificate" > "${OUT}/${NAME}.pem"
-
-    if [[ ! -s "${OUT}/${NAME}.pem" ]]; then
-        echo "FAIL: no cert for ${NAME}" >&2
-        exit 1
-    fi
-
-    # Sanity: subject log + chain check
-    openssl x509 -in "${OUT}/${NAME}.pem" -noout -subject
-    openssl verify -CAfile pki/ca/root.pem -untrusted pki/ca/intermediate.pem "${OUT}/${NAME}.pem" >/dev/null
-
-    mkdir -p "${PKI}/org"
-    mv "${OUT}/${NAME}-key.pem" "${PKI}/org/"
-    mv "${OUT}/${NAME}.pem"     "${PKI}/org/"
-    cp pki/ca/root.pem          "${PKI}/org/"
-    chmod 600 "${PKI}/org/${NAME}-key.pem"
-fi
-
-if [[ "${INTERNAL_CA}" != "-" ]]; then
-    echo "-- internal-CA + internal-cert for ${NAME} --"
-    TMP=$(mktemp -d)
-    cd "${TMP}"
-    jq -n --arg cn "GBO-DEMO Internal CA (${INTERNAL_CA})" --arg o "${INTERNAL_ORG}" \
-        "{CN: \$cn, key: {algo: \"rsa\", size: 4096}, names: [{C: \"NL\", O: \$o}], ca: {expiry: \"43800h\"}}" \
-        > internal-ca.json
-    jq -n --arg cn "${NAME}-internal" --arg o "${INTERNAL_ORG}" --arg hosts "${INTERNAL_HOSTS}" \
-        "{CN: \$cn, hosts: (\$hosts | split(\",\")), key: {algo: \"rsa\", size: 4096}, names: [{C: \"NL\", O: \$o}]}" \
-        > internal-cert.json
-    cfssl gencert -initca internal-ca.json | cfssljson -bare intermediate_ca
-    cfssl gencert \
-        -ca=intermediate_ca.pem \
-        -ca-key=intermediate_ca-key.pem \
-        -config=/work/pki/cfssl-signing-config.json \
-        -profile=server \
-        internal-cert.json \
-    | cfssljson -bare internal-cert
-
-    mkdir -p "${PKI}/internal"
-    mv intermediate_ca.pem      "${PKI}/internal/"
-    mv intermediate_ca-key.pem  "${PKI}/internal/"
-    mv internal-cert.pem        "${PKI}/internal/"
-    mv internal-cert-key.pem    "${PKI}/internal/"
-    chmod 600 "${PKI}/internal/"*-key.pem
-fi
-
-# OpenFSC containers run as appuser (uid/gid 1001).
-if [[ "${DO_GROUP}" == 1 ]]; then
-    chown -R 1001:1001 "${PKI}"
-elif [[ "${INTERNAL_CA}" != "-" ]]; then
-    chown -R 1001:1001 "${PKI}/internal"
-fi
-'
 
 if [[ "${INTERNAL_ONLY}" == 0 && ( ! -f ca/root.pem || ! -f ca/intermediate.pem ) ]]; then
     echo "ERROR: root-CA not found. Run first: bash generate-root-ca.sh"
@@ -156,7 +95,7 @@ fi
 
 for PEER in "$@"; do
     if ! ROW=$(peer_row "${PEER}"); then
-        echo "ERROR: no valid row for party '${PEER}' in fsc-infra/peers.txt" >&2
+        echo "ERROR: no party '${PEER}' in fsc-infra/peers.txt" >&2
         exit 1
     fi
     IFS=$'\t' read -r NAME DIR OIN ORG HOSTS INTERNAL_CA INTERNAL_ORG INTERNAL_HOSTS <<<"${ROW}"
@@ -193,7 +132,7 @@ for PEER in "$@"; do
         -e INTERNAL_ORG="${INTERNAL_ORG}" \
         -e INTERNAL_HOSTS="${INTERNAL_HOSTS}" \
         "${IMAGE_TAG}" \
-        bash -c "${CONTAINER_SCRIPT}"
+        bash pki/bootstrap-peer-container.sh
 
     if [[ "${INTERNAL_ONLY}" == 0 ]]; then
         echo

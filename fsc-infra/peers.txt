@@ -1,9 +1,9 @@
 # FSC parties of the demo: one row per party that holds a group certificate.
 #
-# Read by pki/bootstrap-peer.sh (group and internal certificates) and by
-# pki/regenerate-internal-certs.sh (internal certificates only). Fields are
-# separated by "|"; spaces around a field are ignored. Lines starting with
-# "#" are comments.
+# Read by pki/bootstrap-peer.sh, which generates the certificates from it;
+# `bootstrap-peer.sh --list` prints it for pki/regenerate-internal-certs.sh
+# and the Makefile. Fields are separated by "|"; spaces around a field are
+# ignored. Lines starting with "#" are comments.
 #
 #   name           key of the party; also the file name of its group
 #                  certificate: <dir>/pki/org/<name>.pem and <name>-key.pem

@@ -67,7 +67,7 @@ export PGPASSWORD="${PGPASSWORD:-${FSC_POSTGRES_PASSWORD}}"
 for f in "$INT_CERT" "$INT_KEY" "$INT_CA" "$INT_ORG_CERT" "$HV_CERT" "$HV_KEY" "$HV_CA"; do
   if [ ! -f "$f" ]; then
     echo "missing cert file: $f" >&2
-    echo "run 'make fsc-int-certs fsc-hv-certs' first" >&2
+    echo "run 'make fsc-certs' first" >&2
     exit 1
   fi
 done

@@ -669,8 +669,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   the certificates from it and replaces the ten `bootstrap-<party>.sh`
   scripts and their `*-internal-ca.json` and `*-internal-cert.json` files;
   `regenerate-internal-certs.sh` and `make fsc-clean` read the same table,
-  so the certificates of a new party take one row. The generated files, subjects and ownership
-  are unchanged.
+  so the certificates of a new party take one row. One target, `make
+  fsc-certs`, generates the certificates of every party in the table and
+  replaces the per-party `fsc-<party>-certs` targets. The generated files,
+  subjects and ownership are unchanged.
 - **Credentials without a revocation reference are valid for 24 hours**
   (#697): the own credential issuer cannot revoke what it issued through
   login, disclosure-based issuance or an offer without `reference`, so those

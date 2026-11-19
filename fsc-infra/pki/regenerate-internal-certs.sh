@@ -12,17 +12,11 @@ set -o nounset
 
 cd "$(dirname "$0")"
 
-# Every party with internal certs, in table order.
-NAMES=()
-while IFS= read -r NAME; do NAMES+=("${NAME}"); done < <(awk -F'|' '
-    {
-        for (i = 1; i <= NF; i++) gsub(/^[[:space:]]+|[[:space:]]+$/, "", $i)
-        if ($1 !~ /^[[:alnum:]]/) next  # comment or empty line
-        if ($6 != "-") print $1
-    }
-' ../peers.txt)
-
-bash bootstrap-peer.sh --internal-only "${NAMES[@]}"
+# Every party, in table order; bootstrap-peer.sh skips those without
+# internal certs.
+NAMES=$(bash bootstrap-peer.sh --list | cut -f1)
+# shellcheck disable=SC2086 # one party name per word
+bash bootstrap-peer.sh --internal-only ${NAMES}
 
 echo
 echo ">>> Done. Restart all FSC containers and dev-portal-backend to load the new internal certs."
