@@ -29,6 +29,12 @@ import (
 // it ^[0-9a-f]{32}$ (it was a uuid before). Every answer carries the
 // API-Version header the API design rules ask for.
 
+// HeaderTruncated marks an answer the read cap cut off: there are more
+// records than it holds. A local extension, because the read extension's
+// OpenAPI 1.1.0 has no paging; a header keeps the body schema-valid. A reader
+// that treats an answer as complete must check it.
+const HeaderTruncated = "Gbo-Ldv-Truncated"
+
 // APIVersion is the version of the read extension this API follows.
 const APIVersion = "1.1.0"
 
@@ -148,6 +154,9 @@ func (h *Handler) listDataProcessingOperations(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	if page.Truncated {
+		w.Header().Set(HeaderTruncated, "true")
+	}
 	operations := make([]dataProcessingOperation, 0, len(page.Records))
 	for _, stored := range page.Records {
 		operation := dataProcessingOperation{

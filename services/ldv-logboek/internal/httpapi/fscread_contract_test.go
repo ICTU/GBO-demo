@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,6 +11,8 @@ import (
 	"slices"
 	"testing"
 	"time"
+
+	"ldv-logboek/internal/ldv"
 )
 
 // The reduced answer of the FSC read listener (#686) against the response
@@ -169,5 +172,37 @@ func TestTheFSCListenerTakesOneTraceIDAndNothingElse(t *testing.T) {
 				t.Fatalf("status = %d, want 400", recorder.Code)
 			}
 		})
+	}
+}
+
+// A trace with more records than the cap returns the cap, and says that it
+// was cut off, so a reader does not take it for the whole history.
+func TestATruncatedAnswerSaysSo(t *testing.T) {
+	handler, _ := newTestHandler(t)
+	trace := "0af7651916cd43dd8448eb211c80319c"
+	for i := 0; i < ldv.MaxReadLimit+1; i++ {
+		body := validBody()
+		body["span_id"] = fmt.Sprintf("%016x", i+1)
+		if response := post(t, handler, writeToken, body); response.Code != http.StatusCreated {
+			t.Fatalf("seed %d: status %d, body %s", i, response.Code, response.Body)
+		}
+	}
+	fsc := NewFSCReadHandler(handler.logbook, testLogbookID)
+	read := func(trace string) *httptest.ResponseRecorder {
+		recorder := httptest.NewRecorder()
+		fsc.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/data-processing-operations",
+			bytes.NewBufferString(`{"traceId":"`+trace+`"}`)))
+		return recorder
+	}
+	recorder := read(trace)
+	var answer struct {
+		Operations []any `json:"dataProcessingOperations"`
+	}
+	_ = json.Unmarshal(recorder.Body.Bytes(), &answer)
+	if len(answer.Operations) != ldv.MaxReadLimit || recorder.Header().Get(HeaderTruncated) != "true" {
+		t.Fatalf("%d records, %s = %q; want %d and true", len(answer.Operations), HeaderTruncated, recorder.Header().Get(HeaderTruncated), ldv.MaxReadLimit)
+	}
+	if recorder := read("00000000000000000000000000000001"); recorder.Header().Get(HeaderTruncated) != "" {
+		t.Fatalf("an answer that was not cut off is marked")
 	}
 }

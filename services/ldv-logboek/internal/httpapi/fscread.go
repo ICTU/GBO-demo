@@ -21,6 +21,8 @@ import (
 //     That makes this listener safe only when nothing but the Inway reaches
 //     it.
 //   - Exactly one traceId and nothing else, as the PDP rule also demands.
+//   - Up to ldv.MaxReadLimit records; a longer trace is cut off and the
+//     answer says so in Gbo-Ldv-Truncated (see HeaderTruncated).
 //   - A reduced answer: traceId, spanId, name, status, startTime, endTime
 //     and the processing activity. No data subject, no resource, no other
 //     attributes. `name` is required by the response schema of OpenAPI
@@ -45,7 +47,7 @@ func NewFSCReadHandler(logbook *ldv.Logbook, logbookID string) http.Handler {
 			writeProblem(w, http.StatusBadRequest, "invalid_trace_id", "traceId must be 32 lowercase hex characters")
 			return
 		}
-		page, err := logbook.Read(r.Context(), ldv.Query{TraceID: request.TraceID})
+		page, err := logbook.Read(r.Context(), ldv.Query{TraceID: request.TraceID, Limit: ldv.MaxReadLimit})
 		if err != nil {
 			if errors.Is(err, ldv.ErrNoSelector) {
 				writeProblem(w, http.StatusBadRequest, "no_selector", err.Error())
@@ -54,6 +56,9 @@ func NewFSCReadHandler(logbook *ldv.Logbook, logbookID string) http.Handler {
 			slog.Error("reading log records", "err", err.Error())
 			writeProblem(w, http.StatusInternalServerError, "storage_failure", "the records could not be read")
 			return
+		}
+		if page.Truncated {
+			w.Header().Set(HeaderTruncated, "true")
 		}
 		operations := make([]dataProcessingOperation, 0, len(page.Records))
 		for _, stored := range page.Records {

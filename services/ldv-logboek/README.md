@@ -344,6 +344,12 @@ bearer token for that reader:
   resource, no other attributes. `name` is not in #686's list but is required
   by the response schema, so it stays. `fscread_contract_test.go` checks the
   answer against the response schema of OpenAPI 1.1.0 (`internal/httpapi/testdata`).
+- **Up to 500 records per trace.** A longer trace is cut off at 500 and the
+  answer carries `Gbo-Ldv-Truncated: true`. The read extension's OpenAPI has
+  no paging, so this is a local extension in a header, which keeps the body
+  schema-valid; the register shows a notice for such a source instead of
+  presenting the list as complete. The token-protected read API sets the
+  same header.
 
 `traceId` is 32 lowercase hex in request and response on both listeners, the
 same value as in `traceparent`: OpenAPI 1.1.0 types it `^[0-9a-f]{32}$`. A
