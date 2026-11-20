@@ -64,7 +64,7 @@ trust anchors or wallet:
 
 ```bash
 cd aspire
-aspire run --launch-profile dvtp
+aspire run
 ```
 
 The [AppHost](aspire/apphost.go) builds every image, creates the FSC
@@ -91,7 +91,7 @@ machine, put a reverse proxy in front (next section) and set the host name
 that browser uses, then start again:
 
 ```bash
-aspire run --launch-profile dvtp -- --Gbo:PublicHost=demo.example.org
+aspire run -- --Gbo:PublicHost=demo.example.org
 ```
 
 ### HTTPS behind a reverse proxy
@@ -104,7 +104,7 @@ WebSocket upgrades and `X-Forwarded-*` headers. Then start again with the
 public host and scheme:
 
 ```bash
-aspire run --launch-profile dvtp -- --Gbo:PublicHost=demo.example.org --Gbo:PublicScheme=https
+aspire run -- --Gbo:PublicHost=demo.example.org --Gbo:PublicScheme=https
 ```
 
 The plain http ports stay on the loopback interface, so only the proxy
@@ -232,7 +232,7 @@ With an existing reverse proxy or externally managed tunnel, start everything
 with:
 
 ```bash
-aspire run --launch-profile full
+Gbo__Profiles=full aspire run
 ```
 
 To use the bundled Cloudflare connector, set its token once and start with
@@ -240,7 +240,7 @@ the tunnel on:
 
 ```bash
 aspire secret set Parameters:cloudflare-tunnel-token <token>
-aspire run --launch-profile full -- --Gbo:CloudflareTunnel=true
+Gbo__Profiles=full aspire run -- --Gbo:CloudflareTunnel=true
 ```
 
 Configure these Cloudflare Public Hostnames:
@@ -261,14 +261,14 @@ certificates, EUDI configuration and application startup.
 ## Other modes
 
 A profile picks which parts run, as the compose profiles did. Pick one with
-a launch profile or with `Gbo__Profiles`, comma-separated:
+`Gbo__Profiles`, comma-separated:
 
 | Command (in `aspire/`) | Starts |
 | --- | --- |
-| `aspire run --launch-profile core` | Core services only: sources, PDP, logbooks, developer portal |
-| `aspire run` (or `--launch-profile dvtp`) | DvTP consent flow over OpenFSC |
+| `Gbo__Profiles=core aspire run` | Core services only: sources, PDP, logbooks, developer portal |
+| `aspire run` (or `Gbo__Profiles=dvtp aspire run`) | DvTP consent flow over OpenFSC |
 | `Gbo__Profiles=eudi aspire run` | EUDI wallet flow over OpenFSC |
-| `aspire run --launch-profile full` | DvTP and EUDI flows together |
+| `Gbo__Profiles=full aspire run` | DvTP and EUDI flows together |
 | `Gbo__Profiles=dvtp,integrator aspire run` | DvTP plus the integrator path |
 | `Gbo__Profiles=full,asi aspire run` | Everything plus the ASI route |
 | `Gbo__Profiles=manager aspire run` | Core services with OpenFTV Manager policy distribution |

@@ -10,7 +10,7 @@ labels: bug
 
 ## Steps to reproduce
 
-1. `aspire run --launch-profile dvtp` (or another profile / curl / UI action)
+1. `aspire run` (or another profile / curl / UI action)
 2. …
 
 ## Expected

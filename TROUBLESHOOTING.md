@@ -37,7 +37,7 @@ Vite's dev server refuses host names it does not know. Start the AppHost with
 the host name the browser uses, plus any other names, comma-separated:
 
 ```bash
-aspire run --launch-profile dvtp -- --Gbo:PublicHost=demo.example.org --Gbo:ExtraAllowedHosts=alias.example.org
+aspire run -- --Gbo:PublicHost=demo.example.org --Gbo:ExtraAllowedHosts=alias.example.org
 ```
 
 The same setting fixes links that point at `localhost`.
@@ -232,7 +232,7 @@ environment.
 
 Expected without the `dvtp` profile: the DvTP tabs are empty because
 `dienstverlener-backend` and `consent-portal-backend` are not running. Start
-with `--launch-profile dvtp` or `full`.
+with the default (dvtp) or `Gbo__Profiles=full`.
 
 ## Traces or decision details are missing in the developer portal
 

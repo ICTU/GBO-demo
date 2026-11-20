@@ -54,9 +54,8 @@ func (m *model) build() {
 
 	// ── Profiles ─────────────────────────────────────────────────────────
 	// Which parts of the demo run, as the compose profiles did. Set them with
-	// a launch profile (aspire run --launch-profile full) or Gbo__Profiles,
-	// comma separated. Without any, the dvtp demo runs, as `make demo` did;
-	// `core` (aspire run --launch-profile core) runs the core only.
+	// Gbo__Profiles, comma separated (Gbo__Profiles=full aspire run). Without
+	// any, the dvtp demo runs, as `make demo` did; `core` runs the core only.
 	//   core        sources, PDP, logbooks, developer portal and landing page
 	//   dvtp        consent flow over FSC: consumer, consent portal, IR, LVG
 	//   eudi        EUDI wallet issuance over FSC (needs public URLs and CAs)
@@ -189,7 +188,7 @@ func (m *model) build() {
 		}
 		otlp, err := url.Parse(raw)
 		if err != nil || otlp.Scheme != "http" {
-			log.Fatal("The collector forwards to the dashboard over plaintext gRPC; use an http launch profile.")
+			log.Fatal("The collector forwards to the dashboard over plaintext gRPC; keep the http profile in aspire.config.json (and no https one).")
 		}
 		dashboardOtlpGrpc = "host.docker.internal:" + otlp.Port()
 		frontend, err := url.Parse(strings.Split(m.configOr("ASPNETCORE_URLS", "http://localhost:15126"), ";")[0])

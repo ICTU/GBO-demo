@@ -27,8 +27,8 @@ From this directory. The first run generates the Go SDK into `.aspire/`
 
 ```bash
 aspire run                          # the DvTP consent demo (was: make demo)
-aspire run --launch-profile core    # core only (was: make demo-minimal)
-aspire run --launch-profile full    # DvTP and EUDI (was: make demo-full)
+Gbo__Profiles=core aspire run      # core only (was: make demo-minimal)
+Gbo__Profiles=full aspire run      # DvTP and EUDI (was: make demo-full)
 ```
 
 The dashboard opens at <http://localhost:15126>. Stop with Ctrl+C.
@@ -36,8 +36,8 @@ The dashboard opens at <http://localhost:15126>. Stop with Ctrl+C.
 
 ### Profiles
 
-A profile picks which parts run, as the compose profiles did. Set it with a
-launch profile from `aspire.config.json` or with `Gbo__Profiles`,
+A profile picks which parts run, as the compose profiles did. Set it with
+`Gbo__Profiles` (a Go AppHost has no `--launch-profile`; see GO-APPHOST.md),
 comma-separated:
 
 | Profile | Adds | Was |
@@ -178,7 +178,7 @@ decision log back through the dashboard's telemetry API
 `../OBSERVABILITY.md` for the simulation deployment, which keeps Jaeger and
 Loki.
 
-The default launch profiles use plain http, since the collector forwards to
+The launch profile in `aspire.config.json` uses plain http, since the collector forwards to
 the dashboard over plaintext OTLP.
 
 ## Publishing

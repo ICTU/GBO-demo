@@ -6,7 +6,7 @@ Thanks for taking the time to look at this reference-architecture demo. Bug repo
 
 Please use GitHub Issues for bug reports and feature discussions. Include:
 
-- What you tried to run (`aspire run --launch-profile dvtp`, a specific `curl`, a UI interaction)
+- What you tried to run (`aspire run`, a specific `curl`, a UI interaction)
 - What you expected to happen
 - What actually happened (error message, screenshot, log snippet)
 - Your environment (OS, Docker version)
@@ -31,7 +31,7 @@ Before opening a PR:
    cd <frontend> && npx tsc --noEmit
    ```
 
-2. Keep the demo runnable end-to-end (`aspire run --launch-profile dvtp` in `aspire/` must still work).
+2. Keep the demo runnable end-to-end (`aspire run` in `aspire/` must still work).
 
 3. Match the code style of the file you're editing. New Go services get the same `.golangci.yml` treatment as existing ones.
 

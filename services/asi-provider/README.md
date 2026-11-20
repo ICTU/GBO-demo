@@ -15,7 +15,7 @@ A mock Authentic Source Interface Provider. A qualified trust service provider (
 
 ## Run
 
-In the demo stack, after `Gbo__Profiles=eudi aspire run` or `aspire run --launch-profile full`:
+In the demo stack, after `Gbo__Profiles=eudi aspire run` or `Gbo__Profiles=full aspire run`:
 
 ```bash
 Gbo__Profiles=eudi aspire run      # in aspire/

@@ -159,7 +159,7 @@ The tunnel is **not** started by default. Turn it on (in `aspire/`, with the
 token in the AppHost secrets as `Parameters:cloudflare-tunnel-token`):
 
 ```bash
-aspire run --launch-profile full -- --Gbo:CloudflareTunnel=true
+Gbo__Profiles=full aspire run -- --Gbo:CloudflareTunnel=true
 ```
 
 ## 4. The silent failure: trust anchors

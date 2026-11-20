@@ -166,7 +166,7 @@ LDV-standaard.
 ## Lokaal testen
 
 De demo gebruikt standaard de directe route: Hypotheek-BV verbindt zelf. De
-integrator is opt-in. Start eerst `aspire run --launch-profile dvtp` of `aspire run --launch-profile full` en
+integrator is opt-in. Start eerst `aspire run` of `Gbo__Profiles=full aspire run` en
 daarna `Gbo__Profiles=dvtp,integrator aspire run`. Dat maakt de integrator-peer aan (compose-profiel
 `integrator`), seedt het gedelegeerde contract (the `fsc-seed-int` step) en start
 `integrator-backend`. Het toelatingsregister kent de integrator al; zonder

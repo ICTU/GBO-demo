@@ -15,5 +15,5 @@
 - [ ] `go test ./...` passes for touched services
 - [ ] `opa test /policies -v` passes (if policies touched)
 - [ ] `tsc --noEmit` passes for touched frontends
-- [ ] `aspire run --launch-profile dvtp` (in `aspire/`) still runs end-to-end
+- [ ] `aspire run` (in `aspire/`) still runs end-to-end
 - [ ] README / docs updated if behaviour visible to users changed
