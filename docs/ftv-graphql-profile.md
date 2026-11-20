@@ -19,7 +19,7 @@ afnemer → Outway → Inway (PEP) → OpenFTV PDP: mapper ftvgraphql → Rego-e
 
 | Eis | Hoe |
 |---|---|
-| Elk verzoek voor de bron gaat naar de PDP, met ruwe body (§5.1, §5.2) | `AUTHZEN_WITH_BODY=true` op elke Inway (`AddFscPeer` in `aspire/apphost.cs`). De Inway stuurt de body alleen mee bij `application/json`; zonder body faalt de mapper dicht |
+| Elk verzoek voor de bron gaat naar de PDP, met ruwe body (§5.1, §5.2) | `AUTHZEN_WITH_BODY=true` op elke Inway (`AddFscPeer` in `aspire/apphost.go`). De Inway stuurt de body alleen mee bij `application/json`; zonder body faalt de mapper dicht |
 | `subject.id` uit mTLS, `resource.id` het ruwe request-target, headers, `X-Request-ID` (§5.2) | standaardgedrag van de Inway; `X-Request-ID` is de `Fsc-Transaction-Id` |
 | Bij deny 401 of 403, niet doorsturen (§10.3) | de Inway antwoordt 401 en stuurt niets door |
 | `graphql.admin` nooit naar de afnemer (§10.3) | OpenFTV geeft alleen `allow` en `reason` door; `reason` is de afnemerscode |

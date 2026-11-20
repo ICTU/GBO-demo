@@ -29,7 +29,7 @@ This adds the ASIP's FSC peer (OIN `99999999900000001200`, AppHost profile `asi`
 On its own, it needs an Outway with a contract for `brp` and the Source Registry; outside the stack every query then answers 503:
 
 ```bash
-# runs as the AppHost's provision-asip-seal-certificate step; by hand: see apphost.cs
+# runs as the AppHost's provision-asip-seal-certificate step; by hand: see apphost.go
 cd services/asi-provider
 ASIP_SEAL_KEY_FILE=../../.local/secrets/asi-provider/seal-key.pem \
 ASIP_SEAL_CERT_FILE=../../.local/secrets/asi-provider/seal-cert.pem \

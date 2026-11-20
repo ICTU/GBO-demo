@@ -1,25 +1,29 @@
 # GBO-demo AppHost
 
-`apphost.cs` is a C# file-based [Aspire](https://aspire.dev) 17 AppHost. It
+`apphost.go` is a Go [Aspire](https://aspire.dev) 17 AppHost (`model.go`
+holds its helpers). It
 runs the whole demo: the Go services, the FSC network, OpenFTV, the EUDI and
 ASI parts, the frontends and the run-once steps between them, in dependency
 order. It replaced the compose files and the Makefile; `PLAN.md` records the
-migration and the follow-ups.
+migration and the follow-ups, and `GO-APPHOST.md` what the Go AppHost
+preview can and cannot do yet.
 
 ## Prerequisites
 
 - Aspire CLI 17 (`brew install --cask aspire`, or the install script from aspire.dev)
-- .NET 10 SDK
 - Docker (Docker Desktop, OrbStack or Docker Engine)
 - Node.js 24 or newer with npm 11, for the Vite frontends (`npm ci`). It need
   not be first on PATH: the AppHost finds one in PATH, Homebrew, nvm, Volta or
   fnm, or takes `Gbo:NodeDir`
-- Go 1.26 or newer, for the host-side certificate steps
+- Go 1.26 or newer, for the AppHost itself and the host-side certificate
+  steps. No .NET SDK: the Aspire CLI brings its own AppHost server.
 - Bash, `curl`, `jq`, OpenSSL; Python 3 for the OpenFTV Manager seed
 
 ## Run
 
-From this directory:
+From this directory. The first run generates the Go SDK into `.aspire/`
+(ignored by git); `aspire restore` does that on its own, for example before
+`go vet` or after switching branches.
 
 ```bash
 aspire run                          # the DvTP consent demo (was: make demo)
@@ -33,7 +37,7 @@ The dashboard opens at <http://localhost:15126>. Stop with Ctrl+C.
 ### Profiles
 
 A profile picks which parts run, as the compose profiles did. Set it with a
-launch profile from `apphost.run.json` or with `Gbo__Profiles`,
+launch profile from `aspire.config.json` or with `Gbo__Profiles`,
 comma-separated:
 
 | Profile | Adds | Was |
@@ -170,7 +174,7 @@ PDP's console, its decision log included, reaches the dashboard as OTLP logs
 through `logtee` in the PDP image. The developer portal reads traces and the
 decision log back through the dashboard's telemetry API
 (`TELEMETRY_API_URL`). The dashboard keeps one store across restarts
-(`ASPIRE_DASHBOARD_PERSISTENCE_MODE=Resume` in `apphost.run.json`). See
+(`ASPIRE_DASHBOARD_PERSISTENCE_MODE=Resume` in `aspire.config.json`). See
 `../OBSERVABILITY.md` for the simulation deployment, which keeps Jaeger and
 Loki.
 

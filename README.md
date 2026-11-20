@@ -26,7 +26,8 @@ consumer → FSC Outway → FSC Inway → OpenFTV PDP → source sidecar → Gra
 
 For every mode:
 
-- the [Aspire CLI](https://aspire.dev) 17 and the .NET 10 SDK;
+- the [Aspire CLI](https://aspire.dev) 17 and Go 1.26 or newer (the AppHost
+  is written in Go);
 - Docker (Docker Desktop, OrbStack or Docker Engine);
 - Node.js 24 or newer with npm 11, for the Vite frontends; the AppHost finds
   it even when an older `node` comes first on PATH;
@@ -66,7 +67,7 @@ cd aspire
 aspire run --launch-profile dvtp
 ```
 
-The [AppHost](aspire/apphost.cs) builds every image, creates the FSC
+The [AppHost](aspire/apphost.go) builds every image, creates the FSC
 certificates and contracts and starts the demo in dependency order. The
 first run takes a few minutes. The Aspire dashboard
 (<http://localhost:15126>) lists every resource with its state, logs and

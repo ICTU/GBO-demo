@@ -5,7 +5,7 @@ FROM golang:1.27-alpine@sha256:26402d86be3d72e6a9410afa0108f03529f51f0c1b5eb7f50
 # PDP. Once both are available upstream, this patch can be removed and the
 # published pdp image can be used. Keep the release tag in lockstep with
 # the manager and management-interface image tags in
-# aspire/apphost.cs — CI fails when the three drift apart.
+# aspire/apphost.go — CI fails when the three drift apart.
 ARG OPENFTV_REF=v0.1.0
 
 WORKDIR /build

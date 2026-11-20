@@ -8,7 +8,7 @@
 # demo has:
 #   bri -> bron-sidecar     -> graphql-server     (BD bronprofiel)
 #   brp -> brp-sidecar      -> brp-graphql-server (BRP bronprofiel)
-# aspire/apphost.cs runs it once per service, as the fsc-seed-* steps.
+# aspire/apphost.go runs it once per service, as the fsc-seed-* steps.
 #
 # Background:
 #   The flow was originally set up manually via the Controller UIs.
@@ -45,7 +45,7 @@ PROVIDER_PEER_ID="${PROVIDER_PEER_ID:-99999999900000000200}"
 DIR_PEER_ID="${DIR_PEER_ID:-99999999900000000000}"   # Directory-peer
 
 # Endpoints — in-network hostnames. Script runs in a container on the
-# AppHost's network (aspire/apphost.cs arranges this). Manager and
+# AppHost's network (aspire/apphost.go arranges this). Manager and
 # Controller accept mTLS with each org's internal-cert set.
 PROVIDER_CONTROLLER_URL="${PROVIDER_CONTROLLER_URL:-https://bd-controller:9444}"
 PROVIDER_MANAGER_URL="${PROVIDER_MANAGER_URL:-https://bd-manager:9443}"
@@ -66,7 +66,7 @@ SERVICE_INWAY_ADDRESS="${SERVICE_INWAY_ADDRESS:-https://bd-inway:443}"
 # (#473): the bron-sidecar takes the subject from the consent token, not from
 # a declared identifier format. The parameter stays for properties to come.
 # Requires OpenFSC >= v2.0.0 on every peer on the contract; the demo pins
-# v2.4.0 (FscVersion in aspire/apphost.cs).
+# v2.4.0 (fscVersion in aspire/apphost.go).
 default_grant_properties='{}'
 GRANT_PROPERTIES="${GRANT_PROPERTIES:-$default_grant_properties}"
 if ! jq -e 'type == "object"' >/dev/null 2>&1 <<<"$GRANT_PROPERTIES"; then

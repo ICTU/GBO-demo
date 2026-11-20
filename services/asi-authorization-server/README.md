@@ -38,7 +38,7 @@ The ASIP and the authorization server may be operated by one party, but they are
 ## Run
 
 ```bash
-# runs as the AppHost's provision-asip-qtsp-certificate step; by hand: see apphost.cs
+# runs as the AppHost's provision-asip-qtsp-certificate step; by hand: see apphost.go
 cd services/asi-authorization-server
 AZSP_TRUST_ANCHORS_FILE=../../.local/secrets/development-ca/reader-ca-cert.pem go run .
 ```

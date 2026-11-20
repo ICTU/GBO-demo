@@ -18,7 +18,7 @@
 #
 # Signing runs here, with go run, so no CA or signer key ever enters a
 # container. Settings come from NAME=value arguments or the environment;
-# the defaults match apphost.cs (Gbo:SecretsDir and friends).
+# the defaults match apphost.go (Gbo:SecretsDir and friends).
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."

@@ -12,7 +12,9 @@ step is ticked in the commit that completes it.
 Decisions already taken:
 
 - C# file-based AppHost (`aspire/apphost.cs`), Aspire 17. Port to a Go
-  AppHost when that is generally available.
+  AppHost when that is generally available. Done ahead of GA on branch
+  `aspire/go-apphost` (`aspire/apphost.go`); `GO-APPHOST.md` lists what the
+  preview lacks and the workarounds.
 - The Helm chart (`deploy/helm/gbo-app`) and its example values stay as they
   are.
 
@@ -87,8 +89,7 @@ Decisions already taken:
 - `aspire publish`: the generated compose refers to images by variable and
   leaves out the host steps (PKI, provisioning); a push step and a decision
   on the host steps make it a standalone replacement.
-- Go AppHost: port apphost.cs to a Go AppHost (`apphost.go`) once that is
-  generally available, or once the Go AppHost issues that matter here are
-  solved: in preview, a brownfield `aspire init` fails next to an existing
-  `go.mod`, and the certificate-trust and OTel Collector APIs this AppHost
-  relies on are C#-first. The pull request stays a draft until then.
+- Go AppHost: ported on `aspire/go-apphost` (`apphost.go`). Remove the
+  `TODO(go-apphost/...)` workarounds as Aspire fixes them (GO-APPHOST.md);
+  the pull request stays a draft until the Go AppHost is GA or those gaps
+  are closed.
