@@ -1,5 +1,67 @@
 {
   "appHost": {
-    "path": "apphost.cs"
+    "path": "apphost.go",
+    "language": "go"
+  },
+  "sdk": {
+    "version": "17.0.0"
+  },
+  "profiles": {
+    "http": {
+      "applicationUrl": "http://localhost:15126",
+      "environmentVariables": {
+        "ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL": "http://localhost:19025",
+        "ASPIRE_RESOURCE_SERVICE_ENDPOINT_URL": "http://localhost:20111",
+        "ASPIRE_ALLOW_UNSECURED_TRANSPORT": "true",
+        "ASPIRE_DASHBOARD_PERSISTENCE_MODE": "Resume",
+        "DASHBOARD__API__AUTHMODE": "ApiKey"
+      }
+    },
+    "core": {
+      "applicationUrl": "http://localhost:15126",
+      "environmentVariables": {
+        "ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL": "http://localhost:19025",
+        "ASPIRE_RESOURCE_SERVICE_ENDPOINT_URL": "http://localhost:20111",
+        "ASPIRE_ALLOW_UNSECURED_TRANSPORT": "true",
+        "ASPIRE_DASHBOARD_PERSISTENCE_MODE": "Resume",
+        "DASHBOARD__API__AUTHMODE": "ApiKey",
+        "Gbo__Profiles": "core"
+      }
+    },
+    "dvtp": {
+      "applicationUrl": "http://localhost:15126",
+      "environmentVariables": {
+        "ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL": "http://localhost:19025",
+        "ASPIRE_RESOURCE_SERVICE_ENDPOINT_URL": "http://localhost:20111",
+        "ASPIRE_ALLOW_UNSECURED_TRANSPORT": "true",
+        "ASPIRE_DASHBOARD_PERSISTENCE_MODE": "Resume",
+        "DASHBOARD__API__AUTHMODE": "ApiKey",
+        "Gbo__Profiles": "dvtp"
+      }
+    },
+    "full": {
+      "applicationUrl": "http://localhost:15126",
+      "environmentVariables": {
+        "ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL": "http://localhost:19025",
+        "ASPIRE_RESOURCE_SERVICE_ENDPOINT_URL": "http://localhost:20111",
+        "ASPIRE_ALLOW_UNSECURED_TRANSPORT": "true",
+        "ASPIRE_DASHBOARD_PERSISTENCE_MODE": "Resume",
+        "DASHBOARD__API__AUTHMODE": "ApiKey",
+        "Gbo__Profiles": "full"
+      }
+    },
+    "https": {
+      "applicationUrl": "https://localhost:17083;http://localhost:15126",
+      "environmentVariables": {
+        "ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL": "https://localhost:21134",
+        "ASPIRE_RESOURCE_SERVICE_ENDPOINT_URL": "https://localhost:22074",
+        "ASPIRE_DASHBOARD_PERSISTENCE_MODE": "Resume",
+        "DASHBOARD__API__AUTHMODE": "ApiKey"
+      }
+    }
+  },
+  "packages": {
+    "Aspire.Hosting.JavaScript": "17.0.0",
+    "Aspire.Hosting.Docker": "17.0.0"
   }
 }

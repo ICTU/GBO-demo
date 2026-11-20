@@ -413,8 +413,8 @@ jobs:
         if: matrix.service == 'openftv-pdp'
         run: |
           pdp="$(grep -oP '^ARG OPENFTV_REF=\K\S+' services/openftv-pdp/Dockerfile)"
-          mgr="$(grep -oP 'open-ftv/manager", "\K[^"]+' aspire/apphost.cs)"
-          ui="$(grep -oP 'open-ftv/management-interface", "\K[^"]+' aspire/apphost.cs)"
+          mgr="$(grep -oP 'open-ftv/manager", "\K[^"]+' aspire/apphost.go)"
+          ui="$(grep -oP 'open-ftv/management-interface", "\K[^"]+' aspire/apphost.go)"
           for v in "$pdp" "$mgr" "$ui"; do
             test -n "$v" || { echo "OpenFTV version not found in all three places" >&2; exit 1; }
           done
