@@ -7,9 +7,9 @@
 // them by name, and Aspire's container network resolves resource names the
 // same way compose did.
 //
-// Workarounds for gaps in the Go AppHost preview are marked `TODO(aspire#N)`
-// with the upstream issue, so they can go when Aspire catches up. GO-APPHOST.md
-// lists them.
+// Workarounds for gaps in the Go AppHost preview are marked
+// `TODO(go-apphost/<gap>)`. GO-APPHOST.md lists each gap with its upstream
+// issue, so the workaround can go when Aspire catches up.
 package main
 
 import (
@@ -1367,7 +1367,7 @@ echo "FSC databases ready"
 	npm := filepath.Join(nodeDir, "npm")
 
 	frontend := func(name string, port int) aspire.ViteAppResource {
-		// TODO(aspire#21290): the C# AppHost lets WithNpm install with
+		// TODO(go-apphost/npm-installer): the C# AppHost lets WithNpm install with
 		// `npm ci` and pins the installer's npm in a BeforeStartEvent. The Go
 		// SDK cannot reach the installer resource WithNpm creates (the model
 		// only returns untyped handles), so the AppHost runs `npm ci` itself

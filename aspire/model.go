@@ -31,7 +31,7 @@ type model struct {
 	repoRoot string
 	runMode  bool
 
-	// TODO(aspire#go-model): the Go SDK has no typed enumeration of the
+	// TODO(go-apphost/typed-model): the Go SDK has no typed enumeration of the
 	// model (builder.Resources in C#); DistributedApplicationModel only
 	// returns untyped handles. The AppHost keeps its own index instead.
 	resources  map[string]tracked
@@ -122,7 +122,7 @@ func (m *model) dockerfile(name, context, dockerfile string) aspire.ContainerRes
 // containerArgs sets a container's arguments, some of which may be
 // parameters or reference expressions.
 //
-// TODO(aspire#go-args): WithArgs takes []string in the Go SDK, where C#
+// TODO(go-apphost/string-args): WithArgs takes []string in the Go SDK, where C#
 // takes object[] (strings, parameters and expressions). Mixed arguments go
 // through WithArgsCallback.
 func (m *model) containerArgs(c aspire.ContainerResource, args ...any) aspire.ContainerResource {
@@ -141,7 +141,7 @@ func (m *model) containerArgs(c aspire.ContainerResource, args ...any) aspire.Co
 // executable adds a host process with plain string arguments.
 func (m *model) executable(name, command, workingDirectory string, args ...string) aspire.ExecutableResource {
 	if args == nil {
-		// TODO(aspire#go-nil-args): AddExecutable leaves a nil args slice out
+		// TODO(go-apphost/nil-args): AddExecutable leaves a nil args slice out
 		// of the request, and the AppHost server then rejects the call with
 		// "Missing required argument 'args'". An empty slice works.
 		args = []string{}
@@ -178,7 +178,7 @@ func (m *model) nestUnder(child, parent string) {
 
 // argValue wraps a bare parameter in a reference expression.
 //
-// TODO(aspire#go-param-arg): a ParameterResource added to the arguments as
+// TODO(go-apphost/parameter-arg): a ParameterResource added to the arguments as
 // is runs fine but breaks `aspire publish` ("Command line args must be
 // strings" in publish-compose); wrapped in an expression it publishes as
 // ${NAME}, as C# does.
