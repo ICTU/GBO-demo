@@ -19,7 +19,19 @@ import (
 type tracked struct {
 	handle aspire.Resource
 	nest   func(parent aspire.Resource)
+	label  func(tags []string, order int)
+	kind   kind
 }
+
+// kind sorts a resource into one of the dashboard groups (see labelAll).
+type kind int
+
+const (
+	ownBuild kind = iota
+	offTheShelf
+	monitoring
+	setup
+)
 
 type namedContainer struct {
 	name   string
@@ -94,19 +106,29 @@ func (m *model) secret(name, value string) aspire.ParameterResource {
 	return m.b.AddParameter(name, aspire.AddParameterValue(value), aspire.AddParameterSecret(true))
 }
 
-func (m *model) register(name string, r aspire.Resource, nest func(aspire.Resource)) {
-	m.resources[name] = tracked{handle: r, nest: nest}
+func (m *model) register(name string, r aspire.Resource, k kind, nest func(aspire.Resource), label func([]string, int)) {
+	m.resources[name] = tracked{handle: r, nest: nest, label: label, kind: k}
 }
 
-func (m *model) trackContainer(name string, c aspire.ContainerResource) aspire.ContainerResource {
-	m.register(name, c, func(p aspire.Resource) { c.WithParentRelationship(p) })
+// classify overrides the group a resource got from how it was added.
+func (m *model) classify(name string, k kind) {
+	if t, ok := m.resources[name]; ok {
+		t.kind = k
+		m.resources[name] = t
+	}
+}
+
+func (m *model) trackContainer(name string, c aspire.ContainerResource, k kind) aspire.ContainerResource {
+	m.register(name, c, k,
+		func(p aspire.Resource) { c.WithParentRelationship(p) },
+		func(tags []string, order int) { c.WithTags(tags).WithDisplayOrder(order) })
 	m.containers = append(m.containers, namedContainer{name, c})
 	return c
 }
 
 // container adds a container from a published image.
 func (m *model) container(name, image, tag string) aspire.ContainerResource {
-	return m.trackContainer(name, m.b.AddContainer(name, image).WithImageTag(tag))
+	return m.trackContainer(name, m.b.AddContainer(name, image).WithImageTag(tag), offTheShelf)
 }
 
 // dockerfile adds a container built from a Dockerfile. An empty dockerfile
@@ -116,7 +138,7 @@ func (m *model) dockerfile(name, context, dockerfile string) aspire.ContainerRes
 	if dockerfile != "" {
 		opts = append(opts, aspire.AddDockerfileDockerfilePath(dockerfile))
 	}
-	return m.trackContainer(name, m.b.AddDockerfile(name, context, opts...))
+	return m.trackContainer(name, m.b.AddDockerfile(name, context, opts...), ownBuild)
 }
 
 // containerArgs sets a container's arguments, some of which may be
@@ -147,7 +169,9 @@ func (m *model) executable(name, command, workingDirectory string, args ...strin
 		args = []string{}
 	}
 	e := m.b.AddExecutable(name, command, workingDirectory, args)
-	m.register(name, e, func(p aspire.Resource) { e.WithParentRelationship(p) })
+	m.register(name, e, setup,
+		func(p aspire.Resource) { e.WithParentRelationship(p) },
+		func(tags []string, order int) { e.WithTags(tags).WithDisplayOrder(order) })
 	return e
 }
 
@@ -187,6 +211,27 @@ func argValue(a any) any {
 		return aspire.RefExpr("%v", p)
 	}
 	return a
+}
+
+// labelAll tags every resource with its group and sorts the groups in the
+// dashboard: the services built from this repository first, then the
+// components taken off the shelf, then monitoring, then the run-once setup
+// steps. A child nested under a parent stays under it; the order applies
+// among the top-level resources and among siblings.
+func (m *model) labelAll() {
+	groups := map[kind]struct {
+		tag   string
+		order int
+	}{
+		ownBuild:    {"own build", 300},
+		offTheShelf: {"off the shelf", 200},
+		monitoring:  {"monitoring", 100},
+		setup:       {"setup", 0},
+	}
+	for _, t := range m.resources {
+		g := groups[t.kind]
+		t.label([]string{g.tag}, g.order)
+	}
 }
 
 func allStrings(args []any) ([]string, bool) {

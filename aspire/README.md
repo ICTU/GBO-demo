@@ -121,6 +121,20 @@ FSC peer's parts under its Controller, migrations and seeds under their
 database, PDP or directory. That leaves about 40 top-level resources in the
 dvtp run.
 
+Every resource carries one tag, and the list sorts by group:
+
+| Tag | What | Order |
+| --- | --- | --- |
+| `own build` | services and frontends built from this repository | first |
+| `off the shelf` | published components: Postgres, OpenFSC, cfssl, Keycloak, the OpenFTV PDP and Manager, nginx, cloudflared, the nl-wallet issuance server and verifier | second |
+| `monitoring` | the OpenTelemetry collector | third |
+| `setup` | run-once steps: images, certificates, migrations, seeds, `npm ci` | last (all nested) |
+
+Filter on a tag under Filters, Tags. A resource takes its group from how it
+is added (Dockerfile, image or host process); `apphost.go` lists the
+exceptions under "Groups in the dashboard". The five `<frontend>-installer`
+leftovers stay untagged (GO-APPHOST.md, npm-installer).
+
 In Aspire 17.0 the graph view draws every resource and ignores the list's
 Filters and nesting. To graph a subset, select it in the list (click, and
 ⌘-click to add or remove), or open the page with the resources in the URL:

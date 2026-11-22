@@ -1383,7 +1383,9 @@ echo "FSC databases ready"
 				e.SetIsProxied(&proxied)
 			}).
 			WithEnvironment("__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS", allowedHosts)
-		m.register(name, app, func(p aspire.Resource) { app.WithParentRelationship(p) })
+		m.register(name, app, ownBuild,
+			func(p aspire.Resource) { app.WithParentRelationship(p) },
+			func(tags []string, order int) { app.WithTags(tags).WithDisplayOrder(order) })
 		if m.runMode {
 			install := m.executable(name+"-install", npm, m.repo(name), "ci").
 				WithEnvironment("PATH", nodePath)
@@ -1507,6 +1509,30 @@ echo "FSC databases ready"
 	} {
 		m.nestUnder(cp[0], cp[1])
 	}
+
+	// ── Groups in the dashboard ──────────────────────────────────────────
+	// Every resource carries one tag, and the groups sort in this order:
+	// "own build" (the services and frontends built from this repository),
+	// "off the shelf" (published components: Postgres, OpenFSC, cfssl,
+	// Keycloak, the OpenFTV Manager, nginx, cloudflared, and the nl-wallet
+	// issuance server and verifier), "monitoring" (the collector) and "setup"
+	// (run-once steps). A resource gets its group from how it is added
+	// (Dockerfile: own build, image: off the shelf, host process: setup);
+	// the exceptions are listed here.
+	m.classify("otel-collector", monitoring)
+	// Released OpenFTV, built from source only for the GBO mapper patch
+	// (services/openftv-pdp/Dockerfile).
+	m.classify("openftv-pdp", offTheShelf)
+	for name := range m.resources {
+		if strings.HasPrefix(name, "fsc-seed-") || strings.Contains(name, "-migrations") ||
+			strings.HasSuffix(name, "-bootstrap") || strings.HasSuffix(name, "-materialize") {
+			m.classify(name, setup)
+		}
+	}
+	for _, name := range []string{"postgres-ftv-init", "pdp-admission", "fsc-databases", "source-reconciler", "eudi-wallet-verifier-runtime"} {
+		m.classify(name, setup)
+	}
+	m.labelAll()
 
 	// ── Grouping in Docker Desktop and OrbStack ──────────────────────────
 	// Both group containers by the compose project label. Every container the
