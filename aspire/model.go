@@ -21,6 +21,7 @@ type tracked struct {
 	nest   func(parent aspire.Resource)
 	label  func(tags []string, order int)
 	kind   kind
+	extra  []kind
 }
 
 // kind sorts a resource into one of the dashboard groups (see labelAll).
@@ -213,6 +214,15 @@ func argValue(a any) any {
 	return a
 }
 
+// alsoTag adds a second group's tag to a resource; it keeps the sort order
+// of its own group.
+func (m *model) alsoTag(name string, k kind) {
+	if t, ok := m.resources[name]; ok {
+		t.extra = append(t.extra, k)
+		m.resources[name] = t
+	}
+}
+
 // labelAll tags every resource with its group and sorts the groups in the
 // dashboard: the services built from this repository first, then the
 // components taken off the shelf, then monitoring, then the run-once setup
@@ -230,7 +240,11 @@ func (m *model) labelAll() {
 	}
 	for _, t := range m.resources {
 		g := groups[t.kind]
-		t.label([]string{g.tag}, g.order)
+		tags := []string{g.tag}
+		for _, k := range t.extra {
+			tags = append(tags, groups[k].tag)
+		}
+		t.label(tags, g.order)
 	}
 }
 

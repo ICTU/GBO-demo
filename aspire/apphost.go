@@ -1520,9 +1520,10 @@ echo "FSC databases ready"
 	// (Dockerfile: own build, image: off the shelf, host process: setup);
 	// the exceptions are listed here.
 	m.classify("otel-collector", monitoring)
-	// Released OpenFTV, built from source only for the GBO mapper patch
-	// (services/openftv-pdp/Dockerfile).
-	m.classify("openftv-pdp", offTheShelf)
+	// Released OpenFTV built here with the GBO mapper patch
+	// (services/openftv-pdp/Dockerfile): both groups, sorted with the own
+	// builds.
+	m.alsoTag("openftv-pdp", offTheShelf)
 	for name := range m.resources {
 		if strings.HasPrefix(name, "fsc-seed-") || strings.Contains(name, "-migrations") ||
 			strings.HasSuffix(name, "-bootstrap") || strings.HasSuffix(name, "-materialize") {

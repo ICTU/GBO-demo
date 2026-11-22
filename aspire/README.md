@@ -125,8 +125,8 @@ Every resource carries one tag, and the list sorts by group:
 
 | Tag | What | Order |
 | --- | --- | --- |
-| `own build` | services and frontends built from this repository | first |
-| `off the shelf` | published components: Postgres, OpenFSC, cfssl, Keycloak, the OpenFTV PDP and Manager, nginx, cloudflared, the nl-wallet issuance server and verifier | second |
+| `own build` | services and frontends built from this repository | first (the OpenFTV PDP, built here from released OpenFTV with our patch, also carries `off the shelf`) |
+| `off the shelf` | published components: Postgres, OpenFSC, cfssl, Keycloak, the OpenFTV Manager, nginx, cloudflared, the nl-wallet issuance server and verifier | second |
 | `monitoring` | the OpenTelemetry collector | third |
 | `setup` | run-once steps: images, certificates, migrations, seeds, `npm ci` | last (all nested) |
 
