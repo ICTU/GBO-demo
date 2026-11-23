@@ -251,9 +251,7 @@ jobs:
       - name: bundled schemas match the running sources
         run: ./scripts/check-schema-drift.sh
 
-  # Real OINs, internal hostnames and secrets must not reach this public
-  # repository. All logic is in the script, so any CI system runs it the
-  # same way. Runs on every change: any file can introduce a leak.
+  # Not gated by the plan: any file can introduce a leak.
   safety:
     name: Safety audit — no real OINs, internal hosts or secrets
     runs-on: ubuntu-latest

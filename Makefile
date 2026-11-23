@@ -147,8 +147,6 @@ policy-test: policy-check
 	$(OPA) fmt --diff policies
 	$(OPA) test policies -v --timeout $(OPA_TEST_TIMEOUT)
 
-# Scan the tracked files for real OINs, internal hostnames and secrets.
-# CI runs the same script; see scripts/check-safety.sh.
 check-safety:
 	./scripts/check-safety.sh
 
