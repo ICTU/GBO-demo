@@ -16,9 +16,10 @@
 # HIGH findings are blocking: the script exits 1. LOW findings are
 # informational: a count per category by default, the full list with -v.
 #
-# Known-good matches are listed, each with a reason, in
-# scripts/check-safety.allowlist. Add an entry there only for a match that
-# is not a leak; never add a real value.
+# There is no allowlist: when a check flags a test or demo value, replace
+# it with one the check accepts (an OIN from the demo range 99999999...,
+# an identifier or placeholder that does not look like a secret). When it
+# flags a real value, remove the value instead.
 #
 # Runs in CI on every change. Run it locally from anywhere in the repo:
 #
@@ -54,16 +55,14 @@ if ! echo "" | grep -P '' > /dev/null 2>&1; then
   exit 2
 fi
 
-ALLOWLIST="scripts/check-safety.allowlist"
-
 # Tracked regular files under TARGET, minus files that cannot leak in a
-# meaningful way or would only produce noise: this script and its allowlist
-# (they hold the patterns), lockfiles and checksum files (hashes).
+# meaningful way or would only produce noise: this script (it holds the
+# patterns), lockfiles, checksum files (hashes) and images.
 FILES=()
 while IFS= read -r -d '' f; do
   [[ -f "$f" && ! -L "$f" ]] || continue
   case "$f" in
-    scripts/check-safety.sh | "$ALLOWLIST") continue ;;
+    scripts/check-safety.sh) continue ;;
     *package-lock.json | *go.sum | *.svg | *.png) continue ;;
   esac
   FILES+=("$f")
@@ -74,45 +73,9 @@ if [[ ${#FILES[@]} -eq 0 ]]; then
   exit 2
 fi
 
-# Allowlist: lines "<path glob>|<fixed text>". A finding is dropped when
-# its file matches the glob and its line contains the text.
-allow_globs=()
-allow_texts=()
-if [[ -f "$ALLOWLIST" ]]; then
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    [[ -z "${line// /}" || "$line" == \#* ]] && continue
-    allow_globs+=("${line%%|*}")
-    allow_texts+=("${line#*|}")
-  done < "$ALLOWLIST"
-fi
-
-# Reads grep -n output ("file:line:text") on stdin, prints the findings
-# that are not allowlisted.
-filter_allowed() {
-  local hit file text i allowed
-  while IFS= read -r hit; do
-    file="${hit%%:*}"
-    text="${hit#*:}"
-    text="${text#*:}"
-    allowed=0
-    for i in "${!allow_globs[@]}"; do
-      # shellcheck disable=SC2254 # the glob is meant to match as a pattern
-      case "$file" in
-        ${allow_globs[$i]})
-          if [[ "$text" == *"${allow_texts[$i]}"* ]]; then
-            allowed=1
-            break
-          fi
-          ;;
-      esac
-    done
-    [[ $allowed -eq 1 ]] || printf '%s\n' "$hit"
-  done
-}
-
 scan() {
   # -I skips binary files; grep exits 1 when nothing matches.
-  printf '%s\0' "${FILES[@]}" | xargs -0 grep -IHPn -- "$1" 2>/dev/null | filter_allowed || true
+  printf '%s\0' "${FILES[@]}" | xargs -0 grep -IHPn -- "$1" 2>/dev/null || true
 }
 
 # ── HIGH severity (blocking) ────────────────────────────────────────────
@@ -135,7 +98,7 @@ check_high() {
 # OIN: 20 digits. Real OINs start with 0000000 followed by 1-9 (the
 # register prefix), so those are not exempt. Exempt: the demo range
 # 99999999..., and 00000000... (no real OIN starts with eight zeros).
-# Synthetic numbers with a real-looking prefix are listed in the allowlist.
+# Test and demo data use the 99999999... range.
 check_high "Non-demo OIN" '(?<![0-9])(?!99999999|00000000)[0-9]{20}(?![0-9])'
 
 # Corporate / VPN-only hostnames. Only in host position (after "://",
@@ -188,7 +151,7 @@ check_low "Common Dutch first names in text" '\b(Jan|Piet|Kees|Marieke|Sanne|Wou
 
 # GitHub @-mentions, in markdown only (code has npm scopes like @types/x).
 mentions=$(printf '%s\n' "${FILES[@]}" | grep -E '\.md$' | tr '\n' '\0' |
-  xargs -0 -r grep -IHPn '(?<![\w.])@[a-zA-Z][a-zA-Z0-9_-]{2,}\b' 2>/dev/null | filter_allowed || true)
+  xargs -0 -r grep -IHPn '(?<![\w.])@[a-zA-Z][a-zA-Z0-9_-]{2,}\b' 2>/dev/null || true)
 if [[ -n "$mentions" ]]; then
   low_summary+="LOW:  $(printf '%s\n' "$mentions" | wc -l | tr -d ' ')  GitHub @-mentions in markdown"$'\n'
   low_report+=$'\n--- LOW: GitHub @-mentions in markdown ---\n'"$mentions"$'\n'
@@ -208,8 +171,8 @@ if [[ -n "$low_summary" && $verbose -eq 0 ]]; then
   echo "      (informational; run with -v to list them)"
 fi
 if [[ $high_hits -gt 0 ]]; then
-  echo "HIGH: $high_hits blocking finding(s). Remove the value, or, if it is"
-  echo "      not a leak, add it with a reason to $ALLOWLIST."
+  echo "HIGH: $high_hits blocking finding(s). Remove a real value; replace a test"
+  echo "      or demo value with one the check accepts (see the script header)."
   exit 1
 fi
 echo "OK: no blocking findings."

@@ -49,7 +49,7 @@ func TestCreateThenGetConsent(t *testing.T) {
 			"99999999900000000210": {"pseudonym": {"key_set_version": 20260301, "value": "cHNldWRvLTIxMA=="}}
 		},
 		"subject_ref": "EP-portal-abc123",
-		"dienstverlener_oin": "00000001234567890000",
+		"dienstverlener_oin": "99999999900000001400",
 		"scopes": ["bsn:read"],
 		"use_case": "hypotheek-aanvraag"
 	}`)
@@ -93,7 +93,7 @@ func TestCreateThenGetConsent(t *testing.T) {
 	}
 	claims := parsed.Claims.(*ConsentClaims)
 	assertSignedSubject(t, claims.EncryptedSubject)
-	if claims.DienstverlenrOIN != "00000001234567890000" {
+	if claims.DienstverlenrOIN != "99999999900000001400" {
 		t.Fatalf("unexpected signed claims: %+v", claims)
 	}
 	if claims.ValidUntil == "" || claims.ID == "" || len(claims.Audience) != 1 {
@@ -219,7 +219,7 @@ func TestCreateRefusesAConsentWithoutAnEncryptedSubject(t *testing.T) {
 	} {
 		body := bytes.NewBufferString(`{` + subject + `
 			"subject_ref": "EP-portal-abc123",
-			"dienstverlener_oin": "00000001234567890000",
+			"dienstverlener_oin": "99999999900000001400",
 			"scopes": ["bsn:read"]
 		}`)
 		resp, err := http.Post(srv.URL+"/consents", "application/json", body)

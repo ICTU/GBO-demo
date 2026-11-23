@@ -28,7 +28,7 @@ test_source_metadata_simulation_peer_allowed if {
 }
 
 test_source_metadata_other_actor_denied if {
-	not authz.allow with input as metadata_input_for_actor("00000001234567890000")
+	not authz.allow with input as metadata_input_for_actor("99999999900000001400")
 }
 
 test_source_metadata_wrong_method_denied if {

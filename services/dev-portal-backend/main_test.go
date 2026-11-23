@@ -199,8 +199,8 @@ func TestPolicySourceConfinesReadsToPoliciesDirectory(t *testing.T) {
 		t.Fatalf("write valid policy: %v", err)
 	}
 	outside := filepath.Join(root, "outside.rego")
-	const secret = "outside-policy-content"
-	if err := os.WriteFile(outside, []byte(secret), 0o644); err != nil {
+	const outsideContent = "outside-policy-content"
+	if err := os.WriteFile(outside, []byte(outsideContent), 0o644); err != nil {
 		t.Fatalf("write outside policy: %v", err)
 	}
 	if err := os.Symlink(outside, filepath.Join(policiesDir, "escape.rego")); err != nil {
@@ -221,7 +221,7 @@ func TestPolicySourceConfinesReadsToPoliciesDirectory(t *testing.T) {
 	if rec.Code == http.StatusOK {
 		t.Fatalf("policy source followed an escaping symlink; body=%s", rec.Body.String())
 	}
-	if strings.Contains(rec.Body.String(), secret) {
+	if strings.Contains(rec.Body.String(), outsideContent) {
 		t.Fatal("policy source disclosed a file outside the policies directory")
 	}
 }

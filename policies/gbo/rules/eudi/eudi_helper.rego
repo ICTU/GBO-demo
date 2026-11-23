@@ -14,7 +14,7 @@ import data.gbo.lib
 # admits a peer to the service; this admits it to the EUDI rules. The list
 # says who may issue attestations at all, not which source they read.
 designated_issuers := {
-	"00000004000000004000",
+	"99999999900000001700",
 	"0000009961MINEZK0000",
 	"99999999900000000100",
 }

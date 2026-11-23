@@ -108,7 +108,7 @@ func grant(t *testing.T, url string) string {
 	body, err := json.Marshal(map[string]any{
 		"encrypted_subject":  testEncryptedSubject,
 		"subject_ref":        testSubjectRef,
-		"dienstverlener_oin": "00000001234567890000",
+		"dienstverlener_oin": "99999999900000001400",
 		"scopes":             []string{"bd:ib:2025"},
 		"use_case":           "hypotheek",
 	})
@@ -317,7 +317,7 @@ func TestAFailedStoreLeavesNeitherConsentNorRecord(t *testing.T) {
 
 	body, err := json.Marshal(map[string]any{
 		"encrypted_subject": testEncryptedSubject, "subject_ref": testSubjectRef,
-		"dienstverlener_oin": "00000001234567890000", "scopes": []string{"bd:ib:2025"},
+		"dienstverlener_oin": "99999999900000001400", "scopes": []string{"bd:ib:2025"},
 	})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)

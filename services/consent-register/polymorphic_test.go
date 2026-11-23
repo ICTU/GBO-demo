@@ -90,7 +90,7 @@ func TestNoConsentAnswerCarriesThePolymorphicValues(t *testing.T) {
 	}
 	body, _ := json.Marshal(map[string]any{
 		"encrypted_subject": testEncryptedSubject, "subject_ref": testSubjectRef,
-		"dienstverlener_oin": "00000001234567890000", "scopes": []string{"bd:ib:2025"},
+		"dienstverlener_oin": "99999999900000001400", "scopes": []string{"bd:ib:2025"},
 	})
 	created, err := http.Post(srv.URL+"/consents", "application/json", bytes.NewReader(body))
 	if err != nil {

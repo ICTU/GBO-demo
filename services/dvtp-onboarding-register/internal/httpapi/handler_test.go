@@ -135,7 +135,7 @@ func TestOpenFTVParticipantsEndpoint(t *testing.T) {
 func TestParticipantFormCreatesParticipant(t *testing.T) {
 	service, repository := newTestService(t)
 	form := url.Values{
-		"peer_id":         {"00000001234567890000"},
+		"peer_id":         {"99999999900000001400"},
 		"name":            {"Hypotheekadvies BV"},
 		"active":          {"on"},
 		"source_peer_ids": {"99999999900000000200"},
@@ -154,7 +154,7 @@ func TestParticipantFormCreatesParticipant(t *testing.T) {
 func TestParticipantFormRejectsMissingSource(t *testing.T) {
 	service, _ := newTestService(t)
 	form := url.Values{
-		"peer_id": {"00000001234567890000"},
+		"peer_id": {"99999999900000001400"},
 		"name":    {"Hypotheekadvies BV"},
 		"active":  {"on"},
 	}
@@ -249,7 +249,7 @@ func TestParticipantFormRejectsCrossSiteAndMissingToken(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			service, repository := newTestService(t)
 			form := url.Values{
-				"peer_id":         {"00000001234567890000"},
+				"peer_id":         {"99999999900000001400"},
 				"name":            {"Hypotheekadvies BV"},
 				"source_peer_ids": {"99999999900000000200"},
 				"csrf_token":      {test.token},
@@ -274,7 +274,7 @@ func TestToggleStorageFailureReturnsUnavailable(t *testing.T) {
 	service, repository := newTestService(t)
 	repository.toggleErr = errors.New("database locked")
 	recorder := httptest.NewRecorder()
-	request := formRequest(http.MethodPost, "/participants/00000001234567890000/toggle", url.Values{})
+	request := formRequest(http.MethodPost, "/participants/99999999900000001400/toggle", url.Values{})
 	testHandler(service).ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusInternalServerError)

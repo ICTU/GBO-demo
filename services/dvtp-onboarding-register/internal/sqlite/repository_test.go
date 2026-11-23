@@ -22,7 +22,7 @@ func testRepository(t *testing.T) *Repository {
 func TestRepositoryPersistsAndTogglesParticipant(t *testing.T) {
 	repository := testRepository(t)
 	participant := onboarding.Participant{
-		PeerID:               "00000001234567890000",
+		PeerID:               "99999999900000001400",
 		Name:                 "Hypotheekadvies BV",
 		Active:               true,
 		AllowedSourcePeerIDs: []string{"99999999900000000200", "99999999900000000400"},
@@ -65,7 +65,7 @@ func TestRepositoryPersistsAndTogglesParticipant(t *testing.T) {
 func TestInsertIfAbsentDoesNotOverwriteParticipant(t *testing.T) {
 	repository := testRepository(t)
 	participant := onboarding.Participant{
-		PeerID:               "00000001234567890000",
+		PeerID:               "99999999900000001400",
 		Name:                 "Original",
 		Active:               true,
 		AllowedSourcePeerIDs: []string{"99999999900000000200"},
@@ -103,7 +103,7 @@ func TestOpenMigratesNumericOINSchemaToPeerIDs(t *testing.T) {
 	}
 	if _, err := db.Exec(`
         INSERT INTO participants (oin, name, active, allowed_sources, updated_at)
-        VALUES ('00000001234567890000', 'Legacy', 1, '["99999999900000000200"]', '2026-01-01T00:00:00Z')
+        VALUES ('99999999900000001400', 'Legacy', 1, '["99999999900000000200"]', '2026-01-01T00:00:00Z')
     `); err != nil {
 		t.Fatal(err)
 	}

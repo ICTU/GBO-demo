@@ -29,7 +29,7 @@ func TestTheUsesEndpointChecksOwnership(t *testing.T) {
 			_, _ = w.Write([]byte(`{"consent_id":"c-1","status":"ACTIVE","subject_ref":"` + string(owner) + `"}`))
 		case "/consents/c-1/uses":
 			usesAsked++
-			_, _ = w.Write([]byte(`{"consent_id":"c-1","uses":[{"used_at":"2026-11-19T09:30:00.123Z","service_provider_oin":"00000003000000003000","service_provider":"Hypotheek-BV","source":"Belastingdienst","logbook_id":"99999999900000000200/bd"}],"notices":[]}`))
+			_, _ = w.Write([]byte(`{"consent_id":"c-1","uses":[{"used_at":"2026-11-19T09:30:00.123Z","service_provider_oin":"99999999900000001800","service_provider":"Hypotheek-BV","source":"Belastingdienst","logbook_id":"99999999900000000200/bd"}],"notices":[]}`))
 		default:
 			http.NotFound(w, r)
 		}
