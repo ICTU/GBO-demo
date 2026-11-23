@@ -141,8 +141,13 @@ not with `aspire run`. `core` was started once; `full` was not.
 
 Checked against microsoft/aspire `main` (commit `f9da20e`, 2026-11-23): all
 five workaround gaps are still there, and no issue or pull request covers
-them. Filed on 2026-11-23 as the issues below. Where each one sits in the
-Aspire source:
+them. Filed on 2026-11-23 as the issues linked in the workaround table, with
+fixes proposed for the two bugs:
+[microsoft/aspire#22573](https://github.com/microsoft/aspire/pull/22573) for
+`nil-args` and
+[microsoft/aspire#22574](https://github.com/microsoft/aspire/pull/22574) for
+`parameter-arg`. When a release contains them, remove the two workarounds.
+Where each gap sits in the Aspire source:
 
 | Gap | Kind | Where |
 | --- | --- | --- |
