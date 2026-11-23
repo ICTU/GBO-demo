@@ -137,6 +137,10 @@ func (m *model) build() {
 	}
 	on := func(p string) bool { return profiles[p] }
 	fscOn := on("dvtp") || on("eudi") || on("onboarding") || on("integrator") || on("asi")
+	// The EDI issuer (its FSC peer, and what only the EUDI flows use) runs
+	// with the EUDI profiles only; eudi, asi and credential-issuer all turn
+	// onboarding on.
+	ediOn := on("onboarding")
 
 	// ── Settings ─────────────────────────────────────────────────────────
 	// Browser-facing links, as GBO_PUBLIC_HOST and GBO_PUBLIC_SCHEME were.
@@ -283,6 +287,10 @@ func (m *model) build() {
 		{"logboek-ir", "ir", "https://logboek.installatieregister.test/data-processing-operations"},
 	} {
 		name, register, logbookID := l[0], l[1], l[2]
+		if name == "logboek-eudi-adapter" && !on("eudi") {
+			// Only the EUDI adapter writes to it.
+			continue
+		}
 		logboeken[name] = goService(name, "services/ldv-logboek/Dockerfile", 4016, "", 0).
 			WithEnvironment("DATABASE_PATH", "/data/logboek.db").
 			WithEnvironment("REGISTER_PATH", fmt.Sprintf("/config/verwerkingsactiviteiten-%s.json", register)).
@@ -417,9 +425,13 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 		WithVolume("/data", aspire.VolumeName("gbo-ldv-outbox-brp-graphql-server")).
 		WaitFor(logboeken["logboek-brp"])
 
-	goService("unsecured-graphql-server", "services/graphql-server/Dockerfile", 4000, "", 0).
-		WithEnvironment("GBO_SOURCE_METADATA_PATH", "/config/gbo-source-metadata-unsecured.json").
-		WithBindMount(m.repo("services/graphql-server/config"), "/config", aspire.BindMountIsReadOnly(true))
+	if on("onboarding") {
+		// The unsecured demo source; only source onboarding reads it
+		// (sources/local-demo/demo-unsecured.yaml).
+		goService("unsecured-graphql-server", "services/graphql-server/Dockerfile", 4000, "", 0).
+			WithEnvironment("GBO_SOURCE_METADATA_PATH", "/config/gbo-source-metadata-unsecured.json").
+			WithBindMount(m.repo("services/graphql-server/config"), "/config", aspire.BindMountIsReadOnly(true))
+	}
 
 	// The source-side sidecar in front of a source: decrypts the polymorphic
 	// identity and writes the source's logbook records.
@@ -632,8 +644,10 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 
 		addFscPeer(peerSpec{prefix: "directory", pkiDir: "directory-peer/pki", certName: "directory-peer", bootstrap: "bootstrap-directory-peer.sh", db: "dir", controllerPort: 8092,
 			inway: "DirectoryInway-01", managerArgs: []string{"--auto-sign-grants=servicePublication"}})
-		addFscPeer(peerSpec{prefix: "edi", pkiDir: "orgs/edi-issuer/pki", certName: "edi-issuer", bootstrap: "bootstrap-edi-issuer.sh", db: "edi", controllerPort: 8094,
-			outway: "EdiOutway-01", outwayPort: 8087})
+		if ediOn {
+			addFscPeer(peerSpec{prefix: "edi", pkiDir: "orgs/edi-issuer/pki", certName: "edi-issuer", bootstrap: "bootstrap-edi-issuer.sh", db: "edi", controllerPort: 8094,
+				outway: "EdiOutway-01", outwayPort: 8087})
+		}
 		addFscPeer(peerSpec{prefix: "bd", pkiDir: "orgs/belastingdienst-mock/pki", certName: "bd-mock", bootstrap: "bootstrap-bd-mock.sh", db: "bd", controllerPort: 8095,
 			inway: "BdInway-01", authzen: true})
 		addFscPeer(peerSpec{prefix: "hv", pkiDir: "orgs/hypotheekverlener-mock/pki", certName: "hypotheekverlener", bootstrap: "bootstrap-hypotheekverlener.sh", db: "hv", controllerPort: 8096,
@@ -689,7 +703,13 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 		}
 
 		// BD publishes bri (BD source); the EDI issuer connects to it.
-		seed("fsc-seed-bri", "scripts/seed-bri-contract.sh")
+		// Without the EDI peer the seed registers and publishes bri only;
+		// the other consumers' seeds need that.
+		if ediOn {
+			seed("fsc-seed-bri", "scripts/seed-bri-contract.sh")
+		} else {
+			seed("fsc-seed-bri", "scripts/seed-bri-contract.sh", [2]string{"CREATE_CONNECTION", "false"})
+		}
 		if on("dvtp") {
 			// Hypotheek-BV (the DvTP consumer) connects to bri.
 			seed("fsc-seed-bri-hv", "scripts/seed-bri-connection-hv.sh")
@@ -759,15 +779,20 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 	}
 
 	// ── Developer portal ─────────────────────────────────────────────────
-	ldvLogbooks := strings.Join([]string{
+	ldvLogbookList := []string{
 		"https://logboek.hypotheek-bv.test/data-processing-operations=Hypotheek-BV=http://logboek-afnemer:4016=start",
-		"https://logboek.gbo.overheid.nl/eudi-adapter/data-processing-operations=GBO EUDI-adapter=http://logboek-eudi-adapter:4016=start",
 		"https://logboek.belastingdienst.nl/data-processing-operations=Belastingdienst=http://logboek-bd:4016",
 		"https://logboek.rvig.nl/data-processing-operations=RvIG=http://logboek-brp:4016",
 		"https://logboek.gbo.overheid.nl/toestemming/data-processing-operations=GBO toestemming=http://logboek-toestemming:4016",
 		"https://logboek.installatieregister.test/data-processing-operations=Installatie Register=http://logboek-ir:4016=start",
 		"https://logboek.lvg.test/data-processing-operations=LVG=http://logboek-lvg:4016",
-	}, ",")
+	}
+	if on("eudi") {
+		ldvLogbookList = append(ldvLogbookList[:1], append([]string{
+			"https://logboek.gbo.overheid.nl/eudi-adapter/data-processing-operations=GBO EUDI-adapter=http://logboek-eudi-adapter:4016=start",
+		}, ldvLogbookList[1:]...)...)
+	}
+	ldvLogbooks := strings.Join(ldvLogbookList, ",")
 
 	devPortalBackend := m.dockerfile("dev-portal-backend", "..", "services/dev-portal-backend/Dockerfile").
 		WithHttpEndpoint(aspire.HttpEndpointTargetPort(4007), aspire.HttpEndpointName("http")).
@@ -799,10 +824,14 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 		WaitFor(openftvPdp).
 		WaitForCompletion(postgresFtvInit)
 
-	// The FSC transaction logs it reads, per peer, with that peer's internal
-	// certificates. The directories exist once the peer's bootstrap ran.
+	// The FSC transaction logs it reads, per peer that runs, with that
+	// peer's internal certificates. The directories exist once the peer's
+	// bootstrap ran. The backend skips a peer that is not configured.
 	for _, od := range [][2]string{{"edi", "edi-issuer"}, {"hv", "hypotheekverlener-mock"}, {"ir", "installatieregister"}, {"asip", "asip"}, {"bd", "belastingdienst-mock"}} {
 		org, dir := od[0], od[1]
+		if _, runs := m.resources[org+"-txlog-api"]; !runs {
+			continue
+		}
 		mkdirAll(m.repo("fsc-infra/orgs/" + dir + "/pki/internal"))
 		upper := strings.ToUpper(org)
 		devPortalBackend.
@@ -1421,6 +1450,9 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 		WithEnvironment("VITE_FSC_CONTROLLER_BRON_URL", publicURL(8095)).
 		WithEnvironment("VITE_FSC_CONTROLLER_DVTP_URL", publicURL(8096)).
 		WithEnvironment("VITE_FSC_CONTROLLER_EUDI_URL", publicURL(8094)).
+		// The EDI issuer's Controller only runs with the EUDI profiles; the
+		// page leaves its link out otherwise.
+		WithEnvironment("VITE_EUDI_FSC_AVAILABLE", strconv.FormatBool(ediOn)).
 		WithEnvironment("VITE_VERSION_STRING", m.config("Gbo:VersionString")).
 		// Without the dvtp profile the consumer mock, consent portal and
 		// Installatie Register do not run; the page then shows their start

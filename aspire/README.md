@@ -43,10 +43,10 @@ comma-separated:
 | Profile | Adds | Was |
 | --- | --- | --- |
 | `core` | sources, PDP, logbooks, developer portal, landing page | `make demo-minimal` |
-| `dvtp` (the default) | the FSC network, consumers, consent portal, LVG and the Installatie Register | `make demo` |
-| `eudi` | the Source Registry, source onboarding, the issuance server and the EUDI adapter (left out, with an `eudi-not-configured` notice, while the development CAs are missing) | `make demo-eudi` |
+| `dvtp` (the default) | the FSC network without the EDI issuer's peer, consumers, consent portal, LVG and the Installatie Register | `make demo` |
+| `eudi` | the EDI issuer's FSC peer, the Source Registry, source onboarding (with the unsecured demo source), the issuance server, the EUDI adapter and its logbook (left out, with an `eudi-not-configured` notice, while the development CAs are missing) | `make demo-eudi` |
 | `full` | `dvtp` + `eudi`, and the separate BRP FSC peer | `make demo-full` |
-| `onboarding` | the Source Registry and the reconciler only | `--profile onboarding` |
+| `onboarding` | the EDI issuer's FSC peer, the unsecured demo source, the Source Registry and the reconciler only | `--profile onboarding` |
 | `integrator` | the integrator's FSC peer, seed and backend | `make demo-integrator` |
 | `asi` | the ASIP's FSC peer, authorization server, discovery stub, reference QTSP and the wallet verifiers once provisioned | `make demo-asi` |
 | `manager` | Keycloak, the OpenFTV Manager and UI, and the policy seed | `make demo-manager` |
@@ -109,7 +109,7 @@ Fixed and not proxied:
 | Ports | What |
 | --- | --- |
 | 9000–9004 | the landing page, consumer mock, consent portal, developer portal and Installatie Register |
-| 8091–8102 | certportal, the directory UI and the FSC Controllers; the EDI Outway on 8087 |
+| 8091–8102 | certportal, the directory UI and the FSC Controllers; the EDI Outway on 8087 (the EDI Controller on 8094 and its Outway only with an EUDI profile) |
 | 9409, 9424–9432, 18001 | the EUDI adapter, the ASI route, the credential issuer, trust host and issuance server |
 | 9280–9284 | the OpenFTV Manager, its UI and Keycloak |
 | 15126 | the dashboard |
@@ -176,8 +176,8 @@ Sizes measured on macOS (arm64):
 
 | Run | Containers (long-running / run-once) | Host processes | Healthy after |
 | --- | --- | --- | --- |
-| core | 23 (21 / 2) | 7 | 35 s warm |
-| `dvtp` | 86 (58 / 28) | 21 | 63 s warm, about 800 MiB |
+| core | 23 (21 / 2) | 7 | 35 s warm (measured before 2026-11-23; two fewer containers since) |
+| `dvtp` | 75 (51 / 24) | 21 | about 45 s warm (2026-11-23, without the EDI issuer's peer) |
 | every profile (`aspire publish`) | about 139 | | not run |
 
 ## Scripts

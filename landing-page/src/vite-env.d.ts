@@ -15,5 +15,6 @@ interface Window {
     fscControllerEudiUrl?: string
     versionString?: string
     dvtpAvailable?: string
+    eudiFscAvailable?: string
   }
 }

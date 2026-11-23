@@ -23,7 +23,8 @@ certificate steps and the seeds are idempotent.
 The AppHost publishes fixed ports where a URL or certificate depends on them:
 
 - the frontends: 9000–9004;
-- the FSC Controllers and certportal: 8091–8102, and the EDI Outway on 8087;
+- the FSC Controllers and certportal: 8091–8102, and the EDI Outway on 8087
+  (the EDI peer only with an EUDI profile);
 - the EUDI and ASI services: 9409, 9424–9432 and 18001;
 - the dashboard: 15126, 19025 and 20111.
 
@@ -175,7 +176,10 @@ that one:
 | `consent-status` | PDP → Toestemmingsregister | `fsc-seed-consent-status` |
 
 The `sub` claim tells the two `bri` rows apart: `99999999900000000100` is the
-EDI-issuer, `99999999900000000300` the Hypotheekverlener.
+EDI-issuer, `99999999900000000300` the Hypotheekverlener. The EDI-issuer's
+peer and its contracts exist only with an EUDI profile (`eudi`, `full`,
+`onboarding`, `asi`, `credential-issuer`); in the default dvtp run
+`fsc-seed-bri` registers and publishes `bri` without the EDI connection.
 
 If the new contract stays pending, the counterparty refused it; see *Contract
 seed fails* above. Grant properties need OpenFSC >= v2.0.0 on every peer on

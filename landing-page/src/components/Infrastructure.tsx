@@ -1,5 +1,5 @@
 import ExternalLink from './ExternalLink'
-import { docs, links } from '../config'
+import { docs, eudiFscAvailable, links } from '../config'
 
 export default function Infrastructure() {
   return (
@@ -29,13 +29,15 @@ export default function Infrastructure() {
             >
               Afnemer DvTP (minezk) ↗
             </ExternalLink>
-            <ExternalLink
-              href={links.fscControllerEudi}
-              describes="de FSC-controller van de afnemer EUDI"
-              className="infra-link"
-            >
-              Afnemer EUDI (minezk) ↗
-            </ExternalLink>
+            {eudiFscAvailable && (
+              <ExternalLink
+                href={links.fscControllerEudi}
+                describes="de FSC-controller van de afnemer EUDI"
+                className="infra-link"
+              >
+                Afnemer EUDI (minezk) ↗
+              </ExternalLink>
+            )}
           </div>
           <div>
             <h3>Observability</h3>

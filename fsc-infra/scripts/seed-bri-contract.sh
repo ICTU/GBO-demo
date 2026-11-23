@@ -80,6 +80,11 @@ fi
 # parts[0]).
 GRANT_LINK_PATH="${GRANT_LINK_PATH:-/bri}"
 CREATE_GRANT_LINK="${CREATE_GRANT_LINK:-true}"
+# CREATE_CONNECTION=false registers and publishes the service only. The
+# AppHost uses it for bri when the EDI issuer's peer does not run (no EUDI
+# profile): the provider side must exist for the other consumers' seeds, but
+# there is no EDI Manager to hold a connection contract.
+CREATE_CONNECTION="${CREATE_CONNECTION:-true}"
 OUTWAY_NAME="${OUTWAY_NAME:-EdiOutway-01}"
 CONSUMER_CONTROLLER_DB="${CONSUMER_CONTROLLER_DB:-fsc_edi_controller}"
 PG_HOST="${PG_HOST:-postgres}"
@@ -101,7 +106,11 @@ CONSUMER_CA="$CONSUMER_INTERNAL_DIR/intermediate_ca.pem"
 # Peer/org certs (needed for pubkey-thumbprint of the outway).
 CONSUMER_ORG_CERT="${CONSUMER_ORG_CERT:-$FSC_INFRA_DIR/orgs/edi-issuer/pki/org/edi-issuer.pem}"
 
-for f in "$PROVIDER_CERT" "$PROVIDER_KEY" "$PROVIDER_CA" "$CONSUMER_CERT" "$CONSUMER_KEY" "$CONSUMER_CA" "$CONSUMER_ORG_CERT"; do
+required_files=("$PROVIDER_CERT" "$PROVIDER_KEY" "$PROVIDER_CA")
+if [ "$CREATE_CONNECTION" = "true" ]; then
+  required_files+=("$CONSUMER_CERT" "$CONSUMER_KEY" "$CONSUMER_CA" "$CONSUMER_ORG_CERT")
+fi
+for f in "${required_files[@]}"; do
   if [ ! -f "$f" ]; then
     echo "missing cert file: $f" >&2
     echo "provision the consumer and provider FSC certificates first" >&2
@@ -201,6 +210,13 @@ else
   done
   [ "${st:-}" = "CONTRACT_STATE_VALID" ] ||
     fail_unsigned "publication contract for '$SERVICE_NAME'" "${st:-}"
+fi
+
+if [ "$CREATE_CONNECTION" != "true" ]; then
+  echo "[3/4] and [4/4] skipped: no connection contract requested (CREATE_CONNECTION=$CREATE_CONNECTION)"
+  echo
+  echo "Contract-seed done: '$SERVICE_NAME' is registered and published."
+  exit 0
 fi
 
 # ── 3. Create connection contract in consumer Manager ───────────────────────────
