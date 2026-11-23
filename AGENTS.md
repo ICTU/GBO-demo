@@ -22,8 +22,8 @@ When you plan or propose work here:
   which refusal reason applies, and what happens when something is unavailable.
   Ask instead of assuming.
 
-The architecture rules below apply to the code you build; this section decides
-what is worth building.
+This section decides what is worth building; the architecture rules for services
+decide how to build it.
 
 # Repository architecture
 
@@ -35,3 +35,8 @@ before creating or restructuring a service.
 Before debugging the EUDI wallet flow (a QR scan that does not produce a
 credential), read
 [docs/debugging-eudi-wallet.md](docs/debugging-eudi-wallet.md).
+
+# AGENTS.md files and docs
+
+Before you create or change an `AGENTS.md` file or a doc in `docs/`, read
+[docs/intent-layer.md](docs/intent-layer.md).
