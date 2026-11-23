@@ -65,7 +65,7 @@ Fixed headings, in this order; leave out the empty ones:
 | Contracts      | Entry points (endpoints, make targets, CLI) and invariants the code does not enforce.                                                                     |
 | Dependencies   | Who calls this part and what it calls: services, FSC (Federatieve Service Connectiviteit) services, database, configuration.                              |
 | Patterns       | The standard pattern: "to add a new rule, follow …".                                                                                                      |
-| Pitfalls       | Anti-patterns and traps: what agents or people got wrong here before.                                                                                     |
+| Pitfalls       | Only traps someone actually hit, each with a link to the issue or pull request.                                                                           |
 | Verify         | The commands that prove a change here, and the rigor level.                                                                                               |
 | Decisions      | One line per deliberate choice, with a link to the pull request or the GBO-TO ADR. Whoever reverses the choice updates the line in the same pull request. |
 | Open questions | What is not answered yet, with a link to the issue.                                                                                                       |
@@ -98,6 +98,7 @@ serve as examples: [`services/ldv-logboek`](../services/ldv-logboek/AGENTS.md),
 - Diagrams in Mermaid, not as images: text can be reviewed in a diff, an agent
   can read it, and GitHub renders it.
 - A line that changes no behaviour goes.
+- No filler: leave a heading out rather than invent content for it.
 
 ## Separate docs
 

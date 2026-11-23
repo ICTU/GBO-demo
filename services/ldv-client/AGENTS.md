@@ -23,16 +23,8 @@ Not published: consumers use a `replace` to `../ldv-client`
   ambient span last: behind `otelhttp` that span always exists and would shadow
   the headers.
 - Extra attributes use the `dpl.gbo.` prefix.
-
-## Pitfalls
-
 - Wrap as `otelhttp.NewTransport(ldv.Transport(base))`, or callee records hang
   under an OTel span no logbook reader can resolve.
-- `Outbox.Deliver` stops at the first failure. A record the logbook refuses for
-  good (`422`, `409`) blocks every later one, though its request already
-  succeeded; only a log line shows it.
-- `SpanID` is the record's own id, not the OTel span's.
-- A change here rebuilds every producer image (root build context).
 
 ## Verify
 
@@ -51,8 +43,9 @@ at once.
 
 ## Open questions
 
-- How should a permanently refused record leave the outbox, and who should
-  notice?
+- `Outbox.Deliver` stops at the first failure, so a record the logbook refuses
+  for good (`422`, `409`) blocks every later one, with only a log line. How
+  should such a record leave the outbox, and who should notice?
 - The logbook README says `consent-portal-backend` uses none of this module; its
   `ldv/` adapter and `main.go` use `ldvclient` and `Outbox`. Stale?
 

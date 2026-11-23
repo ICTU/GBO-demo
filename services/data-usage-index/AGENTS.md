@@ -30,12 +30,6 @@ peer's Outway, and by `consent-register` through `cr-outway`. Calls nothing.
 SQLite on its own volume. Published by `make fsc-seed-data-usage-index`
 (`fsc-infra/scripts/seed-data-usage-index.sh`).
 
-## Pitfalls
-
-- The store has no migrations (`CREATE TABLE IF NOT EXISTS`); a schema change
-  needs a volume reset.
-- `LOOKUP_PEERS` empty means the FSC contract alone decides who looks up.
-
 ## Verify
 
 `go test ./...` here. End to end: `make demo-dvtp`, run a DvTP query, then check

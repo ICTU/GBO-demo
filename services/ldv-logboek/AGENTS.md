@@ -24,6 +24,8 @@ records; producers decide what to log, through
 - The FSC read listener (`NewFSCReadHandler`) has no auth of its own: only the
   Inway may reach it, and its body check mirrors the PDP rule `LDV_READ_FSC` in
   `policies/authz.rego`. Change both together.
+- Write side snake_case and epoch ms, read side camelCase and RFC 3339: each
+  follows its own specification. Do not unify.
 
 ## Patterns
 
@@ -36,8 +38,6 @@ URI in the producer's environment.
 - No migrations (`CREATE TABLE IF NOT EXISTS`): a schema or storage-format
   change needs a volume reset, as in
   [#652](https://github.com/ICTU/GBO-demo/pull/652).
-- Write side snake_case and epoch ms, read side camelCase and RFC 3339: each
-  follows its own specification. Do not unify.
 
 ## Verify
 
