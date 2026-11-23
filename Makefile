@@ -150,6 +150,13 @@ policy-test: policy-check
 check-safety:
 	./scripts/check-safety.sh
 
+# ── Intent Layer ─────────────────────────────────────────────────────────
+# Structural check of the AGENTS.md files (see docs/intent-layer.md). Same
+# script as the intent-layer job in .github/workflows/ci.yml.
+.PHONY: intent-layer-check
+intent-layer-check:
+	@scripts/intent-layer.sh check
+
 # Markdown formatting (oxfmt, 80 columns); CI runs the same script.
 md-fmt:
 	./scripts/md-format.sh fmt
