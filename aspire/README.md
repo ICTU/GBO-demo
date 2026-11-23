@@ -196,8 +196,13 @@ which forwards to the dashboard and to dev-portal-backend's live strip. The
 PDP's console, its decision log included, reaches the dashboard as OTLP logs
 through `logtee` in the PDP image. The developer portal reads traces and the
 decision log back through the dashboard's telemetry API
-(`TELEMETRY_API_URL`). The dashboard keeps one store across restarts
-(`ASPIRE_DASHBOARD_PERSISTENCE_MODE=Resume` in `aspire.config.json`). See
+(`TELEMETRY_API_URL`). The dashboard keeps each run separately (Run
+persistence, Aspire's default): it and its API show the current run, and the
+Recordings drawer opens the last 10 runs read-only. Resume persistence (one
+store across restarts) was used before and dropped on 2026-11-23: with
+per-run instance ids, earlier runs' telemetry no longer matched a resource,
+piled up as separate telemetry sources and made the portal's PDP lookup
+(`resource=openftv-pdp`) ambiguous. See
 `../OBSERVABILITY.md` for the simulation deployment, which keeps Jaeger and
 Loki.
 

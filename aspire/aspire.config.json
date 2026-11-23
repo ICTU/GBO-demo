@@ -13,7 +13,6 @@
         "ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL": "http://localhost:19025",
         "ASPIRE_RESOURCE_SERVICE_ENDPOINT_URL": "http://localhost:20111",
         "ASPIRE_ALLOW_UNSECURED_TRANSPORT": "true",
-        "ASPIRE_DASHBOARD_PERSISTENCE_MODE": "Resume",
         "DASHBOARD__API__AUTHMODE": "ApiKey"
       }
     }

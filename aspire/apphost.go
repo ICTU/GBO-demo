@@ -162,7 +162,8 @@ func (m *model) build() {
 
 	// ── Telemetry ────────────────────────────────────────────────────────
 	// The Aspire dashboard is the local observability store: traces, logs and
-	// metrics, kept across restarts (Resume persistence, aspire.config.json).
+	// metrics, one store per run (Run persistence; earlier runs in the
+	// dashboard's Recordings drawer).
 	// The services export to the collector; the collector forwards to the
 	// dashboard and to dev-portal-backend's live strip. The developer portal
 	// reads traces and the PDP's decision log back through the dashboard's

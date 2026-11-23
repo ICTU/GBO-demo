@@ -251,8 +251,9 @@ with the default (dvtp) or `Gbo__Profiles=full`.
 
 Locally the portal reads traces and the PDP's decision log from the Aspire
 dashboard. Check that the `otel-collector` resource is healthy and that the
-dashboard's Traces page shows the request. The dashboard keeps one store
-across restarts (Resume persistence); spans older than its limits
+dashboard's Traces page shows the request. The portal only sees the current
+run: after an AppHost restart, earlier traces are in the dashboard's
+Recordings drawer, not in the portal. Spans older than the dashboard's limits
 (100,000 traces) are evicted.
 
 ## Reset to a clean state

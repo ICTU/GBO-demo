@@ -18,7 +18,9 @@ same data paths, with a different store at the end:
 | Portal reads traces and the decision log from | the dashboard's telemetry API | Jaeger's query API and Loki |
 
 Locally the Aspire dashboard is the one store for traces, logs and metrics,
-and it keeps them across restarts (Resume persistence). It is a development
+and it keeps each run separately (Run persistence, Aspire's default): the
+dashboard and its telemetry API show the current run, and the Recordings
+drawer opens the last 10 runs read-only (pin a run to keep it). It is a development
 tool, not a durable store: it caps at 100,000 traces and 100,000 log
 records, and has no backups or encryption at rest. That is why the
 simulation deployment keeps Jaeger and Loki.

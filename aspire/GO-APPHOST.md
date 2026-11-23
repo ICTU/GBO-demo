@@ -25,15 +25,15 @@ Checked with Aspire CLI 17.0.0, Go 1.27.4 on macOS (arm64), 2026-11-20.
   through the PDP. A restart on the same volumes comes up the same way.
 - **Telemetry.** The collector forwards with the OTLP key the AppHost writes
   into the configuration; the dashboard telemetry API returns traces and the
-  PDP's decision log (what the developer portal reads), and keeps them across
-  restarts (Resume).
+  PDP's decision log (what the developer portal reads), for the current run
+  (Run persistence; earlier runs in the Recordings drawer).
 - **Settings** after `--` (`aspire run -- --Gbo:PublicHost=...`) reach the
   AppHost, as with C#.
 - **No .NET SDK.** The Aspire CLI runs a prebuilt AppHost server; the only
   toolchain the AppHost needs is Go.
 - **The launch profile** lives in `aspire.config.json` instead of
-  `apphost.run.json`, with the same environment (Resume persistence,
-  dashboard API key auth). Which demo profile runs is `Gbo__Profiles`
+  `apphost.run.json`, with the same environment apart from persistence
+  (dashboard API key auth; Run persistence since 2026-11-23). Which demo profile runs is `Gbo__Profiles`
   (`Gbo__Profiles=core aspire run`), checked for `core` at run time.
 - **Configuration** (`Gbo:*` settings, `Gbo__Profiles`, user secrets,
   `aspire secret set`) reads through `GetConfiguration()`, and the AppHost can
@@ -72,8 +72,11 @@ Checked with Aspire CLI 17.0.0, Go 1.27.4 on macOS (arm64), 2026-11-20.
   developer portal's live strip keeps its feed. Aspire adds the service name
   and the `service.instance.id` that ties traces and logs to the resource, so
   the dashboard no longer lists them as separate telemetry-only sources.
-  Entries from before the change stay in the dashboard's Resume store until
-  its telemetry is cleared.
+  This needs Run persistence: with Resume, the previous runs' instance ids
+  matched no resource, piled up as telemetry sources and made the base-name
+  lookup the developer portal uses for the PDP log (`resource=openftv-pdp`)
+  return 404. With Run persistence the dashboard shows only the current run
+  (Recordings drawer for the last 10) and the lookup works.
 
 ## Gaps in the preview, with a workaround
 
