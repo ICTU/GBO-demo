@@ -764,6 +764,45 @@ services:
       timeout: 3s
       retries: 5
 
+  # The data usage index (#687, the "trace index" there): under legal basis
+  # X (today: a consent), source Y delivered data under trace Z, at time T.
+  # Pointers only, no personal data. GBO runs it next to the register, under
+  # the register's peer (...0700). Two listeners, each an FSC service behind
+  # cr-inway: 4019 is data-usage-index, where the sidecars register a
+  # delivery; 4020 is data-usage-lookup, with a connection for the register
+  # only.
+  #
+  # Demo shortcut: like the register's status listener, both trust the
+  # Fsc-Authorization header the Inway forwards and are also reachable on
+  # the compose networks. A real deployment lets only the Inway reach them.
+  #
+  # Every delivery under a consent waits for this service (the sidecar
+  # withholds the data when the registration fails), hence the restart
+  # policy and the health check on the store.
+  data-usage-index:
+    build: ./services/data-usage-index
+    restart: unless-stopped
+    environment:
+      - OTEL_SERVICE_NAME=data-usage-index
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      # Next to the FSC contract: only the register's peer may look up.
+      - LOOKUP_PEERS=99999999900000000700
+    volumes:
+      - data-usage-index-data:/data
+    networks:
+      - backend
+      # cr-inway forwards data-usage-index (4019) and data-usage-lookup
+      # (4020) here.
+      - fsc-infra
+    depends_on:
+      otel-collector:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4020/health"]
+      <<: *healthcheck-timing
+      timeout: 3s
+      retries: 5
+
   bsnk-mock:
     build: ./services/bsnk-mock
     ports:
@@ -2267,6 +2306,7 @@ volumes:
   ldv-outbox-consent-portal-backend:
   dev-portal-var:
   dvtp-onboarding-data:
+  data-usage-index-data:
   logboek-bd-data:
   logboek-brp-data:
   logboek-toestemming-data:
