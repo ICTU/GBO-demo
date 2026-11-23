@@ -12,9 +12,9 @@ preview can and cannot do yet.
 
 - Aspire CLI 17 (`brew install --cask aspire`, or the install script from aspire.dev)
 - Docker (Docker Desktop, OrbStack or Docker Engine)
-- Node.js 24 or newer with npm 11, for the Vite frontends (`npm ci`). It need
-  not be first on PATH: the AppHost finds one in PATH, Homebrew, nvm, Volta or
-  fnm, or takes `Gbo:NodeDir`
+- Node.js 24 or newer with npm 11, for the Vite frontends (`npm ci`), as the
+  first `node` on PATH: Aspire's installers run the first `npm` they find. The
+  AppHost checks this and stops with a hint when it is older
 - Go 1.26 or newer, for the AppHost itself and the host-side certificate
   steps. No .NET SDK: the Aspire CLI brings its own AppHost server.
 - Bash, `curl`, `jq`, OpenSSL; Python 3 for the OpenFTV Manager seed
@@ -133,7 +133,8 @@ Every resource carries one tag, and the list sorts by group:
 Filter on a tag under Filters, Tags. A resource takes its group from how it
 is added (Dockerfile, image or host process); `apphost.go` lists the
 exceptions under "Groups in the dashboard". The five `<frontend>-installer`
-leftovers stay untagged (GO-APPHOST.md, npm-installer).
+steps, nested under their frontend, stay untagged: the Go SDK cannot reach
+them (GO-APPHOST.md, typed-model).
 
 In Aspire 17.0 the graph view draws every resource and ignores the list's
 Filters and nesting. To graph a subset, select it in the list (click, and

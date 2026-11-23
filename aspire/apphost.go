@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"log"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -1353,26 +1352,18 @@ echo "FSC databases ready"
 
 	// The installers run `npm ci`, which needs npm 11 (Node.js 24 or newer,
 	// as in CI and the frontend images): npm 10 reads the lockfiles as out
-	// of sync. The first `node` on PATH may be older, so the AppHost looks for
-	// a new enough one (Gbo:NodeDir, PATH, Homebrew, nvm, Volta, fnm) and runs
-	// npm and its node from there, whatever PATH says.
+	// of sync. Aspire's installer runs the first `npm` on the PATH that
+	// `aspire run` was started with, so that one has to be new enough; the
+	// AppHost stops with a hint when it is not.
 	const minimumNodeMajor = 24
-	nodeDir := findNodeDir(m.config("Gbo:NodeDir"), minimumNodeMajor)
-	if nodeDir == "" {
-		log.Fatalf("The frontends need Node.js %d or newer (npm 11), and none was found on PATH, in Homebrew, nvm, Volta or fnm. "+
-			"Install one (for example `brew install node`) or point Gbo:NodeDir at its bin directory.", minimumNodeMajor)
+	if m.runMode {
+		checkNodeOnPath(minimumNodeMajor)
 	}
-	nodePath := nodeDir + string(os.PathListSeparator) + os.Getenv("PATH")
-	npm := filepath.Join(nodeDir, "npm")
 
 	frontend := func(name string, port int) aspire.ViteAppResource {
-		// TODO(go-apphost/npm-installer): the C# AppHost lets WithNpm install with
-		// `npm ci` and pins the installer's npm in a BeforeStartEvent. The Go
-		// SDK cannot reach the installer resource WithNpm creates (the model
-		// only returns untyped handles), so the AppHost runs `npm ci` itself
-		// as <name>-install and the Vite app skips WithNpm's installer.
 		app := b.AddViteApp(name, "../"+name).
-			WithNpm(aspire.NpmInstall(false)).
+			// npm ci: install exactly the lockfile, never rewrite it.
+			WithNpm(aspire.NpmInstall(true), aspire.NpmInstallCommand("ci")).
 			// Not proxied: the dev server itself listens on the fixed port, so
 			// the links between the frontends (and the consent redirect to the
 			// consumer mock port + 1) hit the app, not a proxy in front of it.
@@ -1386,14 +1377,6 @@ echo "FSC databases ready"
 		m.register(name, app, ownBuild,
 			func(p aspire.Resource) { app.WithParentRelationship(p) },
 			func(tags []string, order int) { app.WithTags(tags).WithDisplayOrder(order) })
-		if m.runMode {
-			install := m.executable(name+"-install", npm, m.repo(name), "ci").
-				WithEnvironment("PATH", nodePath)
-			app.WithExecutableCommand(npm).
-				WithEnvironment("PATH", nodePath).
-				WaitForCompletion(install)
-			m.nestUnder(name+"-install", name)
-		}
 		return app
 	}
 

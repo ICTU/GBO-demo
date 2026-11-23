@@ -48,9 +48,21 @@ Checked with Aspire CLI 17.0.0, Go 1.27.4 on macOS (arm64), 2026-11-20.
 | `nil-args` | `AddExecutable(name, cmd, dir, nil)` leaves `args` out of the request; the server rejects it with "Missing required argument 'args'". | Pass an empty slice (`model.executable`). | Not filed yet |
 | `parameter-arg` | A `ParameterResource` handle added through `WithArgsCallback` runs, but breaks `aspire publish` with "Command line args must be strings". C# passes `parameter.Resource`, which the Go SDK has no counterpart for. | Wrap it: `RefExpr("%v", p)` publishes as `${NAME}` (`model.argValue`). | Not filed yet |
 | `string-args` | `WithArgs` takes `[]string`; C# takes `object[]` with parameters and expressions mixed in. | Mixed arguments go through `WithArgsCallback` (`model.containerArgs`, `model.executableArgs`). | Not filed yet (by design of the generated API, maybe) |
-| `typed-model` | No typed `builder.Resources`; `DistributedApplicationModel` returns untyped handles, so the AppHost cannot find a resource by name and call `WithParentRelationship` or `WithContainerRuntimeArgs` on it. | `model.go` keeps its own index of the resources it adds (dashboard nesting, compose labels, the tunnel's waits). | Not filed yet |
-| `npm-installer` | The C# AppHost pins the npm of the installer that `WithNpm` creates, in a `BeforeStartEvent`. The Go SDK cannot reach that installer as an executable. Leaving the installer on is not an option: it runs `npm install` with the first npm on PATH and rewrites the lockfiles. | `WithNpm(NpmInstall(false))`, and the AppHost runs `npm ci` itself as `<frontend>-install`, nested under the frontend, in run mode only. Side effect: five `<frontend>-installer` resources stay `NotStarted` and untagged in the dashboard. Checked 2026-11-22: the installer does not inherit the Vite app's environment (it resolves `npm` from the PATH `aspire run` was started with), and `FindResourceByName` in a BeforeStart subscriber returns an untyped handle (`*aspire.handleWrapperBase`, no `JavaScriptInstallerResource` wrapper), so it cannot be hidden, tagged or reconfigured. | Not filed yet |
+| `typed-model` | No typed `builder.Resources`; `DistributedApplicationModel` returns untyped handles, so the AppHost cannot find a resource by name and call `WithParentRelationship`, `WithContainerRuntimeArgs` or `WithTags` on it. Resources an integration creates, such as the `<frontend>-installer` steps, cannot be reached at all, so they stay untagged. | `model.go` keeps its own index of the resources it adds (dashboard nesting, compose labels, the tunnel's waits). | Not filed yet |
 | `launch-profile` | `aspire run --launch-profile` is refused for Go AppHosts ("not supported for Go AppHosts"), and with an `https` profile present the CLI picks it over the first one. | One `http` profile only; the demo profile comes from `Gbo__Profiles` instead of the `core`/`dvtp`/`full` launch profiles. Docs changed from `--launch-profile X` to `Gbo__Profiles=X aspire run`. | Not filed yet |
+
+## Workarounds removed
+
+- **`npm-installer`** (removed 2026-11-23, no Aspire change). The AppHost used
+  to switch off the installer `WithNpm` creates and run `npm ci` itself with a
+  Node.js 24+ it looked up, because the Go SDK cannot reach that installer
+  (`FindResourceByName` returns an untyped handle, and the installer does not
+  take the Vite app's environment) and the first `npm` on PATH may be older.
+  That left five `NotStarted` installer resources in the dashboard. Now the
+  frontends use `WithNpm(NpmInstall(true), NpmInstallCommand("ci"))`, and the
+  AppHost stops with a hint when the first `node` on PATH is older than 24.
+  Trade-off: Node.js 24+ must come first on the PATH `aspire run` starts with.
+  The installers still cannot be tagged (typed-model).
 
 ## Gaps that do not affect this AppHost
 

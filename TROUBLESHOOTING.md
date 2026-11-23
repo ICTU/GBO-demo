@@ -46,10 +46,11 @@ The same setting fixes links that point at `localhost`.
 
 The `*-installer` resources run `npm ci`, which needs npm 11 (Node.js 24 or
 newer, as in CI). npm 10 reads the lockfiles as out of sync (`Missing:
-@types/react@… from lock file`). The AppHost looks for a Node.js 24+ itself
-(PATH, Homebrew, nvm, Volta, fnm) and stops with a message when it finds none;
-install one (`brew install node`) or point `Gbo:NodeDir` at its `bin`
-directory.
+@types/react@… from lock file`). The installers run the first `npm` on the
+PATH that `aspire run` was started with, so the AppHost checks that one and
+stops with a message when it is too old, naming a newer Node.js it found
+(Homebrew, nvm, Volta, fnm). Put that directory first on PATH, or install one
+(`brew install node`).
 
 ## Docker resource limits
 

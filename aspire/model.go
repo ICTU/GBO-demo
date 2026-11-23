@@ -5,6 +5,7 @@ package main
 // instead), and the host lookups for Node.js.
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
@@ -271,10 +272,48 @@ func mkdirAll(path string) {
 	}
 }
 
-// findNodeDir returns the first bin directory with a node of at least
-// minimumMajor and an npm next to it: Gbo:NodeDir, PATH, Homebrew, nvm,
-// Volta, fnm.
-func findNodeDir(configured string, minimumMajor int) string {
+// checkNodeOnPath stops the AppHost when the first node or npm on PATH is
+// older than minimumMajor, naming a newer one it can find (Homebrew, nvm,
+// Volta, fnm) so the fix is a PATH change.
+func checkNodeOnPath(minimumMajor int) {
+	node, errNode := exec.LookPath("node")
+	_, errNpm := exec.LookPath("npm")
+	major := 0
+	if errNode == nil && errNpm == nil {
+		major = nodeMajor(node)
+	}
+	if major >= minimumMajor {
+		return
+	}
+	found := "none was found on this machine; install one, for example `brew install node`"
+	if dir := findNodeDir(minimumMajor); dir != "" {
+		found = fmt.Sprintf("a new enough one is in %s; put that directory first on PATH (or remove the older node) and start `aspire run` again", dir)
+	}
+	first := "no node or npm"
+	if errNode == nil {
+		first = fmt.Sprintf("%s (major version %d)", node, major)
+	}
+	log.Fatalf("The frontends run `npm ci` with the first npm on PATH, which needs Node.js %d or newer (npm 11). "+
+		"The first on PATH is %s; %s.", minimumMajor, first, found)
+}
+
+// nodeMajor returns the major version of a node binary, or 0.
+func nodeMajor(node string) int {
+	out, err := exec.Command(node, "--version").Output()
+	if err != nil {
+		return 0
+	}
+	version := strings.TrimPrefix(strings.TrimSpace(string(out)), "v")
+	major, err := strconv.Atoi(strings.Split(version, ".")[0])
+	if err != nil {
+		return 0
+	}
+	return major
+}
+
+// findNodeDir returns a bin directory with a node of at least minimumMajor
+// and an npm next to it: PATH, Homebrew, nvm, Volta, fnm.
+func findNodeDir(minimumMajor int) string {
 	home, _ := os.UserHomeDir()
 	versions := func(root, suffix string) []string {
 		entries, err := os.ReadDir(root)
@@ -290,8 +329,7 @@ func findNodeDir(configured string, minimumMajor int) string {
 		sort.Sort(sort.Reverse(sort.StringSlice(dirs)))
 		return dirs
 	}
-	candidates := []string{configured}
-	candidates = append(candidates, filepath.SplitList(os.Getenv("PATH"))...)
+	candidates := filepath.SplitList(os.Getenv("PATH"))
 	candidates = append(candidates, "/opt/homebrew/opt/node/bin", "/opt/homebrew/bin", "/usr/local/opt/node/bin", "/usr/local/bin")
 	if matches, _ := filepath.Glob("/opt/homebrew/opt/node@*"); matches != nil {
 		for _, d := range matches {
@@ -309,15 +347,7 @@ func findNodeDir(configured string, minimumMajor int) string {
 		}
 		seen[dir] = true
 		node := filepath.Join(dir, "node")
-		if !fileExists(node) || !fileExists(filepath.Join(dir, "npm")) {
-			continue
-		}
-		out, err := exec.Command(node, "--version").Output()
-		if err != nil {
-			continue
-		}
-		version := strings.TrimPrefix(strings.TrimSpace(string(out)), "v")
-		if major, err := strconv.Atoi(strings.Split(version, ".")[0]); err == nil && major >= minimumMajor {
+		if fileExists(node) && fileExists(filepath.Join(dir, "npm")) && nodeMajor(node) >= minimumMajor {
 			return dir
 		}
 	}

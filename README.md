@@ -29,8 +29,8 @@ For every mode:
 - the [Aspire CLI](https://aspire.dev) 17 and Go 1.26 or newer (the AppHost
   is written in Go);
 - Docker (Docker Desktop, OrbStack or Docker Engine);
-- Node.js 24 or newer with npm 11, for the Vite frontends; the AppHost finds
-  it even when an older `node` comes first on PATH;
+- Node.js 24 or newer with npm 11, for the Vite frontends; it must be the
+  first `node` on PATH (the AppHost checks and says where a newer one is);
 - Go 1.26 or newer, for the host-side certificate steps;
 - Git, Bash, `curl`, `jq` and OpenSSL; Python 3.9 or newer for the OpenFTV
   Manager seed.
