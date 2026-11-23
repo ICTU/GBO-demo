@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import DigiDLayout from '../components/DigiDLayout'
-import { useRedirectContext, clearRedirectContext } from '../hooks/useRedirectContext'
 import { usePortalToken } from '../hooks/usePortalToken'
 import { login } from '../api/portalClient'
+import { clearedStartCookie, resumeAfterLogin } from '../consentStart/startFlow'
 
 type Method = 'app' | 'sms' | 'rijbewijs' | 'id-kaart'
 
@@ -53,12 +53,17 @@ const METHODS: { id: Method; title: string; subtitle?: string; icon: React.React
   { id: 'id-kaart', title: 'Met mijn identiteitskaart', icon: <CardIcon /> },
 ]
 
+const secure = () => window.location.protocol === 'https:'
+
 export default function DigiDAuth() {
-  const ctx = useRedirectContext()
   const { set } = usePortalToken()
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const nextParam = params.get('next')
+  // The start of a consent flow from a pushed request (/toestemming/start)
+  // waits in a cookie while the citizen logs in. Nothing else of a consent
+  // request reaches the login: other parameters are not read.
+  const startFlow = params.get('flow') === 'start'
 
   const [method, setMethod] = useState<Method>('app')
   const [showForm, setShowForm] = useState(false)
@@ -67,18 +72,14 @@ export default function DigiDAuth() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Standalone login (no ctx, no next) is valid — citizen visits MijnOverheid
+  // Standalone login (no flow, no next) is valid — citizen visits MijnOverheid
   // directly. Default destination: consents overview.
 
   const onCancel = () => {
-    if (ctx) {
-      const url = new URL(ctx.return_url)
-      url.searchParams.set('status', 'denied')
-      clearRedirectContext()
-      window.location.assign(url.toString())
-    } else {
-      navigate('/mijnoverheid/toestemmingen')
-    }
+    // The portal does not know a provider's return URL: cancelling goes to
+    // the overview.
+    if (startFlow) document.cookie = clearedStartCookie(secure())
+    navigate('/mijnoverheid/toestemmingen')
   }
 
   const onMethodClick = (m: Method) => {
@@ -95,9 +96,15 @@ export default function DigiDAuth() {
       // Username is cosmetic; password field carries the BSN we send to the mock backend.
       const { token } = await login(password.trim())
       set(token)
-      // Destination choice: ctx (issuance flow) > next (standalone) > default
-      const dest = ctx ? '/consent' : (nextParam ?? '/mijnoverheid/toestemmingen')
-      navigate(dest)
+      if (startFlow) {
+        // Back to the start URL; when its cookie has expired, to the start
+        // flow's error page rather than silently to the overview.
+        const resume = resumeAfterLogin(document.cookie)
+        document.cookie = clearedStartCookie(secure())
+        navigate(resume, { replace: true })
+        return
+      }
+      navigate(nextParam ?? '/mijnoverheid/toestemmingen')
     } catch (err) {
       setError((err as Error).message)
     } finally {

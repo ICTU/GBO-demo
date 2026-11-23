@@ -11,10 +11,12 @@
 //	             Imports no transport library; the compiler enforces it.
 //	bsnk/        driven adapter — BSNk pseudonymisation
 //	register/    driven adapter — the consent register
+//	onboarding/  driven adapter — the DvTP admission register
 //	devportal/   driven adapter — best-effort history, shaped as an Observer
 //	ldv/         driven adapter — the Logboek Dataverwerkingen
 //	upstream/    the shared JSON caller those adapters use
 //	portalhttp/  driving adapters — handlers, JWT, SSE, routing
+//	fschttp/     driving adapter — the endpoints providers reach over FSC
 //	logctx/      trace-correlated logging
 //	main.go      wiring, and nothing else
 package main
@@ -26,6 +28,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -43,8 +46,10 @@ import (
 	"gbo-demo/consent-portal-backend/bsnk"
 	"gbo-demo/consent-portal-backend/consent"
 	"gbo-demo/consent-portal-backend/devportal"
+	"gbo-demo/consent-portal-backend/fschttp"
 	"gbo-demo/consent-portal-backend/ldv"
 	"gbo-demo/consent-portal-backend/logctx"
+	"gbo-demo/consent-portal-backend/onboarding"
 	"gbo-demo/consent-portal-backend/portalhttp"
 	"gbo-demo/consent-portal-backend/register"
 	"gbo-demo/consent-portal-backend/upstream"
@@ -61,7 +66,8 @@ const portalOIN = "00000000000000000002" // mock-portal OIN
 // portalKeySetVersion is the version of the portal's own keys at BSNk.
 const portalKeySetVersion = 1
 
-// upstreamTimeout bounds every call to BSNk and the consent register. The
+// upstreamTimeout bounds every call to BSNk, the consent register and the
+// admission register. The
 // previous implementation used the package-global http.DefaultClient, which
 // has no timeout at all, so an unresponsive upstream would hang a citizen's
 // request indefinitely.
@@ -90,7 +96,9 @@ const streamGrace = 2 * time.Second
 // ── Config ────────────────────────────────────────────────────────────────
 
 type config struct {
-	Port             string
+	Port string
+	// FSCPort is the listener for the endpoints providers reach over FSC.
+	FSCPort          string
 	BSNkURL          string
 	ConsentURL       string
 	DevPortalBackend string
@@ -111,7 +119,19 @@ type config struct {
 	// citizen with, and SubjectRefKeyVersion names it.
 	SubjectRefKey        []byte
 	SubjectRefKeyVersion string
+	// OnboardingRegisterURL is the DvTP admission register, which a request
+	// to start a consent flow is checked against.
+	OnboardingRegisterURL string
+	// KnownScopes are the data sets the portal can describe to a citizen.
+	KnownScopes []string
+	// RequestLifetime is how long a pushed request waits for the citizen.
+	RequestLifetime time.Duration
 }
+
+// defaultKnownScopes are the data sets the portal frontend describes
+// (toestemmingsportaal-frontend/src/data/scopeGroups.ts). Demo shortcut: the
+// list is configuration until a service catalogue holds the data sets.
+const defaultKnownScopes = "bd:ib:2025,bd:ib:2024,lvg:vbo:eigendom"
 
 var subjectRefKeyVersion = regexp.MustCompile(`^[0-9A-Za-z]{1,16}$`)
 
@@ -130,12 +150,21 @@ func loadConfig() (config, error) {
 	if !subjectRefKeyVersion.MatchString(version) {
 		return config{}, fmt.Errorf("SUBJECT_REF_KEY_VERSION: %q is not 1 to 16 letters and digits", version)
 	}
+	knownScopes, err := parseKnownScopes(getEnv("CONSENT_KNOWN_SCOPES", defaultKnownScopes))
+	if err != nil {
+		return config{}, fmt.Errorf("CONSENT_KNOWN_SCOPES: %w", err)
+	}
+	requestLifetime, err := time.ParseDuration(getEnv("PAR_REQUEST_LIFETIME", "10m"))
+	if err != nil || requestLifetime < time.Second {
+		return config{}, fmt.Errorf("PAR_REQUEST_LIFETIME: %q is not a duration of at least 1s, such as 10m", os.Getenv("PAR_REQUEST_LIFETIME"))
+	}
 	listMaxAge, err := time.ParseDuration(getEnv("BSN_AUTHORISATION_LIST_MAX_AGE", "1h"))
 	if err != nil || listMaxAge < 0 {
 		return config{}, fmt.Errorf("BSN_AUTHORISATION_LIST_MAX_AGE: %q is not a duration such as 1h", os.Getenv("BSN_AUTHORISATION_LIST_MAX_AGE"))
 	}
 	return config{
 		Port:              getEnv("PORT", "4005"),
+		FSCPort:           getEnv("FSC_PORT", "4013"),
 		BSNkURL:           getEnv("BSNK_URL", "http://bsnk-mock:4003"),
 		ConsentURL:        getEnv("CONSENT_URL", "http://consent-register:4002"),
 		DevPortalBackend:  getEnv("DEV_PORTAL_BACKEND_URL", ""),
@@ -148,7 +177,28 @@ func loadConfig() (config, error) {
 
 		SubjectRefKey:        []byte(key),
 		SubjectRefKeyVersion: version,
+
+		OnboardingRegisterURL: getEnv("ONBOARDING_REGISTER_URL", "http://dvtp-onboarding-register:4015"),
+		KnownScopes:           knownScopes,
+		RequestLifetime:       requestLifetime,
 	}, nil
+}
+
+// parseKnownScopes reads the known data sets as a comma-separated list of
+// codes. At least one is required: with none, every request would be
+// refused.
+func parseKnownScopes(value string) ([]string, error) {
+	var scopes []string
+	for _, scope := range strings.Split(value, ",") {
+		scope = strings.TrimSpace(scope)
+		if scope != "" && !slices.Contains(scopes, scope) {
+			scopes = append(scopes, scope)
+		}
+	}
+	if len(scopes) == 0 {
+		return nil, errors.New("name at least one data set code")
+	}
+	return scopes, nil
 }
 
 var sourceOIN = regexp.MustCompile(`^[0-9]{20}$`)
@@ -228,6 +278,13 @@ func newPortal(cfg config, hub *portalhttp.Hub, logbook consent.Logbook) *consen
 		Logbook:           logbook,
 		Sources:           cfg.Sources,
 		PseudonymsLogbook: cfg.PseudonymsLogbook,
+		Registrations:     onboarding.Client{Base: cfg.OnboardingRegisterURL, Caller: caller},
+		KnownScopes:       cfg.KnownScopes,
+		Requests:          consent.NewRequestStore(cfg.RequestLifetime),
+		// A code is exchanged by the provider's backend right after the
+		// browser returns, so a minute is plenty (RFC 6749 §4.1.2 advises
+		// at most ten).
+		Codes: consent.NewCodeStore(time.Minute),
 
 		AuthorisationListMaxAge: cfg.AuthorisationListMaxAge,
 	}
@@ -245,11 +302,11 @@ func newLogbook(cfg config, serviceName string) (consent.Logbook, *ldvclient.Cli
 	return writer, client, nil
 }
 
-// newMux wires the core to its production adapters and builds the routing
-// tree. Extracted from main so integration tests can drive the real handlers
-// through an httptest.Server without starting the listener.
-func newMux(cfg config, hub *portalhttp.Hub, logbook consent.Logbook) *http.ServeMux {
-	return portalhttp.NewMux(newPortal(cfg, hub, logbook), hub)
+// newMux builds the routing tree of the citizen's listener. Extracted from
+// main so integration tests can drive the real handlers through an
+// httptest.Server without starting the listener.
+func newMux(portal *consent.Portal, hub *portalhttp.Hub) *http.ServeMux {
+	return portalhttp.NewMux(portal, hub)
 }
 
 // ── OTel setup ────────────────────────────────────────────────────────────
@@ -325,14 +382,22 @@ func main() {
 	// BaseContext gives every request a context this process can cancel, which
 	// is how the long-lived SSE streams are told to wind up at shutdown.
 	baseCtx, endStreams := context.WithCancel(context.Background())
+	// One portal behind both listeners: a request pushed over FSC is resolved
+	// by the citizen's browser.
+	portal := newPortal(cfg, hub, logbook)
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           otelhttp.NewHandler(portalhttp.WithDemoSession(logctx.WithAccessLog(newMux(cfg, hub, logbook))), serviceName, otelhttp.WithFilter(filters.Not(filters.Path("/health")))),
+		Handler:           otelhttp.NewHandler(portalhttp.WithDemoSession(logctx.WithAccessLog(newMux(portal, hub))), serviceName, otelhttp.WithFilter(filters.Not(filters.Path("/health")))),
 		ReadHeaderTimeout: readHeaderTimeout,
 		BaseContext:       func(net.Listener) context.Context { return baseCtx },
 	}
-	slog.Info("listening", "addr", srv.Addr)
-	serve(srv, endStreams)
+	fscSrv := &http.Server{
+		Addr:              ":" + cfg.FSCPort,
+		Handler:           logctx.WithAccessLog(fschttp.NewMux(portal)),
+		ReadHeaderTimeout: readHeaderTimeout,
+	}
+	slog.Info("listening", "addr", srv.Addr, "fsc_addr", fscSrv.Addr)
+	serve(srv, fscSrv, endStreams)
 }
 
 // fatal logs and ends the process. main is the only place in this service
@@ -346,12 +411,14 @@ func fatal(msg string, err error) {
 // Without this a SIGTERM (docker compose down, a Kubernetes rollout) killed
 // in-flight consent writes outright. Previously a failed ListenAndServe was
 // only logged, so a service that could not bind its port exited 0.
-func serve(srv *http.Server, endStreams context.CancelFunc) {
-	go func() {
-		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
-			fatal("listen and serve", err)
-		}
-	}()
+func serve(srv, fscSrv *http.Server, endStreams context.CancelFunc) {
+	for _, s := range []*http.Server{srv, fscSrv} {
+		go func() {
+			if err := s.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+				fatal("listen and serve", err)
+			}
+		}()
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -363,6 +430,9 @@ func serve(srv *http.Server, endStreams context.CancelFunc) {
 	time.AfterFunc(streamGrace, endStreams)
 	drainCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
+	if err := fscSrv.Shutdown(drainCtx); err != nil {
+		_ = fscSrv.Close()
+	}
 	if err := srv.Shutdown(drainCtx); err != nil {
 		slog.Warn("drain did not finish; closing remaining connections", "err", err.Error())
 		_ = srv.Close()

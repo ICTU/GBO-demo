@@ -38,8 +38,12 @@ For every mode:
 The complete EUDI flow additionally requires:
 
 - the pinned nl-wallet v0.5.0 submodule;
+- Go 1.26 or newer on the host: the provisioning targets (`demo-eudi`,
+  `demo-full` and every `provision-*` target) sign with `go run` on the host,
+  so the CA keys never enter a container;
 - two public HTTPS URLs: one for the issuance server and one for the EUDI
-  adapter;
+  adapter (the own credential issuer and the ASI route need more; see
+  [the port table](#public-urls-and-ports));
 - a compatible test wallet with a valid `urn:eudi:pid:nl:1` credential;
 - issuer and reader trust anchors already trusted by that wallet.
 
@@ -109,6 +113,11 @@ GBO_PUBLIC_BIND_ADDRESS=127.0.0.1
 `GBO_PUBLIC_BIND_ADDRESS` keeps the plain http ports on the loopback
 interface, so only the proxy reaches them.
 
+For the EUDI flows some containers call the public URLs themselves
+(`EUDI_BRI_URL` and `EUDI_TRUST_PUBLIC_URL`), so those hostnames must also
+resolve to the proxy, and the proxy must be reachable, from inside the
+containers.
+
 ### The complete demo, with EUDI
 
 `make demo-full` adds the EUDI wallet flow to DvTP. It additionally needs the
@@ -118,6 +127,30 @@ public URLs in `.env`:
 EUDI_PUBLIC_URL=https://eudi-is.example.org/
 EUDI_BRI_URL=https://eudi-bri.example.org/
 ```
+
+#### Public URLs and ports
+
+Each public URL routes to one published host port. `make demo-full` needs
+the first two; the others serve the
+[own credential issuer](#own-credential-issuer-for-eudi-wallets) and the
+ASI route (`make demo-asi`). Set the ones you use in `.env`.
+
+| Setting | Host port | Needed for |
+| --- | --- | --- |
+| `EUDI_PUBLIC_URL` | 18001 | NL Wallet issuance (issuance server) |
+| `EUDI_BRI_URL` | 9409 | EUDI adapter: the issuance server's data source and type metadata |
+| `ISSUER_PUBLIC_URL` | 9429 | own credential issuer |
+| `EUDI_TRUST_PUBLIC_URL` | 9430 | trust host: LoTE lists, CRL, status lists |
+| `ASI_PROVIDER_PUBLIC_URL` | 9424 | ASI provider |
+| `ASI_AUTHORIZATION_SERVER_PUBLIC_URL` | 9425 | ASI login and consent in the browser |
+| `QTSP_PUBLIC_URL` | 9427 | reference QTSP |
+| `ASI_WALLET_VERIFIER_PUBLIC_URL` | 9428 | NL Wallet PID presentation in the ASI route |
+| `ASI_EUDI_WALLET_VERIFIER_PUBLIC_URL` | 9432 | EUDI wallet PID presentation in the ASI route |
+| `GBO_PUBLIC_HOST` | 9000, 9003 | landing page, developer portal |
+
+Never publish port 9431: it is the own issuer's internal offer API, which
+has no authentication. Compose binds it to `127.0.0.1`; keep it out of the
+proxy too.
 
 Before starting an EUDI demo, provide the issuer and reader CA material that
 the test wallet already trusts. The setup deliberately never generates trust
@@ -131,6 +164,10 @@ issuer-ca-cert.pem
 reader-ca-key.pem
 reader-ca-cert.pem
 ```
+
+These files are managed material and are not part of the repository.
+Published wallet builds trust only these managed CAs; a CA of your own works
+only with a wallet you build yourself against your own trust lists.
 
 Keep the private keys outside version control. To load the same managed CA
 material from another location, set `ONBOARDING_SECRETS_DIR` to the absolute
@@ -154,8 +191,9 @@ provisioning snapshot plus restart.
 See the [trust-host runbook](trust-host/README.md) for host-only signing and
 publication.
 
-The own credential issuer (`services/eudi-credential-issuer`, not yet in the
-stack) also needs per source an access certificate (WRPAC) and a registration
+The own credential issuer (`services/eudi-credential-issuer`, Compose
+profile `credential-issuer`, started with `make credential-issuer-up`; see
+[below](#own-credential-issuer-for-eudi-wallets)) also needs per source an access certificate (WRPAC) and a registration
 certificate (WRPRC). `make create-development-registrar-root` creates the
 registrar root that signs the registration certificates, once, in
 `development-ca/` (`registrar-ca-key.pem`, `registrar-ca-cert.pem`); it is a
@@ -251,6 +289,39 @@ The first EUDI build can take several minutes. `make demo-full` performs the
 complete idempotent bootstrap: FSC setup, contracts, source onboarding,
 development certificates, EUDI configuration and application startup.
 
+### Own credential issuer for EUDI wallets
+
+The own credential issuer runs beside the issuance server, under the Compose
+profile `credential-issuer`. It needs `ISSUER_PUBLIC_URL`,
+`EUDI_TRUST_PUBLIC_URL` and `CREDENTIAL_ISSUER_DB_PASSWORD` in `.env`, and
+the trusted wallet providers in `WALLET_ROOTS_DIR` (see the
+credential-issuer block in `docker-compose.yml`). After `make demo-full`,
+run in this order:
+
+```bash
+# The registrar root is created once and never replaced; skip it on a rerun.
+test -f "${ONBOARDING_SECRETS_DIR:-.local/secrets}/development-ca/registrar-ca-key.pem" \
+  || make create-development-registrar-root
+make provision-wallet-registration SOURCE_ID=belastingdienst KVK_NUMBER=99990200
+make provision-wallet-registration SOURCE_ID=rvig KVK_NUMBER=99990300
+make provision-wallet-registration SOURCE_ID=demo-unsecured KVK_NUMBER=99990900
+make provision-test-pid
+make provision-qtsp-wallet-registration
+make provision-trust-list-signer
+make publish-trust-lists
+docker compose --profile eudi --profile credential-issuer up -d trust-host
+# Check that the four $EUDI_TRUST_PUBLIC_URL/lote/*.jwt return 200, then:
+make credential-issuer-up
+make provision-asi-eudi-wallet-verifier
+make demo-asi
+```
+
+The trust host must serve the lists before the issuer starts: its
+materializer and the EUDI wallet verifier fetch the PID list from it. The
+LoTE signer keys stay in `.local/lote-signer/` (`GBO_LOTE_SIGNER_DIR`); losing
+them invalidates every wallet build that embeds their root. See the
+[trust-host runbook](trust-host/README.md) for the publication details.
+
 ## Other modes
 
 | Command | Starts |
@@ -275,14 +346,19 @@ The flow starts at the consumer, not at the consent portal: the portal only
 shows consents that already exist.
 
 1. Open the [consumer mock](http://localhost:9001) and click
-   **Inloggen met DigiD**. The consumer sends you to the consent portal with
-   its request: service, purpose and the scopes `bd:ib:2025` and `bd:ib:2024`.
+   **Inloggen met DigiD**. The consumer's backend pushes its request (service
+   `aangiftegegevens`, the scopes `bd:ib:2025` and `bd:ib:2024`) to the
+   consent portal over FSC, and the browser goes to the portal with only the
+   consumer's `client_id` and a `request_uri`.
 2. Pick any sign-in method. The DigiD mock takes any username and a mock BSN
    as the password, for example `123456789`; the mock citizens are in
    `services/graphql-server/mockdata/citizens.json`.
-3. Choose the data sets to share and click **Geef toestemming**. The portal
-   returns a signed consent token to the consumer mock, which immediately runs
-   the query and shows the income data.
+3. The portal shows the consumer's registered name and purpose. Choose the
+   data sets to share and click **Geef toestemming**. After a short
+   confirmation the portal sends you back to the consumer mock with a
+   one-time code; the consumer's backend exchanges it over FSC for the signed
+   consent token, keeps the token in its session and runs the query. The
+   consumer mock shows the income data.
 4. Open the [developer portal](http://localhost:9003). **History · Replay**
    lists the issuance and the query with their outcome and trace id.
 5. In another tab, open the [consent portal](http://localhost:9002) and sign
@@ -295,15 +371,20 @@ shows consents that already exist.
    [docs/consent-flow.md](docs/consent-flow.md#4-gebruik-van-een-toestemming-inzien).
 6. On the same page click **Toestemming intrekken**.
    Back in the consumer mock, expand **Inkomensgegevens** and click
-   **↻ Verversen** to repeat the query with the same token. The PDP now denies
+   **↻ Verversen** to repeat the query with the same consent. The PDP now denies
    it. The consumer is told only `FIELD_NOT_PERMITTED`, so the consumer mock
    offers to consent again without naming a cause. The developer portal's
    history lists the request as `DENY`; the field's own reason,
    `CONSENT_WITHDRAWN`, is in the PDP decision log
    (`docker compose logs openftv-pdp`).
 
-Starting again from the consumer mock's home page begins a new consent; it
-does not repeat the query, because the token only lives in that result page.
+Starting again from the consumer mock's home page begins a new consent
+request.
+
+The [Installatie Register mock](http://localhost:9004) asks the owner's
+consent for the ownership check at LVG the same way: **Bevestig eigendom via
+MijnOverheid** pushes the request through `ir-backend`, and the return page
+hands the code to that backend, which keeps the token for the checks at LVG.
 
 The developer portal injects `DVTP_CONSUMER_PEER_ID` into the
 `dienstverlener_oin` field of its predefined DvTP issuance scenarios. It uses
@@ -356,14 +437,51 @@ to the FSC/mTLS identity (for example with a confirmation claim); the current
 explicit `dienstverlener_oin` check prevents cross-consumer use but does not
 make a stolen bearer token non-replayable by that same consumer.
 
-Because the token returns through the browser, the consent portal only accepts
-`http` or `https` return URLs whose exact origin occurs in the configured
-allow-list (comma-separated). The image reads it from `ALLOWED_RETURN_ORIGINS`
-when the container starts; `VITE_ALLOWED_RETURN_ORIGINS` only applies to the
-Vite dev server, where Compose derives it from `DIENSTVERLENER_PUBLIC_URL` and
-`KEYPER_PUBLIC_URL`.
-Without either, the portal only accepts `http://localhost:9001` (a demo
-shortcut), so a deployment must set `ALLOWED_RETURN_ORIGINS`.
+The DvTP onboarding register also reads `DIENSTVERLENER_PUBLIC_URL` and
+`KEYPER_PUBLIC_URL` to build the registered return locations of both demo
+providers, so set both when you run on your own host.
+
+A service provider starts a consent flow by pushing its request to the consent
+portal over FSC, as a pushed authorization request (RFC 9126): `POST /par` on
+the FSC service `consent-authorization` of the consent register's peer, which
+both demo providers reach through their Outway at `/consent-authorization`
+(`make fsc-seed-consent-authorization`, part of `make demo`). The request
+carries `response_type=code`, `client_id` (the provider's own Peer ID),
+`service`, `scope` (space-separated data sets), `redirect_uri`, `state` and an
+S256 `code_challenge`; `valid_until`, `client_name` and `purpose` are
+optional. The portal checks it against the provider's registration in the
+DvTP onboarding register and answers `201` with a `request_uri` and
+`expires_in` (`PAR_REQUEST_LIFETIME`, default 10 minutes), or refuses it with
+an OAuth error and the reason code in `reason`.
+
+The provider then sends the citizen's browser to the portal with only its
+`client_id` and the `request_uri`. Behind the portal login,
+`GET /portal/requests/{request_uri}?client_id=…` shows the request (name and
+purpose from the registration) and binds it to the citizen;
+`POST /portal/requests/{request_uri}/decision` records the decision once and
+answers with the return URL the browser goes to: with `code` and `state`, or
+with `error=access_denied` or `error=server_error` and `state`. The provider
+exchanges the code over FSC at `POST /token` on the same FSC service, with the
+PKCE `code_verifier`, for the consent token (`access_token`). A code works once
+and for 60 seconds.
+
+The provider backends (`dienstverlener-backend`, `ir-backend`) do this on the
+provider's side: `POST /api/consent/start` pushes the request and answers with
+the portal URL for the browser, and `POST /api/consent/complete` exchanges the
+code and keeps the consent token in a server-side session behind an HttpOnly
+cookie, which `POST /api/dvtp/query` uses when the body has no token (see
+[the service README](services/dienstverlener-backend/README.md)).
+
+The toestemmingsportaal serves the citizen's side at `/toestemming/start`: it
+reads only `client_id` and `request_uri`, keeps the start URL in a five-minute
+cookie while the citizen logs in, shows the resolved request with "Geef
+toestemming" and "Weiger", and after a short confirmation goes to the return URL
+in the backend's answer. A refused reference, or a start cookie that expired
+during the login, shows an error page without a link or a redirect. The portal
+cannot be framed by another site. Both demo providers use this flow; the
+portal no longer accepts a request in the URL, and the consent token never
+passes through the browser. See [the reason codes and outcomes](docs/consent-flow.md#weigeringen-en-uitkomsten)
+and the demo shortcuts of this flow in the consent-flow document.
 
 ### EUDI wallet issuance
 

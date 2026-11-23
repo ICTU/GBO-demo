@@ -1,6 +1,6 @@
 // What the installer gets (design screens 12, 14 and 17). Before releasing
 // anything, IR asks LVG again whether the citizen still owns the building,
-// with the consent token it kept (steps 29–33 of the pilot's diagram). Once
+// under the consent its backend kept (steps 29–33 of the pilot's diagram). Once
 // the owner revokes the DvTP consent in MijnOverheid, that check is refused
 // and IR releases nothing.
 import { useCallback, useEffect, useState } from 'react'
@@ -16,16 +16,16 @@ function useRecurringCheck(aanvraag: Aanvraag | null) {
   const [checkedAt, setCheckedAt] = useState(0)
 
   const check = useCallback(() => {
-    if (!aanvraag?.consentToken) {
+    if (!aanvraag?.consentId) {
       setOutcome('unconfirmed')
       return
     }
     setOutcome('checking')
-    checkOwnership(aanvraag.consentToken, aanvraag.gebouw.vboId).then((result) => {
+    checkOwnership(aanvraag.gebouw.vboId).then((result) => {
       setOutcome(result.outcome)
       setCheckedAt(Date.now())
     })
-  }, [aanvraag?.consentToken, aanvraag?.gebouw.vboId])
+  }, [aanvraag?.consentId, aanvraag?.gebouw.vboId])
 
   useEffect(check, [check])
   return { outcome, checkedAt, check }

@@ -42,7 +42,8 @@ func TestTheUsesEndpointChecksOwnership(t *testing.T) {
 		SubjectRefKey:        []byte(testSubjectRefKey),
 		SubjectRefKeyVersion: "1",
 	}
-	srv := httptest.NewServer(newMux(cfg, portalhttp.NewHub(), nil))
+	hub := portalhttp.NewHub()
+	srv := httptest.NewServer(newMux(newPortal(cfg, hub, nil), hub))
 	defer srv.Close()
 
 	get := func(bsn string) (int, string) {

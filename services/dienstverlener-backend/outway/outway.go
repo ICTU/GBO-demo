@@ -1,5 +1,6 @@
-// Package outway is the consumer's source, reached through its own FSC Outway.
-// It is a driven adapter for consumer.Source.
+// Package outway reaches FSC services through the consumer's own Outway: the
+// source, a driven adapter for consumer.Source, and the consent portal, one
+// for consentrequest.Portal (authorization.go).
 //
 // No separate token fetch is needed: the Outway picks a contract by
 // grant-link, signs the FSC token internally and opens mTLS to the provider's

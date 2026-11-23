@@ -1,5 +1,5 @@
 .PHONY: up down logs clean certs require-ftv-postgres demo-manager manager-seed fsc-local-env fsc-ca fsc-up fsc-all-up fsc-brp-certs fsc-consent-register-certs fsc-gbo-pdp-certs fsc-ir-certs fsc-int-certs fsc-asip-certs fsc-databases fsc-down fsc-test fsc-clean \
-        fsc-seed-bri fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-data-usage-index fsc-seed-ldv-lezen fsc-seed-lvg fsc-seed-int fsc-seed-asip fsc-seed-brp fsc-seed-rvig-source fsc-seed-metadata fsc-pdp-cert pdp-up \
+        fsc-seed-bri fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-data-usage-index fsc-seed-consent-authorization fsc-seed-ldv-lezen fsc-seed-lvg fsc-seed-int fsc-seed-asip fsc-seed-brp fsc-seed-rvig-source fsc-seed-metadata fsc-pdp-cert pdp-up \
         eudi-images asi-wallet-verifier-image source-metadata-up \
         require-development-cas create-development-registrar-root provision-wallet-registration provision-test-pid provision-qtsp-wallet-registration credential-issuer-up provision-development-certificates provision-qtsp-issuance-certificates provision-asip-seal-certificate provision-asip-qtsp-certificate provision-asi-wallet-verifier provision-asi-eudi-wallet-verifier reconcile-sources onboard-demo-sources onboarding-directories demo demo-minimal demo-dvtp demo-eudi \
         demo-full demo-integrator demo-asi demo-down eudi-config policy-check policy-test
@@ -209,7 +209,7 @@ manager-seed: policy-check
 	./scripts/seed-openftv-manager.py --url http://localhost:$${GBO_PORT_FTV_MANAGER:-9280}
 	docker compose --profile manager restart openftv-pdp
 
-demo-dvtp: policy-check certs require-ftv-postgres fsc-all-up fsc-seed-bri fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-data-usage-index fsc-seed-lvg fsc-seed-ldv-lezen
+demo-dvtp: policy-check certs require-ftv-postgres fsc-all-up fsc-seed-bri fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-data-usage-index fsc-seed-consent-authorization fsc-seed-lvg fsc-seed-ldv-lezen
 	@echo "-> DvTP stack: base + dienstverlener + toestemmingsportaal (via real FSC)"
 	docker compose --profile dvtp up --build -d
 	@echo ""
@@ -289,8 +289,10 @@ asi-wallet-verifier-image:
 	    -f services/asi-wallet-verifier/Dockerfile "$$NLWALLET_PATH"; \
 	fi
 
+# The URL defaults only satisfy Compose's required-variable checks for the
+# whole file; none of the services started here reads them.
 source-metadata-up: policy-check
-	EUDI_PUBLIC_URL="$${EUDI_PUBLIC_URL:-http://localhost:8001}" \
+	EUDI_PUBLIC_URL="$${EUDI_PUBLIC_URL:-http://localhost:18001}" \
 	EUDI_BRI_URL="$${EUDI_BRI_URL:-http://localhost:9409}" \
 	EUDI_POSTGRES_PASSWORD="$${EUDI_POSTGRES_PASSWORD:-local-not-used}" \
 		docker compose up --build --force-recreate -d openftv-pdp graphql-server brp-graphql-server unsecured-graphql-server bron-sidecar brp-sidecar
@@ -501,7 +503,7 @@ demo-eudi: policy-check require-ftv-postgres onboard-demo-sources provision-qtsp
 	$(call banner,EUDI-adapter:,$(PORT_EUDI_ADAPTER))
 	$(call banner,Jaeger:,$(PORT_JAEGER))
 
-demo-full: policy-check require-ftv-postgres onboard-demo-sources provision-qtsp-issuance-certificates fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-data-usage-index fsc-seed-lvg fsc-seed-ldv-lezen eudi-images
+demo-full: policy-check require-ftv-postgres onboard-demo-sources provision-qtsp-issuance-certificates fsc-seed-bri-hv fsc-seed-consent-status fsc-seed-data-usage-index fsc-seed-consent-authorization fsc-seed-lvg fsc-seed-ldv-lezen eudi-images
 	@echo "-> Full stack: everything on"
 	docker compose --profile full up --build -d
 
@@ -834,6 +836,59 @@ fsc-seed-data-usage-index: fsc-local-env
 		-w /work \
 		gbo-demo/pki-tools:local \
 		bash scripts/seed-data-usage-index.sh
+
+# Service providers push their request to start a consent flow to the consent
+# portal over FSC: the register's peer publishes consent-authorization (the
+# portal backend's FSC listener), and Hypotheek-BV (...0300) and the
+# Installatie Register (...1000) each connect to it, through a grant-link on
+# their Outway at /consent-authorization. The register's Manager signs a
+# connection only for a peer the onboarding register admits to the register's
+# peer; the precheck says so when an existing register volume predates that
+# admission, instead of letting the seed time out.
+fsc-seed-consent-authorization: fsc-local-env
+	./scripts/check-consent-authorization-admission.sh
+	docker run --rm \
+		--network $(FSC_INFRA_NETWORK) \
+		--env-file fsc-infra/.env \
+		-e SERVICE_NAME=consent-authorization \
+		-e SERVICE_ENDPOINT_URL=http://consent-portal-backend:4013 \
+		-e SERVICE_INWAY_ADDRESS=https://cr-inway:443 \
+		-e PROVIDER_PEER_ID=99999999900000000700 \
+		-e PROVIDER_CONTROLLER_URL=https://cr-controller:9444 \
+		-e PROVIDER_MANAGER_URL=https://cr-manager:9443 \
+		-e PROVIDER_INTERNAL_DIR=/work/orgs/consent-register/pki/internal \
+		-e CONSUMER_PEER_ID=99999999900000000300 \
+		-e CONSUMER_MANAGER_URL=https://hv-manager:9443 \
+		-e CONSUMER_INTERNAL_DIR=/work/orgs/hypotheekverlener-mock/pki/internal \
+		-e CONSUMER_ORG_CERT=/work/orgs/hypotheekverlener-mock/pki/org/hypotheekverlener.pem \
+		-e CONSUMER_CONTROLLER_DB=fsc_hv_controller \
+		-e GRANT_LINK_PATH=/consent-authorization \
+		-e OUTWAY_NAME=HvOutway-01 \
+		-v $(PWD)/fsc-infra:/work:ro \
+		-w /work \
+		gbo-demo/pki-tools:local \
+		bash scripts/seed-bri-contract.sh
+	docker run --rm \
+		--network $(FSC_INFRA_NETWORK) \
+		--env-file fsc-infra/.env \
+		-e SERVICE_NAME=consent-authorization \
+		-e SERVICE_ENDPOINT_URL=http://consent-portal-backend:4013 \
+		-e SERVICE_INWAY_ADDRESS=https://cr-inway:443 \
+		-e PROVIDER_PEER_ID=99999999900000000700 \
+		-e PROVIDER_CONTROLLER_URL=https://cr-controller:9444 \
+		-e PROVIDER_MANAGER_URL=https://cr-manager:9443 \
+		-e PROVIDER_INTERNAL_DIR=/work/orgs/consent-register/pki/internal \
+		-e CONSUMER_PEER_ID=99999999900000001000 \
+		-e CONSUMER_MANAGER_URL=https://ir-manager:9443 \
+		-e CONSUMER_INTERNAL_DIR=/work/orgs/installatieregister/pki/internal \
+		-e CONSUMER_ORG_CERT=/work/orgs/installatieregister/pki/org/installatieregister.pem \
+		-e CONSUMER_CONTROLLER_DB=fsc_ir_controller \
+		-e GRANT_LINK_PATH=/consent-authorization \
+		-e OUTWAY_NAME=IrOutway-01 \
+		-v $(PWD)/fsc-infra:/work:ro \
+		-w /work \
+		gbo-demo/pki-tools:local \
+		bash scripts/seed-bri-contract.sh
 
 # The read API of each source's delivery logbook (#686): the source peers
 # publish ldv-lezen-bd, ldv-lezen-lvg (...0200) and ldv-lezen-brp (...0400),
