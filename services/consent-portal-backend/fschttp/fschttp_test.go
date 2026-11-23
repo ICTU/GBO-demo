@@ -141,6 +141,7 @@ func TestPARRefusesWithTheReasonCode(t *testing.T) {
 		{"plain challenge method", hypotheekPeer, func(f url.Values) { f.Set("code_challenge_method", "plain") }, nil, 400, "invalid_request", consent.ReasonInitiationIncomplete},
 		{"no service", hypotheekPeer, func(f url.Values) { f.Del("service") }, nil, 400, "invalid_request", consent.ReasonInitiationIncomplete},
 		{"valid_until in the past", hypotheekPeer, func(f url.Values) { f.Set("valid_until", "2020-01-01T00:00:00Z") }, nil, 400, "invalid_request", consent.ReasonInitiationIncomplete},
+		{"valid_until before the request_uri expires", hypotheekPeer, func(f url.Values) { f.Set("valid_until", "2026-11-10T12:10:00Z") }, nil, 400, "invalid_request", consent.ReasonInitiationIncomplete},
 		{"repeated state", hypotheekPeer, func(f url.Values) { f.Add("state", "other") }, nil, 400, "invalid_request", consent.ReasonInitiationIncomplete},
 		{"repeated scope", hypotheekPeer, func(f url.Values) { f.Add("scope", "bd:ib:2025") }, nil, 400, "invalid_request", consent.ReasonInitiationIncomplete},
 		{"repeated unknown parameter", hypotheekPeer, func(f url.Values) { f["extra"] = []string{"a", "b"} }, nil, 400, "invalid_request", consent.ReasonInitiationIncomplete},

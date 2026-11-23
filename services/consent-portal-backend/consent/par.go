@@ -47,6 +47,11 @@ type PendingRequest struct {
 	CodeChallenge string
 	ValidUntil    time.Time // zero when the provider asked for no end date
 	ExpiresAt     time.Time
+	// Citizen is the citizen the request is bound to: the first one to
+	// resolve its reference. Empty until then.
+	Citizen SubjectRef
+	// Spent is set once the citizen's decision used the reference.
+	Spent bool
 }
 
 // PushedReference is what the provider gets back for an accepted request:
@@ -59,11 +64,15 @@ type PushedReference struct {
 // PushRequest checks a pushed request from provider, the authenticated
 // peer, and keeps it under a new request URI. A refusal is a *Refusal: a
 // missing or unusable OAuth parameter, or a valid_until that is malformed or
-// not in the future, is ReasonInitiationIncomplete, checked before anything
-// else; the rest are VerifyRequest's checks.
+// not later than the expiry of the new request URI, is
+// ReasonInitiationIncomplete, checked before anything else; the rest are
+// VerifyRequest's checks.
 func (p *Portal) PushRequest(ctx context.Context, provider PeerID, pushed PushedRequest) (PushedReference, error) {
 	if problem := pushed.incomplete(); problem != "" {
 		return PushedReference{}, refuse(ReasonInitiationIncomplete, "%s", problem)
+	}
+	if p.Requests == nil {
+		return PushedReference{}, errors.New("no request store is configured")
 	}
 	now := p.now()
 	var validUntil time.Time
@@ -72,8 +81,11 @@ func (p *Portal) PushRequest(ctx context.Context, provider PeerID, pushed Pushed
 		if err != nil {
 			return PushedReference{}, refuse(ReasonInitiationIncomplete, "valid_until is not an RFC 3339 time")
 		}
-		if !parsed.After(now) {
-			return PushedReference{}, refuse(ReasonInitiationIncomplete, "valid_until is not in the future")
+		// A consent that ends before the citizen can decide is no consent:
+		// valid_until has to outlast the request URI, so that it is still
+		// in the future whenever the decision is made.
+		if !parsed.After(p.Requests.expiry(now)) {
+			return PushedReference{}, refuse(ReasonInitiationIncomplete, "valid_until is not later than the expiry of the request_uri")
 		}
 		validUntil = parsed
 	}
@@ -90,9 +102,6 @@ func (p *Portal) PushRequest(ctx context.Context, provider PeerID, pushed Pushed
 		return PushedReference{}, err
 	}
 
-	if p.Requests == nil {
-		return PushedReference{}, errors.New("no request store is configured")
-	}
 	uri, expiresAt, err := p.Requests.Put(PendingRequest{
 		Request:       verified,
 		State:         pushed.State,
@@ -125,6 +134,9 @@ func (r PushedRequest) incomplete() string {
 }
 
 // RequestStore keeps pending requests by request URI until they expire.
+// An expired or spent request is remembered for one more lifetime, so that
+// a citizen who comes back with its reference is told it expired or was
+// used; after that its reference is unknown.
 //
 // Demo shortcut: the store is in memory, so a restart of the backend drops
 // every open request and the backend runs as a single replica. A real
@@ -142,24 +154,30 @@ func NewRequestStore(lifetime time.Duration) *RequestStore {
 }
 
 // Put keeps a request under a new, unguessable request URI and returns the
-// URI and when the request expires. Expired requests are dropped on the way.
+// URI and when the request expires. Requests past their retention are
+// dropped on the way.
 func (s *RequestStore) Put(request PendingRequest, now time.Time) (string, time.Time, error) {
 	random := make([]byte, 32)
 	if _, err := rand.Read(random); err != nil {
 		return "", time.Time{}, err
 	}
 	uri := requestURIPrefix + base64.RawURLEncoding.EncodeToString(random)
-	request.ExpiresAt = now.Add(s.lifetime)
+	request.ExpiresAt = s.expiry(now)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for key, pending := range s.requests {
-		if !now.Before(pending.ExpiresAt) {
+		if !now.Before(pending.ExpiresAt.Add(s.lifetime)) {
 			delete(s.requests, key)
 		}
 	}
 	s.requests[uri] = request
 	return uri, request.ExpiresAt, nil
+}
+
+// expiry is when a request put at now expires.
+func (s *RequestStore) expiry(now time.Time) time.Time {
+	return now.Add(s.lifetime)
 }
 
 // Get returns the request kept under uri. found is false for an unknown
@@ -172,4 +190,68 @@ func (s *RequestStore) Get(uri string, now time.Time) (request PendingRequest, f
 		return PendingRequest{}, false
 	}
 	return request, true
+}
+
+// Bind returns the request under uri for citizen, after checking that its
+// reference is usable, that clientID is the provider that pushed it and
+// that no other citizen has it. The first citizen to resolve the reference
+// is bound to it; the same citizen may resolve it again.
+func (s *RequestStore) Bind(uri, clientID string, citizen SubjectRef, now time.Time) (PendingRequest, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	request, err := s.usable(uri, now)
+	if err != nil {
+		return PendingRequest{}, err
+	}
+	if clientID != string(request.Request.Provider) {
+		return PendingRequest{}, refuse(ReasonClientIDMismatch, "the reference was not pushed by client_id %q", clientID)
+	}
+	if request.Citizen != "" && request.Citizen != citizen {
+		return PendingRequest{}, refuse(ReasonRequestURIOtherCitizen, "the reference belongs to another citizen")
+	}
+	request.Citizen = citizen
+	s.requests[uri] = request
+	return request, nil
+}
+
+// Spend uses the reference under uri for citizen's decision: the reference
+// must be usable and already bound to citizen by Bind, which checked the
+// client ID; then accept runs on the request. When accept returns nil the
+// reference is spent; when it returns an error nothing changes. Only one
+// decision can spend a reference.
+func (s *RequestStore) Spend(uri string, citizen SubjectRef, now time.Time, accept func(PendingRequest) error) (PendingRequest, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	request, err := s.usable(uri, now)
+	if err != nil {
+		return PendingRequest{}, err
+	}
+	switch request.Citizen {
+	case citizen:
+	case "":
+		return PendingRequest{}, refuse(ReasonRequestURINotResolved, "the reference was not resolved before the decision")
+	default:
+		return PendingRequest{}, refuse(ReasonRequestURIOtherCitizen, "the reference belongs to another citizen")
+	}
+	if err := accept(request); err != nil {
+		return PendingRequest{}, err
+	}
+	request.Spent = true
+	s.requests[uri] = request
+	return request, nil
+}
+
+// usable returns the request under uri, or a refusal when its reference is
+// unknown, expired or spent. The caller holds s.mu.
+func (s *RequestStore) usable(uri string, now time.Time) (PendingRequest, error) {
+	request, found := s.requests[uri]
+	switch {
+	case !found || !now.Before(request.ExpiresAt.Add(s.lifetime)):
+		return PendingRequest{}, refuse(ReasonRequestURIUnknown, "the reference is unknown")
+	case !now.Before(request.ExpiresAt):
+		return PendingRequest{}, refuse(ReasonRequestURIExpired, "the reference has expired")
+	case request.Spent:
+		return PendingRequest{}, refuse(ReasonRequestURISpent, "the reference has been used")
+	}
+	return request, nil
 }

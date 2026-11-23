@@ -41,6 +41,9 @@ type Portal struct {
 	// Requests keeps the pushed requests that passed the checks. Nil
 	// accepts none.
 	Requests *RequestStore
+	// Codes keeps the codes of granted decisions until the provider
+	// exchanges them. Nil gives none: a grant then fails.
+	Codes *CodeStore
 
 	authorisations authorisationList
 }

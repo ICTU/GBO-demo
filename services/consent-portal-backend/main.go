@@ -281,6 +281,10 @@ func newPortal(cfg config, hub *portalhttp.Hub, logbook consent.Logbook) *consen
 		Registrations:     onboarding.Client{Base: cfg.OnboardingRegisterURL, Caller: caller},
 		KnownScopes:       cfg.KnownScopes,
 		Requests:          consent.NewRequestStore(cfg.RequestLifetime),
+		// A code is exchanged by the provider's backend right after the
+		// browser returns, so a minute is plenty (RFC 6749 §4.1.2 advises
+		// at most ten).
+		Codes: consent.NewCodeStore(time.Minute),
 
 		AuthorisationListMaxAge: cfg.AuthorisationListMaxAge,
 	}
