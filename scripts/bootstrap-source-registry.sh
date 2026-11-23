@@ -29,6 +29,9 @@ ALTER ROLE source_registry_reader LOGIN PASSWORD :'reader_password';
 
 SELECT 'CREATE DATABASE source_registry OWNER source_registry'
 WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'source_registry') \gexec
+-- The database may exist already without this owner: the Aspire AppHost
+-- creates it before this script runs.
+ALTER DATABASE source_registry OWNER TO source_registry;
 GRANT CONNECT ON DATABASE source_registry TO source_registry_reader;
 SQL
 

@@ -21,6 +21,7 @@ type tracked struct {
 	handle aspire.Resource
 	nest   func(parent aspire.Resource)
 	label  func(tags []string, order int)
+	hide   func() // WithHiddenOnCompletion; nil for resources that never complete
 	kind   kind
 	extra  []kind
 }
@@ -35,9 +36,11 @@ const (
 	setup
 )
 
+// namedContainer is a container the AppHost starts, with a way to add
+// container runtime arguments (compose labels) whatever its handle type.
 type namedContainer struct {
-	name   string
-	handle aspire.ContainerResource
+	name        string
+	runtimeArgs func(args []string)
 }
 
 type model struct {
@@ -48,9 +51,11 @@ type model struct {
 	// TODO(go-apphost/typed-model): the Go SDK has no typed enumeration of the
 	// model (builder.Resources in C#); DistributedApplicationModel only
 	// returns untyped handles. The AppHost keeps its own index instead.
-	resources  map[string]tracked
-	containers []namedContainer
-	seeds      []string
+	resources map[string]tracked
+	// keepVisible lists setup steps people rerun by hand from the dashboard.
+	keepVisible map[string]bool
+	containers  []namedContainer
+	seeds       []string
 
 	directoryManager aspire.ContainerResource
 }
@@ -65,10 +70,11 @@ func newModel(b aspire.DistributedApplicationBuilder) *model {
 		log.Fatal(aspire.FormatError(err))
 	}
 	return &model{
-		b:         b,
-		repoRoot:  filepath.Clean(filepath.Join(dir, "..")),
-		runMode:   runMode,
-		resources: map[string]tracked{},
+		b:           b,
+		repoRoot:    filepath.Clean(filepath.Join(dir, "..")),
+		runMode:     runMode,
+		resources:   map[string]tracked{},
+		keepVisible: map[string]bool{},
 	}
 }
 
@@ -124,8 +130,44 @@ func (m *model) trackContainer(name string, c aspire.ContainerResource, k kind) 
 	m.register(name, c, k,
 		func(p aspire.Resource) { c.WithParentRelationship(p) },
 		func(tags []string, order int) { c.WithTags(tags).WithDisplayOrder(order) })
-	m.containers = append(m.containers, namedContainer{name, c})
+	m.setHide(name, func() { c.WithHiddenOnCompletion() })
+	m.containers = append(m.containers, namedContainer{name, func(a []string) { c.WithContainerRuntimeArgs(a) }})
 	return c
+}
+
+func (m *model) setHide(name string, hide func()) {
+	t := m.resources[name]
+	t.hide = hide
+	m.resources[name] = t
+}
+
+// postgres adds a PostgreSQL server through Aspire's PostgreSQL integration:
+// health check, credentials from parameters and databases created on start
+// (see database). The data volume keeps the name the server had before, so
+// existing data stays.
+func (m *model) postgres(name, user string, password aspire.ParameterResource, tag, volume string) aspire.PostgresServerResource {
+	opts := []aspire.AddPostgresOption{aspire.AddPostgresPassword(password)}
+	if user != "" {
+		opts = append(opts, aspire.AddPostgresUserName(m.b.AddParameter(name+"-user", aspire.AddParameterValue(user))))
+	}
+	pg := m.b.AddPostgres(name, opts...).
+		WithImageTag(tag).
+		WithDataVolume(aspire.DataVolumeName(volume))
+	m.register(name, pg, offTheShelf,
+		func(p aspire.Resource) { pg.WithParentRelationship(p) },
+		func(tags []string, order int) { pg.WithTags(tags).WithDisplayOrder(order) })
+	m.containers = append(m.containers, namedContainer{name, func(a []string) { pg.WithContainerRuntimeArgs(a) }})
+	return pg
+}
+
+// database adds a database on a server; Aspire creates it when the server
+// is ready, unless it exists. Consumers WaitFor it.
+func (m *model) database(server aspire.PostgresServerResource, name, databaseName string) aspire.PostgresDatabaseResource {
+	db := server.AddDatabase(name, aspire.AddDatabaseDatabaseName(databaseName))
+	m.register(name, db, offTheShelf,
+		func(p aspire.Resource) { db.WithParentRelationship(p) },
+		func(tags []string, order int) { db.WithTags(tags).WithDisplayOrder(order) })
+	return db
 }
 
 // container adds a container from a published image.
@@ -174,6 +216,7 @@ func (m *model) executable(name, command, workingDirectory string, args ...strin
 	m.register(name, e, setup,
 		func(p aspire.Resource) { e.WithParentRelationship(p) },
 		func(tags []string, order int) { e.WithTags(tags).WithDisplayOrder(order) })
+	m.setHide(name, func() { e.WithHiddenOnCompletion() })
 	return e
 }
 
@@ -239,7 +282,12 @@ func (m *model) labelAll() {
 		monitoring:  {"monitoring", 100},
 		setup:       {"setup", 0},
 	}
-	for _, t := range m.resources {
+	for name, t := range m.resources {
+		// Setup steps leave the list once they succeed; a running or failed
+		// one stays, and "Show hidden resources" brings them all back.
+		if t.kind == setup && t.hide != nil && !m.keepVisible[name] {
+			t.hide()
+		}
 		g := groups[t.kind]
 		tags := []string{g.tag}
 		for _, k := range t.extra {

@@ -128,13 +128,21 @@ Every resource carries one tag, and the list sorts by group:
 | `own build` | services and frontends built from this repository | first (the OpenFTV PDP, built here from released OpenFTV with our patch, also carries `off the shelf`) |
 | `off the shelf` | published components: Postgres, OpenFSC, cfssl, Keycloak, the OpenFTV Manager, nginx, cloudflared, the nl-wallet issuance server and verifier | second |
 | `monitoring` | the OpenTelemetry collector | third |
-| `setup` | run-once steps: images, certificates, migrations, seeds, `npm ci` | last (all nested) |
+| `setup` | run-once steps: images, certificates, migrations, seeds, role bootstraps | last (nested, and hidden once they succeed) |
+
+Setup steps use `WithHiddenOnCompletion`: they show while they run or when
+they fail, and leave the list once they succeed. "Show hidden resources" in
+the dashboard, or `aspire describe --include-hidden`, shows them again. Three
+stay visible because they are rerun by hand: `manager-seed`,
+`eudi-issuance-materialize` and `credential-issuer-materialize`. The
+databases (`ftv-*-db`, `<peer>-db-*`, `source-registry-db`, ...) are
+resources of Aspire's PostgreSQL integration, nested under their server.
 
 Filter on a tag under Filters, Tags. A resource takes its group from how it
 is added (Dockerfile, image or host process); `apphost.go` lists the
 exceptions under "Groups in the dashboard". The five `<frontend>-installer`
-steps, nested under their frontend, stay untagged: the Go SDK cannot reach
-them (GO-APPHOST.md, typed-model).
+steps, nested under their frontend, stay untagged and visible: the Go SDK
+cannot reach them (GO-APPHOST.md, typed-model).
 
 In Aspire 17.0 the graph view draws every resource and ignores the list's
 Filters and nesting. To graph a subset, select it in the list (click, and

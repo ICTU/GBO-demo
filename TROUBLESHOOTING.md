@@ -12,8 +12,11 @@ The AppHost starts resources in dependency order: a resource waits until the
 ones it depends on are healthy, or for run-once steps, have exited 0. A step
 that fails holds up everything after it. Find the first resource that is not
 `Running`/`Healthy` or exited non-zero in the dashboard and read its console
-log. Restart a run-once step from its row in the dashboard once the cause is
-fixed; the FSC certificate steps and the seeds are idempotent.
+log. Run-once steps leave the list once they succeed; a running or failed one
+stays, and "Show hidden resources" in the dashboard (or
+`aspire describe --include-hidden`) shows the finished ones. Restart a
+run-once step from its row in the dashboard once the cause is fixed; the FSC
+certificate steps and the seeds are idempotent.
 
 ## Port conflicts
 
@@ -73,8 +76,9 @@ failed step.
 
 ## Migrations racing
 
-The FSC migration steps wait for the `fsc-databases` step, which waits until
-Postgres answers. A migration that still fails shows its error in its console
+Each FSC migration step waits for its database (`<peer>-db-<part>`, nested
+under `fsc-postgres`), which Aspire's PostgreSQL integration creates once the
+server is healthy. A migration that still fails shows its error in its console
 log; restart it from the dashboard.
 
 ## Contract seed fails

@@ -11,16 +11,15 @@ Checked with Aspire CLI 17.0.0, Go 1.27.4 on macOS (arm64), 2026-11-20.
 ## What works
 
 - **The whole app model.** Every resource, profile, wait, mount, endpoint,
-  parameter and setting of the C# AppHost is in `apphost.go`. `aspire publish`
-  writes the same `docker-compose.yaml` and the same `.env` keys as the C#
-  AppHost, apart from the generated passwords and the repository path, for:
-  - the default profile (dvtp),
-  - `core` (40 services),
-  - every profile at once (`full,asi,manager,integrator,credential-issuer`,
-    with the tunnel and both wallet verifiers: 170 services).
+  parameter and setting of the C# AppHost is in `apphost.go`. Until the
+  PostgreSQL switch below (2026-11-23), `aspire publish` wrote the same
+  `docker-compose.yaml` and `.env` keys as the C# AppHost (default, `core`
+  and every profile at once, 170 services). The C# AppHost is no longer the
+  reference: the Go AppHost uses Aspire features the C# one did not.
 - **`aspire run` of the default (dvtp) demo**, on top of the volumes the C#
-  AppHost made: all 122 resources come up (73 running and healthy, 44 run-once
-  steps exit 0), in about 45 s to a healthy consumer backend. The DvTP flow
+  AppHost made: every resource comes up healthy or exits 0 (2026-11-23, with
+  the PostgreSQL integration: 141 resources, 39 setup steps hidden after
+  success, 90 resources left in the list). The DvTP flow
   works end to end in the browser: consumer mock, DigiD mock login, consent in
   MijnOverheid, back to the consumer with both income years fetched over FSC
   through the PDP. A restart on the same volumes comes up the same way.
@@ -40,6 +39,34 @@ Checked with Aspire CLI 17.0.0, Go 1.27.4 on macOS (arm64), 2026-11-20.
   `aspire secret set`) reads through `GetConfiguration()`, and the AppHost can
   write the dashboard keys into it, as C# did.
 - **CI**: the OpenFTV version check and the CI planner read `apphost.go`.
+
+## Aspire features used beyond the C# AppHost (2026-11-23)
+
+- **Aspire's PostgreSQL integration** (`Aspire.Hosting.PostgreSQL`) runs the
+  three Postgres servers (`postgres-ftv`, `fsc-postgres`, `postgres-eudi`):
+  health checks instead of `pg_isready` loops, credentials from the existing
+  parameters, and the existing data volumes. Each database is an
+  `AddDatabase` resource that Aspire creates when it is missing and that its
+  users wait for. That replaced the `fsc-databases` step, the Postgres
+  `POSTGRES_DB` variables and `services/openftv-manager/initdb`.
+- **Roles stay a run-once step.** `postgres-ftv-init` (ADL reader),
+  `source-registry-bootstrap` and `credential-issuer-db-bootstrap` still run,
+  slimmer, after their database exists. Aspire's creation script cannot take
+  them over: it runs as one batch on the server, cannot switch to the new
+  database (`\c`), and `CREATE DATABASE` refuses to share a batch with other
+  statements ("cannot be executed within a pipeline", tested). The two
+  bootstrap scripts now also set the database owner, since Aspire creates the
+  database before they run (tested on a fresh database: the owner role can
+  create its schema).
+- **`WithHiddenOnCompletion`** on every setup step: it shows while it runs or
+  when it fails and leaves the list once it succeeds. `manager-seed` and the
+  two `*-materialize` steps stay visible, since they are rerun by hand.
+- **Trade-off in `aspire publish`:** Aspire's Docker Compose output does not
+  create `AddDatabase` databases (no `CREATE DATABASE`, no `POSTGRES_DB`), so
+  the generated compose file no longer sets the databases up. It was not a
+  standalone replacement before either (PLAN.md, follow-ups).
+- **Dashboard tags and order** (`WithTags`, `WithDisplayOrder`): own build,
+  off the shelf, monitoring, setup.
 
 ## Gaps in the preview, with a workaround
 

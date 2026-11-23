@@ -284,15 +284,19 @@ func (m *model) build() {
 	}
 
 	// ── OpenFTV: decision log database and PDP ───────────────────────────
-	postgresFtv := m.container("postgres-ftv", "postgres", "16-alpine").
-		WithEndpoint(aspire.EndpointTargetPort(5432), aspire.EndpointName("tcp"), aspire.EndpointScheme("tcp")).
-		WithEnvironment("POSTGRES_USER", "ftv").
-		WithEnvironment("POSTGRES_DB", "ftv_manager").
-		WithEnvironment("POSTGRES_PASSWORD", ftvPostgresPassword).
-		WithBindMount(m.repo("services/openftv-manager/initdb"), "/docker-entrypoint-initdb.d", aspire.BindMountIsReadOnly(true)).
-		WithVolume("/var/lib/postgresql/data", aspire.VolumeName("gbo-postgres-ftv-data"))
+	// The Manager's database and the Authorization Decision Log, each in its
+	// own database (services/openftv-manager/initdb explains why), created by
+	// Aspire when missing.
+	postgresFtv := m.postgres("postgres-ftv", "ftv", ftvPostgresPassword, "16-alpine", "gbo-postgres-ftv-data")
+	ftvManagerDb := m.database(postgresFtv, "ftv-manager-db", "ftv_manager")
+	ftvAdlDb := m.database(postgresFtv, "ftv-adl-db", "ftv_adl")
 
 	// Creates the SELECT-only role the developer portal reads the ADL with.
+	// Aspire's creation script cannot do this: it runs as one batch on the
+	// server, cannot connect to the new database (\c), and CREATE DATABASE
+	// refuses to share a batch, so roles and grants inside ftv_adl stay a
+	// run-once step. It runs on every start, so the role's password follows
+	// the parameter.
 	postgresFtvInit := m.container("postgres-ftv-init", "postgres", "16-alpine").
 		WithEnvironment("PGHOST", "postgres-ftv").
 		WithEnvironment("PGUSER", "ftv").
@@ -301,11 +305,8 @@ func (m *model) build() {
 		WithEnvironment("ADL_READER_PASSWORD", ftvAdlReaderPassword).
 		WithBindMount(m.repo("services/openftv-manager/adl/adl-reader.sql"), "/init/adl-reader.sql", aspire.BindMountIsReadOnly(true)).
 		WithEntrypoint("sh").
-		WithArgs([]string{"-c", strings.TrimSpace(`
-for i in $(seq 1 60); do psql -c 'select 1' >/dev/null 2>&1 && break; sleep 1; done
-psql -v ON_ERROR_STOP=1 -v reader_password="$ADL_READER_PASSWORD" -f /init/adl-reader.sql
-`)}).
-		WaitFor(postgresFtv)
+		WithArgs([]string{"-c", `psql -v ON_ERROR_STOP=1 -v reader_password="$ADL_READER_PASSWORD" -f /init/adl-reader.sql`}).
+		WaitFor(ftvAdlDb)
 
 	dvtpOnboardingRegister := m.dockerfile("dvtp-onboarding-register", "../services/dvtp-onboarding-register", "").
 		WithHttpEndpoint(aspire.HttpEndpointTargetPort(4015), aspire.HttpEndpointName("http")).
@@ -482,32 +483,13 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 				"--ca-host=http://cfssl:8888", "--include-issuer-cert=true"}).
 			WaitFor(cfssl)
 
-		fscPostgres := m.container("fsc-postgres", "postgres", "17.10-alpine").
+		// One server for every peer, reachable as "postgres" as under
+		// compose. Each peer adds its three databases (addFscPeer); Aspire
+		// creates the ones that do not exist yet, also in a volume
+		// initialised before a peer was added.
+		fscPostgres := m.postgres("fsc-postgres", "", fscPostgresPassword, "17.10-alpine", "gbo-fsc-postgres-data").
 			WithContainerNetworkAlias("postgres").
-			WithEndpoint(aspire.EndpointTargetPort(5432), aspire.EndpointName("tcp"), aspire.EndpointScheme("tcp")).
-			WithEnvironment("POSTGRES_USER", "postgres").
-			WithEnvironment("POSTGRES_PASSWORD", fscPostgresPassword).
-			WithArgs([]string{"postgres", "-c", "max_connections=300"}).
-			WithVolume("/var/lib/postgresql/data", aspire.VolumeName("gbo-fsc-postgres-data"))
-
-		// Creates every peer database that does not exist yet, also in a
-		// volume initialised before a peer was added.
-		fscDatabases := m.container("fsc-databases", "postgres", "17.10-alpine").
-			WithEnvironment("PGHOST", "postgres").
-			WithEnvironment("PGUSER", "postgres").
-			WithEnvironment("PGPASSWORD", fscPostgresPassword).
-			WithEntrypoint("sh").
-			WithArgs([]string{"-c", strings.TrimSpace(`
-for i in $(seq 1 60); do psql -d postgres -tAc 'select 1' >/dev/null 2>&1 && break; sleep 1; done
-for org in dir edi bd hv brp cr pdp ir int asip; do
-  for part in controller manager txlog; do
-    db="fsc_${org}_${part}"
-    [ "$(psql -d postgres -tAc "select 1 from pg_database where datname='$db'")" = 1 ] || createdb "$db"
-  done
-done
-echo "FSC databases ready"
-`)}).
-			WaitFor(fscPostgres)
+			WithArgs([]string{"-c", "max_connections=300"})
 
 		// One peer: certificates, migrations, controller, manager, txlog-api
 		// and an inway (provider) or outway (consumer).
@@ -538,10 +520,12 @@ echo "FSC databases ready"
 				return aspire.RefExpr("postgresql://postgres:%v@postgres:5432/fsc_"+p.db+"_"+part+"?sslmode=disable&connect_timeout=2", fscPostgresPassword)
 			}
 			migrations := func(component, part string) aspire.ContainerResource {
+				db := m.database(fscPostgres, p.prefix+"-db-"+part, "fsc_"+p.db+"_"+part)
+				m.nestUnder(p.prefix+"-db-"+part, "fsc-postgres")
 				return fsc(p.prefix+"-migrations-"+component, component).
 					WithArgs([]string{"/usr/local/bin/" + component, "migrate", "up"}).
 					WithEnvironment("POSTGRES_DSN", dsn(part)).
-					WaitForCompletion(fscDatabases)
+					WaitFor(db)
 			}
 
 			migrateController := migrations("controller", "controller")
@@ -904,13 +888,14 @@ echo "FSC databases ready"
 		eudiBriURL := b.AddParameter("eudi-bri-url").
 			WithDescription("Public HTTPS URL where the issuance server reaches the EUDI adapter, e.g. https://eudi-bri.example.org/")
 
-		postgresEudi := m.container("postgres-eudi", "postgres", "16-alpine").
-			WithEndpoint(aspire.EndpointTargetPort(5432), aspire.EndpointName("tcp"), aspire.EndpointScheme("tcp")).
-			WithEnvironment("POSTGRES_USER", "wallet").
-			WithEnvironment("POSTGRES_DB", "issuance_server").
-			WithEnvironment("POSTGRES_PASSWORD", eudiPostgresPassword).
-			WithVolume("/var/lib/postgresql/data", aspire.VolumeName("gbo-postgres-eudi-data"))
+		postgresEudi := m.postgres("postgres-eudi", "wallet", eudiPostgresPassword, "16-alpine", "gbo-postgres-eudi-data")
+		issuanceServerDb := m.database(postgresEudi, "issuance-server-db", "issuance_server")
+		sourceRegistryDb := m.database(postgresEudi, "source-registry-db", "source_registry")
 
+		// The Source Registry's owner and reader roles, and the database's
+		// owner. A run-once step for the same reason as postgres-ftv-init:
+		// Aspire's creation script cannot create roles next to the database.
+		// The script is the one the Helm chart runs as a Job.
 		sourceRegistryBootstrap := m.container("source-registry-bootstrap", "postgres", "16-alpine").
 			WithEnvironment("PGHOST", "postgres-eudi").
 			WithEnvironment("PGPORT", "5432").
@@ -920,8 +905,8 @@ echo "FSC databases ready"
 			WithEnvironment("SOURCE_REGISTRY_READER_PASSWORD", sourceRegistryReaderPassword).
 			WithBindMount(m.repo("scripts/bootstrap-source-registry.sh"), "/scripts/bootstrap-source-registry.sh", aspire.BindMountIsReadOnly(true)).
 			WithEntrypoint("sh").
-			WithArgs([]string{"-c", "for i in $(seq 1 60); do pg_isready -q && break; sleep 1; done; /scripts/bootstrap-source-registry.sh"}).
-			WaitFor(postgresEudi)
+			WithArgs([]string{"-c", "/scripts/bootstrap-source-registry.sh"}).
+			WaitFor(sourceRegistryDb)
 
 		sourceRegistryReaderURL = aspire.RefExpr("postgres://source_registry_reader:%v@postgres-eudi:5432/source_registry", sourceRegistryReaderPassword)
 		sourceRegistryURL := aspire.RefExpr("postgres://source_registry:%v@postgres-eudi:5432/source_registry", sourceRegistryPassword)
@@ -1010,7 +995,7 @@ echo "FSC databases ready"
 				WithArgs([]string{"up"}).
 				WithEnvironment("DATABASE_URL", issuanceDatabaseURL).
 				WaitForCompletion(issuanceServerImage).
-				WaitForCompletion(sourceRegistryBootstrap)
+				WaitFor(issuanceServerDb)
 
 			// Renders the issuance server's configuration from the active
 			// Source Release, into a host directory the server then mounts.
@@ -1070,7 +1055,9 @@ echo "FSC databases ready"
 			trustPublicURL := b.AddParameter("eudi-trust-public-url").
 				WithDescription("Public URL of the trust host, e.g. https://eudi-trust.example.org")
 			credentialIssuerDbPassword := m.generated("credential-issuer-db-password")
+			credentialIssuerDb := m.database(postgresEudi, "credential-issuer-db", "credential_issuer")
 
+			// Its role and the database's owner (see source-registry-bootstrap).
 			credentialIssuerDbBootstrap := m.container("credential-issuer-db-bootstrap", "postgres", "16-alpine").
 				WithEnvironment("PGHOST", "postgres-eudi").
 				WithEnvironment("PGPORT", "5432").
@@ -1079,8 +1066,8 @@ echo "FSC databases ready"
 				WithEnvironment("CREDENTIAL_ISSUER_DB_PASSWORD", credentialIssuerDbPassword).
 				WithBindMount(m.repo("scripts/bootstrap-credential-issuer.sh"), "/scripts/bootstrap-credential-issuer.sh", aspire.BindMountIsReadOnly(true)).
 				WithEntrypoint("sh").
-				WithArgs([]string{"-c", "for i in $(seq 1 60); do pg_isready -q && break; sleep 1; done; /scripts/bootstrap-credential-issuer.sh"}).
-				WaitFor(postgresEudi)
+				WithArgs([]string{"-c", "/scripts/bootstrap-credential-issuer.sh"}).
+				WaitFor(credentialIssuerDb)
 			issuerDbURL := aspire.RefExpr("postgres://credential_issuer:%v@postgres-eudi:5432/credential_issuer", credentialIssuerDbPassword)
 			credentialIssuerMigrations := m.dockerfile("credential-issuer-migrations", "..", "services/eudi-credential-issuer/Dockerfile").
 				WithArgs([]string{"./eudi-credential-issuer", "migrate"}).
@@ -1308,6 +1295,7 @@ echo "FSC databases ready"
 			WithBindMount(m.repo("services/openftv-manager/authz"), "/authz", aspire.BindMountIsReadOnly(true)).
 			WithBindMount(m.repo("services/openftv-manager/bundles"), "/bundles", aspire.BindMountIsReadOnly(true)).
 			WithBindMount(m.repo("services/openftv-manager/tags"), "/tags", aspire.BindMountIsReadOnly(true)).
+			WaitFor(ftvManagerDb).
 			WaitForCompletion(postgresFtvInit).
 			WaitFor(keycloak)
 
@@ -1475,7 +1463,6 @@ echo "FSC databases ready"
 	for _, name := range m.seeds {
 		m.nestUnder(name, "directory-controller")
 	}
-	m.nestUnder("fsc-databases", "fsc-postgres")
 	pkiParent := "openftv-pdp"
 	if _, ok := m.resources["certportal"]; ok {
 		pkiParent = "certportal"
@@ -1519,8 +1506,15 @@ echo "FSC databases ready"
 			m.classify(name, setup)
 		}
 	}
-	for _, name := range []string{"postgres-ftv-init", "pdp-admission", "fsc-databases", "source-reconciler", "eudi-wallet-verifier-runtime"} {
+	for _, name := range []string{"postgres-ftv-init", "pdp-admission", "source-reconciler", "eudi-wallet-verifier-runtime"} {
 		m.classify(name, setup)
+	}
+	// Setup steps hide once they succeed (labelAll), except the ones people
+	// rerun by hand: the policy seed after editing policies, and the two
+	// materialize steps after a certificate or configuration change (see
+	// AGENTS.md, "Restarting a resource versus restarting the AppHost").
+	for _, name := range []string{"manager-seed", "eudi-issuance-materialize", "credential-issuer-materialize"} {
+		m.keepVisible[name] = true
 	}
 	m.labelAll()
 
@@ -1531,7 +1525,7 @@ echo "FSC databases ready"
 	// touch these containers.
 	const composeProject = "gbo-demo-aspire"
 	for _, c := range m.containers {
-		c.handle.WithContainerRuntimeArgs([]string{
+		c.runtimeArgs([]string{
 			"--label", "com.docker.compose.project=" + composeProject,
 			"--label", "com.docker.compose.service=" + c.name,
 		})
