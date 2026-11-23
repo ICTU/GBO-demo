@@ -214,6 +214,17 @@ func (m *model) build() {
 		WithEnvironment("ASPIRE_DASHBOARD_OTLP_GRPC", dashboardOtlpGrpc).
 		WithEnvironment("ASPIRE_DASHBOARD_OTLP_API_KEY", keys["AppHost:OtlpApiKey"])
 
+	// otlpViaCollector gives a service Aspire's OTLP settings (service name
+	// and the instance id that ties its telemetry to the resource in the
+	// dashboard), but sends the telemetry to the collector, which forwards it
+	// to the dashboard and to dev-portal-backend's live strip. The endpoint is
+	// set after WithOtlpExporter so it wins.
+	otlpViaCollector := func(c aspire.ContainerResource) aspire.ContainerResource {
+		return c.WithOtlpExporter(aspire.OtlpExporterProtocol(aspire.OtlpProtocolGrpc)).
+			WithEnvironment("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317").
+			WaitFor(otelCollector)
+	}
+
 	// A service built from its Dockerfile, exporting spans to the collector.
 	// hostPort 0 means a proxied endpoint on a port Aspire picks.
 	goService := func(name, dockerfile string, port int, context string, hostPort int) aspire.ContainerResource {
@@ -224,12 +235,9 @@ func (m *model) build() {
 		if hostPort != 0 {
 			endpoint = append(endpoint, aspire.HttpEndpointPort(hostPort))
 		}
-		return m.dockerfile(name, context, dockerfile).
+		return otlpViaCollector(m.dockerfile(name, context, dockerfile).
 			WithHttpEndpoint(endpoint...).
-			WithHttpHealthCheck(aspire.HttpHealthCheckPath("/health")).
-			WithEnvironment("OTEL_SERVICE_NAME", name).
-			WithEnvironment("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317").
-			WaitFor(otelCollector)
+			WithHttpHealthCheck(aspire.HttpHealthCheckPath("/health")))
 	}
 
 	// ── PKI tooling ──────────────────────────────────────────────────────
@@ -348,11 +356,6 @@ func (m *model) build() {
 		WithEnvironment("PDP_BUNDLE_MANAGER", pdpBundleManager).
 		WithEnvironment("PDP_TLS_CERT", "/certs/pdp-service.pem").
 		WithEnvironment("PDP_TLS_KEY", "/certs/pdp-service-key.pem").
-		// The image's logtee exports the PDP's console, the decision log
-		// among it, as OTLP log records of this resource.
-		WithEnvironment("OTEL_SERVICE_NAME", "openftv-pdp").
-		WithEnvironment("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317").
-		WaitFor(otelCollector).
 		WithBindMount(m.repo("policies"), "/policies", aspire.BindMountIsReadOnly(true)).
 		WithBindMount(m.repo("schemas/pdp-mirror"), "/etc/gbo/ftv-graphql", aspire.BindMountIsReadOnly(true)).
 		WithBindMount(m.repo("services/openftv-pdp/certs"), "/certs", aspire.BindMountIsReadOnly(true)).
@@ -362,6 +365,9 @@ func (m *model) build() {
 		WaitForCompletion(pdpCert).
 		WaitFor(consentRegister).
 		WaitFor(dvtpOnboardingRegister)
+	// The image's logtee exports the PDP's console, the decision log among
+	// it, as OTLP log records of this resource.
+	otlpViaCollector(openftvPdp)
 
 	// The source Managers decide on incoming contracts through the PDP, so
 	// the PDP must answer with the seeded Hypotheek-BV admission before the

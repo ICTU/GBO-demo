@@ -67,6 +67,13 @@ Checked with Aspire CLI 17.0.0, Go 1.27.4 on macOS (arm64), 2026-11-20.
   standalone replacement before either (PLAN.md, follow-ups).
 - **Dashboard tags and order** (`WithTags`, `WithDisplayOrder`): own build,
   off the shelf, monitoring, setup.
+- **`WithOtlpExporter`** on every service that exports telemetry (and the
+  OpenFTV PDP's logtee), with the endpoint set back to the collector so the
+  developer portal's live strip keeps its feed. Aspire adds the service name
+  and the `service.instance.id` that ties traces and logs to the resource, so
+  the dashboard no longer lists them as separate telemetry-only sources.
+  Entries from before the change stay in the dashboard's Resume store until
+  its telemetry is cleared.
 
 ## Gaps in the preview, with a workaround
 
