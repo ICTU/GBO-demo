@@ -57,19 +57,22 @@ every task needs.
 
 ## What a node contains
 
-Fixed headings, in this order; leave out the empty ones:
+Every heading is optional: a node has only the sections with real content, in
+this order. A line earns its place when an agent could not get it quickly from
+the code or the README, or when it points to a real source (a pull request,
+issue, ADR or requirement).
 
-| Heading        | Content                                                                                                                                                   |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Purpose        | What this part is for, and what it explicitly does not do.                                                                                                |
-| Contracts      | Entry points (endpoints, make targets, CLI) and invariants the code does not enforce.                                                                     |
-| Dependencies   | Who calls this part and what it calls: services, FSC (Federatieve Service Connectiviteit) services, database, configuration.                              |
-| Patterns       | The standard pattern: "to add a new rule, follow …".                                                                                                      |
-| Pitfalls       | Only traps someone actually hit, each with a link to the issue or pull request.                                                                           |
-| Verify         | The commands that prove a change here, and the rigor level.                                                                                               |
-| Decisions      | One line per deliberate choice, with a link to the pull request or the GBO-TO ADR. Whoever reverses the choice updates the line in the same pull request. |
-| Open questions | What is not answered yet, with a link to the issue.                                                                                                       |
-| Links          | Downlinks to nodes below that you would otherwise miss; the README, GBO-TO requirements, docs that do not load by themselves.                             |
+| Heading        | Content                                                                                                                                                                |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Purpose        | What this part is for and what it explicitly does not do, when the README does not say so.                                                                             |
+| Contracts      | Invariants and agreements the code does not enforce or show, often between services.                                                                                   |
+| Dependencies   | Callers and callees that are hard to find from here.                                                                                                                   |
+| Patterns       | Steps for a recurring change that spans several files.                                                                                                                 |
+| Pitfalls       | Traps someone actually hit, each with a link.                                                                                                                          |
+| Verify         | Commands that prove a change here, beyond the obvious test run.                                                                                                        |
+| Decisions      | One line per deliberate choice, with a link to the pull request or ADR; without a link it goes. Whoever reverses the choice updates the line in the same pull request. |
+| Open questions | What is genuinely still open, ideally with an issue link.                                                                                                              |
+| Links          | Docs and nodes that do not load by themselves, with when to open them.                                                                                                 |
 
 The LDV (Logboek Dataverwerkingen) services were the first to get nodes and
 serve as examples: [`services/ldv-logboek`](../services/ldv-logboek/AGENTS.md),
@@ -98,7 +101,8 @@ serve as examples: [`services/ldv-logboek`](../services/ldv-logboek/AGENTS.md),
 - Diagrams in Mermaid, not as images: text can be reviewed in a diff, an agent
   can read it, and GitHub renders it.
 - A line that changes no behaviour goes.
-- No filler: leave a heading out rather than invent content for it.
+- No filler: no restated code facts, generic advice or speculation; leave a
+  heading out rather than invent content for it.
 
 ## Separate docs
 
