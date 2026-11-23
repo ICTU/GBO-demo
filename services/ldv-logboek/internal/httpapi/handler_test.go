@@ -255,7 +255,7 @@ func TestReadExtensionAnswersInItsOwnShape(t *testing.T) {
 		t.Fatalf("seed write status = %d, body = %s", response.Code, response.Body)
 	}
 
-	response := read(t, handler, readToken, map[string]any{"traceId": "0af76519-16cd-43dd-8448-eb211c80319c"})
+	response := read(t, handler, readToken, map[string]any{"traceId": "0af7651916cd43dd8448eb211c80319c"})
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", response.Code, response.Body)
 	}
@@ -290,6 +290,22 @@ func TestReadExtensionAnswersInItsOwnShape(t *testing.T) {
 	if operation["status"] != "Ok" {
 		t.Errorf("status = %v, want the read extension's Ok", operation["status"])
 	}
+	// OpenAPI 1.1.0: traceId is the W3C hex form, the same as traceparent.
+	if operation["traceId"] != "0af7651916cd43dd8448eb211c80319c" {
+		t.Errorf("traceId = %v, want 32 lowercase hex", operation["traceId"])
+	}
+	if response.Header().Get("API-Version") != "1.1.0" {
+		t.Errorf("API-Version = %q", response.Header().Get("API-Version"))
+	}
+}
+
+// A uuid-shaped traceId was accepted before OpenAPI 1.1.0; it is refused now.
+func TestReadExtensionRefusesAUUIDTraceID(t *testing.T) {
+	handler, _ := newTestHandler(t)
+	response := read(t, handler, readToken, map[string]any{"traceId": "0af76519-16cd-43dd-8448-eb211c80319c"})
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", response.Code)
+	}
 }
 
 // The three selectors the standard names, one of which must be present.
@@ -300,8 +316,7 @@ func TestReadExtensionSelectors(t *testing.T) {
 	}
 
 	for name, body := range map[string]any{
-		"by trace":      map[string]any{"traceId": "0af7651916cd43dd8448eb211c80319c"},
-		"by trace uuid": map[string]any{"traceId": "0af76519-16cd-43dd-8448-eb211c80319c"},
+		"by trace": map[string]any{"traceId": "0af7651916cd43dd8448eb211c80319c"},
 		// The shape the schema specifies: allOf over Attributes, so dpl sits
 		// at the top level of the request body — not under an `attributes`
 		// wrapper, which is where a *response* puts it.

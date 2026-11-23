@@ -1,0 +1,114 @@
+{
+  "type": "object",
+  "description": "Attributes gebruikt binnen de Logboek Dataverwerkingen extensie lezen",
+  "properties": {
+    "dpl": {
+      "type": "object",
+      "description": "Container voor LDV attributen (core + extensies)",
+      "properties": {
+        "core": {
+          "type": "object",
+          "description": "Algemene attributen uit de LDV core standaard",
+          "properties": {
+            "processingActivityId": {
+              "type": "string",
+              "format": "uri",
+              "description": "Verwijzing naar een Register met meer informatie over de Verwerkingsactiviteit",
+              "example": "http://boerenkoolstronkerade.el/verwerkingenregister/#verhuizing",
+              "externalDocs": {
+                "description": "Definitie van Register in de standaard logboek dataverwerkingen",
+                "url": "https://logius-standaarden.github.io/logboek-dataverwerkingen/#dfn-registers"
+              }
+            },
+            "dataSubjectId": {
+              "type": "string",
+              "description": "Unieke, versleutelde identificerende code van de Betrokkene",
+              "example": "123456782",
+              "externalDocs": {
+                "description": "Definitie van Betrokkene in de standaard logboek dataverwerkingen",
+                "url": "https://logius-standaarden.github.io/logboek-dataverwerkingen/#dfn-betrokkenen"
+              }
+            },
+            "dataSubjectIdType": {
+              "type": "string",
+              "description": "Type van de identificerende code, zoals BSN, personeelsnummer, of een URI naar een Register dat het type specificeert",
+              "example": "BSN",
+              "externalDocs": {
+                "description": "Definitie van Betrokkene in de standaard logboek dataverwerkingen",
+                "url": "https://logius-standaarden.github.io/logboek-dataverwerkingen/#dfn-betrokkenen"
+              }
+            },
+            "foreignOperation": {
+              "type": "object",
+              "description": "verwijzingen naar operaties die dit logboek aanroepen",
+              "properties": {
+                "processor": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "Link naar externe Applicatie",
+                  "example": "http://www.nattemer.en/applicatie",
+                  "externalDocs": {
+                    "description": "Definitie van Applicatie in de standaard logboek dataverwerkingen",
+                    "url": "https://logius-standaarden.github.io/logboek-dataverwerkingen/#dfn-applicaties"
+                  }
+                }
+              }
+            }
+          },
+          "example": {
+            "processingActivityId": "http://boerenkoolstronkerade.el/verwerkingenregister/#verhuizing",
+            "dataSubjectId": "123456789",
+            "dataSubjectIdType": "BSN",
+            "foreignOperation": {
+              "processor": "http://www.nattemer.en/applicatie"
+            }
+          }
+        },
+        "read": {
+          "type": "object",
+          "description": "Attributen specifiek voor de lezen-extensie",
+          "properties": {
+            "nextLogbookId": {
+              "type": "string",
+              "format": "uri",
+              "description": "Identifier van de lexen extensie API van een volgend logbook in de keten",
+              "example": "http://www.nattemer.en/applicatie/lezen/openapi.json"
+            }
+          },
+          "example": {
+            "nextLogbookId": "http://www.nattemer.en/applicatie/lezen/openapi.json"
+          }
+        }
+      },
+      "example": {
+        "core": {
+          "processingActivityId": "http://boerenkoolstronkerade.el/verwerkingenregister/#verhuizing",
+          "dataSubjectId": "123456789",
+          "dataSubjectIdType": "BSN",
+          "foreignOperation": {
+            "processor": "http://www.nattemer.en/applicatie"
+          }
+        },
+        "read": {
+          "nextLogbookId": "http://www.nattemer.en/applicatie/lezen/openapi.json"
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "example": {
+    "dpl": {
+      "core": {
+        "processingActivityId": "http://boerenkoolstronkerade.el/verwerkingenregister/#verhuizing",
+        "dataSubjectId": "123456789",
+        "dataSubjectIdType": "BSN",
+        "foreignOperation": {
+          "processor": "http://www.nattemer.en/applicatie"
+        }
+      },
+      "read": {
+        "nextLogbookId": "http://www.nattemer.en/applicatie/lezen/openapi.json"
+      }
+    }
+  }
+}
