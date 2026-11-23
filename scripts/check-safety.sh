@@ -27,11 +27,6 @@
 #   scripts/check-safety.sh -v         # also list the LOW findings
 #   scripts/check-safety.sh services/  # audit tracked files under a path
 #
-# Needs bash and a git that supports git grep -P (built with PCRE). Common
-# builds have it: Linux distributions, macOS/Xcode git, Git for Windows and
-# CI images. On a git built without PCRE the script stops with a clear
-# message (exit code 2).
-#
 # Exit codes: 0 no blocking findings, 1 blocking findings, 2 usage error.
 
 set -euo pipefail
@@ -47,14 +42,6 @@ cd "$ROOT"
 
 TARGET="${1:-.}"
 
-# git grep searches only files tracked by git and skips submodules.
-# -P (Perl regular expressions) needs a git built with PCRE, as common
-# builds are; stop if this one lacks it.
-if ! git grep -qP -e '' -- scripts/check-safety.sh 2>/dev/null; then
-  echo "check-safety: this git cannot search with -P (built without PCRE)." >&2
-  exit 2
-fi
-
 # Files that are not worth scanning: this script holds the patterns,
 # lockfiles and checksum files hold only hashes, images are not text.
 EXCLUDES=(':!scripts/check-safety.sh' ':!*package-lock.json' ':!*go.sum' ':!*.svg' ':!*.png')
@@ -68,6 +55,7 @@ if [[ $file_count -eq 0 ]]; then
 fi
 
 # Print every line that matches a pattern, as "file:line:text".
+# git grep searches only files tracked by git and skips submodules.
 # -I skips binary files; git grep exits 1 when nothing matches.
 scan() {
   git grep -IPn -e "$1" -- "$TARGET" "${EXCLUDES[@]}" || true
