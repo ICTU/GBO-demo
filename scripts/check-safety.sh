@@ -27,8 +27,10 @@
 #   scripts/check-safety.sh -v         # also list the LOW findings
 #   scripts/check-safety.sh services/  # audit tracked files under a path
 #
-# Needs bash and a git that supports git grep -P (built with PCRE), as
-# Linux distributions and Homebrew ship it; Apple's own git may lack it.
+# Needs bash and a git that supports git grep -P (built with PCRE). Common
+# builds have it: Linux distributions, macOS/Xcode git, Git for Windows and
+# CI images. On a git built without PCRE the script stops with a clear
+# message (exit code 2).
 #
 # Exit codes: 0 no blocking findings, 1 blocking findings, 2 usage error.
 
@@ -46,8 +48,8 @@ cd "$ROOT"
 TARGET="${1:-.}"
 
 # git grep searches only files tracked by git and skips submodules.
-# -P (Perl regular expressions) needs a git built with PCRE, as on Linux
-# distributions, Homebrew and CI runners; stop if this one lacks it.
+# -P (Perl regular expressions) needs a git built with PCRE, as common
+# builds are; stop if this one lacks it.
 if ! git grep -qP -e '' -- scripts/check-safety.sh 2>/dev/null; then
   echo "check-safety: this git cannot search with -P (built without PCRE)." >&2
   exit 2
