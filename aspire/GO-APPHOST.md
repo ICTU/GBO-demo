@@ -139,9 +139,23 @@ not with `aspire run`. `core` was started once; `full` was not.
 
 ## Upstream issues
 
-None of the six workaround gaps had an upstream issue on 2026-11-20 (searched
-microsoft/aspire). Each one is small and reproducible; filing them makes the
-TODOs traceable. Not filed: that posts on GitHub and is your call.
+Checked against microsoft/aspire `main` (commit `f9da20e`, 2026-11-23): all
+five workaround gaps are still there, and no issue or pull request covers
+them. Issue drafts are written and not yet filed. Where each one sits in the
+Aspire source:
+
+| Gap | Kind | Where |
+| --- | --- | --- |
+| `nil-args` | bug | the nil guard for required parameters in `src/Aspire.Hosting.CodeGeneration.Go/AtsGoCodeGenerator.cs` also skips nil slices |
+| `parameter-arg` | bug | `CommandLineArgsEditor.Add` and `EnvironmentEditor.Set` store the parameter's builder; `ProcessValueAsync` in `src/Aspire.Hosting.Docker` does not unwrap it |
+| `launch-profile` | feature | `GuestAppHostProject.SupportsLaunchProfiles` is `false` and `ReadProfileFromAspireConfig` prefers `https`, then the first profile (`src/Aspire.Cli/Projects`) |
+| `typed-model` | feature | `FindResourceByName` (`src/Aspire.Hosting/Ats/ModelExports.cs`) returns `IResource`, which the Go SDK wraps without methods |
+| `string-args` | by design | the `object[]` overload of `WithArgs` is marked `AspireExportIgnore`; `WithArgsCallback` is the intended route |
+
+`parameter-arg` is wider than the workaround shows: a parameter set through
+`WithEnvironmentCallback` publishes without an error, but with a .NET type
+name as its value in `docker-compose.yaml`. This AppHost sets environment
+variables with `WithEnvironment`, which is not affected.
 
 ## Moving from the C# AppHost
 
