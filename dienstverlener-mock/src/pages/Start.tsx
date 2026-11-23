@@ -1,21 +1,36 @@
-import { buildPortalUrl, configuredConsumerPeerID } from '../lib/buildPortalUrl'
+import { useEffect, useState } from 'react'
+import { startConsent } from '../lib/consentFlow'
 import { ChecklistItem, CompletedDossierItems, DossierUser, HeaderBar } from '../components/dossier'
 
-const VALID_UNTIL_90D = new Date(Date.now() + 90 * 24 * 3600 * 1000).toISOString()
-
-const REDIRECT_CONTEXT = {
+// What Hypotheek-BV asks consent for. The name and purpose the citizen sees
+// come from Hypotheek-BV's registration, not from this request.
+const CONSENT_REQUEST = {
   service: 'aangiftegegevens',
-  purpose: 'Hypotheek-aanvraag',
-  scope: ['bd:ib:2025', 'bd:ib:2024'],
-  client_oin: configuredConsumerPeerID(),
-  client_name: 'Hypotheek-BV',
-  valid_until: VALID_UNTIL_90D,
-  return_url: `${window.location.origin}/return`,
+  scopes: ['bd:ib:2025', 'bd:ib:2024'],
 }
 
 export default function Start() {
-  const onLogin = () => {
-    window.location.assign(buildPortalUrl(REDIRECT_CONTEXT))
+  const [busy, setBusy] = useState(false)
+  const [failed, setFailed] = useState(false)
+
+  // Back from the portal with the browser's back button, the page may come
+  // from the back-forward cache, still busy.
+  useEffect(() => {
+    const reset = (e: PageTransitionEvent) => { if (e.persisted) setBusy(false) }
+    window.addEventListener('pageshow', reset)
+    return () => window.removeEventListener('pageshow', reset)
+  }, [])
+
+  const onLogin = async () => {
+    setBusy(true)
+    setFailed(false)
+    try {
+      const validUntil = new Date(Date.now() + 90 * 24 * 3600 * 1000).toISOString()
+      window.location.assign(await startConsent({ ...CONSENT_REQUEST, valid_until: validUntil }))
+    } catch {
+      setFailed(true)
+      setBusy(false)
+    }
   }
 
   return (
@@ -46,10 +61,15 @@ export default function Start() {
             Belastingdienst via MijnOverheid — u hoeft geen papieren op te sturen. Log in met DigiD om
             te beginnen.
           </p>
-          <button className="hb-digid-btn" onClick={onLogin}>
+          <button className="hb-digid-btn" onClick={onLogin} disabled={busy}>
             <img src="/Logo_of_DigiD.png" alt="" width={36} height={36} />
-            <span className="label">Inloggen met DigiD</span>
+            <span className="label">{busy ? 'Bezig…' : 'Inloggen met DigiD'}</span>
           </button>
+          {failed && (
+            <p className="hb-status-denied" role="alert">
+              Het ophalen via MijnOverheid kan nu niet worden gestart. Probeer het later opnieuw.
+            </p>
+          )}
         </section>
 
       </main>

@@ -31,6 +31,19 @@ type Portal struct {
 	// can be looked up — its read API, or a contact page when it has none —
 	// recorded as the pseudonymisation's next logbook. Empty means unknown.
 	PseudonymsLogbook string
+	// Registrations is the DvTP admission register, which VerifyRequest
+	// checks a request to start a consent flow against. Nil refuses every
+	// such request: the checks fail closed.
+	Registrations Registrations
+	// KnownScopes are the data sets the portal can describe to a citizen.
+	// VerifyRequest refuses a request for any other.
+	KnownScopes []string
+	// Requests keeps the pushed requests that passed the checks. Nil
+	// accepts none.
+	Requests *RequestStore
+	// Codes keeps the codes of granted decisions until the provider
+	// exchanges them. Nil gives none: a grant then fails.
+	Codes *CodeStore
 
 	authorisations authorisationList
 }

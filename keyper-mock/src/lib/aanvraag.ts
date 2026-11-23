@@ -18,9 +18,10 @@ export type Aanvraag = {
   eigendomBevestigd?: string
   goedgekeurd?: string
   afgewezen?: string
-  // The signed DvTP consent token from MijnOverheid. IR keeps it for the
-  // recurring check at LVG; the identity in it is readable by LVG only.
-  consentToken?: string
+  // The DvTP consent from MijnOverheid. IR's backend keeps its token in the
+  // session (an HttpOnly cookie) for the recurring check at LVG; the browser
+  // only knows the consent's id.
+  consentId?: string
 }
 
 const KEY = 'keyper.aanvraag'
