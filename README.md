@@ -461,9 +461,16 @@ provider's side: `POST /api/consent/start` pushes the request and answers with
 the portal URL for the browser, and `POST /api/consent/complete` exchanges the
 code and keeps the consent token in a server-side session behind an HttpOnly
 cookie, which `POST /api/dvtp/query` uses when the body has no token (see
-[the service README](services/dienstverlener-backend/README.md)). The demo
-frontends do not use these routes yet: their flow still starts with the
-redirect described above.
+[the service README](services/dienstverlener-backend/README.md)).
+
+The toestemmingsportaal serves the citizen's side at `/toestemming/start`: it
+reads only `client_id` and `request_uri`, keeps the start URL in a five-minute
+cookie while the citizen logs in, shows the resolved request with "Geef
+toestemming" and "Weiger", and after a short confirmation goes to the return URL
+in the backend's answer. A refused reference, or a start cookie that expired
+during the login, shows an error page without a link or a redirect. The portal
+cannot be framed by another site. The demo frontends do not use these routes yet: their flow still
+starts with the redirect described above.
 
 ### EUDI wallet issuance
 
