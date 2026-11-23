@@ -82,11 +82,11 @@ Checked with Aspire CLI 17.0.0, Go 1.27.4 on macOS (arm64), 2026-11-20.
 
 | Gap (`TODO` tag) | What happens | Workaround | Upstream |
 | --- | --- | --- | --- |
-| `nil-args` | `AddExecutable(name, cmd, dir, nil)` leaves `args` out of the request; the server rejects it with "Missing required argument 'args'". | Pass an empty slice (`model.executable`). | Not filed yet |
-| `parameter-arg` | A `ParameterResource` handle added through `WithArgsCallback` runs, but breaks `aspire publish` with "Command line args must be strings". C# passes `parameter.Resource`, which the Go SDK has no counterpart for. | Wrap it: `RefExpr("%v", p)` publishes as `${NAME}` (`model.argValue`). | Not filed yet |
-| `string-args` | `WithArgs` takes `[]string`; C# takes `object[]` with parameters and expressions mixed in. | Mixed arguments go through `WithArgsCallback` (`model.containerArgs`, `model.executableArgs`). | Not filed yet (by design of the generated API, maybe) |
-| `typed-model` | No typed `builder.Resources`; `DistributedApplicationModel` returns untyped handles, so the AppHost cannot find a resource by name and call `WithParentRelationship`, `WithContainerRuntimeArgs` or `WithTags` on it. Resources an integration creates, such as the `<frontend>-installer` steps, cannot be reached at all, so they stay untagged. | `model.go` keeps its own index of the resources it adds (dashboard nesting, compose labels, the tunnel's waits). | Not filed yet |
-| `launch-profile` | `aspire run --launch-profile` is refused for Go AppHosts ("not supported for Go AppHosts"), and with an `https` profile present the CLI picks it over the first one. | One `http` profile only; the demo profile comes from `Gbo__Profiles` instead of the `core`/`dvtp`/`full` launch profiles. Docs changed from `--launch-profile X` to `Gbo__Profiles=X aspire run`. | Not filed yet |
+| `nil-args` | `AddExecutable(name, cmd, dir, nil)` leaves `args` out of the request; the server rejects it with "Missing required argument 'args'". | Pass an empty slice (`model.executable`). | [microsoft/aspire#22569](https://github.com/microsoft/aspire/issues/22569) |
+| `parameter-arg` | A `ParameterResource` handle added through `WithArgsCallback` runs, but breaks `aspire publish` with "Command line args must be strings". C# passes `parameter.Resource`, which the Go SDK has no counterpart for. | Wrap it: `RefExpr("%v", p)` publishes as `${NAME}` (`model.argValue`). | [microsoft/aspire#22570](https://github.com/microsoft/aspire/issues/22570) |
+| `string-args` | `WithArgs` takes `[]string`; C# takes `object[]` with parameters and expressions mixed in. | Mixed arguments go through `WithArgsCallback` (`model.containerArgs`, `model.executableArgs`). | Not filed: by design upstream; [microsoft/aspire#22570](https://github.com/microsoft/aspire/issues/22570) covers the part that breaks |
+| `typed-model` | No typed `builder.Resources`; `DistributedApplicationModel` returns untyped handles, so the AppHost cannot find a resource by name and call `WithParentRelationship`, `WithContainerRuntimeArgs` or `WithTags` on it. Resources an integration creates, such as the `<frontend>-installer` steps, cannot be reached at all, so they stay untagged. | `model.go` keeps its own index of the resources it adds (dashboard nesting, compose labels, the tunnel's waits). | [microsoft/aspire#22572](https://github.com/microsoft/aspire/issues/22572) |
+| `launch-profile` | `aspire run --launch-profile` is refused for Go AppHosts ("not supported for Go AppHosts"), and with an `https` profile present the CLI picks it over the first one. | One `http` profile only; the demo profile comes from `Gbo__Profiles` instead of the `core`/`dvtp`/`full` launch profiles. Docs changed from `--launch-profile X` to `Gbo__Profiles=X aspire run`. | [microsoft/aspire#22571](https://github.com/microsoft/aspire/issues/22571) |
 
 ## Workarounds removed
 
@@ -141,7 +141,7 @@ not with `aspire run`. `core` was started once; `full` was not.
 
 Checked against microsoft/aspire `main` (commit `f9da20e`, 2026-11-23): all
 five workaround gaps are still there, and no issue or pull request covers
-them. Issue drafts are written and not yet filed. Where each one sits in the
+them. Filed on 2026-11-23 as the issues below. Where each one sits in the
 Aspire source:
 
 | Gap | Kind | Where |

@@ -56,7 +56,7 @@ func (m *model) build() {
 	// Gbo__Profiles, comma separated (Gbo__Profiles=full aspire run). Without
 	// any, the dvtp demo runs, as `make demo` did; `core` runs the core only.
 	//
-	// TODO(go-apphost/launch-profile): the C# AppHost offered these as launch
+	// TODO(go-apphost/launch-profile, microsoft/aspire#22571): the C# AppHost offered these as launch
 	// profiles (aspire run --launch-profile full). The CLI refuses
 	// --launch-profile for Go AppHosts and picks an https profile over the
 	// first one, so aspire.config.json keeps a single http profile and the
