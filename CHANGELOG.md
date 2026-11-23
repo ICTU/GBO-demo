@@ -97,6 +97,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   are remembered for one more request lifetime, then they are unknown. Demo
   shortcut: codes live in memory, like pushed requests. The demo providers do
   not use these endpoints yet.
+- **Consent requests from the provider backends** (#427, #648):
+  `dienstverlener-backend` and `ir-backend` push a consent request to the
+  consent portal over FSC and exchange the code for the consent token, which
+  stays server-side. `POST /api/consent/start` (`service`, `scopes`, optional
+  `valid_until`) sends `POST /par` through the provider's Outway with the
+  configured `client_id` and `redirect_uri`, a random `state` and an S256 PKCE
+  challenge, but no `client_name` or `purpose` (the consent screen shows the
+  registered ones); it answers with `redirect_to`, the portal's start route
+  with only `client_id` and `request_uri`. `POST /api/consent/complete`
+  (`code` or `error`, with `state`) checks the state, exchanges a code at
+  `POST /token` with the PKCE verifier and answers with `outcome` `granted`,
+  `denied` (`access_denied`) or `failed`, never with the token. The token is
+  kept in an in-memory session behind an HttpOnly, `SameSite=Lax` cookie
+  (`Secure` when the redirect URI is https), and `POST /api/dvtp/query` uses
+  it when the body has no `consent_token`; a token in the body still works.
+  A granted consent gets a new session id, so an id known before the grant
+  never gets the token. Start, complete and a query that uses the session
+  must be `application/json` (`415`) and, when the browser sends
+  `Sec-Fetch-Site`, `same-origin` (`403`): other ports and sibling
+  subdomains are the same site for `SameSite=Lax`. A refusal caused by the
+  provider's own registration or configuration is `502`, one caused by the
+  request `400`. Calls to the Outway carry the trace context. Configured with
+  `CONSENT_CLIENT_ID` (a Peer ID, digits only), `CONSENT_REDIRECT_URI`,
+  `CONSENT_PORTAL_URL` and `CONSENT_AUTHORIZATION_URL`; without
+  `CONSENT_CLIENT_ID` the routes are off. Demo shortcuts: sessions live in
+  memory for 12 hours from their creation, a start does not extend them, and
+  their number is not capped; the browser sends each co-hosted provider's
+  session cookie to every demo frontend on the host. The demo frontends do
+  not use the routes yet.
 - **The demo runs on any host name**: the Vite frontends accept
   `GBO_PUBLIC_HOST` and `GBO_EXTRA_ALLOWED_HOSTS`, the reference QTSP follows
   `GBO_PUBLIC_HOST` (`QTSP_PUBLIC_URL` overrides it), and
