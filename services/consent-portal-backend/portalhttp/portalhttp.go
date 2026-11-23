@@ -41,8 +41,11 @@ func WithDemoSession(next http.Handler) http.Handler {
 	})
 }
 
+// writeJSON answers with v as JSON. Portal answers carry consent tokens,
+// codes in a return URL and personal data, so no cache keeps them.
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		slog.Error("json encode failed", "err", err.Error())
@@ -351,6 +354,9 @@ func NewMux(p *consent.Portal, hub *Hub) *http.ServeMux {
 		}
 	})
 	mux.HandleFunc("/portal/consents/", handleRevoke(p))
+	// A pushed request, by its reference: resolve it, then decide on it.
+	mux.HandleFunc("/portal/requests/{ref}", handleResolveRequest(p))
+	mux.HandleFunc("/portal/requests/{ref}/decision", handleDecision(p))
 	mux.HandleFunc("/portal/events", handleSSE(hub))
 
 	return mux

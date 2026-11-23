@@ -88,7 +88,7 @@ func TestEachOutcomeHasItsStatus(t *testing.T) {
 			valid, http.StatusBadGateway, false},
 	} {
 		t.Run(name, func(t *testing.T) {
-			resp, out := post(t, NewMux(tc.consumer), tc.body, nil)
+			resp, out := post(t, NewMux(tc.consumer, nil), tc.body, nil)
 			if resp.StatusCode != tc.status {
 				t.Fatalf("status = %d, want %d (%v)", resp.StatusCode, tc.status, out)
 			}
@@ -107,7 +107,7 @@ func TestARequestThatCannotBeAskedIsABadRequest(t *testing.T) {
 		"no vbo id":        queryBody(map[string]any{"consent_token": testToken("c-ir", "lvg:vbo:eigendom")}),
 	} {
 		t.Run(name, func(t *testing.T) {
-			resp, out := post(t, NewMux(c), body, nil)
+			resp, out := post(t, NewMux(c, nil), body, nil)
 			if resp.StatusCode != http.StatusBadRequest || out["error"] == "" {
 				t.Fatalf("status = %d, body = %v, want 400 with an error", resp.StatusCode, out)
 			}
@@ -121,7 +121,7 @@ func TestTheRequestReachesTheCore(t *testing.T) {
 	source := &fakeSource{answer: consumer.Answer{Allowed: true}}
 	c := &consumer.Consumer{Kind: consumer.Kinds["lvg"], Source: source}
 
-	resp, out := post(t, NewMux(c), queryBody(map[string]any{
+	resp, out := post(t, NewMux(c, nil), queryBody(map[string]any{
 		"consent_token": testToken("c-ir", "lvg:vbo:eigendom"),
 		"scope_id":      "lvg:vbo:eigendom",
 		"vbo_id":        "0632010000099412",
@@ -139,7 +139,7 @@ func TestTheRequestReachesTheCore(t *testing.T) {
 }
 
 func TestHealth(t *testing.T) {
-	srv := httptest.NewServer(NewMux(&consumer.Consumer{}))
+	srv := httptest.NewServer(NewMux(&consumer.Consumer{}, nil))
 	defer srv.Close()
 	resp, err := http.Get(srv.URL + "/health")
 	if err != nil {
@@ -169,7 +169,7 @@ func TestAQueryIsLoggedWhereTheSourceCanFindIt(t *testing.T) {
 		Logbook: &logbook.Logbook{Client: fake.Client(t, "dienstverlener-backend"), NextLogbooks: map[string]string{"bd": bdLogbook}},
 	}
 
-	resp, out := post(t, NewHandler(c, "dienstverlener-backend"),
+	resp, out := post(t, NewHandler(c, nil, "dienstverlener-backend"),
 		queryBody(map[string]any{"consent_token": testToken("c-1", "bd:ib:2025"), "belastingjaren": []int{2025}}), nil)
 
 	if resp.StatusCode != http.StatusOK || out["allowed"] != true {
