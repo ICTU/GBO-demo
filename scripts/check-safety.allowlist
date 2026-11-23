@@ -1,0 +1,29 @@
+# Known-good matches for scripts/check-safety.sh.
+#
+# Format: one entry per line, "<path glob>|<fixed text>". A finding is
+# dropped when its file path matches the glob (shell pattern, "*" also
+# matches "/") and its line contains the fixed text. Keep each entry as
+# narrow as possible and give the reason in a comment above it. Never add
+# a real OIN, name, hostname or secret here: remove the value instead.
+
+# ── Synthetic OINs with a real-looking prefix ────────────────────────────
+# Real OINs start with 0000000 plus a register digit, so the check flags
+# every such number. These are made-up test and demo values (sequences or
+# repeated digits); none is a registered organisation.
+*|00000001234567890000
+*|00000009876543210000
+*|00000005555555550000
+*|00000004000000004000
+*|00000003000000003000
+*|00000001000000000001
+
+# JSON-number parsing test: a 20-digit counting sequence, not an OIN.
+services/ftv-graphql-mapper/mapper_test.go|"12345678901234567890"
+
+# ── Test fixtures that look like secrets ─────────────────────────────────
+# A plain-text marker the test checks is NOT returned; not a credential.
+services/dev-portal-backend/main_test.go|const secret = "outside-policy-content"
+
+# Connection-string parsing test with a dummy password "pw" for a host that
+# only exists in the local Docker Compose network.
+services/dev-portal-backend/adl_test.go|postgres://adl_reader:pw@postgres-ftv:5432

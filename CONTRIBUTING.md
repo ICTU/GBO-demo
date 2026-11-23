@@ -29,6 +29,9 @@ Before opening a PR:
 
    # Frontend type-check
    cd <frontend> && npx tsc --noEmit
+
+   # Safety audit: no real OINs, internal hostnames or secrets (needs GNU grep)
+   make check-safety
    ```
 
 2. Keep the demo runnable end-to-end (`make demo` must still work).

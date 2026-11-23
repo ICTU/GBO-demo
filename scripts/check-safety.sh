@@ -1,182 +1,215 @@
 #!/usr/bin/env bash
-# Pre-publication safety audit for the demo tree.
+# Safety audit: content that must not be in this public repository.
 #
-# Runs before pushing the demo to a public repository. Grep-based checks
-# for content that must NOT reach the public internet:
+# Grep-based checks over every file tracked by git (untracked files,
+# git-ignored runtime config and submodules such as vendor/nl-wallet are
+# not scanned):
 #
-#   1. Real OIN's (only demo-numbers like 9999999... are allowed).
-#   2. Real names — non-public stakeholders, personal identifiers.
-#   3. Internal / VPN-only URLs (*.internal, *.local, tunnel-URLs).
-#   4. Secrets — API keys, tokens, private-key material (beyond demo self-signed).
-#   5. Mock-BSNs that might collide with real citizens.
+#   1. Real OINs (organisatie-identificatienummers); only demo numbers are
+#      allowed.
+#   2. Internal / VPN-only hostnames and personal tunnel URLs.
+#   3. Secrets: API keys, tokens, passwords, credentials in URLs, inline
+#      private keys or certificates, private-key files.
+#   4. (informational) .local hostnames, 9-digit numbers that could be a
+#      BSN (burgerservicenummer), first names, @-mentions.
 #
-# Output: findings grouped by category. Exit-1 if any HIGH-severity leak found.
-# LOW-severity findings are reported but non-blocking (judgement).
+# HIGH findings are blocking: the script exits 1. LOW findings are
+# informational: a count per category by default, the full list with -v.
 #
-# Usage:
-#   scripts/check-safety.sh           # audit 05-demo/
-#   scripts/check-safety.sh path/     # audit a custom path
+# Known-good matches are listed, each with a reason, in
+# scripts/check-safety.allowlist. Add an entry there only for a match that
+# is not a leak; never add a real value.
+#
+# Runs in CI on every change. Run it locally from anywhere in the repo:
+#
+#   make check-safety                  # or: scripts/check-safety.sh
+#   scripts/check-safety.sh -v         # also list the LOW findings
+#   scripts/check-safety.sh services/  # audit tracked files under a path
+#
+# Needs bash, git and GNU grep (for -P). On macOS: brew install grep, and
+# put its gnubin directory first on PATH.
+#
+# Exit codes: 0 no blocking findings, 1 blocking findings, 2 usage error.
 
 set -euo pipefail
 
-TARGET="${1:-05-demo/}"
+verbose=0
+if [[ "${1:-}" == "-v" ]]; then
+  verbose=1
+  shift
+fi
 
-if [[ ! -d "$TARGET" ]]; then
-  echo "check-safety: target directory not found: $TARGET" >&2
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+TARGET="${1:-.}"
+if [[ ! -e "$TARGET" ]]; then
+  echo "check-safety: path not found (relative to the repo root): $TARGET" >&2
   exit 2
 fi
 
-# Requires GNU grep for -P (lookaheads).
 if ! echo "" | grep -P '' > /dev/null 2>&1; then
   echo "check-safety: this script requires GNU grep (-P support)." >&2
-  echo "On macOS: brew install grep && alias grep=ggrep" >&2
+  echo "On macOS: brew install grep, and put its gnubin directory first on PATH." >&2
   exit 2
 fi
 
-INCLUDES=(
-  --include='*.go'
-  --include='*.rego'
-  --include='*.ts'
-  --include='*.tsx'
-  --include='*.js'
-  --include='*.md'
-  --include='*.yml'
-  --include='*.yaml'
-  --include='*.json'
-  --include='*.sh'
-  --include='Makefile*'
-  --include='Dockerfile*'
-  --include='*.env*'
-  --include='*.graphql'
-  --include='*.toml'
-)
+ALLOWLIST="scripts/check-safety.allowlist"
 
-EXCLUDES=(
-  --exclude='check-safety.sh'
-  --exclude='package-lock.json'
-  --exclude='go.sum'
-  --exclude='*.pem'
-  --exclude='*.crt'
-  # Runtime EUDI-config is git-ignored (carries inline demo signing
-  # keys) and never travels to the public repo. Its .example twin
-  # with placeholder values is scanned normally.
-  --exclude='issuance_server.toml'
-  --exclude-dir=node_modules
-  --exclude-dir=dist
-  --exclude-dir=build
-  --exclude-dir=vendor
-  --exclude-dir=.git
-)
+# Tracked regular files under TARGET, minus files that cannot leak in a
+# meaningful way or would only produce noise: this script and its allowlist
+# (they hold the patterns), lockfiles and checksum files (hashes).
+FILES=()
+while IFS= read -r -d '' f; do
+  [[ -f "$f" && ! -L "$f" ]] || continue
+  case "$f" in
+    scripts/check-safety.sh | "$ALLOWLIST") continue ;;
+    *package-lock.json | *go.sum | *.svg | *.png) continue ;;
+  esac
+  FILES+=("$f")
+done < <(git ls-files -z -- "$TARGET")
+
+if [[ ${#FILES[@]} -eq 0 ]]; then
+  echo "check-safety: no tracked files under $TARGET" >&2
+  exit 2
+fi
+
+# Allowlist: lines "<path glob>|<fixed text>". A finding is dropped when
+# its file matches the glob and its line contains the text.
+allow_globs=()
+allow_texts=()
+if [[ -f "$ALLOWLIST" ]]; then
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -z "${line// /}" || "$line" == \#* ]] && continue
+    allow_globs+=("${line%%|*}")
+    allow_texts+=("${line#*|}")
+  done < "$ALLOWLIST"
+fi
+
+# Reads grep -n output ("file:line:text") on stdin, prints the findings
+# that are not allowlisted.
+filter_allowed() {
+  local hit file text i allowed
+  while IFS= read -r hit; do
+    file="${hit%%:*}"
+    text="${hit#*:}"
+    text="${text#*:}"
+    allowed=0
+    for i in "${!allow_globs[@]}"; do
+      # shellcheck disable=SC2254 # the glob is meant to match as a pattern
+      case "$file" in
+        ${allow_globs[$i]})
+          if [[ "$text" == *"${allow_texts[$i]}"* ]]; then
+            allowed=1
+            break
+          fi
+          ;;
+      esac
+    done
+    [[ $allowed -eq 1 ]] || printf '%s\n' "$hit"
+  done
+}
+
+scan() {
+  # -I skips binary files; grep exits 1 when nothing matches.
+  printf '%s\0' "${FILES[@]}" | xargs -0 grep -IHPn -- "$1" 2>/dev/null | filter_allowed || true
+}
 
 # ── HIGH severity (blocking) ────────────────────────────────────────────
 
 high_hits=0
 high_report=""
 
-check_high() {
-  local label="$1"
-  local pattern="$2"
-  local matches
-  matches=$(grep -rPn "$pattern" "$TARGET" "${INCLUDES[@]}" "${EXCLUDES[@]}" 2>/dev/null || true)
-  if [[ -n "$matches" ]]; then
-    local count
-    count=$(printf '%s\n' "$matches" | wc -l | tr -d ' ')
-    high_hits=$((high_hits + count))
-    high_report+=$'\n=== HIGH: '"$label"$' ==='$'\n'"$matches"$'\n'
-  fi
+add_high() {
+  local label="$1" matches="$2" count
+  [[ -n "$matches" ]] || return 0
+  count=$(printf '%s\n' "$matches" | wc -l | tr -d ' ')
+  high_hits=$((high_hits + count))
+  high_report+=$'\n=== HIGH: '"$label"$' ===\n'"$matches"$'\n'
 }
 
-# Real OIN — 20 digits, and NOT a known demo-OIN.
-# Demo-OIN prefixes in this codebase: 99999999 (real-FSC demo orgs),
-# 0000000 (synthetic mocks with 7+ leading zeros).
-check_high "Non-demo OIN" '(?<![0-9])(?!99999999|0000000)[0-9]{20}(?![0-9])'
+check_high() {
+  add_high "$1" "$(scan "$2")"
+}
 
-# Corporate / VPN-only hostnames — must not ship.
-check_high "Corporate/VPN hostnames" '\b[a-zA-Z0-9-]+\.internal\b|\b[a-zA-Z0-9-]+\.corp\b'
+# OIN: 20 digits. Real OINs start with 0000000 followed by 1-9 (the
+# register prefix), so those are not exempt. Exempt: the demo range
+# 99999999..., and 00000000... (no real OIN starts with eight zeros).
+# Synthetic numbers with a real-looking prefix are listed in the allowlist.
+check_high "Non-demo OIN" '(?<![0-9])(?!99999999|00000000)[0-9]{20}(?![0-9])'
 
-# Cloudflared / ngrok tunnels (personal dev-envs).
+# Corporate / VPN-only hostnames. Only in host position (after "://",
+# "@", a quote, "=" or "key: ", or followed by a port), so code such as
+# f.internal.URL does not match. host.docker.internal is Docker's public alias for the host.
+check_high "Corporate/VPN hostnames" '(?:(?:://|@|["'\''`=]|:\s+)[a-zA-Z0-9.-]*|\b[a-zA-Z0-9.-]+(?=\.(?:internal|corp):[0-9]))(?<!host\.docker)\.(?:internal|corp)\b(?![\w.-])'
+
+# Cloudflared / ngrok tunnels (personal development environments).
 check_high "Tunnel URLs" 'https?://[a-z0-9-]+\.trycloudflare\.com|https?://[a-z0-9-]+\.ngrok\.io|https?://[a-z0-9-]+\.ngrok-free\.app'
 
-# Bearer-style secrets — API keys / tokens embedded in code (not test-fixture-signed JWTs).
-# Heuristic: 20+ char alphanumeric strings with a "key"/"secret"/"token" identifier.
+# API keys / tokens / passwords assigned a literal of 20+ characters.
 check_high "Hardcoded secret material" '(api[_-]?key|secret|password|passwd|access[_-]?token)\s*[:=]\s*["'\''][A-Za-z0-9_\-+/]{20,}["'\'']'
 
-# Credentials embedded in connection URLs (postgres://user:pass@host, https://user:pass@host).
-# Skip matches where the password part is an env-var interpolation (${VAR} or ${VAR:-default})
-# — those are the safe form; the literal password lives in .env (git-ignored).
-check_high "URL with embedded credentials" '(postgres|postgresql|mysql|mongodb|https?|redis)://[^:/\s"'\''$]+:(?!\$\{)[^@/\s"'\'']+@'
+# Credentials in connection URLs (postgres://user:pass@host). Skipped: an
+# environment-variable password (${VAR}) and a <placeholder> password.
+check_high "URL with embedded credentials" '(postgres|postgresql|mysql|mongodb|https?|redis)://[^:/\s"'\''$]+:(?!\$\{|<)[^@/\s"'\'']+@'
 
-# Inline private-key or certificate material in TOML / JSON / YAML config.
-# Nl-wallet-style embedded keys look like: private_key = "MIGHAgEAM..." with
-# 40+ base64 chars. Placeholder text (REPLACE_WITH_...) is allowed.
+# Inline private-key or certificate material in TOML / JSON / YAML config,
+# such as private_key = "MIGHAgEAM..." with 40+ base64 characters.
+# Placeholder text (REPLACE_WITH_...) is allowed.
 check_high "Inline private_key / certificate in config" '(private_key|certificate)\s*[:=]\s*"(?!REPLACE_)[A-Za-z0-9+/=_-]{40,}"'
 
-# Private-key files outside known demo-PKI locations. Self-signed demo
-# material under fsc-infra/**/pki/ and top-level certs/ is fine.
-# Implemented via find, not grep.
-strays=$(find "$TARGET" -type f \( -name '*.key' -o -name '*key.pem' \) \
-  ! -path '*/pki/*' \
-  ! -path '*/certs/*' \
-  ! -path '*/node_modules/*' 2>/dev/null || true)
-if [[ -n "$strays" ]]; then
-  count=$(printf '%s\n' "$strays" | wc -l | tr -d ' ')
-  high_hits=$((high_hits + count))
-  high_report+=$'\n=== HIGH: Private-key material outside fsc-infra/orgs/**/pki/ ==='$'\n'"$strays"$'\n'
-fi
+# A PEM private-key block: the BEGIN line on its own, as in a key file.
+# A BEGIN marker inside a string (a test that checks for it) does not match.
+check_high "PEM private key" '^\s*-----BEGIN ([A-Z0-9]+ )*PRIVATE KEY-----\s*$'
 
-# ── LOW severity (reported, non-blocking) ───────────────────────────────
+# Private-key files outside the demo PKI directories (pki/, certs/).
+strays=$(printf '%s\n' "${FILES[@]}" |
+  grep -E '\.(key|p12|pfx|jks)$|key\.pem$' |
+  grep -vE '(^|/)(pki|certs)/' || true)
+add_high "Private-key file outside a pki/ or certs/ directory" "$strays"
+
+# ── LOW severity (informational) ────────────────────────────────────────
 
 low_report=""
+low_summary=""
 
 check_low() {
-  local label="$1"
-  local pattern="$2"
-  local matches
-  matches=$(grep -rPn "$pattern" "$TARGET" "${INCLUDES[@]}" "${EXCLUDES[@]}" 2>/dev/null || true)
-  if [[ -n "$matches" ]]; then
-    low_report+=$'\n--- LOW: '"$label"$' ---'$'\n'"$matches"$'\n'
-  fi
+  local label="$1" matches count
+  matches=$(scan "$2")
+  [[ -n "$matches" ]] || return 0
+  count=$(printf '%s\n' "$matches" | wc -l | tr -d ' ')
+  low_summary+="LOW:  $count  $label"$'\n'
+  low_report+=$'\n--- LOW: '"$label"$' ---\n'"$matches"$'\n'
 }
 
-# .local hostnames — usually test fixtures; flag for review.
 check_low ".local hostnames (test fixtures likely)" '\b[a-zA-Z0-9-]+\.local\b'
-
-# BSN-shaped 9-digit sequences — most will be mock-BSNs but worth listing so
-# you can eyeball whether any real BSN slipped in.
-check_low "9-digit numbers (potential BSNs — verify all are mock)" '(?<![0-9])[0-9]{9}(?![0-9])'
-
-# Dutch personal names in comments/strings — heuristic list, expand as needed.
+check_low "9-digit numbers (potential BSNs, verify all are mock)" '(?<![0-9])[0-9]{9}(?![0-9])'
 check_low "Common Dutch first names in text" '\b(Jan|Piet|Kees|Marieke|Sanne|Wouter|Anouk|Bart|Femke|Sven|Lars|Jasper|Rob|Hans|Karin|Linda|Maud)\b'
 
-# GitHub @-mentions of collaborators inside markdown / code-comments.
-# Restricted to markdown to avoid noise from npm scoped packages (@types/x, @vitejs/x).
-low_matches=$(grep -rPn '@[a-zA-Z][a-zA-Z0-9_-]{2,}\b' "$TARGET" --include='*.md' "${EXCLUDES[@]}" 2>/dev/null || true)
-if [[ -n "$low_matches" ]]; then
-  low_report+=$'\n--- LOW: GitHub @-mentions in markdown (verify all are safe to publish) ---'$'\n'"$low_matches"$'\n'
+# GitHub @-mentions, in markdown only (code has npm scopes like @types/x).
+mentions=$(printf '%s\n' "${FILES[@]}" | grep -E '\.md$' | tr '\n' '\0' |
+  xargs -0 -r grep -IHPn '(?<![\w.])@[a-zA-Z][a-zA-Z0-9_-]{2,}\b' 2>/dev/null | filter_allowed || true)
+if [[ -n "$mentions" ]]; then
+  low_summary+="LOW:  $(printf '%s\n' "$mentions" | wc -l | tr -d ' ')  GitHub @-mentions in markdown"$'\n'
+  low_report+=$'\n--- LOW: GitHub @-mentions in markdown ---\n'"$mentions"$'\n'
 fi
 
 # ── Report ──────────────────────────────────────────────────────────────
 
-if [[ -n "$high_report" ]]; then
-  printf '%s' "$high_report"
-fi
-if [[ -n "$low_report" ]]; then
+printf '%s' "$high_report"
+if [[ $verbose -eq 1 ]]; then
   printf '%s' "$low_report"
 fi
 
 echo ""
-echo "─────────────────────────────────────────────────────────"
+echo "check-safety: scanned ${#FILES[@]} tracked files under $TARGET"
+printf '%s' "$low_summary"
+if [[ -n "$low_summary" && $verbose -eq 0 ]]; then
+  echo "      (informational; run with -v to list them)"
+fi
 if [[ $high_hits -gt 0 ]]; then
-  echo "HIGH: $high_hits blocking finding(s) — must resolve before publication."
-fi
-if [[ -n "$low_report" ]]; then
-  echo "LOW:  findings above are informational"
-fi
-if [[ $high_hits -eq 0 && -z "$low_report" ]]; then
-  echo "OK: no safety-audit findings in $TARGET"
-fi
-echo "─────────────────────────────────────────────────────────"
-
-if [[ $high_hits -gt 0 ]]; then
+  echo "HIGH: $high_hits blocking finding(s). Remove the value, or, if it is"
+  echo "      not a leak, add it with a reason to $ALLOWLIST."
   exit 1
 fi
+echo "OK: no blocking findings."
