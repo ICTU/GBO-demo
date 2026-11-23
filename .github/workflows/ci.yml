@@ -251,7 +251,7 @@ jobs:
       - name: bundled schemas match the running sources
         run: ./scripts/check-schema-drift.sh
 
-  # Not gated by the plan: any file can introduce a leak.
+  # Runs on every change, unlike the path-filtered jobs: a leak can be in any file.
   safety:
     name: Safety audit — no real OINs, internal hosts or secrets
     runs-on: ubuntu-latest
