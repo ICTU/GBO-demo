@@ -44,17 +44,11 @@ ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
 
 TARGET="${1:-.}"
-if [[ ! -e "$TARGET" ]]; then
-  echo "check-safety: path not found (relative to the repo root): $TARGET" >&2
-  exit 2
-fi
 
 # git grep searches only files tracked by git and skips submodules.
 # -P (Perl regular expressions) needs a git built with PCRE, as on Linux
 # distributions, Homebrew and CI runners; stop if this one lacks it.
-pcre_status=0
-git grep -qP -e '(?<!x)y' -- scripts/check-safety.sh 2>/dev/null || pcre_status=$?
-if [[ $pcre_status -gt 1 ]]; then
+if ! git grep -qP -e '' -- scripts/check-safety.sh 2>/dev/null; then
   echo "check-safety: this git cannot search with -P (built without PCRE)." >&2
   exit 2
 fi
@@ -64,8 +58,8 @@ fi
 EXCLUDES=(':!scripts/check-safety.sh' ':!*package-lock.json' ':!*go.sum' ':!*.svg' ':!*.png')
 
 # Count the files that will be scanned (every file with at least one
-# line); none means a path without tracked files.
-file_count=$( (git grep -l -e '' -- "$TARGET" "${EXCLUDES[@]}" || true) | wc -l | tr -d ' ')
+# line); none means a mistyped path or one without tracked files.
+file_count=$(git grep -l -e '' -- "$TARGET" "${EXCLUDES[@]}" | grep -c '' || true)
 if [[ $file_count -eq 0 ]]; then
   echo "check-safety: no tracked files under $TARGET" >&2
   exit 2
@@ -80,14 +74,13 @@ scan() {
 # ── HIGH severity (blocking) ────────────────────────────────────────────
 
 high_hits=0
-high_report=""
 
+# Print the findings of one check and count them.
 add_high() {
-  local label="$1" matches="$2" count
+  local label="$1" matches="$2"
   [[ -n "$matches" ]] || return 0
-  count=$(printf '%s\n' "$matches" | wc -l | tr -d ' ')
-  high_hits=$((high_hits + count))
-  high_report+=$'\n=== HIGH: '"$label"$' ===\n'"$matches"$'\n'
+  high_hits=$((high_hits + $(grep -c '' <<< "$matches")))
+  printf '\n=== HIGH: %s ===\n%s\n' "$label" "$matches"
 }
 
 check_high() {
@@ -103,17 +96,17 @@ check_high "Non-demo OIN" '(?<![0-9])(?!99999999|00000000)[0-9]{20}(?![0-9])'
 # Corporate / VPN-only hostnames. Only in host position (after "://",
 # "@", a quote, "=" or "key: ", or followed by a port), so code such as
 # f.internal.URL does not match. host.docker.internal is Docker's public alias for the host.
-check_high "Corporate/VPN hostnames" '(?:(?:://|@|["'\''`=]|:\s+)[a-zA-Z0-9.-]*|\b[a-zA-Z0-9.-]+(?=\.(?:internal|corp):[0-9]))(?<!host\.docker)\.(?:internal|corp)\b(?![\w.-])'
+check_high "Corporate/VPN hostnames" '(?:(?:://|@|["\x27`=]|:\s+)[a-zA-Z0-9.-]*|\b[a-zA-Z0-9.-]+(?=\.(?:internal|corp):[0-9]))(?<!host\.docker)\.(?:internal|corp)\b(?![\w.-])'
 
 # Cloudflared / ngrok tunnels (personal development environments).
 check_high "Tunnel URLs" 'https?://[a-z0-9-]+\.trycloudflare\.com|https?://[a-z0-9-]+\.ngrok\.io|https?://[a-z0-9-]+\.ngrok-free\.app'
 
 # API keys / tokens / passwords assigned a literal of 20+ characters.
-check_high "Hardcoded secret material" '(api[_-]?key|secret|password|passwd|access[_-]?token)\s*[:=]\s*["'\''][A-Za-z0-9_\-+/]{20,}["'\'']'
+check_high "Hardcoded secret material" '(api[_-]?key|secret|password|passwd|access[_-]?token)\s*[:=]\s*["\x27][A-Za-z0-9_\-+/]{20,}["\x27]'
 
 # Credentials in connection URLs (postgres://user:pass@host). Skipped: an
 # environment-variable password (${VAR}) and a <placeholder> password.
-check_high "URL with embedded credentials" '(postgres|postgresql|mysql|mongodb|https?|redis)://[^:/\s"'\''$]+:(?!\$\{|<)[^@/\s"'\'']+@'
+check_high "URL with embedded credentials" '(postgres|postgresql|mysql|mongodb|https?|redis)://[^:/\s"\x27$]+:(?!\$\{|<)[^@/\s"\x27]+@'
 
 # Inline private-key or certificate material in TOML / JSON / YAML config,
 # such as private_key = "MIGHAgEAM..." with 40+ base64 characters.
@@ -132,16 +125,20 @@ add_high "Private-key file outside a pki/ or certs/ directory" "$strays"
 
 # ── LOW severity (informational) ────────────────────────────────────────
 
-low_report=""
 low_summary=""
 
-check_low() {
-  local label="$1" matches count
-  matches=$(scan "$2")
+# Count the findings of one check for the summary; list them with -v.
+add_low() {
+  local label="$1" matches="$2"
   [[ -n "$matches" ]] || return 0
-  count=$(printf '%s\n' "$matches" | wc -l | tr -d ' ')
-  low_summary+="LOW:  $count  $label"$'\n'
-  low_report+=$'\n--- LOW: '"$label"$' ---\n'"$matches"$'\n'
+  low_summary+="LOW:  $(grep -c '' <<< "$matches")  $label"$'\n'
+  if [[ $verbose -eq 1 ]]; then
+    printf '\n--- LOW: %s ---\n%s\n' "$label" "$matches"
+  fi
+}
+
+check_low() {
+  add_low "$1" "$(scan "$2")"
 }
 
 check_low ".local hostnames (test fixtures likely)" '\b[a-zA-Z0-9-]+\.local\b'
@@ -149,18 +146,10 @@ check_low "9-digit numbers (potential BSNs, verify all are mock)" '(?<![0-9])[0-
 check_low "Common Dutch first names in text" '\b(Jan|Piet|Kees|Marieke|Sanne|Wouter|Anouk|Bart|Femke|Sven|Lars|Jasper|Rob|Hans|Karin|Linda|Maud)\b'
 
 # GitHub @-mentions, in markdown only (code has npm scopes like @types/x).
-mentions=$(scan '(?<![\w.])@[a-zA-Z][a-zA-Z0-9_-]{2,}\b' | grep -E '^[^:]*\.md:' || true)
-if [[ -n "$mentions" ]]; then
-  low_summary+="LOW:  $(printf '%s\n' "$mentions" | wc -l | tr -d ' ')  GitHub @-mentions in markdown"$'\n'
-  low_report+=$'\n--- LOW: GitHub @-mentions in markdown ---\n'"$mentions"$'\n'
-fi
+add_low "GitHub @-mentions in markdown" \
+  "$(scan '(?<![\w.])@[a-zA-Z][a-zA-Z0-9_-]{2,}\b' | grep -E '^[^:]*\.md:' || true)"
 
 # ── Report ──────────────────────────────────────────────────────────────
-
-printf '%s' "$high_report"
-if [[ $verbose -eq 1 ]]; then
-  printf '%s' "$low_report"
-fi
 
 echo ""
 echo "check-safety: scanned $file_count tracked files under $TARGET"
