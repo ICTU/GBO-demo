@@ -30,7 +30,7 @@ Before opening a PR:
    # Frontend type-check
    cd <frontend> && npx tsc --noEmit
 
-   # Safety audit: no real OINs, internal hostnames or secrets (needs GNU grep).
+   # Safety audit: no real OINs, internal hostnames or secrets (needs git with PCRE support for `git grep -P`).
    # There is no allowlist: use demo OINs (99999999...) and values that do
    # not look like secrets in tests; remove a real value instead.
    make check-safety

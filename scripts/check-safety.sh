@@ -27,8 +27,8 @@
 #   scripts/check-safety.sh -v         # also list the LOW findings
 #   scripts/check-safety.sh services/  # audit tracked files under a path
 #
-# Needs bash, git and GNU grep (for -P). On macOS: brew install grep, and
-# put its gnubin directory first on PATH.
+# Needs bash and a git that supports git grep -P (built with PCRE), as
+# Linux distributions and Homebrew ship it; Apple's own git may lack it.
 #
 # Exit codes: 0 no blocking findings, 1 blocking findings, 2 usage error.
 
@@ -49,33 +49,32 @@ if [[ ! -e "$TARGET" ]]; then
   exit 2
 fi
 
-if ! echo "" | grep -P '' > /dev/null 2>&1; then
-  echo "check-safety: this script requires GNU grep (-P support)." >&2
-  echo "On macOS: brew install grep, and put its gnubin directory first on PATH." >&2
+# git grep searches only files tracked by git and skips submodules.
+# -P (Perl regular expressions) needs a git built with PCRE, as on Linux
+# distributions, Homebrew and CI runners; stop if this one lacks it.
+pcre_status=0
+git grep -qP -e '(?<!x)y' -- scripts/check-safety.sh 2>/dev/null || pcre_status=$?
+if [[ $pcre_status -gt 1 ]]; then
+  echo "check-safety: this git cannot search with -P (built without PCRE)." >&2
   exit 2
 fi
 
-# Tracked regular files under TARGET, minus files that cannot leak in a
-# meaningful way or would only produce noise: this script (it holds the
-# patterns), lockfiles, checksum files (hashes) and images.
-FILES=()
-while IFS= read -r -d '' f; do
-  [[ -f "$f" && ! -L "$f" ]] || continue
-  case "$f" in
-    scripts/check-safety.sh) continue ;;
-    *package-lock.json | *go.sum | *.svg | *.png) continue ;;
-  esac
-  FILES+=("$f")
-done < <(git ls-files -z -- "$TARGET")
+# Files that are not worth scanning: this script holds the patterns,
+# lockfiles and checksum files hold only hashes, images are not text.
+EXCLUDES=(':!scripts/check-safety.sh' ':!*package-lock.json' ':!*go.sum' ':!*.svg' ':!*.png')
 
-if [[ ${#FILES[@]} -eq 0 ]]; then
+# Count the files that will be scanned (every file with at least one
+# line); none means a path without tracked files.
+file_count=$( (git grep -l -e '' -- "$TARGET" "${EXCLUDES[@]}" || true) | wc -l | tr -d ' ')
+if [[ $file_count -eq 0 ]]; then
   echo "check-safety: no tracked files under $TARGET" >&2
   exit 2
 fi
 
+# Print every line that matches a pattern, as "file:line:text".
+# -I skips binary files; git grep exits 1 when nothing matches.
 scan() {
-  # -I skips binary files; grep exits 1 when nothing matches.
-  printf '%s\0' "${FILES[@]}" | xargs -0 grep -IHPn -- "$1" 2>/dev/null || true
+  git grep -IPn -e "$1" -- "$TARGET" "${EXCLUDES[@]}" || true
 }
 
 # ── HIGH severity (blocking) ────────────────────────────────────────────
@@ -126,7 +125,7 @@ check_high "Inline private_key / certificate in config" '(private_key|certificat
 check_high "PEM private key" '^\s*-----BEGIN ([A-Z0-9]+ )*PRIVATE KEY-----\s*$'
 
 # Private-key files outside the demo PKI directories (pki/, certs/).
-strays=$(printf '%s\n' "${FILES[@]}" |
+strays=$(git ls-files -- "$TARGET" |
   grep -E '\.(key|p12|pfx|jks)$|key\.pem$' |
   grep -vE '(^|/)(pki|certs)/' || true)
 add_high "Private-key file outside a pki/ or certs/ directory" "$strays"
@@ -150,8 +149,7 @@ check_low "9-digit numbers (potential BSNs, verify all are mock)" '(?<![0-9])[0-
 check_low "Common Dutch first names in text" '\b(Jan|Piet|Kees|Marieke|Sanne|Wouter|Anouk|Bart|Femke|Sven|Lars|Jasper|Rob|Hans|Karin|Linda|Maud)\b'
 
 # GitHub @-mentions, in markdown only (code has npm scopes like @types/x).
-mentions=$(printf '%s\n' "${FILES[@]}" | grep -E '\.md$' | tr '\n' '\0' |
-  xargs -0 -r grep -IHPn '(?<![\w.])@[a-zA-Z][a-zA-Z0-9_-]{2,}\b' 2>/dev/null || true)
+mentions=$(scan '(?<![\w.])@[a-zA-Z][a-zA-Z0-9_-]{2,}\b' | grep -E '^[^:]*\.md:' || true)
 if [[ -n "$mentions" ]]; then
   low_summary+="LOW:  $(printf '%s\n' "$mentions" | wc -l | tr -d ' ')  GitHub @-mentions in markdown"$'\n'
   low_report+=$'\n--- LOW: GitHub @-mentions in markdown ---\n'"$mentions"$'\n'
@@ -165,7 +163,7 @@ if [[ $verbose -eq 1 ]]; then
 fi
 
 echo ""
-echo "check-safety: scanned ${#FILES[@]} tracked files under $TARGET"
+echo "check-safety: scanned $file_count tracked files under $TARGET"
 printf '%s' "$low_summary"
 if [[ -n "$low_summary" && $verbose -eq 0 ]]; then
   echo "      (informational; run with -v to list them)"
