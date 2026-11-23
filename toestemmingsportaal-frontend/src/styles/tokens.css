@@ -364,6 +364,22 @@ a:focus-visible, button:focus-visible, input:focus-visible {
 .timeline-label { font-weight: 700; color: var(--ink-900); font-size: 14px; }
 .timeline-date { font-size: 13px; color: var(--mute); margin-top: 2px; }
 
+/* Gebruik: when the consent was used */
+.usage-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; }
+.usage-item {
+  display: flex;
+  gap: 18px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--rule-soft);
+  font-size: 14px;
+  flex-wrap: wrap;
+}
+.usage-item:last-child { border-bottom: 0; }
+.usage-date { color: var(--mute); min-width: 150px; white-space: nowrap; }
+.usage-body { color: var(--ink-900); flex: 1; min-width: 0; }
+.usage-afnemer, .usage-source { font-weight: 700; }
+.usage-notice { margin-bottom: 10px; }
+
 .detail-actions {
   margin-top: 20px;
   display: flex;

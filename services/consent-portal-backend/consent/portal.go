@@ -305,6 +305,28 @@ func (p *Portal) RevokeConsent(ctx context.Context, citizen BSN, consentID strin
 	return nil
 }
 
+// ConsentUses returns when the caller's consent was used. A consent of
+// another citizen is reported as not found, not as forbidden: whether a
+// consent ID exists is not the caller's to learn (#602).
+func (p *Portal) ConsentUses(ctx context.Context, citizen BSN, consentID string) (Usage, error) {
+	subjectRef, err := p.subjectRefFor(ctx, citizen, "toestemming-gebruik-inzien")
+	if err != nil {
+		return Usage{}, err
+	}
+	rec, err := p.Consents.Get(ctx, consentID)
+	if err != nil {
+		return Usage{}, err // already wraps ErrNotFound on 404
+	}
+	if rec.SubjectRef != subjectRef {
+		return Usage{}, ErrNotFound
+	}
+	usage, err := p.Consents.Uses(ctx, consentID)
+	if err != nil {
+		return Usage{}, fmt.Errorf("uses: %w", err)
+	}
+	return usage, nil
+}
+
 // polymorphicFor returns the polymorphic values the portal keeps for this
 // citizen. A citizen without any is activated here — once, at their first
 // consent — and what BSNk returned is kept for every consent after it.

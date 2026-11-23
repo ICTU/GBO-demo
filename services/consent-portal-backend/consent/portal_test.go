@@ -117,6 +117,8 @@ type memStore struct {
 	seq         int
 	revoked     []string
 	polymorphic map[SubjectRef]Polymorphic
+	uses        map[string]Usage
+	usesErr     error
 }
 
 func newMemStore() *memStore {
@@ -140,6 +142,18 @@ func (m *memStore) KeepPolymorphic(_ context.Context, subject SubjectRef, values
 		m.polymorphic[subject] = values
 	}
 	return nil
+}
+
+func (m *memStore) Uses(_ context.Context, consentID string) (Usage, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.usesErr != nil {
+		return Usage{}, m.usesErr
+	}
+	if usage, ok := m.uses[consentID]; ok {
+		return usage, nil
+	}
+	return Usage{Uses: []Use{}, Notices: []Notice{}}, nil
 }
 
 func (m *memStore) Create(_ context.Context, d Draft) (Record, error) {

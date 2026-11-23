@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -317,6 +318,50 @@ func handleRevoke(p *consent.Portal) http.HandlerFunc {
 		})
 }
 
+// handleConsentUses serves GET /portal/consents/{id}/uses: when the caller's
+// consent was used. Another citizen's consent answers 404 (the core says
+// ErrNotFound), and an index the register cannot reach is a notice in a 200,
+// not an error: the page shows it instead of an empty list.
+func handleConsentUses(p *consent.Portal) http.HandlerFunc {
+	return citizen(http.MethodGet, "consent_uses",
+		func(ctx context.Context, citizen consent.BSN, r *http.Request) (any, error) {
+			consentID, _ := strings.CutSuffix(strings.TrimPrefix(r.URL.Path, "/portal/consents/"), "/uses")
+			if consentID == "" || strings.Contains(consentID, "/") {
+				return nil, &httpError{Status: http.StatusBadRequest, Body: map[string]any{"error": "consent_id missing"}}
+			}
+			usage, err := p.ConsentUses(ctx, citizen, consentID)
+			if err != nil {
+				return nil, err
+			}
+			type useJSON struct {
+				UsedAt             string `json:"used_at"`
+				ServiceProviderOIN string `json:"service_provider_oin"`
+				ServiceProvider    string `json:"service_provider"`
+				Source             string `json:"source"`
+			}
+			type noticeJSON struct {
+				Kind   string `json:"kind"`
+				Source string `json:"source,omitempty"`
+			}
+			out := struct {
+				Uses    []useJSON    `json:"uses"`
+				Notices []noticeJSON `json:"notices"`
+			}{Uses: []useJSON{}, Notices: []noticeJSON{}}
+			for _, use := range usage.Uses {
+				out.Uses = append(out.Uses, useJSON{
+					UsedAt:             use.UsedAt.UTC().Format(time.RFC3339),
+					ServiceProviderOIN: use.ServiceProviderOIN,
+					ServiceProvider:    use.ServiceProvider,
+					Source:             use.Source,
+				})
+			}
+			for _, notice := range usage.Notices {
+				out.Notices = append(out.Notices, noticeJSON(notice))
+			}
+			return out, nil
+		})
+}
+
 // ── Routing ───────────────────────────────────────────────────────────────
 
 // NewMux builds the routing tree over an already-wired core. Keeping this
@@ -353,7 +398,17 @@ func NewMux(p *consent.Portal, hub *Hub) *http.ServeMux {
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		}
 	})
-	mux.HandleFunc("/portal/consents/", handleRevoke(p))
+	// /portal/consents/{id}/uses is when the consent was used; any other
+	// path under /portal/consents/ is a revocation.
+	usesH := handleConsentUses(p)
+	revokeH := handleRevoke(p)
+	mux.HandleFunc("/portal/consents/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/uses") {
+			usesH(w, r)
+			return
+		}
+		revokeH(w, r)
+	})
 	// A pushed request, by its reference: resolve it, then decide on it.
 	mux.HandleFunc("/portal/requests/{ref}", handleResolveRequest(p))
 	mux.HandleFunc("/portal/requests/{ref}/decision", handleDecision(p))

@@ -84,6 +84,10 @@ func (f *fakeRegister) Get(context.Context, string) (consent.Record, error) {
 
 func (f *fakeRegister) Revoke(context.Context, string) error { return consent.ErrNotFound }
 
+func (f *fakeRegister) Uses(context.Context, string) (consent.Usage, error) {
+	return consent.Usage{}, nil
+}
+
 func (f *fakeRegister) PolymorphicFor(context.Context, consent.SubjectRef) (consent.Polymorphic, error) {
 	return consent.Polymorphic{}, consent.ErrNotFound
 }
