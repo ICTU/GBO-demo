@@ -428,6 +428,9 @@ Vite dev server, where Compose derives it from `DIENSTVERLENER_PUBLIC_URL` and
 `KEYPER_PUBLIC_URL`.
 Without either, the portal only accepts `http://localhost:9001` (a demo
 shortcut), so a deployment must set `ALLOWED_RETURN_ORIGINS`.
+The DvTP onboarding register also reads `DIENSTVERLENER_PUBLIC_URL` and
+`KEYPER_PUBLIC_URL` to build the registered return locations of both demo
+providers, so set both when you run on your own host.
 
 ### EUDI wallet issuance
 

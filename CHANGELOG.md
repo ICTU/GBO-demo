@@ -7,6 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Added
+- **Service providers in the DvTP onboarding register** (#427, #648): an
+  optional `service_providers` block registers, per Peer ID, the services a
+  provider asks consent for (each with its purpose) and its return locations,
+  with `${VAR}` expansion in the return locations. The new endpoint
+  `GET /internal/consent-portal/participants/{peer_id}` returns a
+  participant's name, active state, services and return locations. The demo
+  configuration registers both demo providers; Compose passes
+  `DIENSTVERLENER_PUBLIC_URL` and `KEYPER_PUBLIC_URL` to the register. A
+  deployment that uses the image's built-in demo configuration must set both.
 - **The demo runs on any host name**: the Vite frontends accept
   `GBO_PUBLIC_HOST` and `GBO_EXTRA_ALLOWED_HOSTS`, the reference QTSP follows
   `GBO_PUBLIC_HOST` (`QTSP_PUBLIC_URL` overrides it), and
