@@ -177,5 +177,8 @@ CI) fails when:
   listed in `scripts/intent-layer-exceptions.txt`, or that list names a
   directory that has a node or no longer exists.
 
+The check looks at the files git tracks or would add; files ignored by
+`.gitignore` are left alone.
+
 Size is only a warning: a node over 10% of the code below it is reported, not
 failed. The root node has no size warning.

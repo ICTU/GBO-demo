@@ -20,7 +20,6 @@ services/brp-graphql-server
 services/bsnk-mock
 services/consent-portal-backend
 services/consent-register
-services/data-usage-index
 services/dev-portal-backend
 services/dienstverlener-backend
 services/dvtp-onboarding-register
@@ -30,8 +29,6 @@ services/eudi-issuance-server
 services/eudi-wallet-verifier
 services/ftv-graphql-mapper
 services/graphql-server
-services/ldv-client
-services/ldv-logboek
 services/lvg-graphql-server
 services/oid4vc-kit
 services/openftv-pdp
