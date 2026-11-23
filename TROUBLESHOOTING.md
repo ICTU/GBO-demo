@@ -54,9 +54,10 @@ stops with a message when it is too old, naming a newer Node.js it found
 
 ## Docker resource limits
 
-The `dvtp` profile runs about 60 long-running containers plus run-once steps;
-`full` runs more. The containers need about 1 GB of RAM for `dvtp`; give
-Docker at least 8 GB for `full`, and at least 4 cores.
+The `dvtp` profile runs about 60 long-running containers, most of them FSC
+infrastructure, plus run-once steps; `full` runs more. The containers need
+about 1 GB of RAM for `dvtp`; give Docker at least 8 GB for `full`, and at
+least 4 cores.
 
 Symptoms of insufficient RAM: containers crash at random, and the dashboard
 shows them exiting with code 137 (OOM kills).
@@ -199,6 +200,13 @@ onboard the wallet or issue a PID. Use a v0.5.0-compatible test wallet with a
 trusted `urn:eudi:pid:nl:1` credential. Mock BSN `999991772` is the persona that
 has data for all three offers. Also verify that the wallet trusts the issuer
 and reader CA certificates installed under `.local/secrets/development-ca`.
+
+**`aspire/scripts/provision.sh publish-trust-lists` fails with `requires its own GBO root`**: the
+issuer or reader CA files are not the GBO CAs (CN `ca.gbo-issuer` and
+`ca.gbo-reader`). Put the four CA files under `.local/secrets/development-ca/`
+(or the directory `Gbo:SecretsDir` points at), then run the provisioning again. Published
+wallet builds trust only the managed CAs; a CA of your own works only with a
+wallet you build yourself.
 
 **`source metadata unavailable`**: reconciliation did not produce a usable
 activation. Read the `source-reconciler` console log, then restart in the

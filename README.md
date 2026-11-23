@@ -41,8 +41,12 @@ the AppHost's user secrets (`aspire secret list` in `aspire/`).
 The complete EUDI flow additionally requires:
 
 - the pinned nl-wallet v0.5.0 submodule;
+- Go 1.26 or newer on the host (the AppHost needs it anyway): the AppHost's
+  provisioning steps and `aspire/scripts/provision.sh` sign with `go run` on
+  the host, so the CA keys never enter a container;
 - two public HTTPS URLs: one for the issuance server and one for the EUDI
-  adapter;
+  adapter (the own credential issuer and the ASI route need more; see
+  [the port table](#public-urls-and-ports));
 - a compatible test wallet with a valid `urn:eudi:pid:nl:1` credential;
 - issuer and reader trust anchors already trusted by that wallet.
 
@@ -110,6 +114,11 @@ aspire run -- --Gbo:PublicHost=demo.example.org --Gbo:PublicScheme=https
 The plain http ports stay on the loopback interface, so only the proxy
 reaches them.
 
+For the EUDI flows some containers call the public URLs themselves
+(`eudi-bri-url` and `eudi-trust-public-url`), so those hostnames must also
+resolve to the proxy, and the proxy must be reachable, from inside the
+containers.
+
 ### The complete demo, with EUDI
 
 The `full` profile adds the EUDI wallet flow to DvTP. It additionally needs
@@ -119,6 +128,32 @@ two public URLs, which the AppHost asks for as parameters. Set them once:
 aspire secret set Parameters:eudi-public-url https://eudi-is.example.org/
 aspire secret set Parameters:eudi-bri-url https://eudi-bri.example.org/
 ```
+
+#### Public URLs and ports
+
+Each public URL routes to one published host port. The `full` profile needs
+the first two; the others serve the
+[own credential issuer](#own-credential-issuer-for-eudi-wallets) and the
+ASI route (`Gbo__Profiles=full,asi`). Set the ones you use: parameters with
+`aspire secret set Parameters:<name> <url>`, settings with
+`aspire secret set Gbo:<name> <url>` (or after `--`), and the
+`provision.sh` variables as `NAME=value` arguments of that script.
+
+| Setting | Host port | Needed for |
+| --- | --- | --- |
+| `Parameters:eudi-public-url` | 18001 | NL Wallet issuance (issuance server) |
+| `Parameters:eudi-bri-url` | 9409 | EUDI adapter: the issuance server's data source and type metadata |
+| `Parameters:issuer-public-url` (and `Gbo:IssuerPublicUrl` for the portal) | 9429 | own credential issuer |
+| `Parameters:eudi-trust-public-url` | 9430 | trust host: LoTE lists, CRL, status lists |
+| `Gbo:AsiProviderPublicUrl` | 9424 | ASI provider |
+| `Gbo:AsiAuthorizationServerPublicUrl` | 9425 | ASI login and consent in the browser |
+| `Gbo:QtspPublicUrl` | 9427 | reference QTSP |
+| `ASI_WALLET_VERIFIER_PUBLIC_URL` (`provision.sh asi-wallet-verifier`) | 9428 | NL Wallet PID presentation in the ASI route |
+| `ASI_EUDI_WALLET_VERIFIER_PUBLIC_URL` (`provision.sh asi-eudi-wallet-verifier`) | 9432 | EUDI wallet PID presentation in the ASI route |
+| `Gbo:PublicHost` | 9000, 9003 | landing page, developer portal |
+
+Never publish port 9431: it is the own issuer's internal offer API, which
+has no authentication. Keep it out of the proxy.
 
 Before starting an EUDI demo, provide the issuer and reader CA material that
 the test wallet already trusts. The setup deliberately never generates trust
@@ -132,6 +167,10 @@ issuer-ca-cert.pem
 reader-ca-key.pem
 reader-ca-cert.pem
 ```
+
+These files are managed material and are not part of the repository.
+Published wallet builds trust only these managed CAs; a CA of your own works
+only with a wallet you build yourself against your own trust lists.
 
 Keep the private keys outside version control. To load the same managed CA
 material from another location, set `Gbo:SecretsDir` to the absolute path of
@@ -160,7 +199,8 @@ See the [trust-host runbook](trust-host/README.md) for host-only signing and
 publication.
 
 The own credential issuer (`services/eudi-credential-issuer`, profile
-`credential-issuer`) also needs per source an access certificate (WRPAC) and a registration
+`credential-issuer`; see [below](#own-credential-issuer-for-eudi-wallets))
+also needs per source an access certificate (WRPAC) and a registration
 certificate (WRPRC). `aspire/scripts/provision.sh development-registrar-root` creates the
 registrar root that signs the registration certificates, once, in
 `development-ca/` (`registrar-ca-key.pem`, `registrar-ca-cert.pem`); it is a
@@ -257,6 +297,42 @@ The first EUDI build can take several minutes: the issuance server is built
 from the nl-wallet sources. The AppHost performs the complete idempotent
 bootstrap: FSC setup, contracts, source onboarding, development
 certificates, EUDI configuration and application startup.
+
+### Own credential issuer for EUDI wallets
+
+The own credential issuer runs beside the issuance server, under the profile
+`credential-issuer`. It needs the parameters `issuer-public-url` and
+`eudi-trust-public-url` (its database password is generated), and the trusted
+wallet providers in `.local/wallet-roots` (`Gbo:WalletRootsDir`). The AppHost
+leaves it out until the trust lists are published, so with `full` running
+(`Gbo__Profiles=full aspire run`), run in this order from the repository
+root:
+
+```bash
+# The registrar root is created once and never replaced; skip it on a rerun.
+test -f .local/secrets/development-ca/registrar-ca-key.pem \
+  || aspire/scripts/provision.sh development-registrar-root
+aspire/scripts/provision.sh wallet-registration SOURCE_ID=belastingdienst KVK_NUMBER=99990200
+aspire/scripts/provision.sh wallet-registration SOURCE_ID=rvig KVK_NUMBER=99990300
+aspire/scripts/provision.sh wallet-registration SOURCE_ID=demo-unsecured KVK_NUMBER=99990900
+aspire/scripts/provision.sh test-pid ISSUER_PUBLIC_URL=https://eudi-issuer.example.org
+aspire/scripts/provision.sh qtsp-wallet-registration
+aspire/scripts/provision.sh trust-list-signer
+aspire/scripts/provision.sh publish-trust-lists EUDI_TRUST_PUBLIC_URL=https://eudi-trust.example.org
+aspire/scripts/provision.sh asi-eudi-wallet-verifier EUDI_TRUST_PUBLIC_URL=https://eudi-trust.example.org
+```
+
+Then restart with the issuer, the trust host and the ASI route
+(`Gbo__Profiles=full,credential-issuer,asi aspire run` in `aspire/`). The
+trust host must serve the lists before the issuer's materializer and the EUDI
+wallet verifier fetch the PID list from it; the AppHost starts the trust host
+alongside the issuer without waiting for it, so if
+`credential-issuer-materialize` fails on the PID list, check that the four
+`<eudi-trust-public-url>/lote/*.jwt` return 200 and restart it from the
+dashboard. The LoTE signer keys stay in `.local/lote-signer/`
+(`GBO_LOTE_SIGNER_DIR`); losing them invalidates every wallet build that
+embeds their root. See the [trust-host runbook](trust-host/README.md) for the
+publication details.
 
 ## Other modes
 
