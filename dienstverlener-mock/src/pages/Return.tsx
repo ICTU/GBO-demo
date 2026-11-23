@@ -1,5 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { Link, useSearchParams } from 'react-router'
+import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router'
+import { completeConsent, readPortalReturn, type Outcome } from '../lib/consentFlow'
 import { demoSessionHeader } from '../lib/demoSession'
 import { denialMessage } from '../lib/denialMessage'
 import {
@@ -222,17 +223,26 @@ function Denied() {
 }
 
 export default function Return() {
-  const [params] = useSearchParams()
-  const status = params.get('status')
-  const consentId = params.get('consent_id')
-  const [consentToken] = useState(() =>
-    new URLSearchParams(window.location.hash.slice(1)).get('consent_token'))
-  useLayoutEffect(() => {
-    if (consentToken) {
-      window.history.replaceState(null, '', window.location.pathname + window.location.search)
+  // The portal sends the citizen back with a one-time code (or an error) and
+  // the state. They are read once and taken out of the address bar; the
+  // backend exchanges the code and keeps the consent token in its session.
+  const [back] = useState(() => readPortalReturn(window.location.search))
+  const [outcome, setOutcome] = useState<Outcome | 'pending'>(back ? 'pending' : 'failed')
+  const completedRef = useRef(false)
+
+  useEffect(() => {
+    // Keep the router's own history state; only the query goes.
+    if (window.location.search) {
+      window.history.replaceState(window.history.state, '', window.location.pathname)
     }
-  }, [consentToken])
-  const denied = status === 'denied'
+    if (!back || completedRef.current) return
+    completedRef.current = true
+    completeConsent(back)
+      .then((done) => setOutcome(done.outcome))
+      .catch(() => setOutcome('failed'))
+  }, [back])
+  const denied = outcome === 'denied'
+  const granted = outcome === 'granted'
 
   const [phase, setPhase] = useState(0)
   const [response, setResponse] = useState<QueryResponse | null>(null)
@@ -243,7 +253,7 @@ export default function Return() {
   // runQuery performs the fetch; when `quick=true` we skip the UX loading steps
   // (used for the Refresh button after a previous successful response).
   const runQuery = (quick: boolean) => {
-    if (!consentToken) return
+    if (!granted) return
     setFetchError(null)
     if (!quick) {
       setPhase(0)
@@ -264,7 +274,8 @@ export default function Return() {
     fetch('/api/dvtp/query', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...demoSessionHeader() },
-      body: JSON.stringify({ consent_token: consentToken }),
+      // No token in the body: the backend takes the one of its session.
+      body: JSON.stringify({}),
       signal: controller.signal,
     })
       .then((r) => r.json())
@@ -290,16 +301,16 @@ export default function Return() {
   }
 
   useEffect(() => {
-    if (denied || !consentId || !consentToken || startedRef.current) return
+    if (!granted || startedRef.current) return
     startedRef.current = true
     runQuery(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [denied, consentId, consentToken])
+  }, [granted])
 
   const rows = response?.allowed
     ? response.data?.data?.ingeschrevenPersoon?.heeftBelastingjaarAangifte
     : undefined
-  const success = !denied && !!consentId && !!consentToken && !fetchError && !!rows
+  const success = granted && !fetchError && !!rows
 
   return (
     <div className="hb-shell">
@@ -315,7 +326,9 @@ export default function Return() {
       <main className={success ? 'hb-main' : 'hb-return-main'}>
         {denied ? (
           <Denied />
-        ) : !consentId || !consentToken ? (
+        ) : outcome === 'pending' ? (
+          <Loading phase={0} />
+        ) : !granted ? (
           <ErrorPanel />
         ) : fetchError ? (
           <ErrorPanel onRefresh={() => runQuery(true)} refreshing={refreshing} />

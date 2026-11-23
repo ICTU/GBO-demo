@@ -346,28 +346,38 @@ The flow starts at the consumer, not at the consent portal: the portal only
 shows consents that already exist.
 
 1. Open the [consumer mock](http://localhost:9001) and click
-   **Inloggen met DigiD**. The consumer sends you to the consent portal with
-   its request: service, purpose and the scopes `bd:ib:2025` and `bd:ib:2024`.
+   **Inloggen met DigiD**. The consumer's backend pushes its request (service
+   `aangiftegegevens`, the scopes `bd:ib:2025` and `bd:ib:2024`) to the
+   consent portal over FSC, and the browser goes to the portal with only the
+   consumer's `client_id` and a `request_uri`.
 2. Pick any sign-in method. The DigiD mock takes any username and a mock BSN
    as the password, for example `123456789`; the mock citizens are in
    `services/graphql-server/mockdata/citizens.json`.
-3. Choose the data sets to share and click **Geef toestemming**. The portal
-   returns a signed consent token to the consumer mock, which immediately runs
-   the query and shows the income data.
+3. The portal shows the consumer's registered name and purpose. Choose the
+   data sets to share and click **Geef toestemming**. After a short
+   confirmation the portal sends you back to the consumer mock with a
+   one-time code; the consumer's backend exchanges it over FSC for the signed
+   consent token, keeps the token in its session and runs the query. The
+   consumer mock shows the income data.
 4. Open the [developer portal](http://localhost:9003). **History · Replay**
    lists the issuance and the query with their outcome and trace id.
 5. In another tab, open the [consent portal](http://localhost:9002), sign in
    as the same citizen, open the consent and click **Toestemming intrekken**.
    Back in the consumer mock, expand **Inkomensgegevens** and click
-   **↻ Verversen** to repeat the query with the same token. The PDP now denies
+   **↻ Verversen** to repeat the query with the same consent. The PDP now denies
    it. The consumer is told only `FIELD_NOT_PERMITTED`, so the consumer mock
    offers to consent again without naming a cause. The developer portal's
    history lists the request as `DENY`; the field's own reason,
    `CONSENT_WITHDRAWN`, is in the PDP decision log
    (`docker compose logs openftv-pdp`).
 
-Starting again from the consumer mock's home page begins a new consent; it
-does not repeat the query, because the token only lives in that result page.
+Starting again from the consumer mock's home page begins a new consent
+request.
+
+The [Installatie Register mock](http://localhost:9004) asks the owner's
+consent for the ownership check at LVG the same way: **Bevestig eigendom via
+MijnOverheid** pushes the request through `ir-backend`, and the return page
+hands the code to that backend, which keeps the token for the checks at LVG.
 
 The developer portal injects `DVTP_CONSUMER_PEER_ID` into the
 `dienstverlener_oin` field of its predefined DvTP issuance scenarios. It uses
@@ -420,19 +430,11 @@ to the FSC/mTLS identity (for example with a confirmation claim); the current
 explicit `dienstverlener_oin` check prevents cross-consumer use but does not
 make a stolen bearer token non-replayable by that same consumer.
 
-Because the token returns through the browser, the consent portal only accepts
-`http` or `https` return URLs whose exact origin occurs in the configured
-allow-list (comma-separated). The image reads it from `ALLOWED_RETURN_ORIGINS`
-when the container starts; `VITE_ALLOWED_RETURN_ORIGINS` only applies to the
-Vite dev server, where Compose derives it from `DIENSTVERLENER_PUBLIC_URL` and
-`KEYPER_PUBLIC_URL`.
-Without either, the portal only accepts `http://localhost:9001` (a demo
-shortcut), so a deployment must set `ALLOWED_RETURN_ORIGINS`.
 The DvTP onboarding register also reads `DIENSTVERLENER_PUBLIC_URL` and
 `KEYPER_PUBLIC_URL` to build the registered return locations of both demo
 providers, so set both when you run on your own host.
 
-A service provider can push its request to start a consent flow to the consent
+A service provider starts a consent flow by pushing its request to the consent
 portal over FSC, as a pushed authorization request (RFC 9126): `POST /par` on
 the FSC service `consent-authorization` of the consent register's peer, which
 both demo providers reach through their Outway at `/consent-authorization`
@@ -469,8 +471,10 @@ cookie while the citizen logs in, shows the resolved request with "Geef
 toestemming" and "Weiger", and after a short confirmation goes to the return URL
 in the backend's answer. A refused reference, or a start cookie that expired
 during the login, shows an error page without a link or a redirect. The portal
-cannot be framed by another site. The demo frontends do not use these routes yet: their flow still
-starts with the redirect described above.
+cannot be framed by another site. Both demo providers use this flow; the
+portal no longer accepts a request in the URL, and the consent token never
+passes through the browser. See [the reason codes and outcomes](docs/consent-flow.md#weigeringen-en-uitkomsten)
+and the demo shortcuts of this flow in the consent-flow document.
 
 ### EUDI wallet issuance
 
