@@ -531,6 +531,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- **No secret values in the AppHost**: the logbook tokens, the subject
+  pseudonym keys and the subject reference key are generated on the first
+  run and kept in the AppHost user secrets, like the database passwords.
+  They had fixed `local-demo-...` values. Logbook records written under the
+  old pseudonym keys no longer match a lookup by citizen.
 - **The default (dvtp) demo no longer starts what only the EUDI flows use**:
   the EDI issuer's FSC peer, the unsecured demo source and the EUDI
   adapter's logbook start with the EUDI profiles only. `fsc-seed-bri` then

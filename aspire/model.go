@@ -109,9 +109,14 @@ func (m *model) generated(name string) aspire.ParameterResource {
 		aspire.AddParameterWithGeneratedValuePersist(true))
 }
 
-// secret is a secret parameter with a local demo default.
-func (m *model) secret(name, value string) aspire.ParameterResource {
-	return m.b.AddParameter(name, aspire.AddParameterValue(value), aspire.AddParameterSecret(true))
+// generatedKey is a token or key made on first run and kept in the user
+// secrets, like generated. 32 characters: consent-portal-backend refuses a
+// shorter SUBJECT_REF_KEY.
+func (m *model) generatedKey(name string) aspire.ParameterResource {
+	return m.b.AddParameterWithGeneratedValue(name,
+		&aspire.GenerateParameterDefault{MinLength: 32, Lower: true, Upper: true, Numeric: true, Special: false},
+		aspire.AddParameterWithGeneratedValueSecret(true),
+		aspire.AddParameterWithGeneratedValuePersist(true))
 }
 
 func (m *model) register(name string, r aspire.Resource, k kind, nest func(aspire.Resource), label func([]string, int)) {

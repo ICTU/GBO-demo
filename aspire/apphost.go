@@ -149,19 +149,20 @@ func (m *model) build() {
 	publicURL := func(port int) string { return fmt.Sprintf("%s://%s:%d", publicScheme, publicHost, port) }
 
 	// ── Secrets ──────────────────────────────────────────────────────────
-	// Database passwords are generated on first run and kept in the AppHost
-	// user secrets (aspire secret list). The LDV values default to the local
-	// demo values compose used; set real ones with aspire secret set.
+	// Passwords, tokens and keys are generated on first run and kept in the
+	// AppHost user secrets (aspire secret list), so no secret value lives in
+	// the repository. Set a value of your own with aspire secret set
+	// Parameters:<name> <value>.
 	ftvPostgresPassword := m.generated("ftv-postgres-password")
 	ftvAdlReaderPassword := m.generated("ftv-adl-reader-password")
 	fscPostgresPassword := m.generated("fsc-postgres-password")
-	ldvWriteToken := m.secret("ldv-write-token", "local-demo-logboek-token")
-	ldvReadToken := m.secret("ldv-read-token", "local-demo-logboek-read-token")
-	pseudonymKeyBd := m.secret("ldv-subject-pseudonym-key", "local-demo-pseudonym-key")
-	pseudonymKeyBrp := m.secret("ldv-subject-pseudonym-key-brp", "local-demo-pseudonym-key-brp")
-	pseudonymKeyGbo := m.secret("ldv-subject-pseudonym-key-gbo", "local-demo-pseudonym-key-gbo")
-	pseudonymKeyLvg := m.secret("ldv-subject-pseudonym-key-lvg", "local-demo-pseudonym-key-lvg")
-	subjectRefKey := m.secret("subject-ref-key", "local-demo-subject-ref-key-not-a-secret")
+	ldvWriteToken := m.generatedKey("ldv-write-token")
+	ldvReadToken := m.generatedKey("ldv-read-token")
+	pseudonymKeyBd := m.generatedKey("ldv-subject-pseudonym-key")
+	pseudonymKeyBrp := m.generatedKey("ldv-subject-pseudonym-key-brp")
+	pseudonymKeyGbo := m.generatedKey("ldv-subject-pseudonym-key-gbo")
+	pseudonymKeyLvg := m.generatedKey("ldv-subject-pseudonym-key-lvg")
+	subjectRefKey := m.generatedKey("subject-ref-key")
 	bsnAuthorisedOins := b.AddParameter("bsn-authorised-oins", aspire.AddParameterValue("99999999900000000200"))
 
 	// ── Telemetry ────────────────────────────────────────────────────────

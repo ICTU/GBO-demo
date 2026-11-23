@@ -87,9 +87,14 @@ user secrets (`aspire secret list`, `aspire secret set <key> <value>`):
   `aspire secret set Parameters:<name> <value>`: `eudi-public-url`,
   `eudi-bri-url`, `issuer-public-url`, `eudi-trust-public-url` and
   `cloudflare-tunnel-token`.
-- **Local demo defaults** (set real values in a shared environment):
-  `ldv-write-token`, `ldv-read-token`, the `ldv-subject-pseudonym-key*`
-  keys, `subject-ref-key` and `bsn-authorised-oins`.
+- **Also generated on first run:** the logbook tokens `ldv-write-token` and
+  `ldv-read-token`, the `ldv-subject-pseudonym-key*` keys and
+  `subject-ref-key`. No secret value is in the repository. A pseudonym key
+  decides how a citizen appears in a logbook, so logbook records written
+  under another key (for example before 2026-11-23, when these had fixed
+  demo values) no longer match a lookup by citizen; remove the
+  `gbo-logboek-*-data` volumes to start clean.
+- **Local demo default:** `bsn-authorised-oins` (not a secret).
 - **Dashboard keys:** `AppHost:DashboardApiKey` and `AppHost:OtlpApiKey` are
   random per run unless set. dev-portal-backend and the collector are given
   them.
