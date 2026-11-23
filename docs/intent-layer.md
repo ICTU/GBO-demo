@@ -165,7 +165,7 @@ Further:
 
 ## Checks
 
-`scripts/intent-layer.sh check` (also `make intent-layer-check`, and a job in
+`scripts/intent-layer.sh check` (also `make check-intent-layer`, and a job in
 CI) fails when:
 
 - a `CLAUDE.md` or other tool-specific rules file exists, or a node is a
@@ -175,7 +175,7 @@ CI) fails when:
 - a service or frontend (a directory at the top level or under `services/` with
   its own `Dockerfile`, `go.mod` or `package.json`) has no node and is not
   listed in `scripts/intent-layer-exceptions.txt`, or that list names a
-  directory that has a node or no longer exists.
+  directory that has a node or is no longer a service or frontend.
 
 The check looks at the files git tracks or would add; files ignored by
 `.gitignore` are left alone.

@@ -1,7 +1,7 @@
 # Boundaries (a service or frontend with its own Dockerfile, go.mod or
 # package.json) that have no AGENTS.md node yet. scripts/intent-layer.sh check
 # fails for a boundary without a node that is not listed here, and for an
-# entry here that has a node or no longer exists.
+# entry here that has a node or is no longer a boundary.
 #
 # The entries below predate the Intent Layer and the list shrinks as nodes
 # are written; see docs/intent-layer.md. A new service or frontend gets its

@@ -395,8 +395,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Check AGENTS.md nodes
-        run: scripts/intent-layer.sh check
+      - name: scripts/intent-layer.sh check
+        run: ./scripts/intent-layer.sh check
 
   # Runs on every change. All logic lives in the script (oxfmt at a pinned
   # version, run through npx), so another CI system needs only these steps.
