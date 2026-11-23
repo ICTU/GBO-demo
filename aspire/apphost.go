@@ -55,6 +55,12 @@ func (m *model) build() {
 	// Which parts of the demo run, as the compose profiles did. Set them with
 	// Gbo__Profiles, comma separated (Gbo__Profiles=full aspire run). Without
 	// any, the dvtp demo runs, as `make demo` did; `core` runs the core only.
+	//
+	// TODO(go-apphost/launch-profile): the C# AppHost offered these as launch
+	// profiles (aspire run --launch-profile full). The CLI refuses
+	// --launch-profile for Go AppHosts and picks an https profile over the
+	// first one, so aspire.config.json keeps a single http profile and the
+	// demo profile comes from Gbo__Profiles only.
 	//   core        sources, PDP, logbooks, developer portal and landing page
 	//   dvtp        consent flow over FSC: consumer, consent portal, IR, LVG
 	//   eudi        EUDI wallet issuance over FSC (needs public URLs and CAs)
