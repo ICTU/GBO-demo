@@ -7,31 +7,40 @@
 //
 // The code is laid out as ports and adapters, one package per dependency:
 //
-//	consumer/      domain core — the question, the consent token's claims,
-//	               what a citizen may be told. Imports no transport library.
-//	outway/        driven adapter — the source, through the FSC Outway
-//	logbook/       driven adapter — the consumer's Logboek Dataverwerkingen
-//	devportal/     driven adapter — best-effort dev-portal timeline
-//	consumerhttp/  driving adapter — the HTTP API and its trace middleware
-//	main.go        configuration, wiring and process lifecycle, nothing else
+//	consumer/        domain core — the question, the consent token's claims,
+//	                 what a citizen may be told. Imports no transport library.
+//	consentrequest/  domain core — asking the citizen for consent: pushed
+//	                 request, code exchange, the consent token in the session
+//	outway/          driven adapter — the source and the consent portal,
+//	                 through the FSC Outway
+//	sessionstore/    driven adapter — sessions, in memory
+//	logbook/         driven adapter — the consumer's Logboek Dataverwerkingen
+//	devportal/       driven adapter — best-effort dev-portal timeline
+//	consumerhttp/    driving adapter — the HTTP API, its trace middleware and
+//	                 the consent routes
+//	main.go          configuration, wiring and process lifecycle, nothing else
 package main
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 	"time"
 
+	"gbo-demo/dienstverlener-backend/consentrequest"
 	"gbo-demo/dienstverlener-backend/consumer"
 	"gbo-demo/dienstverlener-backend/consumerhttp"
 	"gbo-demo/dienstverlener-backend/devportal"
 	"gbo-demo/dienstverlener-backend/logbook"
 	"gbo-demo/dienstverlener-backend/outway"
+	"gbo-demo/dienstverlener-backend/sessionstore"
 	ldv "gbo-demo/ldv-client"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
@@ -58,6 +67,10 @@ const upstreamRequestTimeout = 30 * time.Second
 // reach the logbook, not whether they do.
 const ldvDeliveryInterval = 2 * time.Second
 
+// sessionLifetime is how long a browser session, and the consent token it
+// holds, is kept.
+const sessionLifetime = 12 * time.Hour
+
 type config struct {
 	Port             string
 	OrgSector        string
@@ -68,6 +81,11 @@ type config struct {
 	// Hypotheek-BV's income data, "lvg" for the Installatie Register's
 	// ownership check.
 	Kind consumer.Kind
+	// The consent request; without CONSENT_CLIENT_ID its routes are off.
+	ConsentClientID         string
+	ConsentRedirectURI      string
+	ConsentPortalURL        string
+	ConsentAuthorizationURL string
 }
 
 func loadConfig() (config, error) {
@@ -75,14 +93,74 @@ func loadConfig() (config, error) {
 	if err != nil {
 		return config{}, err
 	}
-	return config{
+	cfg := config{
 		Kind:             kind,
 		Port:             getEnv("PORT", "4006"),
 		OrgSector:        getEnv("ORG_SECTOR", "hypotheekverlener"),
 		DevPortalBackend: getEnv("DEV_PORTAL_BACKEND_URL", ""),
 		OutwayURL:        getEnv("OUTWAY_URL", "http://hv-outway:8080"),
 		OutwayPath:       getEnv("OUTWAY_PATH", "/bri/graphql"),
-	}, nil
+
+		ConsentClientID:         os.Getenv("CONSENT_CLIENT_ID"),
+		ConsentRedirectURI:      os.Getenv("CONSENT_REDIRECT_URI"),
+		ConsentPortalURL:        os.Getenv("CONSENT_PORTAL_URL"),
+		ConsentAuthorizationURL: os.Getenv("CONSENT_AUTHORIZATION_URL"),
+	}
+	if cfg.ConsentClientID == "" {
+		return cfg, nil
+	}
+	// The client id is part of the session cookie's name; a character a
+	// cookie name cannot hold would make the browser never get the cookie.
+	if !isPeerID(cfg.ConsentClientID) {
+		return config{}, fmt.Errorf("CONSENT_CLIENT_ID: %q is not a Peer ID (digits only)", cfg.ConsentClientID)
+	}
+	for name, value := range map[string]string{
+		"CONSENT_REDIRECT_URI":      cfg.ConsentRedirectURI,
+		"CONSENT_PORTAL_URL":        cfg.ConsentPortalURL,
+		"CONSENT_AUTHORIZATION_URL": cfg.ConsentAuthorizationURL,
+	} {
+		if u, err := url.Parse(value); err != nil || !u.IsAbs() || u.Host == "" {
+			return config{}, fmt.Errorf("%s must be an absolute URL when CONSENT_CLIENT_ID is set", name)
+		}
+	}
+	return cfg, nil
+}
+
+// isPeerID reports whether s is an FSC Peer ID: an OIN, all digits.
+func isPeerID(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// consentFlow wires the consent request, or returns nil when it is not
+// configured.
+func consentFlow(cfg config) *consumerhttp.ConsentFlow {
+	if cfg.ConsentClientID == "" {
+		return nil
+	}
+	redirect, _ := url.Parse(cfg.ConsentRedirectURI)
+	return &consumerhttp.ConsentFlow{
+		Requester: &consentrequest.Requester{
+			ClientID:    cfg.ConsentClientID,
+			RedirectURI: cfg.ConsentRedirectURI,
+			PortalURL:   cfg.ConsentPortalURL,
+			Portal: &outway.ConsentPortal{
+				URL:    cfg.ConsentAuthorizationURL,
+				Client: &http.Client{Timeout: upstreamRequestTimeout},
+			},
+			Sessions: &sessionstore.Memory{Lifetime: sessionLifetime},
+		},
+		CookieName: "consent_session_" + cfg.ConsentClientID,
+		Secure:     redirect.Scheme == "https",
+		MaxAge:     sessionLifetime,
+	}
 }
 
 func getEnv(key, fallback string) string {
@@ -168,9 +246,13 @@ func main() {
 		c.History = &devportal.History{Base: cfg.DevPortalBackend}
 	}
 
+	flow := consentFlow(cfg)
+	if flow == nil {
+		slog.Info("consent request routes off: CONSENT_CLIENT_ID is not set")
+	}
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           consumerhttp.NewHandler(c, serviceName),
+		Handler:           consumerhttp.NewHandler(c, flow, serviceName),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 	slog.Info("starting",

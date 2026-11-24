@@ -49,6 +49,10 @@ type config struct {
 	// itself by. Defaults to the register's base host, which is right for the
 	// demo and wrong for anything else.
 	LogbookID string
+	// FSCReadPort, when set, serves the read extension for the consent
+	// register on a listener of its own, behind the source's Inway: no
+	// bearer token, one traceId, a reduced answer (#686).
+	FSCReadPort string
 }
 
 func loadConfig() config {
@@ -61,6 +65,7 @@ func loadConfig() config {
 		LogbookID:    os.Getenv("LDV_LOGBOOK_ID"),
 		TLSCertPath:  os.Getenv("LDV_TLS_CERT_PATH"),
 		TLSKeyPath:   os.Getenv("LDV_TLS_KEY_PATH"),
+		FSCReadPort:  os.Getenv("LDV_FSC_READ_PORT"),
 	}
 }
 
@@ -158,6 +163,22 @@ func main() {
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 
+	var fscReadServer *http.Server
+	if cfg.FSCReadPort != "" {
+		fscReadServer = &http.Server{
+			Addr:              ":" + cfg.FSCReadPort,
+			Handler:           httpapi.NewFSCReadHandler(logbook, logbookID),
+			ReadHeaderTimeout: readHeaderTimeout,
+		}
+		go func() {
+			slog.Info("FSC read listener", "addr", fscReadServer.Addr)
+			if err := fscReadServer.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+				slog.Error("serving the FSC read listener", "err", err)
+				os.Exit(1)
+			}
+		}()
+	}
+
 	useTLS, err := cfg.tlsEnabled()
 	if err != nil {
 		slog.Error("TLS configuration", "err", err)
@@ -191,6 +212,11 @@ func main() {
 	slog.Info("shutting down")
 	drainCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
+	if fscReadServer != nil {
+		if err := fscReadServer.Shutdown(drainCtx); err != nil {
+			_ = fscReadServer.Close()
+		}
+	}
 	if err := srv.Shutdown(drainCtx); err != nil {
 		slog.Warn("drain did not finish; closing remaining connections", "err", err)
 		_ = srv.Close()

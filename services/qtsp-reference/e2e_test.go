@@ -64,7 +64,17 @@ var (
 	stackOnce sync.Once
 	theStack  *stack
 	stackErr  error
+	// stopStack stops the shared stack's processes and removes its
+	// directory of built binaries and generated keys; TestMain calls it once
+	// all tests have run.
+	stopStack = func() {}
 )
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	stopStack()
+	os.Exit(code)
+}
 
 func startStack(t *testing.T) *stack {
 	t.Helper()
@@ -78,11 +88,30 @@ func startStack(t *testing.T) *stack {
 	return theStack
 }
 
-func buildStack() (*stack, error) {
+func buildStack() (_ *stack, err error) {
 	dir, err := os.MkdirTemp("", "qtsp-e2e-")
 	if err != nil {
 		return nil, err
 	}
+	var procs []*exec.Cmd
+	var outway *httptest.Server
+	stop := func() {
+		for _, p := range procs {
+			_ = p.Process.Kill()
+			_ = p.Wait()
+		}
+		if outway != nil {
+			outway.Close()
+		}
+		_ = os.RemoveAll(dir)
+	}
+	defer func() {
+		if err != nil {
+			stop()
+		} else {
+			stopStack = stop
+		}
+	}()
 	bins := map[string]string{}
 	for _, svc := range []string{"asi-authorization-server", "asi-provider", "asi-discovery-stub"} {
 		bin := filepath.Join(dir, svc)
@@ -120,7 +149,7 @@ func buildStack() (*stack, error) {
 		return nil, fmt.Errorf("write release file: %v\n%s", err, out)
 	}
 
-	outway := httptest.NewServer(http.HandlerFunc(fakeBRP))
+	outway = httptest.NewServer(http.HandlerFunc(fakeBRP))
 	asURL, asipURL, dipURL := "http://"+freeAddr(), "http://"+freeAddr(), "http://"+freeAddr()
 	s := &stack{dip: dipURL, qtspKey: qtspKey, qtspChain: []*x509.Certificate{qtspCert, readerCA}, logs: map[string]*syncBuffer{}}
 	s.sealAnchor = x509.NewCertPool()
@@ -152,6 +181,7 @@ func buildStack() (*stack, error) {
 		if err := cmd.Start(); err != nil {
 			return nil, fmt.Errorf("start %s: %v", p.name, err)
 		}
+		procs = append(procs, cmd)
 		s.logs[p.name] = logs
 		if err := waitHealthy(p.url + "/healthz"); err != nil {
 			return nil, fmt.Errorf("%s: %v\n%s", p.name, err, logs.String())

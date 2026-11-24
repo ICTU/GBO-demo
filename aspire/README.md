@@ -43,9 +43,9 @@ comma-separated:
 | Profile | Adds | Was |
 | --- | --- | --- |
 | `core` | sources, PDP, logbooks, developer portal, landing page | `make demo-minimal` |
-| `dvtp` (the default) | the FSC network without the EDI issuer's peer, consumers, consent portal, LVG and the Installatie Register | `make demo` |
+| `dvtp` (the default) | the FSC network without the EDI issuer's peer (with the RvIG peer, the data usage index and the delivery logbooks), consumers, consent portal, LVG and the Installatie Register | `make demo` |
 | `eudi` | the EDI issuer's FSC peer, the Source Registry, source onboarding (with the unsecured demo source), the issuance server, the EUDI adapter and its logbook (left out, with an `eudi-not-configured` notice, while the development CAs are missing) | `make demo-eudi` |
-| `full` | `dvtp` + `eudi`, and the separate BRP FSC peer | `make demo-full` |
+| `full` | `dvtp` + `eudi` | `make demo-full` |
 | `onboarding` | the EDI issuer's FSC peer, the unsecured demo source, the Source Registry and the reconciler only | `--profile onboarding` |
 | `integrator` | the integrator's FSC peer, seed and backend | `make demo-integrator` |
 | `asi` | the ASIP's FSC peer, authorization server, discovery stub, reference QTSP and the wallet verifiers once provisioned | `make demo-asi` |
@@ -70,6 +70,7 @@ variables (`Gbo__PublicHost=demo.example.org`).
 | `Gbo:IssuerPublicUrl` | | Own credential issuer's public URL, for the portal and the ASI issuance resources |
 | `Gbo:AsiAuthorizationServerPublicUrl`, `Gbo:AsiProviderPublicUrl`, `Gbo:QtspPublicUrl` | public host on 9425, 9424, 9427 | Public base URLs of the ASI route |
 | `Gbo:FtvManagerUrl`, `Gbo:FtvOidcAuthority` | public host on 9280, 9284 | Browser URLs of the OpenFTV Manager and its IdP |
+| `Gbo:ConsentKnownScopes`, `Gbo:ParRequestLifetime` | `bd:ib:2025,bd:ib:2024,lvg:vbo:eigendom`, `10m` | Data sets the consent portal can describe, and how long a pushed consent request waits (was `CONSENT_KNOWN_SCOPES`, `PAR_REQUEST_LIFETIME`) |
 | `Gbo:EudiUlBase`, `Gbo:VersionString`, `Gbo:Issuer*`, `Gbo:Pid*`, `Gbo:WalletRootsDir`, `Gbo:QtspIssuerOffersUrl`, `Gbo:AsiIssuanceResources`, `Gbo:AsiRequireAuthorizationDetails` | as before | The remaining former `.env` settings, one to one |
 
 ### Secrets and parameters

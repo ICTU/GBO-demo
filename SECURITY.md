@@ -38,4 +38,4 @@ The EUDI issuance-server runtime config carries inline mdoc/SD-JWT signing keys 
 
 Start the AppHost with the `eudi` profile; its `eudi-issuance-materialize` step validates every configured source, generates artifacts from the complete candidate set and promotes that set to active. Local development certificates are created only by the AppHost's explicit `provision-<source>-certificates` steps. Production must supply pre-managed certificate references.
 
-The safety-audit script (`scripts/check-safety.sh`) refuses inline `private_key = "…"` / `certificate = "…"` patterns in any committed file, so this stays enforced.
+The safety audit (`scripts/check-safety.sh`) fails on inline `private_key = "…"` / `certificate = "…"` values, other secrets, real OINs (organisatie-identificatienummers) and internal hostnames in any tracked file. CI runs it on every change.

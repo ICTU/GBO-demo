@@ -380,7 +380,7 @@ func newMux(schema *graphql.Schema, tracer trace.Tracer, logbook *sourceLogbook,
 		// The FSC-Inway proxies the Fsc-Transaction-Id through to the
 		// backend. Store it as a span attribute so the dev-portal can use a
 		// tag lookup to correlate the graphql trace with the adapter and pdp
-		// traces (traceparent propagation is broken across the FSC hop).
+		// traces (the FSC Inway sends the PDP no traceparent).
 		if txID := r.Header.Get("Fsc-Transaction-Id"); txID != "" {
 			span.SetAttributes(attribute.String("gbo.fsc.transaction_id", txID))
 		}

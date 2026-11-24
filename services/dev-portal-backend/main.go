@@ -1,8 +1,16 @@
-// Package main implements the demo "dev-portal-backend" — a small persistence
-// layer for the developer-portal frontend. Two concerns only:
+// Package main implements the demo "dev-portal-backend" — the backend of the
+// developer-portal frontend. It keeps two things of its own:
 //   - scenarios: list of pre-defined (source-controlled in ./scenarios) and
 //     user-saved (in /var/scenarios) requests the portal can load.
 //   - history: append-only log of runs started from the portal.
+//
+// Besides those it reads what the chain recorded, for the portal's panels:
+// PDP decisions from the Authorization Decision Log (with the console
+// decision log from Loki), the policy source, FSC transaction logs and the
+// Logboek Dataverwerkingen chains. It receives OTLP traces from the collector
+// for the live architecture strip, relays the ASI tab's calls to the
+// reference QTSP, and, when configured, the revocation and test PID calls to
+// the credential issuer (revocation.go, testpid.go).
 //
 // Plus two passthrough endpoints that expose mock data from other services
 // (citizens and organizations) so the builder does not need a separate

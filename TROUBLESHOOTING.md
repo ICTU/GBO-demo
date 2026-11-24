@@ -127,6 +127,24 @@ few times, since the FSC Managers have no health check. Common causes:
   but does not contain the peer: admit that peer in the register. The source
   Manager does not counter-sign in either case.
 
+## `fsc-seed-consent-authorization` stops: not admitted to the consent register
+
+The consent register's Manager (peer `99999999900000000700`) signs a
+connection to `consent-authorization` only for a participant the DvTP
+onboarding register admits to that peer. The demo configuration admits
+Hypotheek-BV (`99999999900000000300`) and the Installatie Register
+(`99999999900000001000`), but the register writes its seed participants into
+a new volume only. A volume from before that admission keeps the old sources,
+and the `consent-authorization-admission` step stops with an error that names
+the missing participants. Fix it in one of two ways, then restart that step
+and the two `fsc-seed-consent-authorization-*` steps from the dashboard:
+
+- In the register's admin UI (the `dvtp-onboarding-register` endpoint in the
+  dashboard), add `99999999900000000700` to the sources of each named
+  participant. The PDP pulls the register every 5 seconds.
+- Reset the register: stop the AppHost, remove the
+  `gbo-dvtp-onboarding-data` volume and start it again.
+
 ## Every request denies with `NO_APPLICABLE_RULE`
 
 `NO_APPLICABLE_RULE` is the engine's closed-world default: no rule declares
@@ -162,7 +180,8 @@ repoints the grant-link.
 Each seed step repairs only its own grants. Restart them from the dashboard
 in this order, since `fsc-seed-bri-hv` needs the `bri` publication the first
 creates: `fsc-seed-bri`, `fsc-seed-rvig-source`, `fsc-seed-metadata-bd`,
-`fsc-seed-metadata-rvig`, `fsc-seed-bri-hv`, `fsc-seed-consent-status`.
+`fsc-seed-metadata-rvig`, `fsc-seed-bri-hv`, `fsc-seed-consent-status`,
+`fsc-seed-consent-authorization-hv`, `fsc-seed-consent-authorization-ir`.
 
 The `svc` claim in the decoded token names the failing service. To repair just
 that one:
@@ -174,6 +193,7 @@ that one:
 | `brp` | EDI-issuer → Belastingdienst (RvIG source) | `fsc-seed-rvig-source` |
 | `gbo-metadata-bd`, `gbo-metadata-rvig` | EDI-issuer → Belastingdienst | `fsc-seed-metadata-bd`, `fsc-seed-metadata-rvig` |
 | `consent-status` | PDP → Toestemmingsregister | `fsc-seed-consent-status` |
+| `consent-authorization` | Hypotheekverlener, Installatie Register → Toestemmingsregister | `fsc-seed-consent-authorization-hv`, `fsc-seed-consent-authorization-ir` |
 
 The `sub` claim tells the two `bri` rows apart: `99999999900000000100` is the
 EDI-issuer, `99999999900000000300` the Hypotheekverlener. The EDI-issuer's

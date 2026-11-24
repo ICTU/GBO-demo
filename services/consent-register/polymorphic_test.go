@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"consent-register/uses"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -17,7 +18,7 @@ func polymorphicServer(t *testing.T) (*httptest.Server, *Store) {
 		t.Fatal(err)
 	}
 	store := NewStore()
-	srv := httptest.NewServer(newMux(store, issuer, nil))
+	srv := httptest.NewServer(newMux(store, issuer, nil, uses.Service{}))
 	t.Cleanup(srv.Close)
 	return srv, store
 }
@@ -89,7 +90,7 @@ func TestNoConsentAnswerCarriesThePolymorphicValues(t *testing.T) {
 	}
 	body, _ := json.Marshal(map[string]any{
 		"encrypted_subject": testEncryptedSubject, "subject_ref": testSubjectRef,
-		"dienstverlener_oin": "00000001234567890000", "scopes": []string{"bd:ib:2025"},
+		"dienstverlener_oin": "99999999900000001400", "scopes": []string{"bd:ib:2025"},
 	})
 	created, err := http.Post(srv.URL+"/consents", "application/json", bytes.NewReader(body))
 	if err != nil {

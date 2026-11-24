@@ -18,6 +18,24 @@
       "allowed_source_peer_ids": ["99999999900000000700"]
     },
     {
+      "peer_id": "99999999900000000200",
+      "name": "Belastingdienst, registering at the data usage index",
+      "active": true,
+      "allowed_source_peer_ids": ["99999999900000000700"]
+    },
+    {
+      "peer_id": "99999999900000000400",
+      "name": "RvIG, registering at the data usage index",
+      "active": true,
+      "allowed_source_peer_ids": ["99999999900000000700"]
+    },
+    {
+      "peer_id": "99999999900000000700",
+      "name": "Toestemmingsregister (GBO), reading the delivery logbooks of the sources",
+      "active": true,
+      "allowed_source_peer_ids": ["99999999900000000200", "99999999900000000400"]
+    },
+    {
       "peer_id": "99999999900000001200",
       "name": "Demo ASIP (GBO, ETSI TS 119 478)",
       "active": true,
@@ -29,13 +47,13 @@
       "peer_id": "99999999900000000300",
       "name": "Demo Hypotheekverlener BV",
       "active": true,
-      "allowed_source_peer_ids": ["99999999900000000200"]
+      "allowed_source_peer_ids": ["99999999900000000200", "99999999900000000700"]
     },
     {
       "peer_id": "99999999900000001000",
       "name": "Demo Installatie Register",
       "active": true,
-      "allowed_source_peer_ids": ["99999999900000000200"]
+      "allowed_source_peer_ids": ["99999999900000000200", "99999999900000000700"]
     },
     {
       "peer_id": "99999999900000001100",
@@ -55,6 +73,18 @@
       "integrator_peer_id": "99999999900000001100",
       "service_provider_peer_id": "99999999900000000300",
       "rules": ["DVT0001"]
+    }
+  ],
+  "service_providers": [
+    {
+      "peer_id": "99999999900000000300",
+      "return_locations": ["${DIENSTVERLENER_PUBLIC_URL}/return"],
+      "services": [{"service": "aangiftegegevens", "purpose": "Hypotheek-aanvraag"}]
+    },
+    {
+      "peer_id": "99999999900000001000",
+      "return_locations": ["${KEYPER_PUBLIC_URL}/verzoek/terug"],
+      "services": [{"service": "installatieregister", "purpose": "Goedkeuring installatiegegevens"}]
     }
   ]
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"consent-register/uses"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -39,7 +40,7 @@ func TestCreateThenGetConsent(t *testing.T) {
 	}
 	issuer.now = func() time.Time { return time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC) }
 	store := NewStore()
-	srv := httptest.NewServer(newMux(store, issuer, nil))
+	srv := httptest.NewServer(newMux(store, issuer, nil, uses.Service{}))
 	defer srv.Close()
 
 	createBody := bytes.NewBufferString(`{
@@ -48,7 +49,7 @@ func TestCreateThenGetConsent(t *testing.T) {
 			"99999999900000000210": {"pseudonym": {"key_set_version": 20260301, "value": "cHNldWRvLTIxMA=="}}
 		},
 		"subject_ref": "EP-portal-abc123",
-		"dienstverlener_oin": "00000001234567890000",
+		"dienstverlener_oin": "99999999900000001400",
 		"scopes": ["bsn:read"],
 		"use_case": "hypotheek-aanvraag"
 	}`)
@@ -92,7 +93,7 @@ func TestCreateThenGetConsent(t *testing.T) {
 	}
 	claims := parsed.Claims.(*ConsentClaims)
 	assertSignedSubject(t, claims.EncryptedSubject)
-	if claims.DienstverlenrOIN != "00000001234567890000" {
+	if claims.DienstverlenrOIN != "99999999900000001400" {
 		t.Fatalf("unexpected signed claims: %+v", claims)
 	}
 	if claims.ValidUntil == "" || claims.ID == "" || len(claims.Audience) != 1 {
@@ -202,7 +203,7 @@ func TestCreateRefusesAConsentWithoutAnEncryptedSubject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(newMux(NewStore(), issuer, nil))
+	srv := httptest.NewServer(newMux(NewStore(), issuer, nil, uses.Service{}))
 	defer srv.Close()
 
 	for name, subject := range map[string]string{
@@ -218,7 +219,7 @@ func TestCreateRefusesAConsentWithoutAnEncryptedSubject(t *testing.T) {
 	} {
 		body := bytes.NewBufferString(`{` + subject + `
 			"subject_ref": "EP-portal-abc123",
-			"dienstverlener_oin": "00000001234567890000",
+			"dienstverlener_oin": "99999999900000001400",
 			"scopes": ["bsn:read"]
 		}`)
 		resp, err := http.Post(srv.URL+"/consents", "application/json", body)

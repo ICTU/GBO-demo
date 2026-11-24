@@ -12,7 +12,7 @@ import (
 func ptr[T any](v T) *T { return &v }
 
 func TestLoadConfigReadsTheADLDatabaseURL(t *testing.T) {
-	const url = "postgres://adl_reader:pw@postgres-ftv:5432/ftv_adl?sslmode=disable"
+	const url = "postgres://adl_reader@postgres-ftv:5432/ftv_adl?sslmode=disable"
 	t.Setenv("ADL_DATABASE_URL", url)
 
 	if got := loadConfig().ADLDatabaseURL; got != url {

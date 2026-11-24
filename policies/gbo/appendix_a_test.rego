@@ -49,7 +49,7 @@ _output(fields) := {
 }
 
 _decide_output(output, rule) := result if {
-	req := fx.request_with("00000001000000000001", "appendix-a", output, {})
+	req := fx.request_with("99999999900000001900", "appendix-a", output, {})
 	deny_field := _r0001_deny_field with input as req
 	result := gbo.response with input as req
 		with data.gbo.rules as {"appendix_a": {"r0001": object.union(rule, {"deny_field": deny_field})}}

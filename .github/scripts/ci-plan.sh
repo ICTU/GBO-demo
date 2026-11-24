@@ -61,6 +61,7 @@ brp-graphql-server
 bsnk-mock
 consent-portal-backend
 consent-register
+data-usage-index
 dev-portal-backend
 dienstverlener-backend
 dvtp-onboarding-register
@@ -163,6 +164,7 @@ done <<'IMAGES'
 asi-authorization-server
 asi-discovery-stub
 asi-provider
+data-usage-index
 dev-portal-backend
 dvtp-onboarding-register
 eudi-adapter

@@ -15,7 +15,7 @@ import (
 )
 
 func TestPublishesSourceMetadata(t *testing.T) {
-	payload := []byte(`{"source_oin":"00000001003214345000","version":"v1","attestations":[]}`)
+	payload := []byte(`{"source_oin":"99999999900000000200","version":"v1","attestations":[]}`)
 	publisher, err := newSourceMetadataPublisher(payload)
 	if err != nil {
 		t.Fatalf("new source metadata publisher: %v", err)

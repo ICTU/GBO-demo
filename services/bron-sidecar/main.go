@@ -38,8 +38,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"gbo-demo/bron-sidecar/decryption"
 	"gbo-demo/bron-sidecar/substitution"
+	"gbo-demo/bron-sidecar/usageindex"
 	ldv "gbo-demo/ldv-client"
 	"io"
 	"log/slog"
@@ -99,6 +101,26 @@ type config struct {
 	LDVForwardActivity    string
 	// GraphQLPath is the one path GraphQL is served on (transport.go).
 	GraphQLPath string
+	// Deliveries under a consent (#687, #689). After a 200 on a request with
+	// a consent token the sidecar registers the trace at the data usage
+	// index and writes a delivery record in a logbook of its own, apart from
+	// the source's logbook. All four of these, or none: without them this
+	// source records no deliveries, like a source without a logbook writes
+	// no records.
+	//
+	// UsageIndexURL is this source peer's Outway grant link for the index,
+	// and UsageLogbookID the logbook ID a registration names: the Peer ID
+	// plus the name of the delivery logbook's read service.
+	UsageIndexURL  string
+	UsageLogbookID string
+	// DeliveryLogbookURL is the delivery logbook, and DeliveryActivity the
+	// processing activity a delivery is recorded under.
+	DeliveryLogbookURL string
+	DeliveryActivity   string
+	// LDVWriteToken and LDVPseudonymKey are shared with the source's
+	// logbook: one Verantwoordelijke, one pseudonym space.
+	LDVWriteToken   string
+	LDVPseudonymKey string
 }
 
 func loadConfig() config {
@@ -113,7 +135,120 @@ func loadConfig() config {
 		LDVDecryptionActivity: getEnv("LDV_DECRYPTION_ACTIVITY", ""),
 		LDVForwardActivity:    getEnv("LDV_FORWARD_ACTIVITY", ""),
 		GraphQLPath:           getEnv("GRAPHQL_PATH", defaultGraphQLPath),
+		UsageIndexURL:         os.Getenv("DATA_USAGE_INDEX_URL"),
+		UsageLogbookID:        os.Getenv("DATA_USAGE_LOGBOOK_ID"),
+		DeliveryLogbookURL:    os.Getenv("DELIVERY_LOGBOOK_URL"),
+		DeliveryActivity:      os.Getenv("DELIVERY_ACTIVITY"),
+		LDVWriteToken:         os.Getenv("LDV_WRITE_TOKEN"),
+		LDVPseudonymKey:       os.Getenv("LDV_SUBJECT_PSEUDONYM_KEY"),
 	}
+}
+
+// deliveryRegistrar records, at the data usage index, that this source
+// delivered data under a consent in a trace (#687). The port of the one
+// trust boundary the sidecar crosses after the forward; the adapter is
+// usageindex.
+type deliveryRegistrar interface {
+	Register(ctx context.Context, traceID, consentID string) error
+}
+
+// deliveryRecordName is the name of the record a delivery leaves.
+const deliveryRecordName = "dataverwerking.levering-onder-toestemming"
+
+// deliveries records each delivery under a consent: the registration at the
+// index and the record in the delivery logbook.
+type deliveries struct {
+	registrar deliveryRegistrar
+	logbook   *ldv.Client
+	activity  string
+}
+
+// newDeliveries wires what the configuration asks for, or nil when this
+// source records no deliveries. Half a configuration is refused: a sidecar
+// that registered without a record, or recorded without a registration,
+// would show the citizen nothing while looking configured.
+func newDeliveries(cfg config, client *http.Client) (*deliveries, error) {
+	settings := []string{cfg.UsageIndexURL, cfg.UsageLogbookID, cfg.DeliveryLogbookURL, cfg.DeliveryActivity}
+	set := 0
+	for _, value := range settings {
+		if value != "" {
+			set++
+		}
+	}
+	if set == 0 {
+		return nil, nil
+	}
+	if set != len(settings) {
+		return nil, errors.New("DATA_USAGE_INDEX_URL, DATA_USAGE_LOGBOOK_ID, DELIVERY_LOGBOOK_URL and DELIVERY_ACTIVITY must be set together")
+	}
+	// No outbox: the write is synchronous, so the record is in the logbook
+	// before the data leaves and the register's read-back finds it.
+	logbook, err := ldv.New(ldv.Config{
+		ServiceName:  getEnv("OTEL_SERVICE_NAME", "bron-sidecar"),
+		LogbookURL:   cfg.DeliveryLogbookURL,
+		WriteToken:   cfg.LDVWriteToken,
+		PseudonymKey: cfg.LDVPseudonymKey,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("configuring the delivery logbook: %w", err)
+	}
+	return &deliveries{
+		registrar: usageindex.Client{URL: cfg.UsageIndexURL, LogbookID: cfg.UsageLogbookID, HTTP: client},
+		logbook:   logbook,
+		activity:  cfg.DeliveryActivity,
+	}, nil
+}
+
+// record registers the trace, then writes the delivery record. Both must
+// succeed before the data goes out.
+//
+// The registration comes first. The register counts every record under a
+// registered trace as a use, so a record left by a delivery whose
+// registration then failed would show as a use once an earlier delivery had
+// registered the trace. This way a record exists only for a delivery the
+// index confirmed; a registration whose record never landed gives no use.
+//
+// The record names the citizen by the same logbook-local pseudonym as the
+// forward record, and never the consent: the consent ID goes to the index
+// only. Known limitation: a consumer that reuses one trace ID under two
+// consents makes each delivery show as a use of both, because the register
+// finds uses by trace. Adding the span ID to the registration would fix it.
+func (d *deliveries) record(ctx context.Context, forward ldvOperation, consentID, named string) error {
+	if consentID == "" {
+		return errors.New("the consent token carries no consent_id")
+	}
+	if named == "" {
+		return errors.New("the request named no data subject")
+	}
+	subjectID, err := d.logbook.LocalPseudonym(named)
+	if err != nil {
+		return err
+	}
+	if err := d.registrar.Register(ctx, forward.traceID, consentID); err != nil {
+		return fmt.Errorf("register the trace: %w", err)
+	}
+	return d.logbook.Write(ctx, ldv.Record{
+		TraceID:      forward.traceID,
+		SpanID:       ldv.SpanID(),
+		ParentSpanID: forward.spanID,
+		Name:         deliveryRecordName,
+		Status:       ldv.StatusOK,
+		StartTime:    forward.startTime,
+		EndTime:      time.Now().UTC(),
+		Attributes:   ldv.Attributes(d.activity, subjectID, ldv.SubjectTypePseudonym, forward.processor, map[string]any{}),
+	})
+}
+
+// subjectNamed is what the first subject of the request stands for: the BSN
+// or this source's pseudonym. Empty when the request names none.
+func subjectNamed(subjects, filled map[string]string) string {
+	for _, subject := range subjects {
+		if value := filled[subject]; value != "" {
+			return value
+		}
+		return subject
+	}
+	return ""
 }
 
 func getEnv(k, fallback string) string {
@@ -173,7 +308,12 @@ func subjectFromBody(body []byte, subjectVars []string) map[string]string {
 // the forward itself. When a logbook is configured, a record that the logbook
 // does not confirm fails the request — the response is withheld rather than
 // returned unlogged.
-func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client, substitute substitution.Substituter) http.HandlerFunc {
+//
+// After a 200 under a consent the delivery is registered at the data usage
+// index and recorded in the delivery logbook (deliveries.record), after the
+// forward record and before the response leaves: a delivery that cannot be
+// registered and recorded is withheld like an unlogged one.
+func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client, substitute substitution.Substituter, delivered *deliveries) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		span := trace.SpanFromContext(r.Context())
 
@@ -224,6 +364,8 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client, substi
 		// filled maps a subject as it arrived onto what it stands for: the
 		// BSN, or this source's pseudonym of the citizen.
 		filled := map[string]string{}
+		// The consent the token is for, once it has been read.
+		consentID := ""
 		if !underConsent {
 			for _, subject := range subjects {
 				filled[subject] = subject
@@ -244,6 +386,7 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client, substi
 					return
 				}
 			}
+			consentID = result.ConsentID
 			if substituteErr != nil {
 				slog.Error("subject substitution failed", "err", substituteErr.Error())
 				http.Error(w, "the subject of the consent could not be filled in", http.StatusBadRequest)
@@ -295,14 +438,26 @@ func forwardHandler(cfg config, client *http.Client, logbook *ldv.Client, substi
 		defer resp.Body.Close()
 
 		// The forward has happened; log it before the response leaves this
-		// process. If the logbook does not confirm, the caller gets an error
-		// instead of data — the strongest ordering available without a
-		// two-phase commit, and the reason this is fail-closed rather than
-		// best-effort.
+		// process. The record goes to the local outbox, which delivers it to
+		// the logbook later; the caller gets an error instead of data only
+		// when that outbox write fails, not when a logbook does not confirm.
 		if err := logForward(r.Context(), logbook, cfg, forward, subjects, filled, resp.StatusCode); err != nil {
 			ldv.LogFailure("dataverwerking.bronquery-doorgifte", err)
 			http.Error(w, "the forward could not be logged; withholding the response", http.StatusInternalServerError)
 			return
+		}
+
+		// A delivery under a consent: the source answered 200 to a request
+		// that carried a consent token. Anything else delivered nothing
+		// under the consent and leaves no registration and no record.
+		if delivered != nil && underConsent && resp.StatusCode == http.StatusOK {
+			if err := delivered.record(r.Context(), forward, consentID, subjectNamed(subjects, filled)); err != nil {
+				slog.Error("the delivery could not be recorded; withholding the response", "err", err.Error())
+				span.SetAttributes(attribute.Bool("gbo.sidecar.delivery_recorded", false))
+				http.Error(w, "the delivery could not be recorded; withholding the response", http.StatusInternalServerError)
+				return
+			}
+			span.SetAttributes(attribute.Bool("gbo.sidecar.delivery_recorded", true))
 		}
 
 		for k, vv := range resp.Header {
@@ -466,6 +621,10 @@ func newMux(cfg config, client *http.Client, logbook *ldv.Client) (http.Handler,
 	if err != nil {
 		return nil, err
 	}
+	delivered, err := newDeliveries(cfg, client)
+	if err != nil {
+		return nil, err
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -476,7 +635,7 @@ func newMux(cfg config, client *http.Client, logbook *ldv.Client) (http.Handler,
 	if graphQLPath == "" {
 		graphQLPath = defaultGraphQLPath
 	}
-	forward := transportOnly(graphQLPath, forwardHandler(cfg, client, logbook, substitute))
+	forward := transportOnly(graphQLPath, forwardHandler(cfg, client, logbook, substitute, delivered))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/health" {
 			mux.ServeHTTP(w, r)
@@ -551,7 +710,10 @@ func main() {
 	// keys: it would pass the placeholder on to the source instead.
 	mux, err := newMux(cfg, client, logbook)
 	if err != nil {
-		fatal("reading the decryption keys", err)
+		fatal("configuring the sidecar", err)
+	}
+	if cfg.UsageIndexURL == "" {
+		slog.Warn("no DATA_USAGE_INDEX_URL configured; this bron records no deliveries under a consent")
 	}
 	if cfg.SubjectKeysDir == "" {
 		slog.Warn("no SUBJECT_KEYS_DIR configured; this bron refuses consent-based requests")

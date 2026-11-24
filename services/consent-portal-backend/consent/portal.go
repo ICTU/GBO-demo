@@ -31,6 +31,19 @@ type Portal struct {
 	// can be looked up — its read API, or a contact page when it has none —
 	// recorded as the pseudonymisation's next logbook. Empty means unknown.
 	PseudonymsLogbook string
+	// Registrations is the DvTP admission register, which VerifyRequest
+	// checks a request to start a consent flow against. Nil refuses every
+	// such request: the checks fail closed.
+	Registrations Registrations
+	// KnownScopes are the data sets the portal can describe to a citizen.
+	// VerifyRequest refuses a request for any other.
+	KnownScopes []string
+	// Requests keeps the pushed requests that passed the checks. Nil
+	// accepts none.
+	Requests *RequestStore
+	// Codes keeps the codes of granted decisions until the provider
+	// exchanges them. Nil gives none: a grant then fails.
+	Codes *CodeStore
 
 	authorisations authorisationList
 }
@@ -290,6 +303,28 @@ func (p *Portal) RevokeConsent(ctx context.Context, citizen BSN, consentID strin
 	}
 	emit("consent_revoked", "consent-register", map[string]any{"consent_id": consentID})
 	return nil
+}
+
+// ConsentUses returns when the caller's consent was used. A consent of
+// another citizen is reported as not found, not as forbidden: whether a
+// consent ID exists is not the caller's to learn (#602).
+func (p *Portal) ConsentUses(ctx context.Context, citizen BSN, consentID string) (Usage, error) {
+	subjectRef, err := p.subjectRefFor(ctx, citizen, "toestemming-gebruik-inzien")
+	if err != nil {
+		return Usage{}, err
+	}
+	rec, err := p.Consents.Get(ctx, consentID)
+	if err != nil {
+		return Usage{}, err // already wraps ErrNotFound on 404
+	}
+	if rec.SubjectRef != subjectRef {
+		return Usage{}, ErrNotFound
+	}
+	usage, err := p.Consents.Uses(ctx, consentID)
+	if err != nil {
+		return Usage{}, fmt.Errorf("uses: %w", err)
+	}
+	return usage, nil
 }
 
 // polymorphicFor returns the polymorphic values the portal keeps for this

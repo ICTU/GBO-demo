@@ -31,7 +31,7 @@ test_allow_the_simulation_asip_with_a_bsn if {
 # ── Actor ───────────────────────────────────────────────────────────────
 
 test_deny_other_actors if {
-	every actor in [fx.eudi_issuer, fx.hv, "00000001234567890000"] {
+	every actor in [fx.eudi_issuer, fx.hv, "99999999900000001400"] {
 		_reasons(_request(actor, "999991772")) == {"ACTOR_NOT_ALLOWED"}
 	}
 }

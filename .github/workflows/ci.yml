@@ -57,7 +57,7 @@ jobs:
         service: ${{ fromJSON(needs.changes.outputs.go) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: '1.26'
           cache-dependency-path: services/${{ matrix.service }}/go.*
@@ -78,7 +78,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: '1.26'
           cache-dependency-path: conformance/check/go.*
@@ -122,7 +122,7 @@ jobs:
           --health-retries 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: '1.26'
           cache-dependency-path: services/source-registry/go.*
@@ -154,7 +154,7 @@ jobs:
           --health-retries 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: '1.26'
           cache-dependency-path: services/eudi-credential-issuer/go.*
@@ -176,7 +176,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # A separate module: OID4VCgo needs a newer Go than the services.
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: services/eudi-credential-issuer/interop/go.mod
           cache-dependency-path: services/eudi-credential-issuer/interop/go.*
@@ -250,6 +250,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: bundled schemas match the running sources
         run: ./scripts/check-schema-drift.sh
+
+  # Runs on every change, unlike the path-filtered jobs: a leak can be in any file.
+  safety:
+    name: Safety audit — no real OINs, internal hosts or secrets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: scripts/check-safety.sh
+        run: ./scripts/check-safety.sh
 
   image-manifest:
     name: Image manifest — every Dockerfile published
@@ -439,7 +448,7 @@ jobs:
   result:
     name: CI result
     runs-on: ubuntu-latest
-    needs: [changes, go, conformance, source-registry, credential-issuer-db, credential-issuer-interop, rego, schema-drift, image-manifest, chart, frontend, scripts, docker]
+    needs: [changes, go, conformance, source-registry, credential-issuer-db, credential-issuer-interop, rego, schema-drift, safety, image-manifest, chart, frontend, scripts, docker]
     if: always()
     steps:
       - name: Evaluate job results

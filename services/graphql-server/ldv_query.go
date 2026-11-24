@@ -111,8 +111,9 @@ func newSourceLogbook(client *ldv.Client, cfg ldvQueryConfig) *sourceLogbook {
 // than about the logbook protocol.
 type ldvQueryConfig struct {
 	// YearActivityTemplate turns a belastingjaar into a register reference,
-	// e.g. "bd-ib-%d@v1". Empty means this bron does not describe its
-	// verwerkingsactiviteiten per year.
+	// the full activity URI, e.g. ".../verwerkingsactiviteiten/bd-ib-%d/v1".
+	// Empty means this bron does not describe its verwerkingsactiviteiten per
+	// year.
 	YearActivityTemplate string
 }
 

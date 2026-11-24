@@ -20,6 +20,7 @@ type memoryRepository struct {
 	participants map[string]onboarding.Participant
 	toggleErr    error
 	updateErr    error
+	listErr      error
 }
 
 func newTestService(t *testing.T) (*onboarding.Service, *memoryRepository) {
@@ -46,6 +47,9 @@ func newTestService(t *testing.T) (*onboarding.Service, *memoryRepository) {
 }
 
 func (r *memoryRepository) List(context.Context) ([]onboarding.Participant, error) {
+	if r.listErr != nil {
+		return nil, r.listErr
+	}
 	participants := make([]onboarding.Participant, 0, len(r.participants))
 	for _, participant := range r.participants {
 		participants = append(participants, participant)
@@ -131,7 +135,7 @@ func TestOpenFTVParticipantsEndpoint(t *testing.T) {
 func TestParticipantFormCreatesParticipant(t *testing.T) {
 	service, repository := newTestService(t)
 	form := url.Values{
-		"peer_id":         {"00000001234567890000"},
+		"peer_id":         {"99999999900000001400"},
 		"name":            {"Hypotheekadvies BV"},
 		"active":          {"on"},
 		"source_peer_ids": {"99999999900000000200"},
@@ -150,7 +154,7 @@ func TestParticipantFormCreatesParticipant(t *testing.T) {
 func TestParticipantFormRejectsMissingSource(t *testing.T) {
 	service, _ := newTestService(t)
 	form := url.Values{
-		"peer_id": {"00000001234567890000"},
+		"peer_id": {"99999999900000001400"},
 		"name":    {"Hypotheekadvies BV"},
 		"active":  {"on"},
 	}
@@ -245,7 +249,7 @@ func TestParticipantFormRejectsCrossSiteAndMissingToken(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			service, repository := newTestService(t)
 			form := url.Values{
-				"peer_id":         {"00000001234567890000"},
+				"peer_id":         {"99999999900000001400"},
 				"name":            {"Hypotheekadvies BV"},
 				"source_peer_ids": {"99999999900000000200"},
 				"csrf_token":      {test.token},
@@ -270,12 +274,65 @@ func TestToggleStorageFailureReturnsUnavailable(t *testing.T) {
 	service, repository := newTestService(t)
 	repository.toggleErr = errors.New("database locked")
 	recorder := httptest.NewRecorder()
-	request := formRequest(http.MethodPost, "/participants/00000001234567890000/toggle", url.Values{})
+	request := formRequest(http.MethodPost, "/participants/99999999900000001400/toggle", url.Values{})
 	testHandler(service).ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusInternalServerError)
 	}
 	if !strings.Contains(recorder.Body.String(), "register unavailable") {
 		t.Fatalf("body = %q", recorder.Body.String())
+	}
+}
+
+func TestConsentPortalParticipantStorageFailureReturnsUnavailable(t *testing.T) {
+	service, repository := newTestService(t)
+	repository.listErr = errors.New("database locked")
+	recorder := httptest.NewRecorder()
+	testHandler(service).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/internal/consent-portal/participants/99999999900000000300", nil))
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusInternalServerError)
+	}
+	if !strings.Contains(recorder.Body.String(), "register unavailable") {
+		t.Fatalf("body = %q", recorder.Body.String())
+	}
+}
+
+func TestConsentPortalParticipantEndpoint(t *testing.T) {
+	repository := &memoryRepository{participants: make(map[string]onboarding.Participant)}
+	service, err := onboarding.NewService(repository, onboarding.Configuration{
+		SourceHolders: []onboarding.Source{{PeerID: "99999999900000000200", Name: "Belastingdienst"}},
+		SeedParticipants: []onboarding.Participant{
+			{PeerID: "99999999900000000300", Name: "Demo Hypotheekverlener BV", Active: true, AllowedSourcePeerIDs: []string{"99999999900000000200"}},
+		},
+		ServiceProviders: []onboarding.ServiceProvider{{
+			PeerID:          "99999999900000000300",
+			ReturnLocations: []string{"http://localhost:9001/return"},
+			Services:        []onboarding.ProviderService{{Service: "aangiftegegevens", Purpose: "Hypotheek-aanvraag"}},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.SeedDemo(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+	testHandler(service).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/internal/consent-portal/participants/99999999900000000300", nil))
+	if recorder.Code != http.StatusOK || recorder.Header().Get("Content-Type") != "application/json" {
+		t.Fatalf("status = %d, Content-Type = %q", recorder.Code, recorder.Header().Get("Content-Type"))
+	}
+	want := `{"peer_id":"99999999900000000300","name":"Demo Hypotheekverlener BV","active":true,` +
+		`"services":[{"service":"aangiftegegevens","purpose":"Hypotheek-aanvraag"}],"return_locations":["http://localhost:9001/return"]}`
+	if got := strings.TrimSpace(recorder.Body.String()); got != want {
+		t.Fatalf("body = %s, want %s", got, want)
+	}
+
+	for _, peerID := range []string{"99999999900000009999", "unknown"} {
+		recorder = httptest.NewRecorder()
+		testHandler(service).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/internal/consent-portal/participants/"+peerID, nil))
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("%s: status = %d, want 404", peerID, recorder.Code)
+		}
 	}
 }

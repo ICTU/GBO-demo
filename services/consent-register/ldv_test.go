@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"consent-register/uses"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -41,7 +42,7 @@ func registerUnderTest(t *testing.T, logbook *ldvtest.Logbook) (string, ConsentS
 	}
 	store := NewStore()
 	client := newRegisterLogbook(logbook.Client(t, "consent-register"))
-	server := httptest.NewServer(newMux(store, issuer, client))
+	server := httptest.NewServer(newMux(store, issuer, client, uses.Service{}))
 	t.Cleanup(server.Close)
 	return server.URL, store, client
 }
@@ -107,7 +108,7 @@ func grant(t *testing.T, url string) string {
 	body, err := json.Marshal(map[string]any{
 		"encrypted_subject":  testEncryptedSubject,
 		"subject_ref":        testSubjectRef,
-		"dienstverlener_oin": "00000001234567890000",
+		"dienstverlener_oin": "99999999900000001400",
 		"scopes":             []string{"bd:ib:2025"},
 		"use_case":           "hypotheek",
 	})
@@ -311,12 +312,12 @@ func TestAFailedStoreLeavesNeitherConsentNorRecord(t *testing.T) {
 	}
 	store := &failingStore{Store: NewStore()}
 	client := newRegisterLogbook(logbook.Client(t, "consent-register"))
-	server := httptest.NewServer(newMux(store, issuer, client))
+	server := httptest.NewServer(newMux(store, issuer, client, uses.Service{}))
 	defer server.Close()
 
 	body, err := json.Marshal(map[string]any{
 		"encrypted_subject": testEncryptedSubject, "subject_ref": testSubjectRef,
-		"dienstverlener_oin": "00000001234567890000", "scopes": []string{"bd:ib:2025"},
+		"dienstverlener_oin": "99999999900000001400", "scopes": []string{"bd:ib:2025"},
 	})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)

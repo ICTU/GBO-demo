@@ -29,6 +29,9 @@ Before opening a PR:
 
    # Frontend type-check
    cd <frontend> && npx tsc --noEmit
+
+   # No real OINs, internal hostnames or secrets (demo OINs: 99999999...)
+   scripts/check-safety.sh
    ```
 
 2. Keep the demo runnable end-to-end (`aspire run` in `aspire/` must still work).

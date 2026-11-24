@@ -76,7 +76,7 @@ From the description the ASIP derives, per request, one query with only the fiel
 
 ## Layout
 
-Ports and adapters, as `AGENTS.md` asks for a service with an authorization boundary:
+Ports and adapters, as [`services/AGENTS.md`](../AGENTS.md) asks for a service with an authorization boundary:
 
 | Package | |
 |---|---|

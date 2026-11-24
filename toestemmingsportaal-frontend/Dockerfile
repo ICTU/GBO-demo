@@ -8,9 +8,4 @@ RUN npm run build
 FROM nginx:1.31-alpine@sha256:fb4658584bd9a916ffb6f6e365f97c25cfdb2923801f551ea08356e695f14ff7
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY runtime-config.js.template /etc/nginx/templates/runtime-config.js.template
-ENV NGINX_ENVSUBST_OUTPUT_DIR=/usr/share/nginx/html
-# envsubst only fills variables that are set; declare them empty so an unset
-# one falls back to the app's default instead of staying a literal ${VAR}.
-ENV ALLOWED_RETURN_ORIGINS=""
 EXPOSE 80

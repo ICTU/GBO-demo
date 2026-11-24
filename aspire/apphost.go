@@ -147,6 +147,10 @@ func (m *model) build() {
 	publicHost := m.configOr("Gbo:PublicHost", "localhost")
 	publicScheme := m.configOr("Gbo:PublicScheme", "http")
 	publicURL := func(port int) string { return fmt.Sprintf("%s://%s:%d", publicScheme, publicHost, port) }
+	// Fixed host ports of the frontends: they link to each other, the
+	// onboarding register holds the providers' return locations and the
+	// landing page shows the URLs.
+	const landingPort, dvMockPort, consentPortalPort, devPortalPort, keyperPort = 9000, 9001, 9002, 9003, 9004
 
 	// ── Secrets ──────────────────────────────────────────────────────────
 	// Passwords, tokens and keys are generated on first run and kept in the
@@ -300,6 +304,29 @@ func (m *model) build() {
 			WithEnvironment("LDV_READ_TOKEN", ldvReadToken).
 			WithVolume("/data", aspire.VolumeName("gbo-"+name+"-data"))
 	}
+	// The delivery logbooks (#689): where a source's sidecar records each
+	// delivery under a consent, apart from the source's own logbook. Their
+	// read API (4018) is the FSC service ldv-lezen-* behind the source's
+	// Inway: no token, one traceId, a reduced answer (#686). The consent
+	// register reads each use back there.
+	for _, l := range [][3]string{
+		{"logboek-levering-bd", "bd", "https://logboek.belastingdienst.nl/ldv-lezen-bd/data-processing-operations"},
+		{"logboek-levering-brp", "brp", "https://logboek.rvig.nl/ldv-lezen-brp/data-processing-operations"},
+		{"logboek-levering-lvg", "lvg", "https://logboek.lvg.test/ldv-lezen-lvg/data-processing-operations"},
+	} {
+		name, register, logbookID := l[0], l[1], l[2]
+		if register == "lvg" && !on("dvtp") {
+			continue
+		}
+		logboeken[name] = goService(name, "services/ldv-logboek/Dockerfile", 4016, "", 0).
+			WithEnvironment("DATABASE_PATH", "/data/logboek.db").
+			WithEnvironment("REGISTER_PATH", fmt.Sprintf("/config/verwerkingsactiviteiten-%s.json", register)).
+			WithEnvironment("LDV_LOGBOOK_ID", logbookID).
+			WithEnvironment("LDV_WRITE_TOKEN", ldvWriteToken).
+			WithEnvironment("LDV_READ_TOKEN", ldvReadToken).
+			WithEnvironment("LDV_FSC_READ_PORT", "4018").
+			WithVolume("/data", aspire.VolumeName("gbo-"+name+"-data"))
+	}
 
 	// ── OpenFTV: decision log database and PDP ───────────────────────────
 	// The Manager's database and the Authorization Decision Log, each in its
@@ -331,6 +358,9 @@ func (m *model) build() {
 		WithHttpHealthCheck(aspire.HttpHealthCheckPath("/health")).
 		WithEnvironment("DATABASE_PATH", "/data/onboarding.db").
 		WithEnvironment("SEED_DEMO_DATA", "true").
+		// Expanded in the registered return locations of the demo providers.
+		WithEnvironment("DIENSTVERLENER_PUBLIC_URL", publicURL(dvMockPort)).
+		WithEnvironment("KEYPER_PUBLIC_URL", publicURL(keyperPort)).
 		WithVolume("/data", aspire.VolumeName("gbo-dvtp-onboarding-data"))
 
 	consentRegister := goService("consent-register", "services/consent-register/Dockerfile", 4002, "", 0).
@@ -341,7 +371,29 @@ func (m *model) build() {
 		WithEnvironment("LDV_LOGBOOK_URL", "http://logboek-toestemming:4016").
 		WithEnvironment("LDV_WRITE_TOKEN", ldvWriteToken).
 		WithEnvironment("LDV_SUBJECT_PSEUDONYM_KEY", pseudonymKeyGbo).
+		// Consent usage (#687): GET /consents/{id}/uses looks the consent up
+		// in the data usage index and reads each use back from the delivery
+		// logbook of its source, both over FSC through cr-outway.
+		WithEnvironment("DATA_USAGE_INDEX_URL", "http://cr-outway:8080/data-usage-lookup").
+		WithEnvironment("CONSENT_USAGE_READ_SERVICES", "99999999900000000200/ldv-lezen-bd=http://cr-outway:8080/ldv-lezen-bd;99999999900000000200/ldv-lezen-lvg=http://cr-outway:8080/ldv-lezen-lvg;99999999900000000400/ldv-lezen-brp=http://cr-outway:8080/ldv-lezen-brp").
+		WithEnvironment("CONSENT_USAGE_SOURCES", "99999999900000000200/ldv-lezen-bd=Belastingdienst;99999999900000000200/ldv-lezen-lvg=Landelijke Voorziening Gebouwen;99999999900000000400/ldv-lezen-brp=Basisregistratie Personen").
+		WithEnvironment("CONSENT_USAGE_SERVICE_PROVIDERS", "99999999900000000300=Hypotheek-BV;99999999900000001000=Installatie Register").
 		WaitFor(logboeken["logboek-toestemming"])
+
+	// The data usage index (#687): under a legal basis (today a consent), a
+	// source delivered data under a trace, at a time. Pointers only. It runs
+	// under the consent register's peer, as two FSC services behind cr-inway:
+	// data-usage-index (4019), where the sidecars register a delivery, and
+	// data-usage-lookup (4020), for the register only. Every delivery under a
+	// consent waits for it: the sidecar withholds the data when the
+	// registration fails.
+	otlpViaCollector(m.dockerfile("data-usage-index", "../services/data-usage-index", "").
+		WithHttpEndpoint(aspire.HttpEndpointTargetPort(4019), aspire.HttpEndpointName("http")).
+		WithHttpEndpoint(aspire.HttpEndpointTargetPort(4020), aspire.HttpEndpointName("lookup")).
+		WithHttpHealthCheck(aspire.HttpHealthCheckPath("/health"), aspire.HttpHealthCheckEndpointName("lookup")).
+		// Next to the FSC contract: only the register's peer may look up.
+		WithEnvironment("LOOKUP_PEERS", "99999999900000000700").
+		WithVolume("/data", aspire.VolumeName("gbo-data-usage-index-data")))
 
 	pdpBundleManager := ""
 	if on("manager") {
@@ -436,8 +488,19 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 
 	// The source-side sidecar in front of a source: decrypts the polymorphic
 	// identity and writes the source's logbook records.
-	sidecar := func(name, upstream, logbook string, pseudonymKey aspire.ParameterResource, activityBase, activityPrefix string, source aspire.ContainerResource) aspire.ContainerResource {
+	//
+	// Deliveries under a consent (#687, #689): after a 200 on a request with
+	// a consent token it registers the trace at the data usage index through
+	// its peer's Outway, then writes a delivery record in its delivery
+	// logbook. If either fails the data is withheld. The logbook ID is the
+	// peer ID plus the name of that logbook's read service.
+	sidecar := func(name, upstream, logbook string, pseudonymKey aspire.ParameterResource, activityBase, activityPrefix string, source aspire.ContainerResource, outway, peerID string) aspire.ContainerResource {
 		return goService(name, "services/bron-sidecar/Dockerfile", 4011, "", 0).
+			WithEnvironment("DATA_USAGE_INDEX_URL", fmt.Sprintf("http://%s:8080/data-usage-index", outway)).
+			WithEnvironment("DATA_USAGE_LOGBOOK_ID", fmt.Sprintf("%s/ldv-lezen-%s", peerID, activityPrefix)).
+			WithEnvironment("DELIVERY_LOGBOOK_URL", fmt.Sprintf("http://logboek-levering-%s:4016", activityPrefix)).
+			WithEnvironment("DELIVERY_ACTIVITY", fmt.Sprintf("%s/%s-levering-onder-toestemming/v1", activityBase, activityPrefix)).
+			WaitFor(logboeken["logboek-levering-"+activityPrefix]).
 			WithEnvironment("UPSTREAM_URL", upstream).
 			WithEnvironment("DECRYPTION_URL", "http://decryption-component:4003").
 			WithEnvironment("SUBJECT_KEYS_DIR", "/app/config/demo-keys").
@@ -455,9 +518,9 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 	}
 
 	sidecar("bron-sidecar", "http://graphql-server:4000", "logboek-bd", pseudonymKeyBd,
-		"https://logboek.belastingdienst.nl/verwerkingsactiviteiten", "bd", graphqlServer)
+		"https://logboek.belastingdienst.nl/verwerkingsactiviteiten", "bd", graphqlServer, "bd-outway", "99999999900000000200")
 	sidecar("brp-sidecar", "http://brp-graphql-server:4001", "logboek-brp", pseudonymKeyBrp,
-		"https://logboek.rvig.nl/verwerkingsactiviteiten", "brp", brpGraphqlServer)
+		"https://logboek.rvig.nl/verwerkingsactiviteiten", "brp", brpGraphqlServer, "brp-outway", "99999999900000000400")
 
 	var lvgGraphqlServer aspire.ContainerResource
 	if on("dvtp") {
@@ -469,7 +532,7 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 			WithVolume("/data", aspire.VolumeName("gbo-ldv-outbox-lvg-graphql-server")).
 			WaitFor(logboeken["logboek-lvg"])
 		sidecar("lvg-sidecar", "http://lvg-graphql-server:4008", "logboek-lvg", pseudonymKeyLvg,
-			"https://logboek.lvg.test/verwerkingsactiviteiten", "lvg", lvgGraphqlServer)
+			"https://logboek.lvg.test/verwerkingsactiviteiten", "lvg", lvgGraphqlServer, "bd-outway", "99999999900000000200")
 	}
 
 	// ── FSC network (OpenFSC v2.4.0) ─────────────────────────────────────
@@ -649,21 +712,26 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 			addFscPeer(peerSpec{prefix: "edi", pkiDir: "orgs/edi-issuer/pki", certName: "edi-issuer", bootstrap: "bootstrap-edi-issuer.sh", db: "edi", controllerPort: 8094,
 				outway: "EdiOutway-01", outwayPort: 8087})
 		}
+		// The source peers and the consent register's peer also run an
+		// Outway, through which they reach the data usage index (sources)
+		// and the index's lookup and the delivery logbooks (register).
 		addFscPeer(peerSpec{prefix: "bd", pkiDir: "orgs/belastingdienst-mock/pki", certName: "bd-mock", bootstrap: "bootstrap-bd-mock.sh", db: "bd", controllerPort: 8095,
-			inway: "BdInway-01", authzen: true})
+			inway: "BdInway-01", outway: "BdOutway-01", authzen: true})
 		addFscPeer(peerSpec{prefix: "hv", pkiDir: "orgs/hypotheekverlener-mock/pki", certName: "hypotheekverlener", bootstrap: "bootstrap-hypotheekverlener.sh", db: "hv", controllerPort: 8096,
 			outway: "HvOutway-01"})
 		addFscPeer(peerSpec{prefix: "cr", pkiDir: "orgs/consent-register/pki", certName: "consent-register", bootstrap: "bootstrap-consent-register.sh", db: "cr", controllerPort: 8098,
-			inway: "CrInway-01", authzen: true})
+			inway: "CrInway-01", outway: "CrOutway-01", authzen: true})
 		addFscPeer(peerSpec{prefix: "pdp", pkiDir: "orgs/gbo-pdp/pki", certName: "gbo-pdp", bootstrap: "bootstrap-gbo-pdp.sh", db: "pdp", controllerPort: 8099,
 			outway: "PdpOutway-01"})
 		addFscPeer(peerSpec{prefix: "ir", pkiDir: "orgs/installatieregister/pki", certName: "installatieregister", bootstrap: "bootstrap-installatieregister.sh", db: "ir", controllerPort: 8100,
 			outway: "IrOutway-01"})
-		if on("full") {
-			// The separate BRP/RvIG provider peer (...0400). No demo flow uses
-			// it: the demo publishes BRP through the BD participant (...0200).
+		if on("dvtp") {
+			// The RvIG provider peer (...0400). The data flows publish BRP
+			// through the BD participant (...0200); this peer registers the
+			// BRP deliveries under a consent at the data usage index and
+			// publishes their delivery logbook (ldv-lezen-brp).
 			addFscPeer(peerSpec{prefix: "brp", pkiDir: "orgs/brp-mock/pki", certName: "brp-mock", bootstrap: "bootstrap-brp-mock.sh", db: "brp", controllerPort: 8097,
-				inway: "BrpInway-01", authzen: true})
+				inway: "BrpInway-01", outway: "BrpOutway-01", authzen: true})
 		}
 		if on("integrator") {
 			addFscPeer(peerSpec{prefix: "int", pkiDir: "orgs/integrator/pki", certName: "integrator", bootstrap: "bootstrap-integrator.sh", db: "int", controllerPort: 8101,
@@ -691,16 +759,19 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 		// mTLS against the Managers and Controllers, in the order the
 		// Makefile ran them. Each one waits for the previous.
 		var previous aspire.ContainerResource
-		seed := func(name, script string, env ...[2]string) {
-			s := pkiStep(name, script, env...)
-			for _, peer := range fscPeers {
-				s.WaitFor(peer.manager).WaitFor(peer.controller)
-			}
+		step := func(name string, s aspire.ContainerResource) {
 			if previous != nil {
 				s.WaitForCompletion(previous)
 			}
 			previous = s
 			m.seeds = append(m.seeds, name)
+		}
+		seed := func(name, script string, env ...[2]string) {
+			s := pkiStep(name, script, env...)
+			for _, peer := range fscPeers {
+				s.WaitFor(peer.manager).WaitFor(peer.controller)
+			}
+			step(name, s)
 		}
 
 		// BD publishes bri (BD source); the EDI issuer connects to it.
@@ -730,6 +801,42 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 				[2]string{"CONSUMER_CONTROLLER_DB", "fsc_pdp_controller"},
 				[2]string{"GRANT_LINK_PATH", "/consent-status"},
 				[2]string{"OUTWAY_NAME", "PdpOutway-01"})
+			// The register's peer publishes the data usage index; the source
+			// peers connect to it, and the register itself to its lookup.
+			seed("fsc-seed-data-usage-index", "scripts/seed-data-usage-index.sh")
+			// Providers push their request to start a consent flow to the
+			// consent portal over FSC: the register's peer publishes
+			// consent-authorization (the portal backend's FSC listener), and
+			// Hypotheek-BV and the Installatie Register connect to it. The
+			// register's Manager signs only for a peer the onboarding register
+			// admits; the precheck says so when an existing register volume
+			// predates that admission, instead of letting the seed time out.
+			step("consent-authorization-admission", m.container("consent-authorization-admission", "gbo-demo/pki-tools", "local").
+				WithImagePullPolicy(aspire.ImagePullPolicyNever).
+				WithBindMount(m.repo("scripts/check-consent-authorization-admission.sh"), "/check.sh", aspire.BindMountIsReadOnly(true)).
+				WithEntrypoint("bash").
+				WithArgs([]string{"/check.sh"}).
+				WaitForCompletion(pkiToolsImage).
+				WaitFor(dvtpOnboardingRegister))
+			consentAuthorization := func(name, peer, org, pkiOrg, cert, db, outway string) {
+				seed(name, "scripts/seed-bri-contract.sh",
+					[2]string{"SERVICE_NAME", "consent-authorization"},
+					[2]string{"SERVICE_ENDPOINT_URL", "http://consent-portal-backend:4013"},
+					[2]string{"SERVICE_INWAY_ADDRESS", "https://cr-inway:443"},
+					[2]string{"PROVIDER_PEER_ID", "99999999900000000700"},
+					[2]string{"PROVIDER_CONTROLLER_URL", "https://cr-controller:9444"},
+					[2]string{"PROVIDER_MANAGER_URL", "https://cr-manager:9443"},
+					[2]string{"PROVIDER_INTERNAL_DIR", "/work/orgs/consent-register/pki/internal"},
+					[2]string{"CONSUMER_PEER_ID", peer},
+					[2]string{"CONSUMER_MANAGER_URL", "https://" + org + "-manager:9443"},
+					[2]string{"CONSUMER_INTERNAL_DIR", "/work/orgs/" + pkiOrg + "/pki/internal"},
+					[2]string{"CONSUMER_ORG_CERT", "/work/orgs/" + pkiOrg + "/pki/org/" + cert + ".pem"},
+					[2]string{"CONSUMER_CONTROLLER_DB", db},
+					[2]string{"GRANT_LINK_PATH", "/consent-authorization"},
+					[2]string{"OUTWAY_NAME", outway})
+			}
+			consentAuthorization("fsc-seed-consent-authorization-hv", "99999999900000000300", "hv", "hypotheekverlener-mock", "hypotheekverlener", "fsc_hv_controller", "HvOutway-01")
+			consentAuthorization("fsc-seed-consent-authorization-ir", "99999999900000001000", "ir", "installatieregister", "installatieregister", "fsc_ir_controller", "IrOutway-01")
 			// LVG on the shared provider peer; the Installatie Register consumes it.
 			seed("fsc-seed-lvg", "scripts/seed-bri-contract.sh",
 				[2]string{"SERVICE_NAME", "lvg"},
@@ -741,6 +848,9 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 				[2]string{"CONSUMER_CONTROLLER_DB", "fsc_ir_controller"},
 				[2]string{"GRANT_LINK_PATH", "/lvg"},
 				[2]string{"OUTWAY_NAME", "IrOutway-01"})
+			// The read API of each source's delivery logbook; the register's
+			// peer connects to it through cr-outway.
+			seed("fsc-seed-ldv-lezen", "scripts/seed-ldv-lezen.sh")
 		}
 		if on("onboarding") {
 			// The logical RvIG source and the two metadata services on the BD peer.
@@ -787,6 +897,12 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 		"https://logboek.gbo.overheid.nl/toestemming/data-processing-operations=GBO toestemming=http://logboek-toestemming:4016",
 		"https://logboek.installatieregister.test/data-processing-operations=Installatie Register=http://logboek-ir:4016=start",
 		"https://logboek.lvg.test/data-processing-operations=LVG=http://logboek-lvg:4016",
+		"https://logboek.belastingdienst.nl/ldv-lezen-bd/data-processing-operations=BD leveringen=http://logboek-levering-bd:4016=start",
+		"https://logboek.rvig.nl/ldv-lezen-brp/data-processing-operations=BRP leveringen=http://logboek-levering-brp:4016=start",
+	}
+	if on("dvtp") {
+		ldvLogbookList = append(ldvLogbookList,
+			"https://logboek.lvg.test/ldv-lezen-lvg/data-processing-operations=LVG leveringen=http://logboek-levering-lvg:4016=start")
 	}
 	if on("eudi") {
 		ldvLogbookList = append(ldvLogbookList[:1], append([]string{
@@ -857,12 +973,37 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 			WithEnvironment("LDV_LOGBOOK_URL", "http://logboek-toestemming:4016").
 			WithEnvironment("LDV_WRITE_TOKEN", ldvWriteToken).
 			WithEnvironment("LDV_BSNK_NEXT_LOGBOOK_ID", "https://github.com/ICTU/GBO-demo/tree/main/services/bsnk-mock").
+			// A request to start a consent flow is checked against the
+			// provider's registration in the DvTP admission register.
+			WithEnvironment("ONBOARDING_REGISTER_URL", "http://dvtp-onboarding-register:4015").
+			// The data sets the portal can describe to a citizen; a request
+			// for any other is refused.
+			WithEnvironment("CONSENT_KNOWN_SCOPES", m.configOr("Gbo:ConsentKnownScopes", "bd:ib:2025,bd:ib:2024,lvg:vbo:eigendom")).
+			// Providers push their request (POST /par) to this listener,
+			// published as the FSC service consent-authorization through
+			// cr-inway. It trusts the Fsc-Authorization header the Inway
+			// forwards.
+			WithEnvironment("FSC_PORT", "4013").
+			// How long a pushed request waits for the citizen (expires_in).
+			WithEnvironment("PAR_REQUEST_LIFETIME", m.configOr("Gbo:ParRequestLifetime", "10m")).
 			WithVolume("/data", aspire.VolumeName("gbo-ldv-outbox-consent-portal-backend")).
+			WaitFor(dvtpOnboardingRegister).
 			WaitFor(bsnkMock).
 			WaitFor(consentRegister).
 			WaitFor(logboeken["logboek-toestemming"])
 
 		// A consumer backend, calling its source through its own FSC Outway.
+		// With a consent client, POST /api/consent/start pushes the request to
+		// the consent portal over FSC (grant link /consent-authorization) and
+		// /api/consent/complete exchanges the code. The redirect URI must
+		// equal a return location registered for the peer in the onboarding
+		// register.
+		withConsentClient := func(c aspire.ContainerResource, peerID, redirectURI, outway string) aspire.ContainerResource {
+			return c.WithEnvironment("CONSENT_CLIENT_ID", peerID).
+				WithEnvironment("CONSENT_REDIRECT_URI", redirectURI).
+				WithEnvironment("CONSENT_PORTAL_URL", publicURL(consentPortalPort)).
+				WithEnvironment("CONSENT_AUTHORIZATION_URL", fmt.Sprintf("http://%s:8080/consent-authorization", outway))
+		}
 		consumer := func(name string, port int, outway, outwayPath, sector, logbook, nextLogbooks, queryKind string) aspire.ContainerResource {
 			c := goService(name, "services/dienstverlener-backend/Dockerfile", port, "", 0).
 				WithEnvironment("PORT", strconv.Itoa(port)).
@@ -881,10 +1022,12 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 			return afterFsc(c)
 		}
 
-		dienstverlenerBackend = consumer("dienstverlener-backend", 4006, "hv-outway", "/bri/graphql", "hypotheekverlener",
-			"logboek-afnemer", "bd=https://logboek.belastingdienst.nl/data-processing-operations", "")
-		irBackend = consumer("ir-backend", 4010, "ir-outway", "/lvg/graphql", "installatieregister",
-			"logboek-ir", "lvg=https://logboek.lvg.test/data-processing-operations", "lvg")
+		dienstverlenerBackend = withConsentClient(consumer("dienstverlener-backend", 4006, "hv-outway", "/bri/graphql", "hypotheekverlener",
+			"logboek-afnemer", "bd=https://logboek.belastingdienst.nl/data-processing-operations", ""),
+			"99999999900000000300", publicURL(dvMockPort)+"/return", "hv-outway")
+		irBackend = withConsentClient(consumer("ir-backend", 4010, "ir-outway", "/lvg/graphql", "installatieregister",
+			"logboek-ir", "lvg=https://logboek.lvg.test/data-processing-operations", "lvg"),
+			"99999999900000001000", publicURL(keyperPort)+"/verzoek/terug", "ir-outway")
 		if on("integrator") {
 			consumer("integrator-backend", 4023, "int-outway", "/bri/graphql", "hypotheekverlener",
 				"logboek-afnemer", "bd=https://logboek.belastingdienst.nl/data-processing-operations", "")
@@ -1371,11 +1514,7 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 	}
 
 	// ── Frontends: Vite dev servers on the host ──────────────────────────
-	// Fixed host ports: the frontends link to each other, the consent
-	// redirect derives the portal's port as the consumer mock's port + 1, and
-	// the landing page shows the URLs.
-	const landingPort, dvMockPort, devPortalPort, keyperPort = 9000, 9001, 9003, 9004
-	const consentPortalPort = dvMockPort + 1
+	// The fixed host ports are set under Settings.
 	allowedHosts := publicHost
 	if extra := m.config("Gbo:ExtraAllowedHosts"); extra != "" {
 		allowedHosts += "," + extra
@@ -1463,15 +1602,12 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 	if on("dvtp") {
 		frontend("dienstverlener-mock", dvMockPort).
 			WithEnvironment("DV_API_TARGET", dienstverlenerBackend.GetEndpoint("http")).
-			WithEnvironment("VITE_CONSUMER_PEER_ID", "99999999900000000300").
 			WaitFor(dienstverlenerBackend)
 		frontend("toestemmingsportaal-frontend", consentPortalPort).
 			WithEnvironment("PORTAL_API_TARGET", consentPortalBackend.GetEndpoint("http")).
-			WithEnvironment("VITE_ALLOWED_RETURN_ORIGINS", publicURL(dvMockPort)+","+publicURL(keyperPort)).
 			WaitFor(consentPortalBackend)
 		frontend("keyper-mock", keyperPort).
 			WithEnvironment("IR_API_TARGET", irBackend.GetEndpoint("http")).
-			WithEnvironment("VITE_CONSUMER_PEER_ID", "99999999900000001000").
 			WithEnvironment("VITE_CONSENT_PORTAL_URL", publicURL(consentPortalPort)).
 			WaitFor(irBackend)
 	}
