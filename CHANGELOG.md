@@ -1225,6 +1225,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   `SubjectTypePI`.
 
 ### Fixed
+- **The reference QTSP's end-to-end tests clean up after themselves.** They
+  left the service processes they started running and a `qtsp-e2e-*`
+  directory of about 30 MB (built binaries and generated keys) in the temp
+  directory after every run. The tests now stop the processes and remove the
+  directory when they finish, and also when starting the stack fails.
 - **README and TROUBLESHOOTING cover the EUDI setup beyond localhost**: the
   requirements name Go 1.26 for the host-side provisioning; the CA section
   says the four CA files are managed material; a port table lists every
