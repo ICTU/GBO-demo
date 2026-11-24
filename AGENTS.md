@@ -40,3 +40,7 @@ credential), read
 
 Before you create or change an `AGENTS.md` file or a doc in `docs/`, read
 [docs/intent-layer.md](docs/intent-layer.md).
+
+Before you change files in a directory, read every `AGENTS.md` from that
+directory up to the root. When your change alters behaviour or a contract a node
+describes, update that node in the same change.

@@ -15,6 +15,14 @@ image (they build from the repository root).
   one Verantwoordelijke only; never across FSC. Nothing enforces this.
 - Producers wrap as `otelhttp.NewTransport(ldv.Transport(base))`; the other
   order files callee records under an OTel span no logbook reader can resolve.
+- Producers configure it through `LDV_LOGBOOK_URL` (unset: no records; set:
+  every record is spooled before the response leaves), `LDV_OUTBOX_PATH` (on a
+  volume that survives a restart), `LDV_WRITE_TOKEN` (the logbook's) and
+  `LDV_SUBJECT_PSEUDONYM_KEY` (one per Verantwoordelijke; a shared key links one
+  citizen across logbooks). Each producer's `main.go` reads them and
+  `docker-compose.yml` sets them; nothing checks these.
+- `consent-portal-backend` uses this module too, through its `ldv/` adapter,
+  without a pseudonym key.
 
 ## Verify
 
@@ -37,8 +45,6 @@ against "What the flows produce" in
 - `Outbox.Deliver` stops at the first failure, so a record the logbook refuses
   for good (`422`, `409`) blocks every later one, with only a log line. How
   should such a record leave the outbox, and who should notice?
-- The logbook README says `consent-portal-backend` uses none of this module; its
-  `ldv/` adapter and `main.go` use `ldvclient` and `Outbox`. Stale?
 
 ## Links
 

@@ -450,10 +450,10 @@ the services' tests drive. What stays per service is what only that service
 knows: which of its verwerkingsactiviteiten a given request performed and who it
 was about — a small wrapper type embedding the client.
 
-`consent-portal-backend` carries none of it. It is laid out as ports and
-adapters, so its core owns a `Logbook` port and `ldv/` implements it with a
-purpose-built writer: no FSC boundary, no BSN, and therefore no use for the
-shared client's machinery.
+`consent-portal-backend` uses it too, behind its own port: it is laid out as
+ports and adapters, so its core owns a `Logbook` port and `ldv/` implements it
+over the shared client, without a pseudonym key (it never holds a BSN in a
+record).
 
 ## What the flows produce
 

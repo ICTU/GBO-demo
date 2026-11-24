@@ -31,18 +31,13 @@ are published by `make fsc-seed-data-usage-index`.
 ## Verify
 
 `go test ./...` here; end to end: `make demo-dvtp`, run a DvTP query, then check
-the consent's uses in the consent register.
+the consent's uses in the consent register:
+`curl -s http://localhost:9402/consents/<consent-id>/uses | jq`.
 
 ## Decisions
 
 - Two FSC services, logbook ID `<peer ID>/<read service name>`, no data subject
   fields: [#704](https://github.com/ICTU/GBO-demo/pull/704).
-
-## Open questions
-
-- The README and `bron-sidecar/usageindex` show `logbook_id` as `…0200/bd`;
-  compose and [#704](https://github.com/ICTU/GBO-demo/pull/704) use the read
-  service name (`…0200/ldv-lezen-bd`). Which is the contract?
 
 ## Links
 

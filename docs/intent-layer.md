@@ -5,9 +5,10 @@ It is the only place where these rules are written down; when a rule turns out
 not to work, change it here first.
 
 The Intent Layer is the set of small `AGENTS.md` files ("nodes") in this
-repository. A coding agent that reads a file loads the node of that directory
-and every node above it, so it gets the context of the part it works on and not
-the rest. People read the same files.
+repository. An agent working on a file reads the node of that directory and
+every node above it (some tools load them by themselves; the root `AGENTS.md`
+tells the rest to), so it gets the context of the part it works on and not the
+rest. People read the same files.
 
 The method is inspired by
 [The Intent Layer](https://intent-systems.com/blog/intent-layer) and
@@ -31,10 +32,10 @@ structurally is checked hard, by [`scripts/intent-layer.sh check`](#checks).
 
 ## Only AGENTS.md
 
-Nodes are always called `AGENTS.md`. No `CLAUDE.md` or other tool-specific rule
-files, no symlinks and no pointer files that load `AGENTS.md`: every tool the
-team uses reads `AGENTS.md`, and one file per directory means one place to
-update.
+Nodes are always called `AGENTS.md`. No `CLAUDE.md`, `GEMINI.md` or
+`.cursorrules`, no symlinks and no pointer files that load `AGENTS.md`: every
+tool the team uses reads `AGENTS.md`, and one file per directory means one place
+to update.
 
 ## Where a node goes
 
@@ -71,7 +72,7 @@ request, issue, ADR or requirement).
 | Pitfalls       | Traps someone actually hit, each with a link.                                                                                                                          |
 | Verify         | Commands that prove a change here, beyond the obvious test run.                                                                                                        |
 | Decisions      | One line per deliberate choice, with a link to the pull request or ADR; without a link it goes. Whoever reverses the choice updates the line in the same pull request. |
-| Open questions | What is genuinely still open, ideally with an issue link.                                                                                                              |
+| Open questions | What is genuinely still open, with an issue link once the pull request is merged; a draft node may ask reviewers instead.                                              |
 | Links          | Docs and nodes that do not load by themselves, with when to open them.                                                                                                 |
 
 The LDV (Logboek Dataverwerkingen) services were the first to get nodes and
@@ -81,8 +82,10 @@ serve as examples: [`services/ldv-logboek`](../services/ldv-logboek/AGENTS.md),
 
 ## Writing rules
 
-- Only what the code does not say; no summary of what an agent can read for
-  itself. Write for an agent without memory, not as documentation for people.
+- No filler: no restated code facts, generic advice or speculation; leave a
+  heading out rather than invent content for it. A line that changes no
+  behaviour goes. Write for an agent without memory, not as documentation for
+  people.
 - Agents do not load README files by themselves. Anything an agent must know
   before changing the code goes in the node, even when a README says it too;
   link to the README only for detail.
@@ -96,14 +99,13 @@ serve as examples: [`services/ldv-logboek`](../services/ldv-logboek/AGENTS.md),
 - A reference says what the doc is and when to open it ("read
   `docs/debugging-eudi-wallet.md` when a QR scan does not produce a
   credential").
-- Terms follow the GBO-TO glossary. Language: English for nodes and new docs;
-  existing Dutch docs become English when they are rewritten.
+- Terms follow the [glossary](https://ictu.github.io/GBO-TO/main/glossary/) of
+  GBO-TO, the GBO Technisch Ontwerp (technical design). Language: English for
+  nodes and new docs; existing Dutch docs become English when they are
+  rewritten.
 - No commit hashes or line numbers; refer to a file plus a symbol.
 - Diagrams in Mermaid, not as images: text can be reviewed in a diff, an agent
   can read it, and GitHub renders it.
-- A line that changes no behaviour goes.
-- No filler: no restated code facts, generic advice or speculation; leave a
-  heading out rather than invent content for it.
 
 ## Separate docs
 
@@ -130,9 +132,6 @@ scripts/intent-layer.sh size services/ldv-logboek
 scripts/intent-layer.sh size services/ldv-logboek/AGENTS.md
 ```
 
-The number is a signal, not a verdict: a small directory with tricky invariants
-can need a node, a large directory with obvious code may not.
-
 ## Building the layer
 
 Per part of the repository, as a way of working (adapt it where a part asks for
@@ -146,7 +145,7 @@ that):
 3. **Per chunk**: read the code, write a draft node and ask questions (why is
    this so, is this path still used, what must never happen here). Whoever knows
    the part answers them; repeat until it is right. What stays open goes under
-   Open questions with an issue.
+   Open questions (see the table above).
 4. **Sources** everyone can reach: the code, `git log`, the pull request
    discussions, the existing docs and READMEs, `TROUBLESHOOTING.md`, GBO-TO.
 
@@ -174,7 +173,7 @@ Further:
 `scripts/intent-layer.sh check` (also `make check-intent-layer`, and a job in
 CI) fails when:
 
-- a `CLAUDE.md` or other tool-specific rules file exists, or a node is a
+- a `CLAUDE.md`, `GEMINI.md` or `.cursorrules` file exists, or a node is a
   symlink;
 - a node sits in a vendored or generated directory;
 - a relative link in a node or in this guide does not resolve;

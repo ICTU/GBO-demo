@@ -3,9 +3,9 @@
 ## Purpose
 
 The LDV (Logboek Dataverwerkingen) of one Verantwoordelijke. One image, many
-compose instances, told apart only by `REGISTER_PATH`. It stores and serves
-records; producers decide what to log, through
-[`../ldv-client`](../ldv-client/AGENTS.md).
+compose instances, told apart by `REGISTER_PATH` (which Verantwoordelijke's
+register) and `LDV_LOGBOOK_ID`. It stores and serves records; producers decide
+what to log, through [`../ldv-client`](../ldv-client/AGENTS.md).
 
 ## Contracts
 
@@ -28,13 +28,15 @@ then its URI in the producer's environment.
   change needs a volume reset, as in
   [#652](https://github.com/ICTU/GBO-demo/pull/652).
 - Write side snake_case and epoch ms, read side camelCase and RFC 3339: each
-  follows its own specification. Do not unify.
+  follows its own specification. Do not unify. The dev portal once read the
+  written form and showed a chain with every column empty:
+  [#317](https://github.com/ICTU/GBO-demo/pull/317).
 
 ## Verify
 
 `go test ./...` here and in `../ldv-client`; `make policy-test` when the FSC
 read changes. End to end: `make demo-dvtp`, then read the chain through the dev
-portal.
+portal: `curl -s http://localhost:9407/ldv/<trace-id> | jq`.
 
 ## Decisions
 
@@ -52,8 +54,6 @@ portal.
 
 - `ldv.Query` says "exactly one" selector; `normalize` accepts several. Which is
   intended?
-- README shows activities as `bd-ib-2025@v1`; code and compose use
-  `/{id}/{version}` URIs. Is the README stale?
 - `logboek-levering-*` load the source's full register, so accept all its
   activities. Intended?
 
