@@ -78,7 +78,7 @@ A QTSP registers once per authorization server, before its first authorization r
 
 ## Layout
 
-Ports and adapters, as `AGENTS.md` asks for a service with an authorization boundary:
+Ports and adapters, as [`services/AGENTS.md`](../AGENTS.md) asks for a service with an authorization boundary:
 
 | Package | |
 |---|---|
