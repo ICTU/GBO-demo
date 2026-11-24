@@ -193,7 +193,6 @@ func (m *model) build() {
 	}
 	// Under `aspire run` the dashboard listens on the host; in a published
 	// compose file it is the compose environment's dashboard container.
-	dashboardOtlpGrpc := "compose-dashboard:18889"
 	dashboardURL := "http://compose-dashboard:18888"
 	dashboardPublicURL := "http://localhost:18888"
 	if m.runMode {
@@ -205,12 +204,18 @@ func (m *model) build() {
 		if err != nil || otlp.Scheme != "http" {
 			log.Fatal("The collector forwards to the dashboard over plaintext gRPC; keep the http profile in aspire.config.json (and no https one).")
 		}
-		dashboardOtlpGrpc = "host.docker.internal:" + otlp.Port()
 		frontend, err := url.Parse(strings.Split(m.configOr("ASPNETCORE_URLS", "http://localhost:15126"), ";")[0])
 		if err != nil {
 			log.Fatalf("ASPNETCORE_URLS: %v", err)
 		}
-		dashboardURL = "http://host.docker.internal:" + frontend.Port()
+		// TODO(go-apphost/dashboard-from-containers): a container reaches the
+		// dashboard's OTLP endpoint through Aspire's container tunnel (the
+		// collector below), but nothing models its frontend, where the
+		// telemetry API is, for a container. host.docker.internal reaches the
+		// host's loopback on Docker Desktop and OrbStack only; on Docker
+		// Engine on Linux it is the bridge address, where the dashboard does
+		// not listen. Gbo:DashboardHostFromContainers overrides the name.
+		dashboardURL = fmt.Sprintf("http://%s:%s", m.configOr("Gbo:DashboardHostFromContainers", "host.docker.internal"), frontend.Port())
 		dashboardPublicURL = fmt.Sprintf("%s://%s:%s", publicScheme, publicHost, frontend.Port())
 	}
 
@@ -220,8 +225,11 @@ func (m *model) build() {
 		WithEndpoint(aspire.EndpointTargetPort(4318), aspire.EndpointName("otlp-http"), aspire.EndpointScheme("http")).
 		WithHttpEndpoint(aspire.HttpEndpointTargetPort(13133), aspire.HttpEndpointName("health")).
 		WithHttpHealthCheck(aspire.HttpHealthCheckPath("/"), aspire.HttpHealthCheckEndpointName("health")).
-		WithContainerRuntimeArgs([]string{"--add-host", "host.docker.internal:host-gateway"}).
-		WithEnvironment("ASPIRE_DASHBOARD_OTLP_GRPC", dashboardOtlpGrpc).
+		// Aspire's own OTLP settings give the collector the dashboard's
+		// endpoint as a container sees it: through Aspire's container tunnel
+		// under `aspire run` (on Linux too, where host.docker.internal is not
+		// the host's loopback), the compose dashboard when published.
+		WithOtlpExporter(aspire.OtlpExporterProtocol(aspire.OtlpProtocolGrpc)).
 		WithEnvironment("ASPIRE_DASHBOARD_OTLP_API_KEY", keys["AppHost:OtlpApiKey"])
 
 	// otlpViaCollector gives a service Aspire's OTLP settings (service name

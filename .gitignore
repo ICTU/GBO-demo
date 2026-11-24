@@ -84,3 +84,6 @@ services/openftv-pdp/certs/
 
 # Aspire spike: local state of AppHost-run services
 .aspire-data/
+
+# Vite dependency cache (cacheDir in each vite.config.ts)
+.vite/

@@ -29,7 +29,8 @@ processors:
 
 exporters:
   otlp/aspire:
-    endpoint: ${env:ASPIRE_DASHBOARD_OTLP_GRPC}
+    # Set by Aspire (WithOtlpExporter on the collector).
+    endpoint: ${env:OTEL_EXPORTER_OTLP_ENDPOINT}
     headers:
       x-otlp-api-key: ${env:ASPIRE_DASHBOARD_OTLP_API_KEY}
     tls:

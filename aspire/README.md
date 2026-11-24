@@ -18,6 +18,8 @@ preview can and cannot do yet.
 - Go 1.26 or newer, for the AppHost itself and the host-side certificate
   steps. No .NET SDK: the Aspire CLI brings its own AppHost server.
 - Bash, `curl`, `jq`, OpenSSL; Python 3 for the OpenFTV Manager seed
+- On NixOS the Aspire CLI starts only inside an FHS environment
+  (`buildFHSEnv`, or `steam-run`), since it is a dynamically linked binary
 
 ## Run
 
@@ -71,6 +73,7 @@ variables (`Gbo__PublicHost=demo.example.org`).
 | `Gbo:AsiAuthorizationServerPublicUrl`, `Gbo:AsiProviderPublicUrl`, `Gbo:QtspPublicUrl` | public host on 9425, 9424, 9427 | Public base URLs of the ASI route |
 | `Gbo:FtvManagerUrl`, `Gbo:FtvOidcAuthority` | public host on 9280, 9284 | Browser URLs of the OpenFTV Manager and its IdP |
 | `Gbo:ConsentKnownScopes`, `Gbo:ParRequestLifetime` | `bd:ib:2025,bd:ib:2024,lvg:vbo:eigendom`, `10m` | Data sets the consent portal can describe, and how long a pushed consent request waits (was `CONSENT_KNOWN_SCOPES`, `PAR_REQUEST_LIFETIME`) |
+| `Gbo:DashboardHostFromContainers` | `host.docker.internal` | Host name under which dev-portal-backend reaches the dashboard's telemetry API (see Telemetry) |
 | `Gbo:EudiUlBase`, `Gbo:VersionString`, `Gbo:Issuer*`, `Gbo:Pid*`, `Gbo:WalletRootsDir`, `Gbo:QtspIssuerOffersUrl`, `Gbo:AsiIssuanceResources`, `Gbo:AsiRequireAuthorizationDetails` | as before | The remaining former `.env` settings, one to one |
 
 ### Secrets and parameters
@@ -214,6 +217,28 @@ Loki.
 
 The launch profile in `aspire.config.json` uses plain http, since the collector forwards to
 the dashboard over plaintext OTLP.
+
+The collector gets the dashboard's OTLP endpoint from Aspire (`WithOtlpExporter`),
+which routes a container to the host through its container tunnel
+(`aspire.dev.internal`), on Linux as well. dev-portal-backend reads the
+dashboard's telemetry API at `host.docker.internal`, which is the host's
+loopback on Docker Desktop and OrbStack. On Docker Engine on Linux it is the
+bridge address, where the dashboard does not listen, so the developer
+portal's trace details say "telemetry API unreachable"; the decision history
+still works. Untested way around it: let the dashboard listen on the bridge
+address (`applicationUrl` in `aspire.config.json`) and set
+`Gbo:DashboardHostFromContainers` to that address. GO-APPHOST.md tracks the
+gap.
+
+### Low-memory mode
+
+A full dvtp run takes about 3 GiB once Vite's cache is warm. Aspire's
+orchestrator (DCP) also runs one `monitor-container` process per container,
+about 20 MiB each, finished setup steps included: some 1.6 GiB in all. Set
+`DCP_DISABLE_MONITOR_PROCESS=1` in the environment of `aspire run` to leave
+them out. It is undocumented and meant for Aspire's own tests: without the
+monitors, containers keep running after a hard AppHost crash (remove them
+with `docker rm -f`), so it is opt-in only.
 
 ## Publishing
 
