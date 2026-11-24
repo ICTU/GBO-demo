@@ -59,12 +59,12 @@ every task needs.
 
 Every heading is optional: a node has only the sections with real content, in
 this order. A line earns its place when an agent could not get it quickly from
-the code or the README, or when it points to a real source (a pull request,
-issue, ADR or requirement).
+the code it is about to change, or when it points to a real source (a pull
+request, issue, ADR or requirement).
 
 | Heading        | Content                                                                                                                                                                |
 | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Purpose        | What this part is for and what it explicitly does not do, when the README does not say so.                                                                             |
+| Purpose        | What this part is for and what it explicitly does not do.                                                                                                              |
 | Contracts      | Invariants and agreements the code does not enforce or show, often between services.                                                                                   |
 | Dependencies   | Callers and callees that are hard to find from here.                                                                                                                   |
 | Patterns       | Steps for a recurring change that spans several files.                                                                                                                 |
@@ -83,8 +83,9 @@ serve as examples: [`services/ldv-logboek`](../services/ldv-logboek/AGENTS.md),
 
 - Only what the code does not say; no summary of what an agent can read for
   itself. Write for an agent without memory, not as documentation for people.
-  Service READMEs stay for people; the node links to them and does not repeat
-  them.
+- Agents do not load README files by themselves. Anything an agent must know
+  before changing the code goes in the node, even when a README says it too;
+  link to the README only for detail.
 - **Size**: as small as possible, and clearly smaller than the code the node
   covers. When a node grows far, see whether it can be split at a boundary, or
   whether something is only needed sometimes and can move to a separate doc. The

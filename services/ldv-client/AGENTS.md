@@ -1,9 +1,20 @@
 # ldv-client
 
+## Purpose
+
+The one Go module that owns the LDV record wire format and the producer side:
+configuration, confirmed write, local spool (`Outbox`), trace context, subject
+pseudonyms, FSC claims. `ldvtest` is the fake logbook for producers' tests. What
+a service logs, and about whom, stays in that service. Not published: producers
+use a `replace` to `../ldv-client`, so a change here rebuilds every producer
+image (they build from the repository root).
+
 ## Contracts
 
 - The subject headers (`HeaderSubjectID`) pass a pseudonym between components of
   one Verantwoordelijke only; never across FSC. Nothing enforces this.
+- Producers wrap as `otelhttp.NewTransport(ldv.Transport(base))`; the other
+  order files callee records under an OTel span no logbook reader can resolve.
 
 ## Verify
 

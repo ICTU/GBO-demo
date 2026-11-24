@@ -1,7 +1,20 @@
 # data-usage-index
 
+## Purpose
+
+GBO's list of pointers "under legal basis X, logbook Y recorded a delivery under
+trace Z". It holds no personal data and does not check the consent; the source's
+PDP decided that before the delivery.
+
 ## Contracts
 
+- Both listeners trust `Fsc-Authorization` without checking its signature
+  (`CallingPeer`), a demo shortcut: only `cr-inway` may reach them in a real
+  deployment.
+- Registration and lookup stay on separate listeners: an Inway forwards every
+  path under a service, so one listener would let any registering source read
+  every consent's uses.
+- `LOOKUP_PEERS` empty means the FSC contract alone decides who looks up.
 - The name part of `logbook_id` is, in practice, the source's FSC read service
   (`ldv-lezen-bd`). The sidecar's `DATA_USAGE_LOGBOOK_ID` must match a key in
   the consent register's `CONSENT_USAGE_READ_SERVICES` and
@@ -11,9 +24,9 @@
 
 ## Dependencies
 
-Called by the `bron-sidecar` image (`bron-`, `brp-`, `lvg-sidecar`) and by
-`consent-register`. Its FSC services are published by
-`make fsc-seed-data-usage-index`.
+Called by the `bron-sidecar` image (`bron-`, `brp-`, `lvg-sidecar`) through its
+peer's Outway, and by `consent-register` through `cr-outway`. Its FSC services
+are published by `make fsc-seed-data-usage-index`.
 
 ## Verify
 
