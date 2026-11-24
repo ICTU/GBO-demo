@@ -275,12 +275,12 @@ sequenceDiagram
     MAP->>POL: Verstrek query-, FSC-context en consent-token
 
     opt Sleutelcache is leeg, verlopen of kid is onbekend
-        POL->>Register: Haal JWKS op (http.send)
+        POL->>Register: Haal JWKS op (http.send, rechtstreeks)
         Register-->>POL: Publieke ES256-sleutels
     end
     POL->>POL: Verifieer token, bindings en tijdclaims
 
-    POL->>Register: Controleer status van exact consent-id (http.send, zonder cache)
+    POL->>Register: Controleer status van exact consent-id (http.send over FSC via de Outway van de PDP, zonder cache)
     Register-->>POL: ACTIVE, REVOKED of niet gevonden
 
     POL->>POL: Controleer actor, plaatshouder, scope en geldigheid
@@ -303,6 +303,10 @@ sequenceDiagram
 
 De policy haalt het consent zelf op, tijdens de evaluatie (`http.send` vanuit
 `policies/gbo/consent.rego`); de mapper verifieert en raadpleegt niets.
+De status vraagt ze over FSC op, via de eigen Outway van de PDP
+(`pdp-outway` → `cr-inway` → `consent-register:4012`), zodat het register
+alleen een peer antwoordt die de Inway heeft geauthenticeerd. De JWKS is
+openbaar en komt rechtstreeks van het register.
 De JWKS wordt vijf minuten gecachet en direct opnieuw opgehaald bij een
 onbekende `kid`. De status van het specifieke consent wordt bij iedere aanvraag
 zonder cache online gecontroleerd, zodat een intrekking bij de eerstvolgende
@@ -362,12 +366,11 @@ sequenceDiagram
     autonumber
     actor Citizen as "Burger"
     participant Portal as "Toestemmingsportaal"
-    participant BSNk as "BSNk-mock"
     participant Register as "Consent-register S01"
     participant PDP as "OpenFTV PDP"
 
     Citizen->>Portal: Open Mijn toestemmingen
-    Portal->>BSNk: Leid portaalgebonden subject_ref af
+    Portal->>Portal: subject_ref = HMAC van het BSN
     Portal->>Register: Zoek toestemmingen via subject_ref
     Register-->>Portal: Toestemmingen van deze burger
 

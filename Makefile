@@ -161,7 +161,7 @@ down:
 # are auto-generated on first run (idempotent); subsequent runs skip.
 #
 #   make demo          → default DvTP flow (over real FSC via Hypotheekverlener-mock)
-#   make demo-minimal  → base only: adapter/pdp/openftv-pdp/graphql + observability
+#   make demo-minimal  → base only: openftv-pdp/sources/consent-register/logbooks/dev-portal + observability
 #   make demo-dvtp     → alias for 'make demo'
 #   make demo-eudi     → EUDI flow over real FSC (auto init + seed-bri)
 #   make demo-full     → everything on (DvTP + EUDI + fsc-infra)

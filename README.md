@@ -357,8 +357,9 @@ shows consents that already exist.
    data sets to share and click **Geef toestemming**. After a short
    confirmation the portal sends you back to the consumer mock with a
    one-time code; the consumer's backend exchanges it over FSC for the signed
-   consent token, keeps the token in its session and runs the query. The
-   consumer mock shows the income data.
+   consent token, keeps the token in its session and runs the query. Expand
+   **Inkomensgegevens** to see the income data, the **↻ Verversen** button and
+   the trace-id.
 4. Open the [developer portal](http://localhost:9003). **History · Replay**
    lists the issuance and the query with their outcome and trace id.
 5. In another tab, open the [consent portal](http://localhost:9002) and sign
