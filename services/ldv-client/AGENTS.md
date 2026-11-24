@@ -8,7 +8,10 @@
 ## Verify
 
 `go test ./...` here and in every module that replaces it
-(`grep -l gbo-demo/ldv-client services/*/go.mod`).
+(`grep -l gbo-demo/ldv-client services/*/go.mod`). End to end: `make demo-dvtp`,
+run a DvTP query, and check that the chain still assembles across logbooks,
+against "What the flows produce" in
+[../ldv-logboek/README.md](../ldv-logboek/README.md).
 
 ## Decisions
 
