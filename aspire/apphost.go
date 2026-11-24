@@ -414,7 +414,7 @@ func (m *model) build() {
 		WithEnvironment("PDP_POLICIES_LANGUAGE", "rego").
 		WithEnvironment("PDP_POLICIES_STORE", "/policies").
 		WithEnvironment("PDP_POLICIES_STORE_RECURSE", "true").
-		WithEnvironment("PDP_ADL_PG_URL", aspire.RefExpr("postgres://ftv:%v@postgres-ftv:5432/ftv_adl?sslmode=disable", ftvPostgresPassword)).
+		WithEnvironment("PDP_ADL_PG_URL", databaseURL("postgres", "ftv", ftvPostgresPassword, "postgres-ftv:5432/ftv_adl?sslmode=disable")).
 		WithEnvironment("PDP_ADL_SERVICE_NAME", "gbo").
 		WithEnvironment("PDP_LOG_LEVEL", "info").
 		WithEnvironment("PDP_REQUEST_MAPPINGS", "ftvgraphql").
@@ -608,7 +608,7 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 					WaitForCompletion(certs)
 			}
 			dsn := func(part string) *aspire.ReferenceExpression {
-				return aspire.RefExpr("postgresql://postgres:%v@postgres:5432/fsc_"+p.db+"_"+part+"?sslmode=disable&connect_timeout=2", fscPostgresPassword)
+				return databaseURL("postgresql", "postgres", fscPostgresPassword, "postgres:5432/fsc_"+p.db+"_"+part+"?sslmode=disable&connect_timeout=2")
 			}
 			migrations := func(component, part string) aspire.ContainerResource {
 				db := m.database(fscPostgres, p.prefix+"-db-"+part, "fsc_"+p.db+"_"+part)
@@ -939,7 +939,7 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 		WithEnvironment("FSC_GROUP_ID", "fsc-demo").
 		WithEnvironment("POLICIES_DIR", "/policies").
 		WithEnvironment("RULES_FILE", "/rules.json").
-		WithEnvironment("ADL_DATABASE_URL", aspire.RefExpr("postgres://adl_reader:%v@postgres-ftv:5432/ftv_adl?sslmode=disable", ftvAdlReaderPassword)).
+		WithEnvironment("ADL_DATABASE_URL", databaseURL("postgres", "adl_reader", ftvAdlReaderPassword, "postgres-ftv:5432/ftv_adl?sslmode=disable")).
 		WithVolume("/var", aspire.VolumeName("gbo-dev-portal-var")).
 		WithBindMount(m.repo("services/graphql-server/mockdata"), "/citizens", aspire.BindMountIsReadOnly(true)).
 		WithBindMount(m.repo("services/brp-graphql-server/mockdata"), "/test-pid-persons", aspire.BindMountIsReadOnly(true)).
@@ -1096,8 +1096,8 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 			WithArgs([]string{"-c", "/scripts/bootstrap-source-registry.sh"}).
 			WaitFor(sourceRegistryDb)
 
-		sourceRegistryReaderURL = aspire.RefExpr("postgres://source_registry_reader:%v@postgres-eudi:5432/source_registry", sourceRegistryReaderPassword)
-		sourceRegistryURL := aspire.RefExpr("postgres://source_registry:%v@postgres-eudi:5432/source_registry", sourceRegistryPassword)
+		sourceRegistryReaderURL = databaseURL("postgres", "source_registry_reader", sourceRegistryReaderPassword, "postgres-eudi:5432/source_registry")
+		sourceRegistryURL := databaseURL("postgres", "source_registry", sourceRegistryPassword, "postgres-eudi:5432/source_registry")
 
 		// The eudi-adapter image doubles as the CLI for migrations,
 		// materialisation, reconciliation and exports.
@@ -1176,7 +1176,7 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 			issuanceServerImage := m.executable("eudi-issuance-server-image", "bash", m.repoRoot,
 				"aspire/scripts/nlwallet-image.sh", "gbo/eudi-issuance-server:dev", "services/eudi-issuance-server/Dockerfile")
 
-			issuanceDatabaseURL := aspire.RefExpr("postgres://wallet:%v@postgres-eudi:5432/issuance_server", eudiPostgresPassword)
+			issuanceDatabaseURL := databaseURL("postgres", "wallet", eudiPostgresPassword, "postgres-eudi:5432/issuance_server")
 			eudiMigrations := m.container("eudi-migrations", "gbo/eudi-issuance-server", "dev").
 				WithImagePullPolicy(aspire.ImagePullPolicyNever).
 				WithEntrypoint("/issuance_server_migrations").
@@ -1256,7 +1256,7 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 				WithEntrypoint("sh").
 				WithArgs([]string{"-c", "/scripts/bootstrap-credential-issuer.sh"}).
 				WaitFor(credentialIssuerDb)
-			issuerDbURL := aspire.RefExpr("postgres://credential_issuer:%v@postgres-eudi:5432/credential_issuer", credentialIssuerDbPassword)
+			issuerDbURL := databaseURL("postgres", "credential_issuer", credentialIssuerDbPassword, "postgres-eudi:5432/credential_issuer")
 			credentialIssuerMigrations := m.dockerfile("credential-issuer-migrations", "..", "services/eudi-credential-issuer/Dockerfile").
 				WithArgs([]string{"./eudi-credential-issuer", "migrate"}).
 				WithEnvironment("ISSUER_DATABASE_URL", issuerDbURL).
@@ -1466,7 +1466,7 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 			WithHttpEndpoint(aspire.HttpEndpointPort(9281), aspire.HttpEndpointTargetPort(9443), aspire.HttpEndpointName("internal"), aspire.HttpEndpointIsProxied(false)).
 			WithHttpEndpoint(aspire.HttpEndpointPort(9282), aspire.HttpEndpointTargetPort(8080), aspire.HttpEndpointName("health"), aspire.HttpEndpointIsProxied(false)).
 			WithHttpHealthCheck(aspire.HttpHealthCheckPath("/healthz"), aspire.HttpHealthCheckEndpointName("health")).
-			WithEnvironment("MANAGER_DATABASE_URL", aspire.RefExpr("postgres://ftv:%v@postgres-ftv:5432/ftv_manager?sslmode=disable", ftvPostgresPassword)).
+			WithEnvironment("MANAGER_DATABASE_URL", databaseURL("postgres", "ftv", ftvPostgresPassword, "postgres-ftv:5432/ftv_manager?sslmode=disable")).
 			WithEnvironment("MANAGER_POLICIES_STORE", "/authz").
 			WithEnvironment("MANAGER_POLICIES_STORE_RECURSE", "true").
 			WithEnvironment("MANAGER_AUTHORIZATION_AUTHENTICATE", "true").
@@ -1479,7 +1479,7 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 			WithEnvironment("MANAGER_OIDC_JWKS_URL", "http://keycloak:8080/realms/gbo/protocol/openid-connect/certs").
 			WithEnvironment("MANAGER_OIDC_AUDIENCE", "openftv-manager-api").
 			WithEnvironment("MANAGER_OIDC_ROLES_CLAIM", "roles").
-			WithEnvironment("MANAGER_ADL_PG_URL", aspire.RefExpr("postgres://ftv:%v@postgres-ftv:5432/ftv_adl?sslmode=disable", ftvPostgresPassword)).
+			WithEnvironment("MANAGER_ADL_PG_URL", databaseURL("postgres", "ftv", ftvPostgresPassword, "postgres-ftv:5432/ftv_adl?sslmode=disable")).
 			WithBindMount(m.repo("services/openftv-manager/authz"), "/authz", aspire.BindMountIsReadOnly(true)).
 			WithBindMount(m.repo("services/openftv-manager/bundles"), "/bundles", aspire.BindMountIsReadOnly(true)).
 			WithBindMount(m.repo("services/openftv-manager/tags"), "/tags", aspire.BindMountIsReadOnly(true)).

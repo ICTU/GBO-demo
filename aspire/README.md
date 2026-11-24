@@ -219,8 +219,8 @@ The launch profile in `aspire.config.json` uses plain http, since the collector 
 the dashboard over plaintext OTLP.
 
 The collector gets the dashboard's OTLP endpoint from Aspire (`WithOtlpExporter`),
-which routes a container to the host through its container tunnel
-(`aspire.dev.internal`), on Linux as well. dev-portal-backend reads the
+which routes a container to the host through its container tunnel, on
+Linux as well. dev-portal-backend reads the
 dashboard's telemetry API at `host.docker.internal`, which is the host's
 loopback on Docker Desktop and OrbStack. On Docker Engine on Linux it is the
 bridge address, where the dashboard does not listen, so the developer

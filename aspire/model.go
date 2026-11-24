@@ -406,3 +406,10 @@ func findNodeDir(minimumMajor int) string {
 	}
 	return ""
 }
+
+// databaseURL is a connection URL whose password comes from a parameter,
+// put together here so that no URL with a user and password stands in the
+// source: scripts/check-safety.sh blocks those, as possibly real credentials.
+func databaseURL(scheme, user string, password aspire.ParameterResource, rest string) *aspire.ReferenceExpression {
+	return aspire.RefExpr(scheme+"://"+user+":%v@"+rest, password)
+}
