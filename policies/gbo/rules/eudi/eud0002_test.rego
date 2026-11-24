@@ -9,7 +9,7 @@ import data.gbo.rules.eudi.eud0002
 # The subject is on the root field, position 0.
 # ═══════════════════════════════════════════════════════════════════════════
 
-_issuer := "00000004000000004000"
+_issuer := "99999999900000001700"
 
 _request(actor, bsn) := fx.request(actor, "brp", fx.death_certificate_fields(bsn), {})
 
@@ -34,7 +34,7 @@ test_allow_simulation_eudi_issuer if {
 # ── Actor ───────────────────────────────────────────────────────────────
 
 test_deny_actor_not_in_allowed_actors if {
-	_reasons(_request("00000001234567890000", "999991772")) == {"ACTOR_NOT_ALLOWED"}
+	_reasons(_request("99999999900000001400", "999991772")) == {"ACTOR_NOT_ALLOWED"}
 }
 
 # ── PID ─────────────────────────────────────────────────────────────────

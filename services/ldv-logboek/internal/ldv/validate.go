@@ -142,7 +142,7 @@ func validateMandatoryAttributes(record Record, resolve func(string) bool) error
 // is refused. False positives are possible and preferable to the alternative.
 //
 // Word-boundary anchored, and that matters: a 20-digit OIN such as
-// 00000001234567890000 contains a nine-digit run that passes the elfproef, and
+// 99999999900000001400 contains a nine-digit run that passes the elfproef, and
 // an unanchored check would refuse every record naming a dienstverlener. An
 // organisation identifier is not a BSN.
 func validateNoBSN(record Record) error {

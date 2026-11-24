@@ -10,7 +10,7 @@ import data.gbo.rules.eudi.eud0001
 # (position 1).
 # ═══════════════════════════════════════════════════════════════════════════
 
-_issuer := "00000004000000004000"
+_issuer := "99999999900000001700"
 
 _request(actor, bsn, years_arg) := fx.request(actor, "bri", [fx.person(bsn), fx.declarations(years_arg), fx.year], {})
 
@@ -63,7 +63,7 @@ test_year_reason_stays_on_its_field if {
 # ── Actor ───────────────────────────────────────────────────────────────
 
 test_deny_actor_not_in_allowed_actors if {
-	_reasons(_request("00000001234567890000", "999991772", fx.literal([2025]))) == {"ACTOR_NOT_ALLOWED"}
+	_reasons(_request("99999999900000001400", "999991772", fx.literal([2025]))) == {"ACTOR_NOT_ALLOWED"}
 }
 
 # ── PID regime: no consent token, and a subject named ───────────────────

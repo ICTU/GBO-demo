@@ -28,7 +28,7 @@ openssl x509 -req -in "$DIR/server.csr" \
 openssl req -newkey rsa:2048 -nodes \
   -keyout "$DIR/client-key.pem" \
   -out "$DIR/client.csr" \
-  -subj "/CN=00000001234567890000/O=Demo Hypotheekverlener/C=NL"
+  -subj "/CN=99999999900000001400/O=Demo Hypotheekverlener/C=NL"
 
 openssl x509 -req -in "$DIR/client.csr" \
   -CA "$DIR/ca.pem" -CAkey "$DIR/ca-key.pem" \

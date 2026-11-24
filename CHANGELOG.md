@@ -635,6 +635,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     example values file. CI now templates every file in `examples/`.
 
 ### Changed
+- **The safety audit runs in CI** (`safety` job, `make check-safety`) and
+  scans every tracked file. It now flags OINs with a real register prefix;
+  test data uses demo OINs (`99999999…`) instead.
 - **Credentials without a revocation reference are valid for 24 hours**
   (#697): the own credential issuer cannot revoke what it issued through
   login, disclosure-based issuance or an offer without `reference`, so those

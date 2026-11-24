@@ -18,7 +18,7 @@ func (r legacyNullSubjectRow) Scan(dest ...any) error {
 	*dest[0].(*string) = "legacy-consent"
 	*dest[1].(*string) = "ACTIVE"
 	*dest[2].(*pgtype.Text) = pgtype.Text{Valid: false}
-	*dest[3].(*string) = "00000001234567890000"
+	*dest[3].(*string) = "99999999900000001400"
 	*dest[4].(*[]byte) = []byte(`["inkomen:read"]`)
 	*dest[5].(*[]byte) = []byte(`[]`)
 	*dest[6].(*string) = "hypotheek"
@@ -72,7 +72,7 @@ func TestPostgreSQLStorePersistsConsent(t *testing.T) {
 		ConsentID:        consentID,
 		Status:           "ACTIVE",
 		SubjectRef:       "EP-portal-persistent",
-		DienstverlenrOIN: "00000001234567890000",
+		DienstverlenrOIN: "99999999900000001400",
 		Scopes:           []string{"inkomen:read"},
 		ScopeEntries: []ScopeEntry{{
 			Bronhouder:      "MinBZK",
@@ -159,7 +159,7 @@ func TestPostgreSQLStoreMigratesLegacyNullSubjectRef(t *testing.T) {
 			consent_id, status, subject_ref, dienstverlener_oin, scopes,
 			scope_entries, use_case, created_at, valid_until
 		) VALUES ($1, 'ACTIVE', NULL, $2, '["inkomen:read"]', '[]', 'hypotheek', NOW(), NOW() + INTERVAL '1 hour')
-	`, consentID, "00000001234567890000")
+	`, consentID, "99999999900000001400")
 	seedStore.Close()
 	if err != nil {
 		t.Fatalf("insert legacy consent: %v", err)

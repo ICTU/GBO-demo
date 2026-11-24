@@ -131,7 +131,7 @@ func TestPortalGiveThenList(t *testing.T) {
 
 	// Step 2: give consent (auth via bearer).
 	giveBody := strings.NewReader(`{
-		"dienstverlener_oin": "00000003000000003000",
+		"dienstverlener_oin": "99999999900000001800",
 		"scopes": ["bd:ib:2025"],
 		"scope_entries": []
 	}`)
@@ -465,7 +465,7 @@ func TestASecondConsentOnlyTransforms(t *testing.T) {
 		{"Find polymorphic values", "Read the BSN authorisation list", "Transform to pseudonyms", "Transform to identities", "Create Consent"},
 	} {
 		req, _ := http.NewRequest(http.MethodPost, srv.URL+"/portal/consents",
-			strings.NewReader(`{"dienstverlener_oin":"00000003000000003000","scopes":["bd:ib:2025"]}`))
+			strings.NewReader(`{"dienstverlener_oin":"99999999900000001800","scopes":["bd:ib:2025"]}`))
 		req.Header.Set("Authorization", "Bearer "+login.Token)
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := http.DefaultClient.Do(req)
