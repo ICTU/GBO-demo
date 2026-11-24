@@ -193,7 +193,7 @@ func (m *model) build() {
 	}
 	// Under `aspire run` the dashboard listens on the host; in a published
 	// compose file it is the compose environment's dashboard container.
-	dashboardURL := "http://compose-dashboard:18888"
+	var dashboardAPI any = "http://compose-dashboard:18888"
 	dashboardPublicURL := "http://localhost:18888"
 	if m.runMode {
 		raw := m.config("ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL")
@@ -208,14 +208,23 @@ func (m *model) build() {
 		if err != nil {
 			log.Fatalf("ASPNETCORE_URLS: %v", err)
 		}
-		// TODO(go-apphost/dashboard-from-containers): a container reaches the
-		// dashboard's OTLP endpoint through Aspire's container tunnel (the
-		// collector below), but nothing models its frontend, where the
-		// telemetry API is, for a container. host.docker.internal reaches the
-		// host's loopback on Docker Desktop and OrbStack only; on Docker
-		// Engine on Linux it is the bridge address, where the dashboard does
-		// not listen. Gbo:DashboardHostFromContainers overrides the name.
-		dashboardURL = fmt.Sprintf("http://%s:%s", m.configOr("Gbo:DashboardHostFromContainers", "host.docker.internal"), frontend.Port())
+		port, err := strconv.Atoi(frontend.Port())
+		if err != nil {
+			log.Fatalf("ASPNETCORE_URLS: %v", err)
+		}
+		// TODO(go-apphost/dashboard-from-containers): dev-portal-backend
+		// reads the dashboard's telemetry API, on the dashboard's frontend,
+		// which listens on the host's loopback. A container reaches a host
+		// process only through Aspire's container tunnel, and only to an
+		// endpoint of the model; the dashboard's frontend is none.
+		// (host.docker.internal reaches the loopback on Docker Desktop and
+		// OrbStack, not on Docker Engine on Linux.) So this endpoint stands
+		// for it: Aspire's proxy for the endpoint forwards to the dashboard,
+		// and the process behind it only keeps the endpoint up (tail, since
+		// macOS's sleep has no "infinity").
+		dashboardAPI = m.executable("dashboard-api", "tail", m.repoRoot, "-f", "/dev/null").
+			WithHttpEndpoint(aspire.HttpEndpointTargetPort(port), aspire.HttpEndpointName("http")).
+			GetEndpoint("http")
 		dashboardPublicURL = fmt.Sprintf("%s://%s:%s", publicScheme, publicHost, frontend.Port())
 	}
 
@@ -924,8 +933,7 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 		WithHttpHealthCheck(aspire.HttpHealthCheckPath("/health")).
 		WithEnvironment("OTEL_SERVICE_NAME", "dev-portal-backend").
 		// Traces and the PDP's decision log, from the dashboard's telemetry API.
-		WithContainerRuntimeArgs([]string{"--add-host", "host.docker.internal:host-gateway"}).
-		WithEnvironment("TELEMETRY_API_URL", dashboardURL).
+		WithEnvironment("TELEMETRY_API_URL", dashboardAPI).
 		WithEnvironment("TELEMETRY_API_KEY", keys["AppHost:DashboardApiKey"]).
 		WithEnvironment("CITIZENS_FILE", "/citizens/citizens.json").
 		WithEnvironment("ORGANIZATIONS_FILE", "/organizations.json").
@@ -1675,11 +1683,13 @@ echo "OpenFTV did not load the seeded Hypotheek-BV admission within 60s" >&2; ex
 	// "own build" (the services and frontends built from this repository),
 	// "off the shelf" (published components: Postgres, OpenFSC, cfssl,
 	// Keycloak, the OpenFTV Manager, nginx, cloudflared, and the nl-wallet
-	// issuance server and verifier), "monitoring" (the collector) and "setup"
+	// issuance server and verifier), "monitoring" (the collector and the
+	// dashboard-api endpoint) and "setup"
 	// (run-once steps). A resource gets its group from how it is added
 	// (Dockerfile: own build, image: off the shelf, host process: setup);
 	// the exceptions are listed here.
 	m.classify("otel-collector", monitoring)
+	m.classify("dashboard-api", monitoring)
 	// Released OpenFTV built here with the GBO mapper patch
 	// (services/openftv-pdp/Dockerfile): both groups, sorted with the own
 	// builds.
