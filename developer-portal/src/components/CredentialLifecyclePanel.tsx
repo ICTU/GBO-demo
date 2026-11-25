@@ -23,7 +23,7 @@ function fingerprintColour(fp: string): string {
 function kindColour(kind: string): string {
   switch (kind) {
     case 'credential_issued': return 'var(--ok, #2a7)'
-    case 'credential_refused': return 'var(--danger, #d33)'
+    case 'credential_refused': case 'token_refused': return 'var(--danger, #d33)'
     case 'credential_deferred': return 'var(--warn, #c80)'
     default: return 'var(--mute)'
   }

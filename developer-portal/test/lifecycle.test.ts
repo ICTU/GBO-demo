@@ -80,3 +80,10 @@ test('C1: an issuance says how many copies, keys and which batch size, and where
     'refresh token · wallet provider eudi-reference',
   )
 })
+
+test('a refused refresh says why, in the session it would continue', () => {
+  assert.equal(
+    describe(event(0, 'token_refused', 'a', { grant_type: 'refresh_token', error: 'invalid_grant', error_description: 'the deferral has expired' })),
+    'refresh token · invalid_grant: the deferral has expired',
+  )
+})

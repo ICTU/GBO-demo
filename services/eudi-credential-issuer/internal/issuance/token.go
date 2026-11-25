@@ -245,17 +245,24 @@ func (s *Service) refresh(ctx context.Context, req TokenRequest, att clientattes
 	if err := json.Unmarshal(rec.Payload, &g); err != nil {
 		return oid4vci.TokenResponse{}, err
 	}
+	// From here the refresh token names its session, so a refusal goes to
+	// that session's timeline.
+	refused := func(description string) (oid4vci.TokenResponse, error) {
+		s.record(ctx, Event{Kind: EventTokenRefused, Provider: req.Target.Provider, Profile: p.Name, Session: sessionLabel(g.SessionID),
+			GrantType: req.GrantType, WalletProvider: att.Anchor, Error: oid4vci.ErrInvalidGrant, ErrorDescription: description})
+		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, description)
+	}
 	switch {
 	case g.Provider != req.Target.Provider || g.Profile != p.Name:
-		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "the refresh token is unknown or expired")
+		return refused("the refresh token is unknown or expired")
 	case g.ClientID != att.ClientID:
-		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "the refresh token was issued to another wallet")
+		return refused("the refresh token was issued to another wallet")
 	case g.JKT != jkt:
-		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "the refresh token is bound to another DPoP key")
+		return refused("the refresh token is bound to another DPoP key")
 	}
 	old, err := s.sessions.Session(ctx, g.SessionID)
 	if errors.Is(err, ErrNotFound) {
-		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "the refresh token is unknown or expired")
+		return refused("the refresh token is unknown or expired")
 	}
 	if err != nil {
 		return oid4vci.TokenResponse{}, err
@@ -263,7 +270,7 @@ func (s *Service) refresh(ctx context.Context, req TokenRequest, att clientattes
 	if revoked, err := s.referenceRevoked(ctx, old); err != nil {
 		return oid4vci.TokenResponse{}, err
 	} else if revoked {
-		return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "the offer has been revoked")
+		return refused("the offer has been revoked")
 	}
 	// A session whose source has not answered yet has no claims to re-issue.
 	// Its refresh gives a new access token for the same session, so the
@@ -271,7 +278,7 @@ func (s *Service) refresh(ctx context.Context, req TokenRequest, att clientattes
 	// expired; after the deferral the BSN is gone and there is nothing left.
 	if old.Pending != nil {
 		if !old.Pending.Until.IsZero() && !now.Before(old.Pending.Until) {
-			return oid4vci.TokenResponse{}, refuse(oid4vci.ErrInvalidGrant, "the deferral has expired")
+			return refused("the deferral has expired")
 		}
 		resp, err := s.grant(ctx, req.Target, p, old, att, jkt, now, &rec, req.RefreshToken)
 		if err == nil {

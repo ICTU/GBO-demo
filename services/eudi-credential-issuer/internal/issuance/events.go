@@ -17,6 +17,8 @@ const (
 	EventSessionStarted = "session_started"
 	// EventTokenIssued: a wallet redeemed a code or a refresh token.
 	EventTokenIssued = "token_issued"
+	// EventTokenRefused: a refresh token of a known session was refused.
+	EventTokenRefused = "token_refused"
 	// EventCredentialIssued, EventCredentialDeferred and
 	// EventCredentialRefused: the outcome of a credential request.
 	EventCredentialIssued   = "credential_issued"
@@ -74,7 +76,7 @@ type Event struct {
 	BatchSizeFrom   string   `json:"batch_size_from,omitempty"`
 	Credentials     int      `json:"credentials,omitempty"`
 	KeyFingerprints []string `json:"key_fingerprints,omitempty"`
-	// Error and ErrorDescription: credential_refused.
+	// Error and ErrorDescription: credential_refused and token_refused.
 	Error            string `json:"error,omitempty"`
 	ErrorDescription string `json:"error_description,omitempty"`
 	// Notification is the event a wallet notified.
