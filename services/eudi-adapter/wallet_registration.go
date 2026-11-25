@@ -165,6 +165,20 @@ func runWalletRegistrationCommand(ctx context.Context, arguments []string, stdou
 		}
 		_, _ = fmt.Fprintf(stdout, "-> eudi-wallet-verifier configuration in %s\n", filepath.Join(options.secretsDir, asiVerifierDir))
 		return true, nil
+	case "provision-test-relying-parties":
+		options, err := parseTestRPOptions(arguments[0], arguments[1:], stderr)
+		if err != nil {
+			return true, err
+		}
+		skipped, err := provisionTestRelyingParties(options)
+		if err != nil {
+			return true, fmt.Errorf("provision test relying parties: %w", err)
+		}
+		if len(skipped) > 0 {
+			_, _ = fmt.Fprintf(stdout, "skipped providers the issuer does not have: %s\n", strings.Join(skipped, ", "))
+		}
+		_, _ = fmt.Fprintf(stdout, "-> test-relying-party configuration in %s; this command is for local development only\n", filepath.Join(options.secretsDir, testRPDir))
+		return true, nil
 	case "provision-test-pid":
 		options, dirs, err := parseTestPIDOptions(arguments[0], arguments[1:], stderr)
 		if err != nil {
