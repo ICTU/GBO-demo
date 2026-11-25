@@ -7,6 +7,7 @@ import ArchStrip from './components/ArchStrip'
 import EudiQrPanel from './components/EudiQrPanel'
 import TestPidPanel from './components/TestPidPanel'
 import RevocationPanel from './components/RevocationPanel'
+import CredentialLifecyclePanel from './components/CredentialLifecyclePanel'
 import FscTxlogPanel from './components/FscTxlogPanel'
 import LdvPanel from './components/LdvPanel'
 import { useScenarios } from './hooks/useScenarios'
@@ -641,6 +642,7 @@ export default function App() {
 
         {tab === 'eudi-issuance' && <TestPidPanel />}
         {tab === 'eudi-issuance' && <RevocationPanel />}
+        {tab === 'eudi-issuance' && <CredentialLifecyclePanel />}
 
         <div className="panel">
           <div className="panel-h">

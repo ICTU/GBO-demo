@@ -1089,6 +1089,7 @@ func main() {
 	revocations := newRevocationService(cfg)
 	registerTestPID(mux, newTestPIDService(cfg), revocations)
 	registerRevocation(mux, revocations)
+	registerLifecycle(mux, cfg.CredentialIssuerInternalURL)
 
 	// BaseContext gives every request a context this process can cancel, which
 	// is how the long-lived SSE streams are told to wind up at shutdown.

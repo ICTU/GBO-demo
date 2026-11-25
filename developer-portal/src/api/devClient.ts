@@ -5,6 +5,10 @@ import {
   attestationOfferFrom, revocationOffersFrom, revokeEntryErrorFrom, revokeOutcomeFrom,
   type AttestationOffer, type RevocationOffers, type RevokeOutcome, type StatusListView,
 } from '../lib/revocation'
+import {
+  lifecycleEventsFrom, lifecycleMessage, lifecycleSettingsFrom,
+  type LifecycleEvent, type LifecycleSettings, type ReusePolicy,
+} from '../lib/lifecycle'
 
 const BASE = '/api/dev'
 
@@ -90,6 +94,42 @@ export async function revokeOffer(reference: string): Promise<RevokeOutcome> {
 export async function revokeEntry(provider: string, list: string, index: number): Promise<string> {
   const answer = await postJson('/revocation/revoke-entry', { provider, list, index })
   return revokeEntryErrorFrom(answer.status, answer.body)
+}
+
+async function sendJson(method: string, path: string, body?: unknown): Promise<{ status: number | null; body: unknown }> {
+  try {
+    const res = await fetch(BASE + path, {
+      method,
+      cache: 'no-store',
+      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    return { status: res.status, body: await readJson(res) }
+  } catch {
+    return { status: null, body: undefined }
+  }
+}
+
+export async function loadLifecycleSettings(): Promise<LifecycleSettings> {
+  const answer = await sendJson('GET', '/credential-lifecycle/settings')
+  return lifecycleSettingsFrom(answer.status, answer.body)
+}
+
+/** Changes or resets a batch setting; '' when the issuer took it, else why not. */
+export async function changeLifecycleSetting(
+  target: { provider: string } | { configuration: string },
+  value: { batch_size: number } | { reuse_policy: ReusePolicy } | null,
+): Promise<string> {
+  const path = 'provider' in target
+    ? `/credential-lifecycle/settings/providers/${encodeURIComponent(target.provider)}`
+    : `/credential-lifecycle/settings/configurations/${encodeURIComponent(target.configuration)}`
+  const answer = value === null ? await sendJson('DELETE', path) : await sendJson('PUT', path, value)
+  return answer.status === 200 ? '' : lifecycleMessage(answer.status, answer.body)
+}
+
+export async function loadLifecycleEvents(): Promise<LifecycleEvent[] | { error: string }> {
+  const answer = await sendJson('GET', '/credential-lifecycle/events')
+  return lifecycleEventsFrom(answer.status, answer.body)
 }
 
 export async function loadStatusLists(): Promise<StatusListView[] | { error: string }> {
