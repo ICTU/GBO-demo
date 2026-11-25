@@ -113,48 +113,69 @@ func notify(t *testing.T, e env, target issuance.Target, tok oid4vci.TokenRespon
 	}
 }
 
-// C1, C3: a session from offer to notification, a refused request, and a
-// re-issuance linked to the session it continues.
-func TestSessionEvents(t *testing.T) {
+// eudiSession starts a session for income on the eudi profile with a
+// once_only policy of batch 3, and redeems its code. It returns the session
+// label of the session_started event.
+func eudiSession(t *testing.T) (env, *recordedEvents, string, oid4vci.TokenResponse, *ecdsa.PrivateKey) {
+	t.Helper()
 	e, settings, events := eventsEnv(t)
 	settings.setPolicy("income", onceOnly(3, 1))
-	target := tax("eudi")
-
 	_, c := code(t, e, "eudi", "ref-1", "income")
 	started := events.ofKind(issuance.EventSessionStarted)
 	if len(started) != 1 {
-		t.Fatalf("C1: session_started events = %+v", started)
+		t.Fatalf("session_started events = %+v", started)
 	}
-	session := started[0].Session
-	if session == "" || started[0].Provider != "tax" || started[0].Profile != "eudi" ||
-		strings.Join(started[0].Configurations, ",") != "income" || started[0].Flow != issuance.FlowPreAuthorizedCode {
-		t.Errorf("C1: session_started = %+v", started[0])
-	}
-
 	tok, dpopKey, err := token(t, e, "eudi", c)
 	if err != nil {
 		t.Fatal(err)
 	}
-	tokens := events.ofKind(issuance.EventTokenIssued)
-	if len(tokens) != 1 || tokens[0].Session != session || tokens[0].GrantType != oid4vci.GrantPreAuthorizedCode ||
-		tokens[0].WalletProvider != "provider" || tokens[0].PreviousSession != "" {
-		t.Errorf("C1: token_issued = %+v, want the pre-authorized code grant in session %s by wallet provider \"provider\"", tokens, session)
-	}
+	return e, events, started[0].Session, tok, dpopKey
+}
 
-	// Refused: four keys against a batch size of three.
-	_, err = credentialAt(t, e, target, tok, dpopKey, attestedProof(t, e, target, newKeys(t, 4)))
+// C1: the session starts with its configurations and flow, and the token
+// names the grant and the wallet provider.
+func TestSessionStartedAndTokenEvents(t *testing.T) {
+	_, events, session, _, _ := eudiSession(t)
+	s := events.ofKind(issuance.EventSessionStarted)[0]
+	if session == "" || s.Provider != "tax" || s.Profile != "eudi" ||
+		strings.Join(s.Configurations, ",") != "income" || s.Flow != issuance.FlowPreAuthorizedCode {
+		t.Errorf("session_started = %+v", s)
+	}
+	tokens := events.ofKind(issuance.EventTokenIssued)
+	if len(tokens) != 1 {
+		t.Fatalf("token_issued events = %+v", tokens)
+	}
+	if tk := tokens[0]; tk.Session != session || tk.GrantType != oid4vci.GrantPreAuthorizedCode ||
+		tk.WalletProvider != "provider" || tk.PreviousSession != "" {
+		t.Errorf("token_issued = %+v, want the pre-authorized code grant in session %s", tk, session)
+	}
+}
+
+// C1: a refused request names the keys offered and the batch size in force.
+func TestCredentialRefusedEvent(t *testing.T) {
+	e, events, session, tok, dpopKey := eudiSession(t)
+	target := tax("eudi")
+	_, err := credentialAt(t, e, target, tok, dpopKey, attestedProof(t, e, target, newKeys(t, 4)))
 	refusedWith(t, err, oid4vci.ErrInvalidProof)
 	refused := events.ofKind(issuance.EventCredentialRefused)
 	if len(refused) != 1 {
-		t.Fatalf("C1: credential_refused events = %+v", refused)
+		t.Fatalf("credential_refused events = %+v", refused)
 	}
-	if r := refused[0]; r.Session != session || r.Error != oid4vci.ErrInvalidProof || r.ErrorDescription == "" ||
-		r.KeysOffered != 4 || r.BatchSize != 3 || r.BatchSizeFrom != issuance.BatchSizeFromReusePolicy ||
-		r.Configuration != "income" || r.ProofType != issuance.ProofTypeAttestation || r.Credentials != 0 {
-		t.Errorf("C1: credential_refused = %+v", r)
+	r := refused[0]
+	if r.Session != session || r.Error != oid4vci.ErrInvalidProof || r.ErrorDescription == "" || r.Credentials != 0 {
+		t.Errorf("credential_refused = %+v", r)
 	}
+	if r.KeysOffered != 4 || r.BatchSize != 3 || r.BatchSizeFrom != issuance.BatchSizeFromReusePolicy ||
+		r.Configuration != "income" || r.ProofType != issuance.ProofTypeAttestation {
+		t.Errorf("credential_refused details = %+v", r)
+	}
+}
 
-	// Issued: two keys.
+// C1: an issuance names a fingerprint per copy, and the wallet's
+// notification lands in the same session.
+func TestCredentialIssuedAndNotificationEvents(t *testing.T) {
+	e, events, session, tok, dpopKey := eudiSession(t)
+	target := tax("eudi")
 	keys := newKeys(t, 2)
 	resp, err := credentialAt(t, e, target, tok, dpopKey, attestedProof(t, e, target, keys))
 	if err != nil {
@@ -162,37 +183,44 @@ func TestSessionEvents(t *testing.T) {
 	}
 	issued := events.ofKind(issuance.EventCredentialIssued)
 	if len(issued) != 1 {
-		t.Fatalf("C1: credential_issued events = %+v", issued)
+		t.Fatalf("credential_issued events = %+v", issued)
 	}
+	i := issued[0]
 	want := []string{fingerprint(t, keys[0]), fingerprint(t, keys[1])}
-	if i := issued[0]; i.Session != session || i.Configuration != "income" || i.ProofType != issuance.ProofTypeAttestation ||
-		i.KeysOffered != 2 || i.Credentials != 2 || i.BatchSize != 3 || i.BatchSizeFrom != issuance.BatchSizeFromReusePolicy ||
-		strings.Join(i.KeyFingerprints, ",") != strings.Join(want, ",") {
-		t.Errorf("C1: credential_issued = %+v, want fingerprints %v", i, want)
+	if i.Session != session || i.Configuration != "income" || i.ProofType != issuance.ProofTypeAttestation {
+		t.Errorf("credential_issued = %+v", i)
 	}
-
+	if i.KeysOffered != 2 || i.Credentials != 2 || i.BatchSize != 3 || i.BatchSizeFrom != issuance.BatchSizeFromReusePolicy ||
+		strings.Join(i.KeyFingerprints, ",") != strings.Join(want, ",") {
+		t.Errorf("credential_issued = %+v, want fingerprints %v", i, want)
+	}
 	notify(t, e, target, tok, dpopKey, resp.NotificationID, oid4vci.EventCredentialAccepted)
 	notes := events.ofKind(issuance.EventNotificationReceived)
 	if len(notes) != 1 || notes[0].Session != session || notes[0].Notification != oid4vci.EventCredentialAccepted {
-		t.Errorf("C1: notification_received = %+v", notes)
+		t.Errorf("notification_received = %+v", notes)
 	}
+}
 
-	// C3: the refresh starts a session of its own, linked to this one.
+// C3: a refresh starts a session of its own, linked to the one it
+// continues, and its issuance lands in the new session.
+func TestRefreshEventsContinueTheSession(t *testing.T) {
+	e, events, session, tok, dpopKey := eudiSession(t)
+	target := tax("eudi")
 	again := refresh(t, e, target, tok.RefreshToken, dpopKey)
-	tokens = events.ofKind(issuance.EventTokenIssued)
+	tokens := events.ofKind(issuance.EventTokenIssued)
 	if len(tokens) != 2 {
-		t.Fatalf("C3: token_issued events = %+v", tokens)
+		t.Fatalf("token_issued events = %+v", tokens)
 	}
 	next := tokens[1]
 	if next.GrantType != oid4vci.GrantRefreshToken || next.PreviousSession != session || next.Session == "" || next.Session == session {
-		t.Errorf("C3: refresh token_issued = %+v, want a new session after %s", next, session)
+		t.Errorf("refresh token_issued = %+v, want a new session after %s", next, session)
 	}
 	if _, err := credentialAt(t, e, target, again, dpopKey, attestedProof(t, e, target, newKeys(t, 3))); err != nil {
 		t.Fatal(err)
 	}
-	issued = events.ofKind(issuance.EventCredentialIssued)
-	if len(issued) != 2 || issued[1].Session != next.Session || issued[1].Credentials != 3 {
-		t.Errorf("C3: re-issuance credential_issued = %+v, want 3 in session %s", issued, next.Session)
+	issued := events.ofKind(issuance.EventCredentialIssued)
+	if len(issued) != 1 || issued[0].Session != next.Session || issued[0].Credentials != 3 {
+		t.Errorf("re-issuance credential_issued = %+v, want 3 in session %s", issued, next.Session)
 	}
 }
 
@@ -339,5 +367,45 @@ func TestRefusedRefreshEvents(t *testing.T) {
 	raw, _ := json.Marshal(refused)
 	if strings.Contains(string(raw), tok.RefreshToken) {
 		t.Error("an event holds the refresh token")
+
+// A deferred issuance ends in the timeline too: still waiting is
+// credential_deferred again, the credential from the deferred request is
+// credential_issued with the holder key's fingerprint, in the same
+// session, and a request after it is refused.
+func TestDeferredIssuanceEvents(t *testing.T) {
+	events := &recordedEvents{}
+	f := startDeferred(t, newRecordingStore(), events)
+	deferred := events.ofKind(issuance.EventCredentialDeferred)
+	if len(deferred) != 1 || deferred[0].Session == "" {
+		t.Fatalf("credential_deferred events = %+v", deferred)
+	}
+	session := deferred[0].Session
+
+	if res, err := f.deferredRequest(t); err != nil || !res.Deferred {
+		t.Fatalf("still waiting: %+v, %v", res, err)
+	}
+	if n := len(events.ofKind(issuance.EventCredentialDeferred)); n != 2 {
+		t.Errorf("credential_deferred events = %d, want 2", n)
+	}
+
+	f.src.mu.Lock()
+	f.src.available = true
+	f.src.mu.Unlock()
+	if _, err := f.deferredRequest(t); err != nil {
+		t.Fatal(err)
+	}
+	issued := events.ofKind(issuance.EventCredentialIssued)
+	if len(issued) != 1 {
+		t.Fatalf("credential_issued events = %+v", issued)
+	}
+	if i := issued[0]; i.Session != session || i.Credentials != 1 || i.Configuration == "" ||
+		strings.Join(i.KeyFingerprints, ",") != fingerprint(t, f.holder) {
+		t.Errorf("credential_issued = %+v, want one copy of %s in session %s", i, fingerprint(t, f.holder), session)
+	}
+
+	_, err := f.deferredRequest(t)
+	refusedWith(t, err, oid4vci.ErrInvalidTransactionID)
+	if r := events.ofKind(issuance.EventCredentialRefused); len(r) != 1 || r[0].Session != session || r[0].Error != oid4vci.ErrInvalidTransactionID {
+		t.Errorf("credential_refused = %+v", r)
 	}
 }
