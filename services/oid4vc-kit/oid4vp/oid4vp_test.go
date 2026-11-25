@@ -348,3 +348,38 @@ func TestVerifierSetup(t *testing.T) {
 		}
 	}
 }
+
+// A verifier that reports the status accepts a revoked or expired
+// credential and says so, for a test relying party that records what a
+// wallet presents. An unavailable status list is still refused; without
+// ReportStatus nothing changes.
+func TestReportStatus(t *testing.T) {
+	f := newFixture(t)
+	respond := func(o pidOptions) string { return f.respond(t, f.body(f.present(t, f.pid(t, o), "bsn"))) }
+
+	if d, err := f.verify(respond(pidOptions{})); err != nil || d.Status != oid4vp.StatusValid {
+		t.Fatalf("a valid credential: %+v, %v; want status valid", d.Status, err)
+	}
+	f.verifier.ReportStatus = true
+	if d, err := f.verify(respond(pidOptions{})); err != nil || d.Status != oid4vp.StatusValid {
+		t.Errorf("reported valid: %q, %v", d.Status, err)
+	}
+	expired := pidOptions{expires: f.now.Add(-oid4vp.ClockSkew - time.Second)}
+	if d, err := f.verify(respond(expired)); err != nil || d.Status != oid4vp.StatusExpired {
+		t.Errorf("reported expired: %q, %v", d.Status, err)
+	}
+	f.tokens[statusURI] = f.statusToken(t, f.status, []int{pidIndex})
+	if d, err := f.verify(respond(pidOptions{})); err != nil || d.Status != oid4vp.StatusRevoked {
+		t.Errorf("reported revoked: %q, %v", d.Status, err)
+	}
+	if d, err := f.verify(respond(expired)); err != nil || d.Status != oid4vp.StatusRevoked {
+		t.Errorf("revoked and expired: %q, %v; want revoked", d.Status, err)
+	}
+	delete(f.tokens, statusURI)
+	if _, err := f.verify(respond(pidOptions{})); !errors.Is(err, oid4vp.ErrStatusUnavailable) {
+		t.Errorf("unreachable status list: %v, want still refused", err)
+	}
+	f.verifier.ReportStatus = false
+	f.tokens[statusURI] = f.statusToken(t, f.status, nil)
+	f.mustRefuse(t, "expired without ReportStatus", "has expired", respond(expired))
+}

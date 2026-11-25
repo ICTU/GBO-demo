@@ -77,6 +77,7 @@ oid4vc-kit
 qtsp-reference
 source-registry
 test-pid-source
+test-relying-party
 SERVICES
 
 # These services use local replace directives. A change to a sibling module
@@ -105,7 +106,7 @@ if matches_any 'services/brp-graphql-server/mockdata/*'; then
 fi
 
 if matches_any 'services/oid4vc-kit/*'; then
-  for service in eudi-adapter eudi-credential-issuer eudi-wallet-verifier; do
+  for service in eudi-adapter eudi-credential-issuer eudi-wallet-verifier test-relying-party; do
     go="$(append_unique "${go}" "${service}")"
   done
 fi

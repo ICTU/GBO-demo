@@ -26,6 +26,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   The demo keeps those of the last 50 minutes in a schema of its own
   (`ISSUER_DEMO_DATABASE_SCHEMA`) and serves them at `/demo/events` on the
   internal API; without the port the core records nothing.
+- **Test relying party** (#737): `services/test-relying-party` asks a
+  wallet for an attestation of the own credential issuer over OpenID4VP on
+  behalf of two fictional relying parties, for an attestation type and
+  claims the caller chooses, and records which copy was presented to whom
+  (the fingerprint of the holder key in `cnf`), with its status, or that the
+  wallet declined or the presentation did not verify. It keeps no attribute
+  values. `make provision-test-relying-parties` registers the two parties
+  under the development reader CA for every attestation type and claim of
+  the running issuer; the wallets trust them through the CA anchors of the
+  trust lists. The verifier of `oid4vc-kit` gets `ReportStatus`, which
+  accepts a revoked or expired credential and reports it; the issuer and
+  `eudi-wallet-verifier` do not use it. Profile `credential-issuer`, public
+  at `TEST_RP_PUBLIC_URL` through the tunnel.
 - **Refused refresh tokens in the issuer's timeline** (#745): once a
   refresh token is known, so is the session it would continue, so a refusal
   (another wallet or DPoP key, a revoked offer, an expired deferral, a

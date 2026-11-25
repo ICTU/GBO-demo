@@ -42,7 +42,18 @@ type Verifier struct {
 	// list must chain to the same anchor set as the credential.
 	Anchors     []x5c.Anchors
 	FetchStatus StatusFetcher
+	// ReportStatus accepts a revoked or expired credential and reports it
+	// in Disclosure.Status, for a verifier that records what a wallet
+	// presents. Without it, both are refused.
+	ReportStatus bool
 }
+
+// Status values of a Disclosure.
+const (
+	StatusValid   = "valid"
+	StatusRevoked = "revoked"
+	StatusExpired = "expired"
+)
 
 // Disclosure is a verified presentation.
 type Disclosure struct {
@@ -51,6 +62,9 @@ type Disclosure struct {
 	// Anchor names the anchor set that accepted the credential.
 	Anchor string
 	Issuer *x509.Certificate
+	// Status is StatusValid, or with ReportStatus StatusRevoked or
+	// StatusExpired; revoked wins over expired.
+	Status string
 }
 
 // VerifyResponse decrypts the response parameter of a direct_post.jwt
@@ -87,8 +101,12 @@ func (v Verifier) VerifyResponse(ctx context.Context, compact string, s Session,
 	if err != nil {
 		return Disclosure{}, err
 	}
-	if err := checkCredential(parsed.Claims, q, now); err != nil {
+	expired, err := checkCredential(parsed.Claims, q, now)
+	if err != nil {
 		return Disclosure{}, err
+	}
+	if expired && !v.ReportStatus {
+		return Disclosure{}, errors.New("oid4vp: the credential has expired")
 	}
 	if err := checkKeyBinding(kb, sdjwt, parsed.Claims, s, now); err != nil {
 		return Disclosure{}, err
@@ -96,10 +114,16 @@ func (v Verifier) VerifyResponse(ctx context.Context, compact string, s Session,
 	if err := checkDisclosed(parsed, q); err != nil {
 		return Disclosure{}, err
 	}
-	if err := v.checkStatus(ctx, parsed, now); err != nil {
+	status := StatusValid
+	if expired {
+		status = StatusExpired
+	}
+	if err := v.checkStatus(ctx, parsed, now); errors.Is(err, ErrRevoked) && v.ReportStatus {
+		status = StatusRevoked
+	} else if err != nil {
 		return Disclosure{}, err
 	}
-	return Disclosure{Claims: parsed.Claims, Anchor: parsed.Anchor, Issuer: parsed.Issuer}, nil
+	return Disclosure{Claims: parsed.Claims, Anchor: parsed.Anchor, Issuer: parsed.Issuer, Status: status}, nil
 }
 
 // validate refuses a verifier or session the caller set up wrongly: anchor
@@ -168,25 +192,25 @@ func split(presentation string) (string, string, error) {
 }
 
 // checkCredential checks the type and, with ClockSkew, the validity
-// period; exp is required.
-func checkCredential(claims map[string]any, q CredentialQuery, now time.Time) error {
+// period; exp is required. It reports whether the credential has expired
+// and leaves that decision to the caller.
+func checkCredential(claims map[string]any, q CredentialQuery, now time.Time) (expired bool, err error) {
 	vct, _ := claims["vct"].(string)
 	if !slices.Contains(q.Meta.VCTValues, vct) {
-		return fmt.Errorf("oid4vp: vct %q is not asked for", vct)
+		return false, fmt.Errorf("oid4vp: vct %q is not asked for", vct)
 	}
-	if exp, ok, err := numericDate(claims, "exp"); err != nil {
-		return err
+	exp, ok, err := numericDate(claims, "exp")
+	if err != nil {
+		return false, err
 	} else if !ok {
-		return errors.New("oid4vp: the credential has no exp")
-	} else if now.After(exp.Add(ClockSkew)) {
-		return errors.New("oid4vp: the credential has expired")
+		return false, errors.New("oid4vp: the credential has no exp")
 	}
 	if nbf, ok, err := numericDate(claims, "nbf"); err != nil {
-		return err
+		return false, err
 	} else if ok && now.Before(nbf.Add(-ClockSkew)) {
-		return errors.New("oid4vp: the credential is not yet valid")
+		return false, errors.New("oid4vp: the credential is not yet valid")
 	}
-	return nil
+	return now.After(exp.Add(ClockSkew)), nil
 }
 
 func numericDate(claims map[string]any, name string) (time.Time, bool, error) {

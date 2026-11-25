@@ -23,11 +23,15 @@
 #     (the own credential issuer and its trust host, profile
 #     credential-issuer; #614. Only the issuer's public port: its internal
 #     API on 8081 has no authentication and is never routed.)
+#   TEST_RP_PUBLIC_URL host -> http://test-relying-party:8080
+#     (the test relying party of the developer portal, profile
+#     credential-issuer; #737. Only its public port: the internal API on
+#     8081 is never routed.)
 #
 # The complete EUDI_PUBLIC_URL host, the ASI_WALLET_VERIFIER_PUBLIC_URL and
 # ASI_EUDI_WALLET_VERIFIER_PUBLIC_URL hosts, the
-# ASI_AUTHORIZATION_SERVER_PUBLIC_URL host and the ISSUER_PUBLIC_URL host
-# must have a final Cloudflare Cache Rule
+# ASI_AUTHORIZATION_SERVER_PUBLIC_URL host, the ISSUER_PUBLIC_URL host and
+# the TEST_RP_PUBLIC_URL host must have a final Cloudflare Cache Rule
 # with Cache eligibility = Bypass cache. Purge the hostname after adding the
 # rule. Both issuer metadata and request_uri responses are dynamic.
 services:
@@ -61,6 +65,9 @@ services:
         condition: service_started
         required: false
       trust-host:
+        condition: service_started
+        required: false
+      test-relying-party:
         condition: service_started
         required: false
     networks: [eudi, backend]

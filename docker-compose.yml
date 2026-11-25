@@ -2275,6 +2275,54 @@ services:
       retries: 5
     networks: [eudi]
 
+  # Test relying party of the developer portal (#737): two fictional
+  # relying parties that ask a wallet for an attestation of the own
+  # credential issuer and record which copy was presented to whom. The
+  # wallet reaches its public port (8080) at TEST_RP_PUBLIC_URL, which must
+  # be HTTPS for a real wallet (a tunnel); the portal backend uses the
+  # internal port (8081), which has no authentication and is not published.
+  # make provision-test-relying-parties writes its configuration, private
+  # to the user who ran it; this one-shot step copies it to UID 1000.
+  test-relying-party-runtime:
+    build:
+      context: .
+      dockerfile: services/eudi-adapter/Dockerfile
+    profiles: [credential-issuer]
+    command:
+      - ./eudi-adapter
+      - project-runtime
+      - --from=/provisioned
+      - --to=/runtime
+      - --owner=1000
+    volumes:
+      - ${ONBOARDING_SECRETS_DIR:-./.local/secrets}/test-relying-party:/provisioned:ro
+      - test-relying-party-runtime:/runtime
+    network_mode: none
+
+  test-relying-party:
+    build:
+      context: .
+      dockerfile: services/test-relying-party/Dockerfile
+    profiles: [credential-issuer]
+    ports:
+      - "${GBO_PUBLIC_BIND_ADDRESS:+${GBO_PUBLIC_BIND_ADDRESS}:}${GBO_PORT_TEST_RP:-9433}:8080"
+    environment:
+      RP_CONFIG_FILE: /config/config.json
+      # Status lists under the issuer's public URL are read from the issuer
+      # next to it, not through the tunnel.
+      RP_STATUS_URL_MAP: ${ISSUER_PUBLIC_URL:+${ISSUER_PUBLIC_URL}=http://eudi-credential-issuer:8080}
+    volumes:
+      - test-relying-party-runtime:/config:ro
+    depends_on:
+      test-relying-party-runtime:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8081/healthz"]
+      <<: *healthcheck-timing
+      timeout: 3s
+      retries: 5
+    networks: [eudi]
+
   eudi-issuance-server:
     image: gbo/eudi-issuance-server:dev
     profiles: [eudi, full]
@@ -2480,3 +2528,4 @@ volumes:
   eudi-tsl-publish:
   eudi-issuance-runtime:
   credential-issuer-runtime:
+  test-relying-party-runtime:
