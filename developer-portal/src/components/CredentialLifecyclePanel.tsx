@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { changeLifecycleSetting, loadLifecycleEvents, loadLifecycleSettings, loadRPCatalog, loadRPEvents } from '../api/devClient'
 import {
-  copyOrigin, describe, describeRP, kindLabel, sessionChains, wholeNumber,
+  copyOrigin, describe, describeRP, kindLabel, originChain, sessionChains, wholeNumber,
   type ConfigurationSettings, type LifecycleEvent, type LifecycleSettings, type ProviderSettings, type RPCatalog, type RPEvent,
 } from '../lib/lifecycle'
 import TestRelyingPartyForm from './TestRelyingPartyForm'
@@ -263,7 +263,7 @@ export default function CredentialLifecyclePanel() {
                       <td className="mono" style={{ whiteSpace: 'nowrap', width: 1 }}>{new Date(row.rp!.at).toLocaleTimeString('nl-NL')}</td>
                       <td style={{ whiteSpace: 'nowrap', width: 1, color: kindColour(row.rp!.kind), fontWeight: 600 }}>{RP_KIND_LABELS[row.rp!.kind] ?? row.rp!.kind}</td>
                       <td style={{ fontSize: 12 }}>
-                        {describeRP(row.rp!, copyOrigin(chains, row.rp!.key_fingerprint))}
+                        {describeRP(row.rp!, copyOrigin(chains, row.rp!))}
                         {row.rp!.key_fingerprint && <div style={{ marginTop: 4 }}><FingerprintChip fp={row.rp!.key_fingerprint} /></div>}
                       </td>
                     </tr>
@@ -287,7 +287,7 @@ export default function CredentialLifecyclePanel() {
                       <td className="mono" style={{ whiteSpace: 'nowrap', width: 1 }}>{new Date(e.at).toLocaleTimeString('nl-NL')}</td>
                       <td style={{ whiteSpace: 'nowrap', width: 1, color: kindColour(e.kind), fontWeight: 600 }}>{RP_KIND_LABELS[e.kind] ?? e.kind}</td>
                       <td style={{ fontSize: 12 }}>
-                        {describeRP(e, copyOrigin(chains, e.key_fingerprint))}
+                        {describeRP(e, copyOrigin(chains, e))}
                         {e.key_fingerprint && <div style={{ marginTop: 4 }}><FingerprintChip fp={e.key_fingerprint} /></div>}
                       </td>
                     </tr>
@@ -305,7 +305,7 @@ export default function CredentialLifecyclePanel() {
   function timelineRows(chain: ReturnType<typeof sessionChains>[number]): { issuer?: LifecycleEvent; rp?: RPEvent }[] {
     const rows: { at: string; issuer?: LifecycleEvent; rp?: RPEvent }[] = chain.events.map((e) => ({ at: e.at, issuer: e }))
     for (const e of rpEvents) {
-      if (e.kind === 'presented' && copyOrigin(chains, e.key_fingerprint)?.chain === chain) rows.push({ at: e.at, rp: e })
+      if (e.kind === 'presented' && originChain(copyOrigin(chains, e)) === chain) rows.push({ at: e.at, rp: e })
     }
     return rows.sort((a, b) => a.at.localeCompare(b.at))
   }

@@ -104,11 +104,12 @@ test('#737 D2/D3: a presented copy is found in the issuance it came from', async
     at: at(5), kind: 'presented', session: 'r1', relying_party: 'b', relying_party_name: 'GBO testpartij B',
     configuration: 'test-pid-pid', vct: 'urn:eudi:pid:nl:1', claims: ['birthdate'], key_fingerprint: 'fp2', status: 'valid',
   }
-  const origin = copyOrigin(chains, 'fp2')
-  assert.equal(origin?.copy, 2)
-  assert.equal(origin?.of, 3)
+  const origin = copyOrigin(chains, presented)
+  assert.ok(origin && 'chain' in origin)
+  assert.equal(origin.copy, 2)
+  assert.equal(origin.of, 3)
   assert.equal(describeRP(presented, origin), 'getoond aan GBO testpartij B: test-pid-pid (birthdate) · exemplaar 2 van 3 · geldig')
-  assert.equal(copyOrigin(chains, 'unknown'), null)
+  assert.equal(copyOrigin(chains, { ...presented, key_fingerprint: 'unknown' }), null)
   assert.equal(describeRP({ ...presented, status: 'revoked', key_fingerprint: 'x' }, null),
     'getoond aan GBO testpartij B: test-pid-pid (birthdate) · uitgifte niet in de tijdlijn · ingetrokken')
 })
@@ -136,4 +137,29 @@ test('a refused refresh says why, in the session it would continue', () => {
     describe(event(0, 'token_refused', 'a', { grant_type: 'refresh_token', error: 'invalid_grant', error_description: 'the deferral has expired' })),
     'refresh token · invalid_grant: the deferral has expired',
   )
+})
+
+test('#737 review: a copy is matched by fingerprint, type and time; two candidates are ambiguous', async () => {
+  const { copyOrigin, describeRP, sessionChains } = await import('../src/lib/lifecycle.ts')
+  const chains = sessionChains([
+    event(0, 'credential_issued', 'old', { configuration: 'test-pid-pid', key_fingerprints: ['k1', 'k2'] }),
+    event(10, 'credential_issued', 'new', { configuration: 'test-pid-pid', key_fingerprints: ['k3', 'k1'] }),
+    event(12, 'credential_issued', 'other', { configuration: 'income', key_fingerprints: ['k1'] }),
+  ])
+  const presented = (minute: number, fp: string, configuration = 'test-pid-pid') => ({
+    at: at(minute), kind: 'presented', session: 'r', relying_party: 'a', relying_party_name: 'GBO testpartij A',
+    configuration, vct: 'v', claims: ['bsn'], key_fingerprint: fp, status: 'valid',
+  })
+  // Before the newer issuance only the older one can be the origin.
+  const early = copyOrigin(chains, presented(5, 'k1'))
+  assert.ok(early && 'chain' in early && early.chain.sessions[0] === 'old' && early.copy === 1)
+  // After both, the same key is in two issuances of the type: ambiguous.
+  assert.deepEqual(copyOrigin(chains, presented(15, 'k1')), { ambiguous: 2 })
+  assert.equal(describeRP(presented(15, 'k1'), { ambiguous: 2 }),
+    'getoond aan GBO testpartij A: test-pid-pid (bsn) · exemplaar in 2 uitgiftes, niet eenduidig · geldig')
+  // Another type with the same key does not count.
+  const income = copyOrigin(chains, presented(15, 'k1', 'income'))
+  assert.ok(income && 'chain' in income && income.chain.sessions[0] === 'other')
+  // A presentation before any issuance of it has no origin.
+  assert.equal(copyOrigin(chains, presented(-1, 'k1')), null)
 })

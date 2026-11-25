@@ -216,8 +216,9 @@ export type RPRequest = { link: string; expires_at: string; session: string } | 
 /** Where an open request stands: a request is answered once, and expires. */
 export type RequestState = { state: 'open' } | { state: 'answered'; event: RPEvent } | { state: 'expired' }
 
-/** Where a presented copy came from: which issuance, which copy. */
-export type CopyOrigin = { chain: SessionChain; copy: number; of: number }
+/** Where a presented copy came from: which issuance, which copy; or how
+    many issuances it could have come from, when more than one. */
+export type CopyOrigin = { chain: SessionChain; copy: number; of: number } | { ambiguous: number }
 
 const RP_MESSAGES: Record<string, string> = {
   unknown_relying_party: 'De testpartij bestaat niet (meer).',
@@ -250,16 +251,29 @@ export function rpEventsFrom(status: number | null, body: unknown): RPEvent[] | 
   return { error: lifecycleMessage(status, body) }
 }
 
-/** The issuance a presented copy came from, by its key fingerprint. */
-export function copyOrigin(chains: SessionChain[], fingerprint: string | undefined): CopyOrigin | null {
-  if (!fingerprint) return null
+/** The issuance a presented copy came from: one of the same type, issued
+    before the presentation, with the copy's key fingerprint. A wallet may
+    use a key again in a later issuance, so more than one candidate is
+    ambiguous rather than a guess. */
+export function copyOrigin(chains: SessionChain[], presented: Pick<RPEvent, 'key_fingerprint' | 'configuration' | 'at'>): CopyOrigin | null {
+  const fp = presented.key_fingerprint
+  if (!fp) return null
+  const found: { chain: SessionChain; copy: number; of: number }[] = []
   for (const chain of chains) {
     for (const e of chain.events) {
-      const i = (e.key_fingerprints ?? []).indexOf(fingerprint)
-      if (e.kind === 'credential_issued' && i >= 0) return { chain, copy: i + 1, of: e.key_fingerprints!.length }
+      const i = (e.key_fingerprints ?? []).indexOf(fp)
+      if (e.kind === 'credential_issued' && i >= 0 && e.configuration === presented.configuration && e.at <= presented.at) {
+        found.push({ chain, copy: i + 1, of: e.key_fingerprints!.length })
+      }
     }
   }
-  return null
+  if (found.length > 1) return { ambiguous: found.length }
+  return found[0] ?? null
+}
+
+/** The chain a presentation belongs under, if it has exactly one origin. */
+export function originChain(origin: CopyOrigin | null): SessionChain | null {
+  return origin && 'chain' in origin ? origin.chain : null
 }
 
 const STATUS_LABELS: Record<string, string> = { valid: 'geldig', revoked: 'ingetrokken', expired: 'verlopen' }
@@ -270,7 +284,9 @@ export function describeRP(e: RPEvent, origin: CopyOrigin | null): string {
   switch (e.kind) {
     case 'presented':
       return [`getoond aan ${e.relying_party_name}: ${what}`,
-        origin ? `exemplaar ${origin.copy} van ${origin.of}` : 'uitgifte niet in de tijdlijn',
+        !origin ? 'uitgifte niet in de tijdlijn'
+          : 'ambiguous' in origin ? `exemplaar in ${origin.ambiguous} uitgiftes, niet eenduidig`
+            : `exemplaar ${origin.copy} van ${origin.of}`,
         STATUS_LABELS[e.status ?? ''] ?? e.status].filter(Boolean).join(' · ')
     case 'declined':
       return `geweigerd door de wallet voor ${e.relying_party_name}: ${what}${e.error ? ` (${e.error})` : ''}`
