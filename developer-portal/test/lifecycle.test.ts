@@ -163,3 +163,24 @@ test('#737 review: a copy is matched by fingerprint, type and time; two candidat
   // A presentation before any issuance of it has no origin.
   assert.equal(copyOrigin(chains, presented(-1, 'k1')), null)
 })
+
+test('#737 review: a copy is matched by the verified VCT, across configurations of one type', async () => {
+  const { copyOrigin, sessionChains } = await import('../src/lib/lifecycle.ts')
+  const vctOf = (configuration: string) =>
+    ({ 'income-2024': 'urn:income', 'income-2025': 'urn:income', pid: 'urn:pid' } as Record<string, string>)[configuration]
+  const chains = sessionChains([
+    event(0, 'credential_issued', 's25', { configuration: 'income-2025', key_fingerprints: ['k1'] }),
+    event(1, 'credential_issued', 'spid', { configuration: 'pid', key_fingerprints: ['k2'] }),
+  ])
+  const presented = (minute: number, fp: string, configuration: string, vct: string) => ({
+    at: at(minute), kind: 'presented', session: 'r', relying_party: 'a', relying_party_name: 'GBO testpartij A',
+    configuration, vct, claims: ['jaar'], key_fingerprint: fp, status: 'valid',
+  })
+  // Asked as 2024, presented the 2025 statement: the same VCT, so the same copy.
+  const origin = copyOrigin(chains, presented(5, 'k1', 'income-2024', 'urn:income'), vctOf)
+  assert.ok(origin && 'chain' in origin && origin.chain.sessions[0] === 's25' && origin.copy === 1)
+  // A key of another type does not match.
+  assert.equal(copyOrigin(chains, presented(5, 'k2', 'income-2024', 'urn:income'), vctOf), null)
+  // Before the issuance there is no origin.
+  assert.equal(copyOrigin(chains, presented(-1, 'k1', 'income-2024', 'urn:income'), vctOf), null)
+})

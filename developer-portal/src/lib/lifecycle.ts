@@ -251,18 +251,29 @@ export function rpEventsFrom(status: number | null, body: unknown): RPEvent[] | 
   return { error: lifecycleMessage(status, body) }
 }
 
-/** The issuance a presented copy came from: one of the same type, issued
-    before the presentation, with the copy's key fingerprint. A wallet may
-    use a key again in a later issuance, so more than one candidate is
-    ambiguous rather than a guess. */
-export function copyOrigin(chains: SessionChain[], presented: Pick<RPEvent, 'key_fingerprint' | 'configuration' | 'at'>): CopyOrigin | null {
+/** The issuance a presented copy came from: one of the same attestation
+    type (VCT), issued before the presentation, with the copy's key
+    fingerprint. The relying party verifies the VCT, not the configuration:
+    two configurations of one type (two tax years) both answer a request
+    for either. vctOf gives the VCT of an issuer configuration; without
+    one, the configurations must be equal. A wallet may use a key again in a
+    later issuance, so more than one candidate is ambiguous, not a guess. */
+export function copyOrigin(
+  chains: SessionChain[],
+  presented: Pick<RPEvent, 'key_fingerprint' | 'configuration' | 'vct' | 'at'>,
+  vctOf: (configuration: string) => string | undefined = () => undefined,
+): CopyOrigin | null {
   const fp = presented.key_fingerprint
   if (!fp) return null
+  const sameType = (configuration: string | undefined) => {
+    const vct = configuration ? vctOf(configuration) : undefined
+    return vct !== undefined ? vct === presented.vct : configuration === presented.configuration
+  }
   const found: { chain: SessionChain; copy: number; of: number }[] = []
   for (const chain of chains) {
     for (const e of chain.events) {
       const i = (e.key_fingerprints ?? []).indexOf(fp)
-      if (e.kind === 'credential_issued' && i >= 0 && e.configuration === presented.configuration && e.at <= presented.at) {
+      if (e.kind === 'credential_issued' && i >= 0 && sameType(e.configuration) && e.at <= presented.at) {
         found.push({ chain, copy: i + 1, of: e.key_fingerprints!.length })
       }
     }
