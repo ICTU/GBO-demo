@@ -121,6 +121,9 @@ func setDefaults(cfg *Config) {
 	if cfg.Settings == nil {
 		cfg.Settings = ConfiguredSettings(*cfg)
 	}
+	if cfg.Events == nil {
+		cfg.Events = noEvents{}
+	}
 	if cfg.OfferTTL == 0 {
 		cfg.OfferTTL = DefaultOfferTTL
 	}

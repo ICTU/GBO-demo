@@ -203,6 +203,12 @@ func (s *Service) createSession(ctx context.Context, t Target, p Profile, ids []
 	}); err != nil {
 		return "", err
 	}
+	flow := FlowPreAuthorizedCode
+	if opts.binding != nil {
+		flow = FlowAuthorizationCode
+	}
+	s.record(ctx, Event{Kind: EventSessionStarted, Provider: t.Provider, Profile: p.Name, Session: sessionLabel(sessionID),
+		Flow: flow, Configurations: ids})
 	return code, nil
 }
 

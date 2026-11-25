@@ -31,7 +31,7 @@ A Wallet Instance Attestation is accepted only from the wallet providers configu
 | Token Status List, JWT (draft-ietf-oauth-status-list) | implemented; random indices (ARF VCR_17); revocation through the internal API, per entry or per offer reference. A credential without a reference has an entry too, but nobody can find it, so it is valid for 24 hours only (ARF VCR_01b) |
 | NL credential preview endpoint | implemented for `nl`; not part of OpenID4VCI; once per access token |
 | Authorization Code Flow with required PAR (OpenID4VCI 1.0 section 5, RFC 9126; HAIP section 4 via FAPI 2.0), PKCE S256, `iss` in the authorization response (RFC 9207), DPoP binding of the code (RFC 9449 section 10) | implemented on the `eudi` profile when `ISSUER_LOGIN_SERVER` is set: issuer-initiated with `issuer_state`, and wallet-initiated with `scope` or `authorization_details` for a configuration with one source offer. The citizen logs in at GBO's authorization server; see [Authorization code flow](#authorization-code-flow). Without it `response_types_supported` is empty |
-| Notification endpoint (section 11) | implemented on `eudi`: every credential response carries a `notification_id`, good for one notification; the issuer logs the event and acts on none |
+| Notification endpoint (section 11) | implemented on `eudi`: every credential response carries a `notification_id`, good for one notification; the issuer logs the event and acts on none. The demo timeline shows it |
 | Transaction code (`tx_code`, section 4.1.1) | implemented on `eudi`: `POST /offers` with `tx_code: true` gives an offer that asks for six digits, and returns the code apart (`tx_code_value`) for the caller to deliver through another channel. Only a hash bound to the offer is kept; a missing code is `invalid_request` (section 6.3) and no failed attempt, a wrong code is `invalid_grant`, and the third wrong code uses the offer up. A `tx_code` with another grant is `invalid_request`. On `nl` and the combined profile `tx_code_unsupported`: the NL Wallet refuses a whole offer with a `tx_code` |
 | Re-issuance with refresh tokens (RFC 6749 section 6; HAIP section 4.4) | implemented on `eudi`: every token response carries a `refresh_token`, valid 30 days, not rotated (FAPI 2.0 section 5.3.2.1: a refresh returns the same one), bound to the wallet (`client_id` of its attestation) and its DPoP key. A refresh issues the claims of the first issuance again under new credential identifiers; the source is not asked and no BSN is kept, but the claims are kept until the refresh token expires. A revoked offer reference stops it, and so does a deferred issuance that has not finished (`invalid_grant`). A refresh keeps the `nbf` and `exp` of the first issuance, so it does not lengthen a short-lived credential |
 | Deferred issuance (section 9) | implemented on `eudi` after a login: when the source is unavailable at the callback, the wallet still gets its code; the credential request answers `202` with a `transaction_id` and `interval` 5, and each deferred credential request asks the source again. See [Deferred issuance](#deferred-issuance) |
@@ -55,6 +55,7 @@ A Wallet Instance Attestation is accepted only from the wallet providers configu
 - Revocation by reference spans providers: a reference is the caller's, not a provider's, so `{reference}` revokes what every provider issued for it. A real deployment lets each provider revoke only its own credentials.
 - `ISSUER_STORE=memory` keeps all state in memory, for a local run only.
 - The batch settings can be changed at runtime through `/demo/settings` on the internal port (`internal/democontrol`), so the developer portal can show what a wallet does with them. The changes live in memory; a restart brings back the configured settings. The core only knows the `issuance.Settings` port; a real deployment uses the configured settings and leaves `democontrol` out.
+- A timeline of the wallet sessions, for the developer portal: the core hands events to its `issuance.Events` port (session started, token issued, credential issued, deferred or refused, notification), and `democontrol` keeps those of the last 50 minutes in a schema of its own (`ISSUER_DEMO_DATABASE_SCHEMA`, default `eudi_credential_issuer_demo`), in memory with `ISSUER_STORE=memory`. An event holds no attribute values, codes, tokens or holder keys: a session is named by a label derived from its id, a holder key by the first 16 characters of its JWK thumbprint. A refresh starts a session of its own and names the one it continues. Without the port the core records nothing.
 
 ## Endpoints
 
@@ -90,6 +91,7 @@ Internal port (`ISSUER_INTERNAL_ADDR`, default `:8081`):
 | `PUT /demo/settings/providers/{v}` | demo: `{batch_size}` (1 or more; 1 publishes no `batch_credential_issuance`) → `200` with the settings in force; `400 invalid_setting` with the reason, `404 unknown_provider` |
 | `PUT /demo/settings/configurations/{id}` | demo: `{reuse_policy: {method: "once_only", batch_size, reissue_trigger_unused}}`; the issuer checks it (batch size 2 or more, trigger 0 or more and below the batch size) → `200`, `400 invalid_setting`, `404 unknown_configuration` |
 | `DELETE /demo/settings/providers/{v}`, `DELETE /demo/settings/configurations/{id}` | demo: back to the configured setting → `200` |
+| `GET /demo/events` | demo: the timeline, `{events: [...]}`, the events of the last 50 minutes, oldest first, at most 1000; `503 events_unavailable` when its store fails |
 | `GET /healthz` | health |
 
 ## Disclosure-based issuance
@@ -177,6 +179,7 @@ ISSUER_TEST_DATABASE_URL=postgres://... go test ./internal/postgres/
 | `ISSUER_PUBLIC_URL` | external base URL, without trailing slash; issuer identifiers are `<public URL>/<provider>/<profile>` |
 | `ISSUER_CONFIG_FILE` | JSON configuration (below) |
 | `ISSUER_DATABASE_URL`, `ISSUER_DATABASE_SCHEMA` | PostgreSQL; schema default `eudi_credential_issuer` |
+| `ISSUER_DEMO_DATABASE_SCHEMA` | schema of the demo timeline, default `eudi_credential_issuer_demo`; created at start |
 | `ISSUER_STORE=memory` | demo shortcut: in-memory state |
 | `ISSUER_LISTEN_ADDR`, `ISSUER_INTERNAL_ADDR` | ports |
 | `ISSUER_LOGIN_SERVER` | issuer identifier of GBO's authorization server; set, the `eudi` profiles offer the authorization code flow. Without an `eudi` profile the login stays off (a warning in the log) and the other profiles still issue |
@@ -287,7 +290,7 @@ The issuer refuses to start with a configuration a wallet would refuse: no `scop
 | `internal/login` | client of GBO's authorization server: registration, authorization request, code exchange, token checks |
 | `internal/postgres`, `internal/memstore` | stores; `internal/storetest` is the contract both pass |
 | `internal/config` | configuration file |
-| `internal/democontrol` | demo only: batch settings changed at runtime, and their API on the internal port |
+| `internal/democontrol` | demo only: batch settings changed at runtime, the timeline of the wallet sessions, and their API on the internal port |
 | `interop/` | separate module: the issuer driven by the OID4VCgo wallet |
 | `../oid4vc-kit` | protocol building blocks shared with future services |
 

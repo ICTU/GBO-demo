@@ -159,14 +159,15 @@ jobs:
           go-version: '1.26'
           cache-dependency-path: services/eudi-credential-issuer/go.*
       # The store contract runs against memstore in the go job; here against
-      # PostgreSQL, the store the issuer runs on.
+      # PostgreSQL, the store the issuer runs on. The demo's timeline events
+      # too.
       - name: store contract and purge against PostgreSQL
         working-directory: services/eudi-credential-issuer
         env:
           ISSUER_TEST_PASSWORD: issuertest
         run: >-
           ISSUER_TEST_DATABASE_URL="postgres://postgres:${ISSUER_TEST_PASSWORD}@127.0.0.1:5432/issuertest?sslmode=disable"
-          go test -count=1 -timeout 120s ./internal/postgres
+          go test -count=1 -timeout 120s ./internal/postgres ./internal/democontrol
 
   credential-issuer-interop:
     name: Credential issuer — interop with OID4VCgo
