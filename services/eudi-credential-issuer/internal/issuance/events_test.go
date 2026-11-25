@@ -367,6 +367,8 @@ func TestRefusedRefreshEvents(t *testing.T) {
 	raw, _ := json.Marshal(refused)
 	if strings.Contains(string(raw), tok.RefreshToken) {
 		t.Error("an event holds the refresh token")
+	}
+}
 
 // A deferred issuance ends in the timeline too: still waiting is
 // credential_deferred again, the credential from the deferred request is
